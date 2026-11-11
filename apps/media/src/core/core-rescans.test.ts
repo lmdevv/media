@@ -78,7 +78,7 @@ describe("CoreRescans.foldersToWatch", () => {
 
   layer(foldersLayer, { excludeTestServices: true })((test) => {
     test.effect(
-      "watches a folder linked into an approved root at its own path, and none that leads outside",
+      "watches each folder once whatever path names it, a link at its own path, and none outside",
       () =>
         Effect.gen(function* () {
           const { inside, linked, outside, escaping, unmounted } = yield* Folders;
@@ -87,7 +87,20 @@ describe("CoreRescans.foldersToWatch", () => {
             { libraryId, folders: [inside, linked, outside, escaping, unmounted] },
           ]);
 
-          assert.deepStrictEqual(watched, [{ libraryId, roots: [inside, linked, unmounted] }]);
+          assert.deepStrictEqual(watched, [{ libraryId, roots: [inside, unmounted] }]);
+
+          const aliasOnly = yield* foldersToWatch([{ libraryId, folders: [linked] }]);
+
+          assert.deepStrictEqual(aliasOnly, [{ libraryId, roots: [linked] }]);
+
+          const other = LibraryId.make("library-2");
+
+          const across = yield* foldersToWatch([
+            { libraryId, folders: [inside] },
+            { libraryId: other, folders: [linked] },
+          ]);
+
+          assert.deepStrictEqual(across, [{ libraryId, roots: [inside] }]);
 
           const outsideOnly = yield* foldersToWatch([{ libraryId, folders: [outside, escaping] }]);
 

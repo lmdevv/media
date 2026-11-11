@@ -1368,6 +1368,7 @@ const jobView = (job: Doc<"jobs">) => ({
   message: job.status === "running" ? job.message : null,
   error: errorOf(job),
   startedAt: job.status === "running" ? job.claimedAt : null,
+  attempt: job.attempts,
   canceling: job.status === "running" && job.cancelRequestedAt !== null,
   finishedAt:
     job.status === "succeeded" || job.status === "failed" || job.status === "canceled"
@@ -1433,13 +1434,14 @@ export const { list, get, cancel } = registerWithArtworkTickets(register, {
 
     return run ?? fail("not_found", "No such import");
   },
-  // The job's attempt fences the cancel (ADR 0012): a running import stops at its worker's next
-  // lease call, every later write of that attempt is refused, and a finished one stays as it ended.
-  cancel: async (ctx, { importId }, caller) => {
+  // The job's attempt fences the cancel (ADR 0012): it stops only the attempt the person saw, a
+  // running import stops at its worker's next lease call, every later write of that attempt is
+  // refused, and a finished one stays as it ended.
+  cancel: async (ctx, { importId, attempt }, caller) => {
     requireImporter(caller);
 
     const started = await ctx.db.get(importId);
-    const result = started === null ? null : await cancelJob(ctx, started.jobId);
+    const result = started === null ? null : await cancelJob(ctx, started.jobId, attempt);
 
     return result === null || result.outcome === "notFound"
       ? fail("not_found", "No such import")

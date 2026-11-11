@@ -65,7 +65,12 @@ export type JobEvent =
   /** A holder's call with nothing of its own to record, such as reading its items. */
   | { readonly type: "check"; readonly lease: Attempt }
   | { readonly type: "finish"; readonly lease: Attempt; readonly finish: Finish }
-  | { readonly type: "cancel" }
+  /**
+   * Stop the job. `attempt` is the attempt the canceller saw, the job's `attempts` then; a cancel
+   * from a person names it, so it never stops an attempt claimed after they looked. Null stops
+   * whichever attempt holds the job, for the core's own cancels, such as a removed library's scan.
+   */
+  | { readonly type: "cancel"; readonly attempt: number | null }
   | { readonly type: "lapse" }
   /**
    * A restored snapshot caught the job running, and its worker has moved on: `requeue` puts it
@@ -94,7 +99,9 @@ export type Refusal =
   /** A success of an item kind with items unsealed or not done. */
   | { readonly refused: "unfinished"; readonly work: ItemsWork }
   /** A claim of a job that is not queued. */
-  | { readonly refused: "notClaimable" };
+  | { readonly refused: "notClaimable" }
+  /** A cancel named an attempt the job has moved past: it was claimed again since. */
+  | { readonly refused: "movedOn" };
 
 export type Step =
   | {
@@ -331,11 +338,17 @@ export const step = (job: JobFields, event: JobEvent, now: number, policy: Polic
   }
 
   if (event.type === "cancel") {
+    if (job.status !== "queued" && job.status !== "running") return unchanged(job);
+
+    if (event.attempt !== null && event.attempt !== job.attempts) {
+      return refuse({ refused: "movedOn" });
+    }
+
     if (job.status === "queued") {
       return moved({ ...commonOf(job), status: "canceled", finishedAt: now }, purgeOf(job.work));
     }
 
-    return job.status === "running" && job.cancelRequestedAt === null
+    return job.cancelRequestedAt === null
       ? moved({ ...job, cancelRequestedAt: now, dedupeKey: null })
       : unchanged(job);
   }

@@ -14,15 +14,27 @@ export type Canceled =
   | { readonly outcome: "finished"; readonly status: "succeeded" | "failed" | "canceled" }
   /** It is running; it becomes canceled at its worker's next lease call, or when its lease lapses. */
   | { readonly outcome: "canceling" }
+  /** It was claimed again after the attempt named, which it no longer runs; nothing changed. */
+  | { readonly outcome: "movedOn" }
   | { readonly outcome: "notFound" };
 
-/** Cancels a job. Canceling a canceled, finished, or canceling job changes nothing. */
-export const cancel = async (ctx: JobCtx, jobId: Id<"jobs">): Promise<Canceled> => {
+/**
+ * Cancels a job at `attempt`, the attempt the canceller saw, or at whichever attempt holds it for
+ * null (see the machine's `cancel` event). Canceling a canceled, finished, or canceling job
+ * changes nothing.
+ */
+export const cancel = async (
+  ctx: JobCtx,
+  jobId: Id<"jobs">,
+  attempt: number | null,
+): Promise<Canceled> => {
   const job = await ctx.db.get("jobs", jobId);
 
   if (job === null) return { outcome: "notFound" };
 
-  const result = await applyEvent(ctx, job, { type: "cancel" });
+  const result = await applyEvent(ctx, job, { type: "cancel", attempt });
+
+  if (!result.ok && result.refused === "movedOn") return { outcome: "movedOn" };
 
   if (!result.ok || result.next.status === "queued") {
     throw new Error(`The machine left job ${jobId} uncanceled`);

@@ -12,6 +12,17 @@ const page = (rows: ReadonlyArray<string>, isDone: boolean, continueCursor = "ne
   data: { page: rows, isDone, continueCursor } satisfies Page,
 });
 
+const split = (rows: ReadonlyArray<string>, splitCursor: string, endCursor: string) => ({
+  status: "success" as const,
+  data: {
+    page: rows,
+    isDone: false,
+    continueCursor: endCursor,
+    splitCursor,
+    pageStatus: "SplitRequired" as const,
+  } satisfies Page,
+});
+
 /** A watch whose state the test sets, the way a live query publishes. */
 const watchOf = (initial: QueryState<Page>) => {
   let state = initial;
@@ -217,5 +228,70 @@ describe("pagedStore", () => {
     stop();
 
     expect(pinned.listening() + second.listening()).toBe(0);
+  });
+
+  it("splits a pinned page the server says to split, and shows its rows only from the halves", () => {
+    const first = watchOf(page(["a"], false, "after-a"));
+    const pinned = watchOf(split(["a"], "after-a1", "after-a"));
+    const lower = watchOf(page(["a", "a1"], false, "after-a1"));
+    const upper = watchOf({ status: "loading" });
+    const second = watchOf(page(["b"], true));
+    const asked: Array<PageSpan> = [];
+
+    const store = pagedStore((span) => {
+      asked.push(span);
+
+      if (span.cursor === "after-a") return second.watch;
+
+      if (span.cursor === "after-a1") return upper.watch;
+
+      if (span.endCursor === "after-a1") return lower.watch;
+
+      return span.endCursor === undefined ? first.watch : pinned.watch;
+    });
+
+    const stop = store.subscribe(() => undefined);
+    const list = store.getSnapshot();
+
+    if (list.status === "ready" && list.next.kind === "more") list.next.load();
+
+    expect(asked).toContainEqual({ cursor: null, endCursor: "after-a1" });
+    expect(asked).toContainEqual({ cursor: "after-a1", endCursor: "after-a" });
+    expect(pinned.listening()).toBe(0);
+    expect(store.getSnapshot()).toMatchObject({ rows: ["a", "a1"], next: { kind: "loading" } });
+
+    upper.publish(page(["a2"], false, "after-a"));
+
+    expect(store.getSnapshot()).toMatchObject({
+      rows: ["a", "a1", "a2", "b"],
+      next: { kind: "done" },
+    });
+
+    stop();
+
+    expect(lower.listening() + upper.listening() + second.listening()).toBe(0);
+  });
+
+  it("follows the next page by itself when the last page arrives empty but not done", () => {
+    const first = watchOf(page([], false, "after-hidden"));
+    const second = watchOf(page(["b"], true));
+    const asked: Array<PageSpan> = [];
+
+    const store = pagedStore((span) => {
+      asked.push(span);
+
+      if (span.cursor === "after-hidden") return second.watch;
+
+      return span.endCursor === undefined
+        ? first.watch
+        : watchOf(page([], false, "after-hidden")).watch;
+    });
+
+    const stop = store.subscribe(() => undefined);
+
+    expect(store.getSnapshot()).toMatchObject({ rows: ["b"], next: { kind: "done" } });
+    expect(asked).toContainEqual({ cursor: "after-hidden" });
+
+    stop();
   });
 });

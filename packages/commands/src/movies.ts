@@ -440,6 +440,8 @@ const importRun = v.object({
     error: v.union(v.string(), v.null()),
     /** When the attempt running now started; null unless it runs. */
     startedAt: v.union(v.number(), v.null()),
+    /** Claims so far, the latest attempt's number; a cancel names the attempt it saw. */
+    attempt: v.number(),
     /** True while a cancel waits for the running import's worker to stop. */
     canceling: v.boolean(),
     finishedAt: v.union(v.number(), v.null()),
@@ -723,7 +725,11 @@ export const movies = [
   mutation("movies.imports.cancel", {
     summary: "Stop a Jellyfin or Plex import, as an owner or an admin; what it already wrote stays",
     scope: "movies:edit",
-    args: { importId: v.id("imports") },
+    args: {
+      importId: v.id("imports"),
+      /** The job's `attempt` as the import showed it; a later attempt answers movedOn. */
+      attempt: v.number(),
+    },
     result: canceled,
   }),
   query("movies.files.list", {
@@ -744,10 +750,12 @@ export const movies = [
     scope: "movies:edit",
     args: { libraryId: v.id("libraries") },
     result: v.object({
-      missing: v.number(),
-      /** When the file missing longest went missing; null when none is. */
+      /** Null for an editor whose restrictions hide titles: the totals count every title. */
+      missing: nullable(v.number()),
+      /** When the file missing longest went missing; null when none is, or as `missing` is. */
       missingSince: nullable(v.number()),
-      unmatched: v.number(),
+      /** Null as `missing` is. */
+      unmatched: nullable(v.number()),
     }),
   }),
 ] as const satisfies ReadonlyArray<Command>;

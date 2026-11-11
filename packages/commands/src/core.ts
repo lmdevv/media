@@ -48,6 +48,8 @@ export const canceled = v.union(
     status: v.union(v.literal("succeeded"), v.literal("failed"), v.literal("canceled")),
   }),
   v.object({ outcome: v.literal("canceling") }),
+  /** It was claimed again after the attempt named, so nothing changed; look again to cancel it. */
+  v.object({ outcome: v.literal("movedOn") }),
 );
 
 const deviceMode = v.union(v.literal("personal"), v.literal("shared"));
@@ -498,6 +500,8 @@ export const core = [
           message: v.union(v.string(), v.null()),
           /** When the attempt running now started; null unless it runs. */
           startedAt: v.union(v.number(), v.null()),
+          /** Claims so far, the latest attempt's number; a cancel names the attempt it saw. */
+          attempt: v.number(),
           /** True while a cancel waits for the running scan's worker to stop. */
           canceling: v.boolean(),
           finishedAt: v.union(v.number(), v.null()),
@@ -533,9 +537,13 @@ export const core = [
   }),
   mutation("core.libraries.cancelScan", {
     summary:
-      "Stop a library's scan; a finished scan stays as it ended, and what a scan wrote stays",
+      "Stop a library's scan at the attempt you saw; a finished scan stays as it ended, and what a scan wrote stays",
     scope: "signed-in",
-    args: { jobId: v.id("jobs") },
+    args: {
+      jobId: v.id("jobs"),
+      /** The scan's `attempt` as `core.libraries.get` showed it; a later attempt answers movedOn. */
+      attempt: v.number(),
+    },
     result: canceled,
   }),
   mutation("core.libraries.remove", {

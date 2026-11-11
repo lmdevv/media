@@ -28,7 +28,7 @@ const restartScan = async (ctx: JobCtx, library: Doc<"libraries">): Promise<Enqu
 
   if (!running) return joined;
 
-  await cancel(ctx, joined.jobId);
+  await cancel(ctx, joined.jobId, null);
 
   return queueScan(ctx, library);
 };
@@ -52,6 +52,7 @@ const scanOf = async (db: DatabaseReader, jobId: Id<"jobs"> | null, shown: ScanS
     error: shown.error && job.status === "failed" ? job.error : null,
     message: shown.progress && job.status === "running" ? job.message : null,
     startedAt: job.status === "running" ? job.claimedAt : null,
+    attempt: job.attempts,
     canceling: job.status === "running" && job.cancelRequestedAt !== null,
     finishedAt: job.status === "queued" || job.status === "running" ? null : job.finishedAt,
   };
@@ -155,10 +156,11 @@ export const { create, list, get, rename, setFolders, scan, cancelScan, remove }
 
     return queueScan(ctx, doc, mode);
   },
-  // Cancels the scan job named, never the library's current one, so a cancel that arrives after
-  // its scan finished and another started stops nothing. The job's attempt fences it (ADR 0012):
-  // a running scan stops at its worker's next lease call, which refuses every later write.
-  cancelScan: async (ctx, { jobId }, caller) => {
+  // Cancels the scan job named at the attempt the person saw, never the library's current scan nor
+  // an attempt claimed since, so a cancel that arrives late stops nothing. The attempt fences the
+  // rest (ADR 0012): a running scan stops at its worker's next lease call, which refuses every
+  // later write.
+  cancelScan: async (ctx, { jobId, attempt }, caller) => {
     const missing = "No such scan";
     const job = await ctx.db.get(jobId);
     const libraryId = job === null ? null : scannedLibrary(job);
@@ -167,14 +169,14 @@ export const { create, list, get, rename, setFolders, scan, cancelScan, remove }
 
     await requireContent(ctx, caller, "edit", libraryRef(libraryId));
 
-    const result = await cancel(ctx, jobId);
+    const result = await cancel(ctx, jobId, attempt);
 
     return result.outcome === "notFound" ? fail("not_found", missing) : result;
   },
   remove: async (ctx, { libraryId }, caller) => {
     const { doc } = await requireContent(ctx, caller, "manage", libraryRef(libraryId));
 
-    if (doc.lastScan !== null) await cancel(ctx, doc.lastScan);
+    if (doc.lastScan !== null) await cancel(ctx, doc.lastScan, null);
 
     await releaseFolders(ctx, doc._id);
     await releaseClaims(ctx, doc._id, null);

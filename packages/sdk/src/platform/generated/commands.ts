@@ -1130,7 +1130,10 @@ const core_guests_status = query({
 const core_libraries_cancelScan = mutation({
   name: "core.libraries.cancelScan",
   path: "core/libraries:cancelScan",
-  args: Schema.Struct({ jobId: Schema.String.pipe(Schema.brand("Id<jobs>")) }),
+  args: Schema.Struct({
+    jobId: Schema.String.pipe(Schema.brand("Id<jobs>")),
+    attempt: Schema.Finite,
+  }),
   result: Schema.Union([
     Schema.Struct({
       outcome: Schema.Literal("finished"),
@@ -1141,6 +1144,7 @@ const core_libraries_cancelScan = mutation({
       ]),
     }),
     Schema.Struct({ outcome: Schema.Literal("canceling") }),
+    Schema.Struct({ outcome: Schema.Literal("movedOn") }),
   ]),
 });
 
@@ -1184,6 +1188,7 @@ const core_libraries_get = query({
         error: Schema.Union([Schema.String, Schema.Null]),
         message: Schema.Union([Schema.String, Schema.Null]),
         startedAt: Schema.Union([Schema.Finite, Schema.Null]),
+        attempt: Schema.Finite,
         canceling: Schema.Boolean,
         finishedAt: Schema.Union([Schema.Finite, Schema.Null]),
       }),
@@ -2257,9 +2262,9 @@ const movies_files_summary = query({
   path: "movies/files:summary",
   args: Schema.Struct({ libraryId: Schema.String.pipe(Schema.brand("Id<libraries>")) }),
   result: Schema.Struct({
-    missing: Schema.Finite,
+    missing: Schema.Union([Schema.Finite, Schema.Null]),
     missingSince: Schema.Union([Schema.Finite, Schema.Null]),
-    unmatched: Schema.Finite,
+    unmatched: Schema.Union([Schema.Finite, Schema.Null]),
   }),
 });
 
@@ -2440,7 +2445,10 @@ const movies_history_markWatched = mutation({
 const movies_imports_cancel = mutation({
   name: "movies.imports.cancel",
   path: "movies/imports:cancel",
-  args: Schema.Struct({ importId: Schema.String.pipe(Schema.brand("Id<imports>")) }),
+  args: Schema.Struct({
+    importId: Schema.String.pipe(Schema.brand("Id<imports>")),
+    attempt: Schema.Finite,
+  }),
   result: Schema.Union([
     Schema.Struct({
       outcome: Schema.Literal("finished"),
@@ -2451,6 +2459,7 @@ const movies_imports_cancel = mutation({
       ]),
     }),
     Schema.Struct({ outcome: Schema.Literal("canceling") }),
+    Schema.Struct({ outcome: Schema.Literal("movedOn") }),
   ]),
 });
 
@@ -2496,6 +2505,7 @@ const movies_imports_get = query({
       message: Schema.Union([Schema.String, Schema.Null]),
       error: Schema.Union([Schema.String, Schema.Null]),
       startedAt: Schema.Union([Schema.Finite, Schema.Null]),
+      attempt: Schema.Finite,
       canceling: Schema.Boolean,
       finishedAt: Schema.Union([Schema.Finite, Schema.Null]),
     }),
@@ -2555,6 +2565,7 @@ const movies_imports_list = query({
           message: Schema.Union([Schema.String, Schema.Null]),
           error: Schema.Union([Schema.String, Schema.Null]),
           startedAt: Schema.Union([Schema.Finite, Schema.Null]),
+          attempt: Schema.Finite,
           canceling: Schema.Boolean,
           finishedAt: Schema.Union([Schema.Finite, Schema.Null]),
         }),
@@ -3848,7 +3859,7 @@ export const effectMethods = (method: EffectBuilder) => ({
       status: method.query(core_guests_status),
     },
     libraries: {
-      /** `core.libraries.cancelScan` (mutation, signed-in): Stop a library's scan; a finished scan stays as it ended, and what a scan wrote stays. */
+      /** `core.libraries.cancelScan` (mutation, signed-in): Stop a library's scan at the attempt you saw; a finished scan stays as it ended, and what a scan wrote stays. */
       cancelScan: method.mutation(core_libraries_cancelScan),
       /** `core.libraries.create` (mutation, admin, API keys refused): Create a library of movies or music from folders on the server and scan it. */
       create: method.mutation(core_libraries_create),
@@ -4192,7 +4203,7 @@ export const promiseMethods = (method: PromiseBuilder) => ({
       status: method.query(core_guests_status),
     },
     libraries: {
-      /** `core.libraries.cancelScan` (mutation, signed-in): Stop a library's scan; a finished scan stays as it ended, and what a scan wrote stays. */
+      /** `core.libraries.cancelScan` (mutation, signed-in): Stop a library's scan at the attempt you saw; a finished scan stays as it ended, and what a scan wrote stays. */
       cancelScan: method.mutation(core_libraries_cancelScan),
       /** `core.libraries.create` (mutation, admin, API keys refused): Create a library of movies or music from folders on the server and scan it. */
       create: method.mutation(core_libraries_create),

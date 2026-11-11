@@ -96,7 +96,7 @@ export const moviesTables = {
   })
     .index("by_library_match", ["libraryId", "matchKey"])
     .index("by_kind_tmdb", ["kind", "externalIds.tmdb"])
-    .index("by_library_status", ["libraryId", "matchStatus"])
+    .index("by_library_status", ["libraryId", "matchStatus", "sortKey", "tie"])
     .index("by_library_sort", ["libraryId", "sortKey"])
     .index("by_library_added", ["libraryId", "addedAt", "tie"])
     .index("by_library_kind_added", ["libraryId", "kind", "addedAt", "tie"])
@@ -234,7 +234,7 @@ export const moviesTables = {
     sidecarDigest: nullable(v.string()),
   })
     .index("by_library_path", ["libraryId", "path"])
-    .index("by_library_missing", ["libraryId", "missing", "missingSince"])
+    .index("by_library_missing", ["libraryId", "missing", "missingSince", "path"])
     .index("by_title", ["titleId"])
     .index("by_episode", ["episodeId"]),
 

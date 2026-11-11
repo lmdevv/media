@@ -194,8 +194,14 @@ Settled by the libraries build (ADR 0024):
   `can()`, and `movies.imports.cancel` for an import, for owners and admins. Each names the job
   (the scan's job id, the import's row), never "the library's current scan", so a cancel that
   arrives after its job finished and another started changes nothing and answers how the named
-  job ended. The machine fences the rest: a running job's next lease call answers `canceled`,
-  and that attempt's later reports and finish are refused, so no late report undoes a cancel.
+  job ended. Each also names the attempt the person saw (the job's `attempts`, which the scan and
+  import views show), and the machine's `cancel` event carries it: when the job was claimed again
+  since, as after a lapsed lease, the cancel changes nothing and answers `movedOn`, so a cancel
+  meant for an attempt that died never stops the one that replaced it. The core's own cancels (a
+  removed library's scan, a probe kind's jobs, a stale trickplay) pass no attempt and stop
+  whichever holds the job; `core/jobs/admin:cancel` takes an optional one. The machine fences the
+  rest: a running job's next lease call answers `canceled`, and that attempt's later reports and
+  finish are refused, so no late report undoes a cancel.
 - `core.server.backups.active` answers the backup job queued or running, so the Backups screen
   keeps Back up now off for the whole job rather than only while `run` is in flight.
 

@@ -120,14 +120,16 @@ export const get = internalQuery({
 });
 
 export const cancel = internalMutation({
-  args: { jobId: v.id("jobs") },
+  /** `attempt` cancels only that attempt; without it, whichever attempt holds the job. */
+  args: { jobId: v.id("jobs"), attempt: v.optional(v.number()) },
   returns: v.union(
     v.object({
       outcome: v.literal("finished"),
       status: v.union(v.literal("succeeded"), v.literal("failed"), v.literal("canceled")),
     }),
     v.object({ outcome: v.literal("canceling") }),
+    v.object({ outcome: v.literal("movedOn") }),
     v.object({ outcome: v.literal("notFound") }),
   ),
-  handler: (ctx, { jobId }) => cancelJob(ctx, jobId),
+  handler: (ctx, { jobId, attempt }) => cancelJob(ctx, jobId, attempt ?? null),
 });

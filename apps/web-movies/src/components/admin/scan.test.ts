@@ -17,6 +17,7 @@ const scan = (fields: Partial<Scan>): Scan => ({
   error: null,
   message: null,
   startedAt: null,
+  attempt: 1,
   canceling: false,
   finishedAt: null,
   ...fields,

@@ -79,9 +79,9 @@ const listResult = v.object({
 const summaryArgs = v.object({ libraryId: v.id("libraries") });
 
 const summaryResult = v.object({
-  missing: v.number(),
+  missing: v.union(v.number(), v.null()),
   missingSince: v.union(v.number(), v.null()),
-  unmatched: v.number(),
+  unmatched: v.union(v.number(), v.null()),
 });
 
 /** The handlers `convex/movies/files.ts` passes to `register`, one per `movies.files` command. */

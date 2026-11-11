@@ -9,6 +9,7 @@ import { Link } from "@tanstack/react-router";
 import { useAction } from "@/components/admin/action";
 import { formatCount, formatPercent } from "@/components/admin/format";
 import type { ImportRun } from "@/components/admin/types";
+import { reportMovedOn } from "@/lib/canceled";
 import { useNow } from "@media/ui/lib/use-now";
 
 import { PHASE_LABELS, importFraction, importMinutesLeft } from "./migration-model";
@@ -19,7 +20,12 @@ export function Importing({ run }: { readonly run: ImportRun }) {
   const platform = usePlatform();
   const now = useNow(5_000);
   const fraction = importFraction(run);
-  const stop = useAction(() => platform.movies.imports.cancel({ importId: run.importId }));
+
+  const stop = useAction(
+    () => platform.movies.imports.cancel({ importId: run.importId, attempt: run.job.attempt }),
+    { onSuccess: (answer) => reportMovedOn([answer], "import") },
+  );
+
   const minutesLeft = importMinutesLeft(run, fraction, now);
   const { done, total } = run.job;
   const phase = PHASE_LABELS[run.phase];

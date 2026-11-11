@@ -108,9 +108,10 @@ export function LibraryDetailScreen({ libraryId }: { readonly libraryId: Library
         <OfflineState library={detail} scan={detail.scan} now={now} />
       ) : (
         <>
-          {counts === null || counts.missing === 0 ? null : (
+          {counts === null || counts.missing === null || counts.missing === 0 ? null : (
             <MissingNotice
-              counts={counts}
+              missing={counts.missing}
+              missingSince={counts.missingSince}
               reviewing={filter === "missing"}
               onReview={() => setFilter("missing")}
               now={now}
@@ -262,12 +263,14 @@ const FILTERS: ReadonlyArray<{ readonly id: LibraryFileFilter; readonly label: s
 ];
 
 function MissingNotice({
-  counts,
+  missing,
+  missingSince,
   reviewing,
   onReview,
   now,
 }: {
-  readonly counts: LibraryFileSummary;
+  readonly missing: number;
+  readonly missingSince: number | null;
   readonly reviewing: boolean;
   readonly onReview: () => void;
   readonly now: number;
@@ -281,15 +284,13 @@ function MissingNotice({
             onClick={onReview}
             className="shrink-0 cursor-pointer font-sans text-label/label font-semibold text-text hover:underline"
           >
-            Review {formatCount(counts.missing)} missing
+            Review {formatCount(missing)} missing
           </button>
         )
       }
     >
-      {counts.missing === 1
-        ? "1 file disappeared"
-        : `${formatCount(counts.missing)} files disappeared`}
-      {counts.missingSince === null ? "." : ` since ${formatDate(counts.missingSince, now)}.`}
+      {missing === 1 ? "1 file disappeared" : `${formatCount(missing)} files disappeared`}
+      {missingSince === null ? "." : ` since ${formatDate(missingSince, now)}.`}
     </Notice>
   );
 }
@@ -297,7 +298,9 @@ function MissingNotice({
 const chipCount = (filter: LibraryFileFilter, counts: LibraryFileSummary | null): string | null => {
   if (counts === null || filter === "all") return null;
 
-  return formatCount(filter === "missing" ? counts.missing : counts.unmatched);
+  const count = filter === "missing" ? counts.missing : counts.unmatched;
+
+  return count === null ? null : formatCount(count);
 };
 
 const matches = (file: LibraryFile, needle: string): boolean =>

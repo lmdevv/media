@@ -10,7 +10,7 @@ import type { MutationCtx, QueryCtx } from "../../convex/_generated/server";
 import { refuseKeys, requireCaller } from "../../convex/core/auth/caller";
 import type { Caller } from "../../convex/core/auth/caller";
 
-const cancelScanArgs = v.object({ jobId: v.id("jobs") });
+const cancelScanArgs = v.object({ jobId: v.id("jobs"), attempt: v.number() });
 
 const cancelScanResult = v.union(
   v.object({
@@ -18,6 +18,7 @@ const cancelScanResult = v.union(
     status: v.union(v.literal("succeeded"), v.literal("failed"), v.literal("canceled")),
   }),
   v.object({ outcome: v.literal("canceling") }),
+  v.object({ outcome: v.literal("movedOn") }),
 );
 
 const createArgs = v.object({
@@ -52,6 +53,7 @@ const getResult = v.object({
       error: v.union(v.string(), v.null()),
       message: v.union(v.string(), v.null()),
       startedAt: v.union(v.number(), v.null()),
+      attempt: v.number(),
       canceling: v.boolean(),
       finishedAt: v.union(v.number(), v.null()),
     }),
@@ -108,7 +110,7 @@ const setFoldersResult = v.object({ scanJobId: v.union(v.id("jobs"), v.null()) }
 
 /** The handlers `convex/core/libraries.ts` passes to `register`, one per `core.libraries` command. */
 export interface Handlers {
-  /** `core.libraries.cancelScan` (mutation, signed-in): Stop a library's scan; a finished scan stays as it ended, and what a scan wrote stays. */
+  /** `core.libraries.cancelScan` (mutation, signed-in): Stop a library's scan at the attempt you saw; a finished scan stays as it ended, and what a scan wrote stays. */
   readonly cancelScan: (
     ctx: Omit<MutationCtx, "auth">,
     args: Infer<typeof cancelScanArgs>,

@@ -2,6 +2,8 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import type { Restrictions } from "../../commands/access";
+
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { logMark, usageSince } from "../admin";
@@ -38,12 +40,48 @@ const listPage = (
   filter: Filter,
   numItems: number,
   cursor: string | null,
+  endCursor?: string,
 ) =>
   who.signedIn.client.query(api.movies.files.list, {
     libraryId,
     filter,
-    paginationOpts: { numItems, cursor },
+    paginationOpts:
+      endCursor === undefined ? { numItems, cursor } : { numItems, cursor, endCursor },
   });
+
+/**
+ * The rows of the page from `cursor` pinned to end at `endCursor`, split as the server asks, the
+ * way a reactive client reloads a page after the page below it loaded.
+ */
+const pinnedRows = async (
+  who: Member,
+  libraryId: Id<"libraries">,
+  filter: Filter,
+  cursor: string | null,
+  endCursor: string,
+): Promise<ReadonlyArray<LibraryFile>> => {
+  const page = await listPage(who, libraryId, filter, 10, cursor, endCursor);
+
+  if (page.pageStatus !== "SplitRequired") return page.page;
+
+  const split = page.splitCursor;
+
+  if (split === null || split === undefined) throw new Error("A split page names no split");
+
+  return [
+    ...(await pinnedRows(who, libraryId, filter, cursor, split)),
+    ...(await pinnedRows(who, libraryId, filter, split, endCursor)),
+  ];
+};
+
+const pad = (n: number): string => String(n).padStart(3, "0");
+
+const NONE: Restrictions = {
+  maxMovieAge: null,
+  hideUnrated: false,
+  hideExplicitMusic: false,
+  libraries: null,
+};
 
 const allFiles = async (
   who: Member,
@@ -266,5 +304,112 @@ describe.skipIf(stack === undefined)("movies.files", { timeout: 600_000 }, () =>
     });
 
     await admin.signedIn.client.mutation(api.core.libraries.remove, { libraryId });
+  });
+
+  it("count and date nothing an editor's restrictions hide", async () => {
+    if (stack === undefined) return;
+
+    const admin = await member(stack, "files-hidden-admin", "admin");
+    const editor = await member(stack, "files-hidden-editor");
+    const { libraryId, scanJobId, roots } = await moviesLibrary(admin, "Files hidden");
+    const path = join(roots[0] ?? "", "unrated.mkv");
+
+    await share(admin, libraryId, { kind: "user", userId: editor.userId }, "edit");
+
+    const lease = await claimJob(stack, "movies.scan", scanJobId);
+
+    await upsert(stack, lease, [movieFile(path)]);
+    await markMissing(stack, lease, [path]);
+    await finishJob(stack, lease);
+
+    expect(await summaryOf(editor, libraryId)).toMatchObject({ missing: 1, unmatched: 1 });
+
+    await admin.signedIn.client.mutation(api.core.restrictions.set, {
+      userId: editor.userId,
+      restrictions: { ...NONE, hideUnrated: true },
+    });
+
+    expect(pathsOf(await allFiles(editor, libraryId, "all", 10))).toEqual([]);
+    expect(await summaryOf(editor, libraryId)).toEqual({
+      missing: null,
+      missingSince: null,
+      unmatched: null,
+    });
+    expect(await summaryOf(admin, libraryId)).toMatchObject({ missing: 1, unmatched: 1 });
+
+    await admin.signedIn.client.mutation(api.core.libraries.remove, { libraryId });
+  });
+  it("split a pinned page that grew past one call's reads, never answering it empty", async () => {
+    if (stack === undefined) return;
+
+    const admin = await member(stack, "files-pinned", "admin");
+    const { libraryId, scanJobId, roots } = await moviesLibrary(admin, "Files that grew");
+    const root = roots[0] ?? "";
+    const lease = await claimJob(stack, "movies.scan", scanJobId, 600_000);
+
+    await upsertAll(
+      stack,
+      lease,
+      Array.from({ length: 30 }, (_, n) =>
+        movieFile(join(root, `m-${pad(n)}.mkv`), 1, 1, scannedTitle("movie", `m:${n}`, `M ${n}`)),
+      ),
+    );
+
+    const all = await listPage(admin, libraryId, "all", 10, null);
+    const unmatched = await listPage(admin, libraryId, "unmatched", 10, null);
+
+    expect(all.page).toHaveLength(10);
+    expect(unmatched.isDone).toBe(false);
+
+    // Files and titles that sort inside both first pages, each title near its bound.
+    const grown = Array.from({ length: 300 }, (_, n) =>
+      movieFile(join(root, `b-${pad(n)}.mkv`), 1, 1, {
+        ...scannedTitle("movie", `b:${n}`, `B ${pad(n)}`),
+        overview: "o".repeat(60_000),
+      }),
+    );
+
+    // A hundred at a time, so one call's arguments stay under the request size limit.
+    await upsertAll(stack, lease, grown.slice(0, 100));
+    await upsertAll(stack, lease, grown.slice(100, 200));
+    await upsertAll(stack, lease, grown.slice(200));
+
+    await finishJob(stack, lease);
+    await cancelQueued(stack, "movies.trickplay");
+
+    const mark = await logMark(stack);
+    const pinned = await listPage(admin, libraryId, "all", 10, null, all.continueCursor);
+
+    expect(pinned.pageStatus).toBe("SplitRequired");
+    expect(pinned.page.length).toBeGreaterThan(0);
+
+    const pinnedAll = await pinnedRows(admin, libraryId, "all", null, all.continueCursor);
+
+    const pinnedUnmatched = await pinnedRows(
+      admin,
+      libraryId,
+      "unmatched",
+      null,
+      unmatched.continueCursor,
+    );
+
+    expect(pathsOf([pinnedAll])).toEqual([
+      ...grown.map((item) => item.file.path),
+      ...pathsOf([all.page]),
+    ]);
+    expect(pathsOf([pinnedUnmatched])).toEqual(
+      expect.arrayContaining(grown.map((item) => item.file.path)),
+    );
+    expect(new Set(pathsOf([pinnedUnmatched])).size).toBe(pinnedUnmatched.length);
+
+    const usage = await usageSince(stack, mark, api.movies.files.list, 4);
+
+    expect(usage.length).toBeGreaterThan(0);
+    expect(
+      usage.every((call) => call.committed && call.reads < READS_MAX && call.bytes < BYTES_MAX),
+    ).toBe(true);
+
+    // The library stays: removing it purges some 18 MB at once, and Convex's write rate limit
+    // would then refuse the next test's writes.
   });
 });

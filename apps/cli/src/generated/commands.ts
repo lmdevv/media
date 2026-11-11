@@ -1505,10 +1505,13 @@ export const generatedCommands = [
     scope: "signed-in",
     refusesKeys: false,
     summary:
-      "Stop a library's scan; a finished scan stays as it ended, and what a scan wrote stays",
+      "Stop a library's scan at the attempt you saw; a finished scan stays as it ended, and what a scan wrote stays",
     secrets: [],
     paginated: false,
-    args: Schema.Struct({ jobId: Schema.String.pipe(Schema.brand("Id<jobs>")) }),
+    args: Schema.Struct({
+      jobId: Schema.String.pipe(Schema.brand("Id<jobs>")),
+      attempt: Schema.Finite,
+    }),
     result: Schema.Union([
       Schema.Struct({
         outcome: Schema.Literal("finished"),
@@ -1519,6 +1522,7 @@ export const generatedCommands = [
         ]),
       }),
       Schema.Struct({ outcome: Schema.Literal("canceling") }),
+      Schema.Struct({ outcome: Schema.Literal("movedOn") }),
     ]),
     method: (platform) => platform.core.libraries.cancelScan,
   }),
@@ -1579,6 +1583,7 @@ export const generatedCommands = [
           error: Schema.Union([Schema.String, Schema.Null]),
           message: Schema.Union([Schema.String, Schema.Null]),
           startedAt: Schema.Union([Schema.Finite, Schema.Null]),
+          attempt: Schema.Finite,
           canceling: Schema.Boolean,
           finishedAt: Schema.Union([Schema.Finite, Schema.Null]),
         }),
@@ -2929,9 +2934,9 @@ export const generatedCommands = [
     paginated: false,
     args: Schema.Struct({ libraryId: Schema.String.pipe(Schema.brand("Id<libraries>")) }),
     result: Schema.Struct({
-      missing: Schema.Finite,
+      missing: Schema.Union([Schema.Finite, Schema.Null]),
       missingSince: Schema.Union([Schema.Finite, Schema.Null]),
-      unmatched: Schema.Finite,
+      unmatched: Schema.Union([Schema.Finite, Schema.Null]),
     }),
     method: (platform) => platform.movies.files.summary,
   }),
@@ -3142,7 +3147,10 @@ export const generatedCommands = [
     summary: "Stop a Jellyfin or Plex import, as an owner or an admin; what it already wrote stays",
     secrets: [],
     paginated: false,
-    args: Schema.Struct({ importId: Schema.String.pipe(Schema.brand("Id<imports>")) }),
+    args: Schema.Struct({
+      importId: Schema.String.pipe(Schema.brand("Id<imports>")),
+      attempt: Schema.Finite,
+    }),
     result: Schema.Union([
       Schema.Struct({
         outcome: Schema.Literal("finished"),
@@ -3153,6 +3161,7 @@ export const generatedCommands = [
         ]),
       }),
       Schema.Struct({ outcome: Schema.Literal("canceling") }),
+      Schema.Struct({ outcome: Schema.Literal("movedOn") }),
     ]),
     method: (platform) => platform.movies.imports.cancel,
   }),
@@ -3204,6 +3213,7 @@ export const generatedCommands = [
         message: Schema.Union([Schema.String, Schema.Null]),
         error: Schema.Union([Schema.String, Schema.Null]),
         startedAt: Schema.Union([Schema.Finite, Schema.Null]),
+        attempt: Schema.Finite,
         canceling: Schema.Boolean,
         finishedAt: Schema.Union([Schema.Finite, Schema.Null]),
       }),
@@ -3269,6 +3279,7 @@ export const generatedCommands = [
             message: Schema.Union([Schema.String, Schema.Null]),
             error: Schema.Union([Schema.String, Schema.Null]),
             startedAt: Schema.Union([Schema.Finite, Schema.Null]),
+            attempt: Schema.Finite,
             canceling: Schema.Boolean,
             finishedAt: Schema.Union([Schema.Finite, Schema.Null]),
           }),

@@ -178,7 +178,7 @@ export const withScanLease = <Value>(
 ): Promise<LeaseAnswer<Value>> =>
   withJobLease(ctx, [scanKindOf(kind)], held, async (job) => {
     const stop = async (): Promise<LeaseAnswer<Value>> => {
-      await cancel(ctx, job.jobId);
+      await cancel(ctx, job.jobId, null);
 
       const canceling = await ctx.db.get(job.jobId);
 
@@ -319,19 +319,20 @@ export const domains = serverQuery({
 const WATCHED_PAGE_MAX = 64;
 
 /**
- * Every library of `kind` with its folders as recorded, a page at a time, for the server to watch
- * (ADR 0024). Folders, not approved roots, so a change under a folder that links into a root names
- * the library's own path and `changed` finds the library.
+ * Every movies library with its folders as recorded, a page at a time, for the server to watch
+ * (ADR 0024). Movies only, whoever asks: the server rescans only movies on change, and another
+ * domain's folders are not its to read. Folders, not approved roots, so a change under a folder
+ * that links into a root names the library's own path and `changed` finds the library.
  */
 export const watched = serverQuery({
-  args: { kind: contentDomain, paginationOpts: paginationOptsValidator },
+  args: { paginationOpts: paginationOptsValidator },
   returns: paginationResultValidator(
     v.object({ libraryId: v.id("libraries"), folders: v.array(v.string()) }),
   ),
-  handler: async (ctx, { kind, paginationOpts }) => {
+  handler: async (ctx, { paginationOpts }) => {
     const page = await paginate(
       ctx.db,
-      { table: "libraries", index: "by_kind", range: (q) => q.eq("kind", kind) },
+      { table: "libraries", index: "by_kind", range: (q) => q.eq("kind", "movies") },
       { ...paginationOpts, numItems: Math.min(paginationOpts.numItems, WATCHED_PAGE_MAX) },
     );
 

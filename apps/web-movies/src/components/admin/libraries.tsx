@@ -17,6 +17,7 @@ import { useAction } from "./action";
 import { formatCount, formatPercent, plural } from "./format";
 import { isActive, lastScanLabel, scanFraction } from "./scan";
 import { ACCOUNT_LIBRARIES } from "@/lib/account-links";
+import { reportMovedOn } from "@/lib/canceled";
 
 import { PagedView, ShowMore } from "./paged-view";
 import { allows } from "./scope-gate";
@@ -160,8 +161,10 @@ function LibraryRow({ library, now }: { readonly library: Library; readonly now:
   const active = isActive(scan);
   const startScan = useAction(() => platform.core.libraries.scan({ libraryId: library.libraryId }));
 
-  const stopScan = useAction((jobId: Scan["jobId"]) =>
-    platform.core.libraries.cancelScan({ jobId }),
+  const stopScan = useAction(
+    (seen: Pick<Scan, "jobId" | "attempt">) =>
+      platform.core.libraries.cancelScan({ jobId: seen.jobId, attempt: seen.attempt }),
+    { onSuccess: (answer) => reportMovedOn([answer], "scan") },
   );
 
   const running = scan?.status === "running" ? scan : null;
@@ -202,7 +205,7 @@ function LibraryRow({ library, now }: { readonly library: Library; readonly now:
             <button
               type="button"
               disabled={stopScan.pending}
-              onClick={() => void stopScan.run(scan.jobId)}
+              onClick={() => void stopScan.run(scan)}
               aria-label={`Cancel the scan of ${library.name}`}
               className="cursor-pointer font-sans text-label/label font-semibold text-text-muted hover:text-text"
             >

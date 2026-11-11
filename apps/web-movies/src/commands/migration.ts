@@ -7,6 +7,7 @@ import { useMemo } from "react";
 
 import { formatPercent } from "@/components/admin/format";
 import { PHASE_LABELS, importFraction } from "@/components/migration/migration-model";
+import { reportMovedOn } from "@/lib/canceled";
 import { orSkip } from "@/lib/query-state";
 import { isActive } from "@/lib/scan-progress";
 
@@ -74,7 +75,13 @@ export const useMigrationCommands = (context: CommandContext): CommandContributi
               leading: { kind: "icon", icon: CircleXIcon },
               perform: async () => {
                 try {
-                  await Promise.all(cancelable.map((run) => cancel({ importId: run.importId })));
+                  const answers = await Promise.all(
+                    cancelable.map((run) =>
+                      cancel({ importId: run.importId, attempt: run.job.attempt }),
+                    ),
+                  );
+
+                  reportMovedOn(answers, "import");
                 } catch (cause) {
                   toastFailure(cause);
                 }

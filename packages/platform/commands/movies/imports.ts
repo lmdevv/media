@@ -10,7 +10,7 @@ import type { MutationCtx, QueryCtx } from "../../convex/_generated/server";
 import { requireCaller } from "../../convex/core/auth/caller";
 import type { Caller } from "../../convex/core/auth/caller";
 
-const cancelArgs = v.object({ importId: v.id("imports") });
+const cancelArgs = v.object({ importId: v.id("imports"), attempt: v.number() });
 
 const cancelResult = v.union(
   v.object({
@@ -18,6 +18,7 @@ const cancelResult = v.union(
     status: v.union(v.literal("succeeded"), v.literal("failed"), v.literal("canceled")),
   }),
   v.object({ outcome: v.literal("canceling") }),
+  v.object({ outcome: v.literal("movedOn") }),
 );
 
 const getArgs = v.object({ importId: v.id("imports") });
@@ -60,6 +61,7 @@ const getResult = v.object({
     message: v.union(v.string(), v.null()),
     error: v.union(v.string(), v.null()),
     startedAt: v.union(v.number(), v.null()),
+    attempt: v.number(),
     canceling: v.boolean(),
     finishedAt: v.union(v.number(), v.null()),
   }),
@@ -116,6 +118,7 @@ const listResult = v.object({
         message: v.union(v.string(), v.null()),
         error: v.union(v.string(), v.null()),
         startedAt: v.union(v.number(), v.null()),
+        attempt: v.number(),
         canceling: v.boolean(),
         finishedAt: v.union(v.number(), v.null()),
       }),

@@ -614,13 +614,13 @@ Show whether guest links are on, the address they use, and whether you may make 
 
 ## `core.libraries.cancelScan`
 
-Stop a library's scan; a finished scan stays as it ended, and what a scan wrote stays.
+Stop a library's scan at the attempt you saw; a finished scan stays as it ended, and what a scan wrote stays.
 
 - CLI: `media auth libraries cancel-scan`
 - Kind: mutation
 - Scope: signed-in
-- Arguments: `{ jobId: Id<"jobs"> }`
-- Result: `{ outcome: "finished"; status: "succeeded" | "failed" | "canceled" } | { outcome: "canceling" }`
+- Arguments: `{ jobId: Id<"jobs">; attempt: number }`
+- Result: `{ outcome: "finished"; status: "succeeded" | "failed" | "canceled" } | { outcome: "canceling" } | { outcome: "movedOn" }`
 
 ## `core.libraries.create`
 
@@ -641,7 +641,7 @@ Show a library, how many items it holds, its latest scan, and to its managers it
 - Kind: query
 - Scope: signed-in
 - Arguments: `{ libraryId: Id<"libraries"> }`
-- Result: `{ libraryId: Id<"libraries">; name: string; kind: "movies" | "music"; level: "view" | "edit" | "manage"; items: number | null; folders: Array<string> | null; scan: { jobId: Id<"jobs">; status: "queued" | "running" | "succeeded" | "failed" | "canceled"; done: number | null; total: number | null; error: string | null; message: string | null; startedAt: number | null; canceling: boolean; finishedAt: number | null } | null }`
+- Result: `{ libraryId: Id<"libraries">; name: string; kind: "movies" | "music"; level: "view" | "edit" | "manage"; items: number | null; folders: Array<string> | null; scan: { jobId: Id<"jobs">; status: "queued" | "running" | "succeeded" | "failed" | "canceled"; done: number | null; total: number | null; error: string | null; message: string | null; startedAt: number | null; attempt: number; canceling: boolean; finishedAt: number | null } | null }`
 
 ## `core.libraries.list`
 

@@ -6,6 +6,7 @@ import { CircleXIcon, FolderIcon, RefreshCwIcon } from "lucide-react";
 import { useMemo } from "react";
 import { toast } from "sonner";
 
+import { reportMovedOn } from "@/lib/canceled";
 import { formatCount } from "@/lib/format";
 import { useActiveScans, useManagedLibraries } from "@/lib/libraries";
 import { scanProgress } from "@/lib/scan-progress";
@@ -124,9 +125,13 @@ export const useLibraryCommands = (context: CommandContext): CommandContribution
               leading: { kind: "icon", icon: CircleXIcon },
               perform: async () => {
                 try {
-                  await Promise.all(
-                    cancelable.map((active) => cancel({ jobId: active.scan.jobId })),
+                  const answers = await Promise.all(
+                    cancelable.map((active) =>
+                      cancel({ jobId: active.scan.jobId, attempt: active.scan.attempt }),
+                    ),
                   );
+
+                  reportMovedOn(answers, cancelable.length === 1 ? "scan" : "scans");
                 } catch (cause) {
                   toastFailure(cause);
                 }
