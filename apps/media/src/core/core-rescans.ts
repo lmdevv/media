@@ -1,11 +1,15 @@
 /**
- * Rescans after a file changes, on the core (ADR 0024). The server watches each approved library
- * root, as standalone mode does, and asks the core to queue a scan of the movies libraries a change
- * reaches (`core/scans:changed`). It never scans itself: on the core a scan writes only under a scan
- * job's lease, so the core's scan queue runs it, joining a scan already queued or running.
+ * Rescans after a file changes, on the core (ADR 0024). The server watches each folder of every
+ * movies library at the path the library names, following the core's list of them live, and asks
+ * the core to queue a scan of the movies libraries a change reaches (`core/scans:changed`). A
+ * folder that reaches an approved root through a link is watched at its own path, so the paths a
+ * change names are the ones the core knows. It never scans itself: on the core a scan writes only
+ * under a scan job's lease, so the core's scan queue runs it, joining a scan already queued or
+ * running.
  */
+import type { LibraryId } from "@media/contracts/ids";
 import { serverFunctions } from "@media/contracts/server-functions";
-import { Effect, type FileSystem, Layer, type Path } from "effect";
+import { Effect, FileSystem, Layer, Option, Path, Stream } from "effect";
 
 import * as LibraryMonitor from "../library/library-monitor.ts";
 import * as MediaConfig from "../media-config.ts";
@@ -32,14 +36,80 @@ export const pathsToSend = (
   return outermost.length === 0 || outermost.length > PATHS_MAX ? [root] : outermost;
 };
 
-/** Watches every approved root and asks the core to rescan what changed. */
+/** Libraries one page of the core's list of watched folders asks for. */
+const WATCHED_PAGE = 64;
+
+/** A movies library's folders, as the core lists them for watching. */
+interface WatchedLibrary {
+  readonly libraryId: LibraryId;
+  readonly folders: ReadonlyArray<string>;
+}
+
+/** Every movies library with its folders, now and after every change, page after page. */
+const watchedLibraries = (
+  session: CoreSession.Interface,
+  cursor: string | null = null,
+): Stream.Stream<ReadonlyArray<WatchedLibrary>> =>
+  session
+    .watch(serverFunctions.scanWatched, {
+      kind: "movies",
+      paginationOpts: { numItems: WATCHED_PAGE, cursor },
+    })
+    .pipe(
+      Stream.switchMap((page) =>
+        page.isDone
+          ? Stream.succeed(page.page)
+          : watchedLibraries(session, page.continueCursor).pipe(
+              Stream.map((rest) => [...page.page, ...rest]),
+            ),
+      ),
+    );
+
+const isWithin = (root: string, candidate: string, separator: string): boolean =>
+  candidate === root ||
+  candidate.startsWith(root.endsWith(separator) ? root : `${root}${separator}`);
+
+/**
+ * Each folder of `libraries` to watch, as a library of its own so a change names its folder.
+ * A folder that leads outside every approved root is left out, as the scanner refuses it; one
+ * that cannot be resolved now, such as a share not mounted yet, stays, and its watch retries.
+ */
+export const foldersToWatch = Effect.fn("CoreRescans.foldersToWatch")(function* (
+  libraries: ReadonlyArray<WatchedLibrary>,
+) {
+  const config = yield* MediaConfig.Service;
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+
+  const roots = (yield* Effect.forEach(config.libraryRoots, (root) =>
+    fs.realPath(root).pipe(Effect.option),
+  )).flatMap((root) => (Option.isSome(root) ? [root.value] : []));
+
+  const watched = yield* Effect.forEach(
+    libraries.flatMap((library) =>
+      library.folders.map((folder) => ({ libraryId: library.libraryId, folder })),
+    ),
+    ({ libraryId, folder }) =>
+      fs.realPath(folder).pipe(
+        Effect.option,
+        Effect.map((real) =>
+          Option.isSome(real) && !roots.some((root) => isWithin(root, real.value, path.sep))
+            ? []
+            : [{ libraryId, roots: [folder] }],
+        ),
+      ),
+  );
+
+  return watched.flat();
+});
+
+/** Watches every movies library's folders and asks the core to rescan what changed. */
 export const layer: Layer.Layer<
   never,
   never,
   MediaConfig.Service | CoreSession.Service | FileSystem.FileSystem | Path.Path
 > = Layer.unwrap(
   Effect.gen(function* () {
-    const config = yield* MediaConfig.Service;
     const session = yield* CoreSession.Service;
 
     const rescan: LibraryMonitor.Rescan = Effect.fn("CoreRescans.rescan")(
@@ -63,8 +133,19 @@ export const layer: Layer.Layer<
       (effect, library) => effect.pipe(Effect.annotateLogs({ libraryId: library.libraryId })),
     );
 
-    return LibraryMonitor.layerTracking(LibraryMonitor.rootLibraries(config.libraryRoots)).pipe(
-      Layer.provide(LibraryMonitor.layerWith(rescan)),
+    const tracking = Layer.effectDiscard(
+      Effect.gen(function* () {
+        const monitor = yield* LibraryMonitor.Service;
+
+        yield* watchedLibraries(session).pipe(
+          Stream.runForEach((libraries) =>
+            foldersToWatch(libraries).pipe(Effect.flatMap(monitor.track)),
+          ),
+          Effect.forkScoped,
+        );
+      }),
     );
+
+    return tracking.pipe(Layer.provide(LibraryMonitor.layerWith(rescan)));
   }),
 );

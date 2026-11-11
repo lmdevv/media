@@ -234,7 +234,7 @@ export const moviesTables = {
     sidecarDigest: nullable(v.string()),
   })
     .index("by_library_path", ["libraryId", "path"])
-    .index("by_library_missing", ["libraryId", "missing"])
+    .index("by_library_missing", ["libraryId", "missing", "missingSince"])
     .index("by_title", ["titleId"])
     .index("by_episode", ["episodeId"]),
 

@@ -1,6 +1,7 @@
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { Button } from "@media/ui/components/button";
 import { CalmState } from "@media/ui/components/calm-state";
+import { Chip } from "@media/ui/components/chip";
 import {
   Dialog,
   DialogBody,
@@ -15,7 +16,7 @@ import { describeFailure, isFailure } from "@media/ui/lib/failure";
 import { usePages } from "@media/ui/lib/pages";
 import { cn } from "@media/ui/lib/utils";
 import { Link } from "@tanstack/react-router";
-import { RotateCwIcon, SearchIcon, TriangleAlertIcon } from "lucide-react";
+import { CircleHelpIcon, RotateCwIcon, SearchIcon, TriangleAlertIcon } from "lucide-react";
 import { useState } from "react";
 
 import { artworkUrl } from "@/lib/artwork";
@@ -23,23 +24,42 @@ import { useNow } from "@media/ui/lib/use-now";
 import { useMe } from "@/session/session";
 
 import { useAction } from "./action";
-import { formatClock, formatDateTime, plural } from "./format";
+import {
+  formatBytes,
+  formatClock,
+  formatCount,
+  formatDate,
+  formatDateTime,
+  plural,
+} from "./format";
 import { accountLibraryHref } from "./libraries";
-import { titleWithYear } from "./media-quality";
+import { fileName, qualityLabel, titleWithYear } from "./media-quality";
+import { Notice } from "./notice";
 import { PagedView, ShowMore } from "./paged-view";
 import { Poster } from "./poster";
 import type { LibraryId } from "./route-params";
 import { isActive, isUnreachable } from "./scan";
 import { allows } from "./scope-gate";
-import { Cell, Column, Table, TableHead, TableRow } from "./table";
-import type { LibraryDetail, Scan, TitleCard } from "./types";
+import { Cell, Column, StatusDot, Table, TableHead, TableRow } from "./table";
+import type {
+  LibraryDetail,
+  LibraryFile,
+  LibraryFileFilter,
+  LibraryFileSummary,
+  Scan,
+} from "./types";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** A library's page: its scan, and its titles, each linking to its match. */
+/**
+ * A library's page: its scan, its files with their quality, size, and state, and the missing
+ * files to review.
+ */
 export function LibraryDetailScreen({ libraryId }: { readonly libraryId: LibraryId }) {
   const platform = usePlatform();
   const library = usePlatformQuery(platform.core.libraries.get, { libraryId });
+  const summary = usePlatformQuery(platform.movies.files.summary, { libraryId });
+  const [filter, setFilter] = useState<LibraryFileFilter>("all");
   const me = useMe();
   const now = useNow(30_000);
 
@@ -51,6 +71,7 @@ export function LibraryDetailScreen({ libraryId }: { readonly libraryId: Library
 
   const detail = library.data;
   const offline = isUnreachable(detail.scan);
+  const counts = summary.status === "success" ? summary.data : null;
 
   const facts = [
     detail.folders === null ? null : detail.folders.join(", "),
@@ -86,7 +107,23 @@ export function LibraryDetailScreen({ libraryId }: { readonly libraryId: Library
       {isUnreachable(detail.scan) ? (
         <OfflineState library={detail} scan={detail.scan} now={now} />
       ) : (
-        <TitleList libraryId={libraryId} />
+        <>
+          {counts === null || counts.missing === 0 ? null : (
+            <MissingNotice
+              counts={counts}
+              reviewing={filter === "missing"}
+              onReview={() => setFilter("missing")}
+              now={now}
+            />
+          )}
+          <FileList
+            libraryId={libraryId}
+            filter={filter}
+            onFilterChange={setFilter}
+            counts={counts}
+            now={now}
+          />
+        </>
       )}
     </>
   );
@@ -212,24 +249,111 @@ function OfflineState({
   );
 }
 
-const matches = (title: TitleCard, needle: string): boolean =>
-  needle.length === 0 || title.name.toLowerCase().includes(needle);
+const EMPTY_MESSAGES: Readonly<Record<LibraryFileFilter, string>> = {
+  all: "No files yet.",
+  missing: "No missing files.",
+  unmatched: "Every title is matched.",
+};
 
-/** The library's titles by name, a page at a time, filtered by name over the pages loaded. */
-function TitleList({ libraryId }: { readonly libraryId: LibraryId }) {
+const FILTERS: ReadonlyArray<{ readonly id: LibraryFileFilter; readonly label: string }> = [
+  { id: "all", label: "All" },
+  { id: "missing", label: "Missing" },
+  { id: "unmatched", label: "Unmatched" },
+];
+
+function MissingNotice({
+  counts,
+  reviewing,
+  onReview,
+  now,
+}: {
+  readonly counts: LibraryFileSummary;
+  readonly reviewing: boolean;
+  readonly onReview: () => void;
+  readonly now: number;
+}) {
+  return (
+    <Notice
+      action={
+        reviewing ? null : (
+          <button
+            type="button"
+            onClick={onReview}
+            className="shrink-0 cursor-pointer font-sans text-label/label font-semibold text-text hover:underline"
+          >
+            Review {formatCount(counts.missing)} missing
+          </button>
+        )
+      }
+    >
+      {counts.missing === 1
+        ? "1 file disappeared"
+        : `${formatCount(counts.missing)} files disappeared`}
+      {counts.missingSince === null ? "." : ` since ${formatDate(counts.missingSince, now)}.`}
+    </Notice>
+  );
+}
+
+const chipCount = (filter: LibraryFileFilter, counts: LibraryFileSummary | null): string | null => {
+  if (counts === null || filter === "all") return null;
+
+  return formatCount(filter === "missing" ? counts.missing : counts.unmatched);
+};
+
+const matches = (file: LibraryFile, needle: string): boolean =>
+  needle.length === 0 ||
+  file.title.name.toLowerCase().includes(needle) ||
+  file.path.toLowerCase().includes(needle);
+
+/**
+ * The library's files, a page at a time: all of them by path, the missing ones, or the unmatched
+ * titles' files, filtered by title or filename over the pages loaded.
+ */
+function FileList({
+  libraryId,
+  filter,
+  onFilterChange,
+  counts,
+  now,
+}: {
+  readonly libraryId: LibraryId;
+  readonly filter: LibraryFileFilter;
+  readonly onFilterChange: (filter: LibraryFileFilter) => void;
+  readonly counts: LibraryFileSummary | null;
+  readonly now: number;
+}) {
   const platform = usePlatform();
   const [search, setSearch] = useState("");
   const needle = search.trim().toLowerCase();
 
-  const titles = usePages(platform.movies.titles.list, (paginationOpts) => ({
+  const files = usePages(platform.movies.files.list, (paginationOpts) => ({
     paginationOpts,
     libraryId,
-    sort: "name" as const,
+    filter,
   }));
 
   return (
     <>
-      <div className="flex flex-wrap items-center justify-end gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div role="radiogroup" aria-label="Show" className="flex flex-wrap items-center gap-2">
+          {FILTERS.map((each) => {
+            const count = chipCount(each.id, counts);
+
+            return (
+              <Chip
+                key={each.id}
+                role="radio"
+                aria-checked={each.id === filter}
+                selected={each.id === filter}
+                onClick={() => onFilterChange(each.id)}
+                className="gap-2"
+              >
+                {each.label}
+                {count === null ? null : <span>{count}</span>}
+              </Chip>
+            );
+          })}
+        </div>
         <label className="flex h-8 w-65 shrink-0 items-center gap-2 rounded-control border border-hairline bg-surface-raised px-2.5">
           <SearchIcon
             className="size-3.5 shrink-0 text-text-muted"
@@ -240,28 +364,31 @@ function TitleList({ libraryId }: { readonly libraryId: LibraryId }) {
             type="search"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Filter by title"
-            aria-label="Filter by title"
+            placeholder="Filter by title or filename"
+            aria-label="Filter by title or filename"
             className="min-w-0 flex-1 bg-transparent font-sans text-label/label text-text outline-none placeholder:text-text-muted"
           />
         </label>
       </div>
-      <PagedView list={titles} loading={<Skeleton className="h-13 w-full rounded-control" />}>
+      <PagedView list={files} loading={<Skeleton className="h-13 w-full rounded-control" />}>
         {({ rows, next }) => (
-          <Table label="Titles">
+          <Table label="Files">
             <TableHead>
-              <Column className="min-w-80 flex-1">Title</Column>
-              <Column className="w-20">Kind</Column>
-              <Column className="w-30">Status</Column>
+              <Column className="min-w-80 flex-1">File</Column>
+              <Column className="w-37">Quality</Column>
+              <Column className="w-20">Size</Column>
+              <Column className="w-50">Status</Column>
               <Column className="w-24" />
             </TableHead>
             {rows
-              .filter((title) => matches(title, needle))
-              .map((title) => (
-                <TitleRow key={title.id} title={title} libraryId={libraryId} />
+              .filter((file) => matches(file, needle))
+              .map((file) => (
+                <FileRow key={file.id} file={file} libraryId={libraryId} now={now} />
               ))}
             {rows.length === 0 && next.kind === "done" ? (
-              <p className="px-3 py-4 font-sans text-body/body text-text-muted">No titles yet.</p>
+              <p className="px-3 py-4 font-sans text-body/body text-text-muted">
+                {EMPTY_MESSAGES[filter]}
+              </p>
             ) : null}
             <div className="px-3 pt-3 empty:hidden">
               <ShowMore next={next} />
@@ -273,48 +400,126 @@ function TitleList({ libraryId }: { readonly libraryId: LibraryId }) {
   );
 }
 
-function TitleRow({
-  title,
+const episodeLabel = (file: LibraryFile): string =>
+  file.episode === null
+    ? titleWithYear(file.title)
+    : `${file.title.name} · S${file.episode.seasonNumber} E${file.episode.episodeNumber}`;
+
+/** What a file plays as: the title or episode, and its version when it has one. */
+const fileLabel = (file: LibraryFile): string =>
+  file.version.versionName === null
+    ? episodeLabel(file)
+    : `${episodeLabel(file)} · ${file.version.versionName}`;
+
+function FileStatus({ file, now }: { readonly file: LibraryFile; readonly now: number }) {
+  if (file.missing) {
+    return (
+      <div className="flex flex-col gap-0.5">
+        <span className="flex items-center gap-1.5 font-sans text-label/label font-medium text-warning">
+          <TriangleAlertIcon className="size-3" strokeWidth={2} aria-hidden />
+          Missing
+        </span>
+        {file.missingSince === null ? null : (
+          <span className="font-mono text-caption/caption text-text-muted">
+            since {formatDateTime(file.missingSince, now)}
+          </span>
+        )}
+      </div>
+    );
+  }
+
+  if (file.title.matchStatus === "unmatched") {
+    return (
+      <div className="flex flex-col gap-0.5">
+        <span className="flex items-center gap-1.5 font-sans text-label/label font-medium text-text">
+          <CircleHelpIcon className="size-3" strokeWidth={2} aria-hidden />
+          Unmatched
+        </span>
+        <span className="truncate font-mono text-caption/caption text-text-muted">
+          best guess · {episodeLabel(file)}
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <span className="flex items-center gap-1.5 font-sans text-label/label text-text">
+      <StatusDot tone="success" />
+      {file.title.matchStatus === "manual" ? "Matched by hand" : "Matched"}
+    </span>
+  );
+}
+
+function FileRow({
+  file,
   libraryId,
+  now,
 }: {
-  readonly title: TitleCard;
+  readonly file: LibraryFile;
   readonly libraryId: LibraryId;
+  readonly now: number;
 }) {
+  const unmatched = file.title.matchStatus === "unmatched";
+
   const match = {
     to: "/admin/libraries/$libraryId/match/$titleId",
-    params: { libraryId, titleId: title.id },
+    params: { libraryId, titleId: file.title.id },
   } as const;
 
   return (
     <TableRow className="h-13">
       <Cell className="flex min-w-80 flex-1 items-center gap-3">
-        <Poster
-          src={artworkUrl(title.artwork.poster, "thumb")}
-          alt=""
-          className={cn("h-9 w-6 rounded-bar", !title.available && "opacity-50")}
-        />
-        <Link
-          {...match}
-          className="truncate font-sans text-label/label font-semibold text-text hover:underline"
-        >
-          {titleWithYear(title)}
-        </Link>
-      </Cell>
-      <Cell className="w-20 font-sans text-label/label text-text-muted">
-        {title.kind === "show" ? "Series" : "Film"}
-      </Cell>
-      <Cell className="w-30">
-        {title.available ? null : (
-          <span className="flex items-center gap-1.5 font-sans text-label/label font-medium text-warning">
-            <TriangleAlertIcon className="size-3" strokeWidth={2} aria-hidden />
-            Missing
-          </span>
+        {unmatched ? (
+          <span
+            aria-hidden
+            className={cn(
+              "h-9 w-6 shrink-0 rounded-bar border border-dashed border-text-muted",
+              file.missing && "opacity-50",
+            )}
+          />
+        ) : (
+          <Poster
+            src={artworkUrl(file.title.poster, "thumb")}
+            alt=""
+            className={cn("h-9 w-6 rounded-bar", file.missing && "opacity-50")}
+          />
         )}
+        <span className="flex min-w-0 flex-col gap-0.5">
+          {unmatched ? (
+            <span className="truncate font-sans text-label/label font-semibold text-text-muted italic">
+              No match
+            </span>
+          ) : (
+            <Link
+              {...match}
+              className="truncate font-sans text-label/label font-semibold text-text hover:underline"
+            >
+              {fileLabel(file)}
+            </Link>
+          )}
+          <span
+            className="truncate font-mono text-caption/caption text-text-muted"
+            title={file.path}
+          >
+            {fileName(file.path)}
+          </span>
+        </span>
+      </Cell>
+      <Cell className="w-37 font-mono text-caption/caption text-text-muted">
+        {qualityLabel(file.version)}
+      </Cell>
+      <Cell className="w-20 font-mono text-caption/caption text-text-muted">
+        {formatBytes(file.version.sizeBytes)}
+      </Cell>
+      <Cell className="w-50">
+        <FileStatus file={file} now={now} />
       </Cell>
       <Cell className="flex w-24 justify-end">
-        <Link {...match} className={buttonVariants({ variant: "raised", size: "row" })}>
-          Fix match
-        </Link>
+        {file.missing || !unmatched ? null : (
+          <Link {...match} className={buttonVariants({ variant: "raised", size: "row" })}>
+            Fix match
+          </Link>
+        )}
       </Cell>
     </TableRow>
   );

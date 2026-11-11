@@ -82,7 +82,7 @@ test.afterAll(async () => {
   if (workspace !== "") await rm(workspace, { recursive: true, force: true });
 });
 
-test("an admin adds a library in the account client, watches it scan here, fixes a match, and sees the folder go offline", async ({
+test("an admin adds a library in the account client, cancels and restarts its scan, reviews its files, fixes a match, and sees the folder go offline", async ({
   page,
 }) => {
   if (stack === null) return;
@@ -111,6 +111,18 @@ test("an admin adds a library in the account client, watches it scan here, fixes
   await expect(row).toContainText(root);
   await expect(row).toContainText("Queued");
 
+  // The queued scan cancels from its row, and the command menu cancels the next one.
+  await row.getByRole("button", { name: `Cancel the scan of ${name}` }).click();
+  await expect(row.getByRole("button", { name: `Scan ${name} now` })).toBeVisible();
+  await row.getByRole("button", { name: `Scan ${name} now` }).click();
+  await expect(row).toContainText("Queued");
+  await page.keyboard.press("ControlOrMeta+k");
+  await page.getByRole("combobox").fill("cancel scan");
+  await page.getByRole("option", { name: "Cancel scan" }).click();
+  await expect(row.getByRole("button", { name: `Scan ${name} now` })).toBeVisible();
+  await row.getByRole("button", { name: `Scan ${name} now` }).click();
+  await expect(row).toContainText("Queued");
+
   media = await startMediaService(withoutProvider(stack), [workspace]);
   await expect(row).toContainText("Ready", { timeout: SCAN_TIMEOUT_MS });
   await expect(row).toContainText("3 titles");
@@ -118,22 +130,42 @@ test("an admin adds a library in the account client, watches it scan here, fixes
   await row.getByRole("link", { name }).click();
   await expect(page.getByRole("heading", { name })).toBeVisible();
 
-  const titles = page.getByRole("table", { name: "Titles" });
-  const titleRow = (title: string) => titles.getByRole("row").filter({ hasText: title });
+  const files = page.getByRole("table", { name: "Files" });
+  const fileRow = (file: string) => files.getByRole("row").filter({ hasText: file });
+  const filter = (label: string) => page.getByRole("radio", { name: new RegExp(`^${label}`, "u") });
 
-  await expect(titleRow("Arrival (2016)")).toBeVisible();
-  await expect(titleRow("Stalker")).toBeVisible();
-  await expect(titleRow("Prestige")).toBeVisible();
+  // One row per file: what it plays as, its name with the whole path on hover, quality, and state.
+  await expect(fileRow("Arrival.2016.1080p.mkv")).toContainText("Arrival (2016)");
+  await expect(
+    fileRow("Arrival.2016.1080p.mkv").getByText("Arrival.2016.1080p.mkv"),
+  ).toHaveAttribute("title", join(root, "Arrival (2016)", "Arrival.2016.1080p.mkv"));
+  await expect(fileRow("Stalker.1979.Criterion.mkv")).toContainText("Unmatched");
+  await expect(fileRow("Stalker.1979.Criterion.mkv")).toContainText(/\d+p · /u);
+  await expect(fileRow("The.Prestige.2006.mkv")).toBeVisible();
+  await expect(filter("Unmatched")).toContainText(/\d/u);
 
   await rm(join(root, "The.Prestige.2006.mkv"));
   await page.getByRole("button", { name: "Scan now" }).click();
-  await expect(titleRow("Prestige")).toContainText("Missing", { timeout: SCAN_TIMEOUT_MS });
-  await expect(titleRow("Arrival (2016)")).not.toContainText("Missing");
+  await expect(fileRow("The.Prestige.2006.mkv")).toContainText("Missing", {
+    timeout: SCAN_TIMEOUT_MS,
+  });
+  await expect(fileRow("The.Prestige.2006.mkv")).toContainText("since");
+  await expect(fileRow("Arrival.2016.1080p.mkv")).not.toContainText("Missing");
 
-  await page.getByLabel("Filter by title").fill("stalker");
-  await expect(titleRow("Arrival (2016)")).toBeHidden();
+  // The banner counts the missing files since the first went, and reviews them.
+  const notice = page.getByRole("note");
+  await expect(notice).toContainText("1 file disappeared since");
+  await notice.getByRole("button", { name: "Review 1 missing" }).click();
+  await expect(filter("Missing")).toHaveAttribute("aria-checked", "true");
+  await expect(fileRow("The.Prestige.2006.mkv")).toBeVisible();
+  await expect(fileRow("Stalker.1979.Criterion.mkv")).toBeHidden();
+  await expect(notice.getByRole("button", { name: "Review 1 missing" })).toBeHidden();
 
-  await titleRow("Stalker").getByRole("link", { name: "Fix match" }).click();
+  await filter("All").click();
+  await page.getByLabel("Filter by title or filename").fill("criterion");
+  await expect(fileRow("Arrival.2016.1080p.mkv")).toBeHidden();
+
+  await fileRow("Stalker.1979.Criterion.mkv").getByRole("link", { name: "Fix match" }).click();
   await expect(page.getByRole("heading", { name: "Fix match" })).toBeVisible();
   await expect(page.getByRole("status")).toContainText(
     "TMDB search isn’t available on this server",
@@ -141,9 +173,10 @@ test("an admin adds a library in the account client, watches it scan here, fixes
   await page.getByLabel("Title", { exact: true }).fill("Stalker (Criterion)");
   await page.getByRole("button", { name: "Apply match" }).click();
   await expect(page.getByRole("heading", { name })).toBeVisible();
-  await expect(titleRow("Stalker (Criterion)")).toBeVisible();
+  await expect(fileRow("Stalker.1979.Criterion.mkv")).toContainText("Stalker (Criterion)");
+  await expect(fileRow("Stalker.1979.Criterion.mkv")).toContainText("Matched by hand");
 
-  await titleRow("Arrival (2016)").getByRole("link", { name: "Arrival (2016)" }).click();
+  await fileRow("Arrival.2016.1080p.mkv").getByRole("link", { name: "Arrival (2016)" }).click();
   const poster = page.getByRole("img", { name: "Arrival" });
   await expect(poster).toHaveAttribute("src", /\/artwork\/.*[?&]ticket=/u);
   await expect
@@ -166,5 +199,5 @@ test("an admin adds a library in the account client, watches it scan here, fixes
   await expect(page.getByRole("heading", { name: "Can’t reach your NAS" })).toBeHidden({
     timeout: SCAN_TIMEOUT_MS,
   });
-  await expect(titleRow("Arrival (2016)")).toBeVisible();
+  await expect(fileRow("Arrival.2016.1080p.mkv")).toBeVisible();
 });

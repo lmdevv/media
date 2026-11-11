@@ -135,6 +135,29 @@ const archive = (fileName: string, takenAt: number): Archive => ({
 });
 
 describe.skipIf(stack === undefined)("server backups", { timeout: 180_000 }, () => {
+  it("show the backup queued or running for the whole job, to admins only", async () => {
+    if (stack === undefined) return;
+    const admin = await member(stack, "backups-active", "admin");
+    const someone = await member(stack, "backups-active-member");
+    const active = () => admin.signedIn.client.query(api.core.server.backups.active, {});
+
+    expect(await refusal(someone.signedIn.client.query(api.core.server.backups.active, {}))).toBe(
+      "forbidden",
+    );
+
+    const { jobId } = await admin.signedIn.client.mutation(api.core.server.backups.run, {});
+
+    expect(await active()).toEqual({ jobId, status: "queued" });
+
+    const lease = await claimBackup(stack, jobId);
+
+    expect(await active()).toEqual({ jobId, status: "running" });
+
+    await finish(stack, lease);
+
+    expect(await active()).toBeNull();
+  });
+
   it("record an archive under the job's lease, once, with the job's trigger", async () => {
     if (stack === undefined) return;
     const admin = await member(stack, "backups-admin", "admin");

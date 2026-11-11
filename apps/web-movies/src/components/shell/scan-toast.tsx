@@ -4,23 +4,24 @@ import { LoaderCircleIcon } from "lucide-react";
 import { useState } from "react";
 
 import { formatCount } from "@/lib/format";
+import { useNow } from "@media/ui/lib/use-now";
 import { useActiveScans, useManagedLibraries } from "@/lib/libraries";
 import { scanProgress } from "@/lib/scan-progress";
 
 /**
- * The corner card while a movies library this person manages scans: the library and the files
- * scanned so far. Hiding it lasts until the next scan starts. The core reports neither the file
- * being read nor when the scan started, so the card shows no file or time left.
+ * The corner card while a movies library this person manages scans: the library, files scanned,
+ * what the scan is doing, and time left. Hiding it lasts until the next scan starts.
  */
 export function ScanToast() {
   const scans = useActiveScans(useManagedLibraries());
+  const now = useNow(5000);
   const [hidden, setHidden] = useState<ReadonlySet<string>>(new Set());
   const active = scans.find((candidate) => !hidden.has(candidate.scan.jobId));
 
   if (active === undefined) return null;
 
   const { library, scan } = active;
-  const progress = scanProgress(scan);
+  const progress = scanProgress(scan, now);
 
   return (
     <section
@@ -43,9 +44,18 @@ export function ScanToast() {
         </p>
       </div>
       <ProgressBar value={progress.fraction ?? 0} tone="surface" className="rounded-bar" />
-      {scan.status === "queued" ? (
-        <p className="text-label/label text-text-muted">Waiting for the media service</p>
-      ) : null}
+      <div className="flex flex-col gap-1">
+        {scan.message === null ? null : (
+          <p className="truncate font-mono text-caption/caption text-text-muted">{scan.message}</p>
+        )}
+        <p className="text-label/label text-text-muted">
+          {scan.status === "queued"
+            ? "Waiting for the media service"
+            : progress.minutesLeft === null
+              ? "Working out the time left"
+              : `About ${progress.minutesLeft} min left`}
+        </p>
+      </div>
       <div className="flex justify-end gap-1">
         <button
           type="button"

@@ -406,6 +406,60 @@ describe.skipIf(core === undefined || !(await ffmpegAvailable()))(
       expect(server.logged().some((line) => line.includes("CoreRescans.queued"))).toBe(true);
     }, 90_000);
 
+    it("rescans a library whose folder links into an approved root when a file changes there", async () => {
+      // The folder sits inside the approved root, and the library names it through a link outside
+      // it: the server watches the library's own path, so a change there reaches the library.
+      const real = join(workDir, "library", "Linked films");
+      const linked = join(workDir, "linked-films");
+
+      await addFile(join(moviesRoot, directMovie), join(real, "Linked Fixture (2019).mp4"));
+      await linkFolder(real, linked);
+
+      const created = await run(
+        admin.platform.core.libraries.create({
+          name: "Linked films",
+          kind: "movies",
+          folders: [linked],
+        }),
+      );
+
+      try {
+        await eventually(
+          "the linked library's first scan writes its title",
+          async () => {
+            const found = await titlesOf(admin.platform, created.libraryId);
+
+            return found.some((title) => title.name === "Linked Fixture")
+              ? Option.some(found)
+              : Option.none();
+          },
+          60_000,
+        );
+
+        await addFile(join(moviesRoot, directMovie), join(real, "Later Fixture (2022).mp4"));
+
+        const titles = await eventually(
+          "the change's scan writes the new title",
+          async () => {
+            const found = await titlesOf(admin.platform, created.libraryId);
+
+            return found.some((title) => title.name === "Later Fixture")
+              ? Option.some(found)
+              : Option.none();
+          },
+          60_000,
+        );
+
+        expect(titles.map((title) => title.name)).toContain("Later Fixture");
+      } finally {
+        await run(
+          admin.platform.core.libraries
+            .remove({ libraryId: created.libraryId })
+            .pipe(Effect.ignore),
+        );
+      }
+    }, 150_000);
+
     it("keeps tickets and keys out of the log", () => {
       const lines = server.logged().join("\n");
 

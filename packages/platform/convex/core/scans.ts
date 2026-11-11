@@ -1,3 +1,4 @@
+import { paginationOptsValidator, paginationResultValidator } from "convex/server";
 import type { FunctionReference } from "convex/server";
 import { v } from "convex/values";
 
@@ -312,6 +313,39 @@ export const domains = serverQuery({
         hasLibraries: await hasLibraries(ctx.db, kind),
       })),
     ),
+});
+
+/** Libraries one page of `watched` lists, each with its up to 16 folders. */
+const WATCHED_PAGE_MAX = 64;
+
+/**
+ * Every library of `kind` with its folders as recorded, a page at a time, for the server to watch
+ * them (ADR 0024). The server watches each library's folders at the paths the library names, not
+ * only its approved roots, so a change under a folder that reaches an approved root through a
+ * link names the library's own path and `changed` finds the library. The server never watches a
+ * folder that leads outside its approved roots.
+ */
+export const watched = serverQuery({
+  args: { kind: contentDomain, paginationOpts: paginationOptsValidator },
+  returns: paginationResultValidator(
+    v.object({ libraryId: v.id("libraries"), folders: v.array(v.string()) }),
+  ),
+  handler: async (ctx, { kind, paginationOpts }) => {
+    const page = await paginate(
+      ctx.db,
+      { table: "libraries", index: "by_kind", range: (q) => q.eq("kind", kind) },
+      { ...paginationOpts, numItems: Math.min(paginationOpts.numItems, WATCHED_PAGE_MAX) },
+    );
+
+    const libraries = await Promise.all(
+      page.page.map(async (library) => ({
+        libraryId: library._id,
+        folders: [...(await foldersOf(ctx.db, library._id))],
+      })),
+    );
+
+    return { ...page, page: libraries };
+  },
 });
 
 /**

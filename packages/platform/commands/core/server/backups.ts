@@ -10,6 +10,13 @@ import type { MutationCtx, QueryCtx } from "../../../convex/_generated/server";
 import { requireCaller } from "../../../convex/core/auth/caller";
 import type { Caller } from "../../../convex/core/auth/caller";
 
+const activeArgs = v.object({});
+
+const activeResult = v.union(
+  v.null(),
+  v.object({ jobId: v.id("jobs"), status: v.union(v.literal("queued"), v.literal("running")) }),
+);
+
 const listArgs = v.object({
   paginationOpts: v.object({
     numItems: v.number(),
@@ -45,6 +52,13 @@ const runResult = v.object({ jobId: v.id("jobs") });
 
 /** The handlers `convex/core/server/backups.ts` passes to `register`, one per `core.server.backups` command. */
 export interface Handlers {
+  /** `core.server.backups.active` (query, admin): Show the backup queued or running now, if any. */
+  readonly active: (
+    ctx: Omit<QueryCtx, "auth">,
+    args: Record<string, never>,
+    caller: Caller,
+  ) => Infer<typeof activeResult> | Promise<Infer<typeof activeResult>>;
+
   /** `core.server.backups.list` (query, admin): List the server's database backups, newest first. */
   readonly list: (
     ctx: Omit<QueryCtx, "auth">,
@@ -62,6 +76,12 @@ export interface Handlers {
 
 /** The `api` reference of each `core.server.backups` command; `commands/refs.ts` checks them. */
 export interface Refs {
+  readonly active: FunctionReference<
+    "query",
+    "public",
+    Record<string, never>,
+    Infer<typeof activeResult>
+  >;
   readonly list: FunctionReference<
     "query",
     "public",
@@ -78,6 +98,11 @@ export interface Refs {
 
 /** Registers the `core.server.backups` commands as public Convex functions with their declared arguments and result. */
 export const register = (handlers: Handlers) => ({
+  active: query({
+    args: activeArgs,
+    returns: activeResult,
+    handler: async (ctx, args) => handlers.active(ctx, args, await requireCaller(ctx, "admin")),
+  }),
   list: query({
     args: listArgs,
     returns: listResult,

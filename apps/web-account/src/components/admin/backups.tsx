@@ -1,6 +1,6 @@
 import { BackupId } from "@media/contracts/ids";
 import { createMediaServer } from "@media/sdk/promise";
-import { usePlatform } from "@media/sdk/react";
+import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { Button } from "@media/ui/components/button";
 import { UploadIcon } from "lucide-react";
 import { Schema } from "effect";
@@ -59,11 +59,18 @@ export const takenLabel = (takenAt: number, now: number): string => {
 
 type BackupAction = "run" | "restore";
 
+const backupLabel = (running: BackupAction | null, job: "queued" | "running" | null): string => {
+  if (job === "queued") return "Backup queued";
+
+  return running === "run" || job === "running" ? "Backing up…" : "Back up now";
+};
+
 /** Backups: back up now, the nightly schedule, every backup kept, and restoring one. */
 export function BackupsScreen({ mediaUrl }: { readonly mediaUrl: string }) {
   const platform = usePlatform();
   const backups = platform.core.server.backups;
   const list = usePages(backups.list, (paginationOpts) => ({ paginationOpts }));
+  const active = usePlatformQuery(backups.active, {});
   const actions = useActions<BackupAction>();
   const { signOut } = useAccountActions();
   const [selected, setSelected] = useState<Backup | null>(null);
@@ -87,6 +94,7 @@ export function BackupsScreen({ mediaUrl }: { readonly mediaUrl: string }) {
       backups={list}
       selected={selected}
       running={actions.running}
+      job={active.status === "success" ? (active.data?.status ?? null) : null}
       now={now}
       onBackUp={() => void actions.run("run", () => backups.run({}), "Backing up now")}
       onSelect={setSelected}
@@ -95,11 +103,15 @@ export function BackupsScreen({ mediaUrl }: { readonly mediaUrl: string }) {
   );
 }
 
-/** The backups page: Back up now, the schedule, the list, and the restore confirmation. */
+/**
+ * The backups page: Back up now, the schedule, the list, and the restore confirmation. Back up now
+ * stays off for as long as a backup is queued or running on the server, not only while it starts.
+ */
 export function BackupsView({
   backups,
   selected,
   running,
+  job,
   now,
   onBackUp,
   onSelect,
@@ -109,6 +121,8 @@ export function BackupsView({
   /** The backup whose restore is being confirmed. */
   readonly selected: Backup | null;
   readonly running: BackupAction | null;
+  /** The server's backup job queued or running now, null when none is. */
+  readonly job: "queued" | "running" | null;
   readonly now: number;
   readonly onBackUp: () => void;
   readonly onSelect: (backup: Backup | null) => void;
@@ -124,9 +138,14 @@ export function BackupsView({
       <PageHeader
         title="Backups"
         actions={
-          <Button size="xs" className="font-semibold" disabled={busy} onClick={onBackUp}>
+          <Button
+            size="xs"
+            className="font-semibold"
+            disabled={busy || job !== null}
+            onClick={onBackUp}
+          >
             <UploadIcon strokeWidth={2} aria-hidden />
-            {running === "run" ? "Backing up…" : "Back up now"}
+            {backupLabel(running, job)}
           </Button>
         }
       />

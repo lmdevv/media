@@ -612,6 +612,16 @@ Show whether guest links are on, the address they use, and whether you may make 
 - Arguments: none
 - Result: `{ enabled: boolean; address: string | null; mayShare: boolean }`
 
+## `core.libraries.cancelScan`
+
+Stop a library's scan; a finished scan stays as it ended, and what a scan wrote stays.
+
+- CLI: `media auth libraries cancel-scan`
+- Kind: mutation
+- Scope: signed-in
+- Arguments: `{ jobId: Id<"jobs"> }`
+- Result: `{ outcome: "finished"; status: "succeeded" | "failed" | "canceled" } | { outcome: "canceling" }`
+
 ## `core.libraries.create`
 
 Create a library of movies or music from folders on the server and scan it.
@@ -631,7 +641,7 @@ Show a library, how many items it holds, its latest scan, and to its managers it
 - Kind: query
 - Scope: signed-in
 - Arguments: `{ libraryId: Id<"libraries"> }`
-- Result: `{ libraryId: Id<"libraries">; name: string; kind: "movies" | "music"; level: "view" | "edit" | "manage"; items: number | null; folders: Array<string> | null; scan: { jobId: Id<"jobs">; status: "queued" | "running" | "succeeded" | "failed" | "canceled"; done: number | null; total: number | null; error: string | null; finishedAt: number | null } | null }`
+- Result: `{ libraryId: Id<"libraries">; name: string; kind: "movies" | "music"; level: "view" | "edit" | "manage"; items: number | null; folders: Array<string> | null; scan: { jobId: Id<"jobs">; status: "queued" | "running" | "succeeded" | "failed" | "canceled"; done: number | null; total: number | null; error: string | null; message: string | null; startedAt: number | null; finishedAt: number | null } | null }`
 
 ## `core.libraries.list`
 
@@ -811,6 +821,16 @@ Limit what a member sees by movie rating, explicit music, and library, or lift t
 - API keys: refused
 - Arguments: `{ userId: Id<"users">; restrictions: { maxMovieAge: number | null; hideUnrated: boolean; hideExplicitMusic: boolean; libraries: Array<Id<"libraries">> | null } | null }`
 - Result: `null`
+
+## `core.server.backups.active`
+
+Show the backup queued or running now, if any.
+
+- CLI: `media admin backups active`
+- Kind: query
+- Scope: admin
+- Arguments: none
+- Result: `null | { jobId: Id<"jobs">; status: "queued" | "running" }`
 
 ## `core.server.backups.list`
 

@@ -10,7 +10,7 @@ import type { PurgeScope } from "../core/scans";
 import { CALL_BUDGET, budgetFor, whileBudget, work } from "./budget";
 import type { Budget, Work } from "./budget";
 import { adjustPresent, purgingKey } from "./catalog";
-import { forgetTotals, moveTotals, nothingMoved } from "./totals";
+import { countMissing, forgetTotals, moveTotals, nothingMoved } from "./totals";
 import { forgetTrickplay } from "./trickplayState";
 import { patchTitle } from "./write";
 
@@ -30,15 +30,16 @@ const PAGE_COST = work(20, 8);
 
 /**
  * Deleting one file: its thumbnail job read and canceled and its state cleared (8 ranges, 4
- * writes), its title's and episode's present counts (4, 2), and the file (1, 1).
+ * writes), its title's and episode's present counts (4, 2), the file (1, 1), and its library's
+ * missing total (1, 1).
  */
-const FILE_COST = work(13, 7);
+const FILE_COST = work(14, 8);
 
 /** Whether a title still has a file: one index range. */
 const CHECK_COST = work(1, 0);
 
-/** Marking a title: the title patched and the library's episode total moved. */
-const MARK_COST = work(4, 3);
+/** Marking a title: the title patched and the library's episode and unmatched totals moved. */
+const MARK_COST = work(5, 4);
 
 /** Listing one kind of a title's children: one index range. */
 const LIST_COST = work(1, 0);
@@ -91,6 +92,8 @@ export const filesPage = (
         }
 
         await ctx.db.delete(file._id);
+
+        if (!scope.gone) await countMissing(ctx.db, file, null);
       },
     );
 

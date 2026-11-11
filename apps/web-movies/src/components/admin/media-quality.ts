@@ -47,6 +47,9 @@ export const formatRuntime = (ms: number): string => {
   return hours > 0 ? `${hours}:${minutes}:${seconds}` : `${minutes}:${seconds}`;
 };
 
+/** The last segment of a path, such as `Alien.1979.mkv`. */
+export const fileName = (path: string): string => path.slice(path.lastIndexOf("/") + 1);
+
 /** A title with its year, such as `Alien (1979)`. */
 export const titleWithYear = (title: {
   readonly name: string;

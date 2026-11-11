@@ -189,6 +189,15 @@ Settled by the libraries build (ADR 0024):
   cancel, because every scanner write runs `withScanLease` first.
 - Job writes take `JobCtx`, the database and the scheduler, so a command handler, whose context
   has no `auth`, can queue and cancel jobs.
+- People cancel through each domain's own command, never the internal `core/jobs/admin:cancel`
+  (p4-movies-parity): `core.libraries.cancelScan` for a scan, with `edit` on its library through
+  `can()`, and `movies.imports.cancel` for an import, for owners and admins. Each names the job
+  (the scan's job id, the import's row), never "the library's current scan", so a cancel that
+  arrives after its job finished and another started changes nothing and answers how the named
+  job ended. The machine fences the rest: a running job's next lease call answers `canceled`,
+  and that attempt's later reports and finish are refused, so no late report undoes a cancel.
+- `core.server.backups.active` answers the backup job queued or running, so the Backups screen
+  keeps Back up now off for the whole job rather than only while `run` is in flight.
 
 Rejected for this shape:
 

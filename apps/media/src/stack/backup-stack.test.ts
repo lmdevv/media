@@ -130,7 +130,7 @@ describe.skipIf(core === undefined)(
     it("backs up into a private archive, records it, and prunes past the retention", async () => {
       const taken = await backUp(admin);
 
-      expect(taken.fileName).toMatch(/^movies-manual-.*\.zip$/u);
+      expect(taken.fileName).toMatch(/^media-manual-.*\.zip$/u);
       expect(taken.trigger).toBe("manual");
 
       await eventually("the prune drops the expired archive", async () =>

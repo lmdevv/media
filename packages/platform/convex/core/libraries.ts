@@ -10,6 +10,7 @@ import { claimFolders, foldersOf, parseFolders, releaseFolders } from "./folders
 import { progressOf } from "./jobs/machine";
 import { cancel } from "./jobs/queue";
 import type { Enqueued, JobCtx } from "./jobs/store";
+import { fail } from "./lib/errors";
 import { inOrder } from "./lib/inOrder";
 import { GIVEN_NAME_MAX, requireGivenName } from "./lib/names";
 import { requireServer } from "./permissions/authorize";
@@ -49,6 +50,8 @@ const scanOf = async (db: DatabaseReader, jobId: Id<"jobs"> | null, shown: ScanS
     status: job.status,
     ...(shown.progress ? progressOf(job.work) : { done: null, total: null }),
     error: shown.error && job.status === "failed" ? job.error : null,
+    message: shown.progress ? job.message : null,
+    startedAt: job.status === "running" ? job.claimedAt : null,
     finishedAt: job.status === "queued" || job.status === "running" ? null : job.finishedAt,
   };
 };
@@ -85,7 +88,13 @@ export const makeLibrary = async (
   return { libraryId, scanJobId: first.jobId };
 };
 
-export const { create, list, get, rename, setFolders, scan, remove } = register({
+/** The library a scan job scans, or null for a job of another kind. */
+const scannedLibrary = (job: Doc<"jobs">): Id<"libraries"> | null =>
+  job.payload.kind === "movies.scan" || job.payload.kind === "music.scan"
+    ? job.payload.libraryId
+    : null;
+
+export const { create, list, get, rename, setFolders, scan, cancelScan, remove } = register({
   create: async (ctx, { name, kind, folders }, caller) => {
     requireServer(caller, "manageFolders");
 
@@ -145,6 +154,22 @@ export const { create, list, get, rename, setFolders, scan, remove } = register(
     const { doc } = await requireContent(ctx, caller, "edit", libraryRef(libraryId));
 
     return queueScan(ctx, doc, mode);
+  },
+  // Cancels the scan job named, never the library's current one, so a cancel that arrives after
+  // its scan finished and another started stops nothing. The job's attempt fences it (ADR 0012):
+  // a running scan stops at its worker's next lease call, which refuses every later write.
+  cancelScan: async (ctx, { jobId }, caller) => {
+    const missing = "No such scan";
+    const job = await ctx.db.get(jobId);
+    const libraryId = job === null ? null : scannedLibrary(job);
+
+    if (libraryId === null) return fail("not_found", missing);
+
+    await requireContent(ctx, caller, "edit", libraryRef(libraryId));
+
+    const result = await cancel(ctx, jobId);
+
+    return result.outcome === "notFound" ? fail("not_found", missing) : result;
   },
   remove: async (ctx, { libraryId }, caller) => {
     const { doc } = await requireContent(ctx, caller, "manage", libraryRef(libraryId));

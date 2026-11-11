@@ -30,6 +30,7 @@ import type { Refs as core_server_backups } from "./core/server/backups";
 import type { Refs as core_settings } from "./core/settings";
 import type { Refs as core_together } from "./core/together";
 import type { Refs as movies_collections } from "./movies/collections";
+import type { Refs as movies_files } from "./movies/files";
 import type { Refs as movies_history } from "./movies/history";
 import type { Refs as movies_imports } from "./movies/imports";
 import type { Refs as movies_metadata } from "./movies/metadata";
@@ -135,6 +136,7 @@ export const commandRefs = {
   "core.guests.links.create": api.core.guests.links.create satisfies core_guests_links["create"],
   "core.guests.links.list": api.core.guests.links.list satisfies core_guests_links["list"],
   "core.guests.links.revoke": api.core.guests.links.revoke satisfies core_guests_links["revoke"],
+  "core.libraries.cancelScan": api.core.libraries.cancelScan satisfies core_libraries["cancelScan"],
   "core.libraries.create": api.core.libraries.create satisfies core_libraries["create"],
   "core.libraries.get": api.core.libraries.get satisfies core_libraries["get"],
   "core.libraries.list": api.core.libraries.list satisfies core_libraries["list"],
@@ -166,6 +168,8 @@ export const commandRefs = {
   "core.restrictions.set": api.core.restrictions.set satisfies core_restrictions["set"],
   "core.server.info": api.core.server.info satisfies core_server["info"],
   "core.server.status": api.core.server.status satisfies core_server["status"],
+  "core.server.backups.active": api.core.server.backups
+    .active satisfies core_server_backups["active"],
   "core.server.backups.list": api.core.server.backups.list satisfies core_server_backups["list"],
   "core.server.backups.run": api.core.server.backups.run satisfies core_server_backups["run"],
   "core.settings.get": api.core.settings.get satisfies core_settings["get"],
@@ -184,6 +188,8 @@ export const commandRefs = {
   "core.together.remove": api.core.together.remove satisfies core_together["remove"],
   "movies.collections.get": api.movies.collections.get satisfies movies_collections["get"],
   "movies.collections.list": api.movies.collections.list satisfies movies_collections["list"],
+  "movies.files.list": api.movies.files.list satisfies movies_files["list"],
+  "movies.files.summary": api.movies.files.summary satisfies movies_files["summary"],
   "movies.history.continueWatching": api.movies.history
     .continueWatching satisfies movies_history["continueWatching"],
   "movies.history.list": api.movies.history.list satisfies movies_history["list"],
@@ -191,6 +197,7 @@ export const commandRefs = {
     .markUnwatched satisfies movies_history["markUnwatched"],
   "movies.history.markWatched": api.movies.history
     .markWatched satisfies movies_history["markWatched"],
+  "movies.imports.cancel": api.movies.imports.cancel satisfies movies_imports["cancel"],
   "movies.imports.get": api.movies.imports.get satisfies movies_imports["get"],
   "movies.imports.list": api.movies.imports.list satisfies movies_imports["list"],
   "movies.metadata.edit": api.movies.metadata.edit satisfies movies_metadata["edit"],
