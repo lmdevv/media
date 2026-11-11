@@ -1095,7 +1095,6 @@ const make = Effect.gen(function* () {
     const deadline = (yield* Clock.currentTimeMillis) + Duration.toMillis(maxWait);
 
     for (;;) {
-      if (isClosed(session.scope)) return yield* new StreamNotFound({ streamId: session.streamId });
       const current = yield* Ref.get(session.generation);
 
       if (current.number !== generation.number) {
@@ -1109,6 +1108,9 @@ const make = Effect.gen(function* () {
       const wake = MutableRef.get(generation.wake);
       const finished = yield* Deferred.isDone(generation.exit);
       const parsed = yield* parsedNewFragments(generation);
+      const stopped = isClosed(generation.scope);
+
+      if (isClosed(session.scope)) return yield* new StreamNotFound({ streamId: session.streamId });
       const fragments = yield* Ref.get(generation.fragments);
       const produced = producedRange(session, generation, fragments);
       const next = session.plan.starts[index + 1];
@@ -1156,8 +1158,6 @@ const make = Effect.gen(function* () {
 
         return covering.map((fragment) => fragment.path);
       }
-
-      const stopped = isClosed(generation.scope);
 
       if (stopped || (yield* Clock.currentTimeMillis) > deadline) {
         return yield* new SegmentNotReady({ index });
