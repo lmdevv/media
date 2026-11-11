@@ -27,6 +27,13 @@ const SETUP_TIMEOUT_MS = 180_000;
 
 const SCAN_TIMEOUT_MS = 30_000;
 
+/**
+ * The server's watcher queues a scan of its own a few seconds after the folder changes. One queued
+ * before the folder goes offline and claimed after fails as offline, so "Scan now" never returns
+ * for the test to press. This test starts every scan itself: the server polls once an hour.
+ */
+const OWN_SCANS = { LIBRARY_WATCH: "poll", LIBRARY_POLL_SECONDS: "3600" };
+
 const run = Date.now().toString(36);
 
 let workspace = "";
@@ -122,7 +129,7 @@ test("an admin adds a library in the account client, cancels and restarts its sc
   await row.getByRole("button", { name: `Scan ${name} now` }).click();
   await expect(row).toContainText("Queued");
 
-  media = await startMediaService(withoutProvider(stack), [workspace]);
+  media = await startMediaService(withoutProvider(stack), [workspace], OWN_SCANS);
   await expect(row).toContainText("Ready", { timeout: SCAN_TIMEOUT_MS });
   await expect(row).toContainText("3 titles");
 

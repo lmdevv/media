@@ -103,8 +103,19 @@ esac
 
 mkdir -p "$data_dir" "$transcode_dir" "$backup_dir" "${state_dir}/library"
 
+# The self-hosted backend refuses a mutation once the deployment wrote more than this many bytes in
+# the last second (Convex's MAX_BYTES_WRITTEN_PER_SECOND knob, 4 MiB by default; see
+# self-hosted/advanced/knobs.md in get-convex/convex-backend). Stack suites seed tens of megabytes
+# back to back, so a development stack lifts it; the image and the NixOS module keep the default.
+write_limit=$((256 * 1024 * 1024))
+
 start_backend() {
   local box="$1" api_port="$2" http_port="$3"
+  # A backend started before the stack set the write limit is recreated; its data volume stays.
+  if docker inspect "$box" >/dev/null 2>&1 &&
+    ! docker inspect -f '{{join .Config.Env "\n"}}' "$box" | grep -qx "MAX_BYTES_WRITTEN_PER_SECOND=${write_limit}"; then
+    docker rm -f "$box" >/dev/null
+  fi
   if ! docker inspect "$box" >/dev/null 2>&1; then
     # The backend fetches its own OIDC discovery document from CONVEX_SITE_ORIGIN to verify auth
     # tokens, so it listens inside the container on the same ports the host uses.
@@ -114,6 +125,7 @@ start_backend() {
       -e CONVEX_CLOUD_ORIGIN="http://127.0.0.1:${api_port}" \
       -e CONVEX_SITE_ORIGIN="http://127.0.0.1:${http_port}" \
       -e DISABLE_BEACON=1 \
+      -e MAX_BYTES_WRITTEN_PER_SECOND="${write_limit}" \
       --entrypoint bash "$image" -c \
       "sed -e 's/--port 3210/--port ${api_port}/' -e 's/--site-proxy-port 3211/--site-proxy-port ${http_port}/' run_backend.sh >/tmp/run_backend.sh && exec bash /tmp/run_backend.sh" \
       >/dev/null
