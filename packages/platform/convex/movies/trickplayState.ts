@@ -64,7 +64,7 @@ export const queueTrickplay = async (
   if (settled === "ready" || (failed && !retryFailed)) return;
 
   if (state === "active" && file.trickplay?.status === "pending") {
-    await cancel(ctx, file.trickplay.jobId);
+    await cancel(ctx, file.trickplay.jobId, null);
   }
 
   const { jobId } = await enqueue(ctx, {
@@ -91,7 +91,7 @@ export const forgetTrickplay = async (
   file: Doc<"mediaFiles">,
 ): Promise<Doc<"mediaFiles">> => {
   if (file.trickplay?.status === "pending" && (await jobState(ctx, file)) === "active") {
-    await cancel(ctx, file.trickplay.jobId);
+    await cancel(ctx, file.trickplay.jobId, null);
   }
 
   const { _id: _fileId, _creationTime: _created, trickplay, ...kept } = file;

@@ -2,7 +2,7 @@ import { folderTroubleOf } from "@media/contracts/scan-failure";
 
 import { isActive as isJobActive } from "@/lib/scan-progress";
 
-import { formatAgo } from "./format";
+import { formatAgo, formatSpan } from "./format";
 import type { Scan } from "./types";
 
 /** Whether a library's latest scan is still queued or running. */
@@ -12,11 +12,16 @@ export const isActive = (scan: Scan | null): boolean => scan !== null && isJobAc
 export const isUnreachable = (scan: Scan | null): scan is Scan =>
   scan !== null && scan.status === "failed" && folderTroubleOf(scan.error) === "offline";
 
-/** When a library was last scanned: `queued`, `running`, `never`, or how long ago it finished. */
+/**
+ * When a library was last scanned: `queued`, how long the running scan has run, `never`, or how
+ * long ago it finished.
+ */
 export const lastScanLabel = (scan: Scan | null, now: number): string => {
   if (scan?.status === "queued") return "queued";
 
-  if (scan?.status === "running") return "running";
+  if (scan?.status === "running") {
+    return scan.startedAt === null ? "running" : `running ${formatSpan(now - scan.startedAt)}`;
+  }
 
   return scan?.finishedAt === null || scan?.finishedAt === undefined
     ? "never"

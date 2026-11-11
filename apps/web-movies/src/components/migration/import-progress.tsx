@@ -1,28 +1,32 @@
 import { SOURCE_NAMES } from "@media/contracts/migration-plan";
+import { usePlatform } from "@media/sdk/react";
+import { Button } from "@media/ui/components/button";
 import { PageHeader } from "@media/ui/components/page-header";
 import { ProgressBar } from "@media/ui/components/progress-bar";
 import { buttonVariants } from "@media/ui/lib/button-variants";
 import { Link } from "@tanstack/react-router";
 
+import { useAction } from "@/components/admin/action";
 import { formatCount, formatPercent } from "@/components/admin/format";
 import type { ImportRun } from "@/components/admin/types";
+import { reportMovedOn } from "@/lib/canceled";
 import { useNow } from "@media/ui/lib/use-now";
 
-import { useState } from "react";
-
 import { PHASE_LABELS, importFraction, importMinutesLeft } from "./migration-model";
-import type { ImportSeen } from "./migration-model";
 import { Caution, Stat, Stats } from "./parts";
 
-/** 03 Importing: the import's share done, time left, and the phase it is in. */
+/** 03 Importing: the import's share done, time left, the phase it is in, and Cancel. */
 export function Importing({ run }: { readonly run: ImportRun }) {
+  const platform = usePlatform();
   const now = useNow(5_000);
   const fraction = importFraction(run);
-  const [seen, setSeen] = useState<ImportSeen | null>(null);
 
-  if (seen === null && run.job.status === "running") setSeen({ at: now, fraction });
+  const stop = useAction(
+    () => platform.movies.imports.cancel({ importId: run.importId, attempt: run.job.attempt }),
+    { onSuccess: (answer) => reportMovedOn([answer], "import") },
+  );
 
-  const minutesLeft = importMinutesLeft(run, fraction, now, seen);
+  const minutesLeft = importMinutesLeft(run, fraction, now);
   const { done, total } = run.job;
   const phase = PHASE_LABELS[run.phase];
 
@@ -55,6 +59,16 @@ export function Importing({ run }: { readonly run: ImportRun }) {
           className="rounded-bar"
         />
         <p className="font-sans text-label/label text-text-muted">{detail}</p>
+      </div>
+      <div>
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={stop.pending || run.job.canceling}
+          onClick={() => void stop.run()}
+        >
+          {stop.pending || run.job.canceling ? "Canceling…" : "Cancel import"}
+        </Button>
       </div>
     </>
   );

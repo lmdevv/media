@@ -15,6 +15,10 @@ const scan = (fields: Partial<Scan>): Scan => ({
   done: null,
   total: null,
   error: null,
+  message: null,
+  startedAt: null,
+  attempt: 1,
+  canceling: false,
   finishedAt: null,
   ...fields,
 });
@@ -39,6 +43,9 @@ describe("scan", () => {
     expect(lastScanLabel(null, NOW)).toBe("never");
     expect(lastScanLabel(scan({ status: "queued" }), NOW)).toBe("queued");
     expect(lastScanLabel(scan({ status: "running" }), NOW)).toBe("running");
+    expect(lastScanLabel(scan({ status: "running", startedAt: NOW - 95_000 }), NOW)).toBe(
+      "running 1m",
+    );
     expect(lastScanLabel(scan({ finishedAt: NOW - 2 * 60_000 }), NOW)).toBe("2 min ago");
   });
 

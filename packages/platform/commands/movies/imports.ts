@@ -5,10 +5,21 @@ import type { FunctionReference } from "convex/server";
 import { v } from "convex/values";
 import type { Infer } from "convex/values";
 
-import { query } from "../../convex/_generated/server";
-import type { QueryCtx } from "../../convex/_generated/server";
+import { mutation, query } from "../../convex/_generated/server";
+import type { MutationCtx, QueryCtx } from "../../convex/_generated/server";
 import { requireCaller } from "../../convex/core/auth/caller";
 import type { Caller } from "../../convex/core/auth/caller";
+
+const cancelArgs = v.object({ importId: v.id("imports"), attempt: v.number() });
+
+const cancelResult = v.union(
+  v.object({
+    outcome: v.literal("finished"),
+    status: v.union(v.literal("succeeded"), v.literal("failed"), v.literal("canceled")),
+  }),
+  v.object({ outcome: v.literal("canceling") }),
+  v.object({ outcome: v.literal("movedOn") }),
+);
 
 const getArgs = v.object({ importId: v.id("imports") });
 
@@ -49,6 +60,9 @@ const getResult = v.object({
     total: v.union(v.number(), v.null()),
     message: v.union(v.string(), v.null()),
     error: v.union(v.string(), v.null()),
+    startedAt: v.union(v.number(), v.null()),
+    attempt: v.number(),
+    canceling: v.boolean(),
     finishedAt: v.union(v.number(), v.null()),
   }),
 });
@@ -103,6 +117,9 @@ const listResult = v.object({
         total: v.union(v.number(), v.null()),
         message: v.union(v.string(), v.null()),
         error: v.union(v.string(), v.null()),
+        startedAt: v.union(v.number(), v.null()),
+        attempt: v.number(),
+        canceling: v.boolean(),
         finishedAt: v.union(v.number(), v.null()),
       }),
     }),
@@ -117,6 +134,13 @@ const listResult = v.object({
 
 /** The handlers `convex/movies/imports.ts` passes to `register`, one per `movies.imports` command. */
 export interface Handlers {
+  /** `movies.imports.cancel` (mutation, movies:edit): Stop a Jellyfin or Plex import, as an owner or an admin; what it already wrote stays. */
+  readonly cancel: (
+    ctx: Omit<MutationCtx, "auth">,
+    args: Infer<typeof cancelArgs>,
+    caller: Caller,
+  ) => Infer<typeof cancelResult> | Promise<Infer<typeof cancelResult>>;
+
   /** `movies.imports.get` (query, movies:edit): Show one Jellyfin or Plex import, its job, and what it wrote. */
   readonly get: (
     ctx: Omit<QueryCtx, "auth">,
@@ -134,6 +158,12 @@ export interface Handlers {
 
 /** The `api` reference of each `movies.imports` command; `commands/refs.ts` checks them. */
 export interface Refs {
+  readonly cancel: FunctionReference<
+    "mutation",
+    "public",
+    Infer<typeof cancelArgs>,
+    Infer<typeof cancelResult>
+  >;
   readonly get: FunctionReference<
     "query",
     "public",
@@ -150,6 +180,12 @@ export interface Refs {
 
 /** Registers the `movies.imports` commands as public Convex functions with their declared arguments and result. */
 export const register = (handlers: Handlers) => ({
+  cancel: mutation({
+    args: cancelArgs,
+    returns: cancelResult,
+    handler: async (ctx, args) =>
+      handlers.cancel(ctx, args, await requireCaller(ctx, "movies:edit")),
+  }),
   get: query({
     args: getArgs,
     returns: getResult,

@@ -23,6 +23,27 @@ List collections by name with the titles you may see in each.
 - Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
 - Result: `{ page: Array<{ id: Id<"collections">; name: string; overview: string | null; artwork: { poster: string | null; backdrop: string | null }; titles: Array<{ id: Id<"titles">; kind: "movie" | "show"; name: string; year: number | null; certification: string | null; ageRating: number | null; runtimeMs: number | null; genres: Array<string>; artwork: { poster: string | null; backdrop: string | null; logo: string | null }; available: boolean; addedAt: number }> }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
 
+## `movies.files.list`
+
+List a library's files by path with their quality, size, match, and whether they are missing.
+
+- CLI: `media movies files list`
+- Kind: query
+- Scope: movies:edit
+- Arguments: `{ libraryId: Id<"libraries">; filter?: "all" | "missing" | "unmatched"; paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
+- Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
+- Result: `{ page: Array<{ id: Id<"mediaFiles">; path: string; version: { id: Id<"mediaFiles">; versionName: string | null; width: number | null; height: number | null; hdr: "none" | "hdr10" | "hdr10plus" | "hlg" | "dolby_vision"; videoCodec: string | null; videoProfile: string | null; videoLevel: number | null; videoBitDepth: number | null; audioCodec: string | null; audioChannels: number | null; audioTracks: number; container: string; sizeBytes: number; durationMs: number; lastPlayed: boolean }; missing: boolean; missingSince: number | null; title: { id: Id<"titles">; kind: "movie" | "show"; name: string; year: number | null; poster: string | null; matchStatus: "matched" | "unmatched" | "manual" }; episode: { id: Id<"episodes">; seasonNumber: number; episodeNumber: number } | null }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
+
+## `movies.files.summary`
+
+Count a library's missing files, since when the oldest is missing, and its unmatched titles.
+
+- CLI: `media movies files summary`
+- Kind: query
+- Scope: movies:edit
+- Arguments: `{ libraryId: Id<"libraries"> }`
+- Result: `{ missing: number | null; missingSince: number | null; unmatched: number | null }`
+
 ## `movies.history.continueWatching`
 
 List what to resume and which episodes come next, most recent first.
@@ -64,6 +85,16 @@ Mark a movie, an episode, or a whole show watched.
 - Arguments: `{ titleId: Id<"titles">; episodeId?: Id<"episodes"> }`
 - Result: `null`
 
+## `movies.imports.cancel`
+
+Stop a Jellyfin or Plex import, as an owner or an admin; what it already wrote stays.
+
+- CLI: `media movies imports cancel`
+- Kind: mutation
+- Scope: movies:edit
+- Arguments: `{ importId: Id<"imports">; attempt: number }`
+- Result: `{ outcome: "finished"; status: "succeeded" | "failed" | "canceled" } | { outcome: "canceling" } | { outcome: "movedOn" }`
+
 ## `movies.imports.get`
 
 Show one Jellyfin or Plex import, its job, and what it wrote.
@@ -72,7 +103,7 @@ Show one Jellyfin or Plex import, its job, and what it wrote.
 - Kind: query
 - Scope: movies:edit
 - Arguments: `{ importId: Id<"imports"> }`
-- Result: `{ importId: Id<"imports">; source: "jellyfin" | "plex"; serverName: string; createdAt: number; phase: "libraries" | "scanning" | "watchState" | "collections" | "overrides" | "done"; users: number; imported: { librariesAdded: number; watched: number; inProgress: number; favorites: number; collections: number; overrides: number; keptLocal: number; unmatched: number }; job: { jobId: Id<"jobs">; status: "queued" | "running" | "succeeded" | "failed" | "canceled"; done: number; total: number | null; message: string | null; error: string | null; finishedAt: number | null } }`
+- Result: `{ importId: Id<"imports">; source: "jellyfin" | "plex"; serverName: string; createdAt: number; phase: "libraries" | "scanning" | "watchState" | "collections" | "overrides" | "done"; users: number; imported: { librariesAdded: number; watched: number; inProgress: number; favorites: number; collections: number; overrides: number; keptLocal: number; unmatched: number }; job: { jobId: Id<"jobs">; status: "queued" | "running" | "succeeded" | "failed" | "canceled"; done: number; total: number | null; message: string | null; error: string | null; startedAt: number | null; attempt: number; canceling: boolean; finishedAt: number | null } }`
 
 ## `movies.imports.list`
 
@@ -83,7 +114,7 @@ List Jellyfin and Plex imports, newest first, with their phase and what they wro
 - Scope: movies:edit
 - Arguments: `{ paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
 - Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
-- Result: `{ page: Array<{ importId: Id<"imports">; source: "jellyfin" | "plex"; serverName: string; createdAt: number; phase: "libraries" | "scanning" | "watchState" | "collections" | "overrides" | "done"; users: number; imported: { librariesAdded: number; watched: number; inProgress: number; favorites: number; collections: number; overrides: number; keptLocal: number; unmatched: number }; job: { jobId: Id<"jobs">; status: "queued" | "running" | "succeeded" | "failed" | "canceled"; done: number; total: number | null; message: string | null; error: string | null; finishedAt: number | null } }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
+- Result: `{ page: Array<{ importId: Id<"imports">; source: "jellyfin" | "plex"; serverName: string; createdAt: number; phase: "libraries" | "scanning" | "watchState" | "collections" | "overrides" | "done"; users: number; imported: { librariesAdded: number; watched: number; inProgress: number; favorites: number; collections: number; overrides: number; keptLocal: number; unmatched: number }; job: { jobId: Id<"jobs">; status: "queued" | "running" | "succeeded" | "failed" | "canceled"; done: number; total: number | null; message: string | null; error: string | null; startedAt: number | null; attempt: number; canceling: boolean; finishedAt: number | null } }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
 
 ## `movies.metadata.edit`
 

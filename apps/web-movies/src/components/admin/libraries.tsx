@@ -17,6 +17,7 @@ import { useAction } from "./action";
 import { formatCount, formatPercent, plural } from "./format";
 import { isActive, lastScanLabel, scanFraction } from "./scan";
 import { ACCOUNT_LIBRARIES } from "@/lib/account-links";
+import { reportMovedOn } from "@/lib/canceled";
 
 import { PagedView, ShowMore } from "./paged-view";
 import { allows } from "./scope-gate";
@@ -125,7 +126,11 @@ function ScanStatus({ scan }: { readonly scan: Scan | null }) {
       <>
         <Spinner className="size-3 text-text" />
         <span className="font-sans text-label/label text-text">
-          {scan?.status === "queued" ? "Queued" : "Scanning"}
+          {scan?.status === "queued"
+            ? "Queued"
+            : scan?.canceling === true
+              ? "Canceling"
+              : "Scanning"}
         </span>
       </>
     );
@@ -155,6 +160,13 @@ function LibraryRow({ library, now }: { readonly library: Library; readonly now:
   const scan = detail?.scan ?? null;
   const active = isActive(scan);
   const startScan = useAction(() => platform.core.libraries.scan({ libraryId: library.libraryId }));
+
+  const stopScan = useAction(
+    (seen: Pick<Scan, "jobId" | "attempt">) =>
+      platform.core.libraries.cancelScan({ jobId: seen.jobId, attempt: seen.attempt }),
+    { onSuccess: (answer) => reportMovedOn([answer], "scan") },
+  );
+
   const running = scan?.status === "running" ? scan : null;
   const fraction = running === null ? null : scanFraction(running);
 
@@ -189,7 +201,17 @@ function LibraryRow({ library, now }: { readonly library: Library; readonly now:
           {detail === null ? null : <ScanStatus scan={scan} />}
         </Cell>
         <Cell className="flex w-22 justify-end">
-          {active ? null : (
+          {active && scan !== null && !scan.canceling ? (
+            <button
+              type="button"
+              disabled={stopScan.pending}
+              onClick={() => void stopScan.run(scan)}
+              aria-label={`Cancel the scan of ${library.name}`}
+              className="cursor-pointer font-sans text-label/label font-semibold text-text-muted hover:text-text"
+            >
+              Cancel
+            </button>
+          ) : (
             <button
               type="button"
               disabled={startScan.pending}
@@ -219,6 +241,11 @@ function LibraryRow({ library, now }: { readonly library: Library; readonly now:
                   : `${formatCount(running.done)} / ${formatCount(running.total)} files · ${formatPercent(fraction ?? 0)}`}
             </span>
           </div>
+          {running.message === null ? null : (
+            <span className="truncate font-mono text-caption/caption text-text-muted">
+              {running.message}
+            </span>
+          )}
         </div>
       )}
     </div>

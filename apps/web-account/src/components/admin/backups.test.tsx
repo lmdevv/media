@@ -1,4 +1,5 @@
 import { Brand } from "effect";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { BackupsView, formatBytes, takenLabel } from "./backups";
@@ -12,7 +13,7 @@ const NOW = new Date(2026, 10, 10, 12).getTime();
 
 const nightly: Backup = {
   id: backupId("b1"),
-  fileName: "movies-nightly-2026-11-10T03-00-00-000Z.zip",
+  fileName: "media-nightly-2026-11-10T03-00-00-000Z.zip",
   sizeBytes: 182_000_000,
   trigger: "nightly",
   takenAt: new Date(2026, 10, 10, 3).getTime(),
@@ -20,7 +21,7 @@ const nightly: Backup = {
 
 const manual: Backup = {
   id: backupId("b2"),
-  fileName: "movies-manual-2026-11-01T09-30-00-000Z.zip",
+  fileName: "media-manual-2026-11-01T09-30-00-000Z.zip",
   sizeBytes: 4_100_000_000,
   trigger: "manual",
   takenAt: new Date(2026, 10, 1, 9, 30).getTime(),
@@ -30,11 +31,13 @@ const backups = (
   list: Paged<Backup>,
   selected: Backup | null = null,
   running: "run" | "restore" | null = null,
+  job: "queued" | "running" | null = null,
 ) => (
   <BackupsView
     backups={list}
     selected={selected}
     running={running}
+    job={job}
     now={NOW}
     onBackUp={noop}
     onSelect={noop}
@@ -88,5 +91,18 @@ describe("BackupsView", () => {
   it("waits while a backup starts", () => {
     expect(disabledButton(backups(loaded([nightly]), null, "run"), "Restore…")).toBe(true);
     expect(textOf(backups(loaded([nightly]), null, "run"))).toContain("Backing up…");
+  });
+
+  it("keeps Back up now off for the whole backup job on the server", () => {
+    const backUp = (job: "queued" | "running" | null) =>
+      /<button[^>]*disabled=""[^>]*>.*?(Back up now|Backup queued|Backing up…)<\/button>/u.test(
+        renderToStaticMarkup(backups(loaded([nightly]), null, null, job)),
+      );
+
+    expect(backUp(null)).toBe(false);
+    expect(backUp("queued")).toBe(true);
+    expect(backUp("running")).toBe(true);
+    expect(textOf(backups(loaded([nightly]), null, null, "queued"))).toContain("Backup queued");
+    expect(textOf(backups(loaded([nightly]), null, null, "running"))).toContain("Backing up…");
   });
 });

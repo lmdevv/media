@@ -1,8 +1,16 @@
 import { register } from "../../../commands/core/server/backups";
+import type { Doc } from "../../_generated/dataModel";
+import type { DatabaseReader } from "../../_generated/server";
 import { enqueue } from "../jobs/queue";
 import { paginate } from "../lib/paginate";
 
-export const { list, run } = register({
+const backupIn = (db: DatabaseReader, status: "queued" | "running"): Promise<Doc<"jobs"> | null> =>
+  db
+    .query("jobs")
+    .withIndex("by_kind_status", (q) => q.eq("payload.kind", "server.backup").eq("status", status))
+    .first();
+
+export const { list, active, run } = register({
   list: async (ctx, { paginationOpts }) => {
     const page = await paginate(
       ctx.db,
@@ -20,6 +28,14 @@ export const { list, run } = register({
         takenAt: row.takenAt,
       })),
     };
+  },
+  // A canceled backup still running counts until its worker stops: it holds the kind's one slot.
+  active: async (ctx) => {
+    const job = (await backupIn(ctx.db, "running")) ?? (await backupIn(ctx.db, "queued"));
+
+    return job === null || (job.status !== "queued" && job.status !== "running")
+      ? null
+      : { jobId: job._id, status: job.status };
   },
   // A manual backup that joins a queued or running nightly one keeps the nightly trigger.
   run: async (ctx) => ({

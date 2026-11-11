@@ -64,13 +64,14 @@ const finish = (core: CoreStack, lease: Lease) =>
 const claimBackup = async (
   core: CoreStack,
   jobId: Id<"jobs">,
+  leaseMs = 60_000,
   deadline = Date.now() + 120_000,
 ): Promise<Lease> => {
   const claim = await retrying(() =>
     runServer(
       core,
       api.core.jobs.worker.claim,
-      { kinds: ["server.backup"], workerId: `backups-${unique()}`, leaseMs: 60_000 },
+      { kinds: ["server.backup"], workerId: `backups-${unique()}`, leaseMs },
       Claim,
     ),
   );
@@ -82,7 +83,7 @@ const claimBackup = async (
   if (claim.outcome === "claimed") await finish(core, claim.lease);
   else await sleep(250);
 
-  return claimBackup(core, jobId, deadline);
+  return claimBackup(core, jobId, leaseMs, deadline);
 };
 
 const record = (core: CoreStack, lease: Lease, fileName: string, sizeBytes = 10) =>
@@ -135,6 +136,61 @@ const archive = (fileName: string, takenAt: number): Archive => ({
 });
 
 describe.skipIf(stack === undefined)("server backups", { timeout: 180_000 }, () => {
+  it("show the backup queued or running for the whole job, to admins only", async () => {
+    if (stack === undefined) return;
+    const admin = await member(stack, "backups-active", "admin");
+    const someone = await member(stack, "backups-active-member");
+    const active = () => admin.signedIn.client.query(api.core.server.backups.active, {});
+
+    expect(await refusal(someone.signedIn.client.query(api.core.server.backups.active, {}))).toBe(
+      "forbidden",
+    );
+
+    const { jobId } = await admin.signedIn.client.mutation(api.core.server.backups.run, {});
+
+    expect(await active()).toEqual({ jobId, status: "queued" });
+
+    const lease = await claimBackup(stack, jobId);
+
+    expect(await active()).toEqual({ jobId, status: "running" });
+
+    await finish(stack, lease);
+
+    expect(await active()).toBeNull();
+  });
+
+  it("cancel a backup only at the attempt named, after its lease lapsed and it was claimed again", async () => {
+    if (stack === undefined) return;
+
+    const admin = await member(stack, "backups-reclaim", "admin");
+    const { jobId } = await admin.signedIn.client.mutation(api.core.server.backups.run, {});
+    const Answer = Schema.Struct({ outcome: Schema.String });
+
+    const cancelAt = (attempt: number) =>
+      runFunction(stack, internal.core.jobs.admin.cancel, { jobId, attempt }, Answer);
+
+    const first = await claimBackup(stack, jobId, 5000);
+
+    await sleep(5500);
+    await runFunction(
+      stack,
+      internal.core.jobs.leases.releaseExpired,
+      {},
+      Schema.Struct({ released: Schema.Finite, more: Schema.Boolean }),
+    );
+
+    const second = await claimBackup(stack, jobId);
+
+    expect(second).toEqual({ jobId, attempt: first.attempt + 1 });
+    expect(await cancelAt(first.attempt)).toEqual({ outcome: "movedOn" });
+    expect(await admin.signedIn.client.query(api.core.server.backups.active, {})).toEqual({
+      jobId,
+      status: "running",
+    });
+    expect(await cancelAt(second.attempt)).toEqual({ outcome: "canceling" });
+    await finish(stack, second);
+  });
+
   it("record an archive under the job's lease, once, with the job's trigger", async () => {
     if (stack === undefined) return;
     const admin = await member(stack, "backups-admin", "admin");

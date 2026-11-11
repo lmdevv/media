@@ -1,10 +1,12 @@
 import { usePlatform } from "@media/sdk/react";
 import type { CommandItem } from "@media/ui/lib/command-menu";
 import { toastFailure } from "@media/ui/lib/failure";
-import { FolderIcon, RefreshCwIcon } from "lucide-react";
+import { useNow } from "@media/ui/lib/use-now";
+import { CircleXIcon, FolderIcon, RefreshCwIcon } from "lucide-react";
 import { useMemo } from "react";
 import { toast } from "sonner";
 
+import { reportMovedOn } from "@/lib/canceled";
 import { formatCount } from "@/lib/format";
 import { useActiveScans, useManagedLibraries } from "@/lib/libraries";
 import { scanProgress } from "@/lib/scan-progress";
@@ -12,8 +14,8 @@ import { scanProgress } from "@/lib/scan-progress";
 import type { CommandContext, CommandContribution } from "./contribution";
 
 /**
- * Library scans for people who manage a movies library: running scans with their progress, and
- * scanning everything or one library. The core has no way to cancel a scan.
+ * Library scans for people who manage a movies library: running scans with their progress,
+ * scanning everything or one library, and cancelling running scans.
  */
 export const useLibraryCommands = (context: CommandContext): CommandContribution => {
   const platform = usePlatform();
@@ -21,19 +23,26 @@ export const useLibraryCommands = (context: CommandContext): CommandContribution
   const libraries = useManagedLibraries();
   const scans = useActiveScans(edit ? libraries : []);
   const scan = platform.core.libraries.scan;
+  const cancel = platform.core.libraries.cancelScan;
+  const now = useNow(10_000);
 
   return useMemo((): CommandContribution => {
     if (!edit) return { groups: [] };
 
     const running = scans.map(({ library, scan: job }): CommandItem => {
-      const progress = scanProgress(job);
+      const progress = scanProgress(job, now);
 
       const detail =
         job.status === "queued"
           ? "waiting"
-          : progress.total === null
-            ? `${formatCount(progress.done)} files`
-            : `${formatCount(progress.done)} of ${formatCount(progress.total)}`;
+          : [
+              progress.total === null
+                ? `${formatCount(progress.done)} files`
+                : `${formatCount(progress.done)} of ${formatCount(progress.total)}`,
+              progress.minutesLeft === null ? null : `about ${progress.minutesLeft}m`,
+            ]
+              .filter((part) => part !== null)
+              .join(" · ");
 
       return {
         kind: "action",
@@ -102,15 +111,47 @@ export const useLibraryCommands = (context: CommandContext): CommandContribution
       },
     };
 
+    const cancelable = scans.filter((active) => !active.scan.canceling);
+
+    const cancelScans: ReadonlyArray<CommandItem> =
+      cancelable.length === 0
+        ? []
+        : [
+            {
+              kind: "action",
+              id: "scan:cancel",
+              title: cancelable.length === 1 ? "Cancel scan" : "Cancel scans",
+              keywords: ["stop", "scan"],
+              leading: { kind: "icon", icon: CircleXIcon },
+              perform: async () => {
+                try {
+                  const answers = await Promise.all(
+                    cancelable.map((active) =>
+                      cancel({ jobId: active.scan.jobId, attempt: active.scan.attempt }),
+                    ),
+                  );
+
+                  reportMovedOn(answers, cancelable.length === 1 ? "scan" : "scans");
+                } catch (cause) {
+                  toastFailure(cause);
+                }
+              },
+            },
+          ];
+
     return {
       groups: [
         {
           id: "library",
           label: "Library",
-          items: [...running, ...(libraries.length === 0 ? [] : [scanLibraries, scanOne])],
+          items: [
+            ...running,
+            ...(libraries.length === 0 ? [] : [scanLibraries, scanOne]),
+            ...cancelScans,
+          ],
         },
       ],
       fallback: libraries.length === 0 ? [] : [scanLibraries],
     };
-  }, [edit, scans, libraries, scan]);
+  }, [edit, scans, libraries, now, scan, cancel]);
 };

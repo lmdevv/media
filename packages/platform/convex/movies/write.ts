@@ -13,6 +13,7 @@ import {
   fitSeason,
   fitTitle,
 } from "./fit";
+import { countMissing, countUnmatched } from "./totals";
 
 /**
  * The only writer of the movies tables: every insert, patch, and replace of a title, title genre,
@@ -20,7 +21,8 @@ import {
  * entry, watch mark, or import plan goes through here (a test fails on any other). Titles,
  * episodes, people, credits, and collections are fitted within their bounds as whole documents
  * (ADR 0024), so the reads may reserve those bounds (ADR 0005); the other tables hold ids, numbers,
- * literals, and fields bounded where the server functions parse them.
+ * literals, and fields bounded where the server functions parse them. Each write of a title or a
+ * file moves its library's unmatched-title or missing-file total in the same mutation.
  */
 
 type Db = MutationCtx["db"];
@@ -56,8 +58,11 @@ export const insertTitle = async (
   fields: Untied<"titles">,
 ): Promise<Fields<"titles"> & { readonly _id: Id<"titles"> }> => {
   const stored = fitTitle({ ...fields, tie: newTie() });
+  const _id = await db.insert("titles", stored);
 
-  return { ...stored, _id: await db.insert("titles", stored) };
+  await countUnmatched(db, null, stored);
+
+  return { ...stored, _id };
 };
 
 /** Writes `fields` over a title, fitting the merged document; answers the title as stored. */
@@ -71,6 +76,8 @@ export const patchTitle = async (
 
   if (fitted === merged) await db.patch(existing._id, fields);
   else await db.replace(existing._id, fitted);
+
+  await countUnmatched(db, existing, fitted);
 
   return fitted;
 };
@@ -167,7 +174,14 @@ export const patchSeason = async (
 export const insertMediaFile = async (
   db: Db,
   fields: Fields<"mediaFiles">,
-): Promise<Id<"mediaFiles">> => db.insert("mediaFiles", fitMediaFile(fields));
+): Promise<Id<"mediaFiles">> => {
+  const stored = fitMediaFile(fields);
+  const id = await db.insert("mediaFiles", stored);
+
+  await countMissing(db, null, stored);
+
+  return id;
+};
 
 /** Writes `fields` over a media file, fitting the merged document; answers it as stored. */
 export const patchMediaFile = async (
@@ -180,6 +194,8 @@ export const patchMediaFile = async (
 
   if (fitted === merged) await db.patch(existing._id, fields);
   else await db.replace(existing._id, fitted);
+
+  await countMissing(db, existing, fitted);
 
   return fitted;
 };
@@ -196,6 +212,7 @@ export const replaceMediaFile = async (
   const fitted = fitMediaFile(next);
 
   await db.replace(existing._id, fitted);
+  await countMissing(db, existing, fitted);
 
   return { ...fitted, _id: existing._id, _creationTime: existing._creationTime };
 };

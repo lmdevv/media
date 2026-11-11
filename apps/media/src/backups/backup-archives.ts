@@ -5,13 +5,18 @@ import { Duration, Option } from "effect";
 /** Why a backup ran. */
 export type BackupTrigger = BackupArchive["trigger"];
 
-const NAME = /^movies-(nightly|manual)-(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z\.zip$/u;
+/**
+ * An archive name this service writes, `media-…`, or one old movies wrote, `movies-…`, which a
+ * restore still reads.
+ */
+const NAME =
+  /^(?:media|movies)-(nightly|manual)-(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z\.zip$/u;
 
 const ARCHIVE = /^[^./\\][^/\\]*\.zip$/u;
 
 /** The file name of an archive taken at `takenAt` (milliseconds since the epoch). */
 export const archiveName = (trigger: BackupTrigger, takenAt: number): string =>
-  `movies-${trigger}-${new Date(takenAt).toISOString().replaceAll(/[:.]/gu, "-")}.zip`;
+  `media-${trigger}-${new Date(takenAt).toISOString().replaceAll(/[:.]/gu, "-")}.zip`;
 
 /** The name a partial export is written under before it is renamed to `fileName`. */
 export const partialName = (fileName: string): string => `.partial-${fileName}`;

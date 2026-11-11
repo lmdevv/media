@@ -607,7 +607,7 @@ export const cancelQueued = internalMutation({
       .withIndex("by_kind_status", (q) => q.eq("payload.kind", kind).eq("status", "queued"))
       .take(CANCEL_BATCH);
 
-    await inOrder(queued, (job) => cancel(ctx, job._id));
+    await inOrder(queued, (job) => cancel(ctx, job._id, null));
 
     return { more: queued.length === CANCEL_BATCH };
   },

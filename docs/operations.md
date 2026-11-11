@@ -64,8 +64,9 @@ On NixOS, run the same commands as root with `media-core-convex` (from the packa
 
 - A Convex cron requests a backup every night at 03:00 UTC. The media service runs it as a job:
   `convex export --include-file-storage` of the core into a hidden partial file in the backup
-  folder, renamed to `movies-nightly-<timestamp>.zip` only when the export succeeded. The name
-  keeps old movies' prefix, though the archive holds the core.
+  folder, renamed to `media-nightly-<timestamp>.zip` (or `media-manual-…`) only when the export
+  succeeded. Archives named `movies-…` from before keep their time and trigger and restore the
+  same way.
 - Archives are `0600` in a `0700` folder owned by the service user: they hold every account's
   password hash and the hashes of the API keys, the media service's included. Copy them off the
   machine with the same care.

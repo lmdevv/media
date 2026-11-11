@@ -18,9 +18,6 @@ export type LibraryDetail = Result<Core["libraries"]["get"]>;
 /** A library's latest scan. */
 export type Scan = NonNullable<LibraryDetail["scan"]>;
 
-/** A movie or show in a library's title list. */
-export type TitleCard = RowOf<Movies["titles"]["list"]>;
-
 /** A movie or show with its match, files, and versions. */
 export type TitleDetail = Result<Movies["titles"]["get"]>;
 
@@ -35,3 +32,12 @@ export type MetadataOverrides = Parameters<Movies["metadata"]["edit"]>[0]["set"]
 
 /** A user here, as the importer maps source users onto them. */
 export type Person = RowOf<Core["accounts"]["users"]["list"]>;
+
+/** One file of a library as its managers review it, with its title, episode, and match. */
+export type LibraryFile = RowOf<Movies["files"]["list"]>;
+
+/** Which of a library's files to list. */
+export type LibraryFileFilter = NonNullable<Parameters<Movies["files"]["list"]>[0]["filter"]>;
+
+/** A library's missing files, since when, and its unmatched titles. */
+export type LibraryFileSummary = Result<Movies["files"]["summary"]>;

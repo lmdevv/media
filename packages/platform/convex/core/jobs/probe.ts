@@ -56,7 +56,7 @@ export const reset = internalMutation({
     const queued = await jobs("queued", PROBE_BATCH);
     const running = await jobs("running", kindDef(kind).cap);
 
-    await inOrder([...queued, ...running], (job) => cancel(ctx, job._id));
+    await inOrder([...queued, ...running], (job) => cancel(ctx, job._id, null));
 
     return { more: queued.length === PROBE_BATCH };
   },

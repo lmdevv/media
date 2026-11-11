@@ -25,7 +25,19 @@ export interface PageOf<Row> {
   readonly page: ReadonlyArray<Row>;
   readonly isDone: boolean;
   readonly continueCursor: string;
+  /** Where to split a page pinned to an end that grew past what one call may read. */
+  readonly splitCursor?: string | null;
+  /** `SplitRequired` asks the client to load the page as two, at `splitCursor`. */
+  readonly pageStatus?: "SplitRecommended" | "SplitRequired" | null;
 }
+
+/** Whether a page must be loaded again as two pages before its rows can be shown. */
+const mustSplit = <Row>(
+  data: PageOf<Row>,
+): data is PageOf<Row> & { readonly splitCursor: string } =>
+  data.pageStatus === "SplitRequired" &&
+  data.splitCursor !== null &&
+  data.splitCursor !== undefined;
 
 /** A followed query, as a core query's `watch` returns it. */
 export interface Watch<A> {
@@ -59,7 +71,8 @@ export type Paged<Row> =
 
 /**
  * Folds the states of a list's pages, first to last, into one {@link Paged}. A failed first page
- * fails the list; a later page's failure keeps the rows above it.
+ * fails the list; a later page's failure keeps the rows above it. A page waiting to be split, or a
+ * last page that holds no rows but is not the end, counts as loading: the store loads what follows.
  *
  * @param more - Loads the page after the given cursor.
  */
@@ -70,7 +83,7 @@ export const combinePages = <Row, Failure>(
   const rows: Array<Row> = [];
 
   for (const [index, state] of pages.entries()) {
-    if (state.status === "loading") {
+    if (state.status === "loading" || (state.status === "success" && mustSplit(state.data))) {
       return index === 0
         ? { status: "loading" }
         : { status: "ready", rows, next: { kind: "loading" } };
@@ -87,13 +100,13 @@ export const combinePages = <Row, Failure>(
     rows.push(...state.data.page);
 
     if (index === pages.length - 1) {
-      const { isDone, continueCursor } = state.data;
+      const { isDone, continueCursor, page } = state.data;
 
-      return {
-        status: "ready",
-        rows,
-        next: isDone ? { kind: "done" } : { kind: "more", load: () => more(continueCursor) },
-      };
+      if (isDone) return { status: "ready", rows, next: { kind: "done" } };
+
+      return page.length === 0
+        ? { status: "ready", rows, next: { kind: "loading" } }
+        : { status: "ready", rows, next: { kind: "more", load: () => more(continueCursor) } };
     }
   }
 
@@ -115,7 +128,11 @@ interface Loaded<Row> {
  * One store over a list's pages. Loading the next page pins the page above to end where the next
  * one starts, so a row that moves into or out of the pages above never shows twice or goes
  * missing. The open-ended subscription keeps serving the page until the pinned one answers, then
- * stops. Its snapshot stays the same object until a page changes, as `useSyncExternalStore` needs.
+ * stops. A page that holds more than one call may read comes back `SplitRequired`, and the store
+ * loads it again as two pages at its `splitCursor`; for the last page the second one is open. A last page that holds no rows (every
+ * row in its range hidden from this person) but is not the end loads the next page by itself, so
+ * a screen never shows an empty list that is not done. Its snapshot stays the same object until a
+ * page changes, as `useSyncExternalStore` needs.
  *
  * @param pageAt - Follows the page that starts at a cursor, ended at `endCursor` when given.
  */
@@ -143,15 +160,78 @@ export const pagedStore = <Row>(
     }
   };
 
-  const follow = (watch: Watch<PageOf<Row>>, onChange: () => void): (() => void) =>
-    watch.subscribe(() => {
-      stopReplacedWatches();
-      onChange();
-    });
-
   const listen = (watch: Watch<PageOf<Row>>): void => {
     for (const [onChange, stops] of listening) stops.set(watch, follow(watch, onChange));
   };
+
+  const unlisten = (watch: Watch<PageOf<Row>>): void => {
+    for (const stops of listening.values()) {
+      stops.get(watch)?.();
+      stops.delete(watch);
+    }
+  };
+
+  /**
+   * Loads each page the server asked to split as the two pages either side of the split: the
+   * page above pinned to end at the split, and the rest pinned to the page's own end, or open
+   * when it was the last page and had none.
+   */
+  const splitPages = (): void => {
+    for (const [index, loaded] of pages.entries()) {
+      const state = loaded.watch.getSnapshot();
+      const start = starts[index];
+      const end = starts[index + 1];
+
+      if (state.status === "success" && mustSplit(state.data) && start !== undefined) {
+        const split = state.data.splitCursor;
+        const lower = pageAt({ cursor: start, endCursor: split });
+
+        const upper =
+          end === undefined || end === null
+            ? pageAt({ cursor: split })
+            : pageAt({ cursor: split, endCursor: end });
+
+        pages.splice(index, 1, { watch: lower, before: null }, { watch: upper, before: null });
+        starts.splice(index + 1, 0, split);
+        unlisten(loaded.watch);
+
+        if (loaded.before !== null) unlisten(loaded.before);
+        listen(lower);
+        listen(upper);
+        splitPages();
+
+        return;
+      }
+    }
+  };
+
+  /** Loads the next page when the last one holds no rows but is not the end. */
+  const followEmptyTail = (): void => {
+    const last = pages.at(-1);
+    const state = last?.watch.getSnapshot();
+
+    if (
+      state?.status === "success" &&
+      !state.data.isDone &&
+      state.data.page.length === 0 &&
+      !mustSplit(state.data)
+    ) {
+      more(state.data.continueCursor);
+    }
+  };
+
+  const settle = (): void => {
+    stopReplacedWatches();
+    splitPages();
+    followEmptyTail();
+  };
+
+  function follow(watch: Watch<PageOf<Row>>, onChange: () => void): () => void {
+    return watch.subscribe(() => {
+      settle();
+      onChange();
+    });
+  }
 
   const stateOf = (loaded: Loaded<Row>): QueryState<PageOf<Row>> => {
     const state = loaded.watch.getSnapshot();
@@ -180,7 +260,7 @@ export const pagedStore = <Row>(
     pages.push({ watch: next, before: null });
     starts.push(cursor);
     listen(next);
-    stopReplacedWatches();
+    settle();
 
     for (const onChange of listening.keys()) onChange();
   };
@@ -192,8 +272,8 @@ export const pagedStore = <Row>(
 
   return {
     subscribe: (onChange) => {
-      stopReplacedWatches();
       listening.set(onChange, new Map(watches().map((watch) => [watch, follow(watch, onChange)])));
+      settle();
 
       return () => {
         for (const stop of listening.get(onChange)?.values() ?? []) stop();

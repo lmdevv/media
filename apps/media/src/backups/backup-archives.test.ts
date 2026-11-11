@@ -54,6 +54,18 @@ describe("archive names", () => {
     expect(Archives.isArchiveName("snapshot_1791828740404486415.zip")).toBe(true);
   });
 
+  it("name archives for the product, and read the names old movies wrote", () => {
+    expect(Archives.archiveName("manual", 0)).toBe("media-manual-1970-01-01T00-00-00-000Z.zip");
+
+    expect(Archives.parseArchiveName("movies-nightly-2026-10-12T03-00-00-000Z.zip")).toEqual(
+      Option.some({ trigger: "nightly", takenAt: Date.parse("2026-10-12T03:00:00.000Z") }),
+    );
+
+    expect(Archives.parseArchiveName("music-nightly-2026-10-12T03-00-00-000Z.zip")).toEqual(
+      Option.none(),
+    );
+  });
+
   it("describe a copied-in archive as manual, taken at its modification time", () => {
     expect(Archives.describeArchive("snapshot.zip", 42, 1_000.7)).toEqual({
       fileName: "snapshot.zip",

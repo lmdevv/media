@@ -164,6 +164,34 @@ The movies port replaced the movies half of the seam with movies' own rows in
   `added`, and the purge the titles it deleted as `removed`. Its episode and file totals are two
   more counters, `movies.episodes:<id>` and `movies.files:<id>`, which every write of those rows
   moves in its own mutation (`movies/totals.ts`).
+- The library files view (`movies.files.summary`, p4-movies-parity) reads two more counters,
+  `movies.missing:<id>` and `movies.unmatched:<id>`: the library's missing files, and its titles
+  that are unmatched and not being purged. The movies writer moves them on every insert, patch,
+  and replace of a file or title from the row before and after, and the purge on every file it
+  deletes, so no caller can forget one; a removed library's purge deletes them with its other
+  totals. Each write that may flip one is charged one more shard read and write in its work
+  budget. The oldest missing date is one indexed read: `by_library_missing` orders by
+  `missingSince`. A core whose files or titles were written before these counters (any core from
+  before p4-movies-parity) needs `scripts/dev-stack.sh destroy` then `up`, as earlier schema
+  changes did; no release has shipped them yet (D55).
+- `movies.files.list` pages a library's files by path (`by_library_path`) or the missing ones by
+  when they went missing, then path (`by_library_missing`), at most 100 a page and fewer when the
+  per-call read budget (`movies/reads.ts`) cannot pay for each file's title and episode at their
+  bounds (`movies/fit.ts`). The unmatched filter pages the library's unmatched titles by sort key,
+  then tie (`by_library_status`), at most 20 and as many as the budget pays for, each with up to
+  50 of its files, as old movies' file list did. Its cursors are exact positions (a path, a time
+  and a path, a sort key and a tie), not Convex's, and every read is charged at its bound before
+  it runs: Convex ignores `maximumRowsRead` for a page a reactive client reloads to its end, so a
+  range that grew, such as hundreds of titles near their 64 KB bound, would pass 16 MiB inside
+  `paginate`. A page reads at most the rows its budget pays for plus one, through index ranges
+  bounded by its end; a pinned page whose range now holds more answers `SplitRequired` with those
+  rows and a `splitCursor`, and `usePages` loads it as two. Both need `edit` on the library
+  through `can()`, which takes `movies:edit`.
+- `movies.files.summary` answers the library's counters only to an editor whose restrictions hide
+  nothing; to one whose restrictions may hide titles it answers no counts and no missing date
+  (fix round 1 of #141). The counters count every title, and counting only what that editor sees
+  would read every missing file and unmatched title, which no call's reads bound. Old movies'
+  admin screens hid nothing, so they never needed this.
 - Every scanner, metadata, and purge mutation spends a per-call work budget (amended 2026-11-09,
   round 2 of #126's review; `movies/budget.ts`). Each step, such as one file, one path, one
   episode, one title's marking, or one child row, is charged its worst case before it runs. The
@@ -424,20 +452,27 @@ a file changes. It asks the core to queue a scan. Until now "Left for later unit
   scan therefore queues one scan after it, as old movies' monitor rescanned after its running scan,
   and never restarts the running one.
 - Music libraries are skipped, since music has no scanner on the server yet.
-- The server's library monitor, `apps/media/src/core/core-rescans.ts`, watches each approved root
-  and sends the paths a burst of changes named. A path inside another sent path is left out. A
-  burst that names no path or more than 32 (a burst stops keeping paths past 256) sends the root
-  instead. The monitor also sends the root at startup, on the reconcile interval, after a watcher
-  restarts, and when a polled root changes.
-- **Not ported: a library folder reached through a symlink.** A folder outside every approved root
-  that resolves inside one, such as `/films` linking to `/media/films` with `LIBRARY_ROOTS=/media`,
-  scans when asked, but change events and the reconcile carry the root's real paths, which never
-  match the folder's own path, so it is not rescanned on its own. Old movies watched each library's
-  folders as stored. The follow-up is a server query of the movies libraries' folders that the
-  monitor tracks (`LibraryMonitor.track`), within the per-call limits. Queuing every library from
-  the reconcile instead was tried and dropped: on a core with hundreds of libraries its scheduled
-  enqueues kept the scan kind's `jobKinds` row busy, so managers' scans and new libraries failed on
-  conflicts, and the worker scanned every stale library.
+- The server's library monitor, `apps/media/src/core/core-rescans.ts`, watches each folder of
+  every movies library at the path the library names, as old movies watched each library's folders
+  as stored (amended in p4-movies-parity). It follows `core/scans:watched`, a server-facing query
+  behind the media-service guard that pages the movies libraries, and only those whoever asks
+  (64 a page, each with its up to 16 folders), and hands the folders to `LibraryMonitor.track`
+  whenever the list changes and on the reconcile interval. A folder that resolves outside every
+  approved root is not watched, as the scanner refuses it; one that cannot be resolved now, such as
+  a share not mounted yet, is watched anyway and its watch retries. A folder that another listed
+  before it already is, by the identity the folder claims use (its real path's device and inode,
+  and its mount table source), is not watched again, so a folder and a link to it ask once. So a folder outside every approved root that resolves inside one, such as `/films`
+  linking to `/media/films` with `LIBRARY_ROOTS=/media`, now rescans on its own: its events name
+  `/films/…`, which `changed` finds. The monitor sends the paths a burst of changes named. A path
+  inside another sent path is left out. A burst that names no path or more than 32 (a burst stops
+  keeping paths past 256) sends the folder instead. The monitor also sends the folder at startup,
+  on the reconcile interval, after a watcher restarts, and when a polled folder changes. Its
+  calls go one at a time, so every library's startup and reconcile calls never enqueue scans
+  concurrently.
+- Queuing every library from the reconcile instead of watching their folders was tried and
+  dropped: on a core with hundreds of libraries its scheduled enqueues kept the scan kind's
+  `jobKinds` row busy, so managers' scans and new libraries failed on conflicts, and the worker
+  scanned every stale library.
 
 ## Consequences
 

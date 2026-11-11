@@ -509,15 +509,16 @@ export const fileAt = (
 /**
  * Every database operation, a `get`, query, insert, patch, or delete, is charged one index range
  * and every insert, patch, or delete one write: an upper bound, since Convex counts at most that.
- * Besides the genre rows, a file costs at most 42 operations and 21 writes: the file, the title it
+ * Besides the genre rows, a file costs at most 46 operations and 23 writes: the file, the title it
  * plays now, and the title its key names, read to price it (3); the same read again to write it
  * (3); the title written (1); a season and an episode looked up, written, and the season's and
  * the title's episode counts moved (8); the file written (1); the present-file counts of an old and a new title and episode
- * (8); and its thumbnail job read, canceled, queued again, and recorded (16, with 2 to spare).
+ * (8); its thumbnail job read, canceled, queued again, and recorded (16, with 2 to spare); and the
+ * library's unmatched-title and missing-file totals, one shard each read and written (4, 2).
  * Each genre row the title has is deleted or patched, and each it gains inserted: one operation
  * and one write each, plus the one query that lists them.
  */
-const UPSERT_COST = work(42, 21);
+const UPSERT_COST = work(46, 23);
 
 /** The worst case of `upsertScannedItem` for `item`, after reading what prices it (counted). */
 export const upsertCost = async (
@@ -543,15 +544,19 @@ export const upsertCost = async (
 
 /**
  * The worst case of `markFileMissing`: the file looked up, its thumbnail job read and canceled,
- * its state cleared, the file marked, and its title's and episode's present counts moved.
+ * its state cleared, the file marked, its title's and episode's present counts moved, and its
+ * library's missing-file total moved.
  */
-export const MISSING_COST = work(16, 8);
+export const MISSING_COST = work(18, 9);
 
-/** The worst case of rewriting `current` from `scanned`: its row, and each genre row. */
+/**
+ * The worst case of rewriting `current` from `scanned`: its row, each genre row, and its library's
+ * unmatched-title total, one shard read and written.
+ */
 export const rewriteCost = (current: Doc<"titles">, scanned: ScannedTitle): Work => {
   const rows = 2 + genreRows(current.genres) + genreRows(scanned.genres);
 
-  return work(rows, rows);
+  return work(rows + 2, rows + 1);
 };
 
 /** The worst case of `writeOverrides` on `current`: its row, and each of its genre rows. */

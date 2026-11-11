@@ -12,6 +12,7 @@ import type { LeaseAnswer } from "../core/jobs/held";
 import { importSource } from "../core/jobs/kinds";
 import type { ImportKind, PayloadOf } from "../core/jobs/kinds";
 import { lease } from "../core/jobs/model";
+import { cancel as cancelJob } from "../core/jobs/queue";
 import type { Lease } from "../core/jobs/model";
 import type { JobCtx } from "../core/jobs/store";
 import type { Caller } from "../core/auth/caller";
@@ -1364,8 +1365,11 @@ const jobView = (job: Doc<"jobs">) => ({
   status: job.status,
   done: job.work.done,
   total: job.work.mode === "reported" ? job.work.total : job.work.sealed ? job.work.appended : null,
-  message: job.message,
+  message: job.status === "running" ? job.message : null,
   error: errorOf(job),
+  startedAt: job.status === "running" ? job.claimedAt : null,
+  attempt: job.attempts,
+  canceling: job.status === "running" && job.cancelRequestedAt !== null,
   finishedAt:
     job.status === "succeeded" || job.status === "failed" || job.status === "canceled"
       ? job.finishedAt
@@ -1407,7 +1411,7 @@ const requireImporter = (caller: Caller): void => {
 };
 
 /** The import commands. */
-export const { list, get } = registerWithArtworkTickets(register, {
+export const { list, get, cancel } = registerWithArtworkTickets(register, {
   list: async (ctx, { paginationOpts }, caller) => {
     requireImporter(caller);
 
@@ -1429,5 +1433,18 @@ export const { list, get } = registerWithArtworkTickets(register, {
     const run = started === null ? null : await runOf(ctx.db, started);
 
     return run ?? fail("not_found", "No such import");
+  },
+  // The job's attempt fences the cancel (ADR 0012): it stops only the attempt the person saw, a
+  // running import stops at its worker's next lease call, every later write of that attempt is
+  // refused, and a finished one stays as it ended.
+  cancel: async (ctx, { importId, attempt }, caller) => {
+    requireImporter(caller);
+
+    const started = await ctx.db.get(importId);
+    const result = started === null ? null : await cancelJob(ctx, started.jobId, attempt);
+
+    return result === null || result.outcome === "notFound"
+      ? fail("not_found", "No such import")
+      : result;
   },
 });

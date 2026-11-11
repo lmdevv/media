@@ -83,6 +83,10 @@ test("an admin backs up now, sees it listed, and asks before restoring", async (
     await expect(page.getByRole("heading", { level: 1, name: "Backups" })).toBeVisible();
     await page.getByRole("button", { name: "Back up now" }).click();
 
+    await expect(
+      page.getByRole("button", { name: /^(Backup queued|Backing up…)$/u }),
+    ).toBeDisabled();
+
     const recorded = async () =>
       (await listed()).find((backup) => !before.has(backup.id) && backup.trigger === "manual") ??
       null;
@@ -92,6 +96,8 @@ test("an admin backs up now, sees it listed, and asks before restoring", async (
     const archive = await recorded();
 
     if (archive === null) throw new Error("The backup recorded no archive");
+
+    expect(archive.fileName).toMatch(/^media-manual-.*\.zip$/u);
 
     const row = page
       .getByRole("list", { name: "Backups" })

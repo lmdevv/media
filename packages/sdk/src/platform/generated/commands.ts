@@ -1127,6 +1127,27 @@ const core_guests_status = query({
   }),
 });
 
+const core_libraries_cancelScan = mutation({
+  name: "core.libraries.cancelScan",
+  path: "core/libraries:cancelScan",
+  args: Schema.Struct({
+    jobId: Schema.String.pipe(Schema.brand("Id<jobs>")),
+    attempt: Schema.Finite,
+  }),
+  result: Schema.Union([
+    Schema.Struct({
+      outcome: Schema.Literal("finished"),
+      status: Schema.Union([
+        Schema.Literal("succeeded"),
+        Schema.Literal("failed"),
+        Schema.Literal("canceled"),
+      ]),
+    }),
+    Schema.Struct({ outcome: Schema.Literal("canceling") }),
+    Schema.Struct({ outcome: Schema.Literal("movedOn") }),
+  ]),
+});
+
 const core_libraries_create = mutation({
   name: "core.libraries.create",
   path: "core/libraries:create",
@@ -1165,6 +1186,10 @@ const core_libraries_get = query({
         done: Schema.Union([Schema.Finite, Schema.Null]),
         total: Schema.Union([Schema.Finite, Schema.Null]),
         error: Schema.Union([Schema.String, Schema.Null]),
+        message: Schema.Union([Schema.String, Schema.Null]),
+        startedAt: Schema.Union([Schema.Finite, Schema.Null]),
+        attempt: Schema.Finite,
+        canceling: Schema.Boolean,
         finishedAt: Schema.Union([Schema.Finite, Schema.Null]),
       }),
       Schema.Null,
@@ -1507,6 +1532,19 @@ const core_restrictions_set = mutation({
     ]),
   }),
   result: Schema.Null,
+});
+
+const core_server_backups_active = query({
+  name: "core.server.backups.active",
+  path: "core/server/backups:active",
+  args: Schema.Struct({}),
+  result: Schema.Union([
+    Schema.Null,
+    Schema.Struct({
+      jobId: Schema.String.pipe(Schema.brand("Id<jobs>")),
+      status: Schema.Union([Schema.Literal("queued"), Schema.Literal("running")]),
+    }),
+  ]),
 });
 
 const core_server_backups_list = query({
@@ -2136,6 +2174,100 @@ const movies_collections_list = query({
   }),
 });
 
+const movies_files_list = query({
+  name: "movies.files.list",
+  path: "movies/files:list",
+  args: Schema.Struct({
+    libraryId: Schema.String.pipe(Schema.brand("Id<libraries>")),
+    filter: Schema.optionalKey(
+      Schema.Union([Schema.Literal("all"), Schema.Literal("missing"), Schema.Literal("unmatched")]),
+    ),
+    paginationOpts: Schema.Struct({
+      numItems: Schema.Finite,
+      cursor: Schema.Union([Schema.String, Schema.Null]),
+      endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      id: Schema.optionalKey(Schema.Finite),
+      maximumRowsRead: Schema.optionalKey(Schema.Finite),
+      maximumBytesRead: Schema.optionalKey(Schema.Finite),
+    }),
+  }),
+  result: Schema.Struct({
+    page: Schema.Array(
+      Schema.Struct({
+        id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
+        path: Schema.String,
+        version: Schema.Struct({
+          id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
+          versionName: Schema.Union([Schema.String, Schema.Null]),
+          width: Schema.Union([Schema.Finite, Schema.Null]),
+          height: Schema.Union([Schema.Finite, Schema.Null]),
+          hdr: Schema.Union([
+            Schema.Literal("none"),
+            Schema.Literal("hdr10"),
+            Schema.Literal("hdr10plus"),
+            Schema.Literal("hlg"),
+            Schema.Literal("dolby_vision"),
+          ]),
+          videoCodec: Schema.Union([Schema.String, Schema.Null]),
+          videoProfile: Schema.Union([Schema.String, Schema.Null]),
+          videoLevel: Schema.Union([Schema.Finite, Schema.Null]),
+          videoBitDepth: Schema.Union([Schema.Finite, Schema.Null]),
+          audioCodec: Schema.Union([Schema.String, Schema.Null]),
+          audioChannels: Schema.Union([Schema.Finite, Schema.Null]),
+          audioTracks: Schema.Finite,
+          container: Schema.String,
+          sizeBytes: Schema.Finite,
+          durationMs: Schema.Finite,
+          lastPlayed: Schema.Boolean,
+        }),
+        missing: Schema.Boolean,
+        missingSince: Schema.Union([Schema.Finite, Schema.Null]),
+        title: Schema.Struct({
+          id: Schema.String.pipe(Schema.brand("Id<titles>")),
+          kind: Schema.Union([Schema.Literal("movie"), Schema.Literal("show")]),
+          name: Schema.String,
+          year: Schema.Union([Schema.Finite, Schema.Null]),
+          poster: Schema.Union([Schema.String, Schema.Null]),
+          matchStatus: Schema.Union([
+            Schema.Literal("matched"),
+            Schema.Literal("unmatched"),
+            Schema.Literal("manual"),
+          ]),
+        }),
+        episode: Schema.Union([
+          Schema.Struct({
+            id: Schema.String.pipe(Schema.brand("Id<episodes>")),
+            seasonNumber: Schema.Finite,
+            episodeNumber: Schema.Finite,
+          }),
+          Schema.Null,
+        ]),
+      }),
+    ),
+    continueCursor: Schema.String,
+    isDone: Schema.Boolean,
+    splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+    pageStatus: Schema.optionalKey(
+      Schema.Union([
+        Schema.Literal("SplitRecommended"),
+        Schema.Literal("SplitRequired"),
+        Schema.Null,
+      ]),
+    ),
+  }),
+});
+
+const movies_files_summary = query({
+  name: "movies.files.summary",
+  path: "movies/files:summary",
+  args: Schema.Struct({ libraryId: Schema.String.pipe(Schema.brand("Id<libraries>")) }),
+  result: Schema.Struct({
+    missing: Schema.Union([Schema.Finite, Schema.Null]),
+    missingSince: Schema.Union([Schema.Finite, Schema.Null]),
+    unmatched: Schema.Union([Schema.Finite, Schema.Null]),
+  }),
+});
+
 const movies_history_continueWatching = query({
   name: "movies.history.continueWatching",
   path: "movies/history:continueWatching",
@@ -2310,6 +2442,27 @@ const movies_history_markWatched = mutation({
   result: Schema.Null,
 });
 
+const movies_imports_cancel = mutation({
+  name: "movies.imports.cancel",
+  path: "movies/imports:cancel",
+  args: Schema.Struct({
+    importId: Schema.String.pipe(Schema.brand("Id<imports>")),
+    attempt: Schema.Finite,
+  }),
+  result: Schema.Union([
+    Schema.Struct({
+      outcome: Schema.Literal("finished"),
+      status: Schema.Union([
+        Schema.Literal("succeeded"),
+        Schema.Literal("failed"),
+        Schema.Literal("canceled"),
+      ]),
+    }),
+    Schema.Struct({ outcome: Schema.Literal("canceling") }),
+    Schema.Struct({ outcome: Schema.Literal("movedOn") }),
+  ]),
+});
+
 const movies_imports_get = query({
   name: "movies.imports.get",
   path: "movies/imports:get",
@@ -2351,6 +2504,9 @@ const movies_imports_get = query({
       total: Schema.Union([Schema.Finite, Schema.Null]),
       message: Schema.Union([Schema.String, Schema.Null]),
       error: Schema.Union([Schema.String, Schema.Null]),
+      startedAt: Schema.Union([Schema.Finite, Schema.Null]),
+      attempt: Schema.Finite,
+      canceling: Schema.Boolean,
       finishedAt: Schema.Union([Schema.Finite, Schema.Null]),
     }),
   }),
@@ -2408,6 +2564,9 @@ const movies_imports_list = query({
           total: Schema.Union([Schema.Finite, Schema.Null]),
           message: Schema.Union([Schema.String, Schema.Null]),
           error: Schema.Union([Schema.String, Schema.Null]),
+          startedAt: Schema.Union([Schema.Finite, Schema.Null]),
+          attempt: Schema.Finite,
+          canceling: Schema.Boolean,
           finishedAt: Schema.Union([Schema.Finite, Schema.Null]),
         }),
       }),
@@ -3700,6 +3859,8 @@ export const effectMethods = (method: EffectBuilder) => ({
       status: method.query(core_guests_status),
     },
     libraries: {
+      /** `core.libraries.cancelScan` (mutation, signed-in): Stop a library's scan at the attempt you saw; a finished scan stays as it ended, and what a scan wrote stays. */
+      cancelScan: method.mutation(core_libraries_cancelScan),
       /** `core.libraries.create` (mutation, admin, API keys refused): Create a library of movies or music from folders on the server and scan it. */
       create: method.mutation(core_libraries_create),
       /** `core.libraries.get` (query, signed-in): Show a library, how many items it holds, its latest scan, and to its managers its folders. */
@@ -3749,6 +3910,8 @@ export const effectMethods = (method: EffectBuilder) => ({
     },
     server: {
       backups: {
+        /** `core.server.backups.active` (query, admin): Show the backup queued or running now, if any. */
+        active: method.query(core_server_backups_active),
         /** `core.server.backups.list` (query, admin): List the server's database backups, newest first. */
         list: method.query(core_server_backups_list),
         /** `core.server.backups.run` (mutation, admin): Back up the server's database now, or join the backup already queued or running. */
@@ -3799,6 +3962,12 @@ export const effectMethods = (method: EffectBuilder) => ({
       /** `movies.collections.list` (query, movies:read): List collections by name with the titles you may see in each. */
       list: method.query(movies_collections_list),
     },
+    files: {
+      /** `movies.files.list` (query, movies:edit): List a library's files by path with their quality, size, match, and whether they are missing. */
+      list: method.query(movies_files_list),
+      /** `movies.files.summary` (query, movies:edit): Count a library's missing files, since when the oldest is missing, and its unmatched titles. */
+      summary: method.query(movies_files_summary),
+    },
     history: {
       /** `movies.history.continueWatching` (query, movies:read): List what to resume and which episodes come next, most recent first. */
       continueWatching: method.query(movies_history_continueWatching),
@@ -3810,6 +3979,8 @@ export const effectMethods = (method: EffectBuilder) => ({
       markWatched: method.mutation(movies_history_markWatched),
     },
     imports: {
+      /** `movies.imports.cancel` (mutation, movies:edit): Stop a Jellyfin or Plex import, as an owner or an admin; what it already wrote stays. */
+      cancel: method.mutation(movies_imports_cancel),
       /** `movies.imports.get` (query, movies:edit): Show one Jellyfin or Plex import, its job, and what it wrote. */
       get: method.query(movies_imports_get),
       /** `movies.imports.list` (query, movies:edit): List Jellyfin and Plex imports, newest first, with their phase and what they wrote. */
@@ -4032,6 +4203,8 @@ export const promiseMethods = (method: PromiseBuilder) => ({
       status: method.query(core_guests_status),
     },
     libraries: {
+      /** `core.libraries.cancelScan` (mutation, signed-in): Stop a library's scan at the attempt you saw; a finished scan stays as it ended, and what a scan wrote stays. */
+      cancelScan: method.mutation(core_libraries_cancelScan),
       /** `core.libraries.create` (mutation, admin, API keys refused): Create a library of movies or music from folders on the server and scan it. */
       create: method.mutation(core_libraries_create),
       /** `core.libraries.get` (query, signed-in): Show a library, how many items it holds, its latest scan, and to its managers its folders. */
@@ -4081,6 +4254,8 @@ export const promiseMethods = (method: PromiseBuilder) => ({
     },
     server: {
       backups: {
+        /** `core.server.backups.active` (query, admin): Show the backup queued or running now, if any. */
+        active: method.query(core_server_backups_active),
         /** `core.server.backups.list` (query, admin): List the server's database backups, newest first. */
         list: method.query(core_server_backups_list),
         /** `core.server.backups.run` (mutation, admin): Back up the server's database now, or join the backup already queued or running. */
@@ -4131,6 +4306,12 @@ export const promiseMethods = (method: PromiseBuilder) => ({
       /** `movies.collections.list` (query, movies:read): List collections by name with the titles you may see in each. */
       list: method.query(movies_collections_list),
     },
+    files: {
+      /** `movies.files.list` (query, movies:edit): List a library's files by path with their quality, size, match, and whether they are missing. */
+      list: method.query(movies_files_list),
+      /** `movies.files.summary` (query, movies:edit): Count a library's missing files, since when the oldest is missing, and its unmatched titles. */
+      summary: method.query(movies_files_summary),
+    },
     history: {
       /** `movies.history.continueWatching` (query, movies:read): List what to resume and which episodes come next, most recent first. */
       continueWatching: method.query(movies_history_continueWatching),
@@ -4142,6 +4323,8 @@ export const promiseMethods = (method: PromiseBuilder) => ({
       markWatched: method.mutation(movies_history_markWatched),
     },
     imports: {
+      /** `movies.imports.cancel` (mutation, movies:edit): Stop a Jellyfin or Plex import, as an owner or an admin; what it already wrote stays. */
+      cancel: method.mutation(movies_imports_cancel),
       /** `movies.imports.get` (query, movies:edit): Show one Jellyfin or Plex import, its job, and what it wrote. */
       get: method.query(movies_imports_get),
       /** `movies.imports.list` (query, movies:edit): List Jellyfin and Plex imports, newest first, with their phase and what they wrote. */

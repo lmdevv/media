@@ -1,6 +1,10 @@
-import { assert, describe, it } from "@effect/vitest";
+import { NodeServices } from "@effect/platform-node";
+import { assert, describe, it, layer } from "@effect/vitest";
+import { LibraryId } from "@media/contracts/ids";
+import { Context, Effect, FileSystem, Layer, Path } from "effect";
 
-import { pathsToSend } from "./core-rescans.ts";
+import { testConfigLayer } from "../testing/test-config.ts";
+import { foldersToWatch, pathsToSend } from "./core-rescans.ts";
 
 describe("CoreRescans.pathsToSend", () => {
   it("sends each changed path once, none inside another it sends", () => {
@@ -30,5 +34,78 @@ describe("CoreRescans.pathsToSend", () => {
 
     assert.deepStrictEqual(pathsToSend("/media", many), ["/media"]);
     assert.lengthOf(pathsToSend("/media", many.slice(0, 32)), 32);
+  });
+});
+
+class Folders extends Context.Service<
+  Folders,
+  {
+    readonly inside: string;
+    readonly linked: string;
+    readonly outside: string;
+    readonly escaping: string;
+    readonly unmounted: string;
+  }
+>()("test/CoreRescans/Folders") {}
+
+const foldersLayer = Layer.unwrap(
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const base = yield* fs.makeTempDirectoryScoped({ prefix: "rescans-folders-" });
+    const approved = path.join(base, "media");
+    const inside = path.join(approved, "films");
+    const outside = path.join(base, "outside");
+    const linked = path.join(base, "films");
+    const escaping = path.join(approved, "escape");
+
+    yield* fs.makeDirectory(inside, { recursive: true });
+    yield* fs.makeDirectory(outside);
+    yield* fs.symlink(inside, linked);
+    yield* fs.symlink(outside, escaping);
+
+    const unmounted = path.join(base, "nas", "films");
+
+    return Layer.succeed(
+      Folders,
+      Folders.of({ inside, linked, outside, escaping, unmounted }),
+    ).pipe(Layer.merge(testConfigLayer({ LIBRARY_ROOTS: approved, DATA_DIR: base })));
+  }),
+).pipe(Layer.provideMerge(NodeServices.layer));
+
+describe("CoreRescans.foldersToWatch", () => {
+  const libraryId = LibraryId.make("library-1");
+
+  layer(foldersLayer, { excludeTestServices: true })((test) => {
+    test.effect(
+      "watches each folder once whatever path names it, a link at its own path, and none outside",
+      () =>
+        Effect.gen(function* () {
+          const { inside, linked, outside, escaping, unmounted } = yield* Folders;
+
+          const watched = yield* foldersToWatch([
+            { libraryId, folders: [inside, linked, outside, escaping, unmounted] },
+          ]);
+
+          assert.deepStrictEqual(watched, [{ libraryId, roots: [inside, unmounted] }]);
+
+          const aliasOnly = yield* foldersToWatch([{ libraryId, folders: [linked] }]);
+
+          assert.deepStrictEqual(aliasOnly, [{ libraryId, roots: [linked] }]);
+
+          const other = LibraryId.make("library-2");
+
+          const across = yield* foldersToWatch([
+            { libraryId, folders: [inside] },
+            { libraryId: other, folders: [linked] },
+          ]);
+
+          assert.deepStrictEqual(across, [{ libraryId, roots: [inside] }]);
+
+          const outsideOnly = yield* foldersToWatch([{ libraryId, folders: [outside, escaping] }]);
+
+          assert.deepStrictEqual(outsideOnly, []);
+        }),
+    );
   });
 });

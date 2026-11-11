@@ -450,7 +450,7 @@ const disown = async (ctx: ClaimCtx, libraryId: Id<"libraries">): Promise<void> 
 
   const scan = library.lastScan === null ? null : await ctx.db.get(library.lastScan);
 
-  if (scan?.status === "running") await cancel(ctx, scan._id);
+  if (scan?.status === "running") await cancel(ctx, scan._id, null);
 
   await ctx.scheduler.runAfter(0, internal.core.scans.purgeLibrary, { libraryId });
   await wake(ctx, libraryId);

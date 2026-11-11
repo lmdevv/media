@@ -369,6 +369,24 @@ export const serverFunctions = {
     args: Schema.Struct({ path: Schema.String }),
     result: Schema.Struct({ queued: Schema.Int }),
   }),
+  /**
+   * A page of the movies libraries with their folders as recorded, for the server to watch
+   * each folder at the path its library names.
+   */
+  scanWatched: serverQuery({
+    name: "core.scans.watched",
+    path: "core/scans:watched",
+    args: Schema.Struct({
+      paginationOpts: Schema.Struct({ numItems: Schema.Int, cursor: Schema.NullOr(Schema.String) }),
+    }),
+    result: Schema.Struct({
+      page: Schema.Array(
+        Schema.Struct({ libraryId: LibraryId, folders: Schema.Array(Schema.String) }),
+      ),
+      continueCursor: Schema.String,
+      isDone: Schema.Boolean,
+    }),
+  }),
   moviesKnown: serverMutation({
     name: "movies.scanner.known",
     path: "movies/scanner:known",

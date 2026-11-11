@@ -10,6 +10,17 @@ import type { MutationCtx, QueryCtx } from "../../convex/_generated/server";
 import { refuseKeys, requireCaller } from "../../convex/core/auth/caller";
 import type { Caller } from "../../convex/core/auth/caller";
 
+const cancelScanArgs = v.object({ jobId: v.id("jobs"), attempt: v.number() });
+
+const cancelScanResult = v.union(
+  v.object({
+    outcome: v.literal("finished"),
+    status: v.union(v.literal("succeeded"), v.literal("failed"), v.literal("canceled")),
+  }),
+  v.object({ outcome: v.literal("canceling") }),
+  v.object({ outcome: v.literal("movedOn") }),
+);
+
 const createArgs = v.object({
   name: v.string(),
   kind: v.union(v.literal("movies"), v.literal("music")),
@@ -40,6 +51,10 @@ const getResult = v.object({
       done: v.union(v.number(), v.null()),
       total: v.union(v.number(), v.null()),
       error: v.union(v.string(), v.null()),
+      message: v.union(v.string(), v.null()),
+      startedAt: v.union(v.number(), v.null()),
+      attempt: v.number(),
+      canceling: v.boolean(),
       finishedAt: v.union(v.number(), v.null()),
     }),
     v.null(),
@@ -95,6 +110,13 @@ const setFoldersResult = v.object({ scanJobId: v.union(v.id("jobs"), v.null()) }
 
 /** The handlers `convex/core/libraries.ts` passes to `register`, one per `core.libraries` command. */
 export interface Handlers {
+  /** `core.libraries.cancelScan` (mutation, signed-in): Stop a library's scan at the attempt you saw; a finished scan stays as it ended, and what a scan wrote stays. */
+  readonly cancelScan: (
+    ctx: Omit<MutationCtx, "auth">,
+    args: Infer<typeof cancelScanArgs>,
+    caller: Caller,
+  ) => Infer<typeof cancelScanResult> | Promise<Infer<typeof cancelScanResult>>;
+
   /** `core.libraries.create` (mutation, admin, API keys refused): Create a library of movies or music from folders on the server and scan it. */
   readonly create: (
     ctx: Omit<MutationCtx, "auth">,
@@ -147,6 +169,12 @@ export interface Handlers {
 
 /** The `api` reference of each `core.libraries` command; `commands/refs.ts` checks them. */
 export interface Refs {
+  readonly cancelScan: FunctionReference<
+    "mutation",
+    "public",
+    Infer<typeof cancelScanArgs>,
+    Infer<typeof cancelScanResult>
+  >;
   readonly create: FunctionReference<
     "mutation",
     "public",
@@ -193,6 +221,12 @@ export interface Refs {
 
 /** Registers the `core.libraries` commands as public Convex functions with their declared arguments and result. */
 export const register = (handlers: Handlers) => ({
+  cancelScan: mutation({
+    args: cancelScanArgs,
+    returns: cancelScanResult,
+    handler: async (ctx, args) =>
+      handlers.cancelScan(ctx, args, await requireCaller(ctx, "signed-in")),
+  }),
   create: mutation({
     args: createArgs,
     returns: createResult,

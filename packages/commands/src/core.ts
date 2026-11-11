@@ -38,6 +38,20 @@ const jobStatus = v.union(
   v.literal("canceled"),
 );
 
+/**
+ * What asking a job to stop did: a queued job is canceled at once, a running one stops at its
+ * worker's next call, and one that already finished stays as it ended.
+ */
+export const canceled = v.union(
+  v.object({
+    outcome: v.literal("finished"),
+    status: v.union(v.literal("succeeded"), v.literal("failed"), v.literal("canceled")),
+  }),
+  v.object({ outcome: v.literal("canceling") }),
+  /** It was claimed again after the attempt named, so nothing changed; look again to cancel it. */
+  v.object({ outcome: v.literal("movedOn") }),
+);
+
 const deviceMode = v.union(v.literal("personal"), v.literal("shared"));
 
 const approvalIntent = v.union(v.literal("open"), v.literal("leave"));
@@ -203,6 +217,15 @@ export const core = [
         trigger: v.union(v.literal("nightly"), v.literal("manual")),
         takenAt: v.number(),
       }),
+    ),
+  }),
+  query("core.server.backups.active", {
+    summary: "Show the backup queued or running now, if any",
+    scope: "admin",
+    args: {},
+    result: v.union(
+      v.null(),
+      v.object({ jobId: v.id("jobs"), status: v.union(v.literal("queued"), v.literal("running")) }),
     ),
   }),
   mutation("core.server.backups.run", {
@@ -473,6 +496,14 @@ export const core = [
           done: v.union(v.number(), v.null()),
           total: v.union(v.number(), v.null()),
           error: v.union(v.string(), v.null()),
+          /** What the scan is doing now, such as `probing`; null when it reported nothing. */
+          message: v.union(v.string(), v.null()),
+          /** When the attempt running now started; null unless it runs. */
+          startedAt: v.union(v.number(), v.null()),
+          /** Claims so far, the latest attempt's number; a cancel names the attempt it saw. */
+          attempt: v.number(),
+          /** True while a cancel waits for the running scan's worker to stop. */
+          canceling: v.boolean(),
           finishedAt: v.union(v.number(), v.null()),
         }),
         v.null(),
@@ -503,6 +534,17 @@ export const core = [
       mode: v.optional(v.union(v.literal("incremental"), v.literal("full"))),
     },
     result: v.object({ jobId: v.id("jobs"), created: v.boolean() }),
+  }),
+  mutation("core.libraries.cancelScan", {
+    summary:
+      "Stop a library's scan at the attempt you saw; a finished scan stays as it ended, and what a scan wrote stays",
+    scope: "signed-in",
+    args: {
+      jobId: v.id("jobs"),
+      /** The scan's `attempt` as `core.libraries.get` showed it; a later attempt answers movedOn. */
+      attempt: v.number(),
+    },
+    result: canceled,
   }),
   mutation("core.libraries.remove", {
     summary: "Delete a library you manage and everything it lists; the files on disk stay",

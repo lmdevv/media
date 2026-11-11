@@ -76,6 +76,10 @@ const detail: LibraryDetail = {
     done: 3,
     total: 10,
     error: null,
+    message: null,
+    startedAt: 0,
+    attempt: 1,
+    canceling: false,
     finishedAt: null,
   },
 };
@@ -155,6 +159,10 @@ describe("LibraryView", () => {
         done: null,
         total: null,
         error: "Folder gone",
+        message: null,
+        startedAt: null,
+        attempt: 1,
+        canceling: false,
         finishedAt: 1,
       },
     };

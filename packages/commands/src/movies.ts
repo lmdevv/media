@@ -4,6 +4,7 @@ import type { Validator } from "convex/values";
 
 import { mutation, query } from "./command.ts";
 import type { Command } from "./command.ts";
+import { canceled } from "./core.ts";
 
 const nullable = <T, FieldPaths extends string>(validator: Validator<T, "required", FieldPaths>) =>
   v.union(validator, v.null());
@@ -437,8 +438,45 @@ const importRun = v.object({
     total: v.union(v.number(), v.null()),
     message: v.union(v.string(), v.null()),
     error: v.union(v.string(), v.null()),
+    /** When the attempt running now started; null unless it runs. */
+    startedAt: v.union(v.number(), v.null()),
+    /** Claims so far, the latest attempt's number; a cancel names the attempt it saw. */
+    attempt: v.number(),
+    /** True while a cancel waits for the running import's worker to stop. */
+    canceling: v.boolean(),
     finishedAt: v.union(v.number(), v.null()),
   }),
+});
+
+/** Which of a library's files to list: every file, the missing ones, or those of unmatched titles. */
+const libraryFileFilter = v.union(v.literal("all"), v.literal("missing"), v.literal("unmatched"));
+
+/**
+ * One file of a library as its managers review it: where it is, its picture and size, whether a
+ * scan still finds it, and the title and episode it plays with their match.
+ */
+const libraryFile = v.object({
+  id: v.id("mediaFiles"),
+  path: v.string(),
+  version: mediaVersion,
+  missing: v.boolean(),
+  /** When a scan first missed it; null while it is on disk. */
+  missingSince: nullable(v.number()),
+  title: v.object({
+    id: v.id("titles"),
+    kind: titleKind,
+    name: v.string(),
+    year: nullable(v.number()),
+    poster: nullable(v.string()),
+    matchStatus,
+  }),
+  episode: nullable(
+    v.object({
+      id: v.id("episodes"),
+      seasonNumber: v.number(),
+      episodeNumber: v.number(),
+    }),
+  ),
 });
 
 /**
@@ -683,5 +721,41 @@ export const movies = [
     scope: "movies:edit",
     args: { importId: v.id("imports") },
     result: importRun,
+  }),
+  mutation("movies.imports.cancel", {
+    summary: "Stop a Jellyfin or Plex import, as an owner or an admin; what it already wrote stays",
+    scope: "movies:edit",
+    args: {
+      importId: v.id("imports"),
+      /** The job's `attempt` as the import showed it; a later attempt answers movedOn. */
+      attempt: v.number(),
+    },
+    result: canceled,
+  }),
+  query("movies.files.list", {
+    summary:
+      "List a library's files by path with their quality, size, match, and whether they are missing",
+    scope: "movies:edit",
+    args: {
+      libraryId: v.id("libraries"),
+      /** `all` when omitted; `missing` orders by when each went missing. */
+      filter: v.optional(libraryFileFilter),
+      paginationOpts: paginationOptsValidator,
+    },
+    result: paginationResultValidator(libraryFile),
+  }),
+  query("movies.files.summary", {
+    summary:
+      "Count a library's missing files, since when the oldest is missing, and its unmatched titles",
+    scope: "movies:edit",
+    args: { libraryId: v.id("libraries") },
+    result: v.object({
+      /** Null for an editor whose restrictions hide titles: the totals count every title. */
+      missing: nullable(v.number()),
+      /** When the file missing longest went missing; null when none is, or as `missing` is. */
+      missingSince: nullable(v.number()),
+      /** Null as `missing` is. */
+      unmatched: nullable(v.number()),
+    }),
   }),
 ] as const satisfies ReadonlyArray<Command>;

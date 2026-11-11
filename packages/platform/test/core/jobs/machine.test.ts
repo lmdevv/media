@@ -242,21 +242,21 @@ describe("job machine", () => {
   });
 
   it("cancels a queued job at once", () => {
-    expect(run(queued(), { type: "cancel" })).toMatchObject({
+    expect(run(queued(), { type: "cancel", attempt: null })).toMatchObject({
       status: "canceled",
       finishedAt: NOW,
     });
   });
 
   it("keeps a canceled running job until its worker's next lease call answers canceled", () => {
-    const requested = run(claim(queued()), { type: "cancel" });
+    const requested = run(claim(queued()), { type: "cancel", attempt: null });
     const acked = next(report(requested));
 
     expect(requested).toMatchObject({ status: "running", cancelRequestedAt: NOW });
-    expect(run(requested, { type: "cancel" })).toBe(requested);
+    expect(run(requested, { type: "cancel", attempt: null })).toBe(requested);
     expect(acked.status).toBe("canceled");
     expect(report(acked)).toEqual({ ok: false, refused: "canceled" });
-    expect(run(acked, { type: "cancel" })).toBe(acked);
+    expect(run(acked, { type: "cancel", attempt: null })).toBe(acked);
   });
 
   it("ends a canceling job at a check, as at every lease call, and changes nothing else", () => {
@@ -266,21 +266,52 @@ describe("job machine", () => {
       step(job, { type: "check", lease: { attempt } }, NOW, policy);
 
     expect(check(running)).toEqual({ ok: true, changed: false, next: running, writes: [] });
-    expect(next(check(run(running, { type: "cancel" })))).toMatchObject({
+    expect(next(check(run(running, { type: "cancel", attempt: null })))).toMatchObject({
       status: "canceled",
       finishedAt: NOW,
     });
     expect(check(claim(lapse(running)), 1)).toEqual({ ok: false, refused: "lost" });
   });
 
+  it("cancels only the attempt the canceller saw, and answers movedOn once another holds the job", () => {
+    const first = claim(queued());
+    const requeued = lapse(first);
+    const second = claim(requeued, NOW + LEASE_MS + 2);
+
+    const cancelAt = (job: JobFields, attempt: number): Step =>
+      step(job, { type: "cancel", attempt }, NOW + LEASE_MS + 3, policy);
+
+    expect(second.attempts).toBe(first.attempts + 1);
+    expect(cancelAt(second, first.attempts)).toEqual({ ok: false, refused: "movedOn" });
+    expect(next(cancelAt(second, second.attempts))).toMatchObject({
+      status: "running",
+      attempts: second.attempts,
+      cancelRequestedAt: NOW + LEASE_MS + 3,
+    });
+    expect(next(cancelAt(requeued, first.attempts))).toMatchObject({ status: "canceled" });
+    expect(next(cancelAt(queued(), 0)).status).toBe("canceled");
+
+    const done = next(succeed(second));
+
+    expect(cancelAt(done, first.attempts)).toEqual({
+      ok: true,
+      changed: false,
+      next: done,
+      writes: [],
+    });
+  });
+
   it("drops a canceling job's dedupe key, so a new job of the same key can be queued", () => {
     const running = claim({ ...queued(), dedupeKey: "probe.wide:x" });
 
-    expect(run(running, { type: "cancel" })).toMatchObject({ status: "running", dedupeKey: null });
+    expect(run(running, { type: "cancel", attempt: null })).toMatchObject({
+      status: "running",
+      dedupeKey: null,
+    });
   });
 
   it("cancels a canceling job whose lease lapses instead of re-queueing it", () => {
-    expect(lapse(run(claim(queued()), { type: "cancel" })).status).toBe("canceled");
+    expect(lapse(run(claim(queued()), { type: "cancel", attempt: null })).status).toBe("canceled");
   });
 
   it("answers a repeated finish of the same attempt with the same state and no writes", () => {
@@ -391,12 +422,12 @@ describe("job machine", () => {
       }),
     );
 
-    expect(step(halfway, { type: "cancel" }, NOW, policy)).toMatchObject({
+    expect(step(halfway, { type: "cancel", attempt: null }, NOW, policy)).toMatchObject({
       ok: true,
       next: { status: "running" },
       writes: [],
     });
-    expect(report(run(halfway, { type: "cancel" }))).toMatchObject({
+    expect(report(run(halfway, { type: "cancel", attempt: null }))).toMatchObject({
       ok: true,
       next: { status: "canceled" },
       writes: [{ type: "purge", from: 6 }],
@@ -440,7 +471,7 @@ describe("job machine", () => {
       writes: [],
     });
     expect(claim(run(running, requeue))).toMatchObject({ status: "running", attempts: 3 });
-    expect(run(run(running, { type: "cancel" }), requeue).status).toBe("canceled");
+    expect(run(run(running, { type: "cancel", attempt: null }), requeue).status).toBe("canceled");
   });
 
   it("ends a job whose result the restore is as succeeded, and leaves jobs not running", () => {
@@ -457,7 +488,9 @@ describe("job machine", () => {
       finishedAt: NOW,
       message: "Restored",
     });
-    expect(run(run(claim(queued()), { type: "cancel" }), restoredOk).status).toBe("succeeded");
+    expect(run(run(claim(queued()), { type: "cancel", attempt: null }), restoredOk).status).toBe(
+      "succeeded",
+    );
     expect(step(waiting, restoredOk, NOW, policy)).toEqual({
       ok: true,
       changed: false,
