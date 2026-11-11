@@ -45,7 +45,7 @@ packages/
   commands/           the command list and its generator
   contracts/          Effect Schema DTOs, errors, the server's HttpApi
   sdk/                Effect core with /effect, /react, /promise entry points
-  mobile-core/        shared iOS app code, including the shared keychain sign-in
+  mobile-core/        shared iOS app code: connection, shared keychain, sign-in, enrollment
   ui/                 shared shadcn base and type scale
   config/             shared strict tsconfig
 deploy/               the all-in-one image; Compose adds optional sidecars
@@ -189,7 +189,7 @@ Each row is the ADR's own title. ADR 0027 supersedes ADR 0026.
 | [0017](decisions/0017-one-group-session-feature.md)                                           | Build group sessions once in the core and let each domain supply its state     | D34                                         |
 | [0018](decisions/0018-connect-remote-control-and-casting.md)                                  | Put remote control and casting in the core and keep third-party support small  | D35, D44                                    |
 | [0019](decisions/0019-synced-settings-and-core-downloads.md)                                  | Mark which settings sync per user and run downloads as a core service          | D36, D37                                    |
-| [0020](decisions/0020-branded-clients-with-one-sign-in.md)                                    | Ship a branded client per product on a shared base, with one sign-in           | D38, D39, D40, D48                          |
+| [0020](decisions/0020-branded-clients-with-one-sign-in.md)                                    | Ship a branded client per product on a shared base, with one sign-in           | D38, D39, D40, D48, D59, D64                |
 | [0021](decisions/0021-one-cli-and-one-agent-skill.md)                                         | Ship one `media` CLI and one agent skill with a reference per domain           | D41                                         |
 | [0022](decisions/0022-agent-workflow-tracking-and-copyleft.md)                                | Keep movies' agent workflow, one Linear team, and a merged copyleft list       | D11, D42, D43                               |
 | [0023](decisions/0023-run-the-core-in-its-own-deployment-until-the-movies-port.md)            | Run the core in its own Convex deployment until the movies port                | D04, D14, D22                               |

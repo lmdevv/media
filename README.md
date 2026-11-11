@@ -259,9 +259,10 @@ core's admin key (`--env-file`, or `MEDIA_CORE_URL` and `MEDIA_CORE_ADMIN_KEY`).
 
 ## iOS app
 
-`apps/mobile` is the iPhone app: Expo, Expo Router, and Uniwind over the same SDK. People type the
-server's address; the app asks the media service where accounts live and signs in from there.
-Building and running it is in [apps/mobile/README.md](apps/mobile/README.md).
+`apps/mobile-movies` is the movies iPhone app: Expo, Expo Router, and Uniwind over the platform SDK
+and `@media/mobile-core`. People type the server's address; the app reads where the core lives
+from the server and signs in through it. Building and running it is in
+[apps/mobile-movies/README.md](apps/mobile-movies/README.md).
 
 ## Telemetry
 

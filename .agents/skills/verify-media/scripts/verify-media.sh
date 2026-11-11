@@ -845,14 +845,14 @@ before_source() {
 # native inputs, and the derived data goes, so every run and worktree with the same inputs installs
 # one build. JavaScript always comes from Metro.
 native_hash() {
-  (cd "${1:-$root}/apps/mobile" && (cat app.json package.json ../../pnpm-lock.yaml; find assets -type f | sort) | sha1sum | cut -d' ' -f1)
+  (cd "${1:-$root}/apps/mobile-movies" && (cat app.json package.json ../../pnpm-lock.yaml; find assets -type f | sort) | sha1sum | cut -d' ' -f1)
 }
 
 ios_build() {
   local id="$1" remote="$mac_dir/verify-$run"
-  local app="$remote/apps/mobile"
+  local app="$remote/apps/mobile-movies"
   ssh "$mac" "mkdir -p $remote"
-  rsync -az --delete --exclude node_modules --exclude /apps/mobile/ios --exclude .git --exclude dist \
+  rsync -az --delete --exclude node_modules --exclude /apps/mobile-movies/ios --exclude .git --exclude dist \
     --exclude .expo --exclude .turbo --exclude /captures --exclude .repos "$root/" "$mac:$remote/"
   # No .git on the Mac, so the root prepare script (lefthook) can't run there.
   on_mac "cd $remote && pnpm install --frozen-lockfile --ignore-scripts >/dev/null"
@@ -880,8 +880,9 @@ cmd_ios_up() {
     esac
   done
   [[ -n "$(read_state people)" ]] || die "start the $side side first: \`up --side $side\` (with setup)"
-  # The app signs in to old movies' own Convex, which a one-backend image no longer runs.
-  core_only && die "the movies iOS app can't reach the $side side's one-backend image until it moves to the core (p4-mobile-movies); verify iOS on a side with old movies' backend"
+  # The app signs in to the core (p4-mobile-movies). An image from before the movies cutover runs
+  # old movies' own Convex, which only that revision's app and its own verify skill reach.
+  core_only || die "this checkout's movies iOS app signs in to the core, which the $side side's $(read_state layout) image does not serve; run the iOS lane from a checkout of that image's revision with its own verify skill"
   [[ -z "$(read_state ios_udid)" ]] || die "the $side side already has a simulator; run \`ios down --side $side\`"
   on_mac "test -x $axe" || die "AXe is missing on $mac at ~/music-ios/tools/axe/axe; unpack the release from github.com/cameroncooke/AXe there"
   # The Mac's disk runs nearly full, and a full disk fails a build or a boot halfway with errors
@@ -919,7 +920,7 @@ cmd_ios_up() {
   # Not CI=1: that turns off file watching and the app keeps serving the first bundle.
   # Its own session, so `ios down` stops pnpm, Expo, and Metro's workers as one process group. The
   # log takes all its output, so nothing that reads this script's output waits on it.
-  setsid bash -c 'cd "$1" && REACT_NATIVE_PACKAGER_HOSTNAME=127.0.0.1 exec pnpm --filter mobile exec \
+  setsid bash -c 'cd "$1" && REACT_NATIVE_PACKAGER_HOSTNAME=127.0.0.1 exec pnpm --filter @media/mobile-movies exec \
     expo start --dev-client --port "$2"' metro "$src" "$metro" < /dev/null > "$state/metro.log" 2>&1 &
   write_state metro_pid "$!"
   for _ in $(seq 1 120); do
@@ -979,39 +980,31 @@ ios_dismiss_save_password() {
         $axe touch -x \$x -y \$y --down --up --delay 0.15 --udid $(udid) >/dev/null; exit 0; fi; done; exit 1"
 }
 
+# Signs in as the seeded person $1 (the owner, lucia, by default) with their username and password.
+# The app has no profiles (D12): a person is a user, and switching person is signing out first.
 ios_sign_in() {
-  local tree
+  local who="${1:-$(owner_name)}" tree
   tree="$(ios_tree)"
-  local typed=0
-  # Already signed in, on the profile picker: only the pick is left.
-  if ! grep -q 'Manage Profiles' <<<"$tree"; then
-    if ! grep -q 'Sign In with a Code' <<<"$tree"; then
-      ios_tap_label "Connect to Server"
-      ios_wait "Server address" 30
-      ios_tap_label "Server address"
-      ios_type "$(url)"
-      ios_tap_label "Continue"
-      ios_wait "Sign In with a Code" 60
-    fi
-    ios_tap_label "Email"
-    ios_type "admin@movies.local"
-    ios_tap_label "Password"
-    ios_type "$password"
-    ios_tap_label "Sign In"
-    typed=1
+  if ! grep -q 'Sign In with a Code' <<<"$tree"; then
+    ios_tap_label "Connect to Server"
+    ios_wait "Server address" 30
+    ios_tap_label "Server address"
+    ios_type "$(url)"
+    ios_tap_label "Continue"
+    ios_wait "Sign In with a Code" 60
   fi
-  local tapped=0
+  ios_tap_label "Username"
+  ios_type "$who"
+  ios_tap_label "Password"
+  ios_type "$password"
+  ios_tap_label "Sign In"
   for _ in $(seq 1 60); do
     tree="$(ios_tree 2>/dev/null || true)"
-    if grep -q "^ *Lucía" <<<"$tree" && grep -q 'Manage Profiles' <<<"$tree"; then
-      # Still on the picker after a tap: the system's Save Password sheet took it.
-      ((tapped)) && { ios_dismiss_save_password || true; }
-      ios_tap_label "Lucía"
-      tapped=1
     # A phone's tab bar is a Tab Bar; an iPad's sits at the top as a toolbar of radio buttons.
-    elif grep -qE 'Tab Bar|^ *Home = 1 \| RadioButton' <<<"$tree"; then
+    if grep -qE 'Tab Bar|^ *Home = 1 \| RadioButton' <<<"$tree"; then
       # After a password, the Save Password card can land after Home does, over the next screenshot.
-      ((typed)) && { sleep 3; ios_dismiss_save_password || true; }
+      sleep 3
+      ios_dismiss_save_password || true
       return 0
     fi
     sleep 1
@@ -1034,7 +1027,10 @@ cmd_ios() {
       on_mac "curl -fsS --max-time 10 $(convex_url)/version >/dev/null" && echo "ok    the Mac reaches Convex at $(convex_url)" || { echo "FAIL  the Mac reaches $(convex_url)"; failed=1; }
       return "$failed" ;;
     describe) ios_tree ;;
-    sign-in) ios_sign_in && echo "signed in on $(udid)" ;;
+    sign-in)
+      local who=""
+      [[ "${args[1]:-}" == --as ]] && who="${args[2]:?ios sign-in --as <person>}"
+      ios_sign_in "$who" && echo "signed in on $(udid)" ;;
     find) ios_find "${args[1]:?ios find <label>}" ;;
     tap)
       case "${args[1]:-}" in

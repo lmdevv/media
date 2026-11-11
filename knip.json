@@ -14,7 +14,7 @@
     },
     "apps/web-movies": {},
     "apps/web-account": {},
-    "apps/mobile": {
+    "apps/mobile-movies": {
       "entry": ["src/app/**/*.tsx"],
       "project": ["src/**/*.{ts,tsx,css}"]
     },

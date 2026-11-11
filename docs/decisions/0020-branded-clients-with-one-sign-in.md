@@ -2,8 +2,9 @@
 
 - Status: Accepted, 2026-11-03. Amended 2026-11-06 with the account client as built,
   2026-11-07 with one sign-in session per browser (D52), 2026-11-09 with what the iOS keychain
-  holds (D48, D59), and 2026-11-10 with the movies client on the web as built (D52, D57, D62).
-- Decisions: D38, D39, D40, D48, D52, D57, D59, D62
+  holds (D48, D59), 2026-11-10 with the movies client on the web as built (D52, D57, D62), and
+  2026-11-11 with the movies iOS app as built (D12, D48, D51, D56, D59, D62, D64).
+- Decisions: D12, D38, D39, D40, D48, D51, D52, D56, D57, D59, D62, D64
 
 ## Context
 
@@ -304,3 +305,104 @@ them, and the parity unit `p4-movies-parity` brings them back before the release
 The library page's "Scan now" asks for a full scan, which reads every file again, as old movies'
 did: `core.libraries.scan` takes `mode: "full"`, carried in the scan job's payload to the server's
 scanner. A full request joins a scan already queued or running, whatever its mode, as before.
+
+## The movies iOS app as built (amended 2026-11-11)
+
+`p4-mobile-movies` moved `apps/mobile` to `apps/mobile-movies`, the package `@media/mobile-movies`,
+on the platform SDK. What every [media] iOS app shares lives in `packages/mobile-core`: the server
+connection, the keychains, sign-in, and device enrollment.
+
+### Connecting
+
+People type the server's address. `@media/mobile-core/server` checks `/api/health`, then reads
+`convexUrl` and `moviesUrl` from `/api/client-config` (ADR 0027): the core to run the platform
+client on, and the movies web client, which a shared title link opens as `<moviesUrl>/title/<id>`.
+Every sign-in goes to the media server's sign-in boundary, `signInUrlFor` the server's address
+(ADR 0007).
+
+### What the keychains hold (D48)
+
+| Keychain group                         | Key                      | Holds                                                             |
+| -------------------------------------- | ------------------------ | ----------------------------------------------------------------- |
+| shared, `<Team ID>.dev.lmdevv.media`   | `media.phone`            | the server's address, the person's user id, and the grant         |
+| the app's own, `<Team ID>.<bundle id>` | `media.server`           | the connection: the server, the core, and `moviesUrl`             |
+| the app's own                          | `media.session.<server>` | the platform client's session tokens                              |
+| the app's own                          | `media.app.<server>`     | the app's device code, who it last signed in as, and its D59 mark |
+| the app's own                          | `movies.*`               | the app's local preferences                                       |
+
+- Every app lists its own group first and the shared group second in its
+  `keychain-access-groups` entitlement, and `app.json` names the Team ID (`ios.appleTeamId`), from
+  which the app forms both names at run time (`groupsFor` in `@media/mobile-core/keychains`).
+- Every keychain read, write, and delete names its group. iOS puts an item written without one in
+  the first group the entitlement lists, so an unnamed write could land in the shared group, where
+  the phone's other apps would read a session. Listing the own group first is a second guard.
+- The records sign-in's safety depends on, the D59 mark, the person, and the grant, are written
+  durably: a write the keychain refuses, as while the device is locked, throws and holds nothing,
+  so the sign-in stops and the password prompt stays. Only records whose loss is harmless, the
+  connection and the app's local preferences, fall back to memory for the launch.
+- A build that cannot write the group, such as one without a team, keeps the shared record in the
+  app's own keychain. It then works alone: nothing reaches the phone's other apps.
+- An app with no connection of its own, whose shared keychain names a server, connects there on
+  its first launch without asking.
+
+### Signing in
+
+- **The D59 mark.** Before any call that can open a session, the app sets `opened` in its own
+  record. A launch that finds it set, or a person recorded, asks for the password and never
+  exchanges the grant. So every state a crash can leave from the first write on, mid sign-in or
+  mid exchange, asks for the password (`@media/mobile-core/sign-in.test.ts`, "a crash part way
+  through a sign-in", starts a launch from the state after each write).
+- **A password, an owner setup, or an invite** opens a session. The app enrolls its own device
+  with the device code it keeps and records who signed in, then issues the phone's grant with
+  `core.devices.deviceGrants.issue`, handing over the grant the shared keychain holds for this
+  server. A grant of the same person is confirmed. Another person's is revoked, with every session
+  it minted (D64). The grant is the last thing written, to the shared keychain, once every call
+  has succeeded.
+- **A device code** that someone approves opens a session that may not issue a grant (ADR 0006),
+  so the app only enrolls. The shared keychain keeps whatever grant it held, and the phone's next
+  password sign-in confirms or revokes it.
+- **First launch.** An app that opens signed out and has never begun a sign-in on this server sets
+  its mark, exchanges the shared grant for a session of its own (`Credentials.Grant`), then enrolls
+  as its own device.
+- **D59.** Once the app has begun a sign-in on a server, it never exchanges the grant again. When
+  its session ends, whether the core refused it or the person signed out, the app shows sign-in
+  with the person's username filled in and asks for the password. The platform client first
+  refreshes once on `Unauthenticated` (D51).
+- If issuing or enrolling fails, the app signs the new session out again, so it is never left
+  signed in without its grant or its device.
+- The platform client reports signed in as soon as the session opens. The app keeps its sign-in
+  screens until the grant and the device are done, so no screen runs on a session that has no
+  device yet.
+- **Signing out** ends only this app's session. The grant stays in the shared keychain for the
+  phone's other apps, and the next person's password sign-in replaces it (D64). Switching person
+  is signing out, then signing in (D12, D52). A kid signs in as their own user, and the core
+  applies their restrictions.
+
+### What moved where
+
+- Browse, titles, my list, history, and search read `platform.movies.*`.
+- The player takes one ticket per start from `movies.play.start` and reports with its
+  `playbackId` (ADR 0011). It renews no token. It stops its server stream at once, with
+  `Playback.stopNow`, when it is torn down, and when nobody watches or hears it while the app is
+  away: in the background with no Picture in Picture and nothing playing (owner, 2026-11-11). A
+  stream someone watches in Picture in Picture or hears as background audio keeps its transcode
+  slot; it stops when Picture in Picture closes or playback pauses there. A start that answers
+  while the app is in the background opens no stream until the app comes back. iOS sends the
+  background event before it ends an app, so a paused player is stopped before a kill. The rules
+  are `StreamLifecycle` in `apps/mobile-movies/src/lib/player/app-state.ts`.
+- Downloads follow `core.downloads.list` and fetch through 15-minute download tickets (ADR 0019),
+  and offline progress goes to `movies.play.reportOffline`.
+- The audio and subtitle languages, autoplay, and the streaming and download quality are the core's
+  settings, so the web clients show what the app set. The rest stay on the phone.
+- Profiles, profile PINs, watch rooms, and together are deleted (D12, D62). Shared-device tiles,
+  unlock codes, and approvals stay in the web account client.
+- The owner screens for libraries, users, import, and backups stay on the old movies SDK until
+  `p4-mobile-owner` (D56). The core runs none of its functions, so against an install they show
+  their load failure.
+- API Keys creates a key and shows its secret once to copy, revokes by ID the keys made on this
+  phone since the app opened, and ends every key. The core has no query that lists a person's
+  keys, so the screen lists only those it made; listing every key waits for a core query, a
+  logged parity follow-up.
+- Left out because the core has no data for them (D62): a person's own list of signed-in devices
+  (the Devices screen lists the registry, for admins), and the email on the account screen
+  (accounts have only a username).

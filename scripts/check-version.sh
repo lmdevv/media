@@ -2,7 +2,7 @@
 # Prints the release version and fails unless every workspace package carries it: the image, the
 # Nix packages, the npm package, and the release binaries all report it. Given a release tag, also
 # fails unless the tag names that version. The iOS app's store version (`expo.version` in
-# apps/mobile/app.json) goes through App Store review on its own schedule, so it is not checked.
+# apps/mobile-movies/app.json) goes through App Store review on its own schedule, so it is not checked.
 #
 #   scripts/check-version.sh            # 0.2.0
 #   scripts/check-version.sh v0.2.0     # the release workflows, with the pushed tag
