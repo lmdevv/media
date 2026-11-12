@@ -11,7 +11,7 @@ import { toast } from "sonner";
 
 import { describeFailure } from "@media/ui/lib/failure";
 import { useAccountActions } from "@/session/account";
-import { useMe } from "@/session/me";
+import { nameOf, useMe } from "@/session/me";
 
 /** The products this account opens, each its own client on this origin (ADR 0020). */
 const PRODUCTS = [
@@ -122,7 +122,7 @@ export function Shell({ children }: { readonly children: ReactNode }) {
           ))}
           actions={
             <>
-              <TopBarLink render={<span />}>{me.username}</TopBarLink>
+              <TopBarLink render={<span />}>{nameOf(me)}</TopBarLink>
               <Button variant="ghost" size="xs" disabled={leaving} onClick={() => void leave()}>
                 Sign out
               </Button>
@@ -143,6 +143,8 @@ interface NavEntry {
 
 const YOU: ReadonlyArray<NavEntry> = [
   { to: "/settings", label: "Settings" },
+  { to: "/devices", label: "Devices" },
+  { to: "/api-keys", label: "API keys" },
   { to: "/device", label: "Approve a device" },
 ];
 

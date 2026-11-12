@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { api } from "../../../convex/_generated/api";
+import { DISPLAY_NAME_MAX, GIVEN_NAME_MAX } from "../../../convex/core/lib/names";
 import { PASSWORD_MAX } from "../../../convex/core/lib/passwords";
+import { enroll, member, picker } from "../../devices";
+import { allPages } from "../../pages";
 import { createPerson, refusal, signIn, signInAs, unique } from "../../sign-in";
 import type { SignedIn } from "../../sign-in";
 import { coreStackFromEnvFile } from "../../stack-env";
@@ -106,5 +109,64 @@ describe.skipIf(stack === undefined)("your own account", { timeout: 120_000 }, (
         }),
       ),
     ).toBe("forbidden");
+  });
+  it("takes a display name that greetings and the users list show, until cleared, and keeps it off pickers", async () => {
+    if (stack === undefined) return;
+    const person = await createPerson(stack, "named");
+    const session = await signInAs(stack, person);
+    const admin = await member(stack, "admin", "admin");
+    const device = await enroll(session, "Living room iPad");
+    const { userId } = await whoIs(session);
+
+    const nameOf = async () => {
+      const pages = await allPages(
+        (paginationOpts) =>
+          admin.signedIn.client.query(api.core.accounts.users.list, { paginationOpts }),
+        200,
+      );
+
+      return pages.flatMap((page) => page.page).find((user) => user.userId === userId)?.displayName;
+    };
+
+    expect(await whoIs(session)).toMatchObject({ displayName: null });
+    expect(await nameOf()).toBeNull();
+
+    await session.client.mutation(api.core.accounts.me.setDisplayName, {
+      displayName: "  Aiko Tanaka ",
+    });
+
+    expect(await whoIs(session)).toMatchObject({ displayName: "Aiko Tanaka" });
+    expect(await nameOf()).toBe("Aiko Tanaka");
+    expect((await picker(stack, device)).tiles).toEqual([{ userId, username: person.username }]);
+
+    await session.client.mutation(api.core.accounts.me.rename, { username: `aiko-${unique()}` });
+
+    expect(await whoIs(session)).toMatchObject({ displayName: "Aiko Tanaka" });
+
+    await session.client.mutation(api.core.accounts.me.setDisplayName, { displayName: null });
+
+    expect(await whoIs(session)).toMatchObject({ displayName: null });
+    expect(await nameOf()).toBeNull();
+  });
+
+  it("takes up to 80 characters, as old movies did, and refuses a blank, unprintable, or keyed one", async () => {
+    if (stack === undefined) return;
+    const session = await signInAs(stack, await createPerson(stack, "fit"));
+
+    const name = (displayName: string, as: SignedIn = session) =>
+      refusal(as.client.mutation(api.core.accounts.me.setDisplayName, { displayName }));
+
+    expect(await name("   ")).toBe("invalid_args");
+    expect(await name("bad\u202Ename")).toBe("invalid_args");
+    expect(await name("x".repeat(DISPLAY_NAME_MAX + 1))).toBe("invalid_args");
+    expect(await name("x".repeat(GIVEN_NAME_MAX + 1))).toBe("accepted");
+    expect(await name("😀".repeat(DISPLAY_NAME_MAX))).toBe("accepted");
+
+    const { key } = await session.client.action(api.core.auth.apiKeys.create, {
+      name: "script",
+      scopes: ["account"],
+    });
+
+    expect(await name("Script", await signIn(stack, "apiKey", { key }))).toBe("forbidden");
   });
 });

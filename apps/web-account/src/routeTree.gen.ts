@@ -5,7 +5,9 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteImport } from './routes/admin'
+import { Route as ApiKeysRouteImport } from './routes/api-keys'
 import { Route as DeviceRouteImport } from './routes/device'
+import { Route as DevicesRouteImport } from './routes/devices'
 import { Route as HomeRouteImport } from './routes/home'
 import { Route as InviteRouteImport } from './routes/invite'
 import { Route as ResetRouteImport } from './routes/reset'
@@ -30,9 +32,19 @@ const AdminRoute = AdminRouteImport.update({
   path: '/admin',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiKeysRoute = ApiKeysRouteImport.update({
+  id: '/api-keys',
+  path: '/api-keys',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DeviceRoute = DeviceRouteImport.update({
   id: '/device',
   path: '/device',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DevicesRoute = DevicesRouteImport.update({
+  id: '/devices',
+  path: '/devices',
   getParentRoute: () => rootRouteImport,
 } as any)
 const HomeRoute = HomeRouteImport.update({
@@ -104,7 +116,9 @@ const AdminLibrariesLibraryIdRoute = AdminLibrariesLibraryIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRouteWithChildren
+  '/api-keys': typeof ApiKeysRoute
   '/device': typeof DeviceRoute
+  '/devices': typeof DevicesRoute
   '/home': typeof HomeRoute
   '/invite': typeof InviteRoute
   '/reset': typeof ResetRoute
@@ -121,7 +135,9 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/api-keys': typeof ApiKeysRoute
   '/device': typeof DeviceRoute
+  '/devices': typeof DevicesRoute
   '/home': typeof HomeRoute
   '/invite': typeof InviteRoute
   '/reset': typeof ResetRoute
@@ -140,7 +156,9 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/admin': typeof AdminRouteWithChildren
+  '/api-keys': typeof ApiKeysRoute
   '/device': typeof DeviceRoute
+  '/devices': typeof DevicesRoute
   '/home': typeof HomeRoute
   '/invite': typeof InviteRoute
   '/reset': typeof ResetRoute
@@ -160,7 +178,9 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/admin'
+    | '/api-keys'
     | '/device'
+    | '/devices'
     | '/home'
     | '/invite'
     | '/reset'
@@ -177,7 +197,9 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/api-keys'
     | '/device'
+    | '/devices'
     | '/home'
     | '/invite'
     | '/reset'
@@ -195,7 +217,9 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/admin'
+    | '/api-keys'
     | '/device'
+    | '/devices'
     | '/home'
     | '/invite'
     | '/reset'
@@ -214,7 +238,9 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRouteWithChildren
+  ApiKeysRoute: typeof ApiKeysRoute
   DeviceRoute: typeof DeviceRoute
+  DevicesRoute: typeof DevicesRoute
   HomeRoute: typeof HomeRoute
   InviteRoute: typeof InviteRoute
   ResetRoute: typeof ResetRoute
@@ -238,11 +264,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api-keys': {
+      id: '/api-keys'
+      path: '/api-keys'
+      fullPath: '/api-keys'
+      preLoaderRoute: typeof ApiKeysRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/device': {
       id: '/device'
       path: '/device'
       fullPath: '/device'
       preLoaderRoute: typeof DeviceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/devices': {
+      id: '/devices'
+      path: '/devices'
+      fullPath: '/devices'
+      preLoaderRoute: typeof DevicesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/home': {
@@ -366,7 +406,9 @@ const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRouteWithChildren,
+  ApiKeysRoute: ApiKeysRoute,
   DeviceRoute: DeviceRoute,
+  DevicesRoute: DevicesRoute,
   HomeRoute: HomeRoute,
   InviteRoute: InviteRoute,
   ResetRoute: ResetRoute,

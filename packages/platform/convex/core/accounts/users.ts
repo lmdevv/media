@@ -10,6 +10,7 @@ import type { DatabaseReader, MutationCtx } from "../../_generated/server";
 import { refuseKeys, requireCaller } from "../auth/caller";
 import { GUEST_KEYS_FROM } from "../guests/model";
 import { fail } from "../lib/errors";
+import { requireDisplayName } from "../lib/names";
 import { paginate } from "../lib/paginate";
 import { hashNewPassword, storePassword } from "../lib/passwords";
 import { requireUsername } from "../lib/usernames";
@@ -98,6 +99,17 @@ export const renameUser = async (
   await ctx.db.patch(user._id, parsed);
 };
 
+/** Sets the name a person goes by, or clears it with null so they go by their username. */
+export const changeDisplayName = async (
+  ctx: Pick<MutationCtx, "db">,
+  user: PersonDoc,
+  typed: string | null,
+): Promise<void> => {
+  const displayName = typed === null ? undefined : requireDisplayName(typed);
+
+  if (displayName !== user.displayName) await ctx.db.patch(user._id, { displayName });
+};
+
 export const setUp = internalMutation({
   args: {
     pass: spentPass,
@@ -154,7 +166,14 @@ export const { create, list, setRole, handOverOwnership } = register({
       ...page,
       page: page.page.flatMap((user) =>
         user.kind === "person"
-          ? [{ userId: user._id, username: user.username, role: user.role }]
+          ? [
+              {
+                userId: user._id,
+                username: user.username,
+                displayName: user.displayName ?? null,
+                role: user.role,
+              },
+            ]
           : [],
       ),
     };

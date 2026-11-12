@@ -1208,6 +1208,34 @@ const decideGrant = (principal: Principal, rule: GrantRule, grant: GrantResource
   return ALLOWED;
 };
 
+/**
+ * What can be done with a person's own sign-in credentials: their sessions and their API keys.
+ * `list` shows them, never a secret, and `end` signs one out or revokes it.
+ */
+export const credentialActions = ["list", "end"] as const;
+
+export type CredentialAction = (typeof credentialActions)[number];
+
+/** A session or an API key as `can` sees it: whose it is. */
+export interface CredentialResource {
+  readonly on: "credential";
+  readonly owner: Id<"users">;
+}
+
+/**
+ * A credential is its person's own: nobody else lists or ends it, admins included. Only a session
+ * of that person holding `account` may, and never a guest's.
+ */
+const decideCredential = (principal: Principal, credential: CredentialResource): Decision => {
+  if (principal.kind === "service") return hidden("service");
+
+  if (principal.userId !== credential.owner) return hidden("not-yours");
+
+  if (principal.role === "guest") return forbidden("guest");
+
+  return principal.scopes.includes("account") ? ALLOWED : forbidden("scope");
+};
+
 const isContentAction = (action: string): action is ContentAction =>
   contentActions.some((known) => known === action);
 
@@ -1243,6 +1271,9 @@ const isShareRecordAction = (action: string): action is ShareRecordAction =>
 
 const isGrantAction = (action: string): action is GrantAction =>
   grantActions.some((known) => known === action);
+
+const isCredentialAction = (action: string): action is CredentialAction =>
+  credentialActions.some((known) => known === action);
 
 /**
  * The one access decision (ADR 0005): role, credential scopes, grants, and restrictions, from
@@ -1291,6 +1322,11 @@ export function can(
 export function can(principal: Principal, action: GrantAction, resource: GrantResource): Decision;
 export function can(
   principal: Principal,
+  action: CredentialAction,
+  resource: CredentialResource,
+): Decision;
+export function can(
+  principal: Principal,
   action:
     | ContentAction
     | AccountAction
@@ -1303,7 +1339,8 @@ export function can(
     | TogetherAction
     | ShareAction
     | ShareRecordAction
-    | GrantAction,
+    | GrantAction
+    | CredentialAction,
   resource:
     | ContentResource
     | AccountResource
@@ -1316,7 +1353,8 @@ export function can(
     | TogetherResource
     | ShareResource
     | ShareRecordResource
-    | GrantResource,
+    | GrantResource
+    | CredentialResource,
 ): Decision {
   if (resource.on === "content" && isContentAction(action)) {
     return decideContent(principal, action, resource);
@@ -1364,6 +1402,10 @@ export function can(
 
   if (resource.on === "deviceGrant" && isGrantAction(action)) {
     return decideGrant(principal, grantRules[action], resource);
+  }
+
+  if (resource.on === "credential" && isCredentialAction(action)) {
+    return decideCredential(principal, resource);
   }
 
   throw new Error(`${action} is not an action on ${resource.on}`);

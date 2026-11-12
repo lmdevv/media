@@ -24,11 +24,26 @@ const family = groupId("g-family");
 
 const NO_GROUPS: ReadonlySet<GroupId> = new Set();
 
-const lucia: HouseholdUser = { userId: userId("u-lucia"), username: "lucia", role: "owner" };
+const lucia: HouseholdUser = {
+  userId: userId("u-lucia"),
+  username: "lucia",
+  displayName: null,
+  role: "owner",
+};
 
-const aiko: HouseholdUser = { userId: userId("u-aiko"), username: "aiko", role: "member" };
+const aiko: HouseholdUser = {
+  userId: userId("u-aiko"),
+  username: "aiko",
+  displayName: null,
+  role: "member",
+};
 
-const mateo: HouseholdUser = { userId: userId("u-mateo"), username: "mateo", role: "admin" };
+const mateo: HouseholdUser = {
+  userId: userId("u-mateo"),
+  username: "mateo",
+  displayName: null,
+  role: "admin",
+};
 
 const toUser = (person: HouseholdUser): LibraryGrant => ({
   principal: { kind: "user", userId: person.userId, username: person.username },

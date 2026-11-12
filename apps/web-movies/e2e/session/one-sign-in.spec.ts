@@ -1,7 +1,14 @@
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
-import { NO_STACK, createPerson, moviesPath, reachableStack, signIn } from "../stack/people";
+import {
+  NO_STACK,
+  createPerson,
+  moviesPath,
+  reachableStack,
+  signIn,
+  signInClient,
+} from "../stack/people";
 
 const stack = await reachableStack();
 
@@ -47,4 +54,27 @@ test("one sign-in at / opens /movies signed in in every tab, and a sign-out ther
 
   await second.goto(moviesPath());
   await expectSignedOut(second);
+});
+
+test("movies greets a person by the name they go by, and by their username once they clear it", async ({
+  page,
+}) => {
+  if (stack === null) return;
+
+  const person = await createPerson(stack, "aiko", "member");
+  const client = await signInClient(stack, person);
+
+  try {
+    await signIn(page, person);
+    await page.goto(moviesPath());
+    await expectMoviesHome(page, person.username);
+
+    await client.platform.core.accounts.me.setDisplayName({ displayName: "Aiko Tanaka" });
+    await expectMoviesHome(page, "Aiko Tanaka");
+
+    await client.platform.core.accounts.me.setDisplayName({ displayName: null });
+    await expectMoviesHome(page, person.username);
+  } finally {
+    await client.platform.dispose();
+  }
 });

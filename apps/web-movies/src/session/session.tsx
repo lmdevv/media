@@ -66,6 +66,10 @@ export const useMe = (): Me | null => {
   return me.status === "success" ? me.data : null;
 };
 
+/** The name a person goes by: the display name they set, else their username. */
+export const nameOf = (person: Pick<Me, "username" | "displayName">): string =>
+  person.displayName ?? person.username;
+
 /** A scope a session can hold, such as `movies:edit`. */
 export type Scope = Me["scopes"][number];
 

@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { ActionStatus } from "./action";
 import { button } from "./fixtures";
 import {
+  DisplayNameSection,
   NameSection,
   PasswordSection,
   PlaybackSection,
@@ -54,6 +55,28 @@ describe("NameSection", () => {
   it("says when it saved and why it failed", () => {
     expect(renderName(DONE)).toContain("Username saved.");
     expect(renderName(FAILED)).toContain("That username is taken.");
+  });
+});
+
+const renderDisplayName = (displayName: string | null, status: ActionStatus): string =>
+  renderToStaticMarkup(
+    <DisplayNameSection displayName={displayName} username="ada" status={status} onSave={noop} />,
+  );
+
+describe("DisplayNameSection", () => {
+  it("shows the name the person goes by, with the username as its placeholder", () => {
+    const html = renderDisplayName("Ada Lovelace", IDLE);
+
+    expect(html).toContain('value="Ada Lovelace"');
+    expect(html).toContain('placeholder="ada"');
+    expect(button(html, "Save").disabled).toBe(true);
+  });
+
+  it("starts empty without a name, holds Save while saving, and says when it saved", () => {
+    expect(renderDisplayName(null, IDLE)).toContain('value=""');
+    expect(button(renderDisplayName(null, PENDING), "Save").disabled).toBe(true);
+    expect(renderDisplayName("Ada", DONE)).toContain("Name saved.");
+    expect(renderDisplayName("Ada", FAILED)).toContain("That username is taken.");
   });
 });
 

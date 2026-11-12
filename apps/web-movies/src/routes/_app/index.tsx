@@ -14,7 +14,7 @@ import { newBadge } from "@/components/browse/new-badge";
 import { ContinueCard, TitleLandscapeCard, TitlePosterCard } from "@/components/browse/title-cards";
 import { describeFailure } from "@media/ui/lib/failure";
 import { useActiveScans, useMovieLibraries } from "@/lib/libraries";
-import { useMe, useScopes } from "@/session/session";
+import { nameOf, useMe, useScopes } from "@/session/session";
 import { usePhone } from "@/lib/use-phone";
 
 export const Route = createFileRoute("/_app/")({
@@ -126,7 +126,7 @@ function HomeRows({ home }: { readonly home: Home }) {
         {home.continueWatching.length === 0 ? null : (
           <MediaRow
             title={
-              phone || me === null ? "Continue watching" : `Continue watching for ${me.username}`
+              phone || me === null ? "Continue watching" : `Continue watching for ${nameOf(me)}`
             }
           >
             {home.continueWatching.map((item) => (

@@ -3,6 +3,7 @@ import { Link } from "@tanstack/react-router";
 import type { LinkProps } from "@tanstack/react-router";
 import { FilmIcon, MusicIcon } from "lucide-react";
 
+import { nameOf } from "@/session/me";
 import type { Me } from "@/session/platform-types";
 
 /** The products, each its own client on this origin that a full page load opens (ADR 0020). */
@@ -35,7 +36,7 @@ export function HomeView({ me }: { readonly me: Me }) {
     <div className="px-4 md:px-16">
       <div className="mx-auto flex max-w-content flex-col gap-8 pt-8 md:gap-12 md:pt-16">
         <h1 className="text-title/title font-bold tracking-display text-text md:text-display/display">
-          {`Hi, ${me.username}.`}
+          {`Hi, ${nameOf(me)}.`}
         </h1>
         <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:gap-6">
           {PRODUCTS.map(({ href, label, Icon }) => (

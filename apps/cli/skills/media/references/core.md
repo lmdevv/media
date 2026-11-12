@@ -69,6 +69,17 @@ Change your username; everything you own stays yours.
 - Arguments: `{ username: string }`
 - Result: `null`
 
+## `core.accounts.me.setDisplayName`
+
+Set the name you go by in greetings and lists, or clear it to go by your username.
+
+- CLI: `media auth me set-display-name`
+- Kind: mutation
+- Scope: account
+- API keys: refused
+- Arguments: `{ displayName: string | null }`
+- Result: `null`
+
 ## `core.accounts.resetLinks.create`
 
 Create a one-time link code that lets someone set a new password within a day.
@@ -123,7 +134,7 @@ List every user with their role, by username.
 - Scope: admin
 - Arguments: `{ paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
 - Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
-- Result: `{ page: Array<{ userId: Id<"users">; username: string; role: "owner" | "admin" | "member" | "guest" }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
+- Result: `{ page: Array<{ userId: Id<"users">; username: string; displayName: string | null; role: "owner" | "admin" | "member" | "guest" }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
 
 ## `core.accounts.users.setRole`
 
@@ -156,6 +167,17 @@ Stop every API key you have made so far.
 - Scope: account
 - Arguments: none
 - Result: `null`
+
+## `core.auth.apiKeys.list`
+
+List your API keys that still work or ran out, newest first, with their scopes and last use; never their secrets.
+
+- CLI: `media auth api-keys list`
+- Kind: query
+- Scope: account
+- Arguments: `{ paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
+- Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
+- Result: `{ page: Array<{ keyId: Id<"apiKeys">; name: string; scopes: Array<"account" | "admin" | "movies:read" | "movies:play" | "movies:edit" | "music:read" | "music:play" | "music:edit">; createdAt: number; expiresAt: number | null; lastUsedAt: number | null }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
 
 ## `core.auth.apiKeys.revoke`
 
@@ -216,7 +238,7 @@ Show who is signed in, how, with which scopes, and on which device in what order
 - Kind: query
 - Scope: signed-in
 - Arguments: none
-- Result: `{ userId: Id<"users">; username: string; role: "owner" | "admin" | "member" | "guest"; sessionId: Id<"authSessions">; kind: "password" | "apiKey" | "deviceCode" | "tile" | "guest" | "grant"; scopes: Array<"account" | "admin" | "movies:read" | "movies:play" | "movies:edit" | "music:read" | "music:play" | "music:edit">; device: null | { deviceId: Id<"devices">; joinSequence: number } }`
+- Result: `{ userId: Id<"users">; username: string; displayName: string | null; role: "owner" | "admin" | "member" | "guest"; sessionId: Id<"authSessions">; kind: "password" | "apiKey" | "deviceCode" | "tile" | "guest" | "grant"; scopes: Array<"account" | "admin" | "movies:read" | "movies:play" | "movies:edit" | "music:read" | "music:play" | "music:edit">; device: null | { deviceId: Id<"devices">; joinSequence: number } }`
 
 ## `core.auth.sessions.end`
 
@@ -237,6 +259,17 @@ Sign out every password and device session you have, or every other one.
 - Scope: account
 - Arguments: `{ keepCurrent: boolean }`
 - Result: `null`
+
+## `core.auth.sessions.list`
+
+List your signed-in browsers, apps, devices, and API keys' sign-ins, newest first, with the device each is on.
+
+- CLI: `media auth sessions list`
+- Kind: query
+- Scope: account
+- Arguments: `{ paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
+- Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
+- Result: `{ page: Array<{ sessionId: Id<"authSessions">; kind: "password" | "apiKey" | "deviceCode" | "tile" | "grant"; name: string | null; device: null | { deviceId: Id<"devices">; name: string }; scopes: Array<"account" | "admin" | "movies:read" | "movies:play" | "movies:edit" | "music:read" | "music:play" | "music:edit">; signedInAt: number; expiresAt: number; current: boolean }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
 
 ## `core.auth.sessions.revoke`
 

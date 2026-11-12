@@ -56,7 +56,10 @@ describe.skipIf(stack === undefined)("API key sign-in", { timeout: 120_000 }, ()
 
     expect(
       await refusal(
-        agent.client.action(api.core.auth.apiKeys.create, { name: "copy", scopes: [] }),
+        agent.client.action(api.core.auth.apiKeys.create, {
+          name: "copy",
+          scopes: ["movies:read"],
+        }),
       ),
     ).toBe("forbidden");
     expect(
@@ -78,7 +81,7 @@ describe.skipIf(stack === undefined)("API key sign-in", { timeout: 120_000 }, ()
 
     const { key } = await owner.client.action(api.core.auth.apiKeys.create, {
       name: "cron",
-      scopes: [],
+      scopes: ["movies:read"],
     });
 
     const [oldest, ...newer] = await Array.from({ length: 102 }).reduce<
@@ -113,7 +116,7 @@ describe.skipIf(stack === undefined)("API key sign-in", { timeout: 120_000 }, ()
 
     const { key } = await owner.client.action(api.core.auth.apiKeys.create, {
       name: "k",
-      scopes: [],
+      scopes: ["movies:read"],
     });
 
     expect(await refusal(signIn(stack, "apiKey", { key: `${key.slice(0, -4)}AAAA` }))).toBe(
@@ -128,13 +131,13 @@ describe.skipIf(stack === undefined)("API key sign-in", { timeout: 120_000 }, ()
 
     const { key } = await owner.client.action(api.core.auth.apiKeys.create, {
       name: "narrow",
-      scopes: [],
+      scopes: ["movies:read"],
     });
 
     const narrow = await signIn(stack, "apiKey", { key });
 
     expect(await narrow.client.query(api.core.auth.sessions.current, {})).toMatchObject({
-      scopes: [],
+      scopes: ["movies:read"],
     });
     expect(
       await refusal(
@@ -152,7 +155,7 @@ describe.skipIf(stack === undefined)("API key sign-in", { timeout: 120_000 }, ()
 
     const { key } = await owner.client.action(api.core.auth.apiKeys.create, {
       name: "old",
-      scopes: [],
+      scopes: ["movies:read"],
     });
 
     const signedIn = await signIn(stack, "apiKey", { key });
@@ -173,7 +176,7 @@ describe.skipIf(stack === undefined)("API key sign-in", { timeout: 120_000 }, ()
 
     const fresh = await owner.client.action(api.core.auth.apiKeys.create, {
       name: "new",
-      scopes: [],
+      scopes: ["movies:read"],
     });
 
     expect(await signIn(stack, "apiKey", { key: fresh.key })).toBeDefined();
@@ -185,7 +188,7 @@ describe.skipIf(stack === undefined)("API key sign-in", { timeout: 120_000 }, ()
 
     const created = await owner.client.action(api.core.auth.apiKeys.create, {
       name: "r",
-      scopes: [],
+      scopes: ["movies:read"],
     });
 
     const signedIn = await signIn(stack, "apiKey", { key: created.key });
@@ -209,14 +212,14 @@ describe.skipIf(stack === undefined)("API key sign-in", { timeout: 120_000 }, ()
 
     const created = await owner.client.action(api.core.auth.apiKeys.create, {
       name: "mine",
-      scopes: [],
+      scopes: ["movies:read"],
     });
 
     expect(
       await refusal(
         owner.client.action(api.core.auth.apiKeys.create, {
           name: "x",
-          scopes: [],
+          scopes: ["movies:read"],
           expiresInDays: 400,
         }),
       ),

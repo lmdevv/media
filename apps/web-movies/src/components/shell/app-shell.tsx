@@ -14,7 +14,7 @@ import type { ReactNode } from "react";
 import { SWITCH_PERSON_COMMAND, useCommandRoot } from "@/commands";
 import { TitlePrefetchProvider } from "@/components/browse/prefetch";
 import { keymap, shortcutLabel } from "@/lib/keymap";
-import { useMe, useScopes } from "@/session/session";
+import { nameOf, useMe, useScopes } from "@/session/session";
 
 import { InShell } from "./route-states";
 import { ScanToast } from "./scan-toast";
@@ -72,7 +72,7 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
     pathname === "/"
       ? me === null
         ? ""
-        : `For ${me.username}`
+        : `For ${nameOf(me)}`
       : (current?.label ?? (pathname.startsWith("/settings") ? "Settings" : ""));
 
   const root = useCommandRoot({ navigate, query, scopes, player: null });
@@ -81,7 +81,7 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
     setMenu(start === undefined ? { open: true } : { open: true, start });
   }, []);
 
-  const name = me?.username ?? "";
+  const name = me === null ? "" : nameOf(me);
 
   const accountButton = (size: "xs" | "sm", round: boolean) => (
     <button

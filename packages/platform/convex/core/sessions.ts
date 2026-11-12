@@ -116,6 +116,22 @@ export const liveOnDevice = (
   );
 };
 
+/** Whether a session of a household person is live, from its user and its device, both read. */
+export const liveWithDevice = (
+  session: Session,
+  user: Doc<"users">,
+  device: Doc<"devices"> | null,
+  now: number,
+): boolean => {
+  const guest = session.kind === "guest" || (user.kind === "person" && user.role === "guest");
+
+  if (guest || !isLive(session, user, now)) return false;
+
+  const bound = boundDevice(session);
+
+  return bound === null || stillOnDevice(session, bound, device, user);
+};
+
 const fitsUser = async (
   db: DatabaseReader,
   session: Session,

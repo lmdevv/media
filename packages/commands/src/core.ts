@@ -242,6 +242,8 @@ export const core = [
     result: v.object({
       userId: v.id("users"),
       username: v.string(),
+      /** The name the person goes by, or null to go by their username. */
+      displayName: v.union(v.string(), v.null()),
       role,
       sessionId: v.id("authSessions"),
       kind: v.union(
@@ -255,6 +257,32 @@ export const core = [
       scopes: v.array(credentialScope),
       device: v.union(v.null(), v.object({ deviceId: v.id("devices"), joinSequence: v.number() })),
     }),
+  }),
+  query("core.auth.sessions.list", {
+    summary:
+      "List your signed-in browsers, apps, devices, and API keys' sign-ins, newest first, with the device each is on",
+    scope: "account",
+    args: { paginationOpts: paginationOptsValidator },
+    result: paginationResultValidator(
+      v.object({
+        sessionId: v.id("authSessions"),
+        kind: v.union(
+          v.literal("password"),
+          v.literal("apiKey"),
+          v.literal("deviceCode"),
+          v.literal("tile"),
+          v.literal("grant"),
+        ),
+        /** What it calls itself: its device's name, its key's or device sign-in's name, or its app grant's name; null for none. */
+        name: v.union(v.string(), v.null()),
+        device: v.union(v.null(), v.object({ deviceId: v.id("devices"), name: v.string() })),
+        scopes: v.array(credentialScope),
+        signedInAt: v.number(),
+        expiresAt: v.number(),
+        /** The session this call came from. */
+        current: v.boolean(),
+      }),
+    ),
   }),
   mutation("core.auth.sessions.end", {
     summary: "Sign out one of your sessions",
@@ -290,6 +318,23 @@ export const core = [
       key: v.string(),
       expiresAt: v.union(v.number(), v.null()),
     }),
+  }),
+  query("core.auth.apiKeys.list", {
+    summary:
+      "List your API keys that still work or ran out, newest first, with their scopes and last use; never their secrets",
+    scope: "account",
+    args: { paginationOpts: paginationOptsValidator },
+    result: paginationResultValidator(
+      v.object({
+        keyId: v.id("apiKeys"),
+        name: v.string(),
+        scopes: v.array(credentialScope),
+        createdAt: v.number(),
+        expiresAt: v.union(v.number(), v.null()),
+        /** When it last signed in, or null when it never has. */
+        lastUsedAt: v.union(v.number(), v.null()),
+      }),
+    ),
   }),
   mutation("core.auth.apiKeys.revoke", {
     summary: "Revoke one of your API keys and sign out what it signed in",
@@ -405,7 +450,12 @@ export const core = [
     scope: "admin",
     args: { paginationOpts: paginationOptsValidator },
     result: paginationResultValidator(
-      v.object({ userId: v.id("users"), username: v.string(), role }),
+      v.object({
+        userId: v.id("users"),
+        username: v.string(),
+        displayName: v.union(v.string(), v.null()),
+        role,
+      }),
     ),
   }),
   mutation("core.accounts.users.setRole", {
@@ -899,6 +949,13 @@ export const core = [
     scope: "account",
     refusesKeys: true,
     args: { username: v.string() },
+    result: v.null(),
+  }),
+  mutation("core.accounts.me.setDisplayName", {
+    summary: "Set the name you go by in greetings and lists, or clear it to go by your username",
+    scope: "account",
+    refusesKeys: true,
+    args: { displayName: v.union(v.string(), v.null()) },
     result: v.null(),
   }),
   action("core.accounts.me.changePassword", {

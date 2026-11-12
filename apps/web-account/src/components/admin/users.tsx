@@ -103,7 +103,11 @@ export function PeopleView({
         {(user) => (
           <ItemRow
             title={user.userId === selfId ? `${user.username} (you)` : user.username}
-            facts={ROLE_LABELS[user.role]}
+            facts={
+              user.displayName === null
+                ? ROLE_LABELS[user.role]
+                : `${user.displayName} · ${ROLE_LABELS[user.role]}`
+            }
             actions={
               user.role === "guest" ? null : (
                 <Button

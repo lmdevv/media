@@ -20,7 +20,7 @@ import { ListRow } from "@/components/ui/list-row";
 import { READABLE_COLUMN, Screen } from "@/components/ui/screen";
 import { Text } from "@/components/ui/text";
 import { plural } from "@/lib/browse";
-import { useMe } from "@/session/me";
+import { nameOf, useMe } from "@/session/me";
 
 export default function You() {
   const me = useMe();
@@ -28,6 +28,7 @@ export default function You() {
   const list = useAllPages(platform.movies.myList.list, (paginationOpts) => ({ paginationOpts }));
   const accountSettings = me.scopes.includes("account");
   const admin = me.scopes.includes("admin");
+  const name = nameOf(me);
 
   return (
     <Screen
@@ -56,14 +57,14 @@ export default function You() {
       >
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`${me.username}, Sign Out`}
+          accessibilityLabel={`${name}, Sign Out`}
           onPress={() => router.push("/sign-out")}
           className="flex-row items-center gap-4 py-3 active:opacity-70"
         >
-          <PersonAvatar name={me.username} />
+          <PersonAvatar name={name} />
           <View className="flex-1 gap-1">
             <Text variant="title" numberOfLines={1}>
-              {me.username}
+              {name}
             </Text>
             <Text variant="label" tone="muted">
               Sign Out
@@ -83,7 +84,7 @@ export default function You() {
         <View className="h-4" />
         <ListRow icon={UserRound} title="Account" onPress={() => router.push("/account")} />
         <ListRow icon={Settings2} title="App Settings" onPress={() => router.push("/settings")} />
-        {admin ? (
+        {accountSettings ? (
           <ListRow icon={TvMinimal} title="Devices" onPress={() => router.push("/devices")} />
         ) : null}
         {accountSettings ? (

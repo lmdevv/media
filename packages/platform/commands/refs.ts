@@ -56,6 +56,8 @@ export const commandRefs = {
   "core.accounts.me.changePassword": api.core.accounts.me
     .changePassword satisfies core_accounts_me["changePassword"],
   "core.accounts.me.rename": api.core.accounts.me.rename satisfies core_accounts_me["rename"],
+  "core.accounts.me.setDisplayName": api.core.accounts.me
+    .setDisplayName satisfies core_accounts_me["setDisplayName"],
   "core.accounts.resetLinks.create": api.core.accounts.resetLinks
     .create satisfies core_accounts_resetLinks["create"],
   "core.accounts.resetLinks.lookup": api.core.accounts.resetLinks
@@ -69,6 +71,7 @@ export const commandRefs = {
     .setRole satisfies core_accounts_users["setRole"],
   "core.auth.apiKeys.create": api.core.auth.apiKeys.create satisfies core_auth_apiKeys["create"],
   "core.auth.apiKeys.endAll": api.core.auth.apiKeys.endAll satisfies core_auth_apiKeys["endAll"],
+  "core.auth.apiKeys.list": api.core.auth.apiKeys.list satisfies core_auth_apiKeys["list"],
   "core.auth.apiKeys.revoke": api.core.auth.apiKeys.revoke satisfies core_auth_apiKeys["revoke"],
   "core.auth.deviceCodes.approve": api.core.auth.deviceCodes
     .approve satisfies core_auth_deviceCodes["approve"],
@@ -82,6 +85,7 @@ export const commandRefs = {
     .current satisfies core_auth_sessions["current"],
   "core.auth.sessions.end": api.core.auth.sessions.end satisfies core_auth_sessions["end"],
   "core.auth.sessions.endAll": api.core.auth.sessions.endAll satisfies core_auth_sessions["endAll"],
+  "core.auth.sessions.list": api.core.auth.sessions.list satisfies core_auth_sessions["list"],
   "core.auth.sessions.revoke": api.core.auth.sessions.revoke satisfies core_auth_sessions["revoke"],
   "core.connect.player.report": api.core.connect.player
     .report satisfies core_connect_player["report"],

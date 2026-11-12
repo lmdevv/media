@@ -15,6 +15,7 @@ const currentArgs = v.object({});
 const currentResult = v.object({
   userId: v.id("users"),
   username: v.string(),
+  displayName: v.union(v.string(), v.null()),
   role: v.union(v.literal("owner"), v.literal("admin"), v.literal("member"), v.literal("guest")),
   sessionId: v.id("authSessions"),
   kind: v.union(
@@ -48,6 +49,55 @@ const endAllArgs = v.object({ keepCurrent: v.boolean() });
 
 const endAllResult = v.null();
 
+const listArgs = v.object({
+  paginationOpts: v.object({
+    numItems: v.number(),
+    cursor: v.union(v.string(), v.null()),
+    endCursor: v.optional(v.union(v.string(), v.null())),
+    id: v.optional(v.number()),
+    maximumRowsRead: v.optional(v.number()),
+    maximumBytesRead: v.optional(v.number()),
+  }),
+});
+
+const listResult = v.object({
+  page: v.array(
+    v.object({
+      sessionId: v.id("authSessions"),
+      kind: v.union(
+        v.literal("password"),
+        v.literal("apiKey"),
+        v.literal("deviceCode"),
+        v.literal("tile"),
+        v.literal("grant"),
+      ),
+      name: v.union(v.string(), v.null()),
+      device: v.union(v.null(), v.object({ deviceId: v.id("devices"), name: v.string() })),
+      scopes: v.array(
+        v.union(
+          v.literal("account"),
+          v.literal("admin"),
+          v.literal("movies:read"),
+          v.literal("movies:play"),
+          v.literal("movies:edit"),
+          v.literal("music:read"),
+          v.literal("music:play"),
+          v.literal("music:edit"),
+        ),
+      ),
+      signedInAt: v.number(),
+      expiresAt: v.number(),
+      current: v.boolean(),
+    }),
+  ),
+  continueCursor: v.string(),
+  isDone: v.boolean(),
+  splitCursor: v.optional(v.union(v.string(), v.null())),
+  pageStatus: v.optional(
+    v.union(v.literal("SplitRecommended"), v.literal("SplitRequired"), v.null()),
+  ),
+});
+
 const revokeArgs = v.object({ refreshToken: v.string() });
 
 const revokeResult = v.object({ confirmed: v.literal(true) });
@@ -74,6 +124,13 @@ export interface Handlers {
     args: Infer<typeof endAllArgs>,
     caller: Caller,
   ) => Infer<typeof endAllResult> | Promise<Infer<typeof endAllResult>>;
+
+  /** `core.auth.sessions.list` (query, account): List your signed-in browsers, apps, devices, and API keys' sign-ins, newest first, with the device each is on. */
+  readonly list: (
+    ctx: Omit<QueryCtx, "auth">,
+    args: Infer<typeof listArgs>,
+    caller: Caller,
+  ) => Infer<typeof listResult> | Promise<Infer<typeof listResult>>;
 
   /** `core.auth.sessions.revoke` (mutation, public): End the session a refresh token belongs to, deleting it and every refresh token it has; confirmed even when it had already ended. */
   readonly revoke: (
@@ -102,6 +159,12 @@ export interface Refs {
     Infer<typeof endAllArgs>,
     Infer<typeof endAllResult>
   >;
+  readonly list: FunctionReference<
+    "query",
+    "public",
+    Infer<typeof listArgs>,
+    Infer<typeof listResult>
+  >;
   readonly revoke: FunctionReference<
     "mutation",
     "public",
@@ -127,6 +190,11 @@ export const register = (handlers: Handlers) => ({
     args: endAllArgs,
     returns: endAllResult,
     handler: async (ctx, args) => handlers.endAll(ctx, args, await requireCaller(ctx, "account")),
+  }),
+  list: query({
+    args: listArgs,
+    returns: listResult,
+    handler: async (ctx, args) => handlers.list(ctx, args, await requireCaller(ctx, "account")),
   }),
   revoke: mutation({
     args: revokeArgs,

@@ -48,6 +48,8 @@ const personFields = {
   username: v.string(),
   /** The username folded for uniqueness and sign-in: `alice`. */
   usernameKey: v.string(),
+  /** The name the person goes by in greetings and lists; absent, they go by their username. */
+  displayName: v.optional(v.string()),
   ...generations,
   /** Listed on every shared device's picker (ADR 0006). An adult opts in; an admin lists a kid. */
   sharedDevices: v.optional(v.literal(true)),
@@ -223,6 +225,8 @@ export default defineSchema({
     /** The user's `keyGeneration` when the key was made. */
     generation: v.number(),
     expiresAt: v.optional(v.number()),
+    /** When the key last signed in; absent until it first does. */
+    lastUsedAt: v.optional(v.number()),
   }).index("by_user", ["userId"]),
 
   deviceCodes: defineTable(

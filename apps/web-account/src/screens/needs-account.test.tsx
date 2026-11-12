@@ -9,6 +9,7 @@ import { NeedsAccountScreen } from "./needs-account";
 const me = (scopes: Me["scopes"], kind: Me["kind"]): Me => ({
   userId: Brand.nominal<Me["userId"]>()("u1"),
   username: "kim",
+  displayName: null,
   role: "member",
   sessionId: Brand.nominal<Me["sessionId"]>()("s1"),
   kind,
