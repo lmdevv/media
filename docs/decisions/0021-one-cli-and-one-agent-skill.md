@@ -136,9 +136,9 @@ NixOS module now run alone (ADR 0027).
   the media server refuses the session (`Unauthenticated`, HTTP 401), the platform client
   refreshes once at once. A refused refresh clears the stored session, and the CLI reports
   `not_logged_in`, naming `media auth login`. Platform calls run under it inside the client; the
-  media server's routes (`media logs`, `media diagnostics`) and the web clients' media server
-  calls (`createMediaServer` with the platform `session`) run under the same rule through
-  `session.refreshOnRefusal`.
+  media server's routes (`media logs`, `media diagnostics`) and the web clients' and the
+  movies iOS app's media server calls (`createMediaServer` with the platform `session`) run
+  under the same rule through `session.refreshOnRefusal`.
 - **The refusal fence.** A refusal can arrive after the session it answered was renewed, so the
   rule is fenced on the token the call actually carried, and it never sends a call again. The
   session stamps every token it hands out with the session it belongs to (the token's subject) and
