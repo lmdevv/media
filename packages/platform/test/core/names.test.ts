@@ -54,7 +54,7 @@ describe.skipIf(stack === undefined)("names other people see", { timeout: 180_00
       groupRename: (name: string) =>
         admin.client.mutation(api.core.permissions.groups.rename, { groupId, name }),
       key: (name: string) =>
-        admin.client.action(api.core.auth.apiKeys.create, { name, scopes: [] }),
+        admin.client.action(api.core.auth.apiKeys.create, { name, scopes: ["movies:read"] }),
       device: (name: string) => enroll(admin, name),
       grant: (name: string) => admin.client.action(api.core.devices.deviceGrants.issue, { name }),
       deviceCode: (clientName: string) =>
@@ -132,7 +132,9 @@ describe.skipIf(stack === undefined)("names other people see", { timeout: 180_00
     ).toBe(WIDE);
 
     expect(
-      await refusal(admin.client.action(api.core.auth.apiKeys.create, { name: WIDE, scopes: [] })),
+      await refusal(
+        admin.client.action(api.core.auth.apiKeys.create, { name: WIDE, scopes: ["movies:read"] }),
+      ),
     ).toBe("accepted");
 
     const started = await new ConvexHttpClient(stack.url, { logger: false }).action(

@@ -159,7 +159,12 @@ describe.skipIf(stack === undefined)("service keys", { timeout: 120_000 }, () =>
             paginationOpts: { numItems: 10, cursor: null },
           }),
         ),
-        refusal(service.client.action(api.core.auth.apiKeys.create, { name: "copy", scopes: [] })),
+        refusal(
+          service.client.action(api.core.auth.apiKeys.create, {
+            name: "copy",
+            scopes: ["movies:read"],
+          }),
+        ),
       ]),
     ).toEqual(["forbidden", "forbidden", "forbidden"]);
 

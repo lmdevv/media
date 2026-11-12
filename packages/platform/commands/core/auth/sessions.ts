@@ -66,6 +66,7 @@ const listResult = v.object({
       sessionId: v.id("authSessions"),
       kind: v.union(
         v.literal("password"),
+        v.literal("apiKey"),
         v.literal("deviceCode"),
         v.literal("tile"),
         v.literal("grant"),
@@ -124,7 +125,7 @@ export interface Handlers {
     caller: Caller,
   ) => Infer<typeof endAllResult> | Promise<Infer<typeof endAllResult>>;
 
-  /** `core.auth.sessions.list` (query, account): List your signed-in browsers, apps, and devices, newest first, with the device each is on; API keys' sessions are left to the key list. */
+  /** `core.auth.sessions.list` (query, account): List your signed-in browsers, apps, devices, and API keys' sign-ins, newest first, with the device each is on. */
   readonly list: (
     ctx: Omit<QueryCtx, "auth">,
     args: Infer<typeof listArgs>,

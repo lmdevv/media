@@ -333,8 +333,8 @@ describe.skipIf(stack === undefined)("the platform SDK on the stack", { timeout:
         const own = yield* owner.core.auth.sessions.current();
 
         const created = yield* owner.core.auth.apiKeys.create({
-          name: "no scopes",
-          scopes: [],
+          name: "reads only",
+          scopes: ["movies:read"],
         });
 
         const keyed = yield* open();
@@ -351,7 +351,7 @@ describe.skipIf(stack === undefined)("the platform SDK on the stack", { timeout:
     );
 
     expect(answer).toMatchObject({
-      current: [],
+      current: ["movies:read"],
       refused: { _tag: "Forbidden", message: "This session lacks the account scope" },
     });
   });

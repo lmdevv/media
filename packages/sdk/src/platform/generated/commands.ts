@@ -399,6 +399,7 @@ const core_auth_sessions_list = query({
         sessionId: Schema.String.pipe(Schema.brand("Id<authSessions>")),
         kind: Schema.Union([
           Schema.Literal("password"),
+          Schema.Literal("apiKey"),
           Schema.Literal("deviceCode"),
           Schema.Literal("tile"),
           Schema.Literal("grant"),
@@ -3916,7 +3917,7 @@ export const effectMethods = (method: EffectBuilder) => ({
         end: method.mutation(core_auth_sessions_end),
         /** `core.auth.sessions.endAll` (mutation, account): Sign out every password and device session you have, or every other one. */
         endAll: method.mutation(core_auth_sessions_endAll),
-        /** `core.auth.sessions.list` (query, account): List your signed-in browsers, apps, and devices, newest first, with the device each is on; API keys' sessions are left to the key list. */
+        /** `core.auth.sessions.list` (query, account): List your signed-in browsers, apps, devices, and API keys' sign-ins, newest first, with the device each is on. */
         list: method.query(core_auth_sessions_list),
         /** `core.auth.sessions.revoke` (mutation, public): End the session a refresh token belongs to, deleting it and every refresh token it has; confirmed even when it had already ended. */
         revoke: method.mutation(core_auth_sessions_revoke),
@@ -4268,7 +4269,7 @@ export const promiseMethods = (method: PromiseBuilder) => ({
         end: method.mutation(core_auth_sessions_end),
         /** `core.auth.sessions.endAll` (mutation, account): Sign out every password and device session you have, or every other one. */
         endAll: method.mutation(core_auth_sessions_endAll),
-        /** `core.auth.sessions.list` (query, account): List your signed-in browsers, apps, and devices, newest first, with the device each is on; API keys' sessions are left to the key list. */
+        /** `core.auth.sessions.list` (query, account): List your signed-in browsers, apps, devices, and API keys' sign-ins, newest first, with the device each is on. */
         list: method.query(core_auth_sessions_list),
         /** `core.auth.sessions.revoke` (mutation, public): End the session a refresh token belongs to, deleting it and every refresh token it has; confirmed even when it had already ended. */
         revoke: method.mutation(core_auth_sessions_revoke),

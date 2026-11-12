@@ -537,7 +537,7 @@ export const generatedCommands = [
     scope: "account",
     refusesKeys: false,
     summary:
-      "List your signed-in browsers, apps, and devices, newest first, with the device each is on; API keys' sessions are left to the key list",
+      "List your signed-in browsers, apps, devices, and API keys' sign-ins, newest first, with the device each is on",
     secrets: [],
     paginated: true,
     args: Schema.Struct({
@@ -556,6 +556,7 @@ export const generatedCommands = [
           sessionId: Schema.String.pipe(Schema.brand("Id<authSessions>")),
           kind: Schema.Union([
             Schema.Literal("password"),
+            Schema.Literal("apiKey"),
             Schema.Literal("deviceCode"),
             Schema.Literal("tile"),
             Schema.Literal("grant"),

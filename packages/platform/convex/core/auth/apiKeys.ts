@@ -216,6 +216,8 @@ export const insert = internalMutation({
 
     const granted = [...new Set(scopes)];
 
+    if (granted.length === 0) return fail("invalid_args", "Choose at least one scope");
+
     if (granted.some((scope) => !caller.scopes.includes(scope))) {
       return fail("forbidden", "A key can hold only scopes this session holds");
     }

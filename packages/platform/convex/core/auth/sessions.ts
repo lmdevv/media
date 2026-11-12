@@ -15,8 +15,8 @@ const REFRESH_TOKEN_DIVIDER = "|";
 const NO_SESSION = "No such session";
 
 /**
- * What a listed session costs: its row, the device it is bound to, and the grant that names an app
- * on no device yet.
+ * What a listed session costs: its row, and the device it is bound to and the grant that names an
+ * app on no device yet, or the key that signed it in.
  */
 const LIST_ROW_READS = 3;
 
@@ -43,12 +43,11 @@ export const requireOwnCredential = (
   );
 };
 
-type Listed = Exclude<Doc<"authSessions">, { readonly kind: "apiKey" | "guest" }>;
+type Listed = Exclude<Doc<"authSessions">, { readonly kind: "guest" }>;
 
-const listed = (session: Doc<"authSessions">): session is Listed =>
-  session.kind !== "apiKey" && session.kind !== "guest";
+const listed = (session: Doc<"authSessions">): session is Listed => session.kind !== "guest";
 
-/** What a session calls itself: its device's name, a device sign-in's name, or its grant's. */
+/** What a session calls itself: its device's name, its key's or device sign-in's, or its grant's. */
 const nameOf = async (
   db: DatabaseReader,
   session: Listed,
@@ -57,6 +56,8 @@ const nameOf = async (
   if (device !== null) return device.name;
 
   if (session.kind === "deviceCode") return session.clientName;
+
+  if (session.kind === "apiKey") return (await db.get(session.keyId))?.name ?? null;
 
   if (session.kind === "password" || session.kind === "grant") {
     const grant = session.grant === undefined ? null : await db.get(session.grant);
@@ -90,8 +91,8 @@ export const { current, list, end, endAll, revoke } = register({
     };
   },
   /**
-   * The caller's live sessions, except those API keys open, which the key list covers. Ended
-   * sessions wait for the purge and are left out, so a page may hold fewer rows than asked.
+   * The caller's live sessions, API keys' sign-ins included, at most 100 a key. Ended sessions
+   * wait for the purge and are left out, so a page may hold fewer rows than asked.
    */
   list: async (ctx, { paginationOpts }, caller) => {
     requireOwnCredential(caller, "list", caller.userId, NO_SESSION);

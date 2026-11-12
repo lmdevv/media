@@ -10,7 +10,7 @@ import { enroll, member } from "../../devices";
 import type { Member } from "../../devices";
 import { allPages, counted } from "../../pages";
 import type { PageLoader } from "../../pages";
-import { createPerson, refusal, signIn, signInAs } from "../../sign-in";
+import { createPerson, failureOf, refusal, signIn, signInAs } from "../../sign-in";
 import type { SignedIn } from "../../sign-in";
 import { coreStackFromEnvFile } from "../../stack-env";
 import type { CoreStack } from "../../stack-env";
@@ -83,14 +83,14 @@ const inBatches = async <T>(
   }, Promise.resolve([]));
 };
 
-/** Key sign-ins enough that the list's rows sit past what one page of sessions reads. */
+/** Key sign-ins enough that the list runs past what one page of sessions reads. */
 const KEY_SIGN_INS_PAST_A_PAGE = 340;
 
 const makeKey = (who: Member, name: string) =>
-  who.signedIn.client.action(api.core.auth.apiKeys.create, { name, scopes: [] });
+  who.signedIn.client.action(api.core.auth.apiKeys.create, { name, scopes: ["movies:read"] });
 
 describe.skipIf(stack === undefined)("a person's own sessions", { timeout: 300_000 }, () => {
-  it("lists each live browser, app, and device newest first, naming the device, and no API key's", async () => {
+  it("lists each live browser, app, device, and key sign-in newest first, naming each", async () => {
     if (stack === undefined) return;
     const { who, movies, issued } = await phone(stack, "aiko");
     const music = await signIn(stack, "grant", { userId: who.userId, grant: issued.grant });
@@ -103,25 +103,27 @@ describe.skipIf(stack === undefined)("a person's own sessions", { timeout: 300_0
       scopes: ["movies:read"],
     });
 
-    await signIn(stack, "apiKey", { key });
-
+    const script = await signIn(stack, "apiKey", { key });
     const listed = await sessionsOf(laptop);
 
     expect(listed.map((row) => [row.kind, row.name, row.device?.deviceId ?? null])).toEqual([
+      ["apiKey", "script", null],
       ["deviceCode", "Living room TV", null],
       ["password", null, null],
       ["grant", "Music on phone", musicDevice.deviceId],
       ["password", "Movies on phone", movies.deviceId],
     ]);
-    expect(listed.map((row) => row.current)).toEqual([false, true, false, false]);
+    expect(listed.map((row) => row.current)).toEqual([false, false, true, false, false]);
     expect(listed.map((row) => row.sessionId)).toEqual([
+      (await current(script)).sessionId,
       (await current(television)).sessionId,
       (await current(laptop)).sessionId,
       (await current(music)).sessionId,
       (await current(who.signedIn)).sessionId,
     ]);
-    expect(listed[0]?.scopes).toEqual(["movies:read", "movies:play"]);
-    expect(listed[1]?.scopes).toContain("account");
+    expect(listed[0]?.scopes).toEqual(["movies:read"]);
+    expect(listed[1]?.scopes).toEqual(["movies:read", "movies:play"]);
+    expect(listed[2]?.scopes).toContain("account");
 
     for (const row of listed) {
       expect(row.expiresAt).toBeGreaterThan(row.signedInAt);
@@ -159,6 +161,27 @@ describe.skipIf(stack === undefined)("a person's own sessions", { timeout: 300_0
         laptop.client.mutation(api.core.auth.sessions.end, { sessionId: movies.sessionId }),
       ),
     ).toBe("not_found");
+  });
+
+  it("signs one key's sign-in out alone, and the key signs in again on its next use", async () => {
+    if (stack === undefined) return;
+    const aiko = await member(stack, "keyed");
+
+    const { key } = await aiko.signedIn.client.action(api.core.auth.apiKeys.create, {
+      name: "script",
+      scopes: ["movies:read"],
+    });
+
+    const first = await signIn(stack, "apiKey", { key });
+    const second = await signIn(stack, "apiKey", { key });
+    const { sessionId } = await current(first);
+
+    await aiko.signedIn.client.mutation(api.core.auth.sessions.end, { sessionId });
+
+    expect(await refusal(current(first))).toBe("unauthenticated");
+    expect(await refusal(current(second))).toBe("accepted");
+    expect(await refusal(current(await signIn(stack, "apiKey", { key })))).toBe("accepted");
+    expect((await sessionsOf(aiko.signedIn)).map((row) => row.sessionId)).not.toContain(sessionId);
   });
 
   it("lets nobody else list or end them, admins included", async () => {
@@ -225,7 +248,10 @@ describe.skipIf(stack === undefined)("a person's own sessions", { timeout: 300_0
     const laptop = await signInAs(stack, person);
 
     const keys = await inBatches(4, 4, async (index) =>
-      laptop.client.action(api.core.auth.apiKeys.create, { name: `key ${index}`, scopes: [] }),
+      laptop.client.action(api.core.auth.apiKeys.create, {
+        name: `key ${index}`,
+        scopes: ["movies:read"],
+      }),
     );
 
     await inBatches(KEY_SIGN_INS_PAST_A_PAGE, 20, async (index) =>
@@ -246,8 +272,17 @@ describe.skipIf(stack === undefined)("a person's own sessions", { timeout: 300_0
       [...browsers.toReversed(), laptop].map(async (each) => (await current(each)).sessionId),
     );
 
+    const keyRows = rows.filter((row) => row.kind === "apiKey");
+
     expect(pages.length).toBeGreaterThan(1);
-    expect(rows.map((row) => row.sessionId)).toEqual(expected);
+    expect(new Set(rows.map((row) => row.sessionId)).size).toBe(rows.length);
+    expect(keyRows).toHaveLength(KEY_SIGN_INS_PAST_A_PAGE);
+    expect(new Set(keyRows.map((row) => row.name))).toEqual(
+      new Set(["key 0", "key 1", "key 2", "key 3"]),
+    );
+    expect(rows.filter((row) => row.kind !== "apiKey").map((row) => row.sessionId)).toEqual(
+      expected,
+    );
     expect(Math.max(...reads)).toBeLessThanOrEqual(PAGE_ROWS_MAX);
   });
 });
@@ -295,6 +330,18 @@ describe.skipIf(stack === undefined)("a person's own API keys", { timeout: 300_0
     }
   });
 
+  it("refuses a key with no scopes, as old movies did", async () => {
+    if (stack === undefined) return;
+    const aiko = await member(stack, "empty");
+
+    expect(
+      await failureOf(
+        aiko.signedIn.client.action(api.core.auth.apiKeys.create, { name: "nothing", scopes: [] }),
+      ),
+    ).toEqual({ code: "invalid_args", message: "Choose at least one scope" });
+    expect(await keysOf(aiko.signedIn)).toEqual([]);
+  });
+
   it("drops a revoked key at once, every key after End all, and shows no one else's", async () => {
     if (stack === undefined) return;
     const aiko = await member(stack, "aiko");
@@ -329,7 +376,7 @@ describe.skipIf(stack === undefined)("a person's own API keys", { timeout: 300_0
     const made = await inBatches(PAGE_ROWS_MAX + 10, 50, async (index) =>
       busy.signedIn.client.action(api.core.auth.apiKeys.create, {
         name: `key ${index}`,
-        scopes: [],
+        scopes: ["movies:read"],
       }),
     );
 

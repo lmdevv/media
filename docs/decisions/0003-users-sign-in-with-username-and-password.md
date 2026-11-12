@@ -165,25 +165,29 @@ amendment brings them back as a port, not new features (D62).
   absent. A shared device's picker and its unlock screen keep showing usernames: old movies'
   picker listed one account's own profiles, while the core's lists everyone on the server, and a
   display name nobody checks for uniqueness would let one person's tile pass for another's. `core.accounts.me.setDisplayName` sets or clears the caller's own.
-  It refuses API keys, as renames do. The name follows the rule for other names people see
-  (`requireGivenName`, `GIVEN_NAME_MAX` code points, printable). Old movies took 80 characters for
-  a profile name; the core keeps one bound for every such name. Signing in still takes the
-  username only. Admins see a display name but do not set someone else's, since old movies let
+  It refuses API keys, as renames do. The name is printable and at most 80 code points
+  (`DISPLAY_NAME_MAX`), the bound old movies took for a profile's name; device, group, library,
+  and key names keep their own 64. Signing in still takes the username only. Admins see a display name but do not set someone else's, since old movies let
   only the account holder name its profiles.
 - **A person's own sessions.** `core.auth.sessions.list` lists the caller's live sessions, newest
-  first: each browser, app, device sign-in, and shared-device tile, with the device it is on and
-  the name its device or device sign-in gave. API keys' sessions stay out, since a key opens a
-  new one on each sign-in (up to 100) and opens it again on its next use. The key list covers
-  them. `core.auth.sessions.end` signs one out through `endSession`, the machinery every other
-  sign-out uses. An app on a phone whose own session ends asks for the password again while the
-  phone's grant stands (D59). Revoking the grant itself stays `core.devices.deviceGrants.revoke`.
+  first: each browser, app, device sign-in, shared-device tile, and API key's sign-in, with the
+  device it is on and the name its device, key, or device sign-in gave. A key opens a session on
+  each sign-in and keeps its newest 100, so a page runs through them under the read budget with
+  exact cursors. The account client lists them all, as old movies' web did, and says a key signs in
+  again on its next use; the iOS app leaves key sign-ins to API Keys, as old iOS did.
+  `core.auth.sessions.end` signs one out through `endSession`, the machinery every other sign-out
+  uses. An app on a phone whose own session ends asks for the password again while the phone's
+  grant stands (D59). Revoking the grant itself stays `core.devices.deviceGrants.revoke`.
 - **A person's own API keys.** `core.auth.apiKeys.list` lists the caller's keys that still work
   or ran out, newest first, with their name, scopes, creation, expiry, and last use, never the
-  secret or its hash. A key records `lastUsedAt` each time it signs in, as old movies did. Keys
-  ended by End all wait for the purge, and the list leaves them out at once.
+  secret or its hash. A key records `lastUsedAt` each time it signs in, as old movies did. A key
+  needs at least one scope, as old movies required, and the account client starts a new one with
+  browse and play. Keys ended by End all wait for the purge, and the list leaves them out at
+  once.
 - **Access.** All three go through the `credential` rows of `can()` (ADR 0005): only the person
   lists or ends their own sessions and keys, from any session holding `account`. Admins and the
   owner see a `not_found`, as for someone's device grant. `sessions.endAll` and `apiKeys.endAll`
   ask the same rule. Both lists page through
   `paginateAtMost`, sized from the per-call read budget: a key row costs one read, and a session
-  row up to three (its row, its device, and the grant that names an app on no device).
+  row up to three (its row, and its device and the grant that names an app on no device, or the
+  key that signed it in).

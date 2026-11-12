@@ -38,9 +38,15 @@ export type Session = Result<PlatformSdk["core"]["auth"]["sessions"]["list"]>["p
 /** A session ID from a route parameter; the core answers `NotFound` for one that names no session. */
 export const asSessionId = Brand.nominal<Session["sessionId"]>();
 
-/** The signed-in devices to list: this iPhone first, the rest newest first as the core lists them. */
+/**
+ * The signed-in devices to list: this iPhone first, the rest newest first as the core lists them.
+ * API keys' sign-ins are left to API Keys, since signing one out lasts only until the key's next use.
+ */
 export const listedSessions = (sessions: ReadonlyArray<Session>): ReadonlyArray<Session> =>
-  sortedBy(sessions, (left, right) => Number(right.current) - Number(left.current));
+  sortedBy(
+    sessions.filter((session) => session.kind !== "apiKey"),
+    (left, right) => Number(right.current) - Number(left.current),
+  );
 
 /**
  * A device's name: the name its device or device sign-in gave, `iPhone` for this one, or

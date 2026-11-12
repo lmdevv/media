@@ -262,14 +262,14 @@ Sign out every password and device session you have, or every other one.
 
 ## `core.auth.sessions.list`
 
-List your signed-in browsers, apps, and devices, newest first, with the device each is on; API keys' sessions are left to the key list.
+List your signed-in browsers, apps, devices, and API keys' sign-ins, newest first, with the device each is on.
 
 - CLI: `media auth sessions list`
 - Kind: query
 - Scope: account
 - Arguments: `{ paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
 - Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
-- Result: `{ page: Array<{ sessionId: Id<"authSessions">; kind: "password" | "deviceCode" | "tile" | "grant"; name: string | null; device: null | { deviceId: Id<"devices">; name: string }; scopes: Array<"account" | "admin" | "movies:read" | "movies:play" | "movies:edit" | "music:read" | "music:play" | "music:edit">; signedInAt: number; expiresAt: number; current: boolean }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
+- Result: `{ page: Array<{ sessionId: Id<"authSessions">; kind: "password" | "apiKey" | "deviceCode" | "tile" | "grant"; name: string | null; device: null | { deviceId: Id<"devices">; name: string }; scopes: Array<"account" | "admin" | "movies:read" | "movies:play" | "movies:edit" | "music:read" | "music:play" | "music:edit">; signedInAt: number; expiresAt: number; current: boolean }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
 
 ## `core.auth.sessions.revoke`
 

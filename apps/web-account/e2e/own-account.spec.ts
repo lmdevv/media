@@ -62,7 +62,9 @@ test("a person sees their own devices and signs another browser out", async ({ p
     const other = list.getByRole("listitem").nth(2);
 
     await other.getByRole("button", { name: /^Sign out/u }).click();
-    await expect(other.getByRole("note")).toContainText("has to sign in again.");
+    await expect(other.getByRole("note")).toContainText(
+      "It has to sign in again to keep watching.",
+    );
     await other.getByRole("button", { name: "Sign out", exact: true }).click();
     await expect(list.getByRole("listitem")).toHaveCount(2);
 
@@ -90,8 +92,8 @@ test("a person makes an API key, sees it listed with its last use but never its 
     await expect(page.getByText("No API keys.")).toBeVisible();
 
     await page.getByRole("button", { name: "Create key" }).click();
+    await expect(page.getByRole("checkbox", { checked: true })).toHaveCount(2);
     await page.getByRole("textbox", { name: "Name" }).fill("Home Assistant");
-    await page.getByRole("checkbox").first().click();
     await page.getByRole("button", { name: "Create key" }).click();
 
     const secret = page.getByText(/^mk_[a-z0-9]+\.[\w-]{43}$/u);

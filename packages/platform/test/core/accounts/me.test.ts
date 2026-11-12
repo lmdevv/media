@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { api } from "../../../convex/_generated/api";
-import { GIVEN_NAME_MAX } from "../../../convex/core/lib/names";
+import { DISPLAY_NAME_MAX, GIVEN_NAME_MAX } from "../../../convex/core/lib/names";
 import { PASSWORD_MAX } from "../../../convex/core/lib/passwords";
 import { enroll, member, picker } from "../../devices";
 import { allPages } from "../../pages";
@@ -149,7 +149,7 @@ describe.skipIf(stack === undefined)("your own account", { timeout: 120_000 }, (
     expect(await nameOf()).toBeNull();
   });
 
-  it("refuses a blank, unprintable, or too long display name, and one set with an API key", async () => {
+  it("takes up to 80 characters, as old movies did, and refuses a blank, unprintable, or keyed one", async () => {
     if (stack === undefined) return;
     const session = await signInAs(stack, await createPerson(stack, "fit"));
 
@@ -158,8 +158,9 @@ describe.skipIf(stack === undefined)("your own account", { timeout: 120_000 }, (
 
     expect(await name("   ")).toBe("invalid_args");
     expect(await name("bad\u202Ename")).toBe("invalid_args");
-    expect(await name("x".repeat(GIVEN_NAME_MAX + 1))).toBe("invalid_args");
-    expect(await name("😀".repeat(GIVEN_NAME_MAX))).toBe("accepted");
+    expect(await name("x".repeat(DISPLAY_NAME_MAX + 1))).toBe("invalid_args");
+    expect(await name("x".repeat(GIVEN_NAME_MAX + 1))).toBe("accepted");
+    expect(await name("😀".repeat(DISPLAY_NAME_MAX))).toBe("accepted");
 
     const { key } = await session.client.action(api.core.auth.apiKeys.create, {
       name: "script",

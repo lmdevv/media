@@ -48,28 +48,21 @@ export type NewKey = Parameters<Auth["apiKeys"]["create"]>[0];
 
 const KIND_LABELS: Readonly<Record<SessionRow["kind"], string>> = {
   password: "Password",
+  apiKey: "API key",
   grant: "App on a phone",
   deviceCode: "Device",
   tile: "Shared device",
 };
 
 /**
- * What a session is called: the name its device or device sign-in gave, `This browser` for this
- * one, or `Password sign-in` for a browser or app that signed in on no device.
+ * What a session is called: the name its device, key, or device sign-in gave, `This browser` for
+ * this one, or `Password sign-in` for a browser or app that signed in on no device.
  */
 export const sessionName = (session: SessionRow): string => {
   if (session.name !== null) return session.name;
 
   return session.current ? "This browser" : "Password sign-in";
 };
-
-/** A session's facts: how it signed in, when, and when it ends unless used again. */
-const sessionFacts = (session: SessionRow): string =>
-  [
-    KIND_LABELS[session.kind],
-    `Signed in ${formatTime(session.signedInAt)}`,
-    `Expires ${formatTime(session.expiresAt)}`,
-  ].join(" · ");
 
 /** Every scope's label, in the order Create key lists them. */
 const SCOPE_LABELS: Readonly<Record<KeyScope, string>> = {
@@ -95,6 +88,21 @@ export const scopeLabels = (scopes: ReadonlyArray<KeyScope>): string =>
         .toSorted((left, right) => scopeRank(left) - scopeRank(right))
         .map((scope) => SCOPE_LABELS[scope])
         .join(", ");
+
+/** A session's facts: how it signed in, its scopes, when, and when it ends unless used again. */
+export const sessionFacts = (session: SessionRow): string =>
+  [
+    KIND_LABELS[session.kind],
+    scopeLabels(session.scopes),
+    `Signed in ${formatTime(session.signedInAt)}`,
+    `Expires ${formatTime(session.expiresAt)}`,
+  ].join(" · ");
+
+/** What signing a session out does, as old movies said it: a key signs in again on its next use. */
+export const signOutNote = (session: SessionRow): string =>
+  session.kind === "apiKey"
+    ? "The key signs in again the next time it is used. Revoke the key to stop it."
+    : "It has to sign in again to keep watching.";
 
 /** The start of a key as its secret begins, `mk_ab12cd34…`, which never shows the secret. */
 export const keyPrefix = (key: Pick<KeyRow, "keyId">): string => `mk_${key.keyId.slice(0, 8)}…`;
@@ -209,7 +217,7 @@ export function DevicesView({
                   </div>
                 }
               >
-                {`${sessionName(session)} has to sign in again.`}
+                {signOutNote(session)}
               </Notice>
             ) : null}
           </ItemRow>
@@ -227,6 +235,9 @@ const EXPIRY_CHOICES: ReadonlyArray<Choice<"30" | "90" | "365" | "never">> = [
 ];
 
 type Expiry = (typeof EXPIRY_CHOICES)[number]["value"];
+
+/** What a new key holds until the person changes it, as old movies started it: browse and play. */
+const DEFAULT_KEY_SCOPES: ReadonlyArray<KeyScope> = ["movies:read", "movies:play"];
 
 const isKeyScope = (scope: string): scope is KeyScope =>
   SCOPE_ORDER.some((known) => known === scope);
@@ -408,17 +419,18 @@ function CreateKeyForm({
   readonly onCreate: (key: NewKey) => void;
 }) {
   const [name, setName] = useState("");
-  const [scopes, setScopes] = useState<ReadonlyArray<KeyScope>>([]);
+  const [scopes, setScopes] = useState<ReadonlyArray<KeyScope>>(DEFAULT_KEY_SCOPES);
   const [expiry, setExpiry] = useState<Expiry>("90");
-  const ready = name.trim() !== "" && !pending;
   const offered = SCOPE_ORDER.filter(isKeyScope).filter((scope) => grantable.includes(scope));
+  const chosen = scopes.filter((scope) => offered.includes(scope));
+  const ready = name.trim() !== "" && chosen.length > 0 && !pending;
 
   const submit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
 
     if (!ready) return;
 
-    const base = { name: name.trim(), scopes: [...scopes] };
+    const base = { name: name.trim(), scopes: chosen };
 
     onCreate(expiry === "never" ? base : { ...base, expiresInDays: Number(expiry) });
   };

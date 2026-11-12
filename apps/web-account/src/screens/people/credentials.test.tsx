@@ -1,4 +1,5 @@
 import { Brand } from "effect";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { disabledButton, loaded, noop, textOf } from "@/components/admin/testing";
@@ -10,7 +11,9 @@ import {
   keyPrefix,
   lastUsedLabel,
   scopeLabels,
+  sessionFacts,
   sessionName,
+  signOutNote,
 } from "./credentials";
 import type { KeyRow, SessionRow } from "./credentials";
 
@@ -77,7 +80,7 @@ describe("DevicesView", () => {
     expect(text).toContain("Firefox on Linux");
     expect(text).toContain("Current");
     expect(text).toContain("Aiko's iPhone");
-    expect(text).toContain("App on a phone · Signed in");
+    expect(text).toContain("App on a phone · Browse movies, Your account · Signed in");
     expect(text.match(/Sign out/gu)).toHaveLength(1);
   });
 
@@ -92,8 +95,24 @@ describe("DevicesView", () => {
       />
     );
 
-    expect(textOf(asking)).toContain("Aiko's iPhone has to sign in again.");
+    expect(textOf(asking)).toContain("It has to sign in again to keep watching.");
     expect(disabledButton(asking, "Sign out")).toBe(true);
+  });
+});
+
+describe("an API key's sign-in on Devices", () => {
+  const keyed = session({ kind: "apiKey", name: "Home Assistant", scopes: ["movies:play"] });
+
+  it("is named by its key, says it is an API key and what it holds", () => {
+    expect(sessionName(keyed)).toBe("Home Assistant");
+    expect(sessionFacts(keyed)).toMatch(/^API key · Play movies · Signed in /u);
+  });
+
+  it("warns that the key signs in again, as old movies did", () => {
+    expect(signOutNote(keyed)).toBe(
+      "The key signs in again the next time it is used. Revoke the key to stop it.",
+    );
+    expect(signOutNote(session())).toBe("It has to sign in again to keep watching.");
   });
 });
 
@@ -145,6 +164,13 @@ describe("ApiKeysView", () => {
 
   it("says when there are none", () => {
     expect(textOf(keysView({ keys: loaded([]) }))).toContain("No API keys.");
+  });
+
+  it("starts a new key with browse and play, and refuses one with no scope", () => {
+    const creating = keysView({ creating: true });
+
+    expect(renderToStaticMarkup(creating).match(/aria-checked="true"/gu)).toHaveLength(2);
+    expect(disabledButton(creating, "Create key")).toBe(true);
   });
 
   it("offers only the scopes this session holds when creating one", () => {

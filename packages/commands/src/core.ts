@@ -260,7 +260,7 @@ export const core = [
   }),
   query("core.auth.sessions.list", {
     summary:
-      "List your signed-in browsers, apps, and devices, newest first, with the device each is on; API keys' sessions are left to the key list",
+      "List your signed-in browsers, apps, devices, and API keys' sign-ins, newest first, with the device each is on",
     scope: "account",
     args: { paginationOpts: paginationOptsValidator },
     result: paginationResultValidator(
@@ -268,11 +268,12 @@ export const core = [
         sessionId: v.id("authSessions"),
         kind: v.union(
           v.literal("password"),
+          v.literal("apiKey"),
           v.literal("deviceCode"),
           v.literal("tile"),
           v.literal("grant"),
         ),
-        /** What it calls itself: its device's name, a device sign-in's name, or its app grant's name; null for none. */
+        /** What it calls itself: its device's name, its key's or device sign-in's name, or its app grant's name; null for none. */
         name: v.union(v.string(), v.null()),
         device: v.union(v.null(), v.object({ deviceId: v.id("devices"), name: v.string() })),
         scopes: v.array(credentialScope),
