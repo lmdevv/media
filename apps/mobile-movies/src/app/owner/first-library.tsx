@@ -1,4 +1,4 @@
-import { useCommand } from "@media/sdk/react";
+import { usePlatform } from "@media/sdk/react";
 import { router } from "expo-router";
 import { useEffect } from "react";
 
@@ -11,7 +11,7 @@ import { useFirstRun } from "@/session/first-run";
 import { useSessionPhase } from "@/session/session-phase";
 
 export default function AddYourFirstLibrary() {
-  const create = useCommand("libraries.create");
+  const platform = usePlatform();
   const firstRun = useFirstRun();
   const finishSetup = useFinishSetup();
   const phase = useSessionPhase();
@@ -33,16 +33,18 @@ export default function AddYourFirstLibrary() {
     <LibraryForm
       title="Add Your First Library"
       initial={NEW_DRAFT}
-      chooseKind
       submitLabel="Add & Scan"
       checkButton={false}
       back={false}
       onSubmit={async (draft) => {
-        const created = await create({ ...submission(draft), kind: draft.kind });
+        const created = await platform.core.libraries.create({
+          ...submission(draft),
+          kind: "movies",
+        });
 
         router.push({
           pathname: "/owner/libraries/[libraryId]/scan",
-          params: { libraryId: created.libraryId, jobId: created.jobId },
+          params: { libraryId: created.libraryId },
         });
       }}
       secondary={

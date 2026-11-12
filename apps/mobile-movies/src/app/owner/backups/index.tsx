@@ -1,22 +1,23 @@
-import { useCommand, useCommandQuery } from "@media/sdk/react";
+import { usePages } from "@media/mobile-core/pages";
+import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { router } from "expo-router";
 import { Server } from "lucide-react-native";
 
-import { OwnerScreen, QueryView, SectionHeading, useNow } from "@/components/owner/parts";
+import { OwnerScreen, PagedView, SectionHeading, useNow } from "@/components/owner/parts";
 import { useTask } from "@/components/owner/use-task";
 import { Button } from "@/components/ui/button";
 import { ListRow } from "@/components/ui/list-row";
 import { Text } from "@/components/ui/text";
 import { formatBytes, formatWhen } from "@/lib/owner-format";
-import { isActive } from "@/lib/scans";
 
 export default function Backups() {
+  const platform = usePlatform();
   const now = useNow(60_000);
-  const backups = useCommandQuery("backups.list", {});
-  const jobs = useCommandQuery("jobs.list", { kind: "backup", limit: 5 });
-  const run = useCommand("backups.run");
-  const backUp = useTask(() => run({}));
-  const running = jobs.status === "success" && jobs.data.some((job) => isActive(job));
+  const { backups } = platform.core.server;
+  const list = usePages(backups.list, (paginationOpts) => ({ paginationOpts }));
+  const active = usePlatformQuery(backups.active);
+  const backUp = useTask(() => backups.run({}));
+  const running = active.status === "success" && active.data !== null;
 
   return (
     <OwnerScreen title="Backups">
@@ -33,16 +34,16 @@ export default function Backups() {
         onPress={() => void backUp.run()}
       />
       <SectionHeading>Latest Backups</SectionHeading>
-      <QueryView query={backups}>
-        {(list) =>
-          list.length === 0 ? (
+      <PagedView list={list}>
+        {(rows, done) =>
+          rows.length === 0 && done ? (
             <Text tone="muted">No backups yet.</Text>
           ) : (
-            list.map((backup) => (
+            rows.map((backup) => (
               <ListRow
                 key={backup.id}
                 icon={Server}
-                title={formatWhen(backup.createdAt, now)}
+                title={formatWhen(backup.takenAt, now)}
                 detail={formatBytes(backup.sizeBytes)}
                 onPress={() =>
                   router.push({
@@ -54,7 +55,7 @@ export default function Backups() {
             ))
           )
         }
-      </QueryView>
+      </PagedView>
     </OwnerScreen>
   );
 }

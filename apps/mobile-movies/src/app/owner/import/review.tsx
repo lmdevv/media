@@ -8,8 +8,6 @@ import {
   Users,
 } from "lucide-react-native";
 import type { LucideIcon } from "lucide-react-native";
-import { mappingsFor } from "@media/contracts/migration-plan";
-import { useCommand } from "@media/sdk/react";
 
 import { useImportState, useReview } from "@/components/owner/import-state";
 import type { Preview } from "@/components/owner/import-state";
@@ -18,9 +16,10 @@ import { useTask } from "@/components/owner/use-task";
 import { Button } from "@/components/ui/button";
 import { ListRow } from "@/components/ui/list-row";
 import { Text } from "@/components/ui/text";
-import { reviewRows } from "@/lib/migration";
+import { mappingsFor, reviewRows } from "@/lib/migration";
 import type { CountRow } from "@/lib/migration";
 import { countOf } from "@/lib/owner-format";
+import { useMediaServer } from "@/session/media-server";
 
 const ICONS: Readonly<Record<CountRow["key"], LucideIcon>> = {
   libraries: Folder,
@@ -54,18 +53,18 @@ const cautions = (preview: Preview): ReadonlyArray<string> => {
 };
 
 function ReviewList({ preview }: { readonly preview: Preview }) {
-  const start = useCommand("migration.import");
+  const media = useMediaServer();
   const { rows } = useReview(preview);
 
   const begin = useTask(async () => {
-    const result = await start({
+    const result = await media.run("imports.start", {
       connectionId: preview.connection.connectionId,
       users: mappingsFor(rows),
     });
 
     if (result.status === "failed") throw new Error(result.message);
 
-    router.replace({ pathname: "/owner/import/progress", params: { jobId: result.jobId } });
+    router.replace({ pathname: "/owner/import/progress", params: { importId: result.importId } });
   });
 
   return (

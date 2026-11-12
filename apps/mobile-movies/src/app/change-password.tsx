@@ -1,3 +1,4 @@
+import { describeFailure, isFailure } from "@media/mobile-core/failure";
 import { usePlatform } from "@media/sdk/react";
 import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
@@ -13,7 +14,6 @@ import { NavHeader } from "@/components/ui/nav-header";
 import { Screen } from "@/components/ui/screen";
 import { TextField } from "@/components/ui/text-field";
 import { PASSWORD_MAX, PASSWORD_MIN, passwordProblem } from "@/lib/account";
-import { describeFailure, isFailure } from "@/lib/failure";
 
 type Problem = { readonly field: "current" | "next" | "confirm"; readonly message: string };
 

@@ -3,8 +3,8 @@ import { usePlatform } from "@media/sdk/react";
 import type { QueryState } from "@media/sdk/react";
 import { useMemo, useState, useSyncExternalStore } from "react";
 
-import { useAllPages } from "@/lib/pages";
-import type { Paged, Watch } from "@/lib/pages";
+import { useAllPages } from "@media/mobile-core/pages";
+import type { Paged, Watch } from "@media/mobile-core/pages";
 
 type Result<Method> = Method extends (...args: never) => Promise<infer A> ? A : never;
 

@@ -1,65 +1,91 @@
-import type { LibraryId } from "@media/contracts/ids";
-import { UserId } from "@media/contracts/ids";
-import type { User } from "@media/contracts/models/account";
-import type { LibraryDetail } from "@media/contracts/models/catalog";
-import type { AssignableRole } from "@media/contracts/scopes";
-import { useCommand, useCommandQuery } from "@media/sdk/react";
-import { Schema } from "effect";
+import {
+  ACCESS_LABELS,
+  ROLE_CHOICES,
+  ROLE_LABELS,
+  accessChangeable,
+  canChangeRole,
+  libraryAccess,
+} from "@media/mobile-core/accounts";
+import type { AssignableRole, HouseholdUser, LibraryAccess } from "@media/mobile-core/accounts";
+import { useHousehold, useLibraryGrants, useSavePerson } from "@media/mobile-core/use-accounts";
 import { router, useLocalSearchParams } from "expo-router";
-import { Ellipsis, Folder, User as UserIcon } from "lucide-react-native";
+import { Folder, User as UserIcon } from "lucide-react-native";
 import { useState } from "react";
 
 import {
-  Loading,
-  LoadFailure,
   OwnerScreen,
+  PagedView,
   SectionHeading,
   Spacer,
   showActions,
 } from "@/components/owner/parts";
+import { useManagedLibraries } from "@/components/owner/use-libraries";
 import { useTask } from "@/components/owner/use-task";
-import { useOwnerViewer } from "@/components/owner/viewer";
 import { Button } from "@/components/ui/button";
-import { IconButton } from "@/components/ui/icon-button";
 import { ListRow } from "@/components/ui/list-row";
 import { Text } from "@/components/ui/text";
-import { ROLE_LABELS, accessRows, canChange, grantsOf, sameGrants } from "@/lib/household";
+import type { Library, LibraryId } from "@/lib/owner";
+import { useMe } from "@/session/me";
 
-const decodeUserId = Schema.decodeUnknownSync(UserId);
-
-const ROLE_CHOICES: ReadonlyArray<AssignableRole> = ["member", "admin"];
+/** One library on the page, with what the person reaches in it as saved. */
+interface LibraryRow {
+  readonly library: Library;
+  readonly saved: LibraryAccess | null;
+}
 
 function Person({
   user,
   libraries,
 }: {
-  readonly user: User;
-  readonly libraries: ReadonlyArray<LibraryDetail>;
+  readonly user: HouseholdUser;
+  readonly libraries: ReadonlyArray<Library>;
 }) {
-  const viewer = useOwnerViewer();
-  const setRole = useCommand("users.setRole");
-  const setAccess = useCommand("users.setLibraryAccess");
-  const enable = useCommand("users.enable");
-  const changeable = canChange(user, viewer.user.id);
-  const saved = grantsOf(user.id, libraries);
-  const [role, setRoleChoice] = useState<User["role"]>(user.role);
-  const [granted, setGranted] = useState<ReadonlyArray<LibraryId>>(saved);
-  const roleChanged = role !== user.role;
-  const accessChanged = !sameGrants(granted, saved);
+  const me = useMe();
+  const save = useSavePerson();
+  const grants = useLibraryGrants(libraries.map((library) => library.libraryId));
+  const changeable = canChangeRole(user, me.userId);
+  const [role, setRoleChoice] = useState<HouseholdUser["role"]>(user.role);
+  const [toggled, setToggled] = useState<ReadonlySet<LibraryId>>(new Set());
 
-  const save = useTask(async () => {
-    if (roleChanged && (role === "admin" || role === "member")) {
-      await setRole({ userId: user.id, role });
-    }
+  const rows = libraries.map((library, at): LibraryRow => {
+    const list = grants[at];
 
-    if (accessChanged && role === "member") {
-      await setAccess({ userId: user.id, libraryIds: granted });
-    }
-
-    router.back();
+    return {
+      library,
+      saved:
+        list?.status === "ready" && list.next.kind === "done"
+          ? libraryAccess(user.userId, role, list.rows)
+          : null,
+    };
   });
 
-  const reenable = useTask(() => enable({ userId: user.id }));
+  const shown = (row: LibraryRow): LibraryAccess | null => {
+    if (row.saved === null || !toggled.has(row.library.libraryId)) return row.saved;
+
+    return row.saved === "allowed" ? "notAllowed" : "allowed";
+  };
+
+  const roleChanged = role !== user.role;
+  const changes = rows.filter((row) => toggled.has(row.library.libraryId) && row.saved !== null);
+
+  const chosenRole = (): AssignableRole | null =>
+    roleChanged ? (ROLE_CHOICES.find((choice) => choice === role) ?? null) : null;
+
+  const saving = useTask(async () => {
+    await save({
+      userId: user.userId,
+      role: chosenRole(),
+      give:
+        role === "member"
+          ? changes.filter((row) => row.saved === "notAllowed").map((row) => row.library.libraryId)
+          : [],
+      takeAway:
+        role === "member"
+          ? changes.filter((row) => row.saved === "allowed").map((row) => row.library.libraryId)
+          : [],
+    });
+    router.back();
+  });
 
   const chooseRole = () =>
     showActions(
@@ -70,63 +96,45 @@ function Person({
       })),
     );
 
-  const disable = () =>
-    router.push({
-      pathname: "/owner/users/[userId]/disable",
-      params: { userId: user.id, name: user.name },
+  const toggle = (libraryId: LibraryId) =>
+    setToggled((current) => {
+      const next = new Set(current);
+
+      if (!next.delete(libraryId)) next.add(libraryId);
+
+      return next;
     });
 
-  const error = save.error ?? reenable.error;
-
   return (
-    <OwnerScreen
-      title={user.name}
-      fallback="/owner/users"
-      trailing={
-        changeable ? (
-          <IconButton
-            icon={Ellipsis}
-            label={`More for ${user.name}`}
-            onPress={() =>
-              showActions(user.name, [
-                user.disabled
-                  ? { label: "Enable Account", onPress: () => void reenable.run() }
-                  : { label: "Disable Account", destructive: true, onPress: disable },
-              ])
-            }
-          />
-        ) : undefined
-      }
-    >
+    <OwnerScreen title={user.username} fallback="/owner/users">
       <ListRow
         icon={UserIcon}
         title="Role"
-        detail={user.disabled ? `${ROLE_LABELS[role]} · Disabled` : ROLE_LABELS[role]}
+        detail={ROLE_LABELS[role]}
         onPress={changeable ? chooseRole : undefined}
       />
       {libraries.length === 0 ? null : <SectionHeading>Library Access</SectionHeading>}
-      {accessRows(role, libraries, granted).map((row) => (
-        <ListRow
-          key={row.libraryId}
-          icon={Folder}
-          title={row.name}
-          detail={row.detail}
-          chevron={false}
-          onPress={
-            changeable && row.changeable
-              ? () =>
-                  setGranted((current) =>
-                    row.allowed
-                      ? current.filter((id) => id !== row.libraryId)
-                      : [...current, row.libraryId],
-                  )
-              : undefined
-          }
-        />
-      ))}
-      {error === null ? null : (
+      {rows.map((row) => {
+        const access = shown(row);
+
+        return (
+          <ListRow
+            key={row.library.libraryId}
+            icon={Folder}
+            title={row.library.name}
+            detail={access === null ? undefined : ACCESS_LABELS[access]}
+            chevron={false}
+            onPress={
+              changeable && access !== null && accessChangeable(access)
+                ? () => toggle(row.library.libraryId)
+                : undefined
+            }
+          />
+        );
+      })}
+      {saving.error === null ? null : (
         <Text variant="meta" tone="danger">
-          {error}
+          {saving.error}
         </Text>
       )}
       {changeable ? (
@@ -134,20 +142,10 @@ function Person({
           <Spacer />
           <Button
             label="Save Changes"
-            busy={save.busy}
-            disabled={!roleChanged && !accessChanged}
-            onPress={() => void save.run()}
+            busy={saving.busy}
+            disabled={!roleChanged && changes.length === 0}
+            onPress={() => void saving.run()}
           />
-          {user.disabled ? (
-            <Button
-              label="Enable Account"
-              variant="secondary"
-              busy={reenable.busy}
-              onPress={() => void reenable.run()}
-            />
-          ) : (
-            <Button label="Disable Account" variant="destructive" onPress={disable} />
-          )}
         </>
       ) : null}
     </OwnerScreen>
@@ -156,43 +154,26 @@ function Person({
 
 export default function PersonScreen() {
   const params = useLocalSearchParams<{ userId: string }>();
-  const userId = decodeUserId(params.userId);
-  const users = useCommandQuery("users.list", {});
-  const libraries = useCommandQuery("libraries.listDetails", {});
+  const users = useHousehold();
+  const libraries = useManagedLibraries();
 
-  if (users.status === "error") {
-    return (
-      <OwnerScreen title="Person" fallback="/owner/users">
-        <LoadFailure error={users.error} retry={users.retry} />
-      </OwnerScreen>
-    );
+  const user =
+    users.status === "ready" ? users.rows.find((each) => each.userId === params.userId) : undefined;
+
+  if (user !== undefined && libraries.status === "ready" && libraries.next.kind === "done") {
+    return <Person key={user.userId} user={user} libraries={libraries.rows} />;
   }
 
-  if (libraries.status === "error") {
-    return (
-      <OwnerScreen title="Person" fallback="/owner/users">
-        <LoadFailure error={libraries.error} retry={libraries.retry} />
-      </OwnerScreen>
-    );
-  }
+  const gone = user === undefined && users.status === "ready" && users.next.kind === "done";
 
-  if (users.status === "loading" || libraries.status === "loading") {
-    return (
-      <OwnerScreen title="" fallback="/owner/users">
-        <Loading />
-      </OwnerScreen>
-    );
-  }
-
-  const user = users.data.find((candidate) => candidate.id === userId);
-
-  if (user === undefined) {
-    return (
-      <OwnerScreen title="Person" fallback="/owner/users">
-        <Text tone="muted">This account is gone.</Text>
-      </OwnerScreen>
-    );
-  }
-
-  return <Person key={user.id} user={user} libraries={libraries.data} />;
+  return (
+    <OwnerScreen title={user?.username ?? "Person"} fallback="/owner/users">
+      {gone ? <Text tone="muted">This account is gone.</Text> : null}
+      {user === undefined ? (
+        <PagedView list={users}>{() => null}</PagedView>
+      ) : (
+        <PagedView list={libraries}>{() => null}</PagedView>
+      )}
+    </OwnerScreen>
+  );
 }

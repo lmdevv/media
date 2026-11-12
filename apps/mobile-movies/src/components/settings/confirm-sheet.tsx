@@ -1,10 +1,10 @@
+import { describeFailure } from "@media/mobile-core/failure";
 import * as Haptics from "expo-haptics";
 import type { LucideIcon } from "lucide-react-native";
 import { useState } from "react";
 
 import { Sheet, useSheetExit } from "@/components/title/sheet";
 import { Button } from "@/components/ui/button";
-import { describeFailure } from "@/lib/failure";
 
 /** Props for `ConfirmSheet`. */
 export interface ConfirmSheetProps {

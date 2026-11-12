@@ -1,3 +1,4 @@
+import { describeFailure, isFailure } from "@media/mobile-core/failure";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import * as Haptics from "expo-haptics";
 import { router, useLocalSearchParams } from "expo-router";
@@ -13,7 +14,6 @@ import { NavHeader } from "@/components/ui/nav-header";
 import { Screen } from "@/components/ui/screen";
 import { Text } from "@/components/ui/text";
 import { formatUserCode } from "@/lib/device-code";
-import { describeFailure, isFailure } from "@/lib/failure";
 import { useMe } from "@/session/me";
 
 /** The device waiting on a code: the code, and the name `core.auth.deviceCodes.lookup` shows. */

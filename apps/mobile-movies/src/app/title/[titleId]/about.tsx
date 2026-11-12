@@ -1,3 +1,4 @@
+import { describeFailure, isFailure } from "@media/mobile-core/failure";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { useLocalSearchParams } from "expo-router";
 import { CircleAlert } from "lucide-react-native";
@@ -14,7 +15,6 @@ import { Screen } from "@/components/ui/screen";
 import { Text } from "@/components/ui/text";
 import { artworkUrl } from "@/lib/artwork";
 import type { TitleDetail } from "@/lib/catalog";
-import { describeFailure, isFailure } from "@/lib/failure";
 import { useServer } from "@/session/connection";
 
 function About({ title }: { readonly title: TitleDetail }) {

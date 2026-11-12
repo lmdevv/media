@@ -1,3 +1,4 @@
+import { describeFailure, isFailure } from "@media/mobile-core/failure";
 import { router } from "expo-router";
 import { Server } from "lucide-react-native";
 import { useRef, useState } from "react";
@@ -9,7 +10,6 @@ import { ListRow } from "@/components/ui/list-row";
 import { NavHeader } from "@/components/ui/nav-header";
 import { Screen } from "@/components/ui/screen";
 import { TextField } from "@/components/ui/text-field";
-import { describeFailure, isFailure } from "@/lib/failure";
 import { useConnection, useServer } from "@/session/connection";
 import { useSessionPhase } from "@/session/session-phase";
 import { useSignIn } from "@/session/sign-in";

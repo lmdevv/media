@@ -1,3 +1,4 @@
+import { describeFailure, isFailure } from "@media/mobile-core/failure";
 import type { PlatformSdk } from "@media/sdk/promise";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { Link } from "lucide-react-native";
@@ -12,7 +13,6 @@ import { Screen } from "@/components/ui/screen";
 import { Text } from "@/components/ui/text";
 import { TextField } from "@/components/ui/text-field";
 import { passwordProblem } from "@/lib/account";
-import { describeFailure, isFailure } from "@/lib/failure";
 import { displayHost } from "@/lib/local-network";
 import { useConnection, useServer } from "@/session/connection";
 import { usePendingInvite } from "@/session/pending-invite";

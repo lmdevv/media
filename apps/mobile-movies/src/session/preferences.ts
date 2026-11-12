@@ -1,3 +1,4 @@
+import { describeFailure } from "@media/mobile-core/failure";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import type { QueryState } from "@media/sdk/react";
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
@@ -5,7 +6,6 @@ import { Alert } from "react-native";
 
 import { loadAppearance, saveAppearance } from "@/lib/appearance";
 import type { Appearance } from "@/lib/appearance";
-import { describeFailure } from "@/lib/failure";
 import {
   parsePreferences,
   parseSynced,

@@ -1,7 +1,7 @@
+import { useAllPages } from "@media/mobile-core/pages";
 import { usePlatform } from "@media/sdk/react";
 
 import type { SeasonEpisode, TitleId } from "@/lib/catalog";
-import { useAllPages } from "@/lib/pages";
 
 const NO_EPISODES: ReadonlyArray<SeasonEpisode> = [];
 

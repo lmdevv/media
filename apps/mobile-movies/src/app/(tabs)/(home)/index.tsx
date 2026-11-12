@@ -1,3 +1,5 @@
+import { describeFailure } from "@media/mobile-core/failure";
+import { useFirstRows } from "@media/mobile-core/pages";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { router } from "expo-router";
 import { Folder, Plus, Popcorn } from "lucide-react-native";
@@ -22,8 +24,6 @@ import { CalmState } from "@/components/ui/calm-state";
 import { homeScreen } from "@/lib/browse";
 import type { HomeScreen } from "@/lib/browse";
 import type { Home as HomeRows } from "@/lib/catalog";
-import { describeFailure } from "@/lib/failure";
-import { useFirstRows } from "@/lib/pages";
 import { useWidthClass } from "@/lib/use-width-class";
 import { useMe } from "@/session/me";
 

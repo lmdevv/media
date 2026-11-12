@@ -1,7 +1,7 @@
 import { SOURCE_NAMES, failureLine } from "@media/contracts/migration-plan";
 import type { MigrationSource } from "@media/contracts/models/jobs";
 import type { MigrationSourceFailure } from "@media/contracts/models/migration";
-import { useCommandQuery } from "@media/sdk/react";
+import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { router } from "expo-router";
 import { RotateCcw } from "lucide-react-native";
 import { useEffect, useState } from "react";
@@ -14,8 +14,10 @@ import { useTask } from "@/components/owner/use-task";
 import { Button } from "@/components/ui/button";
 import { Text } from "@/components/ui/text";
 import { TextField } from "@/components/ui/text-field";
-import { CREDENTIAL_LABELS } from "@/lib/migration";
-import { isActive } from "@/lib/scans";
+import { CREDENTIAL_LABELS, isRunning } from "@/lib/migration";
+
+/** How many of the newest imports the screen looks through for one still running. */
+const RECENT_RUNS = 10;
 
 const SOURCES: ReadonlyArray<MigrationSource> = ["jellyfin", "plex"];
 
@@ -32,15 +34,20 @@ const withScheme = (url: string): string => {
 
 export default function ImportLibrary() {
   const { form, setForm, setPreview } = useImportState();
-  const runs = useCommandQuery("migration.status", {});
+  const platform = usePlatform();
+
+  const runs = usePlatformQuery(platform.movies.imports.list, {
+    paginationOpts: { numItems: RECENT_RUNS, cursor: null },
+  });
+
   const preview = usePreview();
   const [failure, setFailure] = useState<MigrationSourceFailure | null>(null);
-  const active = runs.status === "success" ? runs.data.find((run) => isActive(run.job)) : undefined;
-  const activeId = active?.job.id;
+  const active = runs.status === "success" ? runs.data.page.find(isRunning) : undefined;
+  const activeId = active?.importId;
 
   useEffect(() => {
     if (activeId !== undefined) {
-      router.replace({ pathname: "/owner/import/progress", params: { jobId: activeId } });
+      router.replace({ pathname: "/owner/import/progress", params: { importId: activeId } });
     }
   }, [activeId]);
 

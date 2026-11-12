@@ -1,37 +1,34 @@
-import { LibraryId } from "@media/contracts/ids";
-import type { LibraryDetail } from "@media/contracts/models/catalog";
-import { useCommand, useCommandQuery } from "@media/sdk/react";
-import { Schema } from "effect";
+import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { router, useLocalSearchParams } from "expo-router";
 
 import { LibraryForm } from "@/components/owner/library-form";
 import { OwnerScreen, QueryView } from "@/components/owner/parts";
 import { draftOf, submission } from "@/lib/library-form";
-
-const decodeLibraryId = Schema.decodeUnknownSync(LibraryId);
+import { asLibraryId } from "@/lib/owner";
+import type { LibraryDetail } from "@/lib/owner";
 
 function EditForm({ library }: { readonly library: LibraryDetail }) {
-  const update = useCommand("libraries.update");
+  const platform = usePlatform();
+  const { libraryId } = library;
+  const saved = library.folders ?? [];
 
   return (
     <LibraryForm
       title={library.name}
       initial={draftOf(library)}
-      chooseKind={false}
       submitLabel="Save"
       onSubmit={async (draft) => {
-        const { name, roots } = submission(draft);
-        const moved = roots.join("\n") !== library.roots.join("\n");
+        const { name, folders } = submission(draft);
+        const moved = folders.join("\n") !== saved.join("\n");
 
-        await update(
-          moved ? { libraryId: library.id, name, roots } : { libraryId: library.id, name },
-        );
+        if (name !== library.name) await platform.core.libraries.rename({ libraryId, name });
 
-        if (moved) {
-          router.replace({
-            pathname: "/owner/libraries/[libraryId]/scan",
-            params: { libraryId: library.id },
-          });
+        const rescan = moved
+          ? (await platform.core.libraries.setFolders({ libraryId, folders })).scanJobId
+          : null;
+
+        if (rescan !== null) {
+          router.replace({ pathname: "/owner/libraries/[libraryId]/scan", params: { libraryId } });
 
           return;
         }
@@ -43,10 +40,11 @@ function EditForm({ library }: { readonly library: LibraryDetail }) {
 }
 
 export default function EditLibrary() {
+  const platform = usePlatform();
   const params = useLocalSearchParams<{ libraryId: string }>();
 
-  const library = useCommandQuery("libraries.get", {
-    libraryId: decodeLibraryId(params.libraryId),
+  const library = usePlatformQuery(platform.core.libraries.get, {
+    libraryId: asLibraryId(params.libraryId),
   });
 
   if (library.status === "success") return <EditForm library={library.data} />;

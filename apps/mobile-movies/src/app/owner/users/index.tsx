@@ -1,35 +1,43 @@
-import type { Invite } from "@media/contracts/models/account";
-import { useCommand, useCommandQuery } from "@media/sdk/react";
+import { ROLE_LABELS, expiryLine } from "@media/mobile-core/accounts";
+import type { PendingInvite } from "@media/mobile-core/accounts";
+import { describeFailure } from "@media/mobile-core/failure";
+import { useHousehold, usePendingInvites, useRevokeInvite } from "@media/mobile-core/use-accounts";
 import { router } from "expo-router";
-import { Link, Plus, RotateCcw, User } from "lucide-react-native";
+import { Link, Plus, User } from "lucide-react-native";
 import { Alert } from "react-native";
 
-import { OwnerScreen, QueryView, SectionHeading, showActions } from "@/components/owner/parts";
+import {
+  OwnerScreen,
+  PagedView,
+  SectionHeading,
+  showActions,
+  useNow,
+} from "@/components/owner/parts";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { ListRow } from "@/components/ui/list-row";
-import { Text } from "@/components/ui/text";
-import { describeFailure } from "@/lib/failure";
-import { householdOf, openInvites, userDetail } from "@/lib/household";
 
 const invite = () => router.push("/owner/users/invite");
 
-function PendingInvite({ invite: pending }: { readonly invite: Invite }) {
-  const revoke = useCommand("invites.revoke");
-  const label = pending.email ?? "Invite Link";
+const DAY_MS = 86_400_000;
+
+function PendingInviteRow({ invite: pending }: { readonly invite: PendingInvite }) {
+  const revoke = useRevokeInvite();
+  const now = useNow(60_000);
+  const label = `${ROLE_LABELS[pending.role]} Invite`;
 
   return (
     <ListRow
       icon={Link}
       title={label}
-      detail="Pending"
+      detail={expiryLine(Math.max(1, Math.ceil((pending.expiresAt - now) / DAY_MS)))}
       onPress={() =>
         showActions(label, [
           {
             label: "Revoke Invite",
             destructive: true,
             onPress: () => {
-              revoke({ inviteId: pending.id }).catch((cause: unknown) => {
+              revoke(pending).catch((cause: unknown) => {
                 Alert.alert("Couldn’t Revoke Invite", describeFailure(cause));
               });
             },
@@ -41,45 +49,35 @@ function PendingInvite({ invite: pending }: { readonly invite: Invite }) {
 }
 
 export default function UsersAndInvites() {
-  const users = useCommandQuery("users.list", {});
-  const invites = useCommandQuery("invites.list", {});
-  const pending = invites.status === "success" ? openInvites(invites.data) : [];
+  const users = useHousehold();
+  const invites = usePendingInvites();
 
   return (
     <OwnerScreen
       title="Users & Invites"
       trailing={<IconButton icon={Plus} label="Invite Someone" onPress={invite} />}
     >
-      <QueryView query={users}>
-        {(list) =>
-          householdOf(list).map((user) => (
+      <PagedView list={users}>
+        {(rows) =>
+          rows.map((user) => (
             <ListRow
-              key={user.id}
+              key={user.userId}
               icon={User}
-              title={user.name}
-              detail={userDetail(user)}
+              title={user.username}
+              detail={ROLE_LABELS[user.role]}
               onPress={() =>
-                router.push({ pathname: "/owner/users/[userId]", params: { userId: user.id } })
+                router.push({ pathname: "/owner/users/[userId]", params: { userId: user.userId } })
               }
             />
           ))
         }
-      </QueryView>
-      {invites.status === "error" ? (
+      </PagedView>
+      {invites.status === "ready" && invites.rows.length === 0 ? null : (
         <>
           <SectionHeading>Pending Invites</SectionHeading>
-          <Text variant="meta" tone="danger">
-            {describeFailure(invites.error)}
-          </Text>
-          <Button label="Try Again" variant="secondary" icon={RotateCcw} onPress={invites.retry} />
-        </>
-      ) : null}
-      {pending.length === 0 ? null : (
-        <>
-          <SectionHeading>Pending Invites</SectionHeading>
-          {pending.map((each) => (
-            <PendingInvite key={each.id} invite={each} />
-          ))}
+          <PagedView list={invites}>
+            {(rows) => rows.map((each) => <PendingInviteRow key={each.inviteId} invite={each} />)}
+          </PagedView>
         </>
       )}
       <Button label="Invite Someone" icon={Plus} onPress={invite} />

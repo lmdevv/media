@@ -1,5 +1,5 @@
 import type { ServerFolders } from "@media/contracts/models/catalog";
-import { useCommand } from "@media/sdk/react";
+import { describeFailure, isFailure } from "@media/mobile-core/failure";
 import { router, useLocalSearchParams } from "expo-router";
 import { Check, Folder, FolderX, RotateCcw } from "lucide-react-native";
 import { useEffect, useState } from "react";
@@ -8,7 +8,7 @@ import { InlineState, Loading, OwnerScreen } from "@/components/owner/parts";
 import { Button } from "@/components/ui/button";
 import { ListRow } from "@/components/ui/list-row";
 import { Text } from "@/components/ui/text";
-import { describeFailure, isFailure } from "@/lib/failure";
+import { useMediaServer } from "@/session/media-server";
 
 type Listing =
   | { readonly status: "loading" }
@@ -16,12 +16,14 @@ type Listing =
   | { readonly status: "failed"; readonly cause: unknown };
 
 const useListing = (path: string | undefined) => {
-  const folders = useCommand("libraries.folders");
+  const media = useMediaServer();
   const [attempt, setAttempt] = useState(0);
   const [listing, setListing] = useState<Listing>({ status: "loading" });
 
   useEffect(() => {
     let live = true;
+
+    const folders = (args: { readonly path?: string }) => media.run("libraries.folders", args);
 
     const load = async (): Promise<ServerFolders> => {
       if (path !== undefined) return folders({ path });
@@ -49,7 +51,7 @@ const useListing = (path: string | undefined) => {
     return () => {
       live = false;
     };
-  }, [folders, path, attempt]);
+  }, [media, path, attempt]);
 
   return { listing, retry: () => setAttempt((count) => count + 1) };
 };

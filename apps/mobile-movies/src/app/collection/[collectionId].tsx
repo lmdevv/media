@@ -1,3 +1,4 @@
+import { describeFailure, isFailure } from "@media/mobile-core/failure";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { router, useLocalSearchParams } from "expo-router";
 import { Play } from "lucide-react-native";
@@ -14,7 +15,6 @@ import { titleCount } from "@/lib/browse";
 import { asCollectionId } from "@/lib/catalog";
 import type { CollectionId } from "@/lib/catalog";
 import { watchHref } from "@/lib/routes";
-import { describeFailure, isFailure } from "@/lib/failure";
 
 export default function CollectionPage() {
   const { collectionId } = useLocalSearchParams<{ collectionId: string }>();
