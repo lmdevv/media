@@ -14,9 +14,9 @@ import {
   Queue,
   Redacted,
   Schedule,
+  Scope,
   Stream,
 } from "effect";
-import type { Scope } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { Unauthenticated } from "@media/contracts/errors";
@@ -720,5 +720,61 @@ describe("the verifier's probes on #146", () => {
       status: "signedIn",
       refreshes: ["br1"],
     });
+  });
+
+  it("ends the wait of a refusal with the interruption when the client closes while its refresh is out", async () => {
+    const settled = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fake = yield* FakeConvex.make;
+          const client = yield* Scope.make();
+
+          const context = yield* Layer.buildWithScope(
+            Platform.layer({
+              url: fake.url,
+              connection: "http",
+              storage: TokenStorage.layerMemory,
+              signIn: Platform.SignInRoute.Boundary({ url: fake.signInUrl }),
+            }),
+            client,
+          );
+
+          const platform = Context.get(context, Platform.Platform);
+
+          yield* accounts(
+            fake,
+            { ada: tokens(jwtExpiringAt(Date.now() + HOUR, "ada|session-a"), "r1") },
+            {},
+          );
+          yield* signInAs(platform, "ada");
+
+          // The refusal's refresh reaches the server, which holds it while the client closes.
+          const arrived = yield* Deferred.make<void>();
+          const release = yield* Deferred.make<Reply>();
+
+          yield* fake.handle("auth:signIn", () =>
+            Deferred.succeed(arrived, undefined).pipe(Effect.andThen(Deferred.await(release))),
+          );
+
+          const caller = yield* Effect.forkChild(
+            Effect.exit(
+              platform.session.refreshOnRefusal(() =>
+                Effect.fail(new Unauthenticated({ message: "This session has ended" })),
+              ),
+            ),
+          );
+
+          yield* Deferred.await(arrived);
+          yield* Scope.close(client, Exit.void);
+          const exit = yield* Fiber.await(caller).pipe(Effect.timeoutOption(Duration.millis(300)));
+
+          yield* Deferred.succeed(release, noTokens);
+
+          return Option.isSome(exit);
+        }),
+      ),
+    );
+
+    expect(settled).toBe(true);
   });
 });

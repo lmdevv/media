@@ -999,7 +999,8 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
   /**
    * The one refresh for the refusals of generation `now`: this refusal starts it unless another
    * already has, and awaits it either way. It runs in the engine's scope, so a refusal that stops
-   * waiting leaves it running for the others.
+   * waiting leaves it running for the others, and a closing scope ends the wait of every refusal
+   * with the interruption.
    */
   const sharedRefresh = (now: Epoch, held: StoredSession) =>
     Effect.gen(function* () {
@@ -1019,10 +1020,8 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
       );
 
       if (started) {
-        yield* Effect.forkIn(
+        const running = yield* Effect.forkIn(
           refreshForRefusal(now, held).pipe(
-            Effect.exit,
-            Effect.flatMap((exit) => Deferred.done(fresh, exit)),
             Effect.ensuring(
               Ref.update(inflight, (current) =>
                 Option.exists(current, (entry) => entry.done === fresh) ? Option.none() : current,
@@ -1031,6 +1030,12 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
           ),
           scope,
         );
+
+        // The waiters hear every end of the refresh, an interruption included, as when the engine's
+        // scope closes while it is out, even before it began.
+        running.addObserver((exit) => {
+          Deferred.doneUnsafe(fresh, exit);
+        });
       }
 
       return yield* Deferred.await(done);
