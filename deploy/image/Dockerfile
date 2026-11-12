@@ -39,7 +39,7 @@ RUN pnpm install --frozen-lockfile --ignore-scripts --os=linux --cpu=x64 --cpu=a
 RUN VITE_PLATFORM_URL=__MEDIA_CONVEX_URL__ pnpm --config.verify-deps-before-run=false --filter @media/web-movies build --base=/movies/ \
  && VITE_PLATFORM_URL=__MEDIA_CONVEX_URL__ pnpm --config.verify-deps-before-run=false --filter @media/web-account build \
  && pnpm --config.verify-deps-before-run=false --filter @media/server build \
- && pnpm --config.verify-deps-before-run=false --filter @lmdevv/movies build
+ && pnpm --config.verify-deps-before-run=false --filter @lmdevv/media build
 # The core's tsconfig extends the shared config, which `convex deploy` reads. Its configure script
 # imports TypeScript from a workspace package, which Node does not strip inside node_modules, so it
 # ships bundled.
@@ -59,6 +59,11 @@ RUN pnpm --filter @media/platform deploy --prod --legacy /out/platform \
  && cp -r apps/web-account/dist /out/account \
  && install -D -m 644 apps/cli/dist/media.js /out/cli/media.mjs \
  && install -m 644 apps/cli/dist/THIRD_PARTY_LICENSES.md /out/cli/
+# The release version, labelled on the image below. A build given one refuses a version the
+# packages do not carry (scripts/check-version.sh), so the label cannot name another release.
+ARG MEDIA_VERSION=
+RUN [ -z "$MEDIA_VERSION" ] || [ "$MEDIA_VERSION" = "$(node -p 'require("./packages/platform/package.json").version')" ] \
+ || { echo "MEDIA_VERSION=$MEDIA_VERSION is not the packages' version" >&2; exit 1; }
 
 FROM ${NODE_IMAGE}
 ARG TARGETARCH
@@ -132,6 +137,11 @@ ENV NODE_ENV=production \
 # its streams, then the Convex backend (with SIGINT, which shuts its database down cleanly) and
 # Caddy. It waits up to 24 seconds for them and 3 more before it kills what is left, so give
 # the container a 30-second stop timeout (`--stop-timeout 30`, or Compose's stop_grace_period).
+
+ARG MEDIA_VERSION=
+LABEL org.opencontainers.image.title="[media]" \
+  org.opencontainers.image.source="https://github.com/lmdevv/media" \
+  org.opencontainers.image.version="${MEDIA_VERSION}"
 
 VOLUME ["/data", "/transcode"]
 EXPOSE 8080

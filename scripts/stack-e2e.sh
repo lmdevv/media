@@ -12,9 +12,10 @@ project="${PROJECT:-media-e2e}"
 port="${MEDIA_PORT:-18080}"
 image="${IMAGE:-}"
 
+release="$("$root/scripts/check-version.sh")"
 if [[ -z "$image" ]]; then
   image="media:${project}"
-  docker build -f "$root/deploy/image/Dockerfile" -t "$image" "$root"
+  docker build -f "$root/deploy/image/Dockerfile" --build-arg MEDIA_VERSION="$release" -t "$image" "$root"
 fi
 
 library="$(mktemp -d)"
@@ -241,7 +242,12 @@ check "the boundary logs its sign-ins without a password" \
   'compose logs --no-color media 2>&1 | grep -F "SignInBoundary.relayed" >/dev/null &&
     ! compose logs --no-color media 2>&1 | grep -qF -e "$owner_password" -e wrong-password'
 
-release="$("$root/scripts/check-version.sh")"
+# A published `main` image is labelled `main` instead, so the label is checked only when this
+# script built the image (and in the Image workflow, which builds it with the version).
+if [[ -z "${IMAGE:-}" ]]; then
+  label="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' "$image")"
+  check "the image's version label is the release version" '[[ "$label" == "$release" ]]'
+fi
 check "the image's CLI reports the release version" '[[ "$(in_movies media --version)" == "$release" ]]'
 check "the image's CLI signs in to the core" \
   'printf %s "$owner_password" | in_movies media auth login --username "$owner_name" >/dev/null'

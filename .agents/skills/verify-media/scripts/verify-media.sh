@@ -498,7 +498,7 @@ YAML
 
   # The after side's CLI is this checkout's, built fresh, so a change to it counts.
   if [[ "$side" == after || ! -f "$cli_js" ]]; then
-    pnpm --dir "$root" --filter @lmdevv/movies build > "$state/cli-build.log" 2>&1 ||
+    pnpm --dir "$root" --filter @lmdevv/media build > "$state/cli-build.log" 2>&1 ||
       { tail -20 "$state/cli-build.log" >&2; start_failed "could not build the media CLI"; }
   fi
   if ((music)) && [[ ! -f "$music_cli_js" ]]; then

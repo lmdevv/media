@@ -42,7 +42,7 @@ stdenvNoCC.mkDerivation (finalAttrs: {
   inherit (packageJson) version;
   inherit src;
 
-  pnpmWorkspaces = [ "@lmdevv/movies..." ];
+  pnpmWorkspaces = [ "@lmdevv/media..." ];
 
   pnpmDeps = fetchPnpmDeps {
     inherit (finalAttrs)
@@ -65,7 +65,7 @@ stdenvNoCC.mkDerivation (finalAttrs: {
 
   buildPhase = ''
     runHook preBuild
-    pnpm --filter @lmdevv/movies build
+    pnpm --filter @lmdevv/media build
     runHook postBuild
   '';
 
@@ -86,7 +86,7 @@ stdenvNoCC.mkDerivation (finalAttrs: {
   '';
 
   meta = {
-    description = "The [movies] command line: every command of a self-hosted [movies] server";
+    description = "The [media] command line: every command of a self-hosted [media] server";
     homepage = "https://github.com/lmdevv/media";
     license = lib.licenses.mit;
     mainProgram = "media";

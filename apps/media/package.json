@@ -1,6 +1,6 @@
 {
   "name": "@media/server",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Node + Effect HttpApi media service. Also serves the built web app.",
   "type": "module",

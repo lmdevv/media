@@ -56,7 +56,7 @@ jobs:
           done
 
   npm:
-    name: publish @lmdevv/movies to npm
+    name: publish @lmdevv/media to npm
     # A published version can never be replaced, so it waits until every binary builds and runs
     # and the image is out.
     needs: [binaries, image]
@@ -78,21 +78,21 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           package-manager-cache: false
           registry-url: https://registry.npmjs.org
-      - run: pnpm install --frozen-lockfile --ignore-scripts --filter @lmdevv/movies...
+      - run: pnpm install --frozen-lockfile --ignore-scripts --filter @lmdevv/media...
       # pnpm packs (building the bundle and resolving workspace versions); npm publishes, since its
       # trusted publishing is the documented one. A backport publishes under release-X.Y and a
       # pre-release under next, so neither moves latest.
       - name: Publish unless npm has this version
         run: |
           version="$(scripts/check-version.sh)"
-          if [ "$(npm view "@lmdevv/movies@$version" version 2>/dev/null)" = "$version" ]; then
-            echo "@lmdevv/movies@$version is already on npm" | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ "$(npm view "@lmdevv/media@$version" version 2>/dev/null)" = "$version" ]; then
+            echo "@lmdevv/media@$version is already on npm" | tee -a "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           dist_tag="$(scripts/release-channel.sh "$version")"
-          pnpm --filter @lmdevv/movies pack --pack-destination "$RUNNER_TEMP"
-          npm publish "$RUNNER_TEMP/lmdevv-movies-$version.tgz" --provenance --access public --tag "$dist_tag"
-          echo "Published @lmdevv/movies@$version under $dist_tag" | tee -a "$GITHUB_STEP_SUMMARY"
+          pnpm --filter @lmdevv/media pack --pack-destination "$RUNNER_TEMP"
+          npm publish "$RUNNER_TEMP/lmdevv-media-$version.tgz" --provenance --access public --tag "$dist_tag"
+          echo "Published @lmdevv/media@$version under $dist_tag" | tee -a "$GITHUB_STEP_SUMMARY"
 
   binaries:
     name: binary (${{ matrix.target }})
@@ -118,8 +118,8 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           package-manager-cache: false
-      - run: pnpm install --frozen-lockfile --filter @lmdevv/movies...
-      - run: pnpm --filter @lmdevv/movies build:sea
+      - run: pnpm install --frozen-lockfile --filter @lmdevv/media...
+      - run: pnpm --filter @lmdevv/media build:sea
       - name: The binary runs and reports the tag's version
         run: |
           [ "v$("$BINARY" --version)" = "$GITHUB_REF_NAME" ]
@@ -179,7 +179,7 @@ jobs:
           ## Install
 
           - Server: the image \`ghcr.io/lmdevv/media:$version\` with this tag's \`deploy/compose\`, or the NixOS module from \`github:lmdevv/media/$GITHUB_REF_NAME\`. Both include the \`media\` CLI.
-          - CLI with Node 22 or newer: \`npm install -g @lmdevv/movies@$version\`.
+          - CLI with Node 22 or newer: \`npm install -g @lmdevv/media@$version\`.
           - CLI with Nix: \`nix run github:lmdevv/media/$GITHUB_REF_NAME -- --help\`, or \`programs.media\` from \`nixosModules.cli\` or \`homeManagerModules.movies\`.
           - CLI without Node: the \`media-<os>-<arch>\` binary below. Download it with \`curl\`, check it, and put it on your PATH (here Linux x64; use \`media-linux-arm64\` or \`media-darwin-arm64\` likewise):
 
@@ -195,5 +195,5 @@ jobs:
           Upgrading a server: [docs/operations.md](https://github.com/lmdevv/media/blob/$GITHUB_REF_NAME/docs/operations.md#upgrading).
           EOF
           )"
-          gh release create "$GITHUB_REF_NAME" "$DIST"/* --verify-tag --title "[movies] $version" \
+          gh release create "$GITHUB_REF_NAME" "$DIST"/* --verify-tag --title "[media] $version" \
             --notes "$notes" --generate-notes "${flags[@]}"

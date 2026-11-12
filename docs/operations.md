@@ -1,6 +1,6 @@
 # Operations
 
-Running a [movies] install: what the two installs do at startup, where state lives, backups and
+Running a [media] install: what the two installs do at startup, where state lives, backups and
 restores, upgrades, hardware acceleration, and telemetry. The README has the quick start.
 
 ## What runs
@@ -148,25 +148,27 @@ again before the restart.
 ## Upgrading
 
 Releases are git tags `vX.Y.Z`. Each one publishes the image as `X.Y.Z`, `X.Y`, and, unless a
-higher version is already tagged, `latest` (pre-releases such as `v0.2.0-rc.1` only as
-`0.2.0-rc.1`); `main` publishes `:main`, the edge,
+higher version is already tagged, `latest` (pre-releases such as `v0.4.0-rc.1` only as
+`0.4.0-rc.1`); `main` publishes `:main`, the edge,
 and every build also gets `sha-<commit>`. The NixOS module follows whatever revision the flake
-input points at. A release also publishes the `media` CLI at the same version: `@lmdevv/movies` on
+input points at. A release also publishes the `media` CLI at the same version: `@lmdevv/media` on
 npm and standalone binaries on the tag's GitHub Release. Upgrade a CLI installed that way with
-`npm install -g @lmdevv/movies@X.Y.Z` or the release's binary, fetched with `curl` as in the
+`npm install -g @lmdevv/media@X.Y.Z` or the release's binary, fetched with `curl` as in the
 [README](../README.md#cli) (macOS quarantines a browser download, and Gatekeeper then blocks the
 ad hoc signed binary until `xattr -d com.apple.quarantine`); the image and the Nix modules carry
-their own.
+their own. `@lmdevv/media` replaces the [movies] CLI's package, `@lmdevv/movies`, which ends at
+0.2.0 and is deprecated. Its `movies` command cannot reach a [media] server; remove it with
+`npm uninstall -g @lmdevv/movies`.
 
-The all-in-one image (ADR 0027) is a fresh install, not an upgrade of a v0.2 install. Its Compose
-project, volumes, and data layout are new (`media`, `media-data`, `/data/core` and `/data/movies`),
+The all-in-one image (ADR 0027), first released as 0.3.0, is a fresh install, not an upgrade of a
+v0.2 install. Its Compose project, volumes, and data layout are new (`media`, `media-data`, `/data/core` and `/data/movies`),
 and the NixOS module's `dataDir` moved to `/var/lib/media`. Nothing moves the old data over (ADR
 0002). Stop the old install before starting the new one, since both take port 8080, and keep its
 volumes or `/var/lib/movies` until you no longer need them.
 
 | Track     | Compose `MEDIA_IMAGE`                              | NixOS flake input            |
 | --------- | -------------------------------------------------- | ---------------------------- |
-| A release | `ghcr.io/lmdevv/media:latest`, `:0.2`, or `:0.2.1` | `github:lmdevv/media/v0.2.1` |
+| A release | `ghcr.io/lmdevv/media:latest`, `:0.3`, or `:0.3.1` | `github:lmdevv/media/v0.3.1` |
 | Edge      | `ghcr.io/lmdevv/media:main`                        | `github:lmdevv/media`        |
 
 ### Compose
@@ -176,12 +178,12 @@ and volumes that release's image expects. The image carries the core's Convex ba
 follows the newest release whatever the checkout, so pin the version when you check out a tag.
 
 ```sh
-cd media && git fetch --tags && git checkout v0.2.0      # or `git pull` on main for the edge
+cd media && git fetch --tags && git checkout v0.3.1      # or `git pull` on main for the edge
 cd deploy/compose
-# .env: MEDIA_IMAGE=ghcr.io/lmdevv/media:0.2.0             # or :main for the edge
+# .env: MEDIA_IMAGE=ghcr.io/lmdevv/media:0.3.1             # or :main for the edge
 docker compose pull
 docker compose up -d
-docker compose logs -f media     # "upgrading the core from 0.1.0 to 0.2.0; backing up to ... first"
+docker compose logs -f media     # "upgrading the core from 0.3.0 to 0.3.1; backing up to ... first"
 ```
 
 ### NixOS
@@ -200,12 +202,12 @@ functions differ: the image and the Nix package record a hash of the core's func
 following `main` or building locally backs up too. Convex refuses to
 deploy a schema the stored documents do not match, so such a deploy fails and the start stops with
 the old functions still in place; restarts after that do not export again for the same version.
-Convex backend upgrades ride along with [movies] releases; never change its image on your own.
+Convex backend upgrades ride along with [media] releases; never change its image on your own.
 
 ### Rolling back
 
-1. Go back to the previous version: `git checkout v0.1.0` and its image tag
-   (`MEDIA_IMAGE=ghcr.io/lmdevv/media:0.1.0`, then `docker compose up -d`), or
+1. Go back to the previous version: `git checkout v0.3.0` and its image tag
+   (`MEDIA_IMAGE=ghcr.io/lmdevv/media:0.3.0`, then `docker compose up -d`), or
    `nixos-rebuild switch --rollback`.
 2. If the older functions start, restore the `core-manual-…` archive the upgrade took (**Admin** →
    **Backups** in the account client). If they do not deploy over the newer data, restore without the
@@ -213,7 +215,7 @@ Convex backend upgrades ride along with [movies] releases; never change its imag
 
 ### Releasing
 
-For maintainers. One version covers the image, the Nix packages, `@lmdevv/movies` on npm, and the
+For maintainers. One version covers the image, the Nix packages, `@lmdevv/media` on npm, and the
 CLI binaries. `scripts/check-version.sh`, run by CI and the pre-commit hook, fails while any
 workspace package carries another version. The iOS app's store version (`expo.version` in
 `apps/mobile-movies/app.json`) is not part of it: the App Store build ships through review on its own
@@ -222,23 +224,24 @@ schedule, so a server release does not bump it.
 1. On `main`, set every package's version, then commit and merge it:
 
    ```sh
-   pnpm -r exec npm pkg set version=0.2.0
-   scripts/check-version.sh     # 0.2.0
+   pnpm -r exec npm pkg set version=0.3.0
+   scripts/check-version.sh     # 0.3.0
    ```
 
 2. Tag the merged commit and push the tag:
 
    ```sh
-   git tag -a v0.2.0 -m "[movies] 0.2.0" && git push origin v0.2.0
+   git tag -a v0.3.0 -m "[media] 0.3.0" && git push origin v0.3.0
    ```
 
 The tag runs two workflows, and each refuses a tag that does not name the package version:
 
-- `image.yml` runs the packaged-stack smoke test and publishes the multi-arch image.
+- `image.yml` runs the packaged-stack smoke test and publishes the multi-arch image, labelled
+  `org.opencontainers.image.version` with the version.
 - `release.yml` builds the standalone binaries on their own runners (`linux-x64`, `linux-arm64`,
   and `darwin-arm64`, signed ad hoc, from a pinned Node version) and checks each one's
   `--version`. It then waits for the tag's `image.yml` run. Only once that run has published the
-  image does it publish `@lmdevv/movies` to npm through trusted publishing, with a provenance
+  image does it publish `@lmdevv/media` to npm through trusted publishing, with a provenance
   attestation, and create the GitHub Release with the binaries, `SHA256SUMS`, the third-party
   licenses (Node.js's among them), install notes, and generated notes.
 
@@ -251,26 +254,38 @@ replaces its assets and publishes a release an earlier run left as a draft.
 `v0.2.5` after `v0.3.0`, publishes under the npm dist-tag `release-0.2` and is not marked latest.
 A pre-release such as `v0.3.0-rc.1` publishes under `next` and makes a GitHub pre-release.
 
-npm only lets a trusted publisher be set on a package that exists, so the first version is
-published by hand, before its tag is pushed. Run it from an npm account in the `lmdevv` org:
+npm only lets a trusted publisher be set on a package that exists, so a new package's name is
+claimed by hand with a placeholder version, `0.0.0-stage`, before its first tag is pushed; the
+workflow then publishes the real version with its provenance. Run it from an npm account in the
+`lmdevv` org (here for `@lmdevv/media`):
 
 ```sh
 npm login
-mkdir -p /tmp/movies-cli && pnpm --filter @lmdevv/movies pack --pack-destination /tmp/movies-cli
-npm publish /tmp/movies-cli/lmdevv-movies-0.2.0.tgz --access public
+mkdir -p /tmp/media-stage && cd /tmp/media-stage && echo '{}' > package.json
+npm pkg set name=@lmdevv/media version=0.0.0-stage license=MIT \
+  description="Placeholder; install @lmdevv/media@latest"
+npm publish --access public --tag stage
 ```
 
-Then, on npmjs.com, open `@lmdevv/movies` → Settings → Trusted publishing, choose GitHub Actions,
+Then, on npmjs.com, open `@lmdevv/media` → Settings → Trusted publishing, choose GitHub Actions,
 and enter the owner `lmdevv`, the repository `media`, and the workflow `release.yml`. Once a tag
 has published through it, set Publishing access to require two-factor authentication and
 disallow tokens.
+
+`@lmdevv/movies`, the [movies] CLI's package, stays on npm, deprecated with a pointer to
+`@lmdevv/media`, once `@lmdevv/media` has a release (ADR 0021):
+
+```sh
+npm deprecate @lmdevv/movies "Replaced by @lmdevv/media: npm install -g @lmdevv/media"
+npm view @lmdevv/movies deprecated
+```
 
 ## Remote access
 
 The port listens on `127.0.0.1` by default. For use away from home, put the host on a Tailscale
 tailnet and set the bind address (`MEDIA_BIND` on Compose, `listenAddress` on NixOS) to the
 host's Tailscale address, or keep localhost and use `tailscale serve`. Do not expose the port to
-the internet. It speaks plain HTTP, and every browser and CLI that uses [movies] must reach it.
+the internet. It speaks plain HTTP, and every browser and CLI that uses [media] must reach it.
 
 ## Hardware acceleration
 
