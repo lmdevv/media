@@ -17,3 +17,7 @@ export const useMe = (): Me => {
 
   return me;
 };
+
+/** The name a person goes by: the display name they set, else their username. */
+export const nameOf = (person: Pick<Me, "username" | "displayName">): string =>
+  person.displayName ?? person.username;

@@ -9,6 +9,7 @@ import { SettingsFrame } from "@/components/shell";
 import { describeFailure } from "@media/ui/lib/failure";
 import { useAction } from "@/screens/people/action";
 import {
+  DisplayNameSection,
   NameSection,
   PasswordSection,
   PlaybackSection,
@@ -28,6 +29,10 @@ function SettingsPage() {
   const platform = usePlatform();
   const me = useMe();
   const { accounts, devices } = platform.core;
+
+  const naming = useAction(async (displayName: string | null) => {
+    await accounts.me.setDisplayName({ displayName });
+  });
 
   const rename = useAction(async (username: string) => {
     await accounts.me.rename({ username });
@@ -57,6 +62,13 @@ function SettingsPage() {
   return (
     <SettingsFrame>
       <PageHeader title="Settings" />
+      <DisplayNameSection
+        key={me.displayName ?? ""}
+        displayName={me.displayName}
+        username={me.username}
+        status={naming.status}
+        onSave={(displayName) => void naming.run(displayName)}
+      />
       <NameSection
         key={me.username}
         username={me.username}

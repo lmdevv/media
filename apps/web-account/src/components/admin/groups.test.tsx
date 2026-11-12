@@ -15,9 +15,9 @@ const userId = Brand.nominal<UserId>();
 
 const kids: Group = { groupId: groupId("g1"), name: "Kids" };
 
-const sam: User = { userId: userId("u1"), username: "sam", role: "member" };
+const sam: User = { userId: userId("u1"), username: "sam", displayName: null, role: "member" };
 
-const kim: User = { userId: userId("u2"), username: "kim", role: "member" };
+const kim: User = { userId: userId("u2"), username: "kim", displayName: null, role: "member" };
 
 const groups = (list: Paged<Group>, name = "", open: Group["groupId"] | null = null) => (
   <GroupsView

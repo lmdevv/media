@@ -3,13 +3,15 @@ import { v } from "convex/values";
 import type { Value } from "convex/values";
 
 import { register } from "../../../commands/core/auth/apiKeys";
-import { credentialScope } from "../../../commands/scopes";
+import { credentialScope, credentialScopes } from "../../../commands/scopes";
+import type { CredentialScope } from "../../../commands/scopes";
 import { internal } from "../../_generated/api";
 import type { Doc, Id } from "../../_generated/dataModel";
 import { internalAction, internalMutation, internalQuery } from "../../_generated/server";
 import type { MutationCtx } from "../../_generated/server";
 import { fail } from "../lib/errors";
 import { GIVEN_NAME_MAX, requireGivenName } from "../lib/names";
+import { PAGE_ROWS_MAX, paginateAtMost } from "../lib/paginate";
 import {
   constantTimeEqual,
   formatSecret,
@@ -19,8 +21,10 @@ import {
 } from "../lib/secrets";
 import { endKeySessions, endUserKeys, keyWorks, openSession } from "../sessions";
 import type { SignedIn } from "../sessions";
+import { LIST_CALL_READS } from "../permissions/grants";
 import { callerUser, refuseKeys, requireCaller } from "./caller";
 import { behindBoundary, spendPass, spentPass } from "./passes";
+import { requireOwnCredential } from "./sessions";
 
 const PREFIX = "mk";
 
@@ -31,6 +35,14 @@ const EXPIRY_DAYS_MAX = 365;
 const BAD_KEY = "This API key does not work";
 
 const WORKING_SERVICE_KEYS_MAX = 4;
+
+const NO_KEY = "No such API key";
+
+/** A listed key costs its own row and nothing else. */
+const LIST_ROWS = PAGE_ROWS_MAX - LIST_CALL_READS;
+
+const isCredentialScope = (scope: string): scope is CredentialScope =>
+  credentialScopes.some((known) => known === scope);
 
 const retirement = v.union(v.literal("on-first-use"), v.literal("now"));
 
@@ -110,6 +122,8 @@ export const redeem = internalMutation({
     if (user === null || !keyWorks(key, user, now)) return null;
 
     if (user.kind === "service") await retireKeysBefore(ctx, key);
+
+    await ctx.db.patch(key._id, { lastUsedAt: now });
 
     return {
       userId: user._id,
@@ -231,7 +245,7 @@ export const insert = internalMutation({
   },
 });
 
-export const { create, revoke, endAll } = register({
+export const { create, list, revoke, endAll } = register({
   create: async (ctx, args) => {
     const secret = randomSecret(32);
 
@@ -242,10 +256,44 @@ export const { create, revoke, endAll } = register({
 
     return { keyId, key: formatSecret(PREFIX, keyId, secret), expiresAt };
   },
-  revoke: async (ctx, { keyId }, caller) => {
-    const key = await ctx.db.get(keyId);
+  /**
+   * The caller's keys that still work or ran out, newest first. Keys that ended with End all wait
+   * for the purge and are left out, so a page may hold fewer rows than asked.
+   */
+  list: async (ctx, { paginationOpts }, caller) => {
+    requireOwnCredential(caller, "list", caller.userId, NO_KEY);
 
-    if (key?.userId !== caller.userId) return fail("not_found", "No such API key");
+    const user = await callerUser(ctx, caller);
+
+    const page = await paginateAtMost(
+      ctx.db,
+      { table: "apiKeys", index: "by_user", range: (q) => q.eq("userId", user._id), order: "desc" },
+      paginationOpts,
+      LIST_ROWS,
+    );
+
+    return {
+      ...page,
+      page: page.page.flatMap((key) =>
+        key.generation === user.keyGeneration
+          ? [
+              {
+                keyId: key._id,
+                name: key.name,
+                scopes: key.scopes.filter(isCredentialScope),
+                createdAt: key._creationTime,
+                expiresAt: key.expiresAt ?? null,
+                lastUsedAt: key.lastUsedAt ?? null,
+              },
+            ]
+          : [],
+      ),
+    };
+  },
+  revoke: async (ctx, { keyId }, caller) => {
+    const key = (await ctx.db.get(keyId)) ?? fail("not_found", NO_KEY);
+
+    requireOwnCredential(caller, "end", key.userId, NO_KEY);
 
     await deleteKey(ctx, keyId);
 

@@ -129,6 +129,19 @@ export const generatedCommands = [
     method: (platform) => platform.core.accounts.me.rename,
   }),
   coreCommand({
+    name: "core.accounts.me.setDisplayName",
+    path: ["auth", "me", "set-display-name"],
+    kind: "mutation",
+    scope: "account",
+    refusesKeys: true,
+    summary: "Set the name you go by in greetings and lists, or clear it to go by your username",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({ displayName: Schema.Union([Schema.String, Schema.Null]) }),
+    result: Schema.Null,
+    method: (platform) => platform.core.accounts.me.setDisplayName,
+  }),
+  coreCommand({
     name: "core.accounts.resetLinks.create",
     path: ["admin", "reset-links", "create"],
     kind: "action",
@@ -208,6 +221,7 @@ export const generatedCommands = [
         Schema.Struct({
           userId: Schema.String.pipe(Schema.brand("Id<users>")),
           username: Schema.String,
+          displayName: Schema.Union([Schema.String, Schema.Null]),
           role: Schema.Union([
             Schema.Literal("owner"),
             Schema.Literal("admin"),
@@ -289,6 +303,61 @@ export const generatedCommands = [
     args: Schema.Struct({}),
     result: Schema.Null,
     method: (platform) => platform.core.auth.apiKeys.endAll,
+  }),
+  coreCommand({
+    name: "core.auth.apiKeys.list",
+    path: ["auth", "api-keys", "list"],
+    kind: "query",
+    scope: "account",
+    refusesKeys: false,
+    summary:
+      "List your API keys that still work or ran out, newest first, with their scopes and last use; never their secrets",
+    secrets: [],
+    paginated: true,
+    args: Schema.Struct({
+      paginationOpts: Schema.Struct({
+        numItems: Schema.Finite,
+        cursor: Schema.Union([Schema.String, Schema.Null]),
+        endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+        id: Schema.optionalKey(Schema.Finite),
+        maximumRowsRead: Schema.optionalKey(Schema.Finite),
+        maximumBytesRead: Schema.optionalKey(Schema.Finite),
+      }),
+    }),
+    result: Schema.Struct({
+      page: Schema.Array(
+        Schema.Struct({
+          keyId: Schema.String.pipe(Schema.brand("Id<apiKeys>")),
+          name: Schema.String,
+          scopes: Schema.Array(
+            Schema.Union([
+              Schema.Literal("account"),
+              Schema.Literal("admin"),
+              Schema.Literal("movies:read"),
+              Schema.Literal("movies:play"),
+              Schema.Literal("movies:edit"),
+              Schema.Literal("music:read"),
+              Schema.Literal("music:play"),
+              Schema.Literal("music:edit"),
+            ]),
+          ),
+          createdAt: Schema.Finite,
+          expiresAt: Schema.Union([Schema.Finite, Schema.Null]),
+          lastUsedAt: Schema.Union([Schema.Finite, Schema.Null]),
+        }),
+      ),
+      continueCursor: Schema.String,
+      isDone: Schema.Boolean,
+      splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      pageStatus: Schema.optionalKey(
+        Schema.Union([
+          Schema.Literal("SplitRecommended"),
+          Schema.Literal("SplitRequired"),
+          Schema.Null,
+        ]),
+      ),
+    }),
+    method: (platform) => platform.core.auth.apiKeys.list,
   }),
   coreCommand({
     name: "core.auth.apiKeys.revoke",
@@ -397,6 +466,7 @@ export const generatedCommands = [
     result: Schema.Struct({
       userId: Schema.String.pipe(Schema.brand("Id<users>")),
       username: Schema.String,
+      displayName: Schema.Union([Schema.String, Schema.Null]),
       role: Schema.Union([
         Schema.Literal("owner"),
         Schema.Literal("admin"),
@@ -459,6 +529,74 @@ export const generatedCommands = [
     args: Schema.Struct({ keepCurrent: Schema.Boolean }),
     result: Schema.Null,
     method: (platform) => platform.core.auth.sessions.endAll,
+  }),
+  coreCommand({
+    name: "core.auth.sessions.list",
+    path: ["auth", "sessions", "list"],
+    kind: "query",
+    scope: "account",
+    refusesKeys: false,
+    summary:
+      "List your signed-in browsers, apps, and devices, newest first, with the device each is on; API keys' sessions are left to the key list",
+    secrets: [],
+    paginated: true,
+    args: Schema.Struct({
+      paginationOpts: Schema.Struct({
+        numItems: Schema.Finite,
+        cursor: Schema.Union([Schema.String, Schema.Null]),
+        endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+        id: Schema.optionalKey(Schema.Finite),
+        maximumRowsRead: Schema.optionalKey(Schema.Finite),
+        maximumBytesRead: Schema.optionalKey(Schema.Finite),
+      }),
+    }),
+    result: Schema.Struct({
+      page: Schema.Array(
+        Schema.Struct({
+          sessionId: Schema.String.pipe(Schema.brand("Id<authSessions>")),
+          kind: Schema.Union([
+            Schema.Literal("password"),
+            Schema.Literal("deviceCode"),
+            Schema.Literal("tile"),
+            Schema.Literal("grant"),
+          ]),
+          name: Schema.Union([Schema.String, Schema.Null]),
+          device: Schema.Union([
+            Schema.Null,
+            Schema.Struct({
+              deviceId: Schema.String.pipe(Schema.brand("Id<devices>")),
+              name: Schema.String,
+            }),
+          ]),
+          scopes: Schema.Array(
+            Schema.Union([
+              Schema.Literal("account"),
+              Schema.Literal("admin"),
+              Schema.Literal("movies:read"),
+              Schema.Literal("movies:play"),
+              Schema.Literal("movies:edit"),
+              Schema.Literal("music:read"),
+              Schema.Literal("music:play"),
+              Schema.Literal("music:edit"),
+            ]),
+          ),
+          signedInAt: Schema.Finite,
+          expiresAt: Schema.Finite,
+          current: Schema.Boolean,
+        }),
+      ),
+      continueCursor: Schema.String,
+      isDone: Schema.Boolean,
+      splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      pageStatus: Schema.optionalKey(
+        Schema.Union([
+          Schema.Literal("SplitRecommended"),
+          Schema.Literal("SplitRequired"),
+          Schema.Null,
+        ]),
+      ),
+    }),
+    method: (platform) => platform.core.auth.sessions.list,
   }),
   coreCommand({
     name: "core.auth.sessions.revoke",
@@ -762,6 +900,7 @@ export const generatedCommands = [
           Schema.Struct({
             userId: Schema.String.pipe(Schema.brand("Id<users>")),
             username: Schema.String,
+            displayName: Schema.Union([Schema.String, Schema.Null]),
           }),
         ),
       }),
@@ -774,6 +913,7 @@ export const generatedCommands = [
           Schema.Struct({
             userId: Schema.String.pipe(Schema.brand("Id<users>")),
             username: Schema.String,
+            displayName: Schema.Union([Schema.String, Schema.Null]),
             kid: Schema.Boolean,
             code: Schema.Union([
               Schema.Literal("none"),

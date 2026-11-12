@@ -40,3 +40,10 @@ export const requireGivenName = (typed: string, refusal: string): string =>
 /** A device's name, which an app sends at enrollment: `requireGivenName` with the device refusal. */
 export const requireDeviceName = (typed: string): string =>
   requireGivenName(typed, `Name the device with 1 to ${GIVEN_NAME_MAX} printable characters`);
+
+/**
+ * The name a person goes by in greetings and lists, which others see: `requireGivenName` with the
+ * display-name refusal.
+ */
+export const requireDisplayName = (typed: string): string =>
+  requireGivenName(typed, `Use 1 to ${GIVEN_NAME_MAX} printable characters for your name`);

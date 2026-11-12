@@ -120,7 +120,10 @@ ADR 0006 adds the tile, approval, and device actions, and `listOnSharedDevices`,
 `resetUnlockCode`, and `manageDevices`. ADR 0019 adds `change` on a setting and `keep` on a
 download. ADR 0017 adds the group-session actions, whose loader is `requireTogether` in
 `together/access.ts`. ADR 0007 adds `configureGuests`, `allowSharing`, and the share-link actions
-`offer`, `make`, `open`, `hold`, `play`, `audit`, `revoke`, and `see`.
+`offer`, `make`, `open`, `hold`, `play`, `audit`, `revoke`, and `see`. ADR 0006 adds the
+device-grant actions `issue`, `list`, and `revoke`. ADR 0003 adds `list` and `end` on a
+`credential`, a person's own session or API key: only that person, from a session holding
+`account`; anyone else, admins and the owner included, gets `hidden`.
 
 The answer is `allowed`, `hidden`, or `forbidden`. Content with no grant, content a restriction
 hides, and any content for a service are `hidden`, which fails `not_found` with the same message

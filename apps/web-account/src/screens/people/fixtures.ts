@@ -16,6 +16,7 @@ export const tile = (
 ): SharedTile => ({
   userId: userId(username),
   username,
+  displayName: null,
   kid: false,
   code: "none",
   lock: { state: "open" },

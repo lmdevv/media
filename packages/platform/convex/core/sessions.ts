@@ -116,6 +116,23 @@ export const liveOnDevice = (
   );
 };
 
+/**
+ * Whether a session of a person who is no guest is live, from its user and the device it is bound
+ * to, both already read: what `liveSession` decides for such a person.
+ */
+export const liveWithDevice = (
+  session: Session,
+  user: Doc<"users">,
+  device: Doc<"devices"> | null,
+  now: number,
+): boolean => {
+  if (session.kind === "guest" || !isLive(session, user, now)) return false;
+
+  const bound = boundDevice(session);
+
+  return bound === null || stillOnDevice(session, bound, device, user);
+};
+
 const fitsUser = async (
   db: DatabaseReader,
   session: Session,

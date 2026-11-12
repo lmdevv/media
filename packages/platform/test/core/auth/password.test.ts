@@ -49,6 +49,7 @@ describe.skipIf(stack === undefined)("password sign-in", { timeout: 120_000 }, (
     });
     expect(Object.keys(callers[0] ?? {}).toSorted()).toEqual([
       "device",
+      "displayName",
       "kind",
       "role",
       "scopes",

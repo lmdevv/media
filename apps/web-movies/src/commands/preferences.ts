@@ -4,7 +4,7 @@ import { useTheme } from "next-themes";
 import { useMemo } from "react";
 
 import { ACCOUNT_SETTINGS } from "@/lib/account-links";
-import { useMe, useSignOut } from "@/session/session";
+import { nameOf, useMe, useSignOut } from "@/session/session";
 
 import type { CommandContribution } from "./contribution";
 
@@ -26,7 +26,8 @@ export const SWITCH_PERSON_COMMAND = "switch-person";
 export const usePreferenceCommands = (): CommandContribution => {
   const { theme, setTheme } = useTheme();
   const signOut = useSignOut();
-  const name = useMe()?.username ?? "";
+  const me = useMe();
+  const name = me === null ? "" : nameOf(me);
   const current: ThemeChoice = theme === "dark" || theme === "light" ? theme : "system";
 
   return useMemo(

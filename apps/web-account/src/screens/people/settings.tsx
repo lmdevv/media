@@ -79,6 +79,58 @@ const useSuccessCount = (status: ActionStatus): number => {
   return next.count;
 };
 
+/**
+ * The name the person goes by in greetings and lists. Saving it empty clears it, so they go by
+ * their username again.
+ */
+export function DisplayNameSection({
+  displayName,
+  username,
+  status,
+  onSave,
+}: {
+  readonly displayName: string | null;
+  readonly username: string;
+  readonly status: ActionStatus;
+  readonly onSave: (displayName: string | null) => void;
+}) {
+  const [draft, setDraft] = useState(displayName ?? "");
+  const trimmed = draft.trim();
+  const next = trimmed === "" ? null : trimmed;
+  const unchanged = next === displayName;
+
+  const submit = (event: FormEvent<HTMLFormElement>): void => {
+    event.preventDefault();
+
+    if (!unchanged) onSave(next);
+  };
+
+  return (
+    <Section title="Name">
+      <form className={FORM} onSubmit={submit}>
+        <TextField
+          label="Name"
+          name="name"
+          autoComplete="name"
+          placeholder={username}
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+        />
+        <Button
+          type="submit"
+          variant="raised"
+          size="sm"
+          className="self-start"
+          disabled={unchanged || status.kind === "pending"}
+        >
+          Save
+        </Button>
+        <Outcome status={status} done="Name saved." />
+      </form>
+    </Section>
+  );
+}
+
 /** The person's username. */
 export function NameSection({
   username,

@@ -67,7 +67,8 @@ export default function UsersAndInvites() {
             <ListRow
               key={user.userId}
               icon={User}
-              title={user.username}
+              title={user.displayName ?? user.username}
+              {...(user.displayName === null ? {} : { subtitle: user.username })}
               detail={ROLE_LABELS[user.role]}
               onPress={() =>
                 router.push({ pathname: "/owner/users/[userId]", params: { userId: user.userId } })

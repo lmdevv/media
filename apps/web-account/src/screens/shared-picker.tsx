@@ -8,6 +8,7 @@ import { useState } from "react";
 import { Lede } from "@/components/auth-page";
 import { describeFailure } from "@media/ui/lib/failure";
 import { useAccountActions, useDevice } from "@/session/account";
+import { nameOf } from "@/session/me";
 import type { SharedPicker, SharedTile } from "@/session/platform-types";
 
 import { useAction } from "./people/action";
@@ -57,10 +58,10 @@ export function SharedPickerView({
             return (
               <li key={tile.userId} className="flex flex-col items-center gap-1">
                 <ProfileTile
-                  name={tile.username}
+                  name={nameOf(tile)}
                   locked={locked}
                   disabled={opening.kind === "pending"}
-                  aria-label={[tile.username, tile.kid ? "kid" : null, locked ? "locked" : null]
+                  aria-label={[nameOf(tile), tile.kid ? "kid" : null, locked ? "locked" : null]
                     .filter((part) => part !== null)
                     .join(", ")}
                   onClick={() => onPick(tile)}
@@ -78,7 +79,7 @@ export function SharedPickerView({
       ) : null}
       {leave === null ? null : (
         <section aria-label="Leave" className="flex flex-col gap-3 md:items-center">
-          <Lede>{`${leave.kid.username} is using this device. An adult can let them leave.`}</Lede>
+          <Lede>{`${nameOf(leave.kid)} is using this device. An adult can let them leave.`}</Lede>
           <AskStatus
             phase={leave.phase}
             copy={{

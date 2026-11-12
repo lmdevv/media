@@ -43,7 +43,7 @@ import { useMediaSession } from "@/playback/use-media-session";
 import { usePictureInPicture } from "@/playback/use-picture-in-picture";
 import { useMediaState, usePlayback } from "@/playback/use-playback";
 import { withFacts } from "@/playback/use-version-choice";
-import { useMe, useScopes } from "@/session/session";
+import { nameOf, useMe, useScopes } from "@/session/session";
 
 import { AUTOPLAY_COUNTDOWN } from "./autoplay";
 import { AutoplayNext } from "./autoplay-next";
@@ -873,7 +873,7 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
       return (
         <ResumePrompt
           titleLabel={heading}
-          personName={me?.username ?? ""}
+          personName={me === null ? "" : nameOf(me)}
           positionMs={phase.resumeAtMs}
           durationMs={started?.file.probe.durationMs ?? 0}
           onResume={() => controller?.choose("resume")}

@@ -1,6 +1,7 @@
 import type { PlatformSdk } from "@media/sdk/promise";
 import { Brand } from "effect";
 
+import { dayLabel } from "./dates";
 import { sortedBy } from "./sorted-by";
 
 type Result<Method> = Method extends (...args: never) => Promise<infer A> ? A : never;
@@ -30,6 +31,30 @@ export const deviceDetail = (device: Device, own: DeviceId | null): string => {
 
   return device.mode === "shared" ? "Shared" : "Personal";
 };
+
+/** One of the person's signed-in browsers, apps, or devices, as `core.auth.sessions.list` lists it. */
+export type Session = Result<PlatformSdk["core"]["auth"]["sessions"]["list"]>["page"][number];
+
+/** A session ID from a route parameter; the core answers `NotFound` for one that names no session. */
+export const asSessionId = Brand.nominal<Session["sessionId"]>();
+
+/** The signed-in devices to list: this iPhone first, the rest newest first as the core lists them. */
+export const listedSessions = (sessions: ReadonlyArray<Session>): ReadonlyArray<Session> =>
+  sortedBy(sessions, (left, right) => Number(right.current) - Number(left.current));
+
+/**
+ * A device's name: the name its device or device sign-in gave, `iPhone` for this one, or
+ * `Password Sign-In` for a browser or app that signed in with the password on no device.
+ */
+export const sessionName = (session: Session): string => {
+  if (session.name !== null) return session.name;
+
+  return session.current ? "iPhone" : "Password Sign-In";
+};
+
+/** A device's muted detail: `This Device`, or the day it signed in, such as `Yesterday`. */
+export const sessionDetail = (session: Session, now: number): string =>
+  session.current ? "This Device" : dayLabel(session.signedInAt, now);
 
 /** The fewest characters the core takes in a new password. */
 export const PASSWORD_MIN = 8;

@@ -251,6 +251,7 @@ describe("Platform", () => {
             value: {
               userId: "user-1",
               username: "ada",
+              displayName: null,
               role: "member",
               sessionId: "session-1",
               kind: "password",

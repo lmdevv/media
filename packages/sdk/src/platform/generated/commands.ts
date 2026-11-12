@@ -87,6 +87,13 @@ const core_accounts_me_rename = mutation({
   result: Schema.Null,
 });
 
+const core_accounts_me_setDisplayName = mutation({
+  name: "core.accounts.me.setDisplayName",
+  path: "core/accounts/me:setDisplayName",
+  args: Schema.Struct({ displayName: Schema.Union([Schema.String, Schema.Null]) }),
+  result: Schema.Null,
+});
+
 const core_accounts_resetLinks_create = action({
   name: "core.accounts.resetLinks.create",
   path: "core/accounts/resetLinks:create",
@@ -137,6 +144,7 @@ const core_accounts_users_list = query({
       Schema.Struct({
         userId: Schema.String.pipe(Schema.brand("Id<users>")),
         username: Schema.String,
+        displayName: Schema.Union([Schema.String, Schema.Null]),
         role: Schema.Union([
           Schema.Literal("owner"),
           Schema.Literal("admin"),
@@ -199,6 +207,54 @@ const core_auth_apiKeys_endAll = mutation({
   path: "core/auth/apiKeys:endAll",
   args: Schema.Struct({}),
   result: Schema.Null,
+});
+
+const core_auth_apiKeys_list = query({
+  name: "core.auth.apiKeys.list",
+  path: "core/auth/apiKeys:list",
+  args: Schema.Struct({
+    paginationOpts: Schema.Struct({
+      numItems: Schema.Finite,
+      cursor: Schema.Union([Schema.String, Schema.Null]),
+      endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      id: Schema.optionalKey(Schema.Finite),
+      maximumRowsRead: Schema.optionalKey(Schema.Finite),
+      maximumBytesRead: Schema.optionalKey(Schema.Finite),
+    }),
+  }),
+  result: Schema.Struct({
+    page: Schema.Array(
+      Schema.Struct({
+        keyId: Schema.String.pipe(Schema.brand("Id<apiKeys>")),
+        name: Schema.String,
+        scopes: Schema.Array(
+          Schema.Union([
+            Schema.Literal("account"),
+            Schema.Literal("admin"),
+            Schema.Literal("movies:read"),
+            Schema.Literal("movies:play"),
+            Schema.Literal("movies:edit"),
+            Schema.Literal("music:read"),
+            Schema.Literal("music:play"),
+            Schema.Literal("music:edit"),
+          ]),
+        ),
+        createdAt: Schema.Finite,
+        expiresAt: Schema.Union([Schema.Finite, Schema.Null]),
+        lastUsedAt: Schema.Union([Schema.Finite, Schema.Null]),
+      }),
+    ),
+    continueCursor: Schema.String,
+    isDone: Schema.Boolean,
+    splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+    pageStatus: Schema.optionalKey(
+      Schema.Union([
+        Schema.Literal("SplitRecommended"),
+        Schema.Literal("SplitRequired"),
+        Schema.Null,
+      ]),
+    ),
+  }),
 });
 
 const core_auth_apiKeys_revoke = mutation({
@@ -272,6 +328,7 @@ const core_auth_sessions_current = query({
   result: Schema.Struct({
     userId: Schema.String.pipe(Schema.brand("Id<users>")),
     username: Schema.String,
+    displayName: Schema.Union([Schema.String, Schema.Null]),
     role: Schema.Union([
       Schema.Literal("owner"),
       Schema.Literal("admin"),
@@ -321,6 +378,67 @@ const core_auth_sessions_endAll = mutation({
   path: "core/auth/sessions:endAll",
   args: Schema.Struct({ keepCurrent: Schema.Boolean }),
   result: Schema.Null,
+});
+
+const core_auth_sessions_list = query({
+  name: "core.auth.sessions.list",
+  path: "core/auth/sessions:list",
+  args: Schema.Struct({
+    paginationOpts: Schema.Struct({
+      numItems: Schema.Finite,
+      cursor: Schema.Union([Schema.String, Schema.Null]),
+      endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      id: Schema.optionalKey(Schema.Finite),
+      maximumRowsRead: Schema.optionalKey(Schema.Finite),
+      maximumBytesRead: Schema.optionalKey(Schema.Finite),
+    }),
+  }),
+  result: Schema.Struct({
+    page: Schema.Array(
+      Schema.Struct({
+        sessionId: Schema.String.pipe(Schema.brand("Id<authSessions>")),
+        kind: Schema.Union([
+          Schema.Literal("password"),
+          Schema.Literal("deviceCode"),
+          Schema.Literal("tile"),
+          Schema.Literal("grant"),
+        ]),
+        name: Schema.Union([Schema.String, Schema.Null]),
+        device: Schema.Union([
+          Schema.Null,
+          Schema.Struct({
+            deviceId: Schema.String.pipe(Schema.brand("Id<devices>")),
+            name: Schema.String,
+          }),
+        ]),
+        scopes: Schema.Array(
+          Schema.Union([
+            Schema.Literal("account"),
+            Schema.Literal("admin"),
+            Schema.Literal("movies:read"),
+            Schema.Literal("movies:play"),
+            Schema.Literal("movies:edit"),
+            Schema.Literal("music:read"),
+            Schema.Literal("music:play"),
+            Schema.Literal("music:edit"),
+          ]),
+        ),
+        signedInAt: Schema.Finite,
+        expiresAt: Schema.Finite,
+        current: Schema.Boolean,
+      }),
+    ),
+    continueCursor: Schema.String,
+    isDone: Schema.Boolean,
+    splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+    pageStatus: Schema.optionalKey(
+      Schema.Union([
+        Schema.Literal("SplitRecommended"),
+        Schema.Literal("SplitRequired"),
+        Schema.Null,
+      ]),
+    ),
+  }),
 });
 
 const core_auth_sessions_revoke = mutation({
@@ -539,6 +657,7 @@ const core_devices_picker_show = query({
         Schema.Struct({
           userId: Schema.String.pipe(Schema.brand("Id<users>")),
           username: Schema.String,
+          displayName: Schema.Union([Schema.String, Schema.Null]),
         }),
       ),
     }),
@@ -551,6 +670,7 @@ const core_devices_picker_show = query({
         Schema.Struct({
           userId: Schema.String.pipe(Schema.brand("Id<users>")),
           username: Schema.String,
+          displayName: Schema.Union([Schema.String, Schema.Null]),
           kid: Schema.Boolean,
           code: Schema.Union([
             Schema.Literal("none"),
@@ -3750,6 +3870,8 @@ export const effectMethods = (method: EffectBuilder) => ({
         changePassword: method.action(core_accounts_me_changePassword),
         /** `core.accounts.me.rename` (mutation, account, API keys refused): Change your username; everything you own stays yours. */
         rename: method.mutation(core_accounts_me_rename),
+        /** `core.accounts.me.setDisplayName` (mutation, account, API keys refused): Set the name you go by in greetings and lists, or clear it to go by your username. */
+        setDisplayName: method.mutation(core_accounts_me_setDisplayName),
       },
       resetLinks: {
         /** `core.accounts.resetLinks.create` (action, admin, API keys refused): Create a one-time link code that lets someone set a new password within a day. */
@@ -3774,6 +3896,8 @@ export const effectMethods = (method: EffectBuilder) => ({
         create: method.action(core_auth_apiKeys_create),
         /** `core.auth.apiKeys.endAll` (mutation, account): Stop every API key you have made so far. */
         endAll: method.mutation(core_auth_apiKeys_endAll),
+        /** `core.auth.apiKeys.list` (query, account): List your API keys that still work or ran out, newest first, with their scopes and last use; never their secrets. */
+        list: method.query(core_auth_apiKeys_list),
         /** `core.auth.apiKeys.revoke` (mutation, account): Revoke one of your API keys and sign out what it signed in. */
         revoke: method.mutation(core_auth_apiKeys_revoke),
       },
@@ -3794,6 +3918,8 @@ export const effectMethods = (method: EffectBuilder) => ({
         end: method.mutation(core_auth_sessions_end),
         /** `core.auth.sessions.endAll` (mutation, account): Sign out every password and device session you have, or every other one. */
         endAll: method.mutation(core_auth_sessions_endAll),
+        /** `core.auth.sessions.list` (query, account): List your signed-in browsers, apps, and devices, newest first, with the device each is on; API keys' sessions are left to the key list. */
+        list: method.query(core_auth_sessions_list),
         /** `core.auth.sessions.revoke` (mutation, public): End the session a refresh token belongs to, deleting it and every refresh token it has; confirmed even when it had already ended. */
         revoke: method.mutation(core_auth_sessions_revoke),
       },
@@ -4096,6 +4222,8 @@ export const promiseMethods = (method: PromiseBuilder) => ({
         changePassword: method.action(core_accounts_me_changePassword),
         /** `core.accounts.me.rename` (mutation, account, API keys refused): Change your username; everything you own stays yours. */
         rename: method.mutation(core_accounts_me_rename),
+        /** `core.accounts.me.setDisplayName` (mutation, account, API keys refused): Set the name you go by in greetings and lists, or clear it to go by your username. */
+        setDisplayName: method.mutation(core_accounts_me_setDisplayName),
       },
       resetLinks: {
         /** `core.accounts.resetLinks.create` (action, admin, API keys refused): Create a one-time link code that lets someone set a new password within a day. */
@@ -4120,6 +4248,8 @@ export const promiseMethods = (method: PromiseBuilder) => ({
         create: method.action(core_auth_apiKeys_create),
         /** `core.auth.apiKeys.endAll` (mutation, account): Stop every API key you have made so far. */
         endAll: method.mutation(core_auth_apiKeys_endAll),
+        /** `core.auth.apiKeys.list` (query, account): List your API keys that still work or ran out, newest first, with their scopes and last use; never their secrets. */
+        list: method.query(core_auth_apiKeys_list),
         /** `core.auth.apiKeys.revoke` (mutation, account): Revoke one of your API keys and sign out what it signed in. */
         revoke: method.mutation(core_auth_apiKeys_revoke),
       },
@@ -4140,6 +4270,8 @@ export const promiseMethods = (method: PromiseBuilder) => ({
         end: method.mutation(core_auth_sessions_end),
         /** `core.auth.sessions.endAll` (mutation, account): Sign out every password and device session you have, or every other one. */
         endAll: method.mutation(core_auth_sessions_endAll),
+        /** `core.auth.sessions.list` (query, account): List your signed-in browsers, apps, and devices, newest first, with the device each is on; API keys' sessions are left to the key list. */
+        list: method.query(core_auth_sessions_list),
         /** `core.auth.sessions.revoke` (mutation, public): End the session a refresh token belongs to, deleting it and every refresh token it has; confirmed even when it had already ended. */
         revoke: method.mutation(core_auth_sessions_revoke),
       },

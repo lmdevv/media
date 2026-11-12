@@ -29,6 +29,7 @@ const retry = (): void => undefined;
 const meAs = (scopes: Me["scopes"], kind: Me["kind"] = "password"): Me => ({
   userId: ada,
   username: "ada",
+  displayName: null,
   role: "member",
   sessionId: Brand.nominal<Me["sessionId"]>()("session-1"),
   kind,
@@ -41,6 +42,7 @@ const deviceId = Brand.nominal<SharedPicker["deviceId"]>()("device-1");
 const tile = (overrides: Partial<SharedTile>): SharedTile => ({
   userId: ada,
   username: "ada",
+  displayName: null,
   kid: false,
   code: "none",
   lock: { state: "open" },
@@ -89,7 +91,7 @@ describe("which screen shows", () => {
       deviceId,
       name: "Firefox on Linux",
       mode: "personal",
-      tiles: [{ userId: ada, username: "ada" }],
+      tiles: [{ userId: ada, username: "ada", displayName: null }],
     });
 
     expect(screenOf(inputs({ device: "dv_1.x", picker }))).toStrictEqual({ kind: "signIn" });
@@ -110,7 +112,7 @@ describe("which screen shows", () => {
       deviceId,
       name: "Firefox on Linux",
       mode: "personal",
-      tiles: [{ userId: ada, username: "ada" }],
+      tiles: [{ userId: ada, username: "ada", displayName: null }],
     });
 
     expect(
