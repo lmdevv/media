@@ -189,8 +189,10 @@ The first [media] release (p4-release, D55, ADR 0016) publishes the CLI under it
   with the `media` binary and the skill. The release workflow publishes it with npm trusted
   publishing and a provenance attestation, once the tag's image is out, beside the standalone
   binaries. npm sets a trusted publisher only on a package that exists, so the owner claims the
-  name by hand with a placeholder version, `0.0.0-stage`, under the `stage` dist-tag, before the
-  first tag; the workflow then publishes the release (`docs/operations.md`, "Releasing").
+  name by hand with a placeholder version, `0.0.0-stage`, just before the first tag, and
+  deprecates it at once: the registry makes a first version `latest` whatever its dist-tag, so
+  until the workflow publishes the release an install gets the placeholder (`docs/operations.md`,
+  "Releasing").
 - **`@lmdevv/movies` ends at 0.2.0.** Its binary is `movies`, so the two packages never fight
   over a command. After `@lmdevv/media` 0.3.0 is on npm, the owner deprecates every version of
   `@lmdevv/movies` with a message that names `@lmdevv/media`, with their own npm credentials (D41,

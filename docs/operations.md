@@ -254,9 +254,11 @@ replaces its assets and publishes a release an earlier run left as a draft.
 A pre-release such as `v0.3.0-rc.1` publishes under `next` and makes a GitHub pre-release.
 
 npm only lets a trusted publisher be set on a package that exists, so a new package's name is
-claimed by hand with a placeholder version, `0.0.0-stage`, before its first tag is pushed; the
-workflow then publishes the real version with its provenance. Run it from an npm account in the
-`lmdevv` org (here for `@lmdevv/media`):
+claimed by hand with a placeholder version, `0.0.0-stage`, just before its first tag is pushed; the
+workflow then publishes the real version with its provenance. The registry makes a package's first
+version `latest` whatever its dist-tag, so until the release is out an install gets the empty
+placeholder: claim the name only when the tag is ready, and deprecate the placeholder at once. Run
+it from an npm account in the `lmdevv` org (here for `@lmdevv/media`):
 
 ```sh
 npm login
@@ -264,11 +266,13 @@ mkdir -p /tmp/media-stage && cd /tmp/media-stage && echo '{}' > package.json
 npm pkg set name=@lmdevv/media version=0.0.0-stage license=MIT \
   description="Placeholder; install @lmdevv/media@latest"
 npm publish --access public --tag stage
+npm deprecate @lmdevv/media@0.0.0-stage "Placeholder; install @lmdevv/media@latest"
 ```
 
 Then, on npmjs.com, open `@lmdevv/media` → Settings → Trusted publishing, choose GitHub Actions,
-and enter the owner `lmdevv`, the repository `media`, and the workflow `release.yml`. Once a tag
-has published through it, set Publishing access to require two-factor authentication and
+and enter the owner `lmdevv`, the repository `media`, and the workflow `release.yml`. Push the tag;
+`npm view @lmdevv/media dist-tags` then shows `latest` on the release. Once a tag has published
+through it, set Publishing access to require two-factor authentication and
 disallow tokens.
 
 `@lmdevv/movies`, the [movies] CLI's package, stays on npm, deprecated with a pointer to

@@ -35,6 +35,12 @@ ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH CI=1
 RUN corepack enable
 WORKDIR /src
 COPY . .
+# The release version, labelled on the image below. A build given one refuses it unless the core's
+# package carries it, before the slow steps; scripts/check-version.sh, in CI and the pre-commit
+# hook, keeps every other package at that version.
+ARG MEDIA_VERSION=
+RUN [ -z "$MEDIA_VERSION" ] || [ "$MEDIA_VERSION" = "$(node -p 'require("./packages/platform/package.json").version')" ] \
+ || { echo "MEDIA_VERSION=$MEDIA_VERSION is not the packages' version" >&2; exit 1; }
 RUN pnpm install --frozen-lockfile --ignore-scripts --os=linux --cpu=x64 --cpu=arm64 --libc=glibc
 RUN VITE_PLATFORM_URL=__MEDIA_CONVEX_URL__ pnpm --config.verify-deps-before-run=false --filter @media/web-movies build --base=/movies/ \
  && VITE_PLATFORM_URL=__MEDIA_CONVEX_URL__ pnpm --config.verify-deps-before-run=false --filter @media/web-account build \
@@ -59,11 +65,6 @@ RUN pnpm --filter @media/platform deploy --prod --legacy /out/platform \
  && cp -r apps/web-account/dist /out/account \
  && install -D -m 644 apps/cli/dist/media.js /out/cli/media.mjs \
  && install -m 644 apps/cli/dist/THIRD_PARTY_LICENSES.md /out/cli/
-# The release version, labelled on the image below. A build given one refuses a version the
-# packages do not carry (scripts/check-version.sh), so the label cannot name another release.
-ARG MEDIA_VERSION=
-RUN [ -z "$MEDIA_VERSION" ] || [ "$MEDIA_VERSION" = "$(node -p 'require("./packages/platform/package.json").version')" ] \
- || { echo "MEDIA_VERSION=$MEDIA_VERSION is not the packages' version" >&2; exit 1; }
 
 FROM ${NODE_IMAGE}
 ARG TARGETARCH
