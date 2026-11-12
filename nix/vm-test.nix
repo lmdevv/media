@@ -63,6 +63,11 @@ testers.runNixOSTest {
     def health():
         return json.loads(machine.succeed("curl -fsS http://127.0.0.1:8080/api/health"))
 
+    # Reads the whole body before checking it: `curl | grep -q` fails under pipefail when grep
+    # exits at its first match and curl is still writing (exit code 23).
+    def page(url):
+        return machine.succeed(f"curl -fsS {url}")
+
     def wait_connected():
         machine.wait_until_succeeds(
             "curl -fsS http://127.0.0.1:8080/api/health | grep -q '\"backend\":\"connected\"'",
@@ -85,11 +90,12 @@ testers.runNixOSTest {
             "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/movies/convex/instance_name"
         ) == "404"
         machine.succeed("curl -fsS http://127.0.0.1:8080/api/health")
-        machine.succeed("curl -fsS http://127.0.0.1:8080/ | grep -qF '<title>[media]</title>'")
-        machine.succeed("curl -fsS http://127.0.0.1:8080/people | grep -qF '<title>[media]</title>'")
-        machine.succeed("curl -fsS http://127.0.0.1:8080/movies/ | grep -qF '<title>[movies]</title>'")
-        machine.succeed("curl -fsS http://127.0.0.1:8080/movies/some/client/route | grep -qF '/movies/assets/'")
-        machine.fail("curl -fsS http://127.0.0.1:8080/convex/.well-known/jwks.json | grep -qF keys")
+        assert "<title>[media]</title>" in page("http://127.0.0.1:8080/")
+        assert "<title>[media]</title>" in page("http://127.0.0.1:8080/people")
+        assert "<title>[movies]</title>" in page("http://127.0.0.1:8080/movies/")
+        assert "/movies/assets/" in page("http://127.0.0.1:8080/movies/some/client/route")
+        status, jwks = machine.execute("curl -fsS http://127.0.0.1:8080/convex/.well-known/jwks.json")
+        assert status != 0 or "keys" not in jwks
 
     with subtest("both web clients are served with the core's Convex URL"):
         machine.succeed("grep -rqF http://localhost:8080/convex /run/movies/web")
