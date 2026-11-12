@@ -10,32 +10,19 @@ export const BackupTrigger = Schema.Literals(["nightly", "manual"]);
 export type BackupTrigger = typeof BackupTrigger.Type;
 
 /** What a job does. */
-export const JobKind = Schema.Literals([
-  "scan",
-  "metadata",
-  "person",
-  "backup",
-  "migration",
-  "trickplay",
-]);
+const JobKind = Schema.Literals(["scan", "metadata", "person", "backup", "migration", "trickplay"]);
 
 /** What a job does. */
-export type JobKind = typeof JobKind.Type;
+type JobKind = typeof JobKind.Type;
 
 /** Where a job stands. A `running` job whose lease expired returns to `pending`. */
-export const JobStatus = Schema.Literals([
-  "pending",
-  "running",
-  "succeeded",
-  "failed",
-  "cancelled",
-]);
+const JobStatus = Schema.Literals(["pending", "running", "succeeded", "failed", "cancelled"]);
 
 /** Where a job stands. */
-export type JobStatus = typeof JobStatus.Type;
+type JobStatus = typeof JobStatus.Type;
 
 /** A scan walks every root (`full`) or only checks known paths for changes (`quick`). */
-export const ScanMode = Schema.Literals(["full", "quick"]);
+const ScanMode = Schema.Literals(["full", "quick"]);
 
 /** Which migration source a job reads. */
 export const MigrationSource = Schema.Literals(["jellyfin", "plex"]);
@@ -44,7 +31,7 @@ export const MigrationSource = Schema.Literals(["jellyfin", "plex"]);
 export type MigrationSource = typeof MigrationSource.Type;
 
 /** What the worker needs to run a job, by kind. */
-export const JobPayload = Schema.Union([
+const JobPayload = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("scan"),
     libraryId: LibraryId,
@@ -77,17 +64,17 @@ export const JobPayload = Schema.Union([
 ]);
 
 /** What the worker needs to run a job. */
-export type JobPayload = typeof JobPayload.Type;
+type JobPayload = typeof JobPayload.Type;
 
 /** Progress the worker reports while it holds the lease. */
-export const JobProgress = Schema.Struct({
+const JobProgress = Schema.Struct({
   done: Schema.Int,
   total: Schema.NullOr(Schema.Int),
   message: Schema.NullOr(Schema.String),
 });
 
 /** Job progress. */
-export interface JobProgress extends Schema.Schema.Type<typeof JobProgress> {}
+interface JobProgress extends Schema.Schema.Type<typeof JobProgress> {}
 
 /** A job as admins see it. */
 export const Job = Schema.Struct({
@@ -107,12 +94,6 @@ export const Job = Schema.Struct({
 /** A job. */
 export interface Job extends Schema.Schema.Type<typeof Job> {}
 
-/** The result of a command that queued a job. */
-export const QueuedJob = Schema.Struct({ jobId: JobId });
-
-/** A job a command queued. */
-export interface QueuedJob extends Schema.Schema.Type<typeof QueuedJob> {}
-
 /** A backup archive in the media host's backup folder. */
 export const Backup = Schema.Struct({
   id: BackupId,
@@ -124,9 +105,6 @@ export const Backup = Schema.Struct({
 
 /** A backup archive. */
 export interface Backup extends Schema.Schema.Type<typeof Backup> {}
-
-/** Most archives one `mediaService.syncBackups` call may carry. */
-export const BACKUP_SYNC_LIMIT = 1000;
 
 /** A backup archive as the media service finds it in its backup folder. */
 export const BackupArchive = Schema.Struct({

@@ -19,10 +19,10 @@ const { readFileSync } = require("node:fs");
 
 const [tag, ...manifests] = process.argv.slice(2);
 const versionOf = (path) => JSON.parse(readFileSync(path, "utf8")).version;
-const version = versionOf("packages/backend/package.json");
+const version = versionOf("packages/platform/package.json");
 const failures = manifests
   .filter((path) => versionOf(path) !== version)
-  .map((path) => `${path} is ${versionOf(path)}, not ${version} (packages/backend/package.json)`);
+  .map((path) => `${path} is ${versionOf(path)}, not ${version} (packages/platform/package.json)`);
 
 if (tag !== "" && tag !== `v${version}`) {
   failures.push(`tag ${tag} does not name the package version ${version}`);

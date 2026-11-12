@@ -1,4 +1,6 @@
-import { commands } from "@media/contracts/commands";
+import { TitleCard } from "@media/contracts/models/catalog";
+import { Ok, Page } from "@media/contracts/models/common";
+import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { formatDuration, renderResult } from "./render";
@@ -24,7 +26,7 @@ describe("human output", () => {
   });
 
   it("renders lists of known models as tables", () => {
-    const text = renderResult(commands["titles.search"].result, [card]);
+    const text = renderResult(Schema.Array(TitleCard), [card]);
 
     expect(text.split("\n")[0]).toMatch(/^ID\s+NAME\s+KIND\s+YEAR\s+RATING\s+RUNTIME$/u);
     expect(text).toContain("Alien");
@@ -32,12 +34,12 @@ describe("human output", () => {
   });
 
   it("renders pages with the next cursor", () => {
-    const text = renderResult(commands["titles.list"].result, { items: [card], nextCursor: "c2" });
+    const text = renderResult(Page(TitleCard), { items: [card], nextCursor: "c2" });
 
     expect(text).toContain("More: --cursor c2");
   });
 
   it("renders acknowledgements as ok", () => {
-    expect(renderResult(commands["rooms.leave"].result, { ok: true })).toBe("ok");
+    expect(renderResult(Ok, { ok: true })).toBe("ok");
   });
 });

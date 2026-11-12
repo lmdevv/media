@@ -9,7 +9,7 @@ import * as Downloads from "../downloads/downloads.ts";
 import * as MediaConfig from "../media-config.ts";
 import * as HardwareAcceleration from "../playback/hardware-acceleration.ts";
 import * as PlaybackNegotiator from "../playback/playback-negotiator.ts";
-import * as PlaybackToken from "../playback/playback-token.ts";
+import * as PlaybackToken from "../playback/playback-grants.ts";
 import * as StreamSessions from "../playback/stream-sessions.ts";
 import { retryAfter } from "./rate-limit.ts";
 

@@ -1,8 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { MediaFileId, PlaybackSessionId, UserId } from "@media/contracts/ids";
-import { PlaybackSessionEnded } from "@media/contracts/media-playback";
-import { PlaybackTokenInvalid } from "@media/contracts/playback-token";
+import { PlaybackSessionEnded, PlaybackTokenInvalid } from "@media/contracts/media-playback";
 import { serverFunctions } from "@media/contracts/server-functions";
 import type { SessionStatus } from "@media/contracts/server-functions";
 import {
@@ -38,8 +37,8 @@ import {
 } from "effect";
 
 import * as ArtworkGate from "../artwork/artwork-gate.ts";
-import * as PlaybackToken from "../playback/playback-token.ts";
-import type { PlaybackGrant, TokenPurpose } from "../playback/playback-token.ts";
+import * as PlaybackToken from "../playback/playback-grants.ts";
+import type { PlaybackGrant, TokenPurpose } from "../playback/playback-grants.ts";
 import * as SessionReports from "../playback/session-reports.ts";
 import { SessionReport } from "../playback/stream-liveness.ts";
 import * as StreamOwners from "../playback/stream-owners.ts";

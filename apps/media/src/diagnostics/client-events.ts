@@ -4,12 +4,12 @@ import {
   DiagnosticsRateLimited,
   PlayerObservation,
 } from "@media/contracts/diagnostics";
-import type { PlaybackTokenInvalid } from "@media/contracts/playback-token";
+import type { PlaybackTokenInvalid } from "@media/contracts/media-playback";
 import { Clock, Context, Effect, Layer, Option, Predicate } from "effect";
 
 import { makeLimiter } from "../http/rate-limit.ts";
-import type { PlaybackGrant } from "../playback/playback-token.ts";
-import * as PlaybackToken from "../playback/playback-token.ts";
+import type { PlaybackGrant } from "../playback/playback-grants.ts";
+import * as PlaybackToken from "../playback/playback-grants.ts";
 import * as StreamOwners from "../playback/stream-owners.ts";
 import {
   grantAnnotations,

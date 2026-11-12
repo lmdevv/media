@@ -8,15 +8,13 @@ import {
   type InsufficientTranscodeSpace,
   type MediaFileNotFound,
   type PlaybackSessionEnded,
+  type PlaybackTokenInvalid,
   type PrepareDownloadRequest,
   type PrepareDownloadResponse,
   TranscodeFailed,
   UnsupportedPlayback,
 } from "@media/contracts/media-playback";
-import {
-  PLAYBACK_TOKEN_LIFETIME_MS,
-  type PlaybackTokenInvalid,
-} from "@media/contracts/playback-token";
+import { PERSONAL_TICKET_MAX_MS } from "@media/contracts/ticket";
 import {
   Cause,
   Clock,
@@ -44,7 +42,7 @@ import * as HardwareAcceleration from "../playback/hardware-acceleration.ts";
 import { AudioPlan, VideoPlan } from "../playback/playback-decision.ts";
 import { subtitleViews } from "../playback/playback-negotiator.ts";
 import * as EndedSessions from "../playback/ended-sessions.ts";
-import * as PlaybackToken from "../playback/playback-token.ts";
+import * as PlaybackToken from "../playback/playback-grants.ts";
 import * as TranscodeSpace from "../playback/transcode-space.ts";
 import { mp4CommandArgs } from "../playback/transcode-command.ts";
 import { decideDownload, DownloadPlan } from "./download-plan.ts";
@@ -73,7 +71,7 @@ export class Service extends Context.Service<Service, Interface>()("@media/serve
 
 const KEEP_UNUSED = Duration.hours(6);
 
-const ABANDONED_AFTER = Duration.millis(PLAYBACK_TOKEN_LIFETIME_MS);
+const ABANDONED_AFTER = Duration.millis(PERSONAL_TICKET_MAX_MS);
 
 const ENDED_GRACE = Duration.minutes(2);
 

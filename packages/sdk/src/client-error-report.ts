@@ -27,7 +27,7 @@ export interface ErrorContext {
 }
 
 /** How long an error that was sent is not sent again. */
-export const REPEAT_WINDOW_MS = 30_000;
+const REPEAT_WINDOW_MS = 30_000;
 
 const MAX_REMEMBERED = 100;
 

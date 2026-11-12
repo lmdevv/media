@@ -1,16 +1,7 @@
 import { Schema } from "effect";
 
 import { AgeRating } from "../content-rating";
-import {
-  CollectionId,
-  EpisodeId,
-  LibraryId,
-  MediaFileId,
-  PersonId,
-  SeasonId,
-  TitleId,
-  UserId,
-} from "../ids";
+import { CollectionId, EpisodeId, LibraryId, MediaFileId, SeasonId, TitleId, UserId } from "../ids";
 import { TrickplayManifest } from "../trickplay";
 import { Bytes, EpochMillis, Milliseconds } from "../units";
 
@@ -21,10 +12,10 @@ export const LibraryKind = Schema.Literals(["movies", "shows", "mixed"]);
 export type LibraryKind = typeof LibraryKind.Type;
 
 /** `everyone` libraries are visible to every account; `restricted` ones only to granted members and admins. */
-export const LibraryAccess = Schema.Literals(["everyone", "restricted"]);
+const LibraryAccess = Schema.Literals(["everyone", "restricted"]);
 
 /** Who sees a library. */
-export type LibraryAccess = typeof LibraryAccess.Type;
+type LibraryAccess = typeof LibraryAccess.Type;
 
 /** An absolute folder path on the media host. */
 export const LibraryRoot = Schema.String.check(Schema.isPattern(/^\//u), Schema.isMaxLength(1024));
@@ -183,34 +174,6 @@ export const CreditKind = Schema.Literals([
 
 /** What a person did on a title or episode. */
 export type CreditKind = typeof CreditKind.Type;
-
-/** One person's credit on a title or an episode. */
-export const Credit = Schema.Struct({
-  personId: PersonId,
-  name: Schema.String,
-  kind: CreditKind,
-  /** The character an actor plays, or a crew member's job such as `Screenplay`. */
-  role: Schema.NullOr(Schema.String),
-  /** The person's photo as an artwork key. */
-  profile: Schema.NullOr(Schema.String),
-  /** Billing order; lower comes first. */
-  order: Schema.Int,
-});
-
-/** One person's credit. */
-export interface Credit extends Schema.Schema.Type<typeof Credit> {}
-
-/** A person in search results and lists. */
-export const PersonCard = Schema.Struct({
-  id: PersonId,
-  name: Schema.String,
-  profile: Schema.NullOr(Schema.String),
-  /** The department they are best known for, such as `Acting` or `Directing`. */
-  knownFor: Schema.NullOr(Schema.String),
-});
-
-/** A person in search results. */
-export interface PersonCard extends Schema.Schema.Type<typeof PersonCard> {}
 
 /** The collection a title belongs to, such as `Alien Collection`. */
 export const CollectionRef = Schema.Struct({ id: CollectionId, name: Schema.String });
@@ -418,75 +381,6 @@ export const Episode = Schema.Struct({
 /** An episode. */
 export interface Episode extends Schema.Schema.Type<typeof Episode> {}
 
-/** An episode in a season's list, with its guest stars and its own directors and writers. */
-export const SeasonEpisode = Schema.Struct({
-  ...Episode.fields,
-  credits: Schema.Array(Credit),
-});
-
-/** An episode in a season's list. */
-export interface SeasonEpisode extends Schema.Schema.Type<typeof SeasonEpisode> {}
-
-/** A season in a show's detail page. */
-export const Season = Schema.Struct({
-  id: SeasonId,
-  seasonNumber: Schema.Int,
-  name: Schema.String,
-  poster: Schema.NullOr(Schema.String),
-  episodeCount: Schema.Int,
-  externalIds: ExternalIds,
-});
-
-/** A season. */
-export interface Season extends Schema.Schema.Type<typeof Season> {}
-
-/** Everything a title's detail page shows. */
-export const TitleDetail = Schema.Struct({
-  ...TitleCard.fields,
-  libraryId: LibraryId,
-  sortName: Schema.String,
-  overview: Schema.NullOr(Schema.String),
-  tagline: Schema.NullOr(Schema.String),
-  externalIds: ExternalIds,
-  matchStatus: MatchStatus,
-  originalName: Schema.NullOr(Schema.String),
-  /** First release or air date, `YYYY-MM-DD`. */
-  releaseDate: Schema.NullOr(Schema.String),
-  /** For shows: whether it still airs. */
-  status: Schema.NullOr(ShowStatus),
-  /** ISO 639-1 code of the original language, such as `en`. */
-  originalLanguage: Schema.NullOr(Schema.String),
-  /** Production companies of a movie, networks of a show. */
-  studios: Schema.Array(Schema.String),
-  /** Production countries. */
-  countries: Schema.Array(Schema.String),
-  /** Keywords. */
-  tags: Schema.Array(Schema.String),
-  ratings: Ratings,
-  trailer: Schema.NullOr(Trailer),
-  collection: Schema.NullOr(CollectionRef),
-  /** Top-billed actors in billing order. */
-  cast: Schema.Array(Credit),
-  /** Creators, directors, writers, producers, and composers. */
-  crew: Schema.Array(Credit),
-  seasons: Schema.Array(Season),
-  /** A movie's files, including missing ones; empty for shows, whose files belong to episodes. */
-  files: Schema.Array(MediaFile),
-  /**
-   * A movie's files on disk as versions to choose from, best quality first; empty for shows,
-   * whose episodes list theirs with `titles.versions`.
-   */
-  versions: Schema.Array(MediaVersion),
-  /** A movie's progress; null for shows and unstarted movies. */
-  progress: Schema.NullOr(Progress),
-  /** For shows: the episode to resume or start next. */
-  nextEpisode: Schema.NullOr(Episode),
-  inMyList: Schema.Boolean,
-});
-
-/** Everything a title's detail page shows. */
-export interface TitleDetail extends Schema.Schema.Type<typeof TitleDetail> {}
-
 /** A row in continue watching: resume a started item, or start the next episode of a show. */
 export const ContinueWatchingItem = Schema.Struct({
   reason: Schema.Literals(["resume", "next"]),
@@ -498,18 +392,6 @@ export const ContinueWatchingItem = Schema.Struct({
 /** A row in continue watching. */
 export interface ContinueWatchingItem extends Schema.Schema.Type<typeof ContinueWatchingItem> {}
 
-/** The home screen's rows for one profile. */
-export const Home = Schema.Struct({
-  featured: Schema.NullOr(TitleCard),
-  continueWatching: Schema.Array(ContinueWatchingItem),
-  myList: Schema.Array(TitleCard),
-  recentlyAddedMovies: Schema.Array(TitleCard),
-  recentlyAddedShows: Schema.Array(TitleCard),
-});
-
-/** The home screen's rows. */
-export interface Home extends Schema.Schema.Type<typeof Home> {}
-
 /** One entry in a profile's watch history. */
 export const HistoryEntry = Schema.Struct({
   title: TitleCard,
@@ -520,18 +402,6 @@ export const HistoryEntry = Schema.Struct({
 
 /** One entry in watch history. */
 export interface HistoryEntry extends Schema.Schema.Type<typeof HistoryEntry> {}
-
-/** Sort orders for title lists. */
-export const TitleSort = Schema.Literals(["name", "added", "year"]);
-
-/** A genre and how many visible titles carry it. */
-export const GenreCount = Schema.Struct({ name: Schema.String, count: Schema.Int });
-
-/** A genre and its title count. */
-export interface GenreCount extends Schema.Schema.Type<typeof GenreCount> {}
-
-/** Sort orders for title lists. */
-export type TitleSort = typeof TitleSort.Type;
 
 /** Metadata fields an admin can override by hand. Scans never overwrite an override. */
 export const MetadataOverrides = Schema.Struct({
@@ -545,16 +415,6 @@ export const MetadataOverrides = Schema.Struct({
 
 /** Metadata fields an admin overrides. */
 export interface MetadataOverrides extends Schema.Schema.Type<typeof MetadataOverrides> {}
-
-/** Fields an admin can override, by name, for clearing overrides. */
-export const MetadataField = Schema.Literals([
-  "name",
-  "sortName",
-  "year",
-  "overview",
-  "certification",
-  "ageRating",
-]);
 
 /** A possible metadata match offered when fixing a title's match. */
 export const MetadataCandidate = Schema.Struct({
@@ -570,53 +430,6 @@ export const MetadataCandidate = Schema.Struct({
 
 /** A possible metadata match. */
 export interface MetadataCandidate extends Schema.Schema.Type<typeof MetadataCandidate> {}
-
-/** Which files a library's admin file list shows. */
-export const LibraryFileFilter = Schema.Literals(["all", "missing", "unmatched"]);
-
-/** Which files a library's admin file list shows. */
-export type LibraryFileFilter = typeof LibraryFileFilter.Type;
-
-/** A file in a library's admin file list with the title it belongs to. Paths are for admins. */
-export const LibraryFile = Schema.Struct({
-  id: MediaFileId,
-  /** The absolute path on the media host. */
-  path: Schema.String,
-  sizeBytes: Bytes,
-  durationMs: Milliseconds,
-  /** The primary video stream; null for a file without one. */
-  video: Schema.NullOr(
-    Schema.Struct({ codec: Schema.String, width: Schema.Int, height: Schema.Int, hdr: HdrFormat }),
-  ),
-  missing: Schema.Boolean,
-  /** When a scan last found the file gone; null while it is present. */
-  missingSince: Schema.NullOr(EpochMillis),
-  title: Schema.Struct({
-    id: TitleId,
-    kind: TitleKind,
-    name: Schema.String,
-    year: Schema.NullOr(Schema.Int),
-    matchStatus: MatchStatus,
-    externalIds: ExternalIds,
-    poster: Schema.NullOr(Schema.String),
-  }),
-  /** For a show's file, its season and episode numbers. */
-  episode: Schema.NullOr(Schema.Struct({ seasonNumber: Schema.Int, episodeNumber: Schema.Int })),
-});
-
-/** A file in a library's admin file list. */
-export interface LibraryFile extends Schema.Schema.Type<typeof LibraryFile> {}
-
-/** What needs attention in a library: missing files and unmatched titles. */
-export const LibraryFileSummary = Schema.Struct({
-  missingFiles: Schema.Int,
-  /** The earliest time a missing file went missing; null when none are missing. */
-  missingSince: Schema.NullOr(EpochMillis),
-  unmatchedTitles: Schema.Int,
-});
-
-/** What needs attention in a library. */
-export interface LibraryFileSummary extends Schema.Schema.Type<typeof LibraryFileSummary> {}
 
 /** A folder on the media host that a library could use. */
 export const ServerFolder = Schema.Struct({

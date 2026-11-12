@@ -6,7 +6,7 @@
  */
 import { Schema } from "effect";
 
-import type { FunctionPath } from "./commands/command";
+import type { FunctionPath } from "./command";
 import {
   BackupId,
   EpisodeId,

@@ -1,15 +1,7 @@
 import { Schema } from "effect";
 
 import { AgeRating } from "../content-rating";
-import {
-  EpisodeId,
-  JobId,
-  LibraryId,
-  MediaFileId,
-  PersonId,
-  PlaybackSessionId,
-  TitleId,
-} from "../ids";
+import { EpisodeId, LibraryId, MediaFileId, TitleId } from "../ids";
 import { Bytes, EpochMillis, Milliseconds } from "../units";
 import {
   Artwork,
@@ -17,7 +9,6 @@ import {
   CreditKind,
   ExternalIds,
   ExternalSubtitle,
-  LibraryKind,
   MatchStatus,
   Probe,
   Ratings,
@@ -25,40 +16,6 @@ import {
   TitleKind,
   Trailer,
 } from "./catalog";
-import { Job } from "./jobs";
-
-/** Most items one scan or import write may carry. */
-export const SCAN_BATCH_LIMIT = 100;
-
-/** A library as the media service needs it: the folders it may read. */
-export const MediaLibrary = Schema.Struct({
-  id: LibraryId,
-  name: Schema.String,
-  kind: LibraryKind,
-  roots: Schema.Array(Schema.String),
-});
-
-/** A library's folders. */
-export interface MediaLibrary extends Schema.Schema.Type<typeof MediaLibrary> {}
-
-/** A job the worker now holds, with its library when it has one. */
-export const ClaimedJob = Schema.Struct({
-  job: Job,
-  library: Schema.NullOr(MediaLibrary),
-  leaseExpiresAt: EpochMillis,
-});
-
-/** A claimed job. */
-export interface ClaimedJob extends Schema.Schema.Type<typeof ClaimedJob> {}
-
-/** Arguments that identify the worker holding a job's lease. */
-export const LeaseArgs = {
-  jobId: JobId,
-  workerId: Schema.Trimmed.check(Schema.isMinLength(1), Schema.isMaxLength(120)),
-};
-
-/** How long a claim or renewal holds the lease: 5 seconds to 10 minutes. */
-export const LeaseMs = Schema.Int.check(Schema.isBetween({ minimum: 5_000, maximum: 600_000 }));
 
 /** Most studios, countries, or recommendations a title keeps. */
 export const TITLE_LIST_LIMIT = 20;
@@ -66,14 +23,11 @@ export const TITLE_LIST_LIMIT = 20;
 /** Most keywords a title keeps. */
 export const TITLE_TAG_LIMIT = 40;
 
-/** Most credits one `mediaService.applyCredits` call may carry. */
+/** Most credits one title's catalog record carries. */
 export const CREDIT_BATCH_LIMIT = 100;
 
 const Bounded = <Item extends Schema.Top>(item: Item, limit: number) =>
   Schema.Array(item).check(Schema.isMaxLength(limit));
-
-/** Items of one scan or import write: at most `SCAN_BATCH_LIMIT`. */
-export const ScanBatch = <Item extends Schema.Top>(item: Item) => Bounded(item, SCAN_BATCH_LIMIT);
 
 /**
  * A title as the scanner identified and matched it. `matchKey` identifies the title within its
@@ -200,39 +154,8 @@ export const ResolvedFile = Schema.Struct({
 /** A file named in a playback token. */
 export interface ResolvedFile extends Schema.Schema.Type<typeof ResolvedFile> {}
 
-/** A playback session's state: whether it is still active and whether its player plays. */
-export const SessionStatus = Schema.Struct({
-  sessionId: PlaybackSessionId,
-  status: Schema.Literals(["active", "ended"]),
-  fileId: MediaFileId,
-  endedAt: Schema.NullOr(EpochMillis),
-  state: Schema.Literals(["playing", "paused"]),
-  positionMs: Milliseconds,
-});
-
-/** Whether a playback session continues, and whether its player plays. */
-export interface SessionStatus extends Schema.Schema.Type<typeof SessionStatus> {}
-
-/** A title for a metadata job: what to look up and which episodes exist. */
-export const MetadataTarget = Schema.Struct({
-  titleId: TitleId,
-  libraryId: LibraryId,
-  kind: TitleKind,
-  name: Schema.String,
-  year: Schema.NullOr(Schema.Int),
-  externalIds: ExternalIds,
-  /** The title's current artwork, kept where the provider has none. */
-  artwork: Artwork,
-  episodes: Schema.Array(
-    Schema.Struct({ episodeId: EpisodeId, seasonNumber: Schema.Int, episodeNumber: Schema.Int }),
-  ),
-});
-
-/** A title a metadata job writes. */
-export interface MetadataTarget extends Schema.Schema.Type<typeof MetadataTarget> {}
-
 /** A person as a scan or metadata job found them on a credit. */
-export const ScannedPerson = Schema.Struct({
+const ScannedPerson = Schema.Struct({
   name: Schema.Trimmed.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
   externalIds: ExternalIds,
   /** The person's photo as an artwork key. */
@@ -240,7 +163,7 @@ export const ScannedPerson = Schema.Struct({
 });
 
 /** A person on a credit. */
-export interface ScannedPerson extends Schema.Schema.Type<typeof ScannedPerson> {}
+interface ScannedPerson extends Schema.Schema.Type<typeof ScannedPerson> {}
 
 /** One credit as a scan or metadata job found it. */
 export const ScannedCredit = Schema.Struct({
@@ -252,9 +175,6 @@ export const ScannedCredit = Schema.Struct({
 
 /** One scanned credit. */
 export interface ScannedCredit extends Schema.Schema.Type<typeof ScannedCredit> {}
-
-/** A lease held by a metadata or person job, which may write titles an admin matched by hand. */
-export const OptionalLease = Schema.optionalKey(Schema.Struct(LeaseArgs));
 
 /** The collection a title belongs to, from TMDB or an NFO `<set>`. */
 export const ScannedCollection = Schema.Struct({
@@ -281,13 +201,3 @@ export const ScannedPersonDetails = Schema.Struct({
 
 /** A person's details. */
 export interface ScannedPersonDetails extends Schema.Schema.Type<typeof ScannedPersonDetails> {}
-
-/** A person for a person job: who to look up. */
-export const PersonTarget = Schema.Struct({
-  personId: PersonId,
-  name: Schema.String,
-  externalIds: ExternalIds,
-});
-
-/** A person to look up. */
-export interface PersonTarget extends Schema.Schema.Type<typeof PersonTarget> {}

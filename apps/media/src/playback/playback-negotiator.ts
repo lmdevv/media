@@ -4,9 +4,9 @@ import {
   type NegotiateRequest,
   type NegotiateResponse,
   type PlaybackSessionEnded,
+  type PlaybackTokenInvalid,
   UnsupportedPlayback,
 } from "@media/contracts/media-playback";
-import type { PlaybackTokenInvalid } from "@media/contracts/playback-token";
 import { Context, Duration, Effect, FileSystem, Layer, Option, Path } from "effect";
 import type { Redacted } from "effect";
 
@@ -18,7 +18,7 @@ import * as HardwareAcceleration from "./hardware-acceleration.ts";
 import * as KeyframeIndex from "./keyframe-index.ts";
 import { AudioPlan, decidePlayback, PlaybackPlan, VideoPlan } from "./playback-decision.ts";
 import * as PlaybackReporter from "./playback-reporter.ts";
-import * as PlaybackToken from "./playback-token.ts";
+import * as PlaybackToken from "./playback-grants.ts";
 import * as StreamSessions from "./stream-sessions.ts";
 
 type NegotiateError =

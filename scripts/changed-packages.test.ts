@@ -19,7 +19,6 @@ const everyPackage = [
   "apps/mobile-movies",
   "apps/web-account",
   "apps/web-movies",
-  "packages/backend",
   "packages/commands",
   "packages/config",
   "packages/contracts",
@@ -49,7 +48,6 @@ describe("changed-packages.sh", { timeout: 30_000 }, () => {
       "apps/mobile-movies",
       "apps/web-account",
       "apps/web-movies",
-      "packages/backend",
       "packages/contracts",
       "packages/mobile-core",
       "packages/platform",
@@ -73,10 +71,10 @@ describe("changed-packages.sh", { timeout: 30_000 }, () => {
     ]);
   });
 
-  it("routes the NixOS module to the media service and the dev stack to the backend", () => {
+  it("routes the NixOS module to the media service and the dev stack to the core", () => {
     expect(affected("nix/module.nix")).toEqual(["apps/media"]);
-    expect(affected("scripts/dev-stack.sh")).toEqual(["packages/backend", "packages/platform"]);
-    expect(affected("deploy/functions-hash.sh")).toEqual(["packages/backend"]);
+    expect(affected("scripts/dev-stack.sh")).toEqual(["packages/platform"]);
+    expect(affected("deploy/functions-hash.sh")).toEqual(["packages/platform"]);
   });
 
   it("takes Vitest arguments after test and nowhere else", () => {

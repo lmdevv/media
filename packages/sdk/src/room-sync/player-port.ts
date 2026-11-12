@@ -1,6 +1,3 @@
-import { Effect, Queue, Stream } from "effect";
-import type { Scope } from "effect";
-
 /** Something that happened on a player, from user input, the network, or the engine itself. */
 export type PlayerEvent =
   /** Playback started or resumed after a pause or a stall. */
@@ -39,25 +36,3 @@ export interface PlayerPort {
    */
   readonly fixedRate?: boolean;
 }
-
-/**
- * Subscribes to `player` now, for the rest of the scope, and returns the events as a stream.
- * Subscribing before any fiber forks means no event fired after this returns is missed.
- */
-export const playerEvents = (
-  player: PlayerPort,
-): Effect.Effect<Stream.Stream<PlayerEvent>, never, Scope.Scope> =>
-  Effect.gen(function* () {
-    const queue = yield* Queue.unbounded<PlayerEvent>();
-
-    yield* Effect.acquireRelease(
-      Effect.sync(() =>
-        player.subscribe((event) => {
-          Queue.offerUnsafe(queue, event);
-        }),
-      ),
-      (unsubscribe) => Effect.sync(unsubscribe),
-    );
-
-    return Stream.fromQueue(queue);
-  });

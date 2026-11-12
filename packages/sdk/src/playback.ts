@@ -1,11 +1,3 @@
-import type {
-  DeviceId,
-  EpisodeId,
-  MediaFileId,
-  ProfileId,
-  RoomId,
-  TitleId,
-} from "@media/contracts/ids";
 import {
   type ClientCapabilities,
   MEDIA_ROUTES,
@@ -17,47 +9,12 @@ import {
   StopRequest,
   StopRequestText,
 } from "@media/contracts/media-playback";
-import type { Episode, MediaFile } from "@media/contracts/models/catalog";
-import type {
-  ProgressEvent,
-  ProgressReceipt,
-  StartedPlayback,
-} from "@media/contracts/models/playback";
+import type { StartedPlayback } from "@media/contracts/models/playback";
 import { Milliseconds } from "@media/contracts/units";
-import { Clock, Duration, Effect, Match, Option, Redacted, Schedule, Schema, Stream } from "effect";
+import { Duration, Effect, Match, Option, Redacted, Schedule, Schema, Stream } from "effect";
 
 import type { PlaybackCallError } from "./media-http";
-import { baseUrl, encodeJson, mediaUrl, requestPlayback, withRenewedToken } from "./media-http";
-import { MoviesClient } from "./movies-client";
-import type { PlayerEvent, PlayerPort } from "./room-sync/player-port";
-import { playerEvents } from "./room-sync/player-port";
-
-/**
- * What to play. Omitted options pick the version the profile last played, else the best the
- * device's capabilities play directly, else the best quality, and resume from saved progress.
- */
-export interface PlaybackRequest {
-  readonly profileId: ProfileId;
-  readonly deviceId: DeviceId;
-  readonly deviceName: Option.Option<string>;
-  readonly titleId: TitleId;
-  readonly episodeId: Option.Option<EpisodeId>;
-  readonly fileId: Option.Option<MediaFileId>;
-  /** Join a room's stream; the room decides the file and the position. */
-  readonly roomId: Option.Option<RoomId>;
-  readonly capabilities: ClientCapabilities;
-  /** Start here instead of the saved progress. */
-  readonly startAtMs: Option.Option<Milliseconds>;
-  /** ffmpeg stream index of the audio track to play; the file's default track when none. */
-  readonly audioStreamIndex: Option.Option<number>;
-  /**
-   * Picks the audio track from the file the session chose, when `audioStreamIndex` is none, so the
-   * first stream already plays a preferred language; none plays the file's default track.
-   */
-  readonly chooseAudio?: (file: MediaFile) => Option.Option<number>;
-  /** The most to receive, such as 720p; the best the device plays when none. */
-  readonly quality: Option.Option<PlaybackQuality>;
-}
+import { baseUrl, encodeJson, mediaUrl, requestPlayback } from "./media-http";
 
 /**
  * What a viewer chose about the stream besides its position and audio: a quality cap, and a
@@ -153,9 +110,7 @@ export const seekStream = Effect.fn("Playback.seekStream")(function* (
 
 /**
  * Ends an HLS stream so the media service can stop encoding and delete its segments; a direct
- * stream has nothing to stop. `reportProgress` stops the stream it was given when its scope
- * closes; stop a stream that replaced it (a renegotiation) with this. The request outlives the
- * page that sends it (`keepalive`), so a stop sent as the page goes away still frees the stream's
+ * stream has nothing to stop. The request outlives the page that sends it (`keepalive`), so a stop sent as the page goes away still frees the stream's
  * transcode slot rather than holding it until the service's idle release.
  */
 export const stop = (playback: Playback): Effect.Effect<void, PlaybackCallError> =>
@@ -214,10 +169,10 @@ export const stopNow = (playback: Playback): void => {
  *
  * - `reload-playlist`: a seek replaced the HLS generation; load the current one (`seekStream`).
  * - `renegotiate`: the stream is gone (a restart, an expired token, or a replaced or stopped
- *   stream); call `renegotiate`.
- * - `renew-token`: the token expired; call `renegotiate`, which renews it first.
+ *   stream); negotiate again.
+ * - `renew-token`: the token expired; renew it, then negotiate again.
  * - `new-session`: the playback session ended (signed out, or another device took over); start a
- *   new one with `start`.
+ *   new one.
  * - `retry-later`: the service is busy or briefly unable to answer; retry after a pause.
  * - `unsupported`: this device cannot play the file in any mode; tell the viewer.
  * - `fail`: anything else; report the error.
@@ -252,170 +207,8 @@ export const recoveryFor = (error: PlaybackCallError): Recovery =>
     ProtocolError: (): Recovery => "fail",
   });
 
-const TOKEN_RENEW_MARGIN_MS = 5 * 60 * 1000;
-
-/**
- * Negotiates again at `positionMs`, for example after `StreamNotFound`, before the token expires,
- * or to switch the audio track: renews the playback token first when it expires within five
- * minutes, then returns the playback with the new token and stream. Media URLs carry the token,
- * so load the new `stream.url`. `audioStreamIndex` and `choices` pick the audio track, a quality
- * cap, and a burned-in subtitle as in `negotiate`.
- */
-export const renegotiate = Effect.fn("Playback.renegotiate")(function* (
-  playback: Playback,
-  capabilities: ClientCapabilities,
-  positionMs: Milliseconds,
-  audioStreamIndex: Option.Option<number>,
-  choices: StreamChoices = defaultStreamChoices,
-) {
-  const client = yield* MoviesClient;
-  const now = yield* Clock.currentTimeMillis;
-
-  const renewed =
-    playback.started.tokenExpiresAt - TOKEN_RENEW_MARGIN_MS <= now
-      ? Option.some(
-          yield* client.mutate("playback.renewToken", { sessionId: playback.started.sessionId }),
-        )
-      : Option.none();
-
-  const started: StartedPlayback = Option.match(renewed, {
-    onNone: () => playback.started,
-    onSome: (fresh) => withRenewedToken(playback.started, fresh),
-  });
-
-  const stream = yield* negotiate(started, capabilities, positionMs, audioStreamIndex, choices);
-  const next: Playback = { started, stream };
-
-  return next;
-});
-
-/**
- * Starts playing: creates the session (which ends this device's previous one), then negotiates
- * a stream at the requested position, the saved progress, or the room's start.
- */
-export const start = Effect.fn("Playback.start")(function* (request: PlaybackRequest) {
-  const client = yield* MoviesClient;
-
-  const started = yield* client.mutate("playback.createSession", {
-    profileId: request.profileId,
-    deviceId: request.deviceId,
-    titleId: request.titleId,
-    ...Option.match(request.deviceName, {
-      onNone: () => ({}),
-      onSome: (deviceName) => ({ deviceName }),
-    }),
-    ...Option.match(request.episodeId, {
-      onNone: () => ({}),
-      onSome: (episodeId) => ({ episodeId }),
-    }),
-    ...Option.match(request.fileId, { onNone: () => ({}), onSome: (fileId) => ({ fileId }) }),
-    ...Option.match(request.roomId, { onNone: () => ({}), onSome: (roomId) => ({ roomId }) }),
-    capabilities: request.capabilities,
-  });
-
-  const startAt = Option.getOrElse(request.startAtMs, () => started.resumePositionMs);
-
-  const { chooseAudio } = request;
-
-  const audioStreamIndex = Option.orElse(request.audioStreamIndex, () =>
-    chooseAudio === undefined ? Option.none() : chooseAudio(started.file),
-  );
-
-  const stream = yield* negotiate(started, request.capabilities, startAt, audioStreamIndex, {
-    quality: request.quality,
-    burnInSubtitle: Option.none(),
-  });
-
-  const playback: Playback = { started, stream };
-
-  return playback;
-});
-
 /** How often a playing device reports progress between events. */
 export const PROGRESS_INTERVAL_MS = 10_000;
-
-const EXIT_REPORT_TIMEOUT_MS = 2_000;
-
-const EVENT_REPORTS: Readonly<Record<PlayerEvent, ProgressEvent | null>> = {
-  playing: "resume",
-  paused: "pause",
-  seeked: "seek",
-  ended: "ended",
-  waiting: null,
-};
-
-const position = (player: PlayerPort): Milliseconds =>
-  Milliseconds.make(Math.max(0, player.positionMs()));
-
-/**
- * Reports progress for a playing session until its scope closes: every ten seconds while
- * playing, and on pause, resume, seek, and end. Closing the scope ends the session and its HLS
- * stream on a best-effort basis. Report failures are logged and skipped; the next report retries.
- */
-export const reportProgress = Effect.fn("Playback.reportProgress")(function* (
-  playback: Playback,
-  player: PlayerPort,
-) {
-  const client = yield* MoviesClient;
-  const sessionId = playback.started.sessionId;
-
-  const report = (event: ProgressEvent): Effect.Effect<Option.Option<ProgressReceipt>> =>
-    client
-      .mutate("playback.reportProgress", { sessionId, positionMs: position(player), event })
-      .pipe(
-        Effect.asSome,
-        Effect.catch((error) =>
-          Effect.logWarning("Playback.reportFailed", error).pipe(
-            Effect.annotateLogs({ sessionId, event }),
-            Effect.as(Option.none()),
-          ),
-        ),
-      );
-
-  const events = yield* playerEvents(player);
-
-  yield* Effect.addFinalizer(() =>
-    Effect.all(
-      [
-        client.mutate("playback.endSession", { sessionId, positionMs: position(player) }),
-        stop(playback),
-      ],
-      { concurrency: "unbounded", discard: true },
-    ).pipe(Effect.timeout(Duration.millis(EXIT_REPORT_TIMEOUT_MS)), Effect.ignore),
-  );
-
-  yield* Effect.forkScoped(
-    Stream.runForEach(events, (event) => {
-      const kind = EVENT_REPORTS[event];
-
-      return kind === null ? Effect.void : report(kind);
-    }),
-  );
-
-  yield* Effect.forkScoped(
-    Effect.repeat(
-      Effect.suspend(() => (player.isPaused() ? Effect.void : report("tick"))).pipe(
-        Effect.delay(Duration.millis(PROGRESS_INTERVAL_MS)),
-      ),
-      Schedule.forever,
-    ),
-  );
-});
-
-/** The episode after `episodeId` for this profile, or none after the last one. */
-export const nextEpisode = Effect.fn("Playback.nextEpisode")(function* (
-  profileId: ProfileId,
-  episodeId: EpisodeId,
-) {
-  const client = yield* MoviesClient;
-
-  const next: Episode | null = yield* client.query("playback.nextEpisode", {
-    profileId,
-    episodeId,
-  });
-
-  return Option.fromNullishOr(next);
-});
 
 /**
  * An autoplay countdown: the remaining time now and then every `stepMs` until zero. Play the next

@@ -1,5 +1,8 @@
-import { PlaybackSessionEnded, StreamId } from "@media/contracts/media-playback";
-import { PlaybackTokenInvalid } from "@media/contracts/playback-token";
+import {
+  PlaybackSessionEnded,
+  PlaybackTokenInvalid,
+  StreamId,
+} from "@media/contracts/media-playback";
 import { serverFunctions } from "@media/contracts/server-functions";
 import type { SessionStatus } from "@media/contracts/server-functions";
 import { artworkTicketId, loadTicketKeyRing } from "@media/contracts/ticket";
@@ -21,7 +24,7 @@ import {
 import { TestClock } from "effect/testing";
 
 import * as ArtworkGate from "../artwork/artwork-gate.ts";
-import * as PlaybackToken from "../playback/playback-token.ts";
+import * as PlaybackToken from "../playback/playback-grants.ts";
 import * as SessionReports from "../playback/session-reports.ts";
 import { SessionReport } from "../playback/stream-liveness.ts";
 import * as StreamOwners from "../playback/stream-owners.ts";

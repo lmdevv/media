@@ -167,9 +167,6 @@ export const MigrationConnection = Schema.Struct({
 /** A connected source server. */
 export interface MigrationConnection extends Schema.Schema.Type<typeof MigrationConnection> {}
 
-/** The result of connecting. */
-export const MigrationConnectResult = Schema.Union([MigrationConnection, MigrationSourceFailure]);
-
 /** Which [movies] profile receives a source user's history; null skips the user. */
 export const UserMapping = Schema.Struct({
   sourceUserId: Schema.String,
@@ -178,16 +175,6 @@ export const UserMapping = Schema.Struct({
 
 /** A user mapping. */
 export interface UserMapping extends Schema.Schema.Type<typeof UserMapping> {}
-
-/** Arguments for a dry run or an import. */
-export const MigrationPlanArgs = Schema.Struct({
-  connectionId: Schema.String,
-  /** Overrides of the suggested mappings. Users not listed follow their suggestion. */
-  users: Schema.optionalKey(Schema.Array(UserMapping).check(Schema.isMaxLength(200))),
-});
-
-/** Arguments for a dry run or an import. */
-export interface MigrationPlanArgs extends Schema.Schema.Type<typeof MigrationPlanArgs> {}
 
 /** Why a source item will not be imported. */
 export const UnmatchedReason = Schema.Literals([
@@ -274,15 +261,6 @@ export const MigrationReport = Schema.Struct({
 /** The dry-run summary. */
 export interface MigrationReport extends Schema.Schema.Type<typeof MigrationReport> {}
 
-/** The result of a dry run. */
-export const MigrationDryRunResult = Schema.Union([MigrationReport, MigrationSourceFailure]);
-
-/** The result of starting an import: the queued job, or why the source could not be read. */
-export const MigrationImportResult = Schema.Union([
-  Schema.Struct({ status: Schema.Literal("queued"), jobId: JobId }),
-  MigrationSourceFailure,
-]);
-
 /** Where a migration job stands. Each phase resumes from its checkpoint after a restart. */
 export const MigrationPhase = Schema.Literals([
   "libraries",
@@ -297,7 +275,7 @@ export const MigrationPhase = Schema.Literals([
 export type MigrationPhase = typeof MigrationPhase.Type;
 
 /** What a migration job has written so far. */
-export const MigrationImported = Schema.Struct({
+const MigrationImported = Schema.Struct({
   librariesAdded: Schema.Int,
   watched: Schema.Int,
   inProgress: Schema.Int,
@@ -311,7 +289,7 @@ export const MigrationImported = Schema.Struct({
 });
 
 /** What a migration job has written so far. */
-export interface MigrationImported extends Schema.Schema.Type<typeof MigrationImported> {}
+interface MigrationImported extends Schema.Schema.Type<typeof MigrationImported> {}
 
 /** A migration job with its phase and counts, for the Importing and Done screens. */
 export const MigrationRun = Schema.Struct({

@@ -2,7 +2,6 @@ import { CommandFailure, RateLimited, commandError } from "@media/contracts/erro
 import type { CommandError, ErrorCode, RequestIdentity } from "@media/contracts/errors";
 import { REQUEST_ID_HEADER, RequestId } from "@media/contracts/request-id";
 import { PlaybackApiError } from "@media/contracts/media-playback";
-import type { StartedPlayback } from "@media/contracts/models/playback";
 import { Context, Effect, Option, Redacted, Schema, Stream } from "effect";
 
 import type { CallError } from "./sdk-errors";
@@ -43,22 +42,6 @@ export const encodeJson = <A, I>(
     Effect.flatMap(Schema.decodeUnknownEffect(Schema.Json)),
     Effect.orDie,
   );
-
-/** `started` with a token `playback.renewToken` signed for it. */
-export const withRenewedToken = (
-  started: StartedPlayback,
-  renewed: Pick<StartedPlayback, "token" | "tokenExpiresAt">,
-): StartedPlayback => ({
-  sessionId: started.sessionId,
-  titleId: started.titleId,
-  episodeId: started.episodeId,
-  episode: started.episode,
-  file: started.file,
-  token: renewed.token,
-  tokenExpiresAt: renewed.tokenExpiresAt,
-  mediaBaseUrl: started.mediaBaseUrl,
-  resumePositionMs: started.resumePositionMs,
-});
 
 /** One request to the media service. */
 export interface MediaRequest {

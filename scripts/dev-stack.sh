@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
-# Runs an isolated [media] development stack for the current worktree: two self-hosted Convex
-# backends in Docker, each with its own volume and ports, plus the media service's credentials and
-# a temporary output directory. The core (packages/platform) holds movies, and the media service and
-# both web clients use it. Old movies' backend (packages/backend) stays only for its own stack tests
-# until its package is deleted. The media service's sign-in boundary also runs alone in a container,
-# so the stack suites and the web clients' development servers sign in through it (ADR 0007).
+# Runs an isolated [media] development stack for the current worktree: the core's self-hosted
+# Convex backend (packages/platform) in Docker with its own volume and ports, plus the media
+# service's credentials and a temporary output directory. The media service and both web clients
+# use the core. The media service's sign-in boundary also runs alone in a container, so the stack
+# suites and the web clients' development servers sign in through it (ADR 0007).
 #
-#   scripts/dev-stack.sh up        # start (or reuse) both backends, deploy, configure both, write .env.local
+#   scripts/dev-stack.sh up        # start (or reuse) the backend, deploy, configure, write .env.local
 #   scripts/dev-stack.sh env       # print this worktree's name, ports, and directories
 #   scripts/dev-stack.sh down      # stop and remove the containers (the data volumes stay)
 #   scripts/dev-stack.sh destroy   # remove the containers and their data volumes
@@ -16,8 +15,8 @@
 #
 # The stack name defaults to the worktree directory name; override with MEDIA_STACK. Ports derive
 # from the name so worktrees do not collide; override the base with MEDIA_PORT_BASE.
-#   base      old movies' Convex API (packages/backend tests only)
-#   base + 1  old movies' Convex HTTP actions (auth)
+#   base      unused (old movies' Convex API until its backend was deleted)
+#   base + 1  unused (old movies' Convex HTTP actions)
 #   base + 2  media service
 #   base + 3  movies web dev server (apps/web-movies at /movies/; every other path goes to base + 6)
 #   base + 4  core Convex API
@@ -39,15 +38,14 @@ else
   base=$((13200 + slot * 10))
 fi
 
-convex_port="$base"
-site_port=$((base + 1))
 media_port=$((base + 2))
 web_port=$((base + 3))
 core_port=$((base + 4))
 core_site_port=$((base + 5))
 account_port=$((base + 6))
 boundary_port=$((base + 7))
-container="movies-convex-${name}"
+# Old movies' backend, which stacks made before its deletion still run; `up` removes it.
+old_container="movies-convex-${name}"
 core_container="media-platform-convex-${name}"
 boundary_container="media-boundary-${name}"
 state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/movies-dev/${name}"
@@ -59,9 +57,6 @@ library_roots="${MEDIA_LIBRARY_ROOTS:-${state_dir}/library}"
 print_env() {
   cat <<EOF
 name=${name}
-container=${container}
-convex_url=http://127.0.0.1:${convex_port}
-convex_site_url=http://127.0.0.1:${site_port}
 media_url=http://127.0.0.1:${media_port}
 web_url=http://localhost:${web_port}/movies/
 core_container=${core_container}
@@ -83,15 +78,15 @@ case "${1:-up}" in
     exit 0
     ;;
   down)
-    docker rm -f "$container" "$core_container" "$boundary_container" >/dev/null 2>&1 || true
-    echo "stopped ${container}, ${core_container}, and ${boundary_container}"
+    docker rm -f "$old_container" "$core_container" "$boundary_container" >/dev/null 2>&1 || true
+    echo "stopped ${core_container} and ${boundary_container}"
     exit 0
     ;;
   destroy)
-    docker rm -f "$container" "$core_container" "$boundary_container" >/dev/null 2>&1 || true
-    docker volume rm "${container}-data" "${core_container}-data" >/dev/null 2>&1 || true
+    docker rm -f "$old_container" "$core_container" "$boundary_container" >/dev/null 2>&1 || true
+    docker volume rm "${old_container}-data" "${core_container}-data" >/dev/null 2>&1 || true
     rm -rf "$state_dir" "$(dirname "$transcode_dir")"
-    echo "destroyed ${container}, ${core_container}, and ${boundary_container}"
+    echo "destroyed ${core_container} and ${boundary_container}"
     exit 0
     ;;
   up) ;;
@@ -145,28 +140,10 @@ wait_backend() {
   exit 1
 }
 
-start_backend "$container" "$convex_port" "$site_port"
+# A stack made before old movies' backend was deleted still runs it; its volume goes on `destroy`.
+docker rm -f "$old_container" >/dev/null 2>&1 || true
 start_backend "$core_container" "$core_port" "$core_site_port"
-wait_backend "$container" "$convex_port"
 wait_backend "$core_container" "$core_port"
-
-admin_key="$(docker exec "$container" ./generate_admin_key.sh | tail -n 1)"
-
-cat >"${root}/packages/backend/.env.local" <<ENV
-CONVEX_SELF_HOSTED_URL=http://127.0.0.1:${convex_port}
-CONVEX_SELF_HOSTED_ADMIN_KEY=${admin_key}
-ENV
-
-cd "${root}/packages/backend"
-pnpm exec convex deploy --yes >/dev/null
-# Configures old movies' own deployment for its stack tests, which read the media service
-# credentials it prints from packages/backend/.env.local; the media service itself uses the core.
-if [[ -f scripts/configure.ts ]]; then
-  backend_media_env="$(node scripts/configure.ts --site-url "http://localhost:${web_port}" \
-    --media-url "http://127.0.0.1:${media_port}")"
-  printf '%s\n' "$backend_media_env" >>"${root}/packages/backend/.env.local"
-  unset backend_media_env
-fi
 
 core_admin_key="$(docker exec "$core_container" ./generate_admin_key.sh | tail -n 1)"
 

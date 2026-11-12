@@ -4,6 +4,7 @@ import {
   FileResolverUnavailable,
   MediaFileNotFound,
   PlaybackSessionEnded,
+  PlaybackTokenInvalid,
   SegmentNotFound,
   SegmentNotReady,
   StreamAccessDenied,
@@ -13,7 +14,6 @@ import {
   TranscodeFailed,
   UnsupportedPlayback,
 } from "@media/contracts/media-playback";
-import { PlaybackTokenInvalid } from "@media/contracts/playback-token";
 import {
   Clock,
   Duration,
@@ -46,7 +46,7 @@ import { modifiedAtMs } from "../platform/file-info.ts";
 import * as FileResolver from "../playback/file-resolver.ts";
 import { resolveInsideRoots } from "../playback/file-resolver.ts";
 import { renderPlaylist } from "../playback/hls-plan.ts";
-import * as PlaybackToken from "../playback/playback-token.ts";
+import * as PlaybackToken from "../playback/playback-grants.ts";
 import * as StreamOwners from "../playback/stream-owners.ts";
 import * as StreamSessions from "../playback/stream-sessions.ts";
 import * as SubtitleConverter from "../subtitles/subtitle-tracks.ts";

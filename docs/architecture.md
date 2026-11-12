@@ -6,10 +6,9 @@ after the music port lands, the rules that hold it together, and the order of wo
 behind it are in [`docs/decisions/`](decisions/), one record per area, each citing the
 decision numbers (D01 to D44) settled with the owner on 2026-11-03.
 
-`docs/decisions.md` records how old movies was built. Since the movies cutover (ADR 0027), the
-running server, the movies web client, and the image use the core instead. The file stays
-accurate only for the old code still in the repo, `packages/backend` among it, until
-`p4-movies-delete` removes it.
+`docs/decisions.md` records the concrete choices in the code as it runs now: the core's Convex
+project, the server, the SDK, and the movies clients. Old movies' Convex project and its SDK client
+were deleted in `p4-movies-delete` (ADR 0028).
 
 ## One product on one server
 
@@ -60,9 +59,9 @@ and the docs name, with no change in behavior.
 ## Core modules
 
 The core lives in `packages/platform/convex/core`, plus the server code that serves bytes and runs
-jobs. Each module is used by every domain. Since the movies cutover, `packages/platform` is the
-one deployment that the server, the clients, and the image use (ADR 0027). Old movies'
-`packages/backend` stays in the repo only for its own tests until `p4-movies-delete` (ADR 0023).
+jobs. Each module is used by every domain. `packages/platform` is the one Convex project: the
+server, the clients, and the image use it (ADR 0027), and each worktree's dev stack runs only its
+backend, with its API on base + 4 and its HTTP actions on base + 5 (ADR 0028).
 
 | Module      | Holds                                                                                                                            | ADR        |
 | ----------- | -------------------------------------------------------------------------------------------------------------------------------- | ---------- |
@@ -155,8 +154,8 @@ casting, is missing only from the repo in between.
    downloads, together, connect, guests, the command generator, the SDK core, `apps/web-account`,
    the CLI shell, and the deploy image.
 4. **Movies port.** Move the web app, the iOS app, the CLI commands, and the importer onto the core.
-   Move movies into `packages/platform/convex/movies/`. Delete the old movies code and
-   `packages/backend`.
+   Move movies into `packages/platform/convex/movies/`. Delete the old movies code and its
+   Convex project.
 5. **Music port.** Move the web app, the iOS app, the CLI commands, gapless playback, and lyrics
    onto the core. Delete `legacy/music`.
 6. **Together, Connect, and casting** in both products' clients.
@@ -166,7 +165,7 @@ casting, is missing only from the repo in between.
 
 ## Decision records
 
-Each row is the ADR's own title. ADR 0027 supersedes ADR 0026.
+Each row is the ADR's own title. ADR 0027 supersedes ADR 0026, and ADR 0028 supersedes ADR 0023.
 
 | ADR                                                                                           | Decision                                                                       | D-numbers                                   |
 | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------- |
@@ -197,6 +196,7 @@ Each row is the ADR's own title. ADR 0027 supersedes ADR 0026.
 | [0025](decisions/0025-convex-http-actions-stay-inside-the-install.md)                         | Keep Convex's HTTP actions inside the install, off the public address          | D30, D45                                    |
 | [0026](decisions/0026-serve-old-movies-beside-the-core-in-the-image-until-the-movies-port.md) | Serve old movies beside the core in the image until the movies port            | D30, D31, D32, D49, D50                     |
 | [0027](decisions/0027-run-one-convex-backend-the-cores-in-the-image.md)                       | Run one Convex backend, the core's, in the image                               | D03, D30, D32, D49, D50, D52, D54, D58, D62 |
+| [0028](decisions/0028-one-convex-project-and-one-dev-backend.md)                              | One Convex project, and one backend in each dev stack                          | D04, D14, D22, D49                          |
 
 ## Open
 
@@ -211,12 +211,13 @@ an ADR.
   into `packages/ui`, without reading Paper, which was not running. Paper still has to settle the
   split.
 
-## Appendix A. Where the core runs until the movies port
+## Appendix A. Where the core ran until the movies port
 
-Old movies keeps running until the movies port (ADR 0002), and both it and the core use Convex
-Auth. Convex Auth's tables and its `auth:store` function have fixed names, so one deployment holds
-one Convex Auth setup. Two throwaway prototypes tried the two ways to run the core next to old
-movies. Prototype B won, and ADR 0023 records the decision.
+This appendix is history: ADR 0028 replaced ADR 0023 once old movies was deleted. Old movies kept
+running until the movies port (ADR 0002), and both it and the core used Convex Auth. Convex Auth's
+tables and its `auth:store` function have fixed names, so one deployment holds one Convex Auth
+setup. Two throwaway prototypes tried the two ways to run the core next to old movies. Prototype B
+won, and ADR 0023 records the decision.
 
 | Question                                | A. Core in the movies deployment                                                                                                            | B. Core in its own deployment (chosen)                                                                                            |
 | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
@@ -228,18 +229,18 @@ movies. Prototype B won, and ADR 0023 records the decision.
 | Strict core shape on old movies         | 40 type errors in 12 backend files, and 54 client, server, and test files mention email                                                     | Not applicable                                                                                                                    |
 | Sign-in isolation                       | A user from the core's username provider got a working movies session without movies' invite check                                          | Old movies refused a core session token                                                                                           |
 | Name clashes left for later phase 3 PRs | 7 tables (`users`, `authSessions`, `apiKeys`, `deviceCodes`, `invites`, `jobs`, `libraries`), plus one `auth.ts`, `crons.ts`, and `http.ts` | None                                                                                                                              |
-| End of the movies port                  | Delete every compatibility field, then move movies into `convex/movies/`                                                                    | Move movies into `packages/platform/convex/movies/`, delete `packages/backend` and the second dev-stack backend                   |
+| End of the movies port                  | Delete every compatibility field, then move movies into `convex/movies/`                                                                    | Move movies into `packages/platform/convex/movies/`, delete old movies' backend and the second dev-stack backend                  |
 | Dev stack on this host                  | One backend                                                                                                                                 | A second backend that idles at 46 MiB. A cold `up` takes 8.7 s against 6.7 s (medians of 3, interleaved), and a core deploy 0.9 s |
 | Repo wiring                             | None                                                                                                                                        | `knip.json`, `vitest.config.ts`, `.oxfmtrc.json`, `oxlint.config.ts`, the hook's routing and its test, CI, version                |
 
-Each prototype has a probe test on its branch: `packages/backend/test/proto-a-probe.test.ts` and
-`packages/platform/test/proto-b-probe.test.ts`. Run one with `MEDIA_STACK_TESTS=1` after
+Each prototype has a probe test on its branch: `test/proto-a-probe.test.ts` in old movies' backend
+and `packages/platform/test/proto-b-probe.test.ts`. Run one with `MEDIA_STACK_TESTS=1` after
 `scripts/dev-stack.sh up` on its branch.
 
 B costs a few seconds and tens of MiB per worktree, plus one-time wiring. A costs compatibility code
 in the core's own tables, which every later phase 3 PR would grow and the movies port would have to
-delete. At the movies port, B leaves `packages/backend`, its dev-stack backend, and its config
-entries to delete, and no code inside the core changes.
+delete. At the movies port, B left old movies' backend, its dev-stack backend, and its config
+entries to delete, and no code inside the core changed. `p4-movies-delete` deleted them (ADR 0028).
 
 The build on top of B found two facts that shaped the helpers:
 

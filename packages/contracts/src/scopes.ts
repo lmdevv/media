@@ -45,12 +45,6 @@ export const ApiKeyScope = Scope.pick(["read", "play", "manage", "admin"]);
 /** A scope an API key may carry. */
 export type ApiKeyScope = typeof ApiKeyScope.Type;
 
-/** Scopes a device sign-in may receive. `media-service` is never grantable. */
-export const DeviceScope = Scope.pick(["read", "play", "account", "manage", "admin"]);
-
-/** A scope a device sign-in may receive. */
-export type DeviceScope = typeof DeviceScope.Type;
-
 /**
  * Who may call a command: anyone (`public`), any signed-in session (`authenticated`), or sessions
  * holding one scope.
@@ -59,13 +53,3 @@ export const CommandAccess = Schema.Union([Scope, Schema.Literals(["public", "au
 
 /** Who may call a command. */
 export type CommandAccess = typeof CommandAccess.Type;
-
-const ROLE_SCOPES = {
-  owner: ["read", "play", "account", "manage", "admin"],
-  admin: ["read", "play", "account", "manage", "admin"],
-  member: ["read", "play", "account"],
-  service: ["media-service"],
-} as const satisfies { readonly [R in Role]: ReadonlyArray<Scope> };
-
-/** Every scope a role allows. A password session holds exactly these, except for `service`, which has none. */
-export const roleScopes = (role: Role): ReadonlyArray<Scope> => ROLE_SCOPES[role];
