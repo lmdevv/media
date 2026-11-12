@@ -39,7 +39,7 @@ import {
 import * as ConvexTransport from "./convex-transport";
 import * as MediaHttp from "./media-http";
 import type { CallError } from "./sdk-errors";
-import { ProtocolError } from "./sdk-errors";
+import { ProtocolError, TransportError } from "./sdk-errors";
 import * as TokenStorage from "./token-storage";
 import type { StoredSession } from "./token-storage";
 
@@ -305,7 +305,10 @@ const renewalSchedule = Schedule.min([
 
 const SERVER_SIGN_OUT_TIMEOUT = Duration.seconds(10);
 
-/** How long a sign-in waits for the connection to run as the new session. */
+/**
+ * How long a sign-in waits for the connection to run as the new session. A server that has not
+ * answered by then is unreachable: the sign-in fails with `TransportError` and leaves no session.
+ */
 const AUTHENTICATION_WAIT = Duration.seconds(10);
 
 /** A sign-out refused with one of these found nothing to end: the server no longer knows it. */
@@ -1191,6 +1194,31 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
         ),
     });
 
+  /**
+   * Signs `opened` out after its connection refused it or never answered, and whether it did: a
+   * session another sign-in replaced meanwhile is left alone, and only a store that still holds it
+   * is cleared and ended on the server.
+   */
+  const abandon = Effect.fn("Auth.abandon")(function* (opened: StoredSession) {
+    return yield* committing.withPermits(1)(
+      Effect.gen(function* () {
+        const held = yield* heldSession;
+
+        if (Option.isNone(held) || !isSameSession(held.value, opened)) return false;
+        const current = held.value;
+
+        yield* adopt(Option.none());
+        const ended = yield* Effect.exit(storage.revokeHeld(current));
+
+        if (Exit.isSuccess(ended) && ended.value) {
+          yield* endInBackground(current, true, Duration.zero, true);
+        }
+
+        return true;
+      }),
+    );
+  });
+
   const open = Effect.fn("Auth.open")(function* (request: SignInRequest) {
     const opened = yield* signInTokens(request);
 
@@ -1209,12 +1237,32 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
     );
 
     // A sign-in ends once the connection runs as the new session, so the next call never gets an
-    // answer from before it, such as a query's refusal from while signed out. A server that never
-    // answers costs a wait, not the sign-in.
-    return yield* transport.authenticated.pipe(
-      Effect.timeoutOption(AUTHENTICATION_WAIT),
-      Effect.asVoid,
-    );
+    // answer from before it, such as a query's refusal from while signed out.
+    const answered = yield* transport.authenticated.pipe(Effect.timeoutOption(AUTHENTICATION_WAIT));
+
+    if (Option.exists(answered, (answer) => answer !== "refused")) return undefined;
+
+    // A connection that refused the session's token, or never answered it, leaves no session
+    // half signed in: the session is signed out as a refused password leaves it, unless a later
+    // sign-in replaced it meanwhile, which stands.
+    if (!(yield* abandon(opened.value))) return undefined;
+
+    return yield* Option.match(answered, {
+      onNone: () =>
+        Effect.fail(
+          new TransportError({
+            operation: SIGN_IN,
+            message: `Transport failed during ${SIGN_IN}: the server did not take the new session within ${Duration.format(AUTHENTICATION_WAIT)}`,
+            cause: null,
+          }),
+        ),
+      onSome: () =>
+        Effect.fail(
+          new Unauthenticated({
+            message: "Sign-in refused: the server did not accept the new session's token",
+          }),
+        ),
+    });
   });
 
   /**

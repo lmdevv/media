@@ -435,6 +435,45 @@ describe("a sign-in over the WebSocket connection", () => {
   });
 });
 
+describe("a sign-in the WebSocket connection refuses", () => {
+  it("fails with Unauthenticated and leaves the client signed out when the server refuses every token", async () => {
+    const answer = await withPlatform(
+      (platform, fake) =>
+        Effect.gen(function* () {
+          const issued = { count: 0 };
+
+          // Each sign-in and refresh gets a token, and the server refuses every one of them.
+          yield* fake.handle("auth:signIn", () =>
+            Effect.sync(() => {
+              issued.count += 1;
+
+              return tokens(
+                jwtIssuedAt(Date.now(), 3600 + issued.count, "user-1|session-1"),
+                `refresh-${issued.count}`,
+              );
+            }),
+          );
+          yield* fake.rejectEveryToken;
+
+          const exit = yield* Effect.exit(signInAs(platform, "ada"));
+
+          return {
+            exit: outcome(exit),
+            status: yield* platform.session.currentStatus,
+            token: yield* platform.session.accessToken,
+          };
+        }),
+      "websocket",
+    );
+
+    expect(answer).toStrictEqual({
+      exit: "Unauthenticated",
+      status: "signedOut",
+      token: Option.none(),
+    });
+  });
+});
+
 describe("the web clients' media server calls", () => {
   it("refresh once after the media server refuses the session, and sign out when that is refused", async () => {
     const token = jwtExpiringAt(Date.now() + HOUR, "user-1|session-1");

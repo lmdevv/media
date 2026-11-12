@@ -198,6 +198,14 @@ const bearerOf = (platform: Platform.Interface, fake: FakeConvex.FakeConvex) =>
     return subjectOf(calls.at(-1)?.authorization);
   });
 
+/** The token a call from `platform` carries now, as the core receives it. */
+const tokenOf = (platform: Platform.Interface, fake: FakeConvex.FakeConvex) =>
+  Effect.gen(function* () {
+    yield* platform.core.server.info();
+
+    return (yield* fake.requestsTo("core/server:info")).at(-1)?.authorization;
+  });
+
 /** A call the server refuses as unauthenticated, so the client refreshes once and retries. */
 const refreshOnce = (platform: Platform.Interface) =>
   Effect.ignore(
@@ -271,21 +279,26 @@ describe("clients sharing one session store", () => {
         // The refused call must go out as the session, or no refresh is owed (a call sent signed
         // out never touches a session taken up later).
         yield* signedInBearerOf(first, fake);
+        yield* signedInBearerOf(second, fake);
+        const signedIn = yield* tokenOf(second, fake);
+
         yield* refreshOnce(first);
-        yield* settle;
+        const renewed = yield* tokenOf(first, fake);
+
+        // The second client takes the renewed token from the store; it never refreshes itself.
+        const followed = yield* eventually(
+          Effect.map(tokenOf(second, fake), (token) => token === renewed),
+        );
 
         const refreshes = yield* Effect.map(fake.requestsTo("auth:signIn"), (requests) =>
           requests.filter((request) => Predicate.hasProperty(request.args, "refreshToken")),
         );
 
-        return {
-          same: sameSubject(yield* bearerOf(first, fake), yield* bearerOf(second, fake)),
-          refreshes: refreshes.length,
-        };
+        return { renewed: renewed !== signedIn, followed, refreshes: refreshes.length };
       }),
     );
 
-    expect(answer).toStrictEqual({ same: true, refreshes: 1 });
+    expect(answer).toStrictEqual({ renewed: true, followed: true, refreshes: 1 });
   });
 
   it("signs out when the other client signs out, leaving the server to it", async () => {

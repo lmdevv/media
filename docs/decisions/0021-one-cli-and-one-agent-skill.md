@@ -152,8 +152,12 @@ NixOS module now run alone (ADR 0027).
     answered, and the server had answered that token source (`setAuth`'s `onChange`): until it
     has, the client can still hand out a query's result from before, such as a refusal computed
     while signed out. Otherwise its token is unsettled, and a refusal of it touches nothing. A
-    sign-in returns only once the server has answered the new source, up to 10 seconds, so the
-    next call runs as the new session.
+    sign-in returns only once the server has taken the new source, so the next call runs as the
+    new session. A server that refuses every token the client can get fails the sign-in with
+    `Unauthenticated`, and one that has not answered within 10 seconds is unreachable and fails
+    it with `TransportError`. Either way the session is signed out as a refused password leaves
+    it, unless a later sign-in replaced it meanwhile; the media server's own session keeps
+    signing in with backoff.
 
   On a refusal, decided from the session held now with no lock held across a network wait:
   - an unsettled token, another person's session, no session, or a call sent signed out: the

@@ -1,4 +1,4 @@
-import { ProtocolError } from "@media/sdk/effect";
+import { ProtocolError, TransportError } from "@media/sdk/effect";
 import { Unauthenticated } from "@media/contracts/errors";
 import { assert, describe, it } from "@effect/vitest";
 import { Context, Effect, Fiber, Layer, Ref, Schema, Stream } from "effect";
@@ -17,6 +17,11 @@ const ping = {
 interface FakeCore {
   /** Whether the core accepts the server's key now. */
   readonly accepting: Ref.Ref<boolean>;
+  /**
+   * How a sign-in fails while the core does not accept the key: refused, or never taken up by the
+   * connection, which the SDK reports as unreachable.
+   */
+  readonly failure: Ref.Ref<"refused" | "unreachable">;
   /** Whether the session the server last signed in with still holds. */
   readonly sessionHolds: Ref.Ref<boolean>;
   readonly signIns: Ref.Ref<number>;
@@ -31,7 +36,20 @@ const fakeConnection = (core: FakeCore) =>
     CoreSession.Connection.of({
       signIn: Effect.gen(function* () {
         yield* Ref.update(core.signIns, (count) => count + 1);
-        yield* Effect.filterOrFail(Ref.get(core.accepting), (accepting) => accepting, refused);
+        const failure = yield* Ref.get(core.failure);
+
+        yield* Effect.filterOrFail(
+          Ref.get(core.accepting),
+          (accepting) => accepting,
+          () =>
+            failure === "refused"
+              ? refused()
+              : new TransportError({
+                  operation: "auth:signIn",
+                  message: "The server did not take the new session",
+                  cause: null,
+                }),
+        );
         yield* Ref.set(core.sessionHolds, true);
       }),
       platform: Effect.die(new Error("This test runs no commands")),
@@ -67,28 +85,33 @@ const openSession = (core: FakeCore) =>
 
 const makeCore = Effect.all({
   accepting: Ref.make(false),
+  failure: Ref.make<"refused" | "unreachable">("refused"),
   sessionHolds: Ref.make(false),
   signIns: Ref.make(0),
 });
 
 describe("CoreSession", () => {
-  it.effect("keeps signing in with backoff until the core accepts the key", () =>
-    Effect.gen(function* () {
-      const core = yield* makeCore;
-      const session = yield* openSession(core);
+  it.effect.each(["refused", "unreachable"] as const)(
+    "keeps signing in with backoff until the core accepts the key, when a sign-in is %s",
+    (failure) =>
+      Effect.gen(function* () {
+        const core = yield* makeCore;
 
-      assert.strictEqual(yield* session.status, "signed-out");
+        yield* Ref.set(core.failure, failure);
+        const session = yield* openSession(core);
 
-      yield* TestClock.adjust("5 seconds");
-      assert.isAbove(yield* Ref.get(core.signIns), 2);
-      assert.strictEqual(yield* session.status, "signed-out");
+        assert.strictEqual(yield* session.status, "signed-out");
 
-      yield* Ref.set(core.accepting, true);
-      yield* TestClock.adjust("1 minute");
+        yield* TestClock.adjust("5 seconds");
+        assert.isAbove(yield* Ref.get(core.signIns), 2);
+        assert.strictEqual(yield* session.status, "signed-out");
 
-      assert.strictEqual(yield* session.status, "signed-in");
-      assert.strictEqual(yield* session.call(ping, {}), "pong");
-    }).pipe(Effect.scoped),
+        yield* Ref.set(core.accepting, true);
+        yield* TestClock.adjust("1 minute");
+
+        assert.strictEqual(yield* session.status, "signed-in");
+        assert.strictEqual(yield* session.call(ping, {}), "pong");
+      }).pipe(Effect.scoped),
   );
 
   it.effect("signs in once more when a call finds the session ended", () =>

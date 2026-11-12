@@ -86,6 +86,11 @@ export interface FakeConvex {
    * presents one, as Convex does when a token stops verifying while its connection stays open.
    */
   readonly rejectAcceptedTokens: Effect.Effect<void>;
+  /**
+   * From now on, answers every token a sync connection presents with an `AuthError`, as Convex
+   * does a token it cannot verify, such as one signed by another deployment.
+   */
+  readonly rejectEveryToken: Effect.Effect<void>;
   /** The most queries to `path` that one sync connection has subscribed to at once. */
   readonly peakSubscriptions: (path: string) => Effect.Effect<number>;
 }
@@ -448,6 +453,8 @@ export const make: Effect.Effect<FakeConvex, never, Scope.Scope> = Effect.gen(fu
 
   const accepts = (token: string): boolean => !refused.has(token) && isUnexpired(token, Date.now());
 
+  const rejecting = { every: false };
+
   const openSync = (socket: Duplex, head: Buffer): void => {
     let pending: Buffer = Buffer.alloc(0);
     let queue = Promise.resolve();
@@ -512,6 +519,19 @@ export const make: Effect.Effect<FakeConvex, never, Scope.Scope> = Effect.gen(fu
 
     const handle = async (message: SyncMessage): Promise<void> => {
       if (message.type === "Authenticate") {
+        if (message.value !== undefined && rejecting.every) {
+          const error = {
+            type: "AuthError",
+            error: "Could not verify OIDC token claim",
+            baseVersion: version.identity,
+            authUpdateAttempted: true,
+          };
+
+          writeFrame(socket, OPCODE_TEXT, Buffer.from(JSON.stringify(error)));
+
+          return;
+        }
+
         if (message.value !== undefined && !accepts(message.value)) {
           socket.destroy();
 
@@ -679,6 +699,9 @@ export const make: Effect.Effect<FakeConvex, never, Scope.Scope> = Effect.gen(fu
       for (const token of accepted) refused.add(token);
 
       for (const sendAuthError of authErrorSenders) sendAuthError();
+    }),
+    rejectEveryToken: Effect.sync(() => {
+      rejecting.every = true;
     }),
     peakSubscriptions: (path) => Effect.sync(() => peaks.get(path) ?? 0),
   };

@@ -61,6 +61,13 @@ export const fixedToken =
   () =>
     Promise.resolve({ token, session: Option.none(), generation: 0 });
 
+/**
+ * What the server answered a connection's token source: it took the token, or refused every
+ * token the connection could get; `none` when there is nothing to answer, as for a connection
+ * that authenticates each request, or one with no source.
+ */
+export type Authentication = "accepted" | "refused" | "none";
+
 /** The token a request carried, as far as its connection can tell. */
 export type SentWith = Data.TaggedEnum<{
   /** The request carried `issued`, or went out signed out when none. */
@@ -116,10 +123,10 @@ export interface ClientAdapter {
   /** Resolves once the client uses `source`, or no source when null. */
   readonly setAuth: (source: AuthTokenSource | null) => Promise<void>;
   /**
-   * Resolves once the server has answered the client's current token source, accepting or
-   * refusing it; at once for a client that authenticates each request, or that has no source.
+   * Resolves once the server has answered the client's current token source, with its answer;
+   * at once, with `none`, for a client that authenticates each request or has no source.
    */
-  readonly authenticated: () => Promise<void>;
+  readonly authenticated: () => Promise<Authentication>;
   readonly close: () => Promise<void>;
 }
 
@@ -145,10 +152,10 @@ export interface Interface {
   readonly setAuth: (source: AuthTokenSource | null) => Effect.Effect<void>;
   /**
    * Waits until the server has answered the connection's current token source, so a call made
-   * then runs as that session and no answer from before reaches it. A connection that
-   * authenticates each request, or has no source, does not wait.
+   * then runs as that session and no answer from before reaches it, and tells what it answered.
+   * A connection that authenticates each request, or has no source, answers `none` at once.
    */
-  readonly authenticated: Effect.Effect<void>;
+  readonly authenticated: Effect.Effect<Authentication>;
 }
 
 /** The connection to the [movies] Convex deployment. */
@@ -413,9 +420,9 @@ interface HeldToken {
    * come from before it, under the token it replaced.
    */
   answered: boolean;
-  /** Resolves once `answered`. */
-  readonly settled: Promise<void>;
-  readonly answer: () => void;
+  /** Resolves with the server's first answer once `answered`. */
+  readonly settled: Promise<Authentication>;
+  readonly answer: (accepted: boolean) => void;
   /** Moves on each time the fetcher hands the client a different token. */
   version: number;
   /** Fetches out now. */
@@ -479,9 +486,9 @@ export const clientTokenFetchers = () => {
   const fetcherFor = (source: AuthTokenSource, signal: AbortSignal) => {
     // The client keeps only the answer of the fetch it started last, so that answer is the token
     // it holds, and an older fetch still asking can stop: its answer will be discarded.
-    const answering = { resolve: (): void => undefined };
+    const answering = { resolve: (_answer: Authentication): void => undefined };
 
-    const settled = new Promise<void>((resolve) => {
+    const settled = new Promise<Authentication>((resolve) => {
       answering.resolve = resolve;
     });
 
@@ -489,9 +496,9 @@ export const clientTokenFetchers = () => {
       held: Option.none(),
       answered: false,
       settled,
-      answer: () => {
+      answer: (accepted) => {
         state.answered = true;
-        answering.resolve();
+        answering.resolve(accepted ? "accepted" : "refused");
       },
       version: 0,
       fetching: 0,
@@ -571,7 +578,7 @@ export const clientTokenFetchers = () => {
    */
   const install = (
     source: AuthTokenSource | null,
-    apply: (fetcher: AuthTokenFetcher | null, answered: () => void) => void,
+    apply: (fetcher: AuthTokenFetcher | null, answered: (accepted: boolean) => void) => void,
   ): Promise<void> => {
     retire();
     const { signal } = generation;
@@ -587,7 +594,7 @@ export const clientTokenFetchers = () => {
       await nextTask();
 
       if (signal.aborted) return;
-      apply(made?.fetcher ?? null, () => made?.state.answer());
+      apply(made?.fetcher ?? null, (accepted) => made?.state.answer(accepted));
       // The client takes its token from this fetcher from now on, and from the last one until now.
       newest = made?.state ?? null;
     })().finally(() => {
@@ -608,9 +615,10 @@ export const clientTokenFetchers = () => {
       version: newest?.version ?? 0,
       busy: installs > 0 || (newest !== null && (newest.fetching > 0 || !newest.answered)),
     }),
-    authenticated: async (): Promise<void> => {
+    authenticated: async (): Promise<Authentication> => {
       await installing;
-      await newest?.settled;
+
+      return newest === null ? "none" : newest.settled;
     },
   };
 };
@@ -807,7 +815,7 @@ const httpAdapter = (client: ConvexHttpClient, options: HttpOptions): ClientAdap
 
       return Promise.resolve();
     },
-    authenticated: () => Promise.resolve(),
+    authenticated: () => Promise.resolve("none" as const),
     close: () => Promise.resolve(),
   };
 };
