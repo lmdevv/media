@@ -1,4 +1,3 @@
-import type { DeviceId, EpisodeId, MediaFileId, ProfileId, TitleId } from "@media/contracts/ids";
 import {
   type ClientCapabilities,
   type DownloadQuality,
@@ -9,40 +8,7 @@ import {
 import type { StartedPlayback } from "@media/contracts/models/playback";
 import { Effect, Option, Redacted } from "effect";
 
-import { encodeJson, mediaUrl, requestPlayback, withRenewedToken } from "./media-http";
-import { MoviesClient } from "./movies-client";
-
-/** What to download: a movie, or an episode of a show, in a chosen version or the server's choice. */
-export interface DownloadRequest {
-  readonly profileId: ProfileId;
-  readonly deviceId: DeviceId;
-  readonly deviceName: Option.Option<string>;
-  readonly titleId: TitleId;
-  readonly episodeId: Option.Option<EpisodeId>;
-  readonly fileId: Option.Option<MediaFileId>;
-  readonly capabilities: ClientCapabilities;
-}
-
-/** Starts a download session, which leaves this device's playback alone. */
-export const start = Effect.fn("Downloads.start")(function* (request: DownloadRequest) {
-  const client = yield* MoviesClient;
-
-  return yield* client.mutate("downloads.start", {
-    profileId: request.profileId,
-    deviceId: request.deviceId,
-    titleId: request.titleId,
-    capabilities: request.capabilities,
-    ...Option.match(request.deviceName, {
-      onNone: () => ({}),
-      onSome: (deviceName) => ({ deviceName }),
-    }),
-    ...Option.match(request.episodeId, {
-      onNone: () => ({}),
-      onSome: (episodeId) => ({ episodeId }),
-    }),
-    ...Option.match(request.fileId, { onNone: () => ({}), onSome: (fileId) => ({ fileId }) }),
-  });
-});
+import { encodeJson, mediaUrl, requestPlayback } from "./media-http";
 
 /**
  * Where the session's download stands: `Preparing` with its progress, or `Ready` with the URL to
@@ -74,18 +40,4 @@ export const prepare = Effect.fn("Downloads.prepare")(function* (
     },
     PrepareDownloadResponse,
   );
-});
-
-/**
- * The session with a fresh token, which also keeps it from ending as idle. Renew before
- * `tokenExpiresAt`; the session ends an hour after a token expires unrenewed.
- */
-export const renew = Effect.fn("Downloads.renew")(function* (started: StartedPlayback) {
-  const client = yield* MoviesClient;
-
-  const renewed = yield* client.mutate("playback.renewToken", {
-    sessionId: started.sessionId,
-  });
-
-  return withRenewedToken(started, renewed);
 });

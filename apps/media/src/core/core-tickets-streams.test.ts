@@ -16,7 +16,7 @@ import { serve } from "../http/http-server.ts";
 import * as MediaRoutes from "../http/media-routes.ts";
 import { resolveInsideRoots } from "../playback/file-resolver.ts";
 import { decidePlayback, PlaybackPlan } from "../playback/playback-decision.ts";
-import * as PlaybackToken from "../playback/playback-token.ts";
+import * as PlaybackToken from "../playback/playback-grants.ts";
 import * as StreamOwners from "../playback/stream-owners.ts";
 import * as StreamSessions from "../playback/stream-sessions.ts";
 import { makeFakeCore, stream } from "../testing/fake-core.ts";

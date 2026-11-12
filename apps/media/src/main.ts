@@ -16,7 +16,7 @@ import { servicesLayerWith } from "./media-service.ts";
 import * as Observability from "./observability.ts";
 import * as EndedSessions from "./playback/ended-sessions.ts";
 import * as PlaybackReporter from "./playback/playback-reporter.ts";
-import * as PlaybackToken from "./playback/playback-token.ts";
+import * as PlaybackToken from "./playback/playback-grants.ts";
 import * as SessionReports from "./playback/session-reports.ts";
 import * as StreamOwners from "./playback/stream-owners.ts";
 

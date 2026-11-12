@@ -1,5 +1,5 @@
 import type { PlaybackSessionId } from "@media/contracts/ids";
-import { PLAYBACK_TOKEN_LIFETIME_MS } from "@media/contracts/playback-token";
+import { PERSONAL_TICKET_MAX_MS } from "@media/contracts/ticket";
 import {
   Cache,
   Context,
@@ -63,7 +63,7 @@ export const layer: Layer.Layer<Service, never, SessionReports.Service> = Layer.
     const ends = yield* Cache.make<PlaybackSessionId, void>({
       lookup: () => Effect.void,
       capacity: ENDS_CAPACITY,
-      timeToLive: Duration.millis(PLAYBACK_TOKEN_LIFETIME_MS),
+      timeToLive: Duration.millis(PERSONAL_TICKET_MAX_MS),
     });
 
     const follow = Effect.fnUntraced(function* (sessionId: PlaybackSessionId) {

@@ -10,9 +10,6 @@ export type AgeRating = typeof AgeRating.Type;
 
 const makeAgeRating = Schema.decodeSync(AgeRating);
 
-/** The age a new kids profile allows unless the account chooses another. */
-export const KIDS_DEFAULT_MAX_AGE: AgeRating = makeAgeRating(7);
-
 const CERTIFICATION_AGES: ReadonlyMap<string, number> = new Map([
   ["G", 0],
   ["PG", 7],

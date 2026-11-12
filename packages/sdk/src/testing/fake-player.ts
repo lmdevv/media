@@ -3,7 +3,7 @@ import { Clock, Effect } from "effect";
 import type { PlayerEvent, PlayerPort } from "../room-sync/player-port";
 
 /** A fake player plus the controls a test uses to act as the viewer or the network. */
-export interface FakePlayer extends PlayerPort {
+interface FakePlayer extends PlayerPort {
   /** The viewer presses play. */
   readonly userPlay: () => void;
   /** The viewer presses pause. */

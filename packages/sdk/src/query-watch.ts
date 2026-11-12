@@ -1,9 +1,6 @@
-import type { CommandArgs, CommandResult } from "@media/contracts/commands";
 import type { Duration, ManagedRuntime } from "effect";
 import { Effect, Fiber, Schedule, Stream } from "effect";
 
-import { MoviesClient } from "./movies-client";
-import type { QueryName } from "./movies-client";
 import type { CallError } from "./sdk-errors";
 import { isTransient } from "./sdk-errors";
 
@@ -106,14 +103,3 @@ export const fromStream = <A, R>(
     getSnapshot: () => state,
   };
 };
-
-/** A watch of query `name` with `args` on the movies backend, run on `runtime`. */
-export const make = <Name extends QueryName>(
-  runtime: ManagedRuntime.ManagedRuntime<MoviesClient, unknown>,
-  name: Name,
-  args: CommandArgs<Name>,
-): QueryWatch<CommandResult<Name>> =>
-  fromStream(
-    runtime,
-    Stream.unwrap(Effect.map(MoviesClient, (client) => client.subscribe(name, args))),
-  );

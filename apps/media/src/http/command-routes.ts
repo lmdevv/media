@@ -1,6 +1,9 @@
-import type { CommandArgs, CommandResult } from "@media/contracts/commands";
-import { commands } from "@media/contracts/commands";
-import type { CommandNameOfKind } from "@media/contracts/commands";
+import { mediaCommands } from "@media/contracts/media-commands";
+import type {
+  MediaCommandArgs,
+  MediaCommandName,
+  MediaCommandResult,
+} from "@media/contracts/media-commands";
 import { type CommandError, InvalidArgs, Unauthenticated } from "@media/contracts/errors";
 import type { CallError } from "@media/sdk/effect";
 import { Effect, Match, Redacted, Schema, SchemaIssue } from "effect";
@@ -9,14 +12,11 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import * as CoreCallers from "../core/core-callers.ts";
 import { retryAfter } from "./rate-limit.ts";
 
-/** Commands the media service serves. */
-export type MediaCommandName = CommandNameOfKind<"media">;
-
 /** Implements one media command for an authorized caller. */
 export type CommandHandler<Name extends MediaCommandName> = (
-  args: CommandArgs<Name>,
+  args: MediaCommandArgs<Name>,
   caller: CoreCallers.Caller,
-) => Effect.Effect<CommandResult<Name>, CallError>;
+) => Effect.Effect<MediaCommandResult<Name>, CallError>;
 
 const failureOf = Match.type<CallError>().pipe(
   Match.tagsExhaustive({
@@ -105,7 +105,7 @@ export const commandRoute = Effect.fnUntraced(function* <Name extends MediaComma
 ) {
   const router = yield* HttpRouter.HttpRouter;
   const auth = yield* CoreCallers.Service;
-  const command = commands[name];
+  const command = mediaCommands[name];
   const decodeArgs = bodyDecoder(command.args, `Invalid arguments for ${name}`);
   const encodeResult = Schema.encodeEffect(Schema.toCodecJson(command.result));
 

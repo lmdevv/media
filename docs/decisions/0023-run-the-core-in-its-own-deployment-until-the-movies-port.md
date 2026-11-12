@@ -1,6 +1,6 @@
 # 0023. Run the core in its own Convex deployment until the movies port
 
-- Status: Accepted, 2026-11-04
+- Status: Accepted, 2026-11-04. Superseded by 0028, 2026-11-12.
 - Decisions: D04, D14, D22
 
 ## Context

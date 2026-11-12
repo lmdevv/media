@@ -275,7 +275,7 @@ export const make = (adapter: ClientAdapter): Effect.Effect<Interface> =>
   );
 
 /** A reference to the public function at `path`, for calling it by path. */
-export const reference = <Kind extends FunctionKind>(
+const reference = <Kind extends FunctionKind>(
   kind: Kind,
   path: FunctionPath,
 ): FunctionReference<Kind, "public", WireArgs, Schema.Json> =>
@@ -297,7 +297,7 @@ interface OneShotClient {
 }
 
 /** Runs the function at `path` once on `client`, as the `kind` of function it is. */
-export const callByKind = (
+const callByKind = (
   client: OneShotClient,
   kind: FunctionKind,
   path: FunctionPath,
@@ -315,7 +315,7 @@ export const callByKind = (
  * keeps a query until it is answered or unsubscribed, and sends it again each time it reconnects,
  * so the query is unsubscribed as soon as `signal` aborts, as when its caller stops waiting.
  */
-export const queryOnce = (
+const queryOnce = (
   subscribe: ClientAdapter["subscribe"],
   path: FunctionPath,
   args: WireArgs,
@@ -628,7 +628,7 @@ export const clientTokenFetchers = () => {
  * token held since the last result, or since the query started, when the client held only that
  * one; otherwise it is unsettled, since the client runs the query again under each token it takes.
  */
-export const heldSubscribe =
+const heldSubscribe =
   (
     fetchers: ReturnType<typeof clientTokenFetchers>,
     subscribe: (
@@ -666,7 +666,7 @@ export const heldSubscribe =
  * `call` over a client whose fetchers are `fetchers`: once answered, a call carried the token held
  * as it went out when the client held only that one meanwhile, and is unsettled otherwise.
  */
-export const heldCall =
+const heldCall =
   (
     fetchers: ReturnType<typeof clientTokenFetchers>,
     call: (
@@ -824,7 +824,7 @@ const httpAdapter = (client: ConvexHttpClient, options: HttpOptions): ClientAdap
  * The transport over the adapter `acquire` opens, closed with the layer's scope. Closing stops
  * the adapter's token refreshes, so a closed connection never asks its token source again.
  */
-export const layerFromAdapter = <E>(
+const layerFromAdapter = <E>(
   acquire: Effect.Effect<ClientAdapter, E>,
 ): Layer.Layer<ConvexTransport, E> =>
   Layer.effect(

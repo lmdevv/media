@@ -1,10 +1,10 @@
 import { PlaybackSessionId } from "@media/contracts/ids";
 import {
   PlaybackSessionEnded,
+  PlaybackTokenInvalid,
   TranscodeCapacityReached,
   TranscodeFailed,
 } from "@media/contracts/media-playback";
-import { PlaybackTokenInvalid } from "@media/contracts/playback-token";
 import { Forbidden, NotFound } from "@media/contracts/errors";
 import { TransportError } from "@media/sdk/effect";
 import { describe, expect, it } from "vitest";

@@ -1,8 +1,8 @@
 /**
  * Signing in and keeping the session's token fresh. Convex Auth issues a JWT that lasts an hour
- * and a refresh token that renews it. This service signs in with a password, an API key, or an
- * approved device code, stores the tokens through `TokenStorage`, hands the Convex connection a
- * token source that refreshes on demand, and signs out on the server and locally.
+ * and a refresh token that renews it. The engine signs in with whatever provider its caller names,
+ * stores the tokens through `TokenStorage`, hands the Convex connection a token source that
+ * refreshes on demand, and signs out on the server and locally.
  *
  * Sign-in and refresh go through a private fetch-based client rather than the shared connection:
  * the WebSocket client waits for its token before running calls, so refreshing through it would
@@ -16,7 +16,6 @@ import { ConvexError } from "convex/values";
 import type { Value } from "convex/values";
 import {
   Clock,
-  Context,
   Data,
   Deferred,
   Duration,
@@ -24,7 +23,6 @@ import {
   Exit,
   FiberHandle,
   FiberMap,
-  Layer,
   Option,
   Predicate,
   Redacted,
@@ -46,46 +44,6 @@ import type { StoredSession } from "./token-storage";
 /** Whether the client holds a session. `loading` lasts until stored tokens have been read. */
 export type AuthStatus = "loading" | "signedOut" | "signedIn";
 
-/** What to sign in with. Each case is one Convex Auth provider. */
-export type Credentials = Data.TaggedEnum<{
-  /** Email and password. `signUp` creates the first account (the owner) or redeems an invite. */
-  Password: {
-    readonly flow: "signIn" | "signUp";
-    readonly email: string;
-    readonly password: Redacted.Redacted;
-    readonly name: Option.Option<string>;
-    readonly inviteCode: Option.Option<string>;
-  };
-  /** A scoped API key, as `media keys create` or Settings shows it once. */
-  ApiKey: { readonly key: Redacted.Redacted };
-  /** The secret device code of an approved device sign-in. */
-  DeviceCode: { readonly deviceCode: Redacted.Redacted };
-}>;
-
-/** Constructors and matchers for `Credentials`. */
-export const Credentials = Data.taggedEnum<Credentials>();
-
-/** Email and password sign-in or sign-up as plain values, for the Promise and React entry points. */
-export interface PasswordSignIn {
-  readonly flow: "signIn" | "signUp";
-  readonly email: string;
-  readonly password: string;
-  /** The new account's display name, for `signUp`. */
-  readonly name?: string;
-  /** The invite to redeem, for `signUp` after the owner exists. */
-  readonly inviteCode?: string;
-}
-
-/** The `Password` credentials for `input`, with the password redacted. */
-export const passwordCredentials = (input: PasswordSignIn): Credentials =>
-  Credentials.Password({
-    flow: input.flow,
-    email: input.email,
-    password: Redacted.make(input.password),
-    name: Option.fromNullishOr(input.name),
-    inviteCode: Option.fromNullishOr(input.inviteCode),
-  });
-
 /** A Convex Auth sign-in: a provider of the deployment and the params it takes. */
 export interface SignInRequest {
   readonly provider: string;
@@ -95,8 +53,8 @@ export interface SignInRequest {
 /** Where a sign-in goes. Refreshes and sign-outs always go to the deployment itself. */
 export type SignInRoute = Data.TaggedEnum<{
   /**
-   * To the deployment's `auth:signIn`, with the params `prepare` answers, as the movies backend
-   * takes them and as the media server signs itself in to the core with a pass of its own.
+   * To the deployment's `auth:signIn`, with the params `prepare` answers, as the media server
+   * signs itself in to the core with a pass of its own.
    */
   Direct: { readonly prepare: (request: SignInRequest) => Effect.Effect<SignInRequest> };
   /**
@@ -137,7 +95,7 @@ const decodeWaiting = Schema.decodeUnknownOption(WaitingFailure);
 
 const decodeJson = Schema.decodeUnknownEffect(Schema.Json);
 
-/** Signs in and out and supplies the session's current token. */
+/** Signs out and supplies the session's current token. */
 export interface Interface {
   /** The current status, then every change. */
   readonly status: Stream.Stream<AuthStatus>;
@@ -157,13 +115,6 @@ export interface Interface {
    * as another account or session changes it. None while signed out.
    */
   readonly currentIdentity: Effect.Effect<Option.Option<string>>;
-  /**
-   * Signs in and stores the session. Rejected credentials fail with `Unauthenticated`; a sign-up
-   * without a valid invite fails with `Forbidden` or `Conflict`.
-   */
-  readonly signIn: (
-    credentials: Credentials,
-  ) => Effect.Effect<void, CallError | TokenStorage.TokenStorageError>;
   /** Ends the session on the server when reachable, then forgets it locally. */
   readonly signOut: Effect.Effect<void, TokenStorage.TokenStorageError>;
   /**
@@ -175,9 +126,6 @@ export interface Interface {
     forceRefresh: boolean,
   ) => Effect.Effect<Option.Option<Redacted.Redacted>, TokenStorage.TokenStorageError>;
 }
-
-/** The SDK's sign-in state. */
-export class Auth extends Context.Service<Auth, Interface>()("@media/sdk/Auth") {}
 
 const Tokens = Schema.Struct({ token: Schema.String, refreshToken: Schema.String });
 
@@ -221,33 +169,11 @@ const toSession = (tokens: typeof Tokens.Type): StoredSession => ({
   refreshToken: Redacted.make(tokens.refreshToken),
 });
 
-const providerParams = (credentials: Credentials): SignInRequest =>
-  Credentials.$match(credentials, {
-    Password: ({ flow, email, password, name, inviteCode }) => ({
-      provider: "password",
-      params: {
-        flow,
-        email,
-        password: Redacted.value(password),
-        ...Option.match(name, { onNone: () => ({}), onSome: (value) => ({ name: value }) }),
-        ...Option.match(inviteCode, {
-          onNone: () => ({}),
-          onSome: (value) => ({ inviteCode: value }),
-        }),
-      },
-    }),
-    ApiKey: ({ key }) => ({ provider: "apikey", params: { key: Redacted.value(key) } }),
-    DeviceCode: ({ deviceCode }) => ({
-      provider: "device",
-      params: { deviceCode: Redacted.value(deviceCode) },
-    }),
-  });
-
 const SIGN_IN: FunctionPath = "auth:signIn";
 
 const SIGN_OUT: FunctionPath = "auth:signOut";
 
-/** Options for the auth layer. */
+/** Options for the session engine. */
 export interface Options {
   /** The Convex deployment URL, the same one the connection uses. */
   readonly convexUrl: string;
@@ -320,10 +246,10 @@ const logStorageFailure = (error: TokenStorage.TokenStorageError): Effect.Effect
   );
 
 /**
- * The session lifecycle of any Convex Auth v1 deployment: `Auth` with the provider left open, so
- * the movies backend and the platform share one implementation of refresh, stalls, and sign-out.
+ * The session lifecycle of any Convex Auth v1 deployment, with the provider left open: refresh,
+ * stalls, and sign-out.
  */
-export interface Engine extends Omit<Interface, "signIn"> {
+export interface Engine extends Interface {
   /**
    * Signs in with `request` and stores the session. A provider that refuses fails with its
    * refusal, such as `Unauthenticated`; one that has not decided yet fails with `SignInWaiting`.
@@ -1347,36 +1273,3 @@ export const unexpectedWaiting = (waiting: SignInWaiting): ProtocolError =>
     message: `Protocol error in auth:signIn: the server answered ${waiting.state}`,
     cause: waiting,
   });
-
-/**
- * Builds the auth service over the movies backend's providers. Requires the connection and a
- * token store.
- */
-export const make = Effect.fn("Auth.make")(function* (options: Options) {
-  const engine = yield* makeEngine(options);
-
-  return Auth.of({
-    status: engine.status,
-    currentStatus: engine.currentStatus,
-    reconnecting: engine.reconnecting,
-    isReconnecting: engine.isReconnecting,
-    currentIdentity: engine.currentIdentity,
-    signIn: (credentials) =>
-      engine
-        .open(providerParams(credentials))
-        .pipe(
-          Effect.catchTag("SignInWaiting", (waiting) => Effect.fail(unexpectedWaiting(waiting))),
-        ),
-    signOut: engine.signOut,
-    accessToken: engine.accessToken,
-  });
-});
-
-/** The auth service over the given connection and token store. */
-export const layer = (
-  options: Options,
-): Layer.Layer<
-  Auth,
-  TokenStorage.TokenStorageError,
-  ConvexTransport.ConvexTransport | TokenStorage.TokenStorage
-> => Layer.effect(Auth, make(options));

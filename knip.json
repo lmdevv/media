@@ -18,11 +18,6 @@
       "entry": ["src/app/**/*.tsx"],
       "project": ["src/**/*.{ts,tsx,css}"]
     },
-    "packages/backend": {
-      "typescript": {
-        "config": ["convex/tsconfig.json"]
-      }
-    },
     "packages/platform": {
       "entry": ["commands/refs.ts"],
       "typescript": {

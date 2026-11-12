@@ -1,13 +1,16 @@
 import type { ArgsSchema, MediaCommand, WireSchema } from "@media/contracts/command";
-import { commands } from "@media/contracts/commands";
-import type { CommandArgs, CommandResult } from "@media/contracts/commands";
+import { mediaCommands } from "@media/contracts/media-commands";
+import type {
+  MediaCommandArgs,
+  MediaCommandName,
+  MediaCommandResult,
+} from "@media/contracts/media-commands";
 import { Effect, Option } from "effect";
 
 import { encodeArgs } from "./calls";
 import { baseUrl, requestJson } from "./media-http";
 import { withBearer } from "./media-server";
 import type { MediaServerOptions } from "./media-server";
-import type { MediaName } from "./movies-client";
 
 const callMedia = <Command extends MediaCommand<ArgsSchema, WireSchema>>(
   options: MediaServerOptions,
@@ -33,8 +36,8 @@ const callMedia = <Command extends MediaCommand<ArgsSchema, WireSchema>>(
   );
 
 /** Runs the media command `name` with `args`, as `MediaServer.run` does. */
-export const runMediaCommand = <Name extends MediaName>(
+export const runMediaCommand = <Name extends MediaCommandName>(
   options: MediaServerOptions,
   name: Name,
-  args: CommandArgs<Name>,
-): Promise<CommandResult<Name>> => callMedia(options, name, commands[name], args);
+  args: MediaCommandArgs<Name>,
+): Promise<MediaCommandResult<Name>> => callMedia(options, name, mediaCommands[name], args);

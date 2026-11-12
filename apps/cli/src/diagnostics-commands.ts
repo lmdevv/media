@@ -1,4 +1,4 @@
-import { commands } from "@media/contracts/commands";
+import { mediaCommands } from "@media/contracts/media-commands";
 import {
   type DiagnosedSession,
   LOG_LEVELS,
@@ -372,7 +372,7 @@ const playbackTimeline: ShortcutCommand = {
 
       const json = yield* encodeResult(
         "diagnostics.playback",
-        commands["diagnostics.playback"],
+        mediaCommands["diagnostics.playback"],
         diagnostics,
       );
 
@@ -412,7 +412,7 @@ const sessions: ShortcutCommand = {
 
       const json = yield* encodeResult(
         "diagnostics.sessions",
-        commands["diagnostics.sessions"],
+        mediaCommands["diagnostics.sessions"],
         found,
       );
 

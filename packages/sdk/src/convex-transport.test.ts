@@ -11,8 +11,8 @@ import {
   Option,
   Predicate,
   Queue,
-  Redacted,
   Schedule,
+  Schema,
   Scope,
   Stream,
   Struct,
@@ -20,12 +20,20 @@ import {
 import { describe, expect, it } from "vitest";
 
 import * as Auth from "./auth";
+import { acrossReconnects } from "./calls";
 import * as ConvexTransport from "./convex-transport";
 import { clientTokenFetchers, translateFailure } from "./convex-transport";
-import * as MoviesClient from "./movies-client";
 import * as FakeConvex from "./testing/fake-convex";
 import { issuedOf, jwtIssuedAt, Reply } from "./testing/fake-convex";
 import * as TokenStorage from "./token-storage";
+
+const decodeSetupStatus = Schema.decodeUnknownEffect(
+  Schema.Struct({ hasLibraries: Schema.Boolean }),
+);
+
+/** What a setup status answer says about libraries, as the subscription test records it. */
+const librariesOf = (answer: Schema.Json) =>
+  Effect.map(decodeSetupStatus(answer), ({ hasLibraries }) => `libraries: ${String(hasLibraries)}`);
 
 /** Long enough for the client's ten-second refresh leeway, short enough to outlive in a test. */
 const TOKEN_LIFETIME_SECONDS = 12;
@@ -50,19 +58,19 @@ const askAfterFirstTokenExpires = (signIn: (request: { readonly args: unknown })
         yield* fake.reply("account:viewer", Reply.Success({ value: "signed in" }));
 
         const context = yield* Layer.build(
-          Auth.layer({ convexUrl: fake.url }).pipe(
-            Layer.provideMerge(ConvexTransport.layerWebSocket(fake.url)),
-            Layer.provide(TokenStorage.layerMemory),
-          ),
+          Layer.merge(ConvexTransport.layerWebSocket(fake.url), TokenStorage.layerMemory),
         );
 
-        const auth = Context.get(context, Auth.Auth);
+        const auth = yield* Auth.makeEngine({ convexUrl: fake.url }).pipe(
+          Effect.provideContext(context),
+        );
+
         const transport = Context.get(context, ConvexTransport.ConvexTransport);
         const viewer = transport.call("query", "account:viewer", {});
 
         // Start at the top of a second, so the sign-in and the client's first refresh share it.
         yield* Effect.sleep(Duration.millis(1000 - (Date.now() % 1000)));
-        yield* auth.signIn(Auth.Credentials.ApiKey({ key: Redacted.make("mk_service") }));
+        yield* auth.open({ provider: "apikey", params: { key: "mk_service" } });
         const signedInAt = Date.now();
 
         expect(yield* viewer).toBe("signed in");
@@ -265,21 +273,18 @@ describe.concurrent("layerWebSocket", () => {
           );
 
           const context = yield* Layer.build(
-            MoviesClient.layer({ mediaUrl: Option.none() }).pipe(
-              Layer.provideMerge(
-                Auth.layer({ convexUrl: fake.url, refreshFailureLimit: Duration.seconds(5) }),
-              ),
-              Layer.provideMerge(ConvexTransport.layerWebSocket(fake.url)),
-              Layer.provide(TokenStorage.layerMemory),
-            ),
+            Layer.merge(ConvexTransport.layerWebSocket(fake.url), TokenStorage.layerMemory),
           );
 
-          const auth = Context.get(context, Auth.Auth);
+          const auth = yield* Auth.makeEngine({
+            convexUrl: fake.url,
+            refreshFailureLimit: Duration.seconds(5),
+          }).pipe(Effect.provideContext(context));
+
           const transport = Context.get(context, ConvexTransport.ConvexTransport);
-          const client = Context.get(context, MoviesClient.MoviesClient);
           const seen = yield* Queue.unbounded<string>();
 
-          yield* auth.signIn(Auth.Credentials.ApiKey({ key: Redacted.make("mk_service") }));
+          yield* auth.open({ provider: "apikey", params: { key: "mk_service" } });
           yield* fake.acceptedTokens.pipe(
             Effect.repeat({
               until: (accepted) => new Set(accepted).size >= 2,
@@ -287,10 +292,9 @@ describe.concurrent("layerWebSocket", () => {
             }),
             Effect.timeout(Duration.seconds(5)),
           );
-          yield* client.subscribe("setup.status", {}).pipe(
-            Stream.runForEach((status) =>
-              Queue.offer(seen, `libraries: ${String(status.hasLibraries)}`),
-            ),
+          yield* acrossReconnects(auth, transport.subscribe("setup:status", {})).pipe(
+            Stream.mapEffect(librariesOf),
+            Stream.runForEach((libraries) => Queue.offer(seen, libraries)),
             Effect.catch((error) => Queue.offer(seen, `failed: ${Struct.get(error, "_tag")}`)),
             Effect.forkScoped,
           );
@@ -308,8 +312,8 @@ describe.concurrent("layerWebSocket", () => {
             reconnecting: yield* Stream.runHead(auth.reconnecting),
           };
 
-          const asked = yield* client.query("setup.status", {}).pipe(
-            Effect.map((status) => `libraries: ${String(status.hasLibraries)}`),
+          const asked = yield* transport.call("query", "setup:status", {}).pipe(
+            Effect.flatMap(librariesOf),
             Effect.catch((error) => Effect.succeed(`failed: ${Struct.get(error, "_tag")}`)),
             Effect.timeout(Duration.seconds(5)),
           );

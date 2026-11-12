@@ -1,6 +1,10 @@
 import type { ArgsSchema, MediaCommand, WireSchema } from "@media/contracts/command";
-import { commands } from "@media/contracts/commands";
-import type { CommandArgs, CommandNameOfKind, CommandResult } from "@media/contracts/commands";
+import { mediaCommands } from "@media/contracts/media-commands";
+import type {
+  MediaCommandArgs,
+  MediaCommandName,
+  MediaCommandResult,
+} from "@media/contracts/media-commands";
 import {
   DIAGNOSTICS_ROUTES,
   LOG_TRUNCATED_HEADER,
@@ -16,9 +20,6 @@ import { baseUrl, encodeJson, requestJson, requestLines } from "./media-http";
 import type { CallError, TransportError } from "./sdk-errors";
 import type { TokenStorageError } from "./token-storage";
 
-/** Commands served by the media service over HTTP. */
-export type MediaName = CommandNameOfKind<"media">;
-
 /** Any failure of a media route call, including an unreadable stored session. */
 export type MediaRouteError = CallError | TokenStorageError;
 
@@ -31,7 +32,7 @@ export interface Options {
 }
 
 /** Retained log records as the media service sends them. */
-export interface LogLines {
+interface LogLines {
   /** Older records may match too: the query's limit was reached first. */
   readonly truncated: boolean;
   /**
@@ -50,7 +51,7 @@ export interface LogLines {
  * Runs the media service command `command`, named `name` for errors and traces, with the
  * session's token as the bearer.
  */
-export const runCommand = <Command extends MediaCommand<ArgsSchema, WireSchema>>(
+const runCommand = <Command extends MediaCommand<ArgsSchema, WireSchema>>(
   options: Options,
   name: string,
   command: Command,
@@ -72,12 +73,12 @@ export const runCommand = <Command extends MediaCommand<ArgsSchema, WireSchema>>
   }).pipe(Effect.withSpan("MediaRoutes.run", { attributes: { command: name } }));
 
 /** Runs the media service command `name` with the session's token as the bearer. */
-export const run = <Name extends MediaName>(
+export const run = <Name extends MediaCommandName>(
   options: Options,
   name: Name,
-  args: CommandArgs<Name>,
-): Effect.Effect<CommandResult<Name>, MediaRouteError> =>
-  runCommand(options, name, commands[name], args);
+  args: MediaCommandArgs<Name>,
+): Effect.Effect<MediaCommandResult<Name>, MediaRouteError> =>
+  runCommand(options, name, mediaCommands[name], args);
 
 /** The media service's retained log, for a session holding the admin scope: what `query` matches. */
 export const logs = Effect.fn("MediaRoutes.logs")(function* (options: Options, query: LogQuery) {

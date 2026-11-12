@@ -31,7 +31,7 @@ import * as MediaTestServer from "../testing/media-test-server.ts";
 import { signTestToken } from "../testing/test-tokens.ts";
 import * as TestSessions from "../testing/test-sessions.ts";
 import * as PlaybackReporter from "./playback-reporter.ts";
-import * as PlaybackToken from "./playback-token.ts";
+import * as PlaybackToken from "./playback-grants.ts";
 import * as StreamSessions from "./stream-sessions.ts";
 
 const hasFfmpeg = await ffmpegAvailable();

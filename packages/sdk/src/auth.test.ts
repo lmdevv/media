@@ -1,7 +1,6 @@
 import { inspect } from "node:util";
 
 import {
-  Context,
   Deferred,
   Effect,
   Fiber,
@@ -19,8 +18,7 @@ import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 
 import * as Auth from "./auth";
-import * as Movies from "./movies";
-import { MoviesClient } from "./movies-client";
+import * as ConvexTransport from "./convex-transport";
 import * as FakeConvex from "./testing/fake-convex";
 import { jwtExpiringAt, Reply } from "./testing/fake-convex";
 import * as TokenStorage from "./token-storage";
@@ -108,13 +106,13 @@ const memoryStore = (initial: Option.Option<{ token: string; refreshToken: strin
 interface Fixture {
   readonly fake: FakeConvex.FakeConvex;
   readonly memory: MemoryStore;
-  readonly auth: Auth.Interface;
+  readonly auth: Auth.Engine;
   readonly logs: () => ReadonlyArray<string>;
 }
 
 const withAuth = <A, E>(
   stored: Option.Option<{ token: string; refreshToken: string }>,
-  body: (fixture: Fixture) => Effect.Effect<A, E, Movies.Services | Scope.Scope>,
+  body: (fixture: Fixture) => Effect.Effect<A, E, ConvexTransport.ConvexTransport | Scope.Scope>,
 ): Promise<A> =>
   Effect.runPromise(
     Effect.scoped(
@@ -135,12 +133,15 @@ const withAuth = <A, E>(
           const memory = memoryStore(stored);
 
           const sdk = yield* Layer.build(
-            Movies.layer({ convexUrl: fake.url, mediaUrl: Option.none(), connection: "http" }).pipe(
-              Layer.provide(TokenStorage.layerKeyValue(memory.store, KEY)),
+            Layer.mergeAll(
+              ConvexTransport.layerHttp(fake.url),
+              TokenStorage.layerKeyValue(memory.store, KEY),
             ),
           );
 
-          const auth = Context.get(sdk, Auth.Auth);
+          const auth = yield* Auth.makeEngine({ convexUrl: fake.url }).pipe(
+            Effect.provideContext(sdk),
+          );
 
           return yield* body({ fake, memory, auth, logs: () => [...logged] }).pipe(
             Effect.provideContext(sdk),
@@ -388,7 +389,7 @@ describe("Auth", () => {
           ),
         );
         yield* failForAMinute(auth);
-        yield* auth.signIn(Auth.Credentials.ApiKey({ key: Redacted.make("sam-key") }));
+        yield* auth.open({ provider: "apikey", params: { key: "sam-key" } });
         const asked = (yield* refreshRequests(fake)).length;
 
         for (let wait = 0; wait < 5; wait += 1) yield* TestClock.adjust(30_000);
@@ -497,7 +498,7 @@ describe("Auth", () => {
         const refreshing = yield* Effect.forkChild(auth.accessToken(true));
 
         yield* Deferred.await(gate.arrived);
-        yield* auth.signIn(Auth.Credentials.ApiKey({ key: Redacted.make("sam-key") }));
+        yield* auth.open({ provider: "apikey", params: { key: "sam-key" } });
         yield* Deferred.succeed(gate.release, undefined);
 
         expect(reveal(yield* Fiber.join(refreshing))).toBe(sam);
@@ -517,7 +518,7 @@ describe("Auth", () => {
         const refreshing = yield* Effect.forkChild(auth.accessToken(true));
 
         yield* Deferred.await(gate.arrived);
-        yield* auth.signIn(Auth.Credentials.ApiKey({ key: Redacted.make("sam-key") }));
+        yield* auth.open({ provider: "apikey", params: { key: "sam-key" } });
         yield* Deferred.succeed(gate.release, undefined);
         yield* Fiber.join(refreshing);
 
@@ -548,7 +549,7 @@ describe("Auth", () => {
         const refreshing = yield* Effect.forkChild(auth.accessToken(true));
 
         yield* Deferred.await(arrived);
-        yield* auth.signIn(Auth.Credentials.ApiKey({ key: Redacted.make("service-key") }));
+        yield* auth.open({ provider: "apikey", params: { key: "service-key" } });
         yield* Deferred.succeed(release, undefined);
 
         expect(reveal(yield* Fiber.join(refreshing))).toBe(signedInAgain);
@@ -567,7 +568,7 @@ describe("Auth", () => {
         const refreshing = yield* Effect.forkChild(auth.accessToken(true));
 
         yield* Deferred.await(gate.arrived);
-        yield* auth.signIn(Auth.Credentials.ApiKey({ key: Redacted.make("sam-key") }));
+        yield* auth.open({ provider: "apikey", params: { key: "sam-key" } });
         yield* Deferred.succeed(gate.release, undefined);
 
         expect(reveal(yield* Fiber.join(refreshing))).toBe(sam);
@@ -650,9 +651,9 @@ describe("Auth", () => {
         yield* fake.reply("auth:signIn", tokens(RENEWED, ROTATED));
         yield* fake.reply("deviceAuth:status", Reply.Success({ value: { state: "pending" } }));
         memory.failWrites(true);
-        const client = yield* MoviesClient;
+        const transport = yield* ConvexTransport.ConvexTransport;
 
-        yield* client.query("deviceAuth.status", { deviceCode: "device-secret" });
+        yield* transport.call("query", "deviceAuth:status", { deviceCode: "device-secret" });
 
         expect(
           (yield* fake.requestsTo("deviceAuth:status")).map((request) => request.authorization),
@@ -697,7 +698,7 @@ describe("Auth", () => {
         const signingOut = yield* Effect.forkChild(auth.signOut);
 
         yield* Deferred.await(arrived);
-        yield* auth.signIn(Auth.Credentials.ApiKey({ key: Redacted.make("sam-key") }));
+        yield* auth.open({ provider: "apikey", params: { key: "sam-key" } });
         yield* Deferred.succeed(release, undefined);
         yield* Fiber.join(signingOut);
 
@@ -827,9 +828,9 @@ describe("Auth", () => {
         yield* fake.reply("auth:signIn", tokens(RENEWED, ROTATED));
         yield* fake.reply("deviceAuth:status", Reply.Success({ value: { state: "pending" } }));
         memory.failWrites(true);
-        const client = yield* MoviesClient;
+        const transport = yield* ConvexTransport.ConvexTransport;
 
-        yield* client.query("deviceAuth.status", { deviceCode: "device-secret" });
+        yield* transport.call("query", "deviceAuth:status", { deviceCode: "device-secret" });
 
         const warnings = logs().filter((entry) => entry.includes("Auth.tokenStorageFailed"));
 

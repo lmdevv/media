@@ -1,28 +1,19 @@
 /**
  * `@media/sdk/effect`: the Effect core. `Platform.layer` connects to the platform deployment and
  * gives every platform command a method (`platform.core.server.info()`), and `MediaRoutes` calls
- * the media server's own routes with its session's token. The movies backend's
- * client sits beside it: start from `Movies.layer` with a `TokenStorage` layer, then use
- * `MoviesClient`, `Auth`, `ClientErrors`, `DeviceLogin`, `Playback` (with `PlayerDiagnostics`),
- * `Downloads`, `Versions` (with `MediaLabels` naming their facts), `RoomSync`, and `RoomPresence`.
+ * the media server's own routes with its session's token. `Playback` (with `PlayerDiagnostics`)
+ * and `Downloads` stream and download through the media server, and `Versions` (with
+ * `MediaLabels` naming their facts) describes a title's files.
  */
 export * as Auth from "./auth";
 
-export * as ClientErrors from "./client-errors";
-
 export * as ConvexTransport from "./convex-transport";
-
-export * as DeviceLogin from "./device-login";
 
 export * as Downloads from "./downloads";
 
 export * as MediaLabels from "./media-labels";
 
 export * as MediaRoutes from "./media-routes";
-
-export * as Movies from "./movies";
-
-export * as MoviesClient from "./movies-client";
 
 export * as Platform from "./platform/platform";
 
@@ -31,12 +22,6 @@ export * as Playback from "./playback";
 export * as PlayerDiagnostics from "./player-diagnostics";
 
 export type { PlayerEvent, PlayerPort } from "./room-sync/player-port";
-
-export * as RoomPresence from "./room-sync/room-presence";
-
-export * as RoomSync from "./room-sync/room-sync";
-
-export * as RoomSyncPolicy from "./room-sync/sync-policy";
 
 export { MediaOrigin } from "./media-http";
 

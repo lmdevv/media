@@ -12,7 +12,7 @@ import { resolveInsideRoots } from "./file-resolver.ts";
 import * as KeyframeIndex from "./keyframe-index.ts";
 import { decidePlayback, PlaybackPlan } from "./playback-decision.ts";
 import * as PlaybackReporter from "./playback-reporter.ts";
-import * as PlaybackToken from "./playback-token.ts";
+import * as PlaybackToken from "./playback-grants.ts";
 import * as StreamOwners from "./stream-owners.ts";
 import * as StreamSessions from "./stream-sessions.ts";
 

@@ -6,7 +6,7 @@ import type { ClientCapabilities } from "@media/contracts/media-playback";
 
 import { resolveInsideRoots } from "../playback/file-resolver.ts";
 import { decidePlayback, PlaybackPlan } from "../playback/playback-decision.ts";
-import * as PlaybackToken from "../playback/playback-token.ts";
+import * as PlaybackToken from "../playback/playback-grants.ts";
 import * as StreamSessions from "../playback/stream-sessions.ts";
 import { writeFakeFfmpeg } from "../testing/fake-ffmpeg.ts";
 import { ffmpegAvailable } from "../testing/fixture-library.ts";
