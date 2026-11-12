@@ -1,9 +1,9 @@
+import { describeFailure } from "@media/mobile-core/failure";
 import { usePlatform } from "@media/sdk/react";
 import * as Haptics from "expo-haptics";
 import { useRef, useState } from "react";
 
 import type { TitleId } from "@/lib/catalog";
-import { describeFailure } from "@/lib/failure";
 
 import { optimisticValue } from "./title-model";
 import type { Pending } from "./title-model";

@@ -1,3 +1,4 @@
+import { describeFailure } from "@media/mobile-core/failure";
 import { MediaLabels } from "@media/sdk/effect";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { useLocalSearchParams } from "expo-router";
@@ -11,7 +12,6 @@ import { Button } from "@/components/ui/button";
 import { ListRow } from "@/components/ui/list-row";
 import { Text } from "@/components/ui/text";
 import type { MediaFileId } from "@/lib/catalog";
-import { describeFailure } from "@/lib/failure";
 import { watchHref } from "@/lib/routes";
 
 export default function ChooseVersion() {

@@ -1,5 +1,4 @@
 import { BackupId } from "@media/contracts/ids";
-import { useCommand } from "@media/sdk/react";
 import { Option, Schema } from "effect";
 import { useLocalSearchParams } from "expo-router";
 import { RotateCcw } from "lucide-react-native";
@@ -7,6 +6,7 @@ import { RotateCcw } from "lucide-react-native";
 import { useTask } from "@/components/owner/use-task";
 import { Sheet, useSheetExit } from "@/components/title/sheet";
 import { Button } from "@/components/ui/button";
+import { useMediaServer } from "@/session/media-server";
 import { useSignOut } from "@/session/viewer";
 
 const decodeBackupId = Schema.decodeUnknownOption(BackupId);
@@ -22,12 +22,12 @@ function NoSuchBackup() {
 }
 
 function ConfirmRestore({ backupId }: { readonly backupId: BackupId }) {
-  const restore = useCommand("backups.restore");
+  const media = useMediaServer();
   const signOut = useSignOut();
   const exit = useSheetExit();
 
   const confirm = useTask(async () => {
-    await restore({ backupId });
+    await media.run("backups.restore", { backupId });
     await signOut();
   });
 

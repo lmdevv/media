@@ -1,3 +1,4 @@
+import { describeFailure } from "@media/mobile-core/failure";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { useLocalSearchParams } from "expo-router";
 import { Check, EyeOff, Minus, Plus, RotateCcw, Share as ShareIcon } from "lucide-react-native";
@@ -10,7 +11,6 @@ import { defaultVersion, playAction, watchedMarks } from "@/components/title/tit
 import { useMyListToggle, useRunner } from "@/components/title/use-title-actions";
 import { ListRow } from "@/components/ui/list-row";
 import type { TitleDetail } from "@/lib/catalog";
-import { describeFailure } from "@/lib/failure";
 import { watchHref } from "@/lib/routes";
 import { useServer } from "@/session/connection";
 

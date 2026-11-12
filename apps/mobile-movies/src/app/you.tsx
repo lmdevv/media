@@ -1,3 +1,4 @@
+import { useAllPages } from "@media/mobile-core/pages";
 import { usePlatform } from "@media/sdk/react";
 import { router } from "expo-router";
 import {
@@ -19,7 +20,6 @@ import { ListRow } from "@/components/ui/list-row";
 import { READABLE_COLUMN, Screen } from "@/components/ui/screen";
 import { Text } from "@/components/ui/text";
 import { plural } from "@/lib/browse";
-import { useAllPages } from "@/lib/pages";
 import { useMe } from "@/session/me";
 
 export default function You() {

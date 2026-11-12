@@ -39,6 +39,28 @@ const listResult = v.object({
   ),
 });
 
+const memberOfArgs = v.object({
+  userId: v.id("users"),
+  paginationOpts: v.object({
+    numItems: v.number(),
+    cursor: v.union(v.string(), v.null()),
+    endCursor: v.optional(v.union(v.string(), v.null())),
+    id: v.optional(v.number()),
+    maximumRowsRead: v.optional(v.number()),
+    maximumBytesRead: v.optional(v.number()),
+  }),
+});
+
+const memberOfResult = v.object({
+  page: v.array(v.object({ groupId: v.id("groups"), name: v.string() })),
+  continueCursor: v.string(),
+  isDone: v.boolean(),
+  splitCursor: v.optional(v.union(v.string(), v.null())),
+  pageStatus: v.optional(
+    v.union(v.literal("SplitRecommended"), v.literal("SplitRequired"), v.null()),
+  ),
+});
+
 const membersArgs = v.object({
   groupId: v.id("groups"),
   paginationOpts: v.object({
@@ -96,6 +118,13 @@ export interface Handlers {
     caller: Caller,
   ) => Infer<typeof listResult> | Promise<Infer<typeof listResult>>;
 
+  /** `core.permissions.groups.memberOf` (query, admin): List the groups someone is in, at most 16, so their page shows what reaches them. */
+  readonly memberOf: (
+    ctx: Omit<QueryCtx, "auth">,
+    args: Infer<typeof memberOfArgs>,
+    caller: Caller,
+  ) => Infer<typeof memberOfResult> | Promise<Infer<typeof memberOfResult>>;
+
   /** `core.permissions.groups.members` (query, admin): List the people in a group. */
   readonly members: (
     ctx: Omit<QueryCtx, "auth">,
@@ -145,6 +174,12 @@ export interface Refs {
     Infer<typeof listArgs>,
     Infer<typeof listResult>
   >;
+  readonly memberOf: FunctionReference<
+    "query",
+    "public",
+    Infer<typeof memberOfArgs>,
+    Infer<typeof memberOfResult>
+  >;
   readonly members: FunctionReference<
     "query",
     "public",
@@ -188,6 +223,11 @@ export const register = (handlers: Handlers) => ({
     args: listArgs,
     returns: listResult,
     handler: async (ctx, args) => handlers.list(ctx, args, await requireCaller(ctx, "admin")),
+  }),
+  memberOf: query({
+    args: memberOfArgs,
+    returns: memberOfResult,
+    handler: async (ctx, args) => handlers.memberOf(ctx, args, await requireCaller(ctx, "admin")),
   }),
   members: query({
     args: membersArgs,

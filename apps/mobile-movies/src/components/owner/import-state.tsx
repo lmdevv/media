@@ -1,19 +1,20 @@
 import type { MigrationSource } from "@media/contracts/models/jobs";
 import type {
-  MigrationConnection,
-  MigrationReport,
+  ImportConnection,
+  ImportReport,
+  ImportUserMapping,
   MigrationSourceFailure,
   PathMapping,
-  UserMapping,
 } from "@media/contracts/models/migration";
-import { mappingsFor, mappingsWith, userRows } from "@media/contracts/migration-plan";
-import type { UserChoice, UserRow } from "@media/contracts/migration-plan";
-import { useCommand, useCommandQuery } from "@media/sdk/react";
+import { mappingsWith } from "@media/contracts/migration-plan";
+import { useHousehold } from "@media/mobile-core/use-accounts";
 import { Option, Redacted } from "effect";
 import { createContext, useCallback, useContext, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
-import { SKIP_LABEL } from "@/lib/migration";
+import { mappingsFor, userRows } from "@/lib/migration";
+import type { UserChoice, UserRow } from "@/lib/migration";
+import { useMediaServer } from "@/session/media-server";
 
 import { useTask } from "./use-task";
 
@@ -27,8 +28,8 @@ export interface SourceForm {
 
 /** A connected source and its dry run. */
 export interface Preview {
-  readonly connection: MigrationConnection;
-  readonly report: MigrationReport;
+  readonly connection: ImportConnection;
+  readonly report: ImportReport;
 }
 
 interface ImportState {
@@ -71,22 +72,21 @@ export type PreviewResult = ({ readonly status: "ready" } & Preview) | Migration
 
 /**
  * Connects to the source in `form` and dry-runs the import. `users` overrides suggested mappings;
- * `pathMappings` adds folder mappings. Failures of [movies] itself, such as a missing scope,
+ * `pathMappings` adds folder mappings. Failures of this server itself, such as a missing scope,
  * reject; a source that cannot be used resolves with its reason.
  */
 export const usePreview = () => {
-  const connect = useCommand("migration.connect");
-  const dryRun = useCommand("migration.dryRun");
+  const media = useMediaServer();
 
   return useCallback(
     async (
       form: SourceForm,
       options: {
-        readonly users?: ReadonlyArray<UserMapping>;
+        readonly users?: ReadonlyArray<ImportUserMapping>;
         readonly pathMappings?: ReadonlyArray<PathMapping>;
       } = {},
     ): Promise<PreviewResult> => {
-      const connection = await connect({
+      const connection = await media.run("imports.connect", {
         source: form.source,
         url: form.url.trim(),
         credentials: { kind: "token", token: Redacted.make(form.token.trim()) },
@@ -97,11 +97,15 @@ export const usePreview = () => {
 
       const known = new Set(connection.users.map((user) => user.sourceUserId));
       const users = (options.users ?? []).filter((user) => known.has(user.sourceUserId));
-      const report = await dryRun({ connectionId: connection.connectionId, users });
+
+      const report = await media.run("imports.preview", {
+        connectionId: connection.connectionId,
+        users,
+      });
 
       return report.status === "failed" ? report : { status: "ready", connection, report };
     },
-    [connect, dryRun],
+    [media],
   );
 };
 
@@ -111,22 +115,14 @@ export const usePreview = () => {
  */
 export const useReview = (preview: Preview) => {
   const { form, setPreview } = useImportState();
-  const profiles = useCommandQuery("profiles.list", {});
-  const accounts = useCommandQuery("users.list", {});
-  const dryRun = useCommand("migration.dryRun");
+  const people = useHousehold();
+  const media = useMediaServer();
   const reconnect = usePreview();
   const { connection, report } = preview;
 
   const rows: ReadonlyArray<UserRow> = useMemo(
-    () =>
-      userRows(
-        connection,
-        report,
-        profiles.status === "success" ? profiles.data : [],
-        accounts.status === "success" ? accounts.data : [],
-        SKIP_LABEL,
-      ),
-    [connection, report, profiles, accounts],
+    () => userRows(connection, report, people.status === "ready" ? people.rows : []),
+    [connection, report, people],
   );
 
   const settle = (result: PreviewResult): MigrationSourceFailure | null => {
@@ -137,7 +133,7 @@ export const useReview = (preview: Preview) => {
   };
 
   const choose = useTask(async (sourceUserId: string, choice: UserChoice) => {
-    const next = await dryRun({
+    const next = await media.run("imports.preview", {
       connectionId: connection.connectionId,
       users: mappingsFor(rows, { sourceUserId, choice }),
     });

@@ -396,9 +396,8 @@ Every sign-in goes to the media server's sign-in boundary, `signInUrlFor` the se
   settings, so the web clients show what the app set. The rest stay on the phone.
 - Profiles, profile PINs, watch rooms, and together are deleted (D12, D62). Shared-device tiles,
   unlock codes, and approvals stay in the web account client.
-- The owner screens for libraries, users, import, and backups stay on the old movies SDK until
-  `p4-mobile-owner` (D56). The core runs none of its functions, so against an install they show
-  their load failure.
+- The owner screens for libraries, users, import, and backups moved onto the core in
+  `p4-mobile-owner` (D56); see "The owner screens on the core" below.
 - API Keys creates a key and shows its secret once to copy, revokes by ID the keys made on this
   phone since the app opened, and ends every key. The core has no query that lists a person's
   keys, so the screen lists only those it made; listing every key waits for a core query, a
@@ -406,3 +405,54 @@ Every sign-in goes to the media server's sign-in boundary, `signInUrlFor` the se
 - Left out because the core has no data for them (D62): a person's own list of signed-in devices
   (the Devices screen lists the registry, for admins), and the email on the account screen
   (accounts have only a username).
+
+### The owner screens on the core (amended 2026-11-11)
+
+`p4-mobile-owner` moved the iOS owner screens onto the platform SDK, and the app no longer holds
+the old movies SDK or a Convex client of its own. They open for an owner or an admin holding the
+`admin` scope, as the server's library, user, import, and backup commands need.
+
+- **Libraries** list the movies libraries the person manages (`core.libraries.list` at `manage`).
+  A library is made with `core.libraries.create` as kind `movies`: the core keeps movies and
+  shows in one kind and tells them apart by their files, so the form lost old movies' Movies and
+  Shows choice. Renaming is `core.libraries.rename`; new folders are `core.libraries.setFolders`,
+  which rescans. The library and scan screens read `core.libraries.get`, which keeps only the
+  latest scan, so the list of recent scans became the latest scan's row. A cancel names the
+  attempt the screen showed and says so when the scan had started over (`movedOn`). Counts the
+  core hides from a restricted editor (`items`, the file summary) are left out, not shown as zero.
+- **Files and matching** page `movies.files.list` with `usePages`, which loads a page the
+  core asks to split as two. Fix Match searches TMDB through the media server
+  (`metadata.searchCandidates`) and matches with `movies.metadata.match`.
+- **Import** connects, previews, and starts through the media server (`imports.connect`,
+  `imports.preview`, `imports.start`) and follows the run with `movies.imports.get`. The old app
+  had no cancel, so this one has none either (D62).
+- **Backups** page `core.server.backups.list`, show a backup in progress from
+  `core.server.backups.active`, run one with `core.server.backups.run`, and restore through the
+  media server.
+- **Users and invites** are shared: their state lives in `@media/mobile-core/accounts` (roles, who
+  may change whose role, library access from grants, the invite link) and
+  `@media/mobile-core/use-accounts` (the household, pending invites, making and revoking an
+  invite, saving a person), and each app draws them in its own look. The music app reuses them in
+  `p5-mobile-music`. An invite is made by `core.accounts.invites.create`, which makes the code on
+  the server and answers it once; the app shares `<server>/invite#<code>` and never sends a code
+  back in a mutation. Library access follows grants for every role, since a core library is
+  private until shared, admins included (ADR 0024). The page shows a person's own grant, which
+  it gives at `view` and takes away (`core.permissions.grants.set` and `remove`), apart from what
+  reaches them through the household or a group they are in, as the core's `levelOn` counts it:
+  taking their own grant away reads `View, through Family`, never Not Allowed, while a group
+  still reaches them. The maker's grant to manage shows as Manages and stays. The page keeps the
+  grant's real level, view or edit, so it asks before taking away a grant another admin raised
+  meanwhile. It reads the person's own groups with `core.permissions.groups.memberOf`, an admin
+  query over their memberships, at most 16 (`GROUPS_PER_USER_MAX`), never every group's members.
+- **Owner forms save only what the person edited** (`@media/mobile-core/edits`). A row on screen
+  keeps following the core while someone edits it, so a form never compares its fields with the
+  live row: each field keeps the value it had when the person began editing it, a save writes
+  only fields changed from that value, and it asks before writing over a field another admin
+  changed meanwhile. The library edit form, a person's page, and Fix Match work this way, so a
+  rename never writes back folders moved meanwhile, and saving library access never sends back
+  a role another admin changed.
+- **Shared with every iOS app** besides the users and invites screens: paging over the core's lists
+  (`@media/mobile-core/pages`), the failure lines (`@media/mobile-core/failure`), and saving
+  edits (`@media/mobile-core/edits`).
+- Left out because the core has no command for them (D62): disabling and enabling an account, and
+  an email on an invite.

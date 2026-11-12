@@ -1,12 +1,15 @@
-import { LibraryId, TitleId } from "@media/contracts/ids";
-import type { LibraryFile, MetadataCandidate } from "@media/contracts/models/catalog";
-import { useCommand, useCommandQuery } from "@media/sdk/react";
+import { TitleId as MediaTitleId } from "@media/contracts/ids";
+import type { MetadataCandidate } from "@media/contracts/models/catalog";
+import { fieldEdit, overtakenFields } from "@media/mobile-core/edits";
+import { describeFailure, isFailure } from "@media/mobile-core/failure";
+import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { Predicate, Schema } from "effect";
 import { router, useLocalSearchParams } from "expo-router";
 import { Check, Search } from "lucide-react-native";
 import { useEffect, useRef, useState } from "react";
 import { Pressable, View } from "react-native";
 
+import { confirmOverwrite } from "@/components/owner/confirm-overwrite";
 import { Loading, OwnerScreen, QueryView } from "@/components/owner/parts";
 import { useTask } from "@/components/owner/use-task";
 import { Button } from "@/components/ui/button";
@@ -14,12 +17,12 @@ import { Icon } from "@/components/ui/icon";
 import { Image } from "@/components/ui/image";
 import { Text } from "@/components/ui/text";
 import { TextField } from "@/components/ui/text-field";
-import { describeFailure, isFailure } from "@/lib/failure";
+import { asTitleId } from "@/lib/catalog";
+import type { TitleDetail } from "@/lib/catalog";
 import { facts } from "@/lib/format";
+import { useMediaServer } from "@/session/media-server";
 
-const decodeLibraryId = Schema.decodeUnknownSync(LibraryId);
-
-const decodeTitleId = Schema.decodeUnknownSync(TitleId);
+const decodeMediaTitleId = Schema.decodeUnknownSync(MediaTitleId);
 
 type Results =
   | { readonly status: "idle" }
@@ -42,8 +45,6 @@ const searchFailure = (cause: unknown): string => {
 
   return describeFailure(cause);
 };
-
-const fileName = (path: string): string => path.slice(path.lastIndexOf("/") + 1);
 
 function Candidate({
   candidate,
@@ -84,10 +85,17 @@ function Candidate({
   );
 }
 
-function MatchEditor({ file }: { readonly file: LibraryFile }) {
-  const { title } = file;
-  const search = useCommand("metadata.searchCandidates");
-  const fixMatch = useCommand("metadata.fixMatch");
+function MatchEditor({
+  title,
+  file,
+}: {
+  readonly title: TitleDetail;
+  readonly file: string | undefined;
+}) {
+  const platform = usePlatform();
+  const media = useMediaServer();
+  // The match as the screen opened it: choosing it again writes nothing.
+  const [began] = useState(title.externalIds.tmdb);
   const [query, setQuery] = useState(title.name);
   const [year, setYear] = useState(title.year === null ? "" : String(title.year));
   const [results, setResults] = useState<Results>({ status: "idle" });
@@ -105,10 +113,11 @@ function MatchEditor({ file }: { readonly file: LibraryFile }) {
     setResults({ status: "searching" });
 
     try {
-      const candidates = await search(
-        filter === null
-          ? { titleId: title.id, query: text }
-          : { titleId: title.id, query: text, year: filter },
+      const titleId = decodeMediaTitleId(title.id);
+
+      const candidates = await media.run(
+        "metadata.searchCandidates",
+        filter === null ? { titleId, query: text } : { titleId, query: text, year: filter },
       );
 
       if (attempt !== latest.current) return;
@@ -133,7 +142,14 @@ function MatchEditor({ file }: { readonly file: LibraryFile }) {
   });
 
   const apply = useTask(async (providerId: string) => {
-    await fixMatch({ titleId: title.id, provider: "tmdb", providerId });
+    const match = fieldEdit<string | null>(began, providerId, title.externalIds.tmdb);
+
+    if (match.kind === "edited") {
+      if (!(await confirmOverwrite(overtakenFields({ Match: match })))) return;
+
+      await platform.movies.metadata.match({ titleId: title.id, provider: "tmdb", providerId });
+    }
+
     router.back();
   });
 
@@ -142,9 +158,11 @@ function MatchEditor({ file }: { readonly file: LibraryFile }) {
 
   return (
     <>
-      <Text variant="bodyMedium" tone="muted" selectable>
-        {fileName(file.path)}
-      </Text>
+      {file === undefined ? null : (
+        <Text variant="bodyMedium" tone="muted" selectable>
+          {file}
+        </Text>
+      )}
       <TextField
         label="Title"
         value={query}
@@ -196,23 +214,17 @@ function MatchEditor({ file }: { readonly file: LibraryFile }) {
 }
 
 export default function FixMatch() {
-  const params = useLocalSearchParams<{ libraryId: string; titleId: string }>();
-  const libraryId = decodeLibraryId(params.libraryId);
-  const titleId = decodeTitleId(params.titleId);
-  const files = useCommandQuery("libraries.files", { libraryId, titleId, limit: 1 });
+  const platform = usePlatform();
+  const params = useLocalSearchParams<{ libraryId: string; titleId: string; file?: string }>();
+
+  const title = usePlatformQuery(platform.movies.titles.get, {
+    titleId: asTitleId(params.titleId),
+  });
 
   return (
     <OwnerScreen title="Fix Match">
-      <QueryView query={files}>
-        {(page) => {
-          const [file] = page.items;
-
-          return file === undefined ? (
-            <Text tone="muted">This title is gone.</Text>
-          ) : (
-            <MatchEditor key={file.title.id} file={file} />
-          );
-        }}
+      <QueryView query={title}>
+        {(detail) => <MatchEditor key={detail.id} title={detail} file={params.file} />}
       </QueryView>
     </OwnerScreen>
   );

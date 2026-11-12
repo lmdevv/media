@@ -1,3 +1,4 @@
+import { usePages } from "@media/mobile-core/pages";
 import { usePlatform } from "@media/sdk/react";
 import { useLocalSearchParams } from "expo-router";
 import { Tags } from "lucide-react-native";
@@ -15,7 +16,6 @@ import { NavHeader } from "@/components/ui/nav-header";
 import { Screen } from "@/components/ui/screen";
 import { DEFAULT_FILTERS, listArgs } from "@/lib/browse";
 import type { KindFilter } from "@/lib/browse";
-import { usePages } from "@/lib/pages";
 
 const kindParam = (raw: string | undefined): KindFilter =>
   raw === "movie" || raw === "show" ? raw : "all";

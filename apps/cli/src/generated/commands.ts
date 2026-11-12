@@ -1904,6 +1904,46 @@ export const generatedCommands = [
     method: (platform) => platform.core.permissions.groups.list,
   }),
   coreCommand({
+    name: "core.permissions.groups.memberOf",
+    path: ["admin", "groups", "member-of"],
+    kind: "query",
+    scope: "admin",
+    refusesKeys: false,
+    summary: "List the groups someone is in, at most 16, so their page shows what reaches them",
+    secrets: [],
+    paginated: true,
+    args: Schema.Struct({
+      userId: Schema.String.pipe(Schema.brand("Id<users>")),
+      paginationOpts: Schema.Struct({
+        numItems: Schema.Finite,
+        cursor: Schema.Union([Schema.String, Schema.Null]),
+        endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+        id: Schema.optionalKey(Schema.Finite),
+        maximumRowsRead: Schema.optionalKey(Schema.Finite),
+        maximumBytesRead: Schema.optionalKey(Schema.Finite),
+      }),
+    }),
+    result: Schema.Struct({
+      page: Schema.Array(
+        Schema.Struct({
+          groupId: Schema.String.pipe(Schema.brand("Id<groups>")),
+          name: Schema.String,
+        }),
+      ),
+      continueCursor: Schema.String,
+      isDone: Schema.Boolean,
+      splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      pageStatus: Schema.optionalKey(
+        Schema.Union([
+          Schema.Literal("SplitRecommended"),
+          Schema.Literal("SplitRequired"),
+          Schema.Null,
+        ]),
+      ),
+    }),
+    method: (platform) => platform.core.permissions.groups.memberOf,
+  }),
+  coreCommand({
     name: "core.permissions.groups.members",
     path: ["admin", "groups", "members"],
     kind: "query",

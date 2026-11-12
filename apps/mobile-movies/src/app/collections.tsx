@@ -1,3 +1,4 @@
+import { usePages } from "@media/mobile-core/pages";
 import { usePlatform } from "@media/sdk/react";
 import { Library } from "lucide-react-native";
 import { ActivityIndicator, FlatList } from "react-native";
@@ -10,7 +11,6 @@ import { Button } from "@/components/ui/button";
 import { CalmState } from "@/components/ui/calm-state";
 import { NavHeader } from "@/components/ui/nav-header";
 import { Screen } from "@/components/ui/screen";
-import { usePages } from "@/lib/pages";
 
 export default function Collections() {
   return (

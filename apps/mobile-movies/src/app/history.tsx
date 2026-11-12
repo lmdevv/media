@@ -1,3 +1,4 @@
+import { usePages } from "@media/mobile-core/pages";
 import { usePlatform } from "@media/sdk/react";
 import { router } from "expo-router";
 import { Ellipsis, History as HistoryIcon, Play } from "lucide-react-native";
@@ -16,7 +17,6 @@ import { artworkUrl } from "@/lib/artwork";
 import type { HistoryEntry } from "@/lib/catalog";
 import { progressLabel } from "@/lib/format";
 import { historyDetail, historyKey, historyName, historySections } from "@/lib/history";
-import { usePages } from "@/lib/pages";
 import { watchHref } from "@/lib/routes";
 import { useServer } from "@/session/connection";
 

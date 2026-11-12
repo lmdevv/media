@@ -1,23 +1,20 @@
-import { LibraryId } from "@media/contracts/ids";
-import { useCommand } from "@media/sdk/react";
-import { Schema } from "effect";
+import { usePlatform } from "@media/sdk/react";
 import { router, useLocalSearchParams } from "expo-router";
 import { Trash2 } from "lucide-react-native";
 
 import { useTask } from "@/components/owner/use-task";
 import { Sheet, useSheetExit } from "@/components/title/sheet";
 import { Button } from "@/components/ui/button";
-
-const decodeLibraryId = Schema.decodeUnknownSync(LibraryId);
+import { asLibraryId } from "@/lib/owner";
 
 export default function RemoveLibrary() {
   const params = useLocalSearchParams<{ libraryId: string; name: string }>();
-  const libraryId = decodeLibraryId(params.libraryId);
-  const remove = useCommand("libraries.remove");
+  const libraryId = asLibraryId(params.libraryId);
+  const platform = usePlatform();
   const exit = useSheetExit();
 
   const confirm = useTask(async () => {
-    await remove({ libraryId });
+    await platform.core.libraries.remove({ libraryId });
     router.dismissTo("/owner/libraries");
   });
 

@@ -1,3 +1,4 @@
+import { describeFailure, isFailure } from "@media/mobile-core/failure";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
@@ -15,7 +16,6 @@ import { artworkUrl } from "@/lib/artwork";
 import { creditedTitles } from "@/lib/browse";
 import { asPersonId } from "@/lib/catalog";
 import type { PersonId } from "@/lib/catalog";
-import { describeFailure, isFailure } from "@/lib/failure";
 import { useServer } from "@/session/connection";
 
 export default function PersonPage() {

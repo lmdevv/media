@@ -1,15 +1,27 @@
-import { ProfileId } from "@media/contracts/ids";
-import {
-  MigrationConnection,
-  MigrationReport,
-  MigrationRun,
-} from "@media/contracts/models/migration";
-import { Schema } from "effect";
+import type { HouseholdUser } from "@media/mobile-core/accounts";
+import { ImportConnection, ImportReport } from "@media/contracts/models/migration";
+import { Brand, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { SKIP, userRows } from "@media/contracts/migration-plan";
+import {
+  SKIP,
+  choiceLabel,
+  doneRows,
+  importFraction,
+  mappingsFor,
+  phaseRows,
+  reviewRows,
+  userRows,
+} from "./migration";
+import type { ImportRun } from "./owner";
 
-import { SKIP_LABEL, choiceLabel, doneRows, phaseRows, reviewRows } from "./migration";
+const coreUserId = Brand.nominal<HouseholdUser["userId"]>();
+
+const importId = Brand.nominal<ImportRun["importId"]>();
+
+const jobId = Brand.nominal<ImportRun["job"]["jobId"]>();
+
+const lucia: HouseholdUser = { userId: coreUserId("u1"), username: "lucia", role: "owner" };
 
 const summary = {
   usersMapped: 1,
@@ -29,48 +41,45 @@ const summary = {
   conflicts: 0,
 };
 
-const connection = Schema.decodeSync(MigrationConnection)({
+const connection = Schema.decodeSync(ImportConnection)({
   status: "connected",
   connectionId: "c1",
   source: "jellyfin",
-  serverName: "Home",
-  version: "10.10.3",
+  serverName: "Den",
+  version: "10.10.0",
   users: [
     {
-      sourceUserId: "u1",
-      name: "Alex",
+      sourceUserId: "s1",
+      name: "Lucía",
       email: null,
       isAdmin: true,
-      suggestion: { kind: "profile", userId: "acct-sam", profileId: "p-sam", matchedBy: "name" },
+      suggestion: { kind: "user", userId: "u1", matchedBy: "name" },
       history: "full",
     },
     {
-      sourceUserId: "u2",
-      name: "Jordan",
+      sourceUserId: "s2",
+      name: "Kid",
       email: null,
       isAdmin: false,
-      suggestion: { kind: "invite" },
+      suggestion: { kind: "user", userId: "u9", matchedBy: "name" },
       history: "full",
     },
   ],
   libraries: [],
-  pathMappings: [
-    { from: "/data", to: "/mnt/nas", inferred: false },
-    { from: "/tv", to: "/media/tv", inferred: true },
-  ],
-  expiresAt: 1,
+  pathMappings: [],
+  expiresAt: 0,
 });
 
-const report = Schema.decodeSync(MigrationReport)({
+const report = Schema.decodeSync(ImportReport)({
   status: "ready",
   connectionId: "c1",
   source: "jellyfin",
-  serverName: "Home",
-  createdAt: 1,
+  serverName: "Den",
+  createdAt: 0,
   summary,
   users: [
-    { sourceUserId: "u1", name: "Alex", profileId: "p-sam", action: "import" },
-    { sourceUserId: "u2", name: "Jordan", profileId: null, action: "invite" },
+    { sourceUserId: "s1", name: "Lucía", userId: "u1", action: "import" },
+    { sourceUserId: "s2", name: "Kid", userId: null, action: "skip" },
   ],
   libraries: [
     {
@@ -96,40 +105,41 @@ const report = Schema.decodeSync(MigrationReport)({
 });
 
 const run = (
-  phase: MigrationRun["phase"],
-  status: MigrationRun["job"]["status"],
-  done: number,
-  total: number | null,
-) =>
-  Schema.decodeSync(MigrationRun)({
-    job: {
-      id: "j1",
-      kind: "migration",
-      status,
-      payload: { kind: "migration", source: "jellyfin", serverName: "Home" },
-      progress: { done, total, message: null },
-      error: null,
-      requestedBy: null,
-      attempts: 1,
-      createdAt: 1,
-      startedAt: 1,
-      finishedAt: null,
-    },
+  fields: Partial<Omit<ImportRun, "job">> & { readonly job?: Partial<ImportRun["job"]> },
+): ImportRun => {
+  const base: ImportRun = {
+    importId: importId("i1"),
     source: "jellyfin",
-    serverName: "Home",
-    phase,
+    serverName: "Den",
+    createdAt: 0,
+    phase: "watchState",
+    users: 2,
     imported: {
       librariesAdded: 1,
       watched: 1842,
       inProgress: 23,
-      playCounts: 0,
       favorites: 64,
       collections: 2,
       overrides: 0,
       keptLocal: 0,
       unmatched: 0,
     },
-  });
+    job: {
+      jobId: jobId("j1"),
+      status: "running",
+      done: 1252,
+      total: 1842,
+      message: null,
+      error: null,
+      startedAt: 1,
+      attempt: 1,
+      canceling: false,
+      finishedAt: null,
+    },
+  };
+
+  return { ...base, ...fields, job: { ...base.job, ...fields.job } };
+};
 
 describe("migration", () => {
   it("lists what a dry run found, leaving out empty collections", () => {
@@ -140,36 +150,47 @@ describe("migration", () => {
       ["In Progress", "23 Items"],
       ["Favorites", "64"],
     ]);
-    expect(doneRows(run("done", "succeeded", 0, null)).map((row) => row.title)).toContain(
-      "Collections",
-    );
+    expect(
+      doneRows(run({ phase: "done", job: { status: "succeeded" } })).map((row) => row.title),
+    ).toContain("Collections");
   });
 
   it("marks each phase done, under way with its count, or waiting", () => {
-    const watching = run("watchState", "running", 1252, 1842);
-
-    expect(phaseRows(watching).map((row) => row.detail)).toStrictEqual([
+    expect(phaseRows(run({})).map((row) => row.detail)).toStrictEqual([
       "Complete",
       "Complete",
       "1,252 of 1,842",
       "Waiting",
       "Waiting",
     ]);
+    expect(phaseRows(run({ job: { status: "queued" } }))[2]?.detail).toBe("Waiting");
   });
 
-  it("names a skipped person's choice in Paper's title case", () => {
-    const rows = userRows(
-      connection,
-      report,
-      [{ id: Schema.decodeSync(ProfileId)("p-own"), name: "Me" }],
-      [],
-      SKIP_LABEL,
-    );
+  it("weighs each phase and counts a finished import as complete", () => {
+    expect(importFraction(run({ job: { done: 50, total: 100 } }))).toBeCloseTo(0.3 + 0.55 * 0.5);
+    expect(importFraction(run({ phase: "done" }))).toBe(1);
+    expect(importFraction(run({ job: { status: "succeeded" } }))).toBe(1);
+  });
 
-    const jordan = rows[1];
+  it("offers every person here, a suggestion not listed, and skipping in Paper's title case", () => {
+    const rows = userRows(connection, report, [lucia]);
 
-    expect(jordan?.choice).toBe(SKIP);
-    expect(jordan === undefined ? null : choiceLabel(jordan)).toBe("Don’t Import");
-    expect(rows[0] === undefined ? null : choiceLabel(rows[0])).toBe("Suggested");
+    expect(rows.map((row) => row.choice)).toStrictEqual(["u1", SKIP]);
+    expect(rows[1]?.options.map((option) => option.label)).toStrictEqual([
+      "Suggested",
+      "lucia",
+      "Don’t Import",
+    ]);
+    expect(rows[0] === undefined ? null : choiceLabel(rows[0])).toBe("lucia");
+    expect(rows[1] === undefined ? null : choiceLabel(rows[1])).toBe("Don’t Import");
+  });
+
+  it("maps a changed choice and keeps the rest", () => {
+    const rows = userRows(connection, report, [lucia]);
+
+    expect(mappingsFor(rows, { sourceUserId: "s1", choice: SKIP })).toStrictEqual([
+      { sourceUserId: "s1", userId: null },
+      { sourceUserId: "s2", userId: null },
+    ]);
   });
 });

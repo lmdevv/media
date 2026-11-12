@@ -1,3 +1,4 @@
+import { describeFailure } from "@media/mobile-core/failure";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { Stack, router, useFocusEffect, useNavigation } from "expo-router";
 import { Search as SearchIcon } from "lucide-react-native";
@@ -17,7 +18,6 @@ import { Text } from "@/components/ui/text";
 import { gridRows, kindFacts, popularTitles } from "@/lib/browse";
 import type { KindFilter } from "@/lib/browse";
 import type { PersonCard, TitleCard } from "@/lib/catalog";
-import { describeFailure } from "@/lib/failure";
 import { useGridLayout, useWidthClass } from "@/lib/use-width-class";
 import { useThemeColor } from "@/lib/theme-color";
 

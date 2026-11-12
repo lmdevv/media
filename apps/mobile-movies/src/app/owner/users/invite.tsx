@@ -1,6 +1,7 @@
-import type { CreatedInvite } from "@media/contracts/models/account";
-import type { AssignableRole } from "@media/contracts/scopes";
-import { useCommand } from "@media/sdk/react";
+import { INVITE_DAYS, ROLE_LABELS, accountUrlOf, expiryLine } from "@media/mobile-core/accounts";
+import type { AssignableRole } from "@media/mobile-core/accounts";
+import { useMakeInvite } from "@media/mobile-core/use-accounts";
+import type { MadeInvite } from "@media/mobile-core/use-accounts";
 import { router } from "expo-router";
 import { Share as ShareIcon, ShieldCheck, User } from "lucide-react-native";
 import type { LucideIcon } from "lucide-react-native";
@@ -12,98 +13,74 @@ import { useTask } from "@/components/owner/use-task";
 import { Button } from "@/components/ui/button";
 import { ListRow } from "@/components/ui/list-row";
 import { Text } from "@/components/ui/text";
-import { TextField } from "@/components/ui/text-field";
-import { expiryLine } from "@/lib/household";
+import { useServer } from "@/session/connection";
 
-const DAYS = 7;
-
-const ROLES: ReadonlyArray<{
-  readonly role: AssignableRole;
-  readonly label: string;
-  readonly icon: LucideIcon;
-}> = [
-  { role: "member", label: "Member", icon: User },
-  { role: "admin", label: "Admin", icon: ShieldCheck },
+const ROLES: ReadonlyArray<{ readonly role: AssignableRole; readonly icon: LucideIcon }> = [
+  { role: "member", icon: User },
+  { role: "admin", icon: ShieldCheck },
 ];
 
-function InviteReady({ created }: { readonly created: CreatedInvite }) {
+function InviteReady({ made }: { readonly made: MadeInvite }) {
   return (
     <>
       <Text variant="label" tone="muted">
-        {created.invite.email === null ? "Invite Link" : `Invite Link for ${created.invite.email}`}
+        Invite Link
       </Text>
       <Text variant="mono" selectable>
-        {created.url}
+        {made.link}
       </Text>
       <Button
         label="Share Invite"
         icon={ShareIcon}
-        onPress={() => void Share.share({ url: created.url })}
+        onPress={() => void Share.share({ url: made.link })}
       />
       <Button label="Done" variant="secondary" onPress={() => router.back()} />
       <Text variant="secondary" tone="muted">
-        {`${expiryLine(DAYS)} · Works once`}
+        {`${expiryLine(INVITE_DAYS)} · Works once`}
       </Text>
     </>
   );
 }
 
 export default function InviteSomeone() {
-  const create = useCommand("invites.create");
-  const [email, setEmail] = useState("");
+  const { moviesUrl } = useServer();
+  const makeInvite = useMakeInvite(accountUrlOf(moviesUrl));
   const [role, setRole] = useState<AssignableRole>("member");
-  const [created, setCreated] = useState<CreatedInvite | null>(null);
+  const [made, setMade] = useState<MadeInvite | null>(null);
 
   const submit = useTask(async () => {
-    const address = email.trim();
-
-    setCreated(
-      await create(
-        address === ""
-          ? { role, expiresInDays: DAYS }
-          : { email: address, role, expiresInDays: DAYS },
-      ),
-    );
+    setMade(await makeInvite(role));
   });
 
-  if (created !== null) {
+  if (made !== null) {
     return (
       <OwnerScreen title="Invite Someone" fallback="/owner/users">
-        <InviteReady created={created} />
+        <InviteReady made={made} />
       </OwnerScreen>
     );
   }
 
   return (
     <OwnerScreen title="Invite Someone" fallback="/owner/users">
-      <TextField
-        label="Email"
-        placeholder="Optional"
-        value={email}
-        onChangeText={(text) => {
-          setEmail(text);
-          submit.clearError();
-        }}
-        error={submit.error}
-        autoCapitalize="none"
-        keyboardType="email-address"
-        textContentType="emailAddress"
-        autoComplete="email"
-      />
       <SectionHeading>Role</SectionHeading>
       {ROLES.map((each) => (
         <ListRow
           key={each.role}
           icon={each.icon}
-          title={each.label}
+          title={ROLE_LABELS[each.role]}
           detail={each.role === role ? "Selected" : undefined}
           chevron={false}
           onPress={() => setRole(each.role)}
         />
       ))}
+      {submit.error === null ? null : (
+        <Text variant="meta" tone="danger">
+          {submit.error}
+        </Text>
+      )}
       <Button label="Create Invite" busy={submit.busy} onPress={() => void submit.run()} />
       <Text variant="secondary" tone="muted">
-        {expiryLine(DAYS)}
+        {expiryLine(INVITE_DAYS)}
       </Text>
     </OwnerScreen>
   );

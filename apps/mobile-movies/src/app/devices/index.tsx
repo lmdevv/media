@@ -1,3 +1,4 @@
+import { useAllPages } from "@media/mobile-core/pages";
 import { usePlatform } from "@media/sdk/react";
 import { router } from "expo-router";
 import { Monitor, Plus, Smartphone } from "lucide-react-native";
@@ -9,7 +10,6 @@ import { ListRow } from "@/components/ui/list-row";
 import { NavHeader } from "@/components/ui/nav-header";
 import { Screen } from "@/components/ui/screen";
 import { deviceDetail, listedDevices } from "@/lib/account";
-import { useAllPages } from "@/lib/pages";
 import { useMe } from "@/session/me";
 
 export default function Devices() {

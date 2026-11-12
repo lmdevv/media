@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { describeFailure } from "@/lib/failure";
+import { describeFailure } from "@media/mobile-core/failure";
 
 /** An action's state and the way to run it. */
 export interface Task<Args extends ReadonlyArray<unknown>, A> {

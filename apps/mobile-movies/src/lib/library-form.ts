@@ -1,38 +1,26 @@
-import type { LibraryDetail } from "@media/contracts/models/catalog";
 import { normalizeFolder } from "@media/contracts/library-folder";
+import { fieldEdit } from "@media/mobile-core/edits";
+import type { FieldEdit } from "@media/mobile-core/edits";
 
-/** The kinds the form offers; `mixed` libraries come from imports and keep their kind. */
-export type FormKind = "movies" | "shows";
+import type { LibraryDetail } from "./owner";
 
 /** What the form holds. */
 export interface LibraryDraft {
   readonly name: string;
-  readonly kind: FormKind;
   /** One or more folders; a new library starts with one. */
   readonly folders: ReadonlyArray<string>;
 }
 
-/** The kind chips' labels, which are also a new library's default names. */
-export const KIND_LABELS: Readonly<Record<FormKind, string>> = {
-  movies: "Movies",
-  shows: "Shows",
-};
+/**
+ * A new library: named Movies, with one empty folder. The core keeps movies and shows in one kind
+ * of library and tells them apart by their files, so the form has no kind to choose.
+ */
+export const NEW_DRAFT: LibraryDraft = { name: "Movies", folders: [""] };
 
-/** A new library: Movies, named after its kind, with one empty folder. */
-export const NEW_DRAFT: LibraryDraft = { name: KIND_LABELS.movies, kind: "movies", folders: [""] };
-
-/** The draft for editing `library`: its own name and folders. */
+/** The draft for editing `library`: its own name, and its folders when the core shows them. */
 export const draftOf = (library: LibraryDetail): LibraryDraft => ({
   name: library.name,
-  kind: library.kind === "shows" ? "shows" : "movies",
-  folders: library.roots.length === 0 ? [""] : library.roots,
-});
-
-/** `draft` with kind `kind`; a name still at the old kind's default follows to the new one. */
-export const withKind = (draft: LibraryDraft, kind: FormKind): LibraryDraft => ({
-  ...draft,
-  kind,
-  name: draft.name.trim() === KIND_LABELS[draft.kind] ? KIND_LABELS[kind] : draft.name,
+  folders: library.folders === null || library.folders.length === 0 ? [""] : library.folders,
 });
 
 /** `draft` with folder `index` set to `folder`. */
@@ -72,10 +60,10 @@ export const filledFolders = (
     field === 0 || path.trim() !== "" ? [{ field, path }] : [],
   );
 
-/** The draft as the server takes it: a trimmed name and its filled folders, normalized. */
+/** The draft as the core takes it: a trimmed name and its filled folders, normalized. */
 export const submission = (draft: LibraryDraft) => ({
   name: draft.name.trim(),
-  roots: filledFolders(draft).map((folder) => normalizeFolder(folder.path)),
+  folders: filledFolders(draft).map((folder) => normalizeFolder(folder.path)),
 });
 
 /**
@@ -108,4 +96,40 @@ export const fieldNamedIn = (
   }
 
   return null;
+};
+
+/** The fields of a library its edit form changes, as the core holds them. */
+export interface LibraryFields {
+  readonly name: string;
+  readonly folders: ReadonlyArray<string>;
+}
+
+/** `library`'s name and folders. */
+export const fieldsOf = (library: LibraryDetail): LibraryFields => ({
+  name: library.name,
+  folders: library.folders ?? [],
+});
+
+/** What saving the edit form writes: each field the person changed, and only those. */
+export interface LibrarySave {
+  readonly name: FieldEdit<string>;
+  readonly folders: FieldEdit<ReadonlyArray<string>>;
+}
+
+/**
+ * The save of `draft`, with `began` as the library was when the form opened and `live` as it is
+ * now. A field counts as edited only when the person changed it from `began`, so a rename never
+ * writes back folders another admin changed meanwhile.
+ */
+export const librarySave = (
+  began: LibraryFields,
+  draft: LibraryDraft,
+  live: LibraryFields,
+): LibrarySave => {
+  const sent = submission(draft);
+
+  return {
+    name: fieldEdit(began.name, sent.name, live.name),
+    folders: fieldEdit(began.folders, sent.folders, live.folders),
+  };
 };

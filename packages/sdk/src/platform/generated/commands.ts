@@ -1434,6 +1434,40 @@ const core_permissions_groups_list = query({
   }),
 });
 
+const core_permissions_groups_memberOf = query({
+  name: "core.permissions.groups.memberOf",
+  path: "core/permissions/groups:memberOf",
+  args: Schema.Struct({
+    userId: Schema.String.pipe(Schema.brand("Id<users>")),
+    paginationOpts: Schema.Struct({
+      numItems: Schema.Finite,
+      cursor: Schema.Union([Schema.String, Schema.Null]),
+      endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      id: Schema.optionalKey(Schema.Finite),
+      maximumRowsRead: Schema.optionalKey(Schema.Finite),
+      maximumBytesRead: Schema.optionalKey(Schema.Finite),
+    }),
+  }),
+  result: Schema.Struct({
+    page: Schema.Array(
+      Schema.Struct({
+        groupId: Schema.String.pipe(Schema.brand("Id<groups>")),
+        name: Schema.String,
+      }),
+    ),
+    continueCursor: Schema.String,
+    isDone: Schema.Boolean,
+    splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+    pageStatus: Schema.optionalKey(
+      Schema.Union([
+        Schema.Literal("SplitRecommended"),
+        Schema.Literal("SplitRequired"),
+        Schema.Null,
+      ]),
+    ),
+  }),
+});
+
 const core_permissions_groups_members = query({
   name: "core.permissions.groups.members",
   path: "core/permissions/groups:members",
@@ -3892,6 +3926,8 @@ export const effectMethods = (method: EffectBuilder) => ({
         create: method.mutation(core_permissions_groups_create),
         /** `core.permissions.groups.list` (query, admin): List the groups by name. */
         list: method.query(core_permissions_groups_list),
+        /** `core.permissions.groups.memberOf` (query, admin): List the groups someone is in, at most 16, so their page shows what reaches them. */
+        memberOf: method.query(core_permissions_groups_memberOf),
         /** `core.permissions.groups.members` (query, admin): List the people in a group. */
         members: method.query(core_permissions_groups_members),
         /** `core.permissions.groups.remove` (mutation, admin): Delete a group, so what was shared with it no longer reaches its members. */
@@ -4236,6 +4272,8 @@ export const promiseMethods = (method: PromiseBuilder) => ({
         create: method.mutation(core_permissions_groups_create),
         /** `core.permissions.groups.list` (query, admin): List the groups by name. */
         list: method.query(core_permissions_groups_list),
+        /** `core.permissions.groups.memberOf` (query, admin): List the groups someone is in, at most 16, so their page shows what reaches them. */
+        memberOf: method.query(core_permissions_groups_memberOf),
         /** `core.permissions.groups.members` (query, admin): List the people in a group. */
         members: method.query(core_permissions_groups_members),
         /** `core.permissions.groups.remove` (mutation, admin): Delete a group, so what was shared with it no longer reaches its members. */

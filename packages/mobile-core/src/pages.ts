@@ -1,6 +1,6 @@
 /**
- * Paging over the core's paginated queries, as `@media/ui/lib/pages` does for the web clients. The
- * app cannot import `@media/ui`, which pulls web-only modules into the iOS bundle.
+ * Paging over the core's paginated queries, as `@media/ui/lib/pages` does for the web clients. An
+ * iOS app cannot import `@media/ui`, which pulls web-only modules into its bundle.
  */
 import type { QueryState } from "@media/sdk/react";
 import { useEffect, useState, useSyncExternalStore } from "react";

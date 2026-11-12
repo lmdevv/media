@@ -1,7 +1,7 @@
-import type { MigrationPhase, MigrationRun } from "@media/contracts/models/migration";
-import { SOURCE_NAMES, importFraction } from "@media/contracts/migration-plan";
-import { useCommandQuery } from "@media/sdk/react";
-import { router, useLocalSearchParams } from "expo-router";
+import type { ImportPhase } from "@media/contracts/models/migration";
+import { SOURCE_NAMES } from "@media/contracts/migration-plan";
+import { usePlatform, usePlatformQuery } from "@media/sdk/react";
+import { Redirect, router, useLocalSearchParams } from "expo-router";
 import {
   Bookmark,
   Check,
@@ -13,22 +13,23 @@ import {
   Pencil,
   Play,
   RotateCcw,
+  Users,
   X,
 } from "lucide-react-native";
 import type { LucideIcon } from "lucide-react-native";
 
-import { InlineState, Loading, LoadFailure, Meter, OwnerScreen } from "@/components/owner/parts";
+import { InlineState, Meter, OwnerScreen, QueryView } from "@/components/owner/parts";
 import { Button } from "@/components/ui/button";
 import { ListRow } from "@/components/ui/list-row";
-import { Text } from "@/components/ui/text";
-import { doneRows, phaseRows } from "@/lib/migration";
+import { doneRows, importFraction, isRunning, phaseRows } from "@/lib/migration";
 import type { CountRow } from "@/lib/migration";
+import { asImportId } from "@/lib/owner";
+import type { ImportId, ImportRun } from "@/lib/owner";
 import { formatPercent } from "@/lib/owner-format";
-import { isActive } from "@/lib/scans";
 import { useFinishSetup } from "@/session/finish-setup";
 import { useSessionPhase } from "@/session/session-phase";
 
-const PHASE_ICONS: Readonly<Record<MigrationPhase, LucideIcon>> = {
+const PHASE_ICONS: Readonly<Record<ImportPhase, LucideIcon>> = {
   libraries: Folder,
   scanning: FolderSearch,
   watchState: History,
@@ -39,7 +40,7 @@ const PHASE_ICONS: Readonly<Record<MigrationPhase, LucideIcon>> = {
 
 const DONE_ICONS: Readonly<Record<CountRow["key"], LucideIcon>> = {
   libraries: Folder,
-  users: Folder,
+  users: Users,
   watched: History,
   inProgress: Play,
   favorites: Bookmark,
@@ -56,7 +57,7 @@ const useGoHome = () => {
   };
 };
 
-function Importing({ run }: { readonly run: MigrationRun }) {
+function Importing({ run }: { readonly run: ImportRun }) {
   const goHome = useGoHome();
   const fraction = importFraction(run);
 
@@ -80,7 +81,7 @@ function Importing({ run }: { readonly run: MigrationRun }) {
   );
 }
 
-function Complete({ run }: { readonly run: MigrationRun }) {
+function Complete({ run }: { readonly run: ImportRun }) {
   const goHome = useGoHome();
 
   return (
@@ -94,7 +95,7 @@ function Complete({ run }: { readonly run: MigrationRun }) {
   );
 }
 
-function Stopped({ run }: { readonly run: MigrationRun }) {
+function Stopped({ run }: { readonly run: ImportRun }) {
   return (
     <>
       <InlineState
@@ -117,50 +118,35 @@ const useLeaveImport = () => {
   return () => router.dismissTo(phase.kind === "setup" ? "/owner/first-library" : "/owner");
 };
 
-export default function ImportProgress() {
-  const params = useLocalSearchParams<{ jobId?: string }>();
-  const runs = useCommandQuery("migration.status", {});
+function RunView({ run }: { readonly run: ImportRun }) {
+  if (run.job.status === "succeeded") return <Complete run={run} />;
+
+  return isRunning(run) ? <Importing run={run} /> : <Stopped run={run} />;
+}
+
+function RunProgress({ importId }: { readonly importId: ImportId }) {
+  const platform = usePlatform();
+  const run = usePlatformQuery(platform.movies.imports.get, { importId });
   const leave = useLeaveImport();
-
-  if (runs.status === "loading") {
-    return (
-      <OwnerScreen title="Importing" onBack={leave}>
-        <Loading />
-      </OwnerScreen>
-    );
-  }
-
-  if (runs.status === "error") {
-    return (
-      <OwnerScreen title="Importing" onBack={leave}>
-        <LoadFailure error={runs.error} retry={runs.retry} />
-      </OwnerScreen>
-    );
-  }
-
-  const run =
-    runs.data.find((each) => each.job.id === params.jobId) ??
-    runs.data.find((each) => isActive(each.job));
-
-  if (run === undefined) {
-    return (
-      <OwnerScreen title="Importing" onBack={leave}>
-        <Text tone="muted">This import is gone.</Text>
-      </OwnerScreen>
-    );
-  }
-
-  if (run.job.status === "succeeded") {
-    return (
-      <OwnerScreen title="Import Complete" onBack={leave}>
-        <Complete run={run} />
-      </OwnerScreen>
-    );
-  }
+  const done = run.status === "success" && run.data.job.status === "succeeded";
 
   return (
-    <OwnerScreen title="Importing" onBack={leave}>
-      {isActive(run.job) ? <Importing run={run} /> : <Stopped run={run} />}
+    <OwnerScreen title={done ? "Import Complete" : "Importing"} onBack={leave}>
+      <QueryView query={run}>{(shown) => <RunView run={shown} />}</QueryView>
     </OwnerScreen>
   );
+}
+
+/**
+ * The import a link names. One that names none goes to Import, which opens the import still
+ * running, if any.
+ */
+export default function ImportProgress() {
+  const params = useLocalSearchParams<{ importId?: string }>();
+
+  if (params.importId === undefined || params.importId === "") {
+    return <Redirect href="/owner/import" />;
+  }
+
+  return <RunProgress key={params.importId} importId={asImportId(params.importId)} />;
 }

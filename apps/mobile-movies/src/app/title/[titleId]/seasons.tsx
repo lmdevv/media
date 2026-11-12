@@ -1,3 +1,4 @@
+import { describeFailure } from "@media/mobile-core/failure";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { router, useLocalSearchParams } from "expo-router";
 
@@ -5,7 +6,6 @@ import { seasonParam, titleIdParam } from "@/components/title/route-params";
 import { Sheet } from "@/components/title/sheet";
 import { seasonDetail } from "@/components/title/title-model";
 import { ListRow } from "@/components/ui/list-row";
-import { describeFailure } from "@/lib/failure";
 
 export default function Seasons() {
   const params = useLocalSearchParams<{ titleId: string; season?: string }>();

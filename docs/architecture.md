@@ -45,7 +45,7 @@ packages/
   commands/           the command list and its generator
   contracts/          Effect Schema DTOs, errors, the server's HttpApi
   sdk/                Effect core with /effect, /react, /promise entry points
-  mobile-core/        shared iOS app code: connection, shared keychain, sign-in, enrollment
+  mobile-core/        shared iOS app code: connection, keychains, sign-in, users and invites
   ui/                 shared shadcn base and type scale
   config/             shared strict tsconfig
 deploy/               the all-in-one image; Compose adds optional sidecars

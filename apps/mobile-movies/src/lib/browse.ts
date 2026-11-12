@@ -1,3 +1,4 @@
+import type { PageOpts } from "@media/mobile-core/pages";
 import type { PlatformSdk } from "@media/sdk/promise";
 
 import type {
@@ -11,7 +12,6 @@ import type {
 } from "./catalog";
 import { episodeCode, facts, formatRuntime, progressFraction } from "./format";
 import type { WidthClass } from "./layout";
-import type { PageOpts } from "./pages";
 import { watchHref } from "./routes";
 
 /** `1 movie`, `8 movies`. */

@@ -1,3 +1,5 @@
+import { describeFailure, isFailure } from "@media/mobile-core/failure";
+import { useAllPages } from "@media/mobile-core/pages";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { router, useLocalSearchParams } from "expo-router";
 import { ChevronDown, CircleAlert } from "lucide-react-native";
@@ -25,8 +27,6 @@ import { NavHeader } from "@/components/ui/nav-header";
 import { Screen } from "@/components/ui/screen";
 import { Text } from "@/components/ui/text";
 import type { SeasonEpisode, TitleDetail, TitleId } from "@/lib/catalog";
-import { describeFailure, isFailure } from "@/lib/failure";
-import { useAllPages } from "@/lib/pages";
 import { episodeLayout, heroHeight, rowsOf, topBarFade } from "@/lib/title-layout";
 import { useWidthClass } from "@/lib/use-width-class";
 

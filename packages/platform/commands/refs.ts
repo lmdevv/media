@@ -156,6 +156,8 @@ export const commandRefs = {
     .create satisfies core_permissions_groups["create"],
   "core.permissions.groups.list": api.core.permissions.groups
     .list satisfies core_permissions_groups["list"],
+  "core.permissions.groups.memberOf": api.core.permissions.groups
+    .memberOf satisfies core_permissions_groups["memberOf"],
   "core.permissions.groups.members": api.core.permissions.groups
     .members satisfies core_permissions_groups["members"],
   "core.permissions.groups.remove": api.core.permissions.groups

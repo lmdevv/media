@@ -1,5 +1,6 @@
 import "../global.css";
 
+import { describeFailure } from "@media/mobile-core/failure";
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect, useMemo, useState } from "react";
@@ -13,7 +14,6 @@ import { ServerUnavailable } from "@/components/server-unavailable";
 import { TitleStatesProvider } from "@/components/browse/title-states";
 import { Button } from "@/components/ui/button";
 import { applyAppearance } from "@/lib/appearance";
-import { describeFailure } from "@/lib/failure";
 import { displayHost } from "@/lib/local-network";
 import { useSheetOptions } from "@/lib/sheet";
 import { useThemeColor } from "@/lib/theme-color";

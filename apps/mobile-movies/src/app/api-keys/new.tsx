@@ -1,3 +1,4 @@
+import { describeFailure } from "@media/mobile-core/failure";
 import { usePlatform } from "@media/sdk/react";
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
@@ -16,7 +17,6 @@ import { TextField } from "@/components/ui/text-field";
 import { Toggle } from "@/components/ui/toggle";
 import { broadestLabel, grantablePermissions } from "@/lib/api-keys";
 import type { KeyScope } from "@/lib/api-keys";
-import { describeFailure } from "@/lib/failure";
 import { useMadeKeys } from "@/session/made-keys";
 import { useMe } from "@/session/me";
 

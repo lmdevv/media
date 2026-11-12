@@ -275,9 +275,6 @@ importers:
       '@media/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk
-      convex:
-        specifier: 'catalog:'
-        version: 1.46.0(react@19.3.0)
       effect:
         specifier: 'catalog:'
         version: 4.0.3
@@ -656,9 +653,15 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 26.6.5
+      '@types/react':
+        specifier: 'catalog:'
+        version: 19.3.0
       expo-secure-store:
         specifier: ~58.0.2
         version: 58.0.2(expo@58.0.17)
+      react:
+        specifier: 'catalog:'
+        version: 19.3.0
       typescript:
         specifier: 'catalog:'
         version: 7.0.2

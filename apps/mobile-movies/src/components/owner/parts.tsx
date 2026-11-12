@@ -1,3 +1,5 @@
+import { describeFailure } from "@media/mobile-core/failure";
+import type { Paged } from "@media/mobile-core/pages";
 import type { QueryState } from "@media/sdk/react";
 import type { LucideIcon } from "lucide-react-native";
 import { RotateCcw } from "lucide-react-native";
@@ -14,7 +16,6 @@ import { NavHeader } from "@/components/ui/nav-header";
 import { ProgressBar } from "@/components/ui/progress-bar";
 import { Screen } from "@/components/ui/screen";
 import { Text } from "@/components/ui/text";
-import { describeFailure } from "@/lib/failure";
 
 /** Props for `OwnerScreen`. */
 export interface OwnerScreenProps {
@@ -76,21 +77,26 @@ export function Loading() {
   return <ActivityIndicator className="py-10" colorClassName="accent-text-muted" />;
 }
 
-/** A query that failed: what went wrong and Try Again. */
-export function LoadFailure({
-  error,
+/** Something that failed to load: the line saying why, and Try Again. */
+function FailedToLoad({
+  message,
   retry,
 }: {
-  readonly error: unknown;
+  readonly message: string;
   readonly retry: () => void;
 }) {
   return (
     <CalmState
       title="Couldn’t Load This"
-      description={describeFailure(error)}
+      description={message}
       actions={<Button label="Try Again" variant="secondary" icon={RotateCcw} onPress={retry} />}
     />
   );
+}
+
+/** A query that failed: what went wrong and Try Again. */
+function LoadFailure({ error, retry }: { readonly error: unknown; readonly retry: () => void }) {
+  return <FailedToLoad message={describeFailure(error)} retry={retry} />;
 }
 
 /** Renders a query's rows once it loads, a spinner before, and a failure with Try Again. */
@@ -106,6 +112,43 @@ export function QueryView<A>({
   if (query.status === "error") return <LoadFailure error={query.error} retry={query.retry} />;
 
   return children(query.data);
+}
+
+/**
+ * Renders a paged list's rows once its first page loads, a spinner before, and a failure with Try
+ * Again; under the rows, Show More while more pages follow, or a later page's failure.
+ */
+export function PagedView<Row>({
+  list,
+  children,
+}: {
+  readonly list: Paged<Row>;
+  /** Draws the rows; `done` once no page follows them. */
+  readonly children: (rows: ReadonlyArray<Row>, done: boolean) => ReactNode;
+}) {
+  if (list.status === "loading") return <Loading />;
+
+  if (list.status === "failed") return <FailedToLoad message={list.message} retry={list.retry} />;
+
+  const { next } = list;
+
+  return (
+    <>
+      {children(list.rows, next.kind === "done")}
+      {next.kind === "loading" ? <Loading /> : null}
+      {next.kind === "more" ? (
+        <Button label="Show More" variant="secondary" onPress={next.load} />
+      ) : null}
+      {next.kind === "failed" ? (
+        <>
+          <Text variant="meta" tone="danger">
+            {next.message}
+          </Text>
+          <Button label="Try Again" variant="secondary" icon={RotateCcw} onPress={next.retry} />
+        </>
+      ) : null}
+    </>
+  );
 }
 
 /** A large count such as `42 of 186` or `68%` over the red progress track (I06, J03). */
