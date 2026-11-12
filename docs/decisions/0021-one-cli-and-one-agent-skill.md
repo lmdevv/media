@@ -149,7 +149,11 @@ NixOS module now run alone (ADR 0027).
   - a WebSocket client authenticates its connection, not each call, and Convex reports no
     confirmation of a renewed token. So a call or a subscription result carried the token held
     when it went out only if the connection held that one token, with no fetch out, until it was
-    answered. Otherwise its token is unsettled, and a refusal of it touches nothing.
+    answered, and the server had answered that token source (`setAuth`'s `onChange`): until it
+    has, the client can still hand out a query's result from before, such as a refusal computed
+    while signed out. Otherwise its token is unsettled, and a refusal of it touches nothing. A
+    sign-in returns only once the server has answered the new source, up to 10 seconds, so the
+    next call runs as the new session.
 
   On a refusal, decided from the session held now with no lock held across a network wait:
   - an unsettled token, another person's session, no session, or a call sent signed out: the

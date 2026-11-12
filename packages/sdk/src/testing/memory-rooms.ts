@@ -313,6 +313,7 @@ export const makeMemoryRooms = Effect.fn("MemoryRooms.make")(function* (
       call,
       subscribe: (path) => subscribe(path),
       setAuth: () => Effect.void,
+      authenticated: Effect.void,
     }),
     room: Ref.get(committed),
     serverNow,

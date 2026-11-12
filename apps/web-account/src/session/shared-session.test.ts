@@ -268,7 +268,9 @@ describe("clients sharing one session store", () => {
         const second = yield* openClient(fake, tabs.tab(1));
 
         yield* signInOn(fake, tabs.tab(0), "ada", 1);
-        yield* settle;
+        // The refused call must go out as the session, or no refresh is owed (a call sent signed
+        // out never touches a session taken up later).
+        yield* signedInBearerOf(first, fake);
         yield* refreshOnce(first);
         yield* settle;
 

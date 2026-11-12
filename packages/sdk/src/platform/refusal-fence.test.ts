@@ -416,6 +416,25 @@ describe("a refusal over the WebSocket connection", () => {
   });
 });
 
+describe("a sign-in over the WebSocket connection", () => {
+  it("returns only once the server has taken the new token, so no answer from before reaches the next call", async () => {
+    const token = jwtIssuedAt(Date.now(), 3600, "user-1|session-1");
+
+    const answer = await withPlatform(
+      (platform, fake) =>
+        Effect.gen(function* () {
+          yield* accounts(fake, { ada: tokens(token, "refresh-1") }, {});
+          yield* signInAs(platform, "ada");
+
+          return yield* fake.acceptedTokens;
+        }),
+      "websocket",
+    );
+
+    expect(answer).toContain(token);
+  });
+});
+
 describe("the web clients' media server calls", () => {
   it("refresh once after the media server refuses the session, and sign out when that is refused", async () => {
     const token = jwtExpiringAt(Date.now() + HOUR, "user-1|session-1");

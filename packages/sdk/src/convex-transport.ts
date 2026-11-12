@@ -115,6 +115,11 @@ export interface ClientAdapter {
   ) => Unsubscribe;
   /** Resolves once the client uses `source`, or no source when null. */
   readonly setAuth: (source: AuthTokenSource | null) => Promise<void>;
+  /**
+   * Resolves once the server has answered the client's current token source, accepting or
+   * refusing it; at once for a client that authenticates each request, or that has no source.
+   */
+  readonly authenticated: () => Promise<void>;
   readonly close: () => Promise<void>;
 }
 
@@ -138,6 +143,12 @@ export interface Interface {
   ) => Stream.Stream<Schema.Json, CallError>;
   /** Uses `source` for the auth token of every later call; null signs the connection out. */
   readonly setAuth: (source: AuthTokenSource | null) => Effect.Effect<void>;
+  /**
+   * Waits until the server has answered the connection's current token source, so a call made
+   * then runs as that session and no answer from before reaches it. A connection that
+   * authenticates each request, or has no source, does not wait.
+   */
+  readonly authenticated: Effect.Effect<void>;
 }
 
 /** The connection to the [movies] Convex deployment. */
@@ -252,6 +263,7 @@ export const make = (adapter: ClientAdapter): Effect.Effect<Interface> =>
           ),
         ),
       setAuth: (source) => Effect.promise(() => adapter.setAuth(source)),
+      authenticated: Effect.promise(() => adapter.authenticated()),
     }),
   );
 
@@ -396,6 +408,14 @@ const signedOut: AuthTokenFetcher = () => Promise.resolve(null);
 /** The token a fetcher's client holds: none until it has answered, null for none. */
 interface HeldToken {
   held: Option.Option<IssuedToken | null>;
+  /**
+   * Whether the server has answered the source yet. Until it has, the client's results may still
+   * come from before it, under the token it replaced.
+   */
+  answered: boolean;
+  /** Resolves once `answered`. */
+  readonly settled: Promise<void>;
+  readonly answer: () => void;
   /** Moves on each time the fetcher hands the client a different token. */
   version: number;
   /** Fetches out now. */
@@ -421,6 +441,7 @@ const sentOver = (start: FetcherMoment, end: FetcherMoment): SentWith =>
   start.version === end.version &&
   !start.busy &&
   !end.busy &&
+  start.state?.answered !== false &&
   Option.isSome(start.held)
     ? SentWith.Token({ issued: Option.fromNullishOr(start.held.value) })
     : SentWith.Unsettled();
@@ -458,7 +479,24 @@ export const clientTokenFetchers = () => {
   const fetcherFor = (source: AuthTokenSource, signal: AbortSignal) => {
     // The client keeps only the answer of the fetch it started last, so that answer is the token
     // it holds, and an older fetch still asking can stop: its answer will be discarded.
-    const state: HeldToken = { held: Option.none(), version: 0, fetching: 0 };
+    const answering = { resolve: (): void => undefined };
+
+    const settled = new Promise<void>((resolve) => {
+      answering.resolve = resolve;
+    });
+
+    const state: HeldToken = {
+      held: Option.none(),
+      answered: false,
+      settled,
+      answer: () => {
+        state.answered = true;
+        answering.resolve();
+      },
+      version: 0,
+      fetching: 0,
+    };
+
     let latest = 0;
 
     const heldToken = (): IssuedToken | null => Option.getOrNull(state.held);
@@ -533,7 +571,7 @@ export const clientTokenFetchers = () => {
    */
   const install = (
     source: AuthTokenSource | null,
-    apply: (fetcher: AuthTokenFetcher | null) => void,
+    apply: (fetcher: AuthTokenFetcher | null, answered: () => void) => void,
   ): Promise<void> => {
     retire();
     const { signal } = generation;
@@ -549,7 +587,7 @@ export const clientTokenFetchers = () => {
       await nextTask();
 
       if (signal.aborted) return;
-      apply(made?.fetcher ?? null);
+      apply(made?.fetcher ?? null, () => made?.state.answer());
       // The client takes its token from this fetcher from now on, and from the last one until now.
       newest = made?.state ?? null;
     })().finally(() => {
@@ -568,8 +606,12 @@ export const clientTokenFetchers = () => {
       state: newest,
       held: newest === null ? Option.some(null) : newest.held,
       version: newest?.version ?? 0,
-      busy: installs > 0 || (newest !== null && newest.fetching > 0),
+      busy: installs > 0 || (newest !== null && (newest.fetching > 0 || !newest.answered)),
     }),
+    authenticated: async (): Promise<void> => {
+      await installing;
+      await newest?.settled;
+    },
   };
 };
 
@@ -653,9 +695,10 @@ const webSocketAdapter = (client: ConvexClient): ClientAdapter => {
     ),
     subscribe,
     setAuth: (source) =>
-      fetchers.install(source, (fetcher) => {
-        client.setAuth(fetcher ?? signedOut);
+      fetchers.install(source, (fetcher, answered) => {
+        client.setAuth(fetcher ?? signedOut, answered);
       }),
+    authenticated: fetchers.authenticated,
     close: () => {
       fetchers.retire();
 
@@ -764,6 +807,7 @@ const httpAdapter = (client: ConvexHttpClient, options: HttpOptions): ClientAdap
 
       return Promise.resolve();
     },
+    authenticated: () => Promise.resolve(),
     close: () => Promise.resolve(),
   };
 };

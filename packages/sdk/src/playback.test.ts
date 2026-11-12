@@ -75,6 +75,7 @@ const recordingTransport = (calls: Ref.Ref<ReadonlyArray<readonly [FunctionPath,
       ),
     subscribe: () => Stream.never,
     setAuth: () => Effect.void,
+    authenticated: Effect.void,
   });
 
 const advance = (ms: number) =>

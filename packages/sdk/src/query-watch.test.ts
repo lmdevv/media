@@ -46,6 +46,7 @@ const scripted = (script: ReadonlyArray<Attempt>) => {
         );
       }),
     setAuth: () => Effect.void,
+    authenticated: Effect.void,
   });
 
   const runtime = ManagedRuntime.make(Layer.merge(clientLayer(transport), TestClock.layer()));

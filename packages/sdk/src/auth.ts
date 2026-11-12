@@ -305,6 +305,9 @@ const renewalSchedule = Schedule.min([
 
 const SERVER_SIGN_OUT_TIMEOUT = Duration.seconds(10);
 
+/** How long a sign-in waits for the connection to run as the new session. */
+const AUTHENTICATION_WAIT = Duration.seconds(10);
+
 /** A sign-out refused with one of these found nothing to end: the server no longer knows it. */
 const SESSION_GONE = ["Unauthenticated", "Forbidden", "Expired"] as const;
 
@@ -1197,12 +1200,20 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
       });
     }
 
-    return yield* committing.withPermits(1)(
+    yield* committing.withPermits(1)(
       Effect.gen(function* () {
         yield* storage.save(opened.value);
         yield* Ref.set(lastStored, opened);
         yield* adopt(opened);
       }),
+    );
+
+    // A sign-in ends once the connection runs as the new session, so the next call never gets an
+    // answer from before it, such as a query's refusal from while signed out. A server that never
+    // answers costs a wait, not the sign-in.
+    return yield* transport.authenticated.pipe(
+      Effect.timeoutOption(AUTHENTICATION_WAIT),
+      Effect.asVoid,
     );
   });
 

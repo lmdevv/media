@@ -40,10 +40,11 @@ const reactAdapter = (client: ConvexReactClient): ClientAdapter => {
     ),
     subscribe,
     setAuth: (source: AuthTokenSource | null) =>
-      fetchers.install(source, (fetcher) => {
+      fetchers.install(source, (fetcher, answered) => {
         if (fetcher === null) client.clearAuth();
-        else client.setAuth(fetcher);
+        else client.setAuth(fetcher, answered);
       }),
+    authenticated: fetchers.authenticated,
     close: () => {
       fetchers.retire();
 
