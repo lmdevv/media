@@ -1,7 +1,7 @@
 # 0021. Ship one `media` CLI and one agent skill with a reference per domain
 
-- Status: Accepted, 2026-11-03. Amended 2026-11-04 with the CLI shell, and 2026-11-11 with one
-  config and the movies commands.
+- Status: Accepted, 2026-11-03. Amended 2026-11-04 with the CLI shell, 2026-11-11 with one
+  config and the movies commands, and 2026-11-11 with the refusal fence.
 - Decisions: D41, D51, D53
 
 ## Context
@@ -136,8 +136,27 @@ NixOS module now run alone (ADR 0027).
   the media server refuses the session (`Unauthenticated`, HTTP 401), the platform client
   refreshes once at once. A refused refresh clears the stored session, and the CLI reports
   `not_logged_in`, naming `media auth login`. Platform calls run under it inside the client; the
-  media server's routes (`media logs`, `media diagnostics`) run under the same rule through
+  media server's routes (`media logs`, `media diagnostics`) and the web clients' media server
+  calls (`createMediaServer` with the platform `session`) run under the same rule through
   `session.refreshOnRefusal`.
+- **The refusal fence.** A refusal can arrive after the session it answered was renewed, so the
+  rule is fenced on the token the call actually went out with. The session stamps every token it
+  hands out with the session it belongs to (the token's subject) and a generation, which moves on
+  whenever the held session changes, in this tab or another (D52), and whenever a refusal's
+  refresh keeps it. The connection reports the stamp it attached: the HTTP connection the token
+  it set after any renewal on the way, the WebSocket connection the token it held as the call left
+  or as a subscription's last result arrived. A connection that cannot tell keeps the stamp from
+  before the call, which is never newer, so it errs toward a retry rather than a refresh. Forbidden
+  and network failures never touch the session, and the HTTP connection's own retry after a
+  rejected token retries only with a newer token of the same session. On a refusal, under one
+  lock:
+  - another person's session, or a call sent signed out: nothing refreshes or ends, and the call is
+    never sent again as the person signed in now;
+  - the same session renewed since: nothing refreshes; the call runs once more with the token held
+    now, and a subscription subscribes again;
+  - the same session and generation: the single-call rule above, once;
+  - the same session after a refresh that kept it finished: that refresh is shared, so nothing
+    refreshes again, even when it kept the token because the server was unreachable.
 
 Old words with no replacement on the core, left out under D62 until the backlog brings them back:
 `profiles use` (one person per session now), `keys list`, the room countdown above, `import` (the

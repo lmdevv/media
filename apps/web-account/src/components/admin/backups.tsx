@@ -77,7 +77,7 @@ export function BackupsScreen({ mediaUrl }: { readonly mediaUrl: string }) {
   const now = useNow(NOW_EVERY_MS);
 
   const media = useMemo(
-    () => createMediaServer({ url: mediaUrl, accessToken: platform.session.accessToken }),
+    () => createMediaServer({ url: mediaUrl, session: platform.session }),
     [mediaUrl, platform],
   );
 

@@ -11,13 +11,30 @@ import type { ErrorContext } from "./client-error-report";
 import { baseUrl, encodeJson, requestJson } from "./media-http";
 import type { MediaName } from "./movies-client";
 
-/** Where the media server answers and how to read the session's bearer token. */
-export interface MediaServerOptions {
+/** The session a media server call goes out as: `createPlatform`'s `session` is one. */
+export interface MediaServerSession {
+  /** Calls `use` with the session's token under the session's refusal rule. */
+  readonly refreshOnRefusal: <A>(use: (token: string | null) => Promise<A>) => Promise<A>;
+}
+
+/** Where the media server answers and the session its calls go out as. */
+export type MediaServerOptions = {
   /** The media server's base URL, such as `https://media.example.com`. */
   readonly url: string;
-  /** The signed-in session's auth token; null while signed out. `createPlatform`'s does this. */
-  readonly accessToken: () => Promise<string | null>;
-}
+} & (
+  | {
+      /**
+       * The signed-in session, whose token goes as the bearer. A refusal follows the rule every
+       * platform call does: one refresh of the session the call went out with, or one more try
+       * when the session was renewed since.
+       */
+      readonly session: MediaServerSession;
+    }
+  | {
+      /** The signed-in session's auth token; null while signed out. A refusal refreshes nothing. */
+      readonly accessToken: () => Promise<string | null>;
+    }
+);
 
 /** The media server's own routes, called as the signed-in person of the core (ADR 0010). */
 export interface MediaServer {
@@ -47,36 +64,48 @@ export interface MediaServer {
   readonly reportClientEvents: (request: ClientDiagnosticsRequest) => Promise<void>;
 }
 
-/** The session's token as a bearer, none while signed out. */
-export const bearerOf = (options: MediaServerOptions) =>
-  Effect.promise(() => options.accessToken()).pipe(
-    Effect.map((token) => Option.map(Option.fromNullishOr(token), Redacted.make)),
-  );
+const bearerOf = (token: string | null): Option.Option<Redacted.Redacted> =>
+  Option.map(Option.fromNullishOr(token), Redacted.make);
 
-const postSignedIn = (
+/**
+ * Runs `use` with the session's token as the bearer, none while signed out, under the session's
+ * refusal rule when the options name one. Rejects as `use` fails.
+ */
+export const withBearer = <A, E>(
   options: MediaServerOptions,
-  operation: string,
-  path: string,
-  body: Effect.Effect<Schema.Json>,
-) =>
-  Effect.gen(function* () {
-    const bearer = yield* bearerOf(options);
+  use: (bearer: Option.Option<Redacted.Redacted>) => Effect.Effect<A, E>,
+): Promise<A> => {
+  const attempt = (token: string | null): Promise<A> => Effect.runPromise(use(bearerOf(token)));
 
-    if (Option.isNone(bearer)) return;
+  return "session" in options
+    ? options.session.refreshOnRefusal(attempt)
+    : options.accessToken().then(attempt);
+};
 
-    yield* requestJson(
-      {
-        operation,
-        url: `${baseUrl(options.url)}${path}`,
-        method: "POST",
-        body: Option.some(yield* body),
-        bearer,
-      },
-      Schema.Null,
-    );
-  });
+const postSignedIn =
+  (
+    options: MediaServerOptions,
+    operation: string,
+    path: string,
+    body: Effect.Effect<Schema.Json>,
+  ) =>
+  (bearer: Option.Option<Redacted.Redacted>) =>
+    Effect.gen(function* () {
+      if (Option.isNone(bearer)) return;
 
-/** The media server's routes at `options.url`, as the session `options.accessToken` reads. */
+      yield* requestJson(
+        {
+          operation,
+          url: `${baseUrl(options.url)}${path}`,
+          method: "POST",
+          body: Option.some(yield* body),
+          bearer,
+        },
+        Schema.Null,
+      );
+    });
+
+/** The media server's routes at `options.url`, called as the session the options name. */
 export const createMediaServer = (options: MediaServerOptions): MediaServer => {
   const gate = reportGate();
 
@@ -95,7 +124,7 @@ export const createMediaServer = (options: MediaServerOptions): MediaServer => {
       import("./media-commands").then(({ runMediaCommand }) =>
         runMediaCommand(options, name, args),
       ),
-    reportError: (report) => Effect.runPromise(sendReport(report)),
+    reportError: (report) => withBearer(options, sendReport(report)),
     reportCaught: (cause, context) =>
       Effect.runPromise(
         Effect.gen(function* () {
@@ -104,9 +133,14 @@ export const createMediaServer = (options: MediaServerOptions): MediaServer => {
 
           if (!gate.admits(report, now)) return;
 
-          yield* sendReport(report).pipe(
-            Effect.tapErrorTag("RateLimited", (refused) =>
-              Effect.sync(() => gate.pause(now, refused.retryAfterSeconds)),
+          // A report that cannot go out is dropped below, whatever stopped it.
+          yield* Effect.promise(() =>
+            withBearer(options, (bearer) =>
+              sendReport(report)(bearer).pipe(
+                Effect.tapErrorTag("RateLimited", (refused) =>
+                  Effect.sync(() => gate.pause(now, refused.retryAfterSeconds)),
+                ),
+              ),
             ),
           );
         }).pipe(
@@ -114,7 +148,8 @@ export const createMediaServer = (options: MediaServerOptions): MediaServer => {
         ),
       ),
     reportClientEvents: (request) =>
-      Effect.runPromise(
+      withBearer(
+        options,
         postSignedIn(
           options,
           "playback.diagnostics",

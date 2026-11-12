@@ -91,7 +91,7 @@ export const layer = (coreUrl: string): Layer.Layer<Service> =>
             const context = yield* Layer.build(ConvexTransport.layerHttp(coreUrl));
             const transport = Context.get(context, ConvexTransport.ConvexTransport);
 
-            yield* transport.setAuth(() => Promise.resolve(Redacted.value(bearer)));
+            yield* transport.setAuth(ConvexTransport.fixedToken(Redacted.value(bearer)));
 
             const raw = yield* transport.call("query", CURRENT, {});
 

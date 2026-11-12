@@ -12,7 +12,7 @@ import type { AuthTokenSource, ClientAdapter } from "./convex-transport";
 const reactAdapter = (client: ConvexReactClient): ClientAdapter => {
   const fetchers = ConvexTransport.clientTokenFetchers();
 
-  const subscribe: ClientAdapter["subscribe"] = (path, args, onValue, onError) => {
+  const subscribe = ConvexTransport.heldSubscribe(fetchers, (path, args, onValue, onError) => {
     const watch = client.watchQuery(ConvexTransport.reference("query", path), args);
 
     const read = (): void => {
@@ -30,13 +30,14 @@ const reactAdapter = (client: ConvexReactClient): ClientAdapter => {
     read();
 
     return unsubscribe;
-  };
+  });
 
   return {
-    call: (kind, path, args, signal) =>
+    call: ConvexTransport.heldCall(fetchers, (kind, path, args, signal) =>
       kind === "query"
         ? ConvexTransport.queryOnce(subscribe, path, args, signal)
         : ConvexTransport.callByKind(client, kind, path, args),
+    ),
     subscribe,
     setAuth: (source: AuthTokenSource | null) =>
       fetchers.install(source, (fetcher) => {

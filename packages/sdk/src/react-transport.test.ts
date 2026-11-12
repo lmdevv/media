@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import * as ConvexTransport from "./convex-transport";
 import * as ReactTransport from "./react-transport";
 import * as FakeConvex from "./testing/fake-convex";
-import { jwtIssuedAt } from "./testing/fake-convex";
+import { issuedOf, jwtIssuedAt } from "./testing/fake-convex";
 
 /**
  * How often a source that keeps handing back its token was asked before and after `stop` ends
@@ -36,7 +36,7 @@ const asksAround = (
         yield* connection.setAuth(() => {
           asked += 1;
 
-          return Promise.resolve(token);
+          return Promise.resolve(issuedOf(token));
         });
         yield* Effect.sync(() => asked).pipe(
           Effect.repeat({ until: (count) => count >= 2, schedule: Schedule.spaced("50 millis") }),

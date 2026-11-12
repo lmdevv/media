@@ -22,7 +22,7 @@ import * as ConvexTransport from "./convex-transport";
 import { clientTokenFetchers, translateFailure } from "./convex-transport";
 import * as MoviesClient from "./movies-client";
 import * as FakeConvex from "./testing/fake-convex";
-import { jwtIssuedAt, Reply } from "./testing/fake-convex";
+import { issuedOf, jwtIssuedAt, Reply } from "./testing/fake-convex";
 import * as TokenStorage from "./token-storage";
 
 /** Long enough for the client's ten-second refresh leeway, short enough to outlive in a test. */
@@ -104,7 +104,7 @@ const asksAround = (
         yield* connection.setAuth(() => {
           asked += 1;
 
-          return Promise.resolve(token);
+          return Promise.resolve(issuedOf(token));
         });
         yield* Effect.sync(() => asked).pipe(
           Effect.repeat({ until: (count) => count >= 2, schedule: Schedule.spaced("50 millis") }),
@@ -166,7 +166,7 @@ describe.concurrent("layerWebSocket", () => {
           yield* connection.setAuth(() => {
             asked += 1;
 
-            return Promise.resolve(asked === 1 ? signedIn : refreshed);
+            return Promise.resolve(issuedOf(asked === 1 ? signedIn : refreshed));
           });
           yield* connection.call("query", "account:viewer", { ask: 1 });
           yield* Effect.sleep(Duration.millis(300));
@@ -178,7 +178,7 @@ describe.concurrent("layerWebSocket", () => {
           // Signing in again, as the media service's probe does.
           const second = jwtIssuedAt(Date.now(), 3600, "user|session-2");
 
-          yield* connection.setAuth(() => Promise.resolve(second));
+          yield* connection.setAuth(ConvexTransport.fixedToken(second));
 
           return yield* connection
             .call("query", "account:viewer", { ask: 2 })
@@ -358,7 +358,7 @@ describe("clientTokenFetchers", () => {
       () => {
         asked += 1;
 
-        return Promise.resolve("token");
+        return Promise.resolve(issuedOf("token"));
       },
       (given) => {
         if (given !== null) installed.push(given);
@@ -394,7 +394,7 @@ describe("clientTokenFetchers", () => {
   it("compares a refreshed token with the newest fetch's answer, the only one the client keeps", async () => {
     // The client keeps only the answer of the fetch it started last; an older one still out
     // when a newer one starts is discarded when it lands.
-    const answers: Array<(token: string) => void> = [];
+    const answers: Array<(issued: ConvexTransport.IssuedToken) => void> = [];
     let asked = 0;
 
     const installed: Array<AuthTokenFetcher> = [];
@@ -418,15 +418,15 @@ describe("clientTokenFetchers", () => {
     const discarded = fetcher({ forceRefreshToken: true });
     const kept = fetcher({ forceRefreshToken: true });
 
-    answers[1]?.("token-2");
+    answers[1]?.(issuedOf("token-2"));
     expect(await kept).toBe("token-2");
-    answers[0]?.("token-3");
+    answers[0]?.(issuedOf("token-3"));
     expect(await discarded).toBe("token-3");
 
     // The client holds token-2, so token-3 is new to it and comes back without asking again.
     const next = fetcher({ forceRefreshToken: true });
 
-    answers[2]?.("token-3");
+    answers[2]?.(issuedOf("token-3"));
 
     const answer = await Promise.race([
       next,

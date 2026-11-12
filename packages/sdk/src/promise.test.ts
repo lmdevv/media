@@ -157,7 +157,7 @@ describe("createMovies", () => {
 
   it("refreshes a rejected token once and retries the call with the new one", () =>
     withSdk(signedIn(), async (fake, sdk) => {
-      const renewed = jwtExpiringAt(Date.now() + 3_600_000, "sam-renewed");
+      const renewed = jwtExpiringAt(Date.now() + 7_200_000, "sam");
       let calls = 0;
 
       await control(

@@ -5,6 +5,7 @@ import {
   Effect,
   Layer,
   Match,
+  MutableRef,
   Option,
   Predicate,
   Redacted,
@@ -124,14 +125,19 @@ export interface Session {
    */
   readonly accessToken: Effect.Effect<Option.Option<Redacted.Redacted>, TokenStorageError>;
   /**
-   * Runs `effect`, a call some server answered as this session, under the one refusal rule
-   * (D51): when it fails with `Unauthenticated`, the session refreshes once at once, and a refused
-   * refresh signs it out. The call is never repeated, so the failure still comes back; read
-   * `currentStatus` to tell an ended session from a refusal of the call alone. Every platform
-   * call already runs under it; wrap a call to another server that sends `accessToken`, such as
-   * the media server's own routes.
+   * Runs `use`, a call to another server such as the media server's own routes, with the token
+   * `accessToken` gives, under the one refusal rule (D51) every platform call follows, fenced on
+   * that token. When the call fails with `Unauthenticated` and the session is still the one it
+   * went out with, the session refreshes once at once, shared with every refusal of that
+   * generation, and a refused refresh signs it out; the call is not repeated, so read
+   * `currentStatus` to tell an ended session from a refusal of the call alone. When the session was
+   * renewed since, as by another call or another tab, nothing refreshes: `use` runs once more with
+   * the token held now. A refusal of another person's session, or of a call sent signed out, never
+   * touches the session held now. Other failures leave the session alone.
    */
-  readonly refreshOnRefusal: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
+  readonly refreshOnRefusal: <A, E, R>(
+    use: (token: Option.Option<Redacted.Redacted>) => Effect.Effect<A, E, R>,
+  ) => Effect.Effect<A, E | TokenStorageError, R>;
 }
 
 /** Runs platform commands as the signed-in session. */
@@ -197,6 +203,9 @@ const toPlatformError =
       Match.orElse((other) => other),
     );
 
+const tokenOf = (sent: Option.Option<ConvexTransport.IssuedToken>): Option.Option<string> =>
+  Option.map(sent, (issued) => issued.token);
+
 const tileProofParams = (proof: TileProof) =>
   TileProof.$match(proof, {
     Password: ({ by, password }) => ({ kind: "password", by, password: Redacted.value(password) }),
@@ -243,29 +252,105 @@ const make = Effect.fn("Platform.make")(function* (url: string, signInRoute: Aut
     signIn: signInRoute,
   });
 
-  const refreshAfterRefusal = engine
-    .accessToken(true)
-    .pipe(
-      Effect.catchTag("TokenStorageError", (error) =>
-        Effect.logWarning("Platform.sessionStorageFailed").pipe(
-          Effect.annotateLogs({ operation: error.operation, message: error.message }),
+  const refusalOf = (refused: Option.Option<ConvexTransport.IssuedToken>) =>
+    engine
+      .refuse(refused)
+      .pipe(
+        Effect.catchTag("TokenStorageError", (error) =>
+          Effect.logWarning("Platform.sessionStorageFailed").pipe(
+            Effect.annotateLogs({ operation: error.operation, message: error.message }),
+            Effect.as<Auth.Refusal>("stands"),
+          ),
+        ),
+      );
+
+  /**
+   * Where a request records the token it went out with. It starts as the token held as the
+   * request is made, which is never newer than the one it is sent with, so a connection that
+   * cannot tell which token it sent errs toward a retry rather than a refresh. A retry may still go
+   * out with the token the server refused, on a connection that has not taken the renewed one yet;
+   * that token, sent again after the renewal, keeps the stamp the retry started with, so its
+   * refusal counts as one of the session now.
+   */
+  const sentToken = (refusedBefore: Option.Option<string>) =>
+    Effect.map(engine.held, (held) => {
+      const sent = MutableRef.make(held);
+
+      const attached: ConvexTransport.Attached = (issued) => {
+        if (issued !== null && Option.contains(refusedBefore, issued.token)) return;
+        MutableRef.set(sent, Option.fromNullishOr(issued));
+      };
+
+      return { sent, attached };
+    });
+
+  /**
+   * Runs `attempt`, which tells `attached` the token it went out with, under D51 fenced on that
+   * token, as `refreshOnRefusal` says. A call renewed past runs once more, and only once.
+   */
+  const fenced = <A, E, R>(
+    attempt: (attached: ConvexTransport.Attached) => Effect.Effect<A, E, R>,
+    refusedBefore: Option.Option<string> = Option.none(),
+  ): Effect.Effect<A, E, R> =>
+    Effect.flatMap(sentToken(refusedBefore), ({ sent, attached }) =>
+      Effect.catchIf(
+        attempt(attached),
+        (error) => Predicate.isTagged(error, "Unauthenticated"),
+        (error) =>
+          Effect.flatMap(refusalOf(MutableRef.get(sent)), (refusal) =>
+            refusal === "retry" && Option.isNone(refusedBefore)
+              ? fenced(attempt, tokenOf(MutableRef.get(sent)))
+              : Effect.fail(error),
+          ),
+      ),
+    );
+
+  /**
+   * `open`'s results, fenced as `fenced` says. A subscription refused with a token the session
+   * renewed since subscribes again with the token held now, once per renewal.
+   */
+  const fencedStream = <A, E>(
+    open: (attached: ConvexTransport.Attached) => Stream.Stream<A, E>,
+    refusedBefore: Option.Option<string> = Option.none(),
+  ): Stream.Stream<A, E> =>
+    Stream.unwrap(
+      Effect.map(sentToken(refusedBefore), ({ sent, attached }) =>
+        Stream.catchIf(
+          open(attached),
+          (error) => Predicate.isTagged(error, "Unauthenticated"),
+          (error) =>
+            Stream.unwrap(
+              Effect.map(refusalOf(MutableRef.get(sent)), (refusal) =>
+                refusal === "retry"
+                  ? fencedStream(open, tokenOf(MutableRef.get(sent)))
+                  : Stream.fail(error),
+              ),
+            ),
         ),
       ),
     );
 
-  const refreshOnRefusal = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
-    Effect.tapError(effect, (error) =>
-      Predicate.isTagged(error, "Unauthenticated") ? refreshAfterRefusal : Effect.void,
+  const refreshOnRefusal: Session["refreshOnRefusal"] = (use) =>
+    fenced((attached) =>
+      Effect.flatMap(engine.issue, (issued) => {
+        attached(Option.getOrNull(issued));
+
+        return use(Option.map(issued, (sent) => Redacted.make(sent.token)));
+      }),
     );
 
   const run: Interface["run"] = (command, params) => {
     const [args] = params;
 
     return encodeArgs(command.name, command.args, args).pipe(
-      Effect.flatMap((wire) => transport.call(command.kind, command.path, wire)),
-      Effect.flatMap((raw) => decodeResult(command.name, command.result, raw)),
-      Effect.mapError(toPlatformError(command.name)),
-      refreshOnRefusal,
+      Effect.flatMap((wire) =>
+        fenced((attached) =>
+          transport.call(command.kind, command.path, wire, attached).pipe(
+            Effect.flatMap((raw) => decodeResult(command.name, command.result, raw)),
+            Effect.mapError(toPlatformError(command.name)),
+          ),
+        ),
+      ),
       Effect.withSpan("Platform.call", { attributes: { command: command.name } }),
     );
   };
@@ -275,17 +360,16 @@ const make = Effect.fn("Platform.make")(function* (url: string, signInRoute: Aut
 
     return Stream.unwrap(
       Effect.map(encodeArgs(command.name, command.args, args), (wire) =>
-        acrossReconnects(
-          engine,
-          transport
-            .subscribe(command.path, wire)
-            .pipe(Stream.mapEffect((raw) => decodeResult(command.name, command.result, raw))),
+        fencedStream((attached) =>
+          acrossReconnects(
+            engine,
+            transport
+              .subscribe(command.path, wire, attached)
+              .pipe(Stream.mapEffect((raw) => decodeResult(command.name, command.result, raw))),
+          ),
         ),
       ),
-    ).pipe(
-      Stream.mapError(toPlatformError(command.name)),
-      Stream.tapErrorTag("Unauthenticated", () => refreshAfterRefusal),
-    );
+    ).pipe(Stream.mapError(toPlatformError(command.name)));
   };
 
   const methods = effectMethods(effectBuilder({ run, watch }));

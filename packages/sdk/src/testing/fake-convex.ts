@@ -23,6 +23,8 @@ import { SIGN_IN_PATH, signInRefusalStatus } from "@media/contracts/sign-in";
 import { Data, Effect, Option, Predicate, Schema } from "effect";
 import type { Scope } from "effect";
 
+import type { IssuedToken } from "../convex-transport";
+
 type CallKind = "query" | "mutation" | "action";
 
 /** One call the fake received, with its bearer token header when it carried one. */
@@ -188,6 +190,13 @@ export const jwtIssuedAt = (issuedAt: number, lifetimeSeconds: number, subject: 
 /** A JWT that only carries `exp`, enough for the SDK to read when it expires. */
 export const jwtExpiringAt = (epochMillis: number, subject = "user"): string =>
   `${jwtPart({ alg: "none" })}.${jwtPart({ exp: Math.floor(epochMillis / 1000), sub: subject })}.fake`;
+
+/** `token` as a token source hands it out, outside any session. */
+export const issuedOf = (token: string): IssuedToken => ({
+  token,
+  session: Option.none(),
+  generation: 0,
+});
 
 const WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
