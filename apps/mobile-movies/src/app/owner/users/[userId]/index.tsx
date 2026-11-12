@@ -6,6 +6,7 @@ import {
   isChangeable,
   libraryAccess,
   personSave,
+  toggledGrant,
 } from "@media/mobile-core/accounts";
 import type {
   ChangeableGrant,
@@ -154,11 +155,9 @@ function Person({
   const toggle = (libraryId: GrantedLibrary, live: ChangeableGrant, shown: ChangeableGrant) =>
     setGrantEdits((current) => {
       const next = new Map(current);
+      const from = current.get(libraryId)?.from ?? live;
 
-      next.set(
-        libraryId,
-        editFrom(current.get(libraryId), live, shown === "allowed" ? "none" : "allowed"),
-      );
+      next.set(libraryId, editFrom(current.get(libraryId), live, toggledGrant(shown, from)));
 
       return next;
     });

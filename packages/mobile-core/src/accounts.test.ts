@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   accessLabel,
+  toggledGrant,
   accountUrlOf,
   canChangeRole,
   expiryLine,
@@ -64,7 +65,7 @@ describe("libraryAccess", () => {
       direct: "none",
       inherited: null,
     });
-    expect(libraryAccess(mateo.userId, [toUser(mateo)], NO_GROUPS).direct).toBe("allowed");
+    expect(libraryAccess(mateo.userId, [toUser(mateo)], NO_GROUPS).direct).toBe("view");
   });
 
   it("keeps the maker's grant to manage out of reach of a person's page", () => {
@@ -112,11 +113,12 @@ describe("libraryAccess", () => {
     );
 
     expect(access).toStrictEqual({
-      direct: "allowed",
+      direct: "view",
       inherited: { level: "edit", through: "Family" },
     });
     expect(isChangeable(access.direct)).toBe(true);
-    expect(accessLabel("allowed", access.inherited)).toBe("Allowed");
+    expect(accessLabel("view", access.inherited)).toBe("Allowed");
+    expect(accessLabel("edit", access.inherited)).toBe("Allowed");
     // Taking her own grant away leaves what the group gives her, never Not Allowed.
     expect(accessLabel("none", access.inherited)).toBe("Edit, through Family");
     expect(accessLabel("none", { level: "view", through: "Everyone" })).toBe(
@@ -134,7 +136,7 @@ describe("personSave", () => {
     // Aiko's page opens with her a member; the admin gives her Movies. Meanwhile another admin
     // makes her an admin. The save gives Movies and never sends her role back to member.
     const save = personSave(null, "admin", [
-      { libraryId: movies, name: "Movies", edit: { from: "none", to: "allowed" }, live: "none" },
+      { libraryId: movies, name: "Movies", edit: { from: "none", to: "view" }, live: "none" },
     ]);
 
     expect(save).toStrictEqual({ role: null, give: [movies], takeAway: [], overtaken: [] });
@@ -142,7 +144,7 @@ describe("personSave", () => {
 
   it("never grants admin back after a demotion made meanwhile", () => {
     const save = personSave(null, "member", [
-      { libraryId: shows, name: "Shows", edit: { from: "allowed", to: "none" }, live: "allowed" },
+      { libraryId: shows, name: "Shows", edit: { from: "view", to: "none" }, live: "view" },
     ]);
 
     expect(save.role).toBeNull();
@@ -158,8 +160,8 @@ describe("personSave", () => {
 
   it("names a library whose grant changed meanwhile, and leaves alone one put back", () => {
     const save = personSave(null, "member", [
-      { libraryId: movies, name: "Movies", edit: { from: "none", to: "allowed" }, live: "allowed" },
-      { libraryId: shows, name: "Shows", edit: { from: "none", to: "none" }, live: "allowed" },
+      { libraryId: movies, name: "Movies", edit: { from: "none", to: "view" }, live: "view" },
+      { libraryId: shows, name: "Shows", edit: { from: "none", to: "none" }, live: "view" },
     ]);
 
     expect(save.give).toStrictEqual([movies]);
@@ -167,10 +169,59 @@ describe("personSave", () => {
     expect(save.overtaken).toStrictEqual(["Movies"]);
   });
 
+  it("asks before taking away a grant another admin raised to edit meanwhile", () => {
+    // Aiko's page opens with her own view grant on Movies, and the admin turns it off. Meanwhile
+    // another admin raises it to edit. Read from the grants as the page reads them, the change
+    // shows, so the save asks before taking the raised grant away.
+    const opened = libraryAccess(aiko.userId, [toUser(aiko)], NO_GROUPS).direct;
+
+    const raised = libraryAccess(
+      aiko.userId,
+      [{ ...toUser(aiko), level: "edit" }],
+      NO_GROUPS,
+    ).direct;
+
+    if (!isChangeable(opened)) throw new Error("a view grant is changeable");
+
+    const save = personSave(null, "member", [
+      {
+        libraryId: movies,
+        name: "Movies",
+        edit: { from: opened, to: "none" },
+        live: raised,
+      },
+    ]);
+
+    expect(save).toStrictEqual({
+      role: null,
+      give: [],
+      takeAway: [movies],
+      overtaken: ["Movies"],
+    });
+  });
+
+  it("puts a grant back as it was, so tapping twice never lowers edit to view", () => {
+    expect(toggledGrant("edit", "edit")).toBe("none");
+    expect(toggledGrant("none", "edit")).toBe("edit");
+    expect(toggledGrant("none", "none")).toBe("view");
+
+    const save = personSave(null, "member", [
+      {
+        libraryId: movies,
+        name: "Movies",
+        edit: { from: "edit", to: toggledGrant("none", "edit") },
+        live: "edit",
+      },
+    ]);
+
+    expect(save).toStrictEqual({ role: null, give: [], takeAway: [], overtaken: [] });
+  });
+
+  // Documents the rule; it held before the round-2 fix too.
   it("leaves alone a library that now holds a grant to manage, or is not loaded", () => {
     const save = personSave(null, "member", [
-      { libraryId: movies, name: "Movies", edit: { from: "none", to: "allowed" }, live: "manages" },
-      { libraryId: shows, name: "Shows", edit: { from: "none", to: "allowed" }, live: null },
+      { libraryId: movies, name: "Movies", edit: { from: "none", to: "view" }, live: "manages" },
+      { libraryId: shows, name: "Shows", edit: { from: "none", to: "view" }, live: null },
     ]);
 
     expect(save).toStrictEqual({ role: null, give: [], takeAway: [], overtaken: [] });

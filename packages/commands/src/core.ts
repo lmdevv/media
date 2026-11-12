@@ -453,6 +453,12 @@ export const core = [
     args: { groupId: v.id("groups"), paginationOpts: paginationOptsValidator },
     result: paginationResultValidator(v.object({ userId: v.id("users"), username: v.string() })),
   }),
+  query("core.permissions.groups.memberOf", {
+    summary: "List the groups someone is in, at most 16, so their page shows what reaches them",
+    scope: "admin",
+    args: { userId: v.id("users"), paginationOpts: paginationOptsValidator },
+    result: paginationResultValidator(v.object({ groupId: v.id("groups"), name: v.string() })),
+  }),
   mutation("core.permissions.groups.addMember", {
     summary: "Add someone to a group; what is shared with it reaches them on their next call",
     scope: "admin",

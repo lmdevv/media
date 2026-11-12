@@ -440,7 +440,10 @@ the old movies SDK or a Convex client of its own. They open for an owner or an a
   it gives at `view` and takes away (`core.permissions.grants.set` and `remove`), apart from what
   reaches them through the household or a group they are in, as the core's `levelOn` counts it:
   taking their own grant away reads `View, through Family`, never Not Allowed, while a group
-  still reaches them. The maker's grant to manage shows as Manages and stays.
+  still reaches them. The maker's grant to manage shows as Manages and stays. The page keeps the
+  grant's real level, view or edit, so it asks before taking away a grant another admin raised
+  meanwhile. It reads the person's own groups with `core.permissions.groups.memberOf`, an admin
+  query over their memberships, at most 16 (`GROUPS_PER_USER_MAX`), never every group's members.
 - **Owner forms save only what the person edited** (`@media/mobile-core/edits`). A row on screen
   keeps following the core while someone edits it, so a form never compares its fields with the
   live row: each field keeps the value it had when the person began editing it, a save writes

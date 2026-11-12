@@ -760,6 +760,17 @@ List the groups by name.
 - Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
 - Result: `{ page: Array<{ groupId: Id<"groups">; name: string }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
 
+## `core.permissions.groups.memberOf`
+
+List the groups someone is in, at most 16, so their page shows what reaches them.
+
+- CLI: `media admin groups member-of`
+- Kind: query
+- Scope: admin
+- Arguments: `{ userId: Id<"users">; paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
+- Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
+- Result: `{ page: Array<{ groupId: Id<"groups">; name: string }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
+
 ## `core.permissions.groups.members`
 
 List the people in a group.

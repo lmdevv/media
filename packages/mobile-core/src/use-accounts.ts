@@ -210,44 +210,25 @@ const loaded = <Row>(list: Paged<Row>): list is Extract<Paged<Row>, { status: "r
   list.status === "ready" && list.next.kind === "done";
 
 /**
- * The groups `userId` is in, which a library shared with a group reaches them through. Each
- * group's members are followed; a household has a few groups.
+ * The groups `userId` is in, which a library shared with a group reaches them through. It reads
+ * only this person's memberships (`core.permissions.groups.memberOf`), at most 16, never every
+ * group's members.
  */
 export const useMemberships = (userId: UserId): Memberships => {
   const platform = usePlatform();
-  const { groups } = platform.core.permissions;
-  const all = useAllPages(groups.list, (paginationOpts) => ({ paginationOpts }));
-  const ids = all.status === "ready" ? all.rows.map((group) => group.groupId) : [];
 
-  const members = useEveryList(groups.members, ids, (groupId, paginationOpts) => ({
-    groupId,
+  const joined = useAllPages(platform.core.permissions.groups.memberOf, (paginationOpts) => ({
+    userId,
     paginationOpts,
   }));
 
   return useMemo((): Memberships => {
-    for (const list of [all, ...members]) {
-      const retry = failure<unknown>(list);
+    const retry = failure(joined);
 
-      if (retry !== null) return { status: "failed", retry };
-    }
+    if (retry !== null) return { status: "failed", retry };
 
-    if (!loaded(all) || members.length !== all.rows.length || !members.every(loaded)) {
-      return LOADING;
-    }
-
-    return {
-      status: "ready",
-      groups: new Set(
-        all.rows.flatMap((group, at) => {
-          const list = members[at];
-
-          return list !== undefined &&
-            loaded(list) &&
-            list.rows.some((member) => member.userId === userId)
-            ? [group.groupId]
-            : [];
-        }),
-      ),
-    };
-  }, [all, members, userId]);
+    return loaded(joined)
+      ? { status: "ready", groups: new Set(joined.rows.map((group) => group.groupId)) }
+      : LOADING;
+  }, [joined]);
 };

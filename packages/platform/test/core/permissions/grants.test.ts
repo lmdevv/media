@@ -32,6 +32,12 @@ const seedOne = async (core: CoreStack, manager: Session, name: string) =>
 const lookUp = (session: Session, libraryId: Id<"libraries">) =>
   session.signedIn.client.query(api.core.libraries.get, { libraryId });
 
+const memberOf = (session: Session, userId: Id<"users">) =>
+  session.signedIn.client.query(api.core.permissions.groups.memberOf, {
+    userId,
+    paginationOpts: { numItems: 25, cursor: null },
+  });
+
 const sees = async (session: Session, libraryId: Id<"libraries">) => ({
   open: await refusal(lookUp(session, libraryId)),
   listed: (await visibleLibraries(session)).includes(libraryId),
@@ -78,6 +84,43 @@ describe.skipIf(stack === undefined)("grants", { timeout: 120_000 }, () => {
     });
 
     expect(await sees(member, libraryId)).toEqual({ open: "not_found", listed: false });
+  });
+
+  it("list the groups one person is in, to admins only, and nobody else's", async () => {
+    if (stack === undefined) return;
+    const admin = await signInSession(stack, "admin", "admin");
+    const member = await signInSession(stack, "member");
+    const other = await signInSession(stack, "other");
+
+    const groupNamed = async (name: string) =>
+      (await admin.signedIn.client.mutation(api.core.permissions.groups.create, { name })).groupId;
+
+    const family = await groupNamed(`family-${unique()}`);
+    const friends = await groupNamed(`friends-${unique()}`);
+    const unrelated = await groupNamed(`unrelated-${unique()}`);
+
+    await Promise.all(
+      (
+        [
+          [family, member.userId],
+          [friends, member.userId],
+          [unrelated, other.userId],
+        ] as const
+      ).map(([groupId, userId]) =>
+        admin.signedIn.client.mutation(api.core.permissions.groups.addMember, { groupId, userId }),
+      ),
+    );
+
+    const listed = await memberOf(admin, member.userId);
+
+    expect(listed.isDone).toBe(true);
+    expect(listed.page.map((row) => row.groupId).toSorted()).toEqual([family, friends].toSorted());
+    expect((await memberOf(admin, admin.userId)).page).toEqual([]);
+    expect(await refusal(memberOf(member, member.userId))).toBe("forbidden");
+
+    await admin.signedIn.client.mutation(api.core.permissions.groups.remove, { groupId: friends });
+
+    expect((await memberOf(admin, member.userId)).page.map((row) => row.groupId)).toEqual([family]);
   });
 
   it("stop reaching anyone when their group is removed", async () => {

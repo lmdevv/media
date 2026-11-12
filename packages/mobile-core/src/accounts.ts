@@ -85,11 +85,12 @@ export type Level = LibraryGrant["level"];
 export type GroupId = Extract<LibraryGrant["principal"], { readonly kind: "group" }>["groupId"];
 
 /**
- * A person's own grant on a library, which their page gives or takes away. A core library is
- * private to whoever made it until it is shared, admins included (ADR 0024), so this follows
- * grants, not roles. A grant to manage is the maker's, and stays.
+ * A person's own grant on a library at its level, which their page gives or takes away. A core
+ * library is private to whoever made it until it is shared, admins included (ADR 0024), so this
+ * follows grants, not roles. A grant to manage is the maker's, and stays. The level is kept, not
+ * folded into "allowed", so a page notices when another admin raises a grant to edit meanwhile.
  */
-export type DirectGrant = "manages" | "allowed" | "none";
+export type DirectGrant = "manages" | "edit" | "view" | "none";
 
 /** Access that reaches a person through a group they are in, or the whole household. */
 export interface Inherited {
@@ -126,7 +127,7 @@ export const libraryAccess = (
 
   for (const { principal, level } of grants) {
     if (principal.kind === "user") {
-      if (principal.userId === userId) direct = level === "manage" ? "manages" : "allowed";
+      if (principal.userId === userId) direct = level === "manage" ? "manages" : level;
 
       continue;
     }
@@ -153,7 +154,7 @@ export const libraryAccess = (
 export const accessLabel = (direct: DirectGrant, inherited: Inherited | null): string => {
   if (direct === "manages") return "Manages";
 
-  if (direct === "allowed") return "Allowed";
+  if (direct !== "none") return "Allowed";
 
   return inherited === null
     ? "Not Allowed"
@@ -166,6 +167,17 @@ export type ChangeableGrant = Exclude<DirectGrant, "manages">;
 /** Whether a person's own grant can be given or taken away on their page. */
 export const isChangeable = (direct: DirectGrant): direct is ChangeableGrant =>
   direct !== "manages";
+
+/**
+ * What tapping a library on a person's page sets their own grant to: none when they hold one,
+ * else back to the grant they held when the person began editing it, or `view` when they held
+ * none. Putting a grant back as it was is no change, so an edit grant never becomes view.
+ */
+export const toggledGrant = (shown: ChangeableGrant, from: ChangeableGrant): ChangeableGrant => {
+  if (shown !== "none") return "none";
+
+  return from === "none" ? "view" : from;
+};
 
 /** A change the person made on someone's page, from what the field held when they made it. */
 export interface PageEdit<V> {
@@ -219,7 +231,7 @@ export const personSave = (
 
     if (grant.overtaken) overtaken.push(name);
 
-    (grant.to === "allowed" ? give : takeAway).push(libraryId);
+    (grant.to === "none" ? takeAway : give).push(libraryId);
   }
 
   return { role: assignable, give, takeAway, overtaken };

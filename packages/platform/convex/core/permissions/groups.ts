@@ -48,96 +48,122 @@ const membership = (
     .withIndex("by_group_user", (q) => q.eq("groupId", groupId).eq("userId", userId))
     .unique();
 
-export const { create, rename, remove, list, members, addMember, removeMember } = register({
-  create: async (ctx, { name }, caller) => {
-    requireServer(caller, "manageGroups");
+export const { create, rename, remove, list, members, memberOf, addMember, removeMember } =
+  register({
+    create: async (ctx, { name }, caller) => {
+      requireServer(caller, "manageGroups");
 
-    const parsed = parseName(name);
+      const parsed = parseName(name);
 
-    await refuseTakenName(ctx.db, parsed.nameKey);
+      await refuseTakenName(ctx.db, parsed.nameKey);
 
-    return { groupId: await ctx.db.insert("groups", parsed) };
-  },
-  rename: async (ctx, { groupId, name }, caller) => {
-    requireServer(caller, "manageGroups");
+      return { groupId: await ctx.db.insert("groups", parsed) };
+    },
+    rename: async (ctx, { groupId, name }, caller) => {
+      requireServer(caller, "manageGroups");
 
-    const group = await requireGroup(ctx.db, groupId);
-    const parsed = parseName(name);
+      const group = await requireGroup(ctx.db, groupId);
+      const parsed = parseName(name);
 
-    await refuseTakenName(ctx.db, parsed.nameKey, group._id);
-    await ctx.db.patch(group._id, parsed);
+      await refuseTakenName(ctx.db, parsed.nameKey, group._id);
+      await ctx.db.patch(group._id, parsed);
 
-    return null;
-  },
-  remove: async (ctx, { groupId }, caller) => {
-    requireServer(caller, "manageGroups");
+      return null;
+    },
+    remove: async (ctx, { groupId }, caller) => {
+      requireServer(caller, "manageGroups");
 
-    const group = await requireGroup(ctx.db, groupId);
-    const memberships = await membersOf(ctx.db, group._id).take(GROUP_MEMBERS_MAX);
+      const group = await requireGroup(ctx.db, groupId);
+      const memberships = await membersOf(ctx.db, group._id).take(GROUP_MEMBERS_MAX);
 
-    await Promise.all(memberships.map((member) => ctx.db.delete(member._id)));
-    await ctx.db.delete(group._id);
-    await purgeGrantsOf(ctx, group._id);
+      await Promise.all(memberships.map((member) => ctx.db.delete(member._id)));
+      await ctx.db.delete(group._id);
+      await purgeGrantsOf(ctx, group._id);
 
-    return null;
-  },
-  list: async (ctx, { paginationOpts }, caller) => {
-    requireServer(caller, "manageGroups");
+      return null;
+    },
+    list: async (ctx, { paginationOpts }, caller) => {
+      requireServer(caller, "manageGroups");
 
-    const page = await paginate(ctx.db, { table: "groups", index: "by_name_key" }, paginationOpts);
+      const page = await paginate(
+        ctx.db,
+        { table: "groups", index: "by_name_key" },
+        paginationOpts,
+      );
 
-    return {
-      ...page,
-      page: page.page.map((group) => ({ groupId: group._id, name: group.name })),
-    };
-  },
-  members: async (ctx, { groupId, paginationOpts }, caller) => {
-    requireServer(caller, "manageGroups");
+      return {
+        ...page,
+        page: page.page.map((group) => ({ groupId: group._id, name: group.name })),
+      };
+    },
+    members: async (ctx, { groupId, paginationOpts }, caller) => {
+      requireServer(caller, "manageGroups");
 
-    const group = await requireGroup(ctx.db, groupId);
+      const group = await requireGroup(ctx.db, groupId);
 
-    const page = await paginate(
-      ctx.db,
-      { table: "groupMembers", index: "by_group_user", range: (q) => q.eq("groupId", group._id) },
-      paginationOpts,
-    );
+      const page = await paginate(
+        ctx.db,
+        { table: "groupMembers", index: "by_group_user", range: (q) => q.eq("groupId", group._id) },
+        paginationOpts,
+      );
 
-    const people = await Promise.all(page.page.map(async (member) => ctx.db.get(member.userId)));
+      const people = await Promise.all(page.page.map(async (member) => ctx.db.get(member.userId)));
 
-    return {
-      ...page,
-      page: people.flatMap((person) =>
-        person?.kind === "person" ? [{ userId: person._id, username: person.username }] : [],
-      ),
-    };
-  },
-  addMember: async (ctx, { groupId, userId }, caller) => {
-    requireServer(caller, "manageGroups");
+      return {
+        ...page,
+        page: people.flatMap((person) =>
+          person?.kind === "person" ? [{ userId: person._id, username: person.username }] : [],
+        ),
+      };
+    },
+    memberOf: async (ctx, { userId, paginationOpts }, caller) => {
+      requireServer(caller, "manageGroups");
 
-    const group = await requireGroup(ctx.db, groupId);
-    const person = await requireAccount(ctx, caller, "joinGroup", userId);
+      // A person is in at most GROUPS_PER_USER_MAX groups, so this reads a bounded range.
+      const page = await paginate(
+        ctx.db,
+        { table: "groupMembers", index: "by_user_group", range: (q) => q.eq("userId", userId) },
+        paginationOpts,
+      );
 
-    if ((await membership(ctx.db, group._id, person._id)) !== null) return null;
+      const groups = await Promise.all(page.page.map(async (member) => ctx.db.get(member.groupId)));
 
-    if ((await membersOf(ctx.db, group._id).take(GROUP_MEMBERS_MAX)).length >= GROUP_MEMBERS_MAX) {
-      return fail("conflict", `A group holds at most ${GROUP_MEMBERS_MAX} people`);
-    }
+      return {
+        ...page,
+        page: groups.flatMap((group) =>
+          group === null ? [] : [{ groupId: group._id, name: group.name }],
+        ),
+      };
+    },
+    addMember: async (ctx, { groupId, userId }, caller) => {
+      requireServer(caller, "manageGroups");
 
-    if ((await groupsOf(ctx.db, person._id)).length >= GROUPS_PER_USER_MAX) {
-      return fail("conflict", `A person can be in at most ${GROUPS_PER_USER_MAX} groups`);
-    }
+      const group = await requireGroup(ctx.db, groupId);
+      const person = await requireAccount(ctx, caller, "joinGroup", userId);
 
-    await ctx.db.insert("groupMembers", { groupId: group._id, userId: person._id });
+      if ((await membership(ctx.db, group._id, person._id)) !== null) return null;
 
-    return null;
-  },
-  removeMember: async (ctx, { groupId, userId }, caller) => {
-    requireServer(caller, "manageGroups");
+      if (
+        (await membersOf(ctx.db, group._id).take(GROUP_MEMBERS_MAX)).length >= GROUP_MEMBERS_MAX
+      ) {
+        return fail("conflict", `A group holds at most ${GROUP_MEMBERS_MAX} people`);
+      }
 
-    const found = await membership(ctx.db, groupId, userId);
+      if ((await groupsOf(ctx.db, person._id)).length >= GROUPS_PER_USER_MAX) {
+        return fail("conflict", `A person can be in at most ${GROUPS_PER_USER_MAX} groups`);
+      }
 
-    if (found !== null) await ctx.db.delete(found._id);
+      await ctx.db.insert("groupMembers", { groupId: group._id, userId: person._id });
 
-    return null;
-  },
-});
+      return null;
+    },
+    removeMember: async (ctx, { groupId, userId }, caller) => {
+      requireServer(caller, "manageGroups");
+
+      const found = await membership(ctx.db, groupId, userId);
+
+      if (found !== null) await ctx.db.delete(found._id);
+
+      return null;
+    },
+  });
