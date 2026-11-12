@@ -27,6 +27,7 @@ const render = (me: Me): string =>
 const person = (kind: Me["kind"], scopes: Me["scopes"]): Me => ({
   userId: Brand.nominal<Me["userId"]>()("u1"),
   username: "ana",
+  displayName: null,
   role: "member",
   sessionId: Brand.nominal<Me["sessionId"]>()("s1"),
   kind,
@@ -43,6 +44,15 @@ describe("HomeView", () => {
 
     expect(html).toContain("Hi, ana.");
     expect(hrefs(html)).toEqual(["/movies", "/music", "/settings"]);
+  });
+
+  it("greets by the name the person goes by when they set one", () => {
+    const html = render({
+      ...person("password", ["account"]),
+      displayName: "Ana Lima",
+    });
+
+    expect(html).toContain("Hi, Ana Lima.");
   });
 
   it("adds Admin for an admin", () => {

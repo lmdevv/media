@@ -14,13 +14,13 @@ const userId = Brand.nominal<UserId>();
 
 const inviteId = Brand.nominal<Invite["inviteId"]>();
 
-const ada: User = { userId: userId("u1"), username: "ada", role: "owner" };
+const ada: User = { userId: userId("u1"), username: "ada", displayName: null, role: "owner" };
 
-const kid: User = { userId: userId("u2"), username: "sam", role: "member" };
+const kid: User = { userId: userId("u2"), username: "sam", displayName: null, role: "member" };
 
-const bo: User = { userId: userId("u3"), username: "bo", role: "admin" };
+const bo: User = { userId: userId("u3"), username: "bo", displayName: null, role: "admin" };
 
-const guest: User = { userId: userId("u4"), username: "Visitor", role: "guest" };
+const guest: User = { userId: userId("u4"), username: "Visitor", displayName: null, role: "guest" };
 
 /** The users list with each person's panel drawn as a line naming them. */
 const people = (users: Paged<User>, open: UserId | null = null) =>

@@ -231,7 +231,7 @@ const COPIED_MS = 2000;
  * A one-line mono value with a Copy button at its end, for a link shown once. The value is
  * selectable so it can be copied by hand when the clipboard is unavailable.
  */
-function CopyField({ value, label }: { readonly value: string; readonly label: string }) {
+export function CopyField({ value, label }: { readonly value: string; readonly label: string }) {
   const [copiedAt, setCopiedAt] = useState<number | null>(null);
   const copied = copiedAt !== null;
 

@@ -16,7 +16,7 @@ import {
 } from "../lib/passwords";
 import { refundAttempt, takeAttempt } from "../lib/rateLimit";
 import { endUserSessions } from "../sessions";
-import { renameUser } from "./users";
+import { changeDisplayName, renameUser } from "./users";
 
 export const attempt = internalMutation({
   args: {},
@@ -57,9 +57,14 @@ export const replace = internalMutation({
   },
 });
 
-export const { rename, changePassword } = register({
+export const { rename, setDisplayName, changePassword } = register({
   rename: async (ctx, { username }, caller) => {
     await renameUser(ctx, await callerUser(ctx, caller), username);
+
+    return null;
+  },
+  setDisplayName: async (ctx, { displayName }, caller) => {
+    await changeDisplayName(ctx, await callerUser(ctx, caller), displayName);
 
     return null;
   },

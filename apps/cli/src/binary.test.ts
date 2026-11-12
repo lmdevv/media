@@ -88,6 +88,7 @@ const afterFailedSave = (
 const SESSION = {
   userId: "users:1",
   username: "ana",
+  displayName: null,
   role: "owner",
   sessionId: "authSessions:1",
   kind: "password",

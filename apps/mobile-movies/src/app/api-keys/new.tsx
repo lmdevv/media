@@ -15,9 +15,8 @@ import { Screen } from "@/components/ui/screen";
 import { Text } from "@/components/ui/text";
 import { TextField } from "@/components/ui/text-field";
 import { Toggle } from "@/components/ui/toggle";
-import { broadestLabel, grantablePermissions } from "@/lib/api-keys";
+import { grantablePermissions } from "@/lib/api-keys";
 import type { KeyScope } from "@/lib/api-keys";
-import { useMadeKeys } from "@/session/made-keys";
 import { useMe } from "@/session/me";
 
 const DEFAULT_SCOPES: ReadonlyArray<KeyScope> = ["movies:read", "movies:play"];
@@ -69,7 +68,6 @@ function Created({ created }: { readonly created: CreatedKey }) {
 export default function CreateApiKey() {
   const me = useMe();
   const platform = usePlatform();
-  const made = useMadeKeys();
   const [name, setName] = useState("");
   const [scopes, setScopes] = useState<ReadonlyArray<KeyScope>>(DEFAULT_SCOPES);
   const [busy, setBusy] = useState(false);
@@ -103,7 +101,6 @@ export default function CreateApiKey() {
         expiresInDays: EXPIRES_IN_DAYS,
       });
 
-      made.add({ keyId: key.keyId, name: trimmed, detail: broadestLabel(chosen) });
       setCreated({ name: trimmed, key: key.key });
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (cause) {

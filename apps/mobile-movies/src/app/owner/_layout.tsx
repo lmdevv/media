@@ -25,6 +25,7 @@ export default function OwnerLayout() {
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="libraries/[libraryId]/remove" options={sheet} />
       <Stack.Screen name="backups/[backupId]" options={sheet} />
+      <Stack.Screen name="devices/remove" options={sheet} />
     </Stack>
   );
 }

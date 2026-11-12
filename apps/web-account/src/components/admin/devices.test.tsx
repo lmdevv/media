@@ -17,9 +17,14 @@ const tv: Device = { deviceId: deviceId("d1"), name: "Living room TV", mode: "sh
 
 const phone: Device = { deviceId: deviceId("d2"), name: "Ada's phone", mode: "personal" };
 
-const sam: User = { userId: userId("u1"), username: "sam", role: "member" };
+const sam: User = { userId: userId("u1"), username: "sam", displayName: null, role: "member" };
 
-const visitor: User = { userId: userId("u2"), username: "Visitor", role: "guest" };
+const visitor: User = {
+  userId: userId("u2"),
+  username: "Visitor",
+  displayName: null,
+  role: "guest",
+};
 
 const devices = (list: Paged<Device>, focus: DeviceFocus | null = null) => (
   <DevicesView

@@ -18,6 +18,10 @@ const renameArgs = v.object({ username: v.string() });
 
 const renameResult = v.null();
 
+const setDisplayNameArgs = v.object({ displayName: v.union(v.string(), v.null()) });
+
+const setDisplayNameResult = v.null();
+
 /** The handlers `convex/core/accounts/me.ts` passes to `register`, one per `core.accounts.me` command. */
 export interface Handlers {
   /** `core.accounts.me.changePassword` (action, account, API keys refused): Change your password and sign out your other password and device sessions. */
@@ -33,6 +37,13 @@ export interface Handlers {
     args: Infer<typeof renameArgs>,
     caller: Caller,
   ) => Infer<typeof renameResult> | Promise<Infer<typeof renameResult>>;
+
+  /** `core.accounts.me.setDisplayName` (mutation, account, API keys refused): Set the name you go by in greetings and lists, or clear it to go by your username. */
+  readonly setDisplayName: (
+    ctx: Omit<MutationCtx, "auth">,
+    args: Infer<typeof setDisplayNameArgs>,
+    caller: Caller,
+  ) => Infer<typeof setDisplayNameResult> | Promise<Infer<typeof setDisplayNameResult>>;
 }
 
 /** The `api` reference of each `core.accounts.me` command; `commands/refs.ts` checks them. */
@@ -49,6 +60,12 @@ export interface Refs {
     Infer<typeof renameArgs>,
     Infer<typeof renameResult>
   >;
+  readonly setDisplayName: FunctionReference<
+    "mutation",
+    "public",
+    Infer<typeof setDisplayNameArgs>,
+    Infer<typeof setDisplayNameResult>
+  >;
 }
 
 /** Registers the `core.accounts.me` commands as public Convex functions with their declared arguments and result. */
@@ -64,5 +81,11 @@ export const register = (handlers: Handlers) => ({
     returns: renameResult,
     handler: async (ctx, args) =>
       handlers.rename(ctx, args, refuseKeys(await requireCaller(ctx, "account"))),
+  }),
+  setDisplayName: mutation({
+    args: setDisplayNameArgs,
+    returns: setDisplayNameResult,
+    handler: async (ctx, args) =>
+      handlers.setDisplayName(ctx, args, refuseKeys(await requireCaller(ctx, "account"))),
   }),
 });

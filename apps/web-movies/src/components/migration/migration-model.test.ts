@@ -12,9 +12,19 @@ const importId = Brand.nominal<ImportRun["importId"]>();
 
 const jobId = Brand.nominal<ImportRun["job"]["jobId"]>();
 
-const lucia: Person = { userId: coreUserId("u1"), username: "lucia", role: "owner" };
+const lucia: Person = {
+  userId: coreUserId("u1"),
+  username: "lucia",
+  displayName: null,
+  role: "owner",
+};
 
-const visitor: Person = { userId: coreUserId("u2"), username: "visitor", role: "guest" };
+const visitor: Person = {
+  userId: coreUserId("u2"),
+  username: "visitor",
+  displayName: null,
+  role: "guest",
+};
 
 const connection = Schema.decodeSync(ImportConnection)({
   status: "connected",

@@ -5,8 +5,8 @@ import type { FunctionReference } from "convex/server";
 import { v } from "convex/values";
 import type { Infer } from "convex/values";
 
-import { action, mutation } from "../../../convex/_generated/server";
-import type { ActionCtx, MutationCtx } from "../../../convex/_generated/server";
+import { action, mutation, query } from "../../../convex/_generated/server";
+import type { ActionCtx, MutationCtx, QueryCtx } from "../../../convex/_generated/server";
 import { refuseKeys, requireActionCaller, requireCaller } from "../../../convex/core/auth/caller";
 import type { Caller } from "../../../convex/core/auth/caller";
 
@@ -37,6 +37,47 @@ const endAllArgs = v.object({});
 
 const endAllResult = v.null();
 
+const listArgs = v.object({
+  paginationOpts: v.object({
+    numItems: v.number(),
+    cursor: v.union(v.string(), v.null()),
+    endCursor: v.optional(v.union(v.string(), v.null())),
+    id: v.optional(v.number()),
+    maximumRowsRead: v.optional(v.number()),
+    maximumBytesRead: v.optional(v.number()),
+  }),
+});
+
+const listResult = v.object({
+  page: v.array(
+    v.object({
+      keyId: v.id("apiKeys"),
+      name: v.string(),
+      scopes: v.array(
+        v.union(
+          v.literal("account"),
+          v.literal("admin"),
+          v.literal("movies:read"),
+          v.literal("movies:play"),
+          v.literal("movies:edit"),
+          v.literal("music:read"),
+          v.literal("music:play"),
+          v.literal("music:edit"),
+        ),
+      ),
+      createdAt: v.number(),
+      expiresAt: v.union(v.number(), v.null()),
+      lastUsedAt: v.union(v.number(), v.null()),
+    }),
+  ),
+  continueCursor: v.string(),
+  isDone: v.boolean(),
+  splitCursor: v.optional(v.union(v.string(), v.null())),
+  pageStatus: v.optional(
+    v.union(v.literal("SplitRecommended"), v.literal("SplitRequired"), v.null()),
+  ),
+});
+
 const revokeArgs = v.object({ keyId: v.id("apiKeys") });
 
 const revokeResult = v.null();
@@ -56,6 +97,13 @@ export interface Handlers {
     args: Record<string, never>,
     caller: Caller,
   ) => Infer<typeof endAllResult> | Promise<Infer<typeof endAllResult>>;
+
+  /** `core.auth.apiKeys.list` (query, account): List your API keys that still work or ran out, newest first, with their scopes and last use; never their secrets. */
+  readonly list: (
+    ctx: Omit<QueryCtx, "auth">,
+    args: Infer<typeof listArgs>,
+    caller: Caller,
+  ) => Infer<typeof listResult> | Promise<Infer<typeof listResult>>;
 
   /** `core.auth.apiKeys.revoke` (mutation, account): Revoke one of your API keys and sign out what it signed in. */
   readonly revoke: (
@@ -79,6 +127,12 @@ export interface Refs {
     Record<string, never>,
     Infer<typeof endAllResult>
   >;
+  readonly list: FunctionReference<
+    "query",
+    "public",
+    Infer<typeof listArgs>,
+    Infer<typeof listResult>
+  >;
   readonly revoke: FunctionReference<
     "mutation",
     "public",
@@ -99,6 +153,11 @@ export const register = (handlers: Handlers) => ({
     args: endAllArgs,
     returns: endAllResult,
     handler: async (ctx, args) => handlers.endAll(ctx, args, await requireCaller(ctx, "account")),
+  }),
+  list: query({
+    args: listArgs,
+    returns: listResult,
+    handler: async (ctx, args) => handlers.list(ctx, args, await requireCaller(ctx, "account")),
   }),
   revoke: mutation({
     args: revokeArgs,

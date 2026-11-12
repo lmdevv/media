@@ -29,6 +29,7 @@ const retry = (): void => undefined;
 const meAs = (scopes: Me["scopes"], kind: Me["kind"] = "password"): Me => ({
   userId: ada,
   username: "ada",
+  displayName: null,
   role: "member",
   sessionId: Brand.nominal<Me["sessionId"]>()("session-1"),
   kind,

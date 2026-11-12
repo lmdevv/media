@@ -1,6 +1,6 @@
 import { useHousehold } from "@media/mobile-core/use-accounts";
 import { Redirect, router } from "expo-router";
-import { Download, Folder, Server, Settings2, Users } from "lucide-react-native";
+import { Download, Folder, Server, Settings2, TvMinimal, Users } from "lucide-react-native";
 
 import { OwnerScreen } from "@/components/owner/parts";
 import { useManagedLibraries } from "@/components/owner/use-libraries";
@@ -47,6 +47,7 @@ function OwnerSettingsList() {
         title="Import from Jellyfin or Plex"
         onPress={() => router.push("/owner/import")}
       />
+      <ListRow icon={TvMinimal} title="Devices" onPress={() => router.push("/owner/devices")} />
       <ListRow icon={Server} title="Backups" onPress={() => router.push("/owner/backups")} />
       <ListRow icon={Settings2} title="Server" onPress={() => router.push("/owner/server")} />
     </OwnerScreen>

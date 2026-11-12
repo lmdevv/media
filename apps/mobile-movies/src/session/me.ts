@@ -22,6 +22,10 @@ export const useMe = (): Me => {
   return phase.me;
 };
 
+/** The name a person goes by: the display name they set, else their username. */
+export const nameOf = (person: Pick<Me, "username" | "displayName">): string =>
+  person.displayName ?? person.username;
+
 /** The person the app shows: who is signed in, or offline, who last was on this server. */
 export type Person = NonNullable<AppRecord["person"]>;
 

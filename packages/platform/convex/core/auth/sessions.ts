@@ -1,18 +1,86 @@
 import { register } from "../../../commands/core/auth/sessions";
+import type { Doc, Id } from "../../_generated/dataModel";
+import type { DatabaseReader } from "../../_generated/server";
 import { fail } from "../lib/errors";
-import { endSession, endUserSessions } from "../sessions";
+import { PAGE_ROWS_MAX, paginateAtMost } from "../lib/paginate";
+import { LIST_CALL_READS } from "../permissions/grants";
+import { can, heldScopes } from "../permissions/policy";
+import { boundDevice, endSession, endUserSessions, liveWithDevice } from "../sessions";
+import { callerUser } from "./caller";
+import type { Caller } from "./caller";
 
 /** Convex Auth writes a refresh token as `<refreshTokenId>|<sessionId>`. */
 const REFRESH_TOKEN_DIVIDER = "|";
 
-export const { current, end, endAll, revoke } = register({
+const NO_SESSION = "No such session";
+
+/**
+ * What a listed session costs: its row, and the device it is bound to and the grant that names an
+ * app on no device yet, or the key that signed it in.
+ */
+const LIST_ROW_READS = 3;
+
+const LIST_ROWS = Math.floor((PAGE_ROWS_MAX - LIST_CALL_READS) / LIST_ROW_READS);
+
+/** Decides `action` on a session or key `owner` holds; a refusal fails and says why. */
+export const requireOwnCredential = (
+  caller: Caller,
+  action: "list" | "end",
+  owner: Id<"users">,
+  missing: string,
+): void => {
+  const decision = can(caller, action, { on: "credential", owner });
+
+  if (decision.allowed) return;
+
+  if (decision.refusal === "hidden") return fail("not_found", missing);
+
+  return fail(
+    "forbidden",
+    decision.because === "guest"
+      ? "A guest has no account to manage"
+      : "Only a session with your account's scope can do this",
+  );
+};
+
+type Listed = Exclude<Doc<"authSessions">, { readonly kind: "guest" }>;
+
+const listed = (session: Doc<"authSessions">): session is Listed => session.kind !== "guest";
+
+/** What a session calls itself: its device's name, its key's or device sign-in's, or its grant's. */
+const nameOf = async (
+  db: DatabaseReader,
+  session: Listed,
+  device: Doc<"devices"> | null,
+): Promise<string | null> => {
+  if (device !== null) return device.name;
+
+  if (session.kind === "deviceCode") return session.clientName;
+
+  if (session.kind === "apiKey") return (await db.get(session.keyId))?.name ?? null;
+
+  if (session.kind === "password" || session.kind === "grant") {
+    const grant = session.grant === undefined ? null : await db.get(session.grant);
+
+    return grant?.name ?? null;
+  }
+
+  return null;
+};
+
+export const { current, list, end, endAll, revoke } = register({
   current: async (ctx, _args, caller) => {
-    const session = await ctx.db.get(caller.sessionId);
+    const [session, user] = await Promise.all([
+      ctx.db.get(caller.sessionId),
+      ctx.db.get(caller.userId),
+    ]);
+
     const bound = session !== null && "device" in session ? session.device : undefined;
 
     return {
       userId: caller.userId,
       username: caller.username,
+      displayName: user?.kind === "person" ? (user.displayName ?? null) : null,
       role: caller.role,
       sessionId: caller.sessionId,
       kind: caller.sessionKind,
@@ -22,16 +90,68 @@ export const { current, end, endAll, revoke } = register({
         bound?.joined === undefined ? null : { deviceId: bound.id, joinSequence: bound.joined },
     };
   },
-  end: async (ctx, { sessionId }, caller) => {
-    const session = await ctx.db.get(sessionId);
+  /**
+   * The caller's live sessions, API keys' sign-ins included, at most 100 a key. Ended sessions
+   * wait for the purge and are left out, so a page may hold fewer rows than asked.
+   */
+  list: async (ctx, { paginationOpts }, caller) => {
+    requireOwnCredential(caller, "list", caller.userId, NO_SESSION);
 
-    if (session?.userId !== caller.userId) return fail("not_found", "No such session");
+    const user = await callerUser(ctx, caller);
+    const now = Date.now();
+
+    const page = await paginateAtMost(
+      ctx.db,
+      {
+        table: "authSessions",
+        index: "userId",
+        range: (q) => q.eq("userId", user._id),
+        order: "desc",
+      },
+      paginationOpts,
+      LIST_ROWS,
+    );
+
+    const rows = await Promise.all(
+      page.page.filter(listed).map(async (session) => {
+        const bound = boundDevice(session);
+        const device = bound === null ? null : await ctx.db.get(bound.id);
+
+        if (!liveWithDevice(session, user, device, now)) return [];
+
+        return [
+          {
+            sessionId: session._id,
+            kind: session.kind,
+            name: await nameOf(ctx.db, session, device),
+            device: device === null ? null : { deviceId: device._id, name: device.name },
+            scopes: heldScopes(session, user),
+            signedInAt: session._creationTime,
+            expiresAt: session.expirationTime,
+            current: session._id === caller.sessionId,
+          },
+        ];
+      }),
+    );
+
+    return { ...page, page: rows.flat() };
+  },
+  /**
+   * Signs out one of the caller's sessions. An app whose own session ends while its device grant
+   * stands asks for the password again (D59).
+   */
+  end: async (ctx, { sessionId }, caller) => {
+    const session = (await ctx.db.get(sessionId)) ?? fail("not_found", NO_SESSION);
+
+    requireOwnCredential(caller, "end", session.userId, NO_SESSION);
 
     await endSession(ctx, sessionId);
 
     return null;
   },
   endAll: async (ctx, { keepCurrent }, caller) => {
+    requireOwnCredential(caller, "end", caller.userId, NO_SESSION);
+
     const user = await ctx.db.get(caller.userId);
 
     if (user !== null) {

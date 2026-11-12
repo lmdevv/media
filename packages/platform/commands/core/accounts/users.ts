@@ -38,6 +38,7 @@ const listResult = v.object({
     v.object({
       userId: v.id("users"),
       username: v.string(),
+      displayName: v.union(v.string(), v.null()),
       role: v.union(
         v.literal("owner"),
         v.literal("admin"),

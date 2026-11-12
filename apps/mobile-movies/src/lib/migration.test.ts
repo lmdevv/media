@@ -21,7 +21,12 @@ const importId = Brand.nominal<ImportRun["importId"]>();
 
 const jobId = Brand.nominal<ImportRun["job"]["jobId"]>();
 
-const lucia: HouseholdUser = { userId: coreUserId("u1"), username: "lucia", role: "owner" };
+const lucia: HouseholdUser = {
+  userId: coreUserId("u1"),
+  username: "lucia",
+  displayName: null,
+  role: "owner",
+};
 
 const summary = {
   usersMapped: 1,
