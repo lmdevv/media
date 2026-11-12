@@ -34,6 +34,8 @@ jobs:
       - name: Release tag matches the package version
         if: startsWith(github.ref, 'refs/tags/v')
         run: scripts/check-version.sh "$GITHUB_REF_NAME"
+      - id: version
+        run: echo "version=$(scripts/check-version.sh)" | tee -a "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
@@ -43,6 +45,7 @@ jobs:
           platforms: linux/amd64
           load: true
           tags: media:ci
+          build-args: MEDIA_VERSION=${{ steps.version.outputs.version }}
           # Read-only: saving here uploaded the build stage, which the next commit's `COPY . .`
           # never reuses, and replaced the publish job's arm64 layers.
           cache-from: type=gha,scope=image
@@ -50,6 +53,12 @@ jobs:
         run: |
           size="$(docker image inspect media:ci --format '{{.Size}}')"
           echo "media:ci is $((size / 1024 / 1024)) MiB" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: The image is labelled with the package version
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          label="$(docker image inspect media:ci --format '{{ index .Config.Labels "org.opencontainers.image.version" }}')"
+          [ "$label" = "$VERSION" ] || { echo "::error::media:ci is labelled '$label', not $VERSION"; exit 1; }
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0

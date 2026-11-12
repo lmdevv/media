@@ -1,8 +1,9 @@
 # 0021. Ship one `media` CLI and one agent skill with a reference per domain
 
 - Status: Accepted, 2026-11-03. Amended 2026-11-04 with the CLI shell, 2026-11-11 with one
-  config and the movies commands, and 2026-11-11 with the refusal fence.
-- Decisions: D41, D51, D53
+  config and the movies commands, 2026-11-11 with the refusal fence, and 2026-11-12 with the npm
+  package.
+- Decisions: D41, D51, D53, D55
 
 ## Context
 
@@ -179,3 +180,23 @@ NixOS module now run alone (ADR 0027).
 Old words with no replacement on the core, left out under D62 until the backlog brings them back:
 `profiles use` (one person per session now), `keys list`, the room countdown above, `import` (the
 importer page lives in the movies client, D57), `restore`, and `--wait` on queued jobs.
+
+## The npm package (amended 2026-11-12)
+
+The first [media] release (p4-release, D55, ADR 0016) publishes the CLI under its new name.
+
+- **`@lmdevv/media`.** `apps/cli` is the npm package `@lmdevv/media`, at the server's version,
+  with the `media` binary and the skill. The release workflow publishes it with npm trusted
+  publishing and a provenance attestation, once the tag's image is out, beside the standalone
+  binaries. npm sets a trusted publisher only on a package that exists, so the owner claims the
+  name by hand with a placeholder version, `0.0.0-stage`, just before the first tag, and
+  deprecates it at once: the registry makes a first version `latest` whatever its dist-tag, so
+  until the workflow publishes the release an install gets the placeholder (`docs/operations.md`,
+  "Releasing").
+- **`@lmdevv/movies` ends at 0.2.0.** Its binary is `movies`, so the two packages never fight
+  over a command. After `@lmdevv/media` 0.3.0 is on npm, the owner deprecates every version of
+  `@lmdevv/movies` with a message that names `@lmdevv/media`, with their own npm credentials (D41,
+  D53). It is not unpublished.
+- **Nix names stay.** The flake's `cli` package keeps the derivation name `movies-cli`, and its
+  `movies` outputs keep their names. Renaming flake outputs breaks the configurations that import
+  them, so it is not part of the release.

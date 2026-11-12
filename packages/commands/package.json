@@ -1,6 +1,6 @@
 {
   "name": "@media/commands",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "The command list and the generator that writes each command's Convex function and skill reference.",
   "type": "module",

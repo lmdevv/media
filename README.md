@@ -1,10 +1,13 @@
-# [movies]
+# [media]
 
-Self-hosted movies and TV for people and agents. Stream your own folders or NAS from one install,
-with profiles, Netflix-style browsing, watching together at the same second, migration from
-Jellyfin and Plex, and a CLI that can do everything the app can.
+Self-hosted movies and TV for people and agents, with music to follow. Stream your own folders or
+NAS from one install, with an account per person and one sign-in across the apps, Netflix-style
+browsing, watching together at the same second, migration from Jellyfin and Plex, and a CLI that
+can do everything the app can.
 
-Early development: the MVP (media service, web app, SDK, CLI) is in place; native apps come later.
+[media] merges [movies] and [music] into one server. Its first release, 0.3.0, carries movies;
+the music client comes in a later release. It is a fresh install: nothing moves over from a
+[movies] v0.2 install ([docs/operations.md](docs/operations.md#upgrading)).
 
 ## Stack
 
@@ -183,7 +186,7 @@ version as the server.
 | --------------------------- | ---------------------------------------------------------------------------------------------- |
 | The Compose server          | In the image: `docker compose exec media media auth login --username <name>`                   |
 | The NixOS server            | Installed by `services.media`, pointed at the server                                           |
-| Anywhere with Node 22+      | `npm install -g @lmdevv/movies`                                                                |
+| Anywhere with Node 22+      | `npm install -g @lmdevv/media` (it replaces `@lmdevv/movies`)                                  |
 | Linux or macOS without Node | `media-<os>-<arch>` from the [latest release](https://github.com/lmdevv/media/releases/latest) |
 | Another NixOS machine       | `nixosModules.cli` with `programs.media` (below)                                               |
 | Home Manager (Linux, macOS) | `homeManagerModules.movies` with `programs.media` (below)                                      |
@@ -248,7 +251,7 @@ NixOS modules set them for every user on the machine. Home Manager sets them in
 No install stores a credential: each user runs `media auth login` once, or sets
 `MEDIA_CORE_API_KEY`. Output is JSON by default. Agents get an API key from the account page and
 follow [apps/cli/skills/media/SKILL.md](apps/cli/skills/media/SKILL.md), which loads one generated
-reference per domain. In a checkout, `pnpm --filter @lmdevv/movies build` writes
+reference per domain. In a checkout, `pnpm --filter @lmdevv/media build` writes
 `apps/cli/dist/media.js`.
 
 `media --help` lists the `auth`, `admin`, `movies`, and `music` groups, then `media logs` and
@@ -286,7 +289,7 @@ See `AGENTS.md` for the layout, rules, and checks, and `docs/` for decisions and
 
 ## License
 
-[movies] is MIT-licensed. The self-hosted Convex backend it runs (`ghcr.io/convex/convex-backend`)
+[media] is MIT-licensed. The self-hosted Convex backend it runs (`ghcr.io/convex/convex-backend`)
 is FSL-1.1-Apache-2.0: each release converts to Apache-2.0 two years after it ships. The image
 includes Debian's ffmpeg (LGPL/GPL) and the non-free build of Intel's media driver, whose
 encoding kernels are proprietary; the NixOS module uses nixpkgs `ffmpeg-full`.

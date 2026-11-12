@@ -79,7 +79,7 @@ jobs:
         run: pnpm --filter @media/mobile-movies bundle
       - run: scripts/check-deploy.sh
       - if: contains(fromJSON(steps.scope.outputs.workspaces), 'apps/cli')
-        run: pnpm --filter @lmdevv/movies build:sea
+        run: pnpm --filter @lmdevv/media build:sea
       - if: contains(fromJSON(steps.scope.outputs.workspaces), 'apps/cli')
         run: test "$(apps/cli/dist/sea/media-linux-x64 --version)" = "$(scripts/check-version.sh)"
 
@@ -189,7 +189,7 @@ jobs:
           - suite: SDK and CLI
             run: |
               pnpm --filter @media/sdk test:stack
-              pnpm --filter @lmdevv/movies test:stack
+              pnpm --filter @lmdevv/media test:stack
           - suite: media server
             media: true
             run: pnpm --filter @media/server test:stack

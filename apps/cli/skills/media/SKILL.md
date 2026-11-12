@@ -25,7 +25,7 @@ Skip this when `media --version` already works.
 
 - **On the server:** a Compose install has it in the image (`docker compose exec media media ...`).
   A NixOS install puts it on every user's `PATH`.
-- **Node 22 or newer:** `npm install -g @lmdevv/movies`, or once with `npx @lmdevv/movies --help`.
+- **Node 22 or newer:** `npm install -g @lmdevv/media`, or once with `npx @lmdevv/media --help`.
 - **No Node:** download the release binary, check it, and install it (`media-linux-arm64` or
   `media-darwin-arm64` likewise; `shasum -a 256 -c` on macOS):
 

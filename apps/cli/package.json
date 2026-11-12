@@ -1,11 +1,12 @@
 {
-  "name": "@lmdevv/movies",
-  "version": "0.2.0",
-  "description": "Search, play, and manage your self-hosted [movies] library from the command line.",
+  "name": "@lmdevv/media",
+  "version": "0.3.0",
+  "description": "Search, play, and manage your self-hosted [media] server from the command line.",
   "keywords": [
     "agent",
     "cli",
     "jellyfin",
+    "media",
     "media-server",
     "movies",
     "self-hosted"
