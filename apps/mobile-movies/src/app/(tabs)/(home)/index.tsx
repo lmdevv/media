@@ -1,3 +1,5 @@
+import { describeFailure } from "@media/mobile-core/failure";
+import { useFirstRows } from "@media/mobile-core/pages";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { router } from "expo-router";
 import { Folder, Plus, Popcorn } from "lucide-react-native";
@@ -10,7 +12,7 @@ import { EmptyState } from "@/components/browse/empty-state";
 import { Hero } from "@/components/browse/hero";
 import { TAB_BAR_CLEARANCE } from "@/components/browse/layout";
 import { useActiveScans, useMovieLibraries } from "@/components/browse/libraries";
-import type { ActiveScan, Library } from "@/components/browse/libraries";
+import type { ActiveScan } from "@/components/browse/libraries";
 import { ProfileButton } from "@/components/browse/profile-button";
 import { Rail } from "@/components/browse/rail";
 import { ScanStatus } from "@/components/browse/scan-status";
@@ -22,8 +24,7 @@ import { CalmState } from "@/components/ui/calm-state";
 import { homeScreen } from "@/lib/browse";
 import type { HomeScreen } from "@/lib/browse";
 import type { Home as HomeRows } from "@/lib/catalog";
-import { describeFailure } from "@/lib/failure";
-import { useFirstRows } from "@/lib/pages";
+import type { Library } from "@/lib/owner";
 import { useWidthClass } from "@/lib/use-width-class";
 import { useMe } from "@/session/me";
 

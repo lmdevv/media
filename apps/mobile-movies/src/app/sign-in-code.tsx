@@ -1,3 +1,4 @@
+import { describeFailure } from "@media/mobile-core/failure";
 import { Predicate } from "effect";
 import { Lock } from "lucide-react-native";
 import { useEffect, useState } from "react";
@@ -10,7 +11,6 @@ import { NavHeader } from "@/components/ui/nav-header";
 import { Screen } from "@/components/ui/screen";
 import { Text } from "@/components/ui/text";
 import { approvalAddress, codeGroups, expiresInLine, spokenCode } from "@/lib/device-code";
-import { describeFailure } from "@/lib/failure";
 import { useServer } from "@/session/connection";
 import { useSignIn } from "@/session/sign-in";
 

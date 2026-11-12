@@ -1,30 +1,21 @@
-import { LibraryId } from "@media/contracts/ids";
-import type { LibraryDetail, LibraryFileSummary } from "@media/contracts/models/catalog";
-import type { Job } from "@media/contracts/models/jobs";
-import { useCommand, useCommandQuery } from "@media/sdk/react";
-import { Schema } from "effect";
+import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { router, useLocalSearchParams } from "expo-router";
 import {
-  Check,
   Clapperboard,
   Ellipsis,
   FileWarning,
   Folder,
   FolderX,
   History,
-  LoaderCircle,
   RotateCcw,
   Search,
   Wifi,
-  X,
 } from "lucide-react-native";
-import type { LucideIcon } from "lucide-react-native";
 
 import {
   InlineState,
   OwnerScreen,
   QueryView,
-  SectionHeading,
   Spacer,
   showActions,
   useNow,
@@ -35,35 +26,38 @@ import { IconButton } from "@/components/ui/icon-button";
 import { ListRow } from "@/components/ui/list-row";
 import { Text } from "@/components/ui/text";
 import { shortFolder } from "@/lib/library-form";
+import { asLibraryId } from "@/lib/owner";
+import type { LibraryDetail, LibraryFileSummary } from "@/lib/owner";
 import { countOf, formatCount, formatWhen } from "@/lib/owner-format";
 import { folderTrouble, isActive, scanStateLabel } from "@/lib/scans";
 
-const decodeLibraryId = Schema.decodeUnknownSync(LibraryId);
+const folderDetail = (folders: ReadonlyArray<string>): string =>
+  folders.length === 1
+    ? shortFolder(folders[0] ?? "")
+    : countOf(folders.length, "Folder", "Folders");
 
-const RECENT = 3;
-
-const SCAN_ICONS: Readonly<Record<Job["status"], LucideIcon>> = {
-  pending: LoaderCircle,
-  running: LoaderCircle,
-  succeeded: Check,
-  failed: X,
-  cancelled: X,
-};
-
-const folderDetail = (library: LibraryDetail): string =>
-  library.roots.length === 1
-    ? shortFolder(library.roots[0] ?? "")
-    : countOf(library.roots.length, "Folder", "Folders");
-
-const openScan = (library: LibraryDetail, job: Job | undefined) =>
+const openScan = (library: LibraryDetail) =>
   router.push({
     pathname: "/owner/libraries/[libraryId]/scan",
-    params:
-      job === undefined ? { libraryId: library.id } : { libraryId: library.id, jobId: job.id },
+    params: { libraryId: library.libraryId },
   });
 
 const edit = (library: LibraryDetail) =>
-  router.push({ pathname: "/owner/libraries/[libraryId]/edit", params: { libraryId: library.id } });
+  router.push({
+    pathname: "/owner/libraries/[libraryId]/edit",
+    params: { libraryId: library.libraryId },
+  });
+
+function FolderRow({ library }: { readonly library: LibraryDetail }) {
+  return library.folders === null ? null : (
+    <ListRow
+      icon={Folder}
+      title="Server Folder"
+      detail={folderDetail(library.folders)}
+      onPress={() => edit(library)}
+    />
+  );
+}
 
 function FolderTrouble({
   library,
@@ -72,25 +66,16 @@ function FolderTrouble({
   readonly library: LibraryDetail;
   readonly trouble: "offline" | "notApproved";
 }) {
-  const scan = useCommand("libraries.scan");
+  const platform = usePlatform();
 
   const retry = useTask(async () => {
-    const queued = await scan({ libraryId: library.id, mode: "full" });
-
-    router.push({
-      pathname: "/owner/libraries/[libraryId]/scan",
-      params: { libraryId: library.id, jobId: queued.jobId },
-    });
+    await platform.core.libraries.scan({ libraryId: library.libraryId, mode: "full" });
+    openScan(library);
   });
 
   return (
     <>
-      <ListRow
-        icon={Folder}
-        title="Server Folder"
-        detail={folderDetail(library)}
-        onPress={() => edit(library)}
-      />
+      <FolderRow library={library} />
       {trouble === "offline" ? (
         <>
           <InlineState
@@ -127,51 +112,47 @@ function FolderTrouble({
 
 function LibraryRows({
   library,
-  scans,
   summary,
 }: {
   readonly library: LibraryDetail;
-  readonly scans: ReadonlyArray<Job>;
   readonly summary: LibraryFileSummary | null;
 }) {
   const now = useNow(60_000);
-  const scan = useCommand("libraries.scan");
-  const [latest] = scans;
-  const scanning = isActive(latest) || library.scanning;
+  const platform = usePlatform();
+  const { scan } = library;
+  const scanning = isActive(scan);
 
   const start = useTask(async () => {
-    const queued = await scan({ libraryId: library.id, mode: "full" });
-
-    router.push({
-      pathname: "/owner/libraries/[libraryId]/scan",
-      params: { libraryId: library.id, jobId: queued.jobId },
-    });
+    await platform.core.libraries.scan({ libraryId: library.libraryId, mode: "full" });
+    openScan(library);
   });
 
   const files = (filter: "unmatched" | "missing") =>
     router.push({
       pathname: "/owner/libraries/[libraryId]/files",
-      params: { libraryId: library.id, filter },
+      params: { libraryId: library.libraryId, filter },
     });
+
+  const unmatched = summary?.unmatched ?? null;
+  const missing = summary?.missing ?? null;
 
   return (
     <>
-      <ListRow
-        icon={Folder}
-        title="Server Folder"
-        detail={folderDetail(library)}
-        onPress={() => edit(library)}
-      />
-      <ListRow
-        icon={Clapperboard}
-        title={library.kind === "shows" ? "Shows" : "Titles"}
-        detail={formatCount(library.titleCount)}
-      />
+      <FolderRow library={library} />
+      {library.items === null ? null : (
+        <ListRow icon={Clapperboard} title="Titles" detail={formatCount(library.items)} />
+      )}
       <ListRow
         icon={History}
         title="Last Scan"
-        detail={library.lastScanAt === null ? "Never" : formatWhen(library.lastScanAt, now)}
-        onPress={latest === undefined ? undefined : () => openScan(library, latest)}
+        detail={
+          scan === null
+            ? "Never"
+            : scan.finishedAt === null
+              ? scanStateLabel(scan)
+              : `${formatWhen(scan.finishedAt, now)} · ${scanStateLabel(scan)}`
+        }
+        onPress={scan === null ? undefined : () => openScan(library)}
       />
       <Spacer />
       {start.error === null ? null : (
@@ -180,7 +161,7 @@ function LibraryRows({
         </Text>
       )}
       {scanning ? (
-        <Button label="Scanning…" onPress={() => openScan(library, latest)} />
+        <Button label="Scanning…" onPress={() => openScan(library)} />
       ) : (
         <Button
           label="Scan Library"
@@ -189,29 +170,19 @@ function LibraryRows({
           onPress={() => void start.run()}
         />
       )}
-      {scans.length === 0 ? null : <SectionHeading>Recent Scans</SectionHeading>}
-      {scans.slice(0, RECENT).map((job) => (
-        <ListRow
-          key={job.id}
-          icon={SCAN_ICONS[job.status]}
-          title={formatWhen(job.createdAt, now)}
-          detail={scanStateLabel(job)}
-          onPress={() => openScan(library, job)}
-        />
-      ))}
-      {summary === null ? null : (
+      {unmatched === null ? null : (
         <ListRow
           icon={Search}
           title="Unmatched Files"
-          detail={formatCount(summary.unmatchedTitles)}
-          onPress={summary.unmatchedTitles === 0 ? undefined : () => files("unmatched")}
+          detail={formatCount(unmatched)}
+          onPress={unmatched === 0 ? undefined : () => files("unmatched")}
         />
       )}
-      {summary === null || summary.missingFiles === 0 ? null : (
+      {missing === null || missing === 0 ? null : (
         <ListRow
           icon={FileWarning}
           title="Missing Files"
-          detail={formatCount(summary.missingFiles)}
+          detail={formatCount(missing)}
           onPress={() => files("missing")}
         />
       )}
@@ -220,12 +191,11 @@ function LibraryRows({
 }
 
 export default function Library() {
+  const platform = usePlatform();
   const params = useLocalSearchParams<{ libraryId: string }>();
-  const libraryId = decodeLibraryId(params.libraryId);
-  const library = useCommandQuery("libraries.get", { libraryId });
-  const summary = useCommandQuery("libraries.fileSummary", { libraryId });
-  const jobs = useCommandQuery("jobs.list", { kind: "scan", libraryId, limit: RECENT });
-  const scans = jobs.status === "success" ? jobs.data : [];
+  const libraryId = asLibraryId(params.libraryId);
+  const library = usePlatformQuery(platform.core.libraries.get, { libraryId });
+  const summary = usePlatformQuery(platform.movies.files.summary, { libraryId });
   const name = library.status === "success" ? library.data.name : "Library";
 
   const more = () => {
@@ -245,8 +215,6 @@ export default function Library() {
     ]);
   };
 
-  const trouble = folderTrouble(scans[0]);
-
   return (
     <OwnerScreen
       title={name}
@@ -254,17 +222,18 @@ export default function Library() {
       trailing={<IconButton icon={Ellipsis} label={`More for ${name}`} onPress={more} />}
     >
       <QueryView query={library}>
-        {(detail) =>
-          trouble === null ? (
+        {(detail) => {
+          const trouble = folderTrouble(detail.scan);
+
+          return trouble === null ? (
             <LibraryRows
               library={detail}
-              scans={scans}
               summary={summary.status === "success" ? summary.data : null}
             />
           ) : (
             <FolderTrouble library={detail} trouble={trouble} />
-          )
-        }
+          );
+        }}
       </QueryView>
     </OwnerScreen>
   );

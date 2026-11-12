@@ -15,7 +15,6 @@
     "@media/contracts": "workspace:*",
     "@media/mobile-core": "workspace:*",
     "@media/sdk": "workspace:*",
-    "convex": "catalog:",
     "effect": "catalog:",
     "expo": "~58.0.17",
     "expo-blur": "~58.0.5",

@@ -1,3 +1,4 @@
+import { useAllPages } from "@media/mobile-core/pages";
 import { usePlatform } from "@media/sdk/react";
 import { router } from "expo-router";
 import { Bookmark } from "lucide-react-native";
@@ -15,7 +16,6 @@ import { Screen } from "@/components/ui/screen";
 import { Text } from "@/components/ui/text";
 import { ofKind, plural } from "@/lib/browse";
 import type { KindFilter } from "@/lib/browse";
-import { useAllPages } from "@/lib/pages";
 
 export default function MyList() {
   const platform = usePlatform();

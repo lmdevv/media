@@ -5,7 +5,6 @@ import { History, Play, Server, Settings2 } from "lucide-react-native";
 import { useEffect, useState } from "react";
 
 import { Loading, OwnerScreen } from "@/components/owner/parts";
-import { useOwnerViewer } from "@/components/owner/viewer";
 import { ListRow } from "@/components/ui/list-row";
 import { readHealth } from "@media/mobile-core/server";
 import { displayHost } from "@/lib/local-network";
@@ -66,7 +65,6 @@ const stateOf = (health: Health): string => {
 
 export default function ServerScreen() {
   const { mediaUrl } = useServer();
-  const { scopes } = useOwnerViewer();
   const health = useHealth(mediaUrl);
 
   return (
@@ -87,14 +85,12 @@ export default function ServerScreen() {
           />
         </>
       ) : null}
-      {scopes.includes("admin") ? (
-        <ListRow
-          icon={History}
-          title="Backups"
-          detail="Every Night"
-          onPress={() => router.push("/owner/backups")}
-        />
-      ) : null}
+      <ListRow
+        icon={History}
+        title="Backups"
+        detail="Every Night"
+        onPress={() => router.push("/owner/backups")}
+      />
     </OwnerScreen>
   );
 }

@@ -1,32 +1,26 @@
 import { normalizeFolder } from "@media/contracts/library-folder";
-import { useCommand } from "@media/sdk/react";
+import { describeFailure, isFailure } from "@media/mobile-core/failure";
 import { router, useLocalSearchParams, usePathname } from "expo-router";
 import { Check, Folder } from "lucide-react-native";
 import { useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { View } from "react-native";
 
-import { Chip } from "@/components/browse/chip";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { ListRow } from "@/components/ui/list-row";
 import { Text } from "@/components/ui/text";
 import { TextField } from "@/components/ui/text-field";
-import { describeFailure, isFailure } from "@/lib/failure";
 import {
-  KIND_LABELS,
   UNAVAILABLE_FOLDER,
   fieldNamedIn,
   filledFolders,
   folderProblem,
   withFolder,
-  withKind,
 } from "@/lib/library-form";
-import type { FormKind, LibraryDraft } from "@/lib/library-form";
+import type { LibraryDraft } from "@/lib/library-form";
+import { useMediaServer } from "@/session/media-server";
 
 import { OwnerScreen } from "./parts";
-
-const KINDS: ReadonlyArray<FormKind> = ["movies", "shows"];
 
 type FolderPick = { folder?: string; field?: string; picked?: string };
 
@@ -34,8 +28,6 @@ type FolderPick = { folder?: string; field?: string; picked?: string };
 export interface LibraryFormProps {
   readonly title: string;
   readonly initial: LibraryDraft;
-  /** A new library chooses Movies or Shows; an existing one keeps its kind. */
-  readonly chooseKind: boolean;
   readonly submitLabel: string;
   /** Saves the draft; a failure shows under the folder it names, or over the button. */
   readonly onSubmit: (draft: LibraryDraft) => Promise<void>;
@@ -49,7 +41,8 @@ export interface LibraryFormProps {
 }
 
 const useFolderCheck = () => {
-  const folders = useCommand("libraries.folders");
+  const media = useMediaServer();
+  const folders = (args: { readonly path?: string }) => media.run("libraries.folders", args);
   const browses = useRef<Promise<boolean> | null>(null);
 
   return async (
@@ -82,11 +75,10 @@ const useFolderCheck = () => {
   };
 };
 
-/** A library's name, kind, and folders, and the action that saves them. */
+/** A library's name and folders, and the action that saves them. */
 export function LibraryForm({
   title,
   initial,
-  chooseKind,
   submitLabel,
   onSubmit,
   checkButton = true,
@@ -199,18 +191,6 @@ export function LibraryForm({
         returnKeyType="done"
         maxLength={80}
       />
-      {chooseKind ? (
-        <View className="flex-row gap-2" accessibilityRole="radiogroup">
-          {KINDS.map((kind) => (
-            <Chip
-              key={kind}
-              label={KIND_LABELS[kind]}
-              selected={draft.kind === kind}
-              onPress={() => setDraft(withKind(draft, kind))}
-            />
-          ))}
-        </View>
-      ) : null}
       {draft.folders.map((folder, field) => (
         <TextField
           key={`folder-${String(field)}`}

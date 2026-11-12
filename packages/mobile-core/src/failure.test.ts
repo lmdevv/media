@@ -1,4 +1,4 @@
-import { KeychainWriteFailed } from "@media/mobile-core/keychain";
+import { KeychainWriteFailed } from "./keychain";
 import { describe, expect, it } from "vitest";
 
 import { describeFailure } from "./failure";

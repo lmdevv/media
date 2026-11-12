@@ -1,7 +1,7 @@
+import { useAllPages } from "@media/mobile-core/pages";
 import { usePlatform } from "@media/sdk/react";
 
 import type { EpisodeId, SeasonEpisode, TitleId } from "@/lib/catalog";
-import { useAllPages } from "@/lib/pages";
 
 /** An episode of a season as `movies.titles.episodes` lists it, while it loads or once it has. */
 type SeasonEpisodeState =

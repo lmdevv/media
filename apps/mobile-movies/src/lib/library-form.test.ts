@@ -1,3 +1,4 @@
+import { Brand } from "effect";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -5,15 +6,29 @@ import {
   fieldNamedIn,
   folderProblem,
   shortFolder,
+  draftOf,
+  fieldsOf,
+  librarySave,
   submission,
   withFolder,
-  withKind,
 } from "./library-form";
+import type { LibraryDetail } from "./owner";
 
 describe("library form", () => {
-  it("keeps the default name in step with the kind until someone renames it", () => {
-    expect(withKind(NEW_DRAFT, "shows").name).toBe("Shows");
-    expect(withKind({ ...NEW_DRAFT, name: "Family" }, "shows").name).toBe("Family");
+  it("edits a library's own name and folders, or one empty folder when the core hides them", () => {
+    const library: LibraryDetail = {
+      libraryId: Brand.nominal<LibraryDetail["libraryId"]>()("libraries_1"),
+      name: "Shows",
+      kind: "movies",
+      level: "manage",
+      items: 2,
+      folders: ["/media/shows"],
+      scan: null,
+    };
+
+    expect(draftOf(library)).toStrictEqual({ name: "Shows", folders: ["/media/shows"] });
+    expect(draftOf({ ...library, folders: null }).folders).toStrictEqual([""]);
+    expect(NEW_DRAFT).toStrictEqual({ name: "Movies", folders: [""] });
   });
 
   it("refuses empty, relative, and dotted folders before asking the server", () => {
@@ -42,7 +57,40 @@ describe("library form", () => {
   it("sends a trimmed name and normalized folders", () => {
     const draft = withFolder({ ...NEW_DRAFT, name: "  Movies " }, 0, " /media//movies/ ");
 
-    expect(submission(draft)).toStrictEqual({ name: "Movies", roots: ["/media/movies"] });
-    expect(submission({ ...draft, folders: ["/a", " ", "/b/"] }).roots).toStrictEqual(["/a", "/b"]);
+    expect(submission(draft)).toStrictEqual({ name: "Movies", folders: ["/media/movies"] });
+    expect(submission({ ...draft, folders: ["/a", " ", "/b/"] }).folders).toStrictEqual([
+      "/a",
+      "/b",
+    ]);
+  });
+
+  it("renames without writing back folders another admin changed while the form was open", () => {
+    const opened: LibraryDetail = {
+      libraryId: Brand.nominal<LibraryDetail["libraryId"]>()("libraries_1"),
+      name: "Movies",
+      kind: "movies",
+      level: "manage",
+      items: 6,
+      folders: ["/media/old"],
+      scan: null,
+    };
+
+    const began = fieldsOf(opened);
+    const draft = draftOf(opened);
+    // Another admin moves the library to /media/new; the form still holds /media/old.
+    const live = fieldsOf({ ...opened, folders: ["/media/new"] });
+    const save = librarySave(began, { ...draft, name: "Films" }, live);
+
+    expect(save.name).toStrictEqual({ kind: "edited", to: "Films", overtaken: false });
+    expect(save.folders).toStrictEqual({ kind: "unedited" });
+  });
+
+  it("asks before saving folders another admin changed too", () => {
+    const began = { name: "Movies", folders: ["/media/old"] };
+    const draft = { name: "Movies", folders: ["/media/mine"] };
+    const save = librarySave(began, draft, { name: "Movies", folders: ["/media/new"] });
+
+    expect(save.folders).toStrictEqual({ kind: "edited", to: ["/media/mine"], overtaken: true });
+    expect(save.name).toStrictEqual({ kind: "unedited" });
   });
 });

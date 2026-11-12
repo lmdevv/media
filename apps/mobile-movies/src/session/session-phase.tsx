@@ -4,7 +4,7 @@ import type { QueryState } from "@media/sdk/react";
 import { usePlatform, usePlatformQuery, usePlatformStatus } from "@media/sdk/react";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 
-import { isFailure } from "@/lib/failure";
+import { isFailure } from "@media/mobile-core/failure";
 import { appKeychains } from "@/lib/keychains";
 
 import { useServer } from "./connection";

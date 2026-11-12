@@ -1,70 +1,49 @@
-import { JobId, LibraryId } from "@media/contracts/ids";
-import type { LibraryDetail } from "@media/contracts/models/catalog";
-import type { Job } from "@media/contracts/models/jobs";
-import { useCommand, useCommandQuery } from "@media/sdk/react";
-import type { QueryState } from "@media/sdk/react";
-import { Schema } from "effect";
+import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { router, useLocalSearchParams } from "expo-router";
 import { Clapperboard, RotateCcw, Search } from "lucide-react-native";
+import { useState } from "react";
 
-import { LoadFailure, Loading, Meter, OwnerScreen } from "@/components/owner/parts";
+import { Meter, OwnerScreen, QueryView } from "@/components/owner/parts";
 import { useTask } from "@/components/owner/use-task";
 import { Button } from "@/components/ui/button";
 import { ListRow } from "@/components/ui/list-row";
 import { Text } from "@/components/ui/text";
+import { asLibraryId, movedOnLine } from "@/lib/owner";
+import type { LibraryDetail, Scan } from "@/lib/owner";
 import { formatCount } from "@/lib/owner-format";
 import { folderTrouble, isActive, isStopped, scanCount, scanLine } from "@/lib/scans";
 import { useFinishSetup } from "@/session/finish-setup";
 import { useSessionPhase } from "@/session/session-phase";
 
-const decodeLibraryId = Schema.decodeUnknownSync(LibraryId);
-
-const decodeJobId = Schema.decodeUnknownSync(JobId);
-
-const useScan = (libraryId: LibraryId, jobId: string | undefined): QueryState<Job | null> => {
-  const named = useCommandQuery(
-    "jobs.get",
-    jobId === undefined ? "skip" : { jobId: decodeJobId(jobId) },
-  );
-
-  const recent = useCommandQuery(
-    "jobs.list",
-    jobId === undefined ? { kind: "scan", libraryId, limit: 1 } : "skip",
-  );
-
-  if (jobId !== undefined) return named;
-
-  if (recent.status !== "success") return recent;
-
-  return { status: "success", data: recent.data[0] ?? null };
-};
-
-const lineFor = (job: Job): string => {
-  const trouble = folderTrouble(job);
+const lineFor = (scan: Scan): string => {
+  const trouble = folderTrouble(scan);
 
   if (trouble === "offline") return "The NAS can’t be reached.";
 
   if (trouble === "notApproved") return "This folder isn’t available to the server.";
 
-  return scanLine(job);
+  return scanLine(scan);
 };
 
-const meterLabel = (job: Job): string => {
-  const count = scanCount(job);
+const meterLabel = (scan: Scan): string => {
+  const count = scanCount(scan);
 
   if (count !== null) return count.label;
 
-  return job.status === "pending" ? "Starting" : `${formatCount(job.progress.done)} Files`;
+  if (scan.status === "queued") return "Starting";
+
+  return scan.done === null ? "Scanning" : `${formatCount(scan.done)} Files`;
 };
 
-function ScanView({ library, job }: { readonly library: LibraryDetail; readonly job: Job }) {
+function ScanView({ library, scan }: { readonly library: LibraryDetail; readonly scan: Scan }) {
+  const platform = usePlatform();
   const phase = useSessionPhase();
   const finishSetup = useFinishSetup();
-  const cancel = useCommand("jobs.cancel");
-  const scan = useCommand("libraries.scan");
-  const summary = useCommandQuery("libraries.fileSummary", { libraryId: library.id });
-  const active = isActive(job);
-  const count = scanCount(job);
+  const { libraryId } = library;
+  const summary = usePlatformQuery(platform.movies.files.summary, { libraryId });
+  const [movedOn, setMovedOn] = useState<string | null>(null);
+  const active = isActive(scan);
+  const count = scanCount(scan);
 
   const leave = () => {
     if (phase.kind === "setup") {
@@ -74,59 +53,66 @@ function ScanView({ library, job }: { readonly library: LibraryDetail; readonly 
     }
 
     if (router.canGoBack()) router.back();
-    else
-      router.replace({
-        pathname: "/owner/libraries/[libraryId]",
-        params: { libraryId: library.id },
-      });
+    else router.replace({ pathname: "/owner/libraries/[libraryId]", params: { libraryId } });
   };
 
-  const stop = useTask(() => cancel({ jobId: job.id }));
-
-  const retry = useTask(async () => {
-    const queued = await scan({ libraryId: library.id, mode: "full" });
-
-    router.setParams({ jobId: queued.jobId });
+  // The cancel names the attempt shown, so it never stops a later one the person has not seen.
+  const stop = useTask(async () => {
+    setMovedOn(
+      movedOnLine(
+        await platform.core.libraries.cancelScan({ jobId: scan.jobId, attempt: scan.attempt }),
+      ),
+    );
   });
 
-  const unmatched = summary.status === "success" ? summary.data.unmatchedTitles : null;
+  const retry = useTask(async () => {
+    setMovedOn(null);
+    await platform.core.libraries.scan({ libraryId, mode: "full" });
+  });
+
+  const unmatched = summary.status === "success" ? summary.data.unmatched : null;
   const error = stop.error ?? retry.error;
 
   return (
     <>
       <Meter
-        label={meterLabel(job)}
+        label={meterLabel(scan)}
         value={count?.fraction ?? 0}
-        accessibilityLabel={`${library.name}: ${meterLabel(job)}`}
+        accessibilityLabel={`${library.name}: ${meterLabel(scan)}`}
       />
       <Text tone="muted" accessibilityLiveRegion="polite">
-        {lineFor(job)}
+        {lineFor(scan)}
       </Text>
-      <ListRow
-        icon={Clapperboard}
-        title={library.kind === "shows" ? "Shows" : "Titles"}
-        detail={formatCount(library.titleCount)}
-      />
-      <ListRow
-        icon={Search}
-        title="Needs Review"
-        detail={unmatched === null ? undefined : formatCount(unmatched)}
-        onPress={
-          unmatched === null || unmatched === 0
-            ? undefined
-            : () =>
-                router.push({
-                  pathname: "/owner/libraries/[libraryId]/files",
-                  params: { libraryId: library.id, filter: "unmatched" },
-                })
-        }
-      />
+      {library.items === null ? null : (
+        <ListRow icon={Clapperboard} title="Titles" detail={formatCount(library.items)} />
+      )}
+      {unmatched === null ? null : (
+        <ListRow
+          icon={Search}
+          title="Needs Review"
+          detail={formatCount(unmatched)}
+          onPress={
+            unmatched === 0
+              ? undefined
+              : () =>
+                  router.push({
+                    pathname: "/owner/libraries/[libraryId]/files",
+                    params: { libraryId, filter: "unmatched" },
+                  })
+          }
+        />
+      )}
+      {movedOn === null ? null : (
+        <Text variant="meta" tone="muted">
+          {movedOn}
+        </Text>
+      )}
       {error === null ? null : (
         <Text variant="meta" tone="danger">
           {error}
         </Text>
       )}
-      {isStopped(job) ? (
+      {isStopped(scan) ? (
         <>
           <Button
             label="Retry Scan"
@@ -134,14 +120,14 @@ function ScanView({ library, job }: { readonly library: LibraryDetail; readonly 
             busy={retry.busy}
             onPress={() => void retry.run()}
           />
-          {folderTrouble(job) === null ? null : (
+          {folderTrouble(scan) === null ? null : (
             <Button
               label="Edit Folder"
               variant="secondary"
               onPress={() =>
                 router.push({
                   pathname: "/owner/libraries/[libraryId]/edit",
-                  params: { libraryId: library.id },
+                  params: { libraryId },
                 })
               }
             />
@@ -155,6 +141,7 @@ function ScanView({ library, job }: { readonly library: LibraryDetail; readonly 
             label="Cancel Scan"
             variant="destructive"
             busy={stop.busy}
+            disabled={scan.canceling}
             onPress={() => void stop.run()}
           />
         </>
@@ -166,29 +153,27 @@ function ScanView({ library, job }: { readonly library: LibraryDetail; readonly 
 }
 
 export default function ScanLibrary() {
-  const params = useLocalSearchParams<{ libraryId: string; jobId?: string }>();
-  const libraryId = decodeLibraryId(params.libraryId);
-  const library = useCommandQuery("libraries.get", { libraryId });
-  const job = useScan(libraryId, params.jobId);
+  const platform = usePlatform();
+  const params = useLocalSearchParams<{ libraryId: string }>();
+  const libraryId = asLibraryId(params.libraryId);
+  const library = usePlatformQuery(platform.core.libraries.get, { libraryId });
   const name = library.status === "success" ? library.data.name : "Library";
-  const current = job.status === "success" ? job.data : null;
-  const title = current !== null && isActive(current) ? `Scanning ${name}` : name;
+  const scan = library.status === "success" ? library.data.scan : null;
+  const title = isActive(scan) ? `Scanning ${name}` : name;
 
   return (
     <OwnerScreen title={title} fallback="/owner/libraries">
-      {library.status === "error" ? (
-        <LoadFailure error={library.error} retry={library.retry} />
-      ) : job.status === "error" ? (
-        <LoadFailure error={job.error} retry={job.retry} />
-      ) : library.status === "loading" || job.status === "loading" ? (
-        <Loading />
-      ) : job.data === null ? (
-        <Text tone="muted" className="pt-8">
-          No scan to show yet.
-        </Text>
-      ) : (
-        <ScanView library={library.data} job={job.data} />
-      )}
+      <QueryView query={library}>
+        {(detail) =>
+          detail.scan === null ? (
+            <Text tone="muted" className="pt-8">
+              No scan to show yet.
+            </Text>
+          ) : (
+            <ScanView library={detail} scan={detail.scan} />
+          )
+        }
+      </QueryView>
     </OwnerScreen>
   );
 }

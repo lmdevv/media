@@ -1,9 +1,9 @@
+import { describeFailure } from "@media/mobile-core/failure";
 import { useState } from "react";
 
 import { Sheet, useSheetExit } from "@/components/title/sheet";
 import { ListRow } from "@/components/ui/list-row";
 import { DOWNLOAD_QUALITY_OPTIONS } from "@/lib/downloads/settings";
-import { describeFailure } from "@/lib/failure";
 import { useDownloadQuality } from "@/session/download-settings";
 
 export default function DownloadQuality() {

@@ -1,3 +1,5 @@
+import { describeFailure } from "@media/mobile-core/failure";
+import { useAllPages, useFirstRows } from "@media/mobile-core/pages";
 import { usePlatform } from "@media/sdk/react";
 import * as Haptics from "expo-haptics";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
@@ -7,8 +9,6 @@ import { AccessibilityInfo, Alert } from "react-native";
 import { watchStates } from "@/lib/browse";
 import type { WatchState } from "@/lib/browse";
 import type { TitleCard, TitleId } from "@/lib/catalog";
-import { describeFailure } from "@/lib/failure";
-import { useAllPages, useFirstRows } from "@/lib/pages";
 import type { Me } from "@/session/me";
 import { SessionPhaseContext } from "@/session/session-phase";
 

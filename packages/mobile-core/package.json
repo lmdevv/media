@@ -2,7 +2,7 @@
   "name": "@media/mobile-core",
   "version": "0.2.0",
   "private": true,
-  "description": "What every [media] iOS app shares: the server connection, the shared keychain, sign-in, and device enrollment.",
+  "description": "What every [media] iOS app shares: the server connection, the shared keychain, sign-in, device enrollment, paging, and the users and invites screens' state.",
   "type": "module",
   "sideEffects": false,
   "exports": {
@@ -20,11 +20,14 @@
   "devDependencies": {
     "@media/config": "workspace:*",
     "@types/node": "catalog:",
+    "@types/react": "catalog:",
     "expo-secure-store": "~58.0.2",
+    "react": "catalog:",
     "typescript": "catalog:",
     "vitest": "5.0.3"
   },
   "peerDependencies": {
-    "expo-secure-store": "~58.0.2"
+    "expo-secure-store": "~58.0.2",
+    "react": "catalog:"
   }
 }

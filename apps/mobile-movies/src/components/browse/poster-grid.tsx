@@ -1,4 +1,5 @@
 import type { TitleCard } from "@/lib/catalog";
+import type { Paged } from "@media/mobile-core/pages";
 import type { ReactElement } from "react";
 import { ActivityIndicator, FlatList, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -6,7 +7,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button } from "@/components/ui/button";
 import { Text } from "@/components/ui/text";
 import { gridRows } from "@/lib/browse";
-import type { Paged } from "@/lib/pages";
 import { useGridLayout } from "@/lib/use-width-class";
 
 import { TitlePoster } from "../title-poster";
