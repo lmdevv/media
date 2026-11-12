@@ -6,7 +6,14 @@ import {
   canChangeRole,
   libraryAccess,
 } from "@media/mobile-core/accounts";
-import type { AssignableRole, HouseholdUser, LibraryAccess } from "@media/mobile-core/accounts";
+import type {
+  AssignableRole,
+  HouseholdUser,
+  LibraryAccess,
+  LibraryGrant,
+  UserId,
+} from "@media/mobile-core/accounts";
+import type { Paged } from "@media/mobile-core/pages";
 import { useHousehold, useLibraryGrants, useSavePerson } from "@media/mobile-core/use-accounts";
 import { router, useLocalSearchParams } from "expo-router";
 import { Folder, User as UserIcon } from "lucide-react-native";
@@ -27,11 +34,49 @@ import { Text } from "@/components/ui/text";
 import type { Library, LibraryId } from "@/lib/owner";
 import { useMe } from "@/session/me";
 
+/** What a person reaches in a library as the core holds it, or why the page cannot say yet. */
+type Saved =
+  | { readonly kind: "loading" }
+  | { readonly kind: "failed"; readonly retry: () => void }
+  | { readonly kind: "known"; readonly access: LibraryAccess };
+
+/** A choice the admin made on the page: the person's own grant given or taken away. */
+type Chosen = "allowed" | "notAllowed";
+
 /** One library on the page, with what the person reaches in it as saved. */
 interface LibraryRow {
   readonly library: Library;
-  readonly saved: LibraryAccess | null;
+  readonly saved: Saved;
 }
+
+const savedOf = (list: Paged<LibraryGrant> | undefined, userId: UserId): Saved => {
+  if (list?.status === "failed") return { kind: "failed", retry: list.retry };
+
+  if (list?.status === "ready" && list.next.kind === "failed") {
+    return { kind: "failed", retry: list.next.retry };
+  }
+
+  return list?.status === "ready" && list.next.kind === "done"
+    ? { kind: "known", access: libraryAccess(userId, list.rows) }
+    : { kind: "loading" };
+};
+
+/**
+ * What a row shows: the admin's choice while the saved access is one they can change, else the
+ * saved access. A choice that the core now holds, or that a household or manager grant overtook,
+ * is no longer a change.
+ */
+const shownOf = (row: LibraryRow, chosen: Chosen | undefined): LibraryAccess | null => {
+  if (row.saved.kind !== "known") return null;
+
+  return chosen !== undefined && accessChangeable(row.saved.access) ? chosen : row.saved.access;
+};
+
+const isChange = (row: LibraryRow, chosen: Chosen | undefined): boolean =>
+  row.saved.kind === "known" &&
+  accessChangeable(row.saved.access) &&
+  chosen !== undefined &&
+  chosen !== row.saved.access;
 
 function Person({
   user,
@@ -43,46 +88,35 @@ function Person({
   const me = useMe();
   const save = useSavePerson();
   const grants = useLibraryGrants(libraries.map((library) => library.libraryId));
-  const changeable = canChangeRole(user, me.userId);
+  const roleChangeable = canChangeRole(user, me.userId);
+  // Access follows grants for every role, so an admin may share a library with anyone but
+  // themselves, the owner included.
+  const accessChangeableHere = user.userId !== me.userId;
   const [role, setRoleChoice] = useState<HouseholdUser["role"]>(user.role);
-  const [toggled, setToggled] = useState<ReadonlySet<LibraryId>>(new Set());
+  const [chosen, setChosen] = useState<ReadonlyMap<LibraryId, Chosen>>(new Map());
 
-  const rows = libraries.map((library, at): LibraryRow => {
-    const list = grants[at];
-
-    return {
-      library,
-      saved:
-        list?.status === "ready" && list.next.kind === "done"
-          ? libraryAccess(user.userId, role, list.rows)
-          : null,
-    };
-  });
-
-  const shown = (row: LibraryRow): LibraryAccess | null => {
-    if (row.saved === null || !toggled.has(row.library.libraryId)) return row.saved;
-
-    return row.saved === "allowed" ? "notAllowed" : "allowed";
-  };
+  const rows = libraries.map((library, at): LibraryRow => ({
+    library,
+    saved: savedOf(grants[at], user.userId),
+  }));
 
   const roleChanged = role !== user.role;
-  const changes = rows.filter((row) => toggled.has(row.library.libraryId) && row.saved !== null);
+  const changes = rows.filter((row) => isChange(row, chosen.get(row.library.libraryId)));
 
   const chosenRole = (): AssignableRole | null =>
     roleChanged ? (ROLE_CHOICES.find((choice) => choice === role) ?? null) : null;
 
   const saving = useTask(async () => {
+    const want = (access: Chosen) =>
+      changes
+        .filter((row) => chosen.get(row.library.libraryId) === access)
+        .map((row) => row.library.libraryId);
+
     await save({
       userId: user.userId,
       role: chosenRole(),
-      give:
-        role === "member"
-          ? changes.filter((row) => row.saved === "notAllowed").map((row) => row.library.libraryId)
-          : [],
-      takeAway:
-        role === "member"
-          ? changes.filter((row) => row.saved === "allowed").map((row) => row.library.libraryId)
-          : [],
+      give: want("allowed"),
+      takeAway: want("notAllowed"),
     });
     router.back();
   });
@@ -96,14 +130,8 @@ function Person({
       })),
     );
 
-  const toggle = (libraryId: LibraryId) =>
-    setToggled((current) => {
-      const next = new Set(current);
-
-      if (!next.delete(libraryId)) next.add(libraryId);
-
-      return next;
-    });
+  const choose = (libraryId: LibraryId, access: Chosen) =>
+    setChosen((current) => new Map([...current, [libraryId, access]]));
 
   return (
     <OwnerScreen title={user.username} fallback="/owner/users">
@@ -111,22 +139,36 @@ function Person({
         icon={UserIcon}
         title="Role"
         detail={ROLE_LABELS[role]}
-        onPress={changeable ? chooseRole : undefined}
+        onPress={roleChangeable ? chooseRole : undefined}
       />
       {libraries.length === 0 ? null : <SectionHeading>Library Access</SectionHeading>}
       {rows.map((row) => {
-        const access = shown(row);
+        const { libraryId } = row.library;
+        const access = shownOf(row, chosen.get(libraryId));
+
+        if (row.saved.kind === "failed") {
+          return (
+            <ListRow
+              key={libraryId}
+              icon={Folder}
+              title={row.library.name}
+              detail="Couldn’t Load · Try Again"
+              chevron={false}
+              onPress={row.saved.retry}
+            />
+          );
+        }
 
         return (
           <ListRow
-            key={row.library.libraryId}
+            key={libraryId}
             icon={Folder}
             title={row.library.name}
             detail={access === null ? undefined : ACCESS_LABELS[access]}
             chevron={false}
             onPress={
-              changeable && access !== null && accessChangeable(access)
-                ? () => toggle(row.library.libraryId)
+              accessChangeableHere && access !== null && accessChangeable(access)
+                ? () => choose(libraryId, access === "allowed" ? "notAllowed" : "allowed")
                 : undefined
             }
           />
@@ -137,7 +179,7 @@ function Person({
           {saving.error}
         </Text>
       )}
-      {changeable ? (
+      {roleChangeable || accessChangeableHere ? (
         <>
           <Spacer />
           <Button

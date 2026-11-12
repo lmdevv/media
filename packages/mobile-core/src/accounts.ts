@@ -76,10 +76,13 @@ export const accountUrlOf = (moviesUrl: string): string =>
 export const inviteLink = (accountUrl: string, code: string): string =>
   `${accountUrl.replace(/\/+$/u, "")}/invite#${code}`;
 
-/** What a person reaches in one library, on their page. */
+/**
+ * What a person reaches in one library, on their page. A core library is private to whoever made
+ * it until it is shared, admins included (ADR 0024), so access follows grants, not roles.
+ */
 export type LibraryAccess =
-  /** Admins and the owner, whose role reaches every library they are shared. */
-  | "byRole"
+  /** The person manages the library, as whoever made it does. */
+  | "manages"
   /** The library is shared with the whole household. */
   | "everyone"
   /** The library is shared with this person. */
@@ -88,28 +91,27 @@ export type LibraryAccess =
   | "notAllowed";
 
 /**
- * What a person with `role` reaches in a library shared as `grants`. A member's own grant can be
- * given or taken away here; a household grant reaches them whatever it says.
+ * What `userId` reaches in a library shared as `grants`. Their own grant to view or edit can be
+ * given or taken away here; a grant to manage, or the household's, cannot.
  */
 export const libraryAccess = (
   userId: UserId,
-  role: Role,
   grants: ReadonlyArray<LibraryGrant>,
 ): LibraryAccess => {
-  if (role !== "member") return "byRole";
+  const own = grants.find(
+    (grant) => grant.principal.kind === "user" && grant.principal.userId === userId,
+  );
+
+  if (own?.level === "manage") return "manages";
 
   if (grants.some((grant) => grant.principal.kind === "household")) return "everyone";
 
-  return grants.some(
-    (grant) => grant.principal.kind === "user" && grant.principal.userId === userId,
-  )
-    ? "allowed"
-    : "notAllowed";
+  return own === undefined ? "notAllowed" : "allowed";
 };
 
 /** How a library's access reads on a person's page. */
 export const ACCESS_LABELS: Readonly<Record<LibraryAccess, string>> = {
-  byRole: "Allowed",
+  manages: "Manages",
   everyone: "Everyone",
   allowed: "Allowed",
   notAllowed: "Not Allowed",

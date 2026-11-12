@@ -49,10 +49,6 @@ export const asLibraryId = Brand.nominal<LibraryId>();
 
 export const asImportId = Brand.nominal<ImportId>();
 
-/** The movies libraries this person manages, which the owner screens list. */
-export const managedMovieLibraries = (libraries: ReadonlyArray<Library>): ReadonlyArray<Library> =>
-  libraries.filter((library) => library.kind === "movies" && library.level === "manage");
-
 /**
  * The line to show when a scan's cancel changed nothing because the job was claimed again after the
  * person looked: the screen then shows that later attempt, which they may cancel. Null otherwise.

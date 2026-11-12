@@ -30,7 +30,11 @@ function PendingInviteRow({ invite: pending }: { readonly invite: PendingInvite 
     <ListRow
       icon={Link}
       title={label}
-      detail={expiryLine(Math.max(1, Math.ceil((pending.expiresAt - now) / DAY_MS)))}
+      detail={
+        pending.expiresAt <= now
+          ? "Expired"
+          : expiryLine(Math.max(1, Math.ceil((pending.expiresAt - now) / DAY_MS)))
+      }
       onPress={() =>
         showActions(label, [
           {

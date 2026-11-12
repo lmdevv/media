@@ -435,8 +435,10 @@ the old movies SDK or a Convex client of its own. They open for an owner or an a
   invite, saving a person), and each app draws them in its own look. The music app reuses them in
   `p5-mobile-music`. An invite is made by `core.accounts.invites.create`, which makes the code on
   the server and answers it once; the app shares `<server>/invite#<code>` and never sends a code
-  back in a mutation. Library access is a member's own grant at `view`
-  (`core.permissions.grants.set` and `remove`); a household grant shows as Everyone.
+  back in a mutation. Library access follows grants for every role, since a core library is
+  private until shared, admins included (ADR 0024): a person's own grant at `view` is given and
+  taken away (`core.permissions.grants.set` and `remove`), while a grant to manage and a household
+  grant show as Manages and Everyone and stay.
 - **Shared with every iOS app** besides the users and invites screens: paging over the core's lists
   (`@media/mobile-core/pages`) and the failure lines (`@media/mobile-core/failure`).
 - Left out because the core has no command for them (D62): disabling and enabling an account, and

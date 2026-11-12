@@ -35,20 +35,20 @@ export const scanStateLabel = (scan: Scan): string =>
   scan.canceling ? "Cancelling" : STATE_LABELS[scan.status];
 
 /**
- * How far a scan has come once its file count is known: `42 of 186` and the fraction. Null while
- * the count is unknown, or hidden from a restricted editor.
+ * How far a scan has come once its file count is known: `42 of 186` and the fraction, or
+ * `Complete` for a finished one. Null while the count is unknown, or hidden from a restricted
+ * editor.
  */
 export const scanCount = (
   scan: Scan,
 ): { readonly label: string; readonly fraction: number } | null => {
   const { done, total } = scan;
 
+  // The core keeps no file count for a finished scan, only for one that runs.
   if (scan.status === "succeeded") {
-    const count = total ?? done;
-
-    return count === null
-      ? null
-      : { label: `${formatCount(count)} of ${formatCount(count)}`, fraction: 1 };
+    return total === null
+      ? { label: "Complete", fraction: 1 }
+      : { label: `${formatCount(total)} of ${formatCount(total)}`, fraction: 1 };
   }
 
   if (done === null || total === null || total <= 0) return null;

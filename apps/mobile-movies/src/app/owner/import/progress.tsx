@@ -1,7 +1,7 @@
 import type { ImportPhase } from "@media/contracts/models/migration";
 import { SOURCE_NAMES } from "@media/contracts/migration-plan";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
-import { router, useLocalSearchParams } from "expo-router";
+import { Redirect, router, useLocalSearchParams } from "expo-router";
 import {
   Bookmark,
   Check,
@@ -24,7 +24,7 @@ import { ListRow } from "@/components/ui/list-row";
 import { doneRows, importFraction, isRunning, phaseRows } from "@/lib/migration";
 import type { CountRow } from "@/lib/migration";
 import { asImportId } from "@/lib/owner";
-import type { ImportRun } from "@/lib/owner";
+import type { ImportId, ImportRun } from "@/lib/owner";
 import { formatPercent } from "@/lib/owner-format";
 import { useFinishSetup } from "@/session/finish-setup";
 import { useSessionPhase } from "@/session/session-phase";
@@ -124,14 +124,9 @@ function RunView({ run }: { readonly run: ImportRun }) {
   return isRunning(run) ? <Importing run={run} /> : <Stopped run={run} />;
 }
 
-export default function ImportProgress() {
+function RunProgress({ importId }: { readonly importId: ImportId }) {
   const platform = usePlatform();
-  const params = useLocalSearchParams<{ importId: string }>();
-
-  const run = usePlatformQuery(platform.movies.imports.get, {
-    importId: asImportId(params.importId),
-  });
-
+  const run = usePlatformQuery(platform.movies.imports.get, { importId });
   const leave = useLeaveImport();
   const done = run.status === "success" && run.data.job.status === "succeeded";
 
@@ -140,4 +135,18 @@ export default function ImportProgress() {
       <QueryView query={run}>{(shown) => <RunView run={shown} />}</QueryView>
     </OwnerScreen>
   );
+}
+
+/**
+ * The import a link names. One that names none goes to Import, which opens the import still
+ * running, if any.
+ */
+export default function ImportProgress() {
+  const params = useLocalSearchParams<{ importId?: string }>();
+
+  if (params.importId === undefined || params.importId === "") {
+    return <Redirect href="/owner/import" />;
+  }
+
+  return <RunProgress key={params.importId} importId={asImportId(params.importId)} />;
 }

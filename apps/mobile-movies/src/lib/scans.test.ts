@@ -46,6 +46,10 @@ describe("scans", () => {
     expect(scanCount(job({ done: 3 }))).toBeNull();
     expect(scanCount(job({ done: null, total: 10 }))).toBeNull();
     expect(scanCount(job({ done: 1252, total: 1842 }))?.label).toBe("1,252 of 1,842");
+    expect(scanCount(job({ status: "succeeded", done: 0, total: null }))).toStrictEqual({
+      label: "Complete",
+      fraction: 1,
+    });
     expect(scanCount(job({ status: "succeeded", done: 9, total: 9 }))).toStrictEqual({
       label: "9 of 9",
       fraction: 1,

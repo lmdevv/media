@@ -3,8 +3,9 @@ import { View } from "react-native";
 
 import { ListRow } from "@/components/ui/list-row";
 import { ProgressBar } from "@/components/ui/progress-bar";
+import type { Scan } from "@/lib/owner";
 
-import type { ActiveScan, Scan } from "./libraries";
+import type { ActiveScan } from "./libraries";
 
 const progressOf = (scan: Scan): { readonly detail: string; readonly value: number } | null => {
   const { done, total } = scan;

@@ -52,26 +52,34 @@ describe("invite links", () => {
 });
 
 describe("libraryAccess", () => {
-  it("lets admins and the owner reach every library by their role", () => {
-    expect(libraryAccess(mateo.userId, "admin", [])).toBe("byRole");
-    expect(libraryAccess(lucia.userId, "owner", [toUser(aiko)])).toBe("byRole");
+  it("follows grants whatever the role, since a library is private until shared", () => {
+    expect(libraryAccess(mateo.userId, [])).toBe("notAllowed");
+    expect(libraryAccess(mateo.userId, [toUser(mateo)])).toBe("allowed");
   });
 
-  it("shows a household grant as everyone, which a member's page cannot change", () => {
-    const access = libraryAccess(aiko.userId, "member", [
+  it("keeps a manager's grant and a household grant out of a person's page", () => {
+    const manages = libraryAccess(lucia.userId, [
+      { principal: { kind: "user", userId: lucia.userId, username: "lucia" }, level: "manage" },
       { principal: { kind: "household" }, level: "view" },
     ]);
 
-    expect(access).toBe("everyone");
-    expect(accessChangeable(access)).toBe(false);
-    expect(ACCESS_LABELS[access]).toBe("Everyone");
+    expect(manages).toBe("manages");
+    expect(accessChangeable(manages)).toBe(false);
+
+    const everyone = libraryAccess(aiko.userId, [
+      { principal: { kind: "household" }, level: "view" },
+    ]);
+
+    expect(everyone).toBe("everyone");
+    expect(accessChangeable(everyone)).toBe(false);
+    expect(ACCESS_LABELS[everyone]).toBe("Everyone");
   });
 
-  it("tells a member's own grant from none, a group's grant counting as none here", () => {
-    expect(libraryAccess(aiko.userId, "member", [toUser(aiko)])).toBe("allowed");
-    expect(libraryAccess(aiko.userId, "member", [toUser(mateo)])).toBe("notAllowed");
+  it("tells a person's own grant from none, a group's grant counting as none here", () => {
+    expect(libraryAccess(aiko.userId, [toUser(aiko)])).toBe("allowed");
+    expect(libraryAccess(aiko.userId, [toUser(mateo)])).toBe("notAllowed");
     expect(
-      libraryAccess(aiko.userId, "member", [
+      libraryAccess(aiko.userId, [
         { principal: { kind: "group", groupId: groupId("g1"), name: "Kids" }, level: "view" },
       ]),
     ).toBe("notAllowed");
