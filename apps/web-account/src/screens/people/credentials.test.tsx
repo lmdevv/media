@@ -80,7 +80,9 @@ describe("DevicesView", () => {
     expect(text).toContain("Firefox on Linux");
     expect(text).toContain("Current");
     expect(text).toContain("Aiko's iPhone");
-    expect(text).toContain("App on a phone · Browse movies, Your account · Signed in");
+    expect(text).toMatch(
+      /App on a phone · Signed in .* · Expires .* · Browse movies, Your account/u,
+    );
     expect(text.match(/Sign out/gu)).toHaveLength(1);
   });
 
@@ -105,7 +107,7 @@ describe("an API key's sign-in on Devices", () => {
 
   it("is named by its key, says it is an API key and what it holds", () => {
     expect(sessionName(keyed)).toBe("Home Assistant");
-    expect(sessionFacts(keyed)).toMatch(/^API key · Play movies · Signed in /u);
+    expect(sessionFacts(keyed)).toMatch(/^API key · Signed in .* · Expires .* · Play movies$/u);
   });
 
   it("warns that the key signs in again, as old movies did", () => {

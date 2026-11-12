@@ -89,13 +89,16 @@ export const scopeLabels = (scopes: ReadonlyArray<KeyScope>): string =>
         .map((scope) => SCOPE_LABELS[scope])
         .join(", ");
 
-/** A session's facts: how it signed in, its scopes, when, and when it ends unless used again. */
+/**
+ * A session's facts: how it signed in, when, when it ends unless used again, and its scopes, the
+ * longest, last, so a narrow row keeps the dates.
+ */
 export const sessionFacts = (session: SessionRow): string =>
   [
     KIND_LABELS[session.kind],
-    scopeLabels(session.scopes),
     `Signed in ${formatTime(session.signedInAt)}`,
     `Expires ${formatTime(session.expiresAt)}`,
+    scopeLabels(session.scopes),
   ].join(" · ");
 
 /** What signing a session out does, as old movies said it: a key signs in again on its next use. */
