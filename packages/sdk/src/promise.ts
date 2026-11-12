@@ -60,7 +60,7 @@ export { signInUrlBeside, signInUrlFor } from "./platform/sign-in-url";
 
 export { createMediaServer } from "./media-server";
 
-export type { MediaServer, MediaServerOptions } from "./media-server";
+export type { MediaServer, MediaServerOptions, MediaServerSession } from "./media-server";
 
 export { openIndexedDb } from "./shared-store";
 

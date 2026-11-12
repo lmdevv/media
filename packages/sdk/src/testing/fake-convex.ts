@@ -23,6 +23,8 @@ import { SIGN_IN_PATH, signInRefusalStatus } from "@media/contracts/sign-in";
 import { Data, Effect, Option, Predicate, Schema } from "effect";
 import type { Scope } from "effect";
 
+import type { IssuedToken } from "../convex-transport";
+
 type CallKind = "query" | "mutation" | "action";
 
 /** One call the fake received, with its bearer token header when it carried one. */
@@ -84,6 +86,11 @@ export interface FakeConvex {
    * presents one, as Convex does when a token stops verifying while its connection stays open.
    */
   readonly rejectAcceptedTokens: Effect.Effect<void>;
+  /**
+   * From now on, answers every token a sync connection presents with an `AuthError`, as Convex
+   * does a token it cannot verify, such as one signed by another deployment.
+   */
+  readonly rejectEveryToken: Effect.Effect<void>;
   /** The most queries to `path` that one sync connection has subscribed to at once. */
   readonly peakSubscriptions: (path: string) => Effect.Effect<number>;
 }
@@ -188,6 +195,13 @@ export const jwtIssuedAt = (issuedAt: number, lifetimeSeconds: number, subject: 
 /** A JWT that only carries `exp`, enough for the SDK to read when it expires. */
 export const jwtExpiringAt = (epochMillis: number, subject = "user"): string =>
   `${jwtPart({ alg: "none" })}.${jwtPart({ exp: Math.floor(epochMillis / 1000), sub: subject })}.fake`;
+
+/** `token` as a token source hands it out, outside any session. */
+export const issuedOf = (token: string): IssuedToken => ({
+  token,
+  session: Option.none(),
+  generation: 0,
+});
 
 const WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
@@ -439,6 +453,8 @@ export const make: Effect.Effect<FakeConvex, never, Scope.Scope> = Effect.gen(fu
 
   const accepts = (token: string): boolean => !refused.has(token) && isUnexpired(token, Date.now());
 
+  const rejecting = { every: false };
+
   const openSync = (socket: Duplex, head: Buffer): void => {
     let pending: Buffer = Buffer.alloc(0);
     let queue = Promise.resolve();
@@ -503,6 +519,19 @@ export const make: Effect.Effect<FakeConvex, never, Scope.Scope> = Effect.gen(fu
 
     const handle = async (message: SyncMessage): Promise<void> => {
       if (message.type === "Authenticate") {
+        if (message.value !== undefined && rejecting.every) {
+          const error = {
+            type: "AuthError",
+            error: "Could not verify OIDC token claim",
+            baseVersion: version.identity,
+            authUpdateAttempted: true,
+          };
+
+          writeFrame(socket, OPCODE_TEXT, Buffer.from(JSON.stringify(error)));
+
+          return;
+        }
+
         if (message.value !== undefined && !accepts(message.value)) {
           socket.destroy();
 
@@ -670,6 +699,9 @@ export const make: Effect.Effect<FakeConvex, never, Scope.Scope> = Effect.gen(fu
       for (const token of accepted) refused.add(token);
 
       for (const sendAuthError of authErrorSenders) sendAuthError();
+    }),
+    rejectEveryToken: Effect.sync(() => {
+      rejecting.every = true;
     }),
     peakSubscriptions: (path) => Effect.sync(() => peaks.get(path) ?? 0),
   };

@@ -18,6 +18,7 @@ import {
   Clock,
   Context,
   Data,
+  Deferred,
   Duration,
   Effect,
   Exit,
@@ -38,7 +39,7 @@ import {
 import * as ConvexTransport from "./convex-transport";
 import * as MediaHttp from "./media-http";
 import type { CallError } from "./sdk-errors";
-import { ProtocolError } from "./sdk-errors";
+import { ProtocolError, TransportError } from "./sdk-errors";
 import * as TokenStorage from "./token-storage";
 import type { StoredSession } from "./token-storage";
 
@@ -304,6 +305,12 @@ const renewalSchedule = Schedule.min([
 
 const SERVER_SIGN_OUT_TIMEOUT = Duration.seconds(10);
 
+/**
+ * How long a sign-in waits for the connection to run as the new session. A server that has not
+ * answered by then is unreachable: the sign-in fails with `TransportError` and leaves no session.
+ */
+const AUTHENTICATION_WAIT = Duration.seconds(10);
+
 /** A sign-out refused with one of these found nothing to end: the server no longer knows it. */
 const SESSION_GONE = ["Unauthenticated", "Forbidden", "Expired"] as const;
 
@@ -324,6 +331,61 @@ export interface Engine extends Omit<Interface, "signIn"> {
   readonly open: (
     request: SignInRequest,
   ) => Effect.Effect<void, CallError | SignInWaiting | TokenStorage.TokenStorageError>;
+  /** The held session's token as a request would carry it now, without renewing it. */
+  readonly held: Effect.Effect<Option.Option<ConvexTransport.IssuedToken>>;
+  /**
+   * The session's token for a request to another server, renewed first when it is about to
+   * expire, as `accessToken(false)` gives it, stamped for `refuse`.
+   */
+  readonly issue: Effect.Effect<
+    Option.Option<ConvexTransport.IssuedToken>,
+    TokenStorage.TokenStorageError
+  >;
+  /**
+   * Applies the one refusal rule (D51) to a server's refusal of a request sent with `refused`,
+   * fenced on that token: a refusal refreshes the session once only while the session and its
+   * generation are still the ones the request went out with, and refusals of one generation share
+   * that refresh. It never refreshes or ends a session the request did not go out with.
+   */
+  readonly refuse: (
+    refused: Option.Option<ConvexTransport.IssuedToken>,
+  ) => Effect.Effect<Refusal, TokenStorage.TokenStorageError>;
+  /**
+   * Has the connection take the held session's token now, after a refusal showed it still sends
+   * an older one, as a WebSocket client does until its own scheduled renewal.
+   */
+  readonly catchUp: Effect.Effect<void>;
+}
+
+/**
+ * What a refusal meant for the session, as `Engine.refuse` found it. None of them sends the
+ * request again (D51):
+ * - `renewed`: the session was renewed since the request went out, so nothing refreshes; the next
+ *   request goes out with the renewed token;
+ * - `stands`: the session is held still, after the one refresh this refusal or a concurrent one
+ *   ran, so the refusal is the request's own;
+ * - `ended`: no session is held now;
+ * - `elsewhere`: the request went out signed out or as another session, which it never touches.
+ */
+export type Refusal = "renewed" | "stands" | "ended" | "elsewhere";
+
+interface RefusalAnswer {
+  readonly refusal: Refusal;
+  readonly refreshed: Option.Option<Option.Option<Redacted.Redacted>>;
+}
+
+interface RefusalRefresh {
+  readonly generation: number;
+  readonly done: Deferred.Deferred<
+    Option.Option<Redacted.Redacted>,
+    TokenStorage.TokenStorageError
+  >;
+}
+
+interface Epoch {
+  readonly held: Option.Option<StoredSession>;
+  readonly generation: number;
+  readonly heldSince: number;
 }
 
 /**
@@ -337,7 +399,23 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
   const scope = yield* Effect.scope;
   const gateway = new ConvexHttpClient(options.convexUrl, { logger: false });
   const status = yield* SubscriptionRef.make<AuthStatus>("loading");
-  const session = yield* Ref.make(Option.none<StoredSession>());
+
+  /**
+   * The session held now and its generation, in one ref so a token is stamped with the generation
+   * it was held at. The generation moves on whenever the held session changes, renewed or replaced,
+   * and when a refusal's refresh finishes without changing it; `heldSince` is the generation the
+   * held session took over at.
+   */
+  const epoch = yield* Ref.make<Epoch>({ held: Option.none(), generation: 0, heldSince: 0 });
+
+  const heldSession = Effect.map(Ref.get(epoch), (now) => now.held);
+
+  const setSession = (next: Option.Option<StoredSession>): Effect.Effect<void> =>
+    Ref.update(epoch, (now) =>
+      TokenStorage.sameStored(now.held, next)
+        ? { ...now, held: next }
+        : { held: next, generation: now.generation + 1, heldSince: now.generation + 1 },
+    );
 
   /**
    * What this client last read from or wrote to the store. The store differs from it only after
@@ -345,6 +423,13 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
    */
   const lastStored = yield* Ref.make(Option.none<StoredSession>());
   const refreshing = yield* Semaphore.make(1);
+
+  /**
+   * The refresh a refusal of the current generation runs, which every refusal of that generation
+   * awaits. Nothing else waits on it, so a refusal of anything older or of another person answers
+   * at once.
+   */
+  const inflight = yield* Ref.make(Option.none<RefusalRefresh>());
 
   const lastAttempt = yield* Ref.make<{
     readonly finished: number;
@@ -422,7 +507,7 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
     );
 
   const currentToken = Effect.map(
-    Ref.get(session),
+    heldSession,
     Option.map((current) => current.token),
   );
 
@@ -435,16 +520,22 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
       ),
     );
 
-  const tokenSource: ConvexTransport.AuthTokenSource = (forceRefresh) =>
+  const tokenSource: ConvexTransport.AuthTokenSource = (rejected) =>
     Effect.runPromiseWith(context)(
-      accessToken(forceRefresh).pipe(
-        orTokenInMemory,
-        Effect.map(Option.match({ onNone: () => null, onSome: Redacted.value })),
-      ),
+      Option.match(rejected, {
+        onNone: () => accessToken(false),
+        onSome: (token) =>
+          Effect.flatMap(refuseHeld(Option.some(token)), (answer) =>
+            Option.match(answer.refreshed, {
+              onNone: () => accessToken(false),
+              onSome: unlessRevoked,
+            }),
+          ),
+      }).pipe(orTokenInMemory, Effect.flatMap(issue), Effect.map(Option.getOrNull)),
     );
 
   const adopt = Effect.fn("Auth.adopt")(function* (next: Option.Option<StoredSession>) {
-    yield* Ref.set(session, next);
+    yield* setSession(next);
     yield* Ref.set(failing, Option.none());
     yield* transport.setAuth(Option.isSome(next) ? tokenSource : null);
     yield* SubscriptionRef.set(status, Option.isSome(next) ? "signedIn" : "signedOut");
@@ -659,7 +750,7 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
     revoked: StoredSession,
     state: TokenStorage.Revocation,
   ) {
-    if (Option.exists(yield* Ref.get(session), (held) => isSameSession(held, revoked))) {
+    if (Option.exists(yield* heldSession, (held) => isSameSession(held, revoked))) {
       const stored = yield* storage.load.pipe(Effect.orElseSucceed(() => Option.none()));
 
       yield* Ref.set(lastStored, stored);
@@ -673,7 +764,7 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
     seen: StoredSession,
     outcome: RefreshOutcome,
   ) {
-    const current = yield* Ref.get(session);
+    const current = yield* heldSession;
 
     if (Option.isNone(current) || current.value !== seen) {
       // The refresh renewed a session this client has let go of, so end it on the server, unless
@@ -687,9 +778,6 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
 
       return Option.map(current, (held) => held.token);
     }
-
-    const holdRenewed = (renewed: StoredSession) =>
-      Ref.set(session, Option.some(renewed)).pipe(Effect.andThen(reconnect));
 
     return yield* RefreshOutcome.$match(outcome, {
       Renewed: ({ session: renewed }) =>
@@ -765,6 +853,9 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
     yield* Effect.logInfo("Auth.reconnected");
   });
 
+  const holdRenewed = (renewed: StoredSession) =>
+    setSession(Option.some(renewed)).pipe(Effect.andThen(reconnect));
+
   /**
    * Adopts what another writer put in the store. The same session takes the renewed tokens without
    * touching the connection or the status; another session, or none, goes through `adopt`. It
@@ -774,12 +865,12 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
     stored: Option.Option<StoredSession>,
   ) {
     if (TokenStorage.sameStored(stored, yield* Ref.getAndSet(lastStored, stored))) return;
-    const held = yield* Ref.get(session);
+    const held = yield* heldSession;
 
     if (TokenStorage.sameStored(stored, held)) return;
 
     if (Option.isSome(stored) && Option.isSome(held) && isSameSession(held.value, stored.value)) {
-      yield* Ref.set(session, stored);
+      yield* setSession(stored);
       yield* Ref.set(failing, Option.none());
       yield* reconnect;
     } else {
@@ -790,7 +881,7 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
   /** Follows another writer. A held session that another client revoked is dropped. */
   const follow = Effect.fn("Auth.follow")(function* () {
     yield* resumePendingSignOuts;
-    const held = yield* Ref.get(session);
+    const held = yield* heldSession;
 
     if (Option.isSome(held)) {
       const state = yield* storage.revocation(held.value);
@@ -813,7 +904,7 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
    */
   const renewInBackground = (seen: StoredSession): Effect.Effect<void> =>
     Effect.gen(function* () {
-      const current = yield* Ref.get(session);
+      const current = yield* heldSession;
 
       if (!(yield* SubscriptionRef.get(reconnecting)) || !Option.contains(current, seen)) {
         return false;
@@ -832,12 +923,13 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
       Effect.asVoid,
     );
 
-  const refresh = Effect.fn("Auth.refresh")(function* (
+  /** Refreshes `seen` unless another call already did; the caller holds the `refreshing` permit. */
+  const refreshHeld = Effect.fn("Auth.refresh")(function* (
     seen: StoredSession,
     generation: number,
     forced: boolean,
   ) {
-    const current = yield* Ref.get(session);
+    const current = yield* heldSession;
 
     if (Option.isNone(current) || current.value !== seen) {
       return Option.map(current, (held) => held.token);
@@ -861,13 +953,146 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
     }));
 
     return yield* commitRefresh(seen, outcome);
-  }, refreshing.withPermits(1));
+  });
+
+  const refresh = (seen: StoredSession, generation: number, forced: boolean) =>
+    refreshing.withPermits(1)(refreshHeld(seen, generation, forced));
+
+  /**
+   * `token` stamped as a request carries it: with the generation now while it is the held
+   * session's, or as older than the held session when it was renewed before reaching the request.
+   */
+  function issue(
+    token: Option.Option<Redacted.Redacted>,
+  ): Effect.Effect<Option.Option<ConvexTransport.IssuedToken>> {
+    return Effect.map(Ref.get(epoch), (now) =>
+      Option.map(token, (sent) => ({
+        token: Redacted.value(sent),
+        session: TokenStorage.subjectOf(sent),
+        generation: Option.exists(
+          now.held,
+          (held) => Redacted.value(held.token) === Redacted.value(sent),
+        )
+          ? now.generation
+          : now.heldSince - 1,
+      })),
+    );
+  }
+
+  /**
+   * Refreshes `held` once for the refusals of generation `now`, unless the session moved on while
+   * the refresh waited its turn. A refresh that kept the session moves the generation on too, so
+   * the refusals of requests sent before it finished share it instead of refreshing again.
+   */
+  const refreshForRefusal = (now: Epoch, held: StoredSession) =>
+    refreshing.withPermits(1)(
+      Effect.gen(function* () {
+        if ((yield* Ref.get(epoch)).generation !== now.generation) return yield* currentToken;
+        const { finished } = yield* Ref.get(lastAttempt);
+
+        return yield* refreshHeld(held, finished, true).pipe(
+          Effect.ensuring(
+            Ref.update(epoch, (after) =>
+              after.heldSince > now.generation
+                ? after
+                : { ...after, generation: after.generation + 1 },
+            ),
+          ),
+        );
+      }),
+    );
+
+  /**
+   * The one refresh for the refusals of generation `now`: this refusal starts it unless another
+   * already has, and awaits it either way. It runs in the engine's scope, so a refusal that stops
+   * waiting leaves it running for the others, and a closing scope ends the wait of every refusal
+   * with the interruption.
+   */
+  const sharedRefresh = (now: Epoch, held: StoredSession) =>
+    Effect.gen(function* () {
+      const fresh = yield* Deferred.make<
+        Option.Option<Redacted.Redacted>,
+        TokenStorage.TokenStorageError
+      >();
+
+      const [done, started] = yield* Ref.modify(
+        inflight,
+        (
+          current,
+        ): readonly [readonly [RefusalRefresh["done"], boolean], Option.Option<RefusalRefresh>] =>
+          Option.isSome(current) && current.value.generation === now.generation
+            ? [[current.value.done, false], current]
+            : [[fresh, true], Option.some({ generation: now.generation, done: fresh })],
+      );
+
+      if (started) {
+        const running = yield* Effect.forkIn(
+          refreshForRefusal(now, held).pipe(
+            Effect.ensuring(
+              Ref.update(inflight, (current) =>
+                Option.exists(current, (entry) => entry.done === fresh) ? Option.none() : current,
+              ),
+            ),
+          ),
+          scope,
+        );
+
+        // The waiters hear every end of the refresh, an interruption included, as when the engine's
+        // scope closes while it is out, even before it began.
+        running.addObserver((exit) => {
+          Deferred.doneUnsafe(fresh, exit);
+        });
+      }
+
+      return yield* Deferred.await(done);
+    });
+
+  /**
+   * `refuse`, with the token the refresh answered when this refusal ran or shared one: none once
+   * the server has failed every refresh for a while. It decides from the session held now and
+   * waits on nothing but the refresh of its own generation.
+   */
+  const refuseHeld = Effect.fn("Auth.refuse")(function* (
+    rejected: Option.Option<ConvexTransport.IssuedToken>,
+  ): Effect.fn.Return<RefusalAnswer, TokenStorage.TokenStorageError> {
+    const now = yield* Ref.get(epoch);
+
+    if (Option.isNone(now.held)) {
+      return { refusal: "ended", refreshed: Option.none() };
+    }
+
+    const held = now.held.value;
+
+    const sent = Option.filter(rejected, (token) =>
+      ConvexTransport.sameSession(token.session, sessionOf(held)),
+    );
+
+    if (Option.isNone(sent)) {
+      return { refusal: "elsewhere", refreshed: Option.none() };
+    }
+
+    if (sent.value.generation < now.heldSince) {
+      return { refusal: "renewed", refreshed: Option.none() };
+    }
+
+    if (sent.value.generation < now.generation) {
+      return { refusal: "stands", refreshed: Option.none() };
+    }
+
+    const token = yield* sharedRefresh(now, held);
+    const ended = Option.isNone(yield* heldSession);
+
+    return {
+      refusal: ended ? "ended" : "stands",
+      refreshed: Option.some(token),
+    };
+  });
 
   function accessToken(
     forceRefresh: boolean,
   ): Effect.Effect<Option.Option<Redacted.Redacted>, TokenStorage.TokenStorageError> {
     return Effect.gen(function* () {
-      const current = yield* Ref.get(session);
+      const current = yield* heldSession;
 
       if (Option.isNone(current)) return Option.none();
       const { finished: generation } = yield* Ref.get(lastAttempt);
@@ -891,7 +1116,7 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
     token: Option.Option<Redacted.Redacted>,
   ): Effect.Effect<Option.Option<Redacted.Redacted>> {
     return Effect.gen(function* () {
-      const held = yield* Ref.get(session);
+      const held = yield* heldSession;
 
       if (Option.isNone(token) || Option.isNone(held)) return token;
       const state = yield* readRevocation(held.value);
@@ -969,6 +1194,31 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
         ),
     });
 
+  /**
+   * Signs `opened` out after its connection refused it or never answered, and whether it did: a
+   * session another sign-in replaced meanwhile is left alone, and only a store that still holds it
+   * is cleared and ended on the server.
+   */
+  const abandon = Effect.fn("Auth.abandon")(function* (opened: StoredSession) {
+    return yield* committing.withPermits(1)(
+      Effect.gen(function* () {
+        const held = yield* heldSession;
+
+        if (Option.isNone(held) || !isSameSession(held.value, opened)) return false;
+        const current = held.value;
+
+        yield* adopt(Option.none());
+        const ended = yield* Effect.exit(storage.revokeHeld(current));
+
+        if (Exit.isSuccess(ended) && ended.value) {
+          yield* endInBackground(current, true, Duration.zero, true);
+        }
+
+        return true;
+      }),
+    );
+  });
+
   const open = Effect.fn("Auth.open")(function* (request: SignInRequest) {
     const opened = yield* signInTokens(request);
 
@@ -978,13 +1228,41 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
       });
     }
 
-    return yield* committing.withPermits(1)(
+    yield* committing.withPermits(1)(
       Effect.gen(function* () {
         yield* storage.save(opened.value);
         yield* Ref.set(lastStored, opened);
         yield* adopt(opened);
       }),
     );
+
+    // A sign-in ends once the connection runs as the new session, so the next call never gets an
+    // answer from before it, such as a query's refusal from while signed out.
+    const answered = yield* transport.authenticated.pipe(Effect.timeoutOption(AUTHENTICATION_WAIT));
+
+    if (Option.exists(answered, (answer) => answer !== "refused")) return undefined;
+
+    // A connection that refused the session's token, or never answered it, leaves no session
+    // half signed in: the session is signed out as a refused password leaves it, unless a later
+    // sign-in replaced it meanwhile, which stands.
+    if (!(yield* abandon(opened.value))) return undefined;
+
+    return yield* Option.match(answered, {
+      onNone: () =>
+        Effect.fail(
+          new TransportError({
+            operation: SIGN_IN,
+            message: `Transport failed during ${SIGN_IN}: the server did not take the new session within ${Duration.format(AUTHENTICATION_WAIT)}`,
+            cause: null,
+          }),
+        ),
+      onSome: () =>
+        Effect.fail(
+          new Unauthenticated({
+            message: "Sign-in refused: the server did not accept the new session's token",
+          }),
+        ),
+    });
   });
 
   /**
@@ -996,7 +1274,7 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
   const signOut = Effect.fn("Auth.signOut")(function* () {
     const { ended, revoked } = yield* committing.withPermits(1)(
       Effect.gen(function* () {
-        const current = yield* Ref.get(session);
+        const current = yield* heldSession;
 
         const exit = yield* Effect.exit(
           Option.match(current, { onNone: () => Effect.void, onSome: storage.revoke }),
@@ -1043,10 +1321,17 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
     currentStatus: SubscriptionRef.get(status),
     reconnecting: SubscriptionRef.changes(reconnecting),
     isReconnecting: SubscriptionRef.get(reconnecting),
-    currentIdentity: Effect.map(Ref.get(session), Option.flatMap(sessionOf)),
+    currentIdentity: Effect.map(heldSession, Option.flatMap(sessionOf)),
     open,
     signOut: signOut(),
     accessToken,
+    held: Effect.flatMap(currentToken, issue),
+    issue: Effect.flatMap(accessToken(false), issue),
+    refuse: (rejected) => Effect.map(refuseHeld(rejected), (answer) => answer.refusal),
+    catchUp: Effect.gen(function* () {
+      if (Option.isNone(yield* heldSession) || (yield* SubscriptionRef.get(reconnecting))) return;
+      yield* transport.setAuth(tokenSource);
+    }),
   };
 
   return engine;

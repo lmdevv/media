@@ -17,7 +17,7 @@ const serverOf = (platform: PlatformSdk): MediaServer => {
 
   const server = createMediaServer({
     url: MEDIA_BASE_URL,
-    accessToken: platform.session.accessToken,
+    session: platform.session,
   });
 
   servers.set(platform, server);

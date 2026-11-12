@@ -1,7 +1,7 @@
 # 0021. Ship one `media` CLI and one agent skill with a reference per domain
 
-- Status: Accepted, 2026-11-03. Amended 2026-11-04 with the CLI shell, and 2026-11-11 with one
-  config and the movies commands.
+- Status: Accepted, 2026-11-03. Amended 2026-11-04 with the CLI shell, 2026-11-11 with one
+  config and the movies commands, and 2026-11-11 with the refusal fence.
 - Decisions: D41, D51, D53
 
 ## Context
@@ -136,8 +136,45 @@ NixOS module now run alone (ADR 0027).
   the media server refuses the session (`Unauthenticated`, HTTP 401), the platform client
   refreshes once at once. A refused refresh clears the stored session, and the CLI reports
   `not_logged_in`, naming `media auth login`. Platform calls run under it inside the client; the
-  media server's routes (`media logs`, `media diagnostics`) run under the same rule through
-  `session.refreshOnRefusal`.
+  media server's routes (`media logs`, `media diagnostics`) and the web clients' and the
+  movies iOS app's media server calls (`createMediaServer` with the platform `session`) run
+  under the same rule through `session.refreshOnRefusal`.
+- **The refusal fence.** A refusal can arrive after the session it answered was renewed, so the
+  rule is fenced on the token the call actually carried, and it never sends a call again. The
+  session stamps every token it hands out with the session it belongs to (the token's subject) and
+  a generation, which moves on whenever the held session changes, in this tab or another (D52),
+  and whenever a refusal's refresh keeps it. Each connection reports what a call carried:
+  - the HTTP connection sets and records the token as each request leaves, with mutations sent one
+    at a time in call order and each mutation's token read as it leaves;
+  - a WebSocket client authenticates its connection, not each call, and Convex reports no
+    confirmation of a renewed token. So a call or a subscription result carried the token held
+    when it went out only if the connection held that one token, with no fetch out, until it was
+    answered, and the server had answered that token source (`setAuth`'s `onChange`): until it
+    has, the client can still hand out a query's result from before, such as a refusal computed
+    while signed out. Otherwise its token is unsettled, and a refusal of it touches nothing. A
+    sign-in returns only once the server has taken the new source, so the next call runs as the
+    new session. A server that refuses every token the client can get fails the sign-in with
+    `Unauthenticated`, and one that has not answered within 10 seconds is unreachable and fails
+    it with `TransportError`. Either way the session is signed out as a refused password leaves
+    it, unless a later sign-in replaced it meanwhile; the media server's own session keeps
+    signing in with backoff.
+
+  On a refusal, decided from the session held now with no lock held across a network wait:
+  - an unsettled token, another person's session, no session, or a call sent signed out: the
+    failure comes back, and nothing refreshes or ends;
+  - the same session at an older generation, renewed since: the failure comes back and nothing
+    refreshes or ends; the connection takes the renewed token, so the next call carries it;
+  - the same session at the current generation: one refresh per generation, which every refusal of
+    that generation awaits and nothing else does, even when it keeps the token because the server
+    was unreachable. A refused refresh signs out only while that generation is held.
+
+  The HTTP connection no longer sends a call again after a rejected token, so D51 is the only
+  budget. A subscription refused with a renewed or unsettled token subscribes again through the
+  normal path, which sends and records the token held then; a refusal of that subscription is
+  judged by its own token, so a server that keeps refusing the current token gets one refresh and
+  then the stream ends. Three such restarts without a result between end it too. Forbidden and
+  network failures never touch the session. The WebSocket client renews once after it takes a new
+  token source, as it does at sign-in, so catching it up costs one ordinary refresh.
 
 Old words with no replacement on the core, left out under D62 until the backlog brings them back:
 `profiles use` (one person per session now), `keys list`, the room countdown above, `import` (the

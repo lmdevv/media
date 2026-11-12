@@ -5,6 +5,7 @@ import {
   Effect,
   Layer,
   Match,
+  MutableRef,
   Option,
   Predicate,
   Redacted,
@@ -124,14 +125,19 @@ export interface Session {
    */
   readonly accessToken: Effect.Effect<Option.Option<Redacted.Redacted>, TokenStorageError>;
   /**
-   * Runs `effect`, a call some server answered as this session, under the one refusal rule
-   * (D51): when it fails with `Unauthenticated`, the session refreshes once at once, and a refused
-   * refresh signs it out. The call is never repeated, so the failure still comes back; read
-   * `currentStatus` to tell an ended session from a refusal of the call alone. Every platform
-   * call already runs under it; wrap a call to another server that sends `accessToken`, such as
-   * the media server's own routes.
+   * Runs `use`, a call to another server such as the media server's own routes, with the token
+   * `accessToken` gives, under the one refusal rule (D51) every platform call follows, fenced on
+   * that token. `use` runs once and its failure always comes back. When it fails with
+   * `Unauthenticated` and the session and its generation are still the ones the call went out
+   * with, the session refreshes once at once, shared with every refusal of that generation, and a
+   * refused refresh signs it out; read `currentStatus` to tell an ended session from a refusal of
+   * the call alone. A refusal of a token the session renewed since, as another call or another tab
+   * did, of another person's session, or of a call sent signed out, refreshes and ends nothing.
+   * Other failures leave the session alone.
    */
-  readonly refreshOnRefusal: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
+  readonly refreshOnRefusal: <A, E, R>(
+    use: (token: Option.Option<Redacted.Redacted>) => Effect.Effect<A, E, R>,
+  ) => Effect.Effect<A, E | TokenStorageError, R>;
 }
 
 /** Runs platform commands as the signed-in session. */
@@ -197,6 +203,9 @@ const toPlatformError =
       Match.orElse((other) => other),
     );
 
+/** How many times in a row a refused subscription subscribes again without a result between. */
+const SUBSCRIBE_AGAIN_LIMIT = 3;
+
 const tileProofParams = (proof: TileProof) =>
   TileProof.$match(proof, {
     Password: ({ by, password }) => ({ kind: "password", by, password: Redacted.value(password) }),
@@ -243,29 +252,120 @@ const make = Effect.fn("Platform.make")(function* (url: string, signInRoute: Aut
     signIn: signInRoute,
   });
 
-  const refreshAfterRefusal = engine
-    .accessToken(true)
-    .pipe(
-      Effect.catchTag("TokenStorageError", (error) =>
-        Effect.logWarning("Platform.sessionStorageFailed").pipe(
-          Effect.annotateLogs({ operation: error.operation, message: error.message }),
+  const refusalOf = (refused: Option.Option<ConvexTransport.IssuedToken>) =>
+    engine
+      .refuse(refused)
+      .pipe(
+        Effect.catchTag("TokenStorageError", (error) =>
+          Effect.logWarning("Platform.sessionStorageFailed").pipe(
+            Effect.annotateLogs({ operation: error.operation, message: error.message }),
+            Effect.as<Auth.Refusal>("stands"),
+          ),
         ),
+      );
+
+  /**
+   * Where a request records the token it carried. It starts as the token held as the request is
+   * made, which is never newer than the one it is sent with, so a connection that cannot tell
+   * which token it sent errs toward leaving the session alone rather than refreshing.
+   */
+  const sentToken = Effect.map(engine.held, (held) => {
+    const sent = MutableRef.make(ConvexTransport.SentWith.Token({ issued: held }));
+
+    const attached: ConvexTransport.Attached = (next) => {
+      MutableRef.set(sent, next);
+    };
+
+    return { sent, attached };
+  });
+
+  /**
+   * What a refusal of a request that carried `sent` means for the session (D51). A request whose
+   * token is unsettled says nothing about the session, so it touches nothing. After a refusal of a
+   * token the session renewed since, the connection takes the renewed one, so the next request
+   * goes out with it.
+   */
+  const judge = (sent: ConvexTransport.SentWith): Effect.Effect<Auth.Refusal | "unsettled"> =>
+    ConvexTransport.SentWith.$match(sent, {
+      Unsettled: () => Effect.succeed("unsettled" as const),
+      Token: ({ issued }) =>
+        Effect.tap(refusalOf(issued), (refusal) =>
+          refusal === "renewed" ? engine.catchUp : Effect.void,
+        ),
+    });
+
+  /**
+   * Runs `attempt`, which tells `attached` the token it went out with, under D51 fenced on that
+   * token, as `refreshOnRefusal` says. The attempt is never sent again.
+   */
+  const fenced = <A, E, R>(
+    attempt: (attached: ConvexTransport.Attached) => Effect.Effect<A, E, R>,
+  ): Effect.Effect<A, E, R> =>
+    Effect.flatMap(sentToken, ({ sent, attached }) =>
+      Effect.catchIf(
+        attempt(attached),
+        (error) => Predicate.isTagged(error, "Unauthenticated"),
+        (error) => Effect.andThen(judge(MutableRef.get(sent)), Effect.fail(error)),
       ),
     );
 
-  const refreshOnRefusal = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
-    Effect.tapError(effect, (error) =>
-      Predicate.isTagged(error, "Unauthenticated") ? refreshAfterRefusal : Effect.void,
+  /**
+   * `open`'s results, fenced as `fenced` says. A subscription refused with a token the session
+   * renewed since, or while its connection was changing token, subscribes again through `open`,
+   * which sends the token held then and records its own; a refusal of that one is judged by its
+   * own token. Any other refusal ends the stream, so a
+   * server that keeps refusing the current token gets one refresh, then the stream ends. A
+   * subscription refused this way `SUBSCRIBE_AGAIN_LIMIT` times without a result between ends too.
+   */
+  const fencedStream = <A, E>(
+    open: (attached: ConvexTransport.Attached) => Stream.Stream<A, E>,
+    again = 0,
+  ): Stream.Stream<A, E> =>
+    Stream.unwrap(
+      Effect.map(sentToken, ({ sent, attached }) => {
+        const answered = MutableRef.make(false);
+
+        return open(attached).pipe(
+          Stream.tap(() => Effect.sync(() => MutableRef.set(answered, true))),
+          Stream.catchIf(
+            (error) => Predicate.isTagged(error, "Unauthenticated"),
+            (error) =>
+              Stream.unwrap(
+                Effect.map(judge(MutableRef.get(sent)), (refusal) => {
+                  const next = MutableRef.get(answered) ? 1 : again + 1;
+
+                  return (refusal === "renewed" || refusal === "unsettled") &&
+                    next <= SUBSCRIBE_AGAIN_LIMIT
+                    ? fencedStream(open, next)
+                    : Stream.fail(error);
+                }),
+              ),
+          ),
+        );
+      }),
+    );
+
+  const refreshOnRefusal: Session["refreshOnRefusal"] = (use) =>
+    fenced((attached) =>
+      Effect.flatMap(engine.issue, (issued) => {
+        attached(ConvexTransport.SentWith.Token({ issued }));
+
+        return use(Option.map(issued, (sent) => Redacted.make(sent.token)));
+      }),
     );
 
   const run: Interface["run"] = (command, params) => {
     const [args] = params;
 
     return encodeArgs(command.name, command.args, args).pipe(
-      Effect.flatMap((wire) => transport.call(command.kind, command.path, wire)),
-      Effect.flatMap((raw) => decodeResult(command.name, command.result, raw)),
-      Effect.mapError(toPlatformError(command.name)),
-      refreshOnRefusal,
+      Effect.flatMap((wire) =>
+        fenced((attached) =>
+          transport.call(command.kind, command.path, wire, attached).pipe(
+            Effect.flatMap((raw) => decodeResult(command.name, command.result, raw)),
+            Effect.mapError(toPlatformError(command.name)),
+          ),
+        ),
+      ),
       Effect.withSpan("Platform.call", { attributes: { command: command.name } }),
     );
   };
@@ -275,17 +375,16 @@ const make = Effect.fn("Platform.make")(function* (url: string, signInRoute: Aut
 
     return Stream.unwrap(
       Effect.map(encodeArgs(command.name, command.args, args), (wire) =>
-        acrossReconnects(
-          engine,
-          transport
-            .subscribe(command.path, wire)
-            .pipe(Stream.mapEffect((raw) => decodeResult(command.name, command.result, raw))),
+        fencedStream((attached) =>
+          acrossReconnects(
+            engine,
+            transport
+              .subscribe(command.path, wire, attached)
+              .pipe(Stream.mapEffect((raw) => decodeResult(command.name, command.result, raw))),
+          ),
         ),
       ),
-    ).pipe(
-      Stream.mapError(toPlatformError(command.name)),
-      Stream.tapErrorTag("Unauthenticated", () => refreshAfterRefusal),
-    );
+    ).pipe(Stream.mapError(toPlatformError(command.name)));
   };
 
   const methods = effectMethods(effectBuilder({ run, watch }));

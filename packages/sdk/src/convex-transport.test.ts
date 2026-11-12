@@ -2,9 +2,11 @@ import type { AuthTokenFetcher } from "convex/browser";
 import { ConvexError } from "convex/values";
 import {
   Context,
+  Deferred,
   Duration,
   Effect,
   Exit,
+  Fiber,
   Layer,
   Option,
   Predicate,
@@ -22,7 +24,7 @@ import * as ConvexTransport from "./convex-transport";
 import { clientTokenFetchers, translateFailure } from "./convex-transport";
 import * as MoviesClient from "./movies-client";
 import * as FakeConvex from "./testing/fake-convex";
-import { jwtIssuedAt, Reply } from "./testing/fake-convex";
+import { issuedOf, jwtIssuedAt, Reply } from "./testing/fake-convex";
 import * as TokenStorage from "./token-storage";
 
 /** Long enough for the client's ten-second refresh leeway, short enough to outlive in a test. */
@@ -104,7 +106,7 @@ const asksAround = (
         yield* connection.setAuth(() => {
           asked += 1;
 
-          return Promise.resolve(token);
+          return Promise.resolve(issuedOf(token));
         });
         yield* Effect.sync(() => asked).pipe(
           Effect.repeat({ until: (count) => count >= 2, schedule: Schedule.spaced("50 millis") }),
@@ -166,7 +168,7 @@ describe.concurrent("layerWebSocket", () => {
           yield* connection.setAuth(() => {
             asked += 1;
 
-            return Promise.resolve(asked === 1 ? signedIn : refreshed);
+            return Promise.resolve(issuedOf(asked === 1 ? signedIn : refreshed));
           });
           yield* connection.call("query", "account:viewer", { ask: 1 });
           yield* Effect.sleep(Duration.millis(300));
@@ -178,7 +180,7 @@ describe.concurrent("layerWebSocket", () => {
           // Signing in again, as the media service's probe does.
           const second = jwtIssuedAt(Date.now(), 3600, "user|session-2");
 
-          yield* connection.setAuth(() => Promise.resolve(second));
+          yield* connection.setAuth(ConvexTransport.fixedToken(second));
 
           return yield* connection
             .call("query", "account:viewer", { ask: 2 })
@@ -348,6 +350,161 @@ describe.concurrent("layerWebSocket", () => {
   }, 15_000);
 });
 
+/** The token `sent` names, or `unsettled`. */
+const tokenSent = (sent: ConvexTransport.SentWith): string | undefined =>
+  ConvexTransport.SentWith.$match(sent, {
+    Token: ({ issued }) => Option.getOrUndefined(Option.map(issued, (token) => token.token)),
+    Unsettled: () => "unsettled",
+  });
+
+describe("the HTTP connection", () => {
+  // Main kept this order through ConvexHttpClient's own mutation queue, so this passes there; it
+  // guards the transport's queue, which also reads each mutation's token as it leaves.
+  it("sends mutations in order across a token change, each with the token read as it leaves", async () => {
+    const outcome = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fake = yield* FakeConvex.make;
+
+          const arrivals = yield* Queue.unbounded<{
+            readonly authorization: string | undefined;
+            readonly answer: Deferred.Deferred<FakeConvex.Reply>;
+          }>();
+
+          yield* fake.handle("test:write", (request) =>
+            Effect.gen(function* () {
+              const reply = yield* Deferred.make<FakeConvex.Reply>();
+
+              yield* Queue.offer(arrivals, { authorization: request.authorization, answer: reply });
+
+              return yield* Deferred.await(reply);
+            }),
+          );
+
+          const context = yield* Layer.build(ConvexTransport.layerHttp(fake.url));
+          const transport = Context.get(context, ConvexTransport.ConvexTransport);
+          const token = { current: "first" };
+          const attached: Array<string | undefined> = [];
+
+          yield* transport.setAuth(() => Promise.resolve(issuedOf(token.current)));
+
+          const first = yield* Effect.forkChild(
+            transport.call("mutation", "test:write", { n: 1 }, (sent) => {
+              attached.push(tokenSent(sent));
+            }),
+          );
+
+          const held = yield* Queue.take(arrivals);
+
+          token.current = "second";
+
+          const second = yield* Effect.forkChild(
+            transport.call("mutation", "test:write", { n: 2 }, (sent) => {
+              attached.push(tokenSent(sent));
+            }),
+          );
+
+          const overtook = yield* Queue.take(arrivals).pipe(
+            Effect.timeoutOption(Duration.millis(200)),
+          );
+
+          yield* Deferred.succeed(held.answer, Reply.Success({ value: null }));
+
+          const next = Option.isSome(overtook) ? overtook.value : yield* Queue.take(arrivals);
+
+          yield* Deferred.succeed(next.answer, Reply.Success({ value: null }));
+          yield* Fiber.join(first);
+          yield* Fiber.join(second);
+
+          return {
+            overtook: Option.isSome(overtook),
+            bearers: [held.authorization, next.authorization],
+            attached,
+          };
+        }),
+      ),
+    );
+
+    expect(outcome).toStrictEqual({
+      overtook: false,
+      bearers: ["Bearer first", "Bearer second"],
+      attached: ["first", "second"],
+    });
+  });
+});
+
+describe("the WebSocket connection", () => {
+  it("never names a token other than the one a call carried, as when it is queued during reauthentication", async () => {
+    const t1 = jwtIssuedAt(Date.now(), 3600, "ada|session-a");
+    const t2 = jwtIssuedAt(Date.now(), 5400, "ada|session-a");
+    const t3 = jwtIssuedAt(Date.now(), 7200, "ada|session-a");
+
+    const outcome = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fake = yield* FakeConvex.make;
+
+          yield* fake.reply("test:warm", Reply.Success({ value: null }));
+          yield* fake.reply("test:queued", Reply.Success({ value: null }));
+          const context = yield* Layer.build(ConvexTransport.layerWebSocket(fake.url));
+          const transport = Context.get(context, ConvexTransport.ConvexTransport);
+          const renewing = yield* Deferred.make<void>();
+          const release = yield* Deferred.make<void>();
+          const fetched = { count: 0 };
+          const services = yield* Effect.context();
+
+          // The third token, fetched as the connection reauthenticates, waits until released.
+          yield* transport.setAuth(() => {
+            fetched.count += 1;
+            const generation = fetched.count;
+            const token = [t1, t2][generation - 1] ?? t3;
+            const issued = { token, session: Option.some("ada|session-a"), generation };
+
+            return generation < 3
+              ? Promise.resolve(issued)
+              : Effect.runPromiseWith(services)(
+                  Deferred.succeed(renewing, undefined).pipe(
+                    Effect.andThen(Deferred.await(release)),
+                    Effect.as(issued),
+                  ),
+                );
+          });
+          yield* fake.acceptedTokens.pipe(
+            Effect.repeat({
+              until: (accepted) => accepted.includes(t2),
+              schedule: Schedule.spaced("5 millis"),
+            }),
+            Effect.timeout(Duration.seconds(5)),
+          );
+          yield* transport.call("query", "test:warm", {});
+          yield* fake.rejectAcceptedTokens;
+          yield* Deferred.await(renewing);
+
+          const attached: Array<string | undefined> = [];
+
+          const query = yield* Effect.forkChild(
+            transport.call("query", "test:queued", {}, (sent) => {
+              attached.push(tokenSent(sent));
+            }),
+          );
+
+          yield* Effect.yieldNow;
+          yield* Deferred.succeed(release, undefined);
+          yield* Fiber.join(query);
+
+          return {
+            attached,
+            sent: (yield* fake.requestsTo("test:queued")).map((request) => request.authorization),
+          };
+        }),
+      ),
+    );
+
+    // The call left while the connection was fetching a token and went out with the next one.
+    expect(outcome).toStrictEqual({ attached: ["unsettled"], sent: [`Bearer ${t3}`] });
+  });
+});
+
 describe("clientTokenFetchers", () => {
   it("never asks a retired fetcher's source again", async () => {
     const fetchers = clientTokenFetchers();
@@ -358,7 +515,7 @@ describe("clientTokenFetchers", () => {
       () => {
         asked += 1;
 
-        return Promise.resolve("token");
+        return Promise.resolve(issuedOf("token"));
       },
       (given) => {
         if (given !== null) installed.push(given);
@@ -394,7 +551,7 @@ describe("clientTokenFetchers", () => {
   it("compares a refreshed token with the newest fetch's answer, the only one the client keeps", async () => {
     // The client keeps only the answer of the fetch it started last; an older one still out
     // when a newer one starts is discarded when it lands.
-    const answers: Array<(token: string) => void> = [];
+    const answers: Array<(issued: ConvexTransport.IssuedToken) => void> = [];
     let asked = 0;
 
     const installed: Array<AuthTokenFetcher> = [];
@@ -418,15 +575,15 @@ describe("clientTokenFetchers", () => {
     const discarded = fetcher({ forceRefreshToken: true });
     const kept = fetcher({ forceRefreshToken: true });
 
-    answers[1]?.("token-2");
+    answers[1]?.(issuedOf("token-2"));
     expect(await kept).toBe("token-2");
-    answers[0]?.("token-3");
+    answers[0]?.(issuedOf("token-3"));
     expect(await discarded).toBe("token-3");
 
     // The client holds token-2, so token-3 is new to it and comes back without asking again.
     const next = fetcher({ forceRefreshToken: true });
 
-    answers[2]?.("token-3");
+    answers[2]?.(issuedOf("token-3"));
 
     const answer = await Promise.race([
       next,

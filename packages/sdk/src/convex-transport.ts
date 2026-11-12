@@ -14,8 +14,10 @@ import { ConvexError } from "convex/values";
 import {
   Cause,
   Context,
+  Data,
   Duration,
   Effect,
+  Equivalence,
   Layer,
   Option,
   Queue,
@@ -34,10 +36,65 @@ export type FunctionKind = "query" | "mutation" | "action";
 export type WireArgs = Schema.JsonObject;
 
 /**
- * Supplies the session's Convex auth token, or null when signed out. `forceRefresh` asks for a
- * fresh token because the server rejected the last one.
+ * A token as the session handed it out: the session it belongs to and the session's generation
+ * then. A refusal is read back against it, so a refusal of an older token never refreshes or ends
+ * a newer session, and a request one person made is never sent again as another.
  */
-export type AuthTokenSource = (forceRefresh: boolean) => Promise<string | null>;
+export interface IssuedToken {
+  readonly token: string;
+  /** The session the token was minted for, named by its subject; none for a token without one. */
+  readonly session: Option.Option<string>;
+  /** The session's generation when it handed the token out. */
+  readonly generation: number;
+}
+
+/**
+ * Supplies the token for a request, or null when signed out. With `refused`, the server rejected
+ * that token: the source renews the session unless it has moved on since, then answers the token
+ * to send now.
+ */
+export type AuthTokenSource = (refused: Option.Option<IssuedToken>) => Promise<IssuedToken | null>;
+
+/** A source that always answers `token`, for a caller that holds one token of its own. */
+export const fixedToken =
+  (token: string): AuthTokenSource =>
+  () =>
+    Promise.resolve({ token, session: Option.none(), generation: 0 });
+
+/**
+ * What the server answered a connection's token source: it took the token, or refused every
+ * token the connection could get; `none` when there is nothing to answer, as for a connection
+ * that authenticates each request, or one with no source.
+ */
+export type Authentication = "accepted" | "refused" | "none";
+
+/** The token a request carried, as far as its connection can tell. */
+export type SentWith = Data.TaggedEnum<{
+  /** The request carried `issued`, or went out signed out when none. */
+  Token: { readonly issued: Option.Option<IssuedToken> };
+  /**
+   * The connection's token changed, or was being fetched, while the request was out, so which
+   * token it carried is not known. A refusal of it says nothing about the session held now.
+   */
+  Unsettled: {};
+}>;
+
+/** Constructors and matchers for `SentWith`. */
+export const SentWith = Data.taggedEnum<SentWith>();
+
+/**
+ * Told the token a request carried, each time the connection learns it. A connection that cannot
+ * tell yet says nothing.
+ */
+export type Attached = (sent: SentWith) => void;
+
+const attachNothing: Attached = () => undefined;
+
+/**
+ * Whether two tokens' subjects name one session. Tokens without a subject cannot be told apart,
+ * so they count as one session.
+ */
+export const sameSession = Option.makeEquivalence(Equivalence.strictEqual<string>());
 
 /** Stops a subscription. */
 export type Unsubscribe = () => void;
@@ -53,30 +110,52 @@ export interface ClientAdapter {
     path: FunctionPath,
     args: WireArgs,
     signal: AbortSignal,
+    attached: Attached,
   ) => Promise<Schema.Json>;
+  /** Every result of a query; `attached` hears the token each result or failure answered. */
   readonly subscribe: (
     path: FunctionPath,
     args: WireArgs,
     onValue: (value: Schema.Json) => void,
     onError: (error: Error) => void,
+    attached: Attached,
   ) => Unsubscribe;
   /** Resolves once the client uses `source`, or no source when null. */
   readonly setAuth: (source: AuthTokenSource | null) => Promise<void>;
+  /**
+   * Resolves once the server has answered the client's current token source, with its answer;
+   * at once, with `none`, for a client that authenticates each request or has no source.
+   */
+  readonly authenticated: () => Promise<Authentication>;
   readonly close: () => Promise<void>;
 }
 
 /** Calls Convex functions by path with typed failures. */
 export interface Interface {
-  /** Runs a query, mutation, or action once. */
+  /** Runs a query, mutation, or action once; `attached` hears the token it was sent with. */
   readonly call: (
     kind: FunctionKind,
     path: FunctionPath,
     args: WireArgs,
+    attached?: Attached,
   ) => Effect.Effect<Schema.Json, CallError>;
-  /** Every result of a query as it changes. The stream ends only by failing or being interrupted. */
-  readonly subscribe: (path: FunctionPath, args: WireArgs) => Stream.Stream<Schema.Json, CallError>;
+  /**
+   * Every result of a query as it changes; `attached` hears the token each result or failure
+   * answered. The stream ends only by failing or being interrupted.
+   */
+  readonly subscribe: (
+    path: FunctionPath,
+    args: WireArgs,
+    attached?: Attached,
+  ) => Stream.Stream<Schema.Json, CallError>;
   /** Uses `source` for the auth token of every later call; null signs the connection out. */
   readonly setAuth: (source: AuthTokenSource | null) => Effect.Effect<void>;
+  /**
+   * Waits until the server has answered the connection's current token source, so a call made
+   * then runs as that session and no answer from before reaches it, and tells what it answered.
+   * A connection that authenticates each request, or has no source, answers `none` at once.
+   */
+  readonly authenticated: Effect.Effect<Authentication>;
 }
 
 /** The connection to the [movies] Convex deployment. */
@@ -160,13 +239,18 @@ const toError = (cause: unknown): Error =>
 export const make = (adapter: ClientAdapter): Effect.Effect<Interface> =>
   Effect.succeed(
     ConvexTransport.of({
-      call: Effect.fn("ConvexTransport.call")(function* (kind, path, args) {
+      call: Effect.fn("ConvexTransport.call")(function* (
+        kind,
+        path,
+        args,
+        attached = attachNothing,
+      ) {
         return yield* Effect.tryPromise({
-          try: (signal) => adapter.call(kind, path, args, signal),
+          try: (signal) => adapter.call(kind, path, args, signal, attached),
           catch: (cause) => translateFailure(path, cause),
         });
       }),
-      subscribe: (path, args) =>
+      subscribe: (path, args, attached = attachNothing) =>
         Stream.callback<Schema.Json, CallError>((queue) =>
           Effect.acquireRelease(
             Effect.sync(() =>
@@ -179,12 +263,14 @@ export const make = (adapter: ClientAdapter): Effect.Effect<Interface> =>
                 (error) => {
                   Queue.failCauseUnsafe(queue, Cause.fail(translateFailure(path, error)));
                 },
+                attached,
               ),
             ),
             (unsubscribe) => Effect.sync(unsubscribe),
           ),
         ),
       setAuth: (source) => Effect.promise(() => adapter.setAuth(source)),
+      authenticated: Effect.promise(() => adapter.authenticated()),
     }),
   );
 
@@ -268,6 +354,7 @@ export const queryOnce = (
       (error) => {
         settle(() => reject(error));
       },
+      attachNothing,
     );
 
     // A client holding the answer already may hand it over before `subscribe` returns.
@@ -325,6 +412,47 @@ const nextTask = (): Promise<void> =>
 
 const signedOut: AuthTokenFetcher = () => Promise.resolve(null);
 
+/** The token a fetcher's client holds: none until it has answered, null for none. */
+interface HeldToken {
+  held: Option.Option<IssuedToken | null>;
+  /**
+   * Whether the server has answered the source yet. Until it has, the client's results may still
+   * come from before it, under the token it replaced.
+   */
+  answered: boolean;
+  /** Resolves with the server's first answer once `answered`. */
+  readonly settled: Promise<Authentication>;
+  readonly answer: (accepted: boolean) => void;
+  /** Moves on each time the fetcher hands the client a different token. */
+  version: number;
+  /** Fetches out now. */
+  fetching: number;
+}
+
+/** What a client's fetchers hold at one moment, to compare with a later one. */
+interface FetcherMoment {
+  readonly state: HeldToken | null;
+  readonly held: Option.Option<IssuedToken | null>;
+  readonly version: number;
+  /** A fetch or a new fetcher is on its way, so the client's token may change at any moment. */
+  readonly busy: boolean;
+}
+
+/**
+ * The token a request carried, from the client's fetchers as it went out (`start`) and as it was
+ * answered (`end`). A WebSocket client authenticates its connection, not each request, so a
+ * request carried the token held at `start` only when the client held that one token throughout.
+ */
+const sentOver = (start: FetcherMoment, end: FetcherMoment): SentWith =>
+  start.state === end.state &&
+  start.version === end.version &&
+  !start.busy &&
+  !end.busy &&
+  start.state?.answered !== false &&
+  Option.isSome(start.held)
+    ? SentWith.Token({ issued: Option.fromNullishOr(start.held.value) })
+    : SentWith.Unsettled();
+
 /**
  * Token fetchers for one Convex WebSocket client, which keeps its session by one rule: a fetch
  * with `forceRefreshToken` returns a token other than the one it holds, or null to sign out.
@@ -336,35 +464,67 @@ const signedOut: AuthTokenFetcher = () => Promise.resolve(null);
  * and when a refresh lands in the second the token was minted, since Convex Auth signs to the
  * second. So a forced fetch asks again, waiting longer each time, until it gets a new token or
  * none; a source whose refresh can never succeed must answer none in the end, as `Auth` does once
- * the server has failed every refresh for a while. `install` and `retire` end every earlier
- * fetcher at once: its fetches answer null and its source is never asked again.
+ * the server has failed every refresh for a while. Each ask names the token refused last, so the
+ * source tries again rather than share the refresh that kept it. `install` and `retire` end every
+ * earlier fetcher at once: its fetches answer null and its source is never asked again. `held`
+ * names the token the client uses now: none until the newest source has answered, and null while
+ * it has no source.
  */
 export const clientTokenFetchers = () => {
   let generation = new AbortController();
   const fetching = new Set<Promise<string | null>>();
   let installing = Promise.resolve();
+  let installs = 0;
+  // What the newest fetcher holds; null while the client has no source.
+  let newest: HeldToken | null = null;
 
   const retire = (): void => {
     generation.abort();
     generation = new AbortController();
   };
 
-  const fetcherFor = (source: AuthTokenSource, signal: AbortSignal): AuthTokenFetcher => {
+  const fetcherFor = (source: AuthTokenSource, signal: AbortSignal) => {
     // The client keeps only the answer of the fetch it started last, so that answer is the token
     // it holds, and an older fetch still asking can stop: its answer will be discarded.
-    let held: string | null = null;
+    const answering = { resolve: (_answer: Authentication): void => undefined };
+
+    const settled = new Promise<Authentication>((resolve) => {
+      answering.resolve = resolve;
+    });
+
+    const state: HeldToken = {
+      held: Option.none(),
+      answered: false,
+      settled,
+      answer: (accepted) => {
+        state.answered = true;
+        answering.resolve(accepted ? "accepted" : "refused");
+      },
+      version: 0,
+      fetching: 0,
+    };
+
     let latest = 0;
 
-    const renewed = async (fetch: number, delay: number): Promise<string | null> => {
+    const heldToken = (): IssuedToken | null => Option.getOrNull(state.held);
+
+    const renewed = async (
+      fetch: number,
+      refused: IssuedToken | null,
+      delay: number,
+    ): Promise<IssuedToken | null> => {
       if (delay > 0) await sleep(delay, signal);
 
       if (signal.aborted || fetch !== latest) return null;
-      const token = await unlessAborted(source(true), signal);
+      const issued = await unlessAborted(source(Option.fromNullishOr(refused)), signal);
 
-      if (token === null || token !== held || fetch !== latest) return token;
+      if (issued === null || issued.token !== heldToken()?.token || fetch !== latest) {
+        return issued;
+      }
 
       return renewed(
         fetch,
+        issued,
         Math.min(Math.max(delay * 2, FIRST_REFETCH_DELAY_MS), MAX_REFETCH_DELAY_MS),
       );
     };
@@ -376,27 +536,38 @@ export const clientTokenFetchers = () => {
       latest += 1;
       const fetch = latest;
 
-      const token = forceRefreshToken
-        ? await renewed(fetch, 0)
-        : await unlessAborted(source(false), signal);
+      const issued = forceRefreshToken
+        ? await renewed(fetch, heldToken(), 0)
+        : await unlessAborted(source(Option.none()), signal);
 
       // Clearing auth leaves the client's scheduled refresh in place, so a retired fetcher can
       // still be asked after a sign-out, and must not hand the old session back.
       if (retired()) return null;
 
-      if (fetch === latest) held = token;
+      if (fetch === latest) {
+        if (issued?.token !== heldToken()?.token || Option.isNone(state.held)) state.version += 1;
+        state.held = Option.some(issued);
+      }
 
-      return token;
+      return issued?.token ?? null;
     };
 
-    return ({ forceRefreshToken }) => {
+    const fetcher: AuthTokenFetcher = ({ forceRefreshToken }) => {
       const answer = fetchToken(forceRefreshToken);
 
+      state.fetching += 1;
       fetching.add(answer);
-      void answer.finally(() => fetching.delete(answer)).catch(() => undefined);
+      void answer
+        .finally(() => {
+          state.fetching -= 1;
+          fetching.delete(answer);
+        })
+        .catch(() => undefined);
 
       return answer;
     };
+
+    return { fetcher, state };
   };
 
   /**
@@ -407,48 +578,135 @@ export const clientTokenFetchers = () => {
    */
   const install = (
     source: AuthTokenSource | null,
-    apply: (fetcher: AuthTokenFetcher | null) => void,
+    apply: (fetcher: AuthTokenFetcher | null, answered: (accepted: boolean) => void) => void,
   ): Promise<void> => {
     retire();
     const { signal } = generation;
-    const fetcher = source === null ? null : fetcherFor(source, signal);
+    const made = source === null ? null : fetcherFor(source, signal);
     const owed = [...fetching];
     const previous = installing;
+
+    installs += 1;
 
     const installed = (async () => {
       await previous;
       await Promise.allSettled(owed);
       await nextTask();
 
-      if (!signal.aborted) apply(fetcher);
-    })();
+      if (signal.aborted) return;
+      apply(made?.fetcher ?? null, (accepted) => made?.state.answer(accepted));
+      // The client takes its token from this fetcher from now on, and from the last one until now.
+      newest = made?.state ?? null;
+    })().finally(() => {
+      installs -= 1;
+    });
 
     installing = installed.catch(() => undefined);
 
     return installed;
   };
 
-  return { install, retire };
+  return {
+    install,
+    retire,
+    moment: (): FetcherMoment => ({
+      state: newest,
+      held: newest === null ? Option.some(null) : newest.held,
+      version: newest?.version ?? 0,
+      busy: installs > 0 || (newest !== null && (newest.fetching > 0 || !newest.answered)),
+    }),
+    authenticated: async (): Promise<Authentication> => {
+      await installing;
+
+      return newest === null ? "none" : newest.settled;
+    },
+  };
 };
+
+/**
+ * `subscribe` over a client whose fetchers are `fetchers`. Each result or failure answers the
+ * token held since the last result, or since the query started, when the client held only that
+ * one; otherwise it is unsettled, since the client runs the query again under each token it takes.
+ */
+export const heldSubscribe =
+  (
+    fetchers: ReturnType<typeof clientTokenFetchers>,
+    subscribe: (
+      path: FunctionPath,
+      args: WireArgs,
+      onValue: (value: Schema.Json) => void,
+      onError: (error: Error) => void,
+    ) => Unsubscribe,
+  ): ClientAdapter["subscribe"] =>
+  (path, args, onValue, onError, attached) => {
+    let since = fetchers.moment();
+
+    const settle = (): void => {
+      const now = fetchers.moment();
+
+      attached(sentOver(since, now));
+      since = now;
+    };
+
+    return subscribe(
+      path,
+      args,
+      (value) => {
+        settle();
+        onValue(value);
+      },
+      (error) => {
+        settle();
+        onError(error);
+      },
+    );
+  };
+
+/**
+ * `call` over a client whose fetchers are `fetchers`: once answered, a call carried the token held
+ * as it went out when the client held only that one meanwhile, and is unsettled otherwise.
+ */
+export const heldCall =
+  (
+    fetchers: ReturnType<typeof clientTokenFetchers>,
+    call: (
+      kind: FunctionKind,
+      path: FunctionPath,
+      args: WireArgs,
+      signal: AbortSignal,
+    ) => Promise<Schema.Json>,
+  ): ClientAdapter["call"] =>
+  (kind, path, args, signal, attached) => {
+    const start = fetchers.moment();
+
+    const settle = (): void => {
+      attached(sentOver(start, fetchers.moment()));
+    };
+
+    return call(kind, path, args, signal).finally(settle);
+  };
 
 const webSocketAdapter = (client: ConvexClient): ClientAdapter => {
   const fetchers = clientTokenFetchers();
 
-  const subscribe: ClientAdapter["subscribe"] = (path, args, onValue, onError) =>
+  const subscribe = heldSubscribe(fetchers, (path, args, onValue, onError) =>
     client.onUpdate(reference("query", path), args, onValue, (error) => {
       onError(toError(error));
-    });
+    }),
+  );
 
   return {
-    call: (kind, path, args, signal) =>
+    call: heldCall(fetchers, (kind, path, args, signal) =>
       kind === "query"
         ? queryOnce(subscribe, path, args, signal)
         : callByKind(client, kind, path, args),
+    ),
     subscribe,
     setAuth: (source) =>
-      fetchers.install(source, (fetcher) => {
-        client.setAuth(fetcher ?? signedOut);
+      fetchers.install(source, (fetcher, answered) => {
+        client.setAuth(fetcher ?? signedOut, answered);
       }),
+    authenticated: fetchers.authenticated,
     close: () => {
       fetchers.retire();
 
@@ -467,34 +725,49 @@ const valueKey = (value: Schema.Json): string => JSON.stringify(value);
 
 /**
  * Adapts the fetch-based client. It has no subscriptions, so `subscribe` polls and reports
- * changed results; it has no refresh hook, so each call reads the token first and retries once
- * with a fresh token when Convex rejects it.
+ * changed results. Each request reads the token as it leaves and sends it once: a refusal is the
+ * session's to judge (D51), never a reason to send the request again. Mutations leave one at a
+ * time in the order they were called, as the client's own queue keeps them, but the token each
+ * carries is read as it leaves rather than when it was queued.
  */
 const httpAdapter = (client: ConvexHttpClient, options: HttpOptions): ClientAdapter => {
   let source: AuthTokenSource | null = null;
+  let mutations: Promise<unknown> = Promise.resolve();
 
-  const authorize = async (forceRefresh: boolean): Promise<void> => {
-    const token = source === null ? null : await source(forceRefresh);
-
-    if (token === null) client.clearAuth();
-    else client.setAuth(token);
-  };
-
-  const call = async (
+  // The client reads its token synchronously as a request starts, so the token set here is the
+  // one on the wire.
+  const send = async (
     kind: FunctionKind,
     path: FunctionPath,
     args: WireArgs,
+    attached: Attached,
   ): Promise<Schema.Json> => {
-    await authorize(false);
+    const issued = source === null ? null : await source(Option.none());
 
-    try {
-      return await callByKind(client, kind, path, args);
-    } catch (cause) {
-      if (source === null || !(cause instanceof Error) || !isTokenRejection(cause)) throw cause;
-      await authorize(true);
+    if (issued === null) client.clearAuth();
+    else client.setAuth(issued.token);
+    attached(SentWith.Token({ issued: Option.fromNullishOr(issued) }));
 
-      return callByKind(client, kind, path, args);
-    }
+    if (kind === "query") return client.query(reference("query", path), args);
+
+    if (kind === "action") return client.action(reference("action", path), args);
+
+    return client.mutation(reference("mutation", path), args, { skipQueue: true });
+  };
+
+  const call = (
+    kind: FunctionKind,
+    path: FunctionPath,
+    args: WireArgs,
+    _signal: AbortSignal,
+    attached: Attached,
+  ): Promise<Schema.Json> => {
+    if (kind !== "mutation") return send(kind, path, args, attached);
+    const turn = mutations.then(() => send(kind, path, args, attached));
+
+    mutations = turn.catch(() => undefined);
+
+    return turn;
   };
 
   const subscribe = (
@@ -502,6 +775,7 @@ const httpAdapter = (client: ConvexHttpClient, options: HttpOptions): ClientAdap
     args: WireArgs,
     onValue: (value: Schema.Json) => void,
     onError: (error: Error) => void,
+    attached: Attached,
   ): Unsubscribe => {
     let stopped = false;
     let last: string | null = null;
@@ -509,7 +783,7 @@ const httpAdapter = (client: ConvexHttpClient, options: HttpOptions): ClientAdap
 
     const poll = async (): Promise<void> => {
       try {
-        const value = await call("query", path, args);
+        const value = await call("query", path, args, new AbortController().signal, attached);
 
         if (stopped) return;
         const key = valueKey(value);
@@ -541,6 +815,7 @@ const httpAdapter = (client: ConvexHttpClient, options: HttpOptions): ClientAdap
 
       return Promise.resolve();
     },
+    authenticated: () => Promise.resolve("none" as const),
     close: () => Promise.resolve(),
   };
 };

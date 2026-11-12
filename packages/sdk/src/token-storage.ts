@@ -35,12 +35,16 @@ const decodeSubject = Schema.decodeUnknownOption(
   Schema.fromJsonString(Schema.Struct({ sub: Schema.String })),
 );
 
-/** The account and session `session` signs in as, which a renewal keeps. */
-export const sessionOf = (session: StoredSession): Option.Option<string> =>
+/** The account and session `token` was minted for. */
+export const subjectOf = (token: Redacted.Redacted): Option.Option<string> =>
   Option.map(
-    Option.flatMap(tokenPayload(Redacted.value(session.token)), decodeSubject),
+    Option.flatMap(tokenPayload(Redacted.value(token)), decodeSubject),
     (claims) => claims.sub,
   );
+
+/** The account and session `session` signs in as, which a renewal keeps. */
+export const sessionOf = (session: StoredSession): Option.Option<string> =>
+  subjectOf(session.token);
 
 /** Reading or writing the token store failed. */
 export class TokenStorageError extends Schema.TaggedError<TokenStorageError>()(

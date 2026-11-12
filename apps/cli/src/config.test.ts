@@ -1,10 +1,14 @@
+import type { ServerResponse } from "node:http";
 import { join } from "node:path";
 
-import { ConfigProvider, Effect, Option, Redacted } from "effect";
+import { MediaRoutes } from "@media/sdk/effect";
+import { jwtExpiringAt } from "@media/sdk/testing/fake-convex";
+import { Cause, ConfigProvider, Effect, Exit, Option, Predicate, Redacted } from "effect";
 import { afterAll, describe, expect, it } from "vitest";
 
-import { resolveTarget, retarget } from "./config";
+import { connect, resolveTarget, retarget } from "./config";
 import { writePrivateFile } from "./files";
+import { withMediaService } from "./testing/media-service";
 import { makeTempDir, removeDir } from "./testing/process";
 
 const home = await makeTempDir("media-config-test-");
@@ -156,5 +160,108 @@ describe("target resolution", () => {
     expect(moved.mediaUrl).toStrictEqual(Option.some("http://new:8080"));
     expect(moved.signInUrl).toStrictEqual(Option.some("http://new:8080/api/auth/sign-in"));
     expect(named.signInUrl).toStrictEqual(Option.some("http://new:8080/api/auth/sign-in"));
+  });
+});
+
+/** Answers a held media route request as the media server refuses a session. */
+const refuse = (response: ServerResponse | undefined): void => {
+  response?.writeHead(401, { "content-type": "application/json" });
+  response?.end(JSON.stringify({ code: "unauthenticated", message: "Not this session" }));
+};
+
+describe("a refusal from the media server", () => {
+  it("leaves a session another call renewed alone after a delayed refusal, and sends nothing again", async () => {
+    const first = jwtExpiringAt(Date.now() + 3_600_000, "user-1|session-1");
+    const renewed = jwtExpiringAt(Date.now() + 7_200_000, "user-1|session-1");
+    const refreshes: Array<string> = [];
+    const held: Array<ServerResponse> = [];
+    const routed: Array<string> = [];
+
+    const outcome = await withMediaService(
+      (request, response) => {
+        let body = "";
+
+        request.on("data", (chunk: Buffer) => {
+          body += chunk.toString();
+        });
+        request.on("end", () => {
+          const bearer = request.headers.authorization ?? "";
+
+          if (request.url === "/api/action") {
+            const refreshToken = /"refreshToken":"([^"]+)"/u.exec(body)?.[1] ?? "";
+
+            const tokens =
+              refreshToken === "refresh-1" ? { token: renewed, refreshToken: "refresh-2" } : null;
+
+            refreshes.push(refreshToken);
+            response.writeHead(200, { "content-type": "application/json" });
+            // The second call's refusal leaves once the first one's refresh has answered.
+            response.end(
+              JSON.stringify({ status: "success", value: { tokens }, logLines: [] }),
+              () => refuse(held[1]),
+            );
+
+            return;
+          }
+
+          routed.push(bearer === `Bearer ${renewed}` ? "renewed" : "first");
+
+          if (bearer === `Bearer ${renewed}`) {
+            response.writeHead(200, { "content-type": "application/json" });
+            response.end("[]");
+
+            return;
+          }
+
+          held.push(response);
+
+          if (held.length === 2) refuse(held[0]);
+        });
+      },
+      async (url) => {
+        const dir = await homeWith({
+          url,
+          session: { token: first, refreshToken: "refresh-1" },
+        });
+
+        const env = ConfigProvider.fromEnv({ env: { XDG_CONFIG_HOME: dir } });
+
+        return Effect.runPromise(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const target = yield* resolveTarget(Option.none());
+              const connection = yield* connect(target, "required");
+
+              const sessions = () =>
+                Effect.exit(
+                  connection.media((routes) => MediaRoutes.run(routes, "diagnostics.sessions", {})),
+                );
+
+              const exits = yield* Effect.all([sessions(), sessions()], {
+                concurrency: "unbounded",
+              });
+
+              return {
+                exits: exits.map((exit) =>
+                  Exit.isSuccess(exit)
+                    ? "answered"
+                    : Option.exists(Cause.findErrorOption(exit.cause), (error) =>
+                          Predicate.isTagged(error, "Unauthenticated"),
+                        )
+                      ? "Unauthenticated"
+                      : "other",
+                ),
+                status: yield* connection.platform.session.currentStatus,
+              };
+            }),
+          ).pipe(Effect.provideService(ConfigProvider.ConfigProvider, env)),
+        );
+      },
+    );
+
+    expect(refreshes).toStrictEqual(["refresh-1"]);
+    expect(routed).toStrictEqual(["first", "first"]);
+    expect(outcome.status).toBe("signedIn");
+    expect(outcome.exits).toStrictEqual(["Unauthenticated", "Unauthenticated"]);
   });
 });

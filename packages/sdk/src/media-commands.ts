@@ -5,7 +5,7 @@ import { Effect, Option } from "effect";
 
 import { encodeArgs } from "./calls";
 import { baseUrl, requestJson } from "./media-http";
-import { bearerOf } from "./media-server";
+import { withBearer } from "./media-server";
 import type { MediaServerOptions } from "./media-server";
 import type { MediaName } from "./movies-client";
 
@@ -15,7 +15,7 @@ const callMedia = <Command extends MediaCommand<ArgsSchema, WireSchema>>(
   command: Command,
   args: Command["args"]["Type"],
 ): Promise<Command["result"]["Type"]> =>
-  Effect.runPromise(
+  withBearer(options, (bearer) =>
     Effect.gen(function* () {
       const wire = yield* encodeArgs(name, command.args, args);
 
@@ -25,7 +25,7 @@ const callMedia = <Command extends MediaCommand<ArgsSchema, WireSchema>>(
           url: `${baseUrl(options.url)}${command.route.path}`,
           method: command.route.method,
           body: Option.some(wire),
-          bearer: yield* bearerOf(options),
+          bearer,
         },
         command.result,
       );

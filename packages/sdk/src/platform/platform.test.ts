@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { Forbidden, Unauthenticated } from "@media/contracts/errors";
 
+import { TransportError } from "../sdk-errors";
 import * as FakeConvex from "../testing/fake-convex";
 import { jwtExpiringAt, Reply } from "../testing/fake-convex";
 import * as TokenStorage from "../token-storage";
@@ -166,21 +167,28 @@ describe("Platform", () => {
           );
 
           const forbidden = yield* Effect.flip(
-            platform.session.refreshOnRefusal(
+            platform.session.refreshOnRefusal(() =>
               Effect.fail(new Forbidden({ message: "Admins only" })),
+            ),
+          );
+
+          const unreachable = yield* Effect.flip(
+            platform.session.refreshOnRefusal(() =>
+              Effect.fail(new TransportError({ operation: "logs", message: "down", cause: null })),
             ),
           );
 
           const afterForbidden = yield* platform.session.currentStatus;
 
           const refused = yield* Effect.flip(
-            platform.session.refreshOnRefusal(
+            platform.session.refreshOnRefusal(() =>
               Effect.fail(new Unauthenticated({ message: "This session has ended" })),
             ),
           );
 
           return {
             forbidden,
+            unreachable,
             afterForbidden,
             refused,
             status: yield* platform.session.currentStatus,
@@ -193,6 +201,7 @@ describe("Platform", () => {
 
       expect(answer).toMatchObject({
         forbidden: { _tag: "Forbidden" },
+        unreachable: { _tag: "TransportError" },
         afterForbidden: "signedIn",
         refused: { _tag: "Unauthenticated" },
         status: "signedOut",

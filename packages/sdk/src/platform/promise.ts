@@ -1,4 +1,5 @@
-import { Effect, Fiber, ManagedRuntime, Match, Option, Redacted, Stream } from "effect";
+import { Unauthenticated } from "@media/contracts/errors";
+import { Data, Effect, Fiber, ManagedRuntime, Match, Option, Redacted, Stream } from "effect";
 
 import { SignInRoute } from "../auth";
 import type { AuthStatus } from "../auth";
@@ -136,6 +137,15 @@ export interface PlatformSession {
    * while signed out. Never log or store it.
    */
   readonly accessToken: () => Promise<string | null>;
+  /**
+   * Calls `use` once with the token `accessToken` gives, for a request to another server such as
+   * the media server's own routes, under the refusal rule every platform call follows, and
+   * settles as `use` does. When `use` rejects with `Unauthenticated` and the session and its
+   * generation are still the ones the token belongs to, the session refreshes once first; a
+   * refusal of a token the session renewed since, or of another person's, refreshes nothing.
+   * Never log or store the token.
+   */
+  readonly refreshOnRefusal: <A>(use: (token: string | null) => Promise<A>) => Promise<A>;
 }
 
 type PromiseMethods = ReturnType<typeof promiseMethods>;
@@ -148,6 +158,9 @@ export interface PlatformSdk extends PromiseMethods {
 }
 
 const DEFAULT_STORAGE_KEY = "media.session";
+
+/** A rejection of `refreshOnRefusal`'s `use` other than a refusal, carried back to its caller. */
+class UseRejected extends Data.TaggedError("UseRejected")<{ readonly rejection: unknown }> {}
 
 const tileProof = Match.type<PlatformTileProof>().pipe(
   Match.discriminatorsExhaustive("kind")({
@@ -282,6 +295,21 @@ export const createPlatform = (options: PlatformOptions): PlatformSdk => {
           Effect.map(client.session.accessToken, (token) =>
             Option.match(token, { onNone: () => null, onSome: Redacted.value }),
           ),
+        ),
+      refreshOnRefusal: (use) =>
+        withClient((client) =>
+          client.session
+            .refreshOnRefusal((token) =>
+              Effect.tryPromise({
+                try: () => use(Option.match(token, { onNone: () => null, onSome: Redacted.value })),
+                catch: (rejection) =>
+                  rejection instanceof Unauthenticated ? rejection : new UseRejected({ rejection }),
+              }),
+            )
+            .pipe(
+              // Any other rejection goes back to the caller's promise as it came.
+              Effect.catchTag("UseRejected", ({ rejection }) => Effect.die(rejection)),
+            ),
         ),
     },
     dispose: () => runtime.dispose(),

@@ -155,38 +155,19 @@ describe("createMovies", () => {
       ).rejects.toMatchObject({ _tag: "NotFound", message: "Gone" });
     }));
 
-  it("refreshes a rejected token once and retries the call with the new one", () =>
+  it("sends a call whose token is rejected once, and rejects with Unauthenticated", () =>
     withSdk(signedIn(), async (fake, sdk) => {
-      const renewed = jwtExpiringAt(Date.now() + 3_600_000, "sam-renewed");
-      let calls = 0;
+      await control(fake.reply("deviceAuth:status", Reply.TokenRejected()));
 
-      await control(
-        fake.reply(
-          "auth:signIn",
-          Reply.Success({ value: { tokens: { token: renewed, refreshToken: "refresh-2" } } }),
-        ),
-      );
-      await control(
-        fake.handle("deviceAuth:status", () =>
-          Effect.sync(() => {
-            calls += 1;
-
-            return calls === 1
-              ? Reply.TokenRejected()
-              : Reply.Success({ value: { state: "pending" } });
-          }),
-        ),
+      const refused = await sdk.query("deviceAuth.status", { deviceCode: "device-secret" }).then(
+        () => null,
+        (error: Error) => error,
       );
 
-      expect(await sdk.query("deviceAuth.status", { deviceCode: "device-secret" })).toStrictEqual({
-        state: "pending",
-      });
+      expect(refused).toMatchObject({ _tag: "Unauthenticated" });
       expect(
         (await control(fake.requestsTo("deviceAuth:status"))).map((r) => r.authorization),
-      ).toStrictEqual([`Bearer ${SAM}`, `Bearer ${renewed}`]);
-      expect((await control(fake.requestsTo("auth:signIn"))).map((r) => r.args)).toStrictEqual([
-        { refreshToken: "refresh-1" },
-      ]);
+      ).toStrictEqual([`Bearer ${SAM}`]);
     }));
 
   it("delivers a subscription's value and stops it", () =>

@@ -479,7 +479,6 @@ export const connect = Effect.fn("Config.connect")(function* (
     );
 
   const mediaUrl = Option.getOrElse(target.mediaUrl, () => Platform.serverUrlBeside(url));
-  const routes: MediaRoutes.Options = { url: mediaUrl, bearer: platform.session.accessToken };
 
   const connection: Connection = {
     platform,
@@ -487,7 +486,12 @@ export const connect = Effect.fn("Config.connect")(function* (
     target,
     mediaUrl,
     signedIn,
-    media: (call) => signedIn(platform.session.refreshOnRefusal(call(routes))),
+    media: (call) =>
+      signedIn(
+        platform.session.refreshOnRefusal((token) =>
+          call({ url: mediaUrl, bearer: Effect.succeed(token) }),
+        ),
+      ),
   };
 
   return connection;
