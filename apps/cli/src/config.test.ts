@@ -170,7 +170,7 @@ const refuse = (response: ServerResponse | undefined): void => {
 };
 
 describe("a refusal from the media server", () => {
-  it("retries a refusal of a session another call renewed, without a second refresh", async () => {
+  it("leaves a session another call renewed alone after a delayed refusal, and sends nothing again", async () => {
     const first = jwtExpiringAt(Date.now() + 3_600_000, "user-1|session-1");
     const renewed = jwtExpiringAt(Date.now() + 7_200_000, "user-1|session-1");
     const refreshes: Array<string> = [];
@@ -260,8 +260,8 @@ describe("a refusal from the media server", () => {
     );
 
     expect(refreshes).toStrictEqual(["refresh-1"]);
-    expect(routed.toSorted()).toStrictEqual(["first", "first", "renewed"]);
+    expect(routed).toStrictEqual(["first", "first"]);
     expect(outcome.status).toBe("signedIn");
-    expect(outcome.exits.toSorted()).toStrictEqual(["Unauthenticated", "answered"]);
+    expect(outcome.exits).toStrictEqual(["Unauthenticated", "Unauthenticated"]);
   });
 });

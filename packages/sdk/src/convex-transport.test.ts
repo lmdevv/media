@@ -2,9 +2,11 @@ import type { AuthTokenFetcher } from "convex/browser";
 import { ConvexError } from "convex/values";
 import {
   Context,
+  Deferred,
   Duration,
   Effect,
   Exit,
+  Fiber,
   Layer,
   Option,
   Predicate,
@@ -346,6 +348,80 @@ describe.concurrent("layerWebSocket", () => {
 
     expect(later).toBe(stopped);
   }, 15_000);
+});
+
+describe("the HTTP connection", () => {
+  it("sends mutations in order across a token change, each with the token read as it leaves", async () => {
+    const outcome = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fake = yield* FakeConvex.make;
+
+          const arrivals = yield* Queue.unbounded<{
+            readonly authorization: string | undefined;
+            readonly answer: Deferred.Deferred<FakeConvex.Reply>;
+          }>();
+
+          yield* fake.handle("test:write", (request) =>
+            Effect.gen(function* () {
+              const reply = yield* Deferred.make<FakeConvex.Reply>();
+
+              yield* Queue.offer(arrivals, { authorization: request.authorization, answer: reply });
+
+              return yield* Deferred.await(reply);
+            }),
+          );
+
+          const context = yield* Layer.build(ConvexTransport.layerHttp(fake.url));
+          const transport = Context.get(context, ConvexTransport.ConvexTransport);
+          const token = { current: "first" };
+          const attached: Array<string | undefined> = [];
+
+          yield* transport.setAuth(() => Promise.resolve(issuedOf(token.current)));
+
+          const first = yield* Effect.forkChild(
+            transport.call("mutation", "test:write", { n: 1 }, (issued) => {
+              attached.push(issued?.token);
+            }),
+          );
+
+          const held = yield* Queue.take(arrivals);
+
+          token.current = "second";
+
+          const second = yield* Effect.forkChild(
+            transport.call("mutation", "test:write", { n: 2 }, (issued) => {
+              attached.push(issued?.token);
+            }),
+          );
+
+          const overtook = yield* Queue.take(arrivals).pipe(
+            Effect.timeoutOption(Duration.millis(200)),
+          );
+
+          yield* Deferred.succeed(held.answer, Reply.Success({ value: null }));
+
+          const next = Option.isSome(overtook) ? overtook.value : yield* Queue.take(arrivals);
+
+          yield* Deferred.succeed(next.answer, Reply.Success({ value: null }));
+          yield* Fiber.join(first);
+          yield* Fiber.join(second);
+
+          return {
+            overtook: Option.isSome(overtook),
+            bearers: [held.authorization, next.authorization],
+            attached,
+          };
+        }),
+      ),
+    );
+
+    expect(outcome).toStrictEqual({
+      overtook: false,
+      bearers: ["Bearer first", "Bearer second"],
+      attached: ["first", "second"],
+    });
+  });
 });
 
 describe("clientTokenFetchers", () => {

@@ -343,18 +343,24 @@ export interface Engine extends Omit<Interface, "signIn"> {
   readonly refuse: (
     refused: Option.Option<ConvexTransport.IssuedToken>,
   ) => Effect.Effect<Refusal, TokenStorage.TokenStorageError>;
+  /**
+   * Has the connection take the held session's token now, after a refusal showed it still sends
+   * an older one, as a WebSocket client does until its own scheduled renewal.
+   */
+  readonly catchUp: Effect.Effect<void>;
 }
 
 /**
- * What a refusal meant for the session, as `Engine.refuse` found it:
- * - `retry`: the session was renewed since the request went out, so send it once more with the
- *   token held now;
+ * What a refusal meant for the session, as `Engine.refuse` found it. None of them sends the
+ * request again (D51):
+ * - `renewed`: the session was renewed since the request went out, so nothing refreshes; the next
+ *   request goes out with the renewed token;
  * - `stands`: the session is held still, after the one refresh this refusal or a concurrent one
  *   ran, so the refusal is the request's own;
  * - `ended`: no session is held now;
  * - `elsewhere`: the request went out signed out or as another session, which it never touches.
  */
-export type Refusal = "retry" | "stands" | "ended" | "elsewhere";
+export type Refusal = "renewed" | "stands" | "ended" | "elsewhere";
 
 interface RefusalAnswer {
   readonly refusal: Refusal;
@@ -972,7 +978,7 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
       if (Option.isNone(sent)) return { refusal: "elsewhere", refreshed: Option.none() };
 
       if (sent.value.generation < now.heldSince) {
-        return { refusal: "retry", refreshed: Option.none() };
+        return { refusal: "renewed", refreshed: Option.none() };
       }
 
       if (sent.value.generation < now.generation) {
@@ -1197,6 +1203,10 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
     held: Effect.flatMap(currentToken, issue),
     issue: Effect.flatMap(accessToken(false), issue),
     refuse: (rejected) => Effect.map(refuseHeld(rejected), (answer) => answer.refusal),
+    catchUp: Effect.gen(function* () {
+      if (Option.isNone(yield* heldSession) || (yield* SubscriptionRef.get(reconnecting))) return;
+      yield* transport.setAuth(tokenSource);
+    }),
   };
 
   return engine;

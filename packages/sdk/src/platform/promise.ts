@@ -138,11 +138,12 @@ export interface PlatformSession {
    */
   readonly accessToken: () => Promise<string | null>;
   /**
-   * Calls `use` with the token `accessToken` gives, for a request to another server such as the
-   * media server's own routes, under the refusal rule every platform call follows: when `use`
-   * rejects with `Unauthenticated` and the session is still the one the token belongs to, the
-   * session refreshes once and the rejection comes back; when the session was renewed since,
-   * `use` runs once more with the token held now. Never log or store the token.
+   * Calls `use` once with the token `accessToken` gives, for a request to another server such as
+   * the media server's own routes, under the refusal rule every platform call follows, and
+   * settles as `use` does. When `use` rejects with `Unauthenticated` and the session and its
+   * generation are still the ones the token belongs to, the session refreshes once first; a
+   * refusal of a token the session renewed since, or of another person's, refreshes nothing.
+   * Never log or store the token.
    */
   readonly refreshOnRefusal: <A>(use: (token: string | null) => Promise<A>) => Promise<A>;
 }

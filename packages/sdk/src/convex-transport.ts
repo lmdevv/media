@@ -74,13 +74,6 @@ const attachNothing: Attached = () => undefined;
  */
 export const sameSession = Option.makeEquivalence(Equivalence.strictEqual<string>());
 
-/** Whether `next` is a newer token of the session `refused` belongs to, so a retry is that session's. */
-const renewedFrom = (refused: IssuedToken | null, next: IssuedToken | null): next is IssuedToken =>
-  refused !== null &&
-  next !== null &&
-  next.token !== refused.token &&
-  sameSession(refused.session, next.session);
-
 /** Stops a subscription. */
 export type Unsubscribe = () => void;
 
@@ -612,65 +605,49 @@ const valueKey = (value: Schema.Json): string => JSON.stringify(value);
 
 /**
  * Adapts the fetch-based client. It has no subscriptions, so `subscribe` polls and reports
- * changed results; it has no refresh hook, so each call reads the token first and, when Convex
- * rejects it, retries once if the source answers a newer token of the same session.
+ * changed results. Each request reads the token as it leaves and sends it once: a refusal is the
+ * session's to judge (D51), never a reason to send the request again. Mutations leave one at a
+ * time in the order they were called, as the client's own queue keeps them, but the token each
+ * carries is read as it leaves rather than when it was queued.
  */
-interface TokenClient {
-  readonly token: string | null;
-  readonly client: ConvexHttpClient;
-}
-
-const httpAdapter = (open: () => ConvexHttpClient, options: HttpOptions): ClientAdapter => {
+const httpAdapter = (client: ConvexHttpClient, options: HttpOptions): ClientAdapter => {
   let source: AuthTokenSource | null = null;
+  let mutations: Promise<unknown> = Promise.resolve();
 
-  let latest: TokenClient = { token: null, client: open() };
-
-  // A client reads its token when a call leaves, which for a queued mutation is after the calls
-  // before it, so each token gets a client of its own whose token never changes.
-  const clientFor = (token: string | null): ConvexHttpClient => {
-    if (latest.token === token) return latest.client;
-    const client = open();
-
-    if (token !== null) client.setAuth(token);
-    latest = { token, client };
-
-    return client;
-  };
-
-  const callWith = (
-    issued: IssuedToken | null,
+  // The client reads its token synchronously as a request starts, so the token set here is the
+  // one on the wire.
+  const send = async (
     kind: FunctionKind,
     path: FunctionPath,
     args: WireArgs,
     attached: Attached,
   ): Promise<Schema.Json> => {
-    const client = clientFor(issued?.token ?? null);
+    const issued = source === null ? null : await source(Option.none());
 
+    if (issued === null) client.clearAuth();
+    else client.setAuth(issued.token);
     attached(issued);
 
-    return callByKind(client, kind, path, args);
+    if (kind === "query") return client.query(reference("query", path), args);
+
+    if (kind === "action") return client.action(reference("action", path), args);
+
+    return client.mutation(reference("mutation", path), args, { skipQueue: true });
   };
 
-  const call = async (
+  const call = (
     kind: FunctionKind,
     path: FunctionPath,
     args: WireArgs,
     _signal: AbortSignal,
     attached: Attached,
   ): Promise<Schema.Json> => {
-    const asking = source;
-    const issued = asking === null ? null : await asking(Option.none());
+    if (kind !== "mutation") return send(kind, path, args, attached);
+    const turn = mutations.then(() => send(kind, path, args, attached));
 
-    try {
-      return await callWith(issued, kind, path, args, attached);
-    } catch (cause) {
-      if (asking === null || !(cause instanceof Error) || !isTokenRejection(cause)) throw cause;
-      const next = await asking(Option.fromNullishOr(issued));
+    mutations = turn.catch(() => undefined);
 
-      if (!renewedFrom(issued, next)) throw cause;
-
-      return callWith(next, kind, path, args, attached);
-    }
+    return turn;
   };
 
   const subscribe = (
@@ -761,5 +738,5 @@ export const layerHttp = (
   options: HttpOptions = { pollInterval: Duration.seconds(1) },
 ): Layer.Layer<ConvexTransport, TransportError> =>
   layerFromAdapter(
-    openAdapter(() => httpAdapter(() => new ConvexHttpClient(url, { logger: false }), options)),
+    openAdapter(() => httpAdapter(new ConvexHttpClient(url, { logger: false }), options)),
   );

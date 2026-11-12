@@ -148,7 +148,7 @@ const withPlatform = <A, E>(
 const bearer = (token: string): string => `Bearer ${token}`;
 
 describe("a refusal fenced on the token the call went out with", () => {
-  it("fences on the token renewed while authorizing the call, not the one held before", async () => {
+  it("fences on the token renewed while authorizing the call, and leaves a renewed session alone after a delayed refusal", async () => {
     const expiring = jwtExpiringAt(Date.now() + 30_000, "user-1|session-1");
     const renewed = jwtExpiringAt(Date.now() + HOUR, "user-1|session-1");
     const later = jwtExpiringAt(Date.now() + 2 * HOUR, "user-1|session-1");
@@ -173,28 +173,31 @@ describe("a refusal fenced on the token the call went out with", () => {
         const firstExit = yield* Fiber.join(first);
         const afterFirst = yield* refreshesOf(fake);
 
-        // The second refusal answers the same token, which that refresh renewed since.
+        // The delayed second refusal answers the same token, which that refresh renewed since:
+        // it refreshes nothing, ends nothing, and is not sent again.
         yield* Deferred.succeed(b.answer, refused);
-        const retry = yield* calls.next;
-
-        yield* Deferred.succeed(retry.answer, Reply.Success({ value: SESSION }));
+        const secondExit = yield* Fiber.join(second);
 
         return {
-          sentWith: [a.authorization, b.authorization, retry.authorization],
+          sentWith: (yield* fake.requestsTo("core/auth/sessions:current")).map(
+            (request) => request.authorization,
+          ),
           afterFirst,
-          exits: [outcome(firstExit), outcome(yield* Fiber.join(second))],
+          exits: [outcome(firstExit), outcome(secondExit)],
           refreshes: yield* refreshesOf(fake),
           status: yield* platform.session.currentStatus,
+          holder: Option.map(yield* platform.session.accessToken, Redacted.value),
         };
       }),
     );
 
     expect(answer).toStrictEqual({
-      sentWith: [bearer(renewed), bearer(renewed), bearer(later)],
+      sentWith: [bearer(renewed), bearer(renewed)],
       afterFirst: ["refresh-1", "refresh-2"],
-      exits: ["Unauthenticated", "answered"],
+      exits: ["Unauthenticated", "Unauthenticated"],
       refreshes: ["refresh-1", "refresh-2"],
       status: "signedIn",
+      holder: Option.some(later),
     });
   });
 
@@ -335,7 +338,7 @@ describe("a refusal fenced on the token the call went out with", () => {
 });
 
 describe("a refusal over the WebSocket connection", () => {
-  it("counts a refused token sent again after the renewal as the session's own, once", async () => {
+  it("subscribes again with the renewed token, and signs out once the server refuses that too", async () => {
     // Tokens with `iat`, so the connection renews only near their expiry.
     const first = jwtIssuedAt(Date.now(), 3600, "user-1|session-1");
     const connected = jwtIssuedAt(Date.now(), 5400, "user-1|session-1");
@@ -374,8 +377,8 @@ describe("a refusal over the WebSocket connection", () => {
           );
 
           // Then the session ends on the server, which refuses every query from then on. The
-          // subscription goes out again once with the connection's older token, and that
-          // refusal is the session's own.
+          // subscription's refusal names the connection's older token, so the connection takes
+          // the renewed one and subscribes again; that refusal is the session's own (D51).
           yield* fake.reply("core/auth/sessions:current", refused);
 
           const failure = yield* Effect.flip(
@@ -482,5 +485,169 @@ describe("the web clients' media server calls", () => {
       refreshes: ["refresh-1"],
     });
     expect(bearers).toStrictEqual([bearer(token)]);
+  });
+});
+
+describe("the verifier's probes on #146", () => {
+  it("never sends a refused call again, so Ada's call never goes out as Bo", async () => {
+    const ada = jwtExpiringAt(Date.now() + HOUR, "ada|session-a");
+    const expiring = jwtExpiringAt(Date.now() + 30_000, "ada|session-a");
+    const bo = jwtExpiringAt(Date.now() + HOUR, "bo|session-b");
+
+    const answer = await withPlatform((platform, fake) =>
+      Effect.gen(function* () {
+        yield* accounts(
+          fake,
+          { ada: tokens(ada, "r1"), bo: tokens(bo, "br1") },
+          { r1: tokens(expiring, "r2") },
+        );
+        yield* fake.reply("core/auth/sessions:revoke", Reply.Success({ value: null }));
+        yield* signInAs(platform, "ada");
+        const calls = yield* holdCalls(fake, "core/auth/sessions:current");
+        const first = yield* Effect.forkChild(Effect.exit(platform.core.auth.sessions.current()));
+        const initial = yield* calls.next;
+
+        // Another call renews Ada to a token about to expire, so a second send would renew again.
+        yield* Effect.flip(
+          platform.session.refreshOnRefusal(() =>
+            Effect.fail(new Unauthenticated({ message: "renew Ada" })),
+          ),
+        );
+
+        // A renewal waits until Ada has signed out and Bo has signed in.
+        const renewalArrived = yield* Deferred.make<void>();
+        const release = yield* Deferred.make<Reply>();
+
+        yield* fake.handle("auth:signIn", (request) =>
+          Predicate.hasProperty(request.args, "refreshToken")
+            ? Deferred.succeed(renewalArrived, undefined).pipe(
+                Effect.andThen(Deferred.await(release)),
+              )
+            : Effect.succeed(tokens(bo, "br1")),
+        );
+        yield* fake.reply("core/auth/sessions:current", Reply.Success({ value: SESSION }));
+        yield* Deferred.succeed(initial.answer, refused);
+
+        const settled = yield* Effect.raceFirst(
+          Deferred.await(renewalArrived).pipe(Effect.as("renewing")),
+          Fiber.await(first).pipe(Effect.as("answered")),
+        );
+
+        yield* platform.session.signOut;
+        yield* signInAs(platform, "bo");
+        yield* Deferred.succeed(
+          release,
+          tokens(jwtExpiringAt(Date.now() + 2 * HOUR, "ada|session-a"), "r3"),
+        );
+        const exit = yield* Fiber.join(first);
+
+        return {
+          settled,
+          sentWith: (yield* fake.requestsTo("core/auth/sessions:current")).map(
+            (request) => request.authorization,
+          ),
+          exit: outcome(exit),
+        };
+      }),
+    );
+
+    expect(answer).toStrictEqual({
+      settled: "answered",
+      sentWith: [bearer(ada)],
+      exit: "Unauthenticated",
+    });
+  });
+
+  it("sends a call once when the token is rejected, with no resend from the connection or the client", async () => {
+    const t1 = jwtExpiringAt(Date.now() + HOUR, "ada|session-a");
+    const t2 = jwtExpiringAt(Date.now() + 2 * HOUR, "ada|session-a");
+
+    const answer = await withPlatform((platform, fake) =>
+      Effect.gen(function* () {
+        yield* accounts(fake, { ada: tokens(t1, "r1") }, { r1: tokens(t2, "r2") });
+        yield* signInAs(platform, "ada");
+        const calls = yield* holdCalls(fake, "core/auth/sessions:current");
+        const first = yield* Effect.forkChild(Effect.exit(platform.core.auth.sessions.current()));
+        const initial = yield* calls.next;
+
+        // Any later send is refused at once, so a resend shows as a second request.
+        yield* fake.reply("core/auth/sessions:current", refused);
+        yield* Deferred.succeed(initial.answer, Reply.TokenRejected());
+        const exit = yield* Fiber.join(first);
+
+        return {
+          calls: (yield* fake.requestsTo("core/auth/sessions:current")).length,
+          exit: outcome(exit),
+          refreshes: yield* refreshesOf(fake),
+          status: yield* platform.session.currentStatus,
+        };
+      }),
+    );
+
+    expect(answer).toStrictEqual({
+      calls: 1,
+      exit: "Unauthenticated",
+      refreshes: ["r1"],
+      status: "signedIn",
+    });
+  });
+
+  it("keeps a renewed session when the WebSocket connection's older token is refused", async () => {
+    const first = jwtIssuedAt(Date.now(), 3600, "ada|session-a");
+    const connected = jwtIssuedAt(Date.now(), 5400, "ada|session-a");
+    const renewed = jwtIssuedAt(Date.now(), 7200, "ada|session-a");
+    const confirmed = jwtIssuedAt(Date.now(), 9000, "ada|session-a");
+
+    const answer = await withPlatform(
+      (platform, fake) =>
+        Effect.gen(function* () {
+          // The connection renews once each time it takes a new token source, as at sign-in.
+          yield* accounts(
+            fake,
+            { ada: tokens(first, "r1") },
+            { r1: tokens(connected, "r2"), r2: tokens(renewed, "r3"), r3: tokens(confirmed, "r4") },
+          );
+          yield* fake.reply("core/server:info", Reply.Success({ value: SERVER }));
+          yield* signInAs(platform, "ada");
+          yield* refreshesOf(fake).pipe(
+            Effect.repeat({
+              until: (refreshes) => refreshes.length === 1,
+              schedule: Schedule.spaced("10 millis"),
+            }),
+            Effect.timeout(Duration.seconds(5)),
+          );
+          yield* platform.core.server.info();
+          yield* Effect.flip(
+            platform.session.refreshOnRefusal(() =>
+              Effect.fail(new Unauthenticated({ message: "renew" })),
+            ),
+          );
+          yield* fake.handle("core/auth/sessions:current", (request) =>
+            Effect.succeed(
+              request.authorization === bearer(connected)
+                ? refused
+                : Reply.Success({ value: SESSION }),
+            ),
+          );
+
+          const exit = yield* Effect.exit(
+            Stream.runHead(platform.core.auth.sessions.current.watch()),
+          ).pipe(Effect.timeout(Duration.seconds(5)));
+
+          return {
+            exit: outcome(exit),
+            status: yield* platform.session.currentStatus,
+            refreshes: yield* refreshesOf(fake),
+            sentWith: (yield* fake.requestsTo("core/auth/sessions:current")).map(
+              (request) => request.authorization,
+            ),
+          };
+        }),
+      "websocket",
+    );
+
+    expect(answer).toMatchObject({ exit: "answered", status: "signedIn" });
+    expect(answer.refreshes.slice(0, 2)).toStrictEqual(["r1", "r2"]);
+    expect(answer.sentWith.slice(0, 2)).toStrictEqual([bearer(connected), bearer(renewed)]);
   });
 });

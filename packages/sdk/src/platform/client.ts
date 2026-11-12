@@ -127,13 +127,13 @@ export interface Session {
   /**
    * Runs `use`, a call to another server such as the media server's own routes, with the token
    * `accessToken` gives, under the one refusal rule (D51) every platform call follows, fenced on
-   * that token. When the call fails with `Unauthenticated` and the session is still the one it
-   * went out with, the session refreshes once at once, shared with every refusal of that
-   * generation, and a refused refresh signs it out; the call is not repeated, so read
-   * `currentStatus` to tell an ended session from a refusal of the call alone. When the session was
-   * renewed since, as by another call or another tab, nothing refreshes: `use` runs once more with
-   * the token held now. A refusal of another person's session, or of a call sent signed out, never
-   * touches the session held now. Other failures leave the session alone.
+   * that token. `use` runs once and its failure always comes back. When it fails with
+   * `Unauthenticated` and the session and its generation are still the ones the call went out
+   * with, the session refreshes once at once, shared with every refusal of that generation, and a
+   * refused refresh signs it out; read `currentStatus` to tell an ended session from a refusal of
+   * the call alone. A refusal of a token the session renewed since, as another call or another tab
+   * did, of another person's session, or of a call sent signed out, refreshes and ends nothing.
+   * Other failures leave the session alone.
    */
   readonly refreshOnRefusal: <A, E, R>(
     use: (token: Option.Option<Redacted.Redacted>) => Effect.Effect<A, E, R>,
@@ -203,8 +203,8 @@ const toPlatformError =
       Match.orElse((other) => other),
     );
 
-const tokenOf = (sent: Option.Option<ConvexTransport.IssuedToken>): Option.Option<string> =>
-  Option.map(sent, (issued) => issued.token);
+/** How many times in a row a refused subscription subscribes again without a result between. */
+const SUBSCRIBE_AGAIN_LIMIT = 3;
 
 const tileProofParams = (proof: TileProof) =>
   TileProof.$match(proof, {
@@ -267,67 +267,75 @@ const make = Effect.fn("Platform.make")(function* (url: string, signInRoute: Aut
   /**
    * Where a request records the token it went out with. It starts as the token held as the
    * request is made, which is never newer than the one it is sent with, so a connection that
-   * cannot tell which token it sent errs toward a retry rather than a refresh. A retry may still go
-   * out with the token the server refused, on a connection that has not taken the renewed one yet;
-   * that token, sent again after the renewal, keeps the stamp the retry started with, so its
-   * refusal counts as one of the session now.
+   * cannot tell which token it sent errs toward leaving the session alone rather than refreshing.
    */
-  const sentToken = (refusedBefore: Option.Option<string>) =>
-    Effect.map(engine.held, (held) => {
-      const sent = MutableRef.make(held);
+  const sentToken = Effect.map(engine.held, (held) => {
+    const sent = MutableRef.make(held);
 
-      const attached: ConvexTransport.Attached = (issued) => {
-        if (issued !== null && Option.contains(refusedBefore, issued.token)) return;
-        MutableRef.set(sent, Option.fromNullishOr(issued));
-      };
+    const attached: ConvexTransport.Attached = (issued) => {
+      MutableRef.set(sent, Option.fromNullishOr(issued));
+    };
 
-      return { sent, attached };
-    });
+    return { sent, attached };
+  });
+
+  /**
+   * What a refusal of a request sent with `sent` means for the session (D51). After a refusal of a
+   * token the session renewed since, the connection takes the renewed one, so the next request
+   * goes out with it.
+   */
+  const judge = (sent: Option.Option<ConvexTransport.IssuedToken>) =>
+    Effect.tap(refusalOf(sent), (refusal) =>
+      refusal === "renewed" ? engine.catchUp : Effect.void,
+    );
 
   /**
    * Runs `attempt`, which tells `attached` the token it went out with, under D51 fenced on that
-   * token, as `refreshOnRefusal` says. A call renewed past runs once more, and only once.
+   * token, as `refreshOnRefusal` says. The attempt is never sent again.
    */
   const fenced = <A, E, R>(
     attempt: (attached: ConvexTransport.Attached) => Effect.Effect<A, E, R>,
-    refusedBefore: Option.Option<string> = Option.none(),
   ): Effect.Effect<A, E, R> =>
-    Effect.flatMap(sentToken(refusedBefore), ({ sent, attached }) =>
+    Effect.flatMap(sentToken, ({ sent, attached }) =>
       Effect.catchIf(
         attempt(attached),
         (error) => Predicate.isTagged(error, "Unauthenticated"),
-        (error) =>
-          Effect.flatMap(refusalOf(MutableRef.get(sent)), (refusal) =>
-            refusal === "retry" && Option.isNone(refusedBefore)
-              ? fenced(attempt, tokenOf(MutableRef.get(sent)))
-              : Effect.fail(error),
-          ),
+        (error) => Effect.andThen(judge(MutableRef.get(sent)), Effect.fail(error)),
       ),
     );
 
   /**
    * `open`'s results, fenced as `fenced` says. A subscription refused with a token the session
-   * renewed since subscribes again with the token held now, once per renewal.
+   * renewed since subscribes again through `open`, which sends the token held then and records its
+   * own; a refusal of that one is judged by its own token. Any other refusal ends the stream, so a
+   * server that keeps refusing the current token gets one refresh, then the stream ends. A
+   * subscription refused this way `SUBSCRIBE_AGAIN_LIMIT` times without a result between ends too.
    */
   const fencedStream = <A, E>(
     open: (attached: ConvexTransport.Attached) => Stream.Stream<A, E>,
-    refusedBefore: Option.Option<string> = Option.none(),
+    again = 0,
   ): Stream.Stream<A, E> =>
     Stream.unwrap(
-      Effect.map(sentToken(refusedBefore), ({ sent, attached }) =>
-        Stream.catchIf(
-          open(attached),
-          (error) => Predicate.isTagged(error, "Unauthenticated"),
-          (error) =>
-            Stream.unwrap(
-              Effect.map(refusalOf(MutableRef.get(sent)), (refusal) =>
-                refusal === "retry"
-                  ? fencedStream(open, tokenOf(MutableRef.get(sent)))
-                  : Stream.fail(error),
+      Effect.map(sentToken, ({ sent, attached }) => {
+        const answered = MutableRef.make(false);
+
+        return open(attached).pipe(
+          Stream.tap(() => Effect.sync(() => MutableRef.set(answered, true))),
+          Stream.catchIf(
+            (error) => Predicate.isTagged(error, "Unauthenticated"),
+            (error) =>
+              Stream.unwrap(
+                Effect.map(judge(MutableRef.get(sent)), (refusal) => {
+                  const next = MutableRef.get(answered) ? 1 : again + 1;
+
+                  return refusal === "renewed" && next <= SUBSCRIBE_AGAIN_LIMIT
+                    ? fencedStream(open, next)
+                    : Stream.fail(error);
+                }),
               ),
-            ),
-        ),
-      ),
+          ),
+        );
+      }),
     );
 
   const refreshOnRefusal: Session["refreshOnRefusal"] = (use) =>

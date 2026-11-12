@@ -25,8 +25,8 @@ export type MediaServerOptions = {
   | {
       /**
        * The signed-in session, whose token goes as the bearer. A refusal follows the rule every
-       * platform call does: one refresh of the session the call went out with, or one more try
-       * when the session was renewed since.
+       * platform call does: one refresh while the session is still the one the call went out
+       * with, and never a second send.
        */
       readonly session: MediaServerSession;
     }
