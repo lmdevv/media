@@ -140,25 +140,29 @@ NixOS module now run alone (ADR 0027).
   calls (`createMediaServer` with the platform `session`) run under the same rule through
   `session.refreshOnRefusal`.
 - **The refusal fence.** A refusal can arrive after the session it answered was renewed, so the
-  rule is fenced on the token the call actually went out with, and it never sends a call again.
-  The session stamps every token it hands out with the session it belongs to (the token's subject)
-  and a generation, which moves on whenever the held session changes, in this tab or another
-  (D52), and whenever a refusal's refresh keeps it. The connection reports the stamp it attached:
-  the HTTP connection the token it set as the request left, with mutations sent one at a time in
-  call order and each token read as its mutation leaves; the WebSocket connection the token it
-  held as the call left or as a subscription's last result arrived. A connection that cannot tell
-  keeps the stamp from before the call, which is never newer. On a refusal, under one lock:
-  - another person's session, no session, or a call sent signed out: the failure comes back, and
-    nothing refreshes or ends;
+  rule is fenced on the token the call actually carried, and it never sends a call again. The
+  session stamps every token it hands out with the session it belongs to (the token's subject) and
+  a generation, which moves on whenever the held session changes, in this tab or another (D52),
+  and whenever a refusal's refresh keeps it. Each connection reports what a call carried:
+  - the HTTP connection sets and records the token as each request leaves, with mutations sent one
+    at a time in call order and each mutation's token read as it leaves;
+  - a WebSocket client authenticates its connection, not each call, and Convex reports no
+    confirmation of a renewed token. So a call or a subscription result carried the token held
+    when it went out only if the connection held that one token, with no fetch out, until it was
+    answered. Otherwise its token is unsettled, and a refusal of it touches nothing.
+
+  On a refusal, decided from the session held now with no lock held across a network wait:
+  - an unsettled token, another person's session, no session, or a call sent signed out: the
+    failure comes back, and nothing refreshes or ends;
   - the same session at an older generation, renewed since: the failure comes back and nothing
     refreshes or ends; the connection takes the renewed token, so the next call carries it;
-  - the same session at the current generation: one refresh, shared by every refusal of that
-    generation, even when it keeps the token because the server was unreachable. A refused
-    refresh signs out only while the session is still that generation.
+  - the same session at the current generation: one refresh per generation, which every refusal of
+    that generation awaits and nothing else does, even when it keeps the token because the server
+    was unreachable. A refused refresh signs out only while that generation is held.
 
   The HTTP connection no longer sends a call again after a rejected token, so D51 is the only
-  budget. A refused subscription subscribes again only after a refusal of a renewed token, through
-  the normal path, which sends and records the token held then; a refusal of that subscription is
+  budget. A subscription refused with a renewed or unsettled token subscribes again through the
+  normal path, which sends and records the token held then; a refusal of that subscription is
   judged by its own token, so a server that keeps refusing the current token gets one refresh and
   then the stream ends. Three such restarts without a result between end it too. Forbidden and
   network failures never touch the session. The WebSocket client renews once after it takes a new

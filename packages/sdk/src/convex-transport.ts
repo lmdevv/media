@@ -14,6 +14,7 @@ import { ConvexError } from "convex/values";
 import {
   Cause,
   Context,
+  Data,
   Duration,
   Effect,
   Equivalence,
@@ -60,11 +61,25 @@ export const fixedToken =
   () =>
     Promise.resolve({ token, session: Option.none(), generation: 0 });
 
+/** The token a request carried, as far as its connection can tell. */
+export type SentWith = Data.TaggedEnum<{
+  /** The request carried `issued`, or went out signed out when none. */
+  Token: { readonly issued: Option.Option<IssuedToken> };
+  /**
+   * The connection's token changed, or was being fetched, while the request was out, so which
+   * token it carried is not known. A refusal of it says nothing about the session held now.
+   */
+  Unsettled: {};
+}>;
+
+/** Constructors and matchers for `SentWith`. */
+export const SentWith = Data.taggedEnum<SentWith>();
+
 /**
- * Told the token a request was sent with, each time it is sent, or null when it was sent signed
- * out. A connection that cannot tell yet says nothing.
+ * Told the token a request carried, each time the connection learns it. A connection that cannot
+ * tell yet says nothing.
  */
-export type Attached = (issued: IssuedToken | null) => void;
+export type Attached = (sent: SentWith) => void;
 
 const attachNothing: Attached = () => undefined;
 
@@ -381,7 +396,34 @@ const signedOut: AuthTokenFetcher = () => Promise.resolve(null);
 /** The token a fetcher's client holds: none until it has answered, null for none. */
 interface HeldToken {
   held: Option.Option<IssuedToken | null>;
+  /** Moves on each time the fetcher hands the client a different token. */
+  version: number;
+  /** Fetches out now. */
+  fetching: number;
 }
+
+/** What a client's fetchers hold at one moment, to compare with a later one. */
+interface FetcherMoment {
+  readonly state: HeldToken | null;
+  readonly held: Option.Option<IssuedToken | null>;
+  readonly version: number;
+  /** A fetch or a new fetcher is on its way, so the client's token may change at any moment. */
+  readonly busy: boolean;
+}
+
+/**
+ * The token a request carried, from the client's fetchers as it went out (`start`) and as it was
+ * answered (`end`). A WebSocket client authenticates its connection, not each request, so a
+ * request carried the token held at `start` only when the client held that one token throughout.
+ */
+const sentOver = (start: FetcherMoment, end: FetcherMoment): SentWith =>
+  start.state === end.state &&
+  start.version === end.version &&
+  !start.busy &&
+  !end.busy &&
+  Option.isSome(start.held)
+    ? SentWith.Token({ issued: Option.fromNullishOr(start.held.value) })
+    : SentWith.Unsettled();
 
 /**
  * Token fetchers for one Convex WebSocket client, which keeps its session by one rule: a fetch
@@ -404,6 +446,7 @@ export const clientTokenFetchers = () => {
   let generation = new AbortController();
   const fetching = new Set<Promise<string | null>>();
   let installing = Promise.resolve();
+  let installs = 0;
   // What the newest fetcher holds; null while the client has no source.
   let newest: HeldToken | null = null;
 
@@ -415,7 +458,7 @@ export const clientTokenFetchers = () => {
   const fetcherFor = (source: AuthTokenSource, signal: AbortSignal) => {
     // The client keeps only the answer of the fetch it started last, so that answer is the token
     // it holds, and an older fetch still asking can stop: its answer will be discarded.
-    const state: HeldToken = { held: Option.none() };
+    const state: HeldToken = { held: Option.none(), version: 0, fetching: 0 };
     let latest = 0;
 
     const heldToken = (): IssuedToken | null => Option.getOrNull(state.held);
@@ -456,7 +499,10 @@ export const clientTokenFetchers = () => {
       // still be asked after a sign-out, and must not hand the old session back.
       if (retired()) return null;
 
-      if (fetch === latest) state.held = Option.some(issued);
+      if (fetch === latest) {
+        if (issued?.token !== heldToken()?.token || Option.isNone(state.held)) state.version += 1;
+        state.held = Option.some(issued);
+      }
 
       return issued?.token ?? null;
     };
@@ -464,8 +510,14 @@ export const clientTokenFetchers = () => {
     const fetcher: AuthTokenFetcher = ({ forceRefreshToken }) => {
       const answer = fetchToken(forceRefreshToken);
 
+      state.fetching += 1;
       fetching.add(answer);
-      void answer.finally(() => fetching.delete(answer)).catch(() => undefined);
+      void answer
+        .finally(() => {
+          state.fetching -= 1;
+          fetching.delete(answer);
+        })
+        .catch(() => undefined);
 
       return answer;
     };
@@ -489,6 +541,8 @@ export const clientTokenFetchers = () => {
     const owed = [...fetching];
     const previous = installing;
 
+    installs += 1;
+
     const installed = (async () => {
       await previous;
       await Promise.allSettled(owed);
@@ -498,7 +552,9 @@ export const clientTokenFetchers = () => {
       apply(made?.fetcher ?? null);
       // The client takes its token from this fetcher from now on, and from the last one until now.
       newest = made?.state ?? null;
-    })();
+    })().finally(() => {
+      installs -= 1;
+    });
 
     installing = installed.catch(() => undefined);
 
@@ -508,15 +564,19 @@ export const clientTokenFetchers = () => {
   return {
     install,
     retire,
-    held: (): Option.Option<IssuedToken | null> =>
-      newest === null ? Option.some(null) : newest.held,
+    moment: (): FetcherMoment => ({
+      state: newest,
+      held: newest === null ? Option.some(null) : newest.held,
+      version: newest?.version ?? 0,
+      busy: installs > 0 || (newest !== null && newest.fetching > 0),
+    }),
   };
 };
 
 /**
- * `subscribe` over a client whose fetchers are `fetchers`. The client runs the query again under
- * each token it takes, so a result or failure answers the token it held when that result last
- * arrived or the query started, never a newer one.
+ * `subscribe` over a client whose fetchers are `fetchers`. Each result or failure answers the
+ * token held since the last result, or since the query started, when the client held only that
+ * one; otherwise it is unsettled, since the client runs the query again under each token it takes.
  */
 export const heldSubscribe =
   (
@@ -529,26 +589,33 @@ export const heldSubscribe =
     ) => Unsubscribe,
   ): ClientAdapter["subscribe"] =>
   (path, args, onValue, onError, attached) => {
-    const attachHeld = (): void => {
-      const held = fetchers.held();
+    let since = fetchers.moment();
 
-      if (Option.isSome(held)) attached(held.value);
+    const settle = (): void => {
+      const now = fetchers.moment();
+
+      attached(sentOver(since, now));
+      since = now;
     };
-
-    attachHeld();
 
     return subscribe(
       path,
       args,
       (value) => {
+        settle();
         onValue(value);
-        attachHeld();
       },
-      onError,
+      (error) => {
+        settle();
+        onError(error);
+      },
     );
   };
 
-/** `call` over a client whose fetchers are `fetchers`: a call answers the token held as it is sent. */
+/**
+ * `call` over a client whose fetchers are `fetchers`: once answered, a call carried the token held
+ * as it went out when the client held only that one meanwhile, and is unsettled otherwise.
+ */
 export const heldCall =
   (
     fetchers: ReturnType<typeof clientTokenFetchers>,
@@ -560,11 +627,13 @@ export const heldCall =
     ) => Promise<Schema.Json>,
   ): ClientAdapter["call"] =>
   (kind, path, args, signal, attached) => {
-    const held = fetchers.held();
+    const start = fetchers.moment();
 
-    if (Option.isSome(held)) attached(held.value);
+    const settle = (): void => {
+      attached(sentOver(start, fetchers.moment()));
+    };
 
-    return call(kind, path, args, signal);
+    return call(kind, path, args, signal).finally(settle);
   };
 
 const webSocketAdapter = (client: ConvexClient): ClientAdapter => {
@@ -626,7 +695,7 @@ const httpAdapter = (client: ConvexHttpClient, options: HttpOptions): ClientAdap
 
     if (issued === null) client.clearAuth();
     else client.setAuth(issued.token);
-    attached(issued);
+    attached(SentWith.Token({ issued: Option.fromNullishOr(issued) }));
 
     if (kind === "query") return client.query(reference("query", path), args);
 

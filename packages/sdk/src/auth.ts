@@ -18,6 +18,7 @@ import {
   Clock,
   Context,
   Data,
+  Deferred,
   Duration,
   Effect,
   Exit,
@@ -367,6 +368,14 @@ interface RefusalAnswer {
   readonly refreshed: Option.Option<Option.Option<Redacted.Redacted>>;
 }
 
+interface RefusalRefresh {
+  readonly generation: number;
+  readonly done: Deferred.Deferred<
+    Option.Option<Redacted.Redacted>,
+    TokenStorage.TokenStorageError
+  >;
+}
+
 interface Epoch {
   readonly held: Option.Option<StoredSession>;
   readonly generation: number;
@@ -408,7 +417,13 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
    */
   const lastStored = yield* Ref.make(Option.none<StoredSession>());
   const refreshing = yield* Semaphore.make(1);
-  const refusing = yield* Semaphore.make(1);
+
+  /**
+   * The refresh a refusal of the current generation runs, which every refusal of that generation
+   * awaits. Nothing else waits on it, so a refusal of anything older or of another person answers
+   * at once.
+   */
+  const inflight = yield* Ref.make(Option.none<RefusalRefresh>());
 
   const lastAttempt = yield* Ref.make<{
     readonly finished: number;
@@ -959,62 +974,108 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
   }
 
   /**
-   * `refuse`, with the token the refresh answered when this refusal ran one: none once the server
-   * has failed every refresh for a while. The caller holds the `refusing` permit.
+   * Refreshes `held` once for the refusals of generation `now`, unless the session moved on while
+   * the refresh waited its turn. A refresh that kept the session moves the generation on too, so
+   * the refusals of requests sent before it finished share it instead of refreshing again.
    */
-  const decideRefusal = (
-    rejected: Option.Option<ConvexTransport.IssuedToken>,
-  ): Effect.Effect<RefusalAnswer, TokenStorage.TokenStorageError> =>
+  const refreshForRefusal = (now: Epoch, held: StoredSession) =>
+    refreshing.withPermits(1)(
+      Effect.gen(function* () {
+        if ((yield* Ref.get(epoch)).generation !== now.generation) return yield* currentToken;
+        const { finished } = yield* Ref.get(lastAttempt);
+
+        return yield* refreshHeld(held, finished, true).pipe(
+          Effect.ensuring(
+            Ref.update(epoch, (after) =>
+              after.heldSince > now.generation
+                ? after
+                : { ...after, generation: after.generation + 1 },
+            ),
+          ),
+        );
+      }),
+    );
+
+  /**
+   * The one refresh for the refusals of generation `now`: this refusal starts it unless another
+   * already has, and awaits it either way. It runs in the engine's scope, so a refusal that stops
+   * waiting leaves it running for the others.
+   */
+  const sharedRefresh = (now: Epoch, held: StoredSession) =>
     Effect.gen(function* () {
-      const now = yield* Ref.get(epoch);
+      const fresh = yield* Deferred.make<
+        Option.Option<Redacted.Redacted>,
+        TokenStorage.TokenStorageError
+      >();
 
-      if (Option.isNone(now.held)) return { refusal: "ended", refreshed: Option.none() };
-      const held = now.held.value;
-
-      const sent = Option.filter(rejected, (token) =>
-        ConvexTransport.sameSession(token.session, sessionOf(held)),
+      const [done, started] = yield* Ref.modify(
+        inflight,
+        (
+          current,
+        ): readonly [readonly [RefusalRefresh["done"], boolean], Option.Option<RefusalRefresh>] =>
+          Option.isSome(current) && current.value.generation === now.generation
+            ? [[current.value.done, false], current]
+            : [[fresh, true], Option.some({ generation: now.generation, done: fresh })],
       );
 
-      if (Option.isNone(sent)) return { refusal: "elsewhere", refreshed: Option.none() };
-
-      if (sent.value.generation < now.heldSince) {
-        return { refusal: "renewed", refreshed: Option.none() };
-      }
-
-      if (sent.value.generation < now.generation) {
-        return { refusal: "stands", refreshed: Option.none() };
-      }
-
-      const ran = yield* refreshing.withPermits(1)(
-        Effect.gen(function* () {
-          // Another flow may have renewed or replaced the session while this waited.
-          if ((yield* Ref.get(epoch)).generation !== now.generation) return Option.none();
-          const { finished } = yield* Ref.get(lastAttempt);
-
-          // A refresh that kept the session moves the generation on too, so the refusals of
-          // requests sent before it finished share it instead of refreshing again.
-          return Option.some(
-            yield* refreshHeld(held, finished, true).pipe(
-              Effect.ensuring(
-                Ref.update(epoch, (after) =>
-                  after.heldSince > now.generation
-                    ? after
-                    : { ...after, generation: after.generation + 1 },
-                ),
+      if (started) {
+        yield* Effect.forkIn(
+          refreshForRefusal(now, held).pipe(
+            Effect.exit,
+            Effect.flatMap((exit) => Deferred.done(fresh, exit)),
+            Effect.ensuring(
+              Ref.update(inflight, (current) =>
+                Option.exists(current, (entry) => entry.done === fresh) ? Option.none() : current,
               ),
             ),
-          );
-        }),
-      );
+          ),
+          scope,
+        );
+      }
 
-      if (Option.isNone(ran)) return yield* decideRefusal(rejected);
-      const ended = Option.isNone(yield* heldSession);
-
-      return { refusal: ended ? "ended" : "stands", refreshed: ran };
+      return yield* Deferred.await(done);
     });
 
-  const refuseHeld = (rejected: Option.Option<ConvexTransport.IssuedToken>) =>
-    refusing.withPermits(1)(decideRefusal(rejected)).pipe(Effect.withSpan("Auth.refuse"));
+  /**
+   * `refuse`, with the token the refresh answered when this refusal ran or shared one: none once
+   * the server has failed every refresh for a while. It decides from the session held now and
+   * waits on nothing but the refresh of its own generation.
+   */
+  const refuseHeld = Effect.fn("Auth.refuse")(function* (
+    rejected: Option.Option<ConvexTransport.IssuedToken>,
+  ): Effect.fn.Return<RefusalAnswer, TokenStorage.TokenStorageError> {
+    const now = yield* Ref.get(epoch);
+
+    if (Option.isNone(now.held)) {
+      return { refusal: "ended", refreshed: Option.none() };
+    }
+
+    const held = now.held.value;
+
+    const sent = Option.filter(rejected, (token) =>
+      ConvexTransport.sameSession(token.session, sessionOf(held)),
+    );
+
+    if (Option.isNone(sent)) {
+      return { refusal: "elsewhere", refreshed: Option.none() };
+    }
+
+    if (sent.value.generation < now.heldSince) {
+      return { refusal: "renewed", refreshed: Option.none() };
+    }
+
+    if (sent.value.generation < now.generation) {
+      return { refusal: "stands", refreshed: Option.none() };
+    }
+
+    const token = yield* sharedRefresh(now, held);
+    const ended = Option.isNone(yield* heldSession);
+
+    return {
+      refusal: ended ? "ended" : "stands",
+      refreshed: Option.some(token),
+    };
+  });
 
   function accessToken(
     forceRefresh: boolean,

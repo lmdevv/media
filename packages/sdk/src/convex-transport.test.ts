@@ -350,7 +350,16 @@ describe.concurrent("layerWebSocket", () => {
   }, 15_000);
 });
 
+/** The token `sent` names, or `unsettled`. */
+const tokenSent = (sent: ConvexTransport.SentWith): string | undefined =>
+  ConvexTransport.SentWith.$match(sent, {
+    Token: ({ issued }) => Option.getOrUndefined(Option.map(issued, (token) => token.token)),
+    Unsettled: () => "unsettled",
+  });
+
 describe("the HTTP connection", () => {
+  // Main kept this order through ConvexHttpClient's own mutation queue, so this passes there; it
+  // guards the transport's queue, which also reads each mutation's token as it leaves.
   it("sends mutations in order across a token change, each with the token read as it leaves", async () => {
     const outcome = await Effect.runPromise(
       Effect.scoped(
@@ -380,8 +389,8 @@ describe("the HTTP connection", () => {
           yield* transport.setAuth(() => Promise.resolve(issuedOf(token.current)));
 
           const first = yield* Effect.forkChild(
-            transport.call("mutation", "test:write", { n: 1 }, (issued) => {
-              attached.push(issued?.token);
+            transport.call("mutation", "test:write", { n: 1 }, (sent) => {
+              attached.push(tokenSent(sent));
             }),
           );
 
@@ -390,8 +399,8 @@ describe("the HTTP connection", () => {
           token.current = "second";
 
           const second = yield* Effect.forkChild(
-            transport.call("mutation", "test:write", { n: 2 }, (issued) => {
-              attached.push(issued?.token);
+            transport.call("mutation", "test:write", { n: 2 }, (sent) => {
+              attached.push(tokenSent(sent));
             }),
           );
 
@@ -421,6 +430,78 @@ describe("the HTTP connection", () => {
       bearers: ["Bearer first", "Bearer second"],
       attached: ["first", "second"],
     });
+  });
+});
+
+describe("the WebSocket connection", () => {
+  it("never names a token other than the one a call carried, as when it is queued during reauthentication", async () => {
+    const t1 = jwtIssuedAt(Date.now(), 3600, "ada|session-a");
+    const t2 = jwtIssuedAt(Date.now(), 5400, "ada|session-a");
+    const t3 = jwtIssuedAt(Date.now(), 7200, "ada|session-a");
+
+    const outcome = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fake = yield* FakeConvex.make;
+
+          yield* fake.reply("test:warm", Reply.Success({ value: null }));
+          yield* fake.reply("test:queued", Reply.Success({ value: null }));
+          const context = yield* Layer.build(ConvexTransport.layerWebSocket(fake.url));
+          const transport = Context.get(context, ConvexTransport.ConvexTransport);
+          const renewing = yield* Deferred.make<void>();
+          const release = yield* Deferred.make<void>();
+          const fetched = { count: 0 };
+          const services = yield* Effect.context();
+
+          // The third token, fetched as the connection reauthenticates, waits until released.
+          yield* transport.setAuth(() => {
+            fetched.count += 1;
+            const generation = fetched.count;
+            const token = [t1, t2][generation - 1] ?? t3;
+            const issued = { token, session: Option.some("ada|session-a"), generation };
+
+            return generation < 3
+              ? Promise.resolve(issued)
+              : Effect.runPromiseWith(services)(
+                  Deferred.succeed(renewing, undefined).pipe(
+                    Effect.andThen(Deferred.await(release)),
+                    Effect.as(issued),
+                  ),
+                );
+          });
+          yield* fake.acceptedTokens.pipe(
+            Effect.repeat({
+              until: (accepted) => accepted.includes(t2),
+              schedule: Schedule.spaced("5 millis"),
+            }),
+            Effect.timeout(Duration.seconds(5)),
+          );
+          yield* transport.call("query", "test:warm", {});
+          yield* fake.rejectAcceptedTokens;
+          yield* Deferred.await(renewing);
+
+          const attached: Array<string | undefined> = [];
+
+          const query = yield* Effect.forkChild(
+            transport.call("query", "test:queued", {}, (sent) => {
+              attached.push(tokenSent(sent));
+            }),
+          );
+
+          yield* Effect.yieldNow;
+          yield* Deferred.succeed(release, undefined);
+          yield* Fiber.join(query);
+
+          return {
+            attached,
+            sent: (yield* fake.requestsTo("test:queued")).map((request) => request.authorization),
+          };
+        }),
+      ),
+    );
+
+    // The call left while the connection was fetching a token and went out with the next one.
+    expect(outcome).toStrictEqual({ attached: ["unsettled"], sent: [`Bearer ${t3}`] });
   });
 });
 

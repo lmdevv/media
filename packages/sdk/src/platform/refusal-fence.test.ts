@@ -385,10 +385,22 @@ describe("a refusal over the WebSocket connection", () => {
             Stream.runHead(platform.core.auth.sessions.current.watch()),
           ).pipe(Effect.timeout(Duration.seconds(5)));
 
+          // The one refresh for the renewed token is refused, which signs the session out.
+          const status = yield* platform.session.currentStatus.pipe(
+            Effect.repeat({
+              until: (now) => now === "signedOut",
+              schedule: Schedule.spaced("20 millis"),
+            }),
+            Effect.timeout(Duration.seconds(5)),
+          );
+
           return {
             failure,
             refreshes: yield* refreshesOf(fake),
-            status: yield* platform.session.currentStatus,
+            status,
+            sentWith: (yield* fake.requestsTo("core/auth/sessions:current")).map(
+              (request) => request.authorization,
+            ),
           };
         }),
       "websocket",
@@ -399,6 +411,8 @@ describe("a refusal over the WebSocket connection", () => {
       refreshes: ["refresh-1", "refresh-2", "refresh-3"],
       status: "signedOut",
     });
+    // The subscription went out again, and the second request carried the renewed token.
+    expect(answer.sentWith.slice(0, 2)).toStrictEqual([bearer(connected), bearer(renewed)]);
   });
 });
 
@@ -649,5 +663,62 @@ describe("the verifier's probes on #146", () => {
     expect(answer).toMatchObject({ exit: "answered", status: "signedIn" });
     expect(answer.refreshes.slice(0, 2)).toStrictEqual(["r1", "r2"]);
     expect(answer.sentWith.slice(0, 2)).toStrictEqual([bearer(connected), bearer(renewed)]);
+  });
+
+  it("settles another person's delayed refusal at once while the session's refresh is out", async () => {
+    const ada = jwtExpiringAt(Date.now() + HOUR, "ada|session-a");
+    const bo = jwtExpiringAt(Date.now() + HOUR, "bo|session-b");
+
+    const answer = await withPlatform((platform, fake) =>
+      Effect.gen(function* () {
+        yield* accounts(fake, { ada: tokens(ada, "r1"), bo: tokens(bo, "br1") }, {});
+        yield* signInAs(platform, "ada");
+        const calls = yield* holdCalls(fake, "core/auth/sessions:current");
+        const stale = yield* Effect.forkChild(Effect.exit(platform.core.auth.sessions.current()));
+        const held = yield* calls.next;
+
+        yield* signInAs(platform, "bo");
+
+        // Bo's refusal starts the refresh of Bo's generation, which the server holds.
+        const renewalArrived = yield* Deferred.make<void>();
+        const release = yield* Deferred.make<Reply>();
+
+        yield* fake.handle("auth:signIn", () =>
+          Deferred.succeed(renewalArrived, undefined).pipe(Effect.andThen(Deferred.await(release))),
+        );
+
+        const refreshing = yield* Effect.forkChild(
+          Effect.exit(
+            platform.session.refreshOnRefusal(() =>
+              Effect.fail(new Unauthenticated({ message: "Bo's refusal" })),
+            ),
+          ),
+        );
+
+        yield* Deferred.await(renewalArrived);
+        yield* Deferred.succeed(held.answer, refused);
+        const settled = yield* Fiber.await(stale).pipe(Effect.timeoutOption(Duration.millis(200)));
+
+        yield* Deferred.succeed(
+          release,
+          tokens(jwtExpiringAt(Date.now() + 2 * HOUR, "bo|session-b"), "br2"),
+        );
+        yield* Fiber.join(refreshing);
+
+        return {
+          settledWhileRefreshOut: Option.isSome(settled),
+          exit: outcome(yield* Fiber.join(stale)),
+          status: yield* platform.session.currentStatus,
+          refreshes: yield* refreshesOf(fake),
+        };
+      }),
+    );
+
+    expect(answer).toStrictEqual({
+      settledWhileRefreshOut: true,
+      exit: "Unauthenticated",
+      status: "signedIn",
+      refreshes: ["br1"],
+    });
   });
 });

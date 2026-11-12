@@ -265,29 +265,34 @@ const make = Effect.fn("Platform.make")(function* (url: string, signInRoute: Aut
       );
 
   /**
-   * Where a request records the token it went out with. It starts as the token held as the
-   * request is made, which is never newer than the one it is sent with, so a connection that
-   * cannot tell which token it sent errs toward leaving the session alone rather than refreshing.
+   * Where a request records the token it carried. It starts as the token held as the request is
+   * made, which is never newer than the one it is sent with, so a connection that cannot tell
+   * which token it sent errs toward leaving the session alone rather than refreshing.
    */
   const sentToken = Effect.map(engine.held, (held) => {
-    const sent = MutableRef.make(held);
+    const sent = MutableRef.make(ConvexTransport.SentWith.Token({ issued: held }));
 
-    const attached: ConvexTransport.Attached = (issued) => {
-      MutableRef.set(sent, Option.fromNullishOr(issued));
+    const attached: ConvexTransport.Attached = (next) => {
+      MutableRef.set(sent, next);
     };
 
     return { sent, attached };
   });
 
   /**
-   * What a refusal of a request sent with `sent` means for the session (D51). After a refusal of a
+   * What a refusal of a request that carried `sent` means for the session (D51). A request whose
+   * token is unsettled says nothing about the session, so it touches nothing. After a refusal of a
    * token the session renewed since, the connection takes the renewed one, so the next request
    * goes out with it.
    */
-  const judge = (sent: Option.Option<ConvexTransport.IssuedToken>) =>
-    Effect.tap(refusalOf(sent), (refusal) =>
-      refusal === "renewed" ? engine.catchUp : Effect.void,
-    );
+  const judge = (sent: ConvexTransport.SentWith): Effect.Effect<Auth.Refusal | "unsettled"> =>
+    ConvexTransport.SentWith.$match(sent, {
+      Unsettled: () => Effect.succeed("unsettled" as const),
+      Token: ({ issued }) =>
+        Effect.tap(refusalOf(issued), (refusal) =>
+          refusal === "renewed" ? engine.catchUp : Effect.void,
+        ),
+    });
 
   /**
    * Runs `attempt`, which tells `attached` the token it went out with, under D51 fenced on that
@@ -306,8 +311,9 @@ const make = Effect.fn("Platform.make")(function* (url: string, signInRoute: Aut
 
   /**
    * `open`'s results, fenced as `fenced` says. A subscription refused with a token the session
-   * renewed since subscribes again through `open`, which sends the token held then and records its
-   * own; a refusal of that one is judged by its own token. Any other refusal ends the stream, so a
+   * renewed since, or while its connection was changing token, subscribes again through `open`,
+   * which sends the token held then and records its own; a refusal of that one is judged by its
+   * own token. Any other refusal ends the stream, so a
    * server that keeps refusing the current token gets one refresh, then the stream ends. A
    * subscription refused this way `SUBSCRIBE_AGAIN_LIMIT` times without a result between ends too.
    */
@@ -328,7 +334,8 @@ const make = Effect.fn("Platform.make")(function* (url: string, signInRoute: Aut
                 Effect.map(judge(MutableRef.get(sent)), (refusal) => {
                   const next = MutableRef.get(answered) ? 1 : again + 1;
 
-                  return refusal === "renewed" && next <= SUBSCRIBE_AGAIN_LIMIT
+                  return (refusal === "renewed" || refusal === "unsettled") &&
+                    next <= SUBSCRIBE_AGAIN_LIMIT
                     ? fencedStream(open, next)
                     : Stream.fail(error);
                 }),
@@ -341,7 +348,7 @@ const make = Effect.fn("Platform.make")(function* (url: string, signInRoute: Aut
   const refreshOnRefusal: Session["refreshOnRefusal"] = (use) =>
     fenced((attached) =>
       Effect.flatMap(engine.issue, (issued) => {
-        attached(Option.getOrNull(issued));
+        attached(ConvexTransport.SentWith.Token({ issued }));
 
         return use(Option.map(issued, (sent) => Redacted.make(sent.token)));
       }),
