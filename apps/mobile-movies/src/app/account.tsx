@@ -17,16 +17,13 @@ import { useServer } from "@/session/connection";
 import { useMe } from "@/session/me";
 import type { Me } from "@/session/me";
 
-/**
- * The name the person goes by, which greetings and lists show. Saving it empty clears it, so
- * they go by their username again.
- */
 function NameField({ me }: { readonly me: Me }) {
   const platform = usePlatform();
   const [draft, setDraft] = useState(me.displayName ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const trimmed = draft.trim();
+  // The core keeps a name in its NFKC form, so compare in that form.
+  const trimmed = draft.normalize("NFKC").trim();
   const next = trimmed === "" ? null : trimmed;
   const unchanged = next === me.displayName;
 
@@ -54,7 +51,6 @@ function NameField({ me }: { readonly me: Me }) {
         onChangeText={setDraft}
         onSubmitEditing={() => void save()}
         error={error}
-        maxLength={64}
         autoCapitalize="words"
         autoComplete="name"
         textContentType="name"

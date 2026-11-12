@@ -110,7 +110,9 @@ describe("API key facts", () => {
     expect(lastUsedLabel(key(), now)).toBe("Never used");
     expect(lastUsedLabel(key({ lastUsedAt: NOV_6 }), now)).toMatch(/^Last used /u);
     expect(lastUsedLabel(key({ expiresAt: now - 1, lastUsedAt: NOV_6 }), now)).toBe("Expired");
-    expect(keyFacts(key(), now)).toMatch(/^mk_jd7abcde… · Browse movies, Play movies · Created /u);
+    expect(keyFacts(key(), now)).toMatch(
+      /^Never used · Browse movies, Play movies · Created .* · mk_jd7abcde…$/u,
+    );
   });
 });
 

@@ -95,7 +95,8 @@ export function DisplayNameSection({
   readonly onSave: (displayName: string | null) => void;
 }) {
   const [draft, setDraft] = useState(displayName ?? "");
-  const trimmed = draft.trim();
+  // The core keeps a name in its NFKC form, so compare in that form.
+  const trimmed = draft.normalize("NFKC").trim();
   const next = trimmed === "" ? null : trimmed;
   const unchanged = next === displayName;
 

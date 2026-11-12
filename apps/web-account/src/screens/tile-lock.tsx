@@ -9,7 +9,6 @@ import { AuthPage, Lede, PageTitle, PasswordField } from "@/components/auth-page
 import { SelectField } from "@/components/admin/parts";
 import { describeFailure } from "@media/ui/lib/failure";
 import { useAccountActions, useDevice } from "@/session/account";
-import { nameOf } from "@/session/me";
 import type { Approval, SharedPicker, SharedTile, TileProof } from "@/session/platform-types";
 
 import { useAction } from "./people/action";
@@ -91,7 +90,7 @@ function ProofForm({
         <SelectField
           label="Who's unlocking"
           value={prover.userId}
-          options={provers.map((each) => ({ value: each.userId, label: nameOf(each) }))}
+          options={provers.map((each) => ({ value: each.userId, label: each.username }))}
           disabled={busy}
           onChange={onProver}
         />
@@ -99,7 +98,7 @@ function ProofForm({
       <div className="flex flex-col gap-2">
         {method === "code" ? (
           <PasswordField
-            label={`${nameOf(prover)}'s unlock code`}
+            label={`${prover.username}'s unlock code`}
             name="code"
             inputMode="numeric"
             autoComplete="off"
@@ -111,7 +110,7 @@ function ProofForm({
           />
         ) : (
           <PasswordField
-            label={`${nameOf(prover)}'s password`}
+            label={`${prover.username}'s password`}
             name="password"
             autoComplete="off"
             value={secret}
@@ -121,7 +120,7 @@ function ProofForm({
         )}
         {prover.code === "off" ? (
           <p className="text-label/label text-text-muted">
-            {`${nameOf(prover)}'s unlock code is off on this device after 5 wrong tries. Typing the password turns it back on.`}
+            {`${prover.username}'s unlock code is off on this device after 5 wrong tries. Typing the password turns it back on.`}
           </p>
         ) : null}
         {prover.code === "ready" ? (
@@ -174,10 +173,10 @@ export function TileLockView({
   return (
     <AuthPage>
       <div className="flex flex-col items-center gap-5 text-center">
-        <Avatar name={nameOf(tile)} size="md" />
+        <Avatar name={tile.username} size="md" />
         <div className="flex flex-col gap-2">
-          <PageTitle>{`Unlock ${nameOf(tile)}`}</PageTitle>
-          <Lede>{WHO_OPENS[lock.opensWith](nameOf(tile))}</Lede>
+          <PageTitle>{`Unlock ${tile.username}`}</PageTitle>
+          <Lede>{WHO_OPENS[lock.opensWith](tile.username)}</Lede>
         </div>
       </div>
       {typed === null ? (
@@ -197,7 +196,7 @@ export function TileLockView({
           phase={ask}
           copy={{
             ask: "Ask on another device",
-            waiting: `Approve on a device where ${nameOf(tile)} is signed in.`,
+            waiting: `Approve on a device where ${tile.username} is signed in.`,
             approved: "Approved. Opening…",
             denied: "The request was turned down.",
           }}

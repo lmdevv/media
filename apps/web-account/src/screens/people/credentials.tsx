@@ -4,7 +4,7 @@ import { Button } from "@media/ui/components/button";
 import { Checkbox } from "@media/ui/components/checkbox";
 import { PageHeader } from "@media/ui/components/page-header";
 import { TextField } from "@media/ui/components/text-field";
-import { usePages } from "@media/ui/lib/pages";
+import { useAllPages, usePages } from "@media/ui/lib/pages";
 import type { Paged } from "@media/ui/lib/pages";
 import { PlusIcon } from "lucide-react";
 import { useState } from "react";
@@ -99,27 +99,28 @@ export const scopeLabels = (scopes: ReadonlyArray<KeyScope>): string =>
 /** The start of a key as its secret begins, `mk_ab12cd34…`, which never shows the secret. */
 export const keyPrefix = (key: Pick<KeyRow, "keyId">): string => `mk_${key.keyId.slice(0, 8)}…`;
 
-/** When a key last signed in, `Never`, or `Expired` once it ran out. */
+/** When a key last signed in: `Last used …`, `Never used`, or `Expired` once it ran out. */
 export const lastUsedLabel = (key: KeyRow, now: number): string => {
   if (key.expiresAt !== null && key.expiresAt <= now) return "Expired";
 
   return key.lastUsedAt === null ? "Never used" : `Last used ${formatTime(key.lastUsedAt)}`;
 };
 
-/** A key's facts: its prefix, scopes, creation, and last use. */
+/** A key's facts, the ones a narrow row keeps first: last use, scopes, creation, and prefix. */
 export const keyFacts = (key: KeyRow, now: number): string =>
   [
-    keyPrefix(key),
+    lastUsedLabel(key, now),
     scopeLabels(key.scopes),
     `Created ${formatTime(key.createdAt)}`,
-    lastUsedLabel(key, now),
+    keyPrefix(key),
   ].join(" · ");
 
 /** Devices: the person's signed-in browsers, apps, and devices, each signed out from here. */
 export function DevicesScreen() {
   const platform = usePlatform();
 
-  const sessions = usePages(platform.core.auth.sessions.list, (paginationOpts) => ({
+  // Every page: API keys' sessions are read and left out, so a page can come back empty.
+  const sessions = useAllPages(platform.core.auth.sessions.list, (paginationOpts) => ({
     paginationOpts,
   }));
 

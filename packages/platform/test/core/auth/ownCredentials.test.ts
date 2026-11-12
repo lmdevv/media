@@ -83,6 +83,9 @@ const inBatches = async <T>(
   }, Promise.resolve([]));
 };
 
+/** Key sign-ins enough that the list's rows sit past what one page of sessions reads. */
+const KEY_SIGN_INS_PAST_A_PAGE = 340;
+
 const makeKey = (who: Member, name: string) =>
   who.signedIn.client.action(api.core.auth.apiKeys.create, { name, scopes: [] });
 
@@ -225,8 +228,7 @@ describe.skipIf(stack === undefined)("a person's own sessions", { timeout: 300_0
       laptop.client.action(api.core.auth.apiKeys.create, { name: `key ${index}`, scopes: [] }),
     );
 
-    // Key sessions are read and left out, so the list's rows sit beyond one page's reads.
-    await inBatches(340, 20, async (index) =>
+    await inBatches(KEY_SIGN_INS_PAST_A_PAGE, 20, async (index) =>
       signIn(stack, "apiKey", { key: keys[index % keys.length]?.key ?? "" }),
     );
 

@@ -407,7 +407,7 @@ Show a device's picker: who is signed in on it, or on a shared device who opted 
 - Scope: public
 - Arguments: `{ device: string }`
 - Secret: `device` from `MEDIA_ARG_DEVICE` or stdin, never a flag
-- Result: `{ deviceId: Id<"devices">; name: string; mode: "personal"; tiles: Array<{ userId: Id<"users">; username: string; displayName: string | null }> } | { deviceId: Id<"devices">; name: string; mode: "shared"; holder: Id<"users"> | null; tiles: Array<{ userId: Id<"users">; username: string; displayName: string | null; kid: boolean; code: "none" | "ready" | "off"; lock: { state: "open" } | { state: "locked"; because: Array<"admin-rule" | "kid-listed" | "kid-holds-device">; opensWith: "self" | "adult" | "self-or-adult" } }>; approval: { approvalId: Id<"tileApprovals">; intent: "open" | "leave"; userId: Id<"users">; state: "pending" | "approved" | "denied" | "redeemed"; expiresAt: number } | null }`
+- Result: `{ deviceId: Id<"devices">; name: string; mode: "personal"; tiles: Array<{ userId: Id<"users">; username: string }> } | { deviceId: Id<"devices">; name: string; mode: "shared"; holder: Id<"users"> | null; tiles: Array<{ userId: Id<"users">; username: string; kid: boolean; code: "none" | "ready" | "off"; lock: { state: "open" } | { state: "locked"; because: Array<"admin-rule" | "kid-listed" | "kid-holds-device">; opensWith: "self" | "adult" | "self-or-adult" } }>; approval: { approvalId: Id<"tileApprovals">; intent: "open" | "leave"; userId: Id<"users">; state: "pending" | "approved" | "denied" | "redeemed"; expiresAt: number } | null }`
 
 ## `core.devices.registry.enroll`
 

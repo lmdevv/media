@@ -657,7 +657,6 @@ const core_devices_picker_show = query({
         Schema.Struct({
           userId: Schema.String.pipe(Schema.brand("Id<users>")),
           username: Schema.String,
-          displayName: Schema.Union([Schema.String, Schema.Null]),
         }),
       ),
     }),
@@ -670,7 +669,6 @@ const core_devices_picker_show = query({
         Schema.Struct({
           userId: Schema.String.pipe(Schema.brand("Id<users>")),
           username: Schema.String,
-          displayName: Schema.Union([Schema.String, Schema.Null]),
           kid: Schema.Boolean,
           code: Schema.Union([
             Schema.Literal("none"),

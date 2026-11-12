@@ -99,10 +99,7 @@ export const renameUser = async (
   await ctx.db.patch(user._id, parsed);
 };
 
-/**
- * Sets the name a person goes by, or clears it so they go by their username: printable and at
- * most `GIVEN_NAME_MAX` code points, as other names people see.
- */
+/** Sets the name a person goes by, or clears it with null so they go by their username. */
 export const changeDisplayName = async (
   ctx: Pick<MutationCtx, "db">,
   user: PersonDoc,

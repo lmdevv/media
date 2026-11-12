@@ -15,13 +15,7 @@ const showResult = v.union(
     deviceId: v.id("devices"),
     name: v.string(),
     mode: v.literal("personal"),
-    tiles: v.array(
-      v.object({
-        userId: v.id("users"),
-        username: v.string(),
-        displayName: v.union(v.string(), v.null()),
-      }),
-    ),
+    tiles: v.array(v.object({ userId: v.id("users"), username: v.string() })),
   }),
   v.object({
     deviceId: v.id("devices"),
@@ -32,7 +26,6 @@ const showResult = v.union(
       v.object({
         userId: v.id("users"),
         username: v.string(),
-        displayName: v.union(v.string(), v.null()),
         kid: v.boolean(),
         code: v.union(v.literal("none"), v.literal("ready"), v.literal("off")),
         lock: v.union(

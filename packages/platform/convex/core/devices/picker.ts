@@ -29,11 +29,9 @@ export const { show } = register({
         deviceId: device._id,
         name: device.name,
         mode: device.mode,
-        tiles: [...people.values()].toSorted(byUsername).map((person) => ({
-          userId: person._id,
-          username: person.username,
-          displayName: person.displayName ?? null,
-        })),
+        tiles: [...people.values()]
+          .toSorted(byUsername)
+          .map((person) => ({ userId: person._id, username: person.username })),
       };
     }
 
@@ -53,7 +51,6 @@ export const { show } = register({
       tiles: listed.map((person, index) => ({
         userId: person._id,
         username: person.username,
-        displayName: person.displayName ?? null,
         kid: isKid(person),
         code: codes[index] ?? "none",
         lock: lockView(lockOf(tileOf(person, listed, holder, null))),

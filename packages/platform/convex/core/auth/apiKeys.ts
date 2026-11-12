@@ -38,8 +38,9 @@ const WORKING_SERVICE_KEYS_MAX = 4;
 
 const NO_KEY = "No such API key";
 
-/** A listed key costs its own row and nothing else. */
-const LIST_ROWS = PAGE_ROWS_MAX - LIST_CALL_READS;
+const LIST_ROW_READS = 1;
+
+const LIST_ROWS = Math.floor((PAGE_ROWS_MAX - LIST_CALL_READS) / LIST_ROW_READS);
 
 const isCredentialScope = (scope: string): scope is CredentialScope =>
   credentialScopes.some((known) => known === scope);
@@ -257,8 +258,8 @@ export const { create, list, revoke, endAll } = register({
     return { keyId, key: formatSecret(PREFIX, keyId, secret), expiresAt };
   },
   /**
-   * The caller's keys that still work or ran out, newest first. Keys that ended with End all wait
-   * for the purge and are left out, so a page may hold fewer rows than asked.
+   * The caller's keys that still work or ran out, newest first. Ended keys wait for the purge and
+   * are left out, so a page may hold fewer rows than asked.
    */
   list: async (ctx, { paginationOpts }, caller) => {
     requireOwnCredential(caller, "list", caller.userId, NO_KEY);
@@ -300,6 +301,8 @@ export const { create, list, revoke, endAll } = register({
     return null;
   },
   endAll: async (ctx, _args, caller) => {
+    requireOwnCredential(caller, "end", caller.userId, NO_KEY);
+
     const user = await ctx.db.get(caller.userId);
 
     if (user !== null) await endUserKeys(ctx, user);

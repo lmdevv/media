@@ -116,17 +116,16 @@ export const liveOnDevice = (
   );
 };
 
-/**
- * Whether a session of a person who is no guest is live, from its user and the device it is bound
- * to, both already read: what `liveSession` decides for such a person.
- */
+/** Whether a session of a household person is live, from its user and its device, both read. */
 export const liveWithDevice = (
   session: Session,
   user: Doc<"users">,
   device: Doc<"devices"> | null,
   now: number,
 ): boolean => {
-  if (session.kind === "guest" || !isLive(session, user, now)) return false;
+  const guest = session.kind === "guest" || (user.kind === "person" && user.role === "guest");
+
+  if (guest || !isLive(session, user, now)) return false;
 
   const bound = boundDevice(session);
 

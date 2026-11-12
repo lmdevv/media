@@ -161,8 +161,10 @@ amendment brings them back as a port, not new features (D62).
 
 - **Display names.** Old movies greeted a person by their profile's name. A person now has an
   optional `displayName` beside the username. It is the name clients show in greetings, in the top
-  bar, on a picker's tiles, and in the admin user lists, and every client falls back to the
-  username when it is absent. `core.accounts.me.setDisplayName` sets or clears the caller's own.
+  bar, and in the admin user lists, and every client falls back to the username when it is
+  absent. A shared device's picker and its unlock screen keep showing usernames: old movies'
+  picker listed one account's own profiles, while the core's lists everyone on the server, and a
+  display name nobody checks for uniqueness would let one person's tile pass for another's. `core.accounts.me.setDisplayName` sets or clears the caller's own.
   It refuses API keys, as renames do. The name follows the rule for other names people see
   (`requireGivenName`, `GIVEN_NAME_MAX` code points, printable). Old movies took 80 characters for
   a profile name; the core keeps one bound for every such name. Signing in still takes the
@@ -181,6 +183,7 @@ amendment brings them back as a port, not new features (D62).
   ended by End all wait for the purge, and the list leaves them out at once.
 - **Access.** All three go through the `credential` rows of `can()` (ADR 0005): only the person
   lists or ends their own sessions and keys, from any session holding `account`. Admins and the
-  owner see a `not_found`, as for someone's device grant. Both lists page through
+  owner see a `not_found`, as for someone's device grant. `sessions.endAll` and `apiKeys.endAll`
+  ask the same rule. Both lists page through
   `paginateAtMost`, sized from the per-call read budget: a key row costs one read, and a session
   row up to three (its row, its device, and the grant that names an app on no device).

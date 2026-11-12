@@ -1223,9 +1223,8 @@ export interface CredentialResource {
 }
 
 /**
- * A credential is its person's own: nobody else lists or ends it, admins included, and an admin
- * signs someone out everywhere through their account instead. Any session holding `account` may,
- * as old movies let an account-scoped session list and sign out the account's sessions and keys.
+ * A credential is its person's own: nobody else lists or ends it, admins included. Only a session
+ * of that person holding `account` may, and never a guest's.
  */
 const decideCredential = (principal: Principal, credential: CredentialResource): Decision => {
   if (principal.kind === "service") return hidden("service");

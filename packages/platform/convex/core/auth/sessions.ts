@@ -90,9 +90,8 @@ export const { current, list, end, endAll, revoke } = register({
     };
   },
   /**
-   * The caller's live sessions but their API keys', which a key opens again on its next use, so
-   * the key list covers them. Ended sessions wait for the purge and are left out, so a page may
-   * hold fewer rows than asked.
+   * The caller's live sessions, except those API keys open, which the key list covers. Ended
+   * sessions wait for the purge and are left out, so a page may hold fewer rows than asked.
    */
   list: async (ctx, { paginationOpts }, caller) => {
     requireOwnCredential(caller, "list", caller.userId, NO_SESSION);
@@ -137,8 +136,8 @@ export const { current, list, end, endAll, revoke } = register({
     return { ...page, page: rows.flat() };
   },
   /**
-   * Signs out one of the caller's sessions with the session machinery that ends every other one.
-   * An app whose own session ends while its device grant stands asks for the password again (D59).
+   * Signs out one of the caller's sessions. An app whose own session ends while its device grant
+   * stands asks for the password again (D59).
    */
   end: async (ctx, { sessionId }, caller) => {
     const session = (await ctx.db.get(sessionId)) ?? fail("not_found", NO_SESSION);
@@ -150,6 +149,8 @@ export const { current, list, end, endAll, revoke } = register({
     return null;
   },
   endAll: async (ctx, { keepCurrent }, caller) => {
+    requireOwnCredential(caller, "end", caller.userId, NO_SESSION);
+
     const user = await ctx.db.get(caller.userId);
 
     if (user !== null) {

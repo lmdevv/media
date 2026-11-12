@@ -93,7 +93,6 @@ const anchoredTransport = {
 const sharedTile = v.object({
   userId: v.id("users"),
   username: v.string(),
-  displayName: v.union(v.string(), v.null()),
   kid: v.boolean(),
   /** The person's unlock code on this device: none set, ready, or off after 5 wrong tries. */
   code: v.union(v.literal("none"), v.literal("ready"), v.literal("off")),
@@ -273,7 +272,7 @@ export const core = [
           v.literal("tile"),
           v.literal("grant"),
         ),
-        /** What it calls itself: its device's name, or the name a device sign-in gave; null for none. */
+        /** What it calls itself: its device's name, a device sign-in's name, or its app grant's name; null for none. */
         name: v.union(v.string(), v.null()),
         device: v.union(v.null(), v.object({ deviceId: v.id("devices"), name: v.string() })),
         scopes: v.array(credentialScope),
@@ -695,13 +694,7 @@ export const core = [
         deviceId: v.id("devices"),
         name: v.string(),
         mode: v.literal("personal"),
-        tiles: v.array(
-          v.object({
-            userId: v.id("users"),
-            username: v.string(),
-            displayName: v.union(v.string(), v.null()),
-          }),
-        ),
+        tiles: v.array(v.object({ userId: v.id("users"), username: v.string() })),
       }),
       v.object({
         deviceId: v.id("devices"),

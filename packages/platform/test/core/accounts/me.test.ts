@@ -110,7 +110,7 @@ describe.skipIf(stack === undefined)("your own account", { timeout: 120_000 }, (
       ),
     ).toBe("forbidden");
   });
-  it("takes a display name that greetings, the users list, and the picker show, until cleared", async () => {
+  it("takes a display name that greetings and the users list show, until cleared, and keeps it off pickers", async () => {
     if (stack === undefined) return;
     const person = await createPerson(stack, "named");
     const session = await signInAs(stack, person);
@@ -137,9 +137,7 @@ describe.skipIf(stack === undefined)("your own account", { timeout: 120_000 }, (
 
     expect(await whoIs(session)).toMatchObject({ displayName: "Aiko Tanaka" });
     expect(await nameOf()).toBe("Aiko Tanaka");
-    expect((await picker(stack, device)).tiles).toMatchObject([
-      { userId, displayName: "Aiko Tanaka" },
-    ]);
+    expect((await picker(stack, device)).tiles).toEqual([{ userId, username: person.username }]);
 
     await session.client.mutation(api.core.accounts.me.rename, { username: `aiko-${unique()}` });
 

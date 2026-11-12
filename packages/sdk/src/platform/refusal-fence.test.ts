@@ -35,6 +35,7 @@ const SERVER = { name: "[media]", version: "0.2.0", hasOwner: true };
 const SESSION = {
   userId: "user-1",
   username: "ada",
+  displayName: null,
   role: "member",
   sessionId: "session-1",
   kind: "password",
