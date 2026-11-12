@@ -436,10 +436,20 @@ the old movies SDK or a Convex client of its own. They open for an owner or an a
   `p5-mobile-music`. An invite is made by `core.accounts.invites.create`, which makes the code on
   the server and answers it once; the app shares `<server>/invite#<code>` and never sends a code
   back in a mutation. Library access follows grants for every role, since a core library is
-  private until shared, admins included (ADR 0024): a person's own grant at `view` is given and
-  taken away (`core.permissions.grants.set` and `remove`), while a grant to manage and a household
-  grant show as Manages and Everyone and stay.
+  private until shared, admins included (ADR 0024). The page shows a person's own grant, which
+  it gives at `view` and takes away (`core.permissions.grants.set` and `remove`), apart from what
+  reaches them through the household or a group they are in, as the core's `levelOn` counts it:
+  taking their own grant away reads `View, through Family`, never Not Allowed, while a group
+  still reaches them. The maker's grant to manage shows as Manages and stays.
+- **Owner forms save only what the person edited** (`@media/mobile-core/edits`). A row on screen
+  keeps following the core while someone edits it, so a form never compares its fields with the
+  live row: each field keeps the value it had when the person began editing it, a save writes
+  only fields changed from that value, and it asks before writing over a field another admin
+  changed meanwhile. The library edit form, a person's page, and Fix Match work this way, so a
+  rename never writes back folders moved meanwhile, and saving library access never sends back
+  a role another admin changed.
 - **Shared with every iOS app** besides the users and invites screens: paging over the core's lists
-  (`@media/mobile-core/pages`) and the failure lines (`@media/mobile-core/failure`).
+  (`@media/mobile-core/pages`), the failure lines (`@media/mobile-core/failure`), and saving
+  edits (`@media/mobile-core/edits`).
 - Left out because the core has no command for them (D62): disabling and enabling an account, and
   an email on an invite.

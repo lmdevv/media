@@ -3,25 +3,21 @@
  * the household, the invites that still work, making and revoking an invite, a person's role, and
  * what they reach in each library. Each app draws them in its own look over `accounts.ts`.
  */
-import type { PlatformSdk } from "@media/sdk/promise";
 import { usePlatform } from "@media/sdk/react";
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 
 import { INVITE_DAYS, inviteLink } from "./accounts";
 import type {
   AssignableRole,
+  GrantedLibrary,
+  GroupId,
   HouseholdUser,
   LibraryGrant,
   PendingInvite,
   UserId,
 } from "./accounts";
 import { pagedStore, useAllPages, usePages } from "./pages";
-import type { Paged } from "./pages";
-
-type Grants = PlatformSdk["core"]["permissions"]["grants"];
-
-/** A library's id on the core, as a grant names it. */
-export type GrantedLibraryId = Parameters<Grants["list"]>[0]["resource"]["id"];
+import type { Paged, PageOpts, PagedQuery } from "./pages";
 
 /** Everyone in the household by username, every page of them. */
 export const useHousehold = (): Paged<HouseholdUser> => {
@@ -84,8 +80,8 @@ export const useRevokeInvite = (): ((invite: PendingInvite) => Promise<void>) =>
 export const useSavePerson = (): ((change: {
   readonly userId: UserId;
   readonly role: AssignableRole | null;
-  readonly give: ReadonlyArray<GrantedLibraryId>;
-  readonly takeAway: ReadonlyArray<GrantedLibraryId>;
+  readonly give: ReadonlyArray<GrantedLibrary>;
+  readonly takeAway: ReadonlyArray<GrantedLibrary>;
 }) => Promise<void>) => {
   const platform = usePlatform();
   const { setRole } = platform.core.accounts.users;
@@ -106,23 +102,21 @@ export const useSavePerson = (): ((change: {
   );
 };
 
-interface GrantsStore {
+interface ListsStore<Row> {
   readonly subscribe: (onChange: () => void) => () => void;
-  readonly getSnapshot: () => ReadonlyArray<Paged<LibraryGrant>>;
+  readonly getSnapshot: () => ReadonlyArray<Paged<Row>>;
 }
 
-/** One store over several libraries' grant lists; its snapshot changes only when one of theirs does. */
-const grantsStore = (grants: Grants, libraryIds: ReadonlyArray<GrantedLibraryId>): GrantsStore => {
-  const stores = libraryIds.map((id) =>
-    pagedStore<LibraryGrant>((span) =>
-      grants.list.watch({
-        resource: { type: "library", id },
-        paginationOpts: { numItems: 50, ...span },
-      }),
-    ),
+/** One store over several paged lists; its snapshot changes only when one of theirs does. */
+const listsStore = <Args, Row>(
+  query: PagedQuery<Args, Row>,
+  argsOf: ReadonlyArray<(paginationOpts: PageOpts) => Args>,
+): ListsStore<Row> => {
+  const stores = argsOf.map((argsAt) =>
+    pagedStore<Row>((span) => query.watch(argsAt({ numItems: 50, ...span }))),
   );
 
-  let snapshot: ReadonlyArray<Paged<LibraryGrant>> = [];
+  let snapshot: ReadonlyArray<Paged<Row>> = [];
 
   return {
     subscribe: (onChange) => {
@@ -145,23 +139,28 @@ const grantsStore = (grants: Grants, libraryIds: ReadonlyArray<GrantedLibraryId>
 };
 
 /**
- * Who each of `libraryIds` is shared with, every page, in the same order. A household shares a
- * few libraries with a few people, so following each list costs little. Listing a library's
- * grants needs `manage` on it, so pass the libraries the admin manages.
+ * Follows every page of several lists of one paged query, one per key in `keys`, in the same
+ * order. For the few lists a household has, such as each library's grants.
  */
-export const useLibraryGrants = (
-  libraryIds: ReadonlyArray<GrantedLibraryId>,
-): ReadonlyArray<Paged<LibraryGrant>> => {
-  const platform = usePlatform();
-  const grants = platform.core.permissions.grants;
-  const key = libraryIds.join(",");
+const useEveryList = <Key extends string, Args, Row>(
+  query: PagedQuery<Args, Row>,
+  keys: ReadonlyArray<Key>,
+  argsFor: (key: Key, paginationOpts: PageOpts) => Args,
+): ReadonlyArray<Paged<Row>> => {
+  const joined = keys.join(",");
+
+  const open = () =>
+    listsStore(
+      query,
+      keys.map((key) => (opts: PageOpts) => argsFor(key, opts)),
+    );
 
   // State rather than a memo: React may drop a memo, which would restart every subscription.
-  const [held, setHeld] = useState(() => ({ grants, key, store: grantsStore(grants, libraryIds) }));
+  const [held, setHeld] = useState(() => ({ query, joined, store: open() }));
   let current = held;
 
-  if (held.grants !== grants || held.key !== key) {
-    current = { grants, key, store: grantsStore(grants, libraryIds) };
+  if (held.query !== query || held.joined !== joined) {
+    current = { query, joined, store: open() };
     setHeld(current);
   }
 
@@ -175,4 +174,80 @@ export const useLibraryGrants = (
   }, [lists]);
 
   return lists;
+};
+
+/**
+ * Who each of `libraryIds` is shared with, every page, in the same order. A household shares a
+ * few libraries with a few people, so following each list costs little. Listing a library's
+ * grants needs `manage` on it, so pass the libraries the admin manages.
+ */
+export const useLibraryGrants = (
+  libraryIds: ReadonlyArray<GrantedLibrary>,
+): ReadonlyArray<Paged<LibraryGrant>> => {
+  const platform = usePlatform();
+
+  return useEveryList(platform.core.permissions.grants.list, libraryIds, (id, paginationOpts) => ({
+    resource: { type: "library" as const, id },
+    paginationOpts,
+  }));
+};
+
+/** The groups a person is in, once every group's members are known. */
+export type Memberships =
+  | { readonly status: "loading" }
+  | { readonly status: "failed"; readonly retry: () => void }
+  | { readonly status: "ready"; readonly groups: ReadonlySet<GroupId> };
+
+const LOADING: Memberships = { status: "loading" };
+
+const failure = <Row>(list: Paged<Row>): (() => void) | null => {
+  if (list.status === "failed") return list.retry;
+
+  return list.status === "ready" && list.next.kind === "failed" ? list.next.retry : null;
+};
+
+const loaded = <Row>(list: Paged<Row>): list is Extract<Paged<Row>, { status: "ready" }> =>
+  list.status === "ready" && list.next.kind === "done";
+
+/**
+ * The groups `userId` is in, which a library shared with a group reaches them through. Each
+ * group's members are followed; a household has a few groups.
+ */
+export const useMemberships = (userId: UserId): Memberships => {
+  const platform = usePlatform();
+  const { groups } = platform.core.permissions;
+  const all = useAllPages(groups.list, (paginationOpts) => ({ paginationOpts }));
+  const ids = all.status === "ready" ? all.rows.map((group) => group.groupId) : [];
+
+  const members = useEveryList(groups.members, ids, (groupId, paginationOpts) => ({
+    groupId,
+    paginationOpts,
+  }));
+
+  return useMemo((): Memberships => {
+    for (const list of [all, ...members]) {
+      const retry = failure<unknown>(list);
+
+      if (retry !== null) return { status: "failed", retry };
+    }
+
+    if (!loaded(all) || members.length !== all.rows.length || !members.every(loaded)) {
+      return LOADING;
+    }
+
+    return {
+      status: "ready",
+      groups: new Set(
+        all.rows.flatMap((group, at) => {
+          const list = members[at];
+
+          return list !== undefined &&
+            loaded(list) &&
+            list.rows.some((member) => member.userId === userId)
+            ? [group.groupId]
+            : [];
+        }),
+      ),
+    };
+  }, [all, members, userId]);
 };

@@ -1,24 +1,34 @@
 import {
-  ACCESS_LABELS,
   ROLE_CHOICES,
   ROLE_LABELS,
-  accessChangeable,
+  accessLabel,
   canChangeRole,
+  isChangeable,
   libraryAccess,
+  personSave,
 } from "@media/mobile-core/accounts";
 import type {
-  AssignableRole,
+  ChangeableGrant,
+  GrantedLibrary,
   HouseholdUser,
   LibraryAccess,
   LibraryGrant,
-  UserId,
+  PageEdit,
+  Role,
 } from "@media/mobile-core/accounts";
 import type { Paged } from "@media/mobile-core/pages";
-import { useHousehold, useLibraryGrants, useSavePerson } from "@media/mobile-core/use-accounts";
+import {
+  useHousehold,
+  useLibraryGrants,
+  useMemberships,
+  useSavePerson,
+} from "@media/mobile-core/use-accounts";
+import type { Memberships } from "@media/mobile-core/use-accounts";
 import { router, useLocalSearchParams } from "expo-router";
 import { Folder, User as UserIcon } from "lucide-react-native";
 import { useState } from "react";
 
+import { confirmOverwrite } from "@/components/owner/confirm-overwrite";
 import {
   OwnerScreen,
   PagedView,
@@ -31,52 +41,48 @@ import { useTask } from "@/components/owner/use-task";
 import { Button } from "@/components/ui/button";
 import { ListRow } from "@/components/ui/list-row";
 import { Text } from "@/components/ui/text";
-import type { Library, LibraryId } from "@/lib/owner";
+import type { Library } from "@/lib/owner";
 import { useMe } from "@/session/me";
 
-/** What a person reaches in a library as the core holds it, or why the page cannot say yet. */
+/** What a person reaches in a library as the core holds it now, or why the page cannot say yet. */
 type Saved =
   | { readonly kind: "loading" }
   | { readonly kind: "failed"; readonly retry: () => void }
   | { readonly kind: "known"; readonly access: LibraryAccess };
 
-/** A choice the admin made on the page: the person's own grant given or taken away. */
-type Chosen = "allowed" | "notAllowed";
-
-/** One library on the page, with what the person reaches in it as saved. */
+/** One library on the page, with what the person reaches in it now. */
 interface LibraryRow {
   readonly library: Library;
   readonly saved: Saved;
 }
 
-const savedOf = (list: Paged<LibraryGrant> | undefined, userId: UserId): Saved => {
-  if (list?.status === "failed") return { kind: "failed", retry: list.retry };
+const retryOf = <Row,>(list: Paged<Row>): (() => void) | null => {
+  if (list.status === "failed") return list.retry;
 
-  if (list?.status === "ready" && list.next.kind === "failed") {
-    return { kind: "failed", retry: list.next.retry };
-  }
+  return list.status === "ready" && list.next.kind === "failed" ? list.next.retry : null;
+};
 
-  return list?.status === "ready" && list.next.kind === "done"
-    ? { kind: "known", access: libraryAccess(userId, list.rows) }
+const savedOf = (
+  list: Paged<LibraryGrant> | undefined,
+  memberships: Memberships,
+  user: HouseholdUser,
+): Saved => {
+  const retry = list === undefined ? null : retryOf(list);
+
+  if (retry !== null) return { kind: "failed", retry };
+
+  if (memberships.status === "failed") return { kind: "failed", retry: memberships.retry };
+
+  return list?.status === "ready" && list.next.kind === "done" && memberships.status === "ready"
+    ? { kind: "known", access: libraryAccess(user.userId, list.rows, memberships.groups) }
     : { kind: "loading" };
 };
 
-/**
- * What a row shows: the admin's choice while the saved access is one they can change, else the
- * saved access. A choice that the core now holds, or that a household or manager grant overtook,
- * is no longer a change.
- */
-const shownOf = (row: LibraryRow, chosen: Chosen | undefined): LibraryAccess | null => {
-  if (row.saved.kind !== "known") return null;
-
-  return chosen !== undefined && accessChangeable(row.saved.access) ? chosen : row.saved.access;
-};
-
-const isChange = (row: LibraryRow, chosen: Chosen | undefined): boolean =>
-  row.saved.kind === "known" &&
-  accessChangeable(row.saved.access) &&
-  chosen !== undefined &&
-  chosen !== row.saved.access;
+/** The edit kept for a field: a later change keeps the value the field had at the first one. */
+const editFrom = <V,>(earlier: PageEdit<V> | undefined, from: V, to: V): PageEdit<V> => ({
+  from: earlier?.from ?? from,
+  to,
+});
 
 function Person({
   user,
@@ -88,63 +94,86 @@ function Person({
   const me = useMe();
   const save = useSavePerson();
   const grants = useLibraryGrants(libraries.map((library) => library.libraryId));
+  const memberships = useMemberships(user.userId);
   const roleChangeable = canChangeRole(user, me.userId);
   // Access follows grants for every role, so an admin may share a library with anyone but
   // themselves, the owner included.
-  const accessChangeableHere = user.userId !== me.userId;
-  const [role, setRoleChoice] = useState<HouseholdUser["role"]>(user.role);
-  const [chosen, setChosen] = useState<ReadonlyMap<LibraryId, Chosen>>(new Map());
+  const grantsChangeable = user.userId !== me.userId;
+  // Only what the person changes here, each with the value it had when they changed it: the role
+  // and grants on show otherwise follow the core.
+  const [roleEdit, setRoleEdit] = useState<PageEdit<Role> | null>(null);
+
+  const [grantEdits, setGrantEdits] = useState<
+    ReadonlyMap<GrantedLibrary, PageEdit<ChangeableGrant>>
+  >(new Map());
 
   const rows = libraries.map((library, at): LibraryRow => ({
     library,
-    saved: savedOf(grants[at], user.userId),
+    saved: savedOf(grants[at], memberships, user),
   }));
 
-  const roleChanged = role !== user.role;
-  const changes = rows.filter((row) => isChange(row, chosen.get(row.library.libraryId)));
+  const plan = personSave(
+    roleEdit,
+    user.role,
+    rows.flatMap((row) => {
+      const edit = grantEdits.get(row.library.libraryId);
 
-  const chosenRole = (): AssignableRole | null =>
-    roleChanged ? (ROLE_CHOICES.find((choice) => choice === role) ?? null) : null;
+      return edit === undefined
+        ? []
+        : [
+            {
+              libraryId: row.library.libraryId,
+              name: row.library.name,
+              edit,
+              live: row.saved.kind === "known" ? row.saved.access.direct : null,
+            },
+          ];
+    }),
+  );
+
+  const changed = plan.role !== null || plan.give.length > 0 || plan.takeAway.length > 0;
 
   const saving = useTask(async () => {
-    const want = (access: Chosen) =>
-      changes
-        .filter((row) => chosen.get(row.library.libraryId) === access)
-        .map((row) => row.library.libraryId);
+    if (!(await confirmOverwrite(plan.overtaken))) return;
 
-    await save({
-      userId: user.userId,
-      role: chosenRole(),
-      give: want("allowed"),
-      takeAway: want("notAllowed"),
-    });
+    await save({ userId: user.userId, role: plan.role, give: plan.give, takeAway: plan.takeAway });
     router.back();
   });
+
+  const shownRole = roleEdit?.to ?? user.role;
 
   const chooseRole = () =>
     showActions(
       "Role",
       ROLE_CHOICES.map((choice) => ({
         label: ROLE_LABELS[choice],
-        onPress: () => setRoleChoice(choice),
+        onPress: () => setRoleEdit((earlier) => editFrom(earlier ?? undefined, user.role, choice)),
       })),
     );
 
-  const choose = (libraryId: LibraryId, access: Chosen) =>
-    setChosen((current) => new Map([...current, [libraryId, access]]));
+  const toggle = (libraryId: GrantedLibrary, live: ChangeableGrant, shown: ChangeableGrant) =>
+    setGrantEdits((current) => {
+      const next = new Map(current);
+
+      next.set(
+        libraryId,
+        editFrom(current.get(libraryId), live, shown === "allowed" ? "none" : "allowed"),
+      );
+
+      return next;
+    });
 
   return (
     <OwnerScreen title={user.username} fallback="/owner/users">
       <ListRow
         icon={UserIcon}
         title="Role"
-        detail={ROLE_LABELS[role]}
+        detail={ROLE_LABELS[shownRole]}
         onPress={roleChangeable ? chooseRole : undefined}
       />
       {libraries.length === 0 ? null : <SectionHeading>Library Access</SectionHeading>}
       {rows.map((row) => {
         const { libraryId } = row.library;
-        const access = shownOf(row, chosen.get(libraryId));
 
         if (row.saved.kind === "failed") {
           return (
@@ -159,18 +188,34 @@ function Person({
           );
         }
 
+        if (row.saved.kind === "loading") {
+          return <ListRow key={libraryId} icon={Folder} title={row.library.name} chevron={false} />;
+        }
+
+        const { direct, inherited } = row.saved.access;
+
+        if (!isChangeable(direct)) {
+          return (
+            <ListRow
+              key={libraryId}
+              icon={Folder}
+              title={row.library.name}
+              detail={accessLabel(direct, inherited)}
+              chevron={false}
+            />
+          );
+        }
+
+        const shown = grantEdits.get(libraryId)?.to ?? direct;
+
         return (
           <ListRow
             key={libraryId}
             icon={Folder}
             title={row.library.name}
-            detail={access === null ? undefined : ACCESS_LABELS[access]}
+            detail={accessLabel(shown, inherited)}
             chevron={false}
-            onPress={
-              accessChangeableHere && access !== null && accessChangeable(access)
-                ? () => choose(libraryId, access === "allowed" ? "notAllowed" : "allowed")
-                : undefined
-            }
+            onPress={grantsChangeable ? () => toggle(libraryId, direct, shown) : undefined}
           />
         );
       })}
@@ -179,13 +224,13 @@ function Person({
           {saving.error}
         </Text>
       )}
-      {roleChangeable || accessChangeableHere ? (
+      {roleChangeable || grantsChangeable ? (
         <>
           <Spacer />
           <Button
             label="Save Changes"
             busy={saving.busy}
-            disabled={!roleChanged && changes.length === 0}
+            disabled={!changed}
             onPress={() => void saving.run()}
           />
         </>

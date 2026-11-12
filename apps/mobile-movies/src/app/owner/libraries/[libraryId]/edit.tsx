@@ -1,16 +1,20 @@
+import { anyEdited, overtakenFields } from "@media/mobile-core/edits";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { router, useLocalSearchParams } from "expo-router";
+import { useState } from "react";
 
+import { confirmOverwrite } from "@/components/owner/confirm-overwrite";
 import { LibraryForm } from "@/components/owner/library-form";
 import { OwnerScreen, QueryView } from "@/components/owner/parts";
-import { draftOf, submission } from "@/lib/library-form";
+import { draftOf, fieldsOf, librarySave } from "@/lib/library-form";
 import { asLibraryId } from "@/lib/owner";
 import type { LibraryDetail } from "@/lib/owner";
 
 function EditForm({ library }: { readonly library: LibraryDetail }) {
   const platform = usePlatform();
   const { libraryId } = library;
-  const saved = library.folders ?? [];
+  // The library as the form opened it: a save writes only what the person changed from this.
+  const [began] = useState(() => fieldsOf(library));
 
   return (
     <LibraryForm
@@ -18,14 +22,29 @@ function EditForm({ library }: { readonly library: LibraryDetail }) {
       initial={draftOf(library)}
       submitLabel="Save"
       onSubmit={async (draft) => {
-        const { name, folders } = submission(draft);
-        const moved = folders.join("\n") !== saved.join("\n");
+        const save = librarySave(began, draft, fieldsOf(library));
 
-        if (name !== library.name) await platform.core.libraries.rename({ libraryId, name });
+        if (!anyEdited([save.name, save.folders])) {
+          router.back();
 
-        const rescan = moved
-          ? (await platform.core.libraries.setFolders({ libraryId, folders })).scanJobId
-          : null;
+          return;
+        }
+
+        if (
+          !(await confirmOverwrite(overtakenFields({ Name: save.name, Folders: save.folders })))
+        ) {
+          return;
+        }
+
+        if (save.name.kind === "edited") {
+          await platform.core.libraries.rename({ libraryId, name: save.name.to });
+        }
+
+        const rescan =
+          save.folders.kind === "edited"
+            ? (await platform.core.libraries.setFolders({ libraryId, folders: save.folders.to }))
+                .scanJobId
+            : null;
 
         if (rescan !== null) {
           router.replace({ pathname: "/owner/libraries/[libraryId]/scan", params: { libraryId } });

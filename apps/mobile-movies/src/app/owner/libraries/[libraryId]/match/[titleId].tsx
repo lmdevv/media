@@ -1,5 +1,6 @@
 import { TitleId as MediaTitleId } from "@media/contracts/ids";
 import type { MetadataCandidate } from "@media/contracts/models/catalog";
+import { fieldEdit, overtakenFields } from "@media/mobile-core/edits";
 import { describeFailure, isFailure } from "@media/mobile-core/failure";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { Predicate, Schema } from "effect";
@@ -8,6 +9,7 @@ import { Check, Search } from "lucide-react-native";
 import { useEffect, useRef, useState } from "react";
 import { Pressable, View } from "react-native";
 
+import { confirmOverwrite } from "@/components/owner/confirm-overwrite";
 import { Loading, OwnerScreen, QueryView } from "@/components/owner/parts";
 import { useTask } from "@/components/owner/use-task";
 import { Button } from "@/components/ui/button";
@@ -92,6 +94,8 @@ function MatchEditor({
 }) {
   const platform = usePlatform();
   const media = useMediaServer();
+  // The match as the screen opened it: choosing it again writes nothing.
+  const [began] = useState(title.externalIds.tmdb);
   const [query, setQuery] = useState(title.name);
   const [year, setYear] = useState(title.year === null ? "" : String(title.year));
   const [results, setResults] = useState<Results>({ status: "idle" });
@@ -138,7 +142,14 @@ function MatchEditor({
   });
 
   const apply = useTask(async (providerId: string) => {
-    await platform.movies.metadata.match({ titleId: title.id, provider: "tmdb", providerId });
+    const match = fieldEdit<string | null>(began, providerId, title.externalIds.tmdb);
+
+    if (match.kind === "edited") {
+      if (!(await confirmOverwrite(overtakenFields({ Match: match })))) return;
+
+      await platform.movies.metadata.match({ titleId: title.id, provider: "tmdb", providerId });
+    }
+
     router.back();
   });
 

@@ -1,4 +1,6 @@
 import { normalizeFolder } from "@media/contracts/library-folder";
+import { fieldEdit } from "@media/mobile-core/edits";
+import type { FieldEdit } from "@media/mobile-core/edits";
 
 import type { LibraryDetail } from "./owner";
 
@@ -94,4 +96,40 @@ export const fieldNamedIn = (
   }
 
   return null;
+};
+
+/** The fields of a library its edit form changes, as the core holds them. */
+export interface LibraryFields {
+  readonly name: string;
+  readonly folders: ReadonlyArray<string>;
+}
+
+/** `library`'s name and folders. */
+export const fieldsOf = (library: LibraryDetail): LibraryFields => ({
+  name: library.name,
+  folders: library.folders ?? [],
+});
+
+/** What saving the edit form writes: each field the person changed, and only those. */
+export interface LibrarySave {
+  readonly name: FieldEdit<string>;
+  readonly folders: FieldEdit<ReadonlyArray<string>>;
+}
+
+/**
+ * The save of `draft`, with `began` as the library was when the form opened and `live` as it is
+ * now. A field counts as edited only when the person changed it from `began`, so a rename never
+ * writes back folders another admin changed meanwhile.
+ */
+export const librarySave = (
+  began: LibraryFields,
+  draft: LibraryDraft,
+  live: LibraryFields,
+): LibrarySave => {
+  const sent = submission(draft);
+
+  return {
+    name: fieldEdit(began.name, sent.name, live.name),
+    folders: fieldEdit(began.folders, sent.folders, live.folders),
+  };
 };

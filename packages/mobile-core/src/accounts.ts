@@ -6,6 +6,8 @@
  */
 import type { PlatformSdk } from "@media/sdk/promise";
 
+import { fieldEdit } from "./edits";
+
 type Result<Method> = Method extends (...args: never) => Promise<infer A> ? A : never;
 
 type RowOf<Method> =
@@ -76,47 +78,149 @@ export const accountUrlOf = (moviesUrl: string): string =>
 export const inviteLink = (accountUrl: string, code: string): string =>
   `${accountUrl.replace(/\/+$/u, "")}/invite#${code}`;
 
-/**
- * What a person reaches in one library, on their page. A core library is private to whoever made
- * it until it is shared, admins included (ADR 0024), so access follows grants, not roles.
- */
-export type LibraryAccess =
-  /** The person manages the library, as whoever made it does. */
-  | "manages"
-  /** The library is shared with the whole household. */
-  | "everyone"
-  /** The library is shared with this person. */
-  | "allowed"
-  /** The library is not shared with this person, or reaches them only through a group. */
-  | "notAllowed";
+/** A grant's level on a library: view, edit, or manage. */
+export type Level = LibraryGrant["level"];
+
+/** A group's id on the core, as a grant names it. */
+export type GroupId = Extract<LibraryGrant["principal"], { readonly kind: "group" }>["groupId"];
 
 /**
- * What `userId` reaches in a library shared as `grants`. Their own grant to view or edit can be
- * given or taken away here; a grant to manage, or the household's, cannot.
+ * A person's own grant on a library, which their page gives or takes away. A core library is
+ * private to whoever made it until it is shared, admins included (ADR 0024), so this follows
+ * grants, not roles. A grant to manage is the maker's, and stays.
+ */
+export type DirectGrant = "manages" | "allowed" | "none";
+
+/** Access that reaches a person through a group they are in, or the whole household. */
+export interface Inherited {
+  readonly level: Level;
+  /** The group's name, or `Everyone` for the household. */
+  readonly through: string;
+}
+
+/** What a person reaches in one library: their own grant, and the strongest one they inherit. */
+export interface LibraryAccess {
+  readonly direct: DirectGrant;
+  readonly inherited: Inherited | null;
+}
+
+const LEVEL_ORDER: ReadonlyArray<Level> = ["view", "edit", "manage"];
+
+const LEVEL_LABELS: Readonly<Record<Level, string>> = {
+  view: "View",
+  edit: "Edit",
+  manage: "Manage",
+};
+
+/**
+ * What `userId`, a member of `groups`, reaches in a library shared as `grants`, the way the
+ * core's `levelOn` reads them: their own grant, and through the household and their groups.
  */
 export const libraryAccess = (
   userId: UserId,
   grants: ReadonlyArray<LibraryGrant>,
+  groups: ReadonlySet<GroupId>,
 ): LibraryAccess => {
-  const own = grants.find(
-    (grant) => grant.principal.kind === "user" && grant.principal.userId === userId,
-  );
+  let direct: DirectGrant = "none";
+  let inherited: Inherited | null = null;
 
-  if (own?.level === "manage") return "manages";
+  for (const { principal, level } of grants) {
+    if (principal.kind === "user") {
+      if (principal.userId === userId) direct = level === "manage" ? "manages" : "allowed";
 
-  if (grants.some((grant) => grant.principal.kind === "household")) return "everyone";
+      continue;
+    }
 
-  return own === undefined ? "notAllowed" : "allowed";
+    const through = principal.kind === "household" ? "Everyone" : principal.name;
+    const reaches = principal.kind === "household" || groups.has(principal.groupId);
+
+    if (
+      reaches &&
+      (inherited === null || LEVEL_ORDER.indexOf(level) > LEVEL_ORDER.indexOf(inherited.level))
+    ) {
+      inherited = { level, through };
+    }
+  }
+
+  return { direct, inherited };
 };
 
-/** How a library's access reads on a person's page. */
-export const ACCESS_LABELS: Readonly<Record<LibraryAccess, string>> = {
-  manages: "Manages",
-  everyone: "Everyone",
-  allowed: "Allowed",
-  notAllowed: "Not Allowed",
+/**
+ * How a library's access reads on a person's page with their own grant `direct`: `Manages`,
+ * `Allowed`, what they inherit such as `View, through Family`, or `Not Allowed`. Taking their own
+ * grant away never reads as Not Allowed while a group or the household still reaches them.
+ */
+export const accessLabel = (direct: DirectGrant, inherited: Inherited | null): string => {
+  if (direct === "manages") return "Manages";
+
+  if (direct === "allowed") return "Allowed";
+
+  return inherited === null
+    ? "Not Allowed"
+    : `${LEVEL_LABELS[inherited.level]}, through ${inherited.through}`;
 };
 
-/** Whether a library's access can be given or taken away on a person's page. */
-export const accessChangeable = (access: LibraryAccess): boolean =>
-  access === "allowed" || access === "notAllowed";
+/** A person's own grant that their page can give or take away: not the maker's grant to manage. */
+export type ChangeableGrant = Exclude<DirectGrant, "manages">;
+
+/** Whether a person's own grant can be given or taken away on their page. */
+export const isChangeable = (direct: DirectGrant): direct is ChangeableGrant =>
+  direct !== "manages";
+
+/** A change the person made on someone's page, from what the field held when they made it. */
+export interface PageEdit<V> {
+  readonly from: V;
+  readonly to: V;
+}
+
+/** What saving a person's page writes, and the fields it would write over a change meanwhile. */
+export interface PersonSave {
+  readonly role: AssignableRole | null;
+  readonly give: ReadonlyArray<GrantedLibrary>;
+  readonly takeAway: ReadonlyArray<GrantedLibrary>;
+  readonly overtaken: ReadonlyArray<string>;
+}
+
+/** A library's id on the core, as a grant names it. */
+export type GrantedLibrary = Parameters<Grants["set"]>[0]["resource"]["id"];
+
+/**
+ * The save of a person's page. `role` and each of `libraries` hold the person's change and the
+ * value the field had when they made it; `liveRole` and `liveDirect` are the core's values now.
+ * Only fields the person changed are written, so saving library access never writes back a role
+ * another admin changed meanwhile. A library whose grant can no longer be changed here, or whose
+ * access is not loaded, is left alone.
+ */
+export const personSave = (
+  role: PageEdit<Role> | null,
+  liveRole: Role,
+  libraries: ReadonlyArray<{
+    readonly libraryId: GrantedLibrary;
+    readonly name: string;
+    readonly edit: PageEdit<ChangeableGrant>;
+    readonly live: DirectGrant | null;
+  }>,
+): PersonSave => {
+  const roleEdit = role === null ? null : fieldEdit<Role>(role.from, role.to, liveRole);
+  const roleTo = roleEdit?.kind === "edited" ? roleEdit.to : null;
+  const assignable = roleTo !== null && isAssignable(roleTo) ? roleTo : null;
+  const give: Array<GrantedLibrary> = [];
+  const takeAway: Array<GrantedLibrary> = [];
+
+  const overtaken: Array<string> =
+    roleEdit?.kind === "edited" && roleEdit.overtaken ? ["Role"] : [];
+
+  for (const { libraryId, name, edit, live } of libraries) {
+    if (live === null || !isChangeable(live)) continue;
+
+    const grant = fieldEdit<ChangeableGrant>(edit.from, edit.to, live);
+
+    if (grant.kind !== "edited") continue;
+
+    if (grant.overtaken) overtaken.push(name);
+
+    (grant.to === "allowed" ? give : takeAway).push(libraryId);
+  }
+
+  return { role: assignable, give, takeAway, overtaken };
+};

@@ -2,19 +2,26 @@ import { Brand } from "effect";
 import { describe, expect, it } from "vitest";
 
 import {
-  ACCESS_LABELS,
-  accessChangeable,
+  accessLabel,
   accountUrlOf,
   canChangeRole,
   expiryLine,
   inviteLink,
+  isChangeable,
   libraryAccess,
+  personSave,
 } from "./accounts";
-import type { HouseholdUser, LibraryGrant, UserId } from "./accounts";
+import type { GrantedLibrary, GroupId, HouseholdUser, LibraryGrant, UserId } from "./accounts";
 
 const userId = Brand.nominal<UserId>();
 
-const groupId = Brand.nominal<Extract<LibraryGrant["principal"], { kind: "group" }>["groupId"]>();
+const groupId = Brand.nominal<GroupId>();
+
+const libraryId = Brand.nominal<GrantedLibrary>();
+
+const family = groupId("g-family");
+
+const NO_GROUPS: ReadonlySet<GroupId> = new Set();
 
 const lucia: HouseholdUser = { userId: userId("u-lucia"), username: "lucia", role: "owner" };
 
@@ -53,37 +60,119 @@ describe("invite links", () => {
 
 describe("libraryAccess", () => {
   it("follows grants whatever the role, since a library is private until shared", () => {
-    expect(libraryAccess(mateo.userId, [])).toBe("notAllowed");
-    expect(libraryAccess(mateo.userId, [toUser(mateo)])).toBe("allowed");
+    expect(libraryAccess(mateo.userId, [], NO_GROUPS)).toStrictEqual({
+      direct: "none",
+      inherited: null,
+    });
+    expect(libraryAccess(mateo.userId, [toUser(mateo)], NO_GROUPS).direct).toBe("allowed");
   });
 
-  it("keeps a manager's grant and a household grant out of a person's page", () => {
-    const manages = libraryAccess(lucia.userId, [
-      { principal: { kind: "user", userId: lucia.userId, username: "lucia" }, level: "manage" },
-      { principal: { kind: "household" }, level: "view" },
-    ]);
+  it("keeps the maker's grant to manage out of reach of a person's page", () => {
+    const access = libraryAccess(
+      lucia.userId,
+      [
+        { principal: { kind: "user", userId: lucia.userId, username: "lucia" }, level: "manage" },
+        { principal: { kind: "household" }, level: "view" },
+      ],
+      NO_GROUPS,
+    );
 
-    expect(manages).toBe("manages");
-    expect(accessChangeable(manages)).toBe(false);
-
-    const everyone = libraryAccess(aiko.userId, [
-      { principal: { kind: "household" }, level: "view" },
-    ]);
-
-    expect(everyone).toBe("everyone");
-    expect(accessChangeable(everyone)).toBe(false);
-    expect(ACCESS_LABELS[everyone]).toBe("Everyone");
+    expect(access.direct).toBe("manages");
+    expect(isChangeable(access.direct)).toBe(false);
+    expect(accessLabel(access.direct, access.inherited)).toBe("Manages");
   });
 
-  it("tells a person's own grant from none, a group's grant counting as none here", () => {
-    expect(libraryAccess(aiko.userId, [toUser(aiko)])).toBe("allowed");
-    expect(libraryAccess(aiko.userId, [toUser(mateo)])).toBe("notAllowed");
-    expect(
-      libraryAccess(aiko.userId, [
-        { principal: { kind: "group", groupId: groupId("g1"), name: "Kids" }, level: "view" },
-      ]),
-    ).toBe("notAllowed");
-    expect(accessChangeable("allowed")).toBe(true);
-    expect(ACCESS_LABELS.notAllowed).toBe("Not Allowed");
+  it("shows access through a group the person is in, as the core's levelOn counts it", () => {
+    const grants: ReadonlyArray<LibraryGrant> = [
+      { principal: { kind: "group", groupId: family, name: "Family" }, level: "view" },
+    ];
+
+    const member = libraryAccess(aiko.userId, grants, new Set([family]));
+
+    expect(member).toStrictEqual({
+      direct: "none",
+      inherited: { level: "view", through: "Family" },
+    });
+    expect(accessLabel(member.direct, member.inherited)).toBe("View, through Family");
+
+    const outsider = libraryAccess(aiko.userId, grants, NO_GROUPS);
+
+    expect(accessLabel(outsider.direct, outsider.inherited)).toBe("Not Allowed");
+  });
+
+  it("keeps a person's own grant editable beside what they inherit, the strongest first", () => {
+    const access = libraryAccess(
+      aiko.userId,
+      [
+        toUser(aiko),
+        { principal: { kind: "household" }, level: "view" },
+        { principal: { kind: "group", groupId: family, name: "Family" }, level: "edit" },
+      ],
+      new Set([family]),
+    );
+
+    expect(access).toStrictEqual({
+      direct: "allowed",
+      inherited: { level: "edit", through: "Family" },
+    });
+    expect(isChangeable(access.direct)).toBe(true);
+    expect(accessLabel("allowed", access.inherited)).toBe("Allowed");
+    // Taking her own grant away leaves what the group gives her, never Not Allowed.
+    expect(accessLabel("none", access.inherited)).toBe("Edit, through Family");
+    expect(accessLabel("none", { level: "view", through: "Everyone" })).toBe(
+      "View, through Everyone",
+    );
+  });
+});
+
+describe("personSave", () => {
+  const movies = libraryId("lib-movies");
+
+  const shows = libraryId("lib-shows");
+
+  it("saves only library access when another admin promotes the person meanwhile", () => {
+    // Aiko's page opens with her a member; the admin gives her Movies. Meanwhile another admin
+    // makes her an admin. The save gives Movies and never sends her role back to member.
+    const save = personSave(null, "admin", [
+      { libraryId: movies, name: "Movies", edit: { from: "none", to: "allowed" }, live: "none" },
+    ]);
+
+    expect(save).toStrictEqual({ role: null, give: [movies], takeAway: [], overtaken: [] });
+  });
+
+  it("never grants admin back after a demotion made meanwhile", () => {
+    const save = personSave(null, "member", [
+      { libraryId: shows, name: "Shows", edit: { from: "allowed", to: "none" }, live: "allowed" },
+    ]);
+
+    expect(save.role).toBeNull();
+    expect(save.takeAway).toStrictEqual([shows]);
+  });
+
+  it("names a role the person changed that another admin changed too, before saving over it", () => {
+    const save = personSave({ from: "member", to: "admin" }, "admin", []);
+
+    expect(save.role).toBe("admin");
+    expect(save.overtaken).toStrictEqual(["Role"]);
+  });
+
+  it("names a library whose grant changed meanwhile, and leaves alone one put back", () => {
+    const save = personSave(null, "member", [
+      { libraryId: movies, name: "Movies", edit: { from: "none", to: "allowed" }, live: "allowed" },
+      { libraryId: shows, name: "Shows", edit: { from: "none", to: "none" }, live: "allowed" },
+    ]);
+
+    expect(save.give).toStrictEqual([movies]);
+    expect(save.takeAway).toStrictEqual([]);
+    expect(save.overtaken).toStrictEqual(["Movies"]);
+  });
+
+  it("leaves alone a library that now holds a grant to manage, or is not loaded", () => {
+    const save = personSave(null, "member", [
+      { libraryId: movies, name: "Movies", edit: { from: "none", to: "allowed" }, live: "manages" },
+      { libraryId: shows, name: "Shows", edit: { from: "none", to: "allowed" }, live: null },
+    ]);
+
+    expect(save).toStrictEqual({ role: null, give: [], takeAway: [], overtaken: [] });
   });
 });

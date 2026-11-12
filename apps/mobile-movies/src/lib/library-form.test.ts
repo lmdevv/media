@@ -7,6 +7,8 @@ import {
   folderProblem,
   shortFolder,
   draftOf,
+  fieldsOf,
+  librarySave,
   submission,
   withFolder,
 } from "./library-form";
@@ -60,5 +62,35 @@ describe("library form", () => {
       "/a",
       "/b",
     ]);
+  });
+
+  it("renames without writing back folders another admin changed while the form was open", () => {
+    const opened: LibraryDetail = {
+      libraryId: Brand.nominal<LibraryDetail["libraryId"]>()("libraries_1"),
+      name: "Movies",
+      kind: "movies",
+      level: "manage",
+      items: 6,
+      folders: ["/media/old"],
+      scan: null,
+    };
+
+    const began = fieldsOf(opened);
+    const draft = draftOf(opened);
+    // Another admin moves the library to /media/new; the form still holds /media/old.
+    const live = fieldsOf({ ...opened, folders: ["/media/new"] });
+    const save = librarySave(began, { ...draft, name: "Films" }, live);
+
+    expect(save.name).toStrictEqual({ kind: "edited", to: "Films", overtaken: false });
+    expect(save.folders).toStrictEqual({ kind: "unedited" });
+  });
+
+  it("asks before saving folders another admin changed too", () => {
+    const began = { name: "Movies", folders: ["/media/old"] };
+    const draft = { name: "Movies", folders: ["/media/mine"] };
+    const save = librarySave(began, draft, { name: "Movies", folders: ["/media/new"] });
+
+    expect(save.folders).toStrictEqual({ kind: "edited", to: ["/media/mine"], overtaken: true });
+    expect(save.name).toStrictEqual({ kind: "unedited" });
   });
 });
