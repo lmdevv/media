@@ -13,9 +13,8 @@
 import { Schema } from "effect";
 
 import { PlaybackSessionId, UserId } from "./ids";
-import { StreamId } from "./media-playback";
+import { PlaybackTokenInvalid, StreamId } from "./media-playback";
 import { PlaybackMode } from "./models/playback";
-import { PlaybackTokenInvalid } from "./playback-token";
 import { RequestId } from "./request-id";
 import { EpochMillis } from "./units";
 

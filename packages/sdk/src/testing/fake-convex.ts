@@ -28,7 +28,7 @@ import type { IssuedToken } from "../convex-transport";
 type CallKind = "query" | "mutation" | "action";
 
 /** One call the fake received, with its bearer token header when it carried one. */
-export interface RecordedRequest {
+interface RecordedRequest {
   readonly kind: CallKind;
   readonly path: string;
   readonly args: Schema.Json;

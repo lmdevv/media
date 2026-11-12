@@ -62,15 +62,6 @@ export const StartedPlayback = Schema.Struct({
 /** A new playback session. */
 export interface StartedPlayback extends Schema.Schema.Type<typeof StartedPlayback> {}
 
-/** A fresh playback token for an active session. */
-export const RenewedToken = Schema.Struct({
-  token: Schema.String,
-  tokenExpiresAt: EpochMillis,
-});
-
-/** A fresh playback token. */
-export interface RenewedToken extends Schema.Schema.Type<typeof RenewedToken> {}
-
 /**
  * Why a device reports progress: the periodic `tick` (about every ten seconds), a `pause`,
  * `resume`, or `seek`, or `ended` when playback reached the end of the file.
@@ -79,15 +70,3 @@ export const ProgressEvent = Schema.Literals(["tick", "pause", "resume", "seek",
 
 /** Why a device reports progress. */
 export type ProgressEvent = typeof ProgressEvent.Type;
-
-/**
- * Outcome of a progress report. `applied` is false when a newer session of the same profile owns
- * the item's progress, so this stale device did not overwrite it.
- */
-export const ProgressReceipt = Schema.Struct({
-  applied: Schema.Boolean,
-  watched: Schema.Boolean,
-});
-
-/** Outcome of a progress report. */
-export interface ProgressReceipt extends Schema.Schema.Type<typeof ProgressReceipt> {}

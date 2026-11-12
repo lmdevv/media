@@ -11,7 +11,7 @@ import * as MediaTestServer from "../testing/media-test-server.ts";
 import { signTestToken } from "../testing/test-tokens.ts";
 import { resolveInsideRoots } from "./file-resolver.ts";
 import { decidePlayback, PlaybackPlan } from "./playback-decision.ts";
-import * as PlaybackToken from "./playback-token.ts";
+import * as PlaybackToken from "./playback-grants.ts";
 import * as StreamSessions from "./stream-sessions.ts";
 
 const hasFfmpeg = await ffmpegAvailable();

@@ -12,7 +12,6 @@ import { Schema } from "effect";
 
 import { PlaybackSessionId } from "./ids";
 import { PlaybackMode } from "./models/playback";
-import { PlaybackTokenInvalid } from "./playback-token";
 
 /** Paths of the playback API, relative to the media service's base URL. */
 export const MEDIA_ROUTES = {
@@ -23,6 +22,26 @@ export const MEDIA_ROUTES = {
   health: "/api/health",
   clientConfig: "/api/client-config",
 } as const;
+
+/**
+ * Why a playback ticket was refused. Never includes the ticket itself. The media service answers
+ * it with status 401. `wrong_purpose` is a download ticket on a playback route, or a playback
+ * ticket on a download route.
+ */
+export class PlaybackTokenInvalid extends Schema.TaggedError<PlaybackTokenInvalid>()(
+  "PlaybackTokenInvalid",
+  {
+    reason: Schema.Literals([
+      "malformed",
+      "bad_signature",
+      "wrong_audience",
+      "expired",
+      "wrong_purpose",
+    ]),
+    message: Schema.String,
+  },
+  { httpApiStatus: 401 },
+) {}
 
 /**
  * Random identifier of one HLS stream that a media service process owns. It is never stored, so a

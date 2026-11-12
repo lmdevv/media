@@ -1,4 +1,4 @@
-import type { PlaybackGrant } from "../playback/playback-token.ts";
+import type { PlaybackGrant } from "../playback/playback-grants.ts";
 
 /** Log messages of playback events. */
 export const LogEvent = {

@@ -164,11 +164,10 @@ jobs:
       - run: pnpm knip
 
   stack:
-    name: backend against a local Convex (${{ matrix.suite }})
+    name: stack suites against a local Convex (${{ matrix.suite }})
     needs: changes
     if: >-
-      contains(fromJSON(needs.changes.outputs.workspaces), 'packages/backend')
-      || contains(fromJSON(needs.changes.outputs.workspaces), 'packages/platform')
+      contains(fromJSON(needs.changes.outputs.workspaces), 'packages/platform')
       || contains(fromJSON(needs.changes.outputs.workspaces), 'packages/sdk')
       || contains(fromJSON(needs.changes.outputs.workspaces), 'apps/cli')
       || contains(fromJSON(needs.changes.outputs.workspaces), 'apps/media')
@@ -187,9 +186,8 @@ jobs:
             run: pnpm --filter @media/platform test:stack --shard=3/4
           - suite: platform 4/4
             run: pnpm --filter @media/platform test:stack --shard=4/4
-          - suite: backend, SDK and CLI
+          - suite: SDK and CLI
             run: |
-              pnpm --filter @media/backend test:stack
               pnpm --filter @media/sdk test:stack
               pnpm --filter @lmdevv/media test:stack
           - suite: media server

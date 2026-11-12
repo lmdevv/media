@@ -1,9 +1,8 @@
-import { PlaybackSessionEnded } from "@media/contracts/media-playback";
-import { PlaybackTokenInvalid } from "@media/contracts/playback-token";
+import { PlaybackSessionEnded, PlaybackTokenInvalid } from "@media/contracts/media-playback";
 import { Effect, Layer, Match, Option, Schema } from "effect";
 import { HttpPlatform, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 
-import * as PlaybackToken from "../playback/playback-token.ts";
+import * as PlaybackToken from "../playback/playback-grants.ts";
 import * as TrickplayStore from "./trickplay-store.ts";
 
 class TrickplayAccessDenied extends Schema.TaggedError<TrickplayAccessDenied>()(

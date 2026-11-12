@@ -1,27 +1,15 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createServer } from "node:http";
 
-import type { FunctionPath } from "@media/contracts/command";
 import { StartedPlayback } from "@media/contracts/models/playback";
 import { Milliseconds } from "@media/contracts/units";
-import { Effect, Exit, Fiber, Layer, Option, Predicate, Ref, Schema, Scope, Stream } from "effect";
+import { Effect, Exit, Fiber, Layer, Option, Predicate, Schema, Stream } from "effect";
+import type { Scope } from "effect";
 import { TestClock } from "effect/testing";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
-import * as ConvexTransport from "./convex-transport";
-import type { WireArgs } from "./convex-transport";
 import { MediaOrigin } from "./media-http";
-import {
-  autoplayCountdown,
-  negotiate,
-  PROGRESS_INTERVAL_MS,
-  reportProgress,
-  stop,
-  stopNow,
-} from "./playback";
-import type { Playback } from "./playback";
-import { clientLayer } from "./testing/client-context";
-import { makeFakePlayer } from "./testing/fake-player";
+import { autoplayCountdown, negotiate, stop, stopNow } from "./playback";
 
 const started = Schema.decodeSync(StartedPlayback)({
   sessionId: "session-1",
@@ -53,31 +41,6 @@ const started = Schema.decodeSync(StartedPlayback)({
   resumePositionMs: 0,
 });
 
-const playback: Playback = {
-  started,
-  stream: {
-    mode: "direct",
-    url: "http://127.0.0.1:9/media",
-    startSeconds: 0,
-    durationSeconds: 600,
-    video: { codec: "h264", width: 1920, height: 1080, dynamicRange: "sdr" },
-    subtitles: [],
-    expiresAt: 1_760_000_000_000,
-  },
-};
-
-const recordingTransport = (calls: Ref.Ref<ReadonlyArray<readonly [FunctionPath, WireArgs]>>) =>
-  ConvexTransport.ConvexTransport.of({
-    call: (_kind, path, args) =>
-      Effect.as(
-        Ref.update(calls, (list) => [...list, [path, args] as const]),
-        path === "playback:reportProgress" ? { applied: true, watched: false } : { ok: true },
-      ),
-    subscribe: () => Stream.never,
-    setAuth: () => Effect.void,
-    authenticated: Effect.succeed("none" as const),
-  });
-
 const advance = (ms: number) =>
   Effect.gen(function* () {
     for (let elapsed = 0; elapsed < ms; elapsed += 100) yield* TestClock.adjust(100);
@@ -92,49 +55,6 @@ const onTestClock = <A, E>(body: Effect.Effect<A, E, Scope.Scope>): Promise<A> =
     ),
   );
 
-describe("progress reporting", () => {
-  it("reports every ten seconds while playing, on each event, and ends on close", () =>
-    onTestClock(
-      Effect.gen(function* () {
-        const calls = yield* Ref.make<ReadonlyArray<readonly [FunctionPath, WireArgs]>>([]);
-        const client = yield* Layer.build(clientLayer(recordingTransport(calls)));
-        const player = yield* makeFakePlayer(30_000);
-        const scope = yield* Scope.make();
-
-        yield* reportProgress(playback, player).pipe(
-          Scope.provide(scope),
-          Effect.provideContext(client),
-        );
-
-        player.userPlay();
-        yield* advance(2 * PROGRESS_INTERVAL_MS + 500);
-        player.userPause();
-        yield* advance(3 * PROGRESS_INTERVAL_MS);
-        player.userSeek(120_000);
-        yield* advance(100);
-        yield* Scope.close(scope, Exit.void);
-
-        const reported = (yield* Ref.get(calls)).map(([path, args]) =>
-          path === "playback:reportProgress" ? args["event"] : path,
-        );
-
-        expect(reported).toStrictEqual([
-          "resume",
-          "tick",
-          "tick",
-          "pause",
-          "seek",
-          "playback:endSession",
-        ]);
-
-        expect((yield* Ref.get(calls)).at(-1)?.[1]).toStrictEqual({
-          sessionId: "session-1",
-          positionMs: 120_000,
-        });
-      }),
-    ));
-});
-
 const received: Array<string> = [];
 
 const receivedBodies: Array<string> = [];
@@ -145,7 +65,7 @@ const PUBLIC_URL = "http://movies.invalid:18480";
 
 const STREAM_ID = "stream-0123456789abcde";
 
-const mediaService = createServer((request: IncomingMessage, response: ServerResponse) => {
+const mediaServer = createServer((request: IncomingMessage, response: ServerResponse) => {
   let text = "";
 
   request.on("data", (chunk: Buffer) => {
@@ -180,8 +100,8 @@ const mediaService = createServer((request: IncomingMessage, response: ServerRes
 let mediaServiceUrl = "";
 
 beforeAll(async () => {
-  await new Promise<void>((resolve) => mediaService.listen(0, "127.0.0.1", resolve));
-  const address = mediaService.address();
+  await new Promise<void>((resolve) => mediaServer.listen(0, "127.0.0.1", resolve));
+  const address = mediaServer.address();
 
   if (address === null || Predicate.isString(address)) throw new Error("The server is not on TCP");
 
@@ -189,7 +109,7 @@ beforeAll(async () => {
 });
 
 afterAll(() => {
-  mediaService.close();
+  mediaServer.close();
 });
 
 const DESKTOP = {

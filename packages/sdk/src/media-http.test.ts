@@ -5,11 +5,11 @@ import { Effect, Option, Predicate, Redacted, Schema, Stream } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  PlaybackTokenInvalid,
   StreamGenerationGone,
   StreamNotFound,
   TranscodeCapacityReached,
 } from "@media/contracts/media-playback";
-import { PlaybackTokenInvalid } from "@media/contracts/playback-token";
 
 import type { MediaRequest } from "./media-http";
 import { requestJson, requestLines, requestPlayback } from "./media-http";

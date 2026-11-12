@@ -1,14 +1,12 @@
 import { Internal, NotFound } from "@media/contracts/errors";
-import { Effect, Layer, ManagedRuntime, Stream } from "effect";
+import { Effect, ManagedRuntime, Stream } from "effect";
 import type { Schema } from "effect";
 import { TestClock } from "effect/testing";
 import { afterEach, describe, expect, it } from "vitest";
 
-import * as ConvexTransport from "./convex-transport";
 import * as QueryWatch from "./query-watch";
 import type { CallError } from "./sdk-errors";
 import { TransportError } from "./sdk-errors";
-import { clientLayer } from "./testing/client-context";
 
 interface Attempt {
   readonly values: ReadonlyArray<Schema.Json>;
@@ -28,34 +26,28 @@ const missing = new NotFound({ message: "No such item: nothing has that ID" });
 const scripted = (script: ReadonlyArray<Attempt>) => {
   const counts = { opened: 0, closed: 0 };
 
-  const transport = ConvexTransport.ConvexTransport.of({
-    call: () => Effect.die(new Error("queries only")),
-    subscribe: () =>
-      Stream.suspend(() => {
-        const attempt = script[Math.min(counts.opened, script.length - 1)] ?? { values: [] };
+  const results = Stream.suspend(() => {
+    const attempt = script[Math.min(counts.opened, script.length - 1)] ?? { values: [] };
 
-        counts.opened += 1;
+    counts.opened += 1;
 
-        return Stream.fromIterable(attempt.values).pipe(
-          Stream.concat(attempt.error === undefined ? Stream.never : Stream.fail(attempt.error)),
-          Stream.ensuring(
-            Effect.sync(() => {
-              counts.closed += 1;
-            }),
-          ),
-        );
-      }),
-    setAuth: () => Effect.void,
-    authenticated: Effect.succeed("none" as const),
+    return Stream.fromIterable(attempt.values).pipe(
+      Stream.concat(attempt.error === undefined ? Stream.never : Stream.fail(attempt.error)),
+      Stream.ensuring(
+        Effect.sync(() => {
+          counts.closed += 1;
+        }),
+      ),
+    );
   });
 
-  const runtime = ManagedRuntime.make(Layer.merge(clientLayer(transport), TestClock.layer()));
+  const runtime = ManagedRuntime.make(TestClock.layer());
 
   runtimes.push(runtime);
 
   return {
     counts,
-    watch: QueryWatch.make(runtime, "libraries.list", {}),
+    watch: QueryWatch.fromStream(runtime, results),
     advance: (ms: number) =>
       runtime.runPromise(
         Effect.gen(function* () {
@@ -70,12 +62,6 @@ const runtimes: Array<ManagedRuntime.ManagedRuntime<never, unknown>> = [];
 afterEach(async () => {
   await Promise.all(runtimes.splice(0).map((runtime) => runtime.dispose()));
 });
-
-const library = {
-  id: "library-1",
-  name: "Movies",
-  kind: "movies",
-};
 
 describe("QueryWatch", () => {
   it("retries a dropped connection with backoff before showing the result", async () => {
@@ -180,18 +166,6 @@ describe("QueryWatch", () => {
     expect(watch.getSnapshot()).toStrictEqual({ status: "loading" });
     expect(seen).toStrictEqual(["loading"]);
     expect(counts.opened).toBe(2);
-  });
-
-  it("decodes each result with the command's schema", async () => {
-    const { watch, advance } = scripted([{ values: [[library]] }]);
-
-    watch.subscribe(() => undefined);
-    await advance(100);
-
-    expect(watch.getSnapshot()).toMatchObject({
-      status: "error",
-      error: { _tag: "ProtocolError" },
-    });
   });
 
   it("runs only while someone listens", async () => {

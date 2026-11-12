@@ -52,7 +52,6 @@ export default defineConfig({
     "legacy/**",
     "tools/oxlint/**",
     "**/dist/**",
-    "packages/backend/convex/_generated/**",
     "packages/platform/convex/_generated/**",
     "apps/web-movies/src/routeTree.gen.ts",
     "apps/web-account/src/routeTree.gen.ts",

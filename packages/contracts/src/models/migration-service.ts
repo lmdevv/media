@@ -3,25 +3,7 @@ import { Schema } from "effect";
 import { EpisodeId, LibraryId, MediaFileId, ProfileId, TitleId, UserId } from "../ids";
 import { EpochMillis, Milliseconds } from "../units";
 import { ExternalIds, LibraryKind, LibraryRoots, MetadataOverrides, TitleKind } from "./catalog";
-import { MigrationSource } from "./jobs";
-import {
-  ImportPhase,
-  MigrationImported,
-  MigrationPhase,
-  PathMapping,
-  PlannedLibraryAccess,
-} from "./migration";
-
-/** A [movies] account and its profiles, for mapping migration source users. */
-export const MigrationTarget = Schema.Struct({
-  userId: UserId,
-  name: Schema.String,
-  email: Schema.NullOr(Schema.String),
-  profiles: Schema.Array(Schema.Struct({ profileId: ProfileId, name: Schema.String })),
-});
-
-/** A [movies] account and its profiles. */
-export interface MigrationTarget extends Schema.Schema.Type<typeof MigrationTarget> {}
+import { ImportPhase, PathMapping, PlannedLibraryAccess } from "./migration";
 
 /**
  * Source credentials sealed by the media service with AES-256-GCM under a key derived from its
@@ -58,58 +40,6 @@ export const PlannedLibrary = Schema.Struct({
 
 /** A source library as a migration plan imports it. */
 export interface PlannedLibrary extends Schema.Schema.Type<typeof PlannedLibrary> {}
-
-/** Everything a migration job needs to run again after a restart. */
-export const StoredMigrationPlan = Schema.Struct({
-  sourceUrl: Schema.String,
-  /** The source server's own identifier; one migration per server runs at a time. */
-  serverId: Schema.String,
-  credentials: SealedCredentials,
-  users: Schema.Array(PlannedUser).check(Schema.isMaxLength(200)),
-  libraries: Schema.Array(PlannedLibrary).check(Schema.isMaxLength(50)),
-  pathMappings: Schema.Array(PathMapping).check(Schema.isMaxLength(50)),
-});
-
-/** A stored migration plan. */
-export interface StoredMigrationPlan extends Schema.Schema.Type<typeof StoredMigrationPlan> {}
-
-/**
- * Where a job resumes: the phase, the unit within it (such as the user index during
- * `watchState`), and how many items of that unit are already written.
- */
-export const MigrationCheckpoint = Schema.Struct({
-  phase: MigrationPhase,
-  unit: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-  cursor: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-});
-
-/** A migration checkpoint. */
-export interface MigrationCheckpoint extends Schema.Schema.Type<typeof MigrationCheckpoint> {}
-
-/** Arguments to queue a migration job for an admin the media service verified. */
-export const StartMigrationArgs = Schema.Struct({
-  requestedBy: UserId,
-  source: MigrationSource,
-  serverName: Schema.String,
-  plan: StoredMigrationPlan,
-});
-
-/** What starting a migration takes. */
-export interface StartMigrationArgs extends Schema.Schema.Type<typeof StartMigrationArgs> {}
-
-/** A held migration job's plan and progress. */
-export const MigrationState = Schema.Struct({
-  source: MigrationSource,
-  serverName: Schema.String,
-  plan: StoredMigrationPlan,
-  checkpoint: MigrationCheckpoint,
-  imported: MigrationImported,
-  /** Libraries the job found or added so far. */
-  libraryIds: Schema.Array(LibraryId),
-});
-
-/** A held migration job's plan and progress. */
-export interface MigrationState extends Schema.Schema.Type<typeof MigrationState> {}
 
 /** A [movies] file with what matching needs: its title's provider IDs and episode numbers. */
 export const CatalogFile = Schema.Struct({
@@ -160,28 +90,6 @@ export const WatchStateImport = Schema.Struct({
 
 /** One matched item's watch state for one profile. */
 export interface WatchStateImport extends Schema.Schema.Type<typeof WatchStateImport> {}
-
-/** What one watch state batch changed. */
-export const WatchStateImported = Schema.Struct({
-  watched: Schema.Int,
-  inProgress: Schema.Int,
-  playCounts: Schema.Int,
-  favorites: Schema.Int,
-  keptLocal: Schema.Int,
-});
-
-/** What one watch state import changed. */
-export interface WatchStateImported extends Schema.Schema.Type<typeof WatchStateImported> {}
-
-/**
- * Most collections, and most members in all, one `importCollections` call may carry. Replacing a
- * collection deletes its old members (at most 1000) and inserts the new ones, so these keep a
- * call's reads and writes inside one Convex mutation's limits.
- */
-export const COLLECTION_BATCH_LIMIT = 10;
-
-/** Most members, summed over its collections, one `importCollections` call may carry. */
-export const COLLECTION_MEMBER_BATCH_LIMIT = 2000;
 
 /** A source collection with its matched titles. Re-importing replaces its members. */
 export const CollectionImport = Schema.Struct({

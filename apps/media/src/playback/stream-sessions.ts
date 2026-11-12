@@ -64,7 +64,7 @@ import * as KeyframeIndex from "./keyframe-index.ts";
 import * as EncoderSlots from "./encoder-slots.ts";
 import { AudioPlan, decidePlayback, PlaybackPlan, VideoPlan } from "./playback-decision.ts";
 import * as PlaybackReporter from "./playback-reporter.ts";
-import type { PlaybackGrant } from "./playback-token.ts";
+import type { PlaybackGrant } from "./playback-grants.ts";
 import * as SessionReports from "./session-reports.ts";
 import * as StreamLiveness from "./stream-liveness.ts";
 import * as StreamOwners from "./stream-owners.ts";

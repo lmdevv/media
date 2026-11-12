@@ -41,8 +41,7 @@ start with `MEDIA_`, the CLI binary is `media`, and the image is `ghcr.io/lmdevv
 | `apps/media`           | `@media/server`: Effect HttpApi media service; serves the SPA         |
 | `apps/cli`             | Effect CLI with JSON output; agent skill in `skills/media/`           |
 | `apps/mobile-movies`   | Expo + Expo Router + Uniwind movies iOS app over `@media/mobile-core` |
-| `packages/backend`     | Old movies' Convex schema, functions, and Convex Auth                 |
-| `packages/platform`    | The core's Convex project; movies and music port into it (ADR 0023)   |
+| `packages/platform`    | The one Convex project: core, movies; music ports into it (ADR 0028)  |
 | `packages/mobile-core` | iOS apps' connection, shared keychain, sign-in, and enrollment        |
 | `packages/contracts`   | Effect Schema DTOs, errors, media HttpApi, plugin role interfaces     |
 | `packages/sdk`         | Effect core with `/effect`, `/react`, `/promise` entry points         |
@@ -67,7 +66,7 @@ browser bundles.
 nix develop          # Node 24, pnpm, ffmpeg
 scripts/dev-stack.sh up  # isolated Convex backend for this worktree
 pnpm install         # also patches tsc and Oxlint with Effect diagnostics, installs lefthook
-pnpm dev             # web on :3001 and Convex dev
+pnpm dev             # the web clients, the media service build, and Expo, watching
 pnpm typecheck       # tsc 7 with the Effect language service
 pnpm lint            # Oxlint, type-aware, anti-slop and Effect rules
 pnpm fmt:check       # Oxfmt
@@ -88,12 +87,13 @@ setting goes in `deploy/image/rootfs/app/bin/init`, `deploy/compose` (`compose.y
 `.env.example`), the root `.env.example`, `nix/module.nix`, and both READMEs; `check-deploy.sh`
 names what is missing.
 
-Each worktree gets its own stack: `scripts/dev-stack.sh up` starts two self-hosted Convex backends
-in Docker, one for old movies and one for the core, deploys both, configures both backends' auth keys,
-movies' playback token secret and media service credential, runs the media service's sign-in
-boundary alone in a third container, and writes the `.env.local` files. Ports, the data volume, and the temporary
+Each worktree gets its own stack: `scripts/dev-stack.sh up` starts the core's self-hosted Convex
+backend in Docker, deploys and configures it, creates the media service's service principal and
+key, runs the media service's sign-in boundary alone in a second container, and writes the
+`.env.local` files. A stack made before old movies' backend was deleted comes up the same way:
+`up` removes the old container and keeps the core's data, and `destroy` also removes the old volume. Ports, the data volume, and the temporary
 output directory derive from the worktree name; `scripts/dev-stack.sh env` prints them, and
-`down` / `destroy` stop or remove the stack. Commit the regenerated `convex/_generated/`. The stack's backends lift Convex's
+`down` / `destroy` stop or remove the stack. Commit the regenerated `convex/_generated/`. The stack's backend lifts Convex's
 4 MiB/s write limit (`MAX_BYTES_WRITTEN_PER_SECOND`, a documented self-hosted knob) so back-to-back
 test seeds never meet `TooManyWrites`; a backend from before that is recreated on `up`, keeping its
 data. Only the dev stack sets it: the image and the NixOS module keep the default, so product code
@@ -174,14 +174,14 @@ The example identities must be replaced with the model and tool that actually co
 
 ## Verify and review
 
-- Ports come from the worktree's stack: Convex API at base, auth at base + 1, media at base + 2, web
-  at base + 3, the core's Convex API at base + 4, its HTTP actions at base + 5, the account
-  client at base + 6, and the sign-in boundary at base + 7, which every stack suite signs in
-  through.
+- Ports come from the worktree's stack: media at base + 2, web at base + 3, the core's Convex API
+  at base + 4, its HTTP actions at base + 5, the account client at base + 6, and the sign-in
+  boundary at base + 7, which every stack suite signs in through. Base and base + 1 stay unused
+  (ADR 0028).
   `scripts/dev-stack.sh env` prints them. Playwright uses `E2E_PORT`, else the stack's
   web port, else 3011.
 - Stack suites need Docker and `scripts/dev-stack.sh up`: `pnpm --filter <pkg> test:stack` for
-  `@media/platform`, `@media/backend`, `@media/sdk`, `@lmdevv/media`, and `@media/server`, then
+  `@media/platform`, `@media/sdk`, `@lmdevv/media`, and `@media/server`, then
   `pnpm --filter @media/web-movies exec playwright test`. For the migration suites, pull the pinned image
   (`docker pull` the `jellyfin/jellyfin:12.2@sha256:…` reference in `.github/workflows/ci.yml`)
   and set `MEDIA_JELLYFIN_DOCKER=1`; without the image the media suite skips the real-Jellyfin

@@ -1,4 +1,8 @@
-import type { CommandArgs, CommandResult } from "@media/contracts/commands";
+import type {
+  MediaCommandArgs,
+  MediaCommandName,
+  MediaCommandResult,
+} from "@media/contracts/media-commands";
 import {
   ClientDiagnosticsRequest,
   ClientErrorReport,
@@ -9,7 +13,6 @@ import { Clock, Effect, Option, Redacted, Schema } from "effect";
 import { reportGate, reportOf } from "./client-error-report";
 import type { ErrorContext } from "./client-error-report";
 import { baseUrl, encodeJson, requestJson } from "./media-http";
-import type { MediaName } from "./movies-client";
 
 /** The session a media server call goes out as: `createPlatform`'s `session` is one. */
 export interface MediaServerSession {
@@ -42,10 +45,10 @@ export interface MediaServer {
    * Runs a media server command with the session's token as the bearer. Rejects with the
    * command's tagged errors, `TransportError`, or `ProtocolError`.
    */
-  readonly run: <Name extends MediaName>(
+  readonly run: <Name extends MediaCommandName>(
     name: Name,
-    args: CommandArgs<Name>,
-  ) => Promise<CommandResult<Name>>;
+    args: MediaCommandArgs<Name>,
+  ) => Promise<MediaCommandResult<Name>>;
   /**
    * Writes an app's unexpected error to the media server's retained log as the signed-in person;
    * sends nothing while signed out.

@@ -18,10 +18,11 @@ dev stack now pin it in `deploy/convex-backend.image`, from `ghcr.io/convex` sin
   `btoa`/`atob` and `crypto.getRandomValues` are present too. `Buffer` is not.
 - **Choice:** `playback.createSession` is a single **mutation**: it authorizes, writes the
   session, and signs the token in one transaction. No action wrapper is needed.
-- **Proof kept in the repo:** `packages/backend/test/registry.test.ts` checks that the Convex
-  signer (`convex/lib/playbackToken.ts`) reproduces `PLAYBACK_TOKEN_TEST_VECTORS` byte for byte,
-  and `packages/backend/test/stack.test.ts` verifies a token minted by the live backend with the
-  contracts verifier (`verifyPlaybackToken`) and the stack's `PLAYBACK_TOKEN_SECRET`.
+- **Proof, in old movies' backend until `p4-movies-delete` deleted it:** its
+  `test/registry.test.ts` checked that the Convex signer (`convex/lib/playbackToken.ts`)
+  reproduced `PLAYBACK_TOKEN_TEST_VECTORS` byte for byte, and its `test/stack.test.ts` verified a
+  token minted by the live backend with the contracts verifier (`verifyPlaybackToken`) and the
+  stack's `PLAYBACK_TOKEN_SECRET`.
 - **Randomness:** `getRandomValues` in mutations returned different values per call, but Convex
   documents query and mutation randomness as seeded for determinism. Secrets (API keys, invite
   codes, device codes) are therefore minted in **actions** that call an internal mutation; only
