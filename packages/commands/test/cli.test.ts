@@ -26,7 +26,7 @@ const refusalsOf = (declarations: ReadonlyArray<Declaration>): ReadonlyArray<str
 };
 
 describe("CLI placement", () => {
-  it("puts admin-scoped core commands under admin, the rest under auth, and movies under movies", () => {
+  it("puts admin-scoped core commands under admin, the rest under auth, and movies and music under their own", () => {
     expect(
       Object.fromEntries(placed.map((command) => [command.name, cliPath(command).join(" ")])),
     ).toEqual({
@@ -162,6 +162,47 @@ describe("CLI placement", () => {
       "movies.titles.search": "movies titles search",
       "movies.titles.similar": "movies titles similar",
       "movies.titles.versions": "movies titles versions",
+      "music.albums.get": "music albums get",
+      "music.albums.list": "music albums list",
+      "music.albums.tracks": "music albums tracks",
+      "music.artists.albums": "music artists albums",
+      "music.artists.get": "music artists get",
+      "music.artists.list": "music artists list",
+      "music.history.list": "music history list",
+      "music.library.home": "music library home",
+      "music.library.search": "music library search",
+      "music.likes.list": "music likes list",
+      "music.likes.set": "music likes set",
+      "music.lyrics.get": "music lyrics get",
+      "music.play.report": "music play report",
+      "music.play.reportOffline": "music play report-offline",
+      "music.play.start": "music play start",
+      "music.playlists.addTracks": "music playlists add-tracks",
+      "music.playlists.create": "music playlists create",
+      "music.playlists.get": "music playlists get",
+      "music.playlists.items": "music playlists items",
+      "music.playlists.list": "music playlists list",
+      "music.playlists.moveItem": "music playlists move-item",
+      "music.playlists.remove": "music playlists remove",
+      "music.playlists.removeItem": "music playlists remove-item",
+      "music.playlists.share": "music playlists share",
+      "music.playlists.shared": "music playlists shared",
+      "music.playlists.sharing": "music playlists sharing",
+      "music.playlists.unshare": "music playlists unshare",
+      "music.playlists.update": "music playlists update",
+      "music.playlists.visibility": "music playlists visibility",
+      "music.queue.add": "music queue add",
+      "music.queue.autoplay": "music queue autoplay",
+      "music.queue.clear": "music queue clear",
+      "music.queue.get": "music queue get",
+      "music.queue.jump": "music queue jump",
+      "music.queue.list": "music queue list",
+      "music.queue.move": "music queue move",
+      "music.queue.play": "music queue play",
+      "music.queue.remove": "music queue remove",
+      "music.queue.repeat": "music queue repeat",
+      "music.queue.shuffle": "music queue shuffle",
+      "music.tracks.list": "music tracks list",
     });
   });
 
@@ -264,6 +305,17 @@ describe("CLI placement", () => {
       "movies.myList.list",
       "movies.titles.episodes",
       "movies.titles.list",
+      "music.albums.list",
+      "music.albums.tracks",
+      "music.artists.albums",
+      "music.artists.list",
+      "music.history.list",
+      "music.likes.list",
+      "music.playlists.items",
+      "music.playlists.list",
+      "music.playlists.shared",
+      "music.queue.list",
+      "music.tracks.list",
     ]);
   });
 });

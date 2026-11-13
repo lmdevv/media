@@ -18,6 +18,7 @@ const inCatalog = (code: string) => ({ code, filename: catalog });
 new RuleTester().run("music-writer", musicWriterRule, {
   valid: [
     inMusic(`await store.insertTrack(fields); await store.deleteAlbum(id);`),
+    inMusic(`await store.insertLike(like); await store.deleteQueueEntry(id);`),
     inMusic(`await ctx.db.insert("libraries", { name });`),
     inMusic(`const db = ctx.db; await db.insert("grants", grant);`),
     inMusic(`const row = await ctx.db.get(id); const page = ctx.db.query("tracks");`),
@@ -40,6 +41,13 @@ new RuleTester().run("music-writer", musicWriterRule, {
     { ...inMusic(`await db.replace(id, doc);`), errors: [{ messageId: "direct" }] },
     { ...inMusic(`await ctx.db.delete("counters", id);`), errors: [{ messageId: "direct" }] },
     { ...inCore(`await ctx.db.insert("albums", album);`), errors: [{ messageId: "direct" }] },
+    { ...inCore(`await ctx.db.insert("likes", like);`), errors: [{ messageId: "direct" }] },
+    { ...inCore(`await ctx.db.delete("playlists", id);`), errors: [{ messageId: "direct" }] },
+    {
+      ...inCore(`await ctx.db.patch("playQueueEntries", id, { order });`),
+      errors: [{ messageId: "direct" }],
+    },
+    { ...inMusic(`await ctx.db.insert("plays", play);`), errors: [{ messageId: "direct" }] },
     { ...inCore(`await ctx.db.delete("tracks", id);`), errors: [{ messageId: "direct" }] },
     {
       ...inCore(`await ctx.db.patch("localLyrics", id, fields);`),

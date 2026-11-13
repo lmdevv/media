@@ -193,8 +193,11 @@ export interface PersonSave {
   readonly overtaken: ReadonlyArray<string>;
 }
 
-/** A library's id on the core, as a grant names it. */
-export type GrantedLibrary = Parameters<Grants["set"]>[0]["resource"]["id"];
+/** A library's id on the core, as a grant names it; a grant can also name a music playlist. */
+export type GrantedLibrary = Extract<
+  Parameters<Grants["set"]>[0]["resource"],
+  { readonly type: "library" }
+>["id"];
 
 /**
  * The save of a person's page. `role` and each of `libraries` hold the person's change and the

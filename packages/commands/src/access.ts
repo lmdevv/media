@@ -5,17 +5,42 @@ import type { ContentDomain } from "./scopes.ts";
 /** Grant levels, weakest first. Each level allows what the ones before it allow. */
 export const levels = ["view", "edit", "manage"] as const;
 
+type GrantLevel = (typeof levels)[number];
+
 interface ResourceTypeEntry {
   readonly table: string;
+  /**
+   * The levels a grant may give each kind of principal on a row of this type. The creator's own
+   * `manage` grant is made with the row, never through a share.
+   */
+  readonly shares: {
+    readonly user: ReadonlyArray<GrantLevel>;
+    readonly group: ReadonlyArray<GrantLevel>;
+    readonly household: ReadonlyArray<GrantLevel>;
+  };
 }
 
 /**
- * Every resource type a grant can name, and the table that holds its rows. Only containers are
- * grantable: a library now, a playlist or a collection later. A title or a track has no grants of
- * its own; it is seen at its library's level.
+ * Every resource type a grant can name, the table that holds its rows, and what a share may give.
+ * Only containers are grantable: a library, and a music playlist, which a person shares with
+ * someone to listen (`view`) or to change its songs (`edit`), or with everyone to listen, as old
+ * music's viewers, collaborators, and shared visibility did. A playlist has one manager and is never
+ * shared with a group. A title or a track has no grants of its own; it is seen at its library's
+ * level.
  */
 export const resourceTypes = {
-  library: { table: "libraries" },
+  library: {
+    table: "libraries",
+    shares: {
+      user: ["view", "edit", "manage"],
+      group: ["view", "edit"],
+      household: ["view", "edit"],
+    },
+  },
+  playlist: {
+    table: "playlists",
+    shares: { user: ["view", "edit"], group: [], household: ["view"] },
+  },
 } as const satisfies Readonly<Record<string, ResourceTypeEntry>>;
 
 const registered: ReadonlyArray<readonly [string, ResourceTypeEntry]> =

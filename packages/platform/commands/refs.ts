@@ -38,6 +38,16 @@ import type { Refs as movies_myList } from "./movies/myList";
 import type { Refs as movies_people } from "./movies/people";
 import type { Refs as movies_play } from "./movies/play";
 import type { Refs as movies_titles } from "./movies/titles";
+import type { Refs as music_albums } from "./music/albums";
+import type { Refs as music_artists } from "./music/artists";
+import type { Refs as music_history } from "./music/history";
+import type { Refs as music_library } from "./music/library";
+import type { Refs as music_likes } from "./music/likes";
+import type { Refs as music_lyrics } from "./music/lyrics";
+import type { Refs as music_play } from "./music/play";
+import type { Refs as music_playlists } from "./music/playlists";
+import type { Refs as music_queue } from "./music/queue";
+import type { Refs as music_tracks } from "./music/tracks";
 
 /**
  * Every command's `api` reference by name. It fails to compile when a command's Convex module is
@@ -228,4 +238,47 @@ export const commandRefs = {
   "movies.titles.search": api.movies.titles.search satisfies movies_titles["search"],
   "movies.titles.similar": api.movies.titles.similar satisfies movies_titles["similar"],
   "movies.titles.versions": api.movies.titles.versions satisfies movies_titles["versions"],
+  "music.albums.get": api.music.albums.get satisfies music_albums["get"],
+  "music.albums.list": api.music.albums.list satisfies music_albums["list"],
+  "music.albums.tracks": api.music.albums.tracks satisfies music_albums["tracks"],
+  "music.artists.albums": api.music.artists.albums satisfies music_artists["albums"],
+  "music.artists.get": api.music.artists.get satisfies music_artists["get"],
+  "music.artists.list": api.music.artists.list satisfies music_artists["list"],
+  "music.history.list": api.music.history.list satisfies music_history["list"],
+  "music.library.home": api.music.library.home satisfies music_library["home"],
+  "music.library.search": api.music.library.search satisfies music_library["search"],
+  "music.likes.list": api.music.likes.list satisfies music_likes["list"],
+  "music.likes.set": api.music.likes.set satisfies music_likes["set"],
+  "music.lyrics.get": api.music.lyrics.get satisfies music_lyrics["get"],
+  "music.play.report": api.music.play.report satisfies music_play["report"],
+  "music.play.reportOffline": api.music.play.reportOffline satisfies music_play["reportOffline"],
+  "music.play.start": api.music.play.start satisfies music_play["start"],
+  "music.playlists.addTracks": api.music.playlists.addTracks satisfies music_playlists["addTracks"],
+  "music.playlists.create": api.music.playlists.create satisfies music_playlists["create"],
+  "music.playlists.get": api.music.playlists.get satisfies music_playlists["get"],
+  "music.playlists.items": api.music.playlists.items satisfies music_playlists["items"],
+  "music.playlists.list": api.music.playlists.list satisfies music_playlists["list"],
+  "music.playlists.moveItem": api.music.playlists.moveItem satisfies music_playlists["moveItem"],
+  "music.playlists.remove": api.music.playlists.remove satisfies music_playlists["remove"],
+  "music.playlists.removeItem": api.music.playlists
+    .removeItem satisfies music_playlists["removeItem"],
+  "music.playlists.share": api.music.playlists.share satisfies music_playlists["share"],
+  "music.playlists.shared": api.music.playlists.shared satisfies music_playlists["shared"],
+  "music.playlists.sharing": api.music.playlists.sharing satisfies music_playlists["sharing"],
+  "music.playlists.unshare": api.music.playlists.unshare satisfies music_playlists["unshare"],
+  "music.playlists.update": api.music.playlists.update satisfies music_playlists["update"],
+  "music.playlists.visibility": api.music.playlists
+    .visibility satisfies music_playlists["visibility"],
+  "music.queue.add": api.music.queue.add satisfies music_queue["add"],
+  "music.queue.autoplay": api.music.queue.autoplay satisfies music_queue["autoplay"],
+  "music.queue.clear": api.music.queue.clear satisfies music_queue["clear"],
+  "music.queue.get": api.music.queue.get satisfies music_queue["get"],
+  "music.queue.jump": api.music.queue.jump satisfies music_queue["jump"],
+  "music.queue.list": api.music.queue.list satisfies music_queue["list"],
+  "music.queue.move": api.music.queue.move satisfies music_queue["move"],
+  "music.queue.play": api.music.queue.play satisfies music_queue["play"],
+  "music.queue.remove": api.music.queue.remove satisfies music_queue["remove"],
+  "music.queue.repeat": api.music.queue.repeat satisfies music_queue["repeat"],
+  "music.queue.shuffle": api.music.queue.shuffle satisfies music_queue["shuffle"],
+  "music.tracks.list": api.music.tracks.list satisfies music_tracks["list"],
 } as const;

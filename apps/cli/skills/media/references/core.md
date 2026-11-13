@@ -736,7 +736,7 @@ List who something you manage is shared with, and at which level.
 - CLI: `media auth grants list`
 - Kind: query
 - Scope: signed-in
-- Arguments: `{ resource: { type: "library"; id: Id<"libraries"> }; paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
+- Arguments: `{ resource: { type: "library"; id: Id<"libraries"> } | { type: "playlist"; id: Id<"playlists"> }; paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
 - Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
 - Result: `{ page: Array<{ principal: { kind: "user"; userId: Id<"users">; username: string } | { kind: "group"; groupId: Id<"groups">; name: string } | { kind: "household" }; level: "view" | "edit" | "manage" }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
 
@@ -747,7 +747,7 @@ Stop sharing something you manage with someone, or leave what was shared with yo
 - CLI: `media auth grants remove`
 - Kind: mutation
 - Scope: signed-in
-- Arguments: `{ resource: { type: "library"; id: Id<"libraries"> }; principal: { kind: "user"; userId: Id<"users"> } | { kind: "group"; groupId: Id<"groups"> } | { kind: "household" } }`
+- Arguments: `{ resource: { type: "library"; id: Id<"libraries"> } | { type: "playlist"; id: Id<"playlists"> }; principal: { kind: "user"; userId: Id<"users"> } | { kind: "group"; groupId: Id<"groups"> } | { kind: "household" } }`
 - Result: `null`
 
 ## `core.permissions.grants.set`
@@ -758,7 +758,7 @@ Share something you manage with a person, a group, or everyone, at exactly one l
 - Kind: mutation
 - Scope: signed-in
 - API keys: refused
-- Arguments: `{ resource: { type: "library"; id: Id<"libraries"> }; principal: { kind: "user"; userId: Id<"users"> } | { kind: "group"; groupId: Id<"groups"> } | { kind: "household" }; level: "view" | "edit" | "manage" }`
+- Arguments: `{ resource: { type: "library"; id: Id<"libraries"> } | { type: "playlist"; id: Id<"playlists"> }; principal: { kind: "user"; userId: Id<"users"> } | { kind: "group"; groupId: Id<"groups"> } | { kind: "household" }; level: "view" | "edit" | "manage" }`
 - Result: `null`
 
 ## `core.permissions.groups.addMember`

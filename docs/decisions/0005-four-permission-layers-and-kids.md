@@ -3,7 +3,8 @@
 - Status: Accepted, 2026-11-03. Amended 2026-11-04 with the first role and the `admin` scope,
   and again the same day with the permissions as built. Amended 2026-11-06 with the service
   principal's scope and key, and 2026-11-09 with the guarded server functions, movies' facts,
-  and the movies commands' access.
+  and the movies commands' access. Amended 2026-11-13 with playlists and the music commands'
+  access.
 - Decisions: D16, D17
 
 ## Context
@@ -209,8 +210,9 @@ admin can give it a role, a reset link, restrictions, or ownership.
   every person on the server but guests, which covers the libraries both old products shared with
   everyone.
 - Resource types live in one registry, `resourceTypes` in `packages/commands/src/access.ts`. Each
-  entry names its table. Only containers are grantable: a library now (ADR 0024), a playlist or a
-  collection later. A title or a track has no grants of its own: it is seen at its library's level,
+  entry names its table and the levels a share may give each kind of principal. Only containers
+  are grantable: a library (ADR 0024) and a playlist (below) now, a collection later. A title or a
+  track has no grants of its own: it is seen at its library's level,
   through `requireItems`, which decides on the library once and then on each item's facts. So a
   title list pages the domain's own index after one library check, and never merges grant ranges.
 - `core.permissions.grants.set`, `remove`, and `list` share anything in the registry. Their
@@ -457,3 +459,83 @@ access-checked movies read stays under all three by one rule, in `movies/reads.t
   current writes nothing, so a page delivered after a newer mark or report never undoes it, the
   same fence as a metadata job's match generation (ADR 0012). The pages themselves do not move
   it.
+
+## Music commands (amended 2026-11-13)
+
+The music commands (ADR 0009) port old music's actions onto the core. What a person keeps of
+music (playlists, likes, plays, the queue) is theirs, keyed by user, as old music kept it.
+
+### Playlists are a resource type
+
+- `playlist` joins `resourceTypes` in `packages/commands/src/access.ts`, with its table
+  `playlists`, and `placements` in `policy.ts` as `unplaced`, with `libraryList: "allows"` and
+  `facts: "container"`. A kid sees a playlist shared with them whatever their allowed libraries,
+  and each entry is decided on its own track's library and facts, so a song a kid may not play
+  shows greyed out as `no_access`, as old music showed a song in a library someone could not
+  read.
+- Each resource type now names, in `shares`, the levels a grant may give each kind of principal.
+  `grant` and `shareNew` refuse anything else with `invalid_args`, whether it comes from a music
+  command or from `core.permissions.grants.set`. A library keeps its rules: a person gets any
+  level, a group or the household `view` or `edit`. A playlist goes to a person to `view` or
+  `edit`, or to the household to `view`, and never to a group (Appendix F, ADS-408, D62). Its
+  creator's `manage` comes from `grantCreator` when it is made, so it has one manager, as old
+  music's playlists had one owner.
+- Old music's sharing maps onto grants:
+
+  | Old music                            | Grant on the playlist  |
+  | ------------------------------------ | ---------------------- |
+  | the owner                            | the owner's `manage`   |
+  | `playlistShares` role `viewer`       | the person's `view`    |
+  | `playlistShares` role `collaborator` | the person's `edit`    |
+  | visibility `shared` (anyone on it)   | the household's `view` |
+  | visibility `private`                 | no household grant     |
+
+  Seeing it needs `music:read` and `view`, changing its songs `music:edit` and `edit`, and
+  renaming, deleting, and sharing it `music:edit` and `manage`. A person may leave a playlist
+  shared with them; its owner may not, as the last manager. `music.playlists.share` and
+  `music.playlists.visibility` refuse API keys, as `core.permissions.grants.set` does.
+
+- An admin holds no grant on someone's private playlist, so it reads `not_found` to them, as this
+  ADR requires. `music.playlists.shared` lists the playlists shared with the caller by name, their
+  own `view` and `edit` grants, as old music listed only shares by name: a playlist shared with
+  everyone opens for anyone who has its id, and lists for no one but its owner.
+
+### Tracks, albums, and artists
+
+- A track's facts are its `explicit` tag; an album and an artist carry none. A catalog list or
+  lookup decides each row's library once a call through `can()` (`libraryGates` in
+  `music/access.ts`), and a kid's explicit filter hides explicit tracks from every list, search,
+  album, artist, playlist entry, queue entry, and start (D17).
+- Album, artist, and song lists keep one order across every library, as old music's did when it
+  read every library: they page one household-wide index (`by_added`, `by_key`, `by_title`, each
+  ending in the row's tie) and decide each row, as `movies.titles.list` does. A page is sized
+  before it reads by `decidableRows` and by its rows at their bounds (`pageRowsFor`), so it reads
+  at most 1,000 documents and 10 MiB however many groups the caller is in or what the rows hold.
+- Home and search walk the music libraries shared with the caller (`walkMusicLibraries`, as
+  `walkMovieLibraries`) on the call's read budget and answer the best they can afford: home sums
+  each library's totals and merges each library's newest albums; search runs each library's
+  search, as old music searched each library it could read.
+
+### Playing
+
+- `music.play.start` decides one track, as `requirePlayable` decides an item, through
+  `trackPlayer` in `music/access.ts`: a person in the household plays what their grants and
+  restrictions allow; a guest plays what their share link covers, the track itself, or its album
+  when the link's maker may play the track, so a link to an album plays its songs and never one a
+  kid maker could not. A refusal, a missing file, and a library without a grant all read
+  `not_found`. It issues a personal `play` ticket for the track, naming the caller's session, as
+  movies does (ADR 0011).
+- Liking, the queue, recording plays, and lyrics decide `play` the same way, with `music:play`,
+  as movies' list asks `play`. Unliking needs no decision, as taking a title off one's list
+  needs none.
+
+### One budget per mutation
+
+- A person's music mutations charge the music meter (`music/budget.ts`, ADR 0024) for everything
+  they read and write, the core's grant reads and writes included. A command that takes songs
+  (`music.queue.play`, `music.queue.add`, `music.playlists.create`, `music.playlists.addTracks`,
+  `music.play.reportOffline`) reads and decides them a chunk at a time (`readDecided` in
+  `music/person.ts`): each chunk as large as what is left pays for at the track bound with each
+  decision's worst case, each read charged at its real size, so 2,000 songs fit in one call and a
+  call never passes Convex's limits; when not one more song fits, the call is refused with
+  `invalid_args` before it writes.

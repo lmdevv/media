@@ -14,16 +14,29 @@ export type Level = (typeof levels)[number];
 export const level = v.union(v.literal("view"), v.literal("edit"), v.literal("manage"));
 
 /** Every resource type a grant can name, and the table that holds its rows. */
-export const resourceTypes = { library: { table: "libraries" } } as const;
+export const resourceTypes = {
+  library: {
+    table: "libraries",
+    shares: {
+      user: ["view", "edit", "manage"],
+      group: ["view", "edit"],
+      household: ["view", "edit"],
+    },
+  },
+  playlist: {
+    table: "playlists",
+    shares: { user: ["view", "edit"], group: [], household: ["view"] },
+  },
+} as const;
 
 /** A resource type a grant can name. */
 export type ResourceType = keyof typeof resourceTypes;
 
 /** `ResourceType` as a Convex validator. */
-export const resourceType = v.union(v.literal("library"));
+export const resourceType = v.union(v.literal("library"), v.literal("playlist"));
 
 /** The id of a row of any resource type. */
-export const resourceId = v.union(v.id("libraries"));
+export const resourceId = v.union(v.id("libraries"), v.id("playlists"));
 
 /** Every kind of domain item a device can keep for offline play, the table that holds it, and what its download serves. */
 export const downloadKinds = {

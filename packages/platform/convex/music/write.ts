@@ -2,8 +2,8 @@ import type {
   IndexNames,
   NamedTableInfo,
   PaginationOptions,
+  OrderedQuery,
   PaginationResult,
-  Query,
   QueryInitializer,
   WithoutSystemFields,
 } from "convex/server";
@@ -23,8 +23,11 @@ import {
   fingerprint,
   fitAlbum,
   fitArtist,
+  descriptionWithin,
+  fitPlay,
   fitTrack,
   labelWithin,
+  playlistNameWithin,
   sameLyrics,
 } from "./fit";
 import type { musicTables } from "./schema";
@@ -33,8 +36,8 @@ import type { Moved } from "./totals";
 import type { LocalLyricSet } from "./validators";
 
 /**
- * The music store: the only module that reads or writes the music tables in a mutation that
- * writes them. Every insert, patch, and delete goes through here, and each keeps the document
+ * The music store: the only module that reads or writes the music tables, the catalog's and the
+ * per-person ones (playlists, likes, plays, the queue), in a mutation that writes them. Every insert, patch, and delete goes through here, and each keeps the document
  * within its bound in `fit.ts` (ADR 0024), so reads may reserve those bounds (ADR 0005). The store
  * sets each new row's tie. It charges its meter for each read and write as it makes it, at the
  * size of the documents Convex reads: a query reads each document it returns, and a patch or a
@@ -50,9 +53,20 @@ export type MusicTable = keyof typeof musicTables;
 type Info<T extends MusicTable> = NamedTableInfo<DataModel, T>;
 
 /** A query over one music table, built from its start. */
-export type Select<T extends MusicTable> = (table: QueryInitializer<Info<T>>) => Query<Info<T>>;
+export type Select<T extends MusicTable> = (
+  table: QueryInitializer<Info<T>>,
+) => OrderedQuery<Info<T>>;
 
-type Fields<T extends "artists" | "albums" | "tracks"> = Omit<WithoutSystemFields<Doc<T>>, "tie">;
+/** The music tables whose rows carry a tie the store sets. */
+type TiedTable =
+  | "artists"
+  | "albums"
+  | "tracks"
+  | "playlists"
+  | "playlistItems"
+  | "playQueueEntries";
+
+type Fields<T extends TiedTable> = Omit<WithoutSystemFields<Doc<T>>, "tie">;
 
 /** Fields a patch writes, as Convex's `db.patch` takes them: `undefined` removes a field. */
 type Patch<Document> = {
@@ -60,6 +74,11 @@ type Patch<Document> = {
     ? Document[Field] | undefined
     : Document[Field];
 };
+
+/** The fields of a playlist a write changes: its name, description, counts, or change time. */
+export type PlaylistChanges = Partial<
+  Pick<Fields<"playlists">, "name" | "description" | "trackCount" | "durationMs" | "updatedAt">
+>;
 
 /** A row as the store wrote it, which a call keeps instead of reading it again. */
 export type Stored<T extends "artists" | "albums" | "tracks"> = Omit<Doc<T>, "_creationTime">;
@@ -175,6 +194,40 @@ export interface MusicStore {
    * after the batch's last item, so a call reserves it in the work it charges before its first.
    */
   readonly moveTotals: (libraryId: Id<"libraries">, moved: Moved) => Promise<void>;
+
+  /** Inserts a person's playlist with its name and description within their maximums. */
+  readonly insertPlaylist: (fields: Fields<"playlists">) => Promise<Id<"playlists">>;
+  /** Writes a playlist's name, description, counts, or change time. */
+  readonly setPlaylist: (id: Id<"playlists">, fields: PlaylistChanges) => Promise<void>;
+  readonly deletePlaylist: (id: Id<"playlists">) => Promise<void>;
+  readonly insertPlaylistItem: (fields: Fields<"playlistItems">) => Promise<Id<"playlistItems">>;
+  readonly setPlaylistItemPosition: (id: Id<"playlistItems">, position: number) => Promise<void>;
+  readonly deletePlaylistItem: (id: Id<"playlistItems">) => Promise<void>;
+
+  readonly insertLike: (fields: WithoutSystemFields<Doc<"likes">>) => Promise<Id<"likes">>;
+  readonly deleteLike: (id: Id<"likes">) => Promise<void>;
+  readonly insertPlay: (fields: WithoutSystemFields<Doc<"plays">>) => Promise<Id<"plays">>;
+  readonly deletePlay: (id: Id<"plays">) => Promise<void>;
+
+  readonly insertQueue: (
+    fields: WithoutSystemFields<Doc<"playQueues">>,
+  ) => Promise<Id<"playQueues">>;
+  /** Writes a queue's generation, current entry, count, or how it plays on. */
+  readonly setQueue: (
+    id: Id<"playQueues">,
+    fields: Partial<WithoutSystemFields<Doc<"playQueues">>>,
+  ) => Promise<void>;
+  /** Deletes a second queue row a defect left beside a person's one queue. */
+  readonly deleteQueue: (id: Id<"playQueues">) => Promise<void>;
+  readonly insertQueueEntry: (
+    fields: Fields<"playQueueEntries">,
+  ) => Promise<Id<"playQueueEntries">>;
+  /** Writes where a queue entry plays, and where it goes back to when shuffle turns off. */
+  readonly setQueueEntryOrder: (
+    id: Id<"playQueueEntries">,
+    orders: Partial<Pick<Fields<"playQueueEntries">, "order" | "listOrder">>,
+  ) => Promise<void>;
+  readonly deleteQueueEntry: (id: Id<"playQueueEntries">) => Promise<void>;
 }
 
 /** The music store over `db`, charging `meter` for each read and write. */
@@ -206,7 +259,7 @@ export const musicStore = (db: Db, meter: Meter): MusicStore => {
     meter.charge(readCost(bytes));
   };
 
-  const select = <T extends MusicTable>(table: T, query: Select<T>): Query<Info<T>> => {
+  const select = <T extends MusicTable>(table: T, query: Select<T>): OrderedQuery<Info<T>> => {
     const start: QueryInitializer<Info<T>> = db.query(table);
 
     return query(start);
@@ -359,5 +412,40 @@ export const musicStore = (db: Db, meter: Meter): MusicStore => {
       await moveTotals(db, libraryId, moved);
       meter.charge(TOTALS_COST);
     },
+
+    insertPlaylist: (fields) =>
+      insert("playlists", {
+        ...fields,
+        name: playlistNameWithin(fields.name),
+        description: descriptionWithin(fields.description),
+        tie: newTie(),
+      }),
+    setPlaylist: (id, fields) => {
+      const fitted: Patch<Doc<"playlists">> = { ...fields };
+
+      if (fields.name !== undefined) fitted.name = playlistNameWithin(fields.name);
+
+      if (fields.description !== undefined) {
+        fitted.description = descriptionWithin(fields.description);
+      }
+
+      return patch("playlists", id, fitted);
+    },
+    deletePlaylist: (id) => remove("playlists", id),
+    insertPlaylistItem: (fields) => insert("playlistItems", { ...fields, tie: newTie() }),
+    setPlaylistItemPosition: (id, position) => patch("playlistItems", id, { position }),
+    deletePlaylistItem: (id) => remove("playlistItems", id),
+
+    insertLike: (fields) => insert("likes", fields),
+    deleteLike: (id) => remove("likes", id),
+    insertPlay: (fields) => insert("plays", fitPlay(fields)),
+    deletePlay: (id) => remove("plays", id),
+
+    insertQueue: (fields) => insert("playQueues", fields),
+    setQueue: (id, fields) => patch("playQueues", id, fields),
+    deleteQueue: (id) => remove("playQueues", id),
+    insertQueueEntry: (fields) => insert("playQueueEntries", { ...fields, tie: newTie() }),
+    setQueueEntryOrder: (id, orders) => patch("playQueueEntries", id, orders),
+    deleteQueueEntry: (id) => remove("playQueueEntries", id),
   };
 };

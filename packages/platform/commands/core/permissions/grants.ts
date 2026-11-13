@@ -11,7 +11,10 @@ import { refuseKeys, requireCaller } from "../../../convex/core/auth/caller";
 import type { Caller } from "../../../convex/core/auth/caller";
 
 const listArgs = v.object({
-  resource: v.union(v.object({ type: v.literal("library"), id: v.id("libraries") })),
+  resource: v.union(
+    v.object({ type: v.literal("library"), id: v.id("libraries") }),
+    v.object({ type: v.literal("playlist"), id: v.id("playlists") }),
+  ),
   paginationOpts: v.object({
     numItems: v.number(),
     cursor: v.union(v.string(), v.null()),
@@ -42,7 +45,10 @@ const listResult = v.object({
 });
 
 const removeArgs = v.object({
-  resource: v.union(v.object({ type: v.literal("library"), id: v.id("libraries") })),
+  resource: v.union(
+    v.object({ type: v.literal("library"), id: v.id("libraries") }),
+    v.object({ type: v.literal("playlist"), id: v.id("playlists") }),
+  ),
   principal: v.union(
     v.object({ kind: v.literal("user"), userId: v.id("users") }),
     v.object({ kind: v.literal("group"), groupId: v.id("groups") }),
@@ -53,7 +59,10 @@ const removeArgs = v.object({
 const removeResult = v.null();
 
 const setArgs = v.object({
-  resource: v.union(v.object({ type: v.literal("library"), id: v.id("libraries") })),
+  resource: v.union(
+    v.object({ type: v.literal("library"), id: v.id("libraries") }),
+    v.object({ type: v.literal("playlist"), id: v.id("playlists") }),
+  ),
   principal: v.union(
     v.object({ kind: v.literal("user"), userId: v.id("users") }),
     v.object({ kind: v.literal("group"), groupId: v.id("groups") }),

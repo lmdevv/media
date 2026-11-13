@@ -33,6 +33,12 @@ export const MUSIC_BOUNDS = {
   fingerprint: 1024,
   /** A track's length in milliseconds, about 50 days: a million of them still sum safely. */
   durationMs: 2 ** 32,
+  /** A playlist's name, in UTF-16 code units: old music's `Name`. */
+  playlistName: 120,
+  /** A playlist's description, in UTF-16 code units: old music's `Description`. */
+  playlistDescription: 500,
+  /** The playback id a play keeps, as `music.play.start` makes it. */
+  playbackId: 64,
 } as const;
 
 /**
@@ -45,6 +51,10 @@ export const DOCUMENT_BYTES = {
   albums: 12 * 1024,
   artists: 8 * 1024,
   localLyrics: 512 * 1024,
+  /** A name and a description at their maximums in 3-byte characters, and a few numbers. */
+  playlists: 4 * 1024,
+  /** Ids, numbers, and a tie: a person's rows hold no free text but a playback id. */
+  small: 1024,
 } as const;
 
 /** Every music table's bound, typed over the schema's tables, so a table added without one fails. */
@@ -53,6 +63,12 @@ export const TABLE_BYTES = {
   albums: DOCUMENT_BYTES.albums,
   tracks: DOCUMENT_BYTES.tracks,
   localLyrics: DOCUMENT_BYTES.localLyrics,
+  playlists: DOCUMENT_BYTES.playlists,
+  playlistItems: DOCUMENT_BYTES.small,
+  likes: DOCUMENT_BYTES.small,
+  plays: DOCUMENT_BYTES.small,
+  playQueues: DOCUMENT_BYTES.small,
+  playQueueEntries: DOCUMENT_BYTES.small,
 } as const satisfies { readonly [Table in keyof typeof musicTables]: number };
 
 const name = (text: string): string => cut(text, MUSIC_BOUNDS.name);
@@ -135,6 +151,19 @@ export const fitArtist = (artist: Fields<"artists">): Fields<"artists"> => ({
   key: uniqueWithin(artist.key, MUSIC_BOUNDS.key),
   searchText: searchable(artist.searchText),
   artHash: artHashWithin(artist.artHash),
+});
+
+/** A playlist's name within its maximum. */
+export const playlistNameWithin = (typed: string): string => cut(typed, MUSIC_BOUNDS.playlistName);
+
+/** A playlist's description within its maximum, or null for none. */
+export const descriptionWithin = (description: string | null): string | null =>
+  description === null ? null : cut(description, MUSIC_BOUNDS.playlistDescription);
+
+/** A play's playback id within its maximum, which `music.play.report` checks before it writes. */
+export const fitPlay = (play: Fields<"plays">): Fields<"plays"> => ({
+  ...play,
+  playbackId: play.playbackId === null ? null : cut(play.playbackId, MUSIC_BOUNDS.playbackId),
 });
 
 /** Room a lyrics row's `trackId` and field names take beside its sets, in Convex's measure. */

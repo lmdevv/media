@@ -80,7 +80,7 @@ describe("media's groups", () => {
     expect(help.stdout).not.toContain("Usage: media <command> [flags]");
   });
 
-  it("lists each group's commands, and says when a group has none yet", async () => {
+  it("lists each group's commands", async () => {
     const admin = await media(["admin", "--help"]);
 
     expect(admin.code).toBe(ExitCode.ok);
@@ -92,7 +92,8 @@ describe("media's groups", () => {
     expect([movies.code, movies.stdout.includes("None yet")]).toEqual([ExitCode.ok, false]);
     expect(movies.stdout).toContain("media movies titles list");
     expect(movies.stdout).toContain("media movies stream <title>");
-    expect([music.code, music.stdout.includes("None yet")]).toEqual([ExitCode.ok, true]);
+    expect([music.code, music.stdout.includes("None yet")]).toEqual([ExitCode.ok, false]);
+    expect(music.stdout).toContain("media music albums list");
 
     expect((await media(["admin", "users"])).stdout).not.toContain("media admin invites");
   });
