@@ -5,6 +5,7 @@ import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { scanKindOf } from "../../../convex/core/jobs/kinds";
 import { movieFile } from "../../movies/scanned";
+import { musicTrack } from "../../music/scanned";
 import { runServer } from "../../service";
 import type { CoreStack } from "../../stack-env";
 import { eventually, retrying } from "../jobs/driver";
@@ -43,7 +44,12 @@ const answer = <Value extends Schema.Top>(value: Value) =>
     Schema.Struct({ outcome: Schema.Literals(["canceled", "lost"]) }),
   ]);
 
-const File = Schema.Struct({ path: Schema.String, size: Schema.Finite, mtime: Schema.Finite });
+const MusicFile = Schema.Struct({
+  path: Schema.String,
+  size: Schema.Finite,
+  mtimeMs: Schema.Finite,
+  missing: Schema.Boolean,
+});
 
 const MovieFile = Schema.Struct({
   path: Schema.String,
@@ -65,8 +71,6 @@ const pageOf = <Row extends Schema.Top>(row: Row) =>
     }),
   );
 
-const Upserted = answer(Schema.Struct({ inserted: Schema.Finite }));
-
 const Landed = answer(
   Schema.Struct({
     files: Schema.Array(Schema.Struct({ path: Schema.String })),
@@ -74,7 +78,9 @@ const Landed = answer(
   }),
 );
 
-const Missing = answer(Schema.Struct({ removed: Schema.Finite }));
+const Written = answer(
+  Schema.Struct({ done: Schema.Finite, released: Schema.Array(Schema.String) }),
+);
 
 const Marked = answer(Schema.Struct({ marked: Schema.Finite, done: Schema.Finite }));
 
@@ -82,14 +88,14 @@ const Finished = Schema.Struct({ outcome: Schema.String });
 
 const LEASE_MS = 30_000;
 
-/** Paths one `missing` call takes, and files one music `upsert` takes. */
+/** Paths one `missing` call takes, and files one `upsert` takes. */
 const BATCH = 500;
 
-const probe = api.core.libraryProbe;
+const music = api.music.scanner;
 
 const movies = api.movies.scanner;
 
-/** A file the library knows; `missing` only for movies, which keep a missing file's row. */
+/** A file the library knows, missing or not: both domains keep a missing file's row. */
 export interface KnownFile extends ScannedFile {
   readonly missing: boolean;
 }
@@ -127,29 +133,73 @@ const moviesUpsert = async (
   return moviesUpsert(stack, lease, files.slice(landed.value.done), inserted + landed.value.done);
 };
 
-/** Marks `paths` missing, sending again what a call's budget left, and counts the newly marked. */
-const moviesMissing = async (
+/**
+ * Writes `files` as tracks titled by their names on albums named by their folders, sending again
+ * what a call's budget left unwritten, and counts every file it wrote as inserted.
+ */
+const musicUpsert = async (
   stack: CoreStack,
   lease: ScanLease,
+  files: ReadonlyArray<ScannedFile>,
+  inserted = 0,
+): Promise<Held<{ readonly inserted: number }>> => {
+  const written = await retrying(() =>
+    runServer(
+      stack,
+      music.upsert,
+      { lease, tracks: files.map((file) => musicTrack(file.path, file.size, file.mtime)) },
+      Written,
+    ),
+  );
+
+  if (written.outcome !== "held") return written;
+
+  const rest = files.slice(written.value.done);
+  const sum = inserted + written.value.done;
+
+  return rest.length === 0
+    ? { outcome: "held", value: { inserted: sum } }
+    : musicUpsert(stack, lease, rest, sum);
+};
+
+/**
+ * Marks `paths` missing in `kind`, sending again what a call's budget left, and counts the newly
+ * marked.
+ */
+const markMissing = async (
+  stack: CoreStack,
+  lease: ScanLease,
+  kind: ContentDomain,
   paths: ReadonlyArray<string>,
   removed = 0,
 ): Promise<Held<{ readonly removed: number }>> => {
   if (paths.length === 0) return { outcome: "held", value: { removed } };
 
   const marked = await retrying(() =>
-    runServer(stack, movies.missing, { lease, paths: [...paths] }, Marked),
+    runServer(
+      stack,
+      kind === "music" ? music.missing : movies.missing,
+      { lease, paths: [...paths] },
+      Marked,
+    ),
   );
 
   if (marked.outcome !== "held") return marked;
 
-  return moviesMissing(stack, lease, paths.slice(marked.value.done), removed + marked.value.marked);
+  return markMissing(
+    stack,
+    lease,
+    kind,
+    paths.slice(marked.value.done),
+    removed + marked.value.marked,
+  );
 };
 
 /**
  * The scanner's calls, each retried on a refusal that committed nothing, as the server's pool will.
- * Music writes the probe's rows; movies writes each file as a movie titled by its path. Movies'
- * `upsert` counts every file it wrote as inserted, and its `missing` counts the files it newly
- * marked missing as removed, since movies keeps their rows.
+ * Music writes each file as a track titled by its name; movies writes each file as a movie titled
+ * by its path. `upsert` counts every file it wrote as inserted, and `missing` counts the files it
+ * newly marked missing as removed, since both keep their rows.
  */
 export const scanCalls = (stack: CoreStack, workerId: string) => ({
   claim: (kind: ContentDomain) =>
@@ -177,8 +227,16 @@ export const scanCalls = (stack: CoreStack, workerId: string) => ({
   > =>
     kind === "music"
       ? mapHeld(
-          await retrying(() => runServer(stack, probe.known, { lease, cursor }, pageOf(File))),
-          (page) => ({ ...page, files: page.files.map((file) => ({ ...file, missing: false })) }),
+          await retrying(() => runServer(stack, music.known, { lease, cursor }, pageOf(MusicFile))),
+          (page) => ({
+            ...page,
+            files: page.files.map((file) => ({
+              path: file.path,
+              size: file.size,
+              mtime: file.mtimeMs,
+              missing: file.missing,
+            })),
+          }),
         )
       : mapHeld(
           await retrying(() =>
@@ -199,17 +257,12 @@ export const scanCalls = (stack: CoreStack, workerId: string) => ({
     kind: ContentDomain,
     files: ReadonlyArray<ScannedFile>,
   ): Promise<Held<{ readonly inserted: number }>> =>
-    kind === "music"
-      ? retrying(() => runServer(stack, probe.upsert, { lease, files: [...files] }, Upserted))
-      : moviesUpsert(stack, lease, files),
+    kind === "music" ? musicUpsert(stack, lease, files) : moviesUpsert(stack, lease, files),
   missing: async (
     lease: ScanLease,
     kind: ContentDomain,
     paths: ReadonlyArray<string>,
-  ): Promise<Held<{ readonly removed: number }>> =>
-    kind === "music"
-      ? retrying(() => runServer(stack, probe.missing, { lease, paths: [...paths] }, Missing))
-      : moviesMissing(stack, lease, paths),
+  ): Promise<Held<{ readonly removed: number }>> => markMissing(stack, lease, kind, paths),
   finish: (lease: ScanLease) =>
     retrying(() =>
       runServer(

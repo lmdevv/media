@@ -506,7 +506,7 @@ Keep an item on this device for offline play at its download quality, within the
 - CLI: `media auth downloads add`
 - Kind: mutation
 - Scope: signed-in
-- Arguments: `{ item: { kind: "file"; id: Id<"mediaFiles"> } | { kind: "probe"; id: Id<"probeItems"> } }`
+- Arguments: `{ item: { kind: "file"; id: Id<"mediaFiles"> } | { kind: "track"; id: Id<"tracks"> } }`
 - Result: `null`
 
 ## `core.downloads.fetch`
@@ -516,8 +516,8 @@ Get a 15-minute download ticket for the current version of an item you keep on t
 - CLI: `media auth downloads fetch`
 - Kind: mutation
 - Scope: signed-in
-- Arguments: `{ item: { kind: "file"; id: Id<"mediaFiles"> } | { kind: "probe"; id: Id<"probeItems"> } }`
-- Result: `{ state: "available"; revision: string; quality: "standard" | "high"; bytes: number; resource: { kind: "file"; id: string }; ticket: string; expiresAt: number } | { state: "expired"; because: "access" | "restricted" | "device" } | { state: "gone" }`
+- Arguments: `{ item: { kind: "file"; id: Id<"mediaFiles"> } | { kind: "track"; id: Id<"tracks"> } }`
+- Result: `{ state: "available"; revision: string; quality: "standard" | "high"; bytes: number; resource: { kind: "file" | "track"; id: string }; ticket: string; expiresAt: number } | { state: "expired"; because: "access" | "restricted" | "device" } | { state: "gone" }`
 
 ## `core.downloads.list`
 
@@ -528,7 +528,7 @@ List what you keep on this device, newest first, and whether each item can still
 - Scope: signed-in
 - Arguments: `{ paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
 - Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
-- Result: `{ page: Array<{ item: { kind: "file"; id: Id<"mediaFiles"> } | { kind: "probe"; id: Id<"probeItems"> }; state: "available"; revision: string; quality: "standard" | "high"; bytes: number; label: string } | { item: { kind: "file"; id: Id<"mediaFiles"> } | { kind: "probe"; id: Id<"probeItems"> }; state: "expired"; because: "access" | "restricted" | "device" } | { item: { kind: "file"; id: Id<"mediaFiles"> } | { kind: "probe"; id: Id<"probeItems"> }; state: "gone" }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
+- Result: `{ page: Array<{ item: { kind: "file"; id: Id<"mediaFiles"> } | { kind: "track"; id: Id<"tracks"> }; state: "available"; revision: string; quality: "standard" | "high"; bytes: number; label: string } | { item: { kind: "file"; id: Id<"mediaFiles"> } | { kind: "track"; id: Id<"tracks"> }; state: "expired"; because: "access" | "restricted" | "device" } | { item: { kind: "file"; id: Id<"mediaFiles"> } | { kind: "track"; id: Id<"tracks"> }; state: "gone" }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
 
 ## `core.downloads.remove`
 
@@ -537,7 +537,7 @@ Stop keeping an item on this device and free the space it takes.
 - CLI: `media auth downloads remove`
 - Kind: mutation
 - Scope: signed-in
-- Arguments: `{ item: { kind: "file"; id: Id<"mediaFiles"> } | { kind: "probe"; id: Id<"probeItems"> } }`
+- Arguments: `{ item: { kind: "file"; id: Id<"mediaFiles"> } | { kind: "track"; id: Id<"tracks"> } }`
 - Result: `null`
 
 ## `core.downloads.setCap`
@@ -590,7 +590,7 @@ Show a guest what their share link names, who shared it, and when it stops worki
 - Kind: query
 - Scope: signed-in
 - Arguments: none
-- Result: `null | { name: string; sharedBy: string; target: { kind: "item"; item: { domain: "movies"; ref: { type: "title"; id: Id<"titles"> } | { type: "episode"; id: Id<"episodes"> } | { type: "file"; id: Id<"mediaFiles"> } } | { domain: "music"; ref: { type: "probeTrack"; id: Id<"probeItems"> } } } | { kind: "session"; domain: "movies" | "music" }; expiresAt: number }`
+- Result: `null | { name: string; sharedBy: string; target: { kind: "item"; item: { domain: "movies"; ref: { type: "title"; id: Id<"titles"> } | { type: "episode"; id: Id<"episodes"> } | { type: "file"; id: Id<"mediaFiles"> } } | { domain: "music"; ref: { type: "track"; id: Id<"tracks"> } | { type: "album"; id: Id<"albums"> } } } | { kind: "session"; domain: "movies" | "music" }; expiresAt: number }`
 
 ## `core.guests.links.activity`
 
@@ -611,7 +611,7 @@ Make a guest link to something you can play or to the group session you host, sh
 - Kind: action
 - Scope: account
 - API keys: refused
-- Arguments: `{ target: { kind: "item"; item: { domain: "movies"; ref: { type: "title"; id: Id<"titles"> } | { type: "episode"; id: Id<"episodes"> } | { type: "file"; id: Id<"mediaFiles"> } } | { domain: "music"; ref: { type: "probeTrack"; id: Id<"probeItems"> } } } | { kind: "session"; domain: "movies" | "music" }; expiresInDays?: number }`
+- Arguments: `{ target: { kind: "item"; item: { domain: "movies"; ref: { type: "title"; id: Id<"titles"> } | { type: "episode"; id: Id<"episodes"> } | { type: "file"; id: Id<"mediaFiles"> } } | { domain: "music"; ref: { type: "track"; id: Id<"tracks"> } | { type: "album"; id: Id<"albums"> } } } | { kind: "session"; domain: "movies" | "music" }; expiresInDays?: number }`
 - Result: `{ linkId: Id<"shareLinks">; url: string; expiresAt: number }`
 
 ## `core.guests.links.list`
@@ -623,7 +623,7 @@ List the guest links you made, or as an admin everyone's, newest first.
 - Scope: account
 - Arguments: `{ whose: "mine" | "everyone"; paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
 - Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
-- Result: `{ page: Array<{ linkId: Id<"shareLinks">; madeBy: string; kind: "item" | "session"; domain: "movies" | "music"; target: { kind: "item"; item: { domain: "movies"; ref: { type: "title"; id: Id<"titles"> } | { type: "episode"; id: Id<"episodes"> } | { type: "file"; id: Id<"mediaFiles"> } } | { domain: "music"; ref: { type: "probeTrack"; id: Id<"probeItems"> } } } | { kind: "session"; domain: "movies" | "music" } | null; state: "open" | "revoked" | "expired" | "dead"; madeAt: number; expiresAt: number }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
+- Result: `{ page: Array<{ linkId: Id<"shareLinks">; madeBy: string; kind: "item" | "session"; domain: "movies" | "music"; target: { kind: "item"; item: { domain: "movies"; ref: { type: "title"; id: Id<"titles"> } | { type: "episode"; id: Id<"episodes"> } | { type: "file"; id: Id<"mediaFiles"> } } | { domain: "music"; ref: { type: "track"; id: Id<"tracks"> } | { type: "album"; id: Id<"albums"> } } } | { kind: "session"; domain: "movies" | "music" } | null; state: "open" | "revoked" | "expired" | "dead"; madeAt: number; expiresAt: number }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
 
 ## `core.guests.links.revoke`
 
@@ -944,7 +944,7 @@ Queue something you can play in your group session, next or at the end.
 - CLI: `media auth together add`
 - Kind: mutation
 - Scope: signed-in
-- Arguments: `{ item: { domain: "movies"; ref: { type: "title"; id: Id<"titles"> } | { type: "episode"; id: Id<"episodes"> } | { type: "file"; id: Id<"mediaFiles"> } } | { domain: "music"; ref: { type: "probeTrack"; id: Id<"probeItems"> } }; at?: "next" | "end" }`
+- Arguments: `{ item: { domain: "movies"; ref: { type: "title"; id: Id<"titles"> } | { type: "episode"; id: Id<"episodes"> } | { type: "file"; id: Id<"mediaFiles"> } } | { domain: "music"; ref: { type: "track"; id: Id<"tracks"> } | { type: "album"; id: Id<"albums"> } }; at?: "next" | "end" }`
 - Result: `{ entryId: Id<"togetherEntries"> }`
 
 ## `core.together.admit`
@@ -995,7 +995,7 @@ Start a group session on something you can play, leaving any session you are a g
 - Kind: action
 - Scope: signed-in
 - API keys: refused
-- Arguments: `{ item: { domain: "movies"; ref: { type: "title"; id: Id<"titles"> } | { type: "episode"; id: Id<"episodes"> } | { type: "file"; id: Id<"mediaFiles"> } } | { domain: "music"; ref: { type: "probeTrack"; id: Id<"probeItems"> } }; join?: "open" | "approval" | "locked"; control?: boolean; add?: boolean }`
+- Arguments: `{ item: { domain: "movies"; ref: { type: "title"; id: Id<"titles"> } | { type: "episode"; id: Id<"episodes"> } | { type: "file"; id: Id<"mediaFiles"> } } | { domain: "music"; ref: { type: "track"; id: Id<"tracks"> } | { type: "album"; id: Id<"albums"> } }; join?: "open" | "approval" | "locked"; control?: boolean; add?: boolean }`
 - Result: `{ sessionId: Id<"togetherSessions">; link: string }`
 
 ## `core.together.get`
@@ -1006,7 +1006,7 @@ Show your group session in a domain: its clock, item, members, settings, link, a
 - Kind: query
 - Scope: signed-in
 - Arguments: `{ domain: "movies" | "music" }`
-- Result: `null | { state: "pending"; sessionId: Id<"togetherSessions">; host: string } | { state: "ended"; sessionId: Id<"togetherSessions">; reason: "host-left" | "abandoned" } | { state: "joined"; sessionId: Id<"togetherSessions">; host: string; role: "host" | "guest"; link: string; settings: { join: "open" | "approval" | "locked"; control: boolean; add: boolean }; may: { control: boolean; add: boolean; manage: boolean }; clock: { status: "playing" | "paused"; positionAtAnchorMs: number; anchorServerTime: number; playbackRate: number; revision: number }; item: { domain: "movies"; ref: { type: "title"; id: Id<"titles"> } | { type: "episode"; id: Id<"episodes"> } | { type: "file"; id: Id<"mediaFiles"> } } | { domain: "music"; ref: { type: "probeTrack"; id: Id<"probeItems"> } } | null; members: Array<{ userId: Id<"users">; username: string; role: "host" | "guest"; present: boolean; linkGuest: boolean }>; pending: Array<{ userId: Id<"users">; username: string; present: boolean }> | null }`
+- Result: `null | { state: "pending"; sessionId: Id<"togetherSessions">; host: string } | { state: "ended"; sessionId: Id<"togetherSessions">; reason: "host-left" | "abandoned" } | { state: "joined"; sessionId: Id<"togetherSessions">; host: string; role: "host" | "guest"; link: string; settings: { join: "open" | "approval" | "locked"; control: boolean; add: boolean }; may: { control: boolean; add: boolean; manage: boolean }; clock: { status: "playing" | "paused"; positionAtAnchorMs: number; anchorServerTime: number; playbackRate: number; revision: number }; item: { domain: "movies"; ref: { type: "title"; id: Id<"titles"> } | { type: "episode"; id: Id<"episodes"> } | { type: "file"; id: Id<"mediaFiles"> } } | { domain: "music"; ref: { type: "track"; id: Id<"tracks"> } | { type: "album"; id: Id<"albums"> } } | null; members: Array<{ userId: Id<"users">; username: string; role: "host" | "guest"; present: boolean; linkGuest: boolean }>; pending: Array<{ userId: Id<"users">; username: string; present: boolean }> | null }`
 
 ## `core.together.heartbeat`
 
@@ -1048,7 +1048,7 @@ List what plays next in your group session in a domain.
 - Scope: signed-in
 - Arguments: `{ domain: "movies" | "music"; paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
 - Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
-- Result: `{ page: Array<{ entryId: Id<"togetherEntries">; item: { domain: "movies"; ref: { type: "title"; id: Id<"titles"> } | { type: "episode"; id: Id<"episodes"> } | { type: "file"; id: Id<"mediaFiles"> } } | { domain: "music"; ref: { type: "probeTrack"; id: Id<"probeItems"> } } | null; addedBy: string | null; removable: boolean }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
+- Result: `{ page: Array<{ entryId: Id<"togetherEntries">; item: { domain: "movies"; ref: { type: "title"; id: Id<"titles"> } | { type: "episode"; id: Id<"episodes"> } | { type: "file"; id: Id<"mediaFiles"> } } | { domain: "music"; ref: { type: "track"; id: Id<"tracks"> } | { type: "album"; id: Id<"albums"> } } | null; addedBy: string | null; removable: boolean }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
 
 ## `core.together.remove`
 

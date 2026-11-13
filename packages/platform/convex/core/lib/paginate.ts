@@ -1,4 +1,6 @@
 import type {
+  OrderedQuery,
+  QueryInitializer,
   IndexNames,
   IndexRange,
   IndexRangeBuilder,
@@ -47,16 +49,19 @@ export const paginate = <Table extends TableNames, Index extends IndexNames<Tabl
   options: PaginationOptions,
 ): Promise<PaginationResult<Doc<Table>>> => {
   const numItems = pageRows(options.numItems);
+  // Typed one step at a time: inferred as one chain, the query's type over every table of the
+  // schema grows past what TypeScript can represent once a table has as many fields as `tracks`.
+  const table: QueryInitializer<TableInfo<Table>> = db.query(list.table);
 
-  return db
-    .query(list.table)
+  const ordered: OrderedQuery<TableInfo<Table>> = table
     .withIndex(list.index, list.range)
-    .order(list.order ?? "asc")
-    .paginate({
-      ...options,
-      numItems,
-      maximumRowsRead: Math.min(options.maximumRowsRead ?? PAGE_ROWS_MAX, PAGE_ROWS_MAX),
-    });
+    .order(list.order ?? "asc");
+
+  return ordered.paginate({
+    ...options,
+    numItems,
+    maximumRowsRead: Math.min(options.maximumRowsRead ?? PAGE_ROWS_MAX, PAGE_ROWS_MAX),
+  });
 };
 
 /**

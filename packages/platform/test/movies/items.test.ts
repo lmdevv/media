@@ -176,10 +176,10 @@ describe.skipIf(stack === undefined)("movies items", { timeout: 120_000 }, () =>
 
     const track: DomainItem = {
       domain: "music",
-      ref: { type: "probeTrack", id: at(songs.itemIds, 0) },
+      ref: { type: "track", id: at(songs.itemIds, 0) },
     };
 
-    const crossed = { domain: "movies", ref: { type: "probeTrack", id: at(songs.itemIds, 0) } };
+    const crossed = { domain: "movies", ref: { type: "track", id: at(songs.itemIds, 0) } };
 
     expect(await refusal(host.signedIn.client.mutation(untypedAdd, { item: crossed }))).toMatch(
       /ArgumentValidationError/u,

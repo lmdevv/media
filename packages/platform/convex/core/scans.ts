@@ -259,7 +259,7 @@ type PurgeHook = FunctionReference<
 
 const purgeHooks = {
   movies: internal.movies.purge.files,
-  music: internal.core.libraryProbe.purge,
+  music: internal.music.purge.tracks,
 } satisfies { readonly [Kind in ContentDomain]: PurgeHook };
 
 /** Schedules the purge of the library's items outside its folders, or of all once it is gone. */

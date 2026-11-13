@@ -13,7 +13,7 @@ import type { Caller } from "../../convex/core/auth/caller";
 const addArgs = v.object({
   item: v.union(
     v.object({ kind: v.literal("file"), id: v.id("mediaFiles") }),
-    v.object({ kind: v.literal("probe"), id: v.id("probeItems") }),
+    v.object({ kind: v.literal("track"), id: v.id("tracks") }),
   ),
 });
 
@@ -22,7 +22,7 @@ const addResult = v.null();
 const fetchArgs = v.object({
   item: v.union(
     v.object({ kind: v.literal("file"), id: v.id("mediaFiles") }),
-    v.object({ kind: v.literal("probe"), id: v.id("probeItems") }),
+    v.object({ kind: v.literal("track"), id: v.id("tracks") }),
   ),
 });
 
@@ -32,7 +32,7 @@ const fetchResult = v.union(
     revision: v.string(),
     quality: v.union(v.literal("standard"), v.literal("high")),
     bytes: v.number(),
-    resource: v.object({ kind: v.union(v.literal("file")), id: v.string() }),
+    resource: v.object({ kind: v.union(v.literal("file"), v.literal("track")), id: v.string() }),
     ticket: v.string(),
     expiresAt: v.number(),
   }),
@@ -60,7 +60,7 @@ const listResult = v.object({
       v.object({
         item: v.union(
           v.object({ kind: v.literal("file"), id: v.id("mediaFiles") }),
-          v.object({ kind: v.literal("probe"), id: v.id("probeItems") }),
+          v.object({ kind: v.literal("track"), id: v.id("tracks") }),
         ),
         state: v.literal("available"),
         revision: v.string(),
@@ -71,7 +71,7 @@ const listResult = v.object({
       v.object({
         item: v.union(
           v.object({ kind: v.literal("file"), id: v.id("mediaFiles") }),
-          v.object({ kind: v.literal("probe"), id: v.id("probeItems") }),
+          v.object({ kind: v.literal("track"), id: v.id("tracks") }),
         ),
         state: v.literal("expired"),
         because: v.union(v.literal("access"), v.literal("restricted"), v.literal("device")),
@@ -79,7 +79,7 @@ const listResult = v.object({
       v.object({
         item: v.union(
           v.object({ kind: v.literal("file"), id: v.id("mediaFiles") }),
-          v.object({ kind: v.literal("probe"), id: v.id("probeItems") }),
+          v.object({ kind: v.literal("track"), id: v.id("tracks") }),
         ),
         state: v.literal("gone"),
       }),
@@ -96,7 +96,7 @@ const listResult = v.object({
 const removeArgs = v.object({
   item: v.union(
     v.object({ kind: v.literal("file"), id: v.id("mediaFiles") }),
-    v.object({ kind: v.literal("probe"), id: v.id("probeItems") }),
+    v.object({ kind: v.literal("track"), id: v.id("tracks") }),
   ),
 });
 

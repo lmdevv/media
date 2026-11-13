@@ -8,6 +8,7 @@ import { guestAccessDocument, linkDocument } from "./core/guests/model";
 import { importSource } from "./core/jobs/kinds";
 import { jobDocument, jobItemDocument, jobKindDocument } from "./core/jobs/model";
 import { moviesTables } from "./movies/schema";
+import { musicTables } from "./music/schema";
 import {
   beatDocument,
   entryDocument,
@@ -99,6 +100,7 @@ const connectOutput = v.union(
  */
 export default defineSchema({
   ...moviesTables,
+  ...musicTables,
 
   /**
    * The principals. A person has a role, and exactly one person is the owner once the server is
@@ -530,18 +532,6 @@ export default defineSchema({
   })
     .index("by_owner_library", ["ownerLibraryId", "libraryId"])
     .index("by_library", ["libraryId"]),
-
-  /**
-   * The test seam for a track in a music library until the music port: a path a scan found, its
-   * size and change time, and whether it is explicit. Movies keep their own rows (`movies/`).
-   */
-  probeItems: defineTable({
-    libraryId: v.id("libraries"),
-    path: v.string(),
-    size: v.number(),
-    mtime: v.number(),
-    explicit: v.boolean(),
-  }).index("by_library_path", ["libraryId", "path"]),
 
   counters: defineTable({
     name: v.string(),

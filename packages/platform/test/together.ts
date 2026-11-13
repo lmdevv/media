@@ -37,9 +37,9 @@ const title = (id: Id<"titles">): DomainItem => ({
   ref: { type: "title", id },
 });
 
-const probeTrack = (id: Id<"probeItems">): DomainItem => ({
+const musicTrack = (id: Id<"tracks">): DomainItem => ({
   domain: "music",
-  ref: { type: "probeTrack", id },
+  ref: { type: "track", id },
 });
 
 const only = <T>(values: ReadonlyArray<T>, at: number): T => {
@@ -73,7 +73,7 @@ export const catalog = async (stack: CoreStack): Promise<Catalog> => {
     g: title(only(films.itemIds, 0)),
     r: title(only(films.itemIds, 1)),
     pg: title(only(films.itemIds, 2)),
-    track: probeTrack(track),
+    track: musicTrack(track),
     share: async (who) => {
       await Promise.all(
         [films.libraryId, songs.libraryId].map(async (libraryId) =>

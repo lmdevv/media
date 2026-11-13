@@ -17,8 +17,8 @@ import type { CoreStack } from "./stack-env";
 // validators check each again whenever a test sends it back.
 const isLibraryId = (value: unknown): value is Id<"libraries"> => Schema.is(Schema.String)(value);
 
-// SAFETY: as `isLibraryId`, for the `probeItems` ids the music seam answers.
-const isItemId = (value: unknown): value is Id<"probeItems"> => Schema.is(Schema.String)(value);
+// SAFETY: as `isLibraryId`, for the `tracks` ids the music seam answers.
+const isItemId = (value: unknown): value is Id<"tracks"> => Schema.is(Schema.String)(value);
 
 // SAFETY: as `isLibraryId`, for the `titles` ids the movies seam answers.
 const isTitleId = (value: unknown): value is Id<"titles"> => Schema.is(Schema.String)(value);
@@ -40,7 +40,7 @@ const FileId = Schema.declare(isFileId);
 const EpisodeId = Schema.declare(isEpisodeId);
 
 const SeededMusic = Schema.Array(
-  Schema.Struct({ libraryId: LibraryId, itemIds: Schema.Array(ItemId) }),
+  Schema.Struct({ libraryId: LibraryId, folder: Schema.String, itemIds: Schema.Array(ItemId) }),
 );
 
 const SeededMovies = Schema.Array(
@@ -75,12 +75,12 @@ export interface Session {
 
 type MoviesSeed = FunctionArgs<typeof internal.movies.probe.seed>["libraries"][number];
 
-type MusicSeed = FunctionArgs<typeof internal.core.libraryProbe.seed>["libraries"][number];
+type MusicSeed = FunctionArgs<typeof internal.music.probe.seed>["libraries"][number];
 
 /** A movie or show to seed, with a minimum viewer age or none for unrated. */
 export type Title = MoviesSeed["titles"][number];
 
-/** A song to seed, explicit or not, as the music probe's stand-in for a track. */
+/** A song to seed, explicit or not. */
 export type Song = MusicSeed["items"][number];
 
 /** A movies library to seed. */
@@ -105,10 +105,11 @@ export interface SeededMoviesLibrary {
   readonly episodeIds: ReadonlyArray<ReadonlyArray<Id<"episodes">>>;
 }
 
-/** A music library the probe made, with its tracks. */
+/** A music library the seam made: its folder, and its tracks. */
 export interface SeededMusicLibrary {
   readonly libraryId: Id<"libraries">;
-  readonly itemIds: ReadonlyArray<Id<"probeItems">>;
+  readonly folder: string;
+  readonly itemIds: ReadonlyArray<Id<"tracks">>;
 }
 
 /** A movie; `age` null is unrated. */
@@ -176,7 +177,7 @@ const seedMusic = async (
   const seeded = await inOrder(batchesOf(libraries), async (batch) =>
     runFunction(
       stack,
-      internal.core.libraryProbe.seed,
+      internal.music.probe.seed,
       {
         managerId: manager.userId,
         libraries: batch.map((library) => ({ name: library.name, items: [...library.items] })),
@@ -191,7 +192,7 @@ const seedMusic = async (
 /**
  * Seeds libraries that `manager` manages, in order, with no scan queued, 200 a call: each library
  * costs its seed a few index ranges, and Convex caps the ranges one transaction reads. Movies
- * libraries hold movies rows; music libraries hold the probe's stand-ins for tracks.
+ * libraries hold movies rows; music libraries hold music tracks, albums, and artists.
  */
 export function seedLibraries(
   stack: CoreStack,
@@ -249,13 +250,13 @@ type Action = FunctionArgs<typeof internal.movies.probe.open>["action"];
 export const openItem = (
   stack: CoreStack,
   session: Session,
-  itemId: Id<"probeItems">,
+  itemId: Id<"tracks">,
   action: Action = "view",
   scope: CallerScope = "signed-in",
 ): Promise<typeof Opened.Type> =>
   runFunction(
     stack,
-    internal.core.libraryProbe.open,
+    internal.music.probe.open,
     { sessionId: session.sessionId, scope, action, itemId },
     Opened,
   );
@@ -281,11 +282,11 @@ export const visibleItems = async (
   session: Session,
   libraryId: Id<"libraries">,
   cursor: string | null = null,
-  seen: ReadonlyArray<Id<"probeItems">> = [],
-): Promise<ReadonlyArray<Id<"probeItems">>> => {
+  seen: ReadonlyArray<Id<"tracks">> = [],
+): Promise<ReadonlyArray<Id<"tracks">>> => {
   const page = await runFunction(
     stack,
-    internal.core.libraryProbe.page,
+    internal.music.probe.page,
     {
       sessionId: session.sessionId,
       scope: "signed-in",

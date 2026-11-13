@@ -28,7 +28,7 @@ export const resourceId = v.union(v.id("libraries"));
 /** Every kind of domain item a device can keep for offline play, the table that holds it, and what its download serves. */
 export const downloadKinds = {
   file: { table: "mediaFiles", serves: "file" },
-  probe: { table: "probeItems", serves: "file" },
+  track: { table: "tracks", serves: "track" },
 } as const;
 
 /** A kind of domain item a device can keep. */
@@ -37,7 +37,7 @@ export type DownloadKind = keyof typeof downloadKinds;
 /** One item a device can keep: its kind, and the id of its row in that kind's table. */
 export const downloadItem = v.union(
   v.object({ kind: v.literal("file"), id: v.id("mediaFiles") }),
-  v.object({ kind: v.literal("probe"), id: v.id("probeItems") }),
+  v.object({ kind: v.literal("track"), id: v.id("tracks") }),
 );
 
 /** One item a device can keep. */
@@ -54,7 +54,8 @@ export const itemTypes = {
   title: { domain: "movies", table: "titles" },
   episode: { domain: "movies", table: "episodes" },
   file: { domain: "movies", table: "mediaFiles" },
-  probeTrack: { domain: "music", table: "probeItems" },
+  track: { domain: "music", table: "tracks" },
+  album: { domain: "music", table: "albums" },
 } as const;
 
 /** A type of item a group session can hold. */
@@ -72,7 +73,10 @@ export const domainItem = v.union(
   }),
   v.object({
     domain: v.literal("music"),
-    ref: v.union(v.object({ type: v.literal("probeTrack"), id: v.id("probeItems") })),
+    ref: v.union(
+      v.object({ type: v.literal("track"), id: v.id("tracks") }),
+      v.object({ type: v.literal("album"), id: v.id("albums") }),
+    ),
   }),
 );
 

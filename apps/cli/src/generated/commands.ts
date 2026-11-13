@@ -1127,8 +1127,8 @@ export const generatedCommands = [
           id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
         }),
         Schema.Struct({
-          kind: Schema.Literal("probe"),
-          id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+          kind: Schema.Literal("track"),
+          id: Schema.String.pipe(Schema.brand("Id<tracks>")),
         }),
       ]),
     }),
@@ -1152,8 +1152,8 @@ export const generatedCommands = [
           id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
         }),
         Schema.Struct({
-          kind: Schema.Literal("probe"),
-          id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+          kind: Schema.Literal("track"),
+          id: Schema.String.pipe(Schema.brand("Id<tracks>")),
         }),
       ]),
     }),
@@ -1164,7 +1164,7 @@ export const generatedCommands = [
         quality: Schema.Union([Schema.Literal("standard"), Schema.Literal("high")]),
         bytes: Schema.Finite,
         resource: Schema.Struct({
-          kind: Schema.Union([Schema.Literal("file")]),
+          kind: Schema.Union([Schema.Literal("file"), Schema.Literal("track")]),
           id: Schema.String,
         }),
         ticket: Schema.String,
@@ -1212,8 +1212,8 @@ export const generatedCommands = [
                 id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
               }),
               Schema.Struct({
-                kind: Schema.Literal("probe"),
-                id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+                kind: Schema.Literal("track"),
+                id: Schema.String.pipe(Schema.brand("Id<tracks>")),
               }),
             ]),
             state: Schema.Literal("available"),
@@ -1229,8 +1229,8 @@ export const generatedCommands = [
                 id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
               }),
               Schema.Struct({
-                kind: Schema.Literal("probe"),
-                id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+                kind: Schema.Literal("track"),
+                id: Schema.String.pipe(Schema.brand("Id<tracks>")),
               }),
             ]),
             state: Schema.Literal("expired"),
@@ -1247,8 +1247,8 @@ export const generatedCommands = [
                 id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
               }),
               Schema.Struct({
-                kind: Schema.Literal("probe"),
-                id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+                kind: Schema.Literal("track"),
+                id: Schema.String.pipe(Schema.brand("Id<tracks>")),
               }),
             ]),
             state: Schema.Literal("gone"),
@@ -1284,8 +1284,8 @@ export const generatedCommands = [
           id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
         }),
         Schema.Struct({
-          kind: Schema.Literal("probe"),
-          id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+          kind: Schema.Literal("track"),
+          id: Schema.String.pipe(Schema.brand("Id<tracks>")),
         }),
       ]),
     }),
@@ -1401,8 +1401,12 @@ export const generatedCommands = [
                 domain: Schema.Literal("music"),
                 ref: Schema.Union([
                   Schema.Struct({
-                    type: Schema.Literal("probeTrack"),
-                    id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+                    type: Schema.Literal("track"),
+                    id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+                  }),
+                  Schema.Struct({
+                    type: Schema.Literal("album"),
+                    id: Schema.String.pipe(Schema.brand("Id<albums>")),
                   }),
                 ]),
               }),
@@ -1495,8 +1499,12 @@ export const generatedCommands = [
               domain: Schema.Literal("music"),
               ref: Schema.Union([
                 Schema.Struct({
-                  type: Schema.Literal("probeTrack"),
-                  id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+                  type: Schema.Literal("track"),
+                  id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+                }),
+                Schema.Struct({
+                  type: Schema.Literal("album"),
+                  id: Schema.String.pipe(Schema.brand("Id<albums>")),
                 }),
               ]),
             }),
@@ -1569,8 +1577,12 @@ export const generatedCommands = [
                     domain: Schema.Literal("music"),
                     ref: Schema.Union([
                       Schema.Struct({
-                        type: Schema.Literal("probeTrack"),
-                        id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+                        type: Schema.Literal("track"),
+                        id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+                      }),
+                      Schema.Struct({
+                        type: Schema.Literal("album"),
+                        id: Schema.String.pipe(Schema.brand("Id<albums>")),
                       }),
                     ]),
                   }),
@@ -2505,8 +2517,12 @@ export const generatedCommands = [
           domain: Schema.Literal("music"),
           ref: Schema.Union([
             Schema.Struct({
-              type: Schema.Literal("probeTrack"),
-              id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+              type: Schema.Literal("track"),
+              id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+            }),
+            Schema.Struct({
+              type: Schema.Literal("album"),
+              id: Schema.String.pipe(Schema.brand("Id<albums>")),
             }),
           ]),
         }),
@@ -2638,8 +2654,12 @@ export const generatedCommands = [
           domain: Schema.Literal("music"),
           ref: Schema.Union([
             Schema.Struct({
-              type: Schema.Literal("probeTrack"),
-              id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+              type: Schema.Literal("track"),
+              id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+            }),
+            Schema.Struct({
+              type: Schema.Literal("album"),
+              id: Schema.String.pipe(Schema.brand("Id<albums>")),
             }),
           ]),
         }),
@@ -2735,8 +2755,12 @@ export const generatedCommands = [
               domain: Schema.Literal("music"),
               ref: Schema.Union([
                 Schema.Struct({
-                  type: Schema.Literal("probeTrack"),
-                  id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+                  type: Schema.Literal("track"),
+                  id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+                }),
+                Schema.Struct({
+                  type: Schema.Literal("album"),
+                  id: Schema.String.pipe(Schema.brand("Id<albums>")),
                 }),
               ]),
             }),
@@ -2862,8 +2886,12 @@ export const generatedCommands = [
                 domain: Schema.Literal("music"),
                 ref: Schema.Union([
                   Schema.Struct({
-                    type: Schema.Literal("probeTrack"),
-                    id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+                    type: Schema.Literal("track"),
+                    id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+                  }),
+                  Schema.Struct({
+                    type: Schema.Literal("album"),
+                    id: Schema.String.pipe(Schema.brand("Id<albums>")),
                   }),
                 ]),
               }),

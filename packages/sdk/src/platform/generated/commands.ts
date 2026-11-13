@@ -824,8 +824,8 @@ const core_downloads_add = mutation({
         id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
       }),
       Schema.Struct({
-        kind: Schema.Literal("probe"),
-        id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+        kind: Schema.Literal("track"),
+        id: Schema.String.pipe(Schema.brand("Id<tracks>")),
       }),
     ]),
   }),
@@ -842,8 +842,8 @@ const core_downloads_fetch = mutation({
         id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
       }),
       Schema.Struct({
-        kind: Schema.Literal("probe"),
-        id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+        kind: Schema.Literal("track"),
+        id: Schema.String.pipe(Schema.brand("Id<tracks>")),
       }),
     ]),
   }),
@@ -853,7 +853,10 @@ const core_downloads_fetch = mutation({
       revision: Schema.String,
       quality: Schema.Union([Schema.Literal("standard"), Schema.Literal("high")]),
       bytes: Schema.Finite,
-      resource: Schema.Struct({ kind: Schema.Union([Schema.Literal("file")]), id: Schema.String }),
+      resource: Schema.Struct({
+        kind: Schema.Union([Schema.Literal("file"), Schema.Literal("track")]),
+        id: Schema.String,
+      }),
       ticket: Schema.String,
       expiresAt: Schema.Finite,
     }),
@@ -892,8 +895,8 @@ const core_downloads_list = query({
               id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
             }),
             Schema.Struct({
-              kind: Schema.Literal("probe"),
-              id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+              kind: Schema.Literal("track"),
+              id: Schema.String.pipe(Schema.brand("Id<tracks>")),
             }),
           ]),
           state: Schema.Literal("available"),
@@ -909,8 +912,8 @@ const core_downloads_list = query({
               id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
             }),
             Schema.Struct({
-              kind: Schema.Literal("probe"),
-              id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+              kind: Schema.Literal("track"),
+              id: Schema.String.pipe(Schema.brand("Id<tracks>")),
             }),
           ]),
           state: Schema.Literal("expired"),
@@ -927,8 +930,8 @@ const core_downloads_list = query({
               id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
             }),
             Schema.Struct({
-              kind: Schema.Literal("probe"),
-              id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+              kind: Schema.Literal("track"),
+              id: Schema.String.pipe(Schema.brand("Id<tracks>")),
             }),
           ]),
           state: Schema.Literal("gone"),
@@ -958,8 +961,8 @@ const core_downloads_remove = mutation({
         id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
       }),
       Schema.Struct({
-        kind: Schema.Literal("probe"),
-        id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+        kind: Schema.Literal("track"),
+        id: Schema.String.pipe(Schema.brand("Id<tracks>")),
       }),
     ]),
   }),
@@ -1042,8 +1045,12 @@ const core_guests_current = query({
               domain: Schema.Literal("music"),
               ref: Schema.Union([
                 Schema.Struct({
-                  type: Schema.Literal("probeTrack"),
-                  id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+                  type: Schema.Literal("track"),
+                  id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+                }),
+                Schema.Struct({
+                  type: Schema.Literal("album"),
+                  id: Schema.String.pipe(Schema.brand("Id<albums>")),
                 }),
               ]),
             }),
@@ -1123,8 +1130,12 @@ const core_guests_links_create = action({
             domain: Schema.Literal("music"),
             ref: Schema.Union([
               Schema.Struct({
-                type: Schema.Literal("probeTrack"),
-                id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+                type: Schema.Literal("track"),
+                id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+              }),
+              Schema.Struct({
+                type: Schema.Literal("album"),
+                id: Schema.String.pipe(Schema.brand("Id<albums>")),
               }),
             ]),
           }),
@@ -1191,8 +1202,12 @@ const core_guests_links_list = query({
                   domain: Schema.Literal("music"),
                   ref: Schema.Union([
                     Schema.Struct({
-                      type: Schema.Literal("probeTrack"),
-                      id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+                      type: Schema.Literal("track"),
+                      id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+                    }),
+                    Schema.Struct({
+                      type: Schema.Literal("album"),
+                      id: Schema.String.pipe(Schema.brand("Id<albums>")),
                     }),
                   ]),
                 }),
@@ -1918,8 +1933,12 @@ const core_together_add = mutation({
         domain: Schema.Literal("music"),
         ref: Schema.Union([
           Schema.Struct({
-            type: Schema.Literal("probeTrack"),
-            id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+            type: Schema.Literal("track"),
+            id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+          }),
+          Schema.Struct({
+            type: Schema.Literal("album"),
+            id: Schema.String.pipe(Schema.brand("Id<albums>")),
           }),
         ]),
       }),
@@ -2017,8 +2036,12 @@ const core_together_create = action({
         domain: Schema.Literal("music"),
         ref: Schema.Union([
           Schema.Struct({
-            type: Schema.Literal("probeTrack"),
-            id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+            type: Schema.Literal("track"),
+            id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+          }),
+          Schema.Struct({
+            type: Schema.Literal("album"),
+            id: Schema.String.pipe(Schema.brand("Id<albums>")),
           }),
         ]),
       }),
@@ -2099,8 +2122,12 @@ const core_together_get = query({
             domain: Schema.Literal("music"),
             ref: Schema.Union([
               Schema.Struct({
-                type: Schema.Literal("probeTrack"),
-                id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+                type: Schema.Literal("track"),
+                id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+              }),
+              Schema.Struct({
+                type: Schema.Literal("album"),
+                id: Schema.String.pipe(Schema.brand("Id<albums>")),
               }),
             ]),
           }),
@@ -2201,8 +2228,12 @@ const core_together_queue = query({
               domain: Schema.Literal("music"),
               ref: Schema.Union([
                 Schema.Struct({
-                  type: Schema.Literal("probeTrack"),
-                  id: Schema.String.pipe(Schema.brand("Id<probeItems>")),
+                  type: Schema.Literal("track"),
+                  id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+                }),
+                Schema.Struct({
+                  type: Schema.Literal("album"),
+                  id: Schema.String.pipe(Schema.brand("Id<albums>")),
                 }),
               ]),
             }),

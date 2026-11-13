@@ -1,8 +1,10 @@
 import { getFunctionName } from "convex/server";
-import type { FunctionArgs, FunctionReference } from "convex/server";
+import type { FunctionArgs, FunctionReference, WithoutSystemFields } from "convex/server";
 import { ConvexError } from "convex/values";
+import type { Value } from "convex/values";
 import { Option, Schema } from "effect";
 
+import type { Doc, Id, TableNames } from "../convex/_generated/dataModel";
 import type { CoreStack } from "./stack-env";
 
 const FunctionResponse = Schema.Union([
@@ -85,6 +87,53 @@ export const callFunction = async <
   return Schema.decodeUnknownSync(result)(decoded.value);
 };
 
+/**
+ * Runs one of the backend's own dashboard mutations with the admin key, as someone editing a
+ * document by hand in the dashboard does: a change no function of the deployment makes.
+ */
+const runDashboardMutation = async (stack: CoreStack, path: string, args: Value): Promise<void> => {
+  const response = await fetch(`${stack.url}/api/mutation`, {
+    method: "POST",
+    headers: new Headers({
+      "Content-Type": "application/json",
+      Authorization: `Convex ${stack.adminKey}`,
+    }),
+    body: JSON.stringify({ path, args, format: "json" }),
+  });
+
+  const body = await response.text();
+
+  if (!response.ok) throw new FunctionRefused(path, response.status, body);
+
+  const decoded = decodeResponse(JSON.parse(body));
+
+  if (decoded.status === "error") throw new Error(`${path} failed: ${decoded.errorMessage}`);
+};
+
+/** Sets `fields` on the documents `ids` of `table` by hand, as the dashboard does. */
+export const patchByHand = <Table extends TableNames>(
+  stack: CoreStack,
+  table: Table,
+  ids: ReadonlyArray<Id<Table>>,
+  fields: Partial<WithoutSystemFields<Doc<Table>>>,
+): Promise<void> =>
+  runDashboardMutation(stack, "_system/frontend/patchDocumentsFields", {
+    table,
+    ids: [...ids],
+    fields,
+  });
+
+/** Inserts `documents` into `table` by hand, as the dashboard does. */
+export const insertByHand = <Table extends TableNames>(
+  stack: CoreStack,
+  table: Table,
+  documents: ReadonlyArray<WithoutSystemFields<Doc<Table>>>,
+): Promise<void> =>
+  runDashboardMutation(stack, "_system/frontend/addDocument", {
+    table,
+    documents: [...documents],
+  });
+
 /** Runs a function with the deployment's admin key and decodes its result, as `callFunction`. */
 export const runFunction = <
   Callable extends AdminCallable,
@@ -107,11 +156,13 @@ const FunctionLog = Schema.Struct({
       cachedResult: Schema.optionalKey(Schema.Boolean),
       error: Schema.optionalKey(Schema.NullOr(Schema.String)),
       willRetry: Schema.optionalKey(Schema.NullOr(Schema.Boolean)),
+      userExecutionTime: Schema.optionalKey(Schema.NullOr(Schema.Finite)),
       usageStats: Schema.optionalKey(
         Schema.Struct({
           databaseReadDocuments: Schema.Finite,
           databaseReadBytes: Schema.optionalKey(Schema.Finite),
           databaseWriteDocuments: Schema.Finite,
+          databaseWriteBytes: Schema.optionalKey(Schema.Finite),
         }),
       ),
     }),
@@ -155,6 +206,13 @@ export interface CallUsage {
   /** The bytes the attempt read, as the backend logged them; 0 when it logged none. */
   readonly bytes: number;
   readonly writes: number;
+  /** The bytes the attempt wrote, as the backend logged them; 0 when it logged none. */
+  readonly writeBytes: number;
+  /**
+   * How long the attempt's own code ran, in seconds, which Convex's 1 s limit bounds, as the
+   * backend logged it; 0 when it logged none. Time in the database is not part of it.
+   */
+  readonly seconds: number;
   /**
    * False for an attempt that failed, including one Convex retried after a conflict or the
    * write-rate limit; its writes rolled back.
@@ -213,6 +271,8 @@ export const followLog = (stack: CoreStack, mark: LogMark): LogFollower => {
                 reads: entry.usageStats.databaseReadDocuments,
                 bytes: entry.usageStats.databaseReadBytes ?? 0,
                 writes: entry.usageStats.databaseWriteDocuments,
+                writeBytes: entry.usageStats.databaseWriteBytes ?? 0,
+                seconds: entry.userExecutionTime ?? 0,
                 committed: (entry.error ?? null) === null && !(entry.willRetry ?? false),
               },
             ]
