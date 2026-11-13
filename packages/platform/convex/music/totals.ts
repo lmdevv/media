@@ -9,6 +9,13 @@ const artistsCounter = (libraryId: Id<"libraries">): string => `music.artists:${
 
 const durationCounter = (libraryId: Id<"libraries">): string => `music.duration:${libraryId}`;
 
+/** The names of a library's album, artist, and duration counters. */
+export const totalNames = (libraryId: Id<"libraries">): ReadonlyArray<string> => [
+  albumsCounter(libraryId),
+  artistsCounter(libraryId),
+  durationCounter(libraryId),
+];
+
 /**
  * A music library's totals as old music's `libraryStats` kept them: tracks on disk, albums with a
  * track on disk, artists with such an album, and the tracks' total length.
@@ -58,7 +65,5 @@ export const totalsOf = async (db: DatabaseReader, libraryId: Id<"libraries">): 
 
 /** Deletes a removed library's totals, once its purge deleted its last rows. */
 export const forgetTotals = async (db: DatabaseWriter, libraryId: Id<"libraries">) => {
-  await deleteCounter(db, albumsCounter(libraryId));
-  await deleteCounter(db, artistsCounter(libraryId));
-  await deleteCounter(db, durationCounter(libraryId));
+  await Promise.all(totalNames(libraryId).map(async (name) => deleteCounter(db, name)));
 };

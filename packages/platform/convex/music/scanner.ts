@@ -24,7 +24,7 @@ import { knownTrack, scannedLyrics, scannedTrack } from "./validators";
 const BATCH_MAX = 500;
 
 /** A scanner call's own work: the lease check, the library, its folders and claims, the totals. */
-const CALL_COST = cost(30, 12, 64 * 1024, 4 * 1024);
+const FIXED_COST = cost(30, 12, 64 * 1024, 4 * 1024);
 
 /**
  * Tracks one `known` call reads: as many as 12 MiB holds at the track bound, so a page of tracks
@@ -62,6 +62,9 @@ const scanWrite = <Value>(
 /**
  * A page of the tracks the library lists inside its folders now, missing ones included, from
  * `cursor`, with what a scan compares to skip unchanged files and find moved and missing ones.
+ * Fingerprints come back as stored: a file without folder artwork has null, and one over 1,024
+ * characters is kept as `uniqueWithin` makes it (`fit.ts`), so the server compares its own
+ * through the same bound.
  * `from` and `to` bound the page to paths from `from` up to `to`, so the server can read ranges of
  * a large library side by side, as old music's `fingerprints` did. Rows of a removed folder are
  * the purge's to delete.
@@ -134,7 +137,7 @@ export const upsert = serverMutation({
       checkBatch(tracks.length);
       scan.admit(tracks.map((track) => track.path));
 
-      const landed = await whileBudget(budgetFor(CALL_COST), tracks, async (track) =>
+      const landed = await whileBudget(budgetFor(FIXED_COST), tracks, async (track) =>
         pathFits(track.path) ? batch.upsert(track) : skipped(null),
       );
 
@@ -159,7 +162,7 @@ export const move = serverMutation({
       checkBatch(moves.length);
       scan.admit(moves.flatMap(({ from, track }) => [from, track.path]));
 
-      const landed = await whileBudget(budgetFor(CALL_COST), moves, async ({ from, track }) =>
+      const landed = await whileBudget(budgetFor(FIXED_COST), moves, async ({ from, track }) =>
         pathFits(from) && pathFits(track.path) ? batch.move(from, track) : skipped(false),
       );
 
@@ -185,7 +188,7 @@ export const missing = serverMutation({
     scanWrite(ctx, held, async (batch, scan) => {
       checkBatch(paths.length);
 
-      const marked = await whileBudget(budgetFor(CALL_COST), scan.admit(paths), async (path) =>
+      const marked = await whileBudget(budgetFor(FIXED_COST), scan.admit(paths), async (path) =>
         pathFits(path) ? batch.markMissing(path) : skipped(false),
       );
 
@@ -211,7 +214,7 @@ export const lyrics = serverMutation({
       checkBatch(tracks.length);
       scan.admit(tracks.map((track) => track.path));
 
-      const saved = await whileBudget(budgetFor(CALL_COST), tracks, async (track) =>
+      const saved = await whileBudget(budgetFor(FIXED_COST), tracks, async (track) =>
         pathFits(track.path) ? batch.saveLyrics(track) : skipped(false),
       );
 

@@ -9,6 +9,7 @@ import { NO_COST, addCost, cost } from "./budget";
 import type { Cost, Step } from "./budget";
 import {
   DOCUMENT_BYTES,
+  MUSIC_BOUNDS,
   artHashWithin,
   checkLyrics,
   fingerprint,
@@ -33,7 +34,6 @@ import {
   setArtistArt,
   setTrackLyrics,
   setTrackMissing,
-  setTrackPath,
   writeLyrics,
   writeTrack,
 } from "./write";
@@ -86,8 +86,12 @@ const formatLabel = (track: ScannedTrack): string => {
   return codec;
 };
 
-/** A length as tracks keep it: whole milliseconds, at least 0, so totals stay whole. */
-const wholeMs = (ms: number): number => (Number.isFinite(ms) ? Math.max(0, Math.round(ms)) : 0);
+/**
+ * A length as tracks keep it: whole milliseconds from 0 to the bound, so totals stay whole and
+ * safe integers however many tracks a library holds.
+ */
+const wholeMs = (ms: number): number =>
+  Number.isFinite(ms) ? Math.min(Math.max(0, Math.round(ms)), MUSIC_BOUNDS.durationMs) : 0;
 
 /** Room the three ids of a track take beside its other fields, in Convex's measure. */
 const TRACK_IDS_BYTES = 256;
@@ -154,12 +158,12 @@ const GAINING_ALBUM = cost(
 
 /**
  * An album that loses a track this call, settled once at the end: as a gaining one, and when no
- * track is left in it, its emptiness checked and the album deleted, then its artist's checked and
- * the artist deleted.
+ * track is left in it, its emptiness checked and the album deleted, then its artist read again,
+ * its albums and tracks checked, and the artist deleted.
  */
 const LOSING_ALBUM = addCost(
   GAINING_ALBUM,
-  cost(5, 2, 2 * DOCUMENT_BYTES.tracks + DOCUMENT_BYTES.albums),
+  cost(6, 2, 2 * DOCUMENT_BYTES.tracks + DOCUMENT_BYTES.albums + DOCUMENT_BYTES.artists),
 );
 
 /** Looking for another track's artwork when a cover went: two tracks of an index range. */
@@ -613,13 +617,12 @@ export const catalogBatch = (
       };
     }
 
-    const moved = { ...source, path: scanned.path };
-    const planned = await planUpsert(scanned, moved);
+    // The upsert writes every field of the track, its new path included, so the move is one write.
+    const planned = await planUpsert(scanned, { ...source, path: scanned.path });
 
     return {
-      cost: addCost(addCost(reads, writeOf(getDocumentSize(moved), true)), planned.cost),
+      cost: addCost(reads, planned.cost),
       run: async () => {
-        await setTrackPath(db, source._id, scanned.path);
         await planned.run();
 
         return true;

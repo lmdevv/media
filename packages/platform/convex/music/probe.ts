@@ -11,12 +11,12 @@ import { inOrder } from "../core/lib/inOrder";
 import { paginate } from "../core/lib/paginate";
 import { grantCreator, requireItems } from "../core/permissions/grants";
 import { contentActions } from "../core/permissions/policy";
-import { withLibraryItems } from "../core/scans";
+import { itemCount, withLibraryItems } from "../core/scans";
 import { CALL_COST, cost } from "./budget";
 import { catalogBatch } from "./catalog";
 import { trackFacts } from "./items";
 import { restPage, tracksPage } from "./purge";
-import { totalsOf } from "./totals";
+import { totalNames, totalsOf } from "./totals";
 import type { ScannedTrack } from "./validators";
 
 /**
@@ -183,21 +183,24 @@ export const counted = internalQuery({
   handler: (ctx, { libraryId }) => totalsOf(ctx.db, libraryId),
 });
 
-/** Whether any shard of the library's track, album, artist, or duration totals is left. */
+/**
+ * Whether any shard of the library's album, artist, or duration totals is left, or its track
+ * total, the core's item count, holds anything.
+ */
 export const hasTotals = internalQuery({
   args: { libraryId: v.id("libraries") },
   returns: v.boolean(),
   handler: async (ctx, { libraryId }) => {
     const shards = await Promise.all(
-      ["libraryItems", "music.albums", "music.artists", "music.duration"].map(async (name) =>
+      totalNames(libraryId).map(async (name) =>
         ctx.db
           .query("counters")
-          .withIndex("by_name_shard", (q) => q.eq("name", `${name}:${libraryId}`))
+          .withIndex("by_name_shard", (q) => q.eq("name", name))
           .first(),
       ),
     );
 
-    return shards.some((shard) => shard !== null);
+    return shards.some((shard) => shard !== null) || (await itemCount(ctx.db, libraryId)) !== 0;
   },
 });
 

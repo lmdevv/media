@@ -31,6 +31,8 @@ export const MUSIC_BOUNDS = {
   artHash: 128,
   /** A file's folder artwork or lyric files as a scan fingerprints them. */
   fingerprint: 1024,
+  /** A track's length in milliseconds, about 50 days: a million of them still sum safely. */
+  durationMs: 2 ** 32,
 } as const;
 
 /**

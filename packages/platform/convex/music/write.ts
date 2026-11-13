@@ -77,9 +77,6 @@ export const writeTrack = (db: Db, id: Id<"tracks">, fields: Fields<"tracks">) =
 
 export const setTrackMissing = (db: Db, id: Id<"tracks">) => db.patch(id, { missing: true });
 
-/** Moves a track to `path`, which a scan keeps within the filesystem's 4,096 bytes. */
-export const setTrackPath = (db: Db, id: Id<"tracks">, path: string) => db.patch(id, { path });
-
 /** Writes what a track keeps about its own lyrics. */
 export const setTrackLyrics = (
   db: Db,

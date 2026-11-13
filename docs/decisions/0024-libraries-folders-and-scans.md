@@ -525,17 +525,18 @@ music's tables of the same names. No client reads them yet; the music commands c
 - **Bounds.** Music has no long free text, so each field has a fixed maximum, applied by the
   writer, instead of movies' fitting of a whole document:
 
-  | Field                                                           | Maximum             | Over it                                        |
-  | --------------------------------------------------------------- | ------------------- | ---------------------------------------------- |
-  | A title, artist, or album as shown; an artist's or album's name | 512 characters      | cut                                            |
-  | An artist's or album's key                                      | 512 characters      | first 447, `#`, and the hex SHA-256 of the key |
-  | A track's title key, which only orders tracks                   | 128 characters      | cut                                            |
-  | Search text                                                     | 1,024 characters    | cut                                            |
-  | A genre, a codec, a format label                                | 96 characters       | cut                                            |
-  | An artwork hash                                                 | 128 characters      | not kept                                       |
-  | A folder artwork or lyric files fingerprint                     | 1,024 characters    | first 959, `#`, and the hex SHA-256            |
-  | A file's path                                                   | 4,096 bytes         | the file is skipped and counts as done         |
-  | A track's lyric sets                                            | 512 KiB for the row | the leading sets that fit                      |
+  | Field                                                           | Maximum                | Over it                                        |
+  | --------------------------------------------------------------- | ---------------------- | ---------------------------------------------- |
+  | A title, artist, or album as shown; an artist's or album's name | 512 characters         | cut                                            |
+  | An artist's or album's key                                      | 512 characters         | first 447, `#`, and the hex SHA-256 of the key |
+  | A track's title key, which only orders tracks                   | 128 characters         | cut                                            |
+  | Search text                                                     | 1,024 characters       | cut                                            |
+  | A genre, a codec, a format label                                | 96 characters          | cut                                            |
+  | An artwork hash                                                 | 128 characters         | not kept                                       |
+  | A folder artwork or lyric files fingerprint                     | 1,024 characters       | first 959, `#`, and the hex SHA-256            |
+  | A file's path                                                   | 4,096 bytes            | the file is skipped and counts as done         |
+  | A track's length                                                | 2^32 ms, about 50 days | kept at the maximum; not a number is 0         |
+  | A track's lyric sets                                            | 512 KiB for the row    | the leading sets that fit                      |
 
   So a track is at most 24 KiB, an album 12 KiB, and an artist 8 KiB; a unit test builds each at
   its longest. A key keeps its leading part and a hash of the whole, so two names that differ past

@@ -366,8 +366,17 @@ describe.skipIf(stack === undefined)("music scanner", { timeout: 180_000 }, () =
 
     if (kept === undefined) throw new Error("one track");
 
-    expect(await upsert(stack, lease, [long, kept])).toMatchObject({ value: { done: 2 } });
-    expect(await expectExact(stack, libraryId)).toMatchObject({ tracks: 1 });
+    const endless = musicTrack(`${root}/Kept/Kept/endless.flac`, 1, 1, {
+      artist: "Kept",
+      album: "Kept",
+      durationMs: 1e20,
+    });
+
+    expect(await upsert(stack, lease, [long, kept, endless])).toMatchObject({ value: { done: 3 } });
+    expect(await expectExact(stack, libraryId)).toMatchObject({
+      tracks: 2,
+      durationMs: kept.durationMs + 2 ** 32,
+    });
     expect(await refusal(upsert(stack, lease, [musicTrack("/elsewhere/a.flac")]))).toMatch(
       /not a path inside/u,
     );
