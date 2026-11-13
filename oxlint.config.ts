@@ -134,7 +134,7 @@ export default defineConfig({
     },
     {
       files: ["packages/platform/convex/**"],
-      rules: { "media/movies-writer": "error" },
+      rules: { "media/movies-writer": "error", "media/music-writer": "error" },
     },
     {
       files: ["packages/platform/convex/auth.ts", "packages/platform/convex/core/auth/**"],

@@ -2,7 +2,7 @@ import { getDocumentSize } from "convex/values";
 import { describe, expect, it } from "vitest";
 
 import type { Id } from "../../convex/_generated/dataModel";
-import { budgetFor, cost, whileBudget } from "../../convex/music/budget";
+import { NO_COST, cost, meterFrom, whileBudget } from "../../convex/music/budget";
 import {
   MUSIC_BOUNDS,
   TABLE_BYTES,
@@ -13,6 +13,7 @@ import {
   fitLyrics,
   fitTrack,
   keyOf,
+  lyricsFieldsOf,
 } from "../../convex/music/fit";
 import type { LocalLyricSet } from "../../convex/music/validators";
 
@@ -164,22 +165,58 @@ describe("music document bounds", () => {
 });
 
 describe("music call budget", () => {
-  it("stop before a step whose bytes would pass the call's, and always run the first", async () => {
-    const limit = { work: cost(1000, 1000).work, readBytes: 100, writeBytes: 100 };
-    const budget = budgetFor(cost(0, 0), limit);
+  const limit = { work: cost(1000, 1000).work, readBytes: 100, writeBytes: 100 };
 
-    const ran = await whileBudget(budget, [60, 30, 20, 5], async (bytes) => ({
-      cost: cost(1, 1, bytes, 0),
-      run: async () => bytes,
-    }));
+  it("start another write only while what the meter charged leaves room for the most one costs", async () => {
+    const meter = meterFrom(NO_COST);
 
-    expect(ran).toEqual([60, 30]);
+    const ran = await whileBudget(meter, limit, cost(1, 1, 30), [60, 5, 20, 1], async (bytes) => {
+      meter.charge(cost(1, 1, bytes));
 
-    const huge = await whileBudget(budgetFor(cost(0, 0), limit), [500, 1], async (bytes) => ({
-      cost: cost(1, 1, 0, bytes),
-      run: async () => bytes,
-    }));
+      return bytes;
+    });
 
-    expect(huge).toEqual([500]);
+    expect(ran).toEqual([60, 5, 20]);
+    expect(meter.spent().readBytes).toBe(85);
+  });
+
+  it("always run the first write, past a limit the call's own work already spent", async () => {
+    const meter = meterFrom(cost(0, 0, 0, 500));
+    const ran = await whileBudget(meter, limit, NO_COST, [1, 2], async (bytes) => bytes);
+
+    expect(ran).toEqual([1]);
+  });
+});
+
+/** How long `work` takes, in milliseconds. */
+const timed = (work: () => void): number => {
+  const start = performance.now();
+
+  work();
+
+  return performance.now() - start;
+};
+
+/** 8,192 sets, Convex's most in an array, of `length` characters each. */
+const manySets = (length: number): ReadonlyArray<LocalLyricSet> =>
+  Array.from({ length: 8192 }, (_, n) => plain(`${n} `.padEnd(length, "la ")));
+
+describe("music lyrics fitting", () => {
+  it("fit 8,192 sets of 100 characters, or as long as a call's 16 MiB holds, in one pass well inside a call's second", () => {
+    for (const input of [manySets(100), manySets(1800)]) {
+      const elapsed = timed(() => {
+        checkLyrics(input);
+        lyricsFieldsOf(fitLyrics(input));
+      });
+
+      const fitted = fitLyrics(input);
+
+      expect(elapsed).toBeLessThan(500);
+      expect(fitted).toEqual(input.slice(0, fitted.length));
+      expect(lyricsFieldsOf(fitted).lyricsBytes).toBeLessThanOrEqual(TABLE_BYTES.localLyrics);
+      expect(lyricsFieldsOf(input.slice(0, fitted.length + 1)).lyricsBytes).toBeGreaterThan(
+        TABLE_BYTES.localLyrics,
+      );
+    }
   });
 });

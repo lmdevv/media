@@ -12,12 +12,13 @@ import { paginate } from "../core/lib/paginate";
 import { grantCreator, requireItems } from "../core/permissions/grants";
 import { contentActions } from "../core/permissions/policy";
 import { itemCount, withLibraryItems } from "../core/scans";
-import { CALL_COST, cost } from "./budget";
+import { CALL_COST, NO_COST, cost, meterFrom } from "./budget";
 import { catalogBatch } from "./catalog";
 import { trackFacts } from "./items";
 import { restPage, tracksPage } from "./purge";
 import { totalNames, totalsOf } from "./totals";
 import type { ScannedTrack } from "./validators";
+import { musicStore } from "./write";
 
 /**
  * The stack suite's seam into the music catalog, as `movies/probe.ts` is for movies: a seed of
@@ -97,11 +98,8 @@ export const seed = internalMutation({
       );
 
       const itemIds = await withLibraryItems(ctx, libraryId, async () => {
-        const batch = catalogBatch(ctx.db, libraryId);
-
-        const written = await inOrder(items, async (item) =>
-          (await batch.upsert(scannedOf(folder, item))).run(),
-        );
+        const batch = catalogBatch(musicStore(ctx.db, meterFrom(NO_COST)), libraryId);
+        const written = await inOrder(items, async (item) => batch.upsert(scannedOf(folder, item)));
 
         const settled = await batch.finish();
 
@@ -318,6 +316,7 @@ export const track = internalQuery({
       explicit: v.boolean(),
       artHash: v.union(v.string(), v.null()),
       lyricsBytes: v.union(v.number(), v.null()),
+      lyricsHash: v.union(v.string(), v.null()),
     }),
   ),
   handler: async (ctx, { trackId }) => {
@@ -333,6 +332,7 @@ export const track = internalQuery({
           explicit: found.explicit,
           artHash: found.artHash,
           lyricsBytes: found.lyricsBytes,
+          lyricsHash: found.lyricsHash,
         };
   },
 });

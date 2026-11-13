@@ -90,11 +90,14 @@ export const musicTables = {
     /** The version of the server's lyrics reader that read this file's lyrics. */
     lyricsReader: v.number(),
     /**
-     * The size of this file's `localLyrics` row as Convex measures it, absent when it has none.
-     * The writer sets it with the row, so a call charges the row's bytes before reading it.
+     * The size of this file's `localLyrics` row as Convex measures it, absent when it has none,
+     * which a scan compares (`music/scanner:known`).
      */
     lyricsBytes: nullable(v.number()),
-    /** SHA-256 of this file's lyric sets as JSON, absent when it has none. */
+    /**
+     * SHA-256 of this file's lyric sets as JSON, absent when it has none. The store writes it with
+     * the row, so a write of the same sets reads nothing (`MusicStore.writeLyrics`).
+     */
     lyricsHash: nullable(v.string()),
     /** Whether this file's own lyrics include synced main lyrics, which LRCLIB never replaces. */
     lyricsSynced: v.boolean(),

@@ -9,12 +9,12 @@ import { serverMutation } from "../core/lib/serverFacing";
 import { withScanLease } from "../core/scans";
 import type { HeldScan } from "../core/scans";
 import { pathFits } from "../movies/bounds";
-import { budgetFor, cost, whileBudget } from "./budget";
-import type { Step } from "./budget";
+import { cost, meterFrom } from "./budget";
 import { catalogBatch } from "./catalog";
 import type { CatalogBatch } from "./catalog";
 import { DOCUMENT_BYTES } from "./fit";
 import { knownTrack, scannedLyrics, scannedTrack } from "./validators";
+import { musicStore } from "./write";
 
 /**
  * The most files, moves, or paths one call takes as arguments. How many of them it writes is the
@@ -23,7 +23,10 @@ import { knownTrack, scannedLyrics, scannedTrack } from "./validators";
  */
 const BATCH_MAX = 500;
 
-/** A scanner call's own work: the lease check, the library, its folders and claims, the totals. */
+/**
+ * A scanner call's own work, charged before its first item: the lease check, the library, its
+ * folders and claims, its item count, and its totals at the end (`MusicStore.moveTotals`).
+ */
 const FIXED_COST = cost(30, 12, 64 * 1024, 4 * 1024);
 
 /**
@@ -36,12 +39,6 @@ const checkBatch = (count: number): void => {
   if (count > BATCH_MAX) throw new Error(`A batch holds at most ${BATCH_MAX} files; got ${count}`);
 };
 
-/** A step for a path over the filesystem's limit, which names no real file: done, writing nothing. */
-const skipped = <Result>(result: Result): Step<Result> => ({
-  cost: cost(0, 0),
-  run: async () => result,
-});
-
 /** Answers what a scanner write's batch settled: the tracks it put on and took off the disk. */
 const scanWrite = <Value>(
   ctx: JobCtx,
@@ -52,7 +49,7 @@ const scanWrite = <Value>(
   ) => Promise<(released: ReadonlyArray<string>) => Value>,
 ) =>
   withScanLease(ctx, "music", held, async (scan) => {
-    const batch = catalogBatch(ctx.db, scan.library._id);
+    const batch = catalogBatch(musicStore(ctx.db, meterFrom(FIXED_COST)), scan.library._id);
     const answer = await write(batch, scan);
     const settled = await batch.finish();
 
@@ -137,8 +134,9 @@ export const upsert = serverMutation({
       checkBatch(tracks.length);
       scan.admit(tracks.map((track) => track.path));
 
-      const landed = await whileBudget(budgetFor(FIXED_COST), tracks, async (track) =>
-        pathFits(track.path) ? batch.upsert(track) : skipped(null),
+      // A path over the filesystem's limit names no real file: it counts as done, writing nothing.
+      const landed = await batch.each(tracks, async (track) =>
+        pathFits(track.path) ? batch.upsert(track) : null,
       );
 
       return (released) => ({ done: landed.length, released: [...released] });
@@ -162,8 +160,8 @@ export const move = serverMutation({
       checkBatch(moves.length);
       scan.admit(moves.flatMap(({ from, track }) => [from, track.path]));
 
-      const landed = await whileBudget(budgetFor(FIXED_COST), moves, async ({ from, track }) =>
-        pathFits(from) && pathFits(track.path) ? batch.move(from, track) : skipped(false),
+      const landed = await batch.each(moves, async ({ from, track }) =>
+        pathFits(from) && pathFits(track.path) ? batch.move(from, track) : false,
       );
 
       return (released) => ({
@@ -188,8 +186,8 @@ export const missing = serverMutation({
     scanWrite(ctx, held, async (batch, scan) => {
       checkBatch(paths.length);
 
-      const marked = await whileBudget(budgetFor(FIXED_COST), scan.admit(paths), async (path) =>
-        pathFits(path) ? batch.markMissing(path) : skipped(false),
+      const marked = await batch.each(scan.admit(paths), async (path) =>
+        pathFits(path) ? batch.markMissing(path) : false,
       );
 
       return (released) => ({
@@ -214,8 +212,8 @@ export const lyrics = serverMutation({
       checkBatch(tracks.length);
       scan.admit(tracks.map((track) => track.path));
 
-      const saved = await whileBudget(budgetFor(FIXED_COST), tracks, async (track) =>
-        pathFits(track.path) ? batch.saveLyrics(track) : skipped(false),
+      const saved = await batch.each(tracks, async (track) =>
+        pathFits(track.path) ? batch.saveLyrics(track) : false,
       );
 
       return () => ({ done: saved.length, saved: saved.filter(Boolean).length });

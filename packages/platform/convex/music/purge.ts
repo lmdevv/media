@@ -4,14 +4,13 @@ import { internal } from "../_generated/api";
 import type { Id } from "../_generated/dataModel";
 import { internalMutation } from "../_generated/server";
 import type { MutationCtx } from "../_generated/server";
-import { paginate } from "../core/lib/paginate";
 import { purgeStep } from "../core/scans";
-import { CALL_COST, budgetFor, cost, whileBudget } from "./budget";
+import { CALL_COST, NO_COST, cost, meterFrom } from "./budget";
 import type { Cost } from "./budget";
 import { catalogBatch } from "./catalog";
 import { DOCUMENT_BYTES } from "./fit";
 import { forgetTotals } from "./totals";
-import { deleteAlbum, deleteArtist } from "./write";
+import { musicStore } from "./write";
 
 /**
  * Tracks one purge page reads: as many as 8 MiB holds at the track bound, leaving the rest of a
@@ -19,8 +18,11 @@ import { deleteAlbum, deleteArtist } from "./write";
  */
 const TRACKS_PAGE = Math.floor((8 * 1024 * 1024) / DOCUMENT_BYTES.tracks);
 
-/** A page's own work: the page read, the library, its folders and claims, and the totals. */
-const PAGE_COST = cost(30, 12, TRACKS_PAGE * DOCUMENT_BYTES.tracks + 64 * 1024, 4 * 1024);
+/**
+ * A page's own work, charged before its first track: the library, its folders and claims, its
+ * item count, and its totals at the end (`MusicStore.moveTotals`).
+ */
+const PAGE_COST = cost(30, 12, 64 * 1024, 4 * 1024);
 
 /** Albums or artists one page of a removed library's last stage deletes. */
 const ROWS_PAGE = 200;
@@ -48,8 +50,9 @@ export const tracksPage = (
   limit: Cost = CALL_COST,
 ): Promise<PurgeNext> =>
   purgeStep(ctx, libraryId, async (scope) => {
-    const found = await paginate(
-      ctx.db,
+    const store = musicStore(ctx.db, meterFrom(PAGE_COST));
+
+    const found = await store.paginate(
       {
         table: "tracks",
         index: "by_library_path",
@@ -59,11 +62,8 @@ export const tracksPage = (
     );
 
     const leaving = found.page.filter((track) => !scope.keeps(track.path));
-    const batch = catalogBatch(ctx.db, libraryId, { totals: !scope.gone });
-
-    const deleted = await whileBudget(budgetFor(PAGE_COST, limit), leaving, async (track) =>
-      batch.remove(track),
-    );
+    const batch = catalogBatch(store, libraryId, { totals: !scope.gone, limit });
+    const deleted = await batch.each(leaving, batch.remove);
 
     const settled = await batch.finish();
 
@@ -104,24 +104,28 @@ export const tracks = internalMutation({
  * once none is left, its totals. Answers whether more is left.
  */
 export const restPage = async (ctx: MutationCtx, libraryId: Id<"libraries">): Promise<boolean> => {
-  const albums = await ctx.db
-    .query("albums")
-    .withIndex("by_library_added", (q) => q.eq("libraryId", libraryId))
-    .take(ROWS_PAGE);
+  const store = musicStore(ctx.db, meterFrom(NO_COST));
+
+  const albums = await store.take(
+    "albums",
+    (q) => q.withIndex("by_library_added", (index) => index.eq("libraryId", libraryId)),
+    ROWS_PAGE,
+  );
 
   if (albums.length > 0) {
-    await Promise.all(albums.map(async (album) => deleteAlbum(ctx.db, album._id)));
+    await Promise.all(albums.map(async (album) => store.deleteAlbum(album._id)));
 
     return true;
   }
 
-  const artists = await ctx.db
-    .query("artists")
-    .withIndex("by_library_key", (q) => q.eq("libraryId", libraryId))
-    .take(ROWS_PAGE);
+  const artists = await store.take(
+    "artists",
+    (q) => q.withIndex("by_library_key", (index) => index.eq("libraryId", libraryId)),
+    ROWS_PAGE,
+  );
 
   if (artists.length > 0) {
-    await Promise.all(artists.map(async (artist) => deleteArtist(ctx.db, artist._id)));
+    await Promise.all(artists.map(async (artist) => store.deleteArtist(artist._id)));
 
     return true;
   }

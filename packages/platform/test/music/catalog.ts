@@ -111,6 +111,7 @@ const TrackState = Schema.NullOr(
     explicit: Schema.Boolean,
     artHash: Schema.NullOr(Schema.String),
     lyricsBytes: Schema.NullOr(Schema.Finite),
+    lyricsHash: Schema.NullOr(Schema.String),
   }),
 );
 

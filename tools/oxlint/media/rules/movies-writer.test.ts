@@ -22,6 +22,7 @@ new RuleTester().run("movies-writer", moviesWriterRule, {
     inMovies(`const { query } = ctx.db; const page = ctx.db.query("titles");`),
     inCore(`await ctx.db.patch(user._id, { role });`),
     inCore(`const store = ctx.db; await store.insert("users", user);`),
+    inCore(`const rows = await ctx.db.table("users").query().take(10);`),
     { code: `await db.insert("titles", fitTitle(fields)); await db.patch(id, f);`, filename: writer },
   ],
   invalid: [
@@ -65,5 +66,11 @@ new RuleTester().run("movies-writer", moviesWriterRule, {
     },
     { ...inCore(`const put = ctx.db.insert;`), errors: [{ messageId: "hidden" }] },
     { ...inMovies(`const put = ctx.db.patch.bind(ctx.db);`), errors: [{ messageId: "hidden" }] },
+    {
+      ...inMovies(`await ctx.db.table("libraries").insert(row);`),
+      errors: [{ messageId: "hidden" }],
+    },
+    { ...inCore(`await ctx.db.table("titles").patch(id, f);`), errors: [{ messageId: "hidden" }] },
+    { ...inCore(`const { table } = ctx.db;`), errors: [{ messageId: "hidden" }] },
   ],
 });

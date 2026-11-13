@@ -1,20 +1,31 @@
 import { describe, expect, it } from "vitest";
 
-import { api } from "../../convex/_generated/api";
+import { api, internal } from "../../convex/_generated/api";
+import type { Id } from "../../convex/_generated/dataModel";
+import { fitLyrics, lyricsFieldsOf } from "../../convex/music/fit";
 import { logMark, usageSince } from "../admin";
 import type { CallUsage } from "../admin";
 import { member } from "../devices";
 import { coreStackFromEnvFile } from "../stack-env";
+import type { CoreStack } from "../stack-env";
 import {
+  catalogRowsOf,
   claimScan,
   finishScan,
+  leftOf,
   markMissingAll,
   musicLibrary,
+  purgePage,
   rowsOf,
+  setFoldersQuietly,
   totalsOf,
+  trackIdsAt,
+  trackState,
+  upsert,
   upsertAll,
 } from "./catalog";
 import { musicTrack, plainLyrics } from "./scanned";
+import type { LyricSet, ScannedTrack } from "./scanned";
 
 const stack = coreStackFromEnvFile();
 
@@ -23,12 +34,23 @@ const READS_MAX = 32_000;
 
 const WRITES_MAX = 16_000;
 
-const READ_BYTES_MAX = 16 * 1024 * 1024;
+const BYTES_MAX = 16 * 1024 * 1024;
 
+/** What a music call lets itself read and write: 12 MiB each way (`music/budget.ts`). */
+const CALL_BYTES = 12 * 1024 * 1024;
+
+/**
+ * Whether every call stayed inside Convex's limits, and inside the bytes the music budget lets a
+ * call spend, which it can only do when the music store charged each byte Convex counted.
+ */
 const inside = (calls: ReadonlyArray<CallUsage>): boolean =>
   calls.every(
-    (call) => call.reads < READS_MAX && call.writes < WRITES_MAX && call.bytes < READ_BYTES_MAX,
-  );
+    (call) =>
+      call.reads < READS_MAX &&
+      call.writes < WRITES_MAX &&
+      call.bytes <= CALL_BYTES &&
+      call.writeBytes <= CALL_BYTES,
+  ) && calls.every((call) => call.bytes < BYTES_MAX && call.writeBytes < BYTES_MAX);
 
 /** About 200 KB of plain lyrics, different for each track and round. */
 const verse = (n: number, round: number) => plainLyrics(`${round}:${n} `.repeat(30_000));
@@ -36,7 +58,103 @@ const verse = (n: number, round: number) => plainLyrics(`${round}:${n} `.repeat(
 /** `count` characters of a 3-byte character, the longest a name's characters can be. */
 const wide = (count: number, n: number): string => `${n}`.padEnd(count, "語");
 
-describe.skipIf(stack === undefined)("music scanner limits", { timeout: 300_000 }, () => {
+/** `length` characters of plain lyrics, different for each `n` and round. */
+const lyricsOf = (length: number, n: number, round = 1): LyricSet =>
+  plainLyrics(`${round}:${n} `.padEnd(length, "la "));
+
+/**
+ * File `n` with every field long, about 19 KB as a track row, on one of eleven albums by as many
+ * artists, all with long names.
+ */
+const longTrack = (root: string, n: number, lyrics: ReadonlyArray<LyricSet>): ScannedTrack =>
+  musicTrack(`${root}/${n}/${wide(1300, n)}.flac`, 1000, 1, {
+    title: wide(600, n),
+    artist: wide(600, n % 11),
+    album: wide(600, n % 11),
+    genre: wide(200, n % 11),
+    artHash: `${n}`.padStart(64, "0"),
+    folderArt: wide(1200, n),
+    lyricsFiles: wide(1200, n),
+    lyrics: [...lyrics],
+  });
+
+/**
+ * 8,192 lyric sets of `length` characters each: Convex holds at most 8,192 items in an array, and
+ * 1,800 characters each fill most of the 16 MiB a call's arguments may hold.
+ */
+const manySets = (length: number): ReadonlyArray<LyricSet> =>
+  Array.from({ length: 8192 }, (_, n) => plainLyrics(`${n} `.padEnd(length, "la ")));
+
+const exact = async (core: CoreStack, libraryId: Id<"libraries">): Promise<boolean> => {
+  const [rows, totals] = await Promise.all([rowsOf(core, libraryId), totalsOf(core, libraryId)]);
+
+  return (
+    rows.tracks === totals.tracks &&
+    rows.albums === totals.albums &&
+    rows.artists === totals.artists &&
+    rows.durationMs === totals.durationMs
+  );
+};
+
+const idsAt = async (
+  core: CoreStack,
+  libraryId: Id<"libraries">,
+  tracks: ReadonlyArray<ScannedTrack>,
+): Promise<ReadonlyArray<Id<"tracks">>> =>
+  (
+    await trackIdsAt(
+      core,
+      libraryId,
+      tracks.map((track) => track.path),
+    )
+  ).flatMap((id) => (id === null ? [] : [id]));
+
+interface Page {
+  readonly cursor: string | null;
+  readonly more: boolean;
+}
+
+/** Every page of a library's music purge of tracks, from the start, as the hook runs them. */
+const purgeAll = async (
+  core: CoreStack,
+  libraryId: Id<"libraries">,
+  cursor: string | null = null,
+  pages: ReadonlyArray<Page> = [],
+): Promise<ReadonlyArray<Page>> => {
+  const page = await purgePage(core, libraryId, "tracks", cursor);
+  const next = [...pages, page];
+
+  return page.more ? purgeAll(core, libraryId, page.cursor, next) : next;
+};
+
+/**
+ * Removes the second of the library's two folders, whose tracks are `dropped`, and runs the purge
+ * page by page; answers its pages and each page's usage once the dropped tracks and their lyrics
+ * are gone and the totals equal the rows again.
+ */
+const purgeDropped = async (
+  core: CoreStack,
+  libraryId: Id<"libraries">,
+  kept: string,
+  dropped: ReadonlyArray<ScannedTrack>,
+) => {
+  const ids = await idsAt(core, libraryId, dropped);
+
+  expect(ids).toHaveLength(dropped.length);
+
+  await setFoldersQuietly(core, libraryId, [kept]);
+
+  const mark = await logMark(core);
+  const pages = await purgeAll(core, libraryId);
+  const usage = await usageSince(core, mark, internal.music.probe.purgePage, pages.length);
+
+  expect(await leftOf(core, ids)).toEqual({ tracks: 0, lyrics: 0 });
+  expect(await exact(core, libraryId)).toBe(true);
+
+  return { pages, usage };
+};
+
+describe.skipIf(stack === undefined)("music call limits", { timeout: 600_000 }, () => {
   it("write 500 singles, each its own album and artist at the longest names, inside each call's limits", async () => {
     if (stack === undefined) return;
     const admin = await member(stack, "singles-admin", "admin");
@@ -118,5 +236,152 @@ describe.skipIf(stack === undefined)("music scanner limits", { timeout: 300_000 
     expect(inside(usage.filter((call) => call.committed))).toBe(true);
 
     await finishScan(stack, lease);
+  });
+
+  it("rewrite 24 tracks with 512,000 characters of lyrics each in calls that stop on their byte budget", async () => {
+    if (stack === undefined) return;
+    const admin = await member(stack, "longest-lyrics", "admin");
+    const { libraryId, scanJobId, roots } = await musicLibrary(admin, "Longest lyrics");
+    const [root] = roots;
+
+    if (root === undefined) throw new Error("one folder");
+
+    const tracks = (round: number, lyricsRound = round) =>
+      Array.from({ length: 24 }, (_, n) =>
+        musicTrack(`${root}/Album/${n}.flac`, 1000 + round, round, {
+          lyrics: [lyricsOf(512_000, n, lyricsRound)],
+        }),
+      );
+
+    const lease = await claimScan(stack, scanJobId);
+    const firstMark = await logMark(stack);
+    const first = await upsertAll(stack, lease, tracks(1));
+    const firstUsage = await usageSince(stack, firstMark, api.music.scanner.upsert, first.length);
+    const mark = await logMark(stack);
+    const written = await upsertAll(stack, lease, tracks(2));
+    const usage = await usageSince(stack, mark, api.music.scanner.upsert, written.length);
+    // Files changed again with the same lyrics: their rows are neither read nor written.
+    const retagMark = await logMark(stack);
+    const rescanned = await upsertAll(stack, lease, tracks(3, 2));
+    const retagUsage = await usageSince(stack, retagMark, api.music.scanner.upsert, 1);
+
+    await finishScan(stack, lease);
+
+    // Writing 24 rows of 500 KiB fits a call's 12 MiB; rewriting them reads each twice, and does not.
+    expect(first.reduce((sum, call) => sum + call.done, 0)).toBe(24);
+    expect(written[0]?.done).toBeLessThan(24);
+    expect(written.reduce((sum, call) => sum + call.done, 0)).toBe(24);
+    expect(rescanned.map((call) => call.done)).toEqual([24]);
+    expect(
+      retagUsage.every((call) => call.bytes < 1024 * 1024 && call.writeBytes < 1024 * 1024),
+    ).toBe(true);
+
+    expect(inside([...firstUsage, ...usage].filter((call) => call.committed))).toBe(true);
+
+    const ids = await idsAt(stack, libraryId, tracks(2));
+    const states = await Promise.all(ids.map(async (id) => trackState(stack, id)));
+
+    expect(states.map((state) => state?.lyricsHash)).toEqual(
+      tracks(2).map((track) => lyricsFieldsOf(fitLyrics(track.lyrics)).lyricsHash),
+    );
+    expect(states.every((state) => state?.lyricsBytes !== null)).toBe(true);
+    expect(await leftOf(stack, ids)).toEqual({ tracks: 24, lyrics: 24 });
+    expect(await totalsOf(stack, libraryId)).toMatchObject({ tracks: 24, albums: 1, artists: 1 });
+    expect(await exact(stack, libraryId)).toBe(true);
+  });
+
+  it("purge a folder of 341 tracks with long fields and 20,000 characters of lyrics in pages that stop on their byte budget", async () => {
+    if (stack === undefined) return;
+    const admin = await member(stack, "long-purge", "admin");
+    const { libraryId, scanJobId, roots } = await musicLibrary(admin, "Long purge", 2);
+    const [kept, gone] = roots;
+
+    if (kept === undefined || gone === undefined) throw new Error("two folders");
+
+    const keptTracks = Array.from({ length: 3 }, (_, n) =>
+      musicTrack(`${kept}/Stays/${n}.flac`, 1000, 1, { artist: "Stays", album: "Stays" }),
+    );
+
+    const dropped = Array.from({ length: 341 }, (_, n) =>
+      longTrack(gone, n, [lyricsOf(20_000, n)]),
+    );
+
+    const lease = await claimScan(stack, scanJobId);
+
+    await upsertAll(stack, lease, [...keptTracks, ...dropped]);
+    await finishScan(stack, lease);
+
+    const { pages, usage } = await purgeDropped(stack, libraryId, kept, dropped);
+
+    expect(pages[0]).toEqual({ cursor: null, more: true });
+    expect(inside(usage.filter((call) => call.committed))).toBe(true);
+    expect(await totalsOf(stack, libraryId)).toMatchObject({ tracks: 3, albums: 1, artists: 1 });
+    expect(await catalogRowsOf(stack, libraryId)).toEqual({ albums: 1, artists: 1 });
+  });
+
+  it("delete 341 tracks with long fields in purge pages that charge each delete's read and stop on their byte budget", async () => {
+    if (stack === undefined) return;
+    const admin = await member(stack, "delete-purge", "admin");
+    const { libraryId, scanJobId, roots } = await musicLibrary(admin, "Long deletes", 2);
+    const [kept, gone] = roots;
+
+    if (kept === undefined || gone === undefined) throw new Error("two folders");
+
+    const keptTracks = Array.from({ length: 3 }, (_, n) =>
+      musicTrack(`${kept}/Stays/${n}.flac`, 1000, 1, { artist: "Stays", album: "Stays" }),
+    );
+
+    const dropped = Array.from({ length: 341 }, (_, n) => longTrack(gone, n, []));
+    const lease = await claimScan(stack, scanJobId);
+
+    await upsertAll(stack, lease, [...keptTracks, ...dropped]);
+    await finishScan(stack, lease);
+
+    const { pages, usage } = await purgeDropped(stack, libraryId, kept, dropped);
+
+    expect(pages[0]).toEqual({ cursor: null, more: true });
+    expect(inside(usage.filter((call) => call.committed))).toBe(true);
+    expect(await totalsOf(stack, libraryId)).toMatchObject({ tracks: 3, albums: 1, artists: 1 });
+    expect(await catalogRowsOf(stack, libraryId)).toEqual({ albums: 1, artists: 1 });
+  });
+
+  it("write a track of 8,192 lyric sets, and one of as many sets as a call's 16 MiB holds, well inside the time limit", async () => {
+    if (stack === undefined) return;
+    const admin = await member(stack, "many-sets", "admin");
+    const { libraryId, scanJobId, roots } = await musicLibrary(admin, "Many sets");
+    const [root] = roots;
+
+    if (root === undefined) throw new Error("one folder");
+
+    const tracks = [
+      musicTrack(`${root}/Album/hundred.flac`, 1000, 1, { lyrics: [...manySets(100)] }),
+      musicTrack(`${root}/Album/largest.flac`, 1000, 1, { lyrics: [...manySets(1800)] }),
+    ];
+
+    const lease = await claimScan(stack, scanJobId);
+    const mark = await logMark(stack);
+
+    const written = await Promise.all(
+      tracks.map(async (track) => {
+        const answer = await upsert(stack, lease, [track]);
+
+        return answer.outcome === "held" ? answer.value.done : 0;
+      }),
+    );
+
+    const usage = await usageSince(stack, mark, api.music.scanner.upsert, tracks.length);
+
+    await finishScan(stack, lease);
+
+    expect(written).toEqual([1, 1]);
+    expect(usage.filter((call) => call.committed).every((call) => call.seconds < 0.75)).toBe(true);
+
+    const states = await Promise.all(
+      (await idsAt(stack, libraryId, tracks)).map(async (id) => trackState(stack, id)),
+    );
+
+    expect(states.map((state) => state?.lyricsHash)).toEqual(
+      tracks.map((track) => lyricsFieldsOf(fitLyrics(track.lyrics)).lyricsHash),
+    );
   });
 });

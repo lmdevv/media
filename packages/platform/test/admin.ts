@@ -107,11 +107,13 @@ const FunctionLog = Schema.Struct({
       cachedResult: Schema.optionalKey(Schema.Boolean),
       error: Schema.optionalKey(Schema.NullOr(Schema.String)),
       willRetry: Schema.optionalKey(Schema.NullOr(Schema.Boolean)),
+      userExecutionTime: Schema.optionalKey(Schema.NullOr(Schema.Finite)),
       usageStats: Schema.optionalKey(
         Schema.Struct({
           databaseReadDocuments: Schema.Finite,
           databaseReadBytes: Schema.optionalKey(Schema.Finite),
           databaseWriteDocuments: Schema.Finite,
+          databaseWriteBytes: Schema.optionalKey(Schema.Finite),
         }),
       ),
     }),
@@ -155,6 +157,13 @@ export interface CallUsage {
   /** The bytes the attempt read, as the backend logged them; 0 when it logged none. */
   readonly bytes: number;
   readonly writes: number;
+  /** The bytes the attempt wrote, as the backend logged them; 0 when it logged none. */
+  readonly writeBytes: number;
+  /**
+   * How long the attempt's own code ran, in seconds, which Convex's 1 s limit bounds, as the
+   * backend logged it; 0 when it logged none. Time in the database is not part of it.
+   */
+  readonly seconds: number;
   /**
    * False for an attempt that failed, including one Convex retried after a conflict or the
    * write-rate limit; its writes rolled back.
@@ -213,6 +222,8 @@ export const followLog = (stack: CoreStack, mark: LogMark): LogFollower => {
                 reads: entry.usageStats.databaseReadDocuments,
                 bytes: entry.usageStats.databaseReadBytes ?? 0,
                 writes: entry.usageStats.databaseWriteDocuments,
+                writeBytes: entry.usageStats.databaseWriteBytes ?? 0,
+                seconds: entry.userExecutionTime ?? 0,
                 committed: (entry.error ?? null) === null && !(entry.willRetry ?? false),
               },
             ]

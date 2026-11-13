@@ -502,10 +502,15 @@ music's tables of the same names. No client reads them yet; the music commands c
   uses) and `music/art:hashes` (the distinct hashes a table uses, 200 a page). `hashes` walks the
   `by_art` index from one distinct hash to the next with the last hash as an exact cursor, where
   old music read whole tables 1,000 rows a page.
-- **One writer, one batch.** `music/write.ts` is the only module that writes the music tables, and
-  keeps every document within its bound. `music/catalog.ts` is the only caller that changes which
-  tracks a library holds: the scanner callbacks, the purge, and the probe's seed all go through
-  its per-call batch, as old music's `catalogBatch` did. It reads each album and artist once a
+- **One store, one batch.** `music/write.ts` holds the music store, the only module that reads or
+  writes the music tables in a mutation that writes them, and keeps every document within its
+  bound. The `media/music-writer` Oxlint rule, built on the same code as `media/movies-writer`,
+  fails in `convex/music/` every insert, patch, replace, or delete but an insert into a core
+  table, and elsewhere any of them that names a music table, as movies' rule does; it also fails
+  a database scoped to a music table (`ctx.db.table("tracks")`), and in `music/catalog.ts` any
+  `db` name or member and any import of a database or context type. `music/catalog.ts` is the only caller that changes which tracks a library holds: the
+  scanner callbacks, the purge, and the probe's seed all go through its per-call batch, as old
+  music's `catalogBatch` did. It reads each album and artist once a
   call, sums what the call moved, and settles it in the same mutation: each album's tracks on disk
   and their length, each artist's albums with a track on disk, and the library's totals. It
   deletes an album no track points at any more, then its artist when no album or track files under
@@ -515,13 +520,24 @@ music's tables of the same names. No client reads them yet; the music commands c
   track on disk, its artists with such an album, and the length of its tracks on disk in whole
   milliseconds: old music's `libraryStats`. A retried call finds its rows and moves nothing. A
   removed library's totals go once its purge deleted its last rows.
-- **Budget with bytes.** Every scanner and purge step is charged its worst case before it runs,
-  as movies' are (`music/budget.ts` builds on `movies/budget.ts`), and also the bytes it reads and
-  writes, 12 MiB each way a call. A track's lyrics row may hold 512 KiB, so 500 tracks with
-  lyrics would pass Convex's 16 MiB a call however few ranges they use. A step is priced from the
-  rows it read to plan it: the track at its path, and the artist and album it files under, read
-  once a call. Settling an album is charged the first time a call touches it, at its worst when
-  the album may be left empty.
+- **Budget charged where the database is touched** (amended 2026-11-13, fix round 1). A music
+  call counts movies' index ranges and writes (`music/budget.ts` builds on `movies/budget.ts`),
+  and also the bytes it reads and writes, 12 MiB each way. A track's lyrics row may hold 512 KiB,
+  so 500 tracks with lyrics would pass Convex's 16 MiB a call however few ranges they use. The
+  music store charges the call's meter for each read and write as it makes it, at the size of
+  what Convex reads: a query each document it returns, a `get` its document, and a patch or a
+  delete the document it rewrites, which Convex reads again even when the call read it first
+  (the store keeps the latest version of each document it touched, and charges a document's
+  bound when it has not seen it). No call site prices its own steps. A write of the lyric sets a
+  track already holds reads nothing: the track keeps their hash, written with the row. The batch writes items while
+  the meter leaves room for the most one item can cost with every document at its bound, its
+  share of the call's end included (`WRITE_MOST` in `catalog.ts`, about 1.5 MiB read), so the
+  error of any one estimate cannot add up over a call. Settling an album at the call's end is
+  charged to the meter the first time the call touches the album, at its worst when the album
+  may be left empty. The first round charged each step from hand-written estimates: a lyrics row
+  rewritten by a patch or a delete was charged once though Convex read it twice, and a deleted
+  track's own read was not charged, so a rewrite of 24 tracks with 500 KiB of lyrics each, and a
+  purge of 341 long tracks with lyrics, passed 16 MiB.
 - **Bounds.** Music has no long free text, so each field has a fixed maximum, applied by the
   writer, instead of movies' fitting of a whole document:
 
@@ -542,7 +558,11 @@ music's tables of the same names. No client reads them yet; the music commands c
   its longest. A key keeps its leading part and a hash of the whole, so two names that differ past
   the cut stay two rows and a rescan finds the row it wrote. Lyric sets are checked as old music's
   `LocalLyricSet` schema checked them, in plain TypeScript; a set that breaks it is a defect in
-  the server's reader, which checks the same schema, and fails the call.
+  the server's reader, which checks the same schema, and fails the call. The leading sets that
+  fit are found in one pass: Convex measures an array as a fixed marker and the sum of its items,
+  so each set is measured once. One track may carry 8,192 sets, Convex's most in an array, in up
+  to 16 MiB of arguments; measuring the whole list again for each set dropped took past a call's
+  1 s at 8,192 sets of 100 characters, and the one pass takes about 45 ms.
 
 - **Purge.** `music/purge:tracks` pages a library's tracks by path, 341 a page (8 MiB at the track
   bound), and deletes through the batch those no current folder keeps, every track once the

@@ -1,14 +1,9 @@
-import { getDocumentSize } from "convex/values";
-import type { Value } from "convex/values";
-
 import type { Doc, Id } from "../_generated/dataModel";
-import type { MutationCtx } from "../_generated/server";
 import { inOrder } from "../core/lib/inOrder";
 import type { Counted } from "../core/scans";
-import { NO_COST, addCost, cost } from "./budget";
-import type { Cost, Step } from "./budget";
+import { CALL_COST, sumCost, whileBudget } from "./budget";
+import type { Cost } from "./budget";
 import {
-  DOCUMENT_BYTES,
   MUSIC_BOUNDS,
   artHashWithin,
   checkLyrics,
@@ -19,28 +14,9 @@ import {
   lyricsFieldsOf,
   titleKeyOf,
 } from "./fit";
-import { moveTotals } from "./totals";
-import type { Moved } from "./totals";
-import {
-  deleteAlbum,
-  deleteArtist,
-  deleteTrack,
-  insertAlbum,
-  insertArtist,
-  insertTrack,
-  setAlbumCounts,
-  setAlbumTags,
-  setArtistAlbums,
-  setArtistArt,
-  setTrackLyrics,
-  setTrackMissing,
-  writeLyrics,
-  writeTrack,
-} from "./write";
-import type { Stored } from "./write";
+import { atBound } from "./write";
+import type { MusicStore, Stored } from "./write";
 import type { LocalLyricSet, ScannedLyrics, ScannedTrack } from "./validators";
-
-type Db = MutationCtx["db"];
 
 /** Combining Diacritical Marks: the accents NFD splits off Latin, Greek, and Cyrillic letters. */
 const DIACRITICS = /[\u0300-\u036F]/gu;
@@ -93,9 +69,6 @@ const formatLabel = (track: ScannedTrack): string => {
 const wholeMs = (ms: number): number =>
   Number.isFinite(ms) ? Math.min(Math.max(0, Math.round(ms)), MUSIC_BOUNDS.durationMs) : 0;
 
-/** Room the three ids of a track take beside its other fields, in Convex's measure. */
-const TRACK_IDS_BYTES = 256;
-
 /** A scanned file's lyric sets, checked and fitted within the lyrics row's bound. */
 const fittedSets = (sets: ReadonlyArray<LocalLyricSet>): ReadonlyArray<LocalLyricSet> => {
   checkLyrics(sets);
@@ -131,43 +104,49 @@ const trackFields = (scanned: ScannedTrack, sets: ReadonlyArray<LocalLyricSet>) 
     searchText: foldSearchText(`${scanned.title} ${scanned.artist} ${scanned.album}`),
   });
 
-/** One read of a row by index: one range, and the row's bytes when it exists. */
-const readOf = (row: Record<string, Value> | null): Cost =>
-  cost(1, 0, row === null ? 0 : getDocumentSize(row));
+/** Settling one album in `finish`: it and its artist read and patched. */
+const SETTLING = sumCost([
+  atBound.read("albums"),
+  atBound.patch("albums"),
+  atBound.read("artists"),
+  atBound.patch("artists"),
+]);
 
-/** One write of a row of at most `bytes`: an insert, or a patch, which reads the row too. */
-const writeOf = (bytes: number, patch: boolean): Cost =>
-  cost(patch ? 1 : 0, 1, patch ? bytes : 0, bytes);
-
-/** Reading and replacing a track's lyrics row: its stored bytes in, the new sets out. */
-const lyricsCost = (storedBytes: number | null, sets: ReadonlyArray<LocalLyricSet>): Cost =>
-  storedBytes === null && sets.length === 0
-    ? NO_COST
-    : cost(1, 1, storedBytes ?? 0, lyricsFieldsOf(sets).lyricsBytes ?? 0);
-
-/**
- * An album that gains a track this call, settled once at the end: read and patched, and its
- * artist read and patched when it first holds a track on disk.
- */
-const GAINING_ALBUM = cost(
-  4,
-  2,
-  2 * (DOCUMENT_BYTES.albums + DOCUMENT_BYTES.artists),
-  DOCUMENT_BYTES.albums + DOCUMENT_BYTES.artists,
-);
+/** Deleting an emptied album, then its bare artist (`deleteIfEmpty`). */
+const EMPTYING = sumCost([
+  atBound.read("tracks"),
+  atBound.delete("albums"),
+  atBound.read("artists"),
+  atBound.read("albums"),
+  atBound.read("tracks"),
+  atBound.delete("artists"),
+]);
 
 /**
- * An album that loses a track this call, settled once at the end: as a gaining one, and when no
- * track is left in it, its emptiness checked and the album deleted, then its artist read again,
- * its albums and tracks checked, and the artist deleted.
+ * The most one write of a batch costs, with every document at its bound: a move onto a path
+ * another track holds, with its lyrics row rewritten, and three albums settled at the call's end
+ * (the one it joins, the one it leaves, and the one the other track leaves), two of them perhaps
+ * emptied. Every other write costs less.
  */
-const LOSING_ALBUM = addCost(
-  GAINING_ALBUM,
-  cost(6, 2, 2 * DOCUMENT_BYTES.tracks + DOCUMENT_BYTES.albums + DOCUMENT_BYTES.artists),
-);
-
-/** Looking for another track's artwork when a cover went: two tracks of an index range. */
-const ART_FALLBACK = cost(1, 0, 2 * DOCUMENT_BYTES.tracks);
+const WRITE_MOST = sumCost([
+  atBound.read("tracks"),
+  atBound.read("tracks"),
+  atBound.read("artists"),
+  atBound.read("albums"),
+  atBound.patch("tracks"),
+  atBound.read("tracks", 2),
+  atBound.patch("artists"),
+  atBound.read("tracks", 2),
+  atBound.patch("albums"),
+  atBound.patch("tracks"),
+  atBound.read("localLyrics"),
+  atBound.patch("localLyrics"),
+  SETTLING,
+  SETTLING,
+  SETTLING,
+  EMPTYING,
+  EMPTYING,
+]);
 
 /** A change in an album's tracks on disk and their length. */
 interface AlbumDelta {
@@ -184,10 +163,6 @@ interface ArtChange {
   /** The folder cover beside it was replaced, added, or removed since the last scan. */
   readonly coverChanged: boolean;
 }
-
-/** Whether keeping a row's artwork needs another track's: this track's art held it and went. */
-const needsFallback = (current: string | null, art: ArtChange): boolean =>
-  current !== null && current === art.previous && art.next === null;
 
 /**
  * The artwork an album or artist keeps after an upsert, as old music decides it: a row without
@@ -229,35 +204,40 @@ const filingOf = (scanned: ScannedTrack): Filing => {
 };
 
 /**
- * The catalog writes of one mutation in one library, as old music's `catalogBatch` made them: each
- * write is planned as a `Step` whose cost the caller's budget charges first (`budget.ts`). Songs of
- * a batch mostly share albums and artists, so it reads each album and artist once and keeps it,
- * and it sums count changes and settles them in `finish`, writing each album, artist, and total at
- * most once a call. Every change to which tracks a library holds goes through here, so its counts
- * stay exact: an album's tracks on disk, an artist's albums with tracks on disk, and the library's
- * totals of both, of its tracks on disk, and of their length.
+ * The catalog writes of one mutation in one library, as old music's `catalogBatch` made them,
+ * through the music store, which charges the call's meter for each read and write (`write.ts`).
+ * Songs of a batch mostly share albums and artists, so it reads each album and artist once and
+ * keeps it, and it sums count changes and settles them in `finish`, writing each album, artist,
+ * and total at most once a call. Every change to which tracks a library holds goes through here,
+ * so its counts stay exact: an album's tracks on disk, an artist's albums with tracks on disk, and
+ * the library's totals of both, of its tracks on disk, and of their length.
  */
 export interface CatalogBatch {
+  /** Runs `write` on the leading items while `whileBudget` admits another. */
+  readonly each: <Item, Result>(
+    items: ReadonlyArray<Item>,
+    write: (item: Item) => Promise<Result>,
+  ) => Promise<ReadonlyArray<Result>>;
   /**
    * Inserts or updates one scanned file, its album and artist, and its own lyrics. An album or
    * artist whose art came from this file's old art follows a replaced or removed cover.
    */
-  readonly upsert: (scanned: ScannedTrack) => Promise<Step<Id<"tracks">>>;
+  readonly upsert: (scanned: ScannedTrack) => Promise<Id<"tracks">>;
   /**
    * Moves the track at `from` to the scanned file's path and updates it as `upsert` does, keeping
    * its id. With no track at `from`, or another track at the new path, it upserts the file and
    * marks `from` missing instead, answering false.
    */
-  readonly move: (from: string, scanned: ScannedTrack) => Promise<Step<boolean>>;
+  readonly move: (from: string, scanned: ScannedTrack) => Promise<boolean>;
   /** Marks a file that left the disk missing, keeping its row; answers whether it was on disk. */
-  readonly markMissing: (path: string) => Promise<Step<boolean>>;
+  readonly markMissing: (path: string) => Promise<boolean>;
   /**
    * Saves lyrics a scan read again for a file whose audio did not change; answers whether the
    * library has the file.
    */
-  readonly saveLyrics: (scanned: ScannedLyrics) => Promise<Step<boolean>>;
+  readonly saveLyrics: (scanned: ScannedLyrics) => Promise<boolean>;
   /** Deletes a track with its lyrics, for the purge of a folder the library no longer has. */
-  readonly remove: (track: Doc<"tracks">) => Step<void>;
+  readonly remove: (track: Doc<"tracks">) => Promise<void>;
   /**
    * Settles the call: patches each album and artist whose counts moved, moves the library's
    * album, artist, and duration totals, and deletes each album the call left without any track,
@@ -268,24 +248,37 @@ export interface CatalogBatch {
   readonly finish: () => Promise<Counted<ReadonlyArray<string>>>;
 }
 
-/**
- * Starts the catalog writes of one mutation in `libraryId`. Call `finish` once at the end. A
- * removed library's purge passes `totals: false`: its totals are already gone with it.
- */
+export interface BatchOptions {
+  /** False for a removed library's purge: its totals are already gone with it. */
+  readonly totals?: boolean;
+  /** What the call may spend, `CALL_COST` unless a test passes less. */
+  readonly limit?: Cost;
+}
+
+/** Starts the catalog writes of one mutation in `libraryId`. Call `finish` once at the end. */
 export const catalogBatch = (
-  db: Db,
+  store: MusicStore,
   libraryId: Id<"libraries">,
-  options: { readonly totals: boolean } = { totals: true },
+  options: BatchOptions = {},
 ): CatalogBatch => {
   const artists = new Map<string, Stored<"artists"> | null>();
   const albums = new Map<string, Stored<"albums"> | null>();
+  const madeArtists = new Set<Id<"artists">>();
   const deltas = new Map<Id<"albums">, AlbumDelta>();
   const losing = new Set<Id<"albums">>();
-  const charged = new Set<string>();
+  const owed = new Set<string>();
   const released = new Set<string>();
   let added = 0;
   let removed = 0;
   let durationMs = 0;
+
+  /** Charges, once a call for each `key`, work `finish` will do. */
+  const owe = (key: string, work: Cost): void => {
+    if (owed.has(key)) return;
+
+    owed.add(key);
+    store.meter.charge(work);
+  };
 
   const release = (previous: string | null, next: string | null): void => {
     if (previous !== null && previous !== next) released.add(previous);
@@ -294,10 +287,18 @@ export const catalogBatch = (
   const adjust = (albumId: Id<"albums">, tracks: number, length: number): void => {
     const previous = deltas.get(albumId) ?? { tracks: 0, durationMs: 0 };
 
+    owe(`settle:${albumId}`, SETTLING);
     deltas.set(albumId, {
       tracks: previous.tracks + tracks,
       durationMs: previous.durationMs + length,
     });
+  };
+
+  /** An album a track left, which `finish` deletes when no track row points at it any more. */
+  const mayEmpty = (albumId: Id<"albums">): void => {
+    owe(`settle:${albumId}`, SETTLING);
+    owe(`empty:${albumId}`, EMPTYING);
+    losing.add(albumId);
   };
 
   /** A track that came onto the disk or left it, for the library's track and length totals. */
@@ -308,76 +309,72 @@ export const catalogBatch = (
     durationMs += step * track.durationMs;
   };
 
-  /** What settling an album costs the first time a call touches it; nothing after. */
-  const settling = (key: string, settle: Cost): Cost => {
-    if (charged.has(key)) return NO_COST;
-
-    charged.add(key);
-
-    return settle;
-  };
-
   const trackAt = (path: string): Promise<Doc<"tracks"> | null> =>
-    db
-      .query("tracks")
-      .withIndex("by_library_path", (q) => q.eq("libraryId", libraryId).eq("path", path))
-      .unique();
+    store.unique("tracks", (q) =>
+      q.withIndex("by_library_path", (index) => index.eq("libraryId", libraryId).eq("path", path)),
+    );
 
-  const findArtist = async (key: string): Promise<Cost> => {
-    if (artists.has(key)) return NO_COST;
+  const findArtist = async (key: string): Promise<Stored<"artists"> | null> => {
+    if (!artists.has(key)) {
+      artists.set(
+        key,
+        await store.first("artists", (q) =>
+          q.withIndex("by_library_key", (index) => index.eq("libraryId", libraryId).eq("key", key)),
+        ),
+      );
+    }
 
-    const found = await db
-      .query("artists")
-      .withIndex("by_library_key", (q) => q.eq("libraryId", libraryId).eq("key", key))
-      .first();
-
-    artists.set(key, found);
-
-    return readOf(found);
+    return artists.get(key) ?? null;
   };
 
-  const findAlbum = async (artistKey: string, key: string): Promise<Cost> => {
-    const artist = artists.get(artistKey) ?? null;
-
-    if (artist === null) return NO_COST;
-
+  /** An album of `artist` by key, read once a call; an artist this call made has none to read. */
+  const findAlbum = async (
+    artist: Stored<"artists">,
+    key: string,
+  ): Promise<Stored<"albums"> | null> => {
     const cacheKey = albumKeyOf(artist._id, key);
 
-    if (albums.has(cacheKey)) return NO_COST;
+    if (!albums.has(cacheKey) && madeArtists.has(artist._id)) albums.set(cacheKey, null);
 
-    const found = await db
-      .query("albums")
-      .withIndex("by_library_artist_key", (q) =>
-        q.eq("libraryId", libraryId).eq("artistId", artist._id).eq("key", key),
-      )
-      .first();
+    if (!albums.has(cacheKey)) {
+      albums.set(
+        cacheKey,
+        await store.first("albums", (q) =>
+          q.withIndex("by_library_artist_key", (index) =>
+            index.eq("libraryId", libraryId).eq("artistId", artist._id).eq("key", key),
+          ),
+        ),
+      );
+    }
 
-    albums.set(cacheKey, found);
-
-    return readOf(found);
+    return albums.get(cacheKey) ?? null;
   };
 
   /** Another track's artwork on disk for an artist, at most two tracks read. */
   const artistArt = async (artistId: Id<"artists">, except: Id<"tracks"> | null) =>
     firstArt(
-      await db
-        .query("tracks")
-        .withIndex("by_artist_art", (q) =>
-          q.eq("artistId", artistId).eq("missing", false).gt("artHash", ""),
-        )
-        .take(2),
+      await store.take(
+        "tracks",
+        (q) =>
+          q.withIndex("by_artist_art", (index) =>
+            index.eq("artistId", artistId).eq("missing", false).gt("artHash", ""),
+          ),
+        2,
+      ),
       except,
     );
 
   /** Another track's artwork on disk for an album, at most two tracks read. */
   const albumArt = async (albumId: Id<"albums">, except: Id<"tracks"> | null) =>
     firstArt(
-      await db
-        .query("tracks")
-        .withIndex("by_album_art", (q) =>
-          q.eq("albumId", albumId).eq("missing", false).gt("artHash", ""),
-        )
-        .take(2),
+      await store.take(
+        "tracks",
+        (q) =>
+          q.withIndex("by_album_art", (index) =>
+            index.eq("albumId", albumId).eq("missing", false).gt("artHash", ""),
+          ),
+        2,
+      ),
       except,
     );
 
@@ -386,10 +383,10 @@ export const catalogBatch = (
     art: ArtChange,
     except: Id<"tracks"> | null,
   ): Promise<Stored<"artists">> => {
-    const existing = artists.get(filing.artistKey) ?? null;
+    const existing = await findArtist(filing.artistKey);
 
     if (existing === null) {
-      const created = await insertArtist(db, {
+      const created = await store.insertArtist({
         libraryId,
         name: filing.artistName,
         key: filing.artistKey,
@@ -399,6 +396,7 @@ export const catalogBatch = (
       });
 
       artists.set(filing.artistKey, created);
+      madeArtists.add(created._id);
 
       return created;
     }
@@ -407,7 +405,7 @@ export const catalogBatch = (
 
     if (artHash === existing.artHash) return existing;
 
-    await setArtistArt(db, existing._id, artHash);
+    await store.setArtistArt(existing._id, artHash);
     release(existing.artHash, artHash);
 
     const updated = { ...existing, artHash };
@@ -425,10 +423,10 @@ export const catalogBatch = (
     except: Id<"tracks"> | null,
   ): Promise<Stored<"albums">> => {
     const cacheKey = albumKeyOf(artist._id, filing.albumKey);
-    const existing = albums.get(cacheKey) ?? null;
+    const existing = await findAlbum(artist, filing.albumKey);
 
     if (existing === null) {
-      const created = await insertAlbum(db, {
+      const created = await store.insertAlbum({
         libraryId,
         artistId: artist._id,
         artistName: artist.name,
@@ -465,7 +463,7 @@ export const catalogBatch = (
       return existing;
     }
 
-    await setAlbumTags(db, existing._id, changes);
+    await store.setAlbumTags(existing._id, changes);
     release(existing.artHash, artHash);
 
     const updated = { ...existing, ...changes };
@@ -476,16 +474,17 @@ export const catalogBatch = (
   };
 
   /**
-   * Plans an upsert of `scanned` over `existing`, the track already at its path or the one a move
-   * brings there, or null for a new track. Reads the artist and album it files under, once a call.
+   * Writes `scanned` over `existing`, the track already at its path or the one a move brings
+   * there, or null for a new track, with the artist and album it files under, read once a call.
    */
-  const planUpsert = async (
+  const upsertOver = async (
     scanned: ScannedTrack,
     existing: Doc<"tracks"> | null,
-  ): Promise<Step<Id<"tracks">>> => {
+  ): Promise<Id<"tracks">> => {
     const filing = filingOf(scanned);
     const sets = fittedSets(scanned.lyrics);
     const fields = trackFields(scanned, sets);
+    const except = existing?._id ?? null;
 
     const art: ArtChange = {
       previous: existing?.artHash ?? null,
@@ -493,153 +492,92 @@ export const catalogBatch = (
       coverChanged: existing !== null && existing.folderArt !== fields.folderArt,
     };
 
-    const lookups = addCost(
-      await findArtist(filing.artistKey),
-      await findAlbum(filing.artistKey, filing.albumKey),
-    );
+    const filedArtist = await artistFor(filing, art, except);
+    const filedAlbum = await albumFor(filedArtist, scanned, filing, art, except);
+    const placed = { ...fields, libraryId, albumId: filedAlbum._id, artistId: filedArtist._id };
 
-    const artist = artists.get(filing.artistKey) ?? null;
+    if (existing === null) {
+      const trackId = await store.insertTrack(placed);
 
-    const album =
-      artist === null ? null : (albums.get(albumKeyOf(artist._id, filing.albumKey)) ?? null);
+      await store.writeLyrics(trackId, null, sets, fields.lyricsHash);
+      adjust(filedAlbum._id, 1, fields.durationMs);
+      present(fields, 1);
 
-    const rows = [
-      artist === null
-        ? writeOf(DOCUMENT_BYTES.artists, false)
-        : addCost(
-            needsFallback(artist.artHash, art) ? ART_FALLBACK : NO_COST,
-            artist.artHash === art.next ? NO_COST : writeOf(DOCUMENT_BYTES.artists, true),
-          ),
-      album === null
-        ? writeOf(DOCUMENT_BYTES.albums, false)
-        : addCost(
-            needsFallback(album.artHash, art) ? ART_FALLBACK : NO_COST,
-            writeOf(DOCUMENT_BYTES.albums, true),
-          ),
-      writeOf(getDocumentSize(fields) + TRACK_IDS_BYTES, existing !== null),
-      lyricsCost(existing?.lyricsBytes ?? null, sets),
-      settling(`gain:${filing.artistKey}\u0000${filing.albumKey}`, GAINING_ALBUM),
-      existing === null || existing.albumId === album?._id
-        ? NO_COST
-        : settling(`lose:${existing.albumId}`, LOSING_ALBUM),
-    ];
+      return trackId;
+    }
 
-    return {
-      cost: rows.reduce(addCost, lookups),
-      run: async () => {
-        const except = existing?._id ?? null;
-        const filedArtist = await artistFor(filing, art, except);
-        const filedAlbum = await albumFor(filedArtist, scanned, filing, art, except);
-        const placed = { ...fields, libraryId, albumId: filedAlbum._id, artistId: filedArtist._id };
+    await store.writeTrack(existing._id, placed);
+    await store.writeLyrics(existing._id, existing.lyricsHash, sets, fields.lyricsHash);
+    release(existing.artHash, fields.artHash);
 
-        if (existing === null) {
-          const trackId = await insertTrack(db, placed);
+    if (existing.albumId !== filedAlbum._id) mayEmpty(existing.albumId);
 
-          await writeLyrics(db, trackId, false, sets);
-          adjust(filedAlbum._id, 1, fields.durationMs);
-          present(fields, 1);
+    if (existing.missing) {
+      adjust(filedAlbum._id, 1, fields.durationMs);
+      present(fields, 1);
 
-          return trackId;
-        }
+      return existing._id;
+    }
 
-        await writeTrack(db, existing._id, placed);
-        await writeLyrics(db, existing._id, existing.lyricsBytes !== null, sets);
-        release(existing.artHash, fields.artHash);
+    durationMs += fields.durationMs - existing.durationMs;
 
-        if (existing.albumId !== filedAlbum._id) losing.add(existing.albumId);
+    if (existing.albumId === filedAlbum._id) {
+      adjust(filedAlbum._id, 0, fields.durationMs - existing.durationMs);
 
-        if (existing.missing) {
-          adjust(filedAlbum._id, 1, fields.durationMs);
-          present(fields, 1);
+      return existing._id;
+    }
 
-          return existing._id;
-        }
+    adjust(existing.albumId, -1, -existing.durationMs);
+    adjust(filedAlbum._id, 1, fields.durationMs);
 
-        durationMs += fields.durationMs - existing.durationMs;
-
-        if (existing.albumId === filedAlbum._id) {
-          adjust(filedAlbum._id, 0, fields.durationMs - existing.durationMs);
-
-          return existing._id;
-        }
-
-        adjust(existing.albumId, -1, -existing.durationMs);
-        adjust(filedAlbum._id, 1, fields.durationMs);
-
-        return existing._id;
-      },
-    };
+    return existing._id;
   };
 
-  const missingStep = (track: Doc<"tracks"> | null, read: Cost): Step<boolean> => {
-    if (track === null || track.missing) return { cost: read, run: async () => false };
+  /** Marks `track` missing when it is on disk; answers whether it was. */
+  const markGone = async (track: Doc<"tracks"> | null): Promise<boolean> => {
+    if (track === null || track.missing) return false;
 
-    return {
-      cost: addCost(
-        addCost(read, writeOf(getDocumentSize(track), true)),
-        settling(`lose:${track.albumId}`, LOSING_ALBUM),
-      ),
-      run: async () => {
-        await setTrackMissing(db, track._id);
-        adjust(track.albumId, -1, -track.durationMs);
-        losing.add(track.albumId);
-        present(track, -1);
+    await store.setTrackMissing(track._id);
+    adjust(track.albumId, -1, -track.durationMs);
+    mayEmpty(track.albumId);
+    present(track, -1);
 
-        return true;
-      },
-    };
+    return true;
   };
 
-  const upsert = async (scanned: ScannedTrack): Promise<Step<Id<"tracks">>> => {
-    const existing = await trackAt(scanned.path);
-    const planned = await planUpsert(scanned, existing);
+  const upsert = async (scanned: ScannedTrack): Promise<Id<"tracks">> =>
+    upsertOver(scanned, await trackAt(scanned.path));
 
-    return { ...planned, cost: addCost(readOf(existing), planned.cost) };
-  };
-
-  const move = async (from: string, scanned: ScannedTrack): Promise<Step<boolean>> => {
+  const move = async (from: string, scanned: ScannedTrack): Promise<boolean> => {
     const source = await trackAt(from);
-    const occupied = from === scanned.path ? source : await trackAt(scanned.path);
-    const reads = addCost(readOf(source), from === scanned.path ? NO_COST : readOf(occupied));
 
-    if (source === null || occupied !== null || from === scanned.path) {
-      const gone = from === scanned.path ? null : missingStep(source, NO_COST);
-      const planned = await planUpsert(scanned, occupied);
+    if (from === scanned.path) {
+      await upsertOver(scanned, source);
 
-      return {
-        cost: addCost(addCost(reads, gone?.cost ?? NO_COST), planned.cost),
-        run: async () => {
-          await gone?.run();
-          await planned.run();
+      return false;
+    }
 
-          return false;
-        },
-      };
+    const occupied = await trackAt(scanned.path);
+
+    if (source === null || occupied !== null) {
+      await markGone(source);
+      await upsertOver(scanned, occupied);
+
+      return false;
     }
 
     // The upsert writes every field of the track, its new path included, so the move is one write.
-    const planned = await planUpsert(scanned, { ...source, path: scanned.path });
+    await upsertOver(scanned, { ...source, path: scanned.path });
 
-    return {
-      cost: addCost(reads, planned.cost),
-      run: async () => {
-        await planned.run();
-
-        return true;
-      },
-    };
+    return true;
   };
 
-  const markMissing = async (path: string): Promise<Step<boolean>> => {
-    const track = await trackAt(path);
+  const markMissing = async (path: string): Promise<boolean> => markGone(await trackAt(path));
 
-    return missingStep(track, readOf(track));
-  };
-
-  const saveLyrics = async (scanned: ScannedLyrics): Promise<Step<boolean>> => {
+  const saveLyrics = async (scanned: ScannedLyrics): Promise<boolean> => {
     const track = await trackAt(scanned.path);
 
-    if (track === null) return { cost: readOf(track), run: async () => false };
+    if (track === null) return false;
 
     const sets = fittedSets(scanned.lyrics);
 
@@ -656,72 +594,55 @@ export const catalogBatch = (
       track.lyricsHash === fields.lyricsHash &&
       track.lyricsSynced === fields.lyricsSynced;
 
-    return {
-      cost: addCost(
-        addCost(readOf(track), unchanged ? NO_COST : writeOf(getDocumentSize(track), true)),
-        lyricsCost(track.lyricsBytes, sets),
-      ),
-      run: async () => {
-        if (!unchanged) await setTrackLyrics(db, track._id, fields);
+    if (!unchanged) await store.setTrackLyrics(track._id, fields);
 
-        await writeLyrics(db, track._id, track.lyricsBytes !== null, sets);
+    await store.writeLyrics(track._id, track.lyricsHash, sets, fields.lyricsHash);
 
-        return true;
-      },
-    };
+    return true;
   };
 
-  const remove = (track: Doc<"tracks">): Step<void> => ({
-    cost: addCost(
-      addCost(lyricsCost(track.lyricsBytes, []), cost(1, 1)),
-      settling(`lose:${track.albumId}`, LOSING_ALBUM),
-    ),
-    run: async () => {
-      await writeLyrics(db, track._id, track.lyricsBytes !== null, []);
-      await deleteTrack(db, track._id);
-      losing.add(track.albumId);
+  const remove = async (track: Doc<"tracks">): Promise<void> => {
+    await store.writeLyrics(track._id, track.lyricsHash, [], null);
+    await store.deleteTrack(track._id);
+    mayEmpty(track.albumId);
 
-      if (!track.missing) {
-        adjust(track.albumId, -1, -track.durationMs);
-        present(track, -1);
-      }
-    },
-  });
+    if (!track.missing) {
+      adjust(track.albumId, -1, -track.durationMs);
+      present(track, -1);
+    }
+  };
 
   /** Deletes an artist nothing files under any more, answering the artwork it held. */
   const deleteIfBare = async (artistId: Id<"artists">): Promise<string | null> => {
-    const artist = await db.get(artistId);
+    const artist = await store.get("artists", artistId);
 
     if (artist === null || artist.albumCount > 0) return null;
 
     const [album, track] = await Promise.all([
-      db
-        .query("albums")
-        .withIndex("by_artist", (q) => q.eq("artistId", artistId))
-        .first(),
-      db
-        .query("tracks")
-        .withIndex("by_artist", (q) => q.eq("artistId", artistId))
-        .first(),
+      store.first("albums", (q) =>
+        q.withIndex("by_artist", (index) => index.eq("artistId", artistId)),
+      ),
+      store.first("tracks", (q) =>
+        q.withIndex("by_artist", (index) => index.eq("artistId", artistId)),
+      ),
     ]);
 
     if (album !== null || track !== null) return null;
 
-    await deleteArtist(db, artistId);
+    await store.deleteArtist(artistId);
 
     return artist.artHash;
   };
 
   /** Deletes an album no track points at any more, then its artist when it is bare too. */
   const deleteIfEmpty = async (album: Doc<"albums">): Promise<void> => {
-    const track = await db
-      .query("tracks")
-      .withIndex("by_album", (q) => q.eq("albumId", album._id))
-      .first();
+    const track = await store.first("tracks", (q) =>
+      q.withIndex("by_album", (index) => index.eq("albumId", album._id)),
+    );
 
     if (track !== null) return;
 
-    await deleteAlbum(db, album._id);
+    await store.deleteAlbum(album._id);
     release(album.artHash, null);
     release(await deleteIfBare(album.artistId), null);
   };
@@ -732,7 +653,9 @@ export const catalogBatch = (
     let albumsMoved = 0;
 
     const settled = await Promise.all(
-      [...new Set([...deltas.keys(), ...losing])].map(async (albumId) => db.get(albumId)),
+      [...new Set([...deltas.keys(), ...losing])].map(async (albumId) =>
+        store.get("albums", albumId),
+      ),
     );
 
     await Promise.all(
@@ -743,7 +666,7 @@ export const catalogBatch = (
         const trackCount = album.trackCount + delta.tracks;
 
         if (delta.tracks !== 0 || delta.durationMs !== 0) {
-          await setAlbumCounts(db, album._id, {
+          await store.setAlbumCounts(album._id, {
             trackCount,
             durationMs: album.durationMs + delta.durationMs,
           });
@@ -764,25 +687,38 @@ export const catalogBatch = (
 
     await Promise.all(
       [...artistSteps].map(async ([artistId, step]) => {
-        const artist = step === 0 ? null : await db.get(artistId);
+        const artist = step === 0 ? null : await store.get("artists", artistId);
 
         if (artist === null) return;
 
         const albumCount = artist.albumCount + step;
 
-        await setArtistAlbums(db, artistId, albumCount);
+        await store.setArtistAlbums(artistId, albumCount);
         artistsMoved += Number(albumCount > 0) - Number(artist.albumCount > 0);
       }),
     );
 
-    const moved: Moved = { albums: albumsMoved, artists: artistsMoved, durationMs };
-
-    if (options.totals) await moveTotals(db, libraryId, moved);
+    if (options.totals ?? true) {
+      await store.moveTotals(libraryId, {
+        albums: albumsMoved,
+        artists: artistsMoved,
+        durationMs,
+      });
+    }
 
     await inOrder(emptied, deleteIfEmpty);
 
     return { value: [...released], added, removed };
   };
 
-  return { upsert, move, markMissing, saveLyrics, remove, finish };
+  return {
+    each: (items, write) =>
+      whileBudget(store.meter, options.limit ?? CALL_COST, WRITE_MOST, items, write),
+    upsert,
+    move,
+    markMissing,
+    saveLyrics,
+    remove,
+    finish,
+  };
 };

@@ -1,5 +1,5 @@
 import type { WithoutSystemFields } from "convex/server";
-import { getDocumentSize } from "convex/values";
+import { getConvexSize, getDocumentSize } from "convex/values";
 
 import type { Doc } from "../_generated/dataModel";
 import { sha256Hex } from "../core/lib/sha256";
@@ -140,17 +140,27 @@ export const fitArtist = (artist: Fields<"artists">): Fields<"artists"> => ({
 /** Room a lyrics row's `trackId` and field names take beside its sets, in Convex's measure. */
 const LYRICS_ROW_OVERHEAD = 128;
 
+const EMPTY_LYRICS_ROW = getDocumentSize({ sets: [] }) + LYRICS_ROW_OVERHEAD;
+
 const setsBytes = (sets: ReadonlyArray<LocalLyricSet>): number =>
   getDocumentSize({ sets: [...sets] }) + LYRICS_ROW_OVERHEAD;
 
 /**
  * A file's lyric sets within the lyrics row's bound: the leading sets that fit, in the order the
  * server found them, so the main lyrics it found first stay. Lyrics are never refused for size.
+ * Convex sizes an array as a fixed marker plus its elements, so each set adds its own size.
  */
-export const fitLyrics = (sets: ReadonlyArray<LocalLyricSet>): ReadonlyArray<LocalLyricSet> =>
-  sets.length === 0 || setsBytes(sets) <= DOCUMENT_BYTES.localLyrics
-    ? sets
-    : fitLyrics(sets.slice(0, -1));
+export const fitLyrics = (sets: ReadonlyArray<LocalLyricSet>): ReadonlyArray<LocalLyricSet> => {
+  let bytes = EMPTY_LYRICS_ROW;
+
+  for (const [index, set] of sets.entries()) {
+    bytes += getConvexSize(set);
+
+    if (bytes > DOCUMENT_BYTES.localLyrics) return sets.slice(0, index);
+  }
+
+  return sets;
+};
 
 const LANG = /^[a-z]{2,3}(?:-[A-Za-z0-9]{1,8})*$/u;
 
