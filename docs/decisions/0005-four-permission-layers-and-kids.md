@@ -291,9 +291,9 @@ admin can give it a role, a reset link, restrictions, or ownership.
 
 ### Test seam
 
-`convex/movies/probe.ts` seeds rated titles in real movies libraries, and
-`convex/core/libraryProbe.ts` seeds `probeItems` tracks with an explicit flag in music libraries
-until music's own rows exist (ADR 0024). Each seam's internal `open` and `page` take a real
+`convex/movies/probe.ts` seeds rated titles in real movies libraries, and `convex/music/probe.ts`
+seeds tracks, explicit or not, in real music libraries (ADR 0024; `core/libraryProbe.ts` did
+until the music port). Each seam's internal `open` and `page` take a real
 session's id and run `callerOfSession`, which is everything `requireCaller` does after it reads
 the token. A stack test signs in for real, with a password or a key with chosen scopes, and calls
 them with the deployment admin key. Libraries themselves are shared and read through the real

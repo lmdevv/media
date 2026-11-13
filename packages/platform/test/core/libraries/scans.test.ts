@@ -110,7 +110,7 @@ describe.skipIf(stack === undefined)("library scans", { timeout: 180_000 }, () =
     await expect(calls.upsert(lease, "music", files)).rejects.toThrow(/movies\.scan/u);
   });
 
-  it("write a path sent twice in one batch once", async () => {
+  it("count a path sent twice in one batch once", async () => {
     if (stack === undefined) return;
     const owner = await admin(stack);
     const root = await tree(["a.flac", "b.flac"]);
@@ -131,8 +131,9 @@ describe.skipIf(stack === undefined)("library scans", { timeout: 180_000 }, () =
 
     expect(await calls.upsert(lease, "music", [first, first, second])).toEqual({
       outcome: "held",
-      value: { inserted: 2 },
+      value: { inserted: 3 },
     });
+    expect(await itemsOf(owner, libraryId)).toBe(2);
     expect(await calls.missing(lease, "music", [first.path, first.path])).toEqual({
       outcome: "held",
       value: { removed: 1 },
@@ -193,11 +194,12 @@ describe.skipIf(stack === undefined)("library scans", { timeout: 180_000 }, () =
     await scanLibrary(stack, "music", libraryId);
     await owner.mutation(api.core.libraries.remove, { libraryId });
 
-    const Left = Schema.Boolean;
+    const Left = Schema.Struct({ rows: Schema.Finite });
 
     expect(
       await eventually("the purge to finish", async () =>
-        (await runFunction(stack, internal.core.libraryProbe.hasItems, { libraryId }, Left))
+        (await runFunction(stack, internal.music.probe.rows, { libraryId, cursor: null }, Left))
+          .rows > 0
           ? null
           : true,
       ),

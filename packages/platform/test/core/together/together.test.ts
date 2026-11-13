@@ -260,7 +260,7 @@ describe.skipIf(stack === undefined)("group sessions", { timeout: 120_000 }, () 
 
     const crossed = {
       domain: "movies",
-      ref: { type: "probeTrack", id: shelf.track.ref.id },
+      ref: { type: "track", id: shelf.track.ref.id },
     };
 
     expect(

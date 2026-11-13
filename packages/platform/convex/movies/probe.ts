@@ -38,9 +38,9 @@ import {
 import { findProgress, watchGeneration } from "./viewing";
 
 /**
- * The stack suite's seam into the movies catalog, as `core/libraryProbe.ts` is for music until
- * the music port: a seed of rated titles written without a scan, and `open` and `page`, which
- * decide titles through `requireItems` as the movies commands will. The server never calls it.
+ * The stack suite's seam into the movies catalog, as `music/probe.ts` is for music: a seed of
+ * rated titles written without a scan, and `open` and `page`, which decide titles through
+ * `requireItems` as the movies commands will. The server never calls it.
  */
 
 const SEED_MAX = 200;

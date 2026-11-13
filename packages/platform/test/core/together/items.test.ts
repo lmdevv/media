@@ -19,8 +19,16 @@ describe("typed item references", () => {
       ref: { type: "file"; id: Id<"mediaFiles"> };
     }>().toExtend<DomainItem>();
     expectTypeOf<{
+      domain: "music";
+      ref: { type: "track"; id: Id<"tracks"> };
+    }>().toExtend<DomainItem>();
+    expectTypeOf<{
+      domain: "music";
+      ref: { type: "album"; id: Id<"albums"> };
+    }>().toExtend<DomainItem>();
+    expectTypeOf<{
       domain: "movies";
-      ref: { type: "probeTrack"; id: Id<"probeItems"> };
+      ref: { type: "track"; id: Id<"tracks"> };
     }>().not.toExtend<DomainItem>();
     expectTypeOf<{
       domain: "music";
@@ -28,7 +36,7 @@ describe("typed item references", () => {
     }>().not.toExtend<DomainItem>();
     expectTypeOf<{
       domain: "movies";
-      ref: { type: "title"; id: Id<"probeItems"> };
+      ref: { type: "title"; id: Id<"tracks"> };
     }>().not.toExtend<DomainItem>();
   });
 

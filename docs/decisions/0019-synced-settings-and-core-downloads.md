@@ -161,13 +161,15 @@ record of which bytes it holds, so the core asks the device for no acknowledgeme
 - An item is a typed reference `{ kind, id }`. `downloadKinds` in
   `packages/commands/src/access.ts` lists each kind once, with its table and the ticket resource
   its download serves (`file` or `track`). The validators derive from that list.
-- `probe` is the only kind until the movies port. It names a `probeItems` row, the core's stand-in
-  for a movie file or a track, and the port replaces it with movies' own kinds.
+- `probe` was the only kind until the movies port. It named a `probeItems` row, the core's
+  stand-in for a movie file or a track. The movies port added `file` and the music port `track`,
+  which replaced it (ADR 0024).
 - Each kind has one loader in `downloadSources.ts`. A kind without one fails to compile. A loader
   reads the item live, and its library through a reader that reads each library once per call, and
   gives the library, the facts restrictions read, the ticket resource, an
-  opaque revision, the bytes it packages at each quality, and a label. The probe's revision is its
-  size and change time. A domain whose item can point at another file puts the file id in it.
+  opaque revision, the bytes it packages at each quality, and a label. A movies file's revision
+  is its size and change time, and a track's the same in base 36, as old music's. A domain whose
+  item can point at another file puts the file id in it.
 - A container, such as an album, a playlist, or a season, is a domain command that adds its
   items one by one. The core has no container rows.
 

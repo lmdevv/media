@@ -70,7 +70,6 @@ import type * as core_lib_serverFacing from "../core/lib/serverFacing.js";
 import type * as core_lib_sha256 from "../core/lib/sha256.js";
 import type * as core_lib_usernames from "../core/lib/usernames.js";
 import type * as core_libraries from "../core/libraries.js";
-import type * as core_libraryProbe from "../core/libraryProbe.js";
 import type * as core_limitsProbe from "../core/limitsProbe.js";
 import type * as core_maintenance from "../core/maintenance.js";
 import type * as core_maintenanceProbe from "../core/maintenanceProbe.js";
@@ -133,6 +132,17 @@ import type * as movies_trickplayState from "../movies/trickplayState.js";
 import type * as movies_validators from "../movies/validators.js";
 import type * as movies_viewing from "../movies/viewing.js";
 import type * as movies_write from "../movies/write.js";
+import type * as music_art from "../music/art.js";
+import type * as music_budget from "../music/budget.js";
+import type * as music_catalog from "../music/catalog.js";
+import type * as music_fit from "../music/fit.js";
+import type * as music_items from "../music/items.js";
+import type * as music_probe from "../music/probe.js";
+import type * as music_purge from "../music/purge.js";
+import type * as music_scanner from "../music/scanner.js";
+import type * as music_totals from "../music/totals.js";
+import type * as music_validators from "../music/validators.js";
+import type * as music_write from "../music/write.js";
 
 import type {
   ApiFromModules,
@@ -203,7 +213,6 @@ declare const fullApi: ApiFromModules<{
   "core/lib/sha256": typeof core_lib_sha256;
   "core/lib/usernames": typeof core_lib_usernames;
   "core/libraries": typeof core_libraries;
-  "core/libraryProbe": typeof core_libraryProbe;
   "core/limitsProbe": typeof core_limitsProbe;
   "core/maintenance": typeof core_maintenance;
   "core/maintenanceProbe": typeof core_maintenanceProbe;
@@ -266,6 +275,17 @@ declare const fullApi: ApiFromModules<{
   "movies/validators": typeof movies_validators;
   "movies/viewing": typeof movies_viewing;
   "movies/write": typeof movies_write;
+  "music/art": typeof music_art;
+  "music/budget": typeof music_budget;
+  "music/catalog": typeof music_catalog;
+  "music/fit": typeof music_fit;
+  "music/items": typeof music_items;
+  "music/probe": typeof music_probe;
+  "music/purge": typeof music_purge;
+  "music/scanner": typeof music_scanner;
+  "music/totals": typeof music_totals;
+  "music/validators": typeof music_validators;
+  "music/write": typeof music_write;
 }>;
 
 /**

@@ -39,7 +39,10 @@ const currentResult = v.union(
           }),
           v.object({
             domain: v.literal("music"),
-            ref: v.union(v.object({ type: v.literal("probeTrack"), id: v.id("probeItems") })),
+            ref: v.union(
+              v.object({ type: v.literal("track"), id: v.id("tracks") }),
+              v.object({ type: v.literal("album"), id: v.id("albums") }),
+            ),
           }),
         ),
       }),

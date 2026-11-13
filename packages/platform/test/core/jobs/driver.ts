@@ -215,7 +215,8 @@ export type ReportFields = Omit<FunctionArgs<typeof server.report>, "lease" | "l
 
 export type End = FunctionArgs<typeof server.finish>["end"];
 
-export const probeItems = (from: number, count: number) =>
+/** `count` items of the `probe.items` job kind, numbered from `from`. */
+export const jobItems = (from: number, count: number) =>
   Array.from({ length: count }, (_, n) => ({ kind: "probe.items" as const, n: from + n }));
 
 const RETRIED = new Set(["OptimisticConcurrencyControlFailure", "TooManyWrites"]);

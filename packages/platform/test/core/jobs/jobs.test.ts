@@ -17,7 +17,7 @@ import {
   freshRun,
   inSequence,
   jobOf,
-  probeItems,
+  jobItems,
   server,
   waitForJob,
   waiting,
@@ -397,7 +397,7 @@ describe.skipIf(stack === undefined)("core jobs, live", { timeout: 180_000 }, ()
     const w = worker(stack, "items-small");
     const { lease } = await claimed(w.claim(["probe.items"]));
 
-    await w.report(lease, { append: { from: 0, items: probeItems(0, 10), sealed: true } });
+    await w.report(lease, { append: { from: 0, items: jobItems(0, 10), sealed: true } });
 
     expect(await w.items(lease, 4, 3)).toEqual({
       outcome: "held",
@@ -434,13 +434,13 @@ describe.skipIf(stack === undefined)("core jobs, live", { timeout: 180_000 }, ()
 
       return w.report(lease, {
         leaseMs: 60_000,
-        append: { from, items: probeItems(from, count), sealed: from + count === ITEMS },
+        append: { from, items: jobItems(from, count), sealed: from + count === ITEMS },
       });
     });
 
     expect(appended.every((answer) => answer.outcome === "held")).toBe(true);
     expect(
-      await w.report(lease, { append: { from: 0, items: probeItems(0, 1), sealed: false } }),
+      await w.report(lease, { append: { from: 0, items: jobItems(0, 1), sealed: false } }),
     ).toEqual({ outcome: "outOfOrder", appended: ITEMS });
     expect(
       await inSequence(throughs, (through) => w.report(lease, { leaseMs: 60_000, through })),

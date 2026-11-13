@@ -2,7 +2,7 @@ import type { DomainItem, ItemType, Level } from "../../../commands/access";
 import type { Doc, Id } from "../../_generated/dataModel";
 import type { DatabaseReader } from "../../_generated/server";
 import { placeEpisode, placeFile, placeTitle } from "../../movies/items";
-import { probeFacts } from "../libraryProbe";
+import { placeAlbum, placeTrack } from "../../music/items";
 import { fail } from "../lib/errors";
 import { levelOn, reachOf } from "./grants";
 import type { Lent, Reach } from "./grants";
@@ -37,15 +37,8 @@ const loaders: Loaders = {
   title: { reads: 2, load: (db, id) => placeTitle(db, id, libraryReader(db)) },
   episode: { reads: 3, load: (db, id) => placeEpisode(db, id, libraryReader(db)) },
   file: { reads: 3, load: (db, id) => placeFile(db, id, libraryReader(db)) },
-  probeTrack: {
-    reads: 2,
-    load: async (db, id) => {
-      const row = await db.get(id);
-      const library = row === null ? null : await db.get(row.libraryId);
-
-      return row !== null && library?.kind === "music" ? { library, facts: probeFacts(row) } : null;
-    },
-  },
+  track: { reads: 2, load: (db, id) => placeTrack(db, id, libraryReader(db)) },
+  album: { reads: 2, load: (db, id) => placeAlbum(db, id, libraryReader(db)) },
 };
 
 /** The most documents placing one item reads, besides its library's grants. */

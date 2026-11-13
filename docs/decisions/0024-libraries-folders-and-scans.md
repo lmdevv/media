@@ -2,7 +2,7 @@
 
 - Status: Accepted, 2026-11-04. Amended 2026-11-09 with the movies catalog, and again the same
   day with each movies document's size bound. Amended 2026-11-10 with folder identity, and again
-  the same day with rescans after a file changes.
+  the same day with rescans after a file changes. Amended 2026-11-13 with the music catalog.
 - Decisions: D01, D02, D16, D17, D28, D29, D50
 
 ## Context
@@ -127,7 +127,7 @@ never both write.
   and writes. Its items vanish with its grants, because an item's level is its library's. A kid's
   allowed-libraries list may keep the removed id, which matches nothing.
 - The per-domain purge hooks live in one table in `scans.ts`. Movies' hook is `movies/purge:files`;
-  music's is the test seam's until the music port.
+  music's is `music/purge:tracks`.
 
 ### No libraries, no workers
 
@@ -138,14 +138,15 @@ cancels its scan, so no scan of a domain without libraries stays queued.
 
 ### Test seam
 
-`core/libraryProbe.ts` holds `probeItems`, a stand-in for music's tracks until the music port: the
-scanner callbacks `known`, `upsert`, and `missing`, the purge hook, a seed of tracks written
-through `withLibraryItems`, and `open` and `page`, which decide items through `requireItems` as a
-track list will. It takes music libraries only; movies keep their own rows (below).
+Until the music port, `core/libraryProbe.ts` held `probeItems`, a stand-in for music's tracks, with
+its own scanner callbacks, purge hook, and seed. The music port deleted it (amended 2026-11-13):
+each domain's seam is now its own `probe.ts`, `movies/probe.ts` and `music/probe.ts`, which seed
+real rows and decide them through `requireItems`.
 `packages/platform/test/core/libraries/scanner.ts` drives a scan as the server will: claim,
-`target`, a walk with `opendir` and `lstat` only, pages of `known`, batches of 500 (movies sends
-again what a call's budget left), finish. For a movies library it sends each file as a movie titled by
-its path.
+`target`, a walk with `opendir` and `lstat` only, pages of `known`, batches of 500 sent again
+where a call's budget left some, finish. For a movies library it sends each file as a movie titled
+by its path, and for a music library as a track titled by its name on an album named by its
+folder.
 
 ### Movies (amended 2026-11-09)
 
@@ -247,7 +248,7 @@ The movies port replaced the movies half of the seam with movies' own rows in
   and gives the title's facts (ADR 0005). A file a scan marked missing has no download source, so
   a kept copy reads `gone` and `fetch` issues no ticket until a scan finds the file again.
 - `movies/probe.ts` seeds rated titles, shows with episodes, and their files without a scan, and
-  opens and pages titles through `requireItems`, as the libraryProbe seam does for music. It
+  opens and pages titles through `requireItems`, as `music/probe.ts` does tracks. It
   also sets a library's folders without scheduling the purge and runs one purge page at a time,
   so a test can act between pages.
 
@@ -474,6 +475,105 @@ a file changes. It asks the core to queue a scan. Until now "Left for later unit
   `jobKinds` row busy, so managers' scans and new libraries failed on conflicts, and the worker
   scanned every stale library.
 
+### Music (amended 2026-11-13)
+
+The music port replaced the test seam with music's own rows in `convex/music/`, ported from old
+music's tables of the same names. No client reads them yet; the music commands come next.
+
+| Table         | Holds                                                                                  | Indexes                                                                                                                             |
+| ------------- | -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `artists`     | an album artist: name, key, albums with a track on disk, artwork, search text, tie     | `by_library_key` (library, key, tie), `by_art`, search                                                                              |
+| `albums`      | an artist's album: title, key, year, genre, artwork, tracks on disk and their length   | `by_library_artist_key`, `by_library_added` (library, added, tie), `by_artist`, `by_art`, search                                    |
+| `tracks`      | one audio file: path, tags, format, artwork, lyrics fingerprint, `explicit`, `missing` | `by_library_path`, `by_library_title` (…, tie), `by_album` (…, tie), `by_artist`, `by_album_art`, `by_artist_art`, `by_art`, search |
+| `localLyrics` | the lyric sets a track's own files hold, one row per track that has any                | `by_track`                                                                                                                          |
+
+- **Scanner callbacks.** `music/scanner:known`, `upsert`, `move`, `missing`, and `lyrics` are
+  server functions under `withScanLease`, ports of old music's `fingerprints`, `upsertTracks`,
+  `moveTracks`, `markMissing`, and `saveLocalLyrics`. `known` pages 512 tracks, missing ones
+  included, with what a scan compares, optionally between `from` and `to` as old music's
+  `fingerprints` did. The others take up to 500 items, write the leading ones their budget admits,
+  and answer `done`; `upsert`, `move`, and `missing` also answer `released`, the artwork some row
+  stopped using. A missing track keeps its row, so likes and playlists keep pointing at it. A move
+  keeps the track's id.
+- **Artwork.** Old music writes artwork only in its scan: a track's own, and its album's and
+  artist's, which follow a replaced folder cover and fall back to another track's art when the
+  one they came from goes. The port keeps those rules in the scanner callbacks, under the lease.
+  The server's artwork collector reads `music/art:inUse` (which of up to 200 hashes a row still
+  uses) and `music/art:hashes` (the distinct hashes a table uses, 200 a page). `hashes` walks the
+  `by_art` index from one distinct hash to the next with the last hash as an exact cursor, where
+  old music read whole tables 1,000 rows a page.
+- **One writer, one batch.** `music/write.ts` is the only module that writes the music tables, and
+  keeps every document within its bound. `music/catalog.ts` is the only caller that changes which
+  tracks a library holds: the scanner callbacks, the purge, and the probe's seed all go through
+  its per-call batch, as old music's `catalogBatch` did. It reads each album and artist once a
+  call, sums what the call moved, and settles it in the same mutation: each album's tracks on disk
+  and their length, each artist's albums with a track on disk, and the library's totals. It
+  deletes an album no track points at any more, then its artist when no album or track files under
+  it. Convex runs two calls that touch one album one after the other, so the counts are exact.
+- **Totals.** A music library's item count is its tracks on disk. Three more counters,
+  `music.albums:<id>`, `music.artists:<id>`, and `music.duration:<id>`, hold its albums with a
+  track on disk, its artists with such an album, and the length of its tracks on disk in whole
+  milliseconds: old music's `libraryStats`. A retried call finds its rows and moves nothing. A
+  removed library's totals go once its purge deleted its last rows.
+- **Budget with bytes.** Every scanner and purge step is charged its worst case before it runs,
+  as movies' are (`music/budget.ts` builds on `movies/budget.ts`), and also the bytes it reads and
+  writes, 12 MiB each way a call. A track's lyrics row may hold 512 KiB, so 500 tracks with
+  lyrics would pass Convex's 16 MiB a call however few ranges they use. A step is priced from the
+  rows it read to plan it: the track at its path, and the artist and album it files under, read
+  once a call. Settling an album is charged the first time a call touches it, at its worst when
+  the album may be left empty.
+- **Bounds.** Music has no long free text, so each field has a fixed maximum, applied by the
+  writer, instead of movies' fitting of a whole document:
+
+  | Field                                                           | Maximum             | Over it                                        |
+  | --------------------------------------------------------------- | ------------------- | ---------------------------------------------- |
+  | A title, artist, or album as shown; an artist's or album's name | 512 characters      | cut                                            |
+  | An artist's or album's key                                      | 512 characters      | first 447, `#`, and the hex SHA-256 of the key |
+  | A track's title key, which only orders tracks                   | 128 characters      | cut                                            |
+  | Search text                                                     | 1,024 characters    | cut                                            |
+  | A genre, a codec, a format label                                | 96 characters       | cut                                            |
+  | An artwork hash                                                 | 128 characters      | not kept                                       |
+  | A folder artwork or lyric files fingerprint                     | 1,024 characters    | first 959, `#`, and the hex SHA-256            |
+  | A file's path                                                   | 4,096 bytes         | the file is skipped and counts as done         |
+  | A track's lyric sets                                            | 512 KiB for the row | the leading sets that fit                      |
+
+  So a track is at most 24 KiB, an album 12 KiB, and an artist 8 KiB; a unit test builds each at
+  its longest. A key keeps its leading part and a hash of the whole, so two names that differ past
+  the cut stay two rows and a rescan finds the row it wrote. Lyric sets are checked as old music's
+  `LocalLyricSet` schema checked them, in plain TypeScript; a set that breaks it is a defect in
+  the server's reader, which checks the same schema, and fails the call.
+
+- **Purge.** `music/purge:tracks` pages a library's tracks by path, 341 a page (8 MiB at the track
+  bound), and deletes through the batch those no current folder keeps, every track once the
+  library is gone, with their lyrics, as many as the budget admits. The batch settles their albums
+  and artists in the same mutation, so emptied albums and artists go page by page and the totals
+  stay exact at every page. A page the budget stopped is read again. Once a removed library's
+  tracks are gone, `music/purge:rest` deletes any album or artist rows left, 200 a call, which the
+  batch leaves none of unless a defect did, and then the library's totals.
+- **Items.** A `track` and an `album` are music item types, and a `track` is a download kind
+  serving `track` tickets (`packages/commands/src/access.ts`). Each loader reads the row and its
+  library and answers nothing outside a music library. A track's facts are its `explicit` flag,
+  which `can()` hides from a kid whose explicit filter is on (D17); the filter is no separate path.
+  An album is never explicit itself: a kid sees it, and each of its tracks is decided on its own
+  when it plays. A kept track's revision is old music's file revision, its size and change time in
+  base 36, and a track a scan marked missing has no download source until it returns.
+- **Where the port differs from old music.**
+  - Tracks carry `explicit`, which old music did not have; the scanner sends it from the file's
+    tags, and the core's kid restriction reads it (D17).
+  - LRCLIB's `lookupKey` and lookups are left to `p5-lyrics`; tracks keep their own lyrics'
+    fingerprint, size, hash, and whether they hold synced main lyrics.
+  - Fields that old music left absent are null. Rows that lists walk carry a tie. Indexes over
+    every library (`by_key`, `by_added`, `by_title`) and autoplay's genre and year indexes are left
+    to the units whose reads need them.
+  - Old music deleted an album only when its tracks on disk dropped to none in a batch, and kept
+    an album whose tracks were all missing even after they went. The port checks every album that
+    lost a track row, so such an album goes once its last track does.
+  - Old music repointed album download pins after a retag; the core has no album download kind.
+  - Old music's library purge also deleted playlist entries, likes, and history; those tables come
+    with `p5-music-commands`, which deletes them with their tracks.
+  - Batches are 500 a call with the budget deciding each call's share, where old music's server
+    sent 100.
+
 ## Consequences
 
 - A domain author writes scanner callbacks as `serverMutation`s that call `withScanLease`, a purge
@@ -523,4 +623,4 @@ a file changes. It asks the core to queue a scan. Until now "Left for later unit
   items can page only the removed folders' path ranges instead.
 - A recount of a library's items from the domain's rows, for a count a defect moved wrong.
 - Totals of a library's items by kind of item belong to each domain's port. Movies counts titles,
-  episodes, and files (above); music's tracks and albums come with its port.
+  episodes, and files, and music tracks, albums, artists, and their length (above).

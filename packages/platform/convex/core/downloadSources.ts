@@ -3,7 +3,7 @@ import type { DownloadQuality } from "../../commands/settings";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { DatabaseReader } from "../_generated/server";
 import { fileSource } from "../movies/items";
-import { probeSource } from "./libraryProbe";
+import { trackSource } from "../music/items";
 import type { ContentFacts } from "./permissions/policy";
 
 type Entry<K extends DownloadKind> = (typeof downloadKinds)[K];
@@ -57,7 +57,7 @@ type SourceLoaders = { readonly [K in DownloadKind]: Source<K> };
 
 const loaders: SourceLoaders = {
   file: { reads: 3, load: fileSource },
-  probe: { reads: 2, load: probeSource },
+  track: { reads: 2, load: trackSource },
 };
 
 /** The most documents describing one item reads. */

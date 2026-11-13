@@ -131,9 +131,11 @@ music clients adopt it in phase 6.
   domain and table. The generator derives `domainItem`, which pairs a domain only with its own
   types. A movies session handed a music item fails the type check, the argument check, and the
   schema alike. `permissions/items.ts` has one loader per type, or it fails to compile.
-- Phase 3 lists two types over the `probeItems` seam (ADR 0024): `probeMovie` and `probeTrack`. A
-  loader answers nothing for a row whose library holds another domain's content. The movies and
-  music ports replace both with real types.
+- Phase 3 listed two types over the `probeItems` seam (ADR 0024), `probeMovie` and `probeTrack`.
+  The movies port replaced the first with `title`, `episode`, and `file`, and the music port the
+  second with `track` and `album`, and deleted the seam (amended 2026-11-13). A loader answers
+  nothing for a row whose library holds another domain's content. An album is never explicit
+  itself: a kid's explicit filter hides its explicit tracks one by one, when each plays.
 - `create` and `add` take only items the caller can play. `get` and `core.together.queue` show
   each viewer an item they may not play as `null`, such as a kid and an R movie.
 - The queue holds up to 500 items to play next, counted in `counters`. `add` puts one first or

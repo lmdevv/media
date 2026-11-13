@@ -22,7 +22,10 @@ const addArgs = v.object({
     }),
     v.object({
       domain: v.literal("music"),
-      ref: v.union(v.object({ type: v.literal("probeTrack"), id: v.id("probeItems") })),
+      ref: v.union(
+        v.object({ type: v.literal("track"), id: v.id("tracks") }),
+        v.object({ type: v.literal("album"), id: v.id("albums") }),
+      ),
     }),
   ),
   at: v.optional(v.union(v.literal("next"), v.literal("end"))),
@@ -84,7 +87,10 @@ const createArgs = v.object({
     }),
     v.object({
       domain: v.literal("music"),
-      ref: v.union(v.object({ type: v.literal("probeTrack"), id: v.id("probeItems") })),
+      ref: v.union(
+        v.object({ type: v.literal("track"), id: v.id("tracks") }),
+        v.object({ type: v.literal("album"), id: v.id("albums") }),
+      ),
     }),
   ),
   join: v.optional(v.union(v.literal("open"), v.literal("approval"), v.literal("locked"))),
@@ -135,7 +141,10 @@ const getResult = v.union(
         }),
         v.object({
           domain: v.literal("music"),
-          ref: v.union(v.object({ type: v.literal("probeTrack"), id: v.id("probeItems") })),
+          ref: v.union(
+            v.object({ type: v.literal("track"), id: v.id("tracks") }),
+            v.object({ type: v.literal("album"), id: v.id("albums") }),
+          ),
         }),
       ),
       v.null(),
@@ -199,7 +208,10 @@ const queueResult = v.object({
           }),
           v.object({
             domain: v.literal("music"),
-            ref: v.union(v.object({ type: v.literal("probeTrack"), id: v.id("probeItems") })),
+            ref: v.union(
+              v.object({ type: v.literal("track"), id: v.id("tracks") }),
+              v.object({ type: v.literal("album"), id: v.id("albums") }),
+            ),
           }),
         ),
         v.null(),
