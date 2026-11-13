@@ -2,7 +2,7 @@ import type { WithoutSystemFields } from "convex/server";
 import { getConvexSize, getDocumentSize } from "convex/values";
 
 import type { Doc } from "../_generated/dataModel";
-import { sha256Hex } from "../core/lib/sha256";
+import { sha256Hex } from "../core/lib/secrets";
 import { cut, uniqueWithin } from "../movies/bounds";
 import type { musicTables } from "./schema";
 import type { LocalLyricSet } from "./validators";
@@ -162,6 +162,70 @@ export const fitLyrics = (sets: ReadonlyArray<LocalLyricSet>): ReadonlyArray<Loc
   return sets;
 };
 
+type LyricOrigin = LocalLyricSet["origin"];
+
+type LyricBody = LocalLyricSet["body"];
+
+type LyricLine = Extract<LyricBody, { readonly lines: unknown }>["lines"][number];
+
+type LyricWord = NonNullable<LyricLine["words"]>[number];
+
+const sameList = <Item>(
+  left: ReadonlyArray<Item>,
+  right: ReadonlyArray<Item>,
+  same: (one: Item, other: Item) => boolean,
+): boolean =>
+  left.length === right.length &&
+  left.every((one, index) => {
+    const other = right[index];
+
+    return other !== undefined && same(one, other);
+  });
+
+/** Numbers as Convex stores them: `-0` is not `0`, and `NaN` is itself. */
+const sameNumber = (one: number | null, other: number | null): boolean => Object.is(one, other);
+
+const sameWord = (one: LyricWord, other: LyricWord): boolean =>
+  one.text === other.text &&
+  sameNumber(one.startMs, other.startMs) &&
+  sameNumber(one.endMs, other.endMs);
+
+const sameLine = (one: LyricLine, other: LyricLine): boolean =>
+  one.text === other.text &&
+  sameNumber(one.startMs, other.startMs) &&
+  sameNumber(one.endMs, other.endMs) &&
+  one.voice === other.voice &&
+  (one.words === null || other.words === null
+    ? one.words === other.words
+    : sameList(one.words, other.words, sameWord));
+
+const sameOrigin = (one: LyricOrigin, other: LyricOrigin): boolean =>
+  "fileName" in one
+    ? "fileName" in other && one.fileName === other.fileName && one.format === other.format
+    : "tag" in other && one.tag === other.tag;
+
+const sameBody = (one: LyricBody, other: LyricBody): boolean =>
+  "text" in one
+    ? "text" in other && one.text === other.text
+    : "lines" in other && sameList(one.lines, other.lines, sameLine);
+
+const sameSet = (one: LocalLyricSet, other: LocalLyricSet): boolean =>
+  one.kind === other.kind &&
+  one.lang === other.lang &&
+  sameOrigin(one.origin, other.origin) &&
+  sameBody(one.body, other.body);
+
+/**
+ * Whether two lists of lyric sets hold the same sets in the same order, field by field and in any
+ * field order, as Convex hands back a stored object's fields in its own. It walks the sets' known
+ * shape and stops at the first difference: Convex's generic `compareValues` took about 5 µs a set,
+ * so a call rescanning dense lyrics ran out of its 1 s.
+ */
+export const sameLyrics = (
+  one: ReadonlyArray<LocalLyricSet>,
+  other: ReadonlyArray<LocalLyricSet>,
+): boolean => sameList(one, other, sameSet);
+
 const LANG = /^[a-z]{2,3}(?:-[A-Za-z0-9]{1,8})*$/u;
 
 const isMillis = (value: number): boolean => Number.isFinite(value) && value >= 0;
@@ -209,12 +273,16 @@ export interface LyricsFields {
   readonly lyricsSynced: boolean;
 }
 
-/** The fields a track keeps about lyric sets, already fitted, which its row stores. */
-export const lyricsFieldsOf = (sets: ReadonlyArray<LocalLyricSet>): LyricsFields =>
+/**
+ * The fields a track keeps about lyric sets, already fitted, which its row stores. The hash is
+ * Web Crypto's, as old music's was: the synchronous one in `core/lib/sha256.ts` took about 14 ms
+ * for a row of dense sets.
+ */
+export const lyricsFieldsOf = async (sets: ReadonlyArray<LocalLyricSet>): Promise<LyricsFields> =>
   sets.length === 0
     ? { lyricsBytes: null, lyricsHash: null, lyricsSynced: false }
     : {
         lyricsBytes: setsBytes(sets),
-        lyricsHash: sha256Hex(JSON.stringify(sets)),
+        lyricsHash: await sha256Hex(JSON.stringify(sets)),
         lyricsSynced: sets.some((set) => set.kind === "main" && "lines" in set.body),
       };

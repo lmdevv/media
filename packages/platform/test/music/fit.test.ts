@@ -14,6 +14,7 @@ import {
   fitTrack,
   keyOf,
   lyricsFieldsOf,
+  sameLyrics,
 } from "../../convex/music/fit";
 import type { LocalLyricSet } from "../../convex/music/validators";
 
@@ -165,7 +166,7 @@ describe("music document bounds", () => {
 });
 
 describe("music call budget", () => {
-  const limit = { work: cost(1000, 1000).work, readBytes: 100, writeBytes: 100 };
+  const limit = { ...cost(1000, 1000, 100, 100), lyricBytes: 100 };
 
   it("start another write only while what the meter charged leaves room for the most one costs", async () => {
     const meter = meterFrom(NO_COST);
@@ -189,10 +190,10 @@ describe("music call budget", () => {
 });
 
 /** How long `work` takes, in milliseconds. */
-const timed = (work: () => void): number => {
+const timed = async (work: () => Promise<void>): Promise<number> => {
   const start = performance.now();
 
-  work();
+  await work();
 
   return performance.now() - start;
 };
@@ -202,21 +203,102 @@ const manySets = (length: number): ReadonlyArray<LocalLyricSet> =>
   Array.from({ length: 8192 }, (_, n) => plain(`${n} `.padEnd(length, "la ")));
 
 describe("music lyrics fitting", () => {
-  it("fit 8,192 sets of 100 characters, or as long as a call's 16 MiB holds, in one pass well inside a call's second", () => {
-    for (const input of [manySets(100), manySets(1800)]) {
-      const elapsed = timed(() => {
+  it.each([100, 1800])(
+    "fit 8,192 sets of %i characters, up to as many as a call's 16 MiB holds, in one pass well inside a call's second",
+    async (length) => {
+      const input = manySets(length);
+
+      const elapsed = await timed(async () => {
         checkLyrics(input);
-        lyricsFieldsOf(fitLyrics(input));
+        await lyricsFieldsOf(fitLyrics(input));
       });
 
       const fitted = fitLyrics(input);
 
+      const [within, past] = await Promise.all([
+        lyricsFieldsOf(fitted),
+        lyricsFieldsOf(input.slice(0, fitted.length + 1)),
+      ]);
+
       expect(elapsed).toBeLessThan(500);
       expect(fitted).toEqual(input.slice(0, fitted.length));
-      expect(lyricsFieldsOf(fitted).lyricsBytes).toBeLessThanOrEqual(TABLE_BYTES.localLyrics);
-      expect(lyricsFieldsOf(input.slice(0, fitted.length + 1)).lyricsBytes).toBeGreaterThan(
-        TABLE_BYTES.localLyrics,
-      );
-    }
+      expect(within.lyricsBytes).toBeLessThanOrEqual(TABLE_BYTES.localLyrics);
+      expect(past.lyricsBytes).toBeGreaterThan(TABLE_BYTES.localLyrics);
+    },
+  );
+});
+
+const synced = (words: LyricWords): LocalLyricSet => ({
+  kind: "main",
+  lang: null,
+  origin: { _tag: "Sidecar", fileName: "song.lrc", format: "elrc" },
+  body: {
+    _tag: "Synced",
+    lines: [{ text: "La la", startMs: 0, endMs: 1000, words, voice: null }],
+  },
+});
+
+type LyricWords = Extract<
+  LocalLyricSet["body"],
+  { readonly _tag: "Synced" }
+>["lines"][number]["words"];
+
+/** `set` with its fields, and its body's and origin's, in the reverse order, as Convex may hand them back. */
+const reordered = (set: LocalLyricSet): LocalLyricSet => ({
+  body: "text" in set.body ? { text: set.body.text, _tag: "Plain" } : set.body,
+  origin: "tag" in set.origin ? { tag: set.origin.tag, _tag: "Embedded" } : set.origin,
+  lang: set.lang,
+  kind: set.kind,
+});
+
+describe("music lyrics comparison", () => {
+  const words: LyricWords = [
+    { text: "La", startMs: 0, endMs: 500 },
+    { text: "la", startMs: 500, endMs: null },
+  ];
+
+  it("find the same sets equal in any field order, and any difference in a field, a word, or the count", () => {
+    const sets = [plain("Words"), synced(words)];
+
+    expect(sameLyrics(sets, sets.map(reordered))).toBe(true);
+    expect(sameLyrics(sets, [plain("Words"), synced(words.map((word) => ({ ...word })))])).toBe(
+      true,
+    );
+    expect(sameLyrics(sets, [plain("Words")])).toBe(false);
+    expect(sameLyrics(sets, [{ ...plain("Words"), lang: null }, synced(words)])).toBe(false);
+    expect(sameLyrics(sets, [{ ...plain("Words"), kind: "translation" }, synced(words)])).toBe(
+      false,
+    );
+    expect(
+      sameLyrics(sets, [
+        { ...plain("Words"), origin: { _tag: "Embedded", tag: "other" } },
+        synced(words),
+      ]),
+    ).toBe(false);
+    expect(sameLyrics(sets, [plain("Word"), synced(words)])).toBe(false);
+    expect(sameLyrics(sets, [plain("Words"), synced(null)])).toBe(false);
+    expect(
+      sameLyrics(sets, [
+        plain("Words"),
+        synced([...words.slice(0, 1), { text: "la", startMs: 500, endMs: 900 }]),
+      ]),
+    ).toBe(false);
+    expect(sameLyrics(sets, [synced(words), plain("Words")])).toBe(false);
+  });
+
+  it("compare 8,192 one-character sets, the same or changed in the last, in a few milliseconds", async () => {
+    const tiny = Array.from({ length: 8192 }, () => ({ ...plain("x"), lang: null }));
+    const copy = tiny.map(reordered);
+    const changed = [...copy.slice(0, -1), { ...plain("y"), lang: null }];
+
+    const same = await timed(async () => {
+      expect(sameLyrics(tiny, copy)).toBe(true);
+    });
+
+    const different = await timed(async () => {
+      expect(sameLyrics(tiny, changed)).toBe(false);
+    });
+
+    expect(same + different).toBeLessThan(50);
   });
 });

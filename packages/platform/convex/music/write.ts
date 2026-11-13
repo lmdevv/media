@@ -7,7 +7,7 @@ import type {
   QueryInitializer,
   WithoutSystemFields,
 } from "convex/server";
-import { compareValues, getDocumentSize } from "convex/values";
+import { getDocumentSize } from "convex/values";
 import type { Value } from "convex/values";
 
 import type { DataModel, Doc, Id } from "../_generated/dataModel";
@@ -15,7 +15,7 @@ import type { MutationCtx } from "../_generated/server";
 import { inOrder } from "../core/lib/inOrder";
 import { paginate } from "../core/lib/paginate";
 import type { IndexedList } from "../core/lib/paginate";
-import { cost } from "./budget";
+import { cost, lyricsCost } from "./budget";
 import type { Cost, Meter } from "./budget";
 import {
   TABLE_BYTES,
@@ -25,6 +25,7 @@ import {
   fitArtist,
   fitTrack,
   labelWithin,
+  sameLyrics,
 } from "./fit";
 import type { musicTables } from "./schema";
 import { moveTotals } from "./totals";
@@ -79,6 +80,8 @@ export const atBound = {
   read: (table: MusicTable, rows = 1): Cost => readCost(rows * TABLE_BYTES[table]),
   patch: (table: MusicTable): Cost => patchCost(TABLE_BYTES[table], TABLE_BYTES[table]),
   delete: (table: MusicTable): Cost => deleteCost(TABLE_BYTES[table]),
+  /** Walking the lyric sets of `rows` lyrics rows (`lyricsCost`). */
+  lyrics: (rows: number): Cost => lyricsCost(rows * TABLE_BYTES.localLyrics),
 } as const;
 
 /**
@@ -133,7 +136,8 @@ export interface MusicStore {
 
   /**
    * Inserts a track with its own lyrics, already fitted (`fitLyrics`). A new track's id is one no
-   * lyrics row can point at yet, so its lyrics are inserted without a read.
+   * lyrics row can point at yet, so its lyrics are inserted without a read. It charges walking
+   * the sets (`lyricsCost`) at the size of the row it inserts.
    */
   readonly insertTrack: (
     fields: Fields<"tracks">,
@@ -157,7 +161,9 @@ export interface MusicStore {
    * for no sets, or inserts one. It goes by the row, never by what the track keeps of it, so a row changed by
    * anything else is repaired, and the same sets again change nothing. It reads up to
    * `LYRICS_ROWS_READ` rows and deletes the second, so a track left with two rows has one again
-   * after its next write.
+   * after its next write. It compares by the sets' shape (`sameLyrics`), and charges walking each
+   * row it read, and the new sets at the size of the row they match or are written as
+   * (`lyricsCost`).
    */
   readonly writeLyrics: (
     trackId: Id<"tracks">,
@@ -182,6 +188,11 @@ export const musicStore = (db: Db, meter: Meter): MusicStore => {
   /** What Convex reads of the document `id` before it writes it: its bound when unknown. */
   const bytesOf = (table: MusicTable, id: string): number =>
     known.get(id)?.bytes ?? TABLE_BYTES[table];
+
+  /** Charges walking the lyric sets of the lyrics row `id` as the store last read or wrote it. */
+  const walked = (id: string): void => {
+    meter.charge(lyricsCost(bytesOf("localLyrics", id)));
+  };
 
   const read = (rows: ReadonlyArray<Record<string, Value> & { readonly _id: string }>): void => {
     const bytes = rows.reduce((sum, row) => {
@@ -304,7 +315,7 @@ export const musicStore = (db: Db, meter: Meter): MusicStore => {
     insertTrack: async (fields, sets) => {
       const trackId = await insert("tracks", fitTrack({ ...fields, tie: newTie() }));
 
-      if (sets.length > 0) await insert("localLyrics", { trackId, sets: [...sets] });
+      if (sets.length > 0) walked(await insert("localLyrics", { trackId, sets: [...sets] }));
 
       return trackId;
     },
@@ -314,24 +325,33 @@ export const musicStore = (db: Db, meter: Meter): MusicStore => {
       patch("tracks", id, { ...lyrics, lyricsFiles: fingerprint(lyrics.lyricsFiles) }),
     deleteTrack: (id) => remove("tracks", id),
     writeLyrics: async (trackId, sets) => {
-      const [row, ...extra] = await take(
+      const rows = await take(
         "localLyrics",
         (q) => q.withIndex("by_track", (index) => index.eq("trackId", trackId)),
         LYRICS_ROWS_READ,
       );
 
+      const [row, ...extra] = rows;
+
+      // Convex decoded the rows it read; the new sets are walked once more below, as the row they
+      // match, or the row they are written as.
+      for (const one of rows) walked(one._id);
+
       await inOrder(extra, (one) => remove("localLyrics", one._id));
 
       if (row === undefined) {
-        if (sets.length > 0) await insert("localLyrics", { trackId, sets: [...sets] });
+        if (sets.length > 0) walked(await insert("localLyrics", { trackId, sets: [...sets] }));
 
         return;
       }
 
-      if (sets.length === 0) await remove("localLyrics", row._id);
-      // Convex hands back an object's fields in its own order; `compareValues` ignores it.
-      else if (compareValues(row.sets, [...sets]) !== 0) {
+      if (sets.length === 0) {
+        await remove("localLyrics", row._id);
+      } else if (sameLyrics(row.sets, sets)) {
+        walked(row._id);
+      } else {
         await patch("localLyrics", row._id, { sets: [...sets] });
+        walked(row._id);
       }
     },
 

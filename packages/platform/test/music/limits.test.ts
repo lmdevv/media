@@ -13,10 +13,12 @@ import {
   claimScan,
   finishScan,
   leftOf,
+  lyricRowsOf,
   markMissingAll,
   musicLibrary,
   purgePage,
   rowsOf,
+  saveLyricsAll,
   setFoldersQuietly,
   totalsOf,
   trackIdsAt,
@@ -84,6 +86,20 @@ const longTrack = (root: string, n: number, lyrics: ReadonlyArray<LyricSet>): Sc
  */
 const manySets = (length: number): ReadonlyArray<LyricSet> =>
   Array.from({ length: 8192 }, (_, n) => plainLyrics(`${n} `.padEnd(length, "la ")));
+
+/** The lyrics hash each track keeps for its file's lyrics, as the music writer fits them. */
+const hashesOf = (tracks: ReadonlyArray<ScannedTrack>): Promise<ReadonlyArray<string | null>> =>
+  Promise.all(
+    tracks.map(async (track) => (await lyricsFieldsOf(fitLyrics(track.lyrics))).lyricsHash),
+  );
+
+/** A lyric set as small as one can be: one character of plain text from an unnamed tag. */
+const tinySet = (text: string): LyricSet => ({
+  kind: "main",
+  lang: null,
+  origin: { _tag: "Embedded", tag: "other" },
+  body: { _tag: "Plain", text },
+});
 
 const exact = async (core: CoreStack, libraryId: Id<"libraries">): Promise<boolean> => {
   const [rows, totals] = await Promise.all([rowsOf(core, libraryId), totalsOf(core, libraryId)]);
@@ -287,9 +303,7 @@ describe.skipIf(stack === undefined)("music call limits", { timeout: 600_000 }, 
     const ids = await idsAt(stack, libraryId, tracks(2));
     const states = await Promise.all(ids.map(async (id) => trackState(stack, id)));
 
-    expect(states.map((state) => state?.lyricsHash)).toEqual(
-      tracks(2).map((track) => lyricsFieldsOf(fitLyrics(track.lyrics)).lyricsHash),
-    );
+    expect(states.map((state) => state?.lyricsHash)).toEqual(await hashesOf(tracks(2)));
     expect(states.every((state) => state?.lyricsBytes !== null)).toBe(true);
     expect(await leftOf(stack, ids)).toEqual({ tracks: 24, lyrics: 24 });
     expect(await totalsOf(stack, libraryId)).toMatchObject({ tracks: 24, albums: 1, artists: 1 });
@@ -386,8 +400,78 @@ describe.skipIf(stack === undefined)("music call limits", { timeout: 600_000 }, 
       (await idsAt(stack, libraryId, tracks)).map(async (id) => trackState(stack, id)),
     );
 
-    expect(states.map((state) => state?.lyricsHash)).toEqual(
-      tracks.map((track) => lyricsFieldsOf(fitLyrics(track.lyrics)).lyricsHash),
-    );
+    expect(states.map((state) => state?.lyricsHash)).toEqual(await hashesOf(tracks));
+  });
+
+  it("rescan 16 tracks of 6,470 one-character lyric sets, the same or changed in the last, in calls well inside the time limit", async () => {
+    if (stack === undefined) return;
+    const admin = await member(stack, "dense-lyrics", "admin");
+    const { libraryId, scanJobId, roots } = await musicLibrary(admin, "Dense lyrics");
+    const [root] = roots;
+
+    if (root === undefined) throw new Error("one folder");
+
+    // As many of the smallest sets as a lyrics row holds, 11 MB of arguments for the 16 tracks.
+    const sets = fitLyrics(Array.from({ length: 8192 }, () => tinySet("x")));
+    const changed = [...sets.slice(0, -1), tinySet("y")];
+
+    const tracks = (lyrics: ReadonlyArray<LyricSet>) =>
+      Array.from({ length: 16 }, (_, n) =>
+        musicTrack(`${root}/Album/${n}.flac`, 1000, 1, { lyrics: [...lyrics] }),
+      );
+
+    const files = (lyrics: ReadonlyArray<LyricSet>) =>
+      tracks(lyrics).map((track) => ({
+        path: track.path,
+        lyricsFiles: track.lyricsFiles,
+        lyricsReader: track.lyricsReader,
+        lyrics: [...lyrics],
+      }));
+
+    const lease = await claimScan(stack, scanJobId);
+
+    await upsertAll(stack, lease, tracks(sets));
+
+    const ids = await idsAt(stack, libraryId, tracks(sets));
+
+    expect(sets.length).toBe(6470);
+    expect(ids).toHaveLength(16);
+
+    /** Runs a rescan, and answers its calls' usage once the rows hold `lyrics`. */
+    const rescan = async (
+      name: "upsert" | "lyrics",
+      send: () => Promise<ReadonlyArray<{ readonly done: number }>>,
+      lyrics: ReadonlyArray<LyricSet>,
+    ) => {
+      const mark = await logMark(stack);
+      const calls = await send();
+      const usage = await usageSince(stack, mark, api.music.scanner[name], calls.length);
+      const rows = await Promise.all(ids.map(async (id) => lyricRowsOf(stack, id)));
+
+      expect(calls.length).toBeGreaterThan(1);
+      expect(calls.reduce((sum, call) => sum + call.done, 0)).toBe(16);
+      expect(usage.every((call) => call.committed && call.seconds < 0.75)).toBe(true);
+      expect(inside(usage)).toBe(true);
+      expect(rows.map((found) => found.map((row) => row.sets))).toEqual(ids.map(() => [lyrics]));
+
+      return usage;
+    };
+
+    const same = [
+      ...(await rescan("upsert", async () => upsertAll(stack, lease, tracks(sets)), sets)),
+      ...(await rescan("lyrics", async () => saveLyricsAll(stack, lease, files(sets)), sets)),
+    ];
+
+    const patched = [
+      ...(await rescan("upsert", async () => upsertAll(stack, lease, tracks(changed)), changed)),
+      ...(await rescan("lyrics", async () => saveLyricsAll(stack, lease, files(sets)), sets)),
+    ];
+
+    await finishScan(stack, lease);
+
+    // The same sets are compared and not written; a set changed in the last rewrites each row.
+    expect(same.every((call) => call.writeBytes < 64 * 1024)).toBe(true);
+    expect(patched.every((call) => call.writeBytes > 512 * 1024)).toBe(true);
+    expect(await totalsOf(stack, libraryId)).toMatchObject({ tracks: 16, albums: 1, artists: 1 });
   });
 });

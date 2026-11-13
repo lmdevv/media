@@ -77,7 +77,7 @@ const fittedSets = (sets: ReadonlyArray<LocalLyricSet>): ReadonlyArray<LocalLyri
 };
 
 /** A track's fields for a scanned file, but its library, album, and artist, within its bound. */
-const trackFields = (scanned: ScannedTrack, sets: ReadonlyArray<LocalLyricSet>) =>
+const trackFields = async (scanned: ScannedTrack, sets: ReadonlyArray<LocalLyricSet>) =>
   fitTrack({
     path: scanned.path,
     size: scanned.size,
@@ -98,7 +98,7 @@ const trackFields = (scanned: ScannedTrack, sets: ReadonlyArray<LocalLyricSet>) 
     folderArt: scanned.folderArt ?? null,
     lyricsFiles: scanned.lyricsFiles,
     lyricsReader: scanned.lyricsReader,
-    ...lyricsFieldsOf(sets),
+    ...(await lyricsFieldsOf(sets)),
     explicit: scanned.explicit,
     missing: false,
     searchText: foldSearchText(`${scanned.title} ${scanned.artist} ${scanned.album}`),
@@ -124,7 +124,8 @@ const EMPTYING = sumCost([
 
 /**
  * The most one write of a batch costs, with every document at its bound: a move onto a path
- * another track holds, with its lyrics row rewritten, and three albums settled at the call's end
+ * another track holds, with its lyrics row rewritten (two rows read and the new sets walked), and
+ * three albums settled at the call's end
  * (the one it joins, the one it leaves, and the one the other track leaves), two of them perhaps
  * emptied. Every other write costs less.
  */
@@ -142,6 +143,7 @@ const WRITE_MOST = sumCost([
   atBound.read("localLyrics", LYRICS_ROWS_READ),
   atBound.patch("localLyrics"),
   atBound.delete("localLyrics"),
+  atBound.lyrics(LYRICS_ROWS_READ + 1),
   SETTLING,
   SETTLING,
   SETTLING,
@@ -484,7 +486,7 @@ export const catalogBatch = (
   ): Promise<Id<"tracks">> => {
     const filing = filingOf(scanned);
     const sets = fittedSets(scanned.lyrics);
-    const fields = trackFields(scanned, sets);
+    const fields = await trackFields(scanned, sets);
     const except = existing?._id ?? null;
 
     const art: ArtChange = {
@@ -584,7 +586,7 @@ export const catalogBatch = (
     const fields = {
       lyricsFiles: fingerprint(scanned.lyricsFiles),
       lyricsReader: scanned.lyricsReader,
-      ...lyricsFieldsOf(sets),
+      ...(await lyricsFieldsOf(sets)),
     };
 
     const unchanged =

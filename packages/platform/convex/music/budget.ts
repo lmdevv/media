@@ -5,19 +5,26 @@ import type { Work } from "../movies/budget";
  * What music database work costs: movies' index ranges and writes (ADR 0024), and the bytes read
  * and written. Movies bounds its bytes by its batch sizes, since its documents have small bounds.
  * A track's lyrics row may be 512 KiB, so 500 of them would pass Convex's 16 MiB a call: music
- * counts bytes too.
+ * counts bytes too. It also counts the bytes of lyric sets a call's code walks, which bound its
+ * time: a row may pack thousands of small sets, lines, or words, each of them walked to check,
+ * measure, hash, and compare, so a call could spend Convex's 1 s well inside its database bytes.
  */
 export interface Cost {
   readonly work: Work;
   readonly readBytes: number;
   readonly writeBytes: number;
+  readonly lyricBytes: number;
 }
 
 export const cost = (ranges: number, writes: number, readBytes = 0, writeBytes = 0): Cost => ({
   work: work(ranges, writes),
   readBytes,
   writeBytes,
+  lyricBytes: 0,
 });
+
+/** Walking lyric sets of `bytes`, in Convex's measure, as the music store reads or writes them. */
+export const lyricsCost = (bytes: number): Cost => ({ ...cost(0, 0), lyricBytes: bytes });
 
 export const NO_COST: Cost = cost(0, 0);
 
@@ -25,6 +32,7 @@ export const addCost = (left: Cost, right: Cost): Cost => ({
   work: addWork(left.work, right.work),
   readBytes: left.readBytes + right.readBytes,
   writeBytes: left.writeBytes + right.writeBytes,
+  lyricBytes: left.lyricBytes + right.lyricBytes,
 });
 
 export const sumCost = (costs: ReadonlyArray<Cost>): Cost => costs.reduce(addCost, NO_COST);
@@ -32,14 +40,27 @@ export const sumCost = (costs: ReadonlyArray<Cost>): Cost => costs.reduce(addCos
 /** The bytes a call reads, and writes, at most: 12 MiB each, under Convex's 16 MiB. */
 const CALL_BYTES = 12 * 1024 * 1024;
 
-/** How much one call spends at most: movies' ranges and writes, and 12 MiB each way. */
-export const CALL_COST: Cost = { work: CALL_BUDGET, readBytes: CALL_BYTES, writeBytes: CALL_BYTES };
+/**
+ * The bytes of lyric sets a call walks at most: rewriting rows of the densest sets, about 80 bytes
+ * each, takes about 60 ms a MiB on the dev stack, so a call spends about a quarter of Convex's 1 s
+ * on its lyrics (ADR 0024).
+ */
+const CALL_LYRIC_BYTES = 4 * 1024 * 1024;
+
+/** How much one call spends at most: movies' ranges and writes, 12 MiB each way, and its lyrics. */
+export const CALL_COST: Cost = {
+  work: CALL_BUDGET,
+  readBytes: CALL_BYTES,
+  writeBytes: CALL_BYTES,
+  lyricBytes: CALL_LYRIC_BYTES,
+};
 
 const within = (spent: Cost, limit: Cost): boolean =>
   spent.work.ranges <= limit.work.ranges &&
   spent.work.writes <= limit.work.writes &&
   spent.readBytes <= limit.readBytes &&
-  spent.writeBytes <= limit.writeBytes;
+  spent.writeBytes <= limit.writeBytes &&
+  spent.lyricBytes <= limit.lyricBytes;
 
 /**
  * What one music mutation has spent. The music store (`write.ts`) charges it for each read and

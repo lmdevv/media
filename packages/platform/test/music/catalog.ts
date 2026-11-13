@@ -11,7 +11,7 @@ import { claimOwnFolders } from "../core/libraries/ownership";
 import type { Member } from "../devices";
 import { runServer } from "../service";
 import type { CoreStack } from "../stack-env";
-import type { ScannedTrack } from "./scanned";
+import type { ScannedLyrics, ScannedTrack } from "./scanned";
 
 // SAFETY: a type predicate, not checked by the compiler. A Convex id is an opaque string, and the
 // stack answered this one through a `v.id(...)` validator, which checks it again whenever a test
@@ -238,6 +238,18 @@ const sendAll = async <Item, Value extends { readonly done: number }>(
 /** `upsert` for any number of files, as the server sends them. */
 export const upsertAll = (stack: CoreStack, lease: Lease, tracks: ReadonlyArray<ScannedTrack>) =>
   sendAll(tracks, (batch) => upsert(stack, lease, batch));
+
+/** `lyrics` for any number of files whose audio did not change, as the server sends them. */
+export const saveLyricsAll = (
+  stack: CoreStack,
+  lease: Lease,
+  files: ReadonlyArray<ScannedLyrics>,
+) =>
+  sendAll(files, (batch) =>
+    retrying(() =>
+      runServer(stack, api.music.scanner.lyrics, { lease, tracks: [...batch] }, Saved),
+    ),
+  );
 
 /** `markMissing` for any number of paths, as the server sends them. */
 export const markMissingAll = (stack: CoreStack, lease: Lease, paths: ReadonlyArray<string>) =>

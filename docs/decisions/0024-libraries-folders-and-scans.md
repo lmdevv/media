@@ -543,6 +543,21 @@ music's tables of the same names. No client reads them yet; the music commands c
   rewritten by a patch or a delete was charged once though Convex read it twice, and a deleted
   track's own read was not charged, so a rewrite of 24 tracks with 500 KiB of lyrics each, and a
   purge of 341 long tracks with lyrics, passed 16 MiB.
+- **Lyrics charged by the time they take** (amended 2026-11-13, fix round 3). Bytes bound a
+  call's database work, not its code's time: a lyrics row may pack 6,470 sets of one character, or
+  as many synced lines and words, and each is walked to check, measure, hash, and compare. Fix
+  round 2 compared rows with Convex's generic `compareValues`, about 5 µs a set, and the
+  synchronous SHA-256 took about 14 ms a row, so rescanning 16 such tracks unchanged ran past 1 s
+  with no progress. The writer now compares sets by their known shape, field by field in any field
+  order, stopping at the first difference (`sameLyrics` in `fit.ts`); hashes lyrics with Web
+  Crypto, as old music did; and charges the meter for the lyric bytes it walks: each lyrics row it
+  reads, and the new sets at the size of the row they match or are written as. A call walks at
+  most 4 MiB of them (`CALL_LYRIC_BYTES`), and each item reserves three rows at their bound. On the
+  dev stack, rescanning 16 tracks of 6,470 one-character sets (11 MB of arguments) by shape alone,
+  with no lyrics charge, took 0.62 s in one call unchanged and 0.72 s rewritten in the last set;
+  with it, each call takes three tracks, at most 0.27 s unchanged and 0.38 s rewritten, of which
+  about 0.13 s is Convex reading the arguments, which no budget inside the call can bound. Ordinary
+  lyrics of a few KiB a track still fit hundreds of tracks a call.
 - **Bounds.** Music has no long free text, so each field has a fixed maximum, applied by the
   writer, instead of movies' fitting of a whole document:
 

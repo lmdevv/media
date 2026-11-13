@@ -7,6 +7,9 @@ import type { api } from "../../convex/_generated/api";
 /** One audio file with its tags and own lyrics, as the music scanner sends it. */
 export type ScannedTrack = FunctionArgs<typeof api.music.scanner.upsert>["tracks"][number];
 
+/** The lyrics of a file whose audio did not change, as the music scanner sends them again. */
+export type ScannedLyrics = FunctionArgs<typeof api.music.scanner.lyrics>["tracks"][number];
+
 /** One of a song's own lyric sets, as the music scanner sends it. */
 export type LyricSet = ScannedTrack["lyrics"][number];
 
