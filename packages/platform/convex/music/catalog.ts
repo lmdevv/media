@@ -14,7 +14,7 @@ import {
   lyricsFieldsOf,
   titleKeyOf,
 } from "./fit";
-import { atBound } from "./write";
+import { LYRICS_ROWS_READ, atBound } from "./write";
 import type { MusicStore, Stored } from "./write";
 import type { LocalLyricSet, ScannedLyrics, ScannedTrack } from "./validators";
 
@@ -139,8 +139,9 @@ const WRITE_MOST = sumCost([
   atBound.read("tracks", 2),
   atBound.patch("albums"),
   atBound.patch("tracks"),
-  atBound.read("localLyrics"),
+  atBound.read("localLyrics", LYRICS_ROWS_READ),
   atBound.patch("localLyrics"),
+  atBound.delete("localLyrics"),
   SETTLING,
   SETTLING,
   SETTLING,
@@ -497,9 +498,8 @@ export const catalogBatch = (
     const placed = { ...fields, libraryId, albumId: filedAlbum._id, artistId: filedArtist._id };
 
     if (existing === null) {
-      const trackId = await store.insertTrack(placed);
+      const trackId = await store.insertTrack(placed, sets);
 
-      await store.writeLyrics(trackId, null, sets, fields.lyricsHash);
       adjust(filedAlbum._id, 1, fields.durationMs);
       present(fields, 1);
 
@@ -507,7 +507,7 @@ export const catalogBatch = (
     }
 
     await store.writeTrack(existing._id, placed);
-    await store.writeLyrics(existing._id, existing.lyricsHash, sets, fields.lyricsHash);
+    await store.writeLyrics(existing._id, sets);
     release(existing.artHash, fields.artHash);
 
     if (existing.albumId !== filedAlbum._id) mayEmpty(existing.albumId);
@@ -596,13 +596,13 @@ export const catalogBatch = (
 
     if (!unchanged) await store.setTrackLyrics(track._id, fields);
 
-    await store.writeLyrics(track._id, track.lyricsHash, sets, fields.lyricsHash);
+    await store.writeLyrics(track._id, sets);
 
     return true;
   };
 
   const remove = async (track: Doc<"tracks">): Promise<void> => {
-    await store.writeLyrics(track._id, track.lyricsHash, [], null);
+    await store.writeLyrics(track._id, []);
     await store.deleteTrack(track._id);
     mayEmpty(track.albumId);
 

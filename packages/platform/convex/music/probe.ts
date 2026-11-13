@@ -17,6 +17,7 @@ import { catalogBatch } from "./catalog";
 import { trackFacts } from "./items";
 import { restPage, tracksPage } from "./purge";
 import { totalNames, totalsOf } from "./totals";
+import { localLyricSet } from "./validators";
 import type { ScannedTrack } from "./validators";
 import { musicStore } from "./write";
 
@@ -301,6 +302,19 @@ export const leftOf = internalQuery({
       lyrics: left.filter((one) => one.lyrics).length,
     };
   },
+});
+
+/** A track's lyrics rows, up to 8, each its id and its sets. */
+export const lyricRows = internalQuery({
+  args: { trackId: v.id("tracks") },
+  returns: v.array(v.object({ id: v.id("localLyrics"), sets: v.array(localLyricSet) })),
+  handler: async (ctx, { trackId }) =>
+    (
+      await ctx.db
+        .query("localLyrics")
+        .withIndex("by_track", (q) => q.eq("trackId", trackId))
+        .take(8)
+    ).map((row) => ({ id: row._id, sets: row.sets })),
 });
 
 /** A track as a test checks it: its album and artist, and whether it is on disk. */

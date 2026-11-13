@@ -528,10 +528,15 @@ music's tables of the same names. No client reads them yet; the music commands c
   what Convex reads: a query each document it returns, a `get` its document, and a patch or a
   delete the document it rewrites, which Convex reads again even when the call read it first
   (the store keeps the latest version of each document it touched, and charges a document's
-  bound when it has not seen it). No call site prices its own steps. A write of the lyric sets a
-  track already holds reads nothing: the track keeps their hash, written with the row. The batch writes items while
+  bound when it has not seen it). No call site prices its own steps. A lyrics write reads the
+  track's lyrics row and compares its sets, as old music's writer did, never trusting what the
+  track keeps of the row: fix round 1 skipped the read when the track's `lyricsHash` matched, so
+  a row changed out of band was never repaired, and a track whose hash was cleared got a second
+  row (amended 2026-11-13, fix round 2). The write reads up to two rows and deletes the second,
+  so a track converges on one. A track the call inserts has a new id no row can point at, so its
+  lyrics are inserted without a read. The batch writes items while
   the meter leaves room for the most one item can cost with every document at its bound, its
-  share of the call's end included (`WRITE_MOST` in `catalog.ts`, about 1.5 MiB read), so the
+  share of the call's end included (`WRITE_MOST` in `catalog.ts`, about 2.5 MiB read), so the
   error of any one estimate cannot add up over a call. Settling an album at the call's end is
   charged to the meter the first time the call touches the album, at its worst when the album
   may be left empty. The first round charged each step from hand-written estimates: a lyrics row

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
+import { insertByHand, patchByHand } from "../admin";
 import { member } from "../devices";
 import type { Member } from "../devices";
 import { runServer, runServerAs } from "../service";
@@ -16,6 +17,7 @@ import {
   finishScan,
   knownFiles,
   leftOf,
+  lyricRowsOf,
   markMissing,
   moveAll,
   musicLibrary,
@@ -353,6 +355,88 @@ describe.skipIf(stack === undefined)("music scanner", { timeout: 180_000 }, () =
     expect((await trackState(stack, id))?.lyricsBytes).toBeNull();
     expect(await refusal(save([plainLyrics("Bad", "EN!")]))).toMatch(/not lyric sets/u);
     expect(await refusal(save([plainLyrics("")]))).toMatch(/not lyric sets/u);
+
+    await finishScan(stack, lease);
+  });
+
+  it("repair a lyrics row changed by hand on the track's next upsert and lyrics save", async () => {
+    if (stack === undefined) return;
+    const admin = await member(stack, "lyrics-drift", "admin");
+    const { libraryId, lease, root } = await heldScan(stack, admin, "Lyrics drift");
+    const [file] = album(root, "Singer", "Drift", 1);
+
+    if (file === undefined) throw new Error("one track");
+
+    const lyrics = [plainLyrics("Stored by the scan")];
+    const song = { ...file, lyricsFiles: "song.txt:1:2", lyrics };
+
+    await upsertAll(stack, lease, [song]);
+
+    const id = first(await trackIdsAt(stack, libraryId, [song.path]));
+    const [row] = await lyricRowsOf(stack, id);
+
+    if (row === undefined) throw new Error("one lyrics row");
+
+    const stored = [{ id: row.id, sets: lyrics }];
+
+    const byHand = () =>
+      patchByHand(stack, "localLyrics", [row.id], { sets: [plainLyrics("Hand")] });
+
+    await byHand();
+    expect(await lyricRowsOf(stack, id)).not.toEqual(stored);
+
+    await upsertAll(stack, lease, [song]);
+    expect(await lyricRowsOf(stack, id)).toEqual(stored);
+
+    await byHand();
+
+    const saved = await runServer(
+      stack,
+      api.music.scanner.lyrics,
+      {
+        lease,
+        tracks: [{ path: song.path, lyricsFiles: song.lyricsFiles, lyricsReader: 1, lyrics }],
+      },
+      Saved,
+    );
+
+    expect(saved).toEqual({ outcome: "held", value: { done: 1, saved: 1 } });
+    expect(await lyricRowsOf(stack, id)).toEqual(stored);
+
+    await finishScan(stack, lease);
+  });
+
+  it("keep one lyrics row a track, with its hash cleared or a second row added by hand", async () => {
+    if (stack === undefined) return;
+    const admin = await member(stack, "lyrics-rows", "admin");
+    const { libraryId, lease, root } = await heldScan(stack, admin, "Lyrics rows");
+    const [file] = album(root, "Singer", "Rows", 1);
+
+    if (file === undefined) throw new Error("one track");
+
+    const lyrics = [plainLyrics("One row")];
+    const song = { ...file, lyrics };
+    await upsertAll(stack, lease, [song]);
+
+    const id = first(await trackIdsAt(stack, libraryId, [song.path]));
+
+    await patchByHand(stack, "tracks", [id], { lyricsHash: null });
+    await upsertAll(stack, lease, [song]);
+    expect((await lyricRowsOf(stack, id)).map((row) => row.sets)).toEqual([lyrics]);
+
+    const second = () =>
+      insertByHand(stack, "localLyrics", [{ trackId: id, sets: [plainLyrics("Second")] }]);
+
+    await second();
+    expect(await lyricRowsOf(stack, id)).toHaveLength(2);
+
+    await upsertAll(stack, lease, [song]);
+    expect((await lyricRowsOf(stack, id)).map((row) => row.sets)).toEqual([lyrics]);
+
+    await second();
+    await upsertAll(stack, lease, [{ ...song, lyrics: [] }]);
+    expect(await lyricRowsOf(stack, id)).toEqual([]);
+    expect((await trackState(stack, id))?.lyricsBytes).toBeNull();
 
     await finishScan(stack, lease);
   });

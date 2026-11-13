@@ -17,7 +17,7 @@ import type { ScannedTrack } from "./scanned";
 // stack answered this one through a `v.id(...)` validator, which checks it again whenever a test
 // sends it back.
 const isId =
-  <Table extends "jobs" | "tracks" | "albums" | "artists">(_table: Table) =>
+  <Table extends "jobs" | "tracks" | "albums" | "artists" | "localLyrics">(_table: Table) =>
   (value: unknown): value is Id<Table> =>
     Schema.is(Schema.String)(value);
 
@@ -28,6 +28,8 @@ const TrackId = Schema.declare(isId("tracks"));
 const AlbumId = Schema.declare(isId("albums"));
 
 const ArtistId = Schema.declare(isId("artists"));
+
+const LyricsId = Schema.declare(isId("localLyrics"));
 
 export const Lease = Schema.Struct({ jobId: JobId, attempt: Schema.Finite });
 
@@ -348,6 +350,15 @@ export const leftOf = (stack: CoreStack, trackIds: ReadonlyArray<Id<"tracks">>) 
     internal.music.probe.leftOf,
     { trackIds: [...trackIds] },
     Schema.Struct({ tracks: Schema.Finite, lyrics: Schema.Finite }),
+  );
+
+/** A track's lyrics rows, up to 8, each its id and its sets. */
+export const lyricRowsOf = (stack: CoreStack, trackId: Id<"tracks">) =>
+  runFunction(
+    stack,
+    internal.music.probe.lyricRows,
+    { trackId },
+    Schema.Array(Schema.Struct({ id: LyricsId, sets: Schema.Unknown })),
   );
 
 /** Runs one page of a music purge stage and schedules nothing. */

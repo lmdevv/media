@@ -94,10 +94,7 @@ export const musicTables = {
      * which a scan compares (`music/scanner:known`).
      */
     lyricsBytes: nullable(v.number()),
-    /**
-     * SHA-256 of this file's lyric sets as JSON, absent when it has none. The store writes it with
-     * the row, so a write of the same sets reads nothing (`MusicStore.writeLyrics`).
-     */
+    /** SHA-256 of this file's lyric sets as JSON, absent when it has none. */
     lyricsHash: nullable(v.string()),
     /** Whether this file's own lyrics include synced main lyrics, which LRCLIB never replaces. */
     lyricsSynced: v.boolean(),

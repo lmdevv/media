@@ -7,11 +7,12 @@ import type {
   QueryInitializer,
   WithoutSystemFields,
 } from "convex/server";
-import { getDocumentSize } from "convex/values";
+import { compareValues, getDocumentSize } from "convex/values";
 import type { Value } from "convex/values";
 
 import type { DataModel, Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx } from "../_generated/server";
+import { inOrder } from "../core/lib/inOrder";
 import { paginate } from "../core/lib/paginate";
 import type { IndexedList } from "../core/lib/paginate";
 import { cost } from "./budget";
@@ -80,6 +81,12 @@ export const atBound = {
   delete: (table: MusicTable): Cost => deleteCost(TABLE_BYTES[table]),
 } as const;
 
+/**
+ * The lyrics rows a track's write reads (`MusicStore.writeLyrics`): its one row, and a second a
+ * defect left beside it, which the write deletes.
+ */
+export const LYRICS_ROWS_READ = 2;
+
 /** A counter shard row of a library's totals, in Convex's measure: a short name and two numbers. */
 const COUNTER_BYTES = 256;
 
@@ -124,7 +131,14 @@ export interface MusicStore {
   ) => Promise<void>;
   readonly deleteAlbum: (id: Id<"albums">) => Promise<void>;
 
-  readonly insertTrack: (fields: Fields<"tracks">) => Promise<Id<"tracks">>;
+  /**
+   * Inserts a track with its own lyrics, already fitted (`fitLyrics`). A new track's id is one no
+   * lyrics row can point at yet, so its lyrics are inserted without a read.
+   */
+  readonly insertTrack: (
+    fields: Fields<"tracks">,
+    sets: ReadonlyArray<LocalLyricSet>,
+  ) => Promise<Id<"tracks">>;
   /** Writes every field of a track but its tie, as a scan read the file again. */
   readonly writeTrack: (id: Id<"tracks">, fields: Fields<"tracks">) => Promise<void>;
   readonly setTrackMissing: (id: Id<"tracks">) => Promise<void>;
@@ -138,17 +152,16 @@ export interface MusicStore {
   ) => Promise<void>;
   readonly deleteTrack: (id: Id<"tracks">) => Promise<void>;
   /**
-   * Makes `sets`, already fitted (`fitLyrics`), a track's own lyrics. `storedHash` is the
-   * `lyricsHash` the track keeps of its lyrics row, null without one, and `hash` is the sets'
-   * (`lyricsFieldsOf`). When they match, the row already holds the sets and nothing is read;
-   * otherwise the row is read once, then replaced, deleted for no sets, or inserted. The same
-   * sets again change nothing, so a retried batch converges.
+   * Makes `sets`, already fitted (`fitLyrics`), a stored track's own lyrics, as old music's
+   * writer did: it reads the track's lyrics row, then patches it when its sets differ, deletes it
+   * for no sets, or inserts one. It goes by the row, never by what the track keeps of it, so a row changed by
+   * anything else is repaired, and the same sets again change nothing. It reads up to
+   * `LYRICS_ROWS_READ` rows and deletes the second, so a track left with two rows has one again
+   * after its next write.
    */
   readonly writeLyrics: (
     trackId: Id<"tracks">,
-    storedHash: string | null,
     sets: ReadonlyArray<LocalLyricSet>,
-    hash: string | null,
   ) => Promise<void>;
 
   /**
@@ -288,25 +301,26 @@ export const musicStore = (db: Db, meter: Meter): MusicStore => {
     setAlbumCounts: (id, counts) => patch("albums", id, counts),
     deleteAlbum: (id) => remove("albums", id),
 
-    insertTrack: (fields) => insert("tracks", fitTrack({ ...fields, tie: newTie() })),
+    insertTrack: async (fields, sets) => {
+      const trackId = await insert("tracks", fitTrack({ ...fields, tie: newTie() }));
+
+      if (sets.length > 0) await insert("localLyrics", { trackId, sets: [...sets] });
+
+      return trackId;
+    },
     writeTrack: (id, fields) => patch("tracks", id, fitTrack(fields)),
     setTrackMissing: (id) => patch("tracks", id, { missing: true }),
     setTrackLyrics: (id, lyrics) =>
       patch("tracks", id, { ...lyrics, lyricsFiles: fingerprint(lyrics.lyricsFiles) }),
     deleteTrack: (id) => remove("tracks", id),
-    writeLyrics: async (trackId, storedHash, sets, hash) => {
-      if (storedHash === hash) return;
+    writeLyrics: async (trackId, sets) => {
+      const [row, ...extra] = await take(
+        "localLyrics",
+        (q) => q.withIndex("by_track", (index) => index.eq("trackId", trackId)),
+        LYRICS_ROWS_READ,
+      );
 
-      const row =
-        storedHash !== null
-          ? (
-              await take(
-                "localLyrics",
-                (q) => q.withIndex("by_track", (index) => index.eq("trackId", trackId)),
-                1,
-              )
-            )[0]
-          : undefined;
+      await inOrder(extra, (one) => remove("localLyrics", one._id));
 
       if (row === undefined) {
         if (sets.length > 0) await insert("localLyrics", { trackId, sets: [...sets] });
@@ -315,7 +329,10 @@ export const musicStore = (db: Db, meter: Meter): MusicStore => {
       }
 
       if (sets.length === 0) await remove("localLyrics", row._id);
-      else await patch("localLyrics", row._id, { sets: [...sets] });
+      // Convex hands back an object's fields in its own order; `compareValues` ignores it.
+      else if (compareValues(row.sets, [...sets]) !== 0) {
+        await patch("localLyrics", row._id, { sets: [...sets] });
+      }
     },
 
     moveTotals: async (libraryId, moved) => {

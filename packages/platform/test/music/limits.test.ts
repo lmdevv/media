@@ -260,10 +260,16 @@ describe.skipIf(stack === undefined)("music call limits", { timeout: 600_000 }, 
     const mark = await logMark(stack);
     const written = await upsertAll(stack, lease, tracks(2));
     const usage = await usageSince(stack, mark, api.music.scanner.upsert, written.length);
-    // Files changed again with the same lyrics: their rows are neither read nor written.
+    // Files changed again with the same lyrics: their rows are read, compared, and not written.
     const retagMark = await logMark(stack);
     const rescanned = await upsertAll(stack, lease, tracks(3, 2));
-    const retagUsage = await usageSince(stack, retagMark, api.music.scanner.upsert, 1);
+
+    const retagUsage = await usageSince(
+      stack,
+      retagMark,
+      api.music.scanner.upsert,
+      rescanned.length,
+    );
 
     await finishScan(stack, lease);
 
@@ -271,12 +277,12 @@ describe.skipIf(stack === undefined)("music call limits", { timeout: 600_000 }, 
     expect(first.reduce((sum, call) => sum + call.done, 0)).toBe(24);
     expect(written[0]?.done).toBeLessThan(24);
     expect(written.reduce((sum, call) => sum + call.done, 0)).toBe(24);
-    expect(rescanned.map((call) => call.done)).toEqual([24]);
-    expect(
-      retagUsage.every((call) => call.bytes < 1024 * 1024 && call.writeBytes < 1024 * 1024),
-    ).toBe(true);
+    expect(rescanned.reduce((sum, call) => sum + call.done, 0)).toBe(24);
+    expect(retagUsage.every((call) => call.writeBytes < 1024 * 1024)).toBe(true);
 
-    expect(inside([...firstUsage, ...usage].filter((call) => call.committed))).toBe(true);
+    expect(inside([...firstUsage, ...usage, ...retagUsage].filter((call) => call.committed))).toBe(
+      true,
+    );
 
     const ids = await idsAt(stack, libraryId, tracks(2));
     const states = await Promise.all(ids.map(async (id) => trackState(stack, id)));
