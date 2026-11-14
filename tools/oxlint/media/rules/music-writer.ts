@@ -1,11 +1,20 @@
 import { singleWriterRule } from "./single-writer.ts";
 
-/** The music tables, which no module outside `music/` writes either. */
+/**
+ * The music tables, the catalog's and what each person keeps of it, which no module outside
+ * `music/` writes either.
+ */
 export const MUSIC_TABLES: ReadonlySet<string> = new Set([
   "artists",
   "albums",
   "tracks",
   "localLyrics",
+  "playlists",
+  "playlistItems",
+  "likes",
+  "plays",
+  "playQueues",
+  "playQueueEntries",
 ]);
 
 /**

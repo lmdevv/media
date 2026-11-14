@@ -82,9 +82,15 @@ export interface ContentResource {
 
 export type TableOf<T extends ResourceType> = (typeof resourceTypes)[T]["table"];
 
+/**
+ * The id of a row of resource type `T`, one table per type: distributive, so a ref of any
+ * resource type names an id of exactly one table, as the grants table stores it.
+ */
+export type ResourceIdOf<T extends ResourceType> = T extends ResourceType ? Id<TableOf<T>> : never;
+
 export interface ResourceRef<T extends ResourceType> {
   readonly type: T;
-  readonly id: Id<TableOf<T>>;
+  readonly id: ResourceIdOf<T>;
 }
 
 type Placed = Pick<ContentResource, "domain" | "placement">;
@@ -99,6 +105,14 @@ const placements: Placements = {
   library: (library) => ({
     domain: library.kind,
     placement: { in: "library", library: library._id },
+  }),
+  /**
+   * A playlist holds tracks of any library. A kid's allowed-libraries list and explicit filter
+   * leave the playlist itself visible and decide each of its tracks on its own.
+   */
+  playlist: () => ({
+    domain: "music",
+    placement: { in: "unplaced", libraryList: "allows", facts: "container" },
   }),
 };
 

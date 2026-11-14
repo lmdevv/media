@@ -1421,6 +1421,10 @@ const core_permissions_grants_list = query({
         type: Schema.Literal("library"),
         id: Schema.String.pipe(Schema.brand("Id<libraries>")),
       }),
+      Schema.Struct({
+        type: Schema.Literal("playlist"),
+        id: Schema.String.pipe(Schema.brand("Id<playlists>")),
+      }),
     ]),
     paginationOpts: Schema.Struct({
       numItems: Schema.Finite,
@@ -1476,6 +1480,10 @@ const core_permissions_grants_remove = mutation({
         type: Schema.Literal("library"),
         id: Schema.String.pipe(Schema.brand("Id<libraries>")),
       }),
+      Schema.Struct({
+        type: Schema.Literal("playlist"),
+        id: Schema.String.pipe(Schema.brand("Id<playlists>")),
+      }),
     ]),
     principal: Schema.Union([
       Schema.Struct({
@@ -1500,6 +1508,10 @@ const core_permissions_grants_set = mutation({
       Schema.Struct({
         type: Schema.Literal("library"),
         id: Schema.String.pipe(Schema.brand("Id<libraries>")),
+      }),
+      Schema.Struct({
+        type: Schema.Literal("playlist"),
+        id: Schema.String.pipe(Schema.brand("Id<playlists>")),
       }),
     ]),
     principal: Schema.Union([
@@ -3878,6 +3890,1232 @@ const movies_titles_versions = query({
   ),
 });
 
+const music_albums_get = query({
+  name: "music.albums.get",
+  path: "music/albums:get",
+  args: Schema.Struct({ albumId: Schema.String.pipe(Schema.brand("Id<albums>")) }),
+  result: Schema.Struct({
+    album: Schema.Struct({
+      id: Schema.String.pipe(Schema.brand("Id<albums>")),
+      title: Schema.String,
+      artist: Schema.String,
+      artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+      year: Schema.Union([Schema.Finite, Schema.Null]),
+      artUrl: Schema.Union([Schema.String, Schema.Null]),
+      trackCount: Schema.Finite,
+    }),
+    durationMs: Schema.Finite,
+    genre: Schema.Union([Schema.String, Schema.Null]),
+    format: Schema.String,
+  }),
+});
+
+const music_albums_list = query({
+  name: "music.albums.list",
+  path: "music/albums:list",
+  args: Schema.Struct({
+    paginationOpts: Schema.Struct({
+      numItems: Schema.Finite,
+      cursor: Schema.Union([Schema.String, Schema.Null]),
+      endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      id: Schema.optionalKey(Schema.Finite),
+      maximumRowsRead: Schema.optionalKey(Schema.Finite),
+      maximumBytesRead: Schema.optionalKey(Schema.Finite),
+    }),
+  }),
+  result: Schema.Struct({
+    page: Schema.Array(
+      Schema.Struct({
+        id: Schema.String.pipe(Schema.brand("Id<albums>")),
+        title: Schema.String,
+        artist: Schema.String,
+        artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+        year: Schema.Union([Schema.Finite, Schema.Null]),
+        artUrl: Schema.Union([Schema.String, Schema.Null]),
+        trackCount: Schema.Finite,
+      }),
+    ),
+    continueCursor: Schema.String,
+    isDone: Schema.Boolean,
+    splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+    pageStatus: Schema.optionalKey(
+      Schema.Union([
+        Schema.Literal("SplitRecommended"),
+        Schema.Literal("SplitRequired"),
+        Schema.Null,
+      ]),
+    ),
+  }),
+});
+
+const music_albums_tracks = query({
+  name: "music.albums.tracks",
+  path: "music/albums:tracks",
+  args: Schema.Struct({
+    albumId: Schema.String.pipe(Schema.brand("Id<albums>")),
+    paginationOpts: Schema.Struct({
+      numItems: Schema.Finite,
+      cursor: Schema.Union([Schema.String, Schema.Null]),
+      endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      id: Schema.optionalKey(Schema.Finite),
+      maximumRowsRead: Schema.optionalKey(Schema.Finite),
+      maximumBytesRead: Schema.optionalKey(Schema.Finite),
+    }),
+  }),
+  result: Schema.Struct({
+    page: Schema.Array(
+      Schema.Struct({
+        id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+        title: Schema.String,
+        artist: Schema.String,
+        artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+        album: Schema.String,
+        albumId: Schema.String.pipe(Schema.brand("Id<albums>")),
+        trackNumber: Schema.Union([Schema.Finite, Schema.Null]),
+        discNumber: Schema.Union([Schema.Finite, Schema.Null]),
+        durationMs: Schema.Finite,
+        codec: Schema.String,
+        lossless: Schema.Boolean,
+        bitrate: Schema.Union([Schema.Finite, Schema.Null]),
+        sampleRate: Schema.Union([Schema.Finite, Schema.Null]),
+        bitDepth: Schema.Union([Schema.Finite, Schema.Null]),
+        artUrl: Schema.Union([Schema.String, Schema.Null]),
+        liked: Schema.Boolean,
+      }),
+    ),
+    continueCursor: Schema.String,
+    isDone: Schema.Boolean,
+    splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+    pageStatus: Schema.optionalKey(
+      Schema.Union([
+        Schema.Literal("SplitRecommended"),
+        Schema.Literal("SplitRequired"),
+        Schema.Null,
+      ]),
+    ),
+  }),
+});
+
+const music_artists_albums = query({
+  name: "music.artists.albums",
+  path: "music/artists:albums",
+  args: Schema.Struct({
+    artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+    paginationOpts: Schema.Struct({
+      numItems: Schema.Finite,
+      cursor: Schema.Union([Schema.String, Schema.Null]),
+      endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      id: Schema.optionalKey(Schema.Finite),
+      maximumRowsRead: Schema.optionalKey(Schema.Finite),
+      maximumBytesRead: Schema.optionalKey(Schema.Finite),
+    }),
+  }),
+  result: Schema.Struct({
+    page: Schema.Array(
+      Schema.Struct({
+        id: Schema.String.pipe(Schema.brand("Id<albums>")),
+        title: Schema.String,
+        artist: Schema.String,
+        artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+        year: Schema.Union([Schema.Finite, Schema.Null]),
+        artUrl: Schema.Union([Schema.String, Schema.Null]),
+        trackCount: Schema.Finite,
+      }),
+    ),
+    continueCursor: Schema.String,
+    isDone: Schema.Boolean,
+    splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+    pageStatus: Schema.optionalKey(
+      Schema.Union([
+        Schema.Literal("SplitRecommended"),
+        Schema.Literal("SplitRequired"),
+        Schema.Null,
+      ]),
+    ),
+  }),
+});
+
+const music_artists_get = query({
+  name: "music.artists.get",
+  path: "music/artists:get",
+  args: Schema.Struct({ artistId: Schema.String.pipe(Schema.brand("Id<artists>")) }),
+  result: Schema.Struct({
+    artist: Schema.Struct({
+      id: Schema.String.pipe(Schema.brand("Id<artists>")),
+      name: Schema.String,
+      albumCount: Schema.Finite,
+      artUrl: Schema.Union([Schema.String, Schema.Null]),
+    }),
+    topTracks: Schema.Array(
+      Schema.Struct({
+        id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+        title: Schema.String,
+        artist: Schema.String,
+        artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+        album: Schema.String,
+        albumId: Schema.String.pipe(Schema.brand("Id<albums>")),
+        trackNumber: Schema.Union([Schema.Finite, Schema.Null]),
+        discNumber: Schema.Union([Schema.Finite, Schema.Null]),
+        durationMs: Schema.Finite,
+        codec: Schema.String,
+        lossless: Schema.Boolean,
+        bitrate: Schema.Union([Schema.Finite, Schema.Null]),
+        sampleRate: Schema.Union([Schema.Finite, Schema.Null]),
+        bitDepth: Schema.Union([Schema.Finite, Schema.Null]),
+        artUrl: Schema.Union([Schema.String, Schema.Null]),
+        liked: Schema.Boolean,
+      }),
+    ),
+  }),
+});
+
+const music_artists_list = query({
+  name: "music.artists.list",
+  path: "music/artists:list",
+  args: Schema.Struct({
+    paginationOpts: Schema.Struct({
+      numItems: Schema.Finite,
+      cursor: Schema.Union([Schema.String, Schema.Null]),
+      endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      id: Schema.optionalKey(Schema.Finite),
+      maximumRowsRead: Schema.optionalKey(Schema.Finite),
+      maximumBytesRead: Schema.optionalKey(Schema.Finite),
+    }),
+  }),
+  result: Schema.Struct({
+    page: Schema.Array(
+      Schema.Struct({
+        id: Schema.String.pipe(Schema.brand("Id<artists>")),
+        name: Schema.String,
+        albumCount: Schema.Finite,
+        artUrl: Schema.Union([Schema.String, Schema.Null]),
+      }),
+    ),
+    continueCursor: Schema.String,
+    isDone: Schema.Boolean,
+    splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+    pageStatus: Schema.optionalKey(
+      Schema.Union([
+        Schema.Literal("SplitRecommended"),
+        Schema.Literal("SplitRequired"),
+        Schema.Null,
+      ]),
+    ),
+  }),
+});
+
+const music_history_list = query({
+  name: "music.history.list",
+  path: "music/history:list",
+  args: Schema.Struct({
+    paginationOpts: Schema.Struct({
+      numItems: Schema.Finite,
+      cursor: Schema.Union([Schema.String, Schema.Null]),
+      endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      id: Schema.optionalKey(Schema.Finite),
+      maximumRowsRead: Schema.optionalKey(Schema.Finite),
+      maximumBytesRead: Schema.optionalKey(Schema.Finite),
+    }),
+  }),
+  result: Schema.Struct({
+    page: Schema.Array(
+      Schema.Struct({
+        playedAt: Schema.Finite,
+        track: Schema.Struct({
+          id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+          title: Schema.String,
+          artist: Schema.String,
+          artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+          album: Schema.String,
+          albumId: Schema.String.pipe(Schema.brand("Id<albums>")),
+          trackNumber: Schema.Union([Schema.Finite, Schema.Null]),
+          discNumber: Schema.Union([Schema.Finite, Schema.Null]),
+          durationMs: Schema.Finite,
+          codec: Schema.String,
+          lossless: Schema.Boolean,
+          bitrate: Schema.Union([Schema.Finite, Schema.Null]),
+          sampleRate: Schema.Union([Schema.Finite, Schema.Null]),
+          bitDepth: Schema.Union([Schema.Finite, Schema.Null]),
+          artUrl: Schema.Union([Schema.String, Schema.Null]),
+          liked: Schema.Boolean,
+        }),
+      }),
+    ),
+    continueCursor: Schema.String,
+    isDone: Schema.Boolean,
+    splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+    pageStatus: Schema.optionalKey(
+      Schema.Union([
+        Schema.Literal("SplitRecommended"),
+        Schema.Literal("SplitRequired"),
+        Schema.Null,
+      ]),
+    ),
+  }),
+});
+
+const music_library_home = query({
+  name: "music.library.home",
+  path: "music/library:home",
+  args: Schema.Struct({}),
+  result: Schema.Struct({
+    recentlyAdded: Schema.Array(
+      Schema.Struct({
+        id: Schema.String.pipe(Schema.brand("Id<albums>")),
+        title: Schema.String,
+        artist: Schema.String,
+        artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+        year: Schema.Union([Schema.Finite, Schema.Null]),
+        artUrl: Schema.Union([Schema.String, Schema.Null]),
+        trackCount: Schema.Finite,
+      }),
+    ),
+    recentlyPlayed: Schema.Array(
+      Schema.Struct({
+        id: Schema.String.pipe(Schema.brand("Id<albums>")),
+        title: Schema.String,
+        artist: Schema.String,
+        artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+        year: Schema.Union([Schema.Finite, Schema.Null]),
+        artUrl: Schema.Union([Schema.String, Schema.Null]),
+        trackCount: Schema.Finite,
+      }),
+    ),
+    recentlyPlayedArtists: Schema.Array(
+      Schema.Struct({
+        id: Schema.String.pipe(Schema.brand("Id<artists>")),
+        name: Schema.String,
+        albumCount: Schema.Finite,
+        artUrl: Schema.Union([Schema.String, Schema.Null]),
+      }),
+    ),
+    stats: Schema.Struct({
+      tracks: Schema.Finite,
+      albums: Schema.Finite,
+      artists: Schema.Finite,
+      durationMs: Schema.Finite,
+    }),
+  }),
+});
+
+const music_library_search = query({
+  name: "music.library.search",
+  path: "music/library:search",
+  args: Schema.Struct({ query: Schema.String, limit: Schema.optionalKey(Schema.Finite) }),
+  result: Schema.Struct({
+    tracks: Schema.Array(
+      Schema.Struct({
+        id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+        title: Schema.String,
+        artist: Schema.String,
+        artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+        album: Schema.String,
+        albumId: Schema.String.pipe(Schema.brand("Id<albums>")),
+        trackNumber: Schema.Union([Schema.Finite, Schema.Null]),
+        discNumber: Schema.Union([Schema.Finite, Schema.Null]),
+        durationMs: Schema.Finite,
+        codec: Schema.String,
+        lossless: Schema.Boolean,
+        bitrate: Schema.Union([Schema.Finite, Schema.Null]),
+        sampleRate: Schema.Union([Schema.Finite, Schema.Null]),
+        bitDepth: Schema.Union([Schema.Finite, Schema.Null]),
+        artUrl: Schema.Union([Schema.String, Schema.Null]),
+        liked: Schema.Boolean,
+      }),
+    ),
+    albums: Schema.Array(
+      Schema.Struct({
+        id: Schema.String.pipe(Schema.brand("Id<albums>")),
+        title: Schema.String,
+        artist: Schema.String,
+        artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+        year: Schema.Union([Schema.Finite, Schema.Null]),
+        artUrl: Schema.Union([Schema.String, Schema.Null]),
+        trackCount: Schema.Finite,
+      }),
+    ),
+    artists: Schema.Array(
+      Schema.Struct({
+        id: Schema.String.pipe(Schema.brand("Id<artists>")),
+        name: Schema.String,
+        albumCount: Schema.Finite,
+        artUrl: Schema.Union([Schema.String, Schema.Null]),
+      }),
+    ),
+  }),
+});
+
+const music_likes_list = query({
+  name: "music.likes.list",
+  path: "music/likes:list",
+  args: Schema.Struct({
+    paginationOpts: Schema.Struct({
+      numItems: Schema.Finite,
+      cursor: Schema.Union([Schema.String, Schema.Null]),
+      endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      id: Schema.optionalKey(Schema.Finite),
+      maximumRowsRead: Schema.optionalKey(Schema.Finite),
+      maximumBytesRead: Schema.optionalKey(Schema.Finite),
+    }),
+  }),
+  result: Schema.Struct({
+    page: Schema.Array(
+      Schema.Struct({
+        id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+        title: Schema.String,
+        artist: Schema.String,
+        artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+        album: Schema.String,
+        albumId: Schema.String.pipe(Schema.brand("Id<albums>")),
+        trackNumber: Schema.Union([Schema.Finite, Schema.Null]),
+        discNumber: Schema.Union([Schema.Finite, Schema.Null]),
+        durationMs: Schema.Finite,
+        codec: Schema.String,
+        lossless: Schema.Boolean,
+        bitrate: Schema.Union([Schema.Finite, Schema.Null]),
+        sampleRate: Schema.Union([Schema.Finite, Schema.Null]),
+        bitDepth: Schema.Union([Schema.Finite, Schema.Null]),
+        artUrl: Schema.Union([Schema.String, Schema.Null]),
+        liked: Schema.Boolean,
+      }),
+    ),
+    continueCursor: Schema.String,
+    isDone: Schema.Boolean,
+    splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+    pageStatus: Schema.optionalKey(
+      Schema.Union([
+        Schema.Literal("SplitRecommended"),
+        Schema.Literal("SplitRequired"),
+        Schema.Null,
+      ]),
+    ),
+  }),
+});
+
+const music_likes_set = mutation({
+  name: "music.likes.set",
+  path: "music/likes:set",
+  args: Schema.Struct({
+    trackId: Schema.String.pipe(Schema.brand("Id<tracks>")),
+    liked: Schema.Boolean,
+  }),
+  result: Schema.Null,
+});
+
+const music_lyrics_get = query({
+  name: "music.lyrics.get",
+  path: "music/lyrics:get",
+  args: Schema.Struct({ trackId: Schema.String.pipe(Schema.brand("Id<tracks>")) }),
+  result: Schema.Union([
+    Schema.Struct({ status: Schema.Literal("none") }),
+    Schema.Struct({
+      status: Schema.Literal("synced"),
+      source: Schema.Literal("file"),
+      main: Schema.Struct({
+        kind: Schema.Union([
+          Schema.Literal("main"),
+          Schema.Literal("translation"),
+          Schema.Literal("pronunciation"),
+        ]),
+        lang: Schema.Union([Schema.String, Schema.Null]),
+        origin: Schema.Union([
+          Schema.Struct({
+            type: Schema.Literal("sidecar"),
+            fileName: Schema.String,
+            format: Schema.Union([
+              Schema.Literal("lrc"),
+              Schema.Literal("elrc"),
+              Schema.Literal("ttml"),
+              Schema.Literal("vtt"),
+              Schema.Literal("srt"),
+              Schema.Literal("txt"),
+              Schema.Literal("lyricsfile"),
+            ]),
+          }),
+          Schema.Struct({
+            type: Schema.Literal("embedded"),
+            tag: Schema.Union([
+              Schema.Literal("id3:USLT"),
+              Schema.Literal("id3:SYLT"),
+              Schema.Literal("vorbis:LYRICS"),
+              Schema.Literal("vorbis:UNSYNCEDLYRICS"),
+              Schema.Literal("vorbis:SYNCEDLYRICS"),
+              Schema.Literal("mp4:lyr"),
+              Schema.Literal("other"),
+            ]),
+          }),
+        ]),
+        body: Schema.Union([
+          Schema.Struct({
+            type: Schema.Literal("synced"),
+            lines: Schema.Array(
+              Schema.Struct({
+                text: Schema.String,
+                startMs: Schema.Finite,
+                endMs: Schema.Union([Schema.Finite, Schema.Null]),
+                words: Schema.Union([
+                  Schema.Array(
+                    Schema.Struct({
+                      text: Schema.String,
+                      startMs: Schema.Finite,
+                      endMs: Schema.Union([Schema.Finite, Schema.Null]),
+                    }),
+                  ),
+                  Schema.Null,
+                ]),
+                voice: Schema.Union([Schema.String, Schema.Null]),
+              }),
+            ),
+          }),
+          Schema.Struct({ type: Schema.Literal("plain"), text: Schema.String }),
+        ]),
+      }),
+      extras: Schema.Array(
+        Schema.Struct({
+          kind: Schema.Union([
+            Schema.Literal("main"),
+            Schema.Literal("translation"),
+            Schema.Literal("pronunciation"),
+          ]),
+          lang: Schema.Union([Schema.String, Schema.Null]),
+          origin: Schema.Union([
+            Schema.Struct({
+              type: Schema.Literal("sidecar"),
+              fileName: Schema.String,
+              format: Schema.Union([
+                Schema.Literal("lrc"),
+                Schema.Literal("elrc"),
+                Schema.Literal("ttml"),
+                Schema.Literal("vtt"),
+                Schema.Literal("srt"),
+                Schema.Literal("txt"),
+                Schema.Literal("lyricsfile"),
+              ]),
+            }),
+            Schema.Struct({
+              type: Schema.Literal("embedded"),
+              tag: Schema.Union([
+                Schema.Literal("id3:USLT"),
+                Schema.Literal("id3:SYLT"),
+                Schema.Literal("vorbis:LYRICS"),
+                Schema.Literal("vorbis:UNSYNCEDLYRICS"),
+                Schema.Literal("vorbis:SYNCEDLYRICS"),
+                Schema.Literal("mp4:lyr"),
+                Schema.Literal("other"),
+              ]),
+            }),
+          ]),
+          body: Schema.Union([
+            Schema.Struct({
+              type: Schema.Literal("synced"),
+              lines: Schema.Array(
+                Schema.Struct({
+                  text: Schema.String,
+                  startMs: Schema.Finite,
+                  endMs: Schema.Union([Schema.Finite, Schema.Null]),
+                  words: Schema.Union([
+                    Schema.Array(
+                      Schema.Struct({
+                        text: Schema.String,
+                        startMs: Schema.Finite,
+                        endMs: Schema.Union([Schema.Finite, Schema.Null]),
+                      }),
+                    ),
+                    Schema.Null,
+                  ]),
+                  voice: Schema.Union([Schema.String, Schema.Null]),
+                }),
+              ),
+            }),
+            Schema.Struct({ type: Schema.Literal("plain"), text: Schema.String }),
+          ]),
+        }),
+      ),
+    }),
+    Schema.Struct({
+      status: Schema.Literal("plain"),
+      source: Schema.Literal("file"),
+      main: Schema.Struct({
+        kind: Schema.Union([
+          Schema.Literal("main"),
+          Schema.Literal("translation"),
+          Schema.Literal("pronunciation"),
+        ]),
+        lang: Schema.Union([Schema.String, Schema.Null]),
+        origin: Schema.Union([
+          Schema.Struct({
+            type: Schema.Literal("sidecar"),
+            fileName: Schema.String,
+            format: Schema.Union([
+              Schema.Literal("lrc"),
+              Schema.Literal("elrc"),
+              Schema.Literal("ttml"),
+              Schema.Literal("vtt"),
+              Schema.Literal("srt"),
+              Schema.Literal("txt"),
+              Schema.Literal("lyricsfile"),
+            ]),
+          }),
+          Schema.Struct({
+            type: Schema.Literal("embedded"),
+            tag: Schema.Union([
+              Schema.Literal("id3:USLT"),
+              Schema.Literal("id3:SYLT"),
+              Schema.Literal("vorbis:LYRICS"),
+              Schema.Literal("vorbis:UNSYNCEDLYRICS"),
+              Schema.Literal("vorbis:SYNCEDLYRICS"),
+              Schema.Literal("mp4:lyr"),
+              Schema.Literal("other"),
+            ]),
+          }),
+        ]),
+        body: Schema.Union([
+          Schema.Struct({
+            type: Schema.Literal("synced"),
+            lines: Schema.Array(
+              Schema.Struct({
+                text: Schema.String,
+                startMs: Schema.Finite,
+                endMs: Schema.Union([Schema.Finite, Schema.Null]),
+                words: Schema.Union([
+                  Schema.Array(
+                    Schema.Struct({
+                      text: Schema.String,
+                      startMs: Schema.Finite,
+                      endMs: Schema.Union([Schema.Finite, Schema.Null]),
+                    }),
+                  ),
+                  Schema.Null,
+                ]),
+                voice: Schema.Union([Schema.String, Schema.Null]),
+              }),
+            ),
+          }),
+          Schema.Struct({ type: Schema.Literal("plain"), text: Schema.String }),
+        ]),
+      }),
+      extras: Schema.Array(
+        Schema.Struct({
+          kind: Schema.Union([
+            Schema.Literal("main"),
+            Schema.Literal("translation"),
+            Schema.Literal("pronunciation"),
+          ]),
+          lang: Schema.Union([Schema.String, Schema.Null]),
+          origin: Schema.Union([
+            Schema.Struct({
+              type: Schema.Literal("sidecar"),
+              fileName: Schema.String,
+              format: Schema.Union([
+                Schema.Literal("lrc"),
+                Schema.Literal("elrc"),
+                Schema.Literal("ttml"),
+                Schema.Literal("vtt"),
+                Schema.Literal("srt"),
+                Schema.Literal("txt"),
+                Schema.Literal("lyricsfile"),
+              ]),
+            }),
+            Schema.Struct({
+              type: Schema.Literal("embedded"),
+              tag: Schema.Union([
+                Schema.Literal("id3:USLT"),
+                Schema.Literal("id3:SYLT"),
+                Schema.Literal("vorbis:LYRICS"),
+                Schema.Literal("vorbis:UNSYNCEDLYRICS"),
+                Schema.Literal("vorbis:SYNCEDLYRICS"),
+                Schema.Literal("mp4:lyr"),
+                Schema.Literal("other"),
+              ]),
+            }),
+          ]),
+          body: Schema.Union([
+            Schema.Struct({
+              type: Schema.Literal("synced"),
+              lines: Schema.Array(
+                Schema.Struct({
+                  text: Schema.String,
+                  startMs: Schema.Finite,
+                  endMs: Schema.Union([Schema.Finite, Schema.Null]),
+                  words: Schema.Union([
+                    Schema.Array(
+                      Schema.Struct({
+                        text: Schema.String,
+                        startMs: Schema.Finite,
+                        endMs: Schema.Union([Schema.Finite, Schema.Null]),
+                      }),
+                    ),
+                    Schema.Null,
+                  ]),
+                  voice: Schema.Union([Schema.String, Schema.Null]),
+                }),
+              ),
+            }),
+            Schema.Struct({ type: Schema.Literal("plain"), text: Schema.String }),
+          ]),
+        }),
+      ),
+    }),
+  ]),
+});
+
+const music_play_report = mutation({
+  name: "music.play.report",
+  path: "music/play:report",
+  args: Schema.Struct({
+    trackId: Schema.String.pipe(Schema.brand("Id<tracks>")),
+    playbackId: Schema.String,
+  }),
+  result: Schema.Struct({ recorded: Schema.Boolean }),
+});
+
+const music_play_reportOffline = mutation({
+  name: "music.play.reportOffline",
+  path: "music/play:reportOffline",
+  args: Schema.Struct({
+    plays: Schema.Array(
+      Schema.Struct({
+        trackId: Schema.String.pipe(Schema.brand("Id<tracks>")),
+        playedAt: Schema.Finite,
+      }),
+    ),
+    sentAt: Schema.Finite,
+  }),
+  result: Schema.Struct({ recorded: Schema.Finite }),
+});
+
+const music_play_start = mutation({
+  name: "music.play.start",
+  path: "music/play:start",
+  args: Schema.Struct({ trackId: Schema.String.pipe(Schema.brand("Id<tracks>")) }),
+  result: Schema.Struct({
+    trackId: Schema.String.pipe(Schema.brand("Id<tracks>")),
+    playbackId: Schema.String,
+    startedAt: Schema.Finite,
+    ticket: Schema.String,
+    expiresAt: Schema.Finite,
+  }),
+});
+
+const music_playlists_addTracks = mutation({
+  name: "music.playlists.addTracks",
+  path: "music/playlists:addTracks",
+  args: Schema.Struct({
+    playlistId: Schema.String.pipe(Schema.brand("Id<playlists>")),
+    trackIds: Schema.Array(Schema.String.pipe(Schema.brand("Id<tracks>"))),
+  }),
+  result: Schema.Struct({
+    itemIds: Schema.Array(Schema.String.pipe(Schema.brand("Id<playlistItems>"))),
+    rest: Schema.Array(Schema.String.pipe(Schema.brand("Id<tracks>"))),
+  }),
+});
+
+const music_playlists_create = mutation({
+  name: "music.playlists.create",
+  path: "music/playlists:create",
+  args: Schema.Struct({
+    name: Schema.String,
+    description: Schema.optionalKey(Schema.String),
+    trackIds: Schema.optionalKey(Schema.Array(Schema.String.pipe(Schema.brand("Id<tracks>")))),
+  }),
+  result: Schema.Struct({
+    playlistId: Schema.String.pipe(Schema.brand("Id<playlists>")),
+    rest: Schema.Array(Schema.String.pipe(Schema.brand("Id<tracks>"))),
+  }),
+});
+
+const music_playlists_get = query({
+  name: "music.playlists.get",
+  path: "music/playlists:get",
+  args: Schema.Struct({ playlistId: Schema.String.pipe(Schema.brand("Id<playlists>")) }),
+  result: Schema.Struct({
+    id: Schema.String.pipe(Schema.brand("Id<playlists>")),
+    name: Schema.String,
+    description: Schema.Union([Schema.String, Schema.Null]),
+    trackCount: Schema.Finite,
+    durationMs: Schema.Finite,
+    artUrls: Schema.Array(Schema.String),
+    updatedAt: Schema.Finite,
+    owner: Schema.Union([
+      Schema.Struct({ id: Schema.String.pipe(Schema.brand("Id<users>")), name: Schema.String }),
+      Schema.Null,
+    ]),
+    visibility: Schema.Union([Schema.Literal("private"), Schema.Literal("shared")]),
+    sharedWithPeople: Schema.Boolean,
+    access: Schema.Union([
+      Schema.Literal("owner"),
+      Schema.Literal("collaborator"),
+      Schema.Literal("viewer"),
+    ]),
+  }),
+});
+
+const music_playlists_items = query({
+  name: "music.playlists.items",
+  path: "music/playlists:items",
+  args: Schema.Struct({
+    playlistId: Schema.String.pipe(Schema.brand("Id<playlists>")),
+    paginationOpts: Schema.Struct({
+      numItems: Schema.Finite,
+      cursor: Schema.Union([Schema.String, Schema.Null]),
+      endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      id: Schema.optionalKey(Schema.Finite),
+      maximumRowsRead: Schema.optionalKey(Schema.Finite),
+      maximumBytesRead: Schema.optionalKey(Schema.Finite),
+    }),
+  }),
+  result: Schema.Struct({
+    page: Schema.Array(
+      Schema.Struct({
+        itemId: Schema.String.pipe(Schema.brand("Id<playlistItems>")),
+        addedAt: Schema.Finite,
+        track: Schema.Union([
+          Schema.Struct({
+            id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+            title: Schema.String,
+            artist: Schema.String,
+            artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+            album: Schema.String,
+            albumId: Schema.String.pipe(Schema.brand("Id<albums>")),
+            trackNumber: Schema.Union([Schema.Finite, Schema.Null]),
+            discNumber: Schema.Union([Schema.Finite, Schema.Null]),
+            durationMs: Schema.Finite,
+            codec: Schema.String,
+            lossless: Schema.Boolean,
+            bitrate: Schema.Union([Schema.Finite, Schema.Null]),
+            sampleRate: Schema.Union([Schema.Finite, Schema.Null]),
+            bitDepth: Schema.Union([Schema.Finite, Schema.Null]),
+            artUrl: Schema.Union([Schema.String, Schema.Null]),
+            liked: Schema.Boolean,
+          }),
+          Schema.Null,
+        ]),
+        durationMs: Schema.Finite,
+        available: Schema.Boolean,
+        reason: Schema.Union([
+          Schema.Union([Schema.Literal("missing"), Schema.Literal("no_access")]),
+          Schema.Null,
+        ]),
+        addedBy: Schema.Union([
+          Schema.Struct({ id: Schema.String.pipe(Schema.brand("Id<users>")), name: Schema.String }),
+          Schema.Null,
+        ]),
+      }),
+    ),
+    continueCursor: Schema.String,
+    isDone: Schema.Boolean,
+    splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+    pageStatus: Schema.optionalKey(
+      Schema.Union([
+        Schema.Literal("SplitRecommended"),
+        Schema.Literal("SplitRequired"),
+        Schema.Null,
+      ]),
+    ),
+  }),
+});
+
+const music_playlists_list = query({
+  name: "music.playlists.list",
+  path: "music/playlists:list",
+  args: Schema.Struct({
+    paginationOpts: Schema.Struct({
+      numItems: Schema.Finite,
+      cursor: Schema.Union([Schema.String, Schema.Null]),
+      endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      id: Schema.optionalKey(Schema.Finite),
+      maximumRowsRead: Schema.optionalKey(Schema.Finite),
+      maximumBytesRead: Schema.optionalKey(Schema.Finite),
+    }),
+  }),
+  result: Schema.Struct({
+    page: Schema.Array(
+      Schema.Struct({
+        id: Schema.String.pipe(Schema.brand("Id<playlists>")),
+        name: Schema.String,
+        description: Schema.Union([Schema.String, Schema.Null]),
+        trackCount: Schema.Finite,
+        durationMs: Schema.Finite,
+        artUrls: Schema.Array(Schema.String),
+        updatedAt: Schema.Finite,
+        owner: Schema.Union([
+          Schema.Struct({ id: Schema.String.pipe(Schema.brand("Id<users>")), name: Schema.String }),
+          Schema.Null,
+        ]),
+        visibility: Schema.Union([Schema.Literal("private"), Schema.Literal("shared")]),
+        sharedWithPeople: Schema.Boolean,
+        access: Schema.Union([
+          Schema.Literal("owner"),
+          Schema.Literal("collaborator"),
+          Schema.Literal("viewer"),
+        ]),
+      }),
+    ),
+    continueCursor: Schema.String,
+    isDone: Schema.Boolean,
+    splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+    pageStatus: Schema.optionalKey(
+      Schema.Union([
+        Schema.Literal("SplitRecommended"),
+        Schema.Literal("SplitRequired"),
+        Schema.Null,
+      ]),
+    ),
+  }),
+});
+
+const music_playlists_moveItem = mutation({
+  name: "music.playlists.moveItem",
+  path: "music/playlists:moveItem",
+  args: Schema.Struct({
+    playlistId: Schema.String.pipe(Schema.brand("Id<playlists>")),
+    itemId: Schema.String.pipe(Schema.brand("Id<playlistItems>")),
+    afterItemId: Schema.optionalKey(Schema.String.pipe(Schema.brand("Id<playlistItems>"))),
+  }),
+  result: Schema.Null,
+});
+
+const music_playlists_remove = mutation({
+  name: "music.playlists.remove",
+  path: "music/playlists:remove",
+  args: Schema.Struct({ playlistId: Schema.String.pipe(Schema.brand("Id<playlists>")) }),
+  result: Schema.Null,
+});
+
+const music_playlists_removeItem = mutation({
+  name: "music.playlists.removeItem",
+  path: "music/playlists:removeItem",
+  args: Schema.Struct({
+    playlistId: Schema.String.pipe(Schema.brand("Id<playlists>")),
+    itemId: Schema.String.pipe(Schema.brand("Id<playlistItems>")),
+  }),
+  result: Schema.Null,
+});
+
+const music_playlists_share = mutation({
+  name: "music.playlists.share",
+  path: "music/playlists:share",
+  args: Schema.Struct({
+    playlistId: Schema.String.pipe(Schema.brand("Id<playlists>")),
+    userId: Schema.String.pipe(Schema.brand("Id<users>")),
+    role: Schema.optionalKey(
+      Schema.Union([Schema.Literal("viewer"), Schema.Literal("collaborator")]),
+    ),
+  }),
+  result: Schema.Null,
+});
+
+const music_playlists_shared = query({
+  name: "music.playlists.shared",
+  path: "music/playlists:shared",
+  args: Schema.Struct({
+    paginationOpts: Schema.Struct({
+      numItems: Schema.Finite,
+      cursor: Schema.Union([Schema.String, Schema.Null]),
+      endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      id: Schema.optionalKey(Schema.Finite),
+      maximumRowsRead: Schema.optionalKey(Schema.Finite),
+      maximumBytesRead: Schema.optionalKey(Schema.Finite),
+    }),
+  }),
+  result: Schema.Struct({
+    page: Schema.Array(
+      Schema.Struct({
+        id: Schema.String.pipe(Schema.brand("Id<playlists>")),
+        name: Schema.String,
+        description: Schema.Union([Schema.String, Schema.Null]),
+        trackCount: Schema.Finite,
+        durationMs: Schema.Finite,
+        artUrls: Schema.Array(Schema.String),
+        updatedAt: Schema.Finite,
+        owner: Schema.Union([
+          Schema.Struct({ id: Schema.String.pipe(Schema.brand("Id<users>")), name: Schema.String }),
+          Schema.Null,
+        ]),
+        visibility: Schema.Union([Schema.Literal("private"), Schema.Literal("shared")]),
+        sharedWithPeople: Schema.Boolean,
+        access: Schema.Union([
+          Schema.Literal("owner"),
+          Schema.Literal("collaborator"),
+          Schema.Literal("viewer"),
+        ]),
+      }),
+    ),
+    continueCursor: Schema.String,
+    isDone: Schema.Boolean,
+    splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+    pageStatus: Schema.optionalKey(
+      Schema.Union([
+        Schema.Literal("SplitRecommended"),
+        Schema.Literal("SplitRequired"),
+        Schema.Null,
+      ]),
+    ),
+  }),
+});
+
+const music_playlists_sharing = query({
+  name: "music.playlists.sharing",
+  path: "music/playlists:sharing",
+  args: Schema.Struct({ playlistId: Schema.String.pipe(Schema.brand("Id<playlists>")) }),
+  result: Schema.Struct({
+    visibility: Schema.Union([Schema.Literal("private"), Schema.Literal("shared")]),
+    people: Schema.Array(
+      Schema.Struct({
+        person: Schema.Struct({
+          id: Schema.String.pipe(Schema.brand("Id<users>")),
+          name: Schema.String,
+        }),
+        role: Schema.Union([Schema.Literal("viewer"), Schema.Literal("collaborator")]),
+      }),
+    ),
+  }),
+});
+
+const music_playlists_unshare = mutation({
+  name: "music.playlists.unshare",
+  path: "music/playlists:unshare",
+  args: Schema.Struct({
+    playlistId: Schema.String.pipe(Schema.brand("Id<playlists>")),
+    userId: Schema.optionalKey(Schema.String.pipe(Schema.brand("Id<users>"))),
+  }),
+  result: Schema.Null,
+});
+
+const music_playlists_update = mutation({
+  name: "music.playlists.update",
+  path: "music/playlists:update",
+  args: Schema.Struct({
+    playlistId: Schema.String.pipe(Schema.brand("Id<playlists>")),
+    name: Schema.optionalKey(Schema.String),
+    description: Schema.optionalKey(Schema.String),
+  }),
+  result: Schema.Null,
+});
+
+const music_playlists_visibility = mutation({
+  name: "music.playlists.visibility",
+  path: "music/playlists:visibility",
+  args: Schema.Struct({
+    playlistId: Schema.String.pipe(Schema.brand("Id<playlists>")),
+    visibility: Schema.Union([Schema.Literal("private"), Schema.Literal("shared")]),
+  }),
+  result: Schema.Null,
+});
+
+const music_queue_add = mutation({
+  name: "music.queue.add",
+  path: "music/queue:add",
+  args: Schema.Struct({
+    trackIds: Schema.Array(Schema.String.pipe(Schema.brand("Id<tracks>"))),
+    next: Schema.optionalKey(Schema.Boolean),
+    afterItemId: Schema.optionalKey(Schema.String.pipe(Schema.brand("Id<playQueueEntries>"))),
+  }),
+  result: Schema.Struct({
+    itemIds: Schema.Array(Schema.String.pipe(Schema.brand("Id<playQueueEntries>"))),
+    rest: Schema.Array(Schema.String.pipe(Schema.brand("Id<tracks>"))),
+  }),
+});
+
+const music_queue_autoplay = mutation({
+  name: "music.queue.autoplay",
+  path: "music/queue:autoplay",
+  args: Schema.Struct({ on: Schema.Boolean }),
+  result: Schema.Null,
+});
+
+const music_queue_clear = mutation({
+  name: "music.queue.clear",
+  path: "music/queue:clear",
+  args: Schema.Struct({}),
+  result: Schema.Null,
+});
+
+const music_queue_get = query({
+  name: "music.queue.get",
+  path: "music/queue:get",
+  args: Schema.Struct({}),
+  result: Schema.Struct({
+    current: Schema.Union([Schema.String.pipe(Schema.brand("Id<playQueueEntries>")), Schema.Null]),
+    count: Schema.Finite,
+    shuffle: Schema.Boolean,
+    repeat: Schema.Union([Schema.Literal("off"), Schema.Literal("all"), Schema.Literal("one")]),
+    autoplay: Schema.Boolean,
+  }),
+});
+
+const music_queue_jump = mutation({
+  name: "music.queue.jump",
+  path: "music/queue:jump",
+  args: Schema.Struct({ itemId: Schema.String.pipe(Schema.brand("Id<playQueueEntries>")) }),
+  result: Schema.Null,
+});
+
+const music_queue_list = query({
+  name: "music.queue.list",
+  path: "music/queue:list",
+  args: Schema.Struct({
+    paginationOpts: Schema.Struct({
+      numItems: Schema.Finite,
+      cursor: Schema.Union([Schema.String, Schema.Null]),
+      endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      id: Schema.optionalKey(Schema.Finite),
+      maximumRowsRead: Schema.optionalKey(Schema.Finite),
+      maximumBytesRead: Schema.optionalKey(Schema.Finite),
+    }),
+  }),
+  result: Schema.Struct({
+    page: Schema.Array(
+      Schema.Struct({
+        itemId: Schema.String.pipe(Schema.brand("Id<playQueueEntries>")),
+        autoplay: Schema.Boolean,
+        track: Schema.Struct({
+          id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+          title: Schema.String,
+          artist: Schema.String,
+          artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+          album: Schema.String,
+          albumId: Schema.String.pipe(Schema.brand("Id<albums>")),
+          trackNumber: Schema.Union([Schema.Finite, Schema.Null]),
+          discNumber: Schema.Union([Schema.Finite, Schema.Null]),
+          durationMs: Schema.Finite,
+          codec: Schema.String,
+          lossless: Schema.Boolean,
+          bitrate: Schema.Union([Schema.Finite, Schema.Null]),
+          sampleRate: Schema.Union([Schema.Finite, Schema.Null]),
+          bitDepth: Schema.Union([Schema.Finite, Schema.Null]),
+          artUrl: Schema.Union([Schema.String, Schema.Null]),
+          liked: Schema.Boolean,
+        }),
+      }),
+    ),
+    continueCursor: Schema.String,
+    isDone: Schema.Boolean,
+    splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+    pageStatus: Schema.optionalKey(
+      Schema.Union([
+        Schema.Literal("SplitRecommended"),
+        Schema.Literal("SplitRequired"),
+        Schema.Null,
+      ]),
+    ),
+  }),
+});
+
+const music_queue_move = mutation({
+  name: "music.queue.move",
+  path: "music/queue:move",
+  args: Schema.Struct({
+    itemId: Schema.String.pipe(Schema.brand("Id<playQueueEntries>")),
+    afterItemId: Schema.optionalKey(Schema.String.pipe(Schema.brand("Id<playQueueEntries>"))),
+  }),
+  result: Schema.Null,
+});
+
+const music_queue_play = mutation({
+  name: "music.queue.play",
+  path: "music/queue:play",
+  args: Schema.Struct({
+    trackIds: Schema.Array(Schema.String.pipe(Schema.brand("Id<tracks>"))),
+    index: Schema.optionalKey(Schema.Finite),
+  }),
+  result: Schema.Struct({ current: Schema.String.pipe(Schema.brand("Id<playQueueEntries>")) }),
+});
+
+const music_queue_remove = mutation({
+  name: "music.queue.remove",
+  path: "music/queue:remove",
+  args: Schema.Struct({ itemId: Schema.String.pipe(Schema.brand("Id<playQueueEntries>")) }),
+  result: Schema.Null,
+});
+
+const music_queue_repeat = mutation({
+  name: "music.queue.repeat",
+  path: "music/queue:repeat",
+  args: Schema.Struct({
+    mode: Schema.Union([Schema.Literal("off"), Schema.Literal("all"), Schema.Literal("one")]),
+  }),
+  result: Schema.Null,
+});
+
+const music_queue_shuffle = mutation({
+  name: "music.queue.shuffle",
+  path: "music/queue:shuffle",
+  args: Schema.Struct({ on: Schema.Boolean }),
+  result: Schema.Null,
+});
+
+const music_tracks_get = query({
+  name: "music.tracks.get",
+  path: "music/tracks:get",
+  args: Schema.Struct({ trackId: Schema.String.pipe(Schema.brand("Id<tracks>")) }),
+  result: Schema.Struct({
+    id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+    title: Schema.String,
+    artist: Schema.String,
+    artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+    album: Schema.String,
+    albumId: Schema.String.pipe(Schema.brand("Id<albums>")),
+    trackNumber: Schema.Union([Schema.Finite, Schema.Null]),
+    discNumber: Schema.Union([Schema.Finite, Schema.Null]),
+    durationMs: Schema.Finite,
+    codec: Schema.String,
+    lossless: Schema.Boolean,
+    bitrate: Schema.Union([Schema.Finite, Schema.Null]),
+    sampleRate: Schema.Union([Schema.Finite, Schema.Null]),
+    bitDepth: Schema.Union([Schema.Finite, Schema.Null]),
+    artUrl: Schema.Union([Schema.String, Schema.Null]),
+    liked: Schema.Boolean,
+  }),
+});
+
+const music_tracks_list = query({
+  name: "music.tracks.list",
+  path: "music/tracks:list",
+  args: Schema.Struct({
+    paginationOpts: Schema.Struct({
+      numItems: Schema.Finite,
+      cursor: Schema.Union([Schema.String, Schema.Null]),
+      endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      id: Schema.optionalKey(Schema.Finite),
+      maximumRowsRead: Schema.optionalKey(Schema.Finite),
+      maximumBytesRead: Schema.optionalKey(Schema.Finite),
+    }),
+  }),
+  result: Schema.Struct({
+    page: Schema.Array(
+      Schema.Struct({
+        id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+        title: Schema.String,
+        artist: Schema.String,
+        artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+        album: Schema.String,
+        albumId: Schema.String.pipe(Schema.brand("Id<albums>")),
+        trackNumber: Schema.Union([Schema.Finite, Schema.Null]),
+        discNumber: Schema.Union([Schema.Finite, Schema.Null]),
+        durationMs: Schema.Finite,
+        codec: Schema.String,
+        lossless: Schema.Boolean,
+        bitrate: Schema.Union([Schema.Finite, Schema.Null]),
+        sampleRate: Schema.Union([Schema.Finite, Schema.Null]),
+        bitDepth: Schema.Union([Schema.Finite, Schema.Null]),
+        artUrl: Schema.Union([Schema.String, Schema.Null]),
+        liked: Schema.Boolean,
+      }),
+    ),
+    continueCursor: Schema.String,
+    isDone: Schema.Boolean,
+    splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+    pageStatus: Schema.optionalKey(
+      Schema.Union([
+        Schema.Literal("SplitRecommended"),
+        Schema.Literal("SplitRequired"),
+        Schema.Null,
+      ]),
+    ),
+  }),
+});
+
 /**
  * Every command as an Effect method, nested by name: `core.server.info` is
  * `platform.core.server.info()`.
@@ -4231,6 +5469,112 @@ export const effectMethods = (method: EffectBuilder) => ({
       versions: method.query(movies_titles_versions),
     },
   },
+  music: {
+    albums: {
+      /** `music.albums.get` (query, music:read): Show an album: its artist, year, length, genre, and format. */
+      get: method.query(music_albums_get),
+      /** `music.albums.list` (query, music:read): List the albums you may play, newest first. */
+      list: method.query(music_albums_list),
+      /** `music.albums.tracks` (query, music:read): List an album's songs on disk in disc and track order. */
+      tracks: method.query(music_albums_tracks),
+    },
+    artists: {
+      /** `music.artists.albums` (query, music:read): List an artist's albums, newest year first. */
+      albums: method.query(music_artists_albums),
+      /** `music.artists.get` (query, music:read): Show an artist and their top songs. */
+      get: method.query(music_artists_get),
+      /** `music.artists.list` (query, music:read): List the artists you may play, by name. */
+      list: method.query(music_artists_list),
+    },
+    history: {
+      /** `music.history.list` (query, music:read): List the songs you played, most recent first. */
+      list: method.query(music_history_list),
+    },
+    library: {
+      /** `music.library.home` (query, music:read): Show your music home: recently added and recently played albums, recently played artists, and library totals. */
+      home: method.query(music_library_home),
+      /** `music.library.search` (query, music:read): Search the songs, albums, and artists you may play. */
+      search: method.query(music_library_search),
+    },
+    likes: {
+      /** `music.likes.list` (query, music:read): List the songs you like, newest first. */
+      list: method.query(music_likes_list),
+      /** `music.likes.set` (mutation, music:play): Like or unlike a song. */
+      set: method.mutation(music_likes_set),
+    },
+    lyrics: {
+      /** `music.lyrics.get` (query, music:play): Get a song's lyrics, timed line by line when its lyrics are synced. */
+      get: method.query(music_lyrics_get),
+    },
+    play: {
+      /** `music.play.report` (mutation, music:play): Record that a song you started is playing, once per start, in your history. */
+      report: method.mutation(music_play_report),
+      /** `music.play.reportOffline` (mutation, music:play): Record songs a device played offline in your history (500 at most); a play sent again records once. */
+      reportOffline: method.mutation(music_play_reportOffline),
+      /** `music.play.start` (mutation, music:play): Start a song: get a stream ticket for it in this session. */
+      start: method.mutation(music_play_start),
+    },
+    playlists: {
+      /** `music.playlists.addTracks` (mutation, music:edit): Add songs to the end of a playlist you own or collaborate on (2,000 songs at most); send any songs left in rest again. */
+      addTracks: method.mutation(music_playlists_addTracks),
+      /** `music.playlists.create` (mutation, music:edit): Create a playlist, with songs to start it. */
+      create: method.mutation(music_playlists_create),
+      /** `music.playlists.get` (query, music:read): Show a playlist: yours, one shared with you, or one shared with everyone. */
+      get: method.query(music_playlists_get),
+      /** `music.playlists.items` (query, music:read): List a playlist's songs in order, with the ones you cannot play greyed out. */
+      items: method.query(music_playlists_items),
+      /** `music.playlists.list` (query, music:read): List your playlists, most recently changed first. */
+      list: method.query(music_playlists_list),
+      /** `music.playlists.moveItem` (mutation, music:edit): Move a playlist entry to just after another (--after-item-id), or to the top when none is given. */
+      moveItem: method.mutation(music_playlists_moveItem),
+      /** `music.playlists.remove` (mutation, music:edit): Delete a playlist you own. */
+      remove: method.mutation(music_playlists_remove),
+      /** `music.playlists.removeItem` (mutation, music:edit): Remove an entry from a playlist you own or collaborate on. */
+      removeItem: method.mutation(music_playlists_removeItem),
+      /** `music.playlists.share` (mutation, music:edit, API keys refused): Share a playlist you own with someone as a viewer (default) or a collaborator, who adds, removes, and reorders songs. */
+      share: method.mutation(music_playlists_share),
+      /** `music.playlists.shared` (query, music:read): List playlists other people shared with you by name. */
+      shared: method.query(music_playlists_shared),
+      /** `music.playlists.sharing` (query, music:edit): Show who a playlist you own is shared with. */
+      sharing: method.query(music_playlists_sharing),
+      /** `music.playlists.unshare` (mutation, music:edit): Stop sharing a playlist with someone, or leave one shared with you; naming no one stops sharing it at all. */
+      unshare: method.mutation(music_playlists_unshare),
+      /** `music.playlists.update` (mutation, music:edit): Rename a playlist you own or change its description; an empty description clears it. */
+      update: method.mutation(music_playlists_update),
+      /** `music.playlists.visibility` (mutation, music:edit, API keys refused): Make a playlist you own private, or shared: everyone on this server can open and play it. */
+      visibility: method.mutation(music_playlists_visibility),
+    },
+    queue: {
+      /** `music.queue.add` (mutation, music:play): Add songs to your queue: --next plays them after the current song, otherwise they go after your other queued songs (before autoplay); send any songs left in rest again with --after-item-id set to the last item id added so far. */
+      add: method.mutation(music_queue_add),
+      /** `music.queue.autoplay` (mutation, music:play): Turn autoplay on or off: when the queue runs out, play the same artist, then genre, then era. */
+      autoplay: method.mutation(music_queue_autoplay),
+      /** `music.queue.clear` (mutation, music:play): Clear everything after the current song. */
+      clear: method.mutation(music_queue_clear),
+      /** `music.queue.get` (query, music:play): Show your queue: the entry playing, how many there are, shuffle, repeat, and autoplay. */
+      get: method.query(music_queue_get),
+      /** `music.queue.jump` (mutation, music:play): Make a queue entry the one playing. */
+      jump: method.mutation(music_queue_jump),
+      /** `music.queue.list` (query, music:play): List your queue's entries in play order. */
+      list: method.query(music_queue_list),
+      /** `music.queue.move` (mutation, music:play): Move a queue entry to just after another (--after-item-id), or to the top when none is given. */
+      move: method.mutation(music_queue_move),
+      /** `music.queue.play` (mutation, music:play): Replace your queue with songs (2,000 at most, 1,000 kept) and play the one at --index, the first by default. */
+      play: method.mutation(music_queue_play),
+      /** `music.queue.remove` (mutation, music:play): Remove an entry from your queue. */
+      remove: method.mutation(music_queue_remove),
+      /** `music.queue.repeat` (mutation, music:play): Set repeat to off, all, or one. */
+      repeat: method.mutation(music_queue_repeat),
+      /** `music.queue.shuffle` (mutation, music:play): Turn shuffle on or off. */
+      shuffle: method.mutation(music_queue_shuffle),
+    },
+    tracks: {
+      /** `music.tracks.get` (query, music:read): Show a song you may see: its title, artist, and album. */
+      get: method.query(music_tracks_get),
+      /** `music.tracks.list` (query, music:read): List the songs you may play, by title. */
+      list: method.query(music_tracks_list),
+    },
+  },
 });
 
 /** Every command as a Promise method, nested by name as `effectMethods` is. */
@@ -4581,6 +5925,112 @@ export const promiseMethods = (method: PromiseBuilder) => ({
       similar: method.query(movies_titles_similar),
       /** `movies.titles.versions` (query, movies:read): List the versions on disk of a movie or an episode, best quality first. */
       versions: method.query(movies_titles_versions),
+    },
+  },
+  music: {
+    albums: {
+      /** `music.albums.get` (query, music:read): Show an album: its artist, year, length, genre, and format. */
+      get: method.query(music_albums_get),
+      /** `music.albums.list` (query, music:read): List the albums you may play, newest first. */
+      list: method.query(music_albums_list),
+      /** `music.albums.tracks` (query, music:read): List an album's songs on disk in disc and track order. */
+      tracks: method.query(music_albums_tracks),
+    },
+    artists: {
+      /** `music.artists.albums` (query, music:read): List an artist's albums, newest year first. */
+      albums: method.query(music_artists_albums),
+      /** `music.artists.get` (query, music:read): Show an artist and their top songs. */
+      get: method.query(music_artists_get),
+      /** `music.artists.list` (query, music:read): List the artists you may play, by name. */
+      list: method.query(music_artists_list),
+    },
+    history: {
+      /** `music.history.list` (query, music:read): List the songs you played, most recent first. */
+      list: method.query(music_history_list),
+    },
+    library: {
+      /** `music.library.home` (query, music:read): Show your music home: recently added and recently played albums, recently played artists, and library totals. */
+      home: method.query(music_library_home),
+      /** `music.library.search` (query, music:read): Search the songs, albums, and artists you may play. */
+      search: method.query(music_library_search),
+    },
+    likes: {
+      /** `music.likes.list` (query, music:read): List the songs you like, newest first. */
+      list: method.query(music_likes_list),
+      /** `music.likes.set` (mutation, music:play): Like or unlike a song. */
+      set: method.mutation(music_likes_set),
+    },
+    lyrics: {
+      /** `music.lyrics.get` (query, music:play): Get a song's lyrics, timed line by line when its lyrics are synced. */
+      get: method.query(music_lyrics_get),
+    },
+    play: {
+      /** `music.play.report` (mutation, music:play): Record that a song you started is playing, once per start, in your history. */
+      report: method.mutation(music_play_report),
+      /** `music.play.reportOffline` (mutation, music:play): Record songs a device played offline in your history (500 at most); a play sent again records once. */
+      reportOffline: method.mutation(music_play_reportOffline),
+      /** `music.play.start` (mutation, music:play): Start a song: get a stream ticket for it in this session. */
+      start: method.mutation(music_play_start),
+    },
+    playlists: {
+      /** `music.playlists.addTracks` (mutation, music:edit): Add songs to the end of a playlist you own or collaborate on (2,000 songs at most); send any songs left in rest again. */
+      addTracks: method.mutation(music_playlists_addTracks),
+      /** `music.playlists.create` (mutation, music:edit): Create a playlist, with songs to start it. */
+      create: method.mutation(music_playlists_create),
+      /** `music.playlists.get` (query, music:read): Show a playlist: yours, one shared with you, or one shared with everyone. */
+      get: method.query(music_playlists_get),
+      /** `music.playlists.items` (query, music:read): List a playlist's songs in order, with the ones you cannot play greyed out. */
+      items: method.query(music_playlists_items),
+      /** `music.playlists.list` (query, music:read): List your playlists, most recently changed first. */
+      list: method.query(music_playlists_list),
+      /** `music.playlists.moveItem` (mutation, music:edit): Move a playlist entry to just after another (--after-item-id), or to the top when none is given. */
+      moveItem: method.mutation(music_playlists_moveItem),
+      /** `music.playlists.remove` (mutation, music:edit): Delete a playlist you own. */
+      remove: method.mutation(music_playlists_remove),
+      /** `music.playlists.removeItem` (mutation, music:edit): Remove an entry from a playlist you own or collaborate on. */
+      removeItem: method.mutation(music_playlists_removeItem),
+      /** `music.playlists.share` (mutation, music:edit, API keys refused): Share a playlist you own with someone as a viewer (default) or a collaborator, who adds, removes, and reorders songs. */
+      share: method.mutation(music_playlists_share),
+      /** `music.playlists.shared` (query, music:read): List playlists other people shared with you by name. */
+      shared: method.query(music_playlists_shared),
+      /** `music.playlists.sharing` (query, music:edit): Show who a playlist you own is shared with. */
+      sharing: method.query(music_playlists_sharing),
+      /** `music.playlists.unshare` (mutation, music:edit): Stop sharing a playlist with someone, or leave one shared with you; naming no one stops sharing it at all. */
+      unshare: method.mutation(music_playlists_unshare),
+      /** `music.playlists.update` (mutation, music:edit): Rename a playlist you own or change its description; an empty description clears it. */
+      update: method.mutation(music_playlists_update),
+      /** `music.playlists.visibility` (mutation, music:edit, API keys refused): Make a playlist you own private, or shared: everyone on this server can open and play it. */
+      visibility: method.mutation(music_playlists_visibility),
+    },
+    queue: {
+      /** `music.queue.add` (mutation, music:play): Add songs to your queue: --next plays them after the current song, otherwise they go after your other queued songs (before autoplay); send any songs left in rest again with --after-item-id set to the last item id added so far. */
+      add: method.mutation(music_queue_add),
+      /** `music.queue.autoplay` (mutation, music:play): Turn autoplay on or off: when the queue runs out, play the same artist, then genre, then era. */
+      autoplay: method.mutation(music_queue_autoplay),
+      /** `music.queue.clear` (mutation, music:play): Clear everything after the current song. */
+      clear: method.mutation(music_queue_clear),
+      /** `music.queue.get` (query, music:play): Show your queue: the entry playing, how many there are, shuffle, repeat, and autoplay. */
+      get: method.query(music_queue_get),
+      /** `music.queue.jump` (mutation, music:play): Make a queue entry the one playing. */
+      jump: method.mutation(music_queue_jump),
+      /** `music.queue.list` (query, music:play): List your queue's entries in play order. */
+      list: method.query(music_queue_list),
+      /** `music.queue.move` (mutation, music:play): Move a queue entry to just after another (--after-item-id), or to the top when none is given. */
+      move: method.mutation(music_queue_move),
+      /** `music.queue.play` (mutation, music:play): Replace your queue with songs (2,000 at most, 1,000 kept) and play the one at --index, the first by default. */
+      play: method.mutation(music_queue_play),
+      /** `music.queue.remove` (mutation, music:play): Remove an entry from your queue. */
+      remove: method.mutation(music_queue_remove),
+      /** `music.queue.repeat` (mutation, music:play): Set repeat to off, all, or one. */
+      repeat: method.mutation(music_queue_repeat),
+      /** `music.queue.shuffle` (mutation, music:play): Turn shuffle on or off. */
+      shuffle: method.mutation(music_queue_shuffle),
+    },
+    tracks: {
+      /** `music.tracks.get` (query, music:read): Show a song you may see: its title, artist, and album. */
+      get: method.query(music_tracks_get),
+      /** `music.tracks.list` (query, music:read): List the songs you may play, by title. */
+      list: method.query(music_tracks_list),
     },
   },
 });

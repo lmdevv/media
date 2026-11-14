@@ -21,6 +21,7 @@ import type {
   ContentAction,
   ContentFacts,
   Principal,
+  ResourceIdOf,
   ResourceRef,
   ShareSeat,
   TableOf,
@@ -29,7 +30,8 @@ import type {
 /** Most groups one person is in; it bounds the reads of every content check. */
 export const GROUPS_PER_USER_MAX = 16;
 
-const RESOURCE_GRANTS_MAX = 1000;
+/** Grants one resource holds at most. */
+export const RESOURCE_GRANTS_MAX = 1000;
 
 const PURGE_BATCH = 500;
 
@@ -50,7 +52,8 @@ const strongest = (found: ReadonlyArray<Level | null>): Level | null =>
     null,
   );
 
-const grantOn = <T extends ResourceType>(
+/** The grant `key` (a user id, a group id, or `household`) holds on `ref`, or null. */
+export const grantOn = <T extends ResourceType>(
   db: DatabaseReader,
   ref: ResourceRef<T>,
   key: PrincipalKey,
@@ -62,16 +65,21 @@ const grantOn = <T extends ResourceType>(
     )
     .unique();
 
-const grantsOn = <T extends ResourceType>(
+/**
+ * The grants on `ref` in principal order, at most `count` and never more than the 1,000 a
+ * resource holds, for a domain that shows who something is shared with.
+ */
+export const grantsOn = <T extends ResourceType>(
   db: DatabaseReader,
   ref: ResourceRef<T>,
+  count: number = RESOURCE_GRANTS_MAX,
 ): Promise<Array<Doc<"grants">>> =>
   db
     .query("grants")
     .withIndex("by_resource_principal", (q) =>
       q.eq("resourceType", ref.type).eq("resourceId", ref.id),
     )
-    .take(RESOURCE_GRANTS_MAX);
+    .take(Math.min(count, RESOURCE_GRANTS_MAX));
 
 /** The groups a person is in, read live, so a removal applies on their next call. */
 export const groupsOf = async (
@@ -269,19 +277,29 @@ export const requireItems = async (
 };
 
 interface Bounds<T extends ResourceType> {
-  readonly after: Id<TableOf<T>> | null;
+  readonly after: ResourceIdOf<T> | null;
   /** Only rows up to this id, for a reactive page reloaded to the end it had; null for no end. */
-  readonly through: Id<TableOf<T>> | null;
+  readonly through: ResourceIdOf<T> | null;
 }
+
+type IdReaders = {
+  readonly [T in ResourceType]: (db: DatabaseReader, raw: string) => ResourceIdOf<T> | null;
+};
+
+/** Reads a raw id as a row of each resource type's table, or null when it names none. */
+const idReaders: IdReaders = {
+  library: (db, raw) => db.normalizeId("libraries", raw),
+  playlist: (db, raw) => db.normalizeId("playlists", raw),
+};
 
 const boundOf = <T extends ResourceType>(
   db: DatabaseReader,
   type: T,
   cursor: string | null | undefined,
-): Id<TableOf<T>> | null =>
+): ResourceIdOf<T> | null =>
   cursor === undefined || cursor === null || cursor === ""
     ? null
-    : (db.normalizeId(resourceTypes[type].table, cursor) ??
+    : (idReaders[type](db, cursor) ??
       fail("invalid_args", "This page cursor did not come from this list"));
 
 const rangeOf = <T extends ResourceType>(
@@ -346,7 +364,7 @@ export const visiblePage = async <T extends ResourceType>(
 
   const loaded = await Promise.all(
     considered.map(async (rawId) => {
-      const id = ctx.db.normalizeId(resourceTypes[type].table, rawId);
+      const id = idReaders[type](ctx.db, rawId);
       const doc = id === null ? null : await ctx.db.get(id);
       const level = levelsById.get(rawId) ?? null;
 
@@ -416,9 +434,36 @@ const refuseLosingLastManager = (
 };
 
 /**
+ * Whether a share may give `principal` `level` on a row of `type` (`shares` in the resource type
+ * registry): only a person may manage, and a playlist goes to a person or to everyone, never to a
+ * group.
+ */
+const sharable = (type: ResourceType, principal: GrantPrincipal, level: Level): boolean => {
+  const allowed: ReadonlyArray<Level> = resourceTypes[type].shares[principal.kind];
+
+  return allowed.includes(level);
+};
+
+const refusedShare = (type: ResourceType, principal: GrantPrincipal, level: Level): never => {
+  if (level === "manage" && principal.kind !== "user") {
+    return fail("invalid_args", "Only a person can manage something");
+  }
+
+  const allowed: ReadonlyArray<Level> = resourceTypes[type].shares[principal.kind];
+
+  return fail(
+    "invalid_args",
+    allowed.length === 0
+      ? `A ${type} is never shared with a ${principal.kind}`
+      : `A ${type} gives a ${principal.kind} only ${allowed.join(" or ")}`,
+  );
+};
+
+/**
  * Gives `principal` exactly `level` on `ref`, which needs `manage` on it. Only a person may
- * manage; a group or the household gets `view` or `edit`. Running it twice changes nothing, and
- * lowering the last manager is a `conflict`.
+ * manage; a group or the household gets `view` or `edit`, and each resource type may narrow that
+ * further (`shares`). Running it twice changes nothing, and lowering the last manager is a
+ * `conflict`.
  */
 export const grant = async <T extends ResourceType>(
   ctx: Pick<MutationCtx, "db">,
@@ -429,9 +474,7 @@ export const grant = async <T extends ResourceType>(
 ): Promise<void> => {
   await requireContent(ctx, caller, "manage", ref);
 
-  if (level === "manage" && principal.kind !== "user") {
-    return fail("invalid_args", "Only a person can manage something");
-  }
+  if (!sharable(ref.type, principal, level)) return refusedShare(ref.type, principal, level);
 
   const key = await keyOf(ctx.db, principal);
   const existing = await grantOn(ctx.db, ref, key);
@@ -485,6 +528,23 @@ export const revoke = async <T extends ResourceType>(
 };
 
 /**
+ * Stops sharing `ref` with anyone but its managers, which needs `manage` on it: every `view` and
+ * `edit` grant goes, the household's included, as old music's unshare with no one named did. A
+ * resource has at most 1,000 grants, so this reads and deletes at most that many.
+ */
+export const unshareAll = async <T extends ResourceType>(
+  ctx: Pick<MutationCtx, "db">,
+  caller: Principal,
+  ref: ResourceRef<T>,
+): Promise<void> => {
+  await requireContent(ctx, caller, "manage", ref);
+
+  const leaving = (await grantsOn(ctx.db, ref)).filter((row) => row.level !== "manage");
+
+  await Promise.all(leaving.map(async (row) => ctx.db.delete(row._id)));
+};
+
+/**
  * Makes `userId` the first manager of a row made in this same mutation.
  *
  * @throws Error when the row already has a grant, which only a defect gives.
@@ -512,8 +572,8 @@ export const grantCreator = async <T extends ResourceType>(
  * nothing. It reads the row's grants once, where a `grant` per principal would read them each
  * time, and keeps the row within its 1,000 grants.
  *
- * @throws Error when a share would make a group or the household a manager, which only a defect
- * gives.
+ * @throws Error when a share gives a level its resource type does not allow that principal (a group
+ * or the household as a manager), which only a defect gives.
  */
 export const shareNew = async <T extends ResourceType>(
   ctx: Pick<MutationCtx, "db">,
@@ -523,8 +583,8 @@ export const shareNew = async <T extends ResourceType>(
   const held = new Set((await grantsOn(ctx.db, ref)).map((row) => row.principal));
 
   await inOrder(shares, async ({ principal, level }) => {
-    if (level === "manage" && principal.kind !== "user") {
-      throw new Error("Only a person can manage something");
+    if (!sharable(ref.type, principal, level)) {
+      throw new Error(`A ${ref.type} cannot give ${level} to a ${principal.kind}`);
     }
 
     const key = await keyOf(ctx.db, principal);

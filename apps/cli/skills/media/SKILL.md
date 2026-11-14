@@ -1,6 +1,6 @@
 ---
 name: media
-description: Control a [media] server (the user's self-hosted movies, shows, and music) from the terminal with the `media` CLI. Use when asked to find, play, or track movies and shows, manage libraries, scans, backups, accounts, users, invites, API keys, or device sign-ins, reset a password on the server host, or find out why playback stalled.
+description: Control a [media] server (the user's self-hosted movies, shows, and music) from the terminal with the `media` CLI. Use when asked to find, play, or track movies and shows, play music or manage playlists, likes, and the queue, manage libraries, scans, backups, accounts, users, invites, API keys, or device sign-ins, reset a password on the server host, or find out why playback stalled.
 ---
 
 # [media] CLI
@@ -10,14 +10,14 @@ by default.
 
 ## Load only the reference you need
 
-Read the one file that covers the task, and no other. Both are generated from the command list,
+Read the one file that covers the task, and no other. All are generated from the command list,
 so they always match the CLI.
 
 | Task                                                                                                                                                                                                                             | Read                   |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
 | Movies and shows (`media movies`): home rows, titles, search, versions, people, collections, continue watching, history, your list, starting playback, imports, and metadata edits                                               | `references/movies.md` |
+| Music (`media music`): home, albums, artists, songs, search, playlists and sharing them, likes, history, your queue, lyrics, and starting playback                                                                               | `references/music.md`  |
 | Everything else (`media auth`, `media admin`): sign-in, sessions, API keys, device sign-ins, your account, libraries and scans, users, roles, invites, reset links, groups, restrictions, backups, downloads, and group sessions | `references/core.md`   |
-| Music                                                                                                                                                                                                                            | No commands yet        |
 
 ## Install
 
@@ -60,9 +60,10 @@ No install holds a credential; sign in as each reference says.
   limits sign-ins per address: 10 at once, then one every 5 seconds. Set `MEDIA_CORE_SIGN_IN_URL`
   when it is not on the media server. A `rate_limited` answer says how long to wait.
 - **Names to words.** Each reference lists its commands with their `media` lines. Admin
-  commands are in `media admin`, the rest of the core's in `media auth`, and movies in
-  `media movies`: `core.accounts.users.list` is `media admin users list`, and
-  `movies.history.continueWatching` is `media movies history continue-watching`.
+  commands are in `media admin`, the rest of the core's in `media auth`, movies in
+  `media movies`, and music in `media music`: `core.accounts.users.list` is
+  `media admin users list`, and `movies.history.continueWatching` is
+  `media movies history continue-watching`.
   `media call <name> --json '{...}'` runs any command by its name. IDs come from earlier results;
   never invent them.
 - **Passwords never go on the command line.** An argument named like `password` comes from

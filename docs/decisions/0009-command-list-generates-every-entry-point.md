@@ -2,7 +2,7 @@
 
 - Status: Accepted, 2026-11-03. Amended 2026-11-04 with the generator's layout, and again on
   2026-11-04 with `refusesKeys` and with the SDK target. Amended 2026-11-09 with the movies
-  commands.
+  commands, and 2026-11-13 with the music commands.
 - Decisions: D23
 
 ## Context
@@ -201,3 +201,95 @@ the same generator run writes every entry point.
   that must keep one order across many containers, such as the title list across libraries,
   pages one household-wide index and decides each row's access, rather than merging one range
   per container (ADR 0005).
+
+## The music commands (amended 2026-11-13)
+
+The music port declares old music's actions as the `music` domain, in place of old music's two
+string dispatchers that took `v.any()` arguments (D23).
+
+- **Where they live.** The declarations are in `packages/commands/src/music.ts`, each with a
+  `music:read`, `music:play`, or `music:edit` scope. Their handlers are in
+  `packages/platform/convex/music/`, one module per group: `library`, `albums`, `artists`,
+  `tracks`, `playlists`, `likes`, `history`, `queue`, `lyrics`, and `play`. One
+  `pnpm --filter @media/commands generate` writes a contract per module under
+  `packages/platform/commands/music/`, `platform.music.*` in the SDK, the `media music` group of
+  the CLI, and `apps/cli/skills/media/references/music.md`. A second run writes nothing.
+- **What came over.** Home, the album, artist, and song lists, search, an album and its songs, an
+  artist with their top songs and albums, playlists with sharing, likes, history, the queue with
+  shuffle, repeat, and autoplay, lyrics, and starting playback. Old names map one to one, but for
+  these:
+
+  | Old music                              | Core                                                  |
+  | -------------------------------------- | ----------------------------------------------------- |
+  | `library.home`, `search`               | `music.library.home`, `music.library.search`          |
+  | `albums.get`                           | `music.albums.get` and `music.albums.tracks`          |
+  | `artists.get`                          | `music.artists.get` and `music.artists.albums`        |
+  | `playlists.get`                        | `music.playlists.get` and `music.playlists.items`     |
+  | `playlists.rename`, `playlists.update` | `music.playlists.update`                              |
+  | `playlists.delete`                     | `music.playlists.remove` (`delete` is reserved)       |
+  | `playlists.add`, `remove`, `move`      | `music.playlists.addTracks`, `removeItem`, `moveItem` |
+  | `likes.list`, `likes.page`             | `music.likes.list`, a page at a time                  |
+  | `playback.play` without a device       | `music.queue.play`                                    |
+  | `playback.jump`, `shuffle`, `repeat`   | `music.queue.jump`, `shuffle`, `repeat`               |
+  | `stream.url`                           | `music.play.start`, a personal ticket (ADR 0011)      |
+  | the plays of `playback.report`         | `music.play.report`, once per start                   |
+  | the plays of `devices.reconcile`       | `music.play.reportOffline`                            |
+  | `links.get` of a song                  | `music.tracks.get`: its title, album, and album id    |
+
+- **What did not.** Remote control and moving playback between devices (`playback.state`,
+  `position`, `pause`, `resume`, `next`, `previous`, `seek`, `volume`, `transfer`, `report`'s
+  position, `devices.*`) come back with Connect in phase 6 (D62), and jams with group sessions
+  (ADR 0017). Libraries, jobs, accounts, keys, people, invites, downloads, and server settings
+  are the core's already. `links.get` built a path a client can build itself from an id, and
+  answered the title beside it: an album's, an artist's, and a playlist's come from
+  `music.albums.get`, `music.artists.get`, and `music.playlists.get`, and a song's, with the album
+  it opens, from `music.tracks.get`, which iOS's "Add to playlist" sheet shows. LRCLIB lookups and
+  `lyrics.backfill` come with the lyrics job (p5-lyrics), so `music.lyrics.get` answers a song's
+  own lyrics for now.
+- **Lists page.** Every list that can grow pages with an exact cursor, which old music's merged
+  lists and its whole-album, whole-playlist, and whole-queue answers did not: a Convex call reads
+  at most 16 MiB, and 2,000 songs at their bound would pass it. So an album's songs, an artist's
+  albums, a playlist's entries, and the queue's entries are their own paged commands beside the
+  one that shows the album, artist, playlist, or queue. The song, album, and artist lists merge the
+  libraries the caller may read, as old music's did after ADS-112, with `take` on each library's
+  own index and one exact cursor of their own in place of `paginate` (ADR 0005).
+- **Songs in, a call at a time.** `music.queue.add`, `music.playlists.create`, and
+  `music.playlists.addTracks` take up to 2,000 songs and read and decide as many as one call can
+  pay for, songs from many libraries costing each library's grants. A call that cannot take them
+  all answers the rest in `rest`; the client sends them again, to the queue with `afterItemId`
+  naming the last entry the call before added, so the songs keep their order whether they go next,
+  last, or into an empty queue. The other commands that take songs (`music.queue.play`,
+  `music.play.reportOffline`) still take all of them or refuse with `invalid_args` before they
+  write.
+- **Per-person tables.** `playlists`, `playlistItems`, `likes`, `plays`, `playQueues`, and
+  `playQueueEntries` are in `music/schema.ts`, written only through the music store
+  (`music/write.ts`), which bounds each document and charges the call's meter, and which the
+  `media/music-writer` lint rule enforces. Old music's `playlistShares` and playlist visibility
+  are the core's grants (ADR 0005). A playlist holds at most 2,000 entries and a queue 1,000, as
+  in old music; likes and plays grow without limit, so their lists page and each write reads and
+  writes a row or two.
+- **The queue is a row per entry.** Old music kept a person's queue as one array that every
+  command rewrote. Each entry is now its own row with an order key between its neighbours and a
+  unique tie, and `listOrder` keeps the order before shuffle, so an add, a move, or a remove
+  writes the entries it changes and the queue row, never the whole list. When the keys around an
+  insert or a move sit too close to split, the queue renumbers, at most its 1,000 entries; an add
+  renumbers before it reads its songs, so the songs take what the renumber left of the call and
+  the call never renumbers after it read them. A playlist's move renumbers at most its 2,000
+  entries the same way and reads no songs, and adding to a playlist appends, which never
+  renumbers. Every queue command is
+  one serializable Convex mutation, so two sessions of one person adding, moving, and removing at
+  once each see the other's committed entries: none is lost or duplicated, and both read the
+  same order. Replacing the queue moves the queue's `generation` and writes only the new entries;
+  the old ones are deleted in scheduled pages, and reads see only the current generation. Where
+  playback is and on which device stays with the player until Connect: `music.queue.jump` tells
+  the queue which entry plays.
+- **Autoplay** picks as old music's did (the same artist, then genre, then era, leaving out what
+  is queued and the last 100 plays), reading at most 60 songs of an artist and 12 albums a step
+  where old music read 300 and 24, and runs a step only while the call can still pay for it.
+- **Purges.** Removing a library's songs deletes what people kept of them, as old music's purge
+  did: their playlist entries, shrinking each playlist's counts, their likes, their plays, and
+  their queue entries, moving a queue that played one on to the next entry (`music/dependents.ts`,
+  in half of each purge call's budget, before the songs go).
+- **Artwork.** A result names a song's, album's, or artist's artwork as
+  `/music/art/<hash>?ticket=<ticket>`, a shareable `image` ticket for `artworkTicketId(hash)`
+  (ADR 0011), which the server's music routes serve (p5-music-server).
