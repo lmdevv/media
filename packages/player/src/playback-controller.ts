@@ -104,6 +104,11 @@ export interface MusicCommands {
     trackIds: ReadonlyArray<string>,
     index: number | undefined,
   ) => Promise<{ readonly current: string }>;
+  /**
+   * `music.tracks.get`: a song's details, so a new queue's first song starts as soon as its ticket
+   * answers, before the queue that holds it arrives.
+   */
+  readonly track: (trackId: string) => Promise<Track>;
   /** `music.queue.jump`: makes an entry the one playing. */
   readonly jump: (itemId: string) => Promise<void>;
   /** `music.play.report`: records a start that is playing in the listener's history. */
@@ -189,6 +194,18 @@ interface PendingJump {
 }
 
 /**
+ * The song a new queue opens on, started while `music.queue.play` writes the queue: its details,
+ * then its ticket. Null when either failed; the queue's own entry then loads it as before.
+ */
+interface EarlyStart {
+  readonly trackId: string;
+  readonly started: Promise<{
+    readonly track: Track;
+    readonly source: Result.Result<ResolvedSource, StreamRefused>;
+  } | null>;
+}
+
+/**
  * Plays the listener's queue on this device. The core holds the queue and the entry playing
  * (`music.queue.*`); this device holds whether it plays and where in the song, as old music's
  * player did for the device that played (D62). Moving playback between devices returns with
@@ -222,6 +239,8 @@ export class PlaybackController {
   #preloaded: PreloadedEntry | null = null;
   /** The preload request in flight, if any. */
   #preloading: PreloadRequest | null = null;
+  /** The new queue's first song, started ahead; the next load of that song takes it. */
+  #early: EarlyStart | null = null;
   #generation = 0;
   /** The load whose source the engine plays; its events count only while it is `#generation`. */
   #engineGeneration = 0;
@@ -363,17 +382,27 @@ export class PlaybackController {
     return this.#livePositionMs();
   }
 
-  /** Replaces the queue with `trackIds` and plays the one at `index` here. */
+  /**
+   * Replaces the queue with `trackIds` and plays the one at `index` here. That song's ticket is
+   * asked for while the core writes the queue, so it plays once the queue's answer and its ticket
+   * are both in, without waiting for the new queue to arrive. A queue command that fails plays
+   * nothing.
+   */
   async playTracks(trackIds: ReadonlyArray<string>, index?: number): Promise<void> {
     this.#unlockOutput();
     this.#wantPlaying = true;
     this.#update({ error: null });
+    const picked = trackIds[index ?? 0];
+    const early = picked === undefined ? null : this.#startEarly(picked);
+
+    this.#early = early;
 
     try {
       const { current } = await this.#commands.play(trackIds, index);
 
-      this.#moveTo(current, true);
+      this.#moveTo(current, true, early);
     } catch (error) {
+      if (this.#early === early) this.#early = null;
       this.#update({ error: messageOf(error) });
     }
   }
@@ -584,12 +613,19 @@ export class PlaybackController {
     if (this.#loaded === null && this.#wantPlaying) void this.#load(entry, 0);
   }
 
-  /** Keeps the loaded entry's song details current, such as a like, without reloading it. */
+  /**
+   * Keeps the loaded entry's song details current, such as a like, without reloading it. An entry
+   * that holds another song than the one loaded for it loads that song: the guess a new queue's
+   * first song starts from (`#startEarly`) was wrong, as when the core skipped a missing file.
+   */
   #refreshLoaded(): void {
     const loaded = this.#loaded;
     const entry = loaded === null ? null : this.#entryOf(loaded.entry.itemId);
 
-    if (loaded !== null && entry !== null) this.#loaded = { ...loaded, entry };
+    if (loaded === null || entry === null) return;
+
+    if (entry.track.id === loaded.entry.track.id) this.#loaded = { ...loaded, entry };
+    else void this.#load(entry, 0);
   }
 
   /** Moves to `itemId` here at once and tells the core, which confirms it with the next sync. */
@@ -608,8 +644,11 @@ export class PlaybackController {
     }
   }
 
-  /** Moves to `itemId` here at once. Returns the pending move, which the core's sync confirms. */
-  #moveTo(itemId: string, play: boolean): PendingJump {
+  /**
+   * Moves to `itemId` here at once. Returns the pending move, which the core's sync confirms.
+   * `early` is the song started ahead for a new queue whose first entry `itemId` is.
+   */
+  #moveTo(itemId: string, play: boolean, early: EarlyStart | null = null): PendingJump {
     const pending = this.#sendMove(itemId);
 
     this.#wantPlaying = play;
@@ -618,11 +657,75 @@ export class PlaybackController {
     const entry = this.#entryOf(itemId);
 
     if (entry === null) {
-      // The queue that holds it has not arrived yet; `sync` loads it once it does.
+      // The queue that holds it has not arrived yet; `sync` loads it once it does, unless the
+      // song started ahead gets there first.
       this.#unload();
+
+      if (early !== null && play) void this.#loadEarly(itemId, early);
     } else if (this.#loaded?.entry.itemId !== itemId || play) void this.#load(entry, 0);
 
     return pending;
+  }
+
+  /**
+   * Asks for `trackId`'s details and then its ticket, while the core writes the queue that opens
+   * on it. `music.play.start` does not need the queue, so the song can play as soon as both answer.
+   */
+  #startEarly(trackId: string): EarlyStart {
+    const started = this.#commands.track(trackId).then(
+      async (track) => ({
+        track,
+        source: await this.#sources.resolve(track, this.#profileFor(track, this.#wantedEngine())),
+      }),
+      () => null,
+    );
+
+    return { trackId, started };
+  }
+
+  /**
+   * Loads the new queue's first entry `itemId` from the song started ahead, once it answers, unless
+   * the listener moved on or the queue that holds it arrived and loaded it meanwhile.
+   */
+  async #loadEarly(itemId: string, early: EarlyStart): Promise<void> {
+    const started = await early.started;
+
+    if (
+      started === null ||
+      Result.isFailure(started.source) ||
+      this.#early !== early ||
+      this.#snapshot.current !== itemId ||
+      this.#loaded !== null
+    ) {
+      return;
+    }
+
+    await this.#load({ itemId, autoplay: false, track: started.track }, 0);
+  }
+
+  /**
+   * The ticket asked for ahead for `entry`'s song, taken once, its refusal included. Null when
+   * there is none for that song, its details failed, it is in another profile than `profile`, or
+   * it is due for renewal: the load then asks for a ticket itself.
+   */
+  async #takeEarly(
+    entry: QueueEntry,
+    profile: MusicStreamProfile,
+  ): Promise<Result.Result<ResolvedSource, StreamRefused> | null> {
+    const early = this.#early;
+
+    if (early?.trackId !== entry.track.id) return null;
+    this.#early = null;
+    const started = await early.started;
+
+    if (started === null) return null;
+    const { source } = started;
+
+    if (Result.isFailure(source)) return source;
+
+    return source.success.profile === profile && !this.#isExpired(source.success.renewAt)
+      ? source
+      : null;
   }
 
   /** Records a move to `itemId` made here, which the core has not confirmed yet. */
@@ -859,11 +962,15 @@ export class PlaybackController {
       // A switch drops the preload with the engine that held it.
       this.#useEngine(engine);
 
+      const profile = this.#profileFor(track, engine);
       const preloaded = this.#takePreload(entry);
+      const ahead = preloaded === null ? await this.#takeEarly(entry, profile) : null;
+
+      if (generation !== this.#generation) return;
 
       const requested: Result.Result<ResolvedSource, StreamRefused> =
         preloaded === null
-          ? await this.#sources.resolve(track, this.#profileFor(track, engine))
+          ? (ahead ?? (await this.#sources.resolve(track, profile)))
           : Result.succeed(preloaded);
 
       // A ticket that answers after the listener moved on, a failure included, is not this song's.

@@ -236,8 +236,17 @@ const setup = (
     refuse: 0,
   };
 
-  /** Hold `music.play.start`, `music.queue.jump` and `music.play.report`, keyed by their id. */
-  const gates = { start: new Gate(), jump: new Gate(), report: new Gate() };
+  /**
+   * Hold `music.queue.play` (keyed `play`), `music.tracks.get`, `music.play.start`,
+   * `music.queue.jump` and `music.play.report`, keyed by their id.
+   */
+  const gates = {
+    play: new Gate(),
+    track: new Gate(),
+    start: new Gate(),
+    jump: new Gate(),
+    report: new Gate(),
+  };
 
   const engines: Array<FakeEngine> = [];
   const sent: Array<Sent> = [];
@@ -259,11 +268,21 @@ const setup = (
     };
   };
 
+  /** The songs `music.tracks.get` was asked for, in order. */
+  const lookups: Array<string> = [];
+
   const commands: MusicCommands = {
     play: async (trackIds, index) => {
       sent.push({ name: "play", args: [trackIds, index] });
+      await gates.play.pass("play");
 
       return { current: options.playCurrent ?? "new" };
+    },
+    track: async (trackId) => {
+      lookups.push(trackId);
+      await gates.track.pass(trackId);
+
+      return entry(trackId, trackId).track;
     },
     jump: async (itemId) => {
       sent.push({ name: "jump", args: [itemId] });
@@ -310,7 +329,7 @@ const setup = (
   const stop = controller.start();
   const engine = (): FakeEngine => engines.at(-1) ?? instantEngine("html", record);
 
-  return { controller, record, sent, clock, saved, stop, engine, gates };
+  return { controller, record, sent, lookups, clock, saved, stop, engine, gates };
 };
 
 const ListeningAddress = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Int }));
@@ -397,6 +416,128 @@ describe("PlaybackController", () => {
     ]);
     expect(controller.getSnapshot().engineStatus).toBe("playing");
     expect(names(sent)).toStrictEqual(["play:a,b,0", "start:a", "report:a,p1"]);
+  });
+
+  it("asks for the first song's ticket while the queue is written, and plays it before the new queue arrives", async () => {
+    const { controller, record, sent, lookups, gates } = setup({ playCurrent: "1" });
+
+    gates.play.holding = true;
+    const playing = controller.playTracks(["a", "b"], 0);
+    await settle();
+
+    expect(lookups).toStrictEqual(["a"]);
+    expect(names(sent)).toStrictEqual(["play:a,b,0", "start:a"]);
+    expect(record.loads).toHaveLength(0);
+
+    gates.play.release("play");
+    await playing;
+    await settle();
+
+    expect(record.loads.map((load) => load.url)).toStrictEqual([
+      `${BASE}/media/music/stream/a?ticket=t1&p=original`,
+    ]);
+    expect(controller.getSnapshot()).toMatchObject({ current: "1", engineStatus: "playing" });
+
+    controller.sync(queueOf([one, two], "1"));
+    await settle();
+
+    expect(record.loads).toHaveLength(1);
+    expect(names(sent)).toStrictEqual(["play:a,b,0", "start:a", "report:a,p1"]);
+  });
+
+  it("plays nothing it asked for ahead when the queue command fails, and keeps the song playing", async () => {
+    const { controller, record, gates } = setup({ playCurrent: "1" });
+
+    await controller.playTracks(["a"], 0);
+    controller.sync(queueOf([one], "1"));
+    await settle();
+    gates.play.holding = true;
+    const playing = controller.playTracks(["b"], 0);
+    await settle();
+    gates.play.fail("play", "The queue is full");
+    await playing;
+    await settle();
+
+    expect(record.loads.map((load) => load.url)).toStrictEqual([
+      `${BASE}/media/music/stream/a?ticket=t1&p=original`,
+    ]);
+    expect(controller.getSnapshot()).toMatchObject({
+      current: "1",
+      engineStatus: "playing",
+      error: "The queue is full",
+    });
+  });
+
+  it("drops a song asked for ahead once a later play replaced it", async () => {
+    const { controller, record, gates } = setup({ playCurrent: "1" });
+
+    gates.play.holding = true;
+    const first = controller.playTracks(["a"], 0);
+    const second = controller.playTracks(["c"], 0);
+    await settle();
+    gates.play.release("play");
+    await first;
+    await settle();
+
+    expect(record.loads).toHaveLength(0);
+
+    gates.play.release("play");
+    await second;
+    await settle();
+
+    expect(record.loads.map((load) => load.url)).toStrictEqual([
+      `${BASE}/media/music/stream/c?ticket=t2&p=original`,
+    ]);
+  });
+
+  it("asks again for a ticket asked for ahead that is due for renewal by the time it loads", async () => {
+    const { controller, record, clock, gates } = setup({ playCurrent: "1", ticketMs: 1000 });
+
+    gates.play.holding = true;
+    const playing = controller.playTracks(["a"], 0);
+    await settle();
+    clock.now += 600;
+    gates.play.release("play");
+    await playing;
+    await settle();
+
+    expect(record.loads.map((load) => load.url)).toStrictEqual([
+      `${BASE}/media/music/stream/a?ticket=t2&p=original`,
+    ]);
+  });
+
+  it("keeps the song asked for ahead through a load of the old queue's song meanwhile", async () => {
+    const { controller, record, sent, gates } = setup({ playCurrent: "9" });
+
+    gates.play.holding = true;
+    const playing = controller.playTracks(["b"], 0);
+    await settle();
+    controller.sync(queueOf([one], "1"));
+    await settle();
+    gates.play.release("play");
+    await playing;
+    await settle();
+
+    expect(record.loads.at(-1)?.url).toBe(`${BASE}/media/music/stream/b?ticket=t1&p=original`);
+    expect(names(sent).filter((name) => name.startsWith("start"))).toStrictEqual([
+      "start:b",
+      "start:a",
+    ]);
+  });
+
+  it("loads the new queue's own song when its first entry holds another than the one guessed", async () => {
+    const { controller, record } = setup({ playCurrent: "1" });
+
+    await controller.playTracks(["a", "b"], 0);
+    await settle();
+    controller.sync(queueOf([entry("b", "1")], "1"));
+    await settle();
+
+    expect(record.loads.map((load) => load.url)).toStrictEqual([
+      `${BASE}/media/music/stream/a?ticket=t1&p=original`,
+      `${BASE}/media/music/stream/b?ticket=t2&p=original`,
+    ]);
+    expect(controller.getSnapshot()).toMatchObject({ current: "1", engineStatus: "playing" });
   });
 
   it("moves to the next entry at once and keeps it while the core confirms", async () => {

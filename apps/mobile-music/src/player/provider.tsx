@@ -524,6 +524,15 @@ const createPhone = ({
 
       return playLocally(trackIds, index);
     },
+    track: async (trackId) => {
+      const copy = trackOfCopy(copies, trackId);
+
+      if (copy !== null) return copy;
+
+      if (mode.current === "local") throw new Error(NOT_DOWNLOADED);
+
+      return platform.music.tracks.get({ trackId: asTrackId(trackId) });
+    },
     jump: async (itemId) => {
       if (mode.current === "local") {
         controller.sync(local.update((held) => jumpLocal(held, itemId)).state);
