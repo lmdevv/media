@@ -483,6 +483,19 @@ export const lookupKind = internalQuery({
   },
 });
 
+/** A track's LRCLIB rows' ids, up to 8. */
+export const lrclibRowIds = internalQuery({
+  args: { trackId: v.id("tracks") },
+  returns: v.array(v.id("lrclibLyrics")),
+  handler: async (ctx, { trackId }) =>
+    (
+      await ctx.db
+        .query("lrclibLyrics")
+        .withIndex("by_track", (q) => q.eq("trackId", trackId))
+        .take(8)
+    ).map((row) => row._id),
+});
+
 /** How many LRCLIB rows a track has, which outlive no deleted track. */
 export const lrclibRowCount = internalQuery({
   args: { trackId: v.id("tracks") },

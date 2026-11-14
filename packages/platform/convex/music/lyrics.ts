@@ -155,10 +155,11 @@ export const { get, status, configure, backfill } = register({
 
       if (current?.status === "instrumental") return { state: "instrumental" };
 
-      // With lookups off, a queued lookup will not run, so it counts as no answer, as in old music.
+      // No answer yet, or a miss old enough to ask again: pending while a lookup is queued or
+      // running for these tags. With lookups off it will not run, so it counts as no answer, as in
+      // old music.
       const waiting =
         lookup !== null &&
-        current === null &&
         (await remoteLyricsOn(ctx.db)) &&
         (await activeJobFor(ctx.db, lookup)) !== null;
 
@@ -193,7 +194,16 @@ export const { get, status, configure, backfill } = register({
     }
 
     const reach = await reachOf(ctx.db, caller);
-    const { gates } = await walkMusicLibraries(ctx.db, reach, callBudget(reach));
+    const { gates, complete } = await walkMusicLibraries(ctx.db, reach, callBudget(reach));
+
+    // A backfill that left out libraries the budget could not list would look like a whole one.
+    if (!complete) {
+      return fail(
+        "conflict",
+        "You can read more music libraries than one backfill can list; nothing was queued",
+      );
+    }
+
     const libraryIds = gates.map((gate) => gate.library._id);
 
     await startBackfill(ctx, libraryIds);

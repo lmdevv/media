@@ -17,6 +17,7 @@ import type { CoreStack } from "../stack-env";
 import {
   JobId,
   Lease,
+  LrclibId,
   TrackId,
   claimScan,
   finishScan,
@@ -458,6 +459,28 @@ describe.skipIf(stack === undefined)("music lyrics lookups", { timeout: 180_000 
       answer: { status: "miss", current: true },
     });
     expect(await lyricsAs(owner, trackId)).toEqual({ status: "none" });
+
+    // A miss stands 30 days; then a request asks again, and the song reads pending meanwhile.
+    const [missRow] = await runFunction(
+      core,
+      internal.music.probe.lrclibRowIds,
+      { trackId },
+      Schema.Array(LrclibId),
+    );
+
+    await patchByHand(core, "lrclibLyrics", [missRow ?? never()], {
+      checkedAt: Date.now() - 31 * 24 * 60 * 60 * 1000,
+    });
+    await runFunction(
+      core,
+      internal.music.lyricLookups.requestTracks,
+      { trackIds: [trackId] },
+      Schema.Null,
+    );
+
+    expect(await lyricsAs(owner, trackId)).toEqual({ status: "pending", fallback: null });
+    await settle(core, await claimLookup(core, trackId), found(13, "found at last"));
+    expect(await lyricsAs(owner, trackId)).toMatchObject({ status: "synced", source: "lrclib" });
   });
 
   it("run a lookup whose server stopped once more, and never store or ask twice", async () => {
