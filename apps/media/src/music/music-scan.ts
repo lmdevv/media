@@ -393,11 +393,17 @@ export const scanLibrary = Effect.fn("MusicScan.library")(function* <E>(
     message: `Found ${files.length} files, ${changed.length} changed`,
   });
 
+  // Keyed by the artwork file's absolute path, a string, so every song that shares a folder's
+  // artwork shares one read of it.
   const folderArtHashes = yield* Cache.make({
     capacity: 100_000,
-    lookup: (art: { readonly folder: string; readonly relativePath: string }) =>
+    lookup: (artPath: string) =>
       Effect.gen(function* () {
-        const inside = yield* Files.resolveWithin(art.folder, `${art.folder}/${art.relativePath}`);
+        const folder = scan.folders.find((candidate) => Files.isInsideFolder(artPath, candidate));
+
+        if (folder === undefined) return undefined;
+
+        const inside = yield* Files.resolveWithin(folder, artPath);
 
         if (Option.isNone(inside)) return undefined;
 
@@ -416,10 +422,7 @@ export const scanLibrary = Effect.fn("MusicScan.library")(function* <E>(
         ? Option.getOrUndefined(yield* saveArt(dataDir, tags.picture))
         : art === undefined
           ? undefined
-          : yield* Cache.get(folderArtHashes, {
-              folder: file.folder,
-              relativePath: art.relativePath,
-            });
+          : yield* Cache.get(folderArtHashes, `${file.folder}/${art.relativePath}`);
 
     const lyrics = yield* readTrackLyrics(file.folder, sidecarsOf(file), tags.lyrics);
     const relativeFolder = dirname(file.relativePath);

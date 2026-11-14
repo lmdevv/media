@@ -87,8 +87,10 @@ describe("readTrackLyrics", () => {
         expect(shown([first, second, synced])).toMatchObject({ _tag: "Synced" });
         const { lyrics } = yield* readTrackLyrics(root, [], [first, second, synced]);
 
-        expect(lyrics).toEqual([first, synced]);
+        // The synced set comes first, and what is kept fits the core's 512 KiB lyrics row.
+        expect(lyrics).toEqual([synced]);
         expect(shown(lyrics)).toMatchObject({ _tag: "Synced", main: synced });
+        expect(new TextEncoder().encode(JSON.stringify(lyrics)).length).toBeLessThan(480 * 1024);
       }),
     ));
 
@@ -116,8 +118,8 @@ describe("readTrackLyrics", () => {
         const { lyrics } = yield* readTrackLyrics(root, sidecars, [main]);
 
         expect(lyrics.map((set) => [set.kind, set.origin])).toEqual([
-          ["translation", { _tag: "Sidecar", fileName: "Song.de.lrc", format: "lrc" }],
           ["main", main.origin],
+          ["translation", { _tag: "Sidecar", fileName: "Song.de.lrc", format: "lrc" }],
         ]);
         expect(shown(lyrics)).toMatchObject({ _tag: "Plain", main });
       }),

@@ -609,7 +609,10 @@ music's tables of the same names. No client reads them yet; the music commands c
   it stops the scan without marking anything missing, as old music's empty library did. The scan
   compares `known`'s fingerprints through the same 1,024-character bound the core keeps them in,
   so a rescan rewrites nothing that did not change. Folder failures start with the
-  `SCAN_FAILURE_PREFIXES` the account client reads.
+  `SCAN_FAILURE_PREFIXES` the account client reads. A song's own lyric sets are chosen within the
+  core's 512 KiB lyrics row (480 KiB of JSON, for the measures' difference) where old music kept
+  768 KiB, and the set a client shows goes first, so `fitLyrics`, which keeps leading sets, never
+  drops it; the others keep their files' and tags' order.
 - **A track's file for streaming.** `music/tracks:resolve` answers the server a track's path, its
   library's folders now, its size, change time, and codec, or null for a track that is missing,
   outside its folders, or not in a music library, as `movies/files:resolveFile` does for a file.

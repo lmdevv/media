@@ -26,7 +26,13 @@ import * as Files from "./music-files.ts";
  */
 export const LYRICS_READER_VERSION = 1;
 
-const MAX_STORED_BYTES = 768 * 1024;
+/**
+ * The most a song's kept lyric sets take as JSON. The core's lyrics row holds 512 KiB as Convex
+ * measures a document, and keeps the leading sets that fit (`fitLyrics` in `music/fit.ts`), so
+ * the server chooses within that, less a margin for the two measures' difference, rather than
+ * old music's own 768 KiB: the core then never drops what the server kept.
+ */
+const MAX_STORED_BYTES = 480 * 1024;
 
 const CONVEX_ARRAY_MAX = 8192;
 
@@ -126,7 +132,15 @@ const storable = (sets: ReadonlyArray<LocalLyricSet>) => {
     }
   }
 
-  return { kept: sets.filter((set) => kept.has(set)), dropped: sets.length - kept.size };
+  // The set a client shows goes first, so the core's fitting, which keeps leading sets, keeps it
+  // whatever else is there; the others stay in the order their files and tags gave them.
+  const ordered = sets.filter((set) => kept.has(set));
+  const main = shownMain(ordered);
+
+  return {
+    kept: main === undefined ? ordered : [main, ...ordered.filter((set) => set !== main)],
+    dropped: sets.length - kept.size,
+  };
 };
 
 /**
