@@ -438,20 +438,28 @@ command that is new in the checkout fails there.
 
 ### iOS simulator
 
-The movies iOS app (`apps/mobile-movies`) runs on a simulator on `darwin` (set `MAC_HOST` for
-another Mac). It signs in to the core through the media server's sign-in boundary, so `ios up`
-refuses a side whose image still runs old movies' own Convex (`one-port`, `two-port`): run an iOS
-lane against such an image from a checkout of that image's revision, with its own verify skill.
-Old music's
-iOS app is not driven here; the `ios` commands sign in to movies only. Its JavaScript comes
-from a Metro on this machine. For the before side, Metro serves a main checkout that `ios up`
+The movies iOS app (`apps/mobile-movies`), or with `--app music` the music iOS app
+(`apps/mobile-music`), runs on a simulator on `darwin` (set `MAC_HOST` for another Mac). Both sign
+in to the core through the media server's sign-in boundary, so `ios up` refuses a side whose image
+still runs old movies' own Convex (`one-port`, `two-port`): run an iOS lane against such an image
+from a checkout of that image's revision, with its own verify skill. The music app needs an image
+with the music client (`music_core`). Old music's iOS app is not driven here; build it with
+`legacy/music/scripts/ios-mac.sh build-sim <udid>`. The app's JavaScript comes from a Metro on this
+machine. For the before side, Metro serves a main checkout that `ios up`
 makes with `git worktree` under the side's state. The simulator reaches the side as
 `localhost:<port>` through ssh forwards for [media]'s one port and Metro, so every address
 matches the side's public URLs.
 
 ```sh
-$S ios up [--side S] [--device "iPhone 17 Pro"] [--light] [--source DIR]
+$S ios up [--side S] [--app movies|music] [--device "iPhone 17 Pro"] [--udid ID] [--light] [--source DIR] [--no-sign-in]
 ```
+
+`--udid ID` installs and runs the app on a simulator someone else keeps, such as one T3's device
+tools opened, instead of making one; `ios down` then leaves that simulator alone. `--no-sign-in`
+stops once the dev client is installed and Metro runs, and prints the dev client's link to open,
+for a lane whose driver opens the app and signs in itself, such as agent-device through T3's device
+tools (`open dev.lmdevv.music --url <link>`). Both apps share one dev client cache per native
+inputs; the music app's include its local native modules (`modules/`).
 
 `--source DIR` has Metro serve another checkout's JavaScript, such as a PR's worktree, against
 this side's server, so one stack verifies several app branches with this checkout's tooling.
@@ -463,14 +471,16 @@ less than 3 GB free, or 10 GB when it must build the dev client. It does these s
 2. It starts Metro.
 3. It creates and boots the simulator `media-verify-<run>-<side>`, in dark mode unless `--light`.
 4. It installs the dev client. The build is named for the app's native inputs (`app.json`, its
-   `package.json`, the lockfile, and the asset names) and lives at `~/movies-ios/dev-client-<hash>`
+   `package.json`, the lockfile, the asset names, and the music app's `modules/`) and lives at
+   `~/movies-ios/dev-client-<hash>`
    on the Mac, so every run and worktree with the same inputs installs the same build. When none
    matches, it syncs this checkout to `~/movies-ios/verify-<run>`, runs `expo prebuild` there,
    and builds, which takes several minutes.
 5. It turns off the dev client's own UI (its first-launch introduction, its floating button, and
    the gestures that open its menu), so screenshots show only the app.
 6. It opens the app on Metro, connects to the side's server, and signs in as Lucía with her
-   username and password. The app has no profiles (D12): switching person is signing out, then
+   username and password (the music app: Connect to your server, the address, then Username,
+   Password, and Sign in). The app has no profiles (D12): switching person is signing out, then
    `ios sign-in --as <person>`. A new simulator's first sign-in brings up iOS's `Save Password?`
    sheet over the app; `ios up` and `ios sign-in` answer `Not Now`.
 
