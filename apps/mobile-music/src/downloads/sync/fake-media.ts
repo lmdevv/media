@@ -21,7 +21,6 @@ interface Seen {
   readonly url: string;
 }
 
-/** A media service on a free local port, for the download tests. */
 export class FakeMedia {
   readonly #files = new Map<string, Served>();
   readonly #server: Server;

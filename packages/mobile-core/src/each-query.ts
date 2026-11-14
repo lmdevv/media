@@ -7,7 +7,6 @@ import { useState, useSyncExternalStore } from "react";
 
 import type { Watch } from "./pages";
 
-/** A core query that can be followed, such as `platform.core.libraries.get`. */
 export interface WatchedQuery<Args, A> {
   readonly watch: (args: Args) => Watch<A>;
 }

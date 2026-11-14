@@ -3,13 +3,11 @@ import type { QueryState } from "@media/sdk/react";
 import { usePlatform } from "@media/sdk/react";
 import { useState, useSyncExternalStore } from "react";
 
-/** A followed platform query, as a query method's `watch` returns it. */
 interface Watch<Result> {
   readonly subscribe: (onChange: () => void) => () => void;
   readonly getSnapshot: () => QueryState<Result>;
 }
 
-/** A platform query method with arguments `Args`, such as `platform.music.albums.get`. */
 export interface Query<Args, Result> {
   (args: Args): Promise<Result>;
   readonly watch: (args: Args) => Watch<Result>;
@@ -51,8 +49,7 @@ const asError = (cause: unknown): Error =>
 
 /**
  * Follows a platform query: its result, or `undefined` while it loads. Pass `"skip"` to wait. A
- * failure throws to the route's error boundary, as old music's reads did, after the SDK's own
- * retries of network failures.
+ * failure throws to the route's error boundary after the SDK's own retries of network failures.
  */
 export const useRead = <Args, Result>(
   query: Query<Args, Result>,
@@ -80,8 +77,6 @@ export const useReadSettled = <Args, Result>(
   return state.status === "success" ? state.data : undefined;
 };
 
-/** The core's music commands, as Promise methods. */
 export const useMusic = (): PlatformSdk["music"] => usePlatform().music;
 
-/** The core's own commands, as Promise methods. */
 export const useCore = (): PlatformSdk["core"] => usePlatform().core;

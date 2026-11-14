@@ -25,7 +25,6 @@ import { useFlash } from "@/components/settings/use-flash";
 import { sharedWithEveryone, useLibrary, useLibraryGrants } from "./data";
 import type { LibraryGrant } from "./data";
 
-/** A library's settings page, for someone who manages it. */
 export function LibraryPage({ id }: { readonly id: LibraryId | null }) {
   const library = useLibrary(id);
 
@@ -52,7 +51,6 @@ export function LibraryPage({ id }: { readonly id: LibraryId | null }) {
   return <LibraryEditor library={library} />;
 }
 
-/** The people a library is shared with by name, as its access row reads them. */
 const peopleOf = (grants: ReadonlyArray<LibraryGrant>): ReadonlyArray<string> =>
   grants.flatMap((grant) => (grant.principal.kind === "user" ? [grant.principal.username] : []));
 

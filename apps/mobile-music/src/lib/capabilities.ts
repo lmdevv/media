@@ -1,8 +1,8 @@
 import type { Me } from "./models";
 
 /**
- * What the signed-in person may do, as old music's capabilities named it, from the core's role
- * and the scopes this session holds (ADR 0005):
+ * What the signed-in person may do, from the core's role and the scopes this session holds
+ * (ADR 0005):
  *
  * - `keys`: create and revoke API keys for the CLI and agents. Not guests.
  * - `share`: see who else is on the server and share playlists with them. Not guests.
@@ -11,7 +11,6 @@ import type { Me } from "./models";
  */
 export type Capability = "keys" | "share" | "admin" | "owner";
 
-/** Whether `me` may do what `capability` names. */
 const RULES = {
   keys: (me) => me.role !== "guest" && me.scopes.includes("account"),
   share: (me) => me.role !== "guest" && me.scopes.includes("music:edit"),
@@ -22,7 +21,6 @@ const RULES = {
 export const can = (me: Pick<Me, "role" | "scopes">, capability: Capability): boolean =>
   RULES[capability](me);
 
-/** What a person may do with a playlist, as the core answers it. */
 type PlaylistAccess = "owner" | "collaborator" | "viewer";
 
 /** Whether someone may add, remove, and reorder a playlist's songs: its owner or a collaborator. */
@@ -39,10 +37,8 @@ const ROLE_LABELS = {
   guest: "Guest",
 } as const satisfies Record<Me["role"], string>;
 
-/** A role as people read it: `Owner`, `Admin`, `Member`, or `Guest`. */
 export const roleLabel = (role: Me["role"]): string => ROLE_LABELS[role];
 
-/** The line a refused capability shows, as old music's `forbiddenMessage` said it. */
 const FORBIDDEN_MESSAGES = {
   keys: "Guests can't use API keys",
   share: "Guests can't share with other people",

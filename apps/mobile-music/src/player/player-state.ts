@@ -11,7 +11,6 @@ export type PlayerStatus = "idle" | "loading" | "playing" | "paused" | "bufferin
 /** A song as the player plays it: the core's song, or this phone's copy of it offline. */
 export type PlayerTrack = Track;
 
-/** The song at the queue's current entry. */
 export interface NowPlaying {
   readonly itemId: QueueItemId;
   readonly trackId: TrackId;
@@ -90,7 +89,6 @@ export const nowPlayingOf = (
 export const sameSong = (a: NowPlaying | null, b: NowPlaying | null): boolean =>
   JSON.stringify(a) === JSON.stringify(b);
 
-/** A queue entry as the queue shows it; `art` as for `nowPlayingOf`. */
 export const queueItemOf = (
   entry: QueueEntry<PlayerTrack>,
   art: (track: PlayerTrack) => string | null,

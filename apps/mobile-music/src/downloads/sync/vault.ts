@@ -9,7 +9,6 @@ import type {
 } from "./models";
 import type { NewLyrics, StoredArt, StoredCopy, StoredPin, VaultView } from "./plan";
 
-/** Everything the vault holds: the pins this phone keeps, and what it holds for them. */
 export type VaultRows = VaultView;
 
 /** One change to the vault's rows, applied in one transaction. */

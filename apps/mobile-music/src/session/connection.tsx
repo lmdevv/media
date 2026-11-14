@@ -128,7 +128,6 @@ export const useConnectionControls = (): ConnectionControls => {
   return controls;
 };
 
-/** The connected server and the ways to switch, leave, or reopen it. */
 export interface Connection extends ServerConnection {
   readonly connect: (connection: ServerConnection) => void;
   readonly disconnect: () => void;

@@ -13,9 +13,8 @@ interface OfflinePlay {
 
 /**
  * This phone's own queue while the server cannot be reached: the downloaded songs it plays, in
- * order, with the same shuffle, repeat, and entry playing as the core's queue keeps. Old music
- * played its own copy of the session this way offline and handed it back once the server
- * answered (D62).
+ * order, with the same shuffle, repeat, and entry playing as the core's queue keeps. It goes back
+ * to the server once the server answers (D62).
  */
 export interface LocalQueue<T extends Track> {
   readonly state: QueueState<T>;
@@ -85,13 +84,11 @@ const withEntries = <T extends Track>(
   changed: true,
 });
 
-/** New entries, and the number in the next entry id made here after them. */
 interface Made<T extends Track> {
   readonly entries: ReadonlyArray<QueueEntry<T>>;
   readonly nextItem: number;
 }
 
-/** Makes entries for `tracks` with ids this phone has not used yet. */
 const made = <T extends Track>(queue: LocalQueue<T>, tracks: ReadonlyArray<T>): Made<T> => ({
   entries: tracks.map((track, offset) =>
     entryOf(track, `local-${String(queue.nextItem + offset)}`),
@@ -99,7 +96,6 @@ const made = <T extends Track>(queue: LocalQueue<T>, tracks: ReadonlyArray<T>): 
   nextItem: queue.nextItem + tracks.length,
 });
 
-/** Replaces the queue with `tracks` and plays the one at `index`, the first by default. */
 export const playLocal = <T extends Track>(
   queue: LocalQueue<T>,
   tracks: ReadonlyArray<T>,
@@ -115,7 +111,6 @@ export const playLocal = <T extends Track>(
   };
 };
 
-/** Makes `itemId` the entry playing; an entry not queued changes nothing. */
 export const jumpLocal = <T extends Track>(queue: LocalQueue<T>, itemId: string): LocalQueue<T> =>
   indexOf(queue, itemId) === -1 ? queue : withEntries(queue, queue.state.entries, itemId);
 
@@ -242,13 +237,11 @@ export const shuffleLocal = <T extends Track>(
   };
 };
 
-/** Sets repeat to off, all, or one. */
 export const repeatLocal = <T extends Track>(
   queue: LocalQueue<T>,
   mode: RepeatMode,
 ): LocalQueue<T> => ({ ...queue, state: { ...queue.state, repeat: mode }, changed: true });
 
-/** Keeps a play of `trackId` started at `playedAt` for the server's history. */
 export const recordPlay = <T extends Track>(
   queue: LocalQueue<T>,
   trackId: string,
@@ -261,7 +254,6 @@ export interface HandBack {
   readonly plays: ReadonlyArray<OfflinePlay>;
 }
 
-/** What this phone's queue hands back to the server once it answers again. */
 export const handBack = <T extends Track>(queue: LocalQueue<T>): HandBack => {
   const index = Math.max(0, indexOf(queue, queue.state.current));
 

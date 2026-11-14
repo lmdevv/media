@@ -4,7 +4,6 @@ const MIN_PASSWORD_LENGTH = 8;
 
 const MAX_PASSWORD_LENGTH = 256;
 
-/** How many code points `text` holds, as the core counts a password's length. */
 const codePoints = (text: string): number => {
   let count = 0;
 
@@ -33,6 +32,5 @@ export const passwordProblem = (password: string): string | null => {
     : null;
 };
 
-/** The line under an account form for a refusal; a taken username says so. */
 export const accountFailureLine = (cause: unknown): string =>
   isFailure(cause, "Conflict") ? "That username is taken. Pick another." : describeFailure(cause);

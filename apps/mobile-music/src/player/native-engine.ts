@@ -82,7 +82,6 @@ export type TimelineMark =
       readonly at: number;
     };
 
-/** Where the engine reports song changes, and the clock it stamps them with. */
 export interface Timeline {
   readonly mark: (mark: TimelineMark) => void;
   readonly now: () => number;

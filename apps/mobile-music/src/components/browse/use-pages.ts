@@ -4,7 +4,6 @@ import type { Paged, PagedQuery, PageOpts } from "@media/mobile-core/pages";
 import type { AlbumCard, ArtistCard, Track } from "@/lib/models";
 import { useMusic } from "@/lib/platform";
 
-/** Where a list's pages stand. */
 type ChainStatus =
   /** A page is still loading; the items before it are shown. */
   | { readonly kind: "loading" }
@@ -33,7 +32,6 @@ const noMore = (): void => {};
 
 const pageArgs = (paginationOpts: PageOpts) => ({ paginationOpts });
 
-/** A list's pages as the screens read them. A failed page throws to the route's error screen. */
 const pagesOf = <Item>(paged: Paged<Item>): Pages<Item> => {
   if (paged.status === "failed") throw new Error(paged.message);
 

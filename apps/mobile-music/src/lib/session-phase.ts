@@ -63,9 +63,7 @@ export interface PhaseInputs {
   readonly launch: "pending" | "done" | "failed";
   /** A sign-in is between its session opening and its device enrolled. */
   readonly signingIn: boolean;
-  /** Whether the server has an owner, as `core.server.info` answers. */
   readonly hasOwner: boolean | undefined;
-  /** Who is signed in, or why the core would not say. */
   readonly me: Me | Error | undefined;
   /** Whether `me`'s failure is the core refusing the session, which the SDK settles itself. */
   readonly refused: boolean;
@@ -138,7 +136,6 @@ export const settle = (next: SessionPhase, shown: SettledPhase | null): SettledP
   return (isSilent(next) && answered) || offline ? shown : next;
 };
 
-/** Whether two settled phases show the same screens: the same kind, and the same person. */
 export const sameScreens = (next: SettledPhase, shown: SettledPhase | null): boolean => {
   if (shown === null || next.kind !== shown.kind) return false;
 

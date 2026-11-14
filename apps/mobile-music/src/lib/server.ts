@@ -2,7 +2,6 @@ import { normalizeServerUrl } from "@media/mobile-core/server";
 
 const SCHEME = /^[a-z][a-z\d+.-]*:\/\//iu;
 
-/** A server's address as people read it: without its scheme, such as `cinema.home`. */
 export const displayHost = (url: string): string => url.replace(SCHEME, "");
 
 /**

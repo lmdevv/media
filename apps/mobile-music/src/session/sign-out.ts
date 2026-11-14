@@ -6,8 +6,8 @@ import { useServer } from "@/session/connection";
 
 /**
  * Returns the function that signs this app out on the server and here, then deletes this server's
- * downloads on this iPhone, as old music did. Only this app's session ends: the phone keeps its
- * grant for its other apps, and this app asks for the password next (D59).
+ * downloads on this iPhone. Only this app's session ends: the phone keeps its grant for its other
+ * apps, and this app asks for the password next (D59).
  */
 export const useSignOut = (): (() => Promise<void>) => {
   const platform = usePlatform();

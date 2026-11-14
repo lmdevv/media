@@ -10,7 +10,6 @@ import { useConnection, useConnectionControls } from "@/session/connection";
 /** How long Try again shows it is trying before the server counts as silent again (G05). */
 const TRYING_MS = 8000;
 
-/** Whether the last Try again is still waiting on the server. */
 const useTrying = (attempt: number): boolean => {
   const [trying, setTrying] = useState(attempt > 0);
 

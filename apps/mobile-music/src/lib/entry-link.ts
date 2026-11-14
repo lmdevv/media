@@ -1,8 +1,8 @@
 /**
  * Invite and password reset links. The account client's links are `<server>/invite#<code>` and
  * `<server>/reset#<code>`, the code in the fragment so no request carries it (ADR 0020); the
- * app's own deep links are `music://invite/<code>?server=<server>` and the same for `reset`. Old
- * path links, `<server>/invite/<code>`, are refused as the account client refuses them. Parsed
+ * app's own deep links are `music://invite/<code>?server=<server>` and the same for `reset`. Path
+ * links, `<server>/invite/<code>`, are refused as the account client refuses them. Parsed
  * with patterns rather than `URL`, whose query support React Native only partly implements.
  */
 import { normalizeServerUrl } from "@media/mobile-core/server";
@@ -12,7 +12,6 @@ import { sameServer } from "./server";
 /** Which entry screen a link opens. */
 type EntryKind = "invite" | "reset";
 
-/** An invite or reset code, and the server address the link names, if any. */
 export interface EntryLink {
   readonly kind: EntryKind;
   readonly secret: string;
@@ -89,6 +88,5 @@ const SCREENS = {
 export const entryPath = (link: EntryLink): string =>
   `${SCREENS[link.kind]}${encodeURIComponent(link.secret)}`;
 
-/** Whether the link belongs to the server at `mediaUrl`: it names that server, or none. */
 export const linkIsFor = (link: EntryLink, mediaUrl: string): boolean =>
   link.server === null || sameServer(link.server, mediaUrl);

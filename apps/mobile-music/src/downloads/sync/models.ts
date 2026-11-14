@@ -1,8 +1,8 @@
 /**
- * What this phone keeps about its downloads, as schemas its vault rows decode through. Old music
- * kept a download's songs on its server (`downloads.manifest`); the core keeps only the songs a
- * device holds (`core.downloads.*`), so the albums, playlists, and songs someone downloads are
- * kept here as pins, and each pin's songs come from the core's album and playlist reads.
+ * What this phone keeps about its downloads, as schemas its vault rows decode through. The core
+ * keeps only the songs a device holds (`core.downloads.*`), so the albums, playlists, and songs
+ * someone downloads are kept here as pins, and each pin's songs come from the core's album and
+ * playlist reads.
  */
 import { MusicStreamProfile } from "@media/contracts/music-playback";
 import { Schema } from "effect";
@@ -57,7 +57,6 @@ export const OfflineTrack = Schema.Struct({
 
 export interface OfflineTrack extends Schema.Schema.Type<typeof OfflineTrack> {}
 
-/** What someone downloads: a song, an album, or a playlist. */
 export const DownloadTarget = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("track"), id: TrackId }),
   Schema.Struct({ kind: Schema.Literal("album"), id: AlbumId }),

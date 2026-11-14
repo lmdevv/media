@@ -45,8 +45,9 @@ const sweepWiped = (downloads: Directory): void => {
 };
 
 /**
- * Opens the vault of `account` on the server at `origin` (the media server's address), creating it on first use. The
- * downloads directory is marked excluded from backup each time, which is idempotent.
+ * Opens the vault of `account` on the server at `origin` (the media server's address), creating
+ * it on first use. The downloads directory is marked excluded from backup each time, which is
+ * idempotent.
  */
 export const openVault = async (origin: string, account: UserId): Promise<ExpoVault> => {
   const downloads = downloadsDirectory();

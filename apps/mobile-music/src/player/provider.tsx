@@ -68,10 +68,8 @@ import type { NowPlaying, PlayerStatus, PlayerView } from "./player-state";
 
 const POSITION_INTERVAL_MS = 250;
 
-/** Queue entries asked for per page; the core caps a page to what one call may read. */
 const QUEUE_PAGE = 200;
 
-/** How long the queue's pages wait before they are followed again after one failed. */
 const QUEUE_RESTART_MS = 250;
 
 /**
@@ -269,7 +267,6 @@ const useServerQueue = (platform: PlatformSdk): QueueState<Track> | null => {
   }, [data, list]);
 };
 
-/** This phone's own queue, offline, which tells its listener after every change. */
 class LocalStore {
   #queue: LocalQueue<Track> = seedLocal<Track>(null, () => null);
   readonly #listeners = new Set<() => void>();
@@ -284,7 +281,6 @@ class LocalStore {
     };
   };
 
-  /** Replaces the queue with what `change` makes of it. */
   update(change: (queue: LocalQueue<Track>) => LocalQueue<Track>): LocalQueue<Track> {
     this.#queue = change(this.#queue);
 
@@ -297,7 +293,7 @@ class LocalStore {
 /**
  * This phone's quality: the core's tier for this device, or the last one chosen here before the
  * core keeps settings for it. A phone's `auto` plays `high` (AAC 320 kbps): lossless originals are
- * a choice in settings, not a surprise on a cellular plan, as old music's phone started.
+ * a choice in settings, not a surprise on a cellular plan.
  */
 const phoneQuality = (setting: StreamQualitySetting): StreamQuality => {
   if (setting === "low") return "data-saver";
@@ -363,10 +359,6 @@ const withDeadline = async <A,>(call: Promise<A>, ms: number): Promise<Option.Op
   }
 };
 
-/**
- * Logs each song change to Metro's console in development: when the song before reached its end
- * and when the next one started playing, for the gapless timeline.
- */
 const logTimeline = (mark: TimelineMark): void => {
   if (__DEV__) console.info(`[gapless] ${JSON.stringify(mark)}`);
 };

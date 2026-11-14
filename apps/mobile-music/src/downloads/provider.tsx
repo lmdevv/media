@@ -55,7 +55,6 @@ import type {
   TrackDownloadState,
 } from "./sync/sync";
 
-/** Rows asked for per page of the core's download list and a download's songs. */
 const PAGE_ROWS = 200;
 
 /**
@@ -168,7 +167,6 @@ const coreFor = (platform: PlatformSdk, mediaUrl: string): DownloadsCore => ({
 
 type KeptRow = Awaited<ReturnType<PlatformSdk["core"]["downloads"]["list"]>>["page"][number];
 
-/** The songs the core keeps on this device, by song, as `core.downloads.list` lists them. */
 const keptOf = (rows: ReadonlyArray<KeptRow>): ReadonlyMap<TrackId, KeptRow> => {
   const kept = new Map<TrackId, KeptRow>();
 
@@ -274,9 +272,8 @@ const decodeLyrics = Schema.decodeUnknownOption(OfflineLyrics);
 const makeRevision = Schema.decodeSync(LyricsRevision);
 
 /**
- * Looks up the lyrics of kept songs that keep none yet, one song after another, and offers them to
- * the sync. Lyrics found keep their revision, a digest of their JSON. A song the core no longer
- * answers for keeps none.
+ * Looks up the lyrics of kept songs that keep none yet, all at once, and offers them to the sync.
+ * Lyrics found keep their revision, a digest of their JSON.
  */
 function LyricsWatcher({
   sync,

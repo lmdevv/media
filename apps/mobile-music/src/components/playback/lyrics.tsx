@@ -88,7 +88,6 @@ export function LyricsPanel({
 
 type LyricSet = Extract<TrackLyrics, { readonly status: "plain" }>["main"];
 
-/** A lyric set's words as plain text: its text, or its timed lines one under another. */
 const plainText = (set: LyricSet): string =>
   set.body.type === "plain" ? set.body.text : set.body.lines.map((line) => line.text).join("\n");
 

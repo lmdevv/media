@@ -22,7 +22,6 @@ import { useAction } from "@/components/settings/use-action";
 
 import { sharedWithEveryone, useLibrary, useLibraryGrants, usePeople } from "./data";
 
-/** Who can listen to a library, for someone who manages it. */
 export function LibraryAccessPage({ me, id }: { readonly me: Me; readonly id: LibraryId | null }) {
   const library = useLibrary(id);
 
@@ -57,8 +56,8 @@ const LEVEL_LINES = {
 
 /**
  * The people a library is shared with by name, each removable but the ones who manage it, and
- * everyone else in the household to add. A person added can listen (`view`), as old music's
- * library access let them; the core keeps a library private to its maker until shared (ADR 0024).
+ * everyone else in the household to add. A person added can listen (`view`); the core keeps a
+ * library private to its maker until shared (ADR 0024).
  */
 function AccessList({ me, library }: { readonly me: Me; readonly library: LibraryView }) {
   const core = useCore();

@@ -6,7 +6,6 @@ import { displayHost } from "./server";
  */
 export const inviteLink = (server: string, code: string): string => `${server}/invite#${code}`;
 
-/** The account client's one-time link that lets someone set a new password. */
 export const resetLink = (server: string, code: string): string => `${server}/reset#${code}`;
 
 /** The server's address as people read it, without the scheme: `music.example`. */

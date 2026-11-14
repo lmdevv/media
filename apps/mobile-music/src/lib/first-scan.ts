@@ -1,9 +1,7 @@
 import type { PlatformSdk } from "@media/sdk/promise";
 
-/** A library as `core.libraries.get` shows it, with its latest scan. */
 export type LibraryView = Awaited<ReturnType<PlatformSdk["core"]["libraries"]["get"]>>;
 
-/** A library's id. */
 export type LibraryId = LibraryView["libraryId"];
 
 /** What the scan screens show. */

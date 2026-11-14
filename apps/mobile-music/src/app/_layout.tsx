@@ -125,7 +125,6 @@ function ConnectedApp() {
 function App() {
   const { connection, joining, attempt } = useConnectionControls();
 
-  // An app joining the server another [media] app on the phone signed in to keeps the splash.
   if (joining) return <View className="flex-1 bg-canvas" />;
 
   if (connection === null) {

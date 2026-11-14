@@ -151,7 +151,6 @@ const sameRevision = (wanted: string, held: string): boolean =>
 /** A download's song, album, or playlist as one string, for sets and maps. */
 export const targetKey = (target: DownloadTarget): string => `${target.kind}:${target.id}`;
 
-/** The key this phone keeps a download under: its target's kind and id. */
 export const pinIdOf = (target: DownloadTarget): DownloadPinId =>
   DownloadPinId.make(targetKey(target));
 

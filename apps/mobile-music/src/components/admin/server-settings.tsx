@@ -43,10 +43,6 @@ function SettingSwitch({
   );
 }
 
-/**
- * The server-wide settings an admin changes: looking up lyrics on LRCLIB (`music.lyrics.status`
- * and `music.lyrics.configure`). Old music's Jam guest accounts come back with group sessions.
- */
 export function ServerSettingsForm() {
   const { mediaUrl } = useConnection();
   const music = useMusic();

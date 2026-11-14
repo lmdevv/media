@@ -36,7 +36,6 @@ type ApiKey = RowOf<ReturnType<typeof useCore>["auth"]["apiKeys"]["list"]>;
 const keyLine = (key: ApiKey, now: number): string =>
   key.lastUsedAt === null ? "Never used" : `Used ${ago(key.lastUsedAt, now)}`;
 
-/** Keys asked for per page; a person keeps few. */
 const KEY_ROWS = 100;
 
 /** Every key you made that still works or ran out, newest first; undefined while they load. */
@@ -123,7 +122,6 @@ export function NewKey() {
     if (isBlank(name)) return;
 
     action.run(async () => {
-      // A key has the same access as you: every scope this session holds.
       const { key } = await core.auth.apiKeys.create({ name: name.trim(), scopes: [...me.scopes] });
 
       holdSecret(key);

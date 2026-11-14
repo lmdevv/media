@@ -10,21 +10,23 @@ import type { Reach, ServerReach } from "@/lib/server-reach";
 import type { SettledPhase } from "@/lib/session-phase";
 import { useServer } from "@/session/connection";
 
-/** How often the server is asked whether it answers while it does. */
 const ONLINE_PROBE_MS = 10_000;
 
 /** How often it is asked while it does not, so the app notices it back soon. */
 const LOST_PROBE_MS = 3000;
 
-/** Probes in a row that must fail before the app calls the server lost. */
 const LOST_AFTER = 2;
 
 interface ReachState extends Reach {
-  /** Asks the server now, as when a command waited too long for an answer. */
   readonly probe: () => void;
 }
 
 const ServerReachContext = createContext<ReachState | null>(null);
+
+interface Lost {
+  readonly lost: boolean;
+  readonly probe: () => void;
+}
 
 /**
  * Whether the media server answers its health check, asked on a timer while the app is on screen
@@ -32,12 +34,6 @@ const ServerReachContext = createContext<ReachState | null>(null);
  * how it stands; on an install the media server and the core run in one place, so the media
  * server answering stands for both.
  */
-interface Lost {
-  /** The last probes in a row failed. */
-  readonly lost: boolean;
-  readonly probe: () => void;
-}
-
 const useLost = (mediaUrl: string): Lost => {
   const [failures, setFailures] = useState(0);
   const [asked, setAsked] = useState(0);

@@ -13,10 +13,8 @@ import type {
 } from "./models";
 import { useMusic, useReadSettled } from "./platform";
 
-/** Rows a page asks for; the core caps a page to what one call may read. */
 const PAGE_ROWS = 100;
 
-/** Every row once all pages arrived, a failure as an `Error`, or undefined while they load. */
 const wholeOf = <Row>(paged: Paged<Row>): ReadonlyArray<Row> | Error | undefined => {
   if (paged.status === "failed") return new Error(paged.message);
 
@@ -27,7 +25,6 @@ const wholeOf = <Row>(paged: Paged<Row>): ReadonlyArray<Row> | Error | undefined
   return paged.next.kind === "done" ? paged.rows : undefined;
 };
 
-/** Joins a record and its rows: a failure of either wins, then loading, then both. */
 const joined = <A, Row, B>(
   record: A | Error | undefined,
   rows: ReadonlyArray<Row> | Error | undefined,
@@ -40,15 +37,14 @@ const joined = <A, Row, B>(
   return record === undefined || rows === undefined ? undefined : join(record, rows);
 };
 
-/** Follows every page of a paginated music query for one parent. */
 const useRows = <Args, Row>(
   query: PagedQuery<Args, Row>,
   argsAt: ((paginationOpts: PageOpts) => Args) | "skip",
 ): ReadonlyArray<Row> | Error | undefined => wholeOf(useAllPages(query, argsAt, PAGE_ROWS));
 
 /**
- * An album and every one of its songs, as old music's `albums.get` answered; an `Error` for a
- * failure, undefined while it loads. Pass `"skip"` to wait.
+ * An album and every one of its songs; an `Error` for a failure, undefined while it loads. Pass
+ * `"skip"` to wait.
  */
 export const useAlbumDetail = (albumId: AlbumId | "skip"): AlbumDetail | Error | undefined => {
   const music = useMusic();
@@ -65,7 +61,7 @@ export const useAlbumDetail = (albumId: AlbumId | "skip"): AlbumDetail | Error |
   );
 };
 
-/** An artist with every album and their top songs, as old music's `artists.get` answered. */
+/** An artist with every album and their top songs. */
 export const useArtistDetail = (artistId: ArtistId): ArtistDetail | Error | undefined => {
   const music = useMusic();
   const artist = useReadSettled(music.artists.get, { artistId });
@@ -83,7 +79,7 @@ export const useArtistDetail = (artistId: ArtistId): ArtistDetail | Error | unde
   );
 };
 
-/** A playlist with every entry, as old music's `playlists.get` answered. */
+/** A playlist with every entry. */
 export const usePlaylistDetail = (playlistId: PlaylistId): PlaylistDetail | Error | undefined => {
   const music = useMusic();
   const playlist = useReadSettled(music.playlists.get, { playlistId });
@@ -100,8 +96,8 @@ export const usePlaylistDetail = (playlistId: PlaylistId): PlaylistDetail | Erro
 };
 
 /**
- * Your latest plays, newest first, up to `count`, as old music's `history.list` read them with a
- * limit; undefined while they load. A failed page throws to the route's error screen.
+ * Your latest plays, newest first, up to `count`; undefined while they load. A failed page throws
+ * to the route's error screen.
  */
 export const useHistory = (count: number): ReadonlyArray<HistoryEntry> | undefined => {
   const music = useMusic();

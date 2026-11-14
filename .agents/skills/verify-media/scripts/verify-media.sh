@@ -903,8 +903,7 @@ ios_app() {
 # there, `expo prebuild` runs only when the native inputs changed, and xcodebuild builds into
 # ~/movies-ios/dd-verify-<run>. The app then moves to ~/movies-ios/dev-client-<hash>, named for the
 # native inputs, and the derived data goes, so every run and worktree with the same inputs installs
-# one build. JavaScript always comes from Metro. The music app's inputs include its local native
-# modules (`modules/`).
+# one build. JavaScript always comes from Metro.
 native_inputs='cat app.json package.json ../../pnpm-lock.yaml; if [ -d modules ]; then find assets modules -type f | sort; else find assets -type f | sort; fi'
 
 native_hash() {
@@ -916,7 +915,8 @@ ios_build() {
   name="$(ios_app)"
   local app="$remote/apps/mobile-$name"
   ssh "$mac" "mkdir -p $remote"
-  rsync -az --delete --exclude node_modules --exclude "/apps/mobile-$name/ios" --exclude .git --exclude dist \
+  # Both apps' prebuilt native projects stay: a build of one app must not delete the other's.
+  rsync -az --delete --exclude node_modules --exclude "/apps/mobile-*/ios" --exclude .git --exclude dist \
     --exclude .expo --exclude .turbo --exclude /captures --exclude .repos "$root/" "$mac:$remote/"
   # No .git on the Mac, so the root prepare script (lefthook) can't run there.
   on_mac "cd $remote && pnpm install --frozen-lockfile --ignore-scripts >/dev/null"
@@ -1101,8 +1101,7 @@ ios_sign_in() {
   die "the app did not reach Home after signing in; run \`ios describe --side $side\`"
 }
 
-# The music app's sign-in: Connect to your server, the address, then Username, Password, and
-# Sign in. An app on a phone whose other [media] app signed in opens signed in without asking.
+# On a phone whose other [media] app signed in, the music app opens signed in without asking.
 ios_sign_in_music() {
   local who="$1" tree
   tree="$(ios_tree)"

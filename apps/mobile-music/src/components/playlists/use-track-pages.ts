@@ -8,7 +8,6 @@ const PAGE_SIZE = 200;
 
 const SONG_LIMIT = 5000;
 
-/** The queries that page through songs: your liked songs, or every song you may play. */
 type TrackPageName = "likes" | "tracks";
 
 /** The songs loaded so far, whether that is all of them, and how to ask for more. */

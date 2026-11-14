@@ -5,14 +5,13 @@ import { asAlbumId, asPlaylistId, asTrackId } from "@/lib/models";
 import { useMusic } from "@/lib/platform";
 import { useServer } from "@/session/connection";
 
-/** What a link points at: an album, a playlist, or a song, by its ID. */
 export type LinkKind = "album" | "playlist" | "track";
 
 /**
  * Copies the link to an album, playlist, or song on the music web client beside the media server,
  * where installs serve it (`<server>/music`). The record it names is read first, which checks that
- * you can open it, as old music's `links.get` did; a song opens its album with the song
- * highlighted. Rejects with the core's failure.
+ * you can open it; a song opens its album with the song highlighted. Rejects with the core's
+ * failure.
  */
 export const useCopyLink = (): ((kind: LinkKind, id: string) => Promise<void>) => {
   const music = useMusic();

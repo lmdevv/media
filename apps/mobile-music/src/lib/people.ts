@@ -10,7 +10,6 @@ import type { Callout } from "./callout";
 import { countOf } from "./format";
 import { until } from "./when";
 
-/** What people read a person as: the name they go by, else their username. */
 export const personName = (person: {
   readonly displayName: string | null;
   readonly username: string;
@@ -24,13 +23,11 @@ export const accountLine = (me: { readonly role: Role; readonly username: string
 export const personLine = (person: HouseholdUser, meId: string): string =>
   [ROLE_LABELS[person.role], ...(person.userId === meId ? ["You"] : [])].join(" · ");
 
-/** Invites that can still be used at `now`, as the core lists them. */
 export const openInvites = (
   invites: ReadonlyArray<PendingInvite>,
   now: number,
 ): ReadonlyArray<PendingInvite> => invites.filter((invite) => invite.expiresAt > now);
 
-/** Who made an invite, as its row's title: `From aiko`. */
 export const inviteTitle = (invite: Pick<PendingInvite, "invitedBy">): string =>
   `From ${invite.invitedBy}`;
 
@@ -67,7 +64,6 @@ export const ROLE_ACCESS: Readonly<Record<AssignableRole, Callout>> = {
 /** The roles to offer on an invite or a role change, in Paper's order. */
 export const ROLE_OPTIONS: ReadonlyArray<AssignableRole> = ["member", "admin"];
 
-/** A person's role when it is one a role change can give; null for the owner and guests. */
 export const assignedRole = (role: Role): AssignableRole | null =>
   role === "member" || role === "admin" ? role : null;
 

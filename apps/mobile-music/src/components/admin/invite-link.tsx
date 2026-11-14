@@ -47,8 +47,7 @@ const decodeNew = Schema.decodeUnknownOption(NewInvite);
 
 /**
  * A new invite's link, once: the form left it in the secret slot, which this page empties on its
- * first render, so coming back never shows it again. Old music kept every invite's link; the core
- * keeps only a hash of its code.
+ * first render, so coming back never shows it again. The core keeps only a hash of its code.
  */
 function NewInviteLink() {
   const link = useHeldSecret();
@@ -97,7 +96,6 @@ function NewInviteLink() {
   );
 }
 
-/** An open invite: who made it, what it gives, when it stops working, and Revoke. */
 function OpenInvite({ id }: { readonly id: InviteId | null }) {
   const invite = useInvite(id);
   const revoke = useRevokeInvite();
@@ -156,7 +154,6 @@ function OpenInvite({ id }: { readonly id: InviteId | null }) {
   );
 }
 
-/** An invite's page: a new one's link, shown once, or an open one to revoke. */
 export function InviteLink({ id }: { readonly id: InviteId | null }) {
   const { id: raw } = useLocalSearchParams<{ id?: string }>();
 

@@ -73,7 +73,6 @@ export interface SignIns {
   readonly onLaunch: () => Promise<SignIn.LaunchSignIn>;
 }
 
-/** The sign-ins for the connected server. */
 export const useSignIn = (): SignIns => {
   const platform = usePlatform();
   const { mediaUrl } = useServer();

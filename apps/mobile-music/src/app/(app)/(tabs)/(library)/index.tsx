@@ -28,7 +28,6 @@ import { DEVICE_FAMILY } from "@/lib/this-device";
 import { useServerReach } from "@/session/server-reach";
 import { useMaybeMe } from "@/session/me";
 
-/** What you may do with a library shared with you, as its grant's level says. */
 const LEVEL_LABELS = {
   view: "You listen",
   edit: "You edit",

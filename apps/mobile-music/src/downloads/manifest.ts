@@ -10,7 +10,6 @@ type KeptRow = Awaited<ReturnType<PlatformSdk["core"]["downloads"]["list"]>>["pa
 /** The songs the core keeps on this device, by song id, as `core.downloads.list` lists them. */
 export type CoreKept = ReadonlyMap<string, KeptRow>;
 
-/** What the core says a download holds now. */
 export type PinRead =
   | { readonly kind: "track"; readonly track: Track }
   | { readonly kind: "album"; readonly album: AlbumCard; readonly tracks: ReadonlyArray<Track> }
@@ -43,7 +42,7 @@ const offlineTrackOf = (track: Track): OfflineTrack => ({
 
 /**
  * One song of a download, as the core keeps it on this device: fetchable at the revision the core
- * names, or at an unknown one before the core lists it; missing once the core says it expired
+ * names, or at an unknown one before the core lists it; left out once the core says it expired
  * here or is gone, so the copy is deleted.
  */
 const entryOf = (track: Track, kept: CoreKept): ManifestEntry | null => {
@@ -72,9 +71,9 @@ const entriesOf = (tracks: ReadonlyArray<Track>, kept: CoreKept): ReadonlyArray<
 };
 
 /**
- * What a download holds now, as old music's `downloads.manifest` answered it: the pin with the
- * details the core gives, and its songs in album or playlist order. A playlist's songs you may not
- * play, or whose file is gone, are left out, as are songs the core no longer serves this device.
+ * What a download holds now: the pin with the details the core gives, and its songs in album or
+ * playlist order. A playlist's songs you may not play, or whose file is gone, are left out, as are
+ * songs the core no longer serves this device.
  */
 export const manifestOf = (pin: DownloadPin, read: PinRead, kept: CoreKept): DownloadManifest => {
   const base = { id: pin.id, target: pin.target, createdAt: pin.createdAt };

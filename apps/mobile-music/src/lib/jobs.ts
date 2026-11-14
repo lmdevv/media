@@ -3,7 +3,6 @@ import type { PlatformSdk } from "@media/sdk/promise";
 import { countOf } from "./format";
 import { ago, dayOf } from "./when";
 
-/** One of the server's jobs, as `core.jobs.list` lists it. */
 export type Job = Awaited<ReturnType<PlatformSdk["core"]["jobs"]["list"]>>["page"][number];
 
 type JobStatus = Job["status"];
@@ -31,7 +30,6 @@ const KINDS: Readonly<Partial<Record<Job["kind"], string>>> = {
   "movies.scan": "Movies scan",
 };
 
-/** What a job is called: its library's name for a scan, else what it does. */
 export const jobName = (job: Pick<Job, "kind" | "library">): string =>
   job.library?.name ?? KINDS[job.kind] ?? "Background job";
 

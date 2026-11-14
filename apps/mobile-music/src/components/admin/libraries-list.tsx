@@ -15,7 +15,6 @@ import { useManagedLibraries } from "./data";
 
 const addLibrary = () => router.push("/settings/admin/libraries/new");
 
-/** The music libraries you manage, each opening its settings. */
 export function LibrariesList() {
   const libraries = useManagedLibraries();
 

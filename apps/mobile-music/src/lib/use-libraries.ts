@@ -5,12 +5,11 @@ import { useMemo } from "react";
 
 import type { LibraryView } from "./first-scan";
 
-/** Libraries asked for per page; a household keeps few. */
 const PAGE_ROWS = 100;
 
 /**
  * The music libraries shared with you, each with what `core.libraries.get` shows of it, or
- * undefined while they load. A library whose read failed shows without its view.
+ * undefined while they load. A library whose read failed is left out.
  */
 export const useMusicLibraries = (): ReadonlyArray<LibraryView> | undefined => {
   const platform = usePlatform();
@@ -36,7 +35,6 @@ export const useMusicLibraries = (): ReadonlyArray<LibraryView> | undefined => {
   }, [rows, views]);
 };
 
-/** Whether a music library you may read is being scanned now, or undefined while that loads. */
 export const useScanning = (): boolean | undefined =>
   useMusicLibraries()?.some(
     (library) => library.scan?.status === "running" || library.scan?.status === "queued",

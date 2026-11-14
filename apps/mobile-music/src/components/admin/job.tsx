@@ -69,7 +69,6 @@ interface ScanProps {
   readonly library: LibraryView | null;
 }
 
-/** The library's latest scan, when it is this job: what it knows of the running attempt. */
 const scanOf = (job: Job, library: LibraryView | null) =>
   library?.scan?.jobId === job.jobId ? library.scan : null;
 

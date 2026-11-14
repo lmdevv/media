@@ -1,6 +1,6 @@
 /**
  * The music app's records, as the core's commands answer them (`packages/commands` `music.*` and
- * `core.*`), named as old music's `@music/commands/models` named them so the screens read the same.
+ * `core.*`).
  */
 import type { PlatformSdk } from "@media/sdk/promise";
 import { Brand } from "effect";
@@ -9,12 +9,10 @@ type Music = PlatformSdk["music"];
 
 type Core = PlatformSdk["core"];
 
-/** What a platform command resolves with. */
 export type Answer<Method> = Method extends (...args: never) => Promise<infer Result>
   ? Result
   : never;
 
-/** One row of a paginated platform query. */
 export type Row<
   Method extends (...args: never) => Promise<{ readonly page: ReadonlyArray<unknown> }>,
 > = Answer<Method>["page"][number];
@@ -32,7 +30,6 @@ export type AlbumCard = Row<Music["albums"]["list"]>;
 
 export type ArtistCard = Row<Music["artists"]["list"]>;
 
-/** An album's facts, as `music.albums.get` answers: its card, length, genre, and format. */
 type AlbumFacts = Answer<Music["albums"]["get"]>;
 
 export type Home = Answer<Music["library"]["home"]>;
@@ -56,18 +53,14 @@ export type PlaylistSharing = Answer<Music["playlists"]["sharing"]>;
 /** A role a playlist is shared with by name: it plays, or it also changes the songs. */
 export type PlaylistRole = PlaylistSharing["people"][number]["role"];
 
-/** Someone on this server, such as a playlist's owner. */
 export type UserId = NonNullable<Playlist["owner"]>["id"];
 
-/** Someone you may share with, as `core.accounts.directory.list` answers. */
 export type DirectoryPerson = Row<Core["accounts"]["directory"]["list"]>;
 
 export type QueueItemId = Row<Music["queue"]["list"]>["itemId"];
 
-/** A played song, as `music.history.list` answers. */
 export type HistoryEntry = Row<Music["history"]["list"]>;
 
-/** Who is signed in, as `core.auth.sessions.current` answers. */
 export type Me = Answer<Core["auth"]["sessions"]["current"]>;
 
 /**
@@ -86,23 +79,20 @@ export const asUserId = Brand.nominal<UserId>();
 
 export const asQueueItemId = Brand.nominal<QueueItemId>();
 
-/** The name a person goes by: the display name they set, else their username. */
 export const nameOf = (person: {
   readonly username: string;
   readonly displayName: string | null;
 }) => person.displayName ?? person.username;
 
-/** An album with its songs, as old music's `albums.get` answered: the core's facts and every page of its songs. */
+/** An album's facts and every page of its songs. */
 export type AlbumDetail = AlbumFacts & { readonly tracks: ReadonlyArray<Track> };
 
-/** An artist with their albums and top songs, as old music's `artists.get` answered. */
 export interface ArtistDetail {
   readonly artist: ArtistCard;
   readonly albums: ReadonlyArray<AlbumCard>;
   readonly topTracks: ReadonlyArray<Track>;
 }
 
-/** A playlist with its entries, as old music's `playlists.get` answered. */
 export interface PlaylistDetail {
   readonly playlist: Playlist;
   readonly items: ReadonlyArray<PlaylistEntry>;
