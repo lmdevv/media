@@ -21,7 +21,8 @@ const unsupported = (message: string): MediaError => ({
 
 /**
  * An audio element that loads and plays at once, and fails the URLs in `failing` the way a
- * browser does: `error` set, an `error` event after the load, and `play()` rejecting after it.
+ * browser does: after the load returns, `error` set with an `error` event, and a `play()` called
+ * meanwhile rejecting then.
  */
 class StandInAudio extends EventTarget implements AudioElement {
   readyState = HAVE_NOTHING;
@@ -35,6 +36,7 @@ class StandInAudio extends EventTarget implements AudioElement {
   src = "";
   volume = 1;
   readonly #failing: ReadonlySet<string>;
+  #failure: Promise<void> | null = null;
 
   constructor(failing: ReadonlySet<string>) {
     super();
@@ -47,12 +49,20 @@ class StandInAudio extends EventTarget implements AudioElement {
     this.currentTime = 0;
     this.error = null;
     this.readyState = HAVE_NOTHING;
+    this.#failure = null;
 
     if (this.src === "") return;
 
     if (this.#failing.has(this.src)) {
-      this.error = unsupported(`No audio at ${this.src}`);
-      this.#later("error");
+      const error = unsupported(`No audio at ${this.src}`);
+
+      this.#failure = new Promise((resolve) => {
+        queueMicrotask(() => {
+          this.error = error;
+          this.dispatchEvent(new Event("error"));
+          resolve();
+        });
+      });
 
       return;
     }
@@ -64,6 +74,8 @@ class StandInAudio extends EventTarget implements AudioElement {
   }
 
   play(): Promise<void> {
+    if (this.#failure !== null && this.error === null) return this.#failure.then(() => this.play());
+
     if (this.error !== null || this.src === "") {
       return Promise.reject(new DOMException("No supported source", "NotSupportedError"));
     }
@@ -196,6 +208,53 @@ describe("HtmlAudioEngine", () => {
       expect(elements.find((element) => element.src === b.url)?.paused).toBe(false);
       expect(engine.samplePlayback().playing).toBe(true);
       expect(events.some((event) => event.type === "error")).toBe(false);
+    } finally {
+      stop();
+      engine.unload();
+    }
+  });
+
+  it("plays a song chosen explicitly when only its preload failed", async () => {
+    const { engine, failing, elements, events, stop } = setup();
+    const a = source("a");
+    const b = source("b");
+
+    try {
+      await engine.load(a, 0, true);
+      failing.add(b.url);
+      engine.preload(b);
+      await settle();
+      failing.delete(b.url);
+      // Not awaited: before the fix the load waited forever on the failed element.
+      void engine.load(b, 0, true);
+      await settle();
+
+      expect(elements.find((element) => element.src === b.url)?.paused).toBe(false);
+      expect(engine.samplePlayback().playing).toBe(true);
+      expect(events.some((event) => event.type === "error")).toBe(false);
+    } finally {
+      stop();
+      engine.unload();
+    }
+  });
+
+  it("reports the failure of a song chosen explicitly whose preload had failed", async () => {
+    const { engine, failing, events, stop } = setup();
+    const a = source("a");
+    const b = source("b");
+
+    try {
+      await engine.load(a, 0, true);
+      failing.add(b.url);
+      engine.preload(b);
+      await settle();
+      // Not awaited: before the fix the load waited forever on the failed element.
+      void engine.load(b, 0, true);
+      await settle();
+
+      expect(events.filter((event) => event.type === "error")).toMatchObject([
+        { type: "error", reason: "unsupported" },
+      ]);
     } finally {
       stop();
       engine.unload();

@@ -58,6 +58,12 @@ interface Reopening {
   readonly abort: AbortController;
 }
 
+/**
+ * How waiting for an element to play ended: it can play; an `error` event, a timeout, or a cancel
+ * ended the wait; or it already held an error when the wait began.
+ */
+type Readiness = "ready" | "failed" | "held-error";
+
 /** When the current stream last showed progress, for spotting one that stopped. */
 interface Watch {
   readonly currentTime: number;
@@ -156,7 +162,7 @@ export class HtmlAudioEngine implements PlayerEngine {
 
     if (idle.source?.url === source.url) {
       this.#release(this.#currentSlot());
-      this.#current = 1 - this.#current;
+      this.#promote();
     } else {
       const slot = this.#currentSlot();
       this.#release(slot);
@@ -167,9 +173,14 @@ export class HtmlAudioEngine implements PlayerEngine {
 
     const slot = this.#currentSlot();
     slot.source = source;
-    const ready = await this.#whenReady(slot.element);
+    const readiness = await this.#whenReady(slot.element);
 
-    if (generation !== this.#generation || !ready) return;
+    if (generation !== this.#generation) return;
+
+    // The `error` listener reports an `error` event; a held error's event has passed.
+    if (readiness === "held-error") this.#fail(slot.element.error);
+
+    if (readiness !== "ready") return;
 
     if (slot.live && startMs >= LIVE_RESTART_MS) {
       const reopening = { positionMs: startMs, play: autoplay, abort: new AbortController() };
@@ -329,29 +340,50 @@ export class HtmlAudioEngine implements PlayerEngine {
     slot.element.load();
   }
 
+  /**
+   * Makes the idle slot current. Every promotion goes through here: a preload that failed while
+   * idle reported nothing and its `error` event has passed, so starting or waiting on it as it is
+   * would stall without a word. It opens again, so it plays or its failure reaches the controller
+   * as the current song's.
+   */
+  #promote(): Slot {
+    const next = this.#idleSlot();
+
+    if (next.element.error !== null && next.source !== null) this.#openAt(next, next.source.url, 0);
+    this.#current = 1 - this.#current;
+
+    return next;
+  }
+
+  /**
+   * Waits until `element` can play. `held-error` means it already held an error, whose `error`
+   * event has passed, so nothing else will settle or report it.
+   */
   #whenReady(
     element: AudioElement,
     limit?: { readonly ms: number; readonly signal: AbortSignal },
-  ): Promise<boolean> {
-    if (element.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) return Promise.resolve(true);
+  ): Promise<Readiness> {
+    if (element.error !== null) return Promise.resolve("held-error");
+
+    if (element.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) return Promise.resolve("ready");
 
     return new Promise((resolve) => {
-      const settle = (ready: boolean): void => {
+      const settle = (readiness: Readiness): void => {
         element.removeEventListener("canplay", onReady);
         element.removeEventListener("error", onFail);
         limit?.signal.removeEventListener("abort", onFail);
         clearTimeout(timer);
 
         if (this.#cancelLoad === onFail) this.#cancelLoad = null;
-        resolve(ready);
+        resolve(readiness);
       };
 
       const onReady = (): void => {
-        settle(true);
+        settle("ready");
       };
 
       const onFail = (): void => {
-        settle(false);
+        settle("failed");
       };
 
       const timer = limit === undefined ? undefined : setTimeout(onFail, limit.ms);
@@ -487,11 +519,7 @@ export class HtmlAudioEngine implements PlayerEngine {
       return;
     }
 
-    // A preload that failed while idle reported nothing, and starting it as it is fails without
-    // a word; open it again, so it plays or its failure reaches the controller as this song's.
-    if (next.element.error !== null) this.#openAt(next, source.url, 0);
-    void this.#start(next);
-    this.#current = 1 - this.#current;
+    void this.#start(this.#promote());
     this.#emit({ type: "advanced", key: source.key });
     this.#emit({ type: "time", positionMs: 0 });
     this.#release(finished);
@@ -587,10 +615,11 @@ export class HtmlAudioEngine implements PlayerEngine {
       fromStart ? 0 : target,
     );
 
-    const ready = await this.#whenReady(slot.element, {
-      ms: REOPEN_TIMEOUT_MS,
-      signal: reopening.abort.signal,
-    });
+    const ready =
+      (await this.#whenReady(slot.element, {
+        ms: REOPEN_TIMEOUT_MS,
+        signal: reopening.abort.signal,
+      })) === "ready";
 
     if (slot.reopening !== reopening) return;
 
