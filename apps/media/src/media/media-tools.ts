@@ -26,6 +26,17 @@ interface RunOptions {
   readonly timeout?: Duration.Duration;
 }
 
+/** A running ffmpeg whose file descriptor 3 is a pipe to the server (`pipe:3`). */
+interface PipedTool {
+  /**
+   * The bytes ffmpeg writes to `pipe:3`, in order. ffmpeg waits while nobody reads it, so read it
+   * to the end; ending the iteration early closes the pipe.
+   */
+  readonly output: AsyncIterable<Uint8Array>;
+  /** Completes once ffmpeg exited and its pipes closed; fails as `ffmpeg` does. */
+  readonly exit: Effect.Effect<void, MediaToolFailed>;
+}
+
 /** ffprobe and ffmpeg. */
 export interface Interface {
   /**
@@ -55,6 +66,16 @@ export interface Interface {
   readonly startFfmpeg: (
     args: ReadonlyArray<string>,
   ) => Effect.Effect<RunningTool, MediaToolFailed, Scope.Scope>;
+  /**
+   * Starts ffmpeg in the current scope with a pipe on file descriptor 3 for a stream it writes
+   * there (`pipe:3`), as music's transcodes write theirs. `onStdout` gets standard output piece by
+   * piece. Closing the scope kills it with `SIGKILL` and waits until it has exited; on Linux it
+   * also dies with the server.
+   */
+  readonly startFfmpegPiped: (
+    args: ReadonlyArray<string>,
+    onStdout?: (text: string) => void,
+  ) => Effect.Effect<PipedTool, MediaToolFailed, Scope.Scope>;
 }
 
 /** The media tools. */
@@ -125,6 +146,7 @@ const make = Effect.gen(function* () {
     tool: "ffmpeg" | "ffprobe",
     args: ReadonlyArray<string>,
     background: boolean = false,
+    piped: { readonly onStdout: ((text: string) => void) | undefined } | null = null,
   ) {
     const failed = (exitCode: number | null, stderr: string, cause: unknown) =>
       new MediaToolFailed({ tool, exitCode, stderr: scrubPaths(stderr, args), cause });
@@ -137,6 +159,8 @@ const make = Effect.gen(function* () {
       stderrTail: STDERR_TAIL,
       stopSignal: "SIGKILL",
       forceKillAfter: "2 seconds",
+      output: piped !== null,
+      onStdout: piped?.onStdout,
     } as const;
 
     const running = yield* (
@@ -168,6 +192,7 @@ const make = Effect.gen(function* () {
 
     return {
       exit,
+      output: running.output,
       stderrTail: Effect.sync(() => scrubPaths(running.stderrTail(), args)),
       suspend,
     };
@@ -210,11 +235,32 @@ const make = Effect.gen(function* () {
     } satisfies RunningTool;
   });
 
+  const startFfmpegPiped = Effect.fn("MediaTools.startFfmpegPiped")(function* (
+    args: ReadonlyArray<string>,
+    onStdout?: (text: string) => void,
+  ) {
+    const running = yield* spawn("ffmpeg", args, false, { onStdout });
+
+    const { output } = running;
+
+    if (output === null) {
+      return yield* new MediaToolFailed({
+        tool: "ffmpeg",
+        exitCode: null,
+        stderr: "",
+        cause: new Error("ffmpeg started without its output pipe"),
+      });
+    }
+
+    return { output, exit: Effect.asVoid(running.exit) } satisfies PipedTool;
+  });
+
   return Service.of({
     ffprobe: runToCompletion("ffprobe", false),
     ffmpeg: runToCompletion("ffmpeg", false),
     ffmpegInBackground: runToCompletion("ffmpeg", true),
     startFfmpeg,
+    startFfmpegPiped,
   });
 });
 

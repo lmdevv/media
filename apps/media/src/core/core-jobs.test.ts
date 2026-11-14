@@ -1,5 +1,5 @@
 import { NodeServices } from "@effect/platform-node";
-import { JobId, PersonId } from "@media/contracts/ids";
+import { JobId, LibraryId, PersonId } from "@media/contracts/ids";
 import { ContentDomain, serverFunctions } from "@media/contracts/server-functions";
 import type { CoreJobPayload, Lease } from "@media/contracts/server-functions";
 import { EpochMillis } from "@media/contracts/units";
@@ -88,6 +88,11 @@ const setUp = (
     return { fake, finished, domains };
   });
 
+const scan = (n: number): CoreJobPayload => ({
+  kind: "music.scan",
+  libraryId: LibraryId.make(`music${String(n)}`),
+});
+
 const person = (personId: string): CoreJobPayload => ({
   kind: "movies.person",
   personId: PersonId.make(personId),
@@ -103,6 +108,7 @@ const caps: CoreJobs.PoolCaps = {
   movies: 1,
   "movies.background": 1,
   "movies.import": 1,
+  music: 1,
   server: 1,
 };
 
@@ -176,6 +182,60 @@ describe("CoreJobs", () => {
       assert.strictEqual(yield* Ref.get(most), 2);
       assert.strictEqual(yield* Ref.get(running), 0);
     }).pipe(Effect.scoped),
+  );
+
+  it.effect(
+    "runs music's scans in their own pool, one at a time, beside movies' work and only with a music library",
+    () =>
+      Effect.gen(function* () {
+        const release = yield* Deferred.make<void>();
+        const running = yield* Ref.make(0);
+        const most = yield* Ref.make(0);
+        const movies = yield* Ref.make(0);
+
+        const { fake, domains } = yield* setUp(
+          [scan(1), scan(2), scan(3), scan(4), person("p1")],
+          ["movies"],
+        );
+
+        const musicScan = CoreJobs.handler({
+          kind: "music.scan",
+          run: () =>
+            Effect.gen(function* () {
+              const now = yield* Ref.updateAndGet(running, (count) => count + 1);
+
+              yield* Ref.update(most, (seen) => Math.max(seen, now));
+              yield* Deferred.await(release);
+              yield* Ref.update(running, (count) => count - 1);
+
+              return "scanned";
+            }),
+        });
+
+        const moviesPerson = CoreJobs.handler({
+          kind: "movies.person",
+          run: () => Ref.update(movies, (count) => count + 1).pipe(Effect.as("looked up")),
+        });
+
+        yield* Layer.build(
+          CoreJobs.layer(Effect.succeed({ handlers: [musicScan, moviesPerson], caps })).pipe(
+            Layer.provide([fake.layer, NodeServices.layer]),
+          ),
+        );
+
+        yield* settle;
+        assert.strictEqual(yield* Ref.get(running), 0);
+        assert.strictEqual(yield* Ref.get(movies), 1);
+
+        yield* SubscriptionRef.set(domains, ["movies", "music"]);
+        yield* settle;
+        assert.strictEqual(yield* Ref.get(running), 1);
+
+        yield* Deferred.succeed(release, undefined);
+        yield* settle;
+        assert.strictEqual(yield* Ref.get(most), 1);
+        assert.strictEqual(yield* Ref.get(running), 0);
+      }).pipe(Effect.scoped),
   );
 
   it.effect("records a failure with its retry, and settles nothing for a stopped job", () =>

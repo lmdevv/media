@@ -59,6 +59,14 @@ export const MediaFileId = Schema.NonEmptyString.pipe(Schema.brand("MediaFileId"
 /** A media file ID. */
 export type MediaFileId = typeof MediaFileId.Type;
 
+/** One song's audio file in a music library. */
+export const TrackId = Schema.NonEmptyString.pipe(Schema.brand("TrackId")).annotate({
+  [CONVEX_TABLE_ANNOTATION]: "tracks",
+});
+
+/** A track ID. */
+export type TrackId = typeof TrackId.Type;
+
 /** A background job the media service runs: scan, metadata refresh, backup, or migration. */
 export const JobId = Schema.NonEmptyString.pipe(Schema.brand("JobId")).annotate({
   [CONVEX_TABLE_ANNOTATION]: "jobs",

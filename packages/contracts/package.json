@@ -21,6 +21,7 @@
     "./media-commands": "./src/media-commands.ts",
     "./media-api": "./src/media-api.ts",
     "./media-playback": "./src/media-playback.ts",
+    "./music-playback": "./src/music-playback.ts",
     "./artwork": "./src/artwork.ts",
     "./trickplay": "./src/trickplay.ts",
     "./cast": "./src/cast.ts",

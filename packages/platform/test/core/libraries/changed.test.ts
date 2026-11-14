@@ -111,7 +111,7 @@ describe.skipIf(stack === undefined)("rescans after a change", { timeout: 180_00
     expect(await scanOf(manager, libraryId)).toEqual(next);
   });
 
-  it("queue every movies library inside a root, and no music library", async () => {
+  it("queue every movies and music library inside a root", async () => {
     if (stack === undefined) return;
     const manager = await member(stack, "changed-root", "admin");
     const root = `/changed-${unique()}`;
@@ -123,15 +123,18 @@ describe.skipIf(stack === undefined)("rescans after a change", { timeout: 180_00
     );
     await moveTo(stack, music.libraryId, `${root}/music`);
 
-    expect(await changed(stack, root)).toEqual({ queued: 2 });
-    expect(await changed(stack, `${root}/`)).toEqual({ queued: 2 });
+    expect(await changed(stack, root)).toEqual({ queued: 3 });
+    expect(await changed(stack, `${root}/`)).toEqual({ queued: 3 });
 
     await inSequence(films, async ({ libraryId }) => {
       expect(await scanOf(manager, libraryId)).toMatchObject({ status: "queued" });
     });
-    expect(await scanOf(manager, music.libraryId)).toBeNull();
-    expect(await changed(stack, `${root}/music/Song.flac`)).toEqual({ queued: 0 });
-    expect(await scanOf(manager, music.libraryId)).toBeNull();
+
+    const songScan = await scanOf(manager, music.libraryId);
+
+    expect(songScan).toMatchObject({ status: "queued" });
+    expect(await changed(stack, `${root}/music/Song.flac`)).toEqual({ queued: 1 });
+    expect(await scanOf(manager, music.libraryId)).toEqual(songScan);
   });
 
   it("queue nothing for a path in no library", async () => {

@@ -27,6 +27,11 @@ export interface PlaybackGrant {
   readonly userId: UserId;
   /** A profile, which only the unit tests' tokens name; core tickets name none. */
   readonly profileId?: ProfileId;
+  /**
+   * What the ticket names: a movies file, or a music track, whose id `fileId` then holds. A route
+   * serves only its own kind.
+   */
+  readonly resource: "file" | "track";
   readonly fileId: MediaFileId;
   readonly sessionId: PlaybackSessionId;
   readonly purpose: TokenPurpose;

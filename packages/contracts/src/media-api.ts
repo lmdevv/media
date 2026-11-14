@@ -4,8 +4,9 @@
  * media service implements it; clients that may use Effect's unstable HTTP modules can derive an
  * `HttpApiClient` from it, and others decode the same schemas from `@media/contracts/media-playback`.
  *
- * Media bytes (direct files, HLS playlists and segments, WebVTT, artwork) are plain routes on the
- * media service, because `<video>`, `<img>`, and HLS players fetch them by URL. Registry `media`
+ * Media bytes (direct files, HLS playlists and segments, WebVTT, artwork, and music's songs and
+ * art, whose paths `@media/contracts/music-playback` declares) are plain routes on the media
+ * service, because `<video>`, `<audio>`, `<img>`, and HLS players fetch them by URL. Registry `media`
  * commands (such as `metadata.searchCandidates`) answer with command failures instead and are
  * described by `@media/contracts/commands`.
  */

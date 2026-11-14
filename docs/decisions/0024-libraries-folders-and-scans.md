@@ -2,7 +2,8 @@
 
 - Status: Accepted, 2026-11-04. Amended 2026-11-09 with the movies catalog, and again the same
   day with each movies document's size bound. Amended 2026-11-10 with folder identity, and again
-  the same day with rescans after a file changes. Amended 2026-11-13 with the music catalog.
+  the same day with rescans after a file changes. Amended 2026-11-13 with the music catalog, and
+  again the same day with music's scanner on the server.
 - Decisions: D01, D02, D16, D17, D28, D29, D50
 
 ## Context
@@ -452,12 +453,14 @@ a file changes. It asks the core to queue a scan. Until now "Left for later unit
   goes back to the queue starts over, so it only clears the mark. A stream of changes during a long
   scan therefore queues one scan after it, as old movies' monitor rescanned after its running scan,
   and never restarts the running one.
-- Music libraries are skipped, since music has no scanner on the server yet.
+- Music libraries are queued the same way since music's scanner came to the server (amended
+  2026-11-13): old music's media service watched its libraries' folders and rescanned them too.
+  Each kind queues on its own scan kind's row, so music's rescans never contend with movies'.
 - The server's library monitor, `apps/media/src/core/core-rescans.ts`, watches each folder of
-  every movies library at the path the library names, as old movies watched each library's folders
-  as stored (amended in p4-movies-parity). It follows `core/scans:watched`, a server-facing query
-  behind the media-service guard that pages the movies libraries, and only those whoever asks
-  (64 a page, each with its up to 16 folders), and hands the folders to `LibraryMonitor.track`
+  every movies and music library at the path the library names, as old movies watched each
+  library's folders as stored (amended in p4-movies-parity). It follows `core/scans:watched`, a
+  server-facing query behind the media-service guard that pages the libraries (64 a page, each
+  with its up to 16 folders), and hands the folders to `LibraryMonitor.track`
   whenever the list changes and on the reconcile interval. A folder that resolves outside every
   approved root is not watched, as the scanner refuses it; one that cannot be resolved now, such as
   a share not mounted yet, is watched anyway and its watch retries. A folder that another listed
@@ -598,6 +601,18 @@ music's tables of the same names. No client reads them yet; the music commands c
   An album is never explicit itself: a kid sees it, and each of its tracks is decided on its own
   when it plays. A kept track's revision is old music's file revision, its size and change time in
   base 36, and a track a scan marked missing has no download source until it returns.
+- **The scanner on the server** (amended 2026-11-13, `p5-music-server`). The server's `music`
+  pool runs `music.scan` as the movies pool runs `movies.scan`: `target`, a check of each folder
+  against `LIBRARY_ROOTS`, `claimFolders`, then old music's scan over the callbacks, every write
+  carrying the lease. A library's folders are walked one by one; files move between folders of
+  one library as within one. A folder that holds no audio while the core lists songs on disk in
+  it stops the scan without marking anything missing, as old music's empty library did. The scan
+  compares `known`'s fingerprints through the same 1,024-character bound the core keeps them in,
+  so a rescan rewrites nothing that did not change. Folder failures start with the
+  `SCAN_FAILURE_PREFIXES` the account client reads.
+- **A track's file for streaming.** `music/tracks:resolve` answers the server a track's path, its
+  library's folders now, its size, change time, and codec, or null for a track that is missing,
+  outside its folders, or not in a music library, as `movies/files:resolveFile` does for a file.
 - **Where the port differs from old music.**
   - Tracks carry `explicit`, which old music did not have; the scanner sends it from the file's
     tags, and the core's kid restriction reads it (D17).

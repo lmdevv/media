@@ -283,6 +283,7 @@ const make = Effect.fn("CoreTickets.make")(function* (options: Options) {
 
     return {
       userId: UserId.make(claims.principal.userId),
+      resource: claims.resource.kind === "track" ? "track" : "file",
       fileId: MediaFileId.make(claims.resource.id),
       sessionId: playback,
       purpose,

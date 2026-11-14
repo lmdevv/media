@@ -322,10 +322,9 @@ export const domains = serverQuery({
 const WATCHED_PAGE_MAX = 64;
 
 /**
- * Every movies library with its folders as recorded, a page at a time, for the server to watch
- * (ADR 0024). Movies only, whoever asks: the server rescans only movies on change, and another
- * domain's folders are not its to read. Folders, not approved roots, so a change under a folder
- * that links into a root names the library's own path and `changed` finds the library.
+ * Every library of a kind the server scans, movies and music, with its folders as recorded, a page
+ * at a time, for the server to watch (ADR 0024). Folders, not approved roots, so a change under a
+ * folder that links into a root names the library's own path and `changed` finds the library.
  */
 export const watched = serverQuery({
   // An open cursor only: a page reloaded to an `endCursor` may hold any number of libraries, as
@@ -339,7 +338,7 @@ export const watched = serverQuery({
   handler: async (ctx, { paginationOpts }) => {
     const page = await paginate(
       ctx.db,
-      { table: "libraries", index: "by_kind", range: (q) => q.eq("kind", "movies") },
+      { table: "libraries", index: "by_kind" },
       { ...paginationOpts, numItems: Math.min(paginationOpts.numItems, WATCHED_PAGE_MAX) },
     );
 
@@ -431,8 +430,8 @@ export const claimFolders = serverMutation({
     ),
 });
 
-/** The kinds a changed file rescans: those with a scanner on the server. Music has none yet. */
-const RESCANNED_KINDS: ReadonlySet<ContentDomain> = new Set(["movies"]);
+/** The kinds a changed file rescans: those with a scanner on the server. */
+const RESCANNED_KINDS: ReadonlySet<ContentDomain> = new Set(["movies", "music"]);
 
 /** Most characters of a changed path, the longest path Linux takes. */
 const CHANGED_PATH_CHARS_MAX = 4096;
@@ -526,9 +525,10 @@ const rescanInside = async (
  * Rescans after a change on the server's disk (ADR 0024): `path` is an absolute path that changed,
  * a file or a folder, or a library root the server approved, which it sends at startup, on its
  * reconcile interval, after its watcher restarts, and when a root it polls changed. Queues a scan
- * of every movies library with a folder that is `path`, holds it, or lies inside it, and joins a
- * scan already queued or running, as every scan is queued (`queueScan`). Music has no scanner yet,
- * so its libraries are not queued. Answers how many libraries this call queued or joined; the
+ * of every movies and music library with a folder that is `path`, holds it, or lies inside it, and
+ * joins a scan already queued or running, as every scan is queued (`queueScan`). Each kind queues
+ * on its own scan kind's row, so music's rescans never contend with movies' enqueues (ADR 0012).
+ * Answers how many libraries this call queued or joined; the
  * folders inside `path` past its first page are rescanned by scheduled calls. A file name need not
  * be plain, since a change event carries whatever name the disk has: the folders that hold it are
  * its plain leading parts (`changedReach`). Refuses with `invalid_args` a path that is not absolute

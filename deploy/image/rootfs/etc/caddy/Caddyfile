@@ -54,6 +54,11 @@
 		import media-service
 	}
 
+	# Music's album art, at the path the music commands sign with a shareable ticket.
+	handle /music/art/* {
+		import media-service
+	}
+
 	redir /movies /movies/ 308
 
 	handle_path /movies/* {
