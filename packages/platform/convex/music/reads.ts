@@ -26,7 +26,7 @@ export const getsOf = (table: Table, count: number): Reads =>
 export const LIKED_READS: Reads = rowsOf("likes", 1);
 
 /** Rows one list page holds at most, as movies' lists do. */
-const LIST_PAGE_MAX = 200;
+export const LIST_PAGE_MAX = 200;
 
 /** The bytes one list page's rows may read: what a call may read less room for its fixed work. */
 const PAGE_BYTES = 10 * 1024 * 1024;

@@ -280,5 +280,6 @@ export const commandRefs = {
   "music.queue.remove": api.music.queue.remove satisfies music_queue["remove"],
   "music.queue.repeat": api.music.queue.repeat satisfies music_queue["repeat"],
   "music.queue.shuffle": api.music.queue.shuffle satisfies music_queue["shuffle"],
+  "music.tracks.get": api.music.tracks.get satisfies music_tracks["get"],
   "music.tracks.list": api.music.tracks.list satisfies music_tracks["list"],
 } as const;

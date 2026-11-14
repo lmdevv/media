@@ -506,11 +506,19 @@ music (playlists, likes, plays, the queue) is theirs, keyed by user, as old musi
   lookup decides each row's library once a call through `can()` (`libraryGates` in
   `music/access.ts`), and a kid's explicit filter hides explicit tracks from every list, search,
   album, artist, playlist entry, queue entry, and start (D17).
-- Album, artist, and song lists keep one order across every library, as old music's did when it
-  read every library: they page one household-wide index (`by_added`, `by_key`, `by_title`, each
-  ending in the row's tie) and decide each row, as `movies.titles.list` does. A page is sized
-  before it reads by `decidableRows` and by its rows at their bounds (`pageRowsFor`), so it reads
-  at most 1,000 documents and 10 MiB however many groups the caller is in or what the rows hold.
+- Album, artist, and song lists keep one order across the libraries the caller may read, as old
+  music's did once it fixed ADS-112 (`music/merged.ts`): each page walks the caller's music
+  libraries (`walkMusicLibraries`), reads each through its own index (`by_library_added`,
+  `by_library_key`, `by_library_title`, each ending in the row's tie), and merges them in order. A
+  row's tie is unique across every library, so the cursor, the key and tie of the last row a page
+  went past, names one exact place in each library's index: no row is skipped or repeated however
+  rows come and go between pages. The page takes rows up to the least of the libraries' last rows
+  read and reads on only from the library at that point, so it reads one or two index ranges per
+  library and read, charged to the call's read budget, and a library the caller cannot see costs
+  them nothing. A caller who sees more than 100 music libraries, or more than one call can walk,
+  pages the household-wide index (`by_added`, `by_key`, `by_title`) on the same cursor and decides
+  each row, sized by `decidableRows` and by its rows at their bounds (`pageRowsFor`), as
+  `movies.titles.list` does.
 - Home and search walk the music libraries shared with the caller (`walkMusicLibraries`, as
   `walkMovieLibraries`) on the call's read budget and answer the best they can afford: home sums
   each library's totals and merges each library's newest albums; search runs each library's
@@ -536,6 +544,8 @@ music (playlists, likes, plays, the queue) is theirs, keyed by user, as old musi
   (`music.queue.play`, `music.queue.add`, `music.playlists.create`, `music.playlists.addTracks`,
   `music.play.reportOffline`) reads and decides them a chunk at a time (`readDecided` in
   `music/person.ts`): each chunk as large as what is left pays for at the track bound with each
-  decision's worst case, each read charged at its real size, so 2,000 songs fit in one call and a
-  call never passes Convex's limits; when not one more song fits, the call is refused with
-  `invalid_args` before it writes.
+  decision's worst case, each read charged at its real size, so a call never passes Convex's
+  limits. `music.queue.add` and the playlist adds take the leading songs the meter pays for and
+  answer the rest for the client to send again (`readDecidedLeading`); the others take all of them
+  or are refused with `invalid_args` before they write. An add whose place in the queue is too
+  narrow renumbers the queue first, so the songs are read with what the renumber left.

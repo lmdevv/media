@@ -165,6 +165,17 @@ export const requireArtist = async (
 ): Promise<InLibrary<Doc<"artists">>> =>
   requireRow(db, reach, "view", await db.get(artistId), () => ALBUM_FACTS, "No such artist");
 
+/**
+ * A track the caller may see, by its library's grants and its own facts, and its library's gate,
+ * as old music's `links.get` found a song's album and title. Reads 2 and its library's grants.
+ */
+export const requireTrack = async (
+  db: DatabaseReader,
+  reach: Reach,
+  trackId: Id<"tracks">,
+): Promise<InLibrary<Doc<"tracks">>> =>
+  requireRow(db, reach, "view", await db.get(trackId), trackFacts, "No such track");
+
 /** A playlist the caller may do `action` to, and the level their grants give them on it. */
 export const requirePlaylist = async (
   db: DatabaseReader,

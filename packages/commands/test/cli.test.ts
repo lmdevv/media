@@ -202,6 +202,7 @@ describe("CLI placement", () => {
       "music.queue.remove": "music queue remove",
       "music.queue.repeat": "music queue repeat",
       "music.queue.shuffle": "music queue shuffle",
+      "music.tracks.get": "music tracks get",
       "music.tracks.list": "music tracks list",
     });
   });

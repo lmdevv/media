@@ -165,6 +165,11 @@ export const musicTables = {
     trackId: v.id("tracks"),
     /** Sort key within the playlist; a moved entry takes one between its new neighbours. */
     position: v.number(),
+    /**
+     * The song's length when it was added, which the playlist's total gained, so taking the entry
+     * off takes away what it added even after a rescan changed the song's length.
+     */
+    durationMs: v.number(),
     addedBy: v.id("users"),
     addedAt: v.number(),
     tie: v.string(),

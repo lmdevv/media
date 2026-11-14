@@ -234,19 +234,33 @@ string dispatchers that took `v.any()` arguments (D23).
   | `stream.url`                           | `music.play.start`, a personal ticket (ADR 0011)      |
   | the plays of `playback.report`         | `music.play.report`, once per start                   |
   | the plays of `devices.reconcile`       | `music.play.reportOffline`                            |
+  | `links.get` of a song                  | `music.tracks.get`: its title, album, and album id    |
 
 - **What did not.** Remote control and moving playback between devices (`playback.state`,
   `position`, `pause`, `resume`, `next`, `previous`, `seek`, `volume`, `transfer`, `report`'s
   position, `devices.*`) come back with Connect in phase 6 (D62), and jams with group sessions
   (ADR 0017). Libraries, jobs, accounts, keys, people, invites, downloads, and server settings
-  are the core's already. `links.get` built a path a client can build itself. LRCLIB lookups and
+  are the core's already. `links.get` built a path a client can build itself from an id, and
+  answered the title beside it: an album's, an artist's, and a playlist's come from
+  `music.albums.get`, `music.artists.get`, and `music.playlists.get`, and a song's, with the album
+  it opens, from `music.tracks.get`, which iOS's "Add to playlist" sheet shows. LRCLIB lookups and
   `lyrics.backfill` come with the lyrics job (p5-lyrics), so `music.lyrics.get` answers a song's
   own lyrics for now.
 - **Lists page.** Every list that can grow pages with an exact cursor, which old music's merged
   lists and its whole-album, whole-playlist, and whole-queue answers did not: a Convex call reads
   at most 16 MiB, and 2,000 songs at their bound would pass it. So an album's songs, an artist's
   albums, a playlist's entries, and the queue's entries are their own paged commands beside the
-  one that shows the album, artist, playlist, or queue.
+  one that shows the album, artist, playlist, or queue. The song, album, and artist lists merge the
+  libraries the caller may read, as old music's did after ADS-112, with `take` on each library's
+  own index and one exact cursor of their own in place of `paginate` (ADR 0005).
+- **Songs in, a call at a time.** `music.queue.add`, `music.playlists.create`, and
+  `music.playlists.addTracks` take up to 2,000 songs and read and decide as many as one call can
+  pay for, songs from many libraries costing each library's grants. A call that cannot take them
+  all answers the rest in `rest`; the client sends them again, to the queue with `afterItemId`
+  naming the last entry the call before added, so the songs keep their order whether they go next,
+  last, or into an empty queue. The other commands that take songs (`music.queue.play`,
+  `music.play.reportOffline`) still take all of them or refuse with `invalid_args` before they
+  write.
 - **Per-person tables.** `playlists`, `playlistItems`, `likes`, `plays`, `playQueues`, and
   `playQueueEntries` are in `music/schema.ts`, written only through the music store
   (`music/write.ts`), which bounds each document and charges the call's meter, and which the
@@ -257,7 +271,12 @@ string dispatchers that took `v.any()` arguments (D23).
 - **The queue is a row per entry.** Old music kept a person's queue as one array that every
   command rewrote. Each entry is now its own row with an order key between its neighbours and a
   unique tie, and `listOrder` keeps the order before shuffle, so an add, a move, or a remove
-  writes the entries it changes and the queue row, never the whole list. Every queue command is
+  writes the entries it changes and the queue row, never the whole list. When the keys around an
+  insert or a move sit too close to split, the queue renumbers, at most its 1,000 entries; an add
+  renumbers before it reads its songs, so the songs take what the renumber left of the call and
+  the call never renumbers after it read them. A playlist's move renumbers at most its 2,000
+  entries the same way and reads no songs, and adding to a playlist appends, which never
+  renumbers. Every queue command is
   one serializable Convex mutation, so two sessions of one person adding, moving, and removing at
   once each see the other's committed entries: none is lost or duplicated, and both read the
   same order. Replacing the queue moves the queue's `generation` and writes only the new entries;

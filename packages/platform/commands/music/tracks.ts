@@ -10,6 +10,27 @@ import type { QueryCtx } from "../../convex/_generated/server";
 import { requireCaller } from "../../convex/core/auth/caller";
 import type { Caller } from "../../convex/core/auth/caller";
 
+const getArgs = v.object({ trackId: v.id("tracks") });
+
+const getResult = v.object({
+  id: v.id("tracks"),
+  title: v.string(),
+  artist: v.string(),
+  artistId: v.id("artists"),
+  album: v.string(),
+  albumId: v.id("albums"),
+  trackNumber: v.union(v.number(), v.null()),
+  discNumber: v.union(v.number(), v.null()),
+  durationMs: v.number(),
+  codec: v.string(),
+  lossless: v.boolean(),
+  bitrate: v.union(v.number(), v.null()),
+  sampleRate: v.union(v.number(), v.null()),
+  bitDepth: v.union(v.number(), v.null()),
+  artUrl: v.union(v.string(), v.null()),
+  liked: v.boolean(),
+});
+
 const listArgs = v.object({
   paginationOpts: v.object({
     numItems: v.number(),
@@ -52,6 +73,13 @@ const listResult = v.object({
 
 /** The handlers `convex/music/tracks.ts` passes to `register`, one per `music.tracks` command. */
 export interface Handlers {
+  /** `music.tracks.get` (query, music:read): Show a song you may see: its title, artist, and album. */
+  readonly get: (
+    ctx: Omit<QueryCtx, "auth">,
+    args: Infer<typeof getArgs>,
+    caller: Caller,
+  ) => Infer<typeof getResult> | Promise<Infer<typeof getResult>>;
+
   /** `music.tracks.list` (query, music:read): List the songs you may play, by title. */
   readonly list: (
     ctx: Omit<QueryCtx, "auth">,
@@ -62,6 +90,12 @@ export interface Handlers {
 
 /** The `api` reference of each `music.tracks` command; `commands/refs.ts` checks them. */
 export interface Refs {
+  readonly get: FunctionReference<
+    "query",
+    "public",
+    Infer<typeof getArgs>,
+    Infer<typeof getResult>
+  >;
   readonly list: FunctionReference<
     "query",
     "public",
@@ -72,6 +106,11 @@ export interface Refs {
 
 /** Registers the `music.tracks` commands as public Convex functions with their declared arguments and result. */
 export const register = (handlers: Handlers) => ({
+  get: query({
+    args: getArgs,
+    returns: getResult,
+    handler: async (ctx, args) => handlers.get(ctx, args, await requireCaller(ctx, "music:read")),
+  }),
   list: query({
     args: listArgs,
     returns: listResult,

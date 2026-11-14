@@ -160,13 +160,13 @@ Start a song: get a stream ticket for it in this session.
 
 ## `music.playlists.addTracks`
 
-Add songs to the end of a playlist you own or collaborate on (2,000 songs at most).
+Add songs to the end of a playlist you own or collaborate on (2,000 songs at most); send any songs left in rest again.
 
 - CLI: `media music playlists add-tracks`
 - Kind: mutation
 - Scope: music:edit
 - Arguments: `{ playlistId: Id<"playlists">; trackIds: Array<Id<"tracks">> }`
-- Result: `{ itemIds: Array<Id<"playlistItems">> }`
+- Result: `{ itemIds: Array<Id<"playlistItems">>; rest: Array<Id<"tracks">> }`
 
 ## `music.playlists.create`
 
@@ -176,7 +176,7 @@ Create a playlist, with songs to start it.
 - Kind: mutation
 - Scope: music:edit
 - Arguments: `{ name: string; description?: string; trackIds?: Array<Id<"tracks">> }`
-- Result: `{ playlistId: Id<"playlists"> }`
+- Result: `{ playlistId: Id<"playlists">; rest: Array<Id<"tracks">> }`
 
 ## `music.playlists.get`
 
@@ -305,13 +305,13 @@ Make a playlist you own private, or shared: everyone on this server can open and
 
 ## `music.queue.add`
 
-Add songs to your queue: --next plays them after the current song, otherwise they go after your other queued songs (before autoplay).
+Add songs to your queue: --next plays them after the current song, otherwise they go after your other queued songs (before autoplay); send any songs left in rest again with --after-item-id set to the last item id added so far.
 
 - CLI: `media music queue add`
 - Kind: mutation
 - Scope: music:play
-- Arguments: `{ trackIds: Array<Id<"tracks">>; next?: boolean }`
-- Result: `{ itemIds: Array<Id<"playQueueEntries">> }`
+- Arguments: `{ trackIds: Array<Id<"tracks">>; next?: boolean; afterItemId?: Id<"playQueueEntries"> }`
+- Result: `{ itemIds: Array<Id<"playQueueEntries">>; rest: Array<Id<"tracks">> }`
 
 ## `music.queue.autoplay`
 
@@ -413,6 +413,16 @@ Turn shuffle on or off.
 - Scope: music:play
 - Arguments: `{ on: boolean }`
 - Result: `null`
+
+## `music.tracks.get`
+
+Show a song you may see: its title, artist, and album.
+
+- CLI: `media music tracks get`
+- Kind: query
+- Scope: music:read
+- Arguments: `{ trackId: Id<"tracks"> }`
+- Result: `{ id: Id<"tracks">; title: string; artist: string; artistId: Id<"artists">; album: string; albumId: Id<"albums">; trackNumber: number | null; discNumber: number | null; durationMs: number; codec: string; lossless: boolean; bitrate: number | null; sampleRate: number | null; bitDepth: number | null; artUrl: string | null; liked: boolean }`
 
 ## `music.tracks.list`
 

@@ -116,28 +116,38 @@ const roomFor = (meter: Meter, reserve: Cost, each: Cost): number => {
   );
 };
 
-/**
- * Reads `ids` through the store in order and decides each, a chunk at a time: as many as the
- * meter can still pay for, each at the track bound with its decision's worst case, keeping
- * `reserve` for the rest of the call. Each read and decision is charged at what it really cost,
- * so a library decided once makes the next chunk larger, and the call stays inside Convex's limits
- * whatever the tracks hold. Real tracks are far below their bound, so 2,000 fit in a call; when
- * the meter cannot pay for one more, the call is refused with `invalid_args` before it writes.
- */
-export const readDecided = async (
+/** What a read finds when the meter cannot pay for another chunk of songs. */
+type WhenFull = "refuse" | "stop";
+
+/** The songs a call wants at most, of those that `counts` keeps; it reads no further. */
+export interface Wanted {
+  readonly most: number;
+  readonly counts: (decided: Decided) => boolean;
+}
+
+const EVERY: Wanted = { most: Number.POSITIVE_INFINITY, counts: () => true };
+
+const readChunks = async (
   store: MusicStore,
   decider: Decider,
   ids: ReadonlyArray<Id<"tracks">>,
   reserve: Cost,
-  done: ReadonlyArray<Decided> = [],
+  whenFull: WhenFull,
+  wanted: Wanted,
+  done: ReadonlyArray<Decided>,
 ): Promise<ReadonlyArray<Decided>> => {
-  if (ids.length === 0) return done;
+  const short = wanted.most - done.filter(wanted.counts).length;
+
+  if (ids.length === 0 || short <= 0) return done;
 
   const each = addCost(cost(1, 0, TABLE_BYTES.tracks), decider.most);
-  const count = Math.min(ids.length, roomFor(store.meter, reserve, each));
+  const count = Math.min(ids.length, short, roomFor(store.meter, reserve, each));
 
-  if (count < 1)
-    return fail("invalid_args", "These songs are too many to take at once; send fewer");
+  if (count < 1) {
+    return whenFull === "stop" && done.length > 0
+      ? done
+      : fail("invalid_args", "These songs are too many to take at once; send fewer");
+  }
 
   const chunk = ids.slice(0, count);
   const read = await Promise.all(chunk.map(async (id) => store.get("tracks", id)));
@@ -150,5 +160,39 @@ export const readDecided = async (
     }),
   );
 
-  return readDecided(store, decider, ids.slice(count), reserve, [...done, ...decided]);
+  return readChunks(store, decider, ids.slice(count), reserve, whenFull, wanted, [
+    ...done,
+    ...decided,
+  ]);
 };
+
+/**
+ * Reads `ids` through the store in order and decides each, a chunk at a time: as many as the
+ * meter can still pay for, each at the track bound with its decision's worst case, keeping
+ * `reserve` for the rest of the call. Each read and decision is charged at what it really cost,
+ * so a library decided once makes the next chunk larger, and the call stays inside Convex's limits
+ * whatever the tracks hold. Real tracks are far below their bound, so 2,000 fit in a call; when
+ * the meter cannot pay for one more, the call is refused with `invalid_args` before it writes.
+ */
+export const readDecided = (
+  store: MusicStore,
+  decider: Decider,
+  ids: ReadonlyArray<Id<"tracks">>,
+  reserve: Cost,
+): Promise<ReadonlyArray<Decided>> => readChunks(store, decider, ids, reserve, "refuse", EVERY, []);
+
+/**
+ * Reads and decides the leading `ids` as `readDecided` does, but stops at the first chunk the
+ * meter cannot pay for, once one chunk has run, or once it has the songs `wanted` asks for, and
+ * answers the songs it read: the call takes those, and answers the rest for its caller to send
+ * again (ADR 0024). Keeping `reserve` aside leaves room for one chunk however many libraries the
+ * songs come from, so each call takes at least one song; a meter too full for even that is
+ * refused with `invalid_args`.
+ */
+export const readDecidedLeading = (
+  store: MusicStore,
+  decider: Decider,
+  ids: ReadonlyArray<Id<"tracks">>,
+  reserve: Cost,
+  wanted: Wanted = EVERY,
+): Promise<ReadonlyArray<Decided>> => readChunks(store, decider, ids, reserve, "stop", wanted, []);

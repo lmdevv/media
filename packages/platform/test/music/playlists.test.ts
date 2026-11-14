@@ -5,8 +5,11 @@ import { inOrder } from "../../convex/core/lib/inOrder";
 import type { Id } from "../../convex/_generated/dataModel";
 import { member, sharedAdmin } from "../devices";
 import type { Member } from "../devices";
+import { share } from "../probe";
 import { refusal, signIn, unique } from "../sign-in";
 import { coreStackFromEnvFile } from "../stack-env";
+import { claimScan, finishScan, musicLibrary, trackIdsAt, upsertAll } from "./catalog";
+import { musicTrack } from "./scanned";
 import { allPages, at, explicitKid, musicShelf, onAlbum, trackAt } from "./shelf";
 
 const stack = coreStackFromEnvFile();
@@ -449,6 +452,49 @@ describe.skipIf(stack === undefined)("music playlists", { timeout: 180_000 }, ()
       {
         name: "Renamed",
       },
+    );
+  });
+  it("takes off the length an entry added, even after a rescan changed the song's", async () => {
+    if (stack === undefined) return;
+    const admin = await sharedAdmin(stack);
+    const aiko = await member(stack, "aiko");
+    const { libraryId, scanJobId, roots } = await musicLibrary(admin, `Drift ${unique()}`);
+    const path = `${at(roots, 0)}/Drift/Long.flac`;
+    const scan = await claimScan(stack, scanJobId);
+
+    await upsertAll(stack, scan, [musicTrack(path, 1000, 1, { durationMs: 120_000 })]);
+    await share(admin, libraryId, { kind: "user", userId: aiko.userId }, "view");
+
+    const trackId = at(await trackIdsAt(stack, libraryId, [path]), 0);
+
+    if (trackId === null) throw new Error("the scan wrote no track");
+
+    const { playlistId } = await aiko.signedIn.client.mutation(api.music.playlists.create, {
+      name: "Drift",
+      trackIds: [trackId],
+    });
+
+    expect(
+      (await aiko.signedIn.client.query(api.music.playlists.get, { playlistId })).durationMs,
+    ).toBe(120_000);
+
+    // A rescan finds the file changed and half as long; the playlist keeps what the entry added.
+    await upsertAll(stack, scan, [musicTrack(path, 2000, 2, { durationMs: 60_000 })]);
+    await finishScan(stack, scan);
+
+    const [entry] = await itemsOf(aiko, playlistId);
+
+    if (entry === undefined) throw new Error("the playlist has no entry");
+
+    expect(entry.durationMs).toBe(60_000);
+
+    await aiko.signedIn.client.mutation(api.music.playlists.removeItem, {
+      playlistId,
+      itemId: entry.itemId,
+    });
+
+    expect(await aiko.signedIn.client.query(api.music.playlists.get, { playlistId })).toMatchObject(
+      { trackCount: 0, durationMs: 0 },
     );
   });
 });

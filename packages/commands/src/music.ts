@@ -146,6 +146,12 @@ const lyricSet = v.object({
 const trackIds = v.array(v.id("tracks"));
 
 /**
+ * The songs a call left for the next: one call takes as many as it can read within Convex's
+ * limits, so send these again until none are left.
+ */
+const rest = trackIds;
+
+/**
  * The music commands, ported from old music's command registry (D23, D62). What each person
  * keeps (playlists, likes, plays, the queue) is theirs alone; a playlist is shared through the
  * core's grants. Jams and moving playback between devices come back with group sessions and
@@ -230,6 +236,12 @@ export const music = [
     args: { paginationOpts: paginationOptsValidator },
     result: paginationResultValidator(track),
   }),
+  query("music.tracks.get", {
+    summary: "Show a song you may see: its title, artist, and album",
+    scope: "music:read",
+    args: { trackId: v.id("tracks") },
+    result: track,
+  }),
   query("music.playlists.list", {
     summary: "List your playlists, most recently changed first",
     scope: "music:read",
@@ -264,7 +276,8 @@ export const music = [
       description: v.optional(v.string()),
       trackIds: v.optional(trackIds),
     },
-    result: v.object({ playlistId: v.id("playlists") }),
+    /** `rest` holds the songs left to add with `music.playlists.addTracks`. */
+    result: v.object({ playlistId: v.id("playlists"), rest }),
   }),
   mutation("music.playlists.update", {
     summary: "Rename a playlist you own or change its description; an empty description clears it",
@@ -283,10 +296,11 @@ export const music = [
     result: v.null(),
   }),
   mutation("music.playlists.addTracks", {
-    summary: "Add songs to the end of a playlist you own or collaborate on (2,000 songs at most)",
+    summary:
+      "Add songs to the end of a playlist you own or collaborate on (2,000 songs at most); send any songs left in rest again",
     scope: "music:edit",
     args: { playlistId: v.id("playlists"), trackIds },
-    result: v.object({ itemIds: v.array(v.id("playlistItems")) }),
+    result: v.object({ itemIds: v.array(v.id("playlistItems")), rest }),
   }),
   mutation("music.playlists.removeItem", {
     summary: "Remove an entry from a playlist you own or collaborate on",
@@ -396,10 +410,18 @@ export const music = [
   }),
   mutation("music.queue.add", {
     summary:
-      "Add songs to your queue: --next plays them after the current song, otherwise they go after your other queued songs (before autoplay)",
+      "Add songs to your queue: --next plays them after the current song, otherwise they go after your other queued songs (before autoplay); send any songs left in rest again with --after-item-id set to the last item id added so far",
     scope: "music:play",
-    args: { trackIds, next: v.optional(v.boolean()) },
-    result: v.object({ itemIds: v.array(v.id("playQueueEntries")) }),
+    args: {
+      trackIds,
+      next: v.optional(v.boolean()),
+      /**
+       * Where a call that sends `rest` again goes on: right after this entry, the last one the calls
+       * before added, so the songs keep their order. None when they added none yet.
+       */
+      afterItemId: v.optional(v.id("playQueueEntries")),
+    },
+    result: v.object({ itemIds: v.array(v.id("playQueueEntries")), rest }),
   }),
   mutation("music.queue.remove", {
     summary: "Remove an entry from your queue",

@@ -4606,6 +4606,7 @@ const music_playlists_addTracks = mutation({
   }),
   result: Schema.Struct({
     itemIds: Schema.Array(Schema.String.pipe(Schema.brand("Id<playlistItems>"))),
+    rest: Schema.Array(Schema.String.pipe(Schema.brand("Id<tracks>"))),
   }),
 });
 
@@ -4617,7 +4618,10 @@ const music_playlists_create = mutation({
     description: Schema.optionalKey(Schema.String),
     trackIds: Schema.optionalKey(Schema.Array(Schema.String.pipe(Schema.brand("Id<tracks>")))),
   }),
-  result: Schema.Struct({ playlistId: Schema.String.pipe(Schema.brand("Id<playlists>")) }),
+  result: Schema.Struct({
+    playlistId: Schema.String.pipe(Schema.brand("Id<playlists>")),
+    rest: Schema.Array(Schema.String.pipe(Schema.brand("Id<tracks>"))),
+  }),
 });
 
 const music_playlists_get = query({
@@ -4905,9 +4909,11 @@ const music_queue_add = mutation({
   args: Schema.Struct({
     trackIds: Schema.Array(Schema.String.pipe(Schema.brand("Id<tracks>"))),
     next: Schema.optionalKey(Schema.Boolean),
+    afterItemId: Schema.optionalKey(Schema.String.pipe(Schema.brand("Id<playQueueEntries>"))),
   }),
   result: Schema.Struct({
     itemIds: Schema.Array(Schema.String.pipe(Schema.brand("Id<playQueueEntries>"))),
+    rest: Schema.Array(Schema.String.pipe(Schema.brand("Id<tracks>"))),
   }),
 });
 
@@ -5037,6 +5043,30 @@ const music_queue_shuffle = mutation({
   path: "music/queue:shuffle",
   args: Schema.Struct({ on: Schema.Boolean }),
   result: Schema.Null,
+});
+
+const music_tracks_get = query({
+  name: "music.tracks.get",
+  path: "music/tracks:get",
+  args: Schema.Struct({ trackId: Schema.String.pipe(Schema.brand("Id<tracks>")) }),
+  result: Schema.Struct({
+    id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+    title: Schema.String,
+    artist: Schema.String,
+    artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+    album: Schema.String,
+    albumId: Schema.String.pipe(Schema.brand("Id<albums>")),
+    trackNumber: Schema.Union([Schema.Finite, Schema.Null]),
+    discNumber: Schema.Union([Schema.Finite, Schema.Null]),
+    durationMs: Schema.Finite,
+    codec: Schema.String,
+    lossless: Schema.Boolean,
+    bitrate: Schema.Union([Schema.Finite, Schema.Null]),
+    sampleRate: Schema.Union([Schema.Finite, Schema.Null]),
+    bitDepth: Schema.Union([Schema.Finite, Schema.Null]),
+    artUrl: Schema.Union([Schema.String, Schema.Null]),
+    liked: Schema.Boolean,
+  }),
 });
 
 const music_tracks_list = query({
@@ -5485,7 +5515,7 @@ export const effectMethods = (method: EffectBuilder) => ({
       start: method.mutation(music_play_start),
     },
     playlists: {
-      /** `music.playlists.addTracks` (mutation, music:edit): Add songs to the end of a playlist you own or collaborate on (2,000 songs at most). */
+      /** `music.playlists.addTracks` (mutation, music:edit): Add songs to the end of a playlist you own or collaborate on (2,000 songs at most); send any songs left in rest again. */
       addTracks: method.mutation(music_playlists_addTracks),
       /** `music.playlists.create` (mutation, music:edit): Create a playlist, with songs to start it. */
       create: method.mutation(music_playlists_create),
@@ -5515,7 +5545,7 @@ export const effectMethods = (method: EffectBuilder) => ({
       visibility: method.mutation(music_playlists_visibility),
     },
     queue: {
-      /** `music.queue.add` (mutation, music:play): Add songs to your queue: --next plays them after the current song, otherwise they go after your other queued songs (before autoplay). */
+      /** `music.queue.add` (mutation, music:play): Add songs to your queue: --next plays them after the current song, otherwise they go after your other queued songs (before autoplay); send any songs left in rest again with --after-item-id set to the last item id added so far. */
       add: method.mutation(music_queue_add),
       /** `music.queue.autoplay` (mutation, music:play): Turn autoplay on or off: when the queue runs out, play the same artist, then genre, then era. */
       autoplay: method.mutation(music_queue_autoplay),
@@ -5539,6 +5569,8 @@ export const effectMethods = (method: EffectBuilder) => ({
       shuffle: method.mutation(music_queue_shuffle),
     },
     tracks: {
+      /** `music.tracks.get` (query, music:read): Show a song you may see: its title, artist, and album. */
+      get: method.query(music_tracks_get),
       /** `music.tracks.list` (query, music:read): List the songs you may play, by title. */
       list: method.query(music_tracks_list),
     },
@@ -5941,7 +5973,7 @@ export const promiseMethods = (method: PromiseBuilder) => ({
       start: method.mutation(music_play_start),
     },
     playlists: {
-      /** `music.playlists.addTracks` (mutation, music:edit): Add songs to the end of a playlist you own or collaborate on (2,000 songs at most). */
+      /** `music.playlists.addTracks` (mutation, music:edit): Add songs to the end of a playlist you own or collaborate on (2,000 songs at most); send any songs left in rest again. */
       addTracks: method.mutation(music_playlists_addTracks),
       /** `music.playlists.create` (mutation, music:edit): Create a playlist, with songs to start it. */
       create: method.mutation(music_playlists_create),
@@ -5971,7 +6003,7 @@ export const promiseMethods = (method: PromiseBuilder) => ({
       visibility: method.mutation(music_playlists_visibility),
     },
     queue: {
-      /** `music.queue.add` (mutation, music:play): Add songs to your queue: --next plays them after the current song, otherwise they go after your other queued songs (before autoplay). */
+      /** `music.queue.add` (mutation, music:play): Add songs to your queue: --next plays them after the current song, otherwise they go after your other queued songs (before autoplay); send any songs left in rest again with --after-item-id set to the last item id added so far. */
       add: method.mutation(music_queue_add),
       /** `music.queue.autoplay` (mutation, music:play): Turn autoplay on or off: when the queue runs out, play the same artist, then genre, then era. */
       autoplay: method.mutation(music_queue_autoplay),
@@ -5995,6 +6027,8 @@ export const promiseMethods = (method: PromiseBuilder) => ({
       shuffle: method.mutation(music_queue_shuffle),
     },
     tracks: {
+      /** `music.tracks.get` (query, music:read): Show a song you may see: its title, artist, and album. */
+      get: method.query(music_tracks_get),
       /** `music.tracks.list` (query, music:read): List the songs you may play, by title. */
       list: method.query(music_tracks_list),
     },

@@ -50,7 +50,7 @@ const DEPENDENTS_LIMIT: Cost = {
   lyricBytes: CALL_COST.lyricBytes,
 };
 
-const shrink = async (store: MusicStore, item: Doc<"playlistItems">, track: Doc<"tracks">) => {
+const shrink = async (store: MusicStore, item: Doc<"playlistItems">) => {
   await store.deletePlaylistItem(item._id);
 
   const playlist = await store.get("playlists", item.playlistId);
@@ -59,7 +59,7 @@ const shrink = async (store: MusicStore, item: Doc<"playlistItems">, track: Doc<
 
   await store.setPlaylist(playlist._id, {
     trackCount: Math.max(0, playlist.trackCount - 1),
-    durationMs: Math.max(0, playlist.durationMs - track.durationMs),
+    durationMs: Math.max(0, playlist.durationMs - item.durationMs),
   });
 };
 
@@ -143,7 +143,7 @@ const clearOne = async (store: MusicStore, track: Doc<"tracks">): Promise<boolea
   ]);
 
   // One at a time: entries of one playlist or queue each read what the one before wrote.
-  await inOrder(items, async (item) => shrink(store, item, track));
+  await inOrder(items, async (item) => shrink(store, item));
   await inOrder(entries, async (entry) => dropEntry(store, entry));
 
   await Promise.all([

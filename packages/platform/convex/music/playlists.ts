@@ -29,7 +29,7 @@ import type { Cost } from "./budget";
 import { DOCUMENT_BYTES, MUSIC_BOUNDS, TABLE_BYTES } from "./fit";
 import { trackFacts } from "./items";
 import { ORDER_STEP, orderBetween, renumbered } from "./order";
-import { personMeter, readDecided, requireTrackIds, viewDecider } from "./person";
+import { personMeter, readDecidedLeading, requireTrackIds, viewDecider } from "./person";
 import { contributors, likedAmong, musicPresenter } from "./present";
 import type { Contributor, MusicPresenter, Playlist } from "./present";
 import { TRACK_ROW_BYTES, pageRowsFor } from "./reads";
@@ -241,11 +241,19 @@ const lastItem = (store: MusicStore, playlistId: Id<"playlists">) =>
       .order("desc"),
   );
 
+/** The entries a call added, and the songs it left for the next call. */
+interface Appended {
+  readonly itemIds: ReadonlyArray<Id<"playlistItems">>;
+  readonly rest: ReadonlyArray<Id<"tracks">>;
+}
+
 /**
  * Appends `trackIds` to a playlist the caller may edit, as old music's `appendTracks` did: every
- * song must exist and be one the caller may see, or the call fails `not_found` and adds none; a
- * song whose file went missing goes on, and plays once the file is back. A playlist holds at most
- * 2,000 entries, so more fail with `conflict`.
+ * song the call reads must exist and be one the caller may see, or the call fails `not_found` and
+ * adds none of them; a song whose file went missing goes on, and plays once the file is back. A
+ * playlist holds at most 2,000 entries, so more fail with `conflict`. It reads the leading songs
+ * it can within Convex's limits and answers the rest, which the caller sends again
+ * (`readDecidedLeading`): what earlier calls added stays when a later one is refused.
  */
 const appendTracks = async (
   ctx: Pick<MutationCtx, "db">,
@@ -254,7 +262,7 @@ const appendTracks = async (
   playlist: Doc<"playlists">,
   trackIds: ReadonlyArray<Id<"tracks">>,
   userId: Id<"users">,
-): Promise<ReadonlyArray<Id<"playlistItems">>> => {
+): Promise<Appended> => {
   requireTrackIds(trackIds, PLAYLIST_ITEMS_MAX);
 
   if (playlist.trackCount + trackIds.length > PLAYLIST_ITEMS_MAX) {
@@ -268,7 +276,7 @@ const appendTracks = async (
     (trackIds.length + 1) * DOCUMENT_BYTES.small + TABLE_BYTES.playlists,
   );
 
-  const decided = await readDecided(
+  const decided = await readDecidedLeading(
     store,
     viewDecider(ctx.db, reach, store.meter),
     trackIds,
@@ -279,7 +287,7 @@ const appendTracks = async (
     track !== null && allowed ? [track] : [],
   );
 
-  if (tracks.length !== trackIds.length) return fail("not_found", "Some songs were not found");
+  if (tracks.length !== decided.length) return fail("not_found", "Some songs were not found");
 
   const last = await lastItem(store, playlist._id);
   const base = last?.position ?? 0;
@@ -291,6 +299,7 @@ const appendTracks = async (
         playlistId: playlist._id,
         trackId: track._id,
         position: base + (index + 1) * ORDER_STEP,
+        durationMs: track.durationMs,
         addedBy: userId,
         addedAt: now,
       }),
@@ -303,7 +312,7 @@ const appendTracks = async (
     updatedAt: now,
   });
 
-  return itemIds;
+  return { itemIds, rest: trackIds.slice(decided.length) };
 };
 
 /** Opens a playlist for `action` in a mutation, charging what deciding it read. */
@@ -532,15 +541,17 @@ export const {
     store.meter.charge(cost(1, 1, DOCUMENT_BYTES.small, DOCUMENT_BYTES.small));
     await grantCreator(ctx, refOf(playlistId), caller.userId);
 
-    if (args.trackIds !== undefined && args.trackIds.length > 0) {
-      const playlist = await store.get("playlists", playlistId);
+    const playlist =
+      args.trackIds === undefined || args.trackIds.length === 0
+        ? null
+        : await store.get("playlists", playlistId);
 
-      if (playlist !== null) {
-        await appendTracks(ctx, store, reach, playlist, args.trackIds, caller.userId);
-      }
-    }
+    const appended =
+      playlist === null || args.trackIds === undefined
+        ? null
+        : await appendTracks(ctx, store, reach, playlist, args.trackIds, caller.userId);
 
-    return { playlistId };
+    return { playlistId, rest: [...(appended?.rest ?? [])] };
   },
   update: async (ctx, args, caller) => {
     const name = args.name === undefined ? undefined : playlistName(args.name);
@@ -576,19 +587,25 @@ export const {
   addTracks: async (ctx, { playlistId, trackIds }, caller) => {
     const { reach, store, playlist } = await openPlaylist(ctx, caller, "edit", playlistId);
 
-    return {
-      itemIds: [...(await appendTracks(ctx, store, reach, playlist, trackIds, caller.userId))],
-    };
+    const { itemIds, rest } = await appendTracks(
+      ctx,
+      store,
+      reach,
+      playlist,
+      trackIds,
+      caller.userId,
+    );
+
+    return { itemIds: [...itemIds], rest: [...rest] };
   },
   removeItem: async (ctx, { playlistId, itemId }, caller) => {
     const { store, playlist } = await openPlaylist(ctx, caller, "edit", playlistId);
     const item = await itemOf(store, playlist, itemId, "That entry is not in this playlist");
-    const track = await store.get("tracks", item.trackId);
 
     await store.deletePlaylistItem(item._id);
     await store.setPlaylist(playlist._id, {
       trackCount: Math.max(0, playlist.trackCount - 1),
-      durationMs: Math.max(0, playlist.durationMs - (track?.durationMs ?? 0)),
+      durationMs: Math.max(0, playlist.durationMs - item.durationMs),
       updatedAt: Date.now(),
     });
 

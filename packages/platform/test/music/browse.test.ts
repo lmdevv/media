@@ -279,4 +279,26 @@ describe.skipIf(stack === undefined)("music browsing", { timeout: 180_000 }, () 
       await refusal(sam.signedIn.client.query(api.music.lyrics.get, { trackId: synced })),
     ).toBe("not_found");
   });
+  it("shows a song a person may see, with its album, as old music's links did", async () => {
+    if (stack === undefined) return;
+    const [aiko, sam] = await Promise.all([member(stack, "aiko"), member(stack, "sam")]);
+    const kid = await explicitKid(stack, "kid");
+    const shelf = await musicShelf(stack, [aiko, kid], SONGS);
+    const quiet = trackAt(shelf, 1);
+    const loud = trackAt(shelf, 0);
+
+    const song = await aiko.signedIn.client.query(api.music.tracks.get, { trackId: quiet });
+
+    expect(song).toMatchObject({ id: quiet, title: "Quiet Song", album: "Alpha", liked: false });
+
+    const album = await aiko.signedIn.client.query(api.music.albums.get, { albumId: song.albumId });
+
+    expect(album.album.title).toBe("Alpha");
+    expect(await refusal(sam.signedIn.client.query(api.music.tracks.get, { trackId: quiet }))).toBe(
+      "not_found",
+    );
+    expect(await refusal(kid.signedIn.client.query(api.music.tracks.get, { trackId: loud }))).toBe(
+      "not_found",
+    );
+  });
 });

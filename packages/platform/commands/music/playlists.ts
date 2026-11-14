@@ -15,7 +15,10 @@ const addTracksArgs = v.object({
   trackIds: v.array(v.id("tracks")),
 });
 
-const addTracksResult = v.object({ itemIds: v.array(v.id("playlistItems")) });
+const addTracksResult = v.object({
+  itemIds: v.array(v.id("playlistItems")),
+  rest: v.array(v.id("tracks")),
+});
 
 const createArgs = v.object({
   name: v.string(),
@@ -23,7 +26,7 @@ const createArgs = v.object({
   trackIds: v.optional(v.array(v.id("tracks"))),
 });
 
-const createResult = v.object({ playlistId: v.id("playlists") });
+const createResult = v.object({ playlistId: v.id("playlists"), rest: v.array(v.id("tracks")) });
 
 const getArgs = v.object({ playlistId: v.id("playlists") });
 
@@ -220,7 +223,7 @@ const visibilityResult = v.null();
 
 /** The handlers `convex/music/playlists.ts` passes to `register`, one per `music.playlists` command. */
 export interface Handlers {
-  /** `music.playlists.addTracks` (mutation, music:edit): Add songs to the end of a playlist you own or collaborate on (2,000 songs at most). */
+  /** `music.playlists.addTracks` (mutation, music:edit): Add songs to the end of a playlist you own or collaborate on (2,000 songs at most); send any songs left in rest again. */
   readonly addTracks: (
     ctx: Omit<MutationCtx, "auth">,
     args: Infer<typeof addTracksArgs>,

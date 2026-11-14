@@ -12,11 +12,17 @@ import type { Reach } from "../core/permissions/grants";
 import type { Principal } from "../core/permissions/policy";
 import { trackPlayer } from "./access";
 import { AUTOPLAY_BATCH, autoplaySongs, shuffled } from "./autoplay";
-import { NO_COST, cost, meterFrom } from "./budget";
+import { NO_COST, addCost, cost, meterFrom } from "./budget";
 import type { Cost } from "./budget";
 import { DOCUMENT_BYTES, TABLE_BYTES } from "./fit";
 import { orderBetween, ordersBetween, renumbered } from "./order";
-import { personMeter, playDecider, readDecided, requireTrackIds } from "./person";
+import {
+  personMeter,
+  playDecider,
+  readDecided,
+  readDecidedLeading,
+  requireTrackIds,
+} from "./person";
 import type { Decider } from "./person";
 import { likedAmong, musicPresenter } from "./present";
 import { TRACK_ROW_BYTES, pageRowsFor } from "./reads";
@@ -286,6 +292,9 @@ interface Slot {
   readonly after: number | null;
 }
 
+/** Where new entries go in both orders, read again each time it runs. */
+type Place = () => Promise<{ readonly play: Slot; readonly list: Slot }>;
+
 const slotAfter = (
   anchor: number | null,
   next: Entry | null,
@@ -305,7 +314,7 @@ const insertAt = async (
   queue: Queue,
   trackIds: ReadonlyArray<Id<"tracks">>,
   autoplay: boolean,
-  place: () => Promise<{ readonly play: Slot; readonly list: Slot }>,
+  place: Place,
   renumberedOnce = false,
 ): Promise<ReadonlyArray<Id<"playQueueEntries">>> => {
   const slots = await place();
@@ -471,6 +480,84 @@ const deleteUpcoming = async (
   return leaving.length;
 };
 
+/**
+ * Where `music.queue.add` puts songs: right after `after` in both orders when it names an entry
+ * (the current one for `--next`, or the last one a call before added); at the end of an empty
+ * queue; otherwise after the songs people queued and before autoplay's, and at the end of the
+ * order before shuffle, as old music's `addedOrder` placed them.
+ */
+const addedSlots =
+  (session: Session, queue: Queue, current: Entry | null, after: Entry | null): Place =>
+  async () => {
+    if (after !== null) {
+      const fresh = await entryOf(session, queue, after._id);
+      const next = await playsAfter(session, queue, fresh);
+      const play = slotAfter(fresh.order, next, (entry) => entry.order);
+
+      if (!queue.shuffle) return { play, list: play };
+
+      const listNext = await listedAfter(session, queue, fresh);
+
+      return { play, list: slotAfter(fresh.listOrder, listNext, (entry) => entry.listOrder) };
+    }
+
+    const lastListed = await firstOf(session, queue, "by_queue_list", null, true);
+
+    if (current === null) {
+      const last = await firstOf(session, queue, "by_queue_order", null, true);
+
+      return {
+        play: { before: last?.order ?? null, after: null },
+        list: { before: lastListed?.listOrder ?? null, after: null },
+      };
+    }
+
+    const fresh = await entryOf(session, queue, current._id);
+
+    const autoplayed = await session.store.first("playQueueEntries", (q) =>
+      q.withIndex("by_queue_autoplay", (index) =>
+        index
+          .eq("userId", session.userId)
+          .eq("generation", queue.generation)
+          .eq("autoplay", true)
+          .gt("order", fresh.order),
+      ),
+    );
+
+    const before =
+      autoplayed === null
+        ? await firstOf(session, queue, "by_queue_order", null, true)
+        : await playsBeforeOf(session, queue, autoplayed);
+
+    const play = { before: before?.order ?? fresh.order, after: autoplayed?.order ?? null };
+
+    return {
+      play,
+      list: queue.shuffle ? { before: lastListed?.listOrder ?? null, after: null } : play,
+    };
+  };
+
+/**
+ * Renumbers the queue now when `place`'s slots are too narrow for `count` entries, before a call
+ * reads its songs: the renumber writes at most `MAX_QUEUE` entries, and the songs then take what
+ * the call has left, so adding never renumbers after it has read them (ADR 0024).
+ */
+const widen = async (
+  session: Session,
+  queue: Queue,
+  count: number,
+  place: Place,
+): Promise<void> => {
+  const slots = await place();
+
+  if (
+    ordersBetween(slots.play.before, slots.play.after, count) === null ||
+    ordersBetween(slots.list.before, slots.list.after, count) === null
+  ) {
+    await renumber(session, queue);
+  }
+};
+
 export const { get, list, play, add, remove, move, clear, jump, shuffle, repeat, autoplay } =
   register({
     get: async (ctx, _args, caller) => {
@@ -587,95 +674,70 @@ export const { get, list, play, add, remove, move, clear, jump, shuffle, repeat,
 
       return { current };
     },
-    add: async (ctx, { trackIds, next: playNext }, caller) => {
+    add: async (ctx, { trackIds, next: playNext, afterItemId }, caller) => {
       requireTrackIds(trackIds);
 
       const { session, queue } = await open(ctx, caller);
 
-      const reserve = cost(
-        COMMAND_COST.work.ranges,
-        trackIds.length,
-        COMMAND_COST.readBytes,
-        trackIds.length * DOCUMENT_BYTES.small,
-      );
-
-      const { tracks } = await playableTracks(session, trackIds, 0, reserve);
+      // Songs past the queue's room never join it, as old music cut them at `MAX_QUEUE`.
       const room = Math.max(0, MAX_QUEUE - queue.count);
-      const songs = tracks.slice(0, room).map((track) => track._id);
 
-      if (songs.length === 0) return { itemIds: [] };
+      if (room === 0) return { itemIds: [], rest: [] };
+
+      const anchor = afterItemId === undefined ? null : await entryOf(session, queue, afterItemId);
 
       const current =
         queue.current === null ? null : await session.store.get("playQueueEntries", queue.current);
 
-      if (current === null) {
-        const itemIds = await insertAt(session, queue, songs, false, async () => {
-          const last = await firstOf(session, queue, "by_queue_order", null, true);
-          const lastListed = await firstOf(session, queue, "by_queue_list", null, true);
+      const place = addedSlots(
+        session,
+        queue,
+        current,
+        anchor ?? (playNext === true ? current : null),
+      );
 
-          return {
-            play: { before: last?.order ?? null, after: null },
-            list: { before: lastListed?.listOrder ?? null, after: null },
-          };
-        });
+      const most = Math.min(trackIds.length, room);
 
-        await toppedUp(
-          session,
-          await saved(session, queue, {
-            current: itemIds[0] ?? null,
-            count: queue.count + itemIds.length,
-          }),
-        );
+      await widen(session, queue, most, place);
 
-        return { itemIds: [...itemIds] };
+      // It reads until the queue is full, so a song whose file went missing takes no room.
+      const decided = await readDecidedLeading(
+        session.store,
+        session.decider,
+        trackIds,
+        addCost(COMMAND_COST, entriesCost(most)),
+        { most: room, counts: ({ track }) => track !== null && !track.missing },
+      );
+
+      const refused = decided.find(({ track, allowed }) => track === null || !allowed);
+
+      if (refused !== undefined) return fail("not_found", `Track ${refused.id} not found`);
+
+      const songs = decided.flatMap(({ track }) =>
+        track === null || track.missing ? [] : [track._id],
+      );
+
+      const rest = songs.length >= room ? [] : trackIds.slice(decided.length);
+
+      if (songs.length === 0) {
+        return rest.length === 0 && anchor === null
+          ? fail("not_found", "None of those songs can play: their files are missing")
+          : { itemIds: [], rest };
       }
 
-      const itemIds = await insertAt(session, queue, songs, false, async () => {
-        const fresh = await entryOf(session, queue, current._id);
+      const itemIds = await insertAt(session, queue, songs, false, place);
+      const count = queue.count + itemIds.length;
 
-        if (playNext === true) {
-          const after = await playsAfter(session, queue, fresh);
-          const listAfter = queue.shuffle ? await listedAfter(session, queue, fresh) : after;
+      if (current === null) {
+        const started = await saved(session, queue, { current: itemIds[0] ?? null, count });
 
-          return {
-            play: slotAfter(fresh.order, after, (entry) => entry.order),
-            list: queue.shuffle
-              ? slotAfter(fresh.listOrder, listAfter, (entry) => entry.listOrder)
-              : slotAfter(fresh.order, after, (entry) => entry.order),
-          };
-        }
+        // Autoplay waits for the songs the caller sends again, which go before its own.
+        if (rest.length === 0) await toppedUp(session, started);
+      } else {
+        await saved(session, queue, { count });
+      }
 
-        const autoplayed = await session.store.first("playQueueEntries", (q) =>
-          q.withIndex("by_queue_autoplay", (index) =>
-            index
-              .eq("userId", session.userId)
-              .eq("generation", queue.generation)
-              .eq("autoplay", true)
-              .gt("order", fresh.order),
-          ),
-        );
-
-        const before =
-          autoplayed === null
-            ? await firstOf(session, queue, "by_queue_order", null, true)
-            : await playsBeforeOf(session, queue, autoplayed);
-
-        const lastListed = await firstOf(session, queue, "by_queue_list", null, true);
-
-        const playSlot = {
-          before: before?.order ?? fresh.order,
-          after: autoplayed?.order ?? null,
-        };
-
-        return {
-          play: playSlot,
-          list: queue.shuffle ? { before: lastListed?.listOrder ?? null, after: null } : playSlot,
-        };
-      });
-
-      await saved(session, queue, { count: queue.count + itemIds.length });
-
-      return { itemIds: [...itemIds] };
+      return { itemIds: [...itemIds], rest };
     },
     remove: async (ctx, { itemId }, caller) => {
       const { session, queue } = await open(ctx, caller);
@@ -704,7 +766,7 @@ export const { get, list, play, add, remove, move, clear, jump, shuffle, repeat,
       const moving = await entryOf(session, queue, itemId);
       const after = afterItemId === undefined ? null : await entryOf(session, queue, afterItemId);
 
-      const place = async (): Promise<{ readonly play: Slot; readonly list: Slot }> => {
+      const place: Place = async () => {
         const fresh = await entryOf(session, queue, moving._id);
         const anchor = after === null ? null : await entryOf(session, queue, after._id);
 

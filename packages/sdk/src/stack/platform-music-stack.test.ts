@@ -130,6 +130,7 @@ describe.skipIf(stack === undefined)("platform.music on the stack", { timeout: 6
 
         if (sunrise === undefined) return yield* Effect.die("the seeded song was not listed");
 
+        const song = yield* platform.music.tracks.get({ trackId: sunrise });
         const started = yield* platform.music.play.start({ trackId: sunrise });
 
         const recorded = yield* platform.music.play.report({
@@ -151,10 +152,12 @@ describe.skipIf(stack === undefined)("platform.music on the stack", { timeout: 6
 
         const queue = yield* platform.music.queue.get();
 
-        const { playlistId } = yield* platform.music.playlists.create({
+        const { playlistId, rest } = yield* platform.music.playlists.create({
           name: "SDK mix",
           trackIds: [sunrise],
         });
+
+        const added = yield* platform.music.queue.add({ trackIds: [sunrise], next: true });
 
         yield* platform.music.playlists.share({ playlistId, userId: friendId });
 
@@ -170,10 +173,17 @@ describe.skipIf(stack === undefined)("platform.music on the stack", { timeout: 6
         return {
           songs: songs.length,
           titles: tracks.page.map((track) => track.title).toSorted(),
+          song: {
+            title: song.title,
+            album: song.album === album,
+            albumId: song.albumId === albumId,
+          },
           ticket: started.ticket.length > 0,
           recorded,
           liked: liked.page.map((track) => track.id),
           queue: { current: queue.current === current, count: queue.count },
+          added: { items: added.itemIds.length, rest: added.rest.length },
+          rest: rest.length,
           shared: shared.page.map((playlist) => playlist.id),
           playlistId,
           hidden,
@@ -184,9 +194,12 @@ describe.skipIf(stack === undefined)("platform.music on the stack", { timeout: 6
     expect(answer).toMatchObject({
       songs: 3,
       titles: ["Dusk", "Noon", "Sunrise"],
+      song: { title: "Sunrise", album: true, albumId: true },
       ticket: true,
       recorded: { recorded: true },
       queue: { current: true, count: 3 },
+      added: { items: 1, rest: 0 },
+      rest: 0,
       hidden: "not found",
     });
     expect(answer.liked).toHaveLength(1);

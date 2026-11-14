@@ -10,9 +10,16 @@ import type { MutationCtx, QueryCtx } from "../../convex/_generated/server";
 import { requireCaller } from "../../convex/core/auth/caller";
 import type { Caller } from "../../convex/core/auth/caller";
 
-const addArgs = v.object({ trackIds: v.array(v.id("tracks")), next: v.optional(v.boolean()) });
+const addArgs = v.object({
+  trackIds: v.array(v.id("tracks")),
+  next: v.optional(v.boolean()),
+  afterItemId: v.optional(v.id("playQueueEntries")),
+});
 
-const addResult = v.object({ itemIds: v.array(v.id("playQueueEntries")) });
+const addResult = v.object({
+  itemIds: v.array(v.id("playQueueEntries")),
+  rest: v.array(v.id("tracks")),
+});
 
 const autoplayArgs = v.object({ on: v.boolean() });
 
@@ -107,7 +114,7 @@ const shuffleResult = v.null();
 
 /** The handlers `convex/music/queue.ts` passes to `register`, one per `music.queue` command. */
 export interface Handlers {
-  /** `music.queue.add` (mutation, music:play): Add songs to your queue: --next plays them after the current song, otherwise they go after your other queued songs (before autoplay). */
+  /** `music.queue.add` (mutation, music:play): Add songs to your queue: --next plays them after the current song, otherwise they go after your other queued songs (before autoplay); send any songs left in rest again with --after-item-id set to the last item id added so far. */
   readonly add: (
     ctx: Omit<MutationCtx, "auth">,
     args: Infer<typeof addArgs>,
