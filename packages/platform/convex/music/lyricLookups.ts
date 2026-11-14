@@ -16,6 +16,11 @@ import type { JobCtx } from "../core/jobs/store";
 import { inOrder } from "../core/lib/inOrder";
 import { sha256Hex } from "../core/lib/secrets";
 import { serverMutation } from "../core/lib/serverFacing";
+import { reachOf } from "../core/permissions/grants";
+import type { ItemGate } from "../core/permissions/grants";
+import { SERVER, can, principalOf } from "../core/permissions/policy";
+import { callBudget } from "../movies/reads";
+import { walkMusicLibrariesFrom } from "./access";
 import { CALL_COST, NO_COST, addCost, cost, meterFrom, whileBudget } from "./budget";
 import { checkLyrics } from "./fit";
 import { lrclibAnswer } from "./validators";
@@ -232,18 +237,59 @@ export const backfill = internalMutation({
   },
 });
 
-/** Queues the backfill of `libraryIds` (`backfill`). */
+/** Queues the backfill of the libraries `gates` found (`backfill`). */
 export const startBackfill = async (
   ctx: JobCtx,
-  libraryIds: ReadonlyArray<Id<"libraries">>,
+  gates: ReadonlyArray<Pick<ItemGate, "library">>,
 ): Promise<void> => {
-  if (libraryIds.length === 0) return;
+  if (gates.length === 0) return;
 
   await ctx.scheduler.runAfter(0, internal.music.lyricLookups.backfill, {
-    libraryIds: [...libraryIds],
+    libraryIds: gates.map((gate) => gate.library._id),
     after: null,
   });
 };
+
+/** Schedules `discover` from `cursor`, for an admin's libraries one call could not list. */
+export const discoverMore = async (
+  ctx: JobCtx,
+  userId: Id<"users">,
+  cursor: string | null,
+): Promise<void> => {
+  await ctx.scheduler.runAfter(0, internal.music.lyricLookups.discover, { userId, cursor });
+};
+
+/**
+ * Lists the next music libraries `userId` may view, from `cursor`, as far as one call's budget
+ * reaches, and starts their backfill, then goes on in another step until the last one, as old
+ * music's backfill went through every library its admin could read. It stops when lookups are
+ * turned off or the person may no longer configure them.
+ */
+export const discover = internalMutation({
+  args: { userId: v.id("users"), cursor: v.union(v.string(), v.null()) },
+  returns: v.null(),
+  handler: async (ctx, { userId, cursor }) => {
+    const user = await ctx.db.get(userId);
+
+    if (user === null || !(await remoteLyricsOn(ctx.db))) return null;
+
+    const principal = principalOf(user);
+
+    if (!can(principal, "configureLyrics", SERVER).allowed) return null;
+
+    const reach = await reachOf(ctx.db, principal);
+    const walked = await walkMusicLibrariesFrom(ctx.db, reach, callBudget(reach), cursor);
+
+    await startBackfill(ctx, walked.gates);
+
+    // A step that found nothing and still stopped short could not afford one page: stop there.
+    if (!walked.complete && (walked.gates.length > 0 || walked.cursor !== cursor)) {
+      await discoverMore(ctx, userId, walked.cursor);
+    }
+
+    return null;
+  },
+});
 
 /**
  * What one try learned, as the server sends it: LRCLIB's answer; that the record it sent for the

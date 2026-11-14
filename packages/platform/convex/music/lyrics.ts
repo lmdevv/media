@@ -6,7 +6,7 @@ import { reachOf } from "../core/permissions/grants";
 import { callBudget } from "../movies/reads";
 import { trackPlayer, walkMusicLibraries } from "./access";
 import { NO_COST, meterFrom } from "./budget";
-import { lookupOf, remoteLyricsOn, startBackfill } from "./lyricLookups";
+import { discoverMore, lookupOf, remoteLyricsOn, startBackfill } from "./lyricLookups";
 import type { LyricSet } from "./validators";
 import { musicStore } from "./write";
 
@@ -194,20 +194,13 @@ export const { get, status, configure, backfill } = register({
     }
 
     const reach = await reachOf(ctx.db, caller);
-    const { gates, complete } = await walkMusicLibraries(ctx.db, reach, callBudget(reach));
+    const walked = await walkMusicLibraries(ctx.db, reach, callBudget(reach));
 
-    // A backfill that left out libraries the budget could not list would look like a whole one.
-    if (!complete) {
-      return fail(
-        "conflict",
-        "You can read more music libraries than one backfill can list; nothing was queued",
-      );
-    }
+    await startBackfill(ctx, walked.gates);
 
-    const libraryIds = gates.map((gate) => gate.library._id);
+    // Libraries the call's budget could not list are found in scheduled steps, as the admin.
+    if (!walked.complete) await discoverMore(ctx, caller.userId, walked.cursor);
 
-    await startBackfill(ctx, libraryIds);
-
-    return { libraries: libraryIds.length };
+    return { libraries: walked.gates.length };
   },
 });

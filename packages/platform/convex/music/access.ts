@@ -189,6 +189,8 @@ export const requirePlaylist = async (
 export interface Walked {
   readonly gates: ReadonlyArray<ItemGate>;
   readonly complete: boolean;
+  /** Where a walk that stopped short goes on from (`walkMusicLibrariesFrom`); null when complete. */
+  readonly cursor: string | null;
 }
 
 /**
@@ -203,6 +205,14 @@ export const walkMusicLibraries = async (
   reach: Reach,
   budget: ReadBudget,
 ): Promise<Walked> => walkFrom(db, reach, budget, null, []);
+
+/** `walkMusicLibraries` from where an earlier walk that stopped short left off (`cursor`). */
+export const walkMusicLibrariesFrom = (
+  db: DatabaseReader,
+  reach: Reach,
+  budget: ReadBudget,
+  cursor: string | null,
+): Promise<Walked> => walkFrom(db, reach, budget, cursor, []);
 
 const walkFrom = async (
   db: DatabaseReader,
@@ -227,7 +237,9 @@ const walkFrom = async (
   const step = readsOf(1 + keys + rows, groups + keys * (rows + 1) + rows);
 
   if (keys === 0 || rows < 1 || !budget.take(step)) {
-    return { gates: found, complete: keys === 0 };
+    return keys === 0
+      ? { gates: found, complete: true, cursor: null }
+      : { gates: found, complete: false, cursor };
   }
 
   const page = await visiblePage({ db }, reach.principal, "library", { numItems: rows, cursor });
@@ -242,7 +254,7 @@ const walkFrom = async (
   ];
 
   return page.isDone
-    ? { gates, complete: true }
+    ? { gates, complete: true, cursor: null }
     : walkFrom(db, reach, budget, page.continueCursor, gates);
 };
 

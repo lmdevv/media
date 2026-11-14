@@ -357,6 +357,29 @@ describe.skipIf(stack === undefined)("music lyrics lookups", { timeout: 180_000 
     });
   });
 
+  it("go on listing an admin's libraries in later steps and backfill each found", async () => {
+    const owner = await admin;
+    const { ids } = await library(core, owner, "Found later", (root) => [song(root, "Late find")]);
+
+    // The step a backfill schedules when one call could not list every library: from the start
+    // here, it finds this admin's libraries, the new one among them, and backfills them.
+    await runFunction(
+      core,
+      internal.music.lyricLookups.discover,
+      { userId: owner.userId, cursor: null },
+      Schema.Null,
+    );
+
+    const trackId = ids[0] ?? never();
+    const held = await drainUntilQueued(core, ids);
+    const lease = held.get(trackId) ?? (await claimLookup(core, trackId));
+
+    expect(await settle(core, lease, found(4, "found later"))).toEqual({
+      outcome: "held",
+      value: { saved: "found" },
+    });
+  });
+
   it("pause every lookup for LRCLIB's pause, then let them run again", async () => {
     const owner = await admin;
     const { ids } = await library(core, owner, "Pause", (root) => [song(root, "Paused")]);
