@@ -41,7 +41,11 @@ function HomeScreen({ scan: active }: { readonly scan: ActiveScan | null | undef
   const player = usePlayer();
   const now = useNow(60_000);
 
-  if (home === undefined || me === undefined || active === undefined) return <HomeSkeleton />;
+  if (home === undefined || me === undefined) return <HomeSkeleton />;
+
+  // A library with songs shows at once and its scan banner once the scan is known; an empty one
+  // waits for it, so it never flashes the empty state while its first scan runs.
+  if (home.stats.tracks === 0 && active === undefined) return <HomeSkeleton />;
 
   const scan = active ?? undefined;
   const name = firstName(nameOf(me));

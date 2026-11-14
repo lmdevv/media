@@ -562,7 +562,10 @@ YAML
     fi
     if core_only; then wait_core_libraries "$(( 1 + (${#shows[@]} > 0) + (${#music_folder[@]} > 0) ))"
     else wait_libraries "$(( ${#shows[@]} > 0 ? 2 : 1 ))"; fi
-    music_core && write_state music/people lucia
+    if music_core; then
+      within 120 "signing the music page in" browser sign-in --app music >/dev/null
+      write_state music/people lucia
+    fi
     write_state people lucia
     timing "setup and the first scans"
   fi
@@ -585,8 +588,9 @@ YAML
     timing "the seed"
   fi
   write_state ready "$((SECONDS - started))"
-  local music_note=""
-  has_music && music_note=" music $(music_url)$(old_music && echo " image $music_image"),"
+  local music_note="" music_image_note=""
+  old_music && music_image_note=" image $music_image"
+  has_music && music_note=" music $(music_url)$music_image_note,"
   echo "ready: $(url) in $((SECONDS - started))s (run $run, side $side, project $project, image $image,$music_note library $library, evidence $evidence)"
 }
 
