@@ -555,6 +555,8 @@ export default defineSchema({
     .index("by_status_lease", ["status", "leaseExpiresAt"])
     .index("by_kind", ["payload.kind"])
     .index("by_dedupe_status", ["dedupeKey", "status"])
+    /** A track's `music.lyrics` jobs by status, for the music purge; no other kind has the field. */
+    .index("by_track_status", ["payload.trackId", "status"])
     /** The finished jobs of one kind and status by age, for `core/jobs/cleanup.ts`. */
     .index("by_kind_status_finished", ["payload.kind", "status", "finishedAt"]),
 

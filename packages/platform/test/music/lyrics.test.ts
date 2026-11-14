@@ -147,6 +147,33 @@ const claimOnce = (core: CoreStack, leaseMs = 60_000) =>
 const settle = (core: CoreStack, lease: Lease, result: Result) =>
   retrying(() => runServer(core, api.music.lyricLookups.settle, { lease, result }, Settled));
 
+const Proceeded = Schema.Union([
+  Schema.Struct({
+    outcome: Schema.Literal("held"),
+    value: Schema.Struct({ next: Schema.Literals(["ask", "off", "stale"]) }),
+  }),
+  Schema.Struct({ outcome: Schema.Literals(["canceled", "lost"]) }),
+]);
+
+/** What the server asks right before each LRCLIB request: whether the held lookup may send it. */
+const proceed = (core: CoreStack, lease: Lease) =>
+  retrying(() => runServer(core, api.music.lyricLookups.proceed, { lease }, Proceeded));
+
+const nextIs = (next: "ask" | "off" | "stale") => ({ outcome: "held", value: { next } });
+
+/** Requests lookups of `trackIds` as a song starting or a download does. */
+const requestLookups = (core: CoreStack, trackIds: ReadonlyArray<Id<"tracks">>) =>
+  runFunction(
+    core,
+    internal.music.lyricLookups.requestTracks,
+    { trackIds: [...trackIds] },
+    Schema.Null,
+  );
+
+/** The statuses of a track's lookup jobs, gone tracks' included. */
+const statusesOf = (core: CoreStack, trackId: Id<"tracks">) =>
+  runFunction(core, internal.music.probe.lookupStatuses, { trackId }, Schema.Array(Schema.String));
+
 /**
  * Claims the lookup of `trackId` as the stack's media server. A lookup of another track claimed
  * first, left by an earlier test or run, is settled as a miss, which frees the kind's one slot.
@@ -601,6 +628,109 @@ describe.skipIf(stack === undefined)("music lyrics lookups", { timeout: 180_000 
     await settle(core, lease, found(8, "after the switch"));
   });
 
+  it("send nothing more from a lookup claimed before lookups were turned off", async () => {
+    const owner = await admin;
+
+    const { ids } = await library(core, owner, "Claimed then off", (root) => [
+      song(root, "Claimed"),
+    ]);
+
+    const trackId = ids[0] ?? never();
+
+    await requestLookups(core, [trackId]);
+
+    const lease = await claimLookup(core, trackId);
+
+    expect(await proceed(core, lease)).toEqual(nextIs("ask"));
+
+    try {
+      // The admin turns lookups off between the lookup's get and its search.
+      await turn(owner, false);
+
+      expect(await proceed(core, lease)).toEqual(nextIs("off"));
+      expect(await lookupOf(core, trackId)).toMatchObject({
+        job: { status: "queued", attempts: 1, strikes: 0, waitUntil: null },
+        answer: null,
+      });
+      expect(await claimOnce(core)).toEqual({ outcome: "idle" });
+      expect(await settle(core, lease, found(20, "too late"))).toEqual({ outcome: "lost" });
+    } finally {
+      await turn(owner, true);
+    }
+
+    const again = await claimLookup(core, trackId);
+
+    expect(again.attempt).toBe(2);
+    expect(await proceed(core, again)).toEqual(nextIs("ask"));
+    expect(await settle(core, again, found(21, "back on"))).toEqual({
+      outcome: "held",
+      value: { saved: "found" },
+    });
+  });
+
+  it("cancel a removed library's queued lookups, and end a claimed one as stale", async () => {
+    const owner = await admin;
+
+    const made = await library(core, owner, "Purged lookups", (root) => [
+      song(root, "Claimed before"),
+      song(root, "Queued before"),
+    ]);
+
+    const [claimed, queued] = made.ids;
+
+    await requestLookups(core, [claimed ?? never()]);
+
+    const lease = await claimLookup(core, claimed ?? never());
+
+    await requestLookups(core, [queued ?? never()]);
+    expect(await statusesOf(core, queued ?? never())).toEqual(["queued"]);
+
+    await owner.signedIn.client.mutation(api.core.libraries.remove, { libraryId: made.libraryId });
+    await eventually("the purge to finish", async () =>
+      (await hasTotals(core, made.libraryId)) ? null : true,
+    );
+
+    expect(await statusesOf(core, queued ?? never())).toEqual(["canceled"]);
+    expect(await statusesOf(core, claimed ?? never())).toEqual(["running"]);
+    expect(await proceed(core, lease)).toEqual(nextIs("stale"));
+    expect(await statusesOf(core, claimed ?? never())).toEqual(["succeeded"]);
+  });
+
+  it("cancel the queued lookup of a song whose folder left its library", async () => {
+    const owner = await admin;
+    const made = await musicLibrary(owner, "Dropped folder", 2);
+    const [kept, dropped] = made.roots;
+
+    if (kept === undefined || dropped === undefined) throw new Error("two folders");
+
+    const scan = await claimScan(core, made.scanJobId);
+    const scanned = [song(kept, "Kept song"), song(dropped, "Dropped song")];
+
+    await upsertAll(core, scan, scanned);
+    await finishScan(core, scan);
+
+    const [keptId, droppedId] = await trackIdsAt(
+      core,
+      made.libraryId,
+      scanned.map((track) => track.path),
+    );
+
+    await requestLookups(core, [keptId ?? never(), droppedId ?? never()]);
+    expect(await statusesOf(core, droppedId ?? never())).toEqual(["queued"]);
+
+    await owner.signedIn.client.mutation(api.core.libraries.setFolders, {
+      libraryId: made.libraryId,
+      folders: [kept],
+    });
+    await eventually("the dropped song to go", async () =>
+      (await lookupsOf(core, [droppedId ?? never()]))[0] === null ? true : null,
+    );
+
+    expect(await statusesOf(core, droppedId ?? never())).toEqual(["canceled"]);
+    expect(await statusesOf(core, keptId ?? never())).toEqual(["queued"]);
+    await settle(core, await claimLookup(core, keptId ?? never()), found(22, "kept"));
+  });
+
   it("look a retagged song up again, and delete its answer with the song", async () => {
     const owner = await admin;
     const made = await library(core, owner, "Retag", (root) => [song(root, "Old title")]);
@@ -693,6 +823,24 @@ describe.skipIf(stack === undefined)("music lyrics lookups", { timeout: 180_000 
 
     await owner.signedIn.client.mutation(api.music.lyrics.backfill, {});
 
+    /** The most of the songs' lookups seen waiting over `ms`, while nothing claims. */
+    const quietMost = async (until: number, most = 0): Promise<number> => {
+      const states = await lookupsOf(core, ids);
+      const waiting = states.filter((one) => one?.job?.status === "queued").length;
+
+      if (Date.now() > until) return Math.max(most, waiting);
+
+      await sleep(200);
+
+      return quietMost(until, Math.max(most, waiting));
+    };
+
+    // On a queue nothing works, the backfill's steps fill it up to 24 and go no further.
+    const quiet = await quietMost(Date.now() + 5000);
+
+    expect(quiet).toBeGreaterThan(0);
+    expect(quiet).toBeLessThanOrEqual(24);
+
     const created = Promise.all(
       Array.from({ length: 6 }, async (_, n) => musicLibrary(owner, `Beside the backfill ${n}`)),
     );
@@ -724,8 +872,8 @@ describe.skipIf(stack === undefined)("music lyrics lookups", { timeout: 180_000 
 
     expect((await created).length).toBe(6);
     expect(answered).toBe(count);
-    // A step queues its page of 50 only while fewer than 25 wait.
-    expect(mostQueued).toBeLessThanOrEqual(75);
+    // A step queues only enough to keep fewer than 25 waiting.
+    expect(mostQueued).toBeLessThanOrEqual(24);
   });
 });
 

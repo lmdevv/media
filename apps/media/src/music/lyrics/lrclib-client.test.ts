@@ -49,7 +49,7 @@ describe("LrclibClient", { timeout: MEDIA_TEST_TIMEOUT }, () => {
           { maxFailurePause: Duration.minutes(5) },
         );
 
-        const { result, ms } = yield* timed(lrclib.lookup(QUERY));
+        const { result, ms } = yield* timed(lrclib.lookup(QUERY, Effect.void));
 
         expect(ms).toBeLessThan(1000);
         expect(result).toMatchObject({
@@ -69,7 +69,7 @@ describe("LrclibClient", { timeout: MEDIA_TEST_TIMEOUT }, () => {
             json(429, { message: "slow down" }, { "retry-after": retryAfter }),
           );
 
-          expect(yield* Effect.result(lrclib.lookup(QUERY))).toMatchObject({
+          expect(yield* Effect.result(lrclib.lookup(QUERY, Effect.void))).toMatchObject({
             failure: { _tag: "LrclibUnavailable", reason: "rate_limited", pauseMs: 1000 },
           });
         }
@@ -84,7 +84,7 @@ describe("LrclibClient", { timeout: MEDIA_TEST_TIMEOUT }, () => {
           { timeout: Duration.millis(300) },
         );
 
-        const { result } = yield* timed(lrclib.lookup(QUERY));
+        const { result } = yield* timed(lrclib.lookup(QUERY, Effect.void));
 
         expect(result).toMatchObject({
           _tag: "Failure",
@@ -104,7 +104,7 @@ describe("LrclibClient", { timeout: MEDIA_TEST_TIMEOUT }, () => {
           { maxBodyBytes: 1024 },
         );
 
-        const { result } = yield* timed(lrclib.lookup(QUERY));
+        const { result } = yield* timed(lrclib.lookup(QUERY, Effect.void));
 
         expect(result).toMatchObject({ _tag: "Failure", failure: { _tag: "LrclibMalformed" } });
       }),
@@ -114,8 +114,8 @@ describe("LrclibClient", { timeout: MEDIA_TEST_TIMEOUT }, () => {
     runScoped(
       Effect.gen(function* () {
         const { client: lrclib, lrclib: fake } = yield* client(() => json(400, { error: "bad" }));
-        const first = yield* timed(lrclib.lookup(QUERY));
-        const second = yield* timed(lrclib.lookup(QUERY));
+        const first = yield* timed(lrclib.lookup(QUERY, Effect.void));
+        const second = yield* timed(lrclib.lookup(QUERY, Effect.void));
 
         expect(first.result).toMatchObject({
           _tag: "Failure",

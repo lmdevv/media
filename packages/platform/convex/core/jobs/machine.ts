@@ -57,8 +57,9 @@ export type Finish =
     }
   | {
       /**
-       * The attempt could not run because something outside the job was unavailable: back to the
-       * queue with no strike, and the store pauses the whole kind for `pauseMs`.
+       * The attempt could not run because something outside the job was unavailable or turned
+       * off: back to the queue with no strike, and the store pauses the whole kind for `pauseMs`,
+       * or not at all for 0.
        */
       readonly outcome: "deferred";
       readonly error: string;

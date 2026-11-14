@@ -33,16 +33,30 @@ const query = (title: string): LyricsQuery => ({
   durationS: 200,
 });
 
+type Next = "ask" | "off" | "stale";
+
 /**
  * Runs one `music.lyrics` job for `title` against a stand-in LRCLIB answering through `handler`,
- * and answers what the job sent to `settle` and what its run returned.
+ * with the core answering each `proceed` through `next`, and answers what the job sent to
+ * `settle`, how many times it asked to proceed, and what its run returned.
  */
-const runJob = (title: string, handler: FakeLrclibHandler = catalog) =>
+const runJob = (
+  title: string,
+  handler: FakeLrclibHandler = catalog,
+  next: () => Next = () => "ask",
+) =>
   Effect.gen(function* () {
     const lrclib = yield* fakeLrclib(handler);
     const settled = yield* Ref.make<ReadonlyArray<LyricsTry>>([]);
+    const proceeds = yield* Ref.make(0);
 
     const core = yield* makeFakeCore([
+      reply(serverFunctions.musicLyricsProceed, () =>
+        Ref.update(proceeds, (count) => count + 1).pipe(
+          Effect.andThen(Effect.sync(next)),
+          Effect.map((step) => ({ outcome: "held" as const, value: { next: step } })),
+        ),
+      ),
       reply(serverFunctions.musicLyricsSettle, ({ result }) =>
         Ref.update(settled, (seen) => [...seen, result]).pipe(
           Effect.as({ outcome: "held" as const, value: { saved: "found" as const } }),
@@ -80,7 +94,12 @@ const runJob = (title: string, handler: FakeLrclibHandler = catalog) =>
       () => Effect.void,
     );
 
-    return { ran, settled: yield* Ref.get(settled), requests: lrclib.requests() };
+    return {
+      ran,
+      settled: yield* Ref.get(settled),
+      proceeds: yield* Ref.get(proceeds),
+      requests: lrclib.requests(),
+    };
   });
 
 describe("LyricsJob", { timeout: MEDIA_TEST_TIMEOUT }, () => {
@@ -131,10 +150,45 @@ describe("LyricsJob", { timeout: MEDIA_TEST_TIMEOUT }, () => {
   it("settles a miss after LRCLIB's get and search both find nothing", () =>
     runScoped(
       Effect.gen(function* () {
-        const { settled, requests } = yield* runJob(titled("miss"));
+        const { settled, requests, proceeds } = yield* runJob(titled("miss"));
 
         expect(settled).toEqual([{ outcome: "answered", answer: { status: "miss" } }]);
         expect(requests.map((request) => request.path)).toEqual(["/api/get", "/api/search"]);
+        expect(proceeds).toBe(2);
+      }),
+    ));
+
+  it("sends no search once lookups are turned off after its get", () =>
+    runScoped(
+      Effect.gen(function* () {
+        let remote = true;
+
+        const { ran, settled, requests, proceeds } = yield* runJob(
+          titled("miss"),
+          (request) => {
+            // An admin turns lookups off while LRCLIB answers the get.
+            if (request.path === "/api/get") remote = false;
+
+            return catalog(request);
+          },
+          () => (remote ? "ask" : "off"),
+        );
+
+        expect(requests.map((request) => request.path)).toEqual(["/api/get"]);
+        expect(proceeds).toBe(2);
+        expect(settled).toEqual([]);
+        expect(ran).toEqual(new Settled({ outcome: "off" }));
+      }),
+    ));
+
+  it("sends nothing for a song deleted or retagged since its lookup was claimed", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const { ran, settled, requests } = yield* runJob(titled("synced"), catalog, () => "stale");
+
+        expect(requests).toEqual([]);
+        expect(settled).toEqual([]);
+        expect(ran).toEqual(new Settled({ outcome: "stale" }));
       }),
     ));
 

@@ -7,6 +7,7 @@ import type { Doc, Id } from "../_generated/dataModel";
 import type { DatabaseReader } from "../_generated/server";
 import { internalMutation } from "../_generated/server";
 import { leaseAnswer, withJobLease } from "../core/jobs/held";
+import type { LeaseAnswer } from "../core/jobs/held";
 import { kindDef } from "../core/jobs/kinds";
 import type { PayloadOf } from "../core/jobs/kinds";
 import type { Finish } from "../core/jobs/machine";
@@ -22,6 +23,7 @@ import { SERVER, can, principalOf } from "../core/permissions/policy";
 import { callBudget } from "../movies/reads";
 import { walkMusicLibrariesFrom } from "./access";
 import { CALL_COST, NO_COST, addCost, cost, meterFrom, whileBudget } from "./budget";
+import type { Cost, Meter } from "./budget";
 import { checkLyrics } from "./fit";
 import { lrclibAnswer } from "./validators";
 import type { LrclibAnswer } from "./validators";
@@ -56,14 +58,15 @@ const REQUEST_MAX = 16;
 const BACKFILL_PAGE = 50;
 
 /**
- * A backfill queues more lookups only while fewer than this many wait, so a library of any size
- * never puts more than a page ahead of the worker, a song that starts playing waits behind at most
- * that many, and no run of mass inserts holds the kind's row (ADR 0012).
+ * A backfill keeps fewer than this many lookups waiting: a step queues only as many as bring the
+ * waiting count up to one below it, so a library of any size never puts more than that ahead of
+ * the worker, a song that starts playing waits behind at most that many, and no run of mass
+ * inserts holds the kind's row (ADR 0012).
  */
 const BACKFILL_AHEAD = 25;
 
 /**
- * How long a backfill first waits for the queue to drain below `BACKFILL_AHEAD` before it looks
+ * How long a backfill first waits for room below `BACKFILL_AHEAD` before it looks
  * again. Each wait in a row doubles, up to `BACKFILL_WAIT_MAX_MS`, so a backfill whose server is
  * stopped or whose lookups are paused looks about once a minute.
  */
@@ -115,18 +118,22 @@ const answered = (row: Doc<"lrclibLyrics"> | null, lookup: Lookup, now: number):
  * a standing answer for its tags are skipped. The kind's dedupe joins a lookup already queued or
  * running for the same tags.
  */
-const request = async (ctx: JobCtx, store: MusicStore, track: Doc<"tracks">): Promise<void> => {
-  if (track.missing || track.lyricsSynced) return;
+const request = async (ctx: JobCtx, store: MusicStore, track: Doc<"tracks">): Promise<boolean> => {
+  if (track.missing || track.lyricsSynced) return false;
 
   const lookup = await lookupOf(track);
 
-  if (lookup === null) return;
+  if (lookup === null) return false;
 
   const row = await store.first("lrclibLyrics", (q) =>
     q.withIndex("by_track", (index) => index.eq("trackId", track._id)),
   );
 
-  if (!answered(row, lookup, Date.now())) await insertJob(ctx, lookup);
+  if (answered(row, lookup, Date.now())) return false;
+
+  await insertJob(ctx, lookup);
+
+  return true;
 };
 
 /**
@@ -172,8 +179,9 @@ export const scheduleRequest = async (ctx: JobCtx, trackId: Id<"tracks">): Promi
 /**
  * Looks up lyrics for every track of `libraryIds` in path order, a page a step, then the next
  * library, as old music's `lyrics.backfill` did, stopping when lookups are turned off. Unlike old
- * music, which queued every song at once, a step queues its page only while fewer than
- * `BACKFILL_AHEAD` lookups wait, and otherwise looks again later (`BACKFILL_WAIT_MS`).
+ * music, which queued every song at once, a step queues only as many lookups as keep fewer than
+ * `BACKFILL_AHEAD` waiting, stopping in its page there, and looks again later when none fit
+ * (`BACKFILL_WAIT_MS`).
  */
 export const backfill = internalMutation({
   args: {
@@ -189,7 +197,9 @@ export const backfill = internalMutation({
 
     if (libraryId === undefined || !(await remoteLyricsOn(ctx.db))) return null;
 
-    if ((await queuedCount(ctx.db, "music.lyrics", BACKFILL_AHEAD)) >= BACKFILL_AHEAD) {
+    const room = BACKFILL_AHEAD - 1 - (await queuedCount(ctx.db, "music.lyrics", BACKFILL_AHEAD));
+
+    if (room <= 0) {
       const wait = Math.min(BACKFILL_WAIT_MS * 2 ** waits, BACKFILL_WAIT_MAX_MS);
 
       await ctx.scheduler.runAfter(wait, internal.music.lyricLookups.backfill, {
@@ -217,11 +227,21 @@ export const backfill = internalMutation({
     );
 
     // Each track may hold an LRCLIB row at its 512 KiB bound, so the budget decides how many of
-    // the page one step goes through (ADR 0024).
-    const done = await whileBudget(store.meter, CALL_COST, REQUEST_MOST, page, (track) =>
-      request(ctx, store, track),
-    );
+    // the page one step goes through (ADR 0024). A track met once the room is used up stays for
+    // the next step. An enqueue the kind's dedupe joins to a queued lookup still counts against
+    // the room, which only stops a step early.
+    let queued = 0;
 
+    const went = await whileBudget(store.meter, CALL_COST, REQUEST_MOST, page, async (track) => {
+      if (queued >= room) return false;
+
+      if (await request(ctx, store, track)) queued += 1;
+
+      return true;
+    });
+
+    const stop = went.indexOf(false);
+    const done = stop === -1 ? went : went.slice(0, stop);
     const last = page[done.length - 1];
 
     const next =
@@ -390,6 +410,128 @@ const endOf = async (
 };
 
 const STALE_MESSAGE = "The song is gone or was retagged since this lookup was asked for";
+
+const OFF_MESSAGE = "Lyrics lookups are off";
+
+/** What the server does next for a held lookup (`proceed`). */
+const nextStep = v.object({
+  next: v.union(
+    /** Send the request. */
+    v.literal("ask"),
+    /** Lookups are off: the lookup went back to the queue with no strike, and sends nothing. */
+    v.literal("off"),
+    /** The song is gone or retagged: the lookup ended, storing nothing, and sends nothing. */
+    v.literal("stale"),
+  ),
+});
+
+type NextAnswer = LeaseAnswer<Infer<typeof nextStep>>;
+
+/**
+ * Whether the held lookup may send its next LRCLIB request, which the server asks right before
+ * each one. While an admin has lookups off, the lookup goes back to the queue with no strike and
+ * nothing stored, and the held kind keeps it there until they are on again, so a lookup claimed
+ * before the switch flipped sends nothing after it (ADR 0012). A lookup whose song is gone or no
+ * longer has the tags it was asked for ends there, as `settle` would end it, before it asks.
+ */
+export const proceed = serverMutation({
+  args: { lease },
+  returns: leaseAnswer(nextStep),
+  handler: (ctx, { lease: held }) =>
+    withJobLease(ctx, ["music.lyrics"], held, async (job): Promise<NextAnswer> => {
+      const running = await ctx.db.get("jobs", job.jobId);
+
+      if (running?.status !== "running") {
+        throw new Error(`The lookup ${job.jobId} this lease checked is not running`);
+      }
+
+      const end = async (saved: "off" | "stale", finish: Finish): Promise<NextAnswer> => {
+        const step = await applyEvent(ctx, running, { type: "finish", lease: held, finish });
+
+        if (!step.ok) {
+          throw new Error(`The held lookup ${job.jobId} refused its end: ${step.refused}`);
+        }
+
+        return { outcome: "held", value: { next: saved } };
+      };
+
+      if (!(await remoteLyricsOn(ctx.db))) {
+        return end("off", { outcome: "deferred", error: OFF_MESSAGE, pauseMs: 0 });
+      }
+
+      const track = await ctx.db.get("tracks", job.payload.trackId);
+      const current = track === null ? null : await lookupOf(track);
+
+      if (current?.revision !== job.payload.revision) {
+        return end("stale", { outcome: "succeeded", message: STALE_MESSAGE });
+      }
+
+      return { outcome: "held", value: { next: "ask" } };
+    }),
+});
+
+/** Queued lookups of one track one purge step cancels at most; more wait for the next call. */
+const DROPPED_PER_TRACK = 8;
+
+/** The bound of a `music.lyrics` job, whose payload holds four tags at the music name maximum. */
+const LOOKUP_JOB_BYTES = 16 * 1024;
+
+/**
+ * One track's step of `dropLookups` at worst: its queued lookups read, and each canceled, which
+ * rewrites the job and reads and writes the kind's row.
+ */
+const DROP_MOST = cost(
+  1 + DROPPED_PER_TRACK,
+  2 * DROPPED_PER_TRACK,
+  (2 * DROPPED_PER_TRACK + 1) * LOOKUP_JOB_BYTES,
+  2 * DROPPED_PER_TRACK * LOOKUP_JOB_BYTES,
+);
+
+/** A quarter of a call: the purge's dependents and track deletes need the rest. */
+const DROP_LIMIT: Cost = {
+  work: { ranges: CALL_COST.work.ranges / 4, writes: CALL_COST.work.writes / 4 },
+  readBytes: CALL_COST.readBytes / 4,
+  writeBytes: CALL_COST.writeBytes / 4,
+  lyricBytes: CALL_COST.lyricBytes,
+};
+
+/**
+ * Cancels the queued lookups of the leading `tracks`, which a purge is about to delete, while a
+ * quarter of the call's budget on `meter` admits another track, and answers the leading tracks
+ * none is left for, which the purge may then delete. A lookup of any revision goes, so none of a
+ * deleted song waits to ask LRCLIB, holds the kind's slot, or defers through an outage. A lookup
+ * already running for one ends as stale at its next `proceed` or `settle`, before any request.
+ */
+export const dropLookups = async (
+  ctx: JobCtx,
+  meter: Meter,
+  tracks: ReadonlyArray<Doc<"tracks">>,
+): Promise<ReadonlyArray<Doc<"tracks">>> => {
+  const dropped = await whileBudget(meter, DROP_LIMIT, DROP_MOST, tracks, async (track) => {
+    const queued = await ctx.db
+      .query("jobs")
+      .withIndex("by_track_status", (q) =>
+        q.eq("payload.trackId", track._id).eq("status", "queued"),
+      )
+      .take(DROPPED_PER_TRACK);
+
+    await inOrder(queued, (job) => applyEvent(ctx, job, { type: "cancel", attempt: null }));
+    meter.charge(
+      cost(
+        1 + queued.length,
+        2 * queued.length,
+        (2 * queued.length + 1) * LOOKUP_JOB_BYTES,
+        2 * queued.length * LOOKUP_JOB_BYTES,
+      ),
+    );
+
+    return queued.length < DROPPED_PER_TRACK;
+  });
+
+  const stop = dropped.indexOf(false);
+
+  return tracks.slice(0, stop === -1 ? dropped.length : stop);
+};
 
 /**
  * Ends the held lookup with what its try learned, in the one mutation that also stores its

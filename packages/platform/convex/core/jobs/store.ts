@@ -215,7 +215,7 @@ export const applyEvent = async (ctx: JobCtx, job: Doc<"jobs">, event: JobEvent)
     });
   }
 
-  if (event.type === "finish" && event.finish.outcome === "deferred") {
+  if (event.type === "finish" && event.finish.outcome === "deferred" && event.finish.pauseMs > 0) {
     await pauseKind(ctx, job.payload.kind, now + event.finish.pauseMs);
   }
 

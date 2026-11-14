@@ -533,6 +533,12 @@ export const serverFunctions = {
       done: Schema.Boolean,
     }),
   }),
+  musicLyricsProceed: serverMutation({
+    name: "music.lyricLookups.proceed",
+    path: "music/lyricLookups:proceed",
+    args: Schema.Struct({ lease: Lease }),
+    result: LeaseAnswer(Schema.Struct({ next: Schema.Literals(["ask", "off", "stale"]) })),
+  }),
   musicLyricsSettle: serverMutation({
     name: "music.lyricLookups.settle",
     path: "music/lyricLookups:settle",

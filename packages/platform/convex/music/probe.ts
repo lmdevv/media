@@ -508,3 +508,16 @@ export const lrclibRowCount = internalQuery({
         .take(8)
     ).length,
 });
+
+/** The statuses of a track's `music.lyrics` jobs, up to 16, which a purge leaves none queued of. */
+export const lookupStatuses = internalQuery({
+  args: { trackId: v.id("tracks") },
+  returns: v.array(v.string()),
+  handler: async (ctx, { trackId }) =>
+    (
+      await ctx.db
+        .query("jobs")
+        .withIndex("by_track_status", (q) => q.eq("payload.trackId", trackId))
+        .take(16)
+    ).map((job) => job.status),
+});

@@ -74,11 +74,14 @@ export interface Interface {
   readonly ready: Effect.Effect<void>;
   /**
    * The lyrics LRCLIB holds for a song, `None` when it has no matching record. A record without
-   * lyrics comes back as `Empty`.
+   * lyrics comes back as `Empty`. `before` runs ahead of each request the lookup makes, once its
+   * turn has come, so it sees what changed during a pause or the gap; when it fails, the lookup
+   * stops with its error and sends nothing more.
    */
-  readonly lookup: (
+  readonly lookup: <E, R>(
     query: LyricsQuery,
-  ) => Effect.Effect<Option.Option<LrclibLyrics>, LrclibUnavailable | LrclibMalformed>;
+    before: Effect.Effect<void, E, R>,
+  ) => Effect.Effect<Option.Option<LrclibLyrics>, LrclibUnavailable | LrclibMalformed | E, R>;
 }
 
 /** The LRCLIB client. */
@@ -270,10 +273,15 @@ export const make = (options: Options) =>
         return yield* new LrclibUnavailable({ reason, status, pauseMs, cause });
       });
 
-    const paced = (path: string, urlParams: Record<string, string>) =>
+    const paced = <E, R>(
+      path: string,
+      urlParams: Record<string, string>,
+      before: Effect.Effect<void, E, R>,
+    ) =>
       permit.withPermits(1)(
         Effect.gen(function* () {
           yield* untilTurn;
+          yield* before;
 
           const fetched = yield* fetchOnce(options, path, urlParams).pipe(
             Effect.catchTag("NoAnswer", (error) =>
@@ -297,9 +305,17 @@ export const make = (options: Options) =>
         }),
       );
 
-    const search = Effect.fn("LrclibClient.search")(function* (query: LyricsQuery) {
+    const search = Effect.fn("LrclibClient.search")(function* <E, R>(
+      query: LyricsQuery,
+      before: Effect.Effect<void, E, R>,
+    ) {
       const path = "/api/search";
-      const text = yield* paced(path, { track_name: query.title, artist_name: query.artist });
+
+      const text = yield* paced(
+        path,
+        { track_name: query.title, artist_name: query.artist },
+        before,
+      );
 
       if (Option.isNone(text)) return Option.none();
       const matches = searchMatches(query, text.value);
@@ -315,19 +331,26 @@ export const make = (options: Options) =>
       return Option.some(yield* parseRecord(path, JSON.stringify(match.raw)));
     });
 
-    const lookup = Effect.fn("LrclibClient.lookup")(function* (query: LyricsQuery) {
+    const lookup = Effect.fn("LrclibClient.lookup")(function* <E, R>(
+      query: LyricsQuery,
+      before: Effect.Effect<void, E, R>,
+    ) {
       const path = "/api/get";
 
-      const text = yield* paced(path, {
-        track_name: query.title,
-        artist_name: query.artist,
-        album_name: query.album,
-        duration: String(query.durationS),
-      });
+      const text = yield* paced(
+        path,
+        {
+          track_name: query.title,
+          artist_name: query.artist,
+          album_name: query.album,
+          duration: String(query.durationS),
+        },
+        before,
+      );
 
       if (Option.isSome(text)) return Option.some(yield* parseRecord(path, text.value));
 
-      return yield* search(query);
+      return yield* search(query, before);
     });
 
     return LrclibClient.of({ ready: permit.withPermits(1)(untilTurn), lookup });

@@ -360,7 +360,7 @@ one-row `lrclibPause` table that hid the queue while LRCLIB was unavailable.
   later one, and schedules `leases.endPause` at that time. While paused, `kindQueue` offers no job
   and `waiting` answers not ready; ending the pause writes the row, which wakes the pools that
   subscribe to it. This is old music's `lrclibPause`, kept as job state, so it holds across a
-  restart.
+  restart. A deferral with `pauseMs` 0 puts the job back with no strike and pauses nothing.
 - A retry can wait. A worker's failed finish may carry `retryInMs`; the queued job then carries
   `waitUntil`, and the claim reads `by_kind_ready`, whose range takes only jobs without one, so a
   waiting job never blocks the jobs behind it and costs a claim nothing. `leases.wake`, scheduled
@@ -369,8 +369,17 @@ one-row `lrclibPause` table that hid the queue while LRCLIB was unavailable.
   after a try whose record could not be read; the lookup does the same.
 - A kind can be held. `holdKind` sets `jobKinds.held`, and no claim takes the kind's jobs, which
   stay queued; a running one finishes. Music holds `music.lyrics` while an admin has turned
-  LRCLIB lookups off (`music.lyrics.configure`, old music's `remoteLyrics`), so with the switch
-  off no request reaches LRCLIB; turned on again, the queued lookups run, as old music's did.
+  LRCLIB lookups off (`music.lyrics.configure`, old music's `remoteLyrics`); turned on again, the
+  queued lookups run, as old music's did. The hold stops claims, not a lookup already running, so
+  the server asks `music/lyricLookups:proceed` right before each LRCLIB request, after any pause
+  or gap. With lookups off, `proceed` defers the job with `pauseMs` 0, so it goes back to the queue
+  with no strike and no answer stored and runs again once they are on, and the server sends
+  nothing. A request already past `proceed` when the switch flips still goes out: the window is
+  one call's round trip.
+- `proceed` also ends a lookup whose song is gone or retagged as stale, storing nothing, before
+  any request. A purge that deletes a track cancels its queued `music.lyrics` jobs, of any
+  revision, in the same metered pages (`dropLookups`, through `jobs.by_track_status`), so a
+  deleted song's lookup never asks LRCLIB, holds the kind's slot, or defers through an outage.
 - The cron `wake waiting job retries and end job pauses` runs `leases.wakeDue` every minute. It
   wakes due retries and ends due pauses whose scheduled call never ran, as after a restore from a
   backup, reading only rows whose time passed (`jobs.by_status_wait`, `jobKinds.by_paused`).
@@ -386,11 +395,11 @@ one-row `lrclibPause` table that hid the queue while LRCLIB was unavailable.
   (`music.play.start`), when it is downloaded (`core.downloads.add`), and by an admin's
   `music.lyrics.backfill`. Each is a scheduled `requestTracks` or `backfill`, never part of the
   person's own call, so an enqueue never conflicts with it. A scan asks for none, as in old music.
-- A backfill queues a library's tracks a page of 50 at a time, and only while fewer than 25
-  lookups wait; otherwise it looks again after 2 seconds, doubling to a minute. A backfill over a
-  library of any size therefore keeps at most a page ahead of the worker, makes no run of mass
-  inserts on the kind's row (the OCC lesson of #134), and a song that starts playing waits behind
-  at most that many lookups.
+- A backfill reads a library's tracks a page of 50 at a time, and queues only as many lookups as
+  bring the waiting count up to 24, stopping in its page there; with no room it looks again after
+  2 seconds, doubling to a minute. A backfill over a library of any size therefore keeps fewer
+  than 25 lookups waiting, makes no run of mass inserts on the kind's row (the OCC lesson of
+  #134), and a song that starts playing waits behind at most 24 lookups.
 
 Where it differs from old music (D62):
 
