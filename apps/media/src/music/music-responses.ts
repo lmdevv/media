@@ -22,6 +22,19 @@ const STREAM_CACHE_CONTROL = "private, max-age=3600";
 
 const READ_CHUNK = 256 * 1024;
 
+/** A `503` that tells a client polling for a finished file to ask again after `retryAfter`. */
+const pending = (retryAfter: Duration.Duration) =>
+  HttpServerResponse.text("Preparing the file; retry shortly", {
+    status: 503,
+    headers: {
+      "cache-control": "no-store",
+      "retry-after": String(Math.ceil(Duration.toSeconds(retryAfter))),
+    },
+  });
+
+/** How soon a client asks again for a finished file that went from the cache as it was served. */
+const PREPARE_AGAIN = Duration.seconds(2);
+
 /** A byte response stopped because the session that admitted it ended. */
 class SessionEndedMidResponse extends Schema.TaggedError<SessionEndedMidResponse>()(
   "SessionEndedMidResponse",
@@ -150,6 +163,10 @@ const wantsWholeStream = (request: HttpServerRequest.HttpServerRequest): boolean
   );
 };
 
+/** Whether a file response failed because its file is not there. */
+const isGone = (error: unknown): error is Files.FileError =>
+  error instanceof Files.FileError && error.missing;
+
 const finishedFile = (
   request: HttpServerRequest.HttpServerRequest,
   { path, timing }: Transcoded,
@@ -207,14 +224,23 @@ export const transcodedResponse = Effect.fn("MusicResponses.transcoded")(functio
 > {
   const transcoder = yield* MusicTranscoder.Service;
 
-  if (!wantsWholeStream(request)) {
-    return yield* finishedFile(request, yield* transcoder.transcode(input), sessionEnded);
-  }
+  // The cache pruner may remove a finished file between the lookup and the response: transcode it
+  // again once, rather than answer that the song is gone.
+  const servedFinished = (transcoded: Transcoded) =>
+    finishedFile(request, transcoded, sessionEnded).pipe(
+      Effect.catchIf(isGone, () =>
+        transcoder
+          .transcode(input)
+          .pipe(Effect.flatMap((again) => finishedFile(request, again, sessionEnded))),
+      ),
+    );
+
+  if (!wantsWholeStream(request)) return yield* servedFinished(yield* transcoder.transcode(input));
 
   const opened = yield* transcoder.open(input);
 
   return yield* Opened.$match(opened, {
-    Finished: ({ transcoded }) => finishedFile(request, transcoded, sessionEnded),
+    Finished: ({ transcoded }) => servedFinished(transcoded),
     Live: ({ timing, bytes }) =>
       Effect.succeed(
         liveResponse(
@@ -245,17 +271,20 @@ export const finishedResponse = Effect.fn("MusicResponses.finished")(function* (
   const prepared = yield* transcoder.prepare(input);
 
   return yield* Prepared.$match(prepared, {
-    Ready: ({ transcoded }) => finishedFile(request, transcoded, sessionEnded),
-    Pending: ({ retryAfter }) =>
-      Effect.succeed(
-        HttpServerResponse.text("Preparing the file; retry shortly", {
-          status: 503,
-          headers: {
-            "cache-control": "no-store",
-            "retry-after": String(Math.ceil(Duration.toSeconds(retryAfter))),
-          },
-        }),
+    // A finished file the cache pruner removed since is prepared again, and the client polls.
+    Ready: ({ transcoded }) =>
+      finishedFile(request, transcoded, sessionEnded).pipe(
+        Effect.catchIf(isGone, () =>
+          transcoder
+            .prepare(input)
+            .pipe(
+              Effect.map((again) =>
+                Prepared.$is("Pending")(again) ? pending(again.retryAfter) : pending(PREPARE_AGAIN),
+              ),
+            ),
+        ),
       ),
+    Pending: ({ retryAfter }) => Effect.succeed(pending(retryAfter)),
     Failed: ({ error }) => Effect.fail(error),
   });
 });

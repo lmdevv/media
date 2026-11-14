@@ -70,7 +70,7 @@ const ring = async () => {
   return loaded.value;
 };
 
-const issue = async (trackId: string, purpose: TicketPurpose = "play") => {
+const issue = async (trackId: string, purpose: TicketPurpose = "play", lifetimeMs = HOUR) => {
   const issued = await (
     await ring()
   ).issuePersonal({
@@ -79,7 +79,7 @@ const issue = async (trackId: string, purpose: TicketPurpose = "play") => {
     resource: { kind: "track", id: trackId },
     purpose,
     now: Date.now(),
-    lifetimeMs: HOUR,
+    lifetimeMs,
   });
 
   if (!issued.ok) throw new Error("The test ticket was not issued");
@@ -295,6 +295,19 @@ describe("music routes", { timeout: 60_000 }, () => {
     );
 
     expect((packets * 1024) / 44_100).toBeGreaterThan(TONE_SECONDS - 1);
+  });
+
+  it("keep reading an original past its ticket's expiry, but start no transcode with it", async () => {
+    const ticket = await issue(OTHER, "play", 1000);
+
+    expect((await fetch(streamUrl(OTHER, ticket))).status).toBe(200);
+
+    // Tickets hold whole seconds, so this one has expired 2 s later.
+    await new Promise((resolve) => setTimeout(resolve, 2100));
+
+    expect((await fetch(streamUrl(OTHER, ticket))).status).toBe(200);
+    expect((await fetch(streamUrl(OTHER, ticket, "&p=aac-128&finished=1"))).status).toBe(401);
+    expect((await fetch(streamUrl(OTHER, ticket, "&p=aac-128&start=200"))).status).toBe(401);
   });
 
   it("serve art to its shareable ticket only", async () => {

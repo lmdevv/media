@@ -448,7 +448,7 @@ export const layer: Layer.Layer<
           PlaybackToken.READ,
         );
 
-        if (grant.fileId !== fileId) return yield* new MediaAccessDenied();
+        if (!PlaybackToken.admitsFile(grant, fileId)) return yield* new MediaAccessDenied();
 
         return yield* withinFileWait(
           Effect.gen(function* () {
@@ -480,7 +480,7 @@ export const layer: Layer.Layer<
           PlaybackToken.DOWNLOAD,
         );
 
-        if (grant.fileId !== fileId) return yield* new MediaAccessDenied();
+        if (!PlaybackToken.admitsFile(grant, fileId)) return yield* new MediaAccessDenied();
 
         return yield* withinFileWait(
           Effect.gen(function* () {
@@ -627,7 +627,7 @@ export const layer: Layer.Layer<
           PlaybackToken.READ,
         );
 
-        if (grant.fileId !== fileId) return yield* new MediaAccessDenied();
+        if (!PlaybackToken.admitsFile(grant, fileId)) return yield* new MediaAccessDenied();
         const file = yield* resolve(grant.fileId, { sidecars: true });
         const vtt = yield* subtitles.toWebVtt(file, track.replace(/\.vtt$/, ""));
 

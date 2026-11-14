@@ -262,8 +262,6 @@ const readNeeded = (
     : "lyrics";
 };
 
-const isInside = (path: string, folder: string): boolean => path.startsWith(`${folder}/`);
-
 const walkFolder = (libraryId: string, folder: string) =>
   Files.walkTree(
     folder,
@@ -372,7 +370,7 @@ export const scanLibrary = Effect.fn("MusicScan.library")(function* <E>(
 
     if (
       !holdsAudio &&
-      known.values().some((file) => !file.missing && isInside(file.path, folder))
+      known.values().some((file) => !file.missing && Files.isInsideFolder(file.path, folder))
     ) {
       return yield* new LibraryEmpty({ folder });
     }

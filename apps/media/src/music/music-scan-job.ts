@@ -24,10 +24,9 @@ import {
 import * as CoreJobs from "../core/core-jobs.ts";
 import { JobFailed } from "../core/core-jobs.ts";
 import type { JobStopped } from "../core/core-jobs.ts";
-import { sendAll } from "../core/core-scan.ts";
+import { claimScanFolders, sendAll } from "../core/core-scan.ts";
 import * as CoreSession from "../core/core-session.ts";
 import * as MediaConfig from "../media-config.ts";
-import { bootId, folderChain, folderSource } from "../platform/folder-identity.ts";
 import * as MusicArt from "./music-art.ts";
 import { describeScan, scanLibrary } from "./music-scan.ts";
 import type {
@@ -103,15 +102,6 @@ const approveFolder = Effect.fnUntraced(function* (folder: string) {
 
   return real;
 });
-
-const claimFailure = (folder: string) =>
-  new JobFailed({
-    message:
-      folder === ""
-        ? "This server's boot could not be identified"
-        : `The library folder ${folder} could not be identified`,
-    retry: true,
-  });
 
 /** A lease-checked call's value while the lease holds, else why the job stops. */
 const leased = <Value>(
@@ -222,33 +212,7 @@ export const handler = Effect.gen(function* () {
 
       yield* Effect.forEach(target.folders, approveFolder, { discard: true });
 
-      const boot = yield* Effect.tryPromise({ try: bootId, catch: () => claimFailure("") });
-
-      const folders = yield* Effect.forEach(target.folders, (folder) =>
-        Effect.tryPromise({
-          try: async () => ({
-            folder,
-            chain: [...(await folderChain(folder))],
-            source: await folderSource(folder),
-          }),
-          catch: () => claimFailure(folder),
-        }),
-      );
-
-      const claim = yield* session
-        .call(serverFunctions.claimFolders, { lease, kind: "music", bootId: boot, folders })
-        .pipe(Effect.mapError(backendFailure), Effect.flatMap(CoreJobs.held));
-
-      if (!claim.claimed) {
-        return yield* new JobFailed({
-          message: `Another library already uses ${claim.folder} under another path; ${
-            claim.rescans
-              ? "this library scans again on its own once that one lets the folder go"
-              : "scan this library again once that one lets the folder go"
-          }`,
-          retry: false,
-        });
-      }
+      yield* claimScanFolders(session, lease, "music", target.folders);
 
       const progress = yield* Ref.make<ScanProgress>({ done: 0, total: null, message: "Starting" });
 

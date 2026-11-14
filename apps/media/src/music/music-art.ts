@@ -19,8 +19,10 @@ export interface Interface {
   /** The artwork scans released and the collection has not deleted yet. */
   readonly released: Ref.Ref<HashSet.HashSet<string>>;
   /**
-   * Deletes the released artwork nothing uses, keeping what is too new for a later try. Never
-   * fails: a failure is logged, and the hashes wait for the next scan or full collection.
+   * Starts deleting the released artwork nothing uses, keeping what is too new for a later try,
+   * and returns at once: the collection runs in the art lane on a fiber of its own, so a scan's
+   * end, a cancel, or a shutdown never waits for it. A failure is logged, and the hashes wait for
+   * the next scan or full collection.
    */
   readonly collectReleased: Effect.Effect<void>;
 }
@@ -39,6 +41,7 @@ const make = Effect.gen(function* () {
   const { dataDir } = yield* MediaConfig.Service;
   const released = yield* Ref.make(HashSet.empty<string>());
   const lane = yield* Semaphore.make(1);
+  const scope = yield* Effect.scope;
 
   const catalog: ArtCatalog<CallError> = {
     inUse: (hashes) =>
@@ -70,7 +73,7 @@ const make = Effect.gen(function* () {
         HashSet.union(HashSet.difference(current, hashes), HashSet.fromIterable(waiting)),
       );
     }),
-  );
+  ).pipe(Effect.forkIn(scope), Effect.asVoid);
 
   // The first run waits out the server's sign-in to the core, retrying as it goes.
   const collectUnused = collectUnusedArt(dataDir, catalog).pipe(

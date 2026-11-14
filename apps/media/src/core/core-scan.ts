@@ -1,7 +1,7 @@
 import type { LibraryId } from "@media/contracts/ids";
 import type { IndexedFile, ScannedItem, UpsertedFile } from "@media/contracts/models/scan";
 import { SCANNER_BATCH_MAX, serverFunctions } from "@media/contracts/server-functions";
-import type { Lease } from "@media/contracts/server-functions";
+import type { ContentDomain, Lease } from "@media/contracts/server-functions";
 import type { CallError } from "@media/sdk/effect";
 import { Duration, Effect, Match, Option, Ref, Schedule } from "effect";
 import type { FileSystem, Path } from "effect";
@@ -332,6 +332,48 @@ const claimFailure = (folder: string) =>
   });
 
 /**
+ * Claims a scan's folders by identity under its lease (ADR 0024), so no two libraries list one
+ * folder through two paths: this boot, each folder's identity chain and mount source, then
+ * `core/scans:claimFolders`. Every scan of every domain claims before its first write; the core
+ * refuses writes for folders the library does not own. Fails, settling the job for good, when an
+ * older library already owns one of them.
+ */
+export const claimScanFolders = Effect.fnUntraced(function* (
+  session: CoreSession.Interface,
+  lease: Lease,
+  kind: ContentDomain,
+  targetFolders: ReadonlyArray<string>,
+) {
+  const boot = yield* Effect.tryPromise({ try: bootId, catch: () => claimFailure("") });
+
+  const folders = yield* Effect.forEach(targetFolders, (folder) =>
+    Effect.tryPromise({
+      try: async () => ({
+        folder,
+        chain: [...(await folderChain(folder))],
+        source: await folderSource(folder),
+      }),
+      catch: () => claimFailure(folder),
+    }),
+  );
+
+  const claim = yield* session
+    .call(serverFunctions.claimFolders, { lease, kind, bootId: boot, folders })
+    .pipe(Effect.mapError(backendFailure), Effect.flatMap(CoreJobs.held));
+
+  if (claim.claimed) return claim;
+
+  return yield* new JobFailed({
+    message: `Another library already uses ${claim.folder} under another path; ${
+      claim.rescans
+        ? "this library scans again on its own once that one lets the folder go"
+        : "scan this library again once that one lets the folder go"
+    }`,
+    retry: false,
+  });
+});
+
+/**
  * The movies scan on the core: the folders under the lease, a claim of each folder by identity so
  * no two libraries list one folder through two paths, then the scanner over this job's own sink.
  */
@@ -370,33 +412,7 @@ export const handler = Effect.gen(function* () {
         Effect.mapError(scanFailure),
       );
 
-      const boot = yield* Effect.tryPromise({ try: bootId, catch: () => claimFailure("") });
-
-      const folders = yield* Effect.forEach(target.folders, (folder) =>
-        Effect.tryPromise({
-          try: async () => ({
-            folder,
-            chain: [...(await folderChain(folder))],
-            source: await folderSource(folder),
-          }),
-          catch: () => claimFailure(folder),
-        }),
-      );
-
-      const claim = yield* session
-        .call(serverFunctions.claimFolders, { lease, kind: "movies", bootId: boot, folders })
-        .pipe(Effect.mapError(backendFailure), Effect.flatMap(CoreJobs.held));
-
-      if (!claim.claimed) {
-        return yield* new JobFailed({
-          message: `Another library already uses ${claim.folder} under another path; ${
-            claim.rescans
-              ? "this library scans again on its own once that one lets the folder go"
-              : "scan this library again once that one lets the folder go"
-          }`,
-          retry: false,
-        });
-      }
+      yield* claimScanFolders(session, lease, "movies", target.folders);
 
       // Every scanner write, the listing included, needs the claim: the core refuses writes for
       // folders the library does not own, and cancels the scan then (ADR 0024).

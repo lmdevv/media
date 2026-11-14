@@ -10,6 +10,13 @@ import * as NodeFiles from "./platform/node-files.ts";
 
 export type { WalkedFile } from "./platform/node-files.ts";
 
+/**
+ * Whether `path` is `folder` or lies inside it, as the core decides it for a library's folders
+ * (`isInside` in `core/folders.ts`): by exact spelling, the way the core keeps paths.
+ */
+export const isInsideFolder = (path: string, folder: string): boolean =>
+  path === folder || path.startsWith(`${folder}/`);
+
 /** A file system operation failed. `missing` is true when the path does not exist. */
 export class FileError extends Schema.TaggedError<FileError>()("FileError", {
   operation: Schema.String,

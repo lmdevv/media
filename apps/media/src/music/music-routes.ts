@@ -57,8 +57,6 @@ const parseFinished = (raw: string | null): Option.Option<boolean> => {
 const searchOf = (request: HttpServerRequest.HttpServerRequest): URLSearchParams =>
   new URL(request.url, "http://media.invalid").searchParams;
 
-const isInside = (path: string, folder: string): boolean => path.startsWith(`${folder}/`);
-
 /** Adds music's stream and art routes. */
 export const layer: Layer.Layer<
   never,
@@ -103,7 +101,7 @@ export const layer: Layer.Layer<
      * cannot serve a file from elsewhere. None for a file outside either.
      */
     const realFileOf = Effect.fnUntraced(function* (path: string, roots: ReadonlyArray<string>) {
-      const root = roots.find((folder) => isInside(path, folder));
+      const root = roots.find((folder) => Files.isInsideFolder(path, folder));
 
       if (root === undefined) return Option.none<string>();
 
@@ -138,13 +136,16 @@ export const layer: Layer.Layer<
         return text(400, "Invalid start");
       }
 
-      // An expired play ticket keeps reading its song within the idle time, as a range request
-      // does (ADR 0011); a download ticket reads within its own expiry.
+      // An original is a read that starts no encoder: an expired play ticket keeps reading it
+      // within the idle time, as movies' direct play does (ADR 0011). A transcode may start
+      // ffmpeg, so it needs an unexpired ticket. A download ticket reads within its own expiry.
+      const within = profile.value === "original" ? PlaybackToken.READ : undefined;
+
       const grant = yield* Effect.result(
         Effect.gen(function* () {
           const token = yield* PlaybackToken.tokenOf(request, tokens.param);
 
-          return yield* tokens.authorize(token, PlaybackToken.PLAY_OR_DOWNLOAD, PlaybackToken.READ);
+          return yield* tokens.authorize(token, PlaybackToken.PLAY_OR_DOWNLOAD, within);
         }),
       );
 

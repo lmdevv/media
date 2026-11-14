@@ -112,7 +112,7 @@ default. The NixOS options are in brackets.
 | `LIBRARY_POLL_SECONDS`        | Seconds between polls of a share, 60 (`libraryPollSeconds`)                                            |
 | `PROBE_TIMEOUT_SECONDS`       | Longest probe or artwork resize, 60 (`probeTimeoutSeconds`)                                            |
 | `FILE_SCAN_TIMEOUT_SECONDS`   | Longest whole-file scan, 900 (`fileScanTimeoutSeconds`)                                                |
-| `CACHE_MAX_MB`                | Size the caches are pruned to, 2048 MiB (`cacheMaxMb`)                                                 |
+| `CACHE_MAX_MB`                | Size the caches, music transcodes included, are pruned to, 2048 MiB (`cacheMaxMb`)                     |
 | `BACKUP_RETENTION_DAYS`       | Days of nightly backups kept, 14 (`backupRetentionDays`)                                               |
 | `LOG_LEVEL`                   | Least severe level logged and retained, `info` (`logLevel`)                                            |
 | `LOG_RETENTION_DAYS`          | Days the retained logs are kept, 14 (`logRetentionDays`)                                               |

@@ -23,6 +23,7 @@ import {
   Fiber,
   Layer,
   Option,
+  Path,
   Ref,
   Result,
   Schema,
@@ -33,7 +34,7 @@ import {
   SubscriptionRef,
 } from "effect";
 
-import { markUsed } from "../cache-pruner.ts";
+import { cacheDirectories, markUsed, prune } from "../cache-pruner.ts";
 import * as MediaTools from "../media/media-tools.ts";
 import type { MediaToolFailed } from "../media/media-tools.ts";
 import * as MediaConfig from "../media-config.ts";
@@ -334,7 +335,9 @@ const make = Effect.gen(function* () {
   const config = yield* MediaConfig.Service;
   const tools = yield* MediaTools.Service;
   const fs = yield* FileSystem.FileSystem;
+  const paths = yield* Path.Path;
   const scope = yield* Effect.scope;
+  const pruning = yield* Semaphore.make(1);
   const cacheDir = join(config.dataDir, "cache", "music");
   /**
    * Where every file a transcode writes before it is finished lives: its output, its live copy,
@@ -506,8 +509,24 @@ const make = Effect.gen(function* () {
       job.lane.withPermits(1),
     );
 
-    return yield* run;
+    const transcoded = yield* run;
+
+    // Old music evicted its cache after every transcode; the server's caches share one pruner and
+    // one bound, so a finished transcode runs it then, unless a run of it is under way. The new
+    // file is the newest, which the pruner keeps first.
+    yield* pruneNow;
+
+    return transcoded;
   });
+
+  const pruneNow: Effect.Effect<void> = pruning
+    .withPermitsIfAvailable(1)(
+      prune(cacheDirectories(config.dataDir, paths), config.cacheMaxBytes).pipe(
+        Effect.provideService(FileSystem.FileSystem, fs),
+        Effect.provideService(Path.Path, paths),
+      ),
+    )
+    .pipe(Effect.forkIn(scope), Effect.asVoid);
 
   const deleteLive = (job: Job): Effect.Effect<void> =>
     Files.removePath(job.live).pipe(Effect.ignore);
@@ -919,5 +938,5 @@ const make = Effect.gen(function* () {
 export const layer: Layer.Layer<
   Service,
   never,
-  MediaConfig.Service | MediaTools.Service | FileSystem.FileSystem
+  MediaConfig.Service | MediaTools.Service | FileSystem.FileSystem | Path.Path
 > = Layer.effect(Service, make);

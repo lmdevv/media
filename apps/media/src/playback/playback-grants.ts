@@ -46,6 +46,13 @@ export interface PlaybackGrant {
   readonly sessionEnded?: Effect.Effect<void>;
 }
 
+/**
+ * Whether `grant` admits the movies file `fileId`: a file ticket for that file. A music track's
+ * ticket never does, whatever its id.
+ */
+export const admitsFile = (grant: PlaybackGrant, fileId: string): boolean =>
+  grant.resource === "file" && grant.fileId === fileId;
+
 /** The session and account an authentic token was signed for. */
 export type SignedSession = Pick<PlaybackGrant, "sessionId" | "userId">;
 

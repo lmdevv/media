@@ -50,7 +50,7 @@ const client: ClientCapabilities = {
   mse: true,
 };
 
-const issue = (fileId: string, now: number, playback?: string) =>
+const issue = (fileId: string, now: number, playback?: string, kind: "file" | "track" = "file") =>
   Effect.promise(async () => {
     const loaded = await loadTicketKeyRing(TICKET_TEST_KEYS.k1);
 
@@ -59,7 +59,7 @@ const issue = (fileId: string, now: number, playback?: string) =>
     const issued = await loaded.value.issuePersonal({
       principal,
       playback,
-      resource: { kind: "file", id: fileId },
+      resource: { kind, id: fileId },
       purpose: "play",
       now,
       lifetimeMs: HOUR,
@@ -169,7 +169,7 @@ layer(MediaTestServer.layer(), { excludeTestServices: true, timeout: "120 second
     );
 
     it.effect(
-      "stops an open direct-play response once its session ends",
+      "refuses a track's ticket for a file, and stops an open direct-play response once its session ends",
       () =>
         Effect.gen(function* () {
           const server = yield* MediaTestServer.Service;
@@ -200,6 +200,15 @@ layer(MediaTestServer.layer(), { excludeTestServices: true, timeout: "120 second
           );
 
           const { baseUrl } = Context.get(routes, MediaTestServer.Service);
+
+          // A music track's ticket naming the same id is not a ticket for this file.
+          const track = yield* issue(fileId, now, "7b6a5c4d-3e2f-4a1b-9c8d-7e6f5a4b3c2d", "track");
+
+          const refused = yield* Effect.promise(() =>
+            fetch(`${baseUrl}/media/direct/${fileId}?ticket=${encodeURIComponent(track)}`),
+          );
+
+          assert.strictEqual(refused.status, 403);
 
           const response = yield* Effect.promise(() =>
             fetch(`${baseUrl}/media/direct/${fileId}?ticket=${encodeURIComponent(ticket)}`),
