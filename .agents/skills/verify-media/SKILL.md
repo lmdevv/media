@@ -11,9 +11,12 @@ This skill runs the real products on one demo library, mounted read-only:
   container on one port: the account client at `/` with the core's Convex at `/convex`, the
   movies client at `/movies`, which uses the sign-in the account client keeps, and the media
   service, with the library at `/media/library` (ADR 0026). Movies' data lives in the core.
-- **Old music.** The all-in-one image from `legacy/music/deploy/docker/Dockerfile`, with its own
-  Convex, media service, and web app, with the library's `Music` folder at `/music`. It runs
-  until the music port deletes `legacy/music`.
+- **Music.** An image that holds the music client (`/app/music`, from `p5-web-music` on) serves
+  it at `/music` on the same port and session as movies, with its data in the core: `up` records
+  `music_core` and runs no other music. An image from before it runs old music beside it: the
+  all-in-one image from `legacy/music/deploy/docker/Dockerfile`, with its own Convex, media
+  service, and web app, with the library's `Music` folder at `/music`. Until the music port
+  merges, the before side runs old music.
 
 A run has two sides, each its own Compose project that holds both apps:
 
@@ -252,6 +255,10 @@ personal or unlicensed.
   `Elephants Dream` (50% watched). Her My List holds Sintel, Tears of Steel, and Caminandes;
   Mateo's holds Cosmos Laundromat.
 - **Music.** `/music` is shared, so admins and members play it, and Sam plays it through a grant.
+  On the core (`music_core`), setup adds a `Music` library over `/media/library/Music` from the
+  account client's Admin, Libraries, and `music-core-seed.mjs` shares it with Mateo (manages) and
+  everyone on the server (view), then makes the same playlists, sharing, and likes through each
+  person's media CLI. The kid's restrictions hide explicit songs.
   - Lucía's `Sunday morning` (4 songs) is shared with Mateo as a collaborator, and with Aiko and
     Sam as viewers.
   - Lucía's `Deep focus` (4 songs) and Aiko's `Waltzes` (2 songs) are private.
@@ -370,7 +377,11 @@ Movies pages on `one-port` and `two-port`, where old movies signs in on its own,
 | `invite [--invite-role member\|admin]`           | Makes an invite link in Admin, Users and prints its code     |
 | `join --code C --name N --email E`               | Accepts an invite at `/invite/<code>` and makes the account  |
 
-Music pages take these:
+Music pages on the core (`music_core`) sign in at `/`, as movies pages on `one-backend` do:
+`sign-in [--username U --password P]` signs the page in at the account client, as `lucia` by
+default, then opens `/music`. They take the account client's commands too.
+
+Old music's pages take these:
 
 | Command                                          | Does                                                         |
 | ------------------------------------------------ | ------------------------------------------------------------ |
@@ -413,6 +424,9 @@ CLI can't sign in to a `one-port` side's old movies. A command whose arguments n
 `--json '<object>'`. Output is JSON. Exit codes: `0` ok, `1` failed, `2` usage, `3`
 unauthenticated, `4` forbidden, `5` notFound. `$S cli -- --help` lists every command. `kids` has a
 CLI only on `one-backend`.
+
+On the core (`music_core`), music is the media CLI's `music` group: `$S cli --as aiko -- music
+albums list`. `--app music` then refuses and says so.
 
 `$S cli [--side S] --app music [--as mateo|aiko] -- <args>` runs old music's
 `legacy/music/apps/cli/dist/music.js` against the side's music with the person's API key. Add
@@ -604,8 +618,9 @@ it, and add to the map when a change adds a feature.
   the window there. To show something below the fold, screenshot its element.
 - In music, a shortcut key such as `n` or `/` types into a focused field instead. Open a page
   where focus is outside fields, such as an album, before you press it.
-- Music's playback state is per account, not per page: a second music page sees the song that
-  `music` left playing or paused.
+- Old music's playback state is per account, not per page: a second music page sees the song that
+  `music` left playing or paused. On the core the queue is the person's, but whether a page plays
+  and where in the song is that page's own.
 - The simulator shares the Mac's network. `localhost` there is the Mac, reached through the ssh
   forwards. Without them the app can't reach the server.
 - Metro started with `CI=1` stops watching files, and the app keeps the old bundle. `ios up` does

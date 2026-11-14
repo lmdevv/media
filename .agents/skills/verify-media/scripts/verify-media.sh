@@ -394,6 +394,7 @@ cmd_up() {
   # only runs beside an image from before the music port.
   local old=$music
   if ((music)) && [[ "$(music_in "$image")" == 1 ]]; then
+    mkdir -p "$state/music"
     write_state music_core 1
     old=0
   fi
