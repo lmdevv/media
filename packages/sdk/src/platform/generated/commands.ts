@@ -1261,6 +1261,85 @@ const core_guests_status = query({
   }),
 });
 
+const core_jobs_list = query({
+  name: "core.jobs.list",
+  path: "core/jobs:list",
+  args: Schema.Struct({
+    status: Schema.optionalKey(
+      Schema.Union([
+        Schema.Literal("queued"),
+        Schema.Literal("running"),
+        Schema.Literal("succeeded"),
+        Schema.Literal("failed"),
+        Schema.Literal("canceled"),
+      ]),
+    ),
+    paginationOpts: Schema.Struct({
+      numItems: Schema.Finite,
+      cursor: Schema.Union([Schema.String, Schema.Null]),
+      endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      id: Schema.optionalKey(Schema.Finite),
+      maximumRowsRead: Schema.optionalKey(Schema.Finite),
+      maximumBytesRead: Schema.optionalKey(Schema.Finite),
+    }),
+  }),
+  result: Schema.Struct({
+    page: Schema.Array(
+      Schema.Struct({
+        jobId: Schema.String.pipe(Schema.brand("Id<jobs>")),
+        kind: Schema.Union([
+          Schema.Literal("movies.scan"),
+          Schema.Literal("music.scan"),
+          Schema.Literal("movies.metadata"),
+          Schema.Literal("movies.person"),
+          Schema.Literal("movies.trickplay"),
+          Schema.Literal("movies.import.jellyfin"),
+          Schema.Literal("movies.import.plex"),
+          Schema.Literal("music.lyrics"),
+          Schema.Literal("server.backup"),
+        ]),
+        status: Schema.Union([
+          Schema.Literal("queued"),
+          Schema.Literal("running"),
+          Schema.Literal("succeeded"),
+          Schema.Literal("failed"),
+          Schema.Literal("canceled"),
+        ]),
+        library: Schema.Union([
+          Schema.Struct({
+            libraryId: Schema.String.pipe(Schema.brand("Id<libraries>")),
+            name: Schema.String,
+            level: Schema.Union([
+              Schema.Literal("view"),
+              Schema.Literal("edit"),
+              Schema.Literal("manage"),
+            ]),
+          }),
+          Schema.Null,
+        ]),
+        attempts: Schema.Finite,
+        done: Schema.Finite,
+        total: Schema.Union([Schema.Finite, Schema.Null]),
+        message: Schema.Union([Schema.String, Schema.Null]),
+        error: Schema.Union([Schema.String, Schema.Null]),
+        canceling: Schema.Boolean,
+        createdAt: Schema.Finite,
+        finishedAt: Schema.Union([Schema.Finite, Schema.Null]),
+      }),
+    ),
+    continueCursor: Schema.String,
+    isDone: Schema.Boolean,
+    splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+    pageStatus: Schema.optionalKey(
+      Schema.Union([
+        Schema.Literal("SplitRecommended"),
+        Schema.Literal("SplitRequired"),
+        Schema.Null,
+      ]),
+    ),
+  }),
+});
+
 const core_libraries_cancelScan = mutation({
   name: "core.libraries.cancelScan",
   path: "core/libraries:cancelScan",
@@ -5378,6 +5457,10 @@ export const effectMethods = (method: EffectBuilder) => ({
       /** `core.guests.status` (query, account): Show whether guest links are on, the address they use, and whether you may make them. */
       status: method.query(core_guests_status),
     },
+    jobs: {
+      /** `core.jobs.list` (query, admin): List the server's jobs of every kind, newest first, with their attempts; a library's scan, and a song's lyrics lookup, show only where you see the library. */
+      list: method.query(core_jobs_list),
+    },
     libraries: {
       /** `core.libraries.cancelScan` (mutation, signed-in): Stop a library's scan at the attempt you saw; a finished scan stays as it ended, and what a scan wrote stays. */
       cancelScan: method.mutation(core_libraries_cancelScan),
@@ -5841,6 +5924,10 @@ export const promiseMethods = (method: PromiseBuilder) => ({
       },
       /** `core.guests.status` (query, account): Show whether guest links are on, the address they use, and whether you may make them. */
       status: method.query(core_guests_status),
+    },
+    jobs: {
+      /** `core.jobs.list` (query, admin): List the server's jobs of every kind, newest first, with their attempts; a library's scan, and a song's lyrics lookup, show only where you see the library. */
+      list: method.query(core_jobs_list),
     },
     libraries: {
       /** `core.libraries.cancelScan` (mutation, signed-in): Stop a library's scan at the attempt you saw; a finished scan stays as it ended, and what a scan wrote stays. */

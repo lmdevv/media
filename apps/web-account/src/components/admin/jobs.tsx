@@ -1,25 +1,23 @@
 import { usePlatform } from "@media/sdk/react";
-import type { QueryState } from "@media/sdk/react";
 import { Button } from "@media/ui/components/button";
 import { PageHeader } from "@media/ui/components/page-header";
-import { useEachQuery } from "@media/ui/lib/each-query";
-import { useAllPages } from "@media/ui/lib/pages";
+import { useFirstRows, usePages } from "@media/ui/lib/pages";
 import type { Paged } from "@media/ui/lib/pages";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
 import { useActions } from "./action";
 import { KIND_LABELS } from "./libraries";
-import { Failed, ItemRow, PagedList, formatTime } from "./parts";
-import type { Library, LibraryDetail, LibraryId } from "./types";
-
-/** A library's latest scan, its one kind of job. */
-export type Scan = NonNullable<LibraryDetail["scan"]>;
+import { ItemRow, PagedList, formatTime } from "./parts";
+import type { Job, LibraryId } from "./types";
 
 /** Which jobs the list shows: all of them, or the failed ones. */
 export type JobFilter = "all" | "failed";
 
-const STATUS: Readonly<Record<Scan["status"], string>> = {
+/** The failed jobs counted in the filter's label; more shows as `100+`. */
+const FAILED_COUNTED = 100;
+
+const STATUS: Readonly<Record<Job["status"], string>> = {
   queued: "Waiting",
   running: "Running",
   succeeded: "Finished",
@@ -27,70 +25,64 @@ const STATUS: Readonly<Record<Scan["status"], string>> = {
   canceled: "Canceled",
 };
 
-/** Whether a scan is still waiting or running. */
-const isActive = (scan: Scan): boolean => scan.status === "queued" || scan.status === "running";
-
-/** What a scan's row says on its second line: its progress, its error, or when it ended. */
-export const jobFacts = (library: Pick<Library, "kind">, scan: Scan | null): string => {
-  const kind = KIND_LABELS[library.kind];
-
-  if (scan === null) return `${kind} · Never scanned`;
-
-  const progress =
-    scan.status === "running" && scan.done !== null
-      ? ` · ${scan.done}${scan.total === null ? "" : ` / ${scan.total}`} files`
-      : "";
-
-  const ended = scan.finishedAt === null ? "" : ` · ${formatTime(scan.finishedAt)}`;
-
-  return `${kind} · ${STATUS[scan.status]}${progress}${ended}`;
+/** What a job of each kind other than a scan is called; a scan is called by its library. */
+const KIND_TITLES: Readonly<Record<Exclude<Job["kind"], `${string}.scan`>, string>> = {
+  "movies.metadata": "Metadata lookup",
+  "movies.person": "Person lookup",
+  "movies.trickplay": "Scrub thumbnails",
+  "movies.import.jellyfin": "Import from Jellyfin",
+  "movies.import.plex": "Import from Plex",
+  "music.lyrics": "Lyrics lookup",
+  "server.backup": "Backup",
 };
 
-/** A library with its latest scan's state, read from `core.libraries.get`. */
-export interface Job {
-  readonly library: Library;
-  readonly detail: QueryState<LibraryDetail>;
-}
+/** Whether a job is still waiting or running. */
+const isActive = (job: Pick<Job, "status">): boolean =>
+  job.status === "queued" || job.status === "running";
 
-/** Whether a job's latest scan failed. */
-const isFailed = (job: Job): boolean =>
-  job.detail.status === "success" && job.detail.data.scan?.status === "failed";
+/** A job's name in the list: a scan's library, or what the job does. */
+export const jobTitle = (job: Job): string =>
+  job.kind === "movies.scan" || job.kind === "music.scan"
+    ? (job.library?.name ?? "Scan")
+    : KIND_TITLES[job.kind];
 
 /**
- * Jobs: every library's latest scan, with its progress, its error, and a way to stop a scan or
- * run a failed one again. Old music's jobs page listed its scans; the core's jobs are each
- * library's scan, so the page lists the libraries shared with this admin (D57), all of them and
- * each one's scan at once, so the failed ones can be counted as old music did.
+ * What a job's row says on its second line: its library's kind for a scan, its status, how far
+ * it got while it runs, its attempt once it was tried again, and when it ended.
+ */
+export const jobFacts = (job: Job): string => {
+  const kind =
+    job.library === null ? null : KIND_LABELS[job.kind === "music.scan" ? "music" : "movies"];
+
+  const progress =
+    job.status === "running" ? ` · ${job.done}${job.total === null ? "" : ` / ${job.total}`}` : "";
+
+  const attempt = job.attempts > 1 ? ` · attempt ${job.attempts}` : "";
+  const ended = job.finishedAt === null ? "" : ` · ${formatTime(job.finishedAt)}`;
+
+  return `${kind === null ? "" : `${kind} · `}${STATUS[job.status]}${progress}${attempt}${ended}`;
+};
+
+/**
+ * Jobs: the server's jobs of every kind, newest first, with their progress, attempts, and errors,
+ * and a way to stop a library's scan or run a failed one again, as old music's jobs page did for
+ * its scans. The failed ones are counted, as old music counted its recent ones.
  */
 export function JobsScreen() {
   const platform = usePlatform();
   const [filter, setFilter] = useState<JobFilter>("all");
+  const all = usePages(platform.core.jobs.list, (paginationOpts) => ({ paginationOpts }));
 
-  const libraries = useAllPages(platform.core.libraries.list, (paginationOpts) => ({
-    paginationOpts,
-  }));
-
-  const rows = libraries.status === "ready" ? libraries.rows : [];
-
-  const details = useEachQuery(
-    platform.core.libraries.get,
-    rows.map((library) => ({ libraryId: library.libraryId })),
+  const failed = useFirstRows(
+    platform.core.jobs.list,
+    (paginationOpts) => ({ status: "failed" as const, paginationOpts }),
+    FAILED_COUNTED,
   );
-
-  const jobs: Paged<Job> =
-    libraries.status === "ready"
-      ? {
-          ...libraries,
-          rows: libraries.rows.map((library, index) => ({
-            library,
-            detail: details[index] ?? { status: "loading" },
-          })),
-        }
-      : libraries;
 
   return (
     <JobsView
-      jobs={jobs}
+      jobs={filter === "failed" ? failed : all}
+      failed={failed}
       filter={filter}
       onFilter={setFilter}
       row={(job) => <JobRow job={job} />}
@@ -98,32 +90,33 @@ export function JobsScreen() {
   );
 }
 
-/** The jobs list: a row per library, filtered to the failed ones on request. */
+/** How many failed jobs the label counts: all of them, `100+` past that, or nothing while counting. */
+const failedCount = (failed: Paged<Job>): string => {
+  if (failed.status !== "ready") return "";
+
+  if (failed.next.kind === "done" && failed.rows.length <= FAILED_COUNTED) {
+    return ` · ${failed.rows.length}`;
+  }
+
+  return failed.rows.length >= FAILED_COUNTED ? ` · ${FAILED_COUNTED}+` : "";
+};
+
+/** The jobs list, all of them or the failed ones. */
 export function JobsView({
   jobs,
+  failed,
   filter,
   onFilter,
   row,
 }: {
   readonly jobs: Paged<Job>;
+  /** The failed jobs, counted in the filter's label. */
+  readonly failed: Paged<Job>;
   readonly filter: JobFilter;
   readonly onFilter: (filter: JobFilter) => void;
   /** A job's row, with its actions. */
   readonly row: (job: Job) => ReactNode;
 }) {
-  const failed = jobs.status === "ready" ? jobs.rows.filter(isFailed) : [];
-
-  const reading =
-    jobs.status === "ready" && jobs.rows.some((job) => job.detail.status === "loading");
-
-  // The failed ones are known once every library's scan has been read.
-  const shown: Paged<Job> =
-    filter === "failed" && jobs.status === "ready"
-      ? reading
-        ? { status: "loading" }
-        : { ...jobs, rows: failed }
-      : jobs;
-
   return (
     <>
       <PageHeader
@@ -144,20 +137,16 @@ export function JobsView({
               aria-pressed={filter === "failed"}
               onClick={() => onFilter("failed")}
             >
-              {`Failed · ${failed.length}`}
+              {`Failed${failedCount(failed)}`}
             </Button>
           </div>
         }
       />
       <PagedList
         label="Jobs"
-        list={shown}
-        empty={
-          filter === "failed"
-            ? "No failed jobs."
-            : "No library is shared with you, so there are no jobs."
-        }
-        rowKey={(job) => job.library.libraryId}
+        list={jobs}
+        empty={filter === "failed" ? "No failed jobs." : "No jobs yet."}
+        rowKey={(job) => job.jobId}
       >
         {row}
       </PagedList>
@@ -168,22 +157,15 @@ export function JobsView({
 function JobRow({ job }: { readonly job: Job }) {
   const platform = usePlatform();
   const actions = useActions<"cancel" | "retry">();
-  const { library, detail } = job;
-
-  if (detail.status === "loading") return null;
-
-  if (detail.status === "error")
-    return <Failed message={detail.error.message} retry={detail.retry} />;
 
   return (
     <JobRowView
-      library={library}
-      scan={detail.data.scan}
+      job={job}
       running={actions.running}
       onCancel={(scan) =>
         void actions.run(
           "cancel",
-          () => platform.core.libraries.cancelScan({ jobId: scan.jobId, attempt: scan.attempt }),
+          () => platform.core.libraries.cancelScan({ jobId: scan.jobId, attempt: scan.attempts }),
           "Asked the scan to stop",
         )
       }
@@ -198,50 +180,53 @@ function JobRow({ job }: { readonly job: Job }) {
   );
 }
 
-/** One library's scan, with Cancel while it runs and Retry after it failed. */
+/**
+ * One job, with Cancel while a library's scan runs and Retry after it failed, to whoever may do
+ * more than view the library.
+ */
 export function JobRowView({
-  library,
-  scan,
+  job,
   running,
   onCancel,
   onRetry,
 }: {
-  readonly library: Library;
-  readonly scan: Scan | null;
+  readonly job: Job;
   readonly running: "cancel" | "retry" | null;
-  readonly onCancel: (scan: Scan) => void;
+  readonly onCancel: (scan: Job) => void;
   readonly onRetry: (libraryId: LibraryId) => void;
 }) {
-  const manages = library.level !== "view";
-  const active = scan !== null && isActive(scan);
+  const { library } = job;
+  const manages = library !== null && library.level !== "view";
+  const active = isActive(job);
 
-  const action = !manages ? null : active ? (
-    <Button
-      variant="raised"
-      size="xs"
-      disabled={running !== null || scan.canceling}
-      onClick={() => onCancel(scan)}
-    >
-      {scan.canceling || running === "cancel" ? "Canceling…" : "Cancel"}
-    </Button>
-  ) : scan?.status === "failed" ? (
-    <Button
-      variant="raised"
-      size="xs"
-      disabled={running !== null}
-      onClick={() => onRetry(library.libraryId)}
-    >
-      {running === "retry" ? "Starting…" : "Retry"}
-    </Button>
-  ) : null;
+  const action =
+    library === null || !manages ? null : active ? (
+      <Button
+        variant="raised"
+        size="xs"
+        disabled={running !== null || job.canceling}
+        onClick={() => onCancel(job)}
+      >
+        {job.canceling || running === "cancel" ? "Canceling…" : "Cancel"}
+      </Button>
+    ) : job.status === "failed" ? (
+      <Button
+        variant="raised"
+        size="xs"
+        disabled={running !== null}
+        onClick={() => onRetry(library.libraryId)}
+      >
+        {running === "retry" ? "Starting…" : "Retry"}
+      </Button>
+    ) : null;
 
   return (
-    <ItemRow title={library.name} facts={jobFacts(library, scan)} actions={action}>
-      {scan?.error === null || scan?.error === undefined ? null : (
-        <p className="font-mono text-caption/caption break-all text-danger">{scan.error}</p>
+    <ItemRow title={jobTitle(job)} facts={jobFacts(job)} actions={action}>
+      {job.error === null ? null : (
+        <p className="font-mono text-caption/caption break-all text-danger">{job.error}</p>
       )}
-      {active && scan.message !== null ? (
-        <p className="truncate font-mono text-caption/caption text-text-muted">{scan.message}</p>
+      {active && job.message !== null ? (
+        <p className="truncate font-mono text-caption/caption text-text-muted">{job.message}</p>
       ) : null}
     </ItemRow>
   );

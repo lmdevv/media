@@ -39,6 +39,22 @@ const jobStatus = v.union(
 );
 
 /**
+ * The job kinds `core.jobs.list` shows: every kind the server's workers claim. The stack suite's
+ * own probe kinds never run on a server, so the list leaves them out.
+ */
+const listedJobKind = v.union(
+  v.literal("movies.scan"),
+  v.literal("music.scan"),
+  v.literal("movies.metadata"),
+  v.literal("movies.person"),
+  v.literal("movies.trickplay"),
+  v.literal("movies.import.jellyfin"),
+  v.literal("movies.import.plex"),
+  v.literal("music.lyrics"),
+  v.literal("server.backup"),
+);
+
+/**
  * What asking a job to stop did: a queued job is canceled at once, a running one stops at its
  * worker's next call, and one that already finished stays as it ended.
  */
@@ -601,6 +617,40 @@ export const core = [
       attempt: v.number(),
     },
     result: canceled,
+  }),
+  query("core.jobs.list", {
+    summary:
+      "List the server's jobs of every kind, newest first, with their attempts; a library's scan, and a song's lyrics lookup, show only where you see the library",
+    scope: "admin",
+    args: {
+      /** Only the jobs in this status, such as `failed`; every status when omitted. */
+      status: v.optional(jobStatus),
+      paginationOpts: paginationOptsValidator,
+    },
+    result: paginationResultValidator(
+      v.object({
+        jobId: v.id("jobs"),
+        kind: listedJobKind,
+        status: jobStatus,
+        /** The library a scan reads, and your level on it; null for a job of another kind. */
+        library: v.union(
+          v.object({ libraryId: v.id("libraries"), name: v.string(), level }),
+          v.null(),
+        ),
+        /** Claims so far, the latest attempt's number; a scan's cancel names the attempt it saw. */
+        attempts: v.number(),
+        done: v.number(),
+        total: v.union(v.number(), v.null()),
+        /** What the job is doing now; null when it reported nothing. */
+        message: v.union(v.string(), v.null()),
+        /** Why it failed, or why its last attempt did; a scan's only to the library's managers. */
+        error: v.union(v.string(), v.null()),
+        /** True while a cancel waits for the running job's worker to stop. */
+        canceling: v.boolean(),
+        createdAt: v.number(),
+        finishedAt: v.union(v.number(), v.null()),
+      }),
+    ),
   }),
   mutation("core.libraries.remove", {
     summary: "Delete a library you manage and everything it lists; the files on disk stay",

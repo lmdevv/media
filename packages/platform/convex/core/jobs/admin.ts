@@ -38,7 +38,8 @@ const errorOf = (job: Doc<"jobs">): string | null => {
   return job.status === "failed" ? job.error : null;
 };
 
-const viewOf = (job: Doc<"jobs">): JobView => ({
+/** A job as the admin functions and `core.jobs.list` read it: its progress, error, and attempt. */
+export const viewOf = (job: Doc<"jobs">): JobView => ({
   id: job._id,
   createdAt: job._creationTime,
   status: job.status,

@@ -1650,6 +1650,92 @@ export const generatedCommands = [
     method: (platform) => platform.core.guests.status,
   }),
   coreCommand({
+    name: "core.jobs.list",
+    path: ["admin", "jobs", "list"],
+    kind: "query",
+    scope: "admin",
+    refusesKeys: false,
+    summary:
+      "List the server's jobs of every kind, newest first, with their attempts; a library's scan, and a song's lyrics lookup, show only where you see the library",
+    secrets: [],
+    paginated: true,
+    args: Schema.Struct({
+      status: Schema.optionalKey(
+        Schema.Union([
+          Schema.Literal("queued"),
+          Schema.Literal("running"),
+          Schema.Literal("succeeded"),
+          Schema.Literal("failed"),
+          Schema.Literal("canceled"),
+        ]),
+      ),
+      paginationOpts: Schema.Struct({
+        numItems: Schema.Finite,
+        cursor: Schema.Union([Schema.String, Schema.Null]),
+        endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+        id: Schema.optionalKey(Schema.Finite),
+        maximumRowsRead: Schema.optionalKey(Schema.Finite),
+        maximumBytesRead: Schema.optionalKey(Schema.Finite),
+      }),
+    }),
+    result: Schema.Struct({
+      page: Schema.Array(
+        Schema.Struct({
+          jobId: Schema.String.pipe(Schema.brand("Id<jobs>")),
+          kind: Schema.Union([
+            Schema.Literal("movies.scan"),
+            Schema.Literal("music.scan"),
+            Schema.Literal("movies.metadata"),
+            Schema.Literal("movies.person"),
+            Schema.Literal("movies.trickplay"),
+            Schema.Literal("movies.import.jellyfin"),
+            Schema.Literal("movies.import.plex"),
+            Schema.Literal("music.lyrics"),
+            Schema.Literal("server.backup"),
+          ]),
+          status: Schema.Union([
+            Schema.Literal("queued"),
+            Schema.Literal("running"),
+            Schema.Literal("succeeded"),
+            Schema.Literal("failed"),
+            Schema.Literal("canceled"),
+          ]),
+          library: Schema.Union([
+            Schema.Struct({
+              libraryId: Schema.String.pipe(Schema.brand("Id<libraries>")),
+              name: Schema.String,
+              level: Schema.Union([
+                Schema.Literal("view"),
+                Schema.Literal("edit"),
+                Schema.Literal("manage"),
+              ]),
+            }),
+            Schema.Null,
+          ]),
+          attempts: Schema.Finite,
+          done: Schema.Finite,
+          total: Schema.Union([Schema.Finite, Schema.Null]),
+          message: Schema.Union([Schema.String, Schema.Null]),
+          error: Schema.Union([Schema.String, Schema.Null]),
+          canceling: Schema.Boolean,
+          createdAt: Schema.Finite,
+          finishedAt: Schema.Union([Schema.Finite, Schema.Null]),
+        }),
+      ),
+      continueCursor: Schema.String,
+      isDone: Schema.Boolean,
+      splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      pageStatus: Schema.optionalKey(
+        Schema.Union([
+          Schema.Literal("SplitRecommended"),
+          Schema.Literal("SplitRequired"),
+          Schema.Null,
+        ]),
+      ),
+    }),
+    method: (platform) => platform.core.jobs.list,
+  }),
+  coreCommand({
     name: "core.libraries.cancelScan",
     path: ["auth", "libraries", "cancel-scan"],
     kind: "mutation",

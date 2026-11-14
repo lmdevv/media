@@ -521,8 +521,9 @@ artboards stays open (`docs/architecture.md`, "Open").
 
 - Music's settings are Account and Playback. API keys, People, Libraries, and Jobs link to the
   account client, which keeps them for every product. Old music's Jobs page moved to the account
-  client's admin at `/admin/jobs`: every library's latest scan, its progress and error, Cancel, and
-  Retry.
+  client's admin at `/admin/jobs`, over `core.jobs.list` (ADR 0012): the server's jobs of every
+  kind, newest first, with their progress, attempts, and errors, Cancel and Retry on a library's
+  scan, and the failed ones counted.
 - ⌘K searches only songs, albums, artists, and your playlists (D38), opens screens, and runs the
   player's actions. Old music's menu also ran any registry command from a form generated from
   its command schemas; the core declares commands as Convex validators that the client does not
