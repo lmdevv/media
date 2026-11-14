@@ -2,7 +2,7 @@ import { Brand } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { JobRowView, JobsView, jobFacts } from "./jobs";
-import type { Scan } from "./jobs";
+import type { Job, Scan } from "./jobs";
 import { disabledButton, loaded, noop, textOf } from "./testing";
 import type { Library, LibraryId } from "./types";
 
@@ -63,10 +63,42 @@ describe("JobRowView", () => {
   });
 });
 
+const job = (library: Library, current: Scan | null): Job => ({
+  library,
+  detail: {
+    status: "success",
+    data: { ...library, items: 28, folders: null, scan: current },
+  },
+});
+
+const nameOf = (shown: Job): string => `${shown.library.name} row`;
+
+const failedMovies = job(
+  { ...music, libraryId: libraryId("l2"), name: "Movies", kind: "movies" },
+  scan({ status: "failed", error: "Folder is gone" }),
+);
+
 describe("JobsView", () => {
   it("says when no library is shared, so there are no jobs", () => {
-    expect(textOf(<JobsView libraries={loaded([])} filter="all" onFilter={noop} />)).toContain(
-      "No library is shared with you, so there are no jobs.",
+    expect(
+      textOf(<JobsView jobs={loaded([])} filter="all" onFilter={noop} row={nameOf} />),
+    ).toContain("No library is shared with you, so there are no jobs.");
+  });
+
+  it("counts the failed scans and shows only them when asked", () => {
+    const jobs = loaded([job(music, scan({})), failedMovies]);
+    const failed = textOf(<JobsView jobs={jobs} filter="failed" onFilter={noop} row={nameOf} />);
+
+    expect(failed).toContain("Failed · 1");
+    expect(failed).toContain("Movies row");
+    expect(failed).not.toContain("Music row");
+  });
+
+  it("says when no scan failed", () => {
+    const jobs = loaded([job(music, scan({ status: "succeeded" }))]);
+
+    expect(textOf(<JobsView jobs={jobs} filter="failed" onFilter={noop} row={nameOf} />)).toContain(
+      "No failed jobs.",
     );
   });
 });

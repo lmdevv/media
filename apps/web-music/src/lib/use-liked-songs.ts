@@ -1,5 +1,7 @@
+import { useFirstRows } from "@media/ui/lib/pages";
+
 import type { Track } from "@/lib/models";
-import { useEveryPage } from "@/lib/pages";
+import { PAGE_ROWS } from "@/lib/pages";
 import { useMusic } from "@/lib/platform";
 
 const LIKED_LIMIT = 5000;
@@ -12,13 +14,19 @@ export interface LikedSongs {
 
 /**
  * Follows the liked songs page by page, loading each next page as soon as the one before it
- * arrives, up to `LIKED_LIMIT` songs. Each page is its own subscription, pinned where the next one
+ * arrives, until it holds `LIKED_LIMIT` songs. Each page is its own subscription, pinned where the next one
  * starts, so a song liked while the list is open lands in the first page. Returns undefined until
  * the first page arrives; throws a page's error, like `useRead`.
  */
 export const useLikedSongs = (): LikedSongs | undefined => {
   const music = useMusic();
-  const paged = useEveryPage(music.likes.list, (paginationOpts) => ({ paginationOpts }));
+
+  const paged = useFirstRows(
+    music.likes.list,
+    (paginationOpts) => ({ paginationOpts }),
+    LIKED_LIMIT,
+    PAGE_ROWS,
+  );
 
   if (paged.status === "loading") return undefined;
 

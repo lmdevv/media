@@ -2,7 +2,6 @@ import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import type { PlatformSdk } from "@media/sdk/promise";
 import { pagedStore } from "@media/ui/lib/pages";
 import { Brand } from "effect";
-import type { Paged } from "@media/ui/lib/pages";
 import {
   createContext,
   useContext,
@@ -207,16 +206,21 @@ const queuePages = (platform: PlatformSdk) =>
   );
 
 /**
- * Every page of the listener's queue, followed live, loading the next page as soon as one arrives.
- * A new queue (`music.queue.play`) lists another generation's entries, so Convex refuses the
- * cursors its pages were following (`InvalidCursor`, which the SDK reports as a protocol error);
- * the pages then start over from the top, as Convex's own paginated hook does. The rows shown
- * before stay until the new pages answer.
+ * Every row of the listener's queue, followed live, loading the next page as soon as one arrives;
+ * null until every page first arrived. A new queue (`music.queue.play`) lists another
+ * generation's entries, so Convex refuses the cursors its pages were following (`InvalidCursor`,
+ * which the SDK reports as a protocol error); the pages then start over from the top, as Convex's
+ * own paginated hook does. The last whole list stays while pages reload, as when the queue grows
+ * past a page or starts over, so the player never drops the song it shows.
  */
-const useQueueRows = (platform: PlatformSdk): Paged<QueueRow> => {
+const useQueueRows = (platform: PlatformSdk): ReadonlyArray<QueueRow> | null => {
   const [store, setStore] = useState(() => queuePages(platform));
+  const [last, setLast] = useState<ReadonlyArray<QueueRow> | null>(null);
   const paged = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   const load = paged.status === "ready" && paged.next.kind === "more" ? paged.next.load : null;
+  const whole = paged.status === "ready" && paged.next.kind === "done" ? paged.rows : null;
+
+  if (whole !== null && whole !== last) setLast(whole);
 
   const failed =
     paged.status === "failed" || (paged.status === "ready" && paged.next.kind === "failed");
@@ -237,16 +241,14 @@ const useQueueRows = (platform: PlatformSdk): Paged<QueueRow> => {
     };
   }, [failed, platform]);
 
-  return paged;
+  return whole ?? last;
 };
 
 /** The listener's queue once its state and every page have arrived; null before. */
 const useQueue = (platform: PlatformSdk): QueueState<QueueTrack> | null => {
   const info = usePlatformQuery(platform.music.queue.get);
-  const rows = useQueueRows(platform);
-  const complete = rows.status === "ready" && rows.next.kind === "done";
+  const list = useQueueRows(platform);
   const data = info.status === "success" ? info.data : null;
-  const list = complete ? rows.rows : null;
 
   return useMemo(() => {
     if (data === null || list === null) return null;
@@ -265,14 +267,6 @@ const useQueue = (platform: PlatformSdk): QueueState<QueueTrack> | null => {
   }, [data, list]);
 };
 
-type SettingsView = Awaited<ReturnType<PlatformSdk["core"]["settings"]["get"]>>;
-
-const settingsOf = (view: SettingsView, fallback: PlayerSettings): PlayerSettings => ({
-  quality: view.device === null ? fallback.quality : qualityOfSetting(view.device.streamQuality),
-  volume: view.device === null ? fallback.volume : view.device.volume,
-  gapless: view.user.gapless,
-});
-
 interface ControllerProps {
   readonly platform: PlatformSdk;
   readonly mediaBaseUrl: string;
@@ -280,6 +274,8 @@ interface ControllerProps {
   readonly settings: PlayerSettings;
   /** Whether the core keeps settings for this device, read when a change is saved. */
   readonly deviceSettings: () => boolean;
+  /** The volume chosen here whose save the core has not answered yet, set when it is saved. */
+  readonly unsavedVolume: { current: number | null };
 }
 
 const createController = ({
@@ -288,6 +284,7 @@ const createController = ({
   engine,
   settings,
   deviceSettings,
+  unsavedVolume,
 }: ControllerProps): PlaybackController => {
   const storage = browserStorage();
   const probe = document.createElement("audio");
@@ -333,6 +330,8 @@ const createController = ({
       },
       saveVolume: (volume) => {
         saveBrowserVolume(storage, volume);
+
+        if (deviceSettings()) unsavedVolume.current = volume;
         clearTimeout(volumeTimer);
         volumeTimer = setTimeout(() => {
           saveSetting({ volume });
@@ -410,6 +409,7 @@ export function PlayerProvider({
   const [fallback] = useState(() => browserSettings(browserStorage(), true));
   const keepsDeviceSettings = settings.status === "success" && settings.data.device !== null;
   const deviceSettings = useRef(keepsDeviceSettings);
+  const unsavedVolume = useRef<number | null>(null);
 
   useLayoutEffect(() => {
     deviceSettings.current = keepsDeviceSettings;
@@ -423,6 +423,7 @@ export function PlayerProvider({
       engine,
       settings: fallback,
       deviceSettings: () => deviceSettings.current,
+      unsavedVolume,
     }),
   );
 
@@ -435,22 +436,28 @@ export function PlayerProvider({
     if (queue !== null) controller.sync(queue);
   }, [controller, queue]);
 
-  const latest = settings.status === "success" ? settingsOf(settings.data, fallback) : null;
-  const latestQuality = latest?.quality;
-  const latestVolume = latest?.volume;
-  const latestGapless = latest?.gapless;
+  const view = settings.status === "success" ? settings.data : null;
+  const latestGapless = view?.user.gapless;
+  const deviceQuality = view?.device?.streamQuality;
+  const deviceVolume = view?.device?.volume;
 
   useEffect(() => {
-    if (latestQuality === undefined || latestVolume === undefined || latestGapless === undefined) {
-      return;
-    }
+    if (latestGapless === undefined) return;
+
+    // Without settings the core keeps for this device, this browser's last choice stands, read now
+    // rather than at mount, so a change from elsewhere never undoes one made here since.
+    const browser = browserSettings(browserStorage(), latestGapless);
+
+    // The core answers each volume save with the value saved, which may be older than the one
+    // chosen since; the newest choice stands until the core answers with it.
+    if (unsavedVolume.current === deviceVolume) unsavedVolume.current = null;
 
     controller.applySettings({
-      quality: latestQuality,
-      volume: latestVolume,
+      quality: deviceQuality === undefined ? browser.quality : qualityOfSetting(deviceQuality),
+      volume: deviceVolume === undefined ? browser.volume : (unsavedVolume.current ?? deviceVolume),
       gapless: latestGapless,
     });
-  }, [controller, latestQuality, latestVolume, latestGapless]);
+  }, [controller, latestGapless, deviceQuality, deviceVolume]);
 
   const player = useMemo((): Player => {
     const entries = queue?.entries ?? [];

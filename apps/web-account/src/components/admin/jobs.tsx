@@ -1,9 +1,12 @@
-import { usePlatform, usePlatformQuery } from "@media/sdk/react";
+import { usePlatform } from "@media/sdk/react";
+import type { QueryState } from "@media/sdk/react";
 import { Button } from "@media/ui/components/button";
 import { PageHeader } from "@media/ui/components/page-header";
-import { usePages } from "@media/ui/lib/pages";
+import { useEachQuery } from "@media/ui/lib/each-query";
+import { useAllPages } from "@media/ui/lib/pages";
 import type { Paged } from "@media/ui/lib/pages";
 import { useState } from "react";
+import type { ReactNode } from "react";
 
 import { useActions } from "./action";
 import { KIND_LABELS } from "./libraries";
@@ -43,32 +46,84 @@ export const jobFacts = (library: Pick<Library, "kind">, scan: Scan | null): str
   return `${kind} · ${STATUS[scan.status]}${progress}${ended}`;
 };
 
+/** A library with its latest scan's state, read from `core.libraries.get`. */
+export interface Job {
+  readonly library: Library;
+  readonly detail: QueryState<LibraryDetail>;
+}
+
+/** Whether a job's latest scan failed. */
+const isFailed = (job: Job): boolean =>
+  job.detail.status === "success" && job.detail.data.scan?.status === "failed";
+
 /**
  * Jobs: every library's latest scan, with its progress, its error, and a way to stop a scan or
  * run a failed one again. Old music's jobs page listed its scans; the core's jobs are each
- * library's scan, so the page lists the libraries shared with this admin (D57).
+ * library's scan, so the page lists the libraries shared with this admin (D57), all of them and
+ * each one's scan at once, so the failed ones can be counted as old music did.
  */
 export function JobsScreen() {
   const platform = usePlatform();
   const [filter, setFilter] = useState<JobFilter>("all");
 
-  const libraries = usePages(platform.core.libraries.list, (paginationOpts) => ({
+  const libraries = useAllPages(platform.core.libraries.list, (paginationOpts) => ({
     paginationOpts,
   }));
 
-  return <JobsView libraries={libraries} filter={filter} onFilter={setFilter} />;
+  const rows = libraries.status === "ready" ? libraries.rows : [];
+
+  const details = useEachQuery(
+    platform.core.libraries.get,
+    rows.map((library) => ({ libraryId: library.libraryId })),
+  );
+
+  const jobs: Paged<Job> =
+    libraries.status === "ready"
+      ? {
+          ...libraries,
+          rows: libraries.rows.map((library, index) => ({
+            library,
+            detail: details[index] ?? { status: "loading" },
+          })),
+        }
+      : libraries;
+
+  return (
+    <JobsView
+      jobs={jobs}
+      filter={filter}
+      onFilter={setFilter}
+      row={(job) => <JobRow job={job} />}
+    />
+  );
 }
 
 /** The jobs list: a row per library, filtered to the failed ones on request. */
 export function JobsView({
-  libraries,
+  jobs,
   filter,
   onFilter,
+  row,
 }: {
-  readonly libraries: Paged<Library>;
+  readonly jobs: Paged<Job>;
   readonly filter: JobFilter;
   readonly onFilter: (filter: JobFilter) => void;
+  /** A job's row, with its actions. */
+  readonly row: (job: Job) => ReactNode;
 }) {
+  const failed = jobs.status === "ready" ? jobs.rows.filter(isFailed) : [];
+
+  const reading =
+    jobs.status === "ready" && jobs.rows.some((job) => job.detail.status === "loading");
+
+  // The failed ones are known once every library's scan has been read.
+  const shown: Paged<Job> =
+    filter === "failed" && jobs.status === "ready"
+      ? reading
+        ? { status: "loading" }
+        : { ...jobs, rows: failed }
+      : jobs;
+
   return (
     <>
       <PageHeader
@@ -89,46 +144,46 @@ export function JobsView({
               aria-pressed={filter === "failed"}
               onClick={() => onFilter("failed")}
             >
-              Failed
+              {`Failed · ${failed.length}`}
             </Button>
           </div>
         }
       />
       <PagedList
         label="Jobs"
-        list={libraries}
-        empty="No library is shared with you, so there are no jobs."
-        rowKey={(library) => library.libraryId}
+        list={shown}
+        empty={
+          filter === "failed"
+            ? "No failed jobs."
+            : "No library is shared with you, so there are no jobs."
+        }
+        rowKey={(job) => job.library.libraryId}
       >
-        {(library) => <JobRow library={library} filter={filter} />}
+        {row}
       </PagedList>
     </>
   );
 }
 
-function JobRow({ library, filter }: { readonly library: Library; readonly filter: JobFilter }) {
+function JobRow({ job }: { readonly job: Job }) {
   const platform = usePlatform();
-  const detail = usePlatformQuery(platform.core.libraries.get, { libraryId: library.libraryId });
   const actions = useActions<"cancel" | "retry">();
+  const { library, detail } = job;
 
   if (detail.status === "loading") return null;
 
   if (detail.status === "error")
     return <Failed message={detail.error.message} retry={detail.retry} />;
 
-  const { scan } = detail.data;
-
-  if (filter === "failed" && scan?.status !== "failed") return null;
-
   return (
     <JobRowView
       library={library}
-      scan={scan}
+      scan={detail.data.scan}
       running={actions.running}
-      onCancel={(job) =>
+      onCancel={(scan) =>
         void actions.run(
           "cancel",
-          () => platform.core.libraries.cancelScan({ jobId: job.jobId, attempt: job.attempt }),
+          () => platform.core.libraries.cancelScan({ jobId: scan.jobId, attempt: scan.attempt }),
           "Asked the scan to stop",
         )
       }

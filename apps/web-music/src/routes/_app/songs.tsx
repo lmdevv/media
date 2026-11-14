@@ -9,7 +9,8 @@ import { useMoreOnView } from "@/components/library/paged";
 import { TrackList, TrackListSkeleton } from "@/components/library/track-list";
 import { toastFailure } from "@/lib/action";
 import { formatTotal, plural } from "@/lib/format";
-import { readPages, usePaged } from "@/lib/pages";
+import { readPages } from "@/lib/pages";
+import { usePages } from "@media/ui/lib/pages";
 import { useMusic, useRead } from "@/lib/platform";
 import { useHeld } from "@/lib/use-held";
 
@@ -104,7 +105,7 @@ function FilteredSongs({ query }: { readonly query: string }) {
 
 function AllSongs() {
   const music = useMusic();
-  const paged = usePaged(music.tracks.list, (paginationOpts) => ({ paginationOpts }), PAGE_SIZE);
+  const paged = usePages(music.tracks.list, (paginationOpts) => ({ paginationOpts }), PAGE_SIZE);
   const sentinel = useMoreOnView(paged);
 
   if (paged.status === "loading") return <TrackListSkeleton />;

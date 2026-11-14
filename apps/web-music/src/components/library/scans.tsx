@@ -1,13 +1,13 @@
 import { usePlatform } from "@media/sdk/react";
 import type { PlatformSdk } from "@media/sdk/promise";
-import type { ReactNode } from "react";
+import type { QueryState } from "@media/sdk/react";
+import { useEachQuery } from "@media/ui/lib/each-query";
 
 import { isActive } from "@/lib/job-progress";
 import type { Scan } from "@/lib/job-progress";
 import { useAllRows } from "@/lib/pages";
-import { useRead } from "@/lib/platform";
 
-type LibraryId = Awaited<ReturnType<PlatformSdk["core"]["libraries"]["get"]>>["libraryId"];
+type Library = Awaited<ReturnType<PlatformSdk["core"]["libraries"]["get"]>>;
 
 /** A music library's scan that is waiting or running, with the library's name. */
 export interface ActiveScan extends Scan {
@@ -15,68 +15,43 @@ export interface ActiveScan extends Scan {
 }
 
 /**
- * Renders `children` with the first waiting or running scan of a music library shared with you,
- * null when none runs, or `undefined` while the libraries load. Old music listed jobs; the core
- * shows each library's latest scan (`core.libraries.get`), which is the same for its one job kind.
+ * The first waiting or running scan among the libraries' states, in the list's order; null when
+ * none runs, or `undefined` while a library that could hold one still loads. A library the
+ * person lost between the list and its own read holds no scan for them.
  */
-export function WithActiveScan({
-  children,
-}: {
-  readonly children: (scan: ActiveScan | null | undefined) => ReactNode;
-}) {
+export const firstActiveScan = (
+  libraries: ReadonlyArray<QueryState<Library>>,
+): ActiveScan | null | undefined => {
+  for (const state of libraries) {
+    if (state.status === "success" && state.data.scan !== null && isActive(state.data.scan)) {
+      return { ...state.data.scan, library: state.data.name };
+    }
+  }
+
+  return libraries.some((state) => state.status === "loading") ? undefined : null;
+};
+
+/**
+ * The first waiting or running scan of a music library shared with you, null when none runs, or
+ * `undefined` while the libraries load. Old music listed jobs; the core shows each library's
+ * latest scan (`core.libraries.get`), which is the same for its one job kind, so every music
+ * library is read at once.
+ */
+export const useActiveScan = (): ActiveScan | null | undefined => {
   const platform = usePlatform();
 
   const libraries = useAllRows(platform.core.libraries.list, (paginationOpts) => ({
     paginationOpts,
   }));
 
-  if (libraries === undefined) return children(undefined);
+  const music = (libraries ?? [])
+    .filter((library) => library.kind === "music")
+    .map((library) => ({ libraryId: library.libraryId }));
 
-  const music = libraries.filter((library) => library.kind === "music");
+  const states = useEachQuery(platform.core.libraries.get, music);
 
-  return (
-    <FirstActive libraries={music.map((library) => library.libraryId)}>{children}</FirstActive>
-  );
-}
-
-function FirstActive({
-  libraries,
-  children,
-}: {
-  readonly libraries: ReadonlyArray<LibraryId>;
-  readonly children: (scan: ActiveScan | null | undefined) => ReactNode;
-}) {
-  const [first, ...rest] = libraries;
-
-  if (first === undefined) return children(null);
-
-  return (
-    <LibraryScan libraryId={first} rest={rest}>
-      {children}
-    </LibraryScan>
-  );
-}
-
-function LibraryScan({
-  libraryId,
-  rest,
-  children,
-}: {
-  readonly libraryId: LibraryId;
-  readonly rest: ReadonlyArray<LibraryId>;
-  readonly children: (scan: ActiveScan | null | undefined) => ReactNode;
-}) {
-  const platform = usePlatform();
-  const library = useRead(platform.core.libraries.get, { libraryId });
-
-  if (library === undefined) return children(undefined);
-
-  if (library.scan !== null && isActive(library.scan)) {
-    return children({ ...library.scan, library: library.name });
-  }
-
-  return <FirstActive libraries={rest}>{children}</FirstActive>;
-}
+  return libraries === undefined ? undefined : firstActiveScan(states);
+};
 
 /** The thin accent progress bar used for scans. */
 export function ProgressBar({

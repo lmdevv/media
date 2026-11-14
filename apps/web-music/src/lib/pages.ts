@@ -1,74 +1,45 @@
-import { pagedStore } from "@media/ui/lib/pages";
-import type { PageOf, PageOpts, PagedQuery, Paged } from "@media/ui/lib/pages";
-import { useEffect, useState, useSyncExternalStore } from "react";
-
-export type { Paged } from "@media/ui/lib/pages";
+import { useAllPages } from "@media/ui/lib/pages";
+import type { PageOf, PageOpts, PagedQuery } from "@media/ui/lib/pages";
+import { useState } from "react";
 
 /** Rows a page asks for; the core caps a page to what one call may read. */
-const PAGE_ROWS = 100;
+export const PAGE_ROWS = 100;
 
-/**
- * Follows a paginated core query page by page, each page its own subscription pinned where the
- * next one starts (`@media/ui/lib/pages`). The store is held in state, keyed by the query and its
- * arguments, since React may drop a memo, which would restart every page's subscription.
- *
- * @param argsAt - The query's arguments for a page's `paginationOpts`.
- */
-export const usePaged = <Args, Row>(
-  query: PagedQuery<Args, Row>,
-  argsAt: (paginationOpts: PageOpts) => Args,
-  rows = PAGE_ROWS,
-): Paged<Row> => {
-  const key = JSON.stringify(argsAt({ numItems: rows, cursor: null }));
-
-  const open = () => pagedStore((span) => query.watch(argsAt({ numItems: rows, ...span })));
-
-  const [held, setHeld] = useState(() => ({ query, key, store: open() }));
-  let current = held;
-
-  if (held.query !== query || held.key !== key) {
-    current = { query, key, store: open() };
-    setHeld(current);
-  }
-
-  const { store } = current;
-
-  return useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
-};
-
-/**
- * Follows every page of a paginated core query, loading the next as soon as one arrives, for
- * lists a screen shows whole: an album's songs, an artist's albums, a playlist's entries.
- */
-export const useEveryPage = <Args, Row>(
-  query: PagedQuery<Args, Row>,
-  argsAt: (paginationOpts: PageOpts) => Args,
-): Paged<Row> => {
-  const paged = usePaged(query, argsAt);
-  const load = paged.status === "ready" && paged.next.kind === "more" ? paged.next.load : null;
-
-  useEffect(() => {
-    load?.();
-  }, [load]);
-
-  return paged;
-};
+/** The last whole list a query answered, for its arguments' key. */
+interface WholeList<Args, Row> {
+  readonly query: PagedQuery<Args, Row>;
+  readonly key: string;
+  readonly rows: ReadonlyArray<Row>;
+}
 
 /**
  * Every row of a paginated core query once all its pages arrived, else `undefined`, for screens
- * that show a list whole. A failed page throws to the route's error screen, as `useRead` does.
+ * that show a list whole: an album's songs, an artist's albums, a playlist's entries. While a
+ * page reloads, as when the list grows past a page or a page splits, it keeps the last whole list
+ * of the same query, so the screen never drops back to its skeleton. A failed page throws to the
+ * route's error screen, as `useRead` does.
  */
 export const useAllRows = <Args, Row>(
   query: PagedQuery<Args, Row>,
   argsAt: (paginationOpts: PageOpts) => Args,
 ): ReadonlyArray<Row> | undefined => {
-  const paged = useEveryPage(query, argsAt);
+  const paged = useAllPages(query, argsAt, PAGE_ROWS);
+  const key = JSON.stringify(argsAt({ numItems: PAGE_ROWS, cursor: null }));
+  const [last, setLast] = useState<WholeList<Args, Row> | null>(null);
 
   if (paged.status === "failed") throw new Error(paged.message);
 
   if (paged.status === "ready" && paged.next.kind === "failed") throw new Error(paged.next.message);
 
-  return paged.status === "ready" && paged.next.kind === "done" ? paged.rows : undefined;
+  const whole = paged.status === "ready" && paged.next.kind === "done" ? paged.rows : undefined;
+
+  if (whole !== undefined) {
+    if (last?.rows !== whole) setLast({ query, key, rows: whole });
+
+    return whole;
+  }
+
+  return last !== null && last.query === query && last.key === key ? last.rows : undefined;
 };
 
 /**

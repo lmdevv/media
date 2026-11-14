@@ -4,7 +4,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { AlbumCard, PageHeader } from "@/components/library/cards";
 import { Paged } from "@/components/library/paged";
 import { plural } from "@/lib/format";
-import { usePaged } from "@/lib/pages";
+import { usePages } from "@media/ui/lib/pages";
 import { useMusic, useRead } from "@/lib/platform";
 
 export const Route = createFileRoute("/_app/albums/")({ component: AlbumsPage });
@@ -22,7 +22,7 @@ const skeleton = Array.from({ length: 12 }, (_, index) => (
 function AlbumsPage() {
   const music = useMusic();
   const home = useRead(music.library.home, {});
-  const paged = usePaged(music.albums.list, (paginationOpts) => ({ paginationOpts }), PAGE_SIZE);
+  const paged = usePages(music.albums.list, (paginationOpts) => ({ paginationOpts }), PAGE_SIZE);
 
   return (
     <div className="flex flex-col gap-7 px-5 pt-safe-top lg:px-12 lg:pt-row">

@@ -5,7 +5,7 @@ import { DiscIcon, FolderIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { Artwork } from "@/components/library/artwork";
-import { ProgressBar, WithActiveScan } from "@/components/library/scans";
+import { ProgressBar, useActiveScan } from "@/components/library/scans";
 import type { ActiveScan } from "@/components/library/scans";
 import { ACCOUNT_LIBRARIES } from "@/lib/account-links";
 import { jobEta, jobPercent } from "@/lib/job-progress";
@@ -25,15 +25,12 @@ import { formatCount, formatTotal, greeting, initial, weekday } from "@/lib/form
 import { placeholderAt } from "@/lib/art";
 import { useNow } from "@/lib/use-now";
 
-export const Route = createFileRoute("/_app/")({ component: HomePage });
+export const Route = createFileRoute("/_app/")({ component: HomeScreen });
 
 const firstName = (name: string): string => name.split(/\s+/)[0] ?? "";
 
-function HomePage() {
-  return <WithActiveScan>{(scan) => <HomeScreen scan={scan} />}</WithActiveScan>;
-}
-
-function HomeScreen({ scan: active }: { readonly scan: ActiveScan | null | undefined }) {
+function HomeScreen() {
+  const active = useActiveScan();
   const music = useMusic();
   const home = useRead(music.library.home, {});
   const me = useMe();

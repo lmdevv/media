@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { ReactNode, RefObject } from "react";
 
-import type { Paged as PagedRows } from "@/lib/pages";
+import type { Paged as PagedRows } from "@media/ui/lib/pages";
 import { scrollRootOf } from "@/lib/scroll-root";
 
 /** Where to place a list's sentinel, and whether there is a next page for it to load. */
