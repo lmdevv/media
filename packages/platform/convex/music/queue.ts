@@ -297,8 +297,8 @@ const slotAfter = (
 
 /**
  * Inserts entries for `tracks` at `play` in play order and at `list` in the order before shuffle,
- * renumbering first when a slot is too narrow, and answers their ids in order. `place` finds the
- * slots again after a renumber.
+ * renumbering first when a slot is too narrow, and answers their ids in order. `place` reads the
+ * entries around the slots each time it runs, so after a renumber it finds them at their new keys.
  */
 const insertAt = async (
   session: Session,
@@ -306,15 +306,20 @@ const insertAt = async (
   trackIds: ReadonlyArray<Id<"tracks">>,
   autoplay: boolean,
   place: () => Promise<{ readonly play: Slot; readonly list: Slot }>,
+  renumberedOnce = false,
 ): Promise<ReadonlyArray<Id<"playQueueEntries">>> => {
   const slots = await place();
   const plays = ordersBetween(slots.play.before, slots.play.after, trackIds.length);
   const lists = ordersBetween(slots.list.before, slots.list.after, trackIds.length);
 
   if (plays === null || lists === null) {
+    // Renumbering leaves a whole step between neighbours, so a slot `place` reads again after it
+    // always fits; one still too narrow is a defect in `place`.
+    if (renumberedOnce) throw new Error("A queue slot stayed too narrow after renumbering");
+
     await renumber(session, queue);
 
-    return insertAt(session, queue, trackIds, autoplay, place);
+    return insertAt(session, queue, trackIds, autoplay, place, true);
   }
 
   return Promise.all(
@@ -367,11 +372,12 @@ const toppedUp = async (session: Session, queue: Queue): Promise<Queue> => {
   if (songs.length === 0) return queue;
 
   await insertAt(session, queue, songs, true, async () => {
+    const fresh = await entryOf(session, queue, current._id);
     const last = await firstOf(session, queue, "by_queue_list", null, true);
 
     return {
-      play: { before: current.order, after: null },
-      list: { before: last?.listOrder ?? current.listOrder, after: null },
+      play: { before: fresh.order, after: null },
+      list: { before: last?.listOrder ?? fresh.listOrder, after: null },
     };
   });
 
@@ -625,15 +631,17 @@ export const { get, list, play, add, remove, move, clear, jump, shuffle, repeat,
       }
 
       const itemIds = await insertAt(session, queue, songs, false, async () => {
+        const fresh = await entryOf(session, queue, current._id);
+
         if (playNext === true) {
-          const after = await playsAfter(session, queue, current);
-          const listAfter = queue.shuffle ? await listedAfter(session, queue, current) : after;
+          const after = await playsAfter(session, queue, fresh);
+          const listAfter = queue.shuffle ? await listedAfter(session, queue, fresh) : after;
 
           return {
-            play: slotAfter(current.order, after, (entry) => entry.order),
+            play: slotAfter(fresh.order, after, (entry) => entry.order),
             list: queue.shuffle
-              ? slotAfter(current.listOrder, listAfter, (entry) => entry.listOrder)
-              : slotAfter(current.order, after, (entry) => entry.order),
+              ? slotAfter(fresh.listOrder, listAfter, (entry) => entry.listOrder)
+              : slotAfter(fresh.order, after, (entry) => entry.order),
           };
         }
 
@@ -643,7 +651,7 @@ export const { get, list, play, add, remove, move, clear, jump, shuffle, repeat,
               .eq("userId", session.userId)
               .eq("generation", queue.generation)
               .eq("autoplay", true)
-              .gt("order", current.order),
+              .gt("order", fresh.order),
           ),
         );
 
@@ -655,7 +663,7 @@ export const { get, list, play, add, remove, move, clear, jump, shuffle, repeat,
         const lastListed = await firstOf(session, queue, "by_queue_list", null, true);
 
         const playSlot = {
-          before: before?.order ?? current.order,
+          before: before?.order ?? fresh.order,
           after: autoplayed?.order ?? null,
         };
 

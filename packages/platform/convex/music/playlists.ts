@@ -171,22 +171,35 @@ const playlistName = (typed: string): string => {
       );
 };
 
-/** Whether `text` holds a control character other than a tab or a line break. */
-const hasControl = (text: string): boolean =>
+/**
+ * Private-use, unassigned, and surrogate code points, line and paragraph separators, and the
+ * bidirectional controls that reorder what others see, as the core's printable names refuse them.
+ */
+const UNPRINTABLE = /[\p{Co}\p{Cn}\p{Cs}\p{Zl}\p{Zp}\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/u;
+
+/**
+ * Whether a description others see holds a character no one should see: a control character
+ * other than a tab or a line break, or one `UNPRINTABLE` names.
+ */
+const hasUnprintable = (text: string): boolean =>
+  UNPRINTABLE.test(text) ||
   Array.from(text).some((character) => {
     const code = character.codePointAt(0) ?? 0;
 
-    return (code < 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d) || code === 0x7f;
+    return (
+      (code < 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d) ||
+      (code >= 0x7f && code < 0xa0)
+    );
   });
 
 /** A description as old music's `Description` took it: trimmed, at most 500; empty for none. */
 const playlistDescription = (typed: string): string | null => {
   const description = typed.trim();
 
-  if (description.length > MUSIC_BOUNDS.playlistDescription || hasControl(description)) {
+  if (description.length > MUSIC_BOUNDS.playlistDescription || hasUnprintable(description)) {
     return fail(
       "invalid_args",
-      `Describe the playlist in at most ${MUSIC_BOUNDS.playlistDescription} characters, with no control characters`,
+      `Describe the playlist in at most ${MUSIC_BOUNDS.playlistDescription} characters, with no control or direction characters`,
     );
   }
 
@@ -662,7 +675,7 @@ export const {
     const level = role === undefined ? (held?.level ?? "view") : levelOfRole(role);
 
     store.meter.charge(shareCost(reach));
-    await grant(ctx, caller, ref, { kind: "user", userId }, level === "manage" ? "edit" : level);
+    await grant(ctx, caller, ref, { kind: "user", userId }, level);
     await store.setPlaylist(playlist._id, { updatedAt: Date.now() });
 
     return null;
@@ -680,6 +693,12 @@ export const {
     const ref = refOf(playlist._id);
 
     store.meter.charge(shareCost(reach));
+
+    // Leaving needs a share by name, as old music's did: a playlist shared with everyone stays
+    // open to whoever has it until its owner makes it private.
+    if (leaving && (await grantOn(ctx.db, ref, caller.userId)) === null) {
+      return fail("not_found", "This playlist isn't shared with you by name");
+    }
 
     if (userId === undefined) {
       store.meter.charge(DELETE_GRANTS_COST);

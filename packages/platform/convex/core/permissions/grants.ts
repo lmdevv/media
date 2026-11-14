@@ -449,11 +449,13 @@ const refusedShare = (type: ResourceType, principal: GrantPrincipal, level: Leve
     return fail("invalid_args", "Only a person can manage something");
   }
 
+  const allowed: ReadonlyArray<Level> = resourceTypes[type].shares[principal.kind];
+
   return fail(
     "invalid_args",
-    type === "playlist"
-      ? "Share a playlist with a person to view or edit, or with everyone to view"
-      : `A ${type} cannot give ${level} to a ${principal.kind}`,
+    allowed.length === 0
+      ? `A ${type} is never shared with a ${principal.kind}`
+      : `A ${type} gives a ${principal.kind} only ${allowed.join(" or ")}`,
   );
 };
 

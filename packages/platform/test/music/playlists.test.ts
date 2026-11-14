@@ -236,6 +236,26 @@ describe.skipIf(stack === undefined)("music playlists", { timeout: 180_000 }, ()
         }),
       ),
     ).toBe("conflict");
+
+    // Shared with everyone, not with Mateo by name: there is nothing of his to leave.
+    await aiko.signedIn.client.mutation(api.music.playlists.visibility, {
+      playlistId,
+      visibility: "shared",
+    });
+
+    expect(
+      await refusal(
+        mateo.signedIn.client.mutation(api.music.playlists.unshare, {
+          playlistId,
+          userId: mateo.userId,
+        }),
+      ),
+    ).toBe("not_found");
+    expect(
+      await mateo.signedIn.client.query(api.music.playlists.get, { playlistId }),
+    ).toMatchObject({
+      access: "viewer",
+    });
     expect(
       await refusal(
         aiko.signedIn.client.mutation(api.music.playlists.share, {
@@ -355,6 +375,14 @@ describe.skipIf(stack === undefined)("music playlists", { timeout: 180_000 }, ()
     expect(
       await refusal(
         aiko.signedIn.client.mutation(api.music.playlists.create, { name: "x".repeat(121) }),
+      ),
+    ).toBe("invalid_args");
+    expect(
+      await refusal(
+        aiko.signedIn.client.mutation(api.music.playlists.create, {
+          name: "Reversed",
+          description: "Play \u202Edrawkcab",
+        }),
       ),
     ).toBe("invalid_args");
 

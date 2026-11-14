@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { api } from "../../convex/_generated/api";
+import { inOrder } from "../../convex/core/lib/inOrder";
 import type { Id } from "../../convex/_generated/dataModel";
 import { member } from "../devices";
 import type { Member } from "../devices";
@@ -101,6 +102,46 @@ describe.skipIf(stack === undefined)("music queue", { timeout: 240_000 }, () => 
 
     expect(await titlesOf(aiko)).toEqual(["Song 05", "Song 03", "Song 00"]);
     expect((await client.query(api.music.queue.get, {})).count).toBe(3);
+  });
+
+  it("plays next after the current song, renumbering when the gap after it closes", async () => {
+    if (stack === undefined) return;
+    const aiko = await member(stack, "aiko");
+    const shelf = await musicShelf(stack, [aiko], SONGS);
+    const client = aiko.signedIn.client;
+
+    await client.mutation(api.music.queue.autoplay, { on: false });
+
+    const { current } = await client.mutation(api.music.queue.play, {
+      trackIds: [trackAt(shelf, 0), trackAt(shelf, 1), trackAt(shelf, 2)],
+    });
+
+    // The song playing moves between the other two, so its key is no longer a whole step.
+    await client.mutation(api.music.queue.move, {
+      itemId: current,
+      afterItemId: at(await entriesOf(aiko), 1).itemId,
+    });
+
+    // Each song played next goes right after the current one: thirty halve the gap after it past
+    // what a key can split, so the queue renumbers on the way.
+    await inOrder(
+      Array.from({ length: 30 }, (_, n) => n),
+      async (n) =>
+        client.mutation(api.music.queue.add, {
+          trackIds: [trackAt(shelf, 3 + (n % 9))],
+          next: true,
+        }),
+    );
+
+    const titles = await titlesOf(aiko);
+
+    const added = Array.from(
+      { length: 30 },
+      (_, n) => `Song ${String(3 + ((29 - n) % 9)).padStart(2, "0")}`,
+    );
+
+    expect(titles).toEqual(["Song 01", "Song 00", ...added, "Song 02"]);
+    expect((await client.query(api.music.queue.get, {})).current).toBe(current);
   });
 
   it("shuffles behind the current song and restores the order when shuffle turns off", async () => {
