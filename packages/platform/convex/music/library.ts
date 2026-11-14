@@ -1,3 +1,5 @@
+import { foldSearchText } from "@media/contracts/search-text";
+
 import { register } from "../../commands/music/library";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { DatabaseReader } from "../_generated/server";
@@ -7,7 +9,6 @@ import type { ItemGate } from "../core/permissions/grants";
 import { callBudget, plus, readsOf, settleRead, times } from "../movies/reads";
 import type { ReadBudget, Reads } from "../movies/reads";
 import { ALBUM_FACTS, budgetedGates, walkMusicLibraries } from "./access";
-import { foldSearchText } from "./catalog";
 import { trackFacts } from "./items";
 import { ARTIST_ART_ALBUMS, artistArt, likedAmong, musicPresenter } from "./present";
 import { LIKED_READS, getsOf, rowsOf } from "./reads";

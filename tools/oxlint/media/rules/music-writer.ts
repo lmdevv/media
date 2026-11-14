@@ -9,6 +9,8 @@ export const MUSIC_TABLES: ReadonlySet<string> = new Set([
   "albums",
   "tracks",
   "localLyrics",
+  "lrclibLyrics",
+  "lyricsSettings",
   "playlists",
   "playlistItems",
   "likes",

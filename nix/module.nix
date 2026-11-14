@@ -523,6 +523,16 @@ in
       description = "OTLP/HTTP collector for traces and logs. Nothing is exported without it.";
     };
 
+    lrclibUrl = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "http://127.0.0.1:8090";
+      description = ''
+        Where music looks up lyrics, for a stand-in; LRCLIB itself (https://lrclib.net) when
+        null. An admin turns lookups off in the account client.
+      '';
+    };
+
     environmentFile = lib.mkOption {
       type = lib.types.nullOr lib.types.path;
       default = null;
@@ -720,6 +730,9 @@ in
       }
       // lib.optionalAttrs (cfg.otlpEndpoint != null) {
         OTEL_EXPORTER_OTLP_ENDPOINT = cfg.otlpEndpoint;
+      }
+      // lib.optionalAttrs (cfg.lrclibUrl != null) {
+        LRCLIB_URL = cfg.lrclibUrl;
       }
       // lib.optionalAttrs hardware {
         # NixOS keeps VA-API drivers and the oneVPL runtime here (hardware.graphics).

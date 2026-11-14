@@ -104,7 +104,7 @@ const lyricLine = v.object({
   voice: nullable(v.string()),
 });
 
-/** One version of a song's lyrics: from a file beside it or a tag inside it. */
+/** One version of a song's lyrics: from a file beside it, a tag inside it, or LRCLIB. */
 const lyricSet = v.object({
   kind: v.union(v.literal("main"), v.literal("translation"), v.literal("pronunciation")),
   /** A BCP 47 tag, such as `en` or `pt-BR`, or null for none. */
@@ -135,12 +135,17 @@ const lyricSet = v.object({
         v.literal("other"),
       ),
     }),
+    /** The LRCLIB record the server looked the song up in. */
+    v.object({ type: v.literal("lrclib"), recordId: v.number() }),
   ),
   body: v.union(
     v.object({ type: v.literal("synced"), lines: v.array(lyricLine) }),
     v.object({ type: v.literal("plain"), text: v.string() }),
   ),
 });
+
+/** Where the lyrics a song shows came from: its own files and tags, or LRCLIB. */
+const lyricsSource = v.union(v.literal("file"), v.literal("lrclib"));
 
 /** The songs a command takes, in order: at most 2,000. */
 const trackIds = v.array(v.id("tracks"));
@@ -473,20 +478,49 @@ export const music = [
     args: { trackId: v.id("tracks") },
     result: v.union(
       v.object({ status: v.literal("none") }),
+      /** LRCLIB answered that the song has no lyrics. */
+      v.object({ status: v.literal("instrumental") }),
+      /**
+       * The server is still looking the song up on LRCLIB, which may find synced lyrics; until
+       * then, the song's own plain lyrics, if any.
+       */
+      v.object({ status: v.literal("pending"), fallback: nullable(lyricSet) }),
       v.object({
         status: v.literal("synced"),
-        source: v.literal("file"),
+        /** The song's own files and tags always win over LRCLIB. */
+        source: lyricsSource,
         main: lyricSet,
         /** The song's other lyric sets: translations, pronunciations, and other main lyrics. */
         extras: v.array(lyricSet),
       }),
       v.object({
         status: v.literal("plain"),
-        source: v.literal("file"),
+        source: lyricsSource,
         main: lyricSet,
         extras: v.array(lyricSet),
       }),
     ),
+  }),
+  query("music.lyrics.status", {
+    summary:
+      "Show whether the server looks up lyrics on LRCLIB for songs without synced lyrics (owners and admins)",
+    scope: "music:edit",
+    args: {},
+    result: v.object({ remote: v.boolean() }),
+  }),
+  mutation("music.lyrics.configure", {
+    summary:
+      "Turn lyrics lookups on LRCLIB on or off (owners and admins); while off, no request reaches LRCLIB, and lyrics already found keep showing",
+    scope: "music:edit",
+    args: { remote: v.boolean() },
+    result: v.null(),
+  }),
+  mutation("music.lyrics.backfill", {
+    summary:
+      "Look up lyrics on LRCLIB for every song in the music libraries you can read that has no synced lyrics of its own (owners and admins)",
+    scope: "music:edit",
+    args: {},
+    result: v.object({ libraries: v.number() }),
   }),
   mutation("music.play.start", {
     summary: "Start a song: get a stream ticket for it in this session",

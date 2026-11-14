@@ -66,6 +66,39 @@ export const localLyricSet = v.object({
 
 export type LocalLyricSet = Infer<typeof localLyricSet>;
 
+/**
+ * A lyric set LRCLIB returned for a song: old music's `lrclibLyricSet`, a local set's kind,
+ * language, and body with the LRCLIB record it came from, checked like a local set (`fit.ts`).
+ */
+export const lrclibLyricSet = v.object({
+  kind: localLyricSet.fields.kind,
+  lang: localLyricSet.fields.lang,
+  origin: v.object({ _tag: v.literal("Lrclib"), recordId: v.number() }),
+  body: lyricBody,
+});
+
+export type LrclibLyricSet = Infer<typeof lrclibLyricSet>;
+
+/** A lyric set of either source, as `music.lyrics.get` chooses among them. */
+export type LyricSet = LocalLyricSet | LrclibLyricSet;
+
+/**
+ * What LRCLIB answered for a song, as `music/lyricLookups:settle` takes it from the server: its
+ * lyrics, that the song is instrumental, or that it holds no record for the song.
+ */
+export const lrclibAnswer = v.union(
+  v.object({
+    status: v.literal("found"),
+    recordId: v.number(),
+    /** Never empty; the server's reader puts the set a client shows first. */
+    sets: v.array(lrclibLyricSet),
+  }),
+  v.object({ status: v.literal("instrumental"), recordId: v.number() }),
+  v.object({ status: v.literal("miss") }),
+);
+
+export type LrclibAnswer = Infer<typeof lrclibAnswer>;
+
 const lyricsFields = {
   /** The lyric files beside the file, as `name:size:mtime` joined by `/`; empty when none. */
   lyricsFiles: v.string(),

@@ -20,6 +20,7 @@ import { can, contentNeeds, itemOf } from "./permissions/policy";
 import type { Decision } from "./permissions/policy";
 import { downloadQualityOf } from "./settings";
 import { issuePersonalTicket } from "./tickets";
+import { scheduleRequest as scheduleLyricsRequest } from "../music/lyricLookups";
 
 const DEFAULT_CAP_BYTES = 64_000_000_000;
 
@@ -288,6 +289,9 @@ export const { add, list, fetch, remove, usage, setCap } = register({
 
     await moveCounter(ctx.db, bytesCounter(device._id), bytes);
     await moveCounter(ctx.db, itemsCounter(device._id), 1);
+
+    // Old music looked up a downloaded song's lyrics on LRCLIB, so they come along offline.
+    if (item.kind === "track") await scheduleLyricsRequest(ctx, item.id);
 
     return null;
   },

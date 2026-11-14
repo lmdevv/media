@@ -23,6 +23,7 @@ import {
   fingerprint,
   fitAlbum,
   fitArtist,
+  fitLrclibLyrics,
   descriptionWithin,
   fitPlay,
   fitTrack,
@@ -33,7 +34,7 @@ import {
 import type { musicTables } from "./schema";
 import { moveTotals } from "./totals";
 import type { Moved } from "./totals";
-import type { LocalLyricSet } from "./validators";
+import type { LocalLyricSet, LrclibAnswer } from "./validators";
 
 /**
  * The music store: the only module that reads or writes the music tables, the catalog's and the
@@ -190,6 +191,22 @@ export interface MusicStore {
   ) => Promise<void>;
 
   /**
+   * Makes `answer` LRCLIB's answer for a track at `revision`, replacing any older one, within the
+   * row's bound: found lyrics keep their leading sets that fit (`fitLrclibLyrics`), and an answer
+   * left with none is stored as a miss, as old music stored lyrics it could not keep. It reads up
+   * to `LYRICS_ROWS_READ` rows and deletes the second, and charges walking the sets of each row
+   * it read and of the row it writes (`lyricsCost`). Answers the status it stored.
+   */
+  readonly writeLrclibLyrics: (
+    trackId: Id<"tracks">,
+    row: { readonly revision: string; readonly checkedAt: number; readonly answer: LrclibAnswer },
+  ) => Promise<LrclibAnswer["status"]>;
+  /** Deletes a track's LRCLIB answer, and a second row a defect left beside it. */
+  readonly deleteLrclibLyrics: (trackId: Id<"tracks">) => Promise<void>;
+  /** Turns LRCLIB lookups on or off (`lyricsSettings`), deleting a second row a defect left. */
+  readonly setRemoteLyrics: (remote: boolean) => Promise<void>;
+
+  /**
    * Moves a library's album, artist, and duration totals (`totals.ts`). It runs at a call's end,
    * after the batch's last item, so a call reserves it in the work it charges before its first.
    */
@@ -245,6 +262,11 @@ export const musicStore = (db: Db, meter: Meter): MusicStore => {
   /** Charges walking the lyric sets of the lyrics row `id` as the store last read or wrote it. */
   const walked = (id: string): void => {
     meter.charge(lyricsCost(bytesOf("localLyrics", id)));
+  };
+
+  /** Charges walking the LRCLIB sets of the row `id` as the store last read or wrote it. */
+  const lrclibWalked = (id: string): void => {
+    meter.charge(lyricsCost(bytesOf("lrclibLyrics", id)));
   };
 
   const read = (rows: ReadonlyArray<Record<string, Value> & { readonly _id: string }>): void => {
@@ -315,6 +337,14 @@ export const musicStore = (db: Db, meter: Meter): MusicStore => {
     known.delete(id);
     meter.charge(deleteCost(bytes));
   };
+
+  /** A track's LRCLIB rows: its one, and a second a defect left beside it. */
+  const lrclibRows = (trackId: Id<"tracks">) =>
+    take(
+      "lrclibLyrics",
+      (q) => q.withIndex("by_track", (index) => index.eq("trackId", trackId)),
+      LYRICS_ROWS_READ,
+    );
 
   return {
     meter,
@@ -406,6 +436,49 @@ export const musicStore = (db: Db, meter: Meter): MusicStore => {
         await patch("localLyrics", row._id, { sets: [...sets] });
         walked(row._id);
       }
+    },
+
+    writeLrclibLyrics: async (trackId, { revision, checkedAt, answer }) => {
+      const rows = await lrclibRows(trackId);
+      const [row, ...extra] = rows;
+      const sets = answer.status === "found" ? fitLrclibLyrics(answer.sets) : [];
+
+      const stored: LrclibAnswer =
+        answer.status === "found" && sets.length === 0
+          ? { status: "miss" }
+          : answer.status === "found"
+            ? { ...answer, sets: [...sets] }
+            : answer;
+
+      for (const one of rows) lrclibWalked(one._id);
+
+      await inOrder(extra, (one) => remove("lrclibLyrics", one._id));
+
+      const fields = { trackId, revision, checkedAt, answer: stored };
+
+      if (row === undefined) {
+        lrclibWalked(await insert("lrclibLyrics", fields));
+      } else {
+        await patch("lrclibLyrics", row._id, fields);
+        lrclibWalked(row._id);
+      }
+
+      return stored.status;
+    },
+    deleteLrclibLyrics: async (trackId) => {
+      const rows = await lrclibRows(trackId);
+
+      for (const one of rows) lrclibWalked(one._id);
+
+      await inOrder(rows, (one) => remove("lrclibLyrics", one._id));
+    },
+    setRemoteLyrics: async (remote) => {
+      const [row, ...extra] = await take("lyricsSettings", (q) => q, LYRICS_ROWS_READ);
+
+      await inOrder(extra, (one) => remove("lyricsSettings", one._id));
+
+      if (row === undefined) await insert("lyricsSettings", { remote });
+      else if (row.remote !== remote) await patch("lyricsSettings", row._id, { remote });
     },
 
     moveTotals: async (libraryId, moved) => {

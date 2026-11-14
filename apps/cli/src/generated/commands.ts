@@ -5243,6 +5243,34 @@ export const generatedCommands = [
     method: (platform) => platform.music.likes.set,
   }),
   coreCommand({
+    name: "music.lyrics.backfill",
+    path: ["music", "lyrics", "backfill"],
+    kind: "mutation",
+    scope: "music:edit",
+    refusesKeys: false,
+    summary:
+      "Look up lyrics on LRCLIB for every song in the music libraries you can read that has no synced lyrics of its own (owners and admins)",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({}),
+    result: Schema.Struct({ libraries: Schema.Finite }),
+    method: (platform) => platform.music.lyrics.backfill,
+  }),
+  coreCommand({
+    name: "music.lyrics.configure",
+    path: ["music", "lyrics", "configure"],
+    kind: "mutation",
+    scope: "music:edit",
+    refusesKeys: false,
+    summary:
+      "Turn lyrics lookups on LRCLIB on or off (owners and admins); while off, no request reaches LRCLIB, and lyrics already found keep showing",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({ remote: Schema.Boolean }),
+    result: Schema.Null,
+    method: (platform) => platform.music.lyrics.configure,
+  }),
+  coreCommand({
     name: "music.lyrics.get",
     path: ["music", "lyrics", "get"],
     kind: "query",
@@ -5254,9 +5282,76 @@ export const generatedCommands = [
     args: Schema.Struct({ trackId: Schema.String.pipe(Schema.brand("Id<tracks>")) }),
     result: Schema.Union([
       Schema.Struct({ status: Schema.Literal("none") }),
+      Schema.Struct({ status: Schema.Literal("instrumental") }),
+      Schema.Struct({
+        status: Schema.Literal("pending"),
+        fallback: Schema.Union([
+          Schema.Struct({
+            kind: Schema.Union([
+              Schema.Literal("main"),
+              Schema.Literal("translation"),
+              Schema.Literal("pronunciation"),
+            ]),
+            lang: Schema.Union([Schema.String, Schema.Null]),
+            origin: Schema.Union([
+              Schema.Struct({
+                type: Schema.Literal("sidecar"),
+                fileName: Schema.String,
+                format: Schema.Union([
+                  Schema.Literal("lrc"),
+                  Schema.Literal("elrc"),
+                  Schema.Literal("ttml"),
+                  Schema.Literal("vtt"),
+                  Schema.Literal("srt"),
+                  Schema.Literal("txt"),
+                  Schema.Literal("lyricsfile"),
+                ]),
+              }),
+              Schema.Struct({
+                type: Schema.Literal("embedded"),
+                tag: Schema.Union([
+                  Schema.Literal("id3:USLT"),
+                  Schema.Literal("id3:SYLT"),
+                  Schema.Literal("vorbis:LYRICS"),
+                  Schema.Literal("vorbis:UNSYNCEDLYRICS"),
+                  Schema.Literal("vorbis:SYNCEDLYRICS"),
+                  Schema.Literal("mp4:lyr"),
+                  Schema.Literal("other"),
+                ]),
+              }),
+              Schema.Struct({ type: Schema.Literal("lrclib"), recordId: Schema.Finite }),
+            ]),
+            body: Schema.Union([
+              Schema.Struct({
+                type: Schema.Literal("synced"),
+                lines: Schema.Array(
+                  Schema.Struct({
+                    text: Schema.String,
+                    startMs: Schema.Finite,
+                    endMs: Schema.Union([Schema.Finite, Schema.Null]),
+                    words: Schema.Union([
+                      Schema.Array(
+                        Schema.Struct({
+                          text: Schema.String,
+                          startMs: Schema.Finite,
+                          endMs: Schema.Union([Schema.Finite, Schema.Null]),
+                        }),
+                      ),
+                      Schema.Null,
+                    ]),
+                    voice: Schema.Union([Schema.String, Schema.Null]),
+                  }),
+                ),
+              }),
+              Schema.Struct({ type: Schema.Literal("plain"), text: Schema.String }),
+            ]),
+          }),
+          Schema.Null,
+        ]),
+      }),
       Schema.Struct({
         status: Schema.Literal("synced"),
-        source: Schema.Literal("file"),
+        source: Schema.Union([Schema.Literal("file"), Schema.Literal("lrclib")]),
         main: Schema.Struct({
           kind: Schema.Union([
             Schema.Literal("main"),
@@ -5290,6 +5385,7 @@ export const generatedCommands = [
                 Schema.Literal("other"),
               ]),
             }),
+            Schema.Struct({ type: Schema.Literal("lrclib"), recordId: Schema.Finite }),
           ]),
           body: Schema.Union([
             Schema.Struct({
@@ -5350,6 +5446,7 @@ export const generatedCommands = [
                   Schema.Literal("other"),
                 ]),
               }),
+              Schema.Struct({ type: Schema.Literal("lrclib"), recordId: Schema.Finite }),
             ]),
             body: Schema.Union([
               Schema.Struct({
@@ -5380,7 +5477,7 @@ export const generatedCommands = [
       }),
       Schema.Struct({
         status: Schema.Literal("plain"),
-        source: Schema.Literal("file"),
+        source: Schema.Union([Schema.Literal("file"), Schema.Literal("lrclib")]),
         main: Schema.Struct({
           kind: Schema.Union([
             Schema.Literal("main"),
@@ -5414,6 +5511,7 @@ export const generatedCommands = [
                 Schema.Literal("other"),
               ]),
             }),
+            Schema.Struct({ type: Schema.Literal("lrclib"), recordId: Schema.Finite }),
           ]),
           body: Schema.Union([
             Schema.Struct({
@@ -5474,6 +5572,7 @@ export const generatedCommands = [
                   Schema.Literal("other"),
                 ]),
               }),
+              Schema.Struct({ type: Schema.Literal("lrclib"), recordId: Schema.Finite }),
             ]),
             body: Schema.Union([
               Schema.Struct({
@@ -5504,6 +5603,20 @@ export const generatedCommands = [
       }),
     ]),
     method: (platform) => platform.music.lyrics.get,
+  }),
+  coreCommand({
+    name: "music.lyrics.status",
+    path: ["music", "lyrics", "status"],
+    kind: "query",
+    scope: "music:edit",
+    refusesKeys: false,
+    summary:
+      "Show whether the server looks up lyrics on LRCLIB for songs without synced lyrics (owners and admins)",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({}),
+    result: Schema.Struct({ remote: Schema.Boolean }),
+    method: (platform) => platform.music.lyrics.status,
   }),
   coreCommand({
     name: "music.play.report",

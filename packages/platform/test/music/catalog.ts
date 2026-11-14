@@ -17,19 +17,23 @@ import type { ScannedLyrics, ScannedTrack } from "./scanned";
 // stack answered this one through a `v.id(...)` validator, which checks it again whenever a test
 // sends it back.
 const isId =
-  <Table extends "jobs" | "tracks" | "albums" | "artists" | "localLyrics">(_table: Table) =>
+  <Table extends "jobs" | "tracks" | "albums" | "artists" | "localLyrics" | "lrclibLyrics">(
+    _table: Table,
+  ) =>
   (value: unknown): value is Id<Table> =>
     Schema.is(Schema.String)(value);
 
-const JobId = Schema.declare(isId("jobs"));
+export const JobId = Schema.declare(isId("jobs"));
 
-const TrackId = Schema.declare(isId("tracks"));
+export const TrackId = Schema.declare(isId("tracks"));
 
 const AlbumId = Schema.declare(isId("albums"));
 
 const ArtistId = Schema.declare(isId("artists"));
 
 const LyricsId = Schema.declare(isId("localLyrics"));
+
+export const LrclibId = Schema.declare(isId("lrclibLyrics"));
 
 export const Lease = Schema.Struct({ jobId: JobId, attempt: Schema.Finite });
 

@@ -16,6 +16,7 @@ describe("movies job kinds", () => {
       "movies.import.jellyfin": "movies.import",
       "movies.import.plex": "movies.import",
       "music.scan": "music",
+      "music.lyrics": "music.background",
       "server.backup": "server",
     });
   });

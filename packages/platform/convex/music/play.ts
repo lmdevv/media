@@ -5,6 +5,7 @@ import { reachOf } from "../core/permissions/grants";
 import { issuePersonalTicket } from "../core/tickets";
 import { cost } from "./budget";
 import { MUSIC_BOUNDS, TABLE_BYTES } from "./fit";
+import { scheduleRequest } from "./lyricLookups";
 import { personMeter, playDecider, readDecided } from "./person";
 import { musicStore } from "./write";
 
@@ -37,6 +38,10 @@ export const { start, report, reportOffline } = register({
     ) {
       return fail("not_found", NO_TRACK);
     }
+
+    // Old music looked up a song's lyrics on LRCLIB when it started playing, unless its own files
+    // held synced lyrics, which LRCLIB never replaces.
+    if (!track.lyricsSynced) await scheduleRequest(ctx, track._id);
 
     const playbackId = crypto.randomUUID();
 

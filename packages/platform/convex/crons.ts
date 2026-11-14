@@ -21,6 +21,13 @@ crons.interval(
   {},
 );
 
+crons.interval(
+  "wake waiting job retries and end job pauses",
+  { minutes: 1 },
+  internal.core.jobs.leases.wakeDue,
+  {},
+);
+
 crons.interval("delete week-old finished jobs", { hours: 1 }, internal.core.jobs.cleanup.sweep, {});
 
 crons.daily(

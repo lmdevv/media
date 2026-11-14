@@ -52,6 +52,18 @@ export type Finish =
       readonly error: string;
       /** Back to the queue while strikes remain; false fails the job now. */
       readonly retry: boolean;
+      /** How long a retry waits before a claim may take it; absent retries at once. */
+      readonly retryInMs?: number;
+    }
+  | {
+      /**
+       * The attempt could not run because something outside the job was unavailable or turned
+       * off: back to the queue with no strike, and the store pauses the whole kind for `pauseMs`,
+       * or not at all for 0.
+       */
+      readonly outcome: "deferred";
+      readonly error: string;
+      readonly pauseMs: number;
     };
 
 /** How a restore ends a running job (the `restored` event). */
@@ -72,6 +84,11 @@ export type JobEvent =
    */
   | { readonly type: "cancel"; readonly attempt: number | null }
   | { readonly type: "lapse" }
+  /**
+   * A waiting retry's time came: the job becomes claimable. `attempt` is the attempt that asked
+   * to wait, so a wake meant for an earlier wait changes nothing; null wakes any due job.
+   */
+  | { readonly type: "wake"; readonly attempt: number | null }
   /**
    * A restored snapshot caught the job running, and its worker has moved on: `requeue` puts it
    * back in the queue at once, whatever its lease, with no strike; `succeed` ends it with
@@ -271,15 +288,46 @@ const finish = (job: Running, end: Finish, now: number, policy: Policy): Step =>
     });
   }
 
+  if (end.outcome === "deferred") {
+    checkPauseMs(end.pauseMs);
+
+    return moved({ ...commonOf(job), status: "queued", lastError: bounded(end.error) });
+  }
+
   const strikes = job.strikes + 1;
 
   const error = bounded(end.error);
 
   if (end.retry && strikes < policy.maxStrikes) {
-    return moved({ ...commonOf(job), strikes, status: "queued", lastError: error });
+    const queued = { ...commonOf(job), strikes, status: "queued" as const, lastError: error };
+
+    if (end.retryInMs === undefined) return moved(queued);
+
+    checkPauseMs(end.retryInMs);
+
+    return moved({ ...queued, waitUntil: now + end.retryInMs });
   }
 
   return failed(job, error, strikes, now);
+};
+
+/** The longest a kind pauses or a retry waits: a day. */
+export const WAIT_MS_MAX = 24 * 60 * 60 * 1000;
+
+export const checkPauseMs = (ms: number): void => {
+  if (!Number.isSafeInteger(ms) || ms < 0 || ms > WAIT_MS_MAX) {
+    throw new Error(`A pause or a retry waits 0 to ${WAIT_MS_MAX} ms; got ${ms}`);
+  }
+};
+
+const wake = (job: JobFields, attempt: number | null, now: number): Step => {
+  if (job.status !== "queued" || job.waitUntil === undefined || job.waitUntil > now) {
+    return unchanged(job);
+  }
+
+  if (attempt !== null && attempt !== job.attempts) return unchanged(job);
+
+  return moved({ ...commonOf(job), status: "queued", lastError: job.lastError });
 };
 
 const lapse = (job: Running, now: number, policy: Policy): Step => {
@@ -310,14 +358,16 @@ const restored = (job: Running, end: Restored, now: number): Step => {
 const settledAlready = (job: JobFields, end: Finish): boolean =>
   (job.status === "succeeded" && end.outcome === "succeeded") ||
   (job.status === "failed" && end.outcome === "failed") ||
-  (job.status === "queued" && end.outcome === "failed" && end.retry);
+  (job.status === "queued" &&
+    ((end.outcome === "failed" && end.retry) || end.outcome === "deferred"));
 
 /**
  * The one transition function.
  *
- * @throws Error on a defect no validator catches: a lease length outside 5 s to 10 min, a report
- * that mixes item and reported progress, an append past the seal or of another kind's items, more
- * than `ITEM_BATCH_MAX` items, or a `through` past `appended`.
+ * @throws Error on a defect no validator catches: a lease length outside 5 s to 10 min, a pause or
+ * a retry's wait outside 0 to a day, a report that mixes item and reported progress, an append
+ * past the seal or of another kind's items, more than `ITEM_BATCH_MAX` items, or a `through` past
+ * `appended`.
  */
 export const step = (job: JobFields, event: JobEvent, now: number, policy: Policy): Step => {
   if (event.type === "claim") {
@@ -356,6 +406,8 @@ export const step = (job: JobFields, event: JobEvent, now: number, policy: Polic
   if (event.type === "lapse") {
     return job.status === "running" ? lapse(job, now, policy) : unchanged(job);
   }
+
+  if (event.type === "wake") return wake(job, event.attempt, now);
 
   if (event.type === "restored") {
     return job.status === "running" ? restored(job, event.end, now) : unchanged(job);

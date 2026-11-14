@@ -10,6 +10,7 @@ import type { Cost } from "./budget";
 import { catalogBatch } from "./catalog";
 import { clearDependents } from "./dependents";
 import { DOCUMENT_BYTES } from "./fit";
+import { dropLookups } from "./lyricLookups";
 import { forgetTotals } from "./totals";
 import { musicStore } from "./write";
 
@@ -40,7 +41,8 @@ export interface PurgeNext {
  * One page of the music purge (ADR 0024): deletes the tracks of a page that no current folder of
  * the library keeps, or every track once the library is gone, with their lyrics, as many as the
  * call's budget admits, through the catalog batch. What people keep of each track (playlist
- * entries, likes, plays, queue entries) goes first, in half the budget (`dependents.ts`). The batch settles the albums and artists those
+ * entries, likes, plays, queue entries) goes first, in half the budget (`dependents.ts`), then
+ * its queued lyrics lookups, up to three quarters (`dropLookups`). The batch settles the albums and artists those
  * tracks filed under in the same mutation: their counts and the library's totals move, and an
  * album left without any track goes, then its artist when nothing files under it. When the budget
  * stops it partway, the next call reads the same page again; the tracks it deleted are gone.
@@ -64,7 +66,7 @@ export const tracksPage = (
     );
 
     const leaving = found.page.filter((track) => !scope.keeps(track.path));
-    const cleared = await clearDependents(store, leaving);
+    const cleared = await dropLookups(ctx, store.meter, await clearDependents(store, leaving));
     const batch = catalogBatch(store, libraryId, { totals: !scope.gone, limit });
     const deleted = await batch.each(cleared, batch.remove);
 

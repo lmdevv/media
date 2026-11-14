@@ -1,3 +1,5 @@
+import { foldSearchText } from "@media/contracts/search-text";
+
 import type { Doc, Id } from "../_generated/dataModel";
 import { inOrder } from "../core/lib/inOrder";
 import type { Counted } from "../core/scans";
@@ -17,37 +19,6 @@ import {
 import { LYRICS_ROWS_READ, atBound } from "./write";
 import type { MusicStore, Stored } from "./write";
 import type { LocalLyricSet, ScannedLyrics, ScannedTrack } from "./validators";
-
-/** Combining Diacritical Marks: the accents NFD splits off Latin, Greek, and Cyrillic letters. */
-const DIACRITICS = /[\u0300-\u036F]/gu;
-
-/** Letters that carry no separable accent but that people type without one. */
-const LETTERS = new Map([
-  ["ß", "ss"],
-  ["æ", "ae"],
-  ["œ", "oe"],
-  ["ø", "o"],
-  ["ł", "l"],
-  ["đ", "d"],
-  ["ð", "d"],
-  ["þ", "th"],
-  ["ı", "i"],
-]);
-
-const LETTER = /[ßæœøłđðþı]/gu;
-
-/**
- * Lowercases `text` and strips accents, as old music's `foldSearchText` does, so search matches
- * "Doppelgänger" for "doppelganger". Only the Latin, Greek, and Cyrillic accent block goes, and
- * the result is recomposed, so kana and Hangul come back unchanged.
- */
-export const foldSearchText = (text: string): string =>
-  text
-    .toLowerCase()
-    .normalize("NFD")
-    .replaceAll(DIACRITICS, "")
-    .normalize("NFC")
-    .replaceAll(LETTER, (letter) => LETTERS.get(letter) ?? letter);
 
 /** A short format label such as `FLAC 24/96` or `MP3 320`, as old music shows an album's. */
 const formatLabel = (track: ScannedTrack): string => {
@@ -124,8 +95,8 @@ const EMPTYING = sumCost([
 
 /**
  * The most one write of a batch costs, with every document at its bound: a move onto a path
- * another track holds, with its lyrics row rewritten (two rows read and the new sets walked), and
- * three albums settled at the call's end
+ * another track holds, with its lyrics row rewritten (two rows read and the new sets walked), a
+ * removed track's LRCLIB answer deleted, and three albums settled at the call's end
  * (the one it joins, the one it leaves, and the one the other track leaves), two of them perhaps
  * emptied. Every other write costs less.
  */
@@ -144,6 +115,11 @@ const WRITE_MOST = sumCost([
   atBound.patch("localLyrics"),
   atBound.delete("localLyrics"),
   atBound.lyrics(LYRICS_ROWS_READ + 1),
+  // A removed track's LRCLIB answer, and the second row a defect may have left.
+  atBound.read("lrclibLyrics", LYRICS_ROWS_READ),
+  atBound.delete("lrclibLyrics"),
+  atBound.delete("lrclibLyrics"),
+  atBound.lyrics(LYRICS_ROWS_READ),
   SETTLING,
   SETTLING,
   SETTLING,
@@ -605,6 +581,7 @@ export const catalogBatch = (
 
   const remove = async (track: Doc<"tracks">): Promise<void> => {
     await store.writeLyrics(track._id, []);
+    await store.deleteLrclibLyrics(track._id);
     await store.deleteTrack(track._id);
     mayEmpty(track.albumId);
 

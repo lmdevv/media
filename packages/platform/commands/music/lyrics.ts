@@ -5,18 +5,89 @@ import type { FunctionReference } from "convex/server";
 import { v } from "convex/values";
 import type { Infer } from "convex/values";
 
-import { query } from "../../convex/_generated/server";
-import type { QueryCtx } from "../../convex/_generated/server";
+import { mutation, query } from "../../convex/_generated/server";
+import type { MutationCtx, QueryCtx } from "../../convex/_generated/server";
 import { requireCaller } from "../../convex/core/auth/caller";
 import type { Caller } from "../../convex/core/auth/caller";
+
+const backfillArgs = v.object({});
+
+const backfillResult = v.object({ libraries: v.number() });
+
+const configureArgs = v.object({ remote: v.boolean() });
+
+const configureResult = v.null();
 
 const getArgs = v.object({ trackId: v.id("tracks") });
 
 const getResult = v.union(
   v.object({ status: v.literal("none") }),
+  v.object({ status: v.literal("instrumental") }),
+  v.object({
+    status: v.literal("pending"),
+    fallback: v.union(
+      v.object({
+        kind: v.union(v.literal("main"), v.literal("translation"), v.literal("pronunciation")),
+        lang: v.union(v.string(), v.null()),
+        origin: v.union(
+          v.object({
+            type: v.literal("sidecar"),
+            fileName: v.string(),
+            format: v.union(
+              v.literal("lrc"),
+              v.literal("elrc"),
+              v.literal("ttml"),
+              v.literal("vtt"),
+              v.literal("srt"),
+              v.literal("txt"),
+              v.literal("lyricsfile"),
+            ),
+          }),
+          v.object({
+            type: v.literal("embedded"),
+            tag: v.union(
+              v.literal("id3:USLT"),
+              v.literal("id3:SYLT"),
+              v.literal("vorbis:LYRICS"),
+              v.literal("vorbis:UNSYNCEDLYRICS"),
+              v.literal("vorbis:SYNCEDLYRICS"),
+              v.literal("mp4:lyr"),
+              v.literal("other"),
+            ),
+          }),
+          v.object({ type: v.literal("lrclib"), recordId: v.number() }),
+        ),
+        body: v.union(
+          v.object({
+            type: v.literal("synced"),
+            lines: v.array(
+              v.object({
+                text: v.string(),
+                startMs: v.number(),
+                endMs: v.union(v.number(), v.null()),
+                words: v.union(
+                  v.array(
+                    v.object({
+                      text: v.string(),
+                      startMs: v.number(),
+                      endMs: v.union(v.number(), v.null()),
+                    }),
+                  ),
+                  v.null(),
+                ),
+                voice: v.union(v.string(), v.null()),
+              }),
+            ),
+          }),
+          v.object({ type: v.literal("plain"), text: v.string() }),
+        ),
+      }),
+      v.null(),
+    ),
+  }),
   v.object({
     status: v.literal("synced"),
-    source: v.literal("file"),
+    source: v.union(v.literal("file"), v.literal("lrclib")),
     main: v.object({
       kind: v.union(v.literal("main"), v.literal("translation"), v.literal("pronunciation")),
       lang: v.union(v.string(), v.null()),
@@ -46,6 +117,7 @@ const getResult = v.union(
             v.literal("other"),
           ),
         }),
+        v.object({ type: v.literal("lrclib"), recordId: v.number() }),
       ),
       body: v.union(
         v.object({
@@ -102,6 +174,7 @@ const getResult = v.union(
               v.literal("other"),
             ),
           }),
+          v.object({ type: v.literal("lrclib"), recordId: v.number() }),
         ),
         body: v.union(
           v.object({
@@ -132,7 +205,7 @@ const getResult = v.union(
   }),
   v.object({
     status: v.literal("plain"),
-    source: v.literal("file"),
+    source: v.union(v.literal("file"), v.literal("lrclib")),
     main: v.object({
       kind: v.union(v.literal("main"), v.literal("translation"), v.literal("pronunciation")),
       lang: v.union(v.string(), v.null()),
@@ -162,6 +235,7 @@ const getResult = v.union(
             v.literal("other"),
           ),
         }),
+        v.object({ type: v.literal("lrclib"), recordId: v.number() }),
       ),
       body: v.union(
         v.object({
@@ -218,6 +292,7 @@ const getResult = v.union(
               v.literal("other"),
             ),
           }),
+          v.object({ type: v.literal("lrclib"), recordId: v.number() }),
         ),
         body: v.union(
           v.object({
@@ -248,31 +323,92 @@ const getResult = v.union(
   }),
 );
 
+const statusArgs = v.object({});
+
+const statusResult = v.object({ remote: v.boolean() });
+
 /** The handlers `convex/music/lyrics.ts` passes to `register`, one per `music.lyrics` command. */
 export interface Handlers {
+  /** `music.lyrics.backfill` (mutation, music:edit): Look up lyrics on LRCLIB for every song in the music libraries you can read that has no synced lyrics of its own (owners and admins). */
+  readonly backfill: (
+    ctx: Omit<MutationCtx, "auth">,
+    args: Record<string, never>,
+    caller: Caller,
+  ) => Infer<typeof backfillResult> | Promise<Infer<typeof backfillResult>>;
+
+  /** `music.lyrics.configure` (mutation, music:edit): Turn lyrics lookups on LRCLIB on or off (owners and admins); while off, no request reaches LRCLIB, and lyrics already found keep showing. */
+  readonly configure: (
+    ctx: Omit<MutationCtx, "auth">,
+    args: Infer<typeof configureArgs>,
+    caller: Caller,
+  ) => Infer<typeof configureResult> | Promise<Infer<typeof configureResult>>;
+
   /** `music.lyrics.get` (query, music:play): Get a song's lyrics, timed line by line when its lyrics are synced. */
   readonly get: (
     ctx: Omit<QueryCtx, "auth">,
     args: Infer<typeof getArgs>,
     caller: Caller,
   ) => Infer<typeof getResult> | Promise<Infer<typeof getResult>>;
+
+  /** `music.lyrics.status` (query, music:edit): Show whether the server looks up lyrics on LRCLIB for songs without synced lyrics (owners and admins). */
+  readonly status: (
+    ctx: Omit<QueryCtx, "auth">,
+    args: Record<string, never>,
+    caller: Caller,
+  ) => Infer<typeof statusResult> | Promise<Infer<typeof statusResult>>;
 }
 
 /** The `api` reference of each `music.lyrics` command; `commands/refs.ts` checks them. */
 export interface Refs {
+  readonly backfill: FunctionReference<
+    "mutation",
+    "public",
+    Record<string, never>,
+    Infer<typeof backfillResult>
+  >;
+  readonly configure: FunctionReference<
+    "mutation",
+    "public",
+    Infer<typeof configureArgs>,
+    Infer<typeof configureResult>
+  >;
   readonly get: FunctionReference<
     "query",
     "public",
     Infer<typeof getArgs>,
     Infer<typeof getResult>
   >;
+  readonly status: FunctionReference<
+    "query",
+    "public",
+    Record<string, never>,
+    Infer<typeof statusResult>
+  >;
 }
 
 /** Registers the `music.lyrics` commands as public Convex functions with their declared arguments and result. */
 export const register = (handlers: Handlers) => ({
+  backfill: mutation({
+    args: backfillArgs,
+    returns: backfillResult,
+    handler: async (ctx, args) =>
+      handlers.backfill(ctx, args, await requireCaller(ctx, "music:edit")),
+  }),
+  configure: mutation({
+    args: configureArgs,
+    returns: configureResult,
+    handler: async (ctx, args) =>
+      handlers.configure(ctx, args, await requireCaller(ctx, "music:edit")),
+  }),
   get: query({
     args: getArgs,
     returns: getResult,
     handler: async (ctx, args) => handlers.get(ctx, args, await requireCaller(ctx, "music:play")),
+  }),
+  status: query({
+    args: statusArgs,
+    returns: statusResult,
+    handler: async (ctx, args) =>
+      handlers.status(ctx, args, await requireCaller(ctx, "music:edit")),
   }),
 });

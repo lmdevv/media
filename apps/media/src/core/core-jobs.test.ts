@@ -109,6 +109,7 @@ const caps: CoreJobs.PoolCaps = {
   "movies.background": 1,
   "movies.import": 1,
   music: 1,
+  "music.background": 1,
   server: 1,
 };
 

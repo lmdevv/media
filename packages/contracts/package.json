@@ -28,6 +28,8 @@
     "./direct-play": "./src/direct-play.ts",
     "./library-folder": "./src/library-folder.ts",
     "./scan-failure": "./src/scan-failure.ts",
+    "./search-text": "./src/search-text.ts",
+    "./lyrics-lookup": "./src/lyrics-lookup.ts",
     "./migration-plan": "./src/migration-plan.ts",
     "./diagnostics": "./src/diagnostics.ts",
     "./request-id": "./src/request-id.ts",

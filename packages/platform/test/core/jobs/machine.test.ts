@@ -512,3 +512,78 @@ describe("job machine", () => {
     expect(pickClaim([{ cap: 2, running: 0, head: null }])).toBeNull();
   });
 });
+
+const finishWith = (job: JobFields, end: Extract<JobEvent, { type: "finish" }>["finish"]) =>
+  step(job, { type: "finish", lease: { attempt: job.attempts }, finish: end }, NOW, policy);
+
+describe("step: deferred attempts and waiting retries", () => {
+  it("puts a deferred attempt back in the queue with no strike, keeping its error", () => {
+    const running = claim(queued());
+    const back = next(finishWith(running, { outcome: "deferred", error: "429", pauseMs: 5000 }));
+
+    expect(back).toMatchObject({ status: "queued", strikes: 0, attempts: 1, lastError: "429" });
+    expect("waitUntil" in back).toBe(false);
+  });
+
+  it("answers a repeated deferral of the same attempt as settled, changing nothing", () => {
+    const running = claim(queued());
+    const back = next(finishWith(running, { outcome: "deferred", error: "429", pauseMs: 5000 }));
+
+    expect(finishWith(back, { outcome: "deferred", error: "429", pauseMs: 5000 })).toMatchObject({
+      ok: true,
+      changed: false,
+    });
+  });
+
+  it("makes a retry that asks to wait unclaimable until its time, with a strike", () => {
+    const running = claim(queued());
+
+    const waiting = next(
+      finishWith(running, { outcome: "failed", error: "bad", retry: true, retryInMs: 60_000 }),
+    );
+
+    expect(waiting).toMatchObject({ status: "queued", strikes: 1, waitUntil: NOW + 60_000 });
+  });
+
+  it("fails a waiting retry for good on its last strike, without waiting", () => {
+    const struck = { ...claim(queued()), strikes: policy.maxStrikes - 1 };
+
+    expect(
+      next(finishWith(struck, { outcome: "failed", error: "bad", retry: true, retryInMs: 60_000 })),
+    ).toMatchObject({ status: "failed", error: "bad" });
+  });
+
+  it("wakes a waiting retry only when its time came and it waits for the attempt named", () => {
+    const running = claim(queued());
+
+    const waiting = next(
+      finishWith(running, { outcome: "failed", error: "bad", retry: true, retryInMs: 60_000 }),
+    );
+
+    expect(step(waiting, { type: "wake", attempt: 1 }, NOW + 59_999, policy)).toMatchObject({
+      changed: false,
+    });
+    expect(step(waiting, { type: "wake", attempt: 2 }, NOW + 60_000, policy)).toMatchObject({
+      changed: false,
+    });
+
+    const woken = next(step(waiting, { type: "wake", attempt: 1 }, NOW + 60_000, policy));
+
+    expect(woken).toMatchObject({ status: "queued", strikes: 1, attempts: 1, lastError: "bad" });
+    expect("waitUntil" in woken).toBe(false);
+    expect(next(step(waiting, { type: "wake", attempt: null }, NOW + 60_000, policy))).toEqual(
+      woken,
+    );
+  });
+
+  it("refuses a pause or a wait past a day as a defect", () => {
+    const running = claim(queued());
+
+    expect(() =>
+      finishWith(running, { outcome: "deferred", error: "x", pauseMs: 25 * 3600 * 1000 }),
+    ).toThrow(/waits 0 to/u);
+    expect(() =>
+      finishWith(running, { outcome: "failed", error: "x", retry: true, retryInMs: -1 }),
+    ).toThrow(/waits 0 to/u);
+  });
+});

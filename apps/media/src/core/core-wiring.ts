@@ -17,6 +17,8 @@ import * as LogsRoutes from "../logging/logs-routes.ts";
 import * as MediaTools from "../media/media-tools.ts";
 import * as MediaConfig from "../media-config.ts";
 import { servicesLayerWith } from "../media-service.ts";
+import * as LrclibClient from "../music/lyrics/lrclib-client.ts";
+import * as LyricsJob from "../music/lyrics/lyrics-job.ts";
 import * as MusicArt from "../music/music-art.ts";
 import * as MusicRoutes from "../music/music-routes.ts";
 import * as MusicScanJob from "../music/music-scan-job.ts";
@@ -79,6 +81,7 @@ const jobs = (sealKey: Redacted.Redacted) =>
       CoreMetadata.personHandler,
       CoreBackups.handler,
       MusicScanJob.handler,
+      LyricsJob.handler,
     ]);
 
     const imports = yield* CoreImportJob.handlers(sealKey);
@@ -89,6 +92,8 @@ const jobs = (sealKey: Redacted.Redacted) =>
       "movies.import": 1,
       // One music scan at a time, as old music ran its scans (ADR 0014).
       music: 1,
+      // One LRCLIB lookup at a time, as old music's worker asked (ADR 0014).
+      "music.background": 1,
       server: 1,
     };
 
@@ -140,7 +145,12 @@ export const layer = (options: Options) =>
       ).pipe(
         Layer.provideMerge(CoreImports.layer(options.serviceKey)),
         Layer.provideMerge(
-          Layer.mergeAll(MusicArt.layer, TrackSources.layer, MusicTranscoder.layer),
+          Layer.mergeAll(
+            MusicArt.layer,
+            TrackSources.layer,
+            MusicTranscoder.layer,
+            LrclibClient.layer,
+          ),
         ),
         Layer.provideMerge(CachePruner.layer),
         Layer.provideMerge(

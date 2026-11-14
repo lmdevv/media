@@ -44,6 +44,11 @@ export const jobDocument = v.union(
     ...common,
     status: v.literal("queued"),
     lastError: v.union(v.string(), v.null()),
+    /**
+     * A retry the worker asked to wait for: no claim takes the job before this time, when the
+     * core wakes it (`leases.wake`). Absent for a job a claim may take now.
+     */
+    waitUntil: v.optional(v.number()),
   }),
   v.object({
     ...common,
@@ -95,6 +100,14 @@ export const jobKindDocument = v.object({
   running: v.number(),
   /** No queued job of the kind was created before this time, so a claim scans from here. */
   queueFrom: v.number(),
+  /**
+   * No claim takes a job of the kind before this time: a worker deferred a job because what it
+   * calls was unavailable, such as LRCLIB answering 429. The core ends the pause at this time
+   * (`leases.endPause`), which wakes the pools that wait on the kind. Absent when not paused.
+   */
+  pausedUntil: v.optional(v.number()),
+  /** Set while a domain holds the kind, such as music with LRCLIB lookups off: no claim takes it. */
+  held: v.optional(v.literal(true)),
 });
 
 export const lease = v.object({ jobId: v.id("jobs"), attempt: v.number() });

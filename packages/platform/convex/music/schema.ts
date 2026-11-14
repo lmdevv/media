@@ -2,7 +2,7 @@ import { defineTable } from "convex/server";
 import { v } from "convex/values";
 
 import { nullable } from "../movies/validators";
-import { localLyricSet } from "./validators";
+import { localLyricSet, lrclibAnswer } from "./validators";
 
 /** How a queue repeats: not at all, the whole queue, or the current song. */
 export const repeatMode = v.union(v.literal("off"), v.literal("all"), v.literal("one"));
@@ -11,7 +11,7 @@ export const repeatMode = v.union(v.literal("off"), v.literal("all"), v.literal(
  * The music catalog, ported from old music's `artists`, `albums`, `tracks`, and `localLyrics`
  * (ADR 0024), and what each person keeps of it: playlists, likes, plays, and the queue (ADR 0005).
  * A library's track total is its core item count, and its album, artist, and duration totals are
- * counters in `totals.ts`. LRCLIB's lookups come with a later unit. Every write goes through
+ * counters in `totals.ts`. LRCLIB's answers are in `lrclibLyrics`. Every write goes through
  * `write.ts`, which keeps each document within its bound in `fit.ts`.
  */
 export const musicTables = {
@@ -142,6 +142,31 @@ export const musicTables = {
     /** Never empty: a song without lyrics has no row. */
     sets: v.array(localLyricSet),
   }).index("by_track", ["trackId"]),
+
+  /**
+   * What LRCLIB answered for a song, one row per song it was looked up for, replacing old music's
+   * `lyricLookups` answers and `lrclibLyrics`; the lookups themselves are `music.lyrics` jobs
+   * (ADR 0012). The row answers only while the song's tags still make `revision`, so a retagged
+   * song is looked up again. Found lyrics and an instrumental answer stand; a miss stands for 30
+   * days. It goes when the song is deleted.
+   */
+  lrclibLyrics: defineTable({
+    trackId: v.id("tracks"),
+    /** SHA-256 of the lookup key the answer is for (`music/lyricLookups.ts`). */
+    revision: v.string(),
+    /** When LRCLIB answered. */
+    checkedAt: v.number(),
+    answer: lrclibAnswer,
+  }).index("by_track", ["trackId"]),
+
+  /**
+   * The server's lyrics settings, old music's `remoteLyrics` server setting: one row at most, and
+   * none means LRCLIB lookups are on, old music's default.
+   */
+  lyricsSettings: defineTable({
+    /** Whether the server looks lyrics up on LRCLIB; off, no request reaches it. */
+    remote: v.boolean(),
+  }),
 
   /**
    * A person's playlist. Who else may open it is in the core's `grants` (`playlist`): its owner

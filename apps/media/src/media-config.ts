@@ -59,6 +59,11 @@ export interface Interface {
   readonly omdbApiKey: Option.Option<Redacted.Redacted>;
   /** OTLP/HTTP collector base URL. Telemetry export is off without it. */
   readonly otlpEndpoint: Option.Option<string>;
+  /**
+   * Where music looks lyrics up (`LRCLIB_URL`), without a trailing slash: LRCLIB itself unless
+   * pointed at a stand-in, as old music's was.
+   */
+  readonly lrclibUrl: string;
   readonly logs: LogSettings;
   /** The core's Convex URL. Without it the service runs standalone, with no accounts. */
   readonly convexUrl: Option.Option<string>;
@@ -171,6 +176,10 @@ export const layer: Layer.Layer<Service, Config.ConfigError> = Layer.effect(
     const omdbApiKey = yield* Config.option(Config.Redacted("OMDB_API_KEY"));
     const otlpEndpoint = yield* Config.option(Config.URL("OTEL_EXPORTER_OTLP_ENDPOINT"));
 
+    const lrclibUrl = yield* Config.URL("LRCLIB_URL").pipe(
+      Config.withDefault(new URL("https://lrclib.net")),
+    );
+
     const logLevel = yield* Config.Literals(
       ["trace", "debug", "info", "warn", "error"],
       "LOG_LEVEL",
@@ -282,6 +291,7 @@ export const layer: Layer.Layer<Service, Config.ConfigError> = Layer.effect(
       tmdbApiKey,
       omdbApiKey,
       otlpEndpoint: Option.map(otlpEndpoint, withoutTrailingSlash),
+      lrclibUrl: withoutTrailingSlash(lrclibUrl),
       logs: {
         level: LOG_LEVELS[logLevel],
         directory: resolve(absolute(dataDir), "logs"),

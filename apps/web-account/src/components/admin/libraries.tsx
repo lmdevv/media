@@ -8,6 +8,7 @@ import type { ReactNode } from "react";
 import { PageHeader } from "@media/ui/components/page-header";
 
 import { useActions } from "./action";
+import { RemoteLyricsSetting } from "./lyrics";
 import { usePages } from "@media/ui/lib/pages";
 import type { Paged } from "@media/ui/lib/pages";
 import { ItemRow, PagedList, Section, SelectField } from "./parts";
@@ -81,6 +82,7 @@ export function LibrariesScreen() {
       creating={actions.running === "create"}
       onDraft={setDraft}
       onCreate={() => void create()}
+      lyrics={<RemoteLyricsSetting />}
       nameLink={(library) => (
         <Link
           to="/admin/libraries/$libraryId"
@@ -101,6 +103,7 @@ export function LibrariesView({
   creating,
   onDraft,
   onCreate,
+  lyrics,
   nameLink,
 }: {
   readonly libraries: Paged<Library>;
@@ -108,6 +111,8 @@ export function LibrariesView({
   readonly creating: boolean;
   readonly onDraft: (draft: NewLibrary) => void;
   readonly onCreate: () => void;
+  /** Music's lyrics lookups switch, which old music kept with its libraries. */
+  readonly lyrics?: ReactNode;
   /** The library's name, linked to its page. */
   readonly nameLink: (library: Library) => ReactNode;
 }) {
@@ -160,6 +165,7 @@ export function LibrariesView({
           </div>
         </form>
       </Section>
+      {lyrics}
     </>
   );
 }
