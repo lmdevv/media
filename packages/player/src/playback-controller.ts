@@ -397,7 +397,7 @@ export class PlaybackController {
       this.#unlockOutput();
       this.#wantPlaying = true;
       this.#update({ autoplayBlocked: false, error: null });
-      await this.#load(entry, this.#startPositionFor(entry), true);
+      await this.#load(entry, this.#startPositionFor(entry));
 
       return;
     }
@@ -409,7 +409,7 @@ export class PlaybackController {
     if (playing) {
       this.#engine.pause();
       this.#saveResume();
-    } else if (!this.#reloadIfExpired(this.#livePositionMs(), true)) {
+    } else if (!this.#reloadIfExpired(this.#livePositionMs())) {
       await this.#engine.play();
     }
   }
@@ -468,8 +468,8 @@ export class PlaybackController {
 
     if (this.#loading) {
       this.#unload();
-      void this.#load(loaded.entry, target, this.#wantPlaying);
-    } else if (!this.#reloadIfExpired(target, this.#isAudible())) this.#engine.seek(target);
+      void this.#load(loaded.entry, target);
+    } else if (!this.#reloadIfExpired(target)) this.#engine.seek(target);
     this.#setPosition(target);
     this.#showNowPlaying();
     this.#saveResume();
@@ -499,7 +499,7 @@ export class PlaybackController {
     if (this.#snapshot.engineStatus !== "error") return;
     this.#stopHealthProbe();
     this.#update({ mediaOnline: true, engineStatus: "idle", error: null });
-    void this.#loadCurrent(this.#wantPlaying);
+    void this.#loadCurrent();
   }
 
   /**
@@ -555,7 +555,7 @@ export class PlaybackController {
     if (this.#wantPlaying) {
       // From the start, unless this device holds a place in it, as in the song that stopped when
       // the media server went away.
-      void this.#load(entry, this.#resumePositionFor(entry), true);
+      void this.#load(entry, this.#resumePositionFor(entry));
 
       return;
     }
@@ -581,7 +581,7 @@ export class PlaybackController {
       return;
     }
 
-    if (this.#loaded === null && this.#wantPlaying) void this.#load(entry, 0, true);
+    if (this.#loaded === null && this.#wantPlaying) void this.#load(entry, 0);
   }
 
   /** Keeps the loaded entry's song details current, such as a like, without reloading it. */
@@ -620,7 +620,7 @@ export class PlaybackController {
     if (entry === null) {
       // The queue that holds it has not arrived yet; `sync` loads it once it does.
       this.#unload();
-    } else if (this.#loaded?.entry.itemId !== itemId || play) void this.#load(entry, 0, play);
+    } else if (this.#loaded?.entry.itemId !== itemId || play) void this.#load(entry, 0);
 
     return pending;
   }
@@ -686,10 +686,10 @@ export class PlaybackController {
   }
 
   /** Loads the current entry from where the player holds it. */
-  async #loadCurrent(autoplay: boolean): Promise<void> {
+  async #loadCurrent(): Promise<void> {
     const entry = this.#currentEntry();
 
-    if (entry !== null) await this.#load(entry, this.#startPositionFor(entry), autoplay);
+    if (entry !== null) await this.#load(entry, this.#startPositionFor(entry));
   }
 
   #saveResume(): void {
@@ -827,24 +827,22 @@ export class PlaybackController {
     return renewAt !== null && this.#env.now() >= renewAt;
   }
 
-  #reloadIfExpired(positionMs: number, autoplay: boolean): boolean {
+  #reloadIfExpired(positionMs: number): boolean {
     const loaded = this.#loaded;
 
     if (loaded === null || !this.#isExpired(loaded.renewAt)) return false;
-    void this.#load(loaded.entry, positionMs, autoplay);
+    void this.#load(loaded.entry, positionMs);
 
     return true;
   }
 
-  async #load(entry: QueueEntry, startMs: number, autoplay: boolean): Promise<void> {
+  async #load(entry: QueueEntry, startMs: number): Promise<void> {
     this.#generation += 1;
     this.#loading = true;
     const generation = this.#generation;
     const { track } = entry;
 
     try {
-      const plannedAt = this.#env.now();
-
       this.#loaded = {
         entry,
         profile: null,
@@ -891,8 +889,9 @@ export class PlaybackController {
         reported: false,
       };
 
-      const elapsed = autoplay ? this.#env.now() - plannedAt : 0;
-      const start = Math.min(startMs + elapsed, Math.max(0, track.durationMs - 1000));
+      // The song starts where the listener left it, however long its ticket took: no clock is
+      // shared with another player that kept time meanwhile.
+      const start = Math.min(startMs, Math.max(0, track.durationMs - 1000));
       this.#setPosition(start);
       this.#engineGeneration = generation;
       await this.#engine.load(resolved.source, start, this.#wantPlaying);
@@ -1121,7 +1120,7 @@ export class PlaybackController {
 
     if (loaded !== null && this.#queue?.repeat === "one") {
       // A new start, so history records the song again, as old music counted a repeat.
-      void this.#load(loaded.entry, 0, true);
+      void this.#load(loaded.entry, 0);
 
       return;
     }
@@ -1185,7 +1184,7 @@ export class PlaybackController {
       }
 
       this.#renewed = loaded.entry.itemId;
-      void this.#load(loaded.entry, this.#livePositionMs(), this.#wantPlaying);
+      void this.#load(loaded.entry, this.#livePositionMs());
 
       return;
     }
@@ -1202,14 +1201,14 @@ export class PlaybackController {
 
     if (this.#snapshot.engine === "mse" && reason !== "network") {
       this.#mseFailed = true;
-      void this.#load(loaded.entry, this.#livePositionMs(), this.#wantPlaying);
+      void this.#load(loaded.entry, this.#livePositionMs());
 
       return;
     }
 
     if (loaded.profile === "original" && !this.#transcode.has(loaded.entry.track.id)) {
       this.#transcode.add(loaded.entry.track.id);
-      void this.#load(loaded.entry, this.#livePositionMs(), this.#wantPlaying);
+      void this.#load(loaded.entry, this.#livePositionMs());
 
       return;
     }
@@ -1242,7 +1241,7 @@ export class PlaybackController {
           Effect.sync(() => {
             this.#healthFiber = null;
             this.#update({ mediaOnline: true, engineStatus: "idle", error: null });
-            void this.#loadCurrent(this.#wantPlaying);
+            void this.#loadCurrent();
           }),
         ),
       ),

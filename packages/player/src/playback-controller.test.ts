@@ -460,6 +460,37 @@ describe("PlaybackController", () => {
     expect(record.loads.at(-1)?.startMs).toBe(42_000);
   });
 
+  it("starts a new song at its start however long its ticket took", async () => {
+    const { controller, record, clock, gates } = setup({ playCurrent: "1" });
+
+    gates.start.holding = true;
+    await controller.playTracks(["a", "b"], 0);
+    controller.sync(queueOf([one, two], "1"));
+    await settle();
+    clock.now += 5000;
+    gates.start.release("a");
+    await settle();
+
+    expect(record.loads.map((load) => load.startMs)).toStrictEqual([0]);
+  });
+
+  it("resumes where the song stopped however long its ticket took", async () => {
+    const { controller, record, clock, gates } = setup({
+      resume: { itemId: "1", positionMs: 42_000 },
+    });
+
+    gates.start.holding = true;
+    controller.sync(queueOf([one, two], "1"));
+    const playing = controller.togglePlay();
+    await settle();
+    clock.now += 5000;
+    gates.start.release("a");
+    await playing;
+    await settle();
+
+    expect(record.loads.map((load) => load.startMs)).toStrictEqual([42_000]);
+  });
+
   it("goes back within the first seconds and starts the song again after", async () => {
     const { controller, record, clock, engine } = setup({ playCurrent: "2" });
 

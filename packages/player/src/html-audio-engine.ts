@@ -23,6 +23,31 @@ const MAX_RECOVERIES = 3;
 
 const RECOVERED_MS = 2000;
 
+/**
+ * The parts of an `HTMLAudioElement` the engine uses. A browser's element is one; a test drives
+ * the engine with a stand-in.
+ */
+export interface AudioElement extends Pick<
+  HTMLAudioElement,
+  | "readyState"
+  | "duration"
+  | "paused"
+  | "seeking"
+  | "ended"
+  | "error"
+  | "currentTime"
+  | "preload"
+  | "src"
+  | "volume"
+  | "play"
+  | "pause"
+  | "load"
+  | "removeAttribute"
+> {
+  addEventListener(type: string, listener: () => void, options?: AddEventListenerOptions): void;
+  removeEventListener(type: string, listener: () => void): void;
+}
+
 /** A reopening of the stream at another position, waiting for it to play. */
 interface Reopening {
   /** Where playback resumes; later seeks move it. */
@@ -41,7 +66,7 @@ interface Watch {
 
 /** One of the two audio elements and the source it holds. */
 interface Slot {
-  readonly element: HTMLAudioElement;
+  readonly element: AudioElement;
   source: EngineSource | null;
   reopening: Reopening | null;
   /**
@@ -63,7 +88,7 @@ interface Slot {
   retries: number;
 }
 
-const isLive = (element: HTMLAudioElement): boolean =>
+const isLive = (element: AudioElement): boolean =>
   element.readyState >= HTMLMediaElement.HAVE_METADATA &&
   element.duration === Number.POSITIVE_INFINITY;
 
@@ -106,7 +131,7 @@ export class HtmlAudioEngine implements PlayerEngine {
    * @param createElement - Makes each audio element. Pass a factory to route output through Web
    *   Audio (a visualizer, an equalizer, or a capture-based gap measurement).
    */
-  constructor(createElement: () => HTMLAudioElement = () => new Audio()) {
+  constructor(createElement: () => AudioElement = () => new Audio()) {
     this.#slots = [this.#emptySlot(createElement()), this.#emptySlot(createElement())];
 
     for (const slot of this.#slots) this.#attach(slot);
@@ -259,7 +284,7 @@ export class HtmlAudioEngine implements PlayerEngine {
     };
   }
 
-  #emptySlot(element: HTMLAudioElement): Slot {
+  #emptySlot(element: AudioElement): Slot {
     return {
       element,
       source: null,
@@ -305,7 +330,7 @@ export class HtmlAudioEngine implements PlayerEngine {
   }
 
   #whenReady(
-    element: HTMLAudioElement,
+    element: AudioElement,
     limit?: { readonly ms: number; readonly signal: AbortSignal },
   ): Promise<boolean> {
     if (element.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) return Promise.resolve(true);
@@ -462,6 +487,9 @@ export class HtmlAudioEngine implements PlayerEngine {
       return;
     }
 
+    // A preload that failed while idle reported nothing, and starting it as it is fails without
+    // a word; open it again, so it plays or its failure reaches the controller as this song's.
+    if (next.element.error !== null) this.#openAt(next, source.url, 0);
     void this.#start(next);
     this.#current = 1 - this.#current;
     this.#emit({ type: "advanced", key: source.key });
