@@ -489,6 +489,14 @@ export const core = [
     result: v.null(),
   }),
 
+  query("core.accounts.directory.list", {
+    summary:
+      "List the other people on this server you can share with, by username: names and roles, no emails",
+    scope: "signed-in",
+    args: { paginationOpts: paginationOptsValidator },
+    result: paginationResultValidator(v.object({ userId: v.id("users"), name: v.string(), role })),
+  }),
+
   mutation("core.permissions.groups.create", {
     summary: "Create a group of people to share with at once",
     scope: "admin",

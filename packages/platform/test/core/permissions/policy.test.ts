@@ -818,17 +818,40 @@ describe("can", () => {
   });
 });
 
-describe("server actions", () => {
-  it("are an admin's and the owner's alone, managing folders included", () => {
-    const allowed = serverActions.map((action) => [
-      action,
-      Object.entries(as).flatMap(([name, principal]) =>
-        can(principal, action, SERVER).allowed ? [name] : [],
-      ),
-    ]);
+const allowedTo = (action: ServerAction, principals: Readonly<Record<string, Principal>>) =>
+  Object.entries(principals).flatMap(([name, principal]) =>
+    can(principal, action, SERVER).allowed ? [name] : [],
+  );
 
-    expect(serverActions).toContain("manageFolders");
-    expect(allowed).toEqual(serverActions.map((action) => [action, ["owner", "admin"]]));
+describe("server actions", () => {
+  it("are an admin's and the owner's alone, managing folders included, but seeing people", () => {
+    const adminOnly = serverActions.filter((action) => action !== "seePeople");
+
+    expect(adminOnly).toContain("manageFolders");
+    expect(adminOnly.map((action) => [action, allowedTo(action, as)])).toEqual(
+      adminOnly.map((action) => [action, ["owner", "admin"]]),
+    );
+  });
+
+  it("let everyone who can share see people: no guest, service, or key that only plays", () => {
+    const musicEditKey = principalOf(
+      rows.member,
+      heldScopes(keySession(rows.member, ["music:edit"]), rows.member),
+    );
+
+    expect(allowedTo("seePeople", { ...as, musicEditKey })).toEqual([
+      "owner",
+      "admin",
+      "member",
+      "kid",
+      "strictKid",
+      "adminAccountKey",
+      "musicEditKey",
+    ]);
+    expect(outcome(can(as.guest, "seePeople", SERVER))).toEqual(["forbidden", "scope"]);
+    expect(
+      outcome(can({ ...as.guest, scopes: ["account", "music:edit"] }, "seePeople", SERVER)),
+    ).toEqual(["forbidden", "guest"]);
   });
 });
 

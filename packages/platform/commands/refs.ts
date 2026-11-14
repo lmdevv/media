@@ -3,6 +3,7 @@
 
 import { api } from "../convex/_generated/api";
 
+import type { Refs as core_accounts_directory } from "./core/accounts/directory";
 import type { Refs as core_accounts_invites } from "./core/accounts/invites";
 import type { Refs as core_accounts_me } from "./core/accounts/me";
 import type { Refs as core_accounts_resetLinks } from "./core/accounts/resetLinks";
@@ -56,6 +57,8 @@ import type { Refs as music_tracks } from "./music/tracks";
  * `pnpm --filter @media/commands generate` with the dev stack up.
  */
 export const commandRefs = {
+  "core.accounts.directory.list": api.core.accounts.directory
+    .list satisfies core_accounts_directory["list"],
   "core.accounts.invites.create": api.core.accounts.invites
     .create satisfies core_accounts_invites["create"],
   "core.accounts.invites.list": api.core.accounts.invites

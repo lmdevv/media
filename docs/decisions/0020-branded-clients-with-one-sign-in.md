@@ -529,14 +529,15 @@ artboards stays open (`docs/architecture.md`, "Open").
   its command schemas; the core declares commands as Convex validators that the client does not
   carry, so those forms stay out until the SDK exposes the command list to clients.
 
+- The share dialog picks people from `core.accounts.directory.list` (ADR 0005), for members and
+  admins alike, as old music's picked from `people.directory`.
+- A list whose later page fails keeps the rows it has and shows the failure with Try again under
+  them, which loads that page again. A failed first page goes to the screen's error, as before.
+
 ### Left out (D62, D63)
 
 - Jams wait for `p6-together-music`, and Play on and remote control for `p6-connect-web`.
 - Old music's "Reconnecting" banner read its Convex client's socket state, which the platform SDK
   does not expose; the media server's banner stays.
-- Members cannot pick people to share a playlist with: old music listed everyone to members
-  (`people.directory`), while the core lists users to admins alone. Admins pick from
-  `core.accounts.users.list`; a member shares with the CLI and a user ID until the core lists
-  people to members.
 - Crossfade: old music had none, so the player does not cross songs over, whatever the synced
   `crossfade` setting says (D62).

@@ -30,6 +30,7 @@ describe("CLI placement", () => {
     expect(
       Object.fromEntries(placed.map((command) => [command.name, cliPath(command).join(" ")])),
     ).toEqual({
+      "core.accounts.directory.list": "auth directory list",
       "core.accounts.invites.create": "admin invites create",
       "core.accounts.invites.list": "admin invites list",
       "core.accounts.invites.lookup": "auth invites lookup",
@@ -287,6 +288,7 @@ describe("CLI placement", () => {
     expect(
       placed.filter((command) => isPaginated(command.args)).map((command) => command.name),
     ).toEqual([
+      "core.accounts.directory.list",
       "core.accounts.invites.list",
       "core.accounts.users.list",
       "core.auth.apiKeys.list",

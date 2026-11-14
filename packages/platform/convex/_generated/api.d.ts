@@ -9,6 +9,7 @@
  */
 
 import type * as auth from "../auth.js";
+import type * as core_accounts_directory from "../core/accounts/directory.js";
 import type * as core_accounts_host from "../core/accounts/host.js";
 import type * as core_accounts_invites from "../core/accounts/invites.js";
 import type * as core_accounts_me from "../core/accounts/me.js";
@@ -172,6 +173,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   auth: typeof auth;
+  "core/accounts/directory": typeof core_accounts_directory;
   "core/accounts/host": typeof core_accounts_host;
   "core/accounts/invites": typeof core_accounts_invites;
   "core/accounts/me": typeof core_accounts_me;

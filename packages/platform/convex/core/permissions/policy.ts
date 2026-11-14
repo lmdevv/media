@@ -236,6 +236,7 @@ export const serverActions = [
   "manageDevices",
   "configureGuests",
   "configureLyrics",
+  "seePeople",
 ] as const;
 
 export type ContentAction = (typeof contentActions)[number];
@@ -264,7 +265,8 @@ interface AccountRule {
 }
 
 interface ServerRule {
-  readonly scope: CredentialScope;
+  /** The scopes that allow it: holding any one of them is enough. */
+  readonly scopes: ReadonlyArray<CredentialScope>;
 }
 
 type ContentRules = { readonly [A in ContentAction]: ContentRule };
@@ -314,14 +316,28 @@ const accountRules: AccountRules = {
   allowSharing: { scope: "admin", self: "refuse", targets: ["member"], restricted: "any" },
 };
 
+/**
+ * The scopes that let someone share: managing their own account, or editing in any domain, as a
+ * shared device's session does. A guest holds none of them.
+ */
+const SHARING: ReadonlyArray<CredentialScope> = [
+  "account",
+  ...domainScopes.filter((scope) => scope.endsWith(":edit")),
+];
+
+/**
+ * `seePeople` lists the household by name to share with, as old music's `people.directory` did
+ * for anyone who could share (ADR 0005).
+ */
 const serverRules: ServerRules = {
-  invite: { scope: "admin" },
-  manageGroups: { scope: "admin" },
-  manageFolders: { scope: "admin" },
-  manageDevices: { scope: "admin" },
-  configureGuests: { scope: "admin" },
+  invite: { scopes: ["admin"] },
+  manageGroups: { scopes: ["admin"] },
+  manageFolders: { scopes: ["admin"] },
+  manageDevices: { scopes: ["admin"] },
+  configureGuests: { scopes: ["admin"] },
   /** LRCLIB lookups: the switch and the backfill, old music's admin-only `remoteLyrics`. */
-  configureLyrics: { scope: "admin" },
+  configureLyrics: { scopes: ["admin"] },
+  seePeople: { scopes: SHARING },
 };
 
 const ALLOWED = { allowed: true } as const;
@@ -422,10 +438,15 @@ const decideAccount = (
   return restrictionRefusal(rule, target.restricted);
 };
 
-const decideServer = (principal: Principal, rule: ServerRule): Decision =>
-  principal.kind === "person" && principal.scopes.includes(rule.scope)
-    ? ALLOWED
-    : forbidden("scope");
+const decideServer = (principal: Principal, rule: ServerRule): Decision => {
+  if (principal.kind === "service") return forbidden("scope");
+
+  if (!rule.scopes.some((scope) => principal.scopes.includes(scope))) return forbidden("scope");
+
+  // A guest's role allows none of these scopes; refusing the role as well keeps a guest out
+  // whatever a later role table gives it.
+  return principal.role === "guest" ? forbidden("guest") : ALLOWED;
+};
 
 /** Someone who proved themselves on a shared device's lock screen or answers its approval. */
 export interface Prover {

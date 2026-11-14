@@ -8,6 +8,52 @@ import { coreCommand } from "../core/command";
 /** Every command in the command list, at its CLI path, by name. */
 export const generatedCommands = [
   coreCommand({
+    name: "core.accounts.directory.list",
+    path: ["auth", "directory", "list"],
+    kind: "query",
+    scope: "signed-in",
+    refusesKeys: false,
+    summary:
+      "List the other people on this server you can share with, by username: names and roles, no emails",
+    secrets: [],
+    paginated: true,
+    args: Schema.Struct({
+      paginationOpts: Schema.Struct({
+        numItems: Schema.Finite,
+        cursor: Schema.Union([Schema.String, Schema.Null]),
+        endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+        id: Schema.optionalKey(Schema.Finite),
+        maximumRowsRead: Schema.optionalKey(Schema.Finite),
+        maximumBytesRead: Schema.optionalKey(Schema.Finite),
+      }),
+    }),
+    result: Schema.Struct({
+      page: Schema.Array(
+        Schema.Struct({
+          userId: Schema.String.pipe(Schema.brand("Id<users>")),
+          name: Schema.String,
+          role: Schema.Union([
+            Schema.Literal("owner"),
+            Schema.Literal("admin"),
+            Schema.Literal("member"),
+            Schema.Literal("guest"),
+          ]),
+        }),
+      ),
+      continueCursor: Schema.String,
+      isDone: Schema.Boolean,
+      splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      pageStatus: Schema.optionalKey(
+        Schema.Union([
+          Schema.Literal("SplitRecommended"),
+          Schema.Literal("SplitRequired"),
+          Schema.Null,
+        ]),
+      ),
+    }),
+    method: (platform) => platform.core.accounts.directory.list,
+  }),
+  coreCommand({
     name: "core.accounts.invites.create",
     path: ["admin", "invites", "create"],
     kind: "action",

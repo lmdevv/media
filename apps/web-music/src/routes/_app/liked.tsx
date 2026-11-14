@@ -3,6 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { HeartIcon } from "lucide-react";
 
 import { CollectionHeader } from "@/components/library/collection-header";
+import { MoreFailed } from "@/components/library/paged";
 import { TrackList, TrackListSkeleton } from "@/components/library/track-list";
 import { formatCount, formatTotal, plural } from "@/lib/format";
 import { useLikedSongs } from "@/lib/use-liked-songs";
@@ -23,6 +24,7 @@ function LikedCover({ size }: { readonly size: string }) {
 function LikedPage() {
   const liked = useLikedSongs();
   const tracks = liked?.tracks;
+  const failed = liked?.failed ?? null;
   const total = (tracks ?? []).reduce((sum, track) => sum + track.durationMs, 0);
 
   const count =
@@ -48,13 +50,14 @@ function LikedPage() {
       />
       {tracks === undefined ? (
         <TrackListSkeleton />
-      ) : tracks.length === 0 ? (
+      ) : tracks.length === 0 && failed === null ? (
         <p className="max-w-dialog font-sans text-md/md text-text-muted">
           Songs you like show up here. Tap the heart on any song, or press L while it plays.
         </p>
       ) : (
         <TrackList tracks={tracks} variant="list" label="Liked songs" />
       )}
+      {failed === null ? null : <MoreFailed message={failed.message} retry={failed.retry} />}
     </div>
   );
 }

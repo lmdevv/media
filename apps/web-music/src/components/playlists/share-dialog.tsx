@@ -16,8 +16,7 @@ import { LinkIcon, PlusIcon } from "lucide-react";
 import { useAction } from "@/lib/action";
 import type { Playlist, PlaylistRole, PlaylistVisibility, UserId } from "@/lib/models";
 import { useAllRows } from "@/lib/pages";
-import { can } from "@/lib/permissions";
-import { nameOf, useMe, useRead } from "@/lib/platform";
+import { useRead } from "@/lib/platform";
 import type { Me } from "@/lib/platform";
 import { useCopyLink } from "@/lib/use-copy-link";
 
@@ -70,7 +69,6 @@ function ShareForm({
 }) {
   const platform = usePlatform();
   const music = platform.music;
-  const me = useMe();
   const sharing = useRead(music.playlists.sharing, { playlistId: playlist.id });
   const setVisibility = music.playlists.visibility;
   const share = music.playlists.share;
@@ -161,14 +159,11 @@ function ShareForm({
             ))}
           </ul>
         )}
-        {me !== undefined && can(me.role, "admin") ? (
-          <AddSomeone
-            me={me.userId}
-            shared={sharedIds}
-            adding={adding}
-            onAdd={(userId) => void add(userId, "viewer")}
-          />
-        ) : null}
+        <AddSomeone
+          shared={sharedIds}
+          adding={adding}
+          onAdd={(userId) => void add(userId, "viewer")}
+        />
         <FieldHint>
           Sharing doesn't open your libraries: songs someone can't listen to show as unavailable.
         </FieldHint>
@@ -192,28 +187,27 @@ function ShareForm({
 }
 
 /**
- * Picks someone to share with. Old music listed everyone on the server to members
- * (`people.directory`); the core lists users to admins alone (`core.accounts.users.list`), so
- * only admins pick people here until the core lists people to members.
+ * Picks someone to share with from everyone else on the server, by name, as old music's
+ * `people.directory` offered them (`core.accounts.directory.list`, which leaves the caller out).
  */
 function AddSomeone({
-  me,
   shared,
   adding,
   onAdd,
 }: {
-  readonly me: UserId;
   readonly shared: ReadonlySet<UserId>;
   readonly adding: boolean;
   readonly onAdd: (userId: UserId) => void;
 }) {
   const platform = usePlatform();
 
-  const users = useAllRows(platform.core.accounts.users.list, (paginationOpts) => ({
+  const people = useAllRows(platform.core.accounts.directory.list, (paginationOpts) => ({
     paginationOpts,
   }));
 
-  const candidates = (users ?? []).filter((user) => user.userId !== me && !shared.has(user.userId));
+  const candidates = (people ?? [])
+    .filter((person) => !shared.has(person.userId))
+    .toSorted((left, right) => left.name.localeCompare(right.name));
 
   if (candidates.length === 0) return null;
 
@@ -226,9 +220,9 @@ function AddSomeone({
         Add someone
       </DropdownMenuTrigger>
       <DropdownMenuContent>
-        {candidates.map((user) => (
-          <DropdownMenuItem key={user.userId} onClick={() => onAdd(user.userId)}>
-            {nameOf(user)} · {PERSON_ROLES[user.role]}
+        {candidates.map((person) => (
+          <DropdownMenuItem key={person.userId} onClick={() => onAdd(person.userId)}>
+            {person.name} · {PERSON_ROLES[person.role]}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>

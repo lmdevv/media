@@ -5,7 +5,7 @@ import { SearchIcon, ShuffleIcon } from "lucide-react";
 import { useDeferredValue, useState } from "react";
 
 import { PageHeader, usePlayTracks } from "@/components/library/cards";
-import { useMoreOnView } from "@/components/library/paged";
+import { ListTail } from "@/components/library/paged";
 import { TrackList, TrackListSkeleton } from "@/components/library/track-list";
 import { toastFailure } from "@/lib/action";
 import { formatTotal, plural } from "@/lib/format";
@@ -106,7 +106,6 @@ function FilteredSongs({ query }: { readonly query: string }) {
 function AllSongs() {
   const music = useMusic();
   const paged = usePages(music.tracks.list, (paginationOpts) => ({ paginationOpts }), PAGE_SIZE);
-  const sentinel = useMoreOnView(paged);
 
   if (paged.status === "loading") return <TrackListSkeleton />;
 
@@ -123,8 +122,7 @@ function AllSongs() {
   return (
     <div className="flex flex-col">
       <TrackList tracks={paged.rows} variant="list" label="Songs" windowing="always" />
-      {paged.next.kind === "loading" ? <TrackListSkeleton /> : null}
-      {sentinel.more ? <div ref={sentinel.ref} aria-hidden className="h-px" /> : null}
+      <ListTail paged={paged} skeleton={<TrackListSkeleton />} />
     </div>
   );
 }

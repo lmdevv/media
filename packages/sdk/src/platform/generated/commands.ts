@@ -6,6 +6,45 @@ import { Schema } from "effect";
 import { action, mutation, query } from "../command";
 import type { EffectBuilder, PromiseBuilder } from "../command";
 
+const core_accounts_directory_list = query({
+  name: "core.accounts.directory.list",
+  path: "core/accounts/directory:list",
+  args: Schema.Struct({
+    paginationOpts: Schema.Struct({
+      numItems: Schema.Finite,
+      cursor: Schema.Union([Schema.String, Schema.Null]),
+      endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      id: Schema.optionalKey(Schema.Finite),
+      maximumRowsRead: Schema.optionalKey(Schema.Finite),
+      maximumBytesRead: Schema.optionalKey(Schema.Finite),
+    }),
+  }),
+  result: Schema.Struct({
+    page: Schema.Array(
+      Schema.Struct({
+        userId: Schema.String.pipe(Schema.brand("Id<users>")),
+        name: Schema.String,
+        role: Schema.Union([
+          Schema.Literal("owner"),
+          Schema.Literal("admin"),
+          Schema.Literal("member"),
+          Schema.Literal("guest"),
+        ]),
+      }),
+    ),
+    continueCursor: Schema.String,
+    isDone: Schema.Boolean,
+    splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+    pageStatus: Schema.optionalKey(
+      Schema.Union([
+        Schema.Literal("SplitRecommended"),
+        Schema.Literal("SplitRequired"),
+        Schema.Null,
+      ]),
+    ),
+  }),
+});
+
 const core_accounts_invites_create = action({
   name: "core.accounts.invites.create",
   path: "core/accounts/invites:create",
@@ -5294,6 +5333,10 @@ const music_tracks_list = query({
 export const effectMethods = (method: EffectBuilder) => ({
   core: {
     accounts: {
+      directory: {
+        /** `core.accounts.directory.list` (query, signed-in): List the other people on this server you can share with, by username: names and roles, no emails. */
+        list: method.query(core_accounts_directory_list),
+      },
       invites: {
         /** `core.accounts.invites.create` (action, admin, API keys refused): Create an invite link code for someone new, who picks their own username and password. */
         create: method.action(core_accounts_invites_create),
@@ -5762,6 +5805,10 @@ export const effectMethods = (method: EffectBuilder) => ({
 export const promiseMethods = (method: PromiseBuilder) => ({
   core: {
     accounts: {
+      directory: {
+        /** `core.accounts.directory.list` (query, signed-in): List the other people on this server you can share with, by username: names and roles, no emails. */
+        list: method.query(core_accounts_directory_list),
+      },
       invites: {
         /** `core.accounts.invites.create` (action, admin, API keys refused): Create an invite link code for someone new, who picks their own username and password. */
         create: method.action(core_accounts_invites_create),

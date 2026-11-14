@@ -2,6 +2,17 @@
 
 # Core commands
 
+## `core.accounts.directory.list`
+
+List the other people on this server you can share with, by username: names and roles, no emails.
+
+- CLI: `media auth directory list`
+- Kind: query
+- Scope: signed-in
+- Arguments: `{ paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
+- Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
+- Result: `{ page: Array<{ userId: Id<"users">; name: string; role: "owner" | "admin" | "member" | "guest" }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
+
 ## `core.accounts.invites.create`
 
 Create an invite link code for someone new, who picks their own username and password.
