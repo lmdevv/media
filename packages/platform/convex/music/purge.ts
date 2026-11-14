@@ -42,7 +42,7 @@ export interface PurgeNext {
  * the library keeps, or every track once the library is gone, with their lyrics, as many as the
  * call's budget admits, through the catalog batch. What people keep of each track (playlist
  * entries, likes, plays, queue entries) goes first, in half the budget (`dependents.ts`), then
- * its queued lyrics lookups, in a quarter (`dropLookups`). The batch settles the albums and artists those
+ * its queued lyrics lookups, up to three quarters (`dropLookups`). The batch settles the albums and artists those
  * tracks filed under in the same mutation: their counts and the library's totals move, and an
  * album left without any track goes, then its artist when nothing files under it. When the budget
  * stops it partway, the next call reads the same page again; the tracks it deleted are gone.

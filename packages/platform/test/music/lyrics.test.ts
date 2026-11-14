@@ -232,6 +232,45 @@ const drainUntilQueued = async (
   return drainUntilQueued(core, trackIds, held, deadline);
 };
 
+/**
+ * Works the lookup queue as the server would, every lookup a miss, until each of `trackIds` has a
+ * current answer. Answers how many do, and the most of their lookups seen waiting at once.
+ */
+const workUntilAnswered = async (
+  core: CoreStack,
+  trackIds: ReadonlyArray<Id<"tracks">>,
+  rounds = 0,
+  mostQueued = 0,
+): Promise<{ readonly answered: number; readonly mostQueued: number }> => {
+  const states = await lookupsOf(core, trackIds);
+  const queuedNow = states.filter((one) => one?.job?.status === "queued").length;
+  const most = Math.max(mostQueued, queuedNow);
+  const answered = states.filter((one) => one?.answer?.current === true).length;
+
+  if (answered === trackIds.length || rounds >= 2000) return { answered, mostQueued: most };
+
+  const claim = await claimOnce(core);
+
+  if (claim.outcome === "claimed") {
+    await settle(core, claim.lease, { outcome: "answered", answer: { status: "miss" } });
+  } else {
+    await sleep(250);
+  }
+
+  return workUntilAnswered(core, trackIds, rounds + 1, most);
+};
+
+/** Settles every lookup left waiting as a miss, until a claim finds none. */
+const drainAll = async (core: CoreStack): Promise<void> => {
+  const claim = await claimOnce(core);
+
+  if (claim.outcome === "idle") return;
+
+  await settle(core, claim.lease, { outcome: "answered", answer: { status: "miss" } });
+
+  return drainAll(core);
+};
+
 /** A music library of `admin`'s holding `tracks`, scanned, and the tracks' ids in order. */
 const library = async (
   core: CoreStack,
@@ -806,11 +845,8 @@ describe.skipIf(stack === undefined)("music lyrics lookups", { timeout: 180_000 
 
     await owner.signedIn.client.mutation(api.music.lyrics.backfill, {});
 
-    const held = await drainUntilQueued(core, ids);
-
-    expect((await lookupsOf(core, ids)).every((one) => one?.job !== null)).toBe(true);
-
-    await Promise.all([...held.values()].map((lease) => settle(core, lease, found(3, "dense"))));
+    // Each step reads past answers for older tags at the row's bound and queues a new lookup.
+    expect((await workUntilAnswered(core, ids)).answered).toBe(count);
   });
 
   it("keep a large backfill a page ahead of the worker while other enqueues go on", async () => {
@@ -821,6 +857,8 @@ describe.skipIf(stack === undefined)("music lyrics lookups", { timeout: 180_000 
       Array.from({ length: count }, (_, n) => song(root, `Track ${String(n).padStart(3, "0")}`)),
     );
 
+    // Start from an empty queue, which the backfill could fill all at once.
+    await drainAll(core);
     await owner.signedIn.client.mutation(api.music.lyrics.backfill, {});
 
     /** The most of the songs' lookups seen waiting over `ms`, while nothing claims. */
@@ -845,30 +883,7 @@ describe.skipIf(stack === undefined)("music lyrics lookups", { timeout: 180_000 
       Array.from({ length: 6 }, async (_, n) => musicLibrary(owner, `Beside the backfill ${n}`)),
     );
 
-    /** Works the queue as the server would, every lookup a miss, until every song has an answer. */
-    const work = async (
-      rounds: number,
-      mostQueued: number,
-    ): Promise<{ readonly answered: number; readonly mostQueued: number }> => {
-      const states = await lookupsOf(core, ids);
-      const queuedNow = states.filter((one) => one?.job?.status === "queued").length;
-      const most = Math.max(mostQueued, queuedNow);
-      const answered = states.filter((one) => one?.answer !== null).length;
-
-      if (answered === count || rounds >= 2000) return { answered, mostQueued: most };
-
-      const claim = await claimOnce(core);
-
-      if (claim.outcome === "claimed") {
-        await settle(core, claim.lease, { outcome: "answered", answer: { status: "miss" } });
-      } else {
-        await sleep(250);
-      }
-
-      return work(rounds + 1, most);
-    };
-
-    const { answered, mostQueued } = await work(0, 0);
+    const { answered, mostQueued } = await workUntilAnswered(core, ids);
 
     expect((await created).length).toBe(6);
     expect(answered).toBe(count);

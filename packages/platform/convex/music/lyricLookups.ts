@@ -477,27 +477,29 @@ const DROPPED_PER_TRACK = 8;
 const LOOKUP_JOB_BYTES = 16 * 1024;
 
 /**
- * One track's step of `dropLookups` at worst: its queued lookups read, and each canceled, which
- * rewrites the job and reads and writes the kind's row.
+ * What canceling `jobs` queued lookups of one track costs, after the one range that found them:
+ * each job rewritten, and the kind's row read and written for each.
  */
-const DROP_MOST = cost(
-  1 + DROPPED_PER_TRACK,
-  2 * DROPPED_PER_TRACK,
-  (2 * DROPPED_PER_TRACK + 1) * LOOKUP_JOB_BYTES,
-  2 * DROPPED_PER_TRACK * LOOKUP_JOB_BYTES,
-);
+const dropCost = (jobs: number): Cost =>
+  cost(1 + jobs, 2 * jobs, 2 * jobs * LOOKUP_JOB_BYTES, 2 * jobs * LOOKUP_JOB_BYTES);
 
-/** A quarter of a call: the purge's dependents and track deletes need the rest. */
+/** One track's step of `dropLookups` at worst, with every lookup it may cancel. */
+const DROP_MOST = dropCost(DROPPED_PER_TRACK);
+
+/**
+ * Three quarters of a call, counted with what the purge spent before: its page and the dependents
+ * it cleared in half the call (`dependents.ts`). The track deletes need the rest.
+ */
 const DROP_LIMIT: Cost = {
-  work: { ranges: CALL_COST.work.ranges / 4, writes: CALL_COST.work.writes / 4 },
-  readBytes: CALL_COST.readBytes / 4,
-  writeBytes: CALL_COST.writeBytes / 4,
+  work: { ranges: (CALL_COST.work.ranges * 3) / 4, writes: (CALL_COST.work.writes * 3) / 4 },
+  readBytes: (CALL_COST.readBytes * 3) / 4,
+  writeBytes: (CALL_COST.writeBytes * 3) / 4,
   lyricBytes: CALL_COST.lyricBytes,
 };
 
 /**
- * Cancels the queued lookups of the leading `tracks`, which a purge is about to delete, while a
- * quarter of the call's budget on `meter` admits another track, and answers the leading tracks
+ * Cancels the queued lookups of the leading `tracks`, which a purge is about to delete, while
+ * three quarters of the call's budget on `meter` admit another track, and answers the leading tracks
  * none is left for, which the purge may then delete. A lookup of any revision goes, so none of a
  * deleted song waits to ask LRCLIB, holds the kind's slot, or defers through an outage. A lookup
  * already running for one ends as stale at its next `proceed` or `settle`, before any request.
@@ -516,14 +518,7 @@ export const dropLookups = async (
       .take(DROPPED_PER_TRACK);
 
     await inOrder(queued, (job) => applyEvent(ctx, job, { type: "cancel", attempt: null }));
-    meter.charge(
-      cost(
-        1 + queued.length,
-        2 * queued.length,
-        (2 * queued.length + 1) * LOOKUP_JOB_BYTES,
-        2 * queued.length * LOOKUP_JOB_BYTES,
-      ),
-    );
+    meter.charge(dropCost(queued.length));
 
     return queued.length < DROPPED_PER_TRACK;
   });
