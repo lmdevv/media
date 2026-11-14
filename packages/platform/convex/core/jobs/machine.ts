@@ -314,7 +314,7 @@ const finish = (job: Running, end: Finish, now: number, policy: Policy): Step =>
 /** The longest a kind pauses or a retry waits: a day. */
 export const WAIT_MS_MAX = 24 * 60 * 60 * 1000;
 
-const checkPauseMs = (ms: number): void => {
+export const checkPauseMs = (ms: number): void => {
   if (!Number.isSafeInteger(ms) || ms < 0 || ms > WAIT_MS_MAX) {
     throw new Error(`A pause or a retry waits 0 to ${WAIT_MS_MAX} ms; got ${ms}`);
   }

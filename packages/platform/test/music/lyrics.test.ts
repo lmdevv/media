@@ -271,6 +271,20 @@ const drainAll = async (core: CoreStack): Promise<void> => {
   return drainAll(core);
 };
 
+/** Claims every lookup left waiting, settling each as a miss, and answers whose they were. */
+const claimedUntilIdle = async (
+  core: CoreStack,
+  claimed: ReadonlyArray<Id<"tracks"> | undefined> = [],
+): Promise<ReadonlyArray<Id<"tracks"> | undefined>> => {
+  const claim = await claimOnce(core);
+
+  if (claim.outcome === "idle") return claimed;
+
+  await settle(core, claim.lease, { outcome: "answered", answer: { status: "miss" } });
+
+  return claimedUntilIdle(core, [...claimed, claim.payload.trackId]);
+};
+
 /** A music library of `admin`'s holding `tracks`, scanned, and the tracks' ids in order. */
 const library = async (
   core: CoreStack,
@@ -733,6 +747,75 @@ describe.skipIf(stack === undefined)("music lyrics lookups", { timeout: 180_000 
     expect(await statusesOf(core, claimed ?? never())).toEqual(["running"]);
     expect(await proceed(core, lease)).toEqual(nextIs("stale"));
     expect(await statusesOf(core, claimed ?? never())).toEqual(["succeeded"]);
+  });
+
+  it("end a claimed lookup of a purged song as stale while lookups are off", async () => {
+    const owner = await admin;
+
+    const made = await library(core, owner, "Purged while off", (root) => [
+      song(root, "Claimed, then off, then purged"),
+    ]);
+
+    const trackId = made.ids[0] ?? never();
+
+    await requestLookups(core, [trackId]);
+
+    const lease = await claimLookup(core, trackId);
+
+    try {
+      await turn(owner, false);
+      await owner.signedIn.client.mutation(api.core.libraries.remove, {
+        libraryId: made.libraryId,
+      });
+      await eventually("the purge to finish", async () =>
+        (await hasTotals(core, made.libraryId)) ? null : true,
+      );
+
+      expect(await proceed(core, lease)).toEqual(nextIs("stale"));
+      expect(await statusesOf(core, trackId)).toEqual(["succeeded"]);
+    } finally {
+      await turn(owner, true);
+    }
+
+    expect(await claimedUntilIdle(core)).not.toContain(trackId);
+    expect(await statusesOf(core, trackId)).toEqual(["succeeded"]);
+  });
+
+  it("end a purged song's lookup as stale when LRCLIB was unavailable, keeping its pause", async () => {
+    const owner = await admin;
+
+    const made = await library(core, owner, "Purged mid-request", (root) => [
+      song(root, "Unavailable"),
+    ]);
+
+    const trackId = made.ids[0] ?? never();
+
+    await requestLookups(core, [trackId]);
+
+    const lease = await claimLookup(core, trackId);
+
+    expect(await proceed(core, lease)).toEqual(nextIs("ask"));
+
+    await owner.signedIn.client.mutation(api.core.libraries.remove, { libraryId: made.libraryId });
+    await eventually("the purge to finish", async () =>
+      (await hasTotals(core, made.libraryId)) ? null : true,
+    );
+
+    const pauseMs = 2000;
+
+    expect(
+      await settle(core, lease, { outcome: "unavailable", error: "LRCLIB: 429", pauseMs }),
+    ).toEqual({ outcome: "held", value: { saved: "stale" } });
+    expect(await statusesOf(core, trackId)).toEqual(["succeeded"]);
+    expect((await kindOf(core)).pausedUntil).toBeGreaterThan(Date.now());
+
+    await eventually(
+      "the pause to end",
+      async () => ((await kindOf(core)).pausedUntil === null ? true : null),
+      pauseMs + 10_000,
+    );
+
+    expect(await claimedUntilIdle(core)).not.toContain(trackId);
   });
 
   it("cancel the queued lookup of a song whose folder left its library", async () => {

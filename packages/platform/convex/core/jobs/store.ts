@@ -233,7 +233,7 @@ const claimable = (job: JobFields): boolean =>
  * core end it then (`leases.endPause`), which writes the kind's row and so wakes the pools whose
  * `waiting` read it.
  */
-const pauseKind = async (ctx: JobCtx, kind: JobKind, until: number): Promise<void> => {
+export const pauseKind = async (ctx: JobCtx, kind: JobKind, until: number): Promise<void> => {
   const row = await kindRow(ctx.db, kind);
 
   if (row !== null && (row.pausedUntil ?? 0) >= until) return;

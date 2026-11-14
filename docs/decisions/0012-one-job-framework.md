@@ -377,7 +377,8 @@ one-row `lrclibPause` table that hid the queue while LRCLIB was unavailable.
   nothing. A request already past `proceed` when the switch flips still goes out: the window is
   one call's round trip.
 - `proceed` also ends a lookup whose song is gone or retagged as stale, storing nothing, before
-  any request. A purge that deletes a track cancels its queued `music.lyrics` jobs, of any
+  any request, and checks that before the switch, so a purged song's lookup is never deferred back
+  to the queue. `settle` does the same whatever the try learned, keeping LRCLIB's pause. A purge that deletes a track cancels its queued `music.lyrics` jobs, of any
   revision, in the same metered pages (`dropLookups`, through `jobs.by_track_status`), so a
   deleted song's lookup never asks LRCLIB, holds the kind's slot, or defers through an outage.
 - The cron `wake waiting job retries and end job pauses` runs `leases.wakeDue` every minute. It

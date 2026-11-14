@@ -10,9 +10,10 @@ import { leaseAnswer, withJobLease } from "../core/jobs/held";
 import type { LeaseAnswer } from "../core/jobs/held";
 import { kindDef } from "../core/jobs/kinds";
 import type { PayloadOf } from "../core/jobs/kinds";
+import { checkPauseMs } from "../core/jobs/machine";
 import type { Finish } from "../core/jobs/machine";
 import { lease } from "../core/jobs/model";
-import { applyEvent, insertJob, queuedCount } from "../core/jobs/store";
+import { applyEvent, insertJob, pauseKind, queuedCount } from "../core/jobs/store";
 import type { JobCtx } from "../core/jobs/store";
 import { inOrder } from "../core/lib/inOrder";
 import { sha256Hex } from "../core/lib/secrets";
@@ -337,20 +338,21 @@ const SAVED_MESSAGES: Readonly<Record<LrclibAnswer["status"], string>> = {
   miss: "LRCLIB has no lyrics for the song",
 };
 
-/**
- * Stores `answer` for the held lookup when its track still has the tags it was asked for: a gone
- * or retagged track stores nothing, as the answer would be for tags it no longer has.
- */
+/** Whether `lookup`'s track still exists and still has the tags the lookup was asked for. */
+const isCurrent = async (db: DatabaseReader, lookup: Lookup): Promise<boolean> => {
+  const track = await db.get("tracks", lookup.trackId);
+  const current = track === null ? null : await lookupOf(track);
+
+  return current?.revision === lookup.revision;
+};
+
+/** Stores `answer` for the held lookup, whose track `endOf` found current. */
 const saveAnswer = async (
   ctx: JobCtx,
   lookup: Lookup,
   answer: LrclibAnswer,
-): Promise<LrclibAnswer["status"] | "stale"> => {
+): Promise<LrclibAnswer["status"]> => {
   const music = musicStore(ctx.db, meterFrom(NO_COST));
-  const track = await music.get("tracks", lookup.trackId);
-  const current = track === null ? null : await lookupOf(track);
-
-  if (current?.revision !== lookup.revision) return "stale";
 
   if (answer.status === "found") checkLyrics(answer.sets);
 
@@ -368,13 +370,26 @@ interface Ended {
   readonly finish: Finish;
 }
 
-/** What a try with `strikes` before it stores, and how its job ends (`settle`). */
+/**
+ * What a try with `strikes` before it stores, and how its job ends (`settle`). A lookup whose song
+ * is gone or retagged ends as stale whatever its try learned, storing nothing and never going back
+ * to the queue, so no lookup of a purged song is claimed again; LRCLIB's pause still holds.
+ */
 const endOf = async (
   ctx: JobCtx,
   lookup: Lookup,
   result: TryOutcome,
   strikes: number,
 ): Promise<Ended> => {
+  if (!(await isCurrent(ctx.db, lookup))) {
+    if (result.outcome === "unavailable" && result.pauseMs > 0) {
+      checkPauseMs(result.pauseMs);
+      await pauseKind(ctx, "music.lyrics", Date.now() + result.pauseMs);
+    }
+
+    return { saved: "stale", finish: { outcome: "succeeded", message: STALE_MESSAGE } };
+  }
+
   if (result.outcome === "unavailable") {
     return {
       saved: "retrying",
@@ -385,13 +400,7 @@ const endOf = async (
   if (result.outcome === "answered") {
     const saved = await saveAnswer(ctx, lookup, result.answer);
 
-    return {
-      saved,
-      finish: {
-        outcome: "succeeded",
-        message: saved === "stale" ? STALE_MESSAGE : SAVED_MESSAGES[saved],
-      },
-    };
+    return { saved, finish: { outcome: "succeeded", message: SAVED_MESSAGES[saved] } };
   }
 
   const delay = RETRY_DELAYS_MS[strikes];
@@ -432,7 +441,8 @@ type NextAnswer = LeaseAnswer<Infer<typeof nextStep>>;
  * each one. While an admin has lookups off, the lookup goes back to the queue with no strike and
  * nothing stored, and the held kind keeps it there until they are on again, so a lookup claimed
  * before the switch flipped sends nothing after it (ADR 0012). A lookup whose song is gone or no
- * longer has the tags it was asked for ends there, as `settle` would end it, before it asks.
+ * longer has the tags it was asked for ends there, as `settle` would end it, before it asks. That
+ * comes first, even with lookups off, so a purged song's lookup never goes back to the queue.
  */
 export const proceed = serverMutation({
   args: { lease },
@@ -455,15 +465,12 @@ export const proceed = serverMutation({
         return { outcome: "held", value: { next: saved } };
       };
 
-      if (!(await remoteLyricsOn(ctx.db))) {
-        return end("off", { outcome: "deferred", error: OFF_MESSAGE, pauseMs: 0 });
+      if (!(await isCurrent(ctx.db, job.payload))) {
+        return end("stale", { outcome: "succeeded", message: STALE_MESSAGE });
       }
 
-      const track = await ctx.db.get("tracks", job.payload.trackId);
-      const current = track === null ? null : await lookupOf(track);
-
-      if (current?.revision !== job.payload.revision) {
-        return end("stale", { outcome: "succeeded", message: STALE_MESSAGE });
+      if (!(await remoteLyricsOn(ctx.db))) {
+        return end("off", { outcome: "deferred", error: OFF_MESSAGE, pauseMs: 0 });
       }
 
       return { outcome: "held", value: { next: "ask" } };
