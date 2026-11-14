@@ -39,7 +39,8 @@ export default function SignIn() {
   const signIn = useSignIn();
   const { mediaUrl } = useConnection();
   const password = useRef<ComponentRef<typeof TextInput>>(null);
-  const [username, setUsername] = useState(useLastUsername);
+  const lastUsername = useLastUsername();
+  const [username, setUsername] = useState(lastUsername);
   const [secret, setSecret] = useState("");
   const [pending, setPending] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);

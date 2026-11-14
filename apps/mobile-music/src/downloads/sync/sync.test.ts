@@ -13,12 +13,31 @@ import { pinIdOf, UNKNOWN_REVISION } from "./plan";
 import { downloadStatus } from "./status";
 import { DownloadSync } from "./sync";
 import type { DownloadsCore, DownloadsSnapshot } from "./sync";
-import { applyChange, emptyVault } from "./vault";
-import type { KeptLyrics, VaultChange, VaultRows, VaultStore } from "./vault";
+import { applyChange, emptyVault, VaultChange } from "./vault";
+import type { KeptLyrics, VaultRows, VaultStore } from "./vault";
+
+/** A gate a test opens: the commits it holds wait on it. */
+interface Gate {
+  readonly opened: Promise<void>;
+  readonly open: () => void;
+  /** Whether a commit is waiting on it. */
+  waiting: boolean;
+  /** Whether a commit it held has been applied. */
+  passed: boolean;
+}
+
+const gate = (): Gate => {
+  const { promise, resolve } = Promise.withResolvers<void>();
+
+  return { opened: promise, open: resolve, waiting: false, passed: false };
+};
 
 /** A vault on a temporary directory, its rows in memory. */
 class DirectoryVault implements VaultStore {
   view: VaultRows = emptyVault;
+  /** Holds the next covers and pins saved until the test opens it. */
+  artGate: Gate | null = null;
+  pinGate: Gate | null = null;
   readonly #dir: string;
 
   constructor(dir: string) {
@@ -27,11 +46,26 @@ class DirectoryVault implements VaultStore {
 
   load = (): Promise<VaultRows> => Promise.resolve(this.view);
 
-  commit = (change: VaultChange): Promise<void> => {
+  commit = async (change: VaultChange): Promise<void> => {
+    const held = this.#gateOf(change);
+
+    if (held !== null) {
+      held.waiting = true;
+      await held.opened;
+    }
+
     this.view = applyChange(this.view, change);
 
-    return Promise.resolve();
+    if (held !== null) held.passed = true;
   };
+
+  #gateOf(change: VaultChange): Gate | null {
+    if (VaultChange.$is("PutArt")(change)) return this.artGate;
+
+    if (VaultChange.$is("PutPin")(change)) return this.pinGate;
+
+    return null;
+  }
 
   lyrics = (): Promise<KeptLyrics | null> => Promise.resolve(null);
 
@@ -56,10 +90,6 @@ class DirectoryVault implements VaultStore {
   freeBytes = (): number | null => 64 * 1024 ** 3;
 }
 
-/**
- * The core's downloads service as this phone calls it: the songs kept on the device, each with its
- * revision, and a ticket for a kept song's stream on the fake media server.
- */
 class FakeCore implements DownloadsCore {
   readonly kept = new Map<string, string>();
   readonly calls: Array<string> = [];
@@ -101,7 +131,7 @@ class FakeCore implements DownloadsCore {
   resolveUrl = (url: string): string => `${this.#base}${url}`;
 }
 
-const song = (id: string, title: string): OfflineTrack => ({
+const song = (id: string, title: string, artUrl: string | null = null): OfflineTrack => ({
   id: TrackId.make(id),
   title,
   artist: "Massive Attack",
@@ -116,7 +146,7 @@ const song = (id: string, title: string): OfflineTrack => ({
   bitrate: null,
   sampleRate: null,
   bitDepth: null,
-  artUrl: null,
+  artUrl,
 });
 
 const ALBUM = { kind: "album", id: AlbumId.make("blue-lines") } as const;
@@ -158,7 +188,6 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-/** Resolves once the snapshot holds what `done` checks. */
 const settled = (done: (snapshot: DownloadsSnapshot) => boolean): Promise<DownloadsSnapshot> =>
   new Promise((resolve) => {
     const check = () => {
@@ -173,7 +202,6 @@ const settled = (done: (snapshot: DownloadsSnapshot) => boolean): Promise<Downlo
     check();
   });
 
-/** The album's manifest as the core's reads and its download list answer it now. */
 const manifestOf = (tracks: ReadonlyArray<OfflineTrack>): DownloadManifest => ({
   pin: {
     id: pinIdOf(ALBUM),
@@ -189,6 +217,30 @@ const manifestOf = (tracks: ReadonlyArray<OfflineTrack>): DownloadManifest => ({
     artHash: null,
     state: "fetchable",
   })),
+});
+
+const COVER = "/music/art/cover1";
+
+/** The album with its one song and that song's cover, under `title`. */
+const withCover = (track: OfflineTrack, title: string): DownloadManifest => ({
+  pin: {
+    id: pinIdOf(ALBUM),
+    target: ALBUM,
+    createdAt: 1,
+    available: true,
+    title,
+    subtitle: DETAILS.subtitle,
+    artUrl: null,
+    artHash: null,
+  },
+  entries: [
+    {
+      track,
+      rev: core.kept.get(track.id) ?? UNKNOWN_REVISION,
+      artHash: "cover1",
+      state: "fetchable",
+    },
+  ],
 });
 
 describe("DownloadSync over the core", () => {
@@ -243,6 +295,42 @@ describe("DownloadSync over the core", () => {
     await vi.waitFor(async () => {
       expect(await vault.files()).toEqual([]);
     });
+  });
+
+  it("keeps a cover that lands while a plan that saw it missing saves, without fetching it again", async () => {
+    const one = song("t1", "Safe from Harm", COVER);
+    const landing = gate();
+    const saving = gate();
+
+    media.serve("/song/t1", "first song");
+    media.serve(COVER, "cover", { contentType: "image/jpeg" });
+    // The cover's row waits, so the next plan sees the cover missing.
+    vault.artGate = landing;
+    await settled((snapshot) => snapshot.ready);
+    await sync.request(ALBUM, DETAILS);
+    sync.offerManifest(pinIdOf(ALBUM), withCover(one, DETAILS.title));
+    await vi.waitFor(() => {
+      expect(landing.waiting).toBe(true);
+    });
+    // That plan's own save waits until the cover has landed.
+    vault.pinGate = saving;
+    sync.offerManifest(pinIdOf(ALBUM), withCover(one, "Blue Lines (Remastered)"));
+    await vi.waitFor(() => {
+      expect(saving.waiting).toBe(true);
+    });
+    landing.open();
+    await vi.waitFor(() => {
+      expect(vault.view.art.size).toBe(1);
+    });
+    saving.open();
+    await vi.waitFor(() => {
+      expect(saving.passed).toBe(true);
+    });
+    // A cover fetch the plan started is aborted here, and an aborted fetch deletes its file.
+    await sync.stop();
+
+    expect(vault.view.art.has("cover1")).toBe(true);
+    expect(await vault.files()).toContain("art/cover1");
   });
 
   it("marks a song the core no longer serves as failed, without trying it again at once", async () => {

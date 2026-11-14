@@ -117,7 +117,6 @@ export interface PinDetails {
   readonly artUrl: string | null;
 }
 
-/** A song's fetch through the core: its stream URL with a download ticket, and its revision. */
 interface DownloadTicket {
   readonly url: string;
   /** The revision of the file the ticket is for, which the copy is kept at. */
@@ -300,7 +299,6 @@ export class DownloadSync {
     this.#plan();
   }
 
-  /** The lyrics looked up for kept songs. */
   offerLyrics(changes: ReadonlyArray<LyricsChange>): void {
     if (changes.length === 0) return;
 
@@ -697,6 +695,10 @@ export class DownloadSync {
 
     for (const cover of covers) {
       if (!free()) return;
+
+      // The plan read the vault before its saves; a cover that landed since must not be fetched
+      // again, as a second download replaces the file and its abort deletes it.
+      if (this.#view.art.has(cover.hash)) continue;
 
       const failure = this.#artFailures.get(cover.hash);
 
