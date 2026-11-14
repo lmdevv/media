@@ -10,8 +10,7 @@ import {
   MUSIC_STREAM_PARAMS,
   MusicStreamProfile,
 } from "@media/contracts/music-playback";
-import { Effect, Layer, Option, Predicate, Result, Schema } from "effect";
-import type { FileSystem, Path } from "effect";
+import { Effect, FileSystem, Layer, Option, Path, Predicate, Result, Schema } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 
 import * as ArtworkGate from "../artwork/artwork-gate.ts";
@@ -29,7 +28,7 @@ import {
   transcodedResponse,
 } from "./music-responses.ts";
 import * as TrackSources from "./track-sources.ts";
-import type * as MusicTranscoder from "./transcoder.ts";
+import * as MusicTranscoder from "./transcoder.ts";
 
 const ART_CACHE_CONTROL = "public, max-age=31536000, immutable";
 
@@ -80,9 +79,23 @@ export const layer: Layer.Layer<
     const gate = yield* ArtworkGate.Service;
     const sources = yield* TrackSources.Service;
 
-    const context = yield* Effect.context<
-      MediaConfig.Service | MusicTranscoder.Service | FileSystem.FileSystem | Path.Path
-    >();
+    const transcoder = yield* MusicTranscoder.Service;
+    const fs = yield* FileSystem.FileSystem;
+    const paths = yield* Path.Path;
+
+    /**
+     * The services a request runs on, provided one by one. Never the layer's whole context: it
+     * holds the layer's own scope, which would then stand in for the request's, so a live
+     * transcode would hold its run in the layer's scope and its response would close that scope
+     * when its body ends (`HttpEffect.scopeTransferToStream`).
+     */
+    const services = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+      effect.pipe(
+        Effect.provideService(MediaConfig.Service, config),
+        Effect.provideService(MusicTranscoder.Service, transcoder),
+        Effect.provideService(FileSystem.FileSystem, fs),
+        Effect.provideService(Path.Path, paths),
+      );
 
     /**
      * The real path of a track's file: inside the library folder that holds it and inside an
@@ -245,7 +258,7 @@ export const layer: Layer.Layer<
                 Effect.as(text(500, "File unreadable")),
               ),
       }),
-      Effect.provide(context),
+      services,
       Effect.withSpan("MusicRoutes.stream"),
     );
 
@@ -282,7 +295,7 @@ export const layer: Layer.Layer<
               Effect.as(text(500, "Artwork unreadable")),
             ),
       ),
-      Effect.provide(context),
+      services,
       Effect.withSpan("MusicRoutes.art"),
     );
 

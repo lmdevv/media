@@ -198,15 +198,23 @@ export const handler = Effect.gen(function* () {
   const session = yield* CoreSession.Service;
   const art = yield* MusicArt.Service;
 
-  const context = yield* Effect.context<
-    CoreSession.Service | MediaConfig.Service | FileSystem.FileSystem | Path.Path
-  >();
+  const config = yield* MediaConfig.Service;
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+
+  // The services a run needs, provided one by one: the layer's whole context holds its own scope,
+  // which would stand in for the run's.
+  const services = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    effect.pipe(
+      Effect.provideService(MediaConfig.Service, config),
+      Effect.provideService(FileSystem.FileSystem, fs),
+      Effect.provideService(Path.Path, path),
+    );
 
   return CoreJobs.handler({
     kind: "music.scan",
     run: Effect.fn("MusicScanJob.run")(function* (job, report) {
       const { lease } = job;
-      const config = yield* MediaConfig.Service;
 
       const target = yield* session
         .call(serverFunctions.scanTarget, { lease, kind: "music" })
@@ -272,6 +280,6 @@ export const handler = Effect.gen(function* () {
       yield* publish;
 
       return describeScan(summary);
-    }, Effect.provide(context)),
+    }, services),
   });
 });

@@ -28,8 +28,10 @@ import {
   PNG,
   removeDirectory,
   resizeFile,
+  writeBytes,
   writeSong,
 } from "./testing/music-fixtures.ts";
+import { ffprobe } from "./testing/music-songs.ts";
 import * as TrackSources from "./track-sources.ts";
 import * as MusicTranscoder from "./transcoder.ts";
 
@@ -42,6 +44,11 @@ const SONG = "songtrack1";
 const OTHER = "songtrack2";
 
 const LARGE = "largetrack";
+
+const TONE = "longtonetrack";
+
+/** The long tone's length: encoding it (about 11x real time) outlasts a transcode's 1 s grace. */
+const TONE_SECONDS = 60;
 
 let work = "";
 
@@ -132,6 +139,7 @@ beforeAll(async () => {
   await writeSong(join(library, "Album", "01 Song.flac"), { seconds: 3 });
   await writeSong(join(library, "Album", "02 Other.flac"), { seconds: 1 });
   await writeSong(join(library, "Album", "03 Large.wav"), { seconds: 1 });
+  await writeSong(join(library, "Album", "04 Long Tone.flac"), { seconds: TONE_SECONDS });
   // Far larger than socket buffers, so its response is still open when its session ends.
   await resizeFile(join(library, "Album", "03 Large.wav"), 128 * 1024 * 1024);
 
@@ -157,6 +165,7 @@ beforeAll(async () => {
     [SONG, resolved(SONG, join(library, "Album", "01 Song.flac"), "flac")],
     [OTHER, resolved(OTHER, join(library, "Album", "02 Other.flac"), "flac")],
     [LARGE, resolved(LARGE, join(library, "Album", "03 Large.wav"), "pcm")],
+    [TONE, resolved(TONE, join(library, "Album", "04 Long Tone.flac"), "flac")],
   ]);
 
   const http = serve(MusicRoutes.layer).pipe(
@@ -253,6 +262,39 @@ describe("music routes", { timeout: 60_000 }, () => {
     expect(finished.status).toBe(200);
     expect(finished.headers.get("etag")).not.toBeNull();
     expect(finished.headers.get(MusicStreamTimingHeader.duration)).toBe("44100");
+  });
+
+  it("stream each live transcode whole, one after another", async () => {
+    const first = await fetch(streamUrl(OTHER, await issue(OTHER), "&p=aac-320"));
+
+    expect(first.status).toBe(200);
+    expect(first.headers.get("content-type")).toBe("audio/aac");
+    expect(first.headers.get("cache-control")).toBe("no-store");
+    expect((await first.arrayBuffer()).byteLength).toBeGreaterThan(0);
+
+    // The second live transcode must not be cut off once the first response has ended.
+    const second = await fetch(streamUrl(TONE, await issue(TONE), "&p=aac-320"));
+    const body = join(work, "tone.aac");
+
+    expect(second.headers.get("content-type")).toBe("audio/aac");
+    await writeBytes(body, new Uint8Array(await second.arrayBuffer()));
+
+    const packets = Number(
+      (
+        await ffprobe([
+          "-v",
+          "error",
+          "-count_packets",
+          "-show_entries",
+          "stream=nb_read_packets",
+          "-of",
+          "csv=p=0",
+          body,
+        ])
+      ).trim(),
+    );
+
+    expect((packets * 1024) / 44_100).toBeGreaterThan(TONE_SECONDS - 1);
   });
 
   it("serve art to its shareable ticket only", async () => {
