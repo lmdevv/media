@@ -28,7 +28,7 @@ import { listingHeldUntil } from "../testing/held-file-system.ts";
 import { testConfigLayer } from "../testing/test-config.ts";
 import * as Files from "./music-files.ts";
 import { adtsPayload } from "./testing/adts.ts";
-import { ffmpegHangingOnName } from "./testing/hanging-ffmpeg.ts";
+import { ffmpegHangingOnName, ffmpegHeldOpen } from "./testing/hanging-ffmpeg.ts";
 import { mediaData, withoutIndex } from "./testing/mp4-boxes.ts";
 import {
   listNames,
@@ -379,6 +379,82 @@ describe("Transcoder", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         expect((yield* Files.statPath(finished.path)).size).toBeGreaterThan(MEBIBYTE);
         expect(yield* eventually(listNames(otherCache), (names) => names.length === 0)).toEqual([]);
         expect((yield* listNames(cacheDir)).toSorted()).toEqual(["long-1.m4a", "long-1.m4a.json"]);
+      }),
+    ));
+
+  it("keeps a running transcode's working files out of a prune over the cache's bound", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const root = yield* songLibrary("held.flac", 60);
+        const dataDir = yield* temporaryDirectory("data");
+        const scratch = yield* temporaryDirectory("ffmpeg");
+        const ffmpeg = yield* Effect.promise(() => ffmpegHeldOpen(scratch));
+        const workDir = join(dataDir, "music", "transcoding");
+        const otherCache = join(dataDir, "cache", "tmdb");
+
+        // Another cache's file: with a bound of one byte, the prune's quota pass removes it.
+        yield* Files.makeDirectory(otherCache);
+        yield* Files.writeFileAtomic(join(otherCache, "movie.json"), new Uint8Array(1024), "1");
+
+        const pruner = Layer.effect(
+          CachePruner.Service,
+          Path.Path.pipe(
+            Effect.flatMap((path) =>
+              CachePruner.make(CachePruner.cacheDirectories(dataDir, path), 1),
+            ),
+          ),
+        );
+
+        const context = yield* Layer.build(
+          Transcoder.layer.pipe(
+            Layer.provide(MediaTools.layer),
+            Layer.provideMerge(pruner),
+            Layer.provide(testConfigLayer({ DATA_DIR: dataDir, FFMPEG_PATH: ffmpeg.path })),
+            Layer.provide(NodeServices.layer),
+          ),
+        );
+
+        const transcoder = yield* Transcoder.Service.pipe(Effect.provideContext(context));
+        const prune = (yield* CachePruner.Service.pipe(Effect.provideContext(context))).prune;
+        const input = fragmentedInput("held", join(root, "held.flac"));
+        const opened = yield* transcoder.open(input);
+
+        if (!Transcoder.Opened.$is("Live")(opened)) throw new Error("Expected a live transcode");
+
+        // ffmpeg has written the whole song and still runs, so every working file is there.
+        yield* Files.statPath(ffmpeg.written).pipe(
+          Effect.retry({ schedule: Schedule.spaced("50 millis"), times: 1200 }),
+        );
+
+        const sizes = listNames(workDir).pipe(
+          Effect.flatMap((names) =>
+            Effect.forEach(names, (name) =>
+              Files.statPath(join(workDir, name)).pipe(
+                Effect.map(({ size }) => [name, size] as const),
+              ),
+            ),
+          ),
+        );
+
+        const working = yield* sizes;
+
+        expect(working.map(([name]) => name.replace(/^[0-9a-f-]+/, "")).toSorted()).toEqual([
+          ".live.part",
+          ".part",
+        ]);
+        expect(working.reduce((total, [, size]) => total + size, 0)).toBeGreaterThan(MEBIBYTE);
+
+        // The hourly prune's pass: the bound is exceeded, yet it reaches no working file.
+        expect((yield* prune).removedFiles).toBe(1);
+        expect(yield* listNames(otherCache)).toEqual([]);
+        expect(yield* sizes).toEqual(working);
+
+        yield* Effect.promise(ffmpeg.release);
+
+        const live = yield* collect(opened.bytes);
+        const finished = yield* opened.finished;
+
+        expect(live.equals(withoutIndex(yield* Files.readWholeFile(finished.path)))).toBe(true);
       }),
     ));
 

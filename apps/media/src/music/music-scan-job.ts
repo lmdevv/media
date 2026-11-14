@@ -2,7 +2,8 @@
  * The `music.scan` job on the core's worker protocol (ADR 0012, ADR 0024): the folders under the
  * lease, each checked against `LIBRARY_ROOTS` and claimed by identity so no two libraries list one
  * folder through two paths, then music's scan over the core's music scanner functions, every write
- * carrying the lease. After a scan, finished or not, the artwork its writes released is collected.
+ * carrying the lease. A scan takes its turn in music's art lane, so no artwork collection runs
+ * beside it; after it, finished or not, the artwork its writes released is collected.
  */
 import type { KnownTrack } from "@media/contracts/models/music";
 import { SCAN_FAILURE_PREFIXES } from "@media/contracts/scan-failure";
@@ -222,7 +223,7 @@ export const handler = Effect.gen(function* () {
         ),
       );
 
-      const summary = yield* scanLibrary(
+      const scan = scanLibrary(
         {
           libraryId: target.libraryId,
           folders: target.folders,
@@ -232,7 +233,9 @@ export const handler = Effect.gen(function* () {
         catalogOf(session, lease),
         progress,
         art.released,
-      ).pipe(
+      );
+
+      const summary = yield* art.scanning(scan).pipe(
         Effect.catchTags({
           LibraryEmpty: (error) => Effect.fail(scanFailure(error)),
           LibraryUnavailable: (error) => Effect.fail(scanFailure(error)),
