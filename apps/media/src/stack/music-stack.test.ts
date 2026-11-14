@@ -30,6 +30,9 @@ let server: CoreServer;
 
 let libraryId: Option.Option<Platform.Id<"libraries">> = Option.none();
 
+/** Every ticket the suite fetched with, which the server's log must never hold. */
+const used: Array<string> = [];
+
 const library = (): Platform.Id<"libraries"> =>
   Option.getOrThrowWith(libraryId, () => new Error("The music library was not created"));
 
@@ -178,6 +181,8 @@ describe.skipIf(core === undefined || !(await ffmpegAvailable()))(
       const first = await trackNamed(admin.platform, "First");
       const response = await fetch(`${server.baseUrl}${first.artUrl ?? ""}`);
 
+      used.push(new URL(first.artUrl ?? "", server.baseUrl).searchParams.get("ticket") ?? "");
+
       expect(response.status).toBe(200);
       expect(response.headers.get("content-type")).toBe("image/png");
       expect(new Uint8Array(await response.arrayBuffer())).toEqual(PNG);
@@ -190,6 +195,8 @@ describe.skipIf(core === undefined || !(await ffmpegAvailable()))(
     it("streams a song and its gapless transcode to a ticket from music.play.start", async () => {
       const first = await trackNamed(admin.platform, "First");
       const started = await run(admin.platform.music.play.start({ trackId: first.id }));
+
+      used.push(started.ticket);
       const original = await fetch(streamUrl(first.id, started.ticket));
 
       expect(original.status).toBe(200);
@@ -239,6 +246,8 @@ describe.skipIf(core === undefined || !(await ffmpegAvailable()))(
 
       const long = await trackNamed(listener.platform, "Long");
       const started = await run(listener.platform.music.play.start({ trackId: long.id }));
+
+      used.push(started.ticket);
       const response = await fetch(streamUrl(long.id, started.ticket));
 
       expect(response.status).toBe(200);
@@ -257,5 +266,18 @@ describe.skipIf(core === undefined || !(await ffmpegAvailable()))(
       expect(received.aborted).toBe(true);
       expect(received.bytes).toBeLessThan(128 * 1024 * 1024);
     }, 180_000);
+
+    it("keeps every ticket out of the log, its debug access log included", () => {
+      const lines = server.logged().join("\n");
+
+      expect(used.length).toBeGreaterThan(0);
+      expect(lines).toContain("HttpServer.response");
+      expect(lines).toContain("/media/music/stream/");
+
+      for (const ticket of used) expect(lines).not.toContain(ticket);
+
+      expect(lines).not.toMatch(/t1\.[a-z0-9]+\.media\./u);
+      expect(lines).not.toContain("ticket=");
+    });
   },
 );
