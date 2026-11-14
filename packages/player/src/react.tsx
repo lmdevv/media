@@ -90,6 +90,11 @@ export interface PlayerState {
 export interface PlayerActions {
   /** Replaces the queue and plays it on this browser. */
   readonly playTracks: (trackIds: ReadonlyArray<Track["id"]>, index?: number) => Promise<void>;
+  /**
+   * Primes the audio output inside a tap whose playback starts after an await, so iOS Safari
+   * allows it. Call it before the first await; `playTracks` primes by itself when it comes first.
+   */
+  readonly primeOutput: () => void;
   readonly togglePlay: () => Promise<void>;
   readonly next: () => Promise<void>;
   readonly previous: () => Promise<void>;
@@ -489,6 +494,9 @@ export function PlayerProvider({
       autoplayBlocked: local.autoplayBlocked,
       engine: local.engine,
       playTracks: (ids, at) => controller.playTracks(ids, at),
+      primeOutput: () => {
+        controller.primeOutput();
+      },
       togglePlay: () => controller.togglePlay(),
       next: () => controller.next(),
       previous: () => controller.previous(),

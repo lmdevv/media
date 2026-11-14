@@ -7,7 +7,6 @@ import { useDeferredValue, useState } from "react";
 import { PageHeader, usePlayTracks } from "@/components/library/cards";
 import { ListTail } from "@/components/library/paged";
 import { TrackList, TrackListSkeleton } from "@/components/library/track-list";
-import { toastFailure } from "@/lib/action";
 import { formatTotal, plural } from "@/lib/format";
 import { readPages } from "@/lib/pages";
 import { usePages } from "@media/ui/lib/pages";
@@ -30,19 +29,12 @@ function SongsPage() {
 
   const shuffleAll = async () => {
     setShuffling(true);
-
-    try {
-      const tracks = await readPages(
-        (paginationOpts) => music.tracks.list({ paginationOpts }),
-        SHUFFLE_LIMIT,
-      );
-
-      await play(tracks, { shuffle: true });
-    } catch (cause) {
-      toastFailure(cause);
-    } finally {
-      setShuffling(false);
-    }
+    // A failure shows as a toast; the play never rejects.
+    await play(
+      readPages((paginationOpts) => music.tracks.list({ paginationOpts }), SHUFFLE_LIMIT),
+      { shuffle: true },
+    );
+    setShuffling(false);
   };
 
   return (

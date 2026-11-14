@@ -61,6 +61,8 @@ interface EngineRecord {
   /** Every stream the engine started, by a load or by moving on to its preload, in order. */
   readonly played: Array<string>;
   plays: number;
+  /** Times the output was primed inside a tap. */
+  unlocks: number;
   /** Loads still to come that the server refuses, as an expired ticket. */
   refuse: number;
 }
@@ -145,6 +147,9 @@ const instantEngine = (kind: EngineKind, record: EngineRecord): FakeEngine => {
       emit({ type: "time", positionMs: target });
     },
     setVolume: () => {},
+    unlock: () => {
+      record.unlocks += 1;
+    },
     unload: () => {
       paused = true;
       positionMs = 0;
@@ -227,6 +232,7 @@ const setup = (
     seeks: [],
     played: [],
     plays: 0,
+    unlocks: 0,
     refuse: 0,
   };
 
@@ -637,6 +643,55 @@ describe("PlaybackController", () => {
       engineStatus: "error",
       error: "Song b is gone",
     });
+  });
+
+  it("primes idle output at once for a play that starts after an await, never playing output", async () => {
+    const { controller, record } = setup({ playCurrent: "1" });
+
+    controller.primeOutput();
+
+    expect(record.unlocks).toBe(1);
+
+    await controller.playTracks(["a"], 0);
+    controller.sync(queueOf([one], "1"));
+    await settle();
+    const unlocks = record.unlocks;
+
+    controller.primeOutput();
+
+    expect(record.unlocks).toBe(unlocks);
+  });
+
+  it("ignores the outgoing song's engine events while the next song's ticket is out", async () => {
+    const { controller, record, sent, gates, engine } = setup({ playCurrent: "1" });
+
+    await controller.playTracks(["a", "b", "c"], 0);
+    controller.sync(queueOf([one, two, three], "1"));
+    await settle();
+    gates.start.holding = true;
+    await controller.jump("2");
+    controller.sync(queueOf([one, two, three], "2"));
+
+    // Song a keeps sounding until b's ticket answers: its position, its error, and its end all
+    // belong to a, not to b, which has not started.
+    engine().emit({ type: "time", positionMs: 150_000 });
+    engine().emit({ type: "error", reason: "decode", message: "a failed" });
+    engine().finish();
+    await settle();
+
+    expect(controller.positionMs()).toBe(0);
+    expect(controller.getSnapshot()).toMatchObject({
+      current: "2",
+      engineStatus: "loading",
+      error: null,
+    });
+    expect(names(sent).filter((name) => name.startsWith("jump"))).toStrictEqual(["jump:2"]);
+
+    gates.start.release("b");
+    await settle();
+
+    expect(record.played.at(-1)).toContain("/stream/b?ticket=t2");
+    expect(controller.getSnapshot()).toMatchObject({ current: "2", engineStatus: "playing" });
   });
 
   it("keeps the next song's preload through a reload of the playing song", async () => {

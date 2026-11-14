@@ -197,7 +197,10 @@ interface PendingJump {
  * Every request that waits on the network carries what it was made for, and its answer, a
  * failure included, applies only while that still holds: a ticket its load's generation, a
  * preload the entry and stream it asked for, a jump its own pending move, and a history report
- * its start. The media server's recovery loads whatever entry is current once it answers.
+ * its start. The media server's recovery loads whatever entry is current once it answers. The
+ * engine's own events follow the same rule: they belong to the load that gave the engine its
+ * source, and a later load, or an unload, makes them stale until that load hands the engine its
+ * new source.
  */
 export class PlaybackController {
   readonly #commands: MusicCommands;
@@ -220,6 +223,8 @@ export class PlaybackController {
   /** The preload request in flight, if any. */
   #preloading: PreloadRequest | null = null;
   #generation = 0;
+  /** The load whose source the engine plays; its events count only while it is `#generation`. */
+  #engineGeneration = 0;
   #sample: PositionSnapshot = { positionMs: 0, updatedAt: 0, playing: false };
   readonly #transcode = new Set<string>();
   #mseFailed = false;
@@ -371,6 +376,15 @@ export class PlaybackController {
     } catch (error) {
       this.#update({ error: messageOf(error) });
     }
+  }
+
+  /**
+   * Primes the output for playback that starts after an await, such as a play button that loads
+   * an album before {@link playTracks}. Call it synchronously in the tap, before any await: iOS
+   * Safari lets audio start later only once it was started inside a gesture.
+   */
+  primeOutput(): void {
+    this.#unlockOutput();
   }
 
   /** Plays or pauses. The engine reacts at once, inside the tap, which satisfies autoplay rules. */
@@ -880,6 +894,7 @@ export class PlaybackController {
       const elapsed = autoplay ? this.#env.now() - plannedAt : 0;
       const start = Math.min(startMs + elapsed, Math.max(0, track.durationMs - 1000));
       this.#setPosition(start);
+      this.#engineGeneration = generation;
       await this.#engine.load(resolved.source, start, this.#wantPlaying);
 
       if (
@@ -1013,6 +1028,10 @@ export class PlaybackController {
   }
 
   #onEngineEvent = (event: EngineEvent): void => {
+    // The outgoing source still sounds while the next one's ticket is out, and its position, its
+    // failure, and its end describe a song the player has moved on from.
+    if (this.#engineGeneration !== this.#generation) return;
+
     switch (event.type) {
       case "time": {
         this.#setPosition(this.#engine.samplePlayback().positionMs);

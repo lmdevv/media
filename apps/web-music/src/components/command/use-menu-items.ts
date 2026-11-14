@@ -6,7 +6,6 @@ import { toast } from "sonner";
 
 import { usePlayTracks } from "@/components/library/cards";
 import { useUi } from "@/components/shell/ui-state";
-import { toastFailure } from "@/lib/action";
 import { HOTKEYS } from "@/lib/hotkeys";
 import { readPages, useAllRows } from "@/lib/pages";
 import { useMe, useMusic, useRead } from "@/lib/platform";
@@ -70,19 +69,17 @@ export const useMenuItems = (query: string, onClose: () => void): MenuItems => {
         label: "Shuffle",
         run: () => {
           onClose();
-          void (async () => {
-            try {
-              const tracks = await readPages(
-                (paginationOpts) => music.likes.list({ paginationOpts }),
-                SHUFFLE_LIMIT,
-              );
 
-              if (tracks.length === 0) toast("You haven't liked any songs yet.");
-              else await playTracks(tracks, { shuffle: true });
-            } catch (cause) {
-              toastFailure(cause);
-            }
-          })();
+          const liked = readPages(
+            (paginationOpts) => music.likes.list({ paginationOpts }),
+            SHUFFLE_LIMIT,
+          ).then((tracks) => {
+            if (tracks.length === 0) toast("You haven't liked any songs yet.");
+
+            return tracks;
+          });
+
+          void playTracks(liked, { shuffle: true });
         },
       },
       {

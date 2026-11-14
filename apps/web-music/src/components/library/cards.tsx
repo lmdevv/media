@@ -1,5 +1,5 @@
 import type { AlbumId, ArtistId } from "@/lib/models";
-import type { AlbumCard as Album, ArtistCard as Artist, Track } from "@/lib/models";
+import type { AlbumCard as Album, ArtistCard as Artist } from "@/lib/models";
 import { useLatestPlayer } from "@media/player/react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
@@ -12,6 +12,8 @@ import type { ReactNode } from "react";
 import { toastFailure } from "@/lib/action";
 import { readPages } from "@/lib/pages";
 import { useMusic } from "@/lib/platform";
+import { startPlay } from "@/lib/start-play";
+import type { PlayOptions, PlaySource } from "@/lib/start-play";
 
 import { Artwork, PlayingBars } from "./artwork";
 
@@ -19,33 +21,18 @@ import { Artwork, PlayingBars } from "./artwork";
 const ALBUM_LIMIT = 2000;
 
 /**
- * Starts a list of songs, optionally shuffled, reporting failures as toasts. The function is
- * stable and reads the player when it runs, so a list of cards or rows that can play doesn't
- * re-render on every player change.
+ * Starts a list of songs, optionally shuffled, reporting failures as toasts. Pass a load of the
+ * songs rather than awaiting it first: the tap must reach the player before any await (see
+ * `startPlay`). The function is stable and reads the player when it runs, so a list of cards or
+ * rows that can play doesn't re-render on every player change.
  */
-export const usePlayTracks = (): ((
-  tracks: ReadonlyArray<Pick<Track, "id">>,
-  options?: { readonly index?: number; readonly shuffle?: boolean },
-) => Promise<void>) => {
+export const usePlayTracks = (): ((source: PlaySource, options?: PlayOptions) => Promise<void>) => {
   const latestPlayer = useLatestPlayer();
 
   return useCallback(
-    async (tracks, options = {}) => {
-      if (tracks.length === 0) return;
-
-      const player = latestPlayer();
-
+    async (source, options) => {
       try {
-        if (options.shuffle !== undefined && options.shuffle !== player.shuffle) {
-          await player.setShuffle(options.shuffle);
-        }
-
-        const ids = tracks.map((track) => track.id);
-
-        const index =
-          options.shuffle === true ? Math.floor(Math.random() * ids.length) : options.index;
-
-        await player.playTracks(ids, index);
+        await startPlay(latestPlayer, source, options);
       } catch (cause) {
         toastFailure(cause);
       }
@@ -60,18 +47,14 @@ export const usePlayAlbum = (): ((albumId: AlbumId, shuffle?: boolean) => Promis
   const play = usePlayTracks();
 
   return useCallback(
-    async (albumId, shuffle = false) => {
-      try {
-        const tracks = await readPages(
+    (albumId, shuffle = false) =>
+      play(
+        readPages(
           (paginationOpts) => music.albums.tracks({ albumId, paginationOpts }),
           ALBUM_LIMIT,
-        );
-
-        await play(tracks, { shuffle });
-      } catch (cause) {
-        toastFailure(cause);
-      }
-    },
+        ),
+        { shuffle },
+      ),
     [music, play],
   );
 };
@@ -82,14 +65,11 @@ export const usePlayArtist = (): ((artistId: ArtistId, shuffle?: boolean) => Pro
   const play = usePlayTracks();
 
   return useCallback(
-    async (artistId, shuffle = false) => {
-      try {
-        const artist = await music.artists.get({ artistId });
-        await play(artist.topTracks, { shuffle });
-      } catch (cause) {
-        toastFailure(cause);
-      }
-    },
+    (artistId, shuffle = false) =>
+      play(
+        music.artists.get({ artistId }).then((artist) => artist.topTracks),
+        { shuffle },
+      ),
     [music, play],
   );
 };
