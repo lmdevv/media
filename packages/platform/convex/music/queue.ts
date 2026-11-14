@@ -352,9 +352,15 @@ const insertAt = async (
  * Tops the queue up as old music's `toppedUp` did: when autoplay is on, repeat is off, and the
  * current entry is the last, autoplay's songs join after it. A full queue makes room as old music's
  * did, deleting the entries played longest ago, the first before the current one in play order;
- * the current entry stays. It runs only while the call can still pay for autoplay's reads.
+ * the current entry stays, and so does every entry in `kept`, which the calling add just inserted
+ * and answered. When too few entries can leave, autoplay adds only as many songs as fit. It runs
+ * only while the call can still pay for autoplay's reads.
  */
-const toppedUp = async (session: Session, queue: Queue): Promise<Queue> => {
+const toppedUp = async (
+  session: Session,
+  queue: Queue,
+  kept: ReadonlyArray<Id<"playQueueEntries">> = [],
+): Promise<Queue> => {
   if (!queue.autoplay || queue.repeat !== "off" || queue.current === null) return queue;
 
   const current = await session.store.get("playQueueEntries", queue.current);
@@ -366,7 +372,8 @@ const toppedUp = async (session: Session, queue: Queue): Promise<Queue> => {
   if (seed === null) return queue;
 
   const entries = await allEntries(session, queue);
-  const played = entries.filter((entry) => playsBefore(entry, current));
+  const keep = new Set(kept);
+  const played = entries.filter((entry) => playsBefore(entry, current) && !keep.has(entry._id));
 
   const picked = await autoplaySongs(
     session.db,
@@ -742,7 +749,8 @@ export const { get, list, play, add, remove, move, clear, jump, shuffle, repeat,
 
       // Autoplay waits for the songs the caller sends again, which go before its own. The last
       // call tops the queue up as a single call does, even when its songs were all missing.
-      if (rest.length === 0) await toppedUp(session, written);
+      // Its own entries never leave to make room: the caller holds their ids.
+      if (rest.length === 0) await toppedUp(session, written, itemIds);
 
       return { itemIds: [...itemIds], rest };
     },
