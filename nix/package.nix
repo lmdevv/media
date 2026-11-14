@@ -41,6 +41,7 @@ stdenv.mkDerivation (finalAttrs: {
 
   pnpmWorkspaces = [
     "@media/web-movies..."
+    "@media/web-music..."
     "@media/web-account..."
     "@media/server..."
     "@media/platform..."
@@ -55,7 +56,7 @@ stdenv.mkDerivation (finalAttrs: {
       ;
     inherit pnpm;
     fetcherVersion = 4;
-    hash = "sha256-WoipXi2MwVoXBGej44+YqqxuaP5cQF6IBG1VqplXbos=";
+    hash = "sha256-ZRbUTOaOGvZVOY93gE4jDvzgB9UayiRkIoYxhNfvgTQ=";
   };
 
   nativeBuildInputs = [
@@ -70,6 +71,7 @@ stdenv.mkDerivation (finalAttrs: {
     runHook preBuild
 
     VITE_PLATFORM_URL=__MEDIA_CONVEX_URL__ pnpm --filter @media/web-movies build --base=/movies/
+    VITE_PLATFORM_URL=__MEDIA_CONVEX_URL__ pnpm --filter @media/web-music build
     VITE_PLATFORM_URL=__MEDIA_CONVEX_URL__ pnpm --filter @media/web-account build
     pnpm --filter @media/server build
     # The core's configure script imports TypeScript from a workspace package, which Node does not
@@ -107,6 +109,7 @@ stdenv.mkDerivation (finalAttrs: {
     cp -r apps/media/dist $lib/media/dist
     cp apps/media/scripts/configure-web.ts $lib/media/scripts/
     cp -r apps/web-movies/dist $lib/web
+    cp -r apps/web-music/dist $lib/music
     cp -r apps/web-account/dist $lib/account
 
     # Without --enable-source-maps and with two malloc arenas, as in the image's run file
@@ -123,6 +126,9 @@ stdenv.mkDerivation (finalAttrs: {
 
     makeWrapper ${lib.getExe nodejs} $out/bin/movies-configure-account \
       --add-flags "$lib/media/scripts/configure-web.ts --from $lib/account"
+
+    makeWrapper ${lib.getExe nodejs} $out/bin/movies-configure-music \
+      --add-flags "$lib/media/scripts/configure-web.ts --from $lib/music"
 
     # The Convex CLI reads the project's package.json, so both run from its folder.
     makeWrapper ${lib.getExe nodejs} $out/bin/media-core-convex \

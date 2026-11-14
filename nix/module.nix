@@ -175,6 +175,7 @@ let
 
       umask 022
       movies-configure-account --to /run/media-account --convex-url "$public_url/convex"
+      movies-configure-music --to /run/media-music --convex-url "$public_url/convex"
       movies-configure-web --to /run/movies/web --convex-url "$public_url/convex"
 
       umask 077
@@ -319,8 +320,8 @@ in
       default = "http://localhost:${toString cfg.port}";
       defaultText = lib.literalExpression ''"http://localhost:''${toString config.services.media.port}"'';
       description = ''
-        URL people use for [media]: the account client at its root, movies at `/movies`, and the
-        core's Convex backend (`/convex`) and streams under it.
+        URL people use for [media]: the account client at its root, movies at `/movies`, music at
+        `/music`, and the core's Convex backend (`/convex`) and streams under it.
       '';
     };
 
@@ -637,6 +638,7 @@ in
         MEDIA_CORE_CONVEX = "127.0.0.1:${toString ports.coreConvex}";
         MEDIA_SERVICE = "127.0.0.1:${toString ports.media}";
         MEDIA_ACCOUNT_DIR = "/run/media-account";
+        MEDIA_MUSIC_DIR = "/run/media-music";
         MEDIA_TRUSTED_PROXIES = lib.concatStringsSep " " cfg.trustedProxies;
         HOME = "/run/media-proxy";
         XDG_CONFIG_HOME = "/run/media-proxy/config";

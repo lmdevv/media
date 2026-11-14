@@ -94,13 +94,18 @@ testers.runNixOSTest {
         assert "<title>[media]</title>" in page("http://127.0.0.1:8080/people")
         assert "<title>[movies]</title>" in page("http://127.0.0.1:8080/movies/")
         assert "/movies/assets/" in page("http://127.0.0.1:8080/movies/some/client/route")
+        assert "<title>[music]</title>" in page("http://127.0.0.1:8080/music/")
+        assert "/music/assets/" in page("http://127.0.0.1:8080/music/albums/some-album")
         status, jwks = machine.execute("curl -fsS http://127.0.0.1:8080/convex/.well-known/jwks.json")
         assert status != 0 or "keys" not in jwks
 
-    with subtest("both web clients are served with the core's Convex URL"):
+    with subtest("every web client is served with the core's Convex URL"):
         machine.succeed("grep -rqF http://localhost:8080/convex /run/movies/web")
         machine.succeed("grep -rqF http://localhost:8080/convex /run/media-account")
-        machine.fail("grep -rqF __MEDIA_CONVEX_URL__ /run/movies/web /run/media-account")
+        machine.succeed("grep -rqF http://localhost:8080/convex /run/media-music")
+        machine.fail(
+            "grep -rqF __MEDIA_CONVEX_URL__ /run/movies/web /run/media-account /run/media-music"
+        )
 
     with subtest("options reach the service"):
         environ = machine.succeed(

@@ -1,0 +1,131 @@
+import type { PlatformSdk } from "@media/sdk/promise";
+import type { QueryState } from "@media/sdk/react";
+import { Predicate } from "effect";
+
+/**
+ * `music.lyrics.get`'s answer: none, instrumental, a lookup still pending (with the song's own
+ * plain lyrics meanwhile, if any), synced lines, or plain text, from the song's files or LRCLIB.
+ */
+export type TrackLyrics = Awaited<ReturnType<PlatformSdk["music"]["lyrics"]["get"]>>;
+
+/** One timed line of synced lyrics. */
+export type LyricLine = Extract<
+  Extract<TrackLyrics, { readonly status: "synced" }>["main"]["body"],
+  { readonly type: "synced" }
+>["lines"][number];
+
+/**
+ * `music.lyrics.get`'s answer as Now Playing shows it: the song's lyrics, `loading` before the first
+ * answer, or `failed` when the read failed for a reason that may pass (a dropped connection, an
+ * answer this client can't read). A song this person can no longer see has no lyrics for them, so
+ * that refusal reads as none.
+ */
+export type LyricsAnswer = TrackLyrics | "loading" | "failed";
+
+const NONE: TrackLyrics = { status: "none" };
+
+/** Settles the followed `music.lyrics.get` read. */
+export const lyricsAnswer = (read: QueryState<TrackLyrics>): LyricsAnswer => {
+  if (read.status === "loading") return "loading";
+
+  if (read.status === "error") return Predicate.isTagged(read.error, "NotFound") ? NONE : "failed";
+
+  return read.data;
+};
+
+/**
+ * What the lyrics button offers for the playing song: lyrics to show (`ready`), lyrics still
+ * being found (`loading`), lyrics that failed to load (`failed`, which the view explains), or
+ * nothing (`none`, `instrumental`), which dims it.
+ */
+export type LyricsOffer = "ready" | "loading" | "failed" | "none" | "instrumental";
+
+const OFFERS: Readonly<Record<TrackLyrics["status"], LyricsOffer>> = {
+  synced: "ready",
+  plain: "ready",
+  pending: "loading",
+  none: "none",
+  instrumental: "instrumental",
+};
+
+/** The offer for an answer: a pending lookup is still being found; synced and plain are ready. */
+export const lyricsOffer = (answer: LyricsAnswer): LyricsOffer => {
+  if (answer === "loading" || answer === "failed") return answer;
+
+  return OFFERS[answer.status];
+};
+
+/** How the lyrics button looks and reads, the same on desktop and phone. */
+export interface LyricsButton {
+  /** Accessible name and tooltip. */
+  readonly label: string;
+  /** Dimmed: the song has no lyrics to open. */
+  readonly disabled: boolean;
+  /** Shows a spinner in place of the icon while lyrics are being found. */
+  readonly loading: boolean;
+}
+
+const CLOSED_LABEL: Readonly<Record<LyricsOffer, string>> = {
+  ready: "Lyrics",
+  loading: "Loading lyrics",
+  failed: "Lyrics (couldn't load them)",
+  none: "No lyrics for this song",
+  instrumental: "Instrumental, no lyrics",
+};
+
+/**
+ * The lyrics button for an offer, with the lyrics shown (`open`) or not. Open, it always hides
+ * them again, even when the lyrics went away while shown.
+ */
+export const lyricsButton = (offer: LyricsOffer, open: boolean): LyricsButton => ({
+  label: open ? "Hide lyrics" : CLOSED_LABEL[offer],
+  disabled: !open && (offer === "none" || offer === "instrumental"),
+  loading: offer === "loading",
+});
+
+/**
+ * Where playback stands in timed lines: `started` is the last line that has started (-1 before
+ * the first), which the view scrolls to and splits past from upcoming lines by; `sung` says
+ * whether that line is still being sung. A line is sung until its own end when it has one, else
+ * until the next line starts, so in a gap after an explicit end no line is sung.
+ */
+export interface LyricsMoment {
+  readonly started: number;
+  readonly sung: boolean;
+}
+
+/** The moment at `positionMs` in `lines`, sorted by start (a binary search, for every frame). */
+export const lyricsMoment = (
+  lines: ReadonlyArray<Pick<LyricLine, "startMs" | "endMs">>,
+  positionMs: number,
+): LyricsMoment => {
+  let low = 0;
+  let high = lines.length - 1;
+  let started = -1;
+
+  while (low <= high) {
+    const middle = (low + high) >>> 1;
+    const line = lines[middle];
+
+    if (line !== undefined && line.startMs <= positionMs) {
+      started = middle;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+  }
+
+  const endMs = lines[started]?.endMs ?? null;
+
+  return { started, sung: started >= 0 && (endMs === null || positionMs < endMs) };
+};
+
+/** Where a timed line stands against playback: sung now, already passed, or still to come. */
+export type LyricLineState = "past" | "active" | "upcoming";
+
+/** A line is sung while `moment` says so; lines up to the last started are past, later ones upcoming. */
+export const lyricLineState = (index: number, moment: LyricsMoment): LyricLineState => {
+  if (index === moment.started && moment.sung) return "active";
+
+  return index <= moment.started ? "past" : "upcoming";
+};

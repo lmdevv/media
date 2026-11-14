@@ -43,6 +43,7 @@ RUN [ -z "$MEDIA_VERSION" ] || [ "$MEDIA_VERSION" = "$(node -p 'require("./packa
  || { echo "MEDIA_VERSION=$MEDIA_VERSION is not the packages' version" >&2; exit 1; }
 RUN pnpm install --frozen-lockfile --ignore-scripts --os=linux --cpu=x64 --cpu=arm64 --libc=glibc
 RUN VITE_PLATFORM_URL=__MEDIA_CONVEX_URL__ pnpm --config.verify-deps-before-run=false --filter @media/web-movies build --base=/movies/ \
+ && VITE_PLATFORM_URL=__MEDIA_CONVEX_URL__ pnpm --config.verify-deps-before-run=false --filter @media/web-music build \
  && VITE_PLATFORM_URL=__MEDIA_CONVEX_URL__ pnpm --config.verify-deps-before-run=false --filter @media/web-account build \
  && pnpm --config.verify-deps-before-run=false --filter @media/server build \
  && pnpm --config.verify-deps-before-run=false --filter @lmdevv/media build
@@ -62,6 +63,7 @@ RUN pnpm --filter @media/platform deploy --prod --legacy /out/platform \
  && cp -r apps/media/dist /out/media/dist \
  && cp apps/media/scripts/configure-web.ts /out/media/scripts/ \
  && cp -r apps/web-movies/dist /out/web \
+ && cp -r apps/web-music/dist /out/music \
  && cp -r apps/web-account/dist /out/account \
  && install -D -m 644 apps/cli/dist/media.js /out/cli/media.mjs \
  && install -m 644 apps/cli/dist/THIRD_PARTY_LICENSES.md /out/cli/
@@ -120,6 +122,7 @@ RUN printf '%s\n' "$CONVEX_IMAGE" >/app/convex/image
 COPY --from=build /out/platform /app/platform
 COPY --from=build /out/media /app/media
 COPY --from=build /out/web /app/web
+COPY --from=build /out/music /app/music
 COPY --from=build /out/account /app/account
 COPY --from=build /out/cli /app/cli
 COPY deploy/image/media-cli.sh /usr/local/bin/media

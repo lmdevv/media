@@ -120,6 +120,8 @@ node /app/media/scripts/configure-web.ts --from /app/account --to /run/media/acc
   --convex-url "$public_url/convex"
 node /app/media/scripts/configure-web.ts --from /app/web --to /run/media/web \
   --convex-url "$public_url/convex"
+node /app/media/scripts/configure-web.ts --from /app/music --to /run/media/music \
+  --convex-url "$public_url/convex"
 
 umask 077
 install -d -m 755 /run/movies

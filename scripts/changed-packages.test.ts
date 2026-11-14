@@ -19,11 +19,13 @@ const everyPackage = [
   "apps/mobile-movies",
   "apps/web-account",
   "apps/web-movies",
+  "apps/web-music",
   "packages/commands",
   "packages/config",
   "packages/contracts",
   "packages/mobile-core",
   "packages/platform",
+  "packages/player",
   "packages/sdk",
   "packages/ui",
 ];
@@ -48,11 +50,20 @@ describe("changed-packages.sh", { timeout: 30_000 }, () => {
       "apps/mobile-movies",
       "apps/web-account",
       "apps/web-movies",
+      "apps/web-music",
       "packages/contracts",
       "packages/mobile-core",
       "packages/platform",
+      "packages/player",
       "packages/sdk",
       "packages/ui",
+    ]);
+  });
+
+  it("affects the music client when only its player changed", () => {
+    expect(affected("packages/player/src/engine.ts")).toEqual([
+      "apps/web-music",
+      "packages/player",
     ]);
   });
 

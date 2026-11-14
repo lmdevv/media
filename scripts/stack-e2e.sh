@@ -114,9 +114,14 @@ check "/ is the account client" 'answers / "<title>[media]</title>"'
 check "/movies is the movies client" \
   '[[ "$(curl -s -o /dev/null -w "%{http_code} %{redirect_url}" "${MEDIA_BASE_URL}/movies")" == "308 ${MEDIA_BASE_URL}/movies/" ]] &&
     answers /movies/ "<title>[movies]</title>" && answers /movies/title/x "/movies/assets/"'
-check "both web clients reach the core on this address" \
+check "/music is the music client, and its art is the media service's" \
+  '[[ "$(curl -s -o /dev/null -w "%{http_code} %{redirect_url}" "${MEDIA_BASE_URL}/music")" == "308 ${MEDIA_BASE_URL}/music/" ]] &&
+    answers /music/ "<title>[music]</title>" && answers /music/albums/x "/music/assets/" &&
+    [[ "$(status_of /music/art/0000)" != 200 ]] && ! curl -s "${MEDIA_BASE_URL}/music/art/0000" | grep -qF "<html"'
+check "every web client reaches the core on this address" \
   'in_movies grep -rqF "${core_convex_url}" /run/media/account &&
     in_movies grep -rqF "${core_convex_url}" /run/media/web &&
+    in_movies grep -rqF "${core_convex_url}" /run/media/music &&
     ! in_movies grep -rqF "${MEDIA_BASE_URL}/movies/convex" /run/media/web'
 check "Convex HTTP actions stay inside the container" \
   '! curl -fsS "${MEDIA_BASE_URL}/convex/.well-known/jwks.json" 2>/dev/null | grep -qF "\"keys\"" &&

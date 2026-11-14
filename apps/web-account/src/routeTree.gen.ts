@@ -17,6 +17,7 @@ import { Route as AdminBackupsRouteImport } from './routes/admin.backups'
 import { Route as AdminDevicesRouteImport } from './routes/admin.devices'
 import { Route as AdminGroupsRouteImport } from './routes/admin.groups'
 import { Route as AdminGuestsRouteImport } from './routes/admin.guests'
+import { Route as AdminJobsRouteImport } from './routes/admin.jobs'
 import { Route as AdminLibrariesRouteImport } from './routes/admin.libraries'
 import { Route as AdminServerRouteImport } from './routes/admin.server'
 import { Route as TileUserIdRouteImport } from './routes/tile.$userId'
@@ -92,6 +93,11 @@ const AdminGuestsRoute = AdminGuestsRouteImport.update({
   path: '/guests',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminJobsRoute = AdminJobsRouteImport.update({
+  id: '/jobs',
+  path: '/jobs',
+  getParentRoute: () => AdminRoute,
+} as any)
 const AdminLibrariesRoute = AdminLibrariesRouteImport.update({
   id: '/libraries',
   path: '/libraries',
@@ -127,6 +133,7 @@ export interface FileRoutesByFullPath {
   '/admin/devices': typeof AdminDevicesRoute
   '/admin/groups': typeof AdminGroupsRoute
   '/admin/guests': typeof AdminGuestsRoute
+  '/admin/jobs': typeof AdminJobsRoute
   '/admin/libraries': typeof AdminLibrariesRoute
   '/admin/server': typeof AdminServerRoute
   '/tile/$userId': typeof TileUserIdRoute
@@ -146,6 +153,7 @@ export interface FileRoutesByTo {
   '/admin/devices': typeof AdminDevicesRoute
   '/admin/groups': typeof AdminGroupsRoute
   '/admin/guests': typeof AdminGuestsRoute
+  '/admin/jobs': typeof AdminJobsRoute
   '/admin/libraries': typeof AdminLibrariesRoute
   '/admin/server': typeof AdminServerRoute
   '/tile/$userId': typeof TileUserIdRoute
@@ -167,6 +175,7 @@ export interface FileRoutesById {
   '/admin/devices': typeof AdminDevicesRoute
   '/admin/groups': typeof AdminGroupsRoute
   '/admin/guests': typeof AdminGuestsRoute
+  '/admin/jobs': typeof AdminJobsRoute
   '/admin/libraries': typeof AdminLibrariesRoute
   '/admin/server': typeof AdminServerRoute
   '/tile/$userId': typeof TileUserIdRoute
@@ -189,6 +198,7 @@ export interface FileRouteTypes {
     | '/admin/devices'
     | '/admin/groups'
     | '/admin/guests'
+    | '/admin/jobs'
     | '/admin/libraries'
     | '/admin/server'
     | '/tile/$userId'
@@ -208,6 +218,7 @@ export interface FileRouteTypes {
     | '/admin/devices'
     | '/admin/groups'
     | '/admin/guests'
+    | '/admin/jobs'
     | '/admin/libraries'
     | '/admin/server'
     | '/tile/$userId'
@@ -228,6 +239,7 @@ export interface FileRouteTypes {
     | '/admin/devices'
     | '/admin/groups'
     | '/admin/guests'
+    | '/admin/jobs'
     | '/admin/libraries'
     | '/admin/server'
     | '/tile/$userId'
@@ -348,6 +360,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminGuestsRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/admin/jobs': {
+      id: '/admin/jobs'
+      path: '/jobs'
+      fullPath: '/admin/jobs'
+      preLoaderRoute: typeof AdminJobsRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/admin/libraries': {
       id: '/admin/libraries'
       path: '/libraries'
@@ -384,6 +403,7 @@ interface AdminRouteChildren {
   AdminDevicesRoute: typeof AdminDevicesRoute
   AdminGroupsRoute: typeof AdminGroupsRoute
   AdminGuestsRoute: typeof AdminGuestsRoute
+  AdminJobsRoute: typeof AdminJobsRoute
   AdminLibrariesRoute: typeof AdminLibrariesRoute
   AdminServerRoute: typeof AdminServerRoute
   AdminIndexRoute: typeof AdminIndexRoute
@@ -395,6 +415,7 @@ const AdminRouteChildren: AdminRouteChildren = {
   AdminDevicesRoute: AdminDevicesRoute,
   AdminGroupsRoute: AdminGroupsRoute,
   AdminGuestsRoute: AdminGuestsRoute,
+  AdminJobsRoute: AdminJobsRoute,
   AdminLibrariesRoute: AdminLibrariesRoute,
   AdminServerRoute: AdminServerRoute,
   AdminIndexRoute: AdminIndexRoute,

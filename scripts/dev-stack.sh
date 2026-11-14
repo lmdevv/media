@@ -23,6 +23,7 @@
 #   base + 5  core Convex HTTP actions
 #   base + 6  account client dev server (apps/web-account)
 #   base + 7  sign-in boundary (the media service's /api/auth/sign-in route alone)
+#   base + 8  music web dev server (apps/web-music at /music/; every other path goes to base + 6)
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -44,6 +45,7 @@ core_port=$((base + 4))
 core_site_port=$((base + 5))
 account_port=$((base + 6))
 boundary_port=$((base + 7))
+music_port=$((base + 8))
 # Old movies' backend, which stacks made before its deletion still run; `up` removes it.
 old_container="movies-convex-${name}"
 core_container="media-platform-convex-${name}"
@@ -59,6 +61,7 @@ print_env() {
 name=${name}
 media_url=http://127.0.0.1:${media_port}
 web_url=http://localhost:${web_port}/movies/
+music_url=http://localhost:${music_port}/music/
 core_container=${core_container}
 core_convex_url=http://127.0.0.1:${core_port}
 core_convex_site_url=http://127.0.0.1:${core_site_port}
@@ -167,6 +170,14 @@ VITE_PLATFORM_URL=http://127.0.0.1:${core_port}
 VITE_MEDIA_BASE_URL=http://127.0.0.1:${media_port}
 VITE_SIGN_IN_URL=${sign_in_url}
 WEB_PORT=${web_port}
+ACCOUNT_DEV_URL=http://localhost:${account_port}
+ENV
+
+cat >"${root}/apps/web-music/.env.local" <<ENV
+VITE_PLATFORM_URL=http://127.0.0.1:${core_port}
+VITE_MEDIA_BASE_URL=http://127.0.0.1:${media_port}
+VITE_SIGN_IN_URL=${sign_in_url}
+MUSIC_PORT=${music_port}
 ACCOUNT_DEV_URL=http://localhost:${account_port}
 ENV
 

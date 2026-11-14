@@ -1,0 +1,174 @@
+import type { Playlist } from "@/lib/models";
+import { Keys } from "@/components/ui/keys";
+import { Tooltip } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
+import { Link } from "@tanstack/react-router";
+import type { LinkProps } from "@tanstack/react-router";
+import {
+  DiscIcon,
+  HeartIcon,
+  HomeIcon,
+  MusicIcon,
+  PlusIcon,
+  SearchIcon,
+  SlidersHorizontalIcon,
+  UserRoundIcon,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+
+import { Artwork } from "@/components/library/artwork";
+import { initial, plural } from "@/lib/format";
+import { HOTKEYS } from "@/lib/hotkeys";
+
+import { useAllRows } from "@/lib/pages";
+import { nameOf, useMe, useMusic } from "@/lib/platform";
+import { useUi } from "./ui-state";
+
+const NAV: ReadonlyArray<{
+  readonly to: NonNullable<LinkProps["to"]>;
+  readonly label: string;
+  readonly icon: LucideIcon;
+}> = [
+  { to: "/", label: "Home", icon: HomeIcon },
+  { to: "/search", label: "Search", icon: SearchIcon },
+  { to: "/albums", label: "Albums", icon: DiscIcon },
+  { to: "/artists", label: "Artists", icon: UserRoundIcon },
+  { to: "/songs", label: "Songs", icon: MusicIcon },
+  { to: "/liked", label: "Liked songs", icon: HeartIcon },
+];
+
+const itemClassName =
+  "flex h-9 shrink-0 items-center gap-3 rounded-sm px-2.5 font-sans text-base/sm text-text-muted outline-none hover:text-text focus-visible:ring-2 focus-visible:ring-ring/50 [&_svg]:size-5";
+
+const activeClassName = "bg-bg font-semibold text-text dark:bg-surface-raised";
+
+function PlaylistLink({
+  playlist,
+  detail,
+}: {
+  readonly playlist: Playlist;
+  readonly detail: string;
+}) {
+  return (
+    <Link
+      to="/playlists/$playlistId"
+      params={{ playlistId: playlist.id }}
+      className="flex h-11 shrink-0 items-center gap-2.5 rounded-sm px-1.5 outline-none hover:bg-bg/60 focus-visible:ring-2 focus-visible:ring-ring/50 dark:hover:bg-surface"
+      activeProps={{ className: "bg-bg dark:bg-surface-raised", "aria-current": "page" }}
+    >
+      <Artwork url={playlist.artUrls[0] ?? null} seed={playlist.id} className="size-8 rounded-xs" />
+      <span className="flex min-w-0 flex-col gap-px">
+        <span className="truncate font-sans text-base/sm text-text">{playlist.name}</span>
+        <span className="truncate font-sans text-xs/xs text-text-muted">{detail}</span>
+      </span>
+    </Link>
+  );
+}
+
+/**
+ * The desktop library sidebar from Paper: wordmark and ⌘K, main navigation, your playlists, and
+ * your account. Light mode insets it as a rounded surface; dark mode draws it as a panel.
+ */
+export function Sidebar() {
+  const { setCommandOpen, openNewPlaylist } = useUi();
+  const music = useMusic();
+  const playlists = useAllRows(music.playlists.list, (paginationOpts) => ({ paginationOpts }));
+  const shared = useAllRows(music.playlists.shared, (paginationOpts) => ({ paginationOpts }));
+  const me = useMe();
+  const name = me === undefined ? "" : nameOf(me);
+
+  return (
+    <nav
+      aria-label="Library"
+      className="mb-2 hidden w-sidebar shrink-0 flex-col gap-6 rounded-lg border border-border bg-surface px-3 pt-5 pb-4 lg:flex dark:mb-0 dark:rounded-md dark:border-transparent dark:bg-bg"
+    >
+      <div className="flex h-7 shrink-0 items-center justify-between px-2.5">
+        <Link to="/" className="font-mono text-md/base font-semibold tracking-snug text-text">
+          [music]
+        </Link>
+        <Tooltip
+          label="Search and commands"
+          shortcut={HOTKEYS["command-menu.toggle"].defaultHotkey}
+          side="right"
+        >
+          <button
+            type="button"
+            aria-label="Open the command menu"
+            onClick={() => setCommandOpen(true)}
+          >
+            <Keys hotkey={HOTKEYS["command-menu.toggle"].defaultHotkey} />
+          </button>
+        </Tooltip>
+      </div>
+      <div className="flex flex-col gap-0.5">
+        {NAV.map((item) => (
+          <Link
+            key={item.label}
+            to={item.to}
+            activeOptions={{ exact: item.to === "/" }}
+            className={itemClassName}
+            activeProps={{ className: activeClassName, "aria-current": "page" }}
+          >
+            <item.icon aria-hidden />
+            {item.label}
+          </Link>
+        ))}
+      </div>
+      <div className="flex min-h-0 grow flex-col gap-0.5">
+        <div className="flex items-center justify-between px-2.5 pb-1.5">
+          <span className="font-mono text-xs/xs tracking-mono text-text-muted">PLAYLISTS</span>
+          <Tooltip label="New playlist" shortcut={HOTKEYS["playlists.new"].defaultHotkey}>
+            <button
+              type="button"
+              aria-label="New playlist"
+              onClick={() => openNewPlaylist()}
+              className="flex size-5 items-center justify-center rounded-sm text-text-muted hover:text-text"
+            >
+              <PlusIcon className="size-4" />
+            </button>
+          </Tooltip>
+        </div>
+        <div className="flex min-h-0 flex-col gap-0.5 overflow-y-auto">
+          {playlists === undefined ? null : playlists.length === 0 ? (
+            <p className="px-2.5 py-1 font-sans text-sm/sm text-text-muted">
+              Playlists you make show up here.
+            </p>
+          ) : (
+            playlists.map((playlist) => (
+              <PlaylistLink
+                key={playlist.id}
+                playlist={playlist}
+                detail={plural(playlist.trackCount, "song")}
+              />
+            ))
+          )}
+          {shared === undefined || shared.length === 0 ? null : (
+            <section aria-label="Shared with you" className="flex flex-col gap-0.5 pt-3">
+              <span className="px-2.5 pb-1.5 font-mono text-xs/xs tracking-mono text-text-muted">
+                SHARED WITH YOU
+              </span>
+              {shared.map((playlist) => (
+                <PlaylistLink
+                  key={playlist.id}
+                  playlist={playlist}
+                  detail={`${playlist.owner?.name ?? "Someone"} · ${plural(playlist.trackCount, "song")}`}
+                />
+              ))}
+            </section>
+          )}
+        </div>
+      </div>
+      <Link
+        to="/settings"
+        className="flex h-11 shrink-0 items-center gap-2.5 rounded-sm px-1.5 outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        activeProps={{ className: "bg-bg dark:bg-surface-raised" }}
+      >
+        <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-text font-sans text-xs/xs font-semibold text-text-inverse">
+          {initial(name)}
+        </span>
+        <span className="grow truncate font-sans text-base/sm text-text">{name}</span>
+        <SlidersHorizontalIcon aria-label="Settings" className={cn("size-4.5 text-text-muted")} />
+      </Link>
+    </nav>
+  );
+}

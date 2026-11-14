@@ -152,6 +152,7 @@ const ADMIN: ReadonlyArray<NavEntry> = [
   { to: "/admin", label: "Users" },
   { to: "/admin/groups", label: "Groups" },
   { to: "/admin/libraries", label: "Libraries" },
+  { to: "/admin/jobs", label: "Jobs" },
   { to: "/admin/devices", label: "Devices" },
   { to: "/admin/guests", label: "Guests" },
   { to: "/admin/server", label: "Server" },
