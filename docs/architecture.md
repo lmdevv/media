@@ -122,7 +122,7 @@ The image serves every path from one port.
 | `/reset`   | `apps/web-account`, a one-time reset link, its code in the fragment      |
 | `/guest`   | `apps/web-account`, a guest link, its code in the fragment               |
 | `/movies`  | `apps/web-movies`, served by `@media/server`, with no sign-in of its own |
-| `/music`   | `apps/web-music`                                                         |
+| `/music`   | `apps/web-music`, with no sign-in of its own                             |
 | `/convex`  | the core's Convex backend, the only one                                  |
 | `/api`     | `@media/server`, its HttpApi routes                                      |
 | `/media`   | `@media/server`, byte-serving routes that take a ticket                  |
@@ -130,8 +130,8 @@ The image serves every path from one port.
 
 `/movies` uses the browser's one session, which the account client at `/` keeps, and sends a
 signed-out browser to `/` to sign in (ADR 0020). `/movies/convex`, where old movies' backend
-answered before the movies cutover, answers `404 Not Found` (ADR 0027). `/music` arrives with the
-music port; until then the image does not serve it.
+answered before the movies cutover, answers `404 Not Found` (ADR 0027). `/music` serves the music
+client on the same session, its player playing the core's queue with tickets (ADR 0020).
 
 Guest links use a configurable guest address. v1 runs on the home network or Tailscale, and
 Tailscale Funnel can open guest links (ADR 0007).
@@ -209,7 +209,9 @@ an ADR.
   scale. Which components are shared and which belong to one product is decided in Paper during
   the ports (ADR 0020). The movies cutover moved only the helpers both web clients duplicated
   into `packages/ui`, without reading Paper, which was not running. Paper still has to settle the
-  split.
+  split. The music port kept old music's screens, components, and tokens (`packages/ui`'s
+  `music.css`), also without Paper running, so its screens still have to be checked against the
+  `[music]` artboards.
 
 ## Appendix A. Where the core ran until the movies port
 

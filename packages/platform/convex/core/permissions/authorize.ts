@@ -79,5 +79,12 @@ export const requireAccount = async (
 
 /** Decides a server-wide action for `caller`; a refusal fails `forbidden`. Reads nothing. */
 export const requireServer = (caller: Principal, action: ServerAction): void => {
-  if (!can(caller, action, SERVER).allowed) fail("forbidden", "Only an admin can do this");
+  if (can(caller, action, SERVER).allowed) return;
+
+  fail(
+    "forbidden",
+    action === "seePeople"
+      ? "Only someone who can share sees who else is on this server"
+      : "Only an admin can do this",
+  );
 };

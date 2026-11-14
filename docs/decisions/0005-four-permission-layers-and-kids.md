@@ -116,6 +116,7 @@ hold its rules, each typed by its list of actions, so a missing or extra row fai
 | `invite`            | server  | `admin`                                                                              |
 | `manageGroups`      | server  | `admin`                                                                              |
 | `manageFolders`     | server  | `admin`; making a library or changing its folders (ADR 0024)                         |
+| `seePeople`         | server  | `account` or any `<domain>:edit`, and not a guest; listing the household to share    |
 
 ADR 0006 adds the tile, approval, and device actions, and `listOnSharedDevices`,
 `resetUnlockCode`, and `manageDevices`. ADR 0019 adds `change` on a setting and `keep` on a
@@ -549,3 +550,23 @@ music (playlists, likes, plays, the queue) is theirs, keyed by user, as old musi
   answer the rest for the client to send again (`readDecidedLeading`); the others take all of them
   or are refused with `invalid_args` before they write. An add whose place in the queue is too
   narrow renumbers the queue first, so the songs are read with what the renumber left.
+
+## The people directory (amended 2026-11-14)
+
+Old music let anyone who could share list the other people on the server by name
+(`people.directory`), so a member could share a playlist privately with chosen people and add
+collaborators. The core listed users to admins alone (`core.accounts.users.list`), which took
+that away from members in the music client (D62 makes it parity, not a feature).
+
+- `core.accounts.directory.list` (`media auth directory list`, scope `signed-in`) returns each
+  other person in the household with their id, the name they go by (display name, else username),
+  and their role, by username, a page at a time over `by_kind_username_key` with Convex's exact
+  cursor. That is what old music's directory gave: no emails, restrictions, or guests a link let
+  in, and never the caller.
+- `can(principal, "seePeople", SERVER)` decides it. It allows whoever can share something: a
+  session holding `account`, or any domain's `edit` scope, as a shared device's session does. It
+  refuses guests (`guest`), services, and keys that only read or play (`scope`). Server rules now
+  name the scopes that allow them, any one of which is enough; the other server actions still
+  need `admin`.
+- Old music left suspended people out; the core has no suspension, and a person it removes is
+  gone from the table.

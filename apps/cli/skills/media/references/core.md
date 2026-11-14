@@ -2,6 +2,17 @@
 
 # Core commands
 
+## `core.accounts.directory.list`
+
+List the other people on this server you can share with, by username: names and roles, no emails.
+
+- CLI: `media auth directory list`
+- Kind: query
+- Scope: signed-in
+- Arguments: `{ paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
+- Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
+- Result: `{ page: Array<{ userId: Id<"users">; name: string; role: "owner" | "admin" | "member" | "guest" }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
+
 ## `core.accounts.invites.create`
 
 Create an invite link code for someone new, who picks their own username and password.
@@ -644,6 +655,17 @@ Show whether guest links are on, the address they use, and whether you may make 
 - Scope: account
 - Arguments: none
 - Result: `{ enabled: boolean; address: string | null; mayShare: boolean }`
+
+## `core.jobs.list`
+
+List the server's jobs of every kind, newest first, with their attempts; a library's scan, and a song's lyrics lookup, show only where you see the library.
+
+- CLI: `media admin jobs list`
+- Kind: query
+- Scope: admin
+- Arguments: `{ status?: "queued" | "running" | "succeeded" | "failed" | "canceled"; paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
+- Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
+- Result: `{ page: Array<{ jobId: Id<"jobs">; kind: "movies.scan" | "music.scan" | "movies.metadata" | "movies.person" | "movies.trickplay" | "movies.import.jellyfin" | "movies.import.plex" | "music.lyrics" | "server.backup"; status: "queued" | "running" | "succeeded" | "failed" | "canceled"; library: { libraryId: Id<"libraries">; name: string; level: "view" | "edit" | "manage" } | null; attempts: number; done: number; total: number | null; message: string | null; error: string | null; canceling: boolean; createdAt: number; finishedAt: number | null }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
 
 ## `core.libraries.cancelScan`
 

@@ -2,9 +2,10 @@
 
 - Status: Accepted, 2026-11-03. Amended 2026-11-06 with the account client as built,
   2026-11-07 with one sign-in session per browser (D52), 2026-11-09 with what the iOS keychain
-  holds (D48, D59), 2026-11-10 with the movies client on the web as built (D52, D57, D62), and
-  2026-11-11 with the movies iOS app as built (D12, D48, D51, D56, D59, D62, D64).
-- Decisions: D12, D38, D39, D40, D48, D51, D52, D56, D57, D59, D62, D64
+  holds (D48, D59), 2026-11-10 with the movies client on the web as built (D52, D57, D62),
+  2026-11-11 with the movies iOS app as built (D12, D48, D51, D56, D59, D62, D64), and
+  2026-11-14 with the music client on the web as built (D36, D38, D52, D57, D62, D63).
+- Decisions: D12, D36, D38, D39, D40, D48, D51, D52, D56, D57, D59, D62, D63, D64
 
 ## Context
 
@@ -456,3 +457,87 @@ the old movies SDK or a Convex client of its own. They open for an owner or an a
   edits (`@media/mobile-core/edits`).
 - Left out because the core has no command for them (D62): disabling and enabling an account, and
   an email on an invite.
+
+## The music client on the web as built (amended 2026-11-14)
+
+`p5-web-music` ported old music's web app (`legacy/music/apps/web`) to `apps/web-music`, the
+package `@media/web-music`, built for and served at `/music/`. Its player moved to
+`packages/player` (`@media/player`). It talks to the core only through the platform SDK's
+`music.*` and `core.*` commands, and to the media server's music routes with tickets (ADR 0010,
+ADR 0011).
+
+### No sign-in of its own (D52)
+
+- `/music` runs the platform client over the origin's shared store, as `/movies` does
+  (`apps/web-music/src/session/session.tsx`). A browser without a session goes to `/`.
+- Old music's sign-in, setup, invite, and reset pages are gone; the account client has their
+  replacements. Its account settings page stays in `/music` with the name you go by and Sign out,
+  which signs every client on the origin out.
+- In development the music Vite server serves `/music/` and proxies every other path to the
+  account client's dev server, as the movies one does. `scripts/dev-stack.sh` writes its
+  `.env.local` and gives it base + 8.
+
+### Looks
+
+Paper Desktop was not running, so **no `[music]` artboard was read from Paper**. The client keeps
+old music's screens and its tokens, which old music took from the `[music]` Paper file: light
+follows Apple Music with a red accent, dark follows Spotify with a green accent and rounded panels
+on black. The tokens moved to `packages/ui/src/styles/music.css` under their Paper names; the music
+client imports it instead of `globals.css`, whose `[movies]` tokens share some names with other
+values. Old music's restyled shadcn components stay in `apps/web-music/src/components/ui`, since
+`packages/ui`'s are drawn in the `[movies]` tokens. Checking every screen against the `[music]`
+artboards stays open (`docs/architecture.md`, "Open").
+
+### The player
+
+- `packages/player` keeps old music's engines unchanged: the MSE engine that appends fragmented MP4
+  for sample-accurate gapless playback, and the HTML audio fallback, with old music's stream
+  profiles and its recovery from a stalled, refused, or failed stream.
+- The core keeps the queue and the entry playing (`music.queue.*`). Whether the browser plays, and
+  where in the song, is the browser's, as old music's player held it for the device that played.
+  The playback controller picks next and previous with old music's rules (`queue-order.ts`) and
+  sends `music.queue.jump`; when the engine moves to a preloaded song without a gap, the core
+  follows. A move made elsewhere, such as the CLI's `music queue jump`, loads here when this
+  browser plays.
+- Each load starts the song with `music.play.start` and streams it with that start's ticket. The
+  controller renews the ticket before it expires, worked out from the ticket's own lifetime so a
+  skewed device clock still renews in time, and once more after the server refuses it (`401`), as
+  old music renewed its signed URLs (ADR 0010). A start that plays is reported once with
+  `music.play.report`.
+- Quality, volume, and gapless come from the synced settings (D36): `streamQuality` and `volume`
+  for this device, `gapless` for the person. Old music's three qualities map onto the core's tiers
+  (`lossless` from `auto` and `original`, `high` from `high` and `standard`, `data-saver` from
+  `low`). Gapless off plays through HTML audio. A browser the core keeps no device settings for
+  keeps them in local storage, as old music did.
+- The browser keeps where it left the playing song, so a reload resumes there paused, as old
+  music's server kept the position.
+- Adds that the core takes a call at a time (`rest`) continue after the last entry added
+  (`afterItemId`), and a failed add is never sent again: the queue on screen shows what landed.
+- `music.queue.play` starts a new generation of entries, after which Convex refuses the cursors a
+  live queue list was following (`InvalidCursor`, reported by the SDK as a protocol error). The
+  player's queue pages then start over, as Convex's own paginated hook does.
+
+### Settings, admin, and the command menu (D57)
+
+- Music's settings are Account and Playback. API keys, People, Libraries, and Jobs link to the
+  account client, which keeps them for every product. Old music's Jobs page moved to the account
+  client's admin at `/admin/jobs`, over `core.jobs.list` (ADR 0012): the server's jobs of every
+  kind, newest first, with their progress, attempts, and errors, Cancel and Retry on a library's
+  scan, and the failed ones counted.
+- ⌘K searches only songs, albums, artists, and your playlists (D38), opens screens, and runs the
+  player's actions. Old music's menu also ran any registry command from a form generated from
+  its command schemas; the core declares commands as Convex validators that the client does not
+  carry, so those forms stay out until the SDK exposes the command list to clients.
+
+- The share dialog picks people from `core.accounts.directory.list` (ADR 0005), for members and
+  admins alike, as old music's picked from `people.directory`.
+- A list whose later page fails keeps the rows it has and shows the failure with Try again under
+  them, which loads that page again. A failed first page goes to the screen's error, as before.
+
+### Left out (D62, D63)
+
+- Jams wait for `p6-together-music`, and Play on and remote control for `p6-connect-web`.
+- Old music's "Reconnecting" banner read its Convex client's socket state, which the platform SDK
+  does not expose; the media server's banner stays.
+- Crossfade: old music had none, so the player does not cross songs over, whatever the synced
+  `crossfade` setting says (D62).

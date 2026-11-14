@@ -1,6 +1,6 @@
 # 0027. Run one Convex backend, the core's, in the image
 
-- Status: Accepted, 2026-11-10. Supersedes ADR 0026.
+- Status: Accepted, 2026-11-10. Supersedes ADR 0026. Amended 2026-11-14 with `/music` served.
 - Decisions: D03, D30, D32, D49, D50, D52, D54, D58, D62
 
 ## Context
@@ -148,7 +148,10 @@ stack. With the settings under "Idle memory", the image measured 187.5 MiB again
 - No command line holds the Convex instance secret, in the image or under the NixOS module: both
   start the backend and run `generate_key` through the argv-secret shim, and the module replaces
   the upstream entrypoint with `nix/convex-entry.sh` (docs/security.md).
-- `/music` is still not served until the music port, as under ADR 0026.
+- `/music` is still not served until the music port, as under ADR 0026. Amended 2026-11-14:
+  `p5-web-music` serves the music client there from the image's own files, as the account client
+  is served, with `/music/art/*` still the media server's. A request for `/music` no longer reaches
+  the account client's `Not Found`.
 - An upgrade backup is `core-manual-<timestamp>.zip` in `/data/core/backups`, owned by the media
   user, so the media service lists and restores it.
 - A restart reuses the stored key. `scripts/stack-e2e.sh` checks that, that the key and the

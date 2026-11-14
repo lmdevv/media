@@ -1,0 +1,100 @@
+import * as fc from "fast-check";
+import { describe, expect, it } from "vitest";
+
+import { afterIdFor, dragPositions, dropIndex, moveItem, orderToMoveFrom } from "./reorder";
+
+const applyMove = (
+  ids: ReadonlyArray<string>,
+  from: number,
+  after: string | null,
+  anchor: string | null,
+): ReadonlyArray<string> => {
+  const moving = ids[from];
+
+  if (moving === undefined) return ids;
+  const rest = ids.filter((_, position) => position !== from);
+  const at = after === null || after === anchor ? 0 : rest.indexOf(after) + 1;
+
+  return [...rest.slice(0, at), moving, ...rest.slice(at)];
+};
+
+describe("afterIdFor", () => {
+  it("names the neighbour above the new place, or the anchor at the top", () => {
+    const ids = ["a", "b", "c", "d"];
+
+    expect(afterIdFor(ids, 3, 0, "now")).toBe("now");
+    expect(afterIdFor(ids, 0, 2, null)).toBe("c");
+    expect(afterIdFor(ids, 2, 1, null)).toBe("a");
+    expect(afterIdFor(ids, 0, 0, null)).toBeNull();
+  });
+
+  it("puts the entry exactly where it was asked to go", () => {
+    fc.assert(
+      fc.property(
+        fc.uniqueArray(fc.string({ minLength: 1 }), { minLength: 1, maxLength: 12 }),
+        fc.nat(),
+        fc.nat(),
+        (ids, rawFrom, rawTo) => {
+          const from = rawFrom % ids.length;
+          const to = rawTo % ids.length;
+          const moved = applyMove(ids, from, afterIdFor(ids, from, to, null), null);
+
+          expect(moved[to]).toBe(ids[from]);
+          expect(moved.toSorted()).toEqual(ids.toSorted());
+        },
+      ),
+    );
+  });
+});
+
+describe("orderToMoveFrom", () => {
+  it("keeps moving from where earlier moves are heading until the server catches up", () => {
+    const start = ["a", "b", "c", "d"];
+    const once = moveItem(start, 3, 2);
+    const twice = moveItem(once, 2, 1);
+
+    expect(orderToMoveFrom(start, [start, once])).toEqual(once);
+    expect(orderToMoveFrom(once, [start, once, twice])).toEqual(twice);
+    expect(orderToMoveFrom(twice, [start, once, twice])).toEqual(twice);
+  });
+
+  it("follows the server when someone else changed the list meanwhile", () => {
+    const start = ["a", "b", "c"];
+
+    expect(orderToMoveFrom(["c", "a"], [start, moveItem(start, 2, 0)])).toEqual(["c", "a"]);
+  });
+});
+
+describe("dropIndex", () => {
+  it("accounts for the dragged row leaving its place", () => {
+    expect(dropIndex(0, 2, "after")).toBe(2);
+    expect(dropIndex(0, 2, "before")).toBe(1);
+    expect(dropIndex(3, 0, "before")).toBe(0);
+    expect(dropIndex(3, 1, "after")).toBe(2);
+  });
+});
+
+describe("dragPositions", () => {
+  const drag = { id: "c", over: { id: "e", side: "after" } } as const;
+
+  it("follows the dragged and hovered entries when the list shifts under the drag", () => {
+    expect(dragPositions(["a", "b", "c", "d", "e"], drag)).toEqual({
+      from: 2,
+      over: { index: 4, side: "after" },
+    });
+    expect(dragPositions(["b", "c", "d", "e"], drag)).toEqual({
+      from: 1,
+      over: { index: 3, side: "after" },
+    });
+    expect(dragPositions(["c", "a", "b", "e", "d"], drag)).toEqual({
+      from: 0,
+      over: { index: 3, side: "after" },
+    });
+  });
+
+  it("drops the hovered row when it leaves, and the drag when the dragged entry leaves", () => {
+    expect(dragPositions(["a", "b", "c", "d"], drag)).toEqual({ from: 2, over: null });
+    expect(dragPositions(["a", "b", "d", "e"], drag)).toBeNull();
+    expect(dragPositions(["a", "b"], { id: null, over: null })).toBeNull();
+  });
+});

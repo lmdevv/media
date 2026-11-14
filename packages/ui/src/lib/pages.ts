@@ -299,15 +299,17 @@ export const pagedStore = <Row>(
  * the page before ended at, pinned to end where the page after it starts.
  *
  * @param argsAt - The query's arguments for a page's `paginationOpts`.
+ * @param rows - Rows asked for per page.
  */
 export const usePages = <Args, Row>(
   query: PagedQuery<Args, Row>,
   argsAt: (paginationOpts: PageOpts) => Args,
+  rows = PAGE_SIZE,
 ): Paged<Row> => {
-  const key = JSON.stringify(argsAt({ numItems: PAGE_SIZE, cursor: null }));
+  const key = JSON.stringify(argsAt({ numItems: rows, cursor: null }));
 
   const open = (): PagedStore<Row> =>
-    pagedStore((span) => query.watch(argsAt({ numItems: PAGE_SIZE, ...span })));
+    pagedStore((span) => query.watch(argsAt({ numItems: rows, ...span })));
 
   // State rather than a memo: React may drop a memo, which would restart every page's subscription.
   const [held, setHeld] = useState(() => ({ query, key, store: open() }));
@@ -331,8 +333,9 @@ export const usePages = <Args, Row>(
 export const useAllPages = <Args, Row>(
   query: PagedQuery<Args, Row>,
   argsAt: (paginationOpts: PageOpts) => Args,
+  rows = PAGE_SIZE,
 ): Paged<Row> => {
-  const paged = usePages(query, argsAt);
+  const paged = usePages(query, argsAt, rows);
   const load = paged.status === "ready" && paged.next.kind === "more" ? paged.next.load : null;
 
   useEffect(() => {
@@ -351,8 +354,9 @@ export const useFirstRows = <Args, Row>(
   query: PagedQuery<Args, Row>,
   argsAt: (paginationOpts: PageOpts) => Args,
   count: number,
+  rows = PAGE_SIZE,
 ): Paged<Row> => {
-  const paged = usePages(query, argsAt);
+  const paged = usePages(query, argsAt, rows);
 
   const load =
     paged.status === "ready" && paged.rows.length < count && paged.next.kind === "more"

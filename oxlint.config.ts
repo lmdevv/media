@@ -55,6 +55,7 @@ export default defineConfig({
     "packages/platform/convex/_generated/**",
     "apps/web-movies/src/routeTree.gen.ts",
     "apps/web-account/src/routeTree.gen.ts",
+    "apps/web-music/src/routeTree.gen.ts",
     "apps/mobile-movies/src/uniwind-types.d.ts",
   ],
   jsPlugins: [

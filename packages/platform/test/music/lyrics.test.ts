@@ -8,6 +8,7 @@ import { api, internal } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { insertByHand, patchByHand, runFunction } from "../admin";
 import { eventually, retrying } from "../core/jobs/driver";
+import { listedJob } from "../core/jobs/listed";
 import { member } from "../devices";
 import type { Member } from "../devices";
 import { runServer } from "../service";
@@ -584,6 +585,47 @@ describe.skipIf(stack === undefined)("music lyrics lookups", { timeout: 180_000 
     expect(await lyricsAs(owner, trackId)).toEqual({ status: "pending", fallback: null });
     await settle(core, await claimLookup(core, trackId), found(13, "found at last"));
     expect(await lyricsAs(owner, trackId)).toMatchObject({ status: "synced", source: "lrclib" });
+  });
+
+  it("list a lookup with its attempts to the admins who may see its song", async () => {
+    const owner = await admin;
+    const otherAdmin = await member(core, "lyrics-jobs-admin", "admin");
+    const made = await library(core, owner, "Listed", (root) => [song(root, "Listed lookup")]);
+    const trackId = made.ids[0] ?? never();
+
+    await requestLookups(core, [trackId]);
+
+    const lease = await claimLookup(core, trackId);
+
+    await settle(core, lease, { outcome: "failed", error: "LRCLIB sent an unreadable answer" });
+
+    const jobId = (await lookupOf(core, trackId)).job?.jobId ?? never();
+
+    try {
+      expect(await listedJob(owner.signedIn.client, jobId)).toMatchObject({
+        kind: "music.lyrics",
+        status: "queued",
+        attempts: 1,
+        library: null,
+        error: "LRCLIB sent an unreadable answer",
+      });
+
+      // The song's library is private to its owner until it is shared, admins included.
+      expect(await listedJob(otherAdmin.signedIn.client, jobId)).toBeUndefined();
+
+      await owner.signedIn.client.mutation(api.core.permissions.grants.set, {
+        resource: { type: "library", id: made.libraryId },
+        principal: { kind: "household" },
+        level: "view",
+      });
+
+      expect(await listedJob(otherAdmin.signedIn.client, jobId)).toMatchObject({
+        kind: "music.lyrics",
+        attempts: 1,
+      });
+    } finally {
+      await runFunction(core, internal.core.jobs.admin.cancel, { jobId }, Schema.Unknown);
+    }
   });
 
   it("run a lookup whose server stopped once more, and never store or ask twice", async () => {

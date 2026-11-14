@@ -8,7 +8,8 @@ import { after, before, describe, test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
-import { cliEnv, grantArgs, GRANTS, openJobs, scanState } from "./core-seed.mjs";
+import { cliEnv, grantArgs, GRANTS, KID_LIMITS, openJobs, scanState } from "./core-seed.mjs";
+import { ALBUMS, LIKES, LISTENERS, MUSIC_GRANTS, PLAYLISTS } from "./music-core-seed.mjs";
 
 const here = (file) => fileURLToPath(new URL(file, import.meta.url));
 const browserJs = here("browser.mjs");
@@ -566,6 +567,43 @@ describe("a side's layout", () => {
     assert.equal(withLayout("one-port", urls).stdout, "http://localhost:4100/movies http://localhost:4100/movies/convex admin@movies.local media\n");
   });
 
+  test("serves music at /music on the image when it holds the music client, else old music's port", () => {
+    const urls = 'echo "$(music_url)"; music_core && echo core; old_music && echo old; has_music && echo has';
+    assert.equal(withLayout("one-backend", `write_state music_core 1; ${urls}`).stdout, "http://localhost:4100/music\ncore\nhas\n");
+    assert.equal(
+      withLayout("one-port", `write_state music_core 0; write_state music_port 4200; ${urls}`).stdout,
+      "http://localhost:4200\nold\nhas\n",
+    );
+    assert.equal(
+      withLayout("one-backend", "write_state music_core 0; write_state music_port ''; music_core || old_music || has_music || echo none").stdout,
+      "none\n",
+    );
+  });
+
+  test("reads the music client from the image, and stops when Docker can't look", () => {
+    const bin = join(scratch, "music-docker");
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(join(bin, "docker"), '#!/usr/bin/env bash\necho "$*" >> "$FAKE_DOCKER_CALLS"\nexit "$FAKE_DOCKER_CODE"\n', { mode: 0o755 });
+    const calls = join(bin, "calls");
+    const probe = (code) =>
+      spawnSync("bash", ["-c", `source "$1"; music_in media:x`, "layout-test", helper], {
+        encoding: "utf8",
+        env: { ...env, PATH: `${bin}:${process.env.PATH}`, FAKE_DOCKER_CODE: String(code), FAKE_DOCKER_CALLS: calls },
+      });
+    assert.equal(probe(0).stdout, "1\n");
+    assert.equal(probe(1).stdout, "0\n");
+    const broken = probe(125);
+    assert.equal(broken.status, 1);
+    assert.match(broken.stderr, /could not look inside media:x for its music client \(docker run exited 125\)/);
+    assert.match(execFileSync("cat", [calls], { encoding: "utf8" }), /^run --rm --network none --entrypoint test media:x -d \/app\/music$/m);
+  });
+
+  test("sends the music CLI to the media CLI's music group when music is on the core", () => {
+    const result = withLayout("one-backend", "write_state music_core 1; cmd_cli --side after --app music -- music albums list");
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /music is on the core on the after side: run `cli -- music …` with the media CLI/);
+  });
+
   test("refuses the movies iOS app on old movies' backend before it touches the Mac", () => {
     const result = withLayout("one-port", 'write_state people lucia; args=(up); MAC_HOST=nowhere.invalid cmd_ios_up');
     assert.equal(result.status, 1, result.stderr);
@@ -615,6 +653,26 @@ describe("the core seed", () => {
     assert.throws(() => grantArgs({ library: "Music", principal: "aiko", level: "view" }, libraries, users), /no library named Music/);
     assert.throws(() => grantArgs({ library: "Movies", principal: "sam", level: "view" }, libraries, users), /no user sam/);
     for (const grant of GRANTS) assert.ok(grantArgs(grant, libraries, users));
+  });
+
+  test("seeds music on the core with old music's demo data for the same people", () => {
+    const libraries = new Map([["Music", "lib-u"]]);
+    const users = new Map([["mateo", "u-m"], ["aiko", "u-a"], ["sam", "u-s"]]);
+    assert.deepEqual(MUSIC_GRANTS.map((grant) => grantArgs(grant, libraries, users).principal), [
+      { kind: "user", userId: "u-m" },
+      { kind: "household" },
+    ]);
+    assert.equal(ALBUMS, 5);
+    assert.deepEqual(PLAYLISTS.map((playlist) => [playlist.owner, playlist.name, playlist.songs.length]), [
+      ["lucia", "Sunday morning", 4],
+      ["lucia", "Deep focus", 4],
+      ["mateo", "Lossless", 7],
+      ["aiko", "Waltzes", 2],
+    ]);
+    assert.deepEqual(PLAYLISTS[0].share.map((share) => share.with), ["mateo", "aiko", "sam"]);
+    assert.equal(Object.values(LIKES).flat().length, 6);
+    assert.deepEqual(LISTENERS, ["lucia", "mateo", "aiko", "sam"]);
+    assert.equal(KID_LIMITS.hideExplicitMusic, true);
   });
 
   test("gives each person's CLI their own config and none of the caller's servers", () => {

@@ -37,6 +37,9 @@ export type Level = Library["level"];
 /** A library with its items, folders, and latest scan. */
 export type LibraryDetail = Result<Core["libraries"]["get"]>;
 
+/** A job as the jobs list shows it, of any kind. */
+export type Job = RowOf<Core["jobs"]["list"]>;
+
 /** Who something is shared with, and at which level. */
 export type Grant = RowOf<Core["permissions"]["grants"]["list"]>;
 

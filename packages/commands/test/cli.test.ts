@@ -30,6 +30,7 @@ describe("CLI placement", () => {
     expect(
       Object.fromEntries(placed.map((command) => [command.name, cliPath(command).join(" ")])),
     ).toEqual({
+      "core.accounts.directory.list": "auth directory list",
       "core.accounts.invites.create": "admin invites create",
       "core.accounts.invites.list": "admin invites list",
       "core.accounts.invites.lookup": "auth invites lookup",
@@ -90,6 +91,7 @@ describe("CLI placement", () => {
       "core.guests.links.list": "auth links list",
       "core.guests.links.revoke": "auth links revoke",
       "core.guests.status": "auth guests status",
+      "core.jobs.list": "admin jobs list",
       "core.libraries.cancelScan": "auth libraries cancel-scan",
       "core.libraries.create": "admin libraries create",
       "core.libraries.get": "auth libraries get",
@@ -286,6 +288,7 @@ describe("CLI placement", () => {
     expect(
       placed.filter((command) => isPaginated(command.args)).map((command) => command.name),
     ).toEqual([
+      "core.accounts.directory.list",
       "core.accounts.invites.list",
       "core.accounts.users.list",
       "core.auth.apiKeys.list",
@@ -295,6 +298,7 @@ describe("CLI placement", () => {
       "core.downloads.list",
       "core.guests.links.activity",
       "core.guests.links.list",
+      "core.jobs.list",
       "core.libraries.list",
       "core.permissions.grants.list",
       "core.permissions.groups.list",

@@ -6,6 +6,45 @@ import { Schema } from "effect";
 import { action, mutation, query } from "../command";
 import type { EffectBuilder, PromiseBuilder } from "../command";
 
+const core_accounts_directory_list = query({
+  name: "core.accounts.directory.list",
+  path: "core/accounts/directory:list",
+  args: Schema.Struct({
+    paginationOpts: Schema.Struct({
+      numItems: Schema.Finite,
+      cursor: Schema.Union([Schema.String, Schema.Null]),
+      endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      id: Schema.optionalKey(Schema.Finite),
+      maximumRowsRead: Schema.optionalKey(Schema.Finite),
+      maximumBytesRead: Schema.optionalKey(Schema.Finite),
+    }),
+  }),
+  result: Schema.Struct({
+    page: Schema.Array(
+      Schema.Struct({
+        userId: Schema.String.pipe(Schema.brand("Id<users>")),
+        name: Schema.String,
+        role: Schema.Union([
+          Schema.Literal("owner"),
+          Schema.Literal("admin"),
+          Schema.Literal("member"),
+          Schema.Literal("guest"),
+        ]),
+      }),
+    ),
+    continueCursor: Schema.String,
+    isDone: Schema.Boolean,
+    splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+    pageStatus: Schema.optionalKey(
+      Schema.Union([
+        Schema.Literal("SplitRecommended"),
+        Schema.Literal("SplitRequired"),
+        Schema.Null,
+      ]),
+    ),
+  }),
+});
+
 const core_accounts_invites_create = action({
   name: "core.accounts.invites.create",
   path: "core/accounts/invites:create",
@@ -1258,6 +1297,85 @@ const core_guests_status = query({
     enabled: Schema.Boolean,
     address: Schema.Union([Schema.String, Schema.Null]),
     mayShare: Schema.Boolean,
+  }),
+});
+
+const core_jobs_list = query({
+  name: "core.jobs.list",
+  path: "core/jobs:list",
+  args: Schema.Struct({
+    status: Schema.optionalKey(
+      Schema.Union([
+        Schema.Literal("queued"),
+        Schema.Literal("running"),
+        Schema.Literal("succeeded"),
+        Schema.Literal("failed"),
+        Schema.Literal("canceled"),
+      ]),
+    ),
+    paginationOpts: Schema.Struct({
+      numItems: Schema.Finite,
+      cursor: Schema.Union([Schema.String, Schema.Null]),
+      endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      id: Schema.optionalKey(Schema.Finite),
+      maximumRowsRead: Schema.optionalKey(Schema.Finite),
+      maximumBytesRead: Schema.optionalKey(Schema.Finite),
+    }),
+  }),
+  result: Schema.Struct({
+    page: Schema.Array(
+      Schema.Struct({
+        jobId: Schema.String.pipe(Schema.brand("Id<jobs>")),
+        kind: Schema.Union([
+          Schema.Literal("movies.scan"),
+          Schema.Literal("music.scan"),
+          Schema.Literal("movies.metadata"),
+          Schema.Literal("movies.person"),
+          Schema.Literal("movies.trickplay"),
+          Schema.Literal("movies.import.jellyfin"),
+          Schema.Literal("movies.import.plex"),
+          Schema.Literal("music.lyrics"),
+          Schema.Literal("server.backup"),
+        ]),
+        status: Schema.Union([
+          Schema.Literal("queued"),
+          Schema.Literal("running"),
+          Schema.Literal("succeeded"),
+          Schema.Literal("failed"),
+          Schema.Literal("canceled"),
+        ]),
+        library: Schema.Union([
+          Schema.Struct({
+            libraryId: Schema.String.pipe(Schema.brand("Id<libraries>")),
+            name: Schema.String,
+            level: Schema.Union([
+              Schema.Literal("view"),
+              Schema.Literal("edit"),
+              Schema.Literal("manage"),
+            ]),
+          }),
+          Schema.Null,
+        ]),
+        attempts: Schema.Finite,
+        done: Schema.Finite,
+        total: Schema.Union([Schema.Finite, Schema.Null]),
+        message: Schema.Union([Schema.String, Schema.Null]),
+        error: Schema.Union([Schema.String, Schema.Null]),
+        canceling: Schema.Boolean,
+        createdAt: Schema.Finite,
+        finishedAt: Schema.Union([Schema.Finite, Schema.Null]),
+      }),
+    ),
+    continueCursor: Schema.String,
+    isDone: Schema.Boolean,
+    splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+    pageStatus: Schema.optionalKey(
+      Schema.Union([
+        Schema.Literal("SplitRecommended"),
+        Schema.Literal("SplitRequired"),
+        Schema.Null,
+      ]),
+    ),
   }),
 });
 
@@ -5215,6 +5333,10 @@ const music_tracks_list = query({
 export const effectMethods = (method: EffectBuilder) => ({
   core: {
     accounts: {
+      directory: {
+        /** `core.accounts.directory.list` (query, signed-in): List the other people on this server you can share with, by username: names and roles, no emails. */
+        list: method.query(core_accounts_directory_list),
+      },
       invites: {
         /** `core.accounts.invites.create` (action, admin, API keys refused): Create an invite link code for someone new, who picks their own username and password. */
         create: method.action(core_accounts_invites_create),
@@ -5377,6 +5499,10 @@ export const effectMethods = (method: EffectBuilder) => ({
       },
       /** `core.guests.status` (query, account): Show whether guest links are on, the address they use, and whether you may make them. */
       status: method.query(core_guests_status),
+    },
+    jobs: {
+      /** `core.jobs.list` (query, admin): List the server's jobs of every kind, newest first, with their attempts; a library's scan, and a song's lyrics lookup, show only where you see the library. */
+      list: method.query(core_jobs_list),
     },
     libraries: {
       /** `core.libraries.cancelScan` (mutation, signed-in): Stop a library's scan at the attempt you saw; a finished scan stays as it ended, and what a scan wrote stays. */
@@ -5679,6 +5805,10 @@ export const effectMethods = (method: EffectBuilder) => ({
 export const promiseMethods = (method: PromiseBuilder) => ({
   core: {
     accounts: {
+      directory: {
+        /** `core.accounts.directory.list` (query, signed-in): List the other people on this server you can share with, by username: names and roles, no emails. */
+        list: method.query(core_accounts_directory_list),
+      },
       invites: {
         /** `core.accounts.invites.create` (action, admin, API keys refused): Create an invite link code for someone new, who picks their own username and password. */
         create: method.action(core_accounts_invites_create),
@@ -5841,6 +5971,10 @@ export const promiseMethods = (method: PromiseBuilder) => ({
       },
       /** `core.guests.status` (query, account): Show whether guest links are on, the address they use, and whether you may make them. */
       status: method.query(core_guests_status),
+    },
+    jobs: {
+      /** `core.jobs.list` (query, admin): List the server's jobs of every kind, newest first, with their attempts; a library's scan, and a song's lyrics lookup, show only where you see the library. */
+      list: method.query(core_jobs_list),
     },
     libraries: {
       /** `core.libraries.cancelScan` (mutation, signed-in): Stop a library's scan at the attempt you saw; a finished scan stays as it ended, and what a scan wrote stays. */

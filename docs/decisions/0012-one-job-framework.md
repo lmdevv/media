@@ -414,3 +414,28 @@ Where it differs from old music (D62):
   queues the song again; old music stored a miss for 30 days.
 - LRCLIB's lyrics that do not fit the 512 KiB row keep their leading sets, as a song's own do;
   old music stored none past 800 KiB and called the song a miss.
+
+## Listing jobs (amended 2026-11-14)
+
+The music client's Jobs page (ADR 0020) needs what old music's `jobs.list` gave it, so the core
+lists jobs to admins with `core.jobs.list` (`media admin jobs list`):
+
+- It lists every kind newest first, or one status, such as `failed`, by `by_status`. A row is the
+  job's kind, status, attempts, progress, message, error, and times, read by the same `viewOf` as
+  the internal admin functions. The stack suite's `probe.*` kinds never run on a server and are
+  left out.
+- A scan shows only to an admin who sees its library, since a library is private to whoever made
+  it until it is shared, admins included, and its error, which may name the folders, only to the
+  library's managers, as `core.libraries.get` shows it. A scan row carries the library's name and
+  the caller's level, which decides whether the page offers Cancel and Retry.
+- A lyrics lookup (`music.lyrics`) shows, named "Lyrics lookup", only to an admin who may see its
+  song: the job's payload names the track and the tags it asks LRCLIB with, so the row is decided
+  through the track's library and the track's own facts by `can()`, as `music.lyrics.get` and the
+  backfill decide a song. A lookup of a song that is gone shows to nobody, as a scan of a removed
+  library does. Its error names LRCLIB's failure, never the song, so whoever sees the row sees it;
+  the row carries no library and offers no action, as a lookup is asked for again by playing the
+  song, downloading it, or a backfill.
+- A page decides at most what one call may read (`decidableRows`) and at most 100 jobs, through
+  `paginateAtMost`, so a reactive reload past that splits instead of reading more.
+- A new kind adds its literal to the listed kinds in `packages/commands/src/core.ts`, decides
+  whether its rows need a gate as a scan's do, and names itself on the Jobs page.

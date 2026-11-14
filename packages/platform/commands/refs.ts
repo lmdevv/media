@@ -3,6 +3,7 @@
 
 import { api } from "../convex/_generated/api";
 
+import type { Refs as core_accounts_directory } from "./core/accounts/directory";
 import type { Refs as core_accounts_invites } from "./core/accounts/invites";
 import type { Refs as core_accounts_me } from "./core/accounts/me";
 import type { Refs as core_accounts_resetLinks } from "./core/accounts/resetLinks";
@@ -21,6 +22,7 @@ import type { Refs as core_devices_unlockCodes } from "./core/devices/unlockCode
 import type { Refs as core_downloads } from "./core/downloads";
 import type { Refs as core_guests } from "./core/guests";
 import type { Refs as core_guests_links } from "./core/guests/links";
+import type { Refs as core_jobs } from "./core/jobs";
 import type { Refs as core_libraries } from "./core/libraries";
 import type { Refs as core_permissions_grants } from "./core/permissions/grants";
 import type { Refs as core_permissions_groups } from "./core/permissions/groups";
@@ -55,6 +57,8 @@ import type { Refs as music_tracks } from "./music/tracks";
  * `pnpm --filter @media/commands generate` with the dev stack up.
  */
 export const commandRefs = {
+  "core.accounts.directory.list": api.core.accounts.directory
+    .list satisfies core_accounts_directory["list"],
   "core.accounts.invites.create": api.core.accounts.invites
     .create satisfies core_accounts_invites["create"],
   "core.accounts.invites.list": api.core.accounts.invites
@@ -150,6 +154,7 @@ export const commandRefs = {
   "core.guests.links.create": api.core.guests.links.create satisfies core_guests_links["create"],
   "core.guests.links.list": api.core.guests.links.list satisfies core_guests_links["list"],
   "core.guests.links.revoke": api.core.guests.links.revoke satisfies core_guests_links["revoke"],
+  "core.jobs.list": api.core.jobs.list satisfies core_jobs["list"],
   "core.libraries.cancelScan": api.core.libraries.cancelScan satisfies core_libraries["cancelScan"],
   "core.libraries.create": api.core.libraries.create satisfies core_libraries["create"],
   "core.libraries.get": api.core.libraries.get satisfies core_libraries["get"],

@@ -302,6 +302,39 @@ jobs:
       - if: always()
         run: scripts/dev-stack.sh destroy
 
+  music-stack:
+    name: music client against a local Convex
+    needs: changes
+    if: >-
+      contains(fromJSON(needs.changes.outputs.workspaces), 'apps/web-music')
+      || contains(fromJSON(needs.changes.outputs.workspaces), 'packages/player')
+      || contains(fromJSON(needs.changes.outputs.workspaces), 'apps/web-account')
+      || contains(fromJSON(needs.changes.outputs.workspaces), 'packages/platform')
+      || contains(fromJSON(needs.changes.outputs.workspaces), 'apps/media')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: ./.github/actions/ffmpeg
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @media/web-music exec playwright install chromium
+      - run: scripts/dev-stack.sh up
+      - run: pnpm --filter @media/web-music exec playwright test
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: music-playwright-results
+          path: apps/web-music/test-results
+          retention-days: 7
+      - if: always()
+        run: scripts/dev-stack.sh destroy
+
   sandbox:
     name: media tests under the NixOS module's system call filter
     needs: changes
@@ -332,6 +365,7 @@ jobs:
     if: >-
       contains(fromJSON(needs.changes.outputs.workspaces), 'apps/media')
       || contains(fromJSON(needs.changes.outputs.workspaces), 'apps/web-movies')
+      || contains(fromJSON(needs.changes.outputs.workspaces), 'apps/web-music')
       || contains(fromJSON(needs.changes.outputs.workspaces), 'apps/web-account')
       || contains(fromJSON(needs.changes.outputs.workspaces), 'apps/cli')
       || contains(fromJSON(needs.changes.outputs.workspaces), 'packages/platform')
@@ -357,6 +391,7 @@ jobs:
         stack,
         web-stack,
         account-stack,
+        music-stack,
         sandbox,
         nix,
       ]

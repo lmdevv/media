@@ -9,6 +9,7 @@
  */
 
 import type * as auth from "../auth.js";
+import type * as core_accounts_directory from "../core/accounts/directory.js";
 import type * as core_accounts_host from "../core/accounts/host.js";
 import type * as core_accounts_invites from "../core/accounts/invites.js";
 import type * as core_accounts_me from "../core/accounts/me.js";
@@ -47,6 +48,7 @@ import type * as core_guests_links from "../core/guests/links.js";
 import type * as core_guests_model from "../core/guests/model.js";
 import type * as core_guests_standing from "../core/guests/standing.js";
 import type * as core_imports from "../core/imports.js";
+import type * as core_jobs from "../core/jobs.js";
 import type * as core_jobs_admin from "../core/jobs/admin.js";
 import type * as core_jobs_cleanup from "../core/jobs/cleanup.js";
 import type * as core_jobs_held from "../core/jobs/held.js";
@@ -171,6 +173,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   auth: typeof auth;
+  "core/accounts/directory": typeof core_accounts_directory;
   "core/accounts/host": typeof core_accounts_host;
   "core/accounts/invites": typeof core_accounts_invites;
   "core/accounts/me": typeof core_accounts_me;
@@ -209,6 +212,7 @@ declare const fullApi: ApiFromModules<{
   "core/guests/model": typeof core_guests_model;
   "core/guests/standing": typeof core_guests_standing;
   "core/imports": typeof core_imports;
+  "core/jobs": typeof core_jobs;
   "core/jobs/admin": typeof core_jobs_admin;
   "core/jobs/cleanup": typeof core_jobs_cleanup;
   "core/jobs/held": typeof core_jobs_held;
