@@ -76,11 +76,12 @@ const listFiles = Effect.fnUntraced(function* (roots: ReadonlyArray<string>) {
 
 /**
  * Removes abandoned temporary files under `roots`, then the oldest files until the rest take at
- * most `maxBytes`.
+ * most `maxBytes`. The files at the paths in `keep` stay, even past `maxBytes`, and count toward it.
  */
 export const prune = Effect.fn("CachePruner.prune")(function* (
   roots: ReadonlyArray<string>,
   maxBytes: number,
+  keep: ReadonlyArray<string> = [],
 ) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -96,10 +97,13 @@ export const prune = Effect.fn("CachePruner.prune")(function* (
     .filter((file) => !abandoned.includes(file))
     .toSorted((left, right) => right.modifiedAt - left.modifiedAt);
 
-  let keptBytes = 0;
+  const kept = new Set(live.filter((file) => keep.includes(file.path)));
+  let keptBytes = [...kept].reduce((total, file) => total + file.size, 0);
   const expired: Array<CacheFile> = [];
 
   for (const file of live) {
+    if (kept.has(file)) continue;
+
     if (keptBytes + file.size <= maxBytes) keptBytes += file.size;
     else expired.push(file);
   }

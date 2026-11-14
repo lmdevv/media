@@ -115,6 +115,16 @@ describe("disk cache", () => {
           assert.strictEqual(summary.keptBytes, 81 * 1024);
 
           assert.strictEqual((yield* prune(roots, 90 * 1024)).removedFiles, 0);
+
+          const kept = yield* file("cache/music/fmp4-aac/g.m4a", 100, 1);
+          const keptSummary = yield* prune(roots, 90 * 1024, [kept]);
+
+          const afterKeep = yield* Effect.forEach([recent, newest, kept], (target) =>
+            fs.exists(target),
+          );
+
+          assert.deepStrictEqual(afterKeep, [false, false, true]);
+          assert.strictEqual(keptSummary.keptBytes, 100 * 1024);
         }),
       ),
     );

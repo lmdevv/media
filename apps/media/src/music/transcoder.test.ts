@@ -47,6 +47,8 @@ const aacInput = (id: string, source: string): Transcoder.TranscodeInput => ({
   codec: "mp3",
 });
 
+const MEBIBYTE = 1024 * 1024;
+
 const collect = (bytes: Stream.Stream<Uint8Array, Transcoder.TranscodeError>) =>
   Stream.runCollect(bytes).pipe(Effect.map((chunks) => Buffer.concat(chunks)));
 
@@ -317,6 +319,34 @@ describe("Transcoder", { timeout: MEDIA_TEST_TIMEOUT }, () => {
 
         expect(Option.isSome(finished.timing)).toBe(true);
         expect((yield* listNames(cacheDir)).toSorted()).toEqual(["left-1.m4a", "left-1.m4a.json"]);
+      }),
+    ));
+
+  it("keeps a finished transcode past the cache's bound through the prune it runs", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const root = yield* songLibrary("Long/Album/01 Long.flac", 60);
+        const dataDir = yield* temporaryDirectory("data");
+        const transcoder = yield* transcoderWith(dataDir, "ffmpeg", { CACHE_MAX_MB: "1" });
+        const otherCache = join(dataDir, "cache", "tmdb");
+        const cacheDir = join(dataDir, "cache", "music", "fmp4-aac");
+
+        // Another cache's file, as big as the bound and older than the transcode: any prune after
+        // it removes this file, so its absence shows the prune ran.
+        yield* Files.makeDirectory(otherCache);
+        yield* Files.writeFileAtomic(join(otherCache, "movie.json"), new Uint8Array(MEBIBYTE), "1");
+
+        const finished = yield* transcoder.transcode({
+          trackId: TrackId.make("long"),
+          profile: "fmp4-aac",
+          source: join(root, "Long/Album/01 Long.flac"),
+          mtimeMs: 1,
+          codec: "flac",
+        });
+
+        expect((yield* Files.statPath(finished.path)).size).toBeGreaterThan(MEBIBYTE);
+        expect(yield* eventually(listNames(otherCache), (names) => names.length === 0)).toEqual([]);
+        expect((yield* listNames(cacheDir)).toSorted()).toEqual(["long-1.m4a", "long-1.m4a.json"]);
       }),
     ));
 

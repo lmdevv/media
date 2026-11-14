@@ -512,21 +512,32 @@ const make = Effect.gen(function* () {
     const transcoded = yield* run;
 
     // Old music evicted its cache after every transcode; the server's caches share one pruner and
-    // one bound, so a finished transcode runs it then, unless a run of it is under way. The new
-    // file is the newest, which the pruner keeps first.
+    // one bound, so a finished transcode runs it then, unless a run of it is under way.
     yield* pruneNow;
 
     return transcoded;
   });
 
-  const pruneNow: Effect.Effect<void> = pruning
-    .withPermitsIfAvailable(1)(
-      prune(cacheDirectories(config.dataDir, paths), config.cacheMaxBytes).pipe(
-        Effect.provideService(FileSystem.FileSystem, fs),
-        Effect.provideService(Path.Path, paths),
-      ),
-    )
-    .pipe(Effect.forkIn(scope), Effect.asVoid);
+  /**
+   * Prunes the caches in the background, keeping the files of every transcode still registered,
+   * the one that just finished included, even past the bound, as old music's eviction kept the
+   * transcode that ran it. The registry is read before the fork, while that transcode is in it.
+   */
+  const pruneNow: Effect.Effect<void> = Effect.gen(function* () {
+    const keep = [...(yield* Ref.get(jobs)).keys()].flatMap((output) => [
+      output,
+      sidecarOf(output),
+    ]);
+
+    yield* pruning
+      .withPermitsIfAvailable(1)(
+        prune(cacheDirectories(config.dataDir, paths), config.cacheMaxBytes, keep).pipe(
+          Effect.provideService(FileSystem.FileSystem, fs),
+          Effect.provideService(Path.Path, paths),
+        ),
+      )
+      .pipe(Effect.forkIn(scope));
+  });
 
   const deleteLive = (job: Job): Effect.Effect<void> =>
     Files.removePath(job.live).pipe(Effect.ignore);

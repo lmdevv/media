@@ -69,12 +69,19 @@ export const songLibrary = (
     return root;
   });
 
-/** Music's transcoder over the real tools, caching under `dataDir`, with `ffmpegPath` if given. */
-export const transcoderWith = (dataDir: string, ffmpegPath = "ffmpeg") =>
+/**
+ * Music's transcoder over the real tools, caching under `dataDir`, with `ffmpegPath` if given and
+ * any other `settings`.
+ */
+export const transcoderWith = (
+  dataDir: string,
+  ffmpegPath = "ffmpeg",
+  settings: Readonly<Record<string, string>> = {},
+) =>
   Layer.build(
     MusicTranscoder.layer.pipe(
       Layer.provide(MediaTools.layer),
-      Layer.provide(testConfigLayer({ DATA_DIR: dataDir, FFMPEG_PATH: ffmpegPath })),
+      Layer.provide(testConfigLayer({ ...settings, DATA_DIR: dataDir, FFMPEG_PATH: ffmpegPath })),
       Layer.provide(NodeServices.layer),
     ),
   ).pipe(Effect.flatMap((context) => MusicTranscoder.Service.pipe(Effect.provideContext(context))));
