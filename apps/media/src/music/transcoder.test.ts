@@ -1,10 +1,31 @@
 import { join } from "node:path";
 
+import { NodeServices } from "@effect/platform-node";
 import { TrackId } from "@media/contracts/ids";
 import { describe, expect, it } from "vitest";
-import { Cause, Clock, Duration, Effect, Exit, Fiber, Option, Schedule, Stream } from "effect";
+import {
+  Cause,
+  Clock,
+  Deferred,
+  Duration,
+  Effect,
+  Exit,
+  Fiber,
+  FileSystem,
+  Layer,
+  Option,
+  Path,
+  Ref,
+  Schedule,
+  type Scope,
+  Stream,
+} from "effect";
 import { TestClock } from "effect/testing";
 
+import * as CachePruner from "../cache-pruner.ts";
+import * as MediaTools from "../media/media-tools.ts";
+import { listingHeldUntil } from "../testing/held-file-system.ts";
+import { testConfigLayer } from "../testing/test-config.ts";
 import * as Files from "./music-files.ts";
 import { adtsPayload } from "./testing/adts.ts";
 import { ffmpegHangingOnName } from "./testing/hanging-ffmpeg.ts";
@@ -28,7 +49,7 @@ const settledPrepare = (
   transcoder: Transcoder.Interface,
   input: Transcoder.TranscodeInput,
   pause: Effect.Effect<void> = Effect.sleep("50 millis"),
-): Effect.Effect<Transcoder.Prepared> =>
+): Effect.Effect<Transcoder.Prepared, never, Scope.Scope> =>
   transcoder.prepare(input).pipe(
     Effect.filterOrElse(
       (prepared) => !Transcoder.Prepared.$is("Pending")(prepared),
@@ -45,6 +66,14 @@ const aacInput = (id: string, source: string): Transcoder.TranscodeInput => ({
   source,
   mtimeMs: 1,
   codec: "mp3",
+});
+
+const fragmentedInput = (id: string, source: string): Transcoder.TranscodeInput => ({
+  trackId: TrackId.make(id),
+  profile: "fmp4-aac",
+  source,
+  mtimeMs: 1,
+  codec: "flac",
 });
 
 const MEBIBYTE = 1024 * 1024;
@@ -336,17 +365,83 @@ describe("Transcoder", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         yield* Files.makeDirectory(otherCache);
         yield* Files.writeFileAtomic(join(otherCache, "movie.json"), new Uint8Array(MEBIBYTE), "1");
 
-        const finished = yield* transcoder.transcode({
-          trackId: TrackId.make("long"),
-          profile: "fmp4-aac",
-          source: join(root, "Long/Album/01 Long.flac"),
-          mtimeMs: 1,
-          codec: "flac",
-        });
+        // Scoped, so only the transcode itself keeps its files once it returns.
+        const finished = yield* Effect.scoped(
+          transcoder.transcode({
+            trackId: TrackId.make("long"),
+            profile: "fmp4-aac",
+            source: join(root, "Long/Album/01 Long.flac"),
+            mtimeMs: 1,
+            codec: "flac",
+          }),
+        );
 
         expect((yield* Files.statPath(finished.path)).size).toBeGreaterThan(MEBIBYTE);
         expect(yield* eventually(listNames(otherCache), (names) => names.length === 0)).toEqual([]);
         expect((yield* listNames(cacheDir)).toSorted()).toEqual(["long-1.m4a", "long-1.m4a.json"]);
+      }),
+    ));
+
+  it("keeps a transcode that finishes during another transcode's prune through its own prune", () =>
+    runScoped(
+      Effect.gen(function* () {
+        const short = yield* songLibrary("Short.flac", 1);
+        const long = yield* songLibrary("Long.flac", 60);
+        const dataDir = yield* temporaryDirectory("data");
+        const cacheDir = join(dataDir, "cache", "music", "fmp4-aac");
+        const listing = yield* Deferred.make<void>();
+        const release = yield* Deferred.make<void>();
+        const listings = yield* Ref.make(0);
+
+        // The first listing of the caches waits until released, as a slow disk holds a prune
+        // between its listing and its removals.
+        const slowListing = Layer.effect(
+          FileSystem.FileSystem,
+          listingHeldUntil(join(dataDir, "cache"), { reached: listing, release }, listings),
+        );
+
+        const pruner = Layer.effect(
+          CachePruner.Service,
+          Path.Path.pipe(
+            Effect.flatMap((path) =>
+              CachePruner.make(CachePruner.cacheDirectories(dataDir, path), MEBIBYTE),
+            ),
+          ),
+        );
+
+        const context = yield* Layer.build(
+          Transcoder.layer.pipe(
+            Layer.provide([MediaTools.layer, pruner]),
+            Layer.provide(testConfigLayer({ DATA_DIR: dataDir })),
+            Layer.provide(slowListing),
+            Layer.provide(NodeServices.layer),
+          ),
+        );
+
+        const transcoder = yield* Transcoder.Service.pipe(Effect.provideContext(context));
+
+        yield* Effect.scoped(
+          transcoder.transcode(fragmentedInput("short", join(short, "Short.flac"))),
+        );
+        yield* Deferred.await(listing);
+
+        // The long song finishes while the short one's prune is still listing; the caller's scope
+        // lets go once `transcode` returns.
+        const finished = yield* Effect.scoped(
+          transcoder.transcode(fragmentedInput("long", join(long, "Long.flac"))),
+        );
+
+        expect((yield* Files.statPath(finished.path)).size).toBeGreaterThan(MEBIBYTE);
+
+        yield* Deferred.succeed(release, undefined);
+
+        // The long song's own prune removes the short song, which no longer fits beside it.
+        const remaining = yield* eventually(
+          listNames(cacheDir),
+          (names) => !names.includes("short-1.m4a"),
+        );
+
+        expect(remaining.toSorted()).toEqual(["long-1.m4a", "long-1.m4a.json"]);
       }),
     ));
 

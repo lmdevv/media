@@ -100,6 +100,14 @@ export interface ScanCatalog<E> {
   readonly lyrics: (tracks: ReadonlyArray<ScannedLyrics>) => Effect.Effect<void, E>;
 }
 
+/**
+ * How much a scan reads. `incremental` reads only the files whose size, modification time,
+ * artwork, or lyric files differ from what the core knows. `full` reads every file's tags,
+ * artwork, and lyrics again, for a manager who asks for it, so a tag edited without changing the
+ * file's size or modification time is picked up.
+ */
+type ScanMode = "incremental" | "full";
+
 /** What a scan reports while it runs. */
 export interface ScanProgress {
   readonly done: number;
@@ -241,12 +249,14 @@ type Read =
   | { readonly read: "lyrics"; readonly lyrics: ScannedLyrics };
 
 const readNeeded = (
+  mode: ScanMode,
   known: KnownTrack | undefined,
   file: { readonly size: number; readonly mtimeMs: number },
   folderArt: string | undefined,
   lyricsFiles: string,
 ): Pending["read"] | null => {
   if (
+    mode === "full" ||
     known === undefined ||
     known.missing ||
     known.size !== file.size ||
@@ -289,7 +299,7 @@ const knownTracks = <E>(catalog: ScanCatalog<E>, paths: ReadonlyArray<string>) =
   }).pipe(Effect.map((ranges) => new Map(ranges.flat().map((file) => [file.path, file]))));
 
 /**
- * Scans the library `libraryId` in `folders`, writing through `catalog`, reporting into
+ * Scans the library `libraryId` in `folders` in `mode`, writing through `catalog`, reporting into
  * `progress` as it goes, and adding the artwork each write stopped using somewhere to
  * `releasedArt` as soon as the write lands, so it counts even when the scan fails or is canceled
  * later. Unreadable files are skipped and counted; they are read again on the next scan because
@@ -304,6 +314,7 @@ export const scanLibrary = Effect.fn("MusicScan.library")(function* <E>(
     readonly libraryId: string;
     readonly folders: ReadonlyArray<string>;
     readonly dataDir: string;
+    readonly mode: ScanMode;
   },
   catalog: ScanCatalog<E>,
   progress: Ref.Ref<ScanProgress>,
@@ -378,6 +389,7 @@ export const scanLibrary = Effect.fn("MusicScan.library")(function* <E>(
 
   const changed = files.flatMap((file): ReadonlyArray<Pending> => {
     const read = readNeeded(
+      scan.mode,
       known.get(file.path),
       file,
       folderArtKey(folderArtOf(file)),

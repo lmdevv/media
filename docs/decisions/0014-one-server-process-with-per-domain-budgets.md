@@ -59,9 +59,14 @@ mount media read-only.
   and sees only the tools' environment.
 - **Where music writes.** Finished transcodes and their timing go under `DATA_DIR/cache/music`,
   which the cache pruner keeps within `CACHE_MAX_MB` with the server's other caches, replacing old
-  music's own `MEDIA_CACHE_MAX_MB`. As old music evicted after every transcode, each finished
-  transcode runs the pruner, and that run keeps the files of every transcode still registered,
-  the finished one included, even when they alone pass the bound. The pruner removes by
+  music's own `MEDIA_CACHE_MAX_MB`. One pruner serves the server: its hourly prune and every
+  prune a transcode asks for run one at a time, and a request made while a prune runs is served
+  by the next one. A file can be protected for a while, and protected files stay through every
+  prune even past the bound, which they count toward. A prune checks protection under one lock at
+  the moment it removes each file, never only when it starts. As old music evicted after every
+  transcode, keeping that transcode, a transcode protects its files from its start until the prune
+  it asks for after it finishes has run. The transcoder protects a file it answers until the
+  request that asked ends. The pruner removes by
   size, recent files included, so every file a transcode is still writing (its output, its live
   copy, its timing) lives under `DATA_DIR/music/transcoding`, which the pruner never reaches, and
   moves into the cache once it is whole; the server empties that folder when it starts. Artwork goes under

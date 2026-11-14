@@ -152,9 +152,14 @@ routes run on the server's Effect HTTP router beside movies' (D24).
     sign (`music/present.ts`). The image and the NixOS module route `/music/art/*` to the server.
 - **Tickets, not signed URLs.** Old music's media service checked an HMAC over the URL with
   `STREAM_SIGNING_KEY`. The stream route admits a personal `track` ticket for its track, from
-  `music.play.start` or a download, as movies' direct-play route admits a `file` ticket: an
-  expired play ticket keeps reading within `STREAM_IDLE_SECONDS` of its last use, and every
-  response stops mid-body once the ticket's session ends (ADR 0011). A grant names the kind of
+  `music.play.start` or a download, as movies' direct-play route admits a `file` ticket, and
+  every response stops mid-body once the ticket's session ends (ADR 0011). Every request needs an
+  unexpired ticket, as old music's signed URLs did, so a listener whose access is removed gets no
+  more bytes once the ticket expires. The route never uses movies' continuation of an expired play
+  ticket within `STREAM_IDLE_SECONDS`. A play ticket lasts 6 hours, as old music's stream URLs
+  did. Old music's player asked for a new URL before its URL expired and again after a refusal
+  (`legacy/music/packages/player/src/source-resolver.ts`), and music's clients on the core must
+  do the same with `music.play.start` and its `expiresAt`. A grant names the kind of
   resource its ticket was for, and the music route refuses any other with `403`. The art route
   admits the shareable `image` ticket for the hash (`artworkTicketId`).
 - **Server functions.** `music/scanner:known`, `upsert`, `move`, `missing`, and `lyrics`,

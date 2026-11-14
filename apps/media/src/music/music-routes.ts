@@ -136,16 +136,14 @@ export const layer: Layer.Layer<
         return text(400, "Invalid start");
       }
 
-      // An original is a read that starts no encoder: an expired play ticket keeps reading it
-      // within the idle time, as movies' direct play does (ADR 0011). A transcode may start
-      // ffmpeg, so it needs an unexpired ticket. A download ticket reads within its own expiry.
-      const within = profile.value === "original" ? PlaybackToken.READ : undefined;
-
+      // Every request needs an unexpired ticket, as old music's signed URLs did, so a listener who
+      // lost access gets nothing once their play's ticket runs out (ADR 0010). A response under way
+      // runs to its end unless its session ends.
       const grant = yield* Effect.result(
         Effect.gen(function* () {
           const token = yield* PlaybackToken.tokenOf(request, tokens.param);
 
-          return yield* tokens.authorize(token, PlaybackToken.PLAY_OR_DOWNLOAD, within);
+          return yield* tokens.authorize(token, PlaybackToken.PLAY_OR_DOWNLOAD);
         }),
       );
 

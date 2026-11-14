@@ -208,7 +208,8 @@ const liveResponse = (
  * and `Cache-Control: no-store`: fragmented profiles as `audio/mp4` with estimated timing headers
  * (`MusicStreamTimingHeader.estimated`), AAC profiles as ADTS (`audio/aac`). A failure after the
  * first byte aborts the response. Other requests wait for the finished file. The live stream holds
- * the transcode in the request's scope until its body ends.
+ * the transcode in the request's scope until its body ends, and keeps the transcode's files in the
+ * cache.
  *
  * @returns The response, or `TranscodeError` when the transcode fails before its first byte, or
  *   `FileError` when the finished file cannot be read.
@@ -224,8 +225,8 @@ export const transcodedResponse = Effect.fn("MusicResponses.transcoded")(functio
 > {
   const transcoder = yield* MusicTranscoder.Service;
 
-  // The cache pruner may remove a finished file between the lookup and the response: transcode it
-  // again once, rather than answer that the song is gone.
+  // The pruner spares a file the transcoder answered until the request ends, so it is gone only if
+  // something else deleted it: transcode it again once rather than answer that it is gone.
   const servedFinished = (transcoded: Transcoded) =>
     finishedFile(request, transcoded, sessionEnded).pipe(
       Effect.catchIf(isGone, () =>
@@ -271,7 +272,7 @@ export const finishedResponse = Effect.fn("MusicResponses.finished")(function* (
   const prepared = yield* transcoder.prepare(input);
 
   return yield* Prepared.$match(prepared, {
-    // A finished file the cache pruner removed since is prepared again, and the client polls.
+    // A finished file deleted outside the pruner is prepared again, and the client polls.
     Ready: ({ transcoded }) =>
       finishedFile(request, transcoded, sessionEnded).pipe(
         Effect.catchIf(isGone, () =>

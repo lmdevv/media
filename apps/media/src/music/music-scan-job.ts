@@ -223,7 +223,12 @@ export const handler = Effect.gen(function* () {
       );
 
       const summary = yield* scanLibrary(
-        { libraryId: target.libraryId, folders: target.folders, dataDir: config.dataDir },
+        {
+          libraryId: target.libraryId,
+          folders: target.folders,
+          dataDir: config.dataDir,
+          mode: job.payload.mode ?? "incremental",
+        },
         catalogOf(session, lease),
         progress,
         art.released,

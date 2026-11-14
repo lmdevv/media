@@ -15,6 +15,7 @@ import { Duration, Effect, Exit, Layer, Option, Redacted, Scope, SubscriptionRef
 import { HttpServer } from "effect/http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import * as CachePruner from "../cache-pruner.ts";
 import * as CoreTickets from "../core/core-tickets.ts";
 import { serve } from "../http/http-server.ts";
 import * as MediaTools from "../media/media-tools.ts";
@@ -177,7 +178,7 @@ beforeAll(async () => {
       }).pipe(Layer.provide(fake.layer), Layer.provide(StreamOwners.layer)),
     ),
     Layer.provide(sources(tracks)),
-    Layer.provide(MusicTranscoder.layer.pipe(Layer.provide(MediaTools.layer))),
+    Layer.provide(MusicTranscoder.layer.pipe(Layer.provide([MediaTools.layer, CachePruner.layer]))),
     Layer.provide(config),
     Layer.provide(NodeServices.layer),
   );
@@ -297,17 +298,44 @@ describe("music routes", { timeout: 60_000 }, () => {
     expect((packets * 1024) / 44_100).toBeGreaterThan(TONE_SECONDS - 1);
   });
 
-  it("keep reading an original past its ticket's expiry, but start no transcode with it", async () => {
-    const ticket = await issue(OTHER, "play", 1000);
+  it("serve nothing to an expired ticket, but run a response under way to its end", async () => {
+    const ticket = await issue(LARGE, "play", 2000);
+    const response = await fetch(streamUrl(LARGE, ticket));
 
-    expect((await fetch(streamUrl(OTHER, ticket))).status).toBe(200);
+    expect(response.status).toBe(200);
 
-    // Tickets hold whole seconds, so this one has expired 2 s later.
-    await new Promise((resolve) => setTimeout(resolve, 2100));
+    if (response.body === null) throw new Error("No body");
 
-    expect((await fetch(streamUrl(OTHER, ticket))).status).toBe(200);
-    expect((await fetch(streamUrl(OTHER, ticket, "&p=aac-128&finished=1"))).status).toBe(401);
-    expect((await fetch(streamUrl(OTHER, ticket, "&p=aac-128&start=200"))).status).toBe(401);
+    const reader: ReadableStreamDefaultReader<Uint8Array> = response.body.getReader();
+    const first = await reader.read();
+
+    expect(first.done).toBe(false);
+
+    // A seek while the ticket lasts.
+    const seek = await fetch(streamUrl(LARGE, ticket), { headers: { range: "bytes=4096-8191" } });
+
+    expect(seek.status).toBe(206);
+    expect((await seek.arrayBuffer()).byteLength).toBe(4096);
+
+    // Tickets hold whole seconds, so this one has expired 3 s later.
+    await new Promise((resolve) => setTimeout(resolve, 3100));
+
+    expect(await drain(reader, first.value?.byteLength ?? 0)).toEqual({
+      bytes: 128 * 1024 * 1024,
+      aborted: false,
+    });
+
+    const answers = await Promise.all(
+      ["", "&p=aac-128", "&p=aac-128&finished=1", "&p=aac-128&start=200"].map(async (query) => {
+        const refused = await fetch(streamUrl(LARGE, ticket, query), {
+          headers: { range: "bytes=0-1023" },
+        });
+
+        return [refused.status, await refused.text()] as const;
+      }),
+    );
+
+    expect(answers).toEqual(Array.from({ length: 4 }, () => [401, "Invalid or expired ticket"]));
   });
 
   it("serve art to its shareable ticket only", async () => {

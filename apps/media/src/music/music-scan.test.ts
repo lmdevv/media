@@ -22,6 +22,7 @@ import {
   moveFile,
   PNG,
   removeDirectory,
+  replaceInPlace,
   setFileTime,
   sizeOf,
   writeBytes,
@@ -38,13 +39,17 @@ afterEach(async () => {
   await removeDirectory(work);
 });
 
-const scanOnce = (memory: MemoryCatalog, folders: ReadonlyArray<string>) =>
+const scanOnce = (
+  memory: MemoryCatalog,
+  folders: ReadonlyArray<string>,
+  mode: "incremental" | "full" = "incremental",
+) =>
   Effect.gen(function* () {
     const progress = yield* Ref.make<ScanProgress>({ done: 0, total: null, message: "" });
     const released = yield* Ref.make(HashSet.empty<string>());
 
     return yield* scanLibrary(
-      { libraryId: "library", folders, dataDir: join(work, "data") },
+      { libraryId: "library", folders, dataDir: join(work, "data"), mode },
       memory.catalog,
       progress,
       released,
@@ -191,6 +196,34 @@ describe("scanLibrary", { timeout: MEDIA_TEST_TIMEOUT }, () => {
 
     expect(lyricsOnly.updated).toBe(1);
     expect(await Effect.runPromise(memory.writes)).toMatchObject({ upserted: [], lyrics: [moved] });
+  });
+
+  it("reads every file again on a full scan, so a tag edited in place is picked up", async () => {
+    const song = join(work, "music", "Album", "01 Song.flac");
+
+    await writeSong(song, { seconds: 1, tags: { title: "Before", album: "Album" } });
+    await setFileTime(song, 1_700_000_000_000);
+
+    const memory = await Effect.runPromise(memoryCatalog);
+
+    await Effect.runPromise(scanOnce(memory, [join(work, "music")]));
+    await Effect.runPromise(memory.writes);
+
+    // The same number of bytes and the same modification time: only the tag's text differs.
+    await replaceInPlace(song, "title=Before", "title=Edited");
+    await setFileTime(song, 1_700_000_000_000);
+
+    const incremental = await Effect.runPromise(scanOnce(memory, [join(work, "music")]));
+
+    expect(incremental.updated).toBe(0);
+    expect((await Effect.runPromise(memory.writes)).upserted).toEqual([]);
+
+    const full = await Effect.runPromise(scanOnce(memory, [join(work, "music")], "full"));
+    const writes = await Effect.runPromise(memory.writes);
+
+    expect(full).toEqual({ files: 1, updated: 1, moved: 0, missing: 0, failed: 0 });
+    expect(writes.upserted).toEqual([song]);
+    expect((await Effect.runPromise(memory.tracks)).get(song)?.track.title).toBe("Edited");
   });
 
   it("stops without marking anything missing when a folder the core knows songs in is empty", async () => {

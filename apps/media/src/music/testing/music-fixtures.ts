@@ -6,6 +6,7 @@ import { NodeServices } from "@effect/platform-node";
 import type { KnownTrack, ScannedLyrics, ScannedTrack } from "@media/contracts/models/music";
 import { Effect, Layer, Ref, Schema, type Scope } from "effect";
 
+import * as CachePruner from "../../cache-pruner.ts";
 import * as MediaTools from "../../media/media-tools.ts";
 import { testConfigLayer } from "../../testing/test-config.ts";
 import type { PathRange, ScanCatalog, TrackMove } from "../music-scan.ts";
@@ -27,6 +28,7 @@ export {
   moveFile,
   PNG,
   removeDirectory,
+  replaceInPlace,
   resizeFile,
   setFileTime,
   sizeOf,
@@ -70,8 +72,8 @@ export const songLibrary = (
   });
 
 /**
- * Music's transcoder over the real tools, caching under `dataDir`, with `ffmpegPath` if given and
- * any other `settings`.
+ * Music's transcoder over the real tools and its own cache pruner, caching under `dataDir`, with
+ * `ffmpegPath` if given and any other `settings`.
  */
 export const transcoderWith = (
   dataDir: string,
@@ -81,6 +83,7 @@ export const transcoderWith = (
   Layer.build(
     MusicTranscoder.layer.pipe(
       Layer.provide(MediaTools.layer),
+      Layer.provide(CachePruner.layer),
       Layer.provide(testConfigLayer({ ...settings, DATA_DIR: dataDir, FFMPEG_PATH: ffmpegPath })),
       Layer.provide(NodeServices.layer),
     ),

@@ -608,7 +608,10 @@ music's tables of the same names. No client reads them yet; the music commands c
   one library as within one. A folder that holds no audio while the core lists songs on disk in
   it stops the scan without marking anything missing, as old music's empty library did. The scan
   compares `known`'s fingerprints through the same 1,024-character bound the core keeps them in,
-  so a rescan rewrites nothing that did not change. Folder failures start with the
+  so a rescan rewrites nothing that did not change. A scan a manager queues with `mode: "full"`
+  reads every file's tags, artwork, and lyrics again whatever its size and modification time, as a full
+  movies scan probes every file, so a tag edited in place is picked up; old music had no full
+  scan, and the core's command offers one for every kind. Folder failures start with the
   `SCAN_FAILURE_PREFIXES` the account client reads. A song's own lyric sets are chosen within the
   core's 512 KiB lyrics row (480 KiB of JSON, for the measures' difference) where old music kept
   768 KiB, and the set a client shows goes first, so `fitLyrics`, which keeps leading sets, never

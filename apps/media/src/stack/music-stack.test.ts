@@ -2,10 +2,18 @@ import { join } from "node:path";
 
 import { MusicStreamTimingHeader, musicStreamPath } from "@media/contracts/music-playback";
 import type { Platform } from "@media/sdk/effect";
-import { Effect, Exit, Option, Schema, Scope } from "effect";
+import { Effect, Exit, Option, Predicate, Schema, Scope } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { moveFile, PNG, resizeFile, writeBytes, writeSong } from "../music/testing/music-songs.ts";
+import {
+  moveFile,
+  PNG,
+  replaceInPlace,
+  resizeFile,
+  setFileTime,
+  writeBytes,
+  writeSong,
+} from "../music/testing/music-songs.ts";
 import { makeWorkDir, removeDir } from "../testing/core-host.ts";
 import {
   core,
@@ -55,12 +63,19 @@ const ended = (jobId: string): Promise<ScanEnd> =>
     120_000,
   );
 
+const Issued = Schema.Struct({ ticket: Schema.String, expiresAt: Schema.Finite });
+
 /** Asks for a scan of the music library and waits for its own scan to end. */
-const scanNow = async (): Promise<ScanEnd> => {
-  const queued = await run(admin.platform.core.libraries.scan({ libraryId: library() }));
+const scanNow = async (mode?: "full"): Promise<ScanEnd> => {
+  const queued = await run(
+    admin.platform.core.libraries.scan(
+      mode === undefined ? { libraryId: library() } : { libraryId: library(), mode },
+    ),
+  );
+
   const job = await ended(queued.jobId);
 
-  return queued.created ? job : scanNow();
+  return queued.created ? job : scanNow(mode);
 };
 
 const tracksOf = (platform: Platform.Interface) =>
@@ -228,6 +243,81 @@ describe.skipIf(core === undefined || !(await ffmpegAvailable()))(
       expect(scanned.message).toBe("3 files, 0 updated, 1 moved, 0 missing");
       expect((await trackNamed(admin.platform, "Second")).id).toBe(second.id);
     }, 300_000);
+
+    it("reads a tag edited in place again on a full scan", async () => {
+      const song = join(musicRoot, "Stack Band", "Stack Album", "01 First.flac");
+      const at = 1_700_000_000_000;
+
+      await setFileTime(song, at);
+      await scanNow();
+
+      // The same size and modification time: only the title's text differs.
+      await replaceInPlace(song, "title=First", "title=Fifth");
+      await setFileTime(song, at);
+
+      expect((await scanNow()).message).toBe("3 files, 0 updated, 0 missing");
+      expect((await tracksOf(admin.platform)).map((track) => track.title)).toContain("First");
+
+      const full = await scanNow("full");
+
+      expect(full).toMatchObject({ status: "succeeded", message: "3 files, 3 updated, 0 missing" });
+      expect((await tracksOf(admin.platform)).map((track) => track.title).toSorted()).toEqual([
+        "Fifth",
+        "Long",
+        "Second",
+      ]);
+    }, 300_000);
+
+    it("serves no more bytes to an expired ticket once the listener's access is removed", async () => {
+      const listener = await personIn(scope, "member", "revoked");
+      const { userId, sessionId } = await run(listener.platform.core.auth.sessions.current());
+      const resource = { type: "library", id: library() } as const;
+      const principal = { kind: "user", userId } as const;
+
+      await run(admin.platform.core.permissions.grants.set({ resource, principal, level: "view" }));
+
+      const second = await trackNamed(listener.platform, "Second");
+
+      await run(listener.platform.music.play.start({ trackId: second.id }));
+
+      const short = await runHost(
+        "core/ticketsProbe:issuePersonal",
+        {
+          sessionId,
+          resource: { kind: "track", id: second.id },
+          purpose: "play",
+          lifetimeMs: 2000,
+        },
+        Issued,
+      );
+
+      used.push(short.ticket);
+      const first = await fetch(streamUrl(second.id, short.ticket));
+
+      expect(first.status).toBe(200);
+      expect((await first.arrayBuffer()).byteLength).toBeGreaterThan(0);
+
+      await run(admin.platform.core.permissions.grants.remove({ resource, principal }));
+
+      const refused = await run(
+        listener.platform.music.play.start({ trackId: second.id }).pipe(Effect.flip),
+      );
+
+      expect(Predicate.isTagged(refused, "NotFound")).toBe(true);
+
+      // Tickets hold whole seconds, so this one has expired 3 s later.
+      await new Promise((resolve) => setTimeout(resolve, 3100));
+
+      const answers = await Promise.all(
+        ["", "", "", "", "&p=aac-128"].map(async (query) => {
+          const response = await fetch(streamUrl(second.id, short.ticket, query));
+
+          return [response.status, await response.text()] as const;
+        }),
+      );
+
+      expect(answers).toEqual(Array.from({ length: 5 }, () => [401, "Invalid or expired ticket"]));
+    }, 120_000);
 
     it("stops a song once its listener signs out", async () => {
       const listener = await personIn(scope, "admin", "listener");

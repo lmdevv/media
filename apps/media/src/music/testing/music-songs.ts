@@ -8,6 +8,7 @@ import {
   mkdir,
   mkdtemp,
   readdir,
+  readFile,
   rename,
   rm,
   stat,
@@ -42,6 +43,21 @@ export const setFileTime = (path: string, ms: number): Promise<void> =>
 
 /** Moves a file, as a person renaming a song does. */
 export const moveFile = (from: string, to: string): Promise<void> => rename(from, to);
+
+/**
+ * Replaces the first `from` in the file at `path` with `to`, which is as long, so the file keeps
+ * its size: a tag edited in place. Keep its modification time with `setFileTime`.
+ */
+export const replaceInPlace = async (path: string, from: string, to: string): Promise<void> => {
+  if (to.length !== from.length) throw new Error("The replacement must be as long");
+
+  const bytes = await readFile(path);
+  const at = bytes.indexOf(from, 0, "latin1");
+
+  if (at < 0) throw new Error(`No ${from} in ${path}`);
+  bytes.write(to, at, "latin1");
+  await writeFile(path, bytes);
+};
 
 /** Grows or cuts a file to `bytes`. */
 export const resizeFile = (path: string, bytes: number): Promise<void> => truncate(path, bytes);

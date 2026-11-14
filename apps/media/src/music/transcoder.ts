@@ -4,7 +4,9 @@
  * ffmpeg still writes it; a background lane that prepares the finished file for a client that
  * polls; and fresh encodes from an offset for a listener who seeks ahead. They run under music's
  * own caps, not the server's video transcode limit (ADR 0014), and write only under `DATA_DIR`'s
- * cache, which the cache pruner keeps within `CACHE_MAX_MB`.
+ * cache, which the cache pruner keeps within `CACHE_MAX_MB`. The pruner keeps a transcode's files
+ * from its start until a prune after it finishes has run, and keeps a file the transcoder
+ * answered until the asker's scope closes.
  */
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
@@ -23,7 +25,6 @@ import {
   Fiber,
   Layer,
   Option,
-  Path,
   Ref,
   Result,
   Schema,
@@ -34,7 +35,7 @@ import {
   SubscriptionRef,
 } from "effect";
 
-import { cacheDirectories, markUsed, prune } from "../cache-pruner.ts";
+import * as CachePruner from "../cache-pruner.ts";
 import * as MediaTools from "../media/media-tools.ts";
 import type { MediaToolFailed } from "../media/media-tools.ts";
 import * as MediaConfig from "../media-config.ts";
@@ -94,6 +95,9 @@ const PARTIAL_SUFFIX = ".part";
 const LIVE_CHUNK_BYTES = 256 * 1024;
 
 const sidecarOf = (output: string): string => `${output}${SIDECAR_SUFFIX}`;
+
+/** A cached transcode's files: the audio, and the timing beside it for the fragmented profiles. */
+const filesOf = (output: string): ReadonlyArray<string> => [output, sidecarOf(output)];
 
 const TimelineProbe = Schema.Struct({
   streams: Schema.Tuple([
@@ -240,13 +244,19 @@ interface FromOffset {
 
 /** Transcoded files on demand. */
 export interface Interface {
-  /** Returns the cached transcode, creating it first when needed. */
-  readonly transcode: (input: TranscodeInput) => Effect.Effect<Transcoded, TranscodeError>;
+  /**
+   * Returns the cached transcode, creating it first when needed. Its files stay in the cache
+   * until the scope closes.
+   */
+  readonly transcode: (
+    input: TranscodeInput,
+  ) => Effect.Effect<Transcoded, TranscodeError, Scope.Scope>;
   /**
    * Starts or joins the transcode of `input` and returns as soon as it can be read: the cached
    * file, or the live transcode once ffmpeg has written its first bytes. Fails when the
    * transcode fails before that. A live transcode stays readable until the
-   * scope closes; once every scope holding a transcode has closed, it stops after a second.
+   * scope closes; once every scope holding a transcode has closed, it stops after a second. The
+   * transcode's files stay in the cache until the scope closes.
    */
   readonly open: (input: TranscodeInput) => Effect.Effect<Opened, TranscodeError, Scope.Scope>;
   /**
@@ -267,8 +277,9 @@ export interface Interface {
    * about it for `PREPARE_HOLD`. New detached runs take the prepare lane, `PREPARE_RUNS` at once
    * and never a shared slot; while the lane is taken, `prepare` returns `Pending` without starting
    * one, and a later ask starts it. A held run's failure is returned for `PREPARE_FAILURE_TTL`.
+   * A `Ready` file stays in the cache until the scope closes.
    */
-  readonly prepare: (input: TranscodeInput) => Effect.Effect<Prepared>;
+  readonly prepare: (input: TranscodeInput) => Effect.Effect<Prepared, never, Scope.Scope>;
 }
 
 /** The transcode cache. */
@@ -334,10 +345,9 @@ const cached = (output: string, input: TranscodeInput): Effect.Effect<Option.Opt
 const make = Effect.gen(function* () {
   const config = yield* MediaConfig.Service;
   const tools = yield* MediaTools.Service;
+  const pruner = yield* CachePruner.Service;
   const fs = yield* FileSystem.FileSystem;
-  const paths = yield* Path.Path;
   const scope = yield* Effect.scope;
-  const pruning = yield* Semaphore.make(1);
   const cacheDir = join(config.dataDir, "cache", "music");
   /**
    * Where every file a transcode writes before it is finished lives: its output, its live copy,
@@ -359,7 +369,7 @@ const make = Effect.gen(function* () {
    * least recently used files first, keeps the songs people play.
    */
   const markPlayed = (output: string): Effect.Effect<void> =>
-    Effect.forEach([output, sidecarOf(output)], (file) => markUsed(file), { discard: true }).pipe(
+    Effect.forEach(filesOf(output), (file) => CachePruner.markUsed(file), { discard: true }).pipe(
       Effect.provideService(FileSystem.FileSystem, fs),
       Effect.ignore,
     );
@@ -509,34 +519,7 @@ const make = Effect.gen(function* () {
       job.lane.withPermits(1),
     );
 
-    const transcoded = yield* run;
-
-    // Old music evicted its cache after every transcode; the server's caches share one pruner and
-    // one bound, so a finished transcode runs it then, unless a run of it is under way.
-    yield* pruneNow;
-
-    return transcoded;
-  });
-
-  /**
-   * Prunes the caches in the background, keeping the files of every transcode still registered,
-   * the one that just finished included, even past the bound, as old music's eviction kept the
-   * transcode that ran it. The registry is read before the fork, while that transcode is in it.
-   */
-  const pruneNow: Effect.Effect<void> = Effect.gen(function* () {
-    const keep = [...(yield* Ref.get(jobs)).keys()].flatMap((output) => [
-      output,
-      sidecarOf(output),
-    ]);
-
-    yield* pruning
-      .withPermitsIfAvailable(1)(
-        prune(cacheDirectories(config.dataDir, paths), config.cacheMaxBytes, keep).pipe(
-          Effect.provideService(FileSystem.FileSystem, fs),
-          Effect.provideService(Path.Path, paths),
-        ),
-      )
-      .pipe(Effect.forkIn(scope));
+    return yield* run;
   });
 
   const deleteLive = (job: Job): Effect.Effect<void> =>
@@ -634,9 +617,18 @@ const make = Effect.gen(function* () {
 
     yield* Ref.update(jobs, (current) => new Map(current).set(output, job));
 
-    const fiber = yield* produce(job, input).pipe(
-      Effect.mapError(failure(input)),
-      Effect.onExit((exit) => settle(job, input, exit)),
+    // Old music evicted its cache after each transcode, keeping that transcode even past the
+    // bound. The server's caches share one pruner, so a finished transcode asks it for a prune and
+    // keeps its own files until that prune has run, whatever other prunes run meanwhile.
+    const fiber = yield* pruner.protect(filesOf(output)).pipe(
+      Effect.andThen(
+        produce(job, input).pipe(
+          Effect.mapError(failure(input)),
+          Effect.onExit((exit) => settle(job, input, exit)),
+        ),
+      ),
+      Effect.andThen(pruner.prune),
+      Effect.scoped,
       Effect.ignore,
       Effect.forkIn(scope),
     );
@@ -698,6 +690,9 @@ const make = Effect.gen(function* () {
 
   const open = Effect.fn("Transcoder.open")(function* (input: TranscodeInput) {
     const output = outputOf(input);
+
+    // Before the lookup, so no prune removes the file it finds.
+    yield* pruner.protect(filesOf(output));
 
     const found = yield* registry.withPermits(1)(
       Effect.gen(function* () {
@@ -807,6 +802,8 @@ const make = Effect.gen(function* () {
     const output = outputOf(input);
     const now = yield* Clock.currentTimeMillis;
     const pending = Prepared.Pending({ retryAfter: PREPARE_RETRY });
+
+    yield* pruner.protect(filesOf(output));
 
     const prepared = yield* registry.withPermits(1)(
       Effect.gen(function* () {
@@ -929,15 +926,20 @@ const make = Effect.gen(function* () {
   });
 
   return Service.of({
+    // The files stay protected in the caller's scope; the transcode is held only while awaited.
     transcode: (input) =>
-      open(input).pipe(
-        Effect.flatMap(
-          Opened.$match({
-            Finished: ({ transcoded }) => Effect.succeed(transcoded),
-            Live: ({ finished }) => finished,
-          }),
+      pruner.protect(filesOf(outputOf(input))).pipe(
+        Effect.andThen(
+          open(input).pipe(
+            Effect.flatMap(
+              Opened.$match({
+                Finished: ({ transcoded }) => Effect.succeed(transcoded),
+                Live: ({ finished }) => finished,
+              }),
+            ),
+            Effect.scoped,
+          ),
         ),
-        Effect.scoped,
       ),
     open,
     openAt,
@@ -949,5 +951,5 @@ const make = Effect.gen(function* () {
 export const layer: Layer.Layer<
   Service,
   never,
-  MediaConfig.Service | MediaTools.Service | FileSystem.FileSystem | Path.Path
+  MediaConfig.Service | MediaTools.Service | CachePruner.Service | FileSystem.FileSystem
 > = Layer.effect(Service, make);

@@ -137,12 +137,12 @@ export const layer = (options: Options) =>
         CoreStatus.layer,
         CoreRescans.layer,
         Backups.layerSyncOnStart,
-        CachePruner.layer,
       ).pipe(
         Layer.provideMerge(CoreImports.layer(options.serviceKey)),
         Layer.provideMerge(
           Layer.mergeAll(MusicArt.layer, TrackSources.layer, MusicTranscoder.layer),
         ),
+        Layer.provideMerge(CachePruner.layer),
         Layer.provideMerge(
           Backups.layer.pipe(Layer.provide([ConvexCli.layer, CoreBackups.catalogLayer])),
         ),
