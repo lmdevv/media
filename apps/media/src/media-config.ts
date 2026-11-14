@@ -107,7 +107,10 @@ export interface Interface {
    * embedded subtitle track. Every other ffprobe and ffmpeg run to completion gets `probeTimeout`.
    */
   readonly fileScanTimeout: Duration.Duration;
-  /** Size the caches under `DATA_DIR` (provider responses, indexes, subtitles, artwork) are pruned to. */
+  /**
+   * Size the caches under `DATA_DIR` (provider responses, indexes, subtitles, artwork, music's
+   * cached transcodes) are pruned to.
+   */
   readonly cacheMaxBytes: number;
   readonly ffmpegPath: string;
   readonly ffprobePath: string;

@@ -1,7 +1,7 @@
 /**
  * Rescans after a file changes, on the core (ADR 0024). The server watches each folder of every
- * movies library at the path the library names, following the core's list of them live, and asks
- * the core to queue a scan of the movies libraries a change reaches (`core/scans:changed`). A
+ * movies and music library at the path the library names, following the core's list of them live,
+ * and asks the core to queue a scan of the libraries a change reaches (`core/scans:changed`). A
  * folder that reaches an approved root through a link is watched at its own path, so the paths a
  * change names are the ones the core knows. It never scans itself: on the core a scan writes only
  * under a scan job's lease, so the core's scan queue runs it, joining a scan already queued or
@@ -146,7 +146,7 @@ export const foldersToWatch = Effect.fn("CoreRescans.foldersToWatch")(function* 
   });
 });
 
-/** Watches every movies library's folders and asks the core to rescan what changed. */
+/** Watches every movies and music library's folders and asks the core to rescan what changed. */
 export const layer: Layer.Layer<
   never,
   never,

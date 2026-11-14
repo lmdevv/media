@@ -4,7 +4,9 @@ Node + Effect HttpApi media service. It scans approved library folders, probes f
 ffprobe, merges local NFO/artwork with TMDB metadata, negotiates playback, serves direct files
 with byte ranges, produces fMP4 HLS (remux, audio-only transcode, Intel QSV or VA-API transcode with HDR
 tone mapping, or software transcode capped at 1080p), converts text subtitles to WebVTT, and
-hosts the built web app.
+hosts the built web app. For music (`src/music/`, from old music's media service) it scans music
+folders into the core's catalog with their tags, folder art, and own lyrics, follows moved files,
+and streams songs as originals, fast-start AAC, or gapless fragmented FLAC and AAC.
 
 ```sh
 pnpm --filter @media/server dev        # bundle, watch, and run with .env.local
@@ -35,6 +37,8 @@ playback events are logged. `CONVEX_URL` without the key refuses to start.
 | `GET /media/hls/:streamId/:generation/:index.m4s?token=` | fMP4 media segment                                                  |
 | `GET /media/subtitles/:fileId/:track.vtt?token=`         | WebVTT (`e<stream>` embedded, `x<file-name hash>` sidecar)          |
 | `GET /artwork/:key?w=`                                   | Artwork by sealed key, original or resized (185–1280), no token     |
+| `GET, HEAD /media/music/stream/:trackId?ticket=&p=`      | A song: original or a transcode profile; `&start=` or `&finished=1` |
+| `GET /music/art/:hash?ticket=`                           | Music artwork by hash, to its shareable ticket                      |
 | `POST /api/metadata/candidates`                          | `metadata.searchCandidates` command (bearer Convex token, `manage`) |
 | `POST /api/migration/connect`                            | `migration.connect` command (bearer Convex token, `admin`)          |
 | `POST /api/migration/dry-run`                            | `migration.dryRun` command (bearer Convex token, `admin`)           |
@@ -69,7 +73,9 @@ events on local disks, polling on NFS, SMB/CIFS, 9p and FUSE mounts; `events`; `
 `LIBRARY_POLL_SECONDS` (60), `PROBE_TIMEOUT_SECONDS` (60: ffprobe probes, artwork resizes, and
 other short tool runs), `FILE_SCAN_TIMEOUT_SECONDS` (900: keyframe scans and embedded subtitle
 extraction, which read a whole file), `CACHE_MAX_MB` (2048: provider responses, keyframe indexes,
-subtitles, and artwork under `DATA_DIR`, pruned hourly, least recently used first), `TRICKPLAY`
+subtitles, artwork, and music's cached transcodes under `DATA_DIR`, pruned hourly, least recently
+used first; music's artwork under `DATA_DIR/music/art`, and the transcodes still being written
+under `DATA_DIR/music/transcoding`, are never pruned), `TRICKPLAY`
 (`on` or `off`: scrub thumbnail jobs), `TRICKPLAY_INTERVAL_SECONDS` (10, from 1 to 600),
 `TRICKPLAY_CONCURRENCY` (1: files given thumbnails at once, besides other jobs), `FFMPEG_PATH`,
 `FFPROBE_PATH`,

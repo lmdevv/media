@@ -389,7 +389,7 @@ describe.skipIf(stack === undefined)("cancelling scans and imports", { timeout: 
     expect(await finishWith(stack, second)).toEqual({ outcome: "canceled" });
   });
 
-  it("tell the server every movies library's folders, and only the server", async () => {
+  it("tell the server every movies and music library's folders, and only the server", async () => {
     if (stack === undefined) return;
 
     const admin = await member(stack, "watched-admin", "admin");
@@ -414,7 +414,7 @@ describe.skipIf(stack === undefined)("cancelling scans and imports", { timeout: 
       folders: [await makeTree([])],
     });
 
-    expect((await watchedFolders(stack)).has(music.libraryId)).toBe(false);
+    expect((await watchedFolders(stack)).get(music.libraryId)).toHaveLength(1);
     await expect(
       runServer(
         stack,

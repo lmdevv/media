@@ -4,7 +4,7 @@ import {
   type NegotiateRequest,
   type NegotiateResponse,
   type PlaybackSessionEnded,
-  type PlaybackTokenInvalid,
+  PlaybackTokenInvalid,
   UnsupportedPlayback,
 } from "@media/contracts/media-playback";
 import { Context, Duration, Effect, FileSystem, Layer, Option, Path } from "effect";
@@ -95,6 +95,15 @@ const make = Effect.gen(function* () {
     request: NegotiateRequest,
   ) {
     const grant = yield* verifier.verify(request.token, PlaybackToken.PLAY);
+
+    // A music track's ticket plays only on music's stream route.
+    if (grant.resource !== "file") {
+      return yield* new PlaybackTokenInvalid({
+        reason: "wrong_purpose",
+        message: "This ticket is for a song, not a movies file",
+      });
+    }
+
     const negotiation = yield* sessions.negotiate(grant);
 
     const file = yield* resolveInsideRoots(grant.fileId, { sidecars: true }).pipe(

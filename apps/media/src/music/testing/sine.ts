@@ -1,0 +1,50 @@
+import { randomUUID } from "node:crypto";
+import { join } from "node:path";
+
+import { Effect } from "effect";
+
+import * as Files from "../music-files.ts";
+import { runFfmpeg } from "./music-fixtures.ts";
+
+const SINE_RATE = 48_000;
+
+const TONE = "aevalsrc=0.5*sin(2*PI*110*t)|0.5*sin(2*PI*110*t)";
+
+const ENCODERS: Readonly<Record<"flac" | "mp3" | "m4a", ReadonlyArray<string>>> = {
+  flac: ["-c:a", "flac"],
+  mp3: ["-c:a", "libmp3lame", "-b:a", "192k"],
+  m4a: ["-c:a", "aac", "-b:a", "192k"],
+};
+
+/** Writes samples `[start, end)` of the tone to `dir/name.extension`; returns the path. */
+export const sineSegment = (
+  dir: string,
+  name: string,
+  extension: keyof typeof ENCODERS,
+  start: number,
+  end: number,
+) => {
+  const path = join(dir, `${name}.${extension}`);
+
+  return runFfmpeg([
+    "-v",
+    "error",
+    "-f",
+    "lavfi",
+    "-i",
+    `${TONE}:s=${SINE_RATE}:d=${Math.ceil(end / SINE_RATE) + 1}`,
+    "-af",
+    `atrim=start_sample=${start}:end_sample=${end},asetpts=N/SR/TB`,
+    ...ENCODERS[extension],
+    path,
+  ]).pipe(Effect.as(path));
+};
+
+/** Decodes the first audio stream of `path` to mono 32-bit float samples, without any trimming. */
+export const decodeMono = Effect.fn("Test.decodeMono")(function* (path: string, scratch: string) {
+  const raw = join(scratch, `decoded-${randomUUID()}.f32`);
+  yield* runFfmpeg(["-v", "error", "-i", path, "-map", "0:a:0", "-ac", "1", "-f", "f32le", raw]);
+  const bytes = yield* Files.readWholeFile(raw);
+
+  return new Float32Array(bytes.slice().buffer);
+});

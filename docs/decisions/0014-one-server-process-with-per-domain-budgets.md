@@ -1,6 +1,7 @@
 # 0014. Run one server process with per-domain worker caps and one transcode limit
 
 - Status: Accepted, 2026-11-03. Amended 2026-11-10 with the pools on the core and guests' streams.
+  Amended 2026-11-13 with music's pool, its art lane, and its audio transcodes.
 - Decisions: D29
 
 ## Context
@@ -14,23 +15,68 @@ mount media read-only.
 
 - One server process runs worker pools and ffmpeg child processes.
 - Each domain has its own caps, so a music rescan cannot starve a transcode.
-- Each job kind runs in one pool, and each pool has its own cap. Music adds its pools in phase 5.
+- Each job kind runs in one pool, and each pool has its own cap. Music added its pool in phase 5.
 
   | Pool                | Job kinds                         | Cap                     |
   | ------------------- | --------------------------------- | ----------------------- |
   | `movies`            | scan, metadata, person, migration | 2                       |
   | `movies.background` | trickplay                         | `TRICKPLAY_CONCURRENCY` |
+  | `music`             | scan                              | 1                       |
   | `server`            | backup                            | 1                       |
 
-- One server-wide transcode limit covers every domain. Guests have the lowest priority under it
-  (ADR 0007). The remux limit follows the same rules.
+- One server-wide transcode limit covers every domain's video. Guests have the lowest priority
+  under it (ADR 0007). The remux limit follows the same rules. Music's audio transcodes keep their
+  own caps (amended 2026-11-13, below).
 - Media mounts stay read-only.
 - The sandbox stays.
+
+## Music on the server (amended 2026-11-13)
+
+`p5-music-server` added music's pool and moved old music's transcoder onto this server.
+
+- **The `music` pool** runs `music.scan`, one scan at a time on a server, as old music ran its
+  scans. It claims only while `core/scans:domains` answers that music has a library, like the
+  movies pools. Its kind's own row in the core's job table takes its enqueues, so a rescan of
+  every music library never contends with movies' enqueues (ADR 0012), and its claims never take a
+  movies slot.
+- **The art lane.** Old music collected unused artwork after each scan and at start, under its
+  one job lane. The core has no job kind for it, so the server runs it in a lane of its own, one
+  collection at a time: after each music scan, the artwork that scan's writes released; at
+  start, and every hour after, every stored artwork no track, album, or artist uses. Old music ran
+  the full collection after a library's deletion instead, which it saw in its own library list;
+  the hourly run covers that, since a removed library's purge takes a while anyway. A collection
+  never deletes artwork written in the last ten minutes, which a running scan may not have stored
+  yet, so it needs no turn with the scans.
+- **Audio transcodes keep music's caps, outside the video limit.** Old music ran two shared
+  transcodes at once, a lane of one for files prepared in the background (`&finished=1`), and up
+  to eight fresh encodes from an offset, and the port keeps exactly those caps. They do not take
+  slots under `MAX_CONCURRENT_TRANSCODES`, which bounds video encoders: an audio encode is a
+  fraction of a video one, and sharing the limit would let two movies refuse every song. A guest's
+  song is capped like anyone's, as old music had no guest priority.
+- **Pipes, not files, for live streams.** ffmpeg writes a live transcode to file descriptor 3
+  (`pipe:3`) while it writes the cached file, as in old music. `MediaTools.startFfmpegPiped` opens
+  that pipe through the same `setpriv` start as every tool, so music's ffmpeg dies with the server
+  and sees only the tools' environment.
+- **Where music writes.** Finished transcodes and their timing go under `DATA_DIR/cache/music`,
+  which the cache pruner keeps within `CACHE_MAX_MB` with the server's other caches, replacing old
+  music's own `MEDIA_CACHE_MAX_MB`. One pruner serves the server: its hourly prune and every
+  prune a transcode asks for run one at a time, and a request made while a prune runs is served
+  by the next one. A file can be protected for a while, and protected files stay through every
+  prune even past the bound, which they count toward. A prune checks protection under one lock at
+  the moment it removes each file, never only when it starts. As old music evicted after every
+  transcode, keeping that transcode, a transcode protects its files from its start until the prune
+  it asks for after it finishes has run. The transcoder protects a file it answers until the
+  request that asked ends. The pruner removes by
+  size, recent files included, so every file a transcode is still writing (its output, its live
+  copy, its timing) lives under `DATA_DIR/music/transcoding`, which the pruner never reaches, and
+  moves into the cache once it is whole; the server empties that folder when it starts. Artwork goes under
+  `DATA_DIR/music/art`, which the pruner never touches: the catalog names each image by its hash,
+  and only the art lane deletes one. Library folders stay read-only.
 
 ## Consequences
 
 - The deploy runs one server process. Domains share hardware through its pools.
-- Adding a domain means adding its pools and caps, not a new service.
+- Adding a domain means adding its pools and caps, not a new service. Music added one pool.
 - A transcode limit reached by household streams leaves no room for guest streams.
 - The server never writes to a media mount. Temporary segments go to the server's own folder.
 - `scripts/check-sandbox.sh` keeps running the server's tests under the module's system call
@@ -152,7 +198,7 @@ watches `core/jobs/worker:waiting` for its kinds and claims while it has a free 
 its leases with `report` every 15 seconds, and settles with `finish`. A lease-checked call that
 answers canceled or lost stops the job and settles nothing. The `movies` and `movies.background`
 pools claim only while `core/scans:domains` answers that movies has a library (ADR 0024); the
-`server` pool always claims. Music adds its pools with its port.
+`server` pool always claims. Music's pool came with its port (amended 2026-11-13, above).
 
 Jellyfin and Plex imports, old movies' `migration` kind in the `movies` pool, run on the core in a
 pool of their own, `movies.import`, cap 1, which always claims (amended 2026-11-10): an import adds

@@ -112,6 +112,11 @@ const POOLS = {
    */
   "movies.import": { domain: null, kinds: ["movies.import.jellyfin", "movies.import.plex"] },
   "movies.background": { domain: "movies", kinds: ["movies.trickplay"] },
+  /**
+   * Music's scans run in a pool of their own, so a music rescan never takes a movies slot, and
+   * movies' work never holds up a music scan (ADR 0014).
+   */
+  music: { domain: "music", kinds: ["music.scan"] },
   server: { domain: null, kinds: ["server.backup"] },
 } as const satisfies Record<
   string,
@@ -121,7 +126,13 @@ const POOLS = {
 /** A pool's name. */
 type Pool = keyof typeof POOLS;
 
-const POOL_NAMES: ReadonlyArray<Pool> = ["movies", "movies.background", "movies.import", "server"];
+const POOL_NAMES: ReadonlyArray<Pool> = [
+  "movies",
+  "movies.background",
+  "movies.import",
+  "music",
+  "server",
+];
 
 /** The most jobs each pool runs at once on this server; each a whole number of at least 1. */
 export type PoolCaps = { readonly [Name in Pool]: number };

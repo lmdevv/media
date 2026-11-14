@@ -27,6 +27,11 @@ export interface PlaybackGrant {
   readonly userId: UserId;
   /** A profile, which only the unit tests' tokens name; core tickets name none. */
   readonly profileId?: ProfileId;
+  /**
+   * What the ticket names: a movies file, or a music track, whose id `fileId` then holds. A route
+   * serves only its own kind.
+   */
+  readonly resource: "file" | "track";
   readonly fileId: MediaFileId;
   readonly sessionId: PlaybackSessionId;
   readonly purpose: TokenPurpose;
@@ -40,6 +45,13 @@ export interface PlaybackGrant {
    */
   readonly sessionEnded?: Effect.Effect<void>;
 }
+
+/**
+ * Whether `grant` admits the movies file `fileId`: a file ticket for that file. A music track's
+ * ticket never does, whatever its id.
+ */
+export const admitsFile = (grant: PlaybackGrant, fileId: string): boolean =>
+  grant.resource === "file" && grant.fileId === fileId;
 
 /** The session and account an authentic token was signed for. */
 export type SignedSession = Pick<PlaybackGrant, "sessionId" | "userId">;

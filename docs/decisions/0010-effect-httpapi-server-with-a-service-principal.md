@@ -2,6 +2,7 @@
 
 - Status: Accepted, 2026-11-03. Amended 2026-11-06 with the server's key and its rotation, and
   2026-11-10 with the server's core adapters, and again the same day with the server on the core.
+  Amended 2026-11-13 with music's routes on the server.
 - Decisions: D24, D25, D50
 
 ## Context
@@ -135,11 +136,45 @@ old movies adapters in `apps/media/src/convex/`. The server reads one Convex URL
 - **Standalone mode**, with no `CONVEX_URL`, scans the approved roots into memory and reports its
   health. Its byte routes refuse every request, since nothing issues tickets.
 
+## Music's routes on the server (amended 2026-11-13)
+
+`p5-music-server` moved old music's media service onto this server. Its Hono app is gone; music's
+routes run on the server's Effect HTTP router beside movies' (D24).
+
+- **Byte routes, declared in contracts.** Players fetch a song and its art by URL, so, like
+  movies' media bytes, music's routes are plain router routes rather than `MediaApi` endpoints.
+  `@media/contracts/music-playback` declares their paths (`MUSIC_ROUTES`), the stream's query
+  parameters, its profiles, and its timing headers, as old music's `@music/commands/models` did.
+  - `GET` or `HEAD /media/music/stream/<trackId>?ticket=…&p=<profile>`, plus `&start=<ms>` or
+    `&finished=1`: a song's original, a fast-start AAC, or a fragmented FLAC or AAC transcode
+    for the gapless player, with old music's statuses and `X-Music-*` timing headers.
+  - `GET /music/art/<hash>?ticket=…`: an album's art, at the path the music commands already
+    sign (`music/present.ts`). The image and the NixOS module route `/music/art/*` to the server.
+- **Tickets, not signed URLs.** Old music's media service checked an HMAC over the URL with
+  `STREAM_SIGNING_KEY`. The stream route admits a personal `track` ticket for its track, from
+  `music.play.start` or a download, as movies' direct-play route admits a `file` ticket, and
+  every response stops mid-body once the ticket's session ends (ADR 0011). Every request needs an
+  unexpired ticket, as old music's signed URLs did, so a listener whose access is removed gets no
+  more bytes once the ticket expires. The route never uses movies' continuation of an expired play
+  ticket within `STREAM_IDLE_SECONDS`. A play ticket lasts 6 hours, as old music's stream URLs
+  did. Old music's player asked for a new URL before its URL expired and again after a refusal
+  (`legacy/music/packages/player/src/source-resolver.ts`), and music's clients on the core must
+  do the same with `music.play.start` and its `expiresAt`. A grant names the kind of
+  resource its ticket was for, and the music route refuses any other with `403`. The art route
+  admits the shareable `image` ticket for the hash (`artworkTicketId`).
+- **Server functions.** `music/scanner:known`, `upsert`, `move`, `missing`, and `lyrics`,
+  `music/art:inUse` and `hashes`, and `music/tracks:resolve` are declared in
+  `@media/contracts/server-functions` with the movies ones. `music/tracks:resolve` is new: old
+  music's media service read a track's file from its backend (`trackSource`), and the core had no
+  server function for it.
+- **No ticket in a log or a span.** The access log drops every query string, and the server's
+  spans skip `/music/` as they skip `/media/`.
+
 ## Consequences
 
 - Clients, the SDK, and the server share one typed description of every HTTP route.
 - The server's Convex access is limited to the scopes on its key, and the key can be rotated.
-- Music's routes are rewritten onto HttpApi during the music port (phase 5).
+- Music's routes were rewritten onto the server's Effect HTTP router in the music port (above).
 - Convex still never calls the server. The server subscribes outward (`docs/architecture.md`).
 
 ## Alternatives rejected

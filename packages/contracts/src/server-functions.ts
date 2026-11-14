@@ -19,6 +19,7 @@ import {
 } from "./ids";
 import { Artwork, ExternalIds, TitleKind } from "./models/catalog";
 import { BackupArchive, BackupTrigger, MigrationSource } from "./models/jobs";
+import { KnownTrack, ResolvedTrack, ScannedLyrics, ScannedTrack } from "./models/music";
 import { ImportId } from "./models/migration";
 import {
   CatalogFile,
@@ -362,7 +363,7 @@ export const serverFunctions = {
       ]),
     ),
   }),
-  /** Queues a rescan of each movies library whose folder holds, is, or lies inside a changed path. */
+  /** Queues a rescan of each library whose folder holds, is, or lies inside a changed path. */
   scanChanged: serverMutation({
     name: "core.scans.changed",
     path: "core/scans:changed",
@@ -370,8 +371,8 @@ export const serverFunctions = {
     result: Schema.Struct({ queued: Schema.Int }),
   }),
   /**
-   * A page of the movies libraries with their folders as recorded, for the server to watch
-   * each folder at the path its library names.
+   * A page of the movies and music libraries with their folders as recorded, for the server to
+   * watch each folder at the path its library names.
    */
   scanWatched: serverQuery({
     name: "core.scans.watched",
@@ -410,6 +411,88 @@ export const serverFunctions = {
     path: "movies/scanner:missing",
     args: Schema.Struct({ lease: Lease, paths: Schema.Array(Schema.String) }),
     result: LeaseAnswer(Schema.Struct({ marked: Schema.Int, done: Schema.Int })),
+  }),
+  musicKnown: serverMutation({
+    name: "music.scanner.known",
+    path: "music/scanner:known",
+    args: Schema.Struct({
+      lease: Lease,
+      cursor: Cursor,
+      /** The page holds paths from `from` up to, not including, `to`, in code point order. */
+      from: Schema.optionalKey(Schema.String),
+      to: Schema.optionalKey(Schema.String),
+    }),
+    result: LeaseAnswer(
+      Schema.Struct({
+        files: Schema.Array(KnownTrack),
+        continueCursor: Schema.String,
+        isDone: Schema.Boolean,
+      }),
+    ),
+  }),
+  musicUpsert: serverMutation({
+    name: "music.scanner.upsert",
+    path: "music/scanner:upsert",
+    args: Schema.Struct({ lease: Lease, tracks: Schema.Array(ScannedTrack) }),
+    result: LeaseAnswer(Schema.Struct({ done: Schema.Int, released: Schema.Array(Schema.String) })),
+  }),
+  musicMove: serverMutation({
+    name: "music.scanner.move",
+    path: "music/scanner:move",
+    args: Schema.Struct({
+      lease: Lease,
+      moves: Schema.Array(Schema.Struct({ from: Schema.String, track: ScannedTrack })),
+    }),
+    result: LeaseAnswer(
+      Schema.Struct({
+        done: Schema.Int,
+        moved: Schema.Int,
+        released: Schema.Array(Schema.String),
+      }),
+    ),
+  }),
+  musicMissing: serverMutation({
+    name: "music.scanner.missing",
+    path: "music/scanner:missing",
+    args: Schema.Struct({ lease: Lease, paths: Schema.Array(Schema.String) }),
+    result: LeaseAnswer(
+      Schema.Struct({
+        done: Schema.Int,
+        marked: Schema.Int,
+        released: Schema.Array(Schema.String),
+      }),
+    ),
+  }),
+  musicLyrics: serverMutation({
+    name: "music.scanner.lyrics",
+    path: "music/scanner:lyrics",
+    args: Schema.Struct({ lease: Lease, tracks: Schema.Array(ScannedLyrics) }),
+    result: LeaseAnswer(Schema.Struct({ done: Schema.Int, saved: Schema.Int })),
+  }),
+  musicArtInUse: serverQuery({
+    name: "music.art.inUse",
+    path: "music/art:inUse",
+    args: Schema.Struct({ hashes: Schema.Array(Schema.String) }),
+    result: Schema.Struct({ inUse: Schema.Array(Schema.String) }),
+  }),
+  musicArtHashes: serverQuery({
+    name: "music.art.hashes",
+    path: "music/art:hashes",
+    args: Schema.Struct({
+      table: Schema.Literals(["tracks", "albums", "artists"]),
+      cursor: Cursor,
+    }),
+    result: Schema.Struct({
+      hashes: Schema.Array(Schema.String),
+      cursor: Schema.String,
+      done: Schema.Boolean,
+    }),
+  }),
+  resolveTrack: serverQuery({
+    name: "music.tracks.resolve",
+    path: "music/tracks:resolve",
+    args: Schema.Struct({ trackId: Schema.String }),
+    result: Schema.NullOr(ResolvedTrack),
   }),
   metadataTarget: serverQuery({
     name: "movies.metadata.target",
@@ -670,8 +753,14 @@ export const IMPORT_PLAN_MAX = {
 /** The most members of one collection an import writes. */
 export const IMPORT_MEMBERS_MAX = 1000;
 
-/** The most items one `movies/scanner:upsert` or `missing` call takes (ADR 0024). */
+/**
+ * The most items one `movies/scanner:upsert` or `missing` call, or one `music/scanner:*` write,
+ * takes (ADR 0024).
+ */
 export const SCANNER_BATCH_MAX = 500;
+
+/** The most hashes one `music/art:inUse` call checks. */
+export const MUSIC_ART_IN_USE_MAX = 200;
 
 /** The most episodes one `applyMetadata` call takes. */
 export const METADATA_EPISODES_MAX = 500;

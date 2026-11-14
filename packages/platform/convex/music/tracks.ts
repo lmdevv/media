@@ -1,6 +1,10 @@
+import { v } from "convex/values";
+
 import { register } from "../../commands/music/tracks";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { DatabaseReader } from "../_generated/server";
+import { foldersOf, isInside } from "../core/folders";
+import { serverQuery } from "../core/lib/serverFacing";
 import { reachOf } from "../core/permissions/grants";
 import { requireTrack } from "./access";
 import { trackFacts } from "./items";
@@ -82,5 +86,52 @@ export const { list, get } = register({
     const liked = await likedAmong(ctx.db, caller.userId, [track._id]);
 
     return musicPresenter().track(track, liked.has(track._id));
+  },
+});
+
+/**
+ * What the server needs to stream a track a ticket names, as old music's `trackSource` answered
+ * it: its path, its library's folders now, its file's size and change time, and its codec. Null
+ * for an id that names no track, and for a track a scan marked missing, whose library is gone or
+ * is not a music library, or that no folder of its library holds now (a removed folder's purge has
+ * yet to reach it). Reads the track, its library, and its folders: at most 18 documents.
+ */
+export const resolve = serverQuery({
+  args: { trackId: v.string() },
+  returns: v.union(
+    v.null(),
+    v.object({
+      trackId: v.id("tracks"),
+      libraryId: v.id("libraries"),
+      path: v.string(),
+      roots: v.array(v.string()),
+      size: v.number(),
+      mtimeMs: v.number(),
+      codec: v.string(),
+    }),
+  ),
+  handler: async (ctx, { trackId }) => {
+    const id = ctx.db.normalizeId("tracks", trackId);
+    const track = id === null ? null : await ctx.db.get(id);
+
+    if (track === null || track.missing) return null;
+
+    const library = await ctx.db.get(track.libraryId);
+
+    if (library?.kind !== "music") return null;
+
+    const roots = await foldersOf(ctx.db, library._id);
+
+    if (!roots.some((root) => isInside(track.path, root))) return null;
+
+    return {
+      trackId: track._id,
+      libraryId: library._id,
+      path: track.path,
+      roots: [...roots],
+      size: track.size,
+      mtimeMs: track.mtimeMs,
+      codec: track.codec,
+    };
   },
 });

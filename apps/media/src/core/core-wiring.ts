@@ -17,6 +17,11 @@ import * as LogsRoutes from "../logging/logs-routes.ts";
 import * as MediaTools from "../media/media-tools.ts";
 import * as MediaConfig from "../media-config.ts";
 import { servicesLayerWith } from "../media-service.ts";
+import * as MusicArt from "../music/music-art.ts";
+import * as MusicRoutes from "../music/music-routes.ts";
+import * as MusicScanJob from "../music/music-scan-job.ts";
+import * as TrackSources from "../music/track-sources.ts";
+import * as MusicTranscoder from "../music/transcoder.ts";
 import * as CoreImportJob from "../migration/core-import-job.ts";
 import * as CoreImports from "../migration/core-imports.ts";
 import * as ImportRoutes from "../migration/import-routes.ts";
@@ -61,6 +66,7 @@ const commandRoutes = (coreUrl: string) =>
     LogsRoutes.layer,
     DiagnosticsRoutes.layer,
     ClientErrors.layer,
+    MusicRoutes.layer,
   );
 
 const jobs = (sealKey: Redacted.Redacted) =>
@@ -72,6 +78,7 @@ const jobs = (sealKey: Redacted.Redacted) =>
       CoreMetadata.handler,
       CoreMetadata.personHandler,
       CoreBackups.handler,
+      MusicScanJob.handler,
     ]);
 
     const imports = yield* CoreImportJob.handlers(sealKey);
@@ -80,6 +87,8 @@ const jobs = (sealKey: Redacted.Redacted) =>
       movies: 2,
       "movies.background": config.trickplay.concurrency,
       "movies.import": 1,
+      // One music scan at a time, as old music ran its scans (ADR 0014).
+      music: 1,
       server: 1,
     };
 
@@ -128,9 +137,12 @@ export const layer = (options: Options) =>
         CoreStatus.layer,
         CoreRescans.layer,
         Backups.layerSyncOnStart,
-        CachePruner.layer,
       ).pipe(
         Layer.provideMerge(CoreImports.layer(options.serviceKey)),
+        Layer.provideMerge(
+          Layer.mergeAll(MusicArt.layer, TrackSources.layer, MusicTranscoder.layer),
+        ),
+        Layer.provideMerge(CachePruner.layer),
         Layer.provideMerge(
           Backups.layer.pipe(Layer.provide([ConvexCli.layer, CoreBackups.catalogLayer])),
         ),

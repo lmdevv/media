@@ -462,7 +462,7 @@ in
       default = 2048;
       description = ''
         Size in MiB the media service's caches (provider responses, keyframe indexes, subtitles,
-        artwork) are pruned to, least recently used first.
+        artwork, music's cached transcodes) are pruned to, least recently used first.
       '';
     };
 

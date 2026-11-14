@@ -135,6 +135,7 @@ export const testTokensLayer: Layer.Layer<PlaybackToken.Service, never, EndedSes
         return {
           userId: payload.sub,
           profileId: payload.pid,
+          resource: "file",
           fileId: payload.fid,
           sessionId: payload.sid,
           purpose,

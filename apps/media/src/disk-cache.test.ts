@@ -3,7 +3,7 @@ import { assert, describe, layer } from "@effect/vitest";
 import { Context, Duration, Effect, FileSystem, Layer, Option, Path } from "effect";
 import { TestClock } from "effect/testing";
 
-import { cacheDirectories, prune } from "./cache-pruner.ts";
+import * as CachePruner from "./cache-pruner.ts";
 import * as DiskCache from "./disk-cache.ts";
 import { testConfigLayer } from "./testing/test-config.ts";
 
@@ -76,7 +76,7 @@ describe("disk cache", () => {
           const fs = yield* FileSystem.FileSystem;
           const path = yield* Path.Path;
           const root = path.join(dataDir, "movies.parts");
-          const roots = cacheDirectories(root, path);
+          const roots = CachePruner.cacheDirectories(root, path);
           const hour = 60 * 60;
           const now = 10 * 24 * hour;
 
@@ -103,7 +103,8 @@ describe("disk cache", () => {
           const abandoned = yield* file("cache/tmdb/e.json.1x.part", 1, 3);
           const writing = yield* file("artwork/w185/f.jpg.2y.part.jpg", 1, 0);
 
-          const summary = yield* prune(roots, 90 * 1024);
+          const pruner = yield* CachePruner.make(roots, 90 * 1024);
+          const summary = yield* pruner.prune;
 
           const remaining = yield* Effect.forEach(
             [oldest, older, recent, newest, abandoned, writing],
@@ -114,7 +115,20 @@ describe("disk cache", () => {
           assert.strictEqual(summary.removedFiles, 3);
           assert.strictEqual(summary.keptBytes, 81 * 1024);
 
-          assert.strictEqual((yield* prune(roots, 90 * 1024)).removedFiles, 0);
+          assert.strictEqual((yield* pruner.prune).removedFiles, 0);
+
+          const kept = yield* file("cache/music/fmp4-aac/g.m4a", 100, 1);
+
+          const keptSummary = yield* Effect.scoped(
+            pruner.protect([kept]).pipe(Effect.andThen(pruner.prune)),
+          );
+
+          const afterKeep = yield* Effect.forEach([recent, newest, kept], (target) =>
+            fs.exists(target),
+          );
+
+          assert.deepStrictEqual(afterKeep, [false, false, true]);
+          assert.strictEqual(keptSummary.keptBytes, 100 * 1024);
         }),
       ),
     );
@@ -131,7 +145,8 @@ describe("disk cache", () => {
           yield* cache.write("tmdb", "second", "x".repeat(10_000));
           yield* TestClock.adjust(Duration.days(2));
           yield* cache.read("tmdb", "first", Duration.days(30));
-          yield* prune(cacheDirectories(dataDir, path), 15_000);
+          yield* (yield* CachePruner.make(CachePruner.cacheDirectories(dataDir, path), 15_000))
+            .prune;
 
           assert.isTrue(Option.isSome(yield* cache.read("tmdb", "first", Duration.days(30))));
           assert.isTrue(Option.isNone(yield* cache.read("tmdb", "second", Duration.days(30))));
