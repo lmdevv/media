@@ -297,7 +297,7 @@ describe("Transcoder", { timeout: MEDIA_TEST_TIMEOUT }, () => {
             ),
         );
 
-        const liveFiles = listNames(cacheDir).pipe(
+        const liveFiles = listNames(join(dataDir, "music", "transcoding")).pipe(
           Effect.map((names) => names.filter((name) => name.endsWith(".live.part"))),
         );
 
@@ -307,6 +307,8 @@ describe("Transcoder", { timeout: MEDIA_TEST_TIMEOUT }, () => {
         expect(running).toHaveLength(1);
         expect(yield* firstChunk).toHaveLength(1);
         expect(yield* liveFiles).toEqual(running);
+        // Nothing half written sits where the cache pruner prunes by size.
+        expect(yield* listNames(cacheDir)).toEqual([]);
 
         yield* Effect.sleep("1500 millis");
         expect(yield* listNames(cacheDir)).toEqual([]);

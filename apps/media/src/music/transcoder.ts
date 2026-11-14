@@ -336,6 +336,13 @@ const make = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const scope = yield* Effect.scope;
   const cacheDir = join(config.dataDir, "cache", "music");
+  /**
+   * Where every file a transcode writes before it is finished lives: its output, its live copy,
+   * and its timing. The cache pruner prunes `DATA_DIR/cache` by size, recent files included, so a
+   * file still being written stays out of its reach and moves into the cache once it is whole.
+   */
+  const workDir = join(config.dataDir, "music", "transcoding");
+  const workFile = (suffix: string): string => join(workDir, `${randomUUID()}${suffix}`);
   const permits = yield* Semaphore.make(MAX_CONCURRENT_TRANSCODES);
   const prepareLane = yield* Semaphore.make(PREPARE_RUNS);
   const offsetRuns = yield* Semaphore.make(MAX_CONCURRENT_OFFSET_RUNS);
@@ -354,18 +361,14 @@ const make = Effect.gen(function* () {
       Effect.ignore,
     );
 
-  yield* Effect.forEach(PROFILES, (profile) =>
-    Effect.gen(function* () {
-      const directory = join(cacheDir, profile);
-      yield* Files.makeDirectory(directory);
-
-      const partial = (yield* Files.listFiles(directory)).filter((file) =>
-        file.path.endsWith(PARTIAL_SUFFIX),
-      );
-
-      yield* Effect.forEach(partial, (file) => Files.removePath(file.path));
-    }),
-  ).pipe(Effect.orDie);
+  // What an earlier run left half written goes; no transcode runs yet.
+  yield* Files.removePath(workDir).pipe(
+    Effect.andThen(Files.makeDirectory(workDir)),
+    Effect.andThen(
+      Effect.forEach(PROFILES, (profile) => Files.makeDirectory(join(cacheDir, profile))),
+    ),
+    Effect.orDie,
+  );
 
   const appendLive = (job: Job, chunk: Uint8Array) =>
     Files.appendToFile(job.live, chunk).pipe(
@@ -459,7 +462,7 @@ const make = Effect.gen(function* () {
   });
 
   const produce = Effect.fn("Transcoder.produce")(function* (job: Job, input: TranscodeInput) {
-    const temporary = `${job.output}.${randomUUID()}${PARTIAL_SUFFIX}`;
+    const temporary = workFile(PARTIAL_SUFFIX);
     const profile = input.profile;
 
     const run = Effect.gen(function* () {
@@ -470,11 +473,10 @@ const make = Effect.gen(function* () {
         const measured = yield* encodeFragmented(job, input, profile, temporary);
         const json = yield* encodeSidecar(measured);
 
-        yield* Files.writeFileAtomic(
-          sidecarOf(job.output),
-          new TextEncoder().encode(json),
-          randomUUID(),
-        );
+        const timingFile = workFile(SIDECAR_SUFFIX);
+
+        yield* Files.writeFileAtomic(timingFile, new TextEncoder().encode(json), randomUUID());
+        yield* Files.renameFile(timingFile, sidecarOf(job.output));
 
         timing = Option.some(measured);
       } else {
@@ -594,7 +596,7 @@ const make = Effect.gen(function* () {
     const job: Job = {
       output,
       lane,
-      live: `${output}.${randomUUID()}.live${PARTIAL_SUFFIX}`,
+      live: workFile(`.live${PARTIAL_SUFFIX}`),
       progress: yield* SubscriptionRef.make<Progress>(Progress.Queued()),
       holds: yield* Ref.make({ readers: 0, settled: false }),
       fiber: yield* Deferred.make<Fiber.Fiber<void>>(),

@@ -57,9 +57,12 @@ mount media read-only.
   (`pipe:3`) while it writes the cached file, as in old music. `MediaTools.startFfmpegPiped` opens
   that pipe through the same `setpriv` start as every tool, so music's ffmpeg dies with the server
   and sees only the tools' environment.
-- **Where music writes.** Cached transcodes and their timing go under `DATA_DIR/cache/music`,
+- **Where music writes.** Finished transcodes and their timing go under `DATA_DIR/cache/music`,
   which the cache pruner keeps within `CACHE_MAX_MB` with the server's other caches; old music's
-  own `MEDIA_CACHE_MAX_MB` and its eviction after every transcode are gone. Artwork goes under
+  own `MEDIA_CACHE_MAX_MB` and its eviction after every transcode are gone. The pruner removes by
+  size, recent files included, so every file a transcode is still writing (its output, its live
+  copy, its timing) lives under `DATA_DIR/music/transcoding`, which the pruner never reaches, and
+  moves into the cache once it is whole; the server empties that folder when it starts. Artwork goes under
   `DATA_DIR/music/art`, which the pruner never touches: the catalog names each image by its hash,
   and only the art lane deletes one. Library folders stay read-only.
 

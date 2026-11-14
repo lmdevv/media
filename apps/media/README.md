@@ -74,7 +74,8 @@ events on local disks, polling on NFS, SMB/CIFS, 9p and FUSE mounts; `events`; `
 other short tool runs), `FILE_SCAN_TIMEOUT_SECONDS` (900: keyframe scans and embedded subtitle
 extraction, which read a whole file), `CACHE_MAX_MB` (2048: provider responses, keyframe indexes,
 subtitles, artwork, and music's cached transcodes under `DATA_DIR`, pruned hourly, least recently
-used first; music's own artwork under `DATA_DIR/music/art` is never pruned), `TRICKPLAY`
+used first; music's artwork under `DATA_DIR/music/art`, and the transcodes still being written
+under `DATA_DIR/music/transcoding`, are never pruned), `TRICKPLAY`
 (`on` or `off`: scrub thumbnail jobs), `TRICKPLAY_INTERVAL_SECONDS` (10, from 1 to 600),
 `TRICKPLAY_CONCURRENCY` (1: files given thumbnails at once, besides other jobs), `FFMPEG_PATH`,
 `FFPROBE_PATH`,
