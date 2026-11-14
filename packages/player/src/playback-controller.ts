@@ -166,6 +166,22 @@ interface PreloadedEntry extends ResolvedSource {
   readonly entry: QueueEntry;
 }
 
+/** The preload the player calls for at one moment: the entry that plays next and its stream. */
+interface PreloadRequest {
+  /** The load it follows. A reload, or another song, starts a new one. */
+  readonly generation: number;
+  readonly entry: QueueEntry;
+  readonly engine: EngineKind;
+  readonly profile: MusicStreamProfile;
+}
+
+/** Whether two preload requests ask for the same stream after the same load. */
+const samePreload = (a: PreloadRequest, b: PreloadRequest): boolean =>
+  a.generation === b.generation &&
+  a.entry.itemId === b.entry.itemId &&
+  a.engine === b.engine &&
+  a.profile === b.profile;
+
 /** A move to another entry sent from here, which the core has not confirmed yet. */
 interface PendingJump {
   readonly itemId: string;
@@ -177,6 +193,11 @@ interface PendingJump {
  * (`music.queue.*`); this device holds whether it plays and where in the song, as old music's
  * player did for the device that played (D62). Moving playback between devices returns with
  * Connect.
+ *
+ * Every request that waits on the network carries what it was made for, and its answer, a
+ * failure included, applies only while that still holds: a ticket its load's generation, a
+ * preload the entry and stream it asked for, a jump its own pending move, and a history report
+ * its start. The media server's recovery loads whatever entry is current once it answers.
  */
 export class PlaybackController {
   readonly #commands: MusicCommands;
@@ -189,12 +210,15 @@ export class PlaybackController {
 
   #queue: QueueState | null = null;
   #pendingJump: PendingJump | null = null;
+  /** The last move sent from here, even once the core's sync no longer waits for it. */
+  #latestMove: PendingJump | null = null;
   #wantPlaying = false;
   #gapless: boolean;
   #resumeAt: ResumePoint | null;
   #loaded: LoadedEntry | null = null;
   #preloaded: PreloadedEntry | null = null;
-  #preloading = false;
+  /** The preload request in flight, if any. */
+  #preloading: PreloadRequest | null = null;
   #generation = 0;
   #sample: PositionSnapshot = { positionMs: 0, updatedAt: 0, playing: false };
   readonly #transcode = new Set<string>();
@@ -322,8 +346,7 @@ export class PlaybackController {
 
     if (settings.gapless !== this.#gapless) {
       this.#gapless = settings.gapless;
-      this.#engine.preload(null);
-      this.#preloaded = null;
+      this.#dropPreload();
     }
   }
 
@@ -356,11 +379,11 @@ export class PlaybackController {
 
     if (entry === null) return;
 
-    if (this.#loaded === null || this.#loaded.entry.itemId !== entry.itemId) {
+    if (this.#needsSource(entry)) {
       this.#unlockOutput();
       this.#wantPlaying = true;
       this.#update({ autoplayBlocked: false, error: null });
-      await this.#load(entry, this.#resumePositionFor(entry), true);
+      await this.#load(entry, this.#startPositionFor(entry), true);
 
       return;
     }
@@ -462,9 +485,7 @@ export class PlaybackController {
     if (this.#snapshot.engineStatus !== "error") return;
     this.#stopHealthProbe();
     this.#update({ mediaOnline: true, engineStatus: "idle", error: null });
-    const entry = this.#currentEntry();
-
-    if (entry !== null) void this.#load(entry, this.#livePositionMs(), this.#wantPlaying);
+    void this.#loadCurrent(this.#wantPlaying);
   }
 
   /**
@@ -493,8 +514,7 @@ export class PlaybackController {
 
   #takeQuality(quality: StreamQuality): void {
     this.#update({ quality });
-    this.#engine.preload(null);
-    this.#preloaded = null;
+    this.#dropPreload();
   }
 
   /** Follows the core's entry: a move made elsewhere loads it, playing if this device played. */
@@ -519,7 +539,9 @@ export class PlaybackController {
     }
 
     if (this.#wantPlaying) {
-      void this.#load(entry, 0, true);
+      // From the start, unless this device holds a place in it, as in the song that stopped when
+      // the media server went away.
+      void this.#load(entry, this.#resumePositionFor(entry), true);
 
       return;
     }
@@ -558,11 +580,13 @@ export class PlaybackController {
 
   /** Moves to `itemId` here at once and tells the core, which confirms it with the next sync. */
   async #jumpTo(itemId: string, play: boolean): Promise<void> {
-    this.#moveTo(itemId, play);
+    const pending = this.#moveTo(itemId, play);
 
     try {
       await this.#commands.jump(itemId);
     } catch (error) {
+      // A later move replaced this one, so this failure no longer describes what plays here.
+      if (this.#latestMove !== pending) return;
       this.#pendingJump = null;
       this.#update({ error: messageOf(error) });
 
@@ -570,8 +594,10 @@ export class PlaybackController {
     }
   }
 
-  #moveTo(itemId: string, play: boolean): void {
-    this.#pendingJump = { itemId, sentAt: this.#env.now() };
+  /** Moves to `itemId` here at once. Returns the pending move, which the core's sync confirms. */
+  #moveTo(itemId: string, play: boolean): PendingJump {
+    const pending = this.#sendMove(itemId);
+
     this.#wantPlaying = play;
     this.#resumeAt = null;
     this.#update({ current: itemId, error: null });
@@ -580,12 +606,19 @@ export class PlaybackController {
     if (entry === null) {
       // The queue that holds it has not arrived yet; `sync` loads it once it does.
       this.#unload();
+    } else if (this.#loaded?.entry.itemId !== itemId || play) void this.#load(entry, 0, play);
 
-      return;
-    }
+    return pending;
+  }
 
-    if (this.#loaded?.entry.itemId === itemId && !play) return;
-    void this.#load(entry, 0, play);
+  /** Records a move to `itemId` made here, which the core has not confirmed yet. */
+  #sendMove(itemId: string): PendingJump {
+    const move: PendingJump = { itemId, sentAt: this.#env.now() };
+
+    this.#pendingJump = move;
+    this.#latestMove = move;
+
+    return move;
   }
 
   #keepsPlaying(): boolean {
@@ -615,6 +648,34 @@ export class PlaybackController {
     this.#resumeAt = null;
 
     return resume?.itemId === entry.itemId ? resume.positionMs : 0;
+  }
+
+  /** Where `entry` starts when it loads: where the player holds it, else where this device left it. */
+  #startPositionFor(entry: QueueEntry): number {
+    return this.#loaded?.entry.itemId === entry.itemId
+      ? this.#livePositionMs()
+      : this.#resumePositionFor(entry);
+  }
+
+  /**
+   * Whether `entry` has nothing to play here: another entry is loaded, or its ticket failed or
+   * never came, as while the media server was away, and no load is under way.
+   */
+  #needsSource(entry: QueueEntry): boolean {
+    const loaded = this.#loaded;
+
+    return (
+      loaded === null ||
+      loaded.entry.itemId !== entry.itemId ||
+      (loaded.url === null && !this.#loading)
+    );
+  }
+
+  /** Loads the current entry from where the player holds it. */
+  async #loadCurrent(autoplay: boolean): Promise<void> {
+    const entry = this.#currentEntry();
+
+    if (entry !== null) await this.#load(entry, this.#startPositionFor(entry), autoplay);
   }
 
   #saveResume(): void {
@@ -715,8 +776,37 @@ export class PlaybackController {
     this.#engine.unload();
     this.#loaded = null;
     this.#preloaded = null;
-    this.#preloading = false;
+    this.#preloading = null;
     this.#stamp(0, false);
+  }
+
+  /** Drops the preload here and in the engine. */
+  #dropPreload(): void {
+    this.#engine.preload(null);
+    this.#preloaded = null;
+  }
+
+  /**
+   * The preloaded source when it is `entry`'s and its ticket still holds; the engine then plays it
+   * from its preload. Any other preload stays only while it still follows `entry`, as through a
+   * reload of the same song, and is otherwise dropped here and in the engine, which keeps a
+   * preload across loads until told otherwise. Runs once `entry` is the loaded one.
+   */
+  #takePreload(entry: QueueEntry): ResolvedSource | null {
+    const preloaded = this.#preloaded;
+
+    if (preloaded?.entry.itemId !== entry.itemId) {
+      this.#dropStalePreload();
+
+      return null;
+    }
+
+    this.#preloaded = null;
+
+    if (!this.#isExpired(preloaded.renewAt)) return preloaded;
+    this.#engine.preload(null);
+
+    return null;
   }
 
   #isExpired(renewAt: number | null): boolean {
@@ -741,11 +831,6 @@ export class PlaybackController {
     try {
       const plannedAt = this.#env.now();
 
-      const preloaded =
-        this.#preloaded?.entry.itemId === entry.itemId && !this.#isExpired(this.#preloaded.renewAt)
-          ? this.#preloaded
-          : null;
-
       this.#loaded = {
         entry,
         profile: null,
@@ -754,20 +839,34 @@ export class PlaybackController {
         playbackId: null,
         reported: false,
       };
-      this.#preloaded = null;
       this.#stamp(startMs, false);
 
       if (!this.#snapshot.mediaOnline) return;
       const engine = this.#wantedEngine();
       this.#update({ engineStatus: "loading", error: null, autoplayBlocked: false });
+      // A switch drops the preload with the engine that held it.
       this.#useEngine(engine);
 
-      const resolved =
-        preloaded !== null && engine === this.#snapshot.engine
-          ? preloaded
-          : await this.#resolve(track, this.#profileFor(track, engine));
+      const preloaded = this.#takePreload(entry);
 
-      if (generation !== this.#generation || resolved === null) return;
+      const requested: Result.Result<ResolvedSource, StreamRefused> =
+        preloaded === null
+          ? await this.#sources.resolve(track, this.#profileFor(track, engine))
+          : Result.succeed(preloaded);
+
+      // A ticket that answers after the listener moved on, a failure included, is not this song's.
+      if (generation !== this.#generation) return;
+
+      if (Result.isFailure(requested)) {
+        // The song before stops too, so nothing plays under the name of a song that did not start.
+        this.#engine.unload();
+        this.#stamp(startMs, false);
+        this.#update({ engineStatus: "error", error: requested.failure.message });
+
+        return;
+      }
+
+      const resolved = requested.success;
 
       this.#loaded = {
         entry,
@@ -817,26 +916,25 @@ export class PlaybackController {
       : chooseStreamProfile(this.#snapshot.quality, track.codec, this.#env.canPlay);
   }
 
-  async #resolve(track: Track, profile: MusicStreamProfile): Promise<ResolvedSource | null> {
-    const resolved: Result.Result<ResolvedSource, StreamRefused> = await this.#sources.resolve(
-      track,
-      profile,
-    );
-
-    if (Result.isSuccess(resolved)) return resolved.success;
-    this.#update({ engineStatus: "error", error: resolved.failure.message });
-
-    return null;
-  }
-
-  /** Records the loaded entry's start in history once it plays, once per start. */
+  /**
+   * Records the loaded entry's start in history once it plays, once per start. A failure shows
+   * only while that start is still the one loaded.
+   */
   #reportPlay(): void {
     const loaded = this.#loaded;
 
     if (loaded === null || loaded.reported || loaded.playbackId === null) return;
 
     this.#loaded = { ...loaded, reported: true };
-    void this.capture(this.#commands.report(loaded.entry.track.id, loaded.playbackId));
+    void this.#report(loaded.entry.track.id, loaded.playbackId);
+  }
+
+  async #report(trackId: string, playbackId: string): Promise<void> {
+    try {
+      await this.#commands.report(trackId, playbackId);
+    } catch (error) {
+      if (this.#loaded?.playbackId === playbackId) this.#update({ error: messageOf(error) });
+    }
   }
 
   #followingEntry(): QueueEntry | null {
@@ -854,32 +952,49 @@ export class PlaybackController {
     return index === null ? null : (queue.entries[index] ?? null);
   }
 
+  /**
+   * The preload the player calls for now: the entry that plays next by itself, in the profile the
+   * engine playing asks for. Null when nothing should load ahead.
+   */
+  #preloadRequest(): PreloadRequest | null {
+    const engine = this.#snapshot.engine;
+
+    if (this.#wantedEngine() !== engine || !this.#snapshot.mediaOnline) return null;
+    const entry = this.#followingEntry();
+
+    if (entry === null) return null;
+
+    return {
+      generation: this.#generation,
+      entry,
+      engine,
+      profile: this.#profileFor(entry.track, engine),
+    };
+  }
+
   async #preloadFollowing(): Promise<void> {
     const loaded = this.#loaded;
 
-    if (loaded === null || this.#preloaded !== null || this.#preloading || this.#loading) return;
+    if (loaded === null || this.#preloaded !== null || this.#preloading !== null || this.#loading) {
+      return;
+    }
 
     if (loaded.entry.track.durationMs - this.#livePositionMs() > PRELOAD_LEAD_MS) return;
+    const request = this.#preloadRequest();
 
-    if (this.#wantedEngine() !== this.#snapshot.engine || !this.#snapshot.mediaOnline) return;
+    if (request === null) return;
+    this.#preloading = request;
+    const resolved = await this.#sources.resolve(request.entry.track, request.profile);
 
-    const entry = this.#followingEntry();
+    if (this.#preloading === request) this.#preloading = null;
 
-    if (entry === null) return;
+    // Repeat one, a reordered queue, another song or another quality since the request each call
+    // for another preload, or none.
+    const wanted = this.#preloadRequest();
 
-    const generation = this.#generation;
-    this.#preloading = true;
-
-    const resolved = await this.#sources.resolve(
-      entry.track,
-      this.#profileFor(entry.track, this.#snapshot.engine),
-    );
-
-    this.#preloading = false;
-
-    if (generation !== this.#generation || Result.isFailure(resolved)) return;
+    if (Result.isFailure(resolved) || wanted === null || !samePreload(request, wanted)) return;
     this.#engine.preload(resolved.success.source);
-    this.#preloaded = { entry, ...resolved.success };
+    this.#preloaded = { entry: wanted.entry, ...resolved.success };
   }
 
   #dropStalePreload(): void {
@@ -894,8 +1009,7 @@ export class PlaybackController {
       return;
     }
 
-    this.#engine.preload(null);
-    this.#preloaded = null;
+    this.#dropPreload();
   }
 
   #onEngineEvent = (event: EngineEvent): void => {
@@ -966,17 +1080,18 @@ export class PlaybackController {
 
     this.#preloaded = null;
     this.#setPosition(0);
-    this.#pendingJump = { itemId: preloaded.entry.itemId, sentAt: this.#env.now() };
+    const pending = this.#sendMove(preloaded.entry.itemId);
     this.#update({ current: preloaded.entry.itemId });
     this.#showNowPlaying();
     this.#reportPlay();
-    void this.#confirmJump(preloaded.entry.itemId);
+    void this.#confirmJump(pending);
   }
 
-  async #confirmJump(itemId: string): Promise<void> {
+  async #confirmJump(pending: PendingJump): Promise<void> {
     try {
-      await this.#commands.jump(itemId);
+      await this.#commands.jump(pending.itemId);
     } catch (error) {
+      if (this.#latestMove !== pending) return;
       this.#pendingJump = null;
       this.#update({ error: messageOf(error) });
     }
@@ -1083,11 +1198,22 @@ export class PlaybackController {
     this.#update({ engineStatus: "error", error: message });
   }
 
+  /**
+   * Stops playback while the media server is away, and loads the current entry once it answers:
+   * the song that stopped, from where it stopped, unless the listener moved on meanwhile.
+   */
   #goOffline(baseUrl: string): void {
     const loaded = this.#loaded;
     const positionMs = this.#livePositionMs();
 
+    this.#saveResume();
     this.#unload();
+
+    if (loaded !== null) {
+      this.#resumeAt = { itemId: loaded.entry.itemId, positionMs };
+      this.#stamp(positionMs, false);
+    }
+
     this.#update({ mediaOnline: false, engineStatus: "error", error: MEDIA_OFFLINE_MESSAGE });
     this.#stopHealthProbe();
 
@@ -1097,9 +1223,7 @@ export class PlaybackController {
           Effect.sync(() => {
             this.#healthFiber = null;
             this.#update({ mediaOnline: true, engineStatus: "idle", error: null });
-            const entry = loaded === null ? null : this.#entryOf(loaded.entry.itemId);
-
-            if (entry !== null) void this.#load(entry, positionMs, this.#wantPlaying);
+            void this.#loadCurrent(this.#wantPlaying);
           }),
         ),
       ),

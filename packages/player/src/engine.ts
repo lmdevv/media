@@ -77,9 +77,15 @@ export interface EnginePlayback {
 export interface PlayerEngine {
   /** Samples current output rather than replaying a possibly delayed event. */
   samplePlayback(): EnginePlayback;
-  /** Replaces whatever is loaded and starts at `startMs`. Resolves once playback can begin. */
+  /**
+   * Replaces whatever is loaded and starts at `startMs`. Resolves once playback can begin. Loading
+   * the preloaded source plays it from its preload; any other preload stays queued.
+   */
   load(source: EngineSource, startMs: number, autoplay: boolean): Promise<void>;
-  /** Queues the next source so it starts without a gap when the current one ends. */
+  /**
+   * Queues the next source so it starts without a gap when the current one ends, or drops the one
+   * queued. A queued source stays across loads until this replaces or drops it, or `unload` runs.
+   */
   preload(source: EngineSource | null): void;
   /** Starts or resumes output. Resolves once the browser allowed it to start. */
   play(): Promise<void>;
