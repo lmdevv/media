@@ -101,13 +101,40 @@ describe("the phone's own queue", () => {
     expect(repeatLocal(queue, "one").state.repeat).toBe("one");
   });
 
-  it("hands back its plays always, and its queue only once a command ran here", () => {
+  it("hands back its plays always, and its queue only once an edit ran here", () => {
     const seeded = recordPlay(empty, one.id, 42);
 
-    expect(handBack(seeded)).toEqual({ queue: null, plays: [{ trackId: one.id, playedAt: 42 }] });
+    expect(handBack(seeded)).toEqual({
+      queue: null,
+      jump: null,
+      plays: [{ trackId: one.id, playedAt: 42 }],
+    });
 
     const played = jumpLocal(playLocal(seeded, [one, two]), "local-2");
 
-    expect(handBack(played).queue).toEqual({ trackIds: [one.id, two.id], index: 1 });
+    expect(handBack(played)).toMatchObject({
+      queue: { trackIds: [one.id, two.id], index: 1 },
+      jump: null,
+    });
+  });
+
+  it("leaves the server's queue alone when songs only played on, and names the one playing", () => {
+    const server = {
+      entries: [
+        { itemId: "a", autoplay: false, track: one },
+        { itemId: "b", autoplay: false, track: two },
+        { itemId: "c", autoplay: false, track: three },
+      ],
+      current: "a",
+      shuffle: false,
+      repeat: "off" as const,
+      autoplay: false,
+    };
+
+    const held = seedLocal(server, (id) => (id === two.id ? null : { ...one, id }));
+    const listened = jumpLocal(held, "c");
+
+    expect(listened.changed).toBe(false);
+    expect(handBack(listened)).toEqual({ queue: null, jump: "c", plays: [] });
   });
 });

@@ -151,3 +151,10 @@ export const moveArgs = <Id extends string>(
 
   return after === undefined ? { itemId } : { itemId, afterItemId: after.itemId };
 };
+
+/**
+ * Whether iOS plays a MIME type (from `codecMimeType`) as it is: AVPlayer decodes AAC, ALAC, MP3,
+ * FLAC, and WAV, but not Ogg (Vorbis or Opus).
+ */
+export const playsOnIos = (mimeType: string): boolean =>
+  ["audio/mp4", "audio/flac", "audio/mpeg", "audio/wav"].some((type) => mimeType.startsWith(type));

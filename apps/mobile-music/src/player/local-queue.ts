@@ -1,6 +1,8 @@
 import type { QueueEntry, QueueState, Track } from "@media/player/playback-controller";
 import type { RepeatMode } from "@media/player/queue-order";
 
+import { sortedBy } from "../lib/sorted-by";
+
 /** Songs a queue keeps at most, as the core's `music.queue.play` keeps 1,000. */
 const MAX_QUEUE = 1000;
 
@@ -23,8 +25,9 @@ export interface LocalQueue<T extends Track> {
   /** The number in the next entry id made here. */
   readonly nextItem: number;
   /**
-   * A command ran here since the queue left the server. Until one does, the server's queue
-   * stands, and only the plays go back.
+   * A command that edits the queue ran here since it left the server. Until one does, the
+   * server's queue stands: only the entry playing and the plays go back. Moving on to the next
+   * song, or jumping to another, is not an edit.
    */
   readonly changed: boolean;
   /** Plays to hand to the server's history, in the order they started. */
@@ -112,7 +115,7 @@ export const playLocal = <T extends Track>(
 };
 
 export const jumpLocal = <T extends Track>(queue: LocalQueue<T>, itemId: string): LocalQueue<T> =>
-  indexOf(queue, itemId) === -1 ? queue : withEntries(queue, queue.state.entries, itemId);
+  indexOf(queue, itemId) === -1 ? queue : { ...queue, state: { ...queue.state, current: itemId } };
 
 /**
  * Adds `tracks` right after the entry playing when `next` is set, else at the end, keeping at most
@@ -224,7 +227,8 @@ export const shuffleLocal = <T extends Track>(
 
   const order = new Map((queue.unshuffled ?? []).map((id, index) => [id, index]));
 
-  const restored = tail.toSorted(
+  const restored = sortedBy(
+    tail,
     (a, b) =>
       (order.get(a.itemId) ?? Number.MAX_SAFE_INTEGER) -
       (order.get(b.itemId) ?? Number.MAX_SAFE_INTEGER),
@@ -248,20 +252,29 @@ export const recordPlay = <T extends Track>(
   playedAt: number,
 ): LocalQueue<T> => ({ ...queue, plays: [...queue.plays, { trackId, playedAt }] });
 
-/** What goes back to the server: the queue to play there, if a command ran here, and the plays. */
+/**
+ * What goes back to the server: the queue to play there if an edit ran here, else the server's
+ * entry this phone was playing, and the plays.
+ */
 export interface HandBack {
   readonly queue: { readonly trackIds: ReadonlyArray<string>; readonly index: number } | null;
+  readonly jump: string | null;
   readonly plays: ReadonlyArray<OfflinePlay>;
 }
 
 export const handBack = <T extends Track>(queue: LocalQueue<T>): HandBack => {
-  const index = Math.max(0, indexOf(queue, queue.state.current));
+  const { entries, current } = queue.state;
 
-  return {
-    queue:
-      queue.changed && queue.state.entries.length > 0
-        ? { trackIds: queue.state.entries.map((entry) => entry.track.id), index }
-        : null,
-    plays: queue.plays,
-  };
+  if (queue.changed && entries.length > 0) {
+    const index = Math.max(0, indexOf(queue, current));
+
+    return {
+      queue: { trackIds: entries.map((entry) => entry.track.id), index },
+      jump: null,
+      plays: queue.plays,
+    };
+  }
+
+  // Unedited, every entry is the server's own, so the server knows the one playing by its id.
+  return { queue: null, jump: queue.changed ? null : current, plays: queue.plays };
 };

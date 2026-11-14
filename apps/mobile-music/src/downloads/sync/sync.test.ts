@@ -263,6 +263,13 @@ describe("DownloadSync over the core", () => {
     expect(downloadStatus(done, ALBUM)).toMatchObject({ kind: "downloaded" });
   });
 
+  it("reads a download queued, not downloaded, until its songs are known", async () => {
+    await settled((snapshot) => snapshot.ready);
+    await sync.request(ALBUM, DETAILS);
+
+    expect(downloadStatus(sync.getSnapshot(), ALBUM)).toMatchObject({ kind: "queued" });
+  });
+
   it("takes the core's revision once it lists the song, without fetching the copy again", async () => {
     const one = song("t1", "Safe from Harm");
 

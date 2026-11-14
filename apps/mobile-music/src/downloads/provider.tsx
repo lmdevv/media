@@ -21,9 +21,11 @@ import {
 import type { ReactNode } from "react";
 
 import { appKeychains } from "@/lib/keychains";
+import { resolveMediaUrl } from "@/lib/media-url";
 import { asTrackId } from "@/lib/models";
 import type { UserId } from "@/lib/models";
 import { useReadSettled } from "@/lib/platform";
+import { playsOnIos } from "@/player/player-state";
 import { useServer } from "@/session/connection";
 
 import { expoTransfer } from "./expo-transfer";
@@ -68,13 +70,6 @@ const qualityOfSetting = (setting: "standard" | "high"): DownloadQuality =>
 
 const settingOfQuality = (quality: DownloadQuality): "standard" | "high" =>
   quality === "lossless" ? "high" : "standard";
-
-/**
- * Whether iOS plays a MIME type (from `codecMimeType`) as it is: AVPlayer decodes AAC, ALAC, MP3,
- * FLAC, and WAV, but not Ogg (Vorbis or Opus).
- */
-const playsOnIos = (mimeType: string): boolean =>
-  ["audio/mp4", "audio/flac", "audio/mpeg", "audio/wav"].some((type) => mimeType.startsWith(type));
 
 /** What a song, album, or playlist row offers for its download. */
 interface DownloadView {
@@ -162,7 +157,7 @@ const coreFor = (platform: PlatformSdk, mediaUrl: string): DownloadsCore => ({
       revision: fetched.revision,
     };
   },
-  resolveUrl: (url) => (url.startsWith("/") ? `${mediaUrl}${url}` : url),
+  resolveUrl: (url) => resolveMediaUrl(mediaUrl, url) ?? url,
 });
 
 type KeptRow = Awaited<ReturnType<PlatformSdk["core"]["downloads"]["list"]>>["page"][number];
@@ -271,9 +266,23 @@ const decodeLyrics = Schema.decodeUnknownOption(OfflineLyrics);
 
 const makeRevision = Schema.decodeSync(LyricsRevision);
 
+/** Lyrics lookups a watcher sends at once. */
+const LYRICS_BATCH = 50;
+
+/** How soon a song whose lookup failed or is still pending is asked again. */
+const LYRICS_RETRY_MS = 60_000;
+
+interface LyricsAnswer {
+  readonly change: LyricsChange | null;
+  /** Whether the answer is final: not a failure, and not a lookup the server still runs. */
+  readonly settled: boolean;
+}
+
 /**
- * Looks up the lyrics of kept songs that keep none yet, all at once, and offers them to the sync.
- * Lyrics found keep their revision, a digest of their JSON.
+ * Keeps the lyrics of kept songs current. Each song is asked once while the app runs, the lyrics
+ * it keeps offered again only when their digest changed; one whose lookup failed or is still
+ * pending on the server is asked again a minute later. Lyrics keep their revision, a digest of
+ * their JSON.
  */
 function LyricsWatcher({
   sync,
@@ -283,39 +292,72 @@ function LyricsWatcher({
   readonly held: ReadonlyArray<HeldLyrics>;
 }) {
   const platform = usePlatform();
+  const settled = useRef(new Set<TrackId>());
+  const [round, setRound] = useState(0);
 
   useEffect(() => {
-    const missing = held.filter((song) => song.rev === null);
+    const due = held.filter((song) => song.rev === null || !settled.current.has(song.trackId));
 
-    if (missing.length === 0) return undefined;
+    if (due.length === 0) return undefined;
     const stop = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
 
-    const lookUp = async ({ trackId }: HeldLyrics): Promise<ReadonlyArray<LyricsChange>> => {
+    const lookUp = async ({ trackId, rev }: HeldLyrics): Promise<LyricsAnswer> => {
       try {
-        const kept = offlineLyricsOf(await platform.music.lyrics.get({ trackId }));
+        const lyrics = await platform.music.lyrics.get({ trackId });
+        const kept = offlineLyricsOf(lyrics);
         const digest = await digestStringAsync(CryptoDigestAlgorithm.SHA256, JSON.stringify(kept));
+        const next = makeRevision(digest);
 
-        return [
-          LyricsChange.cases.Changed.make({ trackId, rev: makeRevision(digest), lyrics: kept }),
-        ];
+        return {
+          change:
+            next === rev
+              ? null
+              : LyricsChange.cases.Changed.make({ trackId, rev: next, lyrics: kept }),
+          settled: lyrics.status !== "pending",
+        };
       } catch {
-        // The next question asks again.
-        return [];
+        return { change: null, settled: false };
       }
     };
 
-    const look = async (): Promise<void> => {
-      const changes = (await Promise.all(missing.map(lookUp))).flat();
+    const lookAll = async (
+      songs: ReadonlyArray<HeldLyrics>,
+      answers: ReadonlyArray<LyricsAnswer>,
+    ): Promise<ReadonlyArray<LyricsAnswer>> => {
+      if (songs.length === 0 || stop.signal.aborted) return answers;
+      const batch = await Promise.all(songs.slice(0, LYRICS_BATCH).map(lookUp));
 
-      if (!stop.signal.aborted) sync.offerLyrics(changes);
+      return lookAll(songs.slice(LYRICS_BATCH), [...answers, ...batch]);
+    };
+
+    const look = async (): Promise<void> => {
+      const answers = await lookAll(due, []);
+
+      if (stop.signal.aborted) return;
+      answers.forEach((answer, index) => {
+        const song = due[index];
+
+        if (answer.settled && song !== undefined) settled.current.add(song.trackId);
+      });
+      sync.offerLyrics(
+        answers.flatMap((answer) => (answer.change === null ? [] : [answer.change])),
+      );
+
+      if (answers.some((answer) => !answer.settled)) {
+        timer = setTimeout(() => {
+          setRound((count) => count + 1);
+        }, LYRICS_RETRY_MS);
+      }
     };
 
     void look();
 
     return () => {
       stop.abort();
+      clearTimeout(timer);
     };
-  }, [platform, sync, held]);
+  }, [platform, sync, held, round]);
 
   return null;
 }

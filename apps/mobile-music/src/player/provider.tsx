@@ -1,4 +1,6 @@
 import { pagedStore } from "@media/mobile-core/pages";
+import { readHealth } from "@media/mobile-core/server";
+import { lastPerson } from "@media/mobile-core/sign-in";
 import { PlaybackController } from "@media/player/playback-controller";
 import type {
   ControllerSnapshot,
@@ -34,9 +36,12 @@ import type { DownloadedCopies } from "../downloads";
 import { asQueueItemId, asTrackId } from "../lib/models";
 import type { QueueItemId, Track, TrackId } from "../lib/models";
 import { useReadSettled } from "../lib/platform";
+import { appKeychains } from "../lib/keychains";
+import { resolveMediaUrl } from "../lib/media-url";
 import { readValue, writeValue } from "../lib/secure-storage";
 import { useServer } from "../session/connection";
 import { useProbeReach, useServerReach } from "../session/server-reach";
+import { useSessionPhase } from "../session/session-phase";
 import { openExpoOutput } from "./expo-audio-output";
 import {
   addLocal,
@@ -60,6 +65,7 @@ import {
   moveArgs,
   nextRepeat,
   nowPlayingOf,
+  playsOnIos,
   queueItemOf,
   sameSong,
   statusOf,
@@ -85,6 +91,18 @@ const NOT_DOWNLOADED = "This song isn’t downloaded";
 const QUALITY_KEY = "music.streamQuality";
 
 const RESUME_KEY = "music.resume";
+
+/** Offline plays one `music.play.reportOffline` takes at most, as the core accepts. */
+const OFFLINE_PLAYS_MAX = 500;
+
+/** Offline plays this phone keeps for later at most, the newest. */
+const OFFLINE_PLAYS_KEPT = 2000;
+
+const OFFLINE_PLAYS_RETRY_MS = 30_000;
+
+const StoredPlays = Schema.fromJsonString(
+  Schema.Array(Schema.Struct({ trackId: Schema.String, playedAt: Schema.Finite })),
+);
 
 /** What screens can ask the player to do. Actions never reject: failures show up in `error`. */
 export interface PlayerActions {
@@ -267,9 +285,26 @@ const useServerQueue = (platform: PlatformSdk): QueueState<Track> | null => {
   }, [data, list]);
 };
 
+/**
+ * The phone's own queue. Its offline plays are also kept in this app's keychain under `playsKey`,
+ * one key per server and person, so a relaunch or a later outage does not lose them before they
+ * reach the server.
+ */
 class LocalStore {
-  #queue: LocalQueue<Track> = seedLocal<Track>(null, () => null);
+  #queue: LocalQueue<Track>;
   readonly #listeners = new Set<() => void>();
+  readonly #playsKey: string | null;
+
+  constructor(playsKey: string | null) {
+    this.#playsKey = playsKey;
+
+    const plays =
+      playsKey === null
+        ? []
+        : Option.getOrElse(Schema.decodeUnknownOption(StoredPlays)(readValue(playsKey)), () => []);
+
+    this.#queue = { ...seedLocal<Track>(null, () => null), plays };
+  }
 
   getSnapshot = (): LocalQueue<Track> => this.#queue;
 
@@ -282,7 +317,13 @@ class LocalStore {
   };
 
   update(change: (queue: LocalQueue<Track>) => LocalQueue<Track>): LocalQueue<Track> {
+    const before = this.#queue.plays;
     this.#queue = change(this.#queue);
+
+    if (this.#playsKey !== null && this.#queue.plays !== before) {
+      const kept = this.#queue.plays.slice(-OFFLINE_PLAYS_KEPT);
+      writeValue(this.#playsKey, kept.length === 0 ? null : Schema.encodeSync(StoredPlays)(kept));
+    }
 
     for (const listener of this.#listeners) listener();
 
@@ -378,20 +419,28 @@ interface PhoneProps {
   readonly probe: { current: () => void };
   /** Moves the player onto this phone's own queue, seeded from the core's last answer. */
   readonly goLocal: { current: () => void };
+  /** Where this server's and person's offline plays wait, or null when no one is known. */
+  readonly playsKey: string | null;
 }
 
-const createPhone = ({ platform, mediaUrl, copies, probe, goLocal }: PhoneProps): Phone => {
+const createPhone = ({
+  platform,
+  mediaUrl,
+  copies,
+  probe,
+  goLocal,
+  playsKey,
+}: PhoneProps): Phone => {
   const engine = new NativeEngine(openExpoOutput, {
     mark: logTimeline,
     now: () => performance.now(),
   });
 
-  const local = new LocalStore();
+  const local = new LocalStore(playsKey);
   const mode: Phone["mode"] = { current: "server" };
   const controls = lockScreenControls(engine);
 
-  const artFor = (artUrl: string | null): string | null =>
-    artUrl?.startsWith("/") === true ? `${mediaUrl}${artUrl}` : artUrl;
+  const artFor = (artUrl: string | null): string | null => resolveMediaUrl(mediaUrl, artUrl);
 
   const nowPlaying: NowPlayingControls = {
     setHandlers: controls.setHandlers,
@@ -455,16 +504,19 @@ const createPhone = ({ platform, mediaUrl, copies, probe, goLocal }: PhoneProps)
     play: async (trackIds, index) => {
       if (mode.current === "local") return playLocally(trackIds, index);
 
-      const answered = await withDeadline(
-        platform.music.queue.play(
-          index === undefined
-            ? { trackIds: trackIds.map(asTrackId) }
-            : { trackIds: trackIds.map(asTrackId), index },
-        ),
-        ACK_DEADLINE_MS,
+      const pending = platform.music.queue.play(
+        index === undefined
+          ? { trackIds: trackIds.map(asTrackId) }
+          : { trackIds: trackIds.map(asTrackId), index },
       );
 
+      const answered = await withDeadline(pending, ACK_DEADLINE_MS);
+
       if (Option.isSome(answered)) return answered.value;
+
+      // A slow server that still answers gets the play: going local now would hand it a second
+      // queue once it is back.
+      if (Option.isSome(await readHealth(mediaUrl))) return pending;
       probe.current();
 
       if (!trackIds.some((id) => copies.find(id) !== null)) throw new Error(OFFLINE_MESSAGE);
@@ -515,7 +567,7 @@ const createPhone = ({ platform, mediaUrl, copies, probe, goLocal }: PhoneProps)
     sources,
     { mse: null, create: () => engine },
     {
-      canPlay: () => false,
+      canPlay: playsOnIos,
       now: Date.now,
       monotonicNow: () => performance.now(),
       settings: { quality: loadQuality(), volume: 1, gapless: true },
@@ -747,24 +799,40 @@ const useHandBack = (
   const { local, mode } = phone;
   const queue = useSyncExternalStore(local.subscribe, local.getSnapshot);
   const plays = queue.plays;
+  const sending = useRef(false);
+  const [retry, setRetry] = useState(0);
 
+  // One batch at a time, so a play recorded meanwhile is not sent twice; the batch's removal
+  // starts the next.
   useEffect(() => {
-    if (!online || plays.length === 0) return;
-    const sent = plays;
+    if (!online || plays.length === 0 || sending.current) return undefined;
+    const sent = plays.slice(0, OFFLINE_PLAYS_MAX);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    sending.current = true;
 
     const send = async (): Promise<void> => {
       await platform.music.play.reportOffline({
         plays: sent.map((play) => ({ trackId: asTrackId(play.trackId), playedAt: play.playedAt })),
         sentAt: Date.now(),
       });
+      sending.current = false;
       local.update((held) => ({
         ...held,
         plays: held.plays.filter((play) => !sent.includes(play)),
       }));
     };
 
-    void send().catch(() => undefined);
-  }, [platform, local, online, plays]);
+    void send().catch(() => {
+      sending.current = false;
+      timer = setTimeout(() => {
+        setRetry((count) => count + 1);
+      }, OFFLINE_PLAYS_RETRY_MS);
+    });
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [platform, local, online, plays, retry]);
 
   useEffect(() => {
     if (!online || audible || mode.current !== "local") return;
@@ -776,8 +844,21 @@ const useHandBack = (
       void platform.music.queue
         .play({ trackIds: back.queue.trackIds.map(asTrackId), index: back.queue.index })
         .catch(() => undefined);
+    } else if (back.jump !== null) {
+      void platform.music.queue.jump({ itemId: asQueueItemId(back.jump) }).catch(() => undefined);
     }
   }, [platform, local, mode, online, audible, setMode]);
+};
+
+/** Whose player this is: the signed-in person, or offline the one who last signed in here. */
+const usePlayerPerson = (mediaUrl: string): string | null => {
+  const phase = useSessionPhase();
+
+  if (phase.kind === "ready" || phase.kind === "needsLibrary" || phase.kind === "scanning") {
+    return phase.me.userId;
+  }
+
+  return lastPerson({ own: appKeychains().own, server: mediaUrl })?.userId ?? null;
 };
 
 /**
@@ -794,13 +875,24 @@ export function PlayerProvider({ children }: { readonly children: ReactNode }) {
   const probe = useRef(probeReach);
   const goLocal = useRef(() => {});
   const [mode, setMode] = useState<"server" | "local">("server");
+  const person = usePlayerPerson(mediaUrl);
 
   useLayoutEffect(() => {
     probe.current = probeReach;
   }, [probeReach]);
 
   // State rather than a memo: React may drop a memo, which would build a second player.
-  const [phone] = useState(() => createPhone({ platform, mediaUrl, copies, probe, goLocal }));
+  const [phone] = useState(() =>
+    createPhone({
+      platform,
+      mediaUrl,
+      copies,
+      probe,
+      goLocal,
+      playsKey: person === null ? null : `music.offlinePlays:${mediaUrl}:${person}`,
+    }),
+  );
+
   const { controller, local } = phone;
   const serverQueue = useServerQueue(platform);
   const localQueue = useSyncExternalStore(local.subscribe, local.getSnapshot);
@@ -815,7 +907,10 @@ export function PlayerProvider({ children }: { readonly children: ReactNode }) {
   useLayoutEffect(() => {
     goLocal.current = () => {
       if (phone.mode.current === "local") return;
-      local.update(() => seedLocal(serverQueue, (id) => trackOfCopy(copies, id)));
+      local.update((held) => ({
+        ...seedLocal(serverQueue, (id) => trackOfCopy(copies, id)),
+        plays: held.plays,
+      }));
       phone.mode.current = "local";
       setMode("local");
     };
@@ -846,8 +941,7 @@ export function PlayerProvider({ children }: { readonly children: ReactNode }) {
   const art = useMemo(
     () =>
       (track: Track): string | null =>
-        copies.find(track.id)?.artUri ??
-        (track.artUrl?.startsWith("/") === true ? `${mediaUrl}${track.artUrl}` : track.artUrl),
+        copies.find(track.id)?.artUri ?? resolveMediaUrl(mediaUrl, track.artUrl),
     [copies, mediaUrl],
   );
 

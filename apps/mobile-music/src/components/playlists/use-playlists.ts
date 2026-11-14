@@ -4,6 +4,7 @@ import { usePlatform } from "@media/sdk/react";
 
 import type { DirectoryPerson, Playlist, UserId } from "@/lib/models";
 import { useMusic } from "@/lib/platform";
+import { sortedBy } from "@/lib/sorted-by";
 
 const PAGE_ROWS = 200;
 
@@ -54,7 +55,8 @@ export const usePeopleDirectory = (): ReadonlyArray<DirectoryEntry> | undefined 
 
   if (paged.next.kind !== "done") return undefined;
 
-  return paged.rows
-    .map((row) => ({ id: row.userId, name: row.name, role: row.role }))
-    .toSorted((left, right) => left.name.localeCompare(right.name));
+  return sortedBy(
+    paged.rows.map((row) => ({ id: row.userId, name: row.name, role: row.role })),
+    (left, right) => left.name.localeCompare(right.name),
+  );
 };

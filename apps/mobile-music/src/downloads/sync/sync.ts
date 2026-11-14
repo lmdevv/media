@@ -935,7 +935,11 @@ export class DownloadSync {
         return [{ pin: manifest.pin, members }];
       }
 
-      return [{ pin: stored?.pin ?? listedPin, members: stored?.members ?? null }];
+      // A pin saved here before its first manifest has no members yet: its songs are unknown, not
+      // zero, so it reads queued rather than downloaded.
+      const members = stored === undefined || stored.members.length === 0 ? null : stored.members;
+
+      return [{ pin: stored?.pin ?? listedPin, members }];
     });
   }
 
