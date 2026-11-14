@@ -6,12 +6,14 @@
   "type": "module",
   "sideEffects": false,
   "exports": {
+    "./busy-retry": "./src/busy-retry.ts",
     "./engine": "./src/engine.ts",
     "./lyrics": "./src/lyrics.ts",
     "./playback-controller": "./src/playback-controller.ts",
     "./queue-order": "./src/queue-order.ts",
     "./react": "./src/react.tsx",
     "./source-resolver": "./src/source-resolver.ts",
+    "./stream-offset": "./src/stream-offset.ts",
     "./stream-quality": "./src/stream-quality.ts"
   },
   "scripts": {

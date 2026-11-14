@@ -1,0 +1,928 @@
+import { pagedStore } from "@media/mobile-core/pages";
+import { PlaybackController } from "@media/player/playback-controller";
+import type {
+  ControllerSnapshot,
+  MusicCommands,
+  NowPlayingControls,
+  QueueEntry,
+  QueueState,
+  ResumePoint,
+} from "@media/player/playback-controller";
+import type { RepeatMode } from "@media/player/queue-order";
+import { StreamRefused, ticketSources } from "@media/player/source-resolver";
+import type { SourceResolver } from "@media/player/source-resolver";
+import { settingOfQuality } from "@media/player/stream-quality";
+import type { StreamQuality, StreamQualitySetting } from "@media/player/stream-quality";
+import type { PlatformSdk } from "@media/sdk/promise";
+import { usePlatform } from "@media/sdk/react";
+import { Option, Result, Schema } from "effect";
+import { randomUUID } from "expo-crypto";
+import {
+  createContext,
+  use,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import type { ReactNode } from "react";
+
+import { useLocalCopies } from "../downloads";
+import type { DownloadedCopies } from "../downloads";
+import { asQueueItemId, asTrackId } from "../lib/models";
+import type { QueueItemId, Track, TrackId } from "../lib/models";
+import { useReadSettled } from "../lib/platform";
+import { readValue, writeValue } from "../lib/secure-storage";
+import { useServer } from "../session/connection";
+import { useProbeReach, useServerReach } from "../session/server-reach";
+import { openExpoOutput } from "./expo-audio-output";
+import {
+  addLocal,
+  clearLocal,
+  handBack,
+  jumpLocal,
+  moveLocal,
+  playLocal,
+  recordPlay,
+  removeLocal,
+  repeatLocal,
+  seedLocal,
+  shuffleLocal,
+} from "./local-queue";
+import type { LocalQueue } from "./local-queue";
+import { NativeEngine } from "./native-engine";
+import type { TimelineMark } from "./native-engine";
+import { lockScreenControls } from "./native-host";
+import {
+  isPlaying,
+  moveArgs,
+  nextRepeat,
+  nowPlayingOf,
+  queueItemOf,
+  sameSong,
+  statusOf,
+} from "./player-state";
+import type { NowPlaying, PlayerStatus, PlayerView } from "./player-state";
+
+const POSITION_INTERVAL_MS = 250;
+
+/** Queue entries asked for per page; the core caps a page to what one call may read. */
+const QUEUE_PAGE = 200;
+
+/** How long the queue's pages wait before they are followed again after one failed. */
+const QUEUE_RESTART_MS = 250;
+
+/**
+ * How long a new queue may go unanswered before this phone plays its own downloaded songs
+ * instead. A connection that died without the platform client noticing shows up this way.
+ */
+const ACK_DEADLINE_MS = 4000;
+
+const OFFLINE_MESSAGE = "Can’t reach the server. Downloaded songs play without it.";
+
+const NOT_DOWNLOADED = "This song isn’t downloaded";
+
+const QUALITY_KEY = "music.streamQuality";
+
+const RESUME_KEY = "music.resume";
+
+/** What screens can ask the player to do. Actions never reject: failures show up in `error`. */
+export interface PlayerActions {
+  /** Replaces the queue with `trackIds` and plays them here from `index`. */
+  readonly play: (trackIds: ReadonlyArray<TrackId>, index?: number) => Promise<void>;
+  readonly pause: () => Promise<void>;
+  readonly resume: () => Promise<void>;
+  readonly toggle: () => Promise<void>;
+  readonly next: () => Promise<void>;
+  readonly previous: () => Promise<void>;
+  readonly seek: (positionMs: number) => Promise<void>;
+  /** Plays the queue entry `itemId`. */
+  readonly jump: (itemId: QueueItemId) => Promise<void>;
+  readonly setShuffle: (on: boolean) => Promise<void>;
+  /** Off, all, one, and back to off. */
+  readonly cycleRepeat: () => Promise<void>;
+  readonly setAutoplay: (on: boolean) => Promise<void>;
+  /** From 0 to 1. */
+  readonly setVolume: (volume: number) => Promise<void>;
+  /** Queues songs right after the current one. */
+  readonly playNext: (trackIds: ReadonlyArray<TrackId>) => Promise<void>;
+  /** Queues songs after the others the listener queued, before autoplay's. */
+  readonly playLater: (trackIds: ReadonlyArray<TrackId>) => Promise<void>;
+  readonly removeFromQueue: (itemId: QueueItemId) => Promise<void>;
+  /** Moves the entry `itemId` to `toIndex` of `usePlayer().queue`. */
+  readonly moveInQueue: (itemId: QueueItemId, toIndex: number) => Promise<void>;
+  /** Clears everything after the current song. */
+  readonly clearQueue: () => Promise<void>;
+  /** Saves the streaming quality; it applies from the next song. */
+  readonly setQuality: (quality: StreamQuality) => void;
+  /** Loads the current song again from its position after playback failed (G06). */
+  readonly retry: () => void;
+}
+
+/**
+ * Queue changes that reject with the failure, for a sheet that keeps a refusal on screen. An add
+ * is never sent again after a failure: it may have landed, and the queue shows what did.
+ */
+export interface PlayerCommands {
+  readonly addToQueue: (trackIds: ReadonlyArray<TrackId>, next: boolean) => Promise<void>;
+  readonly clearQueue: () => Promise<void>;
+}
+
+/** The song and the status: what the mini player and song rows need. */
+export interface NowPlayingView {
+  readonly nowPlaying: NowPlaying | null;
+  readonly status: PlayerStatus;
+}
+
+/** The live position, and the length of the song it is in. */
+export interface PlaybackPosition {
+  readonly positionMs: number;
+  readonly durationMs: number;
+}
+
+const PlayerContext = createContext<PlayerView | null>(null);
+
+const NowPlayingContext = createContext<NowPlayingView | null>(null);
+
+const PositionContext = createContext<PlaybackPosition>({ positionMs: 0, durationMs: 0 });
+
+const ActionsContext = createContext<PlayerActions | null>(null);
+
+const CommandsContext = createContext<PlayerCommands | null>(null);
+
+const SongContext = createContext<NowPlaying | null>(null);
+
+const OwnSessionContext = createContext(false);
+
+const PositionReaderContext = createContext<(() => number) | null>(null);
+
+const required = <Value,>(value: Value | null, hook: string): Value => {
+  if (value === null) throw new Error(`${hook} must be used inside PlayerProvider`);
+
+  return value;
+};
+
+/** The whole player. Re-renders on every change but the position; prefer the narrower hooks. */
+export const usePlayer = (): PlayerView => required(use(PlayerContext), "usePlayer");
+
+/** The song and the status. Changes only when one of them does. */
+export const useNowPlaying = (): NowPlayingView =>
+  required(use(NowPlayingContext), "useNowPlaying");
+
+/** The song alone, for what doesn't show the status. Changes only when the song does. */
+export const useSong = (): NowPlaying | null => use(SongContext);
+
+/**
+ * The live position, updated four times a second. Only components that call it re-render with
+ * it: Now Playing's scrubber and the mini player's progress.
+ */
+export const usePlaybackPosition = (): PlaybackPosition => use(PositionContext);
+
+/**
+ * A stable function that returns the live position in milliseconds, worked out afresh on every
+ * call. For frame loops that follow playback closely, such as synced lyrics; it never re-renders
+ * its caller.
+ */
+export const usePositionReader = (): (() => number) =>
+  required(use(PositionReaderContext), "usePositionReader");
+
+/** The player's actions. Stable for the provider's lifetime, so it never re-renders a caller. */
+export const usePlayerActions = (): PlayerActions =>
+  required(use(ActionsContext), "usePlayerActions");
+
+/** Queue changes that reject with their failure. Stable for the provider's lifetime. */
+export const usePlayerCommands = (): PlayerCommands =>
+  required(use(CommandsContext), "usePlayerCommands");
+
+/**
+ * Whether the player plays this phone's own queue of downloaded songs, as it does without the
+ * server, until it hands it back. Changes only when that does.
+ */
+export const useOwnSession = (): boolean => use(OwnSessionContext);
+
+type QueueRow = Awaited<ReturnType<PlatformSdk["music"]["queue"]["list"]>>["page"][number];
+
+const queuePages = (platform: PlatformSdk) =>
+  pagedStore((span) =>
+    platform.music.queue.list.watch({ paginationOpts: { numItems: QUEUE_PAGE, ...span } }),
+  );
+
+/**
+ * Every row of the listener's queue, followed live, loading the next page as soon as one arrives;
+ * null until every page first arrived. A new queue (`music.queue.play`) lists another
+ * generation's entries, so Convex refuses the cursors its pages were following; the pages then
+ * start over from the top, as the web player's do. The last whole list stays while pages reload.
+ */
+const useQueueRows = (platform: PlatformSdk): ReadonlyArray<QueueRow> | null => {
+  const [store, setStore] = useState(() => queuePages(platform));
+  const [last, setLast] = useState<ReadonlyArray<QueueRow> | null>(null);
+  const paged = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
+  const load = paged.status === "ready" && paged.next.kind === "more" ? paged.next.load : null;
+  const whole = paged.status === "ready" && paged.next.kind === "done" ? paged.rows : null;
+
+  if (whole !== null && whole !== last) setLast(whole);
+
+  const failed =
+    paged.status === "failed" || (paged.status === "ready" && paged.next.kind === "failed");
+
+  useEffect(() => {
+    load?.();
+  }, [load]);
+
+  useEffect(() => {
+    if (!failed) return undefined;
+
+    const timer = setTimeout(() => {
+      setStore(queuePages(platform));
+    }, QUEUE_RESTART_MS);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [failed, platform]);
+
+  return whole ?? last;
+};
+
+/** The listener's queue on the core once its state and every page have arrived; null before. */
+const useServerQueue = (platform: PlatformSdk): QueueState<Track> | null => {
+  const info = useReadSettled(platform.music.queue.get, {});
+  const list = useQueueRows(platform);
+  const data = info === undefined || info instanceof Error ? null : info;
+
+  return useMemo(() => {
+    if (data === null || list === null) return null;
+
+    return {
+      entries: list.map((row) => ({
+        itemId: row.itemId,
+        autoplay: row.autoplay,
+        track: row.track,
+      })),
+      current: data.current,
+      shuffle: data.shuffle,
+      repeat: data.repeat,
+      autoplay: data.autoplay,
+    };
+  }, [data, list]);
+};
+
+/** This phone's own queue, offline, which tells its listener after every change. */
+class LocalStore {
+  #queue: LocalQueue<Track> = seedLocal<Track>(null, () => null);
+  readonly #listeners = new Set<() => void>();
+
+  getSnapshot = (): LocalQueue<Track> => this.#queue;
+
+  subscribe = (listener: () => void): (() => void) => {
+    this.#listeners.add(listener);
+
+    return () => {
+      this.#listeners.delete(listener);
+    };
+  };
+
+  /** Replaces the queue with what `change` makes of it. */
+  update(change: (queue: LocalQueue<Track>) => LocalQueue<Track>): LocalQueue<Track> {
+    this.#queue = change(this.#queue);
+
+    for (const listener of this.#listeners) listener();
+
+    return this.#queue;
+  }
+}
+
+/**
+ * This phone's quality: the core's tier for this device, or the last one chosen here before the
+ * core keeps settings for it. A phone's `auto` plays `high` (AAC 320 kbps): lossless originals are
+ * a choice in settings, not a surprise on a cellular plan, as old music's phone started.
+ */
+const phoneQuality = (setting: StreamQualitySetting): StreamQuality => {
+  if (setting === "low") return "data-saver";
+
+  return setting === "original" ? "lossless" : "high";
+};
+
+const StoredQuality = Schema.Literals(["lossless", "high", "data-saver"]);
+
+const loadQuality = (): StreamQuality =>
+  Option.getOrElse(Schema.decodeUnknownOption(StoredQuality)(readValue(QUALITY_KEY)), () => "high");
+
+const StoredResume = Schema.fromJsonString(
+  Schema.Struct({ itemId: Schema.String, positionMs: Schema.Finite }),
+);
+
+const resumeStore = {
+  load: (): ResumePoint | null =>
+    Option.getOrNull(Schema.decodeUnknownOption(StoredResume)(readValue(RESUME_KEY))),
+  save: (point: ResumePoint | null): void => {
+    writeValue(RESUME_KEY, point === null ? null : Schema.encodeSync(StoredResume)(point));
+  },
+};
+
+/** A downloaded song as the player plays it offline, its cover this phone's own file. */
+const trackOfCopy = (copies: DownloadedCopies, trackId: string): Track | null => {
+  const copy = copies.find(trackId);
+
+  if (copy === null) return null;
+  const { track } = copy;
+
+  return {
+    id: track.id,
+    title: track.title,
+    artist: track.artist,
+    artistId: track.artistId,
+    album: track.album,
+    albumId: track.albumId,
+    trackNumber: track.trackNumber,
+    discNumber: track.discNumber,
+    durationMs: track.durationMs,
+    codec: track.codec,
+    lossless: track.lossless,
+    bitrate: track.bitrate,
+    sampleRate: track.sampleRate,
+    bitDepth: track.bitDepth,
+    artUrl: copy.artUri,
+    liked: false,
+  };
+};
+
+const withDeadline = async <A,>(call: Promise<A>, ms: number): Promise<Option.Option<A>> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const late = new Promise<Option.Option<A>>((resolve) => {
+    timer = setTimeout(() => resolve(Option.none()), ms);
+  });
+
+  try {
+    return await Promise.race([call.then(Option.some), late]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+/**
+ * Logs each song change to Metro's console in development: when the song before reached its end
+ * and when the next one started playing, for the gapless timeline.
+ */
+const logTimeline = (mark: TimelineMark): void => {
+  if (__DEV__) console.info(`[gapless] ${JSON.stringify(mark)}`);
+};
+
+interface Phone {
+  readonly controller: PlaybackController;
+  readonly local: LocalStore;
+  /** Whether commands go to the core or to this phone's own queue, read when a command runs. */
+  readonly mode: { current: "server" | "local" };
+}
+
+interface PhoneProps {
+  readonly platform: PlatformSdk;
+  readonly mediaUrl: string;
+  readonly copies: DownloadedCopies;
+  /** Asks the server now whether it answers. */
+  readonly probe: { current: () => void };
+  /** Moves the player onto this phone's own queue, seeded from the core's last answer. */
+  readonly goLocal: { current: () => void };
+}
+
+const createPhone = ({ platform, mediaUrl, copies, probe, goLocal }: PhoneProps): Phone => {
+  const engine = new NativeEngine(openExpoOutput, {
+    mark: logTimeline,
+    now: () => performance.now(),
+  });
+
+  const local = new LocalStore();
+  const mode: Phone["mode"] = { current: "server" };
+  const controls = lockScreenControls(engine);
+
+  const artFor = (artUrl: string | null): string | null =>
+    artUrl?.startsWith("/") === true ? `${mediaUrl}${artUrl}` : artUrl;
+
+  const nowPlaying: NowPlayingControls = {
+    setHandlers: controls.setHandlers,
+    show: (track, playing, positionMs) => {
+      controls.show(
+        track === null ? null : { ...track, artUrl: artFor(track.artUrl) },
+        playing,
+        positionMs,
+      );
+    },
+  };
+
+  const remote = ticketSources(
+    (trackId) => platform.music.play.start({ trackId: asTrackId(trackId) }),
+    { now: Date.now, baseUrl: mediaUrl },
+  );
+
+  const sources: SourceResolver = {
+    resolve: async (track, profile) => {
+      const copy = copies.find(track.id);
+
+      if (copy !== null) {
+        return Result.succeed({
+          source: {
+            key: `${track.id}:local:${copy.uri}`,
+            url: copy.uri,
+            durationMs: track.durationMs,
+            finished: true,
+          },
+          profile: copy.profile,
+          renewAt: Number.MAX_SAFE_INTEGER,
+          playbackId: `local:${randomUUID()}`,
+        });
+      }
+
+      if (mode.current === "local")
+        return Result.fail(new StreamRefused({ message: NOT_DOWNLOADED }));
+
+      return remote.resolve(track, profile);
+    },
+  };
+
+  const playLocally = (trackIds: ReadonlyArray<string>, index: number | undefined) => {
+    const picked = trackIds[index ?? 0];
+    const tracks = trackIds.flatMap((id) => trackOfCopy(copies, id) ?? []);
+
+    if (tracks.length === 0) throw new Error(NOT_DOWNLOADED);
+
+    const start = Math.max(
+      0,
+      tracks.findIndex((track) => track.id === picked),
+    );
+
+    const queue = local.update((held) => playLocal(held, tracks, start));
+    controller.sync(queue.state);
+
+    return { current: queue.state.current ?? "" };
+  };
+
+  const commands: MusicCommands = {
+    play: async (trackIds, index) => {
+      if (mode.current === "local") return playLocally(trackIds, index);
+
+      const answered = await withDeadline(
+        platform.music.queue.play(
+          index === undefined
+            ? { trackIds: trackIds.map(asTrackId) }
+            : { trackIds: trackIds.map(asTrackId), index },
+        ),
+        ACK_DEADLINE_MS,
+      );
+
+      if (Option.isSome(answered)) return answered.value;
+      probe.current();
+
+      if (!trackIds.some((id) => copies.find(id) !== null)) throw new Error(OFFLINE_MESSAGE);
+      goLocal.current();
+
+      return playLocally(trackIds, index);
+    },
+    jump: async (itemId) => {
+      if (mode.current === "local") {
+        controller.sync(local.update((held) => jumpLocal(held, itemId)).state);
+
+        return;
+      }
+
+      await platform.music.queue.jump({ itemId: asQueueItemId(itemId) });
+    },
+    report: async (trackId, playbackId) => {
+      if (!playbackId.startsWith("local:")) {
+        await platform.music.play.report({ trackId: asTrackId(trackId), playbackId });
+
+        return;
+      }
+
+      // A downloaded song plays from its file; history still hears of it, now or once the
+      // server answers again.
+      if (mode.current === "server") {
+        const started = await withDeadline(
+          platform.music.play.start({ trackId: asTrackId(trackId) }),
+          ACK_DEADLINE_MS,
+        );
+
+        if (Option.isSome(started)) {
+          await platform.music.play.report({
+            trackId: asTrackId(trackId),
+            playbackId: started.value.playbackId,
+          });
+
+          return;
+        }
+      }
+
+      local.update((held) => recordPlay(held, trackId, Date.now()));
+    },
+  };
+
+  const controller = new PlaybackController(
+    commands,
+    sources,
+    { mse: null, create: () => engine },
+    {
+      canPlay: () => false,
+      now: Date.now,
+      monotonicNow: () => performance.now(),
+      settings: { quality: loadQuality(), volume: 1, gapless: true },
+      saveQuality: (quality) => {
+        writeValue(QUALITY_KEY, quality);
+        void platform.core.settings
+          .set({ streamQuality: settingOfQuality(quality) })
+          .catch(() => undefined);
+      },
+      saveVolume: (volume) => {
+        void platform.core.settings.set({ volume }).catch(() => undefined);
+      },
+      nowPlaying,
+      resume: resumeStore,
+    },
+  );
+
+  return { controller, local, mode };
+};
+
+/** What the actions read at the moment they run. */
+interface Latest {
+  readonly queue: QueueState<Track> | null;
+  readonly playing: boolean;
+}
+
+/**
+ * Adds every song, a call at a time: each call takes as many as it can read and answers the rest,
+ * which the next call adds right after the last entry added so far, so the songs keep their order.
+ * A failed call stops: an add may have landed even when its answer was lost, so it is never sent
+ * again blindly (#153), and the queue on screen shows what landed.
+ */
+const addAll = async (
+  platform: PlatformSdk,
+  trackIds: ReadonlyArray<TrackId>,
+  next: boolean,
+  after?: QueueItemId,
+): Promise<void> => {
+  if (trackIds.length === 0) return;
+
+  const placement = after === undefined ? (next ? { next: true } : {}) : { afterItemId: after };
+
+  const added = await platform.music.queue.add({ trackIds: [...trackIds], ...placement });
+
+  if (added.rest.length >= trackIds.length) throw new Error("The queue stopped taking songs");
+
+  await addAll(platform, added.rest, next, added.itemIds.at(-1) ?? after);
+};
+
+const createCommands = (
+  platform: PlatformSdk,
+  phone: Phone,
+  copies: DownloadedCopies,
+): PlayerCommands => {
+  const { controller, local, mode } = phone;
+
+  const changeLocal = (change: (queue: LocalQueue<Track>) => LocalQueue<Track>): void => {
+    controller.sync(local.update(change).state);
+  };
+
+  return {
+    addToQueue: async (trackIds, next) => {
+      if (mode.current === "local") {
+        const tracks = trackIds.flatMap((id) => trackOfCopy(copies, id) ?? []);
+
+        if (tracks.length === 0) throw new Error(NOT_DOWNLOADED);
+        changeLocal((queue) => addLocal(queue, tracks, next));
+
+        return;
+      }
+
+      await addAll(platform, trackIds, next);
+    },
+    clearQueue: async () => {
+      if (mode.current === "local") {
+        changeLocal(clearLocal);
+
+        return;
+      }
+
+      await platform.music.queue.clear({});
+    },
+  };
+};
+
+const createActions = (
+  platform: PlatformSdk,
+  phone: Phone,
+  commands: PlayerCommands,
+  latest: { readonly current: Latest },
+): PlayerActions => {
+  const { controller, local, mode } = phone;
+  const run = <A,>(call: () => Promise<A>) => controller.capture(call());
+
+  const changeLocal = (change: (queue: LocalQueue<Track>) => LocalQueue<Track>): void => {
+    controller.sync(local.update(change).state);
+  };
+
+  const repeat = (): RepeatMode =>
+    mode.current === "local"
+      ? local.getSnapshot().state.repeat
+      : (latest.current.queue?.repeat ?? "off");
+
+  return {
+    play: (trackIds, index) => controller.playTracks(trackIds, index),
+    pause: async () => {
+      if (latest.current.playing) await controller.togglePlay();
+    },
+    resume: async () => {
+      if (!latest.current.playing) await controller.togglePlay();
+    },
+    toggle: () => controller.togglePlay(),
+    next: () => controller.next(),
+    previous: () => controller.previous(),
+    seek: async (positionMs) => {
+      controller.seek(positionMs);
+    },
+    jump: (itemId) => controller.jump(itemId),
+    setShuffle: async (on) => {
+      if (mode.current === "local") changeLocal((queue) => shuffleLocal(queue, on, Math.random));
+      else await run(() => platform.music.queue.shuffle({ on }));
+    },
+    cycleRepeat: async () => {
+      const next = nextRepeat(repeat());
+
+      if (mode.current === "local") changeLocal((queue) => repeatLocal(queue, next));
+      else await run(() => platform.music.queue.repeat({ mode: next }));
+    },
+    setAutoplay: async (on) => {
+      if (mode.current === "server") await run(() => platform.music.queue.autoplay({ on }));
+    },
+    setVolume: async (volume) => {
+      controller.setVolume(volume);
+    },
+    playNext: (trackIds) => run(() => commands.addToQueue(trackIds, true)),
+    playLater: (trackIds) => run(() => commands.addToQueue(trackIds, false)),
+    removeFromQueue: async (itemId) => {
+      if (mode.current === "local") changeLocal((queue) => removeLocal(queue, itemId));
+      else await run(() => platform.music.queue.remove({ itemId }));
+    },
+    moveInQueue: async (itemId, toIndex) => {
+      if (mode.current === "local") {
+        const args = moveArgs(local.getSnapshot().state.entries, itemId, toIndex);
+
+        if (args !== null) changeLocal((queue) => moveLocal(queue, args.itemId, args.afterItemId));
+
+        return;
+      }
+
+      const args = moveArgs(latest.current.queue?.entries ?? [], itemId, toIndex);
+
+      if (args !== null) {
+        await run(() =>
+          platform.music.queue.move(
+            args.afterItemId === undefined
+              ? { itemId }
+              : { itemId, afterItemId: asQueueItemId(args.afterItemId) },
+          ),
+        );
+      }
+    },
+    clearQueue: () => run(() => commands.clearQueue()),
+    setQuality: (quality) => {
+      controller.setQuality(quality);
+    },
+    retry: () => {
+      controller.retry();
+    },
+  };
+};
+
+function PositionTicker({
+  controller,
+  durationMs,
+  children,
+}: {
+  readonly controller: PlaybackController;
+  readonly durationMs: number;
+  readonly children: ReactNode;
+}) {
+  const [positionMs, setPositionMs] = useState(() => Math.round(controller.positionMs()));
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setPositionMs(Math.round(controller.positionMs()));
+    }, POSITION_INTERVAL_MS);
+
+    return () => {
+      clearInterval(timer);
+    };
+  }, [controller]);
+
+  const position = useMemo(() => ({ positionMs, durationMs }), [positionMs, durationMs]);
+
+  return <PositionContext value={position}>{children}</PositionContext>;
+}
+
+/** Follows the synced settings (D36): quality and volume for this device, gapless for the person. */
+const useSettings = (platform: PlatformSdk, controller: PlaybackController): void => {
+  const settings = useReadSettled(platform.core.settings.get, {});
+  const view = settings === undefined || settings instanceof Error ? null : settings;
+  const gapless = view?.user.gapless;
+  const quality = view?.device?.streamQuality;
+  const volume = view?.device?.volume;
+
+  useEffect(() => {
+    if (gapless === undefined) return;
+
+    controller.applySettings({
+      quality: quality === undefined ? loadQuality() : phoneQuality(quality),
+      volume: volume ?? 1,
+      gapless,
+    });
+  }, [controller, gapless, quality, volume]);
+};
+
+/**
+ * Hands this phone's own queue back once the server answers again: the plays it made go to
+ * history, and a queue changed here replaces the core's. It waits while a song plays, so the song
+ * is not cut off, and goes back at the next pause or stop.
+ */
+const useHandBack = (
+  platform: PlatformSdk,
+  phone: Phone,
+  online: boolean,
+  audible: boolean,
+  setMode: (mode: "server" | "local") => void,
+): void => {
+  const { local, mode } = phone;
+  const queue = useSyncExternalStore(local.subscribe, local.getSnapshot);
+  const plays = queue.plays;
+
+  useEffect(() => {
+    if (!online || plays.length === 0) return;
+    const sent = plays;
+
+    const send = async (): Promise<void> => {
+      await platform.music.play.reportOffline({
+        plays: sent.map((play) => ({ trackId: asTrackId(play.trackId), playedAt: play.playedAt })),
+        sentAt: Date.now(),
+      });
+      local.update((held) => ({
+        ...held,
+        plays: held.plays.filter((play) => !sent.includes(play)),
+      }));
+    };
+
+    void send().catch(() => undefined);
+  }, [platform, local, online, plays]);
+
+  useEffect(() => {
+    if (!online || audible || mode.current !== "local") return;
+    const back = handBack(local.getSnapshot());
+    mode.current = "server";
+    setMode("server");
+
+    if (back.queue !== null) {
+      void platform.music.queue
+        .play({ trackIds: back.queue.trackIds.map(asTrackId), index: back.queue.index })
+        .catch(() => undefined);
+    }
+  }, [platform, local, mode, online, audible, setMode]);
+};
+
+/**
+ * Provides the player hooks. Mount it inside the platform provider of a signed-in person, or of
+ * the person whose downloads the app opened offline. It plays the person's queue on the core on
+ * this phone, and this phone's own queue of downloaded songs while the server is out of reach.
+ */
+export function PlayerProvider({ children }: { readonly children: ReactNode }) {
+  const platform = usePlatform();
+  const { mediaUrl } = useServer();
+  const copies = useLocalCopies();
+  const reach = useServerReach();
+  const probeReach = useProbeReach();
+  const probe = useRef(probeReach);
+  const goLocal = useRef(() => {});
+  const [mode, setMode] = useState<"server" | "local">("server");
+
+  useLayoutEffect(() => {
+    probe.current = probeReach;
+  }, [probeReach]);
+
+  // State rather than a memo: React may drop a memo, which would build a second player.
+  const [phone] = useState(() => createPhone({ platform, mediaUrl, copies, probe, goLocal }));
+  const { controller, local } = phone;
+  const serverQueue = useServerQueue(platform);
+  const localQueue = useSyncExternalStore(local.subscribe, local.getSnapshot);
+
+  const snapshot: ControllerSnapshot = useSyncExternalStore(
+    controller.subscribe,
+    controller.getSnapshot,
+  );
+
+  const online = reach === "online";
+
+  useLayoutEffect(() => {
+    goLocal.current = () => {
+      if (phone.mode.current === "local") return;
+      local.update(() => seedLocal(serverQueue, (id) => trackOfCopy(copies, id)));
+      phone.mode.current = "local";
+      setMode("local");
+    };
+  }, [phone, local, serverQueue, copies]);
+
+  useEffect(() => controller.start(), [controller]);
+
+  useEffect(() => {
+    if (!online) goLocal.current();
+  }, [online]);
+
+  useSettings(platform, controller);
+
+  const queue = mode === "local" ? localQueue.state : serverQueue;
+
+  useEffect(() => {
+    if (queue !== null) controller.sync(queue);
+  }, [controller, queue]);
+
+  const entries = queue?.entries ?? [];
+  const found = entries.findIndex((entry) => entry.itemId === snapshot.current);
+  const entry: QueueEntry<Track> | null = found === -1 ? null : (entries[found] ?? null);
+  const wantsPlay = snapshot.engineStatus === "loading";
+  const playing = isPlaying(snapshot, wantsPlay);
+
+  useHandBack(platform, phone, online, playing, setMode);
+
+  const art = useMemo(
+    () =>
+      (track: Track): string | null =>
+        copies.find(track.id)?.artUri ??
+        (track.artUrl?.startsWith("/") === true ? `${mediaUrl}${track.artUrl}` : track.artUrl),
+    [copies, mediaUrl],
+  );
+
+  const latestSong = useMemo(
+    () => (entry === null ? null : nowPlayingOf(entry, art)),
+    [entry, art],
+  );
+
+  const [nowPlaying, setNowPlaying] = useState(latestSong);
+
+  if (!sameSong(nowPlaying, latestSong)) setNowPlaying(latestSong);
+
+  const items = useMemo(() => entries.map((queued) => queueItemOf(queued, art)), [entries, art]);
+  const status = statusOf(queue === null ? null : { hasCurrent: entry !== null }, snapshot);
+
+  const player = useMemo(
+    (): PlayerView => ({
+      status,
+      nowPlaying,
+      queue: items,
+      index: Math.max(0, found),
+      shuffle: queue?.shuffle ?? false,
+      repeat: queue?.repeat ?? "off",
+      autoplay: queue?.autoplay ?? true,
+      volume: snapshot.volume,
+      error: snapshot.error,
+      quality: snapshot.quality,
+    }),
+    [status, nowPlaying, items, found, queue, snapshot],
+  );
+
+  const current = useMemo((): NowPlayingView => ({ nowPlaying, status }), [nowPlaying, status]);
+  const latest = useRef<Latest>({ queue: serverQueue, playing });
+
+  useLayoutEffect(() => {
+    latest.current = { queue: serverQueue, playing };
+  }, [serverQueue, playing]);
+
+  const commands = useMemo(
+    () => createCommands(platform, phone, copies),
+    [platform, phone, copies],
+  );
+
+  const actions = useMemo(
+    () => createActions(platform, phone, commands, latest),
+    [platform, phone, commands],
+  );
+
+  const readPosition = useMemo(() => () => controller.positionMs(), [controller]);
+
+  return (
+    <PositionReaderContext value={readPosition}>
+      <ActionsContext value={actions}>
+        <CommandsContext value={commands}>
+          <PlayerContext value={player}>
+            <NowPlayingContext value={current}>
+              <SongContext value={nowPlaying}>
+                <OwnSessionContext value={mode === "local"}>
+                  <PositionTicker controller={controller} durationMs={nowPlaying?.durationMs ?? 0}>
+                    {children}
+                  </PositionTicker>
+                </OwnSessionContext>
+              </SongContext>
+            </NowPlayingContext>
+          </PlayerContext>
+        </CommandsContext>
+      </ActionsContext>
+    </PositionReaderContext>
+  );
+}

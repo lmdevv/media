@@ -315,18 +315,19 @@ const SKIPPED: PagedStore<never> = {
  * is `skip`.
  *
  * @param argsAt - The query's arguments for a page's `paginationOpts`.
+ * @param rows - Rows asked for per page.
  */
 export const usePages = <Args, Row>(
   query: PagedQuery<Args, Row>,
   argsAt: PagesArgs<Args>,
+  rows = PAGE_SIZE,
 ): Paged<Row> => {
-  const key =
-    argsAt === "skip" ? null : JSON.stringify(argsAt({ numItems: PAGE_SIZE, cursor: null }));
+  const key = argsAt === "skip" ? null : JSON.stringify(argsAt({ numItems: rows, cursor: null }));
 
   const open = (): PagedStore<Row> =>
     argsAt === "skip"
       ? SKIPPED
-      : pagedStore((span) => query.watch(argsAt({ numItems: PAGE_SIZE, ...span })));
+      : pagedStore((span) => query.watch(argsAt({ numItems: rows, ...span })));
 
   // State rather than a memo: React may drop a memo, which would restart every page's subscription.
   const [held, setHeld] = useState(() => ({ query, key, store: open() }));
@@ -345,12 +346,15 @@ export const usePages = <Args, Row>(
 /**
  * Follows every page of a paginated core query, loading the next page as soon as one arrives. For
  * lists the app needs whole, such as the libraries shared with the person or their list.
+ *
+ * @param rows - Rows asked for per page.
  */
 export const useAllPages = <Args, Row>(
   query: PagedQuery<Args, Row>,
   argsAt: PagesArgs<Args>,
+  rows = PAGE_SIZE,
 ): Paged<Row> => {
-  const paged = usePages(query, argsAt);
+  const paged = usePages(query, argsAt, rows);
   const load = paged.status === "ready" && paged.next.kind === "more" ? paged.next.load : null;
 
   useEffect(() => {
@@ -369,8 +373,9 @@ export const useFirstRows = <Args, Row>(
   query: PagedQuery<Args, Row>,
   argsAt: PagesArgs<Args>,
   count: number,
+  rows = PAGE_SIZE,
 ): Paged<Row> => {
-  const paged = usePages(query, argsAt);
+  const paged = usePages(query, argsAt, rows);
 
   const load =
     paged.status === "ready" && paged.rows.length < count && paged.next.kind === "more"

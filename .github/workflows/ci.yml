@@ -77,6 +77,8 @@ jobs:
       - run: pnpm knip
       - if: contains(fromJSON(steps.scope.outputs.workspaces), 'apps/mobile-movies')
         run: pnpm --filter @media/mobile-movies bundle
+      - if: contains(fromJSON(steps.scope.outputs.workspaces), 'apps/mobile-music')
+        run: pnpm --filter @media/mobile-music bundle
       - run: scripts/check-deploy.sh
       - if: contains(fromJSON(steps.scope.outputs.workspaces), 'apps/cli')
         run: pnpm --filter @lmdevv/media build:sea

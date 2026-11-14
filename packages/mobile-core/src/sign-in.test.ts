@@ -1,4 +1,4 @@
-import { Conflict, Unauthenticated } from "@media/contracts/errors";
+import { Conflict, Expired, Unauthenticated } from "@media/contracts/errors";
 import { Brand } from "effect";
 import { describe, expect, it } from "vitest";
 
@@ -10,6 +10,7 @@ import { readAppRecord, readPhoneAccount } from "./records";
 import type { UserId } from "./records";
 import {
   lastPerson,
+  resetPassword,
   setUpOwner,
   signInOnLaunch,
   signInWithPassword,
@@ -84,6 +85,13 @@ const fakeCore = () => {
       },
       acceptInvite: async () => {
         calls.push("invite");
+      },
+      resetPassword: async ({ code, password }) => {
+        calls.push("reset");
+
+        if (code !== "mr_aiko.secret") throw new Expired({ message: "This link no longer works" });
+        passwords.set("aiko", { userId: asUserId("u_aiko"), password });
+        signedIn("aiko", "password");
       },
       exchangeGrant: async ({ userId, grant }) => {
         calls.push("exchange");
@@ -413,6 +421,33 @@ describe("other sign-ins", () => {
 
     expect(readPhoneAccount(phone.shared)?.userId).toBe("u_lucia");
     expect(lastPerson(phone)?.username).toBe("lucia");
+  });
+
+  it("sets the mark, signs in, enrolls, and issues the grant from a reset link", async () => {
+    const core = fakeCore();
+    const calls: Array<string> = [];
+    const phone = phoneWith(memoryKeychain());
+
+    await resetPassword(core.platform(calls), phone, {
+      code: "mr_aiko.secret",
+      password: "a-new-password",
+    });
+
+    expect(calls).toEqual(["reset", "enroll", "issue:none"]);
+    expect(readAppRecord(phone.own, SERVER).opened).toBe(true);
+    expect(readPhoneAccount(phone.shared)?.userId).toBe("u_aiko");
+  });
+
+  it("keeps the mark after a dead reset link, so a launch asks for the password (D59)", async () => {
+    const core = fakeCore();
+    const phone = phoneWith(memoryKeychain());
+
+    await expect(
+      resetPassword(core.platform([]), phone, { code: "mr_old.secret", password: "x".repeat(8) }),
+    ).rejects.toMatchObject({ _tag: "Expired" });
+
+    expect(readAppRecord(phone.own, SERVER).opened).toBe(true);
+    expect(await signInOnLaunch(core.platform([]), phone)).toBe("askPassword");
   });
 
   it("enrolls after an approved device sign-in, which issues no grant", async () => {

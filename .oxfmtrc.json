@@ -20,6 +20,7 @@
     "apps/web-account/src/routeTree.gen.ts",
     "apps/web-music/src/routeTree.gen.ts",
     "apps/mobile-movies/src/uniwind-types.d.ts",
+    "apps/mobile-music/src/uniwind-types.d.ts",
     "pnpm-lock.yaml"
   ]
 }

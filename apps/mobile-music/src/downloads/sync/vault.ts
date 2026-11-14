@@ -1,0 +1,152 @@
+import { Data } from "effect";
+
+import type {
+  DownloadPinId,
+  LyricsRevision,
+  OfflineLyrics,
+  StreamProfile,
+  TrackId,
+} from "./models";
+import type { NewLyrics, StoredArt, StoredCopy, StoredPin, VaultView } from "./plan";
+
+/** Everything the vault holds: the pins this phone keeps, and what it holds for them. */
+export type VaultRows = VaultView;
+
+/** One change to the vault's rows, applied in one transaction. */
+export type VaultChange = Data.TaggedEnum<{
+  PutPin: { readonly pin: StoredPin };
+  DeletePin: { readonly pinId: DownloadPinId };
+  /** Adds a song's copy, or replaces the row of the copy it held. */
+  PutCopy: { readonly copy: StoredCopy };
+  /**
+   * Rewrites a copy's details while its row still names the same file. A row deleted or replaced
+   * meanwhile stays as it is, so new details never bring back a copy whose file is gone.
+   */
+  UpdateCopy: { readonly copy: StoredCopy };
+  /** Deletes a song's row while it still names `file`; a newer copy's row stays. */
+  DeleteCopy: { readonly trackId: TrackId; readonly file: string };
+  PutArt: { readonly art: StoredArt };
+  DeleteArt: { readonly hash: string };
+  /** Adds songs' lyrics, or replaces those they kept, all in one transaction. */
+  PutLyrics: { readonly lyrics: ReadonlyArray<NewLyrics> };
+  /** Deletes songs' lyrics, all in one transaction. */
+  DeleteLyrics: { readonly trackIds: ReadonlyArray<TrackId> };
+}>;
+
+/** Constructors and matchers for `VaultChange`. */
+export const VaultChange = Data.taggedEnum<VaultChange>();
+
+/** Lyrics the vault keeps for a song, read to show them. */
+export interface KeptLyrics {
+  readonly rev: LyricsRevision;
+  readonly lyrics: OfflineLyrics;
+}
+
+/** A device's durable store for its downloads. Rows reach `DownloadSync` parsed. */
+export interface VaultStore {
+  /** Every row, lyrics without the lyrics themselves. */
+  readonly load: () => Promise<VaultRows>;
+  /**
+   * The lyrics kept for a song, or null when it keeps none or they no longer read as lyrics,
+   * which deletes them.
+   */
+  readonly lyrics: (trackId: TrackId) => Promise<KeptLyrics | null>;
+  /** Applies one change in one transaction. */
+  readonly commit: (change: VaultChange) => Promise<void>;
+  /** Every file in the vault, relative to it, for the sweep at start. */
+  readonly files: () => Promise<ReadonlyArray<string>>;
+  /** The URI of a vault file, to write or play it. */
+  readonly uri: (file: string) => string;
+  /** Deletes a vault file; one that isn't there is fine. */
+  readonly remove: (file: string) => Promise<void>;
+  /** The size of a vault file in bytes, or null when it isn't there. */
+  readonly size: (file: string) => Promise<number | null>;
+  /** Free space on the device, or null when the platform can't tell. */
+  readonly freeBytes: () => number | null;
+}
+
+/** The view after `change`: what `DownloadSync` keeps in memory once the change committed. */
+export const applyChange = (view: VaultRows, change: VaultChange): VaultRows =>
+  VaultChange.$match(change, {
+    PutPin: ({ pin }) => ({ ...view, pins: new Map(view.pins).set(pin.pin.id, pin) }),
+    DeletePin: ({ pinId }) => {
+      const pins = new Map(view.pins);
+      pins.delete(pinId);
+
+      return { ...view, pins };
+    },
+    PutCopy: ({ copy }) => ({ ...view, copies: new Map(view.copies).set(copy.track.id, copy) }),
+    UpdateCopy: ({ copy }) =>
+      view.copies.get(copy.track.id)?.file === copy.file
+        ? { ...view, copies: new Map(view.copies).set(copy.track.id, copy) }
+        : view,
+    DeleteCopy: ({ trackId, file }) => {
+      if (view.copies.get(trackId)?.file !== file) return view;
+      const copies = new Map(view.copies);
+      copies.delete(trackId);
+
+      return { ...view, copies };
+    },
+    PutArt: ({ art }) => ({ ...view, art: new Map(view.art).set(art.hash, art) }),
+    DeleteArt: ({ hash }) => {
+      const art = new Map(view.art);
+      art.delete(hash);
+
+      return { ...view, art };
+    },
+    PutLyrics: ({ lyrics }) => {
+      const next = new Map(view.lyrics);
+
+      for (const { trackId, rev, bytes } of lyrics) next.set(trackId, { trackId, rev, bytes });
+
+      return { ...view, lyrics: next };
+    },
+    DeleteLyrics: ({ trackIds }) => {
+      const lyrics = new Map(view.lyrics);
+
+      for (const trackId of trackIds) lyrics.delete(trackId);
+
+      return { ...view, lyrics };
+    },
+  });
+
+/** Nothing held: a new vault. */
+export const emptyVault: VaultRows = {
+  copies: new Map(),
+  pins: new Map(),
+  art: new Map(),
+  lyrics: new Map(),
+};
+
+const EXTENSIONS = new Map([
+  ["audio/mp4", "m4a"],
+  ["audio/flac", "flac"],
+  ["audio/mpeg", "mp3"],
+  ["audio/aac", "aac"],
+  ["audio/wav", "wav"],
+  ["audio/aiff", "aiff"],
+]);
+
+const NAME_PART = /^[\w-]+$/u;
+
+/**
+ * The vault file for a copy of a song, or null for a type the vault doesn't keep. The name holds
+ * the revision and profile, so a new copy never overwrites the file of one that may be playing.
+ */
+export const audioFile = (
+  trackId: TrackId,
+  rev: string,
+  profile: StreamProfile,
+  contentType: string | null,
+): string | null => {
+  const mime = contentType?.split(";")[0]?.trim().toLowerCase() ?? "";
+  const extension = EXTENSIONS.get(mime);
+
+  if (extension === undefined || !NAME_PART.test(trackId) || !NAME_PART.test(rev)) return null;
+
+  return `audio/${trackId}.${rev}.${profile}.${extension}`;
+};
+
+/** The vault file for a cover, by its content hash, or null for a hash that can't name one. */
+export const artFile = (hash: string): string | null =>
+  NAME_PART.test(hash) ? `art/${hash}` : null;
