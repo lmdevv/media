@@ -6,7 +6,7 @@ import { kindDef } from "./kinds";
 import type { JobKind, JobPayload } from "./kinds";
 import { ITEM_BATCH_MAX, pickClaim, step } from "./machine";
 import type { ItemWrite, JobEvent, KindQueue, Step } from "./machine";
-import type { JobWork, Lease } from "./model";
+import type { JobFields, JobWork, Lease } from "./model";
 
 /** What every job write needs: the database, and the scheduler for item purges. */
 export type JobCtx = Pick<MutationCtx, "db" | "scheduler">;
@@ -61,6 +61,42 @@ const activeWithKey = async (db: DatabaseReader, dedupeKey: string): Promise<Doc
     .query("jobs")
     .withIndex("by_dedupe_status", (q) => q.eq("dedupeKey", dedupeKey).eq("status", "running"))
     .first();
+
+/** The queued or running job with `payload`'s dedupe key, or null; null for a kind without one. */
+export const activeJobFor = async (
+  db: DatabaseReader,
+  payload: JobPayload,
+): Promise<Doc<"jobs"> | null> => {
+  const dedupeKey = kindDef(payload.kind).dedupeKey(payload);
+
+  return dedupeKey === null ? null : activeWithKey(db, dedupeKey);
+};
+
+/**
+ * How many jobs of `kind` wait for a claim now, counted up to `most`: queued and not waiting for a
+ * retry's time. It reads the kind's row and at most `most` queue entries, from where a claim
+ * reads, so a domain that queues work in pages keeps the queue short without counting all of it.
+ */
+export const queuedCount = async (
+  db: DatabaseReader,
+  kind: JobKind,
+  most: number,
+): Promise<number> => {
+  const row = await kindRow(db, kind);
+
+  const ready = await db
+    .query("jobs")
+    .withIndex("by_kind_ready", (q) =>
+      q
+        .eq("payload.kind", kind)
+        .eq("status", "queued")
+        .eq("waitUntil", undefined)
+        .gte("_creationTime", row?.queueFrom ?? 0),
+    )
+    .take(most);
+
+  return ready.length;
+};
 
 /**
  * Inserts a queued job, or returns the active job with the same dedupe key. Dedupe reads at most
@@ -151,27 +187,92 @@ const applyWrite = async (ctx: JobCtx, jobId: Id<"jobs">, write: ItemWrite): Pro
  * its kind's row.
  */
 export const applyEvent = async (ctx: JobCtx, job: Doc<"jobs">, event: JobEvent): Promise<Step> => {
-  const result = step(job, event, Date.now(), kindDef(job.payload.kind));
+  const now = Date.now();
+  const result = step(job, event, now, kindDef(job.payload.kind));
 
   if (!result.ok || !result.changed) return result;
 
-  await ctx.db.replace("jobs", job._id, result.next);
+  const { next } = result;
 
-  const { status } = result.next;
+  await ctx.db.replace("jobs", job._id, next);
+
+  const { status } = next;
   const wasRunning = job.status === "running" ? 1 : 0;
   const isRunning = status === "running" ? 1 : 0;
 
   await moveKindRow(ctx, job.payload.kind, {
     running: isRunning - wasRunning,
-    queued: status === "queued" && job.status !== "queued" ? job._creationTime : null,
+    queued: claimable(next) && !claimable(job) ? job._creationTime : null,
     claimed: job.status === "queued" && status === "running" ? job._creationTime : null,
   });
 
   await inOrder(result.writes, (write) => applyWrite(ctx, job._id, write));
 
+  if (next.status === "queued" && next.waitUntil !== undefined) {
+    await ctx.scheduler.runAt(next.waitUntil, internal.core.jobs.leases.wake, {
+      jobId: job._id,
+      attempt: next.attempts,
+    });
+  }
+
+  if (event.type === "finish" && event.finish.outcome === "deferred") {
+    await pauseKind(ctx, job.payload.kind, now + event.finish.pauseMs);
+  }
+
   if (wasRunning === 1 && isRunning === 0) await followUpScan(ctx, job.payload, status);
 
   return result;
+};
+
+/** Whether a claim may take the job now: queued, and not waiting for a retry's time. */
+const claimable = (job: JobFields): boolean =>
+  job.status === "queued" && job.waitUntil === undefined;
+
+/**
+ * Pauses every claim of `kind` until `until`, keeping a later pause already in force, and has the
+ * core end it then (`leases.endPause`), which writes the kind's row and so wakes the pools whose
+ * `waiting` read it.
+ */
+const pauseKind = async (ctx: JobCtx, kind: JobKind, until: number): Promise<void> => {
+  const row = await kindRow(ctx.db, kind);
+
+  if (row !== null && (row.pausedUntil ?? 0) >= until) return;
+
+  if (row === null) {
+    await ctx.db.insert("jobKinds", { kind, running: 0, queueFrom: 0, pausedUntil: until });
+  } else {
+    await ctx.db.patch("jobKinds", row._id, { pausedUntil: until });
+  }
+
+  await ctx.scheduler.runAt(until, internal.core.jobs.leases.endPause, { kind });
+};
+
+/** Ends `kind`'s pause when its time has come; a pause made longer since stays. */
+export const endPause = async (ctx: JobCtx, kind: JobKind, now: number): Promise<void> => {
+  const row = await kindRow(ctx.db, kind);
+
+  if (row?.pausedUntil !== undefined && row.pausedUntil <= now) {
+    await ctx.db.patch("jobKinds", row._id, { pausedUntil: undefined });
+  }
+};
+
+/**
+ * Holds or releases `kind`: while held, no claim takes its jobs, which stay queued; a running one
+ * finishes. A domain holds a kind while its work is turned off, as music holds `music.lyrics`
+ * while LRCLIB lookups are off. Writes nothing when the kind already is as asked.
+ */
+export const holdKind = async (ctx: JobCtx, kind: JobKind, held: boolean): Promise<void> => {
+  const row = await kindRow(ctx.db, kind);
+
+  if (row === null) {
+    if (held) await ctx.db.insert("jobKinds", { kind, running: 0, queueFrom: 0, held: true });
+
+    return;
+  }
+
+  if ((row.held === true) !== held) {
+    await ctx.db.patch("jobKinds", row._id, { held: held ? true : undefined });
+  }
 };
 
 /**
@@ -201,8 +302,8 @@ const followUpScan = async (
 };
 
 /**
- * What a claim of `kind` would see: the kind's running count and, when it is below the cap, its
- * oldest queued job. It reads the kind's row and one index entry, not the ranges a busy queue
+ * What a claim of `kind` would see: the kind's running count and, when it is below the cap and
+ * neither paused nor held, its oldest queued job that may run now. It reads the kind's row and one index entry, not the ranges a busy queue
  * leaves its old entries in. Every claim and every job leaving `running` writes that row, so
  * claims of one kind conflict with each other and with finishes, and Convex runs them one after
  * the other; the cap holds under any number of workers.
@@ -215,14 +316,19 @@ export const kindQueue = async (
   const row = await kindRow(db, kind);
   const running = row?.running ?? 0;
 
-  if (running >= cap) return { cap, running, head: null };
+  if (running >= cap || row?.held === true || (row?.pausedUntil ?? 0) > Date.now()) {
+    return { cap, running, head: null };
+  }
 
+  // A queued job waiting for a retry's time carries `waitUntil`, so it is outside this range until
+  // the core wakes it.
   const head = await db
     .query("jobs")
-    .withIndex("by_kind_status", (q) =>
+    .withIndex("by_kind_ready", (q) =>
       q
         .eq("payload.kind", kind)
         .eq("status", "queued")
+        .eq("waitUntil", undefined)
         .gte("_creationTime", row?.queueFrom ?? 0),
     )
     .first();

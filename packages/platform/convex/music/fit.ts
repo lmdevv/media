@@ -5,7 +5,7 @@ import type { Doc } from "../_generated/dataModel";
 import { sha256Hex } from "../core/lib/secrets";
 import { cut, uniqueWithin } from "../movies/bounds";
 import type { musicTables } from "./schema";
-import type { LocalLyricSet } from "./validators";
+import type { LocalLyricSet, LrclibLyricSet, LyricSet } from "./validators";
 
 /**
  * The longest fields the music tables keep (ADR 0024), in UTF-16 code units. The music writer
@@ -51,6 +51,8 @@ export const DOCUMENT_BYTES = {
   albums: 12 * 1024,
   artists: 8 * 1024,
   localLyrics: 512 * 1024,
+  /** LRCLIB's lyrics for a song, bounded like its own (#152). */
+  lrclibLyrics: 512 * 1024,
   /** A name and a description at their maximums in 3-byte characters, and a few numbers. */
   playlists: 4 * 1024,
   /** Ids, numbers, and a tie: a person's rows hold no free text but a playback id. */
@@ -63,6 +65,8 @@ export const TABLE_BYTES = {
   albums: DOCUMENT_BYTES.albums,
   tracks: DOCUMENT_BYTES.tracks,
   localLyrics: DOCUMENT_BYTES.localLyrics,
+  lrclibLyrics: DOCUMENT_BYTES.lrclibLyrics,
+  lyricsSettings: DOCUMENT_BYTES.small,
   playlists: DOCUMENT_BYTES.playlists,
   playlistItems: DOCUMENT_BYTES.small,
   likes: DOCUMENT_BYTES.small,
@@ -169,27 +173,48 @@ export const fitPlay = (play: Fields<"plays">): Fields<"plays"> => ({
 /** Room a lyrics row's `trackId` and field names take beside its sets, in Convex's measure. */
 const LYRICS_ROW_OVERHEAD = 128;
 
-const EMPTY_LYRICS_ROW = getDocumentSize({ sets: [] }) + LYRICS_ROW_OVERHEAD;
+/**
+ * Room an LRCLIB row's other fields take beside its sets: its track, its 64-digit revision, when
+ * LRCLIB answered, the answer's status and record, and their names.
+ */
+const LRCLIB_ROW_OVERHEAD = 512;
 
 const setsBytes = (sets: ReadonlyArray<LocalLyricSet>): number =>
   getDocumentSize({ sets: [...sets] }) + LYRICS_ROW_OVERHEAD;
+
+/** The leading `sets` that fit in a row of `bound` bytes beside `overhead` bytes of other fields. */
+const leadingSets = <Set extends LyricSet>(
+  sets: ReadonlyArray<Set>,
+  overhead: number,
+  bound: number,
+): ReadonlyArray<Set> => {
+  let bytes = getDocumentSize({ sets: [] }) + overhead;
+
+  for (const [index, set] of sets.entries()) {
+    bytes += getConvexSize(set);
+
+    if (bytes > bound) return sets.slice(0, index);
+  }
+
+  return sets;
+};
 
 /**
  * A file's lyric sets within the lyrics row's bound: the leading sets that fit, in the order the
  * server found them, so the main lyrics it found first stay. Lyrics are never refused for size.
  * Convex sizes an array as a fixed marker plus its elements, so each set adds its own size.
  */
-export const fitLyrics = (sets: ReadonlyArray<LocalLyricSet>): ReadonlyArray<LocalLyricSet> => {
-  let bytes = EMPTY_LYRICS_ROW;
+export const fitLyrics = (sets: ReadonlyArray<LocalLyricSet>): ReadonlyArray<LocalLyricSet> =>
+  leadingSets(sets, LYRICS_ROW_OVERHEAD, DOCUMENT_BYTES.localLyrics);
 
-  for (const [index, set] of sets.entries()) {
-    bytes += getConvexSize(set);
-
-    if (bytes > DOCUMENT_BYTES.localLyrics) return sets.slice(0, index);
-  }
-
-  return sets;
-};
+/**
+ * LRCLIB's lyric sets for a song within its row's bound, as `fitLyrics` keeps a song's own: the
+ * leading sets, so the set the server's reader put first stays.
+ */
+export const fitLrclibLyrics = (
+  sets: ReadonlyArray<LrclibLyricSet>,
+): ReadonlyArray<LrclibLyricSet> =>
+  leadingSets(sets, LRCLIB_ROW_OVERHEAD, DOCUMENT_BYTES.lrclibLyrics);
 
 type LyricOrigin = LocalLyricSet["origin"];
 
@@ -262,7 +287,7 @@ const isMillis = (value: number): boolean => Number.isFinite(value) && value >= 
 const timed = (item: { readonly startMs: number; readonly endMs: number | null }): boolean =>
   isMillis(item.startMs) && (item.endMs === null || isMillis(item.endMs));
 
-const setProblem = (set: LocalLyricSet): string | null => {
+const setProblem = (set: LyricSet): string | null => {
   if (set.lang !== null && !LANG.test(set.lang)) return `language ${set.lang} is not a BCP 47 tag`;
 
   if ("fileName" in set.origin && set.origin.fileName.length === 0) {
@@ -282,14 +307,14 @@ const setProblem = (set: LocalLyricSet): string | null => {
 };
 
 /**
- * Checks lyric sets as old music's `LocalLyricSet` schema did, past what the validator checks: a
- * language is a BCP 47 tag, a lyric file has a name, plain text and synced lines are not empty,
- * and every time is a finite number of milliseconds of at least 0.
+ * Checks lyric sets as old music's `LocalLyricSet` and `LrclibLyricSet` schemas did, past what the
+ * validator checks: a language is a BCP 47 tag, a lyric file has a name, plain text and synced
+ * lines are not empty, and every time is a finite number of milliseconds of at least 0.
  *
  * @throws Error on a set that breaks one, a defect in the server's lyrics reader, which checks
  * the same schema before it sends them.
  */
-export const checkLyrics = (sets: ReadonlyArray<LocalLyricSet>): void => {
+export const checkLyrics = (sets: ReadonlyArray<LyricSet>): void => {
   const problem = sets.map(setProblem).find((one) => one !== null) ?? null;
 
   if (problem !== null) throw new Error(`Lyrics are not lyric sets: ${problem}`);

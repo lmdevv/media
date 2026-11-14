@@ -45,6 +45,13 @@ interface HeldJob<Kind extends CoreJobKind> {
   readonly payload: Extract<CoreJobPayload, { readonly kind: Kind }>;
 }
 
+/**
+ * What a handler's run answers when its last lease-checked call already ended the job in the core,
+ * in the same mutation as its last write, as `music/lyricLookups:settle` does: the worker settles
+ * nothing more. `outcome` names how it ended, for the log.
+ */
+export class Settled extends Data.TaggedClass("Settled")<{ readonly outcome: string }> {}
+
 /** Progress the next lease renewal reports. */
 interface Progress {
   readonly done: number;
@@ -56,14 +63,15 @@ interface Progress {
 export interface Handler<Kind extends CoreJobKind = CoreJobKind> {
   readonly kind: Kind;
   /**
-   * Runs a claimed job and returns the message recorded when it succeeds. `report` replaces what
-   * the next lease renewal reports. A lease-checked call that answers canceled or lost fails the
-   * run with `JobStopped`, which settles nothing: the core already moved the job.
+   * Runs a claimed job and returns the message recorded when it succeeds, or `Settled` when its
+   * own last call ended the job. `report` replaces what the next lease renewal reports. A
+   * lease-checked call that answers canceled or lost fails the run with `JobStopped`, which
+   * settles nothing: the core already moved the job.
    */
   readonly run: (
     job: HeldJob<Kind>,
     report: (progress: Progress) => Effect.Effect<void>,
-  ) => Effect.Effect<string, JobFailed | JobStopped>;
+  ) => Effect.Effect<string | Settled, JobFailed | JobStopped>;
 }
 
 /** Erases a handler's kind for the worker, which dispatches by the claimed payload's kind. */
@@ -97,7 +105,7 @@ export interface AnyHandler {
   readonly run: (
     job: HeldJob<CoreJobKind>,
     report: (progress: Progress) => Effect.Effect<void>,
-  ) => Effect.Effect<string, JobFailed | JobStopped>;
+  ) => Effect.Effect<string | Settled, JobFailed | JobStopped>;
 }
 
 /** The server's worker pools (ADR 0014) and the domain whose libraries gate each, if any. */
@@ -117,6 +125,11 @@ const POOLS = {
    * movies' work never holds up a music scan (ADR 0014).
    */
   music: { domain: "music", kinds: ["music.scan"] },
+  /**
+   * LRCLIB lookups run in a pool of their own, so a backfill never takes the slot of a music scan
+   * and never waits for one; their claims never read music's scan queue (ADR 0014).
+   */
+  "music.background": { domain: "music", kinds: ["music.lyrics"] },
   server: { domain: null, kinds: ["server.backup"] },
 } as const satisfies Record<
   string,
@@ -131,6 +144,7 @@ const POOL_NAMES: ReadonlyArray<Pool> = [
   "movies.background",
   "movies.import",
   "music",
+  "music.background",
   "server",
 ];
 
@@ -141,6 +155,8 @@ type JobEnd = Data.TaggedEnum<{
   Finished: { readonly message: string };
   Failed: { readonly error: JobFailed };
   Stopped: { readonly outcome: "canceled" | "lost" };
+  /** The handler's own last call ended the job. */
+  Ended: { readonly outcome: string };
 }>;
 
 const JobEnd = Data.taggedEnum<JobEnd>();
@@ -209,7 +225,7 @@ const make = Effect.fn("CoreJobs.make")(function* ({
     });
 
   const settle = Effect.fn("CoreJobs.settle")(function* (lease: Lease, end: JobEnd) {
-    if (JobEnd.$is("Stopped")(end)) return;
+    if (JobEnd.$is("Stopped")(end) || JobEnd.$is("Ended")(end)) return;
 
     yield* session
       .call(serverFunctions.jobsFinish, {
@@ -222,6 +238,7 @@ const make = Effect.fn("CoreJobs.make")(function* ({
             retry: error.retry,
           }),
           Stopped: () => ({ outcome: "succeeded" as const }),
+          Ended: () => ({ outcome: "succeeded" as const }),
         }),
       })
       .pipe(
@@ -241,7 +258,11 @@ const make = Effect.fn("CoreJobs.make")(function* ({
       const work = run
         .run(job, (next) => Ref.set(progress, next))
         .pipe(
-          Effect.map((message) => JobEnd.Finished({ message })),
+          Effect.map((result) =>
+            result instanceof Settled
+              ? JobEnd.Ended({ outcome: result.outcome })
+              : JobEnd.Finished({ message: result }),
+          ),
           Effect.catchTags({
             JobFailed: (error) => Effect.succeed(JobEnd.Failed({ error })),
             JobStopped: ({ outcome }) => Effect.succeed(JobEnd.Stopped({ outcome })),
@@ -272,6 +293,7 @@ const make = Effect.fn("CoreJobs.make")(function* ({
             Finished: () => "succeeded",
             Failed: ({ error }) => (error.retry ? "retrying" : "failed"),
             Stopped: ({ outcome }) => outcome,
+            Ended: ({ outcome }) => outcome,
           }),
         }),
       );

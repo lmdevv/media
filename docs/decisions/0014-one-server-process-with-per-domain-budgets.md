@@ -1,7 +1,8 @@
 # 0014. Run one server process with per-domain worker caps and one transcode limit
 
 - Status: Accepted, 2026-11-03. Amended 2026-11-10 with the pools on the core and guests' streams.
-  Amended 2026-11-13 with music's pool, its art lane, and its audio transcodes.
+  Amended 2026-11-13 with music's pool, its art lane, and its audio transcodes, and 2026-11-14
+  with music's background pool.
 - Decisions: D29
 
 ## Context
@@ -39,6 +40,12 @@ mount media read-only.
   movies pools. Its kind's own row in the core's job table takes its enqueues, so a rescan of
   every music library never contends with movies' enqueues (ADR 0012), and its claims never take a
   movies slot.
+- **The `music.background` pool** runs `music.lyrics`, music's LRCLIB lookups (amended
+  2026-11-14, p5-lyrics, ADR 0012), one at a time on a server, as old music's lyrics worker asked
+  LRCLIB one song at a time. It claims only while music has a library. It is its own pool so a
+  backfill never takes the `music` pool's scan slot and never waits for a scan, and its claims read
+  only `music.lyrics`'s queue, so lookups queued by the thousand never conflict with a scan's
+  claim.
 - **The art lane.** Old music collected unused artwork after each scan and at start, under its
   one job lane. The core has no job kind for it, so the server runs it in a lane of its own, one
   collection at a time: after each music scan, the artwork that scan's writes released; at

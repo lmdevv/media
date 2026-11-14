@@ -235,6 +235,7 @@ export const serverActions = [
   "manageFolders",
   "manageDevices",
   "configureGuests",
+  "configureLyrics",
 ] as const;
 
 export type ContentAction = (typeof contentActions)[number];
@@ -319,6 +320,8 @@ const serverRules: ServerRules = {
   manageFolders: { scope: "admin" },
   manageDevices: { scope: "admin" },
   configureGuests: { scope: "admin" },
+  /** LRCLIB lookups: the switch and the backfill, old music's admin-only `remoteLyrics`. */
+  configureLyrics: { scope: "admin" },
 };
 
 const ALLOWED = { allowed: true } as const;

@@ -15,11 +15,18 @@ import {
   MediaFileId,
   PersonId,
   TitleId,
+  TrackId,
   UserId,
 } from "./ids";
 import { Artwork, ExternalIds, TitleKind } from "./models/catalog";
 import { BackupArchive, BackupTrigger, MigrationSource } from "./models/jobs";
-import { KnownTrack, ResolvedTrack, ScannedLyrics, ScannedTrack } from "./models/music";
+import {
+  KnownTrack,
+  LrclibAnswer,
+  ResolvedTrack,
+  ScannedLyrics,
+  ScannedTrack,
+} from "./models/music";
 import { ImportId } from "./models/migration";
 import {
   CatalogFile,
@@ -87,6 +94,35 @@ export const ContentDomain = Schema.Literals(["movies", "music"]);
 /** A content domain. */
 export type ContentDomain = typeof ContentDomain.Type;
 
+/** The tags an LRCLIB lookup asks with: a song's artist, title, and album, and its whole seconds. */
+export const LyricsQuery = Schema.Struct({
+  artist: Schema.String,
+  title: Schema.String,
+  album: Schema.String,
+  durationS: Schema.Int,
+});
+
+/** The tags an LRCLIB lookup asks with. */
+export interface LyricsQuery extends Schema.Schema.Type<typeof LyricsQuery> {}
+
+/**
+ * What one LRCLIB try learned, as `music/lyricLookups:settle` takes it: LRCLIB's answer; that the
+ * record it sent could not be read; or that LRCLIB was unavailable, with how long the server holds
+ * every request, which pauses every lookup in the core for as long.
+ */
+export const LyricsTry = Schema.Union([
+  Schema.Struct({ outcome: Schema.Literal("answered"), answer: LrclibAnswer }),
+  Schema.Struct({ outcome: Schema.Literal("failed"), error: Schema.String }),
+  Schema.Struct({
+    outcome: Schema.Literal("unavailable"),
+    error: Schema.String,
+    pauseMs: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 24 * 60 * 60 * 1000 })),
+  }),
+]);
+
+/** What one LRCLIB try learned. */
+export type LyricsTry = typeof LyricsTry.Type;
+
 /** The job kinds the server claims. The core's `probe.*` kinds run only in its stack suite. */
 export const CoreJobKind = Schema.Literals([
   "movies.scan",
@@ -96,6 +132,7 @@ export const CoreJobKind = Schema.Literals([
   "movies.trickplay",
   "movies.import.jellyfin",
   "movies.import.plex",
+  "music.lyrics",
   "server.backup",
 ]);
 
@@ -144,6 +181,14 @@ export const CoreJobPayload = Schema.Union([
     kind: Schema.Literal("movies.import.plex"),
     source: Schema.Literal("plex"),
     serverId: Schema.String,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("music.lyrics"),
+    trackId: TrackId,
+    /** SHA-256 of the track's lookup key when the lookup was asked for. */
+    revision: Schema.String,
+    /** The tags LRCLIB is asked with. */
+    query: LyricsQuery,
   }),
   Schema.Struct({ kind: Schema.Literal("server.backup"), trigger: BackupTrigger }),
 ]);
@@ -487,6 +532,16 @@ export const serverFunctions = {
       cursor: Schema.String,
       done: Schema.Boolean,
     }),
+  }),
+  musicLyricsSettle: serverMutation({
+    name: "music.lyricLookups.settle",
+    path: "music/lyricLookups:settle",
+    args: Schema.Struct({ lease: Lease, result: LyricsTry }),
+    result: LeaseAnswer(
+      Schema.Struct({
+        saved: Schema.Literals(["found", "instrumental", "miss", "stale", "retrying"]),
+      }),
+    ),
   }),
   resolveTrack: serverQuery({
     name: "music.tracks.resolve",

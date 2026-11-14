@@ -118,6 +118,26 @@ Like or unlike a song.
 - Arguments: `{ trackId: Id<"tracks">; liked: boolean }`
 - Result: `null`
 
+## `music.lyrics.backfill`
+
+Look up lyrics on LRCLIB for every song in the music libraries you can read that has no synced lyrics of its own (owners and admins).
+
+- CLI: `media music lyrics backfill`
+- Kind: mutation
+- Scope: music:edit
+- Arguments: none
+- Result: `{ libraries: number }`
+
+## `music.lyrics.configure`
+
+Turn lyrics lookups on LRCLIB on or off (owners and admins); while off, no request reaches LRCLIB, and lyrics already found keep showing.
+
+- CLI: `media music lyrics configure`
+- Kind: mutation
+- Scope: music:edit
+- Arguments: `{ remote: boolean }`
+- Result: `null`
+
 ## `music.lyrics.get`
 
 Get a song's lyrics, timed line by line when its lyrics are synced.
@@ -126,7 +146,17 @@ Get a song's lyrics, timed line by line when its lyrics are synced.
 - Kind: query
 - Scope: music:play
 - Arguments: `{ trackId: Id<"tracks"> }`
-- Result: `{ status: "none" } | { status: "synced"; source: "file"; main: { kind: "main" | "translation" | "pronunciation"; lang: string | null; origin: { type: "sidecar"; fileName: string; format: "lrc" | "elrc" | "ttml" | "vtt" | "srt" | "txt" | "lyricsfile" } | { type: "embedded"; tag: "id3:USLT" | "id3:SYLT" | "vorbis:LYRICS" | "vorbis:UNSYNCEDLYRICS" | "vorbis:SYNCEDLYRICS" | "mp4:lyr" | "other" }; body: { type: "synced"; lines: Array<{ text: string; startMs: number; endMs: number | null; words: Array<{ text: string; startMs: number; endMs: number | null }> | null; voice: string | null }> } | { type: "plain"; text: string } }; extras: Array<{ kind: "main" | "translation" | "pronunciation"; lang: string | null; origin: { type: "sidecar"; fileName: string; format: "lrc" | "elrc" | "ttml" | "vtt" | "srt" | "txt" | "lyricsfile" } | { type: "embedded"; tag: "id3:USLT" | "id3:SYLT" | "vorbis:LYRICS" | "vorbis:UNSYNCEDLYRICS" | "vorbis:SYNCEDLYRICS" | "mp4:lyr" | "other" }; body: { type: "synced"; lines: Array<{ text: string; startMs: number; endMs: number | null; words: Array<{ text: string; startMs: number; endMs: number | null }> | null; voice: string | null }> } | { type: "plain"; text: string } }> } | { status: "plain"; source: "file"; main: { kind: "main" | "translation" | "pronunciation"; lang: string | null; origin: { type: "sidecar"; fileName: string; format: "lrc" | "elrc" | "ttml" | "vtt" | "srt" | "txt" | "lyricsfile" } | { type: "embedded"; tag: "id3:USLT" | "id3:SYLT" | "vorbis:LYRICS" | "vorbis:UNSYNCEDLYRICS" | "vorbis:SYNCEDLYRICS" | "mp4:lyr" | "other" }; body: { type: "synced"; lines: Array<{ text: string; startMs: number; endMs: number | null; words: Array<{ text: string; startMs: number; endMs: number | null }> | null; voice: string | null }> } | { type: "plain"; text: string } }; extras: Array<{ kind: "main" | "translation" | "pronunciation"; lang: string | null; origin: { type: "sidecar"; fileName: string; format: "lrc" | "elrc" | "ttml" | "vtt" | "srt" | "txt" | "lyricsfile" } | { type: "embedded"; tag: "id3:USLT" | "id3:SYLT" | "vorbis:LYRICS" | "vorbis:UNSYNCEDLYRICS" | "vorbis:SYNCEDLYRICS" | "mp4:lyr" | "other" }; body: { type: "synced"; lines: Array<{ text: string; startMs: number; endMs: number | null; words: Array<{ text: string; startMs: number; endMs: number | null }> | null; voice: string | null }> } | { type: "plain"; text: string } }> }`
+- Result: `{ status: "none" } | { status: "instrumental" } | { status: "pending"; fallback: { kind: "main" | "translation" | "pronunciation"; lang: string | null; origin: { type: "sidecar"; fileName: string; format: "lrc" | "elrc" | "ttml" | "vtt" | "srt" | "txt" | "lyricsfile" } | { type: "embedded"; tag: "id3:USLT" | "id3:SYLT" | "vorbis:LYRICS" | "vorbis:UNSYNCEDLYRICS" | "vorbis:SYNCEDLYRICS" | "mp4:lyr" | "other" } | { type: "lrclib"; recordId: number }; body: { type: "synced"; lines: Array<{ text: string; startMs: number; endMs: number | null; words: Array<{ text: string; startMs: number; endMs: number | null }> | null; voice: string | null }> } | { type: "plain"; text: string } } | null } | { status: "synced"; source: "file" | "lrclib"; main: { kind: "main" | "translation" | "pronunciation"; lang: string | null; origin: { type: "sidecar"; fileName: string; format: "lrc" | "elrc" | "ttml" | "vtt" | "srt" | "txt" | "lyricsfile" } | { type: "embedded"; tag: "id3:USLT" | "id3:SYLT" | "vorbis:LYRICS" | "vorbis:UNSYNCEDLYRICS" | "vorbis:SYNCEDLYRICS" | "mp4:lyr" | "other" } | { type: "lrclib"; recordId: number }; body: { type: "synced"; lines: Array<{ text: string; startMs: number; endMs: number | null; words: Array<{ text: string; startMs: number; endMs: number | null }> | null; voice: string | null }> } | { type: "plain"; text: string } }; extras: Array<{ kind: "main" | "translation" | "pronunciation"; lang: string | null; origin: { type: "sidecar"; fileName: string; format: "lrc" | "elrc" | "ttml" | "vtt" | "srt" | "txt" | "lyricsfile" } | { type: "embedded"; tag: "id3:USLT" | "id3:SYLT" | "vorbis:LYRICS" | "vorbis:UNSYNCEDLYRICS" | "vorbis:SYNCEDLYRICS" | "mp4:lyr" | "other" } | { type: "lrclib"; recordId: number }; body: { type: "synced"; lines: Array<{ text: string; startMs: number; endMs: number | null; words: Array<{ text: string; startMs: number; endMs: number | null }> | null; voice: string | null }> } | { type: "plain"; text: string } }> } | { status: "plain"; source: "file" | "lrclib"; main: { kind: "main" | "translation" | "pronunciation"; lang: string | null; origin: { type: "sidecar"; fileName: string; format: "lrc" | "elrc" | "ttml" | "vtt" | "srt" | "txt" | "lyricsfile" } | { type: "embedded"; tag: "id3:USLT" | "id3:SYLT" | "vorbis:LYRICS" | "vorbis:UNSYNCEDLYRICS" | "vorbis:SYNCEDLYRICS" | "mp4:lyr" | "other" } | { type: "lrclib"; recordId: number }; body: { type: "synced"; lines: Array<{ text: string; startMs: number; endMs: number | null; words: Array<{ text: string; startMs: number; endMs: number | null }> | null; voice: string | null }> } | { type: "plain"; text: string } }; extras: Array<{ kind: "main" | "translation" | "pronunciation"; lang: string | null; origin: { type: "sidecar"; fileName: string; format: "lrc" | "elrc" | "ttml" | "vtt" | "srt" | "txt" | "lyricsfile" } | { type: "embedded"; tag: "id3:USLT" | "id3:SYLT" | "vorbis:LYRICS" | "vorbis:UNSYNCEDLYRICS" | "vorbis:SYNCEDLYRICS" | "mp4:lyr" | "other" } | { type: "lrclib"; recordId: number }; body: { type: "synced"; lines: Array<{ text: string; startMs: number; endMs: number | null; words: Array<{ text: string; startMs: number; endMs: number | null }> | null; voice: string | null }> } | { type: "plain"; text: string } }> }`
+
+## `music.lyrics.status`
+
+Show whether the server looks up lyrics on LRCLIB for songs without synced lyrics (owners and admins).
+
+- CLI: `media music lyrics status`
+- Kind: query
+- Scope: music:edit
+- Arguments: none
+- Result: `{ remote: boolean }`
 
 ## `music.play.report`
 

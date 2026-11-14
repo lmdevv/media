@@ -243,9 +243,13 @@ string dispatchers that took `v.any()` arguments (D23).
   are the core's already. `links.get` built a path a client can build itself from an id, and
   answered the title beside it: an album's, an artist's, and a playlist's come from
   `music.albums.get`, `music.artists.get`, and `music.playlists.get`, and a song's, with the album
-  it opens, from `music.tracks.get`, which iOS's "Add to playlist" sheet shows. LRCLIB lookups and
-  `lyrics.backfill` come with the lyrics job (p5-lyrics), so `music.lyrics.get` answers a song's
-  own lyrics for now.
+  it opens, from `music.tracks.get`, which iOS's "Add to playlist" sheet shows. LRCLIB lookups
+  came with the lyrics job (p5-lyrics, ADR 0012): `music.lyrics.get` answers old music's
+  `TrackLyrics` cases (none, instrumental, pending with its fallback, and synced or plain from
+  the song's files or LRCLIB), `music.lyrics.backfill` is old music's `lyrics.backfill`, and
+  `music.lyrics.status` and `music.lyrics.configure` are the `remoteLyrics` half of old music's
+  `server.settings` and `server.update`, owners and admins only through `can()`
+  (`configureLyrics`).
 - **Lists page.** Every list that can grow pages with an exact cursor, which old music's merged
   lists and its whole-album, whole-playlist, and whole-queue answers did not: a Convex call reads
   at most 16 MiB, and 2,000 songs at their bound would pass it. So an album's songs, an artist's

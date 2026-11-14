@@ -135,6 +135,40 @@ export const LocalLyricSet = Schema.Struct({
 /** A song's own lyric set. */
 export interface LocalLyricSet extends Schema.Schema.Type<typeof LocalLyricSet> {}
 
+/** An LRCLIB record's id: a whole number above 0. */
+export const LrclibRecordId = Schema.Int.check(Schema.isGreaterThan(0));
+
+/** The LRCLIB record a lyric set came from. */
+export const LrclibOrigin = Schema.TaggedStruct("Lrclib", { recordId: LrclibRecordId });
+
+/** One version of a song's lyrics as LRCLIB holds it, with the record it came from. */
+export const LrclibLyricSet = Schema.Struct({
+  kind: LyricKind,
+  lang: Schema.NullOr(Lang),
+  origin: LrclibOrigin,
+  body: LyricBody,
+});
+
+/** A lyric set LRCLIB returned. */
+export interface LrclibLyricSet extends Schema.Schema.Type<typeof LrclibLyricSet> {}
+
+/**
+ * What LRCLIB answered for a song, as `music/lyricLookups:settle` takes it: its lyrics (never
+ * none, the set a client shows first), that the song is instrumental, or no record for it.
+ */
+export const LrclibAnswer = Schema.Union([
+  Schema.Struct({
+    status: Schema.Literal("found"),
+    recordId: LrclibRecordId,
+    sets: Schema.NonEmptyArray(LrclibLyricSet),
+  }),
+  Schema.Struct({ status: Schema.Literal("instrumental"), recordId: LrclibRecordId }),
+  Schema.Struct({ status: Schema.Literal("miss") }),
+]);
+
+/** What LRCLIB answered for a song. */
+export type LrclibAnswer = typeof LrclibAnswer.Type;
+
 const lyricsFields = {
   /** The lyric files beside the file, as `name:size:mtime` joined by `/`; empty when none. */
   lyricsFiles: Schema.String,

@@ -79,7 +79,8 @@ under `DATA_DIR/music/transcoding`, are never pruned), `TRICKPLAY`
 (`on` or `off`: scrub thumbnail jobs), `TRICKPLAY_INTERVAL_SECONDS` (10, from 1 to 600),
 `TRICKPLAY_CONCURRENCY` (1: files given thumbnails at once, besides other jobs), `FFMPEG_PATH`,
 `FFPROBE_PATH`,
-`OTEL_EXPORTER_OTLP_ENDPOINT`, `BACKUP_RETENTION_DAYS` (14),
+`OTEL_EXPORTER_OTLP_ENDPOINT`, `LRCLIB_URL` (`https://lrclib.net`: where music looks up lyrics,
+as old music's `LRCLIB_URL` did), `BACKUP_RETENTION_DAYS` (14),
 `LOG_LEVEL` (`info`; `trace`, `debug`, `warn`, `error`: the least severe level logged, on standard
 output and in the retained log), `LOG_RETENTION_DAYS` (14) and `LOG_MAX_MB` (512, from 8 to
 1048576: the size the retained log files under `DATA_DIR/logs`, which `media logs` and

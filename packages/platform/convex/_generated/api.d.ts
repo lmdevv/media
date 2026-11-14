@@ -145,6 +145,7 @@ import type * as music_history from "../music/history.js";
 import type * as music_items from "../music/items.js";
 import type * as music_library from "../music/library.js";
 import type * as music_likes from "../music/likes.js";
+import type * as music_lyricLookups from "../music/lyricLookups.js";
 import type * as music_lyrics from "../music/lyrics.js";
 import type * as music_merged from "../music/merged.js";
 import type * as music_order from "../music/order.js";
@@ -306,6 +307,7 @@ declare const fullApi: ApiFromModules<{
   "music/items": typeof music_items;
   "music/library": typeof music_library;
   "music/likes": typeof music_likes;
+  "music/lyricLookups": typeof music_lyricLookups;
   "music/lyrics": typeof music_lyrics;
   "music/merged": typeof music_merged;
   "music/order": typeof music_order;

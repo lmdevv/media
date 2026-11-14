@@ -3,7 +3,8 @@ import { v } from "convex/values";
 import { internal } from "../../_generated/api";
 import { internalMutation } from "../../_generated/server";
 import { inOrder } from "../lib/inOrder";
-import { applyEvent, deleteItemBatch } from "./store";
+import { jobKind } from "./kinds";
+import { applyEvent, deleteItemBatch, endPause as endKindPause } from "./store";
 
 const RELEASE_BATCH = 200;
 
@@ -49,5 +50,66 @@ export const purgeItems = internalMutation({
     }
 
     return null;
+  },
+});
+
+/** Makes a job that waited for a retry's time claimable, when it still waits for that attempt. */
+export const wake = internalMutation({
+  args: { jobId: v.id("jobs"), attempt: v.number() },
+  returns: v.null(),
+  handler: async (ctx, { jobId, attempt }) => {
+    const job = await ctx.db.get("jobs", jobId);
+
+    if (job !== null) await applyEvent(ctx, job, { type: "wake", attempt });
+
+    return null;
+  },
+});
+
+/** Ends a kind's pause once its time came (scheduled by the pause itself). */
+export const endPause = internalMutation({
+  args: { kind: jobKind },
+  returns: v.null(),
+  handler: async (ctx, { kind }) => {
+    await endKindPause(ctx, kind, Date.now());
+
+    return null;
+  },
+});
+
+const WAKE_BATCH = 200;
+
+/**
+ * Wakes waiting retries and ends pauses whose time passed without their scheduled call, as after a
+ * restore from a backup, which keeps the rows but not the schedule. It reads only rows whose time
+ * passed, through `by_status_wait` and `by_paused`, so a quiet minute reads nothing.
+ */
+export const wakeDue = internalMutation({
+  args: {},
+  returns: v.object({ woken: v.number(), resumed: v.number() }),
+  handler: async (ctx) => {
+    const now = Date.now();
+
+    const [due, paused] = await Promise.all([
+      ctx.db
+        .query("jobs")
+        .withIndex("by_status_wait", (q) =>
+          q.eq("status", "queued").gte("waitUntil", 0).lte("waitUntil", now),
+        )
+        .take(WAKE_BATCH),
+      ctx.db
+        .query("jobKinds")
+        .withIndex("by_paused", (q) => q.gte("pausedUntil", 0).lte("pausedUntil", now))
+        .collect(),
+    ]);
+
+    await inOrder(due, (job) => applyEvent(ctx, job, { type: "wake", attempt: null }));
+    await inOrder(paused, (row) => endKindPause(ctx, row.kind, now));
+
+    if (due.length === WAKE_BATCH) {
+      await ctx.scheduler.runAfter(0, internal.core.jobs.leases.wakeDue, {});
+    }
+
+    return { woken: due.length, resumed: paused.length };
   },
 });

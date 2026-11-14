@@ -118,6 +118,7 @@ default. The NixOS options are in brackets.
 | `LOG_RETENTION_DAYS`          | Days the retained logs are kept, 14 (`logRetentionDays`)                                               |
 | `LOG_MAX_MB`                  | Size the retained logs never pass, 512 MiB, at least 8 (`logMaxMb`)                                    |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Optional OTLP/HTTP collector for traces and logs (`otlpEndpoint`)                                      |
+| `LRCLIB_URL`                  | Where music looks up lyrics, `https://lrclib.net` (`lrclibUrl`)                                        |
 
 On NixOS, `environmentFile` adds secrets (such as `TMDB_API_KEY`) from a root-only file and
 `extraEnvironment` sets anything else. The image and the NixOS module connect the media service

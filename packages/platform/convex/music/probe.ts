@@ -15,6 +15,8 @@ import { itemCount, withLibraryItems } from "../core/scans";
 import { CALL_COST, NO_COST, cost, meterFrom } from "./budget";
 import { catalogBatch } from "./catalog";
 import { trackFacts } from "./items";
+import { activeJobFor } from "../core/jobs/store";
+import { lookupOf } from "./lyricLookups";
 import { restPage, tracksPage } from "./purge";
 import { totalNames, totalsOf } from "./totals";
 import { localLyricSet } from "./validators";
@@ -394,4 +396,102 @@ export const purgePage = internalMutation({
 
     return { cursor: next.cursor, more: next.more };
   },
+});
+
+const lookupJob = v.union(
+  v.null(),
+  v.object({
+    jobId: v.id("jobs"),
+    status: v.union(v.literal("queued"), v.literal("running")),
+    attempts: v.number(),
+    strikes: v.number(),
+    waitUntil: v.union(v.number(), v.null()),
+  }),
+);
+
+/**
+ * Each track's LRCLIB lookup as a test checks it: the lookup queued or running for its tags now,
+ * the answer stored for it and whether that answer is for its tags now, and how many LRCLIB rows
+ * it has. A gone track answers null.
+ */
+export const lookups = internalQuery({
+  args: { trackIds: v.array(v.id("tracks")) },
+  returns: v.array(
+    v.union(
+      v.null(),
+      v.object({
+        job: lookupJob,
+        answer: v.union(
+          v.null(),
+          v.object({
+            status: v.union(v.literal("found"), v.literal("instrumental"), v.literal("miss")),
+            current: v.boolean(),
+          }),
+        ),
+        rows: v.number(),
+      }),
+    ),
+  ),
+  handler: (ctx, { trackIds }) =>
+    Promise.all(
+      trackIds.map(async (trackId) => {
+        const song = await ctx.db.get(trackId);
+
+        const answers = await ctx.db
+          .query("lrclibLyrics")
+          .withIndex("by_track", (q) => q.eq("trackId", trackId))
+          .take(8);
+
+        if (song === null) return null;
+
+        const lookup = await lookupOf(song);
+        const job = lookup === null ? null : await activeJobFor(ctx.db, lookup);
+        const [row] = answers;
+
+        return {
+          job:
+            job === null || (job.status !== "queued" && job.status !== "running")
+              ? null
+              : {
+                  jobId: job._id,
+                  status: job.status,
+                  attempts: job.attempts,
+                  strikes: job.strikes,
+                  waitUntil: job.status === "queued" ? (job.waitUntil ?? null) : null,
+                },
+          answer:
+            row === undefined
+              ? null
+              : { status: row.answer.status, current: row.revision === lookup?.revision },
+          rows: answers.length,
+        };
+      }),
+    ),
+});
+
+/** The `music.lyrics` kind's row: whether it is held and when its pause ends. */
+export const lookupKind = internalQuery({
+  args: {},
+  returns: v.object({ held: v.boolean(), pausedUntil: v.union(v.number(), v.null()) }),
+  handler: async (ctx) => {
+    const row = await ctx.db
+      .query("jobKinds")
+      .withIndex("by_kind", (q) => q.eq("kind", "music.lyrics"))
+      .unique();
+
+    return { held: row?.held === true, pausedUntil: row?.pausedUntil ?? null };
+  },
+});
+
+/** How many LRCLIB rows a track has, which outlive no deleted track. */
+export const lrclibRowCount = internalQuery({
+  args: { trackId: v.id("tracks") },
+  returns: v.number(),
+  handler: async (ctx, { trackId }) =>
+    (
+      await ctx.db
+        .query("lrclibLyrics")
+        .withIndex("by_track", (q) => q.eq("trackId", trackId))
+        .take(8)
+    ).length,
 });

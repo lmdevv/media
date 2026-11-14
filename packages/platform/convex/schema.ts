@@ -547,6 +547,10 @@ export default defineSchema({
 
   jobs: defineTable(jobDocument)
     .index("by_kind_status", ["payload.kind", "status"])
+    /** A kind's queued jobs a claim may take now, which have no `waitUntil`, oldest first. */
+    .index("by_kind_ready", ["payload.kind", "status", "waitUntil"])
+    /** Queued jobs waiting for a retry's time, for `core/jobs/leases:wakeDue`. */
+    .index("by_status_wait", ["status", "waitUntil"])
     .index("by_status", ["status"])
     .index("by_status_lease", ["status", "leaseExpiresAt"])
     .index("by_kind", ["payload.kind"])
@@ -556,7 +560,10 @@ export default defineSchema({
 
   jobItems: defineTable(jobItemDocument).index("by_job_seq", ["jobId", "seq"]),
 
-  jobKinds: defineTable(jobKindDocument).index("by_kind", ["kind"]),
+  jobKinds: defineTable(jobKindDocument)
+    .index("by_kind", ["kind"])
+    /** Paused kinds by when their pause ends, for `core/jobs/leases:wakeDue`. */
+    .index("by_paused", ["pausedUntil"]),
 
   schemaMigrations: defineTable({
     name: v.string(),

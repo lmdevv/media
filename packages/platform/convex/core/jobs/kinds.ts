@@ -21,7 +21,14 @@ type Tagged<Kind extends string, Fields extends PropertyValidators> = ReturnType
  * kinds together on one server, under each kind's own cap across every worker. `probe` runs only
  * in the stack suite; the server never claims it.
  */
-type JobPool = "movies" | "movies.background" | "movies.import" | "music" | "server" | "probe";
+type JobPool =
+  | "movies"
+  | "movies.background"
+  | "movies.import"
+  | "music"
+  | "music.background"
+  | "server"
+  | "probe";
 
 interface KindPolicy<Payload extends PropertyValidators> {
   /** What enqueue stores, at most a few KiB. A large plan belongs in the domain's own table. */
@@ -231,6 +238,31 @@ export const KINDS = [
      * its new contents even while the old one still runs.
      */
     dedupe: (payload) => `${payload.fileId}:${payload.revision}`,
+  }),
+  defineKind("music.lyrics", {
+    payload: {
+      trackId: v.id("tracks"),
+      /**
+       * SHA-256 of the track's lookup key when the job was asked for (`music/lyricLookups.ts`):
+       * the tags it looks up. An answer saves only while the track's tags still make it.
+       */
+      revision: v.string(),
+      /** The tags LRCLIB is asked with, each within the music catalog's name maximum. */
+      query: v.object({
+        artist: v.string(),
+        title: v.string(),
+        album: v.string(),
+        durationS: v.number(),
+      }),
+    },
+    pool: "music.background",
+    item: null,
+    /** One lookup at a time, as old music asked LRCLIB one song at a time. */
+    cap: 1,
+    /** Old music's five tries of a song whose own record failed before it counted as a miss. */
+    maxStrikes: 5,
+    /** One lookup per track and lookup revision: a retagged track gets a lookup of its own. */
+    dedupe: (payload) => `${payload.trackId}:${payload.revision}`,
   }),
   importKind("jellyfin"),
   importKind("plex"),

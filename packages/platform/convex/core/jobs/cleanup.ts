@@ -37,12 +37,14 @@ const JOB_BYTES_MAX = 1024 * 1024;
 /**
  * The kinds whose finished jobs nothing needs (ADR 0012, "Finished jobs"). Scans stay, because a
  * library's `lastScan` is its scan state, and so do imports, which an `imports` row names. A
- * trickplay job that a file still waits on is released from the file first.
+ * trickplay job that a file still waits on is released from the file first. A lyrics lookup's
+ * answer lives in `lrclibLyrics`, so its finished job is only a record.
  */
 const SWEPT_KINDS = [
   "movies.trickplay",
   "movies.metadata",
   "movies.person",
+  "music.lyrics",
   "server.backup",
   "probe.capped",
   "probe.wide",

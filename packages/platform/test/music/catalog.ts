@@ -21,9 +21,9 @@ const isId =
   (value: unknown): value is Id<Table> =>
     Schema.is(Schema.String)(value);
 
-const JobId = Schema.declare(isId("jobs"));
+export const JobId = Schema.declare(isId("jobs"));
 
-const TrackId = Schema.declare(isId("tracks"));
+export const TrackId = Schema.declare(isId("tracks"));
 
 const AlbumId = Schema.declare(isId("albums"));
 
