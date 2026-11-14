@@ -71,12 +71,15 @@ const ALL_ENTRIES_COST = cost(
 /** What one queue command keeps for its own reads and writes besides the songs it reads. */
 const COMMAND_COST = cost(24, 4, 24 * DOCUMENT_BYTES.small, 4 * DOCUMENT_BYTES.small);
 
-/** What topping a queue up with autoplay's songs writes, besides what autoplay reads. */
+/**
+ * What topping a queue up with autoplay's songs writes, besides what autoplay reads: its songs,
+ * the queue, and at a full queue as many played entries deleted to make room.
+ */
 const TOP_UP_COST = cost(
   4,
-  AUTOPLAY_BATCH + 1,
+  2 * AUTOPLAY_BATCH + 1,
   4 * DOCUMENT_BYTES.small,
-  (AUTOPLAY_BATCH + 1) * DOCUMENT_BYTES.small,
+  (2 * AUTOPLAY_BATCH + 1) * DOCUMENT_BYTES.small,
 );
 
 /** A person's queue, read once per command, with the store and deciders it writes through. */
@@ -347,38 +350,40 @@ const insertAt = async (
 
 /**
  * Tops the queue up as old music's `toppedUp` did: when autoplay is on, repeat is off, and the
- * current entry is the last, autoplay's songs join after it. It runs only while the call can still
- * pay for autoplay's reads.
+ * current entry is the last, autoplay's songs join after it. A full queue makes room as old music's
+ * did, deleting the entries played longest ago, the first before the current one in play order;
+ * the current entry stays. It runs only while the call can still pay for autoplay's reads.
  */
 const toppedUp = async (session: Session, queue: Queue): Promise<Queue> => {
   if (!queue.autoplay || queue.repeat !== "off" || queue.current === null) return queue;
 
-  const room = MAX_QUEUE - queue.count;
   const current = await session.store.get("playQueueEntries", queue.current);
 
-  if (room <= 0 || current === null || (await playsAfter(session, queue, current)) !== null) {
-    return queue;
-  }
+  if (current === null || (await playsAfter(session, queue, current)) !== null) return queue;
 
   const seed = await session.store.get("tracks", current.trackId);
 
   if (seed === null) return queue;
 
-  const queued = (await allEntries(session, queue)).map((entry) => entry.trackId);
+  const entries = await allEntries(session, queue);
+  const played = entries.filter((entry) => playsBefore(entry, current));
 
-  const songs = (
-    await autoplaySongs(
-      session.db,
-      session.store,
-      session.reach,
-      session.decider,
-      seed,
-      queued,
-      TOP_UP_COST,
-    )
-  ).slice(0, room);
+  const picked = await autoplaySongs(
+    session.db,
+    session.store,
+    session.reach,
+    session.decider,
+    seed,
+    entries.map((entry) => entry.trackId),
+    TOP_UP_COST,
+  );
+
+  const leaving = played.slice(0, Math.max(0, entries.length + picked.length - MAX_QUEUE));
+  const songs = picked.slice(0, MAX_QUEUE - entries.length + leaving.length);
 
   if (songs.length === 0) return queue;
+
+  await Promise.all(leaving.map(async (entry) => session.store.deleteQueueEntry(entry._id)));
 
   await insertAt(session, queue, songs, true, async () => {
     const fresh = await entryOf(session, queue, current._id);
@@ -390,7 +395,7 @@ const toppedUp = async (session: Session, queue: Queue): Promise<Queue> => {
     };
   });
 
-  return saved(session, queue, { count: queue.count + songs.length });
+  return saved(session, queue, { count: entries.length - leaving.length + songs.length });
 };
 
 /**
@@ -719,23 +724,25 @@ export const { get, list, play, add, remove, move, clear, jump, shuffle, repeat,
 
       const rest = songs.length >= room ? [] : trackIds.slice(decided.length);
 
-      if (songs.length === 0) {
-        return rest.length === 0 && anchor === null
-          ? fail("not_found", "None of those songs can play: their files are missing")
-          : { itemIds: [], rest };
+      if (songs.length === 0 && rest.length === 0 && anchor === null) {
+        return fail("not_found", "None of those songs can play: their files are missing");
       }
 
-      const itemIds = await insertAt(session, queue, songs, false, place);
+      const itemIds = songs.length === 0 ? [] : await insertAt(session, queue, songs, false, place);
       const count = queue.count + itemIds.length;
 
-      if (current === null) {
-        const started = await saved(session, queue, { current: itemIds[0] ?? null, count });
+      const written =
+        itemIds.length === 0
+          ? queue
+          : await saved(
+              session,
+              queue,
+              current === null ? { current: itemIds[0] ?? null, count } : { count },
+            );
 
-        // Autoplay waits for the songs the caller sends again, which go before its own.
-        if (rest.length === 0) await toppedUp(session, started);
-      } else {
-        await saved(session, queue, { count });
-      }
+      // Autoplay waits for the songs the caller sends again, which go before its own. The last
+      // call tops the queue up as a single call does, even when its songs were all missing.
+      if (rest.length === 0) await toppedUp(session, written);
 
       return { itemIds: [...itemIds], rest };
     },

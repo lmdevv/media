@@ -5,10 +5,12 @@ import { inOrder } from "../../convex/core/lib/inOrder";
 import type { Id } from "../../convex/_generated/dataModel";
 import { member } from "../devices";
 import type { Member } from "../devices";
-import { sessionOf } from "../probe";
-import { refusal, signInAs } from "../sign-in";
+import { sessionOf, share } from "../probe";
+import { refusal, signInAs, unique } from "../sign-in";
 import { coreStackFromEnvFile } from "../stack-env";
 import type { CoreStack } from "../stack-env";
+import { claimScan, finishScan, markMissing, musicLibrary, trackIdsAt, upsert } from "./catalog";
+import { musicTrack } from "./scanned";
 import { allPages, at, musicShelf, onAlbum, trackAt } from "./shelf";
 
 const stack = coreStackFromEnvFile();
@@ -251,5 +253,65 @@ describe.skipIf(stack === undefined)("music queue", { timeout: 240_000 }, () => 
     await aiko.signedIn.client.mutation(api.music.queue.autoplay, { on: false });
 
     expect(await titlesOf(aiko)).toEqual(["Song 00"]);
+  });
+
+  it("tops the queue up on the last call of an add sent in several, though its songs are all missing", async () => {
+    if (stack === undefined) return;
+    const admin = await member(stack, "queue-missing-admin", "admin");
+    const aiko = await member(stack, "aiko-queue-missing");
+    const { libraryId, scanJobId, roots } = await musicLibrary(admin, `Queue missing ${unique()}`);
+
+    await share(admin, libraryId, { kind: "user", userId: aiko.userId }, "view");
+
+    const lease = await claimScan(stack, scanJobId);
+
+    const files = Array.from({ length: 6 }, (_, n) =>
+      musicTrack(`${at(roots, 0)}/Album/song ${n}`),
+    );
+
+    expect(await upsert(stack, lease, files)).toMatchObject({ value: { done: 6 } });
+    expect(await markMissing(stack, lease, [at(files, 1).path])).toMatchObject({
+      value: { marked: 1 },
+    });
+
+    const found = await trackIdsAt(
+      stack,
+      libraryId,
+      files.map((file) => file.path),
+    );
+
+    const ids = found.flatMap((id) => (id === null ? [] : [id]));
+
+    expect(ids).toHaveLength(6);
+
+    const client = aiko.signedIn.client;
+
+    // Repeat holds autoplay back, so the queue ends at its one song as an earlier call left it.
+    await client.mutation(api.music.queue.repeat, { mode: "one" });
+    await client.mutation(api.music.queue.autoplay, { on: true });
+
+    const { current } = await client.mutation(api.music.queue.play, { trackIds: [at(ids, 0)] });
+
+    await client.mutation(api.music.queue.repeat, { mode: "off" });
+
+    expect(await titlesOf(aiko)).toEqual(["song 0"]);
+    expect(await refusal(client.mutation(api.music.queue.add, { trackIds: [at(ids, 1)] }))).toBe(
+      "not_found",
+    );
+
+    // The last call of a continued add names the entry an earlier call added; its song is missing.
+    expect(
+      await client.mutation(api.music.queue.add, { trackIds: [at(ids, 1)], afterItemId: current }),
+    ).toEqual({ itemIds: [], rest: [] });
+
+    const queue = await client.query(api.music.queue.list, {
+      paginationOpts: { numItems: 50, cursor: null },
+    });
+
+    expect(queue.page.length).toBeGreaterThan(1);
+    expect(queue.page.slice(1).every((entry) => entry.autoplay)).toBe(true);
+    expect(queue.page.map((entry) => entry.track.id)).not.toContain(at(ids, 1));
+
+    await finishScan(stack, lease);
   });
 });

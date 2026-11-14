@@ -12,7 +12,7 @@ import type { MusicLibrary } from "../probe";
 import { unique } from "../sign-in";
 import { coreStackFromEnvFile } from "../stack-env";
 import type { CoreStack } from "../stack-env";
-import { claimScan, finishScan, musicLibrary, upsertAll } from "./catalog";
+import { claimScan, finishScan, musicLibrary, trackIdsAt, upsertAll } from "./catalog";
 import { musicTrack } from "./scanned";
 import { allPages, at, musicShelf, onAlbum } from "./shelf";
 
@@ -307,6 +307,83 @@ describe.skipIf(stack === undefined)("music command limits", { timeout: 300_000 
     expect(withinLimits(await usageSince(stack, mark, api.music.queue.play, 1))).toBe(true);
     expect(withinLimits(await usageSince(stack, mark, api.music.playlists.create, 1))).toBe(true);
   });
+
+  it("keeps autoplay going at a full queue, deleting the entries played longest ago", async () => {
+    if (stack === undefined) return;
+    const admin = await member(stack, "full-autoplay-admin", "admin");
+    const aiko = await member(stack, "full-autoplay-aiko");
+    const { libraryId, scanJobId, roots } = await musicLibrary(admin, `Full ${unique()}`);
+    const artist = `Full Artist ${unique()}`;
+    const lease = await claimScan(stack, scanJobId);
+
+    // An artist of its own, so autoplay's first step reads only this library's 40 songs.
+    const files = Array.from({ length: 40 }, (_, n) =>
+      musicTrack(`${at(roots, 0)}/Full ${n % 4}/${pad(n)}.flac`, 1000, 1, { artist }),
+    );
+
+    await upsertAll(stack, lease, files);
+    await finishScan(stack, lease);
+    await share(admin, libraryId, { kind: "user", userId: aiko.userId }, "view");
+
+    const found = await trackIdsAt(
+      stack,
+      libraryId,
+      files.map((file) => file.path),
+    );
+
+    const songs = found.flatMap((id) => (id === null ? [] : [id]));
+    const client = aiko.signedIn.client;
+
+    expect(songs).toHaveLength(40);
+
+    // The queue repeats 20 of the artist's 40 songs, so autoplay has 20 left to choose from.
+    await client.mutation(api.music.queue.autoplay, { on: false });
+    await client.mutation(api.music.queue.play, {
+      trackIds: Array.from({ length: 1000 }, (_, n) => at(songs, n % 20)),
+    });
+
+    // The current entry is the first, so turning autoplay on adds nothing yet.
+    await client.mutation(api.music.queue.autoplay, { on: true });
+
+    const full = await queued(aiko);
+    const last = at(full, 999);
+
+    expect(full).toHaveLength(1000);
+
+    const mark = await logMark(stack);
+
+    await client.mutation(api.music.queue.jump, { itemId: last });
+
+    const topped = await allPages((cursor) =>
+      client.query(api.music.queue.list, { paginationOpts: { numItems: 200, cursor } }),
+    );
+
+    const joined = topped.rows.filter((entry) => entry.autoplay);
+
+    expect(joined.length).toBeGreaterThan(0);
+    expect(topped.rows.map((entry) => entry.itemId)).toEqual([
+      ...full.slice(joined.length),
+      ...joined.map((entry) => entry.itemId),
+    ]);
+    expect(await client.query(api.music.queue.get, {})).toMatchObject({
+      current: last,
+      count: 1000,
+    });
+    expect(withinLimits(await usageSince(stack, mark, api.music.queue.jump, 1))).toBe(true);
+
+    // Playing on to autoplay's last song tops the full queue up again.
+    const again = at(joined, joined.length - 1).itemId;
+
+    await client.mutation(api.music.queue.jump, { itemId: again });
+
+    const kept = topped.rows.map((entry) => entry.itemId);
+    const after = await queued(aiko);
+    const fresh = after.filter((id) => !kept.includes(id));
+
+    expect(fresh.length).toBeGreaterThan(0);
+    expect(after).toEqual([...kept.slice(fresh.length), ...fresh]);
+  });
+
   it("adds next to a 999-entry queue whose gap closed, for a person in sixteen groups with 2,000 songs from 59 libraries", async () => {
     if (stack === undefined) return;
     const { viewer, songOf } = await wideReach(stack);
