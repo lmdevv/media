@@ -5,6 +5,7 @@ import {
   activeDevice,
   deviceKind,
   devicePosition,
+  moveArrived,
   ownDevices,
   yieldsTo,
 } from "./connect-devices";
@@ -97,6 +98,47 @@ describe("activeDevice", () => {
   it("keeps the device it followed while it still plays", () => {
     expect(activeDevice([device("a", true), device("b", true)], "b")?.id).toBe("b");
     expect(activeDevice([device("a", true), device("b", false)], "b")?.id).toBe("a");
+  });
+});
+
+const holding = (pending: boolean): Device => ({
+  id: "desk",
+  name: "Chrome on Linux",
+  playback: { trackId: "a", playing: true, positionMs: 30_000, at: NOW, pending },
+});
+
+describe("moveArrived", () => {
+  it("waits while only the move's request stands in for the device's report", () => {
+    expect(
+      moveArrived({ deviceId: "desk", landed: true }, { here: false, devices: [holding(true)] }),
+    ).toBe(false);
+  });
+
+  it("arrives once the device reports the song itself", () => {
+    expect(
+      moveArrived({ deviceId: "desk", landed: true }, { here: false, devices: [holding(false)] }),
+    ).toBe(true);
+  });
+
+  it("takes no report before the core took the move, nor from a device holding nothing or gone", () => {
+    expect(
+      moveArrived({ deviceId: "desk", landed: false }, { here: false, devices: [holding(false)] }),
+    ).toBe(false);
+    expect(
+      moveArrived(
+        { deviceId: "desk", landed: true },
+        { here: false, devices: [{ id: "desk", name: "Chrome on Linux", playback: null }] },
+      ),
+    ).toBe(false);
+    expect(moveArrived({ deviceId: "desk", landed: true }, { here: false, devices: [] })).toBe(
+      false,
+    );
+  });
+
+  it("arrives here once this device holds the song", () => {
+    expect(moveArrived({ deviceId: null, landed: true }, { here: false, devices: [] })).toBe(false);
+    expect(moveArrived({ deviceId: null, landed: true }, { here: true, devices: [] })).toBe(true);
+    expect(moveArrived({ deviceId: null, landed: false }, { here: true, devices: [] })).toBe(false);
   });
 });
 

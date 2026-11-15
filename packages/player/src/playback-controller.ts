@@ -367,11 +367,10 @@ export class PlaybackController {
    * Calls `callback` synchronously at the start of every action the listener takes here, before
    * it changes anything: {@link togglePlay}, {@link next}, {@link previous}, {@link seek},
    * {@link jump}, and {@link playTracks}, whether a screen, a shortcut, or the system media
-   * controls asked. A play or pause that a native player applied itself, from the lock screen,
-   * headphones, or CarPlay, calls it too, once the engine reports it (a `system` event).
-   * Connect makes the requests seen so far moot there (ADR 0018). What Connect itself applies,
-   * through `steer`, `playTracksAt`, `playCurrentAt`, and `release`, never calls it. Returns the
-   * function that stops calling it.
+   * controls asked, and the system media controls' own play and pause. Connect makes the requests
+   * seen so far moot there (ADR 0018). What Connect itself applies, through `steer`,
+   * `playTracksAt`, `playCurrentAt`, and `release`, never calls it. Returns the function that
+   * stops calling it.
    */
   onListenerAction(callback: () => void): () => void {
     this.#listenerActions.add(callback);
@@ -395,10 +394,10 @@ export class PlaybackController {
 
     this.#env.nowPlaying.setHandlers({
       play: () => {
-        if (!this.#isAudible()) void this.togglePlay();
+        this.#systemControl("play");
       },
       pause: () => {
-        if (this.#isAudible()) void this.togglePlay();
+        this.#systemControl("pause");
       },
       next: () => {
         void this.next();
@@ -552,17 +551,40 @@ export class PlaybackController {
   /** Plays or pauses. The engine reacts at once, inside the tap, which satisfies autoplay rules. */
   async togglePlay(): Promise<void> {
     this.#listenerActed();
+    await this.#playOrPause("toggle");
+  }
+
+  /**
+   * A play or pause from the system media controls: the lock screen, Control Center, headphones,
+   * CarPlay, or media keys. It plays or pauses whatever plays now, never toggles: a phone's native
+   * player plays or pauses itself for these too, so what plays when the command arrives says
+   * nothing about what the listener asked for.
+   */
+  #systemControl(ask: "play" | "pause"): void {
+    this.#listenerActed();
+    void this.#playOrPause(ask);
+    // A song still loading, or still on its way here, plays as the listener chose, before the
+    // engine says so.
+    this.#notify();
+  }
+
+  /**
+   * Plays or pauses here as the listener asked, the engine at once. A toggle pauses what is audible
+   * and plays anything else, a song with nothing loaded for it included.
+   */
+  async #playOrPause(ask: "play" | "pause" | "toggle"): Promise<void> {
     const entry = this.#currentEntry();
 
     if (entry === null) {
       // A song here the queue does not hold yet, as a new queue's first while that queue is on its
-      // way, plays or pauses as tapped.
+      // way, plays or pauses as asked.
       const here = this.playingHere();
 
       if (here === null) return;
+      const play = ask === "toggle" ? !here.playing : ask === "play";
 
-      if (!here.playing) this.#unlockOutput();
-      this.steer(!here.playing, here.positionMs);
+      if (play) this.#unlockOutput();
+      this.steer(play, here.positionMs);
 
       return;
     }
@@ -570,6 +592,15 @@ export class PlaybackController {
     this.#skipped.clear();
 
     if (this.#needsSource(entry)) {
+      if (ask === "pause") {
+        // Nothing loaded plays: the song loads paused when it loads.
+        this.#choose(false);
+        this.#engine.pause();
+        this.#saveResume();
+
+        return;
+      }
+
       this.#unlockOutput();
       this.#choose(true);
       this.#update({ autoplayBlocked: false, error: null });
@@ -578,14 +609,16 @@ export class PlaybackController {
       return;
     }
 
-    const playing = this.#isAudible();
-    this.#choose(!playing);
+    const audible = this.#isAudible();
+    const play = ask === "toggle" ? !audible : ask === "play";
+
+    this.#choose(play);
     this.#update({ autoplayBlocked: false, error: null });
 
-    if (playing) {
+    if (!play) {
       this.#engine.pause();
       this.#saveResume();
-    } else if (!this.#reloadIfExpired(this.#livePositionMs())) {
+    } else if (!audible && !this.#reloadIfExpired(this.#livePositionMs())) {
       await this.#engine.play();
     }
   }
@@ -1603,12 +1636,6 @@ export class PlaybackController {
   }
 
   #onEngineEvent = (event: EngineEvent): void => {
-    if (event.type === "system") {
-      this.#systemAction(event.playing);
-
-      return;
-    }
-
     // The outgoing source still sounds while the next one's ticket is out, and its position, its
     // failure, and its end describe a song the player has moved on from.
     if (this.#engineGeneration !== this.#generation) return;
@@ -1666,16 +1693,6 @@ export class PlaybackController {
       }
     }
   };
-
-  #systemAction(playing: boolean): void {
-    this.#listenerActed();
-    this.#skipped.clear();
-    this.#choose(playing);
-    this.#update({ autoplayBlocked: false, error: null });
-
-    if (!playing) this.#saveResume();
-    this.#notify();
-  }
 
   /** The engine moved to the preloaded song without a gap: it plays now, so the core follows. */
   #onAdvanced(): void {
@@ -1736,7 +1753,8 @@ export class PlaybackController {
       return;
     }
 
-    void this.#jumpTo(following.itemId, true);
+    // A pause that reached the engine as the song ended holds for the song that follows.
+    void this.#jumpTo(following.itemId, this.#wantPlaying);
   }
 
   async #onError(reason: EngineErrorReason, message: string): Promise<void> {

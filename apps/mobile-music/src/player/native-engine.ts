@@ -41,8 +41,13 @@ export interface LockScreenInfo {
 
 /** One native player holding one opened stream. */
 export interface AudioOutput {
-  /** Reads native output now, independently of a queued status callback. */
+  /**
+   * Reads native output now, independently of a queued status callback. A play asked of the player
+   * reads as waiting until the player starts it.
+   */
   readonly samplePlayback: () => Pick<OutputStatus, "positionMs" | "control">;
+  /** What the native player itself does now, a play asked of it but not started yet aside. */
+  readonly nativeControl: () => OutputControl;
   readonly play: () => void;
   readonly pause: () => void;
   /** Moves to `positionMs` in this stream. */
@@ -95,12 +100,6 @@ const MAX_RECOVERIES = 3;
 
 const RECOVERED_MS = 2000;
 
-/**
- * A pause this close to the song's end is the player stopping at it, whose end report can come
- * after its pause, not the person's.
- */
-const END_GUARD_MS = 1000;
-
 /** A seek in a stream that can seek, from when it is asked for until the player lands it. */
 interface Seeking {
   /** Where the latest seek takes the player. Until it lands, statuses carry an older position. */
@@ -119,6 +118,10 @@ interface Stream {
   status: OutputStatus | null;
   /** The playback state last reported to the engine's listeners for this stream. */
   reported: OutputControl | null;
+  /**
+   * What the engine last asked of this player. A pause asked before the player's end report
+   * arrives holds: the song that follows does not start.
+   */
   asked: "play" | "pause";
   /** The seek the player has not landed yet, or null. */
   seeking: Seeking | null;
@@ -198,9 +201,9 @@ const streamStartFor = (positionMs: number): number =>
  *
  * The lock screen, Control Center, headphones, and CarPlay play and pause the native player
  * itself (expo-audio's own remote commands), and iOS pauses it when headphones are unplugged. The
- * engine knows what it asked each player to do, so it reports such a change as a `system` event
- * right after the change itself: the controller takes it as the person's action, as a tap in the
- * app.
+ * engine reports such a change only as the player's state: the app's `RemoteCommands` module tells
+ * the controller of the command itself (`native-host.ts`). A song ends only when its player says
+ * it finished, whatever its position when it pauses.
  */
 export class NativeEngine implements PlayerEngine {
   readonly #open: OpenOutput;
@@ -215,6 +218,26 @@ export class NativeEngine implements PlayerEngine {
   constructor(open: OpenOutput, timeline: Timeline | null = null) {
     this.#open = open;
     this.#timeline = timeline;
+  }
+
+  /**
+   * Whether the current song's native player plays, or waits to, as it is now, whatever the engine
+   * asked of it: after expo-audio played or paused it for a system command, what it did.
+   */
+  nativelyPlaying(): boolean {
+    const stream = this.#currentSlot().stream;
+
+    return stream !== null && stream.output.nativeControl() !== "paused";
+  }
+
+  /**
+   * Whether the engine means the current song to play: it asked its player to play, or reopens its
+   * stream to play, though the player may have paused itself since.
+   */
+  meansToPlay(): boolean {
+    const slot = this.#currentSlot();
+
+    return slot.reopening?.play ?? slot.stream?.asked === "play";
   }
 
   /** Samples the current native output, preserving an outstanding seek or reopening target. */
@@ -568,11 +591,6 @@ export class NativeEngine implements PlayerEngine {
     stream.output.play();
   }
 
-  #fromOutside(stream: Stream, playing: boolean): void {
-    stream.asked = playing ? "play" : "pause";
-    this.#emit({ type: "system", playing });
-  }
-
   #onStatus(slot: Slot, stream: Stream, reported: OutputStatus): void {
     if (slot.stream !== stream) return;
     const measured = stream.output.samplePlayback();
@@ -622,15 +640,10 @@ export class NativeEngine implements PlayerEngine {
     const positionMs = this.#positionOf(slot);
 
     if (status.control !== stream.reported) {
-      const outside = stream.asked !== (status.control === "paused" ? "pause" : "play");
-
       if (status.control === "paused") {
         if (stream.reported === null) return;
         this.#emit({ type: "time", positionMs });
         this.#reportPaused(stream);
-        const durationMs = status.durationMs ?? slot.source.durationMs;
-
-        if (outside && positionMs < durationMs - END_GUARD_MS) this.#fromOutside(stream, false);
 
         return;
       }
@@ -643,8 +656,6 @@ export class NativeEngine implements PlayerEngine {
       }
 
       this.#emit({ type: status.control });
-
-      if (outside) this.#fromOutside(stream, true);
     }
 
     if (status.control !== "playing" || stream.seeking !== null) return;
@@ -670,27 +681,34 @@ export class NativeEngine implements PlayerEngine {
       return;
     }
 
+    const playing = stream.asked === "play";
+
     stream.reported = "paused";
     stream.asked = "pause";
 
     if (isLive(stream) && endedEarly(positionMs, slot.source?.durationMs ?? 0)) {
-      void this.#recover(slot, true);
+      void this.#recover(slot, playing);
 
       return;
     }
 
-    this.#advance(slot);
+    this.#advance(slot, playing);
   }
 
   #fail(reason: EngineErrorReason, message: string): void {
     this.#emit({ type: "error", reason, message });
   }
 
-  #advance(finished: Slot): void {
+  /**
+   * Moves on from the song in `finished`, which played to its end: the preloaded song starts at
+   * once. With nothing preloaded, or with the song paused as it ended (`playing` false), the engine
+   * reports the end and the controller picks what follows.
+   */
+  #advance(finished: Slot, playing: boolean): void {
     const next = this.#idleSlot();
     const source = next.source;
 
-    if (source === null) {
+    if (source === null || !playing) {
       this.#emit({ type: "time", positionMs: this.#positionOf(finished) });
       this.#emit({ type: "ended" });
 
@@ -776,7 +794,7 @@ export class NativeEngine implements PlayerEngine {
 
     OffsetProbe.$match(probe, {
       Empty: () => {
-        this.#advance(slot);
+        this.#advance(slot, reopening.play);
       },
       Expired: () => {
         this.#fail("expired", "The media server refused the stream’s ticket");

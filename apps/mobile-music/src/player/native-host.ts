@@ -1,32 +1,67 @@
 import type { NowPlayingControls } from "@media/player/playback-controller";
-import { requireNativeModule } from "expo";
-import type { EventEmitter } from "expo";
 
 import type { LockScreenInfo, NativeEngine } from "./native-engine";
 
-const remoteCommands = requireNativeModule<
-  EventEmitter<{
-    nextTrack: () => void;
-    previousTrack: () => void;
-    seekTo: (event: { readonly positionMs: number }) => void;
-  }>
->("RemoteCommands");
+/**
+ * The events of the app's `RemoteCommands` module (`modules/remote-commands`). A type, not an
+ * interface, so it fits expo's `EventEmitter`, which takes a record of events.
+ */
+export type RemoteCommandEvents = {
+  /** The play command, sent once expo-audio played the AVPlayer for it. */
+  readonly play: () => void;
+  /** The pause command, sent once expo-audio paused the AVPlayer for it. */
+  readonly pause: () => void;
+  /** The play/pause toggle, sent once expo-audio played or paused the AVPlayer for it. */
+  readonly togglePlayPause: () => void;
+  /** Headphones unplugged, or another output gone, after which expo-audio paused every player. */
+  readonly unplugged: () => void;
+  readonly nextTrack: () => void;
+  readonly previousTrack: () => void;
+  /** The scrubber, at a position in the song. */
+  readonly seekTo: (event: { readonly positionMs: number }) => void;
+};
+
+/** The app's `RemoteCommands` module, as the host listens to it. */
+export interface RemoteCommands {
+  readonly addListener: <Event extends keyof RemoteCommandEvents>(
+    event: Event,
+    listener: RemoteCommandEvents[Event],
+  ) => { readonly remove: () => void };
+}
 
 type SystemHandlers = NonNullable<Parameters<NowPlayingControls["setHandlers"]>[0]>;
 
 const nothingToStop = (): void => {};
 
 const listenForCommands = (
-  handlers: Pick<SystemHandlers, "next" | "previous" | "seekTo">,
+  engine: NativeEngine,
+  commands: RemoteCommands,
+  handlers: SystemHandlers,
 ): (() => void) => {
   const subscriptions = [
-    remoteCommands.addListener("nextTrack", () => {
+    commands.addListener("play", () => {
+      handlers.play();
+    }),
+    commands.addListener("pause", () => {
+      handlers.pause();
+    }),
+    // expo-audio played or paused the AVPlayer for the toggle before the module sent it, so what
+    // the player does now is what the person chose.
+    commands.addListener("togglePlayPause", () => {
+      if (engine.nativelyPlaying()) handlers.play();
+      else handlers.pause();
+    }),
+    // An unplug pauses a song meant to play, never what the person left paused or idle.
+    commands.addListener("unplugged", () => {
+      if (engine.meansToPlay()) handlers.pause();
+    }),
+    commands.addListener("nextTrack", () => {
       handlers.next();
     }),
-    remoteCommands.addListener("previousTrack", () => {
+    commands.addListener("previousTrack", () => {
       handlers.previous();
     }),
-    remoteCommands.addListener("seekTo", ({ positionMs }) => {
+    commands.addListener("seekTo", ({ positionMs }) => {
       handlers.seekTo(positionMs);
     }),
   ];
@@ -46,23 +81,27 @@ const sameInfo = (a: LockScreenInfo | null, b: LockScreenInfo | null): boolean =
     a.artworkUrl === b.artworkUrl);
 
 /**
- * The lock screen, Control Center, headphones, and CarPlay. expo-audio routes play and pause to
- * the playing AVPlayer itself; the engine sees each as a change it did not ask for and reports it
- * to the controller as the person's own action (`system`). Next, previous, and scrubbing come from
- * the `RemoteCommands` module and go to the controller's handlers, so every one of them reaches
- * the controller's listener boundary, as a tap does. expo-audio moves the AVPlayer for a scrub
- * too, and the controller's seek then lands on the same place. The cover shown is the URL the
- * controller passes: a downloaded song's file when this phone holds one, so it shows without the
- * server.
+ * The lock screen, Control Center, headphones, and CarPlay. expo-audio plays, pauses, and scrubs
+ * the AVPlayer itself, and pauses it when headphones are unplugged, but tells the app only of the
+ * player's new state, which a song's end shares. `commands` reports each command, and the unplug,
+ * as it came, so every one reaches the controller's handlers and its listener boundary as a tap
+ * does: play and pause as asked, never a toggle of what plays by then, and an unplug as a pause of
+ * a song meant to play. The controller's seek lands on the place expo-audio moved the AVPlayer to.
+ * The cover shown is the URL the controller passes: a downloaded song's file when this phone holds
+ * one, so it shows without the server.
  */
-export const lockScreenControls = (engine: NativeEngine): NowPlayingControls => {
+export const lockScreenControls = (
+  engine: NativeEngine,
+  commands: RemoteCommands,
+): NowPlayingControls => {
   let shown: LockScreenInfo | null = null;
   let stopListening = nothingToStop;
 
   return {
     setHandlers: (handlers) => {
       stopListening();
-      stopListening = handlers === null ? nothingToStop : listenForCommands(handlers);
+      stopListening =
+        handlers === null ? nothingToStop : listenForCommands(engine, commands, handlers);
     },
     show: (track) => {
       const info =

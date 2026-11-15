@@ -770,6 +770,54 @@ describe("PlaybackController", () => {
     expect(controller.getSnapshot()).toMatchObject({ current: "2", engineStatus: "playing" });
   });
 
+  it("loads the next song paused when a pause reached the player as the song ended", async () => {
+    const { controller, sent, engine } = setup({ playCurrent: "1" });
+
+    await controller.playTracks(["a", "b"], 0);
+    controller.sync(queueOf([one, two], "1"));
+    await settle();
+    await controller.togglePlay();
+    engine().finish();
+    await settle();
+
+    expect(names(sent)).toContain("jump:2");
+    expect(controller.getSnapshot()).toMatchObject({ current: "2", engineStatus: "paused" });
+    expect(controller.playingHere()).toMatchObject({ trackId: "b", playing: false });
+  });
+
+  it("keeps a system pause the output applied itself, so a song moved on elsewhere loads paused", async () => {
+    const { controller, engine, systemControls } = setup({ playCurrent: "1" });
+
+    await controller.playTracks(["a", "b"], 0);
+    controller.sync(queueOf([one, two], "1"));
+    await settle();
+    engine().emit({ type: "paused" });
+    systemControls.handlers?.pause();
+    controller.sync(queueOf([one, two], "2"));
+    await settle();
+
+    expect(controller.playingHere()).toMatchObject({ trackId: "b", playing: false });
+    expect(controller.getSnapshot().engineStatus).toBe("paused");
+  });
+
+  it("plays and pauses as the system media controls ask, never toggling what plays", async () => {
+    const { controller, systemControls } = setup({ playCurrent: "1" });
+
+    await controller.playTracks(["a", "b"], 0);
+    controller.sync(queueOf([one, two], "1"));
+    await settle();
+    systemControls.handlers?.play();
+    await settle();
+
+    expect(controller.playingHere()).toMatchObject({ trackId: "a", playing: true });
+
+    systemControls.handlers?.pause();
+    systemControls.handlers?.pause();
+    await settle();
+
+    expect(controller.playingHere()).toMatchObject({ trackId: "a", playing: false });
+  });
+
   it("keeps the next song's preload through a reload of the playing song", async () => {
     const { controller, record, clock, engine } = setup({ playCurrent: "1", ticketMs: 60_000 });
 

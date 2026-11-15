@@ -113,6 +113,26 @@ export const activeDevice = (
 };
 
 /**
+ * Whether a move has reached the device it went to: the core took it (`landed`), and this device
+ * holds the song (`deviceId` null), or the other device answered the move's load with a report of
+ * its own rather than the request standing in for its report (`pending`). Convex shows a mutation's
+ * writes to the client's queries before it answers it, so once the move landed, the device's
+ * report from before the move no longer counts (ADR 0018). A device that never answers never
+ * arrives, whoever plays meanwhile.
+ */
+export const moveArrived = (
+  move: { readonly deviceId: string | null; readonly landed: boolean },
+  connect: { readonly here: boolean; readonly devices: ReadonlyArray<Device> },
+): boolean =>
+  move.landed &&
+  (move.deviceId === null
+    ? connect.here
+    : connect.devices.some(
+        (device) =>
+          device.id === move.deviceId && device.playback !== null && !device.playback.pending,
+      ));
+
+/**
  * Whether this device, holding a song paused, should let it go: another of the listener's devices
  * plays music, so it took playback over, as a newly active device stopped the old one in old music.
  */

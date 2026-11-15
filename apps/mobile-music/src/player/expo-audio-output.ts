@@ -80,6 +80,7 @@ export const openExpoOutput = (url: string): AudioOutput => {
         control: starting ? "waiting" : controlOf(player.currentStatus),
       };
     },
+    nativeControl: () => controlOf(player.currentStatus),
     play: () => {
       wantsPlay = true;
       starting = true;

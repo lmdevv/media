@@ -25,6 +25,8 @@ import type { ConnectView, MusicItem } from "@media/player/use-connect";
 import type { PlatformSdk } from "@media/sdk/promise";
 import { usePlatform } from "@media/sdk/react";
 import { Option, Schema } from "effect";
+import { requireNativeModule } from "expo";
+import type { EventEmitter } from "expo";
 import { randomUUID } from "expo-crypto";
 import {
   createContext,
@@ -47,8 +49,14 @@ import { useReadSettled } from "../lib/platform";
 import { appKeychains } from "../lib/keychains";
 import { resolveMediaUrl } from "../lib/media-url";
 import { readValue, writeValue } from "../lib/secure-storage";
-import { HERE, idleTransfer, nextTransfer, TRANSFER_TIMEOUT_MS } from "../lib/transfer";
-import type { MoveTarget, Transfer } from "../lib/transfer";
+import {
+  HERE,
+  idleTransfer,
+  nextTransfer,
+  TRANSFER_TIMEOUT_MS,
+  transferArrived,
+} from "../lib/transfer";
+import type { MoveEnd, MoveTarget, Transfer } from "../lib/transfer";
 import { useServer } from "../session/connection";
 import { useProbeReach, useReachWhileAudible, useServerReach } from "../session/server-reach";
 import { useSessionPhase } from "../session/session-phase";
@@ -74,6 +82,7 @@ import { LocalStore, offlinePlaysKey } from "./local-store";
 import { NativeEngine } from "./native-engine";
 import type { TimelineMark } from "./native-engine";
 import { lockScreenControls } from "./native-host";
+import type { RemoteCommandEvents } from "./native-host";
 import { boundedSources, NOT_DOWNLOADED, phoneSources, SERVER_AWAY } from "./phone-sources";
 import {
   isPlaying,
@@ -173,8 +182,8 @@ export interface DevicesView {
   /** The device that plays: `HERE` while a song is loaded on this phone, another's id, or null. */
   readonly active: MoveTarget | null;
   /**
-   * A move to another device, or here. While pending, the device it went from still plays; a
-   * failed move left playback where it was.
+   * A move to another device, or here: pending until that device answers it, and failed when the
+   * core refused it or the device did not answer within `TRANSFER_TIMEOUT_MS`.
    */
   readonly transfer: Transfer;
   /** Moves playback, at the same place in the song, to `target`: `HERE` or a device's id. */
@@ -409,7 +418,11 @@ const createPhone = ({
   const mode: Phone["mode"] = { current: "server" };
   const unanswered: Phone["unanswered"] = new Set();
   const handing: Phone["handing"] = { current: null };
-  const controls = lockScreenControls(engine);
+
+  const controls = lockScreenControls(
+    engine,
+    requireNativeModule<EventEmitter<RemoteCommandEvents>>("RemoteCommands"),
+  );
 
   const artFor = (artUrl: string | null): string | null => resolveMediaUrl(mediaUrl, artUrl);
 
@@ -932,36 +945,72 @@ const useDevicesView = (
 ): DevicesView => {
   const [transfer, dispatch] = useReducer(nextTransfer, idleTransfer);
   const active = activeOf(connect);
+  const shown = useRef(transfer);
+  const moves = useRef(0);
 
-  if (transfer.state === "pending" && transfer.to === active) dispatch({ type: "active", active });
+  useLayoutEffect(() => {
+    shown.current = transfer;
+  }, [transfer]);
+
+  if (transfer.state === "pending" && transferArrived(transfer, connect)) {
+    dispatch({ type: "arrived", id: transfer.move.id });
+  }
+
+  const pendingId = transfer.state === "pending" ? transfer.move.id : null;
 
   useEffect(() => {
-    if (transfer.state !== "pending") return undefined;
-    const { to } = transfer;
+    if (pendingId === null) return undefined;
 
     const timer = setTimeout(() => {
-      dispatch({ type: "timeout", to });
+      dispatch({ type: "timeout", id: pendingId });
     }, TRANSFER_TIMEOUT_MS);
 
     return () => {
       clearTimeout(timer);
     };
-  }, [transfer]);
+  }, [pendingId]);
 
   const actions = useMemo(() => {
     const move = async (to: MoveTarget): Promise<void> => {
       const { connect: view, track } = latest.current;
-
-      if (activeOf(view) === to) return;
+      const from = activeOf(view);
+      const last = shown.current;
 
       if (to === HERE && view.remote === null && track === null) return;
-      dispatch({ type: "start", to });
+
+      // A device that left the list keeps the name the last move showed it under.
+      const endOf = (target: MoveTarget): MoveEnd => ({
+        target,
+        name:
+          view.devices.find((device) => device.id === target)?.name ??
+          (last.state === "idle"
+            ? undefined
+            : [last.move.from, last.move.to].find((end) => end.target === target)?.name) ??
+          "",
+      });
+
+      moves.current += 1;
+      const id = moves.current;
+
+      if (from === to) {
+        // Trying a move again that the core took but its device never answered: wait again.
+        if (last.state !== "failed" || !last.landed || last.move.to.target !== to) return;
+        const waiting = { ...last.move, id };
+
+        if (transferArrived({ state: "pending", move: waiting, landed: true }, view)) return;
+        dispatch({ type: "start", move: waiting });
+        dispatch({ type: "landed", id });
+
+        return;
+      }
+
+      dispatch({ type: "start", move: { id, from: endOf(from ?? HERE), to: endOf(to) } });
 
       const landed = await (to === HERE
         ? moveHere(platform, controller, view, track)
         : moveTo(platform, controller, view, to, track));
 
-      if (!landed) dispatch({ type: "refused", to, message: REFUSED_MESSAGE });
+      dispatch(landed ? { type: "landed", id } : { type: "refused", id, message: REFUSED_MESSAGE });
     };
 
     return {

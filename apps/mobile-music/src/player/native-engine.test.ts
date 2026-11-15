@@ -190,7 +190,7 @@ describe("NativeEngine", () => {
     expect(types(events).filter((type) => type === "paused")).toHaveLength(1);
   });
 
-  it("tells of a pause it did not ask for, as from the lock screen, right after the pause", async () => {
+  it("reports a pause it did not ask for, as from the lock screen, only as the player's state", async () => {
     const { engine, media, output, events } = await setup();
     const loaded = engine.load(media.source("a"), 0, true);
     output(0).ready(false);
@@ -199,85 +199,68 @@ describe("NativeEngine", () => {
     const before = events.length;
 
     output(0).pause();
+    output(0).play();
 
     expect(events.slice(before)).toStrictEqual([
       { type: "time", positionMs: 5000 },
       { type: "paused" },
-      { type: "system", playing: false },
+      { type: "playing" },
+      { type: "time", positionMs: 5000 },
     ]);
   });
 
-  it("tells of a play it did not ask for once, and takes it as what it asks from then on", async () => {
+  it("takes a pause in the song's last second for a pause, not the song's end", async () => {
     const { engine, media, output, events } = await setup();
-    const loaded = engine.load(media.source("a"), 0, false);
+    const loaded = engine.load(media.source("a"), 0, true);
     output(0).ready(false);
     await loaded;
-    const before = events.length;
-
-    output(0).play();
-    output(0).advance(1000);
-    output(0).play();
-
-    expect(types(events.slice(before)).filter((type) => type !== "time")).toStrictEqual([
-      "playing",
-      "system",
-    ]);
-    expect(events.find((event) => event.type === "system")).toStrictEqual({
-      type: "system",
-      playing: true,
-    });
+    engine.preload(media.source("b"));
+    await vi.waitFor(() => expect(output(1).url).toBe(media.source("b").url));
+    output(1).ready(false);
+    output(0).advance(199_500);
 
     output(0).pause();
 
-    expect(events.findLast((event) => event.type === "system")).toStrictEqual({
-      type: "system",
-      playing: false,
-    });
+    expect(types(events)).not.toContain("advanced");
+    expect(types(events)).not.toContain("ended");
+    expect(types(events).at(-1)).toBe("paused");
+    expect(output(1).wantsPlay).toBe(false);
   });
 
-  it("takes none of its own plays, pauses, or late reports for the person's", async () => {
+  it("moves on once the player says it finished, after the pause it reports at the end", async () => {
     const { engine, media, output, events } = await setup();
     const loaded = engine.load(media.source("a"), 0, true);
     output(0).ready(false);
     await loaded;
-
-    engine.pause();
-    output(0).notifyPlayingLate();
-    await engine.play();
-    output(0).advance(1000);
-    engine.pause();
-
-    expect(types(events)).not.toContain("system");
-  });
-
-  it("takes the pause the player reports at the song's end, before its end, for no one's", async () => {
-    const { engine, media, output, events } = await setup();
-    const loaded = engine.load(media.source("a"), 0, true);
-    output(0).ready(false);
-    await loaded;
+    engine.preload(media.source("b"));
+    await vi.waitFor(() => expect(output(1).url).toBe(media.source("b").url));
+    output(1).ready(false);
 
     // AVPlayer can stop at the end and report its pause before the status that says it finished.
     output(0).positionMs = output(0).durationMs;
     output(0).pause();
     output(0).finish();
 
-    expect(types(events)).not.toContain("system");
-    expect(types(events)).toContain("ended");
+    expect(events).toContainEqual({ type: "advanced", key: "b" });
+    expect(output(1).wantsPlay).toBe(true);
   });
 
-  it("takes a play after the song ended by itself for the person's", async () => {
+  it("leaves the preloaded song paused when it was asked to pause before the player's end report", async () => {
     const { engine, media, output, events } = await setup();
     const loaded = engine.load(media.source("a"), 0, true);
     output(0).ready(false);
     await loaded;
-    output(0).finish();
-    const before = events.length;
+    engine.preload(media.source("b"));
+    await vi.waitFor(() => expect(output(1).url).toBe(media.source("b").url));
+    output(1).ready(false);
+    output(0).advance(199_990);
 
-    output(0).play();
+    engine.pause();
+    output(0).reportEndLate();
 
-    expect(events.slice(before).filter((event) => event.type === "system")).toStrictEqual([
-      { type: "system", playing: true },
-    ]);
+    expect(types(events)).not.toContain("advanced");
+    expect(types(events).at(-1)).toBe("ended");
+    expect(output(1).wantsPlay).toBe(false);
   });
 
   it("seeks within a finished song without opening it again", async () => {

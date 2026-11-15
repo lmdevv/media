@@ -54,7 +54,7 @@ export interface DeviceSheetActions {
   readonly moveTo: (row: DeviceRow) => void;
   /** Closes the sheet. */
   readonly close: () => void;
-  /** Keeps the music where it is after a failed move, and closes the sheet. */
+  /** Keeps the music on the device a failed move went from, and closes the sheet. */
   readonly stay: () => void;
 }
 
@@ -178,8 +178,12 @@ export function DeviceSheet() {
           router.back();
         },
         stay: () => {
-          dismissTransfer();
-          router.back();
+          // A move the core took stopped the device it went from: staying there moves it back.
+          if (transfer.state === "failed" && transfer.landed) moveTo(transfer.move.from.target);
+          else {
+            dismissTransfer();
+            router.back();
+          }
         },
       }}
     />

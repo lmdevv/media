@@ -78,6 +78,11 @@ Preconditions:
   device`, then the phone, moves it back, and the bar's Pause then pauses the phone. An album's
   `Album actions`, then `Play on`, then `Chrome on Linux` plays the album on the desk. As Sam the
   sheet holds only `This iPhone` (or `This iPad`) and `No other devices right now`.
+- **A move that never lands.** With the phone playing, close the desk's page (`close-page`) and,
+  within 20 seconds, while the core still counts its last report, pick `Chrome on Linux` in the
+  phone's `Play on`. The core takes the move and the phone stops, but nothing loads it: the sheet
+  reads `Moving to Chrome on Linux`, and 10 seconds after the tap `Couldn’t reach Chrome on Linux`
+  with `Try again` and `Stay here`, which stay once the desk leaves the list.
 - **Time a remote pause to the phone.** The phone's clock is the Mac's: take its offset from this
   host over one long ssh session (the shortest of many round trips to one remote process), record
   `Date.now()` before each click on the desk, and read when the app's AVPlayer paused from the

@@ -2,7 +2,7 @@ import { deviceKind } from "@media/player/connect-devices";
 import type { DeviceKind } from "@media/player/connect-devices";
 
 import { HERE } from "./transfer";
-import type { MoveTarget, Transfer } from "./transfer";
+import type { MoveEnd, MoveTarget, Transfer } from "./transfer";
 import type { DeviceFamily } from "./device-family";
 import { sortedBy } from "./sorted-by";
 
@@ -25,9 +25,9 @@ export type DeviceSheet =
   | { readonly kind: "picker"; readonly rows: ReadonlyArray<DeviceRow> }
   /** B08: no other device is online. */
   | { readonly kind: "only"; readonly row: DeviceRow }
-  /** B06: playback is moving from `from` to `to`; `from` keeps playing until it lands. */
+  /** B06: playback is moving from `from` to `to`, until `to` answers it. */
   | { readonly kind: "connecting"; readonly from: DeviceRow; readonly to: DeviceRow }
-  /** B07: the move to `to` failed, and playback stayed on `from`. */
+  /** B07: the move from `from` to `to` failed. */
   | {
       readonly kind: "failed";
       readonly from: DeviceRow;
@@ -53,6 +53,8 @@ const ONLINE = "Online";
 /**
  * The sheet for the person's devices and the move in progress: this phone first, then the device
  * that plays, then the rest by name. With nothing playing anywhere, this phone is the current one.
+ * A move shows the devices it went from and to, as listed when it started, even once one of them
+ * leaves the list, as old music's sheet, which listed offline devices too, showed them.
  */
 export const deviceSheet = ({
   family,
@@ -69,34 +71,35 @@ export const deviceSheet = ({
     thisPhone: true,
   };
 
-  const others = sortedBy(
-    devices.map((device): DeviceRow => {
-      const playing = device.id === active;
+  const rowOf = ({ target, name }: MoveEnd): DeviceRow => {
+    if (target === HERE) return phone;
+    const playing = target === active;
 
-      return {
-        target: device.id,
-        name: device.name,
-        kind: deviceKind(device.name),
-        status: playing ? PLAYING : ONLINE,
-        current: playing,
-        thisPhone: false,
-      };
-    }),
+    return {
+      target,
+      name,
+      kind: deviceKind(name),
+      status: playing ? PLAYING : ONLINE,
+      current: playing,
+      thisPhone: false,
+    };
+  };
+
+  if (transfer.state !== "idle") {
+    const from = rowOf(transfer.move.from);
+    const to = rowOf(transfer.move.to);
+
+    return transfer.state === "pending"
+      ? { kind: "connecting", from, to }
+      : { kind: "failed", from, to, message: transfer.message };
+  }
+
+  const others = sortedBy(
+    devices.map((device) => rowOf({ target: device.id, name: device.name })),
     (left, right) => Number(right.current) - Number(left.current),
   );
 
-  const rows = [phone, ...others];
-  const from = rows.find((row) => row.current) ?? phone;
-
-  if (transfer.state !== "idle") {
-    const to = rows.find((row) => row.target === transfer.to);
-
-    if (to !== undefined && to.target !== from.target) {
-      return transfer.state === "pending"
-        ? { kind: "connecting", from, to }
-        : { kind: "failed", from, to, message: transfer.message };
-    }
-  }
-
-  return others.length === 0 ? { kind: "only", row: phone } : { kind: "picker", rows };
+  return others.length === 0
+    ? { kind: "only", row: phone }
+    : { kind: "picker", rows: [phone, ...others] };
 };

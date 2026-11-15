@@ -62,14 +62,6 @@ export type EngineEvent =
   | { readonly type: "advanced"; readonly key: string }
   /** The current source finished and nothing was preloaded. */
   | { readonly type: "ended" }
-  /**
-   * The output started or stopped without the player asking. A native player does this when the
-   * person presses play or pause on the lock screen, in Control Center, on headphones, or in
-   * CarPlay, or when iOS pauses it for them, as when headphones are unplugged. The controller takes
-   * it as the person's own action. The engine reports it right after the change itself, which it
-   * reports as `playing`, `waiting`, or `paused`.
-   */
-  | { readonly type: "system"; readonly playing: boolean }
   | { readonly type: "error"; readonly message: string; readonly reason: EngineErrorReason };
 
 /** A fresh observation of the current output, including a seek target still landing. */

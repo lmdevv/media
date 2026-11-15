@@ -1,4 +1,4 @@
-import type { AudioOutput, LockScreenInfo, OutputStatus } from "./native-engine";
+import type { AudioOutput, LockScreenInfo, OutputControl, OutputStatus } from "./native-engine";
 
 const settled = () =>
   new Promise<void>((resolve) => {
@@ -30,8 +30,11 @@ export class FakeOutput implements AudioOutput {
 
   samplePlayback = (): Pick<OutputStatus, "positionMs" | "control"> => ({
     positionMs: this.positionMs,
-    control: this.wantsPlay ? (this.loaded ? "playing" : "waiting") : "paused",
+    control: this.nativeControl(),
   });
+
+  nativeControl = (): OutputControl =>
+    this.wantsPlay ? (this.loaded ? "playing" : "waiting") : "paused";
 
   play = (): void => {
     this.wantsPlay = true;
