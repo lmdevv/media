@@ -785,7 +785,7 @@ ios_app() {
 # ~/movies-ios/dd-verify-<run>. The app then moves to ~/movies-ios/dev-client-<hash>, named for the
 # native inputs, and the derived data goes, so every run and worktree with the same inputs installs
 # one build. JavaScript always comes from Metro.
-native_inputs='cat app.json package.json ../../pnpm-lock.yaml; if [ -d modules ]; then find assets modules -type f | sort; else find assets -type f | sort; fi'
+native_inputs='cat app.json package.json ../../pnpm-lock.yaml; if [ -d modules ]; then find assets modules -type f | sort; find modules -type f -print0 | sort -z | xargs -0 cat; else find assets -type f | sort; fi'
 
 native_hash() {
   (cd "${1:-$root}/apps/mobile-${2:-$(ios_app)}" && eval "$native_inputs" | sha1sum | cut -d' ' -f1)

@@ -3,6 +3,7 @@ import { Redirect } from "expo-router";
 import { useRef, useState } from "react";
 import { View } from "react-native";
 
+import { DeviceSheetPreview } from "@/components/playback/device-sheet-preview";
 import { HomeSkeleton } from "@/components/states/home-states";
 import { useSave } from "@/components/states/save-failure";
 import { Avatar } from "@/components/ui/avatar";
@@ -166,6 +167,7 @@ function Gallery() {
           onConfirm={failSoon}
         />
       </View>
+      <DeviceSheetPreview />
       <SectionHeader title="Loading" />
       <HomeSkeleton />
       <SectionHeader title="Failed save" />

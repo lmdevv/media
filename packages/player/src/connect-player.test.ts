@@ -568,6 +568,77 @@ describe("ConnectPlayer", () => {
     expect(last(run.reports)).toMatchObject({ applied: 8 });
   });
 
+  it("drops an album load paused by the system media controls after the output paused itself, as a phone's lock screen does", async () => {
+    const run = connected();
+
+    await playing(run);
+    run.albumGate.holding = true;
+    run.connect.take(
+      ask(8, {
+        kind: "load",
+        item: album("al"),
+        playing: true,
+        positionMs: 0,
+        at: run.clock.now,
+        loadRevision: 8,
+      }),
+    );
+    await settle();
+    run.engine().emit({ type: "paused" });
+    run.systemControls.handlers?.pause();
+
+    expect(last(run.reports)).toMatchObject({ song: { trackId: "a", playing: false }, applied: 8 });
+
+    run.albumGate.release();
+    await settle();
+
+    expect(names(run.sent)).not.toContain("play:c,d,0");
+    expect(run.controller.playingHere()).toMatchObject({ trackId: "a", playing: false });
+  });
+
+  it("drops an album load played by the system media controls after the output played itself", async () => {
+    const run = connected();
+
+    await playing(run);
+    await run.controller.togglePlay();
+    run.albumGate.holding = true;
+    run.connect.take(
+      ask(8, {
+        kind: "load",
+        item: album("al"),
+        playing: true,
+        positionMs: 0,
+        at: run.clock.now,
+        loadRevision: 8,
+      }),
+    );
+    await settle();
+    run.engine().emit({ type: "playing" });
+    run.systemControls.handlers?.play();
+    run.albumGate.release();
+    await settle();
+
+    expect(names(run.sent)).not.toContain("play:c,d,0");
+    expect(run.controller.playingHere()).toMatchObject({ trackId: "a", playing: true });
+    expect(last(run.reports)).toMatchObject({ song: { trackId: "a", playing: true }, applied: 8 });
+  });
+
+  it("takes a system pause while the next song's ticket is out as the listener's for that song", async () => {
+    const run = connected();
+
+    await playing(run);
+    run.gates.start.holding = true;
+    run.controller.sync(queueOf([one, two], "2"));
+    await settle();
+    run.engine().emit({ type: "paused" });
+    run.systemControls.handlers?.pause();
+    run.gates.start.release("b");
+    await settle();
+
+    expect(run.controller.playingHere()).toMatchObject({ trackId: "b", playing: false });
+    expect(last(run.reports)).toMatchObject({ song: { trackId: "b", playing: false } });
+  });
+
   it("settles a load of another domain's item without playing it", async () => {
     const run = connected();
 

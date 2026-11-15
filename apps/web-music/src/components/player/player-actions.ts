@@ -1,3 +1,5 @@
+import { moveArrived } from "@media/player/connect-devices";
+import type { Device, DeviceKind } from "@media/player/connect-devices";
 import { LaptopIcon, SmartphoneIcon } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -9,27 +11,6 @@ import { toastFailure } from "@/lib/action";
  */
 export const perform = (action: Promise<void>): void => {
   action.catch(toastFailure);
-};
-
-/** What a device is, as old music's device list told them apart: a computer's browser or a phone. */
-export type DeviceKind = "web" | "phone";
-
-/** The names the account client gives browsers, such as `Firefox on Linux` or `Safari`. */
-const BROWSER_NAME = /^(?:Edge|Firefox|Chrome|Safari|Browser)(?: on (?<system>.+))?$/u;
-
-/** The systems whose browsers old music counted as phones. */
-const PHONE_SYSTEMS = new Set(["iPhone", "Android"]);
-
-/**
- * Whether a device is a computer's browser or a phone, from its name, as old music told them apart:
- * the core keeps no kind, and a browser's name is the one the account client gave it at sign-in. A
- * browser on an iPhone or Android counts as a phone, and so does any other name, such as the phone
- * app's.
- */
-export const deviceKind = (name: string): DeviceKind => {
-  const system = BROWSER_NAME.exec(name)?.groups?.["system"];
-
-  return BROWSER_NAME.test(name) && !PHONE_SYSTEMS.has(system ?? "") ? "web" : "phone";
 };
 
 /**
@@ -49,6 +30,33 @@ const DEVICE_ICONS: Readonly<Record<DeviceKind, LucideIcon>> = {
 
 /** The icon for a device of `kind`: a laptop for a browser, a phone for the phone app. */
 export const deviceIcon = (kind: DeviceKind): LucideIcon => DEVICE_ICONS[kind];
+
+/** Where a move from the Play on list is headed: this browser, or another device. */
+export type MoveTarget = "here" | { readonly device: string };
+
+/** A move from the Play on list on its way. */
+export interface PendingMove {
+  /** Tells this move from earlier ones, whose answers and timeouts change nothing. */
+  readonly id: number;
+  readonly target: MoveTarget;
+  /** The device's name as the list showed it when the move started, `this browser` for here. */
+  readonly name: string;
+  /** The core took the move: its command answered. */
+  readonly landed: boolean;
+}
+
+/**
+ * Whether `move` has reached its device: the core took it, and this browser holds the song, or the
+ * other device answered the move with its own report, not merely the request the core holds for it.
+ */
+export const moveDone = (
+  move: PendingMove,
+  player: { readonly here: boolean; readonly devices: ReadonlyArray<Device> },
+): boolean =>
+  moveArrived(
+    { deviceId: move.target === "here" ? null : move.target.device, landed: move.landed },
+    player,
+  );
 
 /** The repeat mode after the current one when the repeat control is pressed. */
 export const NEXT_REPEAT = { off: "all", all: "one", one: "off" } as const;

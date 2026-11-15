@@ -2,7 +2,14 @@ import { lyricsButton, lyricsOffer } from "@media/player/lyrics";
 import type { LyricsAnswer, LyricsOffer } from "@media/player/lyrics";
 import * as Haptics from "expo-haptics";
 import { router, useNavigation } from "expo-router";
-import { Ellipsis, List, MessageSquareQuote, Music } from "lucide-react-native";
+import {
+  Airplay,
+  Ellipsis,
+  List,
+  MessageSquareQuote,
+  Music,
+  Smartphone,
+} from "lucide-react-native";
 import { useEffect, useRef, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 import { ActivityIndicator, Pressable, useWindowDimensions, View } from "react-native";
@@ -31,9 +38,10 @@ import { CLOSED, layoutOf, partsOf, pressedPanel } from "@/lib/now-playing-layou
 import type { NowPlayingLayout, NowPlayingParts, Panel, StageView } from "@/lib/now-playing-layout";
 import type { SheetSong } from "@/lib/song-sheet";
 import { useThemeColor, useThemeLength } from "@/lib/theme-color";
+import { whereItPlays } from "@/lib/this-device";
 import { useWindowLayout } from "@/lib/window-layout";
 import { usePlayer } from "@/player";
-import type { NowPlaying } from "@/player";
+import type { NowPlaying, RemoteDevice } from "@/player";
 
 import { LyricsPanel } from "./lyrics";
 import { NOW_PLAYING_PRESENTATION } from "./now-playing-presentation";
@@ -335,11 +343,32 @@ function LyricsButton({
   );
 }
 
+function DeviceButton({ remote }: { readonly remote: RemoteDevice | null }) {
+  const label = whereItPlays(remote);
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityHint="Chooses where the music plays"
+      onPress={() => router.push("/player/devices")}
+      className="min-h-hit-target min-w-0 shrink flex-row items-center gap-2 px-2 active:opacity-60"
+    >
+      <Icon icon={remote === null ? Smartphone : Airplay} size="inline" />
+      <Text variant="secondaryStrong" tone={remote === null ? "muted" : "accent"} numberOfLines={1}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
 function ActionRow({
+  remote,
   selected,
   lyrics,
   onPanel,
 }: {
+  readonly remote: RemoteDevice | null;
   readonly selected: Panel | null;
   readonly lyrics: LyricsOffer | null;
   readonly onPanel: (panel: Panel) => void;
@@ -349,6 +378,7 @@ function ActionRow({
   return (
     <View className="flex-row items-center justify-between pt-4">
       <View className="w-ios-88 flex-row items-center" />
+      <DeviceButton remote={remote} />
       <View className="w-ios-88 flex-row items-center justify-end">
         {lyrics === null ? null : (
           <LyricsButton
@@ -810,7 +840,7 @@ function PlayerBody({
 
 /** The Now Playing screen. */
 export function NowPlayingScreen() {
-  const { nowPlaying, status, error } = usePlayer();
+  const { nowPlaying, status, error, remote } = usePlayer();
   const tint = useArtTint(nowPlaying?.artUrl ?? null);
   const player = useThemeColor("--color-player");
   const insets = useSafeAreaInsets();
@@ -907,8 +937,9 @@ export function NowPlayingScreen() {
               show(null);
             }}
           >
-            <VolumeRow />
+            {remote === null ? <VolumeRow /> : null}
             <ActionRow
+              remote={remote}
               selected={parts.selected}
               lyrics={parts.lyricsFrom === "row" ? offer : null}
               onPanel={(panel) => {

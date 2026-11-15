@@ -16,6 +16,7 @@ export default function PlayerLayout() {
   return (
     <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: canvas } }}>
       <Stack.Screen name="index" options={INDEX} />
+      <Stack.Screen name="devices" options={sheet} />
       <Stack.Screen name="clear-queue" options={sheet} />
       <Stack.Screen name="unavailable" options={sheet} />
     </Stack>

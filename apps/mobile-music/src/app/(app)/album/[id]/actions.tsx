@@ -4,7 +4,7 @@ import { describeFailure } from "@media/mobile-core/failure";
 import { useAlbumDetail } from "@/lib/details";
 import { Option, Schema } from "effect";
 import { router, useLocalSearchParams } from "expo-router";
-import { FastForward, List, Share, Users } from "lucide-react-native";
+import { FastForward, List, Share, Speaker, Users } from "lucide-react-native";
 import type { LucideIcon } from "lucide-react-native";
 import { useState } from "react";
 
@@ -12,11 +12,11 @@ import { openArtist } from "@/components/browse/rows";
 import { DownloadRow } from "@/components/downloads/download-row";
 import { useCopyLink } from "@/components/playlists/copy-link";
 import { useCloseAfter } from "@/components/playlists/use-close-after";
-import { Row, RowCheck } from "@/components/ui/row";
+import { Row, RowCheck, RowChevron } from "@/components/ui/row";
 import { SheetLayout } from "@/components/ui/sheet-layout";
 import { Text } from "@/components/ui/text";
 import { countOf } from "@/lib/format";
-import { usePlayerActions } from "@/player";
+import { useDevices, usePlayerActions } from "@/player";
 
 const decodeId = Schema.decodeUnknownOption(AlbumId);
 
@@ -45,6 +45,7 @@ const subtitleOf = ({ album, tracks }: AlbumDetail): string =>
 
 function Sheet({ detail }: { readonly detail: AlbumDetail }) {
   const { playNext, playLater } = usePlayerActions();
+  const { devices } = useDevices();
   const copyLink = useCopyLink();
   const closeSoon = useCloseAfter(CONFIRM_MS);
   const [confirmed, setConfirmed] = useState<QuietKey | null>(null);
@@ -93,6 +94,21 @@ function Sheet({ detail }: { readonly detail: AlbumDetail }) {
       />
       {trackIds.length === 0 ? null : quiet("next")}
       {trackIds.length === 0 ? null : quiet("later")}
+      {trackIds.length === 0 ? null : (
+        <Row
+          title="Play on"
+          leading={{ kind: "icon", icon: Speaker }}
+          trailing={<RowChevron />}
+          dimmed={devices.length === 0}
+          onPress={
+            devices.length === 0
+              ? undefined
+              : () => {
+                  router.replace({ pathname: "/album/[id]/play-on", params: { id: album.id } });
+                }
+          }
+        />
+      )}
       <Row
         title="Go to artist"
         leading={{ kind: "icon", icon: Users }}

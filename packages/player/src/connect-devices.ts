@@ -57,6 +57,26 @@ const musicOf = (target: ConnectTarget): DevicePlayback | null => {
 };
 
 /**
+ * `devices` by name, then id, inserted in order: the phone app's JavaScript engine (Hermes) has no
+ * `toSorted`, and lint forbids `sort`. The list is a person's few devices.
+ */
+const byName = (devices: ReadonlyArray<Device>): ReadonlyArray<Device> => {
+  const sorted: Array<Device> = [];
+
+  const compare = (left: Device, right: Device): number =>
+    left.name.localeCompare(right.name) || left.id.localeCompare(right.id);
+
+  for (const device of devices) {
+    const at = sorted.findIndex((other) => compare(device, other) < 0);
+
+    if (at === -1) sorted.push(device);
+    else sorted.splice(at, 0, device);
+  }
+
+  return sorted;
+};
+
+/**
  * The listener's own devices besides `self` that reported within {@link ONLINE_MS} of `serverNow`,
  * by name, so a device's heartbeat never moves it in the list. Shared devices, which old music
  * never listed, stay out (D62): the list is a person's personal devices, as old music's was.
@@ -66,17 +86,15 @@ export const ownDevices = (
   self: string | null,
   serverNow: number,
 ): ReadonlyArray<Device> =>
-  targets
-    .flatMap((target) =>
+  byName(
+    targets.flatMap((target) =>
       target.mode !== "personal" ||
       target.deviceId === self ||
       serverNow - target.reportedAt > ONLINE_MS
         ? []
         : [{ id: target.deviceId, name: target.name, playback: musicOf(target) }],
-    )
-    .toSorted(
-      (left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id),
-    );
+    ),
+  );
 
 /**
  * The device the player follows while nothing plays here, as old music's active device: one that
@@ -93,6 +111,26 @@ export const activeDevice = (
 
   return pool.find((device) => device.id === previous) ?? pool[0] ?? null;
 };
+
+/**
+ * Whether a move has reached the device it went to: the core took it (`landed`), and this device
+ * holds the song (`deviceId` null), or the other device answered the move's load with a report of
+ * its own rather than the request standing in for its report (`pending`). Convex shows a mutation's
+ * writes to the client's queries before it answers it, so once the move landed, the device's
+ * report from before the move no longer counts (ADR 0018). A device that never answers never
+ * arrives, whoever plays meanwhile.
+ */
+export const moveArrived = (
+  move: { readonly deviceId: string | null; readonly landed: boolean },
+  connect: { readonly here: boolean; readonly devices: ReadonlyArray<Device> },
+): boolean =>
+  move.landed &&
+  (move.deviceId === null
+    ? connect.here
+    : connect.devices.some(
+        (device) =>
+          device.id === move.deviceId && device.playback !== null && !device.playback.pending,
+      ));
 
 /**
  * Whether this device, holding a song paused, should let it go: another of the listener's devices
@@ -112,4 +150,25 @@ export const devicePosition = (
   const position = positionAt(playback, serverNow);
 
   return durationMs > 0 ? Math.min(position, durationMs) : position;
+};
+
+/** What a device is: a computer's browser or a phone. */
+export type DeviceKind = "web" | "phone";
+
+/** The names the account client gives browsers, such as `Firefox on Linux` or `Safari`. */
+const BROWSER_NAME = /^(?:Edge|Firefox|Chrome|Safari|Browser)(?: on (?<system>.+))?$/u;
+
+/** The systems whose browsers old music counted as phones. */
+const PHONE_SYSTEMS = new Set(["iPhone", "Android"]);
+
+/**
+ * Whether a device is a computer's browser or a phone, from its name, as old music told them apart:
+ * the core keeps no kind, and a browser's name is the one the account client gave it at sign-in. A
+ * browser on an iPhone or Android counts as a phone, and so does any other name, such as the phone
+ * app's.
+ */
+export const deviceKind = (name: string): DeviceKind => {
+  const system = BROWSER_NAME.exec(name)?.groups?.["system"];
+
+  return BROWSER_NAME.test(name) && !PHONE_SYSTEMS.has(system ?? "") ? "web" : "phone";
 };

@@ -187,10 +187,12 @@ export const playlistPlace = (id: string): Place => ({
 export const SHEET_ROUTES = [
   "audio",
   "clear-queue",
+  "devices",
   "song/[id]/actions",
   "song/[id]/add-to-playlist",
   "sort/[list]",
   "album/[id]/actions",
+  "album/[id]/play-on",
   "download/remove",
   "playlist/[id]/actions",
   "playlist/[id]/delete",

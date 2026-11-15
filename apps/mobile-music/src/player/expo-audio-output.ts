@@ -1,20 +1,41 @@
 import { createAudioPlayer, setAudioModeAsync } from "expo-audio";
-import type { AudioMetadata, AudioStatus } from "expo-audio";
+import type { AudioMetadata, AudioPlayer, AudioStatus } from "expo-audio";
 
 import type { AudioOutput, LockScreenInfo, OutputControl, OutputStatus } from "./native-engine";
+
+/**
+ * The part of the app's `RemoteCommands` module that learns which player expo-audio has on the
+ * lock screen, so each play and pause it forwards names the player it acted on.
+ */
+export interface LockScreenPlayers {
+  /** `player`, known as `id`, is now on the lock screen. */
+  readonly follow: (player: AudioPlayer, id: string) => void;
+  /** The player `id` left the lock screen or was released, if it was the one there. */
+  readonly unfollow: (id: string) => void;
+}
 
 const STATUS_INTERVAL_MS = 250;
 
 let session: Promise<void> | null = null;
 
-const audioSession = (): Promise<void> => {
-  session ??= setAudioModeAsync({
-    playsInSilentMode: true,
-    shouldPlayInBackground: true,
-    interruptionMode: "doNotMix",
-  }).catch(() => {
+/** The audio session is set up, so a player can start at once. */
+let sessionSet = false;
+
+const setUpSession = async (): Promise<void> => {
+  try {
+    await setAudioModeAsync({
+      playsInSilentMode: true,
+      shouldPlayInBackground: true,
+      interruptionMode: "doNotMix",
+    });
+    sessionSet = true;
+  } catch {
     session = null;
-  });
+  }
+};
+
+const audioSession = (): Promise<void> => {
+  session ??= setUpSession();
 
   return session;
 };
@@ -50,8 +71,11 @@ const lockScreenMetadata = (info: LockScreenInfo): AudioMetadata => {
   return metadata;
 };
 
-/** Opens `url` on a new expo-audio player, paused. */
-export const openExpoOutput = (url: string): AudioOutput => {
+/**
+ * Opens `url` on a new expo-audio player, paused. It tells `lockScreen` when the engine puts the
+ * player on the lock screen, and when the player leaves it or is released.
+ */
+export const openExpoOutput = (url: string, lockScreen: LockScreenPlayers): AudioOutput => {
   void audioSession();
 
   const player = createAudioPlayer(
@@ -68,8 +92,11 @@ export const openExpoOutput = (url: string): AudioOutput => {
   let measuredMs = 0;
   let released = false;
   let seeking: Promise<void> = Promise.resolve();
+  let seeksInFlight = 0;
+  const { id } = player;
 
   return {
+    id,
     samplePlayback: () => {
       const currentTime = player.currentTime;
 
@@ -82,6 +109,15 @@ export const openExpoOutput = (url: string): AudioOutput => {
     },
     play: () => {
       wantsPlay = true;
+
+      // Started at once, a song handed over at another's end already plays when the lock screen
+      // names it, so a toggle there pauses it instead of starting it.
+      if (sessionSet && seeksInFlight === 0) {
+        player.play();
+
+        return;
+      }
+
       starting = true;
 
       const start = async (): Promise<void> => {
@@ -102,9 +138,17 @@ export const openExpoOutput = (url: string): AudioOutput => {
       player.pause();
     },
     seek: (positionMs) => {
-      seeking = player.seekTo(positionMs / 1000);
+      const landing = player.seekTo(positionMs / 1000);
 
-      return seeking;
+      const landed = (): void => {
+        seeksInFlight -= 1;
+      };
+
+      seeksInFlight += 1;
+      seeking = landing;
+      void landing.then(landed, landed);
+
+      return landing;
     },
     setVolume: (volume) => {
       player.volume = volume;
@@ -112,6 +156,7 @@ export const openExpoOutput = (url: string): AudioOutput => {
     showOnLockScreen: (info, live) => {
       if (info === null) {
         player.setActiveForLockScreen(false);
+        lockScreen.unfollow(id);
 
         return;
       }
@@ -121,6 +166,7 @@ export const openExpoOutput = (url: string): AudioOutput => {
         showSeekBackward: false,
         isLiveStream: live,
       });
+      lockScreen.follow(player, id);
     },
     subscribe: (listener) => {
       const subscription = player.addListener("playbackStatusUpdate", (status) => {
@@ -133,6 +179,7 @@ export const openExpoOutput = (url: string): AudioOutput => {
     },
     release: () => {
       released = true;
+      lockScreen.unfollow(id);
       // `remove()` only forgets the player and leaves it playing until garbage collection;
       // `release()` stops it and frees it now.
       player.release();

@@ -7,6 +7,9 @@
   "sideEffects": false,
   "exports": {
     "./busy-retry": "./src/busy-retry.ts",
+    "./connect-actions": "./src/connect-actions.ts",
+    "./connect-devices": "./src/connect-devices.ts",
+    "./connect-player": "./src/connect-player.ts",
     "./engine": "./src/engine.ts",
     "./lyrics": "./src/lyrics.ts",
     "./playback-controller": "./src/playback-controller.ts",
@@ -15,7 +18,8 @@
     "./react": "./src/react.tsx",
     "./source-resolver": "./src/source-resolver.ts",
     "./stream-offset": "./src/stream-offset.ts",
-    "./stream-quality": "./src/stream-quality.ts"
+    "./stream-quality": "./src/stream-quality.ts",
+    "./use-connect": "./src/use-connect.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

@@ -1,3 +1,4 @@
+import { deviceKind } from "@media/player/connect-devices";
 import type { Device } from "@media/player/react";
 import { usePlayer, usePlayerPosition } from "@media/player/react";
 import { useHotkey } from "@tanstack/react-hotkeys";
@@ -12,12 +13,10 @@ import { formatDuration } from "@/lib/format";
 import { HOTKEYS } from "@/lib/hotkeys";
 import { cn } from "@/lib/utils";
 
-import { KIND_LABEL, deviceIcon, deviceKind, thisBrowserKind } from "./player-actions";
+import { KIND_LABEL, deviceIcon, moveDone, thisBrowserKind } from "./player-actions";
+import type { MoveTarget, PendingMove } from "./player-actions";
 
 const TRANSFER_TIMEOUT_MS = 10_000;
-
-/** Where a move is headed: this browser, or another device. */
-type MoveTarget = "here" | { readonly device: string };
 
 const isDevice = (target: MoveTarget | null, deviceId: string): boolean =>
   target !== null && target !== "here" && target.device === deviceId;
@@ -26,50 +25,70 @@ const isDevice = (target: MoveTarget | null, deviceId: string): boolean =>
 interface DevicesState {
   /** Your other devices that are online, by name. */
   readonly others: ReadonlyArray<Device>;
-  /** The device a move is waiting on; `here` is this browser. */
-  readonly pending: MoveTarget | null;
+  readonly pending: PendingMove | null;
   readonly transfer: (target: MoveTarget) => void;
 }
 
 /**
  * The devices you can play on, which one plays, and a move in progress, as old music's device list
- * showed them. A move waits until the device it went to plays, and gives up after 10 seconds.
+ * showed them. A move waits until the device it went to answers it, and gives up after 10 seconds.
  */
 const useDevices = (): DevicesState => {
   const player = usePlayer();
-  const [pending, setPending] = useState<MoveTarget | null>(null);
+  const [pending, setPending] = useState<PendingMove | null>(null);
+  const moves = useRef(0);
   const activeId = player.remote?.id ?? null;
-
-  const arrived =
-    pending === "here" ? player.here : activeId !== null && isDevice(pending, activeId);
+  const arrived = pending !== null && moveDone(pending, player);
 
   if (pending !== null && arrived) setPending(null);
 
   const waiting = arrived ? null : pending;
+  const waitingFor = waiting?.id ?? null;
 
   useEffect(() => {
-    if (waiting === null) return undefined;
+    if (waitingFor === null) return undefined;
 
     const timer = window.setTimeout(() => {
-      setPending(null);
+      setPending((current) => (current?.id === waitingFor ? null : current));
       toast.error("That device didn't respond. Check that it's online and try again.");
     }, TRANSFER_TIMEOUT_MS);
 
     return () => window.clearTimeout(timer);
-  }, [waiting]);
+  }, [waitingFor]);
 
   const transfer = (target: MoveTarget) => {
-    if (target === "here" ? player.here : target.device === activeId) return;
+    if (target === "here" && player.here) return;
 
     // Nothing is queued, so nothing moves here.
     if (target === "here" && activeId === null && player.track === null) return;
 
-    setPending(target);
+    const name =
+      target === "here"
+        ? "this browser"
+        : (player.devices.find((device) => device.id === target.device)?.name ?? "");
+
+    moves.current += 1;
+    const id = moves.current;
+
+    if (target !== "here" && target.device === activeId) {
+      // The core holds a move there already, as one that timed out: wait again for its answer.
+      const again: PendingMove = { id, target, name, landed: true };
+
+      if (!moveDone(again, player)) setPending(again);
+
+      return;
+    }
+
+    setPending({ id, target, name, landed: false });
 
     const move = async () => {
-      if (await (target === "here" ? player.moveHere() : player.moveTo(target.device))) return;
+      if (await (target === "here" ? player.moveHere() : player.moveTo(target.device))) {
+        setPending((current) => (current?.id === id ? { ...current, landed: true } : current));
 
-      setPending(null);
+        return;
+      }
+
+      setPending((current) => (current?.id === id ? null : current));
       toast.error("Couldn't move playback there. Try again.");
     };
 
@@ -152,13 +171,11 @@ export function DeviceList({ touch = false }: { readonly touch?: boolean }) {
   const playing = player.status === "playing";
   const starting = `Starting at ${formatDuration(position)}…`;
 
-  const pendingName =
-    pending === "here"
-      ? "this browser"
-      : (others.find((device) => isDevice(pending, device.id))?.name ?? "");
+  const target = pending?.target ?? null;
+  const pendingName = pending?.name ?? "";
 
   const hereDetail = (): string => {
-    if (!player.here) return pending === "here" ? starting : "Play here";
+    if (!player.here) return target === "here" ? starting : "Play here";
 
     if (pending !== null) return `Will pause when ${pendingName} starts`;
 
@@ -177,14 +194,14 @@ export function DeviceList({ touch = false }: { readonly touch?: boolean }) {
         detail={hereDetail()}
         Icon={deviceIcon(thisBrowserKind())}
         active={player.here}
-        isPending={pending === "here"}
+        isPending={target === "here"}
         playing={playing}
         touch={touch}
         onSelect={() => transfer("here")}
       />
       {others.map((device) => {
         const active = device.id === activeId;
-        const isPending = isDevice(pending, device.id);
+        const isPending = isDevice(target, device.id);
         const kind = deviceKind(device.name);
 
         const state =

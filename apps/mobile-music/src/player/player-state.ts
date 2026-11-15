@@ -43,9 +43,21 @@ export interface QueueItem {
   readonly autoplay: boolean;
 }
 
+/** Another of the person's devices, which the player follows and controls. */
+export interface RemoteDevice {
+  readonly id: string;
+  readonly name: string;
+}
+
 /** What `usePlayer` returns. */
 export interface PlayerView {
   readonly status: PlayerStatus;
+  /**
+   * The device that plays the queue while nothing plays on this phone. While it is set, the
+   * status, the position, play, pause, seek, and skips follow and control it (ADR 0018). Null while
+   * playback is here or nowhere.
+   */
+  readonly remote: RemoteDevice | null;
   readonly nowPlaying: NowPlaying | null;
   readonly queue: ReadonlyArray<QueueItem>;
   readonly index: number;
@@ -111,14 +123,20 @@ export const isPlaying = (local: ControllerSnapshot, wantsPlay: boolean): boolea
   local.engineStatus === "buffering" ||
   (local.engineStatus === "loading" && wantsPlay);
 
-/** What the player shows, from the queue (null before it arrives) and this phone's audio. */
+/**
+ * What the player shows, from the queue (null before it arrives), and this phone's audio or, while
+ * the player follows another device, whether that device plays.
+ */
 export const statusOf = (
   queue: { readonly hasCurrent: boolean } | null,
   local: ControllerSnapshot,
+  remote: { readonly playing: boolean } | null,
 ): PlayerStatus => {
   if (queue === null) return "loading";
 
   if (!queue.hasCurrent) return "idle";
+
+  if (remote !== null) return remote.playing ? "playing" : "paused";
 
   if (local.engineStatus === "idle") return "paused";
 

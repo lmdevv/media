@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { ONLINE_MS, activeDevice, devicePosition, ownDevices, yieldsTo } from "./connect-devices";
+import {
+  ONLINE_MS,
+  activeDevice,
+  deviceKind,
+  devicePosition,
+  moveArrived,
+  ownDevices,
+  yieldsTo,
+} from "./connect-devices";
 import type { ConnectTarget, Device } from "./connect-devices";
 
 const NOW = 1_000_000;
@@ -93,6 +101,47 @@ describe("activeDevice", () => {
   });
 });
 
+const holding = (pending: boolean): Device => ({
+  id: "desk",
+  name: "Chrome on Linux",
+  playback: { trackId: "a", playing: true, positionMs: 30_000, at: NOW, pending },
+});
+
+describe("moveArrived", () => {
+  it("waits while only the move's request stands in for the device's report", () => {
+    expect(
+      moveArrived({ deviceId: "desk", landed: true }, { here: false, devices: [holding(true)] }),
+    ).toBe(false);
+  });
+
+  it("arrives once the device reports the song itself", () => {
+    expect(
+      moveArrived({ deviceId: "desk", landed: true }, { here: false, devices: [holding(false)] }),
+    ).toBe(true);
+  });
+
+  it("takes no report before the core took the move, nor from a device holding nothing or gone", () => {
+    expect(
+      moveArrived({ deviceId: "desk", landed: false }, { here: false, devices: [holding(false)] }),
+    ).toBe(false);
+    expect(
+      moveArrived(
+        { deviceId: "desk", landed: true },
+        { here: false, devices: [{ id: "desk", name: "Chrome on Linux", playback: null }] },
+      ),
+    ).toBe(false);
+    expect(moveArrived({ deviceId: "desk", landed: true }, { here: false, devices: [] })).toBe(
+      false,
+    );
+  });
+
+  it("arrives here once this device holds the song", () => {
+    expect(moveArrived({ deviceId: null, landed: true }, { here: false, devices: [] })).toBe(false);
+    expect(moveArrived({ deviceId: null, landed: true }, { here: true, devices: [] })).toBe(true);
+    expect(moveArrived({ deviceId: null, landed: false }, { here: true, devices: [] })).toBe(false);
+  });
+});
+
 describe("yieldsTo", () => {
   it("lets a song held paused here go once another device plays", () => {
     expect(yieldsTo({ playing: false }, [device("a", true)])).toBe(true);
@@ -109,5 +158,24 @@ describe("devicePosition", () => {
     expect(devicePosition(playback, NOW + 500, 10_000)).toBe(1500);
     expect(devicePosition(playback, NOW + 60_000, 10_000)).toBe(10_000);
     expect(devicePosition({ ...playback, playing: false }, NOW + 500, 10_000)).toBe(1000);
+  });
+});
+
+describe("deviceKind", () => {
+  it("tells a computer's browser by the name the account client gave it", () => {
+    expect(deviceKind("Firefox on Linux")).toBe("web");
+    expect(deviceKind("Safari on iPad")).toBe("web");
+    expect(deviceKind("Chrome")).toBe("web");
+    expect(deviceKind("Browser on Windows")).toBe("web");
+  });
+
+  it("counts a browser on a phone as a phone, as old music did", () => {
+    expect(deviceKind("Safari on iPhone")).toBe("phone");
+    expect(deviceKind("Chrome on Android")).toBe("phone");
+  });
+
+  it("takes any other name for the phone app", () => {
+    expect(deviceKind("Aiko's iPhone")).toBe("phone");
+    expect(deviceKind("Chrome cast in the kitchen")).toBe("phone");
   });
 });

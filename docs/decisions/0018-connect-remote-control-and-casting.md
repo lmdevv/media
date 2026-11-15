@@ -2,8 +2,8 @@
 
 - Status: Accepted, 2026-11-03. Amended 2026-11-04 with Connect as built, 2026-11-07 with the
   phase 3 review fixes, and 2026-11-15 with items, loading and moving playback, group-session
-  membership, the two rules D60 keeps, the upgrade from v0.3.0's Connect rows, and the music web
-  client.
+  membership, the two rules D60 keeps, the upgrade from v0.3.0's Connect rows, the music web
+  client, and the music iOS app.
 - Decisions: D35, D44, D60
 
 ## Context
@@ -347,8 +347,7 @@ that never arrives still fails the p95.
 
 - Remote volume. The device's volume is a per-device setting (ADR 0019), and Connect does not keep
   a second copy.
-- The music iOS app's device list, reporting, applying requests, loading, and moving (phase 6).
-  Movies remote control is in the backlog (D63).
+- Movies remote control, in the web client and the movies iOS app, is in the backlog (D63).
 
 ### The music web client (amended 2026-11-15)
 
@@ -407,23 +406,36 @@ The listener's actions reach the player through one boundary: `PlaybackControlle
 skip, seek, jump, and play-a-list calls run `onListenerAction` before they change anything, and
 `ConnectPlayer` makes every request seen so far moot there. The player bar, the keyboard, the
 command menu, and the system media controls (Media Session: headsets, media keys, the lock
-screen) all call those, so none of them can act while a Connect load still lands over it. What
-Connect itself applies goes through other calls (`steer`, `playTracksAt`, `playCurrentAt`,
-`release`) that never run it. Moving playback here and playing an album on another device reach
-the controller through those other calls too, so they make the requests moot themselves first.
+screen) all call those, so none of them can act while a Connect load still lands over it. The
+system media controls' play and pause play or pause whatever plays, never toggle it. On the phone,
+the app's `RemoteCommands` module delivers each of the system's commands with its outcome, decided
+where it happened, and with its place in one order shared with the app's own commands, so a press
+the person chose again after applies to nothing (The music iOS app, below). What Connect itself applies goes through other calls
+(`steer`, `playTracksAt`, `playCurrentAt`, `release`) that never run it.
+Moving playback here and playing an album on another device reach the controller through those
+other calls too, so they make the requests moot themselves first.
 
-| A request arrives                                                                                                       | What holds now                                 | The device                                           | It settles                                    |
-| ----------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------- | --------------------------------------------- |
-| `transport` of a song                                                                                                   | that song is the one here                      | plays, pauses, or seeks it                           | its revision                                  |
-| `transport` of a song                                                                                                   | another song, or none, is here                 | changes nothing                                      | its revision                                  |
-| `load` under a new `loadRevision`                                                                                       | anything                                       | starts it, and drops a load still starting           | the newest revision asked of it, once started |
-| `load` of the load still starting here                                                                                  | anything                                       | starts it with this ask instead                      | this revision, once started                   |
-| `load` of the load that started here                                                                                    | the entry it started still plays here          | plays, pauses, or seeks it                           | its revision                                  |
-| `load` of the load that started here                                                                                    | what plays here moved on, as after a skip here | changes nothing                                      | its revision                                  |
-| `load` of an older load, or of one dropped                                                                              | anything                                       | changes nothing                                      | its revision                                  |
-| `stop`                                                                                                                  | anything                                       | lets go of the song, and drops a load still starting | its revision                                  |
-| the listener plays, pauses, seeks, skips, or plays a list here, from any screen, shortcut, or the system media controls | anything                                       | drops a load still starting                          | every revision seen                           |
-| none: the core shows nothing left to apply                                                                              | a load still starts here                       | drops it, as the core settled it                     | nothing; the core settled it                  |
+| A request arrives                                                                                                       | What holds now                                                                                                                                             | The device                                                               | It settles                                    |
+| ----------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ | --------------------------------------------- |
+| `transport` of a song                                                                                                   | that song is the one here                                                                                                                                  | plays, pauses, or seeks it                                               | its revision                                  |
+| `transport` of a song                                                                                                   | another song, or none, is here                                                                                                                             | changes nothing                                                          | its revision                                  |
+| `load` under a new `loadRevision`                                                                                       | anything                                                                                                                                                   | starts it, and drops a load still starting                               | the newest revision asked of it, once started |
+| `load` of the load still starting here                                                                                  | anything                                                                                                                                                   | starts it with this ask instead                                          | this revision, once started                   |
+| `load` of the load that started here                                                                                    | the entry it started still plays here                                                                                                                      | plays, pauses, or seeks it                                               | its revision                                  |
+| `load` of the load that started here                                                                                    | what plays here moved on, as after a skip here                                                                                                             | changes nothing                                                          | its revision                                  |
+| `load` of an older load, or of one dropped                                                                              | anything                                                                                                                                                   | changes nothing                                                          | its revision                                  |
+| `stop`                                                                                                                  | anything                                                                                                                                                   | lets go of the song, and drops a load still starting                     | its revision                                  |
+| the listener plays, pauses, seeks, skips, or plays a list here, from any screen, shortcut, or the system media controls | anything                                                                                                                                                   | drops a load still starting                                              | every revision seen                           |
+| the phone's `RemoteCommands` module delivers a play, pause, unplug, next, or previous                                   | the person made a new choice after the press, here or through Connect: played or paused against what plays here, picked a song, or let go of playback here | changes nothing: the person chose again after it                         | nothing                                       |
+| the phone's `RemoteCommands` module delivers a play it decided for the player on the lock screen                        | nobody chose again after the press, and that player holds the song here, a ticket still out too                                                            | plays, drops a load still starting, and keeps the choice                 | every revision seen                           |
+| the phone's `RemoteCommands` module delivers a play it decided for the player on the lock screen                        | the engine moved on from that player, as to the next song                                                                                                  | changes nothing: nobody chose to play what plays now                     | nothing                                       |
+| the phone's `RemoteCommands` module delivers a pause it decided for the player on the lock screen                       | nobody chose again after the press, whether that player holds the song here or the engine moved on from it, as at the song's end                           | pauses what plays now, drops a load still starting, and keeps the choice | every revision seen                           |
+| headphones unplugged                                                                                                    | nobody chose again after the unplug, and a song here is meant to play, its sound started or not                                                            | pauses it, drops a load still starting, and keeps the choice             | every revision seen                           |
+| headphones unplugged                                                                                                    | nothing here is meant to play                                                                                                                              | changes nothing                                                          | nothing                                       |
+| the phone's `RemoteCommands` module delivers a scrub of the player on the lock screen                                   | that player holds the song here, whatever the person chose since                                                                                           | seeks there, as expo-audio moved it, and drops a load still starting     | every revision seen                           |
+| the phone's `RemoteCommands` module delivers a scrub of the player on the lock screen                                   | the engine moved on from that player, as to another song                                                                                                   | changes nothing                                                          | nothing                                       |
+| the phone's native player reports a song finished, before or after its own pause at the end                             | anything                                                                                                                                                   | moves on, as nobody's action: a load still starts                        | nothing                                       |
+| none: the core shows nothing left to apply                                                                              | a load still starts here                                                                                                                                   | drops it, as the core settled it                                         | nothing; the core settled it                  |
 
 | A step of a load's start answers                                                             | What holds now                                    | The device                                                                                                                                                                                                                 |
 | -------------------------------------------------------------------------------------------- | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -484,6 +496,116 @@ for one revision, below):
   load, when the tab stops leading, or when the core shows nothing left to apply. The core settles
   every request when a device reports again after 30 seconds of silence (Rules for reports and
   requests), so a load still starting then is dropped and never starts.
+
+### The music iOS app (amended 2026-11-15)
+
+The music iOS app brings back old music's device sheet and remote control on Connect, through the
+same device side as the web client: `connect-player.ts` reports and applies requests,
+`use-connect.ts` runs it in the phone's player provider, and `connect-actions.ts` holds the moves,
+loads, and remote controls both clients' players make.
+
+- **One app is one device.** The app has no tabs, so it takes no Web Lock (`ConnectHost.locks` is
+  undefined): it speaks for its device as soon as the core names one. It speaks only while it plays
+  the person's queue on the core. A phone that plays its own queue of downloads while the server is
+  away neither reports nor applies requests, and lists no devices, until it hands that queue back.
+- **Reports and the background.** The phone reports on every change and every 10 seconds, as the
+  browser does, never as the song plays on. iOS keeps an app that plays audio running in the
+  background, so the phone keeps reporting and applies requests there, a remote pause included.
+  iOS suspends an app that plays nothing in the background, and a killed app stops, so either
+  leaves the list once its last report is 30 seconds old, as old music's phone left once its
+  heartbeat stopped.
+- **One active device.** As in the browser, the phone follows the device that plays while nothing
+  plays here: Now Playing's device button reads `Playing on <device>`, the iPad's player bar lights
+  its speaker button, and play, pause, seek, and skips control that device. Now Playing hides the
+  volume slider meanwhile, since volume stays with the device that plays. A phone holding a song
+  paused lets it go once another of the person's devices plays.
+- **The device sheet.** Old music's sheet comes back from Now Playing, the iPad's player bar, and
+  Settings: this phone first, then the device that plays, then the rest by name. A row moves
+  playback there, and the sheet shows the move until that device answers it, failing after 10
+  seconds or when the core refuses it. A move is done only once the core took it and the device
+  answered with a report of its own: `targets.list` shows a load the device has not applied as its
+  playback, marked `pending`, and the device the player follows counts it, so a source that stopped
+  is no sign the move landed (`moveArrived` in `connect-devices.ts`, which the browser's Play on list
+  reads too). Old music closed its sheet once its server named the device, without waiting for it.
+  A failed move keeps the devices it went from and to, as listed when it started, so its failure
+  stays once a device's last report expires and it leaves the list, as old music's sheet, which
+  listed offline devices too, kept it. A move the core took but its device never answered stopped
+  the device it went from, so `Stay here` moves playback back there, and `Try again` waits for the
+  device again; after a refusal, `Stay here` only closes the sheet. The browser's list waits again
+  too when its device is picked again. An album's actions have `Play on`, which loads the
+  album onto another device and takes playback over, as the web client's album menu does. The tip
+  copy of old music's sheet is gone, per the content rules, and so is its `Cancel transfer`: a move
+  is one write on the core, so there is nothing to cancel.
+- **The system's controls.** The lock screen, Control Center, headphones, and CarPlay reach the
+  player through the app's `RemoteCommands` module: next, previous, the scrubber, play, pause, and
+  the play/pause toggle, and headphones unplugged, which pauses a song meant to play and leaves one
+  paused, or none, alone. Each calls the controller's handlers, which run `onListenerAction`.
+  expo-audio also plays, pauses, and scrubs the AVPlayer itself for these, and pauses every player
+  when headphones are unplugged, but it tells JavaScript only of the player's new state, and a song
+  that stops at its end reports a pause too, sometimes before its `finished` report. So the engine
+  never takes a pause for the person's or for an end: a command counts by where it comes from, at
+  any place in the song, and a song ends only on the player's own `finished` report.
+  - **A command carries its own outcome.** The module decides each play, pause, and toggle where it
+    happens, as a play or a pause, and sends it with the id of the player on the lock screen it
+    acted on, which the app names to it as expo-audio puts a player there (`follow`). A toggle is
+    what expo-audio did with it: the module reads that player once the press's targets ran, which
+    the command center calls in one main-queue turn, before any later state of the app's player can
+    change the answer. JavaScript never works a command's outcome out from what plays by the time
+    the event arrives: a toggle that paused a song as it ended stays a pause after the song's
+    `finished` report moved the player on to the next one.
+  - **Who a command applies to** (the rows above). A play applies only to the player it was decided
+    for, while that player holds the song here (`NativeEngine.isCurrentPlayer`). Once the engine
+    moved on from it, to the next song or to a stream it reopened, nobody chose to play what plays
+    now, so it changes nothing. A pause decided for a player the engine moved on from still means
+    the person wants playback paused, so it pauses what plays now, unless they chose again after
+    it.
+  - **A command applies only if nobody chose again after it.** JavaScript and Swift share no clock,
+    so the module keeps one sequence of numbers. It stamps every command it forwards with the next
+    one as the press comes, in the main-queue turn in which the command center also calls
+    expo-audio's target, and the unplug on the thread iOS posts it on. The app takes the next
+    number of the same sequence (`stamp`, a synchronous module call) as each new choice starts,
+    before it reaches a player: the controller calls `NowPlayingControls.commanded` at the start of
+    a play or pause tapped here, a jump, a play-a-list, and each Connect request that picks a song
+    here (`playTracksAt`, `playCurrentAt`), lets go of playback here (`release`), or plays or
+    pauses against what plays here (`steer`). The phone's controls (`lockScreenControls` in
+    `native-host.ts`) apply a forwarded play, pause, unplug, next, or previous only while its stamp
+    is newer than every choice the app took a number for, and drop the rest. Presses never order
+    each other: the module sends them in the order they came, though a decided play or pause goes
+    one main-queue turn after the press and the others at once, so each applies in the order it
+    arrives, as before. A press the controller applies is that press: what the controller reports
+    while it applies one takes no new number.
+
+    What takes no number carries the choice before it, so a press made after that choice still
+    applies: a seek, a skip, which keeps playing or paused as it was, a Connect request that leaves
+    playing or paused as the phone shows it (another device that scrubs sends the playing state it
+    last saw), and what the player does by itself, which is a song handing over to the next at its
+    end, the controller following a queue the core moved, a natural advance with nothing
+    preloaded, and reloads for an expired ticket or a media server back online. So a pause decided
+    for a song as it ended still pauses the next one, and a lock-screen pause and then Next in the
+    app loads the next song paused. A Connect load takes its number when it writes its queue here,
+    after an album's songs arrive. A scrub is not ordered: it applies while the player it moved
+    holds the song, whatever the person chose since, so the controller's position follows where
+    expo-audio moved the AVPlayer; a song picked since replaced that player. The web's Media
+    Session handlers run on the page's own thread, in order with its other commands, and ignore
+    `commanded`.
+
+    What stays open is the turn of the press itself: the command center calls this module's
+    target and expo-audio's in no documented order, so a command the app gives on the JavaScript
+    thread between the two (expo-audio plays and pauses synchronously there) can still lose to the
+    press. That window is the length of one target call, far below the 2–3 ms between a song
+    stopping and its handoff that main has too.
+
+  - **A command applies as a tap does.** The controller applies a play or pause to its own choice
+    and to the engine alike, exactly as a tap that chose the same, though the native player already
+    did as asked: the engine hears the play even when the player plays already, so whether a song
+    that ends hands over to the next without a gap, and whether an unplug finds a song meant to
+    play, follow the person's last choice. A command counts even while another song's ticket is
+    out, since it is the person's choice for whatever plays next.
+
+  An interruption, such as a call, pauses and resumes the player with no command, so the controller
+  hears it as the player's state only, as old music's did. A pause that reached the engine before
+  the player's end report arrives holds: the next song loads paused. The controller's seek lands on
+  the place expo-audio moved the AVPlayer to.
 
 ### Edge cases settled in the build
 
@@ -552,6 +674,68 @@ Added with the music web client's fourth fix round (2026-11-15):
 
 - A pause or a skip from the system media controls (a headset, media keys, the lock screen) while
   an album sent from another device still loads drops that load, as a tap on the screen does.
+
+Added with the music iOS app (2026-11-15):
+
+- A pause from a phone's lock screen while an album sent from another device fetches its songs
+  drops that load, and the phone reports the song it holds paused.
+- A pause from the lock screen while that album's queue is written starts the album paused.
+- A play from the lock screen while the next song's ticket is out plays that song once it loads.
+- A remote pause, then a skip on the phone: the next song stays paused, and a later play or pause
+  of the old song leaves it alone.
+- A move onto a phone that just opened waits until its queue's whole listing names the current
+  entry, then plays that entry from the source's position and keeps the queue.
+- An older load's failure, and its old song's late failure from the native player, leave a newer
+  load to play and settle.
+
+Added with the music iOS app's first fix round (2026-11-15):
+
+- A pause from the lock screen half a second before the song's end, while an album sent from
+  another device fetches its songs, drops that load: the album never starts, and the phone reports
+  the song it holds paused. A pause there and then Next loads the next song paused.
+- The same pause holds when its command reaches the app before the player's report of it.
+- A song that plays to its end, reporting its pause before it reports it finished, is nobody's
+  action: an album load still starting goes on and plays.
+- A headphone toggle counts as what the player did with it: a pause drops a load still starting,
+  and the next toggle plays.
+- Headphones unplugged keep the pause, so a song another device moves the queue to loads paused,
+  and pause a song meant to play before its sound starts. Unplugged while nothing plays, they leave
+  an album sent from another device to start.
+- A move to a device whose request is still pending when the source stops keeps waiting, and fails
+  after 10 seconds unless that device reports the song itself.
+- A refused move to a device whose last report then expires keeps its failure, with Try again and
+  Stay here, once the device leaves the list. After a move the core took that its device never
+  answered, Stay here moves playback back, and Try again waits for the device again.
+
+Added with the music iOS app's second fix round (2026-11-15):
+
+- A pause on the phone, then a play from the lock screen once the player plays again: the engine
+  takes the play too, so the song hands over to the next one without a gap at its end, and
+  headphones unplugged later still pause it, so a song another device moves the queue to loads
+  paused.
+- A headphone toggle that pauses a song as it ends, its `finished` report reaching the app first
+  and moving the player on to the next song: the toggle stays a pause, decided where it was
+  pressed, and pauses the next song. A play decided for a song the player has moved on from
+  changes nothing.
+- A move the core accepts after the sheet's 10 seconds ran out: the failure keeps that the core
+  took it, so Stay here moves playback back to the device the move stopped, and Try again waits for
+  the device again. The browser's list shows a failure as a toast and has no Stay here, and picking
+  the device again there reads whether the core lists it as playing, so it needed no change.
+
+Added with the music iOS app's third fix round (2026-11-15):
+
+- A pause from the lock screen, then a play tapped in the app before the module's pause reaches
+  JavaScript: the song keeps playing. The same holds when the person starts another song in the app
+  instead, when they pause in the app after a play from the lock screen, and when another device
+  plays the song through Connect, after the phone reported it paused, before the pause arrives. A
+  lock-screen Next pressed before the person started another album in the app changes nothing.
+- A seek or Next in the app, or another device's scrub that keeps the song playing as it last saw
+  it, between a lock-screen pause and its command: the pause applies. After Next the next song
+  loads paused; after a seek, a song another device moves the queue to loads paused.
+- A lock-screen pause and Next reach the app in the order they arrive, though the module stamped
+  them the other way round.
+- A lock-screen scrub that reaches the app after a pause tapped there still moves the controller's
+  position; one for a song the person replaced since changes nothing.
 
 Rejected in this build:
 
