@@ -119,10 +119,6 @@ interface Stream {
   status: OutputStatus | null;
   /** The playback state last reported to the engine's listeners for this stream. */
   reported: OutputControl | null;
-  /**
-   * Whether the engine last asked this player to play or to pause; it opens paused. A change it
-   * did not ask for came from outside the app, and the engine asks for that from then on.
-   */
   asked: "play" | "pause";
   /** The seek the player has not landed yet, or null. */
   seeking: Seeking | null;
@@ -572,12 +568,6 @@ export class NativeEngine implements PlayerEngine {
     stream.output.play();
   }
 
-  /**
-   * `stream` played or paused without the engine asking: the person did it from the lock screen,
-   * Control Center, headphones, or CarPlay, which act on the native player itself, or iOS did it
-   * for them, as when headphones are unplugged. The engine asks for that from now on, and tells the
-   * controller, which takes it as the person's own action.
-   */
   #fromOutside(stream: Stream, playing: boolean): void {
     stream.asked = playing ? "play" : "pause";
     this.#emit({ type: "system", playing });
@@ -632,7 +622,6 @@ export class NativeEngine implements PlayerEngine {
     const positionMs = this.#positionOf(slot);
 
     if (status.control !== stream.reported) {
-      // A change the engine did not ask for came from outside the app.
       const outside = stream.asked !== (status.control === "paused" ? "pause" : "play");
 
       if (status.control === "paused") {
@@ -681,7 +670,6 @@ export class NativeEngine implements PlayerEngine {
       return;
     }
 
-    // The player stops at the end by itself; a play from the lock screen after it is the person's.
     stream.reported = "paused";
     stream.asked = "pause";
 

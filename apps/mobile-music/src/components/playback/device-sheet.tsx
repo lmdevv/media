@@ -18,13 +18,12 @@ import { useThemeColor } from "@/lib/theme-color";
 import { DEVICE_FAMILY } from "@/lib/this-device";
 import { useDevices, useNowPlaying, usePlaybackPosition } from "@/player";
 
-/** Old music's glyphs: a phone for the phone app and phone browsers, AirPlay for a computer's. */
+/** A phone for the phone app and phone browsers, AirPlay for a computer's browser. */
 export const KIND_ICONS = {
   phone: Smartphone,
   web: Airplay,
 } as const satisfies Record<DeviceKind, LucideIcon>;
 
-/** The song that moves and where it stands, or the queue when nothing is current. */
 function MovingSubtitle() {
   const { nowPlaying } = useNowPlaying();
   const { positionMs } = usePlaybackPosition();
@@ -160,14 +159,11 @@ export function DeviceSheet() {
   const sheet = deviceSheet({ family: DEVICE_FAMILY, devices, active, transfer });
   const previous = useRef(transfer.state);
 
-  // A move that lands closes the sheet, as old music's did.
   useEffect(() => {
     if (previous.current === "pending" && transfer.state === "idle") router.back();
     previous.current = transfer.state;
   }, [transfer.state]);
 
-  // A failure shows until the sheet closes, however it closes, and a move the person closed the
-  // sheet on goes on without it: neither comes back when the sheet opens again.
   useEffect(() => dismissTransfer, [dismissTransfer]);
 
   return (

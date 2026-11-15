@@ -601,7 +601,6 @@ describe("ConnectPlayer", () => {
 
     await playing(run);
     run.gates.start.holding = true;
-    // Another device moves the queue on to B; its ticket is still out when the lock screen pauses A.
     run.controller.sync(queueOf([one, two], "2"));
     await settle();
     run.engine().emit({ type: "paused" });

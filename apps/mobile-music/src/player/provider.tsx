@@ -179,11 +179,11 @@ export interface DevicesView {
   readonly transfer: Transfer;
   /** Moves playback, at the same place in the song, to `target`: `HERE` or a device's id. */
   readonly moveTo: (target: MoveTarget) => void;
-  /** Clears a failed move. */
+  /** Forgets the move: a failed one, or a pending one, which goes on unwatched. */
   readonly dismissTransfer: () => void;
   /**
-   * Plays an album or a song on another device, which takes playback over, as old music's play on
-   * a chosen device did. Resolves whether the core took it.
+   * Plays an album or a song on another device, which takes playback over. Resolves whether the
+   * core took it.
    */
   readonly playOn: (deviceId: string, item: MusicItem) => Promise<boolean>;
 }
@@ -564,10 +564,8 @@ const createPhone = ({
 /** What the actions read at the moment they run. */
 interface Latest {
   readonly queue: QueueState<Track> | null;
-  /** Whether the music plays: on this phone, or on the device the player follows. */
-  readonly playing: boolean;
+  readonly shownPlaying: boolean;
   readonly connect: ConnectView;
-  /** The song the queue plays now, which a move carries; null for an empty queue. */
   readonly track: Track | null;
 }
 
@@ -630,11 +628,6 @@ const createCommands = (
   };
 };
 
-/**
- * Play, pause, skips, and seeks: on this phone, or, while the player follows another device, on
- * that device (ADR 0018). Each of this phone's is a listener action of the controller, which makes
- * the Connect requests seen so far moot, so one still loading never lands over it.
- */
 const transportOf = (
   platform: PlatformSdk,
   controller: PlaybackController,
@@ -693,10 +686,10 @@ const createActions = (
   return {
     play: (trackIds, index) => transport().playTracks(trackIds, index),
     pause: async () => {
-      if (latest.current.playing) await transport().togglePlay();
+      if (latest.current.shownPlaying) await transport().togglePlay();
     },
     resume: async () => {
-      if (!latest.current.playing) await transport().togglePlay();
+      if (!latest.current.shownPlaying) await transport().togglePlay();
     },
     toggle: () => transport().togglePlay(),
     next: () => transport().next(),
@@ -761,7 +754,6 @@ function PositionTicker({
   durationMs,
   children,
 }: {
-  /** The live position in milliseconds; a stable function. */
   readonly read: () => number;
   readonly durationMs: number;
   readonly children: ReactNode;
@@ -929,12 +921,6 @@ const useHandBack = (
   }, [platform, controller, local, mode, unanswered, handing, online, audible, setMode, again]);
 };
 
-/**
- * The person's devices and a move between them, as old music's device sheet tracked one: a move
- * waits until the device it went to plays, here included, and fails after
- * {@link TRANSFER_TIMEOUT_MS} or when the core refuses it.
- */
-/** The device that plays: this phone while a song is loaded here, else the one the player follows. */
 const activeOf = (connect: ConnectView): MoveTarget | null =>
   connect.here ? HERE : (connect.remote?.id ?? null);
 
@@ -947,7 +933,6 @@ const useDevicesView = (
   const [transfer, dispatch] = useReducer(nextTransfer, idleTransfer);
   const active = activeOf(connect);
 
-  // A move lands once the device it went to plays.
   if (transfer.state === "pending" && transfer.to === active) dispatch({ type: "active", active });
 
   useEffect(() => {
@@ -969,7 +954,6 @@ const useDevicesView = (
 
       if (activeOf(view) === to) return;
 
-      // Nothing plays anywhere and the queue is empty, so nothing would move here.
       if (to === HERE && view.remote === null && track === null) return;
       dispatch({ type: "start", to });
 
@@ -1105,7 +1089,6 @@ export function PlayerProvider({ children }: { readonly children: ReactNode }) {
   useHandBack(platform, phone, online, playing, setMode);
   useReachWhileAudible(playing);
 
-  // One app is one device: it speaks for its device whenever it plays the queue on the core.
   const connect = useConnect(platform, controller, snapshot, {
     locks: undefined,
     onCore: mode === "server",
@@ -1168,10 +1151,10 @@ export function PlayerProvider({ children }: { readonly children: ReactNode }) {
 
   const track = entry?.track ?? null;
   const shownPlaying = remotePlayback === null ? playing : remotePlayback.playing;
-  const latest = useRef<Latest>({ queue: serverQueue, playing: shownPlaying, connect, track });
+  const latest = useRef<Latest>({ queue: serverQueue, shownPlaying, connect, track });
 
   useLayoutEffect(() => {
-    latest.current = { queue: serverQueue, playing: shownPlaying, connect, track };
+    latest.current = { queue: serverQueue, shownPlaying, connect, track };
   }, [serverQueue, shownPlaying, connect, track]);
 
   const commands = useMemo(

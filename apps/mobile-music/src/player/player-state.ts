@@ -43,7 +43,7 @@ export interface QueueItem {
   readonly autoplay: boolean;
 }
 
-/** Another of the person's devices that the player follows and controls, as old music's remote. */
+/** Another of the person's devices, which the player follows and controls. */
 export interface RemoteDevice {
   readonly id: string;
   readonly name: string;
@@ -53,9 +53,9 @@ export interface RemoteDevice {
 export interface PlayerView {
   readonly status: PlayerStatus;
   /**
-   * The device that plays the queue while nothing plays on this phone, as old music's active
-   * device. While it is set, the status, the position, play, pause, seek, and skips follow and
-   * control it (ADR 0018). Null while playback is here or nowhere.
+   * The device that plays the queue while nothing plays on this phone. While it is set, the
+   * status, the position, play, pause, seek, and skips follow and control it (ADR 0018). Null while
+   * playback is here or nowhere.
    */
   readonly remote: RemoteDevice | null;
   readonly nowPlaying: NowPlaying | null;

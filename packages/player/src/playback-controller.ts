@@ -1603,8 +1603,6 @@ export class PlaybackController {
   }
 
   #onEngineEvent = (event: EngineEvent): void => {
-    // The person's own choice, made outside the app. It holds for whatever plays here next too, so
-    // it counts even while another song's ticket is out.
     if (event.type === "system") {
       this.#systemAction(event.playing);
 
@@ -1669,13 +1667,6 @@ export class PlaybackController {
     }
   };
 
-  /**
-   * The person played or paused this device from the system's controls, which act on the native
-   * player itself: the lock screen, Control Center, headphones, or CarPlay. iOS pausing it for
-   * them, as when headphones are unplugged, counts too. It is a listener action, as a tap here is
-   * (ADR 0018): the Connect requests seen so far are moot, and the player means to play or pause
-   * from now on, a song still loading included.
-   */
   #systemAction(playing: boolean): void {
     this.#listenerActed();
     this.#skipped.clear();
@@ -1683,7 +1674,6 @@ export class PlaybackController {
     this.#update({ autoplayBlocked: false, error: null });
 
     if (!playing) this.#saveResume();
-    // Connect reads whether a song still loading means to play (`playingHere`).
     this.#notify();
   }
 

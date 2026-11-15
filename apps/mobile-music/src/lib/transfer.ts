@@ -3,7 +3,7 @@ export const TRANSFER_TIMEOUT_MS = 10_000;
 
 const TIMED_OUT_MESSAGE = "That device didn’t respond. Check that it’s online and try again.";
 
-/** The target that is this phone; the core's device ids never read so. */
+/** The move target that is this phone. */
 export const HERE = "here";
 
 /** Where playback can move: this phone (`HERE`), or one of the person's other devices by its id. */
@@ -25,15 +25,13 @@ export type TransferEvent =
   | { readonly type: "refused"; readonly to: MoveTarget; readonly message: string }
   /** The move to `to` waited `TRANSFER_TIMEOUT_MS` for that device to play. */
   | { readonly type: "timeout"; readonly to: MoveTarget }
-  /** The listener closed the failure. */
+  /** The sheet closed, or the listener closed its failure. A pending move goes on unwatched. */
   | { readonly type: "dismiss" };
 
+/** No move on its way, and none failed. */
 export const idleTransfer: Transfer = { state: "idle" };
 
-/**
- * The move after `event`, as old music's device sheet tracked one. Events about an older move than
- * the pending one change nothing.
- */
+/** The move after `event`. Events about an older move than the pending one change nothing. */
 export const nextTransfer = (transfer: Transfer, event: TransferEvent): Transfer => {
   if (event.type === "start") return { state: "pending", to: event.to };
 

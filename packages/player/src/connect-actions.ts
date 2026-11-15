@@ -9,18 +9,10 @@ import type { RepeatMode } from "./queue-order";
 import { asDeviceId } from "./use-connect";
 import type { ConnectView, MusicItem } from "./use-connect";
 
-/*
- * What a music client asks of Connect from its player (ADR 0018): control the device the player
- * follows, move playback between devices, and play an item on another device. The web's and the
- * phone's players both act through these.
- */
-
-/** An entry id the core answered in the queue, handed back to it. */
 const asItemId = Brand.nominal<Parameters<PlatformSdk["music"]["queue"]["jump"]>[0]["itemId"]>();
 
 type TrackRef = Extract<MusicItem["ref"], { readonly type: "track" }>;
 
-/** A song id the core answered in the queue, handed back to it. */
 const asTrackId = Brand.nominal<TrackRef["id"]>();
 
 /** What a play, pause, skip, or seek does: here, or on the device the player follows. */
@@ -31,7 +23,6 @@ export interface TransportActions {
   readonly next: () => Promise<void>;
   readonly previous: () => Promise<void>;
   readonly seek: (positionMs: number) => Promise<void>;
-  /** Plays the queue entry `itemId`. */
   readonly jump: (itemId: string) => Promise<void>;
 }
 
@@ -48,10 +39,9 @@ interface RemoteContext {
 }
 
 /**
- * Playback on the device the player follows, as old music's remote control: play, pause, and seek
- * ask that device (`core.connect.targets.control`); skips move the queue it plays, which it
- * follows; and playing a list here takes playback back, pausing that device, as old music made
- * this device the active one.
+ * Playback on the device the player follows: play, pause, and seek ask that device
+ * (`core.connect.targets.control`); skips move the queue it plays, which it follows; and playing a
+ * list here takes playback back, pausing that device.
  */
 export const remoteActions = ({
   platform,
@@ -116,14 +106,13 @@ const succeeded = async (call: Promise<unknown>): Promise<boolean> => {
   }
 };
 
-/** The song the queue plays now, which moving playback carries; null for an empty queue. */
 type CurrentSong = { readonly id: string } | null;
 
 /**
  * Moves playback from the device the player follows to this device at the same place in the song
- * (`core.connect.targets.move`), as old music's "Play here" did. Call it inside the tap, so a
- * browser lets the song start. With nothing playing anywhere, this device takes the current song,
- * paused where it stands. Resolves whether the core took it.
+ * (`core.connect.targets.move`). Call it inside the tap, so a browser lets the song start. With
+ * nothing playing anywhere, this device takes the current song, paused where it stands. Resolves
+ * whether the core took it.
  */
 export const moveHere = async (
   platform: PlatformSdk,
@@ -140,8 +129,6 @@ export const moveHere = async (
   if (self === null) return false;
 
   if (remote === null) {
-    // Nothing plays anywhere: this device takes the current song, paused where it stands, as old
-    // music's transfer made it the active device.
     if (connect.here || track === null) return true;
     connect.player.supersede();
 
@@ -158,9 +145,8 @@ export const moveHere = async (
 
 /**
  * Moves playback to another of the listener's devices at the same place in the song, from this
- * device or the device the player follows, as old music's transfer did; with nothing playing
- * anywhere it plays the current song there from where it stands here. Resolves whether the core
- * took it.
+ * device or the device the player follows; with nothing playing anywhere it plays the current song
+ * there from where it stands here. Resolves whether the core took it.
  */
 export const moveTo = async (
   platform: PlatformSdk,
@@ -196,8 +182,8 @@ export const moveTo = async (
 
 /**
  * Plays a song or an album on another device (`core.connect.targets.load`), which takes playback
- * over, as old music's play on a chosen device made it the active one: this device stops, or the
- * device the player followed pauses. Resolves whether the core took it.
+ * over: this device stops, or the device the player followed pauses. Resolves whether the core
+ * took it.
  */
 export const playOn = async (
   platform: PlatformSdk,

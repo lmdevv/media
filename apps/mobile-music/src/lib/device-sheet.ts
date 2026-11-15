@@ -13,8 +13,7 @@ export interface DeviceRow {
   /** `This iPhone` or `This iPad` for this device, else the device's own name. */
   readonly name: string;
   readonly kind: DeviceKind;
-  /** `Playing now` or `Online`. */
-  readonly status: string;
+  readonly status: "Playing now" | "Online";
   /** Playback is here: accent title and a check. */
   readonly current: boolean;
   readonly thisPhone: boolean;
@@ -52,9 +51,8 @@ const PLAYING = "Playing now";
 const ONLINE = "Online";
 
 /**
- * The sheet for the person's devices and the move in progress, as old music's was: this phone
- * first, then the device that plays, then the rest by name. With nothing playing anywhere, this
- * phone is the current one.
+ * The sheet for the person's devices and the move in progress: this phone first, then the device
+ * that plays, then the rest by name. With nothing playing anywhere, this phone is the current one.
  */
 export const deviceSheet = ({
   family,

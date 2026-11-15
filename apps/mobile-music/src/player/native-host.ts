@@ -12,7 +12,6 @@ const remoteCommands = requireNativeModule<
   }>
 >("RemoteCommands");
 
-/** What the controller's handlers for the system's media controls do. */
 type SystemHandlers = NonNullable<Parameters<NowPlayingControls["setHandlers"]>[0]>;
 
 const nothingToStop = (): void => {};

@@ -132,7 +132,7 @@ export const devicePosition = (
   return durationMs > 0 ? Math.min(position, durationMs) : position;
 };
 
-/** What a device is, as old music's device lists told them apart: a computer's browser or a phone. */
+/** What a device is: a computer's browser or a phone. */
 export type DeviceKind = "web" | "phone";
 
 /** The names the account client gives browsers, such as `Firefox on Linux` or `Safari`. */

@@ -13,12 +13,6 @@ import { trackOf } from "@/lib/test-fixtures";
 import { FakeOutput } from "./fake-output";
 import { NativeEngine } from "./native-engine";
 
-/*
- * Connect on the phone through the app's own engine: the controller and `ConnectPlayer` over a
- * `NativeEngine` whose native players are fakes. A test presses the lock screen by calling `pause`
- * or `play` on the native player itself, as expo-audio's remote commands do to the AVPlayer.
- */
-
 const songA = trackOf("Safe from Harm");
 
 const songB = trackOf("One Love");
@@ -59,7 +53,6 @@ const song = (track: Track) => ({ domain: "music", ref: { type: "track", id: tra
 
 const album = (id: string) => ({ domain: "music", ref: { type: "album", id } }) as const;
 
-/** Lets the engine's players open and every awaited call settle, a few macrotasks deep. */
 const settle = async (turns = 8): Promise<void> => {
   if (turns === 0) return;
 
@@ -69,7 +62,6 @@ const settle = async (turns = 8): Promise<void> => {
   await settle(turns - 1);
 };
 
-/** A call the test holds until it answers or fails it. */
 interface Held {
   readonly answer: () => void;
   readonly fail: () => void;
@@ -81,11 +73,6 @@ afterEach(() => {
   for (const stop of stops.splice(0)) stop();
 });
 
-/**
- * The phone's player with Connect running over it. Its native players open at once; the core's
- * queue command answers `answer.current`, held while `holdPlay` is set; albums answer their songs,
- * held while `holdAlbums` is set.
- */
 const phone = () => {
   const outputs: Array<FakeOutput> = [];
   const events: Array<EngineEvent> = [];
@@ -196,7 +183,6 @@ const phone = () => {
 
   stops.push(connect.start());
 
-  /** The native player of the song loaded now. */
   const playing = (): FakeOutput => {
     const output = outputs.findLast((opened) => !opened.released);
 
@@ -236,7 +222,6 @@ type Phone = ReturnType<typeof phone>;
 
 const ask = (revision: number, asked: ConnectAsk) => ({ revision, ask: asked });
 
-/** Plays A from the queue [A, B] on the phone, from a tap, and lets it start. */
 const playingA = async (run: Phone): Promise<void> => {
   run.controller.sync(queueOf([one, two], "1"));
   await run.controller.togglePlay();
@@ -331,7 +316,6 @@ describe("Connect on the phone", () => {
     await playingA(run);
     await run.controller.togglePlay();
     await settle();
-    // Another device moves the queue on to B while this phone holds A paused.
     run.controller.sync(queueOf([one, two], "2"));
     run.playing().play();
     await settle();
@@ -364,7 +348,6 @@ describe("Connect on the phone", () => {
     await settle();
     run.controller.sync(queueOf([one, two], "2"));
     await settle();
-    // The old song's player reports late, and the core shows a newer pause of the old song.
     first.notifyPlayingLate();
     run.connect.take(
       ask(3, {
@@ -399,7 +382,6 @@ describe("Connect on the phone", () => {
       }),
     );
     await settle();
-    // The first answer holds a page without the current entry, while the rest still loads.
     run.controller.sync(queueOf([two], "1", { complete: false }));
     await settle();
 
