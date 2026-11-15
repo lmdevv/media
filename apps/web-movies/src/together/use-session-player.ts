@@ -182,19 +182,30 @@ export const useSessionPlayer = (
   const latestJoined = useLatest(joined);
   const latestCreated = useLatest(created);
 
+  /** Seeks the session to where the player stands, then plays it; answers the newest revision. */
   const seekAndPlay = useCallback(
-    async (revision: number, play: boolean): Promise<void> => {
+    async (revision: number, play: boolean): Promise<number> => {
       const positionMs = Math.max(0, player.current?.positionMs() ?? 0);
 
-      await platform.core.together.control({
+      const sought = await platform.core.together.control({
         domain: MOVIES,
         op: { kind: "seek", positionMs, revision },
       });
 
-      if (play) await platform.core.together.control({ domain: MOVIES, op: { kind: "play" } });
+      if (!play) return sought.revision;
+
+      const playing = await platform.core.together.control({
+        domain: MOVIES,
+        op: { kind: "play" },
+      });
+
+      return playing.revision;
     },
     [platform, player],
   );
+
+  /** The new session's revision once its first seek answered, which Start seeks against. */
+  const opening = useRef<Promise<number> | null>(null);
 
   /** Counts starts, so a start the viewer cancelled before it answered is undone, not applied. */
   const startCount = useRef(0);
@@ -208,15 +219,19 @@ export const useSessionPlayer = (
     void platform.core.together
       .create({ item: itemOf(page) })
       .then(async ({ sessionId }) => {
-        if (startCount.current !== attempt) {
+        const undo = async (): Promise<void> => {
           setLeft(sessionId);
           await platform.core.together.leave({ domain: MOVIES });
+        };
 
-          return undefined;
-        }
+        if (startCount.current !== attempt) return undo();
+
+        opening.current = seekAndPlay(0, false);
+        await opening.current;
+
+        if (startCount.current !== attempt) return undo();
 
         setCreated(sessionId);
-        await seekAndPlay(0, false);
 
         return undefined;
       })
@@ -233,7 +248,13 @@ export const useSessionPlayer = (
 
     if (opened === null || opened.sessionId !== latestCreated.current) return;
 
-    void seekAndPlay(opened.clock.revision, player.current?.isPaused() === false)
+    void (opening.current ?? Promise.resolve(opened.clock.revision))
+      .then((revision) =>
+        seekAndPlay(
+          Math.max(revision, opened.clock.revision),
+          player.current?.isPaused() === false,
+        ),
+      )
       .catch(toastFailure)
       .finally(() => setCreated(undefined));
   }, [latestJoined, latestCreated, player, seekAndPlay]);
