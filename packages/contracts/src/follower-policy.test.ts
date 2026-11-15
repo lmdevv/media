@@ -18,6 +18,7 @@ import {
 import type {
   EventAction,
   EventFacts,
+  EventOrigin,
   Expected,
   FollowInput,
   FollowerPlayerEvent,
@@ -393,6 +394,7 @@ describe("hear", () => {
 const facts = (overrides: Partial<EventFacts>): EventFacts => ({
   event: "playing",
   origin: "change",
+  superseded: false,
   controls: true,
   clock: "paused",
   holding: false,
@@ -450,8 +452,46 @@ describe("eventAction", () => {
     ],
     ["does nothing for a stall", { event: "waiting" }, "nothing"],
     ["does nothing for an end", { event: "ended" }, "nothing"],
+    ["follows a viewer's play a later command overtook", { superseded: true }, "follow"],
+    [
+      "follows a viewer's pause a later command overtook",
+      { event: "paused", clock: "playing", paused: true, superseded: true },
+      "follow",
+    ],
+    [
+      "follows a viewer's seek a later command overtook",
+      { event: "seeked", offClock: true, superseded: true },
+      "follow",
+    ],
   ])("%s", (_name, overrides, action) => {
     expect(eventAction(facts(overrides))).toBe(action);
+  });
+
+  it("never moves the session or detaches for an event a later command overtook", () => {
+    const anyFacts = fc.record({
+      event: fc.constantFrom<FollowerPlayerEvent>(
+        "playing",
+        "paused",
+        "seeked",
+        "waiting",
+        "ended",
+      ),
+      origin: fc.constantFrom<EventOrigin>("command", "catching-up", "change", "unchanged"),
+      superseded: fc.constant(true),
+      controls: fc.boolean(),
+      clock: fc.constantFrom<SessionClock["status"]>("playing", "paused"),
+      holding: fc.boolean(),
+      paused: fc.boolean(),
+      buffering: fc.boolean(),
+      atEnd: fc.boolean(),
+      offClock: fc.boolean(),
+    });
+
+    fc.assert(
+      fc.property(anyFacts, (stale) => {
+        expect(["follow", "nothing"]).toContain(eventAction(stale));
+      }),
+    );
   });
 });
 

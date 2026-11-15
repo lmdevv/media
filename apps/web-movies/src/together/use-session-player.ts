@@ -584,7 +584,14 @@ export const useSessionFollow = (
         return;
       }
 
-      await platform.core.together.control({ domain: MOVIES, op: { kind: "pause" } });
+      // Against the clock it was decided on, as no one asked for it: a play or seek someone made
+      // at the end since, which this screen may not have heard of yet, stands.
+      if (current !== null) {
+        await platform.core.together.control({
+          domain: MOVIES,
+          op: { kind: "pause", revision: current.revision },
+        });
+      }
     };
 
     void run().catch(() => {

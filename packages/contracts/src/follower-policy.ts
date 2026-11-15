@@ -313,7 +313,7 @@ const CARRIED_OUT_BY: Readonly<Record<PendingCommand, FollowerPlayerEvent | null
  * expects afterwards. While a command is pending, an event is the player carrying one out or
  * catching up, so it never moves the session; a `seeked` carries out a pending seek wherever it
  * landed. With nothing pending, a play or pause that differs from the expected state is a change.
- * `eventAction` then decides what a change does (ADR 0017).
+ * `eventAction` then decides, when the follower handles the event, what a change does (ADR 0017).
  */
 export const hear = (
   expected: Expected,
@@ -344,11 +344,16 @@ export const hear = (
  */
 export type EventAction = "play" | "pause" | "seek" | "detach" | "follow" | "nothing";
 
-/** What a follower knows when it acts on a player event. */
+/** What a follower knows when it handles a player event. */
 export interface EventFacts {
   readonly event: FollowerPlayerEvent;
   /** Who caused the event, as `hear` judged it on arrival. */
   readonly origin: EventOrigin;
+  /**
+   * The follower gave its player a play, pause, or seek after the event arrived, as for a newer
+   * clock: the event is stale, whoever caused it.
+   */
+  readonly superseded: boolean;
   /** Whether the viewer may control the session. */
   readonly controls: boolean;
   /** Whether the session plays or is paused. */
@@ -366,12 +371,13 @@ export interface EventFacts {
 }
 
 /**
- * Decides what a player event does: the one rule for whether an event moves the session (ADR 0017).
- * Only a change moves it, only while the player still stands where the event says, and only for a
- * viewer who may control; every other event brings the player back to the clock.
+ * Decides what a player event does as the follower handles it: the one rule for whether an event
+ * moves the session (ADR 0017). Only a change moves it, only while no command followed it, only
+ * while the player still stands where the event says, and only for a viewer who may control; every
+ * other event brings the player back to the clock.
  */
 export const eventAction = (facts: EventFacts): EventAction => {
-  const change = facts.origin === "change";
+  const change = facts.origin === "change" && !facts.superseded;
 
   return Match.value(facts.event).pipe(
     Match.whenOr("waiting", "ended", (): EventAction => "nothing"),

@@ -1,6 +1,9 @@
+import { run } from "@media/contracts/follower";
+import type { FollowerPlayer, SessionPort } from "@media/contracts/follower";
 import { ConvexHttpClient } from "convex/browser";
 import { makeFunctionReference } from "convex/server";
 import type { FunctionArgs } from "convex/server";
+import { Data, Effect } from "effect";
 import { describe, expect, it } from "vitest";
 
 import type { ContentDomain } from "../../../commands/scopes";
@@ -43,6 +46,22 @@ const joinBy = (who: Member, link: string, domain: ContentDomain = "movies") =>
 
 const controlAs = (who: Member, op: Op) =>
   who.signedIn.client.mutation(api.core.together.control, { domain: "movies", op });
+
+/** The core refused a follower's call, or the call did not reach it. */
+class CallFailed extends Data.TaggedError("CallFailed")<{ readonly cause: unknown }> {}
+
+/** `who`'s movies session as the shared follower reaches it, over the real backend. */
+const portOf = (who: Member): SessionPort<CallFailed> => ({
+  heartbeat: Effect.tryPromise({
+    try: () => who.signedIn.client.mutation(api.core.together.heartbeat, { domain: "movies" }),
+    catch: (cause) => new CallFailed({ cause }),
+  }),
+  control: (op) =>
+    Effect.tryPromise({
+      try: () => controlAs(who, op),
+      catch: (cause) => new CallFailed({ cause }),
+    }),
+});
 
 const memberNames = async (who: Member): Promise<ReadonlyArray<string>> =>
   (await joinedView(who, "movies")).members.map((row) => row.username);
@@ -232,6 +251,59 @@ describe.skipIf(stack === undefined)("group sessions", { timeout: 120_000 }, () 
       "conflict",
     );
     expect((await joinedView(shelf.host, "movies")).clock).toEqual(paused);
+  });
+
+  it("never plays a stalled host's session on over a pause its clock has not shown yet", async () => {
+    if (stack === undefined) return;
+    const { shelf } = await started(stack);
+
+    await controlAs(shelf.host, { kind: "play" });
+
+    // The stall's own pause, which the follower holds the session at until its player recovers.
+    const held = await controlAs(shelf.host, { kind: "pause" });
+    let buffering = true;
+
+    const player: FollowerPlayer = {
+      positionMs: () => held.positionAtAnchorMs,
+      isPaused: () => false,
+      isBuffering: () => buffering,
+      playbackRate: () => 1,
+      setPlaybackRate: () => undefined,
+      seek: () => undefined,
+      play: () => Promise.resolve(),
+      pause: () => undefined,
+      subscribe: () => () => undefined,
+    };
+
+    const { intentional, after } = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const following = yield* run({
+            player,
+            port: portOf(shelf.host),
+            clock: held,
+            durationMs: () => 3_600_000,
+            controls: true,
+            pausesForStalls: true,
+            resumeHold: { kind: "held", revision: held.revision },
+          });
+
+          // Lucía pauses on her other screen, and this follower hears of it only after its player
+          // recovered and its correction ticks asked to play the session on.
+          const paused = yield* Effect.promise(() => controlAs(shelf.host, { kind: "pause" }));
+
+          buffering = false;
+          yield* Effect.sleep("2 seconds");
+          yield* following.apply(paused);
+
+          const { clock } = yield* Effect.promise(() => joinedView(shelf.host, "movies"));
+
+          return { intentional: paused, after: clock };
+        }),
+      ),
+    );
+
+    expect(after).toMatchObject({ status: "paused", revision: intentional.revision });
   });
 
   it("refuses queued items from a guest the host has not let add", async () => {

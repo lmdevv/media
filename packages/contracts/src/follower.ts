@@ -70,10 +70,14 @@ export interface FollowerPlayer {
   readonly fixedRate?: boolean;
 }
 
-/** A move of the clock, as `core.together.control` takes it. */
+/**
+ * A move of the clock, as `core.together.control` takes it. A play or a pause the follower makes on
+ * its own, for a stalled player's hold, carries the revision it decided against: the core applies
+ * it only while the session is still at it (ADR 0017). A viewer's carries none, so it always does.
+ */
 export type ClockMove =
-  | { readonly kind: "play" }
-  | { readonly kind: "pause" }
+  | { readonly kind: "play"; readonly revision?: number }
+  | { readonly kind: "pause"; readonly revision?: number }
   /** A seek means something only against the clock the member saw, so it carries its revision. */
   | { readonly kind: "seek"; readonly positionMs: number; readonly revision: number };
 
@@ -175,7 +179,10 @@ const END_SLACK_MS = 500;
 interface Heard {
   readonly event: FollowerPlayerEvent;
   readonly origin: EventOrigin;
-  /** The number of the follower's latest command when the event arrived, for logs. */
+  /**
+   * The number of the follower's latest command when the event arrived. A command given after it
+   * makes the event stale by the time the follower handles it.
+   */
   readonly command: number;
 }
 
@@ -438,16 +445,16 @@ export const run = Effect.fn("Follower.run")(function* <E>(
 
   /**
    * Pauses the session at `standing`, then seeks it back there, answering the clock it leaves; a
-   * failed seek still leaves it paused. Only a pause that paused the session takes the hold: its
-   * answer is the revision after `seen`, the clock the player stalled on. A later one found someone
-   * else's move first, a pause included, and answers null. It sends only, so it can outlive the
-   * follower that asked.
+   * failed seek still leaves it paused. The core applies the pause only while the session is still
+   * at `seen`, the clock the player stalled on, so it never pauses a session someone else moved
+   * since, a pause included; then it answers null and takes no hold. The seek applies only at the
+   * pause's own revision. It sends only, so it can outlive the follower that asked.
    */
   const pauseAt = (standing: number, seen: number): Effect.Effect<SessionClock | null> =>
     Effect.gen(function* () {
-      const paused = yield* Effect.option(port.control({ kind: "pause" }));
+      const paused = yield* Effect.option(port.control({ kind: "pause", revision: seen }));
 
-      if (Option.isNone(paused) || paused.value.revision !== seen + 1) return null;
+      if (Option.isNone(paused)) return null;
 
       const sought = yield* Effect.option(
         port.control({ kind: "seek", positionMs: standing, revision: paused.value.revision }),
@@ -458,8 +465,8 @@ export const run = Effect.fn("Follower.run")(function* <E>(
 
   /**
    * Takes over a hold whose pause is on the way: once it lands, the session is held at the clock
-   * it left, and plays on when this player recovers. A pause that failed or was not the hold's
-   * own, or a clock newer than the one it left, leaves no hold.
+   * it left, and plays on when this player recovers. A pause the core refused or that failed, or a
+   * clock newer than the one it left, leaves no hold.
    */
   const settleHold = (landed: Effect.Effect<SessionClock | null>): Effect.Effect<void> =>
     Effect.gen(function* () {
@@ -511,9 +518,11 @@ export const run = Effect.fn("Follower.run")(function* <E>(
     );
 
   /**
-   * Plays the session on after this player's stall while the hold stands. The hold lasts until a
-   * newer clock ends it in `applyClock`, the play's own answer included, so a play that fails
-   * leaves it for the next correction tick to try again.
+   * Plays the session on after this player's stall while the hold stands. The core applies the play
+   * only while the session is still at the hold's own last revision, so a move this follower has
+   * not heard of yet, such as the host's pause on another screen, always wins. The hold lasts until
+   * a newer clock ends it in `applyClock`, the play's own answer included, so a play that fails,
+   * refused or lost, leaves it for the next correction tick to try again.
    */
   const releaseHold = Effect.gen(function* () {
     const { clock, holding } = yield* SubscriptionRef.get(state);
@@ -525,7 +534,7 @@ export const run = Effect.fn("Follower.run")(function* <E>(
       return;
     }
 
-    yield* send({ kind: "play" }).pipe(Effect.ignore);
+    yield* send({ kind: "play", revision: holding.revision }).pipe(Effect.ignore);
   });
 
   /** Whether this player plays again after its stall. */
@@ -643,9 +652,11 @@ export const run = Effect.fn("Follower.run")(function* <E>(
     );
 
   /**
-   * Acts on an event as `hear` judged it when it arrived and as `eventAction` decides, the one
-   * place an event can move the session. A `playing` from a stalled player that holds the
-   * session plays the hold on instead, as a correction tick would.
+   * Decides an event as the follower handles it, the one place and the one time an event can move
+   * the session: `eventAction` reads who `hear` judged caused it on arrival, whether the follower
+   * gave its player a command since, which makes it stale, and the session and the player as they
+   * stand now. A `playing` from a stalled player that holds the session plays the hold on instead,
+   * as a correction tick would.
    */
   const onEvent = (heard: Heard): Effect.Effect<void> =>
     Effect.gen(function* () {
@@ -659,9 +670,17 @@ export const run = Effect.fn("Follower.run")(function* <E>(
         return;
       }
 
-      if (heard.origin === "catching-up") {
-        yield* Effect.logDebug("Follower.catchingUp").pipe(
-          Effect.annotateLogs({ event: heard.event, command: heard.command }),
+      const latest = MutableRef.get(expected).command;
+      const superseded = latest !== heard.command;
+
+      if (heard.origin === "catching-up" || (superseded && heard.origin === "change")) {
+        yield* Effect.logDebug("Follower.eventIgnored").pipe(
+          Effect.annotateLogs({
+            event: heard.event,
+            origin: heard.origin,
+            heardAt: heard.command,
+            command: latest,
+          }),
         );
       }
 
@@ -669,6 +688,7 @@ export const run = Effect.fn("Follower.run")(function* <E>(
         eventAction({
           event: heard.event,
           origin: heard.origin,
+          superseded,
           controls: yield* Ref.get(controls),
           clock: current.clock.status,
           holding: current.holding !== null,
@@ -685,8 +705,8 @@ export const run = Effect.fn("Follower.run")(function* <E>(
   yield* Effect.acquireRelease(
     Effect.sync(() =>
       player.subscribe((event) => {
-        // Judged on arrival against the commands given so far, so an event the player reports
-        // late is judged by when it came, not by when the follower gets to it.
+        // Matched on arrival against the commands given so far, in the order the player reports
+        // them, so each echo carries out its own command; `onEvent` decides it when handled.
         const [origin, next] = hear(MutableRef.get(expected), event);
 
         MutableRef.set(expected, next);

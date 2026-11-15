@@ -48,9 +48,9 @@ export interface Session {
 
 /**
  * A session's clock as the core keeps it: play is absolute, a pause always makes a new revision
- * (of a paused clock too), a seek needs the current revision, and every move anchors at the
- * server's time. Members it holds get each new clock, as the subscription delivers it, one latency
- * after the move.
+ * (of a paused clock too), a seek needs the current revision, a play or a pause that carries a
+ * revision applies only at it, and every move anchors at the server's time. Members it holds get
+ * each new clock, as the subscription delivers it, one latency after the move.
  */
 export const makeSession = (initial: SessionClock): Effect.Effect<Session> =>
   Effect.gen(function* () {
@@ -89,10 +89,9 @@ export const makeSession = (initial: SessionClock): Effect.Effect<Session> =>
           revision: current.revision + 1,
         });
 
-        if (
-          move.kind === "seek" &&
-          (move.revision !== current.revision || (yield* Ref.get(seeksRefused)))
-        ) {
+        const stale = move.revision !== undefined && move.revision !== current.revision;
+
+        if (stale || (move.kind === "seek" && (yield* Ref.get(seeksRefused)))) {
           return yield* new Refused({ reason: "conflict" });
         }
 

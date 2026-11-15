@@ -706,4 +706,115 @@ describe("follower", () => {
         expect(player.isPaused()).toBe(true);
       }),
     ));
+  it("never replays a viewer's play that a newer clock's pause overtook before it was handled", () =>
+    scenario({}, (session) =>
+      Effect.gen(function* () {
+        const player = yield* makePlayer(0);
+        const host = yield* follower(session, player, { controls: true });
+
+        yield* advance(4_000);
+        yield* meanwhile(session.moveUnheard({ kind: "play" }));
+
+        const paused = yield* meanwhile(session.moveUnheard({ kind: "pause" }));
+
+        // The viewer plays on the player itself, and the newer paused clock reaches the follower
+        // before it handles that `playing`; the pause it gives the player takes effect late.
+        player.lagPauses();
+        yield* Effect.andThen(Effect.sync(player.viewerPlay), host.apply(paused));
+        yield* advance(200);
+        expect(yield* session.clock).toMatchObject({ status: "paused", revision: paused.revision });
+
+        player.catchUp();
+        yield* advance(2_000);
+        expect(yield* session.clock).toMatchObject({ status: "paused", revision: paused.revision });
+        expect(player.isPaused()).toBe(true);
+      }),
+    ));
+  it("never plays on over a pause made while its stream reloaded, before its clock arrives", () =>
+    scenario(playingForAMinute, (session) =>
+      Effect.gen(function* () {
+        const player = yield* makePlayer(0);
+        const reloads = yield* Scope.make();
+        const hosting = { controls: true, pausesForStalls: true } as const;
+        const before = yield* Scope.provide(follower(session, player, hosting), reloads);
+
+        yield* advance(4_000);
+        player.stall();
+        yield* advance(FOLLOWER_TUNABLES.stallPauseMs + 20);
+
+        const { holding: left } = yield* before.current;
+
+        if (left?.kind !== "pausing") {
+          throw new Error(`expected a pause on its way, got ${left?.kind}`);
+        }
+
+        yield* session.leave(before);
+        yield* Scope.close(reloads, Exit.void);
+
+        const after = yield* follower(session, player, { ...hosting, resumeHold: left });
+
+        // Lucía pauses on her other screen, and this one hears of it only after its player
+        // recovered.
+        const paused = yield* meanwhile(session.moveUnheard({ kind: "pause" }));
+
+        player.recover();
+        yield* advance(200);
+        yield* after.apply(paused);
+        yield* advance(3_000);
+
+        expect(yield* session.clock).toMatchObject({ status: "paused", revision: paused.revision });
+        expect((yield* after.current).holding).toBeNull();
+      }),
+    ));
+  it("never plays on over a pause the follower has not heard of when its player recovers", () =>
+    scenario(playingForAMinute, (session) =>
+      Effect.gen(function* () {
+        const lucia = yield* makePlayer(0);
+        const host = yield* follower(session, lucia, { controls: true, pausesForStalls: true });
+
+        yield* advance(4_000);
+        lucia.stall();
+        yield* advance(3_000);
+        expect((yield* host.current).holding?.kind).toBe("held");
+
+        // Lucía pauses on her other screen, and its clock reaches this one only after the player
+        // recovered and asked to play the session on.
+        const paused = yield* meanwhile(session.moveUnheard({ kind: "pause" }));
+
+        lucia.recover();
+        yield* advance(1_000);
+        expect(yield* session.clock).toMatchObject({ status: "paused", revision: paused.revision });
+
+        yield* host.apply(paused);
+        yield* advance(2_000);
+        expect(yield* session.clock).toMatchObject({ status: "paused", revision: paused.revision });
+        expect((yield* host.current).holding).toBeNull();
+      }),
+    ));
+  it("never pauses the session for a stall once someone moved it, before the follower heard", () =>
+    scenario(playingForAMinute, (session) =>
+      Effect.gen(function* () {
+        const lucia = yield* makePlayer(0);
+        const host = yield* follower(session, lucia, { controls: true, pausesForStalls: true });
+        const { revision } = yield* session.clock;
+
+        yield* advance(4_000);
+        lucia.stall();
+        yield* advance(FOLLOWER_TUNABLES.stallPauseMs - 200);
+
+        // Lucía seeks on her other screen just before this one's stall pauses the session.
+        const sought = yield* meanwhile(
+          session.moveUnheard({ kind: "seek", positionMs: 600_000, revision }),
+        );
+
+        expect(yield* session.clock).toStrictEqual(sought);
+        expect((yield* host.current).holding).toBeNull();
+
+        lucia.recover();
+        yield* host.apply(sought);
+        yield* advance(3_000);
+        expect(yield* session.clock).toStrictEqual(sought);
+        expect(Math.abs(yield* driftOf(session, lucia))).toBeLessThanOrEqual(inSync);
+      }),
+    ));
 });
