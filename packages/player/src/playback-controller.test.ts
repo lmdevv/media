@@ -1266,6 +1266,58 @@ describe("PlaybackController", () => {
       }
     });
 
+    it.each([
+      { label: "the next song", order: [one, two, three] },
+      { label: "the next song with a copy", order: [one, two, entry("d", "4"), three] },
+    ])(
+      "skips a copy that fails while the server is away to $label, without asking for a stream",
+      async ({ order }) => {
+        const media = await mediaServer();
+        const run = setup({ playCurrent: "1", baseUrl: media.baseUrl, copies: ["b", "c"] });
+
+        try {
+          await run.controller.playTracks(
+            order.map((queued) => queued.track.id),
+            0,
+          );
+          run.controller.sync(queueOf(order, "1"));
+          await settle();
+          media.state.healthy = false;
+          run.engine().emit({ type: "error", reason: "network", message: "network" });
+
+          await vi.waitFor(() => {
+            expect(run.controller.getSnapshot().mediaOnline).toBe(false);
+          });
+          await run.controller.jump("2");
+          await settle();
+
+          expect(run.controller.getSnapshot()).toMatchObject({
+            current: "2",
+            engineStatus: "playing",
+          });
+          const startsBefore = names(run.sent).filter((name) => name.startsWith("start:"));
+
+          run.engine().emit({ type: "error", reason: "decode", message: "Cannot decode" });
+          await settle();
+
+          expect(run.discarded).toStrictEqual([copyUrl("b")]);
+          expect(run.record.loads.at(-1)?.url).toBe(copyUrl("c"));
+          expect(run.controller.getSnapshot()).toMatchObject({
+            current: "3",
+            engineStatus: "playing",
+            mediaOnline: false,
+            error: null,
+          });
+          expect(names(run.sent).filter((name) => name.startsWith("start:"))).toStrictEqual(
+            startsBefore,
+          );
+        } finally {
+          run.stop();
+          media.close();
+        }
+      },
+    );
+
     it("keeps a downloaded song playing when the server comes back", async () => {
       const media = await mediaServer();
       const run = setup({ playCurrent: "1", baseUrl: media.baseUrl, copies: ["b"] });

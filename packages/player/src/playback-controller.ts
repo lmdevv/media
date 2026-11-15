@@ -1038,6 +1038,10 @@ export class PlaybackController {
         this.#stamp(startMs, false);
         this.#update({ engineStatus: "error", error: MEDIA_OFFLINE_MESSAGE });
 
+        // A skip already under way goes on to the next song with a copy; a song the listener
+        // asked for waits for the server.
+        if (this.#skipped.size > 0) this.#skipUnreachable(entry);
+
         return;
       }
 
@@ -1109,6 +1113,22 @@ export class PlaybackController {
 
     if (following === undefined || this.#skipped.has(following.itemId)) return;
     void this.#jumpTo(following.itemId, this.#wantPlaying);
+  }
+
+  /**
+   * Stops `loaded`'s damaged copy while the media server is away and skips to the next song with a
+   * copy, without asking the server for a stream.
+   */
+  #skipDamagedCopy(loaded: LoadedEntry): void {
+    const positionMs = this.#livePositionMs();
+
+    this.#generation += 1;
+    this.#loading = false;
+    this.#engine.unload();
+    this.#loaded = { ...loaded, url: null, origin: null, playbackId: null, renewAt: null };
+    this.#stamp(positionMs, false);
+    this.#update({ engineStatus: "error", error: MEDIA_OFFLINE_MESSAGE });
+    this.#skipUnreachable(loaded.entry);
   }
 
   #profileFor(track: Track, engine: EngineKind): MusicStreamProfile {
@@ -1367,6 +1387,13 @@ export class PlaybackController {
       // loads again from the server, or is skipped while the server can't be reached, as old
       // music's player recovered.
       this.#sources.discard(loaded.entry.track.id, url);
+
+      if (this.#reach() === "device") {
+        this.#skipDamagedCopy(loaded);
+
+        return;
+      }
+
       void this.#load(loaded.entry, this.#livePositionMs());
 
       return;
