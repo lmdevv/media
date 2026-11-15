@@ -4,7 +4,6 @@ import type {
   Follower,
   FollowerPlayer,
   FollowerState,
-  Hold,
   SessionPort,
   ViewerMove,
 } from "@media/contracts/follower";
@@ -12,8 +11,10 @@ import { usePlatform } from "@media/sdk/react";
 import { describeFailure } from "@media/mobile-core/failure";
 import { Data, Effect, Exit, Fiber, Option, Stream } from "effect";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { RefObject } from "react";
 
 import { MOVIES } from "@/lib/together/session";
+import type { CarriedHold } from "@/lib/together/session";
 
 /** The session refused or could not take a call; `message` says why, for the viewer. */
 class SessionCallFailed extends Data.TaggedError("SessionCallFailed")<{
@@ -37,6 +38,11 @@ export interface FollowingInput {
   readonly controls: boolean;
   /** Whether the viewer hosts the session, whose player pauses it while it stalls. */
   readonly hosting: boolean;
+  /**
+   * The screen's stall hold, which outlives this hook: each follower starts with it and keeps it
+   * current, so the next one, after a stream reload or a new playback attempt, takes it over.
+   */
+  readonly carried: RefObject<CarriedHold>;
 }
 
 /** The player's follower, for the screen. */
@@ -54,8 +60,8 @@ export interface Following {
  * Follows the session's clock with `player` while it plays (ADR 0017). Each new clock the session
  * delivers is applied in revision order; an older one changes nothing. Stops when the player goes
  * away or the screen unmounts, putting the player back at the session's rate. A follower started
- * again for the same screen, as after a stream reload, takes over its predecessor's hold on the
- * session, a pause still on its way included.
+ * again for the same screen, as after a stream reload or a new playback attempt, takes over its
+ * predecessor's hold on the session from `carried`, a pause still on its way included.
  */
 export const useSessionFollower = ({
   player,
@@ -64,11 +70,11 @@ export const useSessionFollower = ({
   durationMs,
   controls,
   hosting,
+  carried,
 }: FollowingInput): Following => {
   const platform = usePlatform();
   const [state, setState] = useState<FollowerState | null>(null);
   const follower = useRef<Follower<SessionCallFailed> | null>(null);
-  const hold = useRef<Hold | null>(null);
   const latest = useRef({ clock, controls, durationMs });
 
   useEffect(() => {
@@ -91,14 +97,11 @@ export const useSessionFollower = ({
     [platform],
   );
 
-  const heldIn = useRef<string | null>(null);
-
   useEffect(() => {
     if (player === null || !known || sessionId === null) return undefined;
 
     // A hold belongs to its session: a follower of another one starts without it.
-    if (heldIn.current !== sessionId) hold.current = null;
-    heldIn.current = sessionId;
+    if (carried.current.sessionId !== sessionId) carried.current = { sessionId, hold: null };
 
     const fiber = Effect.runFork(
       Effect.scoped(
@@ -110,7 +113,7 @@ export const useSessionFollower = ({
             durationMs: () => latest.current.durationMs,
             controls: latest.current.controls,
             pausesForStalls: hosting,
-            resumeHold: hold.current,
+            resumeHold: carried.current.hold,
           });
 
           follower.current = running;
@@ -118,7 +121,7 @@ export const useSessionFollower = ({
           yield* running.apply(latest.current.clock);
           yield* Stream.runForEach(running.state, (next) =>
             Effect.sync(() => {
-              hold.current = next.holding;
+              carried.current = { sessionId, hold: next.holding };
               setState(next);
             }),
           );
@@ -131,7 +134,7 @@ export const useSessionFollower = ({
       setState(null);
       Effect.runFork(Fiber.interrupt(fiber));
     };
-  }, [player, port, known, hosting, sessionId, latest]);
+  }, [player, port, known, hosting, sessionId, latest, carried]);
 
   useEffect(() => {
     const running = follower.current;

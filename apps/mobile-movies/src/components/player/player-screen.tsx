@@ -8,6 +8,7 @@ import type { VideoMetadata } from "expo-video";
 import { ChevronLeft, LockKeyhole } from "lucide-react-native";
 import { Result } from "effect";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import type { RefObject } from "react";
 import { AppState, Pressable, StyleSheet, View } from "react-native";
 import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -37,7 +38,8 @@ import { useSessionFollow, useSessionPlayer } from "@/components/together/use-se
 import type { SessionStop } from "@/components/together/use-session-player";
 import type { FollowerPlayer } from "@media/contracts/follower";
 import { usePerson } from "@/session/me";
-import { itemOf } from "@/lib/together/session";
+import { NO_HOLD, itemOf } from "@/lib/together/session";
+import type { CarriedHold } from "@/lib/together/session";
 import { useServer } from "@/session/connection";
 import { useMediaServer } from "@/session/media-server";
 import { usePreferences } from "@/session/preferences";
@@ -152,6 +154,8 @@ interface PlayerSessionProps {
   readonly attempt: Attempt;
   readonly onRestart: (restart: Restart) => void;
   readonly choices: StartChoices;
+  /** The screen's stall hold, which outlives each attempt so the next one plays the session on. */
+  readonly carried: RefObject<CarriedHold>;
 }
 
 /** What `params` asks `movies.play.start` for. */
@@ -167,7 +171,7 @@ const startArgsOf = (params: WatchParams): StartArgs =>
 
 const MISSING_DOWNLOAD = PlaybackStep.Stop({ stop: PlaybackStop.Missing() });
 
-function PlayerSession({ params, attempt, onRestart, choices }: PlayerSessionProps) {
+function PlayerSession({ params, attempt, onRestart, choices, carried }: PlayerSessionProps) {
   const platform = usePlatform();
   const mediaServer = useMediaServer();
   const startQuality = choices.quality;
@@ -297,7 +301,7 @@ function PlayerSession({ params, attempt, onRestart, choices }: PlayerSessionPro
     playerNow.current = controller?.port ?? null;
   }, [controller]);
 
-  const together = useSessionPlayer(watching, playerNow, { follows: download === null });
+  const together = useSessionPlayer(watching, playerNow, { follows: download === null, carried });
   const inSession = together.session !== null && download === null;
   const sessionMode = download === null ? together.mode : "solo";
   const sessionStart = together.startAt;
@@ -422,6 +426,7 @@ function PlayerSession({ params, attempt, onRestart, choices }: PlayerSessionPro
     player: playing && inSession ? (controller?.port ?? null) : null,
     durationMs: durationSeconds > 0 ? durationSeconds * 1000 : null,
     nextEpisode: next,
+    carried,
   });
 
   const person = usePerson();
@@ -1040,6 +1045,10 @@ export function PlayerScreen({ params }: { readonly params: WatchParams }) {
     tracks: null,
   });
 
+  // A stall hold outlives the attempt that took it: a new playback session remounts the attempt,
+  // and its follower plays the session on (ADR 0017).
+  const carried = useRef<CarriedHold>(NO_HOLD);
+
   const [attempt, setAttempt] = useState<Attempt>(() => ({
     key: 0,
     startAtMs: params.at ?? (params.start === "beginning" ? 0 : null),
@@ -1096,6 +1105,7 @@ export function PlayerScreen({ params }: { readonly params: WatchParams }) {
         attempt={attempt}
         onRestart={restart}
         choices={choices}
+        carried={carried}
       />
     </SafeAreaProvider>
   );

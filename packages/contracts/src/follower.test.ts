@@ -791,6 +791,32 @@ describe("follower", () => {
         expect((yield* host.current).holding).toBeNull();
       }),
     ));
+  it("drops a carried hold someone overtook while the follower was being replaced", () =>
+    scenario(playingForAMinute, (session) =>
+      Effect.gen(function* () {
+        const held = yield* meanwhile(session.move({ kind: "pause" }));
+
+        // Someone seeks the held session while the host's playback starts again, still stalled.
+        yield* meanwhile(
+          session.move({ kind: "seek", positionMs: 30_000, revision: held.revision }),
+        );
+
+        const lucia = yield* makePlayer(0);
+
+        lucia.viewerPlay();
+        lucia.stall();
+
+        const host = yield* follower(session, lucia, {
+          controls: true,
+          pausesForStalls: true,
+          resumeHold: { kind: "held", revision: held.revision },
+        });
+
+        expect((yield* host.current).holding).toBeNull();
+        expect(lucia.isPaused()).toBe(true);
+        expect(lucia.positionMs()).toBe(30_000);
+      }),
+    ));
   it("never pauses the session for a stall once someone moved it, before the follower heard", () =>
     scenario(playingForAMinute, (session) =>
       Effect.gen(function* () {

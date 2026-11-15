@@ -6,12 +6,21 @@ import { describeFailure } from "@media/mobile-core/failure";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { router } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { RefObject } from "react";
 import { Alert, Share } from "react-native";
 
 import type { Episode } from "@/lib/catalog";
 import { watchHref } from "@/lib/routes";
-import { MOVIES, itemKey, itemOf, moviesItem, sessionUrl } from "@/lib/together/session";
+import {
+  MOVIES,
+  holdsSession,
+  itemKey,
+  itemOf,
+  moviesItem,
+  sessionUrl,
+} from "@/lib/together/session";
 import type {
+  CarriedHold,
   JoinedSession,
   MoviesItem,
   QueueEntry,
@@ -117,8 +126,12 @@ export interface SessionPlayer {
 export const useSessionPlayer = (
   page: WatchTarget,
   player: { readonly current: FollowerPlayer | null },
-  /** `follows`: whether the player may follow a session at all; a download plays on its own. */
-  { follows }: { readonly follows: boolean },
+  /**
+   * `follows`: whether the player may follow a session at all; a download plays on its own.
+   * `carried`: the screen's stall hold. Playback that starts while it holds the session starts
+   * playing, since the hold plays the session on only once the player plays.
+   */
+  { follows, carried }: { readonly follows: boolean; readonly carried: RefObject<CarriedHold> },
 ): SessionPlayer => {
   const platform = usePlatform();
   const { moviesUrl } = useServer();
@@ -287,9 +300,11 @@ export const useSessionPlayer = (
 
     return {
       positionMs: positionAt(current.clock, serverNow()),
-      play: current.clock.status === "playing",
+      play:
+        current.clock.status === "playing" ||
+        holdsSession(carried.current, current.sessionId, current.clock),
     };
-  }, [latestSession, serverNow]);
+  }, [latestSession, serverNow, carried]);
 
   const actions = useMemo(
     (): SessionActions => ({
@@ -337,6 +352,8 @@ export interface SessionFollowInput {
   readonly durationMs: number | null;
   /** The episode after the playing one, as the viewer sees it. */
   readonly nextEpisode: Episode | null;
+  /** The screen's stall hold, which every follower of the screen's playback attempts shares. */
+  readonly carried: RefObject<CarriedHold>;
 }
 
 /** The player following its session. */
@@ -383,7 +400,7 @@ const useTicking = (enabled: boolean, intervalMs: number): number => {
  */
 export const useSessionFollow = (
   sessionPlayer: SessionPlayer,
-  { player, durationMs, nextEpisode }: SessionFollowInput,
+  { player, durationMs, nextEpisode, carried }: SessionFollowInput,
 ): SessionFollow => {
   const platform = usePlatform();
   const { session, hosting, mayControl } = sessionPlayer;
@@ -397,6 +414,7 @@ export const useSessionFollow = (
     durationMs,
     controls: mayControl,
     hosting,
+    carried,
   });
 
   const queue = usePlatformQuery(

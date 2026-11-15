@@ -2,6 +2,9 @@
  * Movie group sessions as the iOS app reaches them over `core.together.*` (ADR 0017). A person
  * holds one place per domain, so every call names the movies domain and none a session.
  */
+import type { SessionClock } from "@media/contracts/clock";
+import type { Hold } from "@media/contracts/follower";
+import { holdStands } from "@media/contracts/follower-policy";
 import type { PlatformSdk } from "@media/sdk/promise";
 
 import type { EpisodeId, TitleId } from "@/lib/catalog";
@@ -52,6 +55,36 @@ export const moviesItem = (item: DomainItem | null): MoviesItem | null =>
 /** A stable key for an item, to compare two items. */
 export const itemKey = (item: DomainItem): string =>
   `${item.domain}:${item.ref.type}:${item.ref.id}`;
+
+/**
+ * A stall hold kept by an owner that outlives the player, with the session it holds (ADR 0017). The
+ * player screen keeps one across its playback attempts, each of which mounts a new follower, so the
+ * next attempt's follower plays the session on once its player plays.
+ */
+export interface CarriedHold {
+  readonly sessionId: string | null;
+  readonly hold: Hold | null;
+}
+
+/** No hold, which an owner starts from. */
+export const NO_HOLD: CarriedHold = { sessionId: null, hold: null };
+
+/**
+ * Whether `carried` holds `sessionId`, at `clock`, paused for this player's own stall: its pause is
+ * on the way, or the hold still stands. A new attempt's player then starts playing rather than
+ * paused, as the hold plays the session on only once it does.
+ */
+export const holdsSession = (
+  carried: CarriedHold,
+  sessionId: string,
+  clock: SessionClock,
+): boolean => {
+  const { hold } = carried;
+
+  if (carried.sessionId !== sessionId || hold === null) return false;
+
+  return hold.kind === "pausing" || holdStands(hold.revision, clock);
+};
 
 /**
  * The web address of a session's join link, `<server>/movies/together#<link>`, as the web app

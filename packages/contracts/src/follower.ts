@@ -149,7 +149,7 @@ export interface FollowerOptions<E> {
    * The hold an earlier follower of this player left, such as one stopped while its stream
    * reloaded: this one plays the session on once the player plays. A pause still on its way counts:
    * the request goes on without its follower, so whichever follower holds it when it lands owns
-   * the play.
+   * the play. A settled hold that no longer stands at `clock` is dropped.
    */
   readonly resumeHold?: Hold | null;
   readonly tunables?: FollowerTunables;
@@ -191,6 +191,13 @@ const asMove = (move: ViewerMove, revision: number): ClockMove =>
   move.kind === "seek" ? { kind: "seek", positionMs: move.positionMs, revision } : move;
 
 /**
+ * A carried hold as a new follower takes it over at `clock`: a settled one that no longer stands
+ * is none, as someone moved the session while the follower was being replaced.
+ */
+const takenOver = (hold: Hold | null, clock: SessionClock): Hold | null =>
+  hold?.kind === "held" && !holdStands(hold.revision, clock) ? null : hold;
+
+/**
  * Starts following `options.clock` with `options.player`. Samples the server's clock first, so a
  * late joiner seeks straight to the live position.
  */
@@ -215,7 +222,7 @@ export const run = Effect.fn("Follower.run")(function* <E>(
     follow: "following",
     offset: null,
     driftMs: null,
-    holding: options.resumeHold ?? null,
+    holding: takenOver(options.resumeHold ?? null, options.clock),
   });
 
   const update = (change: (current: FollowerState) => FollowerState): Effect.Effect<void> =>
