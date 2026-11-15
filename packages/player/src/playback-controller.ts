@@ -861,8 +861,8 @@ export class PlaybackController {
       return;
     }
 
-    // Shows where this device left the song, paused, until it plays.
-    if (this.#resumeAt?.itemId === entry.itemId) this.#stamp(this.#resumeAt.positionMs, false);
+    // Shows where this device left the song, paused, until it plays, and any other from its start.
+    this.#stamp(this.#resumeAt?.itemId === entry.itemId ? this.#resumeAt.positionMs : 0, false);
   }
 
   /** Loads the entry this player moved to once the queue that holds it arrives. */

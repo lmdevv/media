@@ -147,6 +147,19 @@ describe("PlaybackController for Connect", () => {
     expect(run.controller.getSnapshot().engineStatus).toBe("paused");
   });
 
+  it("shows a song the queue moved on to from its start once it let go of its own", async () => {
+    const run = connected();
+
+    await playing(run);
+    run.engine().emit({ type: "time", positionMs: 50_000 });
+    run.controller.release();
+    run.controller.sync(queueOf([one, two], "2"));
+    await settle();
+
+    expect(run.controller.playingHere()).toBeNull();
+    expect(run.controller.positionMs()).toBe(0);
+  });
+
   it("keeps a device that never played idle when the queue moves elsewhere", async () => {
     const run = connected();
 
