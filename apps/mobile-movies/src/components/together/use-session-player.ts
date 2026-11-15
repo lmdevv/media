@@ -117,6 +117,8 @@ export interface SessionPlayer {
 export const useSessionPlayer = (
   page: WatchTarget,
   player: { readonly current: FollowerPlayer | null },
+  /** `follows`: whether the player may follow a session at all; a download plays on its own. */
+  { follows }: { readonly follows: boolean },
 ): SessionPlayer => {
   const platform = usePlatform();
   const { moviesUrl } = useServer();
@@ -140,7 +142,7 @@ export const useSessionPlayer = (
   // Kept past the session's end, whose view no longer names the host.
   if (joined !== null && joined.host !== lastHost) setLastHost(joined.host);
 
-  if (!following && mine && matches && !starting && stopped === null) {
+  if (!following && follows && mine && matches && !starting && stopped === null) {
     setFollowing(true);
   }
 

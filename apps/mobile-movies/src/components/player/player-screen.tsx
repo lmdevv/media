@@ -297,7 +297,7 @@ function PlayerSession({ params, attempt, onRestart, choices }: PlayerSessionPro
     playerNow.current = controller?.port ?? null;
   }, [controller]);
 
-  const together = useSessionPlayer(watching, playerNow);
+  const together = useSessionPlayer(watching, playerNow, { follows: download === null });
   const inSession = together.session !== null && download === null;
   const sessionMode = download === null ? together.mode : "solo";
   const sessionStart = together.startAt;
