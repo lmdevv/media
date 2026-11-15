@@ -409,12 +409,12 @@ interface Phone {
   /** Whether commands go to the core or to this phone's own queue, read when a command runs. */
   readonly mode: { current: "server" | "local" };
   /**
-   * The new queues (`music.queue.play`) sent to the server that went unanswered before this phone
-   * played on without it: each resolves true once it landed, false once it failed. Convex sends
-   * them again once the connection is back, ahead of anything sent later, so the hand-back waits
-   * for them first.
+   * The new queues (`music.queue.play`) sent to the server that went unanswered when this phone
+   * gave up waiting, one token each. One leaves once it fails, or once it lands while the player
+   * follows the server. Any still here at the hand-back landed, or may land, while this phone played
+   * its own queue, so the server no longer holds the entries the phone names.
    */
-  readonly unanswered: Array<Promise<boolean>>;
+  readonly unanswered: Set<symbol>;
 }
 
 interface PhoneProps {
@@ -444,7 +444,7 @@ const createPhone = ({
 
   const local = new LocalStore(playsKey);
   const mode: Phone["mode"] = { current: "server" };
-  const unanswered: Phone["unanswered"] = [];
+  const unanswered: Phone["unanswered"] = new Set();
   const controls = lockScreenControls(engine);
 
   const artFor = (artUrl: string | null): string | null => resolveMediaUrl(mediaUrl, artUrl);
@@ -503,12 +503,20 @@ const createPhone = ({
       // A slow server that still answers gets the play: going local now would hand it a second
       // queue once it is back.
       if (Option.isSome(await readHealth(mediaUrl))) return pending;
-      unanswered.push(
-        pending.then(
+      const left = Symbol("unanswered play");
+
+      unanswered.add(left);
+
+      const settle = async (): Promise<void> => {
+        const landed = await pending.then(
           () => true,
           () => false,
-        ),
-      );
+        );
+
+        if (!landed || mode.current === "server") unanswered.delete(left);
+      };
+
+      void settle();
       probe.current();
 
       if (!trackIds.some((id) => copies.find(id) !== null)) throw new Error(OFFLINE_MESSAGE);
@@ -818,26 +826,12 @@ const sendStep = async (platform: PlatformSdk, step: HandBackStep): Promise<void
 };
 
 /**
- * Whether a new queue left unanswered when the phone went its own way landed since: the server
- * then holds none of the entries the phone names. One still unanswered by the deadline may yet
- * land, ahead of the hand-back, so it counts as landed.
- */
-const anyLanded = async (unanswered: ReadonlyArray<Promise<boolean>>): Promise<boolean> => {
-  if (unanswered.length === 0) return false;
-  const settled = await withDeadline(Promise.all(unanswered), ACK_DEADLINE_MS);
-
-  return Option.match(settled, {
-    onNone: () => true,
-    onSome: (landed) => landed.some(Boolean),
-  });
-};
-
-/**
  * Hands this phone's own queue back once the server answers again: the plays it made go to
  * history; a queue edited here replaces the core's, or else the core moves to the entry this phone
- * played; and shuffle and repeat changed here go too. A new queue left unanswered when the phone
- * went its own way is waited for first. It waits while a song plays, so the song is not cut off,
- * and goes back at the next pause or stop.
+ * played; and shuffle and repeat changed here go too. After a new queue left unanswered when the
+ * phone went its own way, the whole queue goes back: Convex runs that queue first, as it runs one
+ * client's mutations in order, and the hand-back then puts back what the phone played. It waits
+ * while a song plays, so the song is not cut off, and goes back at the next pause or stop.
  */
 const useHandBack = (
   platform: PlatformSdk,
@@ -886,20 +880,14 @@ const useHandBack = (
 
   useEffect(() => {
     if (!online || audible || mode.current !== "local") return;
-    const held = local.getSnapshot();
-    const waiting = unanswered.splice(0);
+    const steps = handBack(local.getSnapshot(), unanswered.size > 0);
+    unanswered.clear();
     mode.current = "server";
     setMode("server");
 
     // Sent together, in order: Convex runs one client's mutations in the order they were sent.
     // One refused step leaves the others: each changes only what it names.
-    const send = async (): Promise<void> => {
-      const steps = handBack(held, await anyLanded(waiting));
-
-      await Promise.all(steps.map(async (step) => sendStep(platform, step).catch(() => undefined)));
-    };
-
-    void send();
+    for (const step of steps) void sendStep(platform, step).catch(() => undefined);
   }, [platform, local, mode, unanswered, online, audible, setMode]);
 };
 

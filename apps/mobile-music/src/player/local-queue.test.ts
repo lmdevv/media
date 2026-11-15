@@ -228,6 +228,13 @@ describe("the phone's own queue", () => {
     ]);
   });
 
+  it("clears nothing while it plays none of the server's songs", () => {
+    const { held } = sixSongs();
+    const none = seedLocal(held.state, () => null);
+
+    expect(clearLocal(none)).toBe(none);
+  });
+
   it("keeps its plays for the server's history", () => {
     expect(recordPlay(empty, one.id, 42).plays).toEqual([{ trackId: one.id, playedAt: 42 }]);
   });

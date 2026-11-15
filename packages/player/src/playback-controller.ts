@@ -255,7 +255,10 @@ export class PlaybackController {
   readonly #transcode = new Set<string>();
   #mseFailed = false;
   #renewed: string | null = null;
-  /** Entries skipped because nothing could play them, since a song last played here. */
+  /**
+   * Entries skipped one after another because nothing could play them, since a song last played
+   * here or the listener last asked for one.
+   */
   readonly #skipped = new Set<string>();
   #loading = false;
   #unsubscribeEngine: (() => void) | null = null;
@@ -400,6 +403,7 @@ export class PlaybackController {
    */
   async playTracks(trackIds: ReadonlyArray<string>, index?: number): Promise<void> {
     this.#unlockOutput();
+    this.#skipped.clear();
     this.#wantPlaying = true;
     this.#update({ error: null });
     const picked = trackIds[index ?? 0];
@@ -435,6 +439,7 @@ export class PlaybackController {
     const entry = this.#currentEntry();
 
     if (entry === null) return;
+    this.#skipped.clear();
 
     if (this.#needsSource(entry)) {
       this.#unlockOutput();
@@ -462,6 +467,8 @@ export class PlaybackController {
     const queue = this.#queue;
     const at = this.#currentIndex();
 
+    this.#skipped.clear();
+
     if (queue === null || at === null) return;
 
     const index = nextIndex(at, queue.entries.length, queue.repeat);
@@ -474,6 +481,8 @@ export class PlaybackController {
   async previous(): Promise<void> {
     const queue = this.#queue;
     const at = this.#currentIndex();
+
+    this.#skipped.clear();
 
     if (queue === null || at === null) return;
 
@@ -492,6 +501,7 @@ export class PlaybackController {
   /** Plays the queue entry `itemId`. */
   async jump(itemId: string): Promise<void> {
     this.#unlockOutput();
+    this.#skipped.clear();
     await this.#jumpTo(itemId, true);
   }
 
@@ -540,6 +550,7 @@ export class PlaybackController {
    */
   retry(): void {
     if (this.#snapshot.engineStatus !== "error") return;
+    this.#skipped.clear();
     this.#stopHealthProbe();
     this.#update({ mediaOnline: true, engineStatus: "idle", error: null });
     void this.#loadCurrent();

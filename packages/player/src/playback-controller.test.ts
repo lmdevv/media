@@ -710,6 +710,26 @@ describe("PlaybackController", () => {
     });
   });
 
+  it("skips again in a new queue, whatever entries an earlier queue skipped", async () => {
+    const { controller, record } = setup({ playCurrent: "2", copies: ["b"], offline: true });
+
+    controller.sync(queueOf([entry("d", "1")], "1"));
+    await controller.togglePlay();
+    await settle();
+
+    expect(controller.getSnapshot()).toMatchObject({
+      engineStatus: "error",
+      error: NOT_DOWNLOADED,
+    });
+
+    await controller.playTracks(["e", "b"], 0);
+    controller.sync(queueOf([entry("e", "2"), entry("b", "1")], "2"));
+    await settle();
+
+    expect(record.loads.map((load) => load.url)).toStrictEqual([copyUrl("b")]);
+    expect(controller.getSnapshot()).toMatchObject({ current: "1", engineStatus: "playing" });
+  });
+
   it("moves to the next entry at once and keeps it while the core confirms", async () => {
     const { controller, record, sent } = setup({ playCurrent: "1" });
 

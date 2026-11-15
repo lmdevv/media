@@ -85,6 +85,28 @@ const keptOrder = <T extends Track>(
   return order.filter((id) => present.has(id));
 };
 
+/**
+ * `entries` in their order before shuffle: those `unshuffled` lists in its order, then any it
+ * doesn't list (none, normally) in the order they play, as old music's `shuffledOff`.
+ */
+const listedOrder = <T extends Track>(
+  entries: ReadonlyArray<QueueEntry<T>>,
+  unshuffled: ReadonlyArray<string> | null,
+): ReadonlyArray<QueueEntry<T>> => {
+  const byId = new Map(entries.map((entry) => [entry.itemId, entry]));
+  const order = keptOrder(unshuffled ?? [], entries);
+  const listed = new Set(order);
+
+  return [
+    ...order.flatMap((id) => {
+      const entry = byId.get(id);
+
+      return entry === undefined ? [] : [entry];
+    }),
+    ...entries.filter((entry) => !listed.has(entry.itemId)),
+  ];
+};
+
 /** Fisher-Yates shuffle into a new array, drawing from `random` (uniform in `[0, 1)`). */
 const shuffled = <A>(items: ReadonlyArray<A>, random: () => number): ReadonlyArray<A> => {
   const result = [...items];
@@ -332,9 +354,11 @@ export const moveLocal = <T extends Track>(
   );
 };
 
-/** Clears everything after the entry playing. */
+/** Clears everything after the entry playing; with none playing, nothing. */
 export const clearLocal = <T extends Track>(queue: LocalQueue<T>): LocalQueue<T> => {
   const at = indexOf(queue.state.entries, queue.state.current);
+
+  if (at === -1) return queue;
   const entries = queue.state.entries.slice(0, at + 1);
 
   return edited(
@@ -379,22 +403,9 @@ export const shuffleLocal = <T extends Track>(
     };
   }
 
-  const byId = new Map(entries.map((entry) => [entry.itemId, entry]));
-  const order = keptOrder(queue.unshuffled ?? [], entries);
-  const listed = new Set(order);
-
-  const restored = [
-    ...order.flatMap((id) => {
-      const entry = byId.get(id);
-
-      return entry === undefined ? [] : [entry];
-    }),
-    ...entries.filter((entry) => !listed.has(entry.itemId)),
-  ];
-
   return {
     ...queue,
-    state: { ...queue.state, entries: restored, shuffle: false },
+    state: { ...queue.state, entries: listedOrder(entries, queue.unshuffled), shuffle: false },
     unshuffled: null,
   };
 };
@@ -446,18 +457,7 @@ export const handBack = <T extends Track>(
   if (repeat !== queue.server.repeat) preferences.push({ kind: "repeat", mode: repeat });
 
   if ((queue.changed || replaced) && entries.length > 0) {
-    const order = queue.unshuffled ?? [];
-    const listed = new Set(order);
-    const byId = new Map(entries.map((entry) => [entry.itemId, entry]));
-
-    const ordered = [
-      ...order.flatMap((id) => {
-        const entry = byId.get(id);
-
-        return entry === undefined ? [] : [entry];
-      }),
-      ...entries.filter((entry) => !listed.has(entry.itemId)),
-    ];
+    const ordered = listedOrder(entries, queue.unshuffled);
 
     return [
       ...preferences,
