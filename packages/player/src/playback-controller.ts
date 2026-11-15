@@ -1130,9 +1130,9 @@ export class PlaybackController {
 
   /**
    * Moves the song loaded here to `target` unless it is within a quarter second of it, then plays
-   * or pauses it as `#wantPlaying` says, even when it does so already, so the engine ends doing and
-   * meaning what the controller means to. A song whose source failed loads again from `target` when
-   * it is to play.
+   * or pauses it as `#wantPlaying` says, even when it already plays or is paused, so the engine ends
+   * doing and meaning what the controller means to. A song whose source failed loads again from
+   * `target` when it is to play.
    */
   #steerLoaded(loaded: LoadedEntry, target: number): void {
     const playing = this.#wantPlaying;
@@ -1158,10 +1158,11 @@ export class PlaybackController {
       if (!this.#reloadIfExpired(this.#livePositionMs())) void this.#engine.play();
     } else if (playing) {
       void this.#engine.play();
-    } else {
+    } else if (audible) {
       this.#engine.pause();
-
-      if (audible) this.#saveResume();
+      this.#saveResume();
+    } else if (this.#snapshot.engineStatus === "paused") {
+      this.#engine.pause();
     }
   }
 
