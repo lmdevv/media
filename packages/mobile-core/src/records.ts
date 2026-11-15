@@ -1,5 +1,6 @@
 import type { PlatformGrant } from "@media/sdk/promise";
 import { Option, Schema } from "effect";
+import { Base64Url } from "effect/encoding";
 
 import type { Keychain } from "./keychain";
 import type { ServerConnection } from "./server";
@@ -60,22 +61,29 @@ const PHONE_KEY = "media.phone";
 const CONNECTION_KEY = "media.server";
 
 /**
- * A keychain key made of `parts`, such as a name, a server's address and a user id, joined with
- * dots. expo-secure-store refuses a key with anything but letters, digits, `.`, `-` and `_`, on
- * reads and writes alike, so every other character of a part becomes `_`: a server's
- * `https://music.home:8443` becomes `https___music.home_8443`. Keys built from a server keep one
- * record per server, so nothing crosses servers.
+ * A server's address as a keychain key: one record per server, so nothing crosses servers. Kept as
+ * it was when the movies app first stored records under it, so an update finds them. It is not
+ * one-to-one (`/music/a` and `/music_a` meet), so new keys use `keychainKey`.
  */
-export const keychainKey = (...parts: ReadonlyArray<string>): string =>
-  parts.map((part) => part.replace(/[^\w.-]/gu, "_")).join(".");
+const serverKey = (server: string): string => server.replace(/[^\w.-]/gu, "_");
 
-const appKey = (server: string): string => keychainKey("media.app", server);
+/**
+ * The keychain key for `parts`, such as a server's address and a user id, under the fixed `name`.
+ * expo-secure-store refuses a key with anything but letters, digits, `.`, `-` and `_`, on reads and
+ * writes alike. Each part is written in unpadded base64url, which uses only letters, digits, `-`
+ * and `_`, and the parts are joined with dots, so distinct parts always give distinct keys: no two
+ * servers, and no two people on one, share a record.
+ */
+export const keychainKey = (name: string, ...parts: ReadonlyArray<string>): string =>
+  [name, ...parts.map((part) => Base64Url.encode(part))].join(".");
+
+const appKey = (server: string): string => `media.app.${serverKey(server)}`;
 
 /**
  * Where the SDK keeps this app's session for the server at `mediaUrl`, in the app's own keychain
  * (D48). Each server has its own key, so a token saved late for one server never reaches another.
  */
-export const sessionKeyFor = (mediaUrl: string): string => keychainKey("media.session", mediaUrl);
+export const sessionKeyFor = (mediaUrl: string): string => `media.session.${serverKey(mediaUrl)}`;
 
 const readJson = <A>(
   keychain: Keychain,

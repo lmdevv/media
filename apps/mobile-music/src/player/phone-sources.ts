@@ -11,7 +11,7 @@ export const NOT_DOWNLOADED = "This song isn’t downloaded";
  * This phone's sources, as old music's `localFirst`: its downloaded copy of a song first, online
  * too; otherwise `remote`'s stream while the player follows the server's queue; and nothing while
  * the phone plays its own queue without the server, so the player skips the song at once instead
- * of waiting for a connection. A copy that fails to play is discarded, so the song streams, or is
+ * of waiting for a connection, or while the player asks for this phone's copies alone. A copy that fails to play is discarded, so the song streams, or is
  * skipped offline, when it loads again; downloads fetch it again when its file is broken.
  *
  * @param mode - Whether the player follows the server's queue or this phone's own, read on each
@@ -24,7 +24,7 @@ export const phoneSources = (
   mode: { readonly current: "server" | "local" },
   newId: () => string,
 ): SourceResolver => ({
-  resolve: async (track, profile) => {
+  resolve: async (track, profile, reach) => {
     const copy = copies.find(track.id);
 
     if (copy !== null) {
@@ -42,11 +42,11 @@ export const phoneSources = (
       });
     }
 
-    if (mode.current === "local") {
+    if (mode.current === "local" || reach === "device") {
       return Result.fail(new SourceUnreachable({ message: NOT_DOWNLOADED }));
     }
 
-    return remote.resolve(track, profile);
+    return remote.resolve(track, profile, reach);
   },
   discard: copies.discard,
 });

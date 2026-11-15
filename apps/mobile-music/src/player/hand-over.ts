@@ -1,3 +1,6 @@
+import { Option } from "effect";
+
+import { withDeadline } from "./deadline";
 import type { HandBackStep } from "./local-queue";
 
 /** One hand-back of this phone's own queue to the core (`handBack`'s steps). */
@@ -13,6 +16,13 @@ export interface HandOver {
   readonly adopt: (fromItemId: string, toItemId: string) => void;
   /** Moves the player onto the core's queue. */
   readonly follow: () => void;
+  /** How long the steps may take to settle before the phone stops waiting for them. */
+  readonly deadlineMs: number;
+  /**
+   * Gives up on this hand-back when its steps did not settle in time: commands go to the phone's
+   * own queue again, and the hand-back is tried again later.
+   */
+  readonly release: () => void;
 }
 
 /**
@@ -26,6 +36,10 @@ export interface HandOver {
  * Old music did the same: its router kept showing the phone's own session while it reconciled,
  * and sent the position with it (`devices.reconcile`). The core's queue keeps no position, so the
  * phone keeps it.
+ *
+ * A step that never settles, as when the media server answers but the core does not, would hold
+ * the player on the phone's queue while commands go to the core. Past `deadlineMs` the phone stops
+ * waiting and `release` hands commands back to its own queue, as the outage left them.
  */
 export const handOver = async ({
   steps,
@@ -34,12 +48,22 @@ export const handOver = async ({
   stands,
   adopt,
   follow,
+  deadlineMs,
+  release,
 }: HandOver): Promise<void> => {
   // Sent together, in order: Convex runs one client's mutations in the order they were sent. One
   // refused step leaves the others: each changes only what it names.
-  const answers = await Promise.allSettled(steps.map(send));
+  const settled = await withDeadline(Promise.allSettled(steps.map(send)), deadlineMs);
 
   if (!stands()) return;
+
+  if (Option.isNone(settled)) {
+    release();
+
+    return;
+  }
+
+  const answers = settled.value;
 
   for (const answer of answers) {
     if (playing !== null && answer.status === "fulfilled" && answer.value !== null) {

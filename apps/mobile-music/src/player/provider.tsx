@@ -56,6 +56,7 @@ import {
   seedLocal,
   shuffleLocal,
 } from "./local-queue";
+import { withDeadline } from "./deadline";
 import { handOver } from "./hand-over";
 import type { HandBackStep, LocalQueue } from "./local-queue";
 import { LocalStore, offlinePlaysKey } from "./local-store";
@@ -97,6 +98,15 @@ const RESUME_KEY = "music.resume";
 const OFFLINE_PLAYS_MAX = 500;
 
 const OFFLINE_PLAYS_RETRY_MS = 30_000;
+
+/**
+ * How long a hand-back may go unanswered before the phone goes back to its own queue, and how long
+ * it then waits to try again. A core that never answers while the media server does shows up this
+ * way.
+ */
+const HAND_BACK_DEADLINE_MS = 10_000;
+
+const HAND_BACK_RETRY_MS = 15_000;
 
 /** What screens can ask the player to do. Actions never reject: failures show up in `error`. */
 export interface PlayerActions {
@@ -334,20 +344,6 @@ const trackOfCopy = (copies: DownloadedCopies, trackId: string): Track | null =>
   };
 };
 
-const withDeadline = async <A,>(call: Promise<A>, ms: number): Promise<Option.Option<A>> => {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-
-  const late = new Promise<Option.Option<A>>((resolve) => {
-    timer = setTimeout(() => resolve(Option.none()), ms);
-  });
-
-  try {
-    return await Promise.race([call.then(Option.some), late]);
-  } finally {
-    clearTimeout(timer);
-  }
-};
-
 const logTimeline = (mark: TimelineMark): void => {
   if (__DEV__) console.info(`[gapless] ${JSON.stringify(mark)}`);
 };
@@ -370,6 +366,30 @@ interface Phone {
    */
   readonly handing: { current: symbol | null };
 }
+
+/**
+ * Keeps `pending`, a new queue sent to the core that this phone stopped waiting for, in
+ * `unanswered` until it fails, or lands while the player follows the core.
+ */
+const holdUnanswered = (
+  { mode, unanswered }: Pick<Phone, "mode" | "unanswered">,
+  pending: Promise<unknown>,
+): void => {
+  const left = Symbol("unanswered play");
+
+  unanswered.add(left);
+
+  const settle = async (): Promise<void> => {
+    const landed = await pending.then(
+      () => true,
+      () => false,
+    );
+
+    if (!landed || mode.current === "server") unanswered.delete(left);
+  };
+
+  void settle();
+};
 
 interface PhoneProps {
   readonly platform: PlatformSdk;
@@ -458,20 +478,7 @@ const createPhone = ({
       // A slow server that still answers gets the play: going local now would hand it a second
       // queue once it is back.
       if (Option.isSome(await readHealth(mediaUrl))) return pending;
-      const left = Symbol("unanswered play");
-
-      unanswered.add(left);
-
-      const settle = async (): Promise<void> => {
-        const landed = await pending.then(
-          () => true,
-          () => false,
-        );
-
-        if (!landed || mode.current === "server") unanswered.delete(left);
-      };
-
-      void settle();
+      holdUnanswered({ mode, unanswered }, pending);
       probe.current();
 
       if (!trackIds.some((id) => copies.find(id) !== null)) throw new Error(OFFLINE_MESSAGE);
@@ -774,7 +781,8 @@ const sendStep = async (platform: PlatformSdk, step: HandBackStep): Promise<stri
  * client's mutations in order, and the hand-back then puts back what the phone played. It waits
  * while a song plays, so the song is not cut off, and goes back at the next pause or stop.
  * Commands go to the core from then on, after the hand-back; the player keeps the phone's queue
- * until the core confirms it (`handOver`).
+ * until the core confirms it (`handOver`). A hand-back the core leaves unanswered gives commands
+ * back to the phone's queue and is tried again later; a new queue in it counts as unanswered.
  */
 const useHandBack = (
   platform: PlatformSdk,
@@ -788,6 +796,15 @@ const useHandBack = (
   const plays = queue.plays;
   const sending = useRef(false);
   const [retry, setRetry] = useState(0);
+  const [again, setAgain] = useState(0);
+  const againTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useEffect(
+    () => () => {
+      clearTimeout(againTimer.current);
+    },
+    [],
+  );
 
   // One batch at a time, so a play recorded meanwhile is not sent twice; the batch's removal
   // starts the next.
@@ -830,9 +847,17 @@ const useHandBack = (
     mode.current = "server";
     handing.current = token;
 
+    const newQueues: Array<Promise<unknown>> = [];
+
     void handOver({
       steps,
-      send: (step) => sendStep(platform, step),
+      send: (step) => {
+        const sent = sendStep(platform, step);
+
+        if (step.kind === "play") newQueues.push(sent);
+
+        return sent;
+      },
       playing: held.state.current,
       stands: () => handing.current === token,
       adopt: (fromItemId, toItemId) => {
@@ -842,8 +867,19 @@ const useHandBack = (
         handing.current = null;
         setMode("server");
       },
+      deadlineMs: HAND_BACK_DEADLINE_MS,
+      release: () => {
+        handing.current = null;
+        mode.current = "local";
+
+        for (const sent of newQueues) holdUnanswered({ mode, unanswered }, sent);
+        clearTimeout(againTimer.current);
+        againTimer.current = setTimeout(() => {
+          setAgain((count) => count + 1);
+        }, HAND_BACK_RETRY_MS);
+      },
     });
-  }, [platform, controller, local, mode, unanswered, handing, online, audible, setMode]);
+  }, [platform, controller, local, mode, unanswered, handing, online, audible, setMode, again]);
 };
 
 /** Whose player this is: the signed-in person, or offline the one who last signed in here. */

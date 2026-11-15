@@ -9,6 +9,9 @@ import { messageOf } from "./failure";
 /** Renew a ticket this long before it expires, as old music renewed its signed URLs. */
 const RENEW_MARGIN_MS = 5 * 60_000;
 
+/** Why a stream can't answer from this device alone. */
+const NO_COPY_MESSAGE = "This song isn’t on this device";
+
 /** What `music.play.start` answers: a personal ticket for one song in this session. */
 export interface PlayStart {
   /** This start's own playback id, which `music.play.report` carries. */
@@ -62,12 +65,23 @@ export class SourceUnreachable extends Data.TaggedError("SourceUnreachable")<{
   readonly message: string;
 }> {}
 
+/**
+ * Where a source may come from: anywhere, or only this device, while the media server can't be
+ * reached and no stream would play.
+ */
+export type SourceReach = "any" | "device";
+
 /** Where the player gets a song's bytes: a copy on this device, or a ticket from the server. */
 export interface SourceResolver {
-  /** Answers `track`'s source, starting it on the server when it streams at `profile`. */
+  /**
+   * Answers `track`'s source, starting it on the server when it streams at `profile`. With `reach`
+   * `"device"` it answers only a copy on this device and never asks the server: `SourceUnreachable`
+   * otherwise.
+   */
   readonly resolve: (
     track: PlayableTrack,
     profile: MusicStreamProfile,
+    reach: SourceReach,
   ) => Promise<Result.Result<ResolvedSource, StreamRefused | SourceUnreachable>>;
   /**
    * The copy of `trackId` at `url` on this device failed to play: stop offering it. Naming the URL
@@ -103,7 +117,11 @@ export const ticketSources = (
   start: (trackId: string) => Promise<PlayStart>,
   env: { readonly now: () => number; readonly baseUrl: string },
 ): SourceResolver => ({
-  resolve: async (track, profile) => {
+  resolve: async (track, profile, reach) => {
+    if (reach === "device") {
+      return Result.fail(new SourceUnreachable({ message: NO_COPY_MESSAGE }));
+    }
+
     try {
       const requestedAt = env.now();
       const started = await start(track.id);

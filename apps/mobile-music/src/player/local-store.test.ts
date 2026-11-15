@@ -53,6 +53,21 @@ describe("offline plays", () => {
     expect(offlinePlaysKey(`${SERVER}/`, PERSON)).toMatch(SECURE_STORE_KEY);
   });
 
+  it("keeps the plays of servers whose addresses differ only in punctuation apart", () => {
+    const store = keychainStore();
+
+    new LocalStore(launch(store), offlinePlaysKey("https://media.home/music/a", PERSON)).update(
+      (queue) => recordPlay(queue, "t-a", 1000),
+    );
+
+    expect(
+      new LocalStore(
+        launch(store),
+        offlinePlaysKey("https://media.home/music_a", PERSON),
+      ).getSnapshot().plays,
+    ).toEqual([]);
+  });
+
   it("keeps them through a relaunch until they reach the server", () => {
     const store = keychainStore();
     const key = offlinePlaysKey(SERVER, PERSON);

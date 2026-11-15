@@ -145,8 +145,36 @@ describe("keychain keys", () => {
     const key = keychainKey("music.offlinePlays", server, userId);
 
     expect(key).toMatch(SECURE_STORE_KEY);
-    expect(key).toBe(`music.offlinePlays.https___music.home_8443_.${userId}`);
+    expect(key.length).toBeLessThan(256);
     expect(sessionKeyFor(server)).toMatch(SECURE_STORE_KEY);
+  });
+
+  it("gives distinct servers and people distinct keys, each one expo-secure-store takes", () => {
+    const servers = [
+      "https://media.home/music/a",
+      "https://media.home/music_a",
+      "https://media.home/music.a",
+      "https://media.home/music-a",
+      "https://media.home:8443/music/a",
+      "https://media.home/music/a/",
+      "https://Media.home/music/a",
+      "http://media.home/music/a",
+      "https://media.home/música/a",
+      "https://media.home/music/a?x=1",
+      "https://media.home/music/a.",
+      "https://media.home",
+      "",
+    ];
+
+    const users = [userId, "jd7f3k2m9x8b1c4v5n6q0w2e3r4t5y6v", "a.b", "a", "", "a_b"];
+
+    const pairs = servers.flatMap((one) => users.map((user) => ({ one, user })));
+    const keys = pairs.map(({ one, user }) => keychainKey("music.offlinePlays", one, user));
+
+    for (const key of keys) expect(key).toMatch(SECURE_STORE_KEY);
+    expect(new Set(keys).size).toBe(pairs.length);
+    // A dot inside a part never moves the boundary between parts.
+    expect(keychainKey("n", "a.b", "c")).not.toBe(keychainKey("n", "a", "b.c"));
   });
 
   it("keeps every record mobile-core writes, so a relaunch reads it back", async () => {

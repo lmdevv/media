@@ -1,5 +1,5 @@
 import type { SourceResolver } from "@media/player/source-resolver";
-import { ticketSources } from "@media/player/source-resolver";
+import { SourceUnreachable, ticketSources } from "@media/player/source-resolver";
 import { Result } from "effect";
 import { describe, expect, it } from "vitest";
 
@@ -35,18 +35,25 @@ const downloads = (trackIds: ReadonlyArray<string>) => {
   return { copies, discarded };
 };
 
+/** The server's tickets asked for, by song. */
+const started: Array<string> = [];
+
 const streams: SourceResolver = ticketSources(
-  async (trackId) => ({
-    playbackId: `p-${trackId}`,
-    startedAt: 0,
-    ticket: "t1",
-    expiresAt: 6 * 60 * 60 * 1000,
-  }),
+  async (trackId) => {
+    started.push(trackId);
+
+    return {
+      playbackId: `p-${trackId}`,
+      startedAt: 0,
+      ticket: "t1",
+      expiresAt: 6 * 60 * 60 * 1000,
+    };
+  },
   { now: () => 0, baseUrl: BASE },
 );
 
 const urlOf = async (sources: SourceResolver): Promise<string> => {
-  const resolved = await sources.resolve(song, "aac-320");
+  const resolved = await sources.resolve(song, "aac-320", "any");
 
   return Result.isSuccess(resolved) ? resolved.success.source.url : resolved.failure.message;
 };
@@ -55,7 +62,7 @@ describe("phoneSources", () => {
   it("plays the downloaded copy online, and streams the song once the copy failed", async () => {
     const { copies, discarded } = downloads([song.id]);
     const sources = phoneSources(copies, streams, { current: "server" }, () => "1");
-    const first = await sources.resolve(song, "aac-320");
+    const first = await sources.resolve(song, "aac-320", "any");
 
     expect(Result.isSuccess(first) ? first.success : null).toMatchObject({
       origin: "local",
@@ -73,11 +80,28 @@ describe("phoneSources", () => {
     const sources = phoneSources(copies, streams, { current: "local" }, () => "1");
 
     sources.discard(song.id, uri(song.id));
-    const resolved = await sources.resolve(song, "aac-320");
+    const resolved = await sources.resolve(song, "aac-320", "any");
 
     expect(Result.isFailure(resolved) ? resolved.failure : null).toMatchObject({
       _tag: "SourceUnreachable",
       message: NOT_DOWNLOADED,
     });
+  });
+
+  it("answers only the copy, never asking the server, while the player can't reach it", async () => {
+    const { copies } = downloads([song.id]);
+    const other = trackOf("Angel", "Massive Attack", "Mezzanine");
+    const sources = phoneSources(copies, streams, { current: "server" }, () => "1");
+    const before = started.length;
+
+    const copy = await sources.resolve(song, "aac-320", "device");
+    const missing = await sources.resolve(other, "aac-320", "device");
+
+    expect(Result.isSuccess(copy) ? copy.success : null).toMatchObject({
+      origin: "local",
+      source: { url: uri(song.id) },
+    });
+    expect(Result.isFailure(missing) ? missing.failure : null).toBeInstanceOf(SourceUnreachable);
+    expect(started.slice(before)).toStrictEqual([]);
   });
 });

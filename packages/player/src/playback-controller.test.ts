@@ -337,7 +337,7 @@ const setup = (
 
   /** A device's resolver: its copy of a song first, else a stream, else nothing while offline. */
   const sources: SourceResolver = {
-    resolve: async (track, profile) => {
+    resolve: async (track, profile, reach) => {
       if (copies.has(track.id)) {
         return Result.succeed({
           origin: "local",
@@ -357,7 +357,7 @@ const setup = (
         return Result.fail(new SourceUnreachable({ message: NOT_DOWNLOADED }));
       }
 
-      return streams.resolve(track, profile);
+      return streams.resolve(track, profile, reach);
     },
     discard: (trackId, url) => {
       discarded.push(url);
@@ -1221,6 +1221,87 @@ describe("PlaybackController", () => {
       expect(record.loads.at(-1)).toMatchObject({ startMs: 60_000 });
       expect(record.loads.at(-1)?.url).toContain("/stream/a?");
       expect(controller.getSnapshot().current).toBe("1");
+    });
+
+    it("plays a downloaded song picked after a stream failed, without waiting for the server", async () => {
+      const media = await mediaServer();
+      const run = setup({ playCurrent: "1", baseUrl: media.baseUrl, copies: ["b"] });
+
+      try {
+        await run.controller.playTracks(["a", "b"], 0);
+        run.controller.sync(queueOf([one, two], "1"));
+        await settle();
+        media.state.healthy = false;
+        run.engine().emit({ type: "error", reason: "network", message: "network" });
+
+        await vi.waitFor(() => {
+          expect(run.controller.getSnapshot().mediaOnline).toBe(false);
+        });
+        const startsBefore = names(run.sent).filter((name) => name.startsWith("start:"));
+
+        await run.controller.jump("2");
+        await settle();
+
+        expect(run.record.loads.at(-1)?.url).toBe(copyUrl("b"));
+        expect(run.controller.getSnapshot()).toMatchObject({
+          current: "2",
+          engineStatus: "playing",
+          mediaOnline: false,
+          error: null,
+        });
+
+        // A song with no copy still waits for the server, which is never asked.
+        await run.controller.jump("1");
+        await settle();
+
+        expect(run.record.loads.at(-1)?.url).toBe(copyUrl("b"));
+        expect(run.controller.getSnapshot()).toMatchObject({ current: "1", engineStatus: "error" });
+        expect(run.engine().samplePlayback().playing).toBe(false);
+        expect(names(run.sent).filter((name) => name.startsWith("start:"))).toStrictEqual(
+          startsBefore,
+        );
+      } finally {
+        run.stop();
+        media.close();
+      }
+    });
+
+    it("keeps a downloaded song playing when the server comes back", async () => {
+      const media = await mediaServer();
+      const run = setup({ playCurrent: "1", baseUrl: media.baseUrl, copies: ["b"] });
+
+      try {
+        await run.controller.playTracks(["a", "b"], 0);
+        run.controller.sync(queueOf([one, two], "1"));
+        await settle();
+        media.state.healthy = false;
+        run.engine().emit({ type: "error", reason: "network", message: "network" });
+
+        await vi.waitFor(() => {
+          expect(run.controller.getSnapshot().mediaOnline).toBe(false);
+        });
+        await run.controller.jump("2");
+        await settle();
+        const loads = run.record.loads.length;
+
+        media.state.healthy = true;
+
+        await vi.waitFor(
+          () => {
+            expect(run.controller.getSnapshot().mediaOnline).toBe(true);
+          },
+          { timeout: 5000 },
+        );
+
+        expect(run.record.loads.length).toBe(loads);
+        expect(run.controller.getSnapshot()).toMatchObject({
+          current: "2",
+          engineStatus: "playing",
+        });
+      } finally {
+        run.stop();
+        media.close();
+      }
     });
   });
 });

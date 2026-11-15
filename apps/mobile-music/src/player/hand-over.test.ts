@@ -1,4 +1,3 @@
-import type { EngineEvent, EngineSource, PlayerEngine } from "@media/player/engine";
 import { PlaybackController } from "@media/player/playback-controller";
 import type { MusicCommands, QueueState } from "@media/player/playback-controller";
 import { ticketSources } from "@media/player/source-resolver";
@@ -12,6 +11,8 @@ import { handOver } from "./hand-over";
 import { handBack, jumpLocal, playingView, seedLocal } from "./local-queue";
 import type { HandBackStep, LocalQueue } from "./local-queue";
 import { phoneSources } from "./phone-sources";
+import { instantEngine, settle } from "./test-engine";
+import type { Load } from "./test-engine";
 
 const BASE = "http://media.test";
 
@@ -35,77 +36,20 @@ const copies: DownloadedCopies = {
   discard: () => {},
 };
 
-interface Load {
-  readonly url: string;
-  readonly startMs: number;
-}
-
-/** An engine that plays at once, as a copy on the phone does, and records every load. */
-const instantEngine = (loads: Array<Load>): PlayerEngine => {
-  const listeners = new Set<(event: EngineEvent) => void>();
-  let positionMs = 0;
-  let playing = false;
-  let loaded: EngineSource | null = null;
-
-  const emit = (event: EngineEvent): void => {
-    if (event.type === "time") positionMs = event.positionMs;
-
-    if (event.type === "playing") playing = true;
-    else if (event.type === "paused") playing = false;
-
-    for (const listener of listeners) listener(event);
-  };
-
-  return {
-    samplePlayback: () => ({ positionMs, playing }),
-    load: async (source, startMs, autoplay) => {
-      loads.push({ url: source.url, startMs });
-      loaded = source;
-      positionMs = startMs;
-      emit({ type: autoplay ? "playing" : "paused" });
-    },
-    preload: () => {},
-    play: async () => {
-      if (loaded !== null) emit({ type: "playing" });
-    },
-    pause: () => {
-      emit({ type: "paused" });
-    },
-    seek: (target) => {
-      emit({ type: "time", positionMs: target });
-    },
-    setVolume: () => {},
-    unload: () => {
-      loaded = null;
-      positionMs = 0;
-      playing = false;
-    },
-    subscribe: (listener) => {
-      listeners.add(listener);
-
-      return () => {
-        listeners.delete(listener);
-      };
-    },
-  };
-};
-
-/** Lets the controller's loads and the engine's answers run, a few macrotasks deep. */
-const settle = async (turns = 5): Promise<void> => {
-  if (turns === 0) return;
-
-  await new Promise<void>((resolve) => {
-    setTimeout(resolve, 0);
-  });
-  await settle(turns - 1);
-};
-
 /** Where the provider's commands go, read when one runs. */
 interface Mode {
   current: "server" | "local";
 }
 
 const stops: Array<() => void> = [];
+
+/** A deadline the cases that settle never reach. */
+const noDeadline = {
+  deadlineMs: 60_000,
+  release: () => {
+    throw new Error("The hand-back was released");
+  },
+};
 
 afterEach(() => {
   for (const stop of stops.splice(0)) stop();
@@ -197,6 +141,12 @@ const pausedOfflineOnB = async () => {
     reconnect: () => {
       mode.current = "server";
     },
+    /** Sends commands to the phone's own queue again, as the provider's `release` does. */
+    goBackLocal: () => {
+      mode.current = "local";
+    },
+    /** Moves to `itemId` the way the player's queue screen does. */
+    jump: (itemId: string) => commands.jump(itemId),
     /** Changes the core's queue, as a hand-back step landing does. */
     land: (next: QueueState<Track>) => {
       server = next;
@@ -240,6 +190,7 @@ describe("handOver", () => {
         phone.controller.adoptEntry(fromItemId, toItemId);
       },
       follow: phone.follow,
+      ...noDeadline,
     });
 
     // The core still names A until the jump lands.
@@ -293,6 +244,7 @@ describe("handOver", () => {
         phone.controller.adoptEntry(fromItemId, toItemId);
       },
       follow: phone.follow,
+      ...noDeadline,
     });
     await settle();
 
@@ -324,6 +276,7 @@ describe("handOver", () => {
         phone.controller.adoptEntry(fromItemId, toItemId);
       },
       follow: phone.follow,
+      ...noDeadline,
     });
     await settle();
 
@@ -348,10 +301,54 @@ describe("handOver", () => {
       follow: () => {
         followed = true;
       },
+      ...noDeadline,
     });
 
     expect(followed).toBe(false);
     expect(phone.controller.getSnapshot().current).toBe("b");
     expect(phone.controller.positionMs()).toBe(PAUSED_AT);
+  });
+
+  it("gives commands back to the phone's queue when the core never answers the hand-back", async () => {
+    const phone = await pausedOfflineOnB();
+    const loadsBefore = phone.loads.length;
+    let followed = false;
+    let released = 0;
+
+    phone.reconnect();
+
+    await handOver({
+      steps: handBack(phone.local(), false),
+      // Media health answers, but the core never settles the jump.
+      send: () => new Promise<string | null>(() => {}),
+      playing: phone.local().state.current,
+      stands: () => true,
+      adopt: () => {
+        followed = true;
+      },
+      follow: () => {
+        followed = true;
+      },
+      deadlineMs: 20,
+      release: () => {
+        released += 1;
+        phone.goBackLocal();
+      },
+    });
+
+    expect(released).toBe(1);
+    expect(followed).toBe(false);
+    expect(phone.controller.getSnapshot()).toMatchObject({ current: "b", engineStatus: "paused" });
+    expect(phone.controller.positionMs()).toBe(PAUSED_AT);
+
+    // The phone's queue answers commands again: a jump back to A moves it there, and Play plays A
+    // from its copy.
+    await phone.jump("a");
+    await phone.controller.togglePlay();
+    await settle();
+
+    expect(phone.local().state.current).toBe("a");
+    expect(phone.controller.getSnapshot()).toMatchObject({ current: "a", engineStatus: "playing" });
+    expect(phone.loads.slice(loadsBefore)).toEqual([{ url: uri(songA.id), startMs: 0 }]);
   });
 });

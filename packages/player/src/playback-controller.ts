@@ -13,6 +13,7 @@ import { SourceUnreachable } from "./source-resolver";
 import type {
   PlayableTrack,
   ResolvedSource,
+  SourceReach,
   SourceResolver,
   StreamRefused,
 } from "./source-resolver";
@@ -715,7 +716,11 @@ export class PlaybackController {
     const started = this.#commands.track(trackId).then(
       async (track) => ({
         track,
-        source: await this.#sources.resolve(track, this.#profileFor(track, this.#wantedEngine())),
+        source: await this.#sources.resolve(
+          track,
+          this.#profileFor(track, this.#wantedEngine()),
+          this.#reach(),
+        ),
       }),
       () => null,
     );
@@ -1002,8 +1007,9 @@ export class PlaybackController {
         reported: false,
       };
       this.#stamp(startMs, false);
-
-      if (!this.#snapshot.mediaOnline) return;
+      // While the media server is away only a copy on this device plays, as old music's player
+      // allowed: the song waits for the server otherwise.
+      const reach = this.#reach();
       const engine = this.#wantedEngine();
       this.#update({ engineStatus: "loading", error: null, autoplayBlocked: false });
       // A switch drops the preload with the engine that held it.
@@ -1017,11 +1023,23 @@ export class PlaybackController {
 
       const requested: Requested =
         preloaded === null
-          ? (ahead ?? (await this.#sources.resolve(track, profile)))
+          ? (ahead ?? (await this.#sources.resolve(track, profile, reach)))
           : Result.succeed(preloaded);
 
       // A ticket that answers after the listener moved on, a failure included, is not this song's.
       if (generation !== this.#generation) return;
+
+      if (
+        reach === "device" &&
+        (Result.isFailure(requested) || requested.success.origin !== "local")
+      ) {
+        // A copy that played meanwhile stops, so it does not play under this song's name.
+        this.#engine.unload();
+        this.#stamp(startMs, false);
+        this.#update({ engineStatus: "error", error: MEDIA_OFFLINE_MESSAGE });
+
+        return;
+      }
 
       if (Result.isFailure(requested)) {
         // The song before stops too, so nothing plays under the name of a song that did not start.
@@ -1148,7 +1166,7 @@ export class PlaybackController {
   #preloadRequest(): PreloadRequest | null {
     const engine = this.#snapshot.engine;
 
-    if (this.#wantedEngine() !== engine || !this.#snapshot.mediaOnline) return null;
+    if (this.#wantedEngine() !== engine) return null;
     const entry = this.#followingEntry();
 
     if (entry === null) return null;
@@ -1173,7 +1191,8 @@ export class PlaybackController {
 
     if (request === null) return;
     this.#preloading = request;
-    const resolved = await this.#sources.resolve(request.entry.track, request.profile);
+    const reach = this.#reach();
+    const resolved = await this.#sources.resolve(request.entry.track, request.profile, reach);
 
     if (this.#preloading === request) this.#preloading = null;
 
@@ -1182,6 +1201,12 @@ export class PlaybackController {
     const wanted = this.#preloadRequest();
 
     if (Result.isFailure(resolved) || wanted === null || !samePreload(request, wanted)) return;
+
+    // A stream answered just before the media server went away won't play.
+    if (reach !== this.#reach() || (reach === "device" && resolved.success.origin !== "local")) {
+      return;
+    }
+
     this.#engine.preload(resolved.success.source);
     this.#preloaded = { entry: wanted.entry, ...resolved.success };
   }
@@ -1431,12 +1456,25 @@ export class PlaybackController {
         Effect.tap(() =>
           Effect.sync(() => {
             this.#healthFiber = null;
+
+            // A copy on this device that plays meanwhile goes on.
+            if (this.#loaded?.origin === "local") {
+              this.#update({ mediaOnline: true });
+
+              return;
+            }
+
             this.#update({ mediaOnline: true, engineStatus: "idle", error: null });
             void this.#loadCurrent();
           }),
         ),
       ),
     );
+  }
+
+  /** Where sources may come from now: only this device while the media server is away. */
+  #reach(): SourceReach {
+    return this.#snapshot.mediaOnline ? "any" : "device";
   }
 
   #stopHealthProbe(): void {
