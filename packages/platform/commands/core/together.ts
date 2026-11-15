@@ -29,6 +29,7 @@ const addArgs = v.object({
     }),
   ),
   at: v.optional(v.union(v.literal("next"), v.literal("end"))),
+  revision: v.optional(v.number()),
 });
 
 const addResult = v.object({ entryId: v.id("togetherEntries") });

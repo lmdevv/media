@@ -13,6 +13,7 @@ import { ITEM_READS, playableBy, requirePlayable } from "../permissions/items";
 import { can } from "../permissions/policy";
 import type { Principal } from "../permissions/policy";
 import { factsOf, refuse, requireTogether } from "./access";
+import type { InSession } from "./access";
 import { QUEUE_MAX } from "./model";
 
 /** The counter of a session's queued items. */
@@ -23,24 +24,71 @@ export const queueCounter = (sessionId: Id<"togetherSessions">): string =>
 type Where = "next" | "end";
 
 /**
+ * Takes every queued copy of `item` out of `session`, each one only if the caller may remove it,
+ * and answers how many went.
+ */
+const takeOutCopies = async (
+  ctx: Pick<MutationCtx, "db">,
+  caller: Principal,
+  { session, place }: InSession,
+  item: DomainItem,
+): Promise<number> => {
+  const copies = await ctx.db
+    .query("togetherEntries")
+    .withIndex("by_session_item", (q) =>
+      q
+        .eq("sessionId", session._id)
+        .eq("item.ref.type", item.ref.type)
+        .eq("item.ref.id", item.ref.id),
+    )
+    .take(QUEUE_MAX);
+
+  for (const copy of copies) {
+    const decision = can(
+      caller,
+      "remove",
+      factsOf(session, place, { addedIt: copy.addedBy === caller.userId }),
+    );
+
+    if (!decision.allowed) refuse(decision);
+  }
+
+  await Promise.all(copies.map((copy) => ctx.db.delete(copy._id)));
+
+  return copies.length;
+};
+
+/**
  * Queues `item` in the caller's session in its domain, which they must be able to play. `next`
  * puts it before everything queued and `end` after it, by an order one past the first or last.
+ *
+ * With `revision`, the item follows the one playing, as the next episode does: the add fails
+ * `conflict` once the clock moved past `revision`, so a late one cannot queue it after the
+ * session moved on, and any copy already queued is taken out first, so it is queued once.
  */
 export const enqueue = async (
   ctx: Pick<MutationCtx, "db">,
   caller: Principal,
   item: DomainItem,
   at: Where,
+  revision?: number,
 ): Promise<Id<"togetherEntries">> => {
-  const { session } = await requireTogether(ctx, caller, item.domain, "add");
+  const inSession = await requireTogether(ctx, caller, item.domain, "add");
+  const { session } = inSession;
 
   await requirePlayable(ctx.db, caller, item);
 
-  if ((await readCounter(ctx.db, queueCounter(session._id))) >= QUEUE_MAX) {
+  if (revision !== undefined && revision !== session.clock.revision) {
+    return fail("conflict", "The session moved on; apply its latest clock and try again");
+  }
+
+  const replaced = revision === undefined ? 0 : await takeOutCopies(ctx, caller, inSession, item);
+
+  if ((await readCounter(ctx.db, queueCounter(session._id))) - replaced >= QUEUE_MAX) {
     return fail("conflict", `A group session queues at most ${QUEUE_MAX} items`);
   }
 
-  await incrementCounter(ctx.db, queueCounter(session._id), 1);
+  if (replaced !== 1) await incrementCounter(ctx.db, queueCounter(session._id), 1 - replaced);
 
   const edge = await ctx.db
     .query("togetherEntries")

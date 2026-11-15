@@ -986,7 +986,7 @@ Queue something you can play in your group session, next or at the end.
 - CLI: `media auth together add`
 - Kind: mutation
 - Scope: signed-in
-- Arguments: `{ item: { domain: "movies"; ref: { type: "title"; id: Id<"titles"> } | { type: "episode"; id: Id<"episodes"> } | { type: "file"; id: Id<"mediaFiles"> } } | { domain: "music"; ref: { type: "track"; id: Id<"tracks"> } | { type: "album"; id: Id<"albums"> } }; at?: "next" | "end" }`
+- Arguments: `{ item: { domain: "movies"; ref: { type: "title"; id: Id<"titles"> } | { type: "episode"; id: Id<"episodes"> } | { type: "file"; id: Id<"mediaFiles"> } } | { domain: "music"; ref: { type: "track"; id: Id<"tracks"> } | { type: "album"; id: Id<"albums"> } }; at?: "next" | "end"; revision?: number }`
 - Result: `{ entryId: Id<"togetherEntries"> }`
 
 ## `core.together.admit`

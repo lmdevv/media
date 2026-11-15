@@ -2270,6 +2270,7 @@ const core_together_add = mutation({
       }),
     ]),
     at: Schema.optionalKey(Schema.Union([Schema.Literal("next"), Schema.Literal("end")])),
+    revision: Schema.optionalKey(Schema.Finite),
   }),
   result: Schema.Struct({ entryId: Schema.String.pipe(Schema.brand("Id<togetherEntries>")) }),
 });

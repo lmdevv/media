@@ -149,8 +149,8 @@ export const {
   control: (ctx, { domain, op }, caller) => move(ctx, caller, domain, op),
   queue: (ctx, { domain, paginationOpts }, caller) =>
     queuePage(ctx, caller, domain, paginationOpts),
-  add: async (ctx, { item, at }, caller) => ({
-    entryId: await enqueue(ctx, caller, item, at ?? "end"),
+  add: async (ctx, { item, at, revision }, caller) => ({
+    entryId: await enqueue(ctx, caller, item, at ?? "end", revision),
   }),
   remove: async (ctx, { domain, entryId }, caller) => {
     await unqueue(ctx, caller, domain, entryId);

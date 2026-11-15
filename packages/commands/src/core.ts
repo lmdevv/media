@@ -1161,7 +1161,16 @@ export const core = [
   mutation("core.together.add", {
     summary: "Queue something you can play in your group session, next or at the end",
     scope: "signed-in",
-    args: { item: domainItem, at: v.optional(v.union(v.literal("next"), v.literal("end"))) },
+    args: {
+      item: domainItem,
+      at: v.optional(v.union(v.literal("next"), v.literal("end"))),
+      /**
+       * The clock the caller saw, for an item that follows the one playing, such as the next
+       * episode: the add then applies only while the session's clock is still at it, and it
+       * takes out any copy of `item` already queued, so two screens queue it once.
+       */
+      revision: v.optional(v.number()),
+    },
     result: v.object({ entryId: v.id("togetherEntries") }),
   }),
   mutation("core.together.remove", {

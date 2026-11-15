@@ -1,3 +1,4 @@
+import { ConvexHttpClient } from "convex/browser";
 import { makeFunctionReference } from "convex/server";
 import type { FunctionArgs } from "convex/server";
 import { describe, expect, it } from "vitest";
@@ -248,6 +249,56 @@ describe.skipIf(stack === undefined)("group sessions", { timeout: 120_000 }, () 
     expect(await refusal(controlAs(shelf.host, { kind: "next", revision: revision + 1 }))).toBe(
       "conflict",
     );
+  });
+
+  it("queues what follows the item once from two of the host's screens, and not after it moved on", async () => {
+    if (stack === undefined) return;
+    const { shelf, link } = await started(stack, { add: true });
+    const guest = await guestOf(stack, shelf, "guest");
+    const otherScreen = new ConvexHttpClient(stack.url, { logger: false });
+
+    otherScreen.setAuth(shelf.host.signedIn.token);
+    await joinBy(guest, link);
+    await guest.signedIn.client.mutation(api.core.together.add, { item: shelf.pg });
+
+    const queued = async () =>
+      (
+        await shelf.host.signedIn.client.query(api.core.together.queue, {
+          domain: "movies",
+          paginationOpts: { numItems: 10, cursor: null },
+        })
+      ).page.map((entry) => entry.item);
+
+    const { revision } = (await joinedView(shelf.host, "movies")).clock;
+    const following = { item: shelf.pg, at: "next", revision } as const;
+
+    await Promise.all([
+      shelf.host.signedIn.client.mutation(api.core.together.add, following),
+      otherScreen.mutation(api.core.together.add, following),
+    ]);
+
+    expect(await queued()).toEqual([shelf.pg]);
+
+    await controlAs(shelf.host, { kind: "next", revision });
+
+    expect((await joinedView(guest, "movies")).item).toEqual(shelf.pg);
+    expect(await refusal(otherScreen.mutation(api.core.together.add, following))).toBe("conflict");
+    expect(await queued()).toEqual([]);
+
+    await shelf.host.signedIn.client.mutation(api.core.together.add, { item: shelf.g });
+
+    const now = (await joinedView(guest, "movies")).clock.revision;
+
+    expect(
+      await refusal(
+        guest.signedIn.client.mutation(api.core.together.add, {
+          item: shelf.g,
+          at: "next",
+          revision: now,
+        }),
+      ),
+    ).toBe("forbidden");
+    expect(await queued()).toEqual([shelf.g]);
   });
 
   it("refuses an item from another domain, by its type and by its row's table", async () => {
