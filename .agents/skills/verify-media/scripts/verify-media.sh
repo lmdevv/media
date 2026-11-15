@@ -364,7 +364,11 @@ cmd_up() {
   write_state layout "$(layout_of "$state/deploy/compose/compose.yaml" "$backend")"
   # An image that serves the music client at /music runs music itself, on the core. An image from
   # before the music port, or one that still runs old movies' own Convex, runs movies alone.
-  if ((music)) && ! { core_only && [[ "$(music_in "$image")" == 1 ]]; }; then
+  # The probe's status is checked on its own: inside a condition errexit is off, so its `die` would
+  # end only the substitution's subshell and a failed look would read as no music.
+  local has_music=0
+  if ((music)) && core_only; then has_music="$(music_in "$image")" || exit $?; fi
+  if ((music)) && [[ "$has_music" != 1 ]]; then
     say "$image has no music client on the core, so this side runs movies alone"
     music=0
   fi
