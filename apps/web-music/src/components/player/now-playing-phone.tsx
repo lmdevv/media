@@ -96,8 +96,6 @@ export function PhoneNowPlaying({ track, lyrics, view, onView }: PhoneNowPlaying
 }
 
 function PhonePlayer({ track }: { readonly track: Track }) {
-  const remote = usePlayer().remote !== null;
-
   return (
     <>
       <Artwork
@@ -123,11 +121,7 @@ function PhonePlayer({ track }: { readonly track: Track }) {
           />
         </div>
       </div>
-      {remote ? (
-        <div className="pt-4">
-          <RemotePill />
-        </div>
-      ) : null}
+      <RemotePill className="mt-4" />
       <div className="flex flex-col gap-2 pt-6.5">
         <Progress
           layout="stacked"

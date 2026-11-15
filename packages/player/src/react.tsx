@@ -577,7 +577,7 @@ export function PlayerProvider({
       setQuality: (quality) => {
         controller.setQuality(quality);
       },
-      moveHere: () => moveHere(platform, controller, connect),
+      moveHere: () => moveHere(platform, controller, connect, track),
       moveTo: (deviceId) => moveTo(platform, controller, connect, deviceId, track),
       playOn: (deviceId, item) => playOn(platform, controller, connect, deviceId, item),
     };
@@ -600,7 +600,7 @@ export function PlayerProvider({
       player: () => latestPlayer.current,
       positionMs: () => {
         const current = latestConnect.current;
-        const playback = current.remote?.playback ?? null;
+        const playback = current.remote === null ? null : current.playbackOf(current.remote.id);
 
         if (playback === null) return Math.round(controller.positionMs());
 
@@ -742,8 +742,11 @@ const remoteActions = ({
     }
   };
 
-  const positionMs = (): number =>
-    device.playback === null ? 0 : devicePosition(device.playback, connect.serverNow(), durationMs);
+  const positionMs = (): number => {
+    const playback = connect.playbackOf(device.id);
+
+    return playback === null ? 0 : devicePosition(playback, connect.serverNow(), durationMs);
+  };
 
   return {
     playTracks: async (ids, at) => {
@@ -784,6 +787,7 @@ const moveHere = async (
   platform: PlatformSdk,
   controller: PlaybackController,
   connect: ConnectView,
+  track: QueueTrack | null,
 ): Promise<boolean> => {
   const self = connect.deviceId;
   const { remote } = connect;
@@ -793,7 +797,14 @@ const moveHere = async (
 
   if (self === null) return false;
 
-  if (remote === null) return true;
+  if (remote === null) {
+    // Nothing plays anywhere: this browser takes the current song, paused where it stands, as old
+    // music's transfer made it the active device.
+    if (connect.here || track === null) return true;
+    connect.player.supersede();
+
+    return controller.playCurrentAt(track.id, controller.positionMs(), false);
+  }
 
   // This tab applies the load the move makes of this browser's device, not another tab of it.
   await connect.lead();

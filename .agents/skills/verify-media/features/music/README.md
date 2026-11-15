@@ -64,6 +64,5 @@ commands, and observable proof.
 - [Search](./search.md) covers the search page, the `/` shortcut, accent folding, and CLI search.
 - [Playlists](./playlists.md) covers creating, adding to, renaming, and deleting playlists from
   the web and the CLI.
-
-Moving playback from one device to another is not in the music port; it returns in phase 6 (D62),
-so this map has no recipe for it.
+- [Connect](./connect.md) covers "Play on": moving playback between a person's devices, pausing,
+  seeking, and loading an album on another one, and the remote control's band.

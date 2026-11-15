@@ -25,7 +25,7 @@ import {
 } from "./controls";
 import { deviceIcon, deviceKind, perform } from "./player-actions";
 import { barTools } from "./bar-tools";
-import { DeviceList, useDevices } from "./devices";
+import { DeviceList } from "./devices";
 import { shownSurface } from "./play-on";
 
 /**
@@ -175,7 +175,7 @@ export function PlayerBar() {
 
 function DevicePickerButton() {
   const { playOn, openPlayOn, closePlayOn, setPlayOnPopoverMounted } = useUi();
-  const { onlineCount } = useDevices();
+  const onlineCount = usePlayer().devices.length + 1;
   const desktop = useIsDesktop();
   const shown = shownSurface(playOn, desktop);
 
@@ -225,7 +225,6 @@ function RemoteBand() {
     >
       <Icon aria-hidden className="size-3.5" />
       <span className="font-sans text-sm/xs font-semibold">Playing on {remote.name}</span>
-      <span className="font-sans text-sm/xs">· controls here change it</span>
     </div>
   );
 }

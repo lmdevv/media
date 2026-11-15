@@ -1,10 +1,10 @@
 import { usePlatformQuery } from "@media/sdk/react";
 import type { PlatformSdk } from "@media/sdk/promise";
 import { Brand } from "effect";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { activeDevice, ownDevices, yieldsTo } from "./connect-devices";
-import type { Device } from "./connect-devices";
+import type { Device, DevicePlayback } from "./connect-devices";
 import { ConnectPlayer, systemConnectClock } from "./connect-player";
 import type { ConnectCommands } from "./connect-player";
 import type { ControllerSnapshot, PlaybackController } from "./playback-controller";
@@ -112,6 +112,11 @@ export interface ConnectView {
   readonly player: ConnectPlayer;
   /** Makes this tab the one that reports for the browser's device; resolves once it is. */
   readonly lead: () => Promise<void>;
+  /**
+   * What a device plays as it last reported, its position anchor included, which `devices` leaves
+   * as it was while nothing shown changes.
+   */
+  readonly playbackOf: (deviceId: string) => DevicePlayback | null;
   /** The server's time now. */
   readonly serverNow: () => number;
 }
@@ -183,8 +188,16 @@ export const useConnect = (
   const here = playingHere !== null;
   const pausedHere = playingHere !== null && !playingHere.playing;
 
+  const heldBefore = useRef(here);
+
+  // A tab that starts playing speaks for the device; one that held a song already does not take
+  // the lead back from another tab that started since, or two tabs would trade it forever.
   useEffect(() => {
-    if (here && !leading) void election.current?.take();
+    const started = here && !heldBefore.current;
+
+    heldBefore.current = here;
+
+    if (started && !leading) void election.current?.take();
   }, [here, leading]);
 
   const targets = usePlatformQuery(
@@ -202,6 +215,16 @@ export const useConnect = (
   );
 
   const devices = useStable(online);
+  const latest = useRef(online);
+
+  useLayoutEffect(() => {
+    latest.current = online;
+  }, [online]);
+
+  const playbackOf = useCallback(
+    (id: string) => latest.current.find((device) => device.id === id)?.playback ?? null,
+    [],
+  );
 
   const previous = useRef<string | null>(null);
   const remote = here ? null : activeDevice(devices, previous.current);
@@ -210,9 +233,12 @@ export const useConnect = (
     previous.current = remote?.id ?? null;
   }, [remote]);
 
+  // A song the browser would not start without a tap stays, to show "Tap play to start here".
+  const yields = pausedHere && !local.autoplayBlocked;
+
   useEffect(() => {
-    if (leading && yieldsTo(pausedHere ? { playing: false } : null, devices)) controller.release();
-  }, [leading, pausedHere, devices, controller]);
+    if (leading && yieldsTo(yields ? { playing: false } : null, devices)) controller.release();
+  }, [leading, yields, devices, controller]);
 
   return useMemo(
     () => ({
@@ -222,18 +248,27 @@ export const useConnect = (
       here,
       player,
       lead: async () => election.current?.take(),
+      playbackOf,
       serverNow: () => player.serverNow(),
     }),
-    [deviceId, devices, remote, here, player],
+    [deviceId, devices, remote, here, player, playbackOf],
   );
 };
 
 /**
- * `devices` as last answered while it holds the same devices playing the same way, so a device's
- * heartbeat, which changes nothing shown, never re-renders the player's readers.
+ * `devices` as last answered while it holds the same devices, playing the same songs the same way,
+ * so a device's report, which moves only its position anchor, never re-renders the player. The
+ * position is read through `playbackOf`.
  */
 const useStable = (devices: ReadonlyArray<Device>): ReadonlyArray<Device> => {
-  const key = JSON.stringify(devices);
+  const key = JSON.stringify(
+    devices.map(({ id, name, playback }) => [
+      id,
+      name,
+      playback === null ? null : [playback.trackId, playback.playing, playback.pending],
+    ]),
+  );
+
   const [held, setHeld] = useState({ key, devices });
 
   if (held.key === key) return held.devices;

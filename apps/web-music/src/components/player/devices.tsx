@@ -23,11 +23,9 @@ const isDevice = (target: MoveTarget | null, deviceId: string): boolean =>
   target !== null && target !== "here" && target.device === deviceId;
 
 /** Your other devices and the move that is starting, if any. */
-export interface DevicesState {
+interface DevicesState {
   /** Your other devices that are online, by name. */
   readonly others: ReadonlyArray<Device>;
-  /** Devices online, this browser included. */
-  readonly onlineCount: number;
   /** The device a move is waiting on; `here` is this browser. */
   readonly pending: MoveTarget | null;
   readonly transfer: (target: MoveTarget) => void;
@@ -37,7 +35,7 @@ export interface DevicesState {
  * The devices you can play on, which one plays, and a move in progress, as old music's device list
  * showed them. A move waits until the device it went to plays, and gives up after 10 seconds.
  */
-export const useDevices = (): DevicesState => {
+const useDevices = (): DevicesState => {
   const player = usePlayer();
   const [pending, setPending] = useState<MoveTarget | null>(null);
   const activeId = player.remote?.id ?? null;
@@ -63,6 +61,9 @@ export const useDevices = (): DevicesState => {
   const transfer = (target: MoveTarget) => {
     if (target === "here" ? player.here : target.device === activeId) return;
 
+    // Nothing is queued, so nothing moves here.
+    if (target === "here" && activeId === null && player.track === null) return;
+
     setPending(target);
 
     const move = async () => {
@@ -77,7 +78,6 @@ export const useDevices = (): DevicesState => {
 
   return {
     others: player.devices,
-    onlineCount: player.devices.length + 1,
     pending: waiting,
     transfer,
   };

@@ -14,7 +14,7 @@ const aborted = (): DOMException => new DOMException("The lock request was abort
 /**
  * One exclusive lock as the Web Locks API keeps it: requests wait in order, a waiting request
  * leaves when its signal aborts, `steal` takes the lock from its holder, whose request then fails,
- * and a holder lets go when its callback settles.
+ * a holder lets go when its callback settles, and every grant runs its callback a task later.
  */
 class MemoryLocks implements TabLocks {
   #holder: Request | null = null;
@@ -56,7 +56,9 @@ class MemoryLocks implements TabLocks {
 
   #grant(request: Request): void {
     this.#holder = request;
-    void this.#hold(request);
+    setTimeout(() => {
+      void this.#hold(request);
+    }, 0);
   }
 
   async #hold(request: Request): Promise<void> {
@@ -71,11 +73,17 @@ class MemoryLocks implements TabLocks {
   }
 }
 
-/** Lets every pending promise settle. */
-const flush = (): Promise<void> =>
+const tick = (): Promise<void> =>
   new Promise((resolve) => {
     setTimeout(resolve, 0);
   });
+
+/** Lets every pending grant and promise settle: a hand-over takes a few tasks. */
+const flush = async (turns = 5): Promise<void> => {
+  if (turns === 0) return;
+  await tick();
+  await flush(turns - 1);
+};
 
 const tab = (locks: TabLocks | undefined) => {
   const states: Array<boolean> = [];
@@ -128,6 +136,21 @@ describe("followLead", () => {
     await flush();
 
     expect(second.leading()).toBe(true);
+  });
+
+  it("lets go at once of a lead taken just before the tab left, and the other tab leads again", async () => {
+    const locks = new MemoryLocks();
+    const first = tab(locks);
+    const second = tab(locks);
+
+    await flush();
+    void second.lead.take();
+    second.lead.stop();
+    await flush();
+    await flush();
+
+    expect(second.states).toStrictEqual([]);
+    expect(first.leading()).toBe(true);
   });
 
   it("leads at once without Web Locks", () => {

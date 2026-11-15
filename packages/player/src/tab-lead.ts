@@ -67,6 +67,9 @@ export const followLead = (
       .request(name, asking === null ? { steal: true } : { signal: asking.signal }, async () => {
         if (waiting === asking) waiting = null;
 
+        // A steal can't be aborted, so one granted after `stop` lets go at once.
+        if (stopped) return;
+
         await new Promise<void>((resolve) => {
           held = resolve;
           release = resolve;
