@@ -399,30 +399,34 @@ export const run = Effect.fn("Follower.run")(function* <E>(
 
     yield* update((current) => ({ ...current, holding: { kind: "pausing" } }));
 
-    const held = yield* Effect.gen(function* () {
-      const paused = yield* send({ kind: "pause" });
+    const paused = yield* Effect.option(send({ kind: "pause" }));
 
-      return yield* send({ kind: "seek", positionMs: standing, revision: paused.revision });
-    }).pipe(Effect.option);
-
-    if (Option.isSome(held)) {
-      const { revision } = held.value;
-
-      yield* update((current) => ({
-        ...current,
-        holding: current.holding?.kind === "pausing" ? { kind: "held", revision } : current.holding,
-      }));
-      yield* Effect.logInfo("Follower.heldForStall").pipe(
-        Effect.annotateLogs({ revision, positionMs: standing }),
-      );
-
-      // The player may have recovered while the pause was on its way, with no event left to come.
-      yield* releaseIfRecovered;
+    if (Option.isNone(paused)) {
+      yield* update((current) => ({ ...current, holding: null }));
 
       return;
     }
 
-    yield* update((current) => ({ ...current, holding: null }));
+    // The session is paused now; a failed seek back to where the player stalled still holds it.
+    const sought = yield* Effect.option(
+      send({ kind: "seek", positionMs: standing, revision: paused.value.revision }),
+    );
+
+    const revision = Option.match(sought, {
+      onNone: () => paused.value.revision,
+      onSome: (clock) => clock.revision,
+    });
+
+    yield* update((current) => ({
+      ...current,
+      holding: current.holding?.kind === "pausing" ? { kind: "held", revision } : current.holding,
+    }));
+    yield* Effect.logInfo("Follower.heldForStall").pipe(
+      Effect.annotateLogs({ revision, positionMs: standing }),
+    );
+
+    // The player may have recovered while the pause was on its way, with no event left to come.
+    yield* releaseIfRecovered;
   });
 
   /**

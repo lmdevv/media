@@ -132,6 +132,7 @@ const makeSession = (initial: SessionClock) =>
     const clock = yield* Ref.make(initial);
     const followers = yield* Ref.make<ReadonlyArray<Follower<Refused>>>([]);
     const refusing = yield* Ref.make<string | null>(null);
+    const seeksRefused = yield* Ref.make(false);
 
     const serverNow = Effect.map(Clock.currentTimeMillis, (now) =>
       EpochMillis.make(now + SERVER_OFFSET_MS),
@@ -163,7 +164,10 @@ const makeSession = (initial: SessionClock) =>
           revision: current.revision + 1,
         });
 
-        if (move.kind === "seek" && move.revision !== current.revision) {
+        if (
+          move.kind === "seek" &&
+          (move.revision !== current.revision || (yield* Ref.get(seeksRefused)))
+        ) {
           return yield* new Refused({ reason: "conflict" });
         }
 
@@ -204,6 +208,7 @@ const makeSession = (initial: SessionClock) =>
       shared,
       join: (member: Follower<Refused>) => Ref.update(followers, (all) => [...all, member]),
       refuse: (reason: string | null) => Ref.set(refusing, reason),
+      refuseSeeks: (refused: boolean) => Ref.set(seeksRefused, refused),
       move: (move: ClockMove) => control(move),
     };
   });
@@ -613,6 +618,25 @@ describe("follower", () => {
         expect((yield* session.clock).status).toBe("paused");
 
         yield* session.refuse(null);
+        yield* advance(2_000);
+        expect((yield* session.clock).status).toBe("playing");
+        expect(lucia.isPaused()).toBe(false);
+      }),
+    ));
+  it("holds the session at its pause when the seek back to the stall fails", () =>
+    scenario(playingForAMinute, (session) =>
+      Effect.gen(function* () {
+        const lucia = yield* makePlayer(0);
+
+        yield* follower(session, lucia, { controls: true, pausesForStalls: true });
+        yield* advance(4_000);
+        lucia.stall();
+        yield* session.refuseSeeks(true);
+        yield* advance(3_000);
+        expect((yield* session.clock).status).toBe("paused");
+
+        yield* session.refuseSeeks(false);
+        lucia.recover();
         yield* advance(2_000);
         expect((yield* session.clock).status).toBe("playing");
         expect(lucia.isPaused()).toBe(false);

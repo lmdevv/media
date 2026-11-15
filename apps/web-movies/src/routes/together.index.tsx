@@ -87,7 +87,7 @@ function SessionRoute() {
   }, [platform, taken]);
 
   useEffect(() => {
-    if (ready === null || joining.kind === "joining") return;
+    if (ready === null || joining.kind === "joining" || joining.kind === "refused") return;
 
     void navigate({
       to: "/watch/$titleId",
