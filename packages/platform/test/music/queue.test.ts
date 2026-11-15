@@ -52,12 +52,16 @@ describe.skipIf(stack === undefined)("music queue", { timeout: 240_000 }, () => 
     });
 
     expect(await titlesOf(aiko)).toEqual(["Song 00", "Song 01", "Song 02"]);
-    expect(await client.query(api.music.queue.get, {})).toEqual({
+
+    const state = await client.query(api.music.queue.get, {});
+
+    expect(state).toEqual({
       current,
       count: 3,
       shuffle: false,
       repeat: "off",
       autoplay: false,
+      revision: state.revision,
     });
 
     await client.mutation(api.music.queue.add, { trackIds: [trackAt(shelf, 3)], next: true });
@@ -144,6 +148,70 @@ describe.skipIf(stack === undefined)("music queue", { timeout: 240_000 }, () => 
 
     expect(titles).toEqual(["Song 01", "Song 00", ...added, "Song 02"]);
     expect((await client.query(api.music.queue.get, {})).current).toBe(current);
+  });
+
+  it("moves its revision on with each change to the queue or its entries, which its state and every page answer", async () => {
+    if (stack === undefined) return;
+    const aiko = await member(stack, "aiko");
+    const shelf = await musicShelf(stack, [aiko], SONGS);
+    const client = aiko.signedIn.client;
+
+    /** The revision the queue's state answers, once every page of its listing answers it too. */
+    const revisionNow = async (): Promise<number> => {
+      const { revision } = await client.query(api.music.queue.get, {});
+
+      const pages = async (cursor: string | null): Promise<ReadonlyArray<number>> => {
+        const page = await client.query(api.music.queue.list, {
+          paginationOpts: { numItems: 2, cursor },
+        });
+
+        return page.isDone
+          ? [page.revision]
+          : [page.revision, ...(await pages(page.continueCursor))];
+      };
+
+      expect(new Set(await pages(null))).toEqual(new Set([revision]));
+
+      return revision;
+    };
+
+    const revisions = [await revisionNow()];
+
+    const mark = async (): Promise<void> => {
+      revisions.push(await revisionNow());
+    };
+
+    await client.mutation(api.music.queue.autoplay, { on: false });
+    await mark();
+    await client.mutation(api.music.queue.play, {
+      trackIds: [trackAt(shelf, 0), trackAt(shelf, 1), trackAt(shelf, 2), trackAt(shelf, 3)],
+    });
+    await mark();
+    await client.mutation(api.music.queue.add, { trackIds: [trackAt(shelf, 4)], next: true });
+    await mark();
+
+    const entries = await entriesOf(aiko);
+
+    // A move writes only the entry's keys, which are where the listing's pages start and end.
+    await client.mutation(api.music.queue.move, { itemId: at(entries, 3).itemId });
+    await mark();
+    await client.mutation(api.music.queue.jump, { itemId: at(entries, 2).itemId });
+    await mark();
+    await client.mutation(api.music.queue.remove, { itemId: at(entries, 4).itemId });
+    await mark();
+    await client.mutation(api.music.queue.shuffle, { on: true });
+    await mark();
+    await client.mutation(api.music.queue.repeat, { mode: "all" });
+    await mark();
+    await client.mutation(api.music.queue.clear, {});
+    await mark();
+
+    expect(revisions.slice(1).every((revision, n) => revision > at(revisions, n))).toBe(true);
+
+    // A command that changes nothing leaves the queue, and its revision, as they were.
+    await client.mutation(api.music.queue.shuffle, { on: true });
+
+    expect(await revisionNow()).toBe(revisions.at(-1));
   });
 
   it("shuffles behind the current song and restores the order when shuffle turns off", async () => {

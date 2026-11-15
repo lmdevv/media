@@ -391,20 +391,29 @@ export const music = [
       repeat: repeatMode,
       /** Whether songs like the last one join when the queue runs out. */
       autoplay: v.boolean(),
+      /**
+       * Moves on with every change to the queue or its entries, so a `music.queue.list` page of
+       * the same revision lists this queue.
+       */
+      revision: v.number(),
     }),
   }),
   query("music.queue.list", {
     summary: "List your queue's entries in play order",
     scope: "music:play",
     args: { paginationOpts: paginationOptsValidator },
-    result: paginationResultValidator(
-      v.object({
-        itemId: v.id("playQueueEntries"),
-        /** Added by autoplay when the queue ran out, not by you. */
-        autoplay: v.boolean(),
-        track,
-      }),
-    ),
+    result: v.object({
+      ...paginationResultValidator(
+        v.object({
+          itemId: v.id("playQueueEntries"),
+          /** Added by autoplay when the queue ran out, not by you. */
+          autoplay: v.boolean(),
+          track,
+        }),
+      ).fields,
+      /** The revision of the queue this page lists, as `music.queue.get` answers it. */
+      revision: v.number(),
+    }),
   }),
   mutation("music.queue.play", {
     summary:

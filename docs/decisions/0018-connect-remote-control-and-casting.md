@@ -425,7 +425,17 @@ revision that names an older load is still an older load, so a counter alone nev
 | the new queue's write                                                                        | a newer request or the listener replaced the load | changes nothing; the player follows the new queue, playing or paused as the listener last chose                                                                                                                            |
 | the queue arrives holding its current entry, for a song's load waiting on it                 | the load still starts here                        | plays that entry from the position when it holds the song, keeping the queue, and otherwise replaces the queue with the song                                                                                               |
 | the queue's whole listing arrives without its current entry, for a song's load waiting on it | the load still starts here                        | replaces the queue with the song, since the entry left out holds a song the listener may not play                                                                                                                          |
-| the queue arrives with its pages still loading and without its current entry                 | the load still starts here                        | keeps waiting                                                                                                                                                                                                              |
+| the queue arrives without its current entry, and its listing is not whole                    | the load still starts here                        | keeps waiting                                                                                                                                                                                                              |
+
+The queue's listing is whole only at the revision of the queue's state (A whole listing is whole
+for one revision, below):
+
+| The queue's state shows | The listing's pages                                                                | The listing is whole |
+| ----------------------- | ---------------------------------------------------------------------------------- | -------------------- |
+| revision r              | every page in, each read at r                                                      | yes                  |
+| revision r              | every page in, all read at another revision, as a page's last answer kept on retry | no                   |
+| revision r              | every page in, read at different revisions                                         | no                   |
+| revision r              | pages loading again, with the last whole listing kept                              | no                   |
 
 - **Waiting for the queue.** A load of a song is a move only when the queue plays that song now,
   and a browser can tell only once its queue arrived and holds the current entry. Until then the
@@ -434,6 +444,16 @@ revision that names an older load is still an older load, so a counter alone nev
   ends the wait: `music.queue.list` leaves out only an entry whose song the listener may no
   longer play, as after their library access is revoked, and a load names only a song they may
   play, so the entry left out never holds it, and the load replaces the queue.
+- **A whole listing is whole for one revision.** The queue's state (`music.queue.get`) and each
+  page of its listing are subscriptions of their own, and either can lag: a page whose
+  subscription retries keeps its last answer meanwhile, and a client can hear one query's change
+  before the other's. The core keeps a revision on the queue, which moves on with every change to
+  the queue or its entries, and answers it with the state and with every page. The listing is
+  whole only for the revision it was read at, so a listing kept from before the queue moved on
+  never says its new entry is left out. Access changes are not queue writes and leave the
+  revision as it is: an entry the listener may no longer play drops out of the next listing read
+  at that same revision. `queueStateOf` and `listingOf` in `packages/player/src/queue-listing.ts`
+  hold the rule, and the web and phone players both read the queue through them.
 - **The listener's newest choice.** A new queue starts playing or paused as the listener last
   chose, here or through Connect, when its write answers, not as when it was sent. The old queue
   ending meanwhile is no choice, so a list played then still plays. Convex can show a mutation's
@@ -449,9 +469,9 @@ revision that names an older load is still an older load, so a counter alone nev
 - **A write already sent.** A newer request makes an older load's start moot, but a queue write
   it already sent still lands on the shared queue. The browser then follows the queue, as it follows
   any change of it, playing or paused as the listener last chose.
-- **No start waits without end.** A load of a song waits for the queue's whole listing, which
-  ends the wait whether or not it holds the current entry. An album's songs and a queue write
-  wait for the network's answer. Any wait also ends when a newer request or a tap here replaces the
+- **No start waits without end.** A load of a song waits for the queue's whole listing at the
+  revision of its state, which ends the wait whether or not it holds the current entry. An
+  album's songs and a queue write wait for the network's answer. Any wait also ends when a newer request or a tap here replaces the
   load, when the tab stops leading, or when the core shows nothing left to apply. The core settles
   every request when a device reports again after 30 seconds of silence (Rules for reports and
   requests), so a load still starting then is dropped and never starts.

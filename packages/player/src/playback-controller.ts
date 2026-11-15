@@ -58,10 +58,11 @@ export interface QueueState<T extends Track = Track> {
   /** Every entry the listener may play, in play order. */
   readonly entries: ReadonlyArray<QueueEntry<T>>;
   /**
-   * Whether `entries` is the queue's whole listing as it stands, every page in. False while the
-   * pages load again, as after a new queue, when `entries` is the last whole listing and may lack
-   * `current`. A whole listing lacks `current` only when the core leaves that entry out, as it
-   * does an entry whose song the listener may no longer play.
+   * Whether `entries` is the queue's whole listing at the revision of this state, every page in
+   * and read at that revision (`queueStateOf`). False while the pages load again, as after a new
+   * queue, or while they hold another revision, as a page whose subscription retries keeps its
+   * last answer; `entries` may then lack `current`. A whole listing lacks `current` only when the
+   * core leaves that entry out, as it does an entry whose song the listener may no longer play.
    */
   readonly complete: boolean;
   /** The entry playing; null for an empty queue. */
@@ -113,7 +114,7 @@ export interface StartAt {
 
 /** The core's current queue entry as this device knows it: a Connect move lands on it (ADR 0018). */
 export type QueueCurrent =
-  /** The queue has not arrived yet, or its pages are loading again and do not hold it yet. */
+  /** The queue has not arrived yet, or its listing is not whole and does not hold it yet. */
   | { readonly kind: "unknown" }
   | { readonly kind: "empty" }
   /** The whole listing leaves it out: its song is one the listener may not play. */
@@ -685,9 +686,10 @@ export class PlaybackController {
 
   /**
    * The core's current queue entry and its song, as far as the queue this device holds tells:
-   * unknown before the queue arrives, or while its pages load again without it, as after a new
-   * queue, and hidden once the whole listing leaves it out. A Connect load of a song waits on it to
-   * tell a move, which plays that entry, from a song that replaces the queue (ADR 0018).
+   * unknown before the queue arrives, or while its listing is not whole and lacks it, as while
+   * pages load again after a new queue or hold another revision, and hidden once the whole listing
+   * leaves it out. A Connect load of a song waits on it to tell a move, which plays that entry,
+   * from a song that replaces the queue (ADR 0018).
    */
   queueCurrent(): QueueCurrent {
     const queue = this.#queue;

@@ -10,6 +10,8 @@ import type {
   QueueState,
   ResumePoint,
 } from "@media/player/playback-controller";
+import { queueStateOf, useQueueListing } from "@media/player/queue-listing";
+import type { QueueRow } from "@media/player/queue-listing";
 import type { RepeatMode } from "@media/player/queue-order";
 import { ticketSources } from "@media/player/source-resolver";
 import { settingOfQuality } from "@media/player/stream-quality";
@@ -77,10 +79,6 @@ import {
 import type { NowPlaying, PlayerStatus, PlayerView } from "./player-state";
 
 const POSITION_INTERVAL_MS = 250;
-
-const QUEUE_PAGE = 200;
-
-const QUEUE_RESTART_MS = 250;
 
 /**
  * How long a new queue, or a song's ticket, may go unanswered before this phone plays its own
@@ -221,83 +219,23 @@ export const usePlayerCommands = (): PlayerCommands =>
  */
 export const useOwnSession = (): boolean => use(OwnSessionContext);
 
-type QueueRow = Awaited<ReturnType<PlatformSdk["music"]["queue"]["list"]>>["page"][number];
-
-/** The queue's rows, and whether they are its whole listing as it stands. */
-interface QueueRows {
-  readonly rows: ReadonlyArray<QueueRow>;
-  /** False while pages reload and `rows` is the last whole listing. */
-  readonly whole: boolean;
-}
-
-const queuePages = (platform: PlatformSdk) =>
-  pagedStore((span) =>
-    platform.music.queue.list.watch({ paginationOpts: { numItems: QUEUE_PAGE, ...span } }),
-  );
-
-/**
- * Every row of the listener's queue, followed live, loading the next page as soon as one arrives;
- * null until every page first arrived. A new queue (`music.queue.play`) lists another
- * generation's entries, so Convex refuses the cursors its pages were following; the pages then
- * start over from the top, as the web player's do. The last whole list stays while pages reload,
- * and counts as not whole meanwhile.
- */
-const useQueueRows = (platform: PlatformSdk): QueueRows | null => {
-  const [store, setStore] = useState(() => queuePages(platform));
-  const [last, setLast] = useState<ReadonlyArray<QueueRow> | null>(null);
-  const paged = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
-  const load = paged.status === "ready" && paged.next.kind === "more" ? paged.next.load : null;
-  const whole = paged.status === "ready" && paged.next.kind === "done" ? paged.rows : null;
-
-  if (whole !== null && whole !== last) setLast(whole);
-
-  const failed =
-    paged.status === "failed" || (paged.status === "ready" && paged.next.kind === "failed");
-
-  useEffect(() => {
-    load?.();
-  }, [load]);
-
-  useEffect(() => {
-    if (!failed) return undefined;
-
-    const timer = setTimeout(() => {
-      setStore(queuePages(platform));
-    }, QUEUE_RESTART_MS);
-
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [failed, platform]);
-
-  const rows = whole ?? last;
-  const isWhole = whole !== null;
-
-  return useMemo(() => (rows === null ? null : { rows, whole: isWhole }), [rows, isWhole]);
-};
+/** A queue row as the player plays it. */
+const serverEntry = (row: QueueRow): QueueEntry<Track> => ({
+  itemId: row.itemId,
+  autoplay: row.autoplay,
+  track: row.track,
+});
 
 /** The listener's queue on the core once its state and every page have arrived; null before. */
 const useServerQueue = (platform: PlatformSdk): QueueState<Track> | null => {
   const info = useReadSettled(platform.music.queue.get, {});
-  const list = useQueueRows(platform);
+  const listing = useQueueListing(platform, pagedStore);
   const data = info === undefined || info instanceof Error ? null : info;
 
-  return useMemo(() => {
-    if (data === null || list === null) return null;
-
-    return {
-      entries: list.rows.map((row) => ({
-        itemId: row.itemId,
-        autoplay: row.autoplay,
-        track: row.track,
-      })),
-      complete: list.whole,
-      current: data.current,
-      shuffle: data.shuffle,
-      repeat: data.repeat,
-      autoplay: data.autoplay,
-    };
-  }, [data, list]);
+  return useMemo(
+    () => (data === null || listing === null ? null : queueStateOf(data, listing, serverEntry)),
+    [data, listing],
+  );
 };
 
 /**

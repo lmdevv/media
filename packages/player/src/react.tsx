@@ -28,7 +28,9 @@ import { HtmlAudioEngine } from "./html-audio-engine";
 import { setMediaSessionHandlers, showNowPlaying } from "./media-session";
 import { MseEngine } from "./mse-engine";
 import { PlaybackController } from "./playback-controller";
-import type { EngineFactory, PlayerSettings, QueueState } from "./playback-controller";
+import type { EngineFactory, PlayerSettings, QueueEntry, QueueState } from "./playback-controller";
+import { queueStateOf, useQueueListing } from "./queue-listing";
+import type { QueueRow } from "./queue-listing";
 import { nextIndex, previousIndex } from "./queue-order";
 import type { RepeatMode } from "./queue-order";
 import { ticketSources } from "./source-resolver";
@@ -43,16 +45,11 @@ export type { MusicItem } from "./use-connect";
 
 const POSITION_INTERVAL_MS = 250;
 
-/** Queue entries asked for per page; the core caps a page to what one call may read. */
-const QUEUE_PAGE = 200;
-
 /** Wait this long after the last volume change before saving it. */
 const VOLUME_SAVE_MS = 500;
 
 /** A song as the music commands answer it. */
 export type Track = Awaited<ReturnType<PlatformSdk["music"]["tracks"]["get"]>>;
-
-type QueueRow = Awaited<ReturnType<PlatformSdk["music"]["queue"]["list"]>>["page"][number];
 
 /** One queue entry as the UI shows it: its song, its own id, and whether autoplay added it. */
 export interface QueueTrack extends Track {
@@ -243,86 +240,23 @@ const engineFactory = (engine: (() => PlayerEngine) | undefined): EngineFactory 
   };
 };
 
-/** How long the queue's pages wait before they are followed again after one failed. */
-const QUEUE_RESTART_MS = 250;
-
-const queuePages = (platform: PlatformSdk) =>
-  pagedStore((span) =>
-    platform.music.queue.list.watch({ paginationOpts: { numItems: QUEUE_PAGE, ...span } }),
-  );
-
-/** The queue's rows, and whether they are its whole listing as it stands. */
-interface QueueRows {
-  readonly rows: ReadonlyArray<QueueRow>;
-  /** False while pages reload and `rows` is the last whole listing. */
-  readonly whole: boolean;
-}
-
-/**
- * Every row of the listener's queue, followed live, loading the next page as soon as one arrives;
- * null until every page first arrived. A new queue (`music.queue.play`) lists another
- * generation's entries, so Convex refuses the cursors its pages were following (`InvalidCursor`,
- * which the SDK reports as a protocol error); the pages then start over from the top, as Convex's
- * own paginated hook does. The last whole list stays while pages reload, as when the queue grows
- * past a page or starts over, so the player never drops the song it shows; it then counts as not
- * whole, so Connect waits for the pages before it tells a move from a new song (ADR 0018).
- */
-const useQueueRows = (platform: PlatformSdk): QueueRows | null => {
-  const [store, setStore] = useState(() => queuePages(platform));
-  const [last, setLast] = useState<ReadonlyArray<QueueRow> | null>(null);
-  const paged = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
-  const load = paged.status === "ready" && paged.next.kind === "more" ? paged.next.load : null;
-  const whole = paged.status === "ready" && paged.next.kind === "done" ? paged.rows : null;
-
-  if (whole !== null && whole !== last) setLast(whole);
-
-  const failed =
-    paged.status === "failed" || (paged.status === "ready" && paged.next.kind === "failed");
-
-  useEffect(() => {
-    load?.();
-  }, [load]);
-
-  useEffect(() => {
-    if (!failed) return undefined;
-
-    const timer = setTimeout(() => {
-      setStore(queuePages(platform));
-    }, QUEUE_RESTART_MS);
-
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [failed, platform]);
-
-  const rows = whole ?? last;
-  const isWhole = whole !== null;
-
-  return useMemo(() => (rows === null ? null : { rows, whole: isWhole }), [rows, isWhole]);
-};
+/** A queue row as the player shows it: its song with the entry's own id and how it joined. */
+const queueTrack = (row: QueueRow): QueueEntry<QueueTrack> => ({
+  itemId: row.itemId,
+  autoplay: row.autoplay,
+  track: { ...row.track, itemId: row.itemId, autoplay: row.autoplay },
+});
 
 /** The listener's queue once its state and every page have arrived; null before. */
 const useQueue = (platform: PlatformSdk): QueueState<QueueTrack> | null => {
   const info = usePlatformQuery(platform.music.queue.get);
-  const list = useQueueRows(platform);
+  const listing = useQueueListing(platform, pagedStore);
   const data = info.status === "success" ? info.data : null;
 
-  return useMemo(() => {
-    if (data === null || list === null) return null;
-
-    return {
-      entries: list.rows.map((row) => ({
-        itemId: row.itemId,
-        autoplay: row.autoplay,
-        track: { ...row.track, itemId: row.itemId, autoplay: row.autoplay },
-      })),
-      complete: list.whole,
-      current: data.current,
-      shuffle: data.shuffle,
-      repeat: data.repeat,
-      autoplay: data.autoplay,
-    };
-  }, [data, list]);
+  return useMemo(
+    () => (data === null || listing === null ? null : queueStateOf(data, listing, queueTrack)),
+    [data, listing],
+  );
 };
 
 interface ControllerProps {

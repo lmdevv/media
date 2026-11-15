@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { ConnectPlayer } from "./connect-player";
 import type { ConnectAsk, ConnectCommands, ReportedSong } from "./connect-player";
 import type { QueueState } from "./playback-controller";
+import { listingOf, queueStateOf } from "./queue-listing";
 import { entry, names, queueOf, settle, setup } from "./testing/controller-harness";
 
 type Run = ReturnType<typeof setup>;
@@ -765,6 +766,366 @@ const playSongs = async (script: ReadonlyArray<SongEvent>): Promise<void> => {
   run.stop();
 };
 
+/**
+ * What happens around a reconnect: the core's queue moves on, its state or one of its listing's
+ * two pages reaches this device as the core holds it then, in any order, as subscriptions that
+ * retry or reconnect deliver them, the pages fail and start over, a queue write answers, or
+ * another device loads a song here.
+ */
+type ReconnectEvent =
+  | {
+      readonly kind: "load";
+      /** Of the song the core's queue plays now, as a move asks, when the listener may play it. */
+      readonly current: boolean;
+      readonly playing: boolean;
+      readonly positionMs: number;
+    }
+  | { readonly kind: "state" }
+  | { readonly kind: "page"; readonly index: number }
+  /** The pages fail and load again: the last whole listing stays until each page is in again. */
+  | { readonly kind: "restart" }
+  /** Another entry of the queue plays. */
+  | { readonly kind: "jump" }
+  /** An entry of a new song joins at the end and plays, as autoplay's do. */
+  | { readonly kind: "advance" }
+  /** The entry that plays moves to the top, from the second page onto the first. */
+  | { readonly kind: "top" }
+  /** The listener may no longer play the song of the entry that plays; the revision stays. */
+  | { readonly kind: "revoke" }
+  | { readonly kind: "write" };
+
+const reconnectEvents = fc.array(
+  fc.oneof(
+    {
+      weight: 3,
+      arbitrary: fc.record({
+        kind: fc.constant("load" as const),
+        current: fc.boolean(),
+        playing: fc.boolean(),
+        positionMs: fc.integer({ min: 0, max: 100_000 }),
+      }),
+    },
+    { weight: 3, arbitrary: fc.constant({ kind: "state" } as const) },
+    {
+      weight: 4,
+      arbitrary: fc.record({
+        kind: fc.constant("page" as const),
+        index: fc.integer({ min: 0, max: 1 }),
+      }),
+    },
+    { weight: 1, arbitrary: fc.constant({ kind: "restart" } as const) },
+    { weight: 1, arbitrary: fc.constant({ kind: "jump" } as const) },
+    { weight: 2, arbitrary: fc.constant({ kind: "advance" } as const) },
+    { weight: 1, arbitrary: fc.constant({ kind: "top" } as const) },
+    { weight: 1, arbitrary: fc.constant({ kind: "revoke" } as const) },
+    { weight: 2, arbitrary: fc.constant({ kind: "write" } as const) },
+  ),
+  { maxLength: 16 },
+);
+
+/** The queue the core holds at one revision. */
+interface RevisedQueue {
+  readonly entries: ReadonlyArray<QueuedSong>;
+  readonly current: string | null;
+}
+
+/** Entries at these first positions make the listing's first page, and the rest its second. */
+const FIRST_PAGE = 2;
+
+/** A page of the listing as this device last heard it. */
+interface PageRead {
+  readonly rows: ReadonlyArray<QueuedSong>;
+  readonly revision: number;
+  /** The entries the core left out of its listing as it read the page. */
+  readonly hidden: ReadonlySet<string>;
+}
+
+/** The queue the core holds now, and the entries whose songs the listener may not play. */
+interface ReconnectCore {
+  revision: number;
+  queue: RevisedQueue;
+  hidden: ReadonlySet<string>;
+}
+
+/** What reached this device of the queue so far, and the queue it was last shown from it. */
+interface Heard {
+  state: { readonly current: string | null; readonly revision: number } | null;
+  /** Each page since the pages last started over, or null until it arrives again. */
+  pages: ReadonlyArray<PageRead | null>;
+  /** The pages the last time all of them were in. */
+  last: ReadonlyArray<PageRead> | null;
+  view: QueueState | null;
+}
+
+/**
+ * Plays `script` on a device that just opened, whose queue's state and two listing pages each
+ * reach it on their own, then lets every write answer and everything reach it as the core holds
+ * it. Checks that the queue is replaced only while this device was shown another song playing,
+ * or none, or a listing whole at the revision of the state it was shown that leaves the entry
+ * playing out as the core read it, and that every request settles.
+ */
+const followAcrossReconnects = async (script: ReadonlyArray<ReconnectEvent>): Promise<void> => {
+  const run = setup();
+  const applied: Array<number> = [];
+
+  const commands: ConnectCommands = {
+    report: async (_song: ReportedSong | null, revision) => {
+      applied.push(revision);
+
+      return run.clock.now;
+    },
+    albumTracks: async () => [],
+  };
+
+  const connect = new ConnectPlayer(run.controller, commands, {
+    now: () => run.clock.now,
+    every: () => () => undefined,
+  });
+
+  const stopConnect = connect.start();
+
+  run.gates.play.holding = true;
+
+  const core: ReconnectCore = {
+    revision: 1,
+    queue: {
+      entries: [
+        { trackId: "s1", itemId: "i1" },
+        { trackId: "s2", itemId: "i2" },
+        { trackId: "s3", itemId: "i3" },
+      ],
+      current: "i1",
+    },
+    hidden: new Set(),
+  };
+
+  const history = new Map<number, RevisedQueue>([[core.revision, core.queue]]);
+
+  const heard: Heard = { state: null, pages: [null, null], last: null, view: null };
+
+  const counts = { requests: 0, loads: 0, songs: 3, writes: 0, checked: 0 };
+
+  const moveOn = (queue: RevisedQueue): void => {
+    core.revision += 1;
+    core.queue = queue;
+    history.set(core.revision, queue);
+  };
+
+  const readPage = (index: number): PageRead => {
+    const range =
+      index === 0 ? core.queue.entries.slice(0, FIRST_PAGE) : core.queue.entries.slice(FIRST_PAGE);
+
+    return {
+      rows: range.filter((queued) => !core.hidden.has(queued.itemId)),
+      revision: core.revision,
+      hidden: core.hidden,
+    };
+  };
+
+  /** The queue as the player provider hands it to the controller, from what reached it so far. */
+  const show = (): void => {
+    const reads = heard.pages.flatMap((read) => (read === null ? [] : [read]));
+    const whole = reads.length === heard.pages.length ? reads : null;
+
+    if (whole !== null) heard.last = whole;
+    const pages = whole ?? heard.last;
+
+    if (heard.state === null || pages === null) return;
+
+    const view = queueStateOf(
+      {
+        current: heard.state.current,
+        shuffle: false,
+        repeat: "off",
+        autoplay: false,
+        revision: heard.state.revision,
+      },
+      listingOf(pages, whole !== null),
+      (queued: QueuedSong) => entry(queued.trackId, queued.itemId),
+    );
+
+    heard.view = view;
+    run.controller.sync(view);
+  };
+
+  /** The song each queue write the controller sent plays, in order. */
+  const written = (): ReadonlyArray<string> =>
+    names(run.sent).flatMap((name) => {
+      const songs = /^play:(?<songs>[^,]+),0$/u.exec(name)?.groups?.songs;
+
+      return songs === undefined ? [] : [songs];
+    });
+
+  /**
+   * Each write went out while the queue this device was shown said another song plays, or none,
+   * or left the entry playing out of a listing whose every page the core read at the revision of
+   * the state shown, as it left out an entry whose song the listener may not play.
+   */
+  const checkWrites = (): void => {
+    const sent = written();
+
+    for (const song of sent.slice(counts.checked)) {
+      const { view, state } = heard;
+
+      expect(view).not.toBeNull();
+      expect(state).not.toBeNull();
+
+      if (view === null || state === null) return;
+      const playing = view.entries.find((queued) => queued.itemId === view.current);
+
+      if (view.current === null || playing !== undefined) {
+        expect(playing?.track.id).not.toBe(song);
+      } else {
+        const position =
+          history
+            .get(state.revision)
+            ?.entries.findIndex((queued) => queued.itemId === view.current) ?? -1;
+
+        expect(heard.pages.map((read) => read?.revision)).toEqual([state.revision, state.revision]);
+        expect(position).toBeGreaterThanOrEqual(0);
+        expect(heard.pages[position < FIRST_PAGE ? 0 : 1]?.hidden.has(view.current)).toBe(true);
+      }
+    }
+
+    counts.checked = sent.length;
+  };
+
+  /** The oldest queue write answers, and the core holds that queue from then. */
+  const answerWrite = (): boolean => {
+    const song = written()[counts.writes];
+
+    if (song === undefined) return false;
+    counts.writes += 1;
+    const itemId = `w${counts.writes}`;
+
+    moveOn({ entries: [{ trackId: song, itemId }], current: itemId });
+    run.answer.current = itemId;
+    run.gates.play.release("play");
+
+    return true;
+  };
+
+  const apply = async (event: ReconnectEvent): Promise<void> => {
+    const { queue } = core;
+    const playing = queue.entries.find((queued) => queued.itemId === queue.current);
+
+    switch (event.kind) {
+      case "load": {
+        counts.requests += 1;
+        counts.loads += 1;
+
+        // The core loads only a song the listener may play.
+        const trackId =
+          event.current && playing !== undefined && !core.hidden.has(playing.itemId)
+            ? playing.trackId
+            : `x${counts.loads}`;
+
+        connect.take({
+          revision: counts.requests,
+          ask: {
+            kind: "load",
+            item: track(trackId),
+            playing: event.playing,
+            positionMs: event.positionMs,
+            at: run.clock.now,
+            loadRevision: counts.loads,
+          },
+        });
+        break;
+      }
+
+      case "state": {
+        heard.state = { current: queue.current, revision: core.revision };
+        show();
+        break;
+      }
+
+      case "page": {
+        heard.pages = heard.pages.map((read, index) =>
+          index === event.index ? readPage(index) : read,
+        );
+        show();
+        break;
+      }
+
+      case "restart": {
+        heard.pages = [null, null];
+        show();
+        break;
+      }
+
+      case "jump": {
+        const other = queue.entries.find((queued) => queued.itemId !== queue.current);
+
+        if (other !== undefined) moveOn({ ...queue, current: other.itemId });
+        break;
+      }
+
+      case "advance": {
+        counts.songs += 1;
+        const added = { trackId: `s${counts.songs}`, itemId: `i${counts.songs}` };
+
+        moveOn({ entries: [...queue.entries, added], current: added.itemId });
+        break;
+      }
+
+      case "top": {
+        if (playing !== undefined) {
+          moveOn({
+            ...queue,
+            entries: [playing, ...queue.entries.filter((queued) => queued !== playing)],
+          });
+        }
+
+        break;
+      }
+
+      case "revoke": {
+        if (queue.current !== null) core.hidden = new Set([...core.hidden, queue.current]);
+        break;
+      }
+
+      case "write": {
+        answerWrite();
+        break;
+      }
+    }
+
+    await settle();
+    checkWrites();
+  };
+
+  const applyAll = async (remaining: ReadonlyArray<ReconnectEvent>): Promise<void> => {
+    const [event, ...rest] = remaining;
+
+    if (event === undefined) return;
+    await apply(event);
+    await applyAll(rest);
+  };
+
+  /** Every write answers, then the state and every page reach this device, until nothing waits. */
+  const drain = async (): Promise<void> => {
+    const answered = answerWrite();
+
+    heard.state = { current: core.queue.current, revision: core.revision };
+    heard.pages = heard.pages.map((_, index) => readPage(index));
+    show();
+    await settle();
+    checkWrites();
+
+    if (answered || written().length > counts.writes) await drain();
+  };
+
+  await applyAll(script);
+  await drain();
+
+  if (counts.requests > 0) expect(applied.at(-1)).toBe(counts.requests);
+
+  await expectEngineAsMeant(run);
+  stopConnect();
+  run.stop();
+};
+
 describe("ConnectPlayer under any order of requests, answers, and the listener's actions", () => {
   it("writes a queue only for the load still starting, settles every request, and ends as the newest asks", async () => {
     await fc.assert(fc.asyncProperty(events, playAlbums), { numRuns: 250 });
@@ -790,5 +1151,9 @@ describe("ConnectPlayer under any order of requests, answers, and the listener's
 
   it("ends a song load's wait on a whole listing, a newer request, a tap, or the core settling it, and never replaces the queue on a move", async () => {
     await fc.assert(fc.asyncProperty(songEvents, playSongs), { numRuns: 250 });
+  }, 60_000);
+
+  it("replaces the queue on a song load only once a whole listing of the queue's own revision leaves its entry out, whatever order the state and pages arrive in around a reconnect", async () => {
+    await fc.assert(fc.asyncProperty(reconnectEvents, followAcrossReconnects), { numRuns: 250 });
   }, 60_000);
 });

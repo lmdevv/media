@@ -5347,6 +5347,7 @@ const music_queue_get = query({
     shuffle: Schema.Boolean,
     repeat: Schema.Union([Schema.Literal("off"), Schema.Literal("all"), Schema.Literal("one")]),
     autoplay: Schema.Boolean,
+    revision: Schema.Finite,
   }),
 });
 
@@ -5405,6 +5406,7 @@ const music_queue_list = query({
         Schema.Null,
       ]),
     ),
+    revision: Schema.Finite,
   }),
 });
 

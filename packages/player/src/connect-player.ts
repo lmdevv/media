@@ -404,9 +404,10 @@ export class ConnectPlayer {
    * Starts a load of a song. The queue plays that song now when a move lands here, so this device
    * plays that entry from the position and keeps the queue; any other song replaces the queue.
    * Until the queue this device holds says which entry it plays, the load waits for it, so a move
-   * never replaces the queue (`#changed` tries again). A whole listing that leaves the current
-   * entry out ends the wait: that entry's song is one the listener may not play, and the core
-   * loads only a song they may, so the load replaces the queue.
+   * never replaces the queue (`#changed` tries again). A whole listing, read at the revision of
+   * the queue's state, that leaves the current entry out ends the wait: that entry's song is one
+   * the listener may not play, and the core loads only a song they may, so the load replaces the
+   * queue.
    */
   #startSong(load: StartingLoad): void {
     const trackId = load.ask.item.ref.id;

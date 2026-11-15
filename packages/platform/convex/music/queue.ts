@@ -26,7 +26,7 @@ import {
 import type { Decider } from "./person";
 import { likedAmong, musicPresenter } from "./present";
 import { TRACK_ROW_BYTES, pageRowsFor } from "./reads";
-import { musicStore } from "./write";
+import { musicStore, queueRevision } from "./write";
 import type { MusicStore } from "./write";
 
 /** The longest queue kept, as old music's `MAX_QUEUE`. */
@@ -49,6 +49,7 @@ const EMPTY = {
   shuffle: false,
   repeat: "off" as const,
   autoplay: true,
+  revision: 0,
 };
 
 /**
@@ -128,15 +129,19 @@ const open = async (
   };
 };
 
-/** Writes `fields` to the queue and answers it as written. */
+/**
+ * Writes `fields` to the queue, moving its revision on, and answers it as written. Every change to
+ * the queue or its entries goes through here, so a listing read under one revision lists that
+ * queue whole (ADR 0018).
+ */
 const saved = async (
   session: Session,
   queue: Queue,
-  fields: Partial<Omit<Queue, "_id" | "_creationTime" | "userId">>,
+  fields: Partial<Omit<Queue, "_id" | "_creationTime" | "userId" | "revision">>,
 ): Promise<Queue> => {
-  await session.store.setQueue(queue._id, fields);
+  const revision = await session.store.setQueue(queue, fields);
 
-  return { ...queue, ...fields };
+  return { ...queue, ...fields, revision };
 };
 
 /** Whether `one` plays before `other`. */
@@ -271,6 +276,7 @@ const allEntries = (session: Session, queue: Queue): Promise<ReadonlyArray<Entry
 /**
  * Rewrites every entry's play and list keys from the top, keeping both orders, for an insert or a
  * move whose neighbours sit too close to split. A queue holds at most 1,000 entries, a patch each.
+ * The keys are where a listing's pages start and end, so the queue's revision moves on.
  */
 const renumber = async (session: Session, queue: Queue): Promise<void> => {
   const entries = await allEntries(session, queue);
@@ -287,6 +293,8 @@ const renumber = async (session: Session, queue: Queue): Promise<void> => {
       }
     }),
   );
+
+  await saved(session, queue, {});
 };
 
 /** Where new entries go in one order: between two keys, either missing at an end. */
@@ -586,6 +594,7 @@ export const { get, list, play, add, remove, move, clear, jump, shuffle, repeat,
         shuffle: queue.shuffle,
         repeat: queue.repeat,
         autoplay: queue.autoplay,
+        revision: queueRevision(queue),
       };
     },
     list: async (ctx, { paginationOpts }, caller) => {
@@ -596,7 +605,8 @@ export const { get, list, play, add, remove, move, clear, jump, shuffle, repeat,
         .withIndex("by_user", (q) => q.eq("userId", caller.userId))
         .first();
 
-      const generation = row?.generation ?? EMPTY.generation;
+      const queue = row ?? EMPTY;
+      const { generation } = queue;
 
       const page = await paginateAtMost(
         ctx.db,
@@ -638,6 +648,7 @@ export const { get, list, play, add, remove, move, clear, jump, shuffle, repeat,
             track: await present.track(track, liked.has(track._id)),
           })),
         ),
+        revision: queueRevision(queue),
       };
     },
     play: async (ctx, args, caller) => {
@@ -828,7 +839,7 @@ export const { get, list, play, add, remove, move, clear, jump, shuffle, repeat,
         await session.store.setQueueEntryOrder(moving._id, { order, listOrder });
       }
 
-      await toppedUp(session, queue);
+      await toppedUp(session, await saved(session, queue, {}));
 
       return null;
     },
