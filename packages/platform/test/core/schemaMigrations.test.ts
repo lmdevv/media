@@ -23,7 +23,7 @@ const name = "probe.doublePositions";
 
 const Started = Schema.Array(
   Schema.Struct({
-    name: Schema.String,
+    name: Schema.Literals(["probe.doublePositions", "connect.clearRowsBeforeItems"]),
     state: Schema.Literals(["done", "scheduled"]),
     cursor: Schema.optionalKey(Schema.NullOr(Schema.String)),
   }),
@@ -80,11 +80,38 @@ const clearMigrateRows = async (core: CoreStack, cursor: string | null = null): 
   if (!page.isDone) await clearMigrateRows(core, page.continueCursor);
 };
 
+/**
+ * Runs every migration to its end before the test seeds, so no other migration's chain steps after
+ * the log mark. The function log does not say which migration a step ran, so the step counts below
+ * are this migration's only when every other one is done first.
+ */
+const settleEveryMigration = async (core: CoreStack): Promise<void> => {
+  const started = await run(core);
+
+  await inSequence(started, (migration) =>
+    eventually(
+      `${migration.name} to finish`,
+      async () => {
+        const status = await runFunction(
+          core,
+          internal.core.schemaMigrations.status,
+          { name: migration.name },
+          Status,
+        );
+
+        return status?.done === true ? status : null;
+      },
+      240_000,
+    ),
+  );
+};
+
 describe.skipIf(stack === undefined)("core schema migrations, live", { timeout: 300_000 }, () => {
   it("migrates 40,000 rows in batches, and a second run mid-chain does not double the chain", async () => {
     if (stack === undefined) return;
 
     await clearMigrateRows(stack);
+    await settleEveryMigration(stack);
 
     const group = freshRun(GROUP_PREFIX.slice(0, -1));
 
@@ -100,7 +127,7 @@ describe.skipIf(stack === undefined)("core schema migrations, live", { timeout: 
           ),
         ),
     );
-    await runFunction(stack, internal.core.schemaMigrations.resetProbe, { name }, Schema.Null);
+    await runFunction(stack, internal.core.schemaMigrations.reset, { name }, Schema.Null);
 
     const mark = await logMark(stack);
     const log = followLog(stack, mark);

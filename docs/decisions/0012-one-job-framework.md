@@ -4,6 +4,7 @@
   with movies' kinds, pools, and the general lease check. Amended 2026-11-10 with the sweep of
   finished jobs, and again the same day with the Jellyfin and Plex import kinds. Amended
   2026-11-14 with a kind's pause and hold, the delayed retry, and music's lyrics lookups.
+  Amended 2026-11-15 with the steps of a shape change to stored rows.
 - Decisions: D27
 
 ## Context
@@ -114,6 +115,10 @@ The first framework, in `packages/platform/convex/core/jobs/`, settled how these
   chains never both advance. A changed migration needs a new name, because a deployment that
   finished the old name never runs it again. `scripts/dev-stack.sh` calls `run` after it deploys the core, and
   the deploy image does the same once the server joins it.
+- A shape change to rows a released version can hold goes in three steps: the schema accepts both
+  shapes and the code reads both, a migration in the same release rewrites or deletes the old
+  rows, and a later release drops the old shape. The first are Connect's, which rewrite v0.3.0's
+  reports and requests in place (ADR 0018). `reset` forgets a migration's progress, for tests.
 - An `imports` row holds the source, the server id and name, and the job. One active import per
   source server is the import kind's dedupe key. Movies keeps the import plan, its resume point,
   and the imported counts in its own table, keyed by the import id.

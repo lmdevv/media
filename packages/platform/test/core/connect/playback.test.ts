@@ -1,15 +1,21 @@
 import { describe, expect, it } from "vitest";
 
+import type { DomainItem } from "../../../commands/access";
 import type { Id, TableNames } from "../../../convex/_generated/dataModel";
+import type { Ask } from "../../../convex/core/connect/model";
 import {
   changed,
+  controlAsk,
+  loadAsk,
+  moveAsk,
   nextRevision,
   ONLINE_MS,
+  pendingRequest,
   playbackOf,
   positionAt,
   settledAfter,
 } from "../../../convex/core/connect/playback";
-import type { Player, Request } from "../../../convex/core/connect/playback";
+import type { Asked, Player, Request } from "../../../convex/core/connect/playback";
 
 // SAFETY: a type predicate, not checked by the compiler. A Convex id is an opaque string; these
 // functions only compare ids for equality and never send one to a backend.
@@ -30,55 +36,71 @@ const LUCIA = idOf("authSessions", "lucia-tile");
 
 const AIKO = idOf("authSessions", "aiko-tile");
 
+const FILM: DomainItem = { domain: "movies", ref: { type: "title", id: idOf("titles", "film") } };
+
+const SONG: DomainItem = { domain: "music", ref: { type: "track", id: idOf("tracks", "one") } };
+
+const NEXT: DomainItem = { domain: "music", ref: { type: "track", id: idOf("tracks", "two") } };
+
+const ALBUM: DomainItem = { domain: "music", ref: { type: "album", id: idOf("albums", "lp") } };
+
 const player = (fields: Partial<Omit<Player, "_id" | "_creationTime">> = {}): Player => ({
   _id: idOf("connectPlayers", "tv"),
   _creationTime: 0,
   deviceId: TV,
   reporter: LUCIA,
   output: { kind: "local" },
-  playback: { domain: "movies", playing: true, positionMs: 60_000 },
+  playback: { item: FILM, playing: true, positionMs: 60_000 },
   settled: 0,
   reportedAt: 1_000,
   ...fields,
 });
 
-const request = (fields: Partial<Omit<Request, "_id" | "_creationTime">> = {}): Request => ({
+const pause = (item: DomainItem): Ask => ({
+  kind: "transport",
+  item,
+  playing: false,
+  positionMs: 61_000,
+  at: 2_000,
+});
+
+const request = (fields: Partial<Omit<Asked, "_id" | "_creationTime">> = {}): Asked => ({
   _id: idOf("connectRequests", "tv"),
   _creationTime: 0,
   deviceId: TV,
   reporter: LUCIA,
   revision: 1,
-  playing: false,
-  positionMs: 61_000,
-  at: 2_000,
+  ask: pause(FILM),
   ...fields,
 });
 
 describe("what a device plays, as controllers see it", () => {
   it("is the report, held at the time it arrived, while no request waits", () => {
     expect(playbackOf(player(), null)).toEqual({
-      domain: "movies",
+      item: FILM,
       playing: true,
       positionMs: 60_000,
       at: 1_000,
       pending: false,
+      loading: null,
     });
   });
 
   it("is the request at once, before the device applies it", () => {
     expect(playbackOf(player(), request())).toEqual({
-      domain: "movies",
+      item: FILM,
       playing: false,
       positionMs: 61_000,
       at: 2_000,
       pending: true,
+      loading: null,
     });
   });
 
   it("is the report again once the device says it applied the request", () => {
     const paused = player({
       settled: 1,
-      playback: { domain: "movies", playing: false, positionMs: 61_020 },
+      playback: { item: FILM, playing: false, positionMs: 61_020 },
       reportedAt: 2_040,
     });
 
@@ -99,8 +121,153 @@ describe("what a device plays, as controllers see it", () => {
     });
   });
 
-  it("is nothing while the device plays nothing", () => {
+  it("is nothing while the device plays nothing and no load waits", () => {
     expect(playbackOf(player({ playback: null }), request())).toBeNull();
+  });
+
+  it("drops a pause sent for a song once the device reports the next one", () => {
+    const moved = player({ playback: { item: NEXT, playing: true, positionMs: 1_000 } });
+
+    expect(playbackOf(moved, request({ ask: pause(SONG) }))).toMatchObject({
+      item: NEXT,
+      playing: true,
+      pending: false,
+    });
+  });
+
+  it("is the load it has not applied, whatever it plays or whether it plays", () => {
+    const loading = request({ ask: loadAsk(ALBUM, 30_000, 2_000, 1) });
+
+    const expected = {
+      item: ALBUM,
+      playing: true,
+      positionMs: 30_000,
+      at: 2_000,
+      pending: true,
+      loading: 1,
+    };
+
+    expect(playbackOf(player(), loading)).toEqual(expected);
+    expect(playbackOf(player({ playback: null }), loading)).toEqual(expected);
+  });
+
+  it("is nothing from the moment playback moves away, whatever a late report says", () => {
+    const stopped = request({ ask: { kind: "stop", at: 2_000 } });
+
+    expect(playbackOf(player({ reportedAt: 2_100 }), stopped)).toBeNull();
+    expect(playbackOf(player({ settled: 1, playback: null }), stopped)).toBeNull();
+  });
+});
+
+describe("rows v0.3.0 wrote, before items", () => {
+  const oldReport = player({ playback: { domain: "movies", playing: true, positionMs: 60_000 } });
+
+  const oldRequest: Request = {
+    _id: idOf("connectRequests", "tv"),
+    _creationTime: 0,
+    deviceId: TV,
+    reporter: LUCIA,
+    revision: 1,
+    playing: false,
+    positionMs: 61_000,
+    at: 2_000,
+  };
+
+  it("read a report that names no item as playing nothing", () => {
+    expect(playbackOf(oldReport, null)).toBeNull();
+    expect(playbackOf(oldReport, oldRequest)).toBeNull();
+  });
+
+  it("never take a flat transport as pending, so the report stands", () => {
+    expect(pendingRequest(player(), oldRequest)).toBeNull();
+    expect(playbackOf(player(), oldRequest)).toMatchObject({ item: FILM, pending: false });
+  });
+
+  it("still count an old request's revision, so the next one is above it", () => {
+    expect(nextRevision({ ...oldRequest, revision: 4 })).toBe(5);
+  });
+
+  it("show a load made after the upgrade over an old report", () => {
+    expect(
+      playbackOf(oldReport, request({ ask: loadAsk(SONG, 0, 2_000, 2), revision: 2 })),
+    ).toMatchObject({ item: SONG, pending: true, loading: 2 });
+  });
+});
+
+describe("what control and move ask", () => {
+  const reported = {
+    item: SONG,
+    playing: true,
+    positionMs: 10_000,
+    at: 1_000,
+    pending: false,
+    loading: null,
+  };
+
+  it("asks a pause of the item the device plays", () => {
+    expect(controlAsk(reported, { playing: false }, 1_500)).toEqual({
+      kind: "transport",
+      item: SONG,
+      playing: false,
+      positionMs: 10_500,
+      at: 1_500,
+    });
+  });
+
+  it("asks a pause during a load as that same load, so a device that started it only pauses", () => {
+    const loading = { ...reported, item: ALBUM, pending: true, loading: 3 };
+
+    expect(controlAsk(loading, { playing: false }, 1_500)).toEqual({
+      kind: "load",
+      item: ALBUM,
+      playing: false,
+      positionMs: 10_500,
+      at: 1_500,
+      loadRevision: 3,
+    });
+  });
+
+  it("keeps the first load's revision through every change while it waits", () => {
+    const loading = { ...reported, item: ALBUM, pending: true, loading: 3 };
+    const paused = controlAsk(loading, { playing: false }, 1_500);
+    const waiting = playbackOf(player(), request({ ask: paused, revision: 4 }));
+
+    expect(waiting).toMatchObject({ item: ALBUM, playing: false, loading: 3 });
+
+    if (waiting === null) throw new Error("a paused load still shows its item");
+
+    expect(controlAsk(waiting, { positionMs: 20_000 }, 1_700)).toMatchObject({
+      kind: "load",
+      playing: false,
+      positionMs: 20_000,
+      loadRevision: 3,
+    });
+  });
+
+  it("loads an item under the revision that asks for it", () => {
+    expect(loadAsk(ALBUM, 30_000, 2_000, 7)).toEqual({
+      kind: "load",
+      item: ALBUM,
+      playing: true,
+      positionMs: 30_000,
+      at: 2_000,
+      loadRevision: 7,
+    });
+  });
+
+  it("moves the item, playing or paused as it is, at its position now", () => {
+    expect(moveAsk(reported, 1_800, 2)).toEqual({
+      kind: "load",
+      item: SONG,
+      playing: true,
+      positionMs: 10_800,
+      at: 1_800,
+      loadRevision: 2,
+    });
+    expect(moveAsk({ ...reported, playing: false }, 9_000, 2)).toMatchObject({
+      playing: false,
+      positionMs: 10_000,
+    });
   });
 });
 

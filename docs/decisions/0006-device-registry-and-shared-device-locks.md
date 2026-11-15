@@ -2,8 +2,8 @@
 
 - Status: Accepted, 2026-11-03. Amended 2026-11-04 with the registry and locks as built,
   2026-11-07 with the phase 3 review fixes, 2026-11-07 with one session per device (D52), and
-  2026-11-09 with device grants (D48, D59), 2026-11-10 with one person per phone (D64), and 2026-11-11 with refunds checked against the code they verified.
-- Decisions: D18, D19, D35, D40, D47, D48, D52, D59, D64
+  2026-11-09 with device grants (D48, D59), 2026-11-10 with one person per phone (D64), 2026-11-11 with refunds checked against the code they verified, and 2026-11-15 with the Connect rules D60 keeps and `load`.
+- Decisions: D18, D19, D35, D40, D47, D48, D52, D59, D60, D64
 
 ## Context
 
@@ -193,6 +193,13 @@ their own personal device, which means one with their live session on it, and a 
 that lists them. They never control another person's personal device. Connect uses the rule, and
 ADR 0018 records how it is built.
 
+A personal device an admin marks shared becomes a shared device: every person shared devices list
+controls it, and its old owner only while listed. The owner kept this rule (D60), along with the
+household rule deciding for a listed person while the shared device plays a group session whose
+host withholds control. `load`, which loading an item onto a device and moving playback onto it
+use, reaches the same devices as `control`, except that a guest from a share link loads onto
+none (ADR 0018).
+
 ### Actions added to `can`
 
 | Action                | On       | Needs                                                                            |
@@ -202,6 +209,7 @@ ADR 0018 records how it is built.
 | `unlock`              | tile     | `admin`, and no listed kid locking the tile                                      |
 | `answer`              | approval | `account`; `open` by the tile's person, `leave` by an adult                      |
 | `control`, `report`   | device   | as built in ADR 0018: the person's own device or a shared device listing them    |
+| `load`                | device   | as `control`, and never a guest from a share link (ADR 0018)                     |
 | `listOnSharedDevices` | account  | oneself with `account` and no restrictions; otherwise `admin`, on a kid          |
 | `resetUnlockCode`     | account  | `admin`, on anyone in the household                                              |
 | `manageDevices`       | server   | `admin`                                                                          |

@@ -34,6 +34,26 @@ const listResult = v.array(
       v.null(),
       v.object({
         domain: v.union(v.literal("movies"), v.literal("music")),
+        item: v.union(
+          v.union(
+            v.object({
+              domain: v.literal("movies"),
+              ref: v.union(
+                v.object({ type: v.literal("title"), id: v.id("titles") }),
+                v.object({ type: v.literal("episode"), id: v.id("episodes") }),
+                v.object({ type: v.literal("file"), id: v.id("mediaFiles") }),
+              ),
+            }),
+            v.object({
+              domain: v.literal("music"),
+              ref: v.union(
+                v.object({ type: v.literal("track"), id: v.id("tracks") }),
+                v.object({ type: v.literal("album"), id: v.id("albums") }),
+              ),
+            }),
+          ),
+          v.null(),
+        ),
         playing: v.boolean(),
         positionMs: v.number(),
         at: v.number(),
@@ -43,6 +63,34 @@ const listResult = v.array(
     reportedAt: v.number(),
   }),
 );
+
+const loadArgs = v.object({
+  deviceId: v.id("devices"),
+  item: v.union(
+    v.object({
+      domain: v.literal("movies"),
+      ref: v.union(
+        v.object({ type: v.literal("title"), id: v.id("titles") }),
+        v.object({ type: v.literal("episode"), id: v.id("episodes") }),
+        v.object({ type: v.literal("file"), id: v.id("mediaFiles") }),
+      ),
+    }),
+    v.object({
+      domain: v.literal("music"),
+      ref: v.union(
+        v.object({ type: v.literal("track"), id: v.id("tracks") }),
+        v.object({ type: v.literal("album"), id: v.id("albums") }),
+      ),
+    }),
+  ),
+  positionMs: v.optional(v.number()),
+});
+
+const loadResult = v.object({ revision: v.number() });
+
+const moveArgs = v.object({ from: v.id("devices"), to: v.id("devices") });
+
+const moveResult = v.object({ revision: v.number() });
 
 /** The handlers `convex/core/connect/targets.ts` passes to `register`, one per `core.connect.targets` command. */
 export interface Handlers {
@@ -59,6 +107,20 @@ export interface Handlers {
     args: Record<string, never>,
     caller: Caller,
   ) => Infer<typeof listResult> | Promise<Infer<typeof listResult>>;
+
+  /** `core.connect.targets.load` (mutation, signed-in): Play something on a device you can control, from a position, when you and the person on that device can both play it. */
+  readonly load: (
+    ctx: Omit<MutationCtx, "auth">,
+    args: Infer<typeof loadArgs>,
+    caller: Caller,
+  ) => Infer<typeof loadResult> | Promise<Infer<typeof loadResult>>;
+
+  /** `core.connect.targets.move` (mutation, signed-in): Move what plays on one device you can control to another at the same position; the first one stops. */
+  readonly move: (
+    ctx: Omit<MutationCtx, "auth">,
+    args: Infer<typeof moveArgs>,
+    caller: Caller,
+  ) => Infer<typeof moveResult> | Promise<Infer<typeof moveResult>>;
 }
 
 /** The `api` reference of each `core.connect.targets` command; `commands/refs.ts` checks them. */
@@ -75,6 +137,18 @@ export interface Refs {
     Record<string, never>,
     Infer<typeof listResult>
   >;
+  readonly load: FunctionReference<
+    "mutation",
+    "public",
+    Infer<typeof loadArgs>,
+    Infer<typeof loadResult>
+  >;
+  readonly move: FunctionReference<
+    "mutation",
+    "public",
+    Infer<typeof moveArgs>,
+    Infer<typeof moveResult>
+  >;
 }
 
 /** Registers the `core.connect.targets` commands as public Convex functions with their declared arguments and result. */
@@ -89,5 +163,15 @@ export const register = (handlers: Handlers) => ({
     args: listArgs,
     returns: listResult,
     handler: async (ctx, args) => handlers.list(ctx, args, await requireCaller(ctx, "signed-in")),
+  }),
+  load: mutation({
+    args: loadArgs,
+    returns: loadResult,
+    handler: async (ctx, args) => handlers.load(ctx, args, await requireCaller(ctx, "signed-in")),
+  }),
+  move: mutation({
+    args: moveArgs,
+    returns: moveResult,
+    handler: async (ctx, args) => handlers.move(ctx, args, await requireCaller(ctx, "signed-in")),
   }),
 });

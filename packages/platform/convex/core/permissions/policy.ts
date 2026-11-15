@@ -635,10 +635,10 @@ const decideApproval = (principal: Principal, approval: ApprovalResource): Decis
 };
 
 /**
- * What can be done to a registered device through Connect (ADR 0018): `control` its playback, or
- * `report` what it plays from a session on it.
+ * What can be done to a registered device through Connect (ADR 0018): `control` its playback,
+ * `report` what it plays from a session on it, or `load` something onto it.
  */
-export const deviceActions = ["control", "report"] as const;
+export const deviceActions = ["control", "report", "load"] as const;
 
 export type DeviceAction = (typeof deviceActions)[number];
 
@@ -647,31 +647,37 @@ export type DeviceRelation =
   | { readonly mode: "personal"; readonly signedInHere: boolean }
   | { readonly mode: "shared"; readonly listed: boolean };
 
-/** The principal's membership in the group session a device plays (ADR 0017). */
-export interface SessionMembership {
-  /** The session lets this member control playback. */
-  readonly control: boolean;
+/** The group session a device plays, as the principal stands in it (ADR 0017). */
+export interface DeviceSession {
+  /** The session is live and the person whose session reports for the device is still in it. */
+  readonly live: boolean;
+  readonly place: TogetherPlace;
+  readonly settings: Settings;
 }
 
 /** A registered device as `can` sees it for the principal. */
 export interface DeviceResource {
   readonly on: "device";
   readonly relation: DeviceRelation;
-  /** The domain the device plays now, or null when it plays nothing. */
+  /** The domain the device plays now, or null when it plays nothing; for `load`, what it would. */
   readonly domain: ContentDomain | null;
-  /** The principal's membership in the group session the device plays, or null for none. */
-  readonly session: SessionMembership | null;
+  readonly session: DeviceSession | null;
 }
 
 interface DeviceRule {
   readonly verb: ContentVerb;
+  /** `session`: a guest does it inside the session the device plays, as `control` there allows. */
+  readonly guests: "session" | "never";
 }
 
 type DeviceRules = { readonly [A in DeviceAction]: DeviceRule };
 
 const deviceRules: DeviceRules = {
-  control: { verb: "play" },
-  report: { verb: "play" },
+  control: { verb: "play", guests: "session" },
+  /** A guest's session is on no device, so it has nothing to report from. */
+  report: { verb: "play", guests: "never" },
+  /** Loading replaces what plays, which is no control inside a session. */
+  load: { verb: "play", guests: "never" },
 };
 
 type PersonPrincipal = Extract<Principal, { readonly kind: "person" }>;
@@ -687,12 +693,34 @@ const holdsVerb = (
     ? domainScopes.some((scope) => scope.endsWith(`:${verb}`) && scopes.includes(scope))
     : scopes.includes(scopeOf(domain, verb));
 
-const reachesDevice = (principal: PersonPrincipal, device: DeviceResource): Decision => {
-  if (principal.role === "guest") {
-    if (device.session === null) return hidden("guest");
+/** Guests reach a device only through the live group session it plays, as its `control` rule allows (D35). */
+const guestReaches = (
+  principal: PersonPrincipal,
+  rule: DeviceRule,
+  device: DeviceResource,
+): Decision => {
+  const { session } = device;
 
-    return device.session.control ? ALLOWED : forbidden("no-control");
-  }
+  if (session === null || !session.live) return hidden("guest");
+
+  if (session.place !== "guest" && session.place !== "host") return hidden("guest");
+
+  if (rule.guests === "never") return forbidden("guest");
+
+  return actInSession(principal, CONTROL, {
+    ...session,
+    addedIt: false,
+    invited: false,
+  });
+};
+
+/** A listed person reaches a shared device whatever group session it plays (D60). */
+const reachesDevice = (
+  principal: PersonPrincipal,
+  rule: DeviceRule,
+  device: DeviceResource,
+): Decision => {
+  if (principal.role === "guest") return guestReaches(principal, rule, device);
 
   const { relation } = device;
 
@@ -706,7 +734,7 @@ const reachesDevice = (principal: PersonPrincipal, device: DeviceResource): Deci
 const decideDevice = (principal: Principal, rule: DeviceRule, device: DeviceResource): Decision => {
   if (principal.kind === "service") return hidden("service");
 
-  const reach = reachesDevice(principal, device);
+  const reach = reachesDevice(principal, rule, device);
 
   if (!reach.allowed) return reach;
 
@@ -909,6 +937,8 @@ const LIVE: Omit<InsideRule, "who" | "guests"> = {
   platformGuests: true,
 };
 
+const CONTROL: InsideRule = { ...LIVE, who: "joined", guests: "control" };
+
 const togetherRules: TogetherRules = {
   start: { from: "new" },
   join: { from: "outside", under: "open" },
@@ -916,7 +946,7 @@ const togetherRules: TogetherRules = {
   see: MEMBER,
   view: { ...MEMBER, who: "joined" },
   leave: { ...MEMBER, orAccount: true },
-  control: { ...LIVE, who: "joined", guests: "control" },
+  control: CONTROL,
   add: { ...LIVE, who: "joined", guests: "add", platformGuests: false },
   remove: { ...LIVE, who: "joined", guests: "add", own: true, platformGuests: false },
   /** A locked session takes no new members, approved or not. */

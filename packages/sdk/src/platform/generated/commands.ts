@@ -505,9 +505,41 @@ const core_connect_player_report = mutation({
     ]),
     playback: Schema.Union([
       Schema.Struct({
-        domain: Schema.Union([Schema.Literal("movies"), Schema.Literal("music")]),
+        item: Schema.Union([
+          Schema.Struct({
+            domain: Schema.Literal("movies"),
+            ref: Schema.Union([
+              Schema.Struct({
+                type: Schema.Literal("title"),
+                id: Schema.String.pipe(Schema.brand("Id<titles>")),
+              }),
+              Schema.Struct({
+                type: Schema.Literal("episode"),
+                id: Schema.String.pipe(Schema.brand("Id<episodes>")),
+              }),
+              Schema.Struct({
+                type: Schema.Literal("file"),
+                id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
+              }),
+            ]),
+          }),
+          Schema.Struct({
+            domain: Schema.Literal("music"),
+            ref: Schema.Union([
+              Schema.Struct({
+                type: Schema.Literal("track"),
+                id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+              }),
+              Schema.Struct({
+                type: Schema.Literal("album"),
+                id: Schema.String.pipe(Schema.brand("Id<albums>")),
+              }),
+            ]),
+          }),
+        ]),
         playing: Schema.Boolean,
         positionMs: Schema.Finite,
+        session: Schema.optionalKey(Schema.String.pipe(Schema.brand("Id<togetherSessions>"))),
       }),
       Schema.Null,
     ]),
@@ -524,9 +556,86 @@ const core_connect_player_requested = query({
     Schema.Null,
     Schema.Struct({
       revision: Schema.Finite,
-      playing: Schema.Boolean,
-      positionMs: Schema.Finite,
-      at: Schema.Finite,
+      ask: Schema.Union([
+        Schema.Struct({
+          kind: Schema.Literal("transport"),
+          item: Schema.Union([
+            Schema.Struct({
+              domain: Schema.Literal("movies"),
+              ref: Schema.Union([
+                Schema.Struct({
+                  type: Schema.Literal("title"),
+                  id: Schema.String.pipe(Schema.brand("Id<titles>")),
+                }),
+                Schema.Struct({
+                  type: Schema.Literal("episode"),
+                  id: Schema.String.pipe(Schema.brand("Id<episodes>")),
+                }),
+                Schema.Struct({
+                  type: Schema.Literal("file"),
+                  id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
+                }),
+              ]),
+            }),
+            Schema.Struct({
+              domain: Schema.Literal("music"),
+              ref: Schema.Union([
+                Schema.Struct({
+                  type: Schema.Literal("track"),
+                  id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+                }),
+                Schema.Struct({
+                  type: Schema.Literal("album"),
+                  id: Schema.String.pipe(Schema.brand("Id<albums>")),
+                }),
+              ]),
+            }),
+          ]),
+          playing: Schema.Boolean,
+          positionMs: Schema.Finite,
+          at: Schema.Finite,
+        }),
+        Schema.Struct({
+          kind: Schema.Literal("load"),
+          item: Schema.Union([
+            Schema.Struct({
+              domain: Schema.Literal("movies"),
+              ref: Schema.Union([
+                Schema.Struct({
+                  type: Schema.Literal("title"),
+                  id: Schema.String.pipe(Schema.brand("Id<titles>")),
+                }),
+                Schema.Struct({
+                  type: Schema.Literal("episode"),
+                  id: Schema.String.pipe(Schema.brand("Id<episodes>")),
+                }),
+                Schema.Struct({
+                  type: Schema.Literal("file"),
+                  id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
+                }),
+              ]),
+            }),
+            Schema.Struct({
+              domain: Schema.Literal("music"),
+              ref: Schema.Union([
+                Schema.Struct({
+                  type: Schema.Literal("track"),
+                  id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+                }),
+                Schema.Struct({
+                  type: Schema.Literal("album"),
+                  id: Schema.String.pipe(Schema.brand("Id<albums>")),
+                }),
+              ]),
+            }),
+          ]),
+          playing: Schema.Boolean,
+          positionMs: Schema.Finite,
+          at: Schema.Finite,
+          loadRevision: Schema.Finite,
+        }),
+        Schema.Struct({ kind: Schema.Literal("stop"), at: Schema.Finite }),
+      ]),
     }),
   ]),
 });
@@ -566,6 +675,41 @@ const core_connect_targets_list = query({
         Schema.Null,
         Schema.Struct({
           domain: Schema.Union([Schema.Literal("movies"), Schema.Literal("music")]),
+          item: Schema.Union([
+            Schema.Union([
+              Schema.Struct({
+                domain: Schema.Literal("movies"),
+                ref: Schema.Union([
+                  Schema.Struct({
+                    type: Schema.Literal("title"),
+                    id: Schema.String.pipe(Schema.brand("Id<titles>")),
+                  }),
+                  Schema.Struct({
+                    type: Schema.Literal("episode"),
+                    id: Schema.String.pipe(Schema.brand("Id<episodes>")),
+                  }),
+                  Schema.Struct({
+                    type: Schema.Literal("file"),
+                    id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
+                  }),
+                ]),
+              }),
+              Schema.Struct({
+                domain: Schema.Literal("music"),
+                ref: Schema.Union([
+                  Schema.Struct({
+                    type: Schema.Literal("track"),
+                    id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+                  }),
+                  Schema.Struct({
+                    type: Schema.Literal("album"),
+                    id: Schema.String.pipe(Schema.brand("Id<albums>")),
+                  }),
+                ]),
+              }),
+            ]),
+            Schema.Null,
+          ]),
           playing: Schema.Boolean,
           positionMs: Schema.Finite,
           at: Schema.Finite,
@@ -575,6 +719,58 @@ const core_connect_targets_list = query({
       reportedAt: Schema.Finite,
     }),
   ),
+});
+
+const core_connect_targets_load = mutation({
+  name: "core.connect.targets.load",
+  path: "core/connect/targets:load",
+  args: Schema.Struct({
+    deviceId: Schema.String.pipe(Schema.brand("Id<devices>")),
+    item: Schema.Union([
+      Schema.Struct({
+        domain: Schema.Literal("movies"),
+        ref: Schema.Union([
+          Schema.Struct({
+            type: Schema.Literal("title"),
+            id: Schema.String.pipe(Schema.brand("Id<titles>")),
+          }),
+          Schema.Struct({
+            type: Schema.Literal("episode"),
+            id: Schema.String.pipe(Schema.brand("Id<episodes>")),
+          }),
+          Schema.Struct({
+            type: Schema.Literal("file"),
+            id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
+          }),
+        ]),
+      }),
+      Schema.Struct({
+        domain: Schema.Literal("music"),
+        ref: Schema.Union([
+          Schema.Struct({
+            type: Schema.Literal("track"),
+            id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+          }),
+          Schema.Struct({
+            type: Schema.Literal("album"),
+            id: Schema.String.pipe(Schema.brand("Id<albums>")),
+          }),
+        ]),
+      }),
+    ]),
+    positionMs: Schema.optionalKey(Schema.Finite),
+  }),
+  result: Schema.Struct({ revision: Schema.Finite }),
+});
+
+const core_connect_targets_move = mutation({
+  name: "core.connect.targets.move",
+  path: "core/connect/targets:move",
+  args: Schema.Struct({
+    from: Schema.String.pipe(Schema.brand("Id<devices>")),
+    to: Schema.String.pipe(Schema.brand("Id<devices>")),
+  }),
+  result: Schema.Struct({ revision: Schema.Finite }),
 });
 
 const core_devices_approvals_approve = mutation({
@@ -5418,6 +5614,10 @@ export const effectMethods = (method: EffectBuilder) => ({
         control: method.mutation(core_connect_targets_control),
         /** `core.connect.targets.list` (query, signed-in): List the online devices you can control with Connect, newest report first, with what each plays and where. */
         list: method.query(core_connect_targets_list),
+        /** `core.connect.targets.load` (mutation, signed-in): Play something on a device you can control, from a position, when you and the person on that device can both play it. */
+        load: method.mutation(core_connect_targets_load),
+        /** `core.connect.targets.move` (mutation, signed-in): Move what plays on one device you can control to another at the same position; the first one stops. */
+        move: method.mutation(core_connect_targets_move),
       },
     },
     devices: {
@@ -5890,6 +6090,10 @@ export const promiseMethods = (method: PromiseBuilder) => ({
         control: method.mutation(core_connect_targets_control),
         /** `core.connect.targets.list` (query, signed-in): List the online devices you can control with Connect, newest report first, with what each plays and where. */
         list: method.query(core_connect_targets_list),
+        /** `core.connect.targets.load` (mutation, signed-in): Play something on a device you can control, from a position, when you and the person on that device can both play it. */
+        load: method.mutation(core_connect_targets_load),
+        /** `core.connect.targets.move` (mutation, signed-in): Move what plays on one device you can control to another at the same position; the first one stops. */
+        move: method.mutation(core_connect_targets_move),
       },
     },
     devices: {

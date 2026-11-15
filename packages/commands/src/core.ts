@@ -93,10 +93,15 @@ const connectOutput = v.union(
   v.object({ kind: v.literal("airplay"), receiver: v.union(v.string(), v.null()) }),
 );
 
+/**
+ * What a device reports it plays. `session` names the group session it follows, which must be one
+ * its person is in (ADR 0017).
+ */
 const reportedPlayback = v.object({
-  domain: contentDomain,
+  item: domainItem,
   playing: v.boolean(),
   positionMs: v.number(),
+  session: v.optional(v.id("togetherSessions")),
 });
 
 /** Playback in server time: `positionMs` held at `at`, and moves on while `playing`. */
@@ -105,6 +110,25 @@ const anchoredTransport = {
   positionMs: v.number(),
   at: v.number(),
 };
+
+/**
+ * What a controller asks of a device, in server time (ADR 0018). `transport` plays or pauses
+ * `item` at a position, and only while the device still plays that item; `load` plays `item` from
+ * a position, whatever the device plays, unless the device already started the load
+ * `loadRevision` names, when it only plays, pauses, or seeks what that load started; `stop` plays
+ * nothing, as when playback moved to another device.
+ */
+const connectAsk = v.union(
+  v.object({ kind: v.literal("transport"), item: domainItem, ...anchoredTransport }),
+  v.object({
+    kind: v.literal("load"),
+    item: domainItem,
+    ...anchoredTransport,
+    /** The revision of the request that first asked for this load. */
+    loadRevision: v.number(),
+  }),
+  v.object({ kind: v.literal("stop"), at: v.number() }),
+);
 
 const sharedTile = v.object({
   userId: v.id("users"),
@@ -909,7 +933,13 @@ export const core = [
         output: connectOutput,
         playback: v.union(
           v.null(),
-          v.object({ domain: contentDomain, ...anchoredTransport, pending: v.boolean() }),
+          v.object({
+            domain: contentDomain,
+            /** Null when you may not play it, such as a kid and an explicit song. */
+            item: shownItem,
+            ...anchoredTransport,
+            pending: v.boolean(),
+          }),
         ),
         reportedAt: v.number(),
       }),
@@ -924,6 +954,20 @@ export const core = [
       playing: v.optional(v.boolean()),
       positionMs: v.optional(v.number()),
     },
+    result: v.object({ revision: v.number() }),
+  }),
+  mutation("core.connect.targets.load", {
+    summary:
+      "Play something on a device you can control, from a position, when you and the person on that device can both play it",
+    scope: "signed-in",
+    args: { deviceId: v.id("devices"), item: domainItem, positionMs: v.optional(v.number()) },
+    result: v.object({ revision: v.number() }),
+  }),
+  mutation("core.connect.targets.move", {
+    summary:
+      "Move what plays on one device you can control to another at the same position; the first one stops",
+    scope: "signed-in",
+    args: { from: v.id("devices"), to: v.id("devices") },
     result: v.object({ revision: v.number() }),
   }),
   mutation("core.connect.player.report", {
@@ -941,7 +985,7 @@ export const core = [
     summary: "Show the playback another device asked of this one that it has not applied yet",
     scope: "signed-in",
     args: {},
-    result: v.union(v.null(), v.object({ revision: v.number(), ...anchoredTransport })),
+    result: v.union(v.null(), v.object({ revision: v.number(), ask: connectAsk })),
   }),
 
   mutation("core.downloads.add", {

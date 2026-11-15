@@ -61,6 +61,8 @@ describe("CLI placement", () => {
       "core.connect.player.requested": "auth player requested",
       "core.connect.targets.control": "auth targets control",
       "core.connect.targets.list": "auth targets list",
+      "core.connect.targets.load": "auth targets load",
+      "core.connect.targets.move": "auth targets move",
       "core.devices.approvals.approve": "auth approvals approve",
       "core.devices.approvals.deny": "auth approvals deny",
       "core.devices.approvals.pending": "auth approvals pending",

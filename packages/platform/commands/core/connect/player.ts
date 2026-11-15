@@ -18,9 +18,26 @@ const reportArgs = v.object({
   ),
   playback: v.union(
     v.object({
-      domain: v.union(v.literal("movies"), v.literal("music")),
+      item: v.union(
+        v.object({
+          domain: v.literal("movies"),
+          ref: v.union(
+            v.object({ type: v.literal("title"), id: v.id("titles") }),
+            v.object({ type: v.literal("episode"), id: v.id("episodes") }),
+            v.object({ type: v.literal("file"), id: v.id("mediaFiles") }),
+          ),
+        }),
+        v.object({
+          domain: v.literal("music"),
+          ref: v.union(
+            v.object({ type: v.literal("track"), id: v.id("tracks") }),
+            v.object({ type: v.literal("album"), id: v.id("albums") }),
+          ),
+        }),
+      ),
       playing: v.boolean(),
       positionMs: v.number(),
+      session: v.optional(v.id("togetherSessions")),
     }),
     v.null(),
   ),
@@ -33,7 +50,59 @@ const requestedArgs = v.object({});
 
 const requestedResult = v.union(
   v.null(),
-  v.object({ revision: v.number(), playing: v.boolean(), positionMs: v.number(), at: v.number() }),
+  v.object({
+    revision: v.number(),
+    ask: v.union(
+      v.object({
+        kind: v.literal("transport"),
+        item: v.union(
+          v.object({
+            domain: v.literal("movies"),
+            ref: v.union(
+              v.object({ type: v.literal("title"), id: v.id("titles") }),
+              v.object({ type: v.literal("episode"), id: v.id("episodes") }),
+              v.object({ type: v.literal("file"), id: v.id("mediaFiles") }),
+            ),
+          }),
+          v.object({
+            domain: v.literal("music"),
+            ref: v.union(
+              v.object({ type: v.literal("track"), id: v.id("tracks") }),
+              v.object({ type: v.literal("album"), id: v.id("albums") }),
+            ),
+          }),
+        ),
+        playing: v.boolean(),
+        positionMs: v.number(),
+        at: v.number(),
+      }),
+      v.object({
+        kind: v.literal("load"),
+        item: v.union(
+          v.object({
+            domain: v.literal("movies"),
+            ref: v.union(
+              v.object({ type: v.literal("title"), id: v.id("titles") }),
+              v.object({ type: v.literal("episode"), id: v.id("episodes") }),
+              v.object({ type: v.literal("file"), id: v.id("mediaFiles") }),
+            ),
+          }),
+          v.object({
+            domain: v.literal("music"),
+            ref: v.union(
+              v.object({ type: v.literal("track"), id: v.id("tracks") }),
+              v.object({ type: v.literal("album"), id: v.id("albums") }),
+            ),
+          }),
+        ),
+        playing: v.boolean(),
+        positionMs: v.number(),
+        at: v.number(),
+        loadRevision: v.number(),
+      }),
+      v.object({ kind: v.literal("stop"), at: v.number() }),
+    ),
+  }),
 );
 
 /** The handlers `convex/core/connect/player.ts` passes to `register`, one per `core.connect.player` command. */

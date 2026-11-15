@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { internal } from "../_generated/api";
 import type { DatabaseReader, MutationCtx } from "../_generated/server";
 import { internalMutation, internalQuery } from "../_generated/server";
+import { clearRowsBeforeItems } from "./connect/beforeItems";
 
 interface Batch {
   readonly continueCursor: string;
@@ -36,6 +37,7 @@ const MIGRATIONS = [
 
     return page;
   }),
+  defineMigration("connect.clearRowsBeforeItems", clearRowsBeforeItems),
 ] as const;
 
 type MigrationName = (typeof MIGRATIONS)[number]["name"];
@@ -134,8 +136,12 @@ export const status = internalQuery({
   },
 });
 
-export const resetProbe = internalMutation({
-  args: { name: v.literal("probe.doublePositions") },
+/**
+ * Forgets a migration's progress, so `run` starts it again from the first row. Every migration is
+ * idempotent, so a reset only makes it check every row again. Tests use it.
+ */
+export const reset = internalMutation({
+  args: { name: migrationName },
   returns: v.null(),
   handler: async (ctx, { name }) => {
     const progress = await progressOf(ctx.db, name);
