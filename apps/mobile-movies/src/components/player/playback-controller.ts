@@ -53,6 +53,15 @@ export type PlaySource = Data.TaggedEnum<{
 /** Constructors and matchers for `PlaySource`. */
 export const PlaySource = Data.taggedEnum<PlaySource>();
 
+/** How a start differs from the player's options. */
+export interface StartChoice {
+  /**
+   * Whether the first stream plays once it loads, in place of the player's `play` option, as a
+   * group session that is paused starts paused.
+   */
+  readonly play?: boolean;
+}
+
 /** Where the player stands. */
 export type PlayerPhase = Data.TaggedEnum<{
   /** Negotiating and loading a stream, until its first frame (F08). */
@@ -280,12 +289,14 @@ export class PlayerController {
    * Plays `source`, from where it starts; there is no resume prompt. A streamed start negotiates
    * its first stream here and reports its progress and what AVPlayer sees to the server.
    */
-  start(source: PlaySource): void {
+  start(source: PlaySource, choice: StartChoice = {}): void {
     if (this.#begun || this.#disposed) return;
     this.#begun = true;
     this.#update({ phase: PlayerPhase.Preparing() });
 
-    if (this.#options.play) void this.port.play();
+    const playing = choice.play ?? this.#options.play;
+
+    if (playing) void this.port.play();
 
     PlaySource.$match(source, {
       Kept: ({ playback }) => {
@@ -301,7 +312,7 @@ export class PlayerController {
 
         // The start may answer after the app went away: then no stream opens until it is back.
         if (this.#lifecycle.started() === "negotiate") void this.#renegotiate(atMs);
-        else this.#parked = { positionMs: atMs, play: this.#options.play, restart: true };
+        else this.#parked = { positionMs: atMs, play: playing, restart: true };
       },
     });
     this.#watchForStalls();

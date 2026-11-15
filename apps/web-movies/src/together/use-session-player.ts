@@ -187,19 +187,33 @@ export const useSessionPlayer = (
     [platform, player],
   );
 
+  /** Counts starts, so a start the viewer cancelled before it answered is undone, not applied. */
+  const startCount = useRef(0);
+
   const start = useCallback((): void => {
+    const attempt = ++startCount.current;
+
     setCreated(null);
     setStopped(null);
 
     void platform.core.together
       .create({ item: itemOf(page) })
       .then(async ({ sessionId }) => {
+        if (startCount.current !== attempt) {
+          setLeft(sessionId);
+          await platform.core.together.leave({ domain: MOVIES });
+
+          return undefined;
+        }
+
         setCreated(sessionId);
         await seekAndPlay(0, false);
 
         return undefined;
       })
       .catch((cause: unknown) => {
+        if (startCount.current !== attempt) return;
+
         setCreated(undefined);
         toastFailure(cause);
       });
@@ -222,9 +236,17 @@ export const useSessionPlayer = (
   }, [platform, latestJoined]);
 
   const cancelStart = useCallback((): void => {
+    const opened = latestCreated.current;
+
+    startCount.current += 1;
     setCreated(undefined);
-    leave();
-  }, [leave]);
+
+    if (opened === null || opened === undefined) return;
+
+    setLeft(opened);
+    setFollowing(false);
+    void platform.core.together.leave({ domain: MOVIES }).catch(toastFailure);
+  }, [latestCreated, platform]);
 
   const link = joined === null ? null : sessionUrl(joined.link);
 

@@ -318,10 +318,8 @@ function PlayerSession({ params, attempt, onRestart, choices }: PlayerSessionPro
     const { started: begun } = online.play;
     const durationMs = begun.file.probe.durationMs;
 
-    const atMs =
-      sessionMode === "session"
-        ? sessionStart().positionMs
-        : (attempt.startAtMs ?? begun.resumePositionMs);
+    const begin = sessionMode === "session" ? sessionStart() : null;
+    const atMs = begin?.positionMs ?? attempt.startAtMs ?? begun.resumePositionMs;
 
     controller.start(
       PlaySource.Streamed({
@@ -331,6 +329,7 @@ function PlayerSession({ params, attempt, onRestart, choices }: PlayerSessionPro
           startTracks?.audioStreamIndex ??
           preferredTracks(startPreferences, begun.file.probe.audio, []).audioStreamIndex,
       }),
+      begin === null ? {} : { play: begin.play },
     );
   }, [
     controller,
