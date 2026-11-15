@@ -1,7 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { followLead } from "./tab-lead";
+import { ConnectPlayer } from "./connect-player";
+import type { ReportedSong } from "./connect-player";
+import { followLead, speakForDevice } from "./tab-lead";
 import type { TabLocks } from "./tab-lead";
+import { entry, queueOf, settle, setup } from "./testing/controller-harness";
 
 interface Request {
   readonly callback: () => Promise<void>;
@@ -86,13 +89,13 @@ const flush = async (turns = 5): Promise<void> => {
 };
 
 const tab = (locks: TabLocks | undefined) => {
-  const states: Array<boolean> = [];
+  const states: Array<string> = [];
 
-  const lead = followLead(locks, "lead", (leading) => {
-    states.push(leading);
+  const lead = followLead(locks, "lead", (role) => {
+    states.push(role);
   });
 
-  return { lead, leading: () => states.at(-1) ?? false, states };
+  return { lead, leading: () => states.at(-1) === "leading", states };
 };
 
 describe("followLead", () => {
@@ -123,7 +126,7 @@ describe("followLead", () => {
     await flush();
 
     expect(first.leading()).toBe(true);
-    expect(first.states).toStrictEqual([true, false, true]);
+    expect(first.states).toStrictEqual(["leading", "taken", "leading"]);
   });
 
   it("passes the lead on when the leading tab leaves", async () => {
@@ -157,5 +160,96 @@ describe("followLead", () => {
     const only = tab(undefined);
 
     expect(only.leading()).toBe(true);
+  });
+});
+
+/**
+ * A tab of one browser over the real Web Locks API: its own player and Connect's device side,
+ * speaking for the browser's device through `speakForDevice` while it leads.
+ */
+const speakingTab = (name: string) => {
+  const run = setup();
+  const reports: Array<ReportedSong | null> = [];
+
+  const player = new ConnectPlayer(
+    run.controller,
+    {
+      report: async (song) => {
+        reports.push(song);
+
+        return run.clock.now;
+      },
+      albumTracks: async () => [],
+    },
+    { now: () => run.clock.now, every: () => () => undefined },
+  );
+
+  const states: Array<boolean> = [];
+
+  const lead = speakForDevice(
+    navigator.locks,
+    name,
+    { player, controller: run.controller },
+    (leading) => {
+      states.push(leading);
+    },
+  );
+
+  return { ...run, player, lead, reports, leading: () => states.at(-1) === true };
+};
+
+const song = { domain: "music", ref: { type: "track", id: "a" } } as const;
+
+describe("speakForDevice", () => {
+  it("lets go of a tab's song once another tab takes the lead, so a remote pause stops all the browser plays", async () => {
+    const name = `connect-${crypto.randomUUID()}`;
+    const first = speakingTab(name);
+    const second = speakingTab(name);
+
+    await vi.waitFor(() => {
+      expect(first.leading()).toBe(true);
+    });
+
+    for (const run of [first, second]) run.controller.sync(queueOf([entry("a", "1")], "1"));
+    first.controller.playCurrentAt("a", 0, true);
+    await settle();
+    second.controller.playCurrentAt("a", 0, true);
+    await second.lead.take();
+
+    await vi.waitFor(() => {
+      expect(first.player.started).toBe(false);
+    });
+
+    expect(first.controller.playingHere()).toBeNull();
+    expect(first.reports.at(-1)).toMatchObject({ trackId: "a", playing: true });
+    expect(second.player.started).toBe(true);
+
+    second.player.take({
+      revision: 1,
+      ask: { kind: "transport", item: song, playing: false, positionMs: 0, at: second.clock.now },
+    });
+    await settle();
+
+    expect(second.controller.playingHere()).toMatchObject({ trackId: "a", playing: false });
+    expect(first.controller.playingHere()).toBeNull();
+
+    first.lead.stop();
+    second.lead.stop();
+  });
+
+  it("keeps a tab's song when it leaves the election, as when its page closes", async () => {
+    const only = speakingTab(`connect-${crypto.randomUUID()}`);
+
+    await vi.waitFor(() => {
+      expect(only.leading()).toBe(true);
+    });
+
+    only.controller.sync(queueOf([entry("a", "1")], "1"));
+    only.controller.playCurrentAt("a", 0, true);
+    await settle();
+    only.lead.stop();
+
+    expect(only.player.started).toBe(false);
+    expect(only.controller.playingHere()).toMatchObject({ trackId: "a", playing: true });
   });
 });

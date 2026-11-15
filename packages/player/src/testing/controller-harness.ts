@@ -293,12 +293,15 @@ export const setup = (
   /** The songs `music.tracks.get` was asked for, in order. */
   const lookups: Array<string> = [];
 
+  /** The entry `music.queue.play` answers, read as each call answers, so a test can change it. */
+  const answer = { current: options.playCurrent ?? "new" };
+
   const commands: MusicCommands = {
     play: async (trackIds, index) => {
       sent.push({ name: "play", args: [trackIds, index] });
       await gates.play.pass("play");
 
-      return { current: options.playCurrent ?? "new" };
+      return { current: answer.current };
     },
     track: async (trackId) => {
       lookups.push(trackId);
@@ -403,6 +406,7 @@ export const setup = (
     stop,
     engine,
     gates,
+    answer,
     discarded,
     device,
   };

@@ -8,7 +8,7 @@ import type { Device, DevicePlayback } from "./connect-devices";
 import { ConnectPlayer, systemConnectClock } from "./connect-player";
 import type { ConnectCommands } from "./connect-player";
 import type { ControllerSnapshot, PlaybackController } from "./playback-controller";
-import { followLead } from "./tab-lead";
+import { speakForDevice } from "./tab-lead";
 import type { TabLead, TabLocks } from "./tab-lead";
 
 /** How often the device list looks again for devices that went quiet, as time passes. */
@@ -141,9 +141,9 @@ const useOnlineCheck = (active: boolean): number => {
 
 /**
  * Runs this browser as a Connect device for the player (ADR 0018), and lists the listener's other
- * devices. One tab per browser reports and applies requests; a tab that plays takes that over.
- * A song held paused here goes when another of the listener's devices plays, as old music's single
- * active device did.
+ * devices. One tab per browser reports and applies requests; a tab that plays takes that over, and
+ * the tab it took over from lets go of its song. A song held paused here goes when another of the
+ * listener's devices plays, as old music's single active device did.
  */
 export const useConnect = (
   platform: Sdk,
@@ -162,7 +162,7 @@ export const useConnect = (
 
   useEffect(() => {
     if (deviceId === null) return undefined;
-    const lead = followLead(browserLocks(), LEAD_LOCK, setLeading);
+    const lead = speakForDevice(browserLocks(), LEAD_LOCK, { player, controller }, setLeading);
 
     election.current = lead;
 
@@ -170,9 +170,7 @@ export const useConnect = (
       lead.stop();
       election.current = null;
     };
-  }, [deviceId]);
-
-  useEffect(() => (leading ? player.start() : undefined), [player, leading]);
+  }, [deviceId, player, controller]);
 
   const requested = usePlatformQuery(
     platform.core.connect.player.requested,
@@ -190,8 +188,8 @@ export const useConnect = (
 
   const heldBefore = useRef(here);
 
-  // A tab that starts playing speaks for the device; one that held a song already does not take
-  // the lead back from another tab that started since, or two tabs would trade it forever.
+  // A tab that starts playing speaks for the device. The tab it took the lead from lets go of its
+  // song, so that tab takes the lead back only once it plays again.
   useEffect(() => {
     const started = here && !heldBefore.current;
 

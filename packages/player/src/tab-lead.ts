@@ -1,3 +1,6 @@
+import type { ConnectPlayer } from "./connect-player";
+import type { PlaybackController } from "./playback-controller";
+
 /** The part of the Web Locks API (`navigator.locks`) that {@link followLead} uses. */
 export interface TabLocks {
   readonly request: (
@@ -6,6 +9,12 @@ export interface TabLocks {
     callback: () => Promise<void>,
   ) => Promise<void>;
 }
+
+/**
+ * Where a tab stands in the election {@link followLead} runs: it leads, it waits to lead, or it
+ * waits because another tab took the lead from it.
+ */
+type TabRole = "leading" | "waiting" | "taken";
 
 /** A tab's place in the election {@link followLead} runs. */
 export interface TabLead {
@@ -21,20 +30,30 @@ export interface TabLead {
  * first tab to ask leads; a tab that starts playing takes the lead with `take`, and a tab that loses
  * it waits to lead again. Without Web Locks every tab leads, as before.
  *
- * @param onChange - Called with `true` when this tab starts leading and `false` when it stops.
+ * @param onChange - Called with the tab's role each time it changes: `leading` once it leads,
+ *   `taken` once another tab took the lead from it, and `waiting` once it left the election.
  */
 export const followLead = (
   locks: TabLocks | undefined,
   name: string,
-  onChange: (leading: boolean) => void,
+  onChange: (role: TabRole) => void,
 ): TabLead => {
   if (locks === undefined) {
-    onChange(true);
+    let left = false;
 
-    return { take: async () => undefined, stop: () => undefined };
+    onChange("leading");
+
+    return {
+      take: async () => undefined,
+      stop: () => {
+        if (left) return;
+        left = true;
+        onChange("waiting");
+      },
+    };
   }
 
-  let leading = false;
+  let role: TabRole = "waiting";
   let stopped = false;
   let waiting: AbortController | null = null;
   let release: (() => void) | null = null;
@@ -48,11 +67,11 @@ export const followLead = (
     for (const resolve of settled) resolve();
   };
 
-  const lead = (next: boolean): void => {
-    if (next) settleWaiters();
+  const become = (next: TabRole): void => {
+    if (next === "leading") settleWaiters();
 
-    if (next === leading) return;
-    leading = next;
+    if (next === role) return;
+    role = next;
     onChange(next);
   };
 
@@ -73,14 +92,14 @@ export const followLead = (
         await new Promise<void>((resolve) => {
           held = resolve;
           release = resolve;
-          lead(true);
+          become("leading");
         });
       })
       .catch(() => {
         // Aborted while waiting, which needs nothing, or the lead was taken from this tab.
         if (held === null || release !== held) return;
         release = null;
-        lead(false);
+        become("taken");
 
         if (!stopped) ask(false);
       });
@@ -90,7 +109,7 @@ export const followLead = (
 
   return {
     take: async () => {
-      if (leading || stopped) return;
+      if (role === "leading" || stopped) return;
 
       await new Promise<void>((resolve) => {
         waiters.push(resolve);
@@ -105,8 +124,41 @@ export const followLead = (
 
       release = null;
       held?.();
-      lead(false);
+      become("waiting");
       settleWaiters();
     },
   };
+};
+
+/** What a tab runs while it speaks for the browser's device. */
+interface DeviceVoice {
+  /** Connect's device side, which reports and applies requests while started. */
+  readonly player: Pick<ConnectPlayer, "start">;
+  /** The tab's own player, whose song it lets go of once another tab speaks instead. */
+  readonly controller: Pick<PlaybackController, "release">;
+}
+
+/**
+ * Speaks for the browser's device from this tab while it leads {@link followLead}'s election
+ * (ADR 0018): `voice.player` reports and applies Connect's requests only then. When another tab
+ * takes the lead, this tab stops speaking and then lets go of its song, so the browser never plays
+ * audio that its device neither reports nor obeys.
+ *
+ * @param onLeading - Called with whether this tab leads, once it started or stopped speaking.
+ */
+export const speakForDevice = (
+  locks: TabLocks | undefined,
+  name: string,
+  voice: DeviceVoice,
+  onLeading: (leading: boolean) => void,
+): TabLead => {
+  let stopSpeaking: (() => void) | null = null;
+
+  return followLead(locks, name, (role) => {
+    stopSpeaking?.();
+    stopSpeaking = role === "leading" ? voice.player.start() : null;
+
+    if (role === "taken") voice.controller.release();
+    onLeading(role === "leading");
+  });
 };

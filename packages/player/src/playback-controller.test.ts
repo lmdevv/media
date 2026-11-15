@@ -147,6 +147,46 @@ describe("PlaybackController", () => {
     });
   });
 
+  it("starts a new queue paused when the listener pauses while it is written", async () => {
+    const run = setup({ playCurrent: "1" });
+
+    await run.controller.playTracks(["a", "b"], 0);
+    run.controller.sync(queueOf([one, two], "1"));
+    await settle();
+    run.gates.play.holding = true;
+    run.answer.current = "3";
+    const replacing = run.controller.playTracks(["c"], 0);
+    await settle();
+    await run.controller.togglePlay();
+    run.gates.play.release("play");
+    await replacing;
+    run.controller.sync(queueOf([three], "3"));
+    await settle();
+
+    expect(run.controller.playingHere()).toMatchObject({ trackId: "c", playing: false });
+    expect(run.controller.getSnapshot().engineStatus).toBe("paused");
+  });
+
+  it("still starts a new queue playing when the old queue ends while it is written", async () => {
+    const run = setup({ playCurrent: "1" });
+
+    await run.controller.playTracks(["a"], 0);
+    run.controller.sync(queueOf([one], "1"));
+    await settle();
+    run.gates.play.holding = true;
+    run.answer.current = "3";
+    const replacing = run.controller.playTracks(["c"], 0);
+    await settle();
+    run.engine().finish();
+    run.gates.play.release("play");
+    await replacing;
+    run.controller.sync(queueOf([three], "3"));
+    await settle();
+
+    expect(run.controller.playingHere()).toMatchObject({ trackId: "c", playing: true });
+    expect(run.controller.getSnapshot().engineStatus).toBe("playing");
+  });
+
   it("drops a song asked for ahead once a later play replaced it", async () => {
     const { controller, record, gates } = setup({ playCurrent: "1" });
 

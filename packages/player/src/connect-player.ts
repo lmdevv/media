@@ -122,17 +122,44 @@ export class ServerClock {
 type LoadAsk = Extract<ConnectAsk, { readonly kind: "load" }>;
 
 /**
- * A load whose start waits on the network: its songs, or the new queue. A controller that plays,
- * pauses, or seeks the device meanwhile asks for the same load again under a newer revision, which
- * the load then starts with.
+ * The newest load Connect asked of this device, named by its `loadRevision` in every request and
+ * every step of its start (ADR 0018).
  */
-interface PendingLoad {
-  readonly loadRevision: number;
-  /** The newest ask for this load. */
-  readonly ask: LoadAsk;
-  /** The revision that asked it, which the load settles once it starts. */
-  readonly revision: number;
-}
+type Load =
+  | {
+      readonly phase: "starting";
+      readonly loadRevision: number;
+      /**
+       * What its start waits on: the queue, to tell whether its song is the entry the queue plays,
+       * or the network, for an album's songs or the new queue.
+       */
+      readonly waits: "queue" | "network";
+      /** The newest ask for it, which it starts with. */
+      readonly ask: LoadAsk;
+      /** The revision that asked it, which settles once it starts. */
+      readonly revision: number;
+    }
+  | {
+      readonly phase: "started";
+      readonly loadRevision: number;
+      /** The queue entry it started; a newer ask for it applies only while that entry plays here. */
+      readonly itemId: string;
+    };
+
+type StartingLoad = Extract<Load, { readonly phase: "starting" }>;
+
+/** How a step of a load's start answered: with its value, or with a failure. */
+type StepOutcome<A> = { readonly answered: true; readonly value: A } | { readonly answered: false };
+
+/** Where a load stands as a request or a step of its start arrives: ADR 0018's decision table. */
+type Standing =
+  /** Newer than every load asked of this device before. */
+  | { readonly kind: "new" }
+  | { readonly kind: "starting"; readonly load: StartingLoad }
+  /** It started, and the queue entry it started still plays here. */
+  | { readonly kind: "playing" }
+  /** A newer request or the listener replaced it, or what plays here moved on from it. */
+  | { readonly kind: "gone" };
 
 const reportKey = (here: PlayingHere | null, status: string, seeks: number, applied: number) =>
   here === null
@@ -144,12 +171,13 @@ const reportKey = (here: PlayingHere | null, status: string, seeks: number, appl
  * and every {@link HEARTBEAT_MS}, and applies the requests other devices make of it through the
  * controller's own rules.
  *
- * Every request is tagged with its revision, and an answer that arrives for it after a newer
- * request, or after the listener acted here, is dropped, as the controller drops a stale load.
- * A `transport` applies only while the song it names plays here. A `load` this device already
- * started only plays, pauses, or seeks what it plays. A `stop` lets go of the song, as when playback
- * moves to another device. Whatever happens to a request, this device then reports it applied, so
- * the core settles it.
+ * One rule decides every request and every step of a load's start: it names the load it is for,
+ * and applies only while that load is still current here, as things stand when it would apply,
+ * not when it began (`#standing`). A `transport` applies only while the song it names plays here.
+ * A `load` this device already started only plays, pauses, or seeks the queue entry it started,
+ * while that entry plays here. A `stop` lets go of the song, as when playback moves to another
+ * device. Whatever happens to a request, this device then reports it applied, so the core settles
+ * it.
  */
 export class ConnectPlayer {
   readonly #controller: PlaybackController;
@@ -160,12 +188,12 @@ export class ConnectPlayer {
   #applied = 0;
   /** The newest revision `take` was given. */
   #seen = 0;
-  /** The request being applied, while its answer may still be outstanding. */
-  #handling: number | null = null;
-  /** The revision of the newest load started here; a request that names it only steers. */
-  #startedLoad = 0;
-  /** The load starting here, while its songs or its queue are still on the way. */
-  #pendingLoad: PendingLoad | null = null;
+  /** The newest revision taken: handled, or a load still starting. */
+  #taken = 0;
+  /** The newest `loadRevision` asked of this device; a load ask at or below it is no new load. */
+  #newestLoad = 0;
+  /** The newest load, while it is the one Connect asked for here. */
+  #load: Load | null = null;
   #reported: string | null = null;
   #stop: (() => void) | null = null;
 
@@ -186,7 +214,10 @@ export class ConnectPlayer {
     return this.#stop !== null;
   }
 
-  /** Reports now, then on each change and heartbeat. Returns the function that stops it. */
+  /**
+   * Reports now, then on each change and heartbeat. Returns the function that stops it, which drops
+   * a load still starting, so a request it took and did not finish comes again once it starts.
+   */
   start(): () => void {
     this.#stop?.();
     const unsubscribe = this.#controller.subscribe(this.#changed);
@@ -198,8 +229,8 @@ export class ConnectPlayer {
     const stop = (): void => {
       unsubscribe();
       stopBeats();
-      this.#handling = null;
-      this.#pendingLoad = null;
+      this.#load = null;
+      this.#taken = this.#applied;
 
       if (this.#stop === stop) this.#stop = null;
     };
@@ -216,83 +247,217 @@ export class ConnectPlayer {
 
     this.#seen = Math.max(this.#seen, request.revision);
 
-    if (request.revision <= this.#applied || request.revision === this.#handling) return;
+    if (request.revision <= Math.max(this.#applied, this.#taken)) return;
+    this.#taken = request.revision;
+    const { revision, ask } = request;
 
-    this.#handling = request.revision;
-    const pending = this.#pendingLoad;
-    const { ask } = request;
+    switch (ask.kind) {
+      case "stop": {
+        this.#load = null;
+        this.#controller.release();
+        this.#settle(revision);
+        break;
+      }
 
-    // The load starting here, asked again with a newer play, pause, or position: it starts with it.
-    if (pending !== null && ask.kind === "load" && ask.loadRevision === pending.loadRevision) {
-      this.#pendingLoad = { ...pending, ask, revision: request.revision };
+      case "transport": {
+        // A newer request replaces a load still starting.
+        if (this.#load?.phase === "starting") this.#load = null;
 
-      return;
+        if (this.#plays(ask.item)) {
+          this.#controller.steer(ask.playing, positionAt(ask, this.serverNow()));
+        }
+
+        this.#settle(revision);
+        break;
+      }
+
+      case "load": {
+        this.#takeLoad(revision, ask);
+        break;
+      }
     }
-
-    this.#pendingLoad = null;
-    void this.#apply(request);
   }
 
   /**
    * The listener changed what plays here, or whether it plays, so every request seen so far is moot
-   * (ADR 0018): one still being applied is dropped, and this device reports them applied.
+   * (ADR 0018): a load still starting is dropped, and this device reports them applied.
    */
   supersede(): void {
-    this.#handling = null;
-    this.#pendingLoad = null;
-    this.settle(this.#seen);
+    if (this.#load?.phase === "starting") this.#load = null;
+    this.#settle(this.#seen);
   }
 
-  /** Counts `revision` handled, as a move made here whose load this device already plays. */
-  settle(revision: number): void {
-    this.#seen = Math.max(this.#seen, revision);
+  /**
+   * Where the load `loadRevision` stands now. Every request for a load and every step of a load's
+   * start asks this right before it applies anything, so an answer that comes after a newer
+   * request, after the listener acted here, or after what plays here moved on, changes nothing.
+   */
+  #standing(loadRevision: number): Standing {
+    if (loadRevision > this.#newestLoad) return { kind: "new" };
+    const load = this.#load;
 
+    if (load?.loadRevision !== loadRevision) return { kind: "gone" };
+
+    if (load.phase === "starting") return { kind: "starting", load };
+
+    return this.#controller.playingHere()?.itemId === load.itemId
+      ? { kind: "playing" }
+      : { kind: "gone" };
+  }
+
+  #takeLoad(revision: number, ask: LoadAsk): void {
+    const standing = this.#standing(ask.loadRevision);
+
+    switch (standing.kind) {
+      case "new": {
+        this.#newestLoad = ask.loadRevision;
+        this.#start({
+          phase: "starting",
+          loadRevision: ask.loadRevision,
+          waits: "network",
+          ask,
+          revision,
+        });
+        break;
+      }
+
+      case "starting": {
+        // A play, pause, or seek of the load starting here: it starts with this ask instead.
+        this.#load = { ...standing.load, ask, revision };
+        break;
+      }
+
+      case "playing": {
+        this.#controller.steer(ask.playing, positionAt(ask, this.serverNow()));
+        this.#settle(revision);
+        break;
+      }
+
+      case "gone": {
+        this.#settle(revision);
+        break;
+      }
+    }
+  }
+
+  /** Starts a new load: a song or an album of music; anything else plays nothing here. */
+  #start(load: StartingLoad): void {
+    const { item } = load.ask;
+
+    if (item.domain === "music" && item.ref.type === "track") {
+      this.#startSong(load);
+
+      return;
+    }
+
+    if (item.domain === "music" && item.ref.type === "album") {
+      void this.#startAlbum(load, item.ref.id);
+
+      return;
+    }
+
+    this.#load = null;
+    this.#settle(load.revision);
+  }
+
+  /**
+   * Starts a load of a song. The queue plays that song now when a move lands here, so this device
+   * plays that entry from the position and keeps the queue; any other song replaces the queue.
+   * Until the queue this device holds says which entry it plays, the load waits for it, so a move
+   * never replaces the queue (`#changed` tries again).
+   */
+  #startSong(load: StartingLoad): void {
+    const trackId = load.ask.item.ref.id;
+    const current = this.#controller.queueCurrent();
+
+    if (current.kind === "unknown") {
+      this.#load = { ...load, waits: "queue" };
+
+      return;
+    }
+
+    if (current.kind === "entry" && current.trackId === trackId) {
+      this.#load = { phase: "started", loadRevision: load.loadRevision, itemId: current.itemId };
+      this.#controller.playCurrentAt(
+        trackId,
+        positionAt(load.ask, this.serverNow()),
+        load.ask.playing,
+      );
+      this.#settle(load.revision);
+
+      return;
+    }
+
+    void this.#write(load, [trackId]);
+  }
+
+  async #startAlbum(load: StartingLoad, albumId: string): Promise<void> {
+    this.#load = { ...load, waits: "network" };
+    const fetched = await this.#step(load, this.#commands.albumTracks(albumId));
+
+    if (fetched === null) return;
+
+    if (!fetched.outcome.answered) {
+      // The album's songs failed, which changed nothing here: the device tried, so its newest ask
+      // settles.
+      this.#load = null;
+      this.#settle(fetched.load.revision);
+
+      return;
+    }
+
+    await this.#write(fetched.load, fetched.outcome.value);
+  }
+
+  /** Replaces the queue with `trackIds` and plays it from where the load's newest ask says. */
+  async #write(load: StartingLoad, trackIds: ReadonlyArray<string>): Promise<void> {
+    this.#load = { ...load, waits: "network" };
+    const from = { positionMs: positionAt(load.ask, this.serverNow()), playing: load.ask.playing };
+    const written = await this.#step(load, this.#controller.playTracksAt(trackIds, from));
+
+    if (written === null) return;
+    const itemId = written.outcome.answered ? written.outcome.value : null;
+
+    if (itemId === null) {
+      this.#load = null;
+      this.#settle(written.load.revision);
+
+      return;
+    }
+
+    this.#load = { phase: "started", loadRevision: load.loadRevision, itemId };
+    const { ask } = written.load;
+
+    // A play, pause, or seek asked while the queue was written lands on the song it started.
+    if (ask !== load.ask) this.#controller.steer(ask.playing, positionAt(ask, this.serverNow()));
+    this.#settle(written.load.revision);
+  }
+
+  /**
+   * Awaits one step of `load`'s start, then answers its outcome, a failure included, with the load
+   * as it stands now and its newest ask, only while it is still the one starting here. Null once a
+   * newer request or the listener replaced it: whoever replaced it settles it.
+   */
+  async #step<A>(
+    load: StartingLoad,
+    step: Promise<A>,
+  ): Promise<{ readonly load: StartingLoad; readonly outcome: StepOutcome<A> } | null> {
+    const outcome = await step.then(
+      (value): StepOutcome<A> => ({ answered: true, value }),
+      // A failed step changed nothing here, which is all the load needs to know of it.
+      (): StepOutcome<A> => ({ answered: false }),
+    );
+
+    const standing = this.#standing(load.loadRevision);
+
+    return standing.kind === "starting" ? { load: standing.load, outcome } : null;
+  }
+
+  #settle(revision: number): void {
     if (revision <= this.#applied) return;
 
     this.#applied = revision;
     this.#report();
-  }
-
-  async #apply({ revision, ask }: ConnectRequest): Promise<void> {
-    let settled: number | null = revision;
-
-    try {
-      switch (ask.kind) {
-        case "stop": {
-          this.#controller.release();
-          break;
-        }
-
-        case "transport": {
-          if (this.#plays(ask.item)) {
-            this.#controller.steer(ask.playing, positionAt(ask, this.serverNow()));
-          }
-
-          break;
-        }
-
-        case "load": {
-          settled = await this.#load(revision, ask);
-          break;
-        }
-      }
-    } catch {
-      // A load whose songs failed changed nothing here; its newest ask is still settled, as the
-      // device tried it, unless another request replaced it meanwhile.
-      const pending = this.#pendingLoad;
-
-      this.#pendingLoad = null;
-      settled =
-        ask.kind !== "load"
-          ? revision
-          : pending?.loadRevision === ask.loadRevision
-            ? pending.revision
-            : null;
-    }
-
-    if (settled === null || this.#handling !== settled) return;
-    this.#handling = null;
-    this.settle(settled);
   }
 
   /** Whether `item` is the song loaded here. */
@@ -302,61 +467,11 @@ export class ConnectPlayer {
     return here !== null && isSong(item) && item.ref.id === here.trackId;
   }
 
-  /**
-   * Starts the load `ask` names, or steers the one it already started, and answers the revision
-   * that settles it: the newest ask for this load, or null when another request or the listener
-   * replaced it while it started.
-   */
-  async #load(revision: number, ask: LoadAsk): Promise<number | null> {
-    if (ask.loadRevision <= this.#startedLoad) {
-      this.#controller.steer(ask.playing, positionAt(ask, this.serverNow()));
-
-      return revision;
-    }
-
-    this.#startedLoad = ask.loadRevision;
-    const { item } = ask;
-    const song = isSong(item);
-
-    if (item.domain !== "music" || (!song && item.ref.type !== "album")) return revision;
-
-    if (
-      song &&
-      this.#controller.playCurrentAt(item.ref.id, positionAt(ask, this.serverNow()), ask.playing)
-    ) {
-      return revision;
-    }
-
-    this.#pendingLoad = { loadRevision: ask.loadRevision, ask, revision };
-    const trackIds = song ? [item.ref.id] : await this.#commands.albumTracks(item.ref.id);
-    const fetched = this.#startingLoad();
-
-    if (fetched?.loadRevision !== ask.loadRevision) return null;
-
-    await this.#controller.playTracks(trackIds, 0, {
-      positionMs: positionAt(fetched.ask, this.serverNow()),
-      playing: fetched.ask.playing,
-    });
-
-    const latest = this.#startingLoad();
-
-    if (latest?.loadRevision !== ask.loadRevision) return null;
-    this.#pendingLoad = null;
-
-    // A play, pause, or seek asked while the new queue was written lands on the song it started.
-    if (latest.ask !== fetched.ask) {
-      this.#controller.steer(latest.ask.playing, positionAt(latest.ask, this.serverNow()));
-    }
-
-    return latest.revision;
-  }
-
-  /** The load starting here as it stands now, which a request that arrived during an await changed. */
-  #startingLoad(): PendingLoad | null {
-    return this.#pendingLoad;
-  }
-
   #changed = (): void => {
+    const load = this.#load;
+
+    // The queue arrived, or changed: a song load waiting on it may tell now where it lands.
+    if (load?.phase === "starting" && load.waits === "queue") this.#startSong(load);
     const here = this.#controller.playingHere();
     const { engineStatus, seeks } = this.#controller.getSnapshot();
 
