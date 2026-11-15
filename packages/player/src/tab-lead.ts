@@ -11,10 +11,10 @@ export interface TabLocks {
 }
 
 /**
- * Where a tab stands in the election {@link followLead} runs: it leads, it waits to lead, or it
- * waits because another tab took the lead from it.
+ * Where a tab stands in the election {@link followLead} runs: it leads; another tab took the lead
+ * from it, and it waits to lead again; or it is out, before it first leads or once it left.
  */
-type TabRole = "leading" | "waiting" | "taken";
+type TabRole = "leading" | "taken" | "out";
 
 /** A tab's place in the election {@link followLead} runs. */
 export interface TabLead {
@@ -28,10 +28,10 @@ export interface TabLead {
  * Elects one tab of this browser to speak for the browser's device, which every tab on the origin
  * shares (ADR 0020): two tabs reporting for one device would each undo the other's report. The
  * first tab to ask leads; a tab that starts playing takes the lead with `take`, and a tab that loses
- * it waits to lead again. Without Web Locks every tab leads, as before.
+ * it waits to lead again. Without Web Locks every tab leads.
  *
  * @param onChange - Called with the tab's role each time it changes: `leading` once it leads,
- *   `taken` once another tab took the lead from it, and `waiting` once it left the election.
+ *   `taken` once another tab took the lead from it, and `out` once it left the election.
  */
 export const followLead = (
   locks: TabLocks | undefined,
@@ -48,12 +48,12 @@ export const followLead = (
       stop: () => {
         if (left) return;
         left = true;
-        onChange("waiting");
+        onChange("out");
       },
     };
   }
 
-  let role: TabRole = "waiting";
+  let role: TabRole = "out";
   let stopped = false;
   let waiting: AbortController | null = null;
   let release: (() => void) | null = null;
@@ -124,17 +124,15 @@ export const followLead = (
 
       release = null;
       held?.();
-      become("waiting");
+      become("out");
       settleWaiters();
     },
   };
 };
 
-/** What a tab runs while it speaks for the browser's device. */
+/** What a tab starts while it leads, and whose song it lets go of once another tab leads. */
 interface DeviceVoice {
-  /** Connect's device side, which reports and applies requests while started. */
   readonly player: Pick<ConnectPlayer, "start">;
-  /** The tab's own player, whose song it lets go of once another tab speaks instead. */
   readonly controller: Pick<PlaybackController, "release">;
 }
 

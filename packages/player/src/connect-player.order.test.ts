@@ -5,11 +5,6 @@ import { ConnectPlayer } from "./connect-player";
 import type { ConnectAsk, ConnectCommands, ReportedSong } from "./connect-player";
 import { entry, names, queueOf, settle, setup } from "./testing/controller-harness";
 
-/*
- * ConnectPlayer and the controller under any order of Connect's requests, the network's answers,
- * and the listener's own actions here (ADR 0018's table for applying requests).
- */
-
 /**
  * What happens next: a request, an answer the device waits on, or a tap here. A queue write that
  * answers may bring the new queue at once, as the core's subscription soon does.
@@ -65,7 +60,6 @@ interface HeldAlbum {
   readonly fail: () => void;
 }
 
-/** The songs album `albumId` holds. */
 const songsOf = (albumId: string): ReadonlyArray<string> => [`${albumId}-1`, `${albumId}-2`];
 
 /**
@@ -141,9 +135,7 @@ interface Model {
 
 /**
  * Plays `script` on a device that plays an album from a queue it holds, lets every lookup and
- * write answer, and checks the decision table held: only the load still starting wrote the queue,
- * every request settled in order, and the device ends as the newest request, or the listener's
- * pause here, says.
+ * write answer, and checks how the device ended against what the events decided.
  */
 const play = async (script: ReadonlyArray<Event>): Promise<void> => {
   const run = device();
@@ -306,7 +298,6 @@ const play = async (script: ReadonlyArray<Event>): Promise<void> => {
     await applyAll(rest);
   };
 
-  // Every lookup and every write answers, in order, as the core answers in the end.
   const drain = async (): Promise<void> => {
     if (run.held.length > 0) answerSongs(false);
     else if (!answerWrite()) return;
@@ -337,7 +328,6 @@ const play = async (script: ReadonlyArray<Event>): Promise<void> => {
   run.stop();
 };
 
-/** Loads, their answers, and plays or pauses of them, which a tap here then ends. */
 const loadsAndAnswers = fc.array(
   fc.oneof(
     fc.constant({ kind: "album" } as const),

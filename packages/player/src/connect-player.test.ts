@@ -56,7 +56,6 @@ const connected = (
         call.answer();
       }
     },
-    /** Fails the album `albumId` held. */
     fail: (albumId: string): void => {
       const call = held.get(albumId);
 
@@ -518,7 +517,6 @@ describe("ConnectPlayer", () => {
   });
 });
 
-/** A load of `item` asked under `loadRevision`, playing from the top. */
 const loadOf = (item: ConnectItem, loadRevision: number, at: number) =>
   ({ kind: "load", item, playing: true, positionMs: 0, at, loadRevision }) as const;
 
@@ -662,6 +660,29 @@ describe("ConnectPlayer, against what is current when a request or a step of a l
       "play:c,d,0",
     ]);
     expect(last(run.reports)).toMatchObject({ song: { trackId: "c" }, applied: 1 });
+
+    stopAgain();
+  });
+
+  it("keeps moot a load a tap made moot before this tab led, when it is asked again", async () => {
+    const run = connected();
+    const loaded = loadOf(album("al"), 7, run.clock.now);
+
+    run.stopConnect();
+    run.connect.take(ask(7, loaded));
+    run.connect.supersede();
+    await run.controller.playTracks(["a", "b"], 0);
+    run.controller.sync(queueOf([one, two], "1"));
+    const stopAgain = run.connect.start();
+
+    run.connect.take(ask(8, { ...loaded, playing: false }));
+    await settle();
+
+    expect(names(run.sent).filter((name) => name.startsWith("play:"))).toStrictEqual([
+      "play:a,b,0",
+    ]);
+    expect(run.controller.playingHere()).toMatchObject({ trackId: "a", playing: true });
+    expect(last(run.reports)).toMatchObject({ applied: 8 });
 
     stopAgain();
   });

@@ -503,7 +503,8 @@ Added with the music web client's first fix round (2026-11-15):
   tapped then.
 - A pause sent while an album's queue is written starts the album paused, from the position sent.
 - A load that a tab dropped when it stopped leading starts once when it leads again.
-- A tap in a tab that does not lead makes moot the requests it saw before it took the lead.
+- A tap in a tab that does not lead makes moot the requests it saw before it took the lead, and a
+  load it made moot stays moot when it is asked again once that tab leads.
 
 Rejected in this build:
 

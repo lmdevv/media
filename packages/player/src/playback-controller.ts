@@ -104,7 +104,7 @@ export interface StartAt {
   readonly playing: boolean;
 }
 
-/** The core's current queue entry as this device knows it, which a Connect load lands on (ADR 0018). */
+/** The core's current queue entry as this device knows it: a Connect move lands on it (ADR 0018). */
 export type QueueCurrent =
   /** The queue has not arrived yet, or the entries that arrived do not hold its current one yet. */
   | { readonly kind: "unknown" }
@@ -247,7 +247,7 @@ interface EarlyStart {
  * Plays the listener's queue on this device. The core holds the queue and the entry playing
  * (`music.queue.*`); this device holds whether it plays and where in the song, as old music's
  * player did for the device that played (D62). Connect moves playback here and away, and plays,
- * pauses, or seeks it, through `playCurrentAt`, `playTracks`, `steer`, and `release`
+ * pauses, or seeks it, through `playCurrentAt`, `playTracksAt`, `steer`, and `release`
  * (`connect-player.ts`, ADR 0018).
  *
  * Every request that waits on the network carries what it was made for, and its answer, a
@@ -414,7 +414,6 @@ export class PlaybackController {
 
     this.#dropStalePreload();
     this.#showNowPlaying();
-    // Connect waits for the queue to tell which entry a move lands on (`queueCurrent`).
     this.#notify();
   }
 
@@ -495,7 +494,6 @@ export class PlaybackController {
         early !== null && this.#early === early ? { ...early, itemId: current } : null;
 
       if (answered !== null) this.#early = answered;
-      // As things stand now, not as when the queue was sent: a pause chosen meanwhile holds.
       const at = startAt();
 
       if (at !== null) this.#choose(at.playing);
@@ -609,7 +607,6 @@ export class PlaybackController {
     const loaded = this.#loaded;
 
     if (loaded === null) {
-      // A new queue's first song still on its way here starts there too.
       const itemId = this.#currentEntry()?.itemId ?? this.#arriving()?.itemId ?? null;
 
       if (itemId !== null) this.#resumeAt = { itemId, positionMs: target };
@@ -631,7 +628,7 @@ export class PlaybackController {
   /**
    * What this device plays for Connect's reports (ADR 0018): the song loaded here, or a new queue's
    * first song still on its way here once the queue answered, whether it plays, and where. Null
-   * while no song is loaded here, as before the first play or after {@link release}.
+   * while no song is loaded or on its way here, as before the first play or after {@link release}.
    */
   playingHere(): PlayingHere | null {
     const loaded = this.#loaded;
@@ -658,10 +655,10 @@ export class PlaybackController {
 
   /**
    * Plays or pauses the song loaded here at `positionMs`, as a Connect request asks (ADR 0018), and
-   * answers whether a song was loaded to apply it to. A position within a quarter second of where
-   * the song is stays, so a request never makes the sound jump for nothing. A song whose source
-   * failed loads again from `positionMs` when asked to play. A new queue's first song still on its
-   * way here starts as asked.
+   * answers whether a song was loaded or on its way here to apply it to. A position within a
+   * quarter second of where the song is stays, so a request never makes the sound jump for nothing.
+   * A song whose source failed loads again from `positionMs` when asked to play. A new queue's
+   * first song still on its way here starts as asked.
    */
   steer(playing: boolean, positionMs: number): boolean {
     const loaded = this.#loaded;
@@ -1050,10 +1047,6 @@ export class PlaybackController {
     return early.itemId === null ? null : { itemId: early.itemId, trackId: early.trackId };
   }
 
-  /**
-   * Steers the new queue's first song still on its way here: it loads from `target`, playing or
-   * paused as asked, once it arrives, or at once when asked to play an entry the queue holds.
-   */
   #steerArriving(playing: boolean, target: number): boolean {
     const arriving = this.#arriving();
 
@@ -1074,7 +1067,6 @@ export class PlaybackController {
     return true;
   }
 
-  /** The listener chose to play or pause here, on this device or through Connect. */
   #choose(playing: boolean): void {
     this.#chosen = playing;
     this.#wantPlaying = playing;
