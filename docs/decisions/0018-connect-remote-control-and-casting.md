@@ -2,7 +2,8 @@
 
 - Status: Accepted, 2026-11-03. Amended 2026-11-04 with Connect as built, 2026-11-07 with the
   phase 3 review fixes, and 2026-11-15 with items, loading and moving playback, group-session
-  membership, the two rules D60 keeps, and the upgrade from v0.3.0's Connect rows.
+  membership, the two rules D60 keeps, the upgrade from v0.3.0's Connect rows, and the music web
+  client.
 - Decisions: D35, D44, D60
 
 ## Context
@@ -346,9 +347,50 @@ that never arrives still fails the p95.
 
 - Remote volume. The device's volume is a per-device setting (ADR 0019), and Connect does not keep
   a second copy.
-- The clients. The music web client and the music iOS app add the device list, reporting,
-  applying requests, loading, and moving (phase 6). Movies remote control is in the backlog
-  (D63).
+- The music iOS app's device list, reporting, applying requests, loading, and moving (phase 6).
+  Movies remote control is in the backlog (D63).
+
+### The music web client (amended 2026-11-15)
+
+The music web client at `/music` brings back old music's device picker and remote control on
+Connect. The device side is in `packages/player`, beside the controller whose rules it goes
+through, so the music iOS app can use it too: `connect-player.ts` reports and applies requests,
+`connect-devices.ts` reads the device list, `tab-lead.ts` picks the tab that speaks for the
+browser, and `use-connect.ts` runs them in the player provider.
+
+- **Reports.** The browser reports the song loaded in its player, whether it plays, and where, on
+  every change of song, play state, engine state, seek, or applied revision, and every 10
+  seconds. It does not report as the song plays on. Old music reported every 15 seconds while it
+  played and sent a heartbeat every 30; 10 seconds keeps two reports inside Connect's 30-second
+  online window. A browser with no song loaded reports playing nothing.
+- **Applying requests.** Each request is tagged with its revision. An album's songs that answer
+  after a newer request, or after the listener acted in that browser, are dropped, as the
+  controller drops a stale load. A `transport` steers the song only while it is the one loaded,
+  and seeks only when it is more than 250 ms off. A `load` of the song the shared queue plays now
+  plays that entry from the position and keeps the queue, which is how a move lands. A `load` of
+  another song or of an album replaces the queue, as old music's play on a chosen device did. A
+  `stop` lets go of the song and keeps the browser's place in it. The browser reports every request
+  applied, moot ones included.
+- **One active device.** The core keeps no active device, so the client works out old music's from
+  the list: one of the listener's other devices that plays music, else one that holds a song
+  paused, while nothing is loaded in this browser. While there is one, the player bar, the mini
+  player, Now Playing, and the keyboard follow and control it, as old music's remote control did:
+  play, pause, and seek send `control`; skips move the shared queue, which that device follows,
+  paused ones included. Playing a list in this browser takes playback back and pauses that device,
+  and a browser that holds a song paused lets it go once another of the listener's devices plays,
+  as a newly active device stopped the old one. Volume stays with the device that plays, so the bar
+  hides it while another device plays.
+- **The list.** It shows the listener's own personal devices that reported in the last 30 seconds,
+  by name. Shared devices stay out, as old music's list never had them (D62). A device that goes
+  quiet leaves the list within 5 seconds of its last report turning 30 seconds old.
+- **Moving and loading.** A device row in "Play on" moves playback there with `move`, from this
+  browser or the device the player follows; with nothing playing anywhere it loads the current
+  song there. "This browser" moves it here. An album's menu has "Play on", which loads the album
+  onto another device and takes playback over. It replaces old music's command menu form for
+  `playback.play` with a device, which the `/music` port did not keep.
+- **One tab per browser.** Every tab on the origin shares the browser's device (ADR 0020), so
+  only one tab reports and applies requests: the first to take a Web Lock, or a tab that starts
+  playing, which takes the lock over. A tab that moves playback here takes it before the move.
 
 ### Edge cases settled in the build
 

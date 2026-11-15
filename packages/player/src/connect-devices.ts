@@ -1,0 +1,115 @@
+import { positionAt } from "./connect-player";
+import type { ConnectItem } from "./connect-player";
+
+/** Connect counts a device that has not reported for this long as offline (ADR 0018). */
+export const ONLINE_MS = 30_000;
+
+/** A device as `core.connect.targets.list` answers it, in the fields the music clients read. */
+export interface ConnectTarget {
+  readonly deviceId: string;
+  readonly name: string;
+  readonly mode: "personal" | "shared";
+  readonly playback: {
+    readonly domain: string;
+    /** Null when the caller may not play it. */
+    readonly item: ConnectItem | null;
+    readonly playing: boolean;
+    readonly positionMs: number;
+    readonly at: number;
+    /** A request the device has not applied yet stands in for its report. */
+    readonly pending: boolean;
+  } | null;
+  readonly reportedAt: number;
+}
+
+/** What a device plays, in server time: a song, or music the caller may not see. */
+export interface DevicePlayback {
+  /** Null when the caller may not play the song. */
+  readonly trackId: string | null;
+  readonly playing: boolean;
+  readonly positionMs: number;
+  readonly at: number;
+  readonly pending: boolean;
+}
+
+/** One of the listener's own devices other than this one, online now. */
+export interface Device {
+  readonly id: string;
+  readonly name: string;
+  /** Null while it plays no music. */
+  readonly playback: DevicePlayback | null;
+}
+
+const musicOf = (target: ConnectTarget): DevicePlayback | null => {
+  const { playback } = target;
+
+  if (playback?.domain !== "music") return null;
+
+  const { item } = playback;
+
+  return {
+    trackId: item?.ref.type === "track" ? item.ref.id : null,
+    playing: playback.playing,
+    positionMs: playback.positionMs,
+    at: playback.at,
+    pending: playback.pending,
+  };
+};
+
+/**
+ * The listener's own devices besides `self` that reported within {@link ONLINE_MS} of `serverNow`,
+ * by name, so a device's heartbeat never moves it in the list. Shared devices, which old music
+ * never listed, stay out (D62): the list is a person's personal devices, as old music's was.
+ */
+export const ownDevices = (
+  targets: ReadonlyArray<ConnectTarget>,
+  self: string | null,
+  serverNow: number,
+): ReadonlyArray<Device> =>
+  targets
+    .flatMap((target) =>
+      target.mode !== "personal" ||
+      target.deviceId === self ||
+      serverNow - target.reportedAt > ONLINE_MS
+        ? []
+        : [{ id: target.deviceId, name: target.name, playback: musicOf(target) }],
+    )
+    .toSorted(
+      (left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id),
+    );
+
+/**
+ * The device the player follows while nothing plays here, as old music's active device: one that
+ * plays music, else one that holds music paused. `previous` keeps its place while it still
+ * qualifies as well as any other, so two devices that report in turn never swap.
+ */
+export const activeDevice = (
+  devices: ReadonlyArray<Device>,
+  previous: string | null,
+): Device | null => {
+  const holding = devices.filter((device) => device.playback !== null);
+  const playing = holding.filter((device) => device.playback?.playing === true);
+  const pool = playing.length > 0 ? playing : holding;
+
+  return pool.find((device) => device.id === previous) ?? pool[0] ?? null;
+};
+
+/**
+ * Whether this device, holding a song paused, should let it go: another of the listener's devices
+ * plays music, so it took playback over, as a newly active device stopped the old one in old music.
+ */
+export const yieldsTo = (
+  here: { readonly playing: boolean } | null,
+  devices: ReadonlyArray<Device>,
+) => here !== null && !here.playing && devices.some((device) => device.playback?.playing === true);
+
+/** Where `device` stands in its song at server time `serverNow`, held at the song's end. */
+export const devicePosition = (
+  playback: DevicePlayback,
+  serverNow: number,
+  durationMs: number,
+): number => {
+  const position = positionAt(playback, serverNow);
+
+  return durationMs > 0 ? Math.min(position, durationMs) : position;
+};

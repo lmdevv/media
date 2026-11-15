@@ -35,6 +35,8 @@ const ci = Boolean(process.env["CI"]);
  */
 export default defineConfig({
   testDir: "./e2e",
+  // Each file starts the media service on the stack's one media port.
+  workers: 1,
   forbidOnly: ci,
   timeout: 120_000,
   reporter: ci ? "dot" : "list",

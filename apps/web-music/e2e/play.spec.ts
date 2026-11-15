@@ -1,44 +1,22 @@
 import { expect, test } from "@playwright/test";
-import type { Page } from "@playwright/test";
 
+import { audioSeconds, watchMedia } from "./audio";
 import { FIRST_SONG, SECOND_SONG, startMediaService, writeMusicLibrary } from "./media-service";
 import type { MediaService } from "./media-service";
-import { NO_STACK, createPerson, reachableStack, signIn, signInClient } from "./people";
+import {
+  NO_STACK,
+  addHouseholdLibrary,
+  createPerson,
+  reachableStack,
+  signIn,
+  signInClient,
+} from "./people";
 
 const stack = await reachableStack();
 
 test.skip(stack === null, NO_STACK);
 
 test.describe.configure({ mode: "serial" });
-
-/** How far the page's playing audio has got, in seconds; 0 while nothing plays. */
-const audioSeconds = (page: Page): Promise<number> =>
-  page.evaluate(() =>
-    Math.max(
-      0,
-      ...[...(window.musicTestMedia ?? [])].map((media) => (media.paused ? 0 : media.currentTime)),
-    ),
-  );
-
-/** Collects every media element the page plays, for `audioSeconds`. */
-const watchMedia = async (page: Page): Promise<void> => {
-  await page.addInitScript({
-    content: `
-      window.musicTestMedia = new Set();
-      const play = HTMLMediaElement.prototype.play;
-      HTMLMediaElement.prototype.play = function () {
-        window.musicTestMedia.add(this);
-        return play.call(this);
-      };
-    `,
-  });
-};
-
-declare global {
-  interface Window {
-    musicTestMedia?: Set<HTMLMediaElement>;
-  }
-}
 
 let media: MediaService | undefined;
 
@@ -52,31 +30,7 @@ test.beforeAll(async () => {
 
   album = library.album;
   media = await startMediaService(stack, folder);
-
-  const admin = await createPerson(stack, "music-admin", "admin");
-  const platform = await signInClient(stack, admin);
-
-  try {
-    const { libraryId } = await platform.core.libraries.create({
-      name: `Music ${admin.username}`,
-      kind: "music",
-      folders: [folder],
-    });
-
-    await platform.core.permissions.grants.set({
-      resource: { type: "library", id: libraryId },
-      principal: { kind: "household" },
-      level: "view",
-    });
-
-    await expect
-      .poll(async () => (await platform.core.libraries.get({ libraryId })).scan?.status, {
-        timeout: 60_000,
-      })
-      .toBe("succeeded");
-  } finally {
-    await platform.dispose();
-  }
+  await addHouseholdLibrary(stack, folder);
 });
 
 test.afterAll(async () => {

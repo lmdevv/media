@@ -118,3 +118,34 @@ export const signIn = async (page: Page, person: Person): Promise<void> => {
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByRole("heading", { name: `Hi, ${person.username}.` })).toBeVisible();
 };
+
+/**
+ * Adds a music library over `folder` that the whole household may use, as an admin, and resolves
+ * once its first scan finished.
+ */
+export const addHouseholdLibrary = async (stack: StackEnv, folder: string): Promise<void> => {
+  const admin = await createPerson(stack, "music-admin", "admin");
+  const platform = await signInClient(stack, admin);
+
+  try {
+    const { libraryId } = await platform.core.libraries.create({
+      name: `Music ${admin.username}`,
+      kind: "music",
+      folders: [folder],
+    });
+
+    await platform.core.permissions.grants.set({
+      resource: { type: "library", id: libraryId },
+      principal: { kind: "household" },
+      level: "view",
+    });
+
+    await expect
+      .poll(async () => (await platform.core.libraries.get({ libraryId })).scan?.status, {
+        timeout: 60_000,
+      })
+      .toBe("succeeded");
+  } finally {
+    await platform.dispose();
+  }
+};

@@ -1,6 +1,6 @@
 import { usePlayer } from "@media/player/react";
 import { useNavigate } from "@tanstack/react-router";
-import { HeartIcon, ListMusicIcon, PlusIcon } from "lucide-react";
+import { HeartIcon, ListMusicIcon, PlusIcon, SpeakerIcon } from "lucide-react";
 import { useMemo } from "react";
 import { toast } from "sonner";
 
@@ -37,7 +37,7 @@ interface MenuItems {
  */
 export const useMenuItems = (query: string, onClose: () => void): MenuItems => {
   const player = usePlayer();
-  const { openNewPlaylist, setNowPlaying } = useUi();
+  const { openPlayOn, openNewPlaylist, setNowPlaying } = useUi();
   const navigate = useNavigate();
   const music = useMusic();
   const me = useMe();
@@ -80,6 +80,20 @@ export const useMenuItems = (query: string, onClose: () => void): MenuItems => {
           });
 
           void playTracks(liked, { shuffle: true });
+        },
+      },
+      {
+        kind: "action",
+        id: "devices",
+        section: "Commands",
+        title: "Play on another device…",
+        detail: "Move playback to your phone or another browser",
+        icon: SpeakerIcon,
+        shortcut: HOTKEYS["devices.toggle"].defaultHotkey,
+        label: "Choose",
+        run: () => {
+          onClose();
+          openPlayOn();
         },
       },
       {
@@ -127,7 +141,17 @@ export const useMenuItems = (query: string, onClose: () => void): MenuItems => {
     }));
 
     return [...quick, ...screens];
-  }, [role, navigate, onClose, hasTrack, playTracks, music, openNewPlaylist, setNowPlaying]);
+  }, [
+    role,
+    navigate,
+    onClose,
+    hasTrack,
+    playTracks,
+    music,
+    openPlayOn,
+    openNewPlaylist,
+    setNowPlaying,
+  ]);
 
   const items = useMemo(
     (): ReadonlyArray<Item> =>

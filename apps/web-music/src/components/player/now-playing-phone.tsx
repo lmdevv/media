@@ -13,6 +13,7 @@ import { Artwork } from "@/components/library/artwork";
 import { LikeButton } from "@/components/library/like-button";
 import { TrackMenu } from "@/components/playlists/track-menu";
 import { PhonePauseGlyph, PhonePlayGlyph, PhoneSkipGlyph } from "@/components/shell/phone-chrome";
+import { useUi } from "@/components/shell/ui-state";
 import type { NowPlayingView } from "@/components/shell/ui-state";
 import { formatQuality } from "@/lib/format";
 import { useArtColors } from "@/lib/use-art-colors";
@@ -21,7 +22,8 @@ import { Progress, Volume } from "./controls";
 import { LyricsPane } from "./lyrics-view";
 import { NEXT_REPEAT, perform } from "./player-actions";
 import { nowPlayingBackground } from "./now-playing-background";
-import { RepeatGlyph, ShuffleGlyph } from "./now-playing-glyphs";
+import { AirPlayGlyph, RepeatGlyph, ShuffleGlyph } from "./now-playing-glyphs";
+import { RemotePill } from "./now-playing-remote-pill";
 import { UpcomingQueue, useUpNext } from "./queue";
 
 interface PhoneNowPlayingProps {
@@ -34,7 +36,7 @@ interface PhoneNowPlayingProps {
 
 /**
  * Phone Now Playing: the full-screen player, queue, and lyrics (Paper 05 · 04, 04c, 04b) on the
- * linear art-tinted background. Old music's Play on sheet returns with Connect.
+ * linear art-tinted background, with the Play on sheet.
  */
 export function PhoneNowPlaying({ track, lyrics, view, onView }: PhoneNowPlayingProps) {
   const player = usePlayer();
@@ -42,6 +44,7 @@ export function PhoneNowPlaying({ track, lyrics, view, onView }: PhoneNowPlaying
   const background = nowPlayingBackground(colors, "linear");
   const queue = view === "queue";
   const playing = player.status === "playing";
+  const deviceName = player.remote?.name ?? "This browser";
 
   return (
     <div
@@ -73,6 +76,7 @@ export function PhoneNowPlaying({ track, lyrics, view, onView }: PhoneNowPlaying
           open={view === "lyrics"}
           onClick={() => onView(view === "lyrics" ? "player" : "lyrics")}
         />
+        <PlayOnButton deviceName={deviceName} showName={view === "player"} />
         <button
           type="button"
           aria-label={queue ? "Hide queue" : "Queue"}
@@ -92,6 +96,8 @@ export function PhoneNowPlaying({ track, lyrics, view, onView }: PhoneNowPlaying
 }
 
 function PhonePlayer({ track }: { readonly track: Track }) {
+  const remote = usePlayer().remote !== null;
+
   return (
     <>
       <Artwork
@@ -117,6 +123,11 @@ function PhonePlayer({ track }: { readonly track: Track }) {
           />
         </div>
       </div>
+      {remote ? (
+        <div className="pt-4">
+          <RemotePill />
+        </div>
+      ) : null}
       <div className="flex flex-col gap-2 pt-6.5">
         <Progress
           layout="stacked"
@@ -229,6 +240,32 @@ function LyricsButton({
       ) : (
         <MessageCircleIcon className="size-6" />
       )}
+    </button>
+  );
+}
+
+function PlayOnButton({
+  deviceName,
+  showName,
+}: {
+  readonly deviceName: string;
+  readonly showName: boolean;
+}) {
+  const { openPlayOn } = useUi();
+
+  return (
+    <button
+      type="button"
+      onClick={openPlayOn}
+      className="flex flex-col items-center gap-0.75 text-text/75 outline-none"
+      aria-label={`Play on another device. Now: ${deviceName}`}
+    >
+      <AirPlayGlyph />
+      {showName ? (
+        <span className="font-sans text-2xs leading-3.5 font-medium text-text/60">
+          {deviceName}
+        </span>
+      ) : null}
     </button>
   );
 }

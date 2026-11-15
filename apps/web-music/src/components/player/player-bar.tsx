@@ -1,16 +1,19 @@
 import { usePlayer } from "@media/player/react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { Link } from "@tanstack/react-router";
-import { ListMusicIcon } from "lucide-react";
+import { ListMusicIcon, SpeakerIcon } from "lucide-react";
+import { useEffect } from "react";
 
 import { Artwork } from "@/components/library/artwork";
 import { LikeButton } from "@/components/library/like-button";
 import { useUi } from "@/components/shell/ui-state";
 import { formatQuality } from "@/lib/format";
 import { HOTKEYS } from "@/lib/hotkeys";
+import { useIsDesktop } from "@/lib/use-media";
 
 import {
   PlayPauseButton,
@@ -20,22 +23,31 @@ import {
   SkipButton,
   Volume,
 } from "./controls";
-import { perform } from "./player-actions";
+import { deviceIcon, deviceKind, perform } from "./player-actions";
 import { barTools } from "./bar-tools";
+import { DeviceList, useDevices } from "./devices";
+import { shownSurface } from "./play-on";
 
 /**
  * The desktop player bar from Paper: the song on the left, transport and progress in the middle,
- * quality, queue, and volume on the right. It shows the buffering, stream error, and media
- * offline states. Old music's device picker returns with Connect.
+ * quality, queue, device, and volume on the right. It shows the buffering, stream error, media
+ * offline, and remote control states. Volume stays with the device that plays, as Connect keeps no
+ * remote volume (ADR 0018), so the bar hides it while another device plays.
  */
 export function PlayerBar() {
   const player = usePlayer();
   const { setNowPlaying, queueOpen, setQueueOpen } = useUi();
   const track = player.track;
+  const { remote } = player;
 
   if (track === null) return null;
 
-  const tools = barTools({ status: player.status, mediaOnline: player.mediaOnline });
+  const tools = barTools({
+    status: player.status,
+    mediaOnline: player.mediaOnline,
+    remote: remote !== null,
+  });
+
   const offline = tools === "offline";
   const failed = tools === "error";
   const buffering = tools === "buffering";
@@ -129,7 +141,13 @@ export function PlayerBar() {
             <span className="font-mono text-xs/xs tracking-mono text-text-muted">BUFFERING…</span>
           ) : (
             <>
-              <Badge tone="accent">{formatQuality(track)}</Badge>
+              {remote === null ? (
+                <Badge tone="accent">{formatQuality(track)}</Badge>
+              ) : (
+                <Badge tone="surface" className="max-w-40 text-text">
+                  <span className="truncate">On {remote.name}</span>
+                </Badge>
+              )}
               <Tooltip label={queueOpen ? "Hide queue" : "Queue"}>
                 <button
                   type="button"
@@ -146,9 +164,68 @@ export function PlayerBar() {
               </Tooltip>
             </>
           )}
-          {tools === "tools" ? <Volume /> : null}
+          <DevicePickerButton />
+          {tools === "tools" && remote === null ? <Volume /> : null}
         </div>
       </section>
+      <RemoteBand />
+    </div>
+  );
+}
+
+function DevicePickerButton() {
+  const { playOn, openPlayOn, closePlayOn, setPlayOnPopoverMounted } = useUi();
+  const { onlineCount } = useDevices();
+  const desktop = useIsDesktop();
+  const shown = shownSurface(playOn, desktop);
+
+  useEffect(() => {
+    setPlayOnPopoverMounted(true);
+
+    return () => setPlayOnPopoverMounted(false);
+  }, [setPlayOnPopoverMounted]);
+
+  return (
+    <Popover
+      open={shown === "popover"}
+      onOpenChange={(open) => (open ? openPlayOn() : closePlayOn())}
+    >
+      <Tooltip label="Play on another device" shortcut={HOTKEYS["devices.toggle"].defaultHotkey}>
+        <PopoverTrigger
+          aria-label="Play on another device"
+          className="rounded-full text-text outline-none focus-visible:ring-2 focus-visible:ring-ring/50 data-popup-open:text-accent"
+        >
+          <SpeakerIcon className="size-5" />
+        </PopoverTrigger>
+      </Tooltip>
+      <PopoverContent className="w-95 gap-0.5 p-2">
+        <div className="flex items-center justify-between px-3 pt-2.5 pb-2">
+          <span className="font-sans text-md/base font-semibold text-text">Play on</span>
+          <span className="font-mono text-xs/xs tracking-mono text-text-muted">
+            {onlineCount === 1 ? "1 DEVICE ONLINE" : `${onlineCount} DEVICES ONLINE`}
+          </span>
+        </div>
+        <DeviceList />
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function RemoteBand() {
+  const { remote } = usePlayer();
+
+  if (remote === null) return null;
+
+  const Icon = deviceIcon(deviceKind(remote.name));
+
+  return (
+    <div
+      role="status"
+      className="flex h-7 shrink-0 items-center justify-end gap-2 bg-accent px-6 text-on-accent"
+    >
+      <Icon aria-hidden className="size-3.5" />
+      <span className="font-sans text-sm/xs font-semibold">Playing on {remote.name}</span>
+      <span className="font-sans text-sm/xs">· controls here change it</span>
     </div>
   );
 }

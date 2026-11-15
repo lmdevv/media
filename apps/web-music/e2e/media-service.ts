@@ -91,8 +91,14 @@ const SONGS = [
   { title: SECOND_SONG, seconds: 6, frequency: 440 },
 ] as const;
 
-/** Writes the fixture album into a new folder and returns the folder and the album's title. */
-export const writeMusicLibrary = async (): Promise<{
+/**
+ * Writes the fixture album into a new folder and returns the folder and the album's title.
+ *
+ * @param seconds - How long each song lasts, 6 seconds unless a test needs time inside a song.
+ */
+export const writeMusicLibrary = async (
+  seconds?: number,
+): Promise<{
   readonly root: string;
   readonly album: string;
 }> => {
@@ -114,7 +120,7 @@ export const writeMusicLibrary = async (): Promise<{
         "-f",
         "lavfi",
         "-i",
-        `sine=frequency=${String(song.frequency)}:sample_rate=44100:duration=${String(song.seconds)}`,
+        `sine=frequency=${String(song.frequency)}:sample_rate=44100:duration=${String(seconds ?? song.seconds)}`,
         "-metadata",
         `title=${song.title}`,
         "-metadata",
