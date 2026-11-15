@@ -1,9 +1,9 @@
 # Connect
 
 A person moves music between their own devices and controls one from another, as old music's
-"Play on" did: a pause in one browser pauses the song in another, a move continues the song there
-at the same place, and an album's menu plays the album on another device. The list holds only the
-person's own devices that are online (ADR 0018).
+"Play on" did: a pause in one browser or the music iOS app pauses the song on another device, a
+move continues the song there at the same place, and an album's menu plays the album on another
+device. The list holds only the person's own devices that are online (ADR 0018).
 
 ## Sub-features
 
@@ -16,6 +16,9 @@ person's own devices that are online (ADR 0018).
 - `connect-load` plays an album on another device from the album's `More actions` menu,
   `Play on`.
 - `connect-cli` controls a device from the terminal.
+- `connect-ios` does all of the above in the music iOS app: its device sheet, the remote control
+  of another device from the mini player and Now Playing, moves to and from the phone, an
+  album's `Play on`, and the phone as a target the browser pauses and moves to.
 
 ## How to get to it (user POV)
 
@@ -25,6 +28,9 @@ person's own devices that are online (ADR 0018).
 - An album's `More actions for <album>` menu, then `Play on` and a device.
 - Terminal: `media auth targets list`, `media auth targets control --device-id <id> --playing false`,
   `media auth targets load`, and `media auth targets move`.
+- iOS app: Now Playing's device button (`This iPhone`, or `Playing on <device>` while another
+  device plays), the iPad player bar's speaker button, and Settings, `Devices`, each open the
+  `Play on` sheet. An album's `Album actions` sheet has `Play on`.
 
 ## Driving it with verify-media
 
@@ -63,6 +69,22 @@ Preconditions:
   controller's list, and the band goes.
 - **Proof.** Record the controller with `record-start --show-actions`, take stills of both pages,
   and save `delay.txt` with each pause's delay.
+- **The phone.** Run `$S ios up --app music --udid <id> --no-sign-in` on the simulator T3's device
+  tools opened, open the printed link with agent-device, and sign in as `aiko`. The phone's device
+  has the name iOS gives it (`iPhone 18 Pro` on that simulator). With `aiko-desk` playing, the app's
+  mini player follows it, and Now Playing's button reads `Playing on Chrome on Linux`; its Pause
+  pauses the desk. The button opens `Play on`: `This iPhone` moves the song to the phone at the
+  desk's position, and the sheet closes once the phone plays. From the desk, `Play on another
+  device`, then the phone, moves it back, and the bar's Pause then pauses the phone. An album's
+  `Album actions`, then `Play on`, then `Chrome on Linux` plays the album on the desk. As Sam the
+  sheet holds only `This iPhone` (or `This iPad`) and `No other devices right now`.
+- **Time a remote pause to the phone.** The phone's clock is the Mac's: take its offset from this
+  host over one long ssh session (the shortest of many round trips to one remote process), record
+  `Date.now()` before each click on the desk, and read when the app's AVPlayer paused from the
+  Mac's unified log: `xcrun simctl spawn <udid> log show --style ndjson --predicate 'process ==
+  "music" AND eventMessage CONTAINS "timeControlStatus"'`, whose `setting timeControlStatus=0`
+  lines are the pauses. For the reverse, the desk's `connectRequests` row holds the server time
+  its `control` applied (`ask.at`), the clock of the desk's `Date.now()`.
 
 ## Gotchas
 
@@ -71,3 +93,12 @@ Preconditions:
 - The before side has no Connect in `/music` before p6-connect-web.
 - A target the browser never let play sound may refuse to start a load; the browser host launches
   Chromium so that it can.
+- An iOS simulator can't press the lock screen, Control Center, or headphones. Old music's
+  `legacy/music/scripts/ios-remote-command.m` (at `bd7462a7`, built on the Mac at
+  `~/music-ios/tools/ios-remote-command`) sends MediaRemote's play, pause, toggle, next, and
+  previous inside the simulator as they do, which agent-device can't:
+  `xcrun simctl spawn <udid> ~/music-ios/tools/ios-remote-command pause`.
+- In Now Playing, snapshot marks the controls `[covered]` and ref taps don't land: tap by point.
+- A killed app leaves the list about 35 seconds after its last report. iOS suspends a backgrounded
+  app that plays nothing on a real phone, which then leaves the same way; a simulator keeps it
+  running, so it stays listed there.

@@ -57,6 +57,26 @@ const musicOf = (target: ConnectTarget): DevicePlayback | null => {
 };
 
 /**
+ * `devices` by name, then id, inserted in order: the phone app's JavaScript engine (Hermes) has no
+ * `toSorted`, and lint forbids `sort`. The list is a person's few devices.
+ */
+const byName = (devices: ReadonlyArray<Device>): ReadonlyArray<Device> => {
+  const sorted: Array<Device> = [];
+
+  const compare = (left: Device, right: Device): number =>
+    left.name.localeCompare(right.name) || left.id.localeCompare(right.id);
+
+  for (const device of devices) {
+    const at = sorted.findIndex((other) => compare(device, other) < 0);
+
+    if (at === -1) sorted.push(device);
+    else sorted.splice(at, 0, device);
+  }
+
+  return sorted;
+};
+
+/**
  * The listener's own devices besides `self` that reported within {@link ONLINE_MS} of `serverNow`,
  * by name, so a device's heartbeat never moves it in the list. Shared devices, which old music
  * never listed, stay out (D62): the list is a person's personal devices, as old music's was.
@@ -66,17 +86,15 @@ export const ownDevices = (
   self: string | null,
   serverNow: number,
 ): ReadonlyArray<Device> =>
-  targets
-    .flatMap((target) =>
+  byName(
+    targets.flatMap((target) =>
       target.mode !== "personal" ||
       target.deviceId === self ||
       serverNow - target.reportedAt > ONLINE_MS
         ? []
         : [{ id: target.deviceId, name: target.name, playback: musicOf(target) }],
-    )
-    .toSorted(
-      (left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id),
-    );
+    ),
+  );
 
 /**
  * The device the player follows while nothing plays here, as old music's active device: one that

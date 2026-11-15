@@ -4,6 +4,7 @@ import type { DeviceKind } from "@media/player/connect-devices";
 import { HERE } from "./transfer";
 import type { MoveTarget, Transfer } from "./transfer";
 import type { DeviceFamily } from "./device-family";
+import { sortedBy } from "./sorted-by";
 
 /** A device row in the sheet. */
 export interface DeviceRow {
@@ -70,8 +71,8 @@ export const deviceSheet = ({
     thisPhone: true,
   };
 
-  const others = devices
-    .map((device): DeviceRow => {
+  const others = sortedBy(
+    devices.map((device): DeviceRow => {
       const playing = device.id === active;
 
       return {
@@ -82,8 +83,9 @@ export const deviceSheet = ({
         current: playing,
         thisPhone: false,
       };
-    })
-    .toSorted((left, right) => Number(right.current) - Number(left.current));
+    }),
+    (left, right) => Number(right.current) - Number(left.current),
+  );
 
   const rows = [phone, ...others];
   const from = rows.find((row) => row.current) ?? phone;

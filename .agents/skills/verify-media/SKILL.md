@@ -438,7 +438,8 @@ less than 3 GB free, or 10 GB when it must build the dev client. It does these s
 2. It starts Metro.
 3. It creates and boots the simulator `media-verify-<run>-<side>`, in dark mode unless `--light`.
 4. It installs the dev client. The build is named for the app's native inputs (`app.json`, its
-   `package.json`, the lockfile, the asset names, and the music app's `modules/`) and lives at
+   `package.json`, the lockfile, the asset names, and the music app's `modules/`, their code
+   included, so a Swift change builds a new one) and lives at
    `~/movies-ios/dev-client-<hash>`
    on the Mac, so every run and worktree with the same inputs installs the same build. When none
    matches, it syncs this checkout to `~/movies-ios/verify-<run>`, runs `expo prebuild` there,
