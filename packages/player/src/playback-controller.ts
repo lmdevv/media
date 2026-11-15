@@ -9,9 +9,11 @@ import { isStreamRefused, mediaBaseUrl, probeMediaHealth, waitForMedia } from ".
 import type { MediaSessionHandlers, NowPlayingTrack } from "./media-session";
 import { followingIndex, nextIndex, previousIndex } from "./queue-order";
 import type { RepeatMode } from "./queue-order";
+import { SourceUnreachable } from "./source-resolver";
 import type {
   PlayableTrack,
   ResolvedSource,
+  SourceReach,
   SourceResolver,
   StreamRefused,
 } from "./source-resolver";
@@ -104,6 +106,11 @@ export interface MusicCommands {
     trackIds: ReadonlyArray<string>,
     index: number | undefined,
   ) => Promise<{ readonly current: string }>;
+  /**
+   * `music.tracks.get`: a song's details, so a new queue's first song starts as soon as its ticket
+   * answers, before the queue that holds it arrives.
+   */
+  readonly track: (trackId: string) => Promise<Track>;
   /** `music.queue.jump`: makes an entry the one playing. */
   readonly jump: (itemId: string) => Promise<void>;
   /** `music.play.report`: records a start that is playing in the listener's history. */
@@ -158,6 +165,8 @@ interface LoadedEntry {
   readonly renewAt: number | null;
   /** The start its ticket came from; null until its source resolves. */
   readonly playbackId: string | null;
+  /** See `ResolvedSource.origin`; null until its source resolves. */
+  readonly origin: ResolvedSource["origin"] | null;
   /** Whether its start is recorded in history. */
   readonly reported: boolean;
 }
@@ -186,6 +195,22 @@ const samePreload = (a: PreloadRequest, b: PreloadRequest): boolean =>
 interface PendingJump {
   readonly itemId: string;
   readonly sentAt: number;
+}
+
+/** What a load of a song gets: its source, or why nothing can play it. */
+type Requested = Result.Result<ResolvedSource, StreamRefused | SourceUnreachable>;
+
+/**
+ * The song a new queue opens on, started while `music.queue.play` writes the queue: its details,
+ * then its source. `started` is null when either failed; the queue's own entry then loads it as
+ * before.
+ */
+interface EarlyStart {
+  /** The song guessed: the one at the index the play named. */
+  readonly trackId: string;
+  /** The entry `music.queue.play` answered; null until it answers. */
+  readonly itemId: string | null;
+  readonly started: Promise<{ readonly track: Track; readonly source: Requested } | null>;
 }
 
 /**
@@ -222,6 +247,8 @@ export class PlaybackController {
   #preloaded: PreloadedEntry | null = null;
   /** The preload request in flight, if any. */
   #preloading: PreloadRequest | null = null;
+  /** The new queue's first song, started ahead; the next load of that song takes it. */
+  #early: EarlyStart | null = null;
   #generation = 0;
   /** The load whose source the engine plays; its events count only while it is `#generation`. */
   #engineGeneration = 0;
@@ -229,6 +256,11 @@ export class PlaybackController {
   readonly #transcode = new Set<string>();
   #mseFailed = false;
   #renewed: string | null = null;
+  /**
+   * Entries skipped one after another because nothing could play them, since a song last played
+   * here or the listener last asked for one.
+   */
+  readonly #skipped = new Set<string>();
   #loading = false;
   #unsubscribeEngine: (() => void) | null = null;
   #healthFiber: Fiber.Fiber<void, unknown> | null = null;
@@ -363,17 +395,33 @@ export class PlaybackController {
     return this.#livePositionMs();
   }
 
-  /** Replaces the queue with `trackIds` and plays the one at `index` here. */
+  /**
+   * Replaces the queue with `trackIds` and plays the one at `index` here. That song's ticket is
+   * asked for while the core writes the queue, so it plays once the queue's answer and its ticket
+   * are both in, without waiting for the new queue to arrive. A song this device holds a copy of
+   * waits for the new queue to name it, as the core may open the queue on another. A queue command
+   * that fails plays nothing.
+   */
   async playTracks(trackIds: ReadonlyArray<string>, index?: number): Promise<void> {
     this.#unlockOutput();
+    this.#skipped.clear();
     this.#wantPlaying = true;
     this.#update({ error: null });
+    const picked = trackIds[index ?? 0];
+    const early = picked === undefined ? null : this.#startEarly(picked);
+
+    this.#early = early;
 
     try {
       const { current } = await this.#commands.play(trackIds, index);
 
-      this.#moveTo(current, true);
+      const answered =
+        early !== null && this.#early === early ? { ...early, itemId: current } : null;
+
+      if (answered !== null) this.#early = answered;
+      this.#moveTo(current, true, answered);
     } catch (error) {
+      if (this.#early === early) this.#early = null;
       this.#update({ error: messageOf(error) });
     }
   }
@@ -392,6 +440,7 @@ export class PlaybackController {
     const entry = this.#currentEntry();
 
     if (entry === null) return;
+    this.#skipped.clear();
 
     if (this.#needsSource(entry)) {
       this.#unlockOutput();
@@ -419,6 +468,8 @@ export class PlaybackController {
     const queue = this.#queue;
     const at = this.#currentIndex();
 
+    this.#skipped.clear();
+
     if (queue === null || at === null) return;
 
     const index = nextIndex(at, queue.entries.length, queue.repeat);
@@ -431,6 +482,8 @@ export class PlaybackController {
   async previous(): Promise<void> {
     const queue = this.#queue;
     const at = this.#currentIndex();
+
+    this.#skipped.clear();
 
     if (queue === null || at === null) return;
 
@@ -449,6 +502,7 @@ export class PlaybackController {
   /** Plays the queue entry `itemId`. */
   async jump(itemId: string): Promise<void> {
     this.#unlockOutput();
+    this.#skipped.clear();
     await this.#jumpTo(itemId, true);
   }
 
@@ -475,6 +529,21 @@ export class PlaybackController {
     this.#saveResume();
   }
 
+  /**
+   * Gives the entry loaded here, `fromItemId`, the id `toItemId` the core now holds it under, as
+   * when a phone's own queue goes back to the core as a new one. The song stays where it is,
+   * playing or paused, when the queue that names `toItemId` arrives, instead of loading again from
+   * the start; an entry that turns out to hold another song loads that song, as any wrong guess.
+   */
+  adoptEntry(fromItemId: string, toItemId: string): void {
+    const loaded = this.#loaded;
+
+    if (loaded?.entry.itemId !== fromItemId) return;
+    this.#loaded = { ...loaded, entry: { ...loaded.entry, itemId: toItemId } };
+
+    if (this.#snapshot.current === fromItemId) this.#update({ current: toItemId });
+  }
+
   /** Sets the volume here at once and saves it on this device. */
   setVolume(volume: number): void {
     const value = Math.min(1, Math.max(0, volume));
@@ -497,6 +566,7 @@ export class PlaybackController {
    */
   retry(): void {
     if (this.#snapshot.engineStatus !== "error") return;
+    this.#skipped.clear();
     this.#stopHealthProbe();
     this.#update({ mediaOnline: true, engineStatus: "idle", error: null });
     void this.#loadCurrent();
@@ -584,12 +654,19 @@ export class PlaybackController {
     if (this.#loaded === null && this.#wantPlaying) void this.#load(entry, 0);
   }
 
-  /** Keeps the loaded entry's song details current, such as a like, without reloading it. */
+  /**
+   * Keeps the loaded entry's song details current, such as a like, without reloading it. An entry
+   * that holds another song than the one loaded for it loads that song: the guess a new queue's
+   * first song starts from (`#startEarly`) was wrong, as when the core skipped a missing file.
+   */
   #refreshLoaded(): void {
     const loaded = this.#loaded;
     const entry = loaded === null ? null : this.#entryOf(loaded.entry.itemId);
 
-    if (loaded !== null && entry !== null) this.#loaded = { ...loaded, entry };
+    if (loaded === null || entry === null) return;
+
+    if (entry.track.id === loaded.entry.track.id) this.#loaded = { ...loaded, entry };
+    else void this.#load(entry, 0);
   }
 
   /** Moves to `itemId` here at once and tells the core, which confirms it with the next sync. */
@@ -608,8 +685,11 @@ export class PlaybackController {
     }
   }
 
-  /** Moves to `itemId` here at once. Returns the pending move, which the core's sync confirms. */
-  #moveTo(itemId: string, play: boolean): PendingJump {
+  /**
+   * Moves to `itemId` here at once. Returns the pending move, which the core's sync confirms.
+   * `early` is the song started ahead for a new queue whose first entry `itemId` is.
+   */
+  #moveTo(itemId: string, play: boolean, early: EarlyStart | null = null): PendingJump {
     const pending = this.#sendMove(itemId);
 
     this.#wantPlaying = play;
@@ -618,11 +698,85 @@ export class PlaybackController {
     const entry = this.#entryOf(itemId);
 
     if (entry === null) {
-      // The queue that holds it has not arrived yet; `sync` loads it once it does.
+      // The queue that holds it has not arrived yet; `sync` loads it once it does, unless the
+      // song started ahead gets there first.
       this.#unload();
+
+      if (early !== null && play) void this.#loadEarly(itemId, early);
     } else if (this.#loaded?.entry.itemId !== itemId || play) void this.#load(entry, 0);
 
     return pending;
+  }
+
+  /**
+   * Asks for `trackId`'s details and then its ticket, while the core writes the queue that opens
+   * on it. `music.play.start` does not need the queue, so the song can play as soon as both answer.
+   */
+  #startEarly(trackId: string): EarlyStart {
+    const started = this.#commands.track(trackId).then(
+      async (track) => ({
+        track,
+        source: await this.#sources.resolve(
+          track,
+          this.#profileFor(track, this.#wantedEngine()),
+          this.#reach(),
+        ),
+      }),
+      () => null,
+    );
+
+    return { trackId, itemId: null, started };
+  }
+
+  /**
+   * Loads the new queue's first entry `itemId` with the song started ahead, once it answers,
+   * unless the listener moved on or the queue that holds it arrived and loaded it meanwhile.
+   *
+   * The core opens a new queue on the song at the index asked for unless it can't play that song
+   * (its file went missing), and then on the next one it can. A stream's ticket shows the server
+   * plays the guessed song, so the entry holds it. A copy on this device shows nothing of the
+   * kind, so a song started from one waits for the queue to name the entry's song.
+   */
+  async #loadEarly(itemId: string, early: EarlyStart): Promise<void> {
+    const started = await early.started;
+
+    if (
+      started === null ||
+      Result.isFailure(started.source) ||
+      started.source.success.origin !== "stream" ||
+      this.#early !== early ||
+      this.#snapshot.current !== itemId ||
+      this.#loaded !== null
+    ) {
+      return;
+    }
+
+    await this.#load({ itemId, autoplay: false, track: started.track }, 0);
+  }
+
+  /**
+   * The source started ahead for the new queue's first entry, taken once by that entry's load,
+   * its refusal included. Null when it was started for another entry, the entry holds another song
+   * than the one guessed, its details failed, it is in another profile than `profile`, or it is
+   * due for renewal: the load then asks for a source itself.
+   */
+  async #takeEarly(entry: QueueEntry, profile: MusicStreamProfile): Promise<Requested | null> {
+    const early = this.#early;
+
+    if (early === null || early.itemId !== entry.itemId) return null;
+    this.#early = null;
+
+    if (early.trackId !== entry.track.id) return null;
+    const started = await early.started;
+
+    if (started === null) return null;
+    const { source } = started;
+
+    if (Result.isFailure(source)) return source;
+
+    return source.success.profile === profile && !this.#isExpired(source.success.renewAt)
+      ? source
+      : null;
   }
 
   /** Records a move to `itemId` made here, which the core has not confirmed yet. */
@@ -849,31 +1003,55 @@ export class PlaybackController {
         url: null,
         renewAt: null,
         playbackId: null,
+        origin: null,
         reported: false,
       };
       this.#stamp(startMs, false);
-
-      if (!this.#snapshot.mediaOnline) return;
+      // While the media server is away only a copy on this device plays, as old music's player
+      // allowed: the song waits for the server otherwise.
+      const reach = this.#reach();
       const engine = this.#wantedEngine();
       this.#update({ engineStatus: "loading", error: null, autoplayBlocked: false });
       // A switch drops the preload with the engine that held it.
       this.#useEngine(engine);
 
+      const profile = this.#profileFor(track, engine);
       const preloaded = this.#takePreload(entry);
+      const ahead = preloaded === null ? await this.#takeEarly(entry, profile) : null;
 
-      const requested: Result.Result<ResolvedSource, StreamRefused> =
+      if (generation !== this.#generation) return;
+
+      const requested: Requested =
         preloaded === null
-          ? await this.#sources.resolve(track, this.#profileFor(track, engine))
+          ? (ahead ?? (await this.#sources.resolve(track, profile, reach)))
           : Result.succeed(preloaded);
 
       // A ticket that answers after the listener moved on, a failure included, is not this song's.
       if (generation !== this.#generation) return;
+
+      if (
+        reach === "device" &&
+        (Result.isFailure(requested) || requested.success.origin !== "local")
+      ) {
+        // A copy that played meanwhile stops, so it does not play under this song's name.
+        this.#engine.unload();
+        this.#stamp(startMs, false);
+        this.#update({ engineStatus: "error", error: MEDIA_OFFLINE_MESSAGE });
+
+        // A skip already under way goes on to the next song with a copy; a song the listener
+        // asked for waits for the server.
+        if (this.#skipped.size > 0) this.#skipUnreachable(entry);
+
+        return;
+      }
 
       if (Result.isFailure(requested)) {
         // The song before stops too, so nothing plays under the name of a song that did not start.
         this.#engine.unload();
         this.#stamp(startMs, false);
         this.#update({ engineStatus: "error", error: requested.failure.message });
+
+        if (requested.failure instanceof SourceUnreachable) this.#skipUnreachable(entry);
 
         return;
       }
@@ -886,6 +1064,7 @@ export class PlaybackController {
         url: resolved.source.url,
         renewAt: resolved.renewAt,
         playbackId: resolved.playbackId,
+        origin: resolved.origin,
         reported: false,
       };
 
@@ -916,6 +1095,52 @@ export class PlaybackController {
     if (generation === this.#generation && this.#snapshot.engineStatus === "playing") {
       this.#reportPlay();
     }
+  }
+
+  /**
+   * Moves on from `entry`, which nothing can play now, to the entry after it, as old music's player
+   * skipped a song it could not reach. The error stays on screen when no entry follows, or when the
+   * one that follows was skipped too since a song last played, so a queue nothing can play stops.
+   * A queue that no longer holds `entry`, as a phone's own queue of copies holds no song it can't
+   * play, already moved on: the move to `entry` the core never confirmed ends, and the player
+   * follows that queue's entry.
+   */
+  #skipUnreachable(entry: QueueEntry): void {
+    this.#skipped.add(entry.itemId);
+    const queue = this.#queue;
+    const at = queue?.entries.findIndex((queued) => queued.itemId === entry.itemId) ?? -1;
+
+    if (queue === null) return;
+
+    if (at === -1) {
+      if (this.#pendingJump?.itemId !== entry.itemId) return;
+      this.#pendingJump = null;
+      this.#follow(queue.current);
+
+      return;
+    }
+
+    const index = nextIndex(at, queue.entries.length, queue.repeat);
+    const following = index === null ? undefined : queue.entries[index];
+
+    if (following === undefined || this.#skipped.has(following.itemId)) return;
+    void this.#jumpTo(following.itemId, this.#wantPlaying);
+  }
+
+  /**
+   * Stops `loaded`'s damaged copy while the media server is away and skips to the next song with a
+   * copy, without asking the server for a stream.
+   */
+  #skipDamagedCopy(loaded: LoadedEntry): void {
+    const positionMs = this.#livePositionMs();
+
+    this.#generation += 1;
+    this.#loading = false;
+    this.#engine.unload();
+    this.#loaded = { ...loaded, url: null, origin: null, playbackId: null, renewAt: null };
+    this.#stamp(positionMs, false);
+    this.#update({ engineStatus: "error", error: MEDIA_OFFLINE_MESSAGE });
+    this.#skipUnreachable(loaded.entry);
   }
 
   #profileFor(track: Track, engine: EngineKind): MusicStreamProfile {
@@ -973,7 +1198,7 @@ export class PlaybackController {
   #preloadRequest(): PreloadRequest | null {
     const engine = this.#snapshot.engine;
 
-    if (this.#wantedEngine() !== engine || !this.#snapshot.mediaOnline) return null;
+    if (this.#wantedEngine() !== engine) return null;
     const entry = this.#followingEntry();
 
     if (entry === null) return null;
@@ -998,7 +1223,8 @@ export class PlaybackController {
 
     if (request === null) return;
     this.#preloading = request;
-    const resolved = await this.#sources.resolve(request.entry.track, request.profile);
+    const reach = this.#reach();
+    const resolved = await this.#sources.resolve(request.entry.track, request.profile, reach);
 
     if (this.#preloading === request) this.#preloading = null;
 
@@ -1007,6 +1233,12 @@ export class PlaybackController {
     const wanted = this.#preloadRequest();
 
     if (Result.isFailure(resolved) || wanted === null || !samePreload(request, wanted)) return;
+
+    // A stream answered just before the media server went away won't play.
+    if (reach !== this.#reach() || (reach === "device" && resolved.success.origin !== "local")) {
+      return;
+    }
+
     this.#engine.preload(resolved.success.source);
     this.#preloaded = { entry: wanted.entry, ...resolved.success };
   }
@@ -1043,7 +1275,11 @@ export class PlaybackController {
         const { playing } = this.#engine.samplePlayback();
         this.#setMoving(playing);
 
-        if (playing) this.#renewed = null;
+        if (playing) {
+          this.#renewed = null;
+          this.#skipped.clear();
+        }
+
         this.#update(
           playing
             ? { engineStatus: "playing", error: null, autoplayBlocked: false }
@@ -1093,6 +1329,7 @@ export class PlaybackController {
       url: preloaded.source.url,
       renewAt: preloaded.renewAt,
       playbackId: preloaded.playbackId,
+      origin: preloaded.origin,
       reported: false,
     };
 
@@ -1156,6 +1393,24 @@ export class PlaybackController {
 
     const loaded = this.#loaded;
     const url = loaded?.url ?? null;
+
+    if (loaded?.origin === "local" && url !== null) {
+      // A copy on this device that fails to play is damaged: it stops being offered, and the song
+      // loads again from the server, or is skipped while the server can't be reached, as old
+      // music's player recovered.
+      this.#sources.discard(loaded.entry.track.id, url);
+
+      if (this.#reach() === "device") {
+        this.#skipDamagedCopy(loaded);
+
+        return;
+      }
+
+      void this.#load(loaded.entry, this.#livePositionMs());
+
+      return;
+    }
+
     const baseUrl = url === null ? null : mediaBaseUrl(url);
 
     if (loaded === null || baseUrl === null) {
@@ -1240,12 +1495,25 @@ export class PlaybackController {
         Effect.tap(() =>
           Effect.sync(() => {
             this.#healthFiber = null;
+
+            // A copy on this device that plays meanwhile goes on.
+            if (this.#loaded?.origin === "local") {
+              this.#update({ mediaOnline: true });
+
+              return;
+            }
+
             this.#update({ mediaOnline: true, engineStatus: "idle", error: null });
             void this.#loadCurrent();
           }),
         ),
       ),
     );
+  }
+
+  /** Where sources may come from now: only this device while the media server is away. */
+  #reach(): SourceReach {
+    return this.#snapshot.mediaOnline ? "any" : "device";
   }
 
   #stopHealthProbe(): void {

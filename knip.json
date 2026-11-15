@@ -24,6 +24,10 @@
       "entry": ["src/app/**/*.tsx"],
       "project": ["src/**/*.{ts,tsx,css}"]
     },
+    "apps/mobile-music": {
+      "entry": ["src/app/**/*.tsx"],
+      "project": ["src/**/*.{ts,tsx,css}"]
+    },
     "packages/platform": {
       "entry": ["commands/refs.ts"],
       "typescript": {

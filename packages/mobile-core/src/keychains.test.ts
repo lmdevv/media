@@ -1,7 +1,19 @@
+import { Brand } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { groupsFor, openKeychains } from "./keychains";
 import type { SecureStoreModule, StoreOptions } from "./keychains";
+import {
+  keychainKey,
+  readAppRecord,
+  readConnection,
+  readPhoneAccount,
+  sessionKeyFor,
+  writeAppRecord,
+  writeConnection,
+  writePhoneAccount,
+} from "./records";
+import type { UserId } from "./records";
 
 interface Call {
   readonly call: string;
@@ -9,9 +21,13 @@ interface Call {
   readonly group: string | undefined;
 }
 
+/** The keys expo-secure-store 58 takes (`isValidKey` in its `SecureStore.ts`); it throws on any other. */
+const SECURE_STORE_KEY = /^[\w.-]+$/u;
+
 /**
- * expo-secure-store as the keychain behaves: items live per access group, and a group the build
- * is not entitled to refuses every call, as iOS does.
+ * expo-secure-store as the keychain behaves: items live per access group, a group the build is not
+ * entitled to refuses every call, as iOS does, and a key outside expo-secure-store's characters is
+ * refused before the keychain sees it.
  */
 const recordingStore = (entitled: ReadonlySet<string>) => {
   const calls: Array<Call> = [];
@@ -19,6 +35,8 @@ const recordingStore = (entitled: ReadonlySet<string>) => {
 
   const slot = (call: string, key: string, options: StoreOptions): string => {
     calls.push({ call, key, group: options.accessGroup });
+
+    if (!SECURE_STORE_KEY.test(key)) throw new Error("Invalid key provided to SecureStore");
 
     if (options.accessGroup !== undefined && !entitled.has(options.accessGroup)) {
       throw new Error("errSecMissingEntitlement");
@@ -116,6 +134,72 @@ describe("openKeychains", () => {
     keychains.own.write("media.server", "connection");
 
     expect(keychains.own.read("media.server")).toBe("connection");
+  });
+});
+
+describe("keychain keys", () => {
+  const server = "https://music.home:8443/";
+  const userId = Brand.nominal<UserId>()("jd7f3k2m9x8b1c4v5n6q0w2e3r4t5y6u");
+
+  it("builds keys expo-secure-store takes from a real server address and user id", () => {
+    const key = keychainKey("music.offlinePlays", server, userId);
+
+    expect(key).toMatch(SECURE_STORE_KEY);
+    expect(key.length).toBeLessThan(256);
+    expect(sessionKeyFor(server)).toMatch(SECURE_STORE_KEY);
+  });
+
+  it("gives distinct servers and people distinct keys, each one expo-secure-store takes", () => {
+    const servers = [
+      "https://media.home/music/a",
+      "https://media.home/music_a",
+      "https://media.home/music.a",
+      "https://media.home/music-a",
+      "https://media.home:8443/music/a",
+      "https://media.home/music/a/",
+      "https://Media.home/music/a",
+      "http://media.home/music/a",
+      "https://media.home/música/a",
+      "https://media.home/music/a?x=1",
+      "https://media.home/music/a.",
+      "https://media.home",
+      "",
+    ];
+
+    const users = [userId, "jd7f3k2m9x8b1c4v5n6q0w2e3r4t5y6v", "a.b", "a", "", "a_b"];
+
+    const pairs = servers.flatMap((one) => users.map((user) => ({ one, user })));
+    const keys = pairs.map(({ one, user }) => keychainKey("music.offlinePlays", one, user));
+
+    for (const key of keys) expect(key).toMatch(SECURE_STORE_KEY);
+    expect(new Set(keys).size).toBe(pairs.length);
+    // A dot inside a part never moves the boundary between parts.
+    expect(keychainKey("n", "a.b", "c")).not.toBe(keychainKey("n", "a", "b.c"));
+  });
+
+  it("keeps every record mobile-core writes, so a relaunch reads it back", async () => {
+    const { store } = recordingStore(new Set([OWN, SHARED]));
+    const launch = openKeychains(store, { own: OWN, shared: SHARED });
+
+    const connection = {
+      mediaUrl: server,
+      convexUrl: `${server}convex`,
+      moviesUrl: `${server}movies`,
+    };
+
+    const record = { device: "dv_x", person: { userId, username: "aiko" }, opened: true };
+
+    writePhoneAccount(launch.shared, { server, userId, grant: "dg_x" });
+    writeAppRecord(launch.own, server, record);
+    writeConnection(launch.own, connection);
+    await launch.sessions.setItem(sessionKeyFor(server), "tokens");
+
+    const relaunch = openKeychains(store, { own: OWN, shared: SHARED });
+
+    expect(readPhoneAccount(relaunch.shared)).toEqual({ server, userId, grant: "dg_x" });
+    expect(readAppRecord(relaunch.own, server)).toEqual(record);
+    expect(readConnection(relaunch.own)).toEqual(connection);
+    await expect(relaunch.sessions.getItem(sessionKeyFor(server))).resolves.toBe("tokens");
   });
 });
 

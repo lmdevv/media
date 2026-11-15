@@ -609,6 +609,21 @@ describe("a side's layout", () => {
     assert.equal(result.status, 1, result.stderr);
     assert.match(result.stderr, /iOS app signs in to the core, which the after side's one-port image does not serve/);
   });
+
+  test("refuses the music iOS app on an image without the music client before it touches the Mac", () => {
+    const result = withLayout(
+      "one-backend",
+      "write_state people lucia; write_state music_core 0; args=(up --app music); mac=nowhere.invalid cmd_ios_up",
+    );
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /the music iOS app signs in to the core's music, which the after side's image does not serve/);
+  });
+
+  test("refuses an iOS app it does not know", () => {
+    const result = withLayout("one-backend", "args=(up --app tv); mac=nowhere.invalid cmd_ios_up");
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /ios up --app must be movies or music, not tv/);
+  });
 });
 
 describe("the core seed", () => {

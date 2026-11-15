@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 
-import { Schema } from "effect";
+import { Result, Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
 
 import type { EngineEvent, EngineKind, EngineSource, PlayerEngine } from "./engine";
@@ -12,12 +12,17 @@ import type {
   QueueState,
   ResumePoint,
 } from "./playback-controller";
-import { ticketSources } from "./source-resolver";
-import type { PlayStart } from "./source-resolver";
+import { SourceUnreachable, ticketSources } from "./source-resolver";
+import type { PlayStart, SourceResolver } from "./source-resolver";
 
 const SIX_HOURS = 6 * 60 * 60 * 1000;
 
 const BASE = "http://media.test";
+
+const NOT_DOWNLOADED = "This song isn’t downloaded";
+
+/** Where the device's copy of `trackId` is. */
+const copyUrl = (trackId: string): string => `file:///copies/${trackId}`;
 
 const entry = (id: string, itemId: string, durationMs = 200_000): QueueEntry => ({
   itemId,
@@ -65,6 +70,8 @@ interface EngineRecord {
   unlocks: number;
   /** Loads still to come that the server refuses, as an expired ticket. */
   refuse: number;
+  /** Sources that fail to decode, as a damaged copy on the device. */
+  readonly broken: Set<string>;
 }
 
 type FakeEngine = PlayerEngine & {
@@ -124,6 +131,12 @@ const instantEngine = (kind: EngineKind, record: EngineRecord): FakeEngine => {
       if (record.refuse > 0) {
         record.refuse -= 1;
         emit({ type: "error", reason: "expired", message: "expired" });
+
+        return;
+      }
+
+      if (record.broken.has(source.url)) {
+        emit({ type: "error", reason: "decode", message: "Cannot decode" });
 
         return;
       }
@@ -223,6 +236,12 @@ const setup = (
     readonly resume?: ResumePoint | null;
     readonly playCurrent?: string;
     readonly baseUrl?: string;
+    /** Songs the device holds a copy of, which play from it before any stream. */
+    readonly copies?: ReadonlyArray<string>;
+    /** Songs whose copy on the device fails to decode. */
+    readonly broken?: ReadonlyArray<string>;
+    /** The server can't be asked: a song without a copy is unreachable. */
+    readonly offline?: boolean;
   } = {},
 ) => {
   const record: EngineRecord = {
@@ -234,10 +253,20 @@ const setup = (
     plays: 0,
     unlocks: 0,
     refuse: 0,
+    broken: new Set((options.broken ?? []).map(copyUrl)),
   };
 
-  /** Hold `music.play.start`, `music.queue.jump` and `music.play.report`, keyed by their id. */
-  const gates = { start: new Gate(), jump: new Gate(), report: new Gate() };
+  /**
+   * Hold `music.queue.play` (keyed `play`), `music.tracks.get`, `music.play.start`,
+   * `music.queue.jump` and `music.play.report`, keyed by their id.
+   */
+  const gates = {
+    play: new Gate(),
+    track: new Gate(),
+    start: new Gate(),
+    jump: new Gate(),
+    report: new Gate(),
+  };
 
   const engines: Array<FakeEngine> = [];
   const sent: Array<Sent> = [];
@@ -259,11 +288,21 @@ const setup = (
     };
   };
 
+  /** The songs `music.tracks.get` was asked for, in order. */
+  const lookups: Array<string> = [];
+
   const commands: MusicCommands = {
     play: async (trackIds, index) => {
       sent.push({ name: "play", args: [trackIds, index] });
+      await gates.play.pass("play");
 
       return { current: options.playCurrent ?? "new" };
+    },
+    track: async (trackId) => {
+      lookups.push(trackId);
+      await gates.track.pass(trackId);
+
+      return entry(trackId, trackId).track;
     },
     jump: async (itemId) => {
       sent.push({ name: "jump", args: [itemId] });
@@ -291,9 +330,51 @@ const setup = (
     },
   };
 
+  const copies = new Set(options.copies ?? []);
+  /** Set once the device stops waiting for the server: a ticket that answers later counts as none. */
+  const device = { away: false };
+  /** The copies the player stopped playing, by URL, in order. */
+  const discarded: Array<string> = [];
+  const streams = ticketSources(start, { now: () => clock.now, baseUrl: options.baseUrl ?? BASE });
+
+  /** A device's resolver: its copy of a song first, else a stream, else nothing while offline. */
+  const sources: SourceResolver = {
+    resolve: async (track, profile, reach) => {
+      if (copies.has(track.id)) {
+        return Result.succeed({
+          origin: "local",
+          profile: "aac-320",
+          renewAt: Number.MAX_SAFE_INTEGER,
+          playbackId: `local-${track.id}`,
+          source: {
+            key: `${track.id}:local`,
+            url: copyUrl(track.id),
+            durationMs: track.durationMs,
+            finished: true,
+          },
+        });
+      }
+
+      if (options.offline === true) {
+        return Result.fail(new SourceUnreachable({ message: NOT_DOWNLOADED }));
+      }
+
+      const streamed = await streams.resolve(track, profile, reach);
+
+      return device.away
+        ? Result.fail(new SourceUnreachable({ message: NOT_DOWNLOADED }))
+        : streamed;
+    },
+    discard: (trackId, url) => {
+      discarded.push(url);
+
+      if (url === copyUrl(trackId)) copies.delete(trackId);
+    },
+  };
+
   const controller = new PlaybackController(
     commands,
-    ticketSources(start, { now: () => clock.now, baseUrl: options.baseUrl ?? BASE }),
+    sources,
     {
       mse: options.mse === true ? { flac: true, changeType: true } : null,
       create: (kind) => {
@@ -310,7 +391,19 @@ const setup = (
   const stop = controller.start();
   const engine = (): FakeEngine => engines.at(-1) ?? instantEngine("html", record);
 
-  return { controller, record, sent, clock, saved, stop, engine, gates };
+  return {
+    controller,
+    record,
+    sent,
+    lookups,
+    clock,
+    saved,
+    stop,
+    engine,
+    gates,
+    discarded,
+    device,
+  };
 };
 
 const ListeningAddress = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Int }));
@@ -397,6 +490,262 @@ describe("PlaybackController", () => {
     ]);
     expect(controller.getSnapshot().engineStatus).toBe("playing");
     expect(names(sent)).toStrictEqual(["play:a,b,0", "start:a", "report:a,p1"]);
+  });
+
+  it("asks for the first song's ticket while the queue is written, and plays it before the new queue arrives", async () => {
+    const { controller, record, sent, lookups, gates } = setup({ playCurrent: "1" });
+
+    gates.play.holding = true;
+    const playing = controller.playTracks(["a", "b"], 0);
+    await settle();
+
+    expect(lookups).toStrictEqual(["a"]);
+    expect(names(sent)).toStrictEqual(["play:a,b,0", "start:a"]);
+    expect(record.loads).toHaveLength(0);
+
+    gates.play.release("play");
+    await playing;
+    await settle();
+
+    expect(record.loads.map((load) => load.url)).toStrictEqual([
+      `${BASE}/media/music/stream/a?ticket=t1&p=original`,
+    ]);
+    expect(controller.getSnapshot()).toMatchObject({ current: "1", engineStatus: "playing" });
+
+    controller.sync(queueOf([one, two], "1"));
+    await settle();
+
+    expect(record.loads).toHaveLength(1);
+    expect(names(sent)).toStrictEqual(["play:a,b,0", "start:a", "report:a,p1"]);
+  });
+
+  it("plays nothing it asked for ahead when the queue command fails, and keeps the song playing", async () => {
+    const { controller, record, gates } = setup({ playCurrent: "1" });
+
+    await controller.playTracks(["a"], 0);
+    controller.sync(queueOf([one], "1"));
+    await settle();
+    gates.play.holding = true;
+    const playing = controller.playTracks(["b"], 0);
+    await settle();
+    gates.play.fail("play", "The queue is full");
+    await playing;
+    await settle();
+
+    expect(record.loads.map((load) => load.url)).toStrictEqual([
+      `${BASE}/media/music/stream/a?ticket=t1&p=original`,
+    ]);
+    expect(controller.getSnapshot()).toMatchObject({
+      current: "1",
+      engineStatus: "playing",
+      error: "The queue is full",
+    });
+  });
+
+  it("drops a song asked for ahead once a later play replaced it", async () => {
+    const { controller, record, gates } = setup({ playCurrent: "1" });
+
+    gates.play.holding = true;
+    const first = controller.playTracks(["a"], 0);
+    const second = controller.playTracks(["c"], 0);
+    await settle();
+    gates.play.release("play");
+    await first;
+    await settle();
+
+    expect(record.loads).toHaveLength(0);
+
+    gates.play.release("play");
+    await second;
+    await settle();
+
+    expect(record.loads.map((load) => load.url)).toStrictEqual([
+      `${BASE}/media/music/stream/c?ticket=t2&p=original`,
+    ]);
+  });
+
+  it("asks again for a ticket asked for ahead that is due for renewal by the time it loads", async () => {
+    const { controller, record, clock, gates } = setup({ playCurrent: "1", ticketMs: 1000 });
+
+    gates.play.holding = true;
+    const playing = controller.playTracks(["a"], 0);
+    await settle();
+    clock.now += 600;
+    gates.play.release("play");
+    await playing;
+    await settle();
+
+    expect(record.loads.map((load) => load.url)).toStrictEqual([
+      `${BASE}/media/music/stream/a?ticket=t2&p=original`,
+    ]);
+  });
+
+  it("keeps the song asked for ahead through a load of the old queue's song meanwhile", async () => {
+    const { controller, record, sent, gates } = setup({ playCurrent: "9" });
+
+    gates.play.holding = true;
+    const playing = controller.playTracks(["b"], 0);
+    await settle();
+    controller.sync(queueOf([one], "1"));
+    await settle();
+    gates.play.release("play");
+    await playing;
+    await settle();
+
+    expect(record.loads.at(-1)?.url).toBe(`${BASE}/media/music/stream/b?ticket=t1&p=original`);
+    expect(names(sent).filter((name) => name.startsWith("start"))).toStrictEqual([
+      "start:b",
+      "start:a",
+    ]);
+  });
+
+  it("loads the new queue's own song when its first entry holds another than the one guessed", async () => {
+    const { controller, record } = setup({ playCurrent: "1" });
+
+    await controller.playTracks(["a", "b"], 0);
+    await settle();
+    controller.sync(queueOf([entry("b", "1")], "1"));
+    await settle();
+
+    expect(record.loads.map((load) => load.url)).toStrictEqual([
+      `${BASE}/media/music/stream/a?ticket=t1&p=original`,
+      `${BASE}/media/music/stream/b?ticket=t2&p=original`,
+    ]);
+    expect(controller.getSnapshot()).toMatchObject({ current: "1", engineStatus: "playing" });
+  });
+
+  it("plays a downloaded copy of the song guessed only once the new queue names that song", async () => {
+    const { controller, record, sent } = setup({ playCurrent: "1", copies: ["a"] });
+
+    await controller.playTracks(["a", "b"], 0);
+    await settle();
+
+    expect(record.loads).toHaveLength(0);
+
+    controller.sync(queueOf([one, two], "1"));
+    await settle();
+
+    expect(record.loads.map((load) => load.url)).toStrictEqual([copyUrl("a")]);
+    expect(controller.getSnapshot()).toMatchObject({ current: "1", engineStatus: "playing" });
+    expect(names(sent).filter((name) => name.startsWith("start"))).toStrictEqual([]);
+  });
+
+  it("never plays the downloaded song guessed when the core opened the new queue on another", async () => {
+    // The core passes over a song whose file went missing on the server, which a copy on this
+    // device can't tell.
+    const { controller, record } = setup({ playCurrent: "1", copies: ["a"] });
+
+    await controller.playTracks(["a", "b"], 0);
+    await settle();
+    controller.sync(queueOf([entry("b", "1")], "1"));
+    await settle();
+
+    expect(record.loads.map((load) => load.url)).toStrictEqual([
+      `${BASE}/media/music/stream/b?ticket=t1&p=original`,
+    ]);
+    expect(controller.getSnapshot()).toMatchObject({ current: "1", engineStatus: "playing" });
+  });
+
+  it("stops playing a downloaded copy that fails to play and streams the song instead", async () => {
+    const { controller, record, discarded } = setup({
+      playCurrent: "1",
+      copies: ["a"],
+      broken: ["a"],
+    });
+
+    await controller.playTracks(["a", "b"], 0);
+    controller.sync(queueOf([one, two], "1"));
+    await settle();
+
+    expect(discarded).toStrictEqual([copyUrl("a")]);
+    expect(record.loads.map((load) => load.url)).toStrictEqual([
+      copyUrl("a"),
+      `${BASE}/media/music/stream/a?ticket=t1&p=original`,
+    ]);
+    expect(controller.getSnapshot()).toMatchObject({
+      current: "1",
+      engineStatus: "playing",
+      error: null,
+    });
+  });
+
+  it("skips a downloaded copy that fails to play while the server can't be reached", async () => {
+    const { controller, record, sent, discarded } = setup({
+      playCurrent: "1",
+      copies: ["a", "c"],
+      broken: ["a"],
+      offline: true,
+    });
+
+    await controller.playTracks(["a", "c"], 0);
+    controller.sync(queueOf([one, three], "1"));
+    await settle();
+
+    expect(discarded).toStrictEqual([copyUrl("a")]);
+    expect(record.loads.map((load) => load.url)).toStrictEqual([copyUrl("a"), copyUrl("c")]);
+    expect(names(sent).filter((name) => name.startsWith("jump"))).toStrictEqual(["jump:3"]);
+    expect(controller.getSnapshot()).toMatchObject({ current: "3", engineStatus: "playing" });
+  });
+
+  it("shows why a song can't play offline when no song follows it", async () => {
+    const { controller, sent } = setup({
+      playCurrent: "1",
+      copies: ["a"],
+      broken: ["a"],
+      offline: true,
+    });
+
+    await controller.playTracks(["a"], 0);
+    controller.sync(queueOf([one], "1"));
+    await settle();
+
+    expect(names(sent).filter((name) => name.startsWith("jump"))).toStrictEqual([]);
+    expect(controller.getSnapshot()).toMatchObject({
+      current: "1",
+      engineStatus: "error",
+      error: NOT_DOWNLOADED,
+    });
+  });
+
+  it("stops on a repeating queue none of whose songs can play offline", async () => {
+    const { controller, record, sent } = setup({
+      playCurrent: "1",
+      copies: ["a", "b"],
+      broken: ["a", "b"],
+      offline: true,
+    });
+
+    await controller.playTracks(["a", "b"], 0);
+    controller.sync(queueOf([one, two], "1", { repeat: "all" }));
+    await settle();
+
+    expect(record.loads.map((load) => load.url)).toStrictEqual([copyUrl("a"), copyUrl("b")]);
+    expect(names(sent).filter((name) => name.startsWith("jump"))).toStrictEqual(["jump:2"]);
+    expect(controller.getSnapshot()).toMatchObject({
+      current: "2",
+      engineStatus: "error",
+      error: NOT_DOWNLOADED,
+    });
+  });
+
+  it("skips again in a new queue, whatever entries an earlier queue skipped", async () => {
+    const { controller, record } = setup({ playCurrent: "2", copies: ["b"], offline: true });
+
+    controller.sync(queueOf([entry("d", "1")], "1"));
+    await controller.togglePlay();
+    await settle();
+
+    expect(controller.getSnapshot()).toMatchObject({
+      engineStatus: "error",
+      error: NOT_DOWNLOADED,
+    });
+
+    await controller.playTracks(["e", "b"], 0);
+    controller.sync(queueOf([entry("e", "2"), entry("b", "1")], "2"));
+    await settle();
+
+    expect(record.loads.map((load) => load.url)).toStrictEqual([copyUrl("b")]);
+    expect(controller.getSnapshot()).toMatchObject({ current: "1", engineStatus: "playing" });
   });
 
   it("moves to the next entry at once and keeps it while the core confirms", async () => {
@@ -890,6 +1239,177 @@ describe("PlaybackController", () => {
       expect(record.loads.at(-1)).toMatchObject({ startMs: 60_000 });
       expect(record.loads.at(-1)?.url).toContain("/stream/a?");
       expect(controller.getSnapshot().current).toBe("1");
+    });
+
+    it("plays a downloaded song picked after a stream failed, without waiting for the server", async () => {
+      const media = await mediaServer();
+      const run = setup({ playCurrent: "1", baseUrl: media.baseUrl, copies: ["b"] });
+
+      try {
+        await run.controller.playTracks(["a", "b"], 0);
+        run.controller.sync(queueOf([one, two], "1"));
+        await settle();
+        media.state.healthy = false;
+        run.engine().emit({ type: "error", reason: "network", message: "network" });
+
+        await vi.waitFor(() => {
+          expect(run.controller.getSnapshot().mediaOnline).toBe(false);
+        });
+        const startsBefore = names(run.sent).filter((name) => name.startsWith("start:"));
+
+        await run.controller.jump("2");
+        await settle();
+
+        expect(run.record.loads.at(-1)?.url).toBe(copyUrl("b"));
+        expect(run.controller.getSnapshot()).toMatchObject({
+          current: "2",
+          engineStatus: "playing",
+          mediaOnline: false,
+          error: null,
+        });
+
+        // A song with no copy still waits for the server, which is never asked.
+        await run.controller.jump("1");
+        await settle();
+
+        expect(run.record.loads.at(-1)?.url).toBe(copyUrl("b"));
+        expect(run.controller.getSnapshot()).toMatchObject({ current: "1", engineStatus: "error" });
+        expect(run.engine().samplePlayback().playing).toBe(false);
+        expect(names(run.sent).filter((name) => name.startsWith("start:"))).toStrictEqual(
+          startsBefore,
+        );
+      } finally {
+        run.stop();
+        media.close();
+      }
+    });
+
+    it.each([
+      { label: "the next song", order: [one, two, three] },
+      { label: "the next song with a copy", order: [one, two, entry("d", "4"), three] },
+    ])(
+      "skips a copy that fails while the server is away to $label, without asking for a stream",
+      async ({ order }) => {
+        const media = await mediaServer();
+        const run = setup({ playCurrent: "1", baseUrl: media.baseUrl, copies: ["b", "c"] });
+
+        try {
+          await run.controller.playTracks(
+            order.map((queued) => queued.track.id),
+            0,
+          );
+          run.controller.sync(queueOf(order, "1"));
+          await settle();
+          media.state.healthy = false;
+          run.engine().emit({ type: "error", reason: "network", message: "network" });
+
+          await vi.waitFor(() => {
+            expect(run.controller.getSnapshot().mediaOnline).toBe(false);
+          });
+          await run.controller.jump("2");
+          await settle();
+
+          expect(run.controller.getSnapshot()).toMatchObject({
+            current: "2",
+            engineStatus: "playing",
+          });
+          const startsBefore = names(run.sent).filter((name) => name.startsWith("start:"));
+
+          run.engine().emit({ type: "error", reason: "decode", message: "Cannot decode" });
+          await settle();
+
+          expect(run.discarded).toStrictEqual([copyUrl("b")]);
+          expect(run.record.loads.at(-1)?.url).toBe(copyUrl("c"));
+          expect(run.controller.getSnapshot()).toMatchObject({
+            current: "3",
+            engineStatus: "playing",
+            mediaOnline: false,
+            error: null,
+          });
+          expect(names(run.sent).filter((name) => name.startsWith("start:"))).toStrictEqual(
+            startsBefore,
+          );
+        } finally {
+          run.stop();
+          media.close();
+        }
+      },
+    );
+
+    it("follows the device's own queue when the song it moved to fails outside that queue", async () => {
+      const run = setup({ playCurrent: "1", copies: ["a", "c"] });
+
+      try {
+        await run.controller.playTracks(["a", "b", "c"], 0);
+        run.controller.sync(queueOf([one, two, three], "1"));
+        await settle();
+        // A plays out. The core never confirms the move to B, and B's ticket doesn't come.
+        run.gates.jump.holding = true;
+        run.gates.start.holding = true;
+        run.engine().emit({ type: "ended" });
+        await settle();
+
+        expect(run.controller.getSnapshot()).toMatchObject({
+          current: "2",
+          engineStatus: "loading",
+        });
+
+        // The device goes its own way first: its queue holds only its copies, from C on.
+        run.device.away = true;
+        run.controller.sync(queueOf([one, three], "3"));
+        run.gates.start.release("b");
+        await settle();
+
+        expect(run.record.loads.map((load) => load.url)).toStrictEqual([
+          copyUrl("a"),
+          copyUrl("c"),
+        ]);
+        expect(run.controller.getSnapshot()).toMatchObject({
+          current: "3",
+          engineStatus: "playing",
+          error: null,
+        });
+      } finally {
+        run.stop();
+      }
+    });
+
+    it("keeps a downloaded song playing when the server comes back", async () => {
+      const media = await mediaServer();
+      const run = setup({ playCurrent: "1", baseUrl: media.baseUrl, copies: ["b"] });
+
+      try {
+        await run.controller.playTracks(["a", "b"], 0);
+        run.controller.sync(queueOf([one, two], "1"));
+        await settle();
+        media.state.healthy = false;
+        run.engine().emit({ type: "error", reason: "network", message: "network" });
+
+        await vi.waitFor(() => {
+          expect(run.controller.getSnapshot().mediaOnline).toBe(false);
+        });
+        await run.controller.jump("2");
+        await settle();
+        const loads = run.record.loads.length;
+
+        media.state.healthy = true;
+
+        await vi.waitFor(
+          () => {
+            expect(run.controller.getSnapshot().mediaOnline).toBe(true);
+          },
+          { timeout: 5000 },
+        );
+
+        expect(run.record.loads.length).toBe(loads);
+        expect(run.controller.getSnapshot()).toMatchObject({
+          current: "2",
+          engineStatus: "playing",
+        });
+      } finally {
+        run.stop();
+        media.close();
+      }
     });
   });
 });

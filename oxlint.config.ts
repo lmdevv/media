@@ -57,6 +57,7 @@ export default defineConfig({
     "apps/web-account/src/routeTree.gen.ts",
     "apps/web-music/src/routeTree.gen.ts",
     "apps/mobile-movies/src/uniwind-types.d.ts",
+    "apps/mobile-music/src/uniwind-types.d.ts",
   ],
   jsPlugins: [
     { name: "anti-slop", specifier: "./tools/oxlint/anti-slop/index.ts" },

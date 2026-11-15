@@ -890,56 +890,76 @@ before_source() {
   echo "$src"
 }
 
+# Which iOS app the `ios` commands build and open: `movies` (apps/mobile-movies, the default) or
+# `music` (apps/mobile-music), as `ios up --app` picked it. Each is the Expo project, workspace,
+# scheme, and app `<app>`, with the bundle identifier `dev.lmdevv.<app>`.
+ios_app() {
+  local app
+  app="$(read_state ios_app)"
+  echo "${app:-movies}"
+}
+
 # The dev client, built on the Mac from this checkout: the checkout syncs to ~/movies-ios/verify-<run>
 # there, `expo prebuild` runs only when the native inputs changed, and xcodebuild builds into
 # ~/movies-ios/dd-verify-<run>. The app then moves to ~/movies-ios/dev-client-<hash>, named for the
 # native inputs, and the derived data goes, so every run and worktree with the same inputs installs
 # one build. JavaScript always comes from Metro.
+native_inputs='cat app.json package.json ../../pnpm-lock.yaml; if [ -d modules ]; then find assets modules -type f | sort; else find assets -type f | sort; fi'
+
 native_hash() {
-  (cd "${1:-$root}/apps/mobile-movies" && (cat app.json package.json ../../pnpm-lock.yaml; find assets -type f | sort) | sha1sum | cut -d' ' -f1)
+  (cd "${1:-$root}/apps/mobile-${2:-$(ios_app)}" && eval "$native_inputs" | sha1sum | cut -d' ' -f1)
 }
 
 ios_build() {
-  local id="$1" remote="$mac_dir/verify-$run"
-  local app="$remote/apps/mobile-movies"
+  local id="$1" name remote="$mac_dir/verify-$run"
+  name="$(ios_app)"
+  local app="$remote/apps/mobile-$name"
   ssh "$mac" "mkdir -p $remote"
-  rsync -az --delete --exclude node_modules --exclude /apps/mobile-movies/ios --exclude .git --exclude dist \
+  # Both apps' prebuilt native projects stay: a build of one app must not delete the other's.
+  rsync -az --delete --exclude node_modules --exclude "/apps/mobile-*/ios" --exclude .git --exclude dist \
     --exclude .expo --exclude .turbo --exclude /captures --exclude .repos "$root/" "$mac:$remote/"
   # No .git on the Mac, so the root prepare script (lefthook) can't run there.
   on_mac "cd $remote && pnpm install --frozen-lockfile --ignore-scripts >/dev/null"
-  on_mac "cd $app && hash=\$( (cat app.json package.json ../../pnpm-lock.yaml; find assets -type f | sort) | shasum | cut -d' ' -f1) \
+  on_mac "cd $app && hash=\$( ($native_inputs) | shasum | cut -d' ' -f1) \
     && if [ ! -f ios/.native-hash ] || [ \"\$(cat ios/.native-hash)\" != \"\$hash\" ]; then \
          CI=1 npx expo prebuild -p ios --clean >/dev/null && echo \"\$hash\" > ios/.native-hash; fi"
-  on_mac "cd $app/ios && xcodebuild -workspace movies.xcworkspace -scheme movies -configuration Debug \
+  on_mac "cd $app/ios && xcodebuild -workspace $name.xcworkspace -scheme $name -configuration Debug \
       -sdk iphonesimulator -destination id=$id -derivedDataPath ~/$mac_dir/dd-verify-$run build -quiet"
   # Copy, then rename: two runs finishing the same build at once each leave a whole app.
   local shared="$mac_dir/dev-client-$(native_hash)"
   on_mac "rm -rf ~/$shared.tmp-$run && mkdir -p ~/$shared.tmp-$run \
-    && cp -R ~/$mac_dir/dd-verify-$run/Build/Products/Debug-iphonesimulator/movies.app ~/$shared.tmp-$run/ \
+    && cp -R ~/$mac_dir/dd-verify-$run/Build/Products/Debug-iphonesimulator/$name.app ~/$shared.tmp-$run/ \
     && { [ -d ~/$shared ] || mv ~/$shared.tmp-$run ~/$shared; } && rm -rf ~/$shared.tmp-$run ~/$mac_dir/dd-verify-$run"
 }
 
 cmd_ios_up() {
-  local sim_type="iPhone 17 Pro" dark=1 source=""
+  local sim_type="iPhone 17 Pro" dark=1 source="" name=movies given="" sign_in=1
   set -- "${args[@]:1}"
   while (($#)); do
     case "$1" in
       --device) sim_type="$2"; shift 2 ;;
       --source) source="$(cd "$2" && pwd)"; shift 2 ;;
       --light) dark=0; shift ;;
+      --app) name="$2"; shift 2 ;;
+      --udid) given="$2"; shift 2 ;;
+      --no-sign-in) sign_in=0; shift ;;
       *) die "ios up: unknown flag $1" ;;
     esac
   done
+  [[ "$name" == movies || "$name" == music ]] || die "ios up --app must be movies or music, not $name"
+  [[ "$name" == movies || "$(read_state music_core)" == 1 ]] \
+    || die "the music iOS app signs in to the core's music, which the $side side's image does not serve; run it against an image with the music client (music_core)"
   [[ -n "$(read_state people)" ]] || die "start the $side side first: \`up --side $side\` (with setup)"
   # The app signs in to the core (p4-mobile-movies). An image from before the movies cutover runs
   # old movies' own Convex, which only that revision's app and its own verify skill reach.
   core_only || die "this checkout's movies iOS app signs in to the core, which the $side side's $(read_state layout) image does not serve; run the iOS lane from a checkout of that image's revision with its own verify skill"
   [[ -z "$(read_state ios_udid)" ]] || die "the $side side already has a simulator; run \`ios down --side $side\`"
-  on_mac "test -x $axe" || die "AXe is missing on $mac at ~/music-ios/tools/axe/axe; unpack the release from github.com/cameroncooke/AXe there"
+  ((sign_in == 0)) || on_mac "test -x $axe" || die "AXe is missing on $mac at ~/music-ios/tools/axe/axe; unpack the release from github.com/cameroncooke/AXe there"
+  write_state ios_app "$name"
   # The Mac's disk runs nearly full, and a full disk fails a build or a boot halfway with errors
   # that don't say why. A simulator needs about 2 GB; a first build also needs about 7 GB for the
   # synced checkout and its derived data.
-  local app="\$HOME/$mac_dir/dev-client-$(native_hash)/movies.app" free need=3
+  local app="\$HOME/$mac_dir/dev-client-$(native_hash)/$name.app" free need=3
   on_mac "test -d $app" || need=10
   free="$(on_mac "df -g \$HOME | awk 'NR == 2 { print \$4 }'")"
   ((free >= need)) || die "$mac has ${free} GB free and ios up needs ${need} GB; free space there (\`down --purge\` removes this run's checkout there and the dev client for its native inputs, which other runs with the same inputs share)"
@@ -971,8 +991,8 @@ cmd_ios_up() {
   # Not CI=1: that turns off file watching and the app keeps serving the first bundle.
   # Its own session, so `ios down` stops pnpm, Expo, and Metro's workers as one process group. The
   # log takes all its output, so nothing that reads this script's output waits on it.
-  setsid bash -c 'cd "$1" && REACT_NATIVE_PACKAGER_HOSTNAME=127.0.0.1 exec pnpm --filter @media/mobile-movies exec \
-    expo start --dev-client --port "$2"' metro "$src" "$metro" < /dev/null > "$state/metro.log" 2>&1 &
+  setsid bash -c 'cd "$1" && REACT_NATIVE_PACKAGER_HOSTNAME=127.0.0.1 exec pnpm --filter "@media/mobile-$3" exec \
+    expo start --dev-client --port "$2"' metro "$src" "$metro" "$name" < /dev/null > "$state/metro.log" 2>&1 &
   write_state metro_pid "$!"
   for _ in $(seq 1 120); do
     curl -fsS --max-time 5 "http://127.0.0.1:$metro/status" 2>/dev/null | grep -q running && break
@@ -981,11 +1001,22 @@ cmd_ios_up() {
   curl -fsS --max-time 5 "http://127.0.0.1:$metro/status" 2>/dev/null | grep -q running || { tail -20 "$state/metro.log" >&2; die "Metro did not start"; }
 
   local id
-  id="$(on_mac "xcrun simctl create media-verify-$run-$side $(printf %q "$sim_type")")"
-  write_state ios_udid "$id"
-  write_state ios_device "$sim_type"
-  on_mac "xcrun simctl boot $id && xcrun simctl bootstatus $id -b >/dev/null"
-  ((dark)) && on_mac "xcrun simctl ui $id appearance dark"
+  if [[ -n "$given" ]]; then
+    # A simulator someone else keeps, such as one T3's device tools opened: the side installs and
+    # runs the app on it, and `ios down` leaves the simulator itself alone.
+    id="$given"
+    sim_type="$(on_mac "xcrun simctl list devices | grep -F '($id)' | sed 's/^ *//; s/ (.*//'")"
+    write_state ios_udid "$id"
+    write_state ios_owned 0
+    write_state ios_device "$sim_type"
+    on_mac "xcrun simctl bootstatus $id -b >/dev/null"
+  else
+    id="$(on_mac "xcrun simctl create media-verify-$run-$side $(printf %q "$sim_type")")"
+    write_state ios_udid "$id"
+    write_state ios_device "$sim_type"
+    on_mac "xcrun simctl boot $id && xcrun simctl bootstatus $id -b >/dev/null"
+    ((dark)) && on_mac "xcrun simctl ui $id appearance dark"
+  fi
 
   if ! on_mac "test -d $app"; then
     say "building the iOS dev client on $mac (minutes on a cold build)"
@@ -997,16 +1028,22 @@ cmd_ios_up() {
   local key
   for key in IsOnboardingFinished:YES ShowsAtLaunch:NO ShowFloatingActionButton:NO \
     MotionGestureEnabled:NO TouchGestureEnabled:NO; do
-    on_mac "xcrun simctl spawn $id defaults write dev.lmdevv.movies EXDevMenu${key%%:*} -bool ${key#*:}"
+    on_mac "xcrun simctl spawn $id defaults write dev.lmdevv.$name EXDevMenu${key%%:*} -bool ${key#*:}"
   done
   local metro_url
   metro_url="$(node -p 'encodeURIComponent(process.argv[1])' "http://127.0.0.1:$metro")"
-  on_mac "xcrun simctl openurl $id 'exp+movies://expo-development-client/?url=$metro_url'"
+  if ((sign_in == 0)); then
+    # Whoever drives the simulator opens the app on Metro and signs in, such as with T3's device
+    # tools' agent-device `open dev.lmdevv.<app> --url <this>`.
+    echo "ready: ios $side $name on simulator $id (Metro $metro, server $(url)); open exp+$name://expo-development-client/?url=$metro_url"
+    return 0
+  fi
+  on_mac "xcrun simctl openurl $id 'exp+$name://expo-development-client/?url=$metro_url'"
   # iOS asks once whether to open the link in the app. Tap only that prompt's button.
   local tree deadline=$((SECONDS + 240))
   while ((SECONDS < deadline)); do
     tree="$(ios_tree 2>/dev/null || true)"
-    grep -qE 'Connect to Server|Sign In' <<<"$tree" && break
+    grep -qE 'Connect to Server|Connect to your server|Sign In|Sign in' <<<"$tree" && break
     grep -q 'Open in' <<<"$tree" && ios_tap_label "Open" >/dev/null 2>&1
     sleep 2
   done
@@ -1036,6 +1073,7 @@ ios_dismiss_save_password() {
 ios_sign_in() {
   local who="${1:-$(owner_name)}" tree
   tree="$(ios_tree)"
+  [[ "$(ios_app)" == music ]] && { ios_sign_in_music "$who"; return; }
   if ! grep -q 'Sign In with a Code' <<<"$tree"; then
     ios_tap_label "Connect to Server"
     ios_wait "Server address" 30
@@ -1061,6 +1099,40 @@ ios_sign_in() {
     sleep 1
   done
   die "the app did not reach Home after signing in; run \`ios describe --side $side\`"
+}
+
+# On a phone whose other [media] app signed in, the music app opens signed in without asking.
+ios_sign_in_music() {
+  local who="$1" tree
+  tree="$(ios_tree)"
+  if grep -q 'Connect to your server' <<<"$tree"; then
+    ios_tap_label "Connect to your server"
+    ios_wait "Server address" 30
+    ios_tap_label "Server address"
+    ios_type "$(url)"
+    ios_tap_label "Connect"
+  fi
+  for _ in $(seq 1 60); do
+    tree="$(ios_tree 2>/dev/null || true)"
+    grep -qE 'Tab Bar|^ *Home = 1 \| RadioButton' <<<"$tree" && return 0
+    grep -q '^ *Username' <<<"$tree" && break
+    sleep 1
+  done
+  ios_tap_label "Username"
+  ios_type "$who"
+  ios_tap_label "Password"
+  ios_type "$password"
+  ios_tap_label "Sign in"
+  for _ in $(seq 1 60); do
+    tree="$(ios_tree 2>/dev/null || true)"
+    if grep -qE 'Tab Bar|^ *Home = 1 \| RadioButton' <<<"$tree"; then
+      sleep 3
+      ios_dismiss_save_password || true
+      return 0
+    fi
+    sleep 1
+  done
+  die "the music app did not reach Home after signing in; run \`ios describe --side $side\`"
 }
 
 cmd_ios() {
@@ -1141,7 +1213,7 @@ ios_agent() {
 # One try, for a probe whose failure is an answer, such as no alert on screen.
 ios_agent_once() {
   on_mac "ad=\$(ls -d ~/.t3/device/tools/agent-device@*/node_modules/.bin/agent-device | tail -1); session=media-verify-$run-$side \
-    && \$ad open dev.lmdevv.movies --udid $(udid) --platform ios --session \$session >/dev/null \
+    && \$ad open dev.lmdevv.$(ios_app) --udid $(udid) --platform ios --session \$session >/dev/null \
     && \$ad $* --session \$session"
 }
 
@@ -1268,7 +1340,9 @@ ios_down() {
   local id pid
   id="$(read_state ios_udid)"
   if [[ -n "$id" ]]; then
-    on_mac "pkill -INT -f 'recordVideo.*media-verify-$run-$side' || true; xcrun simctl shutdown $id 2>/dev/null || true; xcrun simctl delete $id" || true
+    on_mac "pkill -INT -f 'recordVideo.*media-verify-$run-$side' || true" || true
+    # A simulator `ios up --udid` borrowed stays, with the app on it.
+    [[ "$(read_state ios_owned)" == 0 ]] || on_mac "xcrun simctl shutdown $id 2>/dev/null || true; xcrun simctl delete $id" || true
     on_mac "ad=\$(ls -d ~/.t3/device/tools/agent-device@*/node_modules/.bin/agent-device 2>/dev/null | tail -1); \
       [ -z \"\$ad\" ] || \$ad close --session media-verify-$run-$side >/dev/null 2>&1 || true" || true
     # `ios shot` and `ios record` stage their files here before copying them back.
@@ -1283,7 +1357,8 @@ ios_down() {
   fi
   pid="$(read_state forward_pid)"
   [[ -n "$pid" ]] && kill "$pid" 2>/dev/null || true
-  rm -f "$state/ios_udid" "$state/ios_device" "$state/metro_pid" "$state/metro_port" "$state/forward_pid" "$state/ios_record"
+  rm -f "$state/ios_udid" "$state/ios_device" "$state/ios_owned" "$state/ios_app" "$state/metro_pid" \
+    "$state/metro_port" "$state/forward_pid" "$state/ios_record"
 }
 
 # ----------------------------------------------------------------------------------------- evidence
@@ -1329,7 +1404,8 @@ cmd_down() {
   done
   if [[ -n "$only" ]]; then side_down "$only"; else side_down after; side_down before; fi
   if ((purge)); then
-    on_mac "rm -rf ~/$mac_dir/verify-$run ~/$mac_dir/dd-verify-$run ~/$mac_dir/dev-client-$(native_hash)" || true
+    on_mac "rm -rf ~/$mac_dir/verify-$run ~/$mac_dir/dd-verify-$run ~/$mac_dir/dev-client-$(native_hash "$root" movies) \
+      ~/$mac_dir/dev-client-$(native_hash "$root" music)" || true
     say "removed the iOS build cache on $mac"
   fi
   [[ -z "$only" ]] && rmdir "$state_root" 2>/dev/null || true

@@ -3,8 +3,9 @@
 - Status: Accepted, 2026-11-03. Amended 2026-11-06 with the account client as built,
   2026-11-07 with one sign-in session per browser (D52), 2026-11-09 with what the iOS keychain
   holds (D48, D59), 2026-11-10 with the movies client on the web as built (D52, D57, D62),
-  2026-11-11 with the movies iOS app as built (D12, D48, D51, D56, D59, D62, D64), and
-  2026-11-14 with the music client on the web as built (D36, D38, D52, D57, D62, D63).
+  2026-11-11 with the movies iOS app as built (D12, D48, D51, D56, D59, D62, D64),
+  2026-11-14 with the music client on the web as built (D36, D38, D52, D57, D62, D63), and
+  2026-11-14 with the music iOS app as built (D36, D40, D48, D59, D62, D64).
 - Decisions: D12, D36, D38, D39, D40, D48, D51, D52, D56, D57, D59, D62, D63, D64
 
 ## Context
@@ -541,3 +542,80 @@ artboards stays open (`docs/architecture.md`, "Open").
   does not expose; the media server's banner stays.
 - Crossfade: old music had none, so the player does not cross songs over, whatever the synced
   `crossfade` setting says (D62).
+
+## The music iOS app as built (amended 2026-11-14)
+
+`p5-mobile-music` ported old music's iOS app (`legacy/music/apps/mobile`) to `apps/mobile-music`,
+the package `@media/mobile-music`, over `@media/mobile-core` and the platform SDK. It keeps old
+music's bundle identifier, `dev.lmdevv.music`, and adds the Team ID and the two keychain groups
+the movies app lists: its own, `<Team ID>.dev.lmdevv.music`, then the shared
+`<Team ID>.dev.lmdevv.media`.
+
+### Signing in (D40, D48, D59, D64)
+
+- Connecting, the keychains, the D59 mark, the grant exchange, and enrolling are mobile-core's,
+  exactly as "The movies iOS app as built" describes. An app that remembers no server and whose
+  shared keychain names one connects there on its first launch, exchanges the phone's grant for a
+  session of its own, and enrolls as its own device under the phone's name. So after the movies
+  app signs in, the music app opens signed in as the same person, and each app is one device and
+  one session in the person's devices.
+- Ending the music app's session leaves the movies app signed in: the music app then shows sign
+  in with the person's username filled in and never exchanges the grant again. Revoking the grant
+  ends every session it minted, so both apps show signed out at their next call.
+- Old music's forms asked for an email; the core has usernames. Sign in, creating the owner, and
+  accepting an invite take a username, and the name field becomes the display name
+  (`core.accounts.me.setDisplayName`). A reset link signs in through mobile-core's new
+  `resetPassword`, which sets the D59 mark and issues the grant like the other password sign-ins.
+- Invite and reset links are the account client's (`<server>/invite#<code>`,
+  `<server>/reset#<code>`) or the app's own `music://invite/<code>?server=<server>`; old path
+  links are refused, as on the web.
+
+### The player (D36, D62)
+
+- The player is `@media/player`'s `PlaybackController` over old music's native engine: one
+  expo-audio player per stream, the next song preloaded in a second one that starts the moment
+  the first ends, with lock-screen controls through expo-audio and the `RemoteCommands` module,
+  and background audio. Old music's phone did gapless this way, not sample-accurately; the
+  engine logs each song change (`[gapless]`, in development) so the gap can be read. No
+  crossfade, as old music had none (ADS-296).
+- Each load takes a ticket from `music.play.start`; tickets renew before they expire and once
+  after a `401`, as on the web (ADR 0010). A downloaded song plays from its file, online too.
+- Quality and volume are the core's device settings, gapless the person's. A phone's `auto` plays
+  `high` (AAC 320 kbps), as old music's phone started: lossless is a choice in settings.
+- While the server cannot be reached, the player plays the phone's own queue of downloaded songs,
+  seeded from the core's last queue, as old music's local session did. Its plays go to history
+  with `music.play.reportOffline` once the server answers, and a queue changed here replaces the
+  core's at the next pause. The app finds the server gone by asking the media server's health
+  check, since the platform client does not say how its connection stands; a new queue that goes
+  unanswered for 4 seconds asks at once.
+
+### Downloads (ADR 0019)
+
+The core keeps the songs a device holds, not albums or playlists, so the phone keeps the albums,
+playlists, and songs someone downloads as pins in its vault, and reads each one's songs from the
+core (`music.albums.tracks`, `music.playlists.items`, `music.tracks.get`). Old music's sync engine
+plans what to fetch and delete as before. Each song is kept with `core.downloads.add`, fetched as
+the finished file with a 15-minute ticket from `core.downloads.fetch`, and kept at the revision
+`core.downloads.list` names. A song no download holds any more is released with
+`core.downloads.remove`, also when it was removed offline. Lyrics are kept with each song from
+`music.lyrics.get` when it arrives. The core's `standard` download quality keeps AAC 320 kbps
+copies and `high` the original where iOS plays it.
+
+### Settings and admin (D57)
+
+Settings keeps Account, Playback, Downloads, and API keys (`core.auth.apiKeys.*`, a new key
+holding this session's scopes). Administration keeps People and invites over mobile-core's
+accounts (an invite's link shows once, since the core keeps only a hash of its code), Libraries
+over `core.libraries.*` with who listens as grants (shared with the household, or only the people
+added), Jobs over `core.jobs.list` with a scan's cancel naming the attempt shown, and the server's
+LRCLIB switch (`music.lyrics.configure`).
+
+### Left out (D62)
+
+- Jams and remote control wait for phase 6, with the device sheet, the Jam guest pages, and the
+  Jam guest switch in server settings.
+- Old music's registry actions (forms from its command schemas) stay out, as on the web.
+- Suspending and removing an account: the core has neither command.
+- An album or playlist download follows its songs while the app runs, where old music's server
+  kept each download's songs and the phone asked it.
+- The phone's own queue lives in memory only, where old music kept it across launches.

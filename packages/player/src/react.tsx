@@ -315,6 +315,7 @@ const createController = ({
             ? { trackIds: trackIds.map(asTrackId) }
             : { trackIds: trackIds.map(asTrackId), index },
         ),
+      track: (trackId) => platform.music.tracks.get({ trackId: asTrackId(trackId) }),
       jump: async (itemId) => {
         await platform.music.queue.jump({ itemId: asItemId(itemId) });
       },

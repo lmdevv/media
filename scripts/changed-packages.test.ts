@@ -17,6 +17,7 @@ const everyPackage = [
   "apps/cli",
   "apps/media",
   "apps/mobile-movies",
+  "apps/mobile-music",
   "apps/web-account",
   "apps/web-movies",
   "apps/web-music",
@@ -48,6 +49,7 @@ describe("changed-packages.sh", { timeout: 30_000 }, () => {
       "apps/cli",
       "apps/media",
       "apps/mobile-movies",
+      "apps/mobile-music",
       "apps/web-account",
       "apps/web-movies",
       "apps/web-music",
@@ -60,10 +62,19 @@ describe("changed-packages.sh", { timeout: 30_000 }, () => {
     ]);
   });
 
-  it("affects the music client when only its player changed", () => {
+  it("affects the music clients when only their player changed", () => {
     expect(affected("packages/player/src/engine.ts")).toEqual([
+      "apps/mobile-music",
       "apps/web-music",
       "packages/player",
+    ]);
+  });
+
+  it("affects both iOS apps when the core they share changed", () => {
+    expect(affected("packages/mobile-core/src/sign-in.ts")).toEqual([
+      "apps/mobile-movies",
+      "apps/mobile-music",
+      "packages/mobile-core",
     ]);
   });
 

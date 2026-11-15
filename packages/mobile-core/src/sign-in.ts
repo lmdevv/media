@@ -2,6 +2,7 @@ import type {
   PendingDeviceSignIn,
   PlatformInvite,
   PlatformPassword,
+  PlatformReset,
   PlatformSdk,
   PlatformSession,
 } from "@media/sdk/promise";
@@ -15,7 +16,12 @@ import type { AppRecord, UserId } from "./records";
 export interface SignInPlatform {
   readonly session: Pick<
     PlatformSession,
-    "signInWithPassword" | "setUpOwner" | "acceptInvite" | "exchangeGrant" | "signOut"
+    | "signInWithPassword"
+    | "setUpOwner"
+    | "acceptInvite"
+    | "resetPassword"
+    | "exchangeGrant"
+    | "signOut"
   > & {
     readonly startDeviceSignIn: (clientName: string) => Promise<PendingDeviceSignIn>;
   };
@@ -146,6 +152,20 @@ export const acceptInvite = async (
 ): Promise<void> => {
   markOpened(phone);
   await platform.session.acceptInvite(invite);
+  await finish(platform, phone, "password");
+};
+
+/**
+ * Sets a new password from a reset link's code, signs in with it, and enrolls. Rejects with
+ * `Expired` for a dead link.
+ */
+export const resetPassword = async (
+  platform: SignInPlatform,
+  phone: Phone,
+  reset: PlatformReset,
+): Promise<void> => {
+  markOpened(phone);
+  await platform.session.resetPassword(reset);
   await finish(platform, phone, "password");
 };
 

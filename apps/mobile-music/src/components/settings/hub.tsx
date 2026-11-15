@@ -1,0 +1,77 @@
+import { can } from "@/lib/capabilities";
+import { router } from "expo-router";
+import { CircleArrowDown, Info, Key, Music, Settings, Users } from "lucide-react-native";
+import { View } from "react-native";
+
+import { Page } from "@/components/ui/page";
+import { Row, RowChevron } from "@/components/ui/row";
+import { Text } from "@/components/ui/text";
+import { useDownloadSettings } from "@/downloads";
+import { downloadsSettingsLine } from "@/lib/downloaded";
+import { hostOf } from "@/lib/links";
+import { nameOf } from "@/lib/models";
+import { accountLine } from "@/lib/people";
+import { useConnection } from "@/session/connection";
+
+import { useMe } from "./access";
+import { NavGlyph } from "./nav-glyph";
+
+/** Personal settings and the way into everything else. */
+export function SettingsHub() {
+  const me = useMe();
+  const { mediaUrl } = useConnection();
+  const { usage } = useDownloadSettings();
+
+  return (
+    <Page title="Settings" bottom="plain" trailing={<NavGlyph icon={Info} />}>
+      {me === null ? null : (
+        <>
+          <Row
+            leading={{ kind: "icon", icon: Users, tone: "muted" }}
+            title={nameOf(me)}
+            subtitle={accountLine(me)}
+            trailing={<RowChevron />}
+            onPress={() => router.push("/settings/account")}
+          />
+          <Row
+            leading={{ kind: "icon", icon: Music, tone: "muted" }}
+            title="Playback & appearance"
+            subtitle="Quality, theme, and autoplay"
+            trailing={<RowChevron />}
+            onPress={() => router.push("/settings/playback")}
+          />
+          <Row
+            leading={{ kind: "icon", icon: CircleArrowDown, tone: "muted" }}
+            title="Downloads"
+            subtitle={downloadsSettingsLine(usage)}
+            trailing={<RowChevron />}
+            onPress={() => router.push("/settings/downloads")}
+          />
+          {can(me, "keys") ? (
+            <Row
+              leading={{ kind: "icon", icon: Key, tone: "muted" }}
+              title="API keys"
+              subtitle="Connect your CLI and agents"
+              trailing={<RowChevron />}
+              onPress={() => router.push("/settings/keys")}
+            />
+          ) : null}
+          {can(me, "admin") ? (
+            <Row
+              leading={{ kind: "icon", icon: Settings, tone: "muted" }}
+              title="Server administration"
+              subtitle="People, libraries, and jobs"
+              trailing={<RowChevron />}
+              onPress={() => router.push("/settings/admin")}
+            />
+          ) : null}
+        </>
+      )}
+      <View className="pt-mobile-edge">
+        <Text variant="mono" tone="muted">
+          {`[music] · ${hostOf(mediaUrl)}`.toUpperCase()}
+        </Text>
+      </View>
+    </Page>
+  );
+}
