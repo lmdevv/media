@@ -1,7 +1,7 @@
 import { usePlatform } from "@media/sdk/react";
 import { Spinner } from "@media/ui/components/spinner";
 import { describeFailure, isFailure, toastFailure } from "@media/ui/lib/failure";
-import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
+import { Link, createFileRoute, useLocation, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
 import { useCurrentSession } from "@/together/current-session";
@@ -48,20 +48,29 @@ function SessionRoute() {
   const platform = usePlatform();
   const navigate = useNavigate();
   const view = useCurrentSession();
-  const [link] = useState(() => parseSessionLink(window.location.hash.slice(1)));
+  const link = parseSessionLink(useLocation({ select: (location) => location.hash }));
+  const [taken, setTaken] = useState<string | null>(null);
   const [joining, setJoining] = useState<Joining>({ kind: link === null ? "none" : "joining" });
+
+  // A link opened while on this page, such as from the command menu, joins as well.
+  if (link !== null && link !== taken) {
+    setTaken(link);
+    setJoining({ kind: "joining" });
+  }
+
   const joined = view?.state === "joined" ? view : null;
   const target = useSessionTarget(moviesItem(joined?.item ?? null));
   const ready = joined !== null && target.status === "ready" ? target.target : null;
 
   useEffect(() => {
-    if (link === null) return undefined;
+    if (taken === null) return undefined;
 
     let active = true;
 
+    // Out of the address and history at once; the router keeps it, so the join runs only once.
     window.history.replaceState(window.history.state, "", window.location.pathname);
 
-    platform.core.together.join({ domain: MOVIES, link }).then(
+    platform.core.together.join({ domain: MOVIES, link: taken }).then(
       () => {
         if (active) setJoining({ kind: "joined" });
 
@@ -75,7 +84,7 @@ function SessionRoute() {
     return () => {
       active = false;
     };
-  }, [platform, link]);
+  }, [platform, taken]);
 
   useEffect(() => {
     if (ready === null || joining.kind === "joining") return;

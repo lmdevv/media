@@ -134,6 +134,10 @@ export const useSessionPlayer = (
     target.target.episodeId === page.episodeId;
 
   const mine = joined !== null && joined.sessionId !== left;
+  const [lastHost, setLastHost] = useState("The host");
+
+  // Kept past the session's end, whose view no longer names the host.
+  if (joined !== null && joined.host !== lastHost) setLastHost(joined.host);
 
   if (!following && mine && matches && created === undefined && stopped === null) {
     setFollowing(true);
@@ -365,7 +369,7 @@ export const useSessionPlayer = (
     mode: loading ? "loading" : session === null ? "solo" : "session",
     session,
     startAt,
-    hostName: joined?.host ?? "The host",
+    hostName: joined?.host ?? lastHost,
     hosting: session?.role === "host",
     mayControl: session?.may.control === true,
     mayAdd: session?.may.add === true,
