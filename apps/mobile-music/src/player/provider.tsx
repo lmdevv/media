@@ -11,13 +11,12 @@ import type {
   ResumePoint,
 } from "@media/player/playback-controller";
 import type { RepeatMode } from "@media/player/queue-order";
-import { StreamRefused, ticketSources } from "@media/player/source-resolver";
-import type { SourceResolver } from "@media/player/source-resolver";
+import { ticketSources } from "@media/player/source-resolver";
 import { settingOfQuality } from "@media/player/stream-quality";
 import type { StreamQuality, StreamQualitySetting } from "@media/player/stream-quality";
 import type { PlatformSdk } from "@media/sdk/promise";
 import { usePlatform } from "@media/sdk/react";
-import { Option, Result, Schema } from "effect";
+import { Option, Schema } from "effect";
 import { randomUUID } from "expo-crypto";
 import {
   createContext,
@@ -49,6 +48,7 @@ import {
   handBack,
   jumpLocal,
   moveLocal,
+  playingView,
   playLocal,
   recordPlay,
   removeLocal,
@@ -56,10 +56,11 @@ import {
   seedLocal,
   shuffleLocal,
 } from "./local-queue";
-import type { LocalQueue } from "./local-queue";
+import type { HandBackStep, LocalQueue } from "./local-queue";
 import { NativeEngine } from "./native-engine";
 import type { TimelineMark } from "./native-engine";
 import { lockScreenControls } from "./native-host";
+import { NOT_DOWNLOADED, phoneSources } from "./phone-sources";
 import {
   isPlaying,
   moveArgs,
@@ -85,8 +86,6 @@ const QUEUE_RESTART_MS = 250;
 const ACK_DEADLINE_MS = 4000;
 
 const OFFLINE_MESSAGE = "Can’t reach the server. Downloaded songs play without it.";
-
-const NOT_DOWNLOADED = "This song isn’t downloaded";
 
 const QUALITY_KEY = "music.streamQuality";
 
@@ -409,6 +408,13 @@ interface Phone {
   readonly local: LocalStore;
   /** Whether commands go to the core or to this phone's own queue, read when a command runs. */
   readonly mode: { current: "server" | "local" };
+  /**
+   * The new queues (`music.queue.play`) sent to the server that went unanswered before this phone
+   * played on without it: each resolves true once it landed, false once it failed. Convex sends
+   * them again once the connection is back, ahead of anything sent later, so the hand-back waits
+   * for them first.
+   */
+  readonly unanswered: Array<Promise<boolean>>;
 }
 
 interface PhoneProps {
@@ -438,6 +444,7 @@ const createPhone = ({
 
   const local = new LocalStore(playsKey);
   const mode: Phone["mode"] = { current: "server" };
+  const unanswered: Phone["unanswered"] = [];
   const controls = lockScreenControls(engine);
 
   const artFor = (artUrl: string | null): string | null => resolveMediaUrl(mediaUrl, artUrl);
@@ -458,44 +465,23 @@ const createPhone = ({
     { now: Date.now, baseUrl: mediaUrl },
   );
 
-  const sources: SourceResolver = {
-    resolve: async (track, profile) => {
-      const copy = copies.find(track.id);
+  const sources = phoneSources(copies, remote, mode, randomUUID);
 
-      if (copy !== null) {
-        return Result.succeed({
-          source: {
-            key: `${track.id}:local:${copy.uri}`,
-            url: copy.uri,
-            durationMs: track.durationMs,
-            finished: true,
-          },
-          profile: copy.profile,
-          renewAt: Number.MAX_SAFE_INTEGER,
-          playbackId: `local:${randomUUID()}`,
-        });
-      }
-
-      if (mode.current === "local")
-        return Result.fail(new StreamRefused({ message: NOT_DOWNLOADED }));
-
-      return remote.resolve(track, profile);
-    },
-  };
-
+  /**
+   * Plays the songs this phone holds of `trackIds` as its own new queue, from the one at `index`,
+   * or the next it holds after it, as old music's `playableSongs` and the core's
+   * `music.queue.play` pick.
+   */
   const playLocally = (trackIds: ReadonlyArray<string>, index: number | undefined) => {
-    const picked = trackIds[index ?? 0];
-    const tracks = trackIds.flatMap((id) => trackOfCopy(copies, id) ?? []);
+    const found = trackIds.map((id) => trackOfCopy(copies, id));
+    const tracks = found.filter((track) => track !== null);
 
     if (tracks.length === 0) throw new Error(NOT_DOWNLOADED);
+    const before = found.slice(0, index ?? 0).filter((track) => track !== null).length;
+    const start = Math.min(before, tracks.length - 1);
 
-    const start = Math.max(
-      0,
-      tracks.findIndex((track) => track.id === picked),
-    );
-
-    const queue = local.update((held) => playLocal(held, tracks, start));
-    controller.sync(queue.state);
+    const queue = local.update((held) => playLocal(held, tracks, start, Math.random));
+    controller.sync(playingView(queue));
 
     return { current: queue.state.current ?? "" };
   };
@@ -517,6 +503,12 @@ const createPhone = ({
       // A slow server that still answers gets the play: going local now would hand it a second
       // queue once it is back.
       if (Option.isSome(await readHealth(mediaUrl))) return pending;
+      unanswered.push(
+        pending.then(
+          () => true,
+          () => false,
+        ),
+      );
       probe.current();
 
       if (!trackIds.some((id) => copies.find(id) !== null)) throw new Error(OFFLINE_MESSAGE);
@@ -535,7 +527,7 @@ const createPhone = ({
     },
     jump: async (itemId) => {
       if (mode.current === "local") {
-        controller.sync(local.update((held) => jumpLocal(held, itemId)).state);
+        controller.sync(playingView(local.update((held) => jumpLocal(held, itemId))));
 
         return;
       }
@@ -594,7 +586,7 @@ const createPhone = ({
     },
   );
 
-  return { controller, local, mode };
+  return { controller, local, mode, unanswered };
 };
 
 /** What the actions read at the moment they run. */
@@ -634,7 +626,7 @@ const createCommands = (
   const { controller, local, mode } = phone;
 
   const changeLocal = (change: (queue: LocalQueue<Track>) => LocalQueue<Track>): void => {
-    controller.sync(local.update(change).state);
+    controller.sync(playingView(local.update(change)));
   };
 
   return {
@@ -672,7 +664,7 @@ const createActions = (
   const run = <A,>(call: () => Promise<A>) => controller.capture(call());
 
   const changeLocal = (change: (queue: LocalQueue<Track>) => LocalQueue<Track>): void => {
-    controller.sync(local.update(change).state);
+    controller.sync(playingView(local.update(change)));
   };
 
   const repeat = (): RepeatMode =>
@@ -719,7 +711,7 @@ const createActions = (
     },
     moveInQueue: async (itemId, toIndex) => {
       if (mode.current === "local") {
-        const args = moveArgs(local.getSnapshot().state.entries, itemId, toIndex);
+        const args = moveArgs(playingView(local.getSnapshot()).entries, itemId, toIndex);
 
         if (args !== null) changeLocal((queue) => moveLocal(queue, args.itemId, args.afterItemId));
 
@@ -793,10 +785,59 @@ const useSettings = (platform: PlatformSdk, controller: PlaybackController): voi
   }, [controller, gapless, quality, volume]);
 };
 
+/** Sends one command of the hand-back. */
+const sendStep = async (platform: PlatformSdk, step: HandBackStep): Promise<void> => {
+  switch (step.kind) {
+    case "play": {
+      await platform.music.queue.play({
+        trackIds: step.trackIds.map(asTrackId),
+        index: step.index,
+      });
+
+      return;
+    }
+
+    case "jump": {
+      await platform.music.queue.jump({ itemId: asQueueItemId(step.itemId) });
+
+      return;
+    }
+
+    case "shuffle": {
+      await platform.music.queue.shuffle({ on: step.on });
+
+      return;
+    }
+
+    case "repeat": {
+      await platform.music.queue.repeat({ mode: step.mode });
+
+      return;
+    }
+  }
+};
+
+/**
+ * Whether a new queue left unanswered when the phone went its own way landed since: the server
+ * then holds none of the entries the phone names. One still unanswered by the deadline may yet
+ * land, ahead of the hand-back, so it counts as landed.
+ */
+const anyLanded = async (unanswered: ReadonlyArray<Promise<boolean>>): Promise<boolean> => {
+  if (unanswered.length === 0) return false;
+  const settled = await withDeadline(Promise.all(unanswered), ACK_DEADLINE_MS);
+
+  return Option.match(settled, {
+    onNone: () => true,
+    onSome: (landed) => landed.some(Boolean),
+  });
+};
+
 /**
  * Hands this phone's own queue back once the server answers again: the plays it made go to
- * history, and a queue changed here replaces the core's. It waits while a song plays, so the song
- * is not cut off, and goes back at the next pause or stop.
+ * history; a queue edited here replaces the core's, or else the core moves to the entry this phone
+ * played; and shuffle and repeat changed here go too. A new queue left unanswered when the phone
+ * went its own way is waited for first. It waits while a song plays, so the song is not cut off,
+ * and goes back at the next pause or stop.
  */
 const useHandBack = (
   platform: PlatformSdk,
@@ -805,7 +846,7 @@ const useHandBack = (
   audible: boolean,
   setMode: (mode: "server" | "local") => void,
 ): void => {
-  const { local, mode } = phone;
+  const { local, mode, unanswered } = phone;
   const queue = useSyncExternalStore(local.subscribe, local.getSnapshot);
   const plays = queue.plays;
   const sending = useRef(false);
@@ -845,18 +886,21 @@ const useHandBack = (
 
   useEffect(() => {
     if (!online || audible || mode.current !== "local") return;
-    const back = handBack(local.getSnapshot());
+    const held = local.getSnapshot();
+    const waiting = unanswered.splice(0);
     mode.current = "server";
     setMode("server");
 
-    if (back.queue !== null) {
-      void platform.music.queue
-        .play({ trackIds: back.queue.trackIds.map(asTrackId), index: back.queue.index })
-        .catch(() => undefined);
-    } else if (back.jump !== null) {
-      void platform.music.queue.jump({ itemId: asQueueItemId(back.jump) }).catch(() => undefined);
-    }
-  }, [platform, local, mode, online, audible, setMode]);
+    // Sent together, in order: Convex runs one client's mutations in the order they were sent.
+    // One refused step leaves the others: each changes only what it names.
+    const send = async (): Promise<void> => {
+      const steps = handBack(held, await anyLanded(waiting));
+
+      await Promise.all(steps.map(async (step) => sendStep(platform, step).catch(() => undefined)));
+    };
+
+    void send();
+  }, [platform, local, mode, unanswered, online, audible, setMode]);
 };
 
 /** Whose player this is: the signed-in person, or offline the one who last signed in here. */
@@ -933,7 +977,8 @@ export function PlayerProvider({ children }: { readonly children: ReactNode }) {
 
   useSettings(platform, controller);
 
-  const queue = mode === "local" ? localQueue.state : serverQueue;
+  const localView = useMemo(() => playingView(localQueue), [localQueue]);
+  const queue = mode === "local" ? localView : serverQueue;
 
   useEffect(() => {
     if (queue !== null) controller.sync(queue);

@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 
-import { Schema } from "effect";
+import { Result, Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
 
 import type { EngineEvent, EngineKind, EngineSource, PlayerEngine } from "./engine";
@@ -12,12 +12,17 @@ import type {
   QueueState,
   ResumePoint,
 } from "./playback-controller";
-import { ticketSources } from "./source-resolver";
-import type { PlayStart } from "./source-resolver";
+import { SourceUnreachable, ticketSources } from "./source-resolver";
+import type { PlayStart, SourceResolver } from "./source-resolver";
 
 const SIX_HOURS = 6 * 60 * 60 * 1000;
 
 const BASE = "http://media.test";
+
+const NOT_DOWNLOADED = "This song isn’t downloaded";
+
+/** Where the device's copy of `trackId` is. */
+const copyUrl = (trackId: string): string => `file:///copies/${trackId}`;
 
 const entry = (id: string, itemId: string, durationMs = 200_000): QueueEntry => ({
   itemId,
@@ -65,6 +70,8 @@ interface EngineRecord {
   unlocks: number;
   /** Loads still to come that the server refuses, as an expired ticket. */
   refuse: number;
+  /** Sources that fail to decode, as a damaged copy on the device. */
+  readonly broken: Set<string>;
 }
 
 type FakeEngine = PlayerEngine & {
@@ -124,6 +131,12 @@ const instantEngine = (kind: EngineKind, record: EngineRecord): FakeEngine => {
       if (record.refuse > 0) {
         record.refuse -= 1;
         emit({ type: "error", reason: "expired", message: "expired" });
+
+        return;
+      }
+
+      if (record.broken.has(source.url)) {
+        emit({ type: "error", reason: "decode", message: "Cannot decode" });
 
         return;
       }
@@ -223,6 +236,12 @@ const setup = (
     readonly resume?: ResumePoint | null;
     readonly playCurrent?: string;
     readonly baseUrl?: string;
+    /** Songs the device holds a copy of, which play from it before any stream. */
+    readonly copies?: ReadonlyArray<string>;
+    /** Songs whose copy on the device fails to decode. */
+    readonly broken?: ReadonlyArray<string>;
+    /** The server can't be asked: a song without a copy is unreachable. */
+    readonly offline?: boolean;
   } = {},
 ) => {
   const record: EngineRecord = {
@@ -234,6 +253,7 @@ const setup = (
     plays: 0,
     unlocks: 0,
     refuse: 0,
+    broken: new Set((options.broken ?? []).map(copyUrl)),
   };
 
   /**
@@ -310,9 +330,45 @@ const setup = (
     },
   };
 
+  const copies = new Set(options.copies ?? []);
+  /** The copies the player stopped playing, by URL, in order. */
+  const discarded: Array<string> = [];
+  const streams = ticketSources(start, { now: () => clock.now, baseUrl: options.baseUrl ?? BASE });
+
+  /** A device's resolver: its copy of a song first, else a stream, else nothing while offline. */
+  const sources: SourceResolver = {
+    resolve: async (track, profile) => {
+      if (copies.has(track.id)) {
+        return Result.succeed({
+          origin: "local",
+          profile: "aac-320",
+          renewAt: Number.MAX_SAFE_INTEGER,
+          playbackId: `local-${track.id}`,
+          source: {
+            key: `${track.id}:local`,
+            url: copyUrl(track.id),
+            durationMs: track.durationMs,
+            finished: true,
+          },
+        });
+      }
+
+      if (options.offline === true) {
+        return Result.fail(new SourceUnreachable({ message: NOT_DOWNLOADED }));
+      }
+
+      return streams.resolve(track, profile);
+    },
+    discard: (trackId, url) => {
+      discarded.push(url);
+
+      if (url === copyUrl(trackId)) copies.delete(trackId);
+    },
+  };
+
   const controller = new PlaybackController(
     commands,
-    ticketSources(start, { now: () => clock.now, baseUrl: options.baseUrl ?? BASE }),
+    sources,
     {
       mse: options.mse === true ? { flac: true, changeType: true } : null,
       create: (kind) => {
@@ -329,7 +385,7 @@ const setup = (
   const stop = controller.start();
   const engine = (): FakeEngine => engines.at(-1) ?? instantEngine("html", record);
 
-  return { controller, record, sent, lookups, clock, saved, stop, engine, gates };
+  return { controller, record, sent, lookups, clock, saved, stop, engine, gates, discarded };
 };
 
 const ListeningAddress = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Int }));
@@ -538,6 +594,120 @@ describe("PlaybackController", () => {
       `${BASE}/media/music/stream/b?ticket=t2&p=original`,
     ]);
     expect(controller.getSnapshot()).toMatchObject({ current: "1", engineStatus: "playing" });
+  });
+
+  it("plays a downloaded copy of the song guessed only once the new queue names that song", async () => {
+    const { controller, record, sent } = setup({ playCurrent: "1", copies: ["a"] });
+
+    await controller.playTracks(["a", "b"], 0);
+    await settle();
+
+    expect(record.loads).toHaveLength(0);
+
+    controller.sync(queueOf([one, two], "1"));
+    await settle();
+
+    expect(record.loads.map((load) => load.url)).toStrictEqual([copyUrl("a")]);
+    expect(controller.getSnapshot()).toMatchObject({ current: "1", engineStatus: "playing" });
+    expect(names(sent).filter((name) => name.startsWith("start"))).toStrictEqual([]);
+  });
+
+  it("never plays the downloaded song guessed when the core opened the new queue on another", async () => {
+    // The core passes over a song whose file went missing on the server, which a copy on this
+    // device can't tell.
+    const { controller, record } = setup({ playCurrent: "1", copies: ["a"] });
+
+    await controller.playTracks(["a", "b"], 0);
+    await settle();
+    controller.sync(queueOf([entry("b", "1")], "1"));
+    await settle();
+
+    expect(record.loads.map((load) => load.url)).toStrictEqual([
+      `${BASE}/media/music/stream/b?ticket=t1&p=original`,
+    ]);
+    expect(controller.getSnapshot()).toMatchObject({ current: "1", engineStatus: "playing" });
+  });
+
+  it("stops playing a downloaded copy that fails to play and streams the song instead", async () => {
+    const { controller, record, discarded } = setup({
+      playCurrent: "1",
+      copies: ["a"],
+      broken: ["a"],
+    });
+
+    await controller.playTracks(["a", "b"], 0);
+    controller.sync(queueOf([one, two], "1"));
+    await settle();
+
+    expect(discarded).toStrictEqual([copyUrl("a")]);
+    expect(record.loads.map((load) => load.url)).toStrictEqual([
+      copyUrl("a"),
+      `${BASE}/media/music/stream/a?ticket=t1&p=original`,
+    ]);
+    expect(controller.getSnapshot()).toMatchObject({
+      current: "1",
+      engineStatus: "playing",
+      error: null,
+    });
+  });
+
+  it("skips a downloaded copy that fails to play while the server can't be reached", async () => {
+    const { controller, record, sent, discarded } = setup({
+      playCurrent: "1",
+      copies: ["a", "c"],
+      broken: ["a"],
+      offline: true,
+    });
+
+    await controller.playTracks(["a", "c"], 0);
+    controller.sync(queueOf([one, three], "1"));
+    await settle();
+
+    expect(discarded).toStrictEqual([copyUrl("a")]);
+    expect(record.loads.map((load) => load.url)).toStrictEqual([copyUrl("a"), copyUrl("c")]);
+    expect(names(sent).filter((name) => name.startsWith("jump"))).toStrictEqual(["jump:3"]);
+    expect(controller.getSnapshot()).toMatchObject({ current: "3", engineStatus: "playing" });
+  });
+
+  it("shows why a song can't play offline when no song follows it", async () => {
+    const { controller, sent } = setup({
+      playCurrent: "1",
+      copies: ["a"],
+      broken: ["a"],
+      offline: true,
+    });
+
+    await controller.playTracks(["a"], 0);
+    controller.sync(queueOf([one], "1"));
+    await settle();
+
+    expect(names(sent).filter((name) => name.startsWith("jump"))).toStrictEqual([]);
+    expect(controller.getSnapshot()).toMatchObject({
+      current: "1",
+      engineStatus: "error",
+      error: NOT_DOWNLOADED,
+    });
+  });
+
+  it("stops on a repeating queue none of whose songs can play offline", async () => {
+    const { controller, record, sent } = setup({
+      playCurrent: "1",
+      copies: ["a", "b"],
+      broken: ["a", "b"],
+      offline: true,
+    });
+
+    await controller.playTracks(["a", "b"], 0);
+    controller.sync(queueOf([one, two], "1", { repeat: "all" }));
+    await settle();
+
+    expect(record.loads.map((load) => load.url)).toStrictEqual([copyUrl("a"), copyUrl("b")]);
+    expect(names(sent).filter((name) => name.startsWith("jump"))).toStrictEqual(["jump:2"]);
+    expect(controller.getSnapshot()).toMatchObject({
+      current: "2",
+      engineStatus: "error",
+      error: NOT_DOWNLOADED,
+    });
   });
 
   it("moves to the next entry at once and keeps it while the core confirms", async () => {
