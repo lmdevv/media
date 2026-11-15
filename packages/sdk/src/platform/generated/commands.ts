@@ -3495,6 +3495,40 @@ const movies_play_start = mutation({
   }),
 });
 
+const movies_titles_episode = query({
+  name: "movies.titles.episode",
+  path: "movies/titles:episode",
+  args: Schema.Struct({ episodeId: Schema.String.pipe(Schema.brand("Id<episodes>")) }),
+  result: Schema.Struct({
+    id: Schema.String.pipe(Schema.brand("Id<episodes>")),
+    titleId: Schema.String.pipe(Schema.brand("Id<titles>")),
+    seasonId: Schema.String.pipe(Schema.brand("Id<seasons>")),
+    seasonNumber: Schema.Finite,
+    episodeNumber: Schema.Finite,
+    name: Schema.String,
+    overview: Schema.Union([Schema.String, Schema.Null]),
+    airDate: Schema.Union([Schema.String, Schema.Null]),
+    runtimeMs: Schema.Union([Schema.Finite, Schema.Null]),
+    still: Schema.Union([Schema.String, Schema.Null]),
+    rating: Schema.Union([Schema.Finite, Schema.Null]),
+    externalIds: Schema.Struct({
+      tmdb: Schema.Union([Schema.String, Schema.Null]),
+      imdb: Schema.Union([Schema.String, Schema.Null]),
+      tvdb: Schema.Union([Schema.String, Schema.Null]),
+    }),
+    available: Schema.Boolean,
+    progress: Schema.Union([
+      Schema.Struct({
+        positionMs: Schema.Finite,
+        durationMs: Schema.Finite,
+        watched: Schema.Boolean,
+        updatedAt: Schema.Finite,
+      }),
+      Schema.Null,
+    ]),
+  }),
+});
+
 const movies_titles_episodes = query({
   name: "movies.titles.episodes",
   path: "movies/titles:episodes",
@@ -5867,6 +5901,8 @@ export const effectMethods = (method: EffectBuilder) => ({
       start: method.mutation(movies_play_start),
     },
     titles: {
+      /** `movies.titles.episode` (query, movies:read): Show an episode with its show and your progress, as a group session names it. */
+      episode: method.query(movies_titles_episode),
       /** `movies.titles.episodes` (query, movies:read): List a season's episodes in order with your progress and their credits. */
       episodes: method.query(movies_titles_episodes),
       /** `movies.titles.genres` (query, movies:read): List the genres of the titles you may see, most common first. */
@@ -6343,6 +6379,8 @@ export const promiseMethods = (method: PromiseBuilder) => ({
       start: method.mutation(movies_play_start),
     },
     titles: {
+      /** `movies.titles.episode` (query, movies:read): Show an episode with its show and your progress, as a group session names it. */
+      episode: method.query(movies_titles_episode),
       /** `movies.titles.episodes` (query, movies:read): List a season's episodes in order with your progress and their credits. */
       episodes: method.query(movies_titles_episodes),
       /** `movies.titles.genres` (query, movies:read): List the genres of the titles you may see, most common first. */

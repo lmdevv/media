@@ -252,6 +252,19 @@ describe.skipIf(stack === undefined)("movies browse commands", { timeout: 180_00
     expect((await client.query(api.movies.titles.nextEpisode, { episodeId: first.id }))?.id).toBe(
       second.id,
     );
+
+    const named = await client.query(api.movies.titles.episode, { episodeId: second.id });
+
+    expect({ id: named.id, titleId: named.titleId, number: named.episodeNumber }).toEqual({
+      id: second.id,
+      titleId: pioneerId,
+      number: 2,
+    });
+    expect(
+      await refusal(
+        shelf.outsider.signedIn.client.query(api.movies.titles.episode, { episodeId: second.id }),
+      ),
+    ).toBe("not_found");
     expect(
       await client.query(api.movies.titles.versions, { titleId: pioneerId, episodeId: first.id }),
     ).toHaveLength(1);

@@ -157,6 +157,7 @@ describe("CLI placement", () => {
       "movies.play.report": "movies play report",
       "movies.play.reportOffline": "movies play report-offline",
       "movies.play.start": "movies play start",
+      "movies.titles.episode": "movies titles episode",
       "movies.titles.episodes": "movies titles episodes",
       "movies.titles.genres": "movies titles genres",
       "movies.titles.get": "movies titles get",

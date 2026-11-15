@@ -555,6 +555,12 @@ export const movies = [
     },
     result: paginationResultValidator(v.object({ ...episodeFields, credits: v.array(credit) })),
   }),
+  query("movies.titles.episode", {
+    summary: "Show an episode with its show and your progress, as a group session names it",
+    scope: "movies:read",
+    args: { episodeId: v.id("episodes") },
+    result: episode,
+  }),
   query("movies.titles.nextEpisode", {
     summary: "Show the episode after this one, specials last, or null after the last",
     scope: "movies:read",

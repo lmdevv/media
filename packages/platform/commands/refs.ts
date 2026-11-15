@@ -236,6 +236,7 @@ export const commandRefs = {
   "movies.play.report": api.movies.play.report satisfies movies_play["report"],
   "movies.play.reportOffline": api.movies.play.reportOffline satisfies movies_play["reportOffline"],
   "movies.play.start": api.movies.play.start satisfies movies_play["start"],
+  "movies.titles.episode": api.movies.titles.episode satisfies movies_titles["episode"],
   "movies.titles.episodes": api.movies.titles.episodes satisfies movies_titles["episodes"],
   "movies.titles.genres": api.movies.titles.genres satisfies movies_titles["genres"],
   "movies.titles.get": api.movies.titles.get satisfies movies_titles["get"],

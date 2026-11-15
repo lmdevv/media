@@ -39,6 +39,11 @@ export type StartChoice = Data.TaggedEnum<{
   Ask: {};
   Resume: {};
   Beginning: {};
+  /**
+   * Where a group session stands when the stream is ready, read then rather than when asked, so a
+   * member who joins a playing session starts at its live position; paused when `play` says so.
+   */
+  At: { readonly positionMs: () => number; readonly play: () => boolean };
 }>;
 
 /** Constructors and matchers for `StartChoice`. */
@@ -363,6 +368,7 @@ export class PlaybackController {
     return StartChoice.$match(this.#request.start, {
       Beginning: () => this.#negotiate(play, 0),
       Resume: () => this.#negotiate(play, play.started.resumePositionMs),
+      At: ({ positionMs, play: playing }) => this.#negotiate(play, positionMs(), playing()),
       Ask: () => {
         if (!offersResume(play.started.resumePositionMs)) return this.#negotiate(play, 0);
 

@@ -32,6 +32,12 @@ import { chapterRows, scrubTileAt } from "@/lib/player/scrubbing";
 import type { ScrubTile } from "@/lib/player/scrubbing";
 import type { VideoState } from "@/lib/player/video-port";
 import type { WatchParams } from "@/lib/routes";
+import { SessionPanel } from "@/components/together/session-panel";
+import { useSessionFollow, useSessionPlayer } from "@/components/together/use-session-player";
+import type { SessionStop } from "@/components/together/use-session-player";
+import type { FollowerPlayer } from "@media/contracts/follower";
+import { usePerson } from "@/session/me";
+import { itemOf } from "@/lib/together/session";
 import { useServer } from "@/session/connection";
 import { useMediaServer } from "@/session/media-server";
 import { usePreferences } from "@/session/preferences";
@@ -59,7 +65,7 @@ const CONTROLS_HIDE_MS = 4_000;
 
 const UNLOCK_HINT_MS = 3_000;
 
-type Panel = "audio" | "quality" | "speed" | "episodes" | "chapters";
+type Panel = "audio" | "quality" | "speed" | "episodes" | "chapters" | "session";
 
 interface Attempt {
   readonly key: number;
@@ -233,34 +239,6 @@ function PlayerSession({ params, attempt, onRestart, choices }: PlayerSessionPro
   const online = usePlayStart(args);
   const offline = useDownloadSession(download, controller?.port ?? null);
 
-  useEffect(() => {
-    if (controller === null) return;
-
-    if (download !== null) {
-      if (offline !== null && Result.isSuccess(offline)) {
-        controller.start(PlaySource.Kept({ playback: offline.success }));
-      }
-
-      return;
-    }
-
-    if (online.status !== "started") return;
-
-    const { started } = online.play;
-    const durationMs = started.file.probe.durationMs;
-    const atMs = attempt.startAtMs ?? started.resumePositionMs;
-
-    controller.start(
-      PlaySource.Streamed({
-        play: online.play,
-        atMs: durationMs > 0 ? Math.min(atMs, durationMs) : atMs,
-        audioStreamIndex:
-          startTracks?.audioStreamIndex ??
-          preferredTracks(startPreferences, started.file.probe.audio, []).audioStreamIndex,
-      }),
-    );
-  }, [controller, download, offline, online, attempt.startAtMs, startTracks, startPreferences]);
-
   let startStep: PlaybackStep | null = null;
 
   if (download === null) {
@@ -304,6 +282,67 @@ function PlayerSession({ params, attempt, onRestart, choices }: PlayerSessionPro
   );
 
   const seasonEpisodes = useSeasonEpisodes(titleId, episode?.seasonNumber ?? null);
+
+  const startedEpisode = episode === null ? null : asEpisodeId(episode.id);
+  const routeEpisode = params.episodeId === undefined ? null : asEpisodeId(params.episodeId);
+
+  const watching = useMemo(
+    () => ({ titleId, episodeId: startedEpisode ?? routeEpisode }),
+    [titleId, startedEpisode, routeEpisode],
+  );
+
+  const playerNow = useRef<FollowerPlayer | null>(null);
+
+  useEffect(() => {
+    playerNow.current = controller?.port ?? null;
+  }, [controller]);
+
+  const together = useSessionPlayer(watching, playerNow);
+  const inSession = together.session !== null && download === null;
+  const sessionMode = download === null ? together.mode : "solo";
+  const sessionStart = together.startAt;
+
+  useEffect(() => {
+    if (controller === null) return;
+
+    if (download !== null) {
+      if (offline !== null && Result.isSuccess(offline)) {
+        controller.start(PlaySource.Kept({ playback: offline.success }));
+      }
+
+      return;
+    }
+
+    if (online.status !== "started" || sessionMode === "loading") return;
+
+    const { started: begun } = online.play;
+    const durationMs = begun.file.probe.durationMs;
+
+    const atMs =
+      sessionMode === "session"
+        ? sessionStart().positionMs
+        : (attempt.startAtMs ?? begun.resumePositionMs);
+
+    controller.start(
+      PlaySource.Streamed({
+        play: online.play,
+        atMs: durationMs > 0 ? Math.min(atMs, durationMs) : atMs,
+        audioStreamIndex:
+          startTracks?.audioStreamIndex ??
+          preferredTracks(startPreferences, begun.file.probe.audio, []).audioStreamIndex,
+      }),
+    );
+  }, [
+    controller,
+    download,
+    offline,
+    online,
+    attempt.startAtMs,
+    startTracks,
+    startPreferences,
+    sessionMode,
+    sessionStart,
+  ]);
 
   useEffect(() => {
     if (controller === null || title === null) return;
@@ -380,6 +419,19 @@ function PlayerSession({ params, attempt, onRestart, choices }: PlayerSessionPro
 
   const next = nextEpisode.status === "success" ? nextEpisode.data : null;
 
+  const follow = useSessionFollow(together, {
+    player: playing && inSession ? (controller?.port ?? null) : null,
+    durationMs: durationSeconds > 0 ? durationSeconds * 1000 : null,
+    nextEpisode: next,
+  });
+
+  const person = usePerson();
+  const sessionCard = follow.nextCard;
+  const [closedCard, setClosedCard] = useState<string | null>(null);
+
+  const shownCard =
+    sessionCard !== null && sessionCard.episode.id !== closedCard ? sessionCard : null;
+
   const credits =
     playing &&
     inCredits({
@@ -389,7 +441,8 @@ function PlayerSession({ params, attempt, onRestart, choices }: PlayerSessionPro
       ended: media.ended,
     });
 
-  const showNext = credits && next !== null && !creditsDismissed && panel === null && !locked;
+  const showNext =
+    credits && next !== null && !creditsDismissed && panel === null && !locked && !inSession;
 
   const [countdownStart, setCountdownStart] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -415,9 +468,20 @@ function PlayerSession({ params, attempt, onRestart, choices }: PlayerSessionPro
       ? NEXT_COUNTDOWN.totalMs
       : NEXT_COUNTDOWN.totalMs - (now - countdownStart);
 
-  const playEpisode = useCallback((episodeId: EpisodeId) => {
-    router.setParams({ episodeId, fileId: undefined, start: "resume", at: undefined });
-  }, []);
+  const sessionPlayNow = together.actions.playNow;
+
+  const playEpisode = useCallback(
+    (episodeId: EpisodeId) => {
+      if (inSession) {
+        sessionPlayNow(itemOf({ titleId, episodeId }));
+
+        return;
+      }
+
+      router.setParams({ episodeId, fileId: undefined, start: "resume", at: undefined });
+    },
+    [inSession, sessionPlayNow, titleId],
+  );
 
   useEffect(() => {
     if (showNext && countdownStart !== null && countdownMs <= 0) playEpisode(next.id);
@@ -432,7 +496,16 @@ function PlayerSession({ params, attempt, onRestart, choices }: PlayerSessionPro
   const chapters = useMemo(() => chapterRows(started?.file.probe.chapters ?? []), [started]);
 
   const more: ReadonlyArray<MoreItem> = [
-    ...(episode === null
+    ...(download !== null || (!inSession && together.mode !== "solo")
+      ? []
+      : [
+          {
+            label: inSession ? "Group Session" : "Watch Together",
+            systemImage: "person.2",
+            onPress: () => (inSession ? setPanel("session") : together.actions.start()),
+          } as const,
+        ]),
+    ...(episode === null || (inSession && !(together.mayControl && together.mayAdd))
       ? []
       : [
           {
@@ -483,7 +556,10 @@ function PlayerSession({ params, attempt, onRestart, choices }: PlayerSessionPro
   const bar = useMargin(PLAYER_MARGINS.bar);
 
   const seekTo = (seconds: number): void => {
-    controller?.seek(Math.min(Math.max(0, seconds), durationSeconds) * 1000);
+    const positionMs = Math.min(Math.max(0, seconds), durationSeconds) * 1000;
+
+    if (inSession) follow.move({ kind: "seek", positionMs });
+    else controller?.seek(positionMs);
   };
 
   const stillOf = (item: Pick<SeasonEpisode, "still">): string | undefined =>
@@ -492,7 +568,8 @@ function PlayerSession({ params, attempt, onRestart, choices }: PlayerSessionPro
   const togglePlay = () => {
     poke();
 
-    if (media.playing) port?.pause();
+    if (inSession) follow.move({ kind: media.playing ? "pause" : "play" });
+    else if (media.playing) port?.pause();
     else void port?.play();
   };
 
@@ -559,7 +636,7 @@ function PlayerSession({ params, attempt, onRestart, choices }: PlayerSessionPro
           </View>
         ) : null}
 
-        {visible && playing && !locked && !showNext && stopped === null ? (
+        {visible && playing && !locked && !showNext && shownCard === null && stopped === null ? (
           <Animated.View
             entering={FadeIn}
             exiting={FadeOut}
@@ -597,6 +674,11 @@ function PlayerSession({ params, attempt, onRestart, choices }: PlayerSessionPro
                 setVisible(false);
                 setHeld(false);
               }}
+              locked={
+                inSession && !together.mayControl
+                  ? `Only ${together.hostName} can pause or seek`
+                  : undefined
+              }
             />
           </Animated.View>
         ) : null}
@@ -624,6 +706,45 @@ function PlayerSession({ params, attempt, onRestart, choices }: PlayerSessionPro
           {...(autoplay ? {} : { headline: "Next Episode" })}
           onWatchCredits={() => setCreditsDismissed(true)}
           onPlayNext={() => playEpisode(next.id)}
+        />
+      ) : null}
+
+      {shownCard === null || panel !== null ? null : (
+        <NextEpisodeCard
+          show={name}
+          playing={detailLine}
+          next={shownCard.episode}
+          stillUrl={stillOf(shownCard.episode)}
+          countdownMs={shownCard.countdownMs}
+          creditsLabel={shownCard.canWatchCredits ? "Watch Credits" : "Close"}
+          onWatchCredits={
+            shownCard.canWatchCredits
+              ? follow.watchCredits
+              : () => setClosedCard(shownCard.episode.id)
+          }
+          onPlayNext={shownCard.canPlayNow ? together.actions.playQueued : null}
+        />
+      )}
+
+      <SessionNotice
+        stopped={together.stopped}
+        hostAway={inSession && !together.hosting && together.hostAway}
+        hostName={together.hostName}
+        onKeepWatching={together.actions.goSolo}
+        onLeave={() => {
+          together.actions.leave();
+          close();
+        }}
+        onClose={close}
+      />
+
+      {panel === "session" && together.session !== null ? (
+        <SessionPanel
+          session={together.session}
+          self={person.userId}
+          queue={follow.queue}
+          actions={together.actions}
+          onClose={() => setPanel(null)}
         />
       ) : null}
 
@@ -727,6 +848,49 @@ function PlayerSession({ params, attempt, onRestart, choices }: PlayerSessionPro
         />
       )}
     </View>
+  );
+}
+
+/**
+ * Over the player while its group session waits for its host, or after it ended or took the viewer
+ * out: go on alone, or leave.
+ */
+function SessionNotice({
+  stopped,
+  hostAway,
+  hostName,
+  onKeepWatching,
+  onLeave,
+  onClose,
+}: {
+  readonly stopped: SessionStop | null;
+  readonly hostAway: boolean;
+  readonly hostName: string;
+  readonly onKeepWatching: () => void;
+  readonly onLeave: () => void;
+  readonly onClose: () => void;
+}) {
+  if (stopped === null && !hostAway) return null;
+
+  const title =
+    stopped === null
+      ? `${hostName} Left the Session`
+      : stopped.kind === "ended"
+        ? `${hostName} Ended the Session`
+        : "You’re No Longer in This Session";
+
+  return (
+    <ProblemPanel
+      title={title}
+      description={stopped === null ? "Paused for everyone until they come back." : ""}
+      primary={{ label: "Keep Watching on My Own", retry: false, onPress: onKeepWatching }}
+      secondary={
+        stopped === null
+          ? { label: "Leave Session", onPress: onLeave }
+          : { label: "Close", onPress: onClose }
+      }
+      onClose={stopped === null ? onLeave : onClose}
+    />
   );
 }
 

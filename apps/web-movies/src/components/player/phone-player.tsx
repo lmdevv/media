@@ -16,7 +16,10 @@ import {
   CaptionsIcon,
   GalleryVerticalEndIcon,
   ListVideoIcon,
+  LockIcon,
+  Maximize2Icon,
   SunIcon,
+  UsersIcon,
   Volume1Icon,
   Volume2Icon,
   XIcon,
@@ -178,6 +181,46 @@ export function TrackPill({
  * @param tracks - Track pills, usually wrapped in a track popover.
  * @param scrub - Thumbnails and chapter marks for the scrubber.
  */
+/** Back 10 seconds, play or pause, and forward 10 seconds, centered over the video. */
+function PhoneTransport({
+  playing,
+  onPlayPause,
+  onSkip,
+}: {
+  readonly playing: boolean;
+  readonly onPlayPause: () => void;
+  readonly onSkip: (seconds: number) => void;
+}) {
+  return (
+    <>
+      <button
+        type="button"
+        aria-label="Back 10 seconds"
+        className="cursor-pointer text-text"
+        onClick={() => onSkip(-10)}
+      >
+        <SkipGlyph forward={false} />
+      </button>
+      <button
+        type="button"
+        aria-label={playing ? "Pause" : "Play"}
+        className="cursor-pointer text-text [&_svg]:size-14"
+        onClick={onPlayPause}
+      >
+        {playing ? <PauseGlyph /> : <PlayGlyph />}
+      </button>
+      <button
+        type="button"
+        aria-label="Forward 10 seconds"
+        className="cursor-pointer text-text"
+        onClick={() => onSkip(10)}
+      >
+        <SkipGlyph forward />
+      </button>
+    </>
+  );
+}
+
 export function PhoneControls({
   title,
   playing,
@@ -195,6 +238,8 @@ export function PhoneControls({
   onBrightness,
   onVolume,
   onVolumeCommit,
+  locked,
+  onRoom,
 }: {
   readonly title: string;
   readonly playing: boolean;
@@ -216,6 +261,13 @@ export function PhoneControls({
   readonly onVolume: (value: number) => void;
   /** Where the volume slider settled, which unmuting from silence returns to. */
   readonly onVolumeCommit: (value: number) => void;
+  /**
+   * Replaces the transport with a lock line, such as `Only Lucía can pause or seek`, for a group
+   * session's member who may not control it.
+   */
+  readonly locked?: string | undefined;
+  /** Opens Watch together; omit to hide the button. */
+  readonly onRoom?: (() => void) | undefined;
 }) {
   return (
     <div className="on-media absolute inset-0 bg-linear-to-b from-dark-bg/55 via-dark-bg/25 via-35% to-dark-bg/75 font-sans">
@@ -226,32 +278,21 @@ export function PhoneControls({
         <p className="pointer-events-none absolute inset-x-0 top-7 text-center text-body/5 font-semibold text-text">
           {title}
         </p>
+        {onRoom === undefined ? null : (
+          <GlassButton aria-label="Watch together" onClick={onRoom} className="relative">
+            <UsersIcon strokeWidth={1.75} aria-hidden />
+          </GlassButton>
+        )}
       </div>
       <div className="absolute inset-x-0 top-1/2 flex -translate-y-1/2 items-center justify-center gap-16">
-        <button
-          type="button"
-          aria-label="Back 10 seconds"
-          className="cursor-pointer text-text"
-          onClick={() => onSkip(-10)}
-        >
-          <SkipGlyph forward={false} />
-        </button>
-        <button
-          type="button"
-          aria-label={playing ? "Pause" : "Play"}
-          className="cursor-pointer text-text [&_svg]:size-14"
-          onClick={onPlayPause}
-        >
-          {playing ? <PauseGlyph /> : <PlayGlyph />}
-        </button>
-        <button
-          type="button"
-          aria-label="Forward 10 seconds"
-          className="cursor-pointer text-text"
-          onClick={() => onSkip(10)}
-        >
-          <SkipGlyph forward />
-        </button>
+        {locked === undefined ? (
+          <PhoneTransport playing={playing} onPlayPause={onPlayPause} onSkip={onSkip} />
+        ) : (
+          <span className="flex h-7 items-center gap-1.5 rounded-pill bg-dark-bg/45 pr-2.5 pl-2 text-caption/caption font-semibold text-text">
+            <LockIcon className="size-3.5" strokeWidth={2} aria-hidden />
+            {locked}
+          </span>
+        )}
       </div>
       <SideSlider
         label="Brightness"
@@ -287,6 +328,58 @@ export function PhoneControls({
           </span>
         </div>
         <div className="flex justify-center gap-2">{tracks}</div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Paper 08 · 08: the video overlays of a group session on a phone held upright, with the session
+ * under the video: who hosts, or play and pause for a member who may control, and full screen.
+ */
+export function PhoneSessionVideoChrome({
+  label,
+  playing,
+  fraction,
+  onPlayPause,
+  onFullscreen,
+}: {
+  /** The lock line for a member who may not control, such as `Lucía is hosting`. */
+  readonly label: string | null;
+  readonly playing: boolean;
+  readonly fraction: number;
+  /** Plays or pauses for everyone; null for a member who may not control. */
+  readonly onPlayPause: (() => void) | null;
+  readonly onFullscreen: () => void;
+}) {
+  return (
+    <div className="on-media pointer-events-none absolute inset-0 bg-linear-to-b from-transparent from-45% to-dark-bg/60 font-sans">
+      {label === null ? null : (
+        <span className="absolute bottom-4 left-3 flex h-7 items-center gap-1.5 rounded-pill bg-dark-bg/45 pr-2.5 pl-2 text-caption/caption font-semibold text-text">
+          <LockIcon className="size-3.25" strokeWidth={2} aria-hidden />
+          {label}
+        </span>
+      )}
+      {onPlayPause === null ? null : (
+        <button
+          type="button"
+          aria-label={playing ? "Pause" : "Play"}
+          onClick={onPlayPause}
+          className="pointer-events-auto absolute bottom-4 left-3 flex size-7 cursor-pointer items-center justify-center rounded-pill bg-dark-bg/45 text-text [&_svg]:size-3.5"
+        >
+          {playing ? <PauseGlyph /> : <PlayGlyph />}
+        </button>
+      )}
+      <button
+        type="button"
+        aria-label="Full screen"
+        onClick={onFullscreen}
+        className="pointer-events-auto absolute right-3 bottom-4 flex size-7 cursor-pointer items-center justify-center rounded-pill bg-dark-bg/45 text-text"
+      >
+        <Maximize2Icon className="size-3.5" strokeWidth={2} aria-hidden />
+      </button>
+      <div className="absolute inset-x-0 bottom-0 flex h-0.75 bg-text/25">
+        <div className="h-0.75 bg-accent" style={{ width: `${String(fraction * 100)}%` }} />
       </div>
     </div>
   );

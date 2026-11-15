@@ -32,6 +32,7 @@ import { PersonContext } from "@/session/me";
 import { SdkProvider } from "@/session/sdk-provider";
 import { SessionPhaseContext, useLiveSessionPhase, useSettledPhase } from "@/session/session-phase";
 import { SignInGate } from "@/session/sign-in";
+import { CurrentSessionProvider } from "@/session/together";
 import { useSignOut } from "@/session/viewer";
 import type { SessionPhase } from "@/session/session-phase";
 
@@ -133,6 +134,8 @@ function RootStack({ phase }: { readonly phase: SessionPhase["kind"] | "offline"
         <Stack.Screen name="collection/[collectionId]" />
         <Stack.Screen name="genre/[genre]" />
         <Stack.Screen name="person/[personId]" />
+        <Stack.Screen name="together/index" />
+        <Stack.Screen name="together/[link]" />
       </Stack.Protected>
       <Stack.Protected guard={phase === "offline"}>
         <Stack.Screen name="offline" options={{ animation: "fade" }} />
@@ -288,8 +291,14 @@ function ConnectedApp() {
       <PersonContext.Provider value={person}>
         <HideSplash />
         <TitleStatesProvider>
-          <RootStack phase={settled.kind} />
-          {settled.kind === "ready" ? <StorageFullPrompt /> : null}
+          {settled.kind === "ready" ? (
+            <CurrentSessionProvider>
+              <RootStack phase={settled.kind} />
+              <StorageFullPrompt />
+            </CurrentSessionProvider>
+          ) : (
+            <RootStack phase={settled.kind} />
+          )}
         </TitleStatesProvider>
         {trouble === null ? null : (
           <View className="absolute inset-0" accessibilityViewIsModal>

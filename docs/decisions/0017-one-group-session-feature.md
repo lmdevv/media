@@ -239,3 +239,65 @@ Left for later units:
 | --------------- | -------- | ----------------------------------------------------- |
 | `join`, `ask`   | together | a platform guest needs the `invited` fact             |
 | `add`, `remove` | together | refused to a platform guest, whatever the host allows |
+
+## Movie group sessions in the clients (amended 2026-11-15)
+
+The movies web client and the movies iOS app run movie group sessions, as old movies' watch rooms
+did, over the commands above. The core is unchanged but for one read, `movies.titles.episode`:
+an episode item names no show, and starting playback names both, so a member resolves it.
+
+### The shared clock code
+
+`@media/contracts` holds what every client runs, and the music clients reuse it:
+
+- `clock`: `SessionClock`, `positionAt`, the heartbeat and away timings, the sampling of the
+  server's clock (a burst of 5 heartbeats every 30 seconds, the shortest of the last 10 round
+  trips), `DRIFT_THRESHOLDS`, and the next-episode countdown.
+- `follower-policy`: `follow`, movies' rooms' correction policy (in step within 120 ms, a rate
+  nudge of 5% up to 1.5 s, a seek beyond it), with the end of the player's own media as a ceiling,
+  since members may play versions of different lengths.
+- `follower`: the follower, an Effect over a player port and a session port.
+- `session-next`: the end of an item, below.
+
+### Following
+
+- Every member follows the clock, the host included. A client sends a heartbeat every 5 seconds
+  from any screen while the person is in or waits for a session, so browsing elsewhere keeps their
+  seat and keeps a host's session playing; closing every tab stops it, and 30 seconds later a host
+  away pauses the session.
+- A member who may control plays, pauses, and seeks through `control`. The player moves at once,
+  and corrections wait for the answer. A refused move, or a seek against an older revision, leaves
+  the player to return to the clock. The controls of a member who may not control show who can,
+  and their keyboard shortcuts are refused. A move they make outside the controls, such as a seek
+  from picture in picture, is corrected; a pause there detaches them until they play.
+- Clocks arrive from the subscription and from each answer; only a higher revision is applied.
+  A player's echo of the follower's own command is counted out, so it never moves the session.
+- The host's player pauses the session where it stalled, after a second of waiting (pause, then a
+  seek to its position), and plays it on once it recovers, unless someone moved the clock since.
+  A stall right after the follower's own seek does not count. Guests catch up on their own.
+
+### The end of an item
+
+The core keeps no countdown, so the queue carries it. In the credits of an episode (its last
+tenth, at most 30 seconds) the host's client queues the next episode first. Every member who sees
+it first in the queue counts down on the session's clock, so a pause holds the countdown. When it
+ends, or the item ends, the host's client skips to it; a member who may control can skip sooner.
+Watch credits, the host's, takes the entry out, which stops everyone's countdown. At the end of an
+item with nothing next to an episode, the host's client skips to whatever is queued, or pauses the
+session at the end. Each member's player reports its own progress, so history is each person's.
+
+### Links
+
+The web client opens `/movies/together/<link>`, joins, and plays the session or says why it waits:
+for the host's approval, a locked or ended session, or an item the person may not watch, whose
+place they keep. The iOS app opens `movies://together/<link>` the same way and shares the web
+address. The host starts a session from the player, with the link to copy before it starts.
+
+### Differences from old movies' rooms
+
+- Guests see a paused session while the host's player stalls, not "Waiting for the host's
+  connection": the clock has no buffering state.
+- Members see only their own drift, since heartbeats report none.
+- The countdown holds while the session is paused, and a host who reloads during the credits after
+  Watch credits may see it start again.
+- Queueing (Up next) and the join and guest switches are new to movies, from D34.

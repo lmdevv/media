@@ -13,9 +13,10 @@ import {
   ChevronDownIcon,
   ChevronLeftIcon,
   HardDriveIcon,
+  ListPlusIcon,
   PlusIcon,
-  RotateCcwIcon,
   RefreshCwIcon,
+  RotateCcwIcon,
   TriangleAlertIcon,
 } from "lucide-react";
 import { useState } from "react";
@@ -28,6 +29,7 @@ import { facts, formatRemaining, formatRuntime, plural } from "@/lib/format";
 import { fileBadges, trackSummary } from "@/lib/media-facts";
 import { formatDate, languageName, titleLinks } from "@/lib/metadata";
 import { orSkip } from "@/lib/query-state";
+import { useAddToSession } from "@/together/use-add-to-session";
 import { useVersionChoice, withFacts } from "@/playback/use-version-choice";
 import type { VersionChoice } from "@/playback/use-version-choice";
 
@@ -149,6 +151,8 @@ function VersionSelect({
 
 interface DetailParts {
   readonly title: TitleDetail;
+  /** Queues what the main button plays in the person's group session; null outside one. */
+  readonly addToSession: (() => void) | null;
   readonly canManage: boolean;
   readonly target: PlayTarget;
   readonly myList: MyListToggle;
@@ -175,11 +179,18 @@ export function TitleDetailView({
   const versions = usePlayVersions(title);
   const versionChoice = useVersionChoice(versions);
   const file = mainFile(title, title.kind === "movie" ? versionChoice.chosen : null);
+  const target = playTarget(title);
+
+  const addToSession = useAddToSession(
+    { titleId: title.id, episodeId: target.episodeId ?? null },
+    title.name,
+  );
 
   const parts: DetailParts = {
     title,
+    addToSession,
     canManage,
-    target: playTarget(title),
+    target,
     myList,
     versions,
     versionChoice,
@@ -351,6 +362,7 @@ function TitleHeading({
 
 function PhoneTitleDetail({
   title,
+  addToSession,
   canManage,
   target,
   myList,
@@ -390,7 +402,13 @@ function PhoneTitleDetail({
           className="px-1 text-label/label"
         />
       </div>
-      <PhoneActions title={title} target={target} version={version} myList={myList} />
+      <PhoneActions
+        title={title}
+        target={target}
+        version={version}
+        myList={myList}
+        addToSession={addToSession}
+      />
       {title.kind === "show" ? <Episodes show={title} phone /> : null}
       <TitleRows title={title} phone />
       {links.length === 0 ? null : (
@@ -407,11 +425,13 @@ function PhoneActions({
   target,
   version,
   myList,
+  addToSession,
 }: {
   readonly title: TitleDetail;
   readonly target: PlayTarget;
   readonly version: MediaFileId | undefined;
   readonly myList: MyListToggle;
+  readonly addToSession: (() => void) | null;
 }) {
   return (
     <div className="flex justify-around px-6 pt-4.5 pb-1">
@@ -442,12 +462,23 @@ function PhoneActions({
       {title.trailer === null ? null : (
         <TrailerButton trailer={title.trailer} name={title.name} phone />
       )}
+      {addToSession === null ? null : (
+        <button
+          type="button"
+          onClick={addToSession}
+          className="flex w-26 cursor-pointer flex-col items-center gap-1.5 text-caption/caption text-text-muted"
+        >
+          <ListPlusIcon className="size-5.5 text-text" strokeWidth={1.75} aria-hidden />
+          Add to Up next
+        </button>
+      )}
     </div>
   );
 }
 
 function DesktopTitleDetail({
   title,
+  addToSession,
   canManage,
   target,
   myList,
@@ -510,6 +541,12 @@ function DesktopTitleDetail({
             >
               {myList.inList ? <CheckIcon strokeWidth={1.75} /> : <PlusIcon strokeWidth={1.75} />}
             </Button>
+            {addToSession === null ? null : (
+              <Button variant="secondary" size="lg" onClick={addToSession}>
+                <ListPlusIcon strokeWidth={1.75} aria-hidden />
+                Add to Up next
+              </Button>
+            )}
           </div>
           <WatchProgress title={title} target={target} phone={false} />
           {title.overview === null ? null : (
