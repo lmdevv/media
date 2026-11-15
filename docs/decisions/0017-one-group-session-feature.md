@@ -273,7 +273,9 @@ session or link covers and nothing else.
 - Every member follows the clock, the host included. A client sends a heartbeat every 5 seconds
   from any screen while the person is in or waits for a session, so browsing elsewhere keeps their
   seat and keeps a host's session playing; closing every tab stops it, and 30 seconds later a host
-  away pauses the session.
+  away pauses the session. The iOS app sends it while the app runs, which iOS allows in the
+  background only while it plays or shows picture in picture, so a host watching there stays
+  present, as old rooms' player reports kept them.
 - A member who may control plays, pauses, and seeks through `control`. The player moves at once,
   and corrections wait for the answer. A refused move, or a seek against an older revision, leaves
   the player to return to the clock. The controls of a member who may not control show who can,
