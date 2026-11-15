@@ -154,6 +154,11 @@ export const useSessionPlayer = (
   }
 
   const session = following ? joined : null;
+
+  // The session stopped under the player: hold it until the viewer chooses to go on alone.
+  useEffect(() => {
+    if (stopped !== null) player.current?.pause();
+  }, [stopped, player]);
   const unavailable = following && target.status === "unavailable";
   const movedTo = following && target.status === "ready" && !matches ? target.target : null;
 
@@ -505,6 +510,31 @@ export const useSessionFollow = (
       ? null
       : `${watchedKey ?? ""}:${String(clock.revision)}:${step}:${head?.entryId ?? ""}`;
 
+  /**
+   * Takes out every queued copy of `key` but the first. The host may watch on two screens that
+   * both queue the next episode; each keeps the same copy, and taking out one already gone
+   * changes nothing, so they agree on one.
+   */
+  const dropRepeats = useCallback(
+    async (key: string): Promise<void> => {
+      const { page } = await platform.core.together.queue({
+        domain: MOVIES,
+        paginationOpts: { numItems: QUEUE_PAGE, cursor: null },
+      });
+
+      const copies = page.filter((entry) => entry.item !== null && itemKey(entry.item) === key);
+
+      await Promise.all(
+        copies
+          .slice(1)
+          .map((entry) =>
+            platform.core.together.remove({ domain: MOVIES, entryId: entry.entryId }),
+          ),
+      );
+    },
+    [platform],
+  );
+
   const tried = useRef<string | null>(null);
   const [retries, setRetries] = useState(0);
   const latest = useLatest({ nextEpisode, clock, watchedKey });
@@ -525,10 +555,10 @@ export const useSessionFollow = (
     const run = async (): Promise<void> => {
       if (step === "queue") {
         if (episode !== null) {
-          await platform.core.together.add({
-            item: itemOf({ titleId: episode.titleId, episodeId: episode.id }),
-            at: "next",
-          });
+          const next = itemOf({ titleId: episode.titleId, episodeId: episode.id });
+
+          await platform.core.together.add({ item: next, at: "next" });
+          await dropRepeats(itemKey(next));
         }
 
         // Queued once per item: whoever takes it out stops the countdown for everyone.
@@ -559,7 +589,7 @@ export const useSessionFollow = (
       active = false;
       clearTimeout(retry);
     };
-  }, [stepKey, step, retries, platform, latest]);
+  }, [stepKey, step, retries, platform, latest, dropRepeats]);
 
   const latestSession = useLatest(session);
   const followMove = followed.move;
