@@ -60,7 +60,7 @@ const band = (view: SessionView): string => {
     playing: null,
     playingHidden: false,
     entries: [],
-    anyQueued: false,
+    listing: "empty",
     following: null,
     starting: false,
     start: async () => "",

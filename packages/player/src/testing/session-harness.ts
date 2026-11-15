@@ -14,8 +14,9 @@ import { TestClock } from "effect/testing";
 import type { EngineEvent, EnginePlayback, EngineSource, PlayerEngine } from "../engine";
 import { PlaybackController } from "../playback-controller";
 import type { MusicCommands, Track } from "../playback-controller";
-import { SessionPlayback } from "../session-playback";
+import { SessionPlayback, SessionPresence } from "../session-playback";
 import type {
+  ServerTime,
   SessionFollow,
   SessionOp,
   SessionRunner,
@@ -274,6 +275,21 @@ interface Seat {
   readonly playback: SessionPlayback;
   /** Songs this person may not play, which their view hides. */
   readonly hidden: ReadonlySet<string>;
+  /** When their view first lists the queue; before, it loads, as its pages do. */
+  readonly listedFrom: number;
+  /** The heartbeats their device's clock is corrected by, when it is not the server's own. */
+  readonly presence: SessionPresence | null;
+}
+
+/** A device whose clock is off from the server's, and corrected by its own heartbeats. */
+interface DeviceClock {
+  /** How far the device's clock runs ahead of the server's; behind when negative. */
+  readonly skewMs: number;
+  /**
+   * Each way of its first heartbeat, when it is not the core's usual latency: a lopsided trip
+   * makes that sample's estimate of the server's time off by half the difference.
+   */
+  readonly firstTrip?: { readonly outMs: number; readonly backMs: number };
 }
 
 /** A call a member made to the core, and how it ended. */
@@ -316,6 +332,13 @@ export interface World {
       readonly hidden?: ReadonlyArray<string>;
       /** Its engine reports a load's start only on its next status, as the iOS engine does. */
       readonly reportsLate?: boolean;
+      /**
+       * Its player reads the server's time from its own heartbeats over this clock, rather than
+       * knowing it from the start.
+       */
+      readonly deviceClock?: DeviceClock;
+      /** Its view lists the queue only this long after it joins, as pages that load late. */
+      readonly listsQueueAfterMs?: number;
     },
   ) => Member;
   /**
@@ -444,14 +467,16 @@ export const scenario = async (
       track: seat.hidden.has(entry.track.id) ? null : entry.track,
     });
 
+    const listed = now() >= seat.listedFrom;
+
     return {
       sessionId: SESSION_ID,
       hosting: seat.hosting,
       mayControl: seat.hosting || guestsControl,
       clock,
       playing: shown(playing),
-      queued: queue.slice(0, 20).map(shown),
-      anyQueued: queue.length > 0,
+      queued: listed ? queue.slice(0, 20).map(shown) : [],
+      listing: listed ? (queue.length > 0 ? "listed" : "empty") : "loading",
     };
   };
 
@@ -552,6 +577,44 @@ export const scenario = async (
       }),
     );
 
+  /** The timers of a device whose clock is off from the server's by `device`. */
+  const timersOf = (device: DeviceClock): SessionTimers => ({
+    now: () => serverNow() + device.skewMs,
+    after: timers.after,
+  });
+
+  /** The server's time as a device off by `device` reads it from its own heartbeats. */
+  const presenceOver = (device: DeviceClock): SessionPresence => {
+    let trips = 0;
+
+    const beat = (): Promise<{ readonly serverTime: number }> => {
+      const trip = trips === 0 ? device.firstTrip : undefined;
+
+      trips += 1;
+
+      return runtime.runPromise(
+        Effect.gen(function* () {
+          yield* Effect.sleep(trip?.outMs ?? LATENCY_MS);
+
+          const serverTime = serverNow();
+
+          yield* Effect.sleep(trip?.backMs ?? LATENCY_MS);
+
+          return { serverTime };
+        }),
+      );
+    };
+
+    const presence = new SessionPresence(beat, timersOf(device));
+
+    presence.keep(SESSION_ID);
+
+    return presence;
+  };
+
+  /** The server's time, known from the start, as for a device whose clock is the server's. */
+  const exactTime: ServerTime = { now: serverNow, subscribe: () => () => undefined };
+
   const join: World["join"] = (name, seatOptions) => {
     const engine = new TimedEngine(now, seatOptions.reportsLate === true);
     const sources = instantSources();
@@ -574,16 +637,21 @@ export const scenario = async (
 
     controller.start();
 
+    const { deviceClock } = seatOptions;
+    const presence = deviceClock === undefined ? null : presenceOver(deviceClock);
+
     const playback = new SessionPlayback({
       controller,
       commands: { heartbeat, control: (op, sessionId) => control(name, op, sessionId) },
-      serverNow,
+      serverTime: presence ?? exactTime,
       describe: (cause) => (cause instanceof Refused ? cause.message : "failed"),
-      timers,
+      timers: deviceClock === undefined ? timers : timersOf(deviceClock),
       runner,
     });
 
     playback.start();
+
+    const listsAfter = seatOptions.listsQueueAfterMs ?? 0;
 
     const seat: Seat = {
       name,
@@ -591,11 +659,19 @@ export const scenario = async (
       mayControl: seatOptions.mayControl === true,
       playback,
       hidden: new Set(seatOptions.hidden ?? []),
+      listedFrom: now() + listsAfter,
+      presence,
     };
 
     seats.push(seat);
     engines.push(engine);
     playback.update(viewFor(seat));
+
+    if (listsAfter > 0) {
+      void later(listsAfter, () => {
+        seat.playback.update(viewFor(seat));
+      });
+    }
 
     return { name, engine, controller, playback };
   };
@@ -658,7 +734,11 @@ export const scenario = async (
     },
     advance,
     close: async () => {
-      for (const seat of seats) seat.playback.update(null);
+      for (const seat of seats) {
+        seat.playback.update(null);
+        seat.presence?.keep(null);
+      }
+
       await runtime.dispose();
     },
   };

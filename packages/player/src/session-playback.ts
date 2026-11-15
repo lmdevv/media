@@ -73,6 +73,13 @@ export interface SessionSong<T extends Track = Track> {
   readonly track: T | null;
 }
 
+/**
+ * What a player knows of a session's queue: nothing yet, as while its pages first load; a whole
+ * listing with no entries; or entries, from a whole listing. Only an empty whole listing says the
+ * session has nothing to move on to.
+ */
+export type QueueListing = "loading" | "empty" | "listed";
+
 /** The person's music session, as the player follows it. */
 export interface SessionFollow<T extends Track = Track> {
   readonly sessionId: string;
@@ -83,8 +90,8 @@ export interface SessionFollow<T extends Track = Track> {
   readonly playing: SessionSong<T>;
   /** What plays next, in order, as far as it was read. */
   readonly queued: ReadonlyArray<SessionSong<T>>;
-  /** Whether anything is queued, read or not. */
-  readonly anyQueued: boolean;
+  /** Whether anything is queued, as far as the queue is listed. */
+  readonly listing: QueueListing;
 }
 
 /** Time as the session sees it: the device's clock and one-shot timers. */
@@ -120,12 +127,19 @@ const globalRunner: SessionRunner = {
   runPromiseExit: (effect) => Effect.runPromiseExit(effect),
 };
 
+/** The server's time, as a client estimates it from heartbeats (`SessionPresence`). */
+export interface ServerTime {
+  /** The server's time now, or null until a heartbeat answered. */
+  readonly now: () => EpochMillis | null;
+  /** Calls `listener` after each heartbeat answer, which corrects `now`; returns the unsubscribe. */
+  readonly subscribe: (listener: () => void) => () => void;
+}
+
 /** What a `SessionPlayback` works with. */
 export interface SessionPlaybackOptions {
   readonly controller: PlaybackController;
   readonly commands: SessionCommands;
-  /** The server's time now, as `SessionPresence` estimates it. */
-  readonly serverNow: () => EpochMillis;
+  readonly serverTime: ServerTime;
   /** Says why a call failed, for the screen. */
   readonly describe: (cause: unknown) => string;
   readonly timers?: SessionTimers;
@@ -158,6 +172,12 @@ export interface SessionPlaybackState {
 
 const IDLE: SessionPlaybackState = { follower: null };
 
+/** The host's step at the end on its way: the wait for the song's end, or before a retry. */
+interface EndStep {
+  readonly kind: "end" | "retry";
+  readonly cancel: () => void;
+}
+
 /** The follower running for one playing entry and one load of it. */
 interface Running {
   readonly key: string;
@@ -171,9 +191,10 @@ interface Running {
  * Keeps a person present in their music session, and waiting for one, with a heartbeat every
  * `HEARTBEAT_MS` on any screen, and estimates the server's time from the answers (ADR 0017).
  */
-export class SessionPresence {
+export class SessionPresence implements ServerTime {
   readonly #heartbeat: () => Promise<{ readonly serverTime: number }>;
   readonly #timers: SessionTimers;
+  readonly #listeners = new Set<() => void>();
   #samples: ReadonlyArray<ClockSample> = [];
   #beating: string | null = null;
   #stop: (() => void) | null = null;
@@ -206,13 +227,21 @@ export class SessionPresence {
     beat();
   }
 
-  /** The server's time now, as heartbeats estimate it, or the device's until one answered. */
-  serverNow(): EpochMillis {
-    const now = this.#timers.now();
+  /** The server's time now, as heartbeats estimate it, or null until one answered. */
+  now = (): EpochMillis | null => {
     const offset = estimateClockOffset(this.#samples);
 
-    return offset === undefined ? EpochMillis.make(Math.max(0, now)) : toServerTime(now, offset);
-  }
+    return offset === undefined ? null : toServerTime(this.#timers.now(), offset);
+  };
+
+  /** Calls `listener` after each heartbeat answer; returns the unsubscribe. */
+  subscribe = (listener: () => void): (() => void) => {
+    this.#listeners.add(listener);
+
+    return () => {
+      this.#listeners.delete(listener);
+    };
+  };
 
   #beat(): void {
     const sentAt = this.#timers.now();
@@ -226,6 +255,8 @@ export class SessionPresence {
         };
 
         this.#samples = [...this.#samples, sample].slice(-CLOCK_SAMPLING.kept);
+
+        for (const listener of this.#listeners) listener();
 
         return undefined;
       },
@@ -242,7 +273,7 @@ export class SessionPresence {
 export class SessionPlayback<T extends Track = Track> {
   readonly #controller: PlaybackController;
   readonly #commands: SessionCommands;
-  readonly #serverNow: () => EpochMillis;
+  readonly #serverTime: ServerTime;
   readonly #describe: (cause: unknown) => string;
   readonly #timers: SessionTimers;
   readonly #runner: SessionRunner;
@@ -252,7 +283,7 @@ export class SessionPlayback<T extends Track = Track> {
   /** The stall hold a follower left, which the next follower of the same session takes over. */
   #hold: Hold | null = null;
   #heldIn: string | null = null;
-  #cancelEnd: (() => void) | null = null;
+  #end: EndStep | null = null;
   /** The host's move at the end on its way, as the clock revision it was decided against. */
   #movingOn: number | null = null;
   #snapshot: SessionPlaybackState = IDLE;
@@ -261,14 +292,14 @@ export class SessionPlayback<T extends Track = Track> {
   constructor({
     controller,
     commands,
-    serverNow,
+    serverTime,
     describe,
     timers = systemTimers,
     runner = globalRunner,
   }: SessionPlaybackOptions) {
     this.#controller = controller;
     this.#commands = commands;
-    this.#serverNow = serverNow;
+    this.#serverTime = serverTime;
     this.#describe = describe;
     this.#timers = timers;
     this.#runner = runner;
@@ -300,12 +331,25 @@ export class SessionPlayback<T extends Track = Track> {
     };
   };
 
-  /** Starts watching what the engine plays; returns the function that stops all of it. */
+  /**
+   * Starts watching what the engine plays and the server's time; returns the function that stops
+   * all of it. Each heartbeat answer plans the host's move at the end again, on the corrected time.
+   */
   start(): () => void {
     this.#unsubscribe?.();
-    this.#unsubscribe = this.#controller.subscribe(() => {
+
+    const stopEngine = this.#controller.subscribe(() => {
       this.#reconcile();
     });
+
+    const stopTime = this.#serverTime.subscribe(() => {
+      if (this.#end?.kind !== "retry") this.#planEnd();
+    });
+
+    this.#unsubscribe = () => {
+      stopEngine();
+      stopTime();
+    };
 
     return () => {
       this.update(null);
@@ -325,8 +369,7 @@ export class SessionPlayback<T extends Track = Track> {
 
     if (view === null) {
       this.#stopFollower();
-      this.#cancelEnd?.();
-      this.#cancelEnd = null;
+      this.#cancelEnd();
       this.#hold = null;
 
       if (before !== null) this.#controller.followSession(null);
@@ -487,8 +530,9 @@ export class SessionPlayback<T extends Track = Track> {
     }
 
     // A named entry may be one just added, which the view shows only once the queue answers; the
-    // core refuses one no longer queued.
-    if (key === undefined && !view.anyQueued) return Promise.resolve(null);
+    // core refuses one no longer queued, as it refuses a skip sent while the queue loads when
+    // nothing is queued.
+    if (key === undefined && view.listing === "empty") return Promise.resolve(null);
 
     const op: SessionOp =
       key === undefined
@@ -513,8 +557,11 @@ export class SessionPlayback<T extends Track = Track> {
 
     if (view?.playing.key !== itemId) return { positionMs: 0, playing: false };
 
+    // Until a heartbeat answered, the device's time; the follower corrects it once it samples.
+    const serverNow = this.#serverTime.now() ?? EpochMillis.make(Math.max(0, this.#timers.now()));
+
     return {
-      positionMs: positionAt(view.clock, this.#serverNow()),
+      positionMs: positionAt(view.clock, serverNow),
       playing: view.clock.status === "playing",
     };
   }
@@ -620,10 +667,14 @@ export class SessionPlayback<T extends Track = Track> {
    * heard of yet; a step that failed is tried again against the newest clock. The core starts the
    * next song past the end only if it was queued first by then (`carriedPast`), so the skip names
    * no entry: one taken out at the end is no reason to wait.
+   *
+   * The end is decided on the server's time at the moment of acting, never at planning: nothing is
+   * planned until a heartbeat answered, as the device's own clock may be far from the server's;
+   * each answer plans again; and the wait only plans again when it is over, so a move lands once
+   * the corrected time reaches the end.
    */
   #planEnd(): void {
-    this.#cancelEnd?.();
-    this.#cancelEnd = null;
+    this.#cancelEnd();
 
     const view = this.#view;
     const track = view?.playing.track ?? null;
@@ -639,15 +690,33 @@ export class SessionPlayback<T extends Track = Track> {
       return;
     }
 
+    const serverNow = this.#serverTime.now();
+
+    if (serverNow === null) return;
+
     const endServerTime =
       clock.anchorServerTime + (track.durationMs - clock.positionAtAnchorMs) / clock.playbackRate;
 
-    const wait = Math.max(0, endServerTime - this.#serverNow() + END_MARGIN_MS);
+    const wait = endServerTime - serverNow + END_MARGIN_MS;
 
-    this.#cancelEnd = this.#timers.after(wait, () => {
-      this.#cancelEnd = null;
+    if (wait <= 0) {
       void this.#moveOnAtEnd(view);
-    });
+
+      return;
+    }
+
+    this.#end = {
+      kind: "end",
+      cancel: this.#timers.after(wait, () => {
+        this.#end = null;
+        this.#planEnd();
+      }),
+    };
+  }
+
+  #cancelEnd(): void {
+    this.#end?.cancel();
+    this.#end = null;
   }
 
   async #moveOnAtEnd(decided: SessionFollow<T>): Promise<void> {
@@ -661,7 +730,8 @@ export class SessionPlayback<T extends Track = Track> {
       view.clock.revision === decided.clock.revision;
 
     // Decided once per clock: a newer one decides again, and a move on its way is not sent twice.
-    if (!unchanged || this.#movingOn === view.clock.revision) return;
+    // Until the queue is listed, whether anything plays next is unknown: its listing decides.
+    if (!unchanged || this.#movingOn === view.clock.revision || view.listing === "loading") return;
 
     const { revision } = view.clock;
     const { sessionId } = view;
@@ -669,7 +739,7 @@ export class SessionPlayback<T extends Track = Track> {
     this.#movingOn = revision;
 
     try {
-      if (view.anyQueued) {
+      if (view.listing === "listed") {
         await this.#commands.control({ kind: "next", revision }, sessionId);
 
         return;
@@ -689,11 +759,14 @@ export class SessionPlayback<T extends Track = Track> {
       if (this.#movingOn !== revision) return;
 
       this.#movingOn = null;
-      this.#cancelEnd?.();
-      this.#cancelEnd = this.#timers.after(RETRY_MS, () => {
-        this.#cancelEnd = null;
-        this.#planEnd();
-      });
+      this.#cancelEnd();
+      this.#end = {
+        kind: "retry",
+        cancel: this.#timers.after(RETRY_MS, () => {
+          this.#end = null;
+          this.#planEnd();
+        }),
+      };
     }
   }
 
@@ -709,7 +782,7 @@ export class SessionPlayback<T extends Track = Track> {
 /**
  * The session as the controller plays it: its playing entry first, then what is queued, up to the
  * first entry whose song it does not have yet, so the engine never preloads a song that does not
- * play next. A hidden entry ends it the same way.
+ * play next. A hidden entry ends it the same way, and it is whole only once the queue is listed.
  */
 const queueOf = <T extends Track>(view: SessionFollow<T>): QueueState => {
   const songs = [view.playing, ...view.queued];
@@ -722,7 +795,7 @@ const queueOf = <T extends Track>(view: SessionFollow<T>): QueueState => {
 
   return {
     entries,
-    complete: known === -1,
+    complete: known === -1 && view.listing !== "loading",
     current: view.playing.key,
     shuffle: false,
     repeat: "off",

@@ -525,17 +525,30 @@ preloaded song is that entry's end.
 
 The host's player moves the session on, on the session's clock, never on its own engine's end:
 
-| The session's clock        | Queued    | The host's player                                                                                        |
-| -------------------------- | --------- | -------------------------------------------------------------------------------------------------------- |
-| playing to the song's end  | something | skips to it 40 ms after the end, and the core carries the time past it                                   |
-| playing to the song's end  | nothing   | pauses it, then takes it back to the song's start, as old music's player stopped at the end of its queue |
-| paused past the song's end | something | skips to it at once: the next song waits at its start, paused                                            |
-| paused past the song's end | nothing   | takes it back to the song's start                                                                        |
-| anything else              |           | nothing                                                                                                  |
+| The session's clock          | Queued, as the queue is listed                 | The host's player                                                                                        |
+| ---------------------------- | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| playing to the song's end    | something                                      | skips to it 40 ms after the end, and the core carries the time past it                                   |
+| playing to the song's end    | nothing, in a whole listing read now           | pauses it, then takes it back to the song's start, as old music's player stopped at the end of its queue |
+| paused past the song's end   | something                                      | skips to it at once: the next song waits at its start, paused                                            |
+| paused past the song's end   | nothing, in a whole listing read now           | takes it back to the song's start                                                                        |
+| at or past either end, above | not known yet, as while its pages first arrive | waits for the listing, then decides as above                                                             |
+| anything else                |                                                | nothing                                                                                                  |
 
 It decides once per clock revision. A move refused or lost is tried again after 2 seconds against
 the newest clock, so a person's pause made meanwhile always stands. A guest's player never moves
 the session at a song's end; it waits there, at the end of its song, until the session moves on.
+
+The end is a server time, and the host's player decides it at the moment of acting, on its
+estimate of the server's time from heartbeats: it plans nothing until a heartbeat has answered,
+plans again on each answer, and a wait that runs out only plans again, so the move goes once the
+corrected time reaches the end (fix round 2: when the song's details arrived before the first
+heartbeat answered, a host whose device clock ran 30 seconds fast skipped the song 30 seconds early
+for everyone, and a slow one left a gap). Whether anything is queued comes from the queue's
+listing in three states: still loading, entries, or a whole listing with none. A page opened again
+near a song's end knows the song before its queue's pages arrive, and the end waits for them; a
+last whole listing kept while the pages load again counts for its entries, which the core checks
+on the skip, but not for being empty, which an add made meanwhile may have changed (fix round 2: a
+host who reloaded near the end paused the Jam and took it back to the song's start).
 
 ### Starting, joining, and the queue
 

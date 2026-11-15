@@ -20,6 +20,10 @@ const driftOf = (world: World, member: Member): number => {
 const changesTo = (member: Member, songId: string) =>
   member.engine.heard.filter((heard) => heard.song === songId && heard.kind !== "seek");
 
+/** When the session's song, played from its start by `world.move`, ends, on the device's clock. */
+const endOf = (world: World, lengthMs: number): number =>
+  (world.calls.find((call) => call.op.kind === "play")?.at ?? Number.NaN) + lengthMs;
+
 describe("a music session's players", { timeout: 60_000 }, () => {
   it("play the session's song where its clock stands, in step", async () => {
     await scenario(song("a", 60), [song("b", 60)], async (world) => {
@@ -145,6 +149,96 @@ describe("a music session's players", { timeout: 60_000 }, () => {
         expect(member.engine.samplePlayback()).toMatchObject({ playing: false });
         expect(member.engine.samplePlayback().positionMs).toBeLessThan(120);
       }
+    });
+  });
+
+  for (const skewMs of [30_000, -30_000]) {
+    it(`move the session on at the song's end when the host's clock runs ${String(skewMs / 1000)} s off and the song is known before a heartbeat answers`, async () => {
+      await scenario(song("a", 20), [song("b", 60), song("c", 60)], async (world) => {
+        const guest = world.join("Aiko", {});
+
+        await world.advance(500);
+        world.move("Lucía", { kind: "play" });
+        await world.advance(5_000);
+
+        // The host's page opens again with the session playing: it knows the song at once, and the
+        // server's time only once its first heartbeat answers.
+        const host = world.join("Lucía", { hosting: true, deviceClock: { skewMs } });
+
+        await world.advance(25_000);
+
+        const skips = world.calls.filter((call) => call.op.kind === "next");
+
+        expect(skips).toMatchObject([{ by: "Lucía", outcome: "applied" }]);
+
+        const end = endOf(world, 20_000);
+
+        expect(skips[0]?.at).toBeGreaterThanOrEqual(end);
+        expect(skips[0]?.at).toBeLessThan(end + 300);
+        expect(skips[0]?.startedAt).toBeGreaterThan(0);
+        expect(world.playing().track.id).toBe("b");
+        expect(changesTo(guest, "b")[0]?.kind).toBe("advance");
+
+        for (const member of [host, guest]) {
+          expect(Math.abs(driftOf(world, member))).toBeLessThan(120);
+        }
+      });
+    });
+  }
+
+  for (const [label, firstTrip] of [
+    ["ahead of", { outMs: 1_000, backMs: 30 }],
+    ["behind", { outMs: 30, backMs: 1_000 }],
+  ] as const) {
+    it(`move the session on at the song's end when the host's first heartbeat put the server's time ${label} where it is`, async () => {
+      await scenario(song("a", 20), [song("b", 60)], async (world) => {
+        world.join("Aiko", {});
+
+        await world.advance(500);
+        world.move("Lucía", { kind: "play" });
+        await world.advance(2_000);
+
+        // A lopsided trip puts the first estimate about half a second off; the next heartbeat's
+        // shorter trip corrects it, and the end is planned again on it.
+        world.join("Lucía", { hosting: true, deviceClock: { skewMs: 12_000, firstTrip } });
+        await world.advance(25_000);
+
+        const skips = world.calls.filter((call) => call.op.kind === "next");
+        const end = endOf(world, 20_000);
+
+        expect(skips).toMatchObject([{ by: "Lucía", outcome: "applied" }]);
+        expect(skips[0]?.at).toBeGreaterThanOrEqual(end);
+        expect(skips[0]?.at).toBeLessThan(end + 300);
+      });
+    });
+  }
+
+  it("move on, never back to the song's start, when the host's page opens near the end and the queue lists late", async () => {
+    await scenario(song("a", 20), [song("b", 60), song("c", 60)], async (world) => {
+      const guest = world.join("Aiko", {});
+
+      await world.advance(500);
+      world.move("Lucía", { kind: "play" });
+      await world.advance(18_000);
+
+      // The host's page opens 2 s before the end; the song's details arrive at once, and the queue's
+      // pages 2 s after the end.
+      world.join("Lucía", { hosting: true, listsQueueAfterMs: 4_000 });
+      await world.advance(8_000);
+
+      const end = endOf(world, 20_000);
+      const byHost = world.calls.filter((call) => call.by === "Lucía" && call.at > end - 5_000);
+
+      expect(byHost.map((call) => call.op.kind)).toEqual(["next"]);
+      expect(byHost[0]).toMatchObject({ outcome: "applied" });
+      expect(byHost[0]?.at).toBeGreaterThanOrEqual(end + 2_000);
+      expect(world.playing().track.id).toBe("b");
+      expect(world.clock().status).toBe("playing");
+
+      // The guest's engine moved on by itself at the end; the skip carried the time since, so it
+      // never went back.
+      expect(changesTo(guest, "b").map((heard) => heard.kind)).toEqual(["advance"]);
+      expect(Math.abs(driftOf(world, guest))).toBeLessThan(120);
     });
   });
 

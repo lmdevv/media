@@ -19,6 +19,7 @@ import {
 
 import { NO_CONTROL, playingKey } from "./session-playback";
 import type {
+  QueueListing,
   SessionControl,
   SessionFollow,
   SessionOp,
@@ -100,10 +101,10 @@ export interface SessionData {
   readonly playing: Track | null;
   /** The playing song is one this person may not play. */
   readonly playingHidden: boolean;
-  /** The session's queue in play order, as far as its pages have arrived. */
+  /** The session's queue in play order, as its last whole listing lists it; none until one. */
   readonly entries: ReadonlyArray<SessionEntry>;
-  /** Anything is queued, shown or not. */
-  readonly anyQueued: boolean;
+  /** Whether anything is queued, shown or not, as far as the queue is listed. */
+  readonly listing: QueueListing;
 }
 
 /** The person's music session for the screens, once read. */
@@ -196,18 +197,28 @@ interface Whole {
 }
 
 /**
+ * A session's queue as its pages list it: not whole yet, or whole, now or the last time the pages
+ * were (`useSessionQueue`).
+ */
+type QueueRows =
+  | { readonly whole: "not-yet" }
+  | { readonly whole: "now" | "before"; readonly rows: ReadonlyArray<QueueRow> };
+
+const NOT_YET: QueueRows = { whole: "not-yet" };
+
+/**
  * Every entry of the queue of the person's session `sessionId`, followed live, loading the next
- * page as soon as one arrives, as `useQueueListing` follows the listener's own queue; null outside
- * a joined session and until every page first arrived. A session the person joins, or joins
- * again, starts pages of its own. The last whole listing stays while the pages load again, as
- * when a page grew past what one call may read and splits, or one failed, as one whose cursor
+ * page as soon as one arrives, as `useQueueListing` follows the listener's own queue; not whole
+ * outside a joined session and until every page first arrived. A session the person joins, or
+ * joins again, starts pages of its own. The last whole listing stays while the pages load again,
+ * as when a page grew past what one call may read and splits, or one failed, as one whose cursor
  * Convex refuses, which starts the pages over: the player never loses what plays next.
  */
 const useSessionQueue = (
   platform: PlatformSdk,
   pagedStore: SessionPagedStore,
   sessionId: string | null,
-): ReadonlyArray<QueueRow> | null => {
+): QueueRows => {
   const [followed, setFollowed] = useState<Followed | null>(null);
   const [last, setLast] = useState<Whole | null>(null);
 
@@ -244,7 +255,26 @@ const useSessionQueue = (
     };
   }, [failed, followed, platform, pagedStore]);
 
-  return whole ?? (last !== null && last.sessionId === sessionId ? last.rows : null);
+  return useMemo((): QueueRows => {
+    if (whole !== null) return { whole: "now", rows: whole };
+
+    return last !== null && last.sessionId === sessionId
+      ? { whole: "before", rows: last.rows }
+      : NOT_YET;
+  }, [whole, last, sessionId]);
+};
+
+/**
+ * What `rows`, the entries of `listed`, say is queued: entries; nothing, only when the pages list
+ * the whole queue now; and otherwise not known yet. A last listing that had nothing may be behind
+ * an add made while the pages load again.
+ */
+const listingOf = (listed: QueueRows, rows: ReadonlyArray<QueueRow>): QueueListing => {
+  if (listed.whole === "not-yet") return "loading";
+
+  if (rows.length > 0) return "listed";
+
+  return listed.whole === "now" ? "empty" : "loading";
 };
 
 const songOf = (item: JoinedSession["item"] | QueueRow["item"]): string | null =>
@@ -270,7 +300,7 @@ export const useSessionData = (
   );
 
   const joined = view?.state === "joined" ? view : null;
-  const rows = useSessionQueue(platform, pagedStore, joined?.sessionId ?? null);
+  const listed = useSessionQueue(platform, pagedStore, joined?.sessionId ?? null);
 
   const [shelf] = useState(
     () =>
@@ -284,15 +314,16 @@ export const useSessionData = (
   // Each entry once, by its id, should a row show on two pages for a moment as they move.
   const queued = useMemo((): ReadonlyArray<QueueRow> => {
     const seen = new Set<string>();
+    const rows = listed.whole === "not-yet" ? [] : listed.rows;
 
-    return (rows ?? []).filter((row) => {
+    return rows.filter((row) => {
       if (seen.has(row.entryId)) return false;
 
       seen.add(row.entryId);
 
       return true;
     });
-  }, [rows]);
+  }, [listed]);
 
   const wanted = useMemo(() => {
     const ids = queued.flatMap((row) => {
@@ -330,12 +361,12 @@ export const useSessionData = (
 
   const playing = playingId === null ? null : (songs.get(playingId) ?? null);
   const playingHidden = joined !== null && playingId === null;
-  const anyQueued = queued.length > 0;
+  const listing = listingOf(listed, queued);
 
   // One object while nothing changed, so the player follows the session only when it changes.
   return useMemo(
-    (): SessionData => ({ view, playing, playingHidden, entries, anyQueued }),
-    [view, playing, playingHidden, entries, anyQueued],
+    (): SessionData => ({ view, playing, playingHidden, entries, listing }),
+    [view, playing, playingHidden, entries, listing],
   );
 };
 
@@ -358,7 +389,7 @@ export const followOf = (data: SessionData): SessionFollow<Track> | null => {
     clock: view.clock,
     playing: song(playingKey(view.sessionId, view.entryId), data.playing),
     queued: data.entries.map((entry) => song(entry.key, entry.track)),
-    anyQueued: data.anyQueued,
+    listing: data.listing,
   };
 };
 

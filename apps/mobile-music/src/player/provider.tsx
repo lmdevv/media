@@ -1334,7 +1334,7 @@ export function PlayerProvider({ children }: { readonly children: ReactNode }) {
           heartbeat: () => platform.core.together.heartbeat({ domain: MUSIC }),
           control: sessionControl(platform),
         },
-        serverNow: () => presence.serverNow(),
+        serverTime: presence,
         describe: describeFailure,
       }),
   );

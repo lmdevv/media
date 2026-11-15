@@ -464,7 +464,7 @@ export function PlayerProvider({
           heartbeat: () => platform.core.together.heartbeat({ domain: MUSIC }),
           control: sessionControl(platform),
         },
-        serverNow: () => presence.serverNow(),
+        serverTime: presence,
         describe: messageOf,
       }),
   );
