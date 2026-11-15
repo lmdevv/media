@@ -141,6 +141,12 @@ music clients adopt it in phase 6.
 - The queue holds up to 500 items to play next, counted in `counters`. `add` puts one first or
   last, and `next` plays the first from its start and takes it out of the queue. Phase 6 adds
   reordering where a client needs it.
+- `add` with `revision` queues an item that follows the one playing, such as the next episode,
+  as old movies' rooms named the episode they moved on from (`fromEpisodeId`). It fails
+  `conflict` once the clock moved past that revision, as a stale seek does, and takes out any
+  copy of the item already queued, each only if the caller may remove it. Two of a host's
+  screens racing to queue the next episode then queue it once, and a late add cannot queue it
+  again after the session moved on to it.
 - A queue page holds only as many entries as one call can decide inside `PAGE_ROWS_MAX` reads
   (ADR 0005). Each entry may cost its row, its item and the item's library, one grant per key of
   the viewer's reach, and who queued it. That is 44 entries for a person in 16 groups and 164 for
@@ -243,8 +249,11 @@ Left for later units:
 ## Movie group sessions in the clients (amended 2026-11-15)
 
 The movies web client and the movies iOS app run movie group sessions, as old movies' watch rooms
-did, over the commands above. The core is unchanged but for one read, `movies.titles.episode`:
-an episode item names no show, and starting playback names both, so a member resolves it.
+did, over the commands above. The core changes in two places. `add` takes `revision`, above. And
+one read, `movies.titles.episode`: an episode item names no show, and starting playback names
+both, so a member resolves it. It needs `movies:play`, not `movies:read`, and answers whoever may
+play the episode as `movies.play.start` decides it, so a platform guest reads the episode their
+session or link covers and nothing else.
 
 ### The shared clock code
 
@@ -272,14 +281,22 @@ an episode item names no show, and starting playback names both, so a member res
   from picture in picture, is corrected; a pause there detaches them until they play.
 - Clocks arrive from the subscription and from each answer; only a higher revision is applied.
   A player's echo of the follower's own command is counted out, so it never moves the session.
+- Each player event carries the revision of the clock applied when the follower heard it, and
+  each follower hears one load's player. An event from an older revision moves nothing, and an
+  event moves the session only while the player still stands where it says, so a late `playing`
+  read against a newer paused clock cannot play the session again.
 - The host's player pauses the session where it stalled, after a second of waiting (pause, then a
   seek to its position), and plays it on once it recovers, unless someone moved the clock since.
   A stall right after the follower's own seek does not count. Guests catch up on their own.
+  The pause runs on without its follower, so a follower replaced while it is on the way, as on a
+  stream reload, hands the hold to the next one, which plays the session on once its player
+  recovers.
 
 ### The end of an item
 
 The core keeps no countdown, so the queue carries it. In the credits of an episode (its last
-tenth, at most 30 seconds) the host's client queues the next episode first. Every member who sees
+tenth, at most 30 seconds) the host's client queues the next episode first, against the revision
+it decided on, so the core queues it once across the host's screens. Every member who sees
 it first in the queue counts down on the session's clock, so a pause holds the countdown. When it
 ends, or the item ends, the host's client skips to it; a member who may control can skip sooner.
 Watch credits, the host's, takes the entry out, which stops everyone's countdown. At the end of an
