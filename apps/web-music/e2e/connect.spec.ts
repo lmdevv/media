@@ -124,6 +124,46 @@ test("a pause in one of Aiko's browsers pauses the other at once, and a move con
   }
 });
 
+test("a move to a browser that closed before it loads waits for it, then says it didn't respond", async ({
+  browser,
+  baseURL,
+}) => {
+  if (stack === null) return;
+
+  const aiko = await createPerson(stack, "aiko", "member");
+  const laptop = await openBrowser(browser, baseURL, aiko);
+  const desk = await openBrowser(browser, baseURL, aiko);
+
+  try {
+    await playFirstSong(laptop.page);
+    await desk.page.goto("/music/");
+    await expect(desk.page.getByRole("status").filter({ hasText: "Playing on" })).toBeVisible({
+      timeout: 15_000,
+    });
+    // The core counts the closed desk online until its last report is 30 seconds old.
+    await desk.context.close();
+
+    await laptop.page.getByRole("button", { name: "Play on another device" }).click();
+
+    const deskRow = laptop.page
+      .getByRole("menu", { name: "Play on" })
+      .getByRole("menuitemradio")
+      .filter({ hasNotText: "This browser" });
+
+    await deskRow.click();
+
+    // The core took the move, which stopped the laptop, but nothing loads it on the desk.
+    await expect.poll(() => audioSeconds(laptop.page), { timeout: 15_000 }).toBe(0);
+    await expect(deskRow.getByRole("img", { name: "Starting" })).toBeVisible();
+    await expect(
+      laptop.page.getByText("That device didn't respond. Check that it's online and try again."),
+    ).toBeVisible({ timeout: 15_000 });
+  } finally {
+    await laptop.context.close();
+    await desk.context.close();
+  }
+});
+
 test("Aiko seeks her other browser, and plays an album there from the album's menu", async ({
   browser,
   baseURL,
