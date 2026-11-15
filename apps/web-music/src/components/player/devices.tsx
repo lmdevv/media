@@ -12,7 +12,7 @@ import { formatDuration } from "@/lib/format";
 import { HOTKEYS } from "@/lib/hotkeys";
 import { cn } from "@/lib/utils";
 
-import { KIND_LABEL, deviceIcon, deviceKind } from "./player-actions";
+import { KIND_LABEL, deviceIcon, deviceKind, thisBrowserKind } from "./player-actions";
 
 const TRANSFER_TIMEOUT_MS = 10_000;
 
@@ -175,7 +175,7 @@ export function DeviceList({ touch = false }: { readonly touch?: boolean }) {
       <DeviceRow
         name="This browser"
         detail={hereDetail()}
-        Icon={deviceIcon("web")}
+        Icon={deviceIcon(thisBrowserKind())}
         active={player.here}
         isPending={pending === "here"}
         playing={playing}
