@@ -176,7 +176,9 @@ const reportKey = (here: PlayingHere | null, status: string, seeks: number, appl
  * plays here. A `load` this device already started only plays, pauses, or seeks the queue entry it
  * started, while that entry plays here. A `stop` lets go of the song, as when playback moves to
  * another device. Whatever happens to a request, this device then reports it applied, so the core
- * settles it.
+ * settles it. No start waits without end: a newer request, a tap here, the queue's whole listing,
+ * an answer from the network, the core settling the request, or this device stopping ends each
+ * wait.
  */
 export class ConnectPlayer {
   readonly #controller: PlaybackController;
@@ -255,12 +257,18 @@ export class ConnectPlayer {
 
   /**
    * Takes the request the core shows now, or null when none waits. While this device is not
-   * started, it only notes the revision, which a tap here makes moot ({@link supersede}).
+   * started, it only notes the revision, which a tap here makes moot ({@link supersede}). Null
+   * drops a load still starting: the core settled it, as it settles every request when this
+   * device reports again after 30 seconds of silence, so a request missed meanwhile never starts.
    */
   take(request: ConnectRequest | null): void {
     this.#shown = request;
 
-    if (request === null) return;
+    if (request === null) {
+      if (this.#load?.phase === "starting") this.#load = null;
+
+      return;
+    }
 
     this.#seen = Math.max(this.#seen, request.revision);
 
@@ -396,7 +404,9 @@ export class ConnectPlayer {
    * Starts a load of a song. The queue plays that song now when a move lands here, so this device
    * plays that entry from the position and keeps the queue; any other song replaces the queue.
    * Until the queue this device holds says which entry it plays, the load waits for it, so a move
-   * never replaces the queue (`#changed` tries again).
+   * never replaces the queue (`#changed` tries again). A whole listing that leaves the current
+   * entry out ends the wait: that entry's song is one the listener may not play, and the core
+   * loads only a song they may, so the load replaces the queue.
    */
   #startSong(load: StartingLoad): void {
     const trackId = load.ask.item.ref.id;

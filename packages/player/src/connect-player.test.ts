@@ -799,7 +799,7 @@ describe("ConnectPlayer, against what is current when a request or a step of a l
     const run = connected();
 
     run.controller.sync(queueOf([one, two], "1"));
-    run.controller.sync(queueOf([one, two], "9"));
+    run.controller.sync(queueOf([one, two], "9", { complete: false }));
     run.connect.take(ask(3, loadOf(song("z"), 3, run.clock.now)));
     await settle();
 
@@ -815,6 +815,85 @@ describe("ConnectPlayer, against what is current when a request or a step of a l
       playing: true,
     });
     expect(last(run.reports)).toMatchObject({ applied: 3 });
+  });
+
+  it("plays a loaded song once the whole listing leaves out the entry the queue plays, and keeps waiting while its pages load", async () => {
+    const run = connected({ playCurrent: "z1" });
+
+    run.connect.take(ask(1, loadOf(song("z"), 1, run.clock.now)));
+    run.controller.sync(queueOf([one, two], "9", { complete: false }));
+    await settle();
+
+    expect(names(run.sent)).toStrictEqual([]);
+    expect(last(run.reports)).toStrictEqual({ song: null, applied: 0 });
+
+    // The core leaves entry 9 out of the listing: the listener may no longer play its song.
+    run.controller.sync(queueOf([one, two], "9"));
+    await settle();
+
+    expect(names(run.sent).filter((name) => name.startsWith("play:"))).toStrictEqual(["play:z,0"]);
+    expect(run.controller.playingHere()).toMatchObject({
+      trackId: "z",
+      itemId: "z1",
+      playing: true,
+    });
+    expect(last(run.reports)).toMatchObject({ song: { trackId: "z" }, applied: 1 });
+  });
+
+  it("never starts a load the core settled while this device was away, once its queue arrives", async () => {
+    const run = connected();
+
+    run.connect.take(ask(1, { ...loadOf(song("a"), 1, run.clock.now), positionMs: 60_000 }));
+    await settle();
+    // Back after 30 seconds without reporting: the core settled every request made before.
+    run.connect.take(null);
+    run.controller.sync(queueOf([one, two], "1"));
+    await settle();
+
+    expect(run.record.loads).toHaveLength(0);
+    expect(names(run.sent)).toStrictEqual([]);
+    expect(run.controller.playingHere()).toBeNull();
+  });
+
+  it("writes no queue for an album load the core settled while its songs loaded", async () => {
+    const run = connected();
+
+    run.albumGate.holding = true;
+    run.connect.take(ask(1, loadOf(album("al"), 1, run.clock.now)));
+    await settle();
+    run.connect.take(null);
+    run.albumGate.release("al");
+    await settle();
+
+    expect(names(run.sent)).toStrictEqual([]);
+    expect(run.controller.playingHere()).toBeNull();
+  });
+
+  it("pauses an album's first song where a pause asks when the new queue loaded it before its write answered", async () => {
+    const run = connected({ playCurrent: "new" });
+    const loaded = loadOf(album("al"), 1, run.clock.now);
+
+    run.gates.play.holding = true;
+    run.connect.take(ask(1, loaded));
+    await settle();
+    run.connect.take(ask(2, { ...loaded, playing: false, positionMs: 4000 }));
+    await settle();
+    // Convex can show a mutation's writes to its subscriptions before it answers the mutation.
+    run.controller.sync(queueOf([entry("c", "new"), entry("d", "new2")], "new"));
+    await settle();
+    run.gates.play.release("play");
+    await settle();
+
+    expect(run.engine().samplePlayback()).toStrictEqual({ positionMs: 4000, playing: false });
+    expect(run.controller.playingHere()).toMatchObject({
+      trackId: "c",
+      playing: false,
+      positionMs: 4000,
+    });
+    expect(last(run.reports)).toMatchObject({
+      song: { trackId: "c", playing: false, positionMs: 4000 },
+      applied: 2,
+    });
   });
 
   it("never lands a move that waited for the queue once a newer request replaced it", async () => {

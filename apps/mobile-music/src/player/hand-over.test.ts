@@ -69,6 +69,7 @@ const pausedOfflineOnB = async () => {
       { itemId: "a", autoplay: false, track: songA },
       { itemId: "b", autoplay: false, track: songB },
     ],
+    complete: true,
     current: "a",
     shuffle: false,
     repeat: "off",

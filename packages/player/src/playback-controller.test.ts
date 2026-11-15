@@ -187,6 +187,29 @@ describe("PlaybackController", () => {
     expect(run.controller.getSnapshot().engineStatus).toBe("playing");
   });
 
+  it("starts a new queue where and as its newest ask says when the queue loaded its song before the write answered", async () => {
+    const run = setup({ playCurrent: "1" });
+    const asked = { now: { positionMs: 0, playing: true } };
+
+    run.gates.play.holding = true;
+    const replacing = run.controller.playTracksAt(["a", "b"], () => asked.now);
+    await settle();
+    asked.now = { positionMs: 30_000, playing: false };
+    // Convex can show a mutation's writes to its subscriptions before it answers the mutation.
+    run.controller.sync(queueOf([one, two], "1"));
+    await settle();
+    run.gates.play.release("play");
+    await replacing;
+    await settle();
+
+    expect(run.engine().samplePlayback()).toStrictEqual({ positionMs: 30_000, playing: false });
+    expect(run.controller.playingHere()).toMatchObject({
+      trackId: "a",
+      playing: false,
+      positionMs: 30_000,
+    });
+  });
+
   it("pauses a new queue's first song on its way here when the listener taps pause", async () => {
     const run = setup({ playCurrent: "1" });
 

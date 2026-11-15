@@ -55,8 +55,15 @@ export interface QueueEntry<T extends Track = Track> {
 
 /** The listener's queue as the core keeps it (`music.queue.get` and every `music.queue.list` page). */
 export interface QueueState<T extends Track = Track> {
-  /** Every entry, in play order. */
+  /** Every entry the listener may play, in play order. */
   readonly entries: ReadonlyArray<QueueEntry<T>>;
+  /**
+   * Whether `entries` is the queue's whole listing as it stands, every page in. False while the
+   * pages load again, as after a new queue, when `entries` is the last whole listing and may lack
+   * `current`. A whole listing lacks `current` only when the core leaves that entry out, as it
+   * does an entry whose song the listener may no longer play.
+   */
+  readonly complete: boolean;
   /** The entry playing; null for an empty queue. */
   readonly current: string | null;
   readonly shuffle: boolean;
@@ -106,9 +113,11 @@ export interface StartAt {
 
 /** The core's current queue entry as this device knows it: a Connect move lands on it (ADR 0018). */
 export type QueueCurrent =
-  /** The queue has not arrived yet, or the entries that arrived do not hold its current one yet. */
+  /** The queue has not arrived yet, or its pages are loading again and do not hold it yet. */
   | { readonly kind: "unknown" }
   | { readonly kind: "empty" }
+  /** The whole listing leaves it out: its song is one the listener may not play. */
+  | { readonly kind: "hidden" }
   | { readonly kind: "entry"; readonly itemId: string; readonly trackId: string };
 
 /** Builds the audio engines; the controller switches between them as quality and support allow. */
@@ -254,7 +263,8 @@ interface EarlyStart {
  * failure included, applies only while that still holds: a ticket its load's generation, a
  * preload the entry and stream it asked for, a jump its own pending move, and a history report
  * its start. A new queue's answer plays its entry as the listener's newest choice says, not as
- * when the queue was sent, unless Connect let go of this device meanwhile. The media server's
+ * when the queue was sent, unless Connect let go of this device meanwhile; an entry the new queue
+ * loaded before the answer plays or pauses as that choice says too. The media server's
  * recovery loads whatever entry is current once it answers. The engine's own events follow the
  * same rule: they belong to the load that gave the engine its source, and a later load, or an
  * unload, makes them stale until that load hands the engine its new source.
@@ -668,39 +678,16 @@ export class PlaybackController {
 
     this.#skipped.clear();
     this.#choose(playing);
-
-    if (this.#needsSource(loaded.entry)) {
-      if (playing) {
-        this.#update({ autoplayBlocked: false, error: null });
-        void this.#load(loaded.entry, target);
-      } else this.#stamp(target, false);
-
-      return true;
-    }
-
-    if (Math.abs(this.#livePositionMs() - target) > STEER_TOLERANCE_MS) this.seek(target);
-
-    // A load under way plays or pauses as `#wantPlaying` says once its source lands.
-    if (this.#loading) return true;
-    const audible = this.#isAudible();
-
-    if (playing && !audible) {
-      this.#update({ autoplayBlocked: false, error: null });
-
-      if (!this.#reloadIfExpired(this.#livePositionMs())) void this.#engine.play();
-    } else if (!playing && audible) {
-      this.#engine.pause();
-      this.#saveResume();
-    }
+    this.#steerLoaded(loaded, target);
 
     return true;
   }
 
   /**
    * The core's current queue entry and its song, as far as the queue this device holds tells:
-   * unknown before the queue arrives, or while the entries that arrived do not hold it yet, as
-   * while a new queue's pages load. A Connect load of a song waits on it to tell a move, which
-   * plays that entry, from a song that replaces the queue (ADR 0018).
+   * unknown before the queue arrives, or while its pages load again without it, as after a new
+   * queue, and hidden once the whole listing leaves it out. A Connect load of a song waits on it to
+   * tell a move, which plays that entry, from a song that replaces the queue (ADR 0018).
    */
   queueCurrent(): QueueCurrent {
     const queue = this.#queue;
@@ -710,9 +697,9 @@ export class PlaybackController {
     if (queue.current === null) return { kind: "empty" };
     const entry = this.#entryOf(queue.current);
 
-    return entry === null
-      ? { kind: "unknown" }
-      : { kind: "entry", itemId: entry.itemId, trackId: entry.track.id };
+    if (entry !== null) return { kind: "entry", itemId: entry.itemId, trackId: entry.track.id };
+
+    return queue.complete ? { kind: "hidden" } : { kind: "unknown" };
   }
 
   /**
@@ -931,6 +918,7 @@ export class PlaybackController {
     this.#resumeAt = startMs > 0 ? { itemId, positionMs: startMs } : null;
     this.#update({ current: itemId, error: null });
     const entry = this.#entryOf(itemId);
+    const loaded = this.#loaded;
 
     if (entry === null) {
       // The queue that holds it has not arrived yet; `sync` loads it once it does, unless the
@@ -938,8 +926,12 @@ export class PlaybackController {
       this.#unload();
 
       if (early !== null) void this.#loadEarly(itemId, early);
-    } else if (this.#loaded?.entry.itemId !== itemId || play) {
+    } else if (loaded?.entry.itemId !== itemId || play) {
       void this.#load(entry, this.#resumePositionFor(entry));
+    } else {
+      // Loaded already, as when a new queue arrived and loaded its first song before its write
+      // answered: the song stays loaded, and moves to `startMs` and pauses as this move asks.
+      this.#steerLoaded(loaded, this.#resumePositionFor(entry));
     }
 
     return pending;
@@ -1065,6 +1057,39 @@ export class PlaybackController {
     }
 
     return true;
+  }
+
+  /**
+   * Moves the song loaded here to `target` unless it is within a quarter second of it, then plays
+   * or pauses it as `#wantPlaying` says, so the engine ends doing what the controller means to. A
+   * song whose source failed loads again from `target` when it is to play.
+   */
+  #steerLoaded(loaded: LoadedEntry, target: number): void {
+    const playing = this.#wantPlaying;
+
+    if (this.#needsSource(loaded.entry)) {
+      if (playing) {
+        this.#update({ autoplayBlocked: false, error: null });
+        void this.#load(loaded.entry, target);
+      } else this.#stamp(target, false);
+
+      return;
+    }
+
+    if (Math.abs(this.#livePositionMs() - target) > STEER_TOLERANCE_MS) this.seek(target);
+
+    // A load under way plays or pauses as `#wantPlaying` says once its source lands.
+    if (this.#loading) return;
+    const audible = this.#isAudible();
+
+    if (playing && !audible) {
+      this.#update({ autoplayBlocked: false, error: null });
+
+      if (!this.#reloadIfExpired(this.#livePositionMs())) void this.#engine.play();
+    } else if (!playing && audible) {
+      this.#engine.pause();
+      this.#saveResume();
+    }
   }
 
   #choose(playing: boolean): void {

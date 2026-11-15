@@ -251,15 +251,23 @@ const queuePages = (platform: PlatformSdk) =>
     platform.music.queue.list.watch({ paginationOpts: { numItems: QUEUE_PAGE, ...span } }),
   );
 
+/** The queue's rows, and whether they are its whole listing as it stands. */
+interface QueueRows {
+  readonly rows: ReadonlyArray<QueueRow>;
+  /** False while pages reload and `rows` is the last whole listing. */
+  readonly whole: boolean;
+}
+
 /**
  * Every row of the listener's queue, followed live, loading the next page as soon as one arrives;
  * null until every page first arrived. A new queue (`music.queue.play`) lists another
  * generation's entries, so Convex refuses the cursors its pages were following (`InvalidCursor`,
  * which the SDK reports as a protocol error); the pages then start over from the top, as Convex's
  * own paginated hook does. The last whole list stays while pages reload, as when the queue grows
- * past a page or starts over, so the player never drops the song it shows.
+ * past a page or starts over, so the player never drops the song it shows; it then counts as not
+ * whole, so Connect waits for the pages before it tells a move from a new song (ADR 0018).
  */
-const useQueueRows = (platform: PlatformSdk): ReadonlyArray<QueueRow> | null => {
+const useQueueRows = (platform: PlatformSdk): QueueRows | null => {
   const [store, setStore] = useState(() => queuePages(platform));
   const [last, setLast] = useState<ReadonlyArray<QueueRow> | null>(null);
   const paged = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
@@ -287,7 +295,10 @@ const useQueueRows = (platform: PlatformSdk): ReadonlyArray<QueueRow> | null => 
     };
   }, [failed, platform]);
 
-  return whole ?? last;
+  const rows = whole ?? last;
+  const isWhole = whole !== null;
+
+  return useMemo(() => (rows === null ? null : { rows, whole: isWhole }), [rows, isWhole]);
 };
 
 /** The listener's queue once its state and every page have arrived; null before. */
@@ -300,11 +311,12 @@ const useQueue = (platform: PlatformSdk): QueueState<QueueTrack> | null => {
     if (data === null || list === null) return null;
 
     return {
-      entries: list.map((row) => ({
+      entries: list.rows.map((row) => ({
         itemId: row.itemId,
         autoplay: row.autoplay,
         track: { ...row.track, itemId: row.itemId, autoplay: row.autoplay },
       })),
+      complete: list.whole,
       current: data.current,
       shuffle: data.shuffle,
       repeat: data.repeat,

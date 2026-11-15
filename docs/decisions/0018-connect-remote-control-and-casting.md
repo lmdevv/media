@@ -414,23 +414,32 @@ revision that names an older load is still an older load, so a counter alone nev
 | `load` of an older load, or of one dropped              | anything                                       | changes nothing                                      | its revision                                  |
 | `stop`                                                  | anything                                       | lets go of the song, and drops a load still starting | its revision                                  |
 | the listener plays, pauses, skips, or plays a list here | anything                                       | drops a load still starting                          | every revision seen                           |
+| none: the core shows nothing left to apply              | a load still starts here                       | drops it, as the core settled it                     | nothing; the core settled it                  |
 
-| A step of a load's start answers                   | What holds now                                    | The device                                                                                                                                  |
-| -------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| the album's songs                                  | the load still starts here                        | writes the queue, as the load's newest ask says                                                                                             |
-| the album's songs failed                           | the load still starts here                        | drops it, and settles its newest ask as tried                                                                                               |
-| the album's songs, or their failure                | a newer request or the listener replaced the load | changes nothing; whoever replaced it settles                                                                                                |
-| the new queue's write                              | the load still starts here                        | starts the queue's entry as the load's newest ask says now, holds the load started on it, and settles                                       |
-| the new queue's write                              | a newer request or the listener replaced the load | changes nothing; the player follows the new queue, playing or paused as the listener last chose                                             |
-| the queue arrives, for a song's load waiting on it | the load still starts here                        | plays the queue's current entry from the position when it holds the song, keeping the queue, and otherwise replaces the queue with the song |
+| A step of a load's start answers                                                             | What holds now                                    | The device                                                                                                                                                                                                                 |
+| -------------------------------------------------------------------------------------------- | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| the album's songs                                                                            | the load still starts here                        | writes the queue, as the load's newest ask says                                                                                                                                                                            |
+| the album's songs failed                                                                     | the load still starts here                        | drops it, and settles its newest ask as tried                                                                                                                                                                              |
+| the album's songs, or their failure                                                          | a newer request or the listener replaced the load | changes nothing; whoever replaced it settles                                                                                                                                                                               |
+| the new queue's write                                                                        | the load still starts here                        | starts the queue's entry as the load's newest ask says now, holds the load started on it, and settles; an entry the new queue loaded before the write answered moves to the asked position and pauses, or plays from there |
+| the new queue's write                                                                        | a newer request or the listener replaced the load | changes nothing; the player follows the new queue, playing or paused as the listener last chose                                                                                                                            |
+| the queue arrives holding its current entry, for a song's load waiting on it                 | the load still starts here                        | plays that entry from the position when it holds the song, keeping the queue, and otherwise replaces the queue with the song                                                                                               |
+| the queue's whole listing arrives without its current entry, for a song's load waiting on it | the load still starts here                        | replaces the queue with the song, since the entry left out holds a song the listener may not play                                                                                                                          |
+| the queue arrives with its pages still loading and without its current entry                 | the load still starts here                        | keeps waiting                                                                                                                                                                                                              |
 
 - **Waiting for the queue.** A load of a song is a move only when the queue plays that song now,
   and a browser can tell only once its queue arrived and holds the current entry. Until then the
   load waits. So a move onto a browser that just opened, or one made while a new queue's pages
-  load, never replaces the shared queue with one song.
+  load, never replaces the shared queue with one song. A whole listing without the current entry
+  ends the wait: `music.queue.list` leaves out only an entry whose song the listener may no
+  longer play, as after their library access is revoked, and a load names only a song they may
+  play, so the entry left out never holds it, and the load replaces the queue.
 - **The listener's newest choice.** A new queue starts playing or paused as the listener last
   chose, here or through Connect, when its write answers, not as when it was sent. The old queue
-  ending meanwhile is no choice, so a list played then still plays.
+  ending meanwhile is no choice, so a list played then still plays. Convex can show a mutation's
+  writes to subscriptions before it answers the mutation, so the new queue may arrive and load its
+  first song first. The answer then applies that choice to the song loaded: it moves to the asked
+  position and pauses, or plays from there. The engine always ends doing what the player means.
 - **A song on its way.** Once a new queue's write answered, its first song counts as the song here
   while its ticket is on the way: the browser reports it, and a play, pause, or seek of it, sent
   from another device or tapped here, starts it as asked.
@@ -440,8 +449,12 @@ revision that names an older load is still an older load, so a counter alone nev
 - **A write already sent.** A newer request makes an older load's start moot, but a queue write
   it already sent still lands on the shared queue. The browser then follows the queue, as it follows
   any change of it, playing or paused as the listener last chose.
-- **How long a move waits.** A move waits until the queue's pages hold its current entry, or until
-  a newer request or a tap here replaces it.
+- **No start waits without end.** A load of a song waits for the queue's whole listing, which
+  ends the wait whether or not it holds the current entry. An album's songs and a queue write
+  wait for the network's answer. Any wait also ends when a newer request or a tap here replaces the
+  load, when the tab stops leading, or when the core shows nothing left to apply. The core settles
+  every request when a device reports again after 30 seconds of silence (Rules for reports and
+  requests), so a load still starting then is dropped and never starts.
 
 ### Edge cases settled in the build
 

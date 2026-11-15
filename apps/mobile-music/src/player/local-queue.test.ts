@@ -56,6 +56,7 @@ const sixSongs = () => {
 
   const server: QueueState<Track> = {
     entries: songs.map((track, index) => ({ itemId: `s${String(index)}`, autoplay: false, track })),
+    complete: true,
     current: "s1",
     shuffle: false,
     repeat: "off",
@@ -78,6 +79,7 @@ describe("seedLocal", () => {
         { itemId: "b", autoplay: false, track: two },
         { itemId: "c", autoplay: true, track: three },
       ],
+      complete: true,
       current: "c",
       shuffle: true,
       repeat: "all",
@@ -160,6 +162,7 @@ describe("the phone's own queue", () => {
         { itemId: "a", autoplay: false, track: one },
         { itemId: "b", autoplay: true, track: two },
       ],
+      complete: true,
       current: "a",
       shuffle: false,
       repeat: "off",
@@ -197,6 +200,7 @@ describe("the phone's own queue", () => {
         { itemId: "c", autoplay: false, track: three },
         { itemId: "d", autoplay: true, track: trackOf("Unfinished Sympathy") },
       ],
+      complete: true,
       current: "b",
       shuffle: false,
       repeat: "off",

@@ -41,12 +41,14 @@ export const entry = (id: string, itemId: string, durationMs = 200_000): QueueEn
   },
 });
 
+/** A queue whose listing is whole unless `fields` says its pages are still loading. */
 export const queueOf = (
   entries: ReadonlyArray<QueueEntry>,
   current: string | null,
   fields: Partial<QueueState> = {},
 ): QueueState => ({
   entries,
+  complete: true,
   current,
   shuffle: false,
   repeat: "off",
