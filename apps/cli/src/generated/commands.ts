@@ -816,6 +816,7 @@ export const generatedCommands = [
             playing: Schema.Boolean,
             positionMs: Schema.Finite,
             at: Schema.Finite,
+            loadRevision: Schema.Finite,
           }),
           Schema.Struct({ kind: Schema.Literal("stop"), at: Schema.Finite }),
         ]),

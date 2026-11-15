@@ -2,7 +2,7 @@
 
 - Status: Accepted, 2026-11-03. Amended 2026-11-04 with Connect as built, 2026-11-07 with the
   phase 3 review fixes, and 2026-11-15 with items, loading and moving playback, group-session
-  membership, and the two rules D60 keeps.
+  membership, the two rules D60 keeps, and the upgrade from v0.3.0's Connect rows.
 - Decisions: D35, D44, D60
 
 ## Context
@@ -100,14 +100,20 @@ A request is a desired state, not an event. Its ask is one of three:
 - `transport`: play or pause `item`, with `positionMs` held at server time `at`. It holds only
   while the device still plays that item, so a pause sent for one song never lands on the next.
 - `load`: play `item` from a position, whatever the device plays or whether it plays.
+  `loadRevision` is the revision of the request that first asked for this load. A device that
+  already started that load does not start it again: it only plays, pauses, or seeks what it
+  plays, such as the album's first song.
 - `stop`: play nothing. It is the source's half of moving playback.
 
 `control` reads what the device plays now, applies the change at the current server time, and
 stores the result with the next revision. It asks a `transport` of the item the device plays, or,
-while a load the device has not applied stands in, the same load with the changed transport, so a
-pause sent right after loading an album still lands once the device starts the album's first song. The device
-moves to the newest request it has not applied: it seeks when it is more than about a quarter
-second off, plays or pauses, then reports with `applied` set to that revision. Asking twice gives
+while a load the device has not applied stands in, that same load with the changed transport,
+under the load's own `loadRevision`. A device that started the album before its report landed
+only pauses the song it plays, as old music changed transport without reloading the queue entry,
+and a device that missed the load starts it paused. A transport of the album itself would be
+dropped by a device playing the album's first song, and a new load would start the album again.
+The device moves to the newest request it has not applied: it seeks when it is more than about a
+quarter second off, plays or pauses, then reports with `applied` set to that revision. Asking twice gives
 the same state, and a device that misses a request in between still ends where the last one says.
 
 What controllers see is merged when they read it. A request stands in for the report while its
@@ -144,7 +150,10 @@ does not undo a pause.
   come back and then fires late. `load` takes an idle device.
 - `list` reads only devices the caller might control: those they have a session on, every shared
   device while shared devices list them, and for a guest from a share link every device that
-  follows the group session they are in, at most 64 of each, per domain for the last. It walks the caller's
+  follows the group session they are in, at most 64 of each, per domain for the last. The last
+  comes from `connectPlayers.by_session_reported`, from the 30 seconds before `list` ran, newest
+  first, so offline reports of the session never take the place of a live device; only more than
+  64 devices reporting the session within 30 seconds would. It walks the caller's
   sessions one device at a time, reading that device's newest session and the device, and counts
   a device only while that session is live; a device's newest session ends last. So ended
   sessions, piled on one device or spread over many, never crowd out a live device, unless more
@@ -278,6 +287,44 @@ visible one. The receiver cannot sign in or run our code, so it is not a device.
 under the driving device's name and is controlled under that device's rule. The driving device
 applies requests through the Cast or AirPlay sender, as it applies them to its own player.
 
+### Upgrading from v0.3.0
+
+v0.3.0 shipped Connect without items, with writers in the CLI and SDK
+(`media auth player report` and `media auth targets control`): a report named only the domain,
+and a request was a flat transport. Convex refuses a schema push that stored documents do not
+match, so items arrive in three steps, as ADR 0012's runner allows:
+
+1. **Widen** (with items, 2026-11-15). The schema accepts both shapes. Connect reads an old report
+   as playing nothing and an old request as never pending, since neither names an item, while
+   still counting its revision, so the next request is above it. A new report or request replaces
+   the old row. The new commands' argument validators refuse an old client's report or command, so
+   an old report goes offline 30 seconds after the upgrade at most.
+2. **Migrate**, in the same release: `connect.clearRowsBeforeItems` in `core/schemaMigrations.ts`, 256
+   rows per batch, walks the requests and then the reports in one chain, so no two batches write
+   the same report at once. Neither row can be converted, since it names no item, and both are
+   transient state the device writes again on its next report, so it clears them in place, to
+   what Connect already reads them as, and deletes nothing:
+   - An old request becomes a `stop` under the same revision, and the device's `settled` rises to
+     it, so it never fires.
+   - An old report's playback becomes null, and its `settled` stays, so a load made since the
+     upgrade still waits for the device.
+
+   Deleting either row would break the revision rules above. Without the request, the device's
+   revisions start again at 1, so an app that kept `applied` skips the next request or has its
+   reports refused. Without the report, the device's next report settles every request before it,
+   a load made since the upgrade included. The image's init, the NixOS module, and
+   `scripts/dev-stack.sh` run the migration after every deploy.
+
+3. **Tighten**, not before the first release after the one that ships this migration. That
+   release drops the old shapes from `convex/core/connect/model.ts`, `reportOf`'s and
+   `pendingRequest`'s shape checks, `connect/beforeItems.ts`, and the migration. Its notes tell
+   v0.3.0 installs to upgrade through the release with the migration first, since a v0.3.0
+   install that skips it fails the schema push and stays on the old functions.
+
+`test/core/connect/upgrade.test.ts` imports rows in v0.3.0's shapes, checks how Connect reads them,
+runs the migration across more than one batch of each table, and checks that a load made in
+between still waits and that Connect works afterwards.
+
 ### Delay
 
 `test/core/connect/perf.test.ts` sends 100 pause and play commands from a phone to a shared TV,
@@ -338,6 +385,16 @@ Added with items, loading, and moving (2026-11-15):
   pauses a personal device marked shared (D60).
 - A report that names a session its person is not in, or one of another domain, fails
   `not_found`.
+
+Added with the first review round (2026-11-15):
+
+- A pause sent after a device started an album, before its report of that landed, comes to it as
+  the same load under the same `loadRevision`, so it pauses the song it plays and does not load the
+  album again.
+- A guest lists a live phone that follows their session behind 64 offline reports of the session.
+- v0.3.0's rows pass the schema push and read as playing and asking nothing. The migration clears
+  every old report and settles every old request under its own revision, so nothing fires, a load
+  made in between still waits, and the device's next request is numbered above the old one.
 
 Rejected in this build:
 

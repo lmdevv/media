@@ -330,7 +330,7 @@ export default defineSchema({
   connectPlayers: defineTable(playerDocument)
     .index("by_device", ["deviceId"])
     .index("by_reported", ["reportedAt"])
-    .index("by_session", ["playback.session"]),
+    .index("by_session_reported", ["playback.session", "reportedAt"]),
 
   /** The playback controllers last asked of a device (ADR 0018). */
   connectRequests: defineTable(requestDocument).index("by_device", ["deviceId"]),

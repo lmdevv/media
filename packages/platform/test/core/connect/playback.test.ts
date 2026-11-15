@@ -6,14 +6,16 @@ import type { Ask } from "../../../convex/core/connect/model";
 import {
   changed,
   controlAsk,
+  loadAsk,
   moveAsk,
   nextRevision,
   ONLINE_MS,
+  pendingRequest,
   playbackOf,
   positionAt,
   settledAfter,
 } from "../../../convex/core/connect/playback";
-import type { Player, Request } from "../../../convex/core/connect/playback";
+import type { Asked, Player, Request } from "../../../convex/core/connect/playback";
 
 // SAFETY: a type predicate, not checked by the compiler. A Convex id is an opaque string; these
 // functions only compare ids for equality and never send one to a backend.
@@ -62,7 +64,7 @@ const pause = (item: DomainItem): Ask => ({
   at: 2_000,
 });
 
-const request = (fields: Partial<Omit<Request, "_id" | "_creationTime">> = {}): Request => ({
+const request = (fields: Partial<Omit<Asked, "_id" | "_creationTime">> = {}): Asked => ({
   _id: idOf("connectRequests", "tv"),
   _creationTime: 0,
   deviceId: TV,
@@ -80,7 +82,7 @@ describe("what a device plays, as controllers see it", () => {
       positionMs: 60_000,
       at: 1_000,
       pending: false,
-      loading: false,
+      loading: null,
     });
   });
 
@@ -91,7 +93,7 @@ describe("what a device plays, as controllers see it", () => {
       positionMs: 61_000,
       at: 2_000,
       pending: true,
-      loading: false,
+      loading: null,
     });
   });
 
@@ -134,9 +136,7 @@ describe("what a device plays, as controllers see it", () => {
   });
 
   it("is the load it has not applied, whatever it plays or whether it plays", () => {
-    const loading = request({
-      ask: { kind: "load", item: ALBUM, playing: true, positionMs: 30_000, at: 2_000 },
-    });
+    const loading = request({ ask: loadAsk(ALBUM, 30_000, 2_000, 1) });
 
     const expected = {
       item: ALBUM,
@@ -144,7 +144,7 @@ describe("what a device plays, as controllers see it", () => {
       positionMs: 30_000,
       at: 2_000,
       pending: true,
-      loading: true,
+      loading: 1,
     };
 
     expect(playbackOf(player(), loading)).toEqual(expected);
@@ -159,6 +159,41 @@ describe("what a device plays, as controllers see it", () => {
   });
 });
 
+describe("rows v0.3.0 wrote, before items", () => {
+  const oldReport = player({ playback: { domain: "movies", playing: true, positionMs: 60_000 } });
+
+  const oldRequest: Request = {
+    _id: idOf("connectRequests", "tv"),
+    _creationTime: 0,
+    deviceId: TV,
+    reporter: LUCIA,
+    revision: 1,
+    playing: false,
+    positionMs: 61_000,
+    at: 2_000,
+  };
+
+  it("read a report that names no item as playing nothing", () => {
+    expect(playbackOf(oldReport, null)).toBeNull();
+    expect(playbackOf(oldReport, oldRequest)).toBeNull();
+  });
+
+  it("never take a flat transport as pending, so the report stands", () => {
+    expect(pendingRequest(player(), oldRequest)).toBeNull();
+    expect(playbackOf(player(), oldRequest)).toMatchObject({ item: FILM, pending: false });
+  });
+
+  it("still count an old request's revision, so the next one is above it", () => {
+    expect(nextRevision({ ...oldRequest, revision: 4 })).toBe(5);
+  });
+
+  it("show a load made after the upgrade over an old report", () => {
+    expect(
+      playbackOf(oldReport, request({ ask: loadAsk(SONG, 0, 2_000, 2), revision: 2 })),
+    ).toMatchObject({ item: SONG, pending: true, loading: 2 });
+  });
+});
+
 describe("what control and move ask", () => {
   const reported = {
     item: SONG,
@@ -166,7 +201,7 @@ describe("what control and move ask", () => {
     positionMs: 10_000,
     at: 1_000,
     pending: false,
-    loading: false,
+    loading: null,
   };
 
   it("asks a pause of the item the device plays", () => {
@@ -179,8 +214,8 @@ describe("what control and move ask", () => {
     });
   });
 
-  it("asks a pause during a load as the load again, which lands whatever song it starts", () => {
-    const loading = { ...reported, item: ALBUM, pending: true, loading: true };
+  it("asks a pause during a load as that same load, so a device that started it only pauses", () => {
+    const loading = { ...reported, item: ALBUM, pending: true, loading: 3 };
 
     expect(controlAsk(loading, { playing: false }, 1_500)).toEqual({
       kind: "load",
@@ -188,18 +223,48 @@ describe("what control and move ask", () => {
       playing: false,
       positionMs: 10_500,
       at: 1_500,
+      loadRevision: 3,
+    });
+  });
+
+  it("keeps the first load's revision through every change while it waits", () => {
+    const loading = { ...reported, item: ALBUM, pending: true, loading: 3 };
+    const paused = controlAsk(loading, { playing: false }, 1_500);
+    const waiting = playbackOf(player(), request({ ask: paused, revision: 4 }));
+
+    expect(waiting).toMatchObject({ item: ALBUM, playing: false, loading: 3 });
+
+    if (waiting === null) throw new Error("a paused load still shows its item");
+
+    expect(controlAsk(waiting, { positionMs: 20_000 }, 1_700)).toMatchObject({
+      kind: "load",
+      playing: false,
+      positionMs: 20_000,
+      loadRevision: 3,
+    });
+  });
+
+  it("loads an item under the revision that asks for it", () => {
+    expect(loadAsk(ALBUM, 30_000, 2_000, 7)).toEqual({
+      kind: "load",
+      item: ALBUM,
+      playing: true,
+      positionMs: 30_000,
+      at: 2_000,
+      loadRevision: 7,
     });
   });
 
   it("moves the item, playing or paused as it is, at its position now", () => {
-    expect(moveAsk(reported, 1_800)).toEqual({
+    expect(moveAsk(reported, 1_800, 2)).toEqual({
       kind: "load",
       item: SONG,
       playing: true,
       positionMs: 10_800,
       at: 1_800,
+      loadRevision: 2,
     });
-    expect(moveAsk({ ...reported, playing: false }, 9_000)).toMatchObject({
+    expect(moveAsk({ ...reported, playing: false }, 9_000, 2)).toMatchObject({
       playing: false,
       positionMs: 10_000,
     });

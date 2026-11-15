@@ -11,7 +11,7 @@ import type {
 } from "../permissions/policy";
 import { boundDevice, liveOnDevice, liveSession } from "../sessions";
 import { memberIn, placeOf } from "../together/access";
-import { isOnline } from "./playback";
+import { isOnline, reportOf } from "./playback";
 import type { Playback, Player, Request } from "./playback";
 
 const SESSIONS_READ = 8;
@@ -100,13 +100,14 @@ const sessionFor = async (
   { player, current }: Playing,
   person: PersonDoc,
 ): Promise<DeviceSession | null> => {
-  const sessionId = player?.playback?.session;
+  const reported = player === null ? null : reportOf(player);
+  const sessionId = reported?.session;
 
-  if (player === null || player.playback === null || sessionId === undefined) return null;
+  if (player === null || reported === null || sessionId === undefined) return null;
 
-  if (current === null || current.loading) return null;
+  if (current === null || current.loading !== null) return null;
 
-  const { domain } = player.playback.item;
+  const { domain } = reported.item;
 
   const [session, reporting, own] = await Promise.all([
     db.get(sessionId),

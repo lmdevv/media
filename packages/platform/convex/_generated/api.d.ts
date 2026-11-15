@@ -27,6 +27,7 @@ import type * as core_auth_store from "../core/auth/store.js";
 import type * as core_auth_sweep from "../core/auth/sweep.js";
 import type * as core_auth_tiles from "../core/auth/tiles.js";
 import type * as core_backups from "../core/backups.js";
+import type * as core_connect_beforeItems from "../core/connect/beforeItems.js";
 import type * as core_connect_facts from "../core/connect/facts.js";
 import type * as core_connect_model from "../core/connect/model.js";
 import type * as core_connect_playback from "../core/connect/playback.js";
@@ -192,6 +193,7 @@ declare const fullApi: ApiFromModules<{
   "core/auth/sweep": typeof core_auth_sweep;
   "core/auth/tiles": typeof core_auth_tiles;
   "core/backups": typeof core_backups;
+  "core/connect/beforeItems": typeof core_connect_beforeItems;
   "core/connect/facts": typeof core_connect_facts;
   "core/connect/model": typeof core_connect_model;
   "core/connect/playback": typeof core_connect_playback;

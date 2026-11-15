@@ -1,13 +1,16 @@
 import type { DomainItem } from "../../../commands/access";
 import type { Doc, Id } from "../../_generated/dataModel";
 import { fail } from "../lib/errors";
-import type { Ask } from "./model";
+import type { Ask, Reported } from "./model";
 
 /** What a device last said it plays (ADR 0018). */
 export type Player = Doc<"connectPlayers">;
 
 /** The playback controllers last asked of a device. */
 export type Request = Doc<"connectRequests">;
+
+/** A request with an ask, the shape every request since items has. */
+export type Asked = Extract<Request, { readonly ask: Ask }>;
 
 /** A device that has not reported for this long is offline, and a command to it fails. */
 export const ONLINE_MS = 30_000;
@@ -25,12 +28,13 @@ export interface Transport {
 
 /**
  * What a device plays as controllers see it: `pending` while a request it has yet to apply stands
- * in for its report, and `loading` while that request is a load.
+ * in for its report, and `loading` while that request is a load, as the revision that first asked
+ * for that load.
  */
 export interface Playback extends Transport {
   readonly item: DomainItem;
   readonly pending: boolean;
-  readonly loading: boolean;
+  readonly loading: number | null;
 }
 
 /** What a controller asks a device for: play or pause, a position, or both. */
@@ -42,23 +46,39 @@ export interface Change {
 const sameItem = (left: DomainItem, right: DomainItem): boolean =>
   left.domain === right.domain && left.ref.type === right.ref.type && left.ref.id === right.ref.id;
 
-/** The request a device's reporter has not settled yet, or null. */
-export const pendingRequest = (player: Player, request: Request | null): Request | null =>
-  request !== null && request.reporter === player.reporter && request.revision > player.settled
+/**
+ * What the device's report says it plays, or null. A report from before items (v0.3.0) names no
+ * item, so it reads as playing nothing until the device reports again.
+ */
+export const reportOf = (player: Player): Reported | null =>
+  player.playback !== null && "item" in player.playback ? player.playback : null;
+
+/**
+ * The request a device's reporter has not settled yet, or null. A request from before items
+ * (v0.3.0) names no item, so it is never pending.
+ */
+export const pendingRequest = (player: Player, request: Request | null): Asked | null =>
+  request !== null &&
+  "ask" in request &&
+  request.reporter === player.reporter &&
+  request.revision > player.settled
     ? request
     : null;
 
-const reportedOf = (player: Player): Playback | null =>
-  player.playback === null
+const reportedOf = (player: Player): Playback | null => {
+  const reported = reportOf(player);
+
+  return reported === null
     ? null
     : {
-        item: player.playback.item,
-        playing: player.playback.playing,
-        positionMs: player.playback.positionMs,
+        item: reported.item,
+        playing: reported.playing,
+        positionMs: reported.positionMs,
         at: player.reportedAt,
         pending: false,
-        loading: false,
+        loading: null,
       };
+};
 
 const askedOf = (ask: Exclude<Ask, { readonly kind: "stop" }>): Playback => ({
   item: ask.item,
@@ -66,7 +86,7 @@ const askedOf = (ask: Exclude<Ask, { readonly kind: "stop" }>): Playback => ({
   positionMs: ask.positionMs,
   at: ask.at,
   pending: true,
-  loading: ask.kind === "load",
+  loading: ask.kind === "load" ? ask.loadRevision : null,
 });
 
 /** What a device plays, with the request it has yet to apply standing in for its report. */
@@ -95,22 +115,34 @@ export const changed = (current: Transport, change: Change, now: number): Transp
 });
 
 /**
- * What `control` asks of a device playing `current`. A pending load stays a load, so the change
- * lands on whatever song an album load starts.
+ * What `control` asks of a device playing `current`. A pending load stays that load, under the
+ * revision that first asked for it: a device that already started it, such as an album's first
+ * song, only plays, pauses, or seeks, and one that has not starts it with the change.
  */
-export const controlAsk = (current: Playback, change: Change, now: number): Ask => ({
-  kind: current.loading ? "load" : "transport",
-  item: current.item,
-  ...changed(current, change, now),
-});
+export const controlAsk = (current: Playback, change: Change, now: number): Ask => {
+  const transport = changed(current, change, now);
 
-/** What `move` asks of the device that receives playback. */
-export const moveAsk = (current: Playback, now: number): Ask => ({
+  return current.loading === null
+    ? { kind: "transport", item: current.item, ...transport }
+    : { kind: "load", item: current.item, ...transport, loadRevision: current.loading };
+};
+
+/** What `load` asks of a device under `revision`: `item` from `positionMs`, playing. */
+export const loadAsk = (
+  item: DomainItem,
+  positionMs: number,
+  now: number,
+  revision: number,
+): Ask => ({ kind: "load", item, playing: true, positionMs, at: now, loadRevision: revision });
+
+/** What `move` asks under `revision` of the device that receives playback. */
+export const moveAsk = (current: Playback, now: number, revision: number): Ask => ({
   kind: "load",
   item: current.item,
   playing: current.playing,
   positionMs: positionAt(current, now),
   at: now,
+  loadRevision: revision,
 });
 
 /** The next request's revision on a device, above every request before it. */

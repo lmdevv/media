@@ -9,6 +9,8 @@ import { runFunction } from "./admin";
 import { sharedAdmin } from "./devices";
 import type { Member } from "./devices";
 import { movie, seedLibrary, share } from "./probe";
+import { importRows, newestRows } from "./rows";
+import { unique } from "./sign-in";
 import type { SignedIn } from "./sign-in";
 import type { CoreStack } from "./stack-env";
 
@@ -47,6 +49,36 @@ export interface Shelf {
 const isAlbumId = (value: unknown): value is Id<"albums"> => Schema.is(Schema.String)(value);
 
 const TrackRow = Schema.NullOr(Schema.Struct({ albumId: Schema.declare(isAlbumId) }));
+
+const DeviceRow = Schema.fromJsonString(Schema.Struct({ _id: Schema.String, name: Schema.String }));
+
+// SAFETY: a type predicate, not checked by the compiler. A Convex id is an opaque string, and the
+// stack's export wrote this one as a `devices` id; the backend checks it again when a row names it.
+const isDeviceId = (value: string): value is Id<"devices"> => value.length > 0;
+
+/** Imports `count` personal devices no session is on, and answers their ids. */
+export const plantDevices = (count: number): ReadonlyArray<Id<"devices">> => {
+  const prefix = `planted-${unique()}-`;
+
+  importRows(
+    "devices",
+    Array.from({ length: count }, (_, index) => ({
+      name: `${prefix}${index}`,
+      secretHash: "planted",
+      generation: 0,
+      mode: "personal" as const,
+    })),
+  );
+
+  const planted = newestRows("devices", count + 100)
+    .map((line) => Schema.decodeSync(DeviceRow)(line))
+    .flatMap((row) => (row.name.startsWith(prefix) && isDeviceId(row._id) ? [row._id] : []));
+
+  if (planted.length !== count)
+    throw new Error(`found ${planted.length} of ${count} planted devices`);
+
+  return planted;
+};
 
 const at = <T>(values: ReadonlyArray<T>, index: number): T => {
   const value = values[index];

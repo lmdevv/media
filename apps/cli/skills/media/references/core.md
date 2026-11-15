@@ -311,7 +311,7 @@ Show the playback another device asked of this one that it has not applied yet.
 - Kind: query
 - Scope: signed-in
 - Arguments: none
-- Result: `null | { revision: number; ask: { kind: "transport"; item: { domain: "movies"; ref: { type: "title"; id: Id<"titles"> } | { type: "episode"; id: Id<"episodes"> } | { type: "file"; id: Id<"mediaFiles"> } } | { domain: "music"; ref: { type: "track"; id: Id<"tracks"> } | { type: "album"; id: Id<"albums"> } }; playing: boolean; positionMs: number; at: number } | { kind: "load"; item: { domain: "movies"; ref: { type: "title"; id: Id<"titles"> } | { type: "episode"; id: Id<"episodes"> } | { type: "file"; id: Id<"mediaFiles"> } } | { domain: "music"; ref: { type: "track"; id: Id<"tracks"> } | { type: "album"; id: Id<"albums"> } }; playing: boolean; positionMs: number; at: number } | { kind: "stop"; at: number } }`
+- Result: `null | { revision: number; ask: { kind: "transport"; item: { domain: "movies"; ref: { type: "title"; id: Id<"titles"> } | { type: "episode"; id: Id<"episodes"> } | { type: "file"; id: Id<"mediaFiles"> } } | { domain: "music"; ref: { type: "track"; id: Id<"tracks"> } | { type: "album"; id: Id<"albums"> } }; playing: boolean; positionMs: number; at: number } | { kind: "load"; item: { domain: "movies"; ref: { type: "title"; id: Id<"titles"> } | { type: "episode"; id: Id<"episodes"> } | { type: "file"; id: Id<"mediaFiles"> } } | { domain: "music"; ref: { type: "track"; id: Id<"tracks"> } | { type: "album"; id: Id<"albums"> } }; playing: boolean; positionMs: number; at: number; loadRevision: number } | { kind: "stop"; at: number } }`
 
 ## `core.connect.targets.control`
 

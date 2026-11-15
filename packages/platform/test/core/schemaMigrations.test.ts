@@ -100,7 +100,7 @@ describe.skipIf(stack === undefined)("core schema migrations, live", { timeout: 
           ),
         ),
     );
-    await runFunction(stack, internal.core.schemaMigrations.resetProbe, { name }, Schema.Null);
+    await runFunction(stack, internal.core.schemaMigrations.reset, { name }, Schema.Null);
 
     const mark = await logMark(stack);
     const log = followLog(stack, mark);

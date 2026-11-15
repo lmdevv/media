@@ -98,6 +98,7 @@ const requestedResult = v.union(
         playing: v.boolean(),
         positionMs: v.number(),
         at: v.number(),
+        loadRevision: v.number(),
       }),
       v.object({ kind: v.literal("stop"), at: v.number() }),
     ),

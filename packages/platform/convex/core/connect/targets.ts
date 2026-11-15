@@ -15,7 +15,15 @@ import { boundDevice, liveOnDevice } from "../sessions";
 import { memberIn } from "../together/access";
 import { deviceFor, playerOf, reporterOf, requestOf } from "./facts";
 import type { Ask } from "./model";
-import { controlAsk, moveAsk, nextRevision, parsePosition, playbackOf } from "./playback";
+import {
+  ONLINE_MS,
+  controlAsk,
+  loadAsk,
+  moveAsk,
+  nextRevision,
+  parsePosition,
+  playbackOf,
+} from "./playback";
 import type { Change, Playback, Player, Request } from "./playback";
 
 const BOUND_DEVICES_READ = 64;
@@ -64,9 +72,15 @@ const liveBoundBelow = async (
   return skips === 0 ? [] : liveBoundBelow(db, person, deviceId, left, skips - 1, now);
 };
 
+/**
+ * The devices that reported in the last `ONLINE_MS` that they follow a group session the guest is
+ * in, newest first. The index range holds only reports recent enough to be online, so offline
+ * reports, however many, never crowd out a live device.
+ */
 const followingTheirSessions = async (
   db: DatabaseReader,
   person: PersonDoc,
+  now: number,
 ): Promise<ReadonlyArray<Id<"devices">>> => {
   const rows = await Promise.all(
     contentDomain.members.map(async ({ value: domain }) => memberIn(db, person._id, domain)),
@@ -78,7 +92,10 @@ const followingTheirSessions = async (
         ? []
         : db
             .query("connectPlayers")
-            .withIndex("by_session", (q) => q.eq("playback.session", row.sessionId))
+            .withIndex("by_session_reported", (q) =>
+              q.eq("playback.session", row.sessionId).gte("reportedAt", now - ONLINE_MS),
+            )
+            .order("desc")
             .take(SESSION_DEVICES_READ),
     ),
   );
@@ -93,16 +110,17 @@ const followingTheirSessions = async (
 const reachable = async (
   db: DatabaseReader,
   person: PersonDoc,
+  now: number,
 ): Promise<ReadonlyArray<Id<"devices">>> => {
   const [bound, shared, following] = await Promise.all([
-    liveBoundBelow(db, person, null, BOUND_DEVICES_READ, ENDED_DEVICES_SKIPPED, Date.now()),
+    liveBoundBelow(db, person, null, BOUND_DEVICES_READ, ENDED_DEVICES_SKIPPED, now),
     person.sharedDevices === true
       ? db
           .query("devices")
           .withIndex("by_mode", (q) => q.eq("mode", "shared"))
           .take(SHARED_DEVICES_READ)
       : [],
-    person.role === "guest" ? followingTheirSessions(db, person) : [],
+    person.role === "guest" ? followingTheirSessions(db, person, now) : [],
   ]);
 
   return [...new Set([...bound, ...shared.map((device) => device._id), ...following])];
@@ -160,11 +178,12 @@ const targetOf = async (db: DatabaseReader, deviceId: Id<"devices">): Promise<Ta
   };
 };
 
+/** Stores what `made` asks of the target under its next revision, and answers that revision. */
 const ask = async (
   ctx: Pick<MutationCtx, "db">,
   target: Target,
   player: Player,
-  made: Ask,
+  made: (revision: number) => Ask,
 ): Promise<number> => {
   const revision = nextRevision(target.request);
 
@@ -172,7 +191,7 @@ const ask = async (
     deviceId: target.device._id,
     reporter: player.reporter,
     revision,
-    ask: made,
+    ask: made(revision),
   };
 
   if (target.request === null) await ctx.db.insert("connectRequests", row);
@@ -232,7 +251,7 @@ export const { list, control, load, move } = register({
     const playable = playableBy(ctx.db, await reachOf(ctx.db, caller));
 
     const targets = await Promise.all(
-      (await reachable(ctx.db, person)).map(async (deviceId) => {
+      (await reachable(ctx.db, person, now)).map(async (deviceId) => {
         const [device, player] = await Promise.all([
           ctx.db.get(deviceId),
           playerOf(ctx.db, deviceId),
@@ -302,7 +321,7 @@ export const { list, control, load, move } = register({
 
     if (current === null) return fail("conflict", "Nothing plays on that device");
 
-    return { revision: await ask(ctx, target, player, controlAsk(current, change, now)) };
+    return { revision: await ask(ctx, target, player, () => controlAsk(current, change, now)) };
   },
   load: async (ctx, { deviceId, item, positionMs }, caller) => {
     const position = positionMs === undefined ? 0 : parsePosition(positionMs);
@@ -318,9 +337,11 @@ export const { list, control, load, move } = register({
     await requirePlayable(ctx.db, caller, item);
     await requireTheyPlay(ctx.db, reporter, item);
 
-    const loaded: Ask = { kind: "load", item, playing: true, positionMs: position, at: now };
-
-    return { revision: await ask(ctx, target, player, loaded) };
+    return {
+      revision: await ask(ctx, target, player, (revision) =>
+        loadAsk(item, position, now, revision),
+      ),
+    };
   },
   move: async (ctx, { from, to }, caller) => {
     if (from === to) return fail("invalid_args", "Move playback to another device");
@@ -352,7 +373,8 @@ export const { list, control, load, move } = register({
 
     if (source.current === null) return fail("conflict", "Nothing plays on that device");
 
-    const { item } = source.current;
+    const moved = source.current;
+    const { item } = moved;
     const { player, reporter } = await requireLoad(ctx, caller, person, target, item, now);
 
     if (!(await mayPlay(ctx.db, caller, item))) {
@@ -360,8 +382,10 @@ export const { list, control, load, move } = register({
     }
 
     await requireTheyPlay(ctx.db, reporter, item);
-    await ask(ctx, source, source.player, { kind: "stop", at: now });
+    await ask(ctx, source, source.player, () => ({ kind: "stop", at: now }));
 
-    return { revision: await ask(ctx, target, player, moveAsk(source.current, now)) };
+    return {
+      revision: await ask(ctx, target, player, (revision) => moveAsk(moved, now, revision)),
+    };
   },
 });

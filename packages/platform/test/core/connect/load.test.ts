@@ -3,6 +3,7 @@ import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { DomainItem } from "../../../commands/access";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
+import { ONLINE_MS } from "../../../convex/core/connect/playback";
 import { inOrder } from "../../../convex/core/lib/inOrder";
 import {
   control,
@@ -10,6 +11,7 @@ import {
   load,
   move,
   paused,
+  plantDevices,
   playing,
   report,
   requested,
@@ -21,7 +23,8 @@ import type { Shelf } from "../../connect";
 import { enroll, listings, member, openTile, sharedAdmin, sharedDevice } from "../../devices";
 import type { Member } from "../../devices";
 import { guestsOn, makeLink, openLink } from "../../guests";
-import { newestRows } from "../../rows";
+import { sessionOf } from "../../probe";
+import { importRows, newestRows } from "../../rows";
 import { failureOf, refusal, signInAs } from "../../sign-in";
 import type { SignedIn } from "../../sign-in";
 import { coreStackFromEnvFile } from "../../stack-env";
@@ -121,6 +124,41 @@ describe.skipIf(stack === undefined)("loading and moving playback", { timeout: 1
     expect(shown).toMatchObject({ item: items.song, playing: true, pending: false });
     expect(await requested(laptop.signedIn)).toBeNull();
     lane("load", `asked ${JSON.stringify(asked)}; laptop then reports ${JSON.stringify(shown)}`);
+  });
+
+  it("pauses an album a device started before its report landed, without loading it again", async () => {
+    if (stack === undefined) return;
+    const aiko = await items.share(await member(stack, "aiko"));
+    const phone = await personalDevice(await signInAs(stack, aiko.person), "Phone");
+    const laptop = await personalDevice(await signInAs(stack, aiko.person), "Laptop");
+
+    await report(laptop.signedIn, idle());
+
+    const loaded = await load(phone.signedIn, laptop.deviceId, items.album, 30_000);
+    const started = await requested(laptop.signedIn);
+
+    expect(started).toMatchObject({
+      revision: loaded.revision,
+      ask: { kind: "load", item: items.album, loadRevision: loaded.revision },
+    });
+
+    const pause = await control(phone.signedIn, laptop.deviceId, { playing: false });
+    const asked = await requested(laptop.signedIn);
+
+    expect(asked).toMatchObject({
+      revision: pause.revision,
+      ask: { kind: "load", item: items.album, playing: false, loadRevision: loaded.revision },
+    });
+
+    await report(laptop.signedIn, paused(items.song, 30_100, pause.revision));
+
+    expect(targetIn(await targets(phone.signedIn), laptop.deviceId)?.playback).toMatchObject({
+      item: items.song,
+      playing: false,
+      pending: false,
+    });
+    expect(await requested(laptop.signedIn)).toBeNull();
+    lane("pause-during-load", `started ${JSON.stringify(started)}; then ${JSON.stringify(asked)}`);
   });
 
   it("loads a movie onto a shared TV, and plays nothing the person on the TV may not", async () => {
@@ -377,6 +415,44 @@ describe.skipIf(stack === undefined)("loading and moving playback", { timeout: 1
     lane("guest-denied", JSON.stringify(denied));
     lane("guest-allowed", allowed);
     lane("guest-outside", JSON.stringify(outside));
+  });
+
+  it("lists a live phone that follows a guest's session behind 64 offline reports of it", async () => {
+    if (stack === undefined) return;
+    const host = await items.share(await member(stack, "host", "admin"));
+    const aiko = await items.share(await member(stack, "aiko"));
+    const started = await session(host, items.song, "control");
+    const sam = await linkGuest(stack, host, "Sam");
+    const { sessionId: reporter } = await sessionOf(host.signedIn);
+
+    await aiko.signedIn.client.mutation(api.core.together.join, {
+      domain: "music",
+      link: started.link,
+    });
+
+    importRows(
+      "connectPlayers",
+      plantDevices(64).map((deviceId) => ({
+        deviceId,
+        reporter,
+        output: { kind: "local" as const },
+        playback: { item: items.song, playing: true, positionMs: 0, session: started.sessionId },
+        settled: 0,
+        reportedAt: Date.now() - 2 * ONLINE_MS,
+      })),
+    );
+
+    const phone = await personalDevice(await signInAs(stack, aiko.person), "Phone");
+
+    await report(phone.signedIn, following(started.sessionId, items.song, 1_000));
+
+    expect(targetIn(await targets(sam.signedIn), phone.deviceId)).toMatchObject({
+      name: "Phone",
+      playback: { item: items.song, playing: true },
+    });
+    expect(await refusal(control(sam.signedIn, phone.deviceId, { playing: false }))).toBe(
+      "accepted",
+    );
   });
 
   it("refuses a report that follows a session its person is not in", async () => {

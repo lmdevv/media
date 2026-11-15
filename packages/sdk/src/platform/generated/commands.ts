@@ -632,6 +632,7 @@ const core_connect_player_requested = query({
           playing: Schema.Boolean,
           positionMs: Schema.Finite,
           at: Schema.Finite,
+          loadRevision: Schema.Finite,
         }),
         Schema.Struct({ kind: Schema.Literal("stop"), at: Schema.Finite }),
       ]),

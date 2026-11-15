@@ -1,4 +1,3 @@
-import { Schema } from "effect";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { api } from "../../../convex/_generated/api";
@@ -9,6 +8,7 @@ import {
   control,
   idle,
   paused,
+  plantDevices,
   playing,
   report,
   requested,
@@ -20,17 +20,11 @@ import type { Report, Shelf } from "../../connect";
 import { enroll, listings, member, openTile, sharedAdmin, sharedDevice } from "../../devices";
 import { sessionOf } from "../../probe";
 import { importRows, newestRows } from "../../rows";
-import { refusal, signInAs, unique } from "../../sign-in";
+import { refusal, signInAs } from "../../sign-in";
 import type { SignedIn } from "../../sign-in";
 import { coreStackFromEnvFile } from "../../stack-env";
 
 const stack = coreStackFromEnvFile();
-
-const DeviceRow = Schema.fromJsonString(Schema.Struct({ _id: Schema.String, name: Schema.String }));
-
-// SAFETY: a type predicate, not checked by the compiler. A Convex id is an opaque string, and the
-// stack's export wrote this one as a `devices` id; the backend checks it again when a row names it.
-const isDeviceId = (value: string): value is Id<"devices"> => value.length > 0;
 
 const listed = listings();
 
@@ -465,21 +459,7 @@ describe.skipIf(stack === undefined)("Connect", { timeout: 180_000 }, () => {
   it("lists a live device however many ended sessions a person has elsewhere", async () => {
     if (stack === undefined) return;
     const lucia = await member(stack, "lucia");
-    const prefix = `planted-${unique()}-`;
-
-    importRows(
-      "devices",
-      Array.from({ length: 300 }, (_, index) => ({
-        name: `${prefix}${index}`,
-        secretHash: "planted",
-        generation: 0,
-        mode: "personal" as const,
-      })),
-    );
-
-    const planted = newestRows("devices", 400)
-      .map((line) => Schema.decodeSync(DeviceRow)(line))
-      .flatMap((row) => (row.name.startsWith(prefix) && isDeviceId(row._id) ? [row._id] : []));
+    const planted = plantDevices(300);
 
     const laptopBelow = async (tries: number) => {
       const laptop = await personalDevice(await signInAs(stack, lucia.person), "Laptop");

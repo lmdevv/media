@@ -114,12 +114,19 @@ const anchoredTransport = {
 /**
  * What a controller asks of a device, in server time (ADR 0018). `transport` plays or pauses
  * `item` at a position, and only while the device still plays that item; `load` plays `item` from
- * a position, whatever the device plays; `stop` plays nothing, as when playback moved to another
- * device.
+ * a position, whatever the device plays, unless the device already started the load
+ * `loadRevision` names, when it only plays, pauses, or seeks what that load started; `stop` plays
+ * nothing, as when playback moved to another device.
  */
 const connectAsk = v.union(
   v.object({ kind: v.literal("transport"), item: domainItem, ...anchoredTransport }),
-  v.object({ kind: v.literal("load"), item: domainItem, ...anchoredTransport }),
+  v.object({
+    kind: v.literal("load"),
+    item: domainItem,
+    ...anchoredTransport,
+    /** The revision of the request that first asked for this load. */
+    loadRevision: v.number(),
+  }),
   v.object({ kind: v.literal("stop"), at: v.number() }),
 );
 
