@@ -145,7 +145,11 @@ export const advance = (ms: number): Effect.Effect<void> =>
     for (let elapsed = 0; elapsed < ms; elapsed += 20) yield* TestClock.adjust(20);
   });
 
-/** Starts following `session` with `player` as a member, a second after it begins sampling. */
+/**
+ * Starts following `session` with `player` as a member, a second after it begins sampling. It
+ * starts from the session's clock, or from `options.clock`, as a subscription that lags the session
+ * delivers it.
+ */
 export const follower = (
   session: Session,
   player: FollowerPlayer,
@@ -153,6 +157,7 @@ export const follower = (
     readonly controls?: boolean;
     readonly pausesForStalls?: boolean;
     readonly resumeHold?: Hold;
+    readonly clock?: SessionClock;
   } = {},
 ): Effect.Effect<Follower<Refused>, never, Scope.Scope> =>
   Effect.gen(function* () {
@@ -160,7 +165,7 @@ export const follower = (
       run({
         player,
         port: session.port,
-        clock: yield* session.clock,
+        clock: options.clock ?? (yield* session.clock),
         durationMs: () => 3_600_000,
         controls: options.controls ?? false,
         pausesForStalls: options.pausesForStalls ?? false,

@@ -149,7 +149,7 @@ export interface FollowerOptions<E> {
    * The hold an earlier follower of this player left, such as one stopped while its stream
    * reloaded: this one plays the session on once the player plays. A pause still on its way counts:
    * the request goes on without its follower, so whichever follower holds it when it lands owns
-   * the play. A settled hold that no longer stands at `clock` is dropped.
+   * the play. A settled hold is taken over as `takenOver` decides at `clock`.
    */
   readonly resumeHold?: Hold | null;
   readonly tunables?: FollowerTunables;
@@ -191,10 +191,13 @@ const asMove = (move: ViewerMove, revision: number): ClockMove =>
   move.kind === "seek" ? { kind: "seek", positionMs: move.positionMs, revision } : move;
 
 /**
- * A carried hold as a new follower takes it over at `clock`: a settled one that no longer stands
- * is none, as someone moved the session while the follower was being replaced.
+ * A carried hold as a new follower takes it over at `clock`, the session's clock it starts from. A
+ * pause still on its way is kept, and decided once it lands. A settled hold is kept while it stands
+ * (`holdStands`), even at a clock older than the hold's own last move, which the follower then waits
+ * for, and is none once a newer clock shows someone moved the session. Whoever carries a hold
+ * between followers decides by this too, so they agree with the follower that takes it over.
  */
-const takenOver = (hold: Hold | null, clock: SessionClock): Hold | null =>
+export const takenOver = (hold: Hold | null, clock: SessionClock): Hold | null =>
   hold?.kind === "held" && !holdStands(hold.revision, clock) ? null : hold;
 
 /**
@@ -525,11 +528,12 @@ export const run = Effect.fn("Follower.run")(function* <E>(
     );
 
   /**
-   * Plays the session on after this player's stall while the hold stands. The core applies the play
-   * only while the session is still at the hold's own last revision, so a move this follower has
-   * not heard of yet, such as the host's pause on another screen, always wins. The hold lasts until
-   * a newer clock ends it in `applyClock`, the play's own answer included, so a play that fails,
-   * refused or lost, leaves it for the next correction tick to try again.
+   * Plays the session on after this player's stall while the hold stands, even before this
+   * follower's clock shows the hold's own move. The core applies the play only while the session is
+   * still at the hold's own last revision, so a move this follower has not heard of yet, such as
+   * the host's pause on another screen, always wins. The hold lasts until a newer clock ends it in
+   * `applyClock`, the play's own answer included, so a play that fails, refused or lost, leaves it
+   * for the next correction tick to try again.
    */
   const releaseHold = Effect.gen(function* () {
     const { clock, holding } = yield* SubscriptionRef.get(state);

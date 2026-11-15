@@ -3,8 +3,8 @@
  * holds one place per domain, so every call names the movies domain and none a session.
  */
 import type { SessionClock } from "@media/contracts/clock";
+import { takenOver } from "@media/contracts/follower";
 import type { Hold } from "@media/contracts/follower";
-import { holdStands } from "@media/contracts/follower-policy";
 import type { PlatformSdk } from "@media/sdk/promise";
 
 import type { EpisodeId, TitleId } from "@/lib/catalog";
@@ -70,21 +70,16 @@ export interface CarriedHold {
 export const NO_HOLD: CarriedHold = { sessionId: null, hold: null };
 
 /**
- * Whether `carried` holds `sessionId`, at `clock`, paused for this player's own stall: its pause is
- * on the way, or the hold still stands. A new attempt's player then starts playing rather than
+ * Whether `carried` holds `sessionId`, at `clock`, paused for this player's own stall, as the next
+ * follower takes it over (`takenOver`): its pause is on the way, or the hold still stands, at a
+ * clock that lags the hold's own move too. A new attempt's player then starts playing rather than
  * paused, as the hold plays the session on only once it does.
  */
 export const holdsSession = (
   carried: CarriedHold,
   sessionId: string,
   clock: SessionClock,
-): boolean => {
-  const { hold } = carried;
-
-  if (carried.sessionId !== sessionId || hold === null) return false;
-
-  return hold.kind === "pausing" || holdStands(hold.revision, clock);
-};
+): boolean => carried.sessionId === sessionId && takenOver(carried.hold, clock) !== null;
 
 /**
  * The web address of a session's join link, `<server>/movies/together#<link>`, as the web app

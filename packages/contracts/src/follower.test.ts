@@ -843,4 +843,113 @@ describe("follower", () => {
         expect(Math.abs(yield* driftOf(session, lucia))).toBeLessThanOrEqual(inSync);
       }),
     ));
+  it("plays the session on for a carried hold its new follower's clock has yet to show", () =>
+    scenario(playingForAMinute, (session) =>
+      Effect.gen(function* () {
+        // The stall's pause and seek back landed, and the host's stream reloaded before the
+        // subscription delivered the seek: the new follower starts from the pause's clock.
+        const pause = yield* meanwhile(session.moveUnheard({ kind: "pause" }));
+
+        const held = yield* meanwhile(
+          session.moveUnheard({ kind: "seek", positionMs: 45_000, revision: pause.revision }),
+        );
+
+        const lucia = yield* makePlayer(45_000);
+
+        lucia.viewerPlay();
+        lucia.stall();
+
+        const host = yield* follower(session, lucia, {
+          controls: true,
+          pausesForStalls: true,
+          resumeHold: { kind: "held", revision: held.revision },
+          clock: pause,
+        });
+
+        expect((yield* host.current).holding).toStrictEqual({
+          kind: "held",
+          revision: held.revision,
+        });
+
+        yield* host.apply(held);
+        lucia.recover();
+        yield* advance(3_000);
+
+        expect(yield* session.clock).toMatchObject({
+          status: "playing",
+          revision: held.revision + 1,
+        });
+        expect((yield* host.current).holding).toBeNull();
+      }),
+    ));
+  it("plays a carried hold on when its player recovers before its clock shows the hold", () =>
+    scenario(playingForAMinute, (session) =>
+      Effect.gen(function* () {
+        const stalledOn = yield* session.clock;
+        const pause = yield* meanwhile(session.moveUnheard({ kind: "pause" }));
+
+        const held = yield* meanwhile(
+          session.moveUnheard({ kind: "seek", positionMs: 45_000, revision: pause.revision }),
+        );
+
+        const lucia = yield* makePlayer(45_000);
+
+        lucia.viewerPlay();
+        lucia.stall();
+
+        // The subscription still shows the clock the player stalled on, from before the hold.
+        const host = yield* follower(session, lucia, {
+          controls: true,
+          pausesForStalls: true,
+          resumeHold: { kind: "held", revision: held.revision },
+          clock: stalledOn,
+        });
+
+        lucia.recover();
+        yield* advance(3_000);
+
+        expect(yield* session.clock).toMatchObject({
+          status: "playing",
+          revision: held.revision + 1,
+        });
+        expect((yield* host.current).holding).toBeNull();
+      }),
+    ));
+  it("never plays a carried hold on over a pause made before its clock showed the hold", () =>
+    scenario(playingForAMinute, (session) =>
+      Effect.gen(function* () {
+        const pause = yield* meanwhile(session.moveUnheard({ kind: "pause" }));
+
+        const held = yield* meanwhile(
+          session.moveUnheard({ kind: "seek", positionMs: 45_000, revision: pause.revision }),
+        );
+
+        const lucia = yield* makePlayer(45_000);
+
+        lucia.viewerPlay();
+        lucia.stall();
+
+        const host = yield* follower(session, lucia, {
+          controls: true,
+          pausesForStalls: true,
+          resumeHold: { kind: "held", revision: held.revision },
+          clock: pause,
+        });
+
+        // Lucía pauses on her other screen, and this one hears of it, and of the hold's own seek,
+        // only after its player recovered and asked to play the session on.
+        const paused = yield* meanwhile(session.moveUnheard({ kind: "pause" }));
+
+        lucia.recover();
+        yield* advance(1_000);
+        expect(yield* session.clock).toMatchObject({ status: "paused", revision: paused.revision });
+
+        yield* host.apply(held);
+        yield* host.apply(paused);
+        yield* advance(2_000);
+        expect(yield* session.clock).toMatchObject({ status: "paused", revision: paused.revision });
+        expect((yield* host.current).holding).toBeNull();
+        expect(lucia.isPaused()).toBe(true);
+      }),
+    ));
 });

@@ -401,10 +401,13 @@ export const eventAction = (facts: EventFacts): EventAction => {
 };
 
 /**
- * Whether a stalled player's hold may play the session on: the one rule for holds (ADR 0017). It
- * may only while the session stands paused at the hold's own last revision, its pause or the seek
- * back to the stall, with nothing newer. The core gives every pause a new revision, so a pause that
- * changed nothing ends the hold too.
+ * Whether a stalled player's hold may play the session on, judged against the newest clock the
+ * follower has: the one rule for holds (ADR 0017). The hold's own last move, its pause or the seek
+ * back to the stall, left the session paused at `heldRevision`. A clock at that revision is that
+ * move's. An older one has yet to show it, as from a subscription that lags the move's answer, so
+ * the hold stands and waits for it. Only a newer clock ends the hold: someone moved the session
+ * since, or the hold's own play answered. The core gives every pause a new revision, so a pause
+ * that changed nothing ends the hold too.
  */
 export const holdStands = (heldRevision: number, clock: SessionClock): boolean =>
-  clock.status === "paused" && clock.revision === heldRevision;
+  clock.revision < heldRevision || (clock.revision === heldRevision && clock.status === "paused");

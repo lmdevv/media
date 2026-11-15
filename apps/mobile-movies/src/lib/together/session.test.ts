@@ -60,6 +60,11 @@ describe("holdsSession", () => {
     expect(holdsSession(held, "s1", pausedAt(6))).toBe(true);
   });
 
+  it("holds its own session at a clock that has yet to show the hold's own move", () => {
+    expect(holdsSession(held, "s1", pausedAt(5))).toBe(true);
+    expect(holdsSession(held, "s1", { ...pausedAt(4), status: "playing" })).toBe(true);
+  });
+
   it("holds nothing once someone moved the session, in another session, or with no hold", () => {
     expect(holdsSession(held, "s1", pausedAt(7))).toBe(false);
     expect(holdsSession(held, "s1", { ...pausedAt(6), status: "playing" })).toBe(false);

@@ -504,10 +504,33 @@ const sessionAt = (status: SessionClock["status"], revision: number): SessionClo
 });
 
 describe("holdStands", () => {
-  it("lets a hold play on only while the session stands paused at its own last revision", () => {
+  const anyClock = fc.oneof(playing, paused);
+
+  it("lets a hold play on while the session stands paused at its own last revision", () => {
     expect(holdStands(6, sessionAt("paused", 6))).toBe(true);
-    expect(holdStands(6, sessionAt("paused", 7))).toBe(false);
     expect(holdStands(6, sessionAt("playing", 6))).toBe(false);
-    expect(holdStands(6, sessionAt("paused", 5))).toBe(false);
+  });
+
+  it("keeps a hold at a clock that has yet to show its own move, which it waits for", () => {
+    expect(holdStands(6, sessionAt("paused", 5))).toBe(true);
+    expect(holdStands(6, sessionAt("playing", 4))).toBe(true);
+
+    fc.assert(
+      fc.property(anyClock, fc.integer({ min: 1, max: 1_000 }), (clock, ahead) => {
+        expect(holdStands(clock.revision + ahead, clock)).toBe(true);
+      }),
+    );
+  });
+
+  it("ends a hold at any clock newer than its own move", () => {
+    expect(holdStands(6, sessionAt("paused", 7))).toBe(false);
+
+    fc.assert(
+      fc.property(anyClock, fc.integer({ min: 1, max: 1_000 }), (clock, behind) => {
+        expect(holdStands(clock.revision, { ...clock, revision: clock.revision + behind })).toBe(
+          false,
+        );
+      }),
+    );
   });
 });

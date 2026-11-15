@@ -306,6 +306,71 @@ describe.skipIf(stack === undefined)("group sessions", { timeout: 120_000 }, () 
     expect(after).toMatchObject({ status: "paused", revision: intentional.revision });
   });
 
+  it("plays a stalled host's session on when its new follower starts behind the hold's own seek", async () => {
+    if (stack === undefined) return;
+    const { shelf } = await started(stack);
+
+    await controlAs(shelf.host, { kind: "play" });
+
+    // The stall's pause and its seek back. The host's stream reloads before the subscription shows
+    // the seek, so the new follower starts from the pause's clock, behind the hold's own.
+    const pause = await controlAs(shelf.host, { kind: "pause" });
+
+    const held = await controlAs(shelf.host, {
+      kind: "seek",
+      positionMs: 45_000,
+      revision: pause.revision,
+    });
+
+    let buffering = true;
+    let paused = false;
+
+    const player: FollowerPlayer = {
+      positionMs: () => 45_000,
+      isPaused: () => paused,
+      isBuffering: () => buffering && !paused,
+      playbackRate: () => 1,
+      setPlaybackRate: () => undefined,
+      seek: () => undefined,
+      play: () => {
+        paused = false;
+
+        return Promise.resolve();
+      },
+      pause: () => {
+        paused = true;
+      },
+      subscribe: () => () => undefined,
+    };
+
+    const after = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const following = yield* run({
+            player,
+            port: portOf(shelf.host),
+            clock: pause,
+            durationMs: () => 3_600_000,
+            controls: true,
+            pausesForStalls: true,
+            resumeHold: { kind: "held", revision: held.revision },
+          });
+
+          // The subscription catches up, and then the player recovers.
+          yield* following.apply(held);
+          buffering = false;
+          yield* Effect.sleep("2 seconds");
+
+          const { clock } = yield* Effect.promise(() => joinedView(shelf.host, "movies"));
+
+          return clock;
+        }),
+      ),
+    );
+
+    expect(after).toMatchObject({ status: "playing", revision: held.revision + 1 });
+  });
+
   it("refuses queued items from a guest the host has not let add", async () => {
     if (stack === undefined) return;
     const { shelf, link } = await started(stack);
