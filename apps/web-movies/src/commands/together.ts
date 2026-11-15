@@ -75,7 +75,7 @@ export const useTogetherCommands = (context: CommandContext): CommandContributio
               id: "session:join",
               title: "Join session",
               leading: { kind: "icon", icon: UsersIcon },
-              perform: () => navigate({ to: "/together/$link", params: { link } }),
+              perform: () => navigate({ to: "/together", hash: link }),
             },
           ];
 

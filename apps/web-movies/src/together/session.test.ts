@@ -12,7 +12,7 @@ const LINK = "mt_k57abc123.AbCdEf_-0123456789abcdefgh";
 describe("parseSessionLink", () => {
   it("reads a link, or a web address that ends in one", () => {
     expect(parseSessionLink(LINK)).toBe(LINK);
-    expect(parseSessionLink(`  https://cinema.home/movies/together/${LINK}/ `)).toBe(LINK);
+    expect(parseSessionLink(`  https://cinema.home/movies/together#${LINK} `)).toBe(LINK);
     expect(
       parseSessionLink(`https://cinema.home/movies/together/${encodeURIComponent(LINK)}`),
     ).toBe(LINK);

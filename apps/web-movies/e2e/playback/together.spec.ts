@@ -134,14 +134,16 @@ const startSession = async (page: Page): Promise<string> => {
 
   const link = page.getByLabel("Session link");
 
-  await expect(link).toContainText("/together/mt_");
+  await expect(link).toContainText("/together#mt_");
 
   const address = (await link.textContent()) ?? "";
 
   await page.getByRole("button", { name: "Start session" }).click();
   await expect(page.getByRole("dialog")).toBeHidden();
 
-  return new URL(address).pathname;
+  const opened = new URL(address);
+
+  return `${opened.pathname}${opened.hash}`;
 };
 
 test.beforeAll(async () => {

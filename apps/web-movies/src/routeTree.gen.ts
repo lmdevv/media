@@ -17,7 +17,6 @@ import { Route as DevCrashRouteImport } from './routes/dev/crash'
 import { Route as DevKitRouteImport } from './routes/dev/kit'
 import { Route as DevTracksRouteImport } from './routes/dev/tracks'
 import { Route as TogetherIndexRouteImport } from './routes/together.index'
-import { Route as TogetherLinkRouteImport } from './routes/together.$link'
 import { Route as WatchTitleIdRouteImport } from './routes/watch.$titleId'
 import { Route as AppAdminIndexRouteImport } from './routes/_app/admin/index'
 import { Route as AppAdminMigrationRouteImport } from './routes/_app/admin/migration'
@@ -99,11 +98,6 @@ const TogetherIndexRoute = TogetherIndexRouteImport.update({
   path: '/together/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const TogetherLinkRoute = TogetherLinkRouteImport.update({
-  id: '/together/$link',
-  path: '/together/$link',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const WatchTitleIdRoute = WatchTitleIdRouteImport.update({
   id: '/watch/$titleId',
   path: '/watch/$titleId',
@@ -176,7 +170,6 @@ export interface FileRoutesByFullPath {
   '/dev/crash': typeof DevCrashRoute
   '/dev/kit': typeof DevKitRoute
   '/dev/tracks': typeof DevTracksRoute
-  '/together/$link': typeof TogetherLinkRoute
   '/watch/$titleId': typeof WatchTitleIdRoute
   '/together/': typeof TogetherIndexRoute
   '/admin/migration': typeof AppAdminMigrationRoute
@@ -200,7 +193,6 @@ export interface FileRoutesByTo {
   '/dev/crash': typeof DevCrashRoute
   '/dev/kit': typeof DevKitRoute
   '/dev/tracks': typeof DevTracksRoute
-  '/together/$link': typeof TogetherLinkRoute
   '/watch/$titleId': typeof WatchTitleIdRoute
   '/': typeof AppIndexRoute
   '/together': typeof TogetherIndexRoute
@@ -229,7 +221,6 @@ export interface FileRoutesById {
   '/dev/crash': typeof DevCrashRoute
   '/dev/kit': typeof DevKitRoute
   '/dev/tracks': typeof DevTracksRoute
-  '/together/$link': typeof TogetherLinkRoute
   '/watch/$titleId': typeof WatchTitleIdRoute
   '/_app/': typeof AppIndexRoute
   '/together/': typeof TogetherIndexRoute
@@ -259,7 +250,6 @@ export interface FileRouteTypes {
     | '/dev/crash'
     | '/dev/kit'
     | '/dev/tracks'
-    | '/together/$link'
     | '/watch/$titleId'
     | '/together/'
     | '/admin/migration'
@@ -283,7 +273,6 @@ export interface FileRouteTypes {
     | '/dev/crash'
     | '/dev/kit'
     | '/dev/tracks'
-    | '/together/$link'
     | '/watch/$titleId'
     | '/'
     | '/together'
@@ -311,7 +300,6 @@ export interface FileRouteTypes {
     | '/dev/crash'
     | '/dev/kit'
     | '/dev/tracks'
-    | '/together/$link'
     | '/watch/$titleId'
     | '/_app/'
     | '/together/'
@@ -333,7 +321,6 @@ export interface RootRouteChildren {
   DevCrashRoute: typeof DevCrashRoute
   DevKitRoute: typeof DevKitRoute
   DevTracksRoute: typeof DevTracksRoute
-  TogetherLinkRoute: typeof TogetherLinkRoute
   WatchTitleIdRoute: typeof WatchTitleIdRoute
   TogetherIndexRoute: typeof TogetherIndexRoute
 }
@@ -436,13 +423,6 @@ declare module '@tanstack/react-router' {
       path: '/together'
       fullPath: '/together/'
       preLoaderRoute: typeof TogetherIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/together/$link': {
-      id: '/together/$link'
-      path: '/together/$link'
-      fullPath: '/together/$link'
-      preLoaderRoute: typeof TogetherLinkRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/watch/$titleId': {
@@ -596,7 +576,6 @@ const rootRouteChildren: RootRouteChildren = {
   DevCrashRoute: DevCrashRoute,
   DevKitRoute: DevKitRoute,
   DevTracksRoute: DevTracksRoute,
-  TogetherLinkRoute: TogetherLinkRoute,
   WatchTitleIdRoute: WatchTitleIdRoute,
   TogetherIndexRoute: TogetherIndexRoute,
 }

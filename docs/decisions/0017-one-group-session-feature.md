@@ -288,10 +288,12 @@ session at the end. Each member's player reports its own progress, so history is
 
 ### Links
 
-The web client opens `/movies/together/<link>`, joins, and plays the session or says why it waits:
+The web client opens `/movies/together#<link>`, joins, and plays the session or says why it waits:
 for the host's approval, a locked or ended session, or an item the person may not watch, whose
-place they keep. The iOS app opens `movies://together/<link>` the same way and shares the web
-address. The host starts a session from the player, with the link to copy before it starts.
+place they keep. The link travels after `#`, as invite links do (ADR 0020), so no request,
+referrer, or server log carries it, and the page drops it from the address once read. The iOS app
+opens `movies://together/<link>` the same way and shares the web address. The host starts a
+session from the player, with the link to copy before it starts.
 
 ### Differences from old movies' rooms
 

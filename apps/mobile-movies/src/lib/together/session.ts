@@ -53,9 +53,12 @@ export const moviesItem = (item: DomainItem | null): MoviesItem | null =>
 export const itemKey = (item: DomainItem): string =>
   `${item.domain}:${item.ref.type}:${item.ref.id}`;
 
-/** The web address of a session's join link, which the web app and this app both open. */
+/**
+ * The web address of a session's join link, `<server>/movies/together#<link>`, as the web app
+ * copies it; the link travels after `#`, so no request carries it.
+ */
 export const sessionUrl = (moviesUrl: string, link: string): string =>
-  `${moviesUrl.replace(/\/+$/u, "")}/together/${encodeURIComponent(link)}`;
+  `${moviesUrl.replace(/\/+$/u, "")}/together#${link}`;
 
 const LINK = /(mt_[A-Za-z0-9]+\.[A-Za-z0-9_-]+)\/?$/u;
 
@@ -68,8 +71,9 @@ const decoded = (text: string): string => {
 };
 
 /**
- * The join link in `text`: the link itself (`mt_<session>.<secret>`), a web address ending in it,
- * or this app's `movies://together/<link>`. Null for anything else.
+ * The join link in `text`: the link itself (`mt_<session>.<secret>`), the web app's
+ * `<server>/movies/together#<link>`, or this app's `movies://together/<link>`. Null for anything
+ * else.
  */
 export const parseSessionLink = (text: string): string | null =>
   LINK.exec(decoded(text.trim()))?.[1] ?? null;

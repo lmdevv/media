@@ -61,15 +61,18 @@ export const itemKey = (item: DomainItem): string =>
 export const namesTarget = (item: MoviesItem, target: WatchTarget): boolean =>
   itemKey(item) === itemKey(itemOf(target));
 
-/** The web address that opens a session's join link in the movies client. */
+/**
+ * The web address that opens a session's join link in the movies client: `/movies/together#<link>`.
+ * The link travels after `#`, so no request or referrer carries it.
+ */
 export const sessionUrl = (link: string): string =>
-  `${window.location.origin}${import.meta.env.BASE_URL}together/${encodeURIComponent(link)}`;
+  `${window.location.origin}${import.meta.env.BASE_URL}together#${link}`;
 
 const LINK = /(mt_[A-Za-z0-9]+\.[A-Za-z0-9_-]+)\/?$/u;
 
 /**
- * The join link in `text`: the link itself (`mt_<session>.<secret>`) or a web address ending in it,
- * as the player copies it. Null for anything else.
+ * The join link in `text`: the link itself (`mt_<session>.<secret>`), or a web address ending in
+ * it, such as `/movies/together#<link>` as the player copies it. Null for anything else.
  */
 export const parseSessionLink = (text: string): string | null => {
   const trimmed = text.trim();

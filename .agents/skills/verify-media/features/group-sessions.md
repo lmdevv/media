@@ -9,7 +9,7 @@ may pause and seek or add to Up next. Old movies called these watch rooms, with 
 
 - `session-start` starts a session from the player's `Watch together` button, with the link to
   copy before `Start session`.
-- `session-join` opens `/movies/together/<link>` (the iOS app: `movies://together/<link>`) and
+- `session-join` opens `/movies/together#<link>` (the iOS app: `movies://together/<link>`) and
   plays in step with the host.
 - `session-approval` holds a person on `Waiting for <host>` until the host's `Let in`.
 - `session-locked` refuses a link with `This session is locked`.
@@ -28,7 +28,7 @@ may pause and seek or add to Up next. Old movies called these watch rooms, with 
 
 - The player's `Watch together` button (the people icon), or `Watch together` in the command
   menu. In a session the button opens and closes the `Watching together` panel.
-- A session link: `/movies/together/<link>` in the browser, `movies://together/<link>` on iOS.
+- A session link: `/movies/together#<link>` in the browser, `movies://together/<link>` on iOS.
 - The command menu anywhere in the app: `Return to session`, `Leave session` or `End session`,
   and `Join session` for a pasted link.
 - A title's page: `Add to Up next`, while in a session that lets the person add.
@@ -46,7 +46,7 @@ Preconditions:
   player (`hover --testid player-video`), click `--role button --name "Watch together"`, read
   the link with `text --label "Session link"`, then click `--role button --name "Start
   session"`. The header shows `Live · 1 watching` and the `Watching together` panel.
-- **Join.** `$S browser open /together/<link> --page aiko`, then `wait-video --page aiko
+- **Join.** `$S browser open "/together#<link>" --page aiko`, then `wait-video --page aiko
   --advance 5`. Lucía's panel lists `aiko`.
 - **In step.** Read both pages' `video` position with `eval --js` and their wall clocks
   (`performance.timeOrigin + performance.now()`); carried to one instant they stay within 250 ms.

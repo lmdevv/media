@@ -10,7 +10,7 @@ const LINK = "mt_k57abc123.AbCdEf_-0123456789abcdefgh";
 describe("parseSessionLink", () => {
   it("reads a link, a web address, or this app's address that ends in one", () => {
     expect(parseSessionLink(LINK)).toBe(LINK);
-    expect(parseSessionLink(`https://cinema.home/movies/together/${LINK}`)).toBe(LINK);
+    expect(parseSessionLink(`https://cinema.home/movies/together#${LINK}`)).toBe(LINK);
     expect(parseSessionLink(`movies://together/${encodeURIComponent(LINK)}`)).toBe(LINK);
   });
 
@@ -22,7 +22,7 @@ describe("parseSessionLink", () => {
 describe("sessionUrl", () => {
   it("opens the link in the web app beside the server", () => {
     expect(sessionUrl("http://cinema.home:8080/movies/", LINK)).toBe(
-      `http://cinema.home:8080/movies/together/${LINK}`,
+      `http://cinema.home:8080/movies/together#${LINK}`,
     );
   });
 });
