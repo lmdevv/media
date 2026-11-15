@@ -95,6 +95,12 @@ const MAX_RECOVERIES = 3;
 
 const RECOVERED_MS = 2000;
 
+/**
+ * A pause this close to the song's end is the player stopping at it, whose end report can come
+ * after its pause, not the person's.
+ */
+const END_GUARD_MS = 1000;
+
 /** A seek in a stream that can seek, from when it is asked for until the player lands it. */
 interface Seeking {
   /** Where the latest seek takes the player. Until it lands, statuses carry an older position. */
@@ -633,8 +639,9 @@ export class NativeEngine implements PlayerEngine {
         if (stream.reported === null) return;
         this.#emit({ type: "time", positionMs });
         this.#reportPaused(stream);
+        const durationMs = status.durationMs ?? slot.source.durationMs;
 
-        if (outside) this.#fromOutside(stream, false);
+        if (outside && positionMs < durationMs - END_GUARD_MS) this.#fromOutside(stream, false);
 
         return;
       }

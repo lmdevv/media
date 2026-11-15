@@ -934,6 +934,10 @@ const useHandBack = (
  * waits until the device it went to plays, here included, and fails after
  * {@link TRANSFER_TIMEOUT_MS} or when the core refuses it.
  */
+/** The device that plays: this phone while a song is loaded here, else the one the player follows. */
+const activeOf = (connect: ConnectView): MoveTarget | null =>
+  connect.here ? HERE : (connect.remote?.id ?? null);
+
 const useDevicesView = (
   platform: PlatformSdk,
   controller: PlaybackController,
@@ -941,7 +945,7 @@ const useDevicesView = (
   latest: { readonly current: Latest },
 ): DevicesView => {
   const [transfer, dispatch] = useReducer(nextTransfer, idleTransfer);
-  const active = connect.here ? HERE : (connect.remote?.id ?? null);
+  const active = activeOf(connect);
 
   // A move lands once the device it went to plays.
   if (transfer.state === "pending" && transfer.to === active) dispatch({ type: "active", active });
@@ -962,9 +966,11 @@ const useDevicesView = (
   const actions = useMemo(() => {
     const move = async (to: MoveTarget): Promise<void> => {
       const { connect: view, track } = latest.current;
-      const playsNow = view.here ? HERE : (view.remote?.id ?? null);
 
-      if (playsNow === to) return;
+      if (activeOf(view) === to) return;
+
+      // Nothing plays anywhere and the queue is empty, so nothing would move here.
+      if (to === HERE && view.remote === null && track === null) return;
       dispatch({ type: "start", to });
 
       const landed = await (to === HERE

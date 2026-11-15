@@ -11,7 +11,7 @@ import { Artwork } from "@/components/ui/artwork";
 import { IconButton } from "@/components/ui/icon-button";
 import { Text } from "@/components/ui/text";
 import { formatBadge } from "@/lib/playback-format";
-import { DEVICE_FAMILY } from "@/lib/this-device";
+import { whereItPlays } from "@/lib/this-device";
 import { useWindowLayout } from "@/lib/window-layout";
 import { useNowPlaying } from "@/player";
 
@@ -107,7 +107,7 @@ export function PlayerBar({ inspector }: { readonly inspector: Inspector }) {
           />
           <IconButton
             icon={Speaker}
-            label={remote === null ? `This ${DEVICE_FAMILY}` : `Playing on ${remote.name}`}
+            label={whereItPlays(remote)}
             accessibilityHint="Chooses where the music plays"
             size="side"
             tone={remote === null ? "default" : "accent"}

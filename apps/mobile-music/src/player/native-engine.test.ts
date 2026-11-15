@@ -250,6 +250,21 @@ describe("NativeEngine", () => {
     expect(types(events)).not.toContain("system");
   });
 
+  it("takes the pause the player reports at the song's end, before its end, for no one's", async () => {
+    const { engine, media, output, events } = await setup();
+    const loaded = engine.load(media.source("a"), 0, true);
+    output(0).ready(false);
+    await loaded;
+
+    // AVPlayer can stop at the end and report its pause before the status that says it finished.
+    output(0).positionMs = output(0).durationMs;
+    output(0).pause();
+    output(0).finish();
+
+    expect(types(events)).not.toContain("system");
+    expect(types(events)).toContain("ended");
+  });
+
   it("takes a play after the song ended by itself for the person's", async () => {
     const { engine, media, output, events } = await setup();
     const loaded = engine.load(media.source("a"), 0, true);

@@ -38,7 +38,7 @@ import { CLOSED, layoutOf, partsOf, pressedPanel } from "@/lib/now-playing-layou
 import type { NowPlayingLayout, NowPlayingParts, Panel, StageView } from "@/lib/now-playing-layout";
 import type { SheetSong } from "@/lib/song-sheet";
 import { useThemeColor, useThemeLength } from "@/lib/theme-color";
-import { DEVICE_FAMILY } from "@/lib/this-device";
+import { whereItPlays } from "@/lib/this-device";
 import { useWindowLayout } from "@/lib/window-layout";
 import { usePlayer } from "@/player";
 import type { NowPlaying, RemoteDevice } from "@/player";
@@ -344,7 +344,7 @@ function LyricsButton({
 }
 
 function DeviceButton({ remote }: { readonly remote: RemoteDevice | null }) {
-  const label = remote === null ? `This ${DEVICE_FAMILY}` : `Playing on ${remote.name}`;
+  const label = whereItPlays(remote);
 
   return (
     <Pressable

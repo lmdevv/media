@@ -166,19 +166,9 @@ export function DeviceSheet() {
     previous.current = transfer.state;
   }, [transfer.state]);
 
-  const failed = useRef(false);
-
-  useEffect(() => {
-    failed.current = sheet.kind === "failed";
-  }, [sheet.kind]);
-
-  // A failure shows until the sheet closes, however it closes.
-  useEffect(
-    () => () => {
-      if (failed.current) dismissTransfer();
-    },
-    [dismissTransfer],
-  );
+  // A failure shows until the sheet closes, however it closes, and a move the person closed the
+  // sheet on goes on without it: neither comes back when the sheet opens again.
+  useEffect(() => dismissTransfer, [dismissTransfer]);
 
   return (
     <DeviceSheetBody
