@@ -1,25 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { deviceKind, thisBrowserKind } from "./player-actions";
-
-describe("deviceKind", () => {
-  it("tells a computer's browser by the name the account client gave it", () => {
-    expect(deviceKind("Firefox on Linux")).toBe("web");
-    expect(deviceKind("Safari on iPad")).toBe("web");
-    expect(deviceKind("Chrome")).toBe("web");
-    expect(deviceKind("Browser on Windows")).toBe("web");
-  });
-
-  it("counts a browser on a phone as a phone, as old music did", () => {
-    expect(deviceKind("Safari on iPhone")).toBe("phone");
-    expect(deviceKind("Chrome on Android")).toBe("phone");
-  });
-
-  it("takes any other name for the phone app", () => {
-    expect(deviceKind("Aiko's iPhone")).toBe("phone");
-    expect(deviceKind("Chrome cast in the kitchen")).toBe("phone");
-  });
-});
+import { thisBrowserKind } from "./player-actions";
 
 describe("thisBrowserKind", () => {
   it("counts an iPhone or an Android phone as a phone, and a computer or tablet as a browser", () => {

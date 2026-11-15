@@ -1,3 +1,4 @@
+import { deviceKind } from "@media/player/connect-devices";
 import type { Device } from "@media/player/react";
 import { usePlayer, usePlayerPosition } from "@media/player/react";
 import { useHotkey } from "@tanstack/react-hotkeys";
@@ -12,7 +13,7 @@ import { formatDuration } from "@/lib/format";
 import { HOTKEYS } from "@/lib/hotkeys";
 import { cn } from "@/lib/utils";
 
-import { KIND_LABEL, deviceIcon, deviceKind, thisBrowserKind } from "./player-actions";
+import { KIND_LABEL, deviceIcon, thisBrowserKind } from "./player-actions";
 
 const TRANSFER_TIMEOUT_MS = 10_000;
 

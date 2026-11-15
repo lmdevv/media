@@ -367,9 +367,11 @@ export class PlaybackController {
    * Calls `callback` synchronously at the start of every action the listener takes here, before
    * it changes anything: {@link togglePlay}, {@link next}, {@link previous}, {@link seek},
    * {@link jump}, and {@link playTracks}, whether a screen, a shortcut, or the system media
-   * controls asked. Connect makes the requests seen so far moot there (ADR 0018). What Connect
-   * itself applies, through `steer`, `playTracksAt`, `playCurrentAt`, and `release`, never calls
-   * it. Returns the function that stops calling it.
+   * controls asked. A play or pause that a native player applied itself, from the lock screen,
+   * headphones, or CarPlay, calls it too, once the engine reports it (a `system` event).
+   * Connect makes the requests seen so far moot there (ADR 0018). What Connect itself applies,
+   * through `steer`, `playTracksAt`, `playCurrentAt`, and `release`, never calls it. Returns the
+   * function that stops calling it.
    */
   onListenerAction(callback: () => void): () => void {
     this.#listenerActions.add(callback);
@@ -1601,6 +1603,14 @@ export class PlaybackController {
   }
 
   #onEngineEvent = (event: EngineEvent): void => {
+    // The person's own choice, made outside the app. It holds for whatever plays here next too, so
+    // it counts even while another song's ticket is out.
+    if (event.type === "system") {
+      this.#systemAction(event.playing);
+
+      return;
+    }
+
     // The outgoing source still sounds while the next one's ticket is out, and its position, its
     // failure, and its end describe a song the player has moved on from.
     if (this.#engineGeneration !== this.#generation) return;
@@ -1658,6 +1668,24 @@ export class PlaybackController {
       }
     }
   };
+
+  /**
+   * The person played or paused this device from the system's controls, which act on the native
+   * player itself: the lock screen, Control Center, headphones, or CarPlay. iOS pausing it for
+   * them, as when headphones are unplugged, counts too. It is a listener action, as a tap here is
+   * (ADR 0018): the Connect requests seen so far are moot, and the player means to play or pause
+   * from now on, a song still loading included.
+   */
+  #systemAction(playing: boolean): void {
+    this.#listenerActed();
+    this.#skipped.clear();
+    this.#choose(playing);
+    this.#update({ autoplayBlocked: false, error: null });
+
+    if (!playing) this.#saveResume();
+    // Connect reads whether a song still loading means to play (`playingHere`).
+    this.#notify();
+  }
 
   /** The engine moved to the preloaded song without a gap: it plays now, so the core follows. */
   #onAdvanced(): void {

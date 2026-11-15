@@ -1,3 +1,4 @@
+import { deviceKind } from "@media/player/connect-devices";
 import { usePlayer } from "@media/player/react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,7 +24,7 @@ import {
   SkipButton,
   Volume,
 } from "./controls";
-import { deviceIcon, deviceKind, perform } from "./player-actions";
+import { deviceIcon, perform } from "./player-actions";
 import { barTools } from "./bar-tools";
 import { DeviceList } from "./devices";
 import { shownSurface } from "./play-on";

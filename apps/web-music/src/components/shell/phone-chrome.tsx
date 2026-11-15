@@ -1,3 +1,4 @@
+import { deviceKind } from "@media/player/connect-devices";
 import { usePlayer } from "@media/player/react";
 import { cn } from "@/lib/utils";
 import { Link, useLocation, useNavigate, useSearch } from "@tanstack/react-router";
@@ -6,7 +7,7 @@ import { ListMusicIcon, SearchIcon, XIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { Artwork } from "@/components/library/artwork";
-import { deviceIcon, deviceKind, perform } from "@/components/player/player-actions";
+import { deviceIcon, perform } from "@/components/player/player-actions";
 
 import { useUi } from "./ui-state";
 

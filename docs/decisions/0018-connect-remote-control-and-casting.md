@@ -2,8 +2,8 @@
 
 - Status: Accepted, 2026-11-03. Amended 2026-11-04 with Connect as built, 2026-11-07 with the
   phase 3 review fixes, and 2026-11-15 with items, loading and moving playback, group-session
-  membership, the two rules D60 keeps, the upgrade from v0.3.0's Connect rows, and the music web
-  client.
+  membership, the two rules D60 keeps, the upgrade from v0.3.0's Connect rows, the music web
+  client, and the music iOS app.
 - Decisions: D35, D44, D60
 
 ## Context
@@ -347,8 +347,7 @@ that never arrives still fails the p95.
 
 - Remote volume. The device's volume is a per-device setting (ADR 0019), and Connect does not keep
   a second copy.
-- The music iOS app's device list, reporting, applying requests, loading, and moving (phase 6).
-  Movies remote control is in the backlog (D63).
+- Movies remote control, in the web client and the movies iOS app, is in the backlog (D63).
 
 ### The music web client (amended 2026-11-15)
 
@@ -407,10 +406,12 @@ The listener's actions reach the player through one boundary: `PlaybackControlle
 skip, seek, jump, and play-a-list calls run `onListenerAction` before they change anything, and
 `ConnectPlayer` makes every request seen so far moot there. The player bar, the keyboard, the
 command menu, and the system media controls (Media Session: headsets, media keys, the lock
-screen) all call those, so none of them can act while a Connect load still lands over it. What
-Connect itself applies goes through other calls (`steer`, `playTracksAt`, `playCurrentAt`,
-`release`) that never run it. Moving playback here and playing an album on another device reach
-the controller through those other calls too, so they make the requests moot themselves first.
+screen) all call those, so none of them can act while a Connect load still lands over it. On the
+phone, a play or pause the system applied to the native player itself reaches the same boundary
+through the engine's `system` event (The music iOS app, below). What Connect itself applies goes
+through other calls (`steer`, `playTracksAt`, `playCurrentAt`, `release`) that never run it.
+Moving playback here and playing an album on another device reach the controller through those
+other calls too, so they make the requests moot themselves first.
 
 | A request arrives                                                                                                       | What holds now                                 | The device                                           | It settles                                    |
 | ----------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------- | --------------------------------------------- |
@@ -423,6 +424,7 @@ the controller through those other calls too, so they make the requests moot the
 | `load` of an older load, or of one dropped                                                                              | anything                                       | changes nothing                                      | its revision                                  |
 | `stop`                                                                                                                  | anything                                       | lets go of the song, and drops a load still starting | its revision                                  |
 | the listener plays, pauses, seeks, skips, or plays a list here, from any screen, shortcut, or the system media controls | anything                                       | drops a load still starting                          | every revision seen                           |
+| the lock screen, Control Center, headphones, or CarPlay plays or pauses a phone's native player itself                  | anything, a song's ticket still out included   | drops a load still starting, and keeps the choice    | every revision seen                           |
 | none: the core shows nothing left to apply                                                                              | a load still starts here                       | drops it, as the core settled it                     | nothing; the core settled it                  |
 
 | A step of a load's start answers                                                             | What holds now                                    | The device                                                                                                                                                                                                                 |
@@ -484,6 +486,46 @@ for one revision, below):
   load, when the tab stops leading, or when the core shows nothing left to apply. The core settles
   every request when a device reports again after 30 seconds of silence (Rules for reports and
   requests), so a load still starting then is dropped and never starts.
+
+### The music iOS app (amended 2026-11-15)
+
+The music iOS app brings back old music's device sheet and remote control on Connect, through the
+same device side as the web client: `connect-player.ts` reports and applies requests,
+`use-connect.ts` runs it in the phone's player provider, and `connect-actions.ts` holds the moves,
+loads, and remote controls both clients' players make.
+
+- **One app is one device.** The app has no tabs, so it takes no Web Lock (`ConnectHost.locks` is
+  undefined): it speaks for its device as soon as the core names one. It speaks only while it plays
+  the person's queue on the core. A phone that plays its own queue of downloads while the server is
+  away neither reports nor applies requests, and lists no devices, until it hands that queue back.
+- **Reports and the background.** The phone reports on every change and every 10 seconds, as the
+  browser does, never as the song plays on. iOS keeps an app that plays audio running in the
+  background, so the phone keeps reporting and applies requests there, a remote pause included.
+  iOS suspends an app that plays nothing in the background, and a killed app stops, so either
+  leaves the list once its last report is 30 seconds old, as old music's phone left once its
+  heartbeat stopped.
+- **One active device.** As in the browser, the phone follows the device that plays while nothing
+  plays here: Now Playing's device button reads `Playing on <device>`, the iPad's player bar lights
+  its speaker button, and play, pause, seek, and skips control that device. Now Playing hides the
+  volume slider meanwhile, since volume stays with the device that plays. A phone holding a song
+  paused lets it go once another of the person's devices plays.
+- **The device sheet.** Old music's sheet comes back from Now Playing, the iPad's player bar, and
+  Settings: this phone first, then the device that plays, then the rest by name. A row moves
+  playback there, and the sheet shows the move until that device plays, as old music's did, failing
+  after 10 seconds or when the core refuses it. An album's actions have `Play on`, which loads the
+  album onto another device and takes playback over, as the web client's album menu does. The tip
+  copy of old music's sheet is gone, per the content rules, and so is its `Cancel transfer`: a move
+  is one write on the core, so there is nothing to cancel.
+- **The system's controls.** The lock screen, Control Center, headphones, and CarPlay reach the
+  player two ways. Next, previous, and the scrubber come from the app's `RemoteCommands` module and
+  call the controller's handlers, which run `onListenerAction`. expo-audio routes play and pause to
+  the AVPlayer itself, and iOS pauses it when headphones are unplugged, so the controller would
+  hear of them only as the engine's state. The phone's engine knows what it asked each native player
+  to do, so a change it did not ask for is the person's: it reports a `system` event right after
+  the change, and the controller takes it as a listener action. It counts even while another song's
+  ticket is out, since it is the person's choice for whatever plays next, which the engine's other
+  events of an outgoing song are not. expo-audio also moves the AVPlayer for a scrub, and the
+  controller's seek then lands on the same place.
 
 ### Edge cases settled in the build
 
@@ -552,6 +594,19 @@ Added with the music web client's fourth fix round (2026-11-15):
 
 - A pause or a skip from the system media controls (a headset, media keys, the lock screen) while
   an album sent from another device still loads drops that load, as a tap on the screen does.
+
+Added with the music iOS app (2026-11-15):
+
+- A pause from a phone's lock screen while an album sent from another device fetches its songs
+  drops that load, and the phone reports the song it holds paused.
+- A pause from the lock screen while that album's queue is written starts the album paused.
+- A play from the lock screen while the next song's ticket is out plays that song once it loads.
+- A remote pause, then a skip on the phone: the next song stays paused, and a later play or pause
+  of the old song leaves it alone.
+- A move onto a phone that just opened waits until its queue's whole listing names the current
+  entry, then plays that entry from the source's position and keeps the queue.
+- An older load's failure, and its old song's late failure from the native player, leave a newer
+  load to play and settle.
 
 Rejected in this build:
 

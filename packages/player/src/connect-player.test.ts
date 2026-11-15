@@ -568,6 +568,51 @@ describe("ConnectPlayer", () => {
     expect(last(run.reports)).toMatchObject({ applied: 8 });
   });
 
+  it("drops an album load the listener paused on the native player itself, as from a phone's lock screen", async () => {
+    const run = connected();
+
+    await playing(run);
+    run.albumGate.holding = true;
+    run.connect.take(
+      ask(8, {
+        kind: "load",
+        item: album("al"),
+        playing: true,
+        positionMs: 0,
+        at: run.clock.now,
+        loadRevision: 8,
+      }),
+    );
+    await settle();
+    run.engine().emit({ type: "paused" });
+    run.engine().emit({ type: "system", playing: false });
+
+    expect(last(run.reports)).toMatchObject({ song: { trackId: "a", playing: false }, applied: 8 });
+
+    run.albumGate.release();
+    await settle();
+
+    expect(names(run.sent)).not.toContain("play:c,d,0");
+    expect(run.controller.playingHere()).toMatchObject({ trackId: "a", playing: false });
+  });
+
+  it("takes a pause made outside the app while the next song's ticket is out as the listener's for that song", async () => {
+    const run = connected();
+
+    await playing(run);
+    run.gates.start.holding = true;
+    // Another device moves the queue on to B; its ticket is still out when the lock screen pauses A.
+    run.controller.sync(queueOf([one, two], "2"));
+    await settle();
+    run.engine().emit({ type: "paused" });
+    run.engine().emit({ type: "system", playing: false });
+    run.gates.start.release("b");
+    await settle();
+
+    expect(run.controller.playingHere()).toMatchObject({ trackId: "b", playing: false });
+    expect(last(run.reports)).toMatchObject({ song: { trackId: "b", playing: false } });
+  });
+
   it("settles a load of another domain's item without playing it", async () => {
     const run = connected();
 

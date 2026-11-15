@@ -1,6 +1,6 @@
 import { can } from "@/lib/capabilities";
 import { router } from "expo-router";
-import { CircleArrowDown, Info, Key, Music, Settings, Users } from "lucide-react-native";
+import { CircleArrowDown, Info, Key, Monitor, Music, Settings, Users } from "lucide-react-native";
 import { View } from "react-native";
 
 import { Page } from "@/components/ui/page";
@@ -46,6 +46,13 @@ export function SettingsHub() {
             subtitle={downloadsSettingsLine(usage)}
             trailing={<RowChevron />}
             onPress={() => router.push("/settings/downloads")}
+          />
+          <Row
+            leading={{ kind: "icon", icon: Monitor, tone: "muted" }}
+            title="Devices"
+            subtitle="Listen here or hand off"
+            trailing={<RowChevron />}
+            onPress={() => router.push("/devices")}
           />
           {can(me, "keys") ? (
             <Row

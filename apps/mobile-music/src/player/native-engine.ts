@@ -113,6 +113,11 @@ interface Stream {
   status: OutputStatus | null;
   /** The playback state last reported to the engine's listeners for this stream. */
   reported: OutputControl | null;
+  /**
+   * Whether the engine last asked this player to play or to pause; it opens paused. A change it
+   * did not ask for came from outside the app, and the engine asks for that from then on.
+   */
+  asked: "play" | "pause";
   /** The seek the player has not landed yet, or null. */
   seeking: Seeking | null;
   /** Calls waiting for the stream to open or fail. */
@@ -188,6 +193,12 @@ const streamStartFor = (positionMs: number): number =>
  * A live stream that stops before the song does (it ends early or fails) is reopened where it
  * stopped. When that keeps failing the engine asks the service whether any audio is left there:
  * none means the song is over; a busy service (`503`) is asked again after its `Retry-After`.
+ *
+ * The lock screen, Control Center, headphones, and CarPlay play and pause the native player
+ * itself (expo-audio's own remote commands), and iOS pauses it when headphones are unplugged. The
+ * engine knows what it asked each player to do, so it reports such a change as a `system` event
+ * right after the change itself: the controller takes it as the person's action, as a tap in the
+ * app.
  */
 export class NativeEngine implements PlayerEngine {
   readonly #open: OpenOutput;
@@ -237,7 +248,7 @@ export class NativeEngine implements PlayerEngine {
 
     const early = autoplay && startMs < LIVE_RESTART_MS;
 
-    if (early) stream.output.play();
+    if (early) this.#play(stream);
     const ready = await this.#whenReady(stream, OPEN_TIMEOUT_MS, null);
 
     if (generation !== this.#generation || slot.stream !== stream) return;
@@ -268,7 +279,7 @@ export class NativeEngine implements PlayerEngine {
     if (generation !== this.#generation || slot.stream !== stream) return;
     this.#emit({ type: "time", positionMs: start });
 
-    if (autoplay) stream.output.play();
+    if (autoplay) this.#play(stream);
     else this.#reportPaused(stream);
   }
 
@@ -310,7 +321,7 @@ export class NativeEngine implements PlayerEngine {
       return;
     }
 
-    if (slot.stream !== null) slot.stream.output.play();
+    if (slot.stream !== null) this.#play(slot.stream);
   }
 
   pause(): void {
@@ -329,6 +340,7 @@ export class NativeEngine implements PlayerEngine {
     const stream = slot.stream;
 
     if (stream === null) return;
+    stream.asked = "pause";
     stream.output.pause();
     this.#emit({ type: "time", positionMs: this.#positionOf(slot) });
     this.#reportPaused(stream);
@@ -430,6 +442,7 @@ export class NativeEngine implements PlayerEngine {
       unsubscribe: () => {},
       status: null,
       reported: null,
+      asked: "pause",
       seeking: null,
       waiters: new Set(),
       shown: null,
@@ -548,6 +561,22 @@ export class NativeEngine implements PlayerEngine {
     this.#emit({ type: "paused" });
   }
 
+  #play(stream: Stream): void {
+    stream.asked = "play";
+    stream.output.play();
+  }
+
+  /**
+   * `stream` played or paused without the engine asking: the person did it from the lock screen,
+   * Control Center, headphones, or CarPlay, which act on the native player itself, or iOS did it
+   * for them, as when headphones are unplugged. The engine asks for that from now on, and tells the
+   * controller, which takes it as the person's own action.
+   */
+  #fromOutside(stream: Stream, playing: boolean): void {
+    stream.asked = playing ? "play" : "pause";
+    this.#emit({ type: "system", playing });
+  }
+
   #onStatus(slot: Slot, stream: Stream, reported: OutputStatus): void {
     if (slot.stream !== stream) return;
     const measured = stream.output.samplePlayback();
@@ -597,10 +626,15 @@ export class NativeEngine implements PlayerEngine {
     const positionMs = this.#positionOf(slot);
 
     if (status.control !== stream.reported) {
+      // A change the engine did not ask for came from outside the app.
+      const outside = stream.asked !== (status.control === "paused" ? "pause" : "play");
+
       if (status.control === "paused") {
         if (stream.reported === null) return;
         this.#emit({ type: "time", positionMs });
         this.#reportPaused(stream);
+
+        if (outside) this.#fromOutside(stream, false);
 
         return;
       }
@@ -613,6 +647,8 @@ export class NativeEngine implements PlayerEngine {
       }
 
       this.#emit({ type: status.control });
+
+      if (outside) this.#fromOutside(stream, true);
     }
 
     if (status.control !== "playing" || stream.seeking !== null) return;
@@ -633,12 +669,14 @@ export class NativeEngine implements PlayerEngine {
 
   #onFinished(slot: Slot, stream: Stream, positionMs: number): void {
     if (!isLive(stream) && endedEarly(positionMs, stream.status?.durationMs ?? 0)) {
-      if (stream.reported !== "paused") stream.output.play();
+      if (stream.reported !== "paused") this.#play(stream);
 
       return;
     }
 
+    // The player stops at the end by itself; a play from the lock screen after it is the person's.
     stream.reported = "paused";
+    stream.asked = "pause";
 
     if (isLive(stream) && endedEarly(positionMs, slot.source?.durationMs ?? 0)) {
       void this.#recover(slot, true);
@@ -680,7 +718,7 @@ export class NativeEngine implements PlayerEngine {
 
     stream.handedOver = true;
     this.#mark({ kind: "handoff", key: source.key, at: this.#now() });
-    stream.output.play();
+    this.#play(stream);
     this.#current = 1 - this.#current;
     this.#showLockScreen();
     this.#emit({ type: "advanced", key: source.key });
@@ -805,7 +843,7 @@ export class NativeEngine implements PlayerEngine {
     slot.retries = 0;
     this.#showLockScreen();
 
-    if (reopening.play) stream.output.play();
+    if (reopening.play) this.#play(stream);
     else this.#emit({ type: "time", positionMs: this.#positionOf(slot) });
   }
 

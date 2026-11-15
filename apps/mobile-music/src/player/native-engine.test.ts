@@ -4,129 +4,8 @@ import type { EngineEvent, EngineSource } from "@media/player/engine";
 import { Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { FakeOutput } from "./fake-output";
 import { NativeEngine } from "./native-engine";
-import type { AudioOutput, LockScreenInfo, OutputStatus } from "./native-engine";
-
-class FakeOutput implements AudioOutput {
-  readonly url: string;
-  wantsPlay = false;
-  loaded = false;
-  live = false;
-  durationMs = 0;
-  positionMs = 0;
-  released = false;
-  holdSeeks = false;
-  reportSeeks = true;
-  lockScreen: { readonly info: LockScreenInfo | null; readonly live: boolean } | null = null;
-  readonly #listeners = new Set<(status: OutputStatus) => void>();
-  readonly #heldSeeks: Array<{ readonly land: () => void; readonly refuse: () => void }> = [];
-
-  constructor(url: string) {
-    this.url = url;
-  }
-
-  samplePlayback = (): Pick<OutputStatus, "positionMs" | "control"> => ({
-    positionMs: this.positionMs,
-    control: this.wantsPlay ? (this.loaded ? "playing" : "waiting") : "paused",
-  });
-
-  play = (): void => {
-    this.wantsPlay = true;
-    this.#report();
-  };
-
-  pause = (): void => {
-    this.wantsPlay = false;
-    this.#report();
-  };
-
-  seek = async (positionMs: number): Promise<void> => {
-    if (this.holdSeeks) {
-      await new Promise<void>((resolve, reject) => {
-        this.#heldSeeks.push({ land: resolve, refuse: () => reject(new Error("seek refused")) });
-      });
-    }
-
-    if (!this.live) this.positionMs = positionMs;
-
-    if (this.reportSeeks) this.#report();
-  };
-
-  setVolume = (): void => {};
-
-  showOnLockScreen = (info: LockScreenInfo | null, live: boolean): void => {
-    this.lockScreen = { info, live };
-  };
-
-  subscribe = (listener: (status: OutputStatus) => void): (() => void) => {
-    this.#listeners.add(listener);
-
-    return () => this.#listeners.delete(listener);
-  };
-
-  release = (): void => {
-    this.released = true;
-  };
-
-  ready(live: boolean, durationMs = 200_000): void {
-    this.loaded = true;
-    this.live = live;
-    this.durationMs = durationMs;
-    this.#report();
-  }
-
-  advance(ms: number): void {
-    this.positionMs += ms;
-    this.#report();
-  }
-
-  finish(): void {
-    this.wantsPlay = false;
-    this.positionMs = this.live ? 0 : this.durationMs;
-    this.#report({ finished: true, positionMs: this.live ? 0 : this.durationMs });
-  }
-
-  async landSeeksNewestFirst(): Promise<void> {
-    const held = this.#heldSeeks.pop();
-
-    if (held === undefined) return;
-    held.land();
-    await settled();
-    await this.landSeeksNewestFirst();
-  }
-
-  async refuseOldestSeek(): Promise<void> {
-    this.#heldSeeks.shift()?.refuse();
-    await settled();
-  }
-
-  reportEndLate(): void {
-    this.wantsPlay = false;
-    this.#report({ finished: true });
-  }
-
-  notifyPlayingLate(): void {
-    this.#report({ control: "playing", positionMs: 0 });
-  }
-
-  fail(message: string): void {
-    this.#report({ error: message });
-  }
-
-  #report(patch: Partial<OutputStatus> = {}): void {
-    const status: OutputStatus = {
-      loaded: this.loaded,
-      control: this.wantsPlay ? (this.loaded ? "playing" : "waiting") : "paused",
-      positionMs: this.positionMs,
-      durationMs: this.loaded && !this.live ? this.durationMs : null,
-      finished: false,
-      error: null,
-      ...patch,
-    };
-
-    for (const listener of this.#listeners) listener(status);
-  }
-}
 
 const ListeningAddress = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Int }));
 
@@ -309,6 +188,81 @@ describe("NativeEngine", () => {
     output(0).pause();
 
     expect(types(events).filter((type) => type === "paused")).toHaveLength(1);
+  });
+
+  it("tells of a pause it did not ask for, as from the lock screen, right after the pause", async () => {
+    const { engine, media, output, events } = await setup();
+    const loaded = engine.load(media.source("a"), 0, true);
+    output(0).ready(false);
+    await loaded;
+    output(0).advance(5000);
+    const before = events.length;
+
+    output(0).pause();
+
+    expect(events.slice(before)).toStrictEqual([
+      { type: "time", positionMs: 5000 },
+      { type: "paused" },
+      { type: "system", playing: false },
+    ]);
+  });
+
+  it("tells of a play it did not ask for once, and takes it as what it asks from then on", async () => {
+    const { engine, media, output, events } = await setup();
+    const loaded = engine.load(media.source("a"), 0, false);
+    output(0).ready(false);
+    await loaded;
+    const before = events.length;
+
+    output(0).play();
+    output(0).advance(1000);
+    output(0).play();
+
+    expect(types(events.slice(before)).filter((type) => type !== "time")).toStrictEqual([
+      "playing",
+      "system",
+    ]);
+    expect(events.find((event) => event.type === "system")).toStrictEqual({
+      type: "system",
+      playing: true,
+    });
+
+    output(0).pause();
+
+    expect(events.findLast((event) => event.type === "system")).toStrictEqual({
+      type: "system",
+      playing: false,
+    });
+  });
+
+  it("takes none of its own plays, pauses, or late reports for the person's", async () => {
+    const { engine, media, output, events } = await setup();
+    const loaded = engine.load(media.source("a"), 0, true);
+    output(0).ready(false);
+    await loaded;
+
+    engine.pause();
+    output(0).notifyPlayingLate();
+    await engine.play();
+    output(0).advance(1000);
+    engine.pause();
+
+    expect(types(events)).not.toContain("system");
+  });
+
+  it("takes a play after the song ended by itself for the person's", async () => {
+    const { engine, media, output, events } = await setup();
+    const loaded = engine.load(media.source("a"), 0, true);
+    output(0).ready(false);
+    await loaded;
+    output(0).finish();
+    const before = events.length;
+
+    output(0).play();
+
+    expect(events.slice(before).filter((event) => event.type === "system")).toStrictEqual([
+      { type: "system", playing: true },
+    ]);
   });
 
   it("seeks within a finished song without opening it again", async () => {

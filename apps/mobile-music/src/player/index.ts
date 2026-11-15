@@ -1,5 +1,6 @@
 export {
   PlayerProvider,
+  useDevices,
   useNowPlaying,
   useOwnSession,
   usePlaybackPosition,
@@ -10,4 +11,4 @@ export {
   useSong,
 } from "./provider";
 
-export type { NowPlaying, QueueItem } from "./player-state";
+export type { NowPlaying, QueueItem, RemoteDevice } from "./player-state";

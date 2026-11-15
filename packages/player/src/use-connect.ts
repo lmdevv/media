@@ -95,12 +95,28 @@ const connectCommands = (platform: Sdk): ConnectCommands => ({
   },
 });
 
-const browserLocks = (): TabLocks | undefined =>
+/** This browser's Web Locks, which elect the tab that speaks for its device; none without them. */
+export const browserLocks = (): TabLocks | undefined =>
   typeof navigator !== "undefined" && "locks" in navigator ? navigator.locks : undefined;
+
+/** What decides whether this client speaks for its device, which differs on a phone. */
+export interface ConnectHost {
+  /**
+   * The Web Locks that elect one tab of a browser to speak for the browser's device (ADR 0020), or
+   * undefined where one app is one device, as on a phone, which speaks for its device at once.
+   */
+  readonly locks: TabLocks | undefined;
+  /**
+   * Whether this client plays the person's queue on the core. A phone that plays its own queue of
+   * downloads while the server is away does not. It then neither reports nor applies requests,
+   * and lists no devices, until it hands that queue back.
+   */
+  readonly onCore: boolean;
+}
 
 /** Connect as the player sees it: this device, the listener's other devices, and the one it follows. */
 export interface ConnectView {
-  /** This browser's device; null until the core says, or for a session on no device. */
+  /** This client's device; null until the core says, or for a session on no device. */
   readonly deviceId: string | null;
   /** The listener's other own devices that are online, newest report first. */
   readonly devices: ReadonlyArray<Device>;
@@ -110,7 +126,10 @@ export interface ConnectView {
   readonly here: boolean;
   /** The device side, to drop requests the listener's own actions made moot. */
   readonly player: ConnectPlayer;
-  /** Makes this tab the one that reports for the browser's device; resolves once it is. */
+  /**
+   * Makes this tab the one that reports for the browser's device; resolves once it is. A phone app
+   * always speaks for its device, so it resolves at once there.
+   */
   readonly lead: () => Promise<void>;
   /**
    * What a device plays as it last reported, its position anchor included, which `devices` leaves
@@ -140,18 +159,21 @@ const useOnlineCheck = (active: boolean): number => {
 };
 
 /**
- * Runs this browser as a Connect device for the player (ADR 0018), and lists the listener's other
- * devices. One tab per browser reports and applies requests; a tab that plays takes that over, and
- * the tab it took over from lets go of its song. A song held paused here goes when another of the
+ * Runs this client as a Connect device for the player (ADR 0018), and lists the listener's other
+ * devices. In a browser, one tab reports and applies requests; a tab that plays takes that over,
+ * and the tab it took over from lets go of its song. A phone app is one device and speaks for it
+ * while it plays the queue on the core. A song held paused here goes when another of the
  * listener's devices plays, as old music's single active device did.
  */
 export const useConnect = (
   platform: Sdk,
   controller: PlaybackController,
   local: ControllerSnapshot,
+  { locks, onCore }: ConnectHost,
 ): ConnectView => {
   const me = usePlatformQuery(platform.core.auth.sessions.current);
   const deviceId = me.status === "success" ? (me.data.device?.deviceId ?? null) : null;
+  const speaks = deviceId !== null && onCore;
 
   const [player] = useState(
     () => new ConnectPlayer(controller, connectCommands(platform), systemConnectClock),
@@ -161,8 +183,8 @@ export const useConnect = (
   const election = useRef<TabLead | null>(null);
 
   useEffect(() => {
-    if (deviceId === null) return undefined;
-    const lead = speakForDevice(browserLocks(), LEAD_LOCK, { player, controller }, setLeading);
+    if (!speaks) return undefined;
+    const lead = speakForDevice(locks, LEAD_LOCK, { player, controller }, setLeading);
 
     election.current = lead;
 
@@ -170,13 +192,13 @@ export const useConnect = (
       lead.stop();
       election.current = null;
     };
-  }, [deviceId, player, controller]);
+  }, [speaks, locks, player, controller]);
 
   // Every tab follows the requests, so a tap in a tab that does not lead makes moot the ones it
   // saw; only the tab that leads applies them.
   const requested = usePlatformQuery(
     platform.core.connect.player.requested,
-    ...(deviceId === null ? (["skip"] as const) : [{}]),
+    ...(speaks ? [{}] : (["skip"] as const)),
   );
 
   useEffect(() => {
@@ -202,16 +224,16 @@ export const useConnect = (
 
   const targets = usePlatformQuery(
     platform.core.connect.targets.list,
-    ...(deviceId === null ? (["skip"] as const) : [{}]),
+    ...(speaks ? [{}] : (["skip"] as const)),
   );
 
   const listed = targets.status === "success" ? targets.data : null;
   const tick = useOnlineCheck(listed !== null && listed.length > 0);
 
   const online = useMemo(
-    () => (listed === null ? [] : ownDevices(listed, deviceId, player.serverNow())),
+    () => (listed === null || !speaks ? [] : ownDevices(listed, deviceId, player.serverNow())),
     // `tick` drops a device that went quiet once its last report is 30 seconds old.
-    [listed, deviceId, player, tick],
+    [listed, speaks, deviceId, player, tick],
   );
 
   const devices = useStable(online);

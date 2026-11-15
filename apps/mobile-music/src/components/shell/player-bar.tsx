@@ -1,6 +1,6 @@
 import { lyricsButton } from "@media/player/lyrics";
 import { router } from "expo-router";
-import { ListMusic, MessageSquareQuote } from "lucide-react-native";
+import { ListMusic, MessageSquareQuote, Speaker } from "lucide-react-native";
 import { Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -11,6 +11,7 @@ import { Artwork } from "@/components/ui/artwork";
 import { IconButton } from "@/components/ui/icon-button";
 import { Text } from "@/components/ui/text";
 import { formatBadge } from "@/lib/playback-format";
+import { DEVICE_FAMILY } from "@/lib/this-device";
 import { useWindowLayout } from "@/lib/window-layout";
 import { useNowPlaying } from "@/player";
 
@@ -25,7 +26,7 @@ const litClass = (lit: boolean): string => (lit ? "bg-accent/12" : "");
 
 /** The bar for what is playing; nothing with nothing queued. */
 export function PlayerBar({ inspector }: { readonly inspector: Inspector }) {
-  const { nowPlaying } = useNowPlaying();
+  const { nowPlaying, remote } = useNowPlaying();
   const insets = useSafeAreaInsets();
   const { widthClass } = useWindowLayout();
 
@@ -103,6 +104,15 @@ export function PlayerBar({ inspector }: { readonly inspector: Inspector }) {
             onPress={() => {
               inspector.pressPanel("queue");
             }}
+          />
+          <IconButton
+            icon={Speaker}
+            label={remote === null ? `This ${DEVICE_FAMILY}` : `Playing on ${remote.name}`}
+            accessibilityHint="Chooses where the music plays"
+            size="side"
+            tone={remote === null ? "default" : "accent"}
+            className={remote === null ? "" : "bg-accent/12"}
+            onPress={() => router.push("/devices")}
           />
         </View>
       </View>

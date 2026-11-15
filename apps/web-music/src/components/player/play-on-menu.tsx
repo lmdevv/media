@@ -1,3 +1,4 @@
+import { deviceKind } from "@media/player/connect-devices";
 import { usePlayer } from "@media/player/react";
 import type { MusicItem } from "@media/player/react";
 import { toast } from "sonner";
@@ -9,7 +10,7 @@ import {
   DropdownMenuSubTrigger,
 } from "@/components/ui/dropdown-menu";
 
-import { deviceIcon, deviceKind } from "./player-actions";
+import { deviceIcon } from "./player-actions";
 
 /**
  * "Play on" in an album's menu: plays the album on another of your devices, which takes playback

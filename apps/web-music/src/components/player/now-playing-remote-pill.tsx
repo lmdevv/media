@@ -1,8 +1,9 @@
+import { deviceKind } from "@media/player/connect-devices";
 import { usePlayer } from "@media/player/react";
 
 import { cn } from "@/lib/utils";
 
-import { deviceIcon, deviceKind } from "./player-actions";
+import { deviceIcon } from "./player-actions";
 
 /** "Playing on …" badge shown on Now Playing while another device plays; renders nothing locally. */
 export function RemotePill({ className }: { readonly className?: string }) {

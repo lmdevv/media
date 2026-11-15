@@ -113,3 +113,24 @@ export const devicePosition = (
 
   return durationMs > 0 ? Math.min(position, durationMs) : position;
 };
+
+/** What a device is, as old music's device lists told them apart: a computer's browser or a phone. */
+export type DeviceKind = "web" | "phone";
+
+/** The names the account client gives browsers, such as `Firefox on Linux` or `Safari`. */
+const BROWSER_NAME = /^(?:Edge|Firefox|Chrome|Safari|Browser)(?: on (?<system>.+))?$/u;
+
+/** The systems whose browsers old music counted as phones. */
+const PHONE_SYSTEMS = new Set(["iPhone", "Android"]);
+
+/**
+ * Whether a device is a computer's browser or a phone, from its name, as old music told them apart:
+ * the core keeps no kind, and a browser's name is the one the account client gave it at sign-in. A
+ * browser on an iPhone or Android counts as a phone, and so does any other name, such as the phone
+ * app's.
+ */
+export const deviceKind = (name: string): DeviceKind => {
+  const system = BROWSER_NAME.exec(name)?.groups?.["system"];
+
+  return BROWSER_NAME.test(name) && !PHONE_SYSTEMS.has(system ?? "") ? "web" : "phone";
+};

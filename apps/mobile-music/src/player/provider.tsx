@@ -1,6 +1,10 @@
 import { pagedStore } from "@media/mobile-core/pages";
 import { readHealth } from "@media/mobile-core/server";
 import { lastPerson } from "@media/mobile-core/sign-in";
+import { moveHere, moveTo, playOn, remoteActions } from "@media/player/connect-actions";
+import type { TransportActions } from "@media/player/connect-actions";
+import { devicePosition } from "@media/player/connect-devices";
+import type { Device } from "@media/player/connect-devices";
 import { PlaybackController } from "@media/player/playback-controller";
 import type {
   ControllerSnapshot,
@@ -16,6 +20,8 @@ import type { RepeatMode } from "@media/player/queue-order";
 import { ticketSources } from "@media/player/source-resolver";
 import { settingOfQuality } from "@media/player/stream-quality";
 import type { StreamQuality, StreamQualitySetting } from "@media/player/stream-quality";
+import { useConnect } from "@media/player/use-connect";
+import type { ConnectView, MusicItem } from "@media/player/use-connect";
 import type { PlatformSdk } from "@media/sdk/promise";
 import { usePlatform } from "@media/sdk/react";
 import { Option, Schema } from "effect";
@@ -26,6 +32,7 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
+  useReducer,
   useRef,
   useState,
   useSyncExternalStore,
@@ -40,6 +47,8 @@ import { useReadSettled } from "../lib/platform";
 import { appKeychains } from "../lib/keychains";
 import { resolveMediaUrl } from "../lib/media-url";
 import { readValue, writeValue } from "../lib/secure-storage";
+import { HERE, idleTransfer, nextTransfer, TRANSFER_TIMEOUT_MS } from "../lib/transfer";
+import type { MoveTarget, Transfer } from "../lib/transfer";
 import { useServer } from "../session/connection";
 import { useProbeReach, useReachWhileAudible, useServerReach } from "../session/server-reach";
 import { useSessionPhase } from "../session/session-phase";
@@ -76,9 +85,11 @@ import {
   sameSong,
   statusOf,
 } from "./player-state";
-import type { NowPlaying, PlayerStatus, PlayerView } from "./player-state";
+import type { NowPlaying, PlayerStatus, PlayerView, RemoteDevice } from "./player-state";
 
 const POSITION_INTERVAL_MS = 250;
+
+const REFUSED_MESSAGE = "Couldn’t move playback there. Try again.";
 
 /**
  * How long a new queue, or a song's ticket, may go unanswered before this phone plays its own
@@ -147,10 +158,34 @@ export interface PlayerCommands {
   readonly clearQueue: () => Promise<void>;
 }
 
-/** The song and the status: what the mini player and song rows need. */
+/** The song, the status, and where it plays: what the mini player and song rows need. */
 export interface NowPlayingView {
   readonly nowPlaying: NowPlaying | null;
   readonly status: PlayerStatus;
+  /** The device the player follows while nothing plays here (`PlayerView.remote`). */
+  readonly remote: RemoteDevice | null;
+}
+
+/** The person's devices and a move between them, for the device sheet. */
+export interface DevicesView {
+  /** The person's other own devices that are online now, by name (ADR 0018). */
+  readonly devices: ReadonlyArray<Device>;
+  /** The device that plays: `HERE` while a song is loaded on this phone, another's id, or null. */
+  readonly active: MoveTarget | null;
+  /**
+   * A move to another device, or here. While pending, the device it went from still plays; a
+   * failed move left playback where it was.
+   */
+  readonly transfer: Transfer;
+  /** Moves playback, at the same place in the song, to `target`: `HERE` or a device's id. */
+  readonly moveTo: (target: MoveTarget) => void;
+  /** Clears a failed move. */
+  readonly dismissTransfer: () => void;
+  /**
+   * Plays an album or a song on another device, which takes playback over, as old music's play on
+   * a chosen device did. Resolves whether the core took it.
+   */
+  readonly playOn: (deviceId: string, item: MusicItem) => Promise<boolean>;
 }
 
 /** The live position, and the length of the song it is in. */
@@ -172,6 +207,8 @@ const CommandsContext = createContext<PlayerCommands | null>(null);
 const SongContext = createContext<NowPlaying | null>(null);
 
 const OwnSessionContext = createContext(false);
+
+const DevicesContext = createContext<DevicesView | null>(null);
 
 const PositionReaderContext = createContext<(() => number) | null>(null);
 
@@ -218,6 +255,9 @@ export const usePlayerCommands = (): PlayerCommands =>
  * server, until it hands it back. Changes only when that does.
  */
 export const useOwnSession = (): boolean => use(OwnSessionContext);
+
+/** The person's devices and a move between them. */
+export const useDevices = (): DevicesView => required(use(DevicesContext), "useDevices");
 
 /** A queue row as the player plays it. */
 const serverEntry = (row: QueueRow): QueueEntry<Track> => ({
@@ -524,7 +564,11 @@ const createPhone = ({
 /** What the actions read at the moment they run. */
 interface Latest {
   readonly queue: QueueState<Track> | null;
+  /** Whether the music plays: on this phone, or on the device the player follows. */
   readonly playing: boolean;
+  readonly connect: ConnectView;
+  /** The song the queue plays now, which a move carries; null for an empty queue. */
+  readonly track: Track | null;
 }
 
 /**
@@ -586,6 +630,47 @@ const createCommands = (
   };
 };
 
+/**
+ * Play, pause, skips, and seeks: on this phone, or, while the player follows another device, on
+ * that device (ADR 0018). Each of this phone's is a listener action of the controller, which makes
+ * the Connect requests seen so far moot, so one still loading never lands over it.
+ */
+const transportOf = (
+  platform: PlatformSdk,
+  controller: PlaybackController,
+  { connect, queue, track }: Latest,
+): TransportActions => {
+  const device = connect.remote;
+
+  if (device === null) {
+    return {
+      playTracks: (ids, at) => controller.playTracks(ids, at),
+      togglePlay: () => controller.togglePlay(),
+      next: () => controller.next(),
+      previous: () => controller.previous(),
+      seek: async (positionMs) => {
+        controller.seek(positionMs);
+      },
+      jump: (itemId) => controller.jump(itemId),
+    };
+  }
+
+  const entries = queue?.entries ?? [];
+  const current = controller.getSnapshot().current;
+  const index = entries.findIndex((entry) => entry.itemId === current);
+
+  return remoteActions({
+    platform,
+    controller,
+    connect,
+    device,
+    entries,
+    index: index === -1 ? null : index,
+    repeat: queue?.repeat ?? "off",
+    durationMs: track?.durationMs ?? 0,
+  });
+};
+
 const createActions = (
   platform: PlatformSdk,
   phone: Phone,
@@ -594,6 +679,7 @@ const createActions = (
 ): PlayerActions => {
   const { controller, local, mode } = phone;
   const run = <A,>(call: () => Promise<A>) => controller.capture(call());
+  const transport = (): TransportActions => transportOf(platform, controller, latest.current);
 
   const changeLocal = (change: (queue: LocalQueue<Track>) => LocalQueue<Track>): void => {
     controller.sync(playingView(local.update(change)));
@@ -605,20 +691,18 @@ const createActions = (
       : (latest.current.queue?.repeat ?? "off");
 
   return {
-    play: (trackIds, index) => controller.playTracks(trackIds, index),
+    play: (trackIds, index) => transport().playTracks(trackIds, index),
     pause: async () => {
-      if (latest.current.playing) await controller.togglePlay();
+      if (latest.current.playing) await transport().togglePlay();
     },
     resume: async () => {
-      if (!latest.current.playing) await controller.togglePlay();
+      if (!latest.current.playing) await transport().togglePlay();
     },
-    toggle: () => controller.togglePlay(),
-    next: () => controller.next(),
-    previous: () => controller.previous(),
-    seek: async (positionMs) => {
-      controller.seek(positionMs);
-    },
-    jump: (itemId) => controller.jump(itemId),
+    toggle: () => transport().togglePlay(),
+    next: () => transport().next(),
+    previous: () => transport().previous(),
+    seek: (positionMs) => transport().seek(positionMs),
+    jump: (itemId) => transport().jump(itemId),
     setShuffle: async (on) => {
       if (mode.current === "local") changeLocal((queue) => shuffleLocal(queue, on, Math.random));
       else await run(() => platform.music.queue.shuffle({ on }));
@@ -673,25 +757,26 @@ const createActions = (
 };
 
 function PositionTicker({
-  controller,
+  read,
   durationMs,
   children,
 }: {
-  readonly controller: PlaybackController;
+  /** The live position in milliseconds; a stable function. */
+  readonly read: () => number;
   readonly durationMs: number;
   readonly children: ReactNode;
 }) {
-  const [positionMs, setPositionMs] = useState(() => Math.round(controller.positionMs()));
+  const [positionMs, setPositionMs] = useState(() => Math.round(read()));
 
   useEffect(() => {
     const timer = setInterval(() => {
-      setPositionMs(Math.round(controller.positionMs()));
+      setPositionMs(Math.round(read()));
     }, POSITION_INTERVAL_MS);
 
     return () => {
       clearInterval(timer);
     };
-  }, [controller]);
+  }, [read]);
 
   const position = useMemo(() => ({ positionMs, durationMs }), [positionMs, durationMs]);
 
@@ -844,6 +929,69 @@ const useHandBack = (
   }, [platform, controller, local, mode, unanswered, handing, online, audible, setMode, again]);
 };
 
+/**
+ * The person's devices and a move between them, as old music's device sheet tracked one: a move
+ * waits until the device it went to plays, here included, and fails after
+ * {@link TRANSFER_TIMEOUT_MS} or when the core refuses it.
+ */
+const useDevicesView = (
+  platform: PlatformSdk,
+  controller: PlaybackController,
+  connect: ConnectView,
+  latest: { readonly current: Latest },
+): DevicesView => {
+  const [transfer, dispatch] = useReducer(nextTransfer, idleTransfer);
+  const active = connect.here ? HERE : (connect.remote?.id ?? null);
+
+  // A move lands once the device it went to plays.
+  if (transfer.state === "pending" && transfer.to === active) dispatch({ type: "active", active });
+
+  useEffect(() => {
+    if (transfer.state !== "pending") return undefined;
+    const { to } = transfer;
+
+    const timer = setTimeout(() => {
+      dispatch({ type: "timeout", to });
+    }, TRANSFER_TIMEOUT_MS);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [transfer]);
+
+  const actions = useMemo(() => {
+    const move = async (to: MoveTarget): Promise<void> => {
+      const { connect: view, track } = latest.current;
+      const playsNow = view.here ? HERE : (view.remote?.id ?? null);
+
+      if (playsNow === to) return;
+      dispatch({ type: "start", to });
+
+      const landed = await (to === HERE
+        ? moveHere(platform, controller, view, track)
+        : moveTo(platform, controller, view, to, track));
+
+      if (!landed) dispatch({ type: "refused", to, message: REFUSED_MESSAGE });
+    };
+
+    return {
+      moveTo: (to: MoveTarget) => {
+        void move(to);
+      },
+      dismissTransfer: () => {
+        dispatch({ type: "dismiss" });
+      },
+      playOn: (deviceId: string, item: MusicItem) =>
+        playOn(platform, controller, latest.current.connect, deviceId, item),
+    };
+  }, [platform, controller, latest]);
+
+  return useMemo(
+    () => ({ devices: connect.devices, active, transfer, ...actions }),
+    [connect.devices, active, transfer, actions],
+  );
+};
+
 /** Whose player this is: the signed-in person, or offline the one who last signed in here. */
 const usePlayerPerson = (mediaUrl: string): string | null => {
   const phase = useSessionPhase();
@@ -859,6 +1007,9 @@ const usePlayerPerson = (mediaUrl: string): string | null => {
  * Provides the player hooks. Mount it inside the platform provider of a signed-in person, or of
  * the person whose downloads the app opened offline. It plays the person's queue on the core on
  * this phone, and this phone's own queue of downloaded songs while the server is out of reach.
+ * While it plays the queue on the core, the phone is a Connect device (ADR 0018): it reports what
+ * it plays, applies what the person's other devices ask of it, and, while nothing plays here,
+ * follows and controls another of their devices that does.
  */
 export function PlayerProvider({ children }: { readonly children: ReactNode }) {
   const platform = usePlatform();
@@ -948,6 +1099,21 @@ export function PlayerProvider({ children }: { readonly children: ReactNode }) {
   useHandBack(platform, phone, online, playing, setMode);
   useReachWhileAudible(playing);
 
+  // One app is one device: it speaks for its device whenever it plays the queue on the core.
+  const connect = useConnect(platform, controller, snapshot, {
+    locks: undefined,
+    onCore: mode === "server",
+  });
+
+  const following = connect.remote;
+  const remotePlayback = following?.playback ?? null;
+
+  const remote = useMemo(
+    (): RemoteDevice | null =>
+      following === null ? null : { id: following.id, name: following.name },
+    [following],
+  );
+
   const art = useMemo(
     () =>
       (track: Track): string | null =>
@@ -965,11 +1131,17 @@ export function PlayerProvider({ children }: { readonly children: ReactNode }) {
   if (!sameSong(nowPlaying, latestSong)) setNowPlaying(latestSong);
 
   const items = useMemo(() => entries.map((queued) => queueItemOf(queued, art)), [entries, art]);
-  const status = statusOf(queue === null ? null : { hasCurrent: entry !== null }, snapshot);
+
+  const status = statusOf(
+    queue === null ? null : { hasCurrent: entry !== null },
+    snapshot,
+    remotePlayback,
+  );
 
   const player = useMemo(
     (): PlayerView => ({
       status,
+      remote,
       nowPlaying,
       queue: items,
       index: Math.max(0, found),
@@ -980,15 +1152,21 @@ export function PlayerProvider({ children }: { readonly children: ReactNode }) {
       error: snapshot.error,
       quality: snapshot.quality,
     }),
-    [status, nowPlaying, items, found, queue, snapshot],
+    [status, remote, nowPlaying, items, found, queue, snapshot],
   );
 
-  const current = useMemo((): NowPlayingView => ({ nowPlaying, status }), [nowPlaying, status]);
-  const latest = useRef<Latest>({ queue: serverQueue, playing });
+  const current = useMemo(
+    (): NowPlayingView => ({ nowPlaying, status, remote }),
+    [nowPlaying, status, remote],
+  );
+
+  const track = entry?.track ?? null;
+  const shownPlaying = remotePlayback === null ? playing : remotePlayback.playing;
+  const latest = useRef<Latest>({ queue: serverQueue, playing: shownPlaying, connect, track });
 
   useLayoutEffect(() => {
-    latest.current = { queue: serverQueue, playing };
-  }, [serverQueue, playing]);
+    latest.current = { queue: serverQueue, playing: shownPlaying, connect, track };
+  }, [serverQueue, shownPlaying, connect, track]);
 
   const commands = useMemo(
     () => createCommands(platform, phone, copies),
@@ -1000,23 +1178,37 @@ export function PlayerProvider({ children }: { readonly children: ReactNode }) {
     [platform, phone, commands],
   );
 
-  const readPosition = useMemo(() => () => controller.positionMs(), [controller]);
+  const readPosition = useMemo(
+    () => () => {
+      const { connect: view, track: playingTrack } = latest.current;
+      const followed = view.remote === null ? null : view.playbackOf(view.remote.id);
+
+      if (followed === null) return controller.positionMs();
+
+      return devicePosition(followed, view.serverNow(), playingTrack?.durationMs ?? 0);
+    },
+    [controller],
+  );
+
+  const devices = useDevicesView(platform, controller, connect, latest);
 
   return (
     <PositionReaderContext value={readPosition}>
       <ActionsContext value={actions}>
         <CommandsContext value={commands}>
-          <PlayerContext value={player}>
-            <NowPlayingContext value={current}>
-              <SongContext value={nowPlaying}>
-                <OwnSessionContext value={mode === "local"}>
-                  <PositionTicker controller={controller} durationMs={nowPlaying?.durationMs ?? 0}>
-                    {children}
-                  </PositionTicker>
-                </OwnSessionContext>
-              </SongContext>
-            </NowPlayingContext>
-          </PlayerContext>
+          <DevicesContext value={devices}>
+            <PlayerContext value={player}>
+              <NowPlayingContext value={current}>
+                <SongContext value={nowPlaying}>
+                  <OwnSessionContext value={mode === "local"}>
+                    <PositionTicker read={readPosition} durationMs={nowPlaying?.durationMs ?? 0}>
+                      {children}
+                    </PositionTicker>
+                  </OwnSessionContext>
+                </SongContext>
+              </NowPlayingContext>
+            </PlayerContext>
+          </DevicesContext>
         </CommandsContext>
       </ActionsContext>
     </PositionReaderContext>
