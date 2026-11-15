@@ -596,4 +596,26 @@ describe("follower", () => {
         expect(Math.abs(lucia.positionMs() - aiko.positionMs())).toBeLessThan(250);
       }),
     ));
+  it("tries again to play the session on when the first play after a stall fails", () =>
+    scenario(playingForAMinute, (session) =>
+      Effect.gen(function* () {
+        const lucia = yield* makePlayer(0);
+
+        yield* follower(session, lucia, { controls: true, pausesForStalls: true });
+        yield* advance(4_000);
+        lucia.stall();
+        yield* advance(3_000);
+        expect((yield* session.clock).status).toBe("paused");
+
+        yield* session.refuse("unreachable");
+        lucia.recover();
+        yield* advance(2_000);
+        expect((yield* session.clock).status).toBe("paused");
+
+        yield* session.refuse(null);
+        yield* advance(2_000);
+        expect((yield* session.clock).status).toBe("playing");
+        expect(lucia.isPaused()).toBe(false);
+      }),
+    ));
 });

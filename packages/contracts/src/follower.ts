@@ -425,17 +425,20 @@ export const run = Effect.fn("Follower.run")(function* <E>(
     yield* update((current) => ({ ...current, holding: null }));
   });
 
-  /** Plays the session on after this player's stall, unless someone moved it meanwhile. */
+  /**
+   * Plays the session on after this player's stall, unless someone moved it meanwhile. The hold
+   * lasts until a newer clock ends it in `applyClock`, the play's own answer included, so a play
+   * that fails leaves it for the next correction tick to try again.
+   */
   const releaseHold = Effect.gen(function* () {
     const { clock, holding } = yield* SubscriptionRef.get(state);
-
-    yield* update((current) => ({ ...current, holding: null }));
 
     if (
       holding?.kind !== "held" ||
       clock.revision !== holding.revision ||
       clock.status !== "paused"
     ) {
+      yield* update((current) => ({ ...current, holding: null }));
       yield* correct;
 
       return;
