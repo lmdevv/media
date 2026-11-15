@@ -75,11 +75,17 @@ describe("moving the shared clock", () => {
     expect(clock).toMatchObject({ status: "paused", positionAtAnchorMs: 7_000, revision: 4 });
   });
 
-  it("changes nothing when asked for what already holds, so two members never conflict", () => {
+  it("changes nothing for a play or rate that already holds, so two members never conflict", () => {
     expect(stepOf(playing(0), { kind: "play" }, T0)).toEqual({ kind: "same" });
-    expect(stepOf(paused(0), { kind: "pause" }, T0)).toEqual({ kind: "same" });
     expect(stepOf(playing(0, 1.25), { kind: "rate", playbackRate: 1.25 }, T0)).toEqual({
       kind: "same",
+    });
+  });
+
+  it("gives a pause of a paused clock a new revision at the same position", () => {
+    expect(moved(stepOf(paused(42_000), { kind: "pause" }, T0 + 5_000))).toEqual({
+      ...paused(42_000, 4),
+      anchorServerTime: T0 + 5_000,
     });
   });
 

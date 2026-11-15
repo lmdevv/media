@@ -43,9 +43,12 @@ const SAME: Step = { kind: "same" };
 const STALE: Step = { kind: "stale" };
 
 /**
- * Decides `op` on `clock` at server time `now`. Play, pause, and a rate are absolute, so a repeat
- * or a race between two members changes nothing. A seek and a skip mean something only against
- * the clock the member saw, so an older revision is stale: two members skipping at once move the
+ * Decides `op` on `clock` at server time `now`. Play and a rate are absolute, so a repeat or a race
+ * between two members changes nothing. A pause is absolute too, but always makes a new revision,
+ * of a paused clock as well, as old movies' rooms did for every host command: a stalled host's
+ * player plays the session on only while nothing has moved it since its own pause, and a pause
+ * someone asked for since must count (ADR 0017). A seek and a skip mean something only against the
+ * clock the member saw, so an older revision is stale: two members skipping at once move the
  * session on once.
  *
  * @throws ConvexError `invalid_args` for a negative or non-finite position, or a rate outside
@@ -61,9 +64,7 @@ export const stepOf = (clock: Clock, op: ControlOp, now: number): Step => {
   if (op.kind === "play") return clock.status === "playing" ? SAME : moved({ status: "playing" });
 
   if (op.kind === "pause") {
-    return clock.status === "paused"
-      ? SAME
-      : moved({ status: "paused", positionAtAnchorMs: positionAt(clock, now) });
+    return moved({ status: "paused", positionAtAnchorMs: positionAt(clock, now) });
   }
 
   if (op.kind === "rate") {
@@ -87,12 +88,14 @@ export const stepOf = (clock: Clock, op: ControlOp, now: number): Step => {
     : moved({ positionAtAnchorMs: op.positionMs });
 };
 
-/** Pauses a playing session where it is, as when its host goes away. */
+/** Pauses a playing session where it is, as when its host goes away; a paused one stays as it is. */
 export const pauseSession = async (
   ctx: Pick<MutationCtx, "db">,
   session: SessionDoc,
   now: number,
 ): Promise<void> => {
+  if (session.clock.status !== "playing") return;
+
   const step = stepOf(session.clock, { kind: "pause" }, now);
 
   if (step.kind === "move") await ctx.db.patch(session._id, { clock: step.clock });
