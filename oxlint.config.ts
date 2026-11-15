@@ -49,7 +49,6 @@ export default defineConfig({
     ".roo/**",
     ".windsurf/**",
     ".repos/**",
-    "legacy/**",
     "tools/oxlint/**",
     "**/dist/**",
     "packages/platform/convex/_generated/**",

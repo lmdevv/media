@@ -6,18 +6,15 @@ pre-commit:
     - name: lint
       run: scripts/changed-packages.sh --staged lint
     - name: fmt
-      exclude: ["legacy/**"]
       run: pnpm fmt:check
     - name: test
       run: scripts/changed-packages.sh --staged test
     - name: knip
-      exclude: ["legacy/**", "docs/**", "*.md"]
+      exclude: ["docs/**", "*.md"]
       run: pnpm knip
     - name: deploy
-      exclude: ["legacy/**"]
       run: scripts/check-deploy.sh
     - name: commands
-      exclude: ["legacy/**"]
       run: pnpm --filter @media/commands check
     - name: pnpm-deps-hash
       glob: ["pnpm-lock.yaml", "pnpm-workspace.yaml", "nix/package.nix", "nix/cli.nix"]
@@ -26,9 +23,3 @@ pre-commit:
       glob: [".agents/skills/verify-media/**", "scripts/private-network.sh"]
       # The evidence tests need ffmpeg, which the dev shell pins and a bare host may lack.
       run: nix develop --command node --test .agents/skills/verify-media/scripts/*.test.mjs
-    - name: legacy
-      glob: "legacy/**"
-      root: legacy/music/
-      run: >-
-        test -d node_modules || { echo "legacy: run pnpm install in legacy/music first" >&2; exit 1; };
-        pnpm typecheck && pnpm lint && pnpm fmt:check && pnpm test && pnpm knip

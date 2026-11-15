@@ -1,7 +1,0 @@
-.expo/
-dist/
-/ios/
-/android/
-expo-env.d.ts
-.metro-health-check*
-*.tsbuildinfo

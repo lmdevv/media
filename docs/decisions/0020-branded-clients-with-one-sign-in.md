@@ -5,7 +5,8 @@
   holds (D48, D59), 2026-11-10 with the movies client on the web as built (D52, D57, D62),
   2026-11-11 with the movies iOS app as built (D12, D48, D51, D56, D59, D62, D64),
   2026-11-14 with the music client on the web as built (D36, D38, D52, D57, D62, D63), and
-  2026-11-14 with the music iOS app as built (D36, D40, D48, D59, D62, D64).
+  2026-11-14 with the music iOS app as built (D36, D40, D48, D59, D62, D64). `legacy/music`,
+  whose files it cites, was deleted 2026-11-15; read them at `bd7462a7`.
 - Decisions: D12, D36, D38, D39, D40, D48, D51, D52, D56, D57, D59, D62, D63, D64
 
 ## Context

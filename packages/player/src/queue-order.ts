@@ -1,7 +1,6 @@
 /**
  * Where the queue goes from the entry playing, as old music's server worked it out for
- * `playback.next` and `playback.previous` (`legacy/music/packages/commands/src/queue-rules.ts`).
- * The core keeps the queue and the entry playing; the player picks the entry and sends
+ * `playback.next` and `playback.previous`. The core keeps the queue and the entry playing; the player picks the entry and sends
  * `music.queue.jump`.
  */
 

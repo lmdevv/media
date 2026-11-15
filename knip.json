@@ -1,6 +1,6 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "ignore": ["legacy/**", "tools/oxlint/**"],
+  "ignore": ["tools/oxlint/**"],
   "ignoreDependencies": ["@effect/language-service"],
   "workspaces": {
     ".": {

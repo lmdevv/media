@@ -1,6 +1,7 @@
 # 0023. Run the core in its own Convex deployment until the movies port
 
-- Status: Accepted, 2026-11-04. Superseded by 0028, 2026-11-12.
+- Status: Accepted, 2026-11-04. Superseded by 0028, 2026-11-12. The music port deleted
+  `legacy/music` on 2026-11-15.
 - Decisions: D04, D14, D22
 
 ## Context

@@ -2,7 +2,8 @@
 
 - Status: Accepted, 2026-11-03. Amended 2026-11-04 with the format as built and with how long
   playback and Cast keep their ticket, and 2026-11-10 with the server's admission of tickets, and
-  again the same day with the movies client's side.
+  again the same day with the movies client's side. `legacy/music`, whose files it cites, was
+  deleted 2026-11-15; read them at `bd7462a7`.
 - Decisions: D26, D46
 
 ## Context

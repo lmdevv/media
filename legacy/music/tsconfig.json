@@ -1,5 +1,0 @@
-{
-  "$schema": "./node_modules/@effect/tsgo/schema.json",
-  "extends": "@music/config/tsconfig.base.json",
-  "files": []
-}

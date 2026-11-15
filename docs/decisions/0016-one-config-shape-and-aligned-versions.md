@@ -1,6 +1,7 @@
 # 0016. Use one config shape and align dependency versions
 
-- Status: Accepted, 2026-11-03. Amended 2026-11-12 with the first [media] release.
+- Status: Accepted, 2026-11-03. Amended 2026-11-12 with the first [media] release, and
+  2026-11-15 when `legacy/music` and its own settings were deleted.
 - Decisions: D32, D33, D55
 
 ## Context
@@ -33,8 +34,9 @@ store version is exempt.
 - Music moves to Effect 4.0.3 and Convex 1.46. Movies moves to Expo 58.0.17.
 - Both products already use some `MEDIA_` names with their own meanings, such as movies'
   `MEDIA_BASE_URL` and `MEDIA_SERVICE_API_KEY` and music's `MEDIA_DATA_DIR` and
-  `MEDIA_SERVICE_SECRET`. Old music under `legacy/music/` keeps its own settings until it is
-  deleted, so a renamed setting must not take a name that old music reads with another meaning.
+  `MEDIA_SERVICE_SECRET`. Old music under `legacy/music/` kept its own settings until it was
+  deleted on 2026-11-15, so until then a renamed setting could not take a name that old music read
+  with another meaning.
 - The version check covers the server, the SDK, and the CLI. Clients keep versions of their own,
   as movies' iOS app does today.
 

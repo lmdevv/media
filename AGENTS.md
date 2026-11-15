@@ -38,11 +38,14 @@ start with `MEDIA_`, the CLI binary is `media`, and the image is `ghcr.io/lmdevv
 | Path                   | Role                                                                  |
 | ---------------------- | --------------------------------------------------------------------- |
 | `apps/web-movies`      | `@media/web-movies`: Vite + React + TanStack Router SPA, `/movies`    |
+| `apps/web-music`       | `@media/web-music`: Vite + React + TanStack Router SPA, `/music`      |
 | `apps/media`           | `@media/server`: Effect HttpApi media service; serves the SPA         |
 | `apps/cli`             | Effect CLI with JSON output; agent skill in `skills/media/`           |
 | `apps/mobile-movies`   | Expo + Expo Router + Uniwind movies iOS app over `@media/mobile-core` |
-| `packages/platform`    | The one Convex project: core, movies; music ports into it (ADR 0028)  |
+| `apps/mobile-music`    | Expo + Expo Router + Uniwind music iOS app over `@media/mobile-core`  |
+| `packages/platform`    | The one Convex project: core, movies, and music (ADR 0028)            |
 | `packages/mobile-core` | iOS apps' connection, shared keychain, sign-in, and enrollment        |
+| `packages/player`      | Music's player engine and queue controller, shared by web and iOS     |
 | `packages/contracts`   | Effect Schema DTOs, errors, media HttpApi, plugin role interfaces     |
 | `packages/sdk`         | Effect core with `/effect`, `/react`, `/promise` entry points         |
 | `packages/ui`          | shadcn components restyled through Paper tokens                       |
@@ -50,7 +53,6 @@ start with `MEDIA_`, the CLI binary is `media`, and the image is `ghcr.io/lmdevv
 | `deploy/image`         | All-in-one image: the core's Convex backend, media, and Caddy (s6)    |
 | `deploy/compose`       | Docker Compose: the image plus optional sidecars                      |
 | `nix/`                 | NixOS module                                                          |
-| `legacy/music`         | Old [music] code, runnable until the music port deletes it            |
 
 Ownership: Convex owns accounts, profiles, grants, libraries, titles, files, jobs, watch history,
 and playback sessions. Disk owns original media, which is read-only. The media service owns
@@ -98,15 +100,6 @@ output directory derive from the worktree name; `scripts/dev-stack.sh env` print
 test seeds never meet `TooManyWrites`; a backend from before that is recreated on `up`, keeping its
 data. Only the dev stack sets it: the image and the NixOS module keep the default, so product code
 that writes in bulk must still pace or retry as ADR 0012 says.
-
-`legacy/music` is a nested workspace outside the root one, with its own install, lockfile, and
-checks. Root checks skip it. A commit that touches it runs its typecheck, lint, fmt:check, test,
-and knip in the hook's `legacy` job, which needs its own install, and CI runs them in the
-`legacy/music checks` job. Read `legacy/music/CLAUDE.md` before working there:
-
-```sh
-cd legacy/music && pnpm install
-```
 
 The Effect reference lives in `.repos/effect-smol`. Effect 4 stable releases are tagged in
 `Effect-TS/effect`, so clone the tag matching the pinned version:
@@ -194,11 +187,11 @@ The example identities must be replaced with the model and tool that actually co
   closes a `layer(...)` early, which fails with missing files or `ECONNREFUSED`, not a product bug.
 - Project skills in `.agents/skills/`, pinned in `skills-lock.json`: `react-doctor`,
   `react-best-practices`, and `diagnosing-bugs`. They're all model-invoked. `verify-media` is this
-  repo's own: it runs disposable stacks built from the checkout and from main, each with movies and
-  old music from `legacy/music`, drives both web apps, both CLIs, and the movies iOS app on a
+  repo's own: it runs disposable stacks built from the checkout and from main, each one container,
+  the image, serving movies and music, drives both web apps, the CLI, and either iOS app on a
   simulator, and publishes the evidence to a PR. Its stacks share one set of demo data: the demo
   library image (`docs/demo-library.md`) and four seeded people, the same in both apps, with their
-  profiles, library access, watching, playlists, and likes. Use that data, never your own media,
+  library access, watching, playlists, and likes. Use that data, never your own media,
   in screenshots and recordings.
 - Prove a user-facing change with `verify-media` before you open its PR. A PR that changes what a
   user sees carries before and after screenshots of each changed screen, at desktop and phone size
@@ -214,12 +207,12 @@ The example identities must be replaced with the model and tool that actually co
   Node and ffmpeg, in a `systemd-run --user` unit that kills on any denied call. Run it after a
   change to the media service's file or process handling, its dependencies, or the module's
   sandbox. Copy test files with `testing/byte-copies.ts`: `copyFile` calls `fchown`.
-- CI runs `check`, the unit tests, `legacy/music checks`, both stack jobs, the sandbox job, and the
-  Nix job. The unit tests run in two jobs, one per Vitest project in `vitest.config.ts`: the media
+- CI runs `check`, the unit tests, the stack jobs, the sandbox job, and the Nix job. The unit tests run in two jobs, one per Vitest project in `vitest.config.ts`: the media
   service's playback tests, which take most of the time, and the rest. Each stack job is a matrix:
   the backend one runs the platform's files in four shards and the other packages beside them, and
   the web one runs each Playwright group. On a PR, the `changed
-  workspaces` job skips each of the last five when the diff does not reach the workspaces it tests.
+  workspaces` job skips each stack job, the sandbox job, and the Nix job when the diff does not
+  reach the workspaces it tests.
   `CI passed` fails when any of them fails or is cancelled, and `main` requires it. A new push to a
   PR cancels its older run. PRs matching the `paths` in `.github/workflows/image.yml` also run its
   `build and smoke-test`, which `main` does not require, so check it yourself before merging. Never

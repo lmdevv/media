@@ -4,8 +4,8 @@
 #   verify-media.sh up [--side after|before] [--image IMG] [--library demo|fixtures|DIR] [--no-music] [--no-setup] [--no-seed]
 #   verify-media.sh doctor [--side S]
 #   verify-media.sh browser [--side S] [--app movies|music|account] <command> [flags]
-#   verify-media.sh cli [--side S] [--app movies|music] [--as PERSON] -- <media or music args>
-#   verify-media.sh logs [--side S] [--service media|movies|convex|music] [lines]
+#   verify-media.sh cli [--side S] [--as PERSON] -- <media args>
+#   verify-media.sh logs [--side S] [--service media|movies|convex] [lines]
 #   verify-media.sh ios <up|doctor|describe|find|tap|type|swipe|wait|shot|record|appearance|orientation|open|matrix|sign-in|down> [--side S] ...
 #   verify-media.sh evidence <add|list|clear|publish> ...
 #   verify-media.sh status
@@ -16,9 +16,9 @@
 # `after` is built from this checkout, `before` from main. Each side is its own Compose project,
 # media-verify-<run>-<side>: that side's own revision of deploy/compose (the all-in-one image,
 # with the account client at / and movies at /movies, or before it, Convex and movies on two
-# ports). Music is the image's own client at /music when the image holds it (music_core), else old
-# music from legacy/music as one more service. Its image's own layout picks how people sign in: on
-# the core alone (one-backend), or with old movies' own sign-in beside it.
+# ports). Music is the image's own client at /music when the image holds it (music_core). Its
+# image's own layout picks how people sign in: on the core alone (one-backend), or with old movies'
+# own sign-in beside it.
 set -euo pipefail
 
 skill="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -36,8 +36,6 @@ mac_dir="movies-ios"
 before_image_default="ghcr.io/lmdevv/media:main"
 demo_image="$(<"$root/deploy/demo-library/image")"
 cli_js="$root/apps/cli/dist/media.js"
-music_root="$root/legacy/music"
-music_cli_js="$music_root/apps/cli/dist/music.js"
 password="password123"
 health_seconds="${MEDIA_VERIFY_HEALTH_SECONDS:-360}"
 
@@ -69,28 +67,25 @@ free_port() {
     console.log(s.address().port); s.close(); });'
 }
 
-# The revision of what an image is built from: the build context ($1, `.` or a folder such as
-# legacy/music) as committed, plus the contents of what changed since. The top-level paths that
-# its `.dockerignore` leaves out (such as .agents, .claude, docs, and nix) don't count, so a commit
-# that only edits a skill or the docs keeps the revision and the after side stays current.
-tree_rev() {
-  local prefix="" ignored=() pattern meta path
-  [[ "$1" == . ]] || prefix="$1/"
+# The revision of what the image is built from: the checkout as committed, plus the contents of
+# what changed since. The top-level paths that `.dockerignore` leaves out (such as .agents, .claude,
+# docs, and nix) don't count, so a commit that only edits a skill or the docs keeps the revision and
+# the after side stays current.
+checkout_rev() {
+  local ignored=() pattern meta path
   while read -r pattern; do
     [[ "$pattern" =~ ^[A-Za-z0-9._-]+$ ]] && ignored+=("$pattern")
-  done < "$root/$prefix.dockerignore"
-  local excludes=(":!${prefix}captures")
-  for path in "${ignored[@]}"; do excludes+=(":!$prefix$path"); done
+  done < "$root/.dockerignore"
+  local excludes=(":!captures")
+  for path in "${ignored[@]}"; do excludes+=(":!$path"); done
   {
-    git -C "$root" ls-tree HEAD ${prefix:+"$prefix"} | while IFS=$'\t' read -r meta path; do
-      printf '%s\n' "${ignored[@]}" | grep -qxF -- "${path#"$prefix"}" || printf '%s\t%s\n' "$meta" "$path"
+    git -C "$root" ls-tree HEAD | while IFS=$'\t' read -r meta path; do
+      printf '%s\n' "${ignored[@]}" | grep -qxF -- "$path" || printf '%s\t%s\n' "$meta" "$path"
     done
-    git -C "$root" diff HEAD -- "$1" "${excludes[@]}"
-    git -C "$root" ls-files -oz --exclude-standard -- "$1" "${excludes[@]}" | (cd "$root" && xargs -0r sha1sum)
+    git -C "$root" diff HEAD -- . "${excludes[@]}"
+    git -C "$root" ls-files -oz --exclude-standard -- . "${excludes[@]}" | (cd "$root" && xargs -0r sha1sum)
   } | sha1sum | cut -c1-12
 }
-checkout_rev() { tree_rev .; }
-music_rev() { tree_rev legacy/music; }
 
 chromium_path() {
   if [[ -n "${CHROMIUM_PATH:-}" ]]; then echo "$CHROMIUM_PATH"; return; fi
@@ -134,12 +129,10 @@ convex_url() {
 # The owner's username on the core, or old movies' owner email, which `whoami` prints.
 owner_name() { if core_only; then echo lucia; else echo admin@movies.local; fi; }
 movies_service() { if one_port; then echo media; else echo movies; fi; }
-# Music is the image's own client at /music on its one port (music_core), or old music's own
-# container on a port of its own (old_music), or not there at all (up --no-music).
+# Music is the image's own client at /music on its one port (music_core), or not there at all: an
+# image from before the music port, a library with no music folder, or `up --no-music`.
 music_core() { [[ "$(read_state music_core)" == 1 ]]; }
-old_music() { [[ -n "$(read_state music_port)" ]]; }
-has_music() { music_core || old_music; }
-music_url() { if music_core; then echo "$(url)/music"; else echo "http://localhost:$(read_state music_port)"; fi; }
+music_url() { echo "$(url)/music"; }
 # Prints 1 when an image holds the music client (/app/music), which it serves at /music, and 0
 # when it doesn't. A container with no network, as `movies_backend_in` runs.
 music_in() {
@@ -186,14 +179,11 @@ probe() {
 }
 
 health_url() { echo "$(url)/api/health"; }
-music_health_url() { echo "$(music_url)/healthz"; }
 healthy() { probe "$(health_url)" '"backend":"connected"'; }
-music_healthy() { probe "$(music_health_url)" '"ok":true'; }
 
 stack_logs() {
   local services=("$(movies_service)")
   one_port || services+=(convex)
-  old_music && services+=(music)
   docker_limit=15 compose logs --no-color --tail 40 "${services[@]}" >&2 ||
     say "could not read the containers' logs (status $?)"
 }
@@ -206,36 +196,25 @@ start_failed() {
 }
 
 wait_healthy() {
-  local service status urls=("$(health_url)") target ip ready deadline=$((SECONDS + health_seconds))
-  old_music && urls+=("$(music_health_url)")
+  local status ip target service deadline=$((SECONDS + health_seconds))
+  target="$(health_url)"
+  service="$(container "$(movies_service)")"
   while ((SECONDS < deadline)); do
-    # Both every time, so a report names only the URLs that really never answered.
-    ready=1
-    healthy || ready=0
-    if old_music && ! music_healthy; then ready=0; fi
-    ((ready)) && return 0
-    for service in "$(movies_service)" music; do
-      [[ "$service" == music ]] && ! old_music && continue
-      status="$(docker_brief inspect -f '{{.State.Status}}' "$(container "$service")" 2>/dev/null || echo missing)"
-      if [[ "$status" == exited || "$status" == dead ]]; then
-        stack_logs
-        start_failed "$(container "$service") stopped while starting"
-      fi
-    done
+    healthy && return 0
+    status="$(docker_brief inspect -f '{{.State.Status}}' "$service" 2>/dev/null || echo missing)"
+    if [[ "$status" == exited || "$status" == dead ]]; then
+      stack_logs
+      start_failed "$service stopped while starting"
+    fi
     sleep 2
   done
   stack_logs
-  for target in "${urls[@]}"; do
-    if [[ -n "${answered[$target]:-}" ]]; then say "$target answered but never reported ready"
-    else say "$target never answered"; fi
-  done
+  if [[ -n "${answered[$target]:-}" ]]; then say "$target answered but never reported ready"
+  else say "$target never answered"; fi
   # Published ports reach a container through its address on a Docker network. A VPN route, such as
   # a Tailscale exit node's, can take that address away from the host.
-  for service in "$(movies_service)" music; do
-    [[ "$service" == music ]] && ! old_music && continue
-    for ip in $(docker_brief inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' "$(container "$service")" 2>/dev/null || true); do
-      say "check the host's route to $(container "$service") with \`ip route get $ip\`: $(ip route get "$ip" 2>/dev/null | head -1 || true)"
-    done
+  for ip in $(docker_brief inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' "$service" 2>/dev/null || true); do
+    say "check the host's route to $service with \`ip route get $ip\`: $(ip route get "$ip" 2>/dev/null | head -1 || true)"
   done
   start_failed "$project did not become healthy in ${health_seconds}s"
 }
@@ -247,8 +226,7 @@ browser() {
 start_browser() {
   rm -f "$state/browser.sock"
   local music=()
-  has_music && music=(--music "$(music_url)")
-  music_core && music+=(--music-core)
+  music_core && music=(--music "$(music_url)")
   local layout=(--base "$(url)" --convex "$(convex_url)")
   one_port && layout=(--base "$(movies_url)/" --account "$(url)")
   core_only && layout+=(--core)
@@ -284,12 +262,6 @@ as="lucia"
 cli_raw() {
   env -u MEDIA_CONVEX_URL -u MEDIA_SERVER_URL -u MEDIA_API_KEY -u MEDIA_PROFILE -u MEDIA_PASSWORD \
     -u MEDIA_CORE_URL -u MEDIA_CORE_API_KEY -u MEDIA_CORE_ADMIN_KEY XDG_CONFIG_HOME="$state/cli/$as" ${cli_timeout:+timeout --kill-after=5 "$cli_timeout"} node "$cli_js" "$@"
-}
-
-music_cli_raw() {
-  env -u MUSIC_INSECURE MUSIC_SERVER="$(music_url)/convex" \
-    MUSIC_API_KEY="$(read_state "music/key.$as")" XDG_CONFIG_HOME="$state/music/cli/$as" \
-    ${cli_timeout:+timeout --kill-after=5 "$cli_timeout"} node "$music_cli_js" "$@"
 }
 
 # Signs a person's CLI in with their password, the way `media auth login` documents it on the core
@@ -390,13 +362,11 @@ cmd_up() {
   local backend
   backend="$(movies_backend_in "$image")"
   write_state layout "$(layout_of "$state/deploy/compose/compose.yaml" "$backend")"
-  # An image that serves the music client at /music runs music itself, on the core: old music
-  # only runs beside an image from before the music port.
-  local old=$music
-  if ((music)) && [[ "$(music_in "$image")" == 1 ]]; then
-    mkdir -p "$state/music"
-    write_state music_core 1
-    old=0
+  # An image that serves the music client at /music runs music itself, on the core. An image from
+  # before the music port runs movies alone.
+  if ((music)) && [[ "$(music_in "$image")" == 0 ]]; then
+    say "$image has no music client, so this side runs movies alone"
+    music=0
   fi
   write_state image "$image"
   write_state built "$built"
@@ -404,33 +374,9 @@ cmd_up() {
   write_state rev "$(checkout_rev)"
   timing "the image"
 
-  # This repo publishes no music image, so a side whose image has no music client builds
-  # legacy/music.
-  local music_image="media:verify-$run-music-$side" music_rev
-  if ((old)); then
-    mkdir -p "$state/music"
-    if [[ "$side" == before ]]; then
-      git -C "$root" fetch -q origin main || say "could not fetch main; building music from the local origin/main"
-      music_rev="$(git -C "$root" rev-parse --short=12 origin/main:legacy/music)"
-      say "building $music_image from origin/main:legacy/music"
-      git -C "$root" archive origin/main:legacy/music | docker build -q -f deploy/docker/Dockerfile \
-        --label "media.verify.run=$run" --label "media.verify.side=$side" --label "media.verify.rev=$music_rev" \
-        -t "$music_image" - >/dev/null
-    else
-      music_rev="$(music_rev)"
-      say "building $music_image from $music_root"
-      docker build -q -f "$music_root/deploy/docker/Dockerfile" --label "media.verify.run=$run" \
-        --label "media.verify.side=$side" --label "media.verify.rev=$music_rev" -t "$music_image" "$music_root" >/dev/null
-    fi
-    write_state music/image "$music_image"
-    write_state music/image_id "$(docker image inspect -f '{{.Id}}' "$music_image")"
-    write_state music/rev "$music_rev"
-    timing "the music image"
-  fi
-
   # The demo library is a data-only image that every side on this machine mounts read-only, so
   # Docker keeps one copy of it. Other libraries are folders bind-mounted read-only.
-  local mount movies_dir="Movies" shows_dir="Shows" music_dir="Music" music_mount
+  local mount movies_dir="Movies" shows_dir="Shows" music_dir="Music"
   library="${library:-demo}"
   if [[ "$library" == demo ]]; then
     library="$demo_image"
@@ -440,14 +386,12 @@ cmd_up() {
       timing "the demo library pull"
     fi
     mount=""
-    music_mount="{ type: image, source: \"$library\", target: /music, image: { subpath: Music } }"
   else
     if [[ "$library" == fixtures ]]; then
       # Its own folder, never a state file's name: `library` holds the library's name below.
       library="$state/fixtures"
       rm -rf "$library"
       node "$root/apps/media/scripts/generate-fixtures.ts" "$library" >/dev/null
-      ((music)) && node "$music_root/apps/media/scripts/generate-fixtures.ts" "$library/Music" >/dev/null
       chmod -R a+rX "$library"
     fi
     library="$(cd "$library" && pwd)"
@@ -460,14 +404,20 @@ cmd_up() {
     [[ -d "$library/Music" ]] || music_dir="music"
     [[ -d "$library/$movies_dir" || -d "$library/$shows_dir" ]] ||
       die "$library has no Movies or Shows folder"
-    ((music)) && [[ ! -d "$library/$music_dir" ]] && die "$library has no Music folder for old music; add one or pass --no-music"
+    if ((music)) && [[ ! -d "$library/$music_dir" ]]; then
+      say "$library has no Music folder, so this side runs movies alone"
+      music=0
+    fi
     mount="    volumes:
       - { type: bind, source: \"$library\", target: /media/library, read_only: true }"
-    music_mount="{ type: bind, source: \"$library/$music_dir\", target: /music, read_only: true }"
   fi
   write_state library "$library"
+  if ((music)); then
+    mkdir -p "$state/music"
+    write_state music_core 1
+  fi
 
-  local port convex_port="" music_port music_service="" services_yaml
+  local port convex_port="" services_yaml
   port="$(free_port)"
   write_state port "$port"
   services_yaml="  media:
@@ -479,20 +429,6 @@ cmd_up() {
     labels: { media.verify.run: \"$run\", media.verify.side: \"$side\" }
   movies:
     labels: { media.verify.run: \"$run\", media.verify.side: \"$side\" }"
-  fi
-  if ((old)); then
-    music_port="$(free_port)"
-    write_state music_port "$music_port"
-    music_service="  music:
-    image: $music_image
-    labels: { media.verify.run: \"$run\", media.verify.side: \"$side\" }
-    ports: [\"127.0.0.1:$music_port:8080\"]
-    environment: { PUBLIC_URL: \"http://localhost:$music_port\", PUID: \"$(id -u)\", PGID: \"$(id -g)\", TZ: UTC }
-    volumes:
-      - music-data:/data
-      - $music_mount
-volumes:
-  music-data: {}"
   fi
   # Both public URLs must be the addresses clients use: sign-in tokens and stream URLs carry them.
   # localhost works for the browser here and, through `ios up`'s ssh forwards, on the Mac.
@@ -514,11 +450,10 @@ ENV
 services:
 $services_yaml
 $mount
-$music_service
 YAML
   compose up -d --pull missing --no-build --quiet-pull > "$state/compose.log" 2>&1 ||
     { cat "$state/compose.log" >&2; die "docker compose up failed"; }
-  say "waiting for $project on port $port${convex_port:+ and $convex_port (Convex)}${music_port:+, and $music_port (music)}"
+  say "waiting for $project on port $port${convex_port:+ and $convex_port (Convex)}"
   wait_healthy
   timing "starting the stack"
 
@@ -526,12 +461,6 @@ YAML
   if [[ "$side" == after || ! -f "$cli_js" ]]; then
     pnpm --dir "$root" --filter @lmdevv/media build > "$state/cli-build.log" 2>&1 ||
       { tail -20 "$state/cli-build.log" >&2; start_failed "could not build the media CLI"; }
-  fi
-  if ((old)) && [[ ! -f "$music_cli_js" ]]; then
-    say "building old music's CLI in $music_root"
-    { pnpm --dir "$music_root" install --frozen-lockfile --prefer-offline &&
-      pnpm --dir "$music_root" --filter @music/cli build; } > "$state/music/cli-build.log" 2>&1 ||
-      { tail -20 "$state/music/cli-build.log" >&2; die "could not build old music's CLI"; }
   fi
   start_browser
   if ((setup)); then
@@ -551,15 +480,6 @@ YAML
     as=lucia within 60 "signing the owner's CLI in" cli_login "$(owner_name)"
     as=lucia within 60 "asking the owner's CLI who it is" cli_whoami > "$state/whoami.json"
     grep -q "$(owner_name)" "$state/whoami.json" || die "the CLI does not sign in as the owner"
-    if ((old)); then
-      say "running old music's first-run setup through its web app and scanning /music"
-      within 1260 "first-run setup in the music web app" browser setup --app music >/dev/null
-      mkdir -p "$state/music/cli/lucia"
-      within 360 "making the owner's music API key" browser create-key --app music > "$state/music/key.lucia"
-      as=lucia within 60 "asking the owner's music CLI who it is" music_cli_raw whoami --json > "$state/music/whoami.json"
-      grep -q admin@movies.local "$state/music/whoami.json" || die "the API key does not sign music's CLI in as the owner"
-      write_state music/people lucia
-    fi
     if core_only; then wait_core_libraries "$(( 1 + (${#shows[@]} > 0) + (${#music_folder[@]} > 0) ))"
     else wait_libraries "$(( ${#shows[@]} > 0 ? 2 : 1 ))"; fi
     if music_core; then
@@ -581,27 +501,18 @@ YAML
     if music_core; then
       say "seeding music on the core: the Music library's grants, playlists, sharing, and likes"
       within 900 "seeding music" music_core_seed
-    elif ((old)); then
-      say "seeding the same people in music, with playlists and likes"
-      within 900 "seeding music" music_seed
     fi
     timing "the seed"
   fi
   write_state ready "$((SECONDS - started))"
-  local music_note="" music_image_note=""
-  old_music && music_image_note=" image $music_image"
-  has_music && music_note=" music $(music_url)$music_image_note,"
+  local music_note=""
+  music_core && music_note=" music $(music_url),"
   echo "ready: $(url) in $((SECONDS - started))s (run $run, side $side, project $project, image $image,$music_note library $library, evidence $evidence)"
 }
 
 seed() {
   ${cli_timeout:+timeout --kill-after=5 "$cli_timeout"} node "$scripts/seed.mjs" --state "$state" --server "$(convex_url)" \
     --media-url "$(url)" --cli "$cli_js" --browser "$scripts/browser.mjs" >&2
-}
-
-music_seed() {
-  ${cli_timeout:+timeout --kill-after=5 "$cli_timeout"} node "$scripts/music-seed.mjs" --state "$state" \
-    --server "$(music_url)/convex" --cli "$music_cli_js" --browser "$scripts/browser.mjs" >&2
 }
 
 # Music's demo data on the core, through each person's own media CLI that the movies seed signed in.
@@ -657,34 +568,12 @@ cmd_doctor() {
     else echo "FAIL  the checkout changed since up; run \`down --side $side\` and \`up --side $side\` to test it"; failed=1; fi
   fi
   echo "info  layout $(read_state layout), version $(docker exec "$m" sh -c 'cat /data/movies/version 2>/dev/null || cat /data/version 2>/dev/null || cat /data/core/version'), image $(read_state image), library $(read_state library)"
-  if ! has_music; then
-    echo "info  no music (up ran with --no-music)"
-    return "$failed"
-  fi
   if music_core; then
     check "/music is the music client" "curl -fsS '$(music_url)/' | grep -qF '<title>[music]</title>'"
     echo "info  music is the image's client at $(music_url), on the core"
-    return "$failed"
-  fi
-  local u music_port
-  u="$(container music)"
-  music_port="$(read_state music_port)"
-  check "music container $u runs in run $run" \
-    "[[ \$(docker inspect -f '{{.State.Running}} {{index .Config.Labels \"media.verify.run\"}}' $u) == 'true $run' ]]"
-  check "port $music_port maps to $u" "docker port $u 8080/tcp | grep -q ':$music_port\$'"
-  check "music's /healthz is ok" "music_healthy"
-  check "music runs the image from up" "[[ \$(docker inspect -f '{{.Image}}' $u) == $(read_state music/image_id) ]]"
-  check "music's init deployed this build" "[[ \$(docker exec $u cat /data/build) == \$(docker exec $u cat /app/build-id) ]]"
-  if [[ -n "$(read_state music/people)" ]]; then
-    check "music's CLI signs in as the owner" "music_cli_raw whoami --json | grep -q admin@movies.local"
   else
-    echo "skip  music CLI (up ran with --no-setup)"
+    echo "info  no music (the image has no music client, the library no Music folder, or up ran with --no-music)"
   fi
-  if [[ "$side" == after ]]; then
-    if [[ "$(read_state music/rev)" == "$(music_rev)" ]]; then echo "ok    music image matches legacy/music"
-    else echo "FAIL  legacy/music changed since up; run \`down --side $side\` and \`up --side $side\` to test it"; failed=1; fi
-  fi
-  echo "info  music $(music_url), build $(docker exec "$u" cat /app/build-id 2>/dev/null), image $(read_state music/image)"
   return "$failed"
 }
 
@@ -717,34 +606,21 @@ cmd_browser() {
 cmd_cli() {
   take_side "$@"
   [[ -n "$(read_state port)" ]] || die "no $side side in run $run; run \`up --side $side\`"
-  local app=movies
   set -- "${args[@]}"
   while (($#)); do
     case "$1" in
       # Before the slug: it works on bytes, so it would turn the í into two dashes.
       --as) as="${2:?--as needs a person}"; [[ "$as" == [Ll]ucía ]] && as=lucia; as="$(slug "$as")"; shift 2 ;;
-      --app) app="${2:?--app needs movies or music}"; shift 2 ;;
+      --app) die "cli runs the media CLI for both products: run \`cli -- music …\` for music" ;;
       --) shift; break ;;
       *) break ;;
     esac
   done
-  case "$app" in
-    movies)
-      [[ -d "$state/cli/$as" ]] || {
-        [[ "$as" == lucia ]] && die "no CLI session on the $side side; up ran with --no-setup"
-        die "no CLI session for $as on the $side side; up ran with --no-seed, or $as is not a seeded person"
-      }
-      cli_raw "$@" ;;
-    music)
-      has_music || die "no music on the $side side; up ran with --no-music"
-      music_core && die "music is on the core on the $side side: run \`cli -- music …\` with the media CLI"
-      [[ -n "$(read_state "music/key.$as")" ]] || {
-        [[ "$as" == lucia ]] && die "no music API key on the $side side; up ran with --no-setup"
-        die "no music API key for $as on the $side side; up ran with --no-seed, $as is a guest, or not a seeded person"
-      }
-      music_cli_raw "$@" ;;
-    *) die "--app must be movies or music, not $app" ;;
-  esac
+  [[ -d "$state/cli/$as" ]] || {
+    [[ "$as" == lucia ]] && die "no CLI session on the $side side; up ran with --no-setup"
+    die "no CLI session for $as on the $side side; up ran with --no-seed, or $as is not a seeded person"
+  }
+  cli_raw "$@"
 }
 
 cmd_logs() {
@@ -773,7 +649,6 @@ cmd_status() {
     [[ -n "$(read_state port)" ]] || continue
     echo "$s: $(side_phase) $(read_state layout) movies $(movies_url) (Convex $(convex_url)) project $project ($(docker inspect -f '{{.State.Status}}' "$(container "$(movies_service)")" 2>/dev/null || echo gone)) image $(read_state image)"
     music_core && echo "$s: $(side_phase) music $(music_url) on the image"
-    old_music && echo "$s: $(side_phase) music $(music_url) container $(container music) ($(docker inspect -f '{{.State.Status}}' "$(container music)" 2>/dev/null || echo gone)) image $(read_state music/image)"
     [[ -n "$(read_state ios_udid)" ]] && echo "$s ios: simulator $(read_state ios_udid), metro $(read_state metro_port)"
   done
   echo "evidence: $evidence_root"
