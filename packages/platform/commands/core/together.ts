@@ -29,6 +29,7 @@ const addArgs = v.object({
     }),
   ),
   at: v.optional(v.union(v.literal("next"), v.literal("end"))),
+  revision: v.optional(v.number()),
 });
 
 const addResult = v.object({ entryId: v.id("togetherEntries") });
@@ -59,8 +60,8 @@ const configureResult = v.null();
 const controlArgs = v.object({
   domain: v.union(v.literal("movies"), v.literal("music")),
   op: v.union(
-    v.object({ kind: v.literal("play") }),
-    v.object({ kind: v.literal("pause") }),
+    v.object({ kind: v.literal("play"), revision: v.optional(v.number()) }),
+    v.object({ kind: v.literal("pause"), revision: v.optional(v.number()) }),
     v.object({ kind: v.literal("rate"), playbackRate: v.number() }),
     v.object({ kind: v.literal("seek"), positionMs: v.number(), revision: v.number() }),
     v.object({ kind: v.literal("next"), revision: v.number() }),

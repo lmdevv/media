@@ -75,11 +75,17 @@ describe("moving the shared clock", () => {
     expect(clock).toMatchObject({ status: "paused", positionAtAnchorMs: 7_000, revision: 4 });
   });
 
-  it("changes nothing when asked for what already holds, so two members never conflict", () => {
+  it("changes nothing for a play or rate that already holds, so two members never conflict", () => {
     expect(stepOf(playing(0), { kind: "play" }, T0)).toEqual({ kind: "same" });
-    expect(stepOf(paused(0), { kind: "pause" }, T0)).toEqual({ kind: "same" });
     expect(stepOf(playing(0, 1.25), { kind: "rate", playbackRate: 1.25 }, T0)).toEqual({
       kind: "same",
+    });
+  });
+
+  it("gives a pause of a paused clock a new revision at the same position", () => {
+    expect(moved(stepOf(paused(42_000), { kind: "pause" }, T0 + 5_000))).toEqual({
+      ...paused(42_000, 4),
+      anchorServerTime: T0 + 5_000,
     });
   });
 
@@ -94,6 +100,32 @@ describe("moving the shared clock", () => {
       kind: "stale",
     });
     expect(stepOf(playing(0), { kind: "next", revision: 2 }, T0)).toEqual({ kind: "stale" });
+  });
+
+  it("refuses a play or pause a client decided against an older clock, or a newer one", () => {
+    expect(stepOf(paused(42_000), { kind: "play", revision: 2 }, T0)).toEqual({ kind: "stale" });
+    expect(stepOf(playing(0), { kind: "play", revision: 2 }, T0)).toEqual({ kind: "stale" });
+    expect(stepOf(playing(0), { kind: "pause", revision: 2 }, T0)).toEqual({ kind: "stale" });
+    expect(stepOf(paused(42_000), { kind: "pause", revision: 4 }, T0)).toEqual({ kind: "stale" });
+  });
+
+  it("decides a play or pause at the clock's own revision as one that carries none", () => {
+    fc.assert(
+      fc.property(
+        fc.boolean(),
+        fc.integer({ min: 0, max: 10_000_000 }),
+        fc.integer({ min: 0, max: 600_000 }),
+        fc.constantFrom("play", "pause"),
+        (isPlaying, at, elapsed, kind) => {
+          const before = isPlaying ? playing(at) : paused(at);
+          const now = T0 + elapsed;
+
+          expect(stepOf(before, { kind, revision: before.revision }, now)).toEqual(
+            stepOf(before, { kind }, now),
+          );
+        },
+      ),
+    );
   });
 
   it("seeks and skips against the clock the member saw", () => {

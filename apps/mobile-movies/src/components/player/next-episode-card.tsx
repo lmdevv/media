@@ -18,7 +18,13 @@ export interface NextEpisodeCardProps {
   readonly stillUrl: string | undefined;
   readonly countdownMs: number;
   readonly onWatchCredits: () => void;
-  readonly onPlayNext: () => void;
+  /** Plays the next episode now; null for a group session's member who may not control it. */
+  readonly onPlayNext: (() => void) | null;
+  /**
+   * The label of the button beside Play Next: `Watch Credits`, or `Close` for a group session's
+   * guest, whose card closes on this iPhone only.
+   */
+  readonly creditsLabel?: string | undefined;
   /** The line above the episode's name in place of the countdown, such as why it cannot play. */
   readonly headline?: string | undefined;
 }
@@ -33,6 +39,7 @@ export function NextEpisodeCard({
   onWatchCredits,
   onPlayNext,
   headline,
+  creditsLabel = "Watch Credits",
 }: NextEpisodeCardProps) {
   const insets = useSafeAreaInsets();
   const seconds = secondsLeft(countdownMs);
@@ -79,24 +86,26 @@ export function NextEpisodeCard({
           <Pressable
             onPress={onWatchCredits}
             accessibilityRole="button"
-            accessibilityLabel="Watch Credits"
+            accessibilityLabel={creditsLabel}
             className="h-11 min-w-0 flex-1 items-center justify-center rounded-pill bg-dark-text/12 active:opacity-70"
           >
             <Text variant="labelStrong" tone="onMedia">
-              Watch Credits
+              {creditsLabel}
             </Text>
           </Pressable>
-          <Pressable
-            onPress={onPlayNext}
-            accessibilityRole="button"
-            accessibilityLabel="Play Next"
-            className="h-11 min-w-0 flex-1 flex-row items-center justify-center gap-2 rounded-pill bg-accent active:bg-accent-pressed"
-          >
-            <Icon icon={Play} tone="onMedia" size="inline" filled />
-            <Text variant="labelStrong" tone="onMedia">
-              Play Next
-            </Text>
-          </Pressable>
+          {onPlayNext === null ? null : (
+            <Pressable
+              onPress={onPlayNext}
+              accessibilityRole="button"
+              accessibilityLabel="Play Next"
+              className="h-11 min-w-0 flex-1 flex-row items-center justify-center gap-2 rounded-pill bg-accent active:bg-accent-pressed"
+            >
+              <Icon icon={Play} tone="onMedia" size="inline" filled />
+              <Text variant="labelStrong" tone="onMedia">
+                Play Next
+              </Text>
+            </Pressable>
+          )}
         </View>
       </View>
     </Animated.View>

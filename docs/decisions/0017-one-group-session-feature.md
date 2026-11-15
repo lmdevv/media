@@ -105,9 +105,17 @@ music clients adopt it in phase 6.
 - Only `core.together.control` and the host-away pause move it, and every move anchors at the
   server's own time and bumps the revision. No client time and no player report ever enters the
   clock.
-  - Play, pause, and rate are absolute, so a repeat or a race between two members changes nothing.
+  - Play and rate are absolute, so a repeat or a race between two members changes nothing.
+  - A pause is absolute too, but it always makes a new revision, a paused clock's as well, as old
+    movies' rooms did for every host command (amended 2026-11-15, see "Stall holds" below). Two
+    pauses never conflict, since a pause carries no revision. The host-away pause pauses only a
+    playing session.
   - Seek and next carry the revision the member saw. An older one fails `conflict`, so two members
     skipping at once move the session on once.
+  - A play or a pause may carry a revision too, the one its client decided against (amended
+    2026-11-15, see "Moves no one asked for" below). It then applies only while the clock is still
+    at that revision, and otherwise fails `conflict` and changes nothing, as old movies' rooms
+    fenced every host command. One without a revision applies whatever the clock is.
 - This replaces the rooms' host re-anchoring. The host follows the clock like every guest. A
   stalled host player no longer holds the room: a phase 6 client pauses it through `control`.
 - `core.together.heartbeat` answers the server's time, so a client estimates its offset from
@@ -141,6 +149,12 @@ music clients adopt it in phase 6.
 - The queue holds up to 500 items to play next, counted in `counters`. `add` puts one first or
   last, and `next` plays the first from its start and takes it out of the queue. Phase 6 adds
   reordering where a client needs it.
+- `add` with `revision` queues an item that follows the one playing, such as the next episode,
+  as old movies' rooms named the episode they moved on from (`fromEpisodeId`). It fails
+  `conflict` once the clock moved past that revision, as a stale seek does, and takes out any
+  copy of the item already queued, each only if the caller may remove it. Two of a host's
+  screens racing to queue the next episode then queue it once, and a late add cannot queue it
+  again after the session moved on to it.
 - A queue page holds only as many entries as one call can decide inside `PAGE_ROWS_MAX` reads
   (ADR 0005). Each entry may cost its row, its item and the item's library, one grant per key of
   the viewer's reach, and who queued it. That is 44 entries for a person in 16 groups and 164 for
@@ -239,3 +253,166 @@ Left for later units:
 | --------------- | -------- | ----------------------------------------------------- |
 | `join`, `ask`   | together | a platform guest needs the `invited` fact             |
 | `add`, `remove` | together | refused to a platform guest, whatever the host allows |
+
+## Movie group sessions in the clients (amended 2026-11-15)
+
+The movies web client and the movies iOS app run movie group sessions, as old movies' watch rooms
+did, over the commands above. The core changes in four places. `add` takes `revision`, a pause
+always makes a new revision, and a play or a pause may carry a revision, all above. And one read,
+`movies.titles.episode`: an episode
+item names no show, and starting playback names both, so a member resolves it. It needs
+`movies:play`, not `movies:read`, and answers whoever may play the episode as `movies.play.start`
+decides it, so a platform guest reads the episode their session or link covers and nothing else.
+
+### The shared clock code
+
+`@media/contracts` holds what every client runs, and the music clients reuse it:
+
+- `clock`: `SessionClock`, `positionAt`, the heartbeat and away timings, the sampling of the
+  server's clock (a burst of 5 heartbeats every 30 seconds, the shortest of the last 10 round
+  trips), `DRIFT_THRESHOLDS`, and the next-episode countdown.
+- `follower-policy`: `follow`, movies' rooms' correction policy (in step within 120 ms, a rate
+  nudge of 5% up to 1.5 s, a seek beyond it), with the end of the player's own media as a ceiling,
+  since members may play versions of different lengths.
+- `follower`: the follower, an Effect over a player port and a session port.
+- `session-next`: the end of an item, below.
+
+### Following
+
+- Every member follows the clock, the host included. A client sends a heartbeat every 5 seconds
+  from any screen while the person is in or waits for a session, so browsing elsewhere keeps their
+  seat and keeps a host's session playing; closing every tab stops it, and 30 seconds later a host
+  away pauses the session. The iOS app sends it while the app runs, which iOS allows in the
+  background only while it plays or shows picture in picture, so a host watching there stays
+  present, as old rooms' player reports kept them.
+- A member who may control plays, pauses, and seeks through `control`. The player moves at once,
+  and corrections wait for the answer. A refused move, or a seek against an older revision, leaves
+  the player to return to the clock. The controls of a member who may not control show who can,
+  and their keyboard shortcuts are refused. A move they make outside the controls, such as a seek
+  from picture in picture, is corrected; a pause there detaches them until they play.
+- Clocks arrive from the subscription and from each answer; only a higher revision is applied.
+- The host's player pauses the session where it stalled, after a second of waiting, and plays it
+  on once it recovers, under the rules in "Stall holds" below. A stall right after the follower's
+  own seek does not count. Guests catch up on their own.
+
+### Moves no one asked for
+
+A client's view of the session is always behind the core's: a move someone made on another screen
+reaches it one subscription later. So a client never decides on its own, from what it can see, to
+override the session. Every move a client makes that no person asked for carries the revision it
+was decided against, and the core applies it only while the session is still there. Otherwise it
+fails `conflict` and changes nothing, and the newer clock, on its way, decides what happens next.
+A move a person asks for carries none, so a host's deliberate pause or play always wins.
+
+| Move                                              | Made by                  | Carries                            | When the session moved on                         |
+| ------------------------------------------------- | ------------------------ | ---------------------------------- | ------------------------------------------------- |
+| A stall's pause                                   | the host's follower      | the revision the player stalled on | refused, so no hold                               |
+| A stall's seek back to where the player stalled   | the host's follower      | its pause's revision               | refused, so the session stays paused at the pause |
+| A recovered hold's play                           | the host's follower      | the hold's own last revision       | refused, and the newer clock ends the hold        |
+| Queueing the next episode in the credits          | the host's client        | the revision it decided on         | refused                                           |
+| Moving on at the end of the countdown or the item | the host's client        | the revision it decided on         | refused                                           |
+| Pausing at the end of an item with nothing next   | the host's client        | the revision it decided on         | refused                                           |
+| A play or pause from the controls or the player   | a member who may control | nothing                            | applies                                           |
+| A seek from the controls or the player            | a member who may control | the revision they saw              | refused, and the player returns to the clock      |
+
+A refused move is safe to try again, since it can never undo anything newer: the follower tries a
+hold's play again on its next correction tick, and the client its end-of-item moves after two
+seconds, each against the newest clock it has by then.
+
+### Player events
+
+A player reports events late. A native bridge delivers them after the fact, and a pause or a seek
+takes effect some time after the follower asks for it. No event says which clock it came from, so
+the follower judges events against the commands it gave the player, not against clock revisions.
+
+- The follower numbers every command it gives its player: each play, pause, and seek, and the
+  load it starts on. It keeps the state the player should be in after the latest one, and the
+  commands still pending: the load, the latest play or pause, and the latest seek.
+- A command stays pending until its event arrives: `playing` for a play, `paused` for a pause, and
+  `seeked` for a seek, wherever it landed. A correction that finds the player where the clock wants
+  it also ends a pending command. A seek waits out the 3 second seek cooldown for its `seeked`,
+  because a slow seek can land somewhere else. A load has no event, so the first correction that
+  finds the player in place ends it.
+- `hear` in `follower-policy` judges each event when it arrives, against the commands given so far:
+
+| Pending when it arrives | Event                                                    | It is                    | Moves the session |
+| ----------------------- | -------------------------------------------------------- | ------------------------ | ----------------- |
+| a command               | the event that shows a pending command carried out       | that command's echo      | never             |
+| a command               | any other                                                | the player catching up   | never             |
+| nothing                 | a play or pause that matches the expected state, a stall | no change                | never             |
+| nothing                 | a play or pause that differs from it, or any `seeked`    | the viewer or the player | as below          |
+
+- `eventAction` is the one place that decides what an event does, and it decides once, when the
+  follower handles the event, not when the player reports it (amended 2026-11-15). Events wait in
+  a queue in between, and a newer clock can reach the follower and move the player in that time.
+  Each event keeps the number of the follower's latest command when it arrived. If the follower
+  has given its player a play, pause, or seek since, the event is stale, whoever caused it: a
+  viewer's `playing` still queued when a newer paused clock pauses the player never plays the
+  session again. Otherwise only a change moves the session, and only while the player still stands
+  where the event says. The first row that matches decides:
+
+| Event              | When the follower handles it                                                | Action                                                |
+| ------------------ | --------------------------------------------------------------------------- | ----------------------------------------------------- |
+| a stall or an end  |                                                                             | nothing                                               |
+| any other          | the follower gave its player a command after the event arrived              | bring the player to the clock                         |
+| a `playing` change | the player plays now, the session is paused, the viewer may control         | play the session                                      |
+| a `paused` change  | the player is paused now, the session plays, no hold, not at the end        | pause the session, or detach a viewer without control |
+| a `paused` change  | the session is already paused, a hold holds it, or the player is at its end | nothing                                               |
+| a `seeked` change  | the viewer may control, and the player landed over a second off the clock   | seek the session there                                |
+| any other          |                                                                             | bring the player to the clock                         |
+
+- That includes a viewer's own quick second move on the player. If they pause and then play
+  within one round trip, the answer to the pause moves the player before the follower handles
+  the play, so the play is stale and the session stays paused. Before this rule, the web dropped
+  it too, as its player had already paused, and only the iOS app played on, because AVPlayer
+  takes a pause late.
+
+### Stall holds
+
+The host's player pauses the session where it stalled: a pause, then a seek back to where it
+stalled. `holdStands` in `follower-policy` is the one place that decides whether a hold may play
+the session on. It judges the hold against the newest clock the follower has, which can lag the
+core's, so only a clock newer than the hold's own last move ends it (amended 2026-11-15):
+
+| The follower's newest clock         | The hold                                                                                                                                                               |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| older than the hold's own last move | stands, and waits for the clock to catch up, as when a follower started after a stream reload from a subscription that has not shown the hold's pause or seek back yet |
+| the hold's own last move            | stands, as that move left the session paused                                                                                                                           |
+| newer than the hold's own last move | ends: someone moved the session, or the hold's own play answered                                                                                                       |
+
+| Step                         | Rule                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Taking the hold              | The pause carries the revision of the clock the player stalled on, and the core applies it only there (amended 2026-11-15). If someone else's move came first, a pause included, the core refuses it, the session stays as they left it, and there is no hold.                                                                                                                                                                                                                                                                                                   |
+| Playing on                   | Once the player recovers, while the hold stands, even before the follower's clock shows the hold's own move. The follower checks this when the pause lands, on every newer clock, when a new follower takes the hold over, and before the play. The iOS player screen checks it through the same takeover rule when a new playback attempt starts. The play carries the hold's revision, so the core refuses it once anything moved the session since, even a move the follower has not heard of yet: a deliberate pause made while its clock lagged still wins. |
+| A pause that changes nothing | The core gives every pause a new revision, so a pause someone asks for during a hold always ends it. Under the old rule it left no trace: a session held alone and one also paused by its host end up identical.                                                                                                                                                                                                                                                                                                                                                 |
+| A stream reload              | The pause runs on without its follower. A follower replaced while the pause is on its way, as on a stream reload, takes over the hold, under the same rules once the pause lands. The iOS app starts a new playback attempt for a new stream, which mounts a new follower, so its player screen keeps the hold across attempts, and an attempt that starts while the hold stands starts playing, since the hold plays the session on only once its player plays.                                                                                                 |
+
+### The end of an item
+
+The core keeps no countdown, so the queue carries it. In the credits of an episode (its last
+tenth, at most 30 seconds) the host's client queues the next episode first, against the revision
+it decided on, so the core queues it once across the host's screens. Every member who sees
+it first in the queue counts down on the session's clock, so a pause holds the countdown. When it
+ends, or the item ends, the host's client skips to it; a member who may control can skip sooner.
+Watch credits, the host's, takes the entry out, which stops everyone's countdown. At the end of an
+item with nothing next to an episode, the host's client skips to whatever is queued, or pauses the
+session at the end, against the revision it decided on, as every move no one asked for does. Each
+member's player reports its own progress, so history is each person's.
+
+### Links
+
+The web client opens `/movies/together#<link>`, joins, and plays the session or says why it waits:
+for the host's approval, a locked or ended session, or an item the person may not watch, whose
+place they keep. The link travels after `#`, as invite links do (ADR 0020), so no request,
+referrer, or server log carries it, and the page drops it from the address once read. The iOS app
+opens `movies://together/<link>` the same way and shares the web address. The host starts a
+session from the player, with the link to copy before it starts.
+
+### Differences from old movies' rooms
+
+- Guests see a paused session while the host's player stalls, not "Waiting for the host's
+  connection": the clock has no buffering state.
+- Members see only their own drift, since heartbeats report none.
+- The countdown holds while the session is paused, and a host who reloads during the credits after
+  Watch credits may see it start again.
+- Queueing (Up next) and the join and guest switches are new to movies, from D34.

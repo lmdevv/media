@@ -9,14 +9,25 @@ import { episodeCode, facts, formatRuntime } from "@/lib/format";
 import { AUTOPLAY_COUNTDOWN } from "./autoplay";
 
 /**
- * What the viewer can do about the countdown, `countdownMs` before the next episode starts: play
- * the next episode now, or watch the credits instead.
+ * What the viewer can do about the countdown, `countdownMs` before the next episode starts.
+ * `advance`: playing on their own, or hosting a group session (for everyone in it), they play the
+ * next episode now or watch the credits instead. `follow`: a session's guest sees the shared
+ * countdown and closes the card on this screen, and plays the next episode now for everyone when
+ * they may control the session (`onPlayNext`).
  */
-export interface NextEpisodeActions {
-  readonly countdownMs: number;
-  readonly onPlayNext: () => void;
-  readonly onWatchCredits: () => void;
-}
+export type NextEpisodeActions =
+  | {
+      readonly kind: "advance";
+      readonly countdownMs: number;
+      readonly onPlayNext: () => void;
+      readonly onWatchCredits: () => void;
+    }
+  | {
+      readonly kind: "follow";
+      readonly countdownMs: number;
+      readonly onPlayNext: (() => void) | null;
+      readonly onClose: () => void;
+    };
 
 /** The parts of the next episode the card shows. */
 export type NextEpisode = Pick<
@@ -101,6 +112,25 @@ const secondsLeft = (countdownMs: number): number => Math.max(0, Math.ceil(count
 function CardActions({ actions }: { readonly actions: NextEpisodeActions }) {
   const describedBy = useId();
 
+  if (actions.kind === "follow" && actions.onPlayNext === null) {
+    return (
+      <div className="flex flex-wrap gap-3">
+        <p
+          role="timer"
+          aria-label={startsIn(actions.countdownMs)}
+          className="relative isolate flex h-11 grow items-center justify-center gap-2 overflow-hidden rounded-control bg-text/10 px-5 text-body/4.5 font-semibold text-text"
+        >
+          <CountdownFill countdownMs={actions.countdownMs} className="bg-text/15" />
+          Starts in
+          <Seconds value={secondsLeft(actions.countdownMs)} />
+        </p>
+        <Button variant="secondary" size="md" className="grow" onClick={actions.onClose}>
+          Close
+        </Button>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-wrap gap-3">
       <Button
@@ -109,7 +139,7 @@ function CardActions({ actions }: { readonly actions: NextEpisodeActions }) {
         className="relative isolate grow overflow-hidden bg-text/70 hover:bg-text/80"
         autoFocus
         aria-describedby={describedBy}
-        onClick={actions.onPlayNext}
+        onClick={actions.onPlayNext ?? undefined}
       >
         <CountdownFill countdownMs={actions.countdownMs} className="bg-text" />
         <PlayIcon aria-hidden className="fill-current" />
@@ -121,8 +151,13 @@ function CardActions({ actions }: { readonly actions: NextEpisodeActions }) {
       <span id={describedBy} hidden>
         {startsIn(actions.countdownMs)}
       </span>
-      <Button variant="secondary" size="md" className="grow" onClick={actions.onWatchCredits}>
-        Watch credits
+      <Button
+        variant="secondary"
+        size="md"
+        className="grow"
+        onClick={actions.kind === "advance" ? actions.onWatchCredits : actions.onClose}
+      >
+        {actions.kind === "advance" ? "Watch credits" : "Close"}
       </Button>
     </div>
   );

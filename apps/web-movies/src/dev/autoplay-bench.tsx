@@ -28,6 +28,7 @@ export interface AutoplayBenchOptions {
 }
 
 const actionsFor = (countdownMs: number, done: (what: string) => void): NextEpisodeActions => ({
+  kind: "advance",
   countdownMs,
   onPlayNext: () => done("Played next"),
   onWatchCredits: () => done("Watching credits"),

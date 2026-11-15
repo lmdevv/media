@@ -1,3 +1,5 @@
+import { DRIFT_THRESHOLDS } from "@media/contracts/clock";
+import type { FollowerPlayer } from "@media/contracts/follower";
 import type { NegotiateResponse } from "@media/contracts/media-playback";
 import { Playback, Versions } from "@media/sdk/effect";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
@@ -20,7 +22,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { useCommandRoot } from "@/commands";
-import type { PlayerCommands } from "@/commands";
+import type { PlayerCommands, PlayerTogether } from "@/commands";
 import { artworkUrl } from "@/lib/artwork";
 import type { EpisodeId, MediaFileId, MediaVersion, TitleId } from "@/lib/catalog";
 import { loadQualityChoice, saveQualityChoice } from "@/lib/device-storage";
@@ -44,12 +46,22 @@ import { usePictureInPicture } from "@/playback/use-picture-in-picture";
 import { useMediaState, usePlayback } from "@/playback/use-playback";
 import { withFacts } from "@/playback/use-version-choice";
 import { nameOf, useMe, useScopes } from "@/session/session";
+import { itemOf } from "@/together/session";
+import { SessionPanel, memberRows } from "@/together/session-panel";
+import {
+  HostAway,
+  SessionChip,
+  SessionStopped,
+  StartSessionDialog,
+  SyncingToSession,
+} from "@/together/session-states";
+import { useSessionFollow, useSessionPlayer } from "@/together/use-session-player";
 
 import { AUTOPLAY_COUNTDOWN } from "./autoplay";
 import { AutoplayNext } from "./autoplay-next";
 import { EpisodePicker } from "./episode-picker";
 import { LeaveDialog } from "./leave-dialog";
-import { PhoneControls, TrackPill } from "./phone-player";
+import { PhoneControls, PhoneSessionVideoChrome, TrackPill } from "./phone-player";
 import {
   Buffering,
   PlaybackStopped,
@@ -162,11 +174,22 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
   const deviceQuality =
     settings.status === "success" ? (settings.data.device?.streamQuality ?? null) : null;
 
+  const watching = useMemo(() => ({ titleId, episodeId: episodeId ?? null }), [titleId, episodeId]);
+  const playerNow = useRef<FollowerPlayer | null>(null);
+  const together = useSessionPlayer(watching, playerNow);
+  const inSession = together.session !== null;
+  const sessionStart = together.startAt;
+
   const buildRequest = (): PlaybackRequest => ({
     titleId,
     episodeId: episodeId ?? null,
-    fileId: version ?? null,
-    start: startChoice(start),
+    fileId: inSession ? null : (version ?? null),
+    start: inSession
+      ? StartChoice.At({
+          positionMs: () => sessionStart().positionMs,
+          play: () => sessionStart().play,
+        })
+      : startChoice(start),
     quality: deviceQuality === null ? loadQualityChoice() : qualityOfSetting(deviceQuality),
   });
 
@@ -177,13 +200,21 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
 
   if (!settled && settings.status !== "loading") setSettled(true);
 
-  const handle = usePlayback(video, settled ? buildRequest : null, `${titleId}:${episodeId ?? ""}`);
+  const handle = usePlayback(
+    video,
+    settled && together.mode !== "loading" ? buildRequest : null,
+    `${titleId}:${episodeId ?? ""}`,
+  );
 
   const controller = handle?.controller ?? null;
   const snapshot = handle?.snapshot ?? null;
   const phase = snapshot?.phase ?? PlaybackPhase.Starting();
   const isPlaying = PlaybackPhase.$is("Playing")(phase);
   const player = controller?.player ?? null;
+
+  useEffect(() => {
+    playerNow.current = player;
+  }, [player]);
   const media = useMediaState(video, player);
   const stream = snapshot?.stream ?? null;
   const started = snapshot?.started ?? null;
@@ -206,6 +237,14 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
 
   const nextEpisode = next.status === "success" ? next.data : null;
 
+  const follow = useSessionFollow(together, {
+    player: isPlaying ? player : null,
+    durationMs: duration > 0 ? duration * 1000 : null,
+    nextEpisode,
+  });
+
+  const sessionMove = follow.move;
+
   const backToDetails = useCallback(() => {
     void navigate({ to: "/title/$titleId", params: { titleId } });
   }, [navigate, titleId]);
@@ -216,10 +255,14 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
     (seconds: number) => {
       if (player === null) return;
 
+      const positionMs = Math.max(0, Math.min(duration, seconds)) * 1000;
+
       setScrub(null);
-      player.seek(Math.max(0, Math.min(duration, seconds)) * 1000);
+
+      if (inSession) sessionMove({ kind: "seek", positionMs });
+      else player.seek(positionMs);
     },
-    [player, duration],
+    [player, duration, inSession, sessionMove],
   );
 
   const skip = useCallback(
@@ -255,15 +298,17 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
     if (player === null) return;
 
     if (snapshot?.needsGesture === true) controller?.resumeWithGesture();
+    else if (inSession) sessionMove({ kind: "play" });
     else void player.play().catch(() => undefined);
-  }, [player, snapshot?.needsGesture, controller]);
+  }, [player, snapshot?.needsGesture, controller, inSession, sessionMove]);
 
   const togglePlay = useCallback(() => {
     if (player === null) return;
 
     if (snapshot?.needsGesture === true || player.isPaused()) play();
+    else if (inSession) sessionMove({ kind: "pause" });
     else player.pause();
-  }, [player, snapshot?.needsGesture, play]);
+  }, [player, snapshot?.needsGesture, play, inSession, sessionMove]);
 
   const setVolume = useCallback(
     (value: number) => {
@@ -389,14 +434,14 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
 
   const versionOptions = useMemo(
     (): ReadonlyArray<TrackOption> =>
-      versionFacts.length < 2
+      versionFacts.length < 2 || inSession
         ? []
         : versionFacts.map(({ version: candidate, facts }) => ({
             id: candidate.id,
             label: Versions.label(facts),
             detail: Versions.detail(facts),
           })),
-    [versionFacts],
+    [versionFacts, inSession],
   );
 
   const versionId = coreStart?.file.id ?? "";
@@ -469,13 +514,13 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
   });
 
   const askToLeave = useCallback(() => {
-    const pause = player !== null && !player.isPaused();
+    const pause = !inSession && player !== null && !player.isPaused();
 
     if (pause) player.pause();
     focusBeforeLeaving.current =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setLeaving({ resume: pause });
-  }, [player]);
+  }, [player, inSession]);
 
   const stay = useCallback(() => {
     if (leaving?.resume === true) play();
@@ -509,24 +554,44 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
     duration > 0 &&
     (media.ended || remaining <= creditsSeconds(duration));
 
-  const showNext = inCredits && nextEpisode !== null && !creditsDismissed;
+  const showNext = inCredits && nextEpisode !== null && !creditsDismissed && !inSession;
+
+  const sessionPlayNow = together.actions.playNow;
+  const sessionPlayQueued = together.actions.playQueued;
+  const picksForSession = inSession && together.mayControl && together.mayAdd;
 
   const playEpisode = useCallback(
     (id: EpisodeId) => {
+      if (inSession) {
+        sessionPlayNow(itemOf({ titleId, episodeId: id }));
+
+        return;
+      }
+
       void navigate({
         to: "/watch/$titleId",
         params: { titleId },
         search: { episodeId: id, start: "resume" },
       });
     },
-    [navigate, titleId],
+    [navigate, titleId, inSession, sessionPlayNow],
   );
 
   const playNext = useCallback(() => {
     if (nextEpisode !== null) playEpisode(nextEpisode.id);
   }, [nextEpisode, playEpisode]);
 
-  const nextAction = nextEpisode === null ? null : playNext;
+  const queuedFirst = follow.queue.length > 0;
+
+  const sessionNextAction = !together.mayControl
+    ? null
+    : queuedFirst
+      ? sessionPlayQueued
+      : together.mayAdd && nextEpisode?.available === true
+        ? playNext
+        : null;
+
+  const nextAction = inSession ? sessionNextAction : nextEpisode === null ? null : playNext;
 
   const seasonEpisodes = useSeasonEpisodes(
     coreStart?.titleId ?? titleId,
@@ -560,7 +625,7 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
     [episodeIdNow, seasonNow, seasons, seasonEpisodes],
   );
 
-  const canPick = picking !== null;
+  const canPick = picking !== null && (!inSession || picksForSession);
 
   if (episodesOpenIn !== null && (!canPick || episodesOpenIn !== layout)) {
     setEpisodesOpenIn(null);
@@ -612,7 +677,7 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
             if (player?.isPaused() === false) togglePlay();
           },
           seekTo,
-          previous: previousEpisode === null ? null : playPrevious,
+          previous: previousEpisode === null || inSession ? null : playPrevious,
           next: nextAction,
         },
   );
@@ -638,6 +703,40 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
 
   const stalled = useSettled(isPlaying && media.buffering, BUFFERING_GRACE_MS);
 
+  const session = together.session;
+  const followState = follow.following.state;
+  const [panel, setPanel] = useState(true);
+  const [closedCard, setClosedCard] = useState<EpisodeId | null>(null);
+  const shownCard = follow.nextCard;
+
+  const sessionCard =
+    leaving === null && shownCard !== null && shownCard.episode.id !== closedCard
+      ? shownCard
+      : null;
+
+  const syncing =
+    session !== null &&
+    (followState === null ||
+      followState.offset === null ||
+      followState.follow === "blocked" ||
+      (session.clock.status === "playing" &&
+        (followState.follow === "buffering" ||
+          followState.driftMs === null ||
+          Math.abs(followState.driftMs) >= DRIFT_THRESHOLDS.seekMs)));
+
+  const selfId = me?.userId ?? null;
+
+  const rows = useMemo(
+    () =>
+      session === null
+        ? []
+        : memberRows(session.members, selfId, syncing, followState?.driftMs ?? null),
+    [session, selfId, syncing, followState?.driftMs],
+  );
+
+  const sessionPaused =
+    session !== null && (session.clock.status !== "playing" || together.hostAway);
+
   const streamInfoAvailable = layout === "desktop" && stream !== null && started !== null;
   const infoShown = info && streamInfoAvailable;
 
@@ -650,6 +749,8 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
     (volumeOpen && canSetVolume) ||
     leaving !== null ||
     showNext ||
+    sessionCard !== null ||
+    together.starting !== undefined ||
     scrub !== null;
 
   const controlsVisible = useControlsVisible(frame, hold);
@@ -683,7 +784,22 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
         else askToLeave();
       },
     },
-    !menu && leaving === null,
+    !menu && leaving === null && together.starting === undefined,
+  );
+
+  const canStart = isPlaying && started !== null && together.mode === "solo" && !together.elsewhere;
+  const startSession = together.actions.start;
+  const copySessionLink = together.actions.copyLink;
+  const leaveSession = together.actions.leave;
+
+  const playerTogether = useMemo(
+    (): PlayerTogether => ({
+      start: canStart ? startSession : null,
+      copyLink: inSession ? copySessionLink : null,
+      leave: inSession ? leaveSession : null,
+      hosting: together.hosting,
+    }),
+    [canStart, startSession, inSession, copySessionLink, leaveSession, together.hosting],
   );
 
   const commands = useMemo(
@@ -712,6 +828,7 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
       episodes: episodeOptions,
       episodeId: episode?.id ?? "",
       selectEpisode,
+      together: playerTogether,
     }),
     [
       media.paused,
@@ -737,6 +854,7 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
       episode?.id,
       selectEpisode,
       streamInfoAvailable,
+      playerTogether,
     ],
   );
 
@@ -803,7 +921,7 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
   );
 
   const episodePicker = (trigger: React.ReactElement) =>
-    picking === null ? null : (
+    picking === null || !canPick ? null : (
       <EpisodePicker
         trigger={trigger}
         container={overlayContainer}
@@ -886,6 +1004,49 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
       return <TryingAnotherWay positionMs={phase.positionMs} onBack={backToDetails} />;
     }
 
+    if (together.stopped !== null) {
+      return (
+        <SessionStopped
+          title={
+            together.stopped.kind === "ended"
+              ? `${together.hostName} ended the session`
+              : "You're no longer in this session"
+          }
+          onKeepWatching={together.actions.goSolo}
+          onBack={backToDetails}
+        />
+      );
+    }
+
+    if (session !== null && !together.hosting && together.hostAway) {
+      return (
+        <HostAway
+          hostName={together.hostName}
+          positionMs={together.positionNow()}
+          onKeepWatching={together.actions.goSolo}
+          onLeave={() => {
+            together.actions.leave();
+            backToDetails();
+          }}
+        />
+      );
+    }
+
+    if (session !== null && !together.hosting && (!isPlaying || syncing)) {
+      const blocked = followState?.follow === "blocked" || snapshot?.needsGesture === true;
+
+      return (
+        <SyncingToSession
+          hostName={together.hostName}
+          targetMs={together.positionNow()}
+          progress={
+            isPlaying ? Math.min(1, media.bufferedAheadSeconds / BUFFER_TARGET_SECONDS) : 0.2
+          }
+          onJoin={blocked ? () => controller?.resumeWithGesture() : undefined}
+        />
+      );
+    }
+
     if (!isPlaying) {
       const preparing = PlaybackPhase.$is("Preparing")(phase) ? phase : null;
 
@@ -909,7 +1070,21 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
     return null;
   })();
 
-  const showChrome = isPlaying && center === null && !showNext;
+  const showChrome = isPlaying && center === null && !showNext && sessionCard === null;
+  const portraitSession = layout === "phone-portrait" && session !== null;
+  const sidePanel = layout === "desktop" && session !== null && panel;
+
+  const locked =
+    session !== null && !together.mayControl
+      ? `Only ${together.hostName} can pause or seek`
+      : undefined;
+
+  const onRoom =
+    session !== null
+      ? () => setPanel((open) => !open)
+      : canStart
+        ? together.actions.start
+        : undefined;
 
   const videoElement = (
     <video
@@ -957,6 +1132,9 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
           >
             <ArrowLeftIcon strokeWidth={1.75} aria-hidden />
           </PlayerButton>
+          {session === null ? null : (
+            <SessionChip paused={sessionPaused} watching={session.members.length} />
+          )}
         </div>
         <div className="flex items-center gap-6">
           {isPlaying && pip !== null ? (
@@ -1022,6 +1200,9 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
                 )
           }
           scrub={scrubProps}
+          locked={locked}
+          roomActive={sidePanel}
+          onRoom={onRoom}
           onPlayPause={togglePlay}
           onSeek={(seconds) => setScrub(seconds)}
           onSeekCommit={seekTo}
@@ -1087,6 +1268,8 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
         onBrightness={setBrightness}
         onVolume={followVolume}
         onVolumeCommit={commitVolume}
+        locked={locked}
+        onRoom={session === null ? onRoom : undefined}
       />
     </div>
   ) : null;
@@ -1097,13 +1280,33 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
       data-testid="player"
       tabIndex={-1}
       className={cn(
-        "fixed inset-0 flex flex-row bg-dark-bg text-text outline-none select-none",
+        "fixed inset-0 flex bg-dark-bg text-text outline-none select-none",
+        portraitSession ? "flex-col" : "flex-row",
         !controlsVisible && "cursor-none",
       )}
     >
-      <div className="relative min-w-0 grow">
+      <div
+        className={cn(
+          "relative",
+          portraitSession
+            ? "mt-[env(safe-area-inset-top)] aspect-video w-full shrink-0"
+            : "min-w-0 grow",
+        )}
+      >
         <div className="absolute inset-0">{videoElement}</div>
-        {layout === "desktop" ? desktopControls : phoneControls}
+        {portraitSession ? (
+          <PhoneSessionVideoChrome
+            label={together.mayControl ? null : `${together.hostName} is hosting`}
+            playing={!media.paused}
+            fraction={duration <= 0 ? 0 : Math.min(1, position / duration)}
+            onPlayPause={together.mayControl ? togglePlay : null}
+            onFullscreen={toggleFullscreen}
+          />
+        ) : layout === "desktop" ? (
+          desktopControls
+        ) : (
+          phoneControls
+        )}
         {center}
         <SubtitleDelayNotice text={subtitleDelay.notice} />
         {showNext ? (
@@ -1111,15 +1314,59 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
             next={nextEpisode}
             still={artworkUrl(nextEpisode.still, "card")}
             actions={{
+              kind: "advance",
               countdownMs: countdown ?? AUTOPLAY_COUNTDOWN.totalMs,
               onPlayNext: playNext,
               onWatchCredits: () => setCreditsDismissed(true),
             }}
           />
         ) : null}
+        {sessionCard === null ? null : (
+          <AutoplayNext
+            next={sessionCard.episode}
+            still={artworkUrl(sessionCard.episode.still, "card")}
+            actions={
+              sessionCard.canWatchCredits
+                ? {
+                    kind: "advance",
+                    countdownMs: sessionCard.countdownMs,
+                    onPlayNext: sessionPlayQueued,
+                    onWatchCredits: follow.watchCredits,
+                  }
+                : {
+                    kind: "follow",
+                    countdownMs: sessionCard.countdownMs,
+                    onPlayNext: sessionCard.canPlayNow ? sessionPlayQueued : null,
+                    onClose: () => setClosedCard(sessionCard.episode.id),
+                  }
+            }
+          />
+        )}
       </div>
+      {session === null || (!sidePanel && !portraitSession) ? null : (
+        <SessionPanel
+          session={session}
+          rows={rows}
+          paused={sessionPaused}
+          queue={follow.queue}
+          actions={together.actions}
+          className={
+            portraitSession
+              ? "min-h-0 w-full grow pb-[max(env(safe-area-inset-bottom),var(--spacing-7))]"
+              : "h-full w-95 shrink-0 border-l border-hairline"
+          }
+        />
+      )}
       {overlays === null ? null : (
         <>
+          <StartSessionDialog
+            open={together.starting !== undefined}
+            link={together.starting ?? null}
+            container={overlays}
+            onCopy={together.actions.copyLink}
+            onCancel={together.actions.cancelStart}
+            onStart={together.actions.confirmStart}
+          />
           <LeaveDialog
             open={leaving !== null}
             container={overlays}

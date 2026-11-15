@@ -1,0 +1,588 @@
+import { positionAt, toServerTime } from "@media/contracts/clock";
+import { sessionNext } from "@media/contracts/session-next";
+import type { NextCountdown } from "@media/contracts/session-next";
+import type { FollowerPlayer, ViewerMove } from "@media/contracts/follower";
+import { describeFailure } from "@media/mobile-core/failure";
+import { usePlatform, usePlatformQuery } from "@media/sdk/react";
+import { router } from "expo-router";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { RefObject } from "react";
+import { Alert, Share } from "react-native";
+
+import type { Episode } from "@/lib/catalog";
+import { watchHref } from "@/lib/routes";
+import {
+  MOVIES,
+  holdsSession,
+  itemKey,
+  itemOf,
+  moviesItem,
+  sessionUrl,
+} from "@/lib/together/session";
+import type {
+  CarriedHold,
+  JoinedSession,
+  MoviesItem,
+  QueueEntry,
+  SessionSettings,
+  WaitingPerson,
+  WatchTarget,
+} from "@/lib/together/session";
+import { useSessionTarget } from "@/lib/together/use-session-target";
+import { useServer } from "@/session/connection";
+import { useCurrentSession, useServerNow } from "@/session/together";
+import { useSessionFollower } from "./use-session-follower";
+import type { Following } from "./use-session-follower";
+
+/** The latest `value`, for callbacks that run after a render. */
+const useLatest = <Value>(value: Value): { readonly current: Value } => {
+  const latest = useRef(value);
+
+  useEffect(() => {
+    latest.current = value;
+  }, [value]);
+
+  return latest;
+};
+
+/** Shows a failure the way the app shows any failed action. */
+const alertFailure = (cause: unknown): void => {
+  Alert.alert("Couldn’t Do That", describeFailure(cause));
+};
+
+/** How many queued entries the player reads: the panel's Up next shows these. */
+const QUEUE_PAGE = 50;
+
+/** How often the next-episode countdown and the host's steps are read again. */
+const TICK_MS = 250;
+
+/** How long a host's step that failed waits before it is tried again. */
+const RETRY_MS = 2_000;
+
+/** How a session the player followed stopped. */
+export type SessionStop =
+  /** The host left or stayed away for good, so the session ended for everyone. */
+  | { readonly kind: "ended"; readonly reason: "host-left" | "abandoned" }
+  /** The host took the viewer out. */
+  | { readonly kind: "removed" };
+
+/** What the viewer can do about the session. */
+interface SessionActions {
+  /** Opens the start dialog and creates the session for what the page plays. */
+  readonly start: () => void;
+  /** Shares the session's link from the share sheet. */
+  readonly shareLink: () => void;
+  /** Leaves the session; for the host, ends it for everyone. */
+  readonly leave: () => void;
+  /** Goes on alone: after the session stopped, or leaving it while its host is away. */
+  readonly goSolo: () => void;
+  readonly configure: (settings: SessionSettings) => void;
+  readonly admit: (userId: WaitingPerson["userId"]) => void;
+  readonly turnAway: (userId: WaitingPerson["userId"]) => void;
+  /** Plays `item` for everyone now: queued first, then skipped to. */
+  readonly playNow: (item: MoviesItem) => void;
+  /** Skips to what is queued first. */
+  readonly playQueued: () => void;
+  readonly removeEntry: (entryId: QueueEntry["entryId"]) => void;
+}
+
+/** Where a member's playback starts in the session. */
+interface SessionStart {
+  readonly positionMs: number;
+  /** The session plays, so playback starts playing. */
+  readonly play: boolean;
+}
+
+/** The player in its group session, or alone. */
+export interface SessionPlayer {
+  /**
+   * `loading` while the person's session is read, so playback waits to know where to start;
+   * `solo` outside a session, or in one that plays something else; `session` while following it.
+   */
+  readonly mode: "loading" | "solo" | "session";
+  /** The session while following it. */
+  readonly session: JoinedSession | null;
+  /** Where playback starts in the session, read when the stream is ready. */
+  readonly startAt: () => SessionStart;
+  readonly hostName: string;
+  readonly hosting: boolean;
+  readonly mayControl: boolean;
+  readonly mayAdd: boolean;
+  /** The host is away, so the session waits for them. */
+  readonly hostAway: boolean;
+  /** How the followed session stopped, until the viewer goes on alone. */
+  readonly stopped: SessionStop | null;
+  /** The person is in a session that plays something else, so this page cannot start one. */
+  readonly elsewhere: boolean;
+  readonly actions: SessionActions;
+}
+
+/**
+ * The player's group session: whether the page follows it, and the session's commands. The page
+ * follows the person's movies session when it plays the session's item; once following, it moves
+ * with the session to whatever plays next. `player` is read only when an action needs where the
+ * player stands.
+ */
+export const useSessionPlayer = (
+  page: WatchTarget,
+  player: { readonly current: FollowerPlayer | null },
+  /**
+   * `follows`: whether the player may follow a session at all; a download plays on its own.
+   * `carried`: the screen's stall hold. Playback that starts while it holds the session starts
+   * playing, since the hold plays the session on only once the player plays.
+   */
+  { follows, carried }: { readonly follows: boolean; readonly carried: RefObject<CarriedHold> },
+): SessionPlayer => {
+  const platform = usePlatform();
+  const { moviesUrl } = useServer();
+  const view = useCurrentSession();
+  const joined = view?.state === "joined" ? view : null;
+  const target = useSessionTarget(moviesItem(joined?.item ?? null));
+  const [following, setFollowing] = useState(false);
+  const [starting, setStarting] = useState(false);
+  const serverNow = useServerNow();
+  const [stopped, setStopped] = useState<SessionStop | null>(null);
+  const [left, setLeft] = useState<JoinedSession["sessionId"] | null>(null);
+
+  const matches =
+    target.status === "ready" &&
+    target.target.titleId === page.titleId &&
+    target.target.episodeId === page.episodeId;
+
+  const mine = joined !== null && joined.sessionId !== left;
+  const [lastHost, setLastHost] = useState("The host");
+
+  // Kept past the session's end, whose view no longer names the host.
+  if (joined !== null && joined.host !== lastHost) setLastHost(joined.host);
+
+  if (!following && follows && mine && matches && !starting && stopped === null) {
+    setFollowing(true);
+  }
+
+  if (following && view !== undefined && !mine) {
+    setFollowing(false);
+
+    if (joined === null && view?.sessionId !== left) {
+      setStopped(
+        view?.state === "ended" ? { kind: "ended", reason: view.reason } : { kind: "removed" },
+      );
+    }
+  }
+
+  const session = following ? joined : null;
+
+  // The session stopped under the player: hold it until the viewer chooses to go on alone.
+  useEffect(() => {
+    if (stopped !== null) player.current?.pause();
+  }, [stopped, player]);
+  const unavailable = following && target.status === "unavailable";
+  const movedTo = following && target.status === "ready" && !matches ? target.target : null;
+
+  useEffect(() => {
+    if (movedTo === null) return;
+
+    router.replace(
+      watchHref({ titleId: movedTo.titleId, episodeId: movedTo.episodeId ?? undefined }),
+    );
+  }, [movedTo]);
+
+  useEffect(() => {
+    if (unavailable) router.replace("/together");
+  }, [unavailable]);
+
+  const loading = view === undefined || (mine && target.status === "loading" && stopped === null);
+  const latestSession = useLatest(session);
+  const latestJoined = useLatest(joined);
+
+  const seekAndPlay = useCallback(
+    async (revision: number, play: boolean): Promise<void> => {
+      const positionMs = Math.max(0, player.current?.positionMs() ?? 0);
+
+      await platform.core.together.control({
+        domain: MOVIES,
+        op: { kind: "seek", positionMs, revision },
+      });
+
+      if (play) await platform.core.together.control({ domain: MOVIES, op: { kind: "play" } });
+    },
+    [platform, player],
+  );
+
+  const link = joined === null ? null : sessionUrl(moviesUrl, joined.link);
+
+  const shareLink = useCallback((): void => {
+    if (link !== null) void Share.share({ url: link }).catch(() => undefined);
+  }, [link]);
+
+  const start = useCallback((): void => {
+    setStarting(true);
+    setStopped(null);
+
+    const playing = player.current?.isPaused() === false;
+
+    void platform.core.together
+      .create({ item: itemOf(page) })
+      .then(async ({ link: created }) => {
+        await seekAndPlay(0, playing);
+        void Share.share({ url: sessionUrl(moviesUrl, created) }).catch(() => undefined);
+
+        return undefined;
+      })
+      .catch(alertFailure)
+      .finally(() => setStarting(false));
+  }, [platform, page, seekAndPlay, player, moviesUrl]);
+
+  const leave = useCallback((): void => {
+    setLeft(latestJoined.current?.sessionId ?? null);
+    setFollowing(false);
+    void platform.core.together.leave({ domain: MOVIES }).catch(alertFailure);
+  }, [platform, latestJoined]);
+
+  const goSolo = useCallback((): void => {
+    if (latestJoined.current !== null) leave();
+    setStopped(null);
+    void player.current?.play().catch(() => undefined);
+  }, [latestJoined, leave, player]);
+
+  const configure = useCallback(
+    (settings: SessionSettings): void => {
+      void platform.core.together.configure({ domain: MOVIES, ...settings }).catch(alertFailure);
+    },
+    [platform],
+  );
+
+  const admit = useCallback(
+    (userId: WaitingPerson["userId"]): void => {
+      void platform.core.together.admit({ domain: MOVIES, userId }).catch(alertFailure);
+    },
+    [platform],
+  );
+
+  const turnAway = useCallback(
+    (userId: WaitingPerson["userId"]): void => {
+      void platform.core.together.block({ domain: MOVIES, userId }).catch(alertFailure);
+    },
+    [platform],
+  );
+
+  const skipTo = useCallback(async (): Promise<void> => {
+    await platform.core.together.control({
+      domain: MOVIES,
+      op: { kind: "next", revision: latestSession.current?.clock.revision ?? 0 },
+    });
+  }, [platform, latestSession]);
+
+  const playNow = useCallback(
+    (picked: MoviesItem): void => {
+      void platform.core.together
+        .add({ item: picked, at: "next" })
+        .then(skipTo)
+        .catch(alertFailure);
+    },
+    [platform, skipTo],
+  );
+
+  const playQueued = useCallback((): void => {
+    void skipTo().catch(alertFailure);
+  }, [skipTo]);
+
+  const removeEntry = useCallback(
+    (entryId: QueueEntry["entryId"]): void => {
+      void platform.core.together.remove({ domain: MOVIES, entryId }).catch(alertFailure);
+    },
+    [platform],
+  );
+
+  const startAt = useCallback((): SessionStart => {
+    const current = latestSession.current;
+
+    if (current === null) return { positionMs: 0, play: true };
+
+    return {
+      positionMs: positionAt(current.clock, serverNow()),
+      play:
+        current.clock.status === "playing" ||
+        holdsSession(carried.current, current.sessionId, current.clock),
+    };
+  }, [latestSession, serverNow, carried]);
+
+  const actions = useMemo(
+    (): SessionActions => ({
+      start,
+      shareLink,
+      leave,
+      goSolo,
+      configure,
+      admit,
+      turnAway,
+      playNow,
+      playQueued,
+      removeEntry,
+    }),
+    [start, shareLink, leave, goSolo, configure, admit, turnAway, playNow, playQueued, removeEntry],
+  );
+
+  const host = session?.members.find((member) => member.role === "host");
+
+  return {
+    mode: loading ? "loading" : session === null ? "solo" : "session",
+    session,
+    startAt,
+    hostName: joined?.host ?? lastHost,
+    hosting: session?.role === "host",
+    mayControl: session?.may.control === true,
+    mayAdd: session?.may.add === true,
+    hostAway: session !== null && host?.present !== true,
+    stopped,
+    elsewhere: joined !== null && session === null,
+    actions,
+  };
+};
+
+/** The next-episode card a member sees: the shared countdown, and the episode it moves on to. */
+interface NextCard extends NextCountdown {
+  readonly episode: Episode;
+}
+
+/** What the follow half reads from the player. */
+export interface SessionFollowInput {
+  /** The playback's player once it runs, or null. */
+  readonly player: FollowerPlayer | null;
+  /** The length of the playing media, or null while unknown. */
+  readonly durationMs: number | null;
+  /** The episode after the playing one, as the viewer sees it. */
+  readonly nextEpisode: Episode | null;
+  /** The screen's stall hold, which every follower of the screen's playback attempts shares. */
+  readonly carried: RefObject<CarriedHold>;
+}
+
+/** The player following its session. */
+export interface SessionFollow {
+  readonly following: Following;
+  /** Plays, pauses, or seeks for everyone; refused when the viewer may not control. */
+  readonly move: (move: ViewerMove) => void;
+  /** The next-episode card, or null. */
+  readonly nextCard: NextCard | null;
+  /** The first queued entries, as the viewer sees them. */
+  readonly queue: ReadonlyArray<QueueEntry>;
+  /** The host's Watch credits: takes the queued next episode out, for everyone. */
+  readonly watchCredits: () => void;
+}
+
+const NO_ENTRIES: ReadonlyArray<QueueEntry> = [];
+
+const IDLE_CLOCK = {
+  status: "paused",
+  positionAtAnchorMs: 0,
+  anchorServerTime: 0,
+  playbackRate: 1,
+  revision: -1,
+} as const;
+
+/** The current time, refreshed every `intervalMs` while `enabled`. */
+const useTicking = (enabled: boolean, intervalMs: number): number => {
+  const [now, setNow] = useState(Date.now);
+
+  useEffect(() => {
+    if (!enabled) return undefined;
+
+    const timer = setInterval(() => setNow(Date.now()), intervalMs);
+
+    return () => clearInterval(timer);
+  }, [enabled, intervalMs]);
+
+  return now;
+};
+
+/**
+ * Follows `sessionPlayer`'s session with the player, and runs the end of each item: the shared
+ * next-episode countdown, autoplay of what is queued, and the host's pause at the end of the last.
+ */
+export const useSessionFollow = (
+  sessionPlayer: SessionPlayer,
+  { player, durationMs, nextEpisode, carried }: SessionFollowInput,
+): SessionFollow => {
+  const platform = usePlatform();
+  const { session, hosting, mayControl } = sessionPlayer;
+  const clock = session?.clock ?? null;
+  const watched = useRef(new Set<string>());
+
+  const followed = useSessionFollower({
+    player: session === null ? null : player,
+    sessionId: session?.sessionId ?? null,
+    clock: clock ?? IDLE_CLOCK,
+    durationMs,
+    controls: mayControl,
+    hosting,
+    carried,
+  });
+
+  const queue = usePlatformQuery(
+    platform.core.together.queue,
+    ...(session === null
+      ? (["skip"] as const)
+      : ([{ domain: MOVIES, paginationOpts: { numItems: QUEUE_PAGE, cursor: null } }] as const)),
+  );
+
+  const entries = queue.status === "success" ? queue.data.page : NO_ENTRIES;
+  const offset = followed.state?.offset ?? null;
+  const now = useTicking(session !== null, TICK_MS);
+  const item = moviesItem(session?.item ?? null);
+
+  const watchedKey =
+    session === null || item === null ? null : `${session.sessionId}:${itemKey(item)}`;
+
+  const playable = nextEpisode?.available === true ? nextEpisode : null;
+  const head = entries[0] ?? null;
+
+  const decided =
+    session === null || clock === null || item === null
+      ? null
+      : sessionNext({
+          clock,
+          serverNow: offset === null ? null : toServerTime(now, offset),
+          durationMs,
+          nextKey:
+            playable === null
+              ? null
+              : itemKey(itemOf({ titleId: playable.titleId, episodeId: playable.id })),
+          headKey: head?.item === null || head === null ? null : itemKey(head.item),
+          queued: head !== null,
+          hosting,
+          mayControl,
+          creditsWatched: watchedKey !== null && watched.current.has(watchedKey),
+        });
+
+  const step = decided?.step ?? null;
+  const counting = decided?.countdown !== null && decided?.countdown !== undefined;
+
+  // Queued once per item, by whichever of the host's screens did it: any of them that sees the
+  // countdown counts it as queued, so Watch credits on one stops it on all.
+  useEffect(() => {
+    if (hosting && counting && watchedKey !== null) watched.current.add(watchedKey);
+  }, [hosting, counting, watchedKey]);
+
+  const stepKey =
+    step === null || clock === null || item === null
+      ? null
+      : `${watchedKey ?? ""}:${String(clock.revision)}:${step}:${head?.entryId ?? ""}`;
+
+  const tried = useRef<string | null>(null);
+  const [retries, setRetries] = useState(0);
+  const latest = useLatest({ nextEpisode, clock, watchedKey });
+
+  useEffect(() => {
+    if (stepKey === null || step === null) return undefined;
+
+    const attempt = `${stepKey}#${String(retries)}`;
+
+    if (tried.current === attempt) return undefined;
+
+    tried.current = attempt;
+
+    const { nextEpisode: episode, clock: current, watchedKey: queuedFor } = latest.current;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    let active = true;
+
+    const run = async (): Promise<void> => {
+      if (step === "queue") {
+        if (episode !== null && current !== null) {
+          // Against the clock it was decided on: the core queues the episode once across the
+          // host's screens, and refuses an add that lands after the session moved on.
+          await platform.core.together.add({
+            item: itemOf({ titleId: episode.titleId, episodeId: episode.id }),
+            at: "next",
+            revision: current.revision,
+          });
+        }
+
+        // Queued once per item: whoever takes it out stops the countdown for everyone.
+        if (queuedFor !== null) watched.current.add(queuedFor);
+
+        return;
+      }
+
+      if (step === "next") {
+        if (current !== null) {
+          await platform.core.together.control({
+            domain: MOVIES,
+            op: { kind: "next", revision: current.revision },
+          });
+        }
+
+        return;
+      }
+
+      // Against the clock it was decided on, as no one asked for it: a play or seek someone made
+      // at the end since, which this screen may not have heard of yet, stands.
+      if (current !== null) {
+        await platform.core.together.control({
+          domain: MOVIES,
+          op: { kind: "pause", revision: current.revision },
+        });
+      }
+    };
+
+    void run().catch(() => {
+      if (active) retry = setTimeout(() => setRetries((count) => count + 1), RETRY_MS);
+    });
+
+    return () => {
+      active = false;
+      clearTimeout(retry);
+    };
+  }, [stepKey, step, retries, platform, latest]);
+
+  const latestSession = useLatest(session);
+  const followMove = followed.move;
+
+  const move = useCallback(
+    (next: ViewerMove): void => {
+      const current = latestSession.current;
+
+      if (current === null) return;
+
+      if (!current.may.control) {
+        Alert.alert(`Only ${current.host} can pause or seek`);
+
+        return;
+      }
+
+      void followMove(next).then((refused) => {
+        if (refused !== null) Alert.alert("Couldn’t Do That", refused.message);
+
+        return undefined;
+      });
+    },
+    [latestSession, followMove],
+  );
+
+  const latestEntries = useLatest(entries);
+  const latestWatched = useLatest(watchedKey);
+
+  const watchCredits = useCallback((): void => {
+    const key = latestWatched.current;
+    const first = latestEntries.current[0];
+
+    if (key === null) return;
+
+    watched.current.add(key);
+
+    if (first !== undefined) {
+      void platform.core.together
+        .remove({ domain: MOVIES, entryId: first.entryId })
+        .catch(alertFailure);
+    }
+  }, [latestWatched, latestEntries, platform]);
+
+  return {
+    following: followed,
+    move,
+    nextCard:
+      decided?.countdown === null || decided === null || playable === null
+        ? null
+        : { ...decided.countdown, episode: playable },
+    queue: entries,
+    watchCredits,
+  };
+};

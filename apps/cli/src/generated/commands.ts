@@ -2882,6 +2882,7 @@ export const generatedCommands = [
         }),
       ]),
       at: Schema.optionalKey(Schema.Union([Schema.Literal("next"), Schema.Literal("end")])),
+      revision: Schema.optionalKey(Schema.Finite),
     }),
     result: Schema.Struct({ entryId: Schema.String.pipe(Schema.brand("Id<togetherEntries>")) }),
     method: (platform) => platform.core.together.add,
@@ -2955,8 +2956,14 @@ export const generatedCommands = [
     args: Schema.Struct({
       domain: Schema.Union([Schema.Literal("movies"), Schema.Literal("music")]),
       op: Schema.Union([
-        Schema.Struct({ kind: Schema.Literal("play") }),
-        Schema.Struct({ kind: Schema.Literal("pause") }),
+        Schema.Struct({
+          kind: Schema.Literal("play"),
+          revision: Schema.optionalKey(Schema.Finite),
+        }),
+        Schema.Struct({
+          kind: Schema.Literal("pause"),
+          revision: Schema.optionalKey(Schema.Finite),
+        }),
         Schema.Struct({ kind: Schema.Literal("rate"), playbackRate: Schema.Finite }),
         Schema.Struct({
           kind: Schema.Literal("seek"),
@@ -4332,6 +4339,47 @@ export const generatedCommands = [
       expiresAt: Schema.Finite,
     }),
     method: (platform) => platform.movies.play.start,
+  }),
+  coreCommand({
+    name: "movies.titles.episode",
+    path: ["movies", "titles", "episode"],
+    kind: "query",
+    scope: "movies:play",
+    refusesKeys: false,
+    summary:
+      "Show an episode you can play with its show and your progress, as a group session names it",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({ episodeId: Schema.String.pipe(Schema.brand("Id<episodes>")) }),
+    result: Schema.Struct({
+      id: Schema.String.pipe(Schema.brand("Id<episodes>")),
+      titleId: Schema.String.pipe(Schema.brand("Id<titles>")),
+      seasonId: Schema.String.pipe(Schema.brand("Id<seasons>")),
+      seasonNumber: Schema.Finite,
+      episodeNumber: Schema.Finite,
+      name: Schema.String,
+      overview: Schema.Union([Schema.String, Schema.Null]),
+      airDate: Schema.Union([Schema.String, Schema.Null]),
+      runtimeMs: Schema.Union([Schema.Finite, Schema.Null]),
+      still: Schema.Union([Schema.String, Schema.Null]),
+      rating: Schema.Union([Schema.Finite, Schema.Null]),
+      externalIds: Schema.Struct({
+        tmdb: Schema.Union([Schema.String, Schema.Null]),
+        imdb: Schema.Union([Schema.String, Schema.Null]),
+        tvdb: Schema.Union([Schema.String, Schema.Null]),
+      }),
+      available: Schema.Boolean,
+      progress: Schema.Union([
+        Schema.Struct({
+          positionMs: Schema.Finite,
+          durationMs: Schema.Finite,
+          watched: Schema.Boolean,
+          updatedAt: Schema.Finite,
+        }),
+        Schema.Null,
+      ]),
+    }),
+    method: (platform) => platform.movies.titles.episode,
   }),
   coreCommand({
     name: "movies.titles.episodes",

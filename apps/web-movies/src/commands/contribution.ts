@@ -41,6 +41,19 @@ export interface PlayerCommands {
   readonly episodeId: string;
   /** Plays another of `episodes` in the player. */
   readonly selectEpisode: (id: string) => void;
+  /** The player's group session commands. */
+  readonly together: PlayerTogether;
+}
+
+/** What the open player offers for watching together. */
+export interface PlayerTogether {
+  /** Starts a group session for what plays; null in one, or before playback runs. */
+  readonly start: (() => void) | null;
+  /** Copies the session's link; null outside a session. */
+  readonly copyLink: (() => void) | null;
+  /** Leaves the session, or ends it for everyone when `hosting`; null outside a session. */
+  readonly leave: (() => void) | null;
+  readonly hosting: boolean;
 }
 
 /** What every contribution can read and do. */

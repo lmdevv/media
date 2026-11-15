@@ -10,8 +10,9 @@ import { useMigrationCommands } from "./migration";
 import { useNavigationCommands } from "./navigation";
 import { usePlaybackCommands } from "./playback";
 import { usePreferenceCommands } from "./preferences";
+import { useTogetherCommands } from "./together";
 
-export type { CommandContext, PlayerCommands } from "./contribution";
+export type { CommandContext, PlayerCommands, PlayerTogether } from "./contribution";
 
 export { SWITCH_PERSON_COMMAND } from "./preferences";
 
@@ -24,10 +25,12 @@ export const useCommandRoot = (context: CommandContext): CommandPage => {
   const library = useLibraryCommands(context);
   const admin = useAdminCommands(context);
   const migration = useMigrationCommands(context);
+  const together = useTogetherCommands(context);
 
   return useMemo((): CommandPage => {
     const { groups, fallback } = mergeContributions([
       playback,
+      together,
       browse,
       navigation,
       library,
@@ -37,5 +40,5 @@ export const useCommandRoot = (context: CommandContext): CommandPage => {
     ]);
 
     return { id: "root", placeholder: "Search or jump to…", groups, fallback: () => fallback };
-  }, [playback, browse, navigation, preferences, library, admin, migration]);
+  }, [playback, together, browse, navigation, preferences, library, admin, migration]);
 };

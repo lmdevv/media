@@ -12,6 +12,7 @@ import { parseSearch, stringifySearch } from "./lib/search-params";
 import { routeTree } from "./routeTree.gen";
 import { ReportUnhandledErrors } from "./session/error-reporting";
 import { MoviesSession, RequireSession } from "./session/session";
+import { CurrentSessionProvider } from "./together/current-session";
 
 /** The origin's one session store, shared with the account client at `/` (ADR 0020). */
 const store = await openBrowserSession();
@@ -35,7 +36,9 @@ const router = createRouter({
     return (
       <MoviesSession store={store} url={PLATFORM_URL}>
         <ReportUnhandledErrors />
-        <RequireSession>{children}</RequireSession>
+        <RequireSession>
+          <CurrentSessionProvider>{children}</CurrentSessionProvider>
+        </RequireSession>
       </MoviesSession>
     );
   },

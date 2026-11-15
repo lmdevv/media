@@ -1,5 +1,9 @@
+import { run } from "@media/contracts/follower";
+import type { FollowerPlayer, SessionPort } from "@media/contracts/follower";
+import { ConvexHttpClient } from "convex/browser";
 import { makeFunctionReference } from "convex/server";
 import type { FunctionArgs } from "convex/server";
+import { Data, Effect } from "effect";
 import { describe, expect, it } from "vitest";
 
 import type { ContentDomain } from "../../../commands/scopes";
@@ -42,6 +46,22 @@ const joinBy = (who: Member, link: string, domain: ContentDomain = "movies") =>
 
 const controlAs = (who: Member, op: Op) =>
   who.signedIn.client.mutation(api.core.together.control, { domain: "movies", op });
+
+/** The core refused a follower's call, or the call did not reach it. */
+class CallFailed extends Data.TaggedError("CallFailed")<{ readonly cause: unknown }> {}
+
+/** `who`'s movies session as the shared follower reaches it, over the real backend. */
+const portOf = (who: Member): SessionPort<CallFailed> => ({
+  heartbeat: Effect.tryPromise({
+    try: () => who.signedIn.client.mutation(api.core.together.heartbeat, { domain: "movies" }),
+    catch: (cause) => new CallFailed({ cause }),
+  }),
+  control: (op) =>
+    Effect.tryPromise({
+      try: () => controlAs(who, op),
+      catch: (cause) => new CallFailed({ cause }),
+    }),
+});
 
 const memberNames = async (who: Member): Promise<ReadonlyArray<string>> =>
   (await joinedView(who, "movies")).members.map((row) => row.username);
@@ -204,6 +224,153 @@ describe.skipIf(stack === undefined)("group sessions", { timeout: 120_000 }, () 
     expect(await refusal(controlAs(guest, { kind: "rate", playbackRate: 3 }))).toBe("invalid_args");
   });
 
+  it("applies a play or pause a client decided on its own only at the clock it saw", async () => {
+    if (stack === undefined) return;
+    const { shelf } = await started(stack);
+    const { clock: opened } = await joinedView(shelf.host, "movies");
+    const playing = await controlAs(shelf.host, { kind: "play", revision: opened.revision });
+
+    expect(playing).toMatchObject({ status: "playing", revision: opened.revision + 1 });
+    expect(await refusal(controlAs(shelf.host, { kind: "pause", revision: opened.revision }))).toBe(
+      "conflict",
+    );
+    expect(await refusal(controlAs(shelf.host, { kind: "play", revision: opened.revision }))).toBe(
+      "conflict",
+    );
+    expect((await joinedView(shelf.host, "movies")).clock).toEqual(playing);
+
+    const held = await controlAs(shelf.host, { kind: "pause", revision: playing.revision });
+
+    expect(held).toMatchObject({ status: "paused", revision: playing.revision + 1 });
+
+    // A pause someone asks for carries no revision: it applies, and the hold's play is then stale.
+    const paused = await controlAs(shelf.host, { kind: "pause" });
+
+    expect(paused).toMatchObject({ status: "paused", revision: held.revision + 1 });
+    expect(await refusal(controlAs(shelf.host, { kind: "play", revision: held.revision }))).toBe(
+      "conflict",
+    );
+    expect((await joinedView(shelf.host, "movies")).clock).toEqual(paused);
+  });
+
+  it("never plays a stalled host's session on over a pause its clock has not shown yet", async () => {
+    if (stack === undefined) return;
+    const { shelf } = await started(stack);
+
+    await controlAs(shelf.host, { kind: "play" });
+
+    // The stall's own pause, which the follower holds the session at until its player recovers.
+    const held = await controlAs(shelf.host, { kind: "pause" });
+    let buffering = true;
+
+    const player: FollowerPlayer = {
+      positionMs: () => held.positionAtAnchorMs,
+      isPaused: () => false,
+      isBuffering: () => buffering,
+      playbackRate: () => 1,
+      setPlaybackRate: () => undefined,
+      seek: () => undefined,
+      play: () => Promise.resolve(),
+      pause: () => undefined,
+      subscribe: () => () => undefined,
+    };
+
+    const { intentional, after } = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const following = yield* run({
+            player,
+            port: portOf(shelf.host),
+            clock: held,
+            durationMs: () => 3_600_000,
+            controls: true,
+            pausesForStalls: true,
+            resumeHold: { kind: "held", revision: held.revision },
+          });
+
+          // Lucía pauses on her other screen, and this follower hears of it only after its player
+          // recovered and its correction ticks asked to play the session on.
+          const paused = yield* Effect.promise(() => controlAs(shelf.host, { kind: "pause" }));
+
+          buffering = false;
+          yield* Effect.sleep("2 seconds");
+          yield* following.apply(paused);
+
+          const { clock } = yield* Effect.promise(() => joinedView(shelf.host, "movies"));
+
+          return { intentional: paused, after: clock };
+        }),
+      ),
+    );
+
+    expect(after).toMatchObject({ status: "paused", revision: intentional.revision });
+  });
+
+  it("plays a stalled host's session on when its new follower starts behind the hold's own seek", async () => {
+    if (stack === undefined) return;
+    const { shelf } = await started(stack);
+
+    await controlAs(shelf.host, { kind: "play" });
+
+    // The stall's pause and its seek back. The host's stream reloads before the subscription shows
+    // the seek, so the new follower starts from the pause's clock, behind the hold's own.
+    const pause = await controlAs(shelf.host, { kind: "pause" });
+
+    const held = await controlAs(shelf.host, {
+      kind: "seek",
+      positionMs: 45_000,
+      revision: pause.revision,
+    });
+
+    let buffering = true;
+    let paused = false;
+
+    const player: FollowerPlayer = {
+      positionMs: () => 45_000,
+      isPaused: () => paused,
+      isBuffering: () => buffering && !paused,
+      playbackRate: () => 1,
+      setPlaybackRate: () => undefined,
+      seek: () => undefined,
+      play: () => {
+        paused = false;
+
+        return Promise.resolve();
+      },
+      pause: () => {
+        paused = true;
+      },
+      subscribe: () => () => undefined,
+    };
+
+    const after = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const following = yield* run({
+            player,
+            port: portOf(shelf.host),
+            clock: pause,
+            durationMs: () => 3_600_000,
+            controls: true,
+            pausesForStalls: true,
+            resumeHold: { kind: "held", revision: held.revision },
+          });
+
+          // The subscription catches up, and then the player recovers.
+          yield* following.apply(held);
+          buffering = false;
+          yield* Effect.sleep("2 seconds");
+
+          const { clock } = yield* Effect.promise(() => joinedView(shelf.host, "movies"));
+
+          return clock;
+        }),
+      ),
+    );
+
+    expect(after).toMatchObject({ status: "playing", revision: held.revision + 1 });
+  });
+
   it("refuses queued items from a guest the host has not let add", async () => {
     if (stack === undefined) return;
     const { shelf, link } = await started(stack);
@@ -248,6 +415,56 @@ describe.skipIf(stack === undefined)("group sessions", { timeout: 120_000 }, () 
     expect(await refusal(controlAs(shelf.host, { kind: "next", revision: revision + 1 }))).toBe(
       "conflict",
     );
+  });
+
+  it("queues what follows the item once from two of the host's screens, and not after it moved on", async () => {
+    if (stack === undefined) return;
+    const { shelf, link } = await started(stack, { add: true });
+    const guest = await guestOf(stack, shelf, "guest");
+    const otherScreen = new ConvexHttpClient(stack.url, { logger: false });
+
+    otherScreen.setAuth(shelf.host.signedIn.token);
+    await joinBy(guest, link);
+    await guest.signedIn.client.mutation(api.core.together.add, { item: shelf.pg });
+
+    const queued = async () =>
+      (
+        await shelf.host.signedIn.client.query(api.core.together.queue, {
+          domain: "movies",
+          paginationOpts: { numItems: 10, cursor: null },
+        })
+      ).page.map((entry) => entry.item);
+
+    const { revision } = (await joinedView(shelf.host, "movies")).clock;
+    const following = { item: shelf.pg, at: "next", revision } as const;
+
+    await Promise.all([
+      shelf.host.signedIn.client.mutation(api.core.together.add, following),
+      otherScreen.mutation(api.core.together.add, following),
+    ]);
+
+    expect(await queued()).toEqual([shelf.pg]);
+
+    await controlAs(shelf.host, { kind: "next", revision });
+
+    expect((await joinedView(guest, "movies")).item).toEqual(shelf.pg);
+    expect(await refusal(otherScreen.mutation(api.core.together.add, following))).toBe("conflict");
+    expect(await queued()).toEqual([]);
+
+    await shelf.host.signedIn.client.mutation(api.core.together.add, { item: shelf.g });
+
+    const now = (await joinedView(guest, "movies")).clock.revision;
+
+    expect(
+      await refusal(
+        guest.signedIn.client.mutation(api.core.together.add, {
+          item: shelf.g,
+          at: "next",
+          revision: now,
+        }),
+      ),
+    ).toBe("forbidden");
+    expect(await queued()).toEqual([shelf.g]);
   });
 
   it("refuses an item from another domain, by its type and by its row's table", async () => {

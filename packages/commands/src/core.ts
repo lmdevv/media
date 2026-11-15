@@ -194,10 +194,14 @@ const togetherSettings = { join: joinSetting, control: v.boolean(), add: v.boole
 /** An item as the caller sees it: null when they may not play it, such as a kid and an R movie. */
 const shownItem = v.union(domainItem, v.null());
 
-/** One move of the clock. A seek and a skip carry the revision the caller saw. */
+/**
+ * One move of the clock. A seek and a skip carry the revision the caller saw. A play or a pause may
+ * carry one too, as a client's own moves do, such as a stalled player's hold and its release: it
+ * then applies only while the clock is still at that revision, and fails `conflict` otherwise.
+ */
 const controlOp = v.union(
-  v.object({ kind: v.literal("play") }),
-  v.object({ kind: v.literal("pause") }),
+  v.object({ kind: v.literal("play"), revision: v.optional(v.number()) }),
+  v.object({ kind: v.literal("pause"), revision: v.optional(v.number()) }),
   v.object({ kind: v.literal("rate"), playbackRate: v.number() }),
   v.object({ kind: v.literal("seek"), positionMs: v.number(), revision: v.number() }),
   v.object({ kind: v.literal("next"), revision: v.number() }),
@@ -1161,7 +1165,16 @@ export const core = [
   mutation("core.together.add", {
     summary: "Queue something you can play in your group session, next or at the end",
     scope: "signed-in",
-    args: { item: domainItem, at: v.optional(v.union(v.literal("next"), v.literal("end"))) },
+    args: {
+      item: domainItem,
+      at: v.optional(v.union(v.literal("next"), v.literal("end"))),
+      /**
+       * The clock the caller saw, for an item that follows the one playing, such as the next
+       * episode: the add then applies only while the session's clock is still at it, and it
+       * takes out any copy of `item` already queued, so two screens queue it once.
+       */
+      revision: v.optional(v.number()),
+    },
     result: v.object({ entryId: v.id("togetherEntries") }),
   }),
   mutation("core.together.remove", {

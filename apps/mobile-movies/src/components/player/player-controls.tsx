@@ -33,7 +33,12 @@ const SKIP_SECONDS = 10;
 export interface MoreItem {
   readonly label: string;
   /** An SF Symbol, as the native menu draws it. */
-  readonly systemImage: "list.bullet.rectangle" | "list.number" | "dial.medium" | "speedometer";
+  readonly systemImage:
+    | "list.bullet.rectangle"
+    | "list.number"
+    | "dial.medium"
+    | "speedometer"
+    | "person.2";
   readonly onPress: () => void;
 }
 
@@ -62,6 +67,11 @@ export interface PlayerControlsProps {
   readonly onInteract: (holding?: boolean) => void;
   /** A tap away from any control: hide them. */
   readonly onDismiss: () => void;
+  /**
+   * Replaces the transport with a lock line, such as `Only Lucía can pause or seek`, for a group
+   * session's member who may not control it.
+   */
+  readonly locked?: string | undefined;
 }
 
 /** A round 44pt button on the controls' glass. */
@@ -268,25 +278,34 @@ export function PlayerControls(props: PlayerControlsProps) {
             onChange={props.onBrightness}
             onInteract={() => onInteract()}
           />
-          <View className="flex-row items-center gap-16" pointerEvents="box-none">
-            <SkipButton
-              direction="back"
-              onPress={() => props.onSeek(props.positionSeconds - SKIP_SECONDS)}
-            />
-            <Pressable
-              onPress={props.onTogglePlay}
-              hitSlop={12}
-              accessibilityRole="button"
-              accessibilityLabel={props.playing ? "Pause" : "Play"}
-              className="active:opacity-60"
-            >
-              <Icon icon={props.playing ? Pause : Play} tone="onMedia" size="transport" filled />
-            </Pressable>
-            <SkipButton
-              direction="forward"
-              onPress={() => props.onSeek(props.positionSeconds + SKIP_SECONDS)}
-            />
-          </View>
+          {props.locked === undefined ? (
+            <View className="flex-row items-center gap-16" pointerEvents="box-none">
+              <SkipButton
+                direction="back"
+                onPress={() => props.onSeek(props.positionSeconds - SKIP_SECONDS)}
+              />
+              <Pressable
+                onPress={props.onTogglePlay}
+                hitSlop={12}
+                accessibilityRole="button"
+                accessibilityLabel={props.playing ? "Pause" : "Play"}
+                className="active:opacity-60"
+              >
+                <Icon icon={props.playing ? Pause : Play} tone="onMedia" size="transport" filled />
+              </Pressable>
+              <SkipButton
+                direction="forward"
+                onPress={() => props.onSeek(props.positionSeconds + SKIP_SECONDS)}
+              />
+            </View>
+          ) : (
+            <View className="h-9 flex-row items-center gap-2 rounded-pill bg-dark-surface-raised/80 px-3.5">
+              <Icon icon={LockKeyhole} tone="onMedia" size="inline" />
+              <Text variant="labelStrong" tone="onMedia">
+                {props.locked}
+              </Text>
+            </View>
+          )}
           <VerticalSlider
             icon={Volume2}
             label="Volume"

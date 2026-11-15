@@ -986,7 +986,7 @@ Queue something you can play in your group session, next or at the end.
 - CLI: `media auth together add`
 - Kind: mutation
 - Scope: signed-in
-- Arguments: `{ item: { domain: "movies"; ref: { type: "title"; id: Id<"titles"> } | { type: "episode"; id: Id<"episodes"> } | { type: "file"; id: Id<"mediaFiles"> } } | { domain: "music"; ref: { type: "track"; id: Id<"tracks"> } | { type: "album"; id: Id<"albums"> } }; at?: "next" | "end" }`
+- Arguments: `{ item: { domain: "movies"; ref: { type: "title"; id: Id<"titles"> } | { type: "episode"; id: Id<"episodes"> } | { type: "file"; id: Id<"mediaFiles"> } } | { domain: "music"; ref: { type: "track"; id: Id<"tracks"> } | { type: "album"; id: Id<"albums"> } }; at?: "next" | "end"; revision?: number }`
 - Result: `{ entryId: Id<"togetherEntries"> }`
 
 ## `core.together.admit`
@@ -1026,7 +1026,7 @@ Play, pause, seek, change the speed of, or skip to the next item in your group s
 - CLI: `media auth together control`
 - Kind: mutation
 - Scope: signed-in
-- Arguments: `{ domain: "movies" | "music"; op: { kind: "play" } | { kind: "pause" } | { kind: "rate"; playbackRate: number } | { kind: "seek"; positionMs: number; revision: number } | { kind: "next"; revision: number } }`
+- Arguments: `{ domain: "movies" | "music"; op: { kind: "play"; revision?: number } | { kind: "pause"; revision?: number } | { kind: "rate"; playbackRate: number } | { kind: "seek"; positionMs: number; revision: number } | { kind: "next"; revision: number } }`
 - Result: `{ status: "playing" | "paused"; positionAtAnchorMs: number; anchorServerTime: number; playbackRate: number; revision: number }`
 
 ## `core.together.create`

@@ -10,6 +10,37 @@ import type { QueryCtx } from "../../convex/_generated/server";
 import { requireCaller } from "../../convex/core/auth/caller";
 import type { Caller } from "../../convex/core/auth/caller";
 
+const episodeArgs = v.object({ episodeId: v.id("episodes") });
+
+const episodeResult = v.object({
+  id: v.id("episodes"),
+  titleId: v.id("titles"),
+  seasonId: v.id("seasons"),
+  seasonNumber: v.number(),
+  episodeNumber: v.number(),
+  name: v.string(),
+  overview: v.union(v.string(), v.null()),
+  airDate: v.union(v.string(), v.null()),
+  runtimeMs: v.union(v.number(), v.null()),
+  still: v.union(v.string(), v.null()),
+  rating: v.union(v.number(), v.null()),
+  externalIds: v.object({
+    tmdb: v.union(v.string(), v.null()),
+    imdb: v.union(v.string(), v.null()),
+    tvdb: v.union(v.string(), v.null()),
+  }),
+  available: v.boolean(),
+  progress: v.union(
+    v.object({
+      positionMs: v.number(),
+      durationMs: v.number(),
+      watched: v.boolean(),
+      updatedAt: v.number(),
+    }),
+    v.null(),
+  ),
+});
+
 const episodesArgs = v.object({
   titleId: v.id("titles"),
   seasonNumber: v.number(),
@@ -656,6 +687,13 @@ const versionsResult = v.array(
 
 /** The handlers `convex/movies/titles.ts` passes to `register`, one per `movies.titles` command. */
 export interface Handlers {
+  /** `movies.titles.episode` (query, movies:play): Show an episode you can play with its show and your progress, as a group session names it. */
+  readonly episode: (
+    ctx: Omit<QueryCtx, "auth">,
+    args: Infer<typeof episodeArgs>,
+    caller: Caller,
+  ) => Infer<typeof episodeResult> | Promise<Infer<typeof episodeResult>>;
+
   /** `movies.titles.episodes` (query, movies:read): List a season's episodes in order with your progress and their credits. */
   readonly episodes: (
     ctx: Omit<QueryCtx, "auth">,
@@ -722,6 +760,12 @@ export interface Handlers {
 
 /** The `api` reference of each `movies.titles` command; `commands/refs.ts` checks them. */
 export interface Refs {
+  readonly episode: FunctionReference<
+    "query",
+    "public",
+    Infer<typeof episodeArgs>,
+    Infer<typeof episodeResult>
+  >;
   readonly episodes: FunctionReference<
     "query",
     "public",
@@ -780,6 +824,12 @@ export interface Refs {
 
 /** Registers the `movies.titles` commands as public Convex functions with their declared arguments and result. */
 export const register = (handlers: Handlers) => ({
+  episode: query({
+    args: episodeArgs,
+    returns: episodeResult,
+    handler: async (ctx, args) =>
+      handlers.episode(ctx, args, await requireCaller(ctx, "movies:play")),
+  }),
   episodes: query({
     args: episodesArgs,
     returns: episodesResult,

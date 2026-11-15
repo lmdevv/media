@@ -2270,6 +2270,7 @@ const core_together_add = mutation({
       }),
     ]),
     at: Schema.optionalKey(Schema.Union([Schema.Literal("next"), Schema.Literal("end")])),
+    revision: Schema.optionalKey(Schema.Finite),
   }),
   result: Schema.Struct({ entryId: Schema.String.pipe(Schema.brand("Id<togetherEntries>")) }),
 });
@@ -2316,8 +2317,8 @@ const core_together_control = mutation({
   args: Schema.Struct({
     domain: Schema.Union([Schema.Literal("movies"), Schema.Literal("music")]),
     op: Schema.Union([
-      Schema.Struct({ kind: Schema.Literal("play") }),
-      Schema.Struct({ kind: Schema.Literal("pause") }),
+      Schema.Struct({ kind: Schema.Literal("play"), revision: Schema.optionalKey(Schema.Finite) }),
+      Schema.Struct({ kind: Schema.Literal("pause"), revision: Schema.optionalKey(Schema.Finite) }),
       Schema.Struct({ kind: Schema.Literal("rate"), playbackRate: Schema.Finite }),
       Schema.Struct({
         kind: Schema.Literal("seek"),
@@ -3492,6 +3493,40 @@ const movies_play_start = mutation({
     startedAt: Schema.Finite,
     ticket: Schema.String,
     expiresAt: Schema.Finite,
+  }),
+});
+
+const movies_titles_episode = query({
+  name: "movies.titles.episode",
+  path: "movies/titles:episode",
+  args: Schema.Struct({ episodeId: Schema.String.pipe(Schema.brand("Id<episodes>")) }),
+  result: Schema.Struct({
+    id: Schema.String.pipe(Schema.brand("Id<episodes>")),
+    titleId: Schema.String.pipe(Schema.brand("Id<titles>")),
+    seasonId: Schema.String.pipe(Schema.brand("Id<seasons>")),
+    seasonNumber: Schema.Finite,
+    episodeNumber: Schema.Finite,
+    name: Schema.String,
+    overview: Schema.Union([Schema.String, Schema.Null]),
+    airDate: Schema.Union([Schema.String, Schema.Null]),
+    runtimeMs: Schema.Union([Schema.Finite, Schema.Null]),
+    still: Schema.Union([Schema.String, Schema.Null]),
+    rating: Schema.Union([Schema.Finite, Schema.Null]),
+    externalIds: Schema.Struct({
+      tmdb: Schema.Union([Schema.String, Schema.Null]),
+      imdb: Schema.Union([Schema.String, Schema.Null]),
+      tvdb: Schema.Union([Schema.String, Schema.Null]),
+    }),
+    available: Schema.Boolean,
+    progress: Schema.Union([
+      Schema.Struct({
+        positionMs: Schema.Finite,
+        durationMs: Schema.Finite,
+        watched: Schema.Boolean,
+        updatedAt: Schema.Finite,
+      }),
+      Schema.Null,
+    ]),
   }),
 });
 
@@ -5867,6 +5902,8 @@ export const effectMethods = (method: EffectBuilder) => ({
       start: method.mutation(movies_play_start),
     },
     titles: {
+      /** `movies.titles.episode` (query, movies:play): Show an episode you can play with its show and your progress, as a group session names it. */
+      episode: method.query(movies_titles_episode),
       /** `movies.titles.episodes` (query, movies:read): List a season's episodes in order with your progress and their credits. */
       episodes: method.query(movies_titles_episodes),
       /** `movies.titles.genres` (query, movies:read): List the genres of the titles you may see, most common first. */
@@ -6343,6 +6380,8 @@ export const promiseMethods = (method: PromiseBuilder) => ({
       start: method.mutation(movies_play_start),
     },
     titles: {
+      /** `movies.titles.episode` (query, movies:play): Show an episode you can play with its show and your progress, as a group session names it. */
+      episode: method.query(movies_titles_episode),
       /** `movies.titles.episodes` (query, movies:read): List a season's episodes in order with your progress and their credits. */
       episodes: method.query(movies_titles_episodes),
       /** `movies.titles.genres` (query, movies:read): List the genres of the titles you may see, most common first. */

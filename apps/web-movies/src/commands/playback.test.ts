@@ -49,6 +49,7 @@ const recordingPlayer = (overrides: Partial<PlayerCommands> = {}) => {
     selectEpisode: (id) => {
       chosen.push(`episode:${id}`);
     },
+    together: { start: null, copyLink: null, leave: null, hosting: false },
     ...overrides,
   };
 

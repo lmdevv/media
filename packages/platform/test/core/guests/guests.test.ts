@@ -13,7 +13,15 @@ import { runFunction } from "../../admin";
 import { member } from "../../devices";
 import type { Member } from "../../devices";
 import { GUEST_ADDRESS, guestsOn, makeLink, openLink } from "../../guests";
-import { movie, openTitle, seedLibrary, share, visibleLibraries, visibleTitles } from "../../probe";
+import {
+  movie,
+  openTitle,
+  seedLibrary,
+  share,
+  show,
+  visibleLibraries,
+  visibleTitles,
+} from "../../probe";
 import type { Session } from "../../probe";
 import { importRows, newestRows } from "../../rows";
 import { failureOf, refusal, signIn, unique } from "../../sign-in";
@@ -48,6 +56,11 @@ interface Shelf {
 const movieRef = (id: Id<"titles">): DomainItem => ({
   domain: "movies",
   ref: { type: "title", id },
+});
+
+const episodeRef = (id: Id<"episodes">): DomainItem => ({
+  domain: "movies",
+  ref: { type: "episode", id },
 });
 
 const shelf = async (core: CoreStack): Promise<Shelf> => {
@@ -485,6 +498,49 @@ describe.skipIf(stack === undefined)("guest links", { timeout: 180_000 }, () => 
         host.userId,
       ]);
       expect(after?.state === "joined" ? after.pending : null).toEqual([]);
+    } finally {
+      await host.signedIn.client.mutation(api.core.together.leave, { domain: "movies" });
+    }
+  });
+
+  it("names to a session link's guest the episodes the session covers, and no others", async () => {
+    if (stack === undefined) return;
+    const { admin: host } = await shelf(stack);
+
+    const shows = await seedLibrary(stack, host, {
+      name: `shows-${unique()}`,
+      kind: "movies",
+      items: [show("pioneer", 0, 3)],
+    });
+
+    const [pioneer] = shows.itemIds;
+    const [first, second, third] = shows.episodeIds[0] ?? [];
+
+    if (pioneer === undefined || first === undefined || second === undefined) {
+      throw new Error("seeded too few episodes");
+    }
+
+    if (third === undefined) throw new Error("seeded too few episodes");
+
+    await host.signedIn.client.action(api.core.together.create, { item: episodeRef(first) });
+
+    try {
+      const made = await makeLink(host, { kind: "session", domain: "movies" });
+      const guest = await openLink(stack, made.code, "Sam");
+
+      const named = (episodeId: Id<"episodes">) =>
+        guest.signedIn.client.query(api.movies.titles.episode, { episodeId });
+
+      expect(await named(first)).toMatchObject({ id: first, titleId: pioneer, episodeNumber: 1 });
+      expect(await refusal(named(second))).toBe("not_found");
+
+      await host.signedIn.client.mutation(api.core.together.add, { item: episodeRef(second) });
+
+      expect(await named(second)).toMatchObject({ id: second, titleId: pioneer });
+      expect(await refusal(named(third))).toBe("not_found");
+      expect(
+        await refusal(guest.signedIn.client.query(api.movies.titles.get, { titleId: pioneer })),
+      ).toBe("forbidden");
     } finally {
       await host.signedIn.client.mutation(api.core.together.leave, { domain: "movies" });
     }
