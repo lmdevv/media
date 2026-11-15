@@ -577,4 +577,23 @@ describe("follower", () => {
         expect((yield* member.current).holding).toBeNull();
       }),
     ));
+  it("plays the session on when the host's player recovers while its pause is on the way", () =>
+    scenario(playingForAMinute, (session) =>
+      Effect.gen(function* () {
+        const lucia = yield* makePlayer(0);
+        const aiko = yield* makePlayer(0);
+
+        yield* follower(session, lucia, { controls: true, pausesForStalls: true });
+        yield* follower(session, aiko);
+        yield* advance(4_000);
+        lucia.stall();
+        yield* advance(FOLLOWER_TUNABLES.stallPauseMs + 60);
+        lucia.recover();
+        yield* advance(3_000);
+
+        expect((yield* session.clock).status).toBe("playing");
+        expect(aiko.isPaused()).toBe(false);
+        expect(Math.abs(lucia.positionMs() - aiko.positionMs())).toBeLessThan(250);
+      }),
+    ));
 });

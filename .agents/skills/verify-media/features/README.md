@@ -82,6 +82,9 @@ commands, and observable proof.
   wasn't shared.
 - [My List and Continue watching](./my-list.md) covers adding to My List and the Continue
   watching row with its resume point and next episode.
+- [Group sessions](./group-sessions.md) covers starting, joining, and leaving a session, approval
+  and locked sessions, the guests' control switch, the shared next-episode countdown, the host
+  going away, Up next, and joining from the iOS app.
 
 Music runs on every side too, at `/music` on the same image. Its map is
 [music/README.md](./music/README.md), with the music library, playback, search, and playlists.

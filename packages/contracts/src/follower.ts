@@ -416,6 +416,9 @@ export const run = Effect.fn("Follower.run")(function* <E>(
         Effect.annotateLogs({ revision, positionMs: standing }),
       );
 
+      // The player may have recovered while the pause was on its way, with no event left to come.
+      yield* releaseIfRecovered;
+
       return;
     }
 
@@ -439,6 +442,31 @@ export const run = Effect.fn("Follower.run")(function* <E>(
     }
 
     yield* send({ kind: "play" }).pipe(Effect.ignore);
+  });
+
+  /** Whether this player plays again after its stall. */
+  const recovered = (): boolean => !player.isBuffering() && !player.isPaused();
+
+  /** Ends a settled hold whose player already plays again, as a missed `playing` event would. */
+  const releaseIfRecovered: Effect.Effect<void> = Effect.suspend(() =>
+    Effect.gen(function* () {
+      const { holding } = yield* SubscriptionRef.get(state);
+
+      if (holding?.kind === "held" && recovered()) yield* releaseHold;
+    }),
+  );
+
+  /** A correction tick: a recovered hold plays on, anything else corrects the player. */
+  const tick = Effect.gen(function* () {
+    const { holding } = yield* SubscriptionRef.get(state);
+
+    if (holding?.kind === "held" && recovered()) {
+      yield* releaseHold;
+
+      return;
+    }
+
+    yield* correct;
   });
 
   const watchStall = Effect.gen(function* () {
@@ -596,7 +624,7 @@ export const run = Effect.fn("Follower.run")(function* <E>(
     addSamples.pipe(Effect.delay(Duration.millis(CLOCK_SAMPLING.everyMs)), Effect.forever),
   );
   yield* Effect.forkScoped(
-    correct.pipe(Effect.repeat(Schedule.spaced(Duration.millis(tunables.correctionIntervalMs)))),
+    tick.pipe(Effect.repeat(Schedule.spaced(Duration.millis(tunables.correctionIntervalMs)))),
   );
 
   return {
