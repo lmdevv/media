@@ -13,7 +13,7 @@ This skill runs the real products on one demo library, mounted read-only:
   service, with the library at `/media/library` (ADR 0026). Movies' data lives in the core.
 - **Music.** The image serves the music client (`/app/music`) at `/music` on the same port and
   session as movies, with its data in the core: `up` records `music_core`. An image from before
-  the music client, a library with no `Music` folder, or `up --no-music` runs movies alone.
+  the music client, `--library fixtures`, or `up --no-music` runs movies alone.
 
 A run has two sides, each its own Compose project with one container, the image, for both
 products:
@@ -175,7 +175,7 @@ the CPU.
 | ------------------------------- | ---------------------------------------------------------------------- |
 | `--side before`                 | Start the main side for a before/after comparison                      |
 | `--image IMG`                   | Run another image, such as a release tag, instead of building          |
-| `--library demo\|fixtures\|DIR` | Pick the library. A DIR holds `Movies/`, `Shows/`, and `Music/` and must be readable by others (`a+rX`); without `Music/` the side runs movies alone |
+| `--library demo\|fixtures\|DIR` | Pick the library. A DIR holds `Movies/`, `Shows/`, and `Music/` (or pass `--no-music`) and must be readable by others (`a+rX`); the fixtures have no music |
 | `--no-music`                    | Run movies alone, without the Music library                            |
 | `--no-seed`                     | Stop after setup: only Lucía (with her own profile in old movies) and the libraries |
 | `--no-setup`                    | Leave fresh servers, to verify first-run setup itself                   |

@@ -595,6 +595,9 @@ describe("a side's layout", () => {
     const result = withLayout("one-backend", "write_state music_core 1; cmd_cli --side after --app music -- albums list");
     assert.equal(result.status, 1);
     assert.match(result.stderr, /cli runs the media CLI for both products: run `cli -- music …` for music/);
+    const movies = withLayout("one-backend", "cmd_cli --side after --app movies -- movies titles list");
+    assert.equal(movies.status, 1);
+    assert.match(movies.stderr, /no CLI session on the after side/);
   });
 
   test("refuses the movies iOS app on old movies' backend before it touches the Mac", () => {

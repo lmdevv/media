@@ -130,7 +130,7 @@ convex_url() {
 owner_name() { if core_only; then echo lucia; else echo admin@movies.local; fi; }
 movies_service() { if one_port; then echo media; else echo movies; fi; }
 # Music is the image's own client at /music on its one port (music_core), or not there at all: an
-# image from before the music port, a library with no music folder, or `up --no-music`.
+# image from before the music port, the fixture library, or `up --no-music`.
 music_core() { [[ "$(read_state music_core)" == 1 ]]; }
 music_url() { echo "$(url)/music"; }
 # Prints 1 when an image holds the music client (/app/music), which it serves at /music, and 0
@@ -363,9 +363,9 @@ cmd_up() {
   backend="$(movies_backend_in "$image")"
   write_state layout "$(layout_of "$state/deploy/compose/compose.yaml" "$backend")"
   # An image that serves the music client at /music runs music itself, on the core. An image from
-  # before the music port runs movies alone.
-  if ((music)) && [[ "$(music_in "$image")" == 0 ]]; then
-    say "$image has no music client, so this side runs movies alone"
+  # before the music port, or one that still runs old movies' own Convex, runs movies alone.
+  if ((music)) && ! { core_only && [[ "$(music_in "$image")" == 1 ]]; }; then
+    say "$image has no music client on the core, so this side runs movies alone"
     music=0
   fi
   write_state image "$image"
@@ -393,6 +393,9 @@ cmd_up() {
       rm -rf "$library"
       node "$root/apps/media/scripts/generate-fixtures.ts" "$library" >/dev/null
       chmod -R a+rX "$library"
+      # The fixtures hold films and shows only.
+      ((music)) && say "the fixture library has no music, so this side runs movies alone"
+      music=0
     fi
     library="$(cd "$library" && pwd)"
     # The media service runs unprivileged in its container and must read every folder and file.
@@ -404,10 +407,7 @@ cmd_up() {
     [[ -d "$library/Music" ]] || music_dir="music"
     [[ -d "$library/$movies_dir" || -d "$library/$shows_dir" ]] ||
       die "$library has no Movies or Shows folder"
-    if ((music)) && [[ ! -d "$library/$music_dir" ]]; then
-      say "$library has no Music folder, so this side runs movies alone"
-      music=0
-    fi
+    ((music)) && [[ ! -d "$library/$music_dir" ]] && die "$library has no Music folder; add one or pass --no-music"
     mount="    volumes:
       - { type: bind, source: \"$library\", target: /media/library, read_only: true }"
   fi
@@ -572,7 +572,7 @@ cmd_doctor() {
     check "/music is the music client" "curl -fsS '$(music_url)/' | grep -qF '<title>[music]</title>'"
     echo "info  music is the image's client at $(music_url), on the core"
   else
-    echo "info  no music (the image has no music client, the library no Music folder, or up ran with --no-music)"
+    echo "info  no music (the image has no music client on the core, the library is the fixtures, or up ran with --no-music)"
   fi
   return "$failed"
 }
@@ -611,7 +611,9 @@ cmd_cli() {
     case "$1" in
       # Before the slug: it works on bytes, so it would turn the í into two dashes.
       --as) as="${2:?--as needs a person}"; [[ "$as" == [Ll]ucía ]] && as=lucia; as="$(slug "$as")"; shift 2 ;;
-      --app) die "cli runs the media CLI for both products: run \`cli -- music …\` for music" ;;
+      --app)
+        [[ "${2:-}" == movies ]] || die "cli runs the media CLI for both products: run \`cli -- music …\` for music"
+        shift 2 ;;
       --) shift; break ;;
       *) break ;;
     esac
