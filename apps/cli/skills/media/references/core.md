@@ -300,7 +300,7 @@ Report what this device plays, where it plays it, and the newest request it has 
 - CLI: `media auth player report`
 - Kind: mutation
 - Scope: signed-in
-- Arguments: `{ output: { kind: "local" } | { kind: "cast"; receiver: string | null } | { kind: "airplay"; receiver: string | null }; playback: { domain: "movies" | "music"; playing: boolean; positionMs: number } | null; applied: number }`
+- Arguments: `{ output: { kind: "local" } | { kind: "cast"; receiver: string | null } | { kind: "airplay"; receiver: string | null }; playback: { item: { domain: "movies"; ref: { type: "title"; id: Id<"titles"> } | { type: "episode"; id: Id<"episodes"> } | { type: "file"; id: Id<"mediaFiles"> } } | { domain: "music"; ref: { type: "track"; id: Id<"tracks"> } | { type: "album"; id: Id<"albums"> } }; playing: boolean; positionMs: number; session?: Id<"togetherSessions"> } | null; applied: number }`
 - Result: `{ reportedAt: number }`
 
 ## `core.connect.player.requested`
@@ -311,7 +311,7 @@ Show the playback another device asked of this one that it has not applied yet.
 - Kind: query
 - Scope: signed-in
 - Arguments: none
-- Result: `null | { revision: number; playing: boolean; positionMs: number; at: number }`
+- Result: `null | { revision: number; ask: { kind: "transport"; item: { domain: "movies"; ref: { type: "title"; id: Id<"titles"> } | { type: "episode"; id: Id<"episodes"> } | { type: "file"; id: Id<"mediaFiles"> } } | { domain: "music"; ref: { type: "track"; id: Id<"tracks"> } | { type: "album"; id: Id<"albums"> } }; playing: boolean; positionMs: number; at: number } | { kind: "load"; item: { domain: "movies"; ref: { type: "title"; id: Id<"titles"> } | { type: "episode"; id: Id<"episodes"> } | { type: "file"; id: Id<"mediaFiles"> } } | { domain: "music"; ref: { type: "track"; id: Id<"tracks"> } | { type: "album"; id: Id<"albums"> } }; playing: boolean; positionMs: number; at: number } | { kind: "stop"; at: number } }`
 
 ## `core.connect.targets.control`
 
@@ -331,7 +331,27 @@ List the online devices you can control with Connect, newest report first, with 
 - Kind: query
 - Scope: signed-in
 - Arguments: none
-- Result: `Array<{ deviceId: Id<"devices">; name: string; mode: "personal" | "shared"; output: { kind: "local" } | { kind: "cast"; receiver: string | null } | { kind: "airplay"; receiver: string | null }; playback: null | { domain: "movies" | "music"; playing: boolean; positionMs: number; at: number; pending: boolean }; reportedAt: number }>`
+- Result: `Array<{ deviceId: Id<"devices">; name: string; mode: "personal" | "shared"; output: { kind: "local" } | { kind: "cast"; receiver: string | null } | { kind: "airplay"; receiver: string | null }; playback: null | { domain: "movies" | "music"; item: { domain: "movies"; ref: { type: "title"; id: Id<"titles"> } | { type: "episode"; id: Id<"episodes"> } | { type: "file"; id: Id<"mediaFiles"> } } | { domain: "music"; ref: { type: "track"; id: Id<"tracks"> } | { type: "album"; id: Id<"albums"> } } | null; playing: boolean; positionMs: number; at: number; pending: boolean }; reportedAt: number }>`
+
+## `core.connect.targets.load`
+
+Play something on a device you can control, from a position, when you and the person on that device can both play it.
+
+- CLI: `media auth targets load`
+- Kind: mutation
+- Scope: signed-in
+- Arguments: `{ deviceId: Id<"devices">; item: { domain: "movies"; ref: { type: "title"; id: Id<"titles"> } | { type: "episode"; id: Id<"episodes"> } | { type: "file"; id: Id<"mediaFiles"> } } | { domain: "music"; ref: { type: "track"; id: Id<"tracks"> } | { type: "album"; id: Id<"albums"> } }; positionMs?: number }`
+- Result: `{ revision: number }`
+
+## `core.connect.targets.move`
+
+Move what plays on one device you can control to another at the same position; the first one stops.
+
+- CLI: `media auth targets move`
+- Kind: mutation
+- Scope: signed-in
+- Arguments: `{ from: Id<"devices">; to: Id<"devices"> }`
+- Result: `{ revision: number }`
 
 ## `core.devices.approvals.approve`
 

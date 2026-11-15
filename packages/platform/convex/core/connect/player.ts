@@ -1,5 +1,6 @@
 import { register } from "../../../commands/core/connect/player";
-import type { Doc } from "../../_generated/dataModel";
+import type { ContentDomain } from "../../../commands/scopes";
+import type { Doc, Id } from "../../_generated/dataModel";
 import type { DatabaseReader } from "../../_generated/server";
 import { callerUser } from "../auth/caller";
 import type { Caller } from "../auth/caller";
@@ -7,6 +8,7 @@ import { fail } from "../lib/errors";
 import { printableName } from "../lib/names";
 import { can } from "../permissions/policy";
 import { boundDevice } from "../sessions";
+import { factsOf, memberIn, placeOf } from "../together/access";
 import { deviceFor, playerOf, requestOf } from "./facts";
 import { parsePosition, pendingRequest, settledAfter } from "./playback";
 import type { Player } from "./playback";
@@ -47,6 +49,27 @@ const parseApplied = (applied: number, newestRevision: number): number => {
     : applied;
 };
 
+/** An ended session still passes (`view` allows it), so a device that has not seen it end keeps reporting. */
+const requireFollows = async (
+  db: DatabaseReader,
+  caller: Caller,
+  domain: ContentDomain,
+  sessionId: Id<"togetherSessions">,
+): Promise<void> => {
+  const [session, member] = await Promise.all([
+    db.get(sessionId),
+    memberIn(db, caller.userId, domain),
+  ]);
+
+  const decision =
+    session === null || session.item.domain !== domain
+      ? null
+      : can(caller, "view", factsOf(session, placeOf(session, caller.userId, member)));
+
+  if (decision?.allowed !== true)
+    fail("not_found", "This device's person is not in that group session");
+};
+
 export const { report, requested } = register({
   report: async (ctx, { output, playback, applied }, caller) => {
     const now = Date.now();
@@ -59,10 +82,15 @@ export const { report, requested } = register({
     ]);
 
     const newestRevision = request?.revision ?? 0;
-    const resource = await deviceFor(ctx.db, device, person, playback?.domain ?? null, now);
+    const domain = playback?.item.domain ?? null;
+    const resource = await deviceFor(ctx.db, device, person, null, domain, now);
 
     if (!can(caller, "report", resource).allowed) {
       return fail("forbidden", "This session cannot play what it reports");
+    }
+
+    if (playback?.session !== undefined) {
+      await requireFollows(ctx.db, caller, playback.item.domain, playback.session);
     }
 
     const row = {
@@ -96,13 +124,6 @@ export const { report, requested } = register({
 
     const pending = player?.reporter === caller.sessionId ? pendingRequest(player, request) : null;
 
-    return pending === null
-      ? null
-      : {
-          revision: pending.revision,
-          playing: pending.playing,
-          positionMs: pending.positionMs,
-          at: pending.at,
-        };
+    return pending === null ? null : { revision: pending.revision, ask: pending.ask };
   },
 });

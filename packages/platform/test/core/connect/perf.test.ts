@@ -2,7 +2,7 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import { api } from "../../../convex/_generated/api";
 import { inOrder } from "../../../convex/core/lib/inOrder";
-import { live, playing } from "../../connect";
+import { live, playing, shelf } from "../../connect";
 import { listings, member, openTile, sharedAdmin, sharedDevice } from "../../devices";
 import { coreStackFromEnvFile } from "../../stack-env";
 
@@ -66,21 +66,26 @@ describe.skipIf(stack === undefined)("Connect's delay", { timeout: 600_000 }, ()
     const device = await sharedDevice(stack, admin, "Perf TV");
     const tv = live(stack, await openTile(stack, device, lucia.userId));
     const phone = live(stack, aiko.signedIn);
+    const { film } = await shelf(stack);
 
     const seen = arrivals();
     const applied = arrivals();
 
-    await tv.mutation(api.core.connect.player.report, playing(0));
+    await tv.mutation(api.core.connect.player.report, playing(film, 0));
 
     const stop = tv.onUpdate(api.core.connect.player.requested, {}, (asked) => {
-      if (asked === null) return;
+      if (asked === null || asked.ask.kind !== "transport") return;
 
       seen(asked.revision).resolve(performance.now());
 
       void tv
         .mutation(api.core.connect.player.report, {
           output: { kind: "local" },
-          playback: { domain: "movies", playing: asked.playing, positionMs: asked.positionMs },
+          playback: {
+            item: asked.ask.item,
+            playing: asked.ask.playing,
+            positionMs: asked.ask.positionMs,
+          },
           applied: asked.revision,
         })
         .then(() => applied(asked.revision).resolve(performance.now()));

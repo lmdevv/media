@@ -1,6 +1,7 @@
-import type { ContentDomain } from "../../../commands/scopes";
+import type { DomainItem } from "../../../commands/access";
 import type { Doc, Id } from "../../_generated/dataModel";
 import { fail } from "../lib/errors";
+import type { Ask } from "./model";
 
 /** What a device last said it plays (ADR 0018). */
 export type Player = Doc<"connectPlayers">;
@@ -22,10 +23,14 @@ export interface Transport {
   readonly at: number;
 }
 
-/** What a device plays as controllers see it: `pending` while it has a request to apply. */
+/**
+ * What a device plays as controllers see it: `pending` while a request it has yet to apply stands
+ * in for its report, and `loading` while that request is a load.
+ */
 export interface Playback extends Transport {
-  readonly domain: ContentDomain;
+  readonly item: DomainItem;
   readonly pending: boolean;
+  readonly loading: boolean;
 }
 
 /** What a controller asks a device for: play or pause, a position, or both. */
@@ -34,34 +39,48 @@ export interface Change {
   readonly positionMs?: number | undefined;
 }
 
+const sameItem = (left: DomainItem, right: DomainItem): boolean =>
+  left.domain === right.domain && left.ref.type === right.ref.type && left.ref.id === right.ref.id;
+
 /** The request a device's reporter has not settled yet, or null. */
 export const pendingRequest = (player: Player, request: Request | null): Request | null =>
   request !== null && request.reporter === player.reporter && request.revision > player.settled
     ? request
     : null;
 
-/** What a device plays, with the request it has yet to apply standing in for its report. */
-export const playbackOf = (player: Player, request: Request | null): Playback | null => {
-  if (player.playback === null) return null;
-
-  const { domain } = player.playback;
-  const pending = pendingRequest(player, request);
-
-  return pending === null
-    ? {
-        domain,
+const reportedOf = (player: Player): Playback | null =>
+  player.playback === null
+    ? null
+    : {
+        item: player.playback.item,
         playing: player.playback.playing,
         positionMs: player.playback.positionMs,
         at: player.reportedAt,
         pending: false,
-      }
-    : {
-        domain,
-        playing: pending.playing,
-        positionMs: pending.positionMs,
-        at: pending.at,
-        pending: true,
+        loading: false,
       };
+
+const askedOf = (ask: Exclude<Ask, { readonly kind: "stop" }>): Playback => ({
+  item: ask.item,
+  playing: ask.playing,
+  positionMs: ask.positionMs,
+  at: ask.at,
+  pending: true,
+  loading: ask.kind === "load",
+});
+
+/** What a device plays, with the request it has yet to apply standing in for its report. */
+export const playbackOf = (player: Player, request: Request | null): Playback | null => {
+  const reported = reportedOf(player);
+  const ask = pendingRequest(player, request)?.ask ?? null;
+
+  if (ask === null) return reported;
+
+  if (ask.kind === "stop") return null;
+
+  if (ask.kind === "load") return askedOf(ask);
+
+  return reported !== null && sameItem(reported.item, ask.item) ? askedOf(ask) : reported;
 };
 
 /** Where `transport` is at server time `now`. */
@@ -72,6 +91,25 @@ export const positionAt = (transport: Transport, now: number): number =>
 export const changed = (current: Transport, change: Change, now: number): Transport => ({
   playing: change.playing ?? current.playing,
   positionMs: change.positionMs ?? positionAt(current, now),
+  at: now,
+});
+
+/**
+ * What `control` asks of a device playing `current`. A pending load stays a load, so the change
+ * lands on whatever song an album load starts.
+ */
+export const controlAsk = (current: Playback, change: Change, now: number): Ask => ({
+  kind: current.loading ? "load" : "transport",
+  item: current.item,
+  ...changed(current, change, now),
+});
+
+/** What `move` asks of the device that receives playback. */
+export const moveAsk = (current: Playback, now: number): Ask => ({
+  kind: "load",
+  item: current.item,
+  playing: current.playing,
+  positionMs: positionAt(current, now),
   at: now,
 });
 

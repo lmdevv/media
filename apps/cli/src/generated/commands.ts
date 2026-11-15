@@ -683,9 +683,41 @@ export const generatedCommands = [
       ]),
       playback: Schema.Union([
         Schema.Struct({
-          domain: Schema.Union([Schema.Literal("movies"), Schema.Literal("music")]),
+          item: Schema.Union([
+            Schema.Struct({
+              domain: Schema.Literal("movies"),
+              ref: Schema.Union([
+                Schema.Struct({
+                  type: Schema.Literal("title"),
+                  id: Schema.String.pipe(Schema.brand("Id<titles>")),
+                }),
+                Schema.Struct({
+                  type: Schema.Literal("episode"),
+                  id: Schema.String.pipe(Schema.brand("Id<episodes>")),
+                }),
+                Schema.Struct({
+                  type: Schema.Literal("file"),
+                  id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
+                }),
+              ]),
+            }),
+            Schema.Struct({
+              domain: Schema.Literal("music"),
+              ref: Schema.Union([
+                Schema.Struct({
+                  type: Schema.Literal("track"),
+                  id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+                }),
+                Schema.Struct({
+                  type: Schema.Literal("album"),
+                  id: Schema.String.pipe(Schema.brand("Id<albums>")),
+                }),
+              ]),
+            }),
+          ]),
           playing: Schema.Boolean,
           positionMs: Schema.Finite,
+          session: Schema.optionalKey(Schema.String.pipe(Schema.brand("Id<togetherSessions>"))),
         }),
         Schema.Null,
       ]),
@@ -708,9 +740,85 @@ export const generatedCommands = [
       Schema.Null,
       Schema.Struct({
         revision: Schema.Finite,
-        playing: Schema.Boolean,
-        positionMs: Schema.Finite,
-        at: Schema.Finite,
+        ask: Schema.Union([
+          Schema.Struct({
+            kind: Schema.Literal("transport"),
+            item: Schema.Union([
+              Schema.Struct({
+                domain: Schema.Literal("movies"),
+                ref: Schema.Union([
+                  Schema.Struct({
+                    type: Schema.Literal("title"),
+                    id: Schema.String.pipe(Schema.brand("Id<titles>")),
+                  }),
+                  Schema.Struct({
+                    type: Schema.Literal("episode"),
+                    id: Schema.String.pipe(Schema.brand("Id<episodes>")),
+                  }),
+                  Schema.Struct({
+                    type: Schema.Literal("file"),
+                    id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
+                  }),
+                ]),
+              }),
+              Schema.Struct({
+                domain: Schema.Literal("music"),
+                ref: Schema.Union([
+                  Schema.Struct({
+                    type: Schema.Literal("track"),
+                    id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+                  }),
+                  Schema.Struct({
+                    type: Schema.Literal("album"),
+                    id: Schema.String.pipe(Schema.brand("Id<albums>")),
+                  }),
+                ]),
+              }),
+            ]),
+            playing: Schema.Boolean,
+            positionMs: Schema.Finite,
+            at: Schema.Finite,
+          }),
+          Schema.Struct({
+            kind: Schema.Literal("load"),
+            item: Schema.Union([
+              Schema.Struct({
+                domain: Schema.Literal("movies"),
+                ref: Schema.Union([
+                  Schema.Struct({
+                    type: Schema.Literal("title"),
+                    id: Schema.String.pipe(Schema.brand("Id<titles>")),
+                  }),
+                  Schema.Struct({
+                    type: Schema.Literal("episode"),
+                    id: Schema.String.pipe(Schema.brand("Id<episodes>")),
+                  }),
+                  Schema.Struct({
+                    type: Schema.Literal("file"),
+                    id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
+                  }),
+                ]),
+              }),
+              Schema.Struct({
+                domain: Schema.Literal("music"),
+                ref: Schema.Union([
+                  Schema.Struct({
+                    type: Schema.Literal("track"),
+                    id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+                  }),
+                  Schema.Struct({
+                    type: Schema.Literal("album"),
+                    id: Schema.String.pipe(Schema.brand("Id<albums>")),
+                  }),
+                ]),
+              }),
+            ]),
+            playing: Schema.Boolean,
+            positionMs: Schema.Finite,
+            at: Schema.Finite,
+          }),
+          Schema.Struct({ kind: Schema.Literal("stop"), at: Schema.Finite }),
+        ]),
       }),
     ]),
     method: (platform) => platform.core.connect.player.requested,
@@ -764,6 +872,41 @@ export const generatedCommands = [
           Schema.Null,
           Schema.Struct({
             domain: Schema.Union([Schema.Literal("movies"), Schema.Literal("music")]),
+            item: Schema.Union([
+              Schema.Union([
+                Schema.Struct({
+                  domain: Schema.Literal("movies"),
+                  ref: Schema.Union([
+                    Schema.Struct({
+                      type: Schema.Literal("title"),
+                      id: Schema.String.pipe(Schema.brand("Id<titles>")),
+                    }),
+                    Schema.Struct({
+                      type: Schema.Literal("episode"),
+                      id: Schema.String.pipe(Schema.brand("Id<episodes>")),
+                    }),
+                    Schema.Struct({
+                      type: Schema.Literal("file"),
+                      id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
+                    }),
+                  ]),
+                }),
+                Schema.Struct({
+                  domain: Schema.Literal("music"),
+                  ref: Schema.Union([
+                    Schema.Struct({
+                      type: Schema.Literal("track"),
+                      id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+                    }),
+                    Schema.Struct({
+                      type: Schema.Literal("album"),
+                      id: Schema.String.pipe(Schema.brand("Id<albums>")),
+                    }),
+                  ]),
+                }),
+              ]),
+              Schema.Null,
+            ]),
             playing: Schema.Boolean,
             positionMs: Schema.Finite,
             at: Schema.Finite,
@@ -774,6 +917,72 @@ export const generatedCommands = [
       }),
     ),
     method: (platform) => platform.core.connect.targets.list,
+  }),
+  coreCommand({
+    name: "core.connect.targets.load",
+    path: ["auth", "targets", "load"],
+    kind: "mutation",
+    scope: "signed-in",
+    refusesKeys: false,
+    summary:
+      "Play something on a device you can control, from a position, when you and the person on that device can both play it",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({
+      deviceId: Schema.String.pipe(Schema.brand("Id<devices>")),
+      item: Schema.Union([
+        Schema.Struct({
+          domain: Schema.Literal("movies"),
+          ref: Schema.Union([
+            Schema.Struct({
+              type: Schema.Literal("title"),
+              id: Schema.String.pipe(Schema.brand("Id<titles>")),
+            }),
+            Schema.Struct({
+              type: Schema.Literal("episode"),
+              id: Schema.String.pipe(Schema.brand("Id<episodes>")),
+            }),
+            Schema.Struct({
+              type: Schema.Literal("file"),
+              id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
+            }),
+          ]),
+        }),
+        Schema.Struct({
+          domain: Schema.Literal("music"),
+          ref: Schema.Union([
+            Schema.Struct({
+              type: Schema.Literal("track"),
+              id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+            }),
+            Schema.Struct({
+              type: Schema.Literal("album"),
+              id: Schema.String.pipe(Schema.brand("Id<albums>")),
+            }),
+          ]),
+        }),
+      ]),
+      positionMs: Schema.optionalKey(Schema.Finite),
+    }),
+    result: Schema.Struct({ revision: Schema.Finite }),
+    method: (platform) => platform.core.connect.targets.load,
+  }),
+  coreCommand({
+    name: "core.connect.targets.move",
+    path: ["auth", "targets", "move"],
+    kind: "mutation",
+    scope: "signed-in",
+    refusesKeys: false,
+    summary:
+      "Move what plays on one device you can control to another at the same position; the first one stops",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({
+      from: Schema.String.pipe(Schema.brand("Id<devices>")),
+      to: Schema.String.pipe(Schema.brand("Id<devices>")),
+    }),
+    result: Schema.Struct({ revision: Schema.Finite }),
+    method: (platform) => platform.core.connect.targets.move,
   }),
   coreCommand({
     name: "core.devices.approvals.approve",

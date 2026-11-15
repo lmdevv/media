@@ -108,6 +108,8 @@ export const commandRefs = {
   "core.connect.targets.control": api.core.connect.targets
     .control satisfies core_connect_targets["control"],
   "core.connect.targets.list": api.core.connect.targets.list satisfies core_connect_targets["list"],
+  "core.connect.targets.load": api.core.connect.targets.load satisfies core_connect_targets["load"],
+  "core.connect.targets.move": api.core.connect.targets.move satisfies core_connect_targets["move"],
   "core.devices.approvals.approve": api.core.devices.approvals
     .approve satisfies core_devices_approvals["approve"],
   "core.devices.approvals.deny": api.core.devices.approvals

@@ -1,21 +1,30 @@
+import type { DomainItem } from "../../../commands/access";
 import { register } from "../../../commands/core/connect/targets";
+import { contentDomain } from "../../../commands/scopes";
 import type { Doc, Id } from "../../_generated/dataModel";
-import type { DatabaseReader } from "../../_generated/server";
+import type { DatabaseReader, MutationCtx } from "../../_generated/server";
 import { callerUser } from "../auth/caller";
+import type { Caller } from "../auth/caller";
 import { NO_DEVICE } from "../devices/facts";
 import { fail } from "../lib/errors";
+import { reachOf } from "../permissions/grants";
+import { mayPlay, playableBy, requirePlayable } from "../permissions/items";
 import { can } from "../permissions/policy";
-import type { DeviceResource, PersonDoc, Principal } from "../permissions/policy";
+import type { DeviceAction, DeviceResource, PersonDoc, Principal } from "../permissions/policy";
 import { boundDevice, liveOnDevice } from "../sessions";
-import { deviceFor, playerOf, reporting, requestOf } from "./facts";
-import { changed, isOnline, nextRevision, parsePosition, playbackOf } from "./playback";
-import type { Change } from "./playback";
+import { memberIn } from "../together/access";
+import { deviceFor, playerOf, reporterOf, requestOf } from "./facts";
+import type { Ask } from "./model";
+import { controlAsk, moveAsk, nextRevision, parsePosition, playbackOf } from "./playback";
+import type { Change, Playback, Player, Request } from "./playback";
 
 const BOUND_DEVICES_READ = 64;
 
 const ENDED_DEVICES_SKIPPED = 192;
 
 const SHARED_DEVICES_READ = 64;
+
+const SESSION_DEVICES_READ = 64;
 
 /**
  * Sessions bound to a device sort after those on none, so the descending walk ends at the first
@@ -55,32 +64,57 @@ const liveBoundBelow = async (
   return skips === 0 ? [] : liveBoundBelow(db, person, deviceId, left, skips - 1, now);
 };
 
+const followingTheirSessions = async (
+  db: DatabaseReader,
+  person: PersonDoc,
+): Promise<ReadonlyArray<Id<"devices">>> => {
+  const rows = await Promise.all(
+    contentDomain.members.map(async ({ value: domain }) => memberIn(db, person._id, domain)),
+  );
+
+  const players = await Promise.all(
+    rows.map(async (row) =>
+      row === null || row.state !== "joined"
+        ? []
+        : db
+            .query("connectPlayers")
+            .withIndex("by_session", (q) => q.eq("playback.session", row.sessionId))
+            .take(SESSION_DEVICES_READ),
+    ),
+  );
+
+  return players.flat().map((player) => player.deviceId);
+};
+
+/**
+ * The devices a person might control: those they have a live session on, every shared device
+ * while shared devices list them, and for a guest every device that follows their group session.
+ */
 const reachable = async (
   db: DatabaseReader,
   person: PersonDoc,
 ): Promise<ReadonlyArray<Id<"devices">>> => {
-  const bound = await liveBoundBelow(
-    db,
-    person,
-    null,
-    BOUND_DEVICES_READ,
-    ENDED_DEVICES_SKIPPED,
-    Date.now(),
-  );
-
-  const shared: ReadonlyArray<Doc<"devices">> =
+  const [bound, shared, following] = await Promise.all([
+    liveBoundBelow(db, person, null, BOUND_DEVICES_READ, ENDED_DEVICES_SKIPPED, Date.now()),
     person.sharedDevices === true
-      ? await db
+      ? db
           .query("devices")
           .withIndex("by_mode", (q) => q.eq("mode", "shared"))
           .take(SHARED_DEVICES_READ)
-      : [];
+      : [],
+    person.role === "guest" ? followingTheirSessions(db, person) : [],
+  ]);
 
-  return [...new Set([...bound, ...shared.map((device) => device._id)])];
+  return [...new Set([...bound, ...shared.map((device) => device._id), ...following])];
 };
 
-const requireControl = (principal: Principal, device: DeviceResource): void => {
-  const decision = can(principal, "control", device);
+const refusals = {
+  "no-control": "The group session's host has not let guests control playback",
+  guest: "A guest from a share link cannot load or move playback",
+} as const;
+
+const requireDevice = (caller: Caller, action: DeviceAction, device: DeviceResource): void => {
+  const decision = can(caller, action, device);
 
   if (decision.allowed) return;
 
@@ -88,8 +122,8 @@ const requireControl = (principal: Principal, device: DeviceResource): void => {
 
   fail(
     "forbidden",
-    decision.because === "no-control"
-      ? "The session's host has not let you control playback"
+    decision.because === "no-control" || decision.because === "guest"
+      ? refusals[decision.because]
       : "This session cannot play what that device plays",
   );
 };
@@ -102,10 +136,100 @@ const parseChange = ({ playing, positionMs }: Change): Change => {
   return { playing, positionMs: positionMs === undefined ? undefined : parsePosition(positionMs) };
 };
 
-export const { list, control } = register({
+interface Target {
+  readonly device: Doc<"devices">;
+  readonly player: Player | null;
+  readonly request: Request | null;
+  readonly current: Playback | null;
+}
+
+const targetOf = async (db: DatabaseReader, deviceId: Id<"devices">): Promise<Target> => {
+  const [device, player, request] = await Promise.all([
+    db.get(deviceId),
+    playerOf(db, deviceId),
+    requestOf(db, deviceId),
+  ]);
+
+  if (device === null) return fail("not_found", NO_DEVICE);
+
+  return {
+    device,
+    player,
+    request,
+    current: player === null ? null : playbackOf(player, request),
+  };
+};
+
+const ask = async (
+  ctx: Pick<MutationCtx, "db">,
+  target: Target,
+  player: Player,
+  made: Ask,
+): Promise<number> => {
+  const revision = nextRevision(target.request);
+
+  const row = {
+    deviceId: target.device._id,
+    reporter: player.reporter,
+    revision,
+    ask: made,
+  };
+
+  if (target.request === null) await ctx.db.insert("connectRequests", row);
+  else await ctx.db.replace(target.request._id, row);
+
+  return revision;
+};
+
+const OFFLINE = "That device is offline";
+
+/**
+ * Checks that `caller` may load `item`'s domain onto `target` and control what it plays now, and
+ * answers the device's player with the person whose session reports for it.
+ */
+const requireLoad = async (
+  ctx: Pick<MutationCtx, "db">,
+  caller: Caller,
+  person: PersonDoc,
+  target: Target,
+  item: DomainItem,
+  now: number,
+): Promise<{ readonly player: Player; readonly reporter: Principal }> => {
+  const { device, player, current } = target;
+
+  const resource = await deviceFor(
+    ctx.db,
+    device,
+    person,
+    target,
+    current?.item.domain ?? null,
+    now,
+  );
+
+  requireDevice(caller, "control", resource);
+  requireDevice(caller, "load", { ...resource, domain: item.domain });
+
+  const reporter = player === null ? null : await reporterOf(ctx.db, player, now);
+
+  return player === null || reporter === null ? fail("conflict", OFFLINE) : { player, reporter };
+};
+
+/** Refuses an item the person on the device may not play, such as a kid and an explicit song. */
+const requireTheyPlay = async (
+  db: DatabaseReader,
+  reporter: Principal,
+  item: DomainItem,
+): Promise<void> => {
+  if (!(await mayPlay(db, reporter, item))) {
+    fail("forbidden", "The person on that device cannot play that");
+  }
+};
+
+export const { list, control, load, move } = register({
   list: async (ctx, _args, caller) => {
     const person = await callerUser(ctx, caller);
     const now = Date.now();
+    const playable = playableBy(ctx.db, await reachOf(ctx.db, caller));
 
     const targets = await Promise.all(
       (await reachable(ctx.db, person)).map(async (deviceId) => {
@@ -117,21 +241,28 @@ export const { list, control } = register({
         if (
           device === null ||
           player === null ||
-          !isOnline(player, now) ||
-          !(await reporting(ctx.db, player, now))
+          (await reporterOf(ctx.db, player, now)) === null
         ) {
           return [];
         }
 
-        const resource = await deviceFor(
-          ctx.db,
-          device,
-          person,
-          player.playback?.domain ?? null,
-          now,
-        );
+        const current = playbackOf(player, await requestOf(ctx.db, deviceId));
+        const domain = current?.item.domain ?? null;
+        const resource = await deviceFor(ctx.db, device, person, { player, current }, domain, now);
 
         if (!can(caller, "control", resource).allowed) return [];
+
+        const playback =
+          current === null
+            ? null
+            : {
+                domain: current.item.domain,
+                item: (await playable(current.item)) ? current.item : null,
+                playing: current.playing,
+                positionMs: current.positionMs,
+                at: current.at,
+                pending: current.pending,
+              };
 
         return [
           {
@@ -139,7 +270,7 @@ export const { list, control } = register({
             name: device.name,
             mode: device.mode,
             output: player.output,
-            playback: playbackOf(player, await requestOf(ctx.db, deviceId)),
+            playback,
             reportedAt: player.reportedAt,
           },
         ];
@@ -151,32 +282,86 @@ export const { list, control } = register({
   control: async (ctx, { deviceId, ...asked }, caller) => {
     const change = parseChange(asked);
     const now = Date.now();
-    const device = (await ctx.db.get(deviceId)) ?? fail("not_found", NO_DEVICE);
 
-    const [person, player, request] = await Promise.all([
+    const [target, person] = await Promise.all([
+      targetOf(ctx.db, deviceId),
       callerUser(ctx, caller),
-      playerOf(ctx.db, deviceId),
-      requestOf(ctx.db, deviceId),
     ]);
 
-    requireControl(
+    const { device, player, current } = target;
+
+    requireDevice(
       caller,
-      await deviceFor(ctx.db, device, person, player?.playback?.domain ?? null, now),
+      "control",
+      await deviceFor(ctx.db, device, person, target, current?.item.domain ?? null, now),
     );
 
-    const online =
-      player !== null && isOnline(player, now) && (await reporting(ctx.db, player, now));
+    if (player === null || (await reporterOf(ctx.db, player, now)) === null) {
+      return fail("conflict", OFFLINE);
+    }
 
-    if (!online) return fail("conflict", "That device is offline");
+    if (current === null) return fail("conflict", "Nothing plays on that device");
 
-    const current = playbackOf(player, request) ?? fail("conflict", "Nothing plays on that device");
-    const revision = nextRevision(request);
+    return { revision: await ask(ctx, target, player, controlAsk(current, change, now)) };
+  },
+  load: async (ctx, { deviceId, item, positionMs }, caller) => {
+    const position = positionMs === undefined ? 0 : parsePosition(positionMs);
+    const now = Date.now();
 
-    const row = { deviceId, reporter: player.reporter, revision, ...changed(current, change, now) };
+    const [target, person] = await Promise.all([
+      targetOf(ctx.db, deviceId),
+      callerUser(ctx, caller),
+    ]);
 
-    if (request === null) await ctx.db.insert("connectRequests", row);
-    else await ctx.db.replace(request._id, row);
+    const { player, reporter } = await requireLoad(ctx, caller, person, target, item, now);
 
-    return { revision };
+    await requirePlayable(ctx.db, caller, item);
+    await requireTheyPlay(ctx.db, reporter, item);
+
+    const loaded: Ask = { kind: "load", item, playing: true, positionMs: position, at: now };
+
+    return { revision: await ask(ctx, target, player, loaded) };
+  },
+  move: async (ctx, { from, to }, caller) => {
+    if (from === to) return fail("invalid_args", "Move playback to another device");
+
+    const now = Date.now();
+
+    const [source, target, person] = await Promise.all([
+      targetOf(ctx.db, from),
+      targetOf(ctx.db, to),
+      callerUser(ctx, caller),
+    ]);
+
+    requireDevice(
+      caller,
+      "control",
+      await deviceFor(
+        ctx.db,
+        source.device,
+        person,
+        source,
+        source.current?.item.domain ?? null,
+        now,
+      ),
+    );
+
+    if (source.player === null || (await reporterOf(ctx.db, source.player, now)) === null) {
+      return fail("conflict", OFFLINE);
+    }
+
+    if (source.current === null) return fail("conflict", "Nothing plays on that device");
+
+    const { item } = source.current;
+    const { player, reporter } = await requireLoad(ctx, caller, person, target, item, now);
+
+    if (!(await mayPlay(ctx.db, caller, item))) {
+      return fail("forbidden", "You cannot play what that device plays");
+    }
+
+    await requireTheyPlay(ctx.db, reporter, item);
+    await ask(ctx, source, source.player, { kind: "stop", at: now });
+
+    return { revision: await ask(ctx, target, player, moveAsk(source.current, now)) };
   },
 });

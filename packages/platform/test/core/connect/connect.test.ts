@@ -1,12 +1,22 @@
 import { Schema } from "effect";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { ONLINE_MS } from "../../../convex/core/connect/playback";
 import { inOrder } from "../../../convex/core/lib/inOrder";
-import { control, playing, report, targetIn, targets } from "../../connect";
-import type { Report } from "../../connect";
+import {
+  control,
+  idle,
+  paused,
+  playing,
+  report,
+  requested,
+  shelf,
+  targetIn,
+  targets,
+} from "../../connect";
+import type { Report, Shelf } from "../../connect";
 import { enroll, listings, member, openTile, sharedAdmin, sharedDevice } from "../../devices";
 import { sessionOf } from "../../probe";
 import { importRows, newestRows } from "../../rows";
@@ -26,13 +36,6 @@ const listed = listings();
 
 const RACES = 5;
 
-const requested = (device: SignedIn) => device.client.query(api.core.connect.player.requested, {});
-
-const paused = (positionMs: number, applied: number) => ({
-  ...playing(positionMs, applied),
-  playback: { domain: "movies" as const, playing: false, positionMs },
-});
-
 const personalDevice = async (signedIn: SignedIn, name: string) => {
   const device = await enroll(signedIn, name);
 
@@ -49,6 +52,12 @@ const lane = (name: string, line: string): void => {
 };
 
 describe.skipIf(stack === undefined)("Connect", { timeout: 180_000 }, () => {
+  let items: Shelf;
+
+  beforeAll(async () => {
+    if (stack !== undefined) items = await shelf(stack);
+  });
+
   afterEach(async () => {
     await listed.clear();
   });
@@ -58,7 +67,7 @@ describe.skipIf(stack === undefined)("Connect", { timeout: 180_000 }, () => {
     const lucia = await member(stack, "lucia");
     const laptop = await personalDevice(await signInAs(stack, lucia.person), "Laptop");
 
-    await report(laptop.signedIn, playing(10_000));
+    await report(laptop.signedIn, playing(items.film, 10_000));
 
     expect(targetIn(await targets(lucia.signedIn), laptop.deviceId)?.playback).toMatchObject({
       domain: "movies",
@@ -69,13 +78,18 @@ describe.skipIf(stack === undefined)("Connect", { timeout: 180_000 }, () => {
     const { revision } = await control(lucia.signedIn, laptop.deviceId, { playing: false });
     const asked = await requested(laptop.signedIn);
 
-    expect(asked).toMatchObject({ revision, playing: false });
+    expect(asked).toMatchObject({
+      revision,
+      ask: { kind: "transport", item: items.film, playing: false },
+    });
     expect(targetIn(await targets(lucia.signedIn), laptop.deviceId)?.playback).toMatchObject({
       playing: false,
       pending: true,
     });
 
-    await report(laptop.signedIn, paused(asked?.positionMs ?? 0, revision));
+    const positionMs = asked?.ask.kind === "transport" ? asked.ask.positionMs : 0;
+
+    await report(laptop.signedIn, paused(items.film, positionMs, revision));
 
     const after = targetIn(await targets(lucia.signedIn), laptop.deviceId);
 
@@ -96,11 +110,11 @@ describe.skipIf(stack === undefined)("Connect", { timeout: 180_000 }, () => {
     const tv = await sharedDevice(stack, admin);
     const tile = await openTile(stack, tv, lucia.userId);
 
-    await report(tile, playing(5_000));
+    await report(tile, playing(items.film, 5_000));
 
     const { revision } = await control(aiko.signedIn, tv.deviceId, { playing: false });
 
-    expect(await requested(tile)).toMatchObject({ revision, playing: false });
+    expect(await requested(tile)).toMatchObject({ revision, ask: { playing: false } });
     lane("shared", `aiko (listed) paused lucia's tile on the TV: revision ${revision}`);
 
     expect(await refusal(control(bruno.signedIn, tv.deviceId, { playing: true }))).toBe(
@@ -110,7 +124,7 @@ describe.skipIf(stack === undefined)("Connect", { timeout: 180_000 }, () => {
       "not_found",
     );
     expect(targetIn(await targets(bruno.signedIn), tv.deviceId)).toBeUndefined();
-    expect(await requested(tile)).toMatchObject({ revision, playing: false });
+    expect(await requested(tile)).toMatchObject({ revision, ask: { playing: false } });
     lane("unlisted", "bruno and the unlisted admin are refused not_found and do not list the TV");
   });
 
@@ -120,7 +134,7 @@ describe.skipIf(stack === undefined)("Connect", { timeout: 180_000 }, () => {
     const aiko = await member(stack, "aiko", "admin");
     const laptop = await personalDevice(await signInAs(stack, lucia.person), "Laptop");
 
-    await report(laptop.signedIn, playing(1_000));
+    await report(laptop.signedIn, playing(items.film, 1_000));
 
     expect(await refusal(control(aiko.signedIn, laptop.deviceId, { playing: false }))).toBe(
       "not_found",
@@ -132,13 +146,13 @@ describe.skipIf(stack === undefined)("Connect", { timeout: 180_000 }, () => {
 
   it("shows a Cast or AirPlay receiver as a target through the device that drives it", async () => {
     if (stack === undefined) return;
-    const lucia = await member(stack, "lucia");
+    const lucia = await items.share(await member(stack, "lucia"));
     const phone = await personalDevice(await signInAs(stack, lucia.person), "Phone");
     const laptop = await personalDevice(await signInAs(stack, lucia.person), "Laptop");
 
     await report(phone.signedIn, {
       output: { kind: "cast", receiver: "  Living room TV " },
-      playback: { domain: "music", playing: true, positionMs: 42_000 },
+      playback: { item: items.song, playing: true, positionMs: 42_000 },
       applied: 0,
     });
 
@@ -148,15 +162,14 @@ describe.skipIf(stack === undefined)("Connect", { timeout: 180_000 }, () => {
       name: "Phone",
       mode: "personal",
       output: { kind: "cast", receiver: "Living room TV" },
-      playback: { domain: "music", playing: true },
+      playback: { domain: "music", item: items.song, playing: true },
     });
 
     const { revision } = await control(laptop.signedIn, phone.deviceId, { positionMs: 90_000 });
 
     expect(await requested(phone.signedIn)).toMatchObject({
       revision,
-      playing: true,
-      positionMs: 90_000,
+      ask: { kind: "transport", item: items.song, playing: true, positionMs: 90_000 },
     });
 
     await report(phone.signedIn, {
@@ -178,7 +191,7 @@ describe.skipIf(stack === undefined)("Connect", { timeout: 180_000 }, () => {
     const lucia = await member(stack, "lucia");
     const laptop = await personalDevice(await signInAs(stack, lucia.person), "Laptop");
 
-    await report(laptop.signedIn, playing(10_000));
+    await report(laptop.signedIn, playing(items.film, 10_000));
 
     const { revision } = await control(lucia.signedIn, laptop.deviceId, { playing: false });
 
@@ -189,7 +202,7 @@ describe.skipIf(stack === undefined)("Connect", { timeout: 180_000 }, () => {
     expect(await refusal(control(lucia.signedIn, laptop.deviceId, { playing: true }))).toBe(
       "not_found",
     );
-    expect(await refusal(report(laptop.signedIn, paused(10_100, revision)))).toBe(
+    expect(await refusal(report(laptop.signedIn, paused(items.film, 10_100, revision)))).toBe(
       "unauthenticated",
     );
     expect(targetIn(await targets(lucia.signedIn), laptop.deviceId)).toBeUndefined();
@@ -200,7 +213,7 @@ describe.skipIf(stack === undefined)("Connect", { timeout: 180_000 }, () => {
       async (n) => {
         const device = await personalDevice(await signInAs(stack, lucia.person), `Laptop ${n}`);
 
-        await report(device.signedIn, playing(1_000));
+        await report(device.signedIn, playing(items.film, 1_000));
 
         const [outcome] = await Promise.all([
           refusal(control(lucia.signedIn, device.deviceId, { playing: false })),
@@ -231,7 +244,7 @@ describe.skipIf(stack === undefined)("Connect", { timeout: 180_000 }, () => {
     const tv = await sharedDevice(stack, admin);
     const luciaTile = await openTile(stack, tv, lucia.userId);
 
-    await report(luciaTile, playing(5_000));
+    await report(luciaTile, playing(items.film, 5_000));
     await control(aiko.signedIn, tv.deviceId, { playing: false });
 
     const aikoTile = await openTile(stack, tv, aiko.userId);
@@ -239,11 +252,11 @@ describe.skipIf(stack === undefined)("Connect", { timeout: 180_000 }, () => {
     expect(await refusal(control(aiko.signedIn, tv.deviceId, { playing: false }))).toBe("conflict");
     expect(targetIn(await targets(aiko.signedIn), tv.deviceId)).toBeUndefined();
 
-    await report(aikoTile, { output: { kind: "local" }, playback: null, applied: 0 });
+    await report(aikoTile, idle());
 
     expect(await refusal(control(aiko.signedIn, tv.deviceId, { playing: true }))).toBe("conflict");
 
-    await report(aikoTile, playing(0, 0, "music"));
+    await report(aikoTile, playing(items.song, 0));
 
     expect(await requested(aikoTile)).toBeNull();
     expect(targetIn(await targets(lucia.signedIn), tv.deviceId)?.playback).toMatchObject({
@@ -264,7 +277,7 @@ describe.skipIf(stack === undefined)("Connect", { timeout: 180_000 }, () => {
         deviceId: laptop.deviceId,
         reporter: sessionId,
         output: { kind: "local" },
-        playback: { domain: "movies", playing: true, positionMs: 1_000 },
+        playback: { item: items.film, playing: true, positionMs: 1_000 },
         settled: 0,
         reportedAt: Date.now() - ONLINE_MS - 1_000,
       },
@@ -275,7 +288,7 @@ describe.skipIf(stack === undefined)("Connect", { timeout: 180_000 }, () => {
       "conflict",
     );
 
-    await report(laptop.signedIn, playing(40_000));
+    await report(laptop.signedIn, playing(items.film, 40_000));
 
     expect(targetIn(await targets(lucia.signedIn), laptop.deviceId)).toBeDefined();
     expect(await refusal(control(lucia.signedIn, laptop.deviceId, { playing: false }))).toBe(
@@ -288,12 +301,12 @@ describe.skipIf(stack === undefined)("Connect", { timeout: 180_000 }, () => {
     const lucia = await member(stack, "lucia");
     const laptop = await personalDevice(await signInAs(stack, lucia.person), "Laptop");
 
-    await report(laptop.signedIn, playing(10_000));
+    await report(laptop.signedIn, playing(items.film, 10_000));
 
     const { revision } = await control(lucia.signedIn, laptop.deviceId, { playing: false });
 
-    await report(laptop.signedIn, paused(10_050, revision));
-    await report(laptop.signedIn, paused(10_050, 0));
+    await report(laptop.signedIn, paused(items.film, 10_050, revision));
+    await report(laptop.signedIn, paused(items.film, 10_050, 0));
 
     expect(await requested(laptop.signedIn)).toBeNull();
   });
@@ -304,11 +317,11 @@ describe.skipIf(stack === undefined)("Connect", { timeout: 180_000 }, () => {
     const lucia = await member(stack, "lucia");
     const laptop = await personalDevice(await signInAs(stack, lucia.person), "Laptop");
 
-    await report(laptop.signedIn, playing(10_000));
+    await report(laptop.signedIn, playing(items.film, 10_000));
 
     const { revision } = await control(lucia.signedIn, laptop.deviceId, { playing: false });
 
-    await report(laptop.signedIn, paused(10_050, revision));
+    await report(laptop.signedIn, paused(items.film, 10_050, revision));
 
     const setMode = (mode: "personal" | "shared") =>
       admin.signedIn.client.mutation(api.core.devices.registry.setMode, {
@@ -323,14 +336,17 @@ describe.skipIf(stack === undefined)("Connect", { timeout: 180_000 }, () => {
 
     await enroll(again, "Laptop", laptop.device);
 
-    expect(await refusal(report(again, paused(10_050, revision)))).toBe("accepted");
-    expect(await refusal(report(again, paused(10_050, revision)))).toBe("accepted");
+    expect(await refusal(report(again, paused(items.film, 10_050, revision)))).toBe("accepted");
+    expect(await refusal(report(again, paused(items.film, 10_050, revision)))).toBe("accepted");
     expect(await requested(again)).toBeNull();
 
     const next = await control(lucia.signedIn, laptop.deviceId, { playing: true });
 
     expect(next.revision).toBeGreaterThan(revision);
-    expect(await requested(again)).toMatchObject({ revision: next.revision, playing: true });
+    expect(await requested(again)).toMatchObject({
+      revision: next.revision,
+      ask: { playing: true },
+    });
   });
 
   it("drops a request the device missed while it was offline", async () => {
@@ -345,7 +361,7 @@ describe.skipIf(stack === undefined)("Connect", { timeout: 180_000 }, () => {
         deviceId: laptop.deviceId,
         reporter: sessionId,
         output: { kind: "local" },
-        playback: { domain: "movies", playing: true, positionMs: 1_000 },
+        playback: { item: items.film, playing: true, positionMs: 1_000 },
         settled: 0,
         reportedAt: wentQuiet,
       },
@@ -355,13 +371,17 @@ describe.skipIf(stack === undefined)("Connect", { timeout: 180_000 }, () => {
         deviceId: laptop.deviceId,
         reporter: sessionId,
         revision: 1,
-        playing: false,
-        positionMs: 1_100,
-        at: wentQuiet + 100,
+        ask: {
+          kind: "transport" as const,
+          item: items.film,
+          playing: false,
+          positionMs: 1_100,
+          at: wentQuiet + 100,
+        },
       },
     ]);
 
-    await report(laptop.signedIn, playing(90_000));
+    await report(laptop.signedIn, playing(items.film, 90_000));
 
     expect(await requested(laptop.signedIn)).toBeNull();
     expect(targetIn(await targets(lucia.signedIn), laptop.deviceId)?.playback).toMatchObject({
@@ -375,16 +395,20 @@ describe.skipIf(stack === undefined)("Connect", { timeout: 180_000 }, () => {
     const lucia = await member(stack, "lucia");
     const laptop = await personalDevice(await signInAs(stack, lucia.person), "Laptop");
 
-    await report(laptop.signedIn, playing(10_000));
+    await report(laptop.signedIn, playing(items.film, 10_000));
 
     expect(await refusal(control(lucia.signedIn, laptop.deviceId, {}))).toBe("invalid_args");
     expect(await refusal(control(lucia.signedIn, laptop.deviceId, { positionMs: -1 }))).toBe(
       "invalid_args",
     );
-    expect(await refusal(report(laptop.signedIn, playing(Number.NaN)))).toBe("invalid_args");
-    expect(await refusal(report(laptop.signedIn, playing(0, 1.5)))).toBe("invalid_args");
-    expect(await refusal(report(laptop.signedIn, playing(0, 1)))).toBe("invalid_args");
-    expect(await refusal(report(lucia.signedIn, playing(0)))).toBe("forbidden");
+    expect(await refusal(report(laptop.signedIn, playing(items.film, Number.NaN)))).toBe(
+      "invalid_args",
+    );
+    expect(await refusal(report(laptop.signedIn, playing(items.film, 0, 1.5)))).toBe(
+      "invalid_args",
+    );
+    expect(await refusal(report(laptop.signedIn, playing(items.film, 0, 1)))).toBe("invalid_args");
+    expect(await refusal(report(lucia.signedIn, playing(items.film, 0)))).toBe("forbidden");
     expect(await refusal(requested(lucia.signedIn))).toBe("forbidden");
   });
 
@@ -394,7 +418,7 @@ describe.skipIf(stack === undefined)("Connect", { timeout: 180_000 }, () => {
     const laptop = await personalDevice(await signInAs(stack, lucia.person), "Laptop");
 
     const shown = async (output: Report["output"]) => {
-      await report(laptop.signedIn, { ...playing(0), output });
+      await report(laptop.signedIn, { ...playing(items.film, 0), output });
 
       return targetIn(await targets(lucia.signedIn), laptop.deviceId)?.output;
     };
@@ -416,7 +440,10 @@ describe.skipIf(stack === undefined)("Connect", { timeout: 180_000 }, () => {
     const laptop = await personalDevice(await signInAs(stack, lucia.person), "Laptop");
 
     const shown = async (receiver: string) => {
-      await report(laptop.signedIn, { ...playing(0), output: { kind: "cast", receiver } });
+      await report(laptop.signedIn, {
+        ...playing(items.film, 0),
+        output: { kind: "cast", receiver },
+      });
 
       return targetIn(await targets(lucia.signedIn), laptop.deviceId)?.output;
     };
@@ -482,7 +509,7 @@ describe.skipIf(stack === undefined)("Connect", { timeout: 180_000 }, () => {
       ...above.slice(0, 100).map(ended),
     ]);
 
-    await report(laptop.signedIn, playing(1_000));
+    await report(laptop.signedIn, playing(items.film, 1_000));
 
     expect(targetIn(await targets(lucia.signedIn), laptop.deviceId)?.name).toBe("Laptop");
   });

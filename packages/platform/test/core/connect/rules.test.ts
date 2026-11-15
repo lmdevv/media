@@ -9,8 +9,8 @@ import type {
   Decision,
   DeviceRelation,
   DeviceResource,
+  DeviceSession,
   Principal,
-  SessionMembership,
 } from "../../../convex/core/permissions/policy";
 
 // SAFETY: a type predicate, not checked by the compiler. A Convex id is an opaque string; the
@@ -87,14 +87,24 @@ const listed: DeviceRelation = { mode: "shared", listed: true };
 
 const unlisted: DeviceRelation = { mode: "shared", listed: false };
 
-const CONTROL: SessionMembership = { control: true };
+const SETTINGS = { join: "open", control: false, add: false } as const;
 
-const NO_CONTROL: SessionMembership = { control: false };
+const CONTROL: DeviceSession = {
+  live: true,
+  place: "guest",
+  settings: { ...SETTINGS, control: true },
+};
+
+const NO_CONTROL: DeviceSession = { live: true, place: "guest", settings: SETTINGS };
+
+const HOSTING: DeviceSession = { ...NO_CONTROL, place: "host" };
+
+const ANOTHER: DeviceSession = { ...CONTROL, place: "outside" };
 
 const device = (
   relation: DeviceRelation,
   domain: ContentDomain | null = "movies",
-  session: SessionMembership | null = null,
+  session: DeviceSession | null = null,
 ): DeviceResource => ({ on: "device", relation, domain, session });
 
 const ALLOWED: Decision = { allowed: true };
@@ -180,6 +190,54 @@ const rows: ReadonlyArray<Row> = [
     expected: refused("forbidden", "no-control"),
   },
   {
+    name: "a guest of another session reaches nothing, whatever that session allows",
+    principal: as.guest,
+    device: device(listed, "music", ANOTHER),
+    expected: refused("hidden", "guest"),
+  },
+  {
+    name: "a guest still waiting for the host reaches nothing",
+    principal: as.guest,
+    device: device(listed, "music", { ...CONTROL, place: "pending" }),
+    expected: refused("hidden", "guest"),
+  },
+  {
+    name: "a guest the host removed reaches nothing",
+    principal: as.guest,
+    device: device(listed, "music", { ...CONTROL, place: "blocked" }),
+    expected: refused("hidden", "guest"),
+  },
+  {
+    name: "a guest reaches nothing once the session ends or the device leaves it",
+    principal: as.guest,
+    device: device(listed, "music", { ...CONTROL, live: false }),
+    expected: refused("hidden", "guest"),
+  },
+  {
+    name: "a guest hosting the session the device plays controls it, as the host always may",
+    principal: as.guest,
+    device: device(listed, "music", HOSTING),
+    expected: ALLOWED,
+  },
+  {
+    name: "D60: a listed person pauses a shared device in a session that withholds control",
+    principal: as.member,
+    device: device(listed, "music", NO_CONTROL),
+    expected: ALLOWED,
+  },
+  {
+    name: "D60: a personal device marked shared obeys the people it lists",
+    principal: as.kid,
+    device: device(listed, "music"),
+    expected: ALLOWED,
+  },
+  {
+    name: "a session does not open a shared device to a person it does not list",
+    principal: as.member,
+    device: device(unlisted, "music", CONTROL),
+    expected: refused("hidden", "unlisted"),
+  },
+  {
     name: "a guest outside any session reaches no device, even one that would list them",
     principal: as.guest,
     device: device(listed),
@@ -259,6 +317,70 @@ describe("who reports a device's playback", () => {
   });
 });
 
+interface LoadRow {
+  readonly name: string;
+  readonly principal: Principal;
+  readonly device: DeviceResource;
+  readonly expected: Decision;
+}
+
+const loadRows: ReadonlyArray<LoadRow> = [
+  {
+    name: "a person loads onto their own personal device",
+    principal: as.member,
+    device: device(own, "music"),
+    expected: ALLOWED,
+  },
+  {
+    name: "a person loads onto a shared device that lists them",
+    principal: as.member,
+    device: device(listed, "movies"),
+    expected: ALLOWED,
+  },
+  {
+    name: "lane 8: another person's personal device stays hidden",
+    principal: as.member,
+    device: device(someoneElses, "music"),
+    expected: refused("hidden", "not-signed-in-here"),
+  },
+  {
+    name: "a shared device that does not list the person stays hidden",
+    principal: as.admin,
+    device: device(unlisted, "music"),
+    expected: refused("hidden", "unlisted"),
+  },
+  {
+    name: "a guest who controls the device in their session still cannot load onto it",
+    principal: as.guest,
+    device: device(listed, "music", CONTROL),
+    expected: refused("forbidden", "guest"),
+  },
+  {
+    name: "a guest outside the device's session finds no device",
+    principal: as.guest,
+    device: device(listed, "music", ANOTHER),
+    expected: refused("hidden", "guest"),
+  },
+  {
+    name: "a credential needs the play scope of the item's domain",
+    principal: as.musicKey,
+    device: device(own, "movies"),
+    expected: refused("forbidden", "scope"),
+  },
+  {
+    name: "a service loads nothing",
+    principal: as.service,
+    device: device(own, "music"),
+    expected: refused("hidden", "service"),
+  },
+];
+
+describe("who loads something onto a device, or moves playback onto it", () => {
+  it.each(loadRows)("$name", ({ principal, device: resource, expected }) => {
+    expect(can(principal, "load", resource)).toEqual(expected);
+  });
+});
+
 describe("who controls a device", () => {
   it.each(rows)("$name", ({ principal, device: resource, expected }) => {
     expect(can(principal, "control", resource)).toEqual(expected);
@@ -266,7 +388,7 @@ describe("who controls a device", () => {
 
   it("never lets a household person reach another person's personal device", () => {
     const people = [as.owner, as.admin, as.member, as.kid, as.tile, as.musicKey];
-    const sessions = [null, CONTROL, NO_CONTROL];
+    const sessions = [null, CONTROL, NO_CONTROL, HOSTING, ANOTHER];
     const domains = [null, "movies", "music"] as const;
 
     const decisions = people.flatMap((principal) =>
