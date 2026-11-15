@@ -1,12 +1,18 @@
-import { Clock, Data, Effect, Fiber, Layer, Match, Ref, Result } from "effect";
-import type { Scope } from "effect";
+import { Clock, Data, Effect, Exit, Fiber, Layer, Match, Ref, Result, Scope } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 
 import { positionAt } from "./clock";
 import type { SessionClock } from "./clock";
 import { run } from "./follower";
-import type { ClockMove, Follower, FollowerPlayer, FollowerPlayerEvent } from "./follower";
+import type {
+  ClockMove,
+  Follower,
+  FollowerPlayer,
+  FollowerPlayerEvent,
+  FollowerState,
+  Hold,
+} from "./follower";
 import { FOLLOWER_TUNABLES } from "./follower-policy";
 import { EpochMillis } from "./units";
 
@@ -26,6 +32,14 @@ interface FakePlayer extends FollowerPlayer {
   readonly stall: () => void;
   readonly recover: () => void;
   readonly blockAutoplay: (blocked: boolean) => void;
+  /** Says `playing` as a media element does once a seek lands while it plays. */
+  readonly sayPlaying: () => void;
+  /** Keeps events from listeners until `deliverEvents`, as a slow bridge from native code does. */
+  readonly delayEvents: () => void;
+  readonly deliverEvents: () => void;
+  /** Makes `pause` take effect only at `catchUp`, as a native player's may. */
+  readonly lagPauses: () => void;
+  readonly catchUp: () => void;
 }
 
 const makePlayer = (positionMs: number) =>
@@ -38,6 +52,9 @@ const makePlayer = (positionMs: number) =>
     let stalled = false;
     let rate = 1;
     let blocked = false;
+    let delayed: Array<FollowerPlayerEvent> | null = null;
+    let lagging = false;
+    let pauseOwed = false;
 
     const position = (): number =>
       paused || stalled ? base : base + (clock.currentTimeMillisUnsafe() - since) * rate;
@@ -47,8 +64,13 @@ const makePlayer = (positionMs: number) =>
       since = clock.currentTimeMillisUnsafe();
     };
 
-    const emit = (event: FollowerPlayerEvent): void => {
+    const deliver = (event: FollowerPlayerEvent): void => {
       for (const listener of listeners) listener(event);
+    };
+
+    const emit = (event: FollowerPlayerEvent): void => {
+      if (delayed === null) deliver(event);
+      else delayed.push(event);
     };
 
     const start = (): void => {
@@ -88,7 +110,10 @@ const makePlayer = (positionMs: number) =>
 
         return Promise.resolve();
       },
-      pause: stop,
+      pause: () => {
+        if (lagging) pauseOwed = true;
+        else stop();
+      },
       subscribe: (listener) => {
         listeners.add(listener);
 
@@ -116,6 +141,25 @@ const makePlayer = (positionMs: number) =>
       },
       blockAutoplay: (next) => {
         blocked = next;
+      },
+      sayPlaying: () => emit("playing"),
+      delayEvents: () => {
+        delayed = [];
+      },
+      deliverEvents: () => {
+        const events = delayed ?? [];
+
+        delayed = null;
+        events.forEach(deliver);
+      },
+      lagPauses: () => {
+        lagging = true;
+      },
+      catchUp: () => {
+        lagging = false;
+
+        if (pauseOwed) stop();
+        pauseOwed = false;
       },
     };
 
@@ -146,7 +190,7 @@ const makeSession = (initial: SessionClock) =>
       });
     });
 
-    const control = (move: ClockMove) =>
+    const control = (move: ClockMove, published = true) =>
       Effect.gen(function* () {
         yield* Effect.sleep(LATENCY_MS);
 
@@ -183,7 +227,9 @@ const makeSession = (initial: SessionClock) =>
         );
 
         yield* Ref.set(clock, next);
-        yield* Effect.forkDetach(Effect.delay(publish, LATENCY_MS));
+
+        if (published) yield* Effect.forkDetach(Effect.delay(publish, LATENCY_MS));
+
         yield* Effect.sleep(LATENCY_MS);
 
         return next;
@@ -207,9 +253,13 @@ const makeSession = (initial: SessionClock) =>
       clock: Ref.get(clock),
       shared,
       join: (member: Follower<Refused>) => Ref.update(followers, (all) => [...all, member]),
+      leave: (member: Follower<Refused>) =>
+        Ref.update(followers, (all) => all.filter((other) => other !== member)),
       refuse: (reason: string | null) => Ref.set(refusing, reason),
       refuseSeeks: (refused: boolean) => Ref.set(seeksRefused, refused),
       move: (move: ClockMove) => control(move),
+      /** Moves the clock without telling members, who hear of it only when a test applies it. */
+      moveUnheard: (move: ClockMove) => control(move, false),
     };
   });
 
@@ -226,7 +276,7 @@ const follower = (
   options: {
     readonly controls?: boolean;
     readonly pausesForStalls?: boolean;
-    readonly resumeHold?: number;
+    readonly resumeHold?: Hold;
   } = {},
 ) =>
   Effect.gen(function* () {
@@ -571,7 +621,7 @@ describe("follower", () => {
         const member = yield* follower(session, lucia, {
           controls: true,
           pausesForStalls: true,
-          resumeHold: held,
+          resumeHold: { kind: "held", revision: held },
         });
 
         expect((yield* member.current).holding).toStrictEqual({ kind: "held", revision: held });
@@ -640,6 +690,86 @@ describe("follower", () => {
         yield* advance(2_000);
         expect((yield* session.clock).status).toBe("playing");
         expect(lucia.isPaused()).toBe(false);
+      }),
+    ));
+  it("never plays a paused session again for a `playing` heard before its pause", () =>
+    scenario(playingForAMinute, (session) =>
+      Effect.gen(function* () {
+        const player = yield* makePlayer(0);
+        const member = yield* follower(session, player, { controls: true });
+
+        yield* advance(4_000);
+
+        const paused = yield* meanwhile(session.moveUnheard({ kind: "pause" }));
+
+        // The element says `playing` as a seek lands, and the pause reaches the follower before
+        // it reads that event; the player still plays when it does.
+        player.lagPauses();
+        yield* Effect.andThen(Effect.sync(player.sayPlaying), member.apply(paused));
+        yield* advance(1_000);
+        player.catchUp();
+        yield* advance(2_000);
+
+        expect(yield* session.clock).toMatchObject({ status: "paused", revision: paused.revision });
+        expect(player.isPaused()).toBe(true);
+      }),
+    ));
+  it("never plays a paused session again for a `playing` its player reports late", () =>
+    scenario(playingForAMinute, (session) =>
+      Effect.gen(function* () {
+        const player = yield* makePlayer(0);
+
+        yield* follower(session, player, { controls: true });
+        yield* advance(4_000);
+
+        player.delayEvents();
+        player.sayPlaying();
+
+        const paused = yield* meanwhile(session.move({ kind: "pause" }));
+
+        player.deliverEvents();
+        yield* advance(3_000);
+
+        expect(yield* session.clock).toMatchObject({ status: "paused", revision: paused.revision });
+        expect(player.isPaused()).toBe(true);
+      }),
+    ));
+  it("plays the session on after its stream reloads while the stall's pause is on the way", () =>
+    scenario(playingForAMinute, (session) =>
+      Effect.gen(function* () {
+        const lucia = yield* makePlayer(0);
+        const aiko = yield* makePlayer(0);
+        const reloads = yield* Scope.make();
+        const hosting = { controls: true, pausesForStalls: true } as const;
+        const before = yield* Scope.provide(follower(session, lucia, hosting), reloads);
+
+        yield* follower(session, aiko);
+        yield* advance(4_000);
+        lucia.stall();
+        yield* advance(FOLLOWER_TUNABLES.stallPauseMs + 20);
+
+        const { holding: left }: FollowerState = yield* before.current;
+
+        if (left?.kind !== "pausing")
+          throw new Error(`expected a pause on its way, got ${left?.kind}`);
+
+        expect((yield* session.clock).status).toBe("playing");
+
+        yield* session.leave(before);
+        yield* Scope.close(reloads, Exit.void);
+
+        const after = yield* follower(session, lucia, { ...hosting, resumeHold: left });
+
+        yield* after.apply(yield* session.clock);
+        expect((yield* session.clock).status).toBe("paused");
+        expect(aiko.isPaused()).toBe(true);
+        expect((yield* after.current).holding?.kind).toBe("held");
+
+        lucia.recover();
+        yield* advance(3_000);
+        expect((yield* session.clock).status).toBe("playing");
+        expect((yield* after.current).holding).toBeNull();
+        expect(Math.abs(lucia.positionMs() - aiko.positionMs())).toBeLessThan(250);
       }),
     ));
 });

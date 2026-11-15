@@ -4,6 +4,7 @@ import type {
   Follower,
   FollowerPlayer,
   FollowerState,
+  Hold,
   SessionPort,
   ViewerMove,
 } from "@media/contracts/follower";
@@ -54,7 +55,7 @@ export interface Following {
  * delivers is applied in revision order; an older one changes nothing. Stops when the player goes
  * away or the screen unmounts, putting the player back at the session's rate. A follower started
  * again for the same screen, as after a stream reload, takes over its predecessor's hold on the
- * session.
+ * session, a pause still on its way included.
  */
 export const useSessionFollower = ({
   player,
@@ -67,7 +68,7 @@ export const useSessionFollower = ({
   const platform = usePlatform();
   const [state, setState] = useState<FollowerState | null>(null);
   const follower = useRef<Follower<SessionCallFailed> | null>(null);
-  const hold = useRef<number | null>(null);
+  const hold = useRef<Hold | null>(null);
   const latest = useRef({ clock, controls, durationMs });
 
   useEffect(() => {
@@ -117,7 +118,7 @@ export const useSessionFollower = ({
           yield* running.apply(latest.current.clock);
           yield* Stream.runForEach(running.state, (next) =>
             Effect.sync(() => {
-              hold.current = next.holding?.kind === "held" ? next.holding.revision : null;
+              hold.current = next.holding;
               setState(next);
             }),
           );
