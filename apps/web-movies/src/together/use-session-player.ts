@@ -455,6 +455,7 @@ export const useSessionFollow = (
 
   const followed = useSessionFollower({
     player: session === null ? null : player,
+    sessionId: session?.sessionId ?? null,
     clock: clock ?? IDLE_CLOCK,
     durationMs,
     controls: mayControl,
@@ -502,7 +503,7 @@ export const useSessionFollow = (
   const stepKey =
     step === null || clock === null || item === null
       ? null
-      : `${itemKey(item)}:${String(clock.revision)}:${step}:${head?.entryId ?? ""}`;
+      : `${watchedKey ?? ""}:${String(clock.revision)}:${step}:${head?.entryId ?? ""}`;
 
   const tried = useRef<string | null>(null);
   const [retries, setRetries] = useState(0);

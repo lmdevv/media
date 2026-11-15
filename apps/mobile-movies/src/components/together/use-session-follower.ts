@@ -26,6 +26,8 @@ const failed = (cause: unknown): SessionCallFailed =>
 export interface FollowingInput {
   /** The player once its playback runs; null before, which stops following. */
   readonly player: FollowerPlayer | null;
+  /** The session followed; another one starts a new follower, as its clock starts over. */
+  readonly sessionId: string | null;
   /** The session's newest clock. */
   readonly clock: SessionClock;
   /** The length of the playing media, or null while unknown. */
@@ -56,6 +58,7 @@ export interface Following {
  */
 export const useSessionFollower = ({
   player,
+  sessionId,
   clock,
   durationMs,
   controls,
@@ -87,8 +90,14 @@ export const useSessionFollower = ({
     [platform],
   );
 
+  const heldIn = useRef<string | null>(null);
+
   useEffect(() => {
-    if (player === null || !known) return undefined;
+    if (player === null || !known || sessionId === null) return undefined;
+
+    // A hold belongs to its session: a follower of another one starts without it.
+    if (heldIn.current !== sessionId) hold.current = null;
+    heldIn.current = sessionId;
 
     const fiber = Effect.runFork(
       Effect.scoped(
@@ -121,7 +130,7 @@ export const useSessionFollower = ({
       setState(null);
       Effect.runFork(Fiber.interrupt(fiber));
     };
-  }, [player, port, known, hosting, latest]);
+  }, [player, port, known, hosting, sessionId, latest]);
 
   useEffect(() => {
     const running = follower.current;
