@@ -55,6 +55,10 @@ Preconditions:
 - **Another person.** As Sam, `d` opens a list with only `This browser` and
   `No other devices right now`. As Mateo, `$S cli --as mateo -- auth targets control --device-id
   <Aiko's device> --playing false` exits 5 (notFound), and `auth targets list` is empty.
+- **Take over in a second tab.** While `aiko-desk` plays, open another tab of it with
+  `$S browser --page aiko-desk-2 --tab-of aiko-desk open /albums/<id>` and play there. The new tab
+  speaks for the browser's device, and the first tab's `audio` reads `"playing":false`. A pause
+  from `aiko-phone` then pauses the new tab, and the first stays silent.
 - **Gone.** Close the target page (`close-page`). Within about 35 seconds its row leaves the
   controller's list, and the band goes.
 - **Proof.** Record the controller with `record-start --show-actions`, take stills of both pages,
@@ -63,7 +67,7 @@ Preconditions:
 ## Gotchas
 
 - The pages of one browser context share one device, and only one tab of a browser reports for
-  it. Use a page per device.
+  it: the one that played last, and the tab it took over from stops. Use a page per device.
 - The before side has no Connect in `/music` before p6-connect-web.
 - A target the browser never let play sound may refuse to start a load; the browser host launches
   Chromium so that it can.

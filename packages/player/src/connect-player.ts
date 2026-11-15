@@ -190,6 +190,8 @@ export class ConnectPlayer {
   #applied = 0;
   /** The newest revision the core showed, while started or not, which a tap here makes moot. */
   #seen = 0;
+  /** The request the core shows now, which this device takes once it starts. */
+  #shown: ConnectRequest | null = null;
   /** The newest `loadRevision` asked of this device; a load ask at or below it is no new load. */
   #newestLoad = 0;
   /** The newest load, while it is the one Connect asked for here. */
@@ -243,6 +245,8 @@ export class ConnectPlayer {
 
     this.#stop = stop;
     this.#report();
+    // A request the core showed before this device started, as another tab of it led, applies now.
+    this.take(this.#shown);
 
     return stop;
   }
@@ -252,6 +256,8 @@ export class ConnectPlayer {
    * started, it only notes the revision, which a tap here makes moot ({@link supersede}).
    */
   take(request: ConnectRequest | null): void {
+    this.#shown = request;
+
     if (request === null) return;
 
     this.#seen = Math.max(this.#seen, request.revision);

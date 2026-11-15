@@ -666,6 +666,34 @@ describe("ConnectPlayer, against what is current when a request or a step of a l
     stopAgain();
   });
 
+  it("applies a request the core showed before it started, once it starts", async () => {
+    const run = connected();
+
+    await playing(run);
+    run.stopConnect();
+    run.connect.take(
+      ask(3, {
+        kind: "transport",
+        item: song("a"),
+        playing: false,
+        positionMs: 0,
+        at: run.clock.now,
+      }),
+    );
+    await settle();
+
+    expect(run.controller.getSnapshot().engineStatus).toBe("playing");
+
+    const stopAgain = run.connect.start();
+
+    await settle();
+
+    expect(run.controller.getSnapshot().engineStatus).toBe("paused");
+    expect(last(run.reports)).toMatchObject({ song: { trackId: "a", playing: false }, applied: 3 });
+
+    stopAgain();
+  });
+
   it("makes moot what a tab that did not lead saw before a tap there, once it leads", async () => {
     const run = connected();
     const loaded = loadOf(album("al"), 7, run.clock.now);

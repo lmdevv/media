@@ -174,6 +174,39 @@ test("Aiko seeks her other browser, and plays an album there from the album's me
   }
 });
 
+test("a tab that takes over Aiko's browser stops the tab before it, so a remote pause silences the browser", async ({
+  browser,
+  baseURL,
+}) => {
+  if (stack === null) return;
+
+  const aiko = await createPerson(stack, "aiko", "member");
+  const laptop = await openBrowser(browser, baseURL, aiko);
+  const phone = await openBrowser(browser, baseURL, aiko);
+  const secondTab = await laptop.context.newPage();
+
+  try {
+    await watchMedia(secondTab);
+    await playFirstSong(laptop.page);
+    await playFirstSong(secondTab);
+
+    await expect.poll(() => audioSeconds(laptop.page), { timeout: 15_000 }).toBe(0);
+    expect(await audioSeconds(secondTab)).toBeGreaterThan(0);
+
+    await phone.page.goto("/music/");
+    await expect(phone.page.getByRole("status").filter({ hasText: "Playing on" })).toBeVisible({
+      timeout: 15_000,
+    });
+    await playerOf(phone.page).getByRole("button", { name: "Pause", exact: true }).click();
+
+    await expect.poll(() => audioSeconds(secondTab)).toBe(0);
+    expect(await audioSeconds(laptop.page)).toBe(0);
+  } finally {
+    await laptop.context.close();
+    await phone.context.close();
+  }
+});
+
 test("Sam's list holds only his own devices, and Mateo cannot control Aiko's", async ({
   browser,
   baseURL,
