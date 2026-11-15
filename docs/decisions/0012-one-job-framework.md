@@ -117,8 +117,8 @@ The first framework, in `packages/platform/convex/core/jobs/`, settled how these
   the deploy image does the same once the server joins it.
 - A shape change to rows a released version can hold goes in three steps: the schema accepts both
   shapes and the code reads both, a migration in the same release rewrites or deletes the old
-  rows, and a later release drops the old shape. The first are Connect's, which delete v0.3.0's
-  reports and requests (ADR 0018). `reset` forgets a migration's progress, for tests.
+  rows, and a later release drops the old shape. The first are Connect's, which rewrite v0.3.0's
+  reports and requests in place (ADR 0018). `reset` forgets a migration's progress, for tests.
 - An `imports` row holds the source, the server id and name, and the job. One active import per
   source server is the import kind's dedupe key. Movies keeps the import plan, its resume point,
   and the imported counts in its own table, keyed by the import id.
