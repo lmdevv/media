@@ -21,29 +21,35 @@ import {
   saveBrowserQuality,
   saveBrowserVolume,
 } from "./browser-storage";
+import { devicePosition } from "./connect-devices";
+import type { Device } from "./connect-devices";
 import type { EngineKind, PlayerEngine } from "./engine";
 import { HtmlAudioEngine } from "./html-audio-engine";
 import { setMediaSessionHandlers, showNowPlaying } from "./media-session";
 import { MseEngine } from "./mse-engine";
 import { PlaybackController } from "./playback-controller";
-import type { EngineFactory, PlayerSettings, QueueState } from "./playback-controller";
+import type { EngineFactory, PlayerSettings, QueueEntry, QueueState } from "./playback-controller";
+import { queueStateOf, useQueueListing } from "./queue-listing";
+import type { QueueRow } from "./queue-listing";
+import { nextIndex, previousIndex } from "./queue-order";
 import type { RepeatMode } from "./queue-order";
 import { ticketSources } from "./source-resolver";
 import { qualityOfSetting, settingOfQuality } from "./stream-quality";
 import type { StreamQuality } from "./stream-quality";
+import { asDeviceId, useConnect } from "./use-connect";
+import type { ConnectView, MusicItem } from "./use-connect";
+
+export type { Device, DevicePlayback } from "./connect-devices";
+
+export type { MusicItem } from "./use-connect";
 
 const POSITION_INTERVAL_MS = 250;
-
-/** Queue entries asked for per page; the core caps a page to what one call may read. */
-const QUEUE_PAGE = 200;
 
 /** Wait this long after the last volume change before saving it. */
 const VOLUME_SAVE_MS = 500;
 
 /** A song as the music commands answer it. */
 export type Track = Awaited<ReturnType<PlatformSdk["music"]["tracks"]["get"]>>;
-
-type QueueRow = Awaited<ReturnType<PlatformSdk["music"]["queue"]["list"]>>["page"][number];
 
 /** One queue entry as the UI shows it: its song, its own id, and whether autoplay added it. */
 export interface QueueTrack extends Track {
@@ -84,6 +90,19 @@ export interface PlayerState {
    * MSE engine failed on a song this session).
    */
   readonly engine: EngineKind;
+  /** This browser's device; null until the core says, or for a session on no device. */
+  readonly deviceId: string | null;
+  /** The listener's other own devices that are online, by name (ADR 0018). */
+  readonly devices: ReadonlyArray<Device>;
+  /**
+   * Another of the listener's devices that plays the queue while nothing plays here, as old music's
+   * active device. While it is set, `status`, the position, play, pause, seek, and skips follow and
+   * control it, and playing a list here takes playback back from it. Null while playback is here
+   * or nowhere.
+   */
+  readonly remote: Device | null;
+  /** Whether a song is loaded here, playing or paused. */
+  readonly here: boolean;
 }
 
 /** What the UI can ask the player to do. Actions never reject: failures become `error`. */
@@ -117,6 +136,25 @@ export interface PlayerActions {
   readonly setAutoplay: (on: boolean) => Promise<void>;
   /** Changes the streaming quality. It applies from the next song. */
   readonly setQuality: (quality: StreamQuality) => void;
+  /**
+   * Moves playback from the device the player follows to this browser at the same place in the
+   * song (`core.connect.targets.move`), as old music's "Play here" did. Call it inside the tap, so
+   * the browser lets the song start. Resolves whether the core took it.
+   */
+  readonly moveHere: () => Promise<boolean>;
+  /**
+   * Moves playback to another of the listener's devices at the same place in the song, from this
+   * browser or the device the player follows, as old music's transfer did; with nothing playing
+   * anywhere it plays the current song there from where it stands here. Resolves whether the core
+   * took it.
+   */
+  readonly moveTo: (deviceId: string) => Promise<boolean>;
+  /**
+   * Plays a song or an album on another device (`core.connect.targets.load`), which takes playback
+   * over, as old music's play on a chosen device made it the active one: this browser stops, or
+   * the device the player followed pauses. Resolves whether the core took it.
+   */
+  readonly playOn: (deviceId: string, item: MusicItem) => Promise<boolean>;
 }
 
 /** The player state and actions that `usePlayer` returns. */
@@ -202,74 +240,23 @@ const engineFactory = (engine: (() => PlayerEngine) | undefined): EngineFactory 
   };
 };
 
-/** How long the queue's pages wait before they are followed again after one failed. */
-const QUEUE_RESTART_MS = 250;
-
-const queuePages = (platform: PlatformSdk) =>
-  pagedStore((span) =>
-    platform.music.queue.list.watch({ paginationOpts: { numItems: QUEUE_PAGE, ...span } }),
-  );
-
-/**
- * Every row of the listener's queue, followed live, loading the next page as soon as one arrives;
- * null until every page first arrived. A new queue (`music.queue.play`) lists another
- * generation's entries, so Convex refuses the cursors its pages were following (`InvalidCursor`,
- * which the SDK reports as a protocol error); the pages then start over from the top, as Convex's
- * own paginated hook does. The last whole list stays while pages reload, as when the queue grows
- * past a page or starts over, so the player never drops the song it shows.
- */
-const useQueueRows = (platform: PlatformSdk): ReadonlyArray<QueueRow> | null => {
-  const [store, setStore] = useState(() => queuePages(platform));
-  const [last, setLast] = useState<ReadonlyArray<QueueRow> | null>(null);
-  const paged = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
-  const load = paged.status === "ready" && paged.next.kind === "more" ? paged.next.load : null;
-  const whole = paged.status === "ready" && paged.next.kind === "done" ? paged.rows : null;
-
-  if (whole !== null && whole !== last) setLast(whole);
-
-  const failed =
-    paged.status === "failed" || (paged.status === "ready" && paged.next.kind === "failed");
-
-  useEffect(() => {
-    load?.();
-  }, [load]);
-
-  useEffect(() => {
-    if (!failed) return undefined;
-
-    const timer = setTimeout(() => {
-      setStore(queuePages(platform));
-    }, QUEUE_RESTART_MS);
-
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [failed, platform]);
-
-  return whole ?? last;
-};
+/** A queue row as the player shows it: its song with the entry's own id and how it joined. */
+const queueTrack = (row: QueueRow): QueueEntry<QueueTrack> => ({
+  itemId: row.itemId,
+  autoplay: row.autoplay,
+  track: { ...row.track, itemId: row.itemId, autoplay: row.autoplay },
+});
 
 /** The listener's queue once its state and every page have arrived; null before. */
 const useQueue = (platform: PlatformSdk): QueueState<QueueTrack> | null => {
   const info = usePlatformQuery(platform.music.queue.get);
-  const list = useQueueRows(platform);
+  const listing = useQueueListing(platform, pagedStore);
   const data = info.status === "success" ? info.data : null;
 
-  return useMemo(() => {
-    if (data === null || list === null) return null;
-
-    return {
-      entries: list.map((row) => ({
-        itemId: row.itemId,
-        autoplay: row.autoplay,
-        track: { ...row.track, itemId: row.itemId, autoplay: row.autoplay },
-      })),
-      current: data.current,
-      shuffle: data.shuffle,
-      repeat: data.repeat,
-      autoplay: data.autoplay,
-    };
-  }, [data, list]);
+  return useMemo(
+    () => (data === null || listing === null ? null : queueStateOf(data, listing, queueTrack)),
+    [data, listing],
+  );
 };
 
 interface ControllerProps {
@@ -369,23 +356,24 @@ const asTrackId = Brand.nominal<Track["id"]>();
 const asItemId = Brand.nominal<QueueTrack["itemId"]>();
 
 function PositionTicker({
-  controller,
+  read,
   children,
 }: {
-  readonly controller: PlaybackController;
+  /** The live position in milliseconds; a stable function. */
+  readonly read: () => number;
   readonly children: ReactNode;
 }) {
-  const [position, setPosition] = useState(() => Math.round(controller.positionMs()));
+  const [position, setPosition] = useState(() => Math.round(read()));
 
   useEffect(() => {
     const timer = setInterval(() => {
-      setPosition(Math.round(controller.positionMs()));
+      setPosition(Math.round(read()));
     }, POSITION_INTERVAL_MS);
 
     return () => {
       clearInterval(timer);
     };
-  }, [controller]);
+  }, [read]);
 
   return <PositionContext.Provider value={position}>{children}</PositionContext.Provider>;
 }
@@ -435,6 +423,7 @@ export function PlayerProvider({
 
   const queue = useQueue(platform);
   const local = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
+  const connect = useConnect(platform, controller, local);
 
   useEffect(() => controller.start(), [controller]);
 
@@ -470,14 +459,35 @@ export function PlayerProvider({
     const found = entries.findIndex((entry) => entry.itemId === local.current);
     const index = Math.max(0, found);
     const track = found === -1 ? null : (entries[found]?.track ?? null);
+    const remote = connect.remote?.playback ?? null;
 
     const status = (): PlayerStatus => {
       if (queue === null) return "loading";
 
       if (track === null) return "idle";
 
+      if (remote !== null) return remote.playing ? "playing" : "paused";
+
       return local.engineStatus === "idle" ? "paused" : local.engineStatus;
     };
+
+    const here = localActions(controller);
+
+    const elsewhere =
+      connect.remote === null
+        ? null
+        : remoteActions({
+            platform,
+            controller,
+            connect,
+            device: connect.remote,
+            entries,
+            index: found === -1 ? null : found,
+            repeat: queue?.repeat ?? "off",
+            durationMs: track?.durationMs ?? 0,
+          });
+
+    const actions = elsewhere ?? here;
 
     return {
       status: status(),
@@ -494,17 +504,14 @@ export function PlayerProvider({
       quality: local.quality,
       autoplayBlocked: local.autoplayBlocked,
       engine: local.engine,
-      playTracks: (ids, at) => controller.playTracks(ids, at),
+      deviceId: connect.deviceId,
+      devices: connect.devices,
+      remote: connect.remote,
+      here: connect.here,
+      ...actions,
       primeOutput: () => {
         controller.primeOutput();
       },
-      togglePlay: () => controller.togglePlay(),
-      next: () => controller.next(),
-      previous: () => controller.previous(),
-      seek: async (positionMs) => {
-        controller.seek(positionMs);
-      },
-      jump: (itemId) => controller.jump(itemId),
       setShuffle: (on) => controller.capture(platform.music.queue.shuffle({ on })),
       setRepeat: (mode) => controller.capture(platform.music.queue.repeat({ mode })),
       setVolume: async (volume) => {
@@ -516,8 +523,11 @@ export function PlayerProvider({
       setQuality: (quality) => {
         controller.setQuality(quality);
       },
+      moveHere: () => moveHere(platform, controller, connect, track),
+      moveTo: (deviceId) => moveTo(platform, controller, connect, deviceId, track),
+      playOn: (deviceId, item) => playOn(platform, controller, connect, deviceId, item),
     };
-  }, [queue, local, controller, platform]);
+  }, [queue, local, controller, platform, connect]);
 
   const latestPlayer = useRef(player);
 
@@ -525,10 +535,25 @@ export function PlayerProvider({
     latestPlayer.current = player;
   }, [player]);
 
+  const latestConnect = useRef(connect);
+
+  useLayoutEffect(() => {
+    latestConnect.current = connect;
+  }, [connect]);
+
   const readers = useMemo(
     (): PlayerReaders => ({
       player: () => latestPlayer.current,
-      positionMs: () => Math.round(controller.positionMs()),
+      positionMs: () => {
+        const current = latestConnect.current;
+        const playback = current.remote === null ? null : current.playbackOf(current.remote.id);
+
+        if (playback === null) return Math.round(controller.positionMs());
+
+        return Math.round(
+          devicePosition(playback, current.serverNow(), latestPlayer.current.durationMs),
+        );
+      },
     }),
     [controller],
   );
@@ -542,7 +567,7 @@ export function PlayerProvider({
       <PlayerContext.Provider value={player}>
         <CurrentTrackContext.Provider value={current}>
           <HasTrackContext.Provider value={trackId !== null}>
-            <PositionTicker controller={controller}>{children}</PositionTicker>
+            <PositionTicker read={readers.positionMs}>{children}</PositionTicker>
           </HasTrackContext.Provider>
         </CurrentTrackContext.Provider>
       </PlayerContext.Provider>
@@ -571,4 +596,192 @@ const addAll = async (
   if (added.rest.length >= trackIds.length) throw new Error("The queue stopped taking songs");
 
   await addAll(platform, added.rest, next, added.itemIds.at(-1) ?? after);
+};
+
+/** What a play, pause, skip, or seek does: here, or on the device the player follows. */
+type TransportActions = Pick<
+  PlayerActions,
+  "playTracks" | "togglePlay" | "next" | "previous" | "seek" | "jump"
+>;
+
+/**
+ * Playback here. Each of these is a listener action of the controller, which makes the Connect
+ * requests seen so far moot (ADR 0018), so one still loading never lands over it.
+ */
+const localActions = (controller: PlaybackController): TransportActions => ({
+  playTracks: (ids, at) => controller.playTracks(ids, at),
+  togglePlay: () => controller.togglePlay(),
+  next: () => controller.next(),
+  previous: () => controller.previous(),
+  seek: async (positionMs) => {
+    controller.seek(positionMs);
+  },
+  jump: (itemId) => controller.jump(itemId),
+});
+
+interface RemoteContext {
+  readonly platform: PlatformSdk;
+  readonly controller: PlaybackController;
+  readonly connect: ConnectView;
+  readonly device: Device;
+  readonly entries: ReadonlyArray<QueueState<QueueTrack>["entries"][number]>;
+  /** Where the current entry is in `entries`; null when the queue does not hold it yet. */
+  readonly index: number | null;
+  readonly repeat: RepeatMode;
+  readonly durationMs: number;
+}
+
+/**
+ * Playback on the device the player follows, as old music's remote control: play, pause, and seek
+ * ask that device (`core.connect.targets.control`); skips move the queue it plays, which it
+ * follows; and playing a list here takes playback back, pausing that device, as old music made
+ * this browser the active one.
+ */
+const remoteActions = ({
+  platform,
+  controller,
+  connect,
+  device,
+  entries,
+  index,
+  repeat,
+  durationMs,
+}: RemoteContext): TransportActions => {
+  const deviceId = asDeviceId(device.id);
+  const playing = device.playback?.playing === true;
+
+  const control = (change: { readonly playing: boolean } | { readonly positionMs: number }) =>
+    controller.capture(platform.core.connect.targets.control({ deviceId, ...change }));
+
+  const jumpTo = async (at: number | null): Promise<void> => {
+    const entry = at === null ? undefined : entries[at];
+
+    if (entry !== undefined) {
+      await controller.capture(platform.music.queue.jump({ itemId: asItemId(entry.itemId) }));
+    }
+  };
+
+  const positionMs = (): number => {
+    const playback = connect.playbackOf(device.id);
+
+    return playback === null ? 0 : devicePosition(playback, connect.serverNow(), durationMs);
+  };
+
+  return {
+    playTracks: async (ids, at) => {
+      if (playing) void control({ playing: false });
+      await controller.playTracks(ids, at);
+    },
+    togglePlay: () => control({ playing: !playing }),
+    next: async () => {
+      if (index !== null) await jumpTo(nextIndex(index, entries.length, repeat));
+    },
+    previous: async () => {
+      if (index === null) return;
+      const at = previousIndex(positionMs(), index, entries.length, repeat);
+
+      await (at === index ? control({ positionMs: 0 }) : jumpTo(at));
+    },
+    seek: (target) => control({ positionMs: Math.max(0, Math.round(target)) }),
+    jump: async (itemId) => {
+      await controller.capture(platform.music.queue.jump({ itemId }));
+    },
+  };
+};
+
+/** Resolves whether `call` landed, without rejecting. */
+const succeeded = async (call: Promise<unknown>): Promise<boolean> => {
+  try {
+    await call;
+
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const moveHere = async (
+  platform: PlatformSdk,
+  controller: PlaybackController,
+  connect: ConnectView,
+  track: QueueTrack | null,
+): Promise<boolean> => {
+  const self = connect.deviceId;
+  const { remote } = connect;
+
+  // Inside the tap, so the browser lets the song start once the move lands here.
+  controller.primeOutput();
+
+  if (self === null) return false;
+
+  if (remote === null) {
+    // Nothing plays anywhere: this browser takes the current song, paused where it stands, as old
+    // music's transfer made it the active device.
+    if (connect.here || track === null) return true;
+    connect.player.supersede();
+
+    return controller.playCurrentAt(track.id, controller.positionMs(), false);
+  }
+
+  // This tab applies the load the move makes of this browser's device, not another tab of it.
+  await connect.lead();
+
+  return succeeded(
+    platform.core.connect.targets.move({ from: asDeviceId(remote.id), to: asDeviceId(self) }),
+  );
+};
+
+const moveTo = async (
+  platform: PlatformSdk,
+  controller: PlaybackController,
+  connect: ConnectView,
+  target: string,
+  track: QueueTrack | null,
+): Promise<boolean> => {
+  const self = connect.deviceId;
+  const { remote } = connect;
+  const { move, load } = platform.core.connect.targets;
+
+  if (self === null) return false;
+
+  const from = connect.here ? self : (remote?.id ?? null);
+
+  if (from === target) return true;
+
+  if (from !== null) {
+    return succeeded(move({ from: asDeviceId(from), to: asDeviceId(target) }));
+  }
+
+  if (track === null) return false;
+
+  return succeeded(
+    load({
+      deviceId: asDeviceId(target),
+      item: { domain: "music", ref: { type: "track", id: track.id } },
+      positionMs: Math.round(controller.positionMs()),
+    }),
+  );
+};
+
+const playOn = async (
+  platform: PlatformSdk,
+  controller: PlaybackController,
+  connect: ConnectView,
+  deviceId: string,
+  item: MusicItem,
+): Promise<boolean> => {
+  const { load, control } = platform.core.connect.targets;
+  const loaded = await succeeded(load({ deviceId: asDeviceId(deviceId), item }));
+  const { remote } = connect;
+
+  if (!loaded) return false;
+
+  if (connect.here) {
+    connect.player.supersede();
+    controller.release();
+  } else if (remote !== null && remote.id !== deviceId && remote.playback?.playing === true) {
+    void succeeded(control({ deviceId: asDeviceId(remote.id), playing: false }));
+  }
+
+  return true;
 };

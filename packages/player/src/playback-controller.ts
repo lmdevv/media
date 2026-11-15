@@ -29,6 +29,9 @@ const PRELOAD_LEAD_MS = 20_000;
 /** How long a jump sent from here may go unconfirmed before the server's entry stands again. */
 const JUMP_GRACE_MS = 10_000;
 
+/** A Connect request's position this close to where the song is leaves it there (ADR 0018). */
+const STEER_TOLERANCE_MS = 250;
+
 const AUTOPLAY_BLOCKED_MESSAGE = "Tap play to start here";
 
 const MEDIA_OFFLINE_MESSAGE = "Can't reach the media server. Retrying…";
@@ -52,8 +55,16 @@ export interface QueueEntry<T extends Track = Track> {
 
 /** The listener's queue as the core keeps it (`music.queue.get` and every `music.queue.list` page). */
 export interface QueueState<T extends Track = Track> {
-  /** Every entry, in play order. */
+  /** Every entry the listener may play, in play order. */
   readonly entries: ReadonlyArray<QueueEntry<T>>;
+  /**
+   * Whether `entries` is the queue's whole listing at the revision of this state, every page in
+   * and read at that revision (`queueStateOf`). False while the pages load again, as after a new
+   * queue, or while they hold another revision, as a page whose subscription retries keeps its
+   * last answer; `entries` may then lack `current`. A whole listing lacks `current` only when the
+   * core leaves that entry out, as it does an entry whose song the listener may no longer play.
+   */
+  readonly complete: boolean;
   /** The entry playing; null for an empty queue. */
   readonly current: string | null;
   readonly shuffle: boolean;
@@ -79,7 +90,36 @@ export interface ControllerSnapshot {
    * confirmed yet. Null for an empty queue.
    */
   readonly current: string | null;
+  /**
+   * How many times the position jumped here by a seek, so Connect's reports can tell a jump from
+   * playback moving on (ADR 0018).
+   */
+  readonly seeks: number;
 }
+
+/** What this device plays, as Connect hears it (ADR 0018). */
+export interface PlayingHere {
+  readonly trackId: string;
+  readonly itemId: string;
+  /** Whether it plays, or means to once its song loads; false while paused. */
+  readonly playing: boolean;
+  readonly positionMs: number;
+}
+
+/** Where and how a new queue starts: from `positionMs` into its first song, playing or paused. */
+export interface StartAt {
+  readonly positionMs: number;
+  readonly playing: boolean;
+}
+
+/** The core's current queue entry as this device knows it: a Connect move lands on it (ADR 0018). */
+export type QueueCurrent =
+  /** The queue has not arrived yet, or its listing is not whole and does not hold it yet. */
+  | { readonly kind: "unknown" }
+  | { readonly kind: "empty" }
+  /** The whole listing leaves it out: its song is one the listener may not play. */
+  | { readonly kind: "hidden" }
+  | { readonly kind: "entry"; readonly itemId: string; readonly trackId: string };
 
 /** Builds the audio engines; the controller switches between them as quality and support allow. */
 export interface EngineFactory {
@@ -216,16 +256,19 @@ interface EarlyStart {
 /**
  * Plays the listener's queue on this device. The core holds the queue and the entry playing
  * (`music.queue.*`); this device holds whether it plays and where in the song, as old music's
- * player did for the device that played (D62). Moving playback between devices returns with
- * Connect.
+ * player did for the device that played (D62). Connect moves playback here and away, and plays,
+ * pauses, or seeks it, through `playCurrentAt`, `playTracksAt`, `steer`, and `release`
+ * (`connect-player.ts`, ADR 0018).
  *
  * Every request that waits on the network carries what it was made for, and its answer, a
  * failure included, applies only while that still holds: a ticket its load's generation, a
  * preload the entry and stream it asked for, a jump its own pending move, and a history report
- * its start. The media server's recovery loads whatever entry is current once it answers. The
- * engine's own events follow the same rule: they belong to the load that gave the engine its
- * source, and a later load, or an unload, makes them stale until that load hands the engine its
- * new source.
+ * its start. A new queue's answer plays its entry as the listener's newest choice says, not as
+ * when the queue was sent, unless Connect let go of this device meanwhile; an entry the new queue
+ * loaded before the answer plays or pauses as that choice says too. The media server's
+ * recovery loads whatever entry is current once it answers. The engine's own events follow the
+ * same rule: they belong to the load that gave the engine its source, and a later load, or an
+ * unload, makes them stale until that load hands the engine its new source.
  */
 export class PlaybackController {
   readonly #commands: MusicCommands;
@@ -234,6 +277,8 @@ export class PlaybackController {
   #engine: PlayerEngine;
   readonly #env: ControllerEnvironment;
   readonly #listeners = new Set<() => void>();
+  /** What runs as the listener acts here, before the action: {@link onListenerAction}. */
+  readonly #listenerActions = new Set<() => void>();
   #snapshot: ControllerSnapshot;
 
   #queue: QueueState | null = null;
@@ -241,6 +286,12 @@ export class PlaybackController {
   /** The last move sent from here, even once the core's sync no longer waits for it. */
   #latestMove: PendingJump | null = null;
   #wantPlaying = false;
+  /**
+   * Whether the listener last chose to play, here or through Connect. `#wantPlaying` also follows
+   * what the player does by itself, as stopping at the end of the queue; a new queue starts as the
+   * listener chose.
+   */
+  #chosen = false;
   #gapless: boolean;
   #resumeAt: ResumePoint | null;
   #loaded: LoadedEntry | null = null;
@@ -262,6 +313,8 @@ export class PlaybackController {
    */
   readonly #skipped = new Set<string>();
   #loading = false;
+  /** Counts `release` calls, so a play whose queue answers after one does not start here. */
+  #releases = 0;
   #unsubscribeEngine: (() => void) | null = null;
   #healthFiber: Fiber.Fiber<void, unknown> | null = null;
   #stop: (() => void) | null = null;
@@ -291,13 +344,17 @@ export class PlaybackController {
       engine,
       volume: env.settings.volume,
       current: null,
+      seeks: 0,
     };
   }
 
   /** The current local state. Stable between changes, for `useSyncExternalStore`. */
   getSnapshot = (): ControllerSnapshot => this.#snapshot;
 
-  /** Calls `listener` after every local state change. Returns the unsubscribe function. */
+  /**
+   * Calls `listener` after every local state change, and after every {@link sync}, which may change
+   * the queue alone. Returns the unsubscribe function.
+   */
   subscribe = (listener: () => void): (() => void) => {
     this.#listeners.add(listener);
 
@@ -305,6 +362,22 @@ export class PlaybackController {
       this.#listeners.delete(listener);
     };
   };
+
+  /**
+   * Calls `callback` synchronously at the start of every action the listener takes here, before
+   * it changes anything: {@link togglePlay}, {@link next}, {@link previous}, {@link seek},
+   * {@link jump}, and {@link playTracks}, whether a screen, a shortcut, or the system media
+   * controls asked. Connect makes the requests seen so far moot there (ADR 0018). What Connect
+   * itself applies, through `steer`, `playTracksAt`, `playCurrentAt`, and `release`, never calls
+   * it. Returns the function that stops calling it.
+   */
+  onListenerAction(callback: () => void): () => void {
+    this.#listenerActions.add(callback);
+
+    return () => {
+      this.#listenerActions.delete(callback);
+    };
+  }
 
   /**
    * Starts engine events, media keys, and saving the place in the song. Returns the function that
@@ -370,6 +443,7 @@ export class PlaybackController {
 
     this.#dropStalePreload();
     this.#showNowPlaying();
+    this.#notify();
   }
 
   /** Follows the settings after they changed on the server or on another device. */
@@ -400,29 +474,67 @@ export class PlaybackController {
    * asked for while the core writes the queue, so it plays once the queue's answer and its ticket
    * are both in, without waiting for the new queue to arrive. A song this device holds a copy of
    * waits for the new queue to name it, as the core may open the queue on another. A queue command
-   * that fails plays nothing.
+   * that fails plays nothing. A pause chosen while the queue is written holds: the new queue starts
+   * paused.
    */
   async playTracks(trackIds: ReadonlyArray<string>, index?: number): Promise<void> {
+    this.#listenerActed();
+    await this.#replaceQueue(trackIds, index, () => null);
+  }
+
+  /**
+   * Replaces the queue with `trackIds` and starts its first song here, as a Connect load of a song
+   * or an album asks (ADR 0018), the way {@link playTracks} plays a list. Answers the entry the new
+   * queue plays here, or null when none does: the queue command failed, or Connect let go of this
+   * device while the queue was written.
+   *
+   * @param startAt - Where the first song starts and whether it plays, asked as the queue is sent
+   *   and again once it answers: the load's newest ask, or null once a newer request or the
+   *   listener replaced the load, when the queue starts as the listener last chose.
+   */
+  playTracksAt(
+    trackIds: ReadonlyArray<string>,
+    startAt: () => StartAt | null,
+  ): Promise<string | null> {
+    return this.#replaceQueue(trackIds, 0, startAt);
+  }
+
+  async #replaceQueue(
+    trackIds: ReadonlyArray<string>,
+    index: number | undefined,
+    startAt: () => StartAt | null,
+  ): Promise<string | null> {
     this.#unlockOutput();
     this.#skipped.clear();
-    this.#wantPlaying = true;
+    this.#choose(startAt()?.playing ?? true);
     this.#update({ error: null });
     const picked = trackIds[index ?? 0];
     const early = picked === undefined ? null : this.#startEarly(picked);
 
     this.#early = early;
+    const releases = this.#releases;
 
     try {
       const { current } = await this.#commands.play(trackIds, index);
+
+      // Connect moved playback to another device meanwhile; the queue is its now.
+      if (this.#releases !== releases) return null;
 
       const answered =
         early !== null && this.#early === early ? { ...early, itemId: current } : null;
 
       if (answered !== null) this.#early = answered;
-      this.#moveTo(current, true, answered);
+      const at = startAt();
+
+      if (at !== null) this.#choose(at.playing);
+      this.#moveTo(current, this.#chosen, answered, at?.positionMs ?? 0);
+
+      return current;
     } catch (error) {
       if (this.#early === early) this.#early = null;
       this.#update({ error: messageOf(error) });
+
+      return null;
     }
   }
 
@@ -437,14 +549,27 @@ export class PlaybackController {
 
   /** Plays or pauses. The engine reacts at once, inside the tap, which satisfies autoplay rules. */
   async togglePlay(): Promise<void> {
+    this.#listenerActed();
     const entry = this.#currentEntry();
 
-    if (entry === null) return;
+    if (entry === null) {
+      // A song here the queue does not hold yet, as a new queue's first while that queue is on its
+      // way, plays or pauses as tapped.
+      const here = this.playingHere();
+
+      if (here === null) return;
+
+      if (!here.playing) this.#unlockOutput();
+      this.steer(!here.playing, here.positionMs);
+
+      return;
+    }
+
     this.#skipped.clear();
 
     if (this.#needsSource(entry)) {
       this.#unlockOutput();
-      this.#wantPlaying = true;
+      this.#choose(true);
       this.#update({ autoplayBlocked: false, error: null });
       await this.#load(entry, this.#startPositionFor(entry));
 
@@ -452,7 +577,7 @@ export class PlaybackController {
     }
 
     const playing = this.#isAudible();
-    this.#wantPlaying = !playing;
+    this.#choose(!playing);
     this.#update({ autoplayBlocked: false, error: null });
 
     if (playing) {
@@ -465,6 +590,7 @@ export class PlaybackController {
 
   /** Plays the next entry, wrapping when repeat is all; at the end of the queue it does nothing. */
   async next(): Promise<void> {
+    this.#listenerActed();
     const queue = this.#queue;
     const at = this.#currentIndex();
 
@@ -480,6 +606,7 @@ export class PlaybackController {
 
   /** Starts the song again once it played a little, else plays the entry before. */
   async previous(): Promise<void> {
+    this.#listenerActed();
     const queue = this.#queue;
     const at = this.#currentIndex();
 
@@ -491,7 +618,7 @@ export class PlaybackController {
     const entry = queue.entries[index];
 
     if (index === at || entry === undefined) {
-      this.seek(0);
+      this.#seek(0);
 
       return;
     }
@@ -501,20 +628,27 @@ export class PlaybackController {
 
   /** Plays the queue entry `itemId`. */
   async jump(itemId: string): Promise<void> {
+    this.#listenerActed();
     this.#unlockOutput();
     this.#skipped.clear();
+    this.#choose(true);
     await this.#jumpTo(itemId, true);
   }
 
   /** Seeks the engine at once. */
   seek(positionMs: number): void {
+    this.#listenerActed();
+    this.#seek(positionMs);
+  }
+
+  #seek(positionMs: number): void {
     const target = Math.max(0, Math.round(positionMs));
     const loaded = this.#loaded;
 
     if (loaded === null) {
-      const entry = this.#currentEntry();
+      const itemId = this.#currentEntry()?.itemId ?? this.#arriving()?.itemId ?? null;
 
-      if (entry !== null) this.#resumeAt = { itemId: entry.itemId, positionMs: target };
+      if (itemId !== null) this.#resumeAt = { itemId, positionMs: target };
       this.#stamp(target, false);
 
       return;
@@ -525,8 +659,120 @@ export class PlaybackController {
       void this.#load(loaded.entry, target);
     } else if (!this.#reloadIfExpired(target)) this.#engine.seek(target);
     this.#setPosition(target);
+    this.#update({ seeks: this.#snapshot.seeks + 1 });
     this.#showNowPlaying();
     this.#saveResume();
+  }
+
+  /**
+   * What this device plays for Connect's reports (ADR 0018): the song loaded here, or a new queue's
+   * first song still on its way here once the queue answered, whether it plays, and where. Null
+   * while no song is loaded or on its way here, as before the first play or after {@link release}.
+   */
+  playingHere(): PlayingHere | null {
+    const loaded = this.#loaded;
+
+    if (loaded !== null) {
+      return {
+        trackId: loaded.entry.track.id,
+        itemId: loaded.entry.itemId,
+        playing: this.#isAudible(),
+        positionMs: Math.round(this.#livePositionMs()),
+      };
+    }
+
+    const arriving = this.#arriving();
+
+    if (arriving === null) return null;
+
+    return {
+      ...arriving,
+      playing: this.#wantPlaying,
+      positionMs: this.#resumeAt?.itemId === arriving.itemId ? this.#resumeAt.positionMs : 0,
+    };
+  }
+
+  /**
+   * Plays or pauses the song loaded here at `positionMs`, as a Connect request asks (ADR 0018), and
+   * answers whether a song was loaded or on its way here to apply it to. A position within a
+   * quarter second of where the song is stays, so a request never makes the sound jump for nothing.
+   * A song whose source failed loads again from `positionMs` when asked to play. A new queue's
+   * first song still on its way here starts as asked.
+   */
+  steer(playing: boolean, positionMs: number): boolean {
+    const loaded = this.#loaded;
+    const target = Math.max(0, Math.round(positionMs));
+
+    if (loaded === null) return this.#steerArriving(playing, target);
+
+    this.#skipped.clear();
+    this.#choose(playing);
+    this.#steerLoaded(loaded, target);
+
+    return true;
+  }
+
+  /**
+   * The core's current queue entry and its song, as far as the queue this device holds tells:
+   * unknown before the queue arrives, or while its listing is not whole and lacks it, as while
+   * pages load again after a new queue or hold another revision, and hidden once the whole listing
+   * leaves it out. A Connect load of a song waits on it to tell a move, which plays that entry,
+   * from a song that replaces the queue (ADR 0018).
+   */
+  queueCurrent(): QueueCurrent {
+    const queue = this.#queue;
+
+    if (queue === null) return { kind: "unknown" };
+
+    if (queue.current === null) return { kind: "empty" };
+    const entry = this.#entryOf(queue.current);
+
+    if (entry !== null) return { kind: "entry", itemId: entry.itemId, trackId: entry.track.id };
+
+    return queue.complete ? { kind: "hidden" } : { kind: "unknown" };
+  }
+
+  /**
+   * Plays the core's current queue entry here from `positionMs`, playing or paused, when it holds
+   * `trackId`, as when Connect moves playback onto this device (ADR 0018); the queue stays as it
+   * is. Answers false, changing nothing, when the current entry holds another song or none.
+   */
+  playCurrentAt(trackId: string, positionMs: number, playing: boolean): boolean {
+    const entry = this.#entryOf(this.#queue?.current ?? null);
+
+    if (entry === null || entry.track.id !== trackId) return false;
+
+    this.#skipped.clear();
+    this.#early = null;
+    this.#pendingJump = null;
+    this.#choose(playing);
+    this.#resumeAt = null;
+    this.#update({ current: entry.itemId, error: null, autoplayBlocked: false });
+    void this.#load(entry, Math.max(0, Math.round(positionMs)));
+
+    return true;
+  }
+
+  /**
+   * Stops playing here and lets go of the song, as when Connect moves playback to another device,
+   * or another of the listener's devices plays while this one is paused (ADR 0018). The queue
+   * stays, and this device keeps its place in the song, paused, as after a stop.
+   */
+  release(): void {
+    this.#releases += 1;
+    this.#choose(false);
+    const here = this.playingHere();
+
+    this.#early = null;
+
+    if (here === null) return;
+
+    this.#saveResume();
+    this.#unload();
+    this.#resumeAt = { itemId: here.itemId, positionMs: here.positionMs };
+    this.#stamp(here.positionMs, false);
+    this.#update({ engineStatus: "idle", error: null, autoplayBlocked: false });
+    this.#showNowPlaying();
   }
 
   /**
@@ -622,7 +868,9 @@ export class PlaybackController {
       return;
     }
 
-    if (this.#wantPlaying) {
+    // A device that holds a song, paused included, takes the new entry, as old music's active device
+    // did, so Connect still finds it playing the queue and a remote's play reaches it (ADR 0018).
+    if (this.#wantPlaying || this.#loaded !== null) {
       // From the start, unless this device holds a place in it, as in the song that stopped when
       // the media server went away.
       void this.#load(entry, this.#resumePositionFor(entry));
@@ -630,13 +878,8 @@ export class PlaybackController {
       return;
     }
 
-    if (this.#loaded !== null) {
-      this.#unload();
-      this.#update({ engineStatus: "idle", error: null, autoplayBlocked: false });
-    }
-
-    // Shows where this device left the song, paused, until it plays.
-    if (this.#resumeAt?.itemId === entry.itemId) this.#stamp(this.#resumeAt.positionMs, false);
+    // Shows where this device left the song, paused, until it plays, and any other from its start.
+    this.#stamp(this.#resumeAt?.itemId === entry.itemId ? this.#resumeAt.positionMs : 0, false);
   }
 
   /** Loads the entry this player moved to once the queue that holds it arrives. */
@@ -651,7 +894,9 @@ export class PlaybackController {
       return;
     }
 
-    if (this.#loaded === null && this.#wantPlaying) void this.#load(entry, 0);
+    if (this.#loaded === null && this.#wantPlaying) {
+      void this.#load(entry, this.#resumePositionFor(entry));
+    }
   }
 
   /**
@@ -686,24 +931,38 @@ export class PlaybackController {
   }
 
   /**
-   * Moves to `itemId` here at once. Returns the pending move, which the core's sync confirms.
-   * `early` is the song started ahead for a new queue whose first entry `itemId` is.
+   * Moves to `itemId` here at once, from `startMs` into it. Returns the pending move, which the
+   * core's sync confirms. `early` is the song started ahead for a new queue whose first entry
+   * `itemId` is.
    */
-  #moveTo(itemId: string, play: boolean, early: EarlyStart | null = null): PendingJump {
+  #moveTo(
+    itemId: string,
+    play: boolean,
+    early: EarlyStart | null = null,
+    startMs = 0,
+  ): PendingJump {
     const pending = this.#sendMove(itemId);
 
     this.#wantPlaying = play;
-    this.#resumeAt = null;
+    // Every load of `itemId` below, or by `sync` once its queue arrives, starts here.
+    this.#resumeAt = startMs > 0 ? { itemId, positionMs: startMs } : null;
     this.#update({ current: itemId, error: null });
     const entry = this.#entryOf(itemId);
+    const loaded = this.#loaded;
 
     if (entry === null) {
       // The queue that holds it has not arrived yet; `sync` loads it once it does, unless the
       // song started ahead gets there first.
       this.#unload();
 
-      if (early !== null && play) void this.#loadEarly(itemId, early);
-    } else if (this.#loaded?.entry.itemId !== itemId || play) void this.#load(entry, 0);
+      if (early !== null) void this.#loadEarly(itemId, early);
+    } else if (loaded?.entry.itemId !== itemId || play) {
+      void this.#load(entry, this.#resumePositionFor(entry));
+    } else {
+      // Loaded already, as when a new queue arrived and loaded its first song before its write
+      // answered: the song stays loaded, and moves to `startMs` and pauses as this move asks.
+      this.#steerLoaded(loaded, this.#resumePositionFor(entry));
+    }
 
     return pending;
   }
@@ -751,7 +1010,9 @@ export class PlaybackController {
       return;
     }
 
-    await this.#load({ itemId, autoplay: false, track: started.track }, 0);
+    const entry: QueueEntry = { itemId, autoplay: false, track: started.track };
+
+    await this.#load(entry, this.#resumePositionFor(entry));
   }
 
   /**
@@ -791,6 +1052,79 @@ export class PlaybackController {
 
   #keepsPlaying(): boolean {
     return this.#wantPlaying || this.#isAudible();
+  }
+
+  /**
+   * The entry this player is on while its song, a new queue's first, is still on its way here: the
+   * queue answered, and the song started ahead has not loaded yet (`#loadEarly`). Connect counts it
+   * as the song here, so a request that names it waits for it instead of missing it.
+   */
+  #arriving(): { readonly itemId: string; readonly trackId: string } | null {
+    const early = this.#early;
+
+    if (this.#loaded !== null || early === null || early.itemId !== this.#snapshot.current) {
+      return null;
+    }
+
+    return early.itemId === null ? null : { itemId: early.itemId, trackId: early.trackId };
+  }
+
+  #steerArriving(playing: boolean, target: number): boolean {
+    const arriving = this.#arriving();
+
+    if (arriving === null) return false;
+
+    this.#skipped.clear();
+    this.#choose(playing);
+    const entry = this.#entryOf(arriving.itemId);
+
+    if (playing && entry !== null) {
+      this.#update({ autoplayBlocked: false, error: null });
+      void this.#load(entry, target);
+    } else {
+      this.#resumeAt = { itemId: arriving.itemId, positionMs: target };
+      this.#stamp(target, false);
+    }
+
+    return true;
+  }
+
+  /**
+   * Moves the song loaded here to `target` unless it is within a quarter second of it, then plays
+   * or pauses it as `#wantPlaying` says, so the engine ends doing what the controller means to. A
+   * song whose source failed loads again from `target` when it is to play.
+   */
+  #steerLoaded(loaded: LoadedEntry, target: number): void {
+    const playing = this.#wantPlaying;
+
+    if (this.#needsSource(loaded.entry)) {
+      if (playing) {
+        this.#update({ autoplayBlocked: false, error: null });
+        void this.#load(loaded.entry, target);
+      } else this.#stamp(target, false);
+
+      return;
+    }
+
+    if (Math.abs(this.#livePositionMs() - target) > STEER_TOLERANCE_MS) this.#seek(target);
+
+    // A load under way plays or pauses as `#wantPlaying` says once its source lands.
+    if (this.#loading) return;
+    const audible = this.#isAudible();
+
+    if (playing && !audible) {
+      this.#update({ autoplayBlocked: false, error: null });
+
+      if (!this.#reloadIfExpired(this.#livePositionMs())) void this.#engine.play();
+    } else if (!playing && audible) {
+      this.#engine.pause();
+      this.#saveResume();
+    }
+  }
+
+  #choose(playing: boolean): void {
+    this.#chosen = playing;
+    this.#wantPlaying = playing;
   }
 
   #entryOf(itemId: string | null): QueueEntry | null {
@@ -868,6 +1202,10 @@ export class PlaybackController {
     this.#engine.unlock?.();
   }
 
+  #listenerActed(): void {
+    for (const callback of this.#listenerActions) callback();
+  }
+
   #update(patch: Partial<ControllerSnapshot>): void {
     const current = this.#snapshot;
     const next = { ...current, ...patch };
@@ -880,11 +1218,15 @@ export class PlaybackController {
       next.autoplayBlocked === current.autoplayBlocked &&
       next.engine === current.engine &&
       next.volume === current.volume &&
-      next.current === current.current;
+      next.current === current.current &&
+      next.seeks === current.seeks;
 
     if (unchanged) return;
     this.#snapshot = next;
+    this.#notify();
+  }
 
+  #notify(): void {
     for (const listener of this.#listeners) listener();
   }
 

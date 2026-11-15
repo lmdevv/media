@@ -41,3 +41,22 @@ export function RepeatGlyph({ one }: { readonly one: boolean }) {
     </svg>
   );
 }
+
+/** AirPlay-style glyph for the phone's Play on button. */
+export function AirPlayGlyph() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="size-6"
+    >
+      <path d="M5 17H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-1" />
+      <path d="m12 15 5 6H7Z" />
+    </svg>
+  );
+}

@@ -37,6 +37,7 @@ const getResult = v.object({
   shuffle: v.boolean(),
   repeat: v.union(v.literal("off"), v.literal("all"), v.literal("one")),
   autoplay: v.boolean(),
+  revision: v.number(),
 });
 
 const jumpArgs = v.object({ itemId: v.id("playQueueEntries") });
@@ -85,6 +86,7 @@ const listResult = v.object({
   pageStatus: v.optional(
     v.union(v.literal("SplitRecommended"), v.literal("SplitRequired"), v.null()),
   ),
+  revision: v.number(),
 });
 
 const moveArgs = v.object({

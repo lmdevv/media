@@ -10,7 +10,7 @@ const subscribe = (onChange: () => void): (() => void) => {
 };
 
 /** Whether the window is at the desktop layout width now, for event handlers. */
-const isDesktopNow = (): boolean => window.matchMedia(DESKTOP).matches;
+export const isDesktopNow = (): boolean => window.matchMedia(DESKTOP).matches;
 
 /** True at the desktop layout width (the `lg` breakpoint), where the sidebar shell is shown. */
 export const useIsDesktop = (): boolean => useSyncExternalStore(subscribe, isDesktopNow);

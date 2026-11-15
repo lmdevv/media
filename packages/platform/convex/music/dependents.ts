@@ -111,7 +111,7 @@ const dropEntry = async (store: MusicStore, entry: Doc<"playQueueEntries">) => {
     const current =
       queue.current === entry._id ? ((await neighbour(store, entry))?._id ?? null) : queue.current;
 
-    await store.setQueue(queue._id, { current, count: Math.max(0, queue.count - 1) });
+    await store.setQueue(queue, { current, count: Math.max(0, queue.count - 1) });
   }
 
   await store.deleteQueueEntry(entry._id);

@@ -6,6 +6,7 @@ import { useUi } from "@/components/shell/ui-state";
 import { useMusic, useQueryState } from "@/lib/platform";
 import { useIsDesktop } from "@/lib/use-media";
 
+import { PlayOnSurfaces } from "./device-sheet";
 import { DesktopNowPlaying } from "./now-playing-desktop";
 import { PhoneNowPlaying } from "./now-playing-phone";
 
@@ -52,6 +53,7 @@ export function NowPlaying() {
                   />
                 )}
               </div>
+              <PlayOnSurfaces />
             </>
           ) : null}
         </DialogPopup>

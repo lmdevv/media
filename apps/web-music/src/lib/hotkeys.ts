@@ -36,6 +36,7 @@ export const HOTKEYS = defineAppHotkeys({
     meta: { name: "Command menu: search and run any command", group: GLOBAL_GROUP },
   },
   "playlists.new": { hotkey: "N", meta: { name: "New playlist", group: GLOBAL_GROUP } },
+  "devices.toggle": { hotkey: "D", meta: { name: "Play on another device", group: GLOBAL_GROUP } },
   "queue.close": { hotkey: "Escape", meta: { name: "Close the queue", group: "Queue" } },
   "command-menu.enter": {
     hotkey: "Enter",

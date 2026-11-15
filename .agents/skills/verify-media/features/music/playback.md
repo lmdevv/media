@@ -73,5 +73,5 @@ Preconditions:
 - An iOS app that kept a session to an earlier stack's server, with downloads from it, opens on
   Home offline and never offers another server. Uninstall it before `ios up` installs it again:
   it then opens on `Your server is out of reach.`, whose `Server address` goes back to Welcome.
-- The CLI has no pause, resume, or next: moving playback and remote control return in phase 6
-  (D62).
+- The CLI has no pause, resume, or next of its own; it controls a device through Connect
+  (`media auth targets control`, [Connect](./connect.md)).

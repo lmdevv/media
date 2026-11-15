@@ -69,6 +69,10 @@ type TiedTable =
 
 type Fields<T extends TiedTable> = Omit<WithoutSystemFields<Doc<T>>, "tie">;
 
+/** A queue's revision: 0 for a queue last written before revisions were kept. */
+export const queueRevision = (queue: Pick<Doc<"playQueues">, "revision">): number =>
+  queue.revision ?? 0;
+
 /** Fields a patch writes, as Convex's `db.patch` takes them: `undefined` removes a field. */
 type Patch<Document> = {
   [Field in keyof Document]?: undefined extends Document[Field]
@@ -229,11 +233,14 @@ export interface MusicStore {
   readonly insertQueue: (
     fields: WithoutSystemFields<Doc<"playQueues">>,
   ) => Promise<Id<"playQueues">>;
-  /** Writes a queue's generation, current entry, count, or how it plays on. */
+  /**
+   * Writes a queue's generation, current entry, count, or how it plays on, and moves its revision
+   * on from the one `queue` holds. Answers the revision written.
+   */
   readonly setQueue: (
-    id: Id<"playQueues">,
-    fields: Partial<WithoutSystemFields<Doc<"playQueues">>>,
-  ) => Promise<void>;
+    queue: Pick<Doc<"playQueues">, "_id" | "revision">,
+    fields: Partial<Omit<WithoutSystemFields<Doc<"playQueues">>, "revision">>,
+  ) => Promise<number>;
   /** Deletes a second queue row a defect left beside a person's one queue. */
   readonly deleteQueue: (id: Id<"playQueues">) => Promise<void>;
   readonly insertQueueEntry: (
@@ -515,7 +522,13 @@ export const musicStore = (db: Db, meter: Meter): MusicStore => {
     deletePlay: (id) => remove("plays", id),
 
     insertQueue: (fields) => insert("playQueues", fields),
-    setQueue: (id, fields) => patch("playQueues", id, fields),
+    setQueue: async (queue, fields) => {
+      const revision = queueRevision(queue) + 1;
+
+      await patch("playQueues", queue._id, { ...fields, revision });
+
+      return revision;
+    },
     deleteQueue: (id) => remove("playQueues", id),
     insertQueueEntry: (fields) => insert("playQueueEntries", { ...fields, tie: newTie() }),
     setQueueEntryOrder: (id, orders) => patch("playQueueEntries", id, orders),

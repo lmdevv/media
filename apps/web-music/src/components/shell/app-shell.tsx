@@ -7,6 +7,7 @@ import { Suspense, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 
+import { DeviceSheet } from "@/components/player/device-sheet";
 import { PlayerBar } from "@/components/player/player-bar";
 import { HOTKEYS } from "@/lib/hotkeys";
 import { ChunkLoadError, lazyChunk } from "@/lib/lazy-chunk";
@@ -152,6 +153,7 @@ function Surfaces() {
       <OnDemand open={nowPlaying !== null && hasTrack} onFailed={() => setNowPlaying(null)}>
         <NowPlaying />
       </OnDemand>
+      <DeviceSheet />
     </>
   );
 }

@@ -155,6 +155,8 @@ export const seedLocal = <T extends Track>(
   return {
     state: {
       entries,
+      // This phone's own queue, so nothing of it is still on its way.
+      complete: true,
       current: heldFrom(
         entries,
         held,

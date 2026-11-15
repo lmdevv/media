@@ -2,7 +2,8 @@
 
 - Status: Accepted, 2026-11-03. Amended 2026-11-04 with Connect as built, 2026-11-07 with the
   phase 3 review fixes, and 2026-11-15 with items, loading and moving playback, group-session
-  membership, the two rules D60 keeps, and the upgrade from v0.3.0's Connect rows.
+  membership, the two rules D60 keeps, the upgrade from v0.3.0's Connect rows, and the music web
+  client.
 - Decisions: D35, D44, D60
 
 ## Context
@@ -346,9 +347,143 @@ that never arrives still fails the p95.
 
 - Remote volume. The device's volume is a per-device setting (ADR 0019), and Connect does not keep
   a second copy.
-- The clients. The music web client and the music iOS app add the device list, reporting,
-  applying requests, loading, and moving (phase 6). Movies remote control is in the backlog
-  (D63).
+- The music iOS app's device list, reporting, applying requests, loading, and moving (phase 6).
+  Movies remote control is in the backlog (D63).
+
+### The music web client (amended 2026-11-15)
+
+The music web client at `/music` brings back old music's device picker and remote control on
+Connect. The device side is in `packages/player`, beside the controller whose rules it goes
+through, so the music iOS app can use it too: `connect-player.ts` reports and applies requests,
+`connect-devices.ts` reads the device list, `tab-lead.ts` picks the tab that speaks for the
+browser, and `use-connect.ts` runs them in the player provider.
+
+- **Reports.** The browser reports the song loaded in its player, whether it plays, and where, on
+  every change of song, play state, engine state, seek, or applied revision, and every 10
+  seconds. It does not report as the song plays on. Old music reported every 15 seconds while it
+  played and sent a heartbeat every 30; 10 seconds keeps two reports inside Connect's 30-second
+  online window. A browser with no song loaded reports playing nothing.
+- **Applying requests.** One rule decides every request and every step of a load's start; the
+  next section has its table. A `transport` seeks only when it is more than 250 ms off. A `load`
+  of the song the shared queue plays now plays that entry from the position and keeps the queue,
+  which is how a move lands. A `load` of another song or of an album replaces the queue, as old
+  music's play on a chosen device did. A `stop` lets go of the song and keeps the browser's place
+  in it. The browser reports every request applied, moot ones included.
+- **One active device.** The core keeps no active device, so the client works out old music's from
+  the list: one of the listener's other devices that plays music, else one that holds a song
+  paused, while nothing is loaded in this browser. While there is one, the player bar, the mini
+  player, Now Playing, and the keyboard follow and control it, as old music's remote control did:
+  play, pause, and seek send `control`; skips move the shared queue, which that device follows,
+  paused ones included. Playing a list in this browser takes playback back and pauses that device,
+  and a browser that holds a song paused lets it go once another of the listener's devices plays,
+  as a newly active device stopped the old one. Volume stays with the device that plays, so the bar
+  hides it while another device plays.
+- **The list.** It shows the listener's own personal devices that reported in the last 30 seconds,
+  by name. Shared devices stay out, as old music's list never had them (D62). A device that goes
+  quiet leaves the list within 5 seconds of its last report turning 30 seconds old.
+- **Moving and loading.** A device row in "Play on" moves playback there with `move`, from this
+  browser or the device the player follows; with nothing playing anywhere it loads the current
+  song there. "This browser" moves it here. An album's menu has "Play on", which loads the album
+  onto another device and takes playback over. It replaces old music's command menu form for
+  `playback.play` with a device, which the `/music` port did not keep.
+- **One tab per browser.** Every tab on the origin shares the browser's device (ADR 0020), so
+  only one tab reports and applies requests: the first to take a Web Lock, or a tab that starts
+  playing, which takes the lock over. A tab that moves playback here takes it before the move. A
+  tab whose lock another tab took stops reporting and then lets go of its song
+  (`speakForDevice`), so the browser never plays audio that its device neither reports nor obeys.
+  Old music let every tab play, and its shared pause stopped them all. Every tab follows the
+  requests the core shows, though only the leader applies them, so a tap in a tab that does not
+  lead makes moot the requests it saw, as in the tab that leads, before it takes the lead.
+
+#### One rule for applying requests
+
+Every request, and every step of a load's start that waits on the network or on the queue, names
+the load it is for: its `loadRevision`, and once it started, the queue entry the player started
+for it. Before anything applies, `ConnectPlayer` checks that load against what is current at that
+moment, not when the request or the step began (`#standing` in `connect-player.ts`). A newer
+revision that names an older load is still an older load, so a counter alone never decides.
+
+The listener's actions reach the player through one boundary: `PlaybackController`'s play, pause,
+skip, seek, jump, and play-a-list calls run `onListenerAction` before they change anything, and
+`ConnectPlayer` makes every request seen so far moot there. The player bar, the keyboard, the
+command menu, and the system media controls (Media Session: headsets, media keys, the lock
+screen) all call those, so none of them can act while a Connect load still lands over it. What
+Connect itself applies goes through other calls (`steer`, `playTracksAt`, `playCurrentAt`,
+`release`) that never run it. Moving playback here and playing an album on another device reach
+the controller through those other calls too, so they make the requests moot themselves first.
+
+| A request arrives                                                                                                       | What holds now                                 | The device                                           | It settles                                    |
+| ----------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------- | --------------------------------------------- |
+| `transport` of a song                                                                                                   | that song is the one here                      | plays, pauses, or seeks it                           | its revision                                  |
+| `transport` of a song                                                                                                   | another song, or none, is here                 | changes nothing                                      | its revision                                  |
+| `load` under a new `loadRevision`                                                                                       | anything                                       | starts it, and drops a load still starting           | the newest revision asked of it, once started |
+| `load` of the load still starting here                                                                                  | anything                                       | starts it with this ask instead                      | this revision, once started                   |
+| `load` of the load that started here                                                                                    | the entry it started still plays here          | plays, pauses, or seeks it                           | its revision                                  |
+| `load` of the load that started here                                                                                    | what plays here moved on, as after a skip here | changes nothing                                      | its revision                                  |
+| `load` of an older load, or of one dropped                                                                              | anything                                       | changes nothing                                      | its revision                                  |
+| `stop`                                                                                                                  | anything                                       | lets go of the song, and drops a load still starting | its revision                                  |
+| the listener plays, pauses, seeks, skips, or plays a list here, from any screen, shortcut, or the system media controls | anything                                       | drops a load still starting                          | every revision seen                           |
+| none: the core shows nothing left to apply                                                                              | a load still starts here                       | drops it, as the core settled it                     | nothing; the core settled it                  |
+
+| A step of a load's start answers                                                             | What holds now                                    | The device                                                                                                                                                                                                                 |
+| -------------------------------------------------------------------------------------------- | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| the album's songs                                                                            | the load still starts here                        | writes the queue, as the load's newest ask says                                                                                                                                                                            |
+| the album's songs failed                                                                     | the load still starts here                        | drops it, and settles its newest ask as tried                                                                                                                                                                              |
+| the album's songs, or their failure                                                          | a newer request or the listener replaced the load | changes nothing; whoever replaced it settles                                                                                                                                                                               |
+| the new queue's write                                                                        | the load still starts here                        | starts the queue's entry as the load's newest ask says now, holds the load started on it, and settles; an entry the new queue loaded before the write answered moves to the asked position and pauses, or plays from there |
+| the new queue's write                                                                        | a newer request or the listener replaced the load | changes nothing; the player follows the new queue, playing or paused as the listener last chose                                                                                                                            |
+| the queue arrives holding its current entry, for a song's load waiting on it                 | the load still starts here                        | plays that entry from the position when it holds the song, keeping the queue, and otherwise replaces the queue with the song                                                                                               |
+| the queue's whole listing arrives without its current entry, for a song's load waiting on it | the load still starts here                        | replaces the queue with the song, since the entry left out holds a song the listener may not play                                                                                                                          |
+| the queue arrives without its current entry, and its listing is not whole                    | the load still starts here                        | keeps waiting                                                                                                                                                                                                              |
+
+The queue's listing is whole only at the revision of the queue's state (A whole listing is whole
+for one revision, below):
+
+| The queue's state shows | The listing's pages                                                                | The listing is whole |
+| ----------------------- | ---------------------------------------------------------------------------------- | -------------------- |
+| revision r              | every page in, each read at r                                                      | yes                  |
+| revision r              | every page in, all read at another revision, as a page's last answer kept on retry | no                   |
+| revision r              | every page in, read at different revisions                                         | no                   |
+| revision r              | pages loading again, with the last whole listing kept                              | no                   |
+
+- **Waiting for the queue.** A load of a song is a move only when the queue plays that song now,
+  and a browser can tell only once its queue arrived and holds the current entry. Until then the
+  load waits. So a move onto a browser that just opened, or one made while a new queue's pages
+  load, never replaces the shared queue with one song. A whole listing without the current entry
+  ends the wait: `music.queue.list` leaves out only an entry whose song the listener may no
+  longer play, as after their library access is revoked, and a load names only a song they may
+  play, so the entry left out never holds it, and the load replaces the queue.
+- **A whole listing is whole for one revision.** The queue's state (`music.queue.get`) and each
+  page of its listing are subscriptions of their own, and either can lag: a page whose
+  subscription retries keeps its last answer meanwhile, and a client can hear one query's change
+  before the other's. The core keeps a revision on the queue, which moves on with every change to
+  the queue or its entries, and answers it with the state and with every page. The listing is
+  whole only for the revision it was read at, so a listing kept from before the queue moved on
+  never says its new entry is left out. Access changes are not queue writes and leave the
+  revision as it is: an entry the listener may no longer play drops out of the next listing read
+  at that same revision. `queueStateOf` and `listingOf` in `packages/player/src/queue-listing.ts`
+  hold the rule, and the web and phone players both read the queue through them.
+- **The listener's newest choice.** A new queue starts playing or paused as the listener last
+  chose, here or through Connect, when its write answers, not as when it was sent. The old queue
+  ending meanwhile is no choice, so a list played then still plays. Convex can show a mutation's
+  writes to subscriptions before it answers the mutation, so the new queue may arrive and load its
+  first song first. The answer then applies that choice to the song loaded: it moves to the asked
+  position and pauses, or plays from there. The engine always ends doing what the player means.
+- **A song on its way.** Once a new queue's write answered, its first song counts as the song here
+  while its ticket is on the way: the browser reports it, and a play, pause, or seek of it, sent
+  from another device or tapped here, starts it as asked.
+- **A load dropped when the tab stops.** A tab that stops leading drops a load still starting,
+  and takes it again as a new one once it leads again while the core still shows it. A step of the
+  dropped start never acts for the new one.
+- **A write already sent.** A newer request makes an older load's start moot, but a queue write
+  it already sent still lands on the shared queue. The browser then follows the queue, as it follows
+  any change of it, playing or paused as the listener last chose.
+- **No start waits without end.** A load of a song waits for the queue's whole listing at the
+  revision of its state, which ends the wait whether or not it holds the current entry. An
+  album's songs and a queue write wait for the network's answer. Any wait also ends when a newer request or a tap here replaces the
+  load, when the tab stops leading, or when the core shows nothing left to apply. The core settles
+  every request when a device reports again after 30 seconds of silence (Rules for reports and
+  requests), so a load still starting then is dropped and never starts.
 
 ### Edge cases settled in the build
 
@@ -395,6 +530,28 @@ Added with the first review round (2026-11-15):
 - v0.3.0's rows pass the schema push and read as playing and asking nothing. The migration clears
   every old report and settles every old request under its own revision, so nothing fires, a load
   made in between still waits, and the device's next request is numbered above the old one.
+
+Added with the music web client's first fix round (2026-11-15):
+
+- A pause here while an album sent from another device writes its queue holds: the album starts
+  paused.
+- A load whose album fails after a newer load started leaves the newer load to play and settle.
+- A play, pause, or seek of a load the listener skipped away from here changes nothing, even under a
+  newer revision.
+- A move onto a browser whose queue has not arrived waits for it and keeps the queue.
+- A tab another tab of the browser took over from stops playing, so a remote pause stops all the
+  browser plays.
+- A pause sent while an album's first song is on its way starts it paused, and so does a pause
+  tapped then.
+- A pause sent while an album's queue is written starts the album paused, from the position sent.
+- A load that a tab dropped when it stopped leading starts once when it leads again.
+- A tap in a tab that does not lead makes moot the requests it saw before it took the lead, and a
+  load it made moot stays moot when it is asked again once that tab leads.
+
+Added with the music web client's fourth fix round (2026-11-15):
+
+- A pause or a skip from the system media controls (a headset, media keys, the lock screen) while
+  an album sent from another device still loads drops that load, as a tap on the screen does.
 
 Rejected in this build:
 

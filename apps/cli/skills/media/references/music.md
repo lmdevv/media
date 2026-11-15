@@ -371,7 +371,7 @@ Show your queue: the entry playing, how many there are, shuffle, repeat, and aut
 - Kind: query
 - Scope: music:play
 - Arguments: none
-- Result: `{ current: Id<"playQueueEntries"> | null; count: number; shuffle: boolean; repeat: "off" | "all" | "one"; autoplay: boolean }`
+- Result: `{ current: Id<"playQueueEntries"> | null; count: number; shuffle: boolean; repeat: "off" | "all" | "one"; autoplay: boolean; revision: number }`
 
 ## `music.queue.jump`
 
@@ -392,7 +392,7 @@ List your queue's entries in play order.
 - Scope: music:play
 - Arguments: `{ paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
 - Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
-- Result: `{ page: Array<{ itemId: Id<"playQueueEntries">; autoplay: boolean; track: { id: Id<"tracks">; title: string; artist: string; artistId: Id<"artists">; album: string; albumId: Id<"albums">; trackNumber: number | null; discNumber: number | null; durationMs: number; codec: string; lossless: boolean; bitrate: number | null; sampleRate: number | null; bitDepth: number | null; artUrl: string | null; liked: boolean } }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
+- Result: `{ page: Array<{ itemId: Id<"playQueueEntries">; autoplay: boolean; track: { id: Id<"tracks">; title: string; artist: string; artistId: Id<"artists">; album: string; albumId: Id<"albums">; trackNumber: number | null; discNumber: number | null; durationMs: number; codec: string; lossless: boolean; bitrate: number | null; sampleRate: number | null; bitDepth: number | null; artUrl: string | null; liked: boolean } }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null; revision: number }`
 
 ## `music.queue.move`
 

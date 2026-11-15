@@ -218,6 +218,8 @@ describe.skipIf(stack === undefined)("music listening", { timeout: 240_000 }, ()
     await aiko.signedIn.client.mutation(api.music.queue.autoplay, { on: false });
     await aiko.signedIn.client.mutation(api.music.queue.play, { trackIds: [gone, stays] });
 
+    const before = await aiko.signedIn.client.query(api.music.queue.get, {});
+
     await admin.signedIn.client.mutation(api.core.libraries.remove, {
       libraryId: shelf.library.libraryId,
     });
@@ -244,5 +246,8 @@ describe.skipIf(stack === undefined)("music listening", { timeout: 240_000 }, ()
     expect(queue.count).toBe(1);
     expect(entries.page.map((entry) => entry.track.id)).toEqual([stays]);
     expect(queue.current).toBe(entries.page[0]?.itemId ?? null);
+    // The purge's change to the queue moves its revision on, as a queue command's does.
+    expect(queue.revision).toBeGreaterThan(before.revision);
+    expect(entries.revision).toBe(queue.revision);
   });
 });

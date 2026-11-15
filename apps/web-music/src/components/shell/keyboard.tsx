@@ -83,6 +83,11 @@ export function KeyboardShortcuts() {
       callback: () => ui.openNewPlaylist(),
       options: { enabled: idle },
     },
+    {
+      hotkey: HOTKEYS["devices.toggle"],
+      callback: () => (ui.playOn === null ? ui.openPlayOn() : ui.closePlayOn()),
+      options: { enabled: idle },
+    },
   ]);
 
   return null;
