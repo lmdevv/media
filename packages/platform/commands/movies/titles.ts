@@ -687,7 +687,7 @@ const versionsResult = v.array(
 
 /** The handlers `convex/movies/titles.ts` passes to `register`, one per `movies.titles` command. */
 export interface Handlers {
-  /** `movies.titles.episode` (query, movies:read): Show an episode with its show and your progress, as a group session names it. */
+  /** `movies.titles.episode` (query, movies:play): Show an episode you can play with its show and your progress, as a group session names it. */
   readonly episode: (
     ctx: Omit<QueryCtx, "auth">,
     args: Infer<typeof episodeArgs>,
@@ -828,7 +828,7 @@ export const register = (handlers: Handlers) => ({
     args: episodeArgs,
     returns: episodeResult,
     handler: async (ctx, args) =>
-      handlers.episode(ctx, args, await requireCaller(ctx, "movies:read")),
+      handlers.episode(ctx, args, await requireCaller(ctx, "movies:play")),
   }),
   episodes: query({
     args: episodesArgs,

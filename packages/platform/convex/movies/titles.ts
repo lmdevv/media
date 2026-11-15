@@ -4,6 +4,7 @@ import type { DatabaseReader } from "../_generated/server";
 import { fail } from "../core/lib/errors";
 import { paginateAtMost } from "../core/lib/paginate";
 import { decidableRows, reachOf, requireItems } from "../core/permissions/grants";
+import { playableBy } from "../core/permissions/items";
 import { budgetedViewer, requireTitle, titleViewer, walkMovieLibraries } from "./access";
 import type { BudgetedViewer } from "./access";
 import { registerWithArtworkTickets } from "./artwork";
@@ -484,7 +485,15 @@ export const {
 
     if (found === null) return fail("not_found", "No such episode");
 
-    await requireTitle(ctx.db, caller, "view", found.titleId);
+    const decide = playableBy(ctx.db, await reachOf(ctx.db, caller));
+    const asEpisode = { domain: "movies", ref: { type: "episode", id: found._id } } as const;
+    const asShow = { domain: "movies", ref: { type: "title", id: found.titleId } } as const;
+
+    // It answers whoever may play the episode, as `movies.play.start` decides it, and no one
+    // else: a guest reads only an episode their share link or session covers.
+    if (!(await decide(asEpisode)) && !(await decide(asShow))) {
+      return fail("not_found", "No such episode");
+    }
 
     return presentEpisodeFor(ctx.db, caller.userId, found);
   },

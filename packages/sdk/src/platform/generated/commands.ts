@@ -5902,7 +5902,7 @@ export const effectMethods = (method: EffectBuilder) => ({
       start: method.mutation(movies_play_start),
     },
     titles: {
-      /** `movies.titles.episode` (query, movies:read): Show an episode with its show and your progress, as a group session names it. */
+      /** `movies.titles.episode` (query, movies:play): Show an episode you can play with its show and your progress, as a group session names it. */
       episode: method.query(movies_titles_episode),
       /** `movies.titles.episodes` (query, movies:read): List a season's episodes in order with your progress and their credits. */
       episodes: method.query(movies_titles_episodes),
@@ -6380,7 +6380,7 @@ export const promiseMethods = (method: PromiseBuilder) => ({
       start: method.mutation(movies_play_start),
     },
     titles: {
-      /** `movies.titles.episode` (query, movies:read): Show an episode with its show and your progress, as a group session names it. */
+      /** `movies.titles.episode` (query, movies:play): Show an episode you can play with its show and your progress, as a group session names it. */
       episode: method.query(movies_titles_episode),
       /** `movies.titles.episodes` (query, movies:read): List a season's episodes in order with your progress and their credits. */
       episodes: method.query(movies_titles_episodes),

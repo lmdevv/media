@@ -4338,9 +4338,10 @@ export const generatedCommands = [
     name: "movies.titles.episode",
     path: ["movies", "titles", "episode"],
     kind: "query",
-    scope: "movies:read",
+    scope: "movies:play",
     refusesKeys: false,
-    summary: "Show an episode with its show and your progress, as a group session names it",
+    summary:
+      "Show an episode you can play with its show and your progress, as a group session names it",
     secrets: [],
     paginated: false,
     args: Schema.Struct({ episodeId: Schema.String.pipe(Schema.brand("Id<episodes>")) }),

@@ -239,11 +239,11 @@ Start a movie or an episode: choose its file, resume your position, and get a st
 
 ## `movies.titles.episode`
 
-Show an episode with its show and your progress, as a group session names it.
+Show an episode you can play with its show and your progress, as a group session names it.
 
 - CLI: `media movies titles episode`
 - Kind: query
-- Scope: movies:read
+- Scope: movies:play
 - Arguments: `{ episodeId: Id<"episodes"> }`
 - Result: `{ id: Id<"episodes">; titleId: Id<"titles">; seasonId: Id<"seasons">; seasonNumber: number; episodeNumber: number; name: string; overview: string | null; airDate: string | null; runtimeMs: number | null; still: string | null; rating: number | null; externalIds: { tmdb: string | null; imdb: string | null; tvdb: string | null }; available: boolean; progress: { positionMs: number; durationMs: number; watched: boolean; updatedAt: number } | null }`
 
