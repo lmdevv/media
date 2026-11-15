@@ -800,6 +800,24 @@ describe("PlaybackController", () => {
     expect(controller.getSnapshot().engineStatus).toBe("paused");
   });
 
+  it("takes a system play the output applied itself to the engine too, as a tap's play", async () => {
+    const { controller, engine, record, systemControls } = setup({ playCurrent: "1" });
+
+    await controller.playTracks(["a", "b"], 0);
+    controller.sync(queueOf([one, two], "1"));
+    await settle();
+    await controller.togglePlay();
+    await settle();
+    const plays = record.plays;
+
+    engine().emit({ type: "playing" });
+    systemControls.handlers?.play();
+    await settle();
+
+    expect(record.plays).toBe(plays + 1);
+    expect(controller.playingHere()).toMatchObject({ trackId: "a", playing: true });
+  });
+
   it("plays and pauses as the system media controls ask, never toggling what plays", async () => {
     const { controller, systemControls } = setup({ playCurrent: "1" });
 

@@ -12,6 +12,7 @@ const settled = () =>
  */
 export class FakeOutput implements AudioOutput {
   readonly url: string;
+  readonly id: string;
   wantsPlay = false;
   loaded = false;
   live = false;
@@ -24,17 +25,15 @@ export class FakeOutput implements AudioOutput {
   readonly #listeners = new Set<(status: OutputStatus) => void>();
   readonly #heldSeeks: Array<{ readonly land: () => void; readonly refuse: () => void }> = [];
 
-  constructor(url: string) {
+  constructor(url: string, id: string) {
     this.url = url;
+    this.id = id;
   }
 
   samplePlayback = (): Pick<OutputStatus, "positionMs" | "control"> => ({
     positionMs: this.positionMs,
-    control: this.nativeControl(),
+    control: this.#control(),
   });
-
-  nativeControl = (): OutputControl =>
-    this.wantsPlay ? (this.loaded ? "playing" : "waiting") : "paused";
 
   play = (): void => {
     this.wantsPlay = true;
@@ -119,10 +118,16 @@ export class FakeOutput implements AudioOutput {
     this.#report({ error: message });
   }
 
+  #control(): OutputControl {
+    if (!this.wantsPlay) return "paused";
+
+    return this.loaded ? "playing" : "waiting";
+  }
+
   #report(patch: Partial<OutputStatus> = {}): void {
     const status: OutputStatus = {
       loaded: this.loaded,
-      control: this.wantsPlay ? (this.loaded ? "playing" : "waiting") : "paused",
+      control: this.#control(),
       positionMs: this.positionMs,
       durationMs: this.loaded && !this.live ? this.durationMs : null,
       finished: false,

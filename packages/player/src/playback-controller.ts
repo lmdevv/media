@@ -618,7 +618,11 @@ export class PlaybackController {
     if (!play) {
       this.#engine.pause();
       this.#saveResume();
-    } else if (!audible && !this.#reloadIfExpired(this.#livePositionMs())) {
+    } else if (audible) {
+      // A native player that played itself for the system's play: the engine still takes it, so
+      // its own intent matches the choice. A load under way plays as chosen once it lands.
+      if (!this.#loading) await this.#engine.play();
+    } else if (!this.#reloadIfExpired(this.#livePositionMs())) {
       await this.#engine.play();
     }
   }
@@ -1126,8 +1130,9 @@ export class PlaybackController {
 
   /**
    * Moves the song loaded here to `target` unless it is within a quarter second of it, then plays
-   * or pauses it as `#wantPlaying` says, so the engine ends doing what the controller means to. A
-   * song whose source failed loads again from `target` when it is to play.
+   * or pauses it as `#wantPlaying` says, even when it does so already, so the engine ends doing and
+   * meaning what the controller means to. A song whose source failed loads again from `target` when
+   * it is to play.
    */
   #steerLoaded(loaded: LoadedEntry, target: number): void {
     const playing = this.#wantPlaying;
@@ -1151,9 +1156,12 @@ export class PlaybackController {
       this.#update({ autoplayBlocked: false, error: null });
 
       if (!this.#reloadIfExpired(this.#livePositionMs())) void this.#engine.play();
-    } else if (!playing && audible) {
+    } else if (playing) {
+      void this.#engine.play();
+    } else {
       this.#engine.pause();
-      this.#saveResume();
+
+      if (audible) this.#saveResume();
     }
   }
 

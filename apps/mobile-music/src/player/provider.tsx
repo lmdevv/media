@@ -61,6 +61,7 @@ import { useServer } from "../session/connection";
 import { useProbeReach, useReachWhileAudible, useServerReach } from "../session/server-reach";
 import { useSessionPhase } from "../session/session-phase";
 import { openExpoOutput } from "./expo-audio-output";
+import type { LockScreenPlayers } from "./expo-audio-output";
 import {
   addLocal,
   clearLocal,
@@ -409,7 +410,11 @@ const createPhone = ({
   goLocal,
   playsKey,
 }: PhoneProps): Phone => {
-  const engine = new NativeEngine(openExpoOutput, {
+  const remoteCommands = requireNativeModule<EventEmitter<RemoteCommandEvents> & LockScreenPlayers>(
+    "RemoteCommands",
+  );
+
+  const engine = new NativeEngine((url) => openExpoOutput(url, remoteCommands), {
     mark: logTimeline,
     now: () => performance.now(),
   });
@@ -419,10 +424,7 @@ const createPhone = ({
   const unanswered: Phone["unanswered"] = new Set();
   const handing: Phone["handing"] = { current: null };
 
-  const controls = lockScreenControls(
-    engine,
-    requireNativeModule<EventEmitter<RemoteCommandEvents>>("RemoteCommands"),
-  );
+  const controls = lockScreenControls(engine, remoteCommands);
 
   const artFor = (artUrl: string | null): string | null => resolveMediaUrl(mediaUrl, artUrl);
 
@@ -952,7 +954,7 @@ const useDevicesView = (
     shown.current = transfer;
   }, [transfer]);
 
-  if (transfer.state === "pending" && transferArrived(transfer, connect)) {
+  if (transfer.state !== "idle" && transferArrived(transfer, connect)) {
     dispatch({ type: "arrived", id: transfer.move.id });
   }
 

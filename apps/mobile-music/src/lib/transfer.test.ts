@@ -73,6 +73,42 @@ describe("transfer", () => {
     expect(nextTransfer(refused, { type: "arrived", id: 1 })).toBe(refused);
   });
 
+  it("keeps that the core took a move it answered after the timeout, so Stay here moves back", () => {
+    const timedOut = run([
+      { type: "start", move: toLaptop },
+      { type: "timeout", id: 1 },
+    ]);
+
+    expect(nextTransfer(timedOut, { type: "landed", id: 1 })).toStrictEqual({
+      state: "failed",
+      move: toLaptop,
+      message: "That device didn’t respond. Check that it’s online and try again.",
+      landed: true,
+    });
+    expect(nextTransfer(timedOut, { type: "landed", id: 3 })).toBe(timedOut);
+    expect(nextTransfer(idleTransfer, { type: "landed", id: 1 })).toBe(idleTransfer);
+  });
+
+  it("closes a failed move once the core took it and its device answered it after all", () => {
+    const timedOut = run([
+      { type: "start", move: toLaptop },
+      { type: "timeout", id: 1 },
+    ]);
+
+    expect(transferArrived(timedOut, { here: false, devices: [laptopPlaying(false)] })).toBe(false);
+    expect(nextTransfer(timedOut, { type: "arrived", id: 1 })).toBe(timedOut);
+
+    const landedLate = nextTransfer(timedOut, { type: "landed", id: 1 });
+
+    expect(transferArrived(landedLate, { here: false, devices: [laptopPlaying(true)] })).toBe(
+      false,
+    );
+    expect(transferArrived(landedLate, { here: false, devices: [laptopPlaying(false)] })).toBe(
+      true,
+    );
+    expect(nextTransfer(landedLate, { type: "arrived", id: 1 })).toStrictEqual(idleTransfer);
+  });
+
   it("ignores what happens to a move the listener already replaced, even to the same device", () => {
     const again: Move = { ...toLaptop, id: 3 };
 

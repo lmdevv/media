@@ -73,7 +73,7 @@ const setup = async () => {
   const events: Array<EngineEvent> = [];
 
   const engine = new NativeEngine((url) => {
-    const output = new FakeOutput(url);
+    const output = new FakeOutput(url, `player-${outputs.length + 1}`);
 
     outputs.push(output);
 

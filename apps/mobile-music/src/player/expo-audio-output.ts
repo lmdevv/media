@@ -1,7 +1,18 @@
 import { createAudioPlayer, setAudioModeAsync } from "expo-audio";
-import type { AudioMetadata, AudioStatus } from "expo-audio";
+import type { AudioMetadata, AudioPlayer, AudioStatus } from "expo-audio";
 
 import type { AudioOutput, LockScreenInfo, OutputControl, OutputStatus } from "./native-engine";
+
+/**
+ * The part of the app's `RemoteCommands` module that learns which player expo-audio has on the
+ * lock screen, so each play and pause it forwards names the player it acted on.
+ */
+export interface LockScreenPlayers {
+  /** `player`, known as `id`, is now on the lock screen. */
+  readonly follow: (player: AudioPlayer, id: string) => void;
+  /** The player `id` left the lock screen or was released, if it was the one there. */
+  readonly unfollow: (id: string) => void;
+}
 
 const STATUS_INTERVAL_MS = 250;
 
@@ -50,8 +61,11 @@ const lockScreenMetadata = (info: LockScreenInfo): AudioMetadata => {
   return metadata;
 };
 
-/** Opens `url` on a new expo-audio player, paused. */
-export const openExpoOutput = (url: string): AudioOutput => {
+/**
+ * Opens `url` on a new expo-audio player, paused. It tells `lockScreen` when the engine puts the
+ * player on the lock screen, and when the player leaves it or is released.
+ */
+export const openExpoOutput = (url: string, lockScreen: LockScreenPlayers): AudioOutput => {
   void audioSession();
 
   const player = createAudioPlayer(
@@ -68,8 +82,10 @@ export const openExpoOutput = (url: string): AudioOutput => {
   let measuredMs = 0;
   let released = false;
   let seeking: Promise<void> = Promise.resolve();
+  const { id } = player;
 
   return {
+    id,
     samplePlayback: () => {
       const currentTime = player.currentTime;
 
@@ -80,7 +96,6 @@ export const openExpoOutput = (url: string): AudioOutput => {
         control: starting ? "waiting" : controlOf(player.currentStatus),
       };
     },
-    nativeControl: () => controlOf(player.currentStatus),
     play: () => {
       wantsPlay = true;
       starting = true;
@@ -113,6 +128,7 @@ export const openExpoOutput = (url: string): AudioOutput => {
     showOnLockScreen: (info, live) => {
       if (info === null) {
         player.setActiveForLockScreen(false);
+        lockScreen.unfollow(id);
 
         return;
       }
@@ -122,6 +138,7 @@ export const openExpoOutput = (url: string): AudioOutput => {
         showSeekBackward: false,
         isLiveStream: live,
       });
+      lockScreen.follow(player, id);
     },
     subscribe: (listener) => {
       const subscription = player.addListener("playbackStatusUpdate", (status) => {
@@ -134,6 +151,7 @@ export const openExpoOutput = (url: string): AudioOutput => {
     },
     release: () => {
       released = true;
+      lockScreen.unfollow(id);
       // `remove()` only forgets the player and leaves it playing until garbage collection;
       // `release()` stops it and frees it now.
       player.release();

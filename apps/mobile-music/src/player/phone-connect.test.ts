@@ -5,6 +5,7 @@ import { PlaybackController } from "@media/player/playback-controller";
 import type { MusicCommands, QueueEntry, QueueState } from "@media/player/playback-controller";
 import type { SourceResolver } from "@media/player/source-resolver";
 import { Result } from "effect";
+import * as fc from "fast-check";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { Track } from "@/lib/models";
@@ -69,31 +70,43 @@ interface Held {
   readonly fail: () => void;
 }
 
-type CommandListener = (event: { readonly positionMs: number }) => void;
+type Listeners = { readonly [Event in keyof RemoteCommandEvents]: Set<RemoteCommandEvents[Event]> };
 
 class FakeRemoteCommands implements RemoteCommands {
-  readonly #listeners = new Set<{
-    readonly event: keyof RemoteCommandEvents;
-    readonly listener: CommandListener;
-  }>();
+  readonly #listeners: Listeners = {
+    play: new Set(),
+    pause: new Set(),
+    unplugged: new Set(),
+    nextTrack: new Set(),
+    previousTrack: new Set(),
+    seekTo: new Set(),
+  };
 
-  addListener = (event: keyof RemoteCommandEvents, listener: CommandListener) => {
-    const subscription = { event, listener };
+  addListener = <Event extends keyof RemoteCommandEvents>(
+    event: Event,
+    listener: RemoteCommandEvents[Event],
+  ) => {
+    const listeners: Set<RemoteCommandEvents[Event]> = this.#listeners[event];
 
-    this.#listeners.add(subscription);
+    listeners.add(listener);
 
     return {
       remove: () => {
-        this.#listeners.delete(subscription);
+        listeners.delete(listener);
       },
     };
   };
 
-  /** Sends `event`, as the module does once expo-audio's own handler of the command has run. */
-  send(event: Exclude<keyof RemoteCommandEvents, "seekTo">): void {
-    for (const { event: heard, listener } of this.#listeners) {
-      if (heard === event) listener({ positionMs: 0 });
-    }
+  /** Sends the play or pause the module decided for a press on `player`. */
+  press(decided: "play" | "pause", player: FakeOutput | null): void {
+    const press = { player: player?.id ?? null };
+
+    for (const listener of this.#listeners[decided]) listener(press);
+  }
+
+  /** Sends headphones unplugged. */
+  unplug(): void {
+    for (const listener of this.#listeners.unplugged) listener();
   }
 }
 
@@ -108,7 +121,7 @@ const phone = () => {
   const events: Array<EngineEvent> = [];
 
   const engine = new NativeEngine((url) => {
-    const output = new FakeOutput(url);
+    const output = new FakeOutput(url, `player-${outputs.length + 1}`);
 
     outputs.push(output);
     setTimeout(() => {
@@ -239,25 +252,25 @@ const phone = () => {
     return output;
   };
 
-  /**
-   * The lock screen, Control Center, headphones, and CarPlay: expo-audio plays or pauses the
-   * player on the lock screen itself, and then the module sends the command.
-   */
   const lockScreen = {
     pause: (): void => {
-      shown().pause();
-      remote.send("pause");
+      const output = shown();
+
+      output.pause();
+      remote.press("pause", output);
     },
     play: (): void => {
-      shown().play();
-      remote.send("play");
+      const output = shown();
+
+      output.play();
+      remote.press("play", output);
     },
     toggle: (): void => {
       const output = shown();
 
       if (output.wantsPlay) output.pause();
       else output.play();
-      remote.send("togglePlayPause");
+      remote.press(output.wantsPlay ? "play" : "pause", output);
     },
     // expo-audio pauses every player that plays when an output goes away.
     unplug: (): void => {
@@ -265,7 +278,7 @@ const phone = () => {
         if (!output.released && output.wantsPlay && output.loaded) output.pause();
       }
 
-      remote.send("unplugged");
+      remote.unplug();
     },
   };
 
@@ -587,7 +600,7 @@ describe("The system's controls on the phone", () => {
     const first = run.outputOf(songA);
 
     first.wantsPlay = false;
-    run.remote.send("pause");
+    run.remote.press("pause", first);
     first.pause();
     run.release("al");
     await settle();
@@ -662,12 +675,14 @@ describe("The system's controls on the phone", () => {
     expect(run.outputOf(songA).wantsPlay).toBe(true);
   });
 
-  it("takes a toggle the player applied before its report arrived for what the player does", async () => {
+  it("takes a toggle the module decided as a pause before the player's report of it arrived", async () => {
     const run = phone();
 
     await playingA(run);
-    run.outputOf(songA).wantsPlay = false;
-    run.remote.send("togglePlayPause");
+    const first = run.outputOf(songA);
+
+    first.wantsPlay = false;
+    run.remote.press("pause", first);
     await settle();
 
     expect(run.controller.playingHere()).toMatchObject({ trackId: songA.id, playing: false });
@@ -744,4 +759,254 @@ describe("The system's controls on the phone", () => {
     expect(run.controller.playingHere()).toMatchObject({ trackId: songC.id, playing: true });
     expect(lastReport(run)).toMatchObject({ applied: 2 });
   });
+});
+
+describe("The system's commands on the phone carry their own outcome", () => {
+  it("hands over to the next song without a gap after a lock-screen play resumed a song paused here", async () => {
+    const run = phone();
+
+    await nearTheEnd(run);
+    await run.controller.togglePlay();
+    await settle();
+    run.lockScreen.play();
+    await settle();
+    const preloaded = run.outputOf(songB);
+    const players = run.outputs.length;
+
+    run.outputOf(songA).finish();
+    await settle();
+
+    expect(run.events.some((event) => event.type === "advanced")).toBe(true);
+    expect(preloaded.released).toBe(false);
+    expect(run.outputs).toHaveLength(players);
+    expect(run.controller.playingHere()).toMatchObject({ trackId: songB.id, playing: true });
+  });
+
+  it("pauses on an unplug after a lock-screen play resumed a song paused here, so a song moved on elsewhere loads paused", async () => {
+    const run = phone();
+
+    await playingA(run);
+    await run.controller.togglePlay();
+    await settle();
+    run.lockScreen.play();
+    await settle();
+
+    expect(run.controller.playingHere()).toMatchObject({ trackId: songA.id, playing: true });
+
+    run.lockScreen.unplug();
+    run.controller.sync(queueOf([one, two], "2"));
+    await settle();
+
+    expect(run.controller.playingHere()).toMatchObject({ trackId: songB.id, playing: false });
+    expect(run.outputOf(songB).wantsPlay).toBe(false);
+  });
+
+  it("keeps a headphone toggle's pause that reaches the app after the song's end moved the player on", async () => {
+    const run = phone();
+
+    await nearTheEnd(run);
+    const first = run.outputOf(songA);
+
+    first.pause();
+    first.finish();
+    run.remote.press("pause", first);
+    await settle();
+
+    expect(run.controller.playingHere()).toMatchObject({ trackId: songB.id, playing: false });
+    expect(run.engine.samplePlayback().playing).toBe(false);
+    expect(run.outputOf(songB).wantsPlay).toBe(false);
+  });
+
+  it("keeps a pause that reaches the app just after the song's end", async () => {
+    const run = phone();
+
+    await nearTheEnd(run);
+    const first = run.outputOf(songA);
+
+    first.finish();
+    run.remote.press("pause", first);
+    await settle();
+
+    expect(run.controller.playingHere()).toMatchObject({ trackId: songB.id, playing: false });
+    expect(run.engine.samplePlayback().playing).toBe(false);
+  });
+
+  it("keeps a pause sent twice, and takes a call's pause as the player's state only", async () => {
+    const run = phone();
+
+    await playingA(run);
+    await holdAlbumLoad(run);
+    const first = run.outputOf(songA);
+
+    first.pause();
+
+    expect(lastReport(run)).toMatchObject({ applied: 0 });
+
+    first.play();
+    run.lockScreen.pause();
+    run.remote.press("pause", first);
+    run.release("al");
+    await settle();
+
+    expect(plays(run)).toStrictEqual([]);
+    expect(run.controller.playingHere()).toMatchObject({ trackId: songA.id, playing: false });
+    expect(run.engine.samplePlayback().playing).toBe(false);
+  });
+
+  it("leaves a remote load to start on an unplug after a lock-screen pause of a new queue's first song, before its queue arrived", async () => {
+    const run = phone();
+
+    await run.controller.playTracks([songA.id, songB.id]);
+    await settle();
+
+    expect(run.controller.playingHere()).toMatchObject({ trackId: songA.id, playing: true });
+
+    run.lockScreen.pause();
+    await settle();
+    await holdAlbumLoad(run);
+    run.lockScreen.unplug();
+    run.answer.current = "c1";
+    run.release("al");
+    await settle();
+    run.controller.sync(queueOf([entryOf(songC, "c1"), entryOf(songD, "c2")], "c1"));
+    await settle();
+
+    expect(plays(run)).toStrictEqual([
+      `play:${songA.id},${songB.id}`,
+      `play:${songC.id},${songD.id}`,
+    ]);
+    expect(run.controller.playingHere()).toMatchObject({ trackId: songC.id, playing: true });
+  });
+
+  it("drops a lock-screen play decided for a song the player has since moved on from", async () => {
+    const run = phone();
+
+    await playingA(run);
+    await run.controller.togglePlay();
+    await settle();
+    const first = run.outputOf(songA);
+
+    first.play();
+    run.controller.sync(queueOf([one, two], "2"));
+    await settle();
+    run.remote.press("play", first);
+    await settle();
+
+    expect(run.controller.playingHere()).toMatchObject({ trackId: songB.id, playing: false });
+    expect(run.outputOf(songB).wantsPlay).toBe(false);
+  });
+});
+
+type Arrival = "status" | "finish" | "press" | "advance";
+
+interface Step {
+  readonly arrival: Arrival;
+  readonly settles: boolean;
+}
+
+const stepsOf = (
+  order: ReadonlyArray<Arrival>,
+  settles: ReadonlyArray<boolean>,
+): ReadonlyArray<Step> =>
+  order.map((arrival, index) => ({ arrival, settles: settles[index] === true }));
+
+/** A toggle that pauses a song as it ends: its four parts reach the app in any order. */
+const pauseRacingTheEnd = fc.record({
+  decided: fc.constant("pause" as const),
+  steps: fc
+    .tuple(
+      fc.shuffledSubarray<Arrival>(["status", "finish", "press", "advance"], {
+        minLength: 4,
+        maxLength: 4,
+      }),
+      fc.array(fc.boolean(), { minLength: 4, maxLength: 4 }),
+    )
+    .map(([order, settles]) => stepsOf(order, settles)),
+});
+
+/**
+ * A toggle that plays a song paused half a second before its end: its status and the module's play
+ * reach the app in either order, both before the song can play to its end.
+ */
+const playBeforeTheEnd = fc.record({
+  decided: fc.constant("play" as const),
+  steps: fc
+    .tuple(
+      fc.shuffledSubarray<Arrival>(["status", "press"], { minLength: 2, maxLength: 2 }),
+      fc.array(fc.boolean(), { minLength: 4, maxLength: 4 }),
+    )
+    .map(([first, settles]) => stepsOf(first.concat("finish", "advance"), settles)),
+});
+
+const deliver = async (
+  run: Phone,
+  decided: "play" | "pause",
+  steps: ReadonlyArray<Step>,
+): Promise<void> => {
+  const [step, ...rest] = steps;
+
+  if (step === undefined) return;
+  const first = run.outputs.find((output) => output.url.endsWith(songA.id));
+
+  if (first === undefined) throw new Error("Song A never opened");
+
+  if (step.arrival === "status" && decided === "pause") first.pause();
+
+  if (step.arrival === "status" && decided === "play") first.play();
+
+  if (step.arrival === "finish") first.finish();
+
+  if (step.arrival === "press") run.remote.press(decided, first);
+
+  if (step.arrival === "advance") run.controller.sync(queueOf([one, two], "2"));
+
+  if (step.settles) await settle();
+  await deliver(run, decided, rest);
+};
+
+describe("A toggle racing a song's end on the phone", () => {
+  it("ends as the toggle decided, whatever order its parts, the song's end, and the next song reach the app in", async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.oneof(pauseRacingTheEnd, playBeforeTheEnd),
+        async ({ decided, steps }) => {
+          const run = phone();
+
+          await nearTheEnd(run);
+
+          if (decided === "play") {
+            await run.controller.togglePlay();
+            await settle();
+          }
+
+          const preloaded = run.outputOf(songB);
+          const players = run.outputs.length;
+
+          await deliver(run, decided, steps);
+          await settle();
+
+          if (decided === "pause") {
+            expect(run.controller.playingHere()?.playing).toBe(false);
+            expect(run.engine.samplePlayback().playing).toBe(false);
+            expect(run.engine.meansToPlay()).toBe(false);
+            expect(run.outputs.filter((output) => !output.released && output.wantsPlay)).toEqual(
+              [],
+            );
+          } else {
+            expect(run.events.some((event) => event.type === "advanced")).toBe(true);
+            expect(preloaded.released).toBe(false);
+            expect(run.outputs).toHaveLength(players);
+            expect(run.controller.playingHere()).toMatchObject({
+              trackId: songB.id,
+              playing: true,
+            });
+            expect(run.engine.meansToPlay()).toBe(true);
+          }
+
+          for (const stop of stops.splice(0)) stop();
+        },
+      ),
+      { numRuns: 120 },
+    );
+  }, 60_000);
 });

@@ -33,8 +33,8 @@ export type Transfer =
   /** On its way: `landed` once the core took it, and then waiting for the device to answer it. */
   | { readonly state: "pending"; readonly move: Move; readonly landed: boolean }
   /**
-   * Refused, or unanswered: `landed` when the core had taken it, which stopped the device it went
-   * from, so staying there means moving back.
+   * Refused, or unanswered: `landed` once the core took it, before the failure or after, which
+   * stopped the device it went from, so staying there means moving back.
    */
   | {
       readonly state: "failed";
@@ -62,19 +62,22 @@ export type TransferEvent =
 export const idleTransfer: Transfer = { state: "idle" };
 
 /**
- * The move after `event`. What happens to a move other than the one pending changes nothing, and
- * a move counts as arrived only once the core took it.
+ * The move after `event`. What happens to a move other than the one shown changes nothing, and a
+ * move counts as arrived only once the core took it. Both count even after the move failed here,
+ * as when the core answers after the timeout: a failed move whose device then answers it is done.
  */
 export const nextTransfer = (transfer: Transfer, event: TransferEvent): Transfer => {
   if (event.type === "start") return { state: "pending", move: event.move, landed: false };
 
   if (event.type === "dismiss") return idleTransfer;
 
-  if (transfer.state !== "pending" || event.id !== transfer.move.id) return transfer;
+  if (transfer.state === "idle" || event.id !== transfer.move.id) return transfer;
 
   if (event.type === "landed") return { ...transfer, landed: true };
 
   if (event.type === "arrived") return transfer.landed ? idleTransfer : transfer;
+
+  if (transfer.state !== "pending") return transfer;
 
   return {
     state: "failed",
@@ -85,14 +88,15 @@ export const nextTransfer = (transfer: Transfer, event: TransferEvent): Transfer
 };
 
 /**
- * Whether the move pending in `transfer` has reached its device, as Connect shows it now: the core
- * took it, and this phone holds the song, or the other device answered it with its own report.
+ * Whether the move in `transfer`, pending or failed, has reached its device, as Connect shows it
+ * now: the core took it, and this phone holds the song, or the other device answered it with its
+ * own report.
  */
 export const transferArrived = (
   transfer: Transfer,
   connect: { readonly here: boolean; readonly devices: ReadonlyArray<Device> },
 ): boolean =>
-  transfer.state === "pending" &&
+  transfer.state !== "idle" &&
   moveArrived(
     {
       deviceId: transfer.move.to.target === HERE ? null : transfer.move.to.target,

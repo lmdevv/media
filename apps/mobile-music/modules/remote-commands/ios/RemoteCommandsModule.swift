@@ -9,14 +9,18 @@ import MediaPlayer
 /// it added, so this module's targets stay; while JavaScript listens, it switches the commands back
 /// on as soon as anything turns them off, and forwards each press as an event.
 ///
-/// expo-audio plays and pauses the AVPlayer itself for play, pause, and the play/pause toggle, moves
-/// it for a scrub, and pauses every player when headphones are unplugged. It tells JavaScript only
-/// of the player's new state, and a song that stops at its end looks the same. This module leaves
-/// all of that as it is and forwards each command, and the unplug, as an event too, so the app's
-/// player hears the person's command itself, as it hears a tap. It switches none of these commands
-/// on or off: expo-audio does, by whether a song is on the lock screen and whether its length is
-/// known.
+/// expo-audio plays and pauses the AVPlayer on the lock screen itself for play, pause, and the
+/// play/pause toggle, moves it for a scrub, and pauses every player when headphones are unplugged.
+/// It tells JavaScript only of the player's new state, and a song that stops at its end looks the
+/// same. This module leaves all of that as it is. It forwards each play, pause, and toggle as a
+/// play or a pause, decided here as the press comes and tagged with the player it acted on, which
+/// the app names with `follow`, so the app's player hears the person's choice itself, as it hears a
+/// tap. It forwards the unplug too. It switches none of these commands on or off: expo-audio does,
+/// by whether a song is on the lock screen and whether its length is known.
 public final class RemoteCommandsModule: Module {
+  /// The player on the lock screen, as the app last named it. Main thread only.
+  private var shown: Shown?
+
   private lazy var next = TrackCommand(MPRemoteCommandCenter.shared().nextTrackCommand) { [weak self] in
     self?.sendEvent("nextTrack")
   }
@@ -35,17 +39,17 @@ public final class RemoteCommandsModule: Module {
   }
 
   private lazy var play = CommandTarget(MPRemoteCommandCenter.shared().playCommand) { [weak self] _ in
-    self?.forward("play")
+    self?.forward(.play)
     return .success
   }
 
   private lazy var pause = CommandTarget(MPRemoteCommandCenter.shared().pauseCommand) { [weak self] _ in
-    self?.forward("pause")
+    self?.forward(.pause)
     return .success
   }
 
   private lazy var toggle = CommandTarget(MPRemoteCommandCenter.shared().togglePlayPauseCommand) { [weak self] _ in
-    self?.forward("togglePlayPause")
+    self?.forward(.toggle)
     return .success
   }
 
@@ -56,7 +60,21 @@ public final class RemoteCommandsModule: Module {
   public func definition() -> ModuleDefinition {
     Name("RemoteCommands")
 
-    Events("nextTrack", "previousTrack", "seekTo", "play", "pause", "togglePlayPause", "unplugged")
+    Events("nextTrack", "previousTrack", "seekTo", "play", "pause", "unplugged")
+
+    Function("follow") { (player: SharedRef<AVPlayer>, id: String) in
+      DispatchQueue.main.async {
+        self.shown = Shown(player: player, id: id)
+      }
+    }
+
+    Function("unfollow") { (id: String) in
+      DispatchQueue.main.async {
+        if self.shown?.id == id {
+          self.shown = nil
+        }
+      }
+    }
 
     OnStartObserving("nextTrack") {
       self.next.attach()
@@ -82,12 +100,15 @@ public final class RemoteCommandsModule: Module {
       self.seek.detach()
     }
 
+    // A toggle sends a play or a pause, and the app listens to both together.
     OnStartObserving("play") {
       self.play.attach()
+      self.toggle.attach()
     }
 
     OnStopObserving("play") {
       self.play.detach()
+      self.toggle.detach()
     }
 
     OnStartObserving("pause") {
@@ -96,14 +117,6 @@ public final class RemoteCommandsModule: Module {
 
     OnStopObserving("pause") {
       self.pause.detach()
-    }
-
-    OnStartObserving("togglePlayPause") {
-      self.toggle.attach()
-    }
-
-    OnStopObserving("togglePlayPause") {
-      self.toggle.detach()
     }
 
     OnStartObserving("unplugged") {
@@ -125,14 +138,46 @@ public final class RemoteCommandsModule: Module {
     }
   }
 
-  /// Sends a play, pause, or toggle press on the main queue's next turn. The command center calls
-  /// every target of a press in one turn, so expo-audio's own target has played or paused the
-  /// AVPlayer by then, and the app reads what a toggle did from the player.
-  private func forward(_ event: String) {
+  /// Sends `press` as a play or a pause on the main queue's next turn, with the id of the player
+  /// that was on the lock screen as it came, or none. The command center calls every target of a
+  /// press in that one turn, in no documented order, so by the next one expo-audio's own target has
+  /// played or paused that player, and a toggle sends what it did.
+  private func forward(_ press: Press) {
+    let pressed = shown
+    let player = pressed?.player?.ref
+
     DispatchQueue.main.async { [weak self] in
-      self?.sendEvent(event)
+      let plays: Bool
+
+      switch press {
+      case .play:
+        plays = true
+      case .pause:
+        plays = false
+      case .toggle:
+        guard let player else {
+          return
+        }
+
+        plays = player.timeControlStatus != .paused
+      }
+
+      self?.sendEvent(plays ? "play" : "pause", ["player": pressed?.id])
     }
   }
+}
+
+/// What a press asks of the player on the lock screen.
+private enum Press {
+  case play
+  case pause
+  case toggle
+}
+
+/// The lock screen's player, held weakly so a released one goes, and the app's id for it.
+private struct Shown {
+  weak var player: SharedRef<AVPlayer>?
+  let id: String
 }
 
 /// One remote command this module holds on, from `attach` until `detach`. Main thread only, as

@@ -42,12 +42,15 @@ export interface LockScreenInfo {
 /** One native player holding one opened stream. */
 export interface AudioOutput {
   /**
+   * Names this player to the app's `RemoteCommands` module, whose plays and pauses carry the id of
+   * the player they acted on.
+   */
+  readonly id: string;
+  /**
    * Reads native output now, independently of a queued status callback. A play asked of the player
    * reads as waiting until the player starts it.
    */
   readonly samplePlayback: () => Pick<OutputStatus, "positionMs" | "control">;
-  /** What the native player itself does now, a play asked of it but not started yet aside. */
-  readonly nativeControl: () => OutputControl;
   readonly play: () => void;
   readonly pause: () => void;
   /** Moves to `positionMs` in this stream. */
@@ -202,8 +205,9 @@ const streamStartFor = (positionMs: number): number =>
  * The lock screen, Control Center, headphones, and CarPlay play and pause the native player
  * itself (expo-audio's own remote commands), and iOS pauses it when headphones are unplugged. The
  * engine reports such a change only as the player's state: the app's `RemoteCommands` module tells
- * the controller of the command itself (`native-host.ts`). A song ends only when its player says
- * it finished, whatever its position when it pauses.
+ * the controller of the command itself, as a play or a pause it decided, with the player it acted
+ * on (`native-host.ts`). A song ends only when its player says it finished, whatever its position
+ * when it pauses.
  */
 export class NativeEngine implements PlayerEngine {
   readonly #open: OpenOutput;
@@ -221,13 +225,14 @@ export class NativeEngine implements PlayerEngine {
   }
 
   /**
-   * Whether the current song's native player plays, or waits to, as it is now, whatever the engine
-   * asked of it: after expo-audio played or paused it for a system command, what it did.
+   * Whether `playerId` names the current song's native player: the one on the lock screen, which
+   * the system's commands act on. False once the engine moved on to another player, the next song's
+   * or a reopened stream's.
    */
-  nativelyPlaying(): boolean {
+  isCurrentPlayer(playerId: string | null): boolean {
     const stream = this.#currentSlot().stream;
 
-    return stream !== null && stream.output.nativeControl() !== "paused";
+    return stream !== null && stream.output.id === playerId;
   }
 
   /**
@@ -586,9 +591,11 @@ export class NativeEngine implements PlayerEngine {
     this.#emit({ type: "paused" });
   }
 
+  /** Means `stream` to play, and starts its player unless it plays, or waits to, already. */
   #play(stream: Stream): void {
     stream.asked = "play";
-    stream.output.play();
+
+    if (stream.output.samplePlayback().control === "paused") stream.output.play();
   }
 
   #onStatus(slot: Slot, stream: Stream, reported: OutputStatus): void {
