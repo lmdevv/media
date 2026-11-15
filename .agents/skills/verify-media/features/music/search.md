@@ -13,8 +13,8 @@ and shows a top result with the title as tagged. The CLI returns the same matche
 ## How to get to it (user POV)
 
 - Desktop web: `Search` in the Library sidebar, or `/` with focus outside a field.
-- Phone web: the search button beside the tab bar.
-- Terminal: `music search <query>`.
+- Phone web: the `Search` tab.
+- Terminal: `media music library search <query>`.
 - iOS app: the search button beside the tab bar.
 
 ## Driving it with verify-media
@@ -29,7 +29,7 @@ Preconditions:
   `$S browser --app music wait --role heading --name "Top result"`. Then
   `$S browser --app music text --css "main section" --nth 0` prints `Top result`, `Doppelgänger`, and
   `Song · Doc & Lena Selyanina`.
-- **CLI.** Run `$S cli --app music -- search doppelganger --json`. Exit code `0`, and `tracks[0].title` is
+- **CLI.** Run `$S cli -- music library search doppelganger`. Exit code `0`, and `tracks[0].title` is
   `Doppelgänger` on the album `Vienna Blue`.
 - **Proof.** Run `$S browser --app music screenshot --path captures/verify/<run>/after/music/search/accents.png` and
   `$S browser --app music snapshot --in main --path captures/verify/<run>/after/music/search/accents.aria.txt`.

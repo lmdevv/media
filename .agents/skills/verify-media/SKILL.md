@@ -341,7 +341,7 @@ reads is the one they leave:
 | Command                                          | Does                                                         |
 | ------------------------------------------------ | ------------------------------------------------------------ |
 | `sign-in [--username U --password P]`            | Signs the page in at `/`, as `lucia` by default, and waits for `/home`. A movies page then opens `/movies` |
-| `setup [--movies DIR] [--shows DIR]`             | Creates the owner at `/` and adds the libraries from Admin, Libraries |
+| `setup [--movies DIR] [--shows DIR] [--music-folder DIR]` | Creates the owner at `/` and adds the libraries from Admin, Libraries |
 | `invite [--invite-role member\|admin]`           | Makes an invite link in Admin, Users (`/admin`) and prints its code |
 | `join --code C --username U [--password P]`      | Accepts an invite at `/invite#<code>` and makes the account  |
 | `create-account --username U [--password P] [--invite-role member\|admin]` | Makes an account with a password in Admin, Users |

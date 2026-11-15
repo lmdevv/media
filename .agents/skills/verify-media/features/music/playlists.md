@@ -17,20 +17,21 @@ deletes it. The sidebar and the CLI follow each change.
 - Desktop web: `New playlist` in the sidebar, or `n` with focus outside a field.
 - A song row's `More actions for <title>` menu, then `Add to playlist`.
 - A playlist's `More actions for <name>` menu: `Edit details…` and `Delete playlist…`.
-- Terminal: `music playlists list`, `create`, `add`, `remove`, `rename`, `delete`.
+- Terminal: `media music playlists list`, `create`, `add-tracks`, `remove-item`, `update`, and
+  `remove`.
 
 ## Driving it with verify-media
 
 Preconditions:
 
-- `$S doctor` passes, and `$S cli --app music -- playlists list --json` has no playlist named `Road trip`.
+- `$S doctor` passes, and `$S cli -- music playlists list` has no playlist named `Road trip`.
 
 - **Create.** Open an album so focus is outside fields: `$S browser --app music open /albums`,
   `$S browser --app music click --role link --name "Vienna Blue" --in main --nth 0`, and
   `$S browser --app music wait --role heading --name "Vienna Blue"`. Then run `$S browser --app music press --key n`,
   `$S browser --app music wait --role dialog --name "New playlist"`, `$S browser --app music type --value "Road trip"`,
   and `$S browser --app music press --key Enter`. The heading `Road trip` appears, and
-  `$S cli --app music -- playlists list --json` lists it with `"trackCount": 0`.
+  `$S cli -- music playlists list` lists it with `"trackCount": 0`.
 - **Add.** Go back to the album with `$S browser --app music open /albums` and the album click above. Hover the
   row with `$S browser --app music hover --role row --name Doppelgänger --in main`, then run
   `$S browser --app music click --role button --name "More actions for Doppelgänger" --in main`,
@@ -47,7 +48,7 @@ Preconditions:
 - **Delete.** Run `$S browser --app music click --role button --name "More actions for Night drive"`,
   `$S browser --app music click --role menuitem --name "Delete playlist…"`, and
   `$S browser --app music click --role button --name "Delete playlist"`. The URL ends in `/playlists`, the
-  text `Deleted Night drive` appears, and `$S cli --app music -- playlists list --json` no longer lists it.
+  text `Deleted Night drive` appears, and `$S cli -- music playlists list` no longer lists it.
 - **Proof.** Screenshot each state with `$S browser --app music screenshot --path
   captures/verify/<run>/after/music/playlists/<step>.png`.
 

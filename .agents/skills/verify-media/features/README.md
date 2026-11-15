@@ -83,5 +83,5 @@ commands, and observable proof.
 - [My List and Continue watching](./my-list.md) covers adding to My List and the Continue
   watching row with its resume point and next episode.
 
-Old [music] runs on every side too. Its map is [music/README.md](./music/README.md), with
-first-run setup, playback, search, playlists, and devices.
+Music runs on every side too, at `/music` on the same image. Its map is
+[music/README.md](./music/README.md), with the music library, playback, search, and playlists.
