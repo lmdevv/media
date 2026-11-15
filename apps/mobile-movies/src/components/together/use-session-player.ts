@@ -434,6 +434,13 @@ export const useSessionFollow = (
         });
 
   const step = decided?.step ?? null;
+  const counting = decided?.countdown !== null && decided?.countdown !== undefined;
+
+  // Queued once per item, by whichever of the host's screens did it: any of them that sees the
+  // countdown counts it as queued, so Watch credits on one stops it on all.
+  useEffect(() => {
+    if (hosting && counting && watchedKey !== null) watched.current.add(watchedKey);
+  }, [hosting, counting, watchedKey]);
 
   const stepKey =
     step === null || clock === null || item === null

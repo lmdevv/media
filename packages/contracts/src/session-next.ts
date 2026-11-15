@@ -46,8 +46,9 @@ export interface NextCountdown {
 
 /**
  * What the host does now. `queue`: put the next episode first in the queue, which starts everyone's
- * countdown. `next`: move the session on to what is queued first. `pause`: hold the session at the
- * end of an item with nothing after it.
+ * countdown. `next`: move the session on to what is queued first, only while the session plays, so
+ * someone who paused in the credits can watch them. `pause`: hold the session at the end of an item
+ * with nothing after it.
  */
 export type HostStep = "queue" | "next" | "pause";
 
@@ -83,7 +84,7 @@ export const sessionNext = (input: NextInput): SessionNext => {
 
   if (nextKey !== null && !counting && !input.creditsWatched) return { countdown, step: "queue" };
 
-  if (counting && left === 0) return { countdown, step: "next" };
+  if (counting && left === 0 && clock.status === "playing") return { countdown, step: "next" };
 
   if (!ended) return { countdown, step: null };
 

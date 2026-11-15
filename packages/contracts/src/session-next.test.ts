@@ -85,6 +85,18 @@ describe("sessionNext", () => {
     ).toStrictEqual({ countdown: null, step: "next" });
   });
 
+  it("does not move on while the session is paused in the credits", () => {
+    expect(
+      sessionNext(
+        input({
+          clock: at(credits + NEXT_EPISODE_COUNTDOWN_MS, "paused"),
+          headKey: NEXT,
+          queued: true,
+        }),
+      ).step,
+    ).toBeNull();
+  });
+
   it("does not queue again after the host watched the credits, and holds at the end", () => {
     expect(sessionNext(input({ clock: at(credits), creditsWatched: true })).step).toBeNull();
     expect(sessionNext(input({ clock: at(DURATION_MS), creditsWatched: true })).step).toBe("pause");
