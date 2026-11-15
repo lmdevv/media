@@ -350,6 +350,27 @@ describe("ConnectPlayer", () => {
     expect(last(run.reports)).toMatchObject({ applied: 7 });
   });
 
+  it("starts an album load with the pause a controller sent while its songs loaded", async () => {
+    const run = connected();
+    const loaded = { kind: "load", item: album("al"), positionMs: 0, loadRevision: 6 } as const;
+
+    run.albumGate.holding = true;
+    run.connect.take(ask(6, { ...loaded, playing: true, at: run.clock.now }));
+    await settle();
+    run.connect.take(ask(7, { ...loaded, playing: false, positionMs: 4000, at: run.clock.now }));
+    await settle();
+
+    expect(last(run.reports)).toMatchObject({ applied: 0 });
+
+    run.albumGate.release();
+    await settle();
+
+    expect(names(run.sent)[0]).toBe("play:c,d,0");
+    expect(run.record.loads.map((load) => load.startMs)).toStrictEqual([4000]);
+    expect(run.controller.playingHere()).toMatchObject({ trackId: "c", playing: false });
+    expect(last(run.reports)).toMatchObject({ song: { trackId: "c", playing: false }, applied: 7 });
+  });
+
   it("drops an album load that a newer request replaced while its songs loaded", async () => {
     const run = connected();
 

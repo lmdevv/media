@@ -365,7 +365,8 @@ browser, and `use-connect.ts` runs them in the player provider.
   online window. A browser with no song loaded reports playing nothing.
 - **Applying requests.** Each request is tagged with its revision. An album's songs that answer
   after a newer request, or after the listener acted in that browser, are dropped, as the
-  controller drops a stale load. A `transport` steers the song only while it is the one loaded,
+  controller drops a stale load. A play, pause, or seek of a load still starting comes as that same
+  load under a newer revision; the load then starts with it and settles the newer revision. A `transport` steers the song only while it is the one loaded,
   and seeks only when it is more than 250 ms off. A `load` of the song the shared queue plays now
   plays that entry from the position and keeps the queue, which is how a move lands. A `load` of
   another song or of an album replaces the queue, as old music's play on a chosen device did. A

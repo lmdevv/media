@@ -118,6 +118,22 @@ export class ServerClock {
   }
 }
 
+/** A request to play an item from a position. */
+type LoadAsk = Extract<ConnectAsk, { readonly kind: "load" }>;
+
+/**
+ * A load whose start waits on the network: its songs, or the new queue. A controller that plays,
+ * pauses, or seeks the device meanwhile asks for the same load again under a newer revision, which
+ * the load then starts with.
+ */
+interface PendingLoad {
+  readonly loadRevision: number;
+  /** The newest ask for this load. */
+  readonly ask: LoadAsk;
+  /** The revision that asked it, which the load settles once it starts. */
+  readonly revision: number;
+}
+
 const reportKey = (here: PlayingHere | null, status: string, seeks: number, applied: number) =>
   here === null
     ? `none|${applied}`
@@ -148,6 +164,8 @@ export class ConnectPlayer {
   #handling: number | null = null;
   /** The revision of the newest load started here; a request that names it only steers. */
   #startedLoad = 0;
+  /** The load starting here, while its songs or its queue are still on the way. */
+  #pendingLoad: PendingLoad | null = null;
   #reported: string | null = null;
   #stop: (() => void) | null = null;
 
@@ -181,6 +199,7 @@ export class ConnectPlayer {
       unsubscribe();
       stopBeats();
       this.#handling = null;
+      this.#pendingLoad = null;
 
       if (this.#stop === stop) this.#stop = null;
     };
@@ -200,6 +219,17 @@ export class ConnectPlayer {
     if (request.revision <= this.#applied || request.revision === this.#handling) return;
 
     this.#handling = request.revision;
+    const pending = this.#pendingLoad;
+    const { ask } = request;
+
+    // The load starting here, asked again with a newer play, pause, or position: it starts with it.
+    if (pending !== null && ask.kind === "load" && ask.loadRevision === pending.loadRevision) {
+      this.#pendingLoad = { ...pending, ask, revision: request.revision };
+
+      return;
+    }
+
+    this.#pendingLoad = null;
     void this.#apply(request);
   }
 
@@ -209,6 +239,7 @@ export class ConnectPlayer {
    */
   supersede(): void {
     this.#handling = null;
+    this.#pendingLoad = null;
     this.settle(this.#seen);
   }
 
@@ -223,6 +254,8 @@ export class ConnectPlayer {
   }
 
   async #apply({ revision, ask }: ConnectRequest): Promise<void> {
+    let settled: number | null = revision;
+
     try {
       switch (ask.kind) {
         case "stop": {
@@ -239,18 +272,27 @@ export class ConnectPlayer {
         }
 
         case "load": {
-          await this.#load(revision, ask);
+          settled = await this.#load(revision, ask);
           break;
         }
       }
     } catch {
-      // A load that failed changed nothing here; the request is still settled, as the device
-      // tried it, and the controller shows its own failures.
+      // A load whose songs failed changed nothing here; its newest ask is still settled, as the
+      // device tried it, unless another request replaced it meanwhile.
+      const pending = this.#pendingLoad;
+
+      this.#pendingLoad = null;
+      settled =
+        ask.kind !== "load"
+          ? revision
+          : pending?.loadRevision === ask.loadRevision
+            ? pending.revision
+            : null;
     }
 
-    if (this.#handling !== revision) return;
+    if (settled === null || this.#handling !== settled) return;
     this.#handling = null;
-    this.settle(revision);
+    this.settle(settled);
   }
 
   /** Whether `item` is the song loaded here. */
@@ -260,41 +302,58 @@ export class ConnectPlayer {
     return here !== null && isSong(item) && item.ref.id === here.trackId;
   }
 
-  async #load(
-    revision: number,
-    ask: Extract<ConnectAsk, { readonly kind: "load" }>,
-  ): Promise<void> {
+  /**
+   * Starts the load `ask` names, or steers the one it already started, and answers the revision
+   * that settles it: the newest ask for this load, or null when another request or the listener
+   * replaced it while it started.
+   */
+  async #load(revision: number, ask: LoadAsk): Promise<number | null> {
     if (ask.loadRevision <= this.#startedLoad) {
       this.#controller.steer(ask.playing, positionAt(ask, this.serverNow()));
 
-      return;
+      return revision;
     }
 
     this.#startedLoad = ask.loadRevision;
     const { item } = ask;
+    const song = isSong(item);
 
-    if (item.domain !== "music") return;
+    if (item.domain !== "music" || (!song && item.ref.type !== "album")) return revision;
 
-    if (isSong(item)) {
-      const positionMs = positionAt(ask, this.serverNow());
-
-      if (this.#controller.playCurrentAt(item.ref.id, positionMs, ask.playing)) return;
-
-      await this.#controller.playTracks([item.ref.id], 0, { positionMs, playing: ask.playing });
-
-      return;
+    if (
+      song &&
+      this.#controller.playCurrentAt(item.ref.id, positionAt(ask, this.serverNow()), ask.playing)
+    ) {
+      return revision;
     }
 
-    if (item.ref.type !== "album") return;
-    const trackIds = await this.#commands.albumTracks(item.ref.id);
+    this.#pendingLoad = { loadRevision: ask.loadRevision, ask, revision };
+    const trackIds = song ? [item.ref.id] : await this.#commands.albumTracks(item.ref.id);
+    const fetched = this.#startingLoad();
 
-    // A newer request, or the listener here, replaced this load while its songs loaded.
-    if (this.#handling !== revision) return;
+    if (fetched?.loadRevision !== ask.loadRevision) return null;
 
     await this.#controller.playTracks(trackIds, 0, {
-      positionMs: positionAt(ask, this.serverNow()),
-      playing: ask.playing,
+      positionMs: positionAt(fetched.ask, this.serverNow()),
+      playing: fetched.ask.playing,
     });
+
+    const latest = this.#startingLoad();
+
+    if (latest?.loadRevision !== ask.loadRevision) return null;
+    this.#pendingLoad = null;
+
+    // A play, pause, or seek asked while the new queue was written lands on the song it started.
+    if (latest.ask !== fetched.ask) {
+      this.#controller.steer(latest.ask.playing, positionAt(latest.ask, this.serverNow()));
+    }
+
+    return latest.revision;
+  }
+
+  /** The load starting here as it stands now, which a request that arrived during an await changed. */
+  #startingLoad(): PendingLoad | null {
+    return this.#pendingLoad;
   }
 
   #changed = (): void => {
