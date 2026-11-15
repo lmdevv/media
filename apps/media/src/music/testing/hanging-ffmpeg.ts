@@ -6,15 +6,15 @@ import { isRunning } from "./recording-ffmpeg.ts";
 /**
  * Writes `dir/ffmpeg`: the real ffmpeg, except that a run whose arguments mention `hang` (its
  * source file's name) sleeps instead until it is killed. Every run first notes its process ID
- * under `dir/runs`. Resolves with the script's path, the number of runs started so far, and the
- * number of them still running.
+ * under `dir/runs`. Resolves with the script's path, the number of runs started so far, and both
+ * that number and how many of them still run, read from one listing so the two agree.
  */
 export const ffmpegHangingOnName = async (
   dir: string,
 ): Promise<{
   readonly path: string;
   readonly started: () => Promise<number>;
-  readonly running: () => Promise<number>;
+  readonly runs: () => Promise<{ readonly started: number; readonly running: number }>;
 }> => {
   const path = join(dir, "ffmpeg");
   const runs = join(dir, "runs");
@@ -37,7 +37,11 @@ export const ffmpegHangingOnName = async (
   return {
     path,
     started: async () => (await readdir(runs)).length,
-    running: async () => (await readdir(runs)).map(Number).filter(isRunning).length,
+    runs: async () => {
+      const pids = (await readdir(runs)).map(Number);
+
+      return { started: pids.length, running: pids.filter(isRunning).length };
+    },
   };
 };
 

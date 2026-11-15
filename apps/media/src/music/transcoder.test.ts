@@ -184,20 +184,24 @@ describe("Transcoder", { timeout: MEDIA_TEST_TIMEOUT }, () => {
     runScoped(
       Effect.gen(function* () {
         const scratch = yield* temporaryDirectory("sine");
-        const source = yield* sineSegment(scratch, "long", "mp3", 0, 48_000 * 240);
+        const source = yield* sineSegment(scratch, "held", "mp3", 0, 48_000 * 10);
         const dataDir = yield* temporaryDirectory("data");
-        const transcoder = yield* transcoderWith(dataDir);
+        const tools = yield* temporaryDirectory("ffmpeg");
+        const ffmpeg = yield* Effect.promise(() => ffmpegHeldOpen(tools));
+        yield* Effect.addFinalizer(() => Effect.promise(ffmpeg.release));
+        const transcoder = yield* transcoderWith(dataDir, ffmpeg.path);
         const cacheDir = join(dataDir, "cache", "music", "aac-320");
+        const cached = Effect.option(Files.statPath(join(cacheDir, "held-1.m4a")));
 
         const input = {
-          trackId: TrackId.make("long"),
+          trackId: TrackId.make("held"),
           profile: "aac-320" as const,
           source,
           mtimeMs: 1,
           codec: "mp3",
         };
 
-        const [streamed, finished] = yield* Effect.scoped(
+        const [early, streamed, finished] = yield* Effect.scoped(
           Effect.gen(function* () {
             const opened = yield* transcoder.open(input);
 
@@ -205,13 +209,21 @@ describe("Transcoder", { timeout: MEDIA_TEST_TIMEOUT }, () => {
               throw new Error("Expected a live transcode");
 
             expect(Option.isNone(opened.timing)).toBe(true);
-            expect(
-              Option.isNone(yield* Effect.option(Files.statPath(join(cacheDir, "long-1.m4a")))),
-            ).toBe(true);
 
-            return [yield* collect(opened.bytes), yield* opened.finished] as const;
+            yield* Files.statPath(ffmpeg.written).pipe(
+              Effect.retry({ schedule: Schedule.spaced("50 millis"), times: 400 }),
+            );
+            expect(Option.isNone(yield* cached)).toBe(true);
+            const firstChunk = yield* collect(Stream.take(opened.bytes, 1));
+
+            expect(firstChunk.length).toBeGreaterThan(0);
+            yield* Effect.promise(ffmpeg.release);
+
+            return [firstChunk, yield* collect(opened.bytes), yield* opened.finished] as const;
           }),
         );
+
+        expect(streamed.subarray(0, early.length).equals(early)).toBe(true);
 
         const file = yield* Files.readWholeFile(finished.path);
 
@@ -228,7 +240,7 @@ describe("Transcoder", { timeout: MEDIA_TEST_TIMEOUT }, () => {
           { codec_name: "aac", sample_rate: "44100", channels: 2 },
         ]);
 
-        expect(yield* listNames(cacheDir)).toEqual(["long-1.m4a"]);
+        expect(yield* listNames(cacheDir)).toEqual(["held-1.m4a"]);
         expect(
           Transcoder.Opened.$is("Finished")(yield* Effect.scoped(transcoder.open(input))),
         ).toBe(true);
@@ -588,10 +600,7 @@ describe("Transcoder", { timeout: MEDIA_TEST_TIMEOUT }, () => {
 
           const input = aacInput("hang", yield* sineSegment(library, "hang", "mp3", 0, 48_000));
 
-          const runs = Effect.promise(async () => ({
-            started: await ffmpeg.started(),
-            running: await ffmpeg.running(),
-          }));
+          const runs = Effect.promise(ffmpeg.runs);
 
           const almostHold = Duration.toMillis(Transcoder.PREPARE_HOLD) - 1000;
 
