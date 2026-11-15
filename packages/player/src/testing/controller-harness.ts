@@ -231,6 +231,8 @@ class Gate {
 /** What the system media controls (headset, lock screen, media keys) call while started. */
 interface SystemControls {
   handlers: MediaSessionHandlers | null;
+  /** How many times the controller called `NowPlayingControls.commanded`. */
+  commanded: number;
 }
 
 export const settle = (): Promise<void> =>
@@ -282,7 +284,7 @@ export const setup = (
   const sent: Array<Sent> = [];
   const clock = { now: 1_000_000, monotonic: 0 };
   const saved: Array<ResumePoint | null> = [];
-  const systemControls: SystemControls = { handlers: null };
+  const systemControls: SystemControls = { handlers: null, commanded: 0 };
   let starts = 0;
 
   const start = async (trackId: string): Promise<PlayStart> => {
@@ -340,6 +342,9 @@ export const setup = (
         systemControls.handlers = handlers;
       },
       show: () => {},
+      commanded: () => {
+        systemControls.commanded += 1;
+      },
     },
     resume: {
       load: () => options.resume ?? null,

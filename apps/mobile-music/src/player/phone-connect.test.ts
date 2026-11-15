@@ -73,6 +73,7 @@ interface Held {
 type Listeners = { readonly [Event in keyof RemoteCommandEvents]: Set<RemoteCommandEvents[Event]> };
 
 class FakeRemoteCommands implements RemoteCommands {
+  #last = 0;
   readonly #listeners: Listeners = {
     play: new Set(),
     pause: new Set(),
@@ -97,16 +98,41 @@ class FakeRemoteCommands implements RemoteCommands {
     };
   };
 
-  /** Sends the play or pause the module decided for a press on `player`. */
-  press(decided: "play" | "pause", player: FakeOutput | null): void {
-    const press = { player: player?.id ?? null };
+  stamp = (): number => {
+    this.#last += 1;
+
+    return this.#last;
+  };
+
+  /**
+   * Sends the play or pause the module decided for a press on `player`, stamped now, or with
+   * `stamp` when the press came earlier.
+   */
+  press(decided: "play" | "pause", player: FakeOutput | null, stamp = this.stamp()): void {
+    const press = { player: player?.id ?? null, stamp };
 
     for (const listener of this.#listeners[decided]) listener(press);
   }
 
-  /** Sends headphones unplugged. */
+  /** Sends the scrubber's move of `player` to `positionMs`, stamped now. */
+  seek(player: FakeOutput, positionMs: number): void {
+    const event = { player: player.id, positionMs, stamp: this.stamp() };
+
+    for (const listener of this.#listeners.seekTo) listener(event);
+  }
+
+  /** Sends Next, stamped now, or with `stamp` when it came earlier. */
+  next(stamp = this.stamp()): void {
+    const event = { stamp };
+
+    for (const listener of this.#listeners.nextTrack) listener(event);
+  }
+
+  /** Sends headphones unplugged, stamped now. */
   unplug(): void {
-    for (const listener of this.#listeners.unplugged) listener();
+    const event = { stamp: this.stamp() };
+
+    for (const listener of this.#listeners.unplugged) listener(event);
   }
 }
 
@@ -806,10 +832,11 @@ describe("The system's commands on the phone carry their own outcome", () => {
 
     await nearTheEnd(run);
     const first = run.outputOf(songA);
+    const pressed = run.remote.stamp();
 
     first.pause();
     first.finish();
-    run.remote.press("pause", first);
+    run.remote.press("pause", first, pressed);
     await settle();
 
     expect(run.controller.playingHere()).toMatchObject({ trackId: songB.id, playing: false });
@@ -822,9 +849,10 @@ describe("The system's commands on the phone carry their own outcome", () => {
 
     await nearTheEnd(run);
     const first = run.outputOf(songA);
+    const pressed = run.remote.stamp();
 
     first.finish();
-    run.remote.press("pause", first);
+    run.remote.press("pause", first, pressed);
     await settle();
 
     expect(run.controller.playingHere()).toMatchObject({ trackId: songB.id, playing: false });
@@ -897,7 +925,231 @@ describe("The system's commands on the phone carry their own outcome", () => {
   });
 });
 
-type Arrival = "status" | "finish" | "press" | "advance";
+describe("A system command the person chose again after, on the phone", () => {
+  it("keeps an in-app play made after a lock-screen pause whose command reaches the app later", async () => {
+    const run = phone();
+
+    await playingA(run);
+    const first = run.outputOf(songA);
+    const pressed = run.remote.stamp();
+
+    first.pause();
+    await run.controller.togglePlay();
+    await settle();
+    run.remote.press("pause", first, pressed);
+    await settle();
+
+    expect(run.controller.playingHere()).toMatchObject({ trackId: songA.id, playing: true });
+    expect(run.engine.meansToPlay()).toBe(true);
+    expect(first.wantsPlay).toBe(true);
+  });
+
+  it("keeps a song started in the app after a lock-screen pause of the one before, whose command reaches the app later", async () => {
+    const run = phone();
+
+    await playingA(run);
+    const first = run.outputOf(songA);
+    const pressed = run.remote.stamp();
+
+    first.pause();
+    await run.controller.playTracks([songC.id, songD.id]);
+    await settle();
+    run.remote.press("pause", first, pressed);
+    await settle();
+
+    expect(run.controller.playingHere()).toMatchObject({ trackId: songC.id, playing: true });
+    expect(run.engine.meansToPlay()).toBe(true);
+    expect(run.outputOf(songC).wantsPlay).toBe(true);
+  });
+
+  it("keeps an in-app pause made after a lock-screen play whose command reaches the app later", async () => {
+    const run = phone();
+
+    await playingA(run);
+    await run.controller.togglePlay();
+    await settle();
+    const first = run.outputOf(songA);
+    const pressed = run.remote.stamp();
+
+    first.play();
+    await run.controller.togglePlay();
+    await settle();
+    run.remote.press("play", first, pressed);
+    await settle();
+
+    expect(run.controller.playingHere()).toMatchObject({ trackId: songA.id, playing: false });
+    expect(run.engine.meansToPlay()).toBe(false);
+    expect(first.wantsPlay).toBe(false);
+  });
+
+  it("keeps a remote play applied after a lock-screen pause whose command reaches the app later", async () => {
+    const run = phone();
+
+    await playingA(run);
+    const first = run.outputOf(songA);
+    const pressed = run.remote.stamp();
+
+    first.pause();
+    run.connect.take(
+      ask(1, {
+        kind: "transport",
+        item: song(songA),
+        playing: true,
+        positionMs: 30_000,
+        at: run.clock.now,
+      }),
+    );
+    await settle();
+    run.remote.press("pause", first, pressed);
+    await settle();
+
+    expect(run.controller.playingHere()).toMatchObject({ trackId: songA.id, playing: true });
+    expect(run.engine.meansToPlay()).toBe(true);
+    expect(lastReport(run)).toMatchObject({ song: { trackId: songA.id, playing: true } });
+  });
+
+  it("keeps a lock-screen pause when the person only seeks in the app before its command arrives", async () => {
+    const run = phone();
+
+    await playingA(run);
+    const first = run.outputOf(songA);
+    const pressed = run.remote.stamp();
+
+    first.pause();
+    run.controller.seek(60_000);
+    await settle();
+    run.remote.press("pause", first, pressed);
+    run.controller.sync(queueOf([one, two], "2"));
+    await settle();
+
+    expect(run.controller.playingHere()).toMatchObject({ trackId: songB.id, playing: false });
+    expect(run.engine.meansToPlay()).toBe(false);
+  });
+
+  it("keeps a lock-screen pause when the person skips in the app before its command arrives", async () => {
+    const run = phone();
+
+    await playingA(run);
+    const first = run.outputOf(songA);
+    const pressed = run.remote.stamp();
+
+    first.pause();
+    await run.controller.next();
+    await settle();
+    run.remote.press("pause", first, pressed);
+    await settle();
+
+    expect(run.controller.playingHere()).toMatchObject({ trackId: songB.id, playing: false });
+    expect(run.engine.meansToPlay()).toBe(false);
+    expect(run.outputOf(songB).wantsPlay).toBe(false);
+  });
+
+  it("keeps a lock-screen pause when another device only scrubs the song as it last saw it, before the pause arrives", async () => {
+    const run = phone();
+
+    await playingA(run);
+    const first = run.outputOf(songA);
+    const pressed = run.remote.stamp();
+
+    // expo-audio paused the player; its report of that has not reached the app yet.
+    first.wantsPlay = false;
+    run.connect.take(
+      ask(1, {
+        kind: "transport",
+        item: song(songA),
+        playing: true,
+        positionMs: 60_000,
+        at: run.clock.now,
+      }),
+    );
+    await settle();
+    run.remote.press("pause", first, pressed);
+    await settle();
+
+    expect(run.controller.playingHere()).toMatchObject({
+      trackId: songA.id,
+      playing: false,
+      positionMs: 60_000,
+    });
+    expect(run.engine.meansToPlay()).toBe(false);
+    expect(first.wantsPlay).toBe(false);
+  });
+
+  it("applies a pause and a Next in the order they reach the app, whatever order the module stamped them in", async () => {
+    const run = phone();
+
+    await playingA(run);
+    const first = run.outputOf(songA);
+    const paused = run.remote.stamp();
+
+    first.pause();
+    run.remote.next();
+    await settle();
+    run.remote.press("pause", first, paused);
+    await settle();
+
+    expect(run.controller.playingHere()).toMatchObject({ trackId: songB.id, playing: false });
+    expect(run.engine.meansToPlay()).toBe(false);
+  });
+
+  it("takes a lock-screen scrub that reaches the app after a pause tapped in the app", async () => {
+    const run = phone();
+
+    await playingA(run);
+    const first = run.outputOf(songA);
+
+    first.positionMs = 120_000;
+    await run.controller.togglePlay();
+    run.remote.seek(first, 120_000);
+    await settle();
+
+    expect(run.controller.playingHere()).toMatchObject({
+      trackId: songA.id,
+      playing: false,
+      positionMs: 120_000,
+    });
+  });
+
+  it("drops a lock-screen scrub of a song the person replaced in the app before it arrived", async () => {
+    const run = phone();
+
+    await playingA(run);
+    const first = run.outputOf(songA);
+
+    first.positionMs = 120_000;
+    await run.controller.playTracks([songC.id, songD.id]);
+    await settle();
+    run.remote.seek(first, 120_000);
+    await settle();
+
+    expect(run.controller.playingHere()).toMatchObject({ trackId: songC.id, playing: true });
+    expect(run.outputOf(songC).positionMs).toBe(0);
+  });
+
+  it("drops a lock-screen Next pressed before the person started another song in the app", async () => {
+    const run = phone();
+
+    await playingA(run);
+    const pressed = run.remote.stamp();
+
+    await run.controller.playTracks([songC.id, songD.id]);
+    run.controller.sync(queueOf([entryOf(songC, "n1"), entryOf(songD, "n2")], "n1"));
+    await settle();
+    run.remote.next(pressed);
+    await settle();
+
+    expect(run.controller.playingHere()).toMatchObject({ trackId: songC.id, playing: true });
+    expect(run.sent.filter((call) => call.startsWith("jump:"))).toStrictEqual([]);
+  });
+});
+
+type Arrival = "status" | "finish" | "press" | "advance" | "person";
+
+/**
+ * What the person does after the press, before or after its command reaches the app: taps the
+ * app's play or pause, or plays or pauses from another device.
+ */
+type Choice = "tap" | "remote play" | "remote pause";
 
 interface Step {
   readonly arrival: Arrival;
@@ -919,7 +1171,7 @@ const pauseRacingTheEnd = fc.record({
         minLength: 4,
         maxLength: 4,
       }),
-      fc.array(fc.boolean(), { minLength: 4, maxLength: 4 }),
+      fc.array(fc.boolean(), { minLength: 5, maxLength: 5 }),
     )
     .map(([order, settles]) => stepsOf(order, settles)),
 });
@@ -933,20 +1185,83 @@ const playBeforeTheEnd = fc.record({
   steps: fc
     .tuple(
       fc.shuffledSubarray<Arrival>(["status", "press"], { minLength: 2, maxLength: 2 }),
-      fc.array(fc.boolean(), { minLength: 4, maxLength: 4 }),
+      fc.array(fc.boolean(), { minLength: 5, maxLength: 5 }),
     )
     .map(([first, settles]) => stepsOf(first.concat("finish", "advance"), settles)),
 });
 
-const deliver = async (
-  run: Phone,
-  decided: "play" | "pause",
+/**
+ * The person's choice, anywhere after expo-audio acted on the press (the `status` step), before or
+ * after the press's command reaches the app.
+ */
+const choiceAfterThePress = fc.option(
+  fc.record({
+    choice: fc.constantFrom<Choice>("tap", "remote play", "remote pause"),
+    at: fc.nat(),
+  }),
+  { nil: null, freq: 3 },
+);
+
+const withChoice = (
   steps: ReadonlyArray<Step>,
-): Promise<void> => {
+  made: { readonly at: number } | null,
+  settles: boolean,
+): ReadonlyArray<Step> => {
+  if (made === null) return steps;
+  const after = steps.findIndex((step) => step.arrival === "status") + 1;
+  const index = after + (made.at % (steps.length - after + 1));
+
+  return [...steps.slice(0, index), { arrival: "person", settles }, ...steps.slice(index)];
+};
+
+interface Run {
+  readonly phone: Phone;
+  readonly decided: "play" | "pause";
+  /** The number the module took as the press came, before any of its parts reached the app. */
+  readonly pressed: number;
+  readonly choice: Choice | null;
+  /** Whether the person's newest choice, or else the press, means to play. */
+  plays: boolean;
+  revision: number;
+}
+
+const choose = (run: Run, choice: Choice): void => {
+  const { phone: device } = run;
+  const here = device.controller.playingHere();
+
+  if (here === null) return;
+
+  if (choice === "tap") {
+    // A toggle while a move is on its way loads the move's entry instead of toggling what plays.
+    if (device.controller.getSnapshot().current !== here.itemId) return;
+    run.plays = !here.playing;
+    void device.controller.togglePlay();
+
+    return;
+  }
+
+  const playing = choice === "remote play";
+
+  // A request that leaves playing or paused as the phone shows it is no new choice.
+  if (playing !== here.playing) run.plays = playing;
+  run.revision += 1;
+  device.connect.take(
+    ask(run.revision, {
+      kind: "transport",
+      item: { domain: "music", ref: { type: "track", id: here.trackId } },
+      playing,
+      positionMs: here.positionMs,
+      at: device.clock.now,
+    }),
+  );
+};
+
+const deliver = async (run: Run, steps: ReadonlyArray<Step>): Promise<void> => {
   const [step, ...rest] = steps;
 
   if (step === undefined) return;
-  const first = run.outputs.find((output) => output.url.endsWith(songA.id));
+  const { phone: device, decided } = run;
+  const first = device.outputs.find((output) => output.url.endsWith(songA.id));
 
   if (first === undefined) throw new Error("Song A never opened");
 
@@ -956,57 +1271,76 @@ const deliver = async (
 
   if (step.arrival === "finish") first.finish();
 
-  if (step.arrival === "press") run.remote.press(decided, first);
+  if (step.arrival === "press") device.remote.press(decided, first, run.pressed);
 
-  if (step.arrival === "advance") run.controller.sync(queueOf([one, two], "2"));
+  if (step.arrival === "advance") device.controller.sync(queueOf([one, two], "2"));
+
+  if (step.arrival === "person" && run.choice !== null) choose(run, run.choice);
 
   if (step.settles) await settle();
-  await deliver(run, decided, rest);
+  await deliver(run, rest);
 };
 
 describe("A toggle racing a song's end on the phone", () => {
-  it("ends as the toggle decided, whatever order its parts, the song's end, and the next song reach the app in", async () => {
+  it("ends as the toggle decided, whatever order its parts, the song's end, and the next song reach the app in, unless the person chose again after it", async () => {
     await fc.assert(
       fc.asyncProperty(
         fc.oneof(pauseRacingTheEnd, playBeforeTheEnd),
-        async ({ decided, steps }) => {
-          const run = phone();
+        choiceAfterThePress,
+        async ({ decided, steps }, made) => {
+          const device = phone();
 
-          await nearTheEnd(run);
+          await nearTheEnd(device);
 
           if (decided === "play") {
-            await run.controller.togglePlay();
+            await device.controller.togglePlay();
             await settle();
           }
 
-          const preloaded = run.outputOf(songB);
-          const players = run.outputs.length;
+          const preloaded = device.outputOf(songB);
+          const players = device.outputs.length;
 
-          await deliver(run, decided, steps);
+          const run: Run = {
+            phone: device,
+            decided,
+            pressed: device.remote.stamp(),
+            choice: made?.choice ?? null,
+            plays: decided === "play",
+            revision: 0,
+          };
+
+          await deliver(run, withChoice(steps, made, steps.at(-1)?.settles === true));
           await settle();
 
-          if (decided === "pause") {
-            expect(run.controller.playingHere()?.playing).toBe(false);
-            expect(run.engine.samplePlayback().playing).toBe(false);
-            expect(run.engine.meansToPlay()).toBe(false);
-            expect(run.outputs.filter((output) => !output.released && output.wantsPlay)).toEqual(
+          for (const output of device.outputs) if (!output.released) output.tick();
+          await settle();
+
+          if (!run.plays) {
+            expect(device.controller.playingHere()?.playing).toBe(false);
+            expect(device.engine.samplePlayback().playing).toBe(false);
+            expect(device.engine.meansToPlay()).toBe(false);
+            expect(device.outputs.filter((output) => !output.released && output.wantsPlay)).toEqual(
               [],
             );
-          } else {
-            expect(run.events.some((event) => event.type === "advanced")).toBe(true);
+          } else if (made === null) {
+            expect(device.events.some((event) => event.type === "advanced")).toBe(true);
             expect(preloaded.released).toBe(false);
-            expect(run.outputs).toHaveLength(players);
-            expect(run.controller.playingHere()).toMatchObject({
+            expect(device.outputs).toHaveLength(players);
+            expect(device.controller.playingHere()).toMatchObject({
               trackId: songB.id,
               playing: true,
             });
-            expect(run.engine.meansToPlay()).toBe(true);
+            expect(device.engine.meansToPlay()).toBe(true);
+          } else {
+            expect(device.controller.playingHere()?.playing).toBe(true);
+            expect(device.engine.meansToPlay()).toBe(true);
+            expect(device.playing().wantsPlay).toBe(true);
           }
 
           for (const stop of stops.splice(0)) stop();
         },
       ),
-      { numRuns: 120 },
+      { numRuns: 200 },
     );
-  }, 60_000);
+  }, 90_000);
 });

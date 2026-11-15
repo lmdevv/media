@@ -110,6 +110,11 @@ export class FakeOutput implements AudioOutput {
     this.#report({ finished: true });
   }
 
+  /** Reports the player's state, unchanged, as expo-audio does every 250 ms while it is open. */
+  tick(): void {
+    this.#report();
+  }
+
   notifyPlayingLate(): void {
     this.#report({ control: "playing", positionMs: 0 });
   }

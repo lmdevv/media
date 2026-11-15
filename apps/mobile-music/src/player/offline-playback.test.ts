@@ -105,7 +105,7 @@ const phoneWithB = () => {
       settings: { quality: "high", volume: 1, gapless: true },
       saveQuality: () => {},
       saveVolume: () => {},
-      nowPlaying: { setHandlers: () => {}, show: () => {} },
+      nowPlaying: { setHandlers: () => {}, show: () => {}, commanded: () => {} },
       resume: { load: () => null, save: () => {} },
     },
   );
@@ -260,7 +260,7 @@ const awayInThePocket = () => {
       settings: { quality: "high", volume: 1, gapless: true },
       saveQuality: () => {},
       saveVolume: () => {},
-      nowPlaying: { setHandlers: () => {}, show: () => {} },
+      nowPlaying: { setHandlers: () => {}, show: () => {}, commanded: () => {} },
       resume: { load: () => null, save: () => {} },
     },
   );

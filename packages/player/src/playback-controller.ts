@@ -137,6 +137,15 @@ export interface NowPlayingControls {
   readonly setHandlers: (handlers: MediaSessionHandlers | null) => void;
   /** Shows `track` at `positionMs`, or clears the surface when nothing plays here. */
   readonly show: (track: NowPlayingTrack | null, playing: boolean, positionMs: number) => void;
+  /**
+   * Called synchronously as a new choice starts, before the controller acts on it, whoever made it:
+   * the listener, the system media controls, or Connect. A choice plays or pauses against what
+   * plays here, picks a song to play, or lets go of playback here. A seek, a skip, and a Connect
+   * request that leaves playing or paused as it is carry the choice before them and never call it.
+   * A phone's system commands reach it late, so it orders them against these, and a press older
+   * than the newest choice applies to nothing (ADR 0018). The web's arrive in order and ignore it.
+   */
+  readonly commanded: () => void;
 }
 
 /** The core's music commands the player sends. Each rejects with the SDK's tagged errors. */
@@ -505,6 +514,7 @@ export class PlaybackController {
     index: number | undefined,
     startAt: () => StartAt | null,
   ): Promise<string | null> {
+    this.#env.nowPlaying.commanded();
     this.#unlockOutput();
     this.#skipped.clear();
     this.#choose(startAt()?.playing ?? true);
@@ -551,6 +561,7 @@ export class PlaybackController {
   /** Plays or pauses. The engine reacts at once, inside the tap, which satisfies autoplay rules. */
   async togglePlay(): Promise<void> {
     this.#listenerActed();
+    this.#env.nowPlaying.commanded();
     await this.#playOrPause("toggle");
   }
 
@@ -562,6 +573,7 @@ export class PlaybackController {
    */
   #systemControl(ask: "play" | "pause"): void {
     this.#listenerActed();
+    this.#env.nowPlaying.commanded();
     void this.#playOrPause(ask);
     // A song still loading, or still on its way here, plays as the listener chose, before the
     // engine says so.
@@ -584,7 +596,7 @@ export class PlaybackController {
       const play = ask === "toggle" ? !here.playing : ask === "play";
 
       if (play) this.#unlockOutput();
-      this.steer(play, here.positionMs);
+      this.#steer(play, here.positionMs);
 
       return;
     }
@@ -668,6 +680,7 @@ export class PlaybackController {
   /** Plays the queue entry `itemId`. */
   async jump(itemId: string): Promise<void> {
     this.#listenerActed();
+    this.#env.nowPlaying.commanded();
     this.#unlockOutput();
     this.#skipped.clear();
     this.#choose(true);
@@ -739,6 +752,12 @@ export class PlaybackController {
    * first song still on its way here starts as asked.
    */
   steer(playing: boolean, positionMs: number): boolean {
+    if (this.playingHere()?.playing !== playing) this.#env.nowPlaying.commanded();
+
+    return this.#steer(playing, positionMs);
+  }
+
+  #steer(playing: boolean, positionMs: number): boolean {
     const loaded = this.#loaded;
     const target = Math.max(0, Math.round(positionMs));
 
@@ -781,6 +800,7 @@ export class PlaybackController {
 
     if (entry === null || entry.track.id !== trackId) return false;
 
+    this.#env.nowPlaying.commanded();
     this.#skipped.clear();
     this.#early = null;
     this.#pendingJump = null;
@@ -798,6 +818,7 @@ export class PlaybackController {
    * stays, and this device keeps its place in the song, paused, as after a stop.
    */
   release(): void {
+    this.#env.nowPlaying.commanded();
     this.#releases += 1;
     this.#choose(false);
     const here = this.playingHere();

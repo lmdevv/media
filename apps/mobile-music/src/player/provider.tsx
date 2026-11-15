@@ -83,7 +83,7 @@ import { LocalStore, offlinePlaysKey } from "./local-store";
 import { NativeEngine } from "./native-engine";
 import type { TimelineMark } from "./native-engine";
 import { lockScreenControls } from "./native-host";
-import type { RemoteCommandEvents } from "./native-host";
+import type { RemoteCommandEvents, RemoteCommands } from "./native-host";
 import { boundedSources, NOT_DOWNLOADED, phoneSources, SERVER_AWAY } from "./phone-sources";
 import {
   isPlaying,
@@ -410,9 +410,9 @@ const createPhone = ({
   goLocal,
   playsKey,
 }: PhoneProps): Phone => {
-  const remoteCommands = requireNativeModule<EventEmitter<RemoteCommandEvents> & LockScreenPlayers>(
-    "RemoteCommands",
-  );
+  const remoteCommands = requireNativeModule<
+    EventEmitter<RemoteCommandEvents> & Pick<RemoteCommands, "stamp"> & LockScreenPlayers
+  >("RemoteCommands");
 
   const engine = new NativeEngine((url) => openExpoOutput(url, remoteCommands), {
     mark: logTimeline,
@@ -430,6 +430,7 @@ const createPhone = ({
 
   const nowPlaying: NowPlayingControls = {
     setHandlers: controls.setHandlers,
+    commanded: controls.commanded,
     show: (track, playing, positionMs) => {
       controls.show(
         track === null ? null : { ...track, artUrl: artFor(track.artUrl) },

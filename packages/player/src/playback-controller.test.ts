@@ -836,6 +836,40 @@ describe("PlaybackController", () => {
     expect(controller.playingHere()).toMatchObject({ trackId: "a", playing: false });
   });
 
+  it("tells the now-playing surface of each new choice before it acts, and of no seek, skip, or Connect request that keeps what plays", async () => {
+    const { controller, systemControls } = setup({ playCurrent: "1" });
+
+    controller.sync(queueOf([one, two, three], "1"));
+    await settle();
+
+    const counted = async (act: () => Promise<void> | void): Promise<number> => {
+      const before = systemControls.commanded;
+
+      await act();
+
+      return systemControls.commanded - before;
+    };
+
+    expect(await counted(() => controller.togglePlay())).toBe(1);
+    expect(await counted(() => controller.next())).toBe(0);
+    expect(await counted(() => controller.previous())).toBe(0);
+    expect(await counted(() => controller.jump("3"))).toBe(1);
+    expect(await counted(() => controller.seek(10_000))).toBe(0);
+    expect(
+      await counted(() => {
+        controller.steer(true, 20_000);
+      }),
+    ).toBe(0);
+    expect(
+      await counted(() => {
+        controller.steer(false, 0);
+      }),
+    ).toBe(1);
+    expect(await counted(() => controller.playTracks(["a", "b"], 0))).toBe(1);
+    expect(await counted(() => systemControls.handlers?.pause())).toBe(1);
+    expect(await counted(() => controller.release())).toBe(1);
+  });
+
   it("keeps the next song's preload through a reload of the playing song", async () => {
     const { controller, record, clock, engine } = setup({ playCurrent: "1", ticketMs: 60_000 });
 

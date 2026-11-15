@@ -17,16 +17,24 @@ import MediaPlayer
 /// the app names with `follow`, so the app's player hears the person's choice itself, as it hears a
 /// tap. It forwards the unplug too. It switches none of these commands on or off: expo-audio does,
 /// by whether a song is on the lock screen and whether its length is known.
+///
+/// Every event carries a `stamp` from one sequence, taken as the press comes, in the same
+/// main-queue turn as expo-audio's own target, or as iOS posts the unplug. The app takes a number
+/// from the same sequence (`stamp`) before each of its own commands reaches a player, so it can
+/// tell whether a press came before or after that command, though the event reaches JavaScript
+/// later.
 public final class RemoteCommandsModule: Module {
   /// The player on the lock screen, as the app last named it. Main thread only.
   private var shown: Shown?
 
+  private let stamps = Stamps()
+
   private lazy var next = TrackCommand(MPRemoteCommandCenter.shared().nextTrackCommand) { [weak self] in
-    self?.sendEvent("nextTrack")
+    self?.send("nextTrack")
   }
 
   private lazy var previous = TrackCommand(MPRemoteCommandCenter.shared().previousTrackCommand) { [weak self] in
-    self?.sendEvent("previousTrack")
+    self?.send("previousTrack")
   }
 
   private lazy var seek = CommandTarget(MPRemoteCommandCenter.shared().changePlaybackPositionCommand) { [weak self] event in
@@ -34,7 +42,7 @@ public final class RemoteCommandsModule: Module {
       return .commandFailed
     }
 
-    self?.sendEvent("seekTo", ["positionMs": change.positionTime * 1000])
+    self?.send("seekTo", ["positionMs": change.positionTime * 1000, "player": self?.shown?.id])
     return .success
   }
 
@@ -53,14 +61,25 @@ public final class RemoteCommandsModule: Module {
     return .success
   }
 
+  /// Stamped on the thread iOS posts the route change on, as it happens, and sent from main.
   private lazy var unplugged = OutputGone { [weak self] in
-    self?.sendEvent("unplugged")
+    guard let stamp = self?.stamps.next() else {
+      return
+    }
+
+    DispatchQueue.main.async {
+      self?.sendEvent("unplugged", ["stamp": stamp])
+    }
   }
 
   public func definition() -> ModuleDefinition {
     Name("RemoteCommands")
 
     Events("nextTrack", "previousTrack", "seekTo", "play", "pause", "unplugged")
+
+    Function("stamp") { () -> Int in
+      self.stamps.next()
+    }
 
     Function("follow") { (player: SharedRef<AVPlayer>, id: String) in
       DispatchQueue.main.async {
@@ -138,13 +157,20 @@ public final class RemoteCommandsModule: Module {
     }
   }
 
-  /// Sends `press` as a play or a pause on the main queue's next turn, with the id of the player
-  /// that was on the lock screen as it came, or none. The command center calls every target of a
-  /// press in that one turn, in no documented order, so by the next one expo-audio's own target has
-  /// played or paused that player, and a toggle sends what it did.
+  private func send(_ event: String, _ body: [String: Any?] = [:]) {
+    var stamped = body
+    stamped["stamp"] = stamps.next()
+    sendEvent(event, stamped)
+  }
+
+  /// Sends `press` as a play or a pause on the main queue's next turn, with its stamp and the id of
+  /// the player on the lock screen, or none, both taken as it came. The command center calls every
+  /// target of a press in that one turn, in no documented order, so by the next one expo-audio's
+  /// own target has played or paused that player, and a toggle sends what it did.
   private func forward(_ press: Press) {
     let pressed = shown
     let player = pressed?.player?.ref
+    let stamp = stamps.next()
 
     DispatchQueue.main.async { [weak self] in
       let plays: Bool
@@ -162,7 +188,21 @@ public final class RemoteCommandsModule: Module {
         plays = player.timeControlStatus != .paused
       }
 
-      self?.sendEvent(plays ? "play" : "pause", ["player": pressed?.id])
+      self?.sendEvent(plays ? "play" : "pause", ["player": pressed?.id, "stamp": stamp])
+    }
+  }
+}
+
+/// One sequence of numbers, from 1, for the module's presses and the app's own commands. Locked, as
+/// presses come on the main thread and the app's `stamp` calls on the JavaScript thread.
+private final class Stamps {
+  private let lock = NSLock()
+  private var last = 0
+
+  func next() -> Int {
+    lock.withLock {
+      last += 1
+      return last
     }
   }
 }
@@ -264,7 +304,8 @@ private final class CommandTarget {
 }
 
 /// The audio output going away, as headphones unplugged or a car disconnected, from `attach` until
-/// `detach`. iOS stops the audio then, and expo-audio pauses every player.
+/// `detach`. iOS stops the audio then, and expo-audio pauses every player. `onGone` runs on the
+/// thread iOS posts the change on.
 private final class OutputGone {
   private let onGone: () -> Void
   private var observer: NSObjectProtocol?
@@ -282,7 +323,7 @@ private final class OutputGone {
       observer = NotificationCenter.default.addObserver(
         forName: AVAudioSession.routeChangeNotification,
         object: AVAudioSession.sharedInstance(),
-        queue: .main
+        queue: nil
       ) { [onGone] notification in
         guard
           let reason = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,

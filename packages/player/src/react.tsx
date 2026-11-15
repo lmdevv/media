@@ -345,6 +345,8 @@ const createController = ({
             positionMs,
           );
         },
+        // Media Session handlers run on the page's own thread, in order with its other commands.
+        commanded: () => {},
       },
       resume: browserResume(storage),
     },
