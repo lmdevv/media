@@ -218,7 +218,11 @@ const advance = (ms: number) =>
 const follower = (
   session: Session,
   player: FakePlayer,
-  options: { readonly controls?: boolean; readonly pausesForStalls?: boolean } = {},
+  options: {
+    readonly controls?: boolean;
+    readonly pausesForStalls?: boolean;
+    readonly resumeHold?: number;
+  } = {},
 ) =>
   Effect.gen(function* () {
     const started = yield* Effect.forkChild(
@@ -226,9 +230,10 @@ const follower = (
         player,
         port: session.port,
         clock: yield* session.clock,
-        durationMs: 3_600_000,
+        durationMs: () => 3_600_000,
         controls: options.controls ?? false,
         pausesForStalls: options.pausesForStalls ?? false,
+        resumeHold: options.resumeHold ?? null,
       }),
     );
 
@@ -523,6 +528,53 @@ describe("follower", () => {
         yield* advance(2_000);
 
         expect((yield* session.clock).status).toBe("playing");
+      }),
+    ));
+  it("holds the session again for a later stall after someone overtook the first hold", () =>
+    scenario(playingForAMinute, (session) =>
+      Effect.gen(function* () {
+        const lucia = yield* makePlayer(0);
+
+        yield* follower(session, lucia, { controls: true, pausesForStalls: true });
+        yield* advance(4_000);
+        lucia.stall();
+        yield* advance(3_000);
+        yield* meanwhile(session.move({ kind: "play" }));
+        lucia.recover();
+        yield* advance(5_000);
+        expect((yield* session.clock).status).toBe("playing");
+
+        lucia.stall();
+        yield* advance(3_000);
+        expect((yield* session.clock).status).toBe("paused");
+
+        lucia.recover();
+        yield* advance(3_000);
+        expect((yield* session.clock).status).toBe("playing");
+      }),
+    ));
+
+  it("plays the session on for a hold an earlier follower of the player left", () =>
+    scenario({ ...playingForAMinute, status: "paused", positionAtAnchorMs: 70_000 }, (session) =>
+      Effect.gen(function* () {
+        const lucia = yield* makePlayer(0);
+        const held = (yield* session.clock).revision;
+
+        lucia.stall();
+        lucia.viewerPlay();
+
+        const member = yield* follower(session, lucia, {
+          controls: true,
+          pausesForStalls: true,
+          resumeHold: held,
+        });
+
+        expect((yield* member.current).holding).toStrictEqual({ kind: "held", revision: held });
+
+        lucia.recover();
+        yield* advance(3_000);
+        expect((yield* session.clock).status).toBe("playing");
+        expect((yield* member.current).holding).toBeNull();
       }),
     ));
 });

@@ -496,7 +496,7 @@ function PlayerSession({ params, attempt, onRestart, choices }: PlayerSessionPro
   const chapters = useMemo(() => chapterRows(started?.file.probe.chapters ?? []), [started]);
 
   const more: ReadonlyArray<MoreItem> = [
-    ...(download !== null || (!inSession && together.mode !== "solo")
+    ...(download !== null || (!inSession && (together.mode !== "solo" || together.elsewhere))
       ? []
       : [
           {

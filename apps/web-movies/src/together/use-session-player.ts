@@ -2,7 +2,6 @@ import { positionAt, toServerTime } from "@media/contracts/clock";
 import { sessionNext } from "@media/contracts/session-next";
 import type { NextCountdown } from "@media/contracts/session-next";
 import type { FollowerPlayer, ViewerMove } from "@media/contracts/follower";
-import { EpochMillis } from "@media/contracts/units";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { toastFailure } from "@media/ui/lib/failure";
 import { useNavigate } from "@tanstack/react-router";
@@ -12,7 +11,7 @@ import { toast } from "sonner";
 import type { Episode } from "@/lib/catalog";
 import { useLatest } from "@/lib/use-latest";
 
-import { useCurrentSession } from "./current-session";
+import { useCurrentSession, useServerNow } from "./current-session";
 import { MOVIES, itemKey, itemOf, moviesItem, sessionUrl } from "./session";
 import type {
   JoinedSession,
@@ -91,8 +90,15 @@ export interface SessionPlayer {
   readonly hostAway: boolean;
   /** How the followed session stopped, until the viewer goes on alone. */
   readonly stopped: SessionStop | null;
-  /** The start dialog's link: null while the session is created, undefined while it is closed. */
+  /**
+   * The start dialog's link: null while the session is created and reaches this screen, undefined
+   * while the dialog is closed.
+   */
   readonly starting: string | null | undefined;
+  /** The person is in a session that plays something else, so this page cannot start one. */
+  readonly elsewhere: boolean;
+  /** The session's position now, by the server's clock as heartbeats estimate it. */
+  readonly positionNow: () => number;
   readonly actions: SessionActions;
 }
 
@@ -116,7 +122,9 @@ export const useSessionPlayer = (
   const joined = view?.state === "joined" ? view : null;
   const target = useSessionTarget(moviesItem(joined?.item ?? null));
   const [following, setFollowing] = useState(false);
-  const [starting, setStarting] = useState<string | null | undefined>(undefined);
+  /** The start dialog: open while not undefined, with the session it created once known. */
+  const [created, setCreated] = useState<JoinedSession["sessionId"] | null | undefined>(undefined);
+  const serverNow = useServerNow();
   const [stopped, setStopped] = useState<SessionStop | null>(null);
   const [left, setLeft] = useState<JoinedSession["sessionId"] | null>(null);
 
@@ -127,7 +135,7 @@ export const useSessionPlayer = (
 
   const mine = joined !== null && joined.sessionId !== left;
 
-  if (!following && mine && matches && starting === undefined && stopped === null) {
+  if (!following && mine && matches && created === undefined && stopped === null) {
     setFollowing(true);
   }
 
@@ -163,6 +171,7 @@ export const useSessionPlayer = (
   const loading = view === undefined || (mine && target.status === "loading" && stopped === null);
   const latestSession = useLatest(session);
   const latestJoined = useLatest(joined);
+  const latestCreated = useLatest(created);
 
   const seekAndPlay = useCallback(
     async (revision: number, play: boolean): Promise<void> => {
@@ -179,32 +188,32 @@ export const useSessionPlayer = (
   );
 
   const start = useCallback((): void => {
-    setStarting(null);
+    setCreated(null);
     setStopped(null);
 
     void platform.core.together
       .create({ item: itemOf(page) })
-      .then(async ({ link }) => {
-        setStarting(sessionUrl(link));
+      .then(async ({ sessionId }) => {
+        setCreated(sessionId);
         await seekAndPlay(0, false);
 
         return undefined;
       })
       .catch((cause: unknown) => {
-        setStarting(undefined);
+        setCreated(undefined);
         toastFailure(cause);
       });
   }, [platform, page, seekAndPlay]);
 
   const confirmStart = useCallback((): void => {
-    const created = latestJoined.current;
+    const opened = latestJoined.current;
 
-    if (created === null) return;
+    if (opened === null || opened.sessionId !== latestCreated.current) return;
 
-    void seekAndPlay(created.clock.revision, player.current?.isPaused() === false)
+    void seekAndPlay(opened.clock.revision, player.current?.isPaused() === false)
       .catch(toastFailure)
-      .finally(() => setStarting(undefined));
-  }, [latestJoined, player, seekAndPlay]);
+      .finally(() => setCreated(undefined));
+  }, [latestJoined, latestCreated, player, seekAndPlay]);
 
   const leave = useCallback((): void => {
     setLeft(latestJoined.current?.sessionId ?? null);
@@ -213,19 +222,17 @@ export const useSessionPlayer = (
   }, [platform, latestJoined]);
 
   const cancelStart = useCallback((): void => {
-    setStarting(undefined);
+    setCreated(undefined);
     leave();
   }, [leave]);
 
   const link = joined === null ? null : sessionUrl(joined.link);
 
   const copyLink = useCallback((): void => {
-    const shown = starting ?? link;
-
-    if (shown === null) return;
-
-    void copyText(shown).then(() => toast.success("Session link copied"), toastFailure);
-  }, [starting, link]);
+    if (link !== null) {
+      void copyText(link).then(() => toast.success("Session link copied"), toastFailure);
+    }
+  }, [link]);
 
   const goSolo = useCallback((): void => {
     if (latestJoined.current !== null) leave();
@@ -288,10 +295,16 @@ export const useSessionPlayer = (
     if (current === null) return { positionMs: 0, play: true };
 
     return {
-      positionMs: positionAt(current.clock, EpochMillis.make(Date.now())),
+      positionMs: positionAt(current.clock, serverNow()),
       play: current.clock.status === "playing",
     };
-  }, [latestSession]);
+  }, [latestSession, serverNow]);
+
+  const positionNow = useCallback(
+    (): number =>
+      latestSession.current === null ? 0 : positionAt(latestSession.current.clock, serverNow()),
+    [latestSession, serverNow],
+  );
 
   const actions = useMemo(
     (): SessionActions => ({
@@ -336,7 +349,14 @@ export const useSessionPlayer = (
     mayAdd: session?.may.add === true,
     hostAway: session !== null && host?.present !== true,
     stopped,
-    starting,
+    starting:
+      created === undefined
+        ? undefined
+        : joined !== null && joined.sessionId === created
+          ? link
+          : null,
+    elsewhere: joined !== null && session === null,
+    positionNow,
     actions,
   };
 };
@@ -458,19 +478,22 @@ export const useSessionFollow = (
       ? null
       : `${itemKey(item)}:${String(clock.revision)}:${step}:${head?.entryId ?? ""}`;
 
-  const tried = useRef<{ readonly key: string; readonly at: number } | null>(null);
-  const latest = useLatest({ nextEpisode, clock });
+  const tried = useRef<string | null>(null);
+  const [retries, setRetries] = useState(0);
+  const latest = useLatest({ nextEpisode, clock, watchedKey });
 
   useEffect(() => {
-    if (stepKey === null || step === null) return;
+    if (stepKey === null || step === null) return undefined;
 
-    const last = tried.current;
+    const attempt = `${stepKey}#${String(retries)}`;
 
-    if (last !== null && last.key === stepKey && Date.now() - last.at < RETRY_MS) return;
+    if (tried.current === attempt) return undefined;
 
-    tried.current = { key: stepKey, at: Date.now() };
+    tried.current = attempt;
 
-    const { nextEpisode: episode, clock: current } = latest.current;
+    const { nextEpisode: episode, clock: current, watchedKey: queuedFor } = latest.current;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    let active = true;
 
     const run = async (): Promise<void> => {
       if (step === "queue") {
@@ -480,6 +503,9 @@ export const useSessionFollow = (
             at: "next",
           });
         }
+
+        // Queued once per item: whoever takes it out stops the countdown for everyone.
+        if (queuedFor !== null) watched.current.add(queuedFor);
 
         return;
       }
@@ -498,8 +524,15 @@ export const useSessionFollow = (
       await platform.core.together.control({ domain: MOVIES, op: { kind: "pause" } });
     };
 
-    void run().catch(() => undefined);
-  }, [stepKey, step, platform, latest]);
+    void run().catch(() => {
+      if (active) retry = setTimeout(() => setRetries((count) => count + 1), RETRY_MS);
+    });
+
+    return () => {
+      active = false;
+      clearTimeout(retry);
+    };
+  }, [stepKey, step, retries, platform, latest]);
 
   const latestSession = useLatest(session);
   const followMove = followed.move;

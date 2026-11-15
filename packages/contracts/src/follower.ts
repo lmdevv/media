@@ -94,9 +94,17 @@ export interface FollowerState {
   readonly offset: ClockOffset | null;
   /** The last measured distance from the shared position; positive means ahead. */
   readonly driftMs: number | null;
-  /** This player paused the session for its stall, and plays it on once it recovers. */
-  readonly holding: boolean;
+  /** The session this player paused for its stall, or null without a hold. */
+  readonly holding: Hold | null;
 }
+
+/**
+ * A stalled player's hold on the session. `pausing`: its pause is on the way. `held`: the session
+ * is paused at `revision`, and plays on once the player recovers, unless the clock moved past it.
+ */
+export type Hold =
+  | { readonly kind: "pausing" }
+  | { readonly kind: "held"; readonly revision: number };
 
 /** What to follow, with what. */
 export interface FollowerOptions<E> {
@@ -104,8 +112,8 @@ export interface FollowerOptions<E> {
   readonly port: SessionPort<E>;
   /** The session's clock when following starts. */
   readonly clock: SessionClock;
-  /** The length of the player's media, or null when unknown. */
-  readonly durationMs: number | null;
+  /** The length of the player's media now, or null while unknown; read at each correction. */
+  readonly durationMs: () => number | null;
   /**
    * Whether the viewer may control the session. Their own moves on the player, such as a pause
    * from picture in picture, then move the session; otherwise the player returns to the clock.
@@ -113,6 +121,11 @@ export interface FollowerOptions<E> {
   readonly controls: boolean;
   /** Whether this player pauses the session while it stalls, as its host's does. */
   readonly pausesForStalls: boolean;
+  /**
+   * The revision of a hold an earlier follower of this player left, such as one stopped while its
+   * stream reloaded: this one plays the session on once the player plays.
+   */
+  readonly resumeHold?: number | null;
   readonly tunables?: FollowerTunables;
 }
 
@@ -164,7 +177,6 @@ export const run = Effect.fn("Follower.run")(function* <E>(
   const seekEchoes = yield* Ref.make<ReadonlyArray<number>>([]);
   const controls = yield* Ref.make(options.controls);
   const moving = yield* Ref.make(0);
-  const holdRevision = yield* Ref.make<number | null>(null);
   const stallWatch = yield* Ref.make(Option.none<Fiber.Fiber<void>>());
   const serial = yield* Semaphore.make(1);
   const scope = yield* Effect.scope;
@@ -174,7 +186,10 @@ export const run = Effect.fn("Follower.run")(function* <E>(
     follow: "following",
     offset: null,
     driftMs: null,
-    holding: false,
+    holding:
+      options.resumeHold === undefined || options.resumeHold === null
+        ? null
+        : { kind: "held", revision: options.resumeHold },
   });
 
   const update = (change: (current: FollowerState) => FollowerState): Effect.Effect<void> =>
@@ -281,7 +296,7 @@ export const run = Effect.fn("Follower.run")(function* <E>(
         player: reading(),
         recentlySought: yield* recentlySought,
         settling: (yield* Ref.get(settledOn)) !== current.clock.revision,
-        durationMs,
+        durationMs: durationMs(),
       },
       tunables,
     );
@@ -306,7 +321,7 @@ export const run = Effect.fn("Follower.run")(function* <E>(
     Effect.gen(function* () {
       const current = yield* SubscriptionRef.get(state);
 
-      if ((yield* Ref.get(moving)) > 0 || current.holding) return;
+      if ((yield* Ref.get(moving)) > 0 || current.holding !== null) return;
 
       if (current.follow === "detached" && current.clock.status === "playing") return;
 
@@ -316,29 +331,29 @@ export const run = Effect.fn("Follower.run")(function* <E>(
     }),
   );
 
-  /** Takes `clock` when it is newer, ending a hold that someone else's move overtook. */
+  /**
+   * Takes `clock` when it is newer, ending a hold that someone else's move overtook. A hold still
+   * pausing has no revision yet, so its own answers never overtake it.
+   */
   const applyClock = (clock: SessionClock): Effect.Effect<boolean> =>
-    Effect.gen(function* () {
-      const held = yield* Ref.get(holdRevision);
+    SubscriptionRef.modify(state, (current) => {
+      if (!isNewerRevision(clock, current.clock)) return [false, current];
 
-      return yield* SubscriptionRef.modify(state, (current) => {
-        if (!isNewerRevision(clock, current.clock)) return [false, current];
+      const overtaken =
+        current.holding?.kind === "held" && clock.revision > current.holding.revision;
 
-        const overtaken = held !== null && clock.revision > held;
-
-        return [
-          true,
-          {
-            ...current,
-            clock,
-            holding: overtaken ? false : current.holding,
-            follow:
-              current.follow === "detached" && clock.status !== "playing"
-                ? "following"
-                : current.follow,
-          },
-        ];
-      });
+      return [
+        true,
+        {
+          ...current,
+          clock,
+          holding: overtaken ? null : current.holding,
+          follow:
+            current.follow === "detached" && clock.status !== "playing"
+              ? "following"
+              : current.follow,
+        },
+      ];
     });
 
   const apply = (clock: SessionClock): Effect.Effect<void> =>
@@ -382,7 +397,7 @@ export const run = Effect.fn("Follower.run")(function* <E>(
   const holdForStall = Effect.gen(function* () {
     const standing = player.positionMs();
 
-    yield* update((current) => ({ ...current, holding: true }));
+    yield* update((current) => ({ ...current, holding: { kind: "pausing" } }));
 
     const held = yield* Effect.gen(function* () {
       const paused = yield* send({ kind: "pause" });
@@ -391,25 +406,33 @@ export const run = Effect.fn("Follower.run")(function* <E>(
     }).pipe(Effect.option);
 
     if (Option.isSome(held)) {
-      yield* Ref.set(holdRevision, held.value.revision);
+      const { revision } = held.value;
+
+      yield* update((current) => ({
+        ...current,
+        holding: current.holding?.kind === "pausing" ? { kind: "held", revision } : current.holding,
+      }));
       yield* Effect.logInfo("Follower.heldForStall").pipe(
-        Effect.annotateLogs({ revision: held.value.revision, positionMs: standing }),
+        Effect.annotateLogs({ revision, positionMs: standing }),
       );
 
       return;
     }
 
-    yield* update((current) => ({ ...current, holding: false }));
+    yield* update((current) => ({ ...current, holding: null }));
   });
 
   /** Plays the session on after this player's stall, unless someone moved it meanwhile. */
   const releaseHold = Effect.gen(function* () {
-    const held = yield* Ref.getAndSet(holdRevision, null);
     const { clock, holding } = yield* SubscriptionRef.get(state);
 
-    yield* update((current) => ({ ...current, holding: false }));
+    yield* update((current) => ({ ...current, holding: null }));
 
-    if (!holding || held === null || clock.revision !== held || clock.status !== "paused") {
+    if (
+      holding?.kind !== "held" ||
+      clock.revision !== holding.revision ||
+      clock.status !== "paused"
+    ) {
       yield* correct;
 
       return;
@@ -423,7 +446,7 @@ export const run = Effect.fn("Follower.run")(function* <E>(
 
     const { clock, holding } = yield* SubscriptionRef.get(state);
 
-    if (holding || clock.status !== "playing" || (yield* recentlySought)) return;
+    if (holding !== null || clock.status !== "playing" || (yield* recentlySought)) return;
 
     if ((yield* Ref.get(moving)) > 0) return;
 
@@ -435,7 +458,7 @@ export const run = Effect.fn("Follower.run")(function* <E>(
 
         if (
           player.isBuffering() &&
-          !latest.holding &&
+          latest.holding === null &&
           latest.clock.revision === clock.revision &&
           latest.clock.status === "playing"
         ) {
@@ -449,8 +472,11 @@ export const run = Effect.fn("Follower.run")(function* <E>(
   });
 
   /** A media element pauses itself as it reaches its end, which is no one's move. */
-  const atEnd = (): boolean =>
-    durationMs !== null && durationMs > 0 && player.positionMs() >= durationMs - END_SLACK_MS;
+  const atEnd = (): boolean => {
+    const length = durationMs();
+
+    return length !== null && length > 0 && player.positionMs() >= length - END_SLACK_MS;
+  };
 
   const isSeekEcho = (landed: number): Effect.Effect<boolean> =>
     Ref.modify(seekEchoes, (targets) => {
@@ -485,7 +511,7 @@ export const run = Effect.fn("Follower.run")(function* <E>(
 
     if (yield* isEcho(pauseEchoes)) return;
 
-    if (current.clock.status !== "playing" || current.holding || atEnd()) return;
+    if (current.clock.status !== "playing" || current.holding !== null || atEnd()) return;
 
     if (yield* Ref.get(controls)) {
       yield* moveSession({ kind: "pause" }).pipe(Effect.ignore);
@@ -516,7 +542,7 @@ export const run = Effect.fn("Follower.run")(function* <E>(
       yield* update((latest) => ({ ...latest, follow: "following" }));
     }
 
-    if (current.holding) {
+    if (current.holding?.kind === "held") {
       yield* releaseHold;
 
       return;

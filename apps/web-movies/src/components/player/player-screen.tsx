@@ -1,7 +1,6 @@
-import { DRIFT_THRESHOLDS, positionAt } from "@media/contracts/clock";
+import { DRIFT_THRESHOLDS } from "@media/contracts/clock";
 import type { FollowerPlayer } from "@media/contracts/follower";
 import type { NegotiateResponse } from "@media/contracts/media-playback";
-import { EpochMillis } from "@media/contracts/units";
 import { Playback, Versions } from "@media/sdk/effect";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { ChapterPopover } from "@media/ui/components/chapter-popover";
@@ -788,7 +787,7 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
     !menu && leaving === null && together.starting === undefined,
   );
 
-  const canStart = isPlaying && started !== null && together.mode === "solo";
+  const canStart = isPlaying && started !== null && together.mode === "solo" && !together.elsewhere;
   const startSession = together.actions.start;
   const copySessionLink = together.actions.copyLink;
   const leaveSession = together.actions.leave;
@@ -1023,7 +1022,7 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
       return (
         <HostAway
           hostName={together.hostName}
-          positionMs={positionAt(session.clock, EpochMillis.make(Date.now()))}
+          positionMs={together.positionNow()}
           onKeepWatching={together.actions.goSolo}
           onLeave={() => {
             together.actions.leave();
@@ -1039,7 +1038,7 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
       return (
         <SyncingToSession
           hostName={together.hostName}
-          targetMs={positionAt(session.clock, EpochMillis.make(Date.now()))}
+          targetMs={together.positionNow()}
           progress={
             isPlaying ? Math.min(1, media.bufferedAheadSeconds / BUFFER_TARGET_SECONDS) : 0.2
           }

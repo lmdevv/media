@@ -122,7 +122,9 @@ const holdAt = (
 
   const commands = [
     ...(player.paused ? [] : [PlayerCommand.Pause()]),
-    ...(Math.abs(driftMs) > tunables.inSyncMs ? [PlayerCommand.Seek({ positionMs })] : []),
+    ...(Math.abs(driftMs) > (player.fixedRate ? tunables.fixedRateSeekMs : tunables.inSyncMs)
+      ? [PlayerCommand.Seek({ positionMs })]
+      : []),
     ...(!player.fixedRate && rateDiffers(player.playbackRate, clock.playbackRate)
       ? [PlayerCommand.SetRate({ rate: clock.playbackRate })]
       : []),

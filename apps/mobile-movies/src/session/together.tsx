@@ -1,6 +1,13 @@
-import { HEARTBEAT_MS } from "@media/contracts/clock";
+import {
+  CLOCK_SAMPLING,
+  HEARTBEAT_MS,
+  estimateClockOffset,
+  toServerTime,
+} from "@media/contracts/clock";
+import type { ClockSample } from "@media/contracts/clock";
+import { EpochMillis } from "@media/contracts/units";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { AppState } from "react-native";
 
@@ -11,6 +18,13 @@ import type { SessionView } from "@/lib/together/session";
 type CurrentSession = SessionView | undefined;
 
 const CurrentSessionContext = createContext<CurrentSession>(undefined);
+
+/** The server's time now, as heartbeats estimate it, or the device's until one has answered. */
+type ServerNow = () => EpochMillis;
+
+const deviceNow: ServerNow = () => EpochMillis.make(Date.now());
+
+const ServerNowContext = createContext<ServerNow>(deviceNow);
 
 const useForeground = (): boolean => {
   const [active, setActive] = useState(AppState.currentState === "active");
@@ -37,13 +51,29 @@ export function CurrentSessionProvider({ children }: { readonly children: ReactN
   const view: CurrentSession = current.status === "success" ? current.data : undefined;
   const beating = view?.state === "joined" || view?.state === "pending";
   const sessionId = view?.sessionId ?? null;
+  const samples = useRef<ReadonlyArray<ClockSample>>([]);
   const foreground = useForeground();
 
   useEffect(() => {
     if (!beating || !foreground || sessionId === null) return undefined;
 
     const beat = (): void => {
-      void platform.core.together.heartbeat({ domain: MOVIES }).catch(() => undefined);
+      const sentAt = Date.now();
+
+      void platform.core.together.heartbeat({ domain: MOVIES }).then(
+        ({ serverTime }) => {
+          const sample: ClockSample = {
+            sentAt,
+            serverTime: EpochMillis.make(Math.round(serverTime)),
+            receivedAt: Date.now(),
+          };
+
+          samples.current = [...samples.current, sample].slice(-CLOCK_SAMPLING.kept);
+
+          return undefined;
+        },
+        () => undefined,
+      );
     };
 
     beat();
@@ -53,8 +83,24 @@ export function CurrentSessionProvider({ children }: { readonly children: ReactN
     return () => clearInterval(timer);
   }, [platform, beating, foreground, sessionId]);
 
-  return <CurrentSessionContext value={view}>{children}</CurrentSessionContext>;
+  const serverNow = useCallback((): EpochMillis => {
+    const offset = estimateClockOffset(samples.current);
+
+    return offset === undefined ? deviceNow() : toServerTime(Date.now(), offset);
+  }, []);
+
+  return (
+    <CurrentSessionContext value={view}>
+      <ServerNowContext value={serverNow}>{children}</ServerNowContext>
+    </CurrentSessionContext>
+  );
 }
 
 /** The person's movies session inside `CurrentSessionProvider`: undefined while it loads. */
 export const useCurrentSession = (): CurrentSession => useContext(CurrentSessionContext);
+
+/**
+ * The server's time now inside `CurrentSessionProvider`, estimated from the session's heartbeats
+ * as the follower estimates it, so a screen places the shared clock before its player follows.
+ */
+export const useServerNow = (): ServerNow => useContext(ServerNowContext);
