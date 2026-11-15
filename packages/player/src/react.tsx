@@ -471,7 +471,7 @@ export function PlayerProvider({
       return local.engineStatus === "idle" ? "paused" : local.engineStatus;
     };
 
-    const here = localActions(controller, connect);
+    const here = localActions(controller);
 
     const elsewhere =
       connect.remote === null
@@ -605,46 +605,19 @@ type TransportActions = Pick<
 >;
 
 /**
- * Playback here. Each action the listener takes makes the Connect requests seen so far moot
- * (ADR 0018), so one still loading never lands over it.
+ * Playback here. Each of these is a listener action of the controller, which makes the Connect
+ * requests seen so far moot (ADR 0018), so one still loading never lands over it.
  */
-const localActions = (controller: PlaybackController, connect: ConnectView): TransportActions => {
-  const own = (): void => {
-    connect.player.supersede();
-  };
-
-  return {
-    playTracks: (ids, at) => {
-      own();
-
-      return controller.playTracks(ids, at);
-    },
-    togglePlay: () => {
-      own();
-
-      return controller.togglePlay();
-    },
-    next: () => {
-      own();
-
-      return controller.next();
-    },
-    previous: () => {
-      own();
-
-      return controller.previous();
-    },
-    seek: async (positionMs) => {
-      own();
-      controller.seek(positionMs);
-    },
-    jump: (itemId) => {
-      own();
-
-      return controller.jump(itemId);
-    },
-  };
-};
+const localActions = (controller: PlaybackController): TransportActions => ({
+  playTracks: (ids, at) => controller.playTracks(ids, at),
+  togglePlay: () => controller.togglePlay(),
+  next: () => controller.next(),
+  previous: () => controller.previous(),
+  seek: async (positionMs) => {
+    controller.seek(positionMs);
+  },
+  jump: (itemId) => controller.jump(itemId),
+});
 
 interface RemoteContext {
   readonly platform: PlatformSdk;
@@ -696,8 +669,6 @@ const remoteActions = ({
 
   return {
     playTracks: async (ids, at) => {
-      connect.player.supersede();
-
       if (playing) void control({ playing: false });
       await controller.playTracks(ids, at);
     },

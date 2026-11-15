@@ -1,6 +1,7 @@
 import { Result } from "effect";
 
 import type { EngineEvent, EngineKind, EngineSource, PlayerEngine } from "../engine";
+import type { MediaSessionHandlers } from "../media-session";
 import { PlaybackController } from "../playback-controller";
 import type {
   ControllerEnvironment,
@@ -227,6 +228,11 @@ class Gate {
 }
 
 /** Waits a macrotask turn, so every awaited call inside the controller settles first. */
+/** What the system media controls (headset, lock screen, media keys) call while started. */
+interface SystemControls {
+  handlers: MediaSessionHandlers | null;
+}
+
 export const settle = (): Promise<void> =>
   new Promise((resolve) => {
     setTimeout(resolve, 0);
@@ -276,6 +282,7 @@ export const setup = (
   const sent: Array<Sent> = [];
   const clock = { now: 1_000_000, monotonic: 0 };
   const saved: Array<ResumePoint | null> = [];
+  const systemControls: SystemControls = { handlers: null };
   let starts = 0;
 
   const start = async (trackId: string): Promise<PlayStart> => {
@@ -328,7 +335,12 @@ export const setup = (
     settings: { quality: "lossless", volume: 1, gapless: options.gapless ?? true },
     saveQuality: () => {},
     saveVolume: () => {},
-    nowPlaying: { setHandlers: () => {}, show: () => {} },
+    nowPlaying: {
+      setHandlers: (handlers) => {
+        systemControls.handlers = handlers;
+      },
+      show: () => {},
+    },
     resume: {
       load: () => options.resume ?? null,
       save: (point) => {
@@ -411,6 +423,7 @@ export const setup = (
     answer,
     discarded,
     device,
+    systemControls,
   };
 };
 

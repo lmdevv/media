@@ -403,18 +403,27 @@ for it. Before anything applies, `ConnectPlayer` checks that load against what i
 moment, not when the request or the step began (`#standing` in `connect-player.ts`). A newer
 revision that names an older load is still an older load, so a counter alone never decides.
 
-| A request arrives                                       | What holds now                                 | The device                                           | It settles                                    |
-| ------------------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------- | --------------------------------------------- |
-| `transport` of a song                                   | that song is the one here                      | plays, pauses, or seeks it                           | its revision                                  |
-| `transport` of a song                                   | another song, or none, is here                 | changes nothing                                      | its revision                                  |
-| `load` under a new `loadRevision`                       | anything                                       | starts it, and drops a load still starting           | the newest revision asked of it, once started |
-| `load` of the load still starting here                  | anything                                       | starts it with this ask instead                      | this revision, once started                   |
-| `load` of the load that started here                    | the entry it started still plays here          | plays, pauses, or seeks it                           | its revision                                  |
-| `load` of the load that started here                    | what plays here moved on, as after a skip here | changes nothing                                      | its revision                                  |
-| `load` of an older load, or of one dropped              | anything                                       | changes nothing                                      | its revision                                  |
-| `stop`                                                  | anything                                       | lets go of the song, and drops a load still starting | its revision                                  |
-| the listener plays, pauses, skips, or plays a list here | anything                                       | drops a load still starting                          | every revision seen                           |
-| none: the core shows nothing left to apply              | a load still starts here                       | drops it, as the core settled it                     | nothing; the core settled it                  |
+The listener's actions reach the player through one boundary: `PlaybackController`'s play, pause,
+skip, seek, jump, and play-a-list calls run `onListenerAction` before they change anything, and
+`ConnectPlayer` makes every request seen so far moot there. The player bar, the keyboard, the
+command menu, and the system media controls (Media Session: headsets, media keys, the lock
+screen) all call those, so none of them can act while a Connect load still lands over it. What
+Connect itself applies goes through other calls (`steer`, `playTracksAt`, `playCurrentAt`,
+`release`) that never run it. Moving playback here and playing an album on another device reach
+the controller through those other calls too, so they make the requests moot themselves first.
+
+| A request arrives                                                                                                       | What holds now                                 | The device                                           | It settles                                    |
+| ----------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------- | --------------------------------------------- |
+| `transport` of a song                                                                                                   | that song is the one here                      | plays, pauses, or seeks it                           | its revision                                  |
+| `transport` of a song                                                                                                   | another song, or none, is here                 | changes nothing                                      | its revision                                  |
+| `load` under a new `loadRevision`                                                                                       | anything                                       | starts it, and drops a load still starting           | the newest revision asked of it, once started |
+| `load` of the load still starting here                                                                                  | anything                                       | starts it with this ask instead                      | this revision, once started                   |
+| `load` of the load that started here                                                                                    | the entry it started still plays here          | plays, pauses, or seeks it                           | its revision                                  |
+| `load` of the load that started here                                                                                    | what plays here moved on, as after a skip here | changes nothing                                      | its revision                                  |
+| `load` of an older load, or of one dropped                                                                              | anything                                       | changes nothing                                      | its revision                                  |
+| `stop`                                                                                                                  | anything                                       | lets go of the song, and drops a load still starting | its revision                                  |
+| the listener plays, pauses, seeks, skips, or plays a list here, from any screen, shortcut, or the system media controls | anything                                       | drops a load still starting                          | every revision seen                           |
+| none: the core shows nothing left to apply                                                                              | a load still starts here                       | drops it, as the core settled it                     | nothing; the core settled it                  |
 
 | A step of a load's start answers                                                             | What holds now                                    | The device                                                                                                                                                                                                                 |
 | -------------------------------------------------------------------------------------------- | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -538,6 +547,11 @@ Added with the music web client's first fix round (2026-11-15):
 - A load that a tab dropped when it stopped leading starts once when it leads again.
 - A tap in a tab that does not lead makes moot the requests it saw before it took the lead, and a
   load it made moot stays moot when it is asked again once that tab leads.
+
+Added with the music web client's fourth fix round (2026-11-15):
+
+- A pause or a skip from the system media controls (a headset, media keys, the lock screen) while
+  an album sent from another device still loads drops that load, as a tap on the screen does.
 
 Rejected in this build:
 

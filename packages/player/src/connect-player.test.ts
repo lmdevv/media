@@ -487,6 +487,87 @@ describe("ConnectPlayer", () => {
     expect(names(run.sent)).not.toContain("play:c,d,0");
   });
 
+  it("drops an album load the listener paused through the system media controls, and settles it", async () => {
+    const run = connected();
+
+    await playing(run);
+    run.albumGate.holding = true;
+    run.connect.take(
+      ask(8, {
+        kind: "load",
+        item: album("al"),
+        playing: true,
+        positionMs: 0,
+        at: run.clock.now,
+        loadRevision: 8,
+      }),
+    );
+    await settle();
+    run.systemControls.handlers?.pause();
+    await settle();
+
+    expect(last(run.reports)).toMatchObject({ applied: 8 });
+
+    run.albumGate.release();
+    await settle();
+
+    expect(names(run.sent)).not.toContain("play:c,d,0");
+    expect(run.controller.playingHere()).toMatchObject({ trackId: "a", playing: false });
+  });
+
+  it("drops an album load the listener skipped past through the system media controls", async () => {
+    const run = connected();
+
+    await playing(run);
+    run.albumGate.holding = true;
+    run.connect.take(
+      ask(8, {
+        kind: "load",
+        item: album("al"),
+        playing: true,
+        positionMs: 0,
+        at: run.clock.now,
+        loadRevision: 8,
+      }),
+    );
+    await settle();
+    run.systemControls.handlers?.next();
+    await settle();
+
+    expect(last(run.reports)).toMatchObject({ applied: 8 });
+
+    run.albumGate.release();
+    await settle();
+
+    expect(names(run.sent)).not.toContain("play:c,d,0");
+    expect(names(run.sent)).toContain("jump:2");
+  });
+
+  it("drops an album load the listener paused through the controller from any screen or shortcut", async () => {
+    const run = connected();
+
+    await playing(run);
+    run.albumGate.holding = true;
+    run.connect.take(
+      ask(8, {
+        kind: "load",
+        item: album("al"),
+        playing: true,
+        positionMs: 0,
+        at: run.clock.now,
+        loadRevision: 8,
+      }),
+    );
+    await settle();
+    await run.controller.togglePlay();
+    run.albumGate.release();
+    await settle();
+
+    expect(names(run.sent)).not.toContain("play:c,d,0");
+    expect(run.controller.playingHere()).toMatchObject({ trackId: "a", playing: false });
+    expect(last(run.reports)).toMatchObject({ applied: 8 });
+  });
+
   it("settles a load of another domain's item without playing it", async () => {
     const run = connected();
 

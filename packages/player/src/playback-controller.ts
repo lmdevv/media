@@ -277,6 +277,8 @@ export class PlaybackController {
   #engine: PlayerEngine;
   readonly #env: ControllerEnvironment;
   readonly #listeners = new Set<() => void>();
+  /** What runs as the listener acts here, before the action: {@link onListenerAction}. */
+  readonly #listenerActions = new Set<() => void>();
   #snapshot: ControllerSnapshot;
 
   #queue: QueueState | null = null;
@@ -360,6 +362,22 @@ export class PlaybackController {
       this.#listeners.delete(listener);
     };
   };
+
+  /**
+   * Calls `callback` synchronously at the start of every action the listener takes here, before
+   * it changes anything: {@link togglePlay}, {@link next}, {@link previous}, {@link seek},
+   * {@link jump}, and {@link playTracks}, whether a screen, a shortcut, or the system media
+   * controls asked. Connect makes the requests seen so far moot there (ADR 0018). What Connect
+   * itself applies, through `steer`, `playTracksAt`, `playCurrentAt`, and `release`, never calls
+   * it. Returns the function that stops calling it.
+   */
+  onListenerAction(callback: () => void): () => void {
+    this.#listenerActions.add(callback);
+
+    return () => {
+      this.#listenerActions.delete(callback);
+    };
+  }
 
   /**
    * Starts engine events, media keys, and saving the place in the song. Returns the function that
@@ -460,6 +478,7 @@ export class PlaybackController {
    * paused.
    */
   async playTracks(trackIds: ReadonlyArray<string>, index?: number): Promise<void> {
+    this.#listenerActed();
     await this.#replaceQueue(trackIds, index, () => null);
   }
 
@@ -530,6 +549,7 @@ export class PlaybackController {
 
   /** Plays or pauses. The engine reacts at once, inside the tap, which satisfies autoplay rules. */
   async togglePlay(): Promise<void> {
+    this.#listenerActed();
     const entry = this.#currentEntry();
 
     if (entry === null) {
@@ -570,6 +590,7 @@ export class PlaybackController {
 
   /** Plays the next entry, wrapping when repeat is all; at the end of the queue it does nothing. */
   async next(): Promise<void> {
+    this.#listenerActed();
     const queue = this.#queue;
     const at = this.#currentIndex();
 
@@ -585,6 +606,7 @@ export class PlaybackController {
 
   /** Starts the song again once it played a little, else plays the entry before. */
   async previous(): Promise<void> {
+    this.#listenerActed();
     const queue = this.#queue;
     const at = this.#currentIndex();
 
@@ -596,7 +618,7 @@ export class PlaybackController {
     const entry = queue.entries[index];
 
     if (index === at || entry === undefined) {
-      this.seek(0);
+      this.#seek(0);
 
       return;
     }
@@ -606,6 +628,7 @@ export class PlaybackController {
 
   /** Plays the queue entry `itemId`. */
   async jump(itemId: string): Promise<void> {
+    this.#listenerActed();
     this.#unlockOutput();
     this.#skipped.clear();
     this.#choose(true);
@@ -614,6 +637,11 @@ export class PlaybackController {
 
   /** Seeks the engine at once. */
   seek(positionMs: number): void {
+    this.#listenerActed();
+    this.#seek(positionMs);
+  }
+
+  #seek(positionMs: number): void {
     const target = Math.max(0, Math.round(positionMs));
     const loaded = this.#loaded;
 
@@ -1078,7 +1106,7 @@ export class PlaybackController {
       return;
     }
 
-    if (Math.abs(this.#livePositionMs() - target) > STEER_TOLERANCE_MS) this.seek(target);
+    if (Math.abs(this.#livePositionMs() - target) > STEER_TOLERANCE_MS) this.#seek(target);
 
     // A load under way plays or pauses as `#wantPlaying` says once its source lands.
     if (this.#loading) return;
@@ -1172,6 +1200,10 @@ export class PlaybackController {
     if (this.#isAudible()) return;
     this.#useEngine(this.#wantedEngine());
     this.#engine.unlock?.();
+  }
+
+  #listenerActed(): void {
+    for (const callback of this.#listenerActions) callback();
   }
 
   #update(patch: Partial<ControllerSnapshot>): void {

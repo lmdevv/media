@@ -209,6 +209,10 @@ export class ConnectPlayer {
     this.#commands = commands;
     this.#clock = clock;
     this.#server = new ServerClock(clock.now);
+    // Every action the listener takes here, from any screen or the system media controls.
+    controller.onListenerAction(() => {
+      this.supersede();
+    });
   }
 
   /** The server's time now, as the latest reports' answers show it. */
@@ -311,7 +315,9 @@ export class ConnectPlayer {
 
   /**
    * The listener changed what plays here, or whether it plays, so every request seen so far is moot
-   * (ADR 0018): a load still starting is dropped, and this device reports them applied.
+   * (ADR 0018): a load still starting is dropped, and this device reports them applied. The
+   * controller's listener actions call it on their own ({@link PlaybackController.onListenerAction});
+   * a tap that reaches the controller another way, such as moving playback here, calls it first.
    */
   supersede(): void {
     if (this.#load?.phase === "starting") this.#load = null;
