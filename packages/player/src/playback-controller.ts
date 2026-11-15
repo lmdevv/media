@@ -450,27 +450,34 @@ export class PlaybackController {
    * paused.
    */
   async playTracks(trackIds: ReadonlyArray<string>, index?: number): Promise<void> {
-    await this.#replaceQueue(trackIds, index, { positionMs: 0, playing: true });
+    await this.#replaceQueue(trackIds, index, () => null);
   }
 
   /**
-   * Replaces the queue with `trackIds` and starts its first song here from `from`, as a Connect load
-   * of a song or an album asks (ADR 0018), the way {@link playTracks} plays a list. Answers the entry
-   * the new queue plays here, or null when none does: the queue command failed, or Connect let go
-   * of this device while the queue was written.
+   * Replaces the queue with `trackIds` and starts its first song here, as a Connect load of a song
+   * or an album asks (ADR 0018), the way {@link playTracks} plays a list. Answers the entry the new
+   * queue plays here, or null when none does: the queue command failed, or Connect let go of this
+   * device while the queue was written.
+   *
+   * @param startAt - Where the first song starts and whether it plays, asked as the queue is sent
+   *   and again once it answers: the load's newest ask, or null once a newer request or the
+   *   listener replaced the load, when the queue starts as the listener last chose.
    */
-  playTracksAt(trackIds: ReadonlyArray<string>, from: StartAt): Promise<string | null> {
-    return this.#replaceQueue(trackIds, 0, from);
+  playTracksAt(
+    trackIds: ReadonlyArray<string>,
+    startAt: () => StartAt | null,
+  ): Promise<string | null> {
+    return this.#replaceQueue(trackIds, 0, startAt);
   }
 
   async #replaceQueue(
     trackIds: ReadonlyArray<string>,
     index: number | undefined,
-    from: StartAt,
+    startAt: () => StartAt | null,
   ): Promise<string | null> {
     this.#unlockOutput();
     this.#skipped.clear();
-    this.#choose(from.playing);
+    this.#choose(startAt()?.playing ?? true);
     this.#update({ error: null });
     const picked = trackIds[index ?? 0];
     const early = picked === undefined ? null : this.#startEarly(picked);
@@ -488,8 +495,11 @@ export class PlaybackController {
         early !== null && this.#early === early ? { ...early, itemId: current } : null;
 
       if (answered !== null) this.#early = answered;
-      // As the listener chose last, here or through Connect, not as when the queue was sent.
-      this.#moveTo(current, this.#chosen, answered, from.positionMs);
+      // As things stand now, not as when the queue was sent: a pause chosen meanwhile holds.
+      const at = startAt();
+
+      if (at !== null) this.#choose(at.playing);
+      this.#moveTo(current, this.#chosen, answered, at?.positionMs ?? 0);
 
       return current;
     } catch (error) {
@@ -513,7 +523,19 @@ export class PlaybackController {
   async togglePlay(): Promise<void> {
     const entry = this.#currentEntry();
 
-    if (entry === null) return;
+    if (entry === null) {
+      // A song here the queue does not hold yet, as a new queue's first while that queue is on its
+      // way, plays or pauses as tapped.
+      const here = this.playingHere();
+
+      if (here === null) return;
+
+      if (!here.playing) this.#unlockOutput();
+      this.steer(!here.playing, here.positionMs);
+
+      return;
+    }
+
     this.#skipped.clear();
 
     if (this.#needsSource(entry)) {
@@ -587,9 +609,10 @@ export class PlaybackController {
     const loaded = this.#loaded;
 
     if (loaded === null) {
-      const entry = this.#currentEntry();
+      // A new queue's first song still on its way here starts there too.
+      const itemId = this.#currentEntry()?.itemId ?? this.#arriving()?.itemId ?? null;
 
-      if (entry !== null) this.#resumeAt = { itemId: entry.itemId, positionMs: target };
+      if (itemId !== null) this.#resumeAt = { itemId, positionMs: target };
       this.#stamp(target, false);
 
       return;

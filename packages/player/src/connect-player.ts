@@ -1,4 +1,4 @@
-import type { PlaybackController, PlayingHere } from "./playback-controller";
+import type { PlaybackController, PlayingHere, StartAt } from "./playback-controller";
 
 /**
  * Report at least this often while the page is open: Connect counts a device that has not reported
@@ -129,6 +129,8 @@ type Load =
   | {
       readonly phase: "starting";
       readonly loadRevision: number;
+      /** This start of the load, so a step of an earlier start of it never acts for this one. */
+      readonly run: number;
       /**
        * What its start waits on: the queue, to tell whether its song is the entry the queue plays,
        * or the network, for an album's songs or the new queue.
@@ -186,14 +188,14 @@ export class ConnectPlayer {
   readonly #server: ServerClock;
   /** The newest revision this device handled: applied, or found moot. */
   #applied = 0;
-  /** The newest revision `take` was given. */
+  /** The newest revision the core showed, while started or not, which a tap here makes moot. */
   #seen = 0;
-  /** The newest revision taken: handled, or a load still starting. */
-  #taken = 0;
   /** The newest `loadRevision` asked of this device; a load ask at or below it is no new load. */
   #newestLoad = 0;
   /** The newest load, while it is the one Connect asked for here. */
   #load: Load | null = null;
+  /** Counts the starts of loads, to tell one start of a load from another. */
+  #runs = 0;
   #reported: string | null = null;
   #stop: (() => void) | null = null;
 
@@ -216,7 +218,7 @@ export class ConnectPlayer {
 
   /**
    * Reports now, then on each change and heartbeat. Returns the function that stops it, which drops
-   * a load still starting, so a request it took and did not finish comes again once it starts.
+   * a load still starting: the core still shows it, so it starts again once this device does.
    */
   start(): () => void {
     this.#stop?.();
@@ -229,8 +231,12 @@ export class ConnectPlayer {
     const stop = (): void => {
       unsubscribe();
       stopBeats();
-      this.#load = null;
-      this.#taken = this.#applied;
+      const load = this.#load;
+
+      if (load?.phase === "starting") {
+        this.#load = null;
+        this.#newestLoad = load.loadRevision - 1;
+      }
 
       if (this.#stop === stop) this.#stop = null;
     };
@@ -241,14 +247,18 @@ export class ConnectPlayer {
     return stop;
   }
 
-  /** Takes the request the core shows now, or null when none waits. */
+  /**
+   * Takes the request the core shows now, or null when none waits. While this device is not
+   * started, it only notes the revision, which a tap here makes moot ({@link supersede}).
+   */
   take(request: ConnectRequest | null): void {
-    if (request === null || !this.started) return;
+    if (request === null) return;
 
     this.#seen = Math.max(this.#seen, request.revision);
+    const load = this.#load;
+    const starting = load?.phase === "starting" ? load.revision : 0;
 
-    if (request.revision <= Math.max(this.#applied, this.#taken)) return;
-    this.#taken = request.revision;
+    if (!this.started || request.revision <= Math.max(this.#applied, starting)) return;
     const { revision, ask } = request;
 
     switch (ask.kind) {
@@ -288,9 +298,10 @@ export class ConnectPlayer {
   }
 
   /**
-   * Where the load `loadRevision` stands now. Every request for a load and every step of a load's
-   * start asks this right before it applies anything, so an answer that comes after a newer
-   * request, after the listener acted here, or after what plays here moved on, changes nothing.
+   * Where the load `loadRevision` stands now. Every request for a load asks this right before it
+   * applies anything, and every step of a load's start asks {@link #starting}, so an answer that
+   * comes after a newer request, after the listener acted here, or after what plays here moved on,
+   * changes nothing.
    */
   #standing(loadRevision: number): Standing {
     if (loadRevision > this.#newestLoad) return { kind: "new" };
@@ -305,19 +316,32 @@ export class ConnectPlayer {
       : { kind: "gone" };
   }
 
+  /** `load` as it stands now, its newest ask included, while this start of it is still starting. */
+  #starting(load: StartingLoad): StartingLoad | null {
+    const current = this.#load;
+
+    return current?.phase === "starting" && current.run === load.run ? current : null;
+  }
+
   #takeLoad(revision: number, ask: LoadAsk): void {
     const standing = this.#standing(ask.loadRevision);
 
     switch (standing.kind) {
       case "new": {
         this.#newestLoad = ask.loadRevision;
-        this.#start({
+        this.#runs += 1;
+
+        const load: StartingLoad = {
           phase: "starting",
           loadRevision: ask.loadRevision,
+          run: this.#runs,
           waits: "network",
           ask,
           revision,
-        });
+        };
+
+        this.#load = load;
+        this.#start(load);
         break;
       }
 
@@ -344,7 +368,7 @@ export class ConnectPlayer {
   #start(load: StartingLoad): void {
     const { item } = load.ask;
 
-    if (item.domain === "music" && item.ref.type === "track") {
+    if (isSong(item)) {
       this.#startSong(load);
 
       return;
@@ -392,7 +416,6 @@ export class ConnectPlayer {
   }
 
   async #startAlbum(load: StartingLoad, albumId: string): Promise<void> {
-    this.#load = { ...load, waits: "network" };
     const fetched = await this.#step(load, this.#commands.albumTracks(albumId));
 
     if (fetched === null) return;
@@ -409,34 +432,36 @@ export class ConnectPlayer {
     await this.#write(fetched.load, fetched.outcome.value);
   }
 
-  /** Replaces the queue with `trackIds` and plays it from where the load's newest ask says. */
+  /**
+   * Replaces the queue with `trackIds`. The controller asks where and how the queue starts when
+   * the queue answers, so it starts as the load's newest ask says then, or, once a newer request
+   * or the listener replaced the load, as the listener last chose.
+   */
   async #write(load: StartingLoad, trackIds: ReadonlyArray<string>): Promise<void> {
     this.#load = { ...load, waits: "network" };
-    const from = { positionMs: positionAt(load.ask, this.serverNow()), playing: load.ask.playing };
-    const written = await this.#step(load, this.#controller.playTracksAt(trackIds, from));
+
+    const startAt = (): StartAt | null => {
+      const now = this.#starting(load);
+
+      return now === null
+        ? null
+        : { positionMs: positionAt(now.ask, this.serverNow()), playing: now.ask.playing };
+    };
+
+    const written = await this.#step(load, this.#controller.playTracksAt(trackIds, startAt));
 
     if (written === null) return;
     const itemId = written.outcome.answered ? written.outcome.value : null;
 
-    if (itemId === null) {
-      this.#load = null;
-      this.#settle(written.load.revision);
-
-      return;
-    }
-
-    this.#load = { phase: "started", loadRevision: load.loadRevision, itemId };
-    const { ask } = written.load;
-
-    // A play, pause, or seek asked while the queue was written lands on the song it started.
-    if (ask !== load.ask) this.#controller.steer(ask.playing, positionAt(ask, this.serverNow()));
+    this.#load =
+      itemId === null ? null : { phase: "started", loadRevision: load.loadRevision, itemId };
     this.#settle(written.load.revision);
   }
 
   /**
    * Awaits one step of `load`'s start, then answers its outcome, a failure included, with the load
-   * as it stands now and its newest ask, only while it is still the one starting here. Null once a
-   * newer request or the listener replaced it: whoever replaced it settles it.
+   * as it stands now and its newest ask, only while this start of it is still starting here. Null
+   * once a newer request or the listener replaced it: whoever replaced it settles it.
    */
   async #step<A>(
     load: StartingLoad,
@@ -448,9 +473,9 @@ export class ConnectPlayer {
       (): StepOutcome<A> => ({ answered: false }),
     );
 
-    const standing = this.#standing(load.loadRevision);
+    const now = this.#starting(load);
 
-    return standing.kind === "starting" ? { load: standing.load, outcome } : null;
+    return now === null ? null : { load: now, outcome };
   }
 
   #settle(revision: number): void {

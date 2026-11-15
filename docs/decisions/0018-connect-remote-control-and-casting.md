@@ -391,7 +391,9 @@ browser, and `use-connect.ts` runs them in the player provider.
   playing, which takes the lock over. A tab that moves playback here takes it before the move. A
   tab whose lock another tab took stops reporting and then lets go of its song
   (`speakForDevice`), so the browser never plays audio that its device neither reports nor obeys.
-  Old music let every tab play, and its shared pause stopped them all.
+  Old music let every tab play, and its shared pause stopped them all. Every tab follows the
+  requests the core shows, though only the leader applies them, so a tap in a tab that does not
+  lead makes moot the requests it saw, as in the tab that leads, before it takes the lead.
 
 #### One rule for applying requests
 
@@ -418,7 +420,7 @@ revision that names an older load is still an older load, so a counter alone nev
 | the album's songs                                  | the load still starts here                        | writes the queue, as the load's newest ask says                                                                                             |
 | the album's songs failed                           | the load still starts here                        | drops it, and settles its newest ask as tried                                                                                               |
 | the album's songs, or their failure                | a newer request or the listener replaced the load | changes nothing; whoever replaced it settles                                                                                                |
-| the new queue's write                              | the load still starts here                        | holds the load started on the entry the write answered, plays, pauses, or seeks as an ask sent meanwhile says, and settles                  |
+| the new queue's write                              | the load still starts here                        | starts the queue's entry as the load's newest ask says now, holds the load started on it, and settles                                       |
 | the new queue's write                              | a newer request or the listener replaced the load | changes nothing; the player follows the new queue, playing or paused as the listener last chose                                             |
 | the queue arrives, for a song's load waiting on it | the load still starts here                        | plays the queue's current entry from the position when it holds the song, keeping the queue, and otherwise replaces the queue with the song |
 
@@ -430,8 +432,16 @@ revision that names an older load is still an older load, so a counter alone nev
   chose, here or through Connect, when its write answers, not as when it was sent. The old queue
   ending meanwhile is no choice, so a list played then still plays.
 - **A song on its way.** Once a new queue's write answered, its first song counts as the song here
-  while its ticket is on the way: the browser reports it, and a play, pause, or seek of it starts it
-  as asked.
+  while its ticket is on the way: the browser reports it, and a play, pause, or seek of it, sent
+  from another device or tapped here, starts it as asked.
+- **A load dropped when the tab stops.** A tab that stops leading drops a load still starting,
+  and takes it again as a new one once it leads again while the core still shows it. A step of the
+  dropped start never acts for the new one.
+- **A write already sent.** A newer request makes an older load's start moot, but a queue write
+  it already sent still lands on the shared queue. The browser then follows the queue, as it follows
+  any change of it, playing or paused as the listener last chose.
+- **How long a move waits.** A move waits until the queue's pages hold its current entry, or until
+  a newer request or a tap here replaces it.
 
 ### Edge cases settled in the build
 
@@ -489,7 +499,11 @@ Added with the music web client's first fix round (2026-11-15):
 - A move onto a browser whose queue has not arrived waits for it and keeps the queue.
 - A tab another tab of the browser took over from stops playing, so a remote pause stops all the
   browser plays.
-- A pause sent while an album's first song is on its way starts it paused.
+- A pause sent while an album's first song is on its way starts it paused, and so does a pause
+  tapped then.
+- A pause sent while an album's queue is written starts the album paused, from the position sent.
+- A load that a tab dropped when it stopped leading starts once when it leads again.
+- A tap in a tab that does not lead makes moot the requests it saw before it took the lead.
 
 Rejected in this build:
 

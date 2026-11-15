@@ -187,6 +187,34 @@ describe("PlaybackController", () => {
     expect(run.controller.getSnapshot().engineStatus).toBe("playing");
   });
 
+  it("pauses a new queue's first song on its way here when the listener taps pause", async () => {
+    const run = setup({ playCurrent: "1" });
+
+    run.gates.start.holding = true;
+    await run.controller.playTracks(["a", "b"], 0);
+    await settle();
+    await run.controller.togglePlay();
+    run.gates.start.release("a");
+    await settle();
+
+    expect(run.controller.playingHere()).toMatchObject({ trackId: "a", playing: false });
+    expect(run.controller.getSnapshot().engineStatus).toBe("paused");
+  });
+
+  it("starts a new queue's first song on its way here where the listener seeks", async () => {
+    const run = setup({ playCurrent: "1" });
+
+    run.gates.start.holding = true;
+    await run.controller.playTracks(["a", "b"], 0);
+    await settle();
+    run.controller.seek(30_000);
+    run.gates.start.release("a");
+    await settle();
+
+    expect(run.record.loads.map((load) => load.startMs)).toStrictEqual([30_000]);
+    expect(run.controller.playingHere()).toMatchObject({ trackId: "a", playing: true });
+  });
+
   it("drops a song asked for ahead once a later play replaced it", async () => {
     const { controller, record, gates } = setup({ playCurrent: "1" });
 

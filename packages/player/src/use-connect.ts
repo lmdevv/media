@@ -172,9 +172,11 @@ export const useConnect = (
     };
   }, [deviceId, player, controller]);
 
+  // Every tab follows the requests, so a tap in a tab that does not lead makes moot the ones it
+  // saw; only the tab that leads applies them.
   const requested = usePlatformQuery(
     platform.core.connect.player.requested,
-    ...(leading ? [{}] : (["skip"] as const)),
+    ...(deviceId === null ? (["skip"] as const) : [{}]),
   );
 
   useEffect(() => {

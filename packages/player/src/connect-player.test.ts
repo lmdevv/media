@@ -162,7 +162,7 @@ describe("PlaybackController for Connect", () => {
   it("starts a new queue from a position, paused, when asked to", async () => {
     const run = connected();
 
-    await run.controller.playTracksAt(["a", "b"], { positionMs: 45_000, playing: false });
+    await run.controller.playTracksAt(["a", "b"], () => ({ positionMs: 45_000, playing: false }));
     await settle();
 
     expect(run.record.loads.map((load) => load.startMs)).toStrictEqual([45_000]);
@@ -623,6 +623,69 @@ describe("ConnectPlayer, against what is current when a request or a step of a l
 
     expect(run.controller.playingHere()).toMatchObject({ trackId: "c", playing: false });
     expect(run.controller.getSnapshot().engineStatus).toBe("paused");
+  });
+
+  it("starts an album load as a pause sent while its queue was written asks", async () => {
+    const run = connected();
+    const loaded = loadOf(album("al"), 1, run.clock.now);
+
+    run.gates.play.holding = true;
+    run.connect.take(ask(1, loaded));
+    await settle();
+    run.connect.take(ask(2, { ...loaded, playing: false, positionMs: 4000 }));
+    await settle();
+    run.gates.play.release("play");
+    await settle();
+
+    expect(run.record.loads.map((load) => load.startMs)).toStrictEqual([4000]);
+    expect(run.controller.playingHere()).toMatchObject({ trackId: "c", playing: false });
+    expect(last(run.reports)).toMatchObject({ song: { trackId: "c", playing: false }, applied: 2 });
+  });
+
+  it("starts a load it dropped when it stopped once it starts again, and only once", async () => {
+    const run = connected();
+    const loaded = loadOf(album("al"), 1, run.clock.now);
+
+    run.albumGate.holding = true;
+    run.connect.take(ask(1, loaded));
+    await settle();
+    run.stopConnect();
+    run.albumGate.holding = false;
+    const stopAgain = run.connect.start();
+
+    run.connect.take(ask(1, loaded));
+    await settle();
+    run.albumGate.release("al");
+    await settle();
+
+    expect(names(run.sent).filter((name) => name.startsWith("play:"))).toStrictEqual([
+      "play:c,d,0",
+    ]);
+    expect(last(run.reports)).toMatchObject({ song: { trackId: "c" }, applied: 1 });
+
+    stopAgain();
+  });
+
+  it("makes moot what a tab that did not lead saw before a tap there, once it leads", async () => {
+    const run = connected();
+    const loaded = loadOf(album("al"), 7, run.clock.now);
+
+    run.stopConnect();
+    run.connect.take(ask(7, loaded));
+    run.connect.supersede();
+    await run.controller.playTracks(["a", "b"], 0);
+    run.controller.sync(queueOf([one, two], "1"));
+    const stopAgain = run.connect.start();
+
+    run.connect.take(ask(7, loaded));
+    await settle();
+
+    expect(names(run.sent).filter((name) => name.startsWith("play:"))).toStrictEqual([
+      "play:a,b,0",
+    ]);
+    expect(last(run.reports)).toMatchObject({ song: { trackId: "a" }, applied: 7 });
+
+    stopAgain();
   });
 
   it("drops a play, pause, or seek of a load whose song the listener moved on from here", async () => {
