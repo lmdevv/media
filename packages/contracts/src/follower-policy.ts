@@ -1,8 +1,10 @@
 /**
  * What a player following a group session's clock should do at one instant. Pure: the follower
  * engine (`./follower`) reads the player and the clock, asks `follow`, and carries out the answer.
+ * It asks `hear` and `eventAction` whether a player event moves the session, and `holdStands`
+ * whether a stalled player's hold may play it on.
  */
-import { Data } from "effect";
+import { Data, Match } from "effect";
 
 import { DRIFT_THRESHOLDS, positionAt } from "./clock";
 import type { SessionClock } from "./clock";
@@ -221,3 +223,182 @@ export const commandLabel: (command: PlayerCommand) => string = PlayerCommand.$m
   Pause: () => "pause",
   SetRate: () => "rate",
 });
+
+/** Something that happened on a player, from the viewer, the network, or the follower itself. */
+export type FollowerPlayerEvent = "playing" | "paused" | "seeked" | "waiting" | "ended";
+
+/**
+ * A command the follower gave its player and waits to see carried out. `load` is the stream the
+ * follower started on, which the playback that loaded it may still be starting or seeking.
+ */
+export type PendingCommand = "load" | "play" | "pause" | "seek";
+
+/**
+ * The state a follower expects its player in after its latest command (ADR 0017). Each play,
+ * pause, and seek it gives the player, and the load it starts on, takes the next number.
+ */
+export interface Expected {
+  /** The number of the latest command. */
+  readonly command: number;
+  /** Whether the player stands paused after the latest play or pause, or as it last reported. */
+  readonly paused: boolean;
+  /**
+   * The commands the player has not yet shown carried out: the load, the latest play or pause, and
+   * the latest seek. A play replaces a pending pause, and a pause a play.
+   */
+  readonly pending: ReadonlyArray<PendingCommand>;
+}
+
+/** What a follower expects of the player it starts on, `paused` or not: the load to settle. */
+export const expectedAtLoad = (paused: boolean): Expected => ({
+  command: 1,
+  paused,
+  pending: ["load"],
+});
+
+/** Whether `command` makes `other` pending no longer: a later play or pause, or a later seek. */
+const replaces = (command: PendingCommand, other: PendingCommand): boolean =>
+  command === "seek" ? other === "seek" : other === "play" || other === "pause";
+
+/** The state after the next command, `command`, which leaves the player `paused` or not. */
+const ordered = (expected: Expected, command: PendingCommand, paused: boolean): Expected => ({
+  command: expected.command + 1,
+  paused,
+  pending: [...expected.pending.filter((other) => !replaces(command, other)), command],
+});
+
+/** The state after the follower gives `command`; a rate change shows in no event, so it is none. */
+export const expectedAfter = (expected: Expected, command: PlayerCommand): Expected =>
+  PlayerCommand.$match(command, {
+    Play: () => ordered(expected, "play", false),
+    Pause: () => ordered(expected, "pause", true),
+    Seek: () => ordered(expected, "seek", expected.paused),
+    SetRate: () => expected,
+  });
+
+/**
+ * The player stands where the clock wants it, `paused` or not: the load and its play or pause are
+ * carried out. A seek still waits for its `seeked`, which a slow one sends from wherever it landed.
+ */
+export const expectedInPlace = (expected: Expected, paused: boolean): Expected => ({
+  ...expected,
+  paused,
+  pending: expected.pending.filter((command) => command === "seek"),
+});
+
+/** A seek whose `seeked` never came counts as landed, as once the seek cooldown passed. */
+export const expectedLanded = (expected: Expected): Expected => ({
+  ...expected,
+  pending: expected.pending.filter((command) => command !== "seek"),
+});
+
+/**
+ * Who caused a player event, judged as it arrives. `command`: it shows the player carried out the
+ * pending command. `catching-up`: a command is pending, and this event does not show it carried
+ * out. `change`: nothing was pending, and the player now stands otherwise than expected, by the
+ * viewer's hand or its own. `unchanged`: nothing was pending, and nothing expected changed.
+ */
+export type EventOrigin = "command" | "catching-up" | "change" | "unchanged";
+
+/** The event that shows each command carried out; a load shows in none. */
+const CARRIED_OUT_BY: Readonly<Record<PendingCommand, FollowerPlayerEvent | null>> = {
+  load: null,
+  play: "playing",
+  pause: "paused",
+  seek: "seeked",
+};
+
+/**
+ * Judges `event` as it arrives against what the follower expects of its player, and answers what it
+ * expects afterwards. While a command is pending, an event is the player carrying one out or
+ * catching up, so it never moves the session; a `seeked` carries out a pending seek wherever it
+ * landed. With nothing pending, a play or pause that differs from the expected state is a change.
+ * `eventAction` then decides what a change does (ADR 0017).
+ */
+export const hear = (
+  expected: Expected,
+  event: FollowerPlayerEvent,
+): readonly [EventOrigin, Expected] => {
+  if (expected.pending.length > 0) {
+    const rest = expected.pending.filter((command) => CARRIED_OUT_BY[command] !== event);
+
+    return rest.length < expected.pending.length
+      ? ["command", { ...expected, pending: rest }]
+      : ["catching-up", expected];
+  }
+
+  if (event === "seeked") return ["change", expected];
+
+  if (event !== "playing" && event !== "paused") return ["unchanged", expected];
+
+  const paused = event === "paused";
+
+  return paused === expected.paused ? ["unchanged", expected] : ["change", { ...expected, paused }];
+};
+
+/**
+ * What a follower does about a player event. `play`, `pause`, `seek`: moves the session as the
+ * viewer's change asks, a seek to where the player stands. `detach`: stops following until the
+ * viewer plays, as they may not control and paused their own player. `follow`: brings the player to
+ * the clock. `nothing`: leaves it be, as a player that paused at its end.
+ */
+export type EventAction = "play" | "pause" | "seek" | "detach" | "follow" | "nothing";
+
+/** What a follower knows when it acts on a player event. */
+export interface EventFacts {
+  readonly event: FollowerPlayerEvent;
+  /** Who caused the event, as `hear` judged it on arrival. */
+  readonly origin: EventOrigin;
+  /** Whether the viewer may control the session. */
+  readonly controls: boolean;
+  /** Whether the session plays or is paused. */
+  readonly clock: SessionClock["status"];
+  /** The player paused the session for its stall, or is pausing it. */
+  readonly holding: boolean;
+  /** The player is paused now. */
+  readonly paused: boolean;
+  /** The player is stalled now. */
+  readonly buffering: boolean;
+  /** The player stands at the end of its media, where it pauses itself. */
+  readonly atEnd: boolean;
+  /** The player stands further than `viewerSeekMs` from the shared position. */
+  readonly offClock: boolean;
+}
+
+/**
+ * Decides what a player event does: the one rule for whether an event moves the session (ADR 0017).
+ * Only a change moves it, only while the player still stands where the event says, and only for a
+ * viewer who may control; every other event brings the player back to the clock.
+ */
+export const eventAction = (facts: EventFacts): EventAction => {
+  const change = facts.origin === "change";
+
+  return Match.value(facts.event).pipe(
+    Match.whenOr("waiting", "ended", (): EventAction => "nothing"),
+    Match.when("playing", (): EventAction =>
+      change && facts.controls && facts.clock === "paused" && !facts.paused && !facts.buffering
+        ? "play"
+        : "follow",
+    ),
+    Match.when("paused", (): EventAction => {
+      if (!change || !facts.paused) return "follow";
+
+      if (facts.clock !== "playing" || facts.holding || facts.atEnd) return "nothing";
+
+      return facts.controls ? "pause" : "detach";
+    }),
+    Match.when("seeked", (): EventAction =>
+      change && facts.controls && facts.offClock ? "seek" : "follow",
+    ),
+    Match.exhaustive,
+  );
+};
+
+/**
+ * Whether a stalled player's hold may play the session on: the one rule for holds (ADR 0017). It
+ * may only while the session stands paused at the hold's own last revision, its pause or the seek
+ * back to the stall, with nothing newer. The core gives every pause a new revision, so a pause that
+ * changed nothing ends the hold too.
+ */
+export const holdStands = (heldRevision: number, clock: SessionClock): boolean =>
+  clock.status === "paused" && clock.revision === heldRevision;

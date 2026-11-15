@@ -7,6 +7,8 @@ import {
   Duration,
   Effect,
   Fiber,
+  Match,
+  MutableRef,
   Option,
   Queue,
   Ref,
@@ -24,12 +26,27 @@ import {
   toServerTime,
 } from "./clock";
 import type { ClockOffset, ClockSample, SessionClock } from "./clock";
-import { FOLLOWER_TUNABLES, PlayerCommand, commandLabel, follow } from "./follower-policy";
-import type { FollowerTunables, PlayerReading } from "./follower-policy";
+import {
+  FOLLOWER_TUNABLES,
+  PlayerCommand,
+  commandLabel,
+  eventAction,
+  expectedAfter,
+  expectedAtLoad,
+  expectedInPlace,
+  expectedLanded,
+  follow,
+  hear,
+  holdStands,
+} from "./follower-policy";
+import type {
+  EventAction,
+  EventOrigin,
+  FollowerPlayerEvent,
+  FollowerTunables,
+  PlayerReading,
+} from "./follower-policy";
 import { EpochMillis } from "./units";
-
-/** Something that happened on a player, from the viewer, the network, or the follower itself. */
-export type FollowerPlayerEvent = "playing" | "paused" | "seeked" | "waiting" | "ended";
 
 /**
  * A media player as the follower drives it. Getters return the state at the moment of the call;
@@ -101,8 +118,9 @@ export interface FollowerState {
 
 /**
  * A stalled player's hold on the session. `pausing`: its pause is on the way, and `landed` answers
- * the clock it left, or null when the pause failed. `held`: the session is paused at `revision`,
- * and plays on once the player recovers, unless the clock moved past it.
+ * the clock it left, or null when the pause failed or someone else's move came first. `held`: the
+ * session is paused at `revision`, the hold's own last move, and plays on once the player recovers,
+ * while nothing newer has moved it (`holdStands`).
  */
 export type Hold =
   | { readonly kind: "pausing"; readonly landed: Effect.Effect<SessionClock | null> }
@@ -150,25 +168,20 @@ export interface Follower<E> {
   readonly move: (move: ViewerMove) => Effect.Effect<void, E>;
 }
 
-/** A seek the follower made lands within this of its target, or counts as the viewer's. */
-const SEEK_ECHO_MS = 1_000;
-
 /** How close to its end a player counts as having reached it. */
 const END_SLACK_MS = 500;
 
-/** A player event, with the revision of the clock applied when the follower heard it. */
+/** A player event, with who caused it, as the follower judged it when it arrived. */
 interface Heard {
   readonly event: FollowerPlayerEvent;
-  readonly revision: number;
+  readonly origin: EventOrigin;
+  /** The number of the follower's latest command when the event arrived, for logs. */
+  readonly command: number;
 }
 
 /** The clock move a viewer's move asks for, against the clock at `revision`. */
 const asMove = (move: ViewerMove, revision: number): ClockMove =>
   move.kind === "seek" ? { kind: "seek", positionMs: move.positionMs, revision } : move;
-
-/** Takes one echo off `echoes`, saying whether there was one to take. */
-const isEcho = (echoes: Ref.Ref<number>): Effect.Effect<boolean> =>
-  Ref.modify(echoes, (count) => (count > 0 ? [true, count - 1] : [false, 0]));
 
 /**
  * Starts following `options.clock` with `options.player`. Samples the server's clock first, so a
@@ -182,9 +195,8 @@ export const run = Effect.fn("Follower.run")(function* <E>(
   const samples = yield* Ref.make<ReadonlyArray<ClockSample>>([]);
   const lastSeekAt = yield* Ref.make(Option.none<number>());
   const settledOn = yield* Ref.make<number | null>(null);
-  const pauseEchoes = yield* Ref.make(0);
-  const playEchoes = yield* Ref.make(0);
-  const seekEchoes = yield* Ref.make<ReadonlyArray<number>>([]);
+  // Read and written synchronously: the player's listener judges each event against it on arrival.
+  const expected = MutableRef.make(expectedAtLoad(player.isPaused()));
   const controls = yield* Ref.make(options.controls);
   const moving = yield* Ref.make(0);
   const stallWatch = yield* Ref.make(Option.none<Fiber.Fiber<void>>());
@@ -253,10 +265,18 @@ export const run = Effect.fn("Follower.run")(function* <E>(
     });
   });
 
-  const startPlaying = Effect.gen(function* () {
-    const echoes = player.isPaused();
+  /**
+   * Numbers `command` and records the state it leaves the player in, before the player is called,
+   * so every event the call makes the player report is judged against it.
+   */
+  const order = (command: PlayerCommand): void => {
+    MutableRef.update(expected, (current) => expectedAfter(current, command));
+  };
 
-    if (echoes) yield* Ref.update(playEchoes, (count) => count + 1);
+  const startPlaying = Effect.gen(function* () {
+    if (!player.isPaused() && !MutableRef.get(expected).paused) return;
+
+    order(PlayerCommand.Play());
 
     const started = yield* Effect.promise(() =>
       player.play().then(
@@ -267,23 +287,26 @@ export const run = Effect.fn("Follower.run")(function* <E>(
 
     if (started) return;
 
-    if (echoes) yield* Ref.update(playEchoes, (count) => Math.max(0, count - 1));
+    // The platform refused to start playback: the player stays paused, with nothing on its way.
+    MutableRef.update(expected, (current) => expectedInPlace(current, true));
     yield* Effect.logInfo("Follower.playBlocked");
     yield* update((current) => ({ ...current, follow: "blocked" }));
   });
 
+  /** Gives the player `command`; a pause or play it already carries out gives nothing. */
   const execute = (command: PlayerCommand): Effect.Effect<void> =>
     PlayerCommand.$match(command, {
       Seek: ({ positionMs }) =>
         Effect.gen(function* () {
           yield* Ref.set(lastSeekAt, Option.some(yield* Clock.currentTimeMillis));
-          yield* Ref.update(seekEchoes, (targets) => [...targets.slice(-4), positionMs]);
+          order(command);
           player.seek(positionMs);
         }),
       Pause: () =>
-        Effect.gen(function* () {
-          if (player.isPaused()) return;
-          yield* Ref.update(pauseEchoes, (count) => count + 1);
+        Effect.sync(() => {
+          if (player.isPaused() && MutableRef.get(expected).paused) return;
+
+          order(command);
           player.pause();
         }),
       SetRate: ({ rate }) => Effect.sync(() => player.setPlaybackRate(rate)),
@@ -296,12 +319,15 @@ export const run = Effect.fn("Follower.run")(function* <E>(
 
     if (Option.isNone(now)) return;
 
+    const playerNow = reading();
+    const sought = yield* recentlySought;
+
     const decision = follow(
       {
         clock: current.clock,
         serverNow: now.value,
-        player: reading(),
-        recentlySought: yield* recentlySought,
+        player: playerNow,
+        recentlySought: sought,
         settling: (yield* Ref.get(settledOn)) !== current.clock.revision,
         durationMs: durationMs(),
       },
@@ -310,6 +336,16 @@ export const run = Effect.fn("Follower.run")(function* <E>(
 
     yield* Ref.set(settledOn, decision.settling ? null : current.clock.revision);
     yield* update((latest) => ({ ...latest, driftMs: decision.driftMs }));
+
+    // A player that stands where the clock wants it carried out what it was given. A seek waits
+    // for its `seeked` through the seek cooldown, since a slow one may land elsewhere.
+    if (decision.commands.every(PlayerCommand.$is("SetRate"))) {
+      MutableRef.update(expected, (latest) => {
+        const placed = expectedInPlace(latest, playerNow.paused);
+
+        return sought ? placed : expectedLanded(placed);
+      });
+    }
 
     if (decision.commands.length > 0) {
       yield* Effect.logDebug("Follower.correct").pipe(
@@ -339,15 +375,15 @@ export const run = Effect.fn("Follower.run")(function* <E>(
   );
 
   /**
-   * Takes `clock` when it is newer, ending a hold that someone else's move overtook. A hold still
-   * pausing has no revision yet, so its own answers never overtake it.
+   * Takes `clock` when it is newer, ending a settled hold that no longer stands. A hold still
+   * pausing has no revision yet; `settleHold` decides it once its pause lands.
    */
   const applyClock = (clock: SessionClock): Effect.Effect<boolean> =>
     SubscriptionRef.modify(state, (current) => {
       if (!isNewerRevision(clock, current.clock)) return [false, current];
 
       const overtaken =
-        current.holding?.kind === "held" && clock.revision > current.holding.revision;
+        current.holding?.kind === "held" && !holdStands(current.holding.revision, clock);
 
       return [
         true,
@@ -402,13 +438,16 @@ export const run = Effect.fn("Follower.run")(function* <E>(
 
   /**
    * Pauses the session at `standing`, then seeks it back there, answering the clock it leaves; a
-   * failed seek still leaves it paused. It sends only, so it can outlive the follower that asked.
+   * failed seek still leaves it paused. Only a pause that paused the session takes the hold: its
+   * answer is the revision after `seen`, the clock the player stalled on. A later one found someone
+   * else's move first, a pause included, and answers null. It sends only, so it can outlive the
+   * follower that asked.
    */
-  const pauseAt = (standing: number): Effect.Effect<SessionClock | null> =>
+  const pauseAt = (standing: number, seen: number): Effect.Effect<SessionClock | null> =>
     Effect.gen(function* () {
       const paused = yield* Effect.option(port.control({ kind: "pause" }));
 
-      if (Option.isNone(paused)) return null;
+      if (Option.isNone(paused) || paused.value.revision !== seen + 1) return null;
 
       const sought = yield* Effect.option(
         port.control({ kind: "seek", positionMs: standing, revision: paused.value.revision }),
@@ -419,30 +458,32 @@ export const run = Effect.fn("Follower.run")(function* <E>(
 
   /**
    * Takes over a hold whose pause is on the way: once it lands, the session is held at the clock
-   * it left, and plays on when this player recovers. A failed pause leaves no hold.
+   * it left, and plays on when this player recovers. A pause that failed or was not the hold's
+   * own, or a clock newer than the one it left, leaves no hold.
    */
   const settleHold = (landed: Effect.Effect<SessionClock | null>): Effect.Effect<void> =>
     Effect.gen(function* () {
       const clock = yield* landed;
 
-      if (clock === null) {
-        yield* update((current) => ({
-          ...current,
-          holding: current.holding?.kind === "pausing" ? null : current.holding,
-        }));
+      if (clock !== null) yield* applyClock(clock);
+
+      const held = yield* SubscriptionRef.modify(state, (current) => {
+        if (current.holding?.kind !== "pausing") return [false, current];
+
+        const holding: Hold | null =
+          clock !== null && holdStands(clock.revision, current.clock)
+            ? { kind: "held", revision: clock.revision }
+            : null;
+
+        return [holding !== null, { ...current, holding }];
+      });
+
+      if (!held || clock === null) {
         yield* correct;
 
         return;
       }
 
-      yield* applyClock(clock);
-      yield* update((current) => ({
-        ...current,
-        holding:
-          current.holding?.kind === "pausing"
-            ? { kind: "held", revision: clock.revision }
-            : current.holding,
-      }));
       yield* Effect.logInfo("Follower.heldForStall").pipe(
         Effect.annotateLogs({ revision: clock.revision, positionMs: clock.positionAtAnchorMs }),
       );
@@ -452,34 +493,32 @@ export const run = Effect.fn("Follower.run")(function* <E>(
     });
 
   /**
-   * Pauses the session where this stalled player stands, holding it until the player plays. The
-   * requests run detached: a follower replaced while they are on the way, as on a stream reload,
-   * hands the hold to the next one through `resumeHold`.
+   * Pauses the session where this stalled player stands, holding it until the player plays; `seen`
+   * is the revision of the clock it stalled on. The requests run detached: a follower replaced
+   * while they are on the way, as on a stream reload, hands the hold to the next one through
+   * `resumeHold`.
    */
-  const holdForStall = Effect.uninterruptibleMask((restore) =>
-    Effect.gen(function* () {
-      const request = yield* Effect.forkDetach(pauseAt(player.positionMs()));
-      const landed = Fiber.join(request);
+  const holdForStall = (seen: number): Effect.Effect<void> =>
+    Effect.uninterruptibleMask((restore) =>
+      Effect.gen(function* () {
+        const request = yield* Effect.forkDetach(pauseAt(player.positionMs(), seen));
+        const landed = Fiber.join(request);
 
-      // Sent and recorded together, so no stop in between loses a pause on its way.
-      yield* update((current) => ({ ...current, holding: { kind: "pausing", landed } }));
-      yield* restore(settleHold(landed));
-    }),
-  );
+        // Sent and recorded together, so no stop in between loses a pause on its way.
+        yield* update((current) => ({ ...current, holding: { kind: "pausing", landed } }));
+        yield* restore(settleHold(landed));
+      }),
+    );
 
   /**
-   * Plays the session on after this player's stall, unless someone moved it meanwhile. The hold
-   * lasts until a newer clock ends it in `applyClock`, the play's own answer included, so a play
-   * that fails leaves it for the next correction tick to try again.
+   * Plays the session on after this player's stall while the hold stands. The hold lasts until a
+   * newer clock ends it in `applyClock`, the play's own answer included, so a play that fails
+   * leaves it for the next correction tick to try again.
    */
   const releaseHold = Effect.gen(function* () {
     const { clock, holding } = yield* SubscriptionRef.get(state);
 
-    if (
-      holding?.kind !== "held" ||
-      clock.revision !== holding.revision ||
-      clock.status !== "paused"
-    ) {
+    if (holding?.kind !== "held" || !holdStands(holding.revision, clock)) {
       yield* update((current) => ({ ...current, holding: null }));
       yield* correct;
 
@@ -522,7 +561,7 @@ export const run = Effect.fn("Follower.run")(function* <E>(
           latest.clock.revision === clock.revision &&
           latest.clock.status === "playing"
         ) {
-          yield* holdForStall;
+          yield* holdForStall(clock.revision);
         }
       }).pipe(Effect.ensuring(Ref.set(stallWatch, Option.none()))),
       scope,
@@ -579,13 +618,6 @@ export const run = Effect.fn("Follower.run")(function* <E>(
     return length !== null && length > 0 && player.positionMs() >= length - END_SLACK_MS;
   };
 
-  const isSeekEcho = (landed: number): Effect.Effect<boolean> =>
-    Ref.modify(seekEchoes, (targets) => {
-      const at = targets.findIndex((target) => Math.abs(landed - target) <= SEEK_ECHO_MS);
-
-      return at === -1 ? [false, targets] : [true, targets.slice(at + 1)];
-    });
-
   /** Whether the player is further than `viewerSeekMs` from the shared position. */
   const offClock = Effect.gen(function* () {
     const now = yield* serverNow;
@@ -597,95 +629,68 @@ export const run = Effect.fn("Follower.run")(function* <E>(
     });
   });
 
-  const onPaused = (fresh: boolean): Effect.Effect<void> =>
+  /** Carries out what `eventAction` decided about an event. */
+  const act = (action: EventAction): Effect.Effect<void> =>
+    Match.value(action).pipe(
+      Match.whenOr("play", "pause", (kind) => moveSession({ kind }).pipe(Effect.ignore)),
+      Match.when("seek", () =>
+        moveSession({ kind: "seek", positionMs: player.positionMs() }).pipe(Effect.ignore),
+      ),
+      Match.when("detach", () => update((latest) => ({ ...latest, follow: "detached" }))),
+      Match.when("follow", () => correct),
+      Match.when("nothing", () => Effect.void),
+      Match.exhaustive,
+    );
+
+  /**
+   * Acts on an event as `hear` judged it when it arrived and as `eventAction` decides, the one
+   * place an event can move the session. A `playing` from a stalled player that holds the
+   * session plays the hold on instead, as a correction tick would.
+   */
+  const onEvent = (heard: Heard): Effect.Effect<void> =>
     Effect.gen(function* () {
-      if (yield* isEcho(pauseEchoes)) return;
-
-      if (!player.isPaused()) {
-        yield* correct;
-
-        return;
-      }
+      if (heard.event === "waiting" || heard.event === "playing") yield* observe;
 
       const current = yield* SubscriptionRef.get(state);
 
-      if (current.clock.status !== "playing" || current.holding !== null || atEnd()) return;
-
-      if (!(yield* Ref.get(controls))) {
-        yield* update((latest) => ({ ...latest, follow: "detached" }));
-
-        return;
-      }
-
-      if (fresh) {
-        yield* moveSession({ kind: "pause" }).pipe(Effect.ignore);
-
-        return;
-      }
-
-      yield* correct;
-    });
-
-  const onSeeked = (fresh: boolean): Effect.Effect<void> =>
-    Effect.gen(function* () {
-      const echo = yield* isSeekEcho(player.positionMs());
-
-      if (!echo && fresh && (yield* Ref.get(controls)) && (yield* offClock)) {
-        yield* moveSession({ kind: "seek", positionMs: player.positionMs() }).pipe(Effect.ignore);
-
-        return;
-      }
-
-      yield* correct;
-    });
-
-  const onPlaying = (fresh: boolean): Effect.Effect<void> =>
-    Effect.gen(function* () {
-      const echo = yield* isEcho(playEchoes);
-      const current = yield* SubscriptionRef.get(state);
-
-      yield* observe;
-
-      if (current.holding?.kind === "held") {
+      if (heard.event === "playing" && current.holding?.kind === "held") {
         if (recovered()) yield* releaseHold;
 
         return;
       }
 
-      const viewerPlay = !echo && fresh && current.follow !== "buffering" && !player.isPaused();
-
-      if ((yield* Ref.get(controls)) && viewerPlay && current.clock.status === "paused") {
-        yield* moveSession({ kind: "play" }).pipe(Effect.ignore);
-
-        return;
+      if (heard.origin === "catching-up") {
+        yield* Effect.logDebug("Follower.catchingUp").pipe(
+          Effect.annotateLogs({ event: heard.event, command: heard.command }),
+        );
       }
 
-      yield* correct;
+      yield* act(
+        eventAction({
+          event: heard.event,
+          origin: heard.origin,
+          controls: yield* Ref.get(controls),
+          clock: current.clock.status,
+          holding: current.holding !== null,
+          paused: player.isPaused(),
+          buffering: player.isBuffering(),
+          atEnd: atEnd(),
+          offClock: yield* offClock,
+        }),
+      );
     });
-
-  /**
-   * Each handler gets whether its event is fresh: heard while the clock in force was already
-   * applied. Only a fresh event moves the session, and only while the player still stands where
-   * the event says; anything else brings the player to the clock in force. Otherwise a `playing`
-   * from before a pause, read against the paused clock, would play the session again.
-   */
-  const onEvent: Record<FollowerPlayerEvent, (fresh: boolean) => Effect.Effect<void>> = {
-    waiting: () => observe,
-    paused: onPaused,
-    seeked: onSeeked,
-    playing: onPlaying,
-    ended: () => Effect.void,
-  };
 
   const events = yield* Queue.unbounded<Heard>();
 
   yield* Effect.acquireRelease(
     Effect.sync(() =>
       player.subscribe((event) => {
-        Queue.offerUnsafe(events, {
-          event,
-          revision: SubscriptionRef.getUnsafe(state).clock.revision,
-        });
+        // Judged on arrival against the commands given so far, so an event the player reports
+        // late is judged by when it came, not by when the follower gets to it.
+        const [origin, next] = hear(MutableRef.get(expected), event);
+
+        MutableRef.set(expected, next);
+        Queue.offerUnsafe(events, { event, origin, command: next.command });
       }),
     ),
     (unsubscribe) => Effect.sync(unsubscribe),
@@ -706,16 +711,7 @@ export const run = Effect.fn("Follower.run")(function* <E>(
     yield* Effect.forkScoped(settleHold(options.resumeHold.landed));
   }
 
-  yield* Effect.forkScoped(
-    Effect.forever(
-      Effect.gen(function* () {
-        const heard = yield* Queue.take(events);
-        const { clock } = yield* SubscriptionRef.get(state);
-
-        yield* onEvent[heard.event](heard.revision === clock.revision);
-      }),
-    ),
-  );
+  yield* Effect.forkScoped(Effect.forever(Effect.flatMap(Queue.take(events), onEvent)));
   yield* Effect.forkScoped(
     addSamples.pipe(Effect.delay(Duration.millis(CLOCK_SAMPLING.everyMs)), Effect.forever),
   );

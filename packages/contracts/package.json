@@ -15,6 +15,7 @@
     "./follower": "./src/follower.ts",
     "./follower-policy": "./src/follower-policy.ts",
     "./session-next": "./src/session-next.ts",
+    "./testing/follower-session": "./src/testing/follower-session.ts",
     "./ticket": "./src/ticket.ts",
     "./server-functions": "./src/server-functions.ts",
     "./ticket-vectors": "./src/ticket-vectors.ts",

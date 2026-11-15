@@ -1,4 +1,12 @@
+import {
+  advance,
+  follower,
+  meanwhile,
+  playingForAMinute,
+  scenario,
+} from "@media/contracts/testing/follower-session";
 import type { PlayerEvent } from "@media/sdk/effect";
+import { Clock, Effect } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { StallVerdict, checked, watching } from "./stall-watchdog";
@@ -15,6 +23,8 @@ class TestVideo implements NativeVideo {
   released = false;
   /** AVPlayer starts playing a moment after `play`, as its events reach JS later. */
   startsLater = false;
+  /** AVPlayer ignores `pause` for now, as a pause it takes late does. */
+  pausesLater = false;
   readonly #listeners: Listeners = {
     playingChange: new Set(),
     statusChange: new Set(),
@@ -62,6 +72,7 @@ class TestVideo implements NativeVideo {
   }
 
   pause(): void {
+    if (this.pausesLater) return;
     this.#use();
     this.#waitingToPlay = false;
     this.#setPlaying(false);
@@ -908,6 +919,38 @@ describe("VideoPort with the lock screen and stalls", () => {
     expect(port.wantsToPlay()).toBe(true);
     expect(recoversAfterFirstLimit(port, clock)).toBe(true);
   });
+});
+
+describe("VideoPort following a group session", () => {
+  it("never lets a late playing callback undo the session's pause", () =>
+    scenario(playingForAMinute, (session) =>
+      Effect.gen(function* () {
+        const video = new TestVideo();
+
+        video.status = "readyToPlay";
+        video.currentTime = 60;
+
+        const clock = yield* Clock.Clock;
+        const port = new VideoPort(() => clock.currentTimeMillisUnsafe());
+
+        port.attach(video, { positionMs: 60_000, durationMs: 3_600_000, seeker: NATIVE_SEEKER });
+        yield* follower(session, port, { controls: true });
+        yield* advance(4_000);
+        video.pausesLater = true;
+
+        const paused = yield* meanwhile(session.move({ kind: "pause" }));
+
+        // A playingChange AVPlayer sent before it took the follower's pause reaches JS first.
+        video.firePlaying(true);
+        yield* advance(200);
+        video.pausesLater = false;
+        video.pause();
+        yield* advance(2_000);
+
+        expect(yield* session.clock).toMatchObject({ status: "paused", revision: paused.revision });
+        expect(port.isPaused()).toBe(true);
+      }),
+    ));
 });
 
 describe("withinBuffer", () => {

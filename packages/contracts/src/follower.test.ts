@@ -1,28 +1,20 @@
-import { Clock, Data, Effect, Exit, Fiber, Layer, Match, Ref, Result, Scope } from "effect";
-import { TestClock } from "effect/testing";
+import { Clock, Effect, Exit, Fiber, Result, Scope } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { positionAt } from "./clock";
-import type { SessionClock } from "./clock";
 import { run } from "./follower";
-import type {
-  ClockMove,
-  Follower,
-  FollowerPlayer,
-  FollowerPlayerEvent,
-  FollowerState,
-  Hold,
-} from "./follower";
+import type { FollowerPlayer, FollowerState } from "./follower";
 import { FOLLOWER_TUNABLES } from "./follower-policy";
-import { EpochMillis } from "./units";
-
-const START = 1_760_000_000_000;
-
-const SERVER_OFFSET_MS = 7_000;
-
-const LATENCY_MS = 40;
-
-class Refused extends Data.TaggedError("Refused")<{ readonly reason: string }> {}
+import type { FollowerPlayerEvent } from "./follower-policy";
+import {
+  LATENCY_MS,
+  SERVER_OFFSET_MS,
+  advance,
+  follower,
+  meanwhile,
+  playingForAMinute,
+  scenario,
+} from "./testing/follower-session";
+import type { Session } from "./testing/follower-session";
 
 /** A player whose media clock runs on the test clock, with controls to act as the viewer. */
 interface FakePlayer extends FollowerPlayer {
@@ -166,187 +158,8 @@ const makePlayer = (positionMs: number) =>
     return player;
   });
 
-/**
- * A session's clock as the core keeps it: play and pause are absolute, a seek needs the current
- * revision, every move anchors at the server's time. Members it holds get each new clock, as the
- * subscription delivers it, one latency after the move.
- */
-const makeSession = (initial: SessionClock) =>
-  Effect.gen(function* () {
-    const clock = yield* Ref.make(initial);
-    const followers = yield* Ref.make<ReadonlyArray<Follower<Refused>>>([]);
-    const refusing = yield* Ref.make<string | null>(null);
-    const seeksRefused = yield* Ref.make(false);
-
-    const serverNow = Effect.map(Clock.currentTimeMillis, (now) =>
-      EpochMillis.make(now + SERVER_OFFSET_MS),
-    );
-
-    const publish = Effect.gen(function* () {
-      const current = yield* Ref.get(clock);
-
-      yield* Effect.forEach(yield* Ref.get(followers), (member) => member.apply(current), {
-        discard: true,
-      });
-    });
-
-    const control = (move: ClockMove, published = true) =>
-      Effect.gen(function* () {
-        yield* Effect.sleep(LATENCY_MS);
-
-        const reason = yield* Ref.get(refusing);
-
-        if (reason !== null) return yield* new Refused({ reason });
-
-        const now = yield* serverNow;
-        const current = yield* Ref.get(clock);
-
-        const moved = (fields: Partial<SessionClock>): SessionClock => ({
-          ...current,
-          ...fields,
-          anchorServerTime: now,
-          revision: current.revision + 1,
-        });
-
-        if (
-          move.kind === "seek" &&
-          (move.revision !== current.revision || (yield* Ref.get(seeksRefused)))
-        ) {
-          return yield* new Refused({ reason: "conflict" });
-        }
-
-        const next = Match.value(move).pipe(
-          Match.discriminatorsExhaustive("kind")({
-            play: () => (current.status === "playing" ? current : moved({ status: "playing" })),
-            pause: () =>
-              current.status === "paused"
-                ? current
-                : moved({ status: "paused", positionAtAnchorMs: positionAt(current, now) }),
-            seek: (seek) => moved({ positionAtAnchorMs: seek.positionMs }),
-          }),
-        );
-
-        yield* Ref.set(clock, next);
-
-        if (published) yield* Effect.forkDetach(Effect.delay(publish, LATENCY_MS));
-
-        yield* Effect.sleep(LATENCY_MS);
-
-        return next;
-      });
-
-    const heartbeat = Effect.gen(function* () {
-      yield* Effect.sleep(LATENCY_MS);
-      const serverTime = yield* serverNow;
-
-      yield* Effect.sleep(LATENCY_MS);
-
-      return { serverTime };
-    });
-
-    const shared = Effect.gen(function* () {
-      return positionAt(yield* Ref.get(clock), yield* serverNow);
-    });
-
-    return {
-      port: { heartbeat, control },
-      clock: Ref.get(clock),
-      shared,
-      join: (member: Follower<Refused>) => Ref.update(followers, (all) => [...all, member]),
-      leave: (member: Follower<Refused>) =>
-        Ref.update(followers, (all) => all.filter((other) => other !== member)),
-      refuse: (reason: string | null) => Ref.set(refusing, reason),
-      refuseSeeks: (refused: boolean) => Ref.set(seeksRefused, refused),
-      move: (move: ClockMove) => control(move),
-      /** Moves the clock without telling members, who hear of it only when a test applies it. */
-      moveUnheard: (move: ClockMove) => control(move, false),
-    };
-  });
-
-type Session = Effect.Success<ReturnType<typeof makeSession>>;
-
-const advance = (ms: number) =>
-  Effect.gen(function* () {
-    for (let elapsed = 0; elapsed < ms; elapsed += 20) yield* TestClock.adjust(20);
-  });
-
-const follower = (
-  session: Session,
-  player: FakePlayer,
-  options: {
-    readonly controls?: boolean;
-    readonly pausesForStalls?: boolean;
-    readonly resumeHold?: Hold;
-  } = {},
-) =>
-  Effect.gen(function* () {
-    const started = yield* Effect.forkChild(
-      run({
-        player,
-        port: session.port,
-        clock: yield* session.clock,
-        durationMs: () => 3_600_000,
-        controls: options.controls ?? false,
-        pausesForStalls: options.pausesForStalls ?? false,
-        resumeHold: options.resumeHold ?? null,
-      }),
-    );
-
-    yield* advance(1_000);
-
-    const member = yield* Fiber.join(started);
-
-    yield* session.join(member);
-
-    return member;
-  });
-
-/** Runs `effect` while the test clock moves on, as a call over the network needs. */
-const meanwhile = <A, E>(effect: Effect.Effect<A, E>) =>
-  Effect.gen(function* () {
-    const fiber = yield* Effect.forkChild(effect);
-
-    yield* advance(500);
-
-    return yield* Fiber.join(fiber);
-  });
-
 const driftOf = (session: Session, player: FakePlayer) =>
   Effect.map(session.shared, (shared) => player.positionMs() - shared);
-
-const scenario = (
-  clock: Partial<SessionClock>,
-  body: (session: Session) => Effect.Effect<void, Refused, Scope.Scope>,
-): Promise<void> =>
-  Effect.runPromise(
-    Effect.scoped(
-      Effect.gen(function* () {
-        const testClock = yield* Layer.build(TestClock.layer());
-
-        yield* Effect.gen(function* () {
-          yield* TestClock.setTime(START);
-
-          const session = yield* makeSession({
-            status: "paused",
-            positionAtAnchorMs: 0,
-            anchorServerTime: START + SERVER_OFFSET_MS,
-            playbackRate: 1,
-            revision: 0,
-            ...clock,
-          });
-
-          yield* body(session);
-        }).pipe(Effect.provideContext(testClock));
-      }),
-    ),
-  );
-
-const playingForAMinute: Partial<SessionClock> = {
-  status: "playing",
-  positionAtAnchorMs: 0,
-  anchorServerTime: START + SERVER_OFFSET_MS - 60_000,
-  revision: 4,
-};
 
 const inSync = FOLLOWER_TUNABLES.inSyncMs;
 
@@ -770,6 +583,127 @@ describe("follower", () => {
         expect((yield* session.clock).status).toBe("playing");
         expect((yield* after.current).holding).toBeNull();
         expect(Math.abs(lucia.positionMs() - aiko.positionMs())).toBeLessThan(250);
+      }),
+    ));
+  it("drops a late native playing event while a newer pause is still taking effect", () =>
+    scenario(playingForAMinute, (session) =>
+      Effect.gen(function* () {
+        const player = yield* makePlayer(0);
+
+        yield* follower(session, player, { controls: true });
+        yield* advance(4_000);
+        player.delayEvents();
+        player.sayPlaying();
+        player.lagPauses();
+
+        const paused = yield* meanwhile(session.move({ kind: "pause" }));
+
+        player.deliverEvents();
+        yield* advance(200);
+        player.catchUp();
+        yield* advance(2_000);
+        expect(yield* session.clock).toMatchObject({ status: "paused", revision: paused.revision });
+      }),
+    ));
+  it("keeps an intentional pause during a stall when the player subsequently recovers", () =>
+    scenario(playingForAMinute, (session) =>
+      Effect.gen(function* () {
+        const player = yield* makePlayer(0);
+        const host = yield* follower(session, player, { controls: true, pausesForStalls: true });
+
+        yield* advance(4_000);
+        player.stall();
+        yield* advance(3_000);
+        yield* meanwhile(host.move({ kind: "pause" }));
+        player.recover();
+        yield* advance(3_000);
+        expect((yield* session.clock).status).toBe("paused");
+      }),
+    ));
+  it("does not resume a deliberate pause after an in-flight stall hold crosses a reload", () =>
+    scenario(playingForAMinute, (session) =>
+      Effect.gen(function* () {
+        const player = yield* makePlayer(0);
+        const reloads = yield* Scope.make();
+        const hosting = { controls: true, pausesForStalls: true } as const;
+        const before = yield* Scope.provide(follower(session, player, hosting), reloads);
+
+        yield* advance(4_000);
+        player.stall();
+        yield* advance(FOLLOWER_TUNABLES.stallPauseMs + 20);
+
+        const { holding: left } = yield* before.current;
+
+        if (left?.kind !== "pausing") throw new Error("expected in-flight stall hold");
+
+        yield* session.leave(before);
+        yield* Scope.close(reloads, Exit.void);
+        // Host deliberately presses Pause on their other screen while the stream reloads.
+        yield* meanwhile(session.move({ kind: "pause" }));
+
+        const paused = yield* session.clock;
+        const after = yield* follower(session, player, { ...hosting, resumeHold: left });
+
+        yield* after.apply(yield* session.clock);
+        player.recover();
+        yield* advance(3_000);
+        expect(yield* session.clock).toMatchObject({ status: "paused", revision: paused.revision });
+      }),
+    ));
+  it("never plays on a session someone paused just before the stall's own pause landed", () =>
+    scenario(playingForAMinute, (session) =>
+      Effect.gen(function* () {
+        const lucia = yield* makePlayer(0);
+        const host = yield* follower(session, lucia, { controls: true, pausesForStalls: true });
+
+        yield* advance(4_000);
+        lucia.stall();
+        yield* advance(FOLLOWER_TUNABLES.stallPauseMs - 60);
+
+        // Lucía pauses on her other screen, and this one hears of it only after its stall's pause
+        // went out, which then pauses a session that was already paused.
+        const paused = yield* meanwhile(session.moveUnheard({ kind: "pause" }));
+
+        yield* host.apply(paused);
+        lucia.recover();
+        yield* advance(3_000);
+
+        expect((yield* session.clock).status).toBe("paused");
+        expect((yield* host.current).holding).toBeNull();
+      }),
+    ));
+  it("never moves the session for an event its player reports while the follower starts on it", () =>
+    scenario({ ...playingForAMinute, status: "paused", positionAtAnchorMs: 70_000 }, (session) =>
+      Effect.gen(function* () {
+        const player = yield* makePlayer(70_000);
+
+        // The stream started playing for the clock it loaded on and the session paused since; the
+        // player says so only as the follower starts, and its pause takes effect late.
+        player.delayEvents();
+        player.viewerPlay();
+        player.lagPauses();
+
+        const started = yield* Effect.forkChild(
+          run({
+            player,
+            port: session.port,
+            clock: yield* session.clock,
+            durationMs: () => 3_600_000,
+            controls: true,
+            pausesForStalls: false,
+          }),
+        );
+
+        yield* advance(LATENCY_MS);
+        player.deliverEvents();
+        yield* advance(1_000);
+        yield* session.join(yield* Fiber.join(started));
+        yield* advance(200);
+        player.catchUp();
+        yield* advance(2_000);
+
+        expect(yield* session.clock).toMatchObject({ status: "paused", revision: 4 });
+        expect(player.isPaused()).toBe(true);
       }),
     ));
 });

@@ -3,8 +3,27 @@ import { describe, expect, it } from "vitest";
 
 import { positionAt } from "./clock";
 import type { SessionClock } from "./clock";
-import { FOLLOWER_TUNABLES, PlayerCommand, follow } from "./follower-policy";
-import type { FollowInput, PlayerReading } from "./follower-policy";
+import {
+  FOLLOWER_TUNABLES,
+  PlayerCommand,
+  eventAction,
+  expectedAfter,
+  expectedAtLoad,
+  expectedInPlace,
+  expectedLanded,
+  follow,
+  hear,
+  holdStands,
+} from "./follower-policy";
+import type {
+  EventAction,
+  EventFacts,
+  Expected,
+  FollowInput,
+  FollowerPlayerEvent,
+  PendingCommand,
+  PlayerReading,
+} from "./follower-policy";
 import { EpochMillis } from "./units";
 
 const NOW = EpochMillis.make(1_760_000_000_000);
@@ -244,5 +263,211 @@ describe("follow", () => {
     expect(follow(input(clock, behind, { durationMs: 590_000 })).commands).toStrictEqual([
       PlayerCommand.Seek({ positionMs: 590_000 }),
     ]);
+  });
+});
+
+const expecting = (standsPaused: boolean, pending: ReadonlyArray<PendingCommand>): Expected => ({
+  command: 7,
+  paused: standsPaused,
+  pending,
+});
+
+describe("hear", () => {
+  it.each<readonly [string, Expected, FollowerPlayerEvent, string, Expected]>([
+    ["a pause's own event", expecting(true, ["pause"]), "paused", "command", expecting(true, [])],
+    [
+      "a `playing` while a pause is pending",
+      expecting(true, ["pause"]),
+      "playing",
+      "catching-up",
+      expecting(true, ["pause"]),
+    ],
+    [
+      "a seek's landing while a pause is still pending",
+      expecting(true, ["pause", "seek"]),
+      "seeked",
+      "command",
+      expecting(true, ["pause"]),
+    ],
+    [
+      "a `playing` while the load settles",
+      expecting(false, ["load"]),
+      "playing",
+      "catching-up",
+      expecting(false, ["load"]),
+    ],
+    [
+      "a `seeked` while the load settles",
+      expecting(false, ["load"]),
+      "seeked",
+      "catching-up",
+      expecting(false, ["load"]),
+    ],
+    ["a pause it expected", expecting(true, []), "paused", "unchanged", expecting(true, [])],
+    ["a viewer's play", expecting(true, []), "playing", "change", expecting(false, [])],
+    ["a viewer's pause", expecting(false, []), "paused", "change", expecting(true, [])],
+    ["a viewer's seek", expecting(false, []), "seeked", "change", expecting(false, [])],
+    ["a stall", expecting(false, []), "waiting", "unchanged", expecting(false, [])],
+    ["an end", expecting(false, []), "ended", "unchanged", expecting(false, [])],
+  ])("judges %s", (_name, before, event, origin, after) => {
+    expect(hear(before, event)).toStrictEqual([origin, after]);
+  });
+
+  it("numbers each play, pause, and seek, and keeps one play or pause and one seek pending", () => {
+    const loading = expectedAtLoad(false);
+    const pausing = expectedAfter(loading, PlayerCommand.Pause());
+    const sought = expectedAfter(pausing, PlayerCommand.Seek({ positionMs: 5_000 }));
+    const played = expectedAfter(sought, PlayerCommand.Play());
+
+    expect(loading).toStrictEqual({ command: 1, paused: false, pending: ["load"] });
+    expect(pausing).toStrictEqual({ command: 2, paused: true, pending: ["load", "pause"] });
+    expect(played).toStrictEqual({ command: 4, paused: false, pending: ["load", "seek", "play"] });
+    expect(expectedAfter(played, PlayerCommand.SetRate({ rate: 1.05 }))).toBe(played);
+    expect(expectedAfter(played, PlayerCommand.Seek({ positionMs: 0 })).pending).toStrictEqual([
+      "load",
+      "play",
+      "seek",
+    ]);
+  });
+
+  it("carries out all but a seek once the player stands in place, and a seek once it landed", () => {
+    const pending = expecting(false, ["load", "play", "seek"]);
+
+    expect(expectedInPlace(pending, true)).toStrictEqual(expecting(true, ["seek"]));
+    expect(expectedLanded(expectedInPlace(pending, true))).toStrictEqual(expecting(true, []));
+  });
+
+  it("never takes an event that arrived while a command was pending as a change", () => {
+    const step = fc.oneof(
+      fc
+        .constantFrom(
+          PlayerCommand.Play(),
+          PlayerCommand.Pause(),
+          PlayerCommand.Seek({ positionMs: 1_000 }),
+          PlayerCommand.SetRate({ rate: 1.05 }),
+        )
+        .map((command) => ({ kind: "command" as const, command })),
+      fc
+        .constantFrom<FollowerPlayerEvent>("playing", "paused", "seeked", "waiting", "ended")
+        .map((event) => ({ kind: "event" as const, event })),
+      fc.boolean().map((standsPaused) => ({ kind: "in-place" as const, standsPaused })),
+      fc.constant({ kind: "landed" as const }),
+    );
+
+    fc.assert(
+      fc.property(fc.boolean(), fc.array(step, { maxLength: 40 }), (startPaused, steps) => {
+        let expected = expectedAtLoad(startPaused);
+
+        for (const next of steps) {
+          const before = expected;
+
+          if (next.kind === "command") expected = expectedAfter(before, next.command);
+          else if (next.kind === "in-place") expected = expectedInPlace(before, next.standsPaused);
+          else if (next.kind === "landed") expected = expectedLanded(before);
+          else {
+            const [origin, after] = hear(before, next.event);
+            const waiting = before.pending.length > 0;
+
+            expect(["command", "catching-up"].includes(origin)).toBe(waiting);
+            expect(after.pending.length).toBe(
+              origin === "command" ? before.pending.length - 1 : before.pending.length,
+            );
+            expected = after;
+          }
+
+          const playOrPause = expected.pending.filter(
+            (command) => command === "play" || command === "pause",
+          );
+
+          expect(playOrPause.length).toBeLessThanOrEqual(1);
+          expect(
+            expected.pending.filter((command) => command === "seek").length,
+          ).toBeLessThanOrEqual(1);
+          expect(expected.command).toBeGreaterThanOrEqual(before.command);
+        }
+      }),
+    );
+  });
+});
+
+const facts = (overrides: Partial<EventFacts>): EventFacts => ({
+  event: "playing",
+  origin: "change",
+  controls: true,
+  clock: "paused",
+  holding: false,
+  paused: false,
+  buffering: false,
+  atEnd: false,
+  offClock: false,
+  ...overrides,
+});
+
+describe("eventAction", () => {
+  it.each<readonly [string, Partial<EventFacts>, EventAction]>([
+    ["plays a paused session for a viewer's play", {}, "play"],
+    ["never moves the session for a command's own event", { origin: "command" }, "follow"],
+    ["never moves the session for a player catching up", { origin: "catching-up" }, "follow"],
+    ["follows a `playing` the player no longer stands by", { paused: true }, "follow"],
+    ["follows a `playing` while the player stalls", { buffering: true }, "follow"],
+    ["follows a viewer's play in a session that plays", { clock: "playing" }, "follow"],
+    ["follows a viewer's play without control", { controls: false }, "follow"],
+    [
+      "pauses a playing session for a viewer's pause",
+      { event: "paused", clock: "playing", paused: true },
+      "pause",
+    ],
+    [
+      "detaches a viewer without control who paused",
+      { event: "paused", clock: "playing", paused: true, controls: false },
+      "detach",
+    ],
+    [
+      "leaves a player that paused at its end",
+      { event: "paused", clock: "playing", paused: true, atEnd: true },
+      "nothing",
+    ],
+    [
+      "leaves a pause while the session is held",
+      { event: "paused", clock: "playing", paused: true, holding: true },
+      "nothing",
+    ],
+    [
+      "follows a `paused` the player no longer stands by",
+      { event: "paused", clock: "playing" },
+      "follow",
+    ],
+    [
+      "seeks the session for a viewer's seek off the clock",
+      { event: "seeked", offClock: true },
+      "seek",
+    ],
+    ["follows a landing on the clock", { event: "seeked" }, "follow"],
+    [
+      "follows a seek off the clock without control",
+      { event: "seeked", offClock: true, controls: false },
+      "follow",
+    ],
+    ["does nothing for a stall", { event: "waiting" }, "nothing"],
+    ["does nothing for an end", { event: "ended" }, "nothing"],
+  ])("%s", (_name, overrides, action) => {
+    expect(eventAction(facts(overrides))).toBe(action);
+  });
+});
+
+const sessionAt = (status: SessionClock["status"], revision: number): SessionClock => ({
+  status,
+  positionAtAnchorMs: 30_000,
+  anchorServerTime: NOW,
+  playbackRate: 1,
+  revision,
+});
+
+describe("holdStands", () => {
+  it("lets a hold play on only while the session stands paused at its own last revision", () => {
+    expect(holdStands(6, sessionAt("paused", 6))).toBe(true);
+    expect(holdStands(6, sessionAt("paused", 7))).toBe(false);
+    expect(holdStands(6, sessionAt("playing", 6))).toBe(false);
+    expect(holdStands(6, sessionAt("paused", 5))).toBe(false);
   });
 });
