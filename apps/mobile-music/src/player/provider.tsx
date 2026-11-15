@@ -56,7 +56,9 @@ import {
   seedLocal,
   shuffleLocal,
 } from "./local-queue";
+import { handOver } from "./hand-over";
 import type { HandBackStep, LocalQueue } from "./local-queue";
+import { LocalStore, offlinePlaysKey } from "./local-store";
 import { NativeEngine } from "./native-engine";
 import type { TimelineMark } from "./native-engine";
 import { lockScreenControls } from "./native-host";
@@ -94,14 +96,7 @@ const RESUME_KEY = "music.resume";
 /** Offline plays one `music.play.reportOffline` takes at most, as the core accepts. */
 const OFFLINE_PLAYS_MAX = 500;
 
-/** Offline plays this phone keeps for later at most, the newest. */
-const OFFLINE_PLAYS_KEPT = 2000;
-
 const OFFLINE_PLAYS_RETRY_MS = 30_000;
-
-const StoredPlays = Schema.fromJsonString(
-  Schema.Array(Schema.Struct({ trackId: Schema.String, playedAt: Schema.Finite })),
-);
 
 /** What screens can ask the player to do. Actions never reject: failures show up in `error`. */
 export interface PlayerActions {
@@ -285,52 +280,6 @@ const useServerQueue = (platform: PlatformSdk): QueueState<Track> | null => {
 };
 
 /**
- * The phone's own queue. Its offline plays are also kept in this app's keychain under `playsKey`,
- * one key per server and person, so a relaunch or a later outage does not lose them before they
- * reach the server.
- */
-class LocalStore {
-  #queue: LocalQueue<Track>;
-  readonly #listeners = new Set<() => void>();
-  readonly #playsKey: string | null;
-
-  constructor(playsKey: string | null) {
-    this.#playsKey = playsKey;
-
-    const plays =
-      playsKey === null
-        ? []
-        : Option.getOrElse(Schema.decodeUnknownOption(StoredPlays)(readValue(playsKey)), () => []);
-
-    this.#queue = { ...seedLocal<Track>(null, () => null), plays };
-  }
-
-  getSnapshot = (): LocalQueue<Track> => this.#queue;
-
-  subscribe = (listener: () => void): (() => void) => {
-    this.#listeners.add(listener);
-
-    return () => {
-      this.#listeners.delete(listener);
-    };
-  };
-
-  update(change: (queue: LocalQueue<Track>) => LocalQueue<Track>): LocalQueue<Track> {
-    const before = this.#queue.plays;
-    this.#queue = change(this.#queue);
-
-    if (this.#playsKey !== null && this.#queue.plays !== before) {
-      const kept = this.#queue.plays.slice(-OFFLINE_PLAYS_KEPT);
-      writeValue(this.#playsKey, kept.length === 0 ? null : Schema.encodeSync(StoredPlays)(kept));
-    }
-
-    for (const listener of this.#listeners) listener();
-
-    return this.#queue;
-  }
-}
-
-/**
  * This phone's quality: the core's tier for this device, or the last one chosen here before the
  * core keeps settings for it. A phone's `auto` plays `high` (AAC 320 kbps): lossless originals are
  * a choice in settings, not a surprise on a cellular plan.
@@ -415,6 +364,11 @@ interface Phone {
    * its own queue, so the server no longer holds the entries the phone names.
    */
   readonly unanswered: Set<symbol>;
+  /**
+   * The hand-back under way, from when commands go to the core until the player follows its
+   * queue, or null.
+   */
+  readonly handing: { current: symbol | null };
 }
 
 interface PhoneProps {
@@ -442,9 +396,10 @@ const createPhone = ({
     now: () => performance.now(),
   });
 
-  const local = new LocalStore(playsKey);
+  const local = new LocalStore(appKeychains().own, playsKey);
   const mode: Phone["mode"] = { current: "server" };
   const unanswered: Phone["unanswered"] = new Set();
+  const handing: Phone["handing"] = { current: null };
   const controls = lockScreenControls(engine);
 
   const artFor = (artUrl: string | null): string | null => resolveMediaUrl(mediaUrl, artUrl);
@@ -594,7 +549,7 @@ const createPhone = ({
     },
   );
 
-  return { controller, local, mode, unanswered };
+  return { controller, local, mode, unanswered, handing };
 };
 
 /** What the actions read at the moment they run. */
@@ -793,36 +748,22 @@ const useSettings = (platform: PlatformSdk, controller: PlaybackController): voi
   }, [controller, gapless, quality, volume]);
 };
 
-/** Sends one command of the hand-back. */
-const sendStep = async (platform: PlatformSdk, step: HandBackStep): Promise<void> => {
-  switch (step.kind) {
-    case "play": {
-      await platform.music.queue.play({
-        trackIds: step.trackIds.map(asTrackId),
-        index: step.index,
-      });
+/** Sends one command of the hand-back; a new queue answers the entry it opened on. */
+const sendStep = async (platform: PlatformSdk, step: HandBackStep): Promise<string | null> => {
+  if (step.kind === "play") {
+    const { current } = await platform.music.queue.play({
+      trackIds: step.trackIds.map(asTrackId),
+      index: step.index,
+    });
 
-      return;
-    }
-
-    case "jump": {
-      await platform.music.queue.jump({ itemId: asQueueItemId(step.itemId) });
-
-      return;
-    }
-
-    case "shuffle": {
-      await platform.music.queue.shuffle({ on: step.on });
-
-      return;
-    }
-
-    case "repeat": {
-      await platform.music.queue.repeat({ mode: step.mode });
-
-      return;
-    }
+    return current;
   }
+
+  if (step.kind === "jump") await platform.music.queue.jump({ itemId: asQueueItemId(step.itemId) });
+  else if (step.kind === "shuffle") await platform.music.queue.shuffle({ on: step.on });
+  else await platform.music.queue.repeat({ mode: step.mode });
+
+  return null;
 };
 
 /**
@@ -832,6 +773,8 @@ const sendStep = async (platform: PlatformSdk, step: HandBackStep): Promise<void
  * phone went its own way, the whole queue goes back: Convex runs that queue first, as it runs one
  * client's mutations in order, and the hand-back then puts back what the phone played. It waits
  * while a song plays, so the song is not cut off, and goes back at the next pause or stop.
+ * Commands go to the core from then on, after the hand-back; the player keeps the phone's queue
+ * until the core confirms it (`handOver`).
  */
 const useHandBack = (
   platform: PlatformSdk,
@@ -840,7 +783,7 @@ const useHandBack = (
   audible: boolean,
   setMode: (mode: "server" | "local") => void,
 ): void => {
-  const { local, mode, unanswered } = phone;
+  const { controller, local, mode, unanswered, handing } = phone;
   const queue = useSyncExternalStore(local.subscribe, local.getSnapshot);
   const plays = queue.plays;
   const sending = useRef(false);
@@ -880,15 +823,27 @@ const useHandBack = (
 
   useEffect(() => {
     if (!online || audible || mode.current !== "local") return;
-    const steps = handBack(local.getSnapshot(), unanswered.size > 0);
+    const held = local.getSnapshot();
+    const steps = handBack(held, unanswered.size > 0);
+    const token = Symbol("hand-back");
     unanswered.clear();
     mode.current = "server";
-    setMode("server");
+    handing.current = token;
 
-    // Sent together, in order: Convex runs one client's mutations in the order they were sent.
-    // One refused step leaves the others: each changes only what it names.
-    for (const step of steps) void sendStep(platform, step).catch(() => undefined);
-  }, [platform, local, mode, unanswered, online, audible, setMode]);
+    void handOver({
+      steps,
+      send: (step) => sendStep(platform, step),
+      playing: held.state.current,
+      stands: () => handing.current === token,
+      adopt: (fromItemId, toItemId) => {
+        controller.adoptEntry(fromItemId, toItemId);
+      },
+      follow: () => {
+        handing.current = null;
+        setMode("server");
+      },
+    });
+  }, [platform, controller, local, mode, unanswered, handing, online, audible, setMode]);
 };
 
 /** Whose player this is: the signed-in person, or offline the one who last signed in here. */
@@ -930,7 +885,7 @@ export function PlayerProvider({ children }: { readonly children: ReactNode }) {
       copies,
       probe,
       goLocal,
-      playsKey: person === null ? null : `music.offlinePlays:${mediaUrl}:${person}`,
+      playsKey: person === null ? null : offlinePlaysKey(mediaUrl, person),
     }),
   );
 
@@ -948,6 +903,16 @@ export function PlayerProvider({ children }: { readonly children: ReactNode }) {
   useLayoutEffect(() => {
     goLocal.current = () => {
       if (phone.mode.current === "local") return;
+
+      // Lost again before the core confirmed the hand-back: the player still holds the phone's
+      // queue, which the core's last answer would only take back to before the outage.
+      if (phone.handing.current !== null) {
+        phone.handing.current = null;
+        phone.mode.current = "local";
+
+        return;
+      }
+
       local.update((held) => ({
         ...seedLocal(serverQueue, (id) => trackOfCopy(copies, id)),
         plays: held.plays,

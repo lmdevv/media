@@ -59,16 +59,23 @@ const PHONE_KEY = "media.phone";
 
 const CONNECTION_KEY = "media.server";
 
-/** A server's address as a keychain key: one record per server, so nothing crosses servers. */
-const serverKey = (server: string): string => server.replace(/[^\w.-]/gu, "_");
+/**
+ * A keychain key made of `parts`, such as a name, a server's address and a user id, joined with
+ * dots. expo-secure-store refuses a key with anything but letters, digits, `.`, `-` and `_`, on
+ * reads and writes alike, so every other character of a part becomes `_`: a server's
+ * `https://music.home:8443` becomes `https___music.home_8443`. Keys built from a server keep one
+ * record per server, so nothing crosses servers.
+ */
+export const keychainKey = (...parts: ReadonlyArray<string>): string =>
+  parts.map((part) => part.replace(/[^\w.-]/gu, "_")).join(".");
 
-const appKey = (server: string): string => `media.app.${serverKey(server)}`;
+const appKey = (server: string): string => keychainKey("media.app", server);
 
 /**
  * Where the SDK keeps this app's session for the server at `mediaUrl`, in the app's own keychain
  * (D48). Each server has its own key, so a token saved late for one server never reaches another.
  */
-export const sessionKeyFor = (mediaUrl: string): string => `media.session.${serverKey(mediaUrl)}`;
+export const sessionKeyFor = (mediaUrl: string): string => keychainKey("media.session", mediaUrl);
 
 const readJson = <A>(
   keychain: Keychain,

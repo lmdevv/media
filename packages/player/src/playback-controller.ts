@@ -528,6 +528,21 @@ export class PlaybackController {
     this.#saveResume();
   }
 
+  /**
+   * Gives the entry loaded here, `fromItemId`, the id `toItemId` the core now holds it under, as
+   * when a phone's own queue goes back to the core as a new one. The song stays where it is,
+   * playing or paused, when the queue that names `toItemId` arrives, instead of loading again from
+   * the start; an entry that turns out to hold another song loads that song, as any wrong guess.
+   */
+  adoptEntry(fromItemId: string, toItemId: string): void {
+    const loaded = this.#loaded;
+
+    if (loaded?.entry.itemId !== fromItemId) return;
+    this.#loaded = { ...loaded, entry: { ...loaded.entry, itemId: toItemId } };
+
+    if (this.#snapshot.current === fromItemId) this.#update({ current: toItemId });
+  }
+
   /** Sets the volume here at once and saves it on this device. */
   setVolume(volume: number): void {
     const value = Math.min(1, Math.max(0, volume));
