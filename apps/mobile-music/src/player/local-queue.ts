@@ -129,10 +129,14 @@ const shuffled = <A>(items: ReadonlyArray<A>, random: () => number): ReadonlyArr
  * This phone's queue, starting from the server's last answer: every one of its entries, with this
  * phone's copy of each song it holds (`playable` answers it, or null), and the same shuffle and
  * repeat. It plays the server's entry when this phone holds it, else the next one it holds.
+ *
+ * @param moved - The entry the player moved to, when the server still holds it: it counts instead
+ *   of the server's entry, as when a song ended and the core never confirmed the move to the next.
  */
 export const seedLocal = <T extends Track>(
   server: QueueState<T> | null,
   playable: (trackId: string) => T | null,
+  moved: string | null = null,
 ): LocalQueue<T> => {
   const held = new Set<string>();
 
@@ -147,11 +151,16 @@ export const seedLocal = <T extends Track>(
 
   const shuffle = server?.shuffle ?? false;
   const repeat = server?.repeat ?? "off";
+  const at = indexOf(entries, moved);
 
   return {
     state: {
       entries,
-      current: heldFrom(entries, held, Math.max(0, indexOf(entries, server?.current ?? null))),
+      current: heldFrom(
+        entries,
+        held,
+        Math.max(0, at === -1 ? indexOf(entries, server?.current ?? null) : at),
+      ),
       shuffle,
       repeat,
       autoplay: server?.autoplay ?? false,

@@ -10,6 +10,8 @@ export interface Load {
 export interface TestEngine extends PlayerEngine {
   /** The song loaded stops with a network error. */
   readonly dropStream: () => void;
+  /** The song loaded plays to its end. */
+  readonly end: () => void;
 }
 
 /** An engine that plays at once, as a copy on the phone does, and records every load. */
@@ -31,6 +33,10 @@ export const instantEngine = (loads: Array<Load>): TestEngine => {
   return {
     dropStream: () => {
       emit({ type: "error", reason: "network", message: "The network dropped" });
+    },
+    end: () => {
+      playing = false;
+      emit({ type: "ended" });
     },
     samplePlayback: () => ({ positionMs, playing }),
     load: async (source, startMs, autoplay) => {

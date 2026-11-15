@@ -33,3 +33,18 @@ export const reachOf = ({ offlinePhase, socketLost, stalled }: ReachInputs): Rea
 
   return { reach, notice: reach === "online" && stalled ? "reconnecting" : reach };
 };
+
+/** What decides whether the app asks the server whether it answers. */
+export interface ProbeInputs {
+  /** The app is on screen. */
+  readonly active: boolean;
+  /** This phone plays audio, which iOS keeps running in the background. */
+  readonly audible: boolean;
+}
+
+/**
+ * Whether the app keeps asking the server whether it answers: on screen, and in the background
+ * while audio plays, so an outage met with the phone in a pocket still moves the player to the
+ * downloaded songs. Old music's app read its socket's state, which it kept in the background too.
+ */
+export const probesReach = ({ active, audible }: ProbeInputs): boolean => active || audible;

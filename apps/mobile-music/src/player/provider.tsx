@@ -39,7 +39,7 @@ import { appKeychains } from "../lib/keychains";
 import { resolveMediaUrl } from "../lib/media-url";
 import { readValue, writeValue } from "../lib/secure-storage";
 import { useServer } from "../session/connection";
-import { useProbeReach, useServerReach } from "../session/server-reach";
+import { useProbeReach, useReachWhileAudible, useServerReach } from "../session/server-reach";
 import { useSessionPhase } from "../session/session-phase";
 import { openExpoOutput } from "./expo-audio-output";
 import {
@@ -63,7 +63,7 @@ import { LocalStore, offlinePlaysKey } from "./local-store";
 import { NativeEngine } from "./native-engine";
 import type { TimelineMark } from "./native-engine";
 import { lockScreenControls } from "./native-host";
-import { NOT_DOWNLOADED, phoneSources } from "./phone-sources";
+import { boundedSources, NOT_DOWNLOADED, phoneSources, SERVER_AWAY } from "./phone-sources";
 import {
   isPlaying,
   moveArgs,
@@ -83,12 +83,11 @@ const QUEUE_PAGE = 200;
 const QUEUE_RESTART_MS = 250;
 
 /**
- * How long a new queue may go unanswered before this phone plays its own downloaded songs
- * instead. A connection that died without the platform client noticing shows up this way.
+ * How long a new queue, or a song's ticket, may go unanswered before this phone plays its own
+ * downloaded songs instead. A connection that died without the platform client noticing shows up
+ * this way.
  */
 const ACK_DEADLINE_MS = 4000;
-
-const OFFLINE_MESSAGE = "Can’t reach the server. Downloaded songs play without it.";
 
 const QUALITY_KEY = "music.streamQuality";
 
@@ -435,9 +434,22 @@ const createPhone = ({
     },
   };
 
-  const remote = ticketSources(
-    (trackId) => platform.music.play.start({ trackId: asTrackId(trackId) }),
-    { now: Date.now, baseUrl: mediaUrl },
+  const remote = boundedSources(
+    ticketSources((trackId) => platform.music.play.start({ trackId: asTrackId(trackId) }), {
+      now: Date.now,
+      baseUrl: mediaUrl,
+    }),
+    {
+      deadlineMs: ACK_DEADLINE_MS,
+      answers: async () => Option.isSome(await readHealth(mediaUrl)),
+      away: () => {
+        probe.current();
+        goLocal.current();
+        // At once, so the player is on the phone's queue before the unanswered source fails, and
+        // moves on from there.
+        controller.sync(playingView(local.getSnapshot()));
+      },
+    },
   );
 
   const sources = phoneSources(copies, remote, mode, randomUUID);
@@ -481,7 +493,7 @@ const createPhone = ({
       holdUnanswered({ mode, unanswered }, pending);
       probe.current();
 
-      if (!trackIds.some((id) => copies.find(id) !== null)) throw new Error(OFFLINE_MESSAGE);
+      if (!trackIds.some((id) => copies.find(id) !== null)) throw new Error(SERVER_AWAY);
       goLocal.current();
 
       return playLocally(trackIds, index);
@@ -950,13 +962,17 @@ export function PlayerProvider({ children }: { readonly children: ReactNode }) {
       }
 
       local.update((held) => ({
-        ...seedLocal(serverQueue, (id) => trackOfCopy(copies, id)),
+        ...seedLocal(
+          serverQueue,
+          (id) => trackOfCopy(copies, id),
+          controller.getSnapshot().current,
+        ),
         plays: held.plays,
       }));
       phone.mode.current = "local";
       setMode("local");
     };
-  }, [phone, local, serverQueue, copies]);
+  }, [phone, controller, local, serverQueue, copies]);
 
   useEffect(() => controller.start(), [controller]);
 
@@ -980,6 +996,7 @@ export function PlayerProvider({ children }: { readonly children: ReactNode }) {
   const playing = isPlaying(snapshot, wantsPlay);
 
   useHandBack(platform, phone, online, playing, setMode);
+  useReachWhileAudible(playing);
 
   const art = useMemo(
     () =>

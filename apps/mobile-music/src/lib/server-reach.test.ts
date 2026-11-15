@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { reachOf } from "./server-reach";
+import { probesReach, reachOf } from "./server-reach";
 
 const connected = { offlinePhase: false, socketLost: false, stalled: false };
 
@@ -28,5 +28,16 @@ describe("reachOf", () => {
 
   it("is online with the socket up and nothing waiting", () => {
     expect(reachOf(connected)).toEqual({ reach: "online", notice: "online" });
+  });
+});
+
+describe("probesReach", () => {
+  it("keeps asking in the background while audio plays, so an outage there is noticed", () => {
+    expect(probesReach({ active: false, audible: true })).toBe(true);
+  });
+
+  it("asks on screen, and stops in the background once nothing plays", () => {
+    expect(probesReach({ active: true, audible: false })).toBe(true);
+    expect(probesReach({ active: false, audible: false })).toBe(false);
   });
 });

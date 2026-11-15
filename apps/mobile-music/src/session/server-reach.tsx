@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import { AppState } from "react-native";
 
 import { useDownloadsReach, useTrackHeld } from "@/downloads";
-import { reachOf } from "@/lib/server-reach";
+import { probesReach, reachOf } from "@/lib/server-reach";
 import type { Reach, ServerReach } from "@/lib/server-reach";
 import type { SettledPhase } from "@/lib/session-phase";
 import { useServer } from "@/session/connection";
@@ -19,6 +19,8 @@ const LOST_AFTER = 2;
 
 interface ReachState extends Reach {
   readonly probe: () => void;
+  /** Tells whether this phone plays audio, which keeps the checks going in the background. */
+  readonly setAudible: (audible: boolean) => void;
 }
 
 const ServerReachContext = createContext<ReachState | null>(null);
@@ -30,15 +32,16 @@ interface Lost {
 
 /**
  * Whether the media server answers its health check, asked on a timer while the app is on screen
- * and at once when it comes back. The platform client keeps its own connection and does not say
- * how it stands; on an install the media server and the core run in one place, so the media
- * server answering stands for both.
+ * or plays audio in the background, and at once when it comes back. The platform client keeps its
+ * own connection and does not say how it stands; on an install the media server and the core run
+ * in one place, so the media server answering stands for both.
  */
-const useLost = (mediaUrl: string): Lost => {
+const useLost = (mediaUrl: string, audible: boolean): Lost => {
   const [failures, setFailures] = useState(0);
   const [asked, setAsked] = useState(0);
   const [active, setActive] = useState(AppState.currentState === "active");
   const lost = failures >= LOST_AFTER;
+  const watching = probesReach({ active, audible });
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
@@ -51,7 +54,7 @@ const useLost = (mediaUrl: string): Lost => {
   }, []);
 
   useEffect(() => {
-    if (!active) return undefined;
+    if (!watching) return undefined;
     const stop = new AbortController();
 
     const ask = async (): Promise<void> => {
@@ -68,7 +71,8 @@ const useLost = (mediaUrl: string): Lost => {
       stop.abort();
       clearInterval(timer);
     };
-  }, [mediaUrl, active, lost, asked]);
+    // `active` too, so the app asks at once when it comes back on screen.
+  }, [mediaUrl, watching, active, lost, asked]);
 
   const probe = useCallback(() => {
     setAsked((count) => count + 1);
@@ -90,11 +94,12 @@ export function ServerReachProvider({
   readonly children: ReactNode;
 }) {
   const { mediaUrl } = useServer();
-  const { lost, probe } = useLost(mediaUrl);
+  const [audible, setAudible] = useState(false);
+  const { lost, probe } = useLost(mediaUrl, audible);
   const offlinePhase = phase === "offline";
 
   const value = useMemo(
-    () => ({ ...reachOf({ offlinePhase, socketLost: lost, stalled: false }), probe }),
+    () => ({ ...reachOf({ offlinePhase, socketLost: lost, stalled: false }), probe, setAudible }),
     [offlinePhase, lost, probe],
   );
 
@@ -127,6 +132,25 @@ export const useNoticeReach = (): ServerReach => useReach("useNoticeReach").noti
 
 /** Asks the server now whether it answers, as the player does when a command goes unanswered. */
 export const useProbeReach = (): (() => void) => useReach("useProbeReach").probe;
+
+/**
+ * Keeps asking whether the server answers while `audible`, in the background too: iOS keeps the
+ * app running while it plays audio, and a server lost then (leaving home Wi-Fi with the phone in a
+ * pocket) moves the player to the downloaded songs before it reaches one it can't stream.
+ *
+ * @throws When used outside `ServerReachProvider`, a programming error.
+ */
+export const useReachWhileAudible = (audible: boolean): void => {
+  const { setAudible } = useReach("useReachWhileAudible");
+
+  useEffect(() => {
+    setAudible(audible);
+
+    return () => {
+      setAudible(false);
+    };
+  }, [setAudible, audible]);
+};
 
 /**
  * Whether a song can play now: always while the server answers, else only when this phone holds

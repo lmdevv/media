@@ -1101,13 +1101,25 @@ export class PlaybackController {
    * Moves on from `entry`, which nothing can play now, to the entry after it, as old music's player
    * skipped a song it could not reach. The error stays on screen when no entry follows, or when the
    * one that follows was skipped too since a song last played, so a queue nothing can play stops.
+   * A queue that no longer holds `entry`, as a phone's own queue of copies holds no song it can't
+   * play, already moved on: the move to `entry` the core never confirmed ends, and the player
+   * follows that queue's entry.
    */
   #skipUnreachable(entry: QueueEntry): void {
     this.#skipped.add(entry.itemId);
     const queue = this.#queue;
     const at = queue?.entries.findIndex((queued) => queued.itemId === entry.itemId) ?? -1;
 
-    if (queue === null || at === -1) return;
+    if (queue === null) return;
+
+    if (at === -1) {
+      if (this.#pendingJump?.itemId !== entry.itemId) return;
+      this.#pendingJump = null;
+      this.#follow(queue.current);
+
+      return;
+    }
+
     const index = nextIndex(at, queue.entries.length, queue.repeat);
     const following = index === null ? undefined : queue.entries[index];
 

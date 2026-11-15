@@ -331,6 +331,8 @@ const setup = (
   };
 
   const copies = new Set(options.copies ?? []);
+  /** Set once the device stops waiting for the server: a ticket that answers later counts as none. */
+  const device = { away: false };
   /** The copies the player stopped playing, by URL, in order. */
   const discarded: Array<string> = [];
   const streams = ticketSources(start, { now: () => clock.now, baseUrl: options.baseUrl ?? BASE });
@@ -357,7 +359,11 @@ const setup = (
         return Result.fail(new SourceUnreachable({ message: NOT_DOWNLOADED }));
       }
 
-      return streams.resolve(track, profile, reach);
+      const streamed = await streams.resolve(track, profile, reach);
+
+      return device.away
+        ? Result.fail(new SourceUnreachable({ message: NOT_DOWNLOADED }))
+        : streamed;
     },
     discard: (trackId, url) => {
       discarded.push(url);
@@ -385,7 +391,19 @@ const setup = (
   const stop = controller.start();
   const engine = (): FakeEngine => engines.at(-1) ?? instantEngine("html", record);
 
-  return { controller, record, sent, lookups, clock, saved, stop, engine, gates, discarded };
+  return {
+    controller,
+    record,
+    sent,
+    lookups,
+    clock,
+    saved,
+    stop,
+    engine,
+    gates,
+    discarded,
+    device,
+  };
 };
 
 const ListeningAddress = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Int }));
@@ -1317,6 +1335,44 @@ describe("PlaybackController", () => {
         }
       },
     );
+
+    it("follows the device's own queue when the song it moved to fails outside that queue", async () => {
+      const run = setup({ playCurrent: "1", copies: ["a", "c"] });
+
+      try {
+        await run.controller.playTracks(["a", "b", "c"], 0);
+        run.controller.sync(queueOf([one, two, three], "1"));
+        await settle();
+        // A plays out. The core never confirms the move to B, and B's ticket doesn't come.
+        run.gates.jump.holding = true;
+        run.gates.start.holding = true;
+        run.engine().emit({ type: "ended" });
+        await settle();
+
+        expect(run.controller.getSnapshot()).toMatchObject({
+          current: "2",
+          engineStatus: "loading",
+        });
+
+        // The device goes its own way first: its queue holds only its copies, from C on.
+        run.device.away = true;
+        run.controller.sync(queueOf([one, three], "3"));
+        run.gates.start.release("b");
+        await settle();
+
+        expect(run.record.loads.map((load) => load.url)).toStrictEqual([
+          copyUrl("a"),
+          copyUrl("c"),
+        ]);
+        expect(run.controller.getSnapshot()).toMatchObject({
+          current: "3",
+          engineStatus: "playing",
+          error: null,
+        });
+      } finally {
+        run.stop();
+      }
+    });
 
     it("keeps a downloaded song playing when the server comes back", async () => {
       const media = await mediaServer();
