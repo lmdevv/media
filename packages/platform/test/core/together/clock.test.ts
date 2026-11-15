@@ -102,6 +102,32 @@ describe("moving the shared clock", () => {
     expect(stepOf(playing(0), { kind: "next", revision: 2 }, T0)).toEqual({ kind: "stale" });
   });
 
+  it("refuses a play or pause a client decided against an older clock, or a newer one", () => {
+    expect(stepOf(paused(42_000), { kind: "play", revision: 2 }, T0)).toEqual({ kind: "stale" });
+    expect(stepOf(playing(0), { kind: "play", revision: 2 }, T0)).toEqual({ kind: "stale" });
+    expect(stepOf(playing(0), { kind: "pause", revision: 2 }, T0)).toEqual({ kind: "stale" });
+    expect(stepOf(paused(42_000), { kind: "pause", revision: 4 }, T0)).toEqual({ kind: "stale" });
+  });
+
+  it("decides a play or pause at the clock's own revision as one that carries none", () => {
+    fc.assert(
+      fc.property(
+        fc.boolean(),
+        fc.integer({ min: 0, max: 10_000_000 }),
+        fc.integer({ min: 0, max: 600_000 }),
+        fc.constantFrom("play", "pause"),
+        (isPlaying, at, elapsed, kind) => {
+          const before = isPlaying ? playing(at) : paused(at);
+          const now = T0 + elapsed;
+
+          expect(stepOf(before, { kind, revision: before.revision }, now)).toEqual(
+            stepOf(before, { kind }, now),
+          );
+        },
+      ),
+    );
+  });
+
   it("seeks and skips against the clock the member saw", () => {
     expect(
       moved(stepOf(playing(0), { kind: "seek", positionMs: 5_000, revision: 3 }, T0 + 1)),

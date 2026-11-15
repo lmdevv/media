@@ -51,6 +51,11 @@ const STALE: Step = { kind: "stale" };
  * clock the member saw, so an older revision is stale: two members skipping at once move the
  * session on once.
  *
+ * A play or a pause with a revision is one a client decided on its own, against the clock at that
+ * revision, such as a stalled player's hold and its release. It is stale once the clock moved on,
+ * as old rooms fenced every host command, so it never undoes a move its client had not heard of.
+ * One a person asks for carries none, so it always applies (ADR 0017).
+ *
  * @throws ConvexError `invalid_args` for a negative or non-finite position, or a rate outside
  *   `RATE_MIN` to `RATE_MAX`.
  */
@@ -61,9 +66,11 @@ export const stepOf = (clock: Clock, op: ControlOp, now: number): Step => {
     next,
   });
 
-  if (op.kind === "play") return clock.status === "playing" ? SAME : moved({ status: "playing" });
+  if (op.kind === "play" || op.kind === "pause") {
+    if (op.revision !== undefined && op.revision !== clock.revision) return STALE;
 
-  if (op.kind === "pause") {
+    if (op.kind === "play") return clock.status === "playing" ? SAME : moved({ status: "playing" });
+
     return moved({ status: "paused", positionAtAnchorMs: positionAt(clock, now) });
   }
 

@@ -205,6 +205,35 @@ describe.skipIf(stack === undefined)("group sessions", { timeout: 120_000 }, () 
     expect(await refusal(controlAs(guest, { kind: "rate", playbackRate: 3 }))).toBe("invalid_args");
   });
 
+  it("applies a play or pause a client decided on its own only at the clock it saw", async () => {
+    if (stack === undefined) return;
+    const { shelf } = await started(stack);
+    const { clock: opened } = await joinedView(shelf.host, "movies");
+    const playing = await controlAs(shelf.host, { kind: "play", revision: opened.revision });
+
+    expect(playing).toMatchObject({ status: "playing", revision: opened.revision + 1 });
+    expect(await refusal(controlAs(shelf.host, { kind: "pause", revision: opened.revision }))).toBe(
+      "conflict",
+    );
+    expect(await refusal(controlAs(shelf.host, { kind: "play", revision: opened.revision }))).toBe(
+      "conflict",
+    );
+    expect((await joinedView(shelf.host, "movies")).clock).toEqual(playing);
+
+    const held = await controlAs(shelf.host, { kind: "pause", revision: playing.revision });
+
+    expect(held).toMatchObject({ status: "paused", revision: playing.revision + 1 });
+
+    // A pause someone asks for carries no revision: it applies, and the hold's play is then stale.
+    const paused = await controlAs(shelf.host, { kind: "pause" });
+
+    expect(paused).toMatchObject({ status: "paused", revision: held.revision + 1 });
+    expect(await refusal(controlAs(shelf.host, { kind: "play", revision: held.revision }))).toBe(
+      "conflict",
+    );
+    expect((await joinedView(shelf.host, "movies")).clock).toEqual(paused);
+  });
+
   it("refuses queued items from a guest the host has not let add", async () => {
     if (stack === undefined) return;
     const { shelf, link } = await started(stack);

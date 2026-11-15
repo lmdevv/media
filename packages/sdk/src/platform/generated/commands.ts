@@ -2317,8 +2317,8 @@ const core_together_control = mutation({
   args: Schema.Struct({
     domain: Schema.Union([Schema.Literal("movies"), Schema.Literal("music")]),
     op: Schema.Union([
-      Schema.Struct({ kind: Schema.Literal("play") }),
-      Schema.Struct({ kind: Schema.Literal("pause") }),
+      Schema.Struct({ kind: Schema.Literal("play"), revision: Schema.optionalKey(Schema.Finite) }),
+      Schema.Struct({ kind: Schema.Literal("pause"), revision: Schema.optionalKey(Schema.Finite) }),
       Schema.Struct({ kind: Schema.Literal("rate"), playbackRate: Schema.Finite }),
       Schema.Struct({
         kind: Schema.Literal("seek"),
