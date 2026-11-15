@@ -18,14 +18,24 @@ const STATUS_INTERVAL_MS = 250;
 
 let session: Promise<void> | null = null;
 
-const audioSession = (): Promise<void> => {
-  session ??= setAudioModeAsync({
-    playsInSilentMode: true,
-    shouldPlayInBackground: true,
-    interruptionMode: "doNotMix",
-  }).catch(() => {
+/** The audio session is set up, so a player can start at once. */
+let sessionSet = false;
+
+const setUpSession = async (): Promise<void> => {
+  try {
+    await setAudioModeAsync({
+      playsInSilentMode: true,
+      shouldPlayInBackground: true,
+      interruptionMode: "doNotMix",
+    });
+    sessionSet = true;
+  } catch {
     session = null;
-  });
+  }
+};
+
+const audioSession = (): Promise<void> => {
+  session ??= setUpSession();
 
   return session;
 };
@@ -82,6 +92,7 @@ export const openExpoOutput = (url: string, lockScreen: LockScreenPlayers): Audi
   let measuredMs = 0;
   let released = false;
   let seeking: Promise<void> = Promise.resolve();
+  let seeksInFlight = 0;
   const { id } = player;
 
   return {
@@ -98,6 +109,15 @@ export const openExpoOutput = (url: string, lockScreen: LockScreenPlayers): Audi
     },
     play: () => {
       wantsPlay = true;
+
+      // Started at once, a song handed over at another's end already plays when the lock screen
+      // names it, so a toggle there pauses it instead of starting it.
+      if (sessionSet && seeksInFlight === 0) {
+        player.play();
+
+        return;
+      }
+
       starting = true;
 
       const start = async (): Promise<void> => {
@@ -118,9 +138,17 @@ export const openExpoOutput = (url: string, lockScreen: LockScreenPlayers): Audi
       player.pause();
     },
     seek: (positionMs) => {
-      seeking = player.seekTo(positionMs / 1000);
+      const landing = player.seekTo(positionMs / 1000);
 
-      return seeking;
+      const landed = (): void => {
+        seeksInFlight -= 1;
+      };
+
+      seeksInFlight += 1;
+      seeking = landing;
+      void landing.then(landed, landed);
+
+      return landing;
     },
     setVolume: (volume) => {
       player.volume = volume;
