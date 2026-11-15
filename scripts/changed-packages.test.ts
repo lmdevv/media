@@ -83,14 +83,9 @@ describe("changed-packages.sh", { timeout: 30_000 }, () => {
     expect(affected("docs/operations.md", "pnpm-lock.yaml")).toEqual([".", ...everyPackage]);
   });
 
-  it("keeps legacy/music apart from the root workspace", () => {
-    expect(affected("legacy/music/apps/web/src/main.tsx")).toEqual(["legacy/music"]);
-    expect(affected(".github/workflows/ci.yml")).toEqual([".", ...everyPackage, "legacy/music"]);
-    expect(affected(".github/actions/ffmpeg/action.yml")).toEqual([
-      ".",
-      ...everyPackage,
-      "legacy/music",
-    ]);
+  it("affects the root workspace and every package for a CI change", () => {
+    expect(affected(".github/workflows/ci.yml")).toEqual([".", ...everyPackage]);
+    expect(affected(".github/actions/ffmpeg/action.yml")).toEqual([".", ...everyPackage]);
   });
 
   it("routes the NixOS module to the media service and the dev stack to the core", () => {
@@ -106,6 +101,6 @@ describe("changed-packages.sh", { timeout: 30_000 }, () => {
   });
 
   it("lists every workspace for --all", () => {
-    expect(workspaces(["--all"])).toEqual([".", ...everyPackage, "legacy/music"]);
+    expect(workspaces(["--all"])).toEqual([".", ...everyPackage]);
   });
 });

@@ -7,12 +7,12 @@
 #   scripts/changed-packages.sh - [task]              changed paths read from stdin, one per line
 #
 # With no task it prints each affected workspace directory on its own line: `.` for the root
-# workspace, then its packages, then legacy/music. A change inside a package affects that package
+# workspace, then its packages. A change inside a package affects that package
 # and every package that depends on it. A change to the root workspace affects every package.
 #
 # With a task it runs `pnpm <task>` over the affected packages of the root workspace, over the whole
-# workspace when `.` is affected, or not at all. It never runs a task over legacy/music. Arguments
-# after `test` go to Vitest, such as `--project playback`.
+# workspace when `.` is affected, or not at all. Arguments after `test` go to Vitest, such as
+# `--project playback`.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -44,8 +44,7 @@ route() {
     fi
   done
   case "$path" in
-    legacy/*) echo legacy/music ;;
-    .github/workflows/ci.yml | .github/actions/*) printf '%s\n' . legacy/music ;;
+    .github/workflows/ci.yml | .github/actions/*) echo . ;;
     scripts/changed-packages.sh) echo . ;;
     nix/* | scripts/check-sandbox.sh) echo apps/media ;;
     scripts/dev-stack.sh | deploy/convex-backend.image | deploy/functions-hash.sh) echo packages/platform ;;
@@ -81,17 +80,16 @@ listed="$(turbo_dirs)"
 mapfile -t packages < <(nonempty_lines "$listed" | sort)
 
 if [[ "$mode" == --all ]]; then
-  routed=(. legacy/music)
+  routed=(.)
 else
   mapfile -t paths < <(nonempty_lines "$changed")
   mapfile -t routed < <(for path in "${paths[@]}"; do route "$path"; done | sort -u)
 fi
 
-whole=false legacy=false filters=()
+whole=false filters=()
 for dir in "${routed[@]}"; do
   case "$dir" in
     .) whole=true ;;
-    legacy/music) legacy=true ;;
     *) filters+=("--filter=...{./$dir}") ;;
   esac
 done
@@ -108,7 +106,6 @@ fi
 if [[ -z "$task" ]]; then
   if $whole; then echo .; fi
   if ((${#affected[@]} > 0)); then printf '%s\n' "${affected[@]}"; fi
-  if $legacy; then echo legacy/music; fi
 elif $whole; then
   exec pnpm "$task" "${extra[@]}"
 elif ((${#affected[@]} == 0)); then

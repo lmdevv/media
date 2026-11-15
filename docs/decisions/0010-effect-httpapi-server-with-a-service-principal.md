@@ -2,7 +2,8 @@
 
 - Status: Accepted, 2026-11-03. Amended 2026-11-06 with the server's key and its rotation, and
   2026-11-10 with the server's core adapters, and again the same day with the server on the core.
-  Amended 2026-11-13 with music's routes on the server.
+  Amended 2026-11-13 with music's routes on the server. `legacy/music`, whose files it cites,
+  was deleted 2026-11-15; read them at `bd7462a7`.
 - Decisions: D24, D25, D50
 
 ## Context

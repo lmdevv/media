@@ -13,8 +13,7 @@ interface OfflinePlay {
 
 /**
  * This phone's own queue while the server cannot be reached, as old music's phone kept its own
- * session (`legacy/music/packages/player/src/local-session.ts`). It goes back to the server once
- * the server answers (D62).
+ * session. It goes back to the server once the server answers (D62).
  */
 export interface LocalQueue<T extends Track> {
   /**

@@ -13,7 +13,6 @@
     ".roo/**",
     ".windsurf/**",
     ".repos/**",
-    "legacy/**",
     "tools/oxlint/**",
     "packages/platform/convex/_generated/**",
     "apps/web-movies/src/routeTree.gen.ts",

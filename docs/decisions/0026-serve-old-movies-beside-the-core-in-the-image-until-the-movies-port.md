@@ -1,6 +1,7 @@
 # 0026. Serve old movies beside the core in the image until the movies port
 
-- Status: Accepted, 2026-11-08. Superseded by 0027, 2026-11-10.
+- Status: Accepted, 2026-11-08. Superseded by 0027, 2026-11-10. Old music, which this kept outside
+  the image, was deleted 2026-11-15; the image serves `/music` from the core (ADR 0027).
 - Decisions: D30, D31, D32, D49, D50
 
 ## Context

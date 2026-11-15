@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 // Seeds music's demo data on the core, after core-seed.mjs made the people and signed each one's
 // media CLI in: the Music library's grants, then the playlists, sharing, and likes old music's seed
-// made (music-seed.mjs), each person through their own CLI. Fails when anyone sees other albums
-// than the demo data.
+// made, each person through their own CLI. Fails when anyone sees other albums than the demo data.
 //
 //   music-core-seed.mjs --state <side dir> --cli <media.js>
 import { spawnSync } from "node:child_process";

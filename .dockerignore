@@ -7,7 +7,6 @@
 **/playwright-report
 .git
 .repos
-legacy
 .agents
 .claude
 docs

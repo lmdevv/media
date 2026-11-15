@@ -1,6 +1,7 @@
 # 0001. Merge both products into one repo named [media]
 
-- Status: Accepted, 2026-11-03
+- Status: Accepted, 2026-11-03. Done 2026-11-15: the music port deleted `legacy/music`; its
+  history stays in `git log`, and its last tree is at `bd7462a7`.
 - Decisions: D08, D09, D10
 
 ## Context

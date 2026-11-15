@@ -49,7 +49,6 @@ packages/
   config/             shared strict tsconfig
 deploy/               the all-in-one image; Compose adds optional sidecars
 nix/                  NixOS module with hardened native units
-legacy/music/         old music code, runnable until the music port lands, then deleted
 ```
 
 The server keeps its folder, `apps/media`, under the package name `@media/server`. Moving it to

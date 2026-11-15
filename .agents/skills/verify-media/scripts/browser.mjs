@@ -1,17 +1,17 @@
 #!/usr/bin/env node
-// A Chromium that stays open between commands, so a verification can drive the [movies] web app
-// and old [music]'s one step at a time. `serve` starts the host for one side of a run; every other
+// A Chromium that stays open between commands, so a verification can drive the [media] web apps
+// one step at a time. `serve` starts the host for one side of a run; every other
 // command sends one action to it and prints the result. Each page belongs to one app, picked with
 // --app when the page is created. verify-media.sh calls this; agents call it through
 // `verify-media.sh browser`.
 //
-//   node browser.mjs serve --state <dir> --base <movies url> [--account <url> [--core]] [--convex <url>] [--music <url> [--music-core]]
+//   node browser.mjs serve --state <dir> --base <movies url> [--account <url> [--core]] [--convex <url>] [--music <url>]
 //   node browser.mjs <command> --state <dir> [--app movies|music|account] [flags]
 //
 // With --core, the movies client has no sign-in of its own: it uses the session the account client
 // at --account keeps (the one-backend layout), so movies pages sign in, set up, invite, and join
-// there, and have no profiles. With --music-core, music is the image's own client at --music
-// (`<base>/music`), on that same session, rather than old music beside it.
+// there, and have no profiles. --music is the image's own music client (`<base>/music`), on that
+// same session and port.
 //
 // Where the host allows it, the browser runs in a private network namespace (see `isolate`),
 // because Chromium cancels its queued requests whenever any host interface gains or loses an
@@ -30,7 +30,7 @@ const APPS = ["movies", "music", "account"];
 
 // Every socket lives in the side's state folder and is named relative to it: a socket address
 // holds at most 107 bytes, which a long TMPDIR and run name can pass.
-const SOCKETS = { control: "browser.sock", web: "web.sock", convex: "convex.sock", music: "music.sock", proxy: "proxy.sock" };
+const SOCKETS = { control: "browser.sock", web: "web.sock", convex: "convex.sock", proxy: "proxy.sock" };
 const NETWORK_CHANGED = "net::ERR_NETWORK_CHANGED";
 // How long a command may take on the host. With --timeout, each of its waits stops then and the
 // host answers right after; without it, setup waits for whole first scans.
@@ -63,7 +63,6 @@ const FLAGS = {
   core: { type: "boolean", default: false },
   convex: { type: "string" },
   music: { type: "string" },
-  "music-core": { type: "boolean", default: false },
   "music-folder": { type: "string" },
   app: { type: "string" },
   page: { type: "string" },
@@ -236,16 +235,11 @@ async function serve(options) {
   return drive(options, "host", []);
 }
 
-// Pathname Unix sockets cross network namespaces, so the relays use them. The one port (both web
-// clients, Convex, and streams) and music keep their port numbers inside, so every origin stays
+// Pathname Unix sockets cross network namespaces, so the relays use them. The one port (every web
+// client, Convex, and streams) keeps its port number inside, so every origin stays
 // `http://localhost:<port>`. The proxy carries HTTPS to the internet for the Cast SDK, TMDB
 // images, and trailers.
-/** Whether music is old music on a port of its own, which needs a relay of its own. */
-function ownMusicPort(base, music) {
-  return Boolean(music) && portOf(music, "music") !== portOf(base, "base");
-}
-
-async function isolate({ base, account, core, convex, music, "music-core": musicCore }) {
+async function isolate({ base, account, core, convex, music }) {
   const toHost = (port) =>
     createTcpServer(HALF_OPEN, (client) => pipe(client, connect({ ...HALF_OPEN, port, host: "127.0.0.1" })));
   const proxy = createServer((request, response) => {
@@ -267,7 +261,6 @@ async function isolate({ base, account, core, convex, music, "music-core": music
   const relays = await Promise.all([
     listen(toHost(portOf(base, "base")), SOCKETS.web),
     ...(convex ? [listen(toHost(portOf(convex, "convex")), SOCKETS.convex)] : []),
-    ...(ownMusicPort(base, music) ? [listen(toHost(portOf(music, "music")), SOCKETS.music)] : []),
     listen(proxy, SOCKETS.proxy),
   ]);
 
@@ -280,7 +273,6 @@ async function isolate({ base, account, core, convex, music, "music-core": music
       ...(account ? ["--account", account] : []), ...(core ? ["--core"] : []),
       ...(convex ? ["--convex", convex] : []),
       ...(music ? ["--music", music] : []),
-      ...(musicCore ? ["--music-core"] : []),
     ],
     { stdio: ["pipe", "inherit", "inherit"] },
   );
@@ -289,7 +281,7 @@ async function isolate({ base, account, core, convex, music, "music-core": music
   process.on("SIGINT", stop);
   const finish = (code) => {
     for (const relay of relays) relay.close();
-    for (const socket of [SOCKETS.web, SOCKETS.convex, SOCKETS.music, SOCKETS.proxy]) rmSync(socket, { force: true });
+    for (const socket of [SOCKETS.web, SOCKETS.convex, SOCKETS.proxy]) rmSync(socket, { force: true });
     if (code !== 0 && !existsSync(SOCKETS.control)) {
       console.error("the browser host stopped before it was ready (see above)");
     }
@@ -307,9 +299,6 @@ async function serveInside(options) {
   const toSocket = (socket) => createTcpServer(HALF_OPEN, (client) => pipe(client, connect({ ...HALF_OPEN, path: socket })));
   await listen(toSocket(SOCKETS.web), portOf(options.base, "base"), "127.0.0.1");
   if (options.convex) await listen(toSocket(SOCKETS.convex), portOf(options.convex, "convex"), "127.0.0.1");
-  if (ownMusicPort(options.base, options.music)) {
-    await listen(toSocket(SOCKETS.music), portOf(options.music, "music"), "127.0.0.1");
-  }
   const proxy = await listen(toSocket(SOCKETS.proxy), 0, "127.0.0.1");
   // Chromium never proxies loopback, so the apps' ports still reach the relays above.
   await drive(options, "isolated", [`--proxy-server=http://127.0.0.1:${proxy.address().port}`]);
@@ -317,7 +306,7 @@ async function serveInside(options) {
   process.stdin.resume();
 }
 
-async function drive({ base, account, core, music, "music-core": musicCore }, network, launchArgs) {
+async function drive({ base, account, core, music }, network, launchArgs) {
   const { chromium, devices } = await import("@playwright/test");
   const executablePath = process.env.CHROMIUM_PATH || undefined;
   const browser = await chromium.launch({
@@ -919,55 +908,8 @@ async function drive({ base, account, core, music, "music-core": musicCore }, ne
   const musicSignedIn = (page) =>
     page.getByRole("navigation", { name: "Library" }).or(page.getByRole("navigation", { name: "Main" }));
 
-  const musicCommands = {
-    async "sign-in"({ page }, options) {
-      await openAppPath(page, "/sign-in");
-      await page.getByLabel("Email").fill(options.email ?? OWNER.email);
-      await page.getByLabel("Password").fill(options.password ?? OWNER.password);
-      await page.getByRole("button", { name: "Sign in" }).click();
-      await musicSignedIn(page).first().waitFor({ timeout: timeout(options) });
-      return page.url();
-    },
-    async setup({ page }, options) {
-      await openAppPath(page, "/");
-      await page.waitForURL(/\/setup/, { timeout: timeout(options) });
-      await page.getByLabel("Name").fill(OWNER.name);
-      await page.getByLabel("Email").fill(OWNER.email);
-      await page.getByLabel("Password").fill(OWNER.password);
-      await page.getByRole("button", { name: "Create admin account" }).click();
-      await page.getByRole("heading", { name: "Where's your music?" }).waitFor({ timeout: timeout(options) });
-      await page.getByLabel("Library folder").fill("/music");
-      await page.getByRole("button", { name: "Start scanning" }).click();
-      await page.getByRole("heading", { name: "Your library is ready" }).waitFor({ timeout: Number(options.timeout ?? 300_000) });
-      await page.getByRole("button", { name: "Open my library" }).click();
-      await page.getByRole("heading", { name: "Recently added" }).waitFor({ timeout: timeout(options) });
-      return `set up music as ${OWNER.email}`;
-    },
-    async join({ page }, options) {
-      if (!options.code || !options.name || !options.email) throw new Error("join needs --code, --name, and --email");
-      await openAppPath(page, `/invite/${options.code}`);
-      const email = page.getByLabel("Email");
-      await email.waitFor({ timeout: timeout(options) });
-      if (await email.isEditable()) await email.fill(options.email);
-      await page.getByLabel("Your name").fill(options.name);
-      await page.getByLabel("Choose a password").fill(options.password ?? OWNER.password);
-      await page.getByRole("button", { name: "Join" }).click();
-      await musicSignedIn(page).first().waitFor({ timeout: timeout(options) });
-      return `joined music as ${options.email}`;
-    },
-    async "create-key"({ page }, options) {
-      await openAppPath(page, "/settings/keys");
-      await page.getByRole("button", { name: "New key" }).click();
-      await page.getByLabel("Name").fill("verify-media");
-      await page.getByRole("button", { name: "Create key" }).click();
-      const key = (await page.getByTestId("new-api-key").textContent({ timeout: timeout(options) }))?.trim() ?? "";
-      if (!key.startsWith("mk_")) throw new Error(`the new key looks wrong: "${key}"`);
-      await page.getByRole("button", { name: "Done" }).click();
-      return key;
-    },
-  };
   // The image's own music client signs in at `/`, as movies does on the one-backend layout.
-  const coreMusicCommands = {
+  const musicCommands = {
     ...accountCommands,
     async "sign-in"(entry, options) {
       await accountFlows.signIn(entry.page, options);
@@ -978,7 +920,7 @@ async function drive({ base, account, core, music, "music-core": musicCore }, ne
   };
   const appCommands = {
     movies: core ? coreMoviesCommands : moviesCommands,
-    music: musicCore ? coreMusicCommands : musicCommands,
+    music: musicCommands,
     account: accountCommands,
   };
 

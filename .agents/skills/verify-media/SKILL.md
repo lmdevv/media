@@ -1,6 +1,6 @@
 ---
 name: verify-media
-description: Run disposable [media] stacks built from this checkout and from main, with [media]'s all-in-one image (the real Compose install: the account client, the core's Convex backend with movies in it, the media service, the scanner, ffmpeg, and real video, on one port) and old [music] from legacy/music side by side on one demo library, then drive both web apps in one Chromium, the `media` and `music` CLIs as each seeded person, and the movies iOS app on a Mac simulator to prove a change works the way a user sees it. Captures before/after screenshots and H.264 videos and publishes them to the PR description. Use to verify a web, CLI, backend, media, music, or iOS change end to end, to reproduce a user-facing bug, or to put visual evidence on a PR.
+description: Run disposable [media] stacks built from this checkout and from main, each [media]'s all-in-one image (the real Compose install: the account client, the core's Convex backend with movies and music in it, the media service, the scanner, ffmpeg, and real video and audio, on one port) on one demo library, then drive the movies and music web apps in one Chromium, the `media` CLI as each seeded person, and the movies and music iOS apps on a Mac simulator to prove a change works the way a user sees it. Captures before/after screenshots and H.264 videos and publishes them to the PR description. Use to verify a web, CLI, backend, media, music, or iOS change end to end, to reproduce a user-facing bug, or to put visual evidence on a PR.
 ---
 
 # Verify [media]
@@ -11,18 +11,15 @@ This skill runs the real products on one demo library, mounted read-only:
   container on one port: the account client at `/` with the core's Convex at `/convex`, the
   movies client at `/movies`, which uses the sign-in the account client keeps, and the media
   service, with the library at `/media/library` (ADR 0026). Movies' data lives in the core.
-- **Music.** An image that holds the music client (`/app/music`, from `p5-web-music` on) serves
-  it at `/music` on the same port and session as movies, with its data in the core: `up` records
-  `music_core` and runs no other music. An image from before it runs old music beside it: the
-  all-in-one image from `legacy/music/deploy/docker/Dockerfile`, with its own Convex, media
-  service, and web app, with the library's `Music` folder at `/music`. Until the music port
-  merges, the before side runs old music.
+- **Music.** The image serves the music client (`/app/music`) at `/music` on the same port and
+  session as movies, with its data in the core: `up` records `music_core`. An image from before
+  the music client, `--library fixtures`, or `up --no-music` runs movies alone.
 
-A run has two sides, each its own Compose project that holds both apps:
+A run has two sides, each its own Compose project with one container, the image, for both
+products:
 
 - `after` is built from this checkout. It is the default side for every command.
-- `before` is main: movies is `ghcr.io/lmdevv/media:main`, the last image published from main,
-  and music is built from `origin/main:legacy/music`.
+- `before` is main: `ghcr.io/lmdevv/media:main`, the last image published from main.
 
 Each side runs its own revision's `deploy/compose`, copied into its state folder: the checkout's
 for `after`, `origin/main`'s for `before`. `up` reads the layout from it and from the image, and
@@ -40,8 +37,8 @@ doctor, and the iOS forwards follow each side's layout, so a change to the deplo
 compares before and after. Until the movies cutover merges, the before side is `one-port`.
 
 You drive a side through three surfaces: a Chromium that stays open between commands and opens
-pages in either app, the built `media` and `music` CLIs signed in as each seeded person, and the
-movies iOS app on a simulator on the Mac `darwin`. Run every command from the repo root. `S` is
+pages in either app, the built `media` CLI signed in as each seeded person, and the movies or
+music iOS app on a simulator on the Mac `darwin`. Run every command from the repo root. `S` is
 shorthand for the helper:
 
 ```sh
@@ -58,22 +55,21 @@ two runs on their own. Each side of a run owns these resources and nothing else:
 
 | Resource   | Name                                                                                    |
 | ---------- | --------------------------------------------------------------------------------------- |
-| Project    | `media-verify-<run>-<side>`: containers `…-media-1` and `…-music-1`, labeled `media.verify.run=<run>` |
-| Volumes    | `media-verify-<run>-<side>_media-data`, `_media-transcode`, `_music-data`, and its network |
-| Images     | `media:verify-<run>`, built by `up` for the after side, and `media:verify-<run>-music-<side>` for each side |
-| Ports      | Two free loopback ports chosen at `up`: [media]'s one port and music, each at `http://localhost:<port>` (`MEDIA_BASE_URL` and music's `PUBLIC_URL`) |
+| Project    | `media-verify-<run>-<side>`: the container `…-media-1`, labeled `media.verify.run=<run>` |
+| Volumes    | `media-verify-<run>-<side>_media-data`, `_media-transcode`, and its network            |
+| Images     | `media:verify-<run>`, built by `up` for the after side                                  |
+| Ports      | One free loopback port chosen at `up`, [media]'s, at `http://localhost:<port>` (`MEDIA_BASE_URL`) |
 | Network    | The browser host's own network namespace where the host allows it, reached through Unix sockets in the state folder (see [Network view](#network-view)) |
-| State      | `${TMPDIR:-/tmp}/media-verify/<run>/<side>/`: ports, pids, logs, sockets, and each person's CLI config, with music's under `music/` |
+| State      | `${TMPDIR:-/tmp}/media-verify/<run>/<side>/`: ports, pids, logs, sockets, and each person's CLI config |
 | Simulator  | `media-verify-<run>-<side>` on `darwin`, made by `ios up`                               |
 | Evidence   | `captures/verify/<run>/`, gitignored and kept after `down`                              |
 
 Never drive or touch anything not named `media-verify-*`. The owner runs a real `movies` stack
 on this host (`movies-convex` and the NixOS media service), plus `music` containers; they hold
 real data. The owner's shell may also export settings for their own servers, so never run
-`apps/cli/dist/media.js` or `legacy/music/apps/cli/dist/music.js` directly: `$S cli` strips those
-and gives each person their own `XDG_CONFIG_HOME`. `scripts/dev-stack.sh` and old music's
-`scripts/dev-backend.sh` rewrite the `.env.local` files the owner's `pnpm dev` reads, so this
-skill never calls them. Compose sees only the settings `up` writes, never a `deploy/compose/.env`
+`apps/cli/dist/media.js` directly: `$S cli` strips those and gives each person their own
+`XDG_CONFIG_HOME`. `scripts/dev-stack.sh` rewrites the `.env.local` files the owner's `pnpm dev`
+reads, so this skill never calls it. Compose sees only the settings `up` writes, never a `deploy/compose/.env`
 or the caller's environment.
 
 ### Network view
@@ -88,9 +84,9 @@ Where the host allows it, the browser host therefore runs in a private user and 
 (`scripts/private-network.sh` at the repo root), with the same Chromium, Node, fonts, ffmpeg, and
 files. Its loopback has only these, relayed over Unix sockets in the state folder:
 
-- The side's [media] and music ports, at the same numbers, so every URL and origin
-  stays `http://localhost:<port>` for the browser and the CLIs alike, and for movies through the
-  iOS forwards.
+- The side's [media] port, at the same number, so every URL and origin stays
+  `http://localhost:<port>` for the browser and the CLI alike, and for the apps through the iOS
+  forwards.
 - An HTTPS proxy to the internet on the host, for the Cast SDK, TMDB images, and trailers.
   Chromium sends loopback addresses straight to the relays, never through it.
 
@@ -116,56 +112,49 @@ host can fail the browser's requests; the command that saw them fails rather tha
 ## Launch
 
 Prerequisites: Docker 28 or later (image mounts), Node 24, pnpm, `pnpm install` done in this
-checkout, and ffmpeg for recordings. The first `up` installs `legacy/music` and builds its CLI
-when `legacy/music/apps/cli/dist/music.js` is missing. On NixOS the helper uses the system Chromium on its own,
+checkout, and ffmpeg for recordings. On NixOS the helper uses the system Chromium on its own,
 since Playwright's bundled one does not run there. The browser gets its own network namespace
 where the host allows it (see [Network view](#network-view)).
 
 ```sh
-$S up                  # the after side: build both apps from this checkout
-$S up --side before    # the before side: pull ghcr.io/lmdevv/media:main, build main's legacy/music
+$S up                  # the after side: build the image from this checkout
+$S up --side before    # the before side: pull ghcr.io/lmdevv/media:main
 ```
 
 `up` does these steps in order and prints how long each took:
 
 1. It builds `media:verify-<run>` from `deploy/image/Dockerfile`, or pulls the main image for
    `before`. A warm Docker cache builds in seconds; a cold one takes several minutes.
-2. It builds old music's `media:verify-<run>-music-<side>` from `legacy/music`, or from
-   `origin/main:legacy/music` for `before`. An unchanged tree builds from the cache in seconds;
-   a cold build takes several minutes.
-3. It mounts the library read-only: at `/media/library` for movies and its `Music` folder at
-   `/music` for music. The default is the demo library image named in
-   `deploy/demo-library/image` (see [Demo data](#demo-data)), through
-   `deploy/compose/compose.demo.yaml` for movies; `up` pulls it once per machine.
-4. It starts the Compose project and waits until movies' `/api/health` reports
-   `"backend":"connected"`, which needs Convex, the deployed functions, and the media service, and
-   music's `/healthz` reports `"ok":true`. Each check gives up after 10 seconds, and the wait
-   after 6 minutes (`MEDIA_VERIFY_HEALTH_SECONDS`). When it runs out, or a container stops while
-   starting, `up` prints the containers' last log lines, which URL never answered, and each
-   container's `ip route get` line, removes the side, and exits 1. A route through `tailscale0`
-   or another VPN means the host can't reach that Docker network.
-5. It starts the browser host, in its own network namespace where it can, and runs first-run setup
-   through each web app, as an owner does. The owner is Lucía, with password `password123`: the
-   core user `lucia` on `one-backend`, and `admin@movies.local` in old movies and music:
+2. It mounts the library read-only at `/media/library`. The default is the demo library image
+   named in `deploy/demo-library/image` (see [Demo data](#demo-data)), through
+   `deploy/compose/compose.demo.yaml`; `up` pulls it once per machine.
+3. It starts the Compose project and waits until `/api/health` reports `"backend":"connected"`,
+   which needs Convex, the deployed functions, and the media service. Each check gives up after
+   10 seconds, and the wait after 6 minutes (`MEDIA_VERIFY_HEALTH_SECONDS`). When it runs out, or
+   the container stops while starting, `up` prints the container's last log lines, whether the
+   URL ever answered, and the container's `ip route get` line, removes the side, and exits 1. A
+   route through `tailscale0` or another VPN means the host can't reach that Docker network.
+4. It starts the browser host, in its own network namespace where it can, and runs first-run setup
+   through the web apps, as an owner does. The owner is Lucía, with password `password123`: the
+   core user `lucia` on `one-backend`, and `admin@movies.local` in old movies:
    - `one-backend`: the owner account at `/` in the account client, then the `Movies` library at
      `/media/library/Movies` and the `Shows` library at `/media/library/Shows` from its Admin,
-     Libraries, each of kind Movies. Each queues its first scan.
+     Libraries, each of kind Movies, and with music the `Music` library at `/media/library/Music`,
+     of kind Music. Each queues its first scan.
    - `one-port` and `two-port`: old movies' owner account at `/movies/welcome`, the `Movies`
      library and its first scan, then the `Shows` library from movies' Admin, Libraries.
-   - Music: the owner account, `/music` as the library folder and its first scan, then an API key
-     from `/settings/keys` for her music CLI.
-6. It signs Lucía's movies CLI in with her password (`media auth login --username lucia` on
+5. It signs Lucía's CLI in with her password (`media auth login --username lucia` on
    `one-backend`, `media login --email` before it) and waits until the movies libraries are
    really done: every library scanned and no scan, metadata, or scrub-thumbnail job pending or
    running. The core has no command that lists jobs, so on `one-backend` the wait reads the
    media service's `CoreJobs.claimed` and `CoreJobs.job_ended` log records (`core-seed.mjs wait`).
-7. It seeds the demo people in both apps: in movies, the people, the kid, library access, and
-   watching (`core-seed.mjs seed` on `one-backend`, `seed.mjs` before it); in music, playlists,
-   likes, and sharing (`music-seed.mjs`). Each seed checks that each person sees what the demo
-   data says.
+6. It seeds the demo people: in movies, the people, the kid, library access, and watching
+   (`core-seed.mjs seed` on `one-backend`, `seed.mjs` before it); in music, the Music library's
+   grants, playlists, likes, and sharing (`music-core-seed.mjs`). Each seed checks that each
+   person sees what the demo data says.
 
-Each later step has its own limit too: 21 minutes for each app's first-run setup, a minute for
-each CLI sign-in and check, 6 minutes for music's API key, 15 minutes for the library wait, and
+Each later step has its own limit too: 21 minutes for first-run setup, a minute for each CLI
+sign-in and check, 2 minutes for signing the music page in, 15 minutes for the library wait, and
 15 minutes for each seed. A step that runs out fails `up` the same way, naming the step, and so
 does a browser host that doesn't start in 20 seconds. A step that ignores the stop is killed 5
 seconds later. On the way out, each Docker call gets 15 seconds and `compose down` 60, so a
@@ -174,20 +163,20 @@ stalled Docker daemon can't hold up the removal; a removal that can't finish say
 The side is ready only after a line like this prints, and `$S status` then says `ready` for it:
 
 ```text
-ready: http://localhost:40773 in 150s (run verify-media, side after, project media-verify-verify-media-after, image media:verify-verify-media, music http://localhost:39513 image media:verify-verify-media-music-after, library ghcr.io/lmdevv/media-demo-library:v1@sha256:…, evidence …)
+ready: http://localhost:40773 in 150s (run verify-media, side after, project media-verify-verify-media-after, image media:verify-verify-media, music http://localhost:40773/music, library ghcr.io/lmdevv/media-demo-library:v1@sha256:…, evidence …)
 ```
 
-A warm `up` takes two to three minutes: under 30 seconds to rebuild the images after a small
-change, about 20 to start the stack, 60 to 90 for both setups and the first scans with their
-scrub thumbnails, and 30 to seed. Both sides at once take a little longer each, since they share
+A warm `up` takes two to three minutes: under 30 seconds to rebuild the image after a small
+change, about 20 to start the stack, 60 to 90 for setup and the first scans with their scrub
+thumbnails, and 30 to seed. Both sides at once take a little longer each, since they share
 the CPU.
 
 | Flag                            | Use                                                                    |
 | ------------------------------- | ---------------------------------------------------------------------- |
 | `--side before`                 | Start the main side for a before/after comparison                      |
-| `--image IMG`                   | Run another movies image, such as a release tag, instead of building   |
-| `--library demo\|fixtures\|DIR` | Pick the library. A DIR holds `Movies/`, `Shows/`, and `Music/` and must be readable by others (`a+rX`) |
-| `--no-music`                    | Run movies alone, without old music                                     |
+| `--image IMG`                   | Run another image, such as a release tag, instead of building          |
+| `--library demo\|fixtures\|DIR` | Pick the library. A DIR holds `Movies/`, `Shows/`, and `Music/` (or pass `--no-music`) and must be readable by others (`a+rX`); the fixtures have no music |
+| `--no-music`                    | Run movies alone, without the Music library                            |
 | `--no-seed`                     | Stop after setup: only Lucía (with her own profile in old movies) and the libraries |
 | `--no-setup`                    | Leave fresh servers, to verify first-run setup itself                   |
 
@@ -195,11 +184,10 @@ the CPU.
 inherited. Under `flock(1)`, that is the lock, held until `down`: take it with `flock -o`, which
 closes it for the command, or run `$S browser restart` outside the lock after `up`.
 
-The images hold the checkout as it was at `up`. After you change code, run `down --side after`
-and `up` again. `doctor` fails when the checkout has moved on since the build. For movies,
-changes only to the paths `.dockerignore` leaves out (`.agents`, `.claude`, `docs`, `legacy`,
-`nix`) don't count, since the image doesn't hold them. For music, only `legacy/music` counts,
-apart from the paths its own `.dockerignore` leaves out.
+The image holds the checkout as it was at `up`. After you change code, run `down --side after`
+and `up` again. `doctor` fails when the checkout has moved on since the build. Changes only to
+the paths `.dockerignore` leaves out (`.agents`, `.claude`, `docs`, `nix`) don't count, since the
+image doesn't hold them.
 
 ### Demo data
 
@@ -216,23 +204,21 @@ personal or unlicensed.
   music demo images, and the Demo library workflow publishes the version in
   `deploy/demo-library/image`. When the pull fails, check Docker and access to `ghcr.io`, then
   retry. [docs/demo-library.md](../../../docs/demo-library.md) has the details.
-- **People.** One set of people in every app, with the password `password123`. On `one-backend`
-  each is a core user named by their username, and a kid is their own user; old movies and music
-  name them by email, and old movies has profiles instead of the kid user:
+- **People.** One set of people for both products, with the password `password123`. On
+  `one-backend` each is a core user named by their username, and a kid is their own user; old
+  movies names them by email and has profiles instead of the kid user:
 
-  | Who   | Core user | Email (old movies, music) | Role   | Old movies' profiles                       | Music role | CLIs                                      |
-  | ----- | --------- | ------------------------- | ------ | ------------------------------------------ | ---------- | ----------------------------------------- |
-  | Lucía | `lucia`   | `admin@movies.local`      | owner  | `Lucía`, and `Kids` (kids, PG, PIN `1234`) | owner      | `$S cli --`, `$S cli --app music --`      |
-  | Mateo | `mateo`   | `mateo@movies.local`      | admin  | `Mateo`                                    | admin      | `$S cli --as mateo --`, and `--app music` |
-  | Aiko  | `aiko`    | `aiko@movies.local`       | member | `Aiko`                                     | member     | `$S cli --as aiko --`, and `--app music`  |
-  | Sam   | `sam`     | `sam@movies.local`        | member | `Sam`                                      | guest      | `$S cli --as sam --` (movies only)        |
-  | Kid   | `kids`    | none                      | member, limited to PG | none                        | none       | `$S cli --as kids --` (`one-backend` only) |
+  | Who   | Core user | Email (old movies)   | Role   | Old movies' profiles                       | CLI                                        |
+  | ----- | --------- | -------------------- | ------ | ------------------------------------------ | ------------------------------------------ |
+  | Lucía | `lucia`   | `admin@movies.local` | owner  | `Lucía`, and `Kids` (kids, PG, PIN `1234`) | `$S cli --`                                |
+  | Mateo | `mateo`   | `mateo@movies.local` | admin  | `Mateo`                                    | `$S cli --as mateo --`                     |
+  | Aiko  | `aiko`    | `aiko@movies.local`  | member | `Aiko`                                     | `$S cli --as aiko --`                      |
+  | Sam   | `sam`     | `sam@movies.local`   | member | `Sam`                                      | `$S cli --as sam --`                       |
+  | Kid   | `kids`    | none                 | member, limited to PG | none                        | `$S cli --as kids --` (`one-backend` only) |
 
   On `one-backend`, Mateo, Aiko, and Sam joined from invite links that Lucía made in the account
   client's Admin, Users (`/admin`), and Lucía made the kid's account there with a password. In old
-  movies they joined from invite links made in its Admin, Users. In music they joined from
-  invites she made with music's CLI, and each made an API key at `/settings/keys` for their CLI,
-  except Sam: guests can't make keys.
+  movies they joined from invite links made in its Admin, Users.
 - **Ratings.** The films ship unrated, and a limited person or profile hides unrated titles, so
   Lucía rated them: Big Buck Bunny `G`, Caminandes `TV-Y`, Cosmos Laundromat `PG`, Elephants Dream, Sintel,
   and Tears of Steel `PG-13`, and Pioneer One `TV-14`. The Feature Test stays `NR`.
@@ -254,10 +240,9 @@ personal or unlicensed.
   her `Continue watching for Aiko` row shows `Pioneer One · S1:E3` (next: Alone in the Night) and
   `Elephants Dream` (50% watched). Her My List holds Sintel, Tears of Steel, and Caminandes;
   Mateo's holds Cosmos Laundromat.
-- **Music.** `/music` is shared, so admins and members play it, and Sam plays it through a grant.
-  On the core (`music_core`), setup adds a `Music` library over `/media/library/Music` from the
-  account client's Admin, Libraries, and `music-core-seed.mjs` shares it with Mateo (manages) and
-  everyone on the server (view), then makes the same playlists, sharing, and likes through each
+- **Music.** Setup adds a `Music` library over `/media/library/Music` from the account client's
+  Admin, Libraries, and `music-core-seed.mjs` shares it with Mateo (manages) and everyone on the
+  server (view), so everyone plays it, then makes these playlists, sharing, and likes through each
   person's media CLI. The kid's restrictions hide explicit songs.
   - Lucía's `Sunday morning` (4 songs) is shared with Mateo as a collaborator, and with Aiko and
     Sam as viewers.
@@ -269,16 +254,16 @@ personal or unlicensed.
 Sign a movies page in as anyone with `$S browser sign-in --page aiko --username aiko` on
 `one-backend` (at `/`, then `/movies`), or `$S browser sign-in --page aiko --email
 aiko@movies.local --profile Aiko` in old movies, and a music page with `$S browser sign-in --app
-music --page aiko-music --email aiko@movies.local`. `--library fixtures` generates the stack tests' short fixture titles instead
-(`Big Buck Fixture`, `Fixture Show`) and music's four albums of short chords. It needs no
-download, but the seeds need the demo titles and songs, so pair it with `--no-seed`.
+music --page aiko-music --username aiko`. `--library fixtures` generates the stack tests' short
+fixture titles instead (`Big Buck Fixture`, `Fixture Show`), with no music. It needs no download,
+but the seeds need the demo titles and songs, so pair it with `--no-seed`.
 
 ## Doctor
 
 Run `$S doctor [--side S]` first, and again whenever anything looks off. It is read-only, prints
 one line per check, and exits non-zero on any `FAIL`:
 
-- Both containers run, belong to this run, and own their ports.
+- The container runs, belongs to this run, and owns its port.
 - `/api/health` reports the backend connected.
 - The media service runs the image that `up` recorded.
 - Init deployed this image's functions for each project the layout runs: `/data/core/version` on
@@ -290,16 +275,13 @@ one line per check, and exits non-zero on any `FAIL`:
 - Lucía's CLI is signed in: as `lucia` on the core on `one-backend` (`auth sessions current`), else
   as `admin@movies.local` (`whoami`).
 - For the after side, the image matches the checkout.
-- Music's container runs, belongs to this run, owns its port, and runs the image from `up`;
-  `/healthz` is ok; its init deployed this build (`/data/build` matches `/app/build-id`); Lucía's
-  API key signs music's CLI in; and for the after side, the image matches `legacy/music`.
+- With music, `/music` serves the music client.
 
-The `info` lines name the version, the images, the library, and music's address and build. The
+The `info` lines name the version, the image, the library, and music's address. The
 `before` side often shows the same version as the checkout even when the code differs, because
-the `:main` tag moves only when the Image workflow publishes. `$S logs [--side S] [--service
-media|music] [N]` shows a container's last lines; the media service logs one JSON record
-per line, such as `"message":"Stream.started"` with the stream's `mode`, and music's container
-holds its init, Convex, media service, and Caddy logs. `$S status` lists each side's apps, whether
+the `:main` tag moves only when the Image workflow publishes. `$S logs [--side S] [N]` shows the
+container's last lines; the media service logs one JSON record per line, such as
+`"message":"Stream.started"` with the stream's `mode`. `$S status` lists each side's apps, whether
 the side is `ready`, still `starting`, or `failed` (its `up` stopped before ready; run `down`),
 and its simulator.
 
@@ -359,7 +341,7 @@ reads is the one they leave:
 | Command                                          | Does                                                         |
 | ------------------------------------------------ | ------------------------------------------------------------ |
 | `sign-in [--username U --password P]`            | Signs the page in at `/`, as `lucia` by default, and waits for `/home`. A movies page then opens `/movies` |
-| `setup [--movies DIR] [--shows DIR]`             | Creates the owner at `/` and adds the libraries from Admin, Libraries |
+| `setup [--movies DIR] [--shows DIR] [--music-folder DIR]` | Creates the owner at `/` and adds the libraries from Admin, Libraries |
 | `invite [--invite-role member\|admin]`           | Makes an invite link in Admin, Users (`/admin`) and prints its code |
 | `join --code C --username U [--password P]`      | Accepts an invite at `/invite#<code>` and makes the account  |
 | `create-account --username U [--password P] [--invite-role member\|admin]` | Makes an account with a password in Admin, Users |
@@ -377,17 +359,9 @@ Movies pages on `one-port` and `two-port`, where old movies signs in on its own,
 | `invite [--invite-role member\|admin]`           | Makes an invite link in Admin, Users and prints its code     |
 | `join --code C --name N --email E`               | Accepts an invite at `/invite/<code>` and makes the account  |
 
-Music pages on the core (`music_core`) sign in at `/`, as movies pages on `one-backend` do:
-`sign-in [--username U --password P]` signs the page in at the account client, as `lucia` by
-default, then opens `/music`. They take the account client's commands too.
-
-Old music's pages take these:
-
-| Command                                          | Does                                                         |
-| ------------------------------------------------ | ------------------------------------------------------------ |
-| `sign-in [--email E --password P]`               | Signs the page in at `/sign-in`, as Lucía by default         |
-| `join --code C --name N --email E`               | Makes an account from an invite at `/invite/<code>`          |
-| `create-key`                                     | Makes an API key at `/settings/keys` and prints it           |
+Music pages sign in at `/`, as movies pages on `one-backend` do: `sign-in [--username U
+--password P]` signs the page in at the account client, as `lucia` by default, then opens
+`/music`. They take the account client's commands too.
 
 `video` reads the page's media elements, not the player's buttons. `source` is `file` when the
 browser plays the original file and `mse` when the HLS player feeds it, and `requests` counts the
@@ -425,16 +399,11 @@ CLI can't sign in to a `one-port` side's old movies. A command whose arguments n
 unauthenticated, `4` forbidden, `5` notFound. `$S cli -- --help` lists every command. `kids` has a
 CLI only on `one-backend`.
 
-On the core (`music_core`), music is the media CLI's `music` group: `$S cli --as aiko -- music
-albums list`. `--app music` then refuses and says so.
+Music is the media CLI's `music` group: `$S cli --as aiko -- music albums list`. `cli` takes no
+`--app`, and refuses one with that hint.
 
-`$S cli [--side S] --app music [--as mateo|aiko] -- <args>` runs old music's
-`legacy/music/apps/cli/dist/music.js` against the side's music with the person's API key. Add
-`--json` for stable output. Exit codes: `0` ok, `1` failed, `2` usage, `3` auth. Sam has no music
-CLI, since guests can't make API keys.
-
-Both CLIs are built from this checkout, so on the before side they talk to main's servers: a
-command that is new in the checkout fails there.
+The CLI is built from this checkout, so on the before side it talks to main's server: a command
+that is new in the checkout fails there.
 
 ### iOS simulator
 
@@ -443,9 +412,7 @@ The movies iOS app (`apps/mobile-movies`), or with `--app music` the music iOS a
 in to the core through the media server's sign-in boundary, so `ios up` refuses a side whose image
 still runs old movies' own Convex (`one-port`, `two-port`): run an iOS lane against such an image
 from a checkout of that image's revision, with its own verify skill. The music app needs an image
-with the music client (`music_core`). Old music's iOS app is not driven here; build it with
-`legacy/music/scripts/ios-mac.sh build-sim <udid>`. The app's JavaScript comes from a Metro on this
-machine. For the before side, Metro serves a main checkout that `ios up`
+with the music client (`music_core`). The app's JavaScript comes from a Metro on this machine. For the before side, Metro serves a main checkout that `ios up`
 makes with `git worktree` under the side's state. The simulator reaches the side as
 `localhost:<port>` through ssh forwards for [media]'s one port and Metro, so every address
 matches the side's public URLs.
@@ -521,8 +488,8 @@ Proof standards:
 - Capture the action and the resulting state, not just the final screen. A recording or a
   screenshot plus an ARIA snapshot (`snapshot --path`) or an `ios describe` dump.
 - Verify the side effect behind what's visible: real video or audio with `wait-video` or
-  `wait-audio`, the stream's mode in `$S logs`, stored data with `$S cli -- <command>` (or `$S cli
-  --app music -- <command> --json`), or files in the container with `docker exec`.
+  `wait-audio`, the stream's mode in `$S logs`, stored data with `$S cli -- <command>` (such as
+  `$S cli -- music history list`), or files in the container with `docker exec`.
 - For a change, capture the same journey on both sides, at the same size, theme, and data. The
   before side is the parent's behavior; a difference you can't explain is a finding.
 
@@ -553,7 +520,7 @@ which GitHub plays inline, reads the description back, and fails if a `./capture
 Publishing again replaces the block. To check an upload, fetch it with `curl -sL`: the asset
 redirects to a signed S3 URL that answers `HEAD` with 403 and `GET` with 200. The repo is public,
 so anyone with a link can open an upload. Never capture secrets: a new API key, a device code, or
-an invite link, or music's `/settings/keys` screen right after it made a key.
+an invite link, or an API key screen right after it made a key.
 
 ## Cleanup
 
@@ -583,8 +550,8 @@ never kills by process name. The demo library image stays for the next run. Evid
   left the iPhone alone.
 - `scripts/core-seed.mjs` creates the movies [demo data](#demo-data) on a `one-backend` side after
   setup and checks what each person sees, and its `wait` waits for the first scans there.
-  `scripts/seed.mjs` does the same in old movies, and `scripts/music-seed.mjs` in music. `up`
-  calls the ones the side needs.
+  `scripts/seed.mjs` does the same in old movies, and `scripts/music-core-seed.mjs` makes music's
+  on the core. `up` calls the ones the side needs.
 - `node --test .agents/skills/verify-media/scripts/verify-media.test.mjs` runs the skill's own tests, which need no
   stack: the browser host serves pages of both apps from local servers, in its namespace and on
   the host network, and `evidence` builds one block from both apps' captures.
@@ -599,7 +566,7 @@ never kills by process name. The demo library image stays for the next run. Evid
 ## Feature map
 
 `features/README.md` indexes what movies does and what proves each feature works, and
-`features/music/README.md` does the same for old music. Read the feature's file before you drive
+`features/music/README.md` does the same for music. Read the feature's file before you drive
 it, and add to the map when a change adds a feature.
 
 ## Gotchas
@@ -628,9 +595,8 @@ it, and add to the map when a change adds a feature.
   the window there. To show something below the fold, screenshot its element.
 - In music, a shortcut key such as `n` or `/` types into a focused field instead. Open a page
   where focus is outside fields, such as an album, before you press it.
-- Old music's playback state is per account, not per page: a second music page sees the song that
-  `music` left playing or paused. On the core the queue is the person's, but whether a page plays
-  and where in the song is that page's own.
+- In music, the queue is the person's, but whether a page plays and where in the song is that
+  page's own.
 - The simulator shares the Mac's network. `localhost` there is the Mac, reached through the ssh
   forwards. Without them the app can't reach the server.
 - Metro started with `CI=1` stops watching files, and the app keeps the old bundle. `ios up` does
