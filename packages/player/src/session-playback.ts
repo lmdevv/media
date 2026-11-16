@@ -434,14 +434,19 @@ export class SessionPlayback<T extends Track = Track> {
 
   /**
    * Plays the session for everyone, as a member who may control, as when they play a song now. A
-   * play is absolute, so a session someone else played meanwhile stays playing.
+   * play is absolute, so a session someone else played meanwhile stays playing. It goes straight to
+   * the core, not through the follower: right after a skip the follower running is still the
+   * song's before, whose player must not start for a moment, and the clock that answers plays the
+   * song skipped to.
    */
   play(): Promise<string | null> {
-    if (this.#view?.mayControl !== true) {
+    const view = this.#view;
+
+    if (view?.mayControl !== true) {
       return Promise.resolve(NO_CONTROL);
     }
 
-    return this.#move({ kind: "play" });
+    return this.#send({ kind: "play" }, view.sessionId);
   }
 
   /** Seeks the session for everyone, as a member who may control. */

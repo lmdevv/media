@@ -498,7 +498,7 @@ export const addToSession = async (
  * Plays `trackIds` from `index` now for everyone, as old music's host played a list in a Jam: the
  * first goes in front of the queue and the session skips to that entry at once, playing it in a
  * session that was paused, then the rest follow it in order, up to 100 songs. Resolves with why
- * the session refused, for the screen, or null; rejects when an add fails.
+ * the session refused the skip or the play, for the screen, or null; rejects when an add fails.
  */
 export const playInSession = async (
   platform: PlatformSdk,
@@ -525,12 +525,11 @@ export const playInSession = async (
 
   if (refused !== null) return refused;
 
-  // A skip keeps the clock playing or paused; playing a song now plays it.
+  // A skip keeps the clock playing or paused; playing a song now plays it. The rest of the list
+  // follows it either way, as it is in the session already.
   const unplayed = view.clock.status === "paused" ? await playback.play() : null;
-
-  if (unplayed !== null) return unplayed;
 
   await addToSession(platform, view, rest, true);
 
-  return null;
+  return unplayed;
 };

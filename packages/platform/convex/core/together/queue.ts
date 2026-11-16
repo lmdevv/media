@@ -382,10 +382,13 @@ export const reorder = async (
   await noteQueuedFirst(ctx, session, first?._id ?? null, Date.now());
 };
 
-/** What a music song's details read on top of placing it: its document again, and its like. */
-const SONG_READS = 3;
+const ENTRY_READS = ITEM_READS + 2;
 
-const ENTRY_READS = ITEM_READS + 2 + SONG_READS;
+/**
+ * What an entry of a music session reads on top: its song's document again for the details, and
+ * whether the caller likes it, a range and a row.
+ */
+const SONG_READS = 3;
 
 /** The music song `item` names, if it names one. */
 const songOf = (item: DomainItem | null): Id<"tracks"> | null =>
@@ -418,7 +421,7 @@ export const queuePage = async (
       range: (q) => q.eq("sessionId", sessionId),
     },
     options,
-    decidableRows(reach, ENTRY_READS),
+    decidableRows(reach, domain === "music" ? ENTRY_READS + SONG_READS : ENTRY_READS),
   );
 
   const people = new Map<Id<"users">, Promise<PersonDoc | null>>();

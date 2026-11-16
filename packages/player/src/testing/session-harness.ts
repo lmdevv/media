@@ -277,6 +277,8 @@ interface Seat {
   readonly hidden: ReadonlySet<string>;
   /** When their view first lists the queue; before, it loads, as its pages do. */
   readonly listedFrom: number;
+  /** How much later than a call's answer they hear of the session's change. */
+  readonly hearsLateMs: number;
   /** The heartbeats their device's clock is corrected by, when it is not the server's own. */
   readonly presence: SessionPresence | null;
 }
@@ -339,6 +341,11 @@ export interface World {
       readonly deviceClock?: DeviceClock;
       /** Its view lists the queue only this long after it joins, as pages that load late. */
       readonly listsQueueAfterMs?: number;
+      /**
+       * It hears of each change this much later than the call that made it answers, as a page
+       * whose screen applies a subscription's answer after the mutation's own promise resolves.
+       */
+      readonly hearsLateMs?: number;
     },
   ) => Member;
   /**
@@ -485,7 +492,7 @@ export const scenario = async (
     for (const seat of seats) {
       const view = viewFor(seat);
 
-      void later(LATENCY_MS, () => {
+      void later(LATENCY_MS + seat.hearsLateMs, () => {
         seat.playback.update(view);
       });
     }
@@ -660,6 +667,7 @@ export const scenario = async (
       playback,
       hidden: new Set(seatOptions.hidden ?? []),
       listedFrom: now() + listsAfter,
+      hearsLateMs: seatOptions.hearsLateMs ?? 0,
       presence,
     };
 

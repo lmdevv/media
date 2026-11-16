@@ -421,6 +421,31 @@ describe("a music session's players", { timeout: 60_000 }, () => {
     });
   });
 
+  it("play a song put first now in a paused session, without the song before sounding for a moment", async () => {
+    await scenario(song("a", 60), [song("b", 60)], async (world) => {
+      const host = world.join("Lucía", { hosting: true, hearsLateMs: 200 });
+
+      await world.advance(2_000);
+
+      const since = world.now();
+      const b = world.queue()[0]?.key ?? "missing";
+
+      // As playing a song now does: the skip, then the play the moment the skip lands.
+      const played = host.playback.jump(b).then(async () => host.playback.play());
+
+      await world.advance(3_000);
+
+      expect(await played).toBeNull();
+      expect(
+        host.engine.heard.filter(
+          (heard) => heard.at >= since && heard.song === "a" && heard.kind === "play",
+        ),
+      ).toEqual([]);
+      expect(host.engine.song).toBe("b");
+      expect(host.engine.samplePlayback().playing).toBe(true);
+    });
+  });
+
   it("refuse a pause from a guest the host has not let control, and keep their player on the clock", async () => {
     await scenario(song("a", 60), [], async (world) => {
       world.join("Lucía", { hosting: true });
