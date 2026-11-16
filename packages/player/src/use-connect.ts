@@ -6,7 +6,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { activeDevice, ownDevices, yieldsTo } from "./connect-devices";
 import type { Device, DevicePlayback } from "./connect-devices";
 import { ConnectPlayer, systemConnectClock } from "./connect-player";
-import type { ConnectCommands } from "./connect-player";
+import type { ConnectCommands, ConnectOutput } from "./connect-player";
 import type { ControllerSnapshot, PlaybackController } from "./playback-controller";
 import { speakForDevice } from "./tab-lead";
 import type { TabLead, TabLocks } from "./tab-lead";
@@ -52,7 +52,7 @@ const asTrackId = Brand.nominal<TrackRef["id"]>();
 const asAlbumId = Brand.nominal<AlbumId>();
 
 const connectCommands = (platform: Sdk): ConnectCommands => ({
-  report: async (song, applied) => {
+  report: async (song, applied, output) => {
     const playback: ReportedPlayback | null =
       song === null
         ? null
@@ -63,7 +63,7 @@ const connectCommands = (platform: Sdk): ConnectCommands => ({
           };
 
     const { reportedAt } = await platform.core.connect.player.report({
-      output: { kind: "local" },
+      output,
       playback,
       applied,
     });
@@ -112,6 +112,11 @@ export interface ConnectHost {
    * and lists no devices, until it hands that queue back.
    */
   readonly onCore: boolean;
+  /**
+   * Where this client's sound goes: itself, or a Chromecast or AirPlay receiver it drives, which
+   * its reports name (ADR 0018).
+   */
+  readonly output: ConnectOutput;
 }
 
 /** Connect as the player sees it: this device, the listener's other devices, and the one it follows. */
@@ -169,7 +174,7 @@ export const useConnect = (
   platform: Sdk,
   controller: PlaybackController,
   local: ControllerSnapshot,
-  { locks, onCore }: ConnectHost,
+  { locks, onCore, output }: ConnectHost,
 ): ConnectView => {
   const me = usePlatformQuery(platform.core.auth.sessions.current);
   const deviceId = me.status === "success" ? (me.data.device?.deviceId ?? null) : null;
@@ -178,6 +183,10 @@ export const useConnect = (
   const [player] = useState(
     () => new ConnectPlayer(controller, connectCommands(platform), systemConnectClock),
   );
+
+  useEffect(() => {
+    player.setOutput(output);
+  }, [player, output]);
 
   const [leading, setLeading] = useState(false);
   const election = useRef<TabLead | null>(null);
@@ -284,9 +293,10 @@ export const useConnect = (
  */
 const useStable = (devices: ReadonlyArray<Device>): ReadonlyArray<Device> => {
   const key = JSON.stringify(
-    devices.map(({ id, name, playback }) => [
+    devices.map(({ id, name, output, playback }) => [
       id,
       name,
+      output,
       playback === null ? null : [playback.trackId, playback.playing, playback.pending],
     ]),
   );

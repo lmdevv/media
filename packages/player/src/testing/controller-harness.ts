@@ -415,6 +415,37 @@ export const setup = (
   const stop = controller.start();
   const engine = (): FakeEngine => engines.at(-1) ?? instantEngine("html", record);
 
+  /** A Cast receiver named `name` that plays at once, whose engine `engine()` answers from now. */
+  const receiver = (name: string | null) => {
+    const played = instantEngine("cast", record);
+    const listeners = new Set<(volume: number) => void>();
+    const level = { current: 0.5 };
+
+    engines.push(played);
+
+    return {
+      engine: {
+        ...played,
+        volume: () => level.current,
+        watchVolume: (listener: (volume: number) => void) => {
+          listeners.add(listener);
+
+          return () => {
+            listeners.delete(listener);
+          };
+        },
+      },
+      name,
+      profileFor: () => "aac-320" as const,
+      /** The TV's own remote sets its volume. */
+      turnTo: (volume: number) => {
+        level.current = volume;
+
+        for (const listener of listeners) listener(volume);
+      },
+    };
+  };
+
   return {
     controller,
     record,
@@ -429,6 +460,7 @@ export const setup = (
     discarded,
     device,
     systemControls,
+    receiver,
   };
 };
 

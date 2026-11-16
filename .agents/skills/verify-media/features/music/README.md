@@ -64,6 +64,8 @@ commands, and observable proof.
 - [Search](./search.md) covers the search page, the `/` shortcut, accent folding, and CLI search.
 - [Playlists](./playlists.md) covers creating, adding to, renaming, and deleting playlists from
   the web and the CLI.
+- [Casting](../casting.md) covers casting a song to a scripted Chromecast from Play on, the cast on
+  another device's list, and AirPlay in the iOS app's Now Playing.
 - [Connect](./connect.md) covers "Play on": moving playback between a person's devices, pausing,
   seeking, and loading an album on another one, and the remote control's band.
 - [Jams](./jams.md) covers starting a Jam, joining it by its link on the web and in the iOS app,

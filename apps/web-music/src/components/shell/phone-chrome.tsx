@@ -1,4 +1,3 @@
-import { deviceKind } from "@media/player/connect-devices";
 import { usePlayer } from "@media/player/react";
 import { cn } from "@/lib/utils";
 import { Link, useLocation, useNavigate, useSearch } from "@tanstack/react-router";
@@ -7,7 +6,7 @@ import { ListMusicIcon, SearchIcon, XIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { Artwork } from "@/components/library/artwork";
-import { deviceIcon, perform } from "@/components/player/player-actions";
+import { perform, playingElsewhere } from "@/components/player/player-actions";
 
 import { useUi } from "./ui-state";
 
@@ -96,14 +95,11 @@ function MiniPlayer() {
   const player = usePlayer();
   const { setNowPlaying } = useUi();
   const track = player.track;
-  const { remote } = player;
 
   if (track === null) return null;
 
   const playing = player.status === "playing";
-
-  const device =
-    remote === null ? null : { name: remote.name, Icon: deviceIcon(deviceKind(remote.name)) };
+  const device = playingElsewhere(player);
 
   return (
     <div

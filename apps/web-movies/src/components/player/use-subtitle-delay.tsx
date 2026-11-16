@@ -39,6 +39,8 @@ const noticeFor = (delayMs: number | null, reason: string | null): string | null
 /**
  * The subtitle delay of `controller`'s playback.
  *
+ * @param casting - A Chromecast plays the start.
+ * @param otherScreen - AirPlay or the Remote Playback API plays the element elsewhere.
  * @param keycaps - Draw the G and H keycaps on the buttons; not on touch layouts.
  */
 export const useSubtitleDelay = ({
@@ -46,12 +48,16 @@ export const useSubtitleDelay = ({
   stream,
   subtitleId,
   delayMs,
+  casting,
+  otherScreen,
   keycaps,
 }: {
   readonly controller: PlaybackController | null;
   readonly stream: NegotiateResponse | null;
   readonly subtitleId: string | null;
   readonly delayMs: number;
+  readonly casting: boolean;
+  readonly otherScreen: boolean;
   readonly keycaps: boolean;
 }): PlayerSubtitleDelay => {
   const track =
@@ -59,7 +65,7 @@ export const useSubtitleDelay = ({
       ? null
       : (stream?.subtitles.find((candidate) => candidate.id === subtitleId) ?? "loading");
 
-  const timing = subtitleTiming(track);
+  const timing = subtitleTiming({ track, casting, otherScreen });
   const adjustable = timing.adjustable;
   const reason = timing.adjustable ? null : timing.reason;
   const [notice, setNotice] = useState<string | null>(null);

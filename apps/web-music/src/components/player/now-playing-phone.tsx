@@ -23,7 +23,7 @@ import { useJoinedJam } from "@/components/jam/jam";
 
 import { Progress, Volume } from "./controls";
 import { LyricsPane } from "./lyrics-view";
-import { NEXT_REPEAT, perform } from "./player-actions";
+import { NEXT_REPEAT, perform, playingElsewhere } from "./player-actions";
 import { nowPlayingBackground } from "./now-playing-background";
 import { AirPlayGlyph, RepeatGlyph, ShuffleGlyph } from "./now-playing-glyphs";
 import { RemotePill } from "./now-playing-remote-pill";
@@ -47,7 +47,7 @@ export function PhoneNowPlaying({ track, lyrics, view, onView }: PhoneNowPlaying
   const background = nowPlayingBackground(colors, "linear");
   const queue = view === "queue";
   const playing = player.status === "playing";
-  const deviceName = player.remote?.name ?? "This browser";
+  const deviceName = playingElsewhere(player)?.name ?? "This browser";
 
   return (
     <div

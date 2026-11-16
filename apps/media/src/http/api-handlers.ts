@@ -1,5 +1,7 @@
+import { isReceiverCredential } from "@media/contracts/cast";
 import { MediaApi } from "@media/contracts/media-api";
-import { Effect, Layer, Option } from "effect";
+import { PlaybackTokenInvalid } from "@media/contracts/media-playback";
+import { Effect, Layer, Option, Redacted } from "effect";
 import { HttpEffect } from "effect/http";
 import { HttpApiBuilder } from "effect/http-api";
 
@@ -12,6 +14,20 @@ import * as PlaybackNegotiator from "../playback/playback-negotiator.ts";
 import * as PlaybackToken from "../playback/playback-grants.ts";
 import * as StreamSessions from "../playback/stream-sessions.ts";
 import { retryAfter } from "./rate-limit.ts";
+
+/**
+ * Refuses a receiver credential on a route only the sender calls, such as moving or stopping a
+ * stream: a receiver only fetches what its sender loaded on it (ADR 0011).
+ */
+const fromSender = (token: Redacted.Redacted): Effect.Effect<void, PlaybackTokenInvalid> =>
+  isReceiverCredential(Redacted.value(token))
+    ? Effect.fail(
+        new PlaybackTokenInvalid({
+          reason: "wrong_purpose",
+          message: "A receiver credential only fetches its cast's stream",
+        }),
+      )
+    : Effect.void;
 
 const playbackHandlers = HttpApiBuilder.group(
   MediaApi,
@@ -26,6 +42,7 @@ const playbackHandlers = HttpApiBuilder.group(
     return handlers.handleAll({
       negotiate: ({ payload }) => negotiator.negotiate(payload),
       seek: Effect.fn("Api.seek")(function* ({ payload }) {
+        yield* fromSender(payload.token);
         const grant = yield* verifier.verify(payload.token, PlaybackToken.PLAY, payload.streamId);
         const view = yield* sessions.seek(payload.streamId, payload.positionSeconds, grant);
 
@@ -38,7 +55,15 @@ const playbackHandlers = HttpApiBuilder.group(
           ),
         };
       }),
+      receiver: Effect.fn("Api.receiver")(function* ({ payload }) {
+        const credential = yield* verifier
+          .lend(payload.token)
+          .pipe(Effect.mapError((refused) => refused.error));
+
+        return { credential };
+      }),
       stop: Effect.fn("Api.stop")(function* ({ payload }) {
+        yield* fromSender(payload.token);
         const grant = yield* verifier.verify(payload.token, PlaybackToken.PLAY, payload.streamId);
         yield* sessions.stop(payload.streamId, grant);
       }),

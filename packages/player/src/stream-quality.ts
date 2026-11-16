@@ -1,6 +1,6 @@
 import type { MusicStreamProfile as StreamProfile } from "@media/contracts/music-playback";
 
-import type { EngineKind } from "./engine";
+import type { LocalEngineKind } from "./engine";
 
 /**
  * The listener's streaming quality setting.
@@ -100,7 +100,7 @@ export const chooseEngine = (
   quality: StreamQuality,
   support: MseSupport | null,
   mseFailed: boolean,
-): EngineKind => (support === null || mseFailed || quality === "data-saver" ? "html" : "mse");
+): LocalEngineKind => (support === null || mseFailed || quality === "data-saver" ? "html" : "mse");
 
 /**
  * Picks the fragmented profile for the MSE engine. Lossless sources get FLAC at `lossless`

@@ -20,6 +20,7 @@ const run = (events: ReadonlyArray<TransferEvent>): Transfer =>
 const laptopPlaying = (pending: boolean): Device => ({
   id: laptop.target,
   name: laptop.name,
+  output: { kind: "local" },
   playback: { trackId: "t1", playing: true, positionMs: 30_000, at: 1000, pending },
 });
 

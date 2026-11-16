@@ -1,5 +1,5 @@
 import { positionAt } from "./connect-player";
-import type { ConnectItem } from "./connect-player";
+import type { ConnectItem, ConnectOutput } from "./connect-player";
 
 /** Connect counts a device that has not reported for this long as offline (ADR 0018). */
 export const ONLINE_MS = 30_000;
@@ -9,6 +9,8 @@ export interface ConnectTarget {
   readonly deviceId: string;
   readonly name: string;
   readonly mode: "personal" | "shared";
+  /** Where its sound goes: the device itself, or a Chromecast or AirPlay receiver it drives. */
+  readonly output: ConnectOutput;
   readonly playback: {
     readonly domain: string;
     /** Null when the caller may not play it. */
@@ -36,6 +38,11 @@ export interface DevicePlayback {
 export interface Device {
   readonly id: string;
   readonly name: string;
+  /**
+   * Where its sound goes: the device itself, or a Chromecast or AirPlay receiver it drives, which
+   * shows on its row (ADR 0018).
+   */
+  readonly output: ConnectOutput;
   /** Null while it plays no music. */
   readonly playback: DevicePlayback | null;
 }
@@ -92,7 +99,14 @@ export const ownDevices = (
       target.deviceId === self ||
       serverNow - target.reportedAt > ONLINE_MS
         ? []
-        : [{ id: target.deviceId, name: target.name, playback: musicOf(target) }],
+        : [
+            {
+              id: target.deviceId,
+              name: target.name,
+              output: target.output,
+              playback: musicOf(target),
+            },
+          ],
     ),
   );
 
@@ -160,6 +174,18 @@ const BROWSER_NAME = /^(?:Edge|Firefox|Chrome|Safari|Browser)(?: on (?<system>.+
 
 /** The systems whose browsers old music counted as phones. */
 const PHONE_SYSTEMS = new Set(["iPhone", "Android"]);
+
+/**
+ * Where a device's sound goes, as its row in a device list says it (ADR 0018): `Casting to <TV>` or
+ * `AirPlay to <speaker>`, or null while it plays on the device itself.
+ */
+export const outputLabel = (output: ConnectOutput): string | null => {
+  if (output.kind === "cast") return `Casting to ${output.receiver ?? "a TV"}`;
+
+  if (output.kind === "airplay") return `AirPlay to ${output.receiver ?? "a speaker"}`;
+
+  return null;
+};
 
 /**
  * Whether a device is a computer's browser or a phone, from its name, as old music told them apart:

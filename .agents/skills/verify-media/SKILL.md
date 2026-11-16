@@ -332,6 +332,8 @@ matches `Play from start`.
 | `record-stop`                                    | Finishes the recording and prints its path                   |
 | `url`, `pages`, `close-page`, `eval --js`        | Inspects the session, or closes a page and its recording     |
 | `network`                                        | Prints `isolated` or `host` and the Chromium's pid           |
+| `cast --value A` or `cast --advance S`           | Plays the scripted Chromecast's part on a page made with `--cast-fake`: `devicesAppear`, `holdConnection`, `completeConnection`, `finish`, `fail`, `disconnect`, `refetch`, or moves its position to S seconds |
+| `cast-state`                                     | Prints what the scripted Chromecast loaded, fetched, and plays, as JSON |
 | `restart`                                        | Restarts the host after `browser.mjs` changed; signs `main` and `music` in again as Lucía |
 
 Movies pages on `one-backend`, and account pages on any side with the account client, take these.
@@ -372,8 +374,10 @@ says which way it served the stream: `$S logs | grep Stream.started` shows `"mod
 `--page NAME` (default `main`, or `music` with `--app music`) picks a browser context, which the
 app sees as its own device with its own sign-in. The first command that names a new page creates
 it. On that first command, `--device "iPhone 15"` (any Playwright device name) makes it a phone,
-and `--width W --height H` sets the window. `--tab-of P` instead makes it another tab of page P:
-the same context, size, and sign-in, as in `$S browser open / --page aiko-2 --tab-of aiko`, to
+and `--width W --height H` sets the window. `--cast-fake` puts the scripted Chromecast the
+Playwright suites cast to (`apps/web-movies/e2e/playback/cast-fake.ts`), named `Living Room TV`, in
+the new page in place of Google's Cast SDK; `cast` and `cast-state` drive and read it. `--tab-of P`
+instead makes it another tab of page P: the same context, size, and sign-in, as in `$S browser open / --page aiko-2 --tab-of aiko`, to
 check what a second tab sees. `close-page` on a tab closes that tab alone. Each app follows the system theme: a movies page is
 dark unless `--light`, and a music page is light unless `--dark`, as each app defaults. Only
 `main` (Lucía, on her own profile in old movies) and `music` are signed in by `up`, so start a

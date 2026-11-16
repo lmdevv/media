@@ -17,8 +17,14 @@
  * emit an `error` event with a `reason` and resolve.
  */
 
-/** Which engine implementation plays the audio. */
-export type EngineKind = "mse" | "html";
+/** Which of this device's own engines plays the audio. */
+export type LocalEngineKind = "mse" | "html";
+
+/**
+ * Which engine plays the audio: one of this device's own, or `cast`, a Cast receiver this device
+ * drives, which the player is handed rather than builds (`PlaybackController.castTo`).
+ */
+export type EngineKind = LocalEngineKind | "cast";
 
 /**
  * One playable source: a stream URL with its ticket, plus what the engine needs

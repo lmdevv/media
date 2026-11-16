@@ -98,6 +98,8 @@ const SECRET_VALUES: ReadonlyArray<readonly [RegExp, string]> = [
   [/\bmk_[\w-]{16,}/g, REDACTED],
   // A core ticket (ADR 0011): `t1.<kid>.<aud>.<iat>.<exp>.` and the rest up to its MAC.
   [/\bt1\.[a-z0-9]{1,16}\.[a-z0-9]+\.\d+\.\d+\.[\w.-]+/g, REDACTED],
+  // A receiver credential a Cast receiver's URLs carry (ADR 0011).
+  [/\br1\.[\w-]{43}/g, REDACTED],
   [/\b[\w-]+\|[0-9a-f]{32,}\b/g, REDACTED],
 ];
 

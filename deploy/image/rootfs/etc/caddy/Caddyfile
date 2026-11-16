@@ -1,10 +1,20 @@
 {
 	admin off
 	auto_https off
+	# A request a log line names keeps its path but loses its ticket: Caddy logs the URI of a
+	# proxied request it aborts, such as a stream a player stopped reading, and media URLs carry
+	# tickets and receiver credentials in `ticket` (ADR 0011).
 	log {
-		format console {
-			level_format upper
-			time_local
+		format filter {
+			wrap console {
+				level_format upper
+				time_local
+			}
+			fields {
+				request>uri query {
+					replace ticket REDACTED
+				}
+			}
 		}
 	}
 	# Caddy aborts a response whose write stalls for `write_idle` (1m by default). Players stop
@@ -35,12 +45,13 @@
 }
 
 # A web client's static files at the root of `{args[0]}`: the account client at `/` and the music
-# client at `/music/` (ADR 0020). `media-src blob:` lets music's gapless player play a MediaSource.
+# client at `/music/` (ADR 0020), with `{args[1]}` the script sources it loads besides its own.
+# `media-src blob:` lets music's gapless player play a MediaSource.
 (web-client) {
 	encode zstd gzip
 	root * {args[0]}
 	header {
-		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self' ws://{hostport} wss://{hostport}; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+		Content-Security-Policy "default-src 'self'; script-src 'self' {args[1]}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self' ws://{hostport} wss://{hostport}; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
 		X-Content-Type-Options nosniff
 		Referrer-Policy no-referrer
 		X-Frame-Options DENY
@@ -95,11 +106,13 @@
 	redir /music /music/ 308
 
 	# The music client (ADR 0020), served as the account client is, on the browser's one session.
+	# It casts, so it loads Google's Cast sender SDK from the folders the media service's policy
+	# allows the movies client (apps/media/src/http/hardening.ts), and from no more of that host.
 	handle_path /music/* {
-		import web-client {$MEDIA_MUSIC_DIR:/run/media/music}
+		import web-client {$MEDIA_MUSIC_DIR:/run/media/music} "www.gstatic.com/cv/js/sender/v1/ www.gstatic.com/cast/sdk/libs/sender/1.0/ www.gstatic.com/eureka/clank/"
 	}
 
 	handle {
-		import web-client {$MEDIA_ACCOUNT_DIR:/run/media/account}
+		import web-client {$MEDIA_ACCOUNT_DIR:/run/media/account} ""
 	}
 }

@@ -33,8 +33,9 @@ const bodyRefusal = (headers: Readonly<Record<string, string | undefined>>) => {
 };
 
 /**
- * The folders Google serves the Cast sender SDK from (`apps/web/src/casting/cast-sdk.ts`): the
- * loader, the framework, and the platform scripts it picks. Only these, not the whole host, since
+ * The folders Google serves the Cast sender SDK from (`apps/web-movies/src/casting/cast-sdk.ts`):
+ * the loader, the framework, and the platform scripts it picks. The image's Caddyfile allows the
+ * same folders for the music client, which casts too. Only these, not the whole host, since
  * `www.gstatic.com` also serves script gadgets (old AngularJS bundles) that would turn any HTML
  * injection into script. No scheme: the loader fetches the rest protocol-relative, so a page
  * served over HTTP fetches them over HTTP, and an HTTPS page only over HTTPS.

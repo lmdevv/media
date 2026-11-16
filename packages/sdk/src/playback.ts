@@ -1,3 +1,4 @@
+import { CAST_ROUTES, ReceiverRequest, ReceiverResponse } from "@media/contracts/cast";
 import {
   type ClientCapabilities,
   MEDIA_ROUTES,
@@ -106,6 +107,31 @@ export const seekStream = Effect.fn("Playback.seekStream")(function* (
       SeekResponse,
     ),
   );
+});
+
+/**
+ * Asks the media service for a receiver credential for the start whose ticket is `start.token`:
+ * what a Cast receiver's URLs carry in the ticket's place (ADR 0011). It reads and continues only
+ * that start's playback, while the media service keeps its admission and the session is live, and
+ * asking again for the same start replaces it. Fails like a negotiation when the ticket expired or
+ * the session ended.
+ */
+export const lendToReceiver = Effect.fn("Playback.lendToReceiver")(function* (start: {
+  readonly mediaBaseUrl: string;
+  readonly token: string;
+}) {
+  const answered = yield* requestPlayback(
+    {
+      operation: "playback.receiver",
+      url: yield* mediaUrl(start, CAST_ROUTES.receiver),
+      method: "POST",
+      body: Option.some(yield* encodeJson(ReceiverRequest, { token: Redacted.make(start.token) })),
+      bearer: Option.none(),
+    },
+    ReceiverResponse,
+  );
+
+  return answered.credential;
 });
 
 /**

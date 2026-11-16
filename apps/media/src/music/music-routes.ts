@@ -4,13 +4,24 @@
  * personal ticket, and album art to its shareable ticket (ADR 0011). Answers are plain text with
  * the statuses old music's players read. No answer, log, or span carries a ticket.
  */
+import { isReceiverCredential } from "@media/contracts/cast";
 import { TrackId } from "@media/contracts/ids";
 import {
   MUSIC_ROUTES,
   MUSIC_STREAM_PARAMS,
   MusicStreamProfile,
 } from "@media/contracts/music-playback";
-import { Effect, FileSystem, Layer, Option, Path, Predicate, Result, Schema } from "effect";
+import {
+  Effect,
+  FileSystem,
+  Layer,
+  Option,
+  Path,
+  Predicate,
+  Redacted,
+  Result,
+  Schema,
+} from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 
 import * as ArtworkGate from "../artwork/artwork-gate.ts";
@@ -138,12 +149,17 @@ export const layer: Layer.Layer<
 
       // Every request needs an unexpired ticket, as old music's signed URLs did, so a listener who
       // lost access gets nothing once their play's ticket runs out (ADR 0010). A response under way
-      // runs to its end unless its session ends.
+      // runs to its end unless its session ends. A Cast receiver's credential reads the song its
+      // sender's start was for, while that start's admission stands and its session is live.
       const grant = yield* Effect.result(
         Effect.gen(function* () {
           const token = yield* PlaybackToken.tokenOf(request, tokens.param);
 
-          return yield* tokens.authorize(token, PlaybackToken.PLAY_OR_DOWNLOAD);
+          const within = isReceiverCredential(Redacted.value(token))
+            ? PlaybackToken.READ
+            : undefined;
+
+          return yield* tokens.authorize(token, PlaybackToken.PLAY_OR_DOWNLOAD, within);
         }),
       );
 

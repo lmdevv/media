@@ -32,6 +32,7 @@ import { reportProgress } from "./progress-reporter";
 import type { StopReporting } from "./progress-reporter";
 import { inGeneration, runSdk } from "./sdk-calls";
 import { SubtitleRetimer, clampSubtitleDelay } from "./subtitle-timing";
+import { SwitchablePlayer } from "./switchable-player";
 
 /** Where playback starts. */
 export type StartChoice = Data.TaggedEnum<{
@@ -186,10 +187,18 @@ const refusesFile = (failure: CallError): boolean =>
  * answers that the session ended, or refuses an expired ticket for a new stream (after a lost
  * stream, or an audio, quality, or subtitle change long after the start), the controller starts
  * again from where playback is, which takes a new ticket.
+ *
+ * Another device, such as a Chromecast, can play the start instead (`handOff`): the element lets go
+ * of its stream and nothing here negotiates until `takeBack`, while `output` follows that device.
  */
 export class PlaybackController {
-  /** The element as the SDK sees it, which the progress reports and diagnostics follow. */
+  /** The element as the SDK sees it, which the diagnostics follow. */
   readonly player: MediaElementPlayer;
+  /**
+   * Whichever player plays the start now: the element, or a device it was handed to (`handOff`).
+   * Progress reports and a group session follow it.
+   */
+  readonly output: SwitchablePlayer;
   readonly #services: PlaybackServices;
   readonly #element: HTMLVideoElement;
   readonly #request: PlaybackRequest;
@@ -230,6 +239,8 @@ export class PlaybackController {
   #disposed = false;
   /** Where playback was when the page went into the back-forward cache with its stream stopped. */
   #parked: { readonly positionMs: number; readonly play: boolean } | null = null;
+  /** Another device plays the start (`handOff`); the element holds no stream meanwhile. */
+  #handedOff = false;
   readonly #retimer: SubtitleRetimer;
   #delay: SubtitleDelay | null = null;
 
@@ -251,6 +262,7 @@ export class PlaybackController {
     this.#fileId = request.fileId;
     this.#snapshot = { ...this.#snapshot, quality: request.quality };
     this.player = new MediaElementPlayer(element);
+    this.output = new SwitchablePlayer(this.player);
     this.#retimer = new SubtitleRetimer(element);
     element.addEventListener("playing", this.#onPlaying);
     element.addEventListener("loadeddata", this.#onFirstFrame);
@@ -269,7 +281,8 @@ export class PlaybackController {
   readonly #onPageHide = (event: PageTransitionEvent): void => {
     const playback = this.#playback;
 
-    if (playback === null) return;
+    // A device the start was handed to plays on its own stream, which the page leaves alone.
+    if (playback === null || this.#handedOff) return;
     Playback.stopNow(playback);
 
     if (event.persisted && playback.stream.streamId !== undefined) {
@@ -287,7 +300,7 @@ export class PlaybackController {
 
     this.#parked = null;
 
-    if (!event.persisted || parked === null || this.#disposed) return;
+    if (!event.persisted || parked === null || this.#disposed || this.#handedOff) return;
 
     this.#playback = null;
     this.#recoveries = 0;
@@ -426,7 +439,8 @@ export class PlaybackController {
       ),
     );
 
-    if (this.#disposed || ticket !== this.#negotiation) return;
+    // A hand-off while negotiating gives the start to another device; this stream is not wanted.
+    if (this.#disposed || this.#handedOff || ticket !== this.#negotiation) return;
 
     if (negotiated === null) return this.#stop(STOPPED);
 
@@ -619,6 +633,87 @@ export class PlaybackController {
     await this.#play();
   }
 
+  /**
+   * Hands the start to another device, such as a Chromecast: the media server keeps one stream per
+   * start, so the element lets go of its stream and nothing here negotiates (no recovery, and
+   * audio, subtitle, and quality choices only noted) until `takeBack`. The caller switches `output`
+   * to the other device first, so the element emptying itself is not reported.
+   */
+  handOff(): void {
+    if (this.#handedOff || this.#disposed) return;
+    this.#handedOff = true;
+    this.#negotiation += 1;
+    this.#switching = null;
+    // Late callbacks of the released stream belong to an old generation and do nothing.
+    this.#generation += 1;
+    this.#detach();
+  }
+
+  /** Whether another device plays the start now (`handOff`). */
+  isHandedOff(): boolean {
+    return this.#handedOff;
+  }
+
+  /** Whether the start is still handed off, and `ticket` the newest negotiation, after an await. */
+  #stillHandedOff(ticket: number): boolean {
+    return !this.#disposed && this.#handedOff && ticket === this.#negotiation;
+  }
+
+  /**
+   * Takes a new start of the same file while another device plays it (`handOff`), for that device to
+   * negotiate with: its stream needs a new ticket once the old one expired or its session ended
+   * (ADR 0011). The old start's reports end where `output` stands, and the new start's follow
+   * `output`. Answers the new start as the media server reads it, or null when it could not start
+   * or the start came back meanwhile.
+   */
+  async startHandedOff(): Promise<StartedPlayback | null> {
+    if (!this.#handedOff || this.#disposed) return null;
+
+    const ticket = ++this.#negotiation;
+
+    await this.#closeReporting();
+
+    const created = this.#stillHandedOff(ticket) ? await this.#createPlay() : null;
+
+    if (created === null || Result.isFailure(created) || !this.#stillHandedOff(ticket)) {
+      return null;
+    }
+
+    const play = created.success;
+
+    this.#adopt(play);
+    this.#playback = null;
+    this.#update({ coreStart: play.start, started: play.started });
+    this.#startReporting(play);
+
+    return play.started;
+  }
+
+  /**
+   * Takes the start back at `positionMs` after `handOff`: negotiates a new stream for this element
+   * there, with the current start's ticket, and plays it when `play` is set. A ticket the server
+   * refuses as expired leads to a new start, as for any negotiation.
+   */
+  takeBack(positionMs: number, play: boolean): void {
+    if (!this.#handedOff || this.#disposed) return;
+    this.#handedOff = false;
+    this.#recoveries = 0;
+
+    const current = this.#current;
+    const playback = this.#playback;
+
+    if (current === null) return;
+    this.#update({ phase: PlaybackPhase.Preparing({ startAtMs: positionMs, progress: 0.5 }) });
+
+    if (playback === null) {
+      void this.#negotiate(current, positionMs, play);
+
+      return;
+    }
+
+    void this.#renegotiate(playback, positionMs, this.#snapshot.audioStreamIndex, { play });
+  }
+
   #onStreamFailure(failure: StreamFailure): void {
     void this.#follow(afterStreamFailure(failure), this.positionMs(), describeFailure(failure));
   }
@@ -637,7 +732,7 @@ export class PlaybackController {
     reason: string,
     resume = true,
   ): Promise<void> {
-    if (this.#disposed) return;
+    if (this.#disposed || this.#handedOff) return;
 
     const recovery = recoveryObservation(step, reason);
 
@@ -797,14 +892,20 @@ export class PlaybackController {
    * stream loads starts from the same place with the same languages; a version that cannot start
    * gives way to the one that played. At the resume prompt the new version's start asks again.
    *
-   * @returns Whether a switch started; false before a start exists, or for the version already
-   *   chosen.
+   * @returns Whether a switch started; false before a start exists, while another device plays
+   *   it, or for the version already chosen.
    */
   selectVersion(fileId: MediaFileId): boolean {
     const { started, stream, audioStreamIndex, subtitleId, phase } = this.#snapshot;
     const current = this.#current;
 
-    if (started === null || current === null || this.#disposed || fileId === this.#fileId) {
+    if (
+      started === null ||
+      current === null ||
+      this.#disposed ||
+      this.#handedOff ||
+      fileId === this.#fileId
+    ) {
       return false;
     }
 
@@ -868,6 +969,8 @@ export class PlaybackController {
       readonly revert?: () => void;
     } = {},
   ): Promise<void> {
+    // The device the start was handed to negotiates its own stream (`casting/`).
+    if (this.#handedOff) return;
     const wasPlaying = this.playing();
     const ticket = ++this.#negotiation;
     const version = this.#choicesVersion;
@@ -885,6 +988,7 @@ export class PlaybackController {
 
     if (
       this.#disposed ||
+      this.isHandedOff() ||
       ticket !== this.#negotiation ||
       this.#playback?.started !== playback.started
     ) {
@@ -1040,6 +1144,7 @@ export class PlaybackController {
    * refuses as expired leads to a new start.
    */
   retry(): void {
+    if (this.#handedOff) return;
     this.#recoveries = 0;
 
     const play = this.#current;
@@ -1076,7 +1181,7 @@ export class PlaybackController {
   #startReporting(play: StartedPlay): void {
     if (this.#reporting !== null) return;
 
-    this.#reporting = reportProgress(this.#services.play.report, play.start, this.player);
+    this.#reporting = reportProgress(this.#services.play.report, play.start, this.output);
   }
 
   #startDiagnostics(): void {
