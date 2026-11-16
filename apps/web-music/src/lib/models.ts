@@ -63,3 +63,9 @@ export const asArtistId = Brand.nominal<ArtistId>();
 export const asPlaylistId = Brand.nominal<PlaylistId>();
 
 export const asTrackId = Brand.nominal<TrackId>();
+
+/**
+ * A Jam's queue entry as the player's queue entries are typed: the player plays the Jam's queue in
+ * place of the listener's own and passes each entry's id back as it came (`QueueTrack.itemId`).
+ */
+export const asQueueItemId = Brand.nominal<QueueItemId>();

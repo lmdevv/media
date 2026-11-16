@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import type { ShellLayout } from "@/lib/shell-layout";
 import { useThemeLength } from "@/lib/theme-color";
-import { useSong } from "@/player";
+import { useNowPlaying, useSong } from "@/player";
 
 import { ContentArea } from "./content-area";
 import { InspectorPane, InspectorSheet } from "./inspector";
@@ -65,6 +65,7 @@ export function Shell({
   const insets = useSafeAreaInsets();
   const margin = useThemeLength("--spacing-2");
   const nowPlaying = useSong();
+  const { hidden: songHidden } = useNowPlaying();
   const [hidden, setHidden] = useState(false);
   const [overlaid, setOverlaid] = useState(false);
   const [lastSidebar, setLastSidebar] = useState(layout.sidebar);
@@ -76,7 +77,7 @@ export function Shell({
 
   const beside = layout.sidebar === "pinned" && !hidden;
   const framed = layout.sidebar !== "none";
-  const hasBar = layout.player === "bar" && nowPlaying !== null;
+  const hasBar = layout.player === "bar" && (nowPlaying !== null || songHidden);
   const inspector = useInspector(layout.inspector, nowPlaying?.trackId ?? null);
   const panelSong = inspector.open ? nowPlaying : null;
 

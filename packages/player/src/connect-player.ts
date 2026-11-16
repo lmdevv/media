@@ -175,10 +175,11 @@ const reportKey = (here: PlayingHere | null, status: string, seeks: number, appl
  * here when it would apply, not when it began. A `transport` applies only while the song it names
  * plays here. A `load` this device already started only plays, pauses, or seeks the queue entry it
  * started, while that entry plays here. A `stop` lets go of the song, as when playback moves to
- * another device. Whatever happens to a request, this device then reports it applied, so the core
- * settles it. No start waits without end: a newer request, a tap here, the queue's whole listing,
- * an answer from the network, the core settling the request, or this device stopping ends each
- * wait.
+ * another device. While the controller follows a group session, no request applies: the session
+ * controls the device. Whatever happens to a request, this device then reports it applied, so the
+ * core settles it. No start waits without end: a newer request, a tap here, following a group
+ * session or leaving one, the queue's whole listing, an answer from the network, the core settling
+ * the request, or this device stopping ends each wait.
  */
 export class ConnectPlayer {
   readonly #controller: PlaybackController;
@@ -285,6 +286,17 @@ export class ConnectPlayer {
 
     if (!this.started || request.revision <= Math.max(this.#applied, starting)) return;
     const { revision, ask } = request;
+
+    // The group session this device follows controls it, not Connect (ADR 0017, D35): a request
+    // settles at once and applies nothing, and the load it asks for never starts.
+    if (this.#controller.followsSession) {
+      this.#load = null;
+
+      if (ask.kind === "load") this.#handledLoad = Math.max(this.#handledLoad, ask.loadRevision);
+      this.#settle(revision);
+
+      return;
+    }
 
     switch (ask.kind) {
       case "stop": {

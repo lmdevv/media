@@ -9,6 +9,7 @@ const brand = <B extends Brand.Brand<string>>() => Brand.nominal<B>();
 const member = (userId: string, role: SessionMember["role"], present = true): SessionMember => ({
   userId: brand<SessionMember["userId"]>()(userId),
   username: userId,
+  displayName: null,
   role,
   present,
   linkGuest: false,

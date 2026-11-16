@@ -2883,9 +2883,61 @@ export const generatedCommands = [
       ]),
       at: Schema.optionalKey(Schema.Union([Schema.Literal("next"), Schema.Literal("end")])),
       revision: Schema.optionalKey(Schema.Finite),
+      sessionId: Schema.optionalKey(Schema.String.pipe(Schema.brand("Id<togetherSessions>"))),
     }),
     result: Schema.Struct({ entryId: Schema.String.pipe(Schema.brand("Id<togetherEntries>")) }),
     method: (platform) => platform.core.together.add,
+  }),
+  coreCommand({
+    name: "core.together.addItems",
+    path: ["auth", "together", "add-items"],
+    kind: "mutation",
+    scope: "signed-in",
+    refusesKeys: false,
+    summary:
+      "Queue items at the end of the group session --session-id names, in order (500 at most), as many as one call decides and leaving out any you can't play; send the items after the first taken ones again",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({
+      domain: Schema.Union([Schema.Literal("movies"), Schema.Literal("music")]),
+      sessionId: Schema.String.pipe(Schema.brand("Id<togetherSessions>")),
+      items: Schema.Array(
+        Schema.Union([
+          Schema.Struct({
+            domain: Schema.Literal("movies"),
+            ref: Schema.Union([
+              Schema.Struct({
+                type: Schema.Literal("title"),
+                id: Schema.String.pipe(Schema.brand("Id<titles>")),
+              }),
+              Schema.Struct({
+                type: Schema.Literal("episode"),
+                id: Schema.String.pipe(Schema.brand("Id<episodes>")),
+              }),
+              Schema.Struct({
+                type: Schema.Literal("file"),
+                id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
+              }),
+            ]),
+          }),
+          Schema.Struct({
+            domain: Schema.Literal("music"),
+            ref: Schema.Union([
+              Schema.Struct({
+                type: Schema.Literal("track"),
+                id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+              }),
+              Schema.Struct({
+                type: Schema.Literal("album"),
+                id: Schema.String.pipe(Schema.brand("Id<albums>")),
+              }),
+            ]),
+          }),
+        ]),
+      ),
+    }),
+    result: Schema.Struct({ taken: Schema.Finite }),
+    method: (platform) => platform.core.together.addItems,
   }),
   coreCommand({
     name: "core.together.admit",
@@ -2970,8 +3022,13 @@ export const generatedCommands = [
           positionMs: Schema.Finite,
           revision: Schema.Finite,
         }),
-        Schema.Struct({ kind: Schema.Literal("next"), revision: Schema.Finite }),
+        Schema.Struct({
+          kind: Schema.Literal("next"),
+          revision: Schema.Finite,
+          entryId: Schema.optionalKey(Schema.String.pipe(Schema.brand("Id<togetherEntries>"))),
+        }),
       ]),
+      sessionId: Schema.optionalKey(Schema.String.pipe(Schema.brand("Id<togetherSessions>"))),
     }),
     result: Schema.Struct({
       status: Schema.Union([Schema.Literal("playing"), Schema.Literal("paused")]),
@@ -3042,6 +3099,31 @@ export const generatedCommands = [
     method: (platform) => platform.core.together.create,
   }),
   coreCommand({
+    name: "core.together.ended",
+    path: ["auth", "together", "ended"],
+    kind: "mutation",
+    scope: "signed-in",
+    refusesKeys: false,
+    summary:
+      "Tell your group session that what it plays finished on your player, as its host: once its clock agrees, it moves on to what is queued then, or pauses back at the start with nothing queued",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({
+      domain: Schema.Union([Schema.Literal("movies"), Schema.Literal("music")]),
+      sessionId: Schema.String.pipe(Schema.brand("Id<togetherSessions>")),
+      entryId: Schema.Union([Schema.String.pipe(Schema.brand("Id<togetherEntries>")), Schema.Null]),
+      revision: Schema.Finite,
+    }),
+    result: Schema.Struct({
+      status: Schema.Union([Schema.Literal("playing"), Schema.Literal("paused")]),
+      positionAtAnchorMs: Schema.Finite,
+      anchorServerTime: Schema.Finite,
+      playbackRate: Schema.Finite,
+      revision: Schema.Finite,
+    }),
+    method: (platform) => platform.core.together.ended,
+  }),
+  coreCommand({
     name: "core.together.get",
     path: ["auth", "together", "get"],
     kind: "query",
@@ -3060,6 +3142,7 @@ export const generatedCommands = [
         state: Schema.Literal("pending"),
         sessionId: Schema.String.pipe(Schema.brand("Id<togetherSessions>")),
         host: Schema.String,
+        hostDisplayName: Schema.Union([Schema.String, Schema.Null]),
       }),
       Schema.Struct({
         state: Schema.Literal("ended"),
@@ -3070,6 +3153,7 @@ export const generatedCommands = [
         state: Schema.Literal("joined"),
         sessionId: Schema.String.pipe(Schema.brand("Id<togetherSessions>")),
         host: Schema.String,
+        hostDisplayName: Schema.Union([Schema.String, Schema.Null]),
         role: Schema.Union([Schema.Literal("host"), Schema.Literal("guest")]),
         link: Schema.String,
         settings: Schema.Struct({
@@ -3128,10 +3212,16 @@ export const generatedCommands = [
           ]),
           Schema.Null,
         ]),
+        entryId: Schema.Union([
+          Schema.String.pipe(Schema.brand("Id<togetherEntries>")),
+          Schema.Null,
+        ]),
+        lengthMs: Schema.Union([Schema.Finite, Schema.Null]),
         members: Schema.Array(
           Schema.Struct({
             userId: Schema.String.pipe(Schema.brand("Id<users>")),
             username: Schema.String,
+            displayName: Schema.Union([Schema.String, Schema.Null]),
             role: Schema.Union([Schema.Literal("host"), Schema.Literal("guest")]),
             present: Schema.Boolean,
             linkGuest: Schema.Boolean,
@@ -3142,6 +3232,7 @@ export const generatedCommands = [
             Schema.Struct({
               userId: Schema.String.pipe(Schema.brand("Id<users>")),
               username: Schema.String,
+              displayName: Schema.Union([Schema.String, Schema.Null]),
               present: Schema.Boolean,
             }),
           ),
@@ -3199,6 +3290,60 @@ export const generatedCommands = [
     }),
     result: Schema.Null,
     method: (platform) => platform.core.together.leave,
+  }),
+  coreCommand({
+    name: "core.together.playNow",
+    path: ["auth", "together", "play-now"],
+    kind: "mutation",
+    scope: "signed-in",
+    refusesKeys: false,
+    summary:
+      "Play something you can play now in the group session --session-id names, from its start, playing, for everyone",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({
+      item: Schema.Union([
+        Schema.Struct({
+          domain: Schema.Literal("movies"),
+          ref: Schema.Union([
+            Schema.Struct({
+              type: Schema.Literal("title"),
+              id: Schema.String.pipe(Schema.brand("Id<titles>")),
+            }),
+            Schema.Struct({
+              type: Schema.Literal("episode"),
+              id: Schema.String.pipe(Schema.brand("Id<episodes>")),
+            }),
+            Schema.Struct({
+              type: Schema.Literal("file"),
+              id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
+            }),
+          ]),
+        }),
+        Schema.Struct({
+          domain: Schema.Literal("music"),
+          ref: Schema.Union([
+            Schema.Struct({
+              type: Schema.Literal("track"),
+              id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+            }),
+            Schema.Struct({
+              type: Schema.Literal("album"),
+              id: Schema.String.pipe(Schema.brand("Id<albums>")),
+            }),
+          ]),
+        }),
+      ]),
+      sessionId: Schema.String.pipe(Schema.brand("Id<togetherSessions>")),
+    }),
+    result: Schema.Struct({
+      status: Schema.Union([Schema.Literal("playing"), Schema.Literal("paused")]),
+      positionAtAnchorMs: Schema.Finite,
+      anchorServerTime: Schema.Finite,
+      playbackRate: Schema.Finite,
+      revision: Schema.Finite,
+    }),
+    method: (platform) => platform.core.together.playNow,
   }),
   coreCommand({
     name: "core.together.queue",
@@ -3259,7 +3404,29 @@ export const generatedCommands = [
             ]),
             Schema.Null,
           ]),
+          track: Schema.Union([
+            Schema.Struct({
+              id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+              title: Schema.String,
+              artist: Schema.String,
+              artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+              album: Schema.String,
+              albumId: Schema.String.pipe(Schema.brand("Id<albums>")),
+              trackNumber: Schema.Union([Schema.Finite, Schema.Null]),
+              discNumber: Schema.Union([Schema.Finite, Schema.Null]),
+              durationMs: Schema.Finite,
+              codec: Schema.String,
+              lossless: Schema.Boolean,
+              bitrate: Schema.Union([Schema.Finite, Schema.Null]),
+              sampleRate: Schema.Union([Schema.Finite, Schema.Null]),
+              bitDepth: Schema.Union([Schema.Finite, Schema.Null]),
+              artUrl: Schema.Union([Schema.String, Schema.Null]),
+              liked: Schema.Boolean,
+            }),
+            Schema.Null,
+          ]),
           addedBy: Schema.Union([Schema.String, Schema.Null]),
+          addedByDisplayName: Schema.Union([Schema.String, Schema.Null]),
           removable: Schema.Boolean,
         }),
       ),
@@ -3292,6 +3459,24 @@ export const generatedCommands = [
     }),
     result: Schema.Null,
     method: (platform) => platform.core.together.remove,
+  }),
+  coreCommand({
+    name: "core.together.reorder",
+    path: ["auth", "together", "reorder"],
+    kind: "mutation",
+    scope: "signed-in",
+    refusesKeys: false,
+    summary:
+      "Move an entry of your group session's queue to just after another (--after-entry-id), or to the front when none is given: any as its host, your own as a guest who may add",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({
+      domain: Schema.Union([Schema.Literal("movies"), Schema.Literal("music")]),
+      entryId: Schema.String.pipe(Schema.brand("Id<togetherEntries>")),
+      afterEntryId: Schema.optionalKey(Schema.String.pipe(Schema.brand("Id<togetherEntries>"))),
+    }),
+    result: Schema.Null,
+    method: (platform) => platform.core.together.reorder,
   }),
   coreCommand({
     name: "movies.collections.get",

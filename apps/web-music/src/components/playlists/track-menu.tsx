@@ -50,10 +50,19 @@ export const useQueueActions = (): QueueActions => {
       const label =
         tracks.length === 1 ? (tracks[0]?.title ?? "") : `${formatCount(tracks.length)} songs`;
 
-      const landed = await latestPlayer().addToQueue(
-        tracks.map((track) => track.id),
-        next,
-      );
+      // In a Jam the host may have turned adding off: that refusal says so.
+      const landed = await latestPlayer()
+        .addToQueue(
+          tracks.map((track) => track.id),
+          next,
+        )
+        .catch((cause: unknown) => {
+          toastFailure(cause);
+
+          return null;
+        });
+
+      if (landed === null) return;
 
       if (landed) toast.success(next ? `${label} plays next` : `Added ${label} to the queue`);
       else toast.error(`Couldn't add ${label} to the queue. Try again.`);

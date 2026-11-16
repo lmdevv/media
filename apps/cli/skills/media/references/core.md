@@ -986,8 +986,18 @@ Queue something you can play in your group session, next or at the end.
 - CLI: `media auth together add`
 - Kind: mutation
 - Scope: signed-in
-- Arguments: `{ item: { domain: "movies"; ref: { type: "title"; id: Id<"titles"> } | { type: "episode"; id: Id<"episodes"> } | { type: "file"; id: Id<"mediaFiles"> } } | { domain: "music"; ref: { type: "track"; id: Id<"tracks"> } | { type: "album"; id: Id<"albums"> } }; at?: "next" | "end"; revision?: number }`
+- Arguments: `{ item: { domain: "movies"; ref: { type: "title"; id: Id<"titles"> } | { type: "episode"; id: Id<"episodes"> } | { type: "file"; id: Id<"mediaFiles"> } } | { domain: "music"; ref: { type: "track"; id: Id<"tracks"> } | { type: "album"; id: Id<"albums"> } }; at?: "next" | "end"; revision?: number; sessionId?: Id<"togetherSessions"> }`
 - Result: `{ entryId: Id<"togetherEntries"> }`
+
+## `core.together.addItems`
+
+Queue items at the end of the group session --session-id names, in order (500 at most), as many as one call decides and leaving out any you can't play; send the items after the first taken ones again.
+
+- CLI: `media auth together add-items`
+- Kind: mutation
+- Scope: signed-in
+- Arguments: `{ domain: "movies" | "music"; sessionId: Id<"togetherSessions">; items: Array<{ domain: "movies"; ref: { type: "title"; id: Id<"titles"> } | { type: "episode"; id: Id<"episodes"> } | { type: "file"; id: Id<"mediaFiles"> } } | { domain: "music"; ref: { type: "track"; id: Id<"tracks"> } | { type: "album"; id: Id<"albums"> } }> }`
+- Result: `{ taken: number }`
 
 ## `core.together.admit`
 
@@ -1026,7 +1036,7 @@ Play, pause, seek, change the speed of, or skip to the next item in your group s
 - CLI: `media auth together control`
 - Kind: mutation
 - Scope: signed-in
-- Arguments: `{ domain: "movies" | "music"; op: { kind: "play"; revision?: number } | { kind: "pause"; revision?: number } | { kind: "rate"; playbackRate: number } | { kind: "seek"; positionMs: number; revision: number } | { kind: "next"; revision: number } }`
+- Arguments: `{ domain: "movies" | "music"; op: { kind: "play"; revision?: number } | { kind: "pause"; revision?: number } | { kind: "rate"; playbackRate: number } | { kind: "seek"; positionMs: number; revision: number } | { kind: "next"; revision: number; entryId?: Id<"togetherEntries"> }; sessionId?: Id<"togetherSessions"> }`
 - Result: `{ status: "playing" | "paused"; positionAtAnchorMs: number; anchorServerTime: number; playbackRate: number; revision: number }`
 
 ## `core.together.create`
@@ -1040,6 +1050,16 @@ Start a group session on something you can play, leaving any session you are a g
 - Arguments: `{ item: { domain: "movies"; ref: { type: "title"; id: Id<"titles"> } | { type: "episode"; id: Id<"episodes"> } | { type: "file"; id: Id<"mediaFiles"> } } | { domain: "music"; ref: { type: "track"; id: Id<"tracks"> } | { type: "album"; id: Id<"albums"> } }; join?: "open" | "approval" | "locked"; control?: boolean; add?: boolean }`
 - Result: `{ sessionId: Id<"togetherSessions">; link: string }`
 
+## `core.together.ended`
+
+Tell your group session that what it plays finished on your player, as its host: once its clock agrees, it moves on to what is queued then, or pauses back at the start with nothing queued.
+
+- CLI: `media auth together ended`
+- Kind: mutation
+- Scope: signed-in
+- Arguments: `{ domain: "movies" | "music"; sessionId: Id<"togetherSessions">; entryId: Id<"togetherEntries"> | null; revision: number }`
+- Result: `{ status: "playing" | "paused"; positionAtAnchorMs: number; anchorServerTime: number; playbackRate: number; revision: number }`
+
 ## `core.together.get`
 
 Show your group session in a domain: its clock, item, members, settings, link, and what you may do.
@@ -1048,7 +1068,7 @@ Show your group session in a domain: its clock, item, members, settings, link, a
 - Kind: query
 - Scope: signed-in
 - Arguments: `{ domain: "movies" | "music" }`
-- Result: `null | { state: "pending"; sessionId: Id<"togetherSessions">; host: string } | { state: "ended"; sessionId: Id<"togetherSessions">; reason: "host-left" | "abandoned" } | { state: "joined"; sessionId: Id<"togetherSessions">; host: string; role: "host" | "guest"; link: string; settings: { join: "open" | "approval" | "locked"; control: boolean; add: boolean }; may: { control: boolean; add: boolean; manage: boolean }; clock: { status: "playing" | "paused"; positionAtAnchorMs: number; anchorServerTime: number; playbackRate: number; revision: number }; item: { domain: "movies"; ref: { type: "title"; id: Id<"titles"> } | { type: "episode"; id: Id<"episodes"> } | { type: "file"; id: Id<"mediaFiles"> } } | { domain: "music"; ref: { type: "track"; id: Id<"tracks"> } | { type: "album"; id: Id<"albums"> } } | null; members: Array<{ userId: Id<"users">; username: string; role: "host" | "guest"; present: boolean; linkGuest: boolean }>; pending: Array<{ userId: Id<"users">; username: string; present: boolean }> | null }`
+- Result: `null | { state: "pending"; sessionId: Id<"togetherSessions">; host: string; hostDisplayName: string | null } | { state: "ended"; sessionId: Id<"togetherSessions">; reason: "host-left" | "abandoned" } | { state: "joined"; sessionId: Id<"togetherSessions">; host: string; hostDisplayName: string | null; role: "host" | "guest"; link: string; settings: { join: "open" | "approval" | "locked"; control: boolean; add: boolean }; may: { control: boolean; add: boolean; manage: boolean }; clock: { status: "playing" | "paused"; positionAtAnchorMs: number; anchorServerTime: number; playbackRate: number; revision: number }; item: { domain: "movies"; ref: { type: "title"; id: Id<"titles"> } | { type: "episode"; id: Id<"episodes"> } | { type: "file"; id: Id<"mediaFiles"> } } | { domain: "music"; ref: { type: "track"; id: Id<"tracks"> } | { type: "album"; id: Id<"albums"> } } | null; entryId: Id<"togetherEntries"> | null; lengthMs: number | null; members: Array<{ userId: Id<"users">; username: string; displayName: string | null; role: "host" | "guest"; present: boolean; linkGuest: boolean }>; pending: Array<{ userId: Id<"users">; username: string; displayName: string | null; present: boolean }> | null }`
 
 ## `core.together.heartbeat`
 
@@ -1081,6 +1101,16 @@ Leave your group session in a domain; when you host it, it ends for everyone.
 - Arguments: `{ domain: "movies" | "music" }`
 - Result: `null`
 
+## `core.together.playNow`
+
+Play something you can play now in the group session --session-id names, from its start, playing, for everyone.
+
+- CLI: `media auth together play-now`
+- Kind: mutation
+- Scope: signed-in
+- Arguments: `{ item: { domain: "movies"; ref: { type: "title"; id: Id<"titles"> } | { type: "episode"; id: Id<"episodes"> } | { type: "file"; id: Id<"mediaFiles"> } } | { domain: "music"; ref: { type: "track"; id: Id<"tracks"> } | { type: "album"; id: Id<"albums"> } }; sessionId: Id<"togetherSessions"> }`
+- Result: `{ status: "playing" | "paused"; positionAtAnchorMs: number; anchorServerTime: number; playbackRate: number; revision: number }`
+
 ## `core.together.queue`
 
 List what plays next in your group session in a domain.
@@ -1090,7 +1120,7 @@ List what plays next in your group session in a domain.
 - Scope: signed-in
 - Arguments: `{ domain: "movies" | "music"; paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
 - Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
-- Result: `{ page: Array<{ entryId: Id<"togetherEntries">; item: { domain: "movies"; ref: { type: "title"; id: Id<"titles"> } | { type: "episode"; id: Id<"episodes"> } | { type: "file"; id: Id<"mediaFiles"> } } | { domain: "music"; ref: { type: "track"; id: Id<"tracks"> } | { type: "album"; id: Id<"albums"> } } | null; addedBy: string | null; removable: boolean }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
+- Result: `{ page: Array<{ entryId: Id<"togetherEntries">; item: { domain: "movies"; ref: { type: "title"; id: Id<"titles"> } | { type: "episode"; id: Id<"episodes"> } | { type: "file"; id: Id<"mediaFiles"> } } | { domain: "music"; ref: { type: "track"; id: Id<"tracks"> } | { type: "album"; id: Id<"albums"> } } | null; track: { id: Id<"tracks">; title: string; artist: string; artistId: Id<"artists">; album: string; albumId: Id<"albums">; trackNumber: number | null; discNumber: number | null; durationMs: number; codec: string; lossless: boolean; bitrate: number | null; sampleRate: number | null; bitDepth: number | null; artUrl: string | null; liked: boolean } | null; addedBy: string | null; addedByDisplayName: string | null; removable: boolean }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
 
 ## `core.together.remove`
 
@@ -1100,4 +1130,14 @@ Take an entry out of your group session's queue: any as its host, your own as a 
 - Kind: mutation
 - Scope: signed-in
 - Arguments: `{ domain: "movies" | "music"; entryId: Id<"togetherEntries"> }`
+- Result: `null`
+
+## `core.together.reorder`
+
+Move an entry of your group session's queue to just after another (--after-entry-id), or to the front when none is given: any as its host, your own as a guest who may add.
+
+- CLI: `media auth together reorder`
+- Kind: mutation
+- Scope: signed-in
+- Arguments: `{ domain: "movies" | "music"; entryId: Id<"togetherEntries">; afterEntryId?: Id<"togetherEntries"> }`
 - Result: `null`

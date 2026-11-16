@@ -34,7 +34,8 @@ export interface NowPlaying {
 /** One entry of the queue. */
 export interface QueueItem {
   readonly itemId: QueueItemId;
-  readonly trackId: TrackId;
+  /** Null for a Jam's song this person may not play, which shows as `Hidden song`. */
+  readonly trackId: TrackId | null;
   readonly title: string;
   readonly artist: string;
   readonly artUrl: string | null;

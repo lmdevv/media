@@ -5,6 +5,7 @@ import { Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { LikeButton } from "@/components/playback/like-button";
+import { HIDDEN_SONG } from "@/components/playback/mini-player";
 import { Scrubber } from "@/components/playback/scrubber";
 import { BarTransport } from "@/components/playback/transport";
 import { Artwork } from "@/components/ui/artwork";
@@ -24,13 +25,45 @@ const BAR = {
 
 const litClass = (lit: boolean): string => (lit ? "bg-accent/12" : "");
 
+/**
+ * The bar while a Jam plays a song this person may not play, as a kid an explicit one: its name
+ * hidden, and the Jam's transport.
+ */
+function HiddenSongBar() {
+  const insets = useSafeAreaInsets();
+  const { widthClass } = useWindowLayout();
+  const { gap, song, tools } = widthClass === "wide" ? BAR.wide : BAR.tablet;
+
+  return (
+    <View
+      className="border-t border-border bg-canvas px-6 pt-3 shadow-lg shadow-glass-shadow dark:border-canvas"
+      style={{ paddingBottom: insets.bottom }}
+    >
+      <View className={`h-16 flex-row items-center ${gap}`}>
+        <View className={`min-w-0 ${song}`}>
+          <Text variant="bodyStrong" numberOfLines={1}>
+            {HIDDEN_SONG.title}
+          </Text>
+          <Text variant="secondary" tone="muted" numberOfLines={1}>
+            {HIDDEN_SONG.artist}
+          </Text>
+        </View>
+        <View className="min-w-0 flex-1 items-center self-stretch">
+          <BarTransport modes={false} />
+        </View>
+        <View className={`shrink-0 ${tools}`} />
+      </View>
+    </View>
+  );
+}
+
 /** The bar for what is playing; nothing with nothing queued. */
 export function PlayerBar({ inspector }: { readonly inspector: Inspector }) {
-  const { nowPlaying, remote } = useNowPlaying();
+  const { nowPlaying, remote, hidden } = useNowPlaying();
   const insets = useSafeAreaInsets();
   const { widthClass } = useWindowLayout();
 
-  if (nowPlaying === null) return null;
+  if (nowPlaying === null) return hidden ? <HiddenSongBar /> : null;
 
   const { gap, song, tools, extras } = widthClass === "wide" ? BAR.wide : BAR.tablet;
   const badge = extras ? formatBadge(nowPlaying) : null;

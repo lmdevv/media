@@ -357,6 +357,15 @@ export class MseEngine implements PlayerEngine {
     this.#element.volume = Math.min(1, Math.max(0, volume));
   }
 
+  /**
+   * Sets the element's speed and its default, which a new `MediaSource` resets the speed to, so it
+   * holds across loads; the browser keeps the pitch.
+   */
+  setPlaybackRate(rate: number): void {
+    this.#element.defaultPlaybackRate = rate;
+    this.#element.playbackRate = rate;
+  }
+
   /** Stops output and releases the `MediaSource` and every buffered song. */
   unload(): void {
     this.#cancelLoad?.();

@@ -1,5 +1,6 @@
 import type { Track } from "@/lib/models";
 import { lyricsButton, lyricsOffer } from "@media/player/lyrics";
+import { hostName } from "@media/player/session-react";
 import type { LyricsAnswer, LyricsOffer } from "@media/player/lyrics";
 import { Badge } from "@/components/ui/badge";
 import { DialogClose } from "@/components/ui/dialog";
@@ -13,6 +14,9 @@ import { Artwork } from "@/components/library/artwork";
 import type { NowPlayingView } from "@/components/shell/ui-state";
 import { formatQuality } from "@/lib/format";
 import { useArtColors } from "@/lib/use-art-colors";
+
+import { JamButton } from "@/components/jam/jam-band";
+import { useJoinedJam } from "@/components/jam/jam";
 
 import { PlayPauseButton, Progress, RepeatButton, ShuffleButton, SkipButton } from "./controls";
 import { LyricsPane } from "./lyrics-view";
@@ -208,6 +212,7 @@ function ViewButton({
 function UpNext() {
   const { queued, source } = useUpNext();
   const [clear, clearing] = useClearQueue();
+  const jam = useJoinedJam();
 
   return (
     <div className="flex max-w-155 min-w-0 grow flex-col justify-center gap-7">
@@ -215,7 +220,8 @@ function UpNext() {
         <h2 className="grow font-sans text-xl leading-8.5 font-heavy tracking-tight text-text">
           Up next
         </h2>
-        {queued.length > 0 ? (
+        <JamButton tone="glass" className="mr-2" />
+        {queued.length > 0 && jam === null ? (
           <button
             type="button"
             disabled={clearing}
@@ -231,7 +237,11 @@ function UpNext() {
           tone="glass"
           heading={
             <span className="px-3 pb-1.5 font-sans text-xs/xs font-medium tracking-mono text-text/55 uppercase">
-              {source === null ? "Next up" : `From ${source}`}
+              {jam !== null
+                ? `In ${hostName(jam)}'s Jam`
+                : source === null
+                  ? "Next up"
+                  : `From ${source}`}
             </span>
           }
           empty={

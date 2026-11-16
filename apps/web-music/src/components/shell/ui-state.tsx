@@ -21,8 +21,7 @@ import { isDesktopNow } from "@/lib/use-media";
 export type NowPlayingView = "player" | "queue" | "lyrics";
 
 /**
- * App-wide UI state that several screens open or close. Old music's Jam surfaces come back with
- * group sessions (p6).
+ * App-wide UI state that several screens open or close.
  */
 export interface UiState {
   readonly nowPlaying: NowPlayingView | null;
@@ -42,6 +41,9 @@ export interface UiState {
    * away, which closes its open popover.
    */
   readonly setPlayOnPopoverMounted: (mounted: boolean) => void;
+  /** The Jam panel: a dialog on desktop, a bottom sheet on phones. */
+  readonly jamOpen: boolean;
+  readonly setJamOpen: (open: boolean) => void;
   /** Open with the songs a new playlist starts with; null when the dialog is closed. */
   readonly newPlaylist: { readonly trackIds: ReadonlyArray<TrackId> } | null;
   readonly openNewPlaylist: (trackIds?: ReadonlyArray<TrackId>) => void;
@@ -57,6 +59,7 @@ export function UiStateProvider({ children }: { readonly children: ReactNode }) 
   const [commandOpen, setCommandOpen] = useState(false);
   const [playOn, setPlayOn] = useState<PlayOnSurface | null>(null);
   const [playOnPopoverMounted, setPopoverMounted] = useState(false);
+  const [jamOpen, setJamOpen] = useState(false);
   const [newPlaylist, setNewPlaylist] = useState<UiState["newPlaylist"]>(null);
 
   const setPlayOnPopoverMounted = useCallback((mounted: boolean) => {
@@ -108,6 +111,8 @@ export function UiStateProvider({ children }: { readonly children: ReactNode }) 
       openPlayOn,
       closePlayOn,
       setPlayOnPopoverMounted,
+      jamOpen,
+      setJamOpen,
       newPlaylist,
       openNewPlaylist,
       closeNewPlaylist,
@@ -121,6 +126,7 @@ export function UiStateProvider({ children }: { readonly children: ReactNode }) 
       closePlayOn,
       setPlayOnPopoverMounted,
       setNowPlaying,
+      jamOpen,
       newPlaylist,
       openNewPlaylist,
       closeNewPlaylist,

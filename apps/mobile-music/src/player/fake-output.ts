@@ -59,6 +59,12 @@ export class FakeOutput implements AudioOutput {
 
   setVolume = (): void => {};
 
+  rate = 1;
+
+  setRate = (rate: number): void => {
+    this.rate = rate;
+  };
+
   showOnLockScreen = (info: LockScreenInfo | null, live: boolean): void => {
     this.lockScreen = { info, live };
   };

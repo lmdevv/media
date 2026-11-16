@@ -1,4 +1,6 @@
 import { usePlayer } from "@media/player/react";
+import { hostName, useMusicSession } from "@media/player/session-react";
+import type { SessionEntry } from "@media/player/session-react";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -8,12 +10,16 @@ import { useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { Artwork, PlayingBars } from "@/components/library/artwork";
+import { JamButton } from "@/components/jam/jam-band";
+import { frontOf, upcomingInJam, useJamActions, useJoinedJam } from "@/components/jam/jam";
+import type { EntryId } from "@/components/jam/jam";
 import { MoveButtons, ReorderHandle, useReorder } from "@/components/library/reorder";
 import type { Reorder } from "@/components/library/reorder";
 import { useUi } from "@/components/shell/ui-state";
 import { toastFailure, useAction } from "@/lib/action";
 import { formatDuration } from "@/lib/format";
 import { HOTKEYS } from "@/lib/hotkeys";
+import { asQueueItemId } from "@/lib/models";
 import type { QueueEntry, QueueItemId } from "@/lib/models";
 import { useMusic } from "@/lib/platform";
 import { dropLine } from "@/lib/reorder";
@@ -74,12 +80,15 @@ function QueueRow({
   current = false,
   reorder,
   onRemove,
+  addedBy = null,
 }: {
   readonly entry: QueueEntry;
   readonly tone?: Tone;
   readonly current?: boolean;
-  readonly reorder?: RowReorder;
-  readonly onRemove?: () => void;
+  readonly reorder?: RowReorder | undefined;
+  readonly onRemove?: (() => void) | undefined;
+  /** Who queued it, shown in a Jam. */
+  readonly addedBy?: string | null;
 }) {
   const player = usePlayer();
   const glass = tone === "glass";
@@ -120,7 +129,7 @@ function QueueRow({
         seed={entry.albumId}
         className={cn(glass ? "size-11 rounded-sm" : "size-row rounded-xs")}
       />
-      <QueueRowText entry={entry} glass={glass} current={current} />
+      <QueueRowText entry={entry} glass={glass} current={current} addedBy={addedBy} />
       <QueueRowEnd
         entry={entry}
         glass={glass}
@@ -144,10 +153,12 @@ function QueueRowText({
   entry,
   glass,
   current,
+  addedBy,
 }: {
   readonly entry: QueueEntry;
   readonly glass: boolean;
   readonly current: boolean;
+  readonly addedBy: string | null;
 }) {
   return (
     <div className="pointer-events-none flex min-w-0 grow flex-col gap-px">
@@ -163,7 +174,7 @@ function QueueRowText({
       <span
         className={cn("truncate font-sans text-sm/xs", glass ? "text-text/60" : "text-text-muted")}
       >
-        {entry.artist}
+        {addedBy === null ? entry.artist : `${entry.artist} · Added by ${addedBy}`}
       </span>
     </div>
   );
@@ -224,12 +235,12 @@ function QueueRowEnd({
   );
 }
 
-const useQueueRemoval = (entries: ReadonlyArray<QueueEntry>) => {
+const useQueueRemoval = (itemIds: ReadonlyArray<QueueItemId>) => {
   const player = usePlayer();
   const list = useRef<HTMLDivElement>(null);
   const [removed, setRemoved] = useState<LandedRemoval | null>(null);
   const handled = useRef<LandedRemoval | null>(null);
-  const signature = entries.map((entry) => entry.itemId).join(" ");
+  const signature = itemIds.join(" ");
 
   useLayoutEffect(() => {
     const element = list.current;
@@ -293,10 +304,30 @@ export function UpcomingQueue({
   /** Phones: show up/down buttons on each row instead of dragging. */
   readonly reorderMode?: boolean;
 }) {
+  const jam = useJoinedJam();
+
+  if (jam !== null) {
+    return <JamUpcoming tone={tone} heading={heading} empty={empty} reorderMode={reorderMode} />;
+  }
+
+  return <OwnUpcoming tone={tone} heading={heading} empty={empty} reorderMode={reorderMode} />;
+}
+
+function OwnUpcoming({
+  tone,
+  heading,
+  empty,
+  reorderMode,
+}: {
+  readonly tone: Tone;
+  readonly heading: ReactNode;
+  readonly empty: ReactNode;
+  readonly reorderMode: boolean;
+}) {
   const move = useMusic().queue.move;
   const { current, queued, autoplay } = useUpNext();
   const ids = queued.map((entry) => entry.itemId);
-  const removal = useQueueRemoval(queued);
+  const removal = useQueueRemoval(queued.map((entry) => entry.itemId));
 
   const reorder = useReorder<QueueItemId>(
     ids,
@@ -339,6 +370,125 @@ export function UpcomingQueue({
   );
 }
 
+/** A Jam entry this person may not play, as a kid an explicit song: it shows, but hidden. */
+function HiddenRow({
+  entry,
+  tone,
+  onRemove,
+}: {
+  readonly entry: SessionEntry;
+  readonly tone: Tone;
+  readonly onRemove: (() => void) | undefined;
+}) {
+  const glass = tone === "glass";
+
+  return (
+    <div data-testid="queue-row" className={queueRowClassName(glass, false)}>
+      <span
+        aria-hidden
+        className={cn("shrink-0 bg-surface", glass ? "size-11 rounded-sm" : "size-row rounded-xs")}
+      />
+      <div className="flex min-w-0 grow flex-col gap-px">
+        <span className="truncate font-sans text-base/sm text-text-muted">Hidden song</span>
+        <span className="truncate font-sans text-sm/xs text-text-muted">
+          {entry.addedBy === null ? "Not available to you" : `Added by ${entry.addedBy}`}
+        </span>
+      </div>
+      {onRemove === undefined ? null : (
+        <button
+          type="button"
+          aria-label="Remove the hidden song from the queue"
+          data-queue-remove
+          onClick={onRemove}
+          className="flex size-7 shrink-0 items-center justify-center rounded-full text-text-muted outline-none hover:bg-border hover:text-text focus-visible:ring-2 focus-visible:ring-ring/50"
+        >
+          <XIcon className="size-4" />
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * What plays next in the person's Jam, as they see it: who queued each song, and songs they may not
+ * play as hidden. The host moves and takes out any entry, a guest who may add only their own, as
+ * old music's jams let people move the songs they added.
+ */
+function JamUpcoming({
+  tone,
+  heading,
+  empty,
+  reorderMode,
+}: {
+  readonly tone: Tone;
+  readonly heading: ReactNode;
+  readonly empty: ReactNode;
+  readonly reorderMode: boolean;
+}) {
+  const { entries } = useMusicSession();
+  const player = usePlayer();
+  const { reorder: move } = useJamActions();
+
+  // Once the player moved on to the first entry by itself, it plays it: the rest come after it.
+  const current = player.track?.itemId ?? null;
+
+  const upcoming = upcomingInJam(entries, current);
+
+  const removal = useQueueRemoval(upcoming.map((entry) => asQueueItemId(entry.key)));
+
+  const reorder = useReorder<EntryId>(
+    upcoming.map((entry) => entry.key),
+    frontOf(entries, upcoming[0]?.key ?? null),
+    async (entryId, afterEntryId) => {
+      try {
+        await move(entryId, afterEntryId);
+      } catch (cause) {
+        toastFailure(cause);
+        throw cause;
+      }
+    },
+  );
+
+  return (
+    <div className="flex flex-col gap-0.5">
+      {heading}
+      <div ref={removal.list} tabIndex={-1} className="flex flex-col gap-0.5 outline-none">
+        {upcoming.length === 0
+          ? empty
+          : upcoming.map((entry, index) => {
+              const remove = entry.removable
+                ? () => void removal.remove(asQueueItemId(entry.key), index)
+                : undefined;
+
+              if (entry.track === null) {
+                return <HiddenRow key={entry.key} entry={entry} tone={tone} onRemove={remove} />;
+              }
+
+              return (
+                <QueueRow
+                  key={entry.key}
+                  entry={{ ...entry.track, itemId: asQueueItemId(entry.key), autoplay: false }}
+                  tone={tone}
+                  addedBy={entry.addedBy}
+                  onRemove={remove}
+                  reorder={
+                    entry.removable
+                      ? {
+                          index,
+                          count: upcoming.length,
+                          reorder,
+                          mode: reorderMode ? "buttons" : "drag",
+                        }
+                      : undefined
+                  }
+                />
+              );
+            })}
+      </div>
+    </div>
+  );
+}
+
 function AutoplaySection({
   tone,
   entries,
@@ -348,7 +498,7 @@ function AutoplaySection({
 }) {
   const player = usePlayer();
   const glass = tone === "glass";
-  const removal = useQueueRemoval(entries);
+  const removal = useQueueRemoval(entries.map((entry) => entry.itemId));
 
   return (
     <section aria-label="Autoplay" className="flex flex-col gap-0.5">
@@ -390,6 +540,7 @@ export function QueuePanel() {
   const { setQueueOpen } = useUi();
   const { current, queued, source } = useUpNext();
   const [clear, clearing] = useClearQueue();
+  const jam = useJoinedJam();
 
   // On window, after Base UI's document listeners, so an Escape that already closed one of its
   // popups (and so was prevented) leaves the panel open.
@@ -412,6 +563,7 @@ export function QueuePanel() {
     >
       <div className="flex items-center justify-between gap-2 px-2">
         <h2 className="grow font-sans text-lg/md font-semibold tracking-tight text-text">Queue</h2>
+        <JamButton />
         <button
           type="button"
           aria-label="Close the queue"
@@ -433,9 +585,13 @@ export function QueuePanel() {
         heading={
           <div className="flex items-center justify-between px-2 pb-1.5">
             <span className="truncate font-mono text-xs/xs tracking-mono text-text-muted uppercase">
-              {source === null ? "Next up" : `Next from ${source}`}
+              {jam !== null
+                ? `Next in ${hostName(jam)}'s Jam`
+                : source === null
+                  ? "Next up"
+                  : `Next from ${source}`}
             </span>
-            {queued.length > 0 ? (
+            {queued.length > 0 && jam === null ? (
               <button
                 type="button"
                 disabled={clearing}

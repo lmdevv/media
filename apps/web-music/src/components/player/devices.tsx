@@ -6,6 +6,8 @@ import type { LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
+import { useJoinedJam } from "@/components/jam/jam";
+import { JamButton } from "@/components/jam/jam-band";
 import { PlayingBars } from "@/components/library/artwork";
 import { useUi } from "@/components/shell/ui-state";
 import { Spinner } from "@/components/ui/spinner";
@@ -155,10 +157,12 @@ function DeviceRow({ name, detail, Icon, active, isPending, playing, touch, onSe
 
 /**
  * The "Play on" list shared by the desktop popover and the phone sheet: this browser first, then
- * your other devices, with the playing one marked and a move shown as it starts.
+ * your other devices, with the playing one marked and a move shown as it starts, and the Jam
+ * button, as old music's list had. A Jam plays here and offers no other device (ADR 0017).
  */
 export function DeviceList({ touch = false }: { readonly touch?: boolean }) {
   const player = usePlayer();
+  const jam = useJoinedJam();
   const position = usePlayerPosition();
   const { others, pending, transfer } = useDevices();
   const { closePlayOn } = useUi();
@@ -229,7 +233,10 @@ export function DeviceList({ touch = false }: { readonly touch?: boolean }) {
           />
         );
       })}
-      {others.length === 0 ? (
+      <div className="flex justify-center px-3 pt-2 pb-1">
+        <JamButton />
+      </div>
+      {others.length === 0 && jam === null ? (
         <div className="flex flex-col items-center gap-1.5 px-6 pt-5 pb-3 text-center">
           <span className="font-sans text-base/sm font-medium text-text">
             No other devices right now

@@ -1,3 +1,4 @@
+import { hostName, useMusicSession } from "@media/player/session-react";
 import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
 import type { LucideIcon } from "lucide-react-native";
@@ -48,10 +49,13 @@ function ModePill({
   );
 }
 
-/** Shuffle, repeat, and autoplay. */
+/** Shuffle, repeat, and autoplay; none in a Jam, whose queue plays in order. */
 export function ModePills({ place = "player" }: { readonly place?: PanelPlace }) {
   const { shuffle, repeat, autoplay } = usePlayer();
   const actions = usePlayerActions();
+  const { view } = useMusicSession();
+
+  if (view?.state === "joined") return null;
 
   return (
     <View className="flex-row gap-2 py-2">
@@ -80,7 +84,15 @@ export function ModePills({ place = "player" }: { readonly place?: PanelPlace })
   );
 }
 
-function PlayingNext({ empty, place }: { readonly empty: boolean; readonly place: PanelPlace }) {
+function PlayingNext({
+  empty,
+  place,
+  jamHost,
+}: {
+  readonly empty: boolean;
+  readonly place: PanelPlace;
+  readonly jamHost: string | null;
+}) {
   const panel = place === "panel";
 
   return (
@@ -91,9 +103,9 @@ function PlayingNext({ empty, place }: { readonly empty: boolean; readonly place
           tone={panel ? "muted" : "default"}
           accessibilityRole="header"
         >
-          {panel ? "UP NEXT" : "Playing Next"}
+          {panel ? "UP NEXT" : jamHost === null ? "Playing Next" : `In ${jamHost}'s Jam`}
         </Text>
-        {empty ? null : (
+        {empty || jamHost !== null ? null : (
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Clear queue"
@@ -153,6 +165,20 @@ function ContinuePlaying({
   );
 }
 
+/**
+ * `item` as a Jam's queue shows it, saying who queued it under the artist, or in place of it for a
+ * song this person may not play, as the web does.
+ */
+const withAddedBy = (item: QueueItem, by: string): QueueItem => ({
+  itemId: item.itemId,
+  trackId: item.trackId,
+  title: item.title,
+  artist: item.trackId === null ? `Added by ${by}` : `${item.artist} · Added by ${by}`,
+  artUrl: item.artUrl,
+  durationMs: item.durationMs,
+  autoplay: item.autoplay,
+});
+
 /** The songs after the current one, on `background`, the sheet's color. */
 export function QueueList({
   background,
@@ -163,10 +189,24 @@ export function QueueList({
 }) {
   const { queue, index, autoplay } = usePlayer();
   const actions = usePlayerActions();
+  const { view, entries } = useMusicSession();
+  const jam = view?.state === "joined" ? view : null;
 
   const upcoming = queue.slice(index + 1);
-  const queued = upcoming.filter((item) => !item.autoplay);
   const added = upcoming.filter((item) => item.autoplay);
+
+  // Keyed by plain id: the player passes a Jam's entries on as its own queue's (`QueueItem.itemId`).
+  const addedBy = new Map<string, string | null>(
+    entries.map((entry) => [entry.key, entry.addedBy]),
+  );
+
+  const queued = upcoming
+    .filter((item) => !item.autoplay)
+    .map((item) => {
+      const by = jam === null ? null : (addedBy.get(item.itemId) ?? null);
+
+      return by === null ? item : withAddedBy(item, by);
+    });
 
   return (
     <View className={`min-h-0 flex-1 overflow-hidden ${PLACES[place].bleed}`}>
@@ -175,13 +215,24 @@ export function QueueList({
         background={background}
         place={place}
         onMove={(item, to) => void actions.moveInQueue(item.itemId, index + 1 + to)}
-        onJump={(item) => void actions.jump(item.itemId)}
+        onJump={(item) => {
+          // A hidden song only shows where it plays, as on the web: it plays nothing here.
+          if (item.trackId !== null) void actions.jump(item.itemId);
+        }}
         onRemove={(item) => {
           void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
           void actions.removeFromQueue(item.itemId);
         }}
-        header={<PlayingNext empty={queued.length === 0} place={place} />}
-        footer={autoplay ? <ContinuePlaying items={added} place={place} /> : undefined}
+        header={
+          <PlayingNext
+            empty={queued.length === 0}
+            place={place}
+            jamHost={jam === null ? null : hostName(jam)}
+          />
+        }
+        footer={
+          autoplay && jam === null ? <ContinuePlaying items={added} place={place} /> : undefined
+        }
       />
       <EdgeFade edge="bottom" background={background} />
     </View>

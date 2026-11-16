@@ -111,6 +111,25 @@ describe("NativeEngine", () => {
     for (const cleanup of cleanups.splice(0)) cleanup();
   });
 
+  it("plays every stream at the speed it was given, the preloaded next one and later ones too", async () => {
+    const { engine, media, output, outputs } = await setup();
+
+    engine.setPlaybackRate(0.95);
+
+    const loaded = engine.load(media.source("a"), 0, true);
+
+    output(0).ready(false);
+    await loaded;
+    engine.preload(media.source("b"));
+    await vi.waitFor(() => expect(outputs).toHaveLength(2));
+
+    expect(outputs.map((opened) => opened.rate)).toEqual([0.95, 0.95]);
+
+    engine.setPlaybackRate(1);
+
+    expect(outputs.map((opened) => opened.rate)).toEqual([1, 1]);
+  });
+
   it("keeps the requested position visible while a live load reopens", async () => {
     const { engine, media, output, outputs } = await setup();
     const positions: Array<number> = [];

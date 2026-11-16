@@ -37,6 +37,18 @@ const sessionFields = {
   clock,
   /** What plays now. Its domain is the session's, and never changes. */
   item: domainItem,
+  /**
+   * The queue entry `item` came from, which a skip took out of the queue; absent for the item the
+   * session started on. Two plays of one song differ by it.
+   */
+  itemEntryId: v.optional(v.id("togetherEntries")),
+  /**
+   * The entry queued first, and the server time it got there, kept by every change to the queue;
+   * absent while nothing is queued. A skip carries the clock past the end of the item it leaves
+   * only into this entry, and only when it got there by that end (ADR 0017). A session from
+   * before it was kept has none until its first queued entry changes; its skips start at 0.
+   */
+  queuedFirst: v.optional(v.object({ entryId: v.id("togetherEntries"), since: v.number() })),
 };
 
 export const sessionDocument = v.union(
@@ -47,6 +59,23 @@ export const sessionDocument = v.union(
     reason: v.union(v.literal("host-left"), v.literal("abandoned")),
   }),
 );
+
+/**
+ * The cold half of a session: what `can` reads about it that changes only with its settings or
+ * its end, kept beside it by every writer of those, so a query that decides with them, as each
+ * page of its queue, re-runs on neither its clock nor what it plays (ADR 0017). A session from
+ * before it was kept has none, and decides with its own document.
+ */
+export const factsDocument = v.object({
+  sessionId: v.id("togetherSessions"),
+  /** The session's domain, which never changes. */
+  domain: contentDomain,
+  /** Never changes, as the session's. */
+  hostId: v.id("users"),
+  settings,
+  /** False once the session ended. */
+  live: v.boolean(),
+});
 
 /**
  * A person in a session, joined or waiting for the host. At most one row per person and domain.

@@ -7,6 +7,7 @@ import { Suspense, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 
+import { JamBand } from "@/components/jam/jam-band";
 import { DeviceSheet } from "@/components/player/device-sheet";
 import { PlayerBar } from "@/components/player/player-bar";
 import { HOTKEYS } from "@/lib/hotkeys";
@@ -29,6 +30,7 @@ const surfaces = {
   newPlaylist: lazyChunk(
     async () => (await import("@/components/playlists/new-playlist-dialog")).NewPlaylistDialog,
   ),
+  jamPanel: lazyChunk(async () => (await import("@/components/jam/jam-panel")).JamPanel),
 };
 
 const CommandMenu = surfaces.commandMenu.Component;
@@ -38,6 +40,8 @@ const NowPlaying = surfaces.nowPlaying.Component;
 const QueuePanel = surfaces.queue.Component;
 
 const NewPlaylistDialog = surfaces.newPlaylist.Component;
+
+const JamPanel = surfaces.jamPanel.Component;
 
 const usePreloadSurfaces = (): void => {
   useEffect(
@@ -132,7 +136,7 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
 function Surfaces() {
   const ui = useUi();
   const { commandOpen, setCommandOpen, newPlaylist, closeNewPlaylist } = ui;
-  const { nowPlaying, setNowPlaying } = ui;
+  const { nowPlaying, setNowPlaying, jamOpen, setJamOpen } = ui;
   const hasTrack = useHasTrack();
   const { pathname } = useLocation();
 
@@ -154,6 +158,9 @@ function Surfaces() {
         <NowPlaying />
       </OnDemand>
       <DeviceSheet />
+      <OnDemand open={jamOpen} onFailed={() => setJamOpen(false)}>
+        <JamPanel />
+      </OnDemand>
     </>
   );
 }
@@ -168,6 +175,7 @@ function Frame({ children }: { readonly children: ReactNode }) {
         <Sidebar />
         <div className="flex min-w-0 grow flex-col overflow-clip lg:dark:rounded-md dark:bg-bg">
           <ConnectionBanners />
+          <JamBand />
           <main
             id="main"
             className={`relative min-h-0 grow overflow-y-auto overscroll-contain ${hasTrack ? "pb-50" : "pb-35"} lg:pb-0`}

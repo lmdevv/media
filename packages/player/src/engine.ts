@@ -98,6 +98,12 @@ export interface PlayerEngine {
   seek(positionMs: number): void;
   /** Sets the output volume, from 0 to 1. */
   setVolume(volume: number): void;
+  /**
+   * Plays at `rate` times normal speed from now on, across loads and songs, keeping the pitch, so a
+   * player following a group session's clock closes a small drift without a seek (ADR 0017). An
+   * engine that cannot change its speed leaves this out, and the follower seeks instead.
+   */
+  setPlaybackRate?(rate: number): void;
   /** Stops output and releases the audio element and buffers. */
   unload(): void;
   /**

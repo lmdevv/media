@@ -2,6 +2,7 @@ import { lyricsButton, lyricsOffer } from "@media/player/lyrics";
 import type { LyricsAnswer, LyricsOffer } from "@media/player/lyrics";
 import * as Haptics from "expo-haptics";
 import { router, useNavigation } from "expo-router";
+import { useMusicSession } from "@media/player/session-react";
 import {
   Airplay,
   Ellipsis,
@@ -9,6 +10,7 @@ import {
   MessageSquareQuote,
   Music,
   Smartphone,
+  Users,
 } from "lucide-react-native";
 import { useEffect, useRef, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
@@ -40,7 +42,7 @@ import type { SheetSong } from "@/lib/song-sheet";
 import { useThemeColor, useThemeLength } from "@/lib/theme-color";
 import { whereItPlays } from "@/lib/this-device";
 import { useWindowLayout } from "@/lib/window-layout";
-import { usePlayer } from "@/player";
+import { useNowPlaying, usePlayer } from "@/player";
 import type { NowPlaying, RemoteDevice } from "@/player";
 
 import { LyricsPanel } from "./lyrics";
@@ -362,6 +364,25 @@ function DeviceButton({ remote }: { readonly remote: RemoteDevice | null }) {
   );
 }
 
+/** "Start a Jam", or "Your Jam" while the person is in one or waits to be: opens the Jam. */
+function JamButton() {
+  const { view } = useMusicSession();
+  const inJam = view?.state === "joined" || view?.state === "pending";
+
+  return (
+    <IconButton
+      icon={Users}
+      label={inJam ? "Your Jam" : "Start a Jam"}
+      tone={inJam ? "accent" : "default"}
+      onPress={() => {
+        leaveTo(() => {
+          router.push("/jam");
+        });
+      }}
+    />
+  );
+}
+
 function ActionRow({
   remote,
   selected,
@@ -377,7 +398,9 @@ function ActionRow({
 
   return (
     <View className="flex-row items-center justify-between pt-4">
-      <View className="w-ios-88 flex-row items-center" />
+      <View className="w-ios-88 flex-row items-center">
+        <JamButton />
+      </View>
       <DeviceButton remote={remote} />
       <View className="w-ios-88 flex-row items-center justify-end">
         {lyrics === null ? null : (
@@ -448,6 +471,33 @@ function NothingPlaying({ drag }: { readonly drag: SharedValue<number> | null })
         <View className="w-full max-w-dialog">{empty}</View>
       </View>
     </DragToClose>
+  );
+}
+
+/**
+ * A Jam's song this person may not play, as a kid an explicit one, while it plays: nothing plays
+ * here until the Jam moves on. The Jam's transport stays, so a host or a guest who may control can
+ * pause it or move it on, and so does its queue, which shows what plays after it.
+ */
+function HiddenSong({
+  drag,
+  background,
+}: {
+  readonly drag: SharedValue<number> | null;
+  readonly background: string;
+}) {
+  const hidden = (
+    <View>
+      <EmptyState icon={Music} title="Hidden song" body="Not available to you" />
+      <Transport />
+    </View>
+  );
+
+  return (
+    <View className="flex-1 px-page">
+      {drag === null ? hidden : <DragToClose drag={drag}>{hidden}</DragToClose>}
+      <QueueList background={background} />
+    </View>
   );
 }
 
@@ -841,6 +891,7 @@ function PlayerBody({
 /** The Now Playing screen. */
 export function NowPlayingScreen() {
   const { nowPlaying, status, error, remote } = usePlayer();
+  const { hidden } = useNowPlaying();
   const tint = useArtTint(nowPlaying?.artUrl ?? null);
   const player = useThemeColor("--color-player");
   const insets = useSafeAreaInsets();
@@ -905,9 +956,9 @@ export function NowPlayingScreen() {
       <DragToClose drag={drag}>
         <Handle onClose={windowed ? close : null} />
       </DragToClose>
-      {nowPlaying === null ? (
-        <NothingPlaying drag={drag} />
-      ) : (
+      {nowPlaying === null && hidden ? <HiddenSong drag={drag} background={background} /> : null}
+      {nowPlaying === null && !hidden ? <NothingPlaying drag={drag} /> : null}
+      {nowPlaying === null ? null : (
         <PlayerBody
           layout={layout}
           panelInPlace={parts.stage.panel !== null}

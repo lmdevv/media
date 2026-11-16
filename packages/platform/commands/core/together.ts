@@ -30,9 +30,36 @@ const addArgs = v.object({
   ),
   at: v.optional(v.union(v.literal("next"), v.literal("end"))),
   revision: v.optional(v.number()),
+  sessionId: v.optional(v.id("togetherSessions")),
 });
 
 const addResult = v.object({ entryId: v.id("togetherEntries") });
+
+const addItemsArgs = v.object({
+  domain: v.union(v.literal("movies"), v.literal("music")),
+  sessionId: v.id("togetherSessions"),
+  items: v.array(
+    v.union(
+      v.object({
+        domain: v.literal("movies"),
+        ref: v.union(
+          v.object({ type: v.literal("title"), id: v.id("titles") }),
+          v.object({ type: v.literal("episode"), id: v.id("episodes") }),
+          v.object({ type: v.literal("file"), id: v.id("mediaFiles") }),
+        ),
+      }),
+      v.object({
+        domain: v.literal("music"),
+        ref: v.union(
+          v.object({ type: v.literal("track"), id: v.id("tracks") }),
+          v.object({ type: v.literal("album"), id: v.id("albums") }),
+        ),
+      }),
+    ),
+  ),
+});
+
+const addItemsResult = v.object({ taken: v.number() });
 
 const admitArgs = v.object({
   domain: v.union(v.literal("movies"), v.literal("music")),
@@ -64,8 +91,13 @@ const controlArgs = v.object({
     v.object({ kind: v.literal("pause"), revision: v.optional(v.number()) }),
     v.object({ kind: v.literal("rate"), playbackRate: v.number() }),
     v.object({ kind: v.literal("seek"), positionMs: v.number(), revision: v.number() }),
-    v.object({ kind: v.literal("next"), revision: v.number() }),
+    v.object({
+      kind: v.literal("next"),
+      revision: v.number(),
+      entryId: v.optional(v.id("togetherEntries")),
+    }),
   ),
+  sessionId: v.optional(v.id("togetherSessions")),
 });
 
 const controlResult = v.object({
@@ -101,11 +133,31 @@ const createArgs = v.object({
 
 const createResult = v.object({ sessionId: v.id("togetherSessions"), link: v.string() });
 
+const endedArgs = v.object({
+  domain: v.union(v.literal("movies"), v.literal("music")),
+  sessionId: v.id("togetherSessions"),
+  entryId: v.union(v.id("togetherEntries"), v.null()),
+  revision: v.number(),
+});
+
+const endedResult = v.object({
+  status: v.union(v.literal("playing"), v.literal("paused")),
+  positionAtAnchorMs: v.number(),
+  anchorServerTime: v.number(),
+  playbackRate: v.number(),
+  revision: v.number(),
+});
+
 const getArgs = v.object({ domain: v.union(v.literal("movies"), v.literal("music")) });
 
 const getResult = v.union(
   v.null(),
-  v.object({ state: v.literal("pending"), sessionId: v.id("togetherSessions"), host: v.string() }),
+  v.object({
+    state: v.literal("pending"),
+    sessionId: v.id("togetherSessions"),
+    host: v.string(),
+    hostDisplayName: v.union(v.string(), v.null()),
+  }),
   v.object({
     state: v.literal("ended"),
     sessionId: v.id("togetherSessions"),
@@ -115,6 +167,7 @@ const getResult = v.union(
     state: v.literal("joined"),
     sessionId: v.id("togetherSessions"),
     host: v.string(),
+    hostDisplayName: v.union(v.string(), v.null()),
     role: v.union(v.literal("host"), v.literal("guest")),
     link: v.string(),
     settings: v.object({
@@ -150,17 +203,27 @@ const getResult = v.union(
       ),
       v.null(),
     ),
+    entryId: v.union(v.id("togetherEntries"), v.null()),
+    lengthMs: v.union(v.number(), v.null()),
     members: v.array(
       v.object({
         userId: v.id("users"),
         username: v.string(),
+        displayName: v.union(v.string(), v.null()),
         role: v.union(v.literal("host"), v.literal("guest")),
         present: v.boolean(),
         linkGuest: v.boolean(),
       }),
     ),
     pending: v.union(
-      v.array(v.object({ userId: v.id("users"), username: v.string(), present: v.boolean() })),
+      v.array(
+        v.object({
+          userId: v.id("users"),
+          username: v.string(),
+          displayName: v.union(v.string(), v.null()),
+          present: v.boolean(),
+        }),
+      ),
       v.null(),
     ),
   }),
@@ -180,6 +243,35 @@ const joinResult = v.object({ state: v.union(v.literal("joined"), v.literal("pen
 const leaveArgs = v.object({ domain: v.union(v.literal("movies"), v.literal("music")) });
 
 const leaveResult = v.null();
+
+const playNowArgs = v.object({
+  item: v.union(
+    v.object({
+      domain: v.literal("movies"),
+      ref: v.union(
+        v.object({ type: v.literal("title"), id: v.id("titles") }),
+        v.object({ type: v.literal("episode"), id: v.id("episodes") }),
+        v.object({ type: v.literal("file"), id: v.id("mediaFiles") }),
+      ),
+    }),
+    v.object({
+      domain: v.literal("music"),
+      ref: v.union(
+        v.object({ type: v.literal("track"), id: v.id("tracks") }),
+        v.object({ type: v.literal("album"), id: v.id("albums") }),
+      ),
+    }),
+  ),
+  sessionId: v.id("togetherSessions"),
+});
+
+const playNowResult = v.object({
+  status: v.union(v.literal("playing"), v.literal("paused")),
+  positionAtAnchorMs: v.number(),
+  anchorServerTime: v.number(),
+  playbackRate: v.number(),
+  revision: v.number(),
+});
 
 const queueArgs = v.object({
   domain: v.union(v.literal("movies"), v.literal("music")),
@@ -217,7 +309,29 @@ const queueResult = v.object({
         ),
         v.null(),
       ),
+      track: v.union(
+        v.object({
+          id: v.id("tracks"),
+          title: v.string(),
+          artist: v.string(),
+          artistId: v.id("artists"),
+          album: v.string(),
+          albumId: v.id("albums"),
+          trackNumber: v.union(v.number(), v.null()),
+          discNumber: v.union(v.number(), v.null()),
+          durationMs: v.number(),
+          codec: v.string(),
+          lossless: v.boolean(),
+          bitrate: v.union(v.number(), v.null()),
+          sampleRate: v.union(v.number(), v.null()),
+          bitDepth: v.union(v.number(), v.null()),
+          artUrl: v.union(v.string(), v.null()),
+          liked: v.boolean(),
+        }),
+        v.null(),
+      ),
       addedBy: v.union(v.string(), v.null()),
+      addedByDisplayName: v.union(v.string(), v.null()),
       removable: v.boolean(),
     }),
   ),
@@ -236,6 +350,14 @@ const removeArgs = v.object({
 
 const removeResult = v.null();
 
+const reorderArgs = v.object({
+  domain: v.union(v.literal("movies"), v.literal("music")),
+  entryId: v.id("togetherEntries"),
+  afterEntryId: v.optional(v.id("togetherEntries")),
+});
+
+const reorderResult = v.null();
+
 /** The handlers `convex/core/together.ts` passes to `register`, one per `core.together` command. */
 export interface Handlers {
   /** `core.together.add` (mutation, signed-in): Queue something you can play in your group session, next or at the end. */
@@ -244,6 +366,13 @@ export interface Handlers {
     args: Infer<typeof addArgs>,
     caller: Caller,
   ) => Infer<typeof addResult> | Promise<Infer<typeof addResult>>;
+
+  /** `core.together.addItems` (mutation, signed-in): Queue items at the end of the group session --session-id names, in order (500 at most), as many as one call decides and leaving out any you can't play; send the items after the first taken ones again. */
+  readonly addItems: (
+    ctx: Omit<MutationCtx, "auth">,
+    args: Infer<typeof addItemsArgs>,
+    caller: Caller,
+  ) => Infer<typeof addItemsResult> | Promise<Infer<typeof addItemsResult>>;
 
   /** `core.together.admit` (mutation, signed-in): Let someone waiting to join your group session in, as its host. */
   readonly admit: (
@@ -280,6 +409,13 @@ export interface Handlers {
     caller: Caller,
   ) => Infer<typeof createResult> | Promise<Infer<typeof createResult>>;
 
+  /** `core.together.ended` (mutation, signed-in): Tell your group session that what it plays finished on your player, as its host: once its clock agrees, it moves on to what is queued then, or pauses back at the start with nothing queued. */
+  readonly ended: (
+    ctx: Omit<MutationCtx, "auth">,
+    args: Infer<typeof endedArgs>,
+    caller: Caller,
+  ) => Infer<typeof endedResult> | Promise<Infer<typeof endedResult>>;
+
   /** `core.together.get` (query, signed-in): Show your group session in a domain: its clock, item, members, settings, link, and what you may do. */
   readonly get: (
     ctx: Omit<QueryCtx, "auth">,
@@ -308,6 +444,13 @@ export interface Handlers {
     caller: Caller,
   ) => Infer<typeof leaveResult> | Promise<Infer<typeof leaveResult>>;
 
+  /** `core.together.playNow` (mutation, signed-in): Play something you can play now in the group session --session-id names, from its start, playing, for everyone. */
+  readonly playNow: (
+    ctx: Omit<MutationCtx, "auth">,
+    args: Infer<typeof playNowArgs>,
+    caller: Caller,
+  ) => Infer<typeof playNowResult> | Promise<Infer<typeof playNowResult>>;
+
   /** `core.together.queue` (query, signed-in): List what plays next in your group session in a domain. */
   readonly queue: (
     ctx: Omit<QueryCtx, "auth">,
@@ -321,6 +464,13 @@ export interface Handlers {
     args: Infer<typeof removeArgs>,
     caller: Caller,
   ) => Infer<typeof removeResult> | Promise<Infer<typeof removeResult>>;
+
+  /** `core.together.reorder` (mutation, signed-in): Move an entry of your group session's queue to just after another (--after-entry-id), or to the front when none is given: any as its host, your own as a guest who may add. */
+  readonly reorder: (
+    ctx: Omit<MutationCtx, "auth">,
+    args: Infer<typeof reorderArgs>,
+    caller: Caller,
+  ) => Infer<typeof reorderResult> | Promise<Infer<typeof reorderResult>>;
 }
 
 /** The `api` reference of each `core.together` command; `commands/refs.ts` checks them. */
@@ -330,6 +480,12 @@ export interface Refs {
     "public",
     Infer<typeof addArgs>,
     Infer<typeof addResult>
+  >;
+  readonly addItems: FunctionReference<
+    "mutation",
+    "public",
+    Infer<typeof addItemsArgs>,
+    Infer<typeof addItemsResult>
   >;
   readonly admit: FunctionReference<
     "mutation",
@@ -361,6 +517,12 @@ export interface Refs {
     Infer<typeof createArgs>,
     Infer<typeof createResult>
   >;
+  readonly ended: FunctionReference<
+    "mutation",
+    "public",
+    Infer<typeof endedArgs>,
+    Infer<typeof endedResult>
+  >;
   readonly get: FunctionReference<
     "query",
     "public",
@@ -385,6 +547,12 @@ export interface Refs {
     Infer<typeof leaveArgs>,
     Infer<typeof leaveResult>
   >;
+  readonly playNow: FunctionReference<
+    "mutation",
+    "public",
+    Infer<typeof playNowArgs>,
+    Infer<typeof playNowResult>
+  >;
   readonly queue: FunctionReference<
     "query",
     "public",
@@ -397,6 +565,12 @@ export interface Refs {
     Infer<typeof removeArgs>,
     Infer<typeof removeResult>
   >;
+  readonly reorder: FunctionReference<
+    "mutation",
+    "public",
+    Infer<typeof reorderArgs>,
+    Infer<typeof reorderResult>
+  >;
 }
 
 /** Registers the `core.together` commands as public Convex functions with their declared arguments and result. */
@@ -405,6 +579,12 @@ export const register = (handlers: Handlers) => ({
     args: addArgs,
     returns: addResult,
     handler: async (ctx, args) => handlers.add(ctx, args, await requireCaller(ctx, "signed-in")),
+  }),
+  addItems: mutation({
+    args: addItemsArgs,
+    returns: addItemsResult,
+    handler: async (ctx, args) =>
+      handlers.addItems(ctx, args, await requireCaller(ctx, "signed-in")),
   }),
   admit: mutation({
     args: admitArgs,
@@ -435,6 +615,11 @@ export const register = (handlers: Handlers) => ({
     handler: async (ctx, args) =>
       handlers.create(ctx, args, refuseKeys(await requireActionCaller(ctx, "signed-in"))),
   }),
+  ended: mutation({
+    args: endedArgs,
+    returns: endedResult,
+    handler: async (ctx, args) => handlers.ended(ctx, args, await requireCaller(ctx, "signed-in")),
+  }),
   get: query({
     args: getArgs,
     returns: getResult,
@@ -456,6 +641,12 @@ export const register = (handlers: Handlers) => ({
     returns: leaveResult,
     handler: async (ctx, args) => handlers.leave(ctx, args, await requireCaller(ctx, "signed-in")),
   }),
+  playNow: mutation({
+    args: playNowArgs,
+    returns: playNowResult,
+    handler: async (ctx, args) =>
+      handlers.playNow(ctx, args, await requireCaller(ctx, "signed-in")),
+  }),
   queue: query({
     args: queueArgs,
     returns: queueResult,
@@ -465,5 +656,11 @@ export const register = (handlers: Handlers) => ({
     args: removeArgs,
     returns: removeResult,
     handler: async (ctx, args) => handlers.remove(ctx, args, await requireCaller(ctx, "signed-in")),
+  }),
+  reorder: mutation({
+    args: reorderArgs,
+    returns: reorderResult,
+    handler: async (ctx, args) =>
+      handlers.reorder(ctx, args, await requireCaller(ctx, "signed-in")),
   }),
 });

@@ -153,6 +153,9 @@ export const openExpoOutput = (url: string, lockScreen: LockScreenPlayers): Audi
     setVolume: (volume) => {
       player.volume = volume;
     },
+    setRate: (rate) => {
+      player.setPlaybackRate(rate, "high");
+    },
     showOnLockScreen: (info, live) => {
       if (info === null) {
         player.setActiveForLockScreen(false);

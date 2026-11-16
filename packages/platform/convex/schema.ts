@@ -13,6 +13,7 @@ import { musicTables } from "./music/schema";
 import {
   beatDocument,
   entryDocument,
+  factsDocument,
   memberDocument,
   sessionDocument,
 } from "./core/together/model";
@@ -544,6 +545,9 @@ export default defineSchema({
    * `core/together/` is its only writer.
    */
   togetherSessions: defineTable(sessionDocument),
+
+  /** A session's cold facts, one row each, beside it (`factsDocument`). */
+  togetherFacts: defineTable(factsDocument).index("by_session", ["sessionId"]),
 
   togetherMembers: defineTable(memberDocument)
     .index("by_user_domain", ["userId", "domain"])

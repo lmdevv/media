@@ -37,7 +37,7 @@ function FramedTabs() {
 function Tabs({ framed }: { readonly framed: boolean }) {
   const activateSearch = useActivateSearch();
   const accent = useThemeColor("--color-accent");
-  const { nowPlaying } = useNowPlaying();
+  const { nowPlaying, hidden } = useNowPlaying();
 
   return (
     <NativeTabs
@@ -46,7 +46,7 @@ function Tabs({ framed }: { readonly framed: boolean }) {
       tintColor={accent}
       unstable_nativeProps={PROMINENT_SEARCH}
     >
-      {framed || nowPlaying === null ? null : (
+      {framed || (nowPlaying === null && !hidden) ? null : (
         <NativeTabs.BottomAccessory>
           <MiniPlayer />
         </NativeTabs.BottomAccessory>

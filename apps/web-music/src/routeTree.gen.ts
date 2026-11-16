@@ -6,6 +6,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppSplatRouteImport } from './routes/_app/$'
+import { Route as AppJamRouteImport } from './routes/_app/jam'
 import { Route as AppLibraryRouteImport } from './routes/_app/library'
 import { Route as AppLikedRouteImport } from './routes/_app/liked'
 import { Route as AppSearchRouteImport } from './routes/_app/search'
@@ -33,6 +34,11 @@ const AppIndexRoute = AppIndexRouteImport.update({
 const AppSplatRoute = AppSplatRouteImport.update({
   id: '/$',
   path: '/$',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppJamRoute = AppJamRouteImport.update({
+  id: '/jam',
+  path: '/jam',
   getParentRoute: () => AppRoute,
 } as any)
 const AppLibraryRoute = AppLibraryRouteImport.update({
@@ -109,6 +115,7 @@ const AppSettingsPlaybackRoute = AppSettingsPlaybackRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
   '/$': typeof AppSplatRoute
+  '/jam': typeof AppJamRoute
   '/library': typeof AppLibraryRoute
   '/liked': typeof AppLikedRoute
   '/search': typeof AppSearchRoute
@@ -126,6 +133,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/$': typeof AppSplatRoute
+  '/jam': typeof AppJamRoute
   '/library': typeof AppLibraryRoute
   '/liked': typeof AppLikedRoute
   '/search': typeof AppSearchRoute
@@ -145,6 +153,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_app': typeof AppRouteWithChildren
   '/_app/$': typeof AppSplatRoute
+  '/_app/jam': typeof AppJamRoute
   '/_app/library': typeof AppLibraryRoute
   '/_app/liked': typeof AppLikedRoute
   '/_app/search': typeof AppSearchRoute
@@ -166,6 +175,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/$'
+    | '/jam'
     | '/library'
     | '/liked'
     | '/search'
@@ -183,6 +193,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/$'
+    | '/jam'
     | '/library'
     | '/liked'
     | '/search'
@@ -201,6 +212,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/_app'
     | '/_app/$'
+    | '/_app/jam'
     | '/_app/library'
     | '/_app/liked'
     | '/_app/search'
@@ -243,6 +255,13 @@ declare module '@tanstack/react-router' {
       path: '/$'
       fullPath: '/$'
       preLoaderRoute: typeof AppSplatRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/jam': {
+      id: '/_app/jam'
+      path: '/jam'
+      fullPath: '/jam'
+      preLoaderRoute: typeof AppJamRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/library': {
@@ -364,6 +383,7 @@ const AppSettingsRouteWithChildren = AppSettingsRoute._addFileChildren(
 
 interface AppRouteChildren {
   AppSplatRoute: typeof AppSplatRoute
+  AppJamRoute: typeof AppJamRoute
   AppLibraryRoute: typeof AppLibraryRoute
   AppLikedRoute: typeof AppLikedRoute
   AppSearchRoute: typeof AppSearchRoute
@@ -380,6 +400,7 @@ interface AppRouteChildren {
 
 const AppRouteChildren: AppRouteChildren = {
   AppSplatRoute: AppSplatRoute,
+  AppJamRoute: AppJamRoute,
   AppLibraryRoute: AppLibraryRoute,
   AppLikedRoute: AppLikedRoute,
   AppSearchRoute: AppSearchRoute,

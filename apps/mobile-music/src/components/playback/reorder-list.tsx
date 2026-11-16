@@ -157,7 +157,7 @@ export function QueueLine({
           {item.artist}
         </Text>
       </View>
-      {timed ? (
+      {timed && item.trackId !== null ? (
         <Text variant="mono" tone="muted" className="w-row shrink-0 text-right">
           {clock(item.durationMs)}
         </Text>
@@ -202,7 +202,7 @@ function QueueRow({
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`${item.title}, ${item.artist}`}
-          accessibilityHint="Plays this song"
+          accessibilityHint={item.trackId === null ? undefined : "Plays this song"}
           accessibilityActions={[{ name: "remove", label: "Remove" }]}
           onAccessibilityAction={remove}
           onPress={() => {

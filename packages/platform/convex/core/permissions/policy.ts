@@ -842,7 +842,7 @@ export interface TogetherResource {
     readonly live: boolean;
     readonly place: TogetherPlace;
     readonly settings: Settings;
-    /** The principal queued the entry a `remove` names. */
+    /** The principal queued the entry a `remove` or a `reorder` names. */
     readonly addedIt: boolean;
     /** The principal is a guest whose share link names this session (ADR 0007). */
     readonly invited: boolean;
@@ -852,8 +852,9 @@ export interface TogetherResource {
 /**
  * What can be done to a group session. `join` enters it and `ask` waits for its host. `see` reads
  * one's own place in it and keeps one present, pending included; `view` reads its queue. `remove`
- * takes an entry out of its queue. `admit` lets a waiting person in, and `manage` changes its
- * settings and removes people.
+ * takes an entry out of its queue and `reorder` moves one within it. `advance` moves it on at the
+ * end of what it plays, as its host's player says that ended. `admit` lets a waiting person in,
+ * and `manage` changes its settings and removes people.
  */
 export const togetherActions = [
   "start",
@@ -865,6 +866,8 @@ export const togetherActions = [
   "control",
   "add",
   "remove",
+  "reorder",
+  "advance",
   "admit",
   "manage",
 ] as const;
@@ -939,6 +942,15 @@ const LIVE: Omit<InsideRule, "who" | "guests"> = {
 
 const CONTROL: InsideRule = { ...LIVE, who: "joined", guests: "control" };
 
+/** Taking out or moving a queued entry: the host any, a guest who may add only their own. */
+const OWN_ENTRY: InsideRule = {
+  ...LIVE,
+  who: "joined",
+  guests: "add",
+  own: true,
+  platformGuests: false,
+};
+
 const togetherRules: TogetherRules = {
   start: { from: "new" },
   join: { from: "outside", under: "open" },
@@ -948,7 +960,13 @@ const togetherRules: TogetherRules = {
   leave: { ...MEMBER, orAccount: true },
   control: CONTROL,
   add: { ...LIVE, who: "joined", guests: "add", platformGuests: false },
-  remove: { ...LIVE, who: "joined", guests: "add", own: true, platformGuests: false },
+  remove: OWN_ENTRY,
+  reorder: OWN_ENTRY,
+  /**
+   * Only the host's player moves a session on at an item's end, as old music's jams moved on at the
+   * end of the host's song: a guest's player, whatever the host allows, never does (ADR 0017).
+   */
+  advance: { ...LIVE, who: "host", guests: "nothing" },
   /** A locked session takes no new members, approved or not. */
   admit: { ...LIVE, who: "host", guests: "nothing", locked: false },
   manage: { ...LIVE, who: "host", guests: "nothing" },

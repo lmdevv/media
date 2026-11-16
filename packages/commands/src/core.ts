@@ -12,6 +12,7 @@ import {
 } from "./access.ts";
 import { action, mutation, query } from "./command.ts";
 import type { Command } from "./command.ts";
+import { track as musicTrack } from "./music.ts";
 import { assignableRoles, contentDomains, credentialScopes, roles } from "./scopes.ts";
 import { downloadQuality, settingFields } from "./settings.ts";
 
@@ -191,6 +192,15 @@ const togetherClock = v.object({
 
 const togetherSettings = { join: joinSetting, control: v.boolean(), add: v.boolean() };
 
+/** The name a person goes by in the session's screens, or null to show their username. */
+const togetherDisplayName = v.union(v.string(), v.null());
+
+/**
+ * The session a write was made for: the write then applies only while the caller is still in it,
+ * and fails `conflict` once they left it, or it ended and they started or joined another.
+ */
+const togetherSessionFence = v.optional(v.id("togetherSessions"));
+
 /** An item as the caller sees it: null when they may not play it, such as a kid and an R movie. */
 const shownItem = v.union(domainItem, v.null());
 
@@ -198,13 +208,19 @@ const shownItem = v.union(domainItem, v.null());
  * One move of the clock. A seek and a skip carry the revision the caller saw. A play or a pause may
  * carry one too, as a client's own moves do, such as a stalled player's hold and its release: it
  * then applies only while the clock is still at that revision, and fails `conflict` otherwise.
+ * A skip plays the first queued entry, or `entryId` when it names one, and takes it out of the
+ * queue; the entries before it stay.
  */
 const controlOp = v.union(
   v.object({ kind: v.literal("play"), revision: v.optional(v.number()) }),
   v.object({ kind: v.literal("pause"), revision: v.optional(v.number()) }),
   v.object({ kind: v.literal("rate"), playbackRate: v.number() }),
   v.object({ kind: v.literal("seek"), positionMs: v.number(), revision: v.number() }),
-  v.object({ kind: v.literal("next"), revision: v.number() }),
+  v.object({
+    kind: v.literal("next"),
+    revision: v.number(),
+    entryId: v.optional(v.id("togetherEntries")),
+  }),
 );
 
 /** What a share link names (ADR 0007): an item its maker can play, or a group session they host. */
@@ -1102,6 +1118,7 @@ export const core = [
         state: v.literal("pending"),
         sessionId: v.id("togetherSessions"),
         host: v.string(),
+        hostDisplayName: togetherDisplayName,
       }),
       v.object({
         state: v.literal("ended"),
@@ -1112,16 +1129,30 @@ export const core = [
         state: v.literal("joined"),
         sessionId: v.id("togetherSessions"),
         host: v.string(),
+        hostDisplayName: togetherDisplayName,
         role: togetherRole,
         link: v.string(),
         settings: v.object(togetherSettings),
         may: v.object({ control: v.boolean(), add: v.boolean(), manage: v.boolean() }),
         clock: togetherClock,
         item: shownItem,
+        /**
+         * The queue entry the playing item came from, or null for the item the session started on:
+         * it tells two plays of one song apart, so a player that moved on to the queued entry by
+         * itself knows the session moved there too.
+         */
+        entryId: v.union(v.id("togetherEntries"), v.null()),
+        /**
+         * The length of what plays, in milliseconds, when the core knows one, a music song's, even
+         * when `item` is hidden from you, as old music's jams kept a withheld song's length: a host's
+         * player moves the session on at its end without playing it. Null otherwise.
+         */
+        lengthMs: v.union(v.number(), v.null()),
         members: v.array(
           v.object({
             userId: v.id("users"),
             username: v.string(),
+            displayName: togetherDisplayName,
             role: togetherRole,
             present: v.boolean(),
             /** A guest a share link let in, named by what they typed, not someone in the household. */
@@ -1130,7 +1161,14 @@ export const core = [
         ),
         /** Who waits to be let in; only the host sees them. */
         pending: v.union(
-          v.array(v.object({ userId: v.id("users"), username: v.string(), present: v.boolean() })),
+          v.array(
+            v.object({
+              userId: v.id("users"),
+              username: v.string(),
+              displayName: togetherDisplayName,
+              present: v.boolean(),
+            }),
+          ),
           v.null(),
         ),
       }),
@@ -1146,7 +1184,36 @@ export const core = [
     summary:
       "Play, pause, seek, change the speed of, or skip to the next item in your group session",
     scope: "signed-in",
-    args: { domain: contentDomain, op: controlOp },
+    args: { domain: contentDomain, op: controlOp, sessionId: togetherSessionFence },
+    result: togetherClock,
+  }),
+  mutation("core.together.ended", {
+    summary:
+      "Tell your group session that what it plays finished on your player, as its host: once its clock agrees, it moves on to what is queued then, or pauses back at the start with nothing queued",
+    scope: "signed-in",
+    args: {
+      domain: contentDomain,
+      /** The session the host's player played; it fails `conflict` once they left it. */
+      sessionId: v.id("togetherSessions"),
+      /**
+       * The queue entry that finished, or null for the item the session started on, as `get`
+       * answers it: it fails `conflict` once the session plays another.
+       */
+      entryId: v.union(v.id("togetherEntries"), v.null()),
+      /** The clock the host's player played it under: it fails `conflict` once the clock moved. */
+      revision: v.number(),
+    },
+    result: togetherClock,
+  }),
+  mutation("core.together.playNow", {
+    summary:
+      "Play something you can play now in the group session --session-id names, from its start, playing, for everyone",
+    scope: "signed-in",
+    args: {
+      item: domainItem,
+      /** The session the call was made for, required: it fails `conflict` once you left it. */
+      sessionId: v.id("togetherSessions"),
+    },
     result: togetherClock,
   }),
   query("core.together.queue", {
@@ -1157,7 +1224,13 @@ export const core = [
       v.object({
         entryId: v.id("togetherEntries"),
         item: shownItem,
+        /**
+         * The song's details when the entry is a music song you may play, as `music.tracks.get`
+         * answers them; null for anything else, and for an entry you may not play.
+         */
+        track: v.union(musicTrack, v.null()),
         addedBy: v.union(v.string(), v.null()),
+        addedByDisplayName: togetherDisplayName,
         removable: v.boolean(),
       }),
     ),
@@ -1174,14 +1247,38 @@ export const core = [
        * takes out any copy of `item` already queued, so two screens queue it once.
        */
       revision: v.optional(v.number()),
+      sessionId: togetherSessionFence,
     },
     result: v.object({ entryId: v.id("togetherEntries") }),
+  }),
+  mutation("core.together.addItems", {
+    summary:
+      "Queue items at the end of the group session --session-id names, in order (500 at most), as many as one call decides and leaving out any you can't play; send the items after the first taken ones again",
+    scope: "signed-in",
+    args: {
+      domain: contentDomain,
+      /** The session the call was made for, required: it fails `conflict` once you left it. */
+      sessionId: v.id("togetherSessions"),
+      items: v.array(domainItem),
+    },
+    result: v.object({ taken: v.number() }),
   }),
   mutation("core.together.remove", {
     summary:
       "Take an entry out of your group session's queue: any as its host, your own as a guest",
     scope: "signed-in",
     args: { domain: contentDomain, entryId: v.id("togetherEntries") },
+    result: v.null(),
+  }),
+  mutation("core.together.reorder", {
+    summary:
+      "Move an entry of your group session's queue to just after another (--after-entry-id), or to the front when none is given: any as its host, your own as a guest who may add",
+    scope: "signed-in",
+    args: {
+      domain: contentDomain,
+      entryId: v.id("togetherEntries"),
+      afterEntryId: v.optional(v.id("togetherEntries")),
+    },
     result: v.null(),
   }),
   mutation("core.together.admit", {

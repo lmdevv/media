@@ -57,6 +57,11 @@ export interface AudioOutput {
   readonly seek: (positionMs: number) => Promise<void>;
   readonly setVolume: (volume: number) => void;
   /**
+   * Plays at `rate` times normal speed, keeping the pitch; a paused player starts at it when it
+   * plays.
+   */
+  readonly setRate: (rate: number) => void;
+  /**
    * Puts this player on the lock screen with `info`, or takes it off with null. `live` hides the
    * scrubber of a stream whose length is unknown.
    */
@@ -216,6 +221,7 @@ export class NativeEngine implements PlayerEngine {
   readonly #listeners = new Set<(event: EngineEvent) => void>();
   #current = 0;
   #volume = 1;
+  #rate = 1;
   #lockScreen: LockScreenInfo | null = null;
   #generation = 0;
 
@@ -397,6 +403,12 @@ export class NativeEngine implements PlayerEngine {
 
     for (const slot of this.#slots) slot.stream?.output.setVolume(this.#volume);
   }
+  /** Plays every stream, the preloaded one included, at `rate` times normal speed from now on. */
+  setPlaybackRate(rate: number): void {
+    this.#rate = rate;
+
+    for (const slot of this.#slots) slot.stream?.output.setRate(rate);
+  }
 
   unload(): void {
     this.#generation += 1;
@@ -465,6 +477,7 @@ export class NativeEngine implements PlayerEngine {
     this.#releaseStream(slot);
     const output = this.#open(url);
     output.setVolume(this.#volume);
+    output.setRate(this.#rate);
 
     const stream: Stream = {
       output,

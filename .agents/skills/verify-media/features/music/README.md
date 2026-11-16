@@ -66,3 +66,5 @@ commands, and observable proof.
   the web and the CLI.
 - [Connect](./connect.md) covers "Play on": moving playback between a person's devices, pausing,
   seeking, and loading an album on another one, and the remote control's band.
+- [Jams](./jams.md) covers starting a Jam, joining it by its link on the web and in the iOS app,
+  approval, locked Jams, adding, reordering, gapless song changes in step, and hidden songs.
