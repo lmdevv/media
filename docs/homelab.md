@@ -1,9 +1,10 @@
 # Homelab install
 
 [media] on one box at home, with Docker Compose or NixOS, in about ten minutes. It runs the
-core's self-hosted Convex backend and the media service, which also serves the movies and music
-clients, behind Caddy on one port (8080). The account client is at `/`, movies at `/movies`, music
-at `/music`, and the Convex backend at `/convex`. Browsers and the CLI talk only to that port.
+core's self-hosted Convex backend and the media service, which also serves the movies client,
+behind Caddy on one port (8080), which also serves the account and music clients. The account
+client is at `/`, movies at `/movies`, music at `/music`, and the Convex backend at `/convex`.
+Browsers and the CLI talk only to that port.
 `docs/operations.md` explains what happens at startup, backups and restores, and telemetry in more
 depth.
 
@@ -48,7 +49,8 @@ Open `MEDIA_BASE_URL`, create the owner account (the first account is the owner)
 libraries under Admin, Libraries. Each library has one kind: with `Movies/` and `Music/` in
 `MEDIA_LIBRARY`, add `/media/library/Movies` of kind Movies and `/media/library/Music` of kind
 Music. More folders: add one read-only line per folder under the `media`
-service's `volumes:` (`- /mnt/nas/shows:/media/shows:ro`) and add `/media/shows` as a library.
+service's `volumes:` (`- /mnt/nas/shows:/media/shows:ro`) and add `/media/shows` as a library
+of its kind.
 People sign in once at `MEDIA_BASE_URL`, and `MEDIA_BASE_URL/movies` and `MEDIA_BASE_URL/music`
 open with that sign-in.
 
@@ -73,7 +75,7 @@ inputs.movies.nixosModules.default
 {
   services.media = {
     enable = true;
-    libraryDirs = [ "/srv/media/movies" "/srv/media/shows" ];
+    libraryDirs = [ "/srv/media/movies" "/srv/media/shows" "/srv/media/music" ];
     listenAddress = "100.64.0.1";                     # the host's Tailscale address
     publicUrl = "http://nas.tailnet.ts.net:8080";
     hardwareAcceleration = "qsv";                     # see GPU below; "auto" by default
@@ -241,7 +243,9 @@ cd deploy/compose && docker compose pull && docker compose up -d
 
 For the edge, `git pull` on `main` with `MEDIA_IMAGE=ghcr.io/lmdevv/media:main`.
 
-A [media] 0.3.0 install upgrades to 0.4.0 this way. [media] is a fresh install, not an upgrade of
+A [media] 0.3.0 install upgrades to 0.4.0 this way. Upgrade it to 0.4.0 before any later
+release: 0.4.0 migrates its Connect rows, and a later release will refuse rows from before that
+migration (ADR 0018). [media] is a fresh install, not an upgrade of
 a [movies] v0.2 or [music] v0.3 install: nothing moves over from either, so set it up as above
 beside the old one's data (`docs/operations.md`, "Upgrading").
 
