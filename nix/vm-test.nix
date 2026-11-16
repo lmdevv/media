@@ -190,21 +190,27 @@ testers.runNixOSTest {
         assert count == "1", count
 
     with subtest("an install from 0.4.0 keeps its data under the new service user"):
-        # 0.3.0 and 0.4.0 ran the service as `movies` in these same folders. NixOS drops that user
-        # once nothing declares it, so its files keep a uid no user has; 9999 stands in for it.
+        # 0.3.0 and 0.4.0 ran the service as `movies` in these same folders and kept no record of
+        # whom they belong to. NixOS drops that user once nothing declares it, so its files keep a
+        # uid no user has; 9999 stands in for it. tmpfiles re-owns the top folders, as a switch
+        # does before the service starts.
+        folders = "/var/lib/media/movies/media /var/lib/media/core/backups /var/cache/media/transcode"
         key = machine.succeed("cat /var/lib/media/core/secrets/media-service-key")
         machine.succeed("systemctl stop media-server.service")
+        machine.succeed("rm /var/lib/media/core/service-owner")
         machine.succeed("touch /var/lib/media/movies/media/from-0.4.0")
-        machine.succeed("chown -R 9999:9999 /var/lib/media/movies/media /var/lib/media/core/backups")
+        machine.succeed("mkdir -p /var/cache/media/transcode/downloads")
+        machine.succeed(f"chown -R 9999:9999 {folders}")
+        machine.succeed("systemd-tmpfiles --create")
         machine.succeed("systemctl start media-server.service")
         machine.wait_for_unit("media-server.service")
         wait_connected()
         machine.succeed("test -e /var/lib/media/movies/media/from-0.4.0")
         machine.succeed("ls /var/lib/media/core/backups | grep -q '^core-manual-.*\\.zip$'")
-        owners = machine.succeed(
-            "find /var/lib/media/movies/media /var/lib/media/core/backups -printf '%u:%g\\n' | sort -u"
-        ).split()
+        owners = machine.succeed(f"find {folders} -printf '%u:%g\\n' | sort -u").split()
         assert owners == ["media-server:media-server"], owners
+        assert machine.succeed("cat /var/lib/media/core/service-owner").strip() == "media-server:media-server"
+        assert machine.succeed("stat -c '%U %a' /var/lib/media/core/service-owner").strip() == "root 600"
         assert machine.succeed("cat /var/lib/media/core/secrets/media-service-key") == key
   '';
 }

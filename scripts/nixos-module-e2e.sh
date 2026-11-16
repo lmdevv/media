@@ -28,11 +28,11 @@ cleanup() {
     sudo rm -f "/run/systemd/system/$unit.service" "/run/systemd/system/$proxy_unit.service"
     sudo systemctl daemon-reload
     docker rm -f "${containers[@]}" >/dev/null 2>&1 || true
-    sudo rm -rf "$base"
+    # The setup writes these two web clients outside the unit's runtime folder.
+    sudo rm -rf "$base" /run/media-account /run/media-music
   fi
   exit $status
 }
-trap cleanup EXIT
 
 for container in "${containers[@]}"; do
   if docker inspect "$container" >/dev/null 2>&1; then
@@ -40,10 +40,14 @@ for container in "${containers[@]}"; do
     exit 1
   fi
 done
-if [[ -e /run/media-server ]]; then
-  echo "/run/media-server exists, so a real install runs here; run this on another host" >&2
+# /run/media-account is every release's since 0.3.0; /run/media-server is the service's since 0.4.1.
+if [[ -e /run/media-server || -e /run/media-account ]]; then
+  echo "/run/media-server or /run/media-account exists, so a real install runs here; run this on another host" >&2
   exit 1
 fi
+# Only past the checks above: from here, every container and folder the cleanup removes is this
+# run's own.
+trap cleanup EXIT
 
 sudo rm -rf "$base"
 sudo install -d -m 755 "$base" "$base/library"

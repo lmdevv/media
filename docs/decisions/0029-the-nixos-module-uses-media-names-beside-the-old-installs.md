@@ -30,22 +30,26 @@ the other's `/run/movies`, and the two would have shared one transcode folder.
   files (the owner's NAS does).
 - An upgrade from 0.3.0 or 0.4.0 keeps the state where it is. `dataDir` (`/var/lib/media`) has had
   a media name since 0.3.0 and collides with nothing, and moving it would risk the core's database
-  for no gain. Each start, as root, hands whatever in the service's own folders (`dataDir/movies/media`
-  and `backupDir`) another user owns to the service user. That covers the files the old `movies`
-  user left, which keep its uid once NixOS drops the user. The transcode folder is disposable, so
-  it starts empty at the new path, and the module leaves `/var/cache/movies/transcode` alone,
-  since [movies] v0.2 uses that path too.
+  for no gain. The first start as a new owner, as root and before the service runs, hands the
+  service's own folders (`dataDir/movies/media`, `backupDir`, and `transcodeDir`) to the service
+  user with `chown -R -P`, once: a root-only file, `dataDir/core/service-owner`, records whom they
+  were last given to, since tmpfiles re-owns their top folders before any start. That covers the
+  files the old `movies` user left, which keep its uid once NixOS drops the user, and a later change
+  of `user` or `group`. The default transcode folder starts empty at its new path, and the module
+  leaves `/var/cache/movies/transcode` alone, since [movies] v0.2 uses that path too.
 - An upgrade that overrides `systemd.services.movies` or `users.users.movies`, such as
   `users.users.movies.extraGroups` for library access, moves the override to `media-server`. The
   release notes and `docs/operations.md` ("Upgrading") say so.
 
 ## Consequences
 
-- `nix/vm-test.nix` checks the new names and the upgrade: it hands the service's folders to a uid
-  no user has, as 0.4.0's `movies` files are after the upgrade, and checks that the next start
-  hands them back with nothing lost.
-- `scripts/nixos-module-e2e.sh` refuses a host where `/run/media-server` exists, where a real
-  install runs.
+- `nix/vm-test.nix` checks the new names and the upgrade: with no record of the owner, as 0.4.0
+  left it, it hands the service's folders to a uid no user has, as 0.4.0's `movies` files are after
+  the upgrade, and checks that the next start hands them back with nothing lost.
+- The flake's `module-names` check fails when the module claims a unit, user, group, container,
+  tmpfiles path, runtime folder, or data folder that [movies] v0.2's or old [music]'s module uses.
+- `scripts/nixos-module-e2e.sh` refuses a host where `/run/media-server` or `/run/media-account`
+  exists, where a real install runs, and only then sets up the cleanup that removes containers.
 - Proven in `p8-install`: a NixOS guest imports [movies] v0.2's module and this one together, and
   both start and serve on their own ports.
 - The image keeps its own paths inside the container (`/run/movies/media.env`, user `movies`);

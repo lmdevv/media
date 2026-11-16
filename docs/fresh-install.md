@@ -157,8 +157,8 @@ in
     dataDir = "/var/lib/media";                    # a new, empty folder
     transcodeDir = "/var/cache/media/transcode";   # not shared with another install
     internalPorts = {
-      coreConvex = 3210;                           # loopback; pick free ones
-      media = 4300;
+      coreConvex = 3240;                           # loopback; not 3210, [movies] v0.2's
+      media = 4310;
     };
     libraryDirs = [
       "/srv/media/movies"
@@ -171,7 +171,8 @@ in
 ```
 
 - **Ports.** `port` is the only one people use. The two `internalPorts` listen on loopback, and
-  must be free too (`ss -ltn`).
+  must be free too (`ss -ltn`). Their defaults, 3210 and 4300, are Convex's usual port, which
+  [movies] v0.2's backend also takes by default, so pick others beside it.
 - **Library access.** The `media-server` user must read every library folder. Files and folders
   that are world-readable need nothing more; otherwise add the group that can read them, as in
   `users.users.media-server.extraGroups = [ "media" ];`. The unit mounts each folder read-only.
@@ -182,9 +183,13 @@ in
 
 ### Switch and check
 
+The Convex container's unit is `docker-media-core-convex` with Docker and
+`podman-media-core-convex` with Podman, NixOS's default. The commands on this page use Docker's
+name; with Podman, use the other.
+
 ```sh
 sudo nixos-rebuild switch --flake .#<host>
-systemctl status media-server media-proxy docker-media-core-convex   # podman-… with Podman
+systemctl status media-server media-proxy docker-media-core-convex
 journalctl -u media-server -f
 curl -fsS http://localhost:8099/api/health
 ```

@@ -49,6 +49,12 @@ let
   secretsDir = "${coreDataDir}/secrets";
   moviesDataDir = "${cfg.dataDir}/movies";
   mediaDataDir = "${moviesDataDir}/media";
+  # The folders the media service writes, all its own.
+  serviceDirs = [
+    mediaDataDir
+    cfg.backupDir
+    cfg.transcodeDir
+  ];
 
   # The instance secret's file inside the Convex container, on its data volume, where
   # `convex-entry.sh` keeps it.
@@ -98,21 +104,21 @@ let
       owner=${lib.escapeShellArg "${cfg.user}:${cfg.group}"}
 
       # The service's folders, in case they were removed since boot (tmpfiles creates them). The
-      # core's backups are the service's: it takes the nightly ones and restores them. Whatever in
-      # them another user owns becomes the service user's, such as the files of an install from
-      # 0.3.0 or 0.4.0, which ran the service as `movies` in these same folders.
+      # core's backups are the service's: it takes the nightly ones and restores them.
       install -d -m 700 -o ${lib.escapeShellArg cfg.user} -g ${lib.escapeShellArg cfg.group} \
-        ${lib.escapeShellArgs [
-          mediaDataDir
-          cfg.backupDir
-          cfg.transcodeDir
-        ]}
-      find ${
-        lib.escapeShellArgs [
-          mediaDataDir
-          cfg.backupDir
-        ]
-      } \( \! -user ${lib.escapeShellArg cfg.user} -o \! -group ${lib.escapeShellArg cfg.group} \) \
+        ${lib.escapeShellArgs serviceDirs}
+      # An install from 0.3.0 or 0.4.0 ran the service as `movies` in these same folders, and a
+      # change of `user` or `group` leaves files to the old owner too. The first start as a new
+      # owner hands the folders over, once: a root-only file records whom they were last given to,
+      # since tmpfiles has already re-owned their top folders by then. -P never follows a symlink,
+      # and the service, stopped until this ends, is the only thing that runs as its own user.
+      owner_file=${lib.escapeShellArg "${coreDataDir}/service-owner"}
+      if [ "$(cat "$owner_file" 2>/dev/null)" != "$owner" ]; then
+        log "handing the service's folders to $owner"
+        chown -R -P "$owner" ${lib.escapeShellArgs serviceDirs}
+        printf '%s\n' "$owner" >"$owner_file"
+      fi
+      find ${lib.escapeShellArg cfg.backupDir} \( \! -user ${lib.escapeShellArg cfg.user} -o \! -group ${lib.escapeShellArg cfg.group} \) \
         -exec chown -h "$owner" {} +
       install -d -m 700 ${lib.escapeShellArg secretsDir}
 
@@ -222,8 +228,10 @@ in
       default = pkgs.callPackage ./package.nix { };
       defaultText = lib.literalExpression "pkgs.callPackage ./package.nix { }";
       description = ''
-        The [media] package: media service, web clients, and the core's Convex project. Set it to `pkgs.movies`
-        to use the flake's overlay (or your override of it).
+        The [media] package: media service, web clients, and the core's Convex project. Set it to
+        the flake's own build, `inputs.media.packages.''${system}.movies`, to use the nixpkgs it was
+        tested with. The flake's overlay names it `pkgs.movies`, as [movies] v0.2's overlay names
+        its own package, so on a host with both overlays name the flake's output instead.
       '';
     };
 

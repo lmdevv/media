@@ -138,6 +138,70 @@
             qsvDevice = "/dev/dri/renderD129";
             extraEnvironment.LIBVA_DRIVER_NAME = "iHD";
           };
+          # [movies] v0.2's and old [music]'s modules claim these names, and a host runs them beside
+          # this module until the cutover (ADR 0029), so the module must claim none of them.
+          module-names =
+            let
+              inherit (nixpkgs) lib;
+              inherit
+                (nixpkgs.lib.nixosSystem {
+                  inherit (pkgs.stdenv.hostPlatform) system;
+                  modules = [
+                    self.nixosModules.default
+                    {
+                      boot.isContainer = true;
+                      system.stateVersion = "26.05";
+                      services.media = {
+                        enable = true;
+                        libraryDirs = [ "/srv/media/movies" ];
+                      };
+                    }
+                  ];
+                })
+                config
+                ;
+              taken = {
+                names = [
+                  "movies"
+                  "music"
+                  "movies-convex"
+                  "music-update"
+                ];
+                paths = [
+                  "/run/movies"
+                  "/var/lib/movies"
+                  "/var/cache/movies"
+                  "/var/lib/music"
+                ];
+              };
+              words = value: lib.filter (word: word != "") (lib.splitString " " (toString value));
+              # A unit takes its service's name, or the container's with the backend in front.
+              unitName =
+                unit: lib.removePrefix "podman-" (lib.removePrefix "docker-" (lib.head (lib.splitString "." unit)));
+              names =
+                map unitName (builtins.attrNames config.systemd.units)
+                ++ builtins.attrNames config.users.users
+                ++ builtins.attrNames config.users.groups
+                ++ builtins.attrNames config.virtualisation.oci-containers.containers;
+              paths =
+                map (rule: lib.elemAt (words rule) 1) config.systemd.tmpfiles.rules
+                ++ map (folder: "/run/${folder}") (
+                  lib.concatMap (service: words (service.serviceConfig.RuntimeDirectory or "")) (
+                    builtins.attrValues config.systemd.services
+                  )
+                )
+                ++ [
+                  config.services.media.dataDir
+                  config.services.media.backupDir
+                  config.services.media.transcodeDir
+                ];
+              under = path: lib.any (prefix: path == prefix || lib.hasPrefix "${prefix}/" path) taken.paths;
+              clashes = lib.filter (name: lib.elem name taken.names) names ++ lib.filter under paths;
+            in
+            assert lib.assertMsg (
+              clashes == [ ]
+            ) "nixosModules.default claims names the old movies and music modules use: ${toString clashes}";
+            pkgs.writeText "media-module-names-check" (builtins.toJSON { inherit names paths; });
           module-vaapi = evaluate {
             hardwareAcceleration = "vaapi";
             vaapiDevice = "/dev/dri/renderD129";
