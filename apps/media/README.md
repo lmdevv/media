@@ -115,6 +115,16 @@ direct peer, or, from a loopback peer, the last `X-Forwarded-For` entry, which t
 sets to the client it resolved through `MEDIA_TRUSTED_PROXIES`. A loopback caller without the
 header, such as the container's health check, is not limited.
 
+## Stopping
+
+On SIGTERM or SIGINT the service stops taking connections, gives open responses 3 s to finish
+(`SHUTDOWN_GRACE` in `src/http/http-server.ts`), then ends them, stops every ffmpeg run, and
+exits 0. The whole stop must take at most 5 s (`STOP_DEADLINE` in `src/shutdown-deadline.ts`):
+a stop still running then is a bug, which the service logs as `Main.shutdown_overran` before it
+exits 1, and its tools die with it. That keeps `docker stop` well inside Docker's 10 s before it
+kills the container, and restarts and upgrades under s6 and systemd from waiting on one request
+that never ends.
+
 ## Convex integration
 
 `src/convex/` holds the Convex side; `src/main.ts` composes it.

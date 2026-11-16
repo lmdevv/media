@@ -218,8 +218,12 @@ describe.skipIf(core === undefined || !(await ffmpegAvailable()))(
       expect(original.headers.get("content-type")).toBe("audio/flac");
       expect((await original.arrayBuffer()).byteLength).toBeGreaterThan(0);
 
-      const head = await fetch(streamUrl(first.id, started.ticket, "&p=fmp4-aac"), {
-        method: "HEAD",
+      const head = await eventually("the transcode to finish", async () => {
+        const answer = await fetch(streamUrl(first.id, started.ticket, "&p=fmp4-aac"), {
+          method: "HEAD",
+        });
+
+        return answer.status === 503 ? Option.none() : Option.some(answer);
       });
 
       expect(head.status).toBe(200);

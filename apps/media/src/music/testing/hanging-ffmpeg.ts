@@ -5,9 +5,11 @@ import { isRunning } from "./recording-ffmpeg.ts";
 
 /**
  * Writes `dir/ffmpeg`: the real ffmpeg, except that a run whose arguments mention `hang` (its
- * source file's name) sleeps instead until it is killed. Every run first notes its process ID
- * under `dir/runs`. Resolves with the script's path, the number of runs started so far, and both
- * that number and how many of them still run, read from one listing so the two agree.
+ * source file's name) sleeps instead until it is killed, and one that mentions `slow` reads its
+ * source at the source's own pace (`-re`), as a long song transcodes on a busy machine. Every run
+ * first notes its process ID under `dir/runs`. Resolves with the script's path, the number of runs
+ * started so far, and both that number and how many of them still run, read from one listing so
+ * the two agree.
  */
 export const ffmpegHangingOnName = async (
   dir: string,
@@ -27,6 +29,7 @@ export const ffmpegHangingOnName = async (
       `: > '${runs}'/$$`,
       `case "$*" in`,
       `  *hang*) exec sleep 600 ;;`,
+      `  *slow*) exec ffmpeg -re "$@" ;;`,
       `esac`,
       `exec ffmpeg "$@"`,
       "",

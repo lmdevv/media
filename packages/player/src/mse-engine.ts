@@ -6,6 +6,7 @@ import type {
   EngineSource,
   PlayerEngine,
 } from "./engine";
+import { askExactTiming, ExactTiming } from "./exact-timing";
 import { codecMimeType, concatBytes, HeaderRead, readHeader } from "./fmp4";
 import type { AudioCodec, StreamHeader } from "./fmp4";
 import {
@@ -539,27 +540,11 @@ export class MseEngine implements PlayerEngine {
   }
 
   async #fetchExactTiming(url: string, signal: AbortSignal): Promise<StreamTiming> {
-    let response: Response;
+    const exact = await askExactTiming(url, signal);
 
-    try {
-      response = await fetch(url, { method: "HEAD", signal });
-    } catch (error) {
-      throw new EngineFailure("network", error instanceof Error ? error.message : String(error));
-    }
+    if (ExactTiming.$is("Failed")(exact)) throw new EngineFailure(exact.reason, exact.message);
 
-    if (response.status === TICKET_REFUSED) {
-      void response.body?.cancel().catch(() => undefined);
-
-      throw new EngineFailure("expired", "The stream's ticket has expired");
-    }
-
-    const timing = parseStreamTiming((name) => response.headers.get(name));
-
-    if (!response.ok || timing === null || timing.estimated) {
-      throw new EngineFailure("unsupported", `The finished stream answered ${response.status}`);
-    }
-
-    return timing;
+    return exact.timing;
   }
 
   #discard(session: Session, song: Song): void {

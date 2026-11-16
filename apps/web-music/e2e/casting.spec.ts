@@ -255,9 +255,12 @@ test("ending the cast brings the song back to the browser where the TV was", asy
 });
 
 test("a Jam plays here: starting one ends the cast, and Play on offers no Chromecast in it", async () => {
-  // Old music had no casting, so neither has a Jam (ADR 0018).
+  // Old music had no casting, so neither has a Jam (ADR 0018). An MP3, so its transcode is still
+  // running when the browser takes the song back mid-song.
+  await playSong(laptop, MP3_SONG);
   await castFake(laptop, "devicesAppear");
   await castToTv(laptop);
+  await advanceReceiver(laptop, 40);
   await playerOf(laptop).getByRole("button", { name: "Queue", exact: true }).click();
   await laptop
     .getByRole("complementary", { name: "Queue" })

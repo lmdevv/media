@@ -149,6 +149,10 @@ routes run on the server's Effect HTTP router beside movies' (D24).
   - `GET` or `HEAD /media/music/stream/<trackId>?ticket=…&p=<profile>`, plus `&start=<ms>` or
     `&finished=1`: a song's original, a fast-start AAC, or a fragmented FLAC or AAC transcode
     for the gapless player, with old music's statuses and `X-Music-*` timing headers.
+  - A `HEAD` of a transcode answers as `&finished=1` does (amended 2026-11-16): the finished
+    file's headers and exact timing, or `503` with `Retry-After` while the server prepares it.
+    It used to wait for the encoder, which on a long song outlasted the player's interest, and
+    the web player now asks again after `Retry-After` as the downloaders do.
   - `GET /music/art/<hash>?ticket=…`: an album's art, at the path the music commands already
     sign (`music/present.ts`). The image and the NixOS module route `/music/art/*` to the server.
 - **Tickets, not signed URLs.** Old music's media service checked an HMAC over the URL with
