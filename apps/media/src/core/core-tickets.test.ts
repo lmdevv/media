@@ -3,6 +3,7 @@ import {
   PlaybackTokenInvalid,
   StreamId,
 } from "@media/contracts/media-playback";
+import { isReceiverCredential } from "@media/contracts/cast";
 import { serverFunctions } from "@media/contracts/server-functions";
 import type { SessionStatus } from "@media/contracts/server-functions";
 import { artworkTicketId, loadTicketKeyRing } from "@media/contracts/ticket";
@@ -293,6 +294,118 @@ describe("CoreTickets", () => {
       yield* TestClock.setTime(2 * HOUR);
       assert.isTrue(Option.isSome(yield* Fiber.join(lapsed)));
     }).pipe(Effect.scoped),
+  );
+
+  it.effect(
+    "lends a receiver credential that holds no ticket and plays its cast's stream past the ticket's expiry",
+    () =>
+      Effect.gen(function* () {
+        yield* TestClock.setTime(HOUR);
+        const { tokens, owners } = yield* setUp(live());
+        const ticket = yield* issue("play", HOUR);
+        const credential = yield* tokens.lend(ticket);
+        const text = Redacted.value(credential);
+
+        assert.isTrue(isReceiverCredential(text));
+        assert.notInclude(text, Redacted.value(ticket));
+        assert.notInclude(text, "user1");
+
+        const started = yield* tokens.verify(ticket, PlaybackToken.PLAY);
+
+        yield* owners.opened(STREAM, started.sessionId);
+        // Past the ticket's hour and the 6 hours any personal ticket may start a stream for (D46).
+        yield* TestClock.setTime(7 * HOUR);
+
+        const playlist = yield* tokens.verify(credential, PlaybackToken.PLAY, STREAM);
+
+        const subtitles = yield* tokens.verify(
+          credential,
+          PlaybackToken.PLAY_OR_DOWNLOAD,
+          PlaybackToken.READ,
+        );
+
+        assert.strictEqual(playlist.sessionId, started.sessionId);
+        assert.strictEqual(subtitles.purpose, "play");
+        assert.strictEqual(String(playlist.fileId), "file1");
+      }).pipe(Effect.scoped),
+  );
+
+  it.effect(
+    "refuses a receiver credential that would start, download, or reach another stream",
+    () =>
+      Effect.gen(function* () {
+        yield* TestClock.setTime(HOUR);
+        const { tokens, owners } = yield* setUp(live());
+        const credential = yield* tokens.lend(yield* issue("play", HOUR));
+        const other = yield* tokens.verify(yield* issue("play", HOUR, "file2"), PlaybackToken.PLAY);
+
+        yield* owners.opened(STREAM, other.sessionId);
+
+        const start = yield* Effect.flip(tokens.verify(credential, PlaybackToken.PLAY));
+
+        const download = yield* Effect.flip(
+          tokens.verify(credential, PlaybackToken.DOWNLOAD, PlaybackToken.READ),
+        );
+
+        const foreign = yield* Effect.flip(tokens.verify(credential, PlaybackToken.PLAY, STREAM));
+        const lending = yield* Effect.flip(tokens.lend(credential));
+        const downloadTicket = yield* Effect.flip(tokens.lend(yield* issue("download", HOUR)));
+
+        for (const refused of [start, download, foreign]) {
+          assert.instanceOf(refused, PlaybackTokenInvalid);
+        }
+
+        assert.instanceOf(lending.error, PlaybackTokenInvalid);
+        assert.instanceOf(downloadTicket.error, PlaybackTokenInvalid);
+      }).pipe(Effect.scoped),
+  );
+
+  it.effect("ends a receiver credential with its session, and lending again replaces it", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(HOUR);
+      const { tokens, status } = yield* setUp(live());
+      const ticket = yield* issue("play", HOUR);
+      const first = yield* tokens.lend(ticket);
+      const second = yield* tokens.lend(ticket);
+
+      const replaced = yield* Effect.flip(
+        tokens.verify(first, PlaybackToken.PLAY, PlaybackToken.READ),
+      );
+
+      assert.instanceOf(replaced, PlaybackTokenInvalid);
+      yield* tokens.verify(second, PlaybackToken.PLAY, PlaybackToken.READ);
+
+      yield* SubscriptionRef.set(status, { state: "ended" });
+
+      const signedOut = yield* Effect.flip(
+        tokens.verify(second, PlaybackToken.PLAY, PlaybackToken.READ),
+      );
+
+      assert.instanceOf(signedOut, PlaybackSessionEnded);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect(
+    "forgets a receiver credential once its playback went idle after the ticket expired",
+    () =>
+      Effect.gen(function* () {
+        yield* TestClock.setTime(HOUR);
+        const { tokens } = yield* setUp(live());
+        const credential = yield* tokens.lend(yield* issue("play", HOUR));
+
+        yield* TestClock.setTime(2 * HOUR - 10_000);
+        yield* tokens.verify(credential, PlaybackToken.PLAY, PlaybackToken.READ);
+        yield* TestClock.setTime(2 * HOUR + 10_000);
+        yield* tokens.verify(credential, PlaybackToken.PLAY, PlaybackToken.READ);
+        // The sweep runs every minute; the playback is idle for more than 30 seconds by then.
+        yield* TestClock.adjust("2 minutes");
+
+        const forgotten = yield* Effect.flip(
+          tokens.verify(credential, PlaybackToken.PLAY, PlaybackToken.READ),
+        );
+
+        assert.instanceOf(forgotten, PlaybackTokenInvalid);
+      }).pipe(Effect.scoped),
   );
 
   it.effect("admits shareable artwork tickets for the key's ticket id only", () =>

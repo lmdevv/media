@@ -26,13 +26,20 @@ import { moveHere, moveTo, playOn, remoteActions } from "./connect-actions";
 import type { TransportActions } from "./connect-actions";
 import { devicePosition } from "./connect-devices";
 import type { Device } from "./connect-devices";
+import type { ConnectOutput } from "./connect-player";
 import type { EngineKind, PlayerEngine } from "./engine";
 import { messageOf } from "./failure";
 import { HtmlAudioEngine } from "./html-audio-engine";
 import { setMediaSessionHandlers, showNowPlaying } from "./media-session";
 import { MseEngine } from "./mse-engine";
 import { PlaybackController } from "./playback-controller";
-import type { EngineFactory, PlayerSettings, QueueEntry, QueueState } from "./playback-controller";
+import type {
+  EngineFactory,
+  PlayerSettings,
+  QueueEntry,
+  QueueState,
+  Receiver,
+} from "./playback-controller";
 import { queueStateOf, useQueueListing } from "./queue-listing";
 import type { QueueRow } from "./queue-listing";
 import type { RepeatMode } from "./queue-order";
@@ -123,6 +130,11 @@ export interface PlayerState {
   readonly remote: Device | null;
   /** Whether a song is loaded here, playing or paused. */
   readonly here: boolean;
+  /**
+   * The Chromecast this browser plays through, by its name (null when it has none), or null while
+   * the browser plays itself. Connect shows it as this browser's output (ADR 0018).
+   */
+  readonly cast: { readonly receiver: string | null } | null;
 }
 
 /**
@@ -180,6 +192,12 @@ export interface PlayerActions {
    * the device the player followed pauses. Resolves whether the core took it.
    */
   readonly playOn: (deviceId: string, item: MusicItem) => Promise<boolean>;
+  /**
+   * Plays through a Chromecast this browser drives, as its Cast session starts, or through the
+   * browser itself again for null, as the session ends. The song here moves over at the place it
+   * reached, playing or paused as it was.
+   */
+  readonly castTo: (receiver: Receiver | null) => void;
 }
 
 /** The player state and actions that `usePlayer` returns. */
@@ -377,6 +395,9 @@ const createController = ({
   );
 };
 
+/** A browser that plays its own sound. */
+const LOCAL_OUTPUT: ConnectOutput = { kind: "local" };
+
 /** Song and entry ids the controller hands back, which the core answered in its queue and lists. */
 const asTrackId = Brand.nominal<Track["id"]>();
 
@@ -450,7 +471,18 @@ export function PlayerProvider({
 
   const queue = useQueue(platform);
   const local = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
-  const connect = useConnect(platform, controller, local, { locks: browserLocks(), onCore: true });
+
+  const output = useMemo(
+    (): ConnectOutput =>
+      local.cast === null ? LOCAL_OUTPUT : { kind: "cast", receiver: local.cast.receiver },
+    [local.cast],
+  );
+
+  const connect = useConnect(platform, controller, local, {
+    locks: browserLocks(),
+    onCore: true,
+    output,
+  });
 
   const [presence] = useState(
     () => new SessionPresence(() => platform.core.together.heartbeat({ domain: MUSIC })),
@@ -596,6 +628,7 @@ export function PlayerProvider({
       devices: connect.devices,
       remote: connect.remote,
       here: connect.here,
+      cast: local.cast,
       ...actions,
       primeOutput: () => {
         controller.primeOutput();
@@ -614,6 +647,9 @@ export function PlayerProvider({
       moveHere: () => moveHere(platform, controller, connect, track),
       moveTo: (deviceId) => moveTo(platform, controller, connect, deviceId, track),
       playOn: (deviceId, item) => playOn(platform, controller, connect, deviceId, item),
+      castTo: (receiver) => {
+        controller.castTo(receiver);
+      },
     };
   }, [queue, local, controller, platform, connect, follow, view, sessionData, sessionPlayback]);
 
@@ -822,6 +858,12 @@ const sessionPlayerOf = ({
     moveHere: async () => true,
     moveTo: async () => false,
     playOn: async () => false,
+    cast: local.cast,
+    // A Jam plays here and casts nowhere, as old music had no casting (ADR 0018): only the end of a
+    // cast, as the person joins, reaches the controller.
+    castTo: (receiver) => {
+      if (receiver === null) controller.castTo(null);
+    },
   };
 };
 

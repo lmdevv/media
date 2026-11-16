@@ -48,16 +48,30 @@ export type SubtitleTiming =
 /**
  * Whether the delay can apply to `track`, the subtitle chosen: null for none, `loading` for one
  * the playing stream does not list yet (as its stream is negotiated). Picture subtitles are drawn
- * into the video by the media service, which this browser cannot retime.
+ * into the video by the media service, and a Chromecast or another screen loads its own copy of
+ * the subtitles, none of which this browser can retime.
+ *
+ * @param casting - A Chromecast plays the start.
+ * @param otherScreen - AirPlay or the Remote Playback API plays the element's source elsewhere.
  */
-export const subtitleTiming = (
-  track: { readonly kind: "text" | "bitmap" } | "loading" | null,
-): SubtitleTiming => {
+export const subtitleTiming = ({
+  track,
+  casting,
+  otherScreen,
+}: {
+  readonly track: { readonly kind: "text" | "bitmap" } | "loading" | null;
+  readonly casting: boolean;
+  readonly otherScreen: boolean;
+}): SubtitleTiming => {
   if (track === null) return { adjustable: false, reason: "Subtitles are off" };
 
   if (track === "loading") return { adjustable: false, reason: "Subtitles are loading" };
 
   if (track.kind === "bitmap") return { adjustable: false, reason: "Burned into the video" };
+
+  if (casting) return { adjustable: false, reason: "Not while casting" };
+
+  if (otherScreen) return { adjustable: false, reason: "Not on another screen" };
 
   return { adjustable: true };
 };

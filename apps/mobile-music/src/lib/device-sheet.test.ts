@@ -5,11 +5,13 @@ import type { DeviceSheetInput } from "./device-sheet";
 import { HERE, idleTransfer, nextTransfer } from "./transfer";
 import type { Move, MoveEnd, TransferEvent } from "./transfer";
 
-const mac = { id: "mac", name: "Chrome on macOS" } as const;
+const LOCAL = { kind: "local" } as const;
 
-const iphone = { id: "iphone", name: "Safari on iPhone" } as const;
+const mac = { id: "mac", name: "Chrome on macOS", output: LOCAL } as const;
 
-const den = { id: "den", name: "Den speaker" } as const;
+const iphone = { id: "iphone", name: "Safari on iPhone", output: LOCAL } as const;
+
+const den = { id: "den", name: "Den speaker", output: LOCAL } as const;
 
 const PHONE: MoveEnd = { target: HERE, name: "" };
 
@@ -58,6 +60,20 @@ describe("deviceSheet", () => {
       ["This iPhone", false],
       ["Safari on iPhone", true],
       ["Chrome on macOS", false],
+    ]);
+  });
+
+  it("says where the sound of a device that casts or AirPlays goes, in place of its status", () => {
+    const casting = { ...mac, output: { kind: "cast", receiver: "Living Room TV" } } as const;
+    const airplaying = { ...iphone, output: { kind: "airplay", receiver: null } } as const;
+    const sheet = deviceSheet(input({ devices: [casting, airplaying], active: mac.id }));
+
+    expect(
+      sheet.kind === "picker" && sheet.rows.map((row) => [row.name, row.status, row.current]),
+    ).toStrictEqual([
+      ["This iPhone", "Online", false],
+      ["Chrome on macOS", "Casting to Living Room TV", true],
+      ["Safari on iPhone", "AirPlay to a speaker", false],
     ]);
   });
 

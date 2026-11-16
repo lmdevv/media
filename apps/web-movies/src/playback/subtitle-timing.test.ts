@@ -109,22 +109,37 @@ describe("parseSubtitleDelay", () => {
   });
 });
 
+/** What the delay sees for `track` while the element plays here. */
+const alone = (track: Parameters<typeof subtitleTiming>[0]["track"]) => ({
+  track,
+  casting: false,
+  otherScreen: false,
+});
+
 describe("subtitleTiming", () => {
   const text = { kind: "text" } as const;
 
   it("adjusts a text subtitle playing in this browser", () => {
-    expect(subtitleTiming(text)).toEqual({ adjustable: true });
+    expect(subtitleTiming(alone(text))).toEqual({ adjustable: true });
   });
 
   it("says why it cannot adjust anything else", () => {
-    expect(subtitleTiming(null)).toEqual({ adjustable: false, reason: "Subtitles are off" });
-    expect(subtitleTiming({ kind: "bitmap" })).toEqual({
+    expect(subtitleTiming(alone(null))).toEqual({ adjustable: false, reason: "Subtitles are off" });
+    expect(subtitleTiming(alone({ kind: "bitmap" }))).toEqual({
       adjustable: false,
       reason: "Burned into the video",
     });
-    expect(subtitleTiming("loading")).toEqual({
+    expect(subtitleTiming(alone("loading"))).toEqual({
       adjustable: false,
       reason: "Subtitles are loading",
+    });
+    expect(subtitleTiming({ track: text, casting: true, otherScreen: false })).toEqual({
+      adjustable: false,
+      reason: "Not while casting",
+    });
+    expect(subtitleTiming({ track: text, casting: false, otherScreen: true })).toEqual({
+      adjustable: false,
+      reason: "Not on another screen",
     });
   });
 });

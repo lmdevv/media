@@ -82,6 +82,8 @@ commands, and observable proof.
   wasn't shared.
 - [My List and Continue watching](./my-list.md) covers adding to My List and the Continue
   watching row with its resume point and next episode.
+- [Casting](./casting.md) covers Chromecast from the player and from `/music`'s Play on, a
+  scripted Chromecast for both, signing out mid-cast, and AirPlay on iOS.
 - [Group sessions](./group-sessions.md) covers starting, joining, and leaving a session, approval
   and locked sessions, the guests' control switch, the shared next-episode countdown, the host
   going away, Up next, and joining from the iOS app.

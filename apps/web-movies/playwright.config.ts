@@ -53,9 +53,9 @@ const phone = { ...devices["iPhone 15"], defaultBrowserType: "chromium" };
  * a scanned library with the real media service, which the suites start themselves from
  * `apps/media/.env.local`. `admin` then runs the movies admin screens, `metadata` scans an NFO
  * library for the title, person, genre, and collection pages, `player` plays generated clips,
- * `scrubbing` checks scrub thumbnails and chapters, `together` runs a group session with a host
- * and two members, `versions` chooses among a title's files,
- * `subtitles` delays subtitles, `migration` imports from a Jellyfin, and `liveness` pauses HLS
+ * `scrubbing` checks scrub thumbnails and chapters, `casting` casts to a scripted Chromecast,
+ * `together` runs a group session with a host and two members, `versions` chooses among a
+ * title's files, `subtitles` delays subtitles, `migration` imports from a Jellyfin, and `liveness` pauses HLS
  * streams past the media service's idle time, one of them on a Quick Sync encoder that cannot
  * restart, last. The suites that run a media service take turns in this order, as it owns the
  * stack's port.
@@ -96,6 +96,12 @@ const suites: ReadonlyArray<Suite> = [
     name: "scrubbing",
     group: "player",
     testMatch: /e2e\/playback\/scrubbing\.spec\.ts$/u,
+    chained: true,
+  },
+  {
+    name: "casting",
+    group: "player",
+    testMatch: /e2e\/playback\/casting\.spec\.ts$/u,
     chained: true,
   },
   {

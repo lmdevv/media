@@ -1,17 +1,19 @@
-import { deviceKind } from "@media/player/connect-devices";
 import { usePlayer } from "@media/player/react";
 
 import { cn } from "@/lib/utils";
 
-import { deviceIcon } from "./player-actions";
+import { playingElsewhere } from "./player-actions";
 
-/** "Playing on …" badge shown on Now Playing while another device plays; renders nothing locally. */
+/**
+ * "Playing on …" badge shown on Now Playing while another device or a Chromecast plays; renders
+ * nothing while the music plays on this browser's own speakers.
+ */
 export function RemotePill({ className }: { readonly className?: string }) {
-  const { remote } = usePlayer();
+  const elsewhere = playingElsewhere(usePlayer());
 
-  if (remote === null) return null;
+  if (elsewhere === null) return null;
 
-  const Icon = deviceIcon(deviceKind(remote.name));
+  const { Icon, name } = elsewhere;
 
   return (
     <span
@@ -22,7 +24,7 @@ export function RemotePill({ className }: { readonly className?: string }) {
       )}
     >
       <Icon aria-hidden className="size-3.5" />
-      Playing on {remote.name}
+      Playing on {name}
     </span>
   );
 }

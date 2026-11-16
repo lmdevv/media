@@ -1,5 +1,6 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 
+import { isReceiverCredential } from "@media/contracts/cast";
 import { MediaFileId, PlaybackSessionId, UserId } from "@media/contracts/ids";
 import { PlaybackSessionEnded, PlaybackTokenInvalid } from "@media/contracts/media-playback";
 import { serverFunctions } from "@media/contracts/server-functions";
@@ -9,6 +10,7 @@ import {
   loadTicketKeyRing,
   TICKET_PARAM,
   ticketResourceKinds,
+  toBase64Url,
 } from "@media/contracts/ticket";
 import type {
   SessionPrincipal,
@@ -134,6 +136,11 @@ const invalid = (reason: PlaybackTokenInvalid["reason"], message: string): Playb
 
 const UNREADABLE = "This ticket is not one this server can read";
 
+const RECEIVER_ENDED = "This cast ended; cast again";
+
+/** Random bytes in a receiver credential, as many as a ticket key holds. */
+const RECEIVER_CREDENTIAL_BYTES = 32;
+
 const EXPIRED = "This ticket expired; start playback again";
 
 /**
@@ -203,6 +210,10 @@ const make = Effect.fn("CoreTickets.make")(function* (options: Options) {
 
   const ring = loaded.value;
   const entries = new Map<PlaybackSessionId, Entry>();
+  // Receiver credentials (ADR 0011): each names the playback it was lent for, and each playback
+  // keeps the one it lent last.
+  const receivers = new Map<string, PlaybackSessionId>();
+  const lent = new Map<PlaybackSessionId, string>();
   const idleMs = Duration.toMillis(options.idle);
 
   // One watch per signed-in session, shared by its tickets and streams, kept a minute past its
@@ -376,9 +387,88 @@ const make = Effect.fn("CoreTickets.make")(function* (options: Options) {
     return grantOf(entry, playback);
   });
 
+  /**
+   * Admits a request on a receiver credential: inside the playback it was lent for, a read of its
+   * file or a request of a stream that playback started, while its admission stands and its
+   * session is live. It never starts anything, so a request without `within` is refused.
+   */
+  const received = Effect.fnUntraced(function* (
+    credential: string,
+    purposes: ReadonlyArray<TokenPurpose>,
+    within: PlaybackToken.Within | undefined,
+  ) {
+    const playback = receivers.get(credential);
+    const entry = playback === undefined ? undefined : entries.get(playback);
+
+    if (playback === undefined || entry === undefined) {
+      return yield* new PlaybackToken.TokenRefused({
+        error: invalid("expired", RECEIVER_ENDED),
+        sessionForLog: Option.none(),
+      });
+    }
+
+    const refuseWith = (error: PlaybackTokenInvalid | PlaybackSessionEnded) =>
+      new PlaybackToken.TokenRefused({
+        error,
+        sessionForLog: sessionForLog(entry.claims, playback),
+      });
+
+    if (!purposes.includes("play") || within === undefined) {
+      return yield* refuseWith(
+        invalid("wrong_purpose", "A receiver credential only plays its cast"),
+      );
+    }
+
+    if (
+      within !== PlaybackToken.READ &&
+      !Option.contains(yield* owners.ownerOf(within), playback)
+    ) {
+      return yield* refuseWith(invalid("malformed", "This credential did not start this stream"));
+    }
+
+    const state = yield* Effect.promise(() => readSession(entry.claims.principal));
+
+    if (state === "ended")
+      return yield* refuseWith(new PlaybackSessionEnded({ sessionId: playback }));
+
+    if (state === "unavailable") {
+      return yield* refuseWith(invalid("expired", REFUSALS.session_unavailable[1]));
+    }
+
+    entries.set(playback, { ...entry, lastUsedAt: yield* Clock.currentTimeMillis });
+
+    return grantOf(entry, playback);
+  });
+
+  const lend: PlaybackToken.Interface["lend"] = Effect.fn("CoreTickets.lend")(function* (token) {
+    const ticket = Redacted.value(token);
+
+    if (isReceiverCredential(ticket)) {
+      return yield* new PlaybackToken.TokenRefused({
+        error: invalid("wrong_purpose", "A receiver credential lends nothing"),
+        sessionForLog: Option.none(),
+      });
+    }
+
+    // A start for play: `admitted` keeps the playback's admission, which the credential follows.
+    const grant = yield* admitted(ticket, PlaybackToken.PLAY, false);
+    const playback = grant.sessionId;
+    const bytes = yield* Effect.sync(() => randomBytes(RECEIVER_CREDENTIAL_BYTES));
+    const credential = `r1.${toBase64Url(bytes)}`;
+    const previous = lent.get(playback);
+
+    if (previous !== undefined) receivers.delete(previous);
+    receivers.set(credential, playback);
+    lent.set(playback, credential);
+
+    return Redacted.make(credential);
+  });
+
   const authorize: PlaybackToken.Interface["authorize"] = Effect.fn("CoreTickets.authorize")(
     function* (token, purposes, within) {
       const ticket = Redacted.value(token);
+
+      if (isReceiverCredential(ticket)) return yield* received(ticket, purposes, within);
 
       if (within !== undefined && within !== PlaybackToken.READ) {
         const owner = yield* owners.ownerOf(within);
@@ -400,6 +490,7 @@ const make = Effect.fn("CoreTickets.make")(function* (options: Options) {
     withToken: (url, token) =>
       `${url}?${TICKET_PARAM}=${encodeURIComponent(Redacted.value(token))}`,
     authorize,
+    lend,
     verify: (token, purposes, within) =>
       authorize(token, purposes, within).pipe(Effect.mapError((refused) => refused.error)),
     verifyReport: (token) => {
@@ -436,7 +527,7 @@ const make = Effect.fn("CoreTickets.make")(function* (options: Options) {
   });
 
   // Forgets playbacks whose ticket expired, that no open stream plays, and that went unused for
-  // the idle time.
+  // the idle time, and the receiver credentials they lent.
   yield* Effect.gen(function* () {
     const now = yield* Clock.currentTimeMillis;
 
@@ -445,6 +536,14 @@ const make = Effect.fn("CoreTickets.make")(function* (options: Options) {
       const forgettable = entry.claims.expiresAt <= now && now - entry.lastUsedAt >= idleMs;
 
       if (forgettable && !(yield* owners.hasOpen(playback))) entries.delete(playback);
+    }
+
+    // A receiver credential lasts as long as its playback's admission.
+    for (const [credential, playback] of receivers) {
+      if (!entries.has(playback)) {
+        receivers.delete(credential);
+        lent.delete(playback);
+      }
     }
   }).pipe(Effect.repeat(Schedule.spaced(SWEEP_EVERY)), Effect.forkScoped);
 

@@ -38,6 +38,13 @@ const playbackHandlers = HttpApiBuilder.group(
           ),
         };
       }),
+      receiver: Effect.fn("Api.receiver")(function* ({ payload }) {
+        const credential = yield* verifier
+          .lend(payload.token)
+          .pipe(Effect.mapError((refused) => refused.error));
+
+        return { credential };
+      }),
       stop: Effect.fn("Api.stop")(function* ({ payload }) {
         const grant = yield* verifier.verify(payload.token, PlaybackToken.PLAY, payload.streamId);
         yield* sessions.stop(payload.streamId, grant);

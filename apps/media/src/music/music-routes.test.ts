@@ -11,7 +11,17 @@ import { artworkTicketId, loadTicketKeyRing } from "@media/contracts/ticket";
 import type { TicketPurpose } from "@media/contracts/ticket";
 import { TICKET_TEST_KEYS } from "@media/contracts/ticket-vectors";
 import { EpochMillis } from "@media/contracts/units";
-import { Duration, Effect, Exit, Layer, Option, Redacted, Scope, SubscriptionRef } from "effect";
+import {
+  Context,
+  Duration,
+  Effect,
+  Exit,
+  Layer,
+  Option,
+  Redacted,
+  Scope,
+  SubscriptionRef,
+} from "effect";
 import { HttpServer } from "effect/http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -19,6 +29,7 @@ import * as CachePruner from "../cache-pruner.ts";
 import * as CoreTickets from "../core/core-tickets.ts";
 import { serve } from "../http/http-server.ts";
 import * as MediaTools from "../media/media-tools.ts";
+import * as PlaybackToken from "../playback/playback-grants.ts";
 import * as StreamOwners from "../playback/stream-owners.ts";
 import { makeFakeCore, stream } from "../testing/fake-core.ts";
 import { testConfigLayer } from "../testing/test-config.ts";
@@ -60,6 +71,8 @@ let baseUrl = "";
 let scope: Scope.Closeable;
 
 let status: SubscriptionRef.SubscriptionRef<SessionStatus>;
+
+let tokens: PlaybackToken.Interface;
 
 const run = <A, E>(effect: Effect.Effect<A, E>): Promise<A> => Effect.runPromise(effect);
 
@@ -171,7 +184,7 @@ beforeAll(async () => {
 
   const http = serve(MusicRoutes.layer).pipe(
     Layer.provideMerge(NodeHttpServer.layer(createServer, { port: 0, host: "127.0.0.1" })),
-    Layer.provide(
+    Layer.provideMerge(
       CoreTickets.layer({
         ticketKeys: Redacted.make(TICKET_TEST_KEYS.k1),
         idle: Duration.seconds(30),
@@ -184,6 +197,8 @@ beforeAll(async () => {
   );
 
   const built = await run(Layer.buildWithScope(http, scope));
+
+  tokens = Context.get(built, PlaybackToken.Service);
 
   baseUrl = await run(
     HttpServer.addressFormattedWith((url) => Effect.succeed(url)).pipe(
@@ -363,8 +378,39 @@ describe("music routes", { timeout: 60_000 }, () => {
     ).toBe(404);
   });
 
-  it("stop an open song once its session ends, and refuse the session's tickets after", async () => {
+  it("serve a Cast receiver's credential the song its sender started, past the ticket's expiry", async () => {
+    const ticket = await issue(TONE, "play", 2000);
+    const credential = Redacted.value(await run(tokens.lend(Redacted.make(ticket))));
+    const original = await fetch(streamUrl(TONE, credential));
+
+    expect(original.status).toBe(200);
+    expect(original.headers.get("content-type")).toBe("audio/flac");
+    await original.arrayBuffer();
+
+    // A codec no Chromecast plays everywhere casts as the AAC transcode.
+    const transcode = await fetch(streamUrl(TONE, credential, "&p=aac-320"));
+
+    expect(transcode.status).toBe(200);
+    expect((await transcode.arrayBuffer()).byteLength).toBeGreaterThan(0);
+    expect((await fetch(streamUrl(SONG, credential))).status).toBe(403);
+    expect((await fetch(streamUrl(TONE, credential, "&p=aac-320&finished=1"))).status).not.toBe(
+      401,
+    );
+
+    // Tickets hold whole seconds, so this one has expired 3 s later; the receiver read the song
+    // within the idle time, so its credential goes on, where the ticket starts nothing.
+    await new Promise((resolve) => setTimeout(resolve, 3100));
+
+    const later = await fetch(streamUrl(TONE, credential), { headers: { range: "bytes=0-1023" } });
+
+    expect(later.status).toBe(206);
+    await later.arrayBuffer();
+    expect((await fetch(streamUrl(TONE, ticket))).status).toBe(401);
+  });
+
+  it("stop an open song once its session ends, and refuse the session's tickets and credentials after", async () => {
     const ticket = await issue(LARGE);
+    const credential = await run(tokens.lend(Redacted.make(ticket)));
     const response = await fetch(streamUrl(LARGE, ticket));
 
     expect(response.status).toBe(200);
@@ -383,5 +429,6 @@ describe("music routes", { timeout: 60_000 }, () => {
     expect(received.aborted).toBe(true);
     expect(received.bytes).toBeLessThan(128 * 1024 * 1024);
     expect((await fetch(streamUrl(SONG, await issue(SONG)))).status).toBe(410);
+    expect((await fetch(streamUrl(LARGE, Redacted.value(credential)))).status).toBe(410);
   });
 });

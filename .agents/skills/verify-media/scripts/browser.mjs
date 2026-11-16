@@ -40,6 +40,10 @@ const SETUP_MS = 1_200_000;
 // The status timeout(1) exits with, so verify-media.sh treats a silent host as a step out of time.
 const TIMED_OUT = 124;
 const PRIVATE_NETWORK = fileURLToPath(new URL("../../../../scripts/private-network.sh", import.meta.url));
+// The scripted Chromecast the web clients' Playwright suites cast to, which `--cast-fake` puts in a
+// new page in place of Google's Cast SDK. Node strips its types as it loads it.
+const CAST_FAKE = new URL("../../../../apps/web-movies/e2e/playback/cast-fake.ts", import.meta.url);
+const CAST_ACTIONS = ["devicesAppear", "holdConnection", "completeConnection", "finish", "fail", "disconnect", "refetch"];
 const NETWORKS = ["auto", "isolated", "host"];
 // A relay must carry each direction's end on its own: a client may finish its request and still
 // wait for the response.
@@ -67,6 +71,7 @@ const FLAGS = {
   app: { type: "string" },
   page: { type: "string" },
   "tab-of": { type: "string" },
+  "cast-fake": { type: "boolean", default: false },
   device: { type: "string" },
   width: { type: "string" },
   height: { type: "string" },
@@ -330,6 +335,8 @@ async function drive({ base, account, core, music }, network, launchArgs) {
     const tabOf = options["tab-of"] ? pages.get(options["tab-of"]) : undefined;
     if (options["tab-of"] && !tabOf) throw new Error(`no page named ${options["tab-of"]} to open a tab of`);
     if (tabOf && tabOf.app !== app) throw new Error(`page ${options["tab-of"]} is a ${tabOf.app} page, not ${app}`);
+    // The scripted Chromecast needs its own context, with a Chrome user agent the client casts from.
+    if (tabOf && options["cast-fake"]) throw new Error("--cast-fake makes a page of its own; drop --tab-of");
     const device = tabOf ? tabOf.device : options.device ? devices[options.device] : undefined;
     if (!tabOf && options.device && !device) throw new Error(`unknown Playwright device "${options.device}"`);
     const viewport = tabOf
@@ -341,6 +348,9 @@ async function drive({ base, account, core, music }, network, launchArgs) {
     let context = tabOf?.context;
     if (!context) {
       context = await browser.newContext({
+        // The client loads the Cast SDK only for a Chrome user agent, which headless Chromium's
+        // own lacks.
+        ...(options["cast-fake"] ? { userAgent: devices["Desktop Chrome"].userAgent } : {}),
         ...device,
         viewport,
         baseURL: bases[app],
@@ -349,6 +359,7 @@ async function drive({ base, account, core, music }, network, launchArgs) {
       await context.addInitScript({ content: TRACK_MEDIA });
     }
     const page = await context.newPage();
+    if (options["cast-fake"]) await (await import(CAST_FAKE.href)).installCastFake(page);
     prefixes.set(page, new URL(bases[app]).pathname.replace(/\/$/, ""));
     // What the player fetched, so `video` can say whether it played the file or an HLS stream.
     // Counted per page address, so a title opened after another starts from zero.
@@ -710,6 +721,24 @@ async function drive({ base, account, core, music }, network, launchArgs) {
   };
 
   const commands = {
+    // The scripted Chromecast of a page made with `--cast-fake`: `cast --value <action>` plays the
+    // receiver's part (`devicesAppear`, `disconnect`, …), `--advance S` moves its position, and
+    // `cast-state` prints what it loaded and fetched.
+    async cast({ page }, options) {
+      const fake = await import(CAST_FAKE.href);
+      if (options.advance !== undefined) {
+        const seconds = Number(options.advance);
+        if (!Number.isFinite(seconds) || seconds < 0) throw new Error("cast --advance needs a number of seconds");
+        return fake.advanceReceiver(page, seconds);
+      }
+      if (!CAST_ACTIONS.includes(options.value ?? "")) {
+        throw new Error(`cast needs --advance S or --value with one of ${CAST_ACTIONS.join(", ")}`);
+      }
+      await fake.castFake(page, options.value);
+    },
+    async "cast-state"({ page }) {
+      return JSON.stringify(await (await import(CAST_FAKE.href)).receiver(page));
+    },
     async "record-start"(entry, options) {
       return startRecording(entry, options);
     },

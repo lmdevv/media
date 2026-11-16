@@ -1,3 +1,4 @@
+import { localOnly } from "@media/contracts/cast";
 import { DRIFT_THRESHOLDS } from "@media/contracts/clock";
 import type { FollowerPlayer } from "@media/contracts/follower";
 import type { NegotiateResponse } from "@media/contracts/media-playback";
@@ -17,10 +18,19 @@ import { useKeymap } from "@media/ui/lib/use-keymap";
 import { cn } from "@media/ui/lib/utils";
 import { useNavigate } from "@tanstack/react-router";
 import { Effect, Fiber, Stream } from "effect";
-import { ArrowLeftIcon, InfoIcon, ListVideoIcon, PictureInPicture2Icon } from "lucide-react";
+import {
+  ArrowLeftIcon,
+  CastIcon,
+  InfoIcon,
+  ListVideoIcon,
+  PictureInPicture2Icon,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
+import type { CastItem } from "@/casting/cast-profile";
+import { useAirPlay, useRemotePlayback } from "@/casting/system-targets";
+import { useCast, useRemoteState } from "@/casting/use-cast";
 import { useCommandRoot } from "@/commands";
 import type { PlayerCommands, PlayerTogether } from "@/commands";
 import { artworkUrl } from "@/lib/artwork";
@@ -59,6 +69,7 @@ import { useSessionFollow, useSessionPlayer } from "@/together/use-session-playe
 
 import { AUTOPLAY_COUNTDOWN } from "./autoplay";
 import { AutoplayNext } from "./autoplay-next";
+import { CastMenu, CastingState } from "./cast-menu";
 import { EpisodePicker } from "./episode-picker";
 import { LeaveDialog } from "./leave-dialog";
 import { PhoneControls, PhoneSessionVideoChrome, TrackPill } from "./phone-player";
@@ -84,6 +95,9 @@ const BUFFERING_GRACE_MS = 400;
 const KEY_PREVIEW_MS = 1_200;
 
 const VOLUME_STEP = 0.1;
+
+/** Where unmuting a TV from silence goes when nothing was settled on there yet. */
+const CAST_UNMUTE_LEVEL = 0.5;
 
 const volumeLevel = (value: number): number =>
   Math.round(Math.min(1, Math.max(0, value)) * 100) / 100;
@@ -211,11 +225,12 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
   const phase = snapshot?.phase ?? PlaybackPhase.Starting();
   const isPlaying = PlaybackPhase.$is("Playing")(phase);
   const player = controller?.player ?? null;
+  const output = controller?.output ?? null;
 
   useEffect(() => {
-    playerNow.current = player;
-  }, [player]);
-  const media = useMediaState(video, player);
+    playerNow.current = output;
+  }, [output]);
+  const localMedia = useMediaState(video, player);
   const stream = snapshot?.stream ?? null;
   const started = snapshot?.started ?? null;
   const coreStart = snapshot?.coreStart ?? null;
@@ -223,6 +238,34 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
   const titleName = detail?.name ?? "";
   const artworkKey = episode?.still ?? detail?.artwork.poster ?? null;
   const pip = usePictureInPicture(video);
+
+  const castItem = useMemo(
+    (): CastItem | null =>
+      started === null
+        ? null
+        : {
+            title: episode?.name ?? titleName,
+            episode:
+              episode === null
+                ? null
+                : {
+                    seriesTitle: titleName,
+                    season: episode.seasonNumber,
+                    episode: episode.episodeNumber,
+                  },
+            imageUrl: artworkUrl(artworkKey, "poster") ?? null,
+          },
+    [started, episode, titleName, artworkKey],
+  );
+
+  const chromecast = useCast(controller, isPlaying, castItem);
+  const casting = chromecast.playback;
+  const remote = useRemoteState(casting);
+  const airplay = useAirPlay(video);
+  const remotePlayback = useRemotePlayback(video);
+
+  const media =
+    remote === null ? localMedia : { ...localMedia, ...remote, bufferedAheadSeconds: 0 };
 
   const duration = stream?.durationSeconds ?? (started?.file.probe.durationMs ?? 0) / 1000;
   const position = scrub ?? media.positionSeconds;
@@ -238,7 +281,7 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
   const nextEpisode = next.status === "success" ? next.data : null;
 
   const follow = useSessionFollow(together, {
-    player: isPlaying ? player : null,
+    player: isPlaying ? output : null,
     durationMs: duration > 0 ? duration * 1000 : null,
     nextEpisode,
   });
@@ -253,23 +296,23 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
 
   const seekTo = useCallback(
     (seconds: number) => {
-      if (player === null) return;
+      if (output === null) return;
 
       const positionMs = Math.max(0, Math.min(duration, seconds)) * 1000;
 
       setScrub(null);
 
       if (inSession) sessionMove({ kind: "seek", positionMs });
-      else player.seek(positionMs);
+      else output.seek(positionMs);
     },
-    [player, duration, inSession, sessionMove],
+    [output, duration, inSession, sessionMove],
   );
 
   const skip = useCallback(
     (by: number) => {
-      if (player !== null) seekTo(player.positionMs() / 1000 + by);
+      if (output !== null) seekTo(output.positionMs() / 1000 + by);
     },
-    [player, seekTo],
+    [output, seekTo],
   );
 
   const scrubbing = useScrubbing(started);
@@ -278,8 +321,8 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
 
   const skipByKey = useCallback(
     (by: number) => {
-      if (player === null) return;
-      const target = Math.max(0, Math.min(duration, player.positionMs() / 1000 + by));
+      if (output === null) return;
+      const target = Math.max(0, Math.min(duration, output.positionMs() / 1000 + by));
 
       seekTo(target);
       preloadThumbnails();
@@ -287,47 +330,77 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
       clearTimeout(keyPreviewTimer.current);
       keyPreviewTimer.current = setTimeout(() => setKeyPreview(null), KEY_PREVIEW_MS);
     },
-    [player, duration, seekTo, preloadThumbnails],
+    [output, duration, seekTo, preloadThumbnails],
   );
 
   useEffect(() => () => clearTimeout(keyPreviewTimer.current), []);
 
   const currentChapter = chapterAt(scrubbing.chapters, media.positionSeconds);
 
-  const play = useCallback(() => {
-    if (player === null) return;
+  // A TV never needs a gesture.
+  const needsGesture = snapshot?.needsGesture === true && casting === null;
 
-    if (snapshot?.needsGesture === true) controller?.resumeWithGesture();
+  const play = useCallback(() => {
+    if (output === null) return;
+
+    if (needsGesture) controller?.resumeWithGesture();
     else if (inSession) sessionMove({ kind: "play" });
-    else void player.play().catch(() => undefined);
-  }, [player, snapshot?.needsGesture, controller, inSession, sessionMove]);
+    else void output.play().catch(() => undefined);
+  }, [output, needsGesture, controller, inSession, sessionMove]);
 
   const togglePlay = useCallback(() => {
-    if (player === null) return;
+    if (output === null) return;
 
-    if (snapshot?.needsGesture === true || player.isPaused()) play();
+    if (needsGesture || output.isPaused()) play();
     else if (inSession) sessionMove({ kind: "pause" });
-    else player.pause();
-  }, [player, snapshot?.needsGesture, play, inSession, sessionMove]);
+    else output.pause();
+  }, [output, needsGesture, play, inSession, sessionMove]);
 
+  // Silence mutes and any other level unmutes, here and on a TV alike, so the mute button and the
+  // slider always agree.
   const setVolume = useCallback(
     (value: number) => {
-      if (video === null) return;
-
       const level = volumeLevel(value);
+
+      if (casting !== null) {
+        casting.player.setVolume(level);
+
+        return;
+      }
+
+      if (video === null) return;
 
       video.volume = level;
       video.muted = level === 0;
     },
-    [video],
+    [video, casting],
   );
 
-  const audible = useRef<number | null>(null);
+  // The last level the viewer settled on above silence, here and on each cast, which unmuting from
+  // silence there returns to. A drag's passing levels do not count.
+  const audibleHere = useRef<number | null>(null);
+  const audibleCast = useRef(new WeakMap<object, number>());
   const levelNow = media.volume;
 
+  const remember = useCallback(
+    (level: number) => {
+      if (casting === null) audibleHere.current = level;
+      else audibleCast.current.set(casting, level);
+    },
+    [casting],
+  );
+
+  const remembered = useCallback(
+    (): number | null =>
+      casting === null ? audibleHere.current : (audibleCast.current.get(casting) ?? null),
+    [casting],
+  );
+
+  // A change starts from the level now: here only before the first change, since a drag moves it
+  // as it goes; on a TV every time, since its remote can change it meanwhile.
   const rememberStart = useCallback(() => {
-    if (levelNow > 0 && audible.current === null) audible.current = levelNow;
-  }, [levelNow]);
+    if (levelNow > 0 && (casting !== null || audibleHere.current === null)) remember(levelNow);
+  }, [levelNow, casting, remember]);
 
   const commitVolume = useCallback(
     (value: number) => {
@@ -335,28 +408,33 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
 
       rememberStart();
 
-      if (level > 0) audible.current = level;
+      if (level > 0) remember(level);
       setVolume(level);
     },
-    [rememberStart, setVolume],
+    [rememberStart, remember, setVolume],
   );
 
+  // The slider follows the pointer here at once; a TV hears only where it settles.
   const followVolume = useCallback(
     (value: number) => {
       rememberStart();
-      setVolume(value);
+
+      if (casting === null) setVolume(value);
     },
-    [rememberStart, setVolume],
+    [rememberStart, casting, setVolume],
   );
 
-  const silent = canSetVolume && media.volume === 0;
+  const volumeSettable = casting === null ? canSetVolume : (remote?.volumeSettable ?? false);
+  const silent = volumeSettable && media.volume === 0;
 
   const setMuted = useCallback(
     (muted: boolean) => {
-      if (!muted && silent) setVolume(audible.current ?? 1);
+      if (!muted && silent) {
+        setVolume(remembered() ?? (casting === null ? 1 : CAST_UNMUTE_LEVEL));
+      } else if (casting !== null) casting.player.setMuted(muted);
       else if (video !== null) video.muted = muted;
     },
-    [video, silent, setVolume],
+    [video, casting, silent, remembered, setVolume],
   );
 
   const audioOptions = useMemo(
@@ -434,14 +512,14 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
 
   const versionOptions = useMemo(
     (): ReadonlyArray<TrackOption> =>
-      versionFacts.length < 2 || inSession
+      versionFacts.length < 2 || inSession || casting !== null
         ? []
         : versionFacts.map(({ version: candidate, facts }) => ({
             id: candidate.id,
             label: Versions.label(facts),
             detail: Versions.detail(facts),
           })),
-    [versionFacts, inSession],
+    [versionFacts, inSession, casting],
   );
 
   const versionId = coreStart?.file.id ?? "";
@@ -497,30 +575,34 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
     }
   }, [loadedQuality, deviceQuality, platform]);
 
+  const shownSubtitle = casting === null ? subtitleId : OFF;
+
   useEffect(() => {
     if (video === null) return;
 
     for (const track of Array.from(video.textTracks)) {
-      track.mode = track.id === subtitleId ? "showing" : "disabled";
+      track.mode = track.id === shownSubtitle ? "showing" : "disabled";
     }
-  }, [video, subtitleId, stream]);
+  }, [video, shownSubtitle, stream]);
 
   const subtitleDelay = useSubtitleDelay({
     controller,
     stream,
     subtitleId: snapshot?.subtitleId ?? null,
     delayMs: snapshot?.subtitleDelayMs ?? 0,
+    casting: casting !== null,
+    otherScreen: airplay?.active === true || remotePlayback?.active === true,
     keycaps: layout === "desktop",
   });
 
   const askToLeave = useCallback(() => {
-    const pause = !inSession && player !== null && !player.isPaused();
+    const pause = !inSession && output !== null && !output.isPaused();
 
-    if (pause) player.pause();
+    if (pause) output.pause();
     focusBeforeLeaving.current =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setLeaving({ resume: pause });
-  }, [player, inSession]);
+  }, [output, inSession]);
 
   const stay = useCallback(() => {
     if (leaving?.resume === true) play();
@@ -671,10 +753,10 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
           positionSeconds: media.positionSeconds,
           paused: media.paused,
           play: () => {
-            if (player?.isPaused() === true) togglePlay();
+            if (output?.isPaused() === true) togglePlay();
           },
           pause: () => {
-            if (player?.isPaused() === false) togglePlay();
+            if (output?.isPaused() === false) togglePlay();
           },
           seekTo,
           previous: previousEpisode === null || inSession ? null : playPrevious,
@@ -746,7 +828,7 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
     infoShown ||
     menu ||
     episodesShown ||
-    (volumeOpen && canSetVolume) ||
+    (volumeOpen && volumeSettable) ||
     leaving !== null ||
     showNext ||
     sessionCard !== null ||
@@ -766,11 +848,11 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
       "player.back-5": () => skipByKey(-5),
       "player.forward-5": () => skipByKey(5),
       "player.volume-up": () => {
-        if (canSetVolume) commitVolume(media.volume + VOLUME_STEP);
+        if (volumeSettable) commitVolume(media.volume + VOLUME_STEP);
         else if (media.muted) setMuted(false);
       },
       "player.volume-down": () => {
-        if (canSetVolume) commitVolume(media.volume - VOLUME_STEP);
+        if (volumeSettable) commitVolume(media.volume - VOLUME_STEP);
       },
       "player.fullscreen": toggleFullscreen,
       "player.mute": () => setMuted(!(media.muted || silent)),
@@ -935,6 +1017,39 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
       />
     );
 
+  const castTargets = {
+    chromecast: chromecast.available
+      ? {
+          connecting: chromecast.connecting,
+          starting: chromecast.starting,
+          deviceName: casting?.deviceName ?? null,
+          unreachable: started !== null && localOnly(started.mediaBaseUrl),
+          onConnect: chromecast.connect,
+          onDisconnect: chromecast.disconnect,
+        }
+      : null,
+    airplay:
+      airplay === null || !airplay.available
+        ? null
+        : { active: airplay.active, onChoose: airplay.choose },
+    otherDevices:
+      chromecast.available ||
+      airplay !== null ||
+      remotePlayback === null ||
+      !remotePlayback.available
+        ? null
+        : { active: remotePlayback.active, onChoose: remotePlayback.choose },
+  };
+
+  const canCast =
+    castTargets.chromecast !== null ||
+    castTargets.airplay !== null ||
+    castTargets.otherDevices !== null;
+
+  const castMenu = (trigger: React.ReactElement) => (
+    <CastMenu trigger={trigger} container={overlayContainer} {...castTargets} />
+  );
+
   const scrubProps = {
     describe: scrubbing.describe,
     chapters: scrubbing.chapterStarts,
@@ -1059,7 +1174,7 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
       );
     }
 
-    if (snapshot?.needsGesture === true) {
+    if (needsGesture) {
       return <PressPlay onPlay={() => controller?.resumeWithGesture()} />;
     }
 
@@ -1092,6 +1207,7 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
       data-testid="player-video"
       crossOrigin="anonymous"
       playsInline
+      x-webkit-airplay="allow"
       poster={backdrop}
       className="size-full bg-dark-bg object-contain"
       style={brightness < 1 ? { filter: `brightness(${String(brightness)})` } : undefined}
@@ -1137,7 +1253,7 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
           )}
         </div>
         <div className="flex items-center gap-6">
-          {isPlaying && pip !== null ? (
+          {isPlaying && pip !== null && casting === null ? (
             <PlayerButton
               aria-label="Picture in picture"
               aria-pressed={pip.active}
@@ -1147,6 +1263,13 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
               <PictureInPicture2Icon strokeWidth={1.75} aria-hidden />
             </PlayerButton>
           ) : null}
+          {isPlaying && canCast
+            ? castMenu(
+                <PlayerButton aria-label="Cast" active={casting !== null}>
+                  <CastIcon strokeWidth={1.75} aria-hidden />
+                </PlayerButton>,
+              )
+            : null}
           {isPlaying && stream !== null && started !== null ? (
             <PlayerButton
               aria-label="Stream info"
@@ -1179,7 +1302,7 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
           position={position}
           duration={duration}
           muted={media.muted}
-          volume={canSetVolume ? media.volume : null}
+          volume={volumeSettable ? media.volume : null}
           tracks={tracks(
             <PlayerButton aria-label={TRACKS_LABEL}>
               <TracksGlyph />
@@ -1230,7 +1353,7 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
         position={position}
         duration={duration}
         brightness={brightness}
-        volume={canSetVolume ? (media.muted ? 0 : media.volume) : null}
+        volume={volumeSettable ? (media.muted ? 0 : media.volume) : null}
         tracks={
           <>
             {tracks(
@@ -1270,6 +1393,7 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
         onVolumeCommit={commitVolume}
         locked={locked}
         onRoom={session === null ? onRoom : undefined}
+        castMenu={canCast ? castMenu : undefined}
       />
     </div>
   ) : null;
@@ -1293,7 +1417,10 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
             : "min-w-0 grow",
         )}
       >
-        <div className="absolute inset-0">{videoElement}</div>
+        <div className="absolute inset-0">
+          {videoElement}
+          {casting === null ? null : <CastingState deviceName={casting.deviceName} />}
+        </div>
         {portraitSession ? (
           <PhoneSessionVideoChrome
             label={together.mayControl ? null : `${together.hostName} is hosting`}

@@ -1209,3 +1209,106 @@ describe("PlaybackController", () => {
     });
   });
 });
+
+describe("PlaybackController casting to a receiver", () => {
+  it("moves the song here to the receiver at its place, playing, as the same play", async () => {
+    const run = setup({ playCurrent: "1" });
+
+    await run.controller.playTracks(["a", "b"], 0);
+    run.controller.sync(queueOf([one, two], "1"));
+    await settle();
+    run.engine().emit({ type: "time", positionMs: 60_000 });
+
+    run.controller.castTo(run.receiver("Living Room TV"));
+    await settle();
+
+    expect(run.record.loads.at(-1)).toStrictEqual({
+      kind: "cast",
+      url: `${BASE}/media/music/stream/a?ticket=t2&p=aac-320`,
+      startMs: 60_000,
+    });
+    expect(run.controller.getSnapshot()).toMatchObject({
+      engine: "cast",
+      engineStatus: "playing",
+      current: "1",
+      cast: { receiver: "Living Room TV" },
+    });
+    expect(run.controller.playingHere()).toMatchObject({ trackId: "a", playing: true });
+    // A new ticket for the receiver, and still one play in history.
+    expect(names(run.sent)).toStrictEqual(["play:a,b,0", "start:a", "report:a,p1", "start:a"]);
+    run.stop();
+  });
+
+  it("drops what the old output says after the switch, and comes back where the receiver was", async () => {
+    const run = setup({ playCurrent: "1" });
+
+    await run.controller.playTracks(["a", "b"], 0);
+    run.controller.sync(queueOf([one, two], "1"));
+    await settle();
+
+    const local = run.engine();
+
+    run.controller.castTo(run.receiver(null));
+    await settle();
+
+    const cast = run.engine();
+
+    // The browser's own element ends and fails as it lets go; neither is the receiver's song.
+    local.emit({ type: "ended" });
+    local.emit({ type: "error", reason: "network", message: "gone" });
+    await settle();
+
+    expect(run.controller.getSnapshot()).toMatchObject({
+      current: "1",
+      engineStatus: "playing",
+      cast: { receiver: null },
+    });
+
+    cast.emit({ type: "time", positionMs: 90_000 });
+    run.controller.steer(false, 90_000);
+    await settle();
+
+    expect(run.controller.getSnapshot().engineStatus).toBe("paused");
+
+    run.controller.castTo(null);
+    await settle();
+
+    expect(run.record.loads.at(-1)).toMatchObject({ kind: "html", startMs: 90_000 });
+    expect(run.controller.getSnapshot()).toMatchObject({
+      engine: "html",
+      engineStatus: "paused",
+      cast: null,
+    });
+    run.stop();
+  });
+
+  it("sets the receiver's volume while it plays and keeps this device's own", async () => {
+    const run = setup({ playCurrent: "1" });
+
+    await run.controller.playTracks(["a"], 0);
+    run.controller.sync(queueOf([one], "1"));
+    await settle();
+    run.controller.setVolume(0.8);
+
+    const kitchen = run.receiver("Kitchen");
+
+    run.controller.castTo(kitchen);
+    await settle();
+
+    // The controls show the TV's volume, and follow its own remote.
+    expect(run.controller.getSnapshot().volume).toBe(0.5);
+    kitchen.turnTo(0.3);
+    expect(run.controller.getSnapshot().volume).toBe(0.3);
+
+    run.controller.setVolume(0.2);
+
+    expect(run.controller.getSnapshot().volume).toBe(0.2);
+
+    run.controller.castTo(null);
+    await settle();
+    kitchen.turnTo(0.9);
+
+    expect(run.controller.getSnapshot().volume).toBe(0.8);
+    run.stop();
+  });
+});

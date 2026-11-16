@@ -188,10 +188,13 @@ Old movies' Convex project, its SDK client, and its command registry were delete
 
 ## Casting and system controls
 
-- The movies web client does not cast since the movies cutover; casting returns through the core's
-  Connect (ADR 0018). `@media/contracts/cast` keeps the Chromecast client profile the media
-  service's negotiation is tested with, and the content security policy still allows Google's Cast
-  sender scripts from `www.gstatic.com` (`apps/media/src/http/hardening.ts`).
+- Both web clients cast to Google's default receiver (ADR 0018, "Casting as built"): the movies
+  player as old movies did, and `/music` from "Play on", which Connect then shows as the browser's
+  output. `@media/contracts/cast` holds the Chromecast profiles and the receiver credential a
+  receiver's URLs carry in place of the ticket (ADR 0011), and the content security policy allows
+  Google's Cast sender scripts from `www.gstatic.com` (`apps/media/src/http/hardening.ts`). The
+  music iOS app has the system's AirPlay route picker in Now Playing, and the movies iOS app in its
+  player.
 - Safari plays HLS natively (hls.js is never used there), so its own AirPlay works on the
   `<video>` element.
 - The Media Session API publishes what plays and handles play, pause, seek backward and forward,

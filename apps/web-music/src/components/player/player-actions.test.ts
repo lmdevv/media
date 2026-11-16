@@ -23,6 +23,7 @@ const toDesk: PendingMove = {
 const desk = (pending: boolean): Device => ({
   id: "desk",
   name: "Chrome on Linux",
+  output: { kind: "local" },
   playback: { trackId: "a", playing: true, positionMs: 30_000, at: 1000, pending },
 });
 

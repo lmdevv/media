@@ -1,8 +1,9 @@
 /**
- * The media service's Effect HttpApi: playback negotiation, HLS stream control, player
- * diagnostics, preparing downloads, health, and the connection details apps read. The
- * media service implements it; clients that may use Effect's unstable HTTP modules can derive an
- * `HttpApiClient` from it, and others decode the same schemas from `@media/contracts/media-playback`.
+ * The media service's Effect HttpApi: playback negotiation, HLS stream control, receiver
+ * credentials for casting, player diagnostics, preparing downloads, health, and the connection
+ * details apps read. The media service implements it; clients that may use Effect's unstable HTTP
+ * modules can derive an `HttpApiClient` from it, and others decode the same schemas from
+ * `@media/contracts/media-playback` and `@media/contracts/cast`.
  *
  * Media bytes (direct files, HLS playlists and segments, WebVTT, artwork, and music's songs and
  * art, whose paths `@media/contracts/music-playback` declares) are plain routes on the media
@@ -12,6 +13,7 @@
  */
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/http-api";
 
+import { CAST_ROUTES, ReceiverErrors, ReceiverRequest, ReceiverResponse } from "./cast";
 import {
   ClientDiagnosticsErrors,
   ClientDiagnosticsRequest,
@@ -35,7 +37,10 @@ import {
   StopRequestText,
 } from "./media-playback";
 
-/** Playback negotiation, HLS stream control, and the events players report. */
+/**
+ * Playback negotiation, HLS stream control, receiver credentials for casting, and the events
+ * players report.
+ */
 export class PlaybackGroup extends HttpApiGroup.make("playback").add(
   HttpApiEndpoint.post("negotiate", MEDIA_ROUTES.negotiate, {
     payload: NegotiateRequest,
@@ -51,6 +56,11 @@ export class PlaybackGroup extends HttpApiGroup.make("playback").add(
     payload: [StopRequest, StopRequestText.pipe(HttpApiSchema.asText())],
     success: HttpApiSchema.NoContent,
     error: StopErrors,
+  }),
+  HttpApiEndpoint.post("receiver", CAST_ROUTES.receiver, {
+    payload: ReceiverRequest,
+    success: ReceiverResponse,
+    error: ReceiverErrors,
   }),
   HttpApiEndpoint.post("diagnostics", DIAGNOSTICS_ROUTES.clientEvents, {
     payload: ClientDiagnosticsRequest,

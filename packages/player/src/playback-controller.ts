@@ -3,7 +3,13 @@ import type { FollowerPlayerEvent } from "@media/contracts/follower-policy";
 import type { MusicStreamProfile } from "@media/contracts/music-playback";
 import { Effect, Exit, Fiber, Result } from "effect";
 
-import type { EngineErrorReason, EngineEvent, EngineKind, PlayerEngine } from "./engine";
+import type {
+  EngineErrorReason,
+  EngineEvent,
+  EngineKind,
+  LocalEngineKind,
+  PlayerEngine,
+} from "./engine";
 import { messageOf } from "./failure";
 import { livePosition } from "./live-position";
 import type { PositionSnapshot } from "./live-position";
@@ -87,7 +93,7 @@ export interface ControllerSnapshot {
   readonly mediaOnline: boolean;
   readonly quality: StreamQuality;
   readonly autoplayBlocked: boolean;
-  /** The engine that plays (or will play) the audio here. */
+  /** The engine that plays (or will play) the audio: one of this device's own, or `cast`. */
   readonly engine: EngineKind;
   readonly volume: number;
   /**
@@ -106,6 +112,11 @@ export interface ControllerSnapshot {
    * the song failed. Moving on to the preloaded song by itself keeps the load.
    */
   readonly ready: LoadedReady | null;
+  /**
+   * The Cast receiver this device plays through, by its name (null when it has none), or null
+   * while this device plays itself (ADR 0018).
+   */
+  readonly cast: { readonly receiver: string | null } | null;
 }
 
 /** Where an entry of a group session stands on its clock now, and whether the session plays. */
@@ -130,6 +141,26 @@ export interface SessionMode {
   readonly startAt: (itemId: string) => SessionStart;
   /** The lock screen's and media keys' moves, which go to the session. */
   readonly controls: MediaSessionHandlers;
+}
+
+/** The engine of a Cast receiver, which keeps a volume of its own that its own remote changes. */
+export interface ReceiverEngine extends PlayerEngine {
+  /** The receiver's volume now, from 0 to 1. */
+  volume(): number;
+  /** Calls `listener` with the receiver's volume each time it changes. Returns the stop. */
+  watchVolume(listener: (volume: number) => void): () => void;
+}
+
+/**
+ * A Cast receiver this device drives, which plays the queue instead of this device's own engine
+ * (ADR 0018). The controller loads each song into its engine as into its own.
+ */
+export interface Receiver {
+  readonly engine: ReceiverEngine;
+  /** The receiver's name, as the sender reads it off the device; null when it has none. */
+  readonly name: string | null;
+  /** The stream profile a song plays at on the receiver. */
+  readonly profileFor: (track: Track) => MusicStreamProfile;
 }
 
 /** What this device plays, as Connect hears it (ADR 0018). */
@@ -160,7 +191,7 @@ export type QueueCurrent =
 export interface EngineFactory {
   /** What the gapless MSE engine can play here, or null when it cannot run (HTML audio only). */
   readonly mse: MseSupport | null;
-  readonly create: (kind: EngineKind) => PlayerEngine;
+  readonly create: (kind: LocalEngineKind) => PlayerEngine;
 }
 
 /**
@@ -400,6 +431,13 @@ export class PlaybackController {
   /** Session followers listening for the events of the entry each follows. */
   readonly #followers = new Set<FollowerListener>();
   #unsubscribeEngine: (() => void) | null = null;
+  /** The Cast receiver the queue plays through instead of this device's engine; null for none. */
+  #receiver: Receiver | null = null;
+  /** The volume of this device's own engine, which a receiver's volume never replaces. */
+  #localVolume: number;
+  /** The entry whose play goes on through another output; its next load records no new play. */
+  #continuing: string | null = null;
+  #unwatchVolume: () => void = () => {};
   #healthFiber: Fiber.Fiber<void, unknown> | null = null;
   #stop: (() => void) | null = null;
 
@@ -415,7 +453,8 @@ export class PlaybackController {
     this.#env = env;
     this.#gapless = env.settings.gapless;
     this.#resumeAt = env.resume.load();
-    const engine = this.#engineFor(env.settings.quality);
+    this.#localVolume = env.settings.volume;
+    const engine = this.#localEngineFor(env.settings.quality);
     this.#engine = engines.create(engine);
     this.#engine.setVolume(env.settings.volume);
 
@@ -430,6 +469,7 @@ export class PlaybackController {
       current: null,
       seeks: 0,
       ready: null,
+      cast: null,
     };
   }
 
@@ -550,9 +590,14 @@ export class PlaybackController {
 
   /** Follows the settings after they changed on the server or on another device. */
   applySettings(settings: PlayerSettings): void {
-    if (settings.volume !== this.#snapshot.volume) {
-      this.#engine.setVolume(settings.volume);
-      this.#update({ volume: settings.volume });
+    if (settings.volume !== this.#localVolume) {
+      this.#localVolume = settings.volume;
+
+      // A receiver keeps its own volume; this device's applies once it plays itself again.
+      if (this.#receiver === null) {
+        this.#engine.setVolume(settings.volume);
+        this.#update({ volume: settings.volume });
+      }
     }
 
     if (settings.quality !== this.#snapshot.quality) this.#takeQuality(settings.quality);
@@ -1054,13 +1099,56 @@ export class PlaybackController {
     if (this.#snapshot.current === fromItemId) this.#update({ current: toItemId });
   }
 
-  /** Sets the volume here at once and saves it on this device. */
+  /**
+   * Sets the volume here at once and saves it on this device, or sets the Cast receiver's while
+   * the queue plays through one, which this device does not keep.
+   */
   setVolume(volume: number): void {
     const value = Math.min(1, Math.max(0, volume));
 
     this.#engine.setVolume(value);
     this.#update({ volume: value });
+
+    if (this.#receiver !== null) return;
+    this.#localVolume = value;
     this.#env.saveVolume(value);
+  }
+
+  /**
+   * Plays through `receiver` from now on, or through this device's own engine again for null, as
+   * a Cast session starts or ends (ADR 0018). The song loaded here moves to the new output at the
+   * place it reached, playing or paused as it was, and counts as the same play; the queue and
+   * Connect's requests stay as they were. Whatever the old output says from then on, about the song
+   * it held, changes nothing.
+   */
+  castTo(receiver: Receiver | null): void {
+    if (receiver === this.#receiver) return;
+
+    const loaded = this.#loaded;
+    const positionMs = Math.round(this.#livePositionMs());
+
+    this.#receiver = receiver;
+    this.#unwatchVolume();
+    this.#unwatchVolume =
+      receiver === null
+        ? () => {}
+        : receiver.engine.watchVolume((volume) => {
+            this.#update({ volume });
+          });
+    this.#generation += 1;
+    this.#loading = false;
+    this.#installEngine(this.#wantedEngine());
+    this.#update({ cast: receiver === null ? null : { receiver: receiver.name } });
+
+    if (loaded === null) {
+      this.#stamp(positionMs, false);
+
+      return;
+    }
+
+    this.#loaded = null;
+    this.#continuing = loaded.reported ? loaded.entry.itemId : null;
+    void this.#load(loaded.entry, positionMs);
   }
 
   /** Saves the quality setting. It applies from the next song so the current one never skips. */
@@ -1666,7 +1754,8 @@ export class PlaybackController {
       next.current === current.current &&
       next.seeks === current.seeks &&
       next.ready?.itemId === current.ready?.itemId &&
-      next.ready?.load === current.ready?.load;
+      next.ready?.load === current.ready?.load &&
+      next.cast === current.cast;
 
     if (unchanged) return;
     this.#snapshot = next;
@@ -1707,8 +1796,12 @@ export class PlaybackController {
     return status === "playing" || status === "buffering";
   }
 
-  #engineFor(quality: StreamQuality): EngineKind {
+  #localEngineFor(quality: StreamQuality): LocalEngineKind {
     return this.#gapless ? chooseEngine(quality, this.#engines.mse, this.#mseFailed) : "html";
+  }
+
+  #engineFor(quality: StreamQuality): EngineKind {
+    return this.#receiver === null ? this.#localEngineFor(quality) : "cast";
   }
 
   #wantedEngine(): EngineKind {
@@ -1716,13 +1809,33 @@ export class PlaybackController {
   }
 
   #useEngine(kind: EngineKind): void {
-    if (kind === this.#snapshot.engine) return;
+    if (kind !== this.#snapshot.engine) this.#installEngine(kind);
+  }
+
+  /** Makes the engine of `kind` the one that plays: the receiver's, or a new one of this device. */
+  #installEngine(kind: EngineKind): void {
     this.#engine.unload();
     const listening = this.#unsubscribeEngine !== null;
     this.#unsubscribeEngine?.();
-    this.#engine = this.#engines.create(kind);
+    const receiver = this.#receiver;
+
+    this.#engine =
+      receiver !== null && kind === "cast"
+        ? receiver.engine
+        : this.#engines.create(
+            kind === "cast" ? this.#localEngineFor(this.#snapshot.quality) : kind,
+          );
     this.#unsubscribeEngine = listening ? this.#engine.subscribe(this.#onEngineEvent) : null;
-    this.#engine.setVolume(this.#snapshot.volume);
+
+    // A receiver keeps the volume it has, which the controls then show; this device's own engine
+    // plays at this device's.
+    if (receiver !== null && kind === "cast") {
+      this.#update({ volume: receiver.engine.volume() });
+    } else {
+      this.#engine.setVolume(this.#localVolume);
+      this.#update({ volume: this.#localVolume });
+    }
+
     this.#engine.setPlaybackRate?.(this.#rate);
     this.#preloaded = null;
     this.#update({ engine: kind });
@@ -1787,6 +1900,10 @@ export class PlaybackController {
     const generation = this.#generation;
     const { track } = entry;
 
+    const continuing = this.#continuing === entry.itemId;
+
+    this.#continuing = null;
+
     try {
       this.#loaded = {
         entry,
@@ -1795,7 +1912,7 @@ export class PlaybackController {
         renewAt: null,
         playbackId: null,
         origin: null,
-        reported: false,
+        reported: continuing,
       };
       this.#stamp(startMs, false);
       // While the media server is away only a copy on this device plays, as old music's player
@@ -1856,7 +1973,7 @@ export class PlaybackController {
         renewAt: resolved.renewAt,
         playbackId: resolved.playbackId,
         origin: resolved.origin,
-        reported: false,
+        reported: continuing,
       };
 
       // The song starts where the listener left it, however long its ticket took: no clock is
@@ -1948,6 +2065,11 @@ export class PlaybackController {
 
   #profileFor(track: Track, engine: EngineKind): MusicStreamProfile {
     const support = this.#engines.mse;
+    const receiver = this.#receiver;
+
+    if (engine === "cast" && receiver !== null) {
+      return this.#transcode.has(track.id) ? "aac-320" : receiver.profileFor(track);
+    }
 
     if (engine === "mse" && support !== null) {
       return chooseGaplessProfile(this.#snapshot.quality, track.lossless, support);

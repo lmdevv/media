@@ -104,6 +104,14 @@ export interface Interface {
     within?: Within,
   ) => Effect.Effect<PlaybackGrant, TokenRefused>;
   /**
+   * A receiver credential for the playback `token` starts, for a Cast receiver's URLs in the
+   * ticket's place (ADR 0011): `token` is admitted as a start, for play, and the credential then
+   * reads and continues that playback alone, only with `within` set, while the playback's
+   * admission stands and its session is live. It never starts a stream. Lending again for one
+   * playback replaces the credential lent before. Fails like `authorize`.
+   */
+  readonly lend: (token: Redacted.Redacted) => Effect.Effect<Redacted.Redacted, TokenRefused>;
+  /**
    * The grant of a valid streaming token, even once its session ended: a player's last reports
    * about a session arrive as it ends. Fails with `PlaybackTokenInvalid` like `verify`.
    */
@@ -149,6 +157,7 @@ export const layerRefusing: Layer.Layer<Service> = Layer.succeed(
     verify: () => Effect.fail(refused),
     authorize: () =>
       Effect.fail(new TokenRefused({ error: refused, sessionForLog: Option.none() })),
+    lend: () => Effect.fail(new TokenRefused({ error: refused, sessionForLog: Option.none() })),
     verifyReport: () => Effect.fail(refused),
   }),
 );

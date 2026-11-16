@@ -1,6 +1,7 @@
-import { moveArrived } from "@media/player/connect-devices";
+import { deviceKind, moveArrived } from "@media/player/connect-devices";
 import type { Device, DeviceKind } from "@media/player/connect-devices";
-import { LaptopIcon, SmartphoneIcon } from "lucide-react";
+import type { Player } from "@media/player/react";
+import { CastIcon, LaptopIcon, SmartphoneIcon } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 import { toastFailure } from "@/lib/action";
@@ -30,6 +31,24 @@ const DEVICE_ICONS: Readonly<Record<DeviceKind, LucideIcon>> = {
 
 /** The icon for a device of `kind`: a laptop for a browser, a phone for the phone app. */
 export const deviceIcon = (kind: DeviceKind): LucideIcon => DEVICE_ICONS[kind];
+
+/**
+ * Where the music plays when it is not this browser's own speakers: the device the player follows,
+ * or the Chromecast this browser plays through; null while it plays here or nowhere.
+ */
+export const playingElsewhere = (
+  player: Pick<Player, "remote" | "cast" | "here">,
+): { readonly name: string; readonly Icon: LucideIcon } | null => {
+  if (player.remote !== null) {
+    return { name: player.remote.name, Icon: deviceIcon(deviceKind(player.remote.name)) };
+  }
+
+  if (player.cast !== null && player.here) {
+    return { name: player.cast.receiver ?? "your TV", Icon: CastIcon };
+  }
+
+  return null;
+};
 
 /** Where a move from the Play on list is headed: this browser, or another device. */
 export type MoveTarget = "here" | { readonly device: string };

@@ -14,6 +14,7 @@ import { formatTimecode } from "@media/ui/lib/timecode";
 import { cn } from "@media/ui/lib/utils";
 import {
   CaptionsIcon,
+  CastIcon,
   GalleryVerticalEndIcon,
   ListVideoIcon,
   LockIcon,
@@ -25,7 +26,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
-import type { ComponentProps, ReactNode } from "react";
+import type { ComponentProps, ReactElement, ReactNode } from "react";
 
 function GlassButton({
   className,
@@ -240,6 +241,7 @@ export function PhoneControls({
   onVolumeCommit,
   locked,
   onRoom,
+  castMenu,
 }: {
   readonly title: string;
   readonly playing: boolean;
@@ -268,6 +270,8 @@ export function PhoneControls({
   readonly locked?: string | undefined;
   /** Opens Watch together; omit to hide the button. */
   readonly onRoom?: (() => void) | undefined;
+  /** Wraps the cast button in the cast menu, where this browser can play elsewhere. */
+  readonly castMenu?: ((trigger: ReactElement) => ReactNode) | undefined;
 }) {
   return (
     <div className="on-media absolute inset-0 bg-linear-to-b from-dark-bg/55 via-dark-bg/25 via-35% to-dark-bg/75 font-sans">
@@ -278,11 +282,18 @@ export function PhoneControls({
         <p className="pointer-events-none absolute inset-x-0 top-7 text-center text-body/5 font-semibold text-text">
           {title}
         </p>
-        {onRoom === undefined ? null : (
-          <GlassButton aria-label="Watch together" onClick={onRoom} className="relative">
-            <UsersIcon strokeWidth={1.75} aria-hidden />
-          </GlassButton>
-        )}
+        <div className="relative flex gap-2.5">
+          {onRoom === undefined ? null : (
+            <GlassButton aria-label="Watch together" onClick={onRoom} className="relative">
+              <UsersIcon strokeWidth={1.75} aria-hidden />
+            </GlassButton>
+          )}
+          {castMenu?.(
+            <GlassButton aria-label="Cast">
+              <CastIcon strokeWidth={1.75} aria-hidden />
+            </GlassButton>,
+          )}
+        </div>
       </div>
       <div className="absolute inset-x-0 top-1/2 flex -translate-y-1/2 items-center justify-center gap-16">
         {locked === undefined ? (

@@ -43,6 +43,7 @@ import { useThemeColor, useThemeLength } from "@/lib/theme-color";
 import { whereItPlays } from "@/lib/this-device";
 import { useWindowLayout } from "@/lib/window-layout";
 import { useNowPlaying, usePlayer } from "@/player";
+import { AirPlayButton } from "@/player/audio-route";
 import type { NowPlaying, RemoteDevice } from "@/player";
 
 import { LyricsPanel } from "./lyrics";
@@ -395,10 +396,13 @@ function ActionRow({
   readonly onPanel: (panel: Panel) => void;
 }) {
   const queueOpen = selected === "queue";
+  // In a Jam the phone offers no AirPlay button, as old music offered none there (ADR 0018).
+  const inJam = useMusicSession().view?.state === "joined";
 
   return (
     <View className="flex-row items-center justify-between pt-4">
       <View className="w-ios-88 flex-row items-center">
+        {inJam ? null : <AirPlayButton />}
         <JamButton />
       </View>
       <DeviceButton remote={remote} />

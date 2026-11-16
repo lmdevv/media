@@ -1,5 +1,6 @@
-import { deviceKind } from "@media/player/connect-devices";
+import { deviceKind, outputLabel } from "@media/player/connect-devices";
 import type { DeviceKind } from "@media/player/connect-devices";
+import type { ConnectOutput } from "@media/player/connect-player";
 
 import { HERE } from "./transfer";
 import type { MoveEnd, MoveTarget, Transfer } from "./transfer";
@@ -13,7 +14,8 @@ export interface DeviceRow {
   /** `This iPhone` or `This iPad` for this device, else the device's own name. */
   readonly name: string;
   readonly kind: DeviceKind;
-  readonly status: "Playing now" | "Online";
+  /** `Playing now` or `Online`, or for a device that drives a receiver, `Casting to <TV>`. */
+  readonly status: string;
   /** Playback is here: accent title and a check. */
   readonly current: boolean;
   readonly thisPhone: boolean;
@@ -39,8 +41,12 @@ export type DeviceSheet =
 export interface DeviceSheetInput {
   /** What this device is; its own row reads `This iPad` or `This iPhone`. */
   readonly family: DeviceFamily;
-  /** The person's other devices that are online now, by name (ADR 0018). */
-  readonly devices: ReadonlyArray<{ readonly id: string; readonly name: string }>;
+  /** The person's other devices that are online now, by name, and where each one's sound goes. */
+  readonly devices: ReadonlyArray<{
+    readonly id: string;
+    readonly name: string;
+    readonly output: ConnectOutput;
+  }>;
   /** The device that plays: `HERE` while a song is loaded on this phone, another's id, or null. */
   readonly active: MoveTarget | null;
   readonly transfer: Transfer;
@@ -54,7 +60,8 @@ const ONLINE = "Online";
  * The sheet for the person's devices and the move in progress: this phone first, then the device
  * that plays, then the rest by name. With nothing playing anywhere, this phone is the current one.
  * A move shows the devices it went from and to, as listed when it started, even once one of them
- * leaves the list, as old music's sheet, which listed offline devices too, showed them.
+ * leaves the list, as old music's sheet, which listed offline devices too, showed them. A device
+ * that casts or AirPlays says so in place of its status (ADR 0018).
  */
 export const deviceSheet = ({
   family,
@@ -74,12 +81,13 @@ export const deviceSheet = ({
   const rowOf = ({ target, name }: MoveEnd): DeviceRow => {
     if (target === HERE) return phone;
     const playing = target === active;
+    const output = devices.find((device) => device.id === target)?.output;
 
     return {
       target,
       name,
       kind: deviceKind(name),
-      status: playing ? PLAYING : ONLINE,
+      status: (output === undefined ? null : outputLabel(output)) ?? (playing ? PLAYING : ONLINE),
       current: playing,
       thisPhone: false,
     };

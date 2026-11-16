@@ -3,7 +3,8 @@
 - Status: Accepted, 2026-11-03. Amended 2026-11-04 with the format as built and with how long
   playback and Cast keep their ticket, and 2026-11-10 with the server's admission of tickets, and
   again the same day with the movies client's side. `legacy/music`, whose files it cites, was
-  deleted 2026-11-15; read them at `bd7462a7`.
+  deleted 2026-11-15; read them at `bd7462a7`. Amended 2026-11-15 with receiver credentials, which
+  a Cast receiver's URLs carry in place of the ticket.
 - Decisions: D26, D46
 
 ## Context
@@ -237,3 +238,69 @@ it was given, get a new ticket. D46 settles the principle, and this section sett
   value shaped like an artwork key, since a stream's codec `profile` has the same name. A key that
   appears twice in one result is signed once. Stored rows and server functions keep bare keys.
 - **`artworkTicketId` moved to `@media/contracts/ticket`**, beside the rest of the ticket format.
+
+## Receiver credentials (amended 2026-11-15)
+
+`p6-cast` brought casting back. A Chromecast running Google's default receiver fetches its media
+by URL and runs none of our code, so whatever its URLs carry, the TV holds, and so might its logs
+and the network between. A personal ticket there could start a new stream of its file for up to 6
+hours. So a receiver never gets the ticket: its URLs carry a receiver credential the media server
+lends for the start, which continues only that start's playback and starts nothing.
+
+### Decision
+
+- **Lending.** A sender asks `POST /api/playback/receiver` (`CAST_ROUTES.receiver` in
+  `@media/contracts/cast`) with its start's ticket. The server admits the ticket as a start: for
+  `play`, unexpired, with a live session, as a negotiation does. It answers a receiver credential,
+  `r1.` and 32 random bytes in unpadded base64url, which it keeps in memory beside the playback the
+  ticket started. Lending again for one playback replaces the credential lent before, so a sender
+  lends once per start and reuses it.
+- **Where it goes.** The credential goes where the ticket went: the `ticket` parameter of each URL
+  the receiver loads (`withReceiverCredential`). A playlist copies whatever arrived in that
+  parameter onto its segment URLs, so the receiver's segments carry it too.
+- **What it admits.** Only requests with `within` set: a request of a stream its playback owns
+  (a playlist, a segment), or a read of its playback's file (direct play, subtitles, a song's
+  stream). It never starts anything: a negotiation, a seek, a stop, a download, and another
+  lending refuse it, and so does a stream another playback owns.
+- **How long it lasts.** As long as its playback's admission, while the session is live. Each
+  request checks the session, an open response ends when the session does, and the sweep that
+  forgets a playback (its ticket expired, no open stream, idle for `STREAM_IDLE_SECONDS`) forgets
+  its credential with it. A server restart forgets every one.
+- **Music.** The song route reads a song for a receiver credential as a read of its start: the
+  credential reads only the song its start's ticket names, while the start is admitted, where a
+  ticket needs to be unexpired on every request.
+- **Logs.** Log redaction removes any credential-shaped text and the `ticket` parameter, and the
+  server stack test greps the log for both.
+
+### Consequences
+
+- A leaked receiver URL starts nothing at all, and continues nothing once the session ends or the
+  playback goes idle past its ticket.
+- A paused cast that the server forgot, as after a pause that outlasts the idle time past the
+  ticket's 6 hours, or a server restart, fails on the receiver's next request. The music sender
+  sees the receiver fail, starts the song again with a new ticket, lends again, and loads where
+  the TV was, as "Long playback and Cast" above has it. The movies sender hands playback back to
+  the page, as old movies did when a TV's media failed, and the page starts again with a new
+  ticket; casting again continues on the TV.
+- The movies sender negotiates the receiver's stream with its own ticket and lends with the same
+  ticket. A change after the ticket expired, such as another audio track hours in, takes a new
+  `movies.play.start` while the TV plays, which the page's controller makes for it
+  (`startHandedOff`), then a new lending.
+- The music sender lends for each song's start, since each song has its own ticket.
+
+### Alternatives rejected
+
+- The ticket in the receiver's URLs, as before this amendment. A TV would hold a credential that
+  starts streams.
+- A shareable ticket for receivers. It names no session, so revoking the session could not stop
+  the cast.
+- A signed receiver credential, verifiable without server memory. It would outlive its playback
+  and need its own expiry, where an in-memory one ends with the admission it continues.
+- Lending as renewal. The core still issues every ticket; a credential is narrower than the ticket
+  it was lent for and never outlives the playback that ticket started.
+
+### Edge cases settled
+
+- A credential lent before the receiver reloads for a new generation stays valid: the new
+  playlist URL gets the same credential in place of the ticket the seek answered with.
+- A credential presented to the lending route, or with a download purpose, is refused.

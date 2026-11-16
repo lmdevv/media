@@ -6,6 +6,7 @@ import type {
   ConnectClock,
   ConnectCommands,
   ConnectItem,
+  ConnectOutput,
   ReportedSong,
 } from "./connect-player";
 import type { SessionMode } from "./playback-controller";
@@ -80,9 +81,12 @@ const connected = (
     },
   };
 
+  const outputs: Array<ConnectOutput> = [];
+
   const commands: ConnectCommands = {
-    report: async (reported, applied) => {
+    report: async (reported, applied, output) => {
       reports.push({ song: reported, applied });
+      outputs.push(output);
 
       return run.clock.now + (options.serverAheadMs ?? 0);
     },
@@ -105,7 +109,7 @@ const connected = (
   const connect = new ConnectPlayer(run.controller, commands, clock);
   const stop = connect.start();
 
-  return { ...run, connect, reports, albumGate, beats, stopConnect: stop };
+  return { ...run, connect, reports, outputs, albumGate, beats, stopConnect: stop };
 };
 
 const ask = (revision: number, asked: ConnectAsk) => ({ revision, ask: asked });
@@ -200,6 +204,29 @@ describe("PlaybackController for Connect", () => {
 });
 
 describe("ConnectPlayer", () => {
+  it("names where its sound goes in every report, and reports at once when that changes", async () => {
+    const run = connected();
+
+    await playing(run);
+    expect(run.outputs.at(-1)).toStrictEqual({ kind: "local" });
+
+    const before = run.reports.length;
+
+    run.connect.setOutput({ kind: "cast", receiver: "Living Room TV" });
+    run.connect.setOutput({ kind: "cast", receiver: "Living Room TV" });
+
+    expect(run.reports).toHaveLength(before + 1);
+    expect(run.outputs.at(-1)).toStrictEqual({ kind: "cast", receiver: "Living Room TV" });
+
+    run.controller.castTo(run.receiver("Living Room TV"));
+    await settle();
+    run.beats[0]?.fire();
+
+    expect(run.outputs.at(-1)).toStrictEqual({ kind: "cast", receiver: "Living Room TV" });
+    expect(last(run.reports)?.song).toMatchObject({ trackId: "a", playing: true });
+    run.stopConnect();
+  });
+
   it("reports at start, on each change, and on the heartbeat, but not as the song plays on", async () => {
     const run = connected();
 

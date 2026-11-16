@@ -3,13 +3,13 @@ import { createServer } from "node:http";
 
 import { StartedPlayback } from "@media/contracts/models/playback";
 import { Milliseconds } from "@media/contracts/units";
-import { Effect, Exit, Fiber, Layer, Option, Predicate, Schema, Stream } from "effect";
+import { Effect, Exit, Fiber, Layer, Option, Predicate, Redacted, Schema, Stream } from "effect";
 import type { Scope } from "effect";
 import { TestClock } from "effect/testing";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { MediaOrigin } from "./media-http";
-import { autoplayCountdown, negotiate, stop, stopNow } from "./playback";
+import { autoplayCountdown, lendToReceiver, negotiate, stop, stopNow } from "./playback";
 
 const started = Schema.decodeSync(StartedPlayback)({
   sessionId: "session-1",
@@ -65,6 +65,28 @@ const PUBLIC_URL = "http://movies.invalid:18480";
 
 const STREAM_ID = "stream-0123456789abcde";
 
+const CREDENTIAL = `r1.${"A".repeat(43)}`;
+
+/** A negotiation's answer: a remuxed stream. */
+const NEGOTIATED = {
+  mode: "remux",
+  url: `${PUBLIC_URL}/media/hls/${STREAM_ID}/0/index.m3u8?token=t`,
+  streamId: STREAM_ID,
+  generation: 0,
+  startSeconds: 0,
+  durationSeconds: 600,
+  video: { codec: "h264", width: 1920, height: 1080, dynamicRange: "sdr" },
+  subtitles: [],
+  expiresAt: 1_760_000_000_000,
+};
+
+/** What the media server answers on the route `url`; null for any other. */
+const answerTo = (url: string | undefined) => {
+  if (url === "/api/playback/receiver") return { credential: CREDENTIAL };
+
+  return url === "/api/playback/negotiate" ? NEGOTIATED : null;
+};
+
 const mediaServer = createServer((request: IncomingMessage, response: ServerResponse) => {
   let text = "";
 
@@ -77,20 +99,7 @@ const mediaServer = createServer((request: IncomingMessage, response: ServerResp
     receivedBodies.push(text);
     receivedTypes.push(request.headers["content-type"] ?? "");
 
-    const body =
-      request.url === "/api/playback/negotiate"
-        ? {
-            mode: "remux",
-            url: `${PUBLIC_URL}/media/hls/${STREAM_ID}/0/index.m3u8?token=t`,
-            streamId: STREAM_ID,
-            generation: 0,
-            startSeconds: 0,
-            durationSeconds: 600,
-            video: { codec: "h264", width: 1920, height: 1080, dynamicRange: "sdr" },
-            subtitles: [],
-            expiresAt: 1_760_000_000_000,
-          }
-        : null;
+    const body = answerTo(request.url);
 
     response.writeHead(200, { "content-type": "application/json" });
     response.end(JSON.stringify(body));
@@ -154,6 +163,22 @@ describe("reaching the media service", () => {
 
     expect(received).toStrictEqual(["/api/playback/negotiate", "/api/playback/stop"]);
     expect(url).toBe(`${PUBLIC_URL}/media/hls/${STREAM_ID}/0/index.m3u8?token=t`);
+  });
+});
+
+describe("lending a Cast receiver a credential", () => {
+  it("sends the start's ticket and answers the credential, kept redacted", async () => {
+    received.length = 0;
+    receivedBodies.length = 0;
+
+    const credential = await Effect.runPromise(
+      lendToReceiver({ mediaBaseUrl: mediaServiceUrl, token: started.token }),
+    );
+
+    expect(received).toStrictEqual(["/api/playback/receiver"]);
+    expect(JSON.parse(receivedBodies[0] ?? "")).toStrictEqual({ token: started.token });
+    expect(Redacted.value(credential)).toBe(CREDENTIAL);
+    expect(JSON.stringify({ credential })).not.toContain(CREDENTIAL);
   });
 });
 

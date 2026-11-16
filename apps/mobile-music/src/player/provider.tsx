@@ -117,6 +117,7 @@ import {
   statusOf,
 } from "./player-state";
 import type { NowPlaying, PlayerStatus, PlayerView, QueueItem, RemoteDevice } from "./player-state";
+import { useAudioOutput } from "./audio-route";
 
 const POSITION_INTERVAL_MS = 250;
 
@@ -1440,9 +1441,12 @@ export function PlayerProvider({ children }: { readonly children: ReactNode }) {
   useHandBack(platform, phone, online, playing, setMode);
   useReachWhileAudible(playing);
 
+  const output = useAudioOutput();
+
   const connected = useConnect(platform, controller, snapshot, {
     locks: undefined,
     onCore: mode === "server",
+    output,
   });
 
   const inSession = follow === null ? null : sessionView?.state === "joined" ? sessionView : null;

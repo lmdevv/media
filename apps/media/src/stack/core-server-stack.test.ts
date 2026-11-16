@@ -1,6 +1,13 @@
 import { join } from "node:path";
 
 import {
+  CAST_ROUTES,
+  ReceiverRequest,
+  ReceiverResponse,
+  castCapabilities,
+  isReceiverCredential,
+} from "@media/contracts/cast";
+import {
   type ClientCapabilities,
   MEDIA_ROUTES,
   NegotiateRequest,
@@ -45,6 +52,25 @@ const decodeNegotiated = Schema.decodeUnknownSync(Schema.toCodecJson(NegotiateRe
 
 const Issued = Schema.Struct({ ticket: Schema.String, expiresAt: Schema.Finite });
 
+const encodeReceiver = Schema.encodeSync(Schema.toCodecJson(ReceiverRequest));
+
+const decodeReceiver = Schema.decodeUnknownSync(Schema.toCodecJson(ReceiverResponse));
+
+/** Asks the server for a receiver credential for the start `ticket` names. */
+const lend = async (ticket: string): Promise<string> => {
+  const response = await fetch(`${server.baseUrl}${CAST_ROUTES.receiver}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(encodeReceiver({ token: Redacted.make(ticket) })),
+  });
+
+  const body: unknown = await response.json();
+
+  expect(response.status).toBe(200);
+
+  return Redacted.value(decodeReceiver(body).credential);
+};
+
 let scope: Scope.Closeable;
 
 let workDir = "";
@@ -72,12 +98,12 @@ const titlesOf = (platform: Platform.Interface, id: Platform.Id<"libraries">) =>
 const sessionIdOf = async (platform: Platform.Interface): Promise<string> =>
   (await run(platform.core.auth.sessions.current())).sessionId;
 
-const negotiate = async (ticket: string) => {
+const negotiate = async (ticket: string, capabilities: ClientCapabilities = smallScreen) => {
   const response = await fetch(`${server.baseUrl}${MEDIA_ROUTES.negotiate}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(
-      encodeNegotiate({ token: Redacted.make(ticket), capabilities: smallScreen, startSeconds: 0 }),
+      encodeNegotiate({ token: Redacted.make(ticket), capabilities, startSeconds: 0 }),
     ),
   });
 
@@ -385,6 +411,67 @@ describe.skipIf(core === undefined || !(await ffmpegAvailable()))(
       expect(Date.now() - signedOutAt).toBeLessThan(30_000);
     }, 90_000);
 
+    it("plays a Cast receiver's stream on a receiver credential, never the ticket, until sign-out", async () => {
+      const viewer = await personIn(scope, "admin", "caster");
+      const viewerId = (await run(viewer.platform.core.auth.sessions.current())).userId;
+
+      await run(
+        admin.platform.core.permissions.grants.set({
+          resource: { type: "library", id: library() },
+          principal: { kind: "user", userId: viewerId },
+          level: "view",
+        }),
+      );
+
+      const title = (await titlesOf(viewer.platform, library())).find(
+        (found) => found.name === "HDR Fixture",
+      );
+
+      if (title === undefined) throw new Error("The caster sees no HDR fixture");
+
+      const started = await run(viewer.platform.movies.play.start({ titleId: title.id }));
+      // HDR HEVC: a Chromecast the web sender cannot name gets an H.264 transcode.
+      const stream = await negotiate(started.ticket, castCapabilities(undefined));
+
+      expect(stream.mode).toMatch(/^transcode-/u);
+      expect(stream.video.codec).toBe("h264");
+
+      const credential = await lend(started.ticket);
+      const receiverUrl = withTicket(stream.url, credential);
+      const playlist = await (await fetch(receiverUrl)).text();
+
+      expect(isReceiverCredential(credential)).toBe(true);
+      expect(playlist).not.toContain(started.ticket);
+      expect(playlist).toContain(encodeURIComponent(credential));
+
+      const segment = await firstSegmentUrl(receiverUrl);
+
+      expect(segment).not.toContain(started.ticket);
+      expect((await fetch(segment)).status).toBe(200);
+      // The credential starts nothing of its own.
+      expect(
+        (
+          await fetch(`${server.baseUrl}${CAST_ROUTES.receiver}`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(encodeReceiver({ token: Redacted.make(credential) })),
+          })
+        ).status,
+      ).toBe(401);
+
+      await run(viewer.platform.session.signOut);
+
+      await eventually(
+        "the receiver's stream stops once the session ends",
+        async () => {
+          const status = (await fetch(segment)).status;
+
+          return status === 200 ? Option.none() : Option.some(status);
+        },
+        30_000,
+      );
+    }, 120_000);
+
     it("asks the core to rescan the library when a file appears in its folder", async () => {
       const added = join(moviesRoot, "Rescan Fixture (2021)", "Rescan Fixture (2021).mp4");
 
@@ -462,6 +549,7 @@ describe.skipIf(core === undefined || !(await ffmpegAvailable()))(
       const lines = server.logged().join("\n");
 
       expect(lines).not.toMatch(/t1\.[a-z0-9]+\.media\./u);
+      expect(lines).not.toMatch(/r1\.[\w-]{43}/u);
       expect(lines).not.toMatch(/mk_[a-z0-9]+\./u);
     });
   },

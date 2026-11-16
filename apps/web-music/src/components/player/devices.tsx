@@ -1,16 +1,21 @@
-import { deviceKind } from "@media/player/connect-devices";
+import { localOnly } from "@media/contracts/cast";
+import { deviceKind, outputLabel } from "@media/player/connect-devices";
 import type { Device } from "@media/player/react";
 import { usePlayer, usePlayerPosition } from "@media/player/react";
 import { useHotkey } from "@tanstack/react-hotkeys";
+import { AirplayIcon, CastIcon } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
+import { useCast } from "@/casting/cast-provider";
+import type { MusicCast } from "@/casting/cast-provider";
 import { useJoinedJam } from "@/components/jam/jam";
 import { JamButton } from "@/components/jam/jam-band";
 import { PlayingBars } from "@/components/library/artwork";
 import { useUi } from "@/components/shell/ui-state";
 import { Spinner } from "@/components/ui/spinner";
+import { MEDIA_BASE_URL } from "@/env";
 import { formatDuration } from "@/lib/format";
 import { HOTKEYS } from "@/lib/hotkeys";
 import { cn } from "@/lib/utils";
@@ -113,14 +118,29 @@ interface RowProps {
   readonly playing: boolean;
   readonly touch: boolean;
   readonly onSelect: () => void;
+  /** An action rather than a place to play, such as connecting a Chromecast. */
+  readonly action?: boolean;
+  readonly disabled?: boolean;
 }
 
-function DeviceRow({ name, detail, Icon, active, isPending, playing, touch, onSelect }: RowProps) {
+function DeviceRow({
+  name,
+  detail,
+  Icon,
+  active,
+  isPending,
+  playing,
+  touch,
+  onSelect,
+  action = false,
+  disabled = false,
+}: RowProps) {
   return (
     <button
       type="button"
-      role="menuitemradio"
-      aria-checked={active}
+      role={action ? "menuitem" : "menuitemradio"}
+      aria-checked={action ? undefined : active}
+      disabled={disabled}
       onClick={onSelect}
       className={cn(
         "flex w-full shrink-0 items-center gap-3 rounded-md border-field border-transparent px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:opacity-(--opacity-disabled)",
@@ -155,16 +175,67 @@ function DeviceRow({ name, detail, Icon, active, isPending, playing, touch, onSe
   );
 }
 
+/** The icon of a device that plays through a receiver, by the receiver's kind. */
+const OUTPUT_ICONS = { cast: CastIcon, airplay: AirplayIcon } as const;
+
+/**
+ * The Chromecast row: connect this browser to a Chromecast, which then plays what plays here, or
+ * stop casting; either closes "Play on". Chrome's connection cannot be cancelled from the page, so
+ * the row waits for it.
+ * A media server open at a local address is out of a Chromecast's reach, which a note says.
+ */
+function ChromecastRow({ cast, touch }: { readonly cast: MusicCast; readonly touch: boolean }) {
+  const { device } = cast;
+  const { closePlayOn } = useUi();
+
+  return (
+    <>
+      <DeviceRow
+        name={device === null ? "Chromecast" : "Stop casting"}
+        detail={
+          device === null
+            ? cast.connecting
+              ? "Connecting…"
+              : "Choose a device"
+            : `Playing on ${device.name ?? "your TV"}`
+        }
+        Icon={CastIcon}
+        active={false}
+        isPending={false}
+        playing={false}
+        touch={touch}
+        action
+        disabled={device === null && cast.connecting}
+        onSelect={() => {
+          // Chrome's device picker opens over the page, or the music comes back here.
+          closePlayOn();
+
+          if (device === null) cast.connect();
+          else cast.disconnect();
+        }}
+      />
+      {localOnly(MEDIA_BASE_URL) ? (
+        <p role="note" className="px-3 pb-1 font-sans text-sm/xs text-text-muted">
+          This server is open at a local address. A Chromecast can't reach it; open [music] at its
+          network address to cast.
+        </p>
+      ) : null}
+    </>
+  );
+}
+
 /**
  * The "Play on" list shared by the desktop popover and the phone sheet: this browser first, then
- * your other devices, with the playing one marked and a move shown as it starts, and the Jam
- * button, as old music's list had. A Jam plays here and offers no other device (ADR 0017).
+ * a Chromecast it can play through, then your other devices, with the playing one marked, each
+ * device's Chromecast or AirPlay receiver named, and a move shown as it starts, and the Jam button,
+ * as old music's list had. A Jam plays here and offers no other device or Chromecast (ADR 0017).
  */
 export function DeviceList({ touch = false }: { readonly touch?: boolean }) {
   const player = usePlayer();
   const jam = useJoinedJam();
   const position = usePlayerPosition();
   const { others, pending, transfer } = useDevices();
+  const cast = useCast();
   const { closePlayOn } = useUi();
   const list = useRef<HTMLDivElement>(null);
 
@@ -178,10 +249,14 @@ export function DeviceList({ touch = false }: { readonly touch?: boolean }) {
   const target = pending?.target ?? null;
   const pendingName = pending?.name ?? "";
 
+  const castingTo = player.cast === null ? null : `Casting to ${player.cast.receiver ?? "your TV"}`;
+
   const hereDetail = (): string => {
-    if (!player.here) return target === "here" ? starting : "Play here";
+    if (!player.here) return target === "here" ? starting : (castingTo ?? "Play here");
 
     if (pending !== null) return `Will pause when ${pendingName} starts`;
+
+    if (castingTo !== null) return castingTo;
 
     return playing ? "Playing" : "Ready";
   };
@@ -196,13 +271,16 @@ export function DeviceList({ touch = false }: { readonly touch?: boolean }) {
       <DeviceRow
         name="This browser"
         detail={hereDetail()}
-        Icon={deviceIcon(thisBrowserKind())}
+        Icon={player.cast === null ? deviceIcon(thisBrowserKind()) : CastIcon}
         active={player.here}
         isPending={target === "here"}
         playing={playing}
         touch={touch}
         onSelect={() => transfer("here")}
       />
+      {jam === null && (cast.available || cast.device !== null) ? (
+        <ChromecastRow cast={cast} touch={touch} />
+      ) : null}
       {others.map((device) => {
         const active = device.id === activeId;
         const isPending = isDevice(target, device.id);
@@ -215,16 +293,18 @@ export function DeviceList({ touch = false }: { readonly touch?: boolean }) {
               : "paused"
             : `will pause when ${pendingName} starts`;
 
+        const { output } = device;
+
         const detail = isPending
           ? starting
-          : `${KIND_LABEL[kind]} · ${active ? state : "active now"}`;
+          : `${outputLabel(output) ?? KIND_LABEL[kind]} · ${active ? state : "active now"}`;
 
         return (
           <DeviceRow
             key={device.id}
             name={device.name}
             detail={detail}
-            Icon={deviceIcon(kind)}
+            Icon={output.kind === "local" ? deviceIcon(kind) : OUTPUT_ICONS[output.kind]}
             active={active}
             isPending={isPending}
             playing={playing}

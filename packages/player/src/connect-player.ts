@@ -49,10 +49,27 @@ export interface ReportedSong {
   readonly positionMs: number;
 }
 
+/**
+ * Where this device's sound goes (ADR 0018): the device itself, or a Chromecast or AirPlay
+ * receiver it drives, by the receiver's name, which is null when the receiver has none.
+ */
+export type ConnectOutput =
+  | { readonly kind: "local" }
+  | { readonly kind: "cast" | "airplay"; readonly receiver: string | null };
+
+const LOCAL: ConnectOutput = { kind: "local" };
+
+const outputKey = (output: ConnectOutput): string =>
+  output.kind === "local" ? "local" : `${output.kind}:${output.receiver ?? ""}`;
+
 /** The core calls the device side of Connect sends. Each rejects with the SDK's tagged errors. */
 export interface ConnectCommands {
   /** `core.connect.player.report`: answers the server time the report landed at. */
-  readonly report: (song: ReportedSong | null, applied: number) => Promise<number>;
+  readonly report: (
+    song: ReportedSong | null,
+    applied: number,
+    output: ConnectOutput,
+  ) => Promise<number>;
   /** An album's songs in order, every page of `music.albums.tracks`. */
   readonly albumTracks: (albumId: string) => Promise<ReadonlyArray<string>>;
 }
@@ -161,10 +178,16 @@ type Standing =
    */
   | { readonly kind: "gone" };
 
-const reportKey = (here: PlayingHere | null, status: string, seeks: number, applied: number) =>
+const reportKey = (
+  here: PlayingHere | null,
+  status: string,
+  seeks: number,
+  applied: number,
+  output: ConnectOutput,
+) =>
   here === null
-    ? `none|${applied}`
-    : `${here.itemId}|${here.trackId}|${here.playing}|${status}|${seeks}|${applied}`;
+    ? `none|${applied}|${outputKey(output)}`
+    : `${here.itemId}|${here.trackId}|${here.playing}|${status}|${seeks}|${applied}|${outputKey(output)}`;
 
 /**
  * This device as a Connect player (ADR 0018): it reports what the controller plays, on every change
@@ -203,6 +226,7 @@ export class ConnectPlayer {
   #load: Load | null = null;
   #runs = 0;
   #reported: string | null = null;
+  #output: ConnectOutput = LOCAL;
   #stop: (() => void) | null = null;
 
   constructor(controller: PlaybackController, commands: ConnectCommands, clock: ConnectClock) {
@@ -219,6 +243,17 @@ export class ConnectPlayer {
   /** The server's time now, as the latest reports' answers show it. */
   serverNow(): number {
     return this.#server.now();
+  }
+
+  /**
+   * Reports where this device's sound goes from now on, as a Cast session or an AirPlay route
+   * starts or ends; a change reports at once.
+   */
+  setOutput(output: ConnectOutput): void {
+    if (outputKey(output) === outputKey(this.#output)) return;
+
+    this.#output = output;
+    this.#report();
   }
 
   /** Whether this device reports and applies requests now, between `start` and its stop. */
@@ -528,7 +563,9 @@ export class ConnectPlayer {
     const here = this.#controller.playingHere();
     const { engineStatus, seeks } = this.#controller.getSnapshot();
 
-    if (reportKey(here, engineStatus, seeks, this.#applied) !== this.#reported) this.#report();
+    if (reportKey(here, engineStatus, seeks, this.#applied, this.#output) !== this.#reported) {
+      this.#report();
+    }
   };
 
   #report(): void {
@@ -537,21 +574,27 @@ export class ConnectPlayer {
     const here = this.#controller.playingHere();
     const { engineStatus, seeks } = this.#controller.getSnapshot();
     const applied = this.#applied;
+    const output = this.#output;
     const sentAt = this.#clock.now();
 
-    this.#reported = reportKey(here, engineStatus, seeks, applied);
+    this.#reported = reportKey(here, engineStatus, seeks, applied, output);
 
     const song =
       here === null
         ? null
         : { trackId: here.trackId, playing: here.playing, positionMs: here.positionMs };
 
-    void this.#send(song, applied, sentAt);
+    void this.#send(song, applied, output, sentAt);
   }
 
-  async #send(song: ReportedSong | null, applied: number, sentAt: number): Promise<void> {
+  async #send(
+    song: ReportedSong | null,
+    applied: number,
+    output: ConnectOutput,
+    sentAt: number,
+  ): Promise<void> {
     try {
-      const serverAt = await this.#commands.report(song, applied);
+      const serverAt = await this.#commands.report(song, applied, output);
 
       this.#server.sample(sentAt, this.#clock.now(), serverAt);
     } catch {

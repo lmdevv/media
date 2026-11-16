@@ -1,4 +1,3 @@
-import { deviceKind } from "@media/player/connect-devices";
 import { usePlayer } from "@media/player/react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -24,7 +23,7 @@ import {
   SkipButton,
   Volume,
 } from "./controls";
-import { deviceIcon, perform } from "./player-actions";
+import { perform, playingElsewhere } from "./player-actions";
 import { barTools } from "./bar-tools";
 import { DeviceList } from "./devices";
 import { shownSurface } from "./play-on";
@@ -213,11 +212,11 @@ function DevicePickerButton() {
 }
 
 function RemoteBand() {
-  const { remote } = usePlayer();
+  const elsewhere = playingElsewhere(usePlayer());
 
-  if (remote === null) return null;
+  if (elsewhere === null) return null;
 
-  const Icon = deviceIcon(deviceKind(remote.name));
+  const { Icon, name } = elsewhere;
 
   return (
     <div
@@ -225,7 +224,7 @@ function RemoteBand() {
       className="flex h-7 shrink-0 items-center justify-end gap-2 bg-accent px-6 text-on-accent"
     >
       <Icon aria-hidden className="size-3.5" />
-      <span className="font-sans text-sm/xs font-semibold">Playing on {remote.name}</span>
+      <span className="font-sans text-sm/xs font-semibold">Playing on {name}</span>
     </div>
   );
 }

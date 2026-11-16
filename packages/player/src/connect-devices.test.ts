@@ -6,6 +6,7 @@ import {
   deviceKind,
   devicePosition,
   moveArrived,
+  outputLabel,
   ownDevices,
   yieldsTo,
 } from "./connect-devices";
@@ -20,6 +21,7 @@ const target = (
   deviceId,
   name: fields.name ?? deviceId,
   mode: "personal",
+  output: { kind: "local" },
   playback: null,
   reportedAt: NOW,
   ...fields,
@@ -40,18 +42,23 @@ const music = (
 const device = (id: string, playing: boolean | null): Device => ({
   id,
   name: id,
+  output: { kind: "local" },
   playback:
     playing === null ? null : { trackId: "a", playing, positionMs: 0, at: NOW, pending: false },
 });
 
 describe("ownDevices", () => {
-  it("lists the person's other personal devices that are online, by name", () => {
+  it("lists the person's other personal devices that are online, by name, with where each one's sound goes", () => {
     const listed = ownDevices(
       [
         target("self"),
         target("tv", { mode: "shared" }),
         target("quiet", { reportedAt: NOW - ONLINE_MS - 1 }),
-        target("phone", { name: "Aiko's iPhone", playback: music("a", true) }),
+        target("phone", {
+          name: "Aiko's iPhone",
+          output: { kind: "airplay", receiver: "Kitchen" },
+          playback: music("a", true),
+        }),
         target("laptop", { name: "Firefox on Linux", reportedAt: NOW - ONLINE_MS }),
       ],
       "self",
@@ -62,9 +69,10 @@ describe("ownDevices", () => {
       {
         id: "phone",
         name: "Aiko's iPhone",
+        output: { kind: "airplay", receiver: "Kitchen" },
         playback: { trackId: "a", playing: true, positionMs: 1000, at: NOW, pending: false },
       },
-      { id: "laptop", name: "Firefox on Linux", playback: null },
+      { id: "laptop", name: "Firefox on Linux", output: { kind: "local" }, playback: null },
     ]);
   });
 
@@ -104,6 +112,7 @@ describe("activeDevice", () => {
 const holding = (pending: boolean): Device => ({
   id: "desk",
   name: "Chrome on Linux",
+  output: { kind: "local" },
   playback: { trackId: "a", playing: true, positionMs: 30_000, at: NOW, pending },
 });
 
@@ -127,7 +136,12 @@ describe("moveArrived", () => {
     expect(
       moveArrived(
         { deviceId: "desk", landed: true },
-        { here: false, devices: [{ id: "desk", name: "Chrome on Linux", playback: null }] },
+        {
+          here: false,
+          devices: [
+            { id: "desk", name: "Chrome on Linux", output: { kind: "local" }, playback: null },
+          ],
+        },
       ),
     ).toBe(false);
     expect(moveArrived({ deviceId: "desk", landed: true }, { here: false, devices: [] })).toBe(
@@ -177,5 +191,17 @@ describe("deviceKind", () => {
   it("takes any other name for the phone app", () => {
     expect(deviceKind("Aiko's iPhone")).toBe("phone");
     expect(deviceKind("Chrome cast in the kitchen")).toBe("phone");
+  });
+});
+
+describe("outputLabel", () => {
+  it("names the receiver a device casts or AirPlays to, and nothing while it plays itself", () => {
+    expect(outputLabel({ kind: "cast", receiver: "Living Room TV" })).toBe(
+      "Casting to Living Room TV",
+    );
+    expect(outputLabel({ kind: "airplay", receiver: "Kitchen" })).toBe("AirPlay to Kitchen");
+    expect(outputLabel({ kind: "cast", receiver: null })).toBe("Casting to a TV");
+    expect(outputLabel({ kind: "airplay", receiver: null })).toBe("AirPlay to a speaker");
+    expect(outputLabel({ kind: "local" })).toBeNull();
   });
 });
