@@ -258,4 +258,6 @@ v0.2's.
 NixOS: `nix flake update movies && nixos-rebuild switch` (or move the pinned tag). Both back up
 before the new version deploys its functions; `docs/operations.md` ("Upgrading") covers rolling
 back. From 0.4.0 to 0.4.1 the unit and user `movies` become `media-server`: move any
-`systemd.services.movies` or `users.users.movies` override to the new name.
+`systemd.services.movies` or `users.users.movies` override to the new name, and run the command
+the first start prints, which gives the old user's folders to `media-server` (`docs/operations.md`,
+"Upgrading").

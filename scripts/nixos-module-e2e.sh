@@ -11,8 +11,8 @@ media_port="${MEDIA_PORT:-18380}"
 acceleration="${HARDWARE_ACCELERATION:-none}"
 unit=media-server-module-e2e
 proxy_unit=media-proxy-module-e2e
-handover_unit=media-server-handover-module-e2e
-units=("$unit" "$proxy_unit" "$handover_unit")
+folders_unit=media-server-folders-module-e2e
+units=("$unit" "$proxy_unit" "$folders_unit")
 containers=(media-core-convex)
 # Not under /tmp or /var/tmp: the service has its own (PrivateTmp).
 base=/var/lib/media-module-e2e
@@ -32,7 +32,7 @@ created_dirs=()
 cleanup() {
   local status=$?
   if [[ $status -ne 0 && ${#created_units[@]} -gt 0 ]]; then
-    sudo journalctl -u "$handover_unit" -u "$unit" --no-pager -n 80 >&2 || true
+    sudo journalctl -u "$folders_unit" -u "$unit" --no-pager -n 80 >&2 || true
   fi
   if [[ "${KEEP:-0}" != "1" ]]; then
     if [[ ${#created_units[@]} -gt 0 ]]; then
@@ -126,8 +126,7 @@ evaluated="$(
     in {
       unitDrv = config.systemd.units.\"media-server.service\".unit.drvPath;
       proxyDrv = config.systemd.units.\"media-proxy.service\".unit.drvPath;
-      handoverDrv = config.systemd.units.\"media-server-handover.service\".unit.drvPath;
-      tmpfiles = config.systemd.tmpfiles.rules;
+      foldersDrv = config.systemd.units.\"media-server-folders.service\".unit.drvPath;
       containers = builtins.mapAttrs (_: c: { inherit (c) image ports volumes environment entrypoint cmd; })
         config.virtualisation.oci-containers.containers;
     }"
@@ -136,12 +135,15 @@ field() { node -e "process.stdout.write([].concat(JSON.parse(process.argv[1])[pr
 
 unit_file="$(nix build --no-link --print-out-paths "$(field unitDrv)^out")/media-server.service"
 proxy_file="$(nix build --no-link --print-out-paths "$(field proxyDrv)^out")/media-proxy.service"
-handover_file="$(nix build --no-link --print-out-paths "$(field handoverDrv)^out")/media-server-handover.service"
-# Only the module's own folders, all under $base. The evaluated system's other rules (such as its
-# /lib64 loader link, a stub where the host may run nix-ld) must never reach the host.
-module_tmpfiles="$(field tmpfiles | awk -v base="$base" '$2 == base || index($2, base "/") == 1')"
-[[ -n "$module_tmpfiles" ]] || { echo "the module declared no folders under $base" >&2; exit 1; }
-printf '%s\n' "$module_tmpfiles" | sudo systemd-tmpfiles --create -
+folders_file="$(nix build --no-link --print-out-paths "$(field foldersDrv)^out")/media-server-folders.service"
+
+created_units+=("${units[@]}")
+created_dirs+=("${run_dirs[@]}")
+# The module's folder check makes the folders, the container's database folder among them, before
+# anything else starts, as on a host.
+sudo cp "$folders_file" "/run/systemd/system/$folders_unit.service"
+sudo systemctl daemon-reload
+sudo systemctl start "$folders_unit"
 
 container_field() {
   node -e 'const c = JSON.parse(process.argv[1]).containers[process.argv[2]]; const v = c[process.argv[3]];
@@ -164,14 +166,11 @@ for container in "${containers[@]}"; do
   docker start "$id" >/dev/null
 done
 
-created_units+=("${units[@]}")
-created_dirs+=("${run_dirs[@]}")
 # The run starts the container itself, so the unit drops it from Requires= and After= and waits on
-# the run's handover unit.
+# the run's folder check.
 sed -e '/^\(Requires\|After\)=/s/docker-media-core-convex\.service *//' \
-  -e "s/media-server-handover\.service/$handover_unit.service/g" "$unit_file" |
+  -e "s/media-server-folders\.service/$folders_unit.service/g" "$unit_file" |
   sudo tee "/run/systemd/system/$unit.service" >/dev/null
-sudo cp "$handover_file" "/run/systemd/system/$handover_unit.service"
 sudo cp "$proxy_file" "/run/systemd/system/$proxy_unit.service"
 sudo systemctl daemon-reload
 sudo systemctl start "$proxy_unit" "$unit"
@@ -223,9 +222,17 @@ check "the media service runs as its own user" equals "$(sudo stat -c %U "/proc/
 check "the service environment is private" equals "$(owner_and_mode "$env_file")" "nobody 600"
 check "backups are the service user's and private" equals "$(owner_and_mode "$base/data/core/backups")" "nobody 700"
 check "the service's folders are its user's" equals "$(foreign_entries)" 0
-check "the handover recorded the service's ids, root only" \
-  equals "$(sudo cat "$base/data/core/service-owner") $(owner_and_mode "$base/data/core/service-owner")" \
-  "$(id -u nobody):$(getent group nogroup | cut -d: -f3) root 600"
+folder_modes() {
+  local dir
+  for dir in "$@"; do sudo stat -c "%n %U %a" "$dir"; done
+}
+check "root's folders are root's" \
+  equals "$(folder_modes "$base/data" "$base/data/core" "$base/data/core/convex" "$base/data/core/secrets" "$base/data/movies")" \
+  "$(printf '%s\n' "$base/data root 711" "$base/data/core root 711" "$base/data/core/convex root 700" \
+    "$base/data/core/secrets root 700" "$base/data/movies root 711")"
+check "the service's folders are its user's alone" \
+  equals "$(folder_modes "$base/data/movies/media" "$base/data/core/backups" "$base/transcode")" \
+  "$(printf '%s\n' "$base/data/movies/media nobody 700" "$base/data/core/backups nobody 700" "$base/transcode nobody 700")"
 check "the media service's key is root's and private" \
   equals "$(owner_and_mode "$base/data/core/secrets/media-service-key" "$base/data/core/secrets/media-service-id")" "root 600"
 check "the media service signs in to the core with its stored key and the core's ticket keys" signs_in_with_stored_key
@@ -241,7 +248,7 @@ secrets="$(mktemp -d)"
   sudo sed -n -e 's/^CONVEX_SELF_HOSTED_ADMIN_KEY=//p' -e 's/^MEDIA_SERVICE_API_KEY=//p' "$env_file" |
     tee "$secrets/patterns" >/dev/null
 )
-secret_in_unit() { sudo grep -qF -f "$secrets/patterns" "$unit_file" "$handover_file" "$setup_script"; }
+secret_in_unit() { sudo grep -qF -f "$secrets/patterns" "$unit_file" "$folders_file" "$setup_script"; }
 check "the secrets to look for were read" test -s "$secrets/patterns"
 check "no secret is in the units or the startup script" not secret_in_unit
 rm -rf "$secrets"

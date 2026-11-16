@@ -116,14 +116,14 @@ From `v0.4.1` everything the module makes has a `media` name, and the old [movie
 [music] v0.3 modules use `movies` and `music` names, so one host can import all three (ADR 0029).
 They share only the library folders, which each mounts read-only.
 
-| What           | [media]                                                                               | [movies] v0.2                        | [music] v0.3                      |
-| -------------- | ------------------------------------------------------------------------------------- | ------------------------------------ | --------------------------------- |
-| Options        | `services.media`, `programs.media`                                                    | `services.movies`, `programs.movies` | `services.music`                  |
-| Units          | `media-server`, `media-server-handover`, `media-proxy`, `<backend>-media-core-convex` | `movies`, `<backend>-movies-convex`  | `<backend>-music`, `music-update` |
-| User and group | `media-server`                                                                        | `movies`                             | the container's ids               |
-| State          | `/var/lib/media`                                                                      | `/var/lib/movies`                    | `/var/lib/music`                  |
-| Cache          | `/var/cache/media/transcode`                                                          | `/var/cache/movies/transcode`        | in its state folder               |
-| Runtime        | `/run/media-server`, `/run/media-proxy`, `/run/media-account`, `/run/media-music`     | `/run/movies`                        | none                              |
+| What           | [media]                                                                              | [movies] v0.2                        | [music] v0.3                      |
+| -------------- | ------------------------------------------------------------------------------------ | ------------------------------------ | --------------------------------- |
+| Options        | `services.media`, `programs.media`                                                   | `services.movies`, `programs.movies` | `services.music`                  |
+| Units          | `media-server`, `media-server-folders`, `media-proxy`, `<backend>-media-core-convex` | `movies`, `<backend>-movies-convex`  | `<backend>-music`, `music-update` |
+| User and group | `media-server`                                                                       | `movies`                             | the container's ids               |
+| State          | `/var/lib/media`                                                                     | `/var/lib/movies`                    | `/var/lib/music`                  |
+| Cache          | `/var/cache/media/transcode`                                                         | `/var/cache/movies/transcode`        | in its state folder               |
+| Runtime        | `/run/media-server`, `/run/media-proxy`, `/run/media-account`, `/run/media-music`    | `/run/movies`                        | none                              |
 
 Pick a `port` and `internalPorts` that none of them uses. Evaluation refuses a `dataDir`,
 `backupDir`, or `transcodeDir` that is, holds, or sits inside a library or one of the old installs'
@@ -178,6 +178,11 @@ in
 - **Library access.** The `media-server` user must read every library folder. Files and folders
   that are world-readable need nothing more; otherwise add the group that can read them, as in
   `users.users.media-server.extraGroups = [ "media" ];`. The unit mounts each folder read-only.
+- **Folders.** The module makes `dataDir`, `backupDir`, and `transcodeDir` and changes the owner
+  of nothing that is already there. Each must be a plain folder: no symlink on its path, and not a
+  mount point, so to use a disk of its own, mount it elsewhere and point the option at a folder
+  inside it. `media-server-folders` checks this before every start, and
+  `journalctl -u media-server-folders` says what to fix.
 - **Secrets.** `tmdbApiKeyFile` and `omdbApiKeyFile` take files outside the Nix store, such as
   sops-nix or agenix secrets.
 - **GPU.** `hardwareAcceleration` defaults to `auto`

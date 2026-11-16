@@ -202,9 +202,9 @@
               clashes == [ ]
             ) "nixosModules.default claims names the old movies and music modules use: ${toString clashes}";
             pkgs.writeText "media-module-names-check" (builtins.toJSON { inherit names paths; });
-          # The service owns its folders and hands what is in them to its user, so evaluation refuses
-          # any that overlaps a library, the old installs' folders, or the core's database and
-          # secrets (ADR 0029).
+          # The service writes in its folders and empties transcodeDir at every start, so evaluation
+          # refuses any that overlaps a library, the old installs' folders, or the core's database
+          # and secrets (ADR 0029).
           module-overlaps =
             let
               inherit (nixpkgs) lib;

@@ -25,7 +25,7 @@ movies' backend answered before the movies cutover. Convex's HTTP actions stay i
 (ADR 0025).
 
 Every start, as root, before the media service runs unprivileged (on NixOS, after
-`media-server-handover` has made the service's own folders its user's, ADR 0029):
+`media-server-folders` has checked the folders, ADR 0029):
 
 1. Derive the core's admin key from the backend's instance secret. It is never written to disk
    except into the service's private environment, under `/run/movies` in the image and
@@ -202,14 +202,34 @@ From 0.4.0 to 0.4.1 the module renames what it makes so it can run beside [movie
 (ADR 0029). The media service's unit and user are `media-server`, no longer `movies`, and its
 runtime folder is `/run/media-server`. Move any override of `systemd.services.movies` or
 `users.users.movies`, such as `extraGroups`, to `media-server`. The database and the service's
-state stay in `dataDir`. Before the first start, `media-server-handover` gives the files the old
-`movies` user left in the service's own folders to `media-server`. It refuses to start when a
-symlink leads out of one of them, never crosses into a mount inside one, and changes only files of
-the old ids, which NixOS keeps in `/var/lib/nixos/uid-map` once it drops the user. On a host
-without that file, its log counts the files left, which `chown` by hand finishes. Evaluation
-refuses a `dataDir`, `backupDir`, or `transcodeDir` that overlaps a library or an old install's
-folder. Transcode segments move to `/var/cache/media/transcode`; `/var/cache/movies/transcode` is
-left alone, since [movies] v0.2 uses that path too.
+state stay in `dataDir`, where the old `movies` user's files keep its ids. The module re-owns
+nothing that already exists, so the first start refuses, names the folders, and prints the
+command that gives them to `media-server`. With the default folders, run it once, then start the
+service:
+
+```sh
+sudo find /var/lib/media/core/backups /var/lib/media/movies/media -xdev \( -type d -o -links 1 \) -exec chown -h media-server:media-server {} +
+sudo systemctl start media-server
+```
+
+It changes the owner of every folder and file in them except a file with other names (a hard
+link), which may be another file outside them. The check prints it only when nothing is mounted
+at or inside them, and `-xdev` keeps it on their file system. Add
+`transcodeDir` to it if you set that to a folder of your own. Transcode segments move
+to `/var/cache/media/transcode`, which starts empty; `/var/cache/movies/transcode` is left alone,
+since [movies] v0.2 uses that path too. Evaluation refuses a `dataDir`, `backupDir`, or
+`transcodeDir` that overlaps a library or an old install's folder.
+
+Before every start, `media-server-folders` checks the folders, and the media service and the
+core's Convex container start only if it passes. As root, it refuses a `dataDir` that is a
+symlink, a mount point, or under a folder another user can change, then makes the folders that
+are missing. As `media-server`, it refuses to start unless `dataDir/movies/media`, `backupDir`,
+and `transcodeDir` are plain folders of `media-server`'s, with everything in them: no symlink on
+their paths, no mount at or inside them, and no folder above them that a user other than root or
+`media-server` can change. `journalctl -u media-server-folders` says which check failed and how
+to fix it.
+To put a folder on its own disk, mount the disk elsewhere and point the option at a folder inside
+it.
 
 ### What an upgrade does
 
