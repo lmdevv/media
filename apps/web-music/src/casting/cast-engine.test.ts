@@ -392,6 +392,32 @@ describe("CastEngine", () => {
     expect(run.commands.at(-1)).toBe("stop");
   });
 
+  it("reads the receiver's answer to a seek back to the start as that seek, not a disconnect", async () => {
+    const run = castSetup();
+    const loading = run.engine.load(source(STREAM), 0, false);
+
+    run.lends[0]?.settle(CREDENTIAL);
+    await settled();
+    run.loads[0]?.answer.settle(undefined);
+    await loading;
+    run.change("isPaused", false);
+    run.change("currentTime", 30);
+
+    // The person restarts the song; the receiver answers at 0 and plays on.
+    run.engine.seek(0);
+    run.change("currentTime", 0);
+    run.change("currentTime", 5);
+
+    expect(run.engine.samplePlayback().positionMs).toBe(5_000);
+    expect(run.events.at(-1)).toStrictEqual({ type: "time", positionMs: 5_000 });
+
+    // A jump to 0 nobody asked for is still the mirror's reset as the receiver goes.
+    run.change("currentTime", 0);
+    run.change("isConnected", false);
+
+    expect(run.engine.samplePlayback().positionMs).toBe(5_000);
+  });
+
   it("stops a song the receiver took after the player let go of it", async () => {
     const run = castSetup();
     const loading = run.engine.load(source(STREAM), 0, true);

@@ -346,8 +346,13 @@ export class CastEngine implements ReceiverEngine {
 
     if (load === null || !load.landed) return;
 
-    // A disconnect resets the mirror (time to zero, paused): that is no position of the song.
-    const reset = change.field === "currentTime" && change.value === 0 && this.#lastMs > 1_000;
+    // A disconnect resets the mirror (time to zero, paused): that is no position of the song. A
+    // jump to zero this engine asked for is the answer to that seek, not the reset.
+    const reset =
+      change.field === "currentTime" &&
+      change.value === 0 &&
+      this.#seekTo !== 0 &&
+      this.#lastMs > 1_000;
 
     if (this.#remote.isConnected && !reset) this.#lastMs = this.#remote.currentTime * 1000;
 
