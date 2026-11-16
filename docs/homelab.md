@@ -2,8 +2,9 @@
 
 [media] on one box at home, with Docker Compose or NixOS, in about ten minutes. It runs the
 core's self-hosted Convex backend and the media service, which also serves the movies client,
-behind Caddy on one port (8080). The account client is at `/`, movies at `/movies`, and the Convex
-backend at `/convex`. Browsers and the CLI talk only to that port.
+behind Caddy on one port (8080), which also serves the account and music clients. The account
+client is at `/`, movies at `/movies`, music at `/music`, and the Convex backend at `/convex`.
+Browsers and the CLI talk only to that port.
 `docs/operations.md` explains what happens at startup, backups and restores, and telemetry in more
 depth.
 
@@ -27,7 +28,7 @@ cp .env.example .env
 Edit `.env`:
 
 ```sh
-MEDIA_LIBRARY=/srv/media                 # host folder with your movies and shows
+MEDIA_LIBRARY=/srv/media                 # host folder with your movies, shows, and music
 MEDIA_BASE_URL=http://nas.tailnet.ts.net:8080
 MEDIA_BIND=100.64.0.1                    # the host's Tailscale address (`tailscale ip -4`)
 PUID=1000                                 # a user that can read MEDIA_LIBRARY (`id -u you`)
@@ -44,10 +45,14 @@ docker compose ps          # media turns (healthy)
 docker compose logs -f media
 ```
 
-Open `MEDIA_BASE_URL`, create the owner account (the first account is the owner), and add
-`/media/library` as a library. More folders: add one read-only line per folder under the `media`
-service's `volumes:` (`- /mnt/nas/shows:/media/shows:ro`) and add `/media/shows` as a library.
-People sign in once at `MEDIA_BASE_URL`, and `MEDIA_BASE_URL/movies` opens with that sign-in.
+Open `MEDIA_BASE_URL`, create the owner account (the first account is the owner), and add your
+libraries under Admin, Libraries. Each library has one kind: with `Movies/` and `Music/` in
+`MEDIA_LIBRARY`, add `/media/library/Movies` of kind Movies and `/media/library/Music` of kind
+Music. More folders: add one read-only line per folder under the `media`
+service's `volumes:` (`- /mnt/nas/shows:/media/shows:ro`) and add `/media/shows` as a library
+of its kind.
+People sign in once at `MEDIA_BASE_URL`, and `MEDIA_BASE_URL/movies` and `MEDIA_BASE_URL/music`
+open with that sign-in.
 
 - **Image.** `MEDIA_IMAGE` defaults to `ghcr.io/lmdevv/media:latest`, the newest release. Best
   is the release your checkout is at (`git checkout vX.Y.Z` with `:X.Y.Z`), or `main` with
@@ -63,14 +68,14 @@ People sign in once at `MEDIA_BASE_URL`, and `MEDIA_BASE_URL/movies` opens with 
 
 ```nix
 # flake.nix
-inputs.movies.url = "github:lmdevv/media";   # or github:lmdevv/media/v0.3.0 to pin a release
+inputs.movies.url = "github:lmdevv/media";   # or github:lmdevv/media/v0.4.0 to pin a release
 
 # in nixosSystem { modules = [ ... ]; }
 inputs.movies.nixosModules.default
 {
   services.media = {
     enable = true;
-    libraryDirs = [ "/srv/media/movies" "/srv/media/shows" ];
+    libraryDirs = [ "/srv/media/movies" "/srv/media/shows" "/srv/media/music" ];
     listenAddress = "100.64.0.1";                     # the host's Tailscale address
     publicUrl = "http://nas.tailnet.ts.net:8080";
     hardwareAcceleration = "qsv";                     # see GPU below; "auto" by default
@@ -231,16 +236,18 @@ Compose: keep the checkout and the image on the same release, since `compose.yam
 settings that release's image reads.
 
 ```sh
-cd media && git fetch --tags && git checkout v0.3.0
-# in deploy/compose/.env: MEDIA_IMAGE=ghcr.io/lmdevv/media:0.3.0
+cd media && git fetch --tags && git checkout v0.4.0
+# in deploy/compose/.env: MEDIA_IMAGE=ghcr.io/lmdevv/media:0.4.0
 cd deploy/compose && docker compose pull && docker compose up -d
 ```
 
 For the edge, `git pull` on `main` with `MEDIA_IMAGE=ghcr.io/lmdevv/media:main`.
 
-0.3.0, the first [media] release, is a fresh install, not an upgrade of a [movies] v0.2 install:
-nothing moves over from it, so set it up as above beside the old one's data
-(`docs/operations.md`, "Upgrading").
+A [media] 0.3.0 install upgrades to 0.4.0 this way. Upgrade it to 0.4.0 before any later
+release: 0.4.0 migrates its Connect rows, and a later release will refuse rows from before that
+migration (ADR 0018). [media] is a fresh install, not an upgrade of
+a [movies] v0.2 or [music] v0.3 install: nothing moves over from either, so set it up as above
+beside the old one's data (`docs/operations.md`, "Upgrading").
 
 NixOS: `nix flake update movies && nixos-rebuild switch` (or move the pinned tag). Both back up
 before the new version deploys its functions; `docs/operations.md` ("Upgrading") covers rolling

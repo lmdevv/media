@@ -1,13 +1,14 @@
 # [media]
 
-Self-hosted movies and TV for people and agents, with music to follow. Stream your own folders or
-NAS from one install, with an account per person and one sign-in across the apps, Netflix-style
-browsing, watching together at the same second, migration from Jellyfin and Plex, and a CLI that
-can do everything the app can.
+Self-hosted movies, TV, and music for people and agents. Stream your own folders or NAS from one
+install, with an account per person and one sign-in across the apps, Netflix-style browsing,
+watching and listening together at the same second, migration from Jellyfin and Plex, and a CLI
+that can do everything the app can.
 
-[media] merges [movies] and [music] into one server. Its first release, 0.3.0, carries movies;
-the music client comes in a later release. It is a fresh install: nothing moves over from a
-[movies] v0.2 install ([docs/operations.md](docs/operations.md#upgrading)).
+[media] merges [movies] and [music] into one server. Since 0.4.0 it carries both, movies at
+`/movies` and music at `/music`. A [media] 0.3.0 install upgrades to 0.4.0 in place. It is a fresh
+install for a [movies] v0.2 or [music] v0.3 install: nothing moves over from either
+([docs/operations.md](docs/operations.md#upgrading)).
 
 ## Stack
 
@@ -34,11 +35,12 @@ docker compose up -d
 ```
 
 Open `MEDIA_BASE_URL` (default `http://localhost:8080`), create the owner account (the first
-account is the owner), and add `/media/library` (or a folder in it) as a library. The same sign-in
-opens movies at `MEDIA_BASE_URL/movies`.
+account is the owner), and add your libraries under Admin, Libraries, each with one kind, such as
+`/media/library/Movies` of kind Movies and `/media/library/Music` of kind Music. The same sign-in
+opens movies at `MEDIA_BASE_URL/movies` and music at `MEDIA_BASE_URL/music`.
 
 - The `media` image (`ghcr.io/lmdevv/media`, amd64 and arm64) runs the core's Convex backend, the
-  media service, and both web clients behind Caddy on one port, with the `media` CLI and ffmpeg. Compose runs `:latest`, the newest release; pin `:X.Y` or `:X.Y.Z`, or
+  media service, and the web clients behind Caddy on one port, with the `media` CLI and ffmpeg. Compose runs `:latest`, the newest release; pin `:X.Y` or `:X.Y.Z`, or
   follow `:main` for the edge. `docker compose build` builds it from source instead.
 - Idle, with an empty library, the image uses about 190 MiB. It runs the media service without
   source maps, so stack traces in its log point at the bundle (`dist/main.js`), not at `src/`
@@ -65,7 +67,7 @@ inputs.movies.url = "github:lmdevv/media";
 # configuration.nix, with inputs.movies.nixosModules.default in modules
 services.media = {
   enable = true;
-  libraryDirs = [ "/srv/media/movies" "/srv/media/shows" ];
+  libraryDirs = [ "/srv/media/movies" "/srv/media/shows" "/srv/media/music" ];
   listenAddress = "100.64.0.1";                       # the host's Tailscale address
   publicUrl = "http://nas.tailnet.ts.net:8080";
   hardwareAcceleration = "qsv";                       # Intel Gen12+ iGPU or Arc
