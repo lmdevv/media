@@ -21,6 +21,7 @@ import {
 import { NO_CONTROL, playingKey } from "./session-playback";
 import type {
   QueueListing,
+  SessionCommands,
   SessionControl,
   SessionFollow,
   SessionOp,
@@ -384,6 +385,8 @@ export const followOf = (data: SessionData): SessionFollow<Track> | null => {
     mayControl: view.may.control,
     clock: view.clock,
     playing: song(playingKey(view.sessionId, view.entryId), data.playing),
+    entryId: view.entryId,
+    lengthMs: view.lengthMs,
     queued: data.entries.map((entry) => song(entry.key, entry.track)),
     listing: data.listing,
   };
@@ -443,6 +446,24 @@ export const sessionControl =
       sessionId: asSessionId(sessionId),
     });
 
+/** The core's music session calls a player makes while it follows one, as `SessionPlayback` takes them. */
+export const sessionCommands = (platform: PlatformSdk): SessionCommands => ({
+  heartbeat: () => platform.core.together.heartbeat({ domain: MUSIC }),
+  control: sessionControl(platform),
+  ended: ({ entryId, revision }, sessionId) =>
+    platform.core.together.ended({
+      domain: MUSIC,
+      sessionId: asSessionId(sessionId),
+      entryId: entryId === null ? null : asEntryId(entryId),
+      revision,
+    }),
+  playNow: (trackId, sessionId) =>
+    platform.core.together.playNow({
+      item: musicTrack(asTrackId(trackId)),
+      sessionId: asSessionId(sessionId),
+    }),
+});
+
 /** The core's calls that start a music session from the listener's song and queue. */
 export const startCommands = (platform: PlatformSdk): StartCommands => ({
   create: async (trackId) =>
@@ -464,6 +485,11 @@ export const NO_ADDS = "The host turned off adding songs in this Jam";
 /** The most songs one play in a session queues, as a long playlist would flood it. */
 const SESSION_PLAY_MAX = 100;
 
+/** The core's call that queues in the person's session, as `addToSession` makes it. */
+export interface SessionAdds {
+  readonly core: { readonly together: Pick<Together, "add"> };
+}
+
 /**
  * Queues `trackIds` in the person's session in order, in front of what is queued or after it, a
  * call at a time: in front, the last goes first. Each add names the session `view` shows, so the
@@ -472,7 +498,7 @@ const SESSION_PLAY_MAX = 100;
  * the rest.
  */
 export const addToSession = async (
-  platform: PlatformSdk,
+  platform: SessionAdds,
   view: JoinedSession,
   trackIds: ReadonlyArray<Track["id"]>,
   next: boolean,
@@ -496,14 +522,17 @@ export const addToSession = async (
 
 /**
  * Plays `trackIds` from `index` now for everyone, as old music's host played a list in a Jam: the
- * first goes in front of the queue and the session skips to that entry at once, playing it in a
- * session that was paused, then the rest follow it in order, up to 100 songs. Resolves with why
- * the session refused the skip or the play, for the screen, or null; rejects when an add fails.
+ * first plays at once from its start, playing in a session that was paused too, in one call to the
+ * core bound to the session `view` shows (`SessionPlayback.playNow`), then the rest go in front of
+ * the queue in order, up to 100 songs, each add bound to that session too. So once the person is
+ * no longer in it, the core refuses whatever is still on its way, and nothing lands in a session
+ * that replaced it. Resolves with why the session refused the play, for the screen, or null;
+ * rejects when an add fails.
  */
 export const playInSession = async (
-  platform: PlatformSdk,
+  platform: SessionAdds,
   view: JoinedSession,
-  playback: Pick<SessionPlayback, "jump" | "play">,
+  playback: Pick<SessionPlayback, "playNow">,
   trackIds: ReadonlyArray<Track["id"]>,
   index = 0,
 ): Promise<string | null> => {
@@ -515,21 +544,11 @@ export const playInSession = async (
 
   if (first === undefined) return null;
 
-  const { entryId } = await platform.core.together.add({
-    item: musicTrack(first),
-    at: "next",
-    sessionId: view.sessionId,
-  });
-
-  const refused = await playback.jump(entryId);
+  const refused = await playback.playNow(first, view.sessionId);
 
   if (refused !== null) return refused;
 
-  // A skip keeps the clock playing or paused; playing a song now plays it. The rest of the list
-  // follows it either way, as it is in the session already.
-  const unplayed = view.clock.status === "paused" ? await playback.play() : null;
-
   await addToSession(platform, view, rest, true);
 
-  return unplayed;
+  return null;
 };

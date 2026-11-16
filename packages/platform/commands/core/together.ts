@@ -133,6 +133,21 @@ const createArgs = v.object({
 
 const createResult = v.object({ sessionId: v.id("togetherSessions"), link: v.string() });
 
+const endedArgs = v.object({
+  domain: v.union(v.literal("movies"), v.literal("music")),
+  sessionId: v.id("togetherSessions"),
+  entryId: v.union(v.id("togetherEntries"), v.null()),
+  revision: v.number(),
+});
+
+const endedResult = v.object({
+  status: v.union(v.literal("playing"), v.literal("paused")),
+  positionAtAnchorMs: v.number(),
+  anchorServerTime: v.number(),
+  playbackRate: v.number(),
+  revision: v.number(),
+});
+
 const getArgs = v.object({ domain: v.union(v.literal("movies"), v.literal("music")) });
 
 const getResult = v.union(
@@ -189,6 +204,7 @@ const getResult = v.union(
       v.null(),
     ),
     entryId: v.union(v.id("togetherEntries"), v.null()),
+    lengthMs: v.union(v.number(), v.null()),
     members: v.array(
       v.object({
         userId: v.id("users"),
@@ -227,6 +243,35 @@ const joinResult = v.object({ state: v.union(v.literal("joined"), v.literal("pen
 const leaveArgs = v.object({ domain: v.union(v.literal("movies"), v.literal("music")) });
 
 const leaveResult = v.null();
+
+const playNowArgs = v.object({
+  item: v.union(
+    v.object({
+      domain: v.literal("movies"),
+      ref: v.union(
+        v.object({ type: v.literal("title"), id: v.id("titles") }),
+        v.object({ type: v.literal("episode"), id: v.id("episodes") }),
+        v.object({ type: v.literal("file"), id: v.id("mediaFiles") }),
+      ),
+    }),
+    v.object({
+      domain: v.literal("music"),
+      ref: v.union(
+        v.object({ type: v.literal("track"), id: v.id("tracks") }),
+        v.object({ type: v.literal("album"), id: v.id("albums") }),
+      ),
+    }),
+  ),
+  sessionId: v.id("togetherSessions"),
+});
+
+const playNowResult = v.object({
+  status: v.union(v.literal("playing"), v.literal("paused")),
+  positionAtAnchorMs: v.number(),
+  anchorServerTime: v.number(),
+  playbackRate: v.number(),
+  revision: v.number(),
+});
 
 const queueArgs = v.object({
   domain: v.union(v.literal("movies"), v.literal("music")),
@@ -364,6 +409,13 @@ export interface Handlers {
     caller: Caller,
   ) => Infer<typeof createResult> | Promise<Infer<typeof createResult>>;
 
+  /** `core.together.ended` (mutation, signed-in): Tell your group session that what it plays finished on your player, as its host: once its clock agrees, it moves on to what is queued then, or pauses back at the start with nothing queued. */
+  readonly ended: (
+    ctx: Omit<MutationCtx, "auth">,
+    args: Infer<typeof endedArgs>,
+    caller: Caller,
+  ) => Infer<typeof endedResult> | Promise<Infer<typeof endedResult>>;
+
   /** `core.together.get` (query, signed-in): Show your group session in a domain: its clock, item, members, settings, link, and what you may do. */
   readonly get: (
     ctx: Omit<QueryCtx, "auth">,
@@ -391,6 +443,13 @@ export interface Handlers {
     args: Infer<typeof leaveArgs>,
     caller: Caller,
   ) => Infer<typeof leaveResult> | Promise<Infer<typeof leaveResult>>;
+
+  /** `core.together.playNow` (mutation, signed-in): Play something you can play now in the group session --session-id names, from its start, playing, for everyone. */
+  readonly playNow: (
+    ctx: Omit<MutationCtx, "auth">,
+    args: Infer<typeof playNowArgs>,
+    caller: Caller,
+  ) => Infer<typeof playNowResult> | Promise<Infer<typeof playNowResult>>;
 
   /** `core.together.queue` (query, signed-in): List what plays next in your group session in a domain. */
   readonly queue: (
@@ -458,6 +517,12 @@ export interface Refs {
     Infer<typeof createArgs>,
     Infer<typeof createResult>
   >;
+  readonly ended: FunctionReference<
+    "mutation",
+    "public",
+    Infer<typeof endedArgs>,
+    Infer<typeof endedResult>
+  >;
   readonly get: FunctionReference<
     "query",
     "public",
@@ -481,6 +546,12 @@ export interface Refs {
     "public",
     Infer<typeof leaveArgs>,
     Infer<typeof leaveResult>
+  >;
+  readonly playNow: FunctionReference<
+    "mutation",
+    "public",
+    Infer<typeof playNowArgs>,
+    Infer<typeof playNowResult>
   >;
   readonly queue: FunctionReference<
     "query",
@@ -544,6 +615,11 @@ export const register = (handlers: Handlers) => ({
     handler: async (ctx, args) =>
       handlers.create(ctx, args, refuseKeys(await requireActionCaller(ctx, "signed-in"))),
   }),
+  ended: mutation({
+    args: endedArgs,
+    returns: endedResult,
+    handler: async (ctx, args) => handlers.ended(ctx, args, await requireCaller(ctx, "signed-in")),
+  }),
   get: query({
     args: getArgs,
     returns: getResult,
@@ -564,6 +640,12 @@ export const register = (handlers: Handlers) => ({
     args: leaveArgs,
     returns: leaveResult,
     handler: async (ctx, args) => handlers.leave(ctx, args, await requireCaller(ctx, "signed-in")),
+  }),
+  playNow: mutation({
+    args: playNowArgs,
+    returns: playNowResult,
+    handler: async (ctx, args) =>
+      handlers.playNow(ctx, args, await requireCaller(ctx, "signed-in")),
   }),
   queue: query({
     args: queueArgs,

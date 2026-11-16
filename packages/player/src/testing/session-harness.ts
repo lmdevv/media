@@ -3,7 +3,7 @@
  * real `PlaybackController` and `SessionPlayback` over an engine that plays in time, and a core
  * that keeps the session's clock and queue as `core.together` does, every call and every new view
  * one network latency away. Time is Effect's test clock, which the follower, the engines, the core,
- * and the session's timers all read.
+ * and the session's timers all read; a device's wall clock may be set apart from it.
  */
 import type { SessionClock } from "@media/contracts/clock";
 import { positionAt } from "@media/contracts/clock";
@@ -12,11 +12,13 @@ import { Clock, Data, Effect, Fiber, ManagedRuntime, Result } from "effect";
 import { TestClock } from "effect/testing";
 
 import type { EngineEvent, EnginePlayback, EngineSource, PlayerEngine } from "../engine";
+import type { MediaSessionHandlers } from "../media-session";
 import { PlaybackController } from "../playback-controller";
-import type { MusicCommands, Track } from "../playback-controller";
+import type { MusicCommands, NowPlayingControls, Track } from "../playback-controller";
 import { SessionPlayback, SessionPresence } from "../session-playback";
 import type {
   ServerTime,
+  SessionEnd,
   SessionFollow,
   SessionOp,
   SessionRunner,
@@ -38,7 +40,7 @@ const LATENCY_MS = 30;
 /** How far time moves per step, for the engines to notice the end of a song. */
 const STEP_MS = 10;
 
-/** The session every world plays; a call naming another is refused, as for a session left. */
+/** The session every world starts in; a call naming another is refused, as for a session left. */
 const SESSION_ID = "session";
 
 /** How far past an end the core carries a skip's start, as `CARRY_MAX_MS` in the core. */
@@ -46,6 +48,9 @@ const CARRY_MAX_MS = 10_000;
 
 /** How long before an end the entry a skip carries into was queued first, as `FIRST_BY_MS`. */
 const FIRST_BY_MS = 3_000;
+
+/** How early before an end on the clock the core takes a host's end, as `ENDED_EARLY_MS`. */
+const ENDED_EARLY_MS = 1_500;
 
 /** A song of `seconds`, named `id`. */
 export const song = (id: string, seconds: number): Track => ({
@@ -264,6 +269,8 @@ const songOf = (source: EngineSource | null): string | null =>
 /** A queue entry of the session, with its song. */
 interface Entry {
   readonly key: string;
+  /** The entry's id, or null for the song the session started on, as `core.together.get`. */
+  readonly entryId: string | null;
   readonly track: Track;
 }
 
@@ -281,6 +288,26 @@ interface Seat {
   readonly hearsLateMs: number;
   /** The heartbeats their device's clock is corrected by, when it is not the server's own. */
   readonly presence: SessionPresence | null;
+  /** How much later than usual the core's answers to their calls reach them. */
+  readonly answersLateMs: number;
+  /** How far their device's wall clock was set from where it ran, as a person or NTP sets it. */
+  readonly wall: { jumpMs: number };
+  /** Their phone's system controls, which order presses against their choices, or null. */
+  readonly phone: PhoneControls | null;
+}
+
+/**
+ * A phone's lock screen and headphones as the iOS app's `RemoteCommands` module and
+ * `lockScreenControls` order them (ADR 0018): every press and every choice of the person's takes
+ * the next number of one sequence as it is made, and a press, which reaches JavaScript late,
+ * applies only if no choice took a number after it. A choice the controller makes while it
+ * applies a press is that press.
+ */
+interface PhoneControls {
+  handlers: MediaSessionHandlers | null;
+  stamped: number;
+  newest: number;
+  applying: boolean;
 }
 
 /** A device whose clock is off from the server's, and corrected by its own heartbeats. */
@@ -294,14 +321,51 @@ interface DeviceClock {
   readonly firstTrip?: { readonly outMs: number; readonly backMs: number };
 }
 
-/** A call a member made to the core, and how it ended. */
+/** A phone's system controls for the controller, ordering presses as `PhoneControls` says. */
+const phoneNowPlaying = (phone: PhoneControls): NowPlayingControls => ({
+  setHandlers: (handlers) => {
+    phone.handlers = handlers;
+  },
+  show: () => {},
+  commanded: () => {
+    if (phone.applying) return;
+
+    phone.stamped += 1;
+    phone.newest = phone.stamped;
+  },
+});
+
+/** A call to the core, as the core names it. */
+type CallOp =
+  | SessionOp
+  | ({ readonly kind: "ended" } & SessionEnd)
+  | { readonly kind: "playNow"; readonly trackId: string };
+
+/**
+ * A call a member made to the core, and how it ended: applied, refused, or for a host's end a
+ * little early, scheduled for the end on the clock. The core's own move at that end is a call by
+ * `core`.
+ */
 interface Call {
   readonly by: string;
-  readonly op: SessionOp;
+  readonly op: CallOp;
   readonly at: number;
-  readonly outcome: "applied" | "refused";
-  /** Where a skip started the entry it played; null for any other move or a refusal. */
+  readonly outcome: "applied" | "refused" | "scheduled";
+  /** Where a move to another entry started it; null for any other move or a refusal. */
   readonly startedAt: number | null;
+}
+
+/**
+ * A change of the session's song or clock, as the core made it: what played and how before and
+ * after, the server's time, and how many entries were queued when it was decided.
+ */
+export interface Transition {
+  readonly by: string;
+  readonly kind: CallOp["kind"];
+  readonly serverAt: number;
+  readonly before: { readonly entry: Entry; readonly clock: SessionClock };
+  readonly after: { readonly entry: Entry; readonly clock: SessionClock };
+  readonly queued: number;
 }
 
 /** A member of the session: their player, and the engine it plays through. */
@@ -325,6 +389,12 @@ export interface World {
   /** The shared position now, by the server's clock. */
   readonly shared: () => number;
   readonly calls: ReadonlyArray<Call>;
+  /** Every change of the session's song or clock, in order. */
+  readonly transitions: ReadonlyArray<Transition>;
+  /** The session the world plays now. */
+  readonly sessionId: () => string;
+  /** Whether the session is still live: the host has not left. */
+  readonly live: () => boolean;
   /** Seats a member who follows the session from now on. */
   readonly join: (
     name: string,
@@ -346,6 +416,10 @@ export interface World {
        * whose screen applies a subscription's answer after the mutation's own promise resolves.
        */
       readonly hearsLateMs?: number;
+      /** The core's answers to its calls reach it this much later than usual, as on a slow trip. */
+      readonly answersLateMs?: number;
+      /** Its system controls are a phone's, which order presses against the person's choices. */
+      readonly phone?: boolean;
     },
   ) => Member;
   /**
@@ -360,12 +434,36 @@ export interface World {
   readonly control: (by: string, op: SessionOp, sessionId: string) => Promise<SessionClock>;
   /** Queues `track` at the end, or first. */
   readonly add: (track: Track, at?: "next" | "end") => string;
+  /**
+   * `core.together.add` as `by` calls it, for the session `sessionId` names: queues `trackId` one
+   * latency later, refused once that is not the world's session; answers the new entry's id.
+   */
+  readonly addAs: (
+    by: string,
+    trackId: string,
+    at: "next" | "end",
+    sessionId: string | undefined,
+  ) => Promise<string>;
   /** Takes entry `key` out of the queue. */
   readonly remove: (key: string) => void;
   /** Moves entry `key` to the front of the queue. */
   readonly toFront: (key: string) => void;
   /** Lets guests control, or not. */
   readonly allowControl: (allowed: boolean) => void;
+  /**
+   * The person ends the session and starts another on `first`, paused at its start with nothing
+   * queued, as they might on another device: every member's view names the new session.
+   */
+  readonly replaceSession: (first: Track) => void;
+  /** The host leaves, which ends the session for everyone, as `core.together.leave` does. */
+  readonly hostLeaves: () => void;
+  /** Sets `name`'s device wall clock `byMs` from where it ran, as a person or NTP sets it. */
+  readonly setWallClock: (name: string, byMs: number) => void;
+  /**
+   * `name` presses play or pause on their phone's lock screen now; the press reaches the app's
+   * JavaScript `deliveredAfterMs` later, as a busy JavaScript thread delivers it.
+   */
+  readonly press: (name: string, kind: "play" | "pause", deliveredAfterMs: number) => void;
   /** Moves time on by `ms`, letting every timer, engine, and call run in order. */
   readonly advance: (ms: number) => Promise<void>;
   readonly close: () => Promise<void>;
@@ -392,6 +490,7 @@ export const scenario = async (
 
   const timers: SessionTimers = {
     now,
+    monotonic: now,
     after: (ms, callback) => {
       const fiber = runtime.runFork(
         Effect.sleep(Math.max(0, ms)).pipe(Effect.andThen(Effect.sync(callback))),
@@ -420,12 +519,18 @@ export const scenario = async (
   };
 
   let entryCount = 0;
-  let playing: Entry = { key: "start:session", track: first };
+  let sessionId = SESSION_ID;
+  let live = true;
+  let playing: Entry = { key: `start:${SESSION_ID}`, entryId: null, track: first };
+  const catalog = new Map<string, Track>([first, ...queued].map((track) => [track.id, track]));
 
   const newEntry = (track: Track): Entry => {
     entryCount += 1;
+    catalog.set(track.id, track);
 
-    return { key: `entry-${String(entryCount)}`, track };
+    const key = `entry-${String(entryCount)}`;
+
+    return { key, entryId: key, track };
   };
 
   let queue: Array<Entry> = queued.map(newEntry);
@@ -467,8 +572,11 @@ export const scenario = async (
   const seats: Array<Seat> = [];
   const engines: Array<TimedEngine> = [];
   const calls: Array<Call> = [];
+  const transitions: Array<Transition> = [];
 
-  const viewFor = (seat: Seat): SessionFollow => {
+  const viewFor = (seat: Seat): SessionFollow | null => {
+    if (!live) return null;
+
     const shown = (entry: Entry): SessionSong => ({
       key: entry.key,
       track: seat.hidden.has(entry.track.id) ? null : entry.track,
@@ -477,11 +585,13 @@ export const scenario = async (
     const listed = now() >= seat.listedFrom;
 
     return {
-      sessionId: SESSION_ID,
+      sessionId,
       hosting: seat.hosting,
       mayControl: seat.hosting || guestsControl,
       clock,
       playing: shown(playing),
+      entryId: playing.entryId,
+      lengthMs: playing.track.durationMs > 0 ? playing.track.durationMs : null,
       queued: listed ? queue.slice(0, 20).map(shown) : [],
       listing: listed ? (queue.length > 0 ? "listed" : "empty") : "loading",
     };
@@ -498,30 +608,60 @@ export const scenario = async (
     }
   };
 
-  const apply = (by: string, op: SessionOp, sessionId = SESSION_ID): SessionClock => {
-    const seat = seats.find((candidate) => candidate.name === by);
-    const allowed = seat === undefined || seat.hosting || guestsControl;
-    const at = now();
+  /** Notes a change of the song or the clock that `by`'s `kind` made, decided over `queued`. */
+  const note = (
+    by: string,
+    kind: CallOp["kind"],
+    before: Transition["before"],
+    queuedThen: number,
+  ): void => {
+    if (before.entry === playing && before.clock === clock) return;
 
-    const refuse = (message: string): never => {
+    transitions.push({
+      by,
+      kind,
+      serverAt: serverNow(),
+      before,
+      after: { entry: playing, clock },
+      queued: queuedThen,
+    });
+  };
+
+  /** Fails a call `by` made, as the core refuses it. */
+  const refusing =
+    (by: string, op: CallOp, at: number) =>
+    (message: string): never => {
       calls.push({ by, op, at, outcome: "refused", startedAt: null });
 
       throw new Refused({ message });
     };
 
-    if (sessionId !== SESSION_ID) return refuse("You are no longer in that group session");
-
-    if (!allowed) return refuse("The host has not let guests control playback");
-
-    const server = serverNow();
-
-    const moved = (fields: Partial<SessionClock>): SessionClock => ({
+  /** A move of the clock, at server time `server`, one revision on. */
+  const movedAt =
+    (server: EpochMillis) =>
+    (fields: Partial<SessionClock>): SessionClock => ({
       ...clock,
       ...fields,
       anchorServerTime: server,
       revision: clock.revision + 1,
     });
 
+  const apply = (by: string, op: SessionOp, calledFor = sessionId): SessionClock => {
+    const seat = seats.find((candidate) => candidate.name === by);
+    const allowed = seat === undefined || seat.hosting || guestsControl;
+    const at = now();
+    const refuse = refusing(by, op, at);
+
+    if (calledFor !== sessionId || !live) {
+      return refuse("You are no longer in that group session");
+    }
+
+    if (!allowed) return refuse("The host has not let guests control playback");
+
+    const server = serverNow();
+    const moved = movedAt(server);
+    const before = { entry: playing, clock };
+    const queuedThen = queue.length;
     const stale = op.revision !== undefined && op.revision !== clock.revision;
 
     if (stale) return refuse("The session moved on; apply its latest clock and try again");
@@ -550,26 +690,163 @@ export const scenario = async (
     }
 
     calls.push({ by, op, at, outcome: "applied", startedAt });
+    note(by, op.kind, before, queuedThen);
     deliver();
 
     return clock;
   };
 
-  const control = (by: string, op: SessionOp, sessionId: string): Promise<SessionClock> =>
+  /**
+   * Moves the session on at the end of its song, on the queue as it is now, as the core's
+   * `moveOnAtEnd`: to the entry queued first, carried past the end, or with nothing queued,
+   * paused back at the song's start. Answers where the next entry started, or null.
+   */
+  const moveOnAtEnd = (by: string): number | null => {
+    const server = serverNow();
+    const moved = movedAt(server);
+    const before = { entry: playing, clock };
+    const queuedThen = queue.length;
+    const [next, ...rest] = queue;
+
+    let startedAt: number | null = null;
+
+    if (next === undefined) {
+      clock = moved({ status: "paused", positionAtAnchorMs: 0 });
+    } else {
+      startedAt = carried(next, server);
+      queue = rest;
+      playing = next;
+      clock = moved({ positionAtAnchorMs: startedAt });
+      noteQueuedFirst();
+    }
+
+    note(by, "ended", before, queuedThen);
+    deliver();
+
+    return startedAt;
+  };
+
+  /** When the clock reaches the end of the song playing, as the core's `reachedAt`; null never. */
+  const endReachedAt = (lengthMs: number): number | null =>
+    clock.status === "playing" && clock.positionAtAnchorMs < lengthMs
+      ? clock.anchorServerTime + (lengthMs - clock.positionAtAnchorMs) / clock.playbackRate
+      : null;
+
+  /**
+   * `core.together.ended` as `by`'s player calls it: only the host's; only while the session
+   * still plays that entry under that clock; at or past the end on the clock it moves on now, up
+   * to `ENDED_EARLY_MS` before it the core moves on itself at the end, and earlier it refuses.
+   */
+  const applyEnded = (by: string, end: SessionEnd, calledFor: string): SessionClock => {
+    const op: CallOp = { kind: "ended", ...end };
+    const seat = seats.find((candidate) => candidate.name === by);
+    const at = now();
+    const refuse = refusing(by, op, at);
+
+    if (calledFor !== sessionId || !live) {
+      return refuse("You are no longer in that group session");
+    }
+
+    if (seat?.hosting !== true) return refuse("Only the host can do this");
+
+    if (end.revision !== clock.revision || end.entryId !== playing.entryId) {
+      return refuse("The session moved on; apply its latest clock and try again");
+    }
+
+    const lengthMs = playing.track.durationMs;
+
+    if (!(lengthMs > 0)) return refuse("The session has no length for what it plays");
+
+    const server = serverNow();
+
+    if (positionAt(clock, server) >= lengthMs) {
+      const startedAt = moveOnAtEnd(by);
+
+      calls.push({ by, op, at, outcome: "applied", startedAt });
+
+      return clock;
+    }
+
+    const endsAt = endReachedAt(lengthMs);
+
+    if (endsAt === null || endsAt - server > ENDED_EARLY_MS) {
+      return refuse("What the session plays has not ended on its clock yet");
+    }
+
+    const { revision } = clock;
+    const { entryId } = playing;
+    const scheduledFor = sessionId;
+
+    void later(endsAt - server, () => {
+      const same =
+        live &&
+        sessionId === scheduledFor &&
+        clock.revision === revision &&
+        playing.entryId === entryId;
+
+      if (!same) return;
+
+      const startedAt = moveOnAtEnd("core");
+
+      calls.push({ by: "core", op, at: now(), outcome: "applied", startedAt });
+    });
+
+    calls.push({ by, op, at, outcome: "scheduled", startedAt: null });
+
+    return clock;
+  };
+
+  /**
+   * `core.together.playNow` as `by` calls it: plays `trackId` from its start, playing, as an entry
+   * that never stays queued, while `by` is in the session `calledFor` names and may control.
+   */
+  const applyPlayNow = (by: string, trackId: string, calledFor: string): SessionClock => {
+    const op: CallOp = { kind: "playNow", trackId };
+    const seat = seats.find((candidate) => candidate.name === by);
+    const at = now();
+    const refuse = refusing(by, op, at);
+
+    if (calledFor !== sessionId || !live) {
+      return refuse("You are no longer in that group session");
+    }
+
+    if (seat?.hosting !== true && !guestsControl) {
+      return refuse("The host has not let guests control playback");
+    }
+
+    const before = { entry: playing, clock };
+    const queuedThen = queue.length;
+
+    playing = newEntry(catalog.get(trackId) ?? song(trackId, 60));
+    clock = movedAt(serverNow())({ status: "playing", positionAtAnchorMs: 0 });
+    calls.push({ by, op, at, outcome: "applied", startedAt: 0 });
+    note(by, "playNow", before, queuedThen);
+    deliver();
+
+    return clock;
+  };
+
+  /** A call `by` makes to the core: one latency there, and one, plus theirs, back. */
+  const call = <A>(by: string, decide: () => A): Promise<A> =>
     runtime.runPromise(
       Effect.gen(function* () {
+        const late = seats.find((seat) => seat.name === by)?.answersLateMs ?? 0;
+
         yield* Effect.sleep(LATENCY_MS);
 
         const answer = yield* Effect.try({
-          try: () => apply(by, op, sessionId),
+          try: decide,
           catch: (cause) => (cause instanceof Refused ? cause : new Refused({ message: "failed" })),
         });
 
-        yield* Effect.sleep(LATENCY_MS);
+        yield* Effect.sleep(LATENCY_MS + late);
 
         return answer;
       }),
     );
+
+  const control = (by: string, op: SessionOp, calledFor: string): Promise<SessionClock> =>
+    call(by, () => apply(by, op, calledFor));
 
   const heartbeat = (): Promise<{ readonly serverTime: number }> =>
     runtime.runPromise(
@@ -584,14 +861,21 @@ export const scenario = async (
       }),
     );
 
-  /** The timers of a device whose clock is off from the server's by `device`. */
-  const timersOf = (device: DeviceClock): SessionTimers => ({
-    now: () => serverNow() + device.skewMs,
+  /**
+   * The timers of a device whose wall clock is off from the server's by `device`, and set
+   * `wall.jumpMs` from there since; its monotonic clock, which nothing sets, is the test clock.
+   */
+  const timersOf = (device: DeviceClock, wall: { readonly jumpMs: number }): SessionTimers => ({
+    now: () => serverNow() + device.skewMs + wall.jumpMs,
+    monotonic: now,
     after: timers.after,
   });
 
   /** The server's time as a device off by `device` reads it from its own heartbeats. */
-  const presenceOver = (device: DeviceClock): SessionPresence => {
+  const presenceOver = (
+    device: DeviceClock,
+    wall: { readonly jumpMs: number },
+  ): SessionPresence => {
     let trips = 0;
 
     const beat = (): Promise<{ readonly serverTime: number }> => {
@@ -612,7 +896,7 @@ export const scenario = async (
       );
     };
 
-    const presence = new SessionPresence(beat, timersOf(device));
+    const presence = new SessionPresence(beat, timersOf(device, wall));
 
     presence.keep(SESSION_ID);
 
@@ -625,6 +909,12 @@ export const scenario = async (
   const join: World["join"] = (name, seatOptions) => {
     const engine = new TimedEngine(now, seatOptions.reportsLate === true);
     const sources = instantSources();
+    const wall = { jumpMs: 0 };
+
+    const phone: PhoneControls | null =
+      seatOptions.phone === true
+        ? { handlers: null, stamped: 0, newest: 0, applying: false }
+        : null;
 
     const controller = new PlaybackController(
       silentCommands,
@@ -637,7 +927,10 @@ export const scenario = async (
         settings: { quality: "high", volume: 1, gapless: true },
         saveQuality: () => {},
         saveVolume: () => {},
-        nowPlaying: { setHandlers: () => {}, show: () => {}, commanded: () => {} },
+        nowPlaying:
+          phone === null
+            ? { setHandlers: () => {}, show: () => {}, commanded: () => {} }
+            : phoneNowPlaying(phone),
         resume: { load: () => null, save: () => {} },
       },
     );
@@ -645,14 +938,19 @@ export const scenario = async (
     controller.start();
 
     const { deviceClock } = seatOptions;
-    const presence = deviceClock === undefined ? null : presenceOver(deviceClock);
+    const presence = deviceClock === undefined ? null : presenceOver(deviceClock, wall);
 
     const playback = new SessionPlayback({
       controller,
-      commands: { heartbeat, control: (op, sessionId) => control(name, op, sessionId) },
+      commands: {
+        heartbeat,
+        control: (op, calledFor) => control(name, op, calledFor),
+        ended: (end, calledFor) => call(name, () => applyEnded(name, end, calledFor)),
+        playNow: (trackId, calledFor) => call(name, () => applyPlayNow(name, trackId, calledFor)),
+      },
       serverTime: presence ?? exactTime,
       describe: (cause) => (cause instanceof Refused ? cause.message : "failed"),
-      timers: deviceClock === undefined ? timers : timersOf(deviceClock),
+      timers: deviceClock === undefined ? timers : timersOf(deviceClock, wall),
       runner,
     });
 
@@ -669,6 +967,9 @@ export const scenario = async (
       listedFrom: now() + listsAfter,
       hearsLateMs: seatOptions.hearsLateMs ?? 0,
       presence,
+      answersLateMs: seatOptions.answersLateMs ?? 0,
+      wall,
+      phone,
     };
 
     seats.push(seat);
@@ -702,6 +1003,20 @@ export const scenario = async (
     return advance(ms - STEP_MS);
   };
 
+  const queueAt = (entry: Entry, at: "next" | "end"): void => {
+    queue = at === "next" ? [entry, ...queue] : [...queue, entry];
+    noteQueuedFirst();
+    deliver();
+  };
+
+  const seatOf = (name: string): Seat => {
+    const seat = seats.find((candidate) => candidate.name === name);
+
+    if (seat === undefined) throw new Error(`${name} has no seat`);
+
+    return seat;
+  };
+
   const world: World = {
     now,
     serverNow,
@@ -710,18 +1025,31 @@ export const scenario = async (
     queue: () => queue,
     shared: () => positionAt(clock, serverNow()),
     calls,
+    transitions,
+    sessionId: () => sessionId,
+    live: () => live,
     join,
     move: (by, op) => apply(by, op),
     control,
     add: (track, at = "end") => {
       const entry = newEntry(track);
 
-      queue = at === "next" ? [entry, ...queue] : [...queue, entry];
-      noteQueuedFirst();
-      deliver();
+      queueAt(entry, at);
 
       return entry.key;
     },
+    addAs: (by, trackId, at, calledFor) =>
+      call(by, () => {
+        if ((calledFor !== undefined && calledFor !== sessionId) || !live) {
+          throw new Refused({ message: "You are no longer in that group session" });
+        }
+
+        const entry = newEntry(catalog.get(trackId) ?? song(trackId, 60));
+
+        queueAt(entry, at);
+
+        return entry.key;
+      }),
     remove: (key) => {
       queue = queue.filter((entry) => entry.key !== key);
       noteQueuedFirst();
@@ -739,6 +1067,49 @@ export const scenario = async (
     allowControl: (allowed) => {
       guestsControl = allowed;
       deliver();
+    },
+    replaceSession: (next) => {
+      sessionId = `${SESSION_ID}-${String(entryCount + 1)}`;
+      catalog.set(next.id, next);
+      playing = { key: `start:${sessionId}`, entryId: null, track: next };
+      queue = [];
+      queuedFirst = null;
+      clock = {
+        status: "paused",
+        positionAtAnchorMs: 0,
+        anchorServerTime: serverNow(),
+        playbackRate: 1,
+        revision: 0,
+      };
+      deliver();
+    },
+    hostLeaves: () => {
+      live = false;
+      deliver();
+    },
+    setWallClock: (name, byMs) => {
+      seatOf(name).wall.jumpMs += byMs;
+    },
+    press: (name, kind, deliveredAfterMs) => {
+      const { phone } = seatOf(name);
+
+      if (phone === null) throw new Error(`${name} has no phone`);
+
+      phone.stamped += 1;
+
+      const stamp = phone.stamped;
+
+      void later(deliveredAfterMs, () => {
+        if (stamp < phone.newest) return;
+
+        phone.applying = true;
+
+        try {
+          phone.handlers?.[kind]();
+        } finally {
+          phone.applying = false;
+        }
+      });
     },
     advance,
     close: async () => {

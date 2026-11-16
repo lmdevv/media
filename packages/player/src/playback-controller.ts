@@ -972,6 +972,18 @@ export class PlaybackController {
   }
 
   /**
+   * A choice the listener makes in the group session this player follows starts (ADR 0017): a play
+   * or pause, or a song or queued entry played now. Like the controller's own choices, it takes
+   * the next number of the system controls' sequence before it acts
+   * (`NowPlayingControls.commanded`), so a press the phone made before it applies to nothing (ADR
+   * 0018). A skip or a seek carries the choice before it, and the session's follower and the host's
+   * move at a song's end are no one's choice, so they never call this.
+   */
+  sessionChoice(): void {
+    this.#env.nowPlaying.commanded();
+  }
+
+  /**
    * Whether this player follows a group session (ADR 0017). The session, not Connect, controls such
    * a device (D35), so Connect's device side takes no request while it does.
    */

@@ -7,7 +7,7 @@ import { constantTimeEqual, formatSecret, parseSecret, randomSecret } from "./li
 import { mayPlay } from "./permissions/items";
 import { can } from "./permissions/policy";
 import { factsIn, factsOf, memberIn, placeOf, refuse, requireTogether } from "./together/access";
-import { control as move } from "./together/clock";
+import { ended as endedOn, itemLength, control as move, playNow as playOn } from "./together/clock";
 import { admitMember, dropMember, enter, membersIn } from "./together/members";
 import { BLOCKED_MAX, JOINS_PER_HOUR, LINK_PREFIX, LINK_SECRET_BYTES } from "./together/model";
 import { heartbeat as beat } from "./together/presence";
@@ -24,6 +24,8 @@ export const {
   get,
   heartbeat,
   control,
+  ended,
+  playNow,
   queue,
   add,
   addItems,
@@ -134,6 +136,7 @@ export const {
       clock: session.clock,
       item: (await mayPlay(ctx.db, caller, session.item)) ? session.item : null,
       entryId: session.itemEntryId ?? null,
+      lengthMs: await itemLength(ctx.db, session.item),
       members: joined.map((row) => ({
         userId: row.userId,
         username: people.get(row.userId)?.username ?? "",
@@ -155,6 +158,9 @@ export const {
   },
   heartbeat: (ctx, { domain }, caller) => beat(ctx, caller, domain),
   control: (ctx, { domain, op, sessionId }, caller) => move(ctx, caller, domain, op, sessionId),
+  ended: (ctx, { domain, sessionId, entryId, revision }, caller) =>
+    endedOn(ctx, caller, domain, sessionId, { entryId, revision }),
+  playNow: (ctx, { item, sessionId }, caller) => playOn(ctx, caller, item, sessionId),
   queue: (ctx, { domain, paginationOpts }, caller) =>
     queuePage(ctx, caller, domain, paginationOpts),
   add: async (ctx, { item, at, revision, sessionId }, caller) => ({

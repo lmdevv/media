@@ -1142,6 +1142,12 @@ export const core = [
          * itself knows the session moved there too.
          */
         entryId: v.union(v.id("togetherEntries"), v.null()),
+        /**
+         * The length of what plays, in milliseconds, when the core knows one, a music song's, even
+         * when `item` is hidden from you, as old music's jams kept a withheld song's length: a host's
+         * player moves the session on at its end without playing it. Null otherwise.
+         */
+        lengthMs: v.union(v.number(), v.null()),
         members: v.array(
           v.object({
             userId: v.id("users"),
@@ -1179,6 +1185,35 @@ export const core = [
       "Play, pause, seek, change the speed of, or skip to the next item in your group session",
     scope: "signed-in",
     args: { domain: contentDomain, op: controlOp, sessionId: togetherSessionFence },
+    result: togetherClock,
+  }),
+  mutation("core.together.ended", {
+    summary:
+      "Tell your group session that what it plays finished on your player, as its host: once its clock agrees, it moves on to what is queued then, or pauses back at the start with nothing queued",
+    scope: "signed-in",
+    args: {
+      domain: contentDomain,
+      /** The session the host's player played; it fails `conflict` once they left it. */
+      sessionId: v.id("togetherSessions"),
+      /**
+       * The queue entry that finished, or null for the item the session started on, as `get`
+       * answers it: it fails `conflict` once the session plays another.
+       */
+      entryId: v.union(v.id("togetherEntries"), v.null()),
+      /** The clock the host's player played it under: it fails `conflict` once the clock moved. */
+      revision: v.number(),
+    },
+    result: togetherClock,
+  }),
+  mutation("core.together.playNow", {
+    summary:
+      "Play something you can play now in the group session --session-id names, from its start, playing, for everyone",
+    scope: "signed-in",
+    args: {
+      item: domainItem,
+      /** The session the call was made for, required: it fails `conflict` once you left it. */
+      sessionId: v.id("togetherSessions"),
+    },
     result: togetherClock,
   }),
   query("core.together.queue", {

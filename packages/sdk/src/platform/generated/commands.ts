@@ -2435,6 +2435,24 @@ const core_together_create = action({
   }),
 });
 
+const core_together_ended = mutation({
+  name: "core.together.ended",
+  path: "core/together:ended",
+  args: Schema.Struct({
+    domain: Schema.Union([Schema.Literal("movies"), Schema.Literal("music")]),
+    sessionId: Schema.String.pipe(Schema.brand("Id<togetherSessions>")),
+    entryId: Schema.Union([Schema.String.pipe(Schema.brand("Id<togetherEntries>")), Schema.Null]),
+    revision: Schema.Finite,
+  }),
+  result: Schema.Struct({
+    status: Schema.Union([Schema.Literal("playing"), Schema.Literal("paused")]),
+    positionAtAnchorMs: Schema.Finite,
+    anchorServerTime: Schema.Finite,
+    playbackRate: Schema.Finite,
+    revision: Schema.Finite,
+  }),
+});
+
 const core_together_get = query({
   name: "core.together.get",
   path: "core/together:get",
@@ -2514,6 +2532,7 @@ const core_together_get = query({
         Schema.Null,
       ]),
       entryId: Schema.Union([Schema.String.pipe(Schema.brand("Id<togetherEntries>")), Schema.Null]),
+      lengthMs: Schema.Union([Schema.Finite, Schema.Null]),
       members: Schema.Array(
         Schema.Struct({
           userId: Schema.String.pipe(Schema.brand("Id<users>")),
@@ -2567,6 +2586,53 @@ const core_together_leave = mutation({
     domain: Schema.Union([Schema.Literal("movies"), Schema.Literal("music")]),
   }),
   result: Schema.Null,
+});
+
+const core_together_playNow = mutation({
+  name: "core.together.playNow",
+  path: "core/together:playNow",
+  args: Schema.Struct({
+    item: Schema.Union([
+      Schema.Struct({
+        domain: Schema.Literal("movies"),
+        ref: Schema.Union([
+          Schema.Struct({
+            type: Schema.Literal("title"),
+            id: Schema.String.pipe(Schema.brand("Id<titles>")),
+          }),
+          Schema.Struct({
+            type: Schema.Literal("episode"),
+            id: Schema.String.pipe(Schema.brand("Id<episodes>")),
+          }),
+          Schema.Struct({
+            type: Schema.Literal("file"),
+            id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
+          }),
+        ]),
+      }),
+      Schema.Struct({
+        domain: Schema.Literal("music"),
+        ref: Schema.Union([
+          Schema.Struct({
+            type: Schema.Literal("track"),
+            id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+          }),
+          Schema.Struct({
+            type: Schema.Literal("album"),
+            id: Schema.String.pipe(Schema.brand("Id<albums>")),
+          }),
+        ]),
+      }),
+    ]),
+    sessionId: Schema.String.pipe(Schema.brand("Id<togetherSessions>")),
+  }),
+  result: Schema.Struct({
+    status: Schema.Union([Schema.Literal("playing"), Schema.Literal("paused")]),
+    positionAtAnchorMs: Schema.Finite,
+    anchorServerTime: Schema.Finite,
+    playbackRate: Schema.Finite,
+    revision: Schema.Finite,
+  }),
 });
 
 const core_together_queue = query({
@@ -5916,6 +5982,8 @@ export const effectMethods = (method: EffectBuilder) => ({
       control: method.mutation(core_together_control),
       /** `core.together.create` (action, signed-in, API keys refused): Start a group session on something you can play, leaving any session you are a guest in, and get its join link. */
       create: method.action(core_together_create),
+      /** `core.together.ended` (mutation, signed-in): Tell your group session that what it plays finished on your player, as its host: once its clock agrees, it moves on to what is queued then, or pauses back at the start with nothing queued. */
+      ended: method.mutation(core_together_ended),
       /** `core.together.get` (query, signed-in): Show your group session in a domain: its clock, item, members, settings, link, and what you may do. */
       get: method.query(core_together_get),
       /** `core.together.heartbeat` (mutation, signed-in): Keep yourself present in your group session in a domain and read the server clock. */
@@ -5924,6 +5992,8 @@ export const effectMethods = (method: EffectBuilder) => ({
       join: method.mutation(core_together_join),
       /** `core.together.leave` (mutation, signed-in): Leave your group session in a domain; when you host it, it ends for everyone. */
       leave: method.mutation(core_together_leave),
+      /** `core.together.playNow` (mutation, signed-in): Play something you can play now in the group session --session-id names, from its start, playing, for everyone. */
+      playNow: method.mutation(core_together_playNow),
       /** `core.together.queue` (query, signed-in): List what plays next in your group session in a domain. */
       queue: method.query(core_together_queue),
       /** `core.together.remove` (mutation, signed-in): Take an entry out of your group session's queue: any as its host, your own as a guest. */
@@ -6398,6 +6468,8 @@ export const promiseMethods = (method: PromiseBuilder) => ({
       control: method.mutation(core_together_control),
       /** `core.together.create` (action, signed-in, API keys refused): Start a group session on something you can play, leaving any session you are a guest in, and get its join link. */
       create: method.action(core_together_create),
+      /** `core.together.ended` (mutation, signed-in): Tell your group session that what it plays finished on your player, as its host: once its clock agrees, it moves on to what is queued then, or pauses back at the start with nothing queued. */
+      ended: method.mutation(core_together_ended),
       /** `core.together.get` (query, signed-in): Show your group session in a domain: its clock, item, members, settings, link, and what you may do. */
       get: method.query(core_together_get),
       /** `core.together.heartbeat` (mutation, signed-in): Keep yourself present in your group session in a domain and read the server clock. */
@@ -6406,6 +6478,8 @@ export const promiseMethods = (method: PromiseBuilder) => ({
       join: method.mutation(core_together_join),
       /** `core.together.leave` (mutation, signed-in): Leave your group session in a domain; when you host it, it ends for everyone. */
       leave: method.mutation(core_together_leave),
+      /** `core.together.playNow` (mutation, signed-in): Play something you can play now in the group session --session-id names, from its start, playing, for everyone. */
+      playNow: method.mutation(core_together_playNow),
       /** `core.together.queue` (query, signed-in): List what plays next in your group session in a domain. */
       queue: method.query(core_together_queue),
       /** `core.together.remove` (mutation, signed-in): Take an entry out of your group session's queue: any as its host, your own as a guest. */

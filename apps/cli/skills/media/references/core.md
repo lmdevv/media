@@ -1050,6 +1050,16 @@ Start a group session on something you can play, leaving any session you are a g
 - Arguments: `{ item: { domain: "movies"; ref: { type: "title"; id: Id<"titles"> } | { type: "episode"; id: Id<"episodes"> } | { type: "file"; id: Id<"mediaFiles"> } } | { domain: "music"; ref: { type: "track"; id: Id<"tracks"> } | { type: "album"; id: Id<"albums"> } }; join?: "open" | "approval" | "locked"; control?: boolean; add?: boolean }`
 - Result: `{ sessionId: Id<"togetherSessions">; link: string }`
 
+## `core.together.ended`
+
+Tell your group session that what it plays finished on your player, as its host: once its clock agrees, it moves on to what is queued then, or pauses back at the start with nothing queued.
+
+- CLI: `media auth together ended`
+- Kind: mutation
+- Scope: signed-in
+- Arguments: `{ domain: "movies" | "music"; sessionId: Id<"togetherSessions">; entryId: Id<"togetherEntries"> | null; revision: number }`
+- Result: `{ status: "playing" | "paused"; positionAtAnchorMs: number; anchorServerTime: number; playbackRate: number; revision: number }`
+
 ## `core.together.get`
 
 Show your group session in a domain: its clock, item, members, settings, link, and what you may do.
@@ -1058,7 +1068,7 @@ Show your group session in a domain: its clock, item, members, settings, link, a
 - Kind: query
 - Scope: signed-in
 - Arguments: `{ domain: "movies" | "music" }`
-- Result: `null | { state: "pending"; sessionId: Id<"togetherSessions">; host: string; hostDisplayName: string | null } | { state: "ended"; sessionId: Id<"togetherSessions">; reason: "host-left" | "abandoned" } | { state: "joined"; sessionId: Id<"togetherSessions">; host: string; hostDisplayName: string | null; role: "host" | "guest"; link: string; settings: { join: "open" | "approval" | "locked"; control: boolean; add: boolean }; may: { control: boolean; add: boolean; manage: boolean }; clock: { status: "playing" | "paused"; positionAtAnchorMs: number; anchorServerTime: number; playbackRate: number; revision: number }; item: { domain: "movies"; ref: { type: "title"; id: Id<"titles"> } | { type: "episode"; id: Id<"episodes"> } | { type: "file"; id: Id<"mediaFiles"> } } | { domain: "music"; ref: { type: "track"; id: Id<"tracks"> } | { type: "album"; id: Id<"albums"> } } | null; entryId: Id<"togetherEntries"> | null; members: Array<{ userId: Id<"users">; username: string; displayName: string | null; role: "host" | "guest"; present: boolean; linkGuest: boolean }>; pending: Array<{ userId: Id<"users">; username: string; displayName: string | null; present: boolean }> | null }`
+- Result: `null | { state: "pending"; sessionId: Id<"togetherSessions">; host: string; hostDisplayName: string | null } | { state: "ended"; sessionId: Id<"togetherSessions">; reason: "host-left" | "abandoned" } | { state: "joined"; sessionId: Id<"togetherSessions">; host: string; hostDisplayName: string | null; role: "host" | "guest"; link: string; settings: { join: "open" | "approval" | "locked"; control: boolean; add: boolean }; may: { control: boolean; add: boolean; manage: boolean }; clock: { status: "playing" | "paused"; positionAtAnchorMs: number; anchorServerTime: number; playbackRate: number; revision: number }; item: { domain: "movies"; ref: { type: "title"; id: Id<"titles"> } | { type: "episode"; id: Id<"episodes"> } | { type: "file"; id: Id<"mediaFiles"> } } | { domain: "music"; ref: { type: "track"; id: Id<"tracks"> } | { type: "album"; id: Id<"albums"> } } | null; entryId: Id<"togetherEntries"> | null; lengthMs: number | null; members: Array<{ userId: Id<"users">; username: string; displayName: string | null; role: "host" | "guest"; present: boolean; linkGuest: boolean }>; pending: Array<{ userId: Id<"users">; username: string; displayName: string | null; present: boolean }> | null }`
 
 ## `core.together.heartbeat`
 
@@ -1090,6 +1100,16 @@ Leave your group session in a domain; when you host it, it ends for everyone.
 - Scope: signed-in
 - Arguments: `{ domain: "movies" | "music" }`
 - Result: `null`
+
+## `core.together.playNow`
+
+Play something you can play now in the group session --session-id names, from its start, playing, for everyone.
+
+- CLI: `media auth together play-now`
+- Kind: mutation
+- Scope: signed-in
+- Arguments: `{ item: { domain: "movies"; ref: { type: "title"; id: Id<"titles"> } | { type: "episode"; id: Id<"episodes"> } | { type: "file"; id: Id<"mediaFiles"> } } | { domain: "music"; ref: { type: "track"; id: Id<"tracks"> } | { type: "album"; id: Id<"albums"> } }; sessionId: Id<"togetherSessions"> }`
+- Result: `{ status: "playing" | "paused"; positionAtAnchorMs: number; anchorServerTime: number; playbackRate: number; revision: number }`
 
 ## `core.together.queue`
 

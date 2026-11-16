@@ -5,15 +5,15 @@
  *
  * The session's queue reaches the controller as a queue whose playing entry is first, so the
  * gapless engine preloads what the session plays next and moves on to it by itself at the end of
- * a song. Only the session moves on, though: the host's player asks the core to, at the end on the
- * session's clock, against the clock it decided on, and the core starts the next song as far in
- * as the clock ran past the end (`carriedPast`), so every member's engine, which moved on at that
- * end, is still in step.
+ * a song. Only the session moves on, though, and the core decides when, as old music's jams did:
+ * the host's player says when its engine finished the session's song (`core.together.ended`), and
+ * the core, once its own clock agrees, reads its queue and moves on to what is queued then, as far
+ * in as the clock ran past the end (`carriedPast`), so every member's engine, which moved on at
+ * that end, is still in step; with nothing queued then, it pauses back at the song's start.
  *
  * One identity rule (ADR 0017): every follower is made for one playing entry and one load of it,
- * and stops as soon as either changes; the host's move at the end carries the clock revision it was
- * decided against and applies only if the core's clock is still there, and the core carries the
- * time past the end only into the entry queued first by then; a viewer's move goes through the
+ * and stops as soon as either changes; the host's end names the entry and the clock revision it
+ * played under and applies only if the core still plays them; a viewer's move goes through the
  * follower, which numbers each command it gives the player. Every call to the core names the
  * session it was made for, which the core refuses once the person is no longer in it, so nothing
  * made for one session lands in the session that replaced it.
@@ -58,11 +58,29 @@ export type SessionOp =
  */
 export type SessionControl = (op: SessionOp, sessionId: string) => Promise<SessionClock>;
 
+/** What a host's player says finished: the entry it played, under the clock it played it. */
+export interface SessionEnd {
+  /** The entry's id, or null for the song the session started on. */
+  readonly entryId: string | null;
+  readonly revision: number;
+}
+
 /** The core's group-session calls the music player makes; each rejects with the SDK's errors. */
 export interface SessionCommands {
   /** `core.together.heartbeat` in music: keeps the person present and answers the server's time. */
   readonly heartbeat: () => Promise<{ readonly serverTime: number }>;
   readonly control: SessionControl;
+  /**
+   * `core.together.ended` in music, for the session `sessionId` names: the host's player says what
+   * the session plays finished; the core moves on once its clock agrees. Answers the clock in
+   * force.
+   */
+  readonly ended: (end: SessionEnd, sessionId: string) => Promise<SessionClock>;
+  /**
+   * `core.together.playNow` in music, for the session `sessionId` names: plays the song `trackId`
+   * now for everyone, from its start. Answers the clock in force.
+   */
+  readonly playNow: (trackId: string, sessionId: string) => Promise<SessionClock>;
 }
 
 /** One entry of a session as the player plays it: its key, and its song unless it is hidden. */
@@ -88,22 +106,36 @@ export interface SessionFollow<T extends Track = Track> {
   readonly mayControl: boolean;
   readonly clock: SessionClock;
   readonly playing: SessionSong<T>;
+  /** The queue entry the playing song came from, or null for the song the session started on. */
+  readonly entryId: string | null;
+  /**
+   * The playing song's length, as the core knows it, even when this person may not play it, or
+   * null when it knows none.
+   */
+  readonly lengthMs: number | null;
   /** What plays next, in order, as far as it was read. */
   readonly queued: ReadonlyArray<SessionSong<T>>;
   /** Whether anything is queued, as far as the queue is listed. */
   readonly listing: QueueListing;
 }
 
-/** Time as the session sees it: the device's clock and one-shot timers. */
+/** Time as the session sees it: the device's clocks and one-shot timers. */
 export interface SessionTimers {
+  /** The device's wall clock, which the person or the network may set at any moment. */
   readonly now: () => number;
+  /**
+   * A clock that only runs forward at a steady pace, from an arbitrary start, which nothing sets:
+   * the server's time is estimated on it, so a wall clock set meanwhile moves nothing.
+   */
+  readonly monotonic: () => number;
   /** Calls `callback` once after `ms`; returns the function that cancels it. */
   readonly after: (ms: number, callback: () => void) => () => void;
 }
 
-/** The wall clock and `setTimeout`. */
+/** The wall clock, `performance.now()`, and `setTimeout`. */
 export const systemTimers: SessionTimers = {
   now: Date.now,
+  monotonic: () => performance.now(),
   after: (ms, callback) => {
     const timer = setTimeout(callback, ms);
 
@@ -127,7 +159,10 @@ const globalRunner: SessionRunner = {
   runPromiseExit: (effect) => Effect.runPromiseExit(effect),
 };
 
-/** The server's time, as a client estimates it from heartbeats (`SessionPresence`). */
+/**
+ * The server's time, as a client estimates it from heartbeats on its monotonic clock
+ * (`SessionPresence`).
+ */
 export interface ServerTime {
   /** The server's time now, or null until a heartbeat answered. */
   readonly now: () => EpochMillis | null;
@@ -150,10 +185,14 @@ export interface SessionPlaybackOptions {
 export const playingKey = (sessionId: string, entryId: string | null): string =>
   entryId ?? `start:${sessionId}`;
 
-/** How long after a song's end on the session's clock the host's player moves the session on. */
-const END_MARGIN_MS = 40;
+/**
+ * How long after a song's end on the session's clock the host's player says it ended when its
+ * engine has not: a song hidden from the host, or a player the browser held back or that stalled.
+ * An engine that plays the song in step says so at its end, well inside this.
+ */
+const FALLBACK_MS = 1_000;
 
-/** How long a host's move at the end that failed waits before it is tried again. */
+/** How long a host's end the core refused, or that did not reach it, waits before it is tried again. */
 const RETRY_MS = 2_000;
 
 /** What a member hears who may not move the session, in old music's words. */
@@ -172,7 +211,7 @@ export interface SessionPlaybackState {
 
 const IDLE: SessionPlaybackState = { follower: null };
 
-/** The host's step at the end on its way: the wait for the song's end, or before a retry. */
+/** The host's fallback at a song's end on its way: the wait for the end, or before a retry. */
 interface EndStep {
   readonly kind: "end" | "retry";
   readonly cancel: () => void;
@@ -189,7 +228,8 @@ interface Running {
 
 /**
  * Keeps a person present in their music session, and waiting for one, with a heartbeat every
- * `HEARTBEAT_MS` on any screen, and estimates the server's time from the answers (ADR 0017).
+ * `HEARTBEAT_MS` on any screen, and estimates the server's time from the answers on the device's
+ * monotonic clock, so a wall clock set while a song plays moves nothing (ADR 0017).
  */
 export class SessionPresence implements ServerTime {
   readonly #heartbeat: () => Promise<{ readonly serverTime: number }>;
@@ -231,7 +271,7 @@ export class SessionPresence implements ServerTime {
   now = (): EpochMillis | null => {
     const offset = estimateClockOffset(this.#samples);
 
-    return offset === undefined ? null : toServerTime(this.#timers.now(), offset);
+    return offset === undefined ? null : toServerTime(this.#timers.monotonic(), offset);
   };
 
   /** Calls `listener` after each heartbeat answer; returns the unsubscribe. */
@@ -244,14 +284,14 @@ export class SessionPresence implements ServerTime {
   };
 
   #beat(): void {
-    const sentAt = this.#timers.now();
+    const sentAt = this.#timers.monotonic();
 
     this.#heartbeat().then(
       ({ serverTime }) => {
         const sample: ClockSample = {
           sentAt,
           serverTime: EpochMillis.make(Math.round(serverTime)),
-          receivedAt: this.#timers.now(),
+          receivedAt: this.#timers.monotonic(),
         };
 
         this.#samples = [...this.#samples, sample].slice(-CLOCK_SAMPLING.kept);
@@ -284,8 +324,10 @@ export class SessionPlayback<T extends Track = Track> {
   #hold: Hold | null = null;
   #heldIn: string | null = null;
   #end: EndStep | null = null;
-  /** The host's move at the end on its way, as the clock revision it was decided against. */
+  /** The host's end on its way, as the clock revision it was made under. */
   #movingOn: number | null = null;
+  /** As the host, the engine's end of the playing entry `key` is heard until `stop`. */
+  #endHeard: { readonly key: string; readonly stop: () => void } | null = null;
   #snapshot: SessionPlaybackState = IDLE;
   #unsubscribe: (() => void) | null = null;
 
@@ -333,7 +375,8 @@ export class SessionPlayback<T extends Track = Track> {
 
   /**
    * Starts watching what the engine plays and the server's time; returns the function that stops
-   * all of it. Each heartbeat answer plans the host's move at the end again, on the corrected time.
+   * all of it. Each heartbeat answer plans the host's fallback at the end again, on the corrected
+   * time.
    */
   start(): () => void {
     this.#unsubscribe?.();
@@ -370,6 +413,7 @@ export class SessionPlayback<T extends Track = Track> {
     if (view === null) {
       this.#stopFollower();
       this.#cancelEnd();
+      this.#listenForEnd();
       this.#hold = null;
 
       if (before !== null) this.#controller.followSession(null);
@@ -388,6 +432,7 @@ export class SessionPlayback<T extends Track = Track> {
 
     this.#controller.sync(queueOf(view));
     this.#reconcile();
+    this.#listenForEnd();
 
     const running = this.#running?.follower ?? null;
 
@@ -402,12 +447,15 @@ export class SessionPlayback<T extends Track = Track> {
   /**
    * Plays or pauses the session for everyone, as a member who may control. A member who may not
    * only starts their own player when the browser held it back. Resolves with why the session
-   * refused, for the screen, or null.
+   * refused, for the screen, or null. It is the person's choice, so a phone's press made before it
+   * applies to nothing (`PlaybackController.sessionChoice`), as outside a session.
    */
   async togglePlay(): Promise<string | null> {
     const view = this.#view;
 
     if (view === null) return null;
+
+    this.#controller.sessionChoice();
 
     const key = this.#running?.key;
     const state = this.#snapshot.follower;
@@ -433,20 +481,24 @@ export class SessionPlayback<T extends Track = Track> {
   }
 
   /**
-   * Plays the session for everyone, as a member who may control, as when they play a song now. A
-   * play is absolute, so a session someone else played meanwhile stays playing. It goes straight to
-   * the core, not through the follower: right after a skip the follower running is still the
-   * song's before, whose player must not start for a moment, and the clock that answers plays the
-   * song skipped to.
+   * Plays the song `trackId` now for everyone in the session `sessionId`, the one the person chose
+   * it in, from its start, playing, as a member who may control. The core does it in one write
+   * bound to that session, which it refuses once the person is no longer in it, so nothing it
+   * answers late plays in a session that replaced it. Resolves with why the session refused, for
+   * the screen, or null.
    */
-  play(): Promise<string | null> {
-    const view = this.#view;
+  async playNow(trackId: string, sessionId: string): Promise<string | null> {
+    if (this.#view?.mayControl !== true) return NO_CONTROL;
 
-    if (view?.mayControl !== true) {
-      return Promise.resolve(NO_CONTROL);
+    this.#controller.sessionChoice();
+
+    try {
+      await this.#commands.playNow(trackId, sessionId);
+
+      return null;
+    } catch (cause) {
+      return this.#describe(cause);
     }
-
-    return this.#send({ kind: "play" }, view.sessionId);
   }
 
   /** Seeks the session for everyone, as a member who may control. */
@@ -471,8 +523,13 @@ export class SessionPlayback<T extends Track = Track> {
     return this.seek(0);
   }
 
-  /** Plays the queued entry `key` now for everyone, as a member who may control. */
+  /**
+   * Plays the queued entry `key` now for everyone, as a member who may control. It picks a song, so
+   * it is the person's choice, as a jump outside a session is (`PlaybackController.sessionChoice`).
+   */
   jump(key: string): Promise<string | null> {
+    if (this.#view?.mayControl === true) this.#controller.sessionChoice();
+
     return this.#skip(key);
   }
 
@@ -676,33 +733,69 @@ export class SessionPlayback<T extends Track = Track> {
   }
 
   /**
-   * As the host, moves the session on at the end of its song on the session's clock: skips to
-   * what is queued, or with nothing queued pauses it and takes it back to the song's start, as old
-   * music's player stopped at the end of its queue. A session paused past the end, as when nobody
-   * moved it on before a pause, moves on at once, paused at the next song's start. Each step
-   * carries the revision it was decided against, so it never undoes a move this player has not
-   * heard of yet; a step that failed is tried again against the newest clock. The core starts the
-   * next song past the end only if it was queued first by then (`carriedPast`), so the skip names
-   * no entry: one taken out at the end is no reason to wait.
+   * As the host, hears the engine's end of the session's playing entry, as old music's player
+   * moved its jam on at the end of the host's song: the engine says the entry finished, by itself
+   * at its end or by moving on to the preloaded entry without a gap, and the host's player tells
+   * the core (`#sayEnded`), which decides. Nobody else's engine moves the session on.
+   */
+  #listenForEnd(): void {
+    const view = this.#view;
+    const key = view?.hosting === true ? view.playing.key : null;
+
+    if (this.#endHeard?.key === key) return;
+
+    this.#endHeard?.stop();
+    this.#endHeard = null;
+
+    if (key === null) return;
+
+    const stop = this.#controller.followerPlayer(key).subscribe((event) => {
+      if (event === "ended") this.#engineEnded(key);
+    });
+
+    this.#endHeard = { key, stop };
+  }
+
+  #engineEnded(key: string): void {
+    const view = this.#view;
+    const lengthMs = view?.lengthMs ?? null;
+
+    // With no known length, the core has no end on its clock to agree with; someone skips it.
+    if (
+      view?.hosting !== true ||
+      view.playing.key !== key ||
+      lengthMs === null ||
+      !(lengthMs > 0)
+    ) {
+      return;
+    }
+
+    void this.#sayEnded(view);
+  }
+
+  /**
+   * As the host, the fallback for an engine that never says the session's song ended: a song
+   * hidden from the host, a player the browser held back, or one that stalled. It says the song
+   * ended `FALLBACK_MS` after its end on the session's clock, as the server's time is estimated on
+   * the device's monotonic clock (`ServerTime`), and the core still decides. A session paused past
+   * the end, as when someone paused it before it moved on, says so at once.
    *
-   * The end is decided on the server's time at the moment of acting, never at planning: nothing is
-   * planned until a heartbeat answered, as the device's own clock may be far from the server's;
-   * each answer plans again; and the wait only plans again when it is over, so a move lands once
-   * the corrected time reaches the end.
+   * Nothing is planned until a heartbeat answered, each answer plans again, and a wait that runs
+   * out only plans again, so it says so once the corrected time is past the end.
    */
   #planEnd(): void {
     this.#cancelEnd();
 
     const view = this.#view;
-    const track = view?.playing.track ?? null;
+    const lengthMs = view?.lengthMs ?? null;
 
-    // A song with no known length has no end to move on at; someone skips it.
-    if (view === null || !view.hosting || track === null || track.durationMs <= 0) return;
+    // With no known length, the core has no end on its clock to agree with; someone skips it.
+    if (view === null || !view.hosting || lengthMs === null || !(lengthMs > 0)) return;
 
     const { clock } = view;
 
     if (clock.status === "paused") {
-      if (clock.positionAtAnchorMs >= track.durationMs) void this.#moveOnAtEnd(view);
+      if (clock.positionAtAnchorMs >= lengthMs) void this.#sayEnded(view);
 
       return;
     }
@@ -712,12 +805,12 @@ export class SessionPlayback<T extends Track = Track> {
     if (serverNow === null) return;
 
     const endServerTime =
-      clock.anchorServerTime + (track.durationMs - clock.positionAtAnchorMs) / clock.playbackRate;
+      clock.anchorServerTime + (lengthMs - clock.positionAtAnchorMs) / clock.playbackRate;
 
-    const wait = endServerTime - serverNow + END_MARGIN_MS;
+    const wait = endServerTime - serverNow + FALLBACK_MS;
 
     if (wait <= 0) {
-      void this.#moveOnAtEnd(view);
+      void this.#sayEnded(view);
 
       return;
     }
@@ -736,7 +829,14 @@ export class SessionPlayback<T extends Track = Track> {
     this.#end = null;
   }
 
-  async #moveOnAtEnd(decided: SessionFollow<T>): Promise<void> {
+  /**
+   * Tells the core, as the host, that the playing entry of `decided` finished, against the clock it
+   * played under; the core moves the session on once its own clock agrees, deciding on its queue
+   * as it is then (`core.together.ended`). Said once per clock: a newer clock says it again. One
+   * the core refused, or that did not reach it, is tried again after `RETRY_MS` against the newest
+   * view, if that has ended by then.
+   */
+  async #sayEnded(decided: SessionFollow<T>): Promise<void> {
     const view = this.#view;
 
     const unchanged =
@@ -746,32 +846,14 @@ export class SessionPlayback<T extends Track = Track> {
       view.playing.key === decided.playing.key &&
       view.clock.revision === decided.clock.revision;
 
-    // Decided once per clock: a newer one decides again, and a move on its way is not sent twice.
-    // Until the queue is listed, whether anything plays next is unknown: its listing decides.
-    if (!unchanged || this.#movingOn === view.clock.revision || view.listing === "loading") return;
+    if (!unchanged || this.#movingOn === view.clock.revision) return;
 
     const { revision } = view.clock;
-    const { sessionId } = view;
 
     this.#movingOn = revision;
 
     try {
-      if (view.listing === "listed") {
-        await this.#commands.control({ kind: "next", revision }, sessionId);
-
-        return;
-      }
-
-      // Paused already, the seek alone does: a pause would only make a new revision.
-      const paused =
-        view.clock.status === "paused"
-          ? view.clock
-          : await this.#commands.control({ kind: "pause", revision }, sessionId);
-
-      await this.#commands.control(
-        { kind: "seek", positionMs: 0, revision: paused.revision },
-        sessionId,
-      );
+      await this.#commands.ended({ entryId: view.entryId, revision }, view.sessionId);
     } catch {
       if (this.#movingOn !== revision) return;
 

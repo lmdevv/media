@@ -45,6 +45,7 @@ const joined = (role: JoinedSession["role"]): JoinedSession => ({
   },
   item: null,
   entryId: null,
+  lengthMs: null,
   members: [
     member("lucia", "host", "Lucía"),
     member("aiko", "guest", "Aiko Tanaka"),

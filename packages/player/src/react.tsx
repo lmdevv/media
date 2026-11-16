@@ -44,7 +44,7 @@ import {
   asEntryId,
   followOf,
   playInSession,
-  sessionControl,
+  sessionCommands,
   startCommands,
   useSessionData,
 } from "./session-react";
@@ -460,10 +460,7 @@ export function PlayerProvider({
     () =>
       new SessionPlayback({
         controller,
-        commands: {
-          heartbeat: () => platform.core.together.heartbeat({ domain: MUSIC }),
-          control: sessionControl(platform),
-        },
+        commands: sessionCommands(platform),
         serverTime: presence,
         describe: messageOf,
       }),

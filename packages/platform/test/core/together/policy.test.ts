@@ -216,6 +216,19 @@ describe("what a member may do in a group session", () => {
       { place: "host", live: false },
       "forbidden ended",
     ],
+    ["the host's player moves the session on at an end", "advance", { place: "host" }, "allowed"],
+    [
+      "a guest's player never moves the session on, even when guests may control",
+      "advance",
+      { place: "guest", control: true, add: true },
+      "forbidden not-host",
+    ],
+    [
+      "nobody moves an ended session on",
+      "advance",
+      { place: "host", live: false },
+      "forbidden ended",
+    ],
     ["a guest cannot let people in", "admit", { place: "guest" }, "forbidden not-host"],
     ["the host lets people in", "admit", { place: "host", join: "approval" }, "allowed"],
     [

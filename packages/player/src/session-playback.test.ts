@@ -1,11 +1,15 @@
+import { positionAt } from "@media/contracts/clock";
 import type { SessionClock } from "@media/contracts/clock";
 import { EpochMillis } from "@media/contracts/units";
+import { Brand } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { NO_CONTROL, startSession } from "./session-playback";
 import type { SessionOp, StartCommands } from "./session-playback";
+import { asEntryId, playInSession } from "./session-react";
+import type { JoinedSession, SessionAdds } from "./session-react";
 import { scenario, song } from "./testing/session-harness";
-import type { Member, World } from "./testing/session-harness";
+import type { Member, Transition, World } from "./testing/session-harness";
 
 /** How far a member's engine stands from the session's shared position now. */
 const driftOf = (world: World, member: Member): number => {
@@ -23,6 +27,17 @@ const changesTo = (member: Member, songId: string) =>
 /** When the session's song, played from its start by `world.move`, ends, on the device's clock. */
 const endOf = (world: World, lengthMs: number): number =>
   (world.calls.find((call) => call.op.kind === "play")?.at ?? Number.NaN) + lengthMs;
+
+/** The host's ends the core took: at once, or at the end on its clock (`by: "core"`). */
+const endsTaken = (world: World) =>
+  world.calls.filter((call) => call.op.kind === "ended" && call.outcome === "applied");
+
+/** Every move on at a song's end the core made, by a host's end or at the end itself. */
+const endMoves = (world: World) => world.transitions.filter((change) => change.kind === "ended");
+
+/** Where the session's clock stood in the song it left when `move` moved it on. */
+const positionAtMove = (move: Transition | undefined): number =>
+  move === undefined ? Number.NaN : positionAt(move.before.clock, EpochMillis.make(move.serverAt));
 
 describe("a music session's players", { timeout: 60_000 }, () => {
   it("play the session's song where its clock stands, in step", async () => {
@@ -71,12 +86,18 @@ describe("a music session's players", { timeout: 60_000 }, () => {
         expect(Math.abs(driftOf(world, member))).toBeLessThan(120);
       }
 
-      // Only the host moved the session on, once, against the clock it decided on; the entry every
-      // engine preloaded starts as far in as the clock ran past the end.
-      const skips = world.calls.filter((call) => call.op.kind === "next");
+      // Only the host's engine said the song ended, and the core moved the session on once, at the
+      // end on its clock or after; nobody skipped.
+      expect(world.calls.filter((call) => call.op.kind === "next")).toEqual([]);
+      expect(world.calls.find((call) => call.op.kind === "ended")).toMatchObject({
+        by: "Lucía",
+      });
 
-      expect(skips).toMatchObject([{ by: "Lucía", outcome: "applied" }]);
-      expect(skips[0]?.startedAt).toBeGreaterThan(0);
+      const movedOn = endMoves(world);
+
+      expect(movedOn).toHaveLength(1);
+      expect(movedOn[0]?.after.entry.track.id).toBe("b");
+      expect(positionAtMove(movedOn[0])).toBeGreaterThanOrEqual(20_000);
     });
   });
 
@@ -96,9 +117,7 @@ describe("a music session's players", { timeout: 60_000 }, () => {
 
       // The session moved on to c, queued first only after the end, from its start: no engine had
       // it, so none skipped any of it, and every one plays it where the clock stands.
-      expect(world.calls.filter((call) => call.op.kind === "next")).toMatchObject([
-        { by: "Lucía", outcome: "applied", startedAt: 0 },
-      ]);
+      expect(endsTaken(world)).toMatchObject([{ by: "Lucía", startedAt: 0 }]);
       expect(world.playing().key).toBe(c?.key);
 
       for (const member of [host, ...guests]) {
@@ -122,9 +141,7 @@ describe("a music session's players", { timeout: 60_000 }, () => {
 
       await world.advance(6_000);
 
-      expect(world.calls.filter((call) => call.op.kind === "next")).toMatchObject([
-        { by: "Lucía", outcome: "applied", startedAt: 0 },
-      ]);
+      expect(endsTaken(world)).toMatchObject([{ startedAt: 0 }]);
       expect(world.playing().key).toBe(c);
 
       for (const member of [host, guest]) {
@@ -167,15 +184,14 @@ describe("a music session's players", { timeout: 60_000 }, () => {
 
         await world.advance(25_000);
 
-        const skips = world.calls.filter((call) => call.op.kind === "next");
+        const taken = endsTaken(world);
 
-        expect(skips).toMatchObject([{ by: "Lucía", outcome: "applied" }]);
+        expect(taken).toHaveLength(1);
 
         const end = endOf(world, 20_000);
 
-        expect(skips[0]?.at).toBeGreaterThanOrEqual(end);
-        expect(skips[0]?.at).toBeLessThan(end + 300);
-        expect(skips[0]?.startedAt).toBeGreaterThan(0);
+        expect(taken[0]?.at).toBeGreaterThanOrEqual(end);
+        expect(taken[0]?.at).toBeLessThan(end + 300);
         expect(world.playing().track.id).toBe("b");
         expect(changesTo(guest, "b")[0]?.kind).toBe("advance");
 
@@ -203,12 +219,12 @@ describe("a music session's players", { timeout: 60_000 }, () => {
         world.join("Lucía", { hosting: true, deviceClock: { skewMs: 12_000, firstTrip } });
         await world.advance(25_000);
 
-        const skips = world.calls.filter((call) => call.op.kind === "next");
+        const taken = endsTaken(world);
         const end = endOf(world, 20_000);
 
-        expect(skips).toMatchObject([{ by: "Lucía", outcome: "applied" }]);
-        expect(skips[0]?.at).toBeGreaterThanOrEqual(end);
-        expect(skips[0]?.at).toBeLessThan(end + 300);
+        expect(taken).toHaveLength(1);
+        expect(taken[0]?.at).toBeGreaterThanOrEqual(end);
+        expect(taken[0]?.at).toBeLessThan(end + 300);
       });
     });
   }
@@ -226,12 +242,14 @@ describe("a music session's players", { timeout: 60_000 }, () => {
       world.join("Lucía", { hosting: true, listsQueueAfterMs: 4_000 });
       await world.advance(8_000);
 
+      // The core read its own queue at the end: the host's listing, still loading, decided nothing.
       const end = endOf(world, 20_000);
       const byHost = world.calls.filter((call) => call.by === "Lucía" && call.at > end - 5_000);
 
-      expect(byHost.map((call) => call.op.kind)).toEqual(["next"]);
+      expect(byHost.map((call) => call.op.kind)).toEqual(["ended"]);
       expect(byHost[0]).toMatchObject({ outcome: "applied" });
-      expect(byHost[0]?.at).toBeGreaterThanOrEqual(end + 2_000);
+      expect(byHost[0]?.at).toBeGreaterThanOrEqual(end);
+      expect(byHost[0]?.at).toBeLessThan(end + 300);
       expect(world.playing().track.id).toBe("b");
       expect(world.clock().status).toBe("playing");
 
@@ -295,15 +313,15 @@ describe("a music session's players", { timeout: 60_000 }, () => {
 
       await world.advance(500);
       world.move("Lucía", { kind: "play" });
-      // The session's song ends 20.5 s in; the host's player moves it on 40 ms later, against the
-      // clock before this pause, which the core lands first.
-      await world.advance(20_030);
+      // The session's song ends 20.5 s in, where the host's engine moves on and says so; its end,
+      // under the clock before this pause, reaches the core 30 ms later, after the pause.
+      await world.advance(20_010);
       world.move("Aiko", { kind: "pause" });
       await world.advance(3_000);
 
-      // The skip decided before the pause is refused; paused past the end, the session then moves
-      // on to the next song's start, still paused.
-      expect(world.calls.filter((call) => call.op.kind === "next")).toMatchObject([
+      // The end said before the pause is refused; paused past the end, the session then moves on
+      // to the next song's start, still paused.
+      expect(world.calls.filter((call) => call.op.kind === "ended")).toMatchObject([
         { by: "Lucía", outcome: "refused" },
         { by: "Lucía", outcome: "applied" },
       ]);
@@ -392,46 +410,46 @@ describe("a music session's players", { timeout: 60_000 }, () => {
 
       expect(world.playing().track.id).toBe("a");
       expect(world.calls.filter((call) => call.op.kind === "next")).toEqual([]);
+      expect(endMoves(world)).toEqual([]);
     });
   });
 
-  it("play a paused session for everyone at the word of a member who may control, and refuse one who may not", async () => {
+  it("play a song now in a paused session for everyone at the word of a member who may control, and refuse one who may not", async () => {
     await scenario(song("a", 60), [], async (world) => {
       const host = world.join("Lucía", { hosting: true });
       const guest = world.join("Aiko", {});
 
       await world.advance(500);
 
-      expect(await guest.playback.play()).toBe(NO_CONTROL);
+      expect(await guest.playback.playNow("c", world.sessionId())).toBe(NO_CONTROL);
       expect(world.clock().status).toBe("paused");
 
-      const played = host.playback.play();
+      const played = host.playback.playNow("c", world.sessionId());
 
       await world.advance(500);
 
       expect(await played).toBeNull();
-      expect(world.clock().status).toBe("playing");
+      expect(world.playing().track.id).toBe("c");
+      expect(world.clock()).toMatchObject({ status: "playing", revision: 1 });
 
       await world.advance(3_000);
 
       for (const member of [host, guest]) {
+        expect(member.engine.song).toBe("c");
         expect(member.engine.samplePlayback().playing).toBe(true);
         expect(Math.abs(driftOf(world, member))).toBeLessThan(120);
       }
     });
   });
 
-  it("play a song put first now in a paused session, without the song before sounding for a moment", async () => {
+  it("play a song now in a paused session without the song before sounding for a moment", async () => {
     await scenario(song("a", 60), [song("b", 60)], async (world) => {
       const host = world.join("Lucía", { hosting: true, hearsLateMs: 200 });
 
       await world.advance(2_000);
 
       const since = world.now();
-      const b = world.queue()[0]?.key ?? "missing";
-
-      // As playing a song now does: the skip, then the play the moment the skip lands.
-      const played = host.playback.jump(b).then(async () => host.playback.play());
+      const played = host.playback.playNow("c", world.sessionId());
 
       await world.advance(3_000);
 
@@ -441,8 +459,10 @@ describe("a music session's players", { timeout: 60_000 }, () => {
           (heard) => heard.at >= since && heard.song === "a" && heard.kind === "play",
         ),
       ).toEqual([]);
-      expect(host.engine.song).toBe("b");
+      expect(host.engine.song).toBe("c");
       expect(host.engine.samplePlayback().playing).toBe(true);
+      // The queue stays as it was.
+      expect(world.queue().map((entry) => entry.track.id)).toEqual(["b"]);
     });
   });
 
@@ -531,6 +551,161 @@ describe("a music session's players", { timeout: 60_000 }, () => {
         expect(member.engine.samplePlayback().playing).toBe(true);
         expect(Math.abs(driftOf(world, member))).toBeLessThan(250);
       }
+    });
+  });
+});
+
+/** Song ids as the session's screens hand them to `playInSession`. */
+const asSongId = Brand.nominal<Parameters<typeof playInSession>[3][number]>();
+
+const asSessionId = Brand.nominal<JoinedSession["sessionId"]>();
+
+/** The person's session as their screen shows it, joined as its host, playing nothing they see. */
+const joinedView = (world: World): JoinedSession => ({
+  state: "joined",
+  sessionId: asSessionId(world.sessionId()),
+  host: "lucia",
+  hostDisplayName: "Lucía",
+  role: "host",
+  link: "mt_session.secret",
+  settings: { join: "open", control: false, add: false },
+  may: { control: true, add: true, manage: true },
+  clock: world.clock(),
+  item: null,
+  entryId: null,
+  lengthMs: world.playing().track.durationMs,
+  members: [],
+  pending: null,
+});
+
+/** `core.together.add` as `by`'s screen calls it, through the world's core. */
+const addsAs = (world: World, by: string): SessionAdds => ({
+  core: {
+    together: {
+      add: async ({ item, at, sessionId }) => ({
+        entryId: asEntryId(await world.addAs(by, item.ref.id, at ?? "end", sessionId)),
+      }),
+    },
+  },
+});
+
+/**
+ * The verifier's reproductions of fix round 3 (ADR 0017): each failed on ea37b18c, where the
+ * host's player decided a song's end from its own clock and its own copy of the queue, a Jam's
+ * transport took no number from #163's sequence, and playing a song now was two calls.
+ */
+describe("a music session's end, transport, and play now", { timeout: 60_000 }, () => {
+  it("never moves on early when the host's wall clock is set 30 s ahead mid-song", async () => {
+    await scenario(song("a", 30), [song("b", 60)], async (world) => {
+      const host = world.join("Lucía", { hosting: true, deviceClock: { skewMs: 0 } });
+      const guest = world.join("Aiko", {});
+
+      await world.advance(500);
+      world.move("Lucía", { kind: "play" });
+      await world.advance(4_500);
+
+      // 5 s in, the host's device clock is set 30 s ahead, past the song's end, just before a
+      // heartbeat answers.
+      world.setWallClock("Lucía", 30_000);
+      await world.advance(15_000);
+
+      expect(world.playing().track.id).toBe("a");
+      expect(endMoves(world)).toEqual([]);
+
+      for (const member of [host, guest]) {
+        expect(member.engine.song).toBe("a");
+        expect(Math.abs(driftOf(world, member))).toBeLessThan(120);
+      }
+
+      // It still moves on at the song's real end.
+      await world.advance(15_000);
+
+      const movedOn = endMoves(world);
+
+      expect(movedOn).toHaveLength(1);
+      expect(positionAtMove(movedOn[0])).toBeGreaterThanOrEqual(30_000);
+      expect(world.playing().track.id).toBe("b");
+    });
+  });
+
+  it("moves on to a song added 10 ms before the end, though the host hears of the add 500 ms late", async () => {
+    await scenario(song("a", 20), [], async (world) => {
+      const host = world.join("Lucía", { hosting: true, hearsLateMs: 500 });
+      const guest = world.join("Aiko", {});
+
+      await world.advance(500);
+      world.move("Lucía", { kind: "play" });
+      // The song ends 20.5 s in.
+      await world.advance(19_990);
+
+      const b = world.add(song("b", 30));
+
+      await world.advance(5_000);
+
+      // The core read its queue at the end: b was in it, so the Jam played b, and never went back
+      // to a's start, paused, with b queued.
+      expect(world.playing().key).toBe(b);
+      expect(world.clock().status).toBe("playing");
+      expect(
+        world.transitions.filter(
+          (change) =>
+            change.after.entry === change.before.entry && change.after.clock.status === "paused",
+        ),
+      ).toEqual([]);
+
+      for (const member of [host, guest]) {
+        expect(member.engine.song).toBe("b");
+        expect(member.engine.samplePlayback().playing).toBe(true);
+        expect(Math.abs(driftOf(world, member))).toBeLessThan(120);
+      }
+    });
+  });
+
+  it("lets no lock-screen press made before the person plays the Jam pause it again", async () => {
+    await scenario(song("a", 60), [], async (world) => {
+      const host = world.join("Lucía", { hosting: true, phone: true });
+
+      await world.advance(500);
+
+      // The Jam is paused. The host presses pause on the lock screen; the press reaches the app's
+      // JavaScript 600 ms later. Meanwhile they play the Jam in the app.
+      world.press("Lucía", "pause", 600);
+      await world.advance(100);
+
+      const played = host.playback.togglePlay();
+
+      await world.advance(2_000);
+
+      expect(await played).toBeNull();
+      expect(world.calls.filter((call) => call.op.kind === "pause")).toEqual([]);
+      expect(world.clock().status).toBe("playing");
+      expect(host.engine.samplePlayback().playing).toBe(true);
+    });
+  });
+
+  it("plays nothing in the Jam the person moved to while a song played now in the one before answers", async () => {
+    await scenario(song("a", 60), [], async (world) => {
+      const host = world.join("Lucía", { hosting: true, answersLateMs: 1_000 });
+
+      await world.advance(500);
+
+      const playing = playInSession(addsAs(world, "Lucía"), joinedView(world), host.playback, [
+        asSongId("x"),
+        asSongId("y"),
+      ]).catch((cause: unknown) => cause);
+
+      // The person ends that Jam and starts another, as on another device, while the core's answers
+      // are still on their way.
+      await world.advance(1_200);
+      world.replaceSession(song("z", 60));
+      await world.advance(3_000);
+      await playing;
+
+      expect(world.sessionId()).not.toBe("session");
+      expect(world.playing().track.id).toBe("z");
+      expect(world.clock()).toMatchObject({ status: "paused", revision: 0 });
+      expect(world.queue()).toEqual([]);
+      expect(host.engine.samplePlayback().playing).toBe(false);
     });
   });
 });

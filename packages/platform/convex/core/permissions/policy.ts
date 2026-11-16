@@ -852,8 +852,9 @@ export interface TogetherResource {
 /**
  * What can be done to a group session. `join` enters it and `ask` waits for its host. `see` reads
  * one's own place in it and keeps one present, pending included; `view` reads its queue. `remove`
- * takes an entry out of its queue and `reorder` moves one within it. `admit` lets a waiting person
- * in, and `manage` changes its settings and removes people.
+ * takes an entry out of its queue and `reorder` moves one within it. `advance` moves it on at the
+ * end of what it plays, as its host's player says that ended. `admit` lets a waiting person in,
+ * and `manage` changes its settings and removes people.
  */
 export const togetherActions = [
   "start",
@@ -866,6 +867,7 @@ export const togetherActions = [
   "add",
   "remove",
   "reorder",
+  "advance",
   "admit",
   "manage",
 ] as const;
@@ -960,6 +962,11 @@ const togetherRules: TogetherRules = {
   add: { ...LIVE, who: "joined", guests: "add", platformGuests: false },
   remove: OWN_ENTRY,
   reorder: OWN_ENTRY,
+  /**
+   * Only the host's player moves a session on at an item's end, as old music's jams moved on at the
+   * end of the host's song: a guest's player, whatever the host allows, never does (ADR 0017).
+   */
+  advance: { ...LIVE, who: "host", guests: "nothing" },
   /** A locked session takes no new members, approved or not. */
   admit: { ...LIVE, who: "host", guests: "nothing", locked: false },
   manage: { ...LIVE, who: "host", guests: "nothing" },

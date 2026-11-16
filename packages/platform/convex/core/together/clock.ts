@@ -1,12 +1,18 @@
+import { v } from "convex/values";
+
 import type { DomainItem } from "../../../commands/access";
 import type { ContentDomain } from "../../../commands/scopes";
 import type { Handlers } from "../../../commands/core/together";
+import { internal } from "../../_generated/api";
 import type { Doc, Id } from "../../_generated/dataModel";
+import { internalMutation } from "../../_generated/server";
 import type { DatabaseReader, MutationCtx } from "../../_generated/server";
 import { incrementCounter } from "../lib/counters";
 import { fail } from "../lib/errors";
+import { requirePlayable } from "../permissions/items";
+import { can } from "../permissions/policy";
 import type { Principal } from "../permissions/policy";
-import { requireTogether } from "./access";
+import { factsOf, refuse, requireTogether } from "./access";
 import type { SessionDoc } from "./access";
 import { firstAfter, firstQueued, noteQueuedFirst, queueCounter } from "./queue";
 import { RATE_MAX, RATE_MIN } from "./model";
@@ -162,7 +168,7 @@ export const carriedPast = (clock: Clock, now: number, carry: Carry | null): num
 };
 
 /** The length of `item` when the core knows one, a music track's; null for any other item. */
-const itemLength = async (db: DatabaseReader, item: DomainItem): Promise<number | null> => {
+export const itemLength = async (db: DatabaseReader, item: DomainItem): Promise<number | null> => {
   const { ref } = item;
 
   if (ref.type !== "track") return null;
@@ -255,22 +261,244 @@ export const control = async (
       : fail("conflict", "Nothing is queued");
   }
 
-  // The entry queued first once this one plays, read before anything is written
-  // (`noteQueuedFirst`): the one after it, when it was first; otherwise the same one.
-  const named = op.kind === "next" && op.entryId !== undefined;
-  const head = named ? await firstQueued(ctx.db, session._id) : target;
+  await playEntry(ctx, session, target, step.clock, now);
+
+  return step.clock;
+};
+
+/**
+ * Makes `target`, queued in `session`, the entry it plays under `clock`, and takes it out of the
+ * queue. The entry queued first once it plays is read before anything is written
+ * (`noteQueuedFirst`): the one after it, when it was first; otherwise the same one.
+ */
+const playEntry = async (
+  ctx: Pick<MutationCtx, "db">,
+  session: SessionDoc,
+  target: Doc<"togetherEntries">,
+  clock: Clock,
+  now: number,
+): Promise<void> => {
+  const head = await firstQueued(ctx.db, session._id);
 
   const first =
     head?._id === target._id ? await firstAfter(ctx.db, session._id, target.order) : head;
 
   await ctx.db.delete(target._id);
   await incrementCounter(ctx.db, queueCounter(session._id), -1);
-  await ctx.db.patch(session._id, {
-    clock: step.clock,
-    item: target.item,
-    itemEntryId: target._id,
-  });
+  await ctx.db.patch(session._id, { clock, item: target.item, itemEntryId: target._id });
   await noteQueuedFirst(ctx, session, first?._id ?? null, now);
+};
 
-  return step.clock;
+/**
+ * How long before the end of what a session plays, on its clock, its host's player may say it
+ * ended. A player follows the clock within the follower's seek threshold (`DRIFT_THRESHOLDS.seekMs`
+ * in `@media/contracts`, 1.5 s): further off, it seeks back to the clock. So an engine that
+ * finished a song earlier than this did not finish it where the session stands, as a device whose
+ * clock jumped would, and the core refuses it; the host's player asks again at the end. Within it,
+ * the core moves on at the end itself, never before (`ended`).
+ */
+export const ENDED_EARLY_MS = 1_500;
+
+const MOVED_ON = "The session moved on; apply its latest clock and try again";
+
+/** What a host's player says ended: the entry it played, under the clock it played it. */
+export interface Ended {
+  /** The entry, or null for the item the session started on (`itemEntryId`). */
+  readonly entryId: Id<"togetherEntries"> | null;
+  readonly revision: number;
+}
+
+/** Whether `session` still plays what `ended` names, under the same clock. */
+const stillPlays = (session: SessionDoc, ended: Ended): boolean =>
+  session.clock.revision === ended.revision && (session.itemEntryId ?? null) === ended.entryId;
+
+/**
+ * When `session`'s clock reaches the end of what it plays: now or earlier ("ended"), at a server
+ * time still to come, or "never", for a paused clock before the end. A clock paused past the end,
+ * as when someone paused it before anything moved it on, has ended.
+ */
+const endOf = (
+  clock: Clock,
+  lengthMs: number,
+  now: number,
+):
+  | { readonly kind: "ended" }
+  | { readonly kind: "at"; readonly at: number }
+  | { readonly kind: "never" } => {
+  if (positionAt(clock, now) >= lengthMs) return { kind: "ended" };
+
+  const at = reachedAt(clock, lengthMs);
+
+  return at === null ? { kind: "never" } : { kind: "at", at };
+};
+
+/**
+ * The host's player says its engine finished what the caller's session in `domain` plays, the
+ * session `sessionId` names (ADR 0017). Old music's jams moved on the same way: the host's player
+ * said its song ended, and the server read the queue and moved on in one write. Only the host may
+ * (`advance`); a guest's player never moves a session on.
+ *
+ * It applies only while the session still plays that entry under that clock (`Ended`), and only
+ * once the session's clock agrees: at or past the end, the session moves on now (`moveOnAtEnd`);
+ * up to `ENDED_EARLY_MS` before it, the core moves it on itself when the clock gets there, as
+ * `endAt`; earlier than that, or paused before the end, it fails `conflict`. An item whose length
+ * the core does not know has no end on its clock, so only a skip moves it on. Answers the clock in
+ * force.
+ */
+export const ended = async (
+  ctx: Pick<MutationCtx, "db" | "scheduler">,
+  caller: Principal,
+  domain: ContentDomain,
+  sessionId: Id<"togetherSessions">,
+  what: Ended,
+): Promise<Clock> => {
+  const { session } = await requireTogether(ctx, caller, domain, "advance", sessionId);
+
+  if (!stillPlays(session, what)) return fail("conflict", MOVED_ON);
+
+  const lengthMs = await itemLength(ctx.db, session.item);
+
+  if (lengthMs === null || !(lengthMs > 0)) {
+    return fail("conflict", "The session has no length for what it plays; skip it instead");
+  }
+
+  const now = Date.now();
+  const end = endOf(session.clock, lengthMs, now);
+
+  if (end.kind === "ended") return moveOnAtEnd(ctx, session, now);
+
+  if (end.kind === "never" || end.at - now > ENDED_EARLY_MS) {
+    return fail("conflict", "What the session plays has not ended on its clock yet");
+  }
+
+  await ctx.scheduler.runAt(end.at, internal.core.together.clock.endAt, {
+    sessionId: session._id,
+    ...what,
+  });
+
+  return session.clock;
+};
+
+/**
+ * The end `ended` accepted shortly before it came: moves the session on once its clock reaches
+ * the end, deciding then on the queue as it is then, unless the session ended or moved since. A
+ * run that comes before the end, as a scheduler a little early would, waits for it again.
+ */
+export const endAt = internalMutation({
+  args: {
+    sessionId: v.id("togetherSessions"),
+    entryId: v.union(v.id("togetherEntries"), v.null()),
+    revision: v.number(),
+  },
+  returns: v.null(),
+  handler: async (ctx, { sessionId, entryId, revision }) => {
+    const session = await ctx.db.get(sessionId);
+
+    if (session?.state !== "live" || !stillPlays(session, { entryId, revision })) return null;
+
+    const lengthMs = await itemLength(ctx.db, session.item);
+
+    if (lengthMs === null) return null;
+
+    const now = Date.now();
+    const end = endOf(session.clock, lengthMs, now);
+
+    if (end.kind === "ended") await moveOnAtEnd(ctx, session, now);
+    else if (end.kind === "at") {
+      await ctx.scheduler.runAt(end.at, internal.core.together.clock.endAt, {
+        sessionId,
+        entryId,
+        revision,
+      });
+    }
+
+    return null;
+  },
+});
+
+/**
+ * Moves `session` on at the end of what it plays, deciding on its queue as it is now: to the
+ * entry queued first, as a skip does, carried as far as the clock ran past the end
+ * (`carriedPast`); or with nothing queued, paused back at the start of what it plays, as old
+ * music's player stopped at the end of its queue, in one move.
+ */
+const moveOnAtEnd = async (
+  ctx: Pick<MutationCtx, "db">,
+  session: SessionDoc,
+  now: number,
+): Promise<Clock> => {
+  const { clock } = session;
+  const next = await firstQueued(ctx.db, session._id);
+
+  if (next === null) {
+    const stopped: Clock = {
+      ...clock,
+      status: "paused",
+      positionAtAnchorMs: 0,
+      anchorServerTime: now,
+      revision: clock.revision + 1,
+    };
+
+    await ctx.db.patch(session._id, { clock: stopped });
+
+    return stopped;
+  }
+
+  const carry = await carryOf(ctx.db, session, next);
+
+  const moved: Clock = {
+    ...clock,
+    positionAtAnchorMs: carriedPast(clock, now, carry),
+    anchorServerTime: now,
+    revision: clock.revision + 1,
+  };
+
+  await playEntry(ctx, session, next, moved, now);
+
+  return moved;
+};
+
+/**
+ * Plays `item` now in the caller's session in its domain, the one `sessionId` names, from its
+ * start, playing, in one write, as old music's host played a song in a jam: the caller must be
+ * able to control the session, add to it, and play `item`. It plays as an entry of its own, which
+ * never stays queued, so it differs from any other play of the same item (`itemEntryId`), and the
+ * queue stays as it was. Answers the clock in force. Fails `conflict` once the caller is no longer
+ * in that session (`requireTogether`), so a late call never plays in the session that replaced it.
+ */
+export const playNow = async (
+  ctx: Pick<MutationCtx, "db">,
+  caller: Principal,
+  item: DomainItem,
+  sessionId: Id<"togetherSessions">,
+): Promise<Clock> => {
+  const { session, place } = await requireTogether(ctx, caller, item.domain, "control", sessionId);
+  const adding = can(caller, "add", factsOf(session, place));
+
+  if (!adding.allowed) return refuse(adding);
+
+  await requirePlayable(ctx.db, caller, item);
+
+  const now = Date.now();
+
+  const entryId = await ctx.db.insert("togetherEntries", {
+    sessionId: session._id,
+    order: 0,
+    item,
+    addedBy: caller.userId,
+  });
+
+  await ctx.db.delete(entryId);
+
+  const clock: Clock = {
+    ...session.clock,
+    status: "playing",
+    positionAtAnchorMs: 0,
+    anchorServerTime: now,
+    revision: session.clock.revision + 1,
+  };
+
+  await ctx.db.patch(session._id, { clock, item, itemEntryId: entryId });
+
+  return clock;
 };

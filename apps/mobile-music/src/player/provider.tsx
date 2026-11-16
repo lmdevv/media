@@ -31,7 +31,7 @@ import {
   asEntryId,
   followOf,
   playInSession,
-  sessionControl,
+  sessionCommands,
   startCommands,
   useSessionData,
 } from "@media/player/session-react";
@@ -1330,10 +1330,7 @@ export function PlayerProvider({ children }: { readonly children: ReactNode }) {
     () =>
       new SessionPlayback({
         controller,
-        commands: {
-          heartbeat: () => platform.core.together.heartbeat({ domain: MUSIC }),
-          control: sessionControl(platform),
-        },
+        commands: sessionCommands(platform),
         serverTime: presence,
         describe: describeFailure,
       }),
@@ -1610,7 +1607,7 @@ export function PlayerProvider({ children }: { readonly children: ReactNode }) {
 
   const devices = useDevicesView(platform, controller, connect, latest);
 
-  const sessionCommands = useMemo(
+  const queueCommands = useMemo(
     () => inSessionCommands(platform, latestSession, commands),
     [platform, commands],
   );
@@ -1658,7 +1655,7 @@ export function PlayerProvider({ children }: { readonly children: ReactNode }) {
   return (
     <PositionReaderContext value={readPosition}>
       <ActionsContext value={actions}>
-        <CommandsContext value={sessionCommands}>
+        <CommandsContext value={queueCommands}>
           <DevicesContext value={devices}>
             <PlayerContext value={player}>
               <NowPlayingContext value={current}>

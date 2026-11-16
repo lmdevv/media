@@ -5,12 +5,14 @@
  * member plays the session's song where its clock stands, playing exactly when it plays, and
  * only the host's player or a person moves the session on.
  */
+import { positionAt } from "@media/contracts/clock";
+import { EpochMillis } from "@media/contracts/units";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
 import type { SessionOp } from "./session-playback";
 import { scenario, song } from "./testing/session-harness";
-import type { Member, World } from "./testing/session-harness";
+import type { Member, Transition, World } from "./testing/session-harness";
 
 type Step =
   | { readonly kind: "wait"; readonly ms: number }
@@ -349,6 +351,246 @@ describe("a music session's players, whatever happens in whatever order", () => 
       await fc.assert(
         fc.asyncProperty(toTheEnd, (script) => playScript(script)),
         { numRuns: 12 },
+      );
+    },
+  );
+});
+
+/** Something that can happen around a song's end while the core decides it (ADR 0017). */
+type AtTheEnd =
+  | { readonly kind: "wait"; readonly ms: number }
+  | { readonly kind: "add"; readonly at: "next" | "end" }
+  | { readonly kind: "remove"; readonly pick: number }
+  | { readonly kind: "front"; readonly pick: number }
+  | { readonly kind: "skip" }
+  | { readonly kind: "leave" };
+
+const atTheEnd: fc.Arbitrary<AtTheEnd> = fc.oneof(
+  {
+    weight: 6,
+    arbitrary: fc.integer({ min: 5, max: 300 }).map((ms) => ({ kind: "wait", ms }) as const),
+  },
+  {
+    weight: 3,
+    arbitrary: fc
+      .constantFrom("next" as const, "end" as const)
+      .map((at) => ({ kind: "add", at }) as const),
+  },
+  { weight: 2, arbitrary: fc.nat(3).map((pick) => ({ kind: "remove", pick }) as const) },
+  { weight: 2, arbitrary: fc.nat(3).map((pick) => ({ kind: "front", pick }) as const) },
+  { weight: 1, arbitrary: fc.constant({ kind: "skip" } as const) },
+  { weight: 1, arbitrary: fc.constant({ kind: "leave" } as const) },
+);
+
+/**
+ * How the Jam stands as the script starts: how late the host's player hears the session, as a busy
+ * page does, whether b is hidden from the host, as from a kid, and how many songs are queued after
+ * the first.
+ */
+interface Setup {
+  readonly hearsLateMs: number;
+  readonly hidesB: boolean;
+  readonly queued: number;
+}
+
+const setup: fc.Arbitrary<Setup> = fc.record({
+  hearsLateMs: fc.constantFrom(0, 120, 500),
+  hidesB: fc.boolean(),
+  queued: fc.constantFrom(0, 0, 1, 2),
+});
+
+/** Whether `change`, by no person's move, left the song where it was, paused at its start. */
+const rewound = (change: Transition): boolean =>
+  change.after.entry.key === change.before.entry.key &&
+  change.after.clock.status === "paused" &&
+  change.after.clock.positionAtAnchorMs === 0;
+
+/** Where the clock stood in the song `change` left, at the server time it was made. */
+const leftAt = (change: Transition): number =>
+  positionAt(change.before.clock, EpochMillis.make(change.serverAt));
+
+/** What a script around the end has done so far. */
+interface EndState {
+  lateAdds: number;
+  /** When the host left, on the server's clock, or null while they stay. */
+  leftAtServer: number | null;
+}
+
+/** Runs one step `next` of a script around a song's end; Mateo skips through his own player. */
+const runAtTheEnd = async (
+  world: World,
+  mateo: Member,
+  state: EndState,
+  next: AtTheEnd,
+): Promise<void> => {
+  const pickOf = (pick: number): string | undefined => {
+    const queue = world.queue();
+
+    return queue[pick % Math.max(1, queue.length)]?.key;
+  };
+
+  switch (next.kind) {
+    case "wait": {
+      await world.advance(next.ms);
+
+      break;
+    }
+
+    case "add": {
+      state.lateAdds += 1;
+      world.add(song(`late${String(state.lateAdds)}`, 12), next.at);
+
+      break;
+    }
+
+    case "remove": {
+      const key = pickOf(next.pick);
+
+      if (key !== undefined) world.remove(key);
+
+      break;
+    }
+
+    case "front": {
+      const key = pickOf(next.pick);
+
+      if (key !== undefined) world.toFront(key);
+
+      break;
+    }
+
+    case "skip": {
+      void mateo.playback.next();
+
+      break;
+    }
+
+    case "leave": {
+      if (world.live()) {
+        state.leftAtServer = world.serverNow();
+        world.hostLeaves();
+      }
+
+      break;
+    }
+  }
+};
+
+/**
+ * Plays `script` from just before the first song's end, in a Jam whose host's player says when its
+ * engine finished a song and whose guest Mateo may control, then lets two more songs' ends pass.
+ */
+const playAtTheEnd = (script: ReadonlyArray<AtTheEnd>, host: Setup): Promise<void> =>
+  scenario(song("a", 20), [song("b", 12), song("c", 12)].slice(0, host.queued), async (world) => {
+    world.allowControl(true);
+
+    const lucia = world.join("Lucía", {
+      hosting: true,
+      hearsLateMs: host.hearsLateMs,
+      hidden: host.hidesB ? ["b"] : [],
+    });
+
+    const mateo = world.join("Mateo", { reportsLate: true });
+
+    world.join("Aiko", {});
+
+    await world.advance(500);
+    world.move("screen", { kind: "play" });
+    // The first song ends 20.5 s in; start a little before, as late as an add the host hears late.
+    await world.advance(19_500);
+
+    const at: EndState = { lateAdds: 0, leftAtServer: null };
+
+    await script.reduce(
+      (done: Promise<void>, next) => done.then(() => runAtTheEnd(world, mateo, at, next)),
+      Promise.resolve(),
+    );
+
+    // Two more songs' ends pass, with the fallback's second after each.
+    await world.advance(32_000);
+
+    for (const change of world.transitions) {
+      // Only the host's player, or the core at an end it took, moves the session by itself: the
+      // screen's play and Mateo's skip are people's moves.
+      if (change.by === "screen" || change.by === "Mateo") continue;
+
+      // The Jam never goes back to a song's start while something is queued when that is decided.
+      if (rewound(change)) expect(change.queued, "rewound with entries queued").toBe(0);
+
+      // It never moves on, or stops, before the song's end on the clock, which every engine in step
+      // reached then: so no member's song is cut short.
+      expect(leftAt(change), "moved on before the end").toBeGreaterThanOrEqual(
+        change.before.entry.track.durationMs,
+      );
+    }
+
+    // Once the host left, nothing moved the session.
+    const { leftAtServer } = at;
+
+    if (leftAtServer !== null) {
+      const after = world.transitions.filter((change) => change.serverAt > leftAtServer);
+
+      expect(after).toEqual([]);
+
+      return;
+    }
+
+    // No song plays on past its end with nothing moving it on: the Jam is never stuck.
+    const playing = world.playing();
+
+    if (world.clock().status === "playing") {
+      expect(world.shared(), "stuck past an end").toBeLessThan(playing.track.durationMs + 2_500);
+    }
+
+    // The host's player, the one that said each end, follows the session's song unless hidden.
+    if (!(host.hidesB && playing.track.id === "b")) {
+      expect(lucia.engine.song).toBe(playing.track.id);
+    }
+  });
+
+describe("a music session's end, decided by the core, whatever happens around it", () => {
+  it(
+    "never rewinds while something is queued, and never moves on before the song's end",
+    { timeout: 240_000 },
+    async () => {
+      await fc.assert(
+        fc.asyncProperty(
+          fc.array(atTheEnd, { minLength: 1, maxLength: 12 }),
+          setup,
+          (script, host) => playAtTheEnd(script, host),
+        ),
+        { numRuns: 40 },
+      );
+    },
+  );
+
+  it(
+    "moves on to whatever is queued at the end, however late the host hears of an add or a removal",
+    { timeout: 240_000 },
+    async () => {
+      // An add in the last second of an empty Jam, which the host's page hears late, and maybe
+      // its removal right after: the window where the host's own view said nothing was queued.
+      const window = fc
+        .record({
+          before: fc.integer({ min: 0, max: 1_000 }),
+          at: fc.constantFrom("next" as const, "end" as const),
+          removeAfter: fc.option(fc.integer({ min: 5, max: 400 }), { nil: null }),
+          hearsLateMs: fc.constantFrom(120, 500),
+        })
+        .map(({ before, at, removeAfter, hearsLateMs }) => ({
+          script: [
+            { kind: "wait", ms: Math.max(5, before) } as const,
+            { kind: "add", at } as const,
+            ...(removeAfter === null
+              ? []
+              : [{ kind: "wait", ms: removeAfter } as const, { kind: "remove", pick: 0 } as const]),
+          ],
+          host: { hearsLateMs, hidesB: false, queued: 0 },
+        }));
+
+      await fc.assert(
+        fc.asyncProperty(window, ({ script, host }) => playAtTheEnd(script, host)),
+        { numRuns: 30 },
       );
     },
   );

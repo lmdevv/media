@@ -180,6 +180,7 @@ music clients adopt it in phase 6.
 | `add`     | together | the host, or a joined guest when guests may add                             |
 | `remove`  | together | the host, or a joined guest who may add and queued the entry                |
 | `reorder` | together | the same as `remove` (amended 2026-11-15)                                   |
+| `advance` | together | the host, in a live session (amended 2026-11-15, `core.together.ended`)     |
 | `admit`   | together | the host, in a session that is not locked                                   |
 | `manage`  | together | the host                                                                    |
 
@@ -456,9 +457,9 @@ Each change comes from what old jams did, or from a verifier's finding against i
   the longest a player takes from the write to holding the song preloaded, and still is (table
   below). An add in front, a removal of the entry before it, or a move later than that puts a song
   first that not every player preloaded, so it starts at 0 and no one misses its start (fix round
-  1: a song added 5 seconds after a session ran past its end started 5 seconds in). The host's
-  move at the end names no entry, so an entry taken out at the end is no reason to wait: it plays
-  what is first, from 0 when that is new. Each writer works out the entry it leaves first from
+  1: a song added 5 seconds after a session ran past its end started 5 seconds in). The core's
+  move at a song's end plays what is queued first when it decides, so an entry taken out at the end
+  is no reason to wait: it plays what is first, from 0 when that is new. Each writer works out the entry it leaves first from
   what it read before it wrote anything: in a Convex mutation, a limited index read after a write
   to its range can answer a moved row where it stood, or skip a row after a delete and an insert.
 - `add`, `addItems`, and `control` take a `sessionId`, the session the call was made for, which
@@ -488,6 +489,17 @@ Each change comes from what old jams did, or from a verifier's finding against i
   session's document, so a pause, seek, or skip re-runs `get` and only the page whose entries it
   changed, where it re-ran every page (fix round 2). A session from before its facts were kept has
   none and decides from its document, as before, with no migration.
+- `core.together.ended` is how a session moves on at a song's end (fix round 3, below): the host's
+  player says its engine finished the entry it played, naming the entry and the clock revision,
+  and the core decides on its own clock and its own queue, in one write. Only the host may
+  (`can`'s `advance`). `get` answers `lengthMs`, the playing item's length when the core knows
+  one, a music song's, even when the item is hidden from the caller, as old jams kept a withheld
+  song's length, so a host who may not play the song, as a kid host, still has an end to wait for.
+- `core.together.playNow` plays an item from its start, playing, in one write bound to the session
+  it names, as old jams' host played a song in one write (fix round 3). It needs `control` and
+  `add`, and the item must be one the caller may play. The item plays as an entry of its own, made
+  and taken out in that write, so two plays of one song differ by `entryId`; the queue stays as it
+  was.
 
 | A skip that lands past the end of a song plays                               | It starts                                                                       |
 | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
@@ -497,14 +509,14 @@ Each change comes from what old jams did, or from a verifier's finding against i
 | anything, on a clock paused, moved since it reached the end, or 10 s past it | at 0                                                                            |
 | anything, before the end, or leaving an item of no known length, as a movie  | at 0                                                                            |
 
-| Move                                                        | Made by                  | Carries                                     | When the session moved on                                                                    |
-| ----------------------------------------------------------- | ------------------------ | ------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| Moving on to what is queued at a song's end                 | the host's player        | the revision it decided on                  | refused, and the newer clock decides; the carry only into the entry first 3 s before the end |
-| Pausing at the end of the last song, then back to its start | the host's player        | the revision, then the pause's for the seek | refused, and the session stays as it is                                                      |
-| Moving a session paused past a song's end on, paused        | the host's player        | the revision it decided on                  | refused                                                                                      |
-| Playing a queued song now                                   | a member who may control | the revision they saw                       | refused, as a stale skip                                                                     |
-| Any add, play, pause, seek, or skip from a music client     | the client               | the session it was made for                 | refused once the person left it, it ended, or another replaced it                            |
-| Queueing the songs after the first when a Jam starts        | the host's player        | the session `create` made                   | refused, and the fill stops for good                                                         |
+| Move                                                    | Made by                           | Carries                                  | When the session moved on                                                      |
+| ------------------------------------------------------- | --------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------ |
+| Saying a song ended (`ended`)                           | the host's player                 | the session, the entry, and the revision | refused; a newer clock is decided again (fix round 3)                          |
+| Moving on at an end `ended` took a little early         | the core, at the end on its clock | the same entry and revision              | nothing moves                                                                  |
+| Playing a queued song now                               | a member who may control          | the revision they saw                    | refused, as a stale skip                                                       |
+| Playing a song or a list now (`playNow`, then its rest) | a member who may control and add  | the session the person chose it in       | refused once the person left it; the rest's adds are refused too (fix round 3) |
+| Any add, play, pause, seek, or skip from a music client | the client                        | the session it was made for              | refused once the person left it, it ended, or another replaced it              |
+| Queueing the songs after the first when a Jam starts    | the host's player                 | the session `create` made                | refused, and the fill stops for good                                           |
 
 ### Playing a session's queue
 
@@ -534,32 +546,69 @@ preloaded song is that entry's end.
 
 ### The end of a song
 
-The host's player moves the session on, on the session's clock, never on its own engine's end:
+The core decides when a song ends and what plays next, as old music's jams did (fix round 3). Old
+jams let the host's player say its song ended and the server read the queue and moved on in one
+write. Rounds 1 and 2 had the host's player decide the end from its own estimate of the server's
+time and its own copy of the queue, and each round fixed one interleaving: a host whose wall
+clock was set 30 seconds ahead mid-song skipped the song 5 seconds in, and a song added 10 ms
+before the end, which the host's page heard 500 ms late, left the Jam paused back at the start of
+the song before with the new song queued. A client cannot decide correctly from its lagging view
+of a shared session (#159), so it no longer decides.
 
-| The session's clock          | Queued, as the queue is listed                 | The host's player                                                                                        |
-| ---------------------------- | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| playing to the song's end    | something                                      | skips to it 40 ms after the end, and the core carries the time past it                                   |
-| playing to the song's end    | nothing, in a whole listing read now           | pauses it, then takes it back to the song's start, as old music's player stopped at the end of its queue |
-| paused past the song's end   | something                                      | skips to it at once: the next song waits at its start, paused                                            |
-| paused past the song's end   | nothing, in a whole listing read now           | takes it back to the song's start                                                                        |
-| at or past either end, above | not known yet, as while its pages first arrive | waits for the listing, then decides as above                                                             |
-| anything else                |                                                | nothing                                                                                                  |
+The host's player says the song ended (`core.together.ended`), naming the session, the playing
+entry (null for the song the session started on), and the clock revision it played under:
 
-It decides once per clock revision. A move refused or lost is tried again after 2 seconds against
-the newest clock, so a person's pause made meanwhile always stands. A guest's player never moves
-the session at a song's end; it waits there, at the end of its song, until the session moves on.
+| What tells the host's player                                                                                                                          | It says the song ended                                                                 |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| its engine finished the session's playing entry: at the end of the song with nothing preloaded, or by moving on to the preloaded entry                | at once, once per clock revision                                                       |
+| the session's clock passed the song's end 1 s ago, on the server's time estimated on the device's monotonic clock, with no end said for that revision | then: a song hidden from the host, a player the browser held back, or one that stalled |
+| the session's clock is paused past the song's end                                                                                                     | at once                                                                                |
+| a song whose length the core does not know                                                                                                            | never; someone skips it                                                                |
 
-The end is a server time, and the host's player decides it at the moment of acting, on its
-estimate of the server's time from heartbeats: it plans nothing until a heartbeat has answered,
-plans again on each answer, and a wait that runs out only plans again, so the move goes once the
-corrected time reaches the end (fix round 2: when the song's details arrived before the first
-heartbeat answered, a host whose device clock ran 30 seconds fast skipped the song 30 seconds early
-for everyone, and a slow one left a gap). Whether anything is queued comes from the queue's
-listing in three states: still loading, entries, or a whole listing with none. A page opened again
-near a song's end knows the song before its queue's pages arrive, and the end waits for them; a
-last whole listing kept while the pages load again counts for its entries, which the core checks
-on the skip, but not for being empty, which an add made meanwhile may have changed (fix round 2: a
-host who reloaded near the end paused the Jam and took it back to the song's start).
+The fallback reads the server's time as heartbeats estimate it on `performance.now()`, never on
+the wall clock, so a clock set while a song plays moves nothing. It plans nothing before a
+heartbeat answered and plans again on each answer and each new view. A guest's player never says
+a song ended, whatever the host allows.
+
+The core decides in one write:
+
+| `ended` arrives                                                               | The core                                                                                                                                                                                         |
+| ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| from someone who is not the host, or for a session the caller is no longer in | refuses it: `forbidden`, or `conflict`                                                                                                                                                           |
+| naming an entry or a revision the session no longer plays                     | refuses it, `conflict`: the host's player decides again on the newer clock                                                                                                                       |
+| for an item whose length it does not know                                     | refuses it, `conflict`                                                                                                                                                                           |
+| at or past the song's end on the session's clock, playing or paused           | reads its queue now: moves on to the entry queued first, carried as far as the clock ran past the end (`carriedPast`), or, with nothing queued now, pauses back at the song's start, in one move |
+| up to `ENDED_EARLY_MS` (1.5 s) before the end, playing                        | answers the clock unchanged and moves on itself when the clock reaches the end (`endAt`), deciding on the queue as it is then; a session that moved meanwhile, or ended, moves nothing           |
+| earlier than that, or paused before the end                                   | refuses it, `conflict`: the host's player asks again at the end                                                                                                                                  |
+
+`ENDED_EARLY_MS` is the follower's seek threshold (`DRIFT_THRESHOLDS.seekMs`): a player further
+off the clock than that seeks back to it, so an engine that finished a song earlier than 1.5 s
+before the session's end did not finish it where the session stands. Within it, the core never
+moves before its own end, so every member's engine in step has moved on to the preloaded song by
+itself, and none reloads. The carry fence is unchanged: only the entry queued first 3 s before the
+end carries. A host's end refused, or lost, is tried again after 2 seconds against the newest view.
+
+So the Jam never goes back to a song's start while something is queued at the moment the core
+decides, and never moves on before the song's end on its clock. The old pause-then-seek rewind is
+gone, and with it the three listing states' part in the end: the host's listing no longer decides
+anything there. `next()` still does nothing on a whole, empty listing.
+
+### Choices, and the phone's presses (#163)
+
+A person's choice in a Jam takes the next number of #163's sequence before it acts, as the same
+choice does outside a Jam, so a lock-screen press the phone made before it applies to nothing
+(ADR 0018). Without one, a pause pressed on the lock screen that reached JavaScript late paused a
+Jam the person had just played in the app (fix round 3).
+
+| Jam move                                                         | Takes a number  | Why                                                      |
+| ---------------------------------------------------------------- | --------------- | -------------------------------------------------------- |
+| Play or pause, from the player, the app's controls, or a tap     | yes             | a play or pause, as `togglePlay` outside a Jam           |
+| Play a queued song now (`jump`)                                  | yes             | it picks a song, as `jump` outside a Jam                 |
+| Play a song or a list now (`playNow`)                            | yes             | it picks a song, as playing a list outside a Jam         |
+| Next, previous, seek                                             | no              | they carry the choice before them, as outside a Jam      |
+| The system controls' own play, pause, next, previous             | already has one | the press is the choice; the controller takes no new one |
+| The follower's corrections, holds, and plays; the host's `ended` | no              | no one's choice: they follow the clock or an earlier one |
+| Following a session, or loading its song                         | no              | the player follows what the session already chose        |
 
 ### Starting, joining, and the queue
 
@@ -578,13 +627,18 @@ host who reloaded near the end paused the Jam and took it back to the song's sta
   refused with old music's `The host controls playback in this Jam`. Previous starts the song
   again: a session keeps no songs it played.
 - Adding needs the host's switch (`The host turned off adding songs in this Jam`). Playing a song
-  or a list now, with control and add, queues its first song in front and skips to that entry at
-  once, then queues the rest after it, up to 100 songs; the rest of the queue stays after them.
+  or a list now, with control and add, plays its first song at once from its start, playing in a
+  session that was paused too, in one write bound to the session the person chose it in
+  (`playNow`), then queues the rest in front, up to 100 songs, each add bound to that session too;
+  the rest of the queue stays after them. Before fix round 3 it was an add, a skip, and a play, and
+  the play, sent after the skip answered, went to whatever session was current by then: a person
+  who had moved to Jam B meanwhile played Jam B.
 - A guest who may not control and whose player something outside paused, as a call, sits out
   until they play it again, from the player or the system controls; it then follows the clock.
-- A host's player plans no end for a song whose length is unknown; someone skips it. A host who
-  may not play the song playing, as a kid host and an explicit song a guest queued, has no length
-  to plan by either, so the Jam waits at that song's end until someone skips.
+- A host's player says no end for a song whose length is unknown; someone skips it. A host who
+  may not play the song playing, as a kid host and an explicit song a guest queued, has no engine
+  to say it ended, so its fallback says so 1 s after the end, from `get`'s `lengthMs` (fix round
+  3; before, the Jam waited at that song's end until someone skipped).
 - The clients follow every page of the session's queue, loading the next as soon as one arrives,
   as they follow the listener's own queue (`useQueueListing`), and keep the last whole listing
   while the pages load again, as when one splits or fails: a page holds only as many entries as
@@ -594,8 +648,8 @@ host who reloaded near the end paused the Jam and took it back to the song's sta
   `Hidden song`, as for a kid and an explicit song, on the web and, since fix round 1, on iOS. A
   hidden playing song plays nothing for them for its length: their player stays silent and shows
   `Hidden song` (Now Playing, the mini player, and the iPad bar on iOS), and a guest's player never
-  moves the session on. The host's player moves it on at the song's end, on the clock, unless the
-  song is hidden from the host too (above).
+  moves the session on. The host's player says when it ended, through its fallback when the song
+  is hidden from the host too (above).
 
 ### Connect in a Jam
 
