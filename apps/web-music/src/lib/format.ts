@@ -102,5 +102,5 @@ export const greeting = (ms: number): string => {
   return hour < 12 ? "Good morning" : "Good afternoon";
 };
 
-/** The first letter of a display name, for avatars. */
-export const initial = (name: string): string => name.trim().charAt(0).toUpperCase() || "?";
+/** The first character of a name, for avatars: a whole one, even an emoji's two code units. */
+export const initial = (name: string): string => Array.from(name.trim())[0]?.toUpperCase() ?? "?";

@@ -20,6 +20,8 @@ import { useState } from "react";
 import { formatDuration } from "@/lib/format";
 import { HOTKEYS } from "@/lib/hotkeys";
 
+import { useJoinedJam } from "@/components/jam/jam";
+
 import { NEXT_REPEAT, perform } from "./player-actions";
 
 const roundIcon =
@@ -117,6 +119,9 @@ export function ShuffleButton({
 }) {
   const player = usePlayer();
 
+  // A Jam's queue plays in order, without shuffle or repeat.
+  if (useJoinedJam() !== null) return null;
+
   return (
     <Tooltip label={player.shuffle ? "Shuffle is on" : "Shuffle"}>
       <button
@@ -148,6 +153,8 @@ export function RepeatButton({
 }) {
   const player = usePlayer();
   const Icon = player.repeat === "one" ? Repeat1Icon : RepeatIcon;
+
+  if (useJoinedJam() !== null) return null;
 
   return (
     <Tooltip label={REPEAT_LABEL[player.repeat]}>

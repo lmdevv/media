@@ -190,6 +190,32 @@ describe("what a member may do in a group session", () => {
       "forbidden no-add",
     ],
     ["the host takes out anything", "remove", { place: "host" }, "allowed"],
+    [
+      "a guest who may add moves what they queued",
+      "reorder",
+      { place: "guest", add: true, addedIt: true },
+      "allowed",
+    ],
+    [
+      "a guest who may add cannot move what others queued",
+      "reorder",
+      { place: "guest", add: true },
+      "forbidden not-yours",
+    ],
+    [
+      "a guest who may not add cannot move even their own",
+      "reorder",
+      { place: "guest", addedIt: true },
+      "forbidden no-add",
+    ],
+    ["the host moves anything", "reorder", { place: "host" }, "allowed"],
+    ["a waiting person cannot move anything", "reorder", { place: "pending" }, "forbidden pending"],
+    [
+      "nobody moves anything in an ended session",
+      "reorder",
+      { place: "host", live: false },
+      "forbidden ended",
+    ],
     ["a guest cannot let people in", "admit", { place: "guest" }, "forbidden not-host"],
     ["the host lets people in", "admit", { place: "host", join: "approval" }, "allowed"],
     [
@@ -221,6 +247,14 @@ describe("what a member may do in a group session", () => {
     ["a member leaves an ended session", "leave", { place: "guest", live: false }, "allowed"],
   ])("%s", (_name, action, facts, outcome) => {
     expect(decide(MEMBER, action, sessionAt(facts))).toBe(outcome);
+  });
+
+  it("never lets a platform guest move queued entries, whatever the host allows", () => {
+    const guest = PEOPLE["platform guest"];
+
+    expect(decide(guest, "reorder", sessionAt({ place: "guest", add: true, addedIt: true }))).toBe(
+      "forbidden guest",
+    );
   });
 
   it("lets a platform guest control inside their session only when the host allows it", () => {

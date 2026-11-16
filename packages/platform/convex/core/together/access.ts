@@ -19,6 +19,8 @@ export type MemberDoc = Doc<"togetherMembers">;
 
 const NOT_IN = "You are not in a group session in this domain";
 
+const LEFT = "You are no longer in that group session; it ended, or you left it";
+
 /** Each refusal's code and message; a session the caller is not in reads as none at all. */
 const refusals = {
   service: ["not_found", NOT_IN],
@@ -108,17 +110,25 @@ export interface InSession {
 
 /**
  * Loads the caller's session in `domain` and decides `action` on it. Without one it fails
- * `not_found`, as for a session they are not in; a refusal fails with its own code. `addedIt`
- * says the caller queued the entry the action names.
+ * `not_found`, as for a session they are not in; a refusal fails with its own code.
+ *
+ * With `sessionId`, the call was made for that session, and it fails `conflict` before anything
+ * is decided once the caller's place in the domain is in another session or in none: they left
+ * it, or it ended and they started or joined another. So a client's late write never lands in the
+ * session that replaced the one it was made for (ADR 0017). A session that ended with the caller
+ * still in it is decided as before, as ended.
  */
 export const requireTogether = async (
   ctx: Pick<QueryCtx, "db">,
   caller: Principal,
   domain: ContentDomain,
   action: Exclude<TogetherAction, "start" | "join" | "ask">,
-  addedIt = false,
+  sessionId?: Id<"togetherSessions">,
 ): Promise<InSession> => {
   const member = await memberIn(ctx.db, caller.userId, domain);
+
+  if (sessionId !== undefined && member?.sessionId !== sessionId) return fail("conflict", LEFT);
+
   const session = member === null ? null : await ctx.db.get(member.sessionId);
 
   if (member === null || session === null) {
@@ -128,7 +138,7 @@ export const requireTogether = async (
   }
 
   const place = placeOf(session, caller.userId, member);
-  const decision = can(caller, action, factsOf(session, place, { addedIt }));
+  const decision = can(caller, action, factsOf(session, place));
 
   return decision.allowed ? { session, member, place } : refuse(decision);
 };

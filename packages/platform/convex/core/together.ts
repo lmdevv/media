@@ -11,7 +11,7 @@ import { control as move } from "./together/clock";
 import { admitMember, dropMember, enter, membersIn } from "./together/members";
 import { BLOCKED_MAX, JOINS_PER_HOUR, LINK_PREFIX, LINK_SECRET_BYTES } from "./together/model";
 import { heartbeat as beat } from "./together/presence";
-import { enqueue, queuePage, unqueue } from "./together/queue";
+import { enqueue, enqueueAll, queuePage, reorder as reorderEntry, unqueue } from "./together/queue";
 import { endSession } from "./together/sessions";
 
 const NO_LINK = "This link does not open a group session";
@@ -26,7 +26,9 @@ export const {
   control,
   queue,
   add,
+  addItems,
   remove,
+  reorder,
   admit,
   block,
   configure,
@@ -93,9 +95,13 @@ export const {
       return { state: "ended", sessionId: session._id, reason: session.reason };
     }
 
-    const host = asPerson(await ctx.db.get(session.hostId))?.username ?? "";
+    const hostPerson = asPerson(await ctx.db.get(session.hostId));
+    const host = hostPerson?.username ?? "";
+    const hostDisplayName = hostPerson?.displayName ?? null;
 
-    if (place === "pending") return { state: "pending", sessionId: session._id, host };
+    if (place === "pending") {
+      return { state: "pending", sessionId: session._id, host, hostDisplayName };
+    }
 
     const now = Date.now();
 
@@ -112,12 +118,11 @@ export const {
       ),
     );
 
-    const named = (row: (typeof joined)[number]) => people.get(row.userId)?.username ?? "";
-
     return {
       state: "joined",
       sessionId: session._id,
       host,
+      hostDisplayName,
       role: place === "host" ? "host" : "guest",
       link: formatSecret(LINK_PREFIX, session._id, session.linkSecret),
       settings: session.settings,
@@ -128,9 +133,11 @@ export const {
       },
       clock: session.clock,
       item: (await mayPlay(ctx.db, caller, session.item)) ? session.item : null,
+      entryId: session.itemEntryId ?? null,
       members: joined.map((row) => ({
         userId: row.userId,
-        username: named(row),
+        username: people.get(row.userId)?.username ?? "",
+        displayName: people.get(row.userId)?.displayName ?? null,
         role: row.userId === session.hostId ? "host" : "guest",
         present: row.awaySince === null,
         linkGuest: people.get(row.userId)?.role === "guest",
@@ -140,20 +147,29 @@ export const {
           ? null
           : waiting.map((row) => ({
               userId: row.userId,
-              username: named(row),
+              username: people.get(row.userId)?.username ?? "",
+              displayName: people.get(row.userId)?.displayName ?? null,
               present: row.awaySince === null,
             })),
     };
   },
   heartbeat: (ctx, { domain }, caller) => beat(ctx, caller, domain),
-  control: (ctx, { domain, op }, caller) => move(ctx, caller, domain, op),
+  control: (ctx, { domain, op, sessionId }, caller) => move(ctx, caller, domain, op, sessionId),
   queue: (ctx, { domain, paginationOpts }, caller) =>
     queuePage(ctx, caller, domain, paginationOpts),
-  add: async (ctx, { item, at, revision }, caller) => ({
-    entryId: await enqueue(ctx, caller, item, at ?? "end", revision),
+  add: async (ctx, { item, at, revision, sessionId }, caller) => ({
+    entryId: await enqueue(ctx, caller, item, { at: at ?? "end", revision, sessionId }),
+  }),
+  addItems: async (ctx, { domain, sessionId, items }, caller) => ({
+    taken: await enqueueAll(ctx, caller, domain, sessionId, items),
   }),
   remove: async (ctx, { domain, entryId }, caller) => {
     await unqueue(ctx, caller, domain, entryId);
+
+    return null;
+  },
+  reorder: async (ctx, { domain, entryId, afterEntryId }, caller) => {
+    await reorderEntry(ctx, caller, domain, entryId, afterEntryId);
 
     return null;
   },

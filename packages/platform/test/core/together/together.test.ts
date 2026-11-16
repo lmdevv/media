@@ -9,18 +9,27 @@ import { describe, expect, it } from "vitest";
 import type { ContentDomain } from "../../../commands/scopes";
 import { api } from "../../../convex/_generated/api";
 import { inOrder } from "../../../convex/core/lib/inOrder";
+import { FIRST_BY_MS } from "../../../convex/core/together/clock";
 import { BLOCKED_MAX } from "../../../convex/core/together/model";
 import { member } from "../../devices";
 import type { Member } from "../../devices";
 import { failureOf, refusal } from "../../sign-in";
 import { coreStackFromEnvFile } from "../../stack-env";
 import type { CoreStack } from "../../stack-env";
-import { catalog, guestOf, joinedView, kidOf, plantedStrangers, watch } from "../../together";
+import {
+  catalog,
+  guestOf,
+  joinedView,
+  kidOf,
+  plantedStrangers,
+  sleep,
+  watch,
+} from "../../together";
 import type { Catalog } from "../../together";
 
 const stack = coreStackFromEnvFile();
 
-type Settings = Omit<FunctionArgs<typeof api.core.together.create>, "item">;
+type Settings = Omit<FunctionArgs<typeof api.core.together.create>, "item" | "queue">;
 
 type Op = FunctionArgs<typeof api.core.together.control>["op"];
 
@@ -44,8 +53,32 @@ const started = async (core: CoreStack, settings: Settings = {}): Promise<Starte
 const joinBy = (who: Member, link: string, domain: ContentDomain = "movies") =>
   who.signedIn.client.mutation(api.core.together.join, { domain, link });
 
-const controlAs = (who: Member, op: Op) =>
-  who.signedIn.client.mutation(api.core.together.control, { domain: "movies", op });
+const controlAs = (who: Member, op: Op, domain: ContentDomain = "movies") =>
+  who.signedIn.client.mutation(api.core.together.control, { domain, op });
+
+type EntryId = FunctionArgs<typeof api.core.together.remove>["entryId"];
+
+/** The entries `who` sees queued in their session in `domain`, in play order. */
+const queuedIds = async (
+  who: Member,
+  domain: ContentDomain = "movies",
+): Promise<ReadonlyArray<EntryId>> =>
+  (
+    await who.signedIn.client.query(api.core.together.queue, {
+      domain,
+      paginationOpts: { numItems: 50, cursor: null },
+    })
+  ).page.map((entry) => entry.entryId);
+
+type ReorderArgs = FunctionArgs<typeof api.core.together.reorder>;
+
+const reorderAs = (who: Member, entryId: EntryId, afterEntryId?: EntryId) => {
+  const args: ReorderArgs = { domain: "movies", entryId };
+
+  if (afterEntryId !== undefined) args.afterEntryId = afterEntryId;
+
+  return who.signedIn.client.mutation(api.core.together.reorder, args);
+};
 
 /** The core refused a follower's call, or the call did not reach it. */
 class CallFailed extends Data.TaggedError("CallFailed")<{ readonly cause: unknown }> {}
@@ -149,7 +182,7 @@ describe.skipIf(stack === undefined)("group sessions", { timeout: 120_000 }, () 
       ).toBe("forbidden");
       expect(await refusal(controlAs(guest, { kind: "play" }))).toBe("forbidden");
       expect((await joinedView(shelf.host, "movies")).pending).toEqual([
-        { userId: guest.userId, username: guest.username, present: true },
+        { userId: guest.userId, username: guest.username, displayName: null, present: true },
       ]);
 
       await shelf.host.signedIn.client.mutation(api.core.together.admit, {
@@ -394,8 +427,20 @@ describe.skipIf(stack === undefined)("group sessions", { timeout: 120_000 }, () 
     });
 
     expect(queued.page).toEqual([
-      { entryId: mine, item: shelf.pg, addedBy: guest.username, removable: true },
-      { entryId: hosts, item: shelf.pg, addedBy: shelf.host.username, removable: false },
+      {
+        entryId: mine,
+        item: shelf.pg,
+        addedBy: guest.username,
+        addedByDisplayName: null,
+        removable: true,
+      },
+      {
+        entryId: hosts,
+        item: shelf.pg,
+        addedBy: shelf.host.username,
+        addedByDisplayName: null,
+        removable: false,
+      },
     ]);
 
     const remove = (who: Member, entryId: typeof mine) =>
@@ -637,5 +682,164 @@ describe.skipIf(stack === undefined)("group sessions", { timeout: 120_000 }, () 
     expect(await memberNames(shelf.host)).not.toContain(rude.person.username);
     expect(answer.code).toBe("conflict");
     expect(answer.message).toMatch(/lock/iu);
+  });
+
+  it("lets the host move any queued entry, and a guest who may add only their own", async () => {
+    if (stack === undefined) return;
+    const { shelf, link } = await started(stack, { add: true });
+    const guest = await guestOf(stack, shelf, "guest");
+
+    await joinBy(guest, link);
+
+    const add = async (who: Member, item: typeof shelf.g): Promise<EntryId> =>
+      (await who.signedIn.client.mutation(api.core.together.add, { item })).entryId;
+
+    const hosts = await add(shelf.host, shelf.g);
+    const mine = await add(guest, shelf.pg);
+    const later = await add(shelf.host, shelf.r);
+
+    expect(await refusal(reorderAs(guest, hosts, later))).toBe("forbidden");
+    expect(await reorderAs(guest, mine)).toBe(null);
+    expect(await queuedIds(guest)).toEqual([mine, hosts, later]);
+    expect(await reorderAs(shelf.host, mine, later)).toBe(null);
+    expect(await queuedIds(guest)).toEqual([hosts, later, mine]);
+    expect(await reorderAs(shelf.host, later)).toBe(null);
+    expect(await queuedIds(shelf.host)).toEqual([later, hosts, mine]);
+
+    // Where it already stands, or after itself: nothing moves.
+    expect(await reorderAs(shelf.host, hosts, later)).toBe(null);
+    expect(await reorderAs(shelf.host, hosts, hosts)).toBe(null);
+    expect(await queuedIds(shelf.host)).toEqual([later, hosts, mine]);
+
+    // An entry gone is no change; an anchor gone asks for the queue as it stands now.
+    await shelf.host.signedIn.client.mutation(api.core.together.remove, {
+      domain: "movies",
+      entryId: hosts,
+    });
+    expect(await reorderAs(guest, hosts)).toBe(null);
+    expect(await refusal(reorderAs(guest, mine, hosts))).toBe("conflict");
+
+    await configureAs(shelf.host, { join: "open", control: false, add: false });
+    expect(await refusal(reorderAs(guest, mine))).toBe("forbidden");
+  });
+
+  it("keeps the queue in order through many moves into one gap", async () => {
+    if (stack === undefined) return;
+    const { shelf } = await started(stack);
+
+    const add = async (item: typeof shelf.g): Promise<EntryId> =>
+      (await shelf.host.signedIn.client.mutation(api.core.together.add, { item })).entryId;
+
+    // Orders count up from 0, where halving a gap lasts a thousand moves; above 1, about fifty.
+    const spacer = await add(shelf.g);
+    const first = await add(shelf.g);
+    const second = await add(shelf.pg);
+    const third = await add(shelf.r);
+
+    await shelf.host.signedIn.client.mutation(api.core.together.remove, {
+      domain: "movies",
+      entryId: spacer,
+    });
+
+    // Each move halves the gap after the first entry, until no number is left in it.
+    await inOrder(
+      Array.from({ length: 60 }, (_, at) => at),
+      async (at) => {
+        await reorderAs(shelf.host, at % 2 === 0 ? third : second, first);
+      },
+    );
+
+    expect(await queuedIds(shelf.host)).toEqual([first, second, third]);
+    expect(await reorderAs(shelf.host, third, first)).toBe(null);
+    expect(await queuedIds(shelf.host)).toEqual([first, third, second]);
+  });
+
+  it("skips to a queued entry it names, keeps the ones before it queued, and names where the item came from", async () => {
+    if (stack === undefined) return;
+    const { shelf } = await started(stack);
+
+    const add = async (item: typeof shelf.g): Promise<EntryId> =>
+      (await shelf.host.signedIn.client.mutation(api.core.together.add, { item })).entryId;
+
+    const before = await add(shelf.pg);
+    const named = await add(shelf.r);
+
+    expect((await joinedView(shelf.host, "movies")).entryId).toBe(null);
+
+    const { revision } = (await joinedView(shelf.host, "movies")).clock;
+
+    await controlAs(shelf.host, { kind: "next", revision, entryId: named });
+
+    expect(await joinedView(shelf.host, "movies")).toMatchObject({
+      item: shelf.r,
+      entryId: named,
+    });
+    expect(await queuedIds(shelf.host)).toEqual([before]);
+    expect(
+      await refusal(
+        controlAs(shelf.host, { kind: "next", revision: revision + 1, entryId: named }),
+      ),
+    ).toBe("conflict");
+
+    await controlAs(shelf.host, { kind: "next", revision: revision + 1 });
+
+    expect(await joinedView(shelf.host, "movies")).toMatchObject({
+      item: shelf.pg,
+      entryId: before,
+    });
+  });
+
+  it("starts the next song as far in as the session played past the end of the one before", async () => {
+    if (stack === undefined) return;
+    const shelf = await catalog(stack);
+
+    // The seeded song is a second long; the same song queued again is another entry.
+    await shelf.host.signedIn.client.action(api.core.together.create, { item: shelf.track });
+
+    const { entryId: again } = await shelf.host.signedIn.client.mutation(api.core.together.add, {
+      item: shelf.track,
+    });
+
+    // Queued first well before the end, as every player would have it preloaded by then.
+    await sleep(FIRST_BY_MS);
+
+    const played = await controlAs(shelf.host, { kind: "play" }, "music");
+
+    await sleep(1_600);
+
+    const next = await controlAs(shelf.host, { kind: "next", revision: played.revision }, "music");
+
+    expect(next.status).toBe("playing");
+    expect(next.positionAtAnchorMs).toBeGreaterThan(300);
+    expect(next.positionAtAnchorMs).toBeLessThan(1_500);
+    expect(await joinedView(shelf.host, "music")).toMatchObject({
+      item: shelf.track,
+      entryId: again,
+    });
+  });
+
+  it("starts an entry further down the queue from its start when a skip names it", async () => {
+    if (stack === undefined) return;
+    const shelf = await catalog(stack);
+
+    await shelf.host.signedIn.client.action(api.core.together.create, { item: shelf.track });
+    await shelf.host.signedIn.client.mutation(api.core.together.add, { item: shelf.track });
+
+    const { entryId: later } = await shelf.host.signedIn.client.mutation(api.core.together.add, {
+      item: shelf.track,
+    });
+
+    const played = await controlAs(shelf.host, { kind: "play" }, "music");
+
+    await sleep(1_600);
+
+    const next = await controlAs(
+      shelf.host,
+      { kind: "next", revision: played.revision, entryId: later },
+      "music",
+    );
+
+    expect(next).toMatchObject({ status: "playing", positionAtAnchorMs: 0 });
+    expect(await joinedView(shelf.host, "music")).toMatchObject({ entryId: later });
   });
 });

@@ -8,6 +8,7 @@ import type {
   ConnectItem,
   ReportedSong,
 } from "./connect-player";
+import type { SessionMode } from "./playback-controller";
 import { entry, names, queueOf, settle, setup } from "./testing/controller-harness";
 
 const one = entry("a", "1");
@@ -1059,6 +1060,136 @@ describe("ConnectPlayer, against what is current when a request or a step of a l
     expect(run.record.loads).toHaveLength(0);
     expect(names(run.sent)).toStrictEqual([]);
     expect(last(run.reports)).toStrictEqual({ song: null, applied: 2 });
+  });
+});
+
+/** A group session as the controller follows it: on its first song from the start, playing. */
+const sessionMode: SessionMode = {
+  startAt: () => ({ positionMs: 0, playing: true }),
+  controls: {
+    play: () => {},
+    pause: () => {},
+    next: () => {},
+    previous: () => {},
+    seekTo: () => {},
+  },
+};
+
+const jammed = entry("s", "s1");
+
+/** Makes the device follow a group session that plays S, and lets S load. */
+const follow = async (run: ReturnType<typeof connected>) => {
+  run.controller.followSession(sessionMode);
+  run.controller.sync(queueOf([jammed], "s1"));
+  await settle();
+};
+
+describe("ConnectPlayer on a device that follows a group session", () => {
+  it("settles every request at once and applies none, so the session's song plays on", async () => {
+    const run = connected();
+
+    await playing(run);
+    await follow(run);
+    const sent = run.sent.length;
+    const at = run.clock.now;
+
+    run.connect.take(
+      ask(1, { kind: "transport", item: song("s"), playing: false, positionMs: 50_000, at }),
+    );
+
+    run.connect.take(
+      ask(2, {
+        kind: "load",
+        item: song("b"),
+        loadRevision: 1,
+        playing: true,
+        positionMs: 0,
+        at,
+      }),
+    );
+
+    run.connect.take(ask(3, { kind: "stop", at }));
+    await settle();
+
+    expect(run.controller.playingHere()).toMatchObject({
+      itemId: "s1",
+      trackId: "s",
+      playing: true,
+    });
+    expect(run.record.seeks).toHaveLength(0);
+    expect(names(run.sent.slice(sent))).toStrictEqual([]);
+    expect(last(run.reports)).toMatchObject({ song: { trackId: "s" }, applied: 3 });
+  });
+
+  it("drops a load still waiting for the queue once the device follows a group session", async () => {
+    const run = connected();
+
+    // Without a queue yet, a load of a song waits to tell a move from a new queue.
+    run.connect.take(
+      ask(1, {
+        kind: "load",
+        item: song("b"),
+        loadRevision: 1,
+        playing: true,
+        positionMs: 0,
+        at: run.clock.now,
+      }),
+    );
+
+    await settle();
+    expect(last(run.reports)?.applied).toBe(0);
+
+    await follow(run);
+    expect(last(run.reports)?.applied).toBe(1);
+
+    // Back on the listener's own queue, the dropped load never starts.
+    run.controller.followSession(null);
+    run.controller.sync(queueOf([one, two], "1"));
+    await settle();
+
+    expect(run.sent.filter((call) => call.name === "play")).toStrictEqual([]);
+    expect(run.controller.playingHere()).toBeNull();
+  });
+
+  it("plays nothing from a new queue whose answer comes once the device follows a group session", async () => {
+    const run = connected();
+
+    run.gates.play.holding = true;
+    const played = run.controller.playTracks(["a", "b"], 0);
+
+    await follow(run);
+    run.gates.play.release("play");
+    await played;
+    await settle();
+
+    expect(run.controller.playingHere()).toMatchObject({ itemId: "s1", trackId: "s" });
+    expect(run.sent.filter((call) => call.name === "jump")).toStrictEqual([]);
+  });
+
+  it("keeps the session's song when another of the listener's devices plays", async () => {
+    const run = connected();
+
+    await follow(run);
+    run.controller.release();
+    await settle();
+
+    expect(run.controller.playingHere()).toMatchObject({ itemId: "s1", playing: true });
+  });
+
+  it("never counts a seek the session's follower makes as the listener's action", async () => {
+    const run = connected();
+    let acted = 0;
+
+    await follow(run);
+
+    run.controller.onListenerAction(() => {
+      acted += 1;
+    });
+
+    run.controller.followerPlayer("s1").seek(30_000);
+
+    expect(acted).toBe(0);
+    expect(run.record.seeks).toContain(30_000);
   });
 });
 

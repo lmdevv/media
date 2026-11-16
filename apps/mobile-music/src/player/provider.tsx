@@ -1,3 +1,4 @@
+import { describeFailure } from "@media/mobile-core/failure";
 import { pagedStore } from "@media/mobile-core/pages";
 import { readHealth } from "@media/mobile-core/server";
 import { lastPerson } from "@media/mobile-core/sign-in";
@@ -17,6 +18,24 @@ import type {
 import { queueStateOf, useQueueListing } from "@media/player/queue-listing";
 import type { QueueRow } from "@media/player/queue-listing";
 import type { RepeatMode } from "@media/player/queue-order";
+import {
+  SessionPlayback,
+  SessionPresence,
+  playingKey,
+  startSession,
+} from "@media/player/session-playback";
+import {
+  MUSIC,
+  MusicSessionProvider,
+  addToSession,
+  asEntryId,
+  followOf,
+  playInSession,
+  sessionControl,
+  startCommands,
+  useSessionData,
+} from "@media/player/session-react";
+import type { JoinedSession, MusicSession, SessionData } from "@media/player/session-react";
 import { ticketSources } from "@media/player/source-resolver";
 import { settingOfQuality } from "@media/player/stream-quality";
 import type { StreamQuality, StreamQualitySetting } from "@media/player/stream-quality";
@@ -28,9 +47,11 @@ import { Option, Schema } from "effect";
 import { requireNativeModule } from "expo";
 import type { EventEmitter } from "expo";
 import { randomUUID } from "expo-crypto";
+import { Alert } from "react-native";
 import {
   createContext,
   use,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -95,7 +116,7 @@ import {
   sameSong,
   statusOf,
 } from "./player-state";
-import type { NowPlaying, PlayerStatus, PlayerView, RemoteDevice } from "./player-state";
+import type { NowPlaying, PlayerStatus, PlayerView, QueueItem, RemoteDevice } from "./player-state";
 
 const POSITION_INTERVAL_MS = 250;
 
@@ -174,6 +195,11 @@ export interface NowPlayingView {
   readonly status: PlayerStatus;
   /** The device the player follows while nothing plays here (`PlayerView.remote`). */
   readonly remote: RemoteDevice | null;
+  /**
+   * The person's Jam plays a song they may not play, as a kid an explicit one: nothing plays here
+   * until the Jam moves on, and the screens show it as `Hidden song`.
+   */
+  readonly hidden: boolean;
 }
 
 /** The person's devices and a move between them, for the device sheet. */
@@ -765,6 +791,218 @@ const createActions = (
   };
 };
 
+type JoinedView = JoinedSession;
+
+/** The person's session as the actions read it when they run. */
+interface SessionAct {
+  readonly view: JoinedView;
+  readonly sessionPlayback: SessionPlayback;
+  /** The entries `usePlayer().queue` shows, the song playing first. */
+  readonly shown: ReadonlyArray<string>;
+}
+
+const alertRefusal = (message: string | null): void => {
+  if (message !== null) Alert.alert("Jam", message);
+};
+
+const alertIfRefused = (refused: Promise<string | null>): Promise<void> =>
+  refused.then(alertRefusal);
+
+/** A Jam song this person may not play, as a kid an explicit one, as the queue shows it. */
+const hiddenItem = (itemId: string): QueueItem => ({
+  itemId: asQueueItemId(itemId),
+  trackId: null,
+  title: "Hidden song",
+  artist: "Not available to you",
+  artUrl: null,
+  durationMs: 0,
+  autoplay: false,
+});
+
+interface SessionSongs {
+  /** The song playing on this phone, or null while its details load or when it is hidden. */
+  readonly current: QueueEntry<Track> | null;
+  /**
+   * What the queue shows from the song playing on: that song, or `Hidden song` in its place, then
+   * what plays after it, hidden songs included. Songs whose details still load show once they do.
+   */
+  readonly rows: ReadonlyArray<QueueItem>;
+  /** Where the song playing is in `rows`: 0, or -1 while its details load. */
+  readonly index: number;
+  /** The song playing is one this person may not play. */
+  readonly hidden: boolean;
+}
+
+/**
+ * The session's song as this phone plays it, and what plays after it: the song the engine moved
+ * on to by itself first once it did, and songs this person may not play shown as hidden, as the
+ * web shows them, so a kid sees an explicit song coming and the silence it plays as.
+ */
+const sessionSongsOf = (
+  data: SessionData,
+  view: JoinedView,
+  current: string | null,
+  art: (track: Track) => string | null,
+): SessionSongs => {
+  const songs = [
+    {
+      key: playingKey(view.sessionId, view.entryId),
+      track: data.playing,
+      hidden: data.playingHidden,
+    },
+    ...data.entries.map((entry) => ({ key: entry.key, track: entry.track, hidden: entry.hidden })),
+  ];
+
+  const at = Math.max(
+    0,
+    songs.findIndex((song) => song.key === current),
+  );
+
+  const rows = songs.slice(at).flatMap(({ key, track, hidden }): ReadonlyArray<QueueItem> => {
+    if (track !== null) return [queueItemOf({ itemId: key, autoplay: false, track }, art)];
+
+    return hidden ? [hiddenItem(key)] : [];
+  });
+
+  const playing = songs[at];
+  const hidden = playing?.hidden === true;
+
+  return {
+    current:
+      playing === undefined || playing.track === null
+        ? null
+        : { itemId: playing.key, autoplay: false, track: playing.track },
+    rows,
+    index: playing?.track != null || hidden ? 0 : -1,
+    hidden,
+  };
+};
+
+/**
+ * The player's actions while the person's music session plays (ADR 0017): play, pause, seeks,
+ * skips, and queue changes go to the session, and what it refuses shows in an alert. Outside a
+ * session they are the person's own queue's, `own`.
+ */
+const inSessionActions = (
+  platform: PlatformSdk,
+  latest: { readonly current: SessionAct | null },
+  own: PlayerActions,
+): PlayerActions => {
+  const inSession =
+    <Args extends ReadonlyArray<unknown>>(
+      session: (act: SessionAct, ...args: Args) => Promise<void>,
+      outside: (...args: Args) => Promise<void>,
+    ) =>
+    async (...args: Args): Promise<void> => {
+      const act = latest.current;
+
+      if (act === null) {
+        await outside(...args);
+
+        return;
+      }
+
+      try {
+        await session(act, ...args);
+      } catch (cause) {
+        alertRefusal(describeFailure(cause));
+      }
+    };
+
+  return {
+    ...own,
+    play: inSession(
+      ({ view, sessionPlayback }, trackIds: ReadonlyArray<TrackId>, index?: number) =>
+        alertIfRefused(playInSession(platform, view, sessionPlayback, trackIds, index)),
+      own.play,
+    ),
+    pause: inSession(async ({ view, sessionPlayback }) => {
+      if (view.clock.status === "playing") await alertIfRefused(sessionPlayback.togglePlay());
+    }, own.pause),
+    resume: inSession(async ({ view, sessionPlayback }) => {
+      if (view.clock.status !== "playing") await alertIfRefused(sessionPlayback.togglePlay());
+    }, own.resume),
+    toggle: inSession(
+      ({ sessionPlayback }) => alertIfRefused(sessionPlayback.togglePlay()),
+      own.toggle,
+    ),
+    next: inSession(({ sessionPlayback }) => alertIfRefused(sessionPlayback.next()), own.next),
+    previous: inSession(
+      ({ sessionPlayback }) => alertIfRefused(sessionPlayback.previous()),
+      own.previous,
+    ),
+    seek: inSession(
+      ({ sessionPlayback }, positionMs: number) => alertIfRefused(sessionPlayback.seek(positionMs)),
+      own.seek,
+    ),
+    jump: inSession(
+      ({ sessionPlayback }, itemId: QueueItemId) => alertIfRefused(sessionPlayback.jump(itemId)),
+      own.jump,
+    ),
+    // A session's queue has no shuffle, repeat, or autoplay; the person's own keeps theirs.
+    setShuffle: inSession(async (_act, _on: boolean) => {}, own.setShuffle),
+    cycleRepeat: inSession(async () => {}, own.cycleRepeat),
+    setAutoplay: inSession(async (_act, _on: boolean) => {}, own.setAutoplay),
+    playNext: inSession(
+      ({ view }, trackIds: ReadonlyArray<TrackId>) => addToSession(platform, view, trackIds, true),
+      own.playNext,
+    ),
+    playLater: inSession(
+      ({ view }, trackIds: ReadonlyArray<TrackId>) => addToSession(platform, view, trackIds, false),
+      own.playLater,
+    ),
+    removeFromQueue: inSession(async (_act, itemId: QueueItemId) => {
+      await platform.core.together.remove({ domain: MUSIC, entryId: asEntryId(itemId) });
+    }, own.removeFromQueue),
+    moveInQueue: inSession(async ({ view, shown }, itemId: QueueItemId, toIndex: number) => {
+      const args = moveArgs(
+        shown.map((key) => ({ itemId: key })),
+        itemId,
+        toIndex,
+      );
+
+      if (args === null) return;
+
+      // Right after the song playing is the front of the session's queue, which never holds it.
+      const after = args.afterItemId;
+      const front = after === undefined || after === playingKey(view.sessionId, view.entryId);
+
+      await platform.core.together.reorder(
+        front
+          ? { domain: MUSIC, entryId: asEntryId(itemId) }
+          : { domain: MUSIC, entryId: asEntryId(itemId), afterEntryId: asEntryId(after) },
+      );
+    }, own.moveInQueue),
+    // Clearing takes out only the person's own queue; a session's is taken out an entry at a time.
+    clearQueue: inSession(async () => {}, own.clearQueue),
+  };
+};
+
+/**
+ * Queue changes that reject with their failure, for a sheet that keeps a refusal on screen: the
+ * session's while one plays.
+ */
+const inSessionCommands = (
+  platform: PlatformSdk,
+  latest: { readonly current: SessionAct | null },
+  own: PlayerCommands,
+): PlayerCommands => ({
+  addToQueue: async (trackIds, next) => {
+    const act = latest.current;
+
+    if (act === null) {
+      await own.addToQueue(trackIds, next);
+
+      return;
+    }
+
+    await addToSession(platform, act.view, trackIds, next);
+  },
+  clearQueue: async () => {
+    if (latest.current === null) await own.clearQueue();
+  },
+});
+
 function PositionTicker({
   read,
   durationMs,
@@ -1084,6 +1322,29 @@ export function PlayerProvider({ children }: { readonly children: ReactNode }) {
   const serverQueue = useServerQueue(platform);
   const localQueue = useSyncExternalStore(local.subscribe, local.getSnapshot);
 
+  const [presence] = useState(
+    () => new SessionPresence(() => platform.core.together.heartbeat({ domain: MUSIC })),
+  );
+
+  const [sessionPlayback] = useState(
+    () =>
+      new SessionPlayback({
+        controller,
+        commands: {
+          heartbeat: () => platform.core.together.heartbeat({ domain: MUSIC }),
+          control: sessionControl(platform),
+        },
+        serverNow: () => presence.serverNow(),
+        describe: describeFailure,
+      }),
+  );
+
+  const sessionData = useSessionData(platform, pagedStore);
+  const following = useSyncExternalStore(sessionPlayback.subscribe, sessionPlayback.getSnapshot);
+  const [starting, setStarting] = useState(false);
+  /** The person started the session from this phone's song: it goes on without a gap. */
+  const startedHere = useRef(false);
+
   const snapshot: ControllerSnapshot = useSyncExternalStore(
     controller.subscribe,
     controller.getSnapshot,
@@ -1119,18 +1380,59 @@ export function PlayerProvider({ children }: { readonly children: ReactNode }) {
 
   useEffect(() => controller.start(), [controller]);
 
+  useEffect(() => sessionPlayback.start(), [sessionPlayback]);
+
   useEffect(() => {
     if (!online) goLocal.current();
   }, [online]);
 
   useSettings(platform, controller);
 
+  const sessionView = sessionData.view;
+
+  const beatFor =
+    sessionView?.state === "joined" || sessionView?.state === "pending"
+      ? sessionView.sessionId
+      : null;
+
+  // While the app runs, which iOS allows in the background only while it plays, so a host
+  // listening there stays present (ADR 0017).
+  useEffect(() => {
+    presence.keep(online ? beatFor : null);
+  }, [presence, beatFor, online]);
+
+  useEffect(
+    () => () => {
+      presence.keep(null);
+    },
+    [presence],
+  );
+
+  // A session plays only from the server: this phone's own queue of copies plays without one.
+  const follow = useMemo(
+    () => (mode === "local" || starting ? null : followOf(sessionData)),
+    [mode, starting, sessionData],
+  );
+
+  // Before the queue below: leaving a session first gives the player back to the person's queue.
+  useEffect(() => {
+    sessionPlayback.update(follow, startedHere.current);
+
+    if (follow !== null) startedHere.current = false;
+  }, [sessionPlayback, follow]);
+
   const localView = useMemo(() => playingView(localQueue), [localQueue]);
   const queue = mode === "local" ? localView : serverQueue;
 
+  // The core's queue waits while the person's session is read, so a session never shows their
+  // own song first; this phone's own queue never waits.
   useEffect(() => {
-    if (queue !== null) controller.sync(queue);
-  }, [controller, queue]);
+    if (queue === null || follow !== null) return;
+
+    if (mode === "server" && sessionView === undefined) return;
+
+    controller.sync(queue);
+  }, [controller, queue, follow, mode, sessionView]);
 
   const entries = queue?.entries ?? [];
   const found = entries.findIndex((entry) => entry.itemId === snapshot.current);
@@ -1141,18 +1443,28 @@ export function PlayerProvider({ children }: { readonly children: ReactNode }) {
   useHandBack(platform, phone, online, playing, setMode);
   useReachWhileAudible(playing);
 
-  const connect = useConnect(platform, controller, snapshot, {
+  const connected = useConnect(platform, controller, snapshot, {
     locks: undefined,
     onCore: mode === "server",
   });
 
-  const following = connect.remote;
-  const remotePlayback = following?.playback ?? null;
+  const inSession = follow === null ? null : sessionView?.state === "joined" ? sessionView : null;
+
+  // In a Jam this phone plays the Jam, which controls it rather than Connect (ADR 0017, D35): it
+  // follows no other device and offers none to move to, as the web's player in a Jam.
+  const connect = useMemo(
+    (): ConnectView =>
+      inSession === null ? connected : { ...connected, remote: null, devices: [] },
+    [connected, inSession],
+  );
+
+  const followedDevice = connect.remote;
+  const remotePlayback = followedDevice?.playback ?? null;
 
   const remote = useMemo(
     (): RemoteDevice | null =>
-      following === null ? null : { id: following.id, name: following.name },
-    [following],
+      followedDevice === null ? null : { id: followedDevice.id, name: followedDevice.name },
+    [followedDevice],
   );
 
   const art = useMemo(
@@ -1179,8 +1491,41 @@ export function PlayerProvider({ children }: { readonly children: ReactNode }) {
     remotePlayback,
   );
 
-  const player = useMemo(
-    (): PlayerView => ({
+  const sessionSongs = useMemo(
+    () =>
+      inSession === null ? null : sessionSongsOf(sessionData, inSession, snapshot.current, art),
+    [inSession, sessionData, snapshot, art],
+  );
+
+  const sessionSong = useMemo(
+    () =>
+      sessionSongs?.current === null || sessionSongs === null
+        ? null
+        : nowPlayingOf(sessionSongs.current, art),
+    [sessionSongs, art],
+  );
+
+  const player = useMemo((): PlayerView => {
+    if (sessionSongs !== null && inSession !== null) {
+      return {
+        // A hidden song plays nothing here, but the Jam plays it on: its controls show the Jam's.
+        status: sessionSongs.hidden
+          ? inSession.clock.status
+          : statusOf({ hasCurrent: sessionSongs.current !== null }, snapshot, null),
+        remote: null,
+        nowPlaying: sessionSong,
+        queue: sessionSongs.rows,
+        index: sessionSongs.index,
+        shuffle: false,
+        repeat: "off",
+        autoplay: false,
+        volume: snapshot.volume,
+        error: snapshot.error,
+        quality: snapshot.quality,
+      };
+    }
+
+    return {
       status,
       remote,
       nowPlaying,
@@ -1192,13 +1537,31 @@ export function PlayerProvider({ children }: { readonly children: ReactNode }) {
       volume: snapshot.volume,
       error: snapshot.error,
       quality: snapshot.quality,
-    }),
-    [status, remote, nowPlaying, items, found, queue, snapshot],
-  );
+    };
+  }, [
+    status,
+    remote,
+    nowPlaying,
+    items,
+    found,
+    queue,
+    snapshot,
+    sessionSongs,
+    sessionSong,
+    inSession,
+  ]);
+
+  const shownSong = sessionSongs === null ? nowPlaying : sessionSong;
+  const hiddenSong = sessionSongs?.hidden === true;
 
   const current = useMemo(
-    (): NowPlayingView => ({ nowPlaying, status, remote }),
-    [nowPlaying, status, remote],
+    (): NowPlayingView => ({
+      nowPlaying: shownSong,
+      status: player.status,
+      remote: player.remote,
+      hidden: hiddenSong,
+    }),
+    [shownSong, player.status, player.remote, hiddenSong],
   );
 
   const track = entry?.track ?? null;
@@ -1214,8 +1577,22 @@ export function PlayerProvider({ children }: { readonly children: ReactNode }) {
     [platform, phone, copies],
   );
 
+  const latestSession = useRef<SessionAct | null>(null);
+
+  useLayoutEffect(() => {
+    latestSession.current =
+      inSession === null || sessionSongs === null
+        ? null
+        : {
+            view: inSession,
+            sessionPlayback,
+            shown: sessionSongs.rows.map((row) => row.itemId),
+          };
+  }, [inSession, sessionPlayback, sessionSongs]);
+
   const actions = useMemo(
-    () => createActions(platform, phone, commands, latest),
+    () =>
+      inSessionActions(platform, latestSession, createActions(platform, phone, commands, latest)),
     [platform, phone, commands],
   );
 
@@ -1233,18 +1610,65 @@ export function PlayerProvider({ children }: { readonly children: ReactNode }) {
 
   const devices = useDevicesView(platform, controller, connect, latest);
 
+  const sessionCommands = useMemo(
+    () => inSessionCommands(platform, latestSession, commands),
+    [platform, commands],
+  );
+
+  const start = useCallback(async (): Promise<string> => {
+    const own = latest.current.queue;
+
+    const playingEntry = own?.entries.find(
+      (queued) => queued.itemId === controller.getSnapshot().current,
+    );
+
+    if (own === null || playingEntry === undefined) throw new Error("Play a song to start a Jam");
+
+    const at = own.entries.indexOf(playingEntry);
+
+    setStarting(true);
+
+    try {
+      const started = await startSession(
+        {
+          trackId: playingEntry.track.id,
+          // What the person hears and sees: the device the player follows, when it follows one.
+          positionNow: readPosition,
+          playing: latest.current.shownPlaying,
+          upcoming: own.entries.slice(at + 1).map((queued) => queued.track.id),
+        },
+        startCommands(platform),
+      );
+
+      startedHere.current = true;
+      // The queue fills behind the start; the core refuses its rest once the session is over.
+      started.queued.catch(() => undefined);
+
+      return started.link;
+    } finally {
+      setStarting(false);
+    }
+  }, [platform, controller, readPosition]);
+
+  const musicSession = useMemo(
+    (): MusicSession => ({ ...sessionData, following: following.follower, starting, start }),
+    [sessionData, following, starting, start],
+  );
+
   return (
     <PositionReaderContext value={readPosition}>
       <ActionsContext value={actions}>
-        <CommandsContext value={commands}>
+        <CommandsContext value={sessionCommands}>
           <DevicesContext value={devices}>
             <PlayerContext value={player}>
               <NowPlayingContext value={current}>
-                <SongContext value={nowPlaying}>
+                <SongContext value={shownSong}>
                   <OwnSessionContext value={mode === "local"}>
-                    <PositionTicker read={readPosition} durationMs={nowPlaying?.durationMs ?? 0}>
-                      {children}
-                    </PositionTicker>
+                    <MusicSessionProvider value={musicSession}>
+                      <PositionTicker read={readPosition} durationMs={shownSong?.durationMs ?? 0}>
+                        {children}
+                      </PositionTicker>
+                    </MusicSessionProvider>
                   </OwnSessionContext>
                 </SongContext>
               </NowPlayingContext>

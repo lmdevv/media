@@ -18,6 +18,9 @@ import type { NowPlayingView } from "@/components/shell/ui-state";
 import { formatQuality } from "@/lib/format";
 import { useArtColors } from "@/lib/use-art-colors";
 
+import { JamButton } from "@/components/jam/jam-band";
+import { useJoinedJam } from "@/components/jam/jam";
+
 import { Progress, Volume } from "./controls";
 import { LyricsPane } from "./lyrics-view";
 import { NEXT_REPEAT, perform } from "./player-actions";
@@ -152,11 +155,13 @@ function PhonePlayer({ track }: { readonly track: Track }) {
 
 function PhoneQueue({ track }: { readonly track: Track }) {
   const player = usePlayer();
+  const jam = useJoinedJam();
 
   return (
     <>
       <TrackHeader track={track} showLike={false} />
-      <div className="flex gap-2 pt-5.5">
+      {/* A Jam's queue plays in order, without shuffle or repeat. */}
+      <div className={jam === null ? "flex gap-2 pt-5.5" : "hidden"}>
         <PillToggle
           label="Shuffle"
           pressed={player.shuffle}
@@ -350,6 +355,7 @@ function PhoneUpNext() {
             <span className="truncate font-sans text-sm/sm text-text/55">From {source}</span>
           )}
         </span>
+        <JamButton tone="glass" />
         {queued.length > 1 || reordering ? (
           <button
             type="button"

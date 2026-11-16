@@ -2883,9 +2883,61 @@ export const generatedCommands = [
       ]),
       at: Schema.optionalKey(Schema.Union([Schema.Literal("next"), Schema.Literal("end")])),
       revision: Schema.optionalKey(Schema.Finite),
+      sessionId: Schema.optionalKey(Schema.String.pipe(Schema.brand("Id<togetherSessions>"))),
     }),
     result: Schema.Struct({ entryId: Schema.String.pipe(Schema.brand("Id<togetherEntries>")) }),
     method: (platform) => platform.core.together.add,
+  }),
+  coreCommand({
+    name: "core.together.addItems",
+    path: ["auth", "together", "add-items"],
+    kind: "mutation",
+    scope: "signed-in",
+    refusesKeys: false,
+    summary:
+      "Queue items at the end of the group session --session-id names, in order (500 at most), as many as one call decides and leaving out any you can't play; send the items after the first taken ones again",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({
+      domain: Schema.Union([Schema.Literal("movies"), Schema.Literal("music")]),
+      sessionId: Schema.String.pipe(Schema.brand("Id<togetherSessions>")),
+      items: Schema.Array(
+        Schema.Union([
+          Schema.Struct({
+            domain: Schema.Literal("movies"),
+            ref: Schema.Union([
+              Schema.Struct({
+                type: Schema.Literal("title"),
+                id: Schema.String.pipe(Schema.brand("Id<titles>")),
+              }),
+              Schema.Struct({
+                type: Schema.Literal("episode"),
+                id: Schema.String.pipe(Schema.brand("Id<episodes>")),
+              }),
+              Schema.Struct({
+                type: Schema.Literal("file"),
+                id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
+              }),
+            ]),
+          }),
+          Schema.Struct({
+            domain: Schema.Literal("music"),
+            ref: Schema.Union([
+              Schema.Struct({
+                type: Schema.Literal("track"),
+                id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+              }),
+              Schema.Struct({
+                type: Schema.Literal("album"),
+                id: Schema.String.pipe(Schema.brand("Id<albums>")),
+              }),
+            ]),
+          }),
+        ]),
+      ),
+    }),
+    result: Schema.Struct({ taken: Schema.Finite }),
+    method: (platform) => platform.core.together.addItems,
   }),
   coreCommand({
     name: "core.together.admit",
@@ -2970,8 +3022,13 @@ export const generatedCommands = [
           positionMs: Schema.Finite,
           revision: Schema.Finite,
         }),
-        Schema.Struct({ kind: Schema.Literal("next"), revision: Schema.Finite }),
+        Schema.Struct({
+          kind: Schema.Literal("next"),
+          revision: Schema.Finite,
+          entryId: Schema.optionalKey(Schema.String.pipe(Schema.brand("Id<togetherEntries>"))),
+        }),
       ]),
+      sessionId: Schema.optionalKey(Schema.String.pipe(Schema.brand("Id<togetherSessions>"))),
     }),
     result: Schema.Struct({
       status: Schema.Union([Schema.Literal("playing"), Schema.Literal("paused")]),
@@ -3060,6 +3117,7 @@ export const generatedCommands = [
         state: Schema.Literal("pending"),
         sessionId: Schema.String.pipe(Schema.brand("Id<togetherSessions>")),
         host: Schema.String,
+        hostDisplayName: Schema.Union([Schema.String, Schema.Null]),
       }),
       Schema.Struct({
         state: Schema.Literal("ended"),
@@ -3070,6 +3128,7 @@ export const generatedCommands = [
         state: Schema.Literal("joined"),
         sessionId: Schema.String.pipe(Schema.brand("Id<togetherSessions>")),
         host: Schema.String,
+        hostDisplayName: Schema.Union([Schema.String, Schema.Null]),
         role: Schema.Union([Schema.Literal("host"), Schema.Literal("guest")]),
         link: Schema.String,
         settings: Schema.Struct({
@@ -3128,10 +3187,15 @@ export const generatedCommands = [
           ]),
           Schema.Null,
         ]),
+        entryId: Schema.Union([
+          Schema.String.pipe(Schema.brand("Id<togetherEntries>")),
+          Schema.Null,
+        ]),
         members: Schema.Array(
           Schema.Struct({
             userId: Schema.String.pipe(Schema.brand("Id<users>")),
             username: Schema.String,
+            displayName: Schema.Union([Schema.String, Schema.Null]),
             role: Schema.Union([Schema.Literal("host"), Schema.Literal("guest")]),
             present: Schema.Boolean,
             linkGuest: Schema.Boolean,
@@ -3142,6 +3206,7 @@ export const generatedCommands = [
             Schema.Struct({
               userId: Schema.String.pipe(Schema.brand("Id<users>")),
               username: Schema.String,
+              displayName: Schema.Union([Schema.String, Schema.Null]),
               present: Schema.Boolean,
             }),
           ),
@@ -3260,6 +3325,7 @@ export const generatedCommands = [
             Schema.Null,
           ]),
           addedBy: Schema.Union([Schema.String, Schema.Null]),
+          addedByDisplayName: Schema.Union([Schema.String, Schema.Null]),
           removable: Schema.Boolean,
         }),
       ),
@@ -3292,6 +3358,24 @@ export const generatedCommands = [
     }),
     result: Schema.Null,
     method: (platform) => platform.core.together.remove,
+  }),
+  coreCommand({
+    name: "core.together.reorder",
+    path: ["auth", "together", "reorder"],
+    kind: "mutation",
+    scope: "signed-in",
+    refusesKeys: false,
+    summary:
+      "Move an entry of your group session's queue to just after another (--after-entry-id), or to the front when none is given: any as its host, your own as a guest who may add",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({
+      domain: Schema.Union([Schema.Literal("movies"), Schema.Literal("music")]),
+      entryId: Schema.String.pipe(Schema.brand("Id<togetherEntries>")),
+      afterEntryId: Schema.optionalKey(Schema.String.pipe(Schema.brand("Id<togetherEntries>"))),
+    }),
+    result: Schema.Null,
+    method: (platform) => platform.core.together.reorder,
   }),
   coreCommand({
     name: "movies.collections.get",

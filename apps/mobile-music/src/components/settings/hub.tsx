@@ -63,6 +63,13 @@ export function SettingsHub() {
               onPress={() => router.push("/settings/keys")}
             />
           ) : null}
+          <Row
+            leading={{ kind: "icon", icon: Users, tone: "muted" }}
+            title="Join a Jam"
+            subtitle="Paste a Jam link"
+            trailing={<RowChevron />}
+            onPress={() => router.push("/jam/join")}
+          />
           {can(me, "admin") ? (
             <Row
               leading={{ kind: "icon", icon: Settings, tone: "muted" }}

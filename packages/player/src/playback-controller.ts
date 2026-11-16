@@ -1,3 +1,5 @@
+import type { FollowerPlayer } from "@media/contracts/follower";
+import type { FollowerPlayerEvent } from "@media/contracts/follower-policy";
 import type { MusicStreamProfile } from "@media/contracts/music-playback";
 import { Effect, Exit, Fiber, Result } from "effect";
 
@@ -31,6 +33,9 @@ const JUMP_GRACE_MS = 10_000;
 
 /** A Connect request's position this close to where the song is leaves it there (ADR 0018). */
 const STEER_TOLERANCE_MS = 250;
+
+/** How close to its end a song counts as played to its end, as a session's follower counts it. */
+const END_SLACK_MS = 500;
 
 const AUTOPLAY_BLOCKED_MESSAGE = "Tap play to start here";
 
@@ -95,6 +100,36 @@ export interface ControllerSnapshot {
    * playback moving on (ADR 0018).
    */
   readonly seeks: number;
+  /**
+   * The entry the engine plays, and the load that gave it its source, once that load is done, so a
+   * group session's follower starts on it; null while nothing is loaded, a load is on its way, or
+   * the song failed. Moving on to the preloaded song by itself keeps the load.
+   */
+  readonly ready: LoadedReady | null;
+}
+
+/** Where an entry of a group session stands on its clock now, and whether the session plays. */
+export interface SessionStart {
+  readonly positionMs: number;
+  readonly playing: boolean;
+}
+
+/** The entry an engine plays, and the load that gave the engine its source. */
+export interface LoadedReady {
+  readonly itemId: string;
+  readonly load: number;
+}
+
+/**
+ * How the player follows a group session instead of the listener's own queue (ADR 0017). The
+ * session's queue reaches `sync` like any queue, its playing entry first; the session decides
+ * where each entry starts and whether it plays, and the system's media controls move it.
+ */
+export interface SessionMode {
+  /** Where `itemId` stands now on the session's clock, and whether the session plays. */
+  readonly startAt: (itemId: string) => SessionStart;
+  /** The lock screen's and media keys' moves, which go to the session. */
+  readonly controls: MediaSessionHandlers;
 }
 
 /** What this device plays, as Connect hears it (ADR 0018). */
@@ -233,12 +268,32 @@ interface PreloadRequest {
   readonly profile: MusicStreamProfile;
 }
 
+/**
+ * The event a session's follower hears for each engine event, or null for one it does not follow.
+ * Moving on to the preloaded song ends the song the follower follows.
+ */
+const FOLLOWER_EVENTS: Readonly<Record<EngineEvent["type"], FollowerPlayerEvent | null>> = {
+  playing: "playing",
+  paused: "paused",
+  waiting: "waiting",
+  ended: "ended",
+  advanced: "ended",
+  time: null,
+  error: null,
+};
+
 /** Whether two preload requests ask for the same stream after the same load. */
 const samePreload = (a: PreloadRequest, b: PreloadRequest): boolean =>
   a.generation === b.generation &&
   a.entry.itemId === b.entry.itemId &&
   a.engine === b.engine &&
   a.profile === b.profile;
+
+/** A group session's follower of one entry, and how it hears that entry's engine events. */
+interface FollowerListener {
+  readonly itemId: string;
+  readonly listener: (event: FollowerPlayerEvent) => void;
+}
 
 /** A move to another entry sent from here, which the core has not confirmed yet. */
 interface PendingJump {
@@ -322,8 +377,28 @@ export class PlaybackController {
    */
   readonly #skipped = new Set<string>();
   #loading = false;
-  /** Counts `release` calls, so a play whose queue answers after one does not start here. */
-  #releases = 0;
+  /**
+   * Bumped each time this player lets go of the listener's queue, so a play whose queue answers
+   * after does not start here.
+   */
+  #handOffs = 0;
+  /** The group session this player follows, or null while it plays the listener's own queue. */
+  #session: SessionMode | null = null;
+  /**
+   * In a session, the entry the engine moved on from by itself, to the preloaded one the session
+   * has not moved to yet (`#pendingJump`); null otherwise.
+   */
+  #aheadOf: string | null = null;
+  /** The listener's own place, kept while a session plays, to show again once it ends. */
+  #ownPlace: ResumePoint | null = null;
+  /**
+   * The song the engine plays goes on as the new session's first song, as when the listener starts
+   * a session from it, until the session's first entry arrives.
+   */
+  #adopting = false;
+  #rate = 1;
+  /** Session followers listening for the events of the entry each follows. */
+  readonly #followers = new Set<FollowerListener>();
   #unsubscribeEngine: (() => void) | null = null;
   #healthFiber: Fiber.Fiber<void, unknown> | null = null;
   #stop: (() => void) | null = null;
@@ -354,6 +429,7 @@ export class PlaybackController {
       volume: env.settings.volume,
       current: null,
       seeks: 0,
+      ready: null,
     };
   }
 
@@ -376,10 +452,10 @@ export class PlaybackController {
    * Calls `callback` synchronously at the start of every action the listener takes here, before
    * it changes anything: {@link togglePlay}, {@link next}, {@link previous}, {@link seek},
    * {@link jump}, and {@link playTracks}, whether a screen, a shortcut, or the system media
-   * controls asked, and the system media controls' own play and pause. Connect makes the requests
-   * seen so far moot there (ADR 0018). What Connect itself applies, through `steer`,
-   * `playTracksAt`, `playCurrentAt`, and `release`, never calls it. Returns the function that
-   * stops calling it.
+   * controls asked, the system media controls' own play and pause, and following a group session
+   * or going back to their own queue ({@link followSession}). Connect makes the requests seen so
+   * far moot there (ADR 0018). What Connect itself applies, through `steer`, `playTracksAt`,
+   * `playCurrentAt`, and `release`, never calls it. Returns the function that stops calling it.
    */
   onListenerAction(callback: () => void): () => void {
     this.#listenerActions.add(callback);
@@ -401,21 +477,27 @@ export class PlaybackController {
       if (this.#snapshot.engineStatus === "playing") this.#saveResume();
     }, RESUME_SAVE_MS);
 
+    // In a group session the system's controls move the session, as the player's own do.
     this.#env.nowPlaying.setHandlers({
       play: () => {
-        this.#systemControl("play");
+        if (this.#session !== null) this.#session.controls.play();
+        else this.#systemControl("play");
       },
       pause: () => {
-        this.#systemControl("pause");
+        if (this.#session !== null) this.#session.controls.pause();
+        else this.#systemControl("pause");
       },
       next: () => {
-        void this.next();
+        if (this.#session !== null) this.#session.controls.next();
+        else void this.next();
       },
       previous: () => {
-        void this.previous();
+        if (this.#session !== null) this.#session.controls.previous();
+        else void this.previous();
       },
       seekTo: (positionMs) => {
-        this.seek(positionMs);
+        if (this.#session !== null) this.#session.controls.seekTo(positionMs);
+        else this.seek(positionMs);
       },
     });
 
@@ -436,9 +518,19 @@ export class PlaybackController {
     return stop;
   }
 
-  /** Brings the player in line with the core's queue after it changed. */
+  /**
+   * Brings the player in line with the core's queue after it changed: the listener's own, or in a
+   * group session the session's (`followSession`).
+   */
   sync(queue: QueueState): void {
     this.#queue = queue;
+
+    if (this.#session !== null) {
+      this.#syncSession(queue);
+
+      return;
+    }
+
     const pending = this.#pendingJump;
 
     if (pending !== null) {
@@ -469,6 +561,95 @@ export class PlaybackController {
       this.#gapless = settings.gapless;
       this.#dropPreload();
     }
+  }
+
+  /**
+   * Follows a group session instead of the listener's own queue, or goes back to it with null
+   * (ADR 0017). Their own song stops where it was and waits, paused, until the session ends, as
+   * in old music's jams; the session's queue then reaches `sync`, and the listener's own queue
+   * again once it ends. Following another session starts over from its own queue. Each change is
+   * the listener's action, so Connect's requests seen so far are moot ({@link onListenerAction}),
+   * and a new queue still being written plays nothing once it answers.
+   *
+   * @param adopt - The listener started the session from the song the engine plays, where it
+   *   stands: it goes on without a gap as the session's first song.
+   */
+  followSession(session: SessionMode | null, adopt = false): void {
+    if (session === null && this.#session === null) return;
+
+    this.#listenerActed();
+    this.#handOffs += 1;
+
+    if (this.#session === null) {
+      this.#saveResume();
+      this.#ownPlace = this.#env.resume.load();
+    }
+
+    this.#session = session;
+    this.#pendingJump = null;
+    this.#latestMove = null;
+    this.#aheadOf = null;
+    this.#early = null;
+    this.#skipped.clear();
+    this.#setRate(1);
+    this.#adopting = session !== null && adopt && this.#loaded !== null && !this.#loading;
+
+    if (this.#adopting) {
+      this.#dropPreload();
+
+      return;
+    }
+
+    this.#unload();
+    this.#queue = null;
+    this.#choose(false);
+    this.#update({ current: null, engineStatus: "idle", error: null, autoplayBlocked: false });
+
+    if (session === null) {
+      // The listener's own song shows again where it stopped, paused, once their queue arrives.
+      this.#resumeAt = this.#ownPlace;
+      this.#ownPlace = null;
+    }
+  }
+
+  /**
+   * The player as a group session's follower of the entry `itemId` drives it (`@media/contracts`
+   * follower). Every reading and command is about `itemId`: once the engine moved on from it to
+   * the preloaded entry by itself, the player reads as standing at its end, as it did, and a seek
+   * back into it loads it again. Engine events reach the follower only while the engine plays
+   * `itemId`, or moved on from it, and a seek it asks for answers `seeked` at once, as the engine
+   * reports the target at once.
+   */
+  followerPlayer(itemId: string): FollowerPlayer {
+    return {
+      positionMs: () => this.#positionIn(itemId),
+      isPaused: () => !this.#plays(itemId),
+      isBuffering: () =>
+        this.#holds(itemId) &&
+        (this.#snapshot.engineStatus === "buffering" ||
+          (this.#snapshot.engineStatus === "loading" && this.#wantPlaying)),
+      playbackRate: () => this.#rate,
+      setPlaybackRate: (rate) => {
+        this.#setRate(rate);
+      },
+      seek: (positionMs) => {
+        this.#seekIn(itemId, positionMs);
+      },
+      play: () => this.#playIn(itemId),
+      pause: () => {
+        this.#pauseIn(itemId);
+      },
+      subscribe: (listener) => {
+        const follower: FollowerListener = { itemId, listener };
+
+        this.#followers.add(follower);
+
+        return () => {
+          this.#followers.delete(follower);
+        };
+      },
+      fixedRate: this.#engine.setPlaybackRate === undefined,
+    };
   }
 
   /**
@@ -523,13 +704,13 @@ export class PlaybackController {
     const early = picked === undefined ? null : this.#startEarly(picked);
 
     this.#early = early;
-    const releases = this.#releases;
+    const releases = this.#handOffs;
 
     try {
       const { current } = await this.#commands.play(trackIds, index);
 
       // Connect moved playback to another device meanwhile; the queue is its now.
-      if (this.#releases !== releases) return null;
+      if (this.#handOffs !== releases) return null;
 
       const answered =
         early !== null && this.#early === early ? { ...early, itemId: current } : null;
@@ -791,6 +972,14 @@ export class PlaybackController {
   }
 
   /**
+   * Whether this player follows a group session (ADR 0017). The session, not Connect, controls such
+   * a device (D35), so Connect's device side takes no request while it does.
+   */
+  get followsSession(): boolean {
+    return this.#session !== null;
+  }
+
+  /**
    * Plays the core's current queue entry here from `positionMs`, playing or paused, when it holds
    * `trackId`, as when Connect moves playback onto this device (ADR 0018); the queue stays as it
    * is. Answers false, changing nothing, when the current entry holds another song or none.
@@ -815,11 +1004,14 @@ export class PlaybackController {
   /**
    * Stops playing here and lets go of the song, as when Connect moves playback to another device,
    * or another of the listener's devices plays while this one is paused (ADR 0018). The queue
-   * stays, and this device keeps its place in the song, paused, as after a stop.
+   * stays, and this device keeps its place in the song, paused, as after a stop. A player that
+   * follows a group session keeps the session's song: the session decides what plays here.
    */
   release(): void {
+    if (this.#session !== null) return;
+
     this.#env.nowPlaying.commanded();
-    this.#releases += 1;
+    this.#handOffs += 1;
     this.#choose(false);
     const here = this.playingHere();
 
@@ -940,6 +1132,176 @@ export class PlaybackController {
 
     // Shows where this device left the song, paused, until it plays, and any other from its start.
     this.#stamp(this.#resumeAt?.itemId === entry.itemId ? this.#resumeAt.positionMs : 0, false);
+  }
+
+  /**
+   * Follows a group session's queue (ADR 0017). The engine may have moved on to the preloaded entry
+   * by itself, which the session has not moved to yet: that stands while the session's entry is
+   * still the one it moved on from, and the session confirms it once its entry is the preloaded
+   * one. The session moving anywhere else ends it, and the player loads the session's entry where
+   * the session's clock stands.
+   */
+  #syncSession(queue: QueueState): void {
+    const ahead = this.#pendingJump;
+
+    if (ahead !== null && queue.current !== this.#aheadOf) {
+      this.#pendingJump = null;
+      this.#aheadOf = null;
+    }
+
+    if (this.#pendingJump === null) this.#followSessionEntry(queue.current);
+    else this.#refreshLoaded();
+
+    this.#dropStalePreload();
+    this.#showNowPlaying();
+  }
+
+  /**
+   * Plays the session's entry `current`: loads it where the session's clock stands, playing or
+   * paused as the session is, unless the engine already plays it. Unlike the listener's own queue,
+   * a paused session's entry loads too, so a play reaches every member at once. An entry this
+   * person may not play has no song, and nothing plays.
+   */
+  #followSessionEntry(current: string | null): void {
+    const session = this.#session;
+
+    if (session === null) return;
+
+    this.#update({ current });
+    const entry = this.#currentEntry();
+
+    // The song started from goes on while the session's first song's details load.
+    if (entry === null && this.#adopting) return;
+
+    if (current === null || entry === null) {
+      if (this.#loaded !== null) this.#unload();
+      this.#wantPlaying = false;
+      this.#update({ engineStatus: "idle", error: null, autoplayBlocked: false });
+
+      return;
+    }
+
+    const adopted = this.#adopting ? this.#loaded : null;
+
+    this.#adopting = false;
+
+    if (adopted !== null && adopted.entry.track.id === entry.track.id) {
+      this.#loaded = { ...adopted, entry };
+      this.#update({ ready: { itemId: entry.itemId, load: this.#generation } });
+
+      return;
+    }
+
+    if (this.#loaded?.entry.itemId === entry.itemId) {
+      // A load on its way plays or pauses as the session does once it lands.
+      if (this.#loading) this.#wantPlaying = session.startAt(entry.itemId).playing;
+      this.#refreshLoaded();
+
+      return;
+    }
+
+    const start = session.startAt(entry.itemId);
+
+    this.#wantPlaying = start.playing;
+    void this.#load(entry, start.positionMs);
+  }
+
+  /** Whether the engine holds `itemId`, or moved on from it by itself in a session. */
+  #holds(itemId: string): boolean {
+    return this.#loaded?.entry.itemId === itemId || this.#movedOnFrom(itemId);
+  }
+
+  /** Whether, in a session, the engine moved on from `itemId` to the preloaded entry by itself. */
+  #movedOnFrom(itemId: string): boolean {
+    return this.#aheadOf === itemId && this.#pendingJump !== null;
+  }
+
+  /**
+   * Where the engine stands in `itemId`: its position while it plays `itemId`, the end of `itemId`
+   * once it moved on from it by itself, else where a load of it starts, or 0.
+   */
+  #positionIn(itemId: string): number {
+    if (this.#movedOnFrom(itemId)) return this.#entryOf(itemId)?.track.durationMs ?? 0;
+
+    if (this.#loaded?.entry.itemId !== itemId) return 0;
+
+    return this.#loading ? this.#livePositionMs() : this.#engine.samplePlayback().positionMs;
+  }
+
+  /** Whether the engine plays, or is starting to, while it holds `itemId`. */
+  #plays(itemId: string): boolean {
+    if (!this.#holds(itemId)) return false;
+
+    return this.#loading ? this.#wantPlaying : this.#engine.samplePlayback().playing;
+  }
+
+  /**
+   * Seeks the engine in `itemId` for a session's follower. Once the engine moved on from `itemId` by
+   * itself, a seek back into it loads it again there, as the session never moved on; a seek to its
+   * end leaves the engine where it is. An entry not loaded loads at `positionMs`.
+   */
+  #seekIn(itemId: string, positionMs: number): void {
+    const entry = this.#entryOf(itemId);
+    const target = Math.max(0, Math.round(positionMs));
+
+    if (this.#movedOnFrom(itemId)) {
+      if (entry === null || target >= entry.track.durationMs - END_SLACK_MS) return;
+
+      this.#pendingJump = null;
+      this.#aheadOf = null;
+      this.#update({ current: itemId });
+      void this.#load(entry, target);
+
+      return;
+    }
+
+    if (this.#loaded?.entry.itemId !== itemId) {
+      if (entry !== null && this.#session !== null) void this.#load(entry, target);
+
+      return;
+    }
+
+    this.#seek(target);
+    this.#tellFollowers(itemId, "seeked");
+  }
+
+  /**
+   * Plays the engine in `itemId` for a session's follower; rejects when the platform refused to
+   * start without a tap, as the follower expects.
+   */
+  async #playIn(itemId: string): Promise<void> {
+    if (!this.#holds(itemId)) return;
+
+    this.#wantPlaying = true;
+    this.#update({ autoplayBlocked: false });
+
+    if (this.#loading || this.#reloadIfExpired(this.#livePositionMs())) return;
+
+    await this.#engine.play();
+
+    if (this.#snapshot.autoplayBlocked) throw new Error(AUTOPLAY_BLOCKED_MESSAGE);
+  }
+
+  /** Pauses the engine in `itemId` for a session's follower. */
+  #pauseIn(itemId: string): void {
+    if (!this.#holds(itemId)) return;
+
+    this.#wantPlaying = false;
+
+    if (!this.#loading) this.#engine.pause();
+  }
+
+  /** Plays at `rate` from now on, in this engine and the next one it switches to. */
+  #setRate(rate: number): void {
+    this.#rate = rate;
+    this.#engine.setPlaybackRate?.(rate);
+  }
+
+  /** Hands `event` to the session followers of `itemId`. */
+  #tellFollowers(itemId: string, event: FollowerPlayerEvent): void {
+    for (const follower of this.#followers) {
+      if (follower.itemId === itemId) follower.listener(event);
+    }
   }
 
   /** Loads the entry this player moved to once the queue that holds it arrives. */
@@ -1217,8 +1579,13 @@ export class PlaybackController {
     return resume?.itemId === entry.itemId ? resume.positionMs : 0;
   }
 
-  /** Where `entry` starts when it loads: where the player holds it, else where this device left it. */
+  /**
+   * Where `entry` starts when it loads: where the player holds it, else where this device left it,
+   * or in a group session where the session's clock stands.
+   */
   #startPositionFor(entry: QueueEntry): number {
+    if (this.#session !== null) return this.#session.startAt(entry.itemId).positionMs;
+
     return this.#loaded?.entry.itemId === entry.itemId
       ? this.#livePositionMs()
       : this.#resumePositionFor(entry);
@@ -1248,7 +1615,8 @@ export class PlaybackController {
   #saveResume(): void {
     const loaded = this.#loaded;
 
-    if (loaded === null) return;
+    // A session's song is the session's place, not the listener's.
+    if (loaded === null || this.#session !== null) return;
 
     this.#env.resume.save({
       itemId: loaded.entry.itemId,
@@ -1284,7 +1652,9 @@ export class PlaybackController {
       next.engine === current.engine &&
       next.volume === current.volume &&
       next.current === current.current &&
-      next.seeks === current.seeks;
+      next.seeks === current.seeks &&
+      next.ready?.itemId === current.ready?.itemId &&
+      next.ready?.load === current.ready?.load;
 
     if (unchanged) return;
     this.#snapshot = next;
@@ -1341,6 +1711,7 @@ export class PlaybackController {
     this.#engine = this.#engines.create(kind);
     this.#unsubscribeEngine = listening ? this.#engine.subscribe(this.#onEngineEvent) : null;
     this.#engine.setVolume(this.#snapshot.volume);
+    this.#engine.setPlaybackRate?.(this.#rate);
     this.#preloaded = null;
     this.#update({ engine: kind });
   }
@@ -1353,6 +1724,7 @@ export class PlaybackController {
     this.#preloaded = null;
     this.#preloading = null;
     this.#stamp(0, false);
+    this.#update({ ready: null });
   }
 
   /** Drops the preload here and in the engine. */
@@ -1418,7 +1790,7 @@ export class PlaybackController {
       // allowed: the song waits for the server otherwise.
       const reach = this.#reach();
       const engine = this.#wantedEngine();
-      this.#update({ engineStatus: "loading", error: null, autoplayBlocked: false });
+      this.#update({ engineStatus: "loading", error: null, autoplayBlocked: false, ready: null });
       // A switch drops the preload with the engine that held it.
       this.#useEngine(engine);
 
@@ -1476,17 +1848,26 @@ export class PlaybackController {
       };
 
       // The song starts where the listener left it, however long its ticket took: no clock is
-      // shared with another player that kept time meanwhile.
-      const start = Math.min(startMs, Math.max(0, track.durationMs - 1000));
+      // shared with another player that kept time meanwhile. A group session's clock is, so a
+      // session's song starts where that clock stands once the ticket is in.
+      const wanted =
+        this.#session === null ? startMs : this.#session.startAt(entry.itemId).positionMs;
+
+      const start = Math.min(wanted, Math.max(0, track.durationMs - 1000));
       this.#setPosition(start);
       this.#engineGeneration = generation;
       await this.#engine.load(resolved.source, start, this.#wantPlaying);
 
-      if (
-        generation !== this.#generation ||
-        (this.#snapshot.engineStatus !== "playing" && this.#snapshot.engineStatus !== "paused")
-      )
+      if (generation !== this.#generation || this.#snapshot.engineStatus === "error") return;
+
+      // The engine holds this load's source now, whether or not it reported the start yet: the iOS
+      // engine reports it on its next status update, after the load resolved.
+      this.#loading = false;
+      this.#update({ ready: { itemId: entry.itemId, load: generation } });
+
+      if (this.#snapshot.engineStatus !== "playing" && this.#snapshot.engineStatus !== "paused") {
         return;
+      }
 
       if (
         !this.#snapshot.autoplayBlocked &&
@@ -1513,6 +1894,9 @@ export class PlaybackController {
    * follows that queue's entry.
    */
   #skipUnreachable(entry: QueueEntry): void {
+    // Only the session moves a session on; its song shows why it can't play here.
+    if (this.#session !== null) return;
+
     this.#skipped.add(entry.itemId);
     const queue = this.#queue;
     const at = queue?.entries.findIndex((queued) => queued.itemId === entry.itemId) ?? -1;
@@ -1670,6 +2054,19 @@ export class PlaybackController {
     // failure, and its end describe a song the player has moved on from.
     if (this.#engineGeneration !== this.#generation) return;
 
+    // Read before the event moves the player on, so moving on reaches the entry it moved from.
+    const playedEntry = this.#aheadOf ?? this.#loaded?.entry.itemId ?? null;
+
+    this.#handleEngineEvent(event);
+
+    if (playedEntry !== null && this.#followers.size > 0) {
+      const heard = FOLLOWER_EVENTS[event.type];
+
+      if (heard !== null) this.#tellFollowers(playedEntry, heard);
+    }
+  };
+
+  #handleEngineEvent(event: EngineEvent): void {
     switch (event.type) {
       case "time": {
         this.#setPosition(this.#engine.samplePlayback().positionMs);
@@ -1717,12 +2114,12 @@ export class PlaybackController {
 
       case "error": {
         this.#setMoving(false);
-        this.#update({ engineStatus: "error" });
+        this.#update({ engineStatus: "error", ready: null });
         void this.#onError(event.reason, event.message);
         break;
       }
     }
-  };
+  }
 
   /** The engine moved to the preloaded song without a gap: it plays now, so the core follows. */
   #onAdvanced(): void {
@@ -1742,6 +2139,22 @@ export class PlaybackController {
 
     this.#preloaded = null;
     this.#setPosition(0);
+
+    if (this.#session !== null) {
+      // In a session only the session moves on, at the end on its clock (ADR 0017): the engine
+      // plays ahead, and `#syncSession` keeps it while the session is still on the song before.
+      this.#aheadOf = this.#snapshot.current;
+      this.#pendingJump = { itemId: preloaded.entry.itemId, sentAt: this.#env.now() };
+      this.#update({
+        current: preloaded.entry.itemId,
+        ready: { itemId: preloaded.entry.itemId, load: this.#generation },
+      });
+      this.#showNowPlaying();
+      this.#reportPlay();
+
+      return;
+    }
+
     const pending = this.#sendMove(preloaded.entry.itemId);
     this.#update({ current: preloaded.entry.itemId });
     this.#showNowPlaying();
@@ -1761,6 +2174,14 @@ export class PlaybackController {
 
   #onEnded(): void {
     const loaded = this.#loaded;
+
+    // A session's song waits at its end until the session moves on, on its clock.
+    if (this.#session !== null) {
+      this.#update({ engineStatus: "paused" });
+      this.#showNowPlaying();
+
+      return;
+    }
 
     if (loaded !== null && this.#queue?.repeat === "one") {
       // A new start, so history records the song again, as old music counted a repeat.

@@ -78,18 +78,9 @@ export const endSession = async (
 ): Promise<void> => {
   if (session.state === "ended") return;
 
-  const { _id: sessionId, hostId, linkSecret, settings, blocked, clock, item } = session;
+  const { _id: sessionId, _creationTime: _created, state: _live, ...fields } = session;
 
-  await ctx.db.replace(sessionId, {
-    hostId,
-    linkSecret,
-    settings,
-    blocked,
-    clock,
-    item,
-    state: "ended",
-    reason,
-  });
+  await ctx.db.replace(sessionId, { ...fields, state: "ended", reason });
 
   await dropBeats(ctx, sessionId);
   await ctx.scheduler.runAfter(ENDED_KEEP_MS, internal.core.together.sessions.purge, {

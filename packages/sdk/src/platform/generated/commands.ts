@@ -2271,8 +2271,53 @@ const core_together_add = mutation({
     ]),
     at: Schema.optionalKey(Schema.Union([Schema.Literal("next"), Schema.Literal("end")])),
     revision: Schema.optionalKey(Schema.Finite),
+    sessionId: Schema.optionalKey(Schema.String.pipe(Schema.brand("Id<togetherSessions>"))),
   }),
   result: Schema.Struct({ entryId: Schema.String.pipe(Schema.brand("Id<togetherEntries>")) }),
+});
+
+const core_together_addItems = mutation({
+  name: "core.together.addItems",
+  path: "core/together:addItems",
+  args: Schema.Struct({
+    domain: Schema.Union([Schema.Literal("movies"), Schema.Literal("music")]),
+    sessionId: Schema.String.pipe(Schema.brand("Id<togetherSessions>")),
+    items: Schema.Array(
+      Schema.Union([
+        Schema.Struct({
+          domain: Schema.Literal("movies"),
+          ref: Schema.Union([
+            Schema.Struct({
+              type: Schema.Literal("title"),
+              id: Schema.String.pipe(Schema.brand("Id<titles>")),
+            }),
+            Schema.Struct({
+              type: Schema.Literal("episode"),
+              id: Schema.String.pipe(Schema.brand("Id<episodes>")),
+            }),
+            Schema.Struct({
+              type: Schema.Literal("file"),
+              id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
+            }),
+          ]),
+        }),
+        Schema.Struct({
+          domain: Schema.Literal("music"),
+          ref: Schema.Union([
+            Schema.Struct({
+              type: Schema.Literal("track"),
+              id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+            }),
+            Schema.Struct({
+              type: Schema.Literal("album"),
+              id: Schema.String.pipe(Schema.brand("Id<albums>")),
+            }),
+          ]),
+        }),
+      ]),
+    ),
+  }),
+  result: Schema.Struct({ taken: Schema.Finite }),
 });
 
 const core_together_admit = mutation({
@@ -2325,8 +2370,13 @@ const core_together_control = mutation({
         positionMs: Schema.Finite,
         revision: Schema.Finite,
       }),
-      Schema.Struct({ kind: Schema.Literal("next"), revision: Schema.Finite }),
+      Schema.Struct({
+        kind: Schema.Literal("next"),
+        revision: Schema.Finite,
+        entryId: Schema.optionalKey(Schema.String.pipe(Schema.brand("Id<togetherEntries>"))),
+      }),
     ]),
+    sessionId: Schema.optionalKey(Schema.String.pipe(Schema.brand("Id<togetherSessions>"))),
   }),
   result: Schema.Struct({
     status: Schema.Union([Schema.Literal("playing"), Schema.Literal("paused")]),
@@ -2397,6 +2447,7 @@ const core_together_get = query({
       state: Schema.Literal("pending"),
       sessionId: Schema.String.pipe(Schema.brand("Id<togetherSessions>")),
       host: Schema.String,
+      hostDisplayName: Schema.Union([Schema.String, Schema.Null]),
     }),
     Schema.Struct({
       state: Schema.Literal("ended"),
@@ -2407,6 +2458,7 @@ const core_together_get = query({
       state: Schema.Literal("joined"),
       sessionId: Schema.String.pipe(Schema.brand("Id<togetherSessions>")),
       host: Schema.String,
+      hostDisplayName: Schema.Union([Schema.String, Schema.Null]),
       role: Schema.Union([Schema.Literal("host"), Schema.Literal("guest")]),
       link: Schema.String,
       settings: Schema.Struct({
@@ -2461,10 +2513,12 @@ const core_together_get = query({
         ]),
         Schema.Null,
       ]),
+      entryId: Schema.Union([Schema.String.pipe(Schema.brand("Id<togetherEntries>")), Schema.Null]),
       members: Schema.Array(
         Schema.Struct({
           userId: Schema.String.pipe(Schema.brand("Id<users>")),
           username: Schema.String,
+          displayName: Schema.Union([Schema.String, Schema.Null]),
           role: Schema.Union([Schema.Literal("host"), Schema.Literal("guest")]),
           present: Schema.Boolean,
           linkGuest: Schema.Boolean,
@@ -2475,6 +2529,7 @@ const core_together_get = query({
           Schema.Struct({
             userId: Schema.String.pipe(Schema.brand("Id<users>")),
             username: Schema.String,
+            displayName: Schema.Union([Schema.String, Schema.Null]),
             present: Schema.Boolean,
           }),
         ),
@@ -2568,6 +2623,7 @@ const core_together_queue = query({
           Schema.Null,
         ]),
         addedBy: Schema.Union([Schema.String, Schema.Null]),
+        addedByDisplayName: Schema.Union([Schema.String, Schema.Null]),
         removable: Schema.Boolean,
       }),
     ),
@@ -2590,6 +2646,17 @@ const core_together_remove = mutation({
   args: Schema.Struct({
     domain: Schema.Union([Schema.Literal("movies"), Schema.Literal("music")]),
     entryId: Schema.String.pipe(Schema.brand("Id<togetherEntries>")),
+  }),
+  result: Schema.Null,
+});
+
+const core_together_reorder = mutation({
+  name: "core.together.reorder",
+  path: "core/together:reorder",
+  args: Schema.Struct({
+    domain: Schema.Union([Schema.Literal("movies"), Schema.Literal("music")]),
+    entryId: Schema.String.pipe(Schema.brand("Id<togetherEntries>")),
+    afterEntryId: Schema.optionalKey(Schema.String.pipe(Schema.brand("Id<togetherEntries>"))),
   }),
   result: Schema.Null,
 });
@@ -5816,6 +5883,8 @@ export const effectMethods = (method: EffectBuilder) => ({
     together: {
       /** `core.together.add` (mutation, signed-in): Queue something you can play in your group session, next or at the end. */
       add: method.mutation(core_together_add),
+      /** `core.together.addItems` (mutation, signed-in): Queue items at the end of the group session --session-id names, in order (500 at most), as many as one call decides and leaving out any you can't play; send the items after the first taken ones again. */
+      addItems: method.mutation(core_together_addItems),
       /** `core.together.admit` (mutation, signed-in): Let someone waiting to join your group session in, as its host. */
       admit: method.mutation(core_together_admit),
       /** `core.together.block` (action, signed-in): Remove someone from your group session or turn their request away, as its host; its join link no longer lets them in. */
@@ -5838,6 +5907,8 @@ export const effectMethods = (method: EffectBuilder) => ({
       queue: method.query(core_together_queue),
       /** `core.together.remove` (mutation, signed-in): Take an entry out of your group session's queue: any as its host, your own as a guest. */
       remove: method.mutation(core_together_remove),
+      /** `core.together.reorder` (mutation, signed-in): Move an entry of your group session's queue to just after another (--after-entry-id), or to the front when none is given: any as its host, your own as a guest who may add. */
+      reorder: method.mutation(core_together_reorder),
     },
   },
   movies: {
@@ -6294,6 +6365,8 @@ export const promiseMethods = (method: PromiseBuilder) => ({
     together: {
       /** `core.together.add` (mutation, signed-in): Queue something you can play in your group session, next or at the end. */
       add: method.mutation(core_together_add),
+      /** `core.together.addItems` (mutation, signed-in): Queue items at the end of the group session --session-id names, in order (500 at most), as many as one call decides and leaving out any you can't play; send the items after the first taken ones again. */
+      addItems: method.mutation(core_together_addItems),
       /** `core.together.admit` (mutation, signed-in): Let someone waiting to join your group session in, as its host. */
       admit: method.mutation(core_together_admit),
       /** `core.together.block` (action, signed-in): Remove someone from your group session or turn their request away, as its host; its join link no longer lets them in. */
@@ -6316,6 +6389,8 @@ export const promiseMethods = (method: PromiseBuilder) => ({
       queue: method.query(core_together_queue),
       /** `core.together.remove` (mutation, signed-in): Take an entry out of your group session's queue: any as its host, your own as a guest. */
       remove: method.mutation(core_together_remove),
+      /** `core.together.reorder` (mutation, signed-in): Move an entry of your group session's queue to just after another (--after-entry-id), or to the front when none is given: any as its host, your own as a guest who may add. */
+      reorder: method.mutation(core_together_reorder),
     },
   },
   movies: {

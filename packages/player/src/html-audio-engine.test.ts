@@ -35,6 +35,8 @@ class StandInAudio extends EventTarget implements AudioElement {
   preload: AudioElement["preload"] = "";
   src = "";
   volume = 1;
+  playbackRate = 1;
+  defaultPlaybackRate = 1;
   readonly #failing: ReadonlySet<string>;
   #failure: Promise<void> | null = null;
 
@@ -44,6 +46,8 @@ class StandInAudio extends EventTarget implements AudioElement {
   }
 
   load(): void {
+    // As a browser's element does: loading a source resets the speed to its default.
+    this.playbackRate = this.defaultPlaybackRate;
     this.paused = true;
     this.ended = false;
     this.currentTime = 0;
@@ -166,6 +170,34 @@ describe("HtmlAudioEngine", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it("keeps a speed it was given across loads, and starts the preloaded song at it", async () => {
+    const { engine, stop, playingElement } = setup();
+    const a = source("a");
+    const b = source("b");
+
+    try {
+      engine.setPlaybackRate(1.05);
+      await engine.load(a, 0, true);
+
+      expect(playingElement().playbackRate).toBe(1.05);
+
+      engine.preload(b);
+      await settle();
+      playingElement().finish();
+      await settle();
+
+      expect(playingElement().src).toBe(b.url);
+      expect(playingElement().playbackRate).toBe(1.05);
+
+      engine.setPlaybackRate(1);
+
+      expect(playingElement().playbackRate).toBe(1);
+    } finally {
+      stop();
+      engine.unload();
+    }
   });
 
   it("reports the next song's failure when its preload had already failed", async () => {

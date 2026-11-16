@@ -93,8 +93,9 @@ music clients adopt it in phase 6.
   gets in by joining again.
 - `control` and `add` are two switches for every guest, set with `core.together.configure`. The
   host may always do both. Control moves the clock and skips to the next item. Add queues items
-  and takes out one's own. Items enter a session only through `create` and `add`, so control alone
-  never changes what plays except by skipping to what was queued.
+  and takes out and moves one's own (`reorder`, amended 2026-11-15). Items enter a session only
+  through `create` and `add`, so control alone never changes what plays except by skipping to what
+  was queued.
 
 ### The shared clock
 
@@ -147,8 +148,10 @@ music clients adopt it in phase 6.
 - `create` and `add` take only items the caller can play. `get` and `core.together.queue` show
   each viewer an item they may not play as `null`, such as a kid and an R movie.
 - The queue holds up to 500 items to play next, counted in `counters`. `add` puts one first or
-  last, and `next` plays the first from its start and takes it out of the queue. Phase 6 adds
-  reordering where a client needs it.
+  last, and `next` plays the first from its start and takes it out of the queue. The music clients
+  added reordering, skipping to a named entry, queueing many items at once (`addItems`), and the
+  session fence on `add`, `addItems`, and `control` (amended 2026-11-15, see "Music group sessions
+  in the clients").
 - `add` with `revision` queues an item that follows the one playing, such as the next episode,
   as old movies' rooms named the episode they moved on from (`fromEpisodeId`). It fails
   `conflict` once the clock moved past that revision, as a stale seek does, and takes out any
@@ -176,6 +179,7 @@ music clients adopt it in phase 6.
 | `control` | together | the host, or a joined guest when guests may control                         |
 | `add`     | together | the host, or a joined guest when guests may add                             |
 | `remove`  | together | the host, or a joined guest who may add and queued the entry                |
+| `reorder` | together | the same as `remove` (amended 2026-11-15)                                   |
 | `admit`   | together | the host, in a session that is not locked                                   |
 | `manage`  | together | the host                                                                    |
 
@@ -416,3 +420,221 @@ session from the player, with the link to copy before it starts.
 - The countdown holds while the session is paused, and a host who reloads during the credits after
   Watch credits may see it start again.
 - Queueing (Up next) and the join and guest switches are new to movies, from D34.
+
+## Music group sessions in the clients (amended 2026-11-15)
+
+The music web client and the music iOS app run music group sessions as old music's jams, under
+old music's name for them, Jam, over the commands above. The music player plays a session through
+the same controller and engine as the person's own queue (`packages/player/src/session-playback.ts`)
+and follows the clock with the follower in `@media/contracts`, unchanged. The engines take a
+playback rate, keeping the pitch, so a follower nudges a small drift instead of seeking; the
+shared defaults hold (in step within 120 ms, a 5% nudge up to 1.5 s, a seek beyond).
+
+### The core
+
+Each change comes from what old jams did, or from a verifier's finding against it (fix round 1):
+
+- `core.together.reorder` moves a queued entry to just after another, or to the front. `can`'s
+  `reorder` follows `remove`'s rule: the host any entry, a guest who may add only their own, as old
+  jams by default let people move the songs they added. An entry gone is no change; an anchor gone
+  fails `conflict`. An entry takes an order between its new neighbours; once no number is left
+  between two, the call renumbers the queue, at most 500 entries.
+- A skip (`control`'s `next`) takes an optional `entryId` and plays that queued entry, leaving the
+  ones before it queued, as old music let a person play any song in the queue. It carries the
+  revision as before.
+- `get` answers `entryId`, the queue entry the playing item came from (stored as `itemEntryId`),
+  or null for the item `create` started with. Two plays of one song differ by it, so a player that
+  moved on by itself to the entry queued first knows when the session moved there too.
+- A skip starts the next item as far in as the clock played past the end of the one it leaves
+  (`carriedPast` in `together/clock.ts`), for a music track, whose length the core knows. Every
+  member's gapless engine moves on by itself at that end to the entry queued first, which it
+  preloaded, before the host's skip reaches the core, so that song starts for the core when it
+  started for the players. The carry belongs to that one successor, so the core keeps its
+  identity: the session stores `queuedFirst`, the entry queued first and the server time it got
+  there, and every write to the queue keeps it in the same mutation. A skip carries only into the
+  entry that was queued first 3 seconds (`FIRST_BY_MS`) before the clock reached the end, about
+  the longest a player takes from the write to holding the song preloaded, and still is (table
+  below). An add in front, a removal of the entry before it, or a move later than that puts a song
+  first that not every player preloaded, so it starts at 0 and no one misses its start (fix round
+  1: a song added 5 seconds after a session ran past its end started 5 seconds in). The host's
+  move at the end names no entry, so an entry taken out at the end is no reason to wait: it plays
+  what is first, from 0 when that is new. Each writer works out the entry it leaves first from
+  what it read before it wrote anything: in a Convex mutation, a limited index read after a write
+  to its range can answer a moved row where it stood, or skip a row after a delete and an insert.
+- `add`, `addItems`, and `control` take a `sessionId`, the session the call was made for, which
+  `addItems` requires. With it the call fails `conflict` before anything is decided once the
+  caller's place in the domain is in another session or in none: they left it, or it ended and
+  they started or joined another. A session that ended with them still in it decides as ended, as
+  before. The music clients name their session on every add and every move, so nothing made for
+  one session lands in the one that replaced it (fix round 1: songs a long queue was still adding
+  to Jam A landed in Jam B).
+- `core.together.addItems` queues up to 500 items at the end, in order, as many as one call can
+  decide within `PAGE_ROWS_MAX` reads (196 for a person in no group, 46 for one in 16) and the
+  queue's room, leaving out any the caller may not play, and answers how many it took (`taken`),
+  so the caller sends the rest again. A host's player fills a new Jam with it in a few calls,
+  where it used to add one song a call.
+- `get` answers each person's display name beside their username (`hostDisplayName`, and
+  `displayName` for members and people waiting), and `core.together.queue` who queued each entry by
+  both (`addedByDisplayName`). The clients show the display name, or the username without one
+  (#149), and add the username where a host acts on someone, as two people may go by one name.
+
+| A skip that lands past the end of a song plays                               | It starts                                                                       |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| the entry queued first since 3 s before the clock reached the end            | as far in as the clock ran past the end, at most 10 s and short of its end      |
+| an entry queued first only later, or since that end                          | at 0: an add in front, a removal of the entry before it, or a move put it there |
+| another entry, as one further down the skip names                            | at 0                                                                            |
+| anything, on a clock paused, moved since it reached the end, or 10 s past it | at 0                                                                            |
+| anything, before the end, or leaving an item of no known length, as a movie  | at 0                                                                            |
+
+| Move                                                        | Made by                  | Carries                                     | When the session moved on                                                                    |
+| ----------------------------------------------------------- | ------------------------ | ------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| Moving on to what is queued at a song's end                 | the host's player        | the revision it decided on                  | refused, and the newer clock decides; the carry only into the entry first 3 s before the end |
+| Pausing at the end of the last song, then back to its start | the host's player        | the revision, then the pause's for the seek | refused, and the session stays as it is                                                      |
+| Moving a session paused past a song's end on, paused        | the host's player        | the revision it decided on                  | refused                                                                                      |
+| Playing a queued song now                                   | a member who may control | the revision they saw                       | refused, as a stale skip                                                                     |
+| Any add, play, pause, seek, or skip from a music client     | the client               | the session it was made for                 | refused once the person left it, it ended, or another replaced it                            |
+| Queueing the songs after the first when a Jam starts        | the host's player        | the session `create` made                   | refused, and the fill stops for good                                                         |
+
+### Playing a session's queue
+
+The session reaches the player as a queue: the playing entry first, then what is queued, up to the
+first entry whose song the player has no details for yet or that is hidden from the person, so the
+engine never preloads a song that does not play next. The gapless engine preloads the entry queued
+first and moves on to it by itself at the song's end. Only the session moves the session on. One
+rule decides what a player does with its own move, in the controller's `#syncSession`, against
+each new view of the session:
+
+| The engine                                     | The session's playing entry | The player                                         |
+| ---------------------------------------------- | --------------------------- | -------------------------------------------------- |
+| moved on by itself from entry S to the next, E | still S                     | plays E on, ahead of the session                   |
+| moved on by itself from S to E                 | E                           | plays E on without a reload: the session caught up |
+| moved on by itself from S to E                 | any other                   | loads the session's entry where its clock stands   |
+| plays the session's entry                      | the same                    | follows the clock                                  |
+| plays another entry, or none                   | any                         | loads the session's entry where its clock stands   |
+
+A follower is made for one playing entry and one load of it, and stops as soon as either changes;
+it starts once the engine holds that load's source, whether or not the engine has reported the
+start yet: the iOS engine reports it on its next status update, after the load resolved. While the engine plays ahead in E, the
+follower of S reads the player as standing at S's end, which the follower policy leaves alone
+while the session's position is past it. A seek it asks for back into S loads S there, as the
+session never moved on; a seek to S's end leaves the engine where it is. The engine's events reach
+the follower of the entry they belong to, the one moved on from while ahead, and moving on to the
+preloaded song is that entry's end.
+
+### The end of a song
+
+The host's player moves the session on, on the session's clock, never on its own engine's end:
+
+| The session's clock        | Queued    | The host's player                                                                                        |
+| -------------------------- | --------- | -------------------------------------------------------------------------------------------------------- |
+| playing to the song's end  | something | skips to it 40 ms after the end, and the core carries the time past it                                   |
+| playing to the song's end  | nothing   | pauses it, then takes it back to the song's start, as old music's player stopped at the end of its queue |
+| paused past the song's end | something | skips to it at once: the next song waits at its start, paused                                            |
+| paused past the song's end | nothing   | takes it back to the song's start                                                                        |
+| anything else              |           | nothing                                                                                                  |
+
+It decides once per clock revision. A move refused or lost is tried again after 2 seconds against
+the newest clock, so a person's pause made meanwhile always stands. A guest's player never moves
+the session at a song's end; it waits there, at the end of its song, until the session moves on.
+
+### Starting, joining, and the queue
+
+- The host starts a Jam from the song playing: `create` on it, a play when it played, and a seek to
+  where the song stands, read as late as possible, each naming the session `create` made. The
+  songs queued after it then join the session's queue in order through `addItems`, a few calls for
+  up to 500, each naming the session; the first refusal, as once the session ended or the host
+  left it, stops the fill for good. The song goes on without a gap.
+- Joining stops the person's own song where it was, and it waits, paused, until they leave or the
+  Jam ends; waiting for the host keeps it playing. The web opens `/music/jam#<link>` and drops the
+  link from the address; the iOS app opens `music://jam/<link>` or a pasted link. The host shares
+  the web address, with a QR code.
+- Heartbeats run on every screen while the person is in or waits for a Jam: on the web while a tab
+  is open, in the iOS app while it runs online.
+- Play, pause, seek, and skip go to the session for a member who may control; anyone else is
+  refused with old music's `The host controls playback in this Jam`. Previous starts the song
+  again: a session keeps no songs it played.
+- Adding needs the host's switch (`The host turned off adding songs in this Jam`). Playing a song
+  or a list now, with control and add, queues its first song in front and skips to that entry at
+  once, then queues the rest after it, up to 100 songs; the rest of the queue stays after them.
+- A guest who may not control and whose player something outside paused, as a call, sits out
+  until they play it again, from the player or the system controls; it then follows the clock.
+- A host's player plans no end for a song whose length is unknown; someone skips it. A host who
+  may not play the song playing, as a kid host and an explicit song a guest queued, has no length
+  to plan by either, so the Jam waits at that song's end until someone skips.
+- The clients follow every page of the session's queue, loading the next as soon as one arrives,
+  as they follow the listener's own queue (`useQueueListing`), and keep the last whole listing
+  while the pages load again, as when one splits or fails: a page holds only as many entries as
+  one call can decide, and before fix round 1 the clients read only the first, 50 entries of a
+  500-song queue. So members see, take out, and the host moves every entry, on the web and on iOS.
+- The queue shows who added each song, by display name. An entry the person may not play shows as
+  `Hidden song`, as for a kid and an explicit song, on the web and, since fix round 1, on iOS. A
+  hidden playing song plays nothing for them for its length: their player stays silent and shows
+  `Hidden song` (Now Playing, the mini player, and the iPad bar on iOS), and a guest's player never
+  moves the session on. The host's player moves it on at the song's end, on the clock, unless the
+  song is hidden from the host too (above).
+
+### Connect in a Jam
+
+A device that plays a group session is controlled through the session, not by Connect (D35,
+ADR 0018). Following a session, or going back to the person's own queue, is the listener's action,
+so the Connect requests seen so far are moot, as after a tap. The controller's `followsSession` is
+read as each request applies:
+
+| What reaches the device                                                                   | The device                                                      |
+| ----------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| a Connect play, pause, seek, load, or stop, while it follows                              | settles it at once and applies nothing; the session plays on    |
+| a load still starting, for the queue or an album's songs, as it starts or stops following | drops it and settles it                                         |
+| the answer to a new queue it was writing, once it follows or stopped following            | plays nothing                                                   |
+| another of the person's devices playing, or another tab taking the browser's lead         | keeps the session's song                                        |
+| a seek the session's follower makes                                                       | is not the listener's action, so Connect's requests still stand |
+
+In a Jam the player offers no other device to move to or play on: each of the person's players that
+follows the session plays it, and a move carries an item, not a session. The Play on list shows
+this browser and the Jam button, as old music's did. A device that follows reports the song it
+plays, without the session: only a guest's decision reads it (D35), and guests have no client
+sign-in yet.
+
+### Measured
+
+Live on the image, desktop Chromium pages sampled their audio every 100 ms; the drift is |a - b| at
+common instants while both play one song, over the 5 minutes after the members joined, across a
+gapless song change. Old music's jams ran from `bd7462a7` on `media:0.3.0`, Lucía hosting and Aiko
+listening along, on the same album, song, and queued song. Blocks alternated: head, old jams, head,
+and a third head block on the final code. The head's first and third blocks had two members.
+
+| Measure                                | Old jams | Head, block 1 | Head, block 2 | Head, block 3 |
+| -------------------------------------- | -------- | ------------- | ------------- | ------------- |
+| p95 drift, host and member             | 149 ms   | 46 ms         | 23 ms         | 10 ms         |
+| p95 drift, two members                 |          | 7 ms          |               | 5 ms          |
+| spread of the song change across pages | 90 ms    | 39 ms         | 18 ms         | 10 ms         |
+
+The host's own song, kept without a gap when the Jam starts, stays where the follower's 120 ms
+in-step band leaves it, 5 to 42 ms off the clock here; members load at the clock and settle within
+a few milliseconds. In three of the four song changes, from a FLAC song to an MP3 one, one page's
+audio held about 50 ms, a member's in old jams and the host's in two head blocks, and its follower
+made it up within 2 seconds.
+
+The music iOS app on a simulator joined by its link and followed with a clock offset of -8.5 ms
+over a 33 ms round trip; its Now Playing label turned each second within the probe's own delay of
+the session clock. Before the follower started on a load that the engine had not reported yet, the
+app played about a second behind.
+
+### Differences from old music's jams
+
+Each was decided under D34, the core's one session model (join settings open, approval, or locked;
+permissions control and add), or moved to the owner's backlog under D62:
+
+- No limit on the songs each person has coming up; the core has the add switch only. Backlog
+  (D62).
+- Moving and taking out songs follows `remove`: old jams let the host choose nothing, their own, or
+  anything. Decided under D34.
+- No listen-along switch: every member's player follows the session. Decided under D34.
+- No new link: the core keeps one link per session; the host locks it or asks for approval.
+  Decided under D34; regenerating a link is backlog (D62).
+- No end after four idle hours; the core ends a session whose host is away for 30 minutes.
+  Decided under D34.
+- No guest accounts from a Jam's link. Backlog (D63).
+- No autoplay or shuffle and repeat in a Jam; it stops at the end of its last song. Backlog (D62).
+- A member whose grants do not reach a song's library hears nothing for it, under this ADR's item
+  rule; old jams streamed every song the host played to everyone in the Jam. Decided under D34.
+- The iOS app has no QR scanner, so a link is opened or pasted. Backlog (D62).

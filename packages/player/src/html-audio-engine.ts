@@ -39,6 +39,8 @@ export interface AudioElement extends Pick<
   | "preload"
   | "src"
   | "volume"
+  | "playbackRate"
+  | "defaultPlaybackRate"
   | "play"
   | "pause"
   | "load"
@@ -271,6 +273,17 @@ export class HtmlAudioEngine implements PlayerEngine {
     this.#volume = Math.min(1, Math.max(0, volume));
 
     for (const slot of this.#slots) slot.element.volume = this.#volume;
+  }
+
+  /**
+   * Sets both elements' speed and its default, which loading a source resets the speed to, so the
+   * preloaded song starts at it too; the browser keeps the pitch.
+   */
+  setPlaybackRate(rate: number): void {
+    for (const slot of this.#slots) {
+      slot.element.defaultPlaybackRate = rate;
+      slot.element.playbackRate = rate;
+    }
   }
 
   unlock(): void {

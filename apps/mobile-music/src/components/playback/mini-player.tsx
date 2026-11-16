@@ -26,11 +26,26 @@ const openNowPlaying = () => {
   router.push("/player");
 };
 
+/** What the mini player shows of a song. */
+interface Shown {
+  readonly title: string;
+  readonly artist: string;
+  readonly artUrl: string | null;
+}
+
+/** A Jam's song this person may not play, as a kid an explicit one, while it plays. */
+export const HIDDEN_SONG: Shown = {
+  title: "Hidden song",
+  artist: "Not available to you",
+  artUrl: null,
+};
+
 /** The mini player for the accessory's current placement. */
 export function MiniPlayer() {
   const placement = NativeTabs.BottomAccessory.usePlacement();
-  const { nowPlaying, status } = useNowPlaying();
+  const { nowPlaying: song, status, hidden } = useNowPlaying();
   const actions = usePlayerActions();
+  const nowPlaying = song ?? (hidden ? HIDDEN_SONG : null);
 
   if (nowPlaying === null) return null;
   const playing = playsOn(status);
