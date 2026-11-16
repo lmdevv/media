@@ -6,7 +6,9 @@ behind Caddy on one port (8080), which also serves the account and music clients
 client is at `/`, movies at `/movies`, music at `/music`, and the Convex backend at `/convex`.
 Browsers and the CLI talk only to that port.
 `docs/operations.md` explains what happens at startup, backups and restores, and telemetry in more
-depth.
+depth. [fresh-install.md](fresh-install.md) has the exact steps for a first install from a release
+tag beside other installs, such as an old [movies] or [music] one, on a port and data folder of its
+own.
 
 ## Before you start
 
@@ -246,8 +248,8 @@ For the edge, `git pull` on `main` with `MEDIA_IMAGE=ghcr.io/lmdevv/media:main`.
 A [media] 0.3.0 install upgrades to 0.4.0 this way. Upgrade it to 0.4.0 before any later
 release: 0.4.0 migrates its Connect rows, and a later release will refuse rows from before that
 migration (ADR 0018). [media] is a fresh install, not an upgrade of
-a [movies] v0.2 or [music] v0.3 install: nothing moves over from either, so set it up as above
-beside the old one's data (`docs/operations.md`, "Upgrading").
+a [movies] v0.2 or [music] v0.3 install: nothing moves over from either, so set it up beside the
+old one with [fresh-install.md](fresh-install.md) (`docs/operations.md`, "Upgrading").
 
 NixOS: `nix flake update movies && nixos-rebuild switch` (or move the pinned tag). Both back up
 before the new version deploys its functions; `docs/operations.md` ("Upgrading") covers rolling

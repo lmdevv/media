@@ -162,8 +162,9 @@ their own. `@lmdevv/media` replaces the [movies] CLI's package, `@lmdevv/movies`
 The all-in-one image (ADR 0027), first released as 0.3.0, is a fresh install, not an upgrade of a
 v0.2 install. Its Compose project, volumes, and data layout are new (`media`, `media-data`, `/data/core` and `/data/movies`),
 and the NixOS module's `dataDir` moved to `/var/lib/media`. Nothing moves the old data over (ADR
-0002). Stop the old install before starting the new one, since both take port 8080, and keep its
-volumes or `/var/lib/movies` until you no longer need them.
+0002). Both take port 8080 by default: stop the old install before starting the new one, or run
+the new one beside it on a port and data folder of its own ([fresh-install.md](fresh-install.md)).
+Keep the old volumes or `/var/lib/movies` until you no longer need them.
 
 | Track     | Compose `MEDIA_IMAGE`                              | NixOS flake input            |
 | --------- | -------------------------------------------------- | ---------------------------- |

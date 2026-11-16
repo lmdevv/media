@@ -23,6 +23,9 @@ install for a [movies] v0.2 or [music] v0.3 install: nothing moves over from eit
 
 [docs/homelab.md](docs/homelab.md) walks through a homelab install end to end: Compose or NixOS,
 Tailscale and a Caddy reverse proxy, GPU passthrough, where data lives, backups, and upgrading.
+[docs/fresh-install.md](docs/fresh-install.md) has the exact steps for a first install from a
+release tag beside other installs, such as an old [movies] or [music] one, from the owner account
+to the first scan and a play.
 
 ### Docker Compose
 
