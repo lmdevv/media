@@ -32,8 +32,10 @@ in
 testers.runNixOSTest {
   name = "movies";
 
-  nodes.machine = {
+  nodes.machine = { pkgs, ... }: {
     imports = [ module ];
+
+    environment.systemPackages = [ pkgs.jq ];
 
     virtualisation = {
       memorySize = 4096;
@@ -189,28 +191,83 @@ testers.runNixOSTest {
         count = machine.succeed("ls /var/lib/media/core/backups | grep -c '^core-manual-.*\\.zip$'").strip()
         assert count == "1", count
 
-    with subtest("an install from 0.4.0 keeps its data under the new service user"):
-        # 0.3.0 and 0.4.0 ran the service as `movies` in these same folders and kept no record of
-        # whom they belong to. NixOS drops that user once nothing declares it, so its files keep a
-        # uid no user has; 9999 stands in for it. tmpfiles re-owns the top folders, as a switch
-        # does before the service starts.
-        folders = "/var/lib/media/movies/media /var/lib/media/core/backups /var/cache/media/transcode"
-        key = machine.succeed("cat /var/lib/media/core/secrets/media-service-key")
+    # 0.3.0 and 0.4.0 ran the service as `movies` in these same folders and kept no record of whom
+    # they belong to. Once nothing declares that user and group, NixOS drops them and keeps their
+    # ids in /var/lib/nixos; 9999 stands in for them. Each case below starts from that state: no
+    # record of the owner, and files of the old `movies` ids, which the handover re-owns.
+    folders = "/var/lib/media/movies/media /var/lib/media/core/backups /var/cache/media/transcode"
+    service_ids = machine.succeed("echo \"$(id -u media-server):$(getent group media-server | cut -d: -f3)\"").strip()
+
+    def as_after_0_4_0():
         machine.succeed("systemctl stop media-server.service")
-        machine.succeed("rm /var/lib/media/core/service-owner")
+        machine.succeed("rm -f /var/lib/media/core/service-owner")
+        for kind in ["uid", "gid"]:
+            machine.succeed(
+                f"jq -c '. + {{movies: 9999}}' /var/lib/nixos/{kind}-map > /tmp/{kind}-map"
+                f" && mv /tmp/{kind}-map /var/lib/nixos/{kind}-map"
+            )
+
+    def owner(path):
+        return machine.succeed(f"stat -c %u:%g {path}").strip()
+
+    with subtest("an install from 0.4.0 keeps its data under the new service user"):
+        key = machine.succeed("cat /var/lib/media/core/secrets/media-service-key")
+        as_after_0_4_0()
         machine.succeed("touch /var/lib/media/movies/media/from-0.4.0")
         machine.succeed("mkdir -p /var/cache/media/transcode/downloads")
         machine.succeed(f"chown -R 9999:9999 {folders}")
-        machine.succeed("systemd-tmpfiles --create")
+        # Someone else's file in the service's folder is not the old service's, so it stays theirs.
+        machine.succeed("install -o 8888 -g 8888 /dev/null /var/lib/media/movies/media/someone-elses")
         machine.succeed("systemctl start media-server.service")
         machine.wait_for_unit("media-server.service")
         wait_connected()
         machine.succeed("test -e /var/lib/media/movies/media/from-0.4.0")
         machine.succeed("ls /var/lib/media/core/backups | grep -q '^core-manual-.*\\.zip$'")
-        owners = machine.succeed(f"find {folders} -printf '%u:%g\\n' | sort -u").split()
+        owners = machine.succeed(
+            f"find {folders} ! -name someone-elses -printf '%u:%g\\n' | sort -u"
+        ).split()
         assert owners == ["media-server:media-server"], owners
-        assert machine.succeed("cat /var/lib/media/core/service-owner").strip() == "media-server:media-server"
+        assert owner("/var/lib/media/movies/media/someone-elses") == "8888:8888"
+        assert machine.succeed("cat /var/lib/media/core/service-owner").strip() == service_ids
         assert machine.succeed("stat -c '%U %a' /var/lib/media/core/service-owner").strip() == "root 600"
         assert machine.succeed("cat /var/lib/media/core/secrets/media-service-key") == key
+        machine.succeed("rm /var/lib/media/movies/media/someone-elses")
+
+    with subtest("a symlink on the path of the service's folders stops the start before any chown"):
+        # Another install's files, owned by the very ids the handover takes over from, behind a
+        # symlinked parent of the service's state.
+        as_after_0_4_0()
+        machine.succeed("mkdir -p /srv/elsewhere/media && touch /srv/elsewhere/media/theirs")
+        machine.succeed("chown -R 9999:9999 /srv/elsewhere")
+        machine.succeed("mv /var/lib/media/movies /var/lib/media/movies.real")
+        machine.succeed("ln -s /srv/elsewhere /var/lib/media/movies")
+        status, _ = machine.execute("systemctl start media-server.service")
+        for path in ["/srv/elsewhere", "/srv/elsewhere/media", "/srv/elsewhere/media/theirs"]:
+            assert owner(path) == "9999:9999", f"{path} is now {owner(path)}"
+        assert status != 0, "the media service started through the symlink"
+        machine.succeed(
+            "journalctl -u media-server-handover.service | grep -q 'refusing to start: a symlink on the path of /var/lib/media/movies/media'"
+        )
+        machine.succeed("rm /var/lib/media/movies && mv /var/lib/media/movies.real /var/lib/media/movies")
+        machine.succeed("systemctl reset-failed")
+        machine.succeed("systemctl start media-server.service")
+        wait_connected()
+
+    with subtest("files mounted inside the service's folders keep their owner"):
+        # A bind mount from the same disk keeps the device number, so stopping at other file systems
+        # alone would walk into it. Here it is the library, with a file of the old service's ids.
+        as_after_0_4_0()
+        machine.succeed("install -o 9999 -g 9999 -m 644 /dev/null /srv/media/movies/library-file")
+        machine.succeed("install -o 9999 -g 9999 /dev/null /var/lib/media/movies/media/from-0.4.0-too")
+        machine.succeed("mkdir /var/lib/media/movies/media/mounted")
+        machine.succeed("mount --bind /srv/media/movies /var/lib/media/movies/media/mounted")
+        machine.succeed("systemctl start media-server.service")
+        wait_connected()
+        for path in ["/srv/media/movies", "/srv/media/movies/library-file"]:
+            expected = "0:0" if path == "/srv/media/movies" else "9999:9999"
+            assert owner(path) == expected, f"{path} is now {owner(path)}"
+        assert owner("/var/lib/media/movies/media/from-0.4.0-too") == service_ids
+        machine.succeed("umount /var/lib/media/movies/media/mounted && rmdir /var/lib/media/movies/media/mounted")
+        machine.succeed("rm /srv/media/movies/library-file /var/lib/media/movies/media/from-0.4.0-too")
   '';
 }

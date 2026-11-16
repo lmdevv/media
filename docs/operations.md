@@ -24,7 +24,8 @@ loopback only. Caddy serves them on the one port with the routes in
 movies' backend answered before the movies cutover. Convex's HTTP actions stay inside the install
 (ADR 0025).
 
-Every start, as root, before the media service runs unprivileged:
+Every start, as root, before the media service runs unprivileged (on NixOS, after
+`media-server-handover` has made the service's own folders its user's, ADR 0029):
 
 1. Derive the core's admin key from the backend's instance secret. It is never written to disk
    except into the service's private environment, under `/run/movies` in the image and
@@ -118,7 +119,7 @@ before the new key.
 2. Copy the archive into the backup folder
    (`docker compose cp backup.zip media:/data/core/backups/` and
    `docker compose exec media chown movies:movies /data/core/backups/backup.zip`, or into
-   `backupDir` owned by `movies` on NixOS) and restart the media service, which lists it.
+   `backupDir` owned by `media-server` on NixOS) and restart the media service, which lists it.
 3. Create a temporary owner account in the account client at `/` (the first account on an empty
    deployment is the owner), then restore the archive as above. The snapshot's accounts replace
    the temporary account.
@@ -201,9 +202,14 @@ From 0.4.0 to 0.4.1 the module renames what it makes so it can run beside [movie
 (ADR 0029). The media service's unit and user are `media-server`, no longer `movies`, and its
 runtime folder is `/run/media-server`. Move any override of `systemd.services.movies` or
 `users.users.movies`, such as `extraGroups`, to `media-server`. The database and the service's
-state stay in `dataDir`, and the first start hands the service's files there to the new user.
-Transcode segments move to `/var/cache/media/transcode`; `/var/cache/movies/transcode` is left
-alone, since [movies] v0.2 uses that path too.
+state stay in `dataDir`. Before the first start, `media-server-handover` gives the files the old
+`movies` user left in the service's own folders to `media-server`. It refuses to start when a
+symlink leads out of one of them, never crosses into a mount inside one, and changes only files of
+the old ids, which NixOS keeps in `/var/lib/nixos/uid-map` once it drops the user. On a host
+without that file, its log counts the files left, which `chown` by hand finishes. Evaluation
+refuses a `dataDir`, `backupDir`, or `transcodeDir` that overlaps a library or an old install's
+folder. Transcode segments move to `/var/cache/media/transcode`; `/var/cache/movies/transcode` is
+left alone, since [movies] v0.2 uses that path too.
 
 ### What an upgrade does
 

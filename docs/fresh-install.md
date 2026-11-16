@@ -116,16 +116,18 @@ From `v0.4.1` everything the module makes has a `media` name, and the old [movie
 [music] v0.3 modules use `movies` and `music` names, so one host can import all three (ADR 0029).
 They share only the library folders, which each mounts read-only.
 
-| What           | [media]                                                                           | [movies] v0.2                        | [music] v0.3                      |
-| -------------- | --------------------------------------------------------------------------------- | ------------------------------------ | --------------------------------- |
-| Options        | `services.media`, `programs.media`                                                | `services.movies`, `programs.movies` | `services.music`                  |
-| Units          | `media-server`, `media-proxy`, `<backend>-media-core-convex`                      | `movies`, `<backend>-movies-convex`  | `<backend>-music`, `music-update` |
-| User and group | `media-server`                                                                    | `movies`                             | the container's ids               |
-| State          | `/var/lib/media`                                                                  | `/var/lib/movies`                    | `/var/lib/music`                  |
-| Cache          | `/var/cache/media/transcode`                                                      | `/var/cache/movies/transcode`        | in its state folder               |
-| Runtime        | `/run/media-server`, `/run/media-proxy`, `/run/media-account`, `/run/media-music` | `/run/movies`                        | none                              |
+| What           | [media]                                                                               | [movies] v0.2                        | [music] v0.3                      |
+| -------------- | ------------------------------------------------------------------------------------- | ------------------------------------ | --------------------------------- |
+| Options        | `services.media`, `programs.media`                                                    | `services.movies`, `programs.movies` | `services.music`                  |
+| Units          | `media-server`, `media-server-handover`, `media-proxy`, `<backend>-media-core-convex` | `movies`, `<backend>-movies-convex`  | `<backend>-music`, `music-update` |
+| User and group | `media-server`                                                                        | `movies`                             | the container's ids               |
+| State          | `/var/lib/media`                                                                      | `/var/lib/movies`                    | `/var/lib/music`                  |
+| Cache          | `/var/cache/media/transcode`                                                          | `/var/cache/movies/transcode`        | in its state folder               |
+| Runtime        | `/run/media-server`, `/run/media-proxy`, `/run/media-account`, `/run/media-music`     | `/run/movies`                        | none                              |
 
-Pick a `port` and `internalPorts` that none of them uses. At `v0.4.0` the module still used
+Pick a `port` and `internalPorts` that none of them uses. Evaluation refuses a `dataDir`,
+`backupDir`, or `transcodeDir` that is, holds, or sits inside a library or one of the old installs'
+folders, theirs set in `services.movies` and `services.music` included. At `v0.4.0` the module still used
 `movies` names, and a host that imported it beside [movies] v0.2's module failed to evaluate.
 
 ### Add the release to the flake
