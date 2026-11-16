@@ -3,6 +3,10 @@
 # from this repository (nix/package.nix), and Caddy in front of them on one address, with the
 # image's routes (deploy/image/rootfs/etc/caddy/Caddyfile, docs/decisions/0015).
 #
+# Every unit, user, and folder it makes has a media name (media-server, media-proxy,
+# media-core-convex, /var/lib/media, /var/cache/media, /run/media-server), so a host can run it
+# beside the old [movies] and [music] modules, which use movies and music names.
+#
 #   services.media = {
 #     enable = true;
 #     libraryDirs = [ "/srv/media/movies" "/srv/media/shows" ];
@@ -17,9 +21,9 @@
 # Every startup derives the core's admin key from its backend's instance secret, backs up before
 # an upgrade, deploys the core's functions, configures the deployment (keys and secrets are
 # generated inside Convex and kept there) and both web clients, and writes the service's
-# environment to /run/movies/media.env, readable by the service user only. The first startup also
-# creates the media service's service principal on the core and issues its key, which later
-# startups reuse from a root-only file. No secret enters the Nix store.
+# environment to /run/media-server/media.env, readable by the service user only. The first
+# startup also creates the media service's service principal on the core and issues its key,
+# which later startups reuse from a root-only file. No secret enters the Nix store.
 #
 # The host also gets the `media` CLI, pointed at this server (programs.media, in cli-module.nix).
 {
@@ -72,7 +76,7 @@ let
   };
 
   setup = pkgs.writeShellApplication {
-    name = "movies-setup";
+    name = "media-server-setup";
     runtimeInputs = [
       cfg.package
       pkgs.coreutils
@@ -82,7 +86,7 @@ let
     ];
     text = ''
       umask 077
-      log() { echo "movies-setup: $*" >&2; }
+      log() { echo "media-server-setup: $*" >&2; }
       # Outside CI the Convex CLI reports to Sentry, and where that host is slow or blocked each
       # command waits minutes for it on exit. A self-hosted install sends nothing anyway.
       export CI=1
@@ -94,14 +98,21 @@ let
       owner=${lib.escapeShellArg "${cfg.user}:${cfg.group}"}
 
       # The service's folders, in case they were removed since boot (tmpfiles creates them). The
-      # core's backups are the service's: it takes the nightly ones and restores them.
+      # core's backups are the service's: it takes the nightly ones and restores them. Whatever in
+      # them another user owns becomes the service user's, such as the files of an install from
+      # 0.3.0 or 0.4.0, which ran the service as `movies` in these same folders.
       install -d -m 700 -o ${lib.escapeShellArg cfg.user} -g ${lib.escapeShellArg cfg.group} \
         ${lib.escapeShellArgs [
           mediaDataDir
           cfg.backupDir
           cfg.transcodeDir
         ]}
-      find ${lib.escapeShellArg cfg.backupDir} \( \! -user ${lib.escapeShellArg cfg.user} -o \! -group ${lib.escapeShellArg cfg.group} \) \
+      find ${
+        lib.escapeShellArgs [
+          mediaDataDir
+          cfg.backupDir
+        ]
+      } \( \! -user ${lib.escapeShellArg cfg.user} -o \! -group ${lib.escapeShellArg cfg.group} \) \
         -exec chown -h "$owner" {} +
       install -d -m 700 ${lib.escapeShellArg secretsDir}
 
@@ -176,10 +187,10 @@ let
       umask 022
       movies-configure-account --to /run/media-account --convex-url "$public_url/convex"
       movies-configure-music --to /run/media-music --convex-url "$public_url/convex"
-      movies-configure-web --to /run/movies/web --convex-url "$public_url/convex"
+      movies-configure-web --to /run/media-server/web --convex-url "$public_url/convex"
 
       umask 077
-      env_file=/run/movies/media.env
+      env_file=/run/media-server/media.env
       install -m 600 -o ${lib.escapeShellArg cfg.user} -g ${lib.escapeShellArg cfg.group} /dev/null "$env_file"
       {
         printf 'MEDIA_SERVICE_API_KEY=%s\n' "$(cat "$service_key_file")"
@@ -233,7 +244,7 @@ in
       description = ''
         Folders the media service may scan and stream, read-only. Add each one as a library in the
         web app. The service user must be able to read them (world-readable files and folders are),
-        or put it in a group that can through `users.users.movies.extraGroups`.
+        or put it in a group that can through `users.users.media-server.extraGroups`.
       '';
     };
 
@@ -262,7 +273,7 @@ in
 
     transcodeDir = lib.mkOption {
       type = lib.types.path;
-      default = "/var/cache/movies/transcode";
+      default = "/var/cache/media/transcode";
       description = "Disposable HLS segments. Put it on fast storage with a few GB free.";
     };
 
@@ -537,7 +548,7 @@ in
     environmentFile = lib.mkOption {
       type = lib.types.nullOr lib.types.path;
       default = null;
-      example = "/run/secrets/movies.env";
+      example = "/run/secrets/media.env";
       description = ''
         Extra `KEY=value` lines for the media service, read by systemd as root: secrets such as
         `TMDB_API_KEY`, kept out of the Nix store (agenix, sops-nix, or a root-only file; give a
@@ -571,14 +582,20 @@ in
 
     user = lib.mkOption {
       type = lib.types.str;
-      default = "movies";
-      description = "User the media service runs as.";
+      default = "media-server";
+      description = ''
+        User the media service runs as. The module creates `media-server`; set another user to
+        declare it yourself.
+      '';
     };
 
     group = lib.mkOption {
       type = lib.types.str;
-      default = "movies";
-      description = "Group the media service runs as.";
+      default = "media-server";
+      description = ''
+        Group the media service runs as. The module creates `media-server`; set another group to
+        declare it yourself.
+      '';
     };
   };
 
@@ -589,8 +606,8 @@ in
       mediaUrl = lib.mkDefault cfg.publicUrl;
     };
 
-    users.users = lib.mkIf (cfg.user == "movies") {
-      movies = {
+    users.users = lib.mkIf (cfg.user == "media-server") {
+      media-server = {
         isSystemUser = true;
         inherit (cfg) group;
         extraGroups = lib.optionals hardware [
@@ -599,7 +616,7 @@ in
         ];
       };
     };
-    users.groups = lib.mkIf (cfg.group == "movies") { movies = { }; };
+    users.groups = lib.mkIf (cfg.group == "media-server") { media-server = { }; };
 
     hardware.graphics =
       lib.mkIf (cfg.hardwareAcceleration == "qsv" || cfg.hardwareAcceleration == "vaapi")
@@ -683,7 +700,7 @@ in
       };
     };
 
-    systemd.services.movies = {
+    systemd.services.media-server = {
       description = "[media] media service";
       wantedBy = [ "multi-user.target" ];
       requires = containerUnits;
@@ -705,7 +722,7 @@ in
         BACKUP_DIR = cfg.backupDir;
         BACKUP_RETENTION_DAYS = toString cfg.backupRetentionDays;
         TRANSCODE_DIR = cfg.transcodeDir;
-        WEB_DIST_DIR = "/run/movies/web";
+        WEB_DIST_DIR = "/run/media-server/web";
         LIBRARY_ROOTS = lib.concatStringsSep "," cfg.libraryDirs;
         HARDWARE_ACCELERATION = cfg.hardwareAcceleration;
         QSV_DEVICE = cfg.qsvDevice;
@@ -752,13 +769,13 @@ in
         # media.env is written by ExecStartPre and read before ExecStart, so it is optional only
         # for the setup. Later files win, so the generated credentials override environmentFile.
         EnvironmentFile = lib.optional (cfg.environmentFile != null) cfg.environmentFile ++ [
-          "-/run/movies/media.env"
+          "-/run/media-server/media.env"
         ];
         ExecStart = lib.getExe' cfg.package "movies-media";
         Restart = "on-failure";
         RestartSec = 5;
         TimeoutStartSec = "10min";
-        RuntimeDirectory = "movies";
+        RuntimeDirectory = "media-server";
         RuntimeDirectoryMode = "0755";
 
         ReadWritePaths = [

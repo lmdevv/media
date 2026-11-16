@@ -77,7 +77,7 @@ testers.runNixOSTest {
     machine.wait_for_unit("podman-media-core-convex.service")
     machine.wait_until_succeeds("curl -fsS http://127.0.0.1:3210/version", timeout=300)
     machine.wait_for_unit("media-proxy.service")
-    machine.wait_for_unit("movies.service", timeout=900)
+    machine.wait_for_unit("media-server.service", timeout=900)
 
     with subtest("the media service signs in to the core"):
         wait_connected()
@@ -100,16 +100,16 @@ testers.runNixOSTest {
         assert status != 0 or "keys" not in jwks
 
     with subtest("every web client is served with the core's Convex URL"):
-        machine.succeed("grep -rqF http://localhost:8080/convex /run/movies/web")
+        machine.succeed("grep -rqF http://localhost:8080/convex /run/media-server/web")
         machine.succeed("grep -rqF http://localhost:8080/convex /run/media-account")
         machine.succeed("grep -rqF http://localhost:8080/convex /run/media-music")
         machine.fail(
-            "grep -rqF __MEDIA_CONVEX_URL__ /run/movies/web /run/media-account /run/media-music"
+            "grep -rqF __MEDIA_CONVEX_URL__ /run/media-server/web /run/media-account /run/media-music"
         )
 
     with subtest("options reach the service"):
         environ = machine.succeed(
-            "tr '\\0' '\\n' < /proc/$(systemctl show -p MainPID --value movies)/environ"
+            "tr '\\0' '\\n' < /proc/$(systemctl show -p MainPID --value media-server)/environ"
         )
         assert "STREAM_IDLE_SECONDS=30" in environ, environ
         assert "LIBVA_DRIVER_NAME=iHD" in environ, environ
@@ -118,18 +118,18 @@ testers.runNixOSTest {
         assert "CONVEX_PUBLIC_URL=http://localhost:8080/convex" in environ, environ
 
     with subtest("secrets stay private"):
-        machine.succeed("[ \"$(stat -c '%U %a' /run/movies/media.env)\" = 'movies 600' ]")
-        machine.succeed("[ \"$(stat -c '%U %a' /var/lib/media/core/backups)\" = 'movies 700' ]")
+        machine.succeed("[ \"$(stat -c '%U %a' /run/media-server/media.env)\" = 'media-server 600' ]")
+        machine.succeed("[ \"$(stat -c '%U %a' /var/lib/media/core/backups)\" = 'media-server 700' ]")
         machine.succeed("[ \"$(stat -c '%U %a' /var/lib/media/core/secrets/media-service-key)\" = 'root 600' ]")
-        machine.succeed("grep -q '^MEDIA_TICKET_KEYS=.' /run/movies/media.env")
+        machine.succeed("grep -q '^MEDIA_TICKET_KEYS=.' /run/media-server/media.env")
         machine.succeed(
-            "[ \"$(sed -n 's/^MEDIA_SERVICE_API_KEY=//p' /run/movies/media.env)\" = "
+            "[ \"$(sed -n 's/^MEDIA_SERVICE_API_KEY=//p' /run/media-server/media.env)\" = "
             "\"$(cat /var/lib/media/core/secrets/media-service-key)\" ]"
         )
-        machine.fail("journalctl -u movies.service | grep -qF -f /var/lib/media/core/secrets/media-service-key")
-        machine.succeed("[ \"$(stat -c '%U' /proc/$(systemctl show -p MainPID --value movies))\" = movies ]")
+        machine.fail("journalctl -u media-server.service | grep -qF -f /var/lib/media/core/secrets/media-service-key")
+        machine.succeed("[ \"$(stat -c '%U' /proc/$(systemctl show -p MainPID --value media-server))\" = media-server ]")
         machine.fail(
-            "tr '\\0' '\\n' < /proc/$(systemctl show -p MainPID --value movies)/cmdline | grep -q 'KEY\\|SECRET'"
+            "tr '\\0' '\\n' < /proc/$(systemctl show -p MainPID --value media-server)/cmdline | grep -q 'KEY\\|SECRET'"
         )
 
     with subtest("the Convex instance secret is on no command line"):
@@ -147,32 +147,32 @@ testers.runNixOSTest {
 
     with subtest("the library is read-only to the service"):
         machine.fail(
-            "nsenter -t $(systemctl show -p MainPID --value movies) -m touch /srv/media/movies/written"
+            "nsenter -t $(systemctl show -p MainPID --value media-server) -m touch /srv/media/movies/written"
         )
 
     with subtest("a restart signs in again with the same service key"):
         key = machine.succeed("cat /var/lib/media/core/secrets/media-service-key")
-        machine.succeed("systemctl restart movies.service")
-        machine.wait_for_unit("movies.service")
+        machine.succeed("systemctl restart media-server.service")
+        machine.wait_for_unit("media-server.service")
         wait_connected()
         assert machine.succeed("cat /var/lib/media/core/secrets/media-service-key") == key
 
     with subtest("a lost service key is issued again to the same principal"):
         service = machine.succeed("cat /var/lib/media/core/secrets/media-service-id")
         machine.succeed("rm /var/lib/media/core/secrets/media-service-key")
-        machine.succeed("systemctl restart movies.service")
-        machine.wait_for_unit("movies.service")
+        machine.succeed("systemctl restart media-server.service")
+        machine.wait_for_unit("media-server.service")
         wait_connected()
         assert machine.succeed("cat /var/lib/media/core/secrets/media-service-id") == service
         assert machine.succeed("cat /var/lib/media/core/secrets/media-service-key") != key
 
     with subtest("an upgrade backs up first"):
         machine.succeed("echo 0.0.0-previous > /var/lib/media/core/version")
-        machine.succeed("systemctl restart movies.service")
-        machine.wait_for_unit("movies.service")
+        machine.succeed("systemctl restart media-server.service")
+        machine.wait_for_unit("media-server.service")
         wait_connected()
         machine.succeed("ls /var/lib/media/core/backups | grep -q '^core-manual-.*\\.zip$'")
-        machine.succeed("[ \"$(stat -c %U /var/lib/media/core/backups/core-manual-*.zip)\" = movies ]")
+        machine.succeed("[ \"$(stat -c %U /var/lib/media/core/backups/core-manual-*.zip)\" = media-server ]")
 
     with subtest("a deployed upgrade clears its backup marker"):
         machine.fail("test -e /var/lib/media/core/upgrade-backup")
@@ -183,10 +183,28 @@ testers.runNixOSTest {
         machine.succeed(
             "cd /var/lib/media/core && cp version upgrade-backup && echo 0.0.0-previous > version"
         )
-        machine.succeed("systemctl restart movies.service")
-        machine.wait_for_unit("movies.service")
+        machine.succeed("systemctl restart media-server.service")
+        machine.wait_for_unit("media-server.service")
         wait_connected()
         count = machine.succeed("ls /var/lib/media/core/backups | grep -c '^core-manual-.*\\.zip$'").strip()
         assert count == "1", count
+
+    with subtest("an install from 0.4.0 keeps its data under the new service user"):
+        # 0.3.0 and 0.4.0 ran the service as `movies` in these same folders. NixOS drops that user
+        # once nothing declares it, so its files keep a uid no user has; 9999 stands in for it.
+        key = machine.succeed("cat /var/lib/media/core/secrets/media-service-key")
+        machine.succeed("systemctl stop media-server.service")
+        machine.succeed("touch /var/lib/media/movies/media/from-0.4.0")
+        machine.succeed("chown -R 9999:9999 /var/lib/media/movies/media /var/lib/media/core/backups")
+        machine.succeed("systemctl start media-server.service")
+        machine.wait_for_unit("media-server.service")
+        wait_connected()
+        machine.succeed("test -e /var/lib/media/movies/media/from-0.4.0")
+        machine.succeed("ls /var/lib/media/core/backups | grep -q '^core-manual-.*\\.zip$'")
+        owners = machine.succeed(
+            "find /var/lib/media/movies/media /var/lib/media/core/backups -printf '%u:%g\\n' | sort -u"
+        ).split()
+        assert owners == ["media-server:media-server"], owners
+        assert machine.succeed("cat /var/lib/media/core/secrets/media-service-key") == key
   '';
 }

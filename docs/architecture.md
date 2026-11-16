@@ -196,6 +196,7 @@ Each row is the ADR's own title. ADR 0027 supersedes ADR 0026, and ADR 0028 supe
 | [0026](decisions/0026-serve-old-movies-beside-the-core-in-the-image-until-the-movies-port.md) | Serve old movies beside the core in the image until the movies port            | D30, D31, D32, D49, D50                     |
 | [0027](decisions/0027-run-one-convex-backend-the-cores-in-the-image.md)                       | Run one Convex backend, the core's, in the image                               | D03, D30, D32, D49, D50, D52, D54, D58, D62 |
 | [0028](decisions/0028-one-convex-project-and-one-dev-backend.md)                              | One Convex project, and one backend in each dev stack                          | D04, D14, D22, D49                          |
+| [0029](decisions/0029-the-nixos-module-uses-media-names-beside-the-old-installs.md)           | The NixOS module uses media names, so it runs beside the old installs          | D03, D58, D69                               |
 
 ## Open
 

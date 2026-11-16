@@ -106,7 +106,7 @@
                 ];
               };
               inherit (evaluated) config;
-              service = config.systemd.services.movies;
+              service = config.systemd.services.media-server;
             in
             pkgs.writeText "movies-module-check" (
               builtins.toJSON {
@@ -121,7 +121,7 @@
                 proxy = config.systemd.services.media-proxy.environment;
                 inherit (service) environment serviceConfig;
                 firewall = config.networking.firewall.allowedTCPPorts;
-                groups = config.users.users.movies.extraGroups;
+                groups = config.users.users.media-server.extraGroups;
               }
             );
         in
@@ -162,7 +162,7 @@
                 cli = builtins.any (package: package.pname or "" == "movies-cli") config.environment.systemPackages;
                 convexUrl = config.environment.sessionVariables.MEDIA_CORE_URL or null;
                 mediaUrl = config.environment.sessionVariables.MEDIA_SERVER_URL or null;
-                server = config.systemd.services ? movies;
+                server = config.systemd.services ? media-server;
               };
               serverSettings.services.media = {
                 enable = true;

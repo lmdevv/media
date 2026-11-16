@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Runs the media service's tests (with real ffmpeg: encoders started, released, restarted, and
 # closed, library scans, backups, downloads) under the system call sandbox nix/module.nix gives
-# movies.service, on the Node and ffmpeg that unit runs. A system call the filter denies, such as
-# the fchown inside libuv's copyfile, kills the process here instead of failing one call, so the
-# run fails on any denied call the service or ffmpeg makes.
+# media-server.service, on the Node and ffmpeg that unit runs. A system call the filter denies,
+# such as the fchown inside libuv's copyfile, kills the process here instead of failing one call,
+# so the run fails on any denied call the service or ffmpeg makes.
 #
 #   scripts/check-sandbox.sh                                  # every media test
 #   scripts/check-sandbox.sh apps/media/src/playback          # some test files or folders
@@ -59,11 +59,11 @@ sandbox="$(nix eval --json --impure --expr "$(module '
     RestrictSUIDSGID = null;
     LockPersonality = null;
     MemoryDenyWriteExecute = null;
-  } config.systemd.services.movies.serviceConfig
+  } config.systemd.services.media-server.serviceConfig
 ')")"
 node_dir="$(built config.services.media.package.nodejs)/bin"
 ffmpeg_dir="$(built 'lib.getBin config.services.media.ffmpegPackage')/bin"
-setpriv_dir="$(built 'lib.getBin (lib.findFirst (p: lib.getName p == "util-linux") null config.systemd.services.movies.path)')/bin"
+setpriv_dir="$(built 'lib.getBin (lib.findFirst (p: lib.getName p == "util-linux") null config.systemd.services.media-server.path)')/bin"
 [[ -x "$node_dir/node" ]] || fail "no node in $node_dir"
 [[ -x "$ffmpeg_dir/ffmpeg" && -x "$ffmpeg_dir/ffprobe" ]] || fail "no ffmpeg in $ffmpeg_dir"
 [[ -x "$setpriv_dir/setpriv" ]] || fail "no setpriv in $setpriv_dir"
@@ -75,7 +75,7 @@ done < <(
   "$node_dir/node" -e '
     const settings = JSON.parse(process.argv[1]);
     if (!Array.isArray(settings.SystemCallFilter) || settings.SystemCallFilter.length === 0) {
-      console.error("check-sandbox: movies.service has no SystemCallFilter");
+      console.error("check-sandbox: media-server.service has no SystemCallFilter");
       process.exit(1);
     }
     for (const [name, value] of Object.entries(settings)) {

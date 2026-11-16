@@ -1,6 +1,6 @@
 # Fresh install
 
-The exact steps to install [media] from a release tag, `v0.4.0` here, on a host that already runs
+The exact steps to install [media] from a release tag, `v0.4.1` here, on a host that already runs
 other things: an old [movies] or [music] install, Jellyfin, or anything else. [media] gets its own
 port and its own data folder, mounts the library read-only, and leaves the other installs alone.
 There are two methods, the image under Docker Compose and the NixOS module; pick one. Both end in
@@ -36,8 +36,8 @@ Keep the checkout and the image on the same release: `compose.yaml` passes the s
 release's image reads.
 
 ```sh
-git clone --branch v0.4.0 --depth 1 https://github.com/lmdevv/media media-0.4.0
-cd media-0.4.0/deploy/compose
+git clone --branch v0.4.1 --depth 1 https://github.com/lmdevv/media media-0.4.1
+cd media-0.4.1/deploy/compose
 cp .env.example .env
 docker compose ls      # the projects already running here
 ```
@@ -47,7 +47,7 @@ docker compose ls      # the projects already running here
 Edit `.env`:
 
 ```sh
-MEDIA_IMAGE=ghcr.io/lmdevv/media:0.4.0
+MEDIA_IMAGE=ghcr.io/lmdevv/media:0.4.1
 MEDIA_PORT=8099
 MEDIA_BIND=127.0.0.1
 MEDIA_BASE_URL=http://localhost:8099
@@ -108,22 +108,25 @@ Then continue with [First run](#first-run).
 
 The module runs the core's Convex backend as an OCI container (`<backend>-media-core-convex`,
 Docker or Podman per `virtualisation.oci-containers.backend`), the media service natively as the
-sandboxed `movies` unit, and Caddy on the one port as the `media-proxy` unit.
+sandboxed `media-server` unit, and Caddy on the one port as the `media-proxy` unit.
 
-### Beside an old [movies] install
+### Beside the old installs
 
-At `v0.4.0` the module names its media service unit `movies` and its runtime folder
-`/run/movies`, the same names as [movies] v0.2's module (`services.movies`). A host that imports
-both modules fails to evaluate, with a `conflicting definition values` error for an option under
-`systemd.services.movies`, such as:
+From `v0.4.1` everything the module makes has a `media` name, and the old [movies] v0.2 and
+[music] v0.3 modules use `movies` and `music` names, so one host can import all three (ADR 0029).
+They share only the library folders, which each mounts read-only.
 
-```text
-error: The option `systemd.services.movies.serviceConfig.ExecStart' has conflicting definition values
-```
+| What           | [media]                                                                           | [movies] v0.2                        | [music] v0.3                      |
+| -------------- | --------------------------------------------------------------------------------- | ------------------------------------ | --------------------------------- |
+| Options        | `services.media`, `programs.media`                                                | `services.movies`, `programs.movies` | `services.music`                  |
+| Units          | `media-server`, `media-proxy`, `<backend>-media-core-convex`                      | `movies`, `<backend>-movies-convex`  | `<backend>-music`, `music-update` |
+| User and group | `media-server`                                                                    | `movies`                             | the container's ids               |
+| State          | `/var/lib/media`                                                                  | `/var/lib/movies`                    | `/var/lib/music`                  |
+| Cache          | `/var/cache/media/transcode`                                                      | `/var/cache/movies/transcode`        | in its state folder               |
+| Runtime        | `/run/media-server`, `/run/media-proxy`, `/run/media-account`, `/run/media-music` | `/run/movies`                        | none                              |
 
-On such a host, run this release with the image under [Docker Compose](#docker-compose), or stop
-and remove the old module before you add this one. A host without [movies] v0.2's module has no
-conflict. The old installs that run as containers, such as [music] v0.3, don't conflict either.
+Pick a `port` and `internalPorts` that none of them uses. At `v0.4.0` the module still used
+`movies` names, and a host that imported it beside [movies] v0.2's module failed to evaluate.
 
 ### Add the release to the flake
 
@@ -133,7 +136,7 @@ names the input `media`, since a host beside an old install may already have one
 
 ```nix
 # flake.nix
-inputs.media.url = "github:lmdevv/media/v0.4.0";
+inputs.media.url = "github:lmdevv/media/v0.4.1";
 ```
 
 ```nix
@@ -169,9 +172,9 @@ in
 
 - **Ports.** `port` is the only one people use. The two `internalPorts` listen on loopback, and
   must be free too (`ss -ltn`).
-- **Library access.** The `movies` user must read every library folder. Files and folders that
-  are world-readable need nothing more; otherwise add the group that can read them, as in
-  `users.users.movies.extraGroups = [ "media" ];`. The unit mounts each folder read-only.
+- **Library access.** The `media-server` user must read every library folder. Files and folders
+  that are world-readable need nothing more; otherwise add the group that can read them, as in
+  `users.users.media-server.extraGroups = [ "media" ];`. The unit mounts each folder read-only.
 - **Secrets.** `tmdbApiKeyFile` and `omdbApiKeyFile` take files outside the Nix store, such as
   sops-nix or agenix secrets.
 - **GPU.** `hardwareAcceleration` defaults to `auto`
@@ -181,8 +184,8 @@ in
 
 ```sh
 sudo nixos-rebuild switch --flake .#<host>
-systemctl status movies media-proxy docker-media-core-convex   # podman-… with Podman
-journalctl -u movies -f
+systemctl status media-server media-proxy docker-media-core-convex   # podman-… with Podman
+journalctl -u media-server -f
 curl -fsS http://localhost:8099/api/health
 ```
 
@@ -195,7 +198,7 @@ main process exists only once the health answer reports connected. Each folder m
 `read-only`:
 
 ```sh
-pid="$(systemctl show -p MainPID --value movies)"; [ "$pid" != 0 ] || echo "not running yet"
+pid="$(systemctl show -p MainPID --value media-server)"; [ "$pid" != 0 ] || echo "not running yet"
 for d in /srv/media/movies /srv/media/tv /srv/media/music; do
   if sudo nsenter -t "$pid" -m touch "$d/.write-test" 2>/dev/null; then
     sudo rm "$d/.write-test"; echo "WRITABLE: $d"
@@ -241,15 +244,15 @@ media admin jobs list --status failed          # empty when every scan went thro
 
 ## Check health
 
-| Check                   | Compose                                                              | NixOS                                                             |
-| ----------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| Services up             | `docker compose ps` shows `(healthy)`                                | `systemctl is-active movies media-proxy docker-media-core-convex` |
-| Media service signed in | `curl -fsS <public URL>/api/health` includes `"backend":"connected"` | the same                                                          |
-| Logs                    | `docker compose logs media`                                          | `journalctl -u movies -u media-proxy`                             |
-| Scans                   | `media admin jobs list --status failed` is empty                     | the same                                                          |
+| Check                   | Compose                                                              | NixOS                                                                   |
+| ----------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| Services up             | `docker compose ps` shows `(healthy)`                                | `systemctl is-active media-server media-proxy docker-media-core-convex` |
+| Media service signed in | `curl -fsS <public URL>/api/health` includes `"backend":"connected"` | the same                                                                |
+| Logs                    | `docker compose logs media`                                          | `journalctl -u media-server -u media-proxy`                             |
+| Scans                   | `media admin jobs list --status failed` is empty                     | the same                                                                |
 
 A restart keeps everything: `docker compose restart`, or
-`sudo systemctl restart docker-media-core-convex movies media-proxy`. Each start redeploys the
+`sudo systemctl restart docker-media-core-convex media-server media-proxy`. Each start redeploys the
 functions, which takes seconds once the image is pulled. The libraries stay scanned, and the next
 reconciliation picks up files that changed while it was down.
 
@@ -260,7 +263,9 @@ Read memory after five idle minutes, with no stream playing.
 - **Compose:** `docker stats --no-stream --format '{{.Name}} {{.MemUsage}}'`. The one `media`
   container holds every service.
 - **NixOS:** `systemd-cgtop -m -b -n 1 --raw` lists each unit's memory. [media] is the sum of
-  `movies.service`, `media-proxy.service`, and the Convex container. Docker, with the systemd
-  cgroup driver it uses on cgroup v2, runs the container outside the unit that starts it, in its
-  own scope, `docker-$(sudo docker inspect -f '{{.Id}}' media-core-convex).scope`; with Podman,
-  read it with `sudo podman stats --no-stream media-core-convex`.
+  `media-server.service`, `media-proxy.service`, `docker-media-core-convex.service` (which holds
+  the `docker run` client), and the Convex container itself. Docker, with the systemd cgroup driver
+  it uses on cgroup v2, runs the container outside the unit that starts it, in its own scope,
+  `docker-$(sudo docker inspect -f '{{.Id}}' media-core-convex).scope`; with Podman, read it with
+  `sudo podman stats --no-stream media-core-convex`. Most of `memory.current` right after a scan
+  is page cache, which `docker stats` leaves out; compare installs the same way.

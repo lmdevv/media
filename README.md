@@ -78,10 +78,12 @@ services.media = {
 };
 ```
 
-The core's Convex backend runs as a pinned OCI container; the media service runs natively as a sandboxed
-systemd service built from this repository (`nix build github:lmdevv/media#movies`). Caddy serves
-all of them on one port with the image's routes. Library folders are read-only to the media
-service, and `openFirewall` is off by default.
+The core's Convex backend runs as a pinned OCI container; the media service runs natively as the
+sandboxed `media-server` systemd unit, built from this repository
+(`nix build github:lmdevv/media#movies`). Caddy serves all of them on one port with the image's
+routes. Library folders are read-only to the media service, and `openFirewall` is off by default.
+Every unit, user, and folder the module makes has a `media` name, so from 0.4.1 it runs beside the
+old [movies] and [music] modules ([docs/fresh-install.md](docs/fresh-install.md)).
 
 ## Configuration
 
