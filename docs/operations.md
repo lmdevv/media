@@ -164,7 +164,9 @@ v0.2 install. Its Compose project, volumes, and data layout are new (`media`, `m
 and the NixOS module's `dataDir` moved to `/var/lib/media`. Nothing moves the old data over (ADR
 0002). Both take port 8080 by default: stop the old install before starting the new one, or run
 the new one beside it on a port and data folder of its own ([fresh-install.md](fresh-install.md)).
-Keep the old volumes or `/var/lib/movies` until you no longer need them.
+The 0.4.0 NixOS module can't be imported beside v0.2's module, since both define the `movies`
+unit, so beside a v0.2 NixOS install run the image. Keep the old volumes or `/var/lib/movies` until
+you no longer need them.
 
 | Track     | Compose `MEDIA_IMAGE`                              | NixOS flake input            |
 | --------- | -------------------------------------------------- | ---------------------------- |

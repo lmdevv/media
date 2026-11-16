@@ -15,13 +15,13 @@ old install keeps running as it was until you stop it.
 
 Decide these first. Every later step uses them.
 
-| What            | Example                                                  | Check                                                   |
-| --------------- | -------------------------------------------------------- | ------------------------------------------------------- |
-| Port            | `8099`                                                   | `ss -ltn \| grep -w 8099` prints nothing                |
-| Listen address  | `127.0.0.1`, or the host's Tailscale address             | [homelab.md](homelab.md#remote-access)                  |
-| Public URL      | `http://localhost:8099`                                  | The address browsers, phones, and the CLI open          |
-| Data folder     | Compose: the project's volumes; NixOS: `/var/lib/media`  | Not used by another install                             |
-| Library folders | `/srv/media/movies`, `/srv/media/tv`, `/srv/media/music` | Readable by the service user; [media] never writes them |
+| What            | Example                                                  | Check                                                                |
+| --------------- | -------------------------------------------------------- | -------------------------------------------------------------------- |
+| Port            | `8099`                                                   | `ss -ltn \| grep -w 8099` and `docker ps \| grep 8099` print nothing |
+| Listen address  | `127.0.0.1`, or the host's Tailscale address             | [homelab.md](homelab.md#remote-access)                               |
+| Public URL      | `http://localhost:8099`                                  | The address browsers, phones, and the CLI open                       |
+| Data folder     | Compose: the project's volumes; NixOS: `/var/lib/media`  | Not used by another install                                          |
+| Library folders | `/srv/media/movies`, `/srv/media/tv`, `/srv/media/music` | Readable by the service user; [media] never writes them              |
 
 The public URL must be exactly what people type, with the port, since the web clients reach the
 database at `<public URL>/convex`.
@@ -63,7 +63,7 @@ PGID=1000
 - **Data folder.** Everything [media] keeps lives in the project's `media-data` volume. To keep it
   in a host folder instead, put the override below in `compose.local.yaml` and add
   `COMPOSE_FILE=compose.yaml:compose.local.yaml` to `.env`, so every `docker compose` command
-  reads it.
+  reads it. Choose it before the first start: the database starts empty wherever `/data` points.
 - **More library folders.** Each extra folder is one read-only line in the same override.
 
 ```yaml
@@ -76,7 +76,8 @@ services:
 ```
 
 - **Demo library.** To try [media] on the Creative Commons demo library instead of your own,
-  leave `MEDIA_LIBRARY` empty and set `COMPOSE_FILE=compose.yaml:compose.demo.yaml`
+  leave `MEDIA_LIBRARY` empty and add `compose.demo.yaml` to `COMPOSE_FILE`, after `compose.yaml`
+  and before any override of yours: `COMPOSE_FILE=compose.yaml:compose.demo.yaml:compose.local.yaml`
   ([demo-library.md](demo-library.md)).
 
 ### Start it
@@ -92,11 +93,13 @@ The first start deploys the database functions, configures the core, and issues 
 service its key. `docker compose logs -f media` shows it. The health answer includes
 `"backend":"connected"` once the media service has signed in to the core.
 
-Check that the library is read-only from inside the container. Each write must fail with
-`Read-only file system`:
+Check that every library folder is read-only from inside the container, even for root. Each one
+must print `read-only`; a folder that takes the test file is named and cleaned up:
 
 ```sh
-docker compose exec media touch /media/library/.write-test
+docker compose exec media sh -c 'for d in /media/*; do
+  if touch "$d/.write-test" 2>/dev/null; then rm "$d/.write-test"; echo "WRITABLE: $d"; else echo "read-only: $d"; fi
+done'
 ```
 
 Then continue with [First run](#first-run).
@@ -111,7 +114,8 @@ sandboxed `movies` unit, and Caddy on the one port as the `media-proxy` unit.
 
 At `v0.4.0` the module names its media service unit `movies` and its runtime folder
 `/run/movies`, the same names as [movies] v0.2's module (`services.movies`). A host that imports
-both modules fails to build with:
+both modules fails to evaluate, with a `conflicting definition values` error for an option under
+`systemd.services.movies`, such as:
 
 ```text
 error: The option `systemd.services.movies.serviceConfig.ExecStart' has conflicting definition values
@@ -123,7 +127,9 @@ conflict. The old installs that run as containers, such as [music] v0.3, don't c
 
 ### Add the release to the flake
 
-Pin the tag, and use the release's own build, made with the nixpkgs it was tested with:
+Pin the tag, and use the release's own build, made with the nixpkgs it was tested with. This page
+names the input `media`, since a host beside an old install may already have one named `movies`
+(homelab.md's name); to upgrade later, move the tag and run `nix flake update media`.
 
 ```nix
 # flake.nix
@@ -181,14 +187,20 @@ curl -fsS http://localhost:8099/api/health
 ```
 
 The first start pulls the pinned Convex image, deploys the database functions, and issues the
-media service its key, which takes a minute or two. The health answer includes
+media service its key, which takes about two minutes. The health answer includes
 `"backend":"connected"` when it is done.
 
-Check that the library is read-only to the service. Each write must fail:
+Then check that every library folder is read-only to the service, even for root. The service's
+main process exists only once the health answer reports connected. Each folder must print
+`read-only`:
 
 ```sh
-pid="$(systemctl show -p MainPID --value movies)"
-sudo nsenter -t "$pid" -m touch /srv/media/movies/.write-test
+pid="$(systemctl show -p MainPID --value movies)"; [ "$pid" != 0 ] || echo "not running yet"
+for d in /srv/media/movies /srv/media/tv /srv/media/music; do
+  if sudo nsenter -t "$pid" -m touch "$d/.write-test" 2>/dev/null; then
+    sudo rm "$d/.write-test"; echo "WRITABLE: $d"
+  else echo "read-only: $d"; fi
+done
 ```
 
 ## First run
@@ -218,7 +230,7 @@ The same for both methods. Open the public URL in a browser.
 
 The `media` CLI does the same from a terminal ([README.md](../README.md#cli)). With Compose it is
 in the image: prefix each command with `docker compose exec -T media`. On NixOS the module installs
-it, already pointed at the server.
+it, pointed at the server through session variables that a shell gets at its next login.
 
 ```sh
 printf '%s' "$PASSWORD" | media auth login --username <owner>
@@ -236,8 +248,9 @@ media admin jobs list --status failed          # empty when every scan went thro
 | Logs                    | `docker compose logs media`                                          | `journalctl -u movies -u media-proxy`                             |
 | Scans                   | `media admin jobs list --status failed` is empty                     | the same                                                          |
 
-A restart keeps everything: `docker compose restart`, or `sudo systemctl restart movies` (which
-also redeploys the functions, as every start does). The libraries stay scanned, and the next
+A restart keeps everything: `docker compose restart`, or
+`sudo systemctl restart docker-media-core-convex movies media-proxy`. Each start redeploys the
+functions, which takes seconds once the image is pulled. The libraries stay scanned, and the next
 reconciliation picks up files that changed while it was down.
 
 ## Idle memory
@@ -247,7 +260,7 @@ Read memory after five idle minutes, with no stream playing.
 - **Compose:** `docker stats --no-stream --format '{{.Name}} {{.MemUsage}}'`. The one `media`
   container holds every service.
 - **NixOS:** `systemd-cgtop -m -b -n 1 --raw` lists each unit's memory. [media] is the sum of
-  `movies.service`, `media-proxy.service`, and the Convex container. Docker runs the container
-  outside the unit that starts it, in its own scope,
-  `docker-$(docker inspect -f '{{.Id}}' media-core-convex).scope`; with Podman, read it with
-  `podman stats --no-stream media-core-convex`.
+  `movies.service`, `media-proxy.service`, and the Convex container. Docker, with the systemd
+  cgroup driver it uses on cgroup v2, runs the container outside the unit that starts it, in its
+  own scope, `docker-$(sudo docker inspect -f '{{.Id}}' media-core-convex).scope`; with Podman,
+  read it with `sudo podman stats --no-stream media-core-convex`.

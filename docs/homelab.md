@@ -249,7 +249,8 @@ A [media] 0.3.0 install upgrades to 0.4.0 this way. Upgrade it to 0.4.0 before a
 release: 0.4.0 migrates its Connect rows, and a later release will refuse rows from before that
 migration (ADR 0018). [media] is a fresh install, not an upgrade of
 a [movies] v0.2 or [music] v0.3 install: nothing moves over from either, so set it up beside the
-old one with [fresh-install.md](fresh-install.md) (`docs/operations.md`, "Upgrading").
+old one with [fresh-install.md](fresh-install.md) (`docs/operations.md`, "Upgrading"). Beside a
+[movies] v0.2 NixOS install, run the image: the 0.4.0 module can't be imported beside v0.2's.
 
 NixOS: `nix flake update movies && nixos-rebuild switch` (or move the pinned tag). Both back up
 before the new version deploys its functions; `docs/operations.md` ("Upgrading") covers rolling
