@@ -1,9 +1,9 @@
 # Homelab install
 
 [media] on one box at home, with Docker Compose or NixOS, in about ten minutes. It runs the
-core's self-hosted Convex backend and the media service, which also serves the movies client,
-behind Caddy on one port (8080). The account client is at `/`, movies at `/movies`, and the Convex
-backend at `/convex`. Browsers and the CLI talk only to that port.
+core's self-hosted Convex backend and the media service, which also serves the movies and music
+clients, behind Caddy on one port (8080). The account client is at `/`, movies at `/movies`, music
+at `/music`, and the Convex backend at `/convex`. Browsers and the CLI talk only to that port.
 `docs/operations.md` explains what happens at startup, backups and restores, and telemetry in more
 depth.
 
@@ -27,7 +27,7 @@ cp .env.example .env
 Edit `.env`:
 
 ```sh
-MEDIA_LIBRARY=/srv/media                 # host folder with your movies and shows
+MEDIA_LIBRARY=/srv/media                 # host folder with your movies, shows, and music
 MEDIA_BASE_URL=http://nas.tailnet.ts.net:8080
 MEDIA_BIND=100.64.0.1                    # the host's Tailscale address (`tailscale ip -4`)
 PUID=1000                                 # a user that can read MEDIA_LIBRARY (`id -u you`)
@@ -44,10 +44,13 @@ docker compose ps          # media turns (healthy)
 docker compose logs -f media
 ```
 
-Open `MEDIA_BASE_URL`, create the owner account (the first account is the owner), and add
-`/media/library` as a library. More folders: add one read-only line per folder under the `media`
+Open `MEDIA_BASE_URL`, create the owner account (the first account is the owner), and add your
+libraries under Admin, Libraries. Each library has one kind: with `Movies/` and `Music/` in
+`MEDIA_LIBRARY`, add `/media/library/Movies` of kind Movies and `/media/library/Music` of kind
+Music. More folders: add one read-only line per folder under the `media`
 service's `volumes:` (`- /mnt/nas/shows:/media/shows:ro`) and add `/media/shows` as a library.
-People sign in once at `MEDIA_BASE_URL`, and `MEDIA_BASE_URL/movies` opens with that sign-in.
+People sign in once at `MEDIA_BASE_URL`, and `MEDIA_BASE_URL/movies` and `MEDIA_BASE_URL/music`
+open with that sign-in.
 
 - **Image.** `MEDIA_IMAGE` defaults to `ghcr.io/lmdevv/media:latest`, the newest release. Best
   is the release your checkout is at (`git checkout vX.Y.Z` with `:X.Y.Z`), or `main` with
