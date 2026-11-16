@@ -351,10 +351,11 @@ let
         done
         printf '%s\n' "''${missing[@]}"
       }
-      # Makes each of its arguments, outermost first, as the service user's and 0700.
+      # Makes each of its arguments, outermost first, 0700. The unit's system call filter allows no
+      # chown or chgrp: a folder that takes a setgid parent's group fails the owner check below.
       make_dirs() {
         local dir
-        for dir in "$@"; do mkdir -m 700 -- "$dir" && chgrp -- "$gid" "$dir" || return 1; done
+        for dir in "$@"; do mkdir -m 700 -- "$dir" || return 1; done
       }
 
       for dir in ${lib.escapeShellArgs serviceDirs}; do
