@@ -251,6 +251,26 @@ test("two members join a Jam by its link, play in step, add, reorder, and move o
     );
 
     await expect.poll(() => apart(aiko.page, mateo.page), { timeout: 15_000 }).toBeLessThan(0.25);
+
+    // Paused, the host plays a song from the album now: it plays for everyone, as old jams' host
+    // played a list.
+    await hostPlayer.getByRole("button", { name: "Pause", exact: true }).click();
+    await Promise.all(
+      [aiko, mateo].map((member) =>
+        expect.poll(async () => (await audioAt(member.page)).seconds, { timeout: 15_000 }).toBe(0),
+      ),
+    );
+    await host.page
+      .getByRole("main")
+      .getByRole("row", { name: new RegExp(SECOND_SONG, "u") })
+      .dblclick();
+    await Promise.all(
+      [host, aiko, mateo].map((member) =>
+        expect
+          .poll(async () => (await audioAt(member.page)).seconds, { timeout: 30_000 })
+          .toBeGreaterThan(0.5),
+      ),
+    );
   } finally {
     await Promise.all([host.close(), aiko.close(), mateo.close()]);
   }

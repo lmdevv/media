@@ -2,7 +2,7 @@ import type { SessionClock } from "@media/contracts/clock";
 import { EpochMillis } from "@media/contracts/units";
 import { describe, expect, it } from "vitest";
 
-import { startSession } from "./session-playback";
+import { NO_CONTROL, startSession } from "./session-playback";
 import type { SessionOp, StartCommands } from "./session-playback";
 import { scenario, song } from "./testing/session-harness";
 import type { Member, World } from "./testing/session-harness";
@@ -392,6 +392,32 @@ describe("a music session's players", { timeout: 60_000 }, () => {
 
       expect(world.playing().track.id).toBe("a");
       expect(world.calls.filter((call) => call.op.kind === "next")).toEqual([]);
+    });
+  });
+
+  it("play a paused session for everyone at the word of a member who may control, and refuse one who may not", async () => {
+    await scenario(song("a", 60), [], async (world) => {
+      const host = world.join("Lucía", { hosting: true });
+      const guest = world.join("Aiko", {});
+
+      await world.advance(500);
+
+      expect(await guest.playback.play()).toBe(NO_CONTROL);
+      expect(world.clock().status).toBe("paused");
+
+      const played = host.playback.play();
+
+      await world.advance(500);
+
+      expect(await played).toBeNull();
+      expect(world.clock().status).toBe("playing");
+
+      await world.advance(3_000);
+
+      for (const member of [host, guest]) {
+        expect(member.engine.samplePlayback().playing).toBe(true);
+        expect(Math.abs(driftOf(world, member))).toBeLessThan(120);
+      }
     });
   });
 

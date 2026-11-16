@@ -432,6 +432,18 @@ export class SessionPlayback<T extends Track = Track> {
     return this.#move(playing ? { kind: "pause" } : { kind: "play" });
   }
 
+  /**
+   * Plays the session for everyone, as a member who may control, as when they play a song now. A
+   * play is absolute, so a session someone else played meanwhile stays playing.
+   */
+  play(): Promise<string | null> {
+    if (this.#view?.mayControl !== true) {
+      return Promise.resolve(NO_CONTROL);
+    }
+
+    return this.#move({ kind: "play" });
+  }
+
   /** Seeks the session for everyone, as a member who may control. */
   seek(positionMs: number): Promise<string | null> {
     if (this.#view?.mayControl !== true) {

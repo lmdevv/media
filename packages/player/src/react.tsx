@@ -668,7 +668,8 @@ export function PlayerProvider({
       const started = await startSession(
         {
           trackId: song.id,
-          positionNow: () => controller.positionMs(),
+          // What the person hears and sees: the device the player follows, when it follows one.
+          positionNow: readers.positionMs,
           playing: own.status === "playing" || own.status === "buffering",
           upcoming: own.queue.slice(own.index + 1).map((entry) => entry.id),
         },
@@ -683,7 +684,7 @@ export function PlayerProvider({
     } finally {
       setStarting(false);
     }
-  }, [controller, platform]);
+  }, [controller, platform, readers]);
 
   const musicSession = useMemo(
     (): MusicSession => ({ ...sessionData, following: following.follower, starting, start }),
