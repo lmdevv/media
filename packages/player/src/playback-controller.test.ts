@@ -83,6 +83,32 @@ const outage = async (during: (run: ReturnType<typeof setup>) => Promise<void>) 
 };
 
 describe("PlaybackController", () => {
+  it("reports a tap's pause at once, while the bar and the next tap follow the engine's events", async () => {
+    const { controller, engine } = setup({ playCurrent: "1", heldPlayState: true });
+
+    await controller.playTracks(["a", "b"], 0);
+    controller.sync(queueOf([one, two], "1"));
+    await settle();
+    engine().answer();
+
+    await controller.togglePlay();
+
+    expect(controller.reportedHere()).toMatchObject({ playing: false });
+    expect(controller.playingHere()).toMatchObject({ playing: true });
+    expect(controller.getSnapshot().engineStatus).toBe("playing");
+
+    // The bar still shows Pause, and a tap on it pauses, as it says.
+    await controller.togglePlay();
+
+    expect(engine().samplePlayback().playing).toBe(false);
+
+    engine().answer();
+    await settle();
+
+    expect(controller.getSnapshot().engineStatus).toBe("paused");
+    expect(controller.playingHere()).toMatchObject({ playing: false });
+  });
+
   it("plays a new queue with a ticket for its song, and records the play once", async () => {
     const { controller, record, sent } = setup({ playCurrent: "1" });
 

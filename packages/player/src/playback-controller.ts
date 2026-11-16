@@ -387,6 +387,16 @@ export class PlaybackController {
    * listener chose.
    */
   #chosen = false;
+  /**
+   * Whether a play or pause this player sent its engine, which changed what the engine does, has
+   * yet to be answered by the engine's next play, pause, end, or failure event. Meanwhile Connect
+   * reports the engine's own answer ({@link reportedHere}). Every engine play and pause goes through
+   * `#enginePlay` and `#enginePause`; a call that changed nothing raises nothing, since no event
+   * answers it.
+   */
+  #unanswered = false;
+  /** Bumped by every change of `#unanswered`, so a call's cleanup knows whether another ran. */
+  #unansweredVersion = 0;
   #gapless: boolean;
   #resumeAt: ResumePoint | null;
   #loaded: LoadedEntry | null = null;
@@ -833,7 +843,7 @@ export class PlaybackController {
       if (ask === "pause") {
         // Nothing loaded plays: the song loads paused when it loads.
         this.#choose(false);
-        this.#engine.pause();
+        this.#enginePause();
         this.#saveResume();
 
         return;
@@ -854,14 +864,14 @@ export class PlaybackController {
     this.#update({ autoplayBlocked: false, error: null });
 
     if (!play) {
-      this.#engine.pause();
+      this.#enginePause();
       this.#saveResume();
     } else if (audible) {
       // A native player that played itself for the system's play: the engine still takes it, so
       // its own intent matches the choice. A load under way plays as chosen once it lands.
-      if (!this.#loading) await this.#engine.play();
+      if (!this.#loading) await this.#enginePlay();
     } else if (!this.#reloadIfExpired(this.#livePositionMs())) {
-      await this.#engine.play();
+      await this.#enginePlay();
     }
   }
 
@@ -968,6 +978,23 @@ export class PlaybackController {
       playing: this.#wantPlaying,
       positionMs: this.#resumeAt?.itemId === arriving.itemId ? this.#resumeAt.positionMs : 0,
     };
+  }
+
+  /**
+   * What this device reports to Connect it plays: {@link playingHere}, except whether a loaded
+   * song plays while a play or pause this player sent its engine is unanswered. Every engine acts
+   * on the call at once, as its own `samplePlayback` shows, and says so in an event that comes
+   * later: an audio element's a task later, expo-audio's or a Cast receiver's later still. So the
+   * engine's answer decides meanwhile, and the report that settles a Connect request describes the
+   * device after it applied it (ADR 0018). Everything else, the bar, toggles, the lock screen, and
+   * whether a Connect request is a new choice, reads {@link playingHere}, so what the engine does on
+   * its own, as expo-audio pausing for a lock-screen press before that press's command arrives,
+   * counts only once its event does.
+   */
+  reportedHere(): PlayingHere | null {
+    const here = this.playingHere();
+
+    return here === null || this.#loaded === null ? here : { ...here, playing: this.#playsNow() };
   }
 
   /**
@@ -1387,7 +1414,7 @@ export class PlaybackController {
 
     if (this.#loading || this.#reloadIfExpired(this.#livePositionMs())) return;
 
-    await this.#engine.play();
+    await this.#enginePlay();
 
     if (this.#snapshot.autoplayBlocked) throw new Error(AUTOPLAY_BLOCKED_MESSAGE);
   }
@@ -1398,7 +1425,7 @@ export class PlaybackController {
 
     this.#wantPlaying = false;
 
-    if (!this.#loading) this.#engine.pause();
+    if (!this.#loading) this.#enginePause();
   }
 
   /** Plays at `rate` from now on, in this engine and the next one it switches to. */
@@ -1648,14 +1675,14 @@ export class PlaybackController {
     if (playing && !audible) {
       this.#update({ autoplayBlocked: false, error: null });
 
-      if (!this.#reloadIfExpired(this.#livePositionMs())) void this.#engine.play();
+      if (!this.#reloadIfExpired(this.#livePositionMs())) void this.#enginePlay();
     } else if (playing) {
-      void this.#engine.play();
+      void this.#enginePlay();
     } else if (audible) {
-      this.#engine.pause();
+      this.#enginePause();
       this.#saveResume();
     } else if (this.#snapshot.engineStatus === "paused") {
-      this.#engine.pause();
+      this.#enginePause();
     }
   }
 
@@ -1806,6 +1833,52 @@ export class PlaybackController {
     return status === "playing" || status === "buffering";
   }
 
+  /** Whether the loaded song plays, as {@link reportedHere} reports it. */
+  #playsNow(): boolean {
+    const status = this.#snapshot.engineStatus;
+    const settled = status === "playing" || status === "buffering" || status === "paused";
+
+    if (!this.#unanswered || this.#snapshot.autoplayBlocked || !settled) return this.#isAudible();
+
+    return this.#engine.samplePlayback().playing;
+  }
+
+  #enginePlay(): Promise<void> {
+    return this.#answered(() => this.#engine.play());
+  }
+
+  #enginePause(): void {
+    this.#answered(() => {
+      this.#engine.pause();
+    });
+  }
+
+  /**
+   * Runs an engine play or pause with `#unanswered` raised, and puts it back as it was when the
+   * call changed nothing, unless an event answered or another call ran meanwhile, as listeners
+   * of an event the engine sends at once can.
+   */
+  #answered<A>(call: () => A): A {
+    const before = this.#engine.samplePlayback().playing;
+    const raised = this.#unanswered;
+
+    this.#setUnanswered(true);
+    const version = this.#unansweredVersion;
+
+    try {
+      return call();
+    } finally {
+      if (this.#unansweredVersion === version && this.#engine.samplePlayback().playing === before) {
+        this.#setUnanswered(raised);
+      }
+    }
+  }
+
+  #setUnanswered(unanswered: boolean): void {
+    this.#unanswered = unanswered;
+    this.#unansweredVersion += 1;
+  }
+
   #localEngineFor(quality: StreamQuality): LocalEngineKind {
     return this.#gapless ? chooseEngine(quality, this.#engines.mse, this.#mseFailed) : "html";
   }
@@ -1824,6 +1897,7 @@ export class PlaybackController {
 
   /** Makes the engine of `kind` the one that plays: the receiver's, or a new one of this device. */
   #installEngine(kind: EngineKind): void {
+    this.#setUnanswered(false);
     this.#engine.unload();
     const listening = this.#unsubscribeEngine !== null;
     this.#unsubscribeEngine?.();
@@ -1854,6 +1928,7 @@ export class PlaybackController {
   #unload(): void {
     this.#generation += 1;
     this.#loading = false;
+    this.#setUnanswered(false);
     this.#engine.unload();
     this.#loaded = null;
     this.#preloaded = null;
@@ -1929,6 +2004,7 @@ export class PlaybackController {
       // allowed: the song waits for the server otherwise.
       const reach = this.#reach();
       const engine = this.#wantedEngine();
+      this.#setUnanswered(false);
       this.#update({ engineStatus: "loading", error: null, autoplayBlocked: false, ready: null });
       // A switch drops the preload with the engine that held it.
       this.#useEngine(engine);
@@ -2012,8 +2088,8 @@ export class PlaybackController {
         !this.#snapshot.autoplayBlocked &&
         this.#engine.samplePlayback().playing !== this.#wantPlaying
       ) {
-        if (this.#wantPlaying) await this.#engine.play();
-        else this.#engine.pause();
+        if (this.#wantPlaying) await this.#enginePlay();
+        else this.#enginePause();
       }
     } finally {
       if (generation === this.#generation) this.#loading = false;
@@ -2220,6 +2296,9 @@ export class PlaybackController {
 
       case "playing":
       case "paused": {
+        // Even a stale play or pause event answers: this reads the engine as it is now. A wait
+        // queued before a pause would not, so it leaves `#unanswered` up.
+        this.#setUnanswered(false);
         const { playing } = this.#engine.samplePlayback();
         this.#setMoving(playing);
 
@@ -2251,12 +2330,14 @@ export class PlaybackController {
       }
 
       case "ended": {
+        this.#setUnanswered(false);
         this.#setMoving(false);
         this.#onEnded();
         break;
       }
 
       case "error": {
+        this.#setUnanswered(false);
         this.#setMoving(false);
         // A load the browser would not start without a tap still holds its source, paused: a
         // session's follower keeps it, held back, so the person's tap starts it in step.

@@ -1,9 +1,10 @@
 # 0018. Put remote control and casting in the core and keep third-party support small
 
 - Status: Accepted, 2026-11-03. Amended 2026-11-04 with Connect as built, 2026-11-07 with the
-  phase 3 review fixes, and 2026-11-15 with items, loading and moving playback, group-session
+  phase 3 review fixes, 2026-11-15 with items, loading and moving playback, group-session
   membership, the two rules D60 keeps, the upgrade from v0.3.0's Connect rows, the music web
-  client, the music iOS app, and casting to Chromecast and AirPlay as built.
+  client, the music iOS app, and casting to Chromecast and AirPlay as built, and 2026-11-16 with
+  what a device reports right after it plays or pauses.
 - Decisions: D35, D44, D60
 
 ## Context
@@ -498,6 +499,41 @@ for one revision, below):
   load, when the tab stops leading, or when the core shows nothing left to apply. The core settles
   every request when a device reports again after 30 seconds of silence (Rules for reports and
   requests), so a load still starting then is dropped and never starts.
+
+**What a report says right after a play or pause** (amended 2026-11-16). A report that settles a
+request describes the device after it applied that request, never before. Every engine takes a
+play or pause at once, as its own `samplePlayback` shows, but says so in an event that comes later:
+an audio element fires `playing` or `pause` a task later, expo-audio's report reaches JavaScript
+later, and a Cast receiver answers over the network. `PlaybackController` reported whether the
+song plays from the status those events set, so the report `ConnectPlayer` sends as it settles a
+pause still said the song played, and the next one, a moment later, said it paused. Controllers
+saw the pending pause, then the device playing again with nothing pending, then paused: a person
+who tapped play in between got the bar's `Pause`, and the device stayed paused (CI on #165, where
+the trace's sync frames show the second `control` asking `playing: false`). A remote play flapped
+the same way. Now, while a play or pause the player sent its engine (`#enginePlay`,
+`#enginePause`) has yet to be answered by the engine's next play, pause, end, or failure event,
+what `ConnectPlayer` reports (`reportedHere`) is the engine's own answer. A call that changed
+nothing, as a play of a song that plays or one an engine with nothing loaded ignored, waits for no
+event, so the report keeps reading the status. Everything else reads `playingHere`, the status the
+engine's events set, as before: the bar, toggles, the lock screen, group-session followers,
+history, and whether a Connect request is a new choice for the phone's order of system commands.
+So a label and the tap on it always agree, and what the engine does by itself counts as a choice
+only once its event arrives: a lock-screen pause expo-audio already made is not yet the app's, and
+a scrub from another device that keeps playing as it last saw takes no number. A report sent while
+a call is unanswered says what the engine does then, whoever changed it. Each engine's
+`samplePlayback` shows a play or pause it took at once (`PlayerEngine` in `engine.ts`).
+
+| The player last                                                                            | Its engine            | What Connect reports           | The status the bar and toggles read |
+| ------------------------------------------------------------------------------------------ | --------------------- | ------------------------------ | ----------------------------------- |
+| sent a play or pause that changed what it does: a Connect request, a tap, a system command | has not sent an event | what the engine does now       | as the engine's last event set it   |
+| sent a play or pause that changed nothing                                                  | sends no event        | as the engine's last event set | as the engine's last event set it   |
+| sent a play or pause                                                                       | sent its event        | as the event read the engine   | as the event read the engine        |
+| sent nothing since the engine changed by itself, as expo-audio from a lock screen          | has not sent an event | as the engine's last event set | as the engine's last event set it   |
+
+A tap of play or pause on a device the player follows asks for the opposite of what the bar shows
+as it is tapped (`remoteActions` in `connect-actions.ts`), so it carries the label the person
+tapped. The bar shows the core's merged view: the request while it is pending, then the report
+that settled it, which now says what that request asked.
 
 ### The music iOS app (amended 2026-11-15)
 

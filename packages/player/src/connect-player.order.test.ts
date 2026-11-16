@@ -1126,7 +1126,119 @@ const followAcrossReconnects = async (script: ReadonlyArray<ReconnectEvent>): Pr
   run.stop();
 };
 
+/**
+ * What happens next to a song playing here whose engine says so late: another device asks it to
+ * play or pause, or scrubs it as it last saw it; the listener taps here; or the engine's event
+ * for a play or pause it already did arrives.
+ */
+type Turn =
+  | { readonly kind: "remote"; readonly playing: boolean; readonly offMs: number }
+  | { readonly kind: "scrub"; readonly offMs: number }
+  | { readonly kind: "toggle" }
+  | { readonly kind: "answer" };
+
+const turns = fc.array(
+  fc.oneof(
+    {
+      weight: 3,
+      arbitrary: fc.record({
+        kind: fc.constant("remote" as const),
+        playing: fc.boolean(),
+        offMs: fc.constantFrom(0, 100, 5000),
+      }),
+    },
+    {
+      weight: 1,
+      arbitrary: fc.record({
+        kind: fc.constant("scrub" as const),
+        offMs: fc.constantFrom(0, 5000),
+      }),
+    },
+    { weight: 1, arbitrary: fc.constant({ kind: "toggle" } as const) },
+    { weight: 2, arbitrary: fc.constant({ kind: "answer" } as const) },
+  ),
+  { minLength: 1, maxLength: 12 },
+);
+
+/**
+ * Plays a song here on a held engine, then `script`. Every report must say what the engine does as
+ * it is sent, so a controller that sees a request settled never sees the state that request
+ * replaced.
+ */
+const reportAsHeard = async (script: ReadonlyArray<Turn>): Promise<void> => {
+  const run = setup({ playCurrent: "1", heldPlayState: true });
+  const reported: Array<{ readonly song: ReportedSong | null; readonly sounding: boolean }> = [];
+
+  const commands: ConnectCommands = {
+    report: async (song) => {
+      reported.push({ song, sounding: run.engine().samplePlayback().playing });
+
+      return run.clock.now;
+    },
+    albumTracks: async () => [],
+  };
+
+  const connect = new ConnectPlayer(run.controller, commands, {
+    now: () => run.clock.now,
+    every: () => () => undefined,
+  });
+
+  await run.controller.playTracks(["a", "b"], 0);
+  run.controller.sync(queueOf([entry("a", "1"), entry("b", "2")], "1"));
+  await settle();
+  run.engine().answer();
+  const stopConnect = connect.start();
+  let revision = 0;
+
+  const play = async (turn: Turn): Promise<void> => {
+    const here = run.controller.playingHere();
+
+    if (turn.kind === "answer") run.engine().answer();
+    else if (turn.kind === "toggle") await run.controller.togglePlay();
+    else if (here !== null) {
+      revision += 1;
+      connect.take({
+        revision,
+        ask: {
+          kind: "transport",
+          item: track(here.trackId),
+          playing:
+            turn.kind === "remote" ? turn.playing : (reported.at(-1)?.song?.playing ?? false),
+          positionMs: here.positionMs + turn.offMs,
+          at: run.clock.now,
+        },
+      });
+    }
+
+    await settle();
+  };
+
+  const playAll = async ([turn, ...rest]: ReadonlyArray<Turn>): Promise<void> => {
+    if (turn === undefined) return;
+    await play(turn);
+    await playAll(rest);
+  };
+
+  try {
+    await playAll(script);
+    run.engine().answer();
+    await settle();
+
+    expect(reported.map(({ song }) => song?.playing ?? false)).toEqual(
+      reported.map(({ sounding }) => sounding),
+    );
+    await expectEngineAsMeant(run);
+  } finally {
+    stopConnect();
+    run.stop();
+  }
+};
+
 describe("ConnectPlayer under any order of requests, answers, and the listener's actions", () => {
+  it("reports what the engine does at once, under any order of remote plays and pauses, taps, and engine events still on their way", async () => {
+    await fc.assert(fc.asyncProperty(turns, reportAsHeard), { numRuns: 200 });
+  }, 60_000);
+
   it("writes a queue only for the load still starting, settles every request, and ends as the newest asks", async () => {
     await fc.assert(fc.asyncProperty(events, playAlbums), { numRuns: 250 });
   }, 60_000);

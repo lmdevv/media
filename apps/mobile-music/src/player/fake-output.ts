@@ -22,7 +22,13 @@ export class FakeOutput implements AudioOutput {
   holdSeeks = false;
   reportSeeks = true;
   lockScreen: { readonly info: LockScreenInfo | null; readonly live: boolean } | null = null;
+  /**
+   * Keeps each report back until `sendHeldReports`, as expo-audio's reports reach JavaScript after
+   * the player acts.
+   */
+  holdReports = false;
   readonly #listeners = new Set<(status: OutputStatus) => void>();
+  readonly #heldReports: Array<OutputStatus> = [];
   readonly #heldSeeks: Array<{ readonly land: () => void; readonly refuse: () => void }> = [];
 
   constructor(url: string, id: string) {
@@ -121,6 +127,11 @@ export class FakeOutput implements AudioOutput {
     this.#report();
   }
 
+  /** Sends the reports kept back while `holdReports` was set, in order. */
+  sendHeldReports(): void {
+    for (const status of this.#heldReports.splice(0)) this.#send(status);
+  }
+
   notifyPlayingLate(): void {
     this.#report({ control: "playing", positionMs: 0 });
   }
@@ -146,6 +157,11 @@ export class FakeOutput implements AudioOutput {
       ...patch,
     };
 
+    if (this.holdReports) this.#heldReports.push(status);
+    else this.#send(status);
+  }
+
+  #send(status: OutputStatus): void {
     for (const listener of this.#listeners) listener(status);
   }
 }
