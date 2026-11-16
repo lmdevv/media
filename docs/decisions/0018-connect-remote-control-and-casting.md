@@ -654,10 +654,24 @@ devices that drive them, as "Loading and moving playback" above describes.
 - **Movies on iOS: AirPlay.** The movies app's player has had the system's AirPlay button since
   the iOS port (#144), and its `AVPlayer` allows external playback. It does not report to
   Connect, as movies remote control waits in the backlog.
+- **Senders sharing a receiver.** `/movies` and `/music` share one origin, and two tabs can cast to
+  one TV. The mirror names the media it describes (`RemotePlayer.mediaInfo`), and a sender treats
+  only its own newest load's media as its own: the media before it, or another sender's, changes
+  nothing. Once another sender's media takes the receiver from a sender's own, that sender takes
+  its song or movie back paused where the TV last played it (`PlaybackController.castTaken`, the
+  movies `CastPlayback`'s `onTaken`) and leaves the session without stopping it, so the other
+  media plays on. A tab, in either client, joins on its own only a session it started, after a
+  reload too (`TAB_AND_ORIGIN_SCOPED`), where `v0.2.0` movies joined any session of the origin
+  (`ORIGIN_SCOPED`): with `/music` on the same origin, that would have a movies tab load its movie
+  over a song another tab cast, and old music had no casting to keep. Picking the TV in the cast
+  menu still joins its session and plays there.
+- **A start that outlived its ticket.** A movie paused past its ticket's expiry casts with a new
+  start (`startHandedOff`), as one whose ticket expires mid-cast does; `v0.2.0` renewed its token
+  before it expired.
 - **Music group sessions.** Old music had no casting and no AirPlay button, so a Jam casts nowhere
   (D62): it plays on each of the person's players that follows it (ADR 0017). In a Jam, "Play on"
-  has no Chromecast row, and joining one ends the browser's cast, one started from Chrome's own
-  Cast menu included; the player's `castTo` then takes only the end of a cast. The music app's
+  has no Chromecast row, and joining one ends the cast this tab drives, one started from Chrome's
+  own Cast menu included; the player's `castTo` then takes only the end of a cast. The music app's
   Now Playing shows no AirPlay button in a Jam. iOS still offers its own AirPlay route in Control
   Center, as it did under old music.
 - **Music iOS device sheet.** "Play on" says where a device that casts or AirPlays sends its
@@ -671,22 +685,25 @@ only to the newest load once its media is on the receiver (`#current` in
 `apps/web-movies/src/casting/cast-playback.ts`). The player then applies the engine's events only
 while they belong to its own load, as for any engine.
 
-| What arrives                                    | What holds now                                                                                                               | The sender                                                                                        |
-| ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| a receiver credential for load n                | n is the newest load                                                                                                         | loads the song on the receiver with it                                                            |
-| a receiver credential for load n                | a newer load, or an unload, replaced n                                                                                       | changes nothing                                                                                   |
-| `loadMedia`'s answer for load n                 | n is the newest load                                                                                                         | takes the receiver's state as the song's, or fails the load                                       |
-| `loadMedia`'s answer for load n                 | a newer load replaced n                                                                                                      | changes nothing                                                                                   |
-| `loadMedia`'s answer for load n                 | the player let go of n, as after a move to another device or a skip, and no newer load has sent its song to the receiver yet | stops the song on the receiver                                                                    |
-| a change of the receiver's mirror               | the newest load's media is not on the receiver yet                                                                           | changes nothing: it describes the media before                                                    |
-| a change of the receiver's mirror               | the newest load's media is on the receiver                                                                                   | reports the position, play, pause, waiting, or end                                                |
-| the mirror's time jumps to 0                    | the sender asked for a seek to 0, as a restart of the song                                                                   | takes it as that seek's answer and reports the position                                           |
-| the mirror's time jumps to 0 from past 1 s      | the sender asked for no seek to 0                                                                                            | changes nothing: the mirror resets so as the session ends                                         |
-| the receiver goes idle, finished                | the newest load's media is on the receiver                                                                                   | reports the song ended, and the player moves on                                                   |
-| the receiver goes idle with an error            | the newest load's media is on the receiver                                                                                   | asks the media server why; a refused credential is `expired` and the player starts the song again |
-| the media server's answer about a failed load n | a newer load, or an unload, replaced n while it was asked                                                                    | changes nothing                                                                                   |
-| the receiver goes idle with an error            | a newer load is on its way                                                                                                   | changes nothing                                                                                   |
-| the Cast session ends                           | anything                                                                                                                     | the browser plays again, from where the TV was                                                    |
+| What arrives                                     | What holds now                                                                                                               | The sender                                                                                        |
+| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| a receiver credential for load n                 | n is the newest load                                                                                                         | loads the song on the receiver with it                                                            |
+| a receiver credential for load n                 | a newer load, or an unload, replaced n                                                                                       | changes nothing                                                                                   |
+| `loadMedia`'s answer for load n                  | n is the newest load                                                                                                         | takes the receiver's state as the song's, or fails the load                                       |
+| `loadMedia`'s answer for load n                  | a newer load replaced n                                                                                                      | changes nothing                                                                                   |
+| `loadMedia`'s answer for load n                  | the player let go of n, as after a move to another device or a skip, and no newer load has sent its song to the receiver yet | stops the song on the receiver                                                                    |
+| a change of the receiver's mirror                | the newest load's media is not on the receiver yet                                                                           | changes nothing: it describes the media before                                                    |
+| a change of the receiver's mirror                | the newest load's media is on the receiver                                                                                   | reports the position, play, pause, waiting, or end                                                |
+| a change of the receiver's mirror                | the mirror names the media before the newest load, and the newest load's own has not shown                                   | changes nothing                                                                                   |
+| a change of the receiver's mirror                | the mirror names other media after the newest load landed, or after its own showed                                           | takes the song back paused where the TV was, and leaves the session with that media playing       |
+| a play or pause asked while a load is on its way | anything                                                                                                                     | asks it of the newest load's media once the mirror shows it, not of the media before              |
+| the mirror's time jumps to 0                     | the sender asked for a seek to 0, as a restart of the song                                                                   | takes it as that seek's answer and reports the position                                           |
+| the mirror's time jumps to 0 from past 1 s       | the sender asked for no seek to 0                                                                                            | changes nothing: the mirror resets so as the session ends                                         |
+| the receiver goes idle, finished                 | the newest load's media is on the receiver                                                                                   | reports the song ended, and the player moves on                                                   |
+| the receiver goes idle with an error             | the newest load's media is on the receiver                                                                                   | asks the media server why; a refused credential is `expired` and the player starts the song again |
+| the media server's answer about a failed load n  | a newer load, or an unload, replaced n while it was asked                                                                    | changes nothing                                                                                   |
+| the receiver goes idle with an error             | a newer load is on its way                                                                                                   | changes nothing                                                                                   |
+| the Cast session ends                            | anything                                                                                                                     | the browser plays again, from where the TV was                                                    |
 
 ### Edge cases settled in the build
 

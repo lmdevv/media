@@ -10,8 +10,12 @@
  *
  * Every load has a number, and the receiver's word applies only to the newest load once its media
  * is on the receiver: a credential, a `loadMedia` answer, or a change of the mirror that arrives
- * for an older load, or before the newest one landed, changes nothing (ADR 0018). The player then
- * applies the engine's events only while they belong to the load it made (`PlaybackController`).
+ * for an older load, or before the newest one landed, changes nothing (ADR 0018). The mirror names
+ * the media it describes, and media another sender put on the receiver, such as a movie cast from
+ * `/movies` in another tab, says nothing of this engine's songs. Once another sender's media takes
+ * the receiver from this engine's song, the engine lets the receiver be and tells the host, which
+ * takes the song back. The player then applies the engine's events only while they belong to the
+ * load it made (`PlaybackController`).
  */
 import { castMusicContentType, streamedTrack, withReceiverCredential } from "@media/contracts/cast";
 import { MUSIC_STREAM_PARAMS, MusicStreamProfile } from "@media/contracts/music-playback";
@@ -44,6 +48,9 @@ const FINISHED = "FINISHED";
 
 const ERROR = "ERROR";
 
+/** How many of its own loads' media an engine remembers, to tell a late report from another sender. */
+const OWN_MEDIA_KEPT = 32;
+
 /** How long a play or pause may take to show in the receiver's mirror before it counts as lost. */
 const TOGGLE_TIMEOUT_MS = 5_000;
 
@@ -71,16 +78,25 @@ export interface CastEngineHost {
   readonly lend: (streamUrl: string) => Promise<string | null>;
   /** The answer status of a request for `url` from this page, or null when none came. */
   readonly probe: (url: string) => Promise<number | null>;
+  /**
+   * Another sender's media took the receiver from this engine's song: the engine drives the
+   * receiver no more, and leaves the media there alone.
+   */
+  readonly taken: () => void;
 }
 
 /** A load and where it stands: its number, and its media once the receiver took it. */
 interface Load {
   readonly number: number;
   readonly startMs: number;
+  /** Whether the load asked the receiver to play. */
+  readonly autoplay: boolean;
   /** The URL the receiver fetches, once lent; null while the credential is on its way. */
   readonly url: string | null;
   /** Whether the receiver took the media; until then the mirror describes the media before. */
   readonly landed: boolean;
+  /** The media the mirror named as the load landed, before this load's own showed. */
+  readonly before: string | null;
 }
 
 /** A Chromecast as the player's engine. Create one per Cast session, and `dispose` it after. */
@@ -109,6 +125,12 @@ export class CastEngine implements ReceiverEngine {
   #lastMs = 0;
   /** Once disposed, the engine sends the receiver nothing more. */
   #disposed = false;
+  /** The mirror has shown the newest load's media; another sender's after it takes the receiver. */
+  #shown = false;
+  /** Another sender's media took the receiver: the engine sends it nothing more. */
+  #taken = false;
+  /** The media this engine loaded on the receiver, newest last: a late report of one is its own. */
+  readonly #own: Array<string> = [];
 
   constructor(sdk: CastSdk, session: CastSession, host: CastEngineHost) {
     this.#sdk = sdk;
@@ -162,6 +184,14 @@ export class CastEngine implements ReceiverEngine {
 
     if (!load.landed) return { positionMs: load.startMs, playing: false };
 
+    if (this.#taken) return { positionMs: this.#lastMs, playing: false };
+
+    // Until the mirror describes this load's media, it describes another's: the song stands where
+    // it was asked to start, playing or paused as asked.
+    if (!this.#describes(load)) {
+      return { positionMs: this.#seekTo ?? load.startMs, playing: !this.#asked(load) };
+    }
+
     return { positionMs: this.#positionMs(), playing: !this.#paused() };
   }
 
@@ -169,10 +199,11 @@ export class CastEngine implements ReceiverEngine {
     this.#loads += 1;
     const number = this.#loads;
 
-    this.#load = { number, startMs, url: null, landed: false };
+    this.#load = { number, startMs, autoplay, url: null, landed: false, before: null };
     this.#wanted = null;
     this.#settleToggle();
     this.#seekTo = null;
+    this.#shown = false;
 
     const credential = await this.#host.lend(source.url);
 
@@ -186,10 +217,16 @@ export class CastEngine implements ReceiverEngine {
 
     const url = withReceiverCredential(source.url, credential);
 
-    this.#load = { number, startMs, url, landed: false };
+    this.#own.push(url);
+
+    if (this.#own.length > OWN_MEDIA_KEPT) this.#own.shift();
+
+    this.#load = { number, startMs, autoplay, url, landed: false, before: null };
+
+    const play = this.#playAsked(autoplay);
 
     const failure = await this.#session
-      .loadMedia(this.#request(url, source, startMs, autoplay))
+      .loadMedia(this.#request(url, source, startMs, play))
       .catch(() => "load-failed");
 
     if (!this.#current(number)) {
@@ -208,9 +245,24 @@ export class CastEngine implements ReceiverEngine {
       return;
     }
 
-    this.#load = { number, startMs, url, landed: true };
-    this.#emit({ type: "time", positionMs: this.#positionMs() });
-    this.#emit({ type: this.#paused() ? "paused" : "playing" });
+    const landed: Load = {
+      number,
+      startMs,
+      autoplay: play,
+      url,
+      landed: true,
+      before: this.#mediaOnReceiver(),
+    };
+
+    this.#load = landed;
+
+    if (this.#mediaOnReceiver() === url) this.#shown = true;
+
+    const now = this.samplePlayback();
+
+    this.#emit({ type: "time", positionMs: now.positionMs });
+    this.#emit({ type: now.playing ? "playing" : "paused" });
+    this.#reconcile();
   }
 
   /** The receiver plays every song as it comes; it has nothing to queue ahead. */
@@ -250,7 +302,7 @@ export class CastEngine implements ReceiverEngine {
   }
 
   unload(): void {
-    const landed = this.#load?.landed === true && !this.#disposed;
+    const landed = this.#load?.landed === true && !this.#disposed && !this.#taken;
 
     this.#loads += 1;
     this.#load = null;
@@ -281,7 +333,36 @@ export class CastEngine implements ReceiverEngine {
    * not keep the check before the await narrowed. A disposed engine sends nothing.
    */
   #noNewerMedia(): boolean {
-    return !this.#disposed && (this.#load === null || this.#load.url === null);
+    return !this.#disposed && !this.#taken && (this.#load === null || this.#load.url === null);
+  }
+
+  /** The URL of the media on the receiver, whichever sender loaded it; null while it has none. */
+  #mediaOnReceiver(): string | null {
+    return this.#remote.mediaInfo?.contentId ?? null;
+  }
+
+  /**
+   * Whether the mirror describes `load`'s media: it names that media, or none, as while it resets.
+   * The media before this load, or another sender's, says nothing of it (ADR 0018).
+   */
+  #describes(load: Load): boolean {
+    const media = this.#mediaOnReceiver();
+
+    return media === null || media === load.url;
+  }
+
+  /**
+   * Whether a load asking `autoplay` should start playing: a play or pause asked while its
+   * credential was on its way goes with it. A method, so TypeScript does not keep a narrowing of
+   * the wish from before the await.
+   */
+  #playAsked(autoplay: boolean): boolean {
+    return this.#wanted === null ? autoplay : !this.#wanted;
+  }
+
+  /** Whether `load` should be paused, as last asked, or as it asked the receiver to start. */
+  #asked(load: Load): boolean {
+    return this.#wanted ?? !load.autoplay;
   }
 
   #request(url: string, source: EngineSource, startMs: number, autoplay: boolean): CastLoadRequest {
@@ -344,7 +425,27 @@ export class CastEngine implements ReceiverEngine {
 
     const load = this.#load;
 
-    if (load === null || !load.landed) return;
+    if (load === null || !load.landed || this.#taken) return;
+
+    const media = this.#mediaOnReceiver();
+
+    if (media !== null && media !== load.url) {
+      // An older load of this engine's, or the media before this load, says nothing of it. Other
+      // media arriving after it landed, or after its own showed, is another sender's, which took
+      // the receiver from the song.
+      if (!this.#own.includes(media) && (this.#shown || media !== load.before)) this.#take();
+
+      return;
+    }
+
+    if (media !== null && !this.#shown) {
+      this.#shown = true;
+      // The mirror reports its fields one at a time: a play or pause asked meanwhile goes once the
+      // rest of this load's state came.
+      queueMicrotask(() => {
+        if (this.#load === load) this.#reconcile();
+      });
+    }
 
     // A disconnect resets the mirror (time to zero, paused): that is no position of the song. A
     // jump to zero this engine asked for is the answer to that seek, not the reset.
@@ -402,6 +503,18 @@ export class CastEngine implements ReceiverEngine {
     void this.#failed(load.number, load.url, "The TV stopped playing this song");
   }
 
+  /** Another sender's media took the receiver: the engine lets it be, and the host takes the song. */
+  #take(): void {
+    this.#taken = true;
+    this.#wanted = null;
+
+    // A seek the receiver had not shown yet is where the song was asked to be.
+    if (this.#seekTo !== null) this.#lastMs = this.#seekTo;
+    this.#seekTo = null;
+    this.#settleToggle();
+    this.#host.taken();
+  }
+
   /** Tells the player why the receiver failed load `number`'s song, if it is still the newest. */
   async #failed(number: number, url: string, message: string): Promise<void> {
     const reason = await this.#reasonOf(url);
@@ -411,7 +524,7 @@ export class CastEngine implements ReceiverEngine {
 
   /** Asks for the receiver to be `paused` (or playing); reached as soon as no toggle is on its way. */
   #ask(paused: boolean): void {
-    if (this.#load?.landed !== true) return;
+    if (this.#load === null || this.#taken) return;
 
     this.#wanted = paused;
     this.#reconcile();
@@ -423,10 +536,23 @@ export class CastEngine implements ReceiverEngine {
    * is trusted again.
    */
   #reconcile(): void {
-    if (this.#wanted === null || this.#toggling !== null) return;
+    const load = this.#load;
 
-    if (!this.#remote.isConnected || this.#remote.isPaused === this.#wanted) {
+    if (this.#wanted === null || this.#toggling !== null || this.#taken) return;
+
+    // The mirror's pause belongs to another's media until it describes this load's.
+    if (load === null || !load.landed || !this.#describes(load)) return;
+
+    if (!this.#remote.isConnected) {
       this.#wanted = null;
+
+      return;
+    }
+
+    if (this.#remote.isPaused === this.#wanted) {
+      // A mirror that names no media yet may still show the receiver before this load started:
+      // the wish stands until this load's own media shows.
+      if (this.#shown || this.#mediaOnReceiver() !== null) this.#wanted = null;
 
       return;
     }

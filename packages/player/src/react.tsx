@@ -198,6 +198,11 @@ export interface PlayerActions {
    * reached, playing or paused as it was.
    */
   readonly castTo: (receiver: Receiver | null) => void;
+  /**
+   * Takes the song back from a Chromecast another sender's media took over: it stays here paused,
+   * where the TV last played it.
+   */
+  readonly castTaken: () => void;
 }
 
 /** The player state and actions that `usePlayer` returns. */
@@ -650,6 +655,9 @@ export function PlayerProvider({
       castTo: (receiver) => {
         controller.castTo(receiver);
       },
+      castTaken: () => {
+        controller.castTaken();
+      },
     };
   }, [queue, local, controller, platform, connect, follow, view, sessionData, sessionPlayback]);
 
@@ -863,6 +871,9 @@ const sessionPlayerOf = ({
     // cast, as the person joins, reaches the controller.
     castTo: (receiver) => {
       if (receiver === null) controller.castTo(null);
+    },
+    castTaken: () => {
+      controller.castTaken();
     },
   };
 };

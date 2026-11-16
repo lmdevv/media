@@ -1115,6 +1115,16 @@ export class PlaybackController {
   }
 
   /**
+   * Takes the song back from a receiver another sender's media took over (ADR 0018): nobody hears
+   * it anywhere now, so it comes back here paused, at the place the receiver last played it.
+   */
+  castTaken(): void {
+    if (this.#receiver === null) return;
+    this.#choose(false);
+    this.castTo(null);
+  }
+
+  /**
    * Plays through `receiver` from now on, or through this device's own engine again for null, as
    * a Cast session starts or ends (ADR 0018). The song loaded here moves to the new output at the
    * place it reached, playing or paused as it was, and counts as the same play; the queue and

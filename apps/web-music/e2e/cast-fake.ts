@@ -10,7 +10,10 @@
  * receiver's part. Like a real receiver it fetches what it is told to play (the playlist and a
  * segment, or a byte range of a direct file) with whatever credential its URLs carry, so a stream
  * the media server closed shows up as a failed fetch, and its state reaches the page a moment
- * after a load, not within the call.
+ * after a load, not within the call. Its mirror names the media on the receiver (`mediaInfo`),
+ * and a test can play another sender's part: another tab of the origin casting before this page
+ * opens (`otherTabCasting`), which a page joins on its own only under `ORIGIN_SCOPED`, or loading
+ * its media over this page's (`otherSenderLoads`).
  */
 import type { Page } from "@playwright/test";
 
@@ -53,7 +56,21 @@ export interface FakeReceiver {
   readonly isPaused: boolean;
   /** `IDLE`, `PLAYING`, `PAUSED`, or `BUFFERING`, as the receiver last reported. */
   readonly playerState: string;
+  /** The URL of the media on the receiver, whichever sender loaded it; null while it has none. */
+  readonly media: string | null;
+  /** How this page ended its Cast sessions: `stop` stopped the receiver, `leave` left it playing. */
+  readonly ended: ReadonlyArray<"stop" | "leave">;
 }
+
+/** Media another sender put on the receiver. */
+export interface OtherMedia {
+  readonly contentId: string;
+  readonly duration: number;
+  readonly currentTime: number;
+}
+
+/** Where a page's fake reads the session another tab of the origin started, as the SDK knows it. */
+const OTHER_TAB_KEY = "castFake.otherTab";
 
 const SDK = String.raw`
 (() => {
@@ -72,9 +89,11 @@ const SDK = String.raw`
     // Set by \`holdConnection\`: the next connection waits for \`completeConnection\`.
     holdConnection: false,
     completeConnection: null,
+    ended: [],
     player: {
       isConnected: false,
       isMediaLoaded: false,
+      mediaInfo: null,
       isPaused: true,
       isMuted: false,
       canControlVolume: true,
@@ -171,6 +190,7 @@ const SDK = String.raw`
       fake.playingAt = null;
       // The receiver reports its new state a moment later, as the SDK relays it.
       const reported = new Promise((resolve) => setTimeout(resolve, 50)).then(() => {
+        change("mediaInfo", { contentId: info.contentId });
         change("isMediaLoaded", true);
         change("duration", info.duration);
         change("currentTime", request.currentTime);
@@ -186,21 +206,42 @@ const SDK = String.raw`
     },
   };
 
+  const connect = () => {
+    fake.session = session;
+    change("isConnected", true);
+    emitContext("sessionstatechanged", { sessionState: "SESSION_STARTED" });
+    setCastState("CONNECTED");
+  };
+
+  /** Another sender's media takes the receiver, playing, as the mirror reports it. */
+  const otherMediaArrives = (other) => {
+    fake.current = { url: other.contentId, hls: false, at: other.currentTime, other: true };
+    fake.idleReason = null;
+    change("mediaInfo", { contentId: other.contentId });
+    change("isMediaLoaded", true);
+    change("duration", other.duration);
+    change("currentTime", other.currentTime);
+    change("playerState", "PLAYING");
+    change("isPaused", false);
+  };
+
   const context = {
     setOptions: (options) => {
       fake.options = options;
+      const other = JSON.parse(localStorage.getItem("${OTHER_TAB_KEY}") ?? "null");
+
+      // A session another tab started: ORIGIN_SCOPED joins it as the page opens, and
+      // TAB_AND_ORIGIN_SCOPED only one this tab started.
+      if (other !== null && options.autoJoinPolicy === "origin_scoped") {
+        setCastState("NOT_CONNECTED");
+        connect();
+        otherMediaArrives(other);
+      }
     },
     getCastState: () => fake.castState,
     getCurrentSession: () => fake.session,
     requestSession: () => {
       setCastState("CONNECTING");
-
-      const connect = () => {
-        fake.session = session;
-        change("isConnected", true);
-        emitContext("sessionstatechanged", { sessionState: "SESSION_STARTED" });
-        setCastState("CONNECTED");
-      };
 
       if (!fake.holdConnection) {
         connect();
@@ -216,7 +257,15 @@ const SDK = String.raw`
         };
       });
     },
-    endCurrentSession: () => window.__castFake.disconnect(),
+    endCurrentSession: (stopCasting) => {
+      fake.ended.push(stopCasting ? "stop" : "leave");
+      // Leaving disconnects this page alone; the receiver plays on.
+      if (stopCasting) {
+        fake.current = null;
+        change("mediaInfo", null);
+      }
+      window.__castFake.disconnect();
+    },
     addEventListener: (type, handler) => {
       const handlers = listeners.context.get(type) ?? new Set();
       handlers.add(handler);
@@ -242,6 +291,8 @@ const SDK = String.raw`
     }
     stop() {
       fake.commands.push(["stop", null]);
+      fake.current = null;
+      change("mediaInfo", null);
       change("isMediaLoaded", false);
       change("playerState", "IDLE");
     }
@@ -294,7 +345,10 @@ const SDK = String.raw`
   window.__installCastFake = () => {
     window.chrome = Object.assign(window.chrome ?? {}, {
       cast: {
-        AutoJoinPolicy: { ORIGIN_SCOPED: "origin_scoped" },
+        AutoJoinPolicy: {
+          ORIGIN_SCOPED: "origin_scoped",
+          TAB_AND_ORIGIN_SCOPED: "tab_and_origin_scoped",
+        },
         Image,
         media: {
           DEFAULT_MEDIA_RECEIVER_APP_ID: "CC1AD845",
@@ -333,7 +387,10 @@ const SDK = String.raw`
       currentTime: fake.player.currentTime,
       isPaused: fake.player.isPaused,
       playerState: fake.player.playerState,
+      media: fake.current?.url ?? null,
+      ended: fake.ended,
     }),
+    otherSenderLoads: (other) => otherMediaArrives(other),
     devicesAppear: () => setCastState("NOT_CONNECTED"),
     holdConnection: () => {
       fake.holdConnection = true;
@@ -360,6 +417,7 @@ const SDK = String.raw`
       change("currentTime", 0);
       change("isConnected", false);
       change("isMediaLoaded", false);
+      fake.player.mediaInfo = null;
       emitContext("sessionstatechanged", { sessionState: "SESSION_ENDED" });
       setCastState("NOT_CONNECTED");
     },
@@ -390,6 +448,24 @@ export const castFake = (
     | "disconnect"
     | "refetch",
 ): Promise<void> => page.evaluate(`window.__castFake.${action}()`);
+
+/**
+ * Has another tab of the origin cast `other` before `page` next opens a page: the session the SDK
+ * finds as it loads.
+ */
+export const otherTabCasting = (page: Page, other: OtherMedia): Promise<void> =>
+  page.evaluate(([key, value]) => localStorage.setItem(key, value), [
+    OTHER_TAB_KEY,
+    JSON.stringify(other),
+  ] as const);
+
+/** The other tab's cast ends: pages `page` opens from now on find no session. */
+export const otherTabStops = (page: Page): Promise<void> =>
+  page.evaluate((key) => localStorage.removeItem(key), OTHER_TAB_KEY);
+
+/** Another sender, such as another tab, loads `other` over what the receiver plays. */
+export const otherSenderLoads = (page: Page, other: OtherMedia): Promise<void> =>
+  page.evaluate(`window.__castFake.otherSenderLoads(${JSON.stringify(other)})`);
 
 /** Moves the fake receiver's playback position. */
 export const advanceReceiver = (page: Page, seconds: number): Promise<void> =>

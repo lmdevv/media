@@ -111,7 +111,9 @@ export const useCast = (
       if (!active || loaded === null) return;
       loaded.framework.CastContext.getInstance().setOptions({
         receiverApplicationId: loaded.cast.media.DEFAULT_MEDIA_RECEIVER_APP_ID,
-        autoJoinPolicy: loaded.cast.AutoJoinPolicy.ORIGIN_SCOPED,
+        // A tab rejoins its own cast after a reload, as `v0.2.0` did, and no other tab's: `/music`
+        // shares the origin, and a session another tab started plays that tab's media.
+        autoJoinPolicy: loaded.cast.AutoJoinPolicy.TAB_AND_ORIGIN_SCOPED,
       });
       setSdk(loaded);
     };
@@ -164,10 +166,21 @@ export const useCast = (
     setStarting(true);
 
     const start = async (): Promise<void> => {
-      const result = await CastPlayback.start(sdk, session, castable, cast, (message) => {
-        toast.error(message);
-        context?.endCurrentSession(true);
-      });
+      const result = await CastPlayback.start(
+        sdk,
+        session,
+        castable,
+        cast,
+        (message) => {
+          toast.error(message);
+          context?.endCurrentSession(true);
+        },
+        (message) => {
+          toast(message);
+          // Leaving keeps the other sender's media playing; stopping would end it for everyone.
+          context?.endCurrentSession(false);
+        },
+      );
 
       if (cancelled) {
         if (Result.isSuccess(result)) end(result.success);

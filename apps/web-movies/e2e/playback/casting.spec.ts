@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { isReceiverCredential } from "@media/contracts/cast";
 import { MEDIA_ROUTES } from "@media/contracts/media-playback";
 import { expect, test } from "@playwright/test";
+import { Option, Schema } from "effect";
 import type { BrowserContext, Page, Request } from "@playwright/test";
 
 import { createLibrary, removeLibrary, titlesByName } from "../stack/libraries";
@@ -24,7 +25,14 @@ import {
   signInClient,
 } from "../stack/people";
 import type { Client } from "../stack/people";
-import { advanceReceiver, castFake, installCastFake, receiver } from "./cast-fake";
+import {
+  advanceReceiver,
+  castFake,
+  installCastFake,
+  otherTabCasting,
+  otherTabStops,
+  receiver,
+} from "./cast-fake";
 import type { FakeReceiver } from "./cast-fake";
 import {
   capture,
@@ -68,7 +76,34 @@ const SRT = `1
 The pier lights come on one by one.
 `;
 
+/**
+ * Preloaded into the media server (`node --import`), it moves that process's wall clock by the
+ * milliseconds written in `E2E_CLOCK_FILE`, read again every 50 ms: Effect's clock reads
+ * `Date.now`, and timers keep real time, as with libfaketime.
+ */
+const SHIFTED_CLOCK = [
+  'import { readFileSync } from "node:fs";',
+  "const file = process.env.E2E_CLOCK_FILE;",
+  "const realNow = Date.now;",
+  "let offset = 0;",
+  "const read = () => {",
+  '  try { offset = Number(readFileSync(file, "utf8")) || 0; } catch { offset = 0; }',
+  "};",
+  "read();",
+  "setInterval(read, 50).unref();",
+  "Date.now = () => realNow() + offset;",
+].join("\n");
+
+/** The ticket a page negotiates with, from the body it posts. */
+const decodeNegotiation = Schema.decodeUnknownOption(Schema.Struct({ token: Schema.String }));
+
+/** When a play ticket expires, from its `t1.<kid>.<aud>.<iat>.<exp>.` fields. */
+const ticketExpiresAt = (ticket: string): number =>
+  Number(/^t1\.[^.]+\.[^.]+\.\d+\.(?<exp>\d+)\./u.exec(ticket)?.groups?.["exp"]) * 1000;
+
 let workspace = "";
+
+let clockFile = "";
 
 let media: MediaService | undefined;
 
@@ -132,8 +167,13 @@ test.beforeAll(async ({ browser }) => {
     ),
   ]);
 
+  clockFile = join(workspace, "clock-offset");
+  await writeText(clockFile, "0");
   buildMediaService();
-  media = await startMediaService(offline(stack), [workspace]);
+  media = await startMediaService(offline(stack), [workspace], {
+    NODE_OPTIONS: `--import=data:text/javascript,${encodeURIComponent(SHIFTED_CLOCK)}`,
+    E2E_CLOCK_FILE: clockFile,
+  });
   owner = await signInClient(stack, await createPerson(stack, "admin"));
   libraryId = await createLibrary(owner.platform, { name: `Casting ${run}`, folders: [films] });
 
@@ -534,6 +574,65 @@ test("a quality chosen while casting reaches the TV's stream", async () => {
   expect(asked.at(-1)).toContain('"maxHeight":480');
   page.off("request", onRequest);
   await castFake(page, "disconnect");
+});
+
+test("a start that sat paused past its ticket's expiry casts with a new start", async () => {
+  const tokens: Array<string> = [];
+
+  const onRequest = (request: Request): void => {
+    if (request.method() !== "POST" || !request.url().endsWith(MEDIA_ROUTES.negotiate)) return;
+    const body = decodeNegotiation(request.postDataJSON());
+
+    if (Option.isSome(body)) tokens.push(body.value.token);
+  };
+
+  page.on("request", onRequest);
+
+  try {
+    await page.goto(moviesPath(`/watch/${titleId(DIRECT)}?start=0`));
+    await expectPlayingPast(page, 2);
+    await page.getByTestId("player").press("k");
+
+    const [ticket = ""] = tokens;
+
+    // The media server's clock passes the start's ticket; the core mints new ones on its own.
+    await writeText(clockFile, String(ticketExpiresAt(ticket) + 500 - Date.now()));
+    await castFake(page, "devicesAppear");
+    await castToTv(page);
+
+    const load = (await receiver(page)).loads.at(-1);
+
+    expect(credentialsIn([load?.contentId ?? ""]).every(isReceiverCredential)).toBe(true);
+    // The receiver's stream came from a new start, with a ticket the moved clock still admits.
+    expect(tokens.at(-1)).not.toBe(ticket);
+    await expect
+      .poll(async () => (await receiver(page)).fetches.map(({ status }) => status))
+      .toEqual([206]);
+  } finally {
+    page.off("request", onRequest);
+    await writeText(clockFile, "0");
+  }
+});
+
+test("a movie page joins no cast another tab started, such as a song from /music", async () => {
+  // Another tab of the origin casts a song before this page opens.
+  await otherTabCasting(page, {
+    contentId: `${stack?.mediaUrl ?? ""}/media/music/stream/song1?p=original`,
+    duration: 180,
+    currentTime: 40,
+  });
+
+  try {
+    await page.goto(moviesPath(`/watch/${titleId(DIRECT)}?start=0`));
+    await expectPlayingPast(page, 2);
+
+    const seen = await receiver(page);
+
+    expect(seen.castState).not.toBe("CONNECTED");
+    expect(seen.loads).toStrictEqual([]);
+  } finally {
+    await otherTabStops(page);
+  }
 });
 
 /** The clock of the owner's movies group session. */

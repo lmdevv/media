@@ -10,6 +10,12 @@ import { CastPlayer } from "./cast-player";
 
 const ANY_CHANGE = "anyChanged";
 
+/** The stream this cast loaded on the receiver. */
+const OWN = "http://nas.lan:8080/media/hls/own/1/index.m3u8";
+
+/** A movie a second tab cast to the same receiver. */
+const OTHER = "http://nas.lan:8080/media/hls/other/1/index.m3u8";
+
 /**
  * A receiver whose mirror lags its commands, as a real one does over the network: `playOrPause`
  * reaches it at once, but the mirror only reports the new state on `deliver`. Mute toggles lag the
@@ -23,6 +29,9 @@ const laggingReceiver = ({ muted = false }: { readonly muted?: boolean } = {}) =
   let receiverMuted = muted;
   let mirrorMuted = muted;
   let muteCommands = 0;
+  let mirrorTime = 30;
+  let media: { readonly contentId: string } | null = { contentId: OWN };
+  let stops = 0;
   // The receiver's state after each command, in order, until the mirror reports it.
   const unreported: Array<boolean> = [];
   let toggles = 0;
@@ -39,10 +48,21 @@ const laggingReceiver = ({ muted = false }: { readonly muted?: boolean } = {}) =
       return mirrorMuted;
     }
 
+    get mediaInfo(): { readonly contentId: string } | null {
+      return media;
+    }
+
+    get currentTime(): number {
+      return mirrorTime;
+    }
+
+    set currentTime(value: number) {
+      mirrorTime = value;
+    }
+
     readonly canControlVolume = true;
     readonly duration = 600;
     readonly playerState = "PLAYING";
-    currentTime = 30;
     volumeLevel = 1;
   }
 
@@ -56,7 +76,9 @@ const laggingReceiver = ({ muted = false }: { readonly muted?: boolean } = {}) =
 
     seek(): void {}
 
-    stop(): void {}
+    stop(): void {
+      stops += 1;
+    }
 
     muteOrUnmute(): void {
       muteCommands += 1;
@@ -122,15 +144,37 @@ const laggingReceiver = ({ muted = false }: { readonly muted?: boolean } = {}) =
       for (const handler of handlers) handler({ field: "isMuted", value: mirrorMuted });
     },
     toggles: () => toggles,
+    stops: () => stops,
+    /** A sender, this cast or another, puts `contentId` on the receiver, as the mirror tells. */
+    mediaArrives: (contentId: string) => {
+      media = { contentId };
+
+      for (const handler of handlers) handler({ field: "mediaInfo", value: media });
+    },
+    /** The mirror reports the receiver at `seconds`. */
+    reachTime: (seconds: number) => {
+      mirrorTime = seconds;
+
+      for (const handler of handlers) handler({ field: "currentTime", value: seconds });
+    },
+    /** The mirror reports the receiver paused or playing, whatever toggles are on their way. */
+    reachPaused: (paused: boolean) => {
+      mirrorPaused = paused;
+      receiverPaused = paused;
+
+      for (const handler of handlers) handler({ field: "isPaused", value: paused });
+    },
   };
 };
 
-const castPlayer = (framework: CastFramework): CastPlayer =>
+const castPlayer = (framework: CastFramework, taken: () => void = () => undefined): CastPlayer =>
   new CastPlayer(
     framework,
+    OWN,
     () => Promise.resolve(),
     () => null,
     () => undefined,
+    taken,
   );
 
 afterEach(() => {
@@ -138,6 +182,78 @@ afterEach(() => {
 });
 
 describe("CastPlayer", () => {
+  it("lets the receiver be once a second tab's movie takes it, and keeps where this cast was", () => {
+    const receiver = laggingReceiver();
+    const taken: Array<true> = [];
+    const player = castPlayer(receiver.framework, () => taken.push(true));
+    const heard: Array<string> = [];
+
+    player.subscribe((event) => heard.push(event));
+    receiver.reachTime(40);
+    receiver.mediaArrives(OTHER);
+    receiver.reachTime(3605);
+    receiver.reachPaused(true);
+
+    expect(taken).toHaveLength(1);
+    expect(heard).toStrictEqual([]);
+    expect(player.positionMs()).toBe(40_000);
+
+    player.stopReceiver();
+
+    expect(receiver.stops()).toBe(0);
+  });
+
+  it("says nothing of the media before its newest load until that load shows", () => {
+    const receiver = laggingReceiver();
+    const taken: Array<true> = [];
+    const player = castPlayer(receiver.framework, () => taken.push(true));
+    const next = "http://nas.lan:8080/media/hls/own/2/index.m3u8";
+
+    receiver.reachTime(40);
+    // The cast loads a new generation; the receiver still shows the last one meanwhile.
+    player.expect(next);
+    receiver.reachTime(3605);
+
+    expect(taken).toStrictEqual([]);
+    expect(player.positionMs()).toBe(40_000);
+
+    receiver.mediaArrives(next);
+    receiver.reachTime(41);
+
+    expect(player.positionMs()).toBe(41_000);
+  });
+
+  it("takes a late report of its own older load for the media before, not another tab's", () => {
+    const receiver = laggingReceiver();
+    const taken: Array<true> = [];
+    const player = castPlayer(receiver.framework, () => taken.push(true));
+    const french = "http://nas.lan:8080/media/hls/own/2/index.m3u8";
+    const english = "http://nas.lan:8080/media/hls/own/3/index.m3u8";
+
+    // Two audio changes load one after the other; the receiver reports the first one late.
+    player.expect(french);
+    player.expect(english);
+    receiver.mediaArrives(french);
+
+    expect(taken).toStrictEqual([]);
+
+    receiver.mediaArrives(english);
+    receiver.reachTime(12);
+
+    expect(player.positionMs()).toBe(12_000);
+  });
+
+  it("lets the receiver be when another tab loads before the cast's newest media shows", () => {
+    const receiver = laggingReceiver();
+    const taken: Array<true> = [];
+    const player = castPlayer(receiver.framework, () => taken.push(true));
+
+    player.expect("http://nas.lan:8080/media/hls/own/2/index.m3u8");
+    receiver.mediaArrives(OTHER);
+
+    expect(taken).toHaveLength(1);
+  });
+
   it("sends one toggle at a time, and the next once the mirror shows the first", async () => {
     const receiver = laggingReceiver();
     const player = castPlayer(receiver.framework);

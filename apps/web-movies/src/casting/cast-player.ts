@@ -5,6 +5,11 @@
  * needs the stream moved first (HLS); until it lands, the player reports the target and counts as
  * buffering, as the element player does. Receivers play at normal speed only (`fixedRate`), so
  * the room engine corrects drift by seeking.
+ *
+ * The mirror names the media it describes, and only this cast's newest load is this player's
+ * (ADR 0018): the media before it, or another sender's, such as a second tab's movie or a song cast
+ * from `/music`, says nothing. Once another sender's media takes the receiver from this cast's,
+ * `taken` hears it, and the player follows the receiver no more.
  */
 import type { PlayerEvent, PlayerPort } from "@media/sdk/effect";
 
@@ -25,6 +30,9 @@ const FINISHED = "FINISHED";
 
 const ERROR = "ERROR";
 
+/** How many of its own loads' media a cast remembers, to tell a late report from another sender. */
+const OWN_MEDIA_KEPT = 32;
+
 /** How long a play or pause may take to show in the receiver's mirror before it counts as lost. */
 const TOGGLE_TIMEOUT_MS = 5_000;
 
@@ -40,6 +48,15 @@ export interface RemoteState {
   readonly volumeSettable: boolean;
 }
 
+/** The media a cast loaded on the receiver, as the mirror names it. */
+interface OwnMedia {
+  readonly contentId: string;
+  /** Whether the mirror has named it since it was loaded. */
+  readonly shown: boolean;
+  /** What the mirror named as it was loaded: the media before it. */
+  readonly before: string | null;
+}
+
 /** A Chromecast's player as the progress reporter, the room engine, and the controls see it. */
 export class CastPlayer implements PlayerPort {
   readonly #remote: RemotePlayer;
@@ -48,6 +65,16 @@ export class CastPlayer implements PlayerPort {
   readonly #move: (positionMs: number, signal: AbortSignal) => Promise<void>;
   readonly #idleReason: () => string | null;
   readonly #failed: () => void;
+  readonly #taken: () => void;
+  /**
+   * The media this cast loaded last, whether the mirror has shown it since, and what the mirror
+   * named as it was loaded.
+   */
+  #own: OwnMedia;
+  /** Another sender's media took the receiver: the player follows it no more. */
+  #lost = false;
+  /** The media this cast loaded on the receiver, newest last: a late report of one is its own. */
+  readonly #loaded: Array<string> = [];
   readonly #listeners = new Set<(event: PlayerEvent) => void>();
   readonly #watchers = new Set<() => void>();
   #pending: number | null = null;
@@ -78,15 +105,19 @@ export class CastPlayer implements PlayerPort {
   #state: RemoteState;
 
   /**
+   * @param contentId - The media the cast loaded on the receiver.
    * @param move - Moves the receiver to a position, aborting when a newer seek replaces it.
    * @param idleReason - Why the receiver's media last went idle, or null.
    * @param failed - Hears that the receiver stopped because its media failed (a download error).
+   * @param taken - Hears that another sender's media took the receiver from this cast's.
    */
   constructor(
     framework: CastFramework,
+    contentId: string,
     move: (positionMs: number, signal: AbortSignal) => Promise<void>,
     idleReason: () => string | null,
     failed: () => void,
+    taken: () => void,
   ) {
     this.#remote = new framework.RemotePlayer();
     this.#controller = new framework.RemotePlayerController(this.#remote);
@@ -94,6 +125,11 @@ export class CastPlayer implements PlayerPort {
     this.#move = move;
     this.#idleReason = idleReason;
     this.#failed = failed;
+    this.#taken = taken;
+    const named = this.#remote.mediaInfo?.contentId ?? null;
+
+    this.#own = { contentId, shown: named === contentId, before: named };
+    this.#loaded.push(contentId);
     this.#state = this.#read();
     this.#controller.addEventListener(this.#changeEvent, this.#onChange);
   }
@@ -116,6 +152,24 @@ export class CastPlayer implements PlayerPort {
     this.#controller.removeEventListener(this.#changeEvent, this.#onChange);
     this.#listeners.clear();
     this.#watchers.clear();
+  }
+
+  /** The cast loads `contentId` on the receiver: from now on, only that media is this player's. */
+  expect(contentId: string): void {
+    this.#own = { contentId, shown: false, before: this.#remote.mediaInfo?.contentId ?? null };
+    this.#loaded.push(contentId);
+
+    if (this.#loaded.length > OWN_MEDIA_KEPT) this.#loaded.shift();
+  }
+
+  /**
+   * Whether the mirror describes this cast's newest media: it names that media, or none, as while
+   * it resets.
+   */
+  #describes(): boolean {
+    const media = this.#remote.mediaInfo?.contentId ?? null;
+
+    return media === null || media === this.#own.contentId;
   }
 
   /** The receiver's state now; a new object after every change. */
@@ -154,6 +208,41 @@ export class CastPlayer implements PlayerPort {
   }
 
   readonly #onChange = (change: RemotePlayerChange): void => {
+    if (this.#lost) return;
+
+    // Mute and volume belong to the receiver, whichever media it plays.
+    if (change.field === "isMuted") {
+      this.#settleMuteToggle();
+      this.#reconcileMute();
+    }
+
+    const media = this.#remote.mediaInfo?.contentId ?? null;
+
+    if (media !== null && media !== this.#own.contentId) {
+      // An older load of this cast's, or the media before its newest, says nothing of it. Other
+      // media arriving after that load, or after its own showed, is another sender's, which took
+      // the receiver.
+      if (!this.#loaded.includes(media) && (this.#own.shown || media !== this.#own.before)) {
+        this.#lost = true;
+        this.#taken();
+
+        return;
+      }
+
+      this.#refresh();
+
+      return;
+    }
+
+    if (media !== null && !this.#own.shown) {
+      this.#own = { ...this.#own, shown: true };
+      // The mirror reports its fields one at a time: a play or pause asked meanwhile goes once
+      // the rest of this media's state came.
+      queueMicrotask(() => {
+        this.#reconcile();
+      });
+    }
+
     // A disconnect resets the mirror (time to zero, paused), in whatever order the SDK reports
     // the fields; a jump to zero this player did not ask for is that reset, not a position.
     const reset =
@@ -169,11 +258,6 @@ export class CastPlayer implements PlayerPort {
     if (change.field === "isPaused") {
       this.#settleToggle();
       this.#reconcile();
-    }
-
-    if (change.field === "isMuted") {
-      this.#settleMuteToggle();
-      this.#reconcileMute();
     }
 
     // Every pause and play the receiver goes through is reported, even one it is being toggled
@@ -207,18 +291,32 @@ export class CastPlayer implements PlayerPort {
 
   /** Where the receiver itself is, ignoring a seek in progress. */
   receiverPositionMs(): number {
-    return this.#remote.isConnected ? this.#remote.currentTime * 1000 : this.#last.positionMs;
+    return this.#following() ? this.#remote.currentTime * 1000 : this.#last.positionMs;
   }
 
-  /** Paused as last asked while that is on its way to the receiver, else as its mirror says. */
-  readonly isPaused = (): boolean =>
-    this.#remote.isConnected ? (this.#wanted ?? this.#remote.isPaused) : this.#last.paused;
+  /**
+   * Paused as last asked while that is on its way to the receiver, else as its mirror says, or as
+   * it last said of this cast's media.
+   */
+  readonly isPaused = (): boolean => {
+    if (this.#following()) return this.#wanted ?? this.#remote.isPaused;
+
+    return this.#remote.isConnected && !this.#lost
+      ? (this.#wanted ?? this.#last.paused)
+      : this.#last.paused;
+  };
 
   /** Seeking, an asked play the receiver hasn't started yet, or the receiver buffering. */
   readonly isBuffering = (): boolean =>
     this.#pending !== null ||
-    (this.#wanted === false && this.#remote.isPaused) ||
-    (!this.#remote.isPaused && this.#remote.playerState === BUFFERING);
+    (this.#following() &&
+      ((this.#wanted === false && this.#remote.isPaused) ||
+        (!this.#remote.isPaused && this.#remote.playerState === BUFFERING)));
+
+  /** Whether the mirror speaks of this cast's media now: connected, not taken, describing it. */
+  #following(): boolean {
+    return this.#remote.isConnected && !this.#lost && this.#describes();
+  }
 
   readonly playbackRate = (): number => 1;
 
@@ -272,7 +370,10 @@ export class CastPlayer implements PlayerPort {
    * is trusted again.
    */
   #reconcile(): void {
-    if (this.#wanted === null || this.#toggling !== null) return;
+    if (this.#wanted === null || this.#toggling !== null || this.#lost) return;
+
+    // The mirror's pause belongs to another's media until it describes this cast's.
+    if (this.#remote.isConnected && !this.#describes()) return;
 
     // A receiver that is gone takes no commands; its mirror resets to paused.
     if (!this.#remote.isConnected || this.#remote.isPaused === this.#wanted) {
@@ -303,9 +404,9 @@ export class CastPlayer implements PlayerPort {
     this.#toggling = null;
   }
 
-  /** Stops the receiver's media; the device stays connected. */
+  /** Stops the receiver's media, unless another sender's took it; the device stays connected. */
   stopReceiver(): void {
-    this.#controller.stop();
+    if (!this.#lost) this.#controller.stop();
   }
 
   /** Sets the receiver's volume, from 0 to 1: silence mutes it, and any other level unmutes it. */

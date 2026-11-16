@@ -101,9 +101,16 @@ export interface CastContext {
   ): void;
 }
 
+/** The media on the receiver, as the mirror names it: the URL a sender loaded. */
+interface CastMediaId {
+  readonly contentId: string;
+}
+
 /** The receiver's player as the sender mirrors it. */
 export interface RemotePlayer {
   readonly isConnected: boolean;
+  /** The media on the receiver, whichever sender loaded it; null while it has none. */
+  readonly mediaInfo: CastMediaId | null;
   readonly isPaused: boolean;
   readonly isMuted: boolean;
   /** False for a receiver whose volume is fixed, such as one a TV sets over HDMI. */
@@ -145,7 +152,7 @@ export interface CastFramework {
 
 /** `chrome.cast`. */
 export interface ChromeCast {
-  readonly AutoJoinPolicy: { readonly ORIGIN_SCOPED: string };
+  readonly AutoJoinPolicy: { readonly TAB_AND_ORIGIN_SCOPED: string };
   readonly Image: new (url: string) => CastImage;
   readonly media: {
     readonly DEFAULT_MEDIA_RECEIVER_APP_ID: string;

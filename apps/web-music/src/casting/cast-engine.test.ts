@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import type {
   CastFramework,
+  CastMediaId,
   CastLoadRequest,
   CastSession,
   ChromeCast,
@@ -52,7 +53,13 @@ interface Loaded {
   readonly contentType: string;
   readonly title: string;
   readonly currentTime: number;
+  readonly autoplay: boolean;
   readonly answer: ReturnType<typeof deferred<string | undefined>>;
+}
+
+/** The media on the receiver, as a sender loaded it; null while it has none. */
+interface OnReceiver {
+  media: CastMediaId | null;
 }
 
 /** The Cast SDK as the engine uses it, played by the test, and the engine over it. */
@@ -76,11 +83,22 @@ const castSetup = () => {
     volumeLevel: 1,
   };
 
+  const onReceiver: OnReceiver = { media: null };
+
   const change = (field: keyof typeof mirror, value: boolean | number | string): void => {
     Reflect.set(mirror, field, value);
 
     for (const listener of listeners) listener({ field, value });
   };
+
+  /** Another sender, or this engine's load, puts `contentId` on the receiver, as the mirror tells. */
+  const mediaArrives = (contentId: string | null): void => {
+    onReceiver.media = contentId === null ? null : { contentId };
+
+    for (const listener of listeners) listener({ field: "mediaInfo", value: onReceiver.media });
+  };
+
+  const taken: Array<true> = [];
 
   /** Every RemotePlayer the SDK makes mirrors the one receiver, as the fake's do. */
   class MirroredPlayer implements RemotePlayer {
@@ -94,6 +112,10 @@ const castSetup = () => {
 
     get isMuted(): boolean {
       return mirror.isMuted;
+    }
+
+    get mediaInfo(): CastMediaId | null {
+      return onReceiver.media;
     }
 
     get playerState(): string {
@@ -169,7 +191,7 @@ const castSetup = () => {
   };
 
   const cast: ChromeCast = {
-    AutoJoinPolicy: { ORIGIN_SCOPED: "origin_scoped" },
+    AutoJoinPolicy: { TAB_AND_ORIGIN_SCOPED: "tab_and_origin_scoped" },
     Image: class {
       readonly url: string;
 
@@ -205,6 +227,7 @@ const castSetup = () => {
         contentType: info?.contentType ?? "",
         title: info?.metadata.title ?? "",
         currentTime: request.currentTime,
+        autoplay: request.autoplay,
         answer,
       });
 
@@ -233,6 +256,9 @@ const castSetup = () => {
 
       return probeStatus;
     },
+    taken: () => {
+      taken.push(true);
+    },
   };
 
   const engine = new CastEngine({ framework, cast }, session, host);
@@ -249,12 +275,29 @@ const castSetup = () => {
     probes,
     media,
     change,
+    mediaArrives,
+    taken,
     mirror,
     setProbe: (status: number | null) => {
       probeStatus = status;
     },
     probeHold,
   };
+};
+
+/** A movie another tab cast from `/movies` on the same receiver. */
+const MOVIE = "http://nas.lan:8080/media/hls/movie1/1/index.m3u8";
+
+/** Loads the song in `run`'s engine and has the receiver take it; answers its content id. */
+const landSong = async (run: ReturnType<typeof castSetup>, autoplay = true): Promise<string> => {
+  const loading = run.engine.load(source(STREAM), 0, autoplay);
+
+  run.lends[0]?.settle(CREDENTIAL);
+  await settled();
+  run.loads[0]?.answer.settle(undefined);
+  await loading;
+
+  return run.loads[0]?.contentId ?? "";
 };
 
 describe("CastEngine", () => {
@@ -416,6 +459,136 @@ describe("CastEngine", () => {
     run.change("isConnected", false);
 
     expect(run.engine.samplePlayback().positionMs).toBe(5_000);
+  });
+
+  it("hands the song back, and leaves the receiver alone, once another tab's movie takes it", async () => {
+    const run = castSetup();
+    const song = await landSong(run);
+
+    run.mediaArrives(song);
+    run.change("isPaused", false);
+    run.change("currentTime", 20);
+    // The person seeks; the receiver has not shown it yet when the movie arrives.
+    run.engine.seek(90_000);
+
+    const before = run.events.length;
+
+    // The movies tab casts a movie to the same receiver, which plays it an hour in and ends it.
+    run.mediaArrives(MOVIE);
+    run.change("currentTime", 3605);
+    run.change("isPaused", true);
+    run.media.idleReason = "FINISHED";
+    run.change("playerState", "IDLE");
+
+    expect(run.taken).toHaveLength(1);
+    expect(run.events.slice(before)).toStrictEqual([]);
+    expect(run.engine.samplePlayback()).toStrictEqual({ positionMs: 90_000, playing: false });
+
+    // Taking the song back unloads the engine, which leaves the movie playing.
+    run.engine.unload();
+    await run.engine.play();
+
+    expect(run.commands).toStrictEqual(["seek 90"]);
+  });
+
+  it("says nothing of a movie on the receiver before the song's own media shows", async () => {
+    const run = castSetup();
+
+    // The receiver plays another tab's movie an hour in as the song loads.
+    run.mediaArrives(MOVIE);
+    run.change("isPaused", false);
+    run.change("currentTime", 3600);
+
+    const song = await landSong(run);
+
+    expect(run.events).toStrictEqual([{ type: "time", positionMs: 0 }, { type: "playing" }]);
+
+    run.change("currentTime", 3601);
+    run.media.idleReason = "FINISHED";
+    run.change("playerState", "IDLE");
+
+    expect(run.events).toHaveLength(2);
+    expect(run.taken).toStrictEqual([]);
+
+    // The song's own media replaces the movie, and the engine follows it from then on.
+    run.media.idleReason = null;
+    run.mediaArrives(song);
+    run.change("currentTime", 2);
+
+    expect(run.events.at(-1)).toStrictEqual({ type: "time", positionMs: 2_000 });
+  });
+
+  it("hands the song back when another sender loads before the song's own media shows", async () => {
+    const run = castSetup();
+
+    run.mediaArrives(MOVIE);
+    await landSong(run);
+
+    // The movies tab moves its movie to a new stream before the receiver shows the song.
+    run.mediaArrives("http://nas.lan:8080/media/hls/movie1/2/index.m3u8");
+
+    expect(run.taken).toHaveLength(1);
+  });
+
+  it("takes a late report of its own song before for the media before, not another sender's", async () => {
+    const run = castSetup();
+    const first = run.engine.load(source(STREAM), 0, true);
+
+    run.lends[0]?.settle(CREDENTIAL);
+    await settled();
+
+    // The person skips before the receiver answered the first song.
+    const second = run.engine.load(source(OTHER), 0, true);
+
+    run.lends[1]?.settle(CREDENTIAL);
+    await settled();
+    run.loads[0]?.answer.settle(undefined);
+    run.loads[1]?.answer.settle(undefined);
+    await Promise.all([first, second]);
+
+    // The receiver reports the first song late, then the second.
+    run.mediaArrives(run.loads[0]?.contentId ?? "");
+    run.mediaArrives(run.loads[1]?.contentId ?? "");
+    run.change("currentTime", 3);
+
+    expect(run.taken).toStrictEqual([]);
+    expect(run.events.at(-1)).toStrictEqual({ type: "time", positionMs: 3_000 });
+  });
+
+  it("loads the song paused when the person pauses while its credential is on its way", async () => {
+    const run = castSetup();
+    const loading = run.engine.load(source(STREAM), 0, true);
+
+    run.engine.pause();
+    run.lends[0]?.settle(CREDENTIAL);
+    await settled();
+
+    expect(run.loads[0]?.autoplay).toBe(false);
+    run.loads[0]?.answer.settle(undefined);
+    await loading;
+  });
+
+  it("asks a pause made while the receiver loads of the song, not of the idle receiver before it", async () => {
+    const run = castSetup();
+    const loading = run.engine.load(source(STREAM), 0, true);
+
+    run.lends[0]?.settle(CREDENTIAL);
+    await settled();
+    // The load asked to play; the person pauses before the receiver answers, which shows paused.
+    run.engine.pause();
+    run.loads[0]?.answer.settle(undefined);
+    await loading;
+
+    expect(run.engine.samplePlayback().playing).toBe(false);
+    expect(run.commands).toStrictEqual([]);
+
+    // The receiver starts the song playing, as the load asked; the pause goes once it shows.
+    run.mediaArrives(run.loads[0]?.contentId ?? "");
+    run.change("playerState", "PLAYING");
+    run.change("isPaused", false);
+    await settled();
+
+    expect(run.commands).toStrictEqual(["playOrPause"]);
   });
 
   it("stops a song the receiver took after the player let go of it", async () => {

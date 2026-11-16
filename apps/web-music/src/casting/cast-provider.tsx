@@ -146,8 +146,12 @@ const probe = async (url: string): Promise<number | null> => {
 };
 
 /**
- * Plays the queue through the Chromecast this browser connects to, and tells its children. A Jam
- * plays here and casts nowhere, as old music had no casting (ADR 0018): joining one ends the cast.
+ * Plays the queue through the Chromecast this tab connects to, and tells its children (ADR 0018).
+ * The tab joins on its own only a Cast session it started, after a reload too: `/movies` shares the
+ * origin, and a session another tab started plays that tab's media. When another sender's media
+ * takes the receiver, the song comes back here paused and the tab leaves the session, the receiver
+ * playing on. A Jam plays here and casts nowhere, as old music had no casting: joining one ends the
+ * cast this tab drives.
  */
 export function CastProvider({ children }: { readonly children: ReactNode }) {
   const player = usePlayer();
@@ -167,7 +171,7 @@ export function CastProvider({ children }: { readonly children: ReactNode }) {
       if (!active || loaded === null) return;
       loaded.framework.CastContext.getInstance().setOptions({
         receiverApplicationId: loaded.cast.media.DEFAULT_MEDIA_RECEIVER_APP_ID,
-        autoJoinPolicy: loaded.cast.AutoJoinPolicy.ORIGIN_SCOPED,
+        autoJoinPolicy: loaded.cast.AutoJoinPolicy.TAB_AND_ORIGIN_SCOPED,
       });
       setSdk(loaded);
     };
@@ -185,7 +189,8 @@ export function CastProvider({ children }: { readonly children: ReactNode }) {
   const [device, setDevice] = useState<{ readonly name: string | null } | null>(null);
   const inJam = useJoinedJam() !== null;
 
-  // Chrome's own Cast menu can connect too, so this ends any cast while a Jam plays here.
+  // Chrome's own Cast menu can connect too, so this ends the tab's cast while a Jam plays here: a
+  // tab is connected only to a session it started, or chose and loaded its song on.
   useEffect(() => {
     if (connected && inJam) context?.endCurrentSession(true);
   }, [connected, inJam, context]);
@@ -199,6 +204,11 @@ export function CastProvider({ children }: { readonly children: ReactNode }) {
       song: (trackId) => songIn(latest.current, trackId),
       lend,
       probe,
+      taken: () => {
+        latest.current.castTaken();
+        // Leaving keeps the other sender's media playing; stopping would end it for everyone.
+        context?.endCurrentSession(false);
+      },
     };
 
     const engine = new CastEngine(sdk, session, host);

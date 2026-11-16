@@ -1282,6 +1282,31 @@ describe("PlaybackController casting to a receiver", () => {
     run.stop();
   });
 
+  it("takes the song back paused where the receiver was once another sender's media took it", async () => {
+    const run = setup({ playCurrent: "1" });
+
+    await run.controller.playTracks(["a", "b"], 0);
+    run.controller.sync(queueOf([one, two], "1"));
+    await settle();
+
+    run.controller.castTo(run.receiver("Living Room TV"));
+    await settle();
+    run.engine().emit({ type: "time", positionMs: 75_000 });
+
+    run.controller.castTaken();
+    await settle();
+
+    expect(run.record.loads.at(-1)).toMatchObject({ kind: "html", startMs: 75_000 });
+    expect(run.controller.getSnapshot()).toMatchObject({
+      engine: "html",
+      engineStatus: "paused",
+      current: "1",
+      cast: null,
+    });
+    expect(run.controller.playingHere()).toMatchObject({ trackId: "a", playing: false });
+    run.stop();
+  });
+
   it("sets the receiver's volume while it plays and keeps this device's own", async () => {
     const run = setup({ playCurrent: "1" });
 

@@ -13,7 +13,11 @@
  * within it happens on the receiver at once. A stream whose ticket expired, or whose session the
  * server no longer knows, takes a new start (`startHandedOff`) and loads again where the TV was.
  * A receiver that refuses a stream, or a start that can no longer play, ends the cast through
- * `onLost`. Ending the cast stops the receiver's stream and continues on the page where the TV was.
+ * `onLost`. Another sender's media taking the receiver, such as a second tab's movie or a song cast
+ * from `/music`, ends the cast on the page's side at once, paused where the TV was, and `onTaken`
+ * hears it so the page leaves the session with that media playing on. Ending the cast stops the
+ * receiver's stream and continues on the page where the TV was. A start whose ticket expired before
+ * the cast takes a new start first, as one expiring mid-cast does.
  *
  * Every load on the receiver has a number, and what the receiver says applies only to the newest
  * load (ADR 0018): an answer to an older `loadMedia`, and the end or failure of the media an older
@@ -82,6 +86,7 @@ const LOST = {
   refused: "The TV couldn't play this. Continuing here.",
   ended: "This can no longer play on the TV. Continuing here.",
   failed: "The TV stopped playing this. Continuing here.",
+  taken: "Something else is playing on the TV now. Continuing here.",
 } as const;
 
 const loadRequest = (sdk: CastSdk, plan: CastLoadPlan, autoplay: boolean): CastLoadRequest => {
@@ -190,6 +195,7 @@ export class CastPlayback {
   readonly #controller: PlaybackController;
   readonly #item: CastItem;
   readonly #onLost: (message: string) => void;
+  readonly #onTaken: (message: string) => void;
   #receiver: ReceiverStream;
   /** Where the receiver's current HLS generation starts. */
   #generationStartMs: number;
@@ -222,6 +228,7 @@ export class CastPlayback {
     item: CastItem,
     playing: { readonly receiver: ReceiverStream; readonly plan: CastLoadPlan },
     onLost: (message: string) => void,
+    onTaken: (message: string) => void,
   ) {
     this.#sdk = sdk;
     this.#session = session;
@@ -231,6 +238,7 @@ export class CastPlayback {
     this.#plan = playing.plan;
     this.#generationStartMs = playing.plan.startSeconds * 1000;
     this.#onLost = onLost;
+    this.#onTaken = onTaken;
 
     const snapshot = controller.getSnapshot();
 
@@ -239,11 +247,17 @@ export class CastPlayback {
     this.#choices = choicesKey(controller);
     this.player = new CastPlayer(
       sdk.framework,
+      playing.plan.contentUrl,
       (positionMs, signal) => this.#moveTo(positionMs, signal),
       // The media an older load left on the receiver ends or fails as the newest replaces it.
       () => (this.#loading ? null : (session.getMediaSession()?.idleReason ?? null)),
       () => {
         if (!this.#stopped && !this.#loading) this.#onLost(LOST.failed);
+      },
+      () => {
+        if (this.#stopped) return;
+        this.#end(true, false);
+        this.#onTaken(LOST.taken);
       },
     );
   }
@@ -257,7 +271,8 @@ export class CastPlayback {
    * Negotiates a stream for the device in `session` at the page's position, loads it there with a
    * receiver credential, and hands the start to it. The media server keeps one stream per start,
    * so the receiver's stream replaces the page's, and the page waits (`handOff`) until the cast ends.
-   * `onLost` hears when the cast can no longer go on, so the caller ends it.
+   * `onLost` hears when the cast can no longer go on, so the caller ends it; `onTaken` hears that
+   * another sender's media took the receiver, after the page took the start back paused.
    */
   static async start(
     sdk: CastSdk,
@@ -265,6 +280,7 @@ export class CastPlayback {
     controller: PlaybackController,
     item: CastItem,
     onLost: (message: string) => void,
+    onTaken: (message: string) => void,
   ): Promise<Result.Result<CastPlayback, CastFailure>> {
     const snapshot = controller.getSnapshot();
     const { started, stream } = snapshot;
@@ -286,12 +302,19 @@ export class CastPlayback {
       return Result.fail(failure);
     };
 
-    const receiver = await receiverStream(
-      started,
-      controller,
-      positionMs,
-      snapshot.audioStreamIndex,
-    );
+    const first = await receiverStream(started, controller, positionMs, snapshot.audioStreamIndex);
+
+    // A start that sat paused past its ticket's expiry, or whose session the server lost, takes a
+    // new start, as one that expires mid-cast does.
+    const renewed =
+      first !== null && Result.isFailure(first) && needsNewStart(first.failure)
+        ? await controller.startHandedOff()
+        : null;
+
+    const receiver =
+      renewed === null
+        ? first
+        : await receiverStream(renewed, controller, positionMs, snapshot.audioStreamIndex);
 
     if (receiver === null || Result.isFailure(receiver)) return resumeOnPage("unsupported");
 
@@ -320,6 +343,7 @@ export class CastPlayback {
       item,
       { receiver: receiver.success, plan },
       onLost,
+      onTaken,
     );
 
     controller.output.switchTo(cast.player);
@@ -467,6 +491,7 @@ export class CastPlayback {
     );
     this.#generationStartMs = positionMs;
     this.#loading = true;
+    this.player.expect(this.#plan.contentUrl);
 
     const failure = await this.#session
       .loadMedia(loadRequest(this.#sdk, this.#plan, !this.player.isPaused()))
@@ -546,11 +571,15 @@ export class CastPlayback {
    * where the TV stopped. The cast session itself is the caller's to end.
    */
   stop(resume: boolean): void {
+    this.#end(resume, !this.player.isPaused());
+  }
+
+  /** Ends the cast as `stop` does; with `resume`, the page takes the start back, `playing` or not. */
+  #end(resume: boolean, playing: boolean): void {
     if (this.#stopped) return;
     this.#stopped = true;
 
     const positionMs = this.player.positionMs();
-    const wasPlaying = !this.player.isPaused();
 
     clearTimeout(this.#retryTimer);
     this.#unsubscribe();
@@ -559,6 +588,6 @@ export class CastPlayback {
 
     if (!resume) return;
     this.#controller.output.switchTo(this.#controller.player);
-    this.#controller.takeBack(positionMs, wasPlaying);
+    this.#controller.takeBack(positionMs, playing);
   }
 }

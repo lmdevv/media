@@ -129,6 +129,9 @@ const local = (baseUrl: string, url: string): string => {
 const get = (url: string, headers: Readonly<Record<string, string>> = {}) =>
   HttpClient.get(url, { headers }).pipe(Effect.orDie);
 
+/** The media server's answer to a sender asking for its receiver's credential. */
+const decodeLent = Schema.decodeUnknownEffect(Schema.Struct({ credential: Schema.String }));
+
 const post = (url: string, body: RequestBody | WireBatch) =>
   HttpClient.execute(HttpClientRequest.post(url).pipe(HttpClientRequest.bodyJsonUnsafe(body))).pipe(
     Effect.orDie,
@@ -591,6 +594,48 @@ describe.skipIf(!hasFfmpeg)("media service over HTTP", () => {
 
         assert.strictEqual(sought.generation, 2);
         yield* segmentMatches(local(server.baseUrl, sought.playlistUrl), 5);
+      }),
+    );
+
+    it.effect("lets only the sender move or stop a stream, never its receiver's credential", () =>
+      Effect.gen(function* () {
+        const server = yield* MediaTestServer.Service;
+        const { library } = yield* FixtureWorkspace.Service;
+        const fileId = server.fileId("movies", library.remuxMovie);
+        const token = signTestToken({ fid: fileId, sid: "sender-only" });
+        const started = yield* negotiated({ token, capabilities: withDolbyAudio, startSeconds: 0 });
+        const streamId = started.streamId ?? "";
+        const lent = yield* post(`${server.baseUrl}/api/playback/receiver`, { token });
+        const { credential } = yield* decodeLent(yield* json(lent)).pipe(Effect.orDie);
+
+        for (const route of ["seek", "stop"]) {
+          const refused = yield* post(`${server.baseUrl}/api/playback/${route}`, {
+            token: credential,
+            streamId,
+            positionSeconds: 5,
+          });
+
+          assert.strictEqual(refused.status, 401);
+          assert.deepInclude(yield* json(refused), {
+            _tag: "PlaybackTokenInvalid",
+            reason: "wrong_purpose",
+          });
+        }
+
+        // The credential still plays the stream its sender started, and the sender stops it.
+        const playlist = new URL(local(server.baseUrl, started.url));
+
+        const param = [...playlist.searchParams.keys()].find(
+          (key) => playlist.searchParams.get(key) === token,
+        );
+
+        playlist.searchParams.set(param ?? "", credential);
+        assert.isDefined(param);
+        assert.strictEqual((yield* get(playlist.href)).status, 200);
+
+        const stopped = yield* postText(`${server.baseUrl}/api/playback/stop`, { token, streamId });
+
+        assert.strictEqual(stopped.status, 204);
       }),
     );
 

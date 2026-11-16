@@ -14,7 +14,15 @@ import { expect, test } from "@playwright/test";
 import type { Browser, BrowserContext, Page } from "@playwright/test";
 
 import { audioSeconds, watchMedia } from "./audio";
-import { advanceReceiver, castFake, installCastFake, receiver } from "./cast-fake";
+import {
+  advanceReceiver,
+  castFake,
+  installCastFake,
+  otherSenderLoads,
+  otherTabCasting,
+  otherTabStops,
+  receiver,
+} from "./cast-fake";
 import { FIRST_SONG, startMediaService, writeMusicLibrary } from "./media-service";
 import type { MediaService } from "./media-service";
 import {
@@ -43,6 +51,13 @@ const SLOW_BYTES_PER_SECOND = 32 * 1024;
 
 /** An MP3 every Chromecast decodes, which casts as its original file. */
 const MP3_SONG = "Third Tone";
+
+/** A movie another tab of the origin, `/movies`, casts to the same TV, an hour in. */
+const OTHER_TAB_MOVIE = {
+  contentId: "http://localhost/media/hls/movie/1/index.m3u8",
+  duration: 5400,
+  currentTime: 3600,
+} as const;
 
 let media: MediaService | undefined;
 
@@ -102,14 +117,14 @@ test.afterAll(async () => {
 const openBrowser = async (
   browser: Browser,
   baseURL: string | undefined,
-  { cast }: { readonly cast: boolean },
+  { cast, who = person }: { readonly cast: boolean; readonly who?: Person },
 ): Promise<Page> => {
   const context = await browser.newContext(baseURL === undefined ? {} : { baseURL });
   const page = await context.newPage();
 
   if (cast) await installCastFake(page);
   await watchMedia(page);
-  await signIn(page, person);
+  await signIn(page, who);
   await page.goto("/music/");
   browsers.push({ context, page });
 
@@ -272,6 +287,87 @@ test("a Jam plays here: starting one ends the cast, and Play on offers no Chrome
     .getByRole("button", { name: "End Jam" })
     .click();
   await expect(laptop.getByRole("dialog", { name: "Your Jam" })).toHaveCount(0);
+});
+
+test("a tab joins no cast another tab started, and its Jam leaves that cast playing", async ({
+  browser,
+  baseURL,
+}) => {
+  if (stack === null) return;
+
+  // Someone else, so the Jam stays theirs and Aiko's browsers play on.
+  const sam = await createPerson(stack, "sam", "member");
+  const tab = await openBrowser(browser, baseURL, { cast: true, who: sam });
+
+  // Another tab of the origin casts a movie before this one opens.
+  await otherTabCasting(tab, OTHER_TAB_MOVIE);
+  await playSong(tab, FIRST_SONG);
+
+  const seen = await receiver(tab);
+
+  expect(seen.castState).not.toBe("CONNECTED");
+  expect(seen.loads).toStrictEqual([]);
+
+  // A Jam ends only a cast this tab drives.
+  await playerOf(tab).getByRole("button", { name: "Queue", exact: true }).click();
+  await tab
+    .getByRole("complementary", { name: "Queue" })
+    .getByRole("button", { name: "Start a Jam" })
+    .click();
+  await tab
+    .getByRole("dialog", { name: "Start a Jam" })
+    .getByRole("button", { name: "Start a Jam" })
+    .click();
+  await tab
+    .getByRole("dialog", { name: "Your Jam" })
+    .getByRole("button", { name: "End Jam" })
+    .click();
+  await expect(tab.getByRole("dialog", { name: "Your Jam" })).toHaveCount(0);
+
+  expect((await receiver(tab)).ended).toStrictEqual([]);
+  await otherTabStops(tab);
+  await tab.context().close();
+});
+
+test("another tab's movie taking the TV brings the song back here paused, and leaves the movie playing", async () => {
+  await playSong(laptop, FIRST_SONG);
+  await castFake(laptop, "devicesAppear");
+  await castToTv(laptop);
+
+  const sent = (await receiver(laptop)).commands.length;
+
+  await advanceReceiver(laptop, 7);
+  await otherSenderLoads(laptop, OTHER_TAB_MOVIE);
+
+  await expect(
+    laptop.getByRole("status").filter({ hasText: "Playing on Living Room TV" }),
+  ).toHaveCount(0);
+  await expect(playerOf(laptop).getByRole("button", { name: "Play", exact: true })).toBeVisible();
+  await expect(
+    playerOf(laptop).getByRole("button", { name: FIRST_SONG, exact: true }),
+  ).toBeVisible();
+
+  const position = Number(
+    await playerOf(laptop).getByRole("slider", { name: "Seek" }).getAttribute("aria-valuenow"),
+  );
+
+  expect(position).toBeGreaterThanOrEqual(7_000);
+  expect(position).toBeLessThan(10_000);
+  expect(await audioSeconds(laptop)).toBe(0);
+
+  const seen = await receiver(laptop);
+
+  // The page left the session; the movie plays on, and nothing here stopped it.
+  expect(seen.ended.at(-1)).toBe("leave");
+  expect(seen.media).toBe(OTHER_TAB_MOVIE.contentId);
+  expect(seen.commands.slice(sent).map(([command]) => command)).not.toContain("stop");
+
+  // The movie's end changes nothing here.
+  await castFake(laptop, "finish");
+  await expect(
+    playerOf(laptop).getByRole("button", { name: FIRST_SONG, exact: true }),
+  ).toBeVisible();
+  await expect(playerOf(laptop).getByRole("button", { name: "Play", exact: true })).toBeVisible();
 });
 
 test("an MP3 every Chromecast decodes casts as its original file", async () => {
