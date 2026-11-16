@@ -195,6 +195,13 @@ const FALLBACK_MS = 1_000;
 /** How long a host's end the core refused, or that did not reach it, waits before it is tried again. */
 const RETRY_MS = 2_000;
 
+/**
+ * How far the device's wall clock and its monotonic clock may disagree about the time that passed
+ * before the heartbeats' samples start over: a device that slept, whose monotonic clock may stop
+ * meanwhile, as on macOS and iOS, or a wall clock someone set.
+ */
+const CLOCKS_APART_MS = 1_000;
+
 /** What a member hears who may not move the session, in old music's words. */
 export const NO_CONTROL = "The host controls playback in this Jam";
 
@@ -226,16 +233,30 @@ interface Running {
   follower: Follower<SessionCallFailed> | null;
 }
 
+/** One instant on both of the device's clocks. */
+interface Instant {
+  readonly wall: number;
+  readonly monotonic: number;
+}
+
+/** Whether the device's two clocks agree about the time from `from` to `to`. */
+const clocksAgree = (from: Instant, to: Instant): boolean =>
+  Math.abs(to.wall - from.wall - (to.monotonic - from.monotonic)) <= CLOCKS_APART_MS;
+
 /**
  * Keeps a person present in their music session, and waiting for one, with a heartbeat every
  * `HEARTBEAT_MS` on any screen, and estimates the server's time from the answers on the device's
- * monotonic clock, so a wall clock set while a song plays moves nothing (ADR 0017).
+ * monotonic clock, so a wall clock set while a song plays moves nothing (ADR 0017). Where the two
+ * clocks disagree about the time that passed, as after the device slept with its monotonic clock
+ * stopped, the samples taken before say nothing of the server's time now, so they start over.
  */
 export class SessionPresence implements ServerTime {
   readonly #heartbeat: () => Promise<{ readonly serverTime: number }>;
   readonly #timers: SessionTimers;
   readonly #listeners = new Set<() => void>();
   #samples: ReadonlyArray<ClockSample> = [];
+  /** When the newest sample was received, on both clocks, or null before one. */
+  #sampledAt: Instant | null = null;
   #beating: string | null = null;
   #stop: (() => void) | null = null;
 
@@ -283,18 +304,32 @@ export class SessionPresence implements ServerTime {
     };
   };
 
+  #instant(): Instant {
+    return { wall: this.#timers.now(), monotonic: this.#timers.monotonic() };
+  }
+
   #beat(): void {
-    const sentAt = this.#timers.monotonic();
+    const sent = this.#instant();
 
     this.#heartbeat().then(
       ({ serverTime }) => {
+        const received = this.#instant();
+        const before = this.#sampledAt;
+
         const sample: ClockSample = {
-          sentAt,
+          sentAt: sent.monotonic,
           serverTime: EpochMillis.make(Math.round(serverTime)),
-          receivedAt: this.#timers.monotonic(),
+          receivedAt: received.monotonic,
         };
 
-        this.#samples = [...this.#samples, sample].slice(-CLOCK_SAMPLING.kept);
+        // A trip the clocks disagree about measured nothing; a gap they disagree about since the
+        // newest sample leaves the ones before on another time base.
+        const kept = before === null || clocksAgree(before, received) ? this.#samples : [];
+
+        this.#samples = clocksAgree(sent, received)
+          ? [...kept, sample].slice(-CLOCK_SAMPLING.kept)
+          : [];
+        this.#sampledAt = received;
 
         for (const listener of this.#listeners) listener();
 
@@ -488,7 +523,10 @@ export class SessionPlayback<T extends Track = Track> {
    * the screen, or null.
    */
   async playNow(trackId: string, sessionId: string): Promise<string | null> {
-    if (this.#view?.mayControl !== true) return NO_CONTROL;
+    const view = this.#view;
+
+    // The view of another session says nothing of this one; the core decides that.
+    if (view?.sessionId === sessionId && !view.mayControl) return NO_CONTROL;
 
     this.#controller.sessionChoice();
 
@@ -758,19 +796,8 @@ export class SessionPlayback<T extends Track = Track> {
 
   #engineEnded(key: string): void {
     const view = this.#view;
-    const lengthMs = view?.lengthMs ?? null;
 
-    // With no known length, the core has no end on its clock to agree with; someone skips it.
-    if (
-      view?.hosting !== true ||
-      view.playing.key !== key ||
-      lengthMs === null ||
-      !(lengthMs > 0)
-    ) {
-      return;
-    }
-
-    void this.#sayEnded(view);
+    if (view?.playing.key === key) void this.#sayEnded(view);
   }
 
   /**
@@ -787,10 +814,9 @@ export class SessionPlayback<T extends Track = Track> {
     this.#cancelEnd();
 
     const view = this.#view;
-    const lengthMs = view?.lengthMs ?? null;
+    const lengthMs = view === null ? null : endable(view);
 
-    // With no known length, the core has no end on its clock to agree with; someone skips it.
-    if (view === null || !view.hosting || lengthMs === null || !(lengthMs > 0)) return;
+    if (view === null || lengthMs === null) return;
 
     const { clock } = view;
 
@@ -841,7 +867,7 @@ export class SessionPlayback<T extends Track = Track> {
 
     const unchanged =
       view !== null &&
-      view.hosting &&
+      endable(view) !== null &&
       view.sessionId === decided.sessionId &&
       view.playing.key === decided.playing.key &&
       view.clock.revision === decided.clock.revision;
@@ -877,6 +903,14 @@ export class SessionPlayback<T extends Track = Track> {
     for (const listener of this.#listeners) listener();
   }
 }
+
+/**
+ * The length of the song `view` plays when its host's player says when it ended: only the host's
+ * does, and with no known length the core has no end on its clock to agree with, so someone skips
+ * it. Null otherwise.
+ */
+const endable = <T extends Track>(view: SessionFollow<T>): number | null =>
+  view.hosting && view.lengthMs !== null && view.lengthMs > 0 ? view.lengthMs : null;
 
 /**
  * The session as the controller plays it: its playing entry first, then what is queued, up to the

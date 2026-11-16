@@ -50,6 +50,14 @@ const SAME: Step = { kind: "same" };
 
 const STALE: Step = { kind: "stale" };
 
+/** `clock` moved at server time `now`: `fields` changed, anchored there, one revision on. */
+const movedClock = (clock: Clock, now: number, fields: Partial<Clock>): Clock => ({
+  ...clock,
+  ...fields,
+  anchorServerTime: now,
+  revision: clock.revision + 1,
+});
+
 /**
  * Decides `op` on `clock` at server time `now`. Play and a rate are absolute, so a repeat or a race
  * between two members changes nothing. A pause is absolute too, but always makes a new revision,
@@ -78,7 +86,7 @@ export const stepOf = (
 ): Step => {
   const moved = (fields: Partial<Clock>, next = false): Step => ({
     kind: "move",
-    clock: { ...clock, ...fields, anchorServerTime: now, revision: clock.revision + 1 },
+    clock: movedClock(clock, now, fields),
     next,
   });
 
@@ -312,20 +320,21 @@ export interface Ended {
 const stillPlays = (session: SessionDoc, ended: Ended): boolean =>
   session.clock.revision === ended.revision && (session.itemEntryId ?? null) === ended.entryId;
 
+/** When a session's clock reaches the end of what it plays (`endOf`). */
+type EndOf =
+  | { readonly kind: "ended" }
+  | { readonly kind: "at"; readonly at: number }
+  | { readonly kind: "never" };
+
+const ENDED: EndOf = { kind: "ended" };
+
 /**
  * When `session`'s clock reaches the end of what it plays: now or earlier ("ended"), at a server
  * time still to come, or "never", for a paused clock before the end. A clock paused past the end,
  * as when someone paused it before anything moved it on, has ended.
  */
-const endOf = (
-  clock: Clock,
-  lengthMs: number,
-  now: number,
-):
-  | { readonly kind: "ended" }
-  | { readonly kind: "at"; readonly at: number }
-  | { readonly kind: "never" } => {
-  if (positionAt(clock, now) >= lengthMs) return { kind: "ended" };
+const endOf = (clock: Clock, lengthMs: number, now: number): EndOf => {
+  if (positionAt(clock, now) >= lengthMs) return ENDED;
 
   const at = reachedAt(clock, lengthMs);
 
@@ -382,7 +391,9 @@ export const ended = async (
 /**
  * The end `ended` accepted shortly before it came: moves the session on once its clock reaches
  * the end, deciding then on the queue as it is then, unless the session ended or moved since. A
- * run that comes before the end, as a scheduler a little early would, waits for it again.
+ * run that comes before the end, as a scheduler a little early would, waits for it again. One
+ * whose song lost its length meanwhile, as when it was deleted, moves on now: the end was agreed,
+ * and the host's player, told it was, says it no more.
  */
 export const endAt = internalMutation({
   args: {
@@ -397,11 +408,8 @@ export const endAt = internalMutation({
     if (session?.state !== "live" || !stillPlays(session, { entryId, revision })) return null;
 
     const lengthMs = await itemLength(ctx.db, session.item);
-
-    if (lengthMs === null) return null;
-
     const now = Date.now();
-    const end = endOf(session.clock, lengthMs, now);
+    const end = lengthMs === null ? ENDED : endOf(session.clock, lengthMs, now);
 
     if (end.kind === "ended") await moveOnAtEnd(ctx, session, now);
     else if (end.kind === "at") {
@@ -431,13 +439,7 @@ const moveOnAtEnd = async (
   const next = await firstQueued(ctx.db, session._id);
 
   if (next === null) {
-    const stopped: Clock = {
-      ...clock,
-      status: "paused",
-      positionAtAnchorMs: 0,
-      anchorServerTime: now,
-      revision: clock.revision + 1,
-    };
+    const stopped = movedClock(clock, now, { status: "paused", positionAtAnchorMs: 0 });
 
     await ctx.db.patch(session._id, { clock: stopped });
 
@@ -446,12 +448,7 @@ const moveOnAtEnd = async (
 
   const carry = await carryOf(ctx.db, session, next);
 
-  const moved: Clock = {
-    ...clock,
-    positionAtAnchorMs: carriedPast(clock, now, carry),
-    anchorServerTime: now,
-    revision: clock.revision + 1,
-  };
+  const moved = movedClock(clock, now, { positionAtAnchorMs: carriedPast(clock, now, carry) });
 
   await playEntry(ctx, session, next, moved, now);
 
@@ -490,13 +487,7 @@ export const playNow = async (
 
   await ctx.db.delete(entryId);
 
-  const clock: Clock = {
-    ...session.clock,
-    status: "playing",
-    positionAtAnchorMs: 0,
-    anchorServerTime: now,
-    revision: session.clock.revision + 1,
-  };
+  const clock = movedClock(session.clock, now, { status: "playing", positionAtAnchorMs: 0 });
 
   await ctx.db.patch(session._id, { clock, item, itemEntryId: entryId });
 

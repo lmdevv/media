@@ -4,8 +4,8 @@ import { EpochMillis } from "@media/contracts/units";
 import { Brand } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { NO_CONTROL, startSession } from "./session-playback";
-import type { SessionOp, StartCommands } from "./session-playback";
+import { NO_CONTROL, SessionPresence, startSession } from "./session-playback";
+import type { SessionOp, SessionTimers, StartCommands } from "./session-playback";
 import { asEntryId, playInSession } from "./session-react";
 import type { JoinedSession, SessionAdds } from "./session-react";
 import { scenario, song } from "./testing/session-harness";
@@ -708,6 +708,33 @@ describe("a music session's end, transport, and play now", { timeout: 60_000 }, 
       expect(host.engine.samplePlayback().playing).toBe(false);
     });
   });
+
+  it("lets the core, not the view of another session, decide a song played now in the one before", async () => {
+    await scenario(song("a", 60), [], async (world) => {
+      const host = world.join("Lucía", { hosting: true });
+      const guest = world.join("Aiko", {});
+      const before = world.sessionId();
+
+      await world.advance(500);
+      world.allowControl(true);
+      await world.advance(500);
+      world.replaceSession(song("z", 60));
+      world.allowControl(false);
+      await world.advance(500);
+
+      // The guest may not control the Jam they see now, but the song was chosen in the one before:
+      // the core answers for that one, which they are no longer in.
+      const played = guest.playback.playNow("x", before);
+
+      await world.advance(500);
+
+      expect(await played).toMatch(/no longer in that group session/u);
+      expect(world.calls.filter((call) => call.op.kind === "playNow")).toMatchObject([
+        { by: "Aiko", outcome: "refused" },
+      ]);
+      expect(host.engine.song).toBe("z");
+    });
+  });
 });
 
 /** A session as the core keeps it, for `startSession`'s calls. */
@@ -861,5 +888,148 @@ describe("starting a music session", () => {
       positionAtAnchorMs: 0,
       revision: 0,
     });
+  });
+});
+
+/**
+ * A device for `SessionPresence`: a wall clock someone may set, a monotonic clock that stops while
+ * the device sleeps, a server whose clock runs `SERVER_AHEAD_MS` ahead of real time, and heartbeats
+ * the test answers after a trip it chooses.
+ */
+const SERVER_AHEAD_MS = 4_000;
+
+const presenceDevice = () => {
+  const clocks = { real: 1_760_000_000_000, wallSet: 0, monotonic: 50_000 };
+  const beats: Array<() => void> = [];
+  let answer: ((serverTime: number) => void) | null = null;
+
+  const timers: SessionTimers = {
+    now: () => clocks.real + clocks.wallSet,
+    monotonic: () => clocks.monotonic,
+    after: (_ms, callback) => {
+      beats.push(callback);
+
+      return () => undefined;
+    },
+  };
+
+  const heartbeat = (): Promise<{ readonly serverTime: number }> =>
+    new Promise((resolve) => {
+      answer = (serverTime) => {
+        resolve({ serverTime });
+      };
+    });
+
+  /** Time passes; the monotonic clock runs only while the device is awake. */
+  const pass = (ms: number, awake = true): void => {
+    clocks.real += ms;
+
+    if (awake) clocks.monotonic += ms;
+  };
+
+  const serverNow = (): number => clocks.real + SERVER_AHEAD_MS;
+
+  /** The heartbeat out comes back after a trip of `tripMs`, the server reading halfway. */
+  const answerAfter = async (tripMs: number): Promise<void> => {
+    pass(tripMs / 2);
+
+    const serverTime = serverNow();
+
+    pass(tripMs / 2);
+    answer?.(serverTime);
+    await Promise.resolve();
+    await Promise.resolve();
+  };
+
+  return {
+    presence: new SessionPresence(heartbeat, timers),
+    serverNow,
+    pass,
+    answerAfter,
+    /** Sets the wall clock `byMs` from where it ran, as a person or NTP sets it. */
+    setWall: (byMs: number) => {
+      clocks.wallSet += byMs;
+    },
+    /** The next heartbeat goes out, as its timer fires. */
+    beat: () => {
+      beats.shift()?.();
+    },
+  };
+};
+
+/** 5 s on, the next heartbeat goes out and comes back after a trip of `tripMs`. */
+const nextBeat = async (
+  device: ReturnType<typeof presenceDevice>,
+  tripMs: number,
+): Promise<void> => {
+  device.pass(5_000);
+  device.beat();
+  await device.answerAfter(tripMs);
+};
+
+/** How far `presence`'s estimate of the server's time stands from the server's time now. */
+const offBy = (device: ReturnType<typeof presenceDevice>): number =>
+  Math.abs((device.presence.now() ?? Number.NaN) - device.serverNow());
+
+describe("estimating the server's time for a session", () => {
+  it("starts over after the device slept with its monotonic clock stopped", async () => {
+    const device = presenceDevice();
+
+    device.presence.keep("session");
+    await device.answerAfter(10);
+
+    // Three more heartbeats, each 5 s on, one after another.
+    await [1, 2, 3].reduce(
+      (done: Promise<void>) => done.then(() => nextBeat(device, 10)),
+      Promise.resolve(),
+    );
+
+    expect(offBy(device)).toBeLessThan(10);
+
+    // The device sleeps for a minute: real time and the server's run on, its monotonic clock
+    // stops, as on macOS and iOS. The heartbeat after waking takes a longer trip than those before.
+    device.pass(60_000, false);
+    device.beat();
+    await device.answerAfter(80);
+
+    expect(offBy(device)).toBeLessThan(50);
+  });
+
+  it("measures nothing from a heartbeat whose trip the device slept through", async () => {
+    const device = presenceDevice();
+
+    device.presence.keep("session");
+    await device.answerAfter(10);
+    device.pass(5_000);
+    device.beat();
+
+    // It slept while the heartbeat was out: the trip reads as short on the monotonic clock.
+    device.pass(30_000, false);
+    await device.answerAfter(4);
+
+    expect(device.presence.now()).toBeNull();
+
+    device.pass(5_000);
+    device.beat();
+    await device.answerAfter(20);
+
+    expect(offBy(device)).toBeLessThan(20);
+  });
+
+  it("moves nothing when the wall clock is set, before and after the next heartbeat", async () => {
+    const device = presenceDevice();
+
+    device.presence.keep("session");
+    await device.answerAfter(10);
+    device.setWall(30_000);
+    device.pass(2_000);
+
+    expect(offBy(device)).toBeLessThan(10);
+
+    device.pass(3_000);
+    device.beat();
+    await device.answerAfter(10);
+
+    expect(offBy(device)).toBeLessThan(10);
   });
 });
