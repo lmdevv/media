@@ -1,7 +1,8 @@
 /**
  * The person's music group session on the web and on iOS (ADR 0017), as the player plays it and
  * the music clients' screens show it: one subscription to `core.together.get` and every page of
- * the session's queue, read once for every screen, with the details of the songs it plays.
+ * the session's queue, read once for every screen. Each page carries its songs' details; the song
+ * playing, and the song queued first, which plays next, are read on their own besides.
  */
 import type { FollowerState } from "@media/contracts/follower";
 import type { PlatformSdk } from "@media/sdk/promise";
@@ -281,8 +282,8 @@ const songOf = (item: JoinedSession["item"] | QueueRow["item"]): string | null =
   item?.domain === MUSIC && item.ref.type === "track" ? item.ref.id : null;
 
 /**
- * Reads the person's music session, every entry of its queue, and the details of its songs, for
- * the player and the screens.
+ * Reads the person's music session and every entry of its queue, with the details of its songs,
+ * for the player and the screens.
  *
  * @param pagedStore - The client's paged store.
  */
@@ -325,15 +326,14 @@ export const useSessionData = (
     });
   }, [listed]);
 
-  const wanted = useMemo(() => {
-    const ids = queued.flatMap((row) => {
-      const id = songOf(row.item);
+  // The song playing, which no page holds, and the one queued first, so its details are in hand
+  // the moment the session moves on to it and its entry leaves the pages.
+  const nextId = queued[0] === undefined ? null : songOf(queued[0].item);
 
-      return id === null ? [] : [id];
-    });
-
-    return playingId === null ? ids : [playingId, ...ids];
-  }, [queued, playingId]);
+  const wanted = useMemo(
+    () => [playingId, nextId].filter((id): id is string => id !== null),
+    [playingId, nextId],
+  );
 
   useEffect(() => {
     shelf.want(wanted);
@@ -345,18 +345,14 @@ export const useSessionData = (
 
   const entries = useMemo(
     (): ReadonlyArray<SessionEntry> =>
-      queued.map((row) => {
-        const id = songOf(row.item);
-
-        return {
-          key: row.entryId,
-          track: id === null ? null : (songs.get(id) ?? null),
-          hidden: id === null,
-          addedBy: row.addedByDisplayName ?? row.addedBy,
-          removable: row.removable,
-        };
-      }),
-    [queued, songs],
+      queued.map((row) => ({
+        key: row.entryId,
+        track: row.track,
+        hidden: songOf(row.item) === null,
+        addedBy: row.addedByDisplayName ?? row.addedBy,
+        removable: row.removable,
+      })),
+    [queued],
   );
 
   const playing = playingId === null ? null : (songs.get(playingId) ?? null);

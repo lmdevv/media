@@ -6,7 +6,7 @@ import { takeAttempt } from "./lib/rateLimit";
 import { constantTimeEqual, formatSecret, parseSecret, randomSecret } from "./lib/secrets";
 import { mayPlay } from "./permissions/items";
 import { can } from "./permissions/policy";
-import { factsOf, memberIn, placeOf, refuse, requireTogether } from "./together/access";
+import { factsIn, factsOf, memberIn, placeOf, refuse, requireTogether } from "./together/access";
 import { control as move } from "./together/clock";
 import { admitMember, dropMember, enter, membersIn } from "./together/members";
 import { BLOCKED_MAX, JOINS_PER_HOUR, LINK_PREFIX, LINK_SECRET_BYTES } from "./together/model";
@@ -195,9 +195,12 @@ export const {
     const { settings } = session;
 
     if (settings.join !== joining || settings.control !== controls || settings.add !== adds) {
-      await ctx.db.patch(session._id, {
-        settings: { join: joining, control: controls, add: adds },
-      });
+      const changed = { join: joining, control: controls, add: adds };
+      const cold = await factsIn(ctx.db, session._id);
+
+      await ctx.db.patch(session._id, { settings: changed });
+
+      if (cold !== null) await ctx.db.patch(cold._id, { settings: changed });
     }
 
     return null;

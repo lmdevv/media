@@ -4,6 +4,7 @@
  * for one session never lands in another, and a host's player fills a new session's queue.
  */
 import type { FunctionArgs, FunctionReturnType } from "convex/server";
+import { Schema } from "effect";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
@@ -13,10 +14,11 @@ import type { Id } from "../../../convex/_generated/dataModel";
 import { inOrder } from "../../../convex/core/lib/inOrder";
 import { CARRY_MAX_MS, FIRST_BY_MS } from "../../../convex/core/together/clock";
 import type { Member } from "../../devices";
-import { seedLibrary, song } from "../../probe";
-import { failureOf, refusal } from "../../sign-in";
+import { seedLibrary, share, song } from "../../probe";
+import { importRows, newestRows } from "../../rows";
+import { failureOf, refusal, unique } from "../../sign-in";
 import { coreStackFromEnvFile } from "../../stack-env";
-import { catalog, guestOf, joinedView, sleep } from "../../together";
+import { catalog, guestOf, joinedView, kidOf, sleep } from "../../together";
 
 const stack = coreStackFromEnvFile();
 
@@ -37,6 +39,32 @@ const musicTrack = (id: Id<"tracks">): DomainItem => ({
   domain: MUSIC,
   ref: { type: "track", id },
 });
+
+/** The song a catalog's music item names. */
+const trackIdOf = (item: DomainItem): Id<"tracks"> => {
+  if (item.ref.type !== "track") throw new Error("expected a song");
+
+  return item.ref.id;
+};
+
+const SessionRow = Schema.fromJsonString(
+  Schema.Struct({ _id: Schema.String, linkSecret: Schema.optional(Schema.String) }),
+);
+
+// SAFETY: a type predicate, not checked by the compiler. A Convex id is an opaque string, and the
+// stack's export wrote this one as a `togetherSessions` id; the backend checks it again on use.
+const isSessionId = (value: string): value is SessionId => value.length > 0;
+
+/** The session row imported with the link secret `secret`, as a restore of old rows makes one. */
+const sessionWithSecret = (secret: string): SessionId => {
+  const found = newestRows("togetherSessions", 50)
+    .map((line) => Schema.decodeSync(SessionRow)(line))
+    .find((row) => row.linkSecret === secret);
+
+  if (found === undefined || !isSessionId(found._id)) throw new Error("imported no session");
+
+  return found._id;
+};
 
 const create = (who: Member, item: DomainItem) =>
   who.signedIn.client.action(api.core.together.create, { item });
@@ -117,6 +145,10 @@ const everyEntry = async (
     ? found.page
     : [...found.page, ...(await everyEntry(who, found.continueCursor))];
 };
+
+/** Whether `who` may take out each entry of their music session's queue, in play order. */
+const removable = async (who: Member): Promise<ReadonlyArray<boolean>> =>
+  (await everyEntry(who)).map((row) => row.removable);
 
 const queuedIds = async (who: Member): Promise<ReadonlyArray<EntryId>> =>
   (await everyEntry(who)).map((row) => row.entryId);
@@ -542,6 +574,144 @@ describe.skipIf(stack === undefined)("music group sessions", { timeout: 120_000 
       { addedBy: shelf.host.username, addedByDisplayName: "Lucía García" },
       { addedBy: guest.username, addedByDisplayName: null },
     ]);
+  });
+
+  it("carries each song's details on its queue page, and none for an entry the caller may not play", async () => {
+    if (stack === undefined) return;
+    const shelf = await catalog(stack);
+    const kid = await kidOf(stack, shelf);
+
+    const explicit = await seedLibrary(stack, shelf.host, {
+      name: "Explicit",
+      kind: "music",
+      items: [song("explicit", true)],
+    });
+
+    await share(shelf.host, explicit.libraryId, { kind: "user", userId: kid.userId }, "view");
+
+    const [dirtyId] = explicit.itemIds;
+
+    if (dirtyId === undefined) throw new Error("seeded no explicit song");
+
+    const cleanId = trackIdOf(shelf.track);
+    const { link } = await create(shelf.host, shelf.track);
+
+    await kid.signedIn.client.mutation(api.core.together.join, { domain: MUSIC, link });
+    await addAs(shelf.host, shelf.track);
+    await addAs(shelf.host, musicTrack(dirtyId));
+    await kid.signedIn.client.mutation(api.music.likes.set, { trackId: cleanId, liked: true });
+
+    const forHost = await everyEntry(shelf.host);
+    const forKid = await everyEntry(kid);
+
+    expect(forHost.map((row) => row.track?.id)).toEqual([cleanId, dirtyId]);
+    expect(forHost[1]?.track).toEqual(
+      await shelf.host.signedIn.client.query(api.music.tracks.get, { trackId: dirtyId }),
+    );
+
+    // The kid's own details: their like, and nothing at all of the explicit song.
+    expect(forKid[0]?.track).toEqual(
+      await kid.signedIn.client.query(api.music.tracks.get, { trackId: cleanId }),
+    );
+    expect(forKid[0]?.track?.liked).toBe(true);
+    expect(forKid[1]).toMatchObject({ item: null, track: null });
+  });
+
+  it("decides who may take out an entry from the session's settings and its end", async () => {
+    if (stack === undefined) return;
+    const shelf = await catalog(stack);
+    const guest = await guestOf(stack, shelf, "guest");
+    const { link } = await create(shelf.host, shelf.track);
+
+    await guest.signedIn.client.mutation(api.core.together.join, { domain: MUSIC, link });
+    await letGuestsAdd(shelf.host);
+    await addAs(shelf.host, shelf.track);
+    await addAs(guest, shelf.track);
+
+    expect(await removable(guest)).toEqual([false, true]);
+    expect(await removable(shelf.host)).toEqual([true, true]);
+
+    await shelf.host.signedIn.client.mutation(api.core.together.configure, {
+      domain: MUSIC,
+      join: "open",
+      control: false,
+      add: false,
+    });
+
+    expect(await removable(guest)).toEqual([false, false]);
+
+    await letGuestsAdd(shelf.host);
+
+    expect(await removable(guest)).toEqual([false, true]);
+
+    // The host leaving ends the session: the guest still sees its queue, and takes nothing out.
+    await shelf.host.signedIn.client.mutation(api.core.together.leave, { domain: MUSIC });
+
+    expect(await removable(guest)).toEqual([false, false]);
+  });
+
+  it("lists the queue of a session from before its facts were kept, as before", async () => {
+    if (stack === undefined) return;
+    const shelf = await catalog(stack);
+    const guest = await guestOf(stack, shelf, "guest");
+    const secret = `before-${unique()}`;
+
+    importRows("togetherSessions", [
+      {
+        hostId: shelf.host.userId,
+        linkSecret: secret,
+        settings: { join: "open", control: false, add: true },
+        blocked: [],
+        clock: {
+          status: "paused",
+          positionAtAnchorMs: 0,
+          anchorServerTime: Date.now(),
+          playbackRate: 1,
+          revision: 0,
+        },
+        item: shelf.track,
+        state: "live",
+      },
+    ]);
+
+    const sessionId = sessionWithSecret(secret);
+
+    importRows(
+      "togetherMembers",
+      [shelf.host, guest].map((who) => ({
+        sessionId,
+        userId: who.userId,
+        domain: MUSIC,
+        state: "joined" as const,
+        awaySince: null,
+      })),
+    );
+
+    importRows(
+      "togetherEntries",
+      [shelf.host, guest].map((who, order) => ({
+        sessionId,
+        order,
+        item: shelf.track,
+        addedBy: who.userId,
+      })),
+    );
+
+    const listed = await everyEntry(guest);
+
+    expect(listed.map((row) => [row.track?.id, row.removable])).toEqual([
+      [trackIdOf(shelf.track), false],
+      [trackIdOf(shelf.track), true],
+    ]);
+
+    await shelf.host.signedIn.client.mutation(api.core.together.configure, {
+      domain: MUSIC,
+      join: "open",
+      control: false,
+      add: false,
+    });
+
+    expect((await everyEntry(guest)).map((row) => row.removable)).toEqual([false, false]);
   });
 });
 

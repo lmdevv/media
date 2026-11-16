@@ -14,7 +14,8 @@ const nullable = <T, FieldPaths extends string>(validator: Validator<T, "require
  */
 const artUrl = nullable(v.string());
 
-const track = v.object({
+/** A song as the music commands answer it, and as a music group session's queue shows it. */
+export const track = v.object({
   id: v.id("tracks"),
   title: v.string(),
   artist: v.string(),

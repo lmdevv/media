@@ -61,6 +61,23 @@ export const sessionDocument = v.union(
 );
 
 /**
+ * The cold half of a session: what `can` reads about it that changes only with its settings or
+ * its end, kept beside it by every writer of those, so a query that decides with them, as each
+ * page of its queue, re-runs on neither its clock nor what it plays (ADR 0017). A session from
+ * before it was kept has none, and decides with its own document.
+ */
+export const factsDocument = v.object({
+  sessionId: v.id("togetherSessions"),
+  /** The session's domain, which never changes. */
+  domain: contentDomain,
+  /** Never changes, as the session's. */
+  hostId: v.id("users"),
+  settings,
+  /** False once the session ended. */
+  live: v.boolean(),
+});
+
+/**
  * A person in a session, joined or waiting for the host. At most one row per person and domain.
  * `awaySince` changes only when they go away or come back, so heartbeats re-run no one's view.
  */

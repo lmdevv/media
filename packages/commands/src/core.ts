@@ -12,6 +12,7 @@ import {
 } from "./access.ts";
 import { action, mutation, query } from "./command.ts";
 import type { Command } from "./command.ts";
+import { track as musicTrack } from "./music.ts";
 import { assignableRoles, contentDomains, credentialScopes, roles } from "./scopes.ts";
 import { downloadQuality, settingFields } from "./settings.ts";
 
@@ -1188,6 +1189,11 @@ export const core = [
       v.object({
         entryId: v.id("togetherEntries"),
         item: shownItem,
+        /**
+         * The song's details when the entry is a music song you may play, as `music.tracks.get`
+         * answers them; null for anything else, and for an entry you may not play.
+         */
+        track: v.union(musicTrack, v.null()),
         addedBy: v.union(v.string(), v.null()),
         addedByDisplayName: togetherDisplayName,
         removable: v.boolean(),

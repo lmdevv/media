@@ -10,7 +10,7 @@ import { deleteCounter } from "../lib/counters";
 import { takeAttempt } from "../lib/rateLimit";
 import { requirePlayable } from "../permissions/items";
 import { can } from "../permissions/policy";
-import { refuse } from "./access";
+import { factsIn, refuse } from "./access";
 import type { SessionDoc } from "./access";
 import { startingClock } from "./clock";
 import { queueCounter } from "./queue";
@@ -58,6 +58,14 @@ export const open = internalMutation({
       state: "live",
     });
 
+    await ctx.db.insert("togetherFacts", {
+      sessionId,
+      domain: item.domain,
+      hostId: caller.userId,
+      settings: { join, control, add },
+      live: true,
+    });
+
     const session = (await ctx.db.get(sessionId)) ?? fail("not_found", "No such group session");
 
     await enter(ctx, session, caller.userId, "joined", now);
@@ -82,6 +90,10 @@ export const endSession = async (
 
   await ctx.db.replace(sessionId, { ...fields, state: "ended", reason });
 
+  const cold = await factsIn(ctx.db, sessionId);
+
+  if (cold !== null) await ctx.db.patch(cold._id, { live: false });
+
   await dropBeats(ctx, sessionId);
   await ctx.scheduler.runAfter(ENDED_KEEP_MS, internal.core.together.sessions.purge, {
     sessionId,
@@ -89,8 +101,8 @@ export const endSession = async (
 };
 
 /**
- * Deletes an ended session a batch at a time: its queue, then its members, then the session, and
- * its queue's count.
+ * Deletes an ended session a batch at a time: its queue, then its members, then the session, its
+ * cold facts, and its queue's count.
  */
 export const purge = internalMutation({
   args: { sessionId: v.id("togetherSessions") },
@@ -118,9 +130,13 @@ export const purge = internalMutation({
       .withIndex("by_session_state", (q) => q.eq("sessionId", sessionId))
       .take(MEMBERS_MAX + PENDING_MAX);
 
+    const cold = await factsIn(ctx.db, sessionId);
+
     await dropBeats(ctx, sessionId);
     await Promise.all(members.map(async (member) => ctx.db.delete(member._id)));
     await deleteCounter(ctx.db, queueCounter(sessionId));
+
+    if (cold !== null) await ctx.db.delete(cold._id);
     await ctx.db.delete(sessionId);
 
     return null;

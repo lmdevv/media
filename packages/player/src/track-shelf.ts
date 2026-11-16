@@ -1,6 +1,7 @@
 /**
- * The details of the songs a music group session shows: the core's session answers only which
- * song each entry is, so a player reads each song's details, as a long queue does row by row.
+ * The details of the songs a music group session plays now and next: the core's session answers
+ * only which song plays, and its queue's pages carry their own songs' details, so a player reads
+ * the song playing on its own, and the song queued first, whose entry leaves the pages as it plays.
  */
 
 /** A followed query's state, as the SDK's `watch` answers it. */

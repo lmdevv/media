@@ -12,7 +12,8 @@ import { decidableRows, reachOf } from "../permissions/grants";
 import { ITEM_READS, playableBy, requirePlayable } from "../permissions/items";
 import { can } from "../permissions/policy";
 import type { PersonDoc, Principal } from "../permissions/policy";
-import { factsOf, refuse, requireTogether } from "./access";
+import { likedAmong, musicPresenter } from "../../music/present";
+import { factsOf, refuse, requireQueue, requireTogether } from "./access";
 import type { InSession, SessionDoc } from "./access";
 import { QUEUE_MAX } from "./model";
 
@@ -381,17 +382,23 @@ export const reorder = async (
   await noteQueuedFirst(ctx, session, first?._id ?? null, Date.now());
 };
 
-const ENTRY_READS = ITEM_READS + 2;
+/** What a music song's details read on top of placing it: its document again, and its like. */
+const SONG_READS = 3;
 
-/** Who queued an entry, by username and the name they go by, or nulls for someone gone. */
-const namesOf = (person: PersonDoc | null) => ({
-  addedBy: person?.username ?? null,
-  addedByDisplayName: person?.displayName ?? null,
-});
+const ENTRY_READS = ITEM_READS + 2 + SONG_READS;
+
+/** The music song `item` names, if it names one. */
+const songOf = (item: DomainItem | null): Id<"tracks"> | null =>
+  item?.ref.type === "track" ? item.ref.id : null;
 
 /**
  * One page of what plays next in the caller's session in `domain`, as they may see it, of as many
- * entries as one call can decide.
+ * entries as one call can decide, each music song with its details, as `music.queue.list` pages
+ * carry theirs, so a client reads no song on its own; an entry they may not play has neither.
+ *
+ * It decides from the session's cold facts (`requireQueue`) and its entries, never its document, so
+ * a page re-runs when its entries, the caller's likes, or the session's settings change, and not
+ * on a pause, seek, or skip that leaves its entries as they are (ADR 0017).
  */
 export const queuePage = async (
   ctx: Pick<QueryCtx, "db">,
@@ -399,7 +406,7 @@ export const queuePage = async (
   domain: ContentDomain,
   options: PaginationOptions,
 ) => {
-  const { session, place } = await requireTogether(ctx, caller, domain, "view");
+  const { sessionId, factsFor } = await requireQueue(ctx, caller, domain);
   const reach = await reachOf(ctx.db, caller);
   const playable = playableBy(ctx.db, reach);
 
@@ -408,7 +415,7 @@ export const queuePage = async (
     {
       table: "togetherEntries",
       index: "by_session_order",
-      range: (q) => q.eq("sessionId", session._id),
+      range: (q) => q.eq("sessionId", sessionId),
     },
     options,
     decidableRows(reach, ENTRY_READS),
@@ -424,17 +431,45 @@ export const queuePage = async (
     return person;
   };
 
-  const page = await Promise.all(
+  const shown = await Promise.all(
     found.page.map(async (entry) => ({
-      entryId: entry._id,
+      entry,
       item: (await playable(entry.item)) ? entry.item : null,
-      ...namesOf(await personOf(entry.addedBy)),
-      removable: can(
-        caller,
-        "remove",
-        factsOf(session, place, { addedIt: entry.addedBy === caller.userId }),
-      ).allowed,
     })),
+  );
+
+  const songIds = [...new Set(shown.flatMap(({ item }) => songOf(item) ?? []))];
+
+  const [songs, liked] = await Promise.all([
+    Promise.all(songIds.map(async (trackId) => [trackId, await ctx.db.get(trackId)] as const)),
+    likedAmong(ctx.db, caller.userId, songIds),
+  ]);
+
+  const songDocs = new Map(songs);
+  const present = musicPresenter();
+
+  const detailsOf = async (item: DomainItem | null) => {
+    const trackId = songOf(item);
+    const song = trackId === null ? null : (songDocs.get(trackId) ?? null);
+
+    return song === null ? null : present.track(song, liked.has(song._id));
+  };
+
+  const page = await Promise.all(
+    shown.map(async ({ entry, item }) => {
+      // Who queued it, by username and the name they go by, or nulls for someone gone.
+      const person = await personOf(entry.addedBy);
+
+      return {
+        entryId: entry._id,
+        item,
+        track: await detailsOf(item),
+        addedBy: person?.username ?? null,
+        addedByDisplayName: person?.displayName ?? null,
+        removable: can(caller, "remove", factsFor({ addedIt: entry.addedBy === caller.userId }))
+          .allowed,
+      };
+    }),
   );
 
   return { ...found, page };

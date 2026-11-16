@@ -477,6 +477,17 @@ Each change comes from what old jams did, or from a verifier's finding against i
   `displayName` for members and people waiting), and `core.together.queue` who queued each entry by
   both (`addedByDisplayName`). The clients show the display name, or the username without one
   (#149), and add the username where a host acts on someone, as two people may go by one name.
+- `core.together.queue` pages carry each music song's details (`track`), as `music.tracks.get`
+  answers them, the caller's like included, as `music.queue.list` pages carry theirs, and none for
+  an entry the caller may not play, whose item is null too (fix round 2). The clients read only the
+  song playing and the one queued first on their own, the second so its details are in hand when
+  its entry leaves the pages to play, where they read one subscription per queued song.
+- A session's cold facts sit beside it in `togetherFacts`: its domain, host, settings, and whether
+  it is live, written by `open`, `configure`, the end, and the purge. The queue's pages decide
+  `view` and each entry's `remove` from them and the caller's member row, and never read the
+  session's document, so a pause, seek, or skip re-runs `get` and only the page whose entries it
+  changed, where it re-ran every page (fix round 2). A session from before its facts were kept has
+  none and decides from its document, as before, with no migration.
 
 | A skip that lands past the end of a song plays                               | It starts                                                                       |
 | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
@@ -626,6 +637,18 @@ in-step band leaves it, 5 to 42 ms off the clock here; members load at the clock
 a few milliseconds. In three of the four song changes, from a FLAC song to an MP3 one, one page's
 audio held about 50 ms, a member's in old jams and the host's in two head blocks, and its follower
 made it up within 2 seconds.
+
+What one member of a 500-song Jam reads, over live subscriptions as the clients make them, from
+the stack's function log (`test/core/together/jam-cost.test.ts`, fix round 2):
+
+| Measure                      | Before                                              | After                                        |
+| ---------------------------- | --------------------------------------------------- | -------------------------------------------- |
+| First load, documents read   | 4,047, in 505 query runs (500 song-details queries) | 2,064, in 8 runs                             |
+| One pause, documents read    | 1,547: `get` and all 4 queue pages again            | 14: `get` alone                              |
+| Subscriptions while it plays | `get`, 4 pages, and 500 songs' details              | `get`, 6 pages, and at most 2 songs' details |
+
+Pages hold fewer entries, since each entry reads its song's details too: 6 pages for 500 entries
+where there were 4.
 
 The music iOS app on a simulator joined by its link and followed with a clock offset of -8.5 ms
 over a 33 ms round trip; its Now Playing label turned each second within the probe's own delay of
