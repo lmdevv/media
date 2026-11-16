@@ -426,10 +426,12 @@ describe.skipIf(stack === undefined)("group sessions", { timeout: 120_000 }, () 
       paginationOpts: { numItems: 10, cursor: null },
     });
 
+    // A movie carries no song details: only a music song does.
     expect(queued.page).toEqual([
       {
         entryId: mine,
         item: shelf.pg,
+        track: null,
         addedBy: guest.username,
         addedByDisplayName: null,
         removable: true,
@@ -437,6 +439,7 @@ describe.skipIf(stack === undefined)("group sessions", { timeout: 120_000 }, () 
       {
         entryId: hosts,
         item: shelf.pg,
+        track: null,
         addedBy: shelf.host.username,
         addedByDisplayName: null,
         removable: false,
