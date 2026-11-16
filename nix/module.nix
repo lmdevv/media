@@ -215,6 +215,18 @@ let
         read -r owner mode < <(stat -c '%u %a' -- "$1")
         [ "$owner" = 0 ] && [ $((8#$mode & 8#022)) = 0 ]
       }
+      # Says why $1 is not root_only.
+      why_not_root_only() {
+        local owner mode
+        if [ -L "$1" ]; then
+          echo "is a symlink to $(readlink -- "$1")"
+        elif [ ! -d "$1" ]; then
+          echo "is not a folder"
+        else
+          read -r owner mode < <(stat -c '%u %a' -- "$1")
+          if [ "$owner" != 0 ]; then echo "belongs to uid $owner"; else echo "is writable by its group or others (mode $mode)"; fi
+        fi
+      }
       # Prints the first existing folder on the way to $1, $1 itself left out, that is not root's alone.
       unsafe_parent() {
         local path="" part
@@ -245,7 +257,7 @@ let
       for i in "''${!root_dirs[@]}"; do
         dir="''${root_dirs[i]}"
         parent="$(unsafe_parent "$dir")"
-        [ -z "$parent" ] || refuse "$parent, on the way to $dir, is a symlink, another user's, or writable by others, and root writes in $dir; keep dataDir in folders only root can change"
+        [ -z "$parent" ] || refuse "$parent, on the way to $dir, $(why_not_root_only "$parent"), and root writes in $dir; keep dataDir in folders only root can change"
         if [ -L "$dir" ]; then
           refuse "$dir is a symlink to $(readlink -- "$dir"); set dataDir to a path without symlinks"
         elif [ -e "$dir" ]; then
@@ -256,11 +268,16 @@ let
         fi
       done
 
+      service_uid="$(id -u -- ${lib.escapeShellArg cfg.user})"
       for dir in ${lib.escapeShellArgs serviceDirs}; do
         { [ -e "$dir" ] || [ -L "$dir" ]; } && continue
         parent="$(unsafe_parent "$dir")"
-        if [ -n "$parent" ]; then
-          log "not making $dir: $parent, on the way to it, is a symlink, another user's, or writable by others"
+        if [ -n "$parent" ] && [ -d "$parent" ] && [ ! -L "$parent" ] &&
+          [ "$(stat -c %u -- "$parent")" = "$service_uid" ]; then
+          log "leaving $dir to ${cfg.user} to make: $parent, on the way to it, is ${cfg.user}'s"
+          continue
+        elif [ -n "$parent" ]; then
+          log "not making $dir: $parent, on the way to it, $(why_not_root_only "$parent")"
           continue
         fi
         make_dir "$dir" 700
@@ -297,33 +314,68 @@ let
         read -r owner mode < <(stat -c '%u %a' -- "$1")
         { [ "$owner" = 0 ] || [ "$owner" = "$uid" ]; } && [ $((8#$mode & 8#022)) = 0 ]
       }
+      # Says why $1, on the way to $2, fails that, and what to do.
+      why_unsafe() {
+        local owner mode keep="keep $2 in folders only root and $user can change"
+        if [ -L "$1" ]; then
+          echo "is a symlink to $(readlink -- "$1"); set the option to a path without symlinks"
+          return 0
+        fi
+        read -r owner mode < <(stat -c '%u %a' -- "$1")
+        if [ "$owner" != 0 ] && [ "$owner" != "$uid" ]; then
+          echo "belongs to uid $owner; $keep"
+        else
+          echo "is writable by its group or others (mode $mode); $keep"
+        fi
+      }
       # Prints the first existing folder on the way to $1, $1 itself left out, that fails that.
       unsafe_parent() {
         local path="" part
         local -a parts
         IFS=/ read -ra parts <<<"''${1#/}"
         unset 'parts[-1]'
-        ours_or_roots / || { echo /; return 0; }
+        { [ ! -L / ] && ours_or_roots /; } || { echo /; return 0; }
         for part in "''${parts[@]}"; do
           path+="/$part"
-          [ -e "$path" ] || return 0
-          ours_or_roots "$path" || { echo "$path"; return 0; }
+          [ -e "$path" ] || [ -L "$path" ] || return 0
+          { [ ! -L "$path" ] && ours_or_roots "$path"; } || { echo "$path"; return 0; }
         done
+      }
+      # Prints the folders missing on the way to $1, $1 included, outermost first.
+      missing_dirs() {
+        local path="$1"
+        local -a missing=()
+        while [ ! -e "$path" ] && [ ! -L "$path" ]; do
+          missing=("$path" "''${missing[@]}")
+          path="$(dirname -- "$path")"
+        done
+        printf '%s\n' "''${missing[@]}"
+      }
+      # Makes each of its arguments, outermost first, as the service user's and 0700.
+      make_dirs() {
+        local dir
+        for dir in "$@"; do mkdir -m 700 -- "$dir" && chgrp -- "$gid" "$dir" || return 1; done
       }
 
       for dir in ${lib.escapeShellArgs serviceDirs}; do
         parent="$(unsafe_parent "$dir")"
         if [ -n "$parent" ]; then
-          problems+=("$parent, on the way to $dir, is writable by a user other than root and $user; keep $dir in folders only they can change")
+          problems+=("$parent, on the way to $dir, $(why_unsafe "$parent" "$dir")")
           continue
         fi
         if [ ! -e "$dir" ] && [ ! -L "$dir" ]; then
           # Root makes none inside a folder of the service user's, such as a backupDir inside the
-          # state folder; the service user does, once the folders before it check out.
+          # state folder; the service user does, with any folders missing on the way, once the
+          # folders before it check out. Only root and the service user can change those, so none
+          # becomes a symlink before mkdir.
+          mapfile -t missing < <(missing_dirs "$dir")
+          base="$(dirname -- "''${missing[0]}")"
           if [ "''${#problems[@]}" -gt 0 ] || [ "''${#foreign[@]}" -gt 0 ] ||
-            [ "$(stat -c %u -- "$(dirname -- "$dir")" 2>/dev/null)" != "$uid" ] ||
-            ! mkdir -m 700 -- "$dir" || ! chgrp -- "$gid" "$dir"; then
-            problems+=("$dir is missing; make it with: sudo install -d -m 700 -o $user -g $group $(printf %q "$dir")")
+            [ ! -d "$base" ] || [ -L "$base" ] || [ "$(stat -c %u -- "$base")" != "$uid" ] ||
+            ! make_dirs "''${missing[@]}"; then
+            # Every missing folder is named, so install makes none of them root's.
+            printf -v remedy ' %q' "''${missing[@]}"
+            problems+=("$dir is missing; make it with: sudo install -d -m 700 -o $user -g $group$remedy")
             continue
           fi
         fi
@@ -374,8 +426,12 @@ let
       if [ "''${#foreign[@]}" -gt 0 ]; then
         command="sudo find"
         for dir in "''${foreign[@]}"; do printf -v command '%s %q' "$command" "$dir"; done
-        printf -v command '%s -xdev \\( -type d -o -links 1 \\) -exec chown -h %q {} +' "$command" "$user:$group"
+        # The other owners' uids, root's left out: a process of theirs could swap a file for a
+        # symlink while the fix runs.
+        uids="$({ find "''${foreign[@]}" -xdev ! -uid 0 ! -uid "$uid" -printf '%U\n' 2>/dev/null || true; } | sort -nu | paste -sd , -)"
+        printf -v command '%s -xdev \\( -type d -o -links 1 \\) -execdir chown -h %q {} +' "$command" "$user:$group"
         log "refusing to start: the service's folders and what is in them must be $user's, and the module re-owns nothing that already exists"
+        [ -z "$uids" ] || log "first check that no process runs as uid $uids: pgrep -u $uids must print nothing"
         log "after the 0.3.0 or 0.4.0 module, whose service ran as the movies user, give them to $user, all but files with other names (hard links):"
         log "$command"
         log "then start it again: sudo systemctl start media-server"

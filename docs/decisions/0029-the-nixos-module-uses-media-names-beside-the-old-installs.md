@@ -72,24 +72,31 @@ the other's `/run/movies`, and the two would have shared one transcode folder.
      else can swap it once the check has passed. When the top folder is the service user's, so
      is everything in it, and a file of another user with other names (a hard link) is refused by
      name, since it may be another file. A folder that is missing because root would not make it
-     there is made by the service user when it sits inside a folder the service user already
-     owns; otherwise the error names the `install -d` that makes it.
+     there, such as a `backupDir` inside the state folder, is made by the service user, with the
+     folders missing on the way to it, each `0700`, when the nearest existing folder is
+     the service user's. Otherwise the error names the `install -d` that makes it, listing every
+     missing folder so none of them is left root's.
 
   For folders of another owner, and only when nothing else is wrong, the error names the one
-  command that fixes them. After the 0.3.0 or 0.4.0 module, with the default folders, that is:
+  command that fixes them, and the old owner's uid. The admin first confirms that no process runs
+  as that uid (`pgrep -u <uid>` prints nothing), then runs the exact line the check prints. After
+  the 0.3.0 or 0.4.0 module, with the default folders, that is:
 
   ```sh
-  sudo find /var/lib/media/core/backups /var/lib/media/movies/media -xdev \( -type d -o -links 1 \) -exec chown -h media-server:media-server {} +
+  sudo find /var/lib/media/core/backups /var/lib/media/movies/media -xdev \( -type d -o -links 1 \) -execdir chown -h media-server:media-server {} +
   ```
 
-  plus `transcodeDir` if it was set to a folder of its own. Then `systemctl start media-server`.
-  It re-owns every folder and file in them except files with other names, and the check prints
-  it only when nothing is mounted at or inside them. Nothing outside them changes, not even a
-  library file hard-linked into one.
+  with a custom `transcodeDir` or `backupDir` in place of the defaults when one is set. Then
+  `systemctl start media-server`. It re-owns every folder and file in them except files with
+  other names. `-execdir` runs `chown -h` from each entry's own folder, so a folder swapped for a
+  symlink part way never redirects it. `-xdev` alone would not stop at a bind mount from the same
+  file system, so the check refuses a folder with a mount at or inside it first, and prints no
+  command for it. Nothing outside them changes, not even a library file hard-linked into one.
 
 - No tmpfiles rule makes anything under `dataDir`, since tmpfiles follows a symlink on the way
   before anything checks it. Setup's upgrade backup is written and renamed by the service user,
-  since root writes nothing in a folder another user can change.
+  since root writes in no folder of `dataDir` that another user can change. Root still writes in
+  `/run/media-server`, which systemd makes new at every start.
 - systemd's `StateDirectory=` and `CacheDirectory=` were considered and rejected. systemd 261
   (`setup_exec_directory` in `src/core/exec-invoke.c`, `path_chown_recursive` in
   `src/shared/chown-recursive.c`) re-owns the whole tree whenever the top folder's owner differs

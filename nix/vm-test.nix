@@ -28,35 +28,48 @@ let
     finalImageName = imageName;
     finalImageTag = imageTag;
   };
+
+  # A fresh install; `services` adds to its options.
+  install =
+    services:
+    { pkgs, ... }:
+    {
+      imports = [ module ];
+
+      environment.systemPackages = [ pkgs.jq ];
+
+      virtualisation = {
+        memorySize = 4096;
+        cores = 4;
+        diskSize = 8192;
+        # The loaded image has no registry digest, so the container runs it by name and tag.
+        oci-containers.containers.media-core-convex = {
+          imageFile = convexImage;
+          pull = "never";
+        };
+      };
+
+      systemd.tmpfiles.rules = [ "d /srv/media/movies 0755 root root -" ];
+
+      services.media = {
+        enable = true;
+        libraryDirs = [ "/srv/media/movies" ];
+        convexImage = "${imageName}:${imageTag}";
+      }
+      // services;
+    };
 in
 testers.runNixOSTest {
   name = "movies";
 
-  nodes.machine = { pkgs, ... }: {
-    imports = [ module ];
-
-    environment.systemPackages = [ pkgs.jq ];
-
-    virtualisation = {
-      memorySize = 4096;
-      cores = 4;
-      diskSize = 8192;
-      # The loaded image has no registry digest, so the container runs it by name and tag.
-      oci-containers.containers.media-core-convex = {
-        imageFile = convexImage;
-        pull = "never";
-      };
-    };
-
-    systemd.tmpfiles.rules = [ "d /srv/media/movies 0755 root root -" ];
-
-    services.media = {
-      enable = true;
-      libraryDirs = [ "/srv/media/movies" ];
-      convexImage = "${imageName}:${imageTag}";
+  nodes = {
+    machine = install {
       streamIdleSeconds = 30;
       extraEnvironment.LIBVA_DRIVER_NAME = "iHD";
     };
+    # Root makes no folder inside the service user's state folder, so the service user makes
+    # backupDir and the folder on the way to it.
+    nested = install { backupDir = "/var/lib/media/movies/media/custom/backups"; };
   };
 
   testScript = ''
@@ -70,11 +83,52 @@ testers.runNixOSTest {
     def page(url):
         return machine.succeed(f"curl -fsS {url}")
 
-    def wait_connected():
-        machine.wait_until_succeeds(
+    def wait_connected(node=machine):
+        node.wait_until_succeeds(
             "curl -fsS http://127.0.0.1:8080/api/health | grep -q '\"backend\":\"connected\"'",
             timeout=600,
         )
+
+    def folders_log(node=machine):
+        return node.succeed(
+            "journalctl -o cat _SYSTEMD_INVOCATION_ID=$(systemctl show -p InvocationID --value media-server-folders.service)"
+        )
+
+    start_all()
+
+    nested_dirs = [
+        "/var/lib/media/movies/media",
+        "/var/lib/media/movies/media/custom",
+        "/var/lib/media/movies/media/custom/backups",
+    ]
+
+    def nested_owners():
+        for path in nested_dirs:
+            found = nested.succeed(f"stat -c '%U:%G %a' {path}").strip()
+            assert found == "media-server:media-server 700", f"{path} is {found}"
+
+    with subtest("a fresh install with backupDir inside the state folder starts"):
+        nested.wait_for_unit("media-server.service", timeout=900)
+        wait_connected(nested)
+        nested_owners()
+
+    with subtest("the command the check names for a missing backupDir makes every missing folder the service user's"):
+        # Another owner's file in the state folder stops the check before it makes anything.
+        nested.succeed("systemctl stop media-server.service")
+        nested.succeed(f"rm -rf {nested_dirs[1]} && install -o 9999 -g 9999 /dev/null {nested_dirs[0]}/old")
+        status, _ = nested.execute("systemctl start media-server.service")
+        assert status != 0, "the media service started"
+        log = folders_log(nested)
+        print(log)
+        fix = f"install -d -m 700 -o media-server -g media-server {nested_dirs[1]} {nested_dirs[2]}"
+        assert f"refusing to start: {nested_dirs[2]} is missing; make it with: sudo {fix}" in log, log
+        nested.succeed(fix)
+        nested_owners()
+        nested.succeed(f"rm {nested_dirs[0]}/old && systemctl reset-failed")
+        nested.succeed("systemctl start media-server.service")
+        nested.wait_for_unit("media-server.service")
+        wait_connected(nested)
+        nested.shutdown()
 
     machine.wait_for_unit("podman-media-core-convex.service")
     machine.wait_until_succeeds("curl -fsS http://127.0.0.1:3210/version", timeout=300)
@@ -216,11 +270,6 @@ testers.runNixOSTest {
     def owner(path):
         return machine.succeed(f"stat -c %u:%g {path}").strip()
 
-    def folders_log():
-        return machine.succeed(
-            "journalctl -o cat _SYSTEMD_INVOCATION_ID=$(systemctl show -p InvocationID --value media-server-folders.service)"
-        )
-
     def start_refused():
         status, _ = machine.execute("systemctl start media-server.service")
         assert status != 0, "the media service started"
@@ -250,7 +299,7 @@ testers.runNixOSTest {
 
     def fix_for(*folders):
         return (
-            f"find {' '.join(folders)} -xdev \\( -type d -o -links 1 \\) -exec chown -h media-server:media-server {{}} +"
+            f"find {' '.join(folders)} -xdev \\( -type d -o -links 1 \\) -execdir chown -h media-server:media-server {{}} +"
         )
 
     # 0.3.0 and 0.4.0 ran the service as `movies` in these same folders, and NixOS drops that user
@@ -264,6 +313,7 @@ testers.runNixOSTest {
         log = start_refused()
         assert listing(state, backups, transcodes) == before
         assert f"{state} belongs to uid 9999 and gid 9999, not media-server:media-server" in log, log
+        assert "first check that no process runs as uid 9999: pgrep -u 9999 must print nothing" in log, log
         commands = printed_fix(log)
         assert commands == [fix_for(transcodes, backups, state)], commands
         machine.succeed(commands[0])
@@ -362,7 +412,7 @@ testers.runNixOSTest {
         # Made by the admin, it is still refused while that user can swap it.
         machine.succeed(f"rm -rf {transcodes} && install -d -m 700 -o media-server -g media-server {transcodes}")
         log = start_refused()
-        assert f"refusing to start: /var/cache/media, on the way to {transcodes}, is writable by a user other than root and media-server" in log, log
+        assert f"refusing to start: /var/cache/media, on the way to {transcodes}, belongs to uid 9999" in log, log
         machine.succeed(f"rm -rf {transcodes} && chown root:root /var/cache/media")
         start()
         assert owner(transcodes) == service_ids

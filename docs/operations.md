@@ -204,20 +204,22 @@ runtime folder is `/run/media-server`. Move any override of `systemd.services.mo
 `users.users.movies`, such as `extraGroups`, to `media-server`. The database and the service's
 state stay in `dataDir`, where the old `movies` user's files keep its ids. The module re-owns
 nothing that already exists, so the first start refuses, names the folders, and prints the
-command that gives them to `media-server`. With the default folders, run it once, then start the
-service:
+command that gives them to `media-server`. Run the exact line the check prints, once. First
+confirm that no process runs as the old owner's uid, which the check names: `pgrep -u <uid>` must
+print nothing. With the default folders, and 9999 standing in for that uid:
 
 ```sh
-sudo find /var/lib/media/core/backups /var/lib/media/movies/media -xdev \( -type d -o -links 1 \) -exec chown -h media-server:media-server {} +
+pgrep -u 9999
+sudo find /var/lib/media/core/backups /var/lib/media/movies/media -xdev \( -type d -o -links 1 \) -execdir chown -h media-server:media-server {} +
 sudo systemctl start media-server
 ```
 
 It changes the owner of every folder and file in them except a file with other names (a hard
-link), which may be another file outside them. The check prints it only when nothing is mounted
-at or inside them, and `-xdev` keeps it on their file system. Add
-`transcodeDir` to it if you set that to a folder of your own. Transcode segments move
-to `/var/cache/media/transcode`, which starts empty; `/var/cache/movies/transcode` is left alone,
-since [movies] v0.2 uses that path too. Evaluation refuses a `dataDir`, `backupDir`, or
+link), which may be another file outside them. `-xdev` alone would not stop at a bind mount from
+the same file system, so the check refuses a folder with a mount at or inside it first, and prints
+no command for it. With a custom `transcodeDir` or `backupDir`, the printed line names those
+folders. Transcode segments move to `/var/cache/media/transcode`, which starts empty;
+`/var/cache/movies/transcode` is left alone, since [movies] v0.2 uses that path too. Evaluation refuses a `dataDir`, `backupDir`, or
 `transcodeDir` that overlaps a library or an old install's folder.
 
 Before every start, `media-server-folders` checks the folders, and the media service and the
