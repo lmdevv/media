@@ -83,18 +83,26 @@ type FakeEngine = PlayerEngine & {
   readonly emit: (event: EngineEvent) => void;
   /** Plays the current source to its end: moves on to the preload, as both engines do, or ends. */
   readonly finish: () => void;
+  /** Sends the `playing` and `paused` events a held engine kept back, in order. */
+  readonly answer: () => void;
 };
 
 /**
  * An engine that plays at once: it answers each call with the events a real one would send, and
- * keeps a preload across loads of other sources, as both real engines do.
+ * keeps a preload across loads of other sources, as both real engines do. A `held` one keeps its
+ * `playing` and `paused` events until `answer`.
  */
-const instantEngine = (kind: EngineKind, record: EngineRecord): FakeEngine => {
+const instantEngine = (kind: EngineKind, record: EngineRecord, held = false): FakeEngine => {
   const listeners = new Set<(event: EngineEvent) => void>();
   let paused = true;
   let positionMs = 0;
   let current: EngineSource | null = null;
   let queued: EngineSource | null = null;
+  const unanswered: Array<EngineEvent> = [];
+
+  const deliver = (event: EngineEvent): void => {
+    for (const listener of listeners) listener(event);
+  };
 
   const emit = (event: EngineEvent): void => {
     if (event.type === "time") positionMs = event.positionMs;
@@ -102,7 +110,22 @@ const instantEngine = (kind: EngineKind, record: EngineRecord): FakeEngine => {
     if (event.type === "playing") paused = false;
     else if (event.type === "paused" || event.type === "ended") paused = true;
 
-    for (const listener of listeners) listener(event);
+    deliver(event);
+  };
+
+  const turn = (play: boolean): void => {
+    const event: EngineEvent = { type: play ? "playing" : "paused" };
+
+    if (!held) {
+      emit(event);
+
+      return;
+    }
+
+    // An element that already plays, or is paused, says nothing again.
+    if (paused === !play) return;
+    paused = !play;
+    unanswered.push(event);
   };
 
   record.created.push(kind);
@@ -126,6 +149,8 @@ const instantEngine = (kind: EngineKind, record: EngineRecord): FakeEngine => {
     },
     samplePlayback: () => ({ positionMs, playing: !paused }),
     load: async (source, startMs, autoplay) => {
+      // Events held for the source before describe a stream the player let go of.
+      unanswered.splice(0);
       record.loads.push({ kind, url: source.url, startMs });
       record.played.push(source.url);
       current = source;
@@ -152,13 +177,16 @@ const instantEngine = (kind: EngineKind, record: EngineRecord): FakeEngine => {
       record.preloads.push(source);
       queued = source;
     },
+    answer: () => {
+      for (const event of unanswered.splice(0)) deliver(event);
+    },
     play: async () => {
       if (current === null) return;
       record.plays += 1;
-      emit({ type: "playing" });
+      turn(true);
     },
     pause: () => {
-      emit({ type: "paused" });
+      turn(false);
     },
     seek: (target) => {
       record.seeks.push(target);
@@ -169,6 +197,7 @@ const instantEngine = (kind: EngineKind, record: EngineRecord): FakeEngine => {
       record.unlocks += 1;
     },
     unload: () => {
+      unanswered.splice(0);
       paused = true;
       positionMs = 0;
       current = null;
@@ -235,6 +264,20 @@ interface SystemControls {
   commanded: number;
 }
 
+/** Resolves once `ready` holds, checking every 10 ms; fails once `deadline` passes. */
+export const until = async (
+  ready: () => boolean,
+  deadline = Date.now() + 10_000,
+): Promise<void> => {
+  if (ready()) return;
+
+  if (Date.now() > deadline) throw new Error("Timed out waiting");
+  await new Promise((resolve) => {
+    setTimeout(resolve, 10);
+  });
+  await until(ready, deadline);
+};
+
 export const settle = (): Promise<void> =>
   new Promise((resolve) => {
     setTimeout(resolve, 0);
@@ -254,6 +297,11 @@ export const setup = (
     readonly broken?: ReadonlyArray<string>;
     /** The server can't be asked: a song without a copy is unreachable. */
     readonly offline?: boolean;
+    /**
+     * The engine plays or pauses at once but says so only when the test calls `answer` on it, as
+     * an audio element fires `playing` and `pause` a task after `play()` and `pause()`.
+     */
+    readonly heldPlayState?: boolean;
   } = {},
 ) => {
   const record: EngineRecord = {
@@ -402,7 +450,7 @@ export const setup = (
     {
       mse: options.mse === true ? { flac: true, changeType: true } : null,
       create: (kind) => {
-        const engine = instantEngine(kind, record);
+        const engine = instantEngine(kind, record, options.heldPlayState === true);
 
         engines.push(engine);
 

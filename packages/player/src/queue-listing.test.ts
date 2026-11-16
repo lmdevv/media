@@ -9,7 +9,7 @@ import { ConnectPlayer } from "./connect-player";
 import type { ConnectCommands } from "./connect-player";
 import { listedPage, listingOf, queueStateOf } from "./queue-listing";
 import type { ListedPage, ListingPage, QueueInfo, QueueListing } from "./queue-listing";
-import { entry, names, settle, setup } from "./testing/controller-harness";
+import { entry, names, settle, setup, until } from "./testing/controller-harness";
 
 const info = (current: string | null, revision: number): QueueInfo => ({
   current,
@@ -114,17 +114,6 @@ const row = (trackId: string, itemId: string) => ({
     liked: false,
   },
 });
-
-/** Resolves once `ready` holds, checking every 10 ms; fails once `deadline` passes. */
-const until = async (ready: () => boolean, deadline = Date.now() + 10_000): Promise<void> => {
-  if (ready()) return;
-
-  if (Date.now() > deadline) throw new Error("Timed out waiting");
-  await new Promise((resolve) => {
-    setTimeout(resolve, 10);
-  });
-  await until(ready, deadline);
-};
 
 describe("a device following its queue through the SDK", () => {
   it("never replaces the queue from a whole listing a retrying page kept while the queue moved on", async () => {

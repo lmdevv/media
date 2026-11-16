@@ -382,6 +382,57 @@ const opened = async (run: Phone, turns = 50): Promise<void> => {
 };
 
 describe("Connect on the phone", () => {
+  it("reports a remote play applied as playing before expo-audio's report of it arrives, and keeps a lock-screen pause made then", async () => {
+    const run = phone();
+
+    await playingA(run);
+    run.connect.take(
+      ask(1, {
+        kind: "transport",
+        item: song(songA),
+        playing: false,
+        positionMs: run.controller.positionMs(),
+        at: run.clock.now,
+      }),
+    );
+    await settle();
+
+    expect(lastReport(run)).toMatchObject({
+      song: { trackId: songA.id, playing: false },
+      applied: 1,
+    });
+
+    const first = run.outputOf(songA);
+
+    first.holdReports = true;
+    run.connect.take(
+      ask(2, {
+        kind: "transport",
+        item: song(songA),
+        playing: true,
+        positionMs: run.controller.positionMs(),
+        at: run.clock.now,
+      }),
+    );
+
+    expect(lastReport(run)).toMatchObject({
+      song: { trackId: songA.id, playing: true },
+      applied: 2,
+    });
+
+    run.lockScreen.pause();
+    first.holdReports = false;
+    first.sendHeldReports();
+    await settle();
+
+    expect(run.controller.playingHere()).toMatchObject({ trackId: songA.id, playing: false });
+    expect(run.engine.meansToPlay()).toBe(false);
+    expect(lastReport(run)).toMatchObject({
+      song: { trackId: songA.id, playing: false },
+      applied: 2,
+    });
+  });
+
   it("reports the song it plays, then a pause from the lock screen at once", async () => {
     const run = phone();
 
@@ -1042,6 +1093,44 @@ describe("A system command the person chose again after, on the phone", () => {
     expect(run.controller.playingHere()).toMatchObject({ trackId: songB.id, playing: false });
     expect(run.engine.meansToPlay()).toBe(false);
     expect(run.outputOf(songB).wantsPlay).toBe(false);
+  });
+
+  it("keeps a lock-screen pause when another device scrubs as it last saw it, after asking for a play the phone already played", async () => {
+    const run = phone();
+
+    await playingA(run);
+    run.connect.take(
+      ask(1, {
+        kind: "transport",
+        item: song(songA),
+        playing: true,
+        positionMs: run.controller.positionMs(),
+        at: run.clock.now,
+      }),
+    );
+    await settle();
+
+    const first = run.outputOf(songA);
+    const pressed = run.remote.stamp();
+
+    // expo-audio paused the player; its report of that has not reached the app yet.
+    first.wantsPlay = false;
+    run.connect.take(
+      ask(2, {
+        kind: "transport",
+        item: song(songA),
+        playing: true,
+        positionMs: 60_000,
+        at: run.clock.now,
+      }),
+    );
+    await settle();
+    run.remote.press("pause", first, pressed);
+    await settle();
+
+    expect(run.controller.playingHere()).toMatchObject({ trackId: songA.id, playing: false });
+    expect(run.engine.meansToPlay()).toBe(false);
+    expect(first.wantsPlay).toBe(false);
   });
 
   it("keeps a lock-screen pause when another device only scrubs the song as it last saw it, before the pause arrives", async () => {

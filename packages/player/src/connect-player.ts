@@ -560,7 +560,7 @@ export class ConnectPlayer {
     const load = this.#load;
 
     if (load?.phase === "starting" && load.waits === "queue") this.#startSong(load);
-    const here = this.#controller.playingHere();
+    const here = this.#controller.reportedHere();
     const { engineStatus, seeks } = this.#controller.getSnapshot();
 
     if (reportKey(here, engineStatus, seeks, this.#applied, this.#output) !== this.#reported) {
@@ -571,7 +571,7 @@ export class ConnectPlayer {
   #report(): void {
     if (!this.started) return;
 
-    const here = this.#controller.playingHere();
+    const here = this.#controller.reportedHere();
     const { engineStatus, seeks } = this.#controller.getSnapshot();
     const applied = this.#applied;
     const output = this.#output;

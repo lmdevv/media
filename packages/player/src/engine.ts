@@ -81,7 +81,10 @@ export interface EnginePlayback {
  * Source Extensions; `HtmlAudioEngine` is the plain HTML audio fallback.
  */
 export interface PlayerEngine {
-  /** Samples current output rather than replaying a possibly delayed event. */
+  /**
+   * Samples current output rather than replaying a possibly delayed event. It shows a `play` or
+   * `pause` the engine took at once, before the event that reports it (ADR 0018).
+   */
   samplePlayback(): EnginePlayback;
   /**
    * Replaces whatever is loaded and starts at `startMs`. Resolves once playback can begin. Loading
