@@ -651,17 +651,33 @@ export class MseEngine implements PlayerEngine {
     return 0;
   }
 
+  /**
+   * How far the buffer reaches past the playhead. While a song loads partway in, the playhead
+   * stays where the element began until `#whenPlayable` moves it, so the song's start stands in
+   * for it: measured from 0, a song starting 40 s in looks 40 s ahead, and the pump would idle
+   * waiting for a playhead that waits for the pump.
+   */
   #aheadOfPlayhead(): number {
-    const ranges = this.#session?.buffer?.buffered;
-    const time = this.#element.currentTime;
+    const session = this.#session;
+    const ranges = session?.buffer?.buffered;
 
-    if (ranges === undefined) return 0;
+    if (session === null || ranges === undefined) return 0;
+    const time = Math.max(this.#element.currentTime, this.#startingAt(session));
 
     for (let index = 0; index < ranges.length; index += 1) {
       if (time < ranges.end(index)) return ranges.end(index) - time;
     }
 
     return 0;
+  }
+
+  /** Where the song a load is starting plays from on the element's timeline; 0 once it plays. */
+  #startingAt(session: Session): number {
+    const song = session.songs[0];
+
+    if (session.loadingPlayback === null || song === undefined || song.placement === null) return 0;
+
+    return song.placement.start + song.startSeconds;
   }
 
   async #pump(session: Session): Promise<void> {

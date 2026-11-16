@@ -38,6 +38,9 @@ test.describe.configure({ mode: "serial" });
 /** Long enough to pause, seek, and move inside one song. */
 const SONG_SECONDS = 180;
 
+/** About twice the FLAC fixture's bitrate: playback keeps up, but the stream comes in pieces. */
+const SLOW_BYTES_PER_SECOND = 32 * 1024;
+
 /** An MP3 every Chromecast decodes, which casts as its original file. */
 const MP3_SONG = "Third Tone";
 
@@ -206,13 +209,34 @@ test("another of the person's browsers lists the cast, and its pause reaches the
 });
 
 test("ending the cast brings the song back to the browser where the TV was", async () => {
-  await advanceReceiver(laptop, 40);
-  await castFake(laptop, "disconnect");
-  await expect(
-    laptop.getByRole("status").filter({ hasText: "Playing on Living Room TV" }),
-  ).toHaveCount(0);
-  await expect.poll(() => audioSeconds(laptop), { timeout: 30_000 }).toBeGreaterThan(40);
-  expect(await audioSeconds(laptop)).toBeLessThan(50);
+  // A slow network hands the song's stream over in small pieces, as a busy machine does: the
+  // browser starts from the first of them, 40 s into the song.
+  const network = await laptop.context().newCDPSession(laptop);
+
+  await network.send("Network.emulateNetworkConditions", {
+    offline: false,
+    latency: 0,
+    downloadThroughput: SLOW_BYTES_PER_SECOND,
+    uploadThroughput: -1,
+  });
+
+  try {
+    await advanceReceiver(laptop, 40);
+    await castFake(laptop, "disconnect");
+    await expect(
+      laptop.getByRole("status").filter({ hasText: "Playing on Living Room TV" }),
+    ).toHaveCount(0);
+    await expect.poll(() => audioSeconds(laptop), { timeout: 30_000 }).toBeGreaterThan(40);
+    expect(await audioSeconds(laptop)).toBeLessThan(50);
+  } finally {
+    await network.send("Network.emulateNetworkConditions", {
+      offline: false,
+      latency: 0,
+      downloadThroughput: -1,
+      uploadThroughput: -1,
+    });
+    await network.detach();
+  }
 });
 
 test("a Jam plays here: starting one ends the cast, and Play on offers no Chromecast in it", async () => {
