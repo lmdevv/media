@@ -340,6 +340,15 @@ test("another tab's movie taking the TV brings the song back here paused, and le
   const sent = (await receiver(laptop)).commands.length;
 
   await advanceReceiver(laptop, 7);
+  // The song comes back where the player last heard the TV was, and the seek bar shows that on a
+  // 250 ms tick, which a busy machine delays: the movie comes once the bar shows the TV's report.
+  await expect
+    .poll(async () =>
+      Number(
+        await playerOf(laptop).getByRole("slider", { name: "Seek" }).getAttribute("aria-valuenow"),
+      ),
+    )
+    .toBeGreaterThanOrEqual(7_000);
   await otherSenderLoads(laptop, OTHER_TAB_MOVIE);
 
   await expect(
