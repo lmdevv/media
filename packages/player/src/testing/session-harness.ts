@@ -95,10 +95,16 @@ class TimedEngine implements PlayerEngine {
   /** Reports a load's start on its next tick rather than at once, as the iOS engine's status does. */
   readonly #late: boolean;
   #unreported: EngineEvent | null = null;
+  /**
+   * The browser refuses to start it until the person taps the page, as Chromium does under
+   * `--autoplay-policy=document-user-activation-required`; one tap allows it from then on.
+   */
+  #blocked: boolean;
 
-  constructor(now: () => number, late = false) {
+  constructor(now: () => number, late = false, blocked = false) {
     this.#now = now;
     this.#late = late;
+    this.#blocked = blocked;
   }
 
   /** The song it plays, as the id the source's key starts with, or null. */
@@ -126,9 +132,15 @@ class TimedEngine implements PlayerEngine {
     if (this.#queued?.url === source.url) this.#queued = null;
 
     this.#anchor(startMs);
-    this.#playing = autoplay;
+    this.#playing = autoplay && !this.#blocked;
     this.#note("load", startMs);
     await Promise.resolve();
+
+    if (autoplay && this.#blocked) {
+      this.#emit(AUTOPLAY_BLOCKED);
+
+      return;
+    }
 
     const started: EngineEvent = { type: autoplay ? "playing" : "paused" };
 
@@ -142,6 +154,14 @@ class TimedEngine implements PlayerEngine {
 
   async play(): Promise<void> {
     if (this.#current === null) return;
+
+    if (this.#blocked) {
+      // As the browser's refusal reaches the HTML and MSE engines, once the element's play rejects.
+      await Promise.resolve();
+      this.#emit(AUTOPLAY_BLOCKED);
+
+      return;
+    }
 
     this.#anchor(this.#position());
     this.#playing = true;
@@ -182,6 +202,13 @@ class TimedEngine implements PlayerEngine {
     return () => {
       this.#listeners.delete(listener);
     };
+  }
+
+  /** The person taps the page, which lets it start from now on, then does `action` in that tap. */
+  tap<A>(action: () => A): A {
+    this.#blocked = false;
+
+    return action();
   }
 
   /** Fails as the media server does once a stream's ticket expired; the player loads it again. */
@@ -262,6 +289,12 @@ class TimedEngine implements PlayerEngine {
     for (const listener of this.#listeners) listener(event);
   }
 }
+
+const AUTOPLAY_BLOCKED: EngineEvent = {
+  type: "error",
+  reason: "autoplay-blocked",
+  message: "The browser blocked playback until you tap play",
+};
 
 const songOf = (source: EngineSource | null): string | null =>
   source === null ? null : (source.key.split(":")[0] ?? null);
@@ -420,6 +453,8 @@ export interface World {
       readonly answersLateMs?: number;
       /** Its system controls are a phone's, which order presses against the person's choices. */
       readonly phone?: boolean;
+      /** Its browser refuses to start playback until the person taps the page. */
+      readonly blocksAutoplay?: boolean;
     },
   ) => Member;
   /**
@@ -907,7 +942,12 @@ export const scenario = async (
   const exactTime: ServerTime = { now: serverNow, subscribe: () => () => undefined };
 
   const join: World["join"] = (name, seatOptions) => {
-    const engine = new TimedEngine(now, seatOptions.reportsLate === true);
+    const engine = new TimedEngine(
+      now,
+      seatOptions.reportsLate === true,
+      seatOptions.blocksAutoplay === true,
+    );
+
     const sources = instantSources();
     const wall = { jumpMs: 0 };
 

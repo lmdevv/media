@@ -2126,7 +2126,10 @@ export class PlaybackController {
 
       case "error": {
         this.#setMoving(false);
-        this.#update({ engineStatus: "error", ready: null });
+        // A load the browser would not start without a tap still holds its source, paused: a
+        // session's follower keeps it, held back, so the person's tap starts it in step.
+        const ready = event.reason === "autoplay-blocked" ? this.#snapshot.ready : null;
+        this.#update({ engineStatus: "error", ready });
         void this.#onError(event.reason, event.message);
         break;
       }

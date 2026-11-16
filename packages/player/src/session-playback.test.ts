@@ -380,6 +380,66 @@ describe("a music session's players", { timeout: 60_000 }, () => {
     });
   });
 
+  it("let a guest whose browser held back their player, as they joined a playing session, start it in step with one tap", async () => {
+    await scenario(song("a", 60), [], async (world) => {
+      world.join("Lucía", { hosting: true });
+
+      await world.advance(500);
+      world.move("Lucía", { kind: "play" });
+      await world.advance(3_000);
+
+      // A fresh tab: the browser refuses the load's start and every play the follower tries.
+      const guest = world.join("Aiko", { blocksAutoplay: true });
+
+      await world.advance(5_000);
+
+      expect(guest.engine.samplePlayback().playing).toBe(false);
+      expect(guest.controller.getSnapshot().autoplayBlocked).toBe(true);
+      expect(guest.playback.getSnapshot().follower?.follow).toBe("blocked");
+
+      const before = world.clock();
+
+      await expect(guest.engine.tap(() => guest.playback.togglePlay())).resolves.toBeNull();
+      await world.advance(3_000);
+
+      expect(guest.engine.samplePlayback().playing).toBe(true);
+      expect(Math.abs(driftOf(world, guest))).toBeLessThan(120);
+      // The tap started only this player: the session did not move.
+      expect(world.clock()).toStrictEqual(before);
+      expect(world.calls.filter((call) => call.by === "Aiko")).toEqual([]);
+    });
+  });
+
+  it("let a member who may control, whose browser held back their player, start it with one tap and pause no one", async () => {
+    await scenario(song("a", 60), [], async (world) => {
+      const host = world.join("Lucía", { hosting: true });
+
+      await world.advance(500);
+      world.move("Lucía", { kind: "play" });
+      await world.advance(3_000);
+
+      world.allowControl(true);
+
+      const guest = world.join("Aiko", { blocksAutoplay: true });
+
+      await world.advance(5_000);
+
+      expect(guest.playback.getSnapshot().follower?.follow).toBe("blocked");
+
+      const tapped = guest.engine.tap(() => guest.playback.togglePlay());
+
+      await world.advance(3_000);
+
+      await expect(tapped).resolves.toBeNull();
+      expect(world.clock().status).toBe("playing");
+
+      for (const member of [host, guest]) {
+        expect(member.engine.samplePlayback().playing).toBe(true);
+        expect(Math.abs(driftOf(world, member))).toBeLessThan(120);
+      }
+    });
+  });
+
   it("skip to an entry just queued, before the queue they see shows it", async () => {
     await scenario(song("a", 60), [], async (world) => {
       const host = world.join("Lucía", { hosting: true });

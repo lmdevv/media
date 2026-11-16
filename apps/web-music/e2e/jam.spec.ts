@@ -5,6 +5,7 @@ import { FIRST_SONG, SECOND_SONG, startMediaService, writeMusicLibrary } from ".
 import type { MediaService } from "./media-service";
 import { NO_STACK, createPerson, reachableStack, signIn, signInClient } from "./people";
 import type { Person } from "./people";
+import type { StackEnv } from "./stack-env";
 
 const stack = await reachableStack();
 
@@ -15,6 +16,7 @@ test.describe.configure({ mode: "serial" });
 declare global {
   interface Window {
     musicJamMedia?: Set<HTMLMediaElement>;
+    musicRefusedPlays?: number;
   }
 }
 
@@ -49,9 +51,75 @@ const apart = async (one: Page, other: Page): Promise<number> => {
   return Math.abs(a.seconds - (b.seconds + (a.at - b.at) / 1000));
 };
 
+/**
+ * Refuses the page's playback until the person taps or types in it, as Chromium's
+ * `--autoplay-policy=document-user-activation-required` does, with the same error, and counts
+ * the refusals in `musicRefusedPlays`. The flag itself holds nothing back under Playwright here:
+ * the music client's pages come up as if tapped. Add it before `watchMedia`.
+ */
+const blockAutoplay = async (page: Page): Promise<void> => {
+  await page.addInitScript({
+    content: `
+      window.musicRefusedPlays = 0;
+      let tapped = false;
+      for (const type of ["pointerdown", "keydown"]) {
+        addEventListener(type, (event) => { if (event.isTrusted) tapped = true; }, true);
+      }
+      const play = HTMLMediaElement.prototype.play;
+      HTMLMediaElement.prototype.play = function () {
+        if (tapped) return play.call(this);
+        window.musicRefusedPlays += 1;
+        return Promise.reject(new DOMException("play() needs a user gesture", "NotAllowedError"));
+      };
+    `,
+  });
+};
+
+/** How many times the page asked to play and was refused, with every media element held back. */
+const refusedPlays = (page: Page): Promise<number> =>
+  page.evaluate(() => {
+    const media = [...(window.musicJamMedia ?? [])];
+    const held = media.length > 0 && media.every((element) => element.paused);
+
+    return held ? (window.musicRefusedPlays ?? 0) : 0;
+  });
+
 let media: MediaService | undefined;
 
 let album = "";
+
+/**
+ * Queues `length` songs of the fixture album, its two in turn, as `person`'s own queue, which a
+ * Jam they start from it takes on.
+ */
+const queueAlbum = async (stackEnv: StackEnv, person: Person, length: number): Promise<void> => {
+  const platform = await signInClient(stackEnv, person);
+
+  try {
+    const albums = await platform.music.albums.list({
+      paginationOpts: { numItems: 100, cursor: null },
+    });
+
+    const found = albums.page.find((card) => card.title === album);
+
+    if (found === undefined) throw new Error(`no album ${album}`);
+
+    const tracks = await platform.music.albums.tracks({
+      albumId: found.id,
+      paginationOpts: { numItems: 100, cursor: null },
+    });
+
+    const [first, second] = tracks.page;
+
+    if (first === undefined || second === undefined) throw new Error("the album has two songs");
+
+    await platform.music.queue.play({
+      trackIds: Array.from({ length }, (_, at) => (at % 2 === 0 ? first.id : second.id)),
+    });
+  } finally {
+    await platform.dispose();
+  }
+};
 
 test.beforeAll(async () => {
   if (stack === null) return;
@@ -276,6 +344,68 @@ test("two members join a Jam by its link, play in step, add, reorder, and move o
   }
 });
 
+test("a member without control whose browser blocks autoplay joins a playing Jam, taps Play, and hears it in step", async ({
+  browser,
+  baseURL,
+}) => {
+  if (stack === null) return;
+
+  const [hostPerson, guestPerson] = await Promise.all([
+    createPerson(stack, "playing", "member"),
+    createPerson(stack, "tapper", "member"),
+  ]);
+
+  // Two minutes of six-second songs, so the Jam still plays when the member taps.
+  await queueAlbum(stack, hostPerson, 20);
+
+  const host = await pageFor(browser, baseURL, hostPerson);
+
+  try {
+    const guest = await pageFor(browser, baseURL, guestPerson);
+
+    try {
+      await host.page.goto("/music/");
+
+      const link = await startJamFromPlayer(host.page);
+      const hostPlayer = host.page.getByRole("region", { name: "Player" });
+
+      await hostPlayer.getByRole("button", { name: "Play", exact: true }).click();
+      await expect
+        .poll(async () => (await audioAt(host.page)).seconds, { timeout: 30_000 })
+        .toBeGreaterThan(0.5);
+
+      // The member opens the link in a fresh tab, which has had no tap: its player waits for one.
+      const tab = await guest.page.context().newPage();
+
+      await guest.page.close();
+      await blockAutoplay(tab);
+      await watchMedia(tab);
+      await tab.goto(link);
+      await expect(tab.getByRole("status", { name: "Jam" })).toContainText(
+        `${hostPerson.username}'s Jam`,
+      );
+
+      // The browser refused the song's start, and the follower's own try to play it after.
+      await expect.poll(() => refusedPlays(tab), { timeout: 30_000 }).toBeGreaterThanOrEqual(2);
+
+      const guestPlayer = tab.getByRole("region", { name: "Player" });
+
+      await guestPlayer.getByRole("button", { name: "Play", exact: true }).click();
+      await expect
+        .poll(async () => (await audioAt(tab)).seconds, { timeout: 15_000 })
+        .toBeGreaterThan(0.5);
+      await expect.poll(() => apart(host.page, tab), { timeout: 15_000 }).toBeLessThan(0.25);
+      // The tap played only the member's own player: the Jam played on for the host throughout.
+      await expect(hostPlayer.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
+      await expect(guestPlayer.getByText("The host controls playback in this Jam")).toHaveCount(0);
+    } finally {
+      await guest.close();
+    }
+  } finally {
+    await host.close();
+  }
+});
+
 test("an approval Jam holds a member until the host lets her in, and refuses her adds while adding is off", async ({
   browser,
   baseURL,
@@ -360,34 +490,9 @@ test("a Jam started from a long queue holds all of it, page after page, and a me
     createPerson(stack, "aiko", "member"),
   ]);
 
-  const platform = await signInClient(stack, hostPerson);
-
-  try {
-    const albums = await platform.music.albums.list({
-      paginationOpts: { numItems: 100, cursor: null },
-    });
-
-    const found = albums.page.find((card) => card.title === album);
-
-    if (found === undefined) throw new Error(`no album ${album}`);
-
-    const tracks = await platform.music.albums.tracks({
-      albumId: found.id,
-      paginationOpts: { numItems: 100, cursor: null },
-    });
-
-    const [first, second] = tracks.page;
-
-    if (first === undefined || second === undefined) throw new Error("the album has two songs");
-
-    // The host's own queue: 300 songs, more than two of the core's pages of a Jam's queue for a
-    // person in no group, which hold 140 entries each.
-    await platform.music.queue.play({
-      trackIds: Array.from({ length: 300 }, (_, at) => (at % 2 === 0 ? first.id : second.id)),
-    });
-  } finally {
-    await platform.dispose();
-  }
+  // The host's own queue: 300 songs, more than two of the core's pages of a Jam's queue for a
+  // person in no group, which hold 140 entries each.
+  await queueAlbum(stack, hostPerson, 300);
 
   const host = await pageFor(browser, baseURL, hostPerson);
   const aiko = await pageFor(browser, baseURL, aikoPerson);
