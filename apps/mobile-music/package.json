@@ -1,6 +1,6 @@
 {
   "name": "@media/mobile-music",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "The [music] iOS app: Expo, Expo Router, and Uniwind over the platform SDK and @media/mobile-core.",
   "main": "expo-router/entry",

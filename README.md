@@ -1,13 +1,14 @@
 # [media]
 
-Self-hosted movies and TV for people and agents, with music to follow. Stream your own folders or
-NAS from one install, with an account per person and one sign-in across the apps, Netflix-style
-browsing, watching together at the same second, migration from Jellyfin and Plex, and a CLI that
-can do everything the app can.
+Self-hosted movies, TV, and music for people and agents. Stream your own folders or NAS from one
+install, with an account per person and one sign-in across the apps, Netflix-style browsing,
+watching and listening together at the same second, migration from Jellyfin and Plex, and a CLI
+that can do everything the app can.
 
-[media] merges [movies] and [music] into one server. Its first release, 0.3.0, carries movies;
-the music client comes in a later release. It is a fresh install: nothing moves over from a
-[movies] v0.2 install ([docs/operations.md](docs/operations.md#upgrading)).
+[media] merges [movies] and [music] into one server. Since 0.4.0 it carries both, movies at
+`/movies` and music at `/music`. A [media] 0.3.0 install upgrades in place. It is a fresh install
+for a [movies] v0.2 or [music] v0.3 install: nothing moves over from either
+([docs/operations.md](docs/operations.md#upgrading)).
 
 ## Stack
 

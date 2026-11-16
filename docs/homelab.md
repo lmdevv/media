@@ -63,7 +63,7 @@ People sign in once at `MEDIA_BASE_URL`, and `MEDIA_BASE_URL/movies` opens with 
 
 ```nix
 # flake.nix
-inputs.movies.url = "github:lmdevv/media";   # or github:lmdevv/media/v0.3.0 to pin a release
+inputs.movies.url = "github:lmdevv/media";   # or github:lmdevv/media/v0.4.0 to pin a release
 
 # in nixosSystem { modules = [ ... ]; }
 inputs.movies.nixosModules.default
@@ -231,16 +231,16 @@ Compose: keep the checkout and the image on the same release, since `compose.yam
 settings that release's image reads.
 
 ```sh
-cd media && git fetch --tags && git checkout v0.3.0
-# in deploy/compose/.env: MEDIA_IMAGE=ghcr.io/lmdevv/media:0.3.0
+cd media && git fetch --tags && git checkout v0.4.0
+# in deploy/compose/.env: MEDIA_IMAGE=ghcr.io/lmdevv/media:0.4.0
 cd deploy/compose && docker compose pull && docker compose up -d
 ```
 
 For the edge, `git pull` on `main` with `MEDIA_IMAGE=ghcr.io/lmdevv/media:main`.
 
-0.3.0, the first [media] release, is a fresh install, not an upgrade of a [movies] v0.2 install:
-nothing moves over from it, so set it up as above beside the old one's data
-(`docs/operations.md`, "Upgrading").
+A [media] 0.3.0 install upgrades to 0.4.0 this way. [media] is a fresh install, not an upgrade of
+a [movies] v0.2 or [music] v0.3 install: nothing moves over from either, so set it up as above
+beside the old one's data (`docs/operations.md`, "Upgrading").
 
 NixOS: `nix flake update movies && nixos-rebuild switch` (or move the pinned tag). Both back up
 before the new version deploys its functions; `docs/operations.md` ("Upgrading") covers rolling
