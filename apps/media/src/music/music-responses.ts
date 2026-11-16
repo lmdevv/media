@@ -255,10 +255,11 @@ export const transcodedResponse = Effect.fn("MusicResponses.transcoded")(functio
 });
 
 /**
- * Answers a request for the finished transcode of `input` (`&finished=1`, `GET` or `HEAD`): the
- * cached file with `Content-Length`, `ETag`, and byte ranges. While the transcode is prepared in
- * the background, it answers `503` with `Retry-After` and `Cache-Control: no-store` instead, so a
- * client polls rather than holding a connection through the encode, and leaving does not stop it.
+ * Answers a request for the finished transcode of `input` (`&finished=1`, `GET` or `HEAD`, and any
+ * `HEAD` of a transcoded stream): the cached file with `Content-Length`, `ETag`, byte ranges, and
+ * the measured timing. While the transcode is prepared in the background, or joined while another
+ * request streams it, it answers `503` with `Retry-After` and `Cache-Control: no-store` instead, so
+ * a client polls rather than holding a connection through the encode, and leaving does not stop it.
  *
  * @returns The response, or `TranscodeError` when the background transcode failed just now, or
  *   `FileError` when the finished file cannot be read.

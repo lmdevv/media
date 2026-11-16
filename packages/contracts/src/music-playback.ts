@@ -45,7 +45,8 @@ export const MUSIC_STREAM_PARAMS = {
   /**
    * `1` asks for the finished file: the whole transcode with a length, an `ETag`, and byte ranges,
    * or a `503` with `Retry-After` while the server prepares it in the background. Never a live
-   * stream. An original is always finished.
+   * stream. An original is always finished, and a `HEAD` of a transcoded profile without `start`
+   * answers this way too.
    */
   finished: "finished",
 } as const;
@@ -57,7 +58,8 @@ export const MUSIC_STREAM_PARAMS = {
  *
  * `estimated` is `1` on a stream sent while it is still being transcoded: `duration` is then only
  * the source's declared length, and the stream has no `sidx` index, no `ETag`, and no byte
- * ranges. Once the response ends, a `HEAD` request for the same URL returns the exact timing.
+ * ranges. A `HEAD` request for the same URL answers as `&finished=1` does: the exact timing once
+ * the transcode is finished, and `503` with `Retry-After` until then.
  *
  * `start` is on a stream asked for from an offset (`&start=<ms>` on a transcoded profile): the
  * song sample the stream begins at. Such a stream also carries `priming` and `sampleRate` for

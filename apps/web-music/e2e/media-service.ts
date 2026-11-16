@@ -16,8 +16,12 @@ const run = promisify(execFile);
 
 const mediaDir = fileURLToPath(new URL("../../media", import.meta.url));
 
+/** How long a stop may take before the suite calls it hung: Docker's wait before it kills. */
+const STOP_TIMEOUT_MS = 10_000;
+
 /** A running media service. */
 export interface MediaService {
+  /** Stops it with SIGTERM; fails when it is still running `STOP_TIMEOUT_MS` later. */
   readonly stop: () => Promise<void>;
 }
 
@@ -59,7 +63,26 @@ export const startMediaService = async (
 
   const stop = async (): Promise<void> => {
     if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const inTime = await Promise.race([
+      exited.then(() => true),
+      new Promise<false>((resolve) => {
+        timer = setTimeout(() => resolve(false), STOP_TIMEOUT_MS);
+      }),
+    ]);
+
+    clearTimeout(timer);
+
+    if (inTime) return;
+
+    child.kill("SIGKILL");
     await exited;
+
+    throw new Error(
+      `The media service ignored SIGTERM for ${String(STOP_TIMEOUT_MS)} ms:\n${logs}`,
+    );
   };
 
   const connected = async (): Promise<boolean> =>

@@ -1,9 +1,9 @@
-import { createServer } from "node:http";
+import { createServer, ServerResponse } from "node:http";
 
-import { NodeHttpServer } from "@effect/platform-node";
+import { NodeHttpServer, NodeHttpServerRequest } from "@effect/platform-node";
 import { MusicStreamTimingHeader } from "@media/contracts/music-playback";
 import { Duration, Effect, Layer, Option } from "effect";
-import { HttpMiddleware, HttpRouter } from "effect/http";
+import { HttpMiddleware, HttpRouter, HttpServerRequest } from "effect/http";
 
 import * as MediaConfig from "../media-config.ts";
 import * as TrickplayRoutes from "../trickplay/trickplay-routes.ts";
@@ -83,13 +83,52 @@ const tokenSafeTracing = Layer.succeed(HttpMiddleware.TracerDisabledWhen)(
 const SHUTDOWN_GRACE = Duration.seconds(3);
 
 /**
+ * Ends the response to a `HEAD` whose client has gone, so the server finds it sent. Effect 4.0.3's
+ * Node server answers a `HEAD` by waiting until its response finishes or closes, and once the client
+ * has left neither happens: the request's fiber, interrupted by that leaving, then waits for ever
+ * where it cannot be interrupted, and the server never finishes stopping (`effect@4.0.7` returns
+ * at once for a destroyed response). This runs inside the router, before the server writes.
+ */
+const headsOfLeftClients = HttpRouter.middleware(
+  (httpEffect) =>
+    Effect.gen(function* () {
+      const request = yield* HttpServerRequest.HttpServerRequest;
+
+      if (request.method !== "HEAD") return yield* httpEffect;
+
+      // Undefined, whatever its type says, for a request Node's server did not make.
+      const response: unknown = NodeHttpServerRequest.toServerResponse(request);
+
+      if (!(response instanceof ServerResponse)) return yield* httpEffect;
+
+      const endIfLeft = () => {
+        if (!response.writableEnded) response.end();
+      };
+
+      // Now if the client already left, else when it leaves: by then the server's own listener has
+      // interrupted the request, and this one ends the response before the server writes and waits.
+      return yield* httpEffect.pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            if (response.destroyed) endIfLeft();
+            else response.once("close", endIfLeft);
+          }),
+        ),
+      );
+    }),
+  { global: true },
+);
+
+/**
  * `routes` served over the `HttpServer` in context, the way the service serves every request:
- * Effect's INFO request logger off and the DEBUG `accessLog` in its place.
+ * Effect's INFO request logger off and the DEBUG `accessLog` in its place, and a `HEAD` whose
+ * client left never holding up a shutdown.
  */
 export const serve = <E, R>(routes: Layer.Layer<never, E, R>) =>
-  HttpRouter.serve(routes, { disableLogger: true, middleware: accessLog }).pipe(
-    Layer.provide(tokenSafeTracing),
-  );
+  HttpRouter.serve(Layer.mergeAll(routes, headsOfLeftClients), {
+    disableLogger: true,
+    middleware: accessLog,
+  }).pipe(Layer.provide(tokenSafeTracing));
 
 /**
  * Serves the common routes plus `commandRoutes` (route groups of registry `media` commands, which

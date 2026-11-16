@@ -221,11 +221,13 @@ export const layer: Layer.Layer<
           Effect.as(text(502, "Transcode failed")),
         );
 
-      if (finished.value) {
-        return yield* finishedResponse(request, input, sessionEnded).pipe(
-          Effect.catchTag("TranscodeError", failed),
-        );
-      }
+      // A browser plays the original of a song whose AAC transcode failed, as old music served it.
+      const failedOrOriginal = (error: MusicTranscoder.TranscodeError) =>
+        !isFragmentedProfile(transcodeProfile) && isBrowserPlayable(source.codec, source.path)
+          ? Effect.logWarning("MusicRoutes.transcode_fallback", error).pipe(
+              Effect.andThen(original),
+            )
+          : failed(error);
 
       if (startMs.value > 0) {
         // An offset is a fresh encode that only a reading GET may own: a HEAD response's body is
@@ -247,14 +249,17 @@ export const layer: Layer.Layer<
         );
       }
 
+      // A HEAD answers as `&finished=1` does, from the cache or with `503` and `Retry-After`, and
+      // never waits for the encoder: a player asks for a song's exact timing while ffmpeg may be
+      // minutes from the end, and goes away when it moves on.
+      if (finished.value || request.method === "HEAD") {
+        return yield* finishedResponse(request, input, sessionEnded).pipe(
+          Effect.catchTag("TranscodeError", finished.value ? failed : failedOrOriginal),
+        );
+      }
+
       return yield* transcodedResponse(request, input, sessionEnded).pipe(
-        Effect.catchTag("TranscodeError", (error) =>
-          !isFragmentedProfile(transcodeProfile) && isBrowserPlayable(source.codec, source.path)
-            ? Effect.logWarning("MusicRoutes.transcode_fallback", error).pipe(
-                Effect.andThen(original),
-              )
-            : failed(error),
-        ),
+        Effect.catchTag("TranscodeError", failedOrOriginal),
       );
     }).pipe(
       Effect.catchTags({

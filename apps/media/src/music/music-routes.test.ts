@@ -59,6 +59,8 @@ const LARGE = "largetrack";
 
 const TONE = "longtonetrack";
 
+const BROKEN = "brokentrack";
+
 /** The long tone's length: encoding it (about 11x real time) outlasts a transcode's 1 s grace. */
 const TONE_SECONDS = 60;
 
@@ -127,6 +129,27 @@ const drain = async (
   return next.done ? { bytes, aborted: false } : drain(reader, bytes + next.value.byteLength);
 };
 
+/**
+ * Asks `url` with `method` until the server has the finished transcode, as players and
+ * downloaders do: a `503` with `Retry-After` means ask again.
+ */
+const whenFinished = async (
+  url: string,
+  method: "GET" | "HEAD",
+  attempts = 100,
+): Promise<Response> => {
+  const response = await fetch(url, { method });
+
+  if (response.status !== 503 || attempts === 0) return response;
+
+  expect(response.headers.get("retry-after")).toBe("2");
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  await response.arrayBuffer();
+  await new Promise((resolve) => setTimeout(resolve, 200));
+
+  return whenFinished(url, method, attempts - 1);
+};
+
 const sources = (tracks: ReadonlyMap<string, ResolvedTrack>) =>
   Layer.succeed(
     TrackSources.Service,
@@ -154,6 +177,8 @@ beforeAll(async () => {
   await writeSong(join(library, "Album", "02 Other.flac"), { seconds: 1 });
   await writeSong(join(library, "Album", "03 Large.wav"), { seconds: 1 });
   await writeSong(join(library, "Album", "04 Long Tone.flac"), { seconds: TONE_SECONDS });
+  // An MP3 by its name, a browser plays it, but ffmpeg cannot read it.
+  await writeBytes(join(library, "Album", "05 Broken.mp3"), "not audio at all");
   // Far larger than socket buffers, so its response is still open when its session ends.
   await resizeFile(join(library, "Album", "03 Large.wav"), 128 * 1024 * 1024);
 
@@ -180,6 +205,7 @@ beforeAll(async () => {
     [OTHER, resolved(OTHER, join(library, "Album", "02 Other.flac"), "flac")],
     [LARGE, resolved(LARGE, join(library, "Album", "03 Large.wav"), "pcm")],
     [TONE, resolved(TONE, join(library, "Album", "04 Long Tone.flac"), "flac")],
+    [BROKEN, resolved(BROKEN, join(library, "Album", "05 Broken.mp3"), "mp3")],
   ]);
 
   const http = serve(MusicRoutes.layer).pipe(
@@ -246,7 +272,7 @@ describe("music routes", { timeout: 60_000 }, () => {
 
   it("serve gapless transcodes with their timing, offsets on the song's timeline, and finished files", async () => {
     const ticket = await issue(SONG);
-    const head = await fetch(streamUrl(SONG, ticket, "&p=fmp4-aac"), { method: "HEAD" });
+    const head = await whenFinished(streamUrl(SONG, ticket, "&p=fmp4-aac"), "HEAD");
 
     expect(head.status).toBe(200);
     expect(head.headers.get("content-type")).toBe("audio/mp4");
@@ -261,23 +287,60 @@ describe("music routes", { timeout: 60_000 }, () => {
     expect(offset.headers.get(MusicStreamTimingHeader.start)).toBe(String(22_050));
     expect((await offset.arrayBuffer()).byteLength).toBeGreaterThan(0);
 
-    const prepared = async (attempts: number): Promise<Response> => {
-      const response = await fetch(streamUrl(OTHER, otherTicket, "&p=fmp4-flac&finished=1"));
-
-      if (response.status !== 503 || attempts === 0) return response;
-
-      expect(response.headers.get("retry-after")).toBe("2");
-      await new Promise((resolve) => setTimeout(resolve, 200));
-
-      return prepared(attempts - 1);
-    };
-
     const otherTicket = await issue(OTHER);
-    const finished = await prepared(100);
+
+    const finished = await whenFinished(
+      streamUrl(OTHER, otherTicket, "&p=fmp4-flac&finished=1"),
+      "GET",
+    );
 
     expect(finished.status).toBe(200);
     expect(finished.headers.get("etag")).not.toBeNull();
     expect(finished.headers.get(MusicStreamTimingHeader.duration)).toBe("44100");
+  });
+
+  it("answer a HEAD of a song still transcoding at once, then with its exact timing", async () => {
+    const ticket = await issue(TONE);
+    const live = await fetch(streamUrl(TONE, ticket, "&p=fmp4-aac"));
+
+    expect(live.headers.get(MusicStreamTimingHeader.estimated)).toBe("1");
+
+    if (live.body === null) throw new Error("No body");
+
+    const reader: ReadableStreamDefaultReader<Uint8Array> = live.body.getReader();
+
+    expect((await reader.read()).done).toBe(false);
+
+    const early = await fetch(streamUrl(TONE, ticket, "&p=fmp4-aac"), { method: "HEAD" });
+
+    expect(early.status).toBe(503);
+    expect(early.headers.get("retry-after")).toBe("2");
+    expect(early.headers.get("cache-control")).toBe("no-store");
+    expect((await drain(reader, 0)).aborted).toBe(false);
+
+    const finished = await whenFinished(streamUrl(TONE, ticket, "&p=fmp4-aac"), "HEAD");
+
+    expect(finished.status).toBe(200);
+    expect(finished.headers.get(MusicStreamTimingHeader.estimated)).toBeNull();
+    expect(finished.headers.get(MusicStreamTimingHeader.duration)).toBe(
+      String(TONE_SECONDS * 44_100),
+    );
+    expect(finished.headers.get("etag")).not.toBeNull();
+  });
+
+  it("answer a HEAD as its GET does when a song the browser plays cannot be transcoded", async () => {
+    const ticket = await issue(BROKEN);
+    const head = await whenFinished(streamUrl(BROKEN, ticket, "&p=aac-128"), "HEAD");
+
+    expect(head.status).toBe(200);
+    expect(head.headers.get("content-type")).toBe("audio/mpeg");
+
+    const get = await fetch(streamUrl(BROKEN, ticket, "&p=aac-128"));
+
+    expect(get.status).toBe(200);
+    expect(get.headers.get("content-type")).toBe("audio/mpeg");
+    await get.arrayBuffer();
+    expect((await fetch(streamUrl(BROKEN, ticket, "&p=aac-128&finished=1"))).status).toBe(502);
   });
 
   it("stream each live transcode whole, one after another", async () => {

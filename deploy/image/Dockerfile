@@ -137,10 +137,11 @@ ENV NODE_ENV=production \
     S6_VERBOSITY=1 \
     S6_SERVICES_GRACETIME=24000 \
     S6_KILL_GRACETIME=3000
-# On a stop, s6 stops the media service first, which ends open responses 3 s in and then closes
-# its streams, then the Convex backend (with SIGINT, which shuts its database down cleanly) and
-# Caddy. It waits up to 24 seconds for them and 3 more before it kills what is left, so give
-# the container a 30-second stop timeout (`--stop-timeout 30`, or Compose's stop_grace_period).
+# On a stop, s6 stops the media service first, which ends open responses 3 s in, closes its
+# streams, and exits within 5 s, then the Convex backend (with SIGINT, which shuts its database
+# down cleanly) and Caddy. It waits up to 24 seconds for them and 3 more before it kills what is
+# left, so give the container a 30-second stop timeout (`--stop-timeout 30`, or Compose's
+# stop_grace_period).
 
 ARG MEDIA_VERSION=
 LABEL org.opencontainers.image.title="[media]" \

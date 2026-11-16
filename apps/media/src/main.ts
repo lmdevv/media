@@ -1,5 +1,5 @@
 import { NodeRuntime, NodeServices } from "@effect/platform-node";
-import { Cause, Context, Effect, Exit, Layer, Option, Runtime, Schema } from "effect";
+import { Cause, Context, Duration, Effect, Exit, Layer, Option, Runtime, Schema } from "effect";
 
 import * as ArtworkKeys from "./artwork/artwork-keys.ts";
 import * as BackendHealth from "./backend-health.ts";
@@ -19,6 +19,7 @@ import * as PlaybackReporter from "./playback/playback-reporter.ts";
 import * as PlaybackToken from "./playback/playback-grants.ts";
 import * as SessionReports from "./playback/session-reports.ts";
 import * as StreamOwners from "./playback/stream-owners.ts";
+import { STOP_DEADLINE, withShutdownDeadline } from "./shutdown-deadline.ts";
 
 class CoreSettingMissing extends Schema.TaggedError<CoreSettingMissing>()("CoreSettingMissing", {
   setting: Schema.Literals(["MEDIA_SERVICE_API_KEY", "MEDIA_TICKET_KEYS"]),
@@ -91,6 +92,16 @@ const teardown: Runtime.Teardown = (exit, onExit) => {
   return Runtime.defaultTeardown(exit, onExit);
 };
 
+// A stop past its deadline is a bug, so it exits 1 for the supervisor to record a failure.
+const overran = Effect.logError("Main.shutdown_overran").pipe(
+  Effect.annotateLogs({ deadlineMs: Duration.toMillis(STOP_DEADLINE) }),
+  Effect.andThen(
+    Effect.sync(() => {
+      process.exit(1);
+    }),
+  ),
+);
+
 Effect.gen(function* () {
   const services = yield* Layer.build(application);
   const retained = Context.get(services, RetainedLogs.Service);
@@ -100,4 +111,4 @@ Effect.gen(function* () {
   yield* Effect.addFinalizer(() => retained.close);
 
   return yield* Effect.never;
-}).pipe(Effect.scoped, NodeRuntime.runMain({ teardown }));
+}).pipe(withShutdownDeadline(STOP_DEADLINE, overran), NodeRuntime.runMain({ teardown }));
