@@ -77,81 +77,33 @@ const word = (text: string): string => kebabCase(text).toLowerCase();
 
 const topWords = [...coreGroups, "logs", "diagnostics", "commands", "call", "help"];
 
-/**
- * The old movies server's commands that the port renamed, by their words, and the commands that do
- * their job now. Words that only moved under a group, such as `titles list`, are found by
- * `movedTo`. The room words go to the core's group sessions, except the next-episode countdown,
- * which returns with p6-together-movies.
- */
-const RENAMED: ReadonlyMap<string, ReadonlyArray<string>> = new Map([
-  ["login", ["auth login"]],
-  ["logout", ["auth logout"]],
-  ["whoami", ["auth sessions current"]],
-  ["keys", ["auth api-keys"]],
-  ["search", ["movies titles search"]],
-  ["play", ["movies stream"]],
-  ["progress", ["movies titles get", "movies history list"]],
-  ["continue", ["movies history continue-watching"]],
-  ["scan", ["auth libraries scan"]],
-  ["backup", ["admin backups run"]],
-  ["rooms", ["auth together"]],
-  ["rooms create", ["auth together create"]],
-  ["rooms join", ["auth together join"]],
-  ["rooms play", ["auth together control"]],
-  ["rooms pause", ["auth together control"]],
-  ["rooms seek", ["auth together control"]],
-  ["rooms next", ["auth together control"]],
-  ["rooms status", ["auth together get"]],
-  ["rooms leave", ["auth together leave"]],
-]);
+/** The command, or the prefix of commands, that the leading words name in a group they omit. */
+const inGroup = (group: string, path: ReadonlyArray<string>): Option.Option<string> => {
+  const words = [group, ...path];
 
-/** The renamed command for the leading words: two words, else the first, unless it is `rooms`. */
-const renamed = (path: ReadonlyArray<string>): Option.Option<ReadonlyArray<string>> => {
-  const [first = "", second] = path;
-
-  return Option.orElse(
-    Option.fromNullishOr(second === undefined ? undefined : RENAMED.get(`${first} ${second}`)),
-    () =>
-      second === undefined || first !== "rooms"
-        ? Option.fromNullishOr(RENAMED.get(first))
-        : Option.none(),
-  );
+  return Option.match(resolveCore(words), {
+    onSome: ({ taken }) => Option.some(words.slice(0, taken).join(" ")),
+    onNone: () => Option.map(prefixHelp(words), () => words.join(" ")),
+  });
 };
 
-/** Where an old top-level command lives now: renamed, or under a group. */
-const movedTo = (path: ReadonlyArray<string>): Option.Option<ReadonlyArray<string>> =>
-  Option.orElse(renamed(path), () =>
-    Option.firstSomeOf(
-      (["movies", "auth", "admin"] as const).map((group) => {
-        const words = [group, ...path];
+const unknownCommand = (typed: string, path: ReadonlyArray<string>): UsageError => {
+  const [head = ""] = path;
 
-        return Option.isSome(resolveCore(words)) || Option.isSome(prefixHelp(words))
-          ? Option.some([words.join(" ")])
-          : Option.none();
-      }),
-    ),
-  );
+  const grouped = coreGroups.flatMap((group) => Option.toArray(inGroup(group, path)));
 
-const unknownCommand = (typed: string, path: ReadonlyArray<string>): UsageError =>
-  Option.match(movedTo(path), {
-    onSome: (moved) =>
-      new UsageError({
-        message: `Unknown command "${typed}"; it moved: run ${moved.map((words) => `media ${words}`).join(", or ")}`,
-        command: moved[0]?.split(" ")[0] ?? null,
-      }),
-    onNone: () => {
-      const [head = ""] = path;
+  const close =
+    grouped.length > 0
+      ? grouped.map((words) => `media ${words}`)
+      : topWords
+          .filter((candidate) => candidate.startsWith(head) || head.startsWith(candidate))
+          .slice(0, 3);
 
-      const close = topWords
-        .filter((candidate) => candidate.startsWith(head) || head.startsWith(candidate))
-        .slice(0, 3);
-
-      return new UsageError({
-        message: `Unknown command "${typed}"${close.length > 0 ? `; did you mean ${close.join(", ")}?` : ""}`,
-        command: null,
-      });
-    },
+  return new UsageError({
+    message: `Unknown command "${typed}"${close.length > 0 ? `; did you mean ${close.join(", ")}?` : ""}`,
+    command: grouped.length === 1 ? (grouped[0] ?? null) : null,
   });
+};
 
 /** The leading words before the first flag, as typed. */
 const leadingWords = (words: ReadonlyArray<string>): ReadonlyArray<string> => {

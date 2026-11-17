@@ -44,28 +44,6 @@ const storedHome = (url: string) => {
   return { home: dir, path, stored };
 };
 
-/** The old movies server's top-level words, which `media movies` and the core replace. */
-const OLD_WORDS = [
-  "login",
-  "logout",
-  "whoami",
-  "profiles",
-  "keys",
-  "search",
-  "play",
-  "progress",
-  "continue",
-  "rooms",
-  "scan",
-  "import",
-  "backup",
-  "restore",
-  "titles",
-  "libraries",
-  "jobs",
-  "metadata",
-];
-
 describe("the media command", () => {
   it("prints help and the version", async () => {
     const help = await media("--help");
@@ -75,16 +53,11 @@ describe("the media command", () => {
     expect((await media("--version")).stdout).toBe(packageJson.version);
   });
 
-  it("lists the groups and none of the old movies server's words", async () => {
+  it("lists the groups", async () => {
     const help = (await media("--help")).stdout;
 
     for (const group of ["auth", "admin", "movies", "music"]) {
       expect(help).toMatch(new RegExp(`^  ${group} `, "mu"));
-    }
-
-    for (const old of OLD_WORDS) {
-      expect(help, old).not.toMatch(new RegExp(`^  media ${old}\\b`, "mu"));
-      expect(help, old).not.toMatch(new RegExp(`^  ${old} `, "mu"));
     }
   });
 
@@ -103,49 +76,17 @@ describe("the media command", () => {
     }
   });
 
-  it("names where an old movies word moved, as a usage error", async () => {
-    const cases = {
-      "titles list": "media movies titles list",
-      "my-list add": "media movies my-list add",
-      "api-keys create": "media auth api-keys create",
-      "play Sintel": "media movies stream",
-      login: "media auth login",
-      whoami: "media auth sessions current",
-      continue: "media movies history continue-watching",
-      progress: "media movies titles get, or media movies history list",
-      "rooms create Sintel": "media auth together create",
-      "rooms pause": "media auth together control",
-      "rooms status": "media auth together get",
-      rooms: "media auth together",
-    };
-
-    const runs = await Promise.all(
-      Object.entries(cases).map(async ([typed, moved]) => ({
-        typed,
-        moved,
-        run: await media(...typed.split(" ")),
-      })),
-    );
-
-    for (const { typed, moved, run } of runs) {
-      expect(run.code, typed).toBe(ExitCode.usage);
-      expect(JSON.parse(run.stderr), typed).toMatchObject({ error: { code: "usage" } });
-      expect(JSON.parse(run.stderr), typed).toMatchObject({
-        error: { message: `Unknown command "${typed}"; it moved: run ${moved}` },
-      });
-    }
-  });
-
-  it("reports other unknown commands as usage errors with suggestions", async () => {
-    const [close, flag, typo, countdown] = await Promise.all([
+  it("reports unknown commands as usage errors with suggestions", async () => {
+    const [close, flag, typo, unknown] = await Promise.all([
       media("mov"),
       media("--json"),
       media("diagnostics", "sesions"),
-      media("rooms", "countdown"),
+      media("search", "Sintel"),
     ]);
 
-    expect(JSON.parse(countdown.stderr)).toStrictEqual({
-      error: { code: "usage", message: 'Unknown command "rooms countdown"' },
+    expect(unknown.code).toBe(ExitCode.usage);
+    expect(JSON.parse(unknown.stderr)).toStrictEqual({
+      error: { code: "usage", message: 'Unknown command "search Sintel"' },
     });
 
     expect(close.code).toBe(ExitCode.usage);
@@ -155,6 +96,36 @@ describe("the media command", () => {
     });
     expect(typo.code).toBe(ExitCode.usage);
     expect(typo.stderr).toContain('Unknown command \\"diagnostics sesions\\"');
+  });
+
+  it("names the groups that hold a command typed without its group", async () => {
+    const cases = {
+      "titles list": "media movies titles list",
+      "titles get Sintel": "media movies titles get",
+      "stream Sintel": "media movies stream",
+      "playlists list": "media music playlists list",
+      login: "media auth login",
+      history: "media movies history, media music history",
+    };
+
+    const runs = await Promise.all(
+      Object.entries(cases).map(async ([typed, meant]) => ({
+        typed,
+        meant,
+        run: await media(...typed.split(" ")),
+      })),
+    );
+
+    for (const { typed, meant, run } of runs) {
+      expect(run.code, typed).toBe(ExitCode.usage);
+      expect(JSON.parse(run.stderr), typed).toStrictEqual({
+        error: { code: "usage", message: `Unknown command "${typed}"; did you mean ${meant}?` },
+      });
+    }
+
+    const human = await media("--human", "titles", "list");
+
+    expect(human.stderr).toContain("Run media movies titles list --help.");
   });
 
   it("accepts camelCase words", async () => {
