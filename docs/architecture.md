@@ -166,9 +166,9 @@ Phases 0 to 6, 8, and 9 are done. The fresh install replaced the owner's old ins
 2026-11-17 (D73, D74). One [media] service rescanned the same read-only mounts, and the owner's
 old playlists were recreated as the one exception to the fresh start (D78). The old movies
 address opened [media] after the cutover (D61) until the owner retired it with the old music
-address, so only the [media] address remains. Phase 9 filed the backlog the owner approved (D79)
-in the Linear Platform, movies, and [music] projects, among them the guest links of phase 7 and
-one performance pass across the clients (D66).
+address, so only the [media] address remains. Phase 9 filed the backlog the owner approved (D79),
+among them the guest links of phase 7 and one performance pass across the clients (D66). The
+owner then folded the Linear projects into one project named media (D80).
 
 D65, D67, D68, D70, D71, D72, D75, D76, and D77 decide how agents ran the program and the
 owner's host, not how [media] works, so no ADR cites them. They are in the decisions register.
@@ -200,7 +200,7 @@ Each row is the ADR's own title. ADR 0027 supersedes ADR 0026, and ADR 0028 supe
 | [0019](decisions/0019-synced-settings-and-core-downloads.md)                                  | Mark which settings sync per user and run downloads as a core service          | D36, D37                                    |
 | [0020](decisions/0020-branded-clients-with-one-sign-in.md)                                    | Ship a branded client per product on a shared base, with one sign-in           | D38, D39, D40, D48, D59, D64                |
 | [0021](decisions/0021-one-cli-and-one-agent-skill.md)                                         | Ship one `media` CLI and one agent skill with a reference per domain           | D41                                         |
-| [0022](decisions/0022-agent-workflow-tracking-and-copyleft.md)                                | Keep movies' agent workflow, one Linear team, and a merged copyleft list       | D11, D42, D43                               |
+| [0022](decisions/0022-agent-workflow-tracking-and-copyleft.md)                                | Keep movies' agent workflow, one Linear team, and a merged copyleft list       | D11, D42, D43, D80                          |
 | [0023](decisions/0023-run-the-core-in-its-own-deployment-until-the-movies-port.md)            | Run the core in its own Convex deployment until the movies port                | D04, D14, D22                               |
 | [0024](decisions/0024-libraries-folders-and-scans.md)                                         | Libraries have a kind, their own folders, grants, and one scan kind per domain | D01, D02, D16, D17, D28, D29, D50           |
 | [0025](decisions/0025-convex-http-actions-stay-inside-the-install.md)                         | Keep Convex's HTTP actions inside the install, off the public address          | D30, D45                                    |
@@ -212,7 +212,7 @@ Each row is the ADR's own title. ADR 0027 supersedes ADR 0026, and ADR 0028 supe
 ## Open
 
 These stay open after the unification. Each gets an ADR when it is settled. The work left to
-build is in the Linear Platform, movies, and [music] projects.
+build is in the Linear media project.
 
 - **Per-user personalization.** The register settles which settings sync per user and which stay
   per device (ADR 0019). It does not settle personalization beyond that list.
