@@ -70,7 +70,7 @@ open with that sign-in.
 
 ```nix
 # flake.nix
-inputs.movies.url = "github:lmdevv/media";   # or github:lmdevv/media/v0.4.0 to pin a release
+inputs.movies.url = "github:lmdevv/media";   # or github:lmdevv/media/v0.4.1 to pin a release
 
 # in nixosSystem { modules = [ ... ]; }
 inputs.movies.nixosModules.default
@@ -240,8 +240,8 @@ Compose: keep the checkout and the image on the same release, since `compose.yam
 settings that release's image reads.
 
 ```sh
-cd media && git fetch --tags && git checkout v0.4.0
-# in deploy/compose/.env: MEDIA_IMAGE=ghcr.io/lmdevv/media:0.4.0
+cd media && git fetch --tags && git checkout v0.4.1
+# in deploy/compose/.env: MEDIA_IMAGE=ghcr.io/lmdevv/media:0.4.1
 cd deploy/compose && docker compose pull && docker compose up -d
 ```
 
