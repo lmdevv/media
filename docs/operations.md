@@ -172,7 +172,7 @@ you no longer need them.
 
 | Track     | Compose `MEDIA_IMAGE`                              | NixOS flake input            |
 | --------- | -------------------------------------------------- | ---------------------------- |
-| A release | `ghcr.io/lmdevv/media:latest`, `:0.3`, or `:0.3.1` | `github:lmdevv/media/v0.3.1` |
+| A release | `ghcr.io/lmdevv/media:latest`, `:0.4`, or `:0.4.1` | `github:lmdevv/media/v0.4.1` |
 | Edge      | `ghcr.io/lmdevv/media:main`                        | `github:lmdevv/media`        |
 
 ### Compose
@@ -182,18 +182,18 @@ and volumes that release's image expects. The image carries the core's Convex ba
 follows the newest release whatever the checkout, so pin the version when you check out a tag.
 
 ```sh
-cd media && git fetch --tags && git checkout v0.3.1      # or `git pull` on main for the edge
+cd media && git fetch --tags && git checkout v0.4.1      # or `git pull` on main for the edge
 cd deploy/compose
-# .env: MEDIA_IMAGE=ghcr.io/lmdevv/media:0.3.1             # or :main for the edge
+# .env: MEDIA_IMAGE=ghcr.io/lmdevv/media:0.4.1             # or :main for the edge
 docker compose pull
 docker compose up -d
-docker compose logs -f media     # "upgrading the core from 0.3.0 to 0.3.1; backing up to ... first"
+docker compose logs -f media     # "upgrading the core from 0.4.0 to 0.4.1; backing up to ... first"
 ```
 
 ### NixOS
 
 ```sh
-nix flake update movies          # or point the input at the new tag
+nix flake update media           # or point the input at the new tag
 nixos-rebuild switch
 journalctl -u media-server -f
 ```

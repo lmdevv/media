@@ -1,8 +1,8 @@
 # [media] architecture
 
 [movies] and [music] become one self-hosted product, `[media]`. One server, one Convex database, and
-one account system serve a separately branded client per product. This page describes the target
-after the music port lands, the rules that hold it together, and the order of work. The decisions
+one account system serve a separately branded client per product. This page describes [media] as built when
+the unification closed on 2026-11-17, the rules that hold it together, and the order of work. The decisions
 behind it are in [`docs/decisions/`](decisions/), one record per area, each citing the
 decision numbers (D01 to D44) settled with the owner on 2026-11-03.
 
@@ -158,9 +158,20 @@ casting, is missing only from the repo in between.
 5. **Music port.** Move the web app, the iOS app, the CLI commands, gapless playback, and lyrics
    onto the core. Delete `legacy/music`.
 6. **Together, Connect, and casting** in both products' clients.
-7. **Guests and share links.**
-8. **Fresh install** on the owner's NAS against the same mounts.
+7. **Guests and share links.** Moved to the backlog (D63).
+8. **Fresh install** on the owner's NixOS host against the same mounts.
 9. **Linear triage** and backlog filing from the list the owner approves.
+
+Phases 0 to 6, 8, and 9 are done. The fresh install replaced the owner's old installs on
+2026-11-17 (D73, D74). One [media] service rescanned the same read-only mounts, and the owner's
+old playlists were recreated as the one exception to the fresh start (D78). The old movies
+address opened [media] after the cutover (D61) until the owner retired it with the old music
+address, so only the [media] address remains. Phase 9 filed the backlog the owner approved (D79)
+in the Linear Platform, movies, and [music] projects, among them the guest links of phase 7 and
+one performance pass across the clients (D66).
+
+D65, D67, D68, D70, D71, D72, D75, D76, and D77 decide how agents ran the program and the
+owner's host, not how [media] works, so no ADR cites them. They are in the decisions register.
 
 ## Decision records
 
@@ -200,8 +211,8 @@ Each row is the ADR's own title. ADR 0027 supersedes ADR 0026, and ADR 0028 supe
 
 ## Open
 
-The decisions register leaves these open. Each is settled in the phase named, and the result gets
-an ADR.
+These stay open after the unification. Each gets an ADR when it is settled. The work left to
+build is in the Linear Platform, movies, and [music] projects.
 
 - **Per-user personalization.** The register settles which settings sync per user and which stay
   per device (ADR 0019). It does not settle personalization beyond that list.
