@@ -6,7 +6,9 @@ behind Caddy on one port (8080), which also serves the account and music clients
 client is at `/`, movies at `/movies`, music at `/music`, and the Convex backend at `/convex`.
 Browsers and the CLI talk only to that port.
 `docs/operations.md` explains what happens at startup, backups and restores, and telemetry in more
-depth.
+depth. [fresh-install.md](fresh-install.md) has the exact steps for a first install from a release
+tag beside other installs, such as an old [movies] or [music] one, on a port and data folder of its
+own.
 
 ## Before you start
 
@@ -84,14 +86,16 @@ inputs.movies.nixosModules.default
 }
 ```
 
-`nixos-rebuild switch`, then `systemctl status movies` and `journalctl -u movies -f`. The core's
-Convex backend runs as the `media-core-convex` OCI container (Podman unless
-`virtualisation.oci-containers.backend` says otherwise); the media service runs natively as a
-sandboxed systemd unit with read-only access to `libraryDirs`. The `media-proxy` unit runs Caddy
+`nixos-rebuild switch`, then `systemctl status media-server` and `journalctl -u media-server -f`.
+The core's Convex backend runs as the `media-core-convex` OCI container (Podman unless
+`virtualisation.oci-containers.backend` says otherwise); the media service runs natively as the
+sandboxed `media-server` unit, as the `media-server` user, with read-only access to
+`libraryDirs`. The `media-proxy` unit runs Caddy
 with the image's routes on `listenAddress:port`. The backend and the media service
 listen on loopback only, on the ports in `internalPorts`. The service user must be able to
-read them; add a group with `users.users.movies.extraGroups` if your files are not
-world-readable.
+read them; add a group with `users.users.media-server.extraGroups` if your files are not
+world-readable. Every unit, user, and folder the module makes has a `media` name, so it runs
+beside the old [movies] and [music] modules (ADR 0029).
 
 Every setting has an option (`nixos-option services.media` lists them); `extraEnvironment` sets
 anything else, and `environmentFile` keeps secrets out of the Nix store. The flake also exports
@@ -169,7 +173,7 @@ service uses today.
 **Render group.** The service must open `/dev/dri/renderD128`, which is owned by the host's
 `render` group (`stat -c '%G %g' /dev/dri/renderD128`). Init in the image adds the media
 user to whichever group owns each passed-through render node, so the GID need not match inside
-the container. On NixOS the module adds the `movies` user to `render` and `video` and allows the
+the container. On NixOS the module adds the `media-server` user to `render` and `video` and allows the
 DRM devices in the unit's sandbox whenever `hardwareAcceleration` is not `none`. With rootless
 Podman, add `--group-add keep-groups` so the container keeps your user's `render` membership.
 
@@ -205,7 +209,7 @@ docker compose exec -u movies media vainfo --display drm --device /dev/dri/rende
 | Nightly backups                                | `media-data` volume, `/data/core/backups`  | `/var/lib/media/core/backups` |
 | Service state and caches                       | `media-data` volume, `/data/movies/media`  | `/var/lib/media/movies/media` |
 | `media` CLI logins                             | `media-data` volume, `/data/movies/config` | each user's `~/.config/media` |
-| Transcode segments (disposable)                | `media-transcode` volume                   | `/var/cache/movies/transcode` |
+| Transcode segments (disposable)                | `media-transcode` volume                   | `/var/cache/media/transcode`  |
 | Your library                                   | read-only bind mounts under `/media`       | `libraryDirs`, read-only      |
 
 An install from before the movies cutover also keeps old movies' database in `/data/movies/convex`
@@ -246,9 +250,14 @@ For the edge, `git pull` on `main` with `MEDIA_IMAGE=ghcr.io/lmdevv/media:main`.
 A [media] 0.3.0 install upgrades to 0.4.0 this way. Upgrade it to 0.4.0 before any later
 release: 0.4.0 migrates its Connect rows, and a later release will refuse rows from before that
 migration (ADR 0018). [media] is a fresh install, not an upgrade of
-a [movies] v0.2 or [music] v0.3 install: nothing moves over from either, so set it up as above
-beside the old one's data (`docs/operations.md`, "Upgrading").
+a [movies] v0.2 or [music] v0.3 install: nothing moves over from either, so set it up beside the
+old one with [fresh-install.md](fresh-install.md) (`docs/operations.md`, "Upgrading"). Beside a
+[movies] v0.2 NixOS install, use the module from 0.4.1 on: 0.4.0's can't be imported beside
+v0.2's.
 
 NixOS: `nix flake update movies && nixos-rebuild switch` (or move the pinned tag). Both back up
 before the new version deploys its functions; `docs/operations.md` ("Upgrading") covers rolling
-back.
+back. From 0.4.0 to 0.4.1 the unit and user `movies` become `media-server`: move any
+`systemd.services.movies` or `users.users.movies` override to the new name, and run the command
+the first start prints, which gives the old user's folders to `media-server` (`docs/operations.md`,
+"Upgrading").

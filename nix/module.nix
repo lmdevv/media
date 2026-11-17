@@ -3,6 +3,10 @@
 # from this repository (nix/package.nix), and Caddy in front of them on one address, with the
 # image's routes (deploy/image/rootfs/etc/caddy/Caddyfile, docs/decisions/0015).
 #
+# Every unit, user, and folder it makes has a media name (media-server, media-proxy,
+# media-core-convex, /var/lib/media, /var/cache/media, /run/media-server), so a host can run it
+# beside the old [movies] and [music] modules, which use movies and music names.
+#
 #   services.media = {
 #     enable = true;
 #     libraryDirs = [ "/srv/media/movies" "/srv/media/shows" ];
@@ -17,9 +21,9 @@
 # Every startup derives the core's admin key from its backend's instance secret, backs up before
 # an upgrade, deploys the core's functions, configures the deployment (keys and secrets are
 # generated inside Convex and kept there) and both web clients, and writes the service's
-# environment to /run/movies/media.env, readable by the service user only. The first startup also
-# creates the media service's service principal on the core and issues its key, which later
-# startups reuse from a root-only file. No secret enters the Nix store.
+# environment to /run/media-server/media.env, readable by the service user only. The first
+# startup also creates the media service's service principal on the core and issues its key,
+# which later startups reuse from a root-only file. No secret enters the Nix store.
 #
 # The host also gets the `media` CLI, pointed at this server (programs.media, in cli-module.nix).
 {
@@ -45,6 +49,397 @@ let
   secretsDir = "${coreDataDir}/secrets";
   moviesDataDir = "${cfg.dataDir}/movies";
   mediaDataDir = "${moviesDataDir}/media";
+  convexDataDir = "${coreDataDir}/convex";
+  # Root's folders. Parents first, so each is made with its own mode rather than as a folder on
+  # the way to another. The core's database and secrets stay root's, and setup writes its records
+  # beside them as root.
+  rootDirs = [
+    {
+      path = cfg.dataDir;
+      mode = "0711";
+    }
+    {
+      path = coreDataDir;
+      mode = "0711";
+    }
+    {
+      path = convexDataDir;
+      mode = "0700";
+    }
+    {
+      path = secretsDir;
+      mode = "0700";
+    }
+    {
+      path = moviesDataDir;
+      mode = "0711";
+    }
+  ];
+
+  # Old [movies] v0.2's and old [music]'s folders: their modules' defaults, and their settings when
+  # the host imports those modules too.
+  oldMovies = config.services.movies or { };
+  oldMusic = config.services.music or { };
+  otherInstallDirs = lib.unique (
+    map toString (
+      [
+        "/var/lib/movies"
+        "/var/cache/movies"
+        "/run/movies"
+        "/var/lib/music"
+      ]
+      ++ lib.filter (dir: dir != null) [
+        (oldMovies.dataDir or null)
+        (oldMovies.backupDir or null)
+        (oldMovies.transcodeDir or null)
+        (oldMusic.dataDir or null)
+      ]
+    )
+  );
+  # Old [music] takes a list of folders or an attrset of mount names to folders.
+  oldMusicDirs = oldMusic.musicDirs or [ ];
+  libraries = lib.unique (
+    map toString (
+      cfg.libraryDirs
+      ++ oldMovies.libraryDirs or [ ]
+      ++ (if builtins.isAttrs oldMusicDirs then builtins.attrValues oldMusicDirs else oldMusicDirs)
+    )
+  );
+  # A path's components, with `.`, `..`, and repeated slashes resolved as far as evaluation can.
+  # Symlinks and mounts show only on the host, where media-server-folders refuses them.
+  components =
+    path:
+    lib.foldl' (
+      parts: part:
+      if part == "" || part == "." then
+        parts
+      else if part == ".." then
+        (if parts == [ ] then [ ] else lib.init parts)
+      else
+        parts ++ [ part ]
+    ) [ ] (lib.splitString "/" (toString path));
+  # Whether one path is the other or holds it.
+  overlap =
+    a: b:
+    lib.lists.hasPrefix (components a) (components b)
+    || lib.lists.hasPrefix (components b) (components a);
+  overlaps =
+    folders: others:
+    lib.concatMap (
+      folder:
+      map (other: "${folder.name} (${toString folder.path}) and ${other.name} (${toString other.path})") (
+        lib.filter (other: overlap folder.path other.path) others
+      )
+    ) folders;
+  named = name: paths: map (path: { inherit name path; }) paths;
+
+  ownedFolders = [
+    {
+      name = "dataDir";
+      path = cfg.dataDir;
+    }
+    {
+      name = "backupDir";
+      path = cfg.backupDir;
+    }
+    {
+      name = "transcodeDir";
+      path = cfg.transcodeDir;
+    }
+  ]
+  ++ named "a runtime folder" [
+    "/run/media-server"
+    "/run/media-account"
+    "/run/media-music"
+    "/run/media-proxy"
+  ];
+  serviceFolders = [
+    {
+      name = "dataDir/movies/media";
+      path = mediaDataDir;
+    }
+    {
+      name = "backupDir";
+      path = cfg.backupDir;
+    }
+    {
+      name = "transcodeDir";
+      path = cfg.transcodeDir;
+    }
+  ];
+  # Sorted, so the check reaches a folder before any service folder inside it, which only the
+  # service user may make.
+  serviceDirs = lib.sort lib.lessThan (map (folder: folder.path) serviceFolders);
+  libraryClashes = overlaps ownedFolders (named "the library" libraries);
+  otherInstallClashes = overlaps ownedFolders (named "another install's folder" otherInstallDirs);
+  coreClashes = overlaps serviceFolders (
+    named "the core's database" [ convexDataDir ] ++ named "the core's secrets" [ secretsDir ]
+  );
+  # The media service empties transcodeDir at every start.
+  transcodeClashes = overlaps [
+    {
+      name = "transcodeDir";
+      path = cfg.transcodeDir;
+    }
+  ] (lib.filter (folder: folder.name != "transcodeDir") serviceFolders);
+  # systemd ignores a path in ReadWritePaths or ReadOnlyPaths that is not absolute and normalized,
+  # which would leave a library writable or a folder unwritable, and media-server-folders compares
+  # each path as written with where it resolves.
+  normalized = path: toString path == "/" + lib.concatStringsSep "/" (components path);
+  unnormalized = lib.filter (path: !normalized path) (
+    [
+      cfg.dataDir
+      cfg.backupDir
+      cfg.transcodeDir
+    ]
+    ++ cfg.libraryDirs
+  );
+
+  # A missing folder is made only below folders that are root's alone, so no other user can redirect
+  # it between the check and the mkdir, and only a folder made here is given to the service user.
+  # Nothing that already exists changes owner or mode, and nothing here is recursive.
+  foldersPrepare = pkgs.writeShellApplication {
+    name = "media-server-folders-prepare";
+    runtimeInputs = [
+      pkgs.coreutils
+      pkgs.util-linux
+    ];
+    text = ''
+      log() { echo "media-server-folders: $*" >&2; }
+      refuse() { log "refusing to start: $*"; exit 1; }
+
+      # Once every folder on a path is root_only, nothing on it can change between a check and its use.
+      root_only() {
+        local owner mode
+        [ -d "$1" ] && [ ! -L "$1" ] || return 1
+        read -r owner mode < <(stat -c '%u %a' -- "$1")
+        [ "$owner" = 0 ] && [ $((8#$mode & 8#022)) = 0 ]
+      }
+      # Says why $1 is not root_only.
+      why_not_root_only() {
+        local owner mode
+        if [ -L "$1" ]; then
+          echo "is a symlink to $(readlink -- "$1")"
+        elif [ ! -d "$1" ]; then
+          echo "is not a folder"
+        else
+          read -r owner mode < <(stat -c '%u %a' -- "$1")
+          if [ "$owner" != 0 ]; then echo "belongs to uid $owner"; else echo "is writable by its group or others (mode $mode)"; fi
+        fi
+      }
+      # Prints the first existing folder on the way to $1, $1 itself left out, that is not root's alone.
+      unsafe_parent() {
+        local path="" part
+        local -a parts
+        IFS=/ read -ra parts <<<"''${1#/}"
+        unset 'parts[-1]'
+        root_only / || { echo /; return 0; }
+        for part in "''${parts[@]}"; do
+          path+="/$part"
+          [ -e "$path" ] || [ -L "$path" ] || return 0
+          root_only "$path" || { echo "$path"; return 0; }
+        done
+      }
+      # Makes $1 with mode $2, and the folders missing on the way to it, root's and 0755.
+      make_dir() {
+        local path="" part
+        local -a parts
+        IFS=/ read -ra parts <<<"''${1#/}"
+        for part in "''${parts[@]}"; do
+          path+="/$part"
+          { [ -e "$path" ] || [ -L "$path" ]; } && continue
+          if [ "$path" = "$1" ]; then mkdir -m "$2" -- "$path"; else mkdir -m 755 -- "$path"; fi
+        done
+      }
+
+      root_dirs=(${lib.escapeShellArgs (map (dir: dir.path) rootDirs)})
+      root_modes=(${lib.escapeShellArgs (map (dir: dir.mode) rootDirs)})
+      for i in "''${!root_dirs[@]}"; do
+        dir="''${root_dirs[i]}"
+        parent="$(unsafe_parent "$dir")"
+        [ -z "$parent" ] || refuse "$parent, on the way to $dir, $(why_not_root_only "$parent"), and root writes in $dir; keep dataDir in folders only root can change"
+        if [ -L "$dir" ]; then
+          refuse "$dir is a symlink to $(readlink -- "$dir"); set dataDir to a path without symlinks"
+        elif [ -e "$dir" ]; then
+          root_only "$dir" || refuse "$dir must be a folder of root's that only root can write, and it is $(stat -c '%F, uid %u, mode %a' -- "$dir")"
+          ! mountpoint -q -- "$dir" || refuse "$dir is a mount point; set dataDir to a folder inside the mounted file system"
+        else
+          make_dir "$dir" "''${root_modes[i]}"
+        fi
+      done
+
+      service_uid="$(id -u -- ${lib.escapeShellArg cfg.user})"
+      for dir in ${lib.escapeShellArgs serviceDirs}; do
+        { [ -e "$dir" ] || [ -L "$dir" ]; } && continue
+        parent="$(unsafe_parent "$dir")"
+        if [ -n "$parent" ] && [ -d "$parent" ] && [ ! -L "$parent" ] &&
+          [ "$(stat -c %u -- "$parent")" = "$service_uid" ]; then
+          log "leaving $dir to ${cfg.user} to make: $parent, on the way to it, is ${cfg.user}'s"
+          continue
+        elif [ -n "$parent" ]; then
+          log "not making $dir: $parent, on the way to it, $(why_not_root_only "$parent")"
+          continue
+        fi
+        make_dir "$dir" 700
+        chown -h -- ${lib.escapeShellArg "${cfg.user}:${cfg.group}"} "$dir"
+      done
+    '';
+  };
+
+  # The module re-owns nothing that already exists; for a folder that is not the service user's,
+  # this prints the command that would fix it.
+  foldersCheck = pkgs.writeShellApplication {
+    name = "media-server-folders-check";
+    runtimeInputs = [
+      pkgs.coreutils
+      pkgs.findutils
+      pkgs.util-linux
+    ];
+    text = ''
+      log() { echo "media-server-folders: $*" >&2; }
+      user=${lib.escapeShellArg cfg.user}
+      group=${lib.escapeShellArg cfg.group}
+      uid="$(id -u)"
+      gid="$(id -g)"
+      problems=()
+      foreign=()
+      # findmnt escapes unusual characters as \xHH, which printf's %b reads back.
+      mounts=()
+      while IFS= read -r target; do mounts+=("$(printf '%b' "$target")"); done < <(findmnt -rn -o TARGET)
+
+      # Only root and the service user may be able to change a folder above one of the service's:
+      # anyone else could swap the folder for a symlink once this check has passed.
+      ours_or_roots() {
+        local owner mode
+        read -r owner mode < <(stat -c '%u %a' -- "$1")
+        { [ "$owner" = 0 ] || [ "$owner" = "$uid" ]; } && [ $((8#$mode & 8#022)) = 0 ]
+      }
+      # Says why $1, on the way to $2, fails that, and what to do.
+      why_unsafe() {
+        local owner mode keep="keep $2 in folders only root and $user can change"
+        if [ -L "$1" ]; then
+          echo "is a symlink to $(readlink -- "$1"); set the option to a path without symlinks"
+          return 0
+        fi
+        read -r owner mode < <(stat -c '%u %a' -- "$1")
+        if [ "$owner" != 0 ] && [ "$owner" != "$uid" ]; then
+          echo "belongs to uid $owner; $keep"
+        else
+          echo "is writable by its group or others (mode $mode); $keep"
+        fi
+      }
+      # Prints the first existing folder on the way to $1, $1 itself left out, that fails that.
+      unsafe_parent() {
+        local path="" part
+        local -a parts
+        IFS=/ read -ra parts <<<"''${1#/}"
+        unset 'parts[-1]'
+        { [ ! -L / ] && ours_or_roots /; } || { echo /; return 0; }
+        for part in "''${parts[@]}"; do
+          path+="/$part"
+          [ -e "$path" ] || [ -L "$path" ] || return 0
+          { [ ! -L "$path" ] && ours_or_roots "$path"; } || { echo "$path"; return 0; }
+        done
+      }
+      # Prints the folders missing on the way to $1, $1 included, outermost first.
+      missing_dirs() {
+        local path="$1"
+        local -a missing=()
+        while [ ! -e "$path" ] && [ ! -L "$path" ]; do
+          missing=("$path" "''${missing[@]}")
+          path="$(dirname -- "$path")"
+        done
+        printf '%s\n' "''${missing[@]}"
+      }
+      # Makes each of its arguments, outermost first, 0700. The unit's system call filter allows no
+      # chown or chgrp: a folder that takes a setgid parent's group fails the owner check below.
+      make_dirs() {
+        local dir
+        for dir in "$@"; do mkdir -m 700 -- "$dir" || return 1; done
+      }
+
+      for dir in ${lib.escapeShellArgs serviceDirs}; do
+        parent="$(unsafe_parent "$dir")"
+        if [ -n "$parent" ]; then
+          problems+=("$parent, on the way to $dir, $(why_unsafe "$parent" "$dir")")
+          continue
+        fi
+        if [ ! -e "$dir" ] && [ ! -L "$dir" ]; then
+          # Root makes none inside a folder of the service user's, such as a backupDir inside the
+          # state folder; the service user does, with any folders missing on the way, once the
+          # folders before it check out. Only root and the service user can change those, so none
+          # becomes a symlink before mkdir.
+          mapfile -t missing < <(missing_dirs "$dir")
+          base="$(dirname -- "''${missing[0]}")"
+          if [ "''${#problems[@]}" -gt 0 ] || [ "''${#foreign[@]}" -gt 0 ] ||
+            [ ! -d "$base" ] || [ -L "$base" ] || [ "$(stat -c %u -- "$base")" != "$uid" ] ||
+            ! make_dirs "''${missing[@]}"; then
+            # Every missing folder is named, so install makes none of them root's.
+            printf -v remedy ' %q' "''${missing[@]}"
+            problems+=("$dir is missing; make it with: sudo install -d -m 700 -o $user -g $group$remedy")
+            continue
+          fi
+        fi
+        if [ -L "$dir" ]; then
+          problems+=("$dir is a symlink to $(readlink -- "$dir"); set the option to a plain folder")
+          continue
+        fi
+        if [ ! -d "$dir" ]; then
+          problems+=("$dir is not a folder")
+          continue
+        fi
+        if ! real="$(realpath -e -- "$dir" 2>/dev/null)"; then
+          problems+=("$user cannot reach $dir")
+          continue
+        fi
+        if [ "$real" != "$dir" ]; then
+          problems+=("a symlink on the path of $dir leads to $real; set the option to a path without symlinks")
+          continue
+        fi
+        for mount in "''${mounts[@]}"; do
+          if [ "$mount" = "$dir" ]; then
+            problems+=("$dir is a mount point; mount the file system above it and keep $dir a plain folder inside")
+          elif [[ "$mount" == "$dir"/* ]]; then
+            problems+=("$mount is mounted inside $dir")
+          fi
+        done
+        read -r owner_uid owner_gid < <(stat -c '%u %g' -- "$dir")
+        if [ "$owner_uid" != "$uid" ] || [ "$owner_gid" != "$gid" ]; then
+          log "$dir belongs to uid $owner_uid and gid $owner_gid, not $user:$group"
+          foreign+=("$dir")
+          continue
+        fi
+        # Another user's file with other names may be someone else's file: the fix below skips it.
+        linked="$(find "$dir" -xdev ! -type d -links +1 \( ! -uid "$uid" -o ! -gid "$gid" \) -print -quit 2>/dev/null || true)"
+        if [ -n "$linked" ]; then
+          problems+=("$linked, in $dir, is another user's and has other names (hard links), so it may be another file; remove this name, or give it to $user yourself if it is [media]'s")
+          continue
+        fi
+        other="$(find "$dir" -xdev \( ! -uid "$uid" -o ! -gid "$gid" \) -print -quit 2>/dev/null || true)"
+        if [ -n "$other" ]; then
+          log "$other, in $dir, belongs to $(stat -c 'uid %u and gid %g' -- "$other"), not $user:$group"
+          foreign+=("$dir")
+        fi
+      done
+
+      for problem in "''${problems[@]}"; do log "refusing to start: $problem"; done
+      [ "''${#problems[@]}" -eq 0 ] || exit 1
+      if [ "''${#foreign[@]}" -gt 0 ]; then
+        command="sudo find"
+        for dir in "''${foreign[@]}"; do printf -v command '%s %q' "$command" "$dir"; done
+        # The other owners' uids, root's left out: a process of theirs could swap a file for a
+        # symlink while the fix runs.
+        uids="$({ find "''${foreign[@]}" -xdev ! -uid 0 ! -uid "$uid" -printf '%U\n' 2>/dev/null || true; } | sort -nu | paste -sd , -)"
+        printf -v command '%s -xdev \\( -type d -o -links 1 \\) -execdir chown -h %q {} +' "$command" "$user:$group"
+        log "refusing to start: the service's folders and what is in them must be $user's, and the module re-owns nothing that already exists"
+        [ -z "$uids" ] || log "first check that no process runs as uid $uids: pgrep -u $uids must print nothing"
+        log "after the 0.3.0 or 0.4.0 module, whose service ran as the movies user, give them to $user, all but files with other names (hard links):"
+        log "$command"
+        log "then start it again: sudo systemctl start media-server"
+        exit 1
+      fi
+    '';
+  };
 
   # The instance secret's file inside the Convex container, on its data volume, where
   # `convex-entry.sh` keeps it.
@@ -72,17 +467,17 @@ let
   };
 
   setup = pkgs.writeShellApplication {
-    name = "movies-setup";
+    name = "media-server-setup";
     runtimeInputs = [
       cfg.package
       pkgs.coreutils
       pkgs.curl
-      pkgs.findutils
       pkgs.jq
+      pkgs.util-linux
     ];
     text = ''
       umask 077
-      log() { echo "movies-setup: $*" >&2; }
+      log() { echo "media-server-setup: $*" >&2; }
       # Outside CI the Convex CLI reports to Sentry, and where that host is slow or blocked each
       # command waits minutes for it on exit. A self-hosted install sends nothing anyway.
       export CI=1
@@ -91,19 +486,9 @@ let
       export CONVEX_VERSION_API_ORIGIN=http://127.0.0.1:9
 
       public_url=${lib.escapeShellArg publicUrl}
-      owner=${lib.escapeShellArg "${cfg.user}:${cfg.group}"}
-
-      # The service's folders, in case they were removed since boot (tmpfiles creates them). The
-      # core's backups are the service's: it takes the nightly ones and restores them.
-      install -d -m 700 -o ${lib.escapeShellArg cfg.user} -g ${lib.escapeShellArg cfg.group} \
-        ${lib.escapeShellArgs [
-          mediaDataDir
-          cfg.backupDir
-          cfg.transcodeDir
-        ]}
-      find ${lib.escapeShellArg cfg.backupDir} \( \! -user ${lib.escapeShellArg cfg.user} -o \! -group ${lib.escapeShellArg cfg.group} \) \
-        -exec chown -h "$owner" {} +
-      install -d -m 700 ${lib.escapeShellArg secretsDir}
+      as_service() {
+        setpriv --reuid=${lib.escapeShellArg cfg.user} --regid=${lib.escapeShellArg cfg.group} --clear-groups -- "$@"
+      }
 
       url=${lib.escapeShellArg coreConvexUrl}
       data=${lib.escapeShellArg coreDataDir}
@@ -129,9 +514,10 @@ let
         [ "$(cat "$data/upgrade-backup" 2>/dev/null)" != "$version" ]; then
         name="core-manual-$(date -u +%Y-%m-%dT%H-%M-%S-000Z).zip"
         log "upgrading the core from $(cat "$data/version") to $version; backing up to $name first"
-        media-core-convex export --include-file-storage --path "$backups/.partial-$name"
-        mv "$backups/.partial-$name" "$backups/$name"
-        chown "$owner" "$backups/$name"
+        # As the service user, which owns the backups and takes the nightly ones: root writes nothing
+        # in a folder another user can change.
+        as_service media-core-convex export --include-file-storage --path "$backups/.partial-$name"
+        as_service mv -T -- "$backups/.partial-$name" "$backups/$name"
         printf '%s\n' "$version" >"$data/upgrade-backup"
       fi
 
@@ -176,10 +562,10 @@ let
       umask 022
       movies-configure-account --to /run/media-account --convex-url "$public_url/convex"
       movies-configure-music --to /run/media-music --convex-url "$public_url/convex"
-      movies-configure-web --to /run/movies/web --convex-url "$public_url/convex"
+      movies-configure-web --to /run/media-server/web --convex-url "$public_url/convex"
 
       umask 077
-      env_file=/run/movies/media.env
+      env_file=/run/media-server/media.env
       install -m 600 -o ${lib.escapeShellArg cfg.user} -g ${lib.escapeShellArg cfg.group} /dev/null "$env_file"
       {
         printf 'MEDIA_SERVICE_API_KEY=%s\n' "$(cat "$service_key_file")"
@@ -211,8 +597,10 @@ in
       default = pkgs.callPackage ./package.nix { };
       defaultText = lib.literalExpression "pkgs.callPackage ./package.nix { }";
       description = ''
-        The [media] package: media service, web clients, and the core's Convex project. Set it to `pkgs.movies`
-        to use the flake's overlay (or your override of it).
+        The [media] package: media service, web clients, and the core's Convex project. Set it to
+        the flake's own build, `inputs.media.packages.''${system}.movies`, to use the nixpkgs it was
+        tested with. The flake's overlay names it `pkgs.movies`, as [movies] v0.2's overlay names
+        its own package, so on a host with both overlays name the flake's output instead.
       '';
     };
 
@@ -233,7 +621,7 @@ in
       description = ''
         Folders the media service may scan and stream, read-only. Add each one as a library in the
         web app. The service user must be able to read them (world-readable files and folders are),
-        or put it in a group that can through `users.users.movies.extraGroups`.
+        or put it in a group that can through `users.users.media-server.extraGroups`.
       '';
     };
 
@@ -244,6 +632,8 @@ in
         State, one folder per domain: the core's Convex database (`core/convex/`), the media
         service's key (`core/secrets/`), and the media service's caches (`movies/media/`). An
         install from before the movies cutover also keeps old movies' database (`movies/convex/`).
+        A plain folder: no symlink on its path, not a mount point (use a folder inside the mounted
+        file system), and only root may be able to change the folders above it.
       '';
     };
 
@@ -251,7 +641,11 @@ in
       type = lib.types.path;
       default = "${cfg.dataDir}/core/backups";
       defaultText = lib.literalExpression ''"''${config.services.media.dataDir}/core/backups"'';
-      description = "Nightly backups of the core's database (Convex exports with file storage).";
+      description = ''
+        Nightly backups of the core's database (Convex exports with file storage). A plain folder of
+        the service user's: no symlink on its path, not a mount point, and only root or the service
+        user may be able to change the folders above it.
+      '';
     };
 
     backupRetentionDays = lib.mkOption {
@@ -262,8 +656,12 @@ in
 
     transcodeDir = lib.mkOption {
       type = lib.types.path;
-      default = "/var/cache/movies/transcode";
-      description = "Disposable HLS segments. Put it on fast storage with a few GB free.";
+      default = "/var/cache/media/transcode";
+      description = ''
+        Disposable HLS segments. Put it on fast storage with a few GB free, as a folder inside the
+        mounted file system rather than its mount point: like backupDir, a plain folder of the
+        service user's.
+      '';
     };
 
     port = lib.mkOption {
@@ -537,7 +935,7 @@ in
     environmentFile = lib.mkOption {
       type = lib.types.nullOr lib.types.path;
       default = null;
-      example = "/run/secrets/movies.env";
+      example = "/run/secrets/media.env";
       description = ''
         Extra `KEY=value` lines for the media service, read by systemd as root: secrets such as
         `TMDB_API_KEY`, kept out of the Nix store (agenix, sops-nix, or a root-only file; give a
@@ -571,26 +969,80 @@ in
 
     user = lib.mkOption {
       type = lib.types.str;
-      default = "movies";
-      description = "User the media service runs as.";
+      default = "media-server";
+      description = ''
+        User the media service runs as. The module creates `media-server`; set another user to
+        declare it yourself.
+      '';
     };
 
     group = lib.mkOption {
       type = lib.types.str;
-      default = "movies";
-      description = "Group the media service runs as.";
+      default = "media-server";
+      description = ''
+        Group the media service runs as. The module creates `media-server`; set another group to
+        declare it yourself.
+      '';
     };
   };
 
   config = lib.mkIf cfg.enable {
+    # The service writes in its folders and empties transcodeDir at every start, so none may be,
+    # hold, or sit inside a library, another install's folder, or, for the folders its user owns,
+    # the core's database or secrets.
+    assertions = [
+      {
+        assertion = unnormalized == [ ];
+        message = ''
+          services.media: dataDir, backupDir, transcodeDir, and libraryDirs take absolute paths
+          without `.`, `..`, `//`, or a trailing `/`: ${toString unnormalized}
+        '';
+      }
+      {
+        assertion = libraryClashes == [ ];
+        message = ''
+          services.media: a folder the service owns overlaps a library, which must stay read-only:
+          ${lib.concatStringsSep "\n" libraryClashes}
+          Keep dataDir, backupDir, and transcodeDir apart from every libraryDirs entry.
+        '';
+      }
+      {
+        assertion = otherInstallClashes == [ ];
+        message = ''
+          services.media: a folder the service owns overlaps one of the old [movies] or [music]
+          installs' folders:
+          ${lib.concatStringsSep "\n" otherInstallClashes}
+          Give [media] folders of its own, such as the defaults under /var/lib/media and /var/cache/media.
+        '';
+      }
+      {
+        assertion = coreClashes == [ ];
+        message = ''
+          services.media: a folder the service owns overlaps the core's database or secrets, which
+          stay root's:
+          ${lib.concatStringsSep "\n" coreClashes}
+          Keep backupDir and transcodeDir out of dataDir/core/convex and dataDir/core/secrets, and
+          neither may hold them.
+        '';
+      }
+      {
+        assertion = transcodeClashes == [ ];
+        message = ''
+          services.media: the media service empties transcodeDir at every start, and it overlaps
+          ${lib.concatStringsSep "\n" transcodeClashes}
+          Give transcodeDir a folder of its own.
+        '';
+      }
+    ];
+
     programs.media = {
       enable = lib.mkDefault true;
       convexUrl = lib.mkDefault "${publicUrl}/convex";
       mediaUrl = lib.mkDefault cfg.publicUrl;
     };
 
-    users.users = lib.mkIf (cfg.user == "movies") {
-      movies = {
+    users.users = lib.mkIf (cfg.user == "media-server") {
+      media-server = {
         isSystemUser = true;
         inherit (cfg) group;
         extraGroups = lib.optionals hardware [
@@ -599,7 +1051,7 @@ in
         ];
       };
     };
-    users.groups = lib.mkIf (cfg.group == "movies") { movies = { }; };
+    users.groups = lib.mkIf (cfg.group == "media-server") { media-server = { }; };
 
     hardware.graphics =
       lib.mkIf (cfg.hardwareAcceleration == "qsv" || cfg.hardwareAcceleration == "vaapi")
@@ -610,17 +1062,6 @@ in
           ]
           ++ lib.optionals (cfg.hardwareAcceleration == "qsv") [ pkgs.vpl-gpu-rt ];
         };
-
-    systemd.tmpfiles.rules = [
-      "d ${cfg.dataDir} 0711 root root -"
-      "d ${coreDataDir} 0711 root root -"
-      "d ${coreDataDir}/convex 0700 root root -"
-      "d ${secretsDir} 0700 root root -"
-      "d ${moviesDataDir} 0711 root root -"
-      "d ${mediaDataDir} 0700 ${cfg.user} ${cfg.group} -"
-      "d ${cfg.backupDir} 0700 ${cfg.user} ${cfg.group} -"
-      "d ${cfg.transcodeDir} 0700 ${cfg.user} ${cfg.group} -"
-    ];
 
     virtualisation.oci-containers.containers = {
       media-core-convex =
@@ -683,11 +1124,50 @@ in
       };
     };
 
-    systemd.services.movies = {
+    # Before every start of the media service and the core's container. No tmpfiles rule makes these
+    # folders: tmpfiles follows a symlink on the way before anything checks it (ADR 0029).
+    systemd.services.media-server-folders = {
+      description = "[media] folders checked before it starts";
+      serviceConfig = {
+        Type = "oneshot";
+        User = cfg.user;
+        Group = cfg.group;
+        ExecStartPre = "+${lib.getExe foldersPrepare}";
+        ExecStart = lib.getExe foldersCheck;
+        # No file system namespace, so the check sees the host's mounts; as the service user it
+        # can change nothing beyond what the service itself may.
+        NoNewPrivileges = true;
+        CapabilityBoundingSet = "";
+        AmbientCapabilities = "";
+        RestrictAddressFamilies = [ "AF_UNIX" ];
+        IPAddressDeny = "any";
+        RestrictNamespaces = true;
+        RestrictRealtime = true;
+        RestrictSUIDSGID = true;
+        LockPersonality = true;
+        MemoryDenyWriteExecute = true;
+        SystemCallArchitectures = "native";
+        SystemCallFilter = [
+          "@system-service"
+          "~@privileged"
+        ];
+        UMask = "0077";
+      };
+    };
+    # The container's database is in dataDir/core/convex, which the check above must pass first.
+    systemd.services."${backend}-media-core-convex" = {
+      requires = [ "media-server-folders.service" ];
+      after = [ "media-server-folders.service" ];
+    };
+
+    systemd.services.media-server = {
       description = "[media] media service";
       wantedBy = [ "multi-user.target" ];
-      requires = containerUnits;
-      after = containerUnits ++ [ "network-online.target" ];
+      requires = containerUnits ++ [ "media-server-folders.service" ];
+      after = containerUnits ++ [
+        "media-server-folders.service"
+        "network-online.target"
+      ];
       wants = [ "network-online.target" ];
       # setpriv starts every ffmpeg with a parent-death signal, so none outlives the service. The
       # default KillMode (control-group) also stops anything left when the service exits.
@@ -705,7 +1185,7 @@ in
         BACKUP_DIR = cfg.backupDir;
         BACKUP_RETENTION_DAYS = toString cfg.backupRetentionDays;
         TRANSCODE_DIR = cfg.transcodeDir;
-        WEB_DIST_DIR = "/run/movies/web";
+        WEB_DIST_DIR = "/run/media-server/web";
         LIBRARY_ROOTS = lib.concatStringsSep "," cfg.libraryDirs;
         HARDWARE_ACCELERATION = cfg.hardwareAcceleration;
         QSV_DEVICE = cfg.qsvDevice;
@@ -752,13 +1232,13 @@ in
         # media.env is written by ExecStartPre and read before ExecStart, so it is optional only
         # for the setup. Later files win, so the generated credentials override environmentFile.
         EnvironmentFile = lib.optional (cfg.environmentFile != null) cfg.environmentFile ++ [
-          "-/run/movies/media.env"
+          "-/run/media-server/media.env"
         ];
         ExecStart = lib.getExe' cfg.package "movies-media";
         Restart = "on-failure";
         RestartSec = 5;
         TimeoutStartSec = "10min";
-        RuntimeDirectory = "movies";
+        RuntimeDirectory = "media-server";
         RuntimeDirectoryMode = "0755";
 
         ReadWritePaths = [

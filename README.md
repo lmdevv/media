@@ -23,6 +23,9 @@ install for a [movies] v0.2 or [music] v0.3 install: nothing moves over from eit
 
 [docs/homelab.md](docs/homelab.md) walks through a homelab install end to end: Compose or NixOS,
 Tailscale and a Caddy reverse proxy, GPU passthrough, where data lives, backups, and upgrading.
+[docs/fresh-install.md](docs/fresh-install.md) has the exact steps for a first install from a
+release tag beside other installs, such as an old [movies] or [music] one, from the owner account
+to the first scan and a play.
 
 ### Docker Compose
 
@@ -75,10 +78,12 @@ services.media = {
 };
 ```
 
-The core's Convex backend runs as a pinned OCI container; the media service runs natively as a sandboxed
-systemd service built from this repository (`nix build github:lmdevv/media#movies`). Caddy serves
-all of them on one port with the image's routes. Library folders are read-only to the media
-service, and `openFirewall` is off by default.
+The core's Convex backend runs as a pinned OCI container; the media service runs natively as the
+sandboxed `media-server` systemd unit, built from this repository
+(`nix build github:lmdevv/media#movies`). Caddy serves all of them on one port with the image's
+routes. Library folders are read-only to the media service, and `openFirewall` is off by default.
+Every unit, user, and folder the module makes has a `media` name, so from 0.4.1 it runs beside the
+old [movies] and [music] modules ([docs/fresh-install.md](docs/fresh-install.md)).
 
 ## Configuration
 

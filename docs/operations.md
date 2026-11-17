@@ -5,18 +5,18 @@ restores, upgrades, hardware acceleration, and telemetry. The README has the qui
 
 ## What runs
 
-| Piece             | Compose (`deploy/compose`)                                  | NixOS (`services.media`)                      |
-| ----------------- | ----------------------------------------------------------- | --------------------------------------------- |
-| Convex backend    | the core's, in the image                                    | `media-core-convex` OCI container             |
-| Media service     | in the image, runs as `PUID:PGID`                           | native `movies.service`, user `movies`        |
-| Caddy, one port   | in the image, port 8080                                     | `media-proxy.service` on `listenAddress:port` |
-| Web clients       | account client by Caddy, movies client by the media service | the same                                      |
-| Core database     | `media-data` volume, `/data/core`                           | `dataDir/core` (`/var/lib/media/core`)        |
-| Media service key | `media-data` volume, `/data/core/secrets`, root only        | `dataDir/core/secrets`, root only             |
-| Service state     | `media-data` volume, `/data/movies/media`                   | `dataDir/movies/media`                        |
-| Backups           | `media-data` volume, `/data/core/backups`                   | `backupDir` (`dataDir/core/backups`)          |
-| HLS segments      | `media-transcode` volume                                    | `transcodeDir` (`/var/cache/movies/...`)      |
-| Libraries         | bind mounts under `/media`, read-only                       | `libraryDirs`, read-only to the service       |
+| Piece             | Compose (`deploy/compose`)                                  | NixOS (`services.media`)                           |
+| ----------------- | ----------------------------------------------------------- | -------------------------------------------------- |
+| Convex backend    | the core's, in the image                                    | `media-core-convex` OCI container                  |
+| Media service     | in the image, runs as `PUID:PGID`                           | native `media-server.service`, user `media-server` |
+| Caddy, one port   | in the image, port 8080                                     | `media-proxy.service` on `listenAddress:port`      |
+| Web clients       | account client by Caddy, movies client by the media service | the same                                           |
+| Core database     | `media-data` volume, `/data/core`                           | `dataDir/core` (`/var/lib/media/core`)             |
+| Media service key | `media-data` volume, `/data/core/secrets`, root only        | `dataDir/core/secrets`, root only                  |
+| Service state     | `media-data` volume, `/data/movies/media`                   | `dataDir/movies/media`                             |
+| Backups           | `media-data` volume, `/data/core/backups`                   | `backupDir` (`dataDir/core/backups`)               |
+| HLS segments      | `media-transcode` volume                                    | `transcodeDir` (`/var/cache/media/transcode`)      |
+| Libraries         | bind mounts under `/media`, read-only                       | `libraryDirs`, read-only to the service            |
 
 One Convex backend, the core's, holds every domain (ADR 0027). It and the media service listen on
 loopback only. Caddy serves them on the one port with the routes in
@@ -24,10 +24,12 @@ loopback only. Caddy serves them on the one port with the routes in
 movies' backend answered before the movies cutover. Convex's HTTP actions stay inside the install
 (ADR 0025).
 
-Every start, as root, before the media service runs unprivileged:
+Every start, as root, before the media service runs unprivileged (on NixOS, after
+`media-server-folders` has checked the folders, ADR 0029):
 
 1. Derive the core's admin key from the backend's instance secret. It is never written to disk
-   except into the service's private environment under `/run/movies` (tmpfs).
+   except into the service's private environment, under `/run/movies` in the image and
+   `/run/media-server` on NixOS (tmpfs).
 2. If the release or the core's functions changed, export a backup first:
    `core-manual-<timestamp>.zip` in the backup folder, owned by the service user.
 3. Deploy the core's bundled Convex functions (`packages/platform`).
@@ -40,7 +42,7 @@ Every start, as root, before the media service runs unprivileged:
    sign-in retires the old one.
 6. Read `MEDIA_TICKET_KEYS` from the core deployment for the media service.
 7. Write the core's public URL, `MEDIA_BASE_URL/convex`, into a copy of each web client.
-8. Start the media service with its secrets in `/run/movies/media.env` (mode 0600, owned by the
+8. Start the media service with its secrets in `media.env` there (mode 0600, owned by the
    service user). No secret is in the image, the Nix store, a command line, or the web clients.
 
 ## Run Convex CLI commands against the core
@@ -58,7 +60,7 @@ docker compose exec media sh -c '
 On NixOS, run the same commands as root with `media-core-convex` (from the package) in place of
 `node node_modules/convex/bin/main.js`, `CONVEX_SELF_HOSTED_URL` set to
 `http://127.0.0.1:<internalPorts.coreConvex>` (3210 by default), and the admin key from
-`/run/movies/media.env`.
+`/run/media-server/media.env`.
 
 ## Backups
 
@@ -104,7 +106,7 @@ key, and `/api/health` reports the backend as `connecting` from then on. To issu
 - Compose: run `docker compose exec media rm /data/core/secrets/media-service-key`, then
   `docker compose restart media`.
 - NixOS: run `rm /var/lib/media/core/secrets/media-service-key` as root, then
-  `systemctl restart movies`.
+  `systemctl restart media-server`.
 
 The start issues a new key, to a new service principal if the restored database does not hold the
 recorded one. Artwork keys are sealed under the service key, so images fail until the next scan
@@ -117,7 +119,7 @@ before the new key.
 2. Copy the archive into the backup folder
    (`docker compose cp backup.zip media:/data/core/backups/` and
    `docker compose exec media chown movies:movies /data/core/backups/backup.zip`, or into
-   `backupDir` owned by `movies` on NixOS) and restart the media service, which lists it.
+   `backupDir` owned by `media-server` on NixOS) and restart the media service, which lists it.
 3. Create a temporary owner account in the account client at `/` (the first account on an empty
    deployment is the owner), then restore the archive as above. The snapshot's accounts replace
    the temporary account.
@@ -141,7 +143,7 @@ docker compose restart media
 ```
 
 On NixOS, run the same commands as described in "Run Convex CLI commands against the core", then
-`systemctl restart movies`. If the archive is older than the media service's key, issue the key
+`systemctl restart media-server`. If the archive is older than the media service's key, issue the key
 again before the restart.
 
 ## Upgrading
@@ -162,8 +164,11 @@ their own. `@lmdevv/media` replaces the [movies] CLI's package, `@lmdevv/movies`
 The all-in-one image (ADR 0027), first released as 0.3.0, is a fresh install, not an upgrade of a
 v0.2 install. Its Compose project, volumes, and data layout are new (`media`, `media-data`, `/data/core` and `/data/movies`),
 and the NixOS module's `dataDir` moved to `/var/lib/media`. Nothing moves the old data over (ADR
-0002). Stop the old install before starting the new one, since both take port 8080, and keep its
-volumes or `/var/lib/movies` until you no longer need them.
+0002). Both take port 8080 by default: stop the old install before starting the new one, or run
+the new one beside it on a port and data folder of its own ([fresh-install.md](fresh-install.md)).
+From 0.4.1 the NixOS module names everything it makes `media`, so it also runs beside v0.2's
+module (ADR 0029); 0.4.0's can't, since both define the `movies` unit. Keep the old volumes or `/var/lib/movies` until
+you no longer need them.
 
 | Track     | Compose `MEDIA_IMAGE`                              | NixOS flake input            |
 | --------- | -------------------------------------------------- | ---------------------------- |
@@ -190,8 +195,43 @@ docker compose logs -f media     # "upgrading the core from 0.3.0 to 0.3.1; back
 ```sh
 nix flake update movies          # or point the input at the new tag
 nixos-rebuild switch
-journalctl -u movies -f
+journalctl -u media-server -f
 ```
+
+From 0.4.0 to 0.4.1 the module renames what it makes so it can run beside [movies] v0.2's module
+(ADR 0029). The media service's unit and user are `media-server`, no longer `movies`, and its
+runtime folder is `/run/media-server`. Move any override of `systemd.services.movies` or
+`users.users.movies`, such as `extraGroups`, to `media-server`. The database and the service's
+state stay in `dataDir`, where the old `movies` user's files keep its ids. The module re-owns
+nothing that already exists, so the first start refuses, names the folders, and prints the
+command that gives them to `media-server`. Run the exact line the check prints, once. First
+confirm that no process runs as the old owner's uid, which the check names: `pgrep -u <uid>` must
+print nothing. With the default folders, and 9999 standing in for that uid:
+
+```sh
+pgrep -u 9999
+sudo find /var/lib/media/core/backups /var/lib/media/movies/media -xdev \( -type d -o -links 1 \) -execdir chown -h media-server:media-server {} +
+sudo systemctl start media-server
+```
+
+It changes the owner of every folder and file in them except a file with other names (a hard
+link), which may be another file outside them. `-xdev` alone would not stop at a bind mount from
+the same file system, so the check refuses a folder with a mount at or inside it first, and prints
+no command for it. With a custom `transcodeDir` or `backupDir`, the printed line names those
+folders. Transcode segments move to `/var/cache/media/transcode`, which starts empty;
+`/var/cache/movies/transcode` is left alone, since [movies] v0.2 uses that path too. Evaluation refuses a `dataDir`, `backupDir`, or
+`transcodeDir` that overlaps a library or an old install's folder.
+
+Before every start, `media-server-folders` checks the folders, and the media service and the
+core's Convex container start only if it passes. As root, it refuses a `dataDir` that is a
+symlink, a mount point, or under a folder another user can change, then makes the folders that
+are missing. As `media-server`, it refuses to start unless `dataDir/movies/media`, `backupDir`,
+and `transcodeDir` are plain folders of `media-server`'s, with everything in them: no symlink on
+their paths, no mount at or inside them, and no folder above them that a user other than root or
+`media-server` can change. `journalctl -u media-server-folders` says which check failed and how
+to fix it.
+To put a folder on its own disk, mount the disk elsewhere and point the option at a folder inside
+it.
 
 ### What an upgrade does
 
@@ -310,7 +350,7 @@ The media service uses Intel Quick Sync (QSV) through ffmpeg's libvpl when it ca
 ## Telemetry and logs
 
 - Logs are one JSON object per line on standard output (`docker compose logs media`,
-  `journalctl -u movies`). The media service keeps the same lines, already redacted, in rotating
+  `journalctl -u media-server`). The media service keeps the same lines, already redacted, in rotating
   NDJSON files under its data folder (`/data/movies/media/logs` in the Compose volume,
   `/var/lib/media/movies/media/logs` on NixOS, private to the service): a new file each day and at
   each start. Each name carries a sequence number and the time of the file's first record
