@@ -607,10 +607,10 @@ describe("translateFailure", () => {
   it("turns ConvexError data into the command error for its code", () => {
     const error = translateFailure(
       "rooms:play",
-      new ConvexError({ code: "stale_revision", message: "The room changed" }),
+      new ConvexError({ code: "conflict", message: "The room changed" }),
     );
 
-    expect(error).toMatchObject({ _tag: "StaleRevision", message: "The room changed" });
+    expect(error).toMatchObject({ _tag: "Conflict", message: "The room changed" });
   });
 
   it("reports ConvexError data without a known code as a protocol error", () => {

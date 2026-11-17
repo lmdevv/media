@@ -66,7 +66,6 @@ export const afterSessionFailure = (error: CallError): PlaybackStep =>
     NotFound: ({ message }) => failed(message),
     InvalidArgs: ({ message }) => failed(message),
     Expired: ({ message }) => failed(message),
-    StaleRevision: () => failed(STOPPED_MESSAGE),
     RateLimited: () => PlaybackStep.Renegotiate({ afterMs: RETRY_LATER_MS }),
     Internal: () => failed(STOPPED_MESSAGE),
   });

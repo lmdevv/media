@@ -545,7 +545,6 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
         NotFound: failed(seen),
         InvalidArgs: failed(seen),
         Conflict: failed(seen),
-        StaleRevision: failed(seen),
         Internal: failed(seen),
         ProtocolError: failed(seen),
         SignInWaiting: failed(seen),

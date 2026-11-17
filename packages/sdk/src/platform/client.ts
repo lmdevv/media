@@ -19,7 +19,6 @@ import type { AuthStatus, SignInRequest, SignInWaiting } from "../auth";
 import { acrossReconnects, decodeResult, encodeArgs } from "../calls";
 import * as ConvexTransport from "../convex-transport";
 import type { CallError, TransportError } from "../sdk-errors";
-import { ProtocolError } from "../sdk-errors";
 import type { TokenStorage, TokenStorageError } from "../token-storage";
 import type { Command, EffectBuilder, Id, Params, PlatformError } from "./command";
 import { effectMethods } from "./generated/commands";
@@ -187,22 +186,6 @@ export interface Options {
 /** Opening the client fails when the URL is invalid or the stored session cannot be read. */
 export type OpenError = TransportError | TokenStorageError;
 
-const toPlatformError =
-  (operation: string) =>
-  (error: CallError): PlatformError =>
-    Match.value(error).pipe(
-      Match.tag(
-        "StaleRevision",
-        (stale) =>
-          new ProtocolError({
-            operation,
-            message: `Protocol error in ${operation}: the platform answered stale_revision`,
-            cause: stale,
-          }),
-      ),
-      Match.orElse((other) => other),
-    );
-
 /** How many times in a row a refused subscription subscribes again without a result between. */
 const SUBSCRIBE_AGAIN_LIMIT = 3;
 
@@ -360,10 +343,9 @@ const make = Effect.fn("Platform.make")(function* (url: string, signInRoute: Aut
     return encodeArgs(command.name, command.args, args).pipe(
       Effect.flatMap((wire) =>
         fenced((attached) =>
-          transport.call(command.kind, command.path, wire, attached).pipe(
-            Effect.flatMap((raw) => decodeResult(command.name, command.result, raw)),
-            Effect.mapError(toPlatformError(command.name)),
-          ),
+          transport
+            .call(command.kind, command.path, wire, attached)
+            .pipe(Effect.flatMap((raw) => decodeResult(command.name, command.result, raw))),
         ),
       ),
       Effect.withSpan("Platform.call", { attributes: { command: command.name } }),
@@ -384,7 +366,7 @@ const make = Effect.fn("Platform.make")(function* (url: string, signInRoute: Aut
           ),
         ),
       ),
-    ).pipe(Stream.mapError(toPlatformError(command.name)));
+    );
   };
 
   const methods = effectMethods(effectBuilder({ run, watch }));
@@ -394,8 +376,7 @@ const make = Effect.fn("Platform.make")(function* (url: string, signInRoute: Aut
       Effect.mapError((error) =>
         Match.value(error).pipe(
           Match.tag("SignInWaiting", Auth.unexpectedWaiting),
-          Match.tag("TokenStorageError", (storage) => storage),
-          Match.orElse(toPlatformError("auth:signIn")),
+          Match.orElse((other) => other),
         ),
       ),
     );
@@ -462,8 +443,7 @@ const make = Effect.fn("Platform.make")(function* (url: string, signInRoute: Aut
               "Expired",
               (expired) => new DeviceSignInRefused({ state: "expired", message: expired.message }),
             ),
-            Match.tag("TokenStorageError", (storage) => storage),
-            Match.orElse(toPlatformError("auth:signIn")),
+            Match.orElse((other) => other),
           ),
         ),
       );

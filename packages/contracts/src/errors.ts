@@ -15,7 +15,6 @@ export const ErrorCode = Schema.Literals([
   "invalid_args",
   "conflict",
   "expired",
-  "stale_revision",
   "rate_limited",
   "internal",
 ]);
@@ -79,12 +78,6 @@ export class Expired extends Schema.TaggedError<Expired>()("Expired", {
   ...RequestIdentity.fields,
 }) {}
 
-/** A room command carried an older revision than the room's. Read the committed clock and retry. */
-export class StaleRevision extends Schema.TaggedError<StaleRevision>()("StaleRevision", {
-  message: Schema.String,
-  ...RequestIdentity.fields,
-}) {}
-
 /** Too many attempts. Wait and retry, after `retryAfterSeconds` when it is known. */
 export class RateLimited extends Schema.TaggedError<RateLimited>()("RateLimited", {
   message: Schema.String,
@@ -106,7 +99,6 @@ export type CommandError =
   | InvalidArgs
   | Conflict
   | Expired
-  | StaleRevision
   | RateLimited
   | Internal;
 
@@ -124,7 +116,6 @@ export const commandError = (
     Match.when("invalid_args", () => new InvalidArgs(fields)),
     Match.when("conflict", () => new Conflict(fields)),
     Match.when("expired", () => new Expired(fields)),
-    Match.when("stale_revision", () => new StaleRevision(fields)),
     Match.when("rate_limited", () => new RateLimited(fields)),
     Match.when("internal", () => new Internal(fields)),
     Match.exhaustive,

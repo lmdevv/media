@@ -101,9 +101,9 @@ describe("Platform", () => {
     expect(failure).toMatchObject({ _tag: "ProtocolError", operation: "core.server.info" });
   });
 
-  it("turns each refusal into its tagged error, and stale_revision into a protocol error", async () => {
+  it("turns each refusal into its tagged error", async () => {
     const failures = await withPlatform((platform, fake) =>
-      Effect.forEach(["forbidden", "unauthenticated", "stale_revision"] as const, (code) =>
+      Effect.forEach(["forbidden", "unauthenticated"] as const, (code) =>
         fake
           .reply("core/auth/sessions:endAll", Reply.Failure({ code, message: code }))
           .pipe(
@@ -115,7 +115,6 @@ describe("Platform", () => {
     expect(failures).toMatchObject([
       { _tag: "Forbidden", message: "forbidden" },
       { _tag: "Unauthenticated", message: "unauthenticated" },
-      { _tag: "ProtocolError" },
     ]);
   });
 

@@ -1,5 +1,4 @@
 import type { FunctionPath } from "@media/contracts/command";
-import type { StaleRevision } from "@media/contracts/errors";
 import type { Brand, Effect, Schema, Stream } from "effect";
 
 import type { FunctionKind, WireArgs } from "../convex-transport";
@@ -12,11 +11,8 @@ import type { CallError } from "../sdk-errors";
  */
 export type Id<Table extends string> = string & Brand.Brand<`Id<${Table}>`>;
 
-/**
- * Every way a platform call can fail. The platform never sends `stale_revision`, so a call that
- * reads one fails with `ProtocolError` instead.
- */
-export type PlatformError = Exclude<CallError, StaleRevision>;
+/** Every way a platform call can fail. */
+export type PlatformError = CallError;
 
 /** One command: the Convex function it runs and the schemas of what it takes and returns. */
 export interface Command<Kind extends FunctionKind, Args, Result> {

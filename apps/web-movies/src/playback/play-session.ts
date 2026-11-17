@@ -6,7 +6,6 @@ import {
   InvalidArgs,
   NotFound,
   RateLimited,
-  StaleRevision,
   Unauthenticated,
 } from "@media/contracts/errors";
 import type { ClientCapabilities } from "@media/contracts/media-playback";
@@ -135,7 +134,6 @@ const isCallError = Schema.is(
     InvalidArgs,
     Conflict,
     Expired,
-    StaleRevision,
     RateLimited,
     Internal,
     TransportError,

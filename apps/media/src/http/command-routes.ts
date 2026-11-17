@@ -26,7 +26,6 @@ const failureOf = Match.type<CallError>().pipe(
     InvalidArgs: (error) => ({ code: "invalid_args", status: 400, message: error.message }),
     Conflict: (error) => ({ code: "conflict", status: 409, message: error.message }),
     Expired: (error) => ({ code: "expired", status: 410, message: error.message }),
-    StaleRevision: (error) => ({ code: "stale_revision", status: 409, message: error.message }),
     RateLimited: (error) => ({
       code: "rate_limited",
       status: 429,
