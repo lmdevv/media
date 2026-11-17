@@ -1,6 +1,6 @@
 {
   "name": "@media/contracts",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "private": true,
   "description": "Effect Schema DTOs, errors, the media HttpApi, and typed plugin interfaces.",
   "type": "module",
