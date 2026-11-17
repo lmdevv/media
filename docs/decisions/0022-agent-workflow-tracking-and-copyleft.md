@@ -1,7 +1,7 @@
 # 0022. Keep movies' agent workflow, one Linear team, and a merged copyleft list
 
-- Status: Accepted, 2026-11-03
-- Decisions: D11, D42, D43
+- Status: Accepted, 2026-11-03. Amended 2026-11-17 with one Linear project named media (D80).
+- Decisions: D11, D42, D43, D80
 
 ## Context
 
@@ -30,9 +30,12 @@ priority (ADR 0002).
   - Movies' per-worktree `scripts/dev-stack.sh` stays.
 - **Copyleft.** The read-only list is the union of both repos' lists, plus Nextcloud (AGPL) and
   Audiobookshelf (GPL-3.0).
-- **Linear.** One team with three projects: Platform, Movies, and Music.
-  - The ADRs and the architecture overview live as documents on the Platform project.
-  - Platform has one milestone per phase.
+- **Linear.** One team with three projects: Platform, Movies, and Music. Amended 2026-11-17 (D80).
+  Once the unification finished, Platform was renamed media and became the only project. Issues
+  about one app carry the `movies` or `music` label, and the old Movies and Music projects were
+  deleted after their open issues were triaged into it.
+  - The ADRs and the architecture overview live as documents on the media project.
+  - It has one milestone per phase of the unification.
   - Issues are filed only from a list the owner approves.
 - **Backlog proposals** for that list:
   - scrobbling to Last.fm and ListenBrainz,
@@ -54,7 +57,7 @@ priority (ADR 0002).
   the same seeded people.
 - Copyleft code from any listed project may be read for ideas and edge cases. It is never copied,
   ported, or translated into this repo.
-- The ADRs in this folder also exist as Linear documents on the Platform project.
+- The ADRs in this folder also exist as Linear documents on the media project.
 - No Linear issue exists for a backlog item until the owner approves it.
 
 ## Alternatives rejected

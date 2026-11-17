@@ -7,7 +7,7 @@ name until a later rebrand. The repo is `lmdevv/media`, the workspace scope is `
 start with `MEDIA_`, the CLI binary is `media`, and the image is `ghcr.io/lmdevv/media`.
 
 - Plan: `docs/architecture.md`, the ADRs in `docs/decisions/`, and the
-  [Linear Platform project](https://linear.app/adsfsd/project/platform-c8c8792e24e6).
+  [Linear media project](https://linear.app/adsfsd/project/media-c8c8792e24e6).
 - MVP: media service, web app, SDK, and CLI with an agent skill. Native mobile and TV apps are V1.
 
 ## Rules
