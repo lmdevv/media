@@ -1,8 +1,7 @@
 /**
  * Music as the server reads it from disk and sends it to the core's music scanner functions
  * (`music/scanner:*`): a song's tags, its own lyrics, and what a scan compares to skip unchanged
- * files. The shapes are old music's (`@music/commands/lyrics` and `media-backend.ts`), which the
- * core's `music/validators.ts` stores as they are.
+ * files. The core's `music/validators.ts` stores these shapes as they are.
  */
 import { Option, Schema } from "effect";
 
@@ -227,7 +226,7 @@ export interface ScannedLyrics extends Schema.Schema.Type<typeof ScannedLyrics> 
 export const MUSIC_FINGERPRINT_MAX = 1024;
 
 /**
- * A file the library knows, as a scan compares it with the disk: old music's fingerprint.
+ * A file the library knows, as a scan compares it with the disk: its fingerprint.
  * `folderArt` is null when the file had no folder artwork. Fingerprints come back within
  * `MUSIC_FINGERPRINT_MAX`.
  */

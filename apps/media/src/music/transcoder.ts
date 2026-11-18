@@ -1,12 +1,11 @@
 /**
- * Music's transcodes, as old music's media service ran them (`transcoder.ts`): one cached
- * transcode per song version and profile, shared by everyone who asks for it and readable while
- * ffmpeg still writes it; a background lane that prepares the finished file for a client that
- * polls; and fresh encodes from an offset for a listener who seeks ahead. They run under music's
- * own caps, not the server's video transcode limit (ADR 0014), and write only under `DATA_DIR`'s
- * cache, which the cache pruner keeps within `CACHE_MAX_MB`. The pruner keeps a transcode's files
- * from its start until a prune after it finishes has run, and keeps a file the transcoder
- * answered until the asker's scope closes.
+ * Music's transcodes: one cached transcode per song version and profile, shared by everyone who
+ * asks for it and readable while ffmpeg still writes it; a background lane that prepares the
+ * finished file for a client that polls; and fresh encodes from an offset for a listener who seeks
+ * ahead. They run under music's own caps, not the server's video transcode limit (ADR 0014), and
+ * write only under `DATA_DIR`'s cache, which the cache pruner keeps within `CACHE_MAX_MB`. The
+ * pruner keeps a transcode's files from its start until a prune after it finishes has run, and
+ * keeps a file the transcoder answered until the asker's scope closes.
  */
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
@@ -617,9 +616,8 @@ const make = Effect.gen(function* () {
 
     yield* Ref.update(jobs, (current) => new Map(current).set(output, job));
 
-    // Old music evicted its cache after each transcode, keeping that transcode even past the
-    // bound. The server's caches share one pruner, so a finished transcode asks it for a prune and
-    // keeps its own files until that prune has run, whatever other prunes run meanwhile.
+    // The server's caches share one pruner, so a finished transcode asks it for a prune and keeps
+    // its own files until that prune has run, whatever other prunes run meanwhile.
     const fiber = yield* pruner.protect(filesOf(output)).pipe(
       Effect.andThen(
         produce(job, input).pipe(

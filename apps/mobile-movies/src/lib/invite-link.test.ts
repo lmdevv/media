@@ -18,7 +18,7 @@ describe("invite links", () => {
     });
   });
 
-  it("refuses old path links, as the account client does", () => {
+  it("refuses a link with the code in its path, as the account client does", () => {
     expect(parseInviteLink("https://cinema.home/invite/abc123")).toBeNull();
   });
 

@@ -111,7 +111,7 @@ export function LibrariesView({
   readonly creating: boolean;
   readonly onDraft: (draft: NewLibrary) => void;
   readonly onCreate: () => void;
-  /** Music's lyrics lookups switch, which old music kept with its libraries. */
+  /** Music's lyrics lookups switch, shown with the libraries. */
   readonly lyrics?: ReactNode;
   /** The library's name, linked to its page. */
   readonly nameLink: (library: Library) => ReactNode;

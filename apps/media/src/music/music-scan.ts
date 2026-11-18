@@ -1,9 +1,9 @@
 /**
- * Music's scan, as old music's media service ran it (`scan.ts`): walk each of the library's
- * folders, compare what is there with what the core knows, read the tags, artwork, and lyrics of
- * new and changed files, follow files that moved, and mark the ones that went missing. It writes
- * only through a `ScanCatalog`, which the scan job builds over the core's music scanner functions
- * under its lease, so a canceled or replaced attempt writes nothing (ADR 0024).
+ * Music's scan: walk each of the library's folders, compare what is there with what the core
+ * knows, read the tags, artwork, and lyrics of new and changed files, follow files that moved, and
+ * mark the ones that went missing. It writes only through a `ScanCatalog`, which the scan job
+ * builds over the core's music scanner functions under its lease, so a canceled or replaced
+ * attempt writes nothing (ADR 0024).
  */
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
@@ -54,9 +54,9 @@ export class LibraryUnavailable extends Schema.TaggedError<LibraryUnavailable>()
 
 /**
  * A library folder holds no audio files while the core knows songs in it: most likely a network
- * share or a drive that is not mounted, whose empty mount point reads fine. The scan stops
- * without marking anything missing, as old music's did. Losing every song to an unmounted drive
- * is worse than keeping songs that were all deleted on purpose, which removing the folder clears.
+ * share or a drive that is not mounted, whose empty mount point reads fine. The scan stops without
+ * marking anything missing. Losing every song to an unmounted drive is worse than keeping songs
+ * that were all deleted on purpose, which removing the folder clears.
  */
 export class LibraryEmpty extends Schema.TaggedError<LibraryEmpty>()("LibraryEmpty", {
   folder: Schema.String,
@@ -126,7 +126,7 @@ export interface ScanSummary {
   readonly failed: number;
 }
 
-/** A one-line description of a scan result for the jobs list, as old music wrote it. */
+/** A one-line description of a scan result for the jobs list. */
 export const describeScan = (summary: ScanSummary): string => {
   const parts = [`${summary.files} files`, `${summary.updated} updated`];
 
@@ -289,10 +289,7 @@ const walkFolder = (libraryId: string, folder: string) =>
     Effect.annotateLogs({ libraryId }),
   );
 
-/**
- * Reads every known track, range by range, so a large library's pages are read side by side, as
- * old music read its fingerprints.
- */
+/** Reads every known track, range by range, so a large library's pages are read side by side. */
 const knownTracks = <E>(catalog: ScanCatalog<E>, paths: ReadonlyArray<string>) =>
   Effect.forEach(pathRanges(paths, KNOWN_RANGE), catalog.known, {
     concurrency: KNOWN_CONCURRENCY,

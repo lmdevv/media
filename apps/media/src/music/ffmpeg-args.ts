@@ -1,8 +1,8 @@
 /**
- * The ffmpeg and ffprobe arguments of music's transcodes, as old music's media service built them
- * (`ffmpeg.ts`): fast-start AAC for `<audio>`, fragmented FLAC and AAC for the gapless player, and
- * fresh encodes from an offset for a seek ahead of the cached transcode. Every run writes its
- * stream to file descriptor 3 (`pipe:3`), which `music-tools.ts` reads.
+ * The ffmpeg and ffprobe arguments of music's transcodes: fast-start AAC for `<audio>`, fragmented
+ * FLAC and AAC for the gapless player, and fresh encodes from an offset for a seek ahead of the
+ * cached transcode. Every run writes its stream to file descriptor 3 (`pipe:3`), which
+ * `music-tools.ts` reads.
  */
 import type { MusicStreamProfile } from "@media/contracts/music-playback";
 

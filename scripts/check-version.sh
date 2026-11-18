@@ -4,8 +4,8 @@
 # fails unless the tag names that version. The iOS app's store version (`expo.version` in
 # apps/mobile-movies/app.json) goes through App Store review on its own schedule, so it is not checked.
 #
-#   scripts/check-version.sh            # 0.2.0
-#   scripts/check-version.sh v0.2.0     # the release workflows, with the pushed tag
+#   scripts/check-version.sh            # 0.4.1
+#   scripts/check-version.sh v0.4.1     # the release workflows, with the pushed tag
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

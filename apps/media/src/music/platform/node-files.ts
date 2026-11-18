@@ -1,7 +1,6 @@
 /**
- * Node's file system calls that music's scanner, art store, and transcoder make, as old music's
- * media service made them (`platform/node-files.ts`). This Effect-free leaf answers with promises;
- * `music-files.ts` wraps it for Effect callers.
+ * Node's file system calls that music's scanner, art store, and transcoder make. This Effect-free
+ * leaf answers with promises; `music-files.ts` wraps it for Effect callers.
  */
 import {
   appendFile,

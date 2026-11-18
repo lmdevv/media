@@ -17,7 +17,7 @@ const LETTERS = new Map([
 const LETTER = /[ßæœøłđðþı]/gu;
 
 /**
- * Lowercases `text` and strips accents, as old music's `foldSearchText` does, so search matches
+ * Lowercases `text` and strips accents, so search matches
  * "Doppelgänger" for "doppelganger". Only the Latin, Greek, and Cyrillic accent block goes, and
  * the result is recomposed, so kana and Hangul come back unchanged.
  */

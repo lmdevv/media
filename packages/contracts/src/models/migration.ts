@@ -366,8 +366,8 @@ export const ImportPlanArgs = Schema.Struct({
 export interface ImportPlanArgs extends Schema.Schema.Type<typeof ImportPlanArgs> {}
 
 /**
- * The dry-run summary of an import into the core, shown before anything is written: the summary
- * old movies showed, with each source user's core user. `playCounts` counts items whose last-played
+ * The dry-run summary of an import into the core, shown before anything is written, with each
+ * source user's core user. `playCounts` counts items whose last-played
  * date imports; the core keeps no play count.
  */
 export const ImportReport = Schema.Struct({

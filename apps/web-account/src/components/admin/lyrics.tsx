@@ -6,9 +6,8 @@ import { useActions } from "./action";
 import { Section } from "./parts";
 
 /**
- * Music's switch for LRCLIB lookups, old music's "Look up lyrics online" from its library
- * settings: it saves as it is flipped. Only owners and admins may read or change it, so it shows
- * only once the server answered.
+ * Music's switch for LRCLIB lookups: it saves as it is flipped. Only owners and admins may read or
+ * change it, so it shows only once the server answered.
  */
 export function RemoteLyricsSetting() {
   const platform = usePlatform();

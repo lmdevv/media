@@ -1,7 +1,7 @@
 /**
- * Music's two ways of running ffmpeg with its stream on `pipe:3`, as old music's media service ran
- * them (`ffmpeg.ts`), on the server's tools: they start through `MediaTools`, so each run dies
- * with the server and sees only the tools' environment (ADR 0014).
+ * Music's two ways of running ffmpeg with its stream on `pipe:3`, on the server's tools: they start
+ * through `MediaTools`, so each run dies with the server and sees only the tools' environment
+ * (ADR 0014).
  */
 import { Effect, Stream } from "effect";
 

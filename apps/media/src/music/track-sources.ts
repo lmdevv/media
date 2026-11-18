@@ -18,7 +18,7 @@ class TrackSourcesUnavailable extends Schema.TaggedError<TrackSourcesUnavailable
 export interface Interface {
   /**
    * The track's file as the core lists it now, or none for a track that is gone, missing, or
-   * outside its library's folders. Kept for a minute, as old music's media service kept it.
+   * outside its library's folders. Each answer is kept for a minute.
    */
   readonly resolve: (
     trackId: string,

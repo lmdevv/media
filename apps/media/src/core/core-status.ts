@@ -23,7 +23,7 @@ const same = (left: ServerReport, right: ServerReport): boolean =>
 
 /**
  * Reports the server's version, hardware transcoding, streams, and unexited runs to the core
- * for admins' `core.server.status`, in place of old movies' server page reading `/api/health`.
+ * for admins' `core.server.status`.
  */
 export const layer: Layer.Layer<
   never,

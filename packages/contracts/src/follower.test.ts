@@ -897,7 +897,7 @@ describe("follower", () => {
         lucia.viewerPlay();
         lucia.stall();
 
-        // The subscription still shows the clock the player stalled on, from before the hold.
+        // The subscription still shows the clock the player stalled on, which predates the hold.
         const host = yield* follower(session, lucia, {
           controls: true,
           pausesForStalls: true,

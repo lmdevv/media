@@ -110,7 +110,7 @@ describe("an API key's sign-in on Devices", () => {
     expect(sessionFacts(keyed)).toMatch(/^API key · Signed in .* · Expires .* · Play movies$/u);
   });
 
-  it("warns that the key signs in again, as old movies did", () => {
+  it("warns that the key signs in again on its next use", () => {
     expect(signOutNote(keyed)).toBe(
       "The key signs in again the next time it is used. Revoke the key to stop it.",
     );

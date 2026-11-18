@@ -29,8 +29,8 @@ export const LYRICS_READER_VERSION = 1;
 /**
  * The most a song's kept lyric sets take as JSON. The core's lyrics row holds 512 KiB as Convex
  * measures a document, and keeps the leading sets that fit (`fitLyrics` in `music/fit.ts`), so
- * the server chooses within that, less a margin for the two measures' difference, rather than
- * old music's own 768 KiB: the core then never drops what the server kept.
+ * the server chooses within that, less a margin for the two measures' difference: the core then
+ * never drops what the server kept.
  */
 const MAX_STORED_BYTES = 480 * 1024;
 
@@ -93,8 +93,8 @@ const best = (
   );
 
 /**
- * The set a client shows from a song's own sets, as old music's `resolveLyrics` picked it without
- * LRCLIB and the core's `music.lyrics.get` picks it: its synced main lyrics, else its plain main
+ * The set a client shows from a song's own sets, without LRCLIB's, as the core's
+ * `music.lyrics.get` picks it: its synced main lyrics, else its plain main
  * lyrics, a file beside the song beating a tag inside it, and word timing beating line timing;
  * among sets still equal, the first.
  */

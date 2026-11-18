@@ -1,12 +1,11 @@
 /**
- * Music's artwork collection, as old music's job worker ran it (`art-collector.ts`): after each
- * scan, the artwork that scan's writes released and nothing uses any more; and a full collection
- * when the server starts and every hour after, for artwork a library's removal left behind. Scans
- * and both collections take turns in one lane, as old music's worker ran them (`turns`): a scan
- * reuses a stored artwork without writing it again, so a collection that found it unused must not
- * delete it while a scan stores a song that names it. Music runs one scan at a time (ADR 0014), so
- * a scan waits only for a collection under way, never for another scan, and never holds up a
- * transcode. Both collections also keep artwork written in the last ten minutes.
+ * Music's artwork collection: after each scan, the artwork that scan's writes released and nothing
+ * uses any more; and a full collection when the server starts and every hour after, for artwork a
+ * library's removal left behind. Scans and both collections take turns in one lane: a scan reuses a
+ * stored artwork without writing it again, so a collection that found it unused must not delete it
+ * while a scan stores a song that names it. Music runs one scan at a time (ADR 0014), so a scan
+ * waits only for a collection under way, never for another scan, and never holds up a transcode.
+ * Both collections also keep artwork written in the last ten minutes.
  */
 import { serverFunctions } from "@media/contracts/server-functions";
 import { Context, Duration, Effect, HashSet, Layer, Ref, Schedule, Semaphore } from "effect";

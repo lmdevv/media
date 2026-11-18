@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Prints where a release version publishes, from the repository's `v*` tags:
 #
-# - `next` for a pre-release (`0.3.0-rc.1`), which never becomes the latest release;
+# - `next` for a pre-release (`0.5.0-rc.1`), which never becomes the latest release;
 # - `latest` for the highest stable version tagged;
-# - `release-X.Y` for a backport to an older line (`0.2.5` once `v0.3.0` exists).
+# - `release-X.Y` for a backport to an older line (`0.4.2` once `v0.5.0` exists).
 #
 # The release workflow uses it as the npm dist-tag, and marks the GitHub Release latest only for
 # `latest`. It needs the tags fetched.

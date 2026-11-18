@@ -480,7 +480,7 @@ const libraryFile = v.object({
 });
 
 /**
- * The movies commands, ported from old movies (D62). Everything a person keeps (progress,
+ * The movies commands (D62). Everything a person keeps (progress,
  * history, their list) is theirs alone (D36); nothing is keyed by a profile.
  */
 export const movies = [

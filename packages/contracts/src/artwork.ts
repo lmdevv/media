@@ -2,9 +2,9 @@
  * Artwork URLs. Titles, seasons, and episodes carry artwork keys (`Artwork.poster`,
  * `Season.poster`, `Episode.still`, and so on): opaque, URL-safe strings the media service minted
  * while scanning. Clients load an image from `${mediaBaseUrl}/artwork/${key}`, optionally resized
- * to one of `ARTWORK_WIDTHS` with `?w=`. On old movies images need no token, so `<img>` tags can
- * use the URL as is; on the core an image URL also carries a shareable `ticket` for the key's
- * `artworkTicketId` (`@media/contracts/ticket`), the same string for a whole week, so images still cache (ADR 0011).
+ * to one of `ARTWORK_WIDTHS` with `?w=`. An image URL also carries a shareable `ticket` for the
+ * key's `artworkTicketId` (`@media/contracts/ticket`), the same string for a whole week, so
+ * images still cache (ADR 0011).
  */
 import { Schema } from "effect";
 

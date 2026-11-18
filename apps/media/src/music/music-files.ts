@@ -1,8 +1,8 @@
 /**
- * The file operations music's scanner, art store, and transcoder run, as old music's media service
- * ran them (`files.ts`): the Effect-free `platform/node-files.ts` behind Effect, each failure a
- * `FileError` that says whether the path was missing. Music reads library folders only to walk and
- * read them, and writes only under the server's own data folder.
+ * The file operations music's scanner, art store, and transcoder run: the Effect-free
+ * `platform/node-files.ts` behind Effect, each failure a `FileError` that says whether the path was
+ * missing. Music reads library folders only to walk and read them, and writes only under the
+ * server's own data folder.
  */
 import { Effect, Option, Schema } from "effect";
 
@@ -115,12 +115,12 @@ export const walkFailureOf = (error: FileError): string =>
   error.cause instanceof NodeFiles.UnreadableFolder ? error.cause.message : error.message;
 
 /**
- * Lists the regular files under `root` whose names pass `include`, as old music's walk did:
- * entries whose names start with a dot and file system folders such as `lost+found` are skipped.
- * A link to a file counts only when its target resolves inside `root`, so a link cannot pull
- * outside files into the library; links to folders are never followed, which also rules out
- * loops. A folder that cannot be read fails the walk instead of being skipped, since skipping it
- * would make every song under it look deleted. A folder that vanishes mid-walk is skipped.
+ * Lists the regular files under `root` whose names pass `include`. Entries whose names start with a
+ * dot and file system folders such as `lost+found` are skipped. A link to a file counts only when
+ * its target resolves inside `root`, so a link cannot pull outside files into the library; links to
+ * folders are never followed, which also rules out loops. A folder that cannot be read fails the
+ * walk instead of being skipped, since skipping it would make every song under it look deleted. A
+ * folder that vanishes mid-walk is skipped.
  */
 export const walkTree = (
   root: string,
