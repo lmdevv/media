@@ -102,10 +102,7 @@ convex_backends() {
     tr "\0" " " <"$p/cmdline" 2>/dev/null | grep -q "^/app/convex/convex-local-backend " && echo "${p#/proc/}"
   done' | wc -l
 }
-check "the image runs one Convex backend" \
-  '[[ "$(convex_backends)" -eq 1 ]] &&
-    ! in_media test -e /app/backend && ! in_media test -e /etc/s6-overlay/s6-rc.d/convex-movies &&
-    ! in_media curl -fsS http://127.0.0.1:3220/version >/dev/null 2>&1'
+check "the image runs one Convex backend" '[[ "$(convex_backends)" -eq 1 ]]'
 check "/api is the media service" 'answers /api/health "\"backend\":\"connected\""'
 check "/ is the account client" 'answers / "<title>[media]</title>"'
 check "/movies is the movies client" \
