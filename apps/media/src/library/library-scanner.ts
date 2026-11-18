@@ -807,6 +807,7 @@ export const make = Effect.gen(function* () {
         Stream.filter(Option.isSome),
         Stream.map((scanned) => scanned.value),
         Stream.grouped(BATCH_SIZE),
+        Stream.buffer({ capacity: 1 }),
         Stream.runForEach((batch) =>
           Effect.gen(function* () {
             yield* sink.upsertBatch(libraryFolder, batch);
