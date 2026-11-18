@@ -6,7 +6,8 @@
 #   verify-media.sh browser [--side S] [--app movies|music|account] <command> [flags]
 #   verify-media.sh cli [--side S] [--as PERSON] -- <media args>
 #   verify-media.sh logs [--side S] [lines]
-#   verify-media.sh ios <up|doctor|describe|find|tap|type|swipe|wait|shot|record|appearance|orientation|open|matrix|sign-in|down> [--side S] ...
+#   verify-media.sh lyrics-probe [--side S]
+#   verify-media.sh ios <up|doctor|describe|find|tap|type|swipe|wait|shot|record|appearance|orientation|open|matrix|offline|sign-in|down> [--side S] ...
 #   verify-media.sh evidence <add|list|clear|publish> ...
 #   verify-media.sh status
 #   verify-media.sh down [--side S] [--purge]
@@ -550,6 +551,33 @@ cmd_logs() {
   docker logs --tail "$lines" "$(container media)" 2>&1
 }
 
+# Makes a folder of songs with lyrics inside the side's container and prints its path, to add as a
+# Music library: the demo library's songs have none. The songs are 40-second cuts of a demo song,
+# one with a timed `.lrc` beside it and one with a plain `.txt`.
+cmd_lyrics_probe() {
+  take_side "$@"
+  [[ -n "$(read_state port)" ]] || die "no $side side in run $run; run \`up --side $side\`"
+  music_core || die "the $side side has no music"
+  local dir=/media/lyrics-probe
+  docker exec "$(container media)" sh -c '
+    set -e
+    album="$1/Verify Media/Lyrics Probe"
+    source="$(find /media/library/Music -name "*.mp3" | sort | head -1)"
+    [ -n "$source" ] || { echo "no demo song to cut from" >&2; exit 1; }
+    mkdir -p "$album"
+    cut() {
+      ffmpeg -v error -y -i "$source" -t 40 -map 0:a -c copy -map_metadata -1 -metadata title="$2" \
+        -metadata artist="Verify Media" -metadata album="Lyrics Probe" -metadata track="$1" "$album/0$1 $2.mp3"
+    }
+    cut 1 "Timed Probe"
+    cut 2 "Plain Probe"
+    printf "%s\n" "[00:00.00]First line" "[00:05.00]Second line" "[00:10.00]Third line" "[00:20.00]Fourth line" \
+      > "$album/01 Timed Probe.lrc"
+    printf "%s\n" "A plain first line" "A plain second line" > "$album/02 Plain Probe.txt"
+    chmod -R a+rX "$1"' lyrics-probe "$dir" || die "could not make the lyrics folder in $(container media)"
+  echo "$dir"
+}
+
 side_phase() {
   if [[ -n "$(read_state ready)" ]]; then echo ready
   elif kill -0 "$(read_state up.pid)" 2>/dev/null; then echo starting
@@ -721,6 +749,30 @@ ios_build() {
     && { [ -d ~/$shared ] || mv ~/$shared.tmp-$run ~/$shared; } && rm -rf ~/$shared.tmp-$run ~/$mac_dir/dd-verify-$run"
 }
 
+# Forwards ports to the Mac, whose network the simulator shares, so localhost:<port> there reaches
+# this machine. `server` forwards Lar's one port (the web clients, Convex, and streams) and Metro;
+# `metro` forwards Metro alone, which leaves the app running with its server out of reach.
+ios_forward() {
+  local pid tries=0 forwards
+  pid="$(read_state forward_pid)"
+  if [[ -n "$pid" ]] && ps -p "$pid" -o args= 2>/dev/null | grep -qF "ssh -N"; then
+    kill "$pid" 2>/dev/null || true
+    while kill -0 "$pid" 2>/dev/null; do
+      (( ++tries <= 100 )) || die "the ssh forward $pid did not stop"
+      sleep 0.1
+    done
+  fi
+  sleep 0.5
+  forwards=(-R "$(read_state metro_port):127.0.0.1:$(read_state metro_port)")
+  [[ "$1" == server ]] && forwards+=(-R "$(read_state port):127.0.0.1:$(read_state port)")
+  nohup ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 "${forwards[@]}" \
+    "$mac" > "$state/forward.log" 2>&1 &
+  write_state forward_pid "$!"
+  write_state ios_forward "$1"
+  sleep 2
+  kill -0 "$(read_state forward_pid)" 2>/dev/null || { cat "$state/forward.log" >&2; die "the ssh forward to $mac failed"; }
+}
+
 cmd_ios_up() {
   local sim_type="iPhone 17 Pro" dark=1 source="" name=movies given="" sign_in=1
   set -- "${args[@]:1}"
@@ -750,18 +802,11 @@ cmd_ios_up() {
   free="$(on_mac "df -g \$HOME | awk 'NR == 2 { print \$4 }'")"
   ((free >= need)) || die "$mac has ${free} GB free and ios up needs ${need} GB; free space there (\`down --purge\` removes this run's checkout there and the dev client for its native inputs, which other runs with the same inputs share)"
 
-  local port metro src forwards
+  local port metro src
   port="$(read_state port)"
   metro="$(free_port)"
   write_state metro_port "$metro"
-  # The simulator shares the Mac's network, so localhost:<port> on the Mac reaches this machine:
-  # the web clients, Convex, and streams on the one port, and Metro.
-  forwards=(-R "$port:127.0.0.1:$port" -R "$metro:127.0.0.1:$metro")
-  nohup ssh -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 "${forwards[@]}" \
-    "$mac" > "$state/forward.log" 2>&1 &
-  write_state forward_pid "$!"
-  sleep 2
-  kill -0 "$(read_state forward_pid)" 2>/dev/null || { cat "$state/forward.log" >&2; die "the ssh forward to $mac failed"; }
+  ios_forward server
 
   src="$root"
   [[ "$side" == before ]] && src="$(before_source)"
@@ -931,9 +976,20 @@ cmd_ios() {
       kill -0 "$(read_state forward_pid)" 2>/dev/null && echo "ok    ssh forwards to $mac" || { echo "FAIL  ssh forwards to $mac"; failed=1; }
       curl -fsS --max-time 5 "http://127.0.0.1:$(read_state metro_port)/status" 2>/dev/null | grep -q running && echo "ok    Metro on $(read_state metro_port)" || { echo "FAIL  Metro"; failed=1; }
       on_mac "xcrun simctl list devices | grep -F '$id) (Booted)' >/dev/null" && echo "ok    simulator $id booted" || { echo "FAIL  simulator $id"; failed=1; }
+      if [[ "$(read_state ios_forward)" == metro ]]; then
+        echo "info  the server is cut off from the Mac (\`ios offline on\`); \`ios offline off\` brings it back"
+        return "$failed"
+      fi
       on_mac "curl -fsS --max-time 10 $(url)/api/health | grep -q connected" && echo "ok    the Mac reaches $(url)" || { echo "FAIL  the Mac reaches $(url)"; failed=1; }
       on_mac "curl -fsS --max-time 10 $(convex_url)/version >/dev/null" && echo "ok    the Mac reaches Convex at $(convex_url)" || { echo "FAIL  the Mac reaches $(convex_url)"; failed=1; }
       return "$failed" ;;
+    offline)
+      udid >/dev/null
+      case "${args[1]:-}" in
+        on) ios_forward metro; echo "the app's server is out of reach" ;;
+        off) ios_forward server; echo "the app reaches its server again" ;;
+        *) die "ios offline on|off" ;;
+      esac ;;
     describe) ios_tree ;;
     sign-in)
       local who=""
@@ -1142,7 +1198,7 @@ ios_down() {
   pid="$(read_state forward_pid)"
   [[ -n "$pid" ]] && kill "$pid" 2>/dev/null || true
   rm -f "$state/ios_udid" "$state/ios_device" "$state/ios_owned" "$state/ios_app" "$state/metro_pid" \
-    "$state/metro_port" "$state/forward_pid" "$state/ios_record"
+    "$state/metro_port" "$state/forward_pid" "$state/ios_forward" "$state/ios_record"
 }
 
 # ----------------------------------------------------------------------------------------- evidence
@@ -1206,11 +1262,12 @@ main() {
     browser) cmd_browser "$@" ;;
     cli) cmd_cli "$@" ;;
     logs) cmd_logs "$@" ;;
+    lyrics-probe) cmd_lyrics_probe "$@" ;;
     ios) cmd_ios "$@" ;;
     evidence) cmd_evidence "$@" ;;
     status) cmd_status ;;
     down) cmd_down "$@" ;;
-    *) sed -n '2,17p' "$0" >&2; exit 2 ;;
+    *) sed -n '2,18p' "$0" >&2; exit 2 ;;
   esac
 }
 # Tests source the script to call its functions; run as a command, it runs main.

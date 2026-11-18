@@ -691,6 +691,34 @@ esac
     assert.match(matrix.stderr, /ios matrix lists the movies app's screens, and the after side runs the music app/);
   });
 
+  test("makes the lyrics folder only on a side with music, and cuts the server off only with a simulator", () => {
+    const lyrics = withSide('rm -f "$state/music_core"; cmd_lyrics_probe --side after');
+    assert.equal(lyrics.status, 1);
+    assert.match(lyrics.stderr, /the after side has no music/);
+    const offline = withSideOffline("cmd_ios --side after offline on");
+    assert.equal(offline.status, 1);
+    assert.match(offline.stderr, /no simulator on the after side/);
+    const usage = withSideOffline("write_state ios_udid SIM; cmd_ios --side after offline sideways");
+    assert.equal(usage.status, 1);
+    assert.match(usage.stderr, /ios offline on\|off/);
+  });
+
+  test("forwards Metro alone when the server is cut off, and both ports otherwise", () => {
+    const calls = join(scratch, "forward-calls");
+    const body = (mode) =>
+      `write_state metro_port 4200; nohup() { echo "$*" >> ${JSON.stringify(calls)}; sleep 4; }; ios_forward ${mode}; read_state ios_forward`;
+    rmSync(calls, { force: true });
+    const metro = withSide(body("metro"));
+    assert.equal(metro.status, 0, metro.stderr);
+    assert.equal(metro.stdout.trim(), "metro");
+    const server = withSide(body("server"));
+    assert.equal(server.status, 0, server.stderr);
+    const [first, second] = execFileSync("cat", [calls], { encoding: "utf8" }).trim().split("\n");
+    assert.match(first, /-R 4200:127\.0\.0\.1:4200/);
+    assert.doesNotMatch(first, /-R 4100:/);
+    assert.match(second, /-R 4200:127\.0\.0\.1:4200 -R 4100:127\.0\.0\.1:4100/);
+  });
+
   test("refuses the music iOS app on an image without the music client before it touches the Mac", () => {
     const result = withSideOffline(
       "write_state people lucia; write_state music_core 0; args=(up --app music); mac=nowhere.invalid cmd_ios_up",

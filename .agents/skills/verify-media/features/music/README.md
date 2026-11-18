@@ -64,6 +64,8 @@ commands, and observable proof.
   Liked songs with the like button.
 - [Playback](./playback.md) covers playing, pausing, and skipping with real audio on desktop and
   phone web, the queue and history from the CLI, and the music iOS app.
+- [Lyrics](./lyrics.md) covers timed and plain lyrics in Now Playing, seeking from a line, the
+  CLI's read, and the admin's online lookups.
 - [Search](./search.md) covers the search page, the `/` shortcut, accent folding, and CLI search.
 - [Playlists](./playlists.md) covers creating, adding to, renaming, and deleting playlists from
   the web and from the CLI.

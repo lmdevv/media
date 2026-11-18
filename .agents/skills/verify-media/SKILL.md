@@ -223,6 +223,9 @@ personal or unlicensed.
   her `Continue watching for aiko` row shows `Pioneer One · S1:E3` (next: Alone in the Night) and
   `Elephants Dream` (50% watched). Her My List holds Sintel, Tears of Steel, and Caminandes;
   Mateo's holds Cosmos Laundromat.
+- **Keys.** A side has no TMDB or OMDb key: `up` hands Compose only the settings it writes. The
+  demo titles carry their own details, so pages look complete, but a TMDB search finds nothing and
+  a metadata refresh fails with `missing-credentials`.
 - **Music.** Setup adds a `Music` library over `/media/library/Music` from the account client's
   Admin, Libraries, and `music-core-seed.mjs` shares it with Mateo (manages) and everyone on the
   server (view), so everyone plays it, then makes these playlists, sharing, and likes through each
@@ -371,6 +374,8 @@ unavailable. `$S cli -- --help` lists every command, and `$S cli -- <group> --he
 `$S cli --as probe -- auth login --server http://localhost:<port>/convex` prints a device code to
 approve at `/device`, and `--api-key` or `--username U` reads the key or password from stdin.
 After `up --no-setup` and the owner step, the same command without `--as` signs Lucía's CLI in.
+A CLI session is on no device, so `auth downloads` and the settings a device keeps refuse it until
+`auth registry enroll <name>` registers it as one; do that on a config of its own.
 
 Music is the media CLI's `music` group: `$S cli --as aiko -- music albums list`. `cli` needs no
 `--app`, and refuses `--app music` with that hint.
@@ -438,6 +443,7 @@ It prints `ready: ios <side> on simulator <udid>` when the app shows Home. Then:
 | `ios record start <path.mp4>`, `ios record stop` | Records the screen to an H.264 MP4                      |
 | `ios appearance light\|dark`                     | Switches the system appearance                          |
 | `ios doctor`                                     | Checks the forwards, Metro, the simulator, and that the Mac reaches the web app and Convex |
+| `ios offline on\|off`                            | Cuts the app off from its server, or brings it back, and leaves the app and Metro running: for a download that plays offline. `off` also restarts a forward that died |
 | `ios orientation portrait\|landscape`            | Turns the simulator and checks the app's window turned  |
 | `ios open <path>`                                | Opens an app path with the running app's scheme (`movies://` or `music://`), such as `/title/<id>` or `/jam/<link>`, and accepts iOS's `Open in` prompt |
 | `ios matrix --out DIR [--orientations portrait,landscape] [--screens a,b]` | Movies app only. Screenshots each screen a layout change reaches, in each orientation, as `<device>-<orientation>-<screen>.png` |
@@ -520,6 +526,10 @@ never kills by process name. The demo library image stays for the next run. Evid
 - `scripts/compare-shots.sh BEFORE_DIR AFTER_DIR [GLOB]` compares same-named screenshots below the
   status bar and prints `same` (no pixel moved by more than 2 of 255) or the largest change, exiting 1 when any differ: the check that a change
   left the iPhone alone.
+- `$S lyrics-probe [--side S]` makes `/media/lyrics-probe` inside the side's container and prints
+  that path: two 40-second songs cut from a demo song, `Timed Probe` with a timed `.lrc` beside it
+  and `Plain Probe` with a plain `.txt`. The demo songs have no lyrics, so add this folder as a
+  Music library to verify them (`features/music/lyrics.md`).
 - `scripts/core-seed.mjs` creates the movies [demo data](#demo-data) after setup and checks what
   each person sees, and its `wait` waits for the first scans. `scripts/music-core-seed.mjs` makes
   music's. `up` calls both.
