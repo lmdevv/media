@@ -95,10 +95,6 @@
 	redir /movies /movies/ 308
 
 	handle_path /movies/* {
-		# Old movies' Convex backend served /movies/convex until movies moved into the core, which
-		# /convex serves. Its old path answers Not Found, not the movies client's page.
-		@convex path /convex /convex/*
-		respond @convex "Not Found" 404
 		encode zstd gzip
 		import media-service
 	}

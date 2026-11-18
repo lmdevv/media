@@ -142,9 +142,6 @@ testers.runNixOSTest {
     with subtest("one address serves every path"):
         assert machine.succeed("curl -fsS http://127.0.0.1:8080/convex/instance_name").strip() == "core"
         machine.fail("systemctl cat podman-movies-convex.service")
-        assert machine.succeed(
-            "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/movies/convex/instance_name"
-        ) == "404"
         machine.succeed("curl -fsS http://127.0.0.1:8080/api/health")
         assert "<title>[media]</title>" in page("http://127.0.0.1:8080/")
         assert "<title>[media]</title>" in page("http://127.0.0.1:8080/people")

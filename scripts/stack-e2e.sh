@@ -97,9 +97,6 @@ check "the image publishes one port" \
   '[[ "$(docker port "$(compose ps -q media)" | wc -l)" -le 2 && -z "$(docker port "$(compose ps -q media)" | grep -v "^8080/tcp ")" ]]'
 status_of() { curl -s -o /dev/null -w "%{http_code}" "${MEDIA_BASE_URL}$1"; }
 check "/convex is the core's Convex backend" '[[ "$(curl -fsS "${core_convex_url}/instance_name")" == core ]]'
-check "/movies/convex answers Not Found" \
-  '[[ "$(status_of /movies/convex)" == 404 && "$(status_of /movies/convex/instance_name)" == 404 ]] &&
-    ! curl -s "${MEDIA_BASE_URL}/movies/convex/version" | grep -qF "<html"'
 convex_backends() {
   in_movies sh -c 'for p in /proc/[0-9]*; do
     tr "\0" " " <"$p/cmdline" 2>/dev/null | grep -q "^/app/convex/convex-local-backend " && echo "${p#/proc/}"

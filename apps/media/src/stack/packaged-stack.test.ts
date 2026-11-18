@@ -244,21 +244,6 @@ describe.skipIf(!enabled)("the packaged install", { timeout: 180_000 }, () => {
     expect(session.role).toBe("owner");
   });
 
-  it("answers Not Found at old movies' Convex path", async () => {
-    const answers = await Promise.all(
-      ["/movies/convex", "/movies/convex/version"].map(async (path) => {
-        const response = await fetch(`${mediaUrl}${path}`);
-
-        return { path, status: response.status, body: await response.text() };
-      }),
-    );
-
-    for (const answer of answers) {
-      expect(answer.status, answer.path).toBe(404);
-      expect(answer.body, answer.path).not.toContain("<html");
-    }
-  });
-
   it("serves the movies client pointed at the core", async () => {
     const index = await fetch(`${mediaUrl}/movies/`);
     const html = await index.text();
