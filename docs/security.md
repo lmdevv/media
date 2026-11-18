@@ -165,6 +165,6 @@ scripts/dev-stack.sh destroy && scripts/dev-stack.sh up
 pnpm --filter @media/platform test:stack   # the core's stack suite
 pnpm test                                     # hardening, outbound, media tools, throttle, scanner
 pnpm audit --prod
-VITE_PLATFORM_URL=http://127.0.0.1:<core-port> pnpm --filter @media/web-movies build && grep -rlF "<secret value>" apps/web-movies/dist
+VITE_PLATFORM_URL=http://127.0.0.1:<core-port> pnpm --filter @media/web-movies build && grep -rlF "<secret value>" apps/web/movies/dist
 curl -sI http://127.0.0.1:<media-port>/       # security headers
 ```

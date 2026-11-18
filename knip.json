@@ -17,14 +17,14 @@
       "project": ["src/**/*.ts", "scripts/**/*.ts"],
       "ignoreBinaries": ["unshare"]
     },
-    "apps/web-movies": {},
-    "apps/web-account": {},
-    "apps/web-music": {},
-    "apps/mobile-movies": {
+    "apps/web/movies": {},
+    "apps/web/account": {},
+    "apps/web/music": {},
+    "apps/mobile/movies": {
       "entry": ["src/app/**/*.tsx"],
       "project": ["src/**/*.{ts,tsx,css}"]
     },
-    "apps/mobile-music": {
+    "apps/mobile/music": {
       "entry": ["src/app/**/*.tsx"],
       "project": ["src/**/*.{ts,tsx,css}"]
     },

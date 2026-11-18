@@ -344,7 +344,7 @@ says which way it served the stream: `$S logs | grep Stream.started` shows `"mod
 app sees as its own device with its own sign-in. The first command that names a new page creates
 it. On that first command, `--device "iPhone 15"` (any Playwright device name) makes it a phone,
 and `--width W --height H` sets the window. `--cast-fake` puts the scripted Chromecast the
-Playwright suites cast to (`apps/web-movies/e2e/playback/cast-fake.ts`), named `Living Room TV`, in
+Playwright suites cast to (`apps/web/movies/e2e/playback/cast-fake.ts`), named `Living Room TV`, in
 the new page in place of Google's Cast SDK; `cast` and `cast-state` drive and read it. `--tab-of P`
 instead makes it another tab of page P: the same app, context, size, and sign-in, as in `$S browser open / --page aiko-2 --tab-of aiko`, to
 check what a second tab sees. `close-page` on a tab closes that tab alone. Each app follows the system theme: a movies page is
@@ -385,8 +385,8 @@ that is new in the checkout fails there.
 
 ### iOS simulator
 
-The movies iOS app (`apps/mobile-movies`), or with `--app music` the music iOS app
-(`apps/mobile-music`), runs on a simulator on `darwin` (set `MAC_HOST` for another Mac). Both sign
+The movies iOS app (`apps/mobile/movies`), or with `--app music` the music iOS app
+(`apps/mobile/music`), runs on a simulator on `darwin` (set `MAC_HOST` for another Mac). Both sign
 in to the core through the media server's sign-in boundary. The music app needs an image
 with the music client (`music_core`). The app's JavaScript comes from a Metro on this machine. For the before side, Metro serves a main checkout that `ios up`
 makes with `git worktree` under the side's state. The simulator reaches the side as

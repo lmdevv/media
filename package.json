@@ -4,6 +4,8 @@
   "license": "MIT",
   "workspaces": [
     "apps/*",
+    "apps/web/*",
+    "apps/mobile/*",
     "packages/*"
   ],
   "type": "module",

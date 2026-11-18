@@ -19,5 +19,5 @@
     }
   },
   "globalEnv": ["CI", "NODE_ENV"],
-  "globalDependencies": [".env*", "apps/*/.env*", "packages/*/.env*"]
+  "globalDependencies": [".env*", "apps/*/.env*", "apps/*/*/.env*", "packages/*/.env*"]
 }

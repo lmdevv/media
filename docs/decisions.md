@@ -198,7 +198,7 @@ Old movies' Convex project, its SDK client, and its command registry were delete
 - Safari plays HLS natively (hls.js is never used there), so its own AirPlay works on the
   `<video>` element.
 - The Media Session API publishes what plays and handles play, pause, seek backward and forward,
-  seek to, and previous and next episode (`apps/web-movies/src/playback/use-media-session.ts`).
+  seek to, and previous and next episode (`apps/web/movies/src/playback/use-media-session.ts`).
   Picture in picture uses the standard API, or Safari's presentation modes.
 
 ## Playback and progress
@@ -259,7 +259,7 @@ Old movies' Convex project, its SDK client, and its command registry were delete
   account.
 - It is a client presentation setting and nothing else. The media service, Convex, and the SDK
   never see it, so it is not in contracts, the SDK, or the CLI, which has no player.
-- How: `SubtitleRetimer` (`apps/web-movies/src/playback/subtitle-timing.ts`) moves the
+- How: `SubtitleRetimer` (`apps/web/movies/src/playback/subtitle-timing.ts`) moves the
   `startTime` and `endTime` of the `<video>` element's text track cues, keeping each cue's file
   timing beside it so changes never drift, and times cues that load later (a track shown the first
   time, or a new stream's `<track>` elements). Text subtitles are WebVTT `<track>` elements beside
@@ -322,7 +322,7 @@ Old movies' Convex project, its SDK client, and its command registry were delete
   grid so class names stay familiar, in rem as Tailwind's multiplier drew them, so they follow
   the browser's text size like the rest of the multiplier. Element sizes read the same keys
   where their step is listed (`h-9` is `--spacing-9`, 36px) and the `--spacing` multiplier
-  otherwise (`w-110`). `apps/web-movies/src/lib/design-tokens.test.ts` fails on a spacing step
+  otherwise (`w-110`). `apps/web/movies/src/lib/design-tokens.test.ts` fails on a spacing step
   outside both lists, on Tailwind's own text, radius, shadow, weight, leading, and tracking sizes,
   and on a raw length inside an arbitrary value. `--color-page` is the page canvas: `bg` in light,
   `dark-bg` on dark phones, `dark-surface` on dark desktops, as Paper draws them.
@@ -332,7 +332,7 @@ Old movies' Convex project, its SDK client, and its command registry were delete
   as `text-micro` merge away next to colors such as `text-danger`.
 - Desktop layout starts at `md` (48rem). Rows switch layouts with container queries, so they also
   fit narrow panels.
-- Keyboard shortcuts are listed once in `apps/web-movies/src/lib/keymap.ts` and resolved by
+- Keyboard shortcuts are listed once in `apps/web/movies/src/lib/keymap.ts` and resolved by
   `@media/ui/lib/keymap` (`mod` is `⌘` on Apple devices and `Ctrl` elsewhere). The command menu
   draws its keycaps from that list. Sequences such as `g h` wait one second for the next key.
 - The command menu takes a typed page model (`@media/ui/lib/command-menu`): groups scoped to
@@ -351,7 +351,7 @@ Old movies' Convex project, its SDK client, and its command registry were delete
 
 - The movies web client never signs in itself. It runs the platform client on the browser's one
   session, which the account client at `/` keeps, and sends a signed-out browser there
-  (`apps/web-movies/src/session/session.tsx`, ADR 0020). Screens read and write through
+  (`apps/web/movies/src/session/session.tsx`, ADR 0020). Screens read and write through
   `@media/sdk/react` (`usePlatform`, `usePlatformQuery`).
 - The command menu's root list is collected from `src/commands/`: each feature exports a
   `use<Feature>Commands` hook, and `src/commands/index.ts` merges them in menu order. Groups with
@@ -360,17 +360,17 @@ Old movies' Convex project, its SDK client, and its command registry were delete
   in full screen it only leaves full screen; otherwise it asks "Leave playback?". Stay, Escape, and
   a click outside keep playing, and repeats of a held Escape never close it.
 - Artwork loads the media service's base URL plus the result's artwork path, resized per use
-  (`apps/web-movies/src/lib/artwork.ts`).
+  (`apps/web/movies/src/lib/artwork.ts`).
 - Play and Resume link to `/watch/$titleId?episodeId=&start=0`, with `version=<fileId>` for a
   chosen file. A version switched in the player replaces `version` in the URL without remounting
   the player.
-- The stack E2E suite (`apps/web-movies/e2e/stack`) runs the real media service against the dev
+- The stack E2E suite (`apps/web/movies/e2e/stack`) runs the real media service against the dev
   stack over a generated fixture library. The Playwright groups are in
-  `apps/web-movies/playwright.config.ts`.
+  `apps/web/movies/playwright.config.ts`.
 
 ## Account and admin screens
 
-- The account client (`apps/web-account`) holds sign-in, the shared picker, invites, reset links,
+- The account client (`apps/web/account`) holds sign-in, the shared picker, invites, reset links,
   device approval, and the server's admin screens: users, groups, devices, guests, libraries,
   backups, and the server. The movies client keeps its own library detail, fix match, and import
   screens under `/movies/admin`.

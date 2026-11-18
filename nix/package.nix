@@ -109,9 +109,9 @@ stdenv.mkDerivation (finalAttrs: {
 
     cp -r apps/media/dist $lib/media/dist
     cp apps/media/scripts/configure-web.ts $lib/media/scripts/
-    cp -r apps/web-movies/dist $lib/web
-    cp -r apps/web-music/dist $lib/music
-    cp -r apps/web-account/dist $lib/account
+    cp -r apps/web/movies/dist $lib/web
+    cp -r apps/web/music/dist $lib/music
+    cp -r apps/web/account/dist $lib/account
 
     # Without --enable-source-maps and with two malloc arenas, as in the image's run file
     # (docs/decisions/0027, "Idle memory").

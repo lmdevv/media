@@ -60,7 +60,7 @@ ico() {
 }
 
 # The account client: the Flat logo, ink on a light browser tab and flat white on a dark one.
-account="$root/apps/web-account/public"
+account="$root/apps/web/account/public"
 mkdir -p "$account"
 replace_once "$brand/lar-flat.svg" 'fill="#F1F1EC"' 'class="cube"' "$work/flat.svg"
 replace_once "$work/flat.svg" '<defs>' \
@@ -77,8 +77,8 @@ ico "$work/flat-ground.svg" "$account/favicon.ico"
 # the central circle of 80% diameter that every mask keeps.
 app_icons() {
   local app="$1" name="$2" description="$3" background="$4"
-  local tile="$brand/lar-$app.svg" public="$root/apps/web-$app/public"
-  local images="$root/apps/mobile-$app/assets/images"
+  local tile="$brand/lar-$app.svg" public="$root/apps/web/$app/public"
+  local images="$root/apps/mobile/$app/assets/images"
   mkdir -p "$public" "$images"
 
   replace_once "$tile" ' rx="23"' '' "$work/$app-square.svg"

@@ -707,8 +707,8 @@ before_source() {
   echo "$src"
 }
 
-# Which iOS app the `ios` commands build and open: `movies` (apps/mobile-movies, the default) or
-# `music` (apps/mobile-music), as `ios up --app` picked it. Each is the Expo project, workspace,
+# Which iOS app the `ios` commands build and open: `movies` (apps/mobile/movies, the default) or
+# `music` (apps/mobile/music), as `ios up --app` picked it. Each is the Expo project, workspace,
 # scheme, and app `<app>`, with the bundle identifier `dev.lmdevv.<app>`.
 ios_app() {
   local app
@@ -721,19 +721,19 @@ ios_app() {
 # ~/media-ios/dd-verify-<run>. The app then moves to ~/media-ios/dev-client-<hash>, named for the
 # native inputs, and the derived data goes, so every run and worktree with the same inputs installs
 # one build. JavaScript always comes from Metro.
-native_inputs='cat app.json package.json ../../pnpm-lock.yaml; if [ -d modules ]; then find assets modules -type f | sort; find modules -type f -print0 | sort -z | xargs -0 cat; else find assets -type f | sort; fi'
+native_inputs='cat app.json package.json ../../../pnpm-lock.yaml; if [ -d modules ]; then find assets modules -type f | sort; find modules -type f -print0 | sort -z | xargs -0 cat; else find assets -type f | sort; fi'
 
 native_hash() {
-  (cd "${1:-$root}/apps/mobile-${2:-$(ios_app)}" && eval "$native_inputs" | sha1sum | cut -d' ' -f1)
+  (cd "${1:-$root}/apps/mobile/${2:-$(ios_app)}" && eval "$native_inputs" | sha1sum | cut -d' ' -f1)
 }
 
 ios_build() {
   local id="$1" name remote="$mac_dir/verify-$run"
   name="$(ios_app)"
-  local app="$remote/apps/mobile-$name"
+  local app="$remote/apps/mobile/$name"
   ssh "$mac" "mkdir -p $remote"
   # Both apps' prebuilt native projects stay: a build of one app must not delete the other's.
-  rsync -az --delete --exclude node_modules --exclude "/apps/mobile-*/ios" --exclude .git --exclude dist \
+  rsync -az --delete --exclude node_modules --exclude "/apps/mobile/*/ios" --exclude .git --exclude dist \
     --exclude .expo --exclude .turbo --exclude /captures --exclude .repos "$root/" "$mac:$remote/"
   # No .git on the Mac, so the root prepare script (lefthook) can't run there.
   on_mac "cd $remote && pnpm install --frozen-lockfile --ignore-scripts >/dev/null"

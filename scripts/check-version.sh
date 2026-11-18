@@ -11,7 +11,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 # A command substitution, so a git failure stops the script instead of checking nothing.
-tracked="$(git ls-files -- ':(glob)apps/*/package.json' ':(glob)packages/*/package.json' ':(glob)apps/*/app.json')"
+tracked="$(git ls-files -- ':(glob)apps/**/package.json' ':(glob)packages/**/package.json' ':(glob)apps/**/app.json')"
 mapfile -t manifests <<<"$tracked"
 
 node - "${1:-}" "${manifests[@]}" <<'EOF'
