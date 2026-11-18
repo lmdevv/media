@@ -46,6 +46,10 @@ describe("guest entrance gate", () => {
     );
   });
 
+  it("offers a retry when a signed-in identity lookup fails", () => {
+    expect(guestGate({ ...input, status: "signedIn", role: "failed" })).toBe("unreachable");
+  });
+
   it("takes only a name when signed out, and never invents a preview", () => {
     expect(guestGate(input)).toBe("name");
     expect(guestGate({ ...input, hasCode: false })).toBe("unavailable");

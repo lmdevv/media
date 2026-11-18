@@ -1,7 +1,6 @@
 import { usePlatform, usePlatformQuery, usePlatformStatus } from "@media/sdk/react";
 import { Navigate, Outlet, useRouterState } from "@tanstack/react-router";
 import { Brand, Match } from "effect";
-import { useEffect } from "react";
 import type { ReactNode } from "react";
 
 import { NeedsAccountScreen } from "@/screens/needs-account";
@@ -11,10 +10,11 @@ import { SignInScreen } from "@/screens/sign-in";
 import { TileLockScreen } from "@/screens/tile-lock";
 import { BlankPage, UnreachableScreen } from "@/screens/states";
 
+import { useIdentityRetry } from "./use-identity-retry";
 import { useDevice } from "./account";
 import { MeContext } from "./me";
-import { isRenewing, screenOf } from "./screen";
-import type { Intent, Need, Screen, ScreenInputs } from "./screen";
+import { screenOf } from "./screen";
+import type { Intent, Need, Screen } from "./screen";
 import type { UserId } from "./platform-types";
 
 const NEEDS: ReadonlyArray<Need> = ["public", "anyone", "account", "admin"];
@@ -48,24 +48,6 @@ const useIntent = (): Intent => {
   }
 
   return { kind: "page", need: route.need };
-};
-
-const ASK_AGAIN_MS = 1000;
-
-/**
- * Asks who is signed in again after the server refused the session while the client still holds
- * one: the session was renewed, or a tile opened on this shared device replaced it. A session that
- * really ended fails its renewal, and the status turns signed out instead.
- */
-const useAskAgain = (me: ScreenInputs["me"]): void => {
-  useEffect(() => {
-    const timer =
-      me.status === "error" && isRenewing(me.error)
-        ? setTimeout(me.retry, ASK_AGAIN_MS)
-        : undefined;
-
-    return () => clearTimeout(timer);
-  }, [me]);
 };
 
 const render: (screen: Screen) => ReactNode = Match.type<Screen>().pipe(
@@ -113,7 +95,7 @@ function HouseholdGate() {
     ...(device === null ? (["skip"] as const) : [{ device }]),
   );
 
-  useAskAgain(me);
+  useIdentityRetry(me);
 
   if (me.status === "success" && me.data.role === "guest") return <Navigate to="/guest" replace />;
 

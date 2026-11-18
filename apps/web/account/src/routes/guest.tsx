@@ -6,12 +6,14 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 
 import { AuthPage, Lede, PageTitle } from "@/components/auth-page";
-import { BlankPage } from "@/screens/states";
+import { BlankPage, UnreachableScreen } from "@/screens/states";
 import { guestFailure, guestGate } from "@/screens/guest/state";
 import type { GuestSubmission } from "@/screens/guest/state";
 import { useAccountActions } from "@/session/account";
 import { linkSecretFor } from "@/session/link-secret";
 import { nameOf } from "@/session/me";
+import { isRenewing } from "@/session/screen";
+import { useIdentityRetry } from "@/session/use-identity-retry";
 
 export const Route = createFileRoute("/guest")({
   staticData: { need: "public" },
@@ -60,6 +62,8 @@ function GuestPage() {
     ...(status === "signedIn" ? [] : (["skip"] as const)),
   );
 
+  useIdentityRetry(me);
+
   const { signInAsGuest, signOut } = useAccountActions();
   const [confirmed, setConfirmed] = useState<string | null>(null);
   const [name, setName] = useState("");
@@ -67,14 +71,26 @@ function GuestPage() {
   const busy = useRef(false);
   const [opened, setOpened] = useState(false);
 
+  const identityFailed = me.status === "error" && !isRenewing(me.error);
+
   const gate = guestGate({
     status,
-    role: me.status !== "success" ? "loading" : me.data.role === "guest" ? "guest" : "household",
+    role:
+      me.status !== "success"
+        ? identityFailed
+          ? "failed"
+          : "loading"
+        : me.data.role === "guest"
+          ? "guest"
+          : "household",
     hasCode: code !== "",
     opened,
     confirmed: me.status === "success" && confirmed === me.data.userId,
     submitting: submission.kind === "submitting",
   });
+
+  if (gate === "unreachable" && me.status === "error")
+    return <UnreachableScreen retry={me.retry} />;
 
   if (gate === "loading") return <BlankPage />;
 

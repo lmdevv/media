@@ -31,13 +31,15 @@ export const guestGate = ({
   submitting,
 }: {
   readonly status: "loading" | "signedIn" | "signedOut";
-  readonly role: "guest" | "household" | "loading";
+  readonly role: "guest" | "household" | "loading" | "failed";
   readonly hasCode: boolean;
   readonly opened: boolean;
   readonly confirmed: boolean;
   readonly submitting: boolean;
-}): "loading" | "resume" | "unavailable" | "confirm" | "name" => {
+}): "loading" | "resume" | "unavailable" | "confirm" | "name" | "unreachable" => {
   if (status === "loading" || (status === "signedIn" && role === "loading")) return "loading";
+
+  if (status === "signedIn" && role === "failed") return "unreachable";
 
   if (status === "signedIn" && role === "guest" && (!hasCode || opened)) return "resume";
 
