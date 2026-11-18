@@ -1,15 +1,14 @@
 # Fresh install
 
 The exact steps to install [media] from a release tag, `v0.4.1` here, on a host that already runs
-other things: an old [movies] or [music] install, Jellyfin, or anything else. [media] gets its own
+other things: Jellyfin, another media server, or anything else. [media] gets its own
 port and its own data folder, mounts the library read-only, and leaves the other installs alone.
 There are two methods, the image under Docker Compose and the NixOS module; pick one. Both end in
 the same first run: the owner account, one library per kind, the first scan, and a play.
 
 [homelab.md](homelab.md) explains the parts this page only uses: remote access, GPU transcoding,
-where data lives, backups, and upgrading. Nothing moves over from [movies] v0.2 or [music] v0.3
-([operations.md](operations.md#upgrading)): accounts, libraries, and history start empty, and the
-old install keeps running as it was until you stop it.
+where data lives, backups, and upgrading. A new install starts with no accounts, libraries, or
+history, and leaves anything else on the host running as it was.
 
 ## Plan
 
@@ -110,25 +109,9 @@ The module runs the core's Convex backend as an OCI container (`<backend>-media-
 Docker or Podman per `virtualisation.oci-containers.backend`), the media service natively as the
 sandboxed `media-server` unit, and Caddy on the one port as the `media-proxy` unit.
 
-### Beside the old installs
-
-From `v0.4.1` everything the module makes has a `media` name, and the old [movies] v0.2 and
-[music] v0.3 modules use `movies` and `music` names, so one host can import all three (ADR 0029).
-They share only the library folders, which each mounts read-only.
-
-| What           | [media]                                                                              | [movies] v0.2                        | [music] v0.3                      |
-| -------------- | ------------------------------------------------------------------------------------ | ------------------------------------ | --------------------------------- |
-| Options        | `services.media`, `programs.media`                                                   | `services.movies`, `programs.movies` | `services.music`                  |
-| Units          | `media-server`, `media-server-folders`, `media-proxy`, `<backend>-media-core-convex` | `movies`, `<backend>-movies-convex`  | `<backend>-music`, `music-update` |
-| User and group | `media-server`                                                                       | `movies`                             | the container's ids               |
-| State          | `/var/lib/media`                                                                     | `/var/lib/movies`                    | `/var/lib/music`                  |
-| Cache          | `/var/cache/media/transcode`                                                         | `/var/cache/movies/transcode`        | in its state folder               |
-| Runtime        | `/run/media-server`, `/run/media-proxy`, `/run/media-account`, `/run/media-music`    | `/run/movies`                        | none                              |
-
-Pick a `port` and `internalPorts` that none of them uses, and keep `dataDir`, `backupDir`, and
-`transcodeDir` apart from their folders: evaluation refuses only one that is, holds, or sits inside
-a library. At `v0.4.0` the module still used
-`movies` names, and a host that imported it beside [movies] v0.2's module failed to evaluate.
+Pick a `port` and `internalPorts` that nothing else on the host uses, and keep `dataDir`,
+`backupDir`, and `transcodeDir` apart from other installs' folders: evaluation refuses only one
+that is, holds, or sits inside a library.
 
 ### Add the release to the flake
 
@@ -158,7 +141,7 @@ in
     dataDir = "/var/lib/media";                    # a new, empty folder
     transcodeDir = "/var/cache/media/transcode";   # not shared with another install
     internalPorts = {
-      coreConvex = 3240;                           # loopback; not 3210, [movies] v0.2's
+      coreConvex = 3240;                           # loopback; not 3210, Convex's usual port
       media = 4310;
     };
     libraryDirs = [
@@ -172,8 +155,8 @@ in
 ```
 
 - **Ports.** `port` is the only one people use. The two `internalPorts` listen on loopback, and
-  must be free too (`ss -ltn`). Their defaults, 3210 and 4300, are Convex's usual port, which
-  [movies] v0.2's backend also takes by default, so pick others beside it.
+  must be free too (`ss -ltn`). Their defaults are 3210, Convex's usual port, and 4300, so pick
+  others beside another Convex backend.
 - **Library access.** The `media-server` user must read every library folder. Files and folders
   that are world-readable need nothing more; otherwise add the group that can read them, as in
   `users.users.media-server.extraGroups = [ "media" ];`. The unit mounts each folder read-only.

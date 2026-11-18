@@ -7,8 +7,7 @@ client is at `/`, movies at `/movies`, music at `/music`, and the Convex backend
 Browsers and the CLI talk only to that port.
 `docs/operations.md` explains what happens at startup, backups and restores, and telemetry in more
 depth. [fresh-install.md](fresh-install.md) has the exact steps for a first install from a release
-tag beside other installs, such as an old [movies] or [music] one, on a port and data folder of its
-own.
+tag beside other installs, on a port and data folder of its own.
 
 ## Before you start
 
@@ -94,8 +93,7 @@ sandboxed `media-server` unit, as the `media-server` user, with read-only access
 with the image's routes on `listenAddress:port`. The backend and the media service
 listen on loopback only, on the ports in `internalPorts`. The service user must be able to
 read them; add a group with `users.users.media-server.extraGroups` if your files are not
-world-readable. Every unit, user, and folder the module makes has a `media` name, so it runs
-beside the old [movies] and [music] modules (ADR 0029).
+world-readable. Every unit, user, and folder the module makes has a `media` name (ADR 0029).
 
 Every setting has an option (`nixos-option services.media` lists them); `extraEnvironment` sets
 anything else, and `environmentFile` keeps secrets out of the Nix store. The flake also exports
@@ -212,10 +210,7 @@ docker compose exec -u movies media vainfo --display drm --device /dev/dri/rende
 | Transcode segments (disposable)                | `media-transcode` volume                   | `/var/cache/media/transcode`  |
 | Your library                                   | read-only bind mounts under `/media`       | `libraryDirs`, read-only      |
 
-An install from before the movies cutover also keeps old movies' database in `/data/movies/convex`
-(`/var/lib/media/movies/convex`) and its backups in `/data/movies/backups`
-(`/var/lib/media/movies/backups`); nothing reads them any more. If the media service's key file is
-lost, the next start issues the service a new key and retires the old one.
+If the media service's key file is lost, the next start issues the service a new key and retires the old one.
 
 Volumes are named `media_<name>` (`docker volume inspect media_media-data`). To keep backups on
 another disk, bind a host folder over them: `- /srv/backups/media:/data/core/backups` under the
@@ -247,17 +242,6 @@ cd deploy/compose && docker compose pull && docker compose up -d
 
 For the edge, `git pull` on `main` with `MEDIA_IMAGE=ghcr.io/lmdevv/media:main`.
 
-A [media] 0.3.0 install upgrades to 0.4.0 this way. Upgrade it to 0.4.0 before any later
-release: 0.4.0 migrates its Connect rows, and a later release will refuse rows from before that
-migration (ADR 0018). [media] is a fresh install, not an upgrade of
-a [movies] v0.2 or [music] v0.3 install: nothing moves over from either, so set it up beside the
-old one with [fresh-install.md](fresh-install.md) (`docs/operations.md`, "Upgrading"). Beside a
-[movies] v0.2 NixOS install, use the module from 0.4.1 on: 0.4.0's can't be imported beside
-v0.2's.
-
 NixOS: `nix flake update media && nixos-rebuild switch` (or move the pinned tag). Both back up
 before the new version deploys its functions; `docs/operations.md` ("Upgrading") covers rolling
-back. From 0.4.0 to 0.4.1 the unit and user `movies` become `media-server`: move any
-`systemd.services.movies` or `users.users.movies` override to the new name, and run the command
-the first start prints, which gives the old user's folders to `media-server` (`docs/operations.md`,
-"Upgrading").
+back.
