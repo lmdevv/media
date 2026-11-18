@@ -64,7 +64,7 @@ export function RowSkeleton({
   readonly heading?: boolean;
 }) {
   return (
-    <div aria-hidden className="flex flex-col gap-3.5 overflow-hidden px-4 md:px-16">
+    <div aria-hidden className="flex flex-col gap-3.5 overflow-hidden px-4 md:px-page-inset">
       {heading ? <Block tone="bar" className="h-5 w-55 rounded-poster bg-surface-raised" /> : null}
       <div className="flex gap-2.5 md:gap-4">
         {Array.from({ length: 8 }, (_, index) => (

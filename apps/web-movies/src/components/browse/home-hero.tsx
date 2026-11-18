@@ -66,6 +66,7 @@ function DesktopHero({
 
   return (
     <Hero
+      className="pt-17"
       title={featured.name}
       titleArt={titleArt(featured, false)}
       backdrop={artworkUrl(featured.artwork.backdrop, "backdrop")}

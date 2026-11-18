@@ -78,7 +78,7 @@ const edges = async (
   };
 };
 
-test("a long hero overview shows three lines until More opens it", async ({ page }) => {
+test("a long hero overview shows three lines until Read more opens it", async ({ page }) => {
   await page.setViewportSize({ width: 1710, height: 1000 });
   await page.goto(moviesPath("/dev/kit"));
 
@@ -90,18 +90,20 @@ test("a long hero overview shows three lines until More opens it", async ({ page
       Math.round(element.clientHeight / Number.parseFloat(getComputedStyle(element).lineHeight)),
     );
 
-  await expect(hero.getByRole("button", { name: "More", exact: true })).toHaveAttribute(
+  await expect(hero.getByRole("button", { name: "Read more" })).toHaveAttribute(
     "aria-expanded",
     "false",
   );
   expect(await lines()).toBe(3);
+  expect(await hero.evaluate((element) => element.scrollHeight - element.clientHeight)).toBe(0);
 
-  await hero.getByRole("button", { name: "More", exact: true }).click();
-  await expect(hero.getByRole("button", { name: "Less", exact: true })).toHaveAttribute(
+  await hero.getByRole("button", { name: "Read more" }).click();
+  await expect(hero.getByRole("button", { name: "Show less" })).toHaveAttribute(
     "aria-expanded",
     "true",
   );
   expect(await lines()).toBeGreaterThan(3);
+  expect(await hero.evaluate((element) => element.scrollHeight - element.clientHeight)).toBe(0);
   expect((await edges(hero.getByRole("button", { name: "Play" }))).bottom).toBeLessThanOrEqual(
     (await edges(hero)).bottom,
   );
