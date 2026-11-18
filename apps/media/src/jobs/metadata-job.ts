@@ -147,16 +147,19 @@ export const lookUp = Effect.fn("MetadataJob.lookUp")(function* <EpisodeKey>(
     .titleDetails(target.kind, providerId.value)
     .pipe(Effect.mapError(providerFailure));
 
-  const collection =
-    details.collection === undefined
-      ? undefined
-      : yield* plugin
-          .collectionDetails(details.collection.providerId)
-          .pipe(Effect.orElseSucceed(() => undefined));
-
   const imdb = details.ids.imdb ?? target.externalIds.imdb ?? undefined;
-  const scores = imdb === undefined ? {} : yield* omdb.ratings(imdb);
-  const metadata = titleMetadataOf(details, scores, collection);
+
+  const [collection, scores] = yield* Effect.all(
+    [
+      details.collection === undefined
+        ? Effect.succeedNone
+        : plugin.collectionDetails(details.collection.providerId).pipe(Effect.option),
+      imdb === undefined ? Effect.succeed({}) : omdb.ratings(imdb),
+    ],
+    { concurrency: "unbounded" },
+  );
+
+  const metadata = titleMetadataOf(details, scores, Option.getOrUndefined(collection));
   const folder = { libraryId: target.libraryId, root: "" };
   const scanned = yield* toScannedTitle(folder, metadata, keys.seal);
 
@@ -176,19 +179,22 @@ export const lookUp = Effect.fn("MetadataJob.lookUp")(function* <EpisodeKey>(
     readonly metadata: EpisodeMetadata;
   }> =
     target.kind === "show"
-      ? yield* Effect.forEach(seasons, (season) =>
-          plugin.seasonDetails(providerId.value, season).pipe(
-            Effect.map((seasonDetails) =>
-              target.episodes
-                .filter((episode) => episode.seasonNumber === season)
-                .map((episode) => ({
-                  episodeId: episode.episodeId,
-                  metadata: episodeMetadataOf(seasonDetails, episode.episodeNumber),
-                })),
+      ? yield* Effect.forEach(
+          seasons,
+          (season) =>
+            plugin.seasonDetails(providerId.value, season).pipe(
+              Effect.map((seasonDetails) =>
+                target.episodes
+                  .filter((episode) => episode.seasonNumber === season)
+                  .map((episode) => ({
+                    episodeId: episode.episodeId,
+                    metadata: episodeMetadataOf(seasonDetails, episode.episodeNumber),
+                  })),
+              ),
+              Effect.catchTag("MetadataRequestFailed", () => Effect.succeed([])),
+              Effect.mapError(providerFailure),
             ),
-            Effect.catchTag("MetadataRequestFailed", () => Effect.succeed([])),
-            Effect.mapError(providerFailure),
-          ),
+          { concurrency: PROVIDER_CONCURRENCY },
         ).pipe(Effect.map((perSeason) => perSeason.flat()))
       : [];
 
@@ -201,3 +207,9 @@ export const lookUp = Effect.fn("MetadataJob.lookUp")(function* <EpisodeKey>(
 
 /** The top-billed people whose details a metadata job fetches itself. */
 export const TOP_BILLED = 10;
+
+/**
+ * How many of one title's seasons or people a metadata job asks the provider for at a time. The
+ * provider's own rate limit paces every job together, so this only bounds what one job holds open.
+ */
+export const PROVIDER_CONCURRENCY = 4;

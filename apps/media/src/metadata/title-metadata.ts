@@ -515,16 +515,20 @@ const make = Effect.gen(function* () {
     const provider = available ? Option.getOrUndefined(yield* Cache.get(titles, query)) : undefined;
     const collectionId = provider?.collection?.providerId;
 
-    const collection =
-      collectionId === undefined || input.local?.collection?.overview !== undefined
-        ? undefined
-        : Option.getOrUndefined(yield* Cache.get(collections, collectionId));
-
     const imdb = input.local?.ids.imdb ?? input.nameIds.imdb ?? provider?.ids.imdb;
-    const scores = imdb === undefined ? {} : yield* omdb.ratings(imdb);
+
+    const [collection, scores] = yield* Effect.all(
+      [
+        collectionId === undefined || input.local?.collection?.overview !== undefined
+          ? Effect.succeedNone
+          : Cache.get(collections, collectionId),
+        imdb === undefined ? Effect.succeed({}) : omdb.ratings(imdb),
+      ],
+      { concurrency: "unbounded" },
+    );
 
     return {
-      metadata: mergeTitle(input, provider, scores, collection),
+      metadata: mergeTitle(input, provider, scores, Option.getOrUndefined(collection)),
       providerId: provider?.providerId,
     } satisfies ResolvedTitle;
   });
