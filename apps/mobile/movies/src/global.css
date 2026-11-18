@@ -84,7 +84,6 @@
   --color-video-track: rgb(255 255 255 / 30%);
   --color-video-muted: rgb(255 255 255 / 70%);
   --text-tab: 10px;
-  --radius-sheet: 28px;
 }
 
 /* The profile avatar set, shared with the web app (`apps/web/movies/public/avatars/<key>.svg`): each key
