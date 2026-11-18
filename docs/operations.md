@@ -20,9 +20,7 @@ restores, upgrades, hardware acceleration, and telemetry. The README has the qui
 
 One Convex backend, the core's, holds every domain (ADR 0027). It and the media service listen on
 loopback only. Caddy serves them on the one port with the routes in
-`deploy/image/rootfs/etc/caddy/Caddyfile`, and answers `404` for `/movies/convex`, where old
-movies' backend answered before the movies cutover. Convex's HTTP actions stay inside the install
-(ADR 0025).
+`deploy/image/rootfs/etc/caddy/Caddyfile`. Convex's HTTP actions stay inside the install (ADR 0025).
 
 Every start, as root, before the media service runs unprivileged (on NixOS, after
 `media-server-folders` has checked the folders, ADR 0029):
@@ -438,12 +436,12 @@ The media service uses Intel Quick Sync (QSV) through ffmpeg's libvpl when it ca
 
 ## Verifying an install
 
-- `scripts/stack-e2e.sh` builds the image and runs the packaged suite against a fresh Compose
-  stack: privilege and secret checks, one Convex backend and `/movies/convex` answering Not Found,
-  the owner's sign-in on the core, library, scan, direct and HLS playback of a `movies.play.start`
-  ticket, a media restart (streams answer a typed `StreamNotFound`, then play again), backup and
-  restore through the media service, the image's own `media` signing in to the core, an upgrade
-  backup, and a lost service key issued again. CI runs it on every image change.
+- `scripts/stack-e2e.sh` builds the image and runs the packaged suite against a fresh Compose stack:
+  privilege and secret checks, one Convex backend, the owner's sign-in on the core, library, scan,
+  direct and HLS playback of a `movies.play.start` ticket, a media restart (streams answer a typed
+  `StreamNotFound`, then play again), backup and restore through the media service, the image's own
+  `media` signing in to the core, an upgrade backup, and a lost service key issued again. CI runs it
+  on every image change.
 - `scripts/nixos-module-e2e.sh` does the same against the NixOS module's own unit on a NixOS host
   (needs sudo and Docker), and checks the sandbox.
 - `scripts/check-sandbox.sh` runs the media tests (encoders started, released, and restarted

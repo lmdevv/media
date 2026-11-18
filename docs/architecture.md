@@ -128,9 +128,8 @@ The image serves every path from one port.
 | `/artwork` | `@media/server`, artwork by sealed key and a shareable ticket            |
 
 `/movies` uses the browser's one session, which the account client at `/` keeps, and sends a
-signed-out browser to `/` to sign in (ADR 0020). `/movies/convex`, where old movies' backend
-answered before the movies cutover, answers `404 Not Found` (ADR 0027). `/music` serves the music
-client on the same session, its player playing the core's queue with tickets (ADR 0020).
+signed-out browser to `/` to sign in (ADR 0020). `/music` serves the music client on the same
+session, its player playing the core's queue with tickets (ADR 0020).
 
 Guest links use a configurable guest address. v1 runs on the home network or Tailscale, and
 Tailscale Funnel can open guest links (ADR 0007).

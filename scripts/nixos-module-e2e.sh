@@ -196,11 +196,9 @@ not() { ! "$@"; }
 equals() { [[ "$1" == "$2" ]]; }
 
 answers() { curl -fsS "$media_url$1" 2>/dev/null | grep -qF "$2"; }
-status_of() { curl -s -o /dev/null -w "%{http_code}" "$media_url$1"; }
 owner_and_mode() { sudo stat -c "%U %a" "$@" | sort -u; }
 serves_jwks() { curl -fsS "$media_url/convex/.well-known/jwks.json" 2>/dev/null | grep -qF '"keys"'; }
 check "/convex is the core's Convex backend" equals "$(curl -fsS "$media_url/convex/instance_name")" core
-check "/movies/convex answers Not Found" equals "$(status_of /movies/convex) $(status_of /movies/convex/instance_name)" "404 404"
 check "/ is the account client" answers / "<title>[media]</title>"
 check "/movies is the movies client" answers /movies/ "<title>[movies]</title>"
 check "Convex HTTP actions stay inside the containers" not serves_jwks
