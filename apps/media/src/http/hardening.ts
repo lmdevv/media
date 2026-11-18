@@ -33,7 +33,7 @@ const bodyRefusal = (headers: Readonly<Record<string, string | undefined>>) => {
 };
 
 /**
- * The folders Google serves the Cast sender SDK from (`apps/web-movies/src/casting/cast-sdk.ts`):
+ * The folders Google serves the Cast sender SDK from (`apps/web/movies/src/casting/cast-sdk.ts`):
  * the loader, the framework, and the platform scripts it picks. The image's Caddyfile allows the
  * same folders for the music client, which casts too. Only these, not the whole host, since
  * `www.gstatic.com` also serves script gadgets (old AngularJS bundles) that would turn any HTML

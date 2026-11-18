@@ -16,15 +16,15 @@ const affected = (...paths: ReadonlyArray<string>): ReadonlyArray<string> =>
 const everyPackage = [
   "apps/cli",
   "apps/media",
-  "apps/mobile-movies",
-  "apps/mobile-music",
-  "apps/web-account",
-  "apps/web-movies",
-  "apps/web-music",
+  "apps/mobile/movies",
+  "apps/mobile/music",
+  "apps/web/account",
+  "apps/web/movies",
+  "apps/web/music",
   "packages/commands",
   "packages/config",
   "packages/contracts",
-  "packages/mobile-core",
+  "packages/mobile/core",
   "packages/platform",
   "packages/player",
   "packages/sdk",
@@ -39,8 +39,8 @@ describe("changed-packages.sh", { timeout: 30_000 }, () => {
   });
 
   it("affects one app and nothing else when only that app changed", () => {
-    expect(affected("apps/web-movies/src/main.tsx", "apps/web-movies/README.md")).toEqual([
-      "apps/web-movies",
+    expect(affected("apps/web/movies/src/main.tsx", "apps/web/movies/README.md")).toEqual([
+      "apps/web/movies",
     ]);
   });
 
@@ -48,13 +48,13 @@ describe("changed-packages.sh", { timeout: 30_000 }, () => {
     expect(affected("packages/contracts/src/index.ts")).toEqual([
       "apps/cli",
       "apps/media",
-      "apps/mobile-movies",
-      "apps/mobile-music",
-      "apps/web-account",
-      "apps/web-movies",
-      "apps/web-music",
+      "apps/mobile/movies",
+      "apps/mobile/music",
+      "apps/web/account",
+      "apps/web/movies",
+      "apps/web/music",
       "packages/contracts",
-      "packages/mobile-core",
+      "packages/mobile/core",
       "packages/platform",
       "packages/player",
       "packages/sdk",
@@ -64,17 +64,17 @@ describe("changed-packages.sh", { timeout: 30_000 }, () => {
 
   it("affects the music clients when only their player changed", () => {
     expect(affected("packages/player/src/engine.ts")).toEqual([
-      "apps/mobile-music",
-      "apps/web-music",
+      "apps/mobile/music",
+      "apps/web/music",
       "packages/player",
     ]);
   });
 
   it("affects both iOS apps when the core they share changed", () => {
-    expect(affected("packages/mobile-core/src/sign-in.ts")).toEqual([
-      "apps/mobile-movies",
-      "apps/mobile-music",
-      "packages/mobile-core",
+    expect(affected("packages/mobile/core/src/sign-in.ts")).toEqual([
+      "apps/mobile/movies",
+      "apps/mobile/music",
+      "packages/mobile/core",
     ]);
   });
 

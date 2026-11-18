@@ -4,7 +4,10 @@
   "license": "MIT",
   "workspaces": [
     "apps/*",
-    "packages/*"
+    "apps/web/*",
+    "apps/mobile/*",
+    "packages/*",
+    "packages/mobile/*"
   ],
   "type": "module",
   "scripts": {

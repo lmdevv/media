@@ -41,7 +41,7 @@ const TIMED_OUT = 124;
 const PRIVATE_NETWORK = fileURLToPath(new URL("../../../../scripts/private-network.sh", import.meta.url));
 // The scripted Chromecast the web clients' Playwright suites cast to, which `--cast-fake` puts in a
 // new page in place of Google's Cast SDK. Node strips its types as it loads it.
-const CAST_FAKE = new URL("../../../../apps/web-movies/e2e/playback/cast-fake.ts", import.meta.url);
+const CAST_FAKE = new URL("../../../../apps/web/movies/e2e/playback/cast-fake.ts", import.meta.url);
 const CAST_ACTIONS = ["devicesAppear", "holdConnection", "completeConnection", "finish", "fail", "disconnect", "refetch"];
 const NETWORKS = ["auto", "isolated", "host"];
 // A relay must carry each direction's end on its own: a client may finish its request and still

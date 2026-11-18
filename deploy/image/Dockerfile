@@ -62,9 +62,9 @@ RUN pnpm --filter @media/platform deploy --prod --legacy /out/platform \
  && mkdir -p /out/media/scripts \
  && cp -r apps/media/dist /out/media/dist \
  && cp apps/media/scripts/configure-web.ts /out/media/scripts/ \
- && cp -r apps/web-movies/dist /out/web \
- && cp -r apps/web-music/dist /out/music \
- && cp -r apps/web-account/dist /out/account \
+ && cp -r apps/web/movies/dist /out/web \
+ && cp -r apps/web/music/dist /out/music \
+ && cp -r apps/web/account/dist /out/account \
  && install -D -m 644 apps/cli/dist/media.js /out/cli/media.mjs \
  && install -m 644 apps/cli/dist/THIRD_PARTY_LICENSES.md /out/cli/
 

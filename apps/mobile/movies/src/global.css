@@ -1,0 +1,143 @@
+@import "tailwindcss";
+@import "uniwind";
+
+/* Tokens from the [movies] Paper file (01M4PMRM5T60Q4P0YYZ8DY580D), names unchanged, as in
+   packages/ui. Paper keeps light roles and `dark-` twins; the dark theme (the default) swaps each
+   role for its twin below. React Native loads one font file per weight, so each weight is a family. */
+@theme {
+  --color-dark-bg: #000000;
+  --color-dark-surface: #141414;
+  --color-dark-surface-raised: #232323;
+  --color-dark-hairline: #2f2f2f;
+  --color-dark-text: #ffffff;
+  --color-dark-text-muted: #a3a3a3;
+  --color-dark-success: #46d369;
+  --color-dark-warning: #f5a623;
+  --color-dark-danger: #ff6b6b;
+  --color-accent: #e50914;
+  --color-accent-pressed: #b20710;
+  --color-on-accent: #ffffff;
+  --color-scrim: rgb(0 0 0 / 60%);
+
+  --font-sans: "InterTight-Regular";
+  --font-sans-medium: "InterTight-Medium";
+  --font-sans-semibold: "InterTight-SemiBold";
+  --font-sans-bold: "InterTight-Bold";
+  --font-sans-heavy: "InterTight-ExtraBold";
+  --font-mono: "GeistMono-Regular";
+  --font-mono-medium: "GeistMono-Medium";
+
+  --text-caption: 12px;
+  --text-label: 13px;
+  --text-body: 15px;
+  --text-heading: 20px;
+  --text-title: 32px;
+  --text-display: 56px;
+  --text-ios-11: 11px;
+  --text-ios-17: 17px;
+  --text-ios-22: 22px;
+  --text-ios-28: 28px;
+  --text-ios-34: 34px;
+  --text-ios-36: 36px;
+  --text-ios-40: 40px;
+  --text-ios-48: 48px;
+
+  --tracking-display: -0.03em;
+  --tracking-tight: -0.01em;
+  --tracking-caps: 0.04em;
+
+  --leading-caption: 16px;
+  --leading-label: 18px;
+  --leading-body: 22px;
+  --leading-heading: 26px;
+  --leading-title: 36px;
+  --leading-display: 56px;
+  --leading-ios-19: 19px;
+  --leading-ios-21: 21px;
+  --leading-ios-23: 23px;
+  --leading-ios-28: 28px;
+  --leading-ios-34: 34px;
+  --leading-ios-40: 40px;
+  --leading-ios-42: 42px;
+  --leading-ios-46: 46px;
+  --leading-ios-54: 54px;
+  --leading-ios-62: 62px;
+
+  --opacity-muted: 60%;
+  --opacity-disabled: 40%;
+
+  --radius-poster: 4px;
+  --radius-control: 8px;
+  --radius-card: 14px;
+  --radius-pill: 999px;
+}
+
+/* Paper's iPad width classes. Layout follows the window, not the device, so rotation and Split View
+   land on the right one: under `regular` is the iPhone layout, `regular:` starts at iPad portrait,
+   and `wide:` at iPad landscape. `useWidthClass` reads the same values, so `static` keeps them. */
+@theme static {
+  --breakpoint-regular: 700px;
+  --breakpoint-wide: 1100px;
+  --container-readable: 600px;
+}
+
+@theme {
+  --color-glass: rgb(44 44 46 / 62%);
+  --color-video-track: rgb(255 255 255 / 30%);
+  --color-video-muted: rgb(255 255 255 / 70%);
+  --text-tab: 10px;
+  --radius-sheet: 28px;
+}
+
+/* The profile avatar set, shared with the web app (`apps/web/movies/public/avatars/<key>.svg`): each key
+   is a diagonal gradient from top left to bottom right, the same in both themes. Components read
+   these through `useCSSVariable` rather than classes, so `static` keeps Tailwind from dropping them. */
+@theme static {
+  --color-avatar-red-from: #e3a35f;
+  --color-avatar-red-to: #c45a2c;
+  --color-avatar-blue-from: #5c8ad6;
+  --color-avatar-blue-to: #2b479e;
+  --color-avatar-green-from: #77bf86;
+  --color-avatar-green-to: #3b7f50;
+  --color-avatar-plum-from: #c58fa8;
+  --color-avatar-plum-to: #6b3f5c;
+  --color-avatar-teal-from: #5fb3b0;
+  --color-avatar-teal-to: #2a5f66;
+  --color-avatar-slate-from: #9ea3aa;
+  --color-avatar-slate-to: #4b5057;
+  --color-avatar-kids-from: #f6d66c;
+  --color-avatar-kids-via: #ef9659;
+  --color-avatar-kids-to: #e86fa1;
+}
+
+@layer theme {
+  :root {
+    @variant dark {
+      --color-bg: #000000;
+      --color-surface: #141414;
+      --color-surface-raised: #232323;
+      --color-hairline: #2f2f2f;
+      --color-text: #ffffff;
+      --color-text-muted: #a3a3a3;
+      --color-success: #46d369;
+      --color-warning: #f5a623;
+      --color-danger: #ff6b6b;
+      --color-bg-fade: rgb(0 0 0 / 60%);
+      --color-bg-clear: rgb(0 0 0 / 0%);
+    }
+
+    @variant light {
+      --color-bg: #ffffff;
+      --color-surface: #f2f2f7;
+      --color-surface-raised: #ffffff;
+      --color-hairline: #e5e5ea;
+      --color-text: #111111;
+      --color-text-muted: #636366;
+      --color-success: #1e9e4a;
+      --color-warning: #b76e00;
+      --color-danger: #d70f1a;
+      --color-bg-fade: rgb(255 255 255 / 60%);
+      --color-bg-clear: rgb(255 255 255 / 0%);
+    }
+  }
+}

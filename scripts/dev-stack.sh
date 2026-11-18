@@ -16,12 +16,12 @@
 # The stack name defaults to the worktree directory name; override with MEDIA_STACK. Ports derive
 # from the name so worktrees do not collide; override the base with MEDIA_PORT_BASE.
 #   base      media service
-#   base + 1  movies web dev server (apps/web-movies at /movies/; every other path goes to base + 4)
+#   base + 1  movies web dev server (apps/web/movies at /movies/; every other path goes to base + 4)
 #   base + 2  core Convex API
 #   base + 3  core Convex HTTP actions
-#   base + 4  account client dev server (apps/web-account)
+#   base + 4  account client dev server (apps/web/account)
 #   base + 5  sign-in boundary (the media service's /api/auth/sign-in route alone)
-#   base + 6  music web dev server (apps/web-music at /music/; every other path goes to base + 4)
+#   base + 6  music web dev server (apps/web/music at /music/; every other path goes to base + 4)
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -152,14 +152,14 @@ CONVEX_SELF_HOSTED_ADMIN_KEY=${core_admin_key}
 MEDIA_SIGN_IN_URL=${sign_in_url}
 ENV
 
-cat >"${root}/apps/web-account/.env.local" <<ENV
+cat >"${root}/apps/web/account/.env.local" <<ENV
 VITE_PLATFORM_URL=http://127.0.0.1:${core_port}
 VITE_MEDIA_BASE_URL=http://127.0.0.1:${media_port}
 VITE_SIGN_IN_URL=${sign_in_url}
 ACCOUNT_PORT=${account_port}
 ENV
 
-cat >"${root}/apps/web-movies/.env.local" <<ENV
+cat >"${root}/apps/web/movies/.env.local" <<ENV
 VITE_PLATFORM_URL=http://127.0.0.1:${core_port}
 VITE_MEDIA_BASE_URL=http://127.0.0.1:${media_port}
 VITE_SIGN_IN_URL=${sign_in_url}
@@ -167,7 +167,7 @@ MOVIES_PORT=${movies_port}
 ACCOUNT_DEV_URL=http://localhost:${account_port}
 ENV
 
-cat >"${root}/apps/web-music/.env.local" <<ENV
+cat >"${root}/apps/web/music/.env.local" <<ENV
 VITE_PLATFORM_URL=http://127.0.0.1:${core_port}
 VITE_MEDIA_BASE_URL=http://127.0.0.1:${media_port}
 VITE_SIGN_IN_URL=${sign_in_url}

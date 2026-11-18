@@ -24,11 +24,13 @@ The repo holds the clients, the server, the CLI, and the one Convex project.
 
 ```text
 apps/
-  web-account/        account client at /: sign in, picker, invites, device approval, admin
-  web-movies/         movies web client at /movies, Netflix look
-  web-music/          music web client at /music, Apple Music light, Spotify dark
-  mobile-movies/      movies iOS app over @media/mobile-core
-  mobile-music/       music iOS app over @media/mobile-core
+  web/
+    account/          account client at /: sign in, picker, invites, device approval, admin
+    movies/           movies web client at /movies, Netflix look
+    music/            music web client at /music, Apple Music light, Spotify dark
+  mobile/
+    movies/           movies iOS app over @media/mobile-core
+    music/            music iOS app over @media/mobile-core
   media/              @media/server: Effect HttpApi, worker pools, ffmpeg children
   cli/                the `media` binary and the agent skill, one reference file per domain
 packages/
@@ -41,7 +43,7 @@ packages/
   commands/           the command list and its generator
   contracts/          Effect Schema DTOs, errors, the server's HttpApi
   sdk/                Effect core with /effect, /react, /promise entry points
-  mobile-core/        shared iOS app code: connection, keychains, sign-in, users and invites
+  mobile/core/        shared iOS app code: connection, keychains, sign-in, users and invites
   ui/                 shared shadcn base and type scale
   config/             shared strict tsconfig
 deploy/               the all-in-one image; Compose adds optional sidecars
@@ -82,9 +84,9 @@ catalog tables, its scanner callbacks, its share of the command list, and the st
 group sessions and downloads.
 
 - **Movies** owns titles, files, metadata, trickplay, and the Jellyfin and Plex importer. Its
-  clients are `apps/web-movies` and `apps/mobile-movies`.
+  clients are `apps/web/movies` and `apps/mobile/movies`.
 - **Music** owns tracks, albums, playlists, lyrics, crossfade, and gapless playback. Its clients
-  are `apps/web-music` and `apps/mobile-music`.
+  are `apps/web/music` and `apps/mobile/music`.
 
 Each client searches its own catalog only (ADR 0020), and runs group sessions for its own domain
 only (ADR 0017).
@@ -112,13 +114,13 @@ The image serves every path from one port.
 
 | Path       | Served by                                                                |
 | ---------- | ------------------------------------------------------------------------ |
-| `/`        | `apps/web-account`                                                       |
-| `/invite`  | `apps/web-account`, accepting an invite, its code in the fragment        |
-| `/device`  | `apps/web-account`, approving a device code                              |
-| `/reset`   | `apps/web-account`, a one-time reset link, its code in the fragment      |
-| `/guest`   | `apps/web-account`, a guest link, its code in the fragment               |
-| `/movies`  | `apps/web-movies`, served by `@media/server`, with no sign-in of its own |
-| `/music`   | `apps/web-music`, with no sign-in of its own                             |
+| `/`        | `apps/web/account`                                                       |
+| `/invite`  | `apps/web/account`, accepting an invite, its code in the fragment        |
+| `/device`  | `apps/web/account`, approving a device code                              |
+| `/reset`   | `apps/web/account`, a one-time reset link, its code in the fragment      |
+| `/guest`   | `apps/web/account`, a guest link, its code in the fragment               |
+| `/movies`  | `apps/web/movies`, served by `@media/server`, with no sign-in of its own |
+| `/music`   | `apps/web/music`, with no sign-in of its own                             |
 | `/convex`  | the core's Convex backend, the only one                                  |
 | `/api`     | `@media/server`, its HttpApi routes                                      |
 | `/media`   | `@media/server`, byte-serving routes that take a ticket                  |

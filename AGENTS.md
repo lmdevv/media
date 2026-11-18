@@ -39,15 +39,15 @@ renaming them. The marks are in `brand/`; `scripts/brand-icons.sh` writes every 
 
 | Path                   | Role                                                                  |
 | ---------------------- | --------------------------------------------------------------------- |
-| `apps/web-movies`      | `@media/web-movies`: Vite + React + TanStack Router SPA, `/movies`    |
-| `apps/web-music`       | `@media/web-music`: Vite + React + TanStack Router SPA, `/music`      |
-| `apps/web-account`     | `@media/web-account`: Vite + React account and admin SPA, `/`         |
+| `apps/web/movies`      | `@media/web-movies`: Vite + React + TanStack Router SPA, `/movies`    |
+| `apps/web/music`       | `@media/web-music`: Vite + React + TanStack Router SPA, `/music`      |
+| `apps/web/account`     | `@media/web-account`: Vite + React account and admin SPA, `/`         |
 | `apps/media`           | `@media/server`: Effect HttpApi media service; serves the SPA         |
 | `apps/cli`             | Effect CLI with JSON output; agent skill in `skills/media/`           |
-| `apps/mobile-movies`   | Expo + Expo Router + Uniwind movies iOS app over `@media/mobile-core` |
-| `apps/mobile-music`    | Expo + Expo Router + Uniwind music iOS app over `@media/mobile-core`  |
+| `apps/mobile/movies`   | Expo + Expo Router + Uniwind movies iOS app over `@media/mobile-core` |
+| `apps/mobile/music`    | Expo + Expo Router + Uniwind music iOS app over `@media/mobile-core`  |
 | `packages/platform`    | The one Convex project: core, movies, and music (ADR 0028)            |
-| `packages/mobile-core` | iOS apps' connection, shared keychain, sign-in, and enrollment        |
+| `packages/mobile/core` | iOS apps' connection, shared keychain, sign-in, and enrollment        |
 | `packages/player`      | Music's player engine and queue controller, shared by web and iOS     |
 | `packages/contracts`   | Effect Schema DTOs, errors, media HttpApi, plugin role interfaces     |
 | `packages/commands`    | Command list; generates Convex functions and skill references         |
@@ -184,7 +184,7 @@ The example identities must be replaced with the model and tool that actually co
   and set `MEDIA_JELLYFIN_DOCKER=1`; without the image the media suite skips the real-Jellyfin
   case silently, but the web migration spec starts Jellyfin anyway, pulling the image or failing.
   `E2E_GROUP=<group>` runs one of the Playwright groups that CI runs in separate jobs, each on its
-  own stack; the groups are in `apps/web-movies/playwright.config.ts`.
+  own stack; the groups are in `apps/web/movies/playwright.config.ts`.
 - Repeat runs: `pnpm --filter @media/web-movies exec playwright test --repeat-each=20`, and for Vitest, fresh
   processes that stop at the first failure: `(for run in $(seq 20); do pnpm test <paths> || exit; done)`.
   Don't use Vitest's `--repeats`: `@effect/vitest` 4.0.3 counts each repeat as a finished test and

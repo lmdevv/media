@@ -17,7 +17,7 @@ export default defineConfig({
         test: {
           name: "other",
           include: [
-            "{apps,packages}/*/src/**/*.test.{ts,tsx}",
+            "{apps,packages}/**/src/**/*.test.{ts,tsx}",
             "packages/commands/test/**/*.test.ts",
             "packages/platform/test/**/*.test.ts",
             "scripts/*.test.ts",
