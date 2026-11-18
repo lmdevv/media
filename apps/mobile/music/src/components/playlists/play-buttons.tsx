@@ -5,21 +5,22 @@ import { View } from "react-native";
 import { PAIR_ROWS, PAIR_WIDTHS } from "@/components/browse/play-shuffle";
 import type { PairWidth } from "@/components/browse/play-shuffle";
 import { Button } from "@/components/ui/button";
-import { usePlayer, usePlayerActions } from "@/player";
+import { usePlayerActions } from "@/player";
 
 const usePlayList = (): ((
   trackIds: ReadonlyArray<TrackId>,
   mode: { readonly shuffle: boolean; readonly index?: number },
 ) => Promise<void>) => {
-  const { shuffle } = usePlayer();
-  const { play, setShuffle } = usePlayerActions();
+  const { play } = usePlayerActions();
 
   return async (trackIds, mode) => {
     if (trackIds.length === 0) return;
 
-    if (mode.shuffle !== shuffle) await setShuffle(mode.shuffle);
-
-    await play(trackIds, mode.shuffle ? Math.floor(Math.random() * trackIds.length) : mode.index);
+    await play(
+      trackIds,
+      mode.shuffle ? Math.floor(Math.random() * trackIds.length) : mode.index,
+      mode.shuffle,
+    );
   };
 };
 

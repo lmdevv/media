@@ -239,6 +239,73 @@ describe.skipIf(stack === undefined)("music queue", { timeout: 240_000 }, () => 
     expect((await client.query(api.music.queue.get, {})).shuffle).toBe(false);
   });
 
+  it("leaves the same queue with shuffle set inside play as with shuffle then play, for every start", async () => {
+    if (stack === undefined) return;
+    const aiko = await member(stack, "aiko");
+    const follower = await secondSession(stack, aiko);
+    const shelf = await musicShelf(stack, [aiko], SONGS);
+    const client = aiko.signedIn.client;
+    const listed = SONGS.map((song) => song.name);
+    const trackIds = [...shelf.library.itemIds];
+    const index = 3;
+
+    await client.mutation(api.music.queue.autoplay, { on: false });
+
+    /**
+     * Starts from a queue with shuffle `from`, plays every song from `index` with shuffle `to` in
+     * one call or in two, and answers the queue another session of the person sees: its state, its
+     * entries, and the listed order turning shuffle off brings back.
+     */
+    const played = async (from: boolean, to: boolean, calls: "one" | "two") => {
+      await client.mutation(api.music.queue.play, { trackIds: trackIds.slice(0, 2) });
+      await client.mutation(api.music.queue.shuffle, { on: from });
+
+      if (calls === "one") {
+        await client.mutation(api.music.queue.play, { trackIds, index, shuffle: to });
+      } else {
+        await client.mutation(api.music.queue.shuffle, { on: to });
+        await client.mutation(api.music.queue.play, { trackIds, index });
+      }
+
+      const state = await follower.signedIn.client.query(api.music.queue.get, {});
+      const entries = await entriesOf(follower);
+      const playing = entries.find((entry) => entry.itemId === state.current)?.title;
+
+      await client.mutation(api.music.queue.shuffle, { on: false });
+
+      return {
+        shuffle: state.shuffle,
+        count: state.count,
+        playing,
+        first: at(entries, 0).title,
+        songs: entries.map((entry) => entry.title).toSorted(),
+        ordered: to ? null : entries.map((entry) => entry.title),
+        restored: await titlesOf(follower),
+      };
+    };
+
+    /** Plays one way and the other from shuffle `from` to `to`, and checks both leave one queue. */
+    const compare = async (from: boolean, to: boolean): Promise<void> => {
+      const one = await played(from, to, "one");
+
+      expect(one).toStrictEqual(await played(from, to, "two"));
+      expect(one).toStrictEqual({
+        shuffle: to,
+        count: listed.length,
+        playing: at(listed, index),
+        first: to ? at(listed, index) : at(listed, 0),
+        songs: listed,
+        ordered: to ? null : listed,
+        restored: listed,
+      });
+    };
+
+    await compare(false, true);
+    await compare(true, false);
+    await compare(true, true);
+    await compare(false, false);
+  });
+
   it("keeps every entry exactly once when two sessions add, move, and remove at once", async () => {
     if (stack === undefined) return;
     const aiko = await member(stack, "aiko");

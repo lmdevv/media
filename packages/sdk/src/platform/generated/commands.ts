@@ -5863,6 +5863,7 @@ const music_queue_play = mutation({
   args: Schema.Struct({
     trackIds: Schema.Array(Schema.String.pipe(Schema.brand("Id<tracks>"))),
     index: Schema.optionalKey(Schema.Finite),
+    shuffle: Schema.optionalKey(Schema.Boolean),
   }),
   result: Schema.Struct({ current: Schema.String.pipe(Schema.brand("Id<playQueueEntries>")) }),
 });
@@ -6446,7 +6447,7 @@ export const effectMethods = (method: EffectBuilder) => ({
       list: method.query(music_queue_list),
       /** `music.queue.move` (mutation, music:play): Move a queue entry to just after another (--after-item-id), or to the top when none is given. */
       move: method.mutation(music_queue_move),
-      /** `music.queue.play` (mutation, music:play): Replace your queue with songs (2,000 at most, 1,000 kept) and play the one at --index, the first by default. */
+      /** `music.queue.play` (mutation, music:play): Replace your queue with songs (2,000 at most, 1,000 kept) and play the one at --index, the first by default; --shuffle or --no-shuffle turns shuffle on or off with it. */
       play: method.mutation(music_queue_play),
       /** `music.queue.remove` (mutation, music:play): Remove an entry from your queue. */
       remove: method.mutation(music_queue_remove),
@@ -6946,7 +6947,7 @@ export const promiseMethods = (method: PromiseBuilder) => ({
       list: method.query(music_queue_list),
       /** `music.queue.move` (mutation, music:play): Move a queue entry to just after another (--after-item-id), or to the top when none is given. */
       move: method.mutation(music_queue_move),
-      /** `music.queue.play` (mutation, music:play): Replace your queue with songs (2,000 at most, 1,000 kept) and play the one at --index, the first by default. */
+      /** `music.queue.play` (mutation, music:play): Replace your queue with songs (2,000 at most, 1,000 kept) and play the one at --index, the first by default; --shuffle or --no-shuffle turns shuffle on or off with it. */
       play: method.mutation(music_queue_play),
       /** `music.queue.remove` (mutation, music:play): Remove an entry from your queue. */
       remove: method.mutation(music_queue_remove),

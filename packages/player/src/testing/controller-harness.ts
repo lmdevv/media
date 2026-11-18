@@ -356,8 +356,12 @@ export const setup = (
   const answer = { current: options.playCurrent ?? "new" };
 
   const commands: MusicCommands = {
-    play: async (trackIds, index) => {
-      sent.push({ name: "play", args: [trackIds, index] });
+    play: async (trackIds, index, shuffle) => {
+      // Shuffle shows only when the play sets it, as the command leaves it out otherwise.
+      sent.push({
+        name: "play",
+        args: shuffle === undefined ? [trackIds, index] : [trackIds, index, shuffle],
+      });
       await gates.play.pass("play");
 
       return { current: answer.current };

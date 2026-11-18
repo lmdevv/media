@@ -6,21 +6,23 @@ import { usePlayerActions } from "@/player";
 interface PlayList {
   /** Plays `trackIds` from the song at `index`, keeping shuffle as it is. */
   readonly playFrom: (trackIds: ReadonlyArray<TrackId>, index: number) => void;
-  /** Plays `trackIds` from the top in order, or shuffled from a random song. */
+  /**
+   * Plays `trackIds` from the top in order, or shuffled from a random song, setting shuffle in the
+   * same command.
+   */
   readonly playAll: (trackIds: ReadonlyArray<TrackId>, shuffle: boolean) => void;
 }
 
 /** How a list's rows, Play, and Shuffle start playback. */
 export const usePlayList = (): PlayList => {
-  const { play, setShuffle } = usePlayerActions();
+  const { play } = usePlayerActions();
 
   return {
     playFrom: (trackIds, index) => void play(trackIds, index),
     playAll: (trackIds, shuffle) => {
       if (trackIds.length === 0) return;
 
-      void setShuffle(shuffle);
-      void play(trackIds, shuffle ? Math.floor(Math.random() * trackIds.length) : 0);
+      void play(trackIds, shuffle ? Math.floor(Math.random() * trackIds.length) : 0, shuffle);
     },
   };
 };

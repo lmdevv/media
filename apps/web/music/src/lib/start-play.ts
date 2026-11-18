@@ -17,13 +17,14 @@ export interface PlayOptions {
 }
 
 /** The player actions a play button uses. */
-type PlayingPlayer = Pick<Player, "primeOutput" | "shuffle" | "setShuffle" | "playTracks">;
+type PlayingPlayer = Pick<Player, "primeOutput" | "playTracks">;
 
 /**
- * Replaces the queue with `source` and plays it, turning shuffle on or off first when `shuffle` is
- * set. Every play button starts here, synchronously in its tap: the output is primed before the
- * first await (a load, or the shuffle change), as iOS Safari allows audio to start after an await
- * only once it was started inside the gesture. Rejects with the load's or the core's failure.
+ * Replaces the queue with `source` and plays it, turning shuffle on or off with it in the same
+ * command when `shuffle` is set. Every play button starts here, synchronously in its tap: the
+ * output is primed before the first await (a load, or the play), as iOS Safari allows audio to
+ * start after an await only once it was started inside the gesture. Rejects with the load's or the
+ * core's failure.
  *
  * @param player - Returns the player as it is now, read again after each await.
  */
@@ -38,12 +39,8 @@ export const startPlay = async (
 
   if (tracks.length === 0) return;
 
-  if (options.shuffle !== undefined && options.shuffle !== player().shuffle) {
-    await player().setShuffle(options.shuffle);
-  }
-
   const ids = tracks.map((track) => track.id);
   const index = options.shuffle === true ? Math.floor(Math.random() * ids.length) : options.index;
 
-  await player().playTracks(ids, index);
+  await player().playTracks(ids, index, options.shuffle);
 };

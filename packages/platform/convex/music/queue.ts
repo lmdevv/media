@@ -660,6 +660,7 @@ export const { get, list, play, add, remove, move, clear, jump, shuffle, repeat,
       }
 
       const { session, queue } = await open(ctx, caller);
+      const shuffleOn = args.shuffle ?? queue.shuffle;
 
       const reserve = cost(
         COMMAND_COST.work.ranges,
@@ -669,7 +670,7 @@ export const { get, list, play, add, remove, move, clear, jump, shuffle, repeat,
       );
 
       const playable = await playableTracks(session, args.trackIds, index, reserve);
-      const { played, start } = playOrder(playable.tracks, playable.index, queue.shuffle);
+      const { played, start } = playOrder(playable.tracks, playable.index, shuffleOn);
       const generation = queue.generation + 1;
 
       session.store.meter.charge(entriesCost(played.length));
@@ -680,7 +681,7 @@ export const { get, list, play, add, remove, move, clear, jump, shuffle, repeat,
             userId: session.userId,
             generation,
             order: renumbered(position),
-            listOrder: renumbered(queue.shuffle ? listed : position),
+            listOrder: renumbered(shuffleOn ? listed : position),
             trackId: track._id,
             autoplay: false,
           }),
@@ -688,7 +689,13 @@ export const { get, list, play, add, remove, move, clear, jump, shuffle, repeat,
       );
 
       const current = ids[start] ?? fail("not_found", "None of those songs can play");
-      const next = await saved(session, queue, { generation, current, count: ids.length });
+
+      const next = await saved(session, queue, {
+        generation,
+        current,
+        count: ids.length,
+        shuffle: shuffleOn,
+      });
 
       if (queue.count > 0 || queue.generation > 0) await purgeBefore(session, generation);
 

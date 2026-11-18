@@ -7100,12 +7100,13 @@ export const generatedCommands = [
     scope: "music:play",
     refusesKeys: false,
     summary:
-      "Replace your queue with songs (2,000 at most, 1,000 kept) and play the one at --index, the first by default",
+      "Replace your queue with songs (2,000 at most, 1,000 kept) and play the one at --index, the first by default; --shuffle or --no-shuffle turns shuffle on or off with it",
     secrets: [],
     paginated: false,
     args: Schema.Struct({
       trackIds: Schema.Array(Schema.String.pipe(Schema.brand("Id<tracks>"))),
       index: Schema.optionalKey(Schema.Finite),
+      shuffle: Schema.optionalKey(Schema.Boolean),
     }),
     result: Schema.Struct({ current: Schema.String.pipe(Schema.brand("Id<playQueueEntries>")) }),
     method: (platform) => platform.music.queue.play,

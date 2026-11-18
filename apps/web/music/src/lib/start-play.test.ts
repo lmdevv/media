@@ -10,20 +10,16 @@ const songs = ["a", "b", "c"].map((id) => ({ id: asTrackId(id) }));
  * A player that records each call, and a load of the songs held until the test lets it answer,
  * like an album's pages still on their way.
  */
-const setup = (shuffle: boolean) => {
+const setup = () => {
   const calls: Array<string> = [];
   const held = Promise.withResolvers<typeof songs>();
 
   const player = {
-    shuffle,
     primeOutput: () => {
       calls.push("prime");
     },
-    setShuffle: async (on: boolean) => {
-      calls.push(`shuffle:${on}`);
-    },
-    playTracks: async (ids: ReadonlyArray<string>) => {
-      calls.push(`play:${ids.join(",")}`);
+    playTracks: async (ids: ReadonlyArray<string>, _index?: number, shuffle?: boolean) => {
+      calls.push(`play:${ids.join(",")}${shuffle === undefined ? "" : `:shuffle=${shuffle}`}`);
     },
   };
 
@@ -51,42 +47,36 @@ const setup = (shuffle: boolean) => {
 const taps: ReadonlyArray<{
   readonly name: string;
   readonly loads: boolean;
-  readonly shuffleOn: boolean;
   readonly options: PlayOptions;
   readonly inTap: ReadonlyArray<string>;
 }> = [
   {
     name: "a song row, a search result, a playlist",
     loads: false,
-    shuffleOn: false,
     options: { index: 1 },
     inTap: ["prime"],
   },
   {
-    name: "Shuffle while shuffle is off",
+    name: "Shuffle",
     loads: false,
-    shuffleOn: false,
     options: { shuffle: true },
     inTap: ["prime"],
   },
   {
-    name: "Play while shuffle is on",
+    name: "Play",
     loads: false,
-    shuffleOn: true,
     options: { shuffle: false },
     inTap: ["prime"],
   },
   {
     name: "an album or artist card",
     loads: true,
-    shuffleOn: false,
     options: { shuffle: false },
     inTap: ["load", "prime"],
   },
   {
     name: "Shuffle all, Shuffle liked songs",
     loads: true,
-    shuffleOn: false,
     options: { shuffle: true },
     inTap: ["load", "prime"],
   },
@@ -94,7 +84,7 @@ const taps: ReadonlyArray<{
 
 describe("startPlay", () => {
   it.each(taps)("primes the output inside the tap before any await: $name", async (tap) => {
-    const { calls, player, load, answer } = setup(tap.shuffleOn);
+    const { calls, player, load, answer } = setup();
     const source: PlaySource = tap.loads ? load() : songs;
 
     const started = startPlay(player, source, tap.options);
@@ -104,16 +94,26 @@ describe("startPlay", () => {
     answer();
     await started;
 
-    expect(calls.at(-1)).toBe("play:a,b,c");
+    expect(calls.at(-1)).toMatch(/^play:a,b,c/u);
     expect(calls.filter((call) => call === "prime")).toHaveLength(1);
   });
 
-  it("turns shuffle on before playing, and plays nothing for an empty list", async () => {
-    const { calls, player } = setup(false);
+  it("plays shuffled or in order in the one play command, and plays nothing for an empty list", async () => {
+    const { calls, player } = setup();
 
     await startPlay(player, songs, { shuffle: true });
+    await startPlay(player, songs, { shuffle: false });
+    await startPlay(player, songs, { index: 1 });
     await startPlay(player, [], {});
 
-    expect(calls).toStrictEqual(["prime", "shuffle:true", "play:a,b,c", "prime"]);
+    expect(calls).toStrictEqual([
+      "prime",
+      "play:a,b,c:shuffle=true",
+      "prime",
+      "play:a,b,c:shuffle=false",
+      "prime",
+      "play:a,b,c",
+      "prime",
+    ]);
   });
 });

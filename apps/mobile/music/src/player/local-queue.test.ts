@@ -32,6 +32,17 @@ const empty = seedLocal<Track>(null, () => null);
 /** Keeps each item where it is: a shuffle that leaves what it is given in order. */
 const inOrder = (): number => 0.999;
 
+/** A fresh random sequence, the same each call, so two ways of shuffling draw the same order. */
+const seeded = (): (() => number) => {
+  let state = 7;
+
+  return () => {
+    state = (state * 31 + 11) % 97;
+
+    return state / 97;
+  };
+};
+
 const titles = (queue: LocalQueue<Track>): ReadonlyArray<string> =>
   queue.state.entries.map((entry) => entry.track.title);
 
@@ -129,6 +140,27 @@ describe("the phone's own queue", () => {
       "One Love",
       "Blue Lines",
     ]);
+  });
+
+  it("sets shuffle inside a play as turning it first and then playing does", () => {
+    const playing = playLocal(empty, [one, two, three], 2, inOrder);
+    const shuffledOn = shuffleLocal(playing, true, inOrder);
+
+    for (const [held, shuffle] of [
+      [playing, true],
+      [playing, false],
+      [shuffledOn, false],
+      [shuffledOn, true],
+    ] as const) {
+      const once = playLocal(held, [three, two, one], 1, seeded(), shuffle);
+      const random = seeded();
+      const twice = playLocal(shuffleLocal(held, shuffle, random), [three, two, one], 1, random);
+
+      expect(once).toStrictEqual(twice);
+      expect(once.state.shuffle).toBe(shuffle);
+    }
+
+    expect(playLocal(shuffledOn, [one, two], 0, inOrder).state.shuffle).toBe(true);
   });
 
   it("jumps, adds next or last, removes, moves, and clears after the song playing", () => {
