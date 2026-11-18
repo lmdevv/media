@@ -141,7 +141,7 @@ function NoResults({ query, onClear }: { readonly query: string; readonly onClea
         Not in your library
       </h2>
       <p className="font-sans text-md/md text-text-muted">
-        Nothing matches “{query}” in titles, artists, or albums. [music] only searches music you
+        Nothing matches “{query}” in titles, artists, or albums. Lar Music only searches music you
         own.
       </p>
       <div className="flex gap-2 pt-2">

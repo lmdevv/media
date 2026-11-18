@@ -104,13 +104,13 @@ convex_backends() {
 }
 check "the image runs one Convex backend" '[[ "$(convex_backends)" -eq 1 ]]'
 check "/api is the media service" 'answers /api/health "\"backend\":\"connected\""'
-check "/ is the account client" 'answers / "<title>[media]</title>"'
+check "/ is the account client" 'answers / "<title>Lar</title>"'
 check "/movies is the movies client" \
   '[[ "$(curl -s -o /dev/null -w "%{http_code} %{redirect_url}" "${MEDIA_BASE_URL}/movies")" == "308 ${MEDIA_BASE_URL}/movies/" ]] &&
-    answers /movies/ "<title>[movies]</title>" && answers /movies/title/x "/movies/assets/"'
+    answers /movies/ "<title>Lar Movies</title>" && answers /movies/title/x "/movies/assets/"'
 check "/music is the music client, and its art is the media service's" \
   '[[ "$(curl -s -o /dev/null -w "%{http_code} %{redirect_url}" "${MEDIA_BASE_URL}/music")" == "308 ${MEDIA_BASE_URL}/music/" ]] &&
-    answers /music/ "<title>[music]</title>" && answers /music/albums/x "/music/assets/" &&
+    answers /music/ "<title>Lar Music</title>" && answers /music/albums/x "/music/assets/" &&
     [[ "$(status_of /music/art/0000)" != 200 ]] && ! curl -s "${MEDIA_BASE_URL}/music/art/0000" | grep -qF "<html"'
 check "every web client reaches the core on this address" \
   'in_media grep -rqF "${core_convex_url}" /run/media/account &&

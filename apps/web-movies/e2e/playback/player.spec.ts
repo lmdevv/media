@@ -426,7 +426,7 @@ test("a direct file plays, answers the keyboard, and lands in Continue watching"
   await leaveWithEscape(page);
   await expect(page).toHaveURL(new RegExp(`/title/${titleId(MOVIES.direct)}$`, "u"));
 
-  await page.getByRole("link", { name: "[movies] home" }).click();
+  await page.getByRole("link", { name: "Lar Movies home" }).click();
 
   const row = page.getByRole("region", { name: /^Continue watching/u });
 

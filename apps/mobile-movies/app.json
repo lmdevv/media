@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "[movies]",
+    "name": "movies",
     "slug": "movies",
     "scheme": "movies",
     "version": "0.4.1",
@@ -12,10 +12,12 @@
       "appleTeamId": "J9DZZ82K23",
       "supportsTablet": true,
       "infoPlist": {
+        "CFBundleDisplayName": "Lar Movies",
+        "CFBundleName": "Lar Movies",
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": true
         },
-        "NSLocalNetworkUsageDescription": "Connect to your media server on your local network.",
+        "NSLocalNetworkUsageDescription": "Connect to your Lar server on your local network.",
         "ITSAppUsesNonExemptEncryption": false,
         "UIViewControllerBasedStatusBarAppearance": true
       },
@@ -33,7 +35,7 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "[movies] scans the code another device shows to sign it in.",
+          "cameraPermission": "Lar Movies scans the code another device shows to sign it in.",
           "microphonePermission": false,
           "recordAudioAndroid": false
         }

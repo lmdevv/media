@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs an isolated [media] development stack for the current worktree: the core's self-hosted
+# Runs an isolated Lar development stack for the current worktree: the core's self-hosted
 # Convex backend (packages/platform) in Docker with its own volume and ports, plus the media
 # service's credentials and a temporary output directory. The media service and both web clients
 # use the core. The media service's sign-in boundary also runs alone in a container, so the stack

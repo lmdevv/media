@@ -282,7 +282,7 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
       )}
 
       <div className="hidden h-11 shrink-0 items-center gap-3.5 border-t border-border bg-surface pr-3 pl-5 lg:flex">
-        <span className="grow font-mono text-xs/xs font-semibold text-text-muted">[music]</span>
+        <span className="grow font-mono text-xs/xs font-semibold text-text-muted">Lar Music</span>
         {footerLabel === null ? null : (
           <span className="flex items-center gap-2 font-sans text-sm/xs font-medium text-text">
             {footerLabel}

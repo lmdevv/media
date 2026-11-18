@@ -1,6 +1,6 @@
 # Security review
 
-A review of [media] as the code runs: the core's Convex backend, the media service, the web
+A review of Lar as the code runs: the core's Convex backend, the media service, the web
 clients, the CLI, and the two installs. The media service signs in to the core as a service
 principal and checks a caller with `core.auth.sessions.current` (ADR 0010); its byte routes admit
 only core tickets, and it seals artwork keys under its own service key (ADR 0011). Each finding
@@ -134,7 +134,7 @@ that argument.
 - **The Cast SDK's scripts** come from `www.gstatic.com`, which the content security policy allows
   for scripts, without a scheme: Google's loader fetches its framework over the page's own scheme,
   so an install served over plain HTTP loads it over HTTP, open to anyone on the path to Google.
-  Serve [media] over HTTPS (Tailscale Serve, a reverse proxy) to keep it on HTTPS; browsers other
+  Serve Lar over HTTPS (Tailscale Serve, a reverse proxy) to keep it on HTTPS; browsers other
   than Chromium never load it.
 - **First-time subtitle conversions are not de-duplicated:** two requests for the same track
   before it is cached convert it twice (at most two conversions run at once). Keyframe scans are

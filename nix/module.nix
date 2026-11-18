@@ -1,4 +1,4 @@
-# NixOS module for [media]: the core's self-hosted Convex backend as a pinned OCI container, the
+# NixOS module for Lar: the core's self-hosted Convex backend as a pinned OCI container, the
 # media service (which also serves the movies client) as a native, hardened systemd service built
 # from this repository (nix/package.nix), and Caddy in front of them on one address, with the
 # image's routes (deploy/image/rootfs/etc/caddy/Caddyfile, docs/decisions/0015).
@@ -377,7 +377,7 @@ let
         # Another user's file with other names may be someone else's file: the fix below skips it.
         linked="$(find "$dir" -xdev ! -type d -links +1 \( ! -uid "$uid" -o ! -gid "$gid" \) -print -quit 2>/dev/null || true)"
         if [ -n "$linked" ]; then
-          problems+=("$linked, in $dir, is another user's and has other names (hard links), so it may be another file; remove this name, or give it to $user yourself if it is [media]'s")
+          problems+=("$linked, in $dir, is another user's and has other names (hard links), so it may be another file; remove this name, or give it to $user yourself if it is Lar's")
           continue
         fi
         other="$(find "$dir" -xdev \( ! -uid "$uid" -o ! -gid "$gid" \) -print -quit 2>/dev/null || true)"
@@ -551,14 +551,14 @@ in
   ];
 
   options.services.media = {
-    enable = lib.mkEnableOption "[media], self-hosted media for people and agents";
+    enable = lib.mkEnableOption "Lar, self-hosted media for people and agents";
 
     package = lib.mkOption {
       type = lib.types.package;
       default = pkgs.callPackage ./package.nix { };
       defaultText = lib.literalExpression "pkgs.callPackage ./package.nix { }";
       description = ''
-        The [media] package: media service, web clients, and the core's Convex project. Set it to
+        The Lar package: media service, web clients, and the core's Convex project. Set it to
         the flake's own build, `inputs.media.packages.''${system}.media`, to use the nixpkgs it was
         tested with. The flake's overlay names it `pkgs.media`.
       '';
@@ -635,7 +635,7 @@ in
       default = [ ];
       example = [ "127.0.0.1/32" ];
       description = ''
-        CIDRs of proxies in front of [media] whose `X-Forwarded-For` names the client, such as a TLS
+        CIDRs of proxies in front of Lar whose `X-Forwarded-For` names the client, such as a TLS
         proxy on this host (`127.0.0.1/32`). The media service limits unauthenticated routes per
         client, so without this every request through such a proxy counts as one client.
       '';
@@ -667,7 +667,7 @@ in
       defaultText = lib.literalExpression ''if config.services.media.openFirewall then "0.0.0.0" else "127.0.0.1"'';
       example = "100.64.0.1";
       description = ''
-        Address the port listens on. The default keeps [media] local; set the host's Tailscale
+        Address the port listens on. The default keeps Lar local; set the host's Tailscale
         address to reach it over the tailnet only. The Convex backend and the media service listen
         on loopback only.
       '';
@@ -678,7 +678,7 @@ in
       default = "http://localhost:${toString cfg.port}";
       defaultText = lib.literalExpression ''"http://localhost:''${toString config.services.media.port}"'';
       description = ''
-        URL people use for [media]: the account client at its root, movies at `/movies`, music at
+        URL people use for Lar: the account client at its root, movies at `/movies`, music at
         `/music`, and the core's Convex backend (`/convex`) and streams under it.
       '';
     };
@@ -1021,7 +1021,7 @@ in
     };
 
     systemd.services.media-proxy = {
-      description = "[media] on one address";
+      description = "Lar on one address";
       wantedBy = [ "multi-user.target" ];
       after = [ "network.target" ];
       environment = {
@@ -1078,7 +1078,7 @@ in
     # Before every start of the media service and the core's container. No tmpfiles rule makes these
     # folders: tmpfiles follows a symlink on the way before anything checks it (ADR 0029).
     systemd.services.media-server-folders = {
-      description = "[media] folders checked before it starts";
+      description = "Lar folders checked before it starts";
       serviceConfig = {
         Type = "oneshot";
         User = cfg.user;
@@ -1112,7 +1112,7 @@ in
     };
 
     systemd.services.media-server = {
-      description = "[media] media service";
+      description = "Lar media service";
       wantedBy = [ "multi-user.target" ];
       requires = containerUnits ++ [ "media-server-folders.service" ];
       after = containerUnits ++ [

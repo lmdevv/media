@@ -216,7 +216,7 @@ function ChromecastRow({ cast, touch }: { readonly cast: MusicCast; readonly tou
       />
       {localOnly(MEDIA_BASE_URL) ? (
         <p role="note" className="px-3 pb-1 font-sans text-sm/xs text-text-muted">
-          This server is open at a local address. A Chromecast can't reach it; open [music] at its
+          This server is open at a local address. A Chromecast can't reach it; open Lar Music at its
           network address to cast.
         </p>
       ) : null}

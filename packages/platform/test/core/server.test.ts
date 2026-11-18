@@ -18,7 +18,7 @@ describe.skipIf(stack === undefined)("core.server.info", { timeout: 60_000 }, ()
     await ensureOwner(stack);
 
     expect(await client.query(api.core.server.info, {})).toEqual({
-      name: "[media]",
+      name: "Lar",
       version: packageJson.version,
       hasOwner: true,
     });

@@ -15,10 +15,10 @@ export default function About() {
   const version = Constants.expoConfig?.version;
 
   return (
-    <Screen readable scroll header={<NavHeader title="About [movies]" fallback="/settings" />}>
+    <Screen readable scroll header={<NavHeader title="About Lar Movies" fallback="/settings" />}>
       <View className="h-12" />
       <Text variant="wordmark" tone="accent" accessibilityRole="header">
-        [movies]
+        Lar Movies
       </Text>
       {version === undefined ? null : <Text tone="muted">{`Version ${version}`}</Text>}
       <ListRow

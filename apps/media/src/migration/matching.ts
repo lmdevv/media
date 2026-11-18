@@ -24,7 +24,7 @@ export type ItemMatch = Data.TaggedEnum<{
 /** Constructors and matchers for `ItemMatch`. */
 export const ItemMatch = Data.taggedEnum<ItemMatch>();
 
-/** Lookups over the [movies] catalog. */
+/** Lookups over the Lar Movies catalog. */
 export interface CatalogIndex {
   readonly byPath: ReadonlyMap<string, CatalogFile>;
   readonly movies: ReadonlyMap<string, CatalogFile>;

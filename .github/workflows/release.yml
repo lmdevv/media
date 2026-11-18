@@ -195,5 +195,5 @@ jobs:
           Upgrading a server: [docs/operations.md](https://github.com/lmdevv/media/blob/$GITHUB_REF_NAME/docs/operations.md#upgrading).
           EOF
           )"
-          gh release create "$GITHUB_REF_NAME" "$DIST"/* --verify-tag --title "[media] $version" \
+          gh release create "$GITHUB_REF_NAME" "$DIST"/* --verify-tag --title "Lar $version" \
             --notes "$notes" --generate-notes "${flags[@]}"

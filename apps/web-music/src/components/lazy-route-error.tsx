@@ -27,7 +27,7 @@ function PlainMessage({ description }: { readonly description: string }) {
   );
 }
 
-const UNREACHABLE = "[music] can't reach the server. Check the connection, then reload the page.";
+const UNREACHABLE = "Lar Music can't reach the server. Check the connection, then reload the page.";
 
 function Unloaded({ error }: ErrorComponentProps): ReactNode {
   return (

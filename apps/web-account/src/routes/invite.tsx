@@ -9,7 +9,7 @@ import { linkSecretFor } from "@/session/link-secret";
 
 export const Route = createFileRoute("/invite")({
   staticData: { need: "public" },
-  head: () => ({ meta: [{ title: "Join · [media]" }] }),
+  head: () => ({ meta: [{ title: "Join · Lar" }] }),
   component: InvitePage,
 });
 

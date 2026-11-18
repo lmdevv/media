@@ -134,7 +134,7 @@ const readStored = Effect.fn("Config.readStored")(function* (path: string) {
   if (Result.isFailure(decoded)) {
     return yield* new ConfigFileError({
       path,
-      message: `${path} is not a valid [media] profile; delete it, then run media auth login`,
+      message: `${path} is not a valid Lar profile; delete it, then run media auth login`,
       cause: decoded.failure,
     });
   }

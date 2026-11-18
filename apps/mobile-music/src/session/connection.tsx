@@ -19,7 +19,7 @@ export interface ConnectionControls {
   /** Where the app connects, or null before anyone connected this install. */
   readonly connection: ServerConnection | null;
   /**
-   * True while the app connects, on its first launch, to the server another [media] app on the
+   * True while the app connects, on its first launch, to the server another Lar app on the
    * phone signed in to, as the shared keychain names it (D48).
    */
   readonly joining: boolean;

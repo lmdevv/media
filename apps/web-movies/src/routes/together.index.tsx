@@ -34,7 +34,7 @@ type Joining =
  * not watch.
  */
 export const Route = createFileRoute("/together/")({
-  head: () => ({ meta: [{ title: "Watch together · [movies]" }] }),
+  head: () => ({ meta: [{ title: "Watch together · Lar Movies" }] }),
   component: SessionRoute,
 });
 

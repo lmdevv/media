@@ -159,7 +159,7 @@ export interface Interface {
   readonly authenticated: Effect.Effect<Authentication>;
 }
 
-/** The connection to the [movies] Convex deployment. */
+/** The connection to the core's Convex deployment. */
 export class ConvexTransport extends Context.Service<ConvexTransport, Interface>()(
   "@media/sdk/ConvexTransport",
 ) {}

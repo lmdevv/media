@@ -120,7 +120,7 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
           overMedia={overMedia}
           className="mx-auto max-w-content"
           brand={
-            <Link to="/" aria-label="[movies] home" className="rounded-bar">
+            <Link to="/" aria-label="Lar Movies home" className="rounded-bar">
               <Wordmark />
             </Link>
           }

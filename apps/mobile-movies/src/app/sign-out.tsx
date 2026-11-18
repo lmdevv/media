@@ -6,7 +6,7 @@ export default function SignOut() {
 
   return (
     <ConfirmSheet
-      title="Sign out of [movies]?"
+      title="Sign out of Lar Movies?"
       description="This iPhone will need to sign in again."
       action="Sign Out"
       onConfirm={signOut}

@@ -3,7 +3,7 @@ import { register } from "../../commands/core/server";
 import { ownerOf } from "./accounts/users";
 import { latestStatus } from "./serverStatus";
 
-const SERVER_NAME = "[media]";
+const SERVER_NAME = "Lar";
 
 export const { info, status } = register({
   info: async (ctx) => ({

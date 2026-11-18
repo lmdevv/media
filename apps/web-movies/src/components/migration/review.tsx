@@ -290,8 +290,8 @@ export function Review({
         {summary.conflicts === 0 ? null : (
           <Caution>
             {summary.conflicts === 1
-              ? "1 title keeps the newer progress already in [movies]"
-              : `${formatCount(summary.conflicts)} titles keep the newer progress already in [movies]`}
+              ? "1 title keeps the newer progress already in Lar Movies"
+              : `${formatCount(summary.conflicts)} titles keep the newer progress already in Lar Movies`}
           </Caution>
         )}
       </div>

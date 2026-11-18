@@ -84,7 +84,7 @@ export function Sidebar() {
     >
       <div className="flex h-7 shrink-0 items-center justify-between px-2.5">
         <Link to="/" className="font-mono text-md/base font-semibold tracking-snug text-text">
-          [music]
+          Lar Music
         </Link>
         <Tooltip
           label="Search and commands"

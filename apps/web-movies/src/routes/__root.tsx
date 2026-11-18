@@ -23,7 +23,7 @@ export const Route = createRootRouteWithContext<RouterAppContext>()({
   component: RootComponent,
   head: () => ({
     meta: [
-      { title: "[movies]" },
+      { title: "Lar Movies" },
       { name: "description", content: "Your movies and shows, streamed from your own library" },
     ],
     links: [

@@ -135,7 +135,7 @@ export default function AddFolder() {
       <Notice
         icon={Folder}
         title="Your files stay yours"
-        body="[music] reads your tags and artwork. It doesn’t move or rewrite your music."
+        body="Lar Music reads your tags and artwork. It doesn’t move or rewrite your music."
       />
       <View className="pt-6">
         <Button

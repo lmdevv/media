@@ -288,7 +288,7 @@ describe("planMigration", () => {
     ]);
   });
 
-  it("counts a conflict when [movies] played an item more recently than the source", () => {
+  it("counts a conflict when Lar Movies played an item more recently than the source", () => {
     const newer = planMigration(
       input({ localProgress: new Map([[ALICE, [local("alien", 5_000, 10_000)]]]) }),
     );

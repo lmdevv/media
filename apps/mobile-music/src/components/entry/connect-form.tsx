@@ -64,7 +64,7 @@ export function ConnectForm({ onBack, onConnected }: ConnectFormProps) {
       <Text variant="largeTitle">{"Bring your\ncollection along."}</Text>
       <Field
         label="Server address"
-        helper="The address you use to open [music] in your browser."
+        helper="The address you use to open Lar Music in your browser."
         placeholder="https://music.example"
         value={address}
         onChangeText={(text) => {

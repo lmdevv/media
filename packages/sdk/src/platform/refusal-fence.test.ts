@@ -30,7 +30,7 @@ import { createPlatform } from "./promise";
 
 const HOUR = 3_600_000;
 
-const SERVER = { name: "[media]", version: "0.2.0", hasOwner: true };
+const SERVER = { name: "Lar", version: "0.2.0", hasOwner: true };
 
 const SESSION = {
   userId: "user-1",

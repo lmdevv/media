@@ -95,7 +95,7 @@ function PersonPage() {
 
   return (
     <div className="mx-auto box-content flex max-w-content flex-col gap-10 px-4 pt-6 pb-20 md:gap-14 md:px-16 md:pt-26">
-      <title>{`${data.name} · [movies]`}</title>
+      <title>{`${data.name} · Lar Movies`}</title>
       <section className="flex flex-col gap-6 md:flex-row md:gap-12">
         {photo === undefined ? (
           <div

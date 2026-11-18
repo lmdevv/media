@@ -1,6 +1,6 @@
-# [movies] verification map
+# Lar Movies verification map
 
-This directory is the maintained source for verifying what a [movies] user sees and does. Read
+This directory is the maintained source for verifying what a Lar Movies user sees and does. Read
 this index before you drive the app, then use the matching feature file as the recipe.
 
 ## Baseline preconditions

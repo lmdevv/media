@@ -5,7 +5,7 @@ import { HomeView } from "@/screens/people/home";
 import { useMe } from "@/session/me";
 
 export const Route = createFileRoute("/home")({
-  head: () => ({ meta: [{ title: "[media]" }] }),
+  head: () => ({ meta: [{ title: "Lar" }] }),
   component: HomePage,
 });
 

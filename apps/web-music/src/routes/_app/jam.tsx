@@ -16,7 +16,7 @@ import { describeFailure } from "@/lib/action";
  * or it says why it cannot: waiting for the host, or a locked, ended, or unknown Jam.
  */
 export const Route = createFileRoute("/_app/jam")({
-  head: () => ({ meta: [{ title: "Jam · [music]" }] }),
+  head: () => ({ meta: [{ title: "Jam · Lar Music" }] }),
   component: JamPage,
 });
 
@@ -131,7 +131,7 @@ function JamPage() {
               <p className="font-sans text-md/md text-text-muted">{shown.lead}</p>
             )}
             <Link to="/" className={buttonClassName({ variant: "outline", size: "lg" })}>
-              Go to [music]
+              Go to Lar Music
             </Link>
           </>
         )}

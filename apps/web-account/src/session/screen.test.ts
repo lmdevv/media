@@ -59,7 +59,7 @@ const shared = (tiles: ReadonlyArray<SharedTile>): SharedPicker => ({
 
 const base: ScreenInputs = {
   intent: { kind: "picker" },
-  server: success<ServerInfo>({ name: "[media]", version: "0.2.0", hasOwner: true }),
+  server: success<ServerInfo>({ name: "Lar", version: "0.2.0", hasOwner: true }),
   status: "signedOut",
   me: loading,
   device: null,
@@ -70,7 +70,7 @@ const inputs = (overrides: Partial<ScreenInputs>): ScreenInputs => ({ ...base, .
 
 describe("which screen shows", () => {
   it("asks for the first owner on a server without one", () => {
-    const server = success<ServerInfo>({ name: "[media]", version: "0.2.0", hasOwner: false });
+    const server = success<ServerInfo>({ name: "Lar", version: "0.2.0", hasOwner: false });
 
     expect(screenOf(inputs({ server }))).toStrictEqual({ kind: "setUpOwner" });
   });

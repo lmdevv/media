@@ -21,7 +21,7 @@ import { useMe } from "@/session/me";
 
 export const Route = createFileRoute("/settings")({
   staticData: { need: "account" },
-  head: () => ({ meta: [{ title: "Settings · [media]" }] }),
+  head: () => ({ meta: [{ title: "Settings · Lar" }] }),
   component: SettingsPage,
 });
 

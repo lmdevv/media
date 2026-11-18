@@ -1,15 +1,17 @@
 import { cn } from "@media/ui/lib/utils";
 import type { ComponentProps } from "react";
 
+const NAMES = { movies: "Lar Movies", media: "Lar" } as const;
+
 /**
- * A product's wordmark in heavy accent type: `[movies]` unless `product` names another, such as
- * `media` for the account client.
+ * A product's name in heavy accent type: Lar Movies unless `product` names another, such as
+ * `media` (Lar) for the account client.
  */
 export function Wordmark({
   product = "movies",
   className,
   ...props
-}: Omit<ComponentProps<"span">, "children"> & { readonly product?: "movies" | "media" }) {
+}: Omit<ComponentProps<"span">, "children"> & { readonly product?: keyof typeof NAMES }) {
   return (
     <span
       data-slot="wordmark"
@@ -19,7 +21,7 @@ export function Wordmark({
       )}
       {...props}
     >
-      [{product}]
+      {NAMES[product]}
     </span>
   );
 }

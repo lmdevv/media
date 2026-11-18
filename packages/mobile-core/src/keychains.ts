@@ -131,7 +131,7 @@ export const openKeychains = (store: SecureStoreModule, groups: KeychainGroups):
 };
 
 /**
- * The shared group's name after the Team ID. Every [media] app lists it in its
+ * The shared group's name after the Team ID. Every Lar app lists it in its
  * `keychain-access-groups` entitlement, after its own group, so they share one sign-in (D48).
  */
 const SHARED_GROUP = "dev.lmdevv.media";

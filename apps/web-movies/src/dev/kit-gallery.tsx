@@ -320,7 +320,7 @@ const sampleMenu = (
 };
 
 /**
- * Every [movies] UI kit component with sample data, laid out like Paper's 02 Components page, for
+ * Every Lar Movies UI kit component with sample data, laid out like Paper's 02 Components page, for
  * visual comparison. Development builds only.
  */
 export function KitGallery() {

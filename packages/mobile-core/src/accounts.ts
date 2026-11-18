@@ -1,5 +1,5 @@
 /**
- * The users and invites screens every [media] iOS app has, as data: who is in the household, what
+ * The users and invites screens every Lar iOS app has, as data: who is in the household, what
  * each role reads as, who may change whose role, what a person reaches in each library, and the
  * invite link an admin shares. Each app draws these in its own look; `use-accounts.ts` follows the
  * core's accounts commands for them.

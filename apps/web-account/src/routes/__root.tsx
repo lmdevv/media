@@ -29,7 +29,11 @@ declare module "@tanstack/react-router" {
 export const Route = createRootRouteWithContext<RouterAppContext>()({
   component: RootComponent,
   head: () => ({
-    meta: [{ title: "[media]" }, { name: "description", content: "Your [media] account" }],
+    meta: [{ title: "Lar" }, { name: "description", content: "Your Lar account" }],
+    links: [
+      { rel: "icon", href: `${import.meta.env.BASE_URL}favicon.ico`, sizes: "48x48" },
+      { rel: "icon", href: `${import.meta.env.BASE_URL}favicon.svg`, type: "image/svg+xml" },
+    ],
   }),
 });
 

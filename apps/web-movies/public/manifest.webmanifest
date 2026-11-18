@@ -1,6 +1,6 @@
 {
-  "name": "[movies]",
-  "short_name": "[movies]",
+  "name": "Lar Movies",
+  "short_name": "Lar Movies",
   "description": "Your movies and shows, streamed from your own library",
   "id": "./",
   "start_url": "./",

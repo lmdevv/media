@@ -61,7 +61,7 @@ so a new tag beside the old digest still mounts the old version.
 ## Credits
 
 Every film and album here is free to share under the license listed. The NFO summaries are the
-project's own words. The artists, studios, and labels do not endorse [media].
+project's own words. The artists, studios, and labels do not endorse Lar.
 
 | Item                                          | Made by                                      | License      | Source                                                        |
 | --------------------------------------------- | -------------------------------------------- | ------------ | ------------------------------------------------------------- |

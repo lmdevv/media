@@ -83,7 +83,7 @@ export function SettingsHub() {
       )}
       <View className="pt-mobile-edge">
         <Text variant="mono" tone="muted">
-          {`[music] · ${hostOf(mediaUrl)}`.toUpperCase()}
+          {`Lar Music · ${hostOf(mediaUrl)}`}
         </Text>
       </View>
     </Page>

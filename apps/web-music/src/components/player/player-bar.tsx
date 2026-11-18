@@ -107,7 +107,7 @@ export function PlayerBar() {
           <div role="status" className="flex grow items-center justify-center gap-3">
             <span aria-hidden className="size-2 shrink-0 rounded-full bg-danger" />
             <span className="font-sans text-base/sm text-text">
-              Playback is unavailable. [music] can't reach the media service.
+              Playback is unavailable. Lar Music can't reach the media service.
             </span>
           </div>
         ) : failed ? (

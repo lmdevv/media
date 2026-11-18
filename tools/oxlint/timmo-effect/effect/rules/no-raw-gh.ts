@@ -1,4 +1,4 @@
-// Modified by [media]: private helper comments removed (see ../../UPSTREAM.md).
+// Modified by Lar: private helper comments removed (see ../../UPSTREAM.md).
 import { defineRule } from "@oxlint/plugins";
 
 import { staticMemberName } from "../../shared/ast.ts";

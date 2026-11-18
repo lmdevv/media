@@ -5,7 +5,7 @@ import { DevicesScreen } from "@/screens/people/credentials";
 
 export const Route = createFileRoute("/devices")({
   staticData: { need: "account" },
-  head: () => ({ meta: [{ title: "Devices · [media]" }] }),
+  head: () => ({ meta: [{ title: "Devices · Lar" }] }),
   component: () => (
     <SettingsFrame>
       <DevicesScreen />

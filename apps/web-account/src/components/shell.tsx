@@ -111,7 +111,7 @@ export function Shell({ children }: { readonly children: ReactNode }) {
         <TopBar
           className="mx-auto max-w-content"
           brand={
-            <Link to="/home" aria-label="[media] home" className="rounded-bar">
+            <Link to="/home" aria-label="Lar home" className="rounded-bar">
               <Wordmark product="media" />
             </Link>
           }

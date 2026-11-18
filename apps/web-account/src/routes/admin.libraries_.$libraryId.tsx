@@ -13,6 +13,6 @@ function Library() {
 }
 
 export const Route = createFileRoute("/admin/libraries_/$libraryId")({
-  head: () => ({ meta: [{ title: "Library · [media]" }] }),
+  head: () => ({ meta: [{ title: "Library · Lar" }] }),
   component: Library,
 });

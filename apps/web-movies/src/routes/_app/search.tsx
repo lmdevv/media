@@ -25,7 +25,7 @@ const SearchParams = Schema.Struct({ q: Schema.optionalKey(Schema.String) });
 export const Route = createFileRoute("/_app/search")({
   validateSearch: Schema.toStandardSchemaV1(SearchParams),
   staticData: { phoneTitle: false },
-  head: () => ({ meta: [{ title: "Search · [movies]" }] }),
+  head: () => ({ meta: [{ title: "Search · Lar Movies" }] }),
   component: SearchPage,
 });
 

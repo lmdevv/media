@@ -52,7 +52,7 @@ function TitlePage() {
 
   return (
     <>
-      <title>{`${title.data.name} · [movies]`}</title>
+      <title>{`${title.data.name} · Lar Movies`}</title>
       <TitleDetailView title={title.data} canManage={scopes.has("movies:edit")} phone={phone} />
     </>
   );

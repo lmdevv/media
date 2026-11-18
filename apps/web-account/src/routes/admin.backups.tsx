@@ -4,6 +4,6 @@ import { BackupsScreen } from "@/components/admin/backups";
 import { MEDIA_BASE_URL } from "@/env";
 
 export const Route = createFileRoute("/admin/backups")({
-  head: () => ({ meta: [{ title: "Backups · [media]" }] }),
+  head: () => ({ meta: [{ title: "Backups · Lar" }] }),
   component: () => <BackupsScreen mediaUrl={MEDIA_BASE_URL} />,
 });

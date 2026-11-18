@@ -29,7 +29,7 @@ function StateFrame({ children }: { readonly children: ReactNode }) {
     return (
       <div className="flex min-h-svh flex-col bg-page font-sans text-text">
         <header className="flex h-16 shrink-0 items-center px-5 md:h-24 md:px-16">
-          <Link to="/" aria-label="[movies] home" className="rounded-bar">
+          <Link to="/" aria-label="Lar Movies home" className="rounded-bar">
             <Wordmark />
           </Link>
         </header>
@@ -68,7 +68,7 @@ const errorText = (cause: unknown): string => {
 export function NotFoundPage() {
   return (
     <StateFrame>
-      <title>Not found · [movies]</title>
+      <title>Not found · Lar Movies</title>
       <CalmState title="This page isn't here" actions={goHome("primary")} />
     </StateFrame>
   );

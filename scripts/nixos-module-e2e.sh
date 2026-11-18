@@ -199,8 +199,8 @@ answers() { curl -fsS "$media_url$1" 2>/dev/null | grep -qF "$2"; }
 owner_and_mode() { sudo stat -c "%U %a" "$@" | sort -u; }
 serves_jwks() { curl -fsS "$media_url/convex/.well-known/jwks.json" 2>/dev/null | grep -qF '"keys"'; }
 check "/convex is the core's Convex backend" equals "$(curl -fsS "$media_url/convex/instance_name")" core
-check "/ is the account client" answers / "<title>[media]</title>"
-check "/movies is the movies client" answers /movies/ "<title>[movies]</title>"
+check "/ is the account client" answers / "<title>Lar</title>"
+check "/movies is the movies client" answers /movies/ "<title>Lar Movies</title>"
 check "Convex HTTP actions stay inside the containers" not serves_jwks
 
 pid="$(systemctl show -p MainPID --value "$unit")"

@@ -201,7 +201,7 @@ function EmptyLibrary({ admin }: { readonly admin: boolean }) {
         </h1>
         <p className="font-sans text-md/md text-text-muted">
           {admin
-            ? "Point [music] at the folder where your music lives. Files stay where they are. We only read them."
+            ? "Point Lar Music at the folder where your music lives. Files stay where they are. We only read them."
             : "No library folder is shared with you yet. Ask an admin to add one, or to add you to theirs."}
         </p>
       </div>

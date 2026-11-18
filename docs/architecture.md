@@ -1,7 +1,7 @@
-# [media] architecture
+# Lar architecture
 
-`[media]` is one self-hosted product. One server, one Convex database, and one account system serve
-a branded client for movies and another for music. This page describes [media] as built and the rules
+Lar is one self-hosted product. One server, one Convex database, and one account system serve
+a branded client for movies and another for music. This page describes Lar as built and the rules
 that hold it together. The decisions behind it are in [`docs/decisions/`](decisions/), one record per
 area, each citing the decision numbers settled with the owner.
 
@@ -167,7 +167,7 @@ supersedes ADR 0023; both superseded records stay in [`docs/decisions/`](decisio
 | [0029](decisions/0029-the-nixos-module-uses-media-names-beside-the-old-installs.md) | The NixOS module uses media names, so it runs beside the old installs          | D03, D58, D69                               |
 
 D65, D67, D68, D70, D71, D72, D75, D76, and D77 decide how agents work on the repo and the owner's
-host, not how [media] works, so no ADR cites them. They are in the decisions register.
+host, not how Lar works, so no ADR cites them. They are in the decisions register.
 
 ## Open
 

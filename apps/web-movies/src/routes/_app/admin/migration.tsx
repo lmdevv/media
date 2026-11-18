@@ -9,7 +9,7 @@ const MigrationSearch = Schema.Struct({ run: Schema.optionalKey(ImportRunId) });
 
 export const Route = createFileRoute("/_app/admin/migration")({
   validateSearch: Schema.toStandardSchemaV1(MigrationSearch),
-  head: () => ({ meta: [{ title: "Import from Jellyfin or Plex · [movies]" }] }),
+  head: () => ({ meta: [{ title: "Import from Jellyfin or Plex · Lar Movies" }] }),
   component: MigrationPage,
 });
 

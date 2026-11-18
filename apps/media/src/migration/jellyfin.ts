@@ -237,8 +237,8 @@ const stateOf = (item: Item): SourceItemState | null => {
 /** The `Authorization` header; Jellyfin identifies the client and device by these fields. */
 const authorization = (token: Option.Option<string>): string => {
   const fields = [
-    'Client="[media] migration"',
-    'Device="[media]"',
+    'Client="Lar migration"',
+    'Device="Lar"',
     'DeviceId="media-migration"',
     'Version="1.0.0"',
   ];

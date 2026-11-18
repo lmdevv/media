@@ -1,4 +1,4 @@
-# [movies] for iPhone
+# Lar Movies for iPhone
 
 The iOS app: Expo SDK 58, Expo Router, and Uniwind (Tailwind 4 for React Native) over the platform
 SDK (`@media/sdk/react`) and `@media/mobile-core`. Screens follow the Paper pages **14–20 iOS** in the `[movies]` file; tokens in
@@ -13,7 +13,7 @@ for servers that do not share their Convex URL.
 
 People sign in with a username and password, or with a code another signed-in device approves. A
 password sign-in also keeps the phone's device grant in the shared keychain, so the phone's other
-[media] apps sign in without asking; each app keeps its own session and shows as its own device.
+Lar apps sign in without asking; each app keeps its own session and shows as its own device.
 Switching person is signing out, then signing in. [ADR 0020](../../docs/decisions/0020-branded-clients-with-one-sign-in.md), "The movies iOS app as
 built", lists what each keychain holds and when the app asks for the password again.
 
