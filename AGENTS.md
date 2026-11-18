@@ -190,7 +190,8 @@ The example identities must be replaced with the model and tool that actually co
   Don't use Vitest's `--repeats`: `@effect/vitest` 4.0.3 counts each repeat as a finished test and
   closes a `layer(...)` early, which fails with missing files or `ECONNREFUSED`, not a product bug.
 - Project skills in `.agents/skills/`, pinned in `skills-lock.json`: `react-doctor`,
-  `react-best-practices`, and `diagnosing-bugs`. They're all model-invoked. `verify-media` is this
+  `react-best-practices`, `diagnosing-bugs`, `performance-optimization`, and
+  `browser-testing-with-devtools`. They're all model-invoked. `verify-media` is this
   repo's own: it runs disposable stacks built from the checkout and from main, each one container,
   the image, serving movies and music, drives both web apps, the CLI, and either iOS app on a
   simulator, and publishes the evidence to a PR. Its stacks share one set of demo data: the demo
