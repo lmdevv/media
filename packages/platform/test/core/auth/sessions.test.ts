@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
+import { patchByHand } from "../../admin";
+import { enroll } from "../../devices";
 import { importRows, newestRows, newestScheduledRuns } from "../../rows";
 import { createPerson, refusal, signInAs, unique } from "../../sign-in";
 import { coreStackFromEnvFile } from "../../stack-env";
@@ -146,6 +148,54 @@ describe.skipIf(stack === undefined)("the live-session check", { timeout: 120_00
     );
 
     expect(refreshed.tokens).toBeNull();
+  });
+
+  it("refuses refresh as soon as a user's session generation ends, before its purge", async () => {
+    if (stack === undefined) return;
+    const signedIn = await signInAs(stack, await createPerson(stack));
+    const { userId } = await signedIn.client.query(api.core.auth.sessions.current, {});
+
+    await patchByHand(stack, "users", [userId], { sessionGeneration: 1 });
+
+    expect(await refusal(signedIn.client.query(api.core.auth.sessions.current, {}))).toBe(
+      "unauthenticated",
+    );
+    expect(await refreshWith(stack, signedIn.refreshToken)).toEqual({ tokens: null });
+  });
+
+  it("refuses refresh when the session's user was removed", async () => {
+    if (stack === undefined) return;
+    const signedIn = await signInAs(stack, await createPerson(stack));
+    const { userId } = await signedIn.client.query(api.core.auth.sessions.current, {});
+
+    const removed = await fetch(`${stack.url}/api/mutation`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Convex ${stack.adminKey}` },
+      body: JSON.stringify({
+        path: "_system/frontend/deleteDocuments",
+        args: { toDelete: [{ id: userId, tableName: "users" }] },
+        format: "json",
+      }),
+    });
+
+    expect(await removed.json()).toMatchObject({ status: "success" });
+    expect(await refusal(signedIn.client.query(api.core.auth.sessions.current, {}))).toBe(
+      "unauthenticated",
+    );
+    expect(await refreshWith(stack, signedIn.refreshToken)).toEqual({ tokens: null });
+  });
+
+  it("refuses refresh when the session's device generation ends", async () => {
+    if (stack === undefined) return;
+    const signedIn = await signInAs(stack, await createPerson(stack));
+    const { deviceId } = await enroll(signedIn, "laptop");
+
+    await patchByHand(stack, "devices", [deviceId], { generation: 1 });
+
+    expect(await refusal(signedIn.client.query(api.core.auth.sessions.current, {}))).toBe(
+      "unauthenticated",
+    );
+    expect(await refreshWith(stack, signedIn.refreshToken)).toEqual({ tokens: null });
   });
 
   it("revokes a session from a refresh token that was rotated and invalidated since", async () => {

@@ -6,7 +6,7 @@ import { internal } from "../../_generated/api";
 import type { Doc, Id } from "../../_generated/dataModel";
 import { internalMutation } from "../../_generated/server";
 import type { MutationCtx } from "../../_generated/server";
-import { endSession } from "../sessions";
+import { endSession, liveSession } from "../sessions";
 
 /**
  * How long after its first use a refresh token still refreshes, as Convex Auth's
@@ -207,6 +207,8 @@ export const decideRefresh = async (
 
     return "answered";
   }
+
+  if ((await liveSession(ctx.db, token.sessionId, now)) === null) return "answered";
 
   if (token.firstUsedTime === undefined || token.firstUsedTime + REUSE_WINDOW_MS > now) {
     return "library";

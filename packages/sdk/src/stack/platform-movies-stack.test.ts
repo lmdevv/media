@@ -109,11 +109,17 @@ describe.skipIf(stack === undefined)("platform.movies on the stack", { timeout: 
 
         yield* Effect.promise(() => seedMovies(stack, userId, [{ name: "Shared film", age: 0 }]));
 
-        const { page } = yield* sharing.movies.titles.list({
+        let titles = yield* sharing.movies.titles.list({
           paginationOpts: { numItems: 10, cursor: null },
         });
 
-        const titleId = page[0]?.id;
+        while (titles.page.length === 0 && !titles.isDone) {
+          titles = yield* sharing.movies.titles.list({
+            paginationOpts: { numItems: 10, cursor: titles.continueCursor },
+          });
+        }
+
+        const titleId = titles.page[0]?.id;
 
         if (titleId === undefined) return yield* Effect.die("the shared title was not listed");
 
@@ -179,6 +185,9 @@ describe.skipIf(stack === undefined)("platform.movies on the stack", { timeout: 
           const refused = yield* Effect.flip(guest.core.guests.current());
           const sessionAfterRevoke = yield* Effect.flip(guest.core.auth.sessions.current());
           const currentAfterRevoke = yield* Effect.flip(guest.core.guests.current());
+          const statusAfterRevoke = yield* guest.session.currentStatus;
+          const storedAfterRevoke = values.has(key);
+          const tokenAfterRevoke = yield* guest.session.accessToken;
 
           const reused = yield* Effect.flip(
             guest.session.signInAsGuest({ code: Redacted.make(code), name: "Again" }),
@@ -195,6 +204,9 @@ describe.skipIf(stack === undefined)("platform.movies on the stack", { timeout: 
             refused,
             sessionAfterRevoke,
             currentAfterRevoke,
+            statusAfterRevoke,
+            storedAfterRevoke,
+            tokenAfterRevoke,
             reused,
           };
         }).pipe(Effect.provideContext(clock));
@@ -214,6 +226,9 @@ describe.skipIf(stack === undefined)("platform.movies on the stack", { timeout: 
       refused: { _tag: "Unauthenticated" },
       sessionAfterRevoke: { _tag: "Unauthenticated" },
       currentAfterRevoke: { _tag: "Unauthenticated" },
+      statusAfterRevoke: "signedOut",
+      storedAfterRevoke: false,
+      tokenAfterRevoke: Option.none(),
       reused: { _tag: "Expired" },
     });
     expect(answer.sharedAfterRefresh).toStrictEqual(answer.shared);

@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 
+import { ConvexHttpClient } from "convex/browser";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
@@ -9,7 +10,7 @@ import type { Id } from "../../../convex/_generated/dataModel";
 import { GUESTS_PER_LINK_MAX } from "../../../convex/core/guests/model";
 import { inOrder } from "../../../convex/core/lib/inOrder";
 import { BLOCKED_MAX, MEMBERS_MAX, PRESENT_MS } from "../../../convex/core/together/model";
-import { runFunction } from "../../admin";
+import { patchByHand, runFunction } from "../../admin";
 import { member } from "../../devices";
 import type { Member } from "../../devices";
 import { GUEST_ADDRESS, guestsOn, makeLink, openLink } from "../../guests";
@@ -102,6 +103,11 @@ const statusOf = (core: CoreStack, who: Session) =>
   );
 
 const currentOf = (who: Session) => who.signedIn.client.query(api.core.guests.current, {});
+
+const refresh = (core: CoreStack, who: Session) =>
+  new ConvexHttpClient(core.url, { logger: false }).action(api.auth.signIn, {
+    refreshToken: who.signedIn.refreshToken,
+  });
 
 const revokeAs = (who: Member, linkId: Id<"shareLinks">) =>
   who.signedIn.client.mutation(api.core.guests.links.revoke, { linkId });
@@ -198,6 +204,7 @@ describe.skipIf(stack === undefined)("guest links", { timeout: 180_000 }, () => 
       expect(await refusal(makeLink(admin, { kind: "item", item: shared }))).toBe("forbidden");
       expect(await refusal(currentOf(guest))).toBe("unauthenticated");
       expect(await statusOf(stack, guest)).toEqual({ state: "ended" });
+      expect(await refresh(stack, guest)).toEqual({ tokens: null });
       expect(await refusal(openLink(stack, before.code, "Kai"))).toBe("expired");
       expect((await admin.signedIn.client.query(api.core.guests.status, {})).mayShare).toBe(false);
     } finally {
@@ -235,6 +242,7 @@ describe.skipIf(stack === undefined)("guest links", { timeout: 180_000 }, () => 
       "unauthenticated",
     );
     expect(await refusal(currentOf(guest))).toBe("unauthenticated");
+    expect(await refresh(stack, guest)).toEqual({ tokens: null });
     expect(await refusal(openLink(stack, made.code, "Kai"))).toBe("expired");
 
     await allowAs(admin, maya.userId, true);
@@ -251,8 +259,11 @@ describe.skipIf(stack === undefined)("guest links", { timeout: 180_000 }, () => 
     await allowAs(admin, maya.userId, true);
 
     const made = await makeLink(maya, { kind: "item", item: shared });
+    const guest = await openLink(stack, made.code, "Sam");
 
     await maya.signedIn.client.mutation(api.core.auth.sessions.endAll, { keepCurrent: false });
+
+    expect(await refresh(stack, guest)).toEqual({ tokens: null });
 
     expect(await refusal(openLink(stack, made.code, "Sam"))).toBe("expired");
   });
@@ -277,6 +288,7 @@ describe.skipIf(stack === undefined)("guest links", { timeout: 180_000 }, () => 
     expect(await refusal(openLink(stack, mine.code, "Kai"))).toBe("expired");
     expect(await refusal(currentOf(guest))).toBe("unauthenticated");
     expect(await statusOf(stack, guest)).toEqual({ state: "ended" });
+    expect(await refresh(stack, guest)).toEqual({ tokens: null });
 
     const theirs = await makeLink(maya, { kind: "item", item: shared });
 
@@ -284,6 +296,29 @@ describe.skipIf(stack === undefined)("guest links", { timeout: 180_000 }, () => 
 
     expect(await refusal(openLink(stack, theirs.code, "Kai"))).toBe("expired");
   });
+
+  it.each(["link", "session"] as const)(
+    "refuses refresh after the guest's %s expires",
+    async (expired) => {
+      if (stack === undefined) return;
+      const { admin, shared } = await shelf(stack);
+      const made = await makeLink(admin, { kind: "item", item: shared });
+      const guest = await openLink(stack, made.code, "Sam");
+
+      expect((await refresh(stack, guest)).tokens).not.toBeNull();
+
+      if (expired === "link") {
+        await patchByHand(stack, "shareLinks", [made.linkId], { expiresAt: Date.now() - 1000 });
+      } else {
+        await patchByHand(stack, "authSessions", [guest.sessionId], {
+          expirationTime: Date.now() - 1000,
+        });
+      }
+
+      expect(await refusal(currentOf(guest))).toBe("unauthenticated");
+      expect(await refresh(stack, guest)).toEqual({ tokens: null });
+    },
+  );
 
   it("opens an expired link for no one, and makes links that last 7 days unless asked", async () => {
     if (stack === undefined) return;
@@ -491,6 +526,9 @@ describe.skipIf(stack === undefined)("guest links", { timeout: 180_000 }, () => 
       expect(await refusal(openLink(stack, made.code, "Lee"))).toBe("forbidden");
 
       await revokeAs(host, made.linkId);
+
+      expect(await refresh(stack, guest)).toEqual({ tokens: null });
+      expect(await refresh(stack, waiting)).toEqual({ tokens: null });
 
       const after = await host.signedIn.client.query(api.core.together.get, { domain: "movies" });
 
