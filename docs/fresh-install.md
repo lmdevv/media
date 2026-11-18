@@ -132,9 +132,8 @@ a library. At `v0.4.0` the module still used
 
 ### Add the release to the flake
 
-Pin the tag, and use the release's own build, made with the nixpkgs it was tested with. This page
-names the input `media`, since a host beside an old install may already have one named `movies`
-(homelab.md's name); to upgrade later, move the tag and run `nix flake update media`.
+Pin the tag, and use the release's own build, made with the nixpkgs it was tested with. To
+upgrade later, move the tag and run `nix flake update media`.
 
 ```nix
 # flake.nix
@@ -152,7 +151,7 @@ in
 
   services.media = {
     enable = true;
-    package = release.movies;
+    package = release.media;
     port = 8099;
     listenAddress = "127.0.0.1";                   # or the host's Tailscale address
     publicUrl = "http://localhost:8099";

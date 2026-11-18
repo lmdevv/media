@@ -60,7 +60,7 @@ let
     };
 in
 testers.runNixOSTest {
-  name = "movies";
+  name = "media";
 
   nodes = {
     machine = install {

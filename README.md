@@ -65,22 +65,22 @@ opens movies at `MEDIA_BASE_URL/movies` and music at `MEDIA_BASE_URL/music`.
 
 ```nix
 # flake.nix
-inputs.movies.url = "github:lmdevv/media";
+inputs.media.url = "github:lmdevv/media";
 
-# configuration.nix, with inputs.movies.nixosModules.default in modules
+# configuration.nix, with inputs.media.nixosModules.default in modules
 services.media = {
   enable = true;
   libraryDirs = [ "/srv/media/movies" "/srv/media/shows" "/srv/media/music" ];
   listenAddress = "100.64.0.1";                       # the host's Tailscale address
   publicUrl = "http://nas.tailnet.ts.net:8080";
   hardwareAcceleration = "qsv";                       # Intel Gen12+ iGPU or Arc
-  environmentFile = "/run/secrets/movies.env";        # TMDB_API_KEY=...; agenix or sops-nix
+  environmentFile = "/run/secrets/media.env";         # TMDB_API_KEY=...; agenix or sops-nix
 };
 ```
 
 The core's Convex backend runs as a pinned OCI container; the media service runs natively as the
 sandboxed `media-server` systemd unit, built from this repository
-(`nix build github:lmdevv/media#movies`). Caddy serves all of them on one port with the image's
+(`nix build github:lmdevv/media#media`). Caddy serves all of them on one port with the image's
 routes. Library folders are read-only to the media service, and `openFirewall` is off by default.
 Every unit, user, and folder the module makes has a `media` name, so from 0.4.1 it runs beside the
 old [movies] and [music] modules ([docs/fresh-install.md](docs/fresh-install.md)).
@@ -197,7 +197,7 @@ version as the server.
 | Anywhere with Node 22+      | `npm install -g @lmdevv/media` (it replaces `@lmdevv/movies`)                                  |
 | Linux or macOS without Node | `media-<os>-<arch>` from the [latest release](https://github.com/lmdevv/media/releases/latest) |
 | Another NixOS machine       | `nixosModules.cli` with `programs.media` (below)                                               |
-| Home Manager (Linux, macOS) | `homeManagerModules.movies` with `programs.media` (below)                                      |
+| Home Manager (Linux, macOS) | `homeManagerModules.media` with `programs.media` (below)                                       |
 | Nix, once                   | `nix run github:lmdevv/media -- --help`                                                        |
 
 ```sh
@@ -237,14 +237,14 @@ container. `docker compose exec media media` runs as root, so its login in the `
 Linux or macOS, sets the two URLs itself:
 
 ```nix
-# NixOS: inputs.movies.nixosModules.cli in the system's modules.
-# Home Manager: inputs.movies.homeManagerModules.movies in home-manager's modules.
+# NixOS: inputs.media.nixosModules.cli in the system's modules.
+# Home Manager: inputs.media.homeManagerModules.media in home-manager's modules.
 programs.media = {
   enable = true;
   convexUrl = "http://nas.tailnet.ts.net:8080/convex";
   mediaUrl = "http://nas.tailnet.ts.net:8080";
   # It builds with your nixpkgs; on an older one, use the flake's own build:
-  # package = inputs.movies.packages.${pkgs.stdenv.hostPlatform.system}.cli;
+  # package = inputs.media.packages.${pkgs.stdenv.hostPlatform.system}.cli;
 };
 ```
 

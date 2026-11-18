@@ -1,7 +1,7 @@
 { lib, pkgs }:
 {
   options = {
-    enable = lib.mkEnableOption "the [movies] command line";
+    enable = lib.mkEnableOption "the [media] command line";
 
     package = lib.mkOption {
       type = lib.types.package;
@@ -9,7 +9,7 @@
       defaultText = lib.literalExpression "pkgs.callPackage ./cli.nix { }";
       description = ''
         The `media` CLI package, built with your nixpkgs. On a nixpkgs too old to build it, use
-        the flake's own: `movies.packages.''${pkgs.stdenv.hostPlatform.system}.cli`.
+        the flake's own: `media.packages.''${pkgs.stdenv.hostPlatform.system}.cli`.
       '';
     };
 

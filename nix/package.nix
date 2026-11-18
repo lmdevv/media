@@ -1,4 +1,4 @@
-#   nix build .#movies
+#   nix build .#media
 #
 # After a change to pnpm-lock.yaml, `scripts/check-pnpm-deps-hash.sh --write` updates
 # `pnpmDeps.hash`.
@@ -19,7 +19,7 @@ let
   nodejs = nodejs_24;
 in
 stdenv.mkDerivation (finalAttrs: {
-  pname = "movies";
+  pname = "media";
   version = (lib.importJSON ../packages/platform/package.json).version;
 
   src = lib.fileset.toSource {
@@ -86,7 +86,7 @@ stdenv.mkDerivation (finalAttrs: {
   installPhase = ''
     runHook preInstall
 
-    lib=$out/lib/movies
+    lib=$out/lib/media
     mkdir -p $lib/media/scripts $out/bin
 
     # The core's tsconfig extends the shared config, which `convex deploy` reads.
@@ -114,20 +114,20 @@ stdenv.mkDerivation (finalAttrs: {
 
     # Without --enable-source-maps and with two malloc arenas, as in the image's run file
     # (docs/decisions/0027, "Idle memory").
-    makeWrapper ${lib.getExe nodejs} $out/bin/movies-media \
+    makeWrapper ${lib.getExe nodejs} $out/bin/media-server \
       --add-flags "$lib/media/dist/main.js" \
       --set-default MALLOC_ARENA_MAX 2 \
       --set-default FFMPEG_PATH ${lib.getExe' ffmpeg-full "ffmpeg"} \
       --set-default FFPROBE_PATH ${lib.getExe' ffmpeg-full "ffprobe"} \
       --set-default CONVEX_BACKEND_DIR $lib/platform
 
-    makeWrapper ${lib.getExe nodejs} $out/bin/movies-configure-web \
+    makeWrapper ${lib.getExe nodejs} $out/bin/media-configure-movies \
       --add-flags "$lib/media/scripts/configure-web.ts --from $lib/web"
 
-    makeWrapper ${lib.getExe nodejs} $out/bin/movies-configure-account \
+    makeWrapper ${lib.getExe nodejs} $out/bin/media-configure-account \
       --add-flags "$lib/media/scripts/configure-web.ts --from $lib/account"
 
-    makeWrapper ${lib.getExe nodejs} $out/bin/movies-configure-music \
+    makeWrapper ${lib.getExe nodejs} $out/bin/media-configure-music \
       --add-flags "$lib/media/scripts/configure-web.ts --from $lib/music"
 
     # The Convex CLI reads the project's package.json, so both run from its folder.
@@ -150,7 +150,7 @@ stdenv.mkDerivation (finalAttrs: {
     description = "Self-hosted media for people and agents: the account client and movies";
     homepage = "https://github.com/lmdevv/media";
     license = lib.licenses.mit;
-    mainProgram = "movies-media";
+    mainProgram = "media-server";
     platforms = lib.platforms.linux;
   };
 })
