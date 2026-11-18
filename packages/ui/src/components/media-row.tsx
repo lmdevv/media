@@ -39,7 +39,8 @@ function SeeAll(props: useRender.ComponentProps<"a">) {
 }
 
 /**
- * A labeled, horizontally scrolling row of cards, such as Continue watching. The track bleeds off
+ * A labeled, horizontally scrolling row of cards, such as Continue watching. Its title, "See all",
+ * and first card line up with the centered page content under the top bar, and the track bleeds off
  * the right edge and snaps to cards; ←/→ move between cards and `j`/`k` (see `moveRowFocus`) move
  * between rows.
  *
@@ -65,9 +66,12 @@ export function MediaRow({
   return (
     <section
       aria-labelledby={headingId}
-      className={cn("@container flex w-full flex-col", className)}
+      className={cn(
+        "@container flex w-full flex-col [--row-inset:max(var(--spacing-16),calc((100cqw-var(--container-content))/2))]",
+        className,
+      )}
     >
-      <div className="flex items-center gap-1 px-5 pt-6 pb-2.5 @3xl:box-content @3xl:max-w-content @3xl:items-baseline @3xl:justify-between @3xl:px-16 @3xl:pt-0 @3xl:pb-3.5">
+      <div className="flex items-center gap-1 px-5 pt-6 pb-2.5 @3xl:items-baseline @3xl:justify-between @3xl:px-(--row-inset) @3xl:pt-0 @3xl:pb-3.5">
         <h2
           id={headingId}
           className="font-sans text-heading/6 font-bold text-text @3xl:text-heading/heading @3xl:tracking-tight"
@@ -91,7 +95,7 @@ export function MediaRow({
       <div
         data-media-row=""
         onKeyDown={onTrackKeyDown}
-        className="flex snap-x snap-mandatory scroll-px-4 gap-2.5 overflow-x-auto overscroll-x-contain px-4 py-1 scrollbar-none @3xl:scroll-px-16 @3xl:gap-4 @3xl:px-16"
+        className="flex snap-x snap-mandatory scroll-px-4 gap-2.5 overflow-x-auto overscroll-x-contain px-4 py-1 scrollbar-none @3xl:scroll-px-(--row-inset) @3xl:gap-4 @3xl:px-(--row-inset)"
       >
         {children}
       </div>

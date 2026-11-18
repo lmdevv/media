@@ -391,7 +391,7 @@ export function KitGallery() {
             <Badge>ATMOS</Badge>
           </>
         }
-        overview="Paul Atreides unites with Chani and the Fremen while seeking revenge against the conspirators who destroyed his family."
+        overview="Paul Atreides unites with Chani and the Fremen while seeking revenge against the conspirators who destroyed his family. Facing a choice between the love of his life and the fate of the known universe, he must keep a terrible future from coming to pass. Across the deep desert, the Fremen test him, the Harkonnens hunt him, and the Emperor watches as the spice war spreads from Arrakis to every great house."
         topBar={topBar(true)}
         actions={
           <>

@@ -1,4 +1,5 @@
 import { cn } from "@media/ui/lib/utils";
+import { useCallback, useId, useState } from "react";
 import type { ReactNode } from "react";
 
 type HeroContent = {
@@ -18,6 +19,8 @@ type HeroContent = {
  * @param highlight - A short green lead-in to the facts, such as `New this week`.
  * @param facts - Plain facts such as `2024 · 2h 46m · PG-13`.
  * @param badges - Mono badges after the facts, such as `4K HDR`.
+ * @param overview - The synopsis, held to three lines; when it runs longer, "More" opens the rest in
+ *   a short scrolling box.
  * @param topBar - The `TopBar` drawn over the top of the backdrop.
  */
 export function Hero({
@@ -76,15 +79,57 @@ export function Hero({
               {badges}
             </div>
           )}
-          {overview === undefined ? null : (
-            <p className="w-125 font-sans text-lead/6.5">{overview}</p>
-          )}
+          {overview === undefined ? null : <HeroOverview key={overview} text={overview} />}
           {actions === undefined ? null : (
             <div className="flex items-center gap-3 pt-2">{actions}</div>
           )}
         </div>
       </div>
     </section>
+  );
+}
+
+function HeroOverview({ text }: { readonly text: string }) {
+  const id = useId();
+  const [expanded, setExpanded] = useState(false);
+  const [clamped, setClamped] = useState(false);
+
+  const watchClamp = useCallback((element: HTMLParagraphElement | null) => {
+    if (element === null) return undefined;
+
+    const observer = new ResizeObserver(() => {
+      setClamped(element.scrollHeight > element.clientHeight);
+    });
+
+    observer.observe(element);
+
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <div className="flex w-125 flex-col items-start gap-1.5">
+      <p
+        id={id}
+        ref={expanded ? undefined : watchClamp}
+        className={cn(
+          "font-sans text-lead/6.5",
+          expanded ? "max-h-45.5 overflow-y-auto overscroll-contain" : "line-clamp-3",
+        )}
+      >
+        {text}
+      </p>
+      {clamped ? (
+        <button
+          type="button"
+          aria-expanded={expanded}
+          aria-controls={id}
+          onClick={() => setExpanded((open) => !open)}
+          className="cursor-pointer rounded-bar font-sans text-body/body font-semibold text-text/75 underline-offset-4 transition-colors hover:text-text hover:underline"
+        >
+          {expanded ? "Less" : "More"}
+        </button>
+      ) : null}
+    </div>
   );
 }
 

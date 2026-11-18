@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import type { Locator } from "@playwright/test";
 
 import { NO_STACK, createPerson, moviesPath, reachableStack, signIn } from "./stack/people";
 import type { Person } from "./stack/people";
@@ -62,3 +63,62 @@ test("rows take focus with j and k and move between cards with arrows", async ({
   await page.keyboard.press("k");
   await expect(focused).toContainText("Severance · S2:E4");
 });
+
+const edges = async (
+  locator: Locator,
+): Promise<{ readonly left: number; readonly right: number; readonly bottom: number }> => {
+  const box = await locator.boundingBox();
+
+  if (box === null) throw new Error(`${locator.toString()} is not on screen`);
+
+  return {
+    left: Math.round(box.x),
+    right: Math.round(box.x + box.width),
+    bottom: Math.round(box.y + box.height),
+  };
+};
+
+test("a long hero overview shows three lines until More opens it", async ({ page }) => {
+  await page.setViewportSize({ width: 1710, height: 1000 });
+  await page.goto(moviesPath("/dev/kit"));
+
+  const hero = page.locator('[data-slot="hero"]');
+  const overview = hero.getByText(/^Paul Atreides unites/u);
+
+  const lines = () =>
+    overview.evaluate((element) =>
+      Math.round(element.clientHeight / Number.parseFloat(getComputedStyle(element).lineHeight)),
+    );
+
+  await expect(hero.getByRole("button", { name: "More", exact: true })).toHaveAttribute(
+    "aria-expanded",
+    "false",
+  );
+  expect(await lines()).toBe(3);
+
+  await hero.getByRole("button", { name: "More", exact: true }).click();
+  await expect(hero.getByRole("button", { name: "Less", exact: true })).toHaveAttribute(
+    "aria-expanded",
+    "true",
+  );
+  expect(await lines()).toBeGreaterThan(3);
+  expect((await edges(hero.getByRole("button", { name: "Play" }))).bottom).toBeLessThanOrEqual(
+    (await edges(hero)).bottom,
+  );
+});
+
+for (const width of [1710, 1280]) {
+  test(`at ${width}px a row's title, See all and first card line up with the top bar`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 1000 });
+    await page.goto(moviesPath("/dev/kit"));
+
+    const bar = await edges(page.locator('[data-slot="hero"] [data-slot="top-bar"]'));
+    const row = page.getByRole("region", { name: "Continue watching for Alex" });
+
+    expect((await edges(row.getByRole("heading"))).left).toBe(bar.left);
+    expect((await edges(row.locator("[data-media-row] > *").first())).left).toBe(bar.left);
+    expect((await edges(row.getByText("See all"))).right).toBe(bar.right);
+  });
+}
