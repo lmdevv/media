@@ -156,6 +156,71 @@ describe("media's groups", () => {
 });
 
 describe("a core command", () => {
+  it("sends yes-or-no controls as typed and rejects value words without a request", async () => {
+    const env = freshHome();
+
+    const answer = await withFakeCore((fake) =>
+      Effect.gen(function* () {
+        yield* storeSession(env, fake.url);
+        yield* fake.reply(
+          "core/connect/targets:control",
+          Reply.Success({ value: { revision: 1 } }),
+        );
+
+        const runs = yield* Effect.forEach(
+          [
+            ["--device-id", "x", "--no-playing"],
+            ["x", "--playing"],
+            ["--device-id", "x", "--playing", "false"],
+          ],
+          (args) => Effect.promise(() => media(["auth", "targets", "control", ...args], env)),
+        );
+
+        return {
+          codes: runs.map((run) => run.code),
+          sent: (yield* fake.requestsTo("core/connect/targets:control")).map((call) => call.args),
+        };
+      }),
+    );
+
+    expect(answer).toStrictEqual({
+      codes: [ExitCode.ok, ExitCode.ok, ExitCode.usage],
+      sent: [
+        { deviceId: "x", playing: false },
+        { deviceId: "x", playing: true },
+      ],
+    });
+  });
+
+  it.each(["true", "false", "yes", "no"])(
+    "rejects a boolean value word %s before connecting",
+    async (word) => {
+      const runs = await Promise.all(
+        ["--playing", "--no-playing"].map((flag) =>
+          media(["auth", "targets", "control", "--device-id", "x", flag, word]),
+        ),
+      );
+
+      for (const run of runs) {
+        expect(run.code, run.stderr).toBe(ExitCode.usage);
+        expect(run.stdout).toBe("");
+        expect(run.stderr).toContain("--playing takes no value: use --playing or --no-playing");
+      }
+    },
+  );
+
+  it.each([
+    ["auth", "targets", "control", "x", "--device-id", "y"],
+    ["auth", "targets", "control", "--device-id", "x", "y"],
+    ["movies", "titles", "search", "alien", "covenant"],
+    ["auth", "targets", "list", "stray"],
+  ])("rejects unconsumed words in %j", async (...argv) => {
+    const run = await media(argv);
+
+    expect(run.code, run.stderr).toBe(ExitCode.usage);
+    expect(run.stdout).toBe("");
+  });
+
   it("asks for a sign-in when none is stored", async () => {
     const run = await media(["admin", "users", "list"]);
 

@@ -199,16 +199,39 @@ export const tokenize = (
         strict: true,
         allowPositionals: true,
         allowNegative: true,
+        tokens: true,
       });
 
-      return { values: parsed.values, positionals: parsed.positionals };
+      return parsed;
     },
     catch: (cause) =>
       new UsageError({
         message: cleanParseMessage(cause instanceof Error ? cause.message : String(cause)),
         command,
       }),
-  });
+  }).pipe(
+    Effect.flatMap((parsed) => {
+      for (const [index, token] of parsed.tokens.entries()) {
+        const next = parsed.tokens[index + 1];
+
+        if (
+          token.kind === "option" &&
+          options[token.name]?.type === "boolean" &&
+          next?.kind === "positional" &&
+          /^(true|false|yes|no)$/iu.test(next.value)
+        ) {
+          return Effect.fail(
+            new UsageError({
+              message: `--${token.name} takes no value: use --${token.name} or --no-${token.name}`,
+              command,
+            }),
+          );
+        }
+      }
+
+      return Effect.succeed({ values: parsed.values, positionals: parsed.positionals });
+    }),
+  );
 
 /** Flags every command accepts. */
 export const globalOptions: ParseArgsOptionsConfig = {
@@ -360,7 +383,7 @@ const assignPositionals = (
 
   const converted = FlagType.$match(spec.type, {
     List: ({ item }) => convertList(spec, item, positionals, command),
-    Text: () => Result.succeed<Schema.Json>(positionals.join(" ")),
+    Text: () => single(spec, positionals, command),
     Number: () => single(spec, positionals, command),
     Choice: () => single(spec, positionals, command),
     Boolean: () => single(spec, positionals, command),
@@ -379,7 +402,10 @@ const single = (
 
   if (raw === undefined || positionals.length > 1) {
     return Result.fail(
-      new UsageError({ message: `Expected one value for --${spec.flag}`, command }),
+      new UsageError({
+        message: `Expected one value for --${spec.flag}; quote values containing spaces or use --${spec.flag} <value>`,
+        command,
+      }),
     );
   }
 
@@ -388,7 +414,7 @@ const single = (
 
 /**
  * Builds wire arguments from parsed tokens: `--json`, then the positional value, then explicit
- * flags, each overriding the last.
+ * flags. A positional and its explicit flag cannot both be supplied.
  */
 export const buildArgs = (
   set: FlagSet,
@@ -396,6 +422,21 @@ export const buildArgs = (
   command: string,
 ): Result.Result<WireArgs, UsageError> =>
   Result.gen(function* () {
+    const positional = set.positional;
+
+    if (
+      positional !== null &&
+      tokens.positionals.length > 0 &&
+      tokens.values[positional.flag] !== undefined
+    ) {
+      return yield* Result.fail(
+        new UsageError({
+          message: `--${positional.flag} and the <${positional.flag}> argument both supply ${positional.flag}; use only one`,
+          command,
+        }),
+      );
+    }
+
     const raw = tokens.values["json"];
 
     const base: WireArgs = Predicate.isString(raw)

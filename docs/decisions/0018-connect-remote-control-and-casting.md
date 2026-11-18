@@ -77,7 +77,7 @@ so this build is the state, the commands, and the rule.
 | `core.connect.targets.move`     | a controller                  | Stops one device and plays what it played on another                 |
 
 The CLI has them as `media auth player report`, `media auth player requested`,
-`media auth targets list`, `media auth targets control --device-id <id> --playing false`,
+`media auth targets list`, `media auth targets control --device-id <id> --no-playing`,
 `media auth targets load`, and `media auth targets move`.
 
 ### State
