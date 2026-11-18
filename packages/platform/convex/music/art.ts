@@ -5,8 +5,8 @@ import { fail } from "../core/lib/errors";
 import { serverQuery } from "../core/lib/serverFacing";
 
 /**
- * Hashes one `inUse` call checks at most, as old music's `artInUse` did: each costs three index
- * ranges and at most a track, an album, and an artist at their bounds, about 9 MiB for 200.
+ * Hashes one `inUse` call checks at most: each costs three index ranges and at most a track, an
+ * album, and an artist at their bounds, about 9 MiB for 200.
  */
 const IN_USE_MAX = 200;
 

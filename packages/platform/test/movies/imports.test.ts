@@ -624,7 +624,7 @@ describe.skipIf(stack === undefined)("the Jellyfin and Plex importer", { timeout
 
     expect(await seen(sam)).toEqual(sorted(shared));
     expect(await seen(aiko)).toEqual(sorted([...shared, [names.aiko, "view"]]));
-    // Current admins see restricted and unknown libraries too, as old movies' admins saw all.
+    // Current admins see restricted and unknown libraries too, as a source server's admins saw all.
     expect(await seen(outsider)).toEqual(
       sorted([...shared, [names.aiko, "view"], [names.hidden, "view"]]),
     );

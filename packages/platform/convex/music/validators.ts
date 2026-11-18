@@ -25,10 +25,10 @@ const lyricBody = v.union(
 );
 
 /**
- * One of a song's own lyric sets, from a file beside it or a tag inside it, never LRCLIB: old
- * music's `localLyricSet`, which `LocalLyricSet` in old music's commands encodes. The validator
- * checks its shape; `fit.ts` checks the rest (language tags, non-empty text and lines) in plain
- * TypeScript, as old music's Effect Schema did.
+ * One of a song's own lyric sets, from a file beside it or a tag inside it, never LRCLIB, which
+ * `LocalLyricSet` in the contracts encodes. The validator checks its shape; `fit.ts` checks the
+ * rest (language tags, non-empty text and lines) in plain TypeScript, since Convex functions do
+ * without Effect.
  */
 export const localLyricSet = v.object({
   kind: v.union(v.literal("main"), v.literal("translation"), v.literal("pronunciation")),
@@ -67,8 +67,8 @@ export const localLyricSet = v.object({
 export type LocalLyricSet = Infer<typeof localLyricSet>;
 
 /**
- * A lyric set LRCLIB returned for a song: old music's `lrclibLyricSet`, a local set's kind,
- * language, and body with the LRCLIB record it came from, checked like a local set (`fit.ts`).
+ * A lyric set LRCLIB returned for a song: a local set's kind, language, and body with the LRCLIB
+ * record it came from, checked like a local set (`fit.ts`).
  */
 export const lrclibLyricSet = v.object({
   kind: localLyricSet.fields.kind,
@@ -109,8 +109,8 @@ const lyricsFields = {
 };
 
 /**
- * One audio file a scan read, with its tags and its own lyrics: old music's `scannedTrack`, plus
- * whether its tags mark it explicit, which a kid's explicit filter hides (D17).
+ * One audio file a scan read, with its tags and its own lyrics, and whether its tags mark it
+ * explicit, which a kid's explicit filter hides (D17).
  */
 export const scannedTrack = v.object({
   ...lyricsFields,
@@ -146,7 +146,7 @@ export const scannedLyrics = v.object({ path: v.string(), ...lyricsFields });
 
 export type ScannedLyrics = Infer<typeof scannedLyrics>;
 
-/** A file the library knows, as a scan compares it with the disk: old music's fingerprint. */
+/** A file the library knows, as a scan compares it with the disk. */
 export const knownTrack = v.object({
   path: v.string(),
   size: v.number(),

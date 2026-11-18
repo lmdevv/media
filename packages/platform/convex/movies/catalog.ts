@@ -38,10 +38,9 @@ export const NO_EXTERNAL_IDS: ExternalIds = { tmdb: null, imdb: null, tvdb: null
 const TITLE_LIST_LIMIT = 20;
 
 /**
- * Most distinct genres a title keeps, far above any real file: old movies kept every NFO
- * `<genre>`, and so does this, up to here (ADR 0024). It exists only so one title's worst case
- * always fits one call's budget, since each genre is a `titleGenres` row; a title with more keeps
- * its first 256 and the batch goes on.
+ * Most distinct genres a title keeps, far above any real file: a title keeps every NFO `<genre>` up
+ * to here (ADR 0024). It exists only so one title's worst case always fits one call's budget, since
+ * each genre is a `titleGenres` row; a title with more keeps its first 256 and the batch goes on.
  */
 const GENRES_HARD_MAX = 256;
 

@@ -41,7 +41,7 @@ export const requireGivenName = (typed: string, refusal: string): string =>
 export const requireDeviceName = (typed: string): string =>
   requireGivenName(typed, `Name the device with 1 to ${GIVEN_NAME_MAX} printable characters`);
 
-/** Most code points in the name a person goes by, as old movies took for a profile's name. */
+/** Most code points in the name a person goes by. */
 export const DISPLAY_NAME_MAX = 80;
 
 /** The name a person goes by in greetings and lists, which others see: printable, at most 80. */

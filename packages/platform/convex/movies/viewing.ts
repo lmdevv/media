@@ -44,8 +44,8 @@ export const presentEpisodeFor = async (
 
 /**
  * The playback a report comes from: the id `movies.play.start` gave that one start, and when it
- * ran. Each start is its own playback, as each of old movies' playback sessions was, so two tabs
- * of one sign-in or a title opened again are two playbacks.
+ * ran. Each start is its own playback, so two tabs of one sign-in or a title opened again are two
+ * playbacks.
  */
 export interface PlayOrigin {
   readonly playId: string;

@@ -17,8 +17,8 @@ export const totalNames = (libraryId: Id<"libraries">): ReadonlyArray<string> =>
 ];
 
 /**
- * A music library's totals as old music's `libraryStats` kept them: tracks on disk, albums with a
- * track on disk, artists with such an album, and the tracks' total length.
+ * A music library's totals: tracks on disk, albums with a track on disk, artists with such an
+ * album, and the tracks' total length.
  */
 export interface Totals {
   readonly tracks: number;

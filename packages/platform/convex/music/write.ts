@@ -176,10 +176,10 @@ export interface MusicStore {
   ) => Promise<void>;
   readonly deleteTrack: (id: Id<"tracks">) => Promise<void>;
   /**
-   * Makes `sets`, already fitted (`fitLyrics`), a stored track's own lyrics, as old music's
-   * writer did: it reads the track's lyrics row, then patches it when its sets differ, deletes it
-   * for no sets, or inserts one. It goes by the row, never by what the track keeps of it, so a row changed by
-   * anything else is repaired, and the same sets again change nothing. It reads up to
+   * Makes `sets`, already fitted (`fitLyrics`), a stored track's own lyrics: it reads the track's
+   * lyrics row, then patches it when its sets differ, deletes it for no sets, or inserts one. It
+   * goes by the row, never by what the track keeps of it, so a row changed by anything else is
+   * repaired, and the same sets again change nothing. It reads up to
    * `LYRICS_ROWS_READ` rows and deletes the second, so a track left with two rows has one again
    * after its next write. It compares by the sets' shape (`sameLyrics`), and charges walking each
    * row it read, and the new sets at the size of the row they match or are written as
@@ -193,9 +193,9 @@ export interface MusicStore {
   /**
    * Makes `answer` LRCLIB's answer for a track at `revision`, replacing any older one, within the
    * row's bound: found lyrics keep their leading sets that fit (`fitLrclibLyrics`), and an answer
-   * left with none is stored as a miss, as old music stored lyrics it could not keep. It reads up
-   * to `LYRICS_ROWS_READ` rows and deletes the second, and charges walking the sets of each row
-   * it read and of the row it writes (`lyricsCost`). Answers the status it stored.
+   * left with none is stored as a miss. It reads up to `LYRICS_ROWS_READ` rows and deletes the
+   * second, and charges walking the sets of each row it read and of the row it writes
+   * (`lyricsCost`). Answers the status it stored.
    */
   readonly writeLrclibLyrics: (
     trackId: Id<"tracks">,

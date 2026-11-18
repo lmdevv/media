@@ -529,8 +529,8 @@ export const revoke = async <T extends ResourceType>(
 
 /**
  * Stops sharing `ref` with anyone but its managers, which needs `manage` on it: every `view` and
- * `edit` grant goes, the household's included, as old music's unshare with no one named did. A
- * resource has at most 1,000 grants, so this reads and deletes at most that many.
+ * `edit` grant goes, the household's included. A resource has at most 1,000 grants, so this reads
+ * and deletes at most that many.
  */
 export const unshareAll = async <T extends ResourceType>(
   ctx: Pick<MutationCtx, "db">,

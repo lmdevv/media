@@ -279,7 +279,7 @@ describe.skipIf(stack === undefined)("music browsing", { timeout: 180_000 }, () 
       await refusal(sam.signedIn.client.query(api.music.lyrics.get, { trackId: synced })),
     ).toBe("not_found");
   });
-  it("shows a song a person may see, with its album, as old music's links did", async () => {
+  it("shows a song a person may see, with its album, as a link to it needs", async () => {
     if (stack === undefined) return;
     const [aiko, sam] = await Promise.all([member(stack, "aiko"), member(stack, "sam")]);
     const kid = await explicitKid(stack, "kid");

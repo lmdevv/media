@@ -8,10 +8,10 @@ import { localLyricSet, lrclibAnswer } from "./validators";
 export const repeatMode = v.union(v.literal("off"), v.literal("all"), v.literal("one"));
 
 /**
- * The music catalog, ported from old music's `artists`, `albums`, `tracks`, and `localLyrics`
- * (ADR 0024), and what each person keeps of it: playlists, likes, plays, and the queue (ADR 0005).
- * A library's track total is its core item count, and its album, artist, and duration totals are
- * counters in `totals.ts`. LRCLIB's answers are in `lrclibLyrics`. Every write goes through
+ * The music catalog (`artists`, `albums`, `tracks`, and `localLyrics`; ADR 0024), and what each
+ * person keeps of it: playlists, likes, plays, and the queue (ADR 0005). A library's track total is
+ * its core item count, and its album, artist, and duration totals are counters in `totals.ts`.
+ * LRCLIB's answers are in `lrclibLyrics`. Every write goes through
  * `write.ts`, which keeps each document within its bound in `fit.ts`.
  */
 export const musicTables = {
@@ -144,11 +144,10 @@ export const musicTables = {
   }).index("by_track", ["trackId"]),
 
   /**
-   * What LRCLIB answered for a song, one row per song it was looked up for, replacing old music's
-   * `lyricLookups` answers and `lrclibLyrics`; the lookups themselves are `music.lyrics` jobs
-   * (ADR 0012). The row answers only while the song's tags still make `revision`, so a retagged
-   * song is looked up again. Found lyrics and an instrumental answer stand; a miss stands for 30
-   * days. It goes when the song is deleted.
+   * What LRCLIB answered for a song, one row per song it was looked up for; the lookups themselves
+   * are `music.lyrics` jobs (ADR 0012). The row answers only while the song's tags still make
+   * `revision`, so a retagged song is looked up again. Found lyrics and an instrumental answer
+   * stand; a miss stands for 30 days. It goes when the song is deleted.
    */
   lrclibLyrics: defineTable({
     trackId: v.id("tracks"),
@@ -160,8 +159,8 @@ export const musicTables = {
   }).index("by_track", ["trackId"]),
 
   /**
-   * The server's lyrics settings, old music's `remoteLyrics` server setting: one row at most, and
-   * none means LRCLIB lookups are on, old music's default.
+   * The server's lyrics settings: one row at most, and none means LRCLIB lookups are on, the
+   * default.
    */
   lyricsSettings: defineTable({
     /** Whether the server looks lyrics up on LRCLIB; off, no request reaches it. */
@@ -170,8 +169,8 @@ export const musicTables = {
 
   /**
    * A person's playlist. Who else may open it is in the core's `grants` (`playlist`): its owner
-   * manages it, a person it is shared with views or edits it, and the household views it when it
-   * is shared with everyone, as old music's `playlistShares` and `visibility` did.
+   * manages it, a person it is shared with views or edits it, and the household views it when it is
+   * shared with everyone.
    */
   playlists: defineTable({
     ownerId: v.id("users"),
@@ -212,7 +211,7 @@ export const musicTables = {
     .index("by_user_liked", ["userId", "likedAt"])
     .index("by_track", ["trackId"]),
 
-  /** One play of a song in a person's history, as old music's `history` kept it. */
+  /** One play of a song in a person's history. */
   plays: defineTable({
     userId: v.id("users"),
     trackId: v.id("tracks"),

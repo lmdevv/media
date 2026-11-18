@@ -607,7 +607,7 @@ const ADMINS_READ = 512;
 /**
  * Who sees a library an import adds besides its requester, its manager: everyone in the household
  * when every source user saw the source library; otherwise the core users of the source users it
- * named and every current owner and admin, as old movies showed admins every library.
+ * named and every current owner and admin, since a source server's admins saw every library.
  */
 const sharesOf = async (
   db: DatabaseReader,
@@ -659,11 +659,11 @@ const outermostOf = (roots: ReadonlyArray<string>): ReadonlyArray<string> => {
 };
 
 /**
- * Covers the held import's planned library at the checkpoint's cursor with movies libraries, as
- * old movies' importer did. A folder another library has, holds, or lies in is covered by it,
- * whose sharing stays as it is. The rest become new libraries of up to 16 folders each, named
- * after the source library ("<name>", "<name> 2", and on), each made through `makeLibrary` with
- * the requester its manager and its first scan queued. Each is shared through ordinary grants as
+ * Covers the held import's planned library at the checkpoint's cursor with movies libraries. A
+ * folder another library has, holds, or lies in is covered by it, whose sharing stays as it is. The
+ * rest become new libraries of up to 16 folders each, named after the source library ("<name>",
+ * "<name> 2", and on), each made through `makeLibrary` with the requester its manager and its first
+ * scan queued. Each is shared through ordinary grants as
  * `sharesOf` decides: with the household when every source user saw the source library;
  * otherwise `view` for the core users of the source users it named and for every current owner
  * and admin, who alone get it when the source did not say. Moves the checkpoint to the next

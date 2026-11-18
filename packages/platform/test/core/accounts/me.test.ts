@@ -149,7 +149,7 @@ describe.skipIf(stack === undefined)("your own account", { timeout: 120_000 }, (
     expect(await nameOf()).toBeNull();
   });
 
-  it("takes up to 80 characters, as old movies did, and refuses a blank, unprintable, or keyed one", async () => {
+  it("takes up to 80 characters and refuses a blank, unprintable, or keyed one", async () => {
     if (stack === undefined) return;
     const session = await signInAs(stack, await createPerson(stack, "fit"));
 

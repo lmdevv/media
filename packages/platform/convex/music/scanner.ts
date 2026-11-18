@@ -63,8 +63,7 @@ const scanWrite = <Value>(
  * characters is kept as `uniqueWithin` makes it (`fit.ts`), so the server compares its own
  * through the same bound.
  * `from` and `to` bound the page to paths from `from` up to `to`, so the server can read ranges of
- * a large library side by side, as old music's `fingerprints` did. Rows of a removed folder are
- * the purge's to delete.
+ * a large library side by side. Rows of a removed folder are the purge's to delete.
  */
 export const known = serverMutation({
   args: {

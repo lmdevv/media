@@ -24,11 +24,11 @@ interface SeenLibrary {
 
 export const { list } = register({
   /**
-   * Every kind of job, newest first, as old music's jobs page listed its own. A scan shows only
-   * where the caller sees its library, and its error, which may name the folders, only to the
-   * library's managers, as `core.libraries.get` shows it. A lyrics lookup names a song, so it
-   * shows only where the caller may see that song, as `music.lyrics.get` and the backfill decide
-   * through its library. The stack suite's probe jobs never run on a server and are left out.
+   * Every kind of job, newest first. A scan shows only where the caller sees its library, and its
+   * error, which may name the folders, only to the library's managers, as `core.libraries.get`
+   * shows it. A lyrics lookup names a song, so it shows only where the caller may see that song, as
+   * `music.lyrics.get` and the backfill decide through its library. The stack suite's probe jobs
+   * never run on a server and are left out.
    */
   list: async (ctx, { status, paginationOpts }, caller) => {
     const reach = await reachOf(ctx.db, caller);

@@ -60,16 +60,15 @@ export const placeAlbum = async (
 };
 
 /**
- * A track's file revision as old music names it: its size and change time in base 36, which the
- * server's `ETag` for the original repeats, so a device resumes a download with `If-Range`.
+ * A track's file revision: its size and change time in base 36, which the server's `ETag` for the
+ * original repeats, so a device resumes a download with `If-Range`.
  */
 const fileRevision = (size: number, mtimeMs: number): string =>
   `${size.toString(36)}-${Math.trunc(mtimeMs).toString(36)}`;
 
 /**
- * A track as a download describes it: its file as it is on disk, at every quality, as old music
- * kept downloads. A track a scan marked missing is not on disk, so it is gone until a scan finds
- * it again. Reads 2.
+ * A track as a download describes it: its file as it is on disk, at every quality. A track a scan
+ * marked missing is not on disk, so it is gone until a scan finds it again. Reads 2.
  */
 export const trackSource: SourceLoader<"track"> = async (db, trackId, libraryOf) => {
   const track = await db.get(trackId);

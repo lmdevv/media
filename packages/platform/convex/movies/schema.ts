@@ -22,10 +22,9 @@ import {
 } from "./validators";
 
 /**
- * The movies catalog, ported from old movies' tables (ADR 0024), and what each person keeps of it:
- * progress and their list, keyed by the person (D12, D36). Profiles, rooms, playback sessions, and
- * old movies' identity tables do not come over. A library's title total is its core item count,
- * and its episode and file totals are counters in `totals.ts`.
+ * The movies catalog (ADR 0024), and what each person keeps of it: progress and their list, keyed
+ * by the person (D12, D36). Accounts and together sessions live in the core. A library's title
+ * total is its core item count, and its episode and file totals are counters in `totals.ts`.
  */
 export const moviesTables = {
   titles: defineTable({
@@ -273,7 +272,7 @@ export const moviesTables = {
 
   /**
    * One person's progress through a movie (`episodeId` null) or an episode, and so their watch
-   * history. A row stays when its title is purged; reads skip it, as old movies did.
+   * history. A row stays when its title is purged; reads skip it.
    */
   watchProgress: defineTable({
     userId: v.id("users"),

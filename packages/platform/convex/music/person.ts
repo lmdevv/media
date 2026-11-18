@@ -16,7 +16,7 @@ import type { MusicStore } from "./write";
  * limits whatever they hold (ADR 0005, ADR 0024).
  */
 
-/** Songs one command takes at most, as old music's `TrackIds` did. */
+/** Songs one command takes at most. */
 const TRACKS_IN_MAX = 2000;
 
 /** Refuses a list of songs that is empty or longer than `max`. */

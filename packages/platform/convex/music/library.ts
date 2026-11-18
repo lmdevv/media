@@ -15,7 +15,7 @@ import { LIKED_READS, getsOf, rowsOf } from "./reads";
 import { totalsOf } from "./totals";
 import type { Totals } from "./totals";
 
-/** Albums each home row shows, as old music's did. */
+/** Albums each home row shows. */
 const HOME_ROW = 12;
 
 /**
@@ -24,7 +24,7 @@ const HOME_ROW = 12;
  */
 const NEWEST_PER_LIBRARY = HOME_ROW + 4;
 
-/** Plays the recently played rows are taken from, as old music read them. */
+/** Plays the recently played rows are taken from. */
 const RECENT_PLAYS = 100;
 
 /** A library's totals: four counters of at most 16 shards each. */
@@ -35,7 +35,7 @@ const SEARCH_DEFAULT = 20;
 
 const SEARCH_MAX = 50;
 
-/** The longest search old music took. */
+/** The longest search query taken. */
 const QUERY_MAX = 200;
 
 /** What an artist's artwork fallback reads. */

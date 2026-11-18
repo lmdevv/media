@@ -90,11 +90,11 @@ export const { list, get } = register({
 });
 
 /**
- * What the server needs to stream a track a ticket names, as old music's `trackSource` answered
- * it: its path, its library's folders now, its file's size and change time, and its codec. Null
- * for an id that names no track, and for a track a scan marked missing, whose library is gone or
- * is not a music library, or that no folder of its library holds now (a removed folder's purge has
- * yet to reach it). Reads the track, its library, and its folders: at most 18 documents.
+ * What the server needs to stream a track a ticket names: its path, its library's folders now, its
+ * file's size and change time, and its codec. Null for an id that names no track, and for a track a
+ * scan marked missing, whose library is gone or is not a music library, or that no folder of its
+ * library holds now (a removed folder's purge has yet to reach it). Reads the track, its library,
+ * and its folders: at most 18 documents.
  */
 export const resolve = serverQuery({
   args: { trackId: v.string() },

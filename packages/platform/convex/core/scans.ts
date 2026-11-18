@@ -79,11 +79,11 @@ export const withLibraryItems = async <Value>(
 };
 
 /**
- * Queues a scan of `library` with its kind's dedupe, so a scan already queued or running is
- * joined, and points `lastScan` at a scan this made: the one way a scan is queued, for a manager's
- * scan, a change of folders, a wait that ended, and a file that changed (ADR 0024). A `full` scan
- * reads every file again, as a manager may ask; a scan already queued or running is joined
- * whatever its mode, as old movies' scan did.
+ * Queues a scan of `library` with its kind's dedupe, so a scan already queued or running is joined,
+ * and points `lastScan` at a scan this made: the one way a scan is queued, for a manager's scan, a
+ * change of folders, a wait that ended, and a file that changed (ADR 0024). A `full` scan reads
+ * every file again, as a manager may ask; a scan already queued or running is joined whatever its
+ * mode, so two scans of one library never run at once.
  */
 export const queueScan = async (
   ctx: JobCtx,

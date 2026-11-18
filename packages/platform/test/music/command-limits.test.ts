@@ -326,7 +326,7 @@ describe.skipIf(stack === undefined)("music command limits", { timeout: 300_000 
     const many = Array.from({ length: 2000 }, (_, n) => at(shelf.library.itemIds, n % 100));
     const mark = await logMark(stack);
 
-    // As old music's `playOrder`: a list longer than the queue keeps 1,000 songs from the chosen one.
+    // A list longer than the queue keeps 1,000 songs from the chosen one (`playOrder`).
     await aiko.signedIn.client.mutation(api.music.queue.play, { trackIds: many, index: 0 });
 
     expect((await aiko.signedIn.client.query(api.music.queue.get, {})).count).toBe(1000);

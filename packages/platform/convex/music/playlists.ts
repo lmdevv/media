@@ -36,7 +36,7 @@ import { TRACK_ROW_BYTES, pageRowsFor } from "./reads";
 import { musicStore } from "./write";
 import type { MusicStore, PlaylistChanges } from "./write";
 
-/** Songs a playlist holds at most, as old music's `PLAYLIST_LIMIT`. */
+/** Songs a playlist holds at most. */
 const PLAYLIST_ITEMS_MAX = 2000;
 
 /** Entries whose songs a playlist's mosaic covers come from: its first few. */
@@ -105,8 +105,8 @@ const summariesFor = (db: DatabaseReader, reach: Reach): Summaries => ({
 });
 
 /**
- * A playlist's summary, as old music's `presentPlaylist` showed it, with up to four covers taken
- * only from songs the caller may see: a cover is signed for anyone who holds its path.
+ * A playlist's summary, with up to four covers taken only from songs the caller may see: a cover is
+ * signed for anyone who holds its path.
  */
 const summarize = async (
   summaries: Summaries,
@@ -159,7 +159,7 @@ const summarize = async (
   };
 };
 
-/** A playlist's name as old music's `Name` took it: printable, 1 to 120 characters. */
+/** A playlist's name: printable, 1 to 120 characters. */
 const playlistName = (typed: string): string => {
   const name = printableWithin(typed, MUSIC_BOUNDS.playlistName);
 
@@ -192,7 +192,7 @@ const hasUnprintable = (text: string): boolean =>
     );
   });
 
-/** A description as old music's `Description` took it: trimmed, at most 500; empty for none. */
+/** A playlist's description: trimmed, at most 500; empty for none. */
 const playlistDescription = (typed: string): string | null => {
   const description = typed.trim();
 
@@ -248,12 +248,12 @@ interface Appended {
 }
 
 /**
- * Appends `trackIds` to a playlist the caller may edit, as old music's `appendTracks` did: every
- * song the call reads must exist and be one the caller may see, or the call fails `not_found` and
- * adds none of them; a song whose file went missing goes on, and plays once the file is back. A
- * playlist holds at most 2,000 entries, so more fail with `conflict`. It reads the leading songs
- * it can within Convex's limits and answers the rest, which the caller sends again
- * (`readDecidedLeading`): what earlier calls added stays when a later one is refused.
+ * Appends `trackIds` to a playlist the caller may edit: every song the call reads must exist and be
+ * one the caller may see, or the call fails `not_found` and adds none of them; a song whose file
+ * went missing goes on, and plays once the file is back. A playlist holds at most 2,000 entries, so
+ * more fail with `conflict`. It reads the leading songs it can within Convex's limits and answers
+ * the rest, which the caller sends again (`readDecidedLeading`): what earlier calls added stays
+ * when a later one is refused.
  */
 const appendTracks = async (
   ctx: Pick<MutationCtx, "db">,
@@ -711,8 +711,8 @@ export const {
 
     store.meter.charge(shareCost(reach));
 
-    // Leaving needs a share by name, as old music's did: a playlist shared with everyone stays
-    // open to whoever has it until its owner makes it private.
+    // Leaving needs a share by name: a playlist shared with everyone stays open to whoever has it
+    // until its owner makes it private.
     if (leaving && (await grantOn(ctx.db, ref, caller.userId)) === null) {
       return fail("not_found", "This playlist isn't shared with you by name");
     }

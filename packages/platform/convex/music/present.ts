@@ -109,9 +109,9 @@ export const ARTIST_ART_ALBUMS = 4;
 
 /**
  * The artwork to show for an artist: their own, or else the newest of their albums on disk with
- * artwork among their `ARTIST_ART_ALBUMS` newest, as old music showed. An artist's albums are in
- * the artist's own library, so whoever sees the artist sees them. Reads one index range when the
- * artist has no artwork of their own.
+ * artwork among their `ARTIST_ART_ALBUMS` newest. An artist's albums are in the artist's own
+ * library, so whoever sees the artist sees them. Reads one index range when the artist has no
+ * artwork of their own.
  */
 export const artistArt = async (
   db: DatabaseReader,

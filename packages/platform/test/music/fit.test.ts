@@ -135,7 +135,7 @@ describe("music document bounds", () => {
     expect(fitLyrics([plain(wide(400_000))])).toEqual([]);
   });
 
-  it("check lyric sets as old music's schema did", () => {
+  it("check lyric sets as the contracts' schemas do", () => {
     expect(() => checkLyrics([plain("Words")])).not.toThrow();
     expect(() => checkLyrics([{ ...plain("Words"), lang: "pt-BR" }])).not.toThrow();
     expect(() => checkLyrics([{ ...plain("Words"), lang: "EN" }])).toThrow(/BCP 47/u);

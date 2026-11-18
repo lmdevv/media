@@ -14,7 +14,7 @@ import { pageRowsFor, rowsOf } from "./reads";
 /** What one artist of a list reads besides its library's grants: the artist and its library. */
 const ARTIST_ROW_READS = 2;
 
-/** An artist's songs the top songs are taken from, as old music read them. */
+/** An artist's songs the top songs are taken from. */
 const TOP_TRACKS_READ = 200;
 
 /** Top songs an artist's page shows. */
