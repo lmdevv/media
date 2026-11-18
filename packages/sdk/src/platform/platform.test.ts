@@ -16,7 +16,7 @@ const TOKEN = jwtExpiringAt(Date.now() + 3_600_000, "user-1|session-1");
 
 const signedIn = Reply.Success({ value: { tokens: { token: TOKEN, refreshToken: "refresh-1" } } });
 
-const SERVER = { name: "[media]", version: "0.2.0", hasOwner: true };
+const SERVER = { name: "Lar", version: "0.2.0", hasOwner: true };
 
 const withPlatform = <A, E>(
   body: (

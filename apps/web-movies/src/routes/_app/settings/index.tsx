@@ -7,7 +7,7 @@ import { useTheme } from "next-themes";
 import { ACCOUNT_SETTINGS } from "@/lib/account-links";
 
 export const Route = createFileRoute("/_app/settings/")({
-  head: () => ({ meta: [{ title: "Preferences · [movies]" }] }),
+  head: () => ({ meta: [{ title: "Preferences · Lar Movies" }] }),
   component: PreferencesPage,
 });
 

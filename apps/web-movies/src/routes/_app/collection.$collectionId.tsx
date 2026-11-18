@@ -60,7 +60,7 @@ function CollectionPage() {
 
   return (
     <div className="flex flex-col pb-20">
-      <title>{`${data.name} · [movies]`}</title>
+      <title>{`${data.name} · Lar Movies`}</title>
       <div
         className="on-media relative isolate flex h-110 flex-col justify-end bg-dark-surface bg-cover bg-center px-4 pb-8 md:px-16"
         style={backdrop === undefined ? undefined : { backgroundImage: `url("${backdrop}")` }}

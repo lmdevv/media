@@ -238,7 +238,7 @@ describe("a core command", () => {
       Effect.gen(function* () {
         yield* fake.reply(
           "core/server:info",
-          Reply.Success({ value: { name: "[media]", version: "0.2.0", hasOwner: true } }),
+          Reply.Success({ value: { name: "Lar", version: "0.2.0", hasOwner: true } }),
         );
 
         return yield* Effect.promise(() =>
@@ -249,7 +249,7 @@ describe("a core command", () => {
 
     expect(answer.code).toBe(ExitCode.ok);
     expect(JSON.parse(answer.stdout)).toEqual({
-      name: "[media]",
+      name: "Lar",
       version: "0.2.0",
       hasOwner: true,
     });

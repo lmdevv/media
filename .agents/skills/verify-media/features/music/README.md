@@ -1,6 +1,6 @@
-# [music] verification map
+# Lar Music verification map
 
-This directory is the maintained source for verifying what a [music] user sees and does on a
+This directory is the maintained source for verifying what a Lar Music user sees and does on a
 verify-media side: the music client at `/music`, the `media` CLI's `music` group, and the music
 iOS app. Read this index before you drive the app, then use the matching feature file as the
 recipe. Every browser command takes `--app music` on the page's first command, and every CLI

@@ -31,6 +31,7 @@ stdenv.mkDerivation (finalAttrs: {
         ../pnpm-workspace.yaml
         ../tsconfig.json
         ../apps
+        ../brand
         ../packages
         ../deploy/functions-hash.sh
         ../deploy/image/argv-secret.c

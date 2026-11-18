@@ -23,7 +23,7 @@ import { useMusic, useRead } from "@/lib/platform";
 const MISSING: MissingCopy = {
   title: "This artist isn't in your library anymore",
   description:
-    "A rescan may have removed their songs, their folder was removed from [music], they're in a library that isn't shared with you, or the link is wrong.",
+    "A rescan may have removed their songs, their folder was removed from Lar Music, they're in a library that isn't shared with you, or the link is wrong.",
   back: { to: "/artists", label: "Back to artists" },
 };
 

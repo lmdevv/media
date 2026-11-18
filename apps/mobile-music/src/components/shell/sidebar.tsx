@@ -210,7 +210,7 @@ export function Sidebar({
   return (
     <View className="flex-1 gap-4 overflow-hidden rounded-mobile-card bg-surface px-3 py-4 dark:bg-bg">
       <View className="h-hit-target flex-row items-center justify-between pl-3">
-        <Text variant="wordmark">[music]</Text>
+        <Text variant="wordmark">Lar Music</Text>
         <IconButton
           icon={PanelLeft}
           label="Hide sidebar"

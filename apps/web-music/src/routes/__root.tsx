@@ -15,8 +15,14 @@ export const Route = createRootRoute({
   errorComponent: LazyRouteError,
   head: () => ({
     meta: [
-      { title: "[music]" },
+      { title: "Lar Music" },
       { name: "description", content: "Your own music library, streamed from your server" },
+    ],
+    links: [
+      { rel: "icon", href: `${import.meta.env.BASE_URL}favicon.ico`, sizes: "48x48" },
+      { rel: "icon", href: `${import.meta.env.BASE_URL}favicon.svg`, type: "image/svg+xml" },
+      { rel: "apple-touch-icon", href: `${import.meta.env.BASE_URL}apple-touch-icon.png` },
+      { rel: "manifest", href: `${import.meta.env.BASE_URL}manifest.webmanifest` },
     ],
   }),
 });

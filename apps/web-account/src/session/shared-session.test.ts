@@ -23,7 +23,7 @@ import { jwtExpiringAt, Reply } from "@media/sdk/testing/fake-convex";
 import * as BrowserTabs from "./testing/browser-tabs";
 import { DAY, onClockSkewedBy } from "./testing/clock";
 
-const SERVER = { name: "[media]", version: "0.2.0", hasOwner: true };
+const SERVER = { name: "Lar", version: "0.2.0", hasOwner: true };
 
 const subjectOf = (authorization: string | undefined): Option.Option<string> =>
   Option.flatMap(Option.fromNullishOr(authorization?.replace(/^Bearer /u, "")), (token) =>

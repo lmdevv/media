@@ -12,7 +12,7 @@ export const Route = createFileRoute("/_app/admin/libraries/$libraryId/match/$ti
     }),
     stringify: (params) => ({ libraryId: params.libraryId, titleId: params.titleId }),
   },
-  head: () => ({ meta: [{ title: "Fix match · [movies]" }] }),
+  head: () => ({ meta: [{ title: "Fix match · Lar Movies" }] }),
   component: FixMatchPage,
 });
 

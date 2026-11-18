@@ -99,7 +99,7 @@ describe.skipIf(stack === undefined)("the platform SDK on the stack", { timeout:
     const platform = createPlatform({ url, connection: "http", ...signInOptions() });
 
     try {
-      expect(await platform.core.server.info()).toMatchObject({ name: "[media]" });
+      expect(await platform.core.server.info()).toMatchObject({ name: "Lar" });
     } finally {
       await platform.dispose();
     }
@@ -266,7 +266,7 @@ describe.skipIf(stack === undefined)("the platform SDK on the stack", { timeout:
     );
 
     expect(answer).toMatchObject({
-      info: { name: "[media]" },
+      info: { name: "Lar" },
       me: {
         username: person.username,
         kind: "password",
@@ -282,7 +282,7 @@ describe.skipIf(stack === undefined)("the platform SDK on the stack", { timeout:
       },
       status: "signedOut",
       afterSignOut: { _tag: "Unauthenticated" },
-      infoAfterSignOut: { name: "[media]" },
+      infoAfterSignOut: { name: "Lar" },
     });
   });
 

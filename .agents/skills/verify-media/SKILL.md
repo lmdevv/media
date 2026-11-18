@@ -1,13 +1,13 @@
 ---
 name: verify-media
-description: Run disposable [media] stacks built from this checkout and from main, each [media]'s all-in-one image (the real Compose install: the account client, the core's Convex backend with movies and music in it, the media service, the scanner, ffmpeg, and real video and audio, on one port) on one demo library, then drive the movies and music web apps in one Chromium, the `media` CLI as each seeded person, and the movies and music iOS apps on a Mac simulator to prove a change works the way a user sees it. Captures before/after screenshots and H.264 videos and publishes them to the PR description. Use to verify a web, CLI, backend, media, music, or iOS change end to end, to reproduce a user-facing bug, or to put visual evidence on a PR.
+description: Run disposable Lar stacks built from this checkout and from main, each Lar's all-in-one image (the real Compose install: the account client, the core's Convex backend with movies and music in it, the media service, the scanner, ffmpeg, and real video and audio, on one port) on one demo library, then drive the movies and music web apps in one Chromium, the `media` CLI as each seeded person, and the movies and music iOS apps on a Mac simulator to prove a change works the way a user sees it. Captures before/after screenshots and H.264 videos and publishes them to the PR description. Use to verify a web, CLI, backend, media, music, or iOS change end to end, to reproduce a user-facing bug, or to put visual evidence on a PR.
 ---
 
-# Verify [media]
+# Verify Lar
 
 This skill runs the real products on one demo library, mounted read-only:
 
-- **[media].** `deploy/compose/compose.yaml`, which runs the all-in-one image as one `media`
+- **Lar.** `deploy/compose/compose.yaml`, which runs the all-in-one image as one `media`
   container on one port: the account client at `/` with the core's Convex at `/convex`, the
   movies client at `/movies`, which uses the sign-in the account client keeps, and the media
   service, with the library at `/media/library` (ADR 0026). Movies' data lives in the core.
@@ -48,7 +48,7 @@ two runs on their own. Each side of a run owns these resources and nothing else:
 | Project    | `media-verify-<run>-<side>`: the container `…-media-1`, labeled `media.verify.run=<run>` |
 | Volumes    | `media-verify-<run>-<side>_media-data`, `_media-transcode`, and its network            |
 | Images     | `media:verify-<run>`, built by `up` for the after side                                  |
-| Ports      | One free loopback port chosen at `up`, [media]'s, at `http://localhost:<port>` (`MEDIA_BASE_URL`) |
+| Ports      | One free loopback port chosen at `up`, Lar's, at `http://localhost:<port>` (`MEDIA_BASE_URL`) |
 | Network    | The browser host's own network namespace where the host allows it, reached through Unix sockets in the state folder (see [Network view](#network-view)) |
 | State      | `${TMPDIR:-/tmp}/media-verify/<run>/<side>/`: ports, pids, logs, sockets, and each person's CLI config |
 | Simulator  | `media-verify-<run>-<side>` on `darwin`, made by `ios up`                               |
@@ -74,7 +74,7 @@ Where the host allows it, the browser host therefore runs in a private user and 
 (`scripts/private-network.sh` at the repo root), with the same Chromium, Node, fonts, ffmpeg, and
 files. Its loopback has only these, relayed over Unix sockets in the state folder:
 
-- The side's [media] port, at the same number, so every URL and origin stays
+- The side's Lar port, at the same number, so every URL and origin stays
   `http://localhost:<port>` for the browser and the CLI alike, and for the apps through the iOS
   forwards.
 - An HTTPS proxy to the internet on the host, for the Cast SDK, TMDB images, and trailers.
@@ -374,7 +374,7 @@ The movies iOS app (`apps/mobile-movies`), or with `--app music` the music iOS a
 in to the core through the media server's sign-in boundary. The music app needs an image
 with the music client (`music_core`). The app's JavaScript comes from a Metro on this machine. For the before side, Metro serves a main checkout that `ios up`
 makes with `git worktree` under the side's state. The simulator reaches the side as
-`localhost:<port>` through ssh forwards for [media]'s one port and Metro, so every address
+`localhost:<port>` through ssh forwards for Lar's one port and Metro, so every address
 matches the side's public URLs.
 
 ```sh
@@ -394,7 +394,7 @@ this side's server, so one stack verifies several app branches with this checkou
 `ios up` needs the side to be up with setup, and it stops before anything else when the Mac has
 less than 3 GB free, or 10 GB when it must build the dev client. It does these steps in order:
 
-1. It forwards [media]'s port and Metro's to the Mac.
+1. It forwards Lar's port and Metro's to the Mac.
 2. It starts Metro.
 3. It creates and boots the simulator `media-verify-<run>-<side>`, in dark mode unless `--light`.
 4. It installs the dev client. The build is named for the app's native inputs (`app.json`, its

@@ -1,5 +1,5 @@
 /**
- * The users and invites screens' state on the core's accounts commands, for every [media] iOS app:
+ * The users and invites screens' state on the core's accounts commands, for every Lar iOS app:
  * the household, the invites that still work, making and revoking an invite, a person's role, and
  * what they reach in each library. Each app draws them in its own look over `accounts.ts`.
  */

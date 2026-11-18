@@ -278,7 +278,7 @@ const diagnosticsHelp = (): string =>
 
 const rootText = (): string =>
   [
-    `media ${version}: the [media] command line. Everything the apps can do, for people and agents.`,
+    `media ${version}: the Lar command line. Everything the apps can do, for people and agents.`,
     "",
     "Usage: media <group> <command> [flags]",
     "",

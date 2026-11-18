@@ -9,7 +9,7 @@ import { linkSecretFor } from "@/session/link-secret";
 
 export const Route = createFileRoute("/reset")({
   staticData: { need: "public" },
-  head: () => ({ meta: [{ title: "New password · [media]" }] }),
+  head: () => ({ meta: [{ title: "New password · Lar" }] }),
   component: ResetPage,
 });
 

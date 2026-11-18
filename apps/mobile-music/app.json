@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "[music]",
+    "name": "music",
     "slug": "music",
     "scheme": "music",
     "version": "0.4.1",
@@ -9,17 +9,14 @@
     "ios": {
       "bundleIdentifier": "dev.lmdevv.music",
       "buildNumber": "1",
-      "icon": {
-        "light": "./assets/icon/light.png",
-        "dark": "./assets/icon/dark.png",
-        "tinted": "./assets/icon/tinted.png"
-      },
       "supportsTablet": true,
       "infoPlist": {
+        "CFBundleDisplayName": "Lar Music",
+        "CFBundleName": "Lar Music",
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": true
         },
-        "NSLocalNetworkUsageDescription": "Connect to your media server on your local network.",
+        "NSLocalNetworkUsageDescription": "Connect to your Lar server on your local network.",
         "ITSAppUsesNonExemptEncryption": false,
         "UISupportedInterfaceOrientations~ipad": [
           "UIInterfaceOrientationPortrait",
@@ -63,11 +60,11 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/splash/wordmark.png",
+          "image": "./assets/images/splash.png",
           "imageWidth": 200,
           "backgroundColor": "#ffffff",
           "dark": {
-            "image": "./assets/splash/wordmark-dark.png",
+            "image": "./assets/images/splash.png",
             "backgroundColor": "#000000"
           }
         }
@@ -84,6 +81,7 @@
     "experiments": {
       "reactCompiler": true
     },
+    "icon": "./assets/images/icon.png",
     "updates": {
       "enabled": false
     }

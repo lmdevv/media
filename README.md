@@ -1,12 +1,23 @@
-# [media]
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="brand/lar.svg">
+    <img src="brand/lar-flat-ink.svg" alt="Lar" width="96">
+  </picture>
+</p>
 
-Self-hosted movies, TV, and music for people and agents. Stream your own folders or NAS from one
-install, with an account per person and one sign-in across the apps, Netflix-style browsing,
-watching and listening together at the same second, migration from Jellyfin and Plex, and a CLI
-that can do everything the app can.
+# Lar
 
-One server carries both: movies and TV at `/movies` and music at `/music`, over one database and
-one account system.
+**Your own streaming service.**
+
+Lar is your own streaming service. It puts your movies, TV and music on a machine you own, with an
+app for everyone in the house and one sign-in for all of it. No monthly bill, nothing pulled from
+your library, and nobody watching what you watch. Free and open source.
+
+Lar Movies carries movies and TV at `/movies` and Lar Music carries music at `/music`, over one
+database and one account system. The whole family can watch or listen together at the same
+second, a Jellyfin or Plex install moves over with its watch history, and a command line does
+everything the apps can, for people and agents. The command, packages, settings, and image keep
+the working name `media` until they are renamed.
 
 ## Stack
 
@@ -293,7 +304,7 @@ See `AGENTS.md` for the layout, rules, and checks, and `docs/` for decisions and
 
 ## License
 
-[media] is MIT-licensed. The self-hosted Convex backend it runs (`ghcr.io/convex/convex-backend`)
+Lar is MIT-licensed. The self-hosted Convex backend it runs (`ghcr.io/convex/convex-backend`)
 is FSL-1.1-Apache-2.0: each release converts to Apache-2.0 two years after it ships. The image
 includes Debian's ffmpeg (LGPL/GPL) and the non-free build of Intel's media driver, whose
 encoding kernels are proprietary; the NixOS module uses nixpkgs `ffmpeg-full`.

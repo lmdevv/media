@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs disposable [media] stacks for verification and drives them. See ../SKILL.md.
+# Runs disposable Lar stacks for verification and drives them. See ../SKILL.md.
 #
 #   verify-media.sh up [--side after|before] [--image IMG] [--library demo|fixtures|DIR] [--no-music] [--no-setup] [--no-seed]
 #   verify-media.sh doctor [--side S]
@@ -466,7 +466,7 @@ cmd_doctor() {
   fi
   echo "info  version $(docker exec "$m" cat /data/core/version), image $(read_state image), library $(read_state library)"
   if music_core; then
-    check "/music is the music client" "curl -fsS '$(music_url)/' | grep -qF '<title>[music]</title>'"
+    check "/music is the music client" "curl -fsS '$(music_url)/' | grep -qF '<title>Lar Music</title>'"
     echo "info  music is the image's client at $(music_url), on the core"
   else
     echo "info  no music (the image has no music client on the core, the library is the fixtures, or up ran with --no-music)"
@@ -864,7 +864,7 @@ ios_sign_in() {
   die "the app did not reach Home after signing in; run \`ios describe --side $side\`"
 }
 
-# On a phone whose other [media] app signed in, the music app opens signed in without asking.
+# On a phone whose other Lar app signed in, the music app opens signed in without asking.
 ios_sign_in_music() {
   local who="$1" tree
   tree="$(ios_tree)"
@@ -998,7 +998,7 @@ ios_turned() {
 }
 
 # Opens an app path, such as /title/<id>, as a link to the app's own scheme. Expo Router routes it.
-# iOS often asks "Open in [movies]?" first; agent-device reads the system's alert and accepts it.
+# iOS often asks "Open in Lar Movies?" first; agent-device reads the system's alert and accepts it.
 ios_open() {
   on_mac "xcrun simctl openurl $(udid) $(printf %q "movies://$1")"
   local _

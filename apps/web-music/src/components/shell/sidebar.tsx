@@ -22,6 +22,7 @@ import { HOTKEYS } from "@/lib/hotkeys";
 
 import { useAllRows } from "@/lib/pages";
 import { nameOf, useMe, useMusic } from "@/lib/platform";
+import { MusicMark } from "./music-mark";
 import { useUi } from "./ui-state";
 
 const NAV: ReadonlyArray<{
@@ -83,8 +84,8 @@ export function Sidebar() {
       className="mb-2 hidden w-sidebar shrink-0 flex-col gap-6 rounded-lg border border-border bg-surface px-3 pt-5 pb-4 lg:flex dark:mb-0 dark:rounded-md dark:border-transparent dark:bg-bg"
     >
       <div className="flex h-7 shrink-0 items-center justify-between px-2.5">
-        <Link to="/" className="font-mono text-md/base font-semibold tracking-snug text-text">
-          [music]
+        <Link to="/" className="rounded-bar">
+          <MusicMark className="size-7" />
         </Link>
         <Tooltip
           label="Search and commands"

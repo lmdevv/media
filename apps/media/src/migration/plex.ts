@@ -245,7 +245,7 @@ const openSession = Effect.fnUntraced(function* (target: SourceTarget) {
     baseUrl: target.url,
     headers: {
       "x-plex-token": token,
-      "x-plex-product": "[media] migration",
+      "x-plex-product": "Lar migration",
       "x-plex-client-identifier": "media-migration",
     },
     camelCaseKeys: false,

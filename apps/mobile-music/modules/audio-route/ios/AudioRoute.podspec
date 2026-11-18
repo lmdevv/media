@@ -1,9 +1,9 @@
 Pod::Spec.new do |s|
   s.name           = 'AudioRoute'
   s.version        = '1.0.0'
-  s.summary        = 'The AirPlay route picker, and where the sound goes, for the [music] app.'
+  s.summary        = 'The AirPlay route picker, and where the sound goes, for the Lar Music app.'
   s.license        = 'MIT'
-  s.author         = '[music]'
+  s.author         = 'Lar Music'
   s.homepage       = 'https://github.com/lmdevv/media'
   s.platforms      = { :ios => '17.0' }
   s.swift_version  = '5.9'

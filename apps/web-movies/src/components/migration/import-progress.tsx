@@ -103,7 +103,7 @@ export function Done({ run }: { readonly run: ImportRun }) {
           )}
           {imported.keptLocal === 0 ? null : (
             <Caution>
-              {formatCount(imported.keptLocal)} kept the newer progress already in [movies]
+              {formatCount(imported.keptLocal)} kept the newer progress already in Lar Movies
             </Caution>
           )}
         </div>

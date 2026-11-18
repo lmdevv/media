@@ -12,7 +12,7 @@ export const Route = createFileRoute("/_app/genre/$genre")({
     parse: (raw) => ({ genre: decodeGenre(raw.genre) }),
     stringify: (params) => ({ genre: params.genre }),
   },
-  head: ({ params }) => ({ meta: [{ title: `${params.genre} · [movies]` }] }),
+  head: ({ params }) => ({ meta: [{ title: `${params.genre} · Lar Movies` }] }),
   component: GenrePage,
 });
 

@@ -2,7 +2,6 @@ import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import { Button } from "@media/ui/components/button";
 import { PlayGlyph } from "@media/ui/components/icons";
 import { ProgressRing } from "@media/ui/components/progress-ring";
-import { Wordmark } from "@media/ui/components/wordmark";
 import { buttonVariants } from "@media/ui/lib/button-variants";
 import { formatTimecode } from "@media/ui/lib/timecode";
 import { cn } from "@media/ui/lib/utils";
@@ -17,6 +16,8 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { Match } from "effect";
 import type { ReactNode } from "react";
+
+import { MoviesMark } from "@/components/shell/movies-mark";
 
 const timecode = (ms: number): string => formatTimecode(ms / 1000);
 
@@ -331,7 +332,7 @@ export function SessionPage({
   return (
     <div className="on-media flex min-h-svh flex-col bg-dark-bg bg-radial-[ellipse_60%_50%_at_50%_0%] from-dark-warning/10 to-transparent px-6 pt-4 md:px-16">
       <div className="flex h-17 shrink-0 items-center">
-        <Wordmark />
+        <MoviesMark />
       </div>
       <main className="flex grow items-center justify-center pb-21">
         <div className="flex w-130 max-w-full flex-col items-center gap-7">

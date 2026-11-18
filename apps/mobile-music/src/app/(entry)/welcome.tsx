@@ -20,7 +20,7 @@ export default function Welcome() {
       <View className="readable">
         <View className="min-h-row-touch flex-row items-center justify-between pt-2 pb-3">
           <Text variant="largeTitle" accessibilityRole="header">
-            [music]
+            Lar Music
           </Text>
           <View className="size-hit-target items-center justify-center">
             <Icon icon={Info} />

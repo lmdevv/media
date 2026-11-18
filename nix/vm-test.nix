@@ -142,11 +142,11 @@ testers.runNixOSTest {
     with subtest("one address serves every path"):
         assert machine.succeed("curl -fsS http://127.0.0.1:8080/convex/instance_name").strip() == "core"
         machine.succeed("curl -fsS http://127.0.0.1:8080/api/health")
-        assert "<title>[media]</title>" in page("http://127.0.0.1:8080/")
-        assert "<title>[media]</title>" in page("http://127.0.0.1:8080/people")
-        assert "<title>[movies]</title>" in page("http://127.0.0.1:8080/movies/")
+        assert "<title>Lar</title>" in page("http://127.0.0.1:8080/")
+        assert "<title>Lar</title>" in page("http://127.0.0.1:8080/people")
+        assert "<title>Lar Movies</title>" in page("http://127.0.0.1:8080/movies/")
         assert "/movies/assets/" in page("http://127.0.0.1:8080/movies/some/client/route")
-        assert "<title>[music]</title>" in page("http://127.0.0.1:8080/music/")
+        assert "<title>Lar Music</title>" in page("http://127.0.0.1:8080/music/")
         assert "/music/assets/" in page("http://127.0.0.1:8080/music/albums/some-album")
         status, jwks = machine.execute("curl -fsS http://127.0.0.1:8080/convex/.well-known/jwks.json")
         assert status != 0 or "keys" not in jwks
@@ -257,7 +257,7 @@ testers.runNixOSTest {
         count = machine.succeed("ls /var/lib/media/core/backups | grep -c '^core-manual-.*\\.zip$'").strip()
         assert count == "1", count
 
-    # Nothing outside [media]'s folders may change in the cases below: each path's inode, owner,
+    # Nothing outside Lar's folders may change in the cases below: each path's inode, owner,
     # mode, and link count.
     def listing(*paths):
         return machine.succeed(f"find {' '.join(paths)} -printf '%i %u:%g %m %n %p\\n' | sort")
@@ -335,7 +335,7 @@ testers.runNixOSTest {
         machine.succeed(f"rm {state}/linked /srv/media/movies/library-file")
         start()
 
-    with subtest("a library mounted at or inside a folder of [media]'s stops the start, and keeps its owner and mode"):
+    with subtest("a library mounted at or inside a folder of Lar's stops the start, and keeps its owner and mode"):
         # The core's database is inside one of the folders, so its container stops too.
         machine.succeed("systemctl stop media-server.service podman-media-core-convex.service")
         machine.succeed("install -o 9999 -g 9999 -m 644 /dev/null /srv/media/movies/library-file")

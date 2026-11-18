@@ -144,7 +144,7 @@ ENV NODE_ENV=production \
 # stop_grace_period).
 
 ARG MEDIA_VERSION=
-LABEL org.opencontainers.image.title="[media]" \
+LABEL org.opencontainers.image.title="Lar" \
   org.opencontainers.image.source="https://github.com/lmdevv/media" \
   org.opencontainers.image.version="${MEDIA_VERSION}"
 

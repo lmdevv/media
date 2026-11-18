@@ -7,7 +7,7 @@ let opened: Keychains | null = null;
 
 /**
  * This app's keychains, opened on first use (D48): its own records and session in its private
- * access group, and the phone's shared record in the group every [media] app lists. The groups
+ * access group, and the phone's shared record in the group every Lar app lists. The groups
  * take the Team ID and bundle identifier from `app.json`; a build without a Team ID names none.
  */
 export const appKeychains = (): Keychains => {

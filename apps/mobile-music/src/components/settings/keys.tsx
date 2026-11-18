@@ -76,7 +76,7 @@ export function KeyList() {
         <EmptyState
           icon={Key}
           title={"Your agents\ncan listen too."}
-          body={"Create a key for the [music] CLI\nor your personal assistant."}
+          body={"Create a key for the command line\nor your personal assistant."}
           primary={<Button label="Create API key" icon={Plus} onPress={openNewKey} />}
         />
       </Page>

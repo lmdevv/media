@@ -5,7 +5,7 @@ import { Screen } from "@/components/ui/screen";
 import { Text } from "@/components/ui/text";
 
 const LICENSES: ReadonlyArray<{ readonly name: string; readonly license: string }> = [
-  { name: "[movies]", license: "MIT" },
+  { name: "Lar Movies", license: "MIT" },
   { name: "React Native and Expo", license: "MIT" },
   { name: "Effect", license: "MIT" },
   { name: "Convex", license: "Apache 2.0" },

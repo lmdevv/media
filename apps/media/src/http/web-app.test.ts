@@ -20,7 +20,7 @@ const siteLayer = Layer.unwrap(
     yield* fs.makeDirectory(path.join(dist, "assets"), { recursive: true });
     yield* fs.writeFileString(
       path.join(dist, "index.html"),
-      "<!doctype html><title>[movies]</title>",
+      "<!doctype html><title>Lar Movies</title>",
     );
     yield* fs.writeFileString(path.join(dist, "assets", "app-3f9a.js"), "console.log(1)");
     yield* fs.writeFileString(path.join(dist, "favicon.svg"), "<svg/>");
@@ -71,7 +71,7 @@ describe("web app", () => {
         const index = yield* fetchPage("/");
 
         assert.deepStrictEqual([index.status, index.cacheControl], [200, "no-cache"]);
-        assert.include(index.body, "[movies]");
+        assert.include(index.body, "Lar Movies");
 
         const route = yield* fetchPage("/titles/abc/play");
 
@@ -127,7 +127,7 @@ describe("web app", () => {
 
           assert.strictEqual(page.status, 404, pathname);
           assert.notInclude(page.body, "secret");
-          assert.notInclude(page.body, "[movies]");
+          assert.notInclude(page.body, "Lar Movies");
         }
       }),
     );

@@ -73,7 +73,7 @@ export const MigrationSourceFailure = Schema.Struct({
 /** The source server could not be used. */
 export interface MigrationSourceFailure extends Schema.Schema.Type<typeof MigrationSourceFailure> {}
 
-/** The [media] profile a source user's history goes to by default. */
+/** The Lar profile a source user's history goes to by default. */
 export const UserSuggestion = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("profile"),
@@ -86,7 +86,7 @@ export const UserSuggestion = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("invite") }),
 ]);
 
-/** A source user who can be mapped to a [media] profile. */
+/** A source user who can be mapped to a Lar profile. */
 export const SourceUser = Schema.Struct({
   sourceUserId: Schema.String,
   name: Schema.String,
@@ -167,7 +167,7 @@ export const MigrationConnection = Schema.Struct({
 /** A connected source server. */
 export interface MigrationConnection extends Schema.Schema.Type<typeof MigrationConnection> {}
 
-/** Which [media] profile receives a source user's history; null skips the user. */
+/** Which Lar profile receives a source user's history; null skips the user. */
 export const UserMapping = Schema.Struct({
   sourceUserId: Schema.String,
   profileId: Schema.NullOr(ProfileId),
@@ -180,7 +180,7 @@ export interface UserMapping extends Schema.Schema.Type<typeof UserMapping> {}
 export const UnmatchedReason = Schema.Literals([
   /** The item's folder is not under any mapped folder or approved library root. */
   "path_unmapped",
-  /** The folder is known, but no [movies] file has this path and no provider ID matched. */
+  /** The folder is known, but no Lar Movies file has this path and no provider ID matched. */
   "not_in_catalog",
   /** The source reports no file path and no provider ID matched. */
   "no_path",
@@ -195,7 +195,7 @@ export const MigrationSummary = Schema.Struct({
   usersUnmapped: Schema.Int,
   librariesToAdd: Schema.Int,
   librariesExisting: Schema.Int,
-  /** Movies and episodes matched to a [movies] file by path, after path mapping. */
+  /** Movies and episodes matched to a Lar Movies file by path, after path mapping. */
   itemsByPath: Schema.Int,
   /** Matched by TMDB, IMDb, or TVDB ID (episodes by their show and episode number). */
   itemsByProviderId: Schema.Int,
@@ -209,7 +209,7 @@ export const MigrationSummary = Schema.Struct({
   favorites: Schema.Int,
   collections: Schema.Int,
   overrides: Schema.Int,
-  /** Items whose [movies] progress was played more recently than the source's; [movies] keeps its own. */
+  /** Items whose Lar Movies progress was played more recently than the source's; Lar Movies keeps its own. */
   conflicts: Schema.Int,
 });
 
@@ -240,7 +240,7 @@ export const MigrationReport = Schema.Struct({
       kind: LibraryKind,
       /** The folders on this host. */
       roots: Schema.Array(LibraryRoot),
-      /** The [movies] library already covering these folders, or null when import adds one. */
+      /** The Lar Movies library already covering these folders, or null when import adds one. */
       existingLibraryId: Schema.NullOr(LibraryId),
       /** Source folders without a local folder; their items stay unmatched. */
       unmappedFolders: Schema.Array(SourcePath),
@@ -283,7 +283,7 @@ const MigrationImported = Schema.Struct({
   favorites: Schema.Int,
   collections: Schema.Int,
   overrides: Schema.Int,
-  /** Items where [movies] kept its own, more recent progress. */
+  /** Items where Lar Movies kept its own, more recent progress. */
   keptLocal: Schema.Int,
   unmatched: Schema.Int,
 });

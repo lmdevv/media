@@ -21,7 +21,7 @@ test("an unknown address says so and leads home", async ({ page }) => {
   await page.goto(moviesPath("/nowhere/at-all"));
 
   await expect(page.getByRole("heading", { name: "This page isn't here" })).toBeVisible();
-  await expect(page).toHaveTitle("Not found · [movies]");
+  await expect(page).toHaveTitle("Not found · Lar Movies");
   await expect(page.getByRole("link", { name: "Go home" })).toHaveAttribute("href", "/movies/");
 });
 

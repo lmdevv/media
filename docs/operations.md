@@ -1,6 +1,6 @@
 # Operations
 
-Running a [media] install: what the two installs do at startup, where state lives, backups and
+Running a Lar install: what the two installs do at startup, where state lives, backups and
 restores, upgrades, hardware acceleration, and telemetry. The README has the quick start.
 
 ## What runs
@@ -113,7 +113,7 @@ before the new key.
 
 ### Restoring onto a new machine
 
-1. Install [media] (Compose or NixOS) and start it once.
+1. Install Lar (Compose or NixOS) and start it once.
 2. Copy the archive into the backup folder
    (`docker compose cp backup.zip media:/data/core/backups/` and
    `docker compose exec media chown media:media /data/core/backups/backup.zip`, or into
@@ -206,7 +206,7 @@ functions differ: the image and the Nix package record a hash of the core's func
 following `main` or building locally backs up too. Convex refuses to
 deploy a schema the stored documents do not match, so such a deploy fails and the start stops with
 the old functions still in place; restarts after that do not export again for the same version.
-Convex backend upgrades ride along with [media] releases; never change its image on your own.
+Convex backend upgrades ride along with Lar releases; never change its image on your own.
 
 ### Rolling back
 
@@ -235,7 +235,7 @@ another version.
 2. Tag the merged commit and push the tag:
 
    ```sh
-   git tag -a v0.5.0 -m "[media] 0.5.0" && git push origin v0.5.0
+   git tag -a v0.5.0 -m "Lar 0.5.0" && git push origin v0.5.0
    ```
 
 The tag runs two workflows, and each refuses a tag that does not name the package version:
@@ -285,7 +285,7 @@ disallow tokens.
 The port listens on `127.0.0.1` by default. For use away from home, put the host on a Tailscale
 tailnet and set the bind address (`MEDIA_BIND` on Compose, `listenAddress` on NixOS) to the
 host's Tailscale address, or keep localhost and use `tailscale serve`. Do not expose the port to
-the internet. It speaks plain HTTP, and every browser and CLI that uses [media] must reach it.
+the internet. It speaks plain HTTP, and every browser and CLI that uses Lar must reach it.
 
 ## Hardware acceleration
 
@@ -390,7 +390,7 @@ The media service uses Intel Quick Sync (QSV) through ffmpeg's libvpl when it ca
   messages. Playback URLs carry tickets, so automatic HTTP spans for `/media/` are off as well,
   and so are spans for paths that start with `//`, which a span would read as a host. With OTLP
   on, the console and the retained log keep the same redacted lines.
-- [media] sends nothing anywhere else: no analytics, no update checks. The Convex backend runs
+- Lar sends nothing anywhere else: no analytics, no update checks. The Convex backend runs
   with its beacon disabled.
 
 ## Verifying an install

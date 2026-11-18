@@ -7,6 +7,7 @@ import { SearchIcon } from "lucide-react";
 import { useCallback, useDeferredValue, useEffect, useRef, useState } from "react";
 import type { MouseEvent } from "react";
 
+import { MusicMark } from "@/components/shell/music-mark";
 import { useUi } from "@/components/shell/ui-state";
 import { HOTKEYS } from "@/lib/hotkeys";
 
@@ -282,7 +283,9 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
       )}
 
       <div className="hidden h-11 shrink-0 items-center gap-3.5 border-t border-border bg-surface pr-3 pl-5 lg:flex">
-        <span className="grow font-mono text-xs/xs font-semibold text-text-muted">[music]</span>
+        <span className="flex grow">
+          <MusicMark className="size-5" />
+        </span>
         {footerLabel === null ? null : (
           <span className="flex items-center gap-2 font-sans text-sm/xs font-medium text-text">
             {footerLabel}

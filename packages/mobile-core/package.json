@@ -2,7 +2,7 @@
   "name": "@media/mobile-core",
   "version": "0.4.1",
   "private": true,
-  "description": "What every [media] iOS app shares: the server connection, the shared keychain, sign-in, device enrollment, paging, and the users and invites screens' state.",
+  "description": "What every Lar iOS app shares: the server connection, the shared keychain, sign-in, device enrollment, paging, and the users and invites screens' state.",
   "type": "module",
   "sideEffects": false,
   "exports": {

@@ -18,7 +18,7 @@ import { useMusic, useRead } from "@/lib/platform";
 const MISSING: MissingCopy = {
   title: "This album isn't in your library anymore",
   description:
-    "A rescan may have removed it, its folder was removed from [music], it's in a library that isn't shared with you, or the link is wrong.",
+    "A rescan may have removed it, its folder was removed from Lar Music, it's in a library that isn't shared with you, or the link is wrong.",
   back: { to: "/albums", label: "Back to albums" },
 };
 

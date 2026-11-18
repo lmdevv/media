@@ -1,4 +1,4 @@
-# [music] for iPhone and iPad
+# Lar Music for iPhone and iPad
 
 The iOS app: Expo SDK 58, Expo Router, and Uniwind (Tailwind 4 for React Native) over the platform
 SDK (`@media/sdk/react`) and `@media/mobile-core`. Screens follow the Paper pages **12–20 iOS** in

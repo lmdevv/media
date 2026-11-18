@@ -24,7 +24,7 @@ export const Route = createFileRoute("/watch/$titleId")({
     stringify: (params) => ({ titleId: params.titleId }),
   },
   validateSearch: Schema.toStandardSchemaV1(WatchSearch),
-  head: () => ({ meta: [{ title: "Watch · [movies]" }] }),
+  head: () => ({ meta: [{ title: "Watch · Lar Movies" }] }),
   component: WatchPage,
 });
 

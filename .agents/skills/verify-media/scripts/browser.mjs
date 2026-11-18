@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// A Chromium that stays open between commands, so a verification can drive the [media] web apps
+// A Chromium that stays open between commands, so a verification can drive the Lar web apps
 // one step at a time. `serve` starts the host for one side of a run; every other
 // command sends one action to it and prints the result. Each page belongs to one app, picked with
 // --app when the page is created. verify-media.sh calls this; agents call it through

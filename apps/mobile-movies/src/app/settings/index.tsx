@@ -65,7 +65,11 @@ export default function AppSettings() {
         }
       />
       <View className="h-4" />
-      <ListRow icon={Info} title="About [movies]" onPress={() => router.push("/settings/about")} />
+      <ListRow
+        icon={Info}
+        title="About Lar Movies"
+        onPress={() => router.push("/settings/about")}
+      />
     </Screen>
   );
 }

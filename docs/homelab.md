@@ -1,6 +1,6 @@
 # Homelab install
 
-[media] on one box at home, with Docker Compose or NixOS, in about ten minutes. It runs the
+Lar on one box at home, with Docker Compose or NixOS, in about ten minutes. It runs the
 core's self-hosted Convex backend and the media service, which also serves the movies client,
 behind Caddy on one port (8080), which also serves the account and music clients. The account
 client is at `/`, movies at `/movies`, music at `/music`, and the Convex backend at `/convex`.
@@ -12,7 +12,7 @@ tag beside other installs, on a port and data folder of its own.
 ## Before you start
 
 - A Linux host with your library on a local disk or a NAS mount. The library is mounted
-  read-only; [media] never writes to it.
+  read-only; Lar never writes to it.
 - 2 GB of RAM for the services, plus a few GB of fast disk for transcoding.
 - Decide how people reach it: only this machine (the default), your tailnet (recommended, below),
   or a reverse proxy with TLS on your LAN. Never put the port on the internet.
@@ -106,7 +106,7 @@ anything else, and `environmentFile` keeps secrets out of the Nix store. The fla
 
 Put the host on your tailnet and bind the port to its Tailscale address (`MEDIA_BIND` or
 `listenAddress`). Use the MagicDNS name in the public URL. Every device on the tailnet can
-reach it, and nothing else can. Traffic is encrypted by WireGuard; [media] itself speaks plain
+reach it, and nothing else can. Traffic is encrypted by WireGuard; Lar itself speaks plain
 HTTP.
 
 For HTTPS on the tailnet (needed by some browsers for features like casting), keep the default
@@ -121,7 +121,7 @@ and set `MEDIA_BASE_URL=https://nas.tailnet.ts.net` (`publicUrl`). Trust that pr
 
 ### Caddy on your LAN
 
-A reverse proxy with TLS for a LAN name, with [media] bound to `127.0.0.1`. The proxy forwards
+A reverse proxy with TLS for a LAN name, with Lar bound to `127.0.0.1`. The proxy forwards
 the one port, and Convex's WebSocket under `/convex` passes through as is.
 
 ```caddyfile
@@ -140,8 +140,8 @@ Caddy's local root CA: copy `pki/authorities/local/root.crt` from Caddy's data f
 ### Trusting a proxy in front
 
 The media service limits unauthenticated routes (artwork, `/api/health`, `/api/client-config`)
-per client, by the client address [media]'s own Caddy resolves. A proxy in front, such as the TLS
-proxies above, connects from one address for everyone, so name it as trusted and [media] takes the
+per client, by the client address Lar's own Caddy resolves. A proxy in front, such as the TLS
+proxies above, connects from one address for everyone, so name it as trusted and Lar takes the
 client from the `X-Forwarded-For` it sends:
 
 - **NixOS:** `trustedProxies = [ "127.0.0.1/32" ];` for a proxy on the same host.
@@ -153,7 +153,7 @@ you run: a trusted address can name any client.
 
 ## GPU transcoding
 
-Most plays need no transcoding: [media] streams the original file or remuxes it. When a device
+Most plays need no transcoding: Lar streams the original file or remuxes it. When a device
 cannot play the video, the media service transcodes, on the GPU when it can and in software (up
 to 1080p) otherwise. `GET /api/health` reports what it found.
 

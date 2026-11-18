@@ -78,7 +78,7 @@ function Loaded({
         if (!(error instanceof ChunkLoadError)) return;
 
         onFailed();
-        toast.error("Couldn't load this part of [music]. Reload the page to try again.", {
+        toast.error("Couldn't load this part of Lar Music. Reload the page to try again.", {
           action: { label: "Reload", onClick: () => window.location.reload() },
         });
       }}

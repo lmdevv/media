@@ -70,7 +70,7 @@ export default function SignIn() {
     >
       <Row
         title={displayHost(mediaUrl)}
-        subtitle="Your [music] server"
+        subtitle="Your Lar server"
         leading={{ kind: "icon", icon: Airplay, tone: "muted" }}
         trailing={<RowCheck />}
       />

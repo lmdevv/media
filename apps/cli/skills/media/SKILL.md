@@ -1,11 +1,11 @@
 ---
 name: media
-description: Control a [media] server (the user's self-hosted movies, shows, and music) from the terminal with the `media` CLI. Use when asked to find, play, or track movies and shows, play music or manage playlists, likes, and the queue, manage libraries, scans, backups, accounts, users, invites, API keys, or device sign-ins, reset a password on the server host, or find out why playback stalled.
+description: Control a Lar server (the user's self-hosted movies, shows, and music) from the terminal with the `media` CLI. Use when asked to find, play, or track movies and shows, play music or manage playlists, likes, and the queue, manage libraries, scans, backups, accounts, users, invites, API keys, or device sign-ins, reset a password on the server host, or find out why playback stalled.
 ---
 
-# [media] CLI
+# Lar CLI
 
-`media` runs every action the [media] apps have, for people and agents. Output is JSON on stdout
+`media` runs every action the Lar apps have, for people and agents. Output is JSON on stdout
 by default.
 
 ## Load only the reference you need

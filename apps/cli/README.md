@@ -1,6 +1,6 @@
 # @lmdevv/media
 
-The `media` command line for a self-hosted [media] server: everything the apps can do, for people
+The `media` command line for a self-hosted Lar server: everything the apps can do, for people
 and agents, with JSON output by default.
 
 ```sh

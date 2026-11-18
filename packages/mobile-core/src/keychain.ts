@@ -11,7 +11,7 @@ export class KeychainWriteFailed extends Schema.TaggedError<KeychainWriteFailed>
 
 /**
  * One group of keychain items, read and written synchronously. An app has two (D48): its own,
- * which only it reads, and the phone's shared access group, which every [media] app under the same
+ * which only it reads, and the phone's shared access group, which every Lar app under the same
  * Team ID reads.
  */
 export interface Keychain {

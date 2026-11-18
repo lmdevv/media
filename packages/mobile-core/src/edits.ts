@@ -1,5 +1,5 @@
 /**
- * Edits to a live row, as the owner forms of every [media] iOS app save them. A row on screen
+ * Edits to a live row, as the owner forms of every Lar iOS app save them. A row on screen
  * keeps following the core while someone edits it, so a form never compares what the person
  * typed with the live row: another admin's change would read as the person's own, and saving
  * would write it back over them. Each field instead remembers the value it had when the person

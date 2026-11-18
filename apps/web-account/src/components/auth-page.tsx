@@ -1,9 +1,10 @@
 import { TextField } from "@media/ui/components/text-field";
-import { Wordmark } from "@media/ui/components/wordmark";
 import { cn } from "@media/ui/lib/utils";
 import { CheckIcon, EyeIcon, EyeOffIcon } from "lucide-react";
 import { useState } from "react";
 import type { ComponentProps, ReactNode } from "react";
+
+import { LarMark } from "./lar-mark";
 
 const WIDTHS = {
   form: "w-100",
@@ -13,7 +14,7 @@ const WIDTHS = {
 
 /**
  * A page outside the signed-in shell: sign-in, the picker, a lock screen, an invite, a reset link.
- * The `[media]` wordmark sits top left, as on movies' sign-in page.
+ * The Lar logo sits top left, as on movies' sign-in page.
  *
  * @param width - `form` (400px), `wide` (480px), or `page` (the content width).
  * @param centered - Centers the column on the page, for the pickers.
@@ -30,8 +31,8 @@ export function AuthPage({
   return (
     <div className="flex min-h-svh flex-col bg-page font-sans text-text">
       <header className="flex h-16 shrink-0 items-center px-5 md:h-24 md:px-16">
-        <a href="/" aria-label="[media] home" className="rounded-bar">
-          <Wordmark product="media" />
+        <a href="/" aria-label="Lar home" className="rounded-bar">
+          <LarMark />
         </a>
       </header>
       <main

@@ -97,8 +97,8 @@ function ChromecastRow({
       {row}
       {chromecast.unreachable ? (
         <p role="note" className="px-2 pb-1 font-sans text-caption/caption text-warning">
-          This server is open at a local address. A Chromecast can't reach it; open [movies] at its
-          network address to cast.
+          This server is open at a local address. A Chromecast can't reach it; open Lar Movies at
+          its network address to cast.
         </p>
       ) : null}
     </>

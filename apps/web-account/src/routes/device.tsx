@@ -18,7 +18,7 @@ const DeviceSearch = Schema.Struct({ code: Schema.optionalKey(Schema.String) });
 export const Route = createFileRoute("/device")({
   staticData: { need: "account" },
   validateSearch: Schema.toStandardSchemaV1(DeviceSearch),
-  head: () => ({ meta: [{ title: "Approve a device · [media]" }] }),
+  head: () => ({ meta: [{ title: "Approve a device · Lar" }] }),
   component: DevicePage,
 });
 

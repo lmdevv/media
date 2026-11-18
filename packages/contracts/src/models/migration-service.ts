@@ -41,7 +41,7 @@ export const PlannedLibrary = Schema.Struct({
 /** A source library as a migration plan imports it. */
 export interface PlannedLibrary extends Schema.Schema.Type<typeof PlannedLibrary> {}
 
-/** A [movies] file with what matching needs: its title's provider IDs and episode numbers. */
+/** A Lar Movies file with what matching needs: its title's provider IDs and episode numbers. */
 export const CatalogFile = Schema.Struct({
   fileId: MediaFileId,
   libraryId: LibraryId,
@@ -55,7 +55,7 @@ export const CatalogFile = Schema.Struct({
   episodeNumber: Schema.NullOr(Schema.Int),
 });
 
-/** A [movies] file for matching. */
+/** A Lar Movies file for matching. */
 export interface CatalogFile extends Schema.Schema.Type<typeof CatalogFile> {}
 
 /** A profile's progress on one item, for spotting conflicts in a dry run. */
@@ -73,7 +73,7 @@ export interface LocalProgress extends Schema.Schema.Type<typeof LocalProgress> 
 /**
  * One matched item's watch state for one profile. Writing it twice changes nothing: watched marks
  * stay set, play counts keep the larger value, the position applies only when the source played
- * the item more recently than [movies] did, and favorites are added once.
+ * the item more recently than Lar Movies did, and favorites are added once.
  */
 export const WatchStateImport = Schema.Struct({
   profileId: ProfileId,

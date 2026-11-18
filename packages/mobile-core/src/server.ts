@@ -19,10 +19,10 @@ export interface ServerConnection {
 export type ConnectFailure =
   /** The text is not an address. */
   | "invalid"
-  /** Nothing answered, or it answered but is not a [media] server. */
+  /** Nothing answered, or it answered but is not a Lar server. */
   | "unreachable"
   /**
-   * A [media] server that does not say where its account server is (no public Convex URL
+   * A Lar server that does not say where its account server is (no public Convex URL
    * configured, or a version without `/api/client-config`); Connection Details still works.
    */
   | "needsDetails"
@@ -87,7 +87,7 @@ const convexAnswers = async (convexUrl: string): Promise<boolean> => {
   }
 };
 
-/** The health of the [media] server at `mediaUrl`, or none when it does not answer. */
+/** The health of the Lar server at `mediaUrl`, or none when it does not answer. */
 export const readHealth = (mediaUrl: string): Promise<Option.Option<HealthResponse>> =>
   getDecoded(`${mediaUrl}${MEDIA_ROUTES.health}`, HealthResponse);
 
@@ -149,7 +149,7 @@ export const reachableUrl = (convexUrl: string, mediaUrl: string): string => {
 export const moviesUrlBeside = (mediaUrl: string): string => `${mediaUrl}/movies`;
 
 /**
- * Checks that `text` is a [media] server, asks its `/api/client-config` where the core and the
+ * Checks that `text` is a Lar server, asks its `/api/client-config` where the core and the
  * movies web client live, and probes the core.
  */
 export const discoverServer = async (text: string): Promise<ConnectResult> => {
@@ -219,7 +219,7 @@ export const connectManually = async (
 
 const FAILURE_LINES = {
   invalid: "Enter a server address, such as https://cinema.home.",
-  unreachable: "Can't reach a [media] server at that address.",
+  unreachable: "Can't reach a Lar server at that address.",
   needsDetails: "This server doesn't share its account server. Enter its connection details.",
   accountsUnreachable: "Can't reach this server's account server. Check its connection details.",
 } as const satisfies Record<ConnectFailure, string>;

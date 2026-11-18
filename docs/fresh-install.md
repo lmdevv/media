@@ -1,7 +1,7 @@
 # Fresh install
 
-The exact steps to install [media] from a release tag, `v0.4.1` here, on a host that already runs
-other things: Jellyfin, another media server, or anything else. [media] gets its own
+The exact steps to install Lar from a release tag, `v0.4.1` here, on a host that already runs
+other things: Jellyfin, another media server, or anything else. Lar gets its own
 port and its own data folder, mounts the library read-only, and leaves the other installs alone.
 There are two methods, the image under Docker Compose and the NixOS module; pick one. Both end in
 the same first run: the owner account, one library per kind, the first scan, and a play.
@@ -20,7 +20,7 @@ Decide these first. Every later step uses them.
 | Listen address  | `127.0.0.1`, or the host's Tailscale address             | [homelab.md](homelab.md#remote-access)                               |
 | Public URL      | `http://localhost:8099`                                  | The address browsers, phones, and the CLI open                       |
 | Data folder     | Compose: the project's volumes; NixOS: `/var/lib/media`  | Not used by another install                                          |
-| Library folders | `/srv/media/movies`, `/srv/media/tv`, `/srv/media/music` | Readable by the service user; [media] never writes them              |
+| Library folders | `/srv/media/movies`, `/srv/media/tv`, `/srv/media/music` | Readable by the service user; Lar never writes them                  |
 
 The public URL must be exactly what people type, with the port, since the web clients reach the
 database at `<public URL>/convex`.
@@ -59,7 +59,7 @@ PGID=1000
   `media_media-data` and `media_media-transcode`. If `docker compose ls` or `docker volume ls`
   already shows that name, add `COMPOSE_PROJECT_NAME=media-new` (any unused name) to `.env`; the
   volumes then take that prefix.
-- **Data folder.** Everything [media] keeps lives in the project's `media-data` volume. To keep it
+- **Data folder.** Everything Lar keeps lives in the project's `media-data` volume. To keep it
   in a host folder instead, put the override below in `compose.local.yaml` and add
   `COMPOSE_FILE=compose.yaml:compose.local.yaml` to `.env`, so every `docker compose` command
   reads it. Choose it before the first start: the database starts empty wherever `/data` points.
@@ -74,7 +74,7 @@ services:
       - /mnt/nas/music:/media/music:ro # an extra library folder, read-only
 ```
 
-- **Demo library.** To try [media] on the Creative Commons demo library instead of your own,
+- **Demo library.** To try Lar on the Creative Commons demo library instead of your own,
   leave `MEDIA_LIBRARY` empty and add `compose.demo.yaml` to `COMPOSE_FILE`, after `compose.yaml`
   and before any override of yours: `COMPOSE_FILE=compose.yaml:compose.demo.yaml:compose.local.yaml`
   ([demo-library.md](demo-library.md)).
@@ -256,7 +256,7 @@ Read memory after five idle minutes, with no stream playing.
 
 - **Compose:** `docker stats --no-stream --format '{{.Name}} {{.MemUsage}}'`. The one `media`
   container holds every service.
-- **NixOS:** `systemd-cgtop -m -b -n 1 --raw` lists each unit's memory. [media] is the sum of
+- **NixOS:** `systemd-cgtop -m -b -n 1 --raw` lists each unit's memory. Lar is the sum of
   `media-server.service`, `media-proxy.service`, `docker-media-core-convex.service` (which holds
   the `docker run` client), and the Convex container itself. Docker, with the systemd cgroup driver
   it uses on cgroup v2, runs the container outside the unit that starts it, in its own scope,

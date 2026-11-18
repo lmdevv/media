@@ -11,7 +11,7 @@ export type UserId = PlatformGrant["userId"];
 const UserIdText = Schema.String.pipe(Schema.brand("Id<users>"));
 
 /**
- * What the phone's shared keychain holds for every [media] app on it (D48): the server, the person
+ * What the phone's shared keychain holds for every Lar app on it (D48): the server, the person
  * signed in on the phone, and the phone's device grant for them. No session lives here: each app
  * exchanges the grant for a session of its own.
  */

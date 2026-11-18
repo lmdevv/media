@@ -1,10 +1,12 @@
-# [media]
+# Lar
 
-MIT-licensed, agent-first, self-hosted media platform. It streams the user's own folders or NAS
-shares: movies, TV, and music from one server, one Convex database, and one account system, with
-a web and iOS client for movies and another for music. `[media]`, brackets included, is the working
-name until a later rebrand. The repo is `lmdevv/media`, the workspace scope is `@media/*`, settings
-start with `MEDIA_`, the CLI binary is `media`, and the image is `ghcr.io/lmdevv/media`.
+Lar is an MIT-licensed, agent-first, self-hosted media platform: "Your own streaming service." It
+streams the user's own folders or NAS shares: movies, TV, and music from one server, one Convex
+database, and one account system, with a web and iOS client for movies, Lar Movies, and another for
+music, Lar Music. The technical names stay `media` for now: the repo is `lmdevv/media`, the
+workspace scope is `@media/*`, settings start with `MEDIA_`, the CLI binary is `media`, the image
+is `ghcr.io/lmdevv/media`, and the NixOS module is `services.media`. Linear issue ADS-443 tracks
+renaming them. The marks are in `brand/`; `scripts/brand-icons.sh` writes every app icon from them.
 
 - Plan: `docs/architecture.md`, the ADRs in `docs/decisions/`, and the
   [Linear media project](https://linear.app/adsfsd/project/media-c8c8792e24e6).

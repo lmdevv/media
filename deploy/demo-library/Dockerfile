@@ -10,8 +10,8 @@
 # it, and the Demo library workflow publishes it.
 FROM ghcr.io/lmdevv/music-demo-library:v1@sha256:f62a095b34212379307a6c298588cec3461498b083d805c2922ec1b20480eddb AS music
 FROM ghcr.io/lmdevv/movies-demo-library:v1@sha256:27fe29bb32af3f06e57de70c3453ac36f347ff171c143681a23bf954f353a43b
-LABEL org.opencontainers.image.title="[media] demo library" \
-  org.opencontainers.image.description="Creative Commons films, shows, and music for [media] demos and tests" \
+LABEL org.opencontainers.image.title="Lar demo library" \
+  org.opencontainers.image.description="Creative Commons films, shows, and music for Lar demos and tests" \
   org.opencontainers.image.source="https://github.com/lmdevv/media" \
   org.opencontainers.image.licenses="CC-BY-2.5 AND CC-BY-3.0 AND CC-BY-4.0 AND CC-BY-SA-3.0 AND CC-BY-SA-4.0"
 COPY --from=music /CREDITS.md /Music/

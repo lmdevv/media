@@ -1,5 +1,5 @@
 {
-  description = "[media]: self-hosted media for people and agents";
+  description = "Lar: self-hosted media for people and agents";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
@@ -58,7 +58,7 @@
           media = {
             type = "app";
             program = nixpkgs.lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.cli;
-            meta.description = "The [media] command line";
+            meta.description = "The Lar command line";
           };
         in
         {

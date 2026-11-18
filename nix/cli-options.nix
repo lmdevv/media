@@ -1,7 +1,7 @@
 { lib, pkgs }:
 {
   options = {
-    enable = lib.mkEnableOption "the [media] command line";
+    enable = lib.mkEnableOption "the Lar command line";
 
     package = lib.mkOption {
       type = lib.types.package;

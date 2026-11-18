@@ -1,4 +1,4 @@
-# [media] with Docker Compose: the all-in-one image (the core's Convex backend, the media service,
+# Lar with Docker Compose: the all-in-one image (the core's Convex backend, the media service,
 # and the web clients behind one port), plus optional sidecars. From this folder:
 #
 #   cp .env.example .env        # then set MEDIA_LIBRARY and MEDIA_BASE_URL; see docs/homelab.md

@@ -17,7 +17,7 @@ export default function Welcome() {
       header={
         <View className="h-16 flex-row items-center">
           <Text variant="largeTitle" accessibilityRole="header">
-            [movies]
+            Lar Movies
           </Text>
         </View>
       }

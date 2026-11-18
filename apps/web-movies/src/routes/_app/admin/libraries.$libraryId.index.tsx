@@ -9,7 +9,7 @@ export const Route = createFileRoute("/_app/admin/libraries/$libraryId/")({
     parse: (raw) => ({ libraryId: parseLibraryId(raw.libraryId) }),
     stringify: (params) => ({ libraryId: params.libraryId }),
   },
-  head: () => ({ meta: [{ title: "Library · [movies]" }] }),
+  head: () => ({ meta: [{ title: "Library · Lar Movies" }] }),
   component: LibraryDetailPage,
 });
 

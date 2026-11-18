@@ -86,7 +86,7 @@ stdenvNoCC.mkDerivation (finalAttrs: {
   '';
 
   meta = {
-    description = "The [media] command line: every command of a self-hosted [media] server";
+    description = "The Lar command line: every command of a self-hosted Lar server";
     homepage = "https://github.com/lmdevv/media";
     license = lib.licenses.mit;
     mainProgram = "media";

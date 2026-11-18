@@ -10,7 +10,7 @@ import { GridHeader, PosterGrid } from "@/components/browse/title-grid-page";
 import { plural, titleFacts } from "@/lib/format";
 
 export const Route = createFileRoute("/_app/my-list")({
-  head: () => ({ meta: [{ title: "My List · [movies]" }] }),
+  head: () => ({ meta: [{ title: "My List · Lar Movies" }] }),
   component: MyListPage,
 });
 

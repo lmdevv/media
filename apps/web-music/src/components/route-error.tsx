@@ -82,7 +82,7 @@ export function PageNotFound() {
   return (
     <ScreenMessage
       title="There's nothing here"
-      description="This link doesn't open anything in [music]. It may be mistyped."
+      description="This link doesn't open anything in Lar Music. It may be mistyped."
       action={<BackButton back={{ to: "/", label: "Go to Home" }} />}
     />
   );
