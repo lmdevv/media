@@ -1,5 +1,6 @@
-import { Context, Effect, Layer, Redacted, Schema } from "effect";
+import { Context, Effect, Layer, Option, Redacted, Schema } from "effect";
 import type { Scope } from "effect";
+import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 
 import * as Platform from "../platform/platform";
@@ -94,6 +95,130 @@ const scoped = <A, E>(effect: Effect.Effect<A, E, Scope.Scope>): Promise<A> =>
   Effect.runPromise(Effect.scoped(effect));
 
 describe.skipIf(stack === undefined)("platform.movies on the stack", { timeout: 60_000 }, () => {
+  it("signs a guest in from a link, renews the same identity, and ends it when revoked", async () => {
+    if (stack === undefined) return;
+
+    const admin = await createPlatformPerson(stack, "sdk-guest-admin", "admin");
+    const maker = await createPlatformPerson(stack, "sdk-guest-maker");
+
+    const answer = await scoped(
+      Effect.gen(function* () {
+        const host = yield* signedInAs(admin);
+        const sharing = yield* signedInAs(maker);
+        const { userId } = yield* sharing.core.auth.sessions.current();
+
+        yield* Effect.promise(() => seedMovies(stack, userId, [{ name: "Shared film", age: 0 }]));
+
+        const { page } = yield* sharing.movies.titles.list({
+          paginationOpts: { numItems: 10, cursor: null },
+        });
+
+        const titleId = page[0]?.id;
+
+        if (titleId === undefined) return yield* Effect.die("the shared title was not listed");
+
+        yield* host.core.guests.configure({
+          enabled: true,
+          address: "https://guests.example.ts.net",
+        });
+        yield* host.core.guests.allow({ userId, allowed: true });
+
+        const target = {
+          kind: "item",
+          item: { domain: "movies", ref: { type: "title", id: titleId } },
+        } as const;
+
+        const link = yield* sharing.core.guests.links.create({ target });
+        const code = link.url.slice(link.url.indexOf("#") + 1);
+        const values = new Map<string, string>();
+        const key = "media.session";
+        const clock = yield* Layer.build(TestClock.layer());
+
+        return yield* Effect.gen(function* () {
+          yield* TestClock.setTime(Date.now());
+
+          const context = yield* Layer.build(
+            Platform.layer({
+              url,
+              connection: "http",
+              signIn: stackSignIn(stack),
+              storage: TokenStorage.layerKeyValue(
+                {
+                  getItem: (name) => values.get(name) ?? null,
+                  setItem: (name, value) => {
+                    values.set(name, value);
+                  },
+                  removeItem: (name) => {
+                    values.delete(name);
+                  },
+                },
+                key,
+              ),
+            }),
+          );
+
+          const guest = Context.get(context, Platform.Platform);
+
+          yield* guest.session.signInAsGuest({ code: Redacted.make(code), name: "  Sam  " });
+          const before = yield* guest.core.auth.sessions.current();
+          const shared = yield* guest.core.guests.current();
+          const stored = Option.getOrThrow(TokenStorage.parseStoredSession(values.get(key) ?? ""));
+
+          const claims = yield* Schema.decodeEffect(
+            Schema.fromJsonString(Schema.Struct({ exp: Schema.Finite })),
+          )(Option.getOrThrow(TokenStorage.tokenPayload(Redacted.value(stored.token))));
+
+          yield* TestClock.setTime(claims.exp * 1000 - 30_000);
+          const after = yield* guest.core.auth.sessions.current();
+          const renewed = Option.getOrThrow(TokenStorage.parseStoredSession(values.get(key) ?? ""));
+          yield* TestClock.setTime(Date.now());
+
+          const sharedAfterRefresh = yield* guest.core.guests.current();
+
+          yield* sharing.core.guests.links.revoke({ linkId: link.linkId });
+          const refused = yield* Effect.flip(guest.core.guests.current());
+          const sessionAfterRevoke = yield* Effect.flip(guest.core.auth.sessions.current());
+          const currentAfterRevoke = yield* Effect.flip(guest.core.guests.current());
+
+          const reused = yield* Effect.flip(
+            guest.session.signInAsGuest({ code: Redacted.make(code), name: "Again" }),
+          );
+
+          return {
+            before,
+            sameIdentity: before.userId === after.userId && before.sessionId === after.sessionId,
+            refreshed: Redacted.value(stored.refreshToken) !== Redacted.value(renewed.refreshToken),
+            shared,
+            sharedAfterRefresh,
+            target,
+            sharedBy: maker.username,
+            refused,
+            sessionAfterRevoke,
+            currentAfterRevoke,
+            reused,
+          };
+        }).pipe(Effect.provideContext(clock));
+      }),
+    );
+
+    expect(answer).toMatchObject({
+      before: {
+        username: "Sam",
+        role: "guest",
+        kind: "guest",
+        scopes: ["movies:play", "music:play"],
+      },
+      sameIdentity: true,
+      refreshed: true,
+      shared: { name: "Sam", sharedBy: answer.sharedBy, target: answer.target },
+      refused: { _tag: "Unauthenticated" },
+      sessionAfterRevoke: { _tag: "Unauthenticated" },
+      currentAfterRevoke: { _tag: "Unauthenticated" },
+      reused: { _tag: "Expired" },
+    });
+    expect(answer.sharedAfterRefresh).toStrictEqual(answer.shared);
+  });
+
   it("browses, plays, and keeps a list through the generated movies methods", async () => {
     if (stack === undefined) return;
 

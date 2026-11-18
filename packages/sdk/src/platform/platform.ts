@@ -36,6 +36,7 @@ export { serverUrlBeside, signInUrlBeside, signInUrlFor } from "./sign-in-url";
 
 export type {
   DeviceSignIn,
+  GuestSignIn,
   Interface as ClientInterface,
   OpenError,
   Options,
