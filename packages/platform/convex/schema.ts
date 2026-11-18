@@ -508,7 +508,6 @@ export default defineSchema({
   limitsProbeRows: defineTable({
     group: v.string(),
     position: v.number(),
-    doubled: v.optional(v.number()),
   }).index("by_group_position", ["group", "position"]),
 
   jobs: defineTable(jobDocument)
@@ -532,12 +531,6 @@ export default defineSchema({
     .index("by_kind", ["kind"])
     /** Paused kinds by when their pause ends, for `core/jobs/leases:wakeDue`. */
     .index("by_paused", ["pausedUntil"]),
-
-  schemaMigrations: defineTable({
-    name: v.string(),
-    cursor: v.union(v.string(), v.null()),
-    done: v.boolean(),
-  }).index("by_name", ["name"]),
 
   /**
    * A group session (ADR 0017), found by id from its link or from a member row.

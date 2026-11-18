@@ -495,7 +495,6 @@ let
       media-core-convex deploy --yes --codegen disable --typecheck disable
       log "configuring the core deployment"
       media-core-configure
-      media-core-convex run core/schemaMigrations:run >/dev/null
       printf '%s\n' "$version" >"$data/version"
       rm -f "$data/upgrade-backup"
 

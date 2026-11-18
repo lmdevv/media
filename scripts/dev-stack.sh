@@ -184,7 +184,6 @@ ENV
 cd "${root}/packages/platform"
 pnpm exec convex deploy --yes >/dev/null
 node scripts/configure.ts
-pnpm exec convex run core/schemaMigrations:run >/dev/null
 
 # The media service's service principal and key on the core. The key is shown once, so it is kept
 # in the state directory, beside the creation time of the core's volume it belongs to; a new volume
