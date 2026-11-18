@@ -7,14 +7,14 @@ import type { MutationCtx } from "../../_generated/server";
 import { DOCUMENT_BYTES } from "../../movies/fit";
 import { releaseTrickplayJob } from "../../movies/trickplayState";
 import type { JobKind } from "./kinds";
-import { ITEM_BATCH_MAX } from "./machine";
+import { ITEM_BATCH_MAX, JOB_TEXT_MAX } from "./machine";
 import { deleteFinishedJob } from "./store";
 
 /** How long a finished job stays before the sweep deletes it. */
 const FINISHED_KEPT_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** Most jobs one sweep call deletes. */
-const SWEEP_JOBS_MAX = 256;
+export const SWEEP_JOBS_MAX = 256;
 
 /** Most of their items one sweep call deletes; a job with more goes on in the next call. */
 const SWEEP_ITEMS_MAX = ITEM_BATCH_MAX;
@@ -28,11 +28,14 @@ const SWEEP_BYTES_MAX = 12 * 1024 * 1024;
 /** Convex reads a document again to delete or rewrite it, so its bytes count twice. */
 const READS_PER_DELETE = 2;
 
+/** Most bytes UTF-8 spends on one character of a JavaScript string. */
+const BYTES_PER_CHAR_MAX = 3;
+
 /**
- * What one job may cost before it is read: a Convex document is at most 1 MiB, and a job written
- * before its message and error were bounded may be that large.
+ * What one job may cost before it is read: its message and error, each at most `JOB_TEXT_MAX`
+ * characters, and 16 KiB for the rest, ids, numbers, and short names such as a lyrics lookup's tags.
  */
-const JOB_BYTES_MAX = 1024 * 1024;
+const JOB_BYTES_MAX = 2 * JOB_TEXT_MAX * BYTES_PER_CHAR_MAX + 16 * 1024;
 
 /**
  * The kinds whose finished jobs nothing needs (ADR 0012, "Finished jobs"). Scans stay, because a
@@ -113,8 +116,8 @@ const sweepJobs = async (
 
 /**
  * Deletes old jobs of one lane while the budgets last. Each read takes only as many jobs as the
- * byte budget holds at 1 MiB each, read twice, so a call never reads past it, and the jobs it
- * reads are deleted before the next read.
+ * byte budget holds at `JOB_BYTES_MAX` each, read twice, so a call never reads past it, and the
+ * jobs it reads are deleted before the next read.
  */
 const sweepLane = async (
   ctx: Pick<MutationCtx, "db" | "scheduler">,

@@ -5,6 +5,8 @@ import { describe, expect, it } from "vitest";
 
 import { api, internal } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
+import { SWEEP_JOBS_MAX } from "../../../convex/core/jobs/cleanup";
+import { JOB_TEXT_MAX } from "../../../convex/core/jobs/machine";
 import { runFunction } from "../../admin";
 import { member } from "../../devices";
 import { JobId, claimJob, finishJob, moviesLibrary, upsert } from "../../movies/catalog";
@@ -13,7 +15,7 @@ import { movieFile, scannedTitle } from "../../movies/scanned";
 import { runServer } from "../../service";
 import { coreStackFromEnvFile } from "../../stack-env";
 import type { CoreStack } from "../../stack-env";
-import { freshRun, retrying } from "./driver";
+import { Lease, freshRun, inSequence, retrying, worker } from "./driver";
 
 const stack = coreStackFromEnvFile();
 
@@ -54,6 +56,9 @@ const exists = async (core: CoreStack, jobId: Id<"jobs">): Promise<boolean> =>
     { jobId },
     Schema.NullOr(Schema.Unknown),
   )) !== null;
+
+/** The longest lease a claim may ask for, so no lease lapses before its job is finished. */
+const LONG_LEASE_MS = 10 * 60 * 1000;
 
 const TrickplayState = Schema.Struct({
   trickplay: Schema.NullOr(
@@ -100,6 +105,47 @@ describe.skipIf(stack === undefined)("the sweep of finished jobs", { timeout: 18
     expect(await exists(stack, imported.jobId)).toBe(true);
 
     await admin.signedIn.client.mutation(api.core.libraries.remove, { libraryId });
+  });
+
+  it("delete a full page of jobs, each with the longest message and error, in one call", async () => {
+    if (stack === undefined) return;
+    await sweepAll(stack);
+
+    const workerId = freshRun("sweep-page");
+
+    const jobIds = await runFunction(
+      stack,
+      internal.core.jobs.probe.enqueue,
+      { kind: "probe.wide", run: workerId, count: SWEEP_JOBS_MAX },
+      Schema.Array(JobId),
+    );
+
+    const leases = await runFunction(
+      stack,
+      internal.core.jobs.probe.claimPastCap,
+      { jobIds: [...jobIds], workerId, leaseMs: LONG_LEASE_MS },
+      Schema.Array(Lease),
+    );
+
+    const probe = worker(stack, workerId);
+    const message = "m".repeat(JOB_TEXT_MAX);
+    const error = "e".repeat(JOB_TEXT_MAX);
+
+    await inSequence(leases, async (lease) => {
+      await probe.report(lease, { message, leaseMs: LONG_LEASE_MS });
+      await probe.finish(lease, { outcome: "failed", error, retry: false });
+      await retrying(() => backdate(stack, lease.jobId));
+    });
+
+    const first = await retrying(() =>
+      runFunction(stack, internal.core.jobs.cleanup.sweep, {}, Swept),
+    );
+
+    expect(first).toEqual({ jobs: SWEEP_JOBS_MAX, items: 0, more: true });
+
+    const left = await Promise.all(jobIds.map(async (jobId) => exists(stack, jobId)));
+
+    expect(left.filter(Boolean)).toEqual([]);
   });
 
   it("record a deleted failed trickplay job's failure on its file, so no file names it", async () => {
