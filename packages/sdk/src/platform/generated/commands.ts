@@ -6341,7 +6341,7 @@ export const effectMethods = (method: EffectBuilder) => ({
       search: method.query(movies_titles_search),
       /** `movies.titles.similar` (query, movies:read): Show titles like this one that you may see. */
       similar: method.query(movies_titles_similar),
-      /** `movies.titles.versions` (query, movies:read): List the versions on disk of a movie or an episode, best quality first. */
+      /** `movies.titles.versions` (query, movies:read): List the versions on disk of a movie or an episode, best quality first; for a show without an episode, the one its Play button starts. */
       versions: method.query(movies_titles_versions),
     },
   },
@@ -6841,7 +6841,7 @@ export const promiseMethods = (method: PromiseBuilder) => ({
       search: method.query(movies_titles_search),
       /** `movies.titles.similar` (query, movies:read): Show titles like this one that you may see. */
       similar: method.query(movies_titles_similar),
-      /** `movies.titles.versions` (query, movies:read): List the versions on disk of a movie or an episode, best quality first. */
+      /** `movies.titles.versions` (query, movies:read): List the versions on disk of a movie or an episode, best quality first; for a show without an episode, the one its Play button starts. */
       versions: method.query(movies_titles_versions),
     },
   },

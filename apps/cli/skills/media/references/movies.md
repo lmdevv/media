@@ -363,7 +363,7 @@ Show titles like this one that you may see.
 
 ## `movies.titles.versions`
 
-List the versions on disk of a movie or an episode, best quality first.
+List the versions on disk of a movie or an episode, best quality first; for a show without an episode, the one its Play button starts.
 
 - CLI: `media movies titles versions`
 - Kind: query

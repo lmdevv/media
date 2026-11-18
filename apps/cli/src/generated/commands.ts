@@ -5490,7 +5490,8 @@ export const generatedCommands = [
     kind: "query",
     scope: "movies:read",
     refusesKeys: false,
-    summary: "List the versions on disk of a movie or an episode, best quality first",
+    summary:
+      "List the versions on disk of a movie or an episode, best quality first; for a show without an episode, the one its Play button starts",
     secrets: [],
     paginated: false,
     args: Schema.Struct({

@@ -234,6 +234,9 @@ describe.skipIf(stack === undefined)("movies browse commands", { timeout: 180_00
       ),
       refusal(shelf.kid.signedIn.client.query(api.movies.titles.get, { titleId: sintel })),
       refusal(shelf.outsider.signedIn.client.query(api.movies.titles.get, { titleId: pioneer })),
+      refusal(
+        shelf.outsider.signedIn.client.query(api.movies.titles.versions, { titleId: pioneer }),
+      ),
     ]);
 
     expect(refusals).toEqual(Array.from({ length: refusals.length }, () => "not_found"));
@@ -295,9 +298,12 @@ describe.skipIf(stack === undefined)("movies browse commands", { timeout: 180_00
     expect(
       await client.query(api.movies.titles.versions, { titleId: pioneerId, episodeId: first.id }),
     ).toHaveLength(1);
-    expect(
-      (await failureOf(client.query(api.movies.titles.versions, { titleId: pioneerId }))).code,
-    ).toBe("invalid_args");
+    expect(await client.query(api.movies.titles.versions, { titleId: pioneerId })).toEqual(
+      await client.query(api.movies.titles.versions, {
+        titleId: pioneerId,
+        episodeId: pioneer.nextEpisode?.id ?? first.id,
+      }),
+    );
   });
 
   it("open a show's episodes on its next episode's season, else its first regular one", async () => {
@@ -366,11 +372,20 @@ describe.skipIf(stack === undefined)("movies browse commands", { timeout: 180_00
     await client.mutation(api.movies.history.markWatched, { titleId, episodeId: lastOfFirst.id });
 
     expect(await opened()).toEqual([[2, 1]]);
+
+    const nextOne = (await seasonOf(client, titleId, 2))[0];
+
+    expect(
+      (await client.query(api.movies.titles.versions, { titleId })).map((version) => version.id),
+    ).toEqual(
+      scanned.files.flatMap((file) => (file.episodeId === nextOne?.id ? [file.fileId] : [])),
+    );
     expect(await clientsOpenOn()).toBe(2);
 
     await client.mutation(api.movies.history.markWatched, { titleId });
 
     expect((await client.query(api.movies.titles.get, { titleId })).nextEpisode).toBeNull();
+    expect(await client.query(api.movies.titles.versions, { titleId })).toEqual([]);
     expect(await opened()).toEqual([
       [1, 1],
       [1, 2],

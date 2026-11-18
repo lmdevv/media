@@ -7,7 +7,7 @@ import { Link, createFileRoute } from "@tanstack/react-router";
 import { asTitleId } from "@/lib/catalog";
 import { HeldEpisodes } from "@/components/browse/episodes";
 import { HeroSkeleton } from "@/components/browse/skeletons";
-import { TitleDetailView } from "@/components/browse/title-detail";
+import { HeldPlayVersions, TitleDetailView } from "@/components/browse/title-detail";
 import { HeldSimilar } from "@/components/browse/title-extras";
 import { describeFailure, isFailure } from "@media/ui/lib/failure";
 import { usePhone } from "@/lib/use-phone";
@@ -29,6 +29,7 @@ function TitlePage() {
     <>
       <HeldSimilar titleId={titleId} />
       <HeldEpisodes titleId={titleId} />
+      <HeldPlayVersions titleId={titleId} />
       <TitleContent />
     </>
   );

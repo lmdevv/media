@@ -438,7 +438,14 @@ export const {
   },
   versions: async (ctx, { titleId, episodeId }, caller) => {
     const { title } = await requireTitle(ctx.db, caller, "view", titleId);
-    const chosen = await resolveEpisode(ctx.db, title, episodeId ?? null);
+    const upNext = title.kind === "show" && episodeId === undefined;
+
+    const chosen = upNext
+      ? await upNextEpisode(ctx.db, caller.userId, titleId)
+      : await resolveEpisode(ctx.db, title, episodeId ?? null);
+
+    // A finished show's Play button starts nothing, so it has no versions to offer.
+    if (upNext && chosen === null) return [];
 
     const [files, progress] = await Promise.all([
       filesOnDisk(ctx.db, title, chosen),

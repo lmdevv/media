@@ -596,9 +596,17 @@ export const movies = [
     result: titleDetail,
   }),
   query("movies.titles.versions", {
-    summary: "List the versions on disk of a movie or an episode, best quality first",
+    summary:
+      "List the versions on disk of a movie or an episode, best quality first; for a show without an episode, the one its Play button starts",
     scope: "movies:read",
-    args: { titleId: v.id("titles"), episodeId: v.optional(v.id("episodes")) },
+    args: {
+      titleId: v.id("titles"),
+      /**
+       * An episode of the show. Omit for a movie, or for the episode a show's Play button starts:
+       * none for a finished show.
+       */
+      episodeId: v.optional(v.id("episodes")),
+    },
     result: v.array(mediaVersion),
   }),
   query("movies.titles.episodes", {

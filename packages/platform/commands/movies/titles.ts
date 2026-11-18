@@ -748,7 +748,7 @@ export interface Handlers {
     caller: Caller,
   ) => Infer<typeof similarResult> | Promise<Infer<typeof similarResult>>;
 
-  /** `movies.titles.versions` (query, movies:read): List the versions on disk of a movie or an episode, best quality first. */
+  /** `movies.titles.versions` (query, movies:read): List the versions on disk of a movie or an episode, best quality first; for a show without an episode, the one its Play button starts. */
   readonly versions: (
     ctx: Omit<QueryCtx, "auth">,
     args: Infer<typeof versionsArgs>,

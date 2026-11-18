@@ -1,4 +1,11 @@
-import type { MediaFile, MediaFileId, MediaVersion, ShowStatus, TitleDetail } from "@/lib/catalog";
+import type {
+  MediaFile,
+  MediaFileId,
+  MediaVersion,
+  ShowStatus,
+  TitleDetail,
+  TitleId,
+} from "@/lib/catalog";
 import { MediaLabels, Versions } from "@media/sdk/effect";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { Badge } from "@media/ui/components/badge";
@@ -28,7 +35,6 @@ import { toastFailure } from "@media/ui/lib/failure";
 import { facts, formatRemaining, formatRuntime, plural } from "@/lib/format";
 import { fileBadges, trackSummary } from "@/lib/media-facts";
 import { formatDate, languageName, titleLinks } from "@/lib/metadata";
-import { orSkip } from "@/lib/query-state";
 import { useAddToSession } from "@/together/use-add-to-session";
 import { useVersionChoice, withFacts } from "@/playback/use-version-choice";
 import type { VersionChoice } from "@/playback/use-version-choice";
@@ -96,18 +102,32 @@ const mainFile = (title: TitleDetail, chosen: MediaVersion | null): MediaFile | 
 
 const NO_VERSIONS: ReadonlyArray<MediaVersion> = [];
 
-const usePlayVersions = (title: TitleDetail): ReadonlyArray<MediaVersion> => {
+/**
+ * The versions of what a title's Play button starts: a movie's, or the next episode of a show.
+ * The server picks the episode by the same answers as the title's `nextEpisode`, so the two agree.
+ */
+const usePlayVersionsOf = (titleId: TitleId) => {
   const platform = usePlatform();
-  const episodeId = title.kind === "show" ? title.nextEpisode?.id : undefined;
 
-  const episodeVersions = usePlatformQuery(
-    platform.movies.titles.versions,
-    ...orSkip(episodeId === undefined ? null : { titleId: title.id, episodeId }),
-  );
+  return usePlatformQuery(platform.movies.titles.versions, { titleId });
+};
+
+/**
+ * Holds the versions of what a title's Play button starts from the moment the title's page opens,
+ * so the version menu beside Play has its answer when the page mounts after the title answered.
+ */
+export function HeldPlayVersions({ titleId }: { readonly titleId: TitleId }) {
+  usePlayVersionsOf(titleId);
+
+  return null;
+}
+
+const usePlayVersions = (title: TitleDetail): ReadonlyArray<MediaVersion> => {
+  const versions = usePlayVersionsOf(title.id);
 
   if (title.kind === "movie") return title.versions;
 
-  return episodeVersions.status === "success" ? episodeVersions.data : NO_VERSIONS;
+  return versions.status === "success" ? versions.data : NO_VERSIONS;
 };
 
 function VersionSelect({
