@@ -8,17 +8,23 @@ import type { LibraryView } from "./first-scan";
 const PAGE_ROWS = 100;
 
 /**
+ * Every page of the libraries shared with you. Both hooks below list through it, with the same
+ * arguments, so they share one subscription when both are mounted.
+ */
+const useListed = () =>
+  useAllPages(
+    usePlatform().core.libraries.list,
+    (paginationOpts) => ({ paginationOpts }),
+    PAGE_ROWS,
+  );
+
+/**
  * The music libraries shared with you, each with what `core.libraries.get` shows of it, or
  * undefined while they load. A library whose read failed is left out.
  */
 export const useMusicLibraries = (): ReadonlyArray<LibraryView> | undefined => {
   const platform = usePlatform();
-
-  const listed = useAllPages(
-    platform.core.libraries.list,
-    (paginationOpts) => ({ paginationOpts }),
-    PAGE_ROWS,
-  );
+  const listed = useListed();
 
   const rows =
     listed.status === "ready" && listed.next.kind === "done"
@@ -35,7 +41,18 @@ export const useMusicLibraries = (): ReadonlyArray<LibraryView> | undefined => {
   }, [rows, views]);
 };
 
-export const useScanning = (): boolean | undefined =>
-  useMusicLibraries()?.some(
-    (library) => library.scan?.status === "running" || library.scan?.status === "queued",
+/**
+ * Whether a music library shared with you is being scanned or waits for one, from the list's rows;
+ * undefined while they load. A row from a server that does not send its scan counts as not
+ * scanning.
+ */
+export const useScanning = (): boolean | undefined => {
+  const listed = useListed();
+
+  if (listed.status !== "ready" || listed.next.kind !== "done") return undefined;
+
+  return listed.rows.some(
+    (row) =>
+      row.kind === "music" && (row.scan?.status === "running" || row.scan?.status === "queued"),
   );
+};

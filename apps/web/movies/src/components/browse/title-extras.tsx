@@ -1,12 +1,4 @@
-import type {
-  CollectionId,
-  Credit,
-  CreditKind,
-  Ratings,
-  TitleDetail,
-  TitleId,
-  Trailer,
-} from "@/lib/catalog";
+import type { Credit, CreditKind, Ratings, TitleDetail, TitleId, Trailer } from "@/lib/catalog";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { Avatar } from "@media/ui/components/avatar";
 import { buttonVariants } from "@media/ui/lib/button-variants";
@@ -308,25 +300,44 @@ export function TrailerButton({
   );
 }
 
+const useCollectionOf = (titleId: TitleId) => {
+  const platform = usePlatform();
+
+  return usePlatformQuery(platform.movies.collections.ofTitle, { titleId });
+};
+
+/**
+ * Holds the collection a title belongs to from the moment the title's page opens, so its row has
+ * its answer when it mounts, which is only after the title answered.
+ */
+export function HeldCollection({ titleId }: { readonly titleId: TitleId }) {
+  useCollectionOf(titleId);
+
+  return null;
+}
+
 /** "Part of the Alien Collection": the other titles of the collection, in order. */
 export function CollectionRow({
-  collectionId,
   titleId,
   phone,
 }: {
-  readonly collectionId: CollectionId;
   readonly titleId: TitleId;
   readonly phone: boolean;
 }) {
-  const platform = usePlatform();
-  const collection = usePlatformQuery(platform.movies.collections.get, { collectionId });
+  const collection = useCollectionOf(titleId);
 
-  if (collection.status !== "success" || collection.data.titles.length < 2) return null;
+  if (
+    collection.status !== "success" ||
+    collection.data === null ||
+    collection.data.titles.length < 2
+  ) {
+    return null;
+  }
 
   return (
     <MediaRow
       title={`Part of ${collection.data.name}`}
-      seeAll={<Link to="/collection/$collectionId" params={{ collectionId }} />}
+      seeAll={<Link to="/collection/$collectionId" params={{ collectionId: collection.data.id }} />}
     >
       {collection.data.titles.map((title) =>
         phone ? (

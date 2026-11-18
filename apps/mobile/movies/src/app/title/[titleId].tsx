@@ -1,7 +1,9 @@
+import { allOfSeason, seasonPageArgs } from "@media/contracts/opening-season";
 import { describeFailure, isFailure } from "@media/mobile-core/failure";
 import { useAllPages } from "@media/mobile-core/pages";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { router, useLocalSearchParams } from "expo-router";
+import { useState } from "react";
 import { ChevronDown, CircleAlert } from "lucide-react-native";
 import { ActivityIndicator, Pressable, useWindowDimensions, View } from "react-native";
 import Animated, { useAnimatedScrollHandler, useSharedValue } from "react-native-reanimated";
@@ -14,10 +16,12 @@ import { seasonParam, titleIdParam } from "@/components/title/route-params";
 import { GUTTER, READABLE_COLUMN } from "@/components/ui/page-layout";
 import { TitleHero, TitleTopBar } from "@/components/title/title-hero";
 import { initialSeason } from "@/components/title/title-model";
+import { useOpeningEpisodes } from "@/components/title/use-opening-episodes";
 import {
   AboutRow,
   AvailableVersions,
   CastAndCrew,
+  HeldSimilar,
   MoreLikeThis,
 } from "@/components/title/title-sections";
 import { Button } from "@/components/ui/button";
@@ -72,8 +76,16 @@ function TitleDetailView({ title }: { readonly title: TitleDetail }) {
     scrollY.value = event.contentOffset.y;
   });
 
-  const seasonNumber = seasonParam(params.season) ?? initialSeason(title);
+  const opening = initialSeason(title);
+  // The list keeps the season it opened on while the screen is open, so its heading and the pages
+  // it has loaded stay on one season when the next episode moves to another.
+  const [opened] = useState(opening);
+  const seasonNumber = seasonParam(params.season) ?? opened ?? opening;
+  const [named, setNamed] = useState(false);
   const show = title.kind === "show";
+  // Only the season the list opened on reads the held page: a season the person picked stays
+  // named, so its loaded pages stay when the opening season moves onto it.
+  const held = !named && opened !== null && seasonNumber === opened;
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const widthClass = useWidthClass();
@@ -85,15 +97,23 @@ function TitleDetailView({ title }: { readonly title: TitleDetail }) {
   const episodes = useAllPages(
     platform.movies.titles.episodes,
     show && seasonNumber !== null
-      ? (paginationOpts) => ({ titleId: title.id, seasonNumber, paginationOpts })
+      ? (paginationOpts) => seasonPageArgs(title.id, seasonNumber, held, paginationOpts)
       : "skip",
   );
+
+  const ofSeason =
+    episodes.status === "ready" &&
+    seasonNumber !== null &&
+    allOfSeason(episodes.rows, seasonNumber);
+
+  // The held page moved to another season before the title said so: ask for this one by number.
+  if (held && episodes.status === "ready" && !ofSeason) setNamed(true);
 
   return (
     <View className="flex-1 bg-bg">
       <Animated.FlatList
         data={rowsOf(
-          episodes.status === "ready" ? episodes.rows : NO_EPISODES,
+          ofSeason ? episodes.rows : NO_EPISODES,
           layout.kind === "grid" ? layout.columns : 1,
         )}
         keyExtractor={(row) => row.map((episode) => episode.id).join(" ")}
@@ -180,6 +200,8 @@ function TitleLoader({ titleId }: { readonly titleId: TitleId }) {
   const platform = usePlatform();
   const title = usePlatformQuery(platform.movies.titles.get, { titleId });
 
+  useOpeningEpisodes(titleId);
+
   if (title.status === "loading") {
     return (
       <Screen edges={["top"]} header={<NavHeader />}>
@@ -226,5 +248,10 @@ export default function TitleScreen() {
     );
   }
 
-  return <TitleLoader key={titleId} titleId={titleId} />;
+  return (
+    <>
+      <HeldSimilar titleId={titleId} />
+      <TitleLoader key={titleId} titleId={titleId} />
+    </>
+  );
 }

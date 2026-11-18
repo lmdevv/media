@@ -17,8 +17,15 @@ const asTrackId = Brand.nominal<TrackRef["id"]>();
 
 /** What a play, pause, skip, or seek does: here, or on the device the player follows. */
 export interface TransportActions {
-  /** Replaces the queue and plays it on this device from `index`. */
-  readonly playTracks: (trackIds: ReadonlyArray<string>, index?: number) => Promise<void>;
+  /**
+   * Replaces the queue and plays it on this device from `index`, turning shuffle on or off with it
+   * when `shuffle` is set.
+   */
+  readonly playTracks: (
+    trackIds: ReadonlyArray<string>,
+    index?: number,
+    shuffle?: boolean,
+  ) => Promise<void>;
   readonly togglePlay: () => Promise<void>;
   readonly next: () => Promise<void>;
   readonly previous: () => Promise<void>;
@@ -74,9 +81,9 @@ export const remoteActions = ({
   };
 
   return {
-    playTracks: async (ids, at) => {
+    playTracks: async (ids, at, shuffle) => {
       if (playing) void control({ playing: false });
-      await controller.playTracks(ids, at);
+      await controller.playTracks(ids, at, shuffle);
     },
     togglePlay: () => control({ playing: !playing }),
     next: async () => {

@@ -144,8 +144,15 @@ export interface PlayerState {
  * screen to show.
  */
 export interface PlayerActions {
-  /** Replaces the queue and plays it on this browser. */
-  readonly playTracks: (trackIds: ReadonlyArray<Track["id"]>, index?: number) => Promise<void>;
+  /**
+   * Replaces the queue and plays it on this browser. `shuffle` turns shuffle on or off with it, in
+   * one command; undefined keeps it. A group session's queue has no shuffle and ignores it.
+   */
+  readonly playTracks: (
+    trackIds: ReadonlyArray<Track["id"]>,
+    index?: number,
+    shuffle?: boolean,
+  ) => Promise<void>;
   /**
    * Primes the audio output inside a tap whose playback starts after an await, so iOS Safari
    * allows it. Call it before the first await; `playTracks` primes by itself when it comes first.
@@ -344,12 +351,12 @@ const createController = ({
 
   return new PlaybackController(
     {
-      play: (trackIds, index) =>
-        platform.music.queue.play(
-          index === undefined
-            ? { trackIds: trackIds.map(asTrackId) }
-            : { trackIds: trackIds.map(asTrackId), index },
-        ),
+      play: (trackIds, index, shuffle) => {
+        const listed = { trackIds: trackIds.map(asTrackId) };
+        const started = index === undefined ? listed : { ...listed, index };
+
+        return platform.music.queue.play(shuffle === undefined ? started : { ...started, shuffle });
+      },
       track: (trackId) => platform.music.tracks.get({ trackId: asTrackId(trackId) }),
       jump: async (itemId) => {
         await platform.music.queue.jump({ itemId: asItemId(itemId) });
@@ -906,7 +913,7 @@ const addAll = async (
  * requests seen so far moot (ADR 0018), so one still loading never lands over it.
  */
 const localActions = (controller: PlaybackController): TransportActions => ({
-  playTracks: (ids, at) => controller.playTracks(ids, at),
+  playTracks: (ids, at, shuffle) => controller.playTracks(ids, at, shuffle),
   togglePlay: () => controller.togglePlay(),
   next: () => controller.next(),
   previous: () => controller.previous(),

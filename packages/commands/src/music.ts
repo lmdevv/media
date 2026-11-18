@@ -458,9 +458,14 @@ export const music = [
   }),
   mutation("music.queue.play", {
     summary:
-      "Replace your queue with songs (2,000 at most, 1,000 kept) and play the one at --index, the first by default",
+      "Replace your queue with songs (2,000 at most, 1,000 kept) and play the one at --index, the first by default; --shuffle or --no-shuffle turns shuffle on or off with it",
     scope: "music:play",
-    args: { trackIds, index: v.optional(v.number()) },
+    args: {
+      trackIds,
+      index: v.optional(v.number()),
+      /** Shuffle for the new queue, and for the queue after it; absent keeps shuffle as it is. */
+      shuffle: v.optional(v.boolean()),
+    },
     result: v.object({ current: v.id("playQueueEntries") }),
   }),
   mutation("music.queue.add", {

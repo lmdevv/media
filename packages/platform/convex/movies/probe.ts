@@ -36,6 +36,8 @@ import {
   patchTitle,
 } from "./write";
 import { findProgress, watchGeneration } from "./viewing";
+import { FEATURED_READS, featuredDetailOf } from "./playState";
+import { readBudget, readsOf } from "./reads";
 
 /**
  * The stack suite's seam into the movies catalog, as `music/probe.ts` is for music: a seed of
@@ -760,5 +762,25 @@ export const markPurging = internalMutation({
     await patchTitle(ctx.db, title, { purging: true });
 
     return null;
+  },
+});
+
+/**
+ * Whether Home's billboard detail of `titleId` comes for `userId` on a read budget of what it
+ * reserves for the title's kind, less `shortBy` documents: the reservation is exact when it comes
+ * at 0 and not at 1.
+ */
+export const featuredDetailFits = internalQuery({
+  args: { userId: v.id("users"), titleId: v.id("titles"), shortBy: v.number() },
+  returns: v.boolean(),
+  handler: async (ctx, { userId, titleId, shortBy }) => {
+    const title = await ctx.db.get(titleId);
+
+    if (title === null) return fail("not_found", "No such title");
+
+    const cost = FEATURED_READS[title.kind];
+    const budget = readBudget(readsOf(cost.ranges, cost.documents - shortBy, cost.bytes));
+
+    return (await featuredDetailOf(ctx.db, userId, title, budget)) !== undefined;
   },
 });

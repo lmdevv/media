@@ -140,6 +140,7 @@ describe("CLI placement", () => {
       "core.together.reorder": "auth together reorder",
       "movies.collections.get": "movies collections get",
       "movies.collections.list": "movies collections list",
+      "movies.collections.ofTitle": "movies collections of-title",
       "movies.history.continueWatching": "movies history continue-watching",
       "movies.files.list": "movies files list",
       "movies.files.summary": "movies files summary",

@@ -1669,6 +1669,29 @@ const core_libraries_list = query({
           Schema.Literal("edit"),
           Schema.Literal("manage"),
         ]),
+        scan: Schema.optionalKey(
+          Schema.Union([
+            Schema.Struct({
+              jobId: Schema.String.pipe(Schema.brand("Id<jobs>")),
+              status: Schema.Union([
+                Schema.Literal("queued"),
+                Schema.Literal("running"),
+                Schema.Literal("succeeded"),
+                Schema.Literal("failed"),
+                Schema.Literal("canceled"),
+              ]),
+              done: Schema.Union([Schema.Finite, Schema.Null]),
+              total: Schema.Union([Schema.Finite, Schema.Null]),
+              error: Schema.Union([Schema.String, Schema.Null]),
+              message: Schema.Union([Schema.String, Schema.Null]),
+              startedAt: Schema.Union([Schema.Finite, Schema.Null]),
+              attempt: Schema.Finite,
+              canceling: Schema.Boolean,
+              finishedAt: Schema.Union([Schema.Finite, Schema.Null]),
+            }),
+            Schema.Null,
+          ]),
+        ),
       }),
     ),
     continueCursor: Schema.String,
@@ -2839,6 +2862,43 @@ const movies_collections_list = query({
   }),
 });
 
+const movies_collections_ofTitle = query({
+  name: "movies.collections.ofTitle",
+  path: "movies/collections:ofTitle",
+  args: Schema.Struct({ titleId: Schema.String.pipe(Schema.brand("Id<titles>")) }),
+  result: Schema.Union([
+    Schema.Struct({
+      id: Schema.String.pipe(Schema.brand("Id<collections>")),
+      name: Schema.String,
+      overview: Schema.Union([Schema.String, Schema.Null]),
+      artwork: Schema.Struct({
+        poster: Schema.Union([Schema.String, Schema.Null]),
+        backdrop: Schema.Union([Schema.String, Schema.Null]),
+      }),
+      titles: Schema.Array(
+        Schema.Struct({
+          id: Schema.String.pipe(Schema.brand("Id<titles>")),
+          kind: Schema.Union([Schema.Literal("movie"), Schema.Literal("show")]),
+          name: Schema.String,
+          year: Schema.Union([Schema.Finite, Schema.Null]),
+          certification: Schema.Union([Schema.String, Schema.Null]),
+          ageRating: Schema.Union([Schema.Finite, Schema.Null]),
+          runtimeMs: Schema.Union([Schema.Finite, Schema.Null]),
+          genres: Schema.Array(Schema.String),
+          artwork: Schema.Struct({
+            poster: Schema.Union([Schema.String, Schema.Null]),
+            backdrop: Schema.Union([Schema.String, Schema.Null]),
+            logo: Schema.Union([Schema.String, Schema.Null]),
+          }),
+          available: Schema.Boolean,
+          addedAt: Schema.Finite,
+        }),
+      ),
+    }),
+    Schema.Null,
+  ]),
+});
+
 const movies_files_list = query({
   name: "movies.files.list",
   path: "movies/files:list",
@@ -3835,7 +3895,7 @@ const movies_titles_episodes = query({
   path: "movies/titles:episodes",
   args: Schema.Struct({
     titleId: Schema.String.pipe(Schema.brand("Id<titles>")),
-    seasonNumber: Schema.Finite,
+    seasonNumber: Schema.optionalKey(Schema.Finite),
     paginationOpts: Schema.Struct({
       numItems: Schema.Finite,
       cursor: Schema.Union([Schema.String, Schema.Null]),
@@ -4234,6 +4294,81 @@ const movies_titles_home = query({
       }),
       Schema.Null,
     ]),
+    featuredDetail: Schema.optionalKey(
+      Schema.Struct({
+        id: Schema.String.pipe(Schema.brand("Id<titles>")),
+        overview: Schema.Union([Schema.String, Schema.Null]),
+        seasonCount: Schema.Finite,
+        version: Schema.Union([
+          Schema.Struct({
+            id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
+            versionName: Schema.Union([Schema.String, Schema.Null]),
+            width: Schema.Union([Schema.Finite, Schema.Null]),
+            height: Schema.Union([Schema.Finite, Schema.Null]),
+            hdr: Schema.Union([
+              Schema.Literal("none"),
+              Schema.Literal("hdr10"),
+              Schema.Literal("hdr10plus"),
+              Schema.Literal("hlg"),
+              Schema.Literal("dolby_vision"),
+            ]),
+            videoCodec: Schema.Union([Schema.String, Schema.Null]),
+            videoProfile: Schema.Union([Schema.String, Schema.Null]),
+            videoLevel: Schema.Union([Schema.Finite, Schema.Null]),
+            videoBitDepth: Schema.Union([Schema.Finite, Schema.Null]),
+            audioCodec: Schema.Union([Schema.String, Schema.Null]),
+            audioChannels: Schema.Union([Schema.Finite, Schema.Null]),
+            audioTracks: Schema.Finite,
+            container: Schema.String,
+            sizeBytes: Schema.Finite,
+            durationMs: Schema.Finite,
+            lastPlayed: Schema.Boolean,
+          }),
+          Schema.Null,
+        ]),
+        progress: Schema.Union([
+          Schema.Struct({
+            positionMs: Schema.Finite,
+            durationMs: Schema.Finite,
+            watched: Schema.Boolean,
+            updatedAt: Schema.Finite,
+          }),
+          Schema.Null,
+        ]),
+        nextEpisode: Schema.Union([
+          Schema.Struct({
+            id: Schema.String.pipe(Schema.brand("Id<episodes>")),
+            titleId: Schema.String.pipe(Schema.brand("Id<titles>")),
+            seasonId: Schema.String.pipe(Schema.brand("Id<seasons>")),
+            seasonNumber: Schema.Finite,
+            episodeNumber: Schema.Finite,
+            name: Schema.String,
+            overview: Schema.Union([Schema.String, Schema.Null]),
+            airDate: Schema.Union([Schema.String, Schema.Null]),
+            runtimeMs: Schema.Union([Schema.Finite, Schema.Null]),
+            still: Schema.Union([Schema.String, Schema.Null]),
+            rating: Schema.Union([Schema.Finite, Schema.Null]),
+            externalIds: Schema.Struct({
+              tmdb: Schema.Union([Schema.String, Schema.Null]),
+              imdb: Schema.Union([Schema.String, Schema.Null]),
+              tvdb: Schema.Union([Schema.String, Schema.Null]),
+            }),
+            available: Schema.Boolean,
+            progress: Schema.Union([
+              Schema.Struct({
+                positionMs: Schema.Finite,
+                durationMs: Schema.Finite,
+                watched: Schema.Boolean,
+                updatedAt: Schema.Finite,
+              }),
+              Schema.Null,
+            ]),
+          }),
+          Schema.Null,
+        ]),
+        inMyList: Schema.Boolean,
+      }),
+    ),
     continueWatching: Schema.Array(
       Schema.Struct({
         reason: Schema.Union([Schema.Literal("resume"), Schema.Literal("next")]),
@@ -5840,6 +5975,7 @@ const music_queue_play = mutation({
   args: Schema.Struct({
     trackIds: Schema.Array(Schema.String.pipe(Schema.brand("Id<tracks>"))),
     index: Schema.optionalKey(Schema.Finite),
+    shuffle: Schema.optionalKey(Schema.Boolean),
   }),
   result: Schema.Struct({ current: Schema.String.pipe(Schema.brand("Id<playQueueEntries>")) }),
 });
@@ -6127,7 +6263,7 @@ export const effectMethods = (method: EffectBuilder) => ({
       create: method.mutation(core_libraries_create),
       /** `core.libraries.get` (query, signed-in): Show a library, how many items it holds, its latest scan, and to its managers its folders. */
       get: method.query(core_libraries_get),
-      /** `core.libraries.list` (query, signed-in): List the libraries shared with you. */
+      /** `core.libraries.list` (query, signed-in): List the libraries shared with you, each with its latest scan. */
       list: method.query(core_libraries_list),
       /** `core.libraries.remove` (mutation, signed-in, API keys refused): Delete a library you manage and everything it lists; the files on disk stay. */
       remove: method.mutation(core_libraries_remove),
@@ -6233,6 +6369,8 @@ export const effectMethods = (method: EffectBuilder) => ({
       get: method.query(movies_collections_get),
       /** `movies.collections.list` (query, movies:read): List collections by name with the titles you may see in each. */
       list: method.query(movies_collections_list),
+      /** `movies.collections.ofTitle` (query, movies:read): Show the collection a title's page shows and the titles you may see in it, or null when it is in none you may see. */
+      ofTitle: method.query(movies_collections_ofTitle),
     },
     files: {
       /** `movies.files.list` (query, movies:edit): List a library's files by path with their quality, size, match, and whether they are missing. */
@@ -6301,7 +6439,7 @@ export const effectMethods = (method: EffectBuilder) => ({
     titles: {
       /** `movies.titles.episode` (query, movies:play): Show an episode you can play with its show and your progress, as a group session names it. */
       episode: method.query(movies_titles_episode),
-      /** `movies.titles.episodes` (query, movies:read): List a season's episodes in order with your progress and their credits. */
+      /** `movies.titles.episodes` (query, movies:read): List a season's episodes in order with your progress and their credits; without a season, the one the show's page opens on. */
       episodes: method.query(movies_titles_episodes),
       /** `movies.titles.genres` (query, movies:read): List the genres of the titles you may see, most common first. */
       genres: method.query(movies_titles_genres),
@@ -6317,7 +6455,7 @@ export const effectMethods = (method: EffectBuilder) => ({
       search: method.query(movies_titles_search),
       /** `movies.titles.similar` (query, movies:read): Show titles like this one that you may see. */
       similar: method.query(movies_titles_similar),
-      /** `movies.titles.versions` (query, movies:read): List the versions on disk of a movie or an episode, best quality first. */
+      /** `movies.titles.versions` (query, movies:read): List the versions on disk of a movie or an episode, best quality first; for a show without an episode, the one its Play button starts. */
       versions: method.query(movies_titles_versions),
     },
   },
@@ -6423,7 +6561,7 @@ export const effectMethods = (method: EffectBuilder) => ({
       list: method.query(music_queue_list),
       /** `music.queue.move` (mutation, music:play): Move a queue entry to just after another (--after-item-id), or to the top when none is given. */
       move: method.mutation(music_queue_move),
-      /** `music.queue.play` (mutation, music:play): Replace your queue with songs (2,000 at most, 1,000 kept) and play the one at --index, the first by default. */
+      /** `music.queue.play` (mutation, music:play): Replace your queue with songs (2,000 at most, 1,000 kept) and play the one at --index, the first by default; --shuffle or --no-shuffle turns shuffle on or off with it. */
       play: method.mutation(music_queue_play),
       /** `music.queue.remove` (mutation, music:play): Remove an entry from your queue. */
       remove: method.mutation(music_queue_remove),
@@ -6627,7 +6765,7 @@ export const promiseMethods = (method: PromiseBuilder) => ({
       create: method.mutation(core_libraries_create),
       /** `core.libraries.get` (query, signed-in): Show a library, how many items it holds, its latest scan, and to its managers its folders. */
       get: method.query(core_libraries_get),
-      /** `core.libraries.list` (query, signed-in): List the libraries shared with you. */
+      /** `core.libraries.list` (query, signed-in): List the libraries shared with you, each with its latest scan. */
       list: method.query(core_libraries_list),
       /** `core.libraries.remove` (mutation, signed-in, API keys refused): Delete a library you manage and everything it lists; the files on disk stay. */
       remove: method.mutation(core_libraries_remove),
@@ -6733,6 +6871,8 @@ export const promiseMethods = (method: PromiseBuilder) => ({
       get: method.query(movies_collections_get),
       /** `movies.collections.list` (query, movies:read): List collections by name with the titles you may see in each. */
       list: method.query(movies_collections_list),
+      /** `movies.collections.ofTitle` (query, movies:read): Show the collection a title's page shows and the titles you may see in it, or null when it is in none you may see. */
+      ofTitle: method.query(movies_collections_ofTitle),
     },
     files: {
       /** `movies.files.list` (query, movies:edit): List a library's files by path with their quality, size, match, and whether they are missing. */
@@ -6801,7 +6941,7 @@ export const promiseMethods = (method: PromiseBuilder) => ({
     titles: {
       /** `movies.titles.episode` (query, movies:play): Show an episode you can play with its show and your progress, as a group session names it. */
       episode: method.query(movies_titles_episode),
-      /** `movies.titles.episodes` (query, movies:read): List a season's episodes in order with your progress and their credits. */
+      /** `movies.titles.episodes` (query, movies:read): List a season's episodes in order with your progress and their credits; without a season, the one the show's page opens on. */
       episodes: method.query(movies_titles_episodes),
       /** `movies.titles.genres` (query, movies:read): List the genres of the titles you may see, most common first. */
       genres: method.query(movies_titles_genres),
@@ -6817,7 +6957,7 @@ export const promiseMethods = (method: PromiseBuilder) => ({
       search: method.query(movies_titles_search),
       /** `movies.titles.similar` (query, movies:read): Show titles like this one that you may see. */
       similar: method.query(movies_titles_similar),
-      /** `movies.titles.versions` (query, movies:read): List the versions on disk of a movie or an episode, best quality first. */
+      /** `movies.titles.versions` (query, movies:read): List the versions on disk of a movie or an episode, best quality first; for a show without an episode, the one its Play button starts. */
       versions: method.query(movies_titles_versions),
     },
   },
@@ -6923,7 +7063,7 @@ export const promiseMethods = (method: PromiseBuilder) => ({
       list: method.query(music_queue_list),
       /** `music.queue.move` (mutation, music:play): Move a queue entry to just after another (--after-item-id), or to the top when none is given. */
       move: method.mutation(music_queue_move),
-      /** `music.queue.play` (mutation, music:play): Replace your queue with songs (2,000 at most, 1,000 kept) and play the one at --index, the first by default. */
+      /** `music.queue.play` (mutation, music:play): Replace your queue with songs (2,000 at most, 1,000 kept) and play the one at --index, the first by default; --shuffle or --no-shuffle turns shuffle on or off with it. */
       play: method.mutation(music_queue_play),
       /** `music.queue.remove` (mutation, music:play): Remove an entry from your queue. */
       remove: method.mutation(music_queue_remove),

@@ -15,6 +15,7 @@ import { accountFailureLine } from "@/lib/account-form";
 import { firstScan } from "@/lib/first-scan";
 import type { FirstScan, LibraryId } from "@/lib/first-scan";
 import { LibraryId as LibraryIdSchema } from "@/lib/ids";
+import { LIBRARY_HOME } from "@/lib/details";
 import { useCore, useMusic, useRead } from "@/lib/platform";
 import { countOf, formatCount } from "@/lib/format";
 import { useSetupProgress } from "@/session/session-phase";
@@ -46,7 +47,7 @@ export default function Scan() {
       : LibraryIdSchema.make(progress.libraryId);
 
   const library = useRead(useCore().libraries.get, libraryId === null ? "skip" : { libraryId });
-  const home = useRead(useMusic().library.home, {});
+  const home = useRead(useMusic().library.home, LIBRARY_HOME);
   const now = useNow();
   const scan = library === undefined ? RUNNING : firstScan(library, now);
   const stats = home?.stats ?? NO_STATS;

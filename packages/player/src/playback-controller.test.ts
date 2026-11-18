@@ -123,6 +123,21 @@ describe("PlaybackController", () => {
     expect(names(sent)).toStrictEqual(["play:a,b,0", "start:a", "report:a,p1"]);
   });
 
+  it("sends shuffle inside the one play command, and leaves it out when the play keeps it", async () => {
+    const { controller, sent } = setup({ playCurrent: "1" });
+
+    await controller.playTracks(["a", "b", "c"], 2, true);
+    await controller.playTracks(["a", "b"], 0, false);
+    await controller.playTracks(["a"], 0);
+    await settle();
+
+    expect(names(sent).filter((call) => call.startsWith("play:"))).toStrictEqual([
+      "play:a,b,c,2,true",
+      "play:a,b,0,false",
+      "play:a,0",
+    ]);
+  });
+
   it("asks for the first song's ticket while the queue is written, and plays it before the new queue arrives", async () => {
     const { controller, record, sent, lookups, gates } = setup({ playCurrent: "1" });
 

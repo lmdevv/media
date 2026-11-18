@@ -23,6 +23,16 @@ List collections by name with the titles you may see in each.
 - Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
 - Result: `{ page: Array<{ id: Id<"collections">; name: string; overview: string | null; artwork: { poster: string | null; backdrop: string | null }; titles: Array<{ id: Id<"titles">; kind: "movie" | "show"; name: string; year: number | null; certification: string | null; ageRating: number | null; runtimeMs: number | null; genres: Array<string>; artwork: { poster: string | null; backdrop: string | null; logo: string | null }; available: boolean; addedAt: number }> }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
 
+## `movies.collections.ofTitle`
+
+Show the collection a title's page shows and the titles you may see in it, or null when it is in none you may see.
+
+- CLI: `media movies collections of-title`
+- Kind: query
+- Scope: movies:read
+- Arguments: `{ titleId: Id<"titles"> }`
+- Result: `{ id: Id<"collections">; name: string; overview: string | null; artwork: { poster: string | null; backdrop: string | null }; titles: Array<{ id: Id<"titles">; kind: "movie" | "show"; name: string; year: number | null; certification: string | null; ageRating: number | null; runtimeMs: number | null; genres: Array<string>; artwork: { poster: string | null; backdrop: string | null; logo: string | null }; available: boolean; addedAt: number }> } | null`
+
 ## `movies.files.list`
 
 List a library's files by path with their quality, size, match, and whether they are missing.
@@ -281,12 +291,12 @@ Show an episode you can play with its show and your progress, as a group session
 
 ## `movies.titles.episodes`
 
-List a season's episodes in order with your progress and their credits.
+List a season's episodes in order with your progress and their credits; without a season, the one the show's page opens on.
 
 - CLI: `media movies titles episodes`
 - Kind: query
 - Scope: movies:read
-- Arguments: `{ titleId: Id<"titles">; seasonNumber: number; paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
+- Arguments: `{ titleId: Id<"titles">; seasonNumber?: number; paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
 - Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
 - Result: `{ page: Array<{ id: Id<"episodes">; titleId: Id<"titles">; seasonId: Id<"seasons">; seasonNumber: number; episodeNumber: number; name: string; overview: string | null; airDate: string | null; runtimeMs: number | null; still: string | null; rating: number | null; externalIds: { tmdb: string | null; imdb: string | null; tvdb: string | null }; available: boolean; progress: { positionMs: number; durationMs: number; watched: boolean; updatedAt: number } | null; credits: Array<{ personId: Id<"people">; name: string; kind: "actor" | "guest-star" | "director" | "writer" | "creator" | "producer" | "composer"; role: string | null; profile: string | null; order: number }> }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
 
@@ -318,7 +328,7 @@ Show your home rows: a featured title, continue watching, your list, and the new
 - Kind: query
 - Scope: movies:read
 - Arguments: none
-- Result: `{ featured: { id: Id<"titles">; kind: "movie" | "show"; name: string; year: number | null; certification: string | null; ageRating: number | null; runtimeMs: number | null; genres: Array<string>; artwork: { poster: string | null; backdrop: string | null; logo: string | null }; available: boolean; addedAt: number } | null; continueWatching: Array<{ reason: "resume" | "next"; title: { id: Id<"titles">; kind: "movie" | "show"; name: string; year: number | null; certification: string | null; ageRating: number | null; runtimeMs: number | null; genres: Array<string>; artwork: { poster: string | null; backdrop: string | null; logo: string | null }; available: boolean; addedAt: number }; episode: { id: Id<"episodes">; titleId: Id<"titles">; seasonId: Id<"seasons">; seasonNumber: number; episodeNumber: number; name: string; overview: string | null; airDate: string | null; runtimeMs: number | null; still: string | null; rating: number | null; externalIds: { tmdb: string | null; imdb: string | null; tvdb: string | null }; available: boolean; progress: { positionMs: number; durationMs: number; watched: boolean; updatedAt: number } | null } | null; progress: { positionMs: number; durationMs: number; watched: boolean; updatedAt: number } | null }>; myList: Array<{ id: Id<"titles">; kind: "movie" | "show"; name: string; year: number | null; certification: string | null; ageRating: number | null; runtimeMs: number | null; genres: Array<string>; artwork: { poster: string | null; backdrop: string | null; logo: string | null }; available: boolean; addedAt: number }>; recentlyAddedMovies: Array<{ id: Id<"titles">; kind: "movie" | "show"; name: string; year: number | null; certification: string | null; ageRating: number | null; runtimeMs: number | null; genres: Array<string>; artwork: { poster: string | null; backdrop: string | null; logo: string | null }; available: boolean; addedAt: number }>; recentlyAddedShows: Array<{ id: Id<"titles">; kind: "movie" | "show"; name: string; year: number | null; certification: string | null; ageRating: number | null; runtimeMs: number | null; genres: Array<string>; artwork: { poster: string | null; backdrop: string | null; logo: string | null }; available: boolean; addedAt: number }> }`
+- Result: `{ featured: { id: Id<"titles">; kind: "movie" | "show"; name: string; year: number | null; certification: string | null; ageRating: number | null; runtimeMs: number | null; genres: Array<string>; artwork: { poster: string | null; backdrop: string | null; logo: string | null }; available: boolean; addedAt: number } | null; featuredDetail?: { id: Id<"titles">; overview: string | null; seasonCount: number; version: { id: Id<"mediaFiles">; versionName: string | null; width: number | null; height: number | null; hdr: "none" | "hdr10" | "hdr10plus" | "hlg" | "dolby_vision"; videoCodec: string | null; videoProfile: string | null; videoLevel: number | null; videoBitDepth: number | null; audioCodec: string | null; audioChannels: number | null; audioTracks: number; container: string; sizeBytes: number; durationMs: number; lastPlayed: boolean } | null; progress: { positionMs: number; durationMs: number; watched: boolean; updatedAt: number } | null; nextEpisode: { id: Id<"episodes">; titleId: Id<"titles">; seasonId: Id<"seasons">; seasonNumber: number; episodeNumber: number; name: string; overview: string | null; airDate: string | null; runtimeMs: number | null; still: string | null; rating: number | null; externalIds: { tmdb: string | null; imdb: string | null; tvdb: string | null }; available: boolean; progress: { positionMs: number; durationMs: number; watched: boolean; updatedAt: number } | null } | null; inMyList: boolean }; continueWatching: Array<{ reason: "resume" | "next"; title: { id: Id<"titles">; kind: "movie" | "show"; name: string; year: number | null; certification: string | null; ageRating: number | null; runtimeMs: number | null; genres: Array<string>; artwork: { poster: string | null; backdrop: string | null; logo: string | null }; available: boolean; addedAt: number }; episode: { id: Id<"episodes">; titleId: Id<"titles">; seasonId: Id<"seasons">; seasonNumber: number; episodeNumber: number; name: string; overview: string | null; airDate: string | null; runtimeMs: number | null; still: string | null; rating: number | null; externalIds: { tmdb: string | null; imdb: string | null; tvdb: string | null }; available: boolean; progress: { positionMs: number; durationMs: number; watched: boolean; updatedAt: number } | null } | null; progress: { positionMs: number; durationMs: number; watched: boolean; updatedAt: number } | null }>; myList: Array<{ id: Id<"titles">; kind: "movie" | "show"; name: string; year: number | null; certification: string | null; ageRating: number | null; runtimeMs: number | null; genres: Array<string>; artwork: { poster: string | null; backdrop: string | null; logo: string | null }; available: boolean; addedAt: number }>; recentlyAddedMovies: Array<{ id: Id<"titles">; kind: "movie" | "show"; name: string; year: number | null; certification: string | null; ageRating: number | null; runtimeMs: number | null; genres: Array<string>; artwork: { poster: string | null; backdrop: string | null; logo: string | null }; available: boolean; addedAt: number }>; recentlyAddedShows: Array<{ id: Id<"titles">; kind: "movie" | "show"; name: string; year: number | null; certification: string | null; ageRating: number | null; runtimeMs: number | null; genres: Array<string>; artwork: { poster: string | null; backdrop: string | null; logo: string | null }; available: boolean; addedAt: number }> }`
 
 ## `movies.titles.list`
 
@@ -363,7 +373,7 @@ Show titles like this one that you may see.
 
 ## `movies.titles.versions`
 
-List the versions on disk of a movie or an episode, best quality first.
+List the versions on disk of a movie or an episode, best quality first; for a show without an episode, the one its Play button starts.
 
 - CLI: `media movies titles versions`
 - Kind: query

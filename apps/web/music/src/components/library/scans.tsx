@@ -1,13 +1,11 @@
 import { usePlatform } from "@media/sdk/react";
 import type { PlatformSdk } from "@media/sdk/promise";
-import type { QueryState } from "@media/sdk/react";
-import { useEachQuery } from "@media/ui/lib/each-query";
 
 import { isActive } from "@/lib/job-progress";
 import type { Scan } from "@/lib/job-progress";
 import { useAllRows } from "@/lib/pages";
 
-type Library = Awaited<ReturnType<PlatformSdk["core"]["libraries"]["get"]>>;
+type Library = Awaited<ReturnType<PlatformSdk["core"]["libraries"]["list"]>>["page"][number];
 
 /** A music library's scan that is waiting or running, with the library's name. */
 export interface ActiveScan extends Scan {
@@ -15,26 +13,24 @@ export interface ActiveScan extends Scan {
 }
 
 /**
- * The first waiting or running scan among the libraries' states, in the list's order; null when
- * none runs, or `undefined` while a library that could hold one still loads. A library the
- * person lost between the list and its own read holds no scan for them.
+ * The first waiting or running scan of a music library among the list's rows, in its order; null
+ * when none runs. A row from a server that does not send its scan counts as not scanning.
  */
-export const firstActiveScan = (
-  libraries: ReadonlyArray<QueryState<Library>>,
-): ActiveScan | null | undefined => {
-  for (const state of libraries) {
-    if (state.status === "success" && state.data.scan !== null && isActive(state.data.scan)) {
-      return { ...state.data.scan, library: state.data.name };
+export const firstActiveScan = (libraries: ReadonlyArray<Library>): ActiveScan | null => {
+  for (const library of libraries) {
+    const scan = library.scan ?? null;
+
+    if (library.kind === "music" && scan !== null && isActive(scan)) {
+      return { ...scan, library: library.name };
     }
   }
 
-  return libraries.some((state) => state.status === "loading") ? undefined : null;
+  return null;
 };
 
 /**
  * The first waiting or running scan of a music library shared with you, null when none runs, or
- * `undefined` while the libraries load. The core shows each library's latest scan
- * (`core.libraries.get`), so every music library is read at once.
+ * `undefined` while the libraries load. The library list carries each library's latest scan.
  */
 export const useActiveScan = (): ActiveScan | null | undefined => {
   const platform = usePlatform();
@@ -43,13 +39,7 @@ export const useActiveScan = (): ActiveScan | null | undefined => {
     paginationOpts,
   }));
 
-  const music = (libraries ?? [])
-    .filter((library) => library.kind === "music")
-    .map((library) => ({ libraryId: library.libraryId }));
-
-  const states = useEachQuery(platform.core.libraries.get, music);
-
-  return libraries === undefined ? undefined : firstActiveScan(states);
+  return libraries === undefined ? undefined : firstActiveScan(libraries);
 };
 
 /** The thin accent progress bar used for scans. */

@@ -7,13 +7,14 @@ import { useArtistPages } from "@/components/browse/use-pages";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Text } from "@/components/ui/text";
 import { countOf } from "@/lib/format";
+import { LIBRARY_HOME } from "@/lib/details";
 import { useMusic, useRead } from "@/lib/platform";
 
 const PAGE_SIZE = 100;
 
 export default function Artists() {
   const pages = useArtistPages({ limit: PAGE_SIZE, all: false });
-  const home = useRead(useMusic().library.home, {});
+  const home = useRead(useMusic().library.home, LIBRARY_HOME);
   const done = pages.status.kind === "done";
 
   return (

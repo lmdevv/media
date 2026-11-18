@@ -1,4 +1,5 @@
-import type { TitleCard, TitleDetail } from "@/lib/catalog";
+import { featuredDetailOf } from "@/lib/catalog";
+import type { FeaturedDetail, TitleCard } from "@/lib/catalog";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { Badge } from "@media/ui/components/badge";
 import { Button } from "@media/ui/components/button";
@@ -12,7 +13,8 @@ import type { ReactNode } from "react";
 
 import { artworkUrl } from "@/lib/artwork";
 import { facts, formatRuntime, plural } from "@/lib/format";
-import { fileBadges } from "@/lib/media-facts";
+import { versionBadges } from "@/lib/media-facts";
+import { orSkip } from "@/lib/query-state";
 
 import { playTarget, useMyListToggle, watchSearch } from "./play-target";
 import { newBadge } from "./new-badge";
@@ -34,17 +36,28 @@ const titleArt = (title: TitleCard, phone: boolean): ReactNode => {
   );
 };
 
-/** The billboard on Home for `featured`. */
+/**
+ * The billboard on Home for `featured`. Home sends what it shows beyond the card as `detail`; when
+ * Home could not, it asks for the title's page and reads the same from it.
+ */
 export function HomeHero({
   featured,
+  detail,
   phone,
 }: {
   readonly featured: TitleCard;
+  readonly detail: FeaturedDetail | undefined;
   readonly phone: boolean;
 }) {
   const platform = usePlatform();
-  const detail = usePlatformQuery(platform.movies.titles.get, { titleId: featured.id });
-  const loaded = detail.status === "success" ? detail.data : null;
+  const given = detail?.id === featured.id ? detail : undefined;
+
+  const page = usePlatformQuery(
+    platform.movies.titles.get,
+    ...orSkip(given === undefined ? { titleId: featured.id } : null),
+  );
+
+  const loaded = given ?? (page.status === "success" ? featuredDetailOf(page.data) : null);
 
   return phone ? (
     <PhoneHero featured={featured} detail={loaded} />
@@ -58,11 +71,11 @@ function DesktopHero({
   detail,
 }: {
   readonly featured: TitleCard;
-  readonly detail: TitleDetail | null;
+  readonly detail: FeaturedDetail | null;
 }) {
-  const target = detail === null ? null : playTarget(detail);
-  const file = detail?.files[0];
-  const badges = file === undefined ? [] : fileBadges(file).slice(0, 2);
+  const target = detail === null ? null : playTarget({ kind: featured.kind, ...detail });
+  const version = detail?.version ?? null;
+  const badges = version === null ? [] : versionBadges(version).slice(0, 2);
 
   return (
     <Hero
@@ -76,7 +89,7 @@ function DesktopHero({
         featured.kind === "show"
           ? detail === null
             ? null
-            : plural(detail.seasons.length, "season", "seasons")
+            : plural(detail.seasonCount, "season", "seasons")
           : featured.runtimeMs === null
             ? null
             : formatRuntime(featured.runtimeMs),
@@ -118,9 +131,9 @@ function PhoneHero({
   detail,
 }: {
   readonly featured: TitleCard;
-  readonly detail: TitleDetail | null;
+  readonly detail: FeaturedDetail | null;
 }) {
-  const target = detail === null ? null : playTarget(detail);
+  const target = detail === null ? null : playTarget({ kind: featured.kind, ...detail });
 
   const myList = useMyListToggle(featured.id, detail?.inMyList ?? false, featured.name);
 

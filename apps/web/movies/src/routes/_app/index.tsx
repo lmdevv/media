@@ -129,7 +129,7 @@ function HomeRows({ home }: { readonly home: Home }) {
       {home.featured === null ? (
         <div className="md:h-17" />
       ) : (
-        <HomeHero featured={home.featured} phone={phone} />
+        <HomeHero featured={home.featured} detail={home.featuredDetail} phone={phone} />
       )}
       <div className="flex flex-col pt-1 md:gap-11">
         {home.continueWatching.length === 0 ? null : (

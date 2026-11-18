@@ -1,8 +1,14 @@
-import type { Episode, SeasonEpisode, TitleDetail } from "@/lib/catalog";
+import type { Episode, SeasonEpisode, TitleDetail, TitleId } from "@/lib/catalog";
+import {
+  allOfSeason,
+  openingPageArgs,
+  openingSeason,
+  seasonPageArgs,
+} from "@media/contracts/opening-season";
 import { usePlatform } from "@media/sdk/react";
 import { EpisodeRow } from "@media/ui/components/media-card";
 import { ProgressBar } from "@media/ui/components/progress-bar";
-import { useAllPages } from "@media/ui/lib/pages";
+import { useAllPages, usePages } from "@media/ui/lib/pages";
 import { cn } from "@media/ui/lib/utils";
 import { Link } from "@tanstack/react-router";
 import { ChevronDownIcon } from "lucide-react";
@@ -50,20 +56,57 @@ const episodeCredits = (episode: SeasonEpisode): string | undefined => {
   return lines.length === 0 ? undefined : lines.join(" · ");
 };
 
-/** The episodes section of a show's page. Starts on the season of the next episode. */
+/** The season the server opens a show's episodes on, by the rule both share. */
+const openingSeasonOf = (show: TitleDetail): number =>
+  openingSeason({
+    nextSeason: show.nextEpisode?.seasonNumber ?? null,
+    seasons: show.seasons.map((season) => season.seasonNumber),
+  }) ?? 1;
+
+const useOpeningEpisodes = (titleId: TitleId) => {
+  const platform = usePlatform();
+
+  return usePages(platform.movies.titles.episodes, (paginationOpts) =>
+    openingPageArgs(titleId, paginationOpts),
+  );
+};
+
+/**
+ * Holds the first page of the season a title's page opens on from the moment the page opens, so
+ * the episode list has its answer when it mounts, which is only after the title answered. A
+ * movie's page holds an empty page.
+ */
+export function HeldEpisodes({ titleId }: { readonly titleId: TitleId }) {
+  useOpeningEpisodes(titleId);
+
+  return null;
+}
+
+/**
+ * The episodes section of a show's page. Starts on the season of the next episode, else the first
+ * regular season, and stays on the season it opened on.
+ */
 export function Episodes({ show, phone }: { readonly show: TitleDetail; readonly phone: boolean }) {
   const platform = usePlatform();
-  const firstSeason = show.nextEpisode?.seasonNumber ?? show.seasons[0]?.seasonNumber ?? 1;
-  const [seasonNumber, setSeasonNumber] = useState(firstSeason);
+  const opening = openingSeasonOf(show);
+  const [openedOn] = useState(opening);
+  const [seasonNumber, setSeasonNumber] = useState(openedOn);
+  const [named, setNamed] = useState(false);
   const season = show.seasons.find((candidate) => candidate.seasonNumber === seasonNumber);
+  // Only the season the list opened on reads the held page: a season the person picked stays
+  // named, so its loaded pages stay when the opening season moves onto it.
+  const held = !named && seasonNumber === openedOn;
 
-  const episodes = useAllPages(platform.movies.titles.episodes, (paginationOpts) => ({
-    titleId: show.id,
-    seasonNumber,
-    paginationOpts,
-  }));
+  const episodes = useAllPages(platform.movies.titles.episodes, (paginationOpts) =>
+    seasonPageArgs(show.id, seasonNumber, held, paginationOpts),
+  );
 
-  const list = episodes.status === "ready" ? episodes.rows : NO_EPISODES;
+  const ofSeason = episodes.status === "ready" && allOfSeason(episodes.rows, seasonNumber);
+
+  // The held page moved to another season before the title said so: ask for this one by number.
+  if (held && episodes.status === "ready" && !ofSeason) setNamed(true);
+
+  const list = ofSeason ? episodes.rows : NO_EPISODES;
   const watched = list.filter((episode) => episode.progress?.watched === true).length;
   const nextId = show.nextEpisode?.id;
 
@@ -77,10 +120,7 @@ export function Episodes({ show, phone }: { readonly show: TitleDetail; readonly
     />
   );
 
-  const progress =
-    episodes.status === "ready" && list.length > 0
-      ? `${watched} of ${list.length} watched`
-      : undefined;
+  const progress = ofSeason && list.length > 0 ? `${watched} of ${list.length} watched` : undefined;
 
   if (phone) {
     return (

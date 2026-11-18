@@ -2091,7 +2091,7 @@ export const generatedCommands = [
     kind: "query",
     scope: "signed-in",
     refusesKeys: false,
-    summary: "List the libraries shared with you",
+    summary: "List the libraries shared with you, each with its latest scan",
     secrets: [],
     paginated: true,
     args: Schema.Struct({
@@ -2115,6 +2115,29 @@ export const generatedCommands = [
             Schema.Literal("edit"),
             Schema.Literal("manage"),
           ]),
+          scan: Schema.optionalKey(
+            Schema.Union([
+              Schema.Struct({
+                jobId: Schema.String.pipe(Schema.brand("Id<jobs>")),
+                status: Schema.Union([
+                  Schema.Literal("queued"),
+                  Schema.Literal("running"),
+                  Schema.Literal("succeeded"),
+                  Schema.Literal("failed"),
+                  Schema.Literal("canceled"),
+                ]),
+                done: Schema.Union([Schema.Finite, Schema.Null]),
+                total: Schema.Union([Schema.Finite, Schema.Null]),
+                error: Schema.Union([Schema.String, Schema.Null]),
+                message: Schema.Union([Schema.String, Schema.Null]),
+                startedAt: Schema.Union([Schema.Finite, Schema.Null]),
+                attempt: Schema.Finite,
+                canceling: Schema.Boolean,
+                finishedAt: Schema.Union([Schema.Finite, Schema.Null]),
+              }),
+              Schema.Null,
+            ]),
+          ),
         }),
       ),
       continueCursor: Schema.String,
@@ -3582,6 +3605,50 @@ export const generatedCommands = [
     method: (platform) => platform.movies.collections.list,
   }),
   coreCommand({
+    name: "movies.collections.ofTitle",
+    path: ["movies", "collections", "of-title"],
+    kind: "query",
+    scope: "movies:read",
+    refusesKeys: false,
+    summary:
+      "Show the collection a title's page shows and the titles you may see in it, or null when it is in none you may see",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({ titleId: Schema.String.pipe(Schema.brand("Id<titles>")) }),
+    result: Schema.Union([
+      Schema.Struct({
+        id: Schema.String.pipe(Schema.brand("Id<collections>")),
+        name: Schema.String,
+        overview: Schema.Union([Schema.String, Schema.Null]),
+        artwork: Schema.Struct({
+          poster: Schema.Union([Schema.String, Schema.Null]),
+          backdrop: Schema.Union([Schema.String, Schema.Null]),
+        }),
+        titles: Schema.Array(
+          Schema.Struct({
+            id: Schema.String.pipe(Schema.brand("Id<titles>")),
+            kind: Schema.Union([Schema.Literal("movie"), Schema.Literal("show")]),
+            name: Schema.String,
+            year: Schema.Union([Schema.Finite, Schema.Null]),
+            certification: Schema.Union([Schema.String, Schema.Null]),
+            ageRating: Schema.Union([Schema.Finite, Schema.Null]),
+            runtimeMs: Schema.Union([Schema.Finite, Schema.Null]),
+            genres: Schema.Array(Schema.String),
+            artwork: Schema.Struct({
+              poster: Schema.Union([Schema.String, Schema.Null]),
+              backdrop: Schema.Union([Schema.String, Schema.Null]),
+              logo: Schema.Union([Schema.String, Schema.Null]),
+            }),
+            available: Schema.Boolean,
+            addedAt: Schema.Finite,
+          }),
+        ),
+      }),
+      Schema.Null,
+    ]),
+    method: (platform) => platform.movies.collections.ofTitle,
+  }),
+  coreCommand({
     name: "movies.files.list",
     path: ["movies", "files", "list"],
     kind: "query",
@@ -4737,12 +4804,13 @@ export const generatedCommands = [
     kind: "query",
     scope: "movies:read",
     refusesKeys: false,
-    summary: "List a season's episodes in order with your progress and their credits",
+    summary:
+      "List a season's episodes in order with your progress and their credits; without a season, the one the show's page opens on",
     secrets: [],
     paginated: true,
     args: Schema.Struct({
       titleId: Schema.String.pipe(Schema.brand("Id<titles>")),
-      seasonNumber: Schema.Finite,
+      seasonNumber: Schema.optionalKey(Schema.Finite),
       paginationOpts: Schema.Struct({
         numItems: Schema.Finite,
         cursor: Schema.Union([Schema.String, Schema.Null]),
@@ -5167,6 +5235,81 @@ export const generatedCommands = [
         }),
         Schema.Null,
       ]),
+      featuredDetail: Schema.optionalKey(
+        Schema.Struct({
+          id: Schema.String.pipe(Schema.brand("Id<titles>")),
+          overview: Schema.Union([Schema.String, Schema.Null]),
+          seasonCount: Schema.Finite,
+          version: Schema.Union([
+            Schema.Struct({
+              id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
+              versionName: Schema.Union([Schema.String, Schema.Null]),
+              width: Schema.Union([Schema.Finite, Schema.Null]),
+              height: Schema.Union([Schema.Finite, Schema.Null]),
+              hdr: Schema.Union([
+                Schema.Literal("none"),
+                Schema.Literal("hdr10"),
+                Schema.Literal("hdr10plus"),
+                Schema.Literal("hlg"),
+                Schema.Literal("dolby_vision"),
+              ]),
+              videoCodec: Schema.Union([Schema.String, Schema.Null]),
+              videoProfile: Schema.Union([Schema.String, Schema.Null]),
+              videoLevel: Schema.Union([Schema.Finite, Schema.Null]),
+              videoBitDepth: Schema.Union([Schema.Finite, Schema.Null]),
+              audioCodec: Schema.Union([Schema.String, Schema.Null]),
+              audioChannels: Schema.Union([Schema.Finite, Schema.Null]),
+              audioTracks: Schema.Finite,
+              container: Schema.String,
+              sizeBytes: Schema.Finite,
+              durationMs: Schema.Finite,
+              lastPlayed: Schema.Boolean,
+            }),
+            Schema.Null,
+          ]),
+          progress: Schema.Union([
+            Schema.Struct({
+              positionMs: Schema.Finite,
+              durationMs: Schema.Finite,
+              watched: Schema.Boolean,
+              updatedAt: Schema.Finite,
+            }),
+            Schema.Null,
+          ]),
+          nextEpisode: Schema.Union([
+            Schema.Struct({
+              id: Schema.String.pipe(Schema.brand("Id<episodes>")),
+              titleId: Schema.String.pipe(Schema.brand("Id<titles>")),
+              seasonId: Schema.String.pipe(Schema.brand("Id<seasons>")),
+              seasonNumber: Schema.Finite,
+              episodeNumber: Schema.Finite,
+              name: Schema.String,
+              overview: Schema.Union([Schema.String, Schema.Null]),
+              airDate: Schema.Union([Schema.String, Schema.Null]),
+              runtimeMs: Schema.Union([Schema.Finite, Schema.Null]),
+              still: Schema.Union([Schema.String, Schema.Null]),
+              rating: Schema.Union([Schema.Finite, Schema.Null]),
+              externalIds: Schema.Struct({
+                tmdb: Schema.Union([Schema.String, Schema.Null]),
+                imdb: Schema.Union([Schema.String, Schema.Null]),
+                tvdb: Schema.Union([Schema.String, Schema.Null]),
+              }),
+              available: Schema.Boolean,
+              progress: Schema.Union([
+                Schema.Struct({
+                  positionMs: Schema.Finite,
+                  durationMs: Schema.Finite,
+                  watched: Schema.Boolean,
+                  updatedAt: Schema.Finite,
+                }),
+                Schema.Null,
+              ]),
+            }),
+            Schema.Null,
+          ]),
+          inMyList: Schema.Boolean,
+        }),
+      ),
       continueWatching: Schema.Array(
         Schema.Struct({
           reason: Schema.Union([Schema.Literal("resume"), Schema.Literal("next")]),
@@ -5466,7 +5609,8 @@ export const generatedCommands = [
     kind: "query",
     scope: "movies:read",
     refusesKeys: false,
-    summary: "List the versions on disk of a movie or an episode, best quality first",
+    summary:
+      "List the versions on disk of a movie or an episode, best quality first; for a show without an episode, the one its Play button starts",
     secrets: [],
     paginated: false,
     args: Schema.Struct({
@@ -7077,12 +7221,13 @@ export const generatedCommands = [
     scope: "music:play",
     refusesKeys: false,
     summary:
-      "Replace your queue with songs (2,000 at most, 1,000 kept) and play the one at --index, the first by default",
+      "Replace your queue with songs (2,000 at most, 1,000 kept) and play the one at --index, the first by default; --shuffle or --no-shuffle turns shuffle on or off with it",
     secrets: [],
     paginated: false,
     args: Schema.Struct({
       trackIds: Schema.Array(Schema.String.pipe(Schema.brand("Id<tracks>"))),
       index: Schema.optionalKey(Schema.Finite),
+      shuffle: Schema.optionalKey(Schema.Boolean),
     }),
     result: Schema.Struct({ current: Schema.String.pipe(Schema.brand("Id<playQueueEntries>")) }),
     method: (platform) => platform.music.queue.play,

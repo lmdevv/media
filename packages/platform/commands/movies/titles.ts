@@ -43,7 +43,7 @@ const episodeResult = v.object({
 
 const episodesArgs = v.object({
   titleId: v.id("titles"),
-  seasonNumber: v.number(),
+  seasonNumber: v.optional(v.number()),
   paginationOpts: v.object({
     numItems: v.number(),
     cursor: v.union(v.string(), v.null()),
@@ -408,6 +408,81 @@ const homeResult = v.object({
     }),
     v.null(),
   ),
+  featuredDetail: v.optional(
+    v.object({
+      id: v.id("titles"),
+      overview: v.union(v.string(), v.null()),
+      seasonCount: v.number(),
+      version: v.union(
+        v.object({
+          id: v.id("mediaFiles"),
+          versionName: v.union(v.string(), v.null()),
+          width: v.union(v.number(), v.null()),
+          height: v.union(v.number(), v.null()),
+          hdr: v.union(
+            v.literal("none"),
+            v.literal("hdr10"),
+            v.literal("hdr10plus"),
+            v.literal("hlg"),
+            v.literal("dolby_vision"),
+          ),
+          videoCodec: v.union(v.string(), v.null()),
+          videoProfile: v.union(v.string(), v.null()),
+          videoLevel: v.union(v.number(), v.null()),
+          videoBitDepth: v.union(v.number(), v.null()),
+          audioCodec: v.union(v.string(), v.null()),
+          audioChannels: v.union(v.number(), v.null()),
+          audioTracks: v.number(),
+          container: v.string(),
+          sizeBytes: v.number(),
+          durationMs: v.number(),
+          lastPlayed: v.boolean(),
+        }),
+        v.null(),
+      ),
+      progress: v.union(
+        v.object({
+          positionMs: v.number(),
+          durationMs: v.number(),
+          watched: v.boolean(),
+          updatedAt: v.number(),
+        }),
+        v.null(),
+      ),
+      nextEpisode: v.union(
+        v.object({
+          id: v.id("episodes"),
+          titleId: v.id("titles"),
+          seasonId: v.id("seasons"),
+          seasonNumber: v.number(),
+          episodeNumber: v.number(),
+          name: v.string(),
+          overview: v.union(v.string(), v.null()),
+          airDate: v.union(v.string(), v.null()),
+          runtimeMs: v.union(v.number(), v.null()),
+          still: v.union(v.string(), v.null()),
+          rating: v.union(v.number(), v.null()),
+          externalIds: v.object({
+            tmdb: v.union(v.string(), v.null()),
+            imdb: v.union(v.string(), v.null()),
+            tvdb: v.union(v.string(), v.null()),
+          }),
+          available: v.boolean(),
+          progress: v.union(
+            v.object({
+              positionMs: v.number(),
+              durationMs: v.number(),
+              watched: v.boolean(),
+              updatedAt: v.number(),
+            }),
+            v.null(),
+          ),
+        }),
+        v.null(),
+      ),
+      inMyList: v.boolean(),
+    }),
+  ),
   continueWatching: v.array(
     v.object({
       reason: v.union(v.literal("resume"), v.literal("next")),
@@ -692,7 +767,7 @@ export interface Handlers {
     caller: Caller,
   ) => Infer<typeof episodeResult> | Promise<Infer<typeof episodeResult>>;
 
-  /** `movies.titles.episodes` (query, movies:read): List a season's episodes in order with your progress and their credits. */
+  /** `movies.titles.episodes` (query, movies:read): List a season's episodes in order with your progress and their credits; without a season, the one the show's page opens on. */
   readonly episodes: (
     ctx: Omit<QueryCtx, "auth">,
     args: Infer<typeof episodesArgs>,
@@ -748,7 +823,7 @@ export interface Handlers {
     caller: Caller,
   ) => Infer<typeof similarResult> | Promise<Infer<typeof similarResult>>;
 
-  /** `movies.titles.versions` (query, movies:read): List the versions on disk of a movie or an episode, best quality first. */
+  /** `movies.titles.versions` (query, movies:read): List the versions on disk of a movie or an episode, best quality first; for a show without an episode, the one its Play button starts. */
   readonly versions: (
     ctx: Omit<QueryCtx, "auth">,
     args: Infer<typeof versionsArgs>,

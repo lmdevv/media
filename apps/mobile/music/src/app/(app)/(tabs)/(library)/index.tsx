@@ -22,6 +22,7 @@ import { Text } from "@/components/ui/text";
 import { useDownloadSettings } from "@/downloads";
 import { downloadedDetail, onThisDevice } from "@/lib/downloaded";
 import { librarySummary } from "@/lib/format";
+import { LIBRARY_HOME } from "@/lib/details";
 import { useMusic, useRead } from "@/lib/platform";
 import { useMusicLibraries } from "@/lib/use-libraries";
 import { DEVICE_FAMILY } from "@/lib/this-device";
@@ -56,7 +57,7 @@ const OFFLINE_CATEGORIES: ReadonlyArray<Category> = [
 ];
 
 export default function Library() {
-  const home = useRead(useMusic().library.home, {});
+  const home = useRead(useMusic().library.home, LIBRARY_HOME);
   const libraries = useMusicLibraries();
   const me = useMaybeMe();
   const admin = me !== null && can(me, "admin");

@@ -6,8 +6,9 @@ import { pageRows } from "../core/lib/paginate";
 import { reachOf } from "../core/permissions/grants";
 import type { Reach } from "../core/permissions/grants";
 import type { Principal } from "../core/permissions/policy";
-import { budgetedViewer } from "./access";
+import { budgetedViewer, requireTitle } from "./access";
 import { registerWithArtworkTickets } from "./artwork";
+import { COLLECTION_OF, collectionOf } from "./membership";
 import { presentTitleCard } from "./present";
 import type { TitleCard } from "./present";
 import {
@@ -214,7 +215,7 @@ const collectionsFrom = async (
   return [...sameKey, ...later];
 };
 
-export const { list, get } = registerWithArtworkTickets(register, {
+export const { list, get, ofTitle } = registerWithArtworkTickets(register, {
   list: async (ctx, { paginationOpts }, caller) => {
     const reach = await reachOf(ctx.db, caller);
     const budget = callBudget(reach);
@@ -319,5 +320,19 @@ export const { list, get } = registerWithArtworkTickets(register, {
     const { collection } = await present({ db: ctx.db, caller, reach }, doc, callBudget(reach));
 
     return collection.titles.length === 0 ? fail("not_found", "No such collection") : collection;
+  },
+  ofTitle: async (ctx, { titleId }, caller) => {
+    const { title, reach } = await requireTitle(ctx.db, caller, "view", titleId);
+    const budget = callBudget(reach);
+
+    budget.take(plus(plus(TITLE_GET, libraryCheck(reach)), COLLECTION_OF));
+
+    const doc = await collectionOf(ctx.db, title._id);
+
+    if (doc === null) return null;
+
+    const { collection } = await present({ db: ctx.db, caller, reach }, doc, budget);
+
+    return collection.titles.length === 0 ? null : collection;
   },
 });

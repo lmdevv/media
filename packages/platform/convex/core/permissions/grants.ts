@@ -324,7 +324,9 @@ const rangeOf = <T extends ResourceType>(
  * own grants, the household's, and each group's, keeps the strongest level per row, and drops
  * what `can(principal, "view", ...)` refuses, so a restriction can make a page short. Reads stay
  * under `PAGE_ROWS_MAX` however many grants the table holds: a page holds fewer rows the more
- * groups the person is in. The cursor is the last row id the page considered. A page reloaded up
+ * groups the person is in, and fewer the more documents the caller reads per row: `rowReads`
+ * counts the row's own document and each one the caller reads beside it. The cursor is the last
+ * row id the page considered. A page reloaded up
  * to its `endCursor` holds every row up to it, or asks the client to split it when they no longer
  * fit, so a reactive list never skips a row.
  */
@@ -333,6 +335,7 @@ export const visiblePage = async <T extends ResourceType>(
   principal: Principal,
   type: T,
   options: PaginationOptions,
+  rowReads = 1,
 ): Promise<PaginationResult<Visible<T>>> => {
   const bounds: Bounds<T> = {
     after: boundOf(ctx.db, type, options.cursor),
@@ -341,7 +344,10 @@ export const visiblePage = async <T extends ResourceType>(
 
   const reach = await reachOf(ctx.db, principal);
   const keys = [...reach.direct, ...reach.groups];
-  const fits = Math.floor((PAGE_ROWS_MAX - reach.groups.length - keys.length) / (keys.length + 1));
+
+  const fits = Math.floor(
+    (PAGE_ROWS_MAX - reach.groups.length - keys.length) / (keys.length + rowReads),
+  );
 
   const rows =
     bounds.through === null ? Math.max(1, Math.min(pageRows(options.numItems), fits)) : fits;

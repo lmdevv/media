@@ -547,6 +547,25 @@ export const movies = [
     args: {},
     result: v.object({
       featured: nullable(titleCard),
+      /**
+       * What Home's billboard shows of `featured` beyond its card, as `movies.titles.get` answers
+       * it. Absent when nothing is featured, when the call's reads could not pay for it, and from
+       * a server without this field; a client then asks `movies.titles.get`.
+       */
+      featuredDetail: v.optional(
+        v.object({
+          id: v.id("titles"),
+          overview: nullable(v.string()),
+          seasonCount: v.number(),
+          /** A movie's best version, for its badges; null for a show, whose files are on its episodes. */
+          version: nullable(mediaVersion),
+          /** A movie's progress; a show's is on `nextEpisode`. */
+          progress: nullable(progress),
+          /** The episode a show's Play button starts; null for a movie or a finished show. */
+          nextEpisode: nullable(episode),
+          inMyList: v.boolean(),
+        }),
+      ),
       continueWatching: v.array(continueWatchingItem),
       myList: v.array(titleCard),
       recentlyAddedMovies: v.array(titleCard),
@@ -596,17 +615,30 @@ export const movies = [
     result: titleDetail,
   }),
   query("movies.titles.versions", {
-    summary: "List the versions on disk of a movie or an episode, best quality first",
-    scope: "movies:read",
-    args: { titleId: v.id("titles"), episodeId: v.optional(v.id("episodes")) },
-    result: v.array(mediaVersion),
-  }),
-  query("movies.titles.episodes", {
-    summary: "List a season's episodes in order with your progress and their credits",
+    summary:
+      "List the versions on disk of a movie or an episode, best quality first; for a show without an episode, the one its Play button starts",
     scope: "movies:read",
     args: {
       titleId: v.id("titles"),
-      seasonNumber: v.number(),
+      /**
+       * An episode of the show. Omit for a movie, or for the episode a show's Play button starts:
+       * none for a finished show.
+       */
+      episodeId: v.optional(v.id("episodes")),
+    },
+    result: v.array(mediaVersion),
+  }),
+  query("movies.titles.episodes", {
+    summary:
+      "List a season's episodes in order with your progress and their credits; without a season, the one the show's page opens on",
+    scope: "movies:read",
+    args: {
+      titleId: v.id("titles"),
+      /**
+       * Omit for the season a show's page opens on: its next episode's, else its first regular
+       * season, else its first. Every page after the first names the season.
+       */
+      seasonNumber: v.optional(v.number()),
       paginationOpts: paginationOptsValidator,
     },
     result: paginationResultValidator(v.object({ ...episodeFields, credits: v.array(credit) })),
@@ -653,6 +685,13 @@ export const movies = [
     scope: "movies:read",
     args: { collectionId: v.id("collections") },
     result: collection,
+  }),
+  query("movies.collections.ofTitle", {
+    summary:
+      "Show the collection a title's page shows and the titles you may see in it, or null when it is in none you may see",
+    scope: "movies:read",
+    args: { titleId: v.id("titles") },
+    result: nullable(collection),
   }),
   query("movies.myList.list", {
     summary: "List your list, most recently added first",

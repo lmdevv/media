@@ -45,6 +45,39 @@ const settle = async (change: Promise<unknown>): Promise<boolean> => {
   }
 };
 
+/** The person's whole list, while `on`. */
+const useMyListRows = (on: boolean) => {
+  const platform = usePlatform();
+
+  return useAllPages(
+    platform.movies.myList.list,
+    on ? (paginationOpts) => ({ paginationOpts }) : "skip",
+  );
+};
+
+/** The person's latest history rows, enough to mark what they watched, while `on`. */
+const useRecentHistory = (on: boolean) => {
+  const platform = usePlatform();
+
+  return useFirstRows(
+    platform.movies.history.list,
+    on ? (paginationOpts) => ({ paginationOpts }) : "skip",
+    HISTORY_WINDOW,
+  );
+};
+
+/**
+ * Keeps the person's list and recent history open, through the same hooks
+ * `TitleStatesProvider` reads them with, so the provider finds their answers when it mounts.
+ * Renders nothing and reads no answer.
+ */
+export function HeldTitleStates() {
+  useMyListRows(true);
+  useRecentHistory(true);
+
+  return null;
+}
+
 /**
  * Subscribes to the signed-in person's list and recent history for every screen below, once for
  * the whole app. Mounted above the root stack, so it waits while no one is signed in (or offline)
@@ -54,17 +87,8 @@ export function TitleStatesProvider({ children }: { readonly children: ReactNode
   const platform = usePlatform();
   const phase = useContext(SessionPhaseContext);
   const userId: Me["userId"] | null = phase?.kind === "ready" ? phase.me.userId : null;
-
-  const list = useAllPages(
-    platform.movies.myList.list,
-    userId === null ? "skip" : (paginationOpts) => ({ paginationOpts }),
-  );
-
-  const history = useFirstRows(
-    platform.movies.history.list,
-    userId === null ? "skip" : (paginationOpts) => ({ paginationOpts }),
-    HISTORY_WINDOW,
-  );
+  const list = useMyListRows(userId !== null);
+  const history = useRecentHistory(userId !== null);
 
   const { add, remove } = platform.movies.myList;
   const { markWatched: watched, markUnwatched: unwatched } = platform.movies.history;

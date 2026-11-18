@@ -216,10 +216,14 @@ export interface NowPlayingControls {
 
 /** The core's music commands the player sends. Each rejects with the SDK's tagged errors. */
 export interface MusicCommands {
-  /** `music.queue.play`: replaces the queue and answers the entry that plays. */
+  /**
+   * `music.queue.play`: replaces the queue and answers the entry that plays. `shuffle` turns
+   * shuffle on or off in the same write; undefined keeps it as it is.
+   */
   readonly play: (
     trackIds: ReadonlyArray<string>,
     index: number | undefined,
+    shuffle: boolean | undefined,
   ) => Promise<{ readonly current: string }>;
   /**
    * `music.tracks.get`: a song's details, so a new queue's first song starts as soon as its ticket
@@ -720,11 +724,16 @@ export class PlaybackController {
    * are both in, without waiting for the new queue to arrive. A song this device holds a copy of
    * waits for the new queue to name it, as the core may open the queue on another. A queue command
    * that fails plays nothing. A pause chosen while the queue is written holds: the new queue starts
-   * paused.
+   * paused. `shuffle` turns shuffle on or off with the new queue, in the same command; undefined
+   * keeps it as it is.
    */
-  async playTracks(trackIds: ReadonlyArray<string>, index?: number): Promise<void> {
+  async playTracks(
+    trackIds: ReadonlyArray<string>,
+    index?: number,
+    shuffle?: boolean,
+  ): Promise<void> {
     this.#listenerActed();
-    await this.#replaceQueue(trackIds, index, () => null);
+    await this.#replaceQueue(trackIds, index, shuffle, () => null);
   }
 
   /**
@@ -741,12 +750,13 @@ export class PlaybackController {
     trackIds: ReadonlyArray<string>,
     startAt: () => StartAt | null,
   ): Promise<string | null> {
-    return this.#replaceQueue(trackIds, 0, startAt);
+    return this.#replaceQueue(trackIds, 0, undefined, startAt);
   }
 
   async #replaceQueue(
     trackIds: ReadonlyArray<string>,
     index: number | undefined,
+    shuffle: boolean | undefined,
     startAt: () => StartAt | null,
   ): Promise<string | null> {
     this.#env.nowPlaying.commanded();
@@ -761,7 +771,7 @@ export class PlaybackController {
     const releases = this.#handOffs;
 
     try {
-      const { current } = await this.#commands.play(trackIds, index);
+      const { current } = await this.#commands.play(trackIds, index, shuffle);
 
       // Connect moved playback to another device meanwhile; the queue is its now.
       if (this.#handOffs !== releases) return null;

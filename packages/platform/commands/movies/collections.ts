@@ -91,6 +91,40 @@ const listResult = v.object({
   ),
 });
 
+const ofTitleArgs = v.object({ titleId: v.id("titles") });
+
+const ofTitleResult = v.union(
+  v.object({
+    id: v.id("collections"),
+    name: v.string(),
+    overview: v.union(v.string(), v.null()),
+    artwork: v.object({
+      poster: v.union(v.string(), v.null()),
+      backdrop: v.union(v.string(), v.null()),
+    }),
+    titles: v.array(
+      v.object({
+        id: v.id("titles"),
+        kind: v.union(v.literal("movie"), v.literal("show")),
+        name: v.string(),
+        year: v.union(v.number(), v.null()),
+        certification: v.union(v.string(), v.null()),
+        ageRating: v.union(v.number(), v.null()),
+        runtimeMs: v.union(v.number(), v.null()),
+        genres: v.array(v.string()),
+        artwork: v.object({
+          poster: v.union(v.string(), v.null()),
+          backdrop: v.union(v.string(), v.null()),
+          logo: v.union(v.string(), v.null()),
+        }),
+        available: v.boolean(),
+        addedAt: v.number(),
+      }),
+    ),
+  }),
+  v.null(),
+);
+
 /** The handlers `convex/movies/collections.ts` passes to `register`, one per `movies.collections` command. */
 export interface Handlers {
   /** `movies.collections.get` (query, movies:read): Show a collection and the titles you may see in it. */
@@ -106,6 +140,13 @@ export interface Handlers {
     args: Infer<typeof listArgs>,
     caller: Caller,
   ) => Infer<typeof listResult> | Promise<Infer<typeof listResult>>;
+
+  /** `movies.collections.ofTitle` (query, movies:read): Show the collection a title's page shows and the titles you may see in it, or null when it is in none you may see. */
+  readonly ofTitle: (
+    ctx: Omit<QueryCtx, "auth">,
+    args: Infer<typeof ofTitleArgs>,
+    caller: Caller,
+  ) => Infer<typeof ofTitleResult> | Promise<Infer<typeof ofTitleResult>>;
 }
 
 /** The `api` reference of each `movies.collections` command; `commands/refs.ts` checks them. */
@@ -122,6 +163,12 @@ export interface Refs {
     Infer<typeof listArgs>,
     Infer<typeof listResult>
   >;
+  readonly ofTitle: FunctionReference<
+    "query",
+    "public",
+    Infer<typeof ofTitleArgs>,
+    Infer<typeof ofTitleResult>
+  >;
 }
 
 /** Registers the `movies.collections` commands as public Convex functions with their declared arguments and result. */
@@ -135,5 +182,11 @@ export const register = (handlers: Handlers) => ({
     args: listArgs,
     returns: listResult,
     handler: async (ctx, args) => handlers.list(ctx, args, await requireCaller(ctx, "movies:read")),
+  }),
+  ofTitle: query({
+    args: ofTitleArgs,
+    returns: ofTitleResult,
+    handler: async (ctx, args) =>
+      handlers.ofTitle(ctx, args, await requireCaller(ctx, "movies:read")),
   }),
 });

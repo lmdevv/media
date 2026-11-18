@@ -1,9 +1,11 @@
+import { openingSeason } from "@media/contracts/opening-season";
+
 import type { Doc, Id } from "../_generated/dataModel";
 import type { DatabaseReader, MutationCtx } from "../_generated/server";
 import type { BudgetedViewer } from "./access";
 import { presentEpisode, presentProgress, presentTitleCard } from "./present";
 import type { ContinueItem, Episode } from "./present";
-import { EPISODE_GET, TITLE_GET, episodesOf, queryOf, settleRead } from "./reads";
+import { EPISODE_GET, TITLE_GET, episodesOf, plus, queryOf, settleRead, times } from "./reads";
 import { insertProgress, insertWatchMark, patchProgress, patchWatchMark } from "./write";
 import type { ReadBudget, Reads } from "./reads";
 
@@ -352,6 +354,58 @@ export const upNextEpisode = async (
     ? scanUnwatched(db, userId, episode, MAX_SKIPPED_EPISODES, true, UNBOUNDED)
     : episode;
 };
+
+/** The season a page of a title's episodes covers when the title has none. */
+const NO_SEASON = 1;
+
+/**
+ * The season a show's page opens on, by the rule its clients share ({@link openingSeason}). It
+ * reads the show's lowest season, and its lowest regular one only when the lowest is Specials. A
+ * movie has no episodes, so any season answers its empty page.
+ */
+export const openingSeasonOf = async (
+  db: DatabaseReader,
+  userId: Id<"users">,
+  title: Doc<"titles">,
+): Promise<number> => {
+  if (title.kind === "movie") return NO_SEASON;
+
+  const next = await upNextEpisode(db, userId, title._id);
+
+  if (next !== null) return next.seasonNumber;
+
+  const lowest = await db
+    .query("seasons")
+    .withIndex("by_title_number", (q) => q.eq("titleId", title._id))
+    .first();
+
+  const regular =
+    lowest === null || lowest.seasonNumber > 0
+      ? null
+      : await db
+          .query("seasons")
+          .withIndex("by_title_number", (q) => q.eq("titleId", title._id).gt("seasonNumber", 0))
+          .first();
+
+  const seasons = [lowest, regular].flatMap((season) =>
+    season === null ? [] : [season.seasonNumber],
+  );
+
+  return openingSeason({ nextSeason: null, seasons }) ?? NO_SEASON;
+};
+
+/**
+ * What {@link upNextEpisode} reads at most: the latest progress and its episode, then a scan past
+ * up to `MAX_SKIPPED_EPISODES` watched episodes, `SCAN_BATCH` at a time over two ranges each, with
+ * each one's progress. Starting from the first episode reads less.
+ */
+export const UP_NEXT_READS: Reads = plus(
+  plus(queryOf(1), EPISODE_GET),
+  plus(
+    episodesOf(MAX_SKIPPED_EPISODES + 1, 2 * Math.ceil(MAX_SKIPPED_EPISODES / SCAN_BATCH)),
+    times(queryOf(1), MAX_SKIPPED_EPISODES),
+  ),
+);
 
 const CONTINUE_LIMIT = 20;
 

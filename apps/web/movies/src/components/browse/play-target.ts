@@ -46,7 +46,9 @@ export const watchSearch = (
 };
 
 /** The main play action of a title page or billboard. */
-export const playTarget = (title: TitleDetail): PlayTarget => {
+export const playTarget = (
+  title: Pick<TitleDetail, "kind" | "progress" | "nextEpisode">,
+): PlayTarget => {
   if (title.kind === "movie") {
     const fraction = title.progress?.watched === true ? null : progressFraction(title.progress);
 

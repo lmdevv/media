@@ -216,14 +216,17 @@ const edited = <T extends Track>(
 /**
  * Replaces the queue with `tracks` (songs this phone holds) and plays the one at `index`, in the
  * order the core's `music.queue.play` gives: with shuffle on, that song
- * first and the rest shuffled behind it, keeping their listed order to come back to.
+ * first and the rest shuffled behind it, keeping their listed order to come back to. `shuffle`
+ * turns shuffle on or off first, as its `shuffle` argument does; undefined keeps it.
  */
 export const playLocal = <T extends Track>(
-  queue: LocalQueue<T>,
+  held: LocalQueue<T>,
   tracks: ReadonlyArray<T>,
   index: number,
   random: () => number,
+  shuffle?: boolean,
 ): LocalQueue<T> => {
+  const queue = shuffle === undefined ? held : shuffleLocal(held, shuffle, random);
   const created = made(queue, tracks);
   const start = Math.min(Math.max(0, Math.trunc(index)), Math.max(0, tracks.length - 1));
   const listed = created.entries;

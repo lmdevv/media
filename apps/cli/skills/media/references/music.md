@@ -427,12 +427,12 @@ Move a queue entry to just after another (--after-item-id), or to the top when n
 
 ## `music.queue.play`
 
-Replace your queue with songs (2,000 at most, 1,000 kept) and play the one at --index, the first by default.
+Replace your queue with songs (2,000 at most, 1,000 kept) and play the one at --index, the first by default; --shuffle or --no-shuffle turns shuffle on or off with it.
 
 - CLI: `media music queue play`
 - Kind: mutation
 - Scope: music:play
-- Arguments: `{ trackIds: Array<Id<"tracks">>; index?: number }`
+- Arguments: `{ trackIds: Array<Id<"tracks">>; index?: number; shuffle?: boolean }`
 - Result: `{ current: Id<"playQueueEntries"> }`
 
 ## `music.queue.remove`

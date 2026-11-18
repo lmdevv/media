@@ -166,6 +166,9 @@ const budgetWith = (cap: Reads, parent: ReadBudget | null): ReadBudget => {
   return budget;
 };
 
+/** A budget of `cap` alone, for the stack suite's probe of what one read of a call costs. */
+export const readBudget = (cap: Reads): ReadBudget => budgetWith(cap, null);
+
 /** One call's read budget, with what `reach`'s call reads before its rows already charged. */
 export const callBudget = (reach: Reach): ReadBudget => {
   const fixed = callReads(reach);

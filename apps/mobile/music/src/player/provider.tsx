@@ -150,8 +150,15 @@ const HAND_BACK_RETRY_MS = 15_000;
 
 /** What screens can ask the player to do. Actions never reject: failures show up in `error`. */
 export interface PlayerActions {
-  /** Replaces the queue with `trackIds` and plays them here from `index`. */
-  readonly play: (trackIds: ReadonlyArray<TrackId>, index?: number) => Promise<void>;
+  /**
+   * Replaces the queue with `trackIds` and plays them here from `index`. `shuffle` turns shuffle on
+   * or off with the new queue, in the same command; undefined keeps it. A Jam ignores it.
+   */
+  readonly play: (
+    trackIds: ReadonlyArray<TrackId>,
+    index?: number,
+    shuffle?: boolean,
+  ) => Promise<void>;
   readonly pause: () => Promise<void>;
   readonly resume: () => Promise<void>;
   readonly toggle: () => Promise<void>;
@@ -490,9 +497,13 @@ const createPhone = ({
   /**
    * Plays the songs this phone holds of `trackIds` as its own new queue, from the one at `index`,
    * or the next it holds after it, as the core's `music.queue.play`
-   * picks.
+   * picks, turning shuffle on or off first when `shuffle` is set.
    */
-  const playLocally = (trackIds: ReadonlyArray<string>, index: number | undefined) => {
+  const playLocally = (
+    trackIds: ReadonlyArray<string>,
+    index: number | undefined,
+    shuffle: boolean | undefined,
+  ) => {
     const found = trackIds.map((id) => trackOfCopy(copies, id));
     const tracks = found.filter((track) => track !== null);
 
@@ -500,20 +511,21 @@ const createPhone = ({
     const before = found.slice(0, index ?? 0).filter((track) => track !== null).length;
     const start = Math.min(before, tracks.length - 1);
 
-    const queue = local.update((held) => playLocal(held, tracks, start, Math.random));
+    const queue = local.update((held) => playLocal(held, tracks, start, Math.random, shuffle));
     controller.sync(playingView(queue));
 
     return { current: queue.state.current ?? "" };
   };
 
   const commands: MusicCommands = {
-    play: async (trackIds, index) => {
-      if (mode.current === "local") return playLocally(trackIds, index);
+    play: async (trackIds, index, shuffle) => {
+      if (mode.current === "local") return playLocally(trackIds, index, shuffle);
+
+      const listed = { trackIds: trackIds.map(asTrackId) };
+      const started = index === undefined ? listed : { ...listed, index };
 
       const pending = platform.music.queue.play(
-        index === undefined
-          ? { trackIds: trackIds.map(asTrackId) }
-          : { trackIds: trackIds.map(asTrackId), index },
+        shuffle === undefined ? started : { ...started, shuffle },
       );
 
       const answered = await withDeadline(pending, ACK_DEADLINE_MS);
@@ -529,7 +541,7 @@ const createPhone = ({
       if (!trackIds.some((id) => copies.find(id) !== null)) throw new Error(SERVER_AWAY);
       goLocal.current();
 
-      return playLocally(trackIds, index);
+      return playLocally(trackIds, index, shuffle);
     },
     track: async (trackId) => {
       const copy = trackOfCopy(copies, trackId);
@@ -680,7 +692,7 @@ const transportOf = (
 
   if (device === null) {
     return {
-      playTracks: (ids, at) => controller.playTracks(ids, at),
+      playTracks: (ids, at, shuffle) => controller.playTracks(ids, at, shuffle),
       togglePlay: () => controller.togglePlay(),
       next: () => controller.next(),
       previous: () => controller.previous(),
@@ -727,7 +739,7 @@ const createActions = (
       : (latest.current.queue?.repeat ?? "off");
 
   return {
-    play: (trackIds, index) => transport().playTracks(trackIds, index),
+    play: (trackIds, index, shuffle) => transport().playTracks(trackIds, index, shuffle),
     pause: async () => {
       if (latest.current.shownPlaying) await transport().togglePlay();
     },
@@ -912,9 +924,14 @@ const inSessionActions = (
 
   return {
     ...own,
+    // A session's queue has no shuffle, so a play in it ignores `shuffle`.
     play: inSession(
-      ({ view, sessionPlayback }, trackIds: ReadonlyArray<TrackId>, index?: number) =>
-        alertIfRefused(playInSession(platform, view, sessionPlayback, trackIds, index)),
+      (
+        { view, sessionPlayback },
+        trackIds: ReadonlyArray<TrackId>,
+        index?: number,
+        _shuffle?: boolean,
+      ) => alertIfRefused(playInSession(platform, view, sessionPlayback, trackIds, index)),
       own.play,
     ),
     pause: inSession(async ({ view, sessionPlayback }) => {

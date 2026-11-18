@@ -40,6 +40,30 @@ const jobStatus = v.union(
 );
 
 /**
+ * A library's latest scan as the caller may see it, null before its first: a failed scan's error
+ * only to its managers, and the counts and message only to a caller without restrictions.
+ */
+const libraryScan = v.union(
+  v.object({
+    jobId: v.id("jobs"),
+    status: jobStatus,
+    done: v.union(v.number(), v.null()),
+    total: v.union(v.number(), v.null()),
+    error: v.union(v.string(), v.null()),
+    /** What the scan is doing now, such as `probing`; null when it reported nothing. */
+    message: v.union(v.string(), v.null()),
+    /** When the attempt running now started; null unless it runs. */
+    startedAt: v.union(v.number(), v.null()),
+    /** Claims so far, the latest attempt's number; a cancel names the attempt it saw. */
+    attempt: v.number(),
+    /** True while a cancel waits for the running scan's worker to stop. */
+    canceling: v.boolean(),
+    finishedAt: v.union(v.number(), v.null()),
+  }),
+  v.null(),
+);
+
+/**
  * The job kinds `core.jobs.list` shows: every kind the server's workers claim. The stack suite's
  * own probe kinds never run on a server, so the list leaves them out.
  */
@@ -599,10 +623,19 @@ export const core = [
     result: v.object({ libraryId: v.id("libraries"), scanJobId: v.id("jobs") }),
   }),
   query("core.libraries.list", {
-    summary: "List the libraries shared with you",
+    summary: "List the libraries shared with you, each with its latest scan",
     scope: "signed-in",
     args: { paginationOpts: paginationOptsValidator },
-    result: paginationResultValidator(v.object(libraryRow)),
+    result: paginationResultValidator(
+      v.object({
+        ...libraryRow,
+        /**
+         * The latest scan, as `core.libraries.get` shows it to you. Optional, so an app reads the
+         * list from a server that does not send it, and shows no scan in progress there.
+         */
+        scan: v.optional(libraryScan),
+      }),
+    ),
   }),
   query("core.libraries.get", {
     summary:
@@ -613,25 +646,7 @@ export const core = [
       ...libraryRow,
       items: v.union(v.number(), v.null()),
       folders: v.union(v.array(v.string()), v.null()),
-      scan: v.union(
-        v.object({
-          jobId: v.id("jobs"),
-          status: jobStatus,
-          done: v.union(v.number(), v.null()),
-          total: v.union(v.number(), v.null()),
-          error: v.union(v.string(), v.null()),
-          /** What the scan is doing now, such as `probing`; null when it reported nothing. */
-          message: v.union(v.string(), v.null()),
-          /** When the attempt running now started; null unless it runs. */
-          startedAt: v.union(v.number(), v.null()),
-          /** Claims so far, the latest attempt's number; a cancel names the attempt it saw. */
-          attempt: v.number(),
-          /** True while a cancel waits for the running scan's worker to stop. */
-          canceling: v.boolean(),
-          finishedAt: v.union(v.number(), v.null()),
-        }),
-        v.null(),
-      ),
+      scan: libraryScan,
     }),
   }),
   mutation("core.libraries.rename", {

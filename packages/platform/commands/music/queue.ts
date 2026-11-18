@@ -96,7 +96,11 @@ const moveArgs = v.object({
 
 const moveResult = v.null();
 
-const playArgs = v.object({ trackIds: v.array(v.id("tracks")), index: v.optional(v.number()) });
+const playArgs = v.object({
+  trackIds: v.array(v.id("tracks")),
+  index: v.optional(v.number()),
+  shuffle: v.optional(v.boolean()),
+});
 
 const playResult = v.object({ current: v.id("playQueueEntries") });
 
@@ -165,7 +169,7 @@ export interface Handlers {
     caller: Caller,
   ) => Infer<typeof moveResult> | Promise<Infer<typeof moveResult>>;
 
-  /** `music.queue.play` (mutation, music:play): Replace your queue with songs (2,000 at most, 1,000 kept) and play the one at --index, the first by default. */
+  /** `music.queue.play` (mutation, music:play): Replace your queue with songs (2,000 at most, 1,000 kept) and play the one at --index, the first by default; --shuffle or --no-shuffle turns shuffle on or off with it. */
   readonly play: (
     ctx: Omit<MutationCtx, "auth">,
     args: Infer<typeof playArgs>,
