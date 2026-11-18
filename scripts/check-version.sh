@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Prints the release version and fails unless every workspace package carries it: the image, the
-# Nix packages, the npm package, and the release binaries all report it. Given a release tag, also
-# fails unless the tag names that version. The iOS app's store version (`expo.version` in
-# apps/mobile-movies/app.json) goes through App Store review on its own schedule, so it is not checked.
+# Prints the release version and fails unless every workspace package and each iOS app's
+# `expo.version` in its app.json carries it: the image, the Nix packages, the npm package, the release
+# binaries, and the iOS apps all report it. Given a release tag, also fails unless the tag names that
+# version.
 #
 #   scripts/check-version.sh            # 0.2.0
 #   scripts/check-version.sh v0.2.0     # the release workflows, with the pushed tag
@@ -11,14 +11,17 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 # A command substitution, so a git failure stops the script instead of checking nothing.
-tracked="$(git ls-files -- ':(glob)apps/*/package.json' ':(glob)packages/*/package.json')"
+tracked="$(git ls-files -- ':(glob)apps/*/package.json' ':(glob)packages/*/package.json' ':(glob)apps/*/app.json')"
 mapfile -t manifests <<<"$tracked"
 
 node - "${1:-}" "${manifests[@]}" <<'EOF'
 const { readFileSync } = require("node:fs");
 
 const [tag, ...manifests] = process.argv.slice(2);
-const versionOf = (path) => JSON.parse(readFileSync(path, "utf8")).version;
+const versionOf = (path) => {
+  const manifest = JSON.parse(readFileSync(path, "utf8"));
+  return path.endsWith("/app.json") ? manifest.expo.version : manifest.version;
+};
 const version = versionOf("packages/platform/package.json");
 const failures = manifests
   .filter((path) => versionOf(path) !== version)

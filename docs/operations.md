@@ -252,16 +252,16 @@ Convex backend upgrades ride along with [media] releases; never change its image
 
 ### Releasing
 
-For maintainers. One version covers the image, the Nix packages, `@lmdevv/media` on npm, and the
-CLI binaries. `scripts/check-version.sh`, run by CI and the pre-commit hook, fails while any
-workspace package carries another version. The iOS app's store version (`expo.version` in
-`apps/mobile-movies/app.json`) is not part of it: the App Store build ships through review on its own
-schedule, so a server release does not bump it.
+For maintainers. One version covers the image, the Nix packages, `@lmdevv/media` on npm, the CLI
+binaries, and the iOS apps. `scripts/check-version.sh`, run by CI and the pre-commit hook, fails
+while any workspace package or iOS app's `expo.version` (in `apps/mobile-*/app.json`) carries
+another version.
 
 1. On `main`, set every package's version, then commit and merge it:
 
    ```sh
    pnpm -r exec npm pkg set version=0.3.0
+   node -e 'const fs = require("node:fs"); for (const f of process.argv.slice(1)) { const app = JSON.parse(fs.readFileSync(f, "utf8")); app.expo.version = "0.3.0"; fs.writeFileSync(f, `${JSON.stringify(app, null, 2)}\n`); }' apps/mobile-*/app.json
    scripts/check-version.sh     # 0.3.0
    ```
 
