@@ -2,7 +2,6 @@ import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { Button } from "@media/ui/components/button";
 import { Eyebrow } from "@media/ui/components/page-header";
 import { TopBar, TopBarLink } from "@media/ui/components/top-bar";
-import { Wordmark } from "@media/ui/components/wordmark";
 import { Link } from "@tanstack/react-router";
 import type { LinkProps } from "@tanstack/react-router";
 import { useState } from "react";
@@ -12,6 +11,8 @@ import { toast } from "sonner";
 import { describeFailure } from "@media/ui/lib/failure";
 import { useAccountActions } from "@/session/account";
 import { nameOf, useMe } from "@/session/me";
+
+import { LarMark } from "./lar-mark";
 
 /** The products this account opens, each its own client on this origin (ADR 0020). */
 const PRODUCTS = [
@@ -112,7 +113,7 @@ export function Shell({ children }: { readonly children: ReactNode }) {
           className="mx-auto max-w-content"
           brand={
             <Link to="/home" aria-label="Lar home" className="rounded-bar">
-              <Wordmark product="media" />
+              <LarMark />
             </Link>
           }
           nav={PRODUCTS.map((product) => (

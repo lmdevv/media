@@ -1,7 +1,6 @@
 import { Button } from "@media/ui/components/button";
 import { buttonVariants } from "@media/ui/lib/button-variants";
 import { CalmState } from "@media/ui/components/calm-state";
-import { Wordmark } from "@media/ui/components/wordmark";
 import { cn } from "@media/ui/lib/utils";
 import { Link, useMatches, useRouter } from "@tanstack/react-router";
 import type { ErrorComponentProps } from "@tanstack/react-router";
@@ -10,6 +9,8 @@ import type { ReactNode } from "react";
 
 import { useReportAppError } from "@/session/error-reporting";
 import { useScopes } from "@/session/session";
+
+import { MoviesMark } from "./movies-mark";
 
 const InShellContext = createContext(false);
 
@@ -30,7 +31,7 @@ function StateFrame({ children }: { readonly children: ReactNode }) {
       <div className="flex min-h-svh flex-col bg-page font-sans text-text">
         <header className="flex h-16 shrink-0 items-center px-5 md:h-24 md:px-16">
           <Link to="/" aria-label="Lar Movies home" className="rounded-bar">
-            <Wordmark />
+            <MoviesMark />
           </Link>
         </header>
         <main className="flex grow flex-col items-center px-5 pt-10 pb-16 md:pt-22">

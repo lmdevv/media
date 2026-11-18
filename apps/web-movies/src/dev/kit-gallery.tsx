@@ -41,6 +41,7 @@ import type { ReactNode } from "react";
 import { moveRowFocus } from "@media/ui/lib/row-focus";
 import { useKeymap } from "@media/ui/lib/use-keymap";
 
+import { MoviesMark } from "@/components/shell/movies-mark";
 import { keymap, shortcutLabel } from "@/lib/keymap";
 
 import { ART } from "./sample-art";
@@ -360,6 +361,7 @@ export function KitGallery() {
   const topBar = (overMedia: boolean) => (
     <TopBar
       overMedia={overMedia}
+      brand={<MoviesMark />}
       nav={["Home", "Movies", "Shows", "My List"].map((label, index) => (
         <TopBarLink key={label} href="#" active={index === 0}>
           {label}

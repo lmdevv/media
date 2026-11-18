@@ -53,7 +53,7 @@ export function SignInView({
   readonly onSubmit: () => void;
 }) {
   return (
-    <AuthPage tagline>
+    <AuthPage>
       <PageTitle>Sign in.</PageTitle>
       <AccountForm
         fields="signIn"

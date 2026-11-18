@@ -4,15 +4,13 @@ import { cn } from "@media/ui/lib/utils";
 import { SearchIcon, UsersIcon } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
 
-import { Wordmark } from "./wordmark";
-
 /**
- * The desktop top bar: wordmark and section links on the left; search, the room pill and the
+ * The desktop top bar: the app's mark and section links on the left; search, the room pill and the
  * avatar on the right.
  *
  * @param overMedia - The bar floats transparent over a hero backdrop with white chrome. Otherwise it
  *   sits on the page color and follows the theme.
- * @param brand - Replaces the wordmark, for example with a link to Home that wraps it.
+ * @param brand - The app's mark, for example inside a link to Home.
  */
 export function TopBar({
   nav,
@@ -23,7 +21,7 @@ export function TopBar({
 }: {
   readonly nav?: ReactNode;
   readonly actions?: ReactNode;
-  readonly brand?: ReactNode;
+  readonly brand: ReactNode;
   readonly overMedia?: boolean;
   readonly className?: string;
 }) {
@@ -37,7 +35,7 @@ export function TopBar({
       )}
     >
       <div className="flex min-w-0 items-center gap-9">
-        {brand ?? <Wordmark />}
+        {brand}
         {nav === undefined ? null : (
           <nav aria-label="Sections" className="flex items-center gap-5.5">
             {nav}

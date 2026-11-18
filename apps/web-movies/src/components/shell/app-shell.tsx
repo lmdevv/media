@@ -3,7 +3,6 @@ import { CommandMenu } from "@media/ui/components/command-menu";
 import { CompactTopBar, LargeTitle } from "@media/ui/components/phone-title";
 import { TabBar, TabBarItem, TabBarSearch } from "@media/ui/components/tab-bar";
 import { SearchTrigger, TopBar, TopBarLink } from "@media/ui/components/top-bar";
-import { Wordmark } from "@media/ui/components/wordmark";
 import { moveRowFocus } from "@media/ui/lib/row-focus";
 import { useKeymap } from "@media/ui/lib/use-keymap";
 import { cn } from "@media/ui/lib/utils";
@@ -16,6 +15,7 @@ import { TitlePrefetchProvider } from "@/components/browse/prefetch";
 import { keymap, shortcutLabel } from "@/lib/keymap";
 import { nameOf, useMe, useScopes } from "@/session/session";
 
+import { MoviesMark } from "./movies-mark";
 import { InShell } from "./route-states";
 import { ScanToast } from "./scan-toast";
 import { SECTIONS, sectionOf } from "./sections";
@@ -121,7 +121,7 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
           className="mx-auto max-w-content"
           brand={
             <Link to="/" aria-label="Lar Movies home" className="rounded-bar">
-              <Wordmark />
+              <MoviesMark />
             </Link>
           }
           nav={SECTIONS.map((section) => (
