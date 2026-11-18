@@ -96,18 +96,27 @@ export const usePlaylistDetail = (playlistId: PlaylistId): PlaylistDetail | Erro
 };
 
 /**
+ * The arguments every screen reads `music.library.home` with, so they share one subscription with
+ * the copy held from launch (`HeldHome`).
+ */
+export const LIBRARY_HOME = {};
+
+/** How many plays Home and Search read for their recently played songs. */
+export const RECENT_PLAYS = 50;
+
+/**
+ * Your latest plays' pages, up to `count` rows, `count` to a page. A failure stays in the state
+ * and never throws, so the copy held from launch can read it above every error boundary.
+ */
+export const useHistoryPages = (count: number): Paged<HistoryEntry> =>
+  useFirstRows(useMusic().history.list, (paginationOpts) => ({ paginationOpts }), count, count);
+
+/**
  * Your latest plays, newest first, up to `count`; undefined while they load. A failed page throws
  * to the route's error screen.
  */
 export const useHistory = (count: number): ReadonlyArray<HistoryEntry> | undefined => {
-  const music = useMusic();
-
-  const paged = useFirstRows(
-    music.history.list,
-    (paginationOpts) => ({ paginationOpts }),
-    count,
-    count,
-  );
+  const paged = useHistoryPages(count);
 
   if (paged.status === "failed") throw new Error(paged.message);
 

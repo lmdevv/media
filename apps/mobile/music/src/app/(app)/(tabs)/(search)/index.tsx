@@ -34,7 +34,7 @@ import { useThemeColor } from "@/lib/theme-color";
 import { useContentCanvas } from "@/lib/window-layout";
 import { useNowPlaying } from "@/player";
 import { useServerReach } from "@/session/server-reach";
-import { useHistory } from "@/lib/details";
+import { RECENT_PLAYS, useHistory } from "@/lib/details";
 import { useMusic, useRead } from "@/lib/platform";
 
 const DEBOUNCE_MS = 250;
@@ -42,8 +42,6 @@ const DEBOUNCE_MS = 250;
 const RESULT_LIMIT = 50;
 
 const RECENTLY_PLAYED = 3;
-
-const PLAYS_READ = 50;
 
 const useSettled = (text: string): string => {
   const [settled, setSettled] = useState(text.trim());
@@ -121,7 +119,7 @@ export default function Search() {
     useRead(music.library.search, query === "" ? "skip" : { query, limit: RESULT_LIMIT }),
   );
 
-  const plays = useHistory(PLAYS_READ);
+  const plays = useHistory(RECENT_PLAYS);
   const { recents, remember, clear } = useRecentSearches();
   const playingId = useNowPlaying().nowPlaying?.trackId ?? null;
   const { playFrom } = usePlayList();

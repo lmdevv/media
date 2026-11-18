@@ -15,6 +15,7 @@ import type { SettledPhase } from "@/lib/session-phase";
 import { useThemeColor } from "@/lib/theme-color";
 import { ConnectionProvider, useConnectionControls } from "@/session/connection";
 import { SdkProvider } from "@/session/sdk-provider";
+import { HeldHome } from "@/session/held-home";
 import { ServerReachProvider } from "@/session/server-reach";
 import {
   SessionPhaseContext,
@@ -109,16 +110,22 @@ function HideSplash() {
 function ConnectedApp() {
   const phase = useSettledPhase();
 
-  if (phase === null) return <View className="flex-1 bg-canvas" />;
-
+  // HeldHome stays first, so it keeps its place, and its queries, as the phase settles.
   return (
-    <SessionPhaseContext value={phase}>
-      <ServerReachProvider phase={phase.kind}>
-        <HideSplash />
-        <RootStack phase={phase.kind} />
-        <OpenEntryLink phase={phase.kind} />
-      </ServerReachProvider>
-    </SessionPhaseContext>
+    <>
+      <HeldHome phase={phase?.kind ?? null} />
+      {phase === null ? (
+        <View className="flex-1 bg-canvas" />
+      ) : (
+        <SessionPhaseContext value={phase}>
+          <ServerReachProvider phase={phase.kind}>
+            <HideSplash />
+            <RootStack phase={phase.kind} />
+            <OpenEntryLink phase={phase.kind} />
+          </ServerReachProvider>
+        </SessionPhaseContext>
+      )}
+    </>
   );
 }
 

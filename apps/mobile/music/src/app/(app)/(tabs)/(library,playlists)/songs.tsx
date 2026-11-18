@@ -14,7 +14,7 @@ import { IconButton } from "@/components/ui/icon-button";
 import { Text } from "@/components/ui/text";
 import { songsArriveSorted, sortSongs } from "@/lib/browse-view";
 import { countOf } from "@/lib/format";
-import { readPages } from "@/lib/details";
+import { LIBRARY_HOME, readPages } from "@/lib/details";
 import { useMusic, useRead } from "@/lib/platform";
 import { useNowPlaying } from "@/player";
 
@@ -26,7 +26,7 @@ export default function Songs() {
   const { sort } = useBrowseView().songs;
   const pages = useTrackPages({ limit: PAGE_SIZE, all: !songsArriveSorted(sort) });
   const music = useMusic();
-  const home = useRead(music.library.home, {});
+  const home = useRead(music.library.home, LIBRARY_HOME);
   const playingId = useNowPlaying().nowPlaying?.trackId ?? null;
   const { playFrom, playAll } = usePlayList();
   const [reading, setReading] = useState(false);

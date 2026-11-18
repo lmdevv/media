@@ -10,7 +10,7 @@ import { OfflineNotice } from "@/components/states/offline-notice";
 import { SectionHeader } from "@/components/ui/section-header";
 import { TabRoot } from "@/components/ui/tab-root";
 import { useDownloadsLibrary } from "@/downloads";
-import { useHistory } from "@/lib/details";
+import { LIBRARY_HOME, RECENT_PLAYS, useHistory } from "@/lib/details";
 import { homeStats } from "@/lib/format";
 import { distinctSongs } from "@/lib/history";
 import { cardOf } from "@/lib/offline-library";
@@ -21,10 +21,8 @@ import { useServerReach } from "@/session/server-reach";
 
 const RECENT_SONGS = 5;
 
-const PLAYS_READ = 50;
-
 function RecentlyPlayed() {
-  const plays = useHistory(PLAYS_READ);
+  const plays = useHistory(RECENT_PLAYS);
   const playingId = useNowPlaying().nowPlaying?.trackId ?? null;
   const { playFrom } = usePlayList();
 
@@ -65,7 +63,7 @@ function OnThisPhone({ albums }: { readonly albums: ReadonlyArray<OfflineAlbum> 
 }
 
 export default function Home() {
-  const home = useRead(useMusic().library.home, {});
+  const home = useRead(useMusic().library.home, LIBRARY_HOME);
   const reach = useServerReach();
   const { albums } = useDownloadsLibrary();
   const onPhone = reach === "offline" || (reach === "reconnecting" && albums.length > 0);
