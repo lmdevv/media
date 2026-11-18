@@ -2,6 +2,7 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @source "../../../../apps/web/music/src/**/*.{ts,tsx}";
+@source "../components/guest-links-form.tsx";
 
 @custom-variant dark (&:is(.dark *));
 

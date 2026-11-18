@@ -39,6 +39,8 @@ import { useAddToSession } from "@/together/use-add-to-session";
 import { useVersionChoice, withFacts } from "@/playback/use-version-choice";
 import type { VersionChoice } from "@/playback/use-version-choice";
 
+import { TitleGuestLinks } from "../guests/guest-links";
+
 import { Episodes } from "./episodes";
 import { playTarget, useMyListToggle, watchSearch } from "./play-target";
 import type { MyListToggle, PlayTarget } from "./play-target";
@@ -452,7 +454,7 @@ function PhoneActions({
   readonly addToSession: (() => void) | null;
 }) {
   return (
-    <div className="flex justify-around px-6 pt-4.5 pb-1">
+    <div className="flex flex-wrap justify-around gap-y-3 px-6 pt-4.5 pb-1">
       <button
         type="button"
         aria-pressed={myList.inList}
@@ -466,6 +468,7 @@ function PhoneActions({
         )}
         My List
       </button>
+      <TitleGuestLinks title={title} phone />
       {target.resuming ? (
         <Link
           to="/watch/$titleId"
@@ -559,6 +562,7 @@ function DesktopTitleDetail({
             >
               {myList.inList ? <CheckIcon strokeWidth={1.75} /> : <PlusIcon strokeWidth={1.75} />}
             </Button>
+            <TitleGuestLinks title={title} />
             {addToSession === null ? null : (
               <Button variant="secondary" size="lg" onClick={addToSession}>
                 <ListPlusIcon strokeWidth={1.75} aria-hidden />

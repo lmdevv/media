@@ -19,6 +19,7 @@ import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 
+import { GuestLinkDialog, GuestLinkMenuItem } from "@/components/guests/guest-links";
 import { Artwork } from "@/components/library/artwork";
 import { useUi } from "@/components/shell/ui-state";
 import { toastFailure } from "@/lib/action";
@@ -267,6 +268,7 @@ export function TrackMenu({
   const { liked, toggle } = useLike(track);
   const copyLink = useCopyLink();
   const [info, setInfo] = useState(false);
+  const [guestTrack, setGuestTrack] = useState<Pick<Track, "id" | "title"> | null>(null);
   const infoMounted = useOpenedOnce(info);
   const [open, setOpen] = useState(false);
 
@@ -351,11 +353,29 @@ export function TrackMenu({
               <DropdownMenuItem onClick={() => copyLink({ kind: "track", id: track.id })}>
                 Copy link
               </DropdownMenuItem>
+              {playable ? (
+                <GuestLinkMenuItem
+                  onClick={() => setGuestTrack({ id: track.id, title: track.title })}
+                />
+              ) : null}
               <DropdownMenuItem onClick={() => setInfo(true)}>File info</DropdownMenuItem>
             </>
           )}
         </DropdownMenuContent>
       </DropdownMenu>
+      {guestTrack === null ? null : (
+        <GuestLinkDialog
+          name={guestTrack.title}
+          open
+          onOpenChange={(dialogOpen) => {
+            if (!dialogOpen) setGuestTrack(null);
+          }}
+          target={{
+            kind: "item",
+            item: { domain: "music", ref: { type: "track", id: guestTrack.id } },
+          }}
+        />
+      )}
       {infoMounted ? <FileInfoDialog track={track} open={info} onOpenChange={setInfo} /> : null}
     </>
   );

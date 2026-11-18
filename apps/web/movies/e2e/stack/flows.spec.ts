@@ -22,6 +22,8 @@ import {
 } from "./people";
 import type { Client, Person } from "./people";
 
+test.use({ trace: "off", screenshot: "off", video: "off" });
+
 const stack = await reachableStack();
 
 test.skip(stack === null, NO_STACK);
@@ -305,4 +307,110 @@ test("app errors reach the server's log while signed in, never while signed out"
   expect((await reported()).join("\n")).not.toContain(`signed-out-${run}`);
   expect(strangerReports).toStrictEqual([]);
   await signedOut.close();
+});
+
+test.describe("guest links", () => {
+  test("an allowed maker creates and revokes a title link; a member without leave has no entry", async ({
+    browser,
+  }) => {
+    if (stack === null) return;
+    const { platform } = signedIn();
+    const guestAddress = "http://guests.example.test";
+    const originalPolicy = await platform.core.guests.status();
+    await platform.core.guests.configure({ enabled: true, address: guestAddress });
+
+    try {
+      const titles = await platform.movies.titles.search({ query: "Arrival" });
+      const title = titles[0];
+
+      if (title === undefined) throw new Error("the scanned title is missing");
+
+      const member = await createPerson(stack, "guest-member", "member");
+      const libraryId = libraries[0];
+
+      if (libraryId === undefined) throw new Error("the movies library is missing");
+      const memberClient = await signInClient(stack, member);
+      const me = await memberClient.platform.core.auth.sessions.current();
+      await platform.core.permissions.grants.set({
+        resource: { type: "library", id: libraryId },
+        principal: { kind: "user", userId: me.userId },
+        level: "view",
+      });
+      const memberContext = await browser.newContext();
+
+      try {
+        const memberPage = await memberContext.newPage();
+        let policyLoaded = false;
+        memberPage.on("websocket", (socket) => {
+          socket.on("framereceived", ({ payload }) => {
+            if (/"mayShare"\s*:\s*false/u.test(payload.toString())) policyLoaded = true;
+          });
+        });
+        await signIn(memberPage, member);
+        await memberPage.goto(moviesPath(`/title/${title.id}`));
+        await expect(memberPage.getByRole("button", { name: "Add to My List" })).toBeVisible();
+        await expect.poll(() => policyLoaded).toBe(true);
+        await memberPage.evaluate(
+          () =>
+            new Promise<void>((resolve) =>
+              requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+            ),
+        );
+        await expect(
+          memberPage.getByRole("button", { name: "Guest link", exact: true }),
+        ).toHaveCount(0);
+      } finally {
+        await memberContext.close();
+        await memberClient.platform.dispose();
+      }
+
+      await page.goto(moviesPath(`/title/${title.id}`));
+      await page.addStyleTag({
+        content: '[data-sensitive="guest-link"] { visibility: hidden !important; }',
+      });
+      await page.getByRole("button", { name: "Guest link", exact: true }).click();
+      const dialog = page.getByRole("dialog", { name: `Share ${title.name}` });
+      await expect(dialog.getByLabel("Expires in days")).toHaveValue("7");
+      await dialog.getByRole("button", { name: "Create link", exact: true }).click();
+
+      const addressMatches = await dialog
+        .getByLabel("New guest link")
+        .evaluate(
+          (element, expected) =>
+            element instanceof HTMLInputElement && new URL(element.value).origin === expected,
+          guestAddress,
+        );
+
+      expect(addressMatches).toBe(true);
+      await expect(dialog.getByRole("region", { name: "Your guest links" })).toContainText("open");
+      await dialog.getByRole("button", { name: "Copy", exact: true }).click();
+      await expect(dialog.getByRole("button", { name: "Copied", exact: true })).toBeVisible();
+      await dialog.getByRole("button", { name: "Close", exact: true }).click();
+      await page.getByRole("button", { name: "Guest link", exact: true }).click();
+      await expect(dialog.getByLabel("New guest link")).toHaveCount(0);
+      await dialog.getByRole("button", { name: "Revoke", exact: true }).click();
+      await expect(dialog.getByRole("region", { name: "Your guest links" })).toContainText(
+        "revoked",
+      );
+
+      const listed = await platform.core.guests.links.list({
+        whose: "mine",
+        paginationOpts: { numItems: 100, cursor: null },
+      });
+
+      expect(
+        listed.page.some(
+          (row) =>
+            row.target?.kind === "item" &&
+            row.target.item.ref.id === title.id &&
+            row.state === "revoked",
+        ),
+      ).toBe(true);
+    } finally {
+      await platform.core.guests.configure({
+        enabled: originalPolicy.enabled,
+        address: originalPolicy.address,
+      });
+    }
+  });
 });
