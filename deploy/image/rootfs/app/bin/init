@@ -32,22 +32,22 @@ if [ -n "${LOG_MAX_MB:-}" ] &&
   exit 1
 fi
 
-[ "$(id -g movies)" = "$pgid" ] || groupmod --non-unique --gid "$pgid" movies
-[ "$(id -u movies)" = "$puid" ] || usermod --non-unique --uid "$puid" --gid "$pgid" movies
+[ "$(id -g media)" = "$pgid" ] || groupmod --non-unique --gid "$pgid" media
+[ "$(id -u media)" = "$puid" ] || usermod --non-unique --uid "$puid" --gid "$pgid" media
 
 for node in /dev/dri/renderD*; do
   [ -e "$node" ] || continue
   gid="$(stat -c %g "$node")"
   getent group "$gid" >/dev/null || groupadd --gid "$gid" "render$gid"
-  usermod -a -G "$(getent group "$gid" | cut -d: -f1)" movies
+  usermod -a -G "$(getent group "$gid" | cut -d: -f1)" media
 done
 
 # The core's nightly and upgrade backups sit beside its database. The media service takes them, so
-# they are its own; /data/movies keeps its caches and the image CLI's logins.
-install -d -m 700 /data/core/secrets /data/movies/config
-install -d -m 700 -o movies -g movies /data/core/backups /data/movies/media /transcode
-find /data/core/backups /data/movies/media /transcode \( \! -user movies -o \! -group movies \) \
-  -exec chown -h movies:movies {} +
+# they are its own; /data/server keeps its caches and the image CLI's logins.
+install -d -m 700 /data/core/secrets /data/server/config
+install -d -m 700 -o media -g media /data/core/backups /data/server/media /transcode
+find /data/core/backups /data/server/media /transcode \( \! -user media -o \! -group media \) \
+  -exec chown -h media:media {} +
 
 convex() { (cd /app/platform && node node_modules/convex/bin/main.js "$@"); }
 
@@ -70,7 +70,7 @@ if [ -s /data/core/version ] && [ "$(cat /data/core/version)" != "$version" ] &&
   log "upgrading the core from $(cat /data/core/version) to $version; backing up to $backup first"
   convex export --include-file-storage --path "/data/core/backups/.partial-core-manual-$stamp.zip"
   mv "/data/core/backups/.partial-core-manual-$stamp.zip" "$backup"
-  chown movies:movies "$backup"
+  chown media:media "$backup"
   printf '%s\n' "$version" >/data/core/upgrade-backup
 fi
 
@@ -123,9 +123,8 @@ node /app/media/scripts/configure-web.ts --from /app/music --to /run/media/music
   --convex-url "$public_url/convex"
 
 umask 077
-install -d -m 755 /run/movies
-env_file=/run/movies/media.env
-install -m 600 -o movies -g movies /dev/null "$env_file"
+env_file=/run/media/media.env
+install -m 600 -o media -g media /dev/null "$env_file"
 setting() { [ -z "$2" ] || printf '%s=%s\n' "$1" "$2" >>"$env_file"; }
 setting HOST 127.0.0.1
 setting PORT 4300
@@ -136,7 +135,7 @@ setting MEDIA_SERVICE_API_KEY "$media_service_api_key"
 setting MEDIA_TICKET_KEYS "$media_ticket_keys"
 setting CONVEX_SELF_HOSTED_ADMIN_KEY "$admin_key"
 setting CONVEX_BACKEND_DIR /app/platform
-setting DATA_DIR /data/movies/media
+setting DATA_DIR /data/server/media
 setting BACKUP_DIR /data/core/backups
 setting TRANSCODE_DIR /transcode
 setting WEB_DIST_DIR /run/media/web

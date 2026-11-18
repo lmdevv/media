@@ -103,9 +103,9 @@ RUN set -eux; \
     rm s6-overlay-*.tar.xz
 # The base image's `node` user holds uid 1000.
 RUN userdel --remove node \
- && groupadd --gid 1000 movies \
- && useradd --uid 1000 --gid movies --no-create-home --home-dir /nonexistent \
-      --shell /usr/sbin/nologin movies \
+ && groupadd --gid 1000 media \
+ && useradd --uid 1000 --gid media --no-create-home --home-dir /nonexistent \
+      --shell /usr/sbin/nologin media \
  && groupadd --system --gid 901 convex \
  && useradd --system --uid 901 --gid convex --no-create-home --home-dir /nonexistent \
       --shell /usr/sbin/nologin convex \
