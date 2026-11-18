@@ -19,7 +19,7 @@ skipped='^([^:]*/)?(docs/decisions/|docs/decisions\.md:|node_modules/|convex/_ge
 
 status=0
 matches="$(
-  grep -rnIiE --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=.repos -- "$pattern" "$@" ||
+  grep -rHnIiE --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=.repos -- "$pattern" "$@" ||
     status=$?
   [[ $status -le 1 ]] || exit "$status"
 )"
