@@ -30,7 +30,6 @@ const Resolved = Schema.NullOr(
     roots: Schema.Array(Schema.String),
     probe: Schema.Struct({ container: Schema.String, durationMs: Schema.Finite }),
     externalSubtitles: Schema.Array(Schema.Unknown),
-    missing: Schema.Boolean,
   }),
 );
 
@@ -79,7 +78,6 @@ describe.skipIf(stack === undefined)("movies/files:resolveFile", { timeout: 180_
       roots: [...roots].toSorted(),
       probe: { container: "matroska", durationMs: 0 },
       externalSubtitles: [],
-      missing: false,
     });
     expect(await resolve(stack, gone.fileId)).toBeNull();
     expect(await resolve(stack, purging.fileId)).toBeNull();

@@ -24,8 +24,7 @@ import { externalSubtitle, probe } from "./validators";
  * What the server needs to stream a file: its path, its library's folders now, what ffprobe saw
  * in it, and the subtitle files beside it. Null for an id that names no file, and for a file that
  * is missing, whose title is gone or being purged, whose library is gone, or that no folder of its
- * library holds now (a removed folder's purge has yet to reach it). So `missing` is always false;
- * it stays for the shape old movies answered.
+ * library holds now (a removed folder's purge has yet to reach it).
  */
 export const resolveFile = serverQuery({
   args: { fileId: v.string() },
@@ -38,7 +37,6 @@ export const resolveFile = serverQuery({
       roots: v.array(v.string()),
       probe,
       externalSubtitles: v.array(externalSubtitle),
-      missing: v.boolean(),
     }),
   ),
   handler: async (ctx, { fileId }) => {
@@ -65,7 +63,6 @@ export const resolveFile = serverQuery({
       roots: [...roots],
       probe: file.probe,
       externalSubtitles: file.externalSubtitles,
-      missing: file.missing,
     };
   },
 });

@@ -148,7 +148,6 @@ export const ResolvedFile = Schema.Struct({
   roots: Schema.Array(Schema.String),
   probe: Probe,
   externalSubtitles: Schema.Array(ExternalSubtitle),
-  missing: Schema.Boolean,
 });
 
 /** A file named in a playback token. */
