@@ -29,7 +29,7 @@ import { TRACK_ROW_BYTES, pageRowsFor } from "./reads";
 import { musicStore } from "./write";
 import type { MusicStore } from "./write";
 
-/** The longest queue kept, as old music's `MAX_QUEUE`. */
+/** The longest queue kept. */
 export const MAX_QUEUE = 1000;
 
 /** Entries one scheduled page of a replaced queue's cleanup deletes. */
@@ -41,7 +41,7 @@ type Queue = Doc<"playQueues">;
 
 type Entry = Doc<"playQueueEntries">;
 
-/** A queue before its first write: empty, with autoplay on, as old music's queues started. */
+/** A queue before its first write: empty, with autoplay on. */
 const EMPTY = {
   generation: 0,
   current: null,
@@ -357,12 +357,12 @@ const insertAt = async (
 };
 
 /**
- * Tops the queue up as old music's `toppedUp` did: when autoplay is on, repeat is off, and the
- * current entry is the last, autoplay's songs join after it. A full queue makes room as old music's
- * did, deleting the entries played longest ago, the first before the current one in play order;
- * the current entry stays, and so does every entry in `kept`, which the calling add just inserted
- * and answered. When too few entries can leave, autoplay adds only as many songs as fit. It runs
- * only while the call can still pay for autoplay's reads.
+ * Tops the queue up: when autoplay is on, repeat is off, and the current entry is the last,
+ * autoplay's songs join after it. A full queue makes room by deleting the entries played longest
+ * ago, the first before the current one in play order; the current entry stays, and so does every
+ * entry in `kept`, which the calling add just inserted and answered. When too few entries can
+ * leave, autoplay adds only as many songs as fit. It runs only while the call can still pay for
+ * autoplay's reads.
  */
 const toppedUp = async (
   session: Session,
@@ -414,10 +414,9 @@ const toppedUp = async (
 };
 
 /**
- * Reads and decides `trackIds` for play, as old music's `playableTracks` did: each must exist and
- * be one the caller may play, or the call fails `not_found`; songs whose files went missing are
- * left out, and the call fails when none is left. Answers the songs kept, and where `index` lands
- * among them.
+ * Reads and decides `trackIds` for play: each must exist and be one the caller may play, or the
+ * call fails `not_found`; songs whose files went missing are left out, and the call fails when none
+ * is left. Answers the songs kept, and where `index` lands among them.
  */
 const playableTracks = async (
   session: Session,
@@ -447,9 +446,9 @@ const playableTracks = async (
 const entriesCost = (count: number): Cost => cost(0, count, 0, count * DOCUMENT_BYTES.small);
 
 /**
- * The order a new queue plays `tracks` in, as old music's `playOrder`: shuffled, the chosen song
- * first and the rest shuffled behind it, cut to `MAX_QUEUE`, keeping their listed order to come
- * back to; otherwise up to `MAX_QUEUE` songs from the chosen one when the list is longer.
+ * The order a new queue plays `tracks` in: shuffled, the chosen song first and the rest shuffled
+ * behind it, cut to `MAX_QUEUE`, keeping their listed order to come back to; otherwise up to
+ * `MAX_QUEUE` songs from the chosen one when the list is longer.
  */
 const playOrder = (tracks: ReadonlyArray<Doc<"tracks">>, index: number, shuffle: boolean) => {
   const listed = tracks.map((track, position) => ({ track, listed: position }));
@@ -503,8 +502,8 @@ const deleteUpcoming = async (
 /**
  * Where `music.queue.add` puts songs: right after `after` in both orders when it names an entry
  * (the current one for `--next`, or the last one a call before added); at the end of an empty
- * queue; otherwise after the songs people queued and before autoplay's, and at the end of the
- * order before shuffle, as old music's `addedOrder` placed them.
+ * queue; otherwise after the songs people queued and before autoplay's, and at the end of the order
+ * before shuffle.
  */
 const addedSlots =
   (session: Session, queue: Queue, current: Entry | null, after: Entry | null): Place =>
@@ -702,7 +701,7 @@ export const { get, list, play, add, remove, move, clear, jump, shuffle, repeat,
 
       const { session, queue } = await open(ctx, caller);
 
-      // Songs past the queue's room never join it, as old music cut them at `MAX_QUEUE`.
+      // Songs past the queue's room never join it.
       const room = Math.max(0, MAX_QUEUE - queue.count);
 
       if (room === 0) return { itemIds: [], rest: [] };

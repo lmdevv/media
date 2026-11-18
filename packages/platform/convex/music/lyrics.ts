@@ -84,7 +84,7 @@ const chosen = (
   extras: sets.flatMap((set) => (set === main ? [] : [presented(set)])),
 });
 
-/** What LRCLIB is known to hold for the song now, as old music's `LyricsLookup` said. */
+/** What LRCLIB is known to hold for the song now. */
 type Remote =
   | { readonly state: "none" }
   | { readonly state: "pending" }
@@ -92,12 +92,11 @@ type Remote =
   | { readonly state: "found"; readonly sets: ReadonlyArray<LyricSet> };
 
 /**
- * The lyrics to show, as old music's `resolveLyrics` picked them: the song's synced lyrics, then
- * LRCLIB's synced lyrics, then the song's plain lyrics, then LRCLIB's plain lyrics; the song's own
- * lyrics also beat an LRCLIB instrumental answer. Among one source's sets, a file beside the song
- * beats a tag inside it, and word timing beats line timing; among sets still equal, the first.
- * While a lookup is pending, the song's plain lyrics show as its fallback, since LRCLIB may find
- * synced ones.
+ * The lyrics to show: the song's synced lyrics, then LRCLIB's synced lyrics, then the song's plain
+ * lyrics, then LRCLIB's plain lyrics; the song's own lyrics also beat an LRCLIB instrumental
+ * answer. Among one source's sets, a file beside the song beats a tag inside it, and word timing
+ * beats line timing; among sets still equal, the first. While a lookup is pending, the song's plain
+ * lyrics show as its fallback, since LRCLIB may find synced ones.
  */
 const resolve = (local: ReadonlyArray<LyricSet>, remote: Remote) => {
   const localSynced = bestSynced(local);
@@ -156,8 +155,7 @@ export const { get, status, configure, backfill } = register({
       if (current?.status === "instrumental") return { state: "instrumental" };
 
       // No answer yet, or a miss old enough to ask again: pending while a lookup is queued or
-      // running for these tags. With lookups off it will not run, so it counts as no answer, as in
-      // old music.
+      // running for these tags. With lookups off it will not run, so it counts as no answer.
       const waiting =
         lookup !== null &&
         (await remoteLyricsOn(ctx.db)) &&
@@ -178,7 +176,7 @@ export const { get, status, configure, backfill } = register({
 
     await musicStore(ctx.db, meterFrom(NO_COST)).setRemoteLyrics(remote);
     // Off holds the kind, so no claim hands the server a lookup and no request reaches LRCLIB;
-    // queued lookups stay and run when lookups are on again, as in old music.
+    // queued lookups stay and run when lookups are on again.
     await holdKind(ctx, "music.lyrics", !remote);
 
     return null;

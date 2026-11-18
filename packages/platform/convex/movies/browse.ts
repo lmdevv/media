@@ -18,7 +18,7 @@ export interface TitleFilter {
   readonly minRating?: number | undefined;
 }
 
-/** Most titles one list page holds, as old movies' title list allowed. */
+/** Most titles one list page holds. */
 export const TITLE_PAGE_MAX = 100;
 
 const folded = (text: string): string => text.trim().toLowerCase();

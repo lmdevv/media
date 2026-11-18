@@ -191,8 +191,8 @@ const seedMusic = async (
 
 /**
  * Seeds libraries that `manager` manages, in order, with no scan queued, 200 a call: each library
- * costs its seed a few index ranges, and Convex caps the ranges one transaction reads. Movies
- * libraries hold movies rows; music libraries hold music tracks, albums, and artists.
+ * costs its seed a few index ranges, and Convex caps the ranges one transaction reads. A movies
+ * library gets movies rows; a music library gets music tracks, albums, and artists.
  */
 export function seedLibraries(
   stack: CoreStack,

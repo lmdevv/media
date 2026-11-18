@@ -6,10 +6,10 @@ import type { MusicStore } from "./write";
 import { atBound } from "./write";
 
 /**
- * What people keep of a track that a purge deletes, as old music's purge did before it deleted the
- * track: its playlist entries, shrinking each playlist's counts, its likes, its plays, and its
- * queue entries, moving a queue that played one on to the entry after it. Each call clears what
- * its budget admits; a track whose rows are not all gone stays for the next call.
+ * What people keep of a track that a purge deletes before it deletes the track: its playlist
+ * entries, shrinking each playlist's counts, its likes, its plays, and its queue entries, moving a
+ * queue that played one on to the entry after it. Each call clears what its budget admits; a track
+ * whose rows are not all gone stays for the next call.
  */
 
 /** Rows of one table one track's step deletes at most. */

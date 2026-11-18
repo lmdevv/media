@@ -38,7 +38,7 @@ const secondSession = async (core: CoreStack, who: Member): Promise<Member> => (
 });
 
 describe.skipIf(stack === undefined)("music queue", { timeout: 240_000 }, () => {
-  it("plays, adds next and last, moves, removes, jumps, and clears, as old music's queue did", async () => {
+  it("plays, adds next and last, moves, removes, jumps, and clears", async () => {
     if (stack === undefined) return;
     const aiko = await member(stack, "aiko");
     const shelf = await musicShelf(stack, [aiko], SONGS);

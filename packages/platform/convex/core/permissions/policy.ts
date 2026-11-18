@@ -326,8 +326,7 @@ const SHARING: ReadonlyArray<CredentialScope> = [
 ];
 
 /**
- * `seePeople` lists the household by name to share with, as old music's `people.directory` did
- * for anyone who could share (ADR 0005).
+ * `seePeople` lists the household by name to share with, for anyone who can share (ADR 0005).
  */
 const serverRules: ServerRules = {
   invite: { scopes: ["admin"] },
@@ -335,7 +334,7 @@ const serverRules: ServerRules = {
   manageFolders: { scopes: ["admin"] },
   manageDevices: { scopes: ["admin"] },
   configureGuests: { scopes: ["admin"] },
-  /** LRCLIB lookups: the switch and the backfill, old music's admin-only `remoteLyrics`. */
+  /** LRCLIB lookups: the switch and the backfill, admins only. */
   configureLyrics: { scopes: ["admin"] },
   seePeople: { scopes: SHARING },
 };
@@ -963,8 +962,8 @@ const togetherRules: TogetherRules = {
   remove: OWN_ENTRY,
   reorder: OWN_ENTRY,
   /**
-   * Only the host's player moves a session on at an item's end, as old music's jams moved on at the
-   * end of the host's song: a guest's player, whatever the host allows, never does (ADR 0017).
+   * Only the host's player moves a session on at an item's end: a guest's player, whatever the host
+   * allows, never does (ADR 0017).
    */
   advance: { ...LIVE, who: "host", guests: "nothing" },
   /** A locked session takes no new members, approved or not. */

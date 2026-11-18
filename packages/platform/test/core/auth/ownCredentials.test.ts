@@ -330,7 +330,7 @@ describe.skipIf(stack === undefined)("a person's own API keys", { timeout: 300_0
     }
   });
 
-  it("refuses a key with no scopes, as old movies did", async () => {
+  it("refuses a key with no scopes", async () => {
     if (stack === undefined) return;
     const aiko = await member(stack, "empty");
 

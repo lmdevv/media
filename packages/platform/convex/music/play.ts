@@ -11,7 +11,7 @@ import { musicStore } from "./write";
 
 const NO_TRACK = "No such track";
 
-/** Offline plays one report records at most, as old music's `devices.reconcile` took. */
+/** Offline plays one report records at most. */
 const OFFLINE_PLAYS_MAX = 500;
 
 /**
@@ -39,8 +39,8 @@ export const { start, report, reportOffline } = register({
       return fail("not_found", NO_TRACK);
     }
 
-    // Old music looked up a song's lyrics on LRCLIB when it started playing, unless its own files
-    // held synced lyrics, which LRCLIB never replaces.
+    // A song that starts playing gets its lyrics looked up on LRCLIB, unless its own files hold
+    // synced lyrics, which LRCLIB never replaces.
     if (!track.lyricsSynced) await scheduleRequest(ctx, track._id);
 
     const playbackId = crypto.randomUUID();

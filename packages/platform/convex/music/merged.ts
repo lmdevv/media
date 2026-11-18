@@ -14,10 +14,10 @@ import { DOCUMENT_BYTES } from "./fit";
 import { LIST_PAGE_MAX, pageRowsFor } from "./reads";
 
 /**
- * The album, artist, and song lists over every music library a person may see, in one order, as
- * old music merged them when it fixed ADS-112: a page reads only the libraries the caller may
- * read, each through its own index, and merges them by the list's key and each row's tie, so a
- * library they cannot see costs them nothing and never leaves them an empty page (ADR 0005).
+ * The album, artist, and song lists over every music library a person may see, in one order: a page
+ * reads only the libraries the caller may read, each through its own index, and merges them by the
+ * list's key and each row's tie, so a library they cannot see costs them nothing and never leaves
+ * them an empty page (ADR 0005).
  *
  * The cursor is the key and the tie of the last row a page went past, as `key|tie`; a tie is a
  * UUID, so the last `|` divides them whatever the key holds. A tie is unique to its row

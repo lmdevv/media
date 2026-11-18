@@ -327,10 +327,10 @@ const renumber = async (
 };
 
 /**
- * Moves `entryId` in the caller's session in `domain` to just after `afterEntryId`, or to the
- * front without one: the host any entry, a guest who may add only their own, as old music's jams
- * let people move the songs they added. An entry gone, or in another session, is no change,
- * decided as if it were theirs, as `unqueue` decides it. An anchor no longer queued fails
+ * Moves `entryId` in the caller's session in `domain` to just after `afterEntryId`, or to the front
+ * without one: the host any entry, a guest who may add only their own, so people move the songs
+ * they added. An entry gone, or in another session, is no change, decided as if it were theirs, as
+ * `unqueue` decides it. An anchor no longer queued fails
  * `conflict`, so the caller tries again against the queue as it now stands.
  */
 export const reorder = async (

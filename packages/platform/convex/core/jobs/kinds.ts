@@ -257,9 +257,9 @@ export const KINDS = [
     },
     pool: "music.background",
     item: null,
-    /** One lookup at a time, as old music asked LRCLIB one song at a time. */
+    /** One lookup at a time, so LRCLIB is asked about one song at a time. */
     cap: 1,
-    /** Old music's five tries of a song whose own record failed before it counted as a miss. */
+    /** Five tries of a song whose own record failed before it counts as a miss. */
     maxStrikes: 5,
     /** One lookup per track and lookup revision: a retagged track gets a lookup of its own. */
     dedupe: (payload) => `${payload.trackId}:${payload.revision}`,

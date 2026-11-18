@@ -32,23 +32,23 @@ import { atBound, musicStore } from "./write";
 import type { MusicStore } from "./write";
 
 /**
- * LRCLIB lookups as `music.lyrics` jobs (ADR 0012), replacing old music's `lyricLookups` queue and
- * its `lrclibPause` table: a job's attempts and strikes are a lookup's tries, its delayed retry is
- * old music's wait after a failed try, and the kind's pause is the LRCLIB pause. A lookup is asked
- * for when a song starts playing (`music.play.start`), when it is downloaded (`core.downloads.add`),
- * and by an admin's backfill (`music.lyrics.backfill`), as in old music; never by a scan. Its
- * answer lands in `lrclibLyrics`, keyed by the track and the revision of its tags.
+ * LRCLIB lookups as `music.lyrics` jobs (ADR 0012): a job's attempts and strikes are a lookup's
+ * tries, its delayed retry is the wait after a failed try, and the kind's pause is the LRCLIB
+ * pause. A lookup is asked for when a song starts playing (`music.play.start`), when it is
+ * downloaded (`core.downloads.add`), and by an admin's backfill (`music.lyrics.backfill`); never by
+ * a scan, so a scan of a large library sends LRCLIB nothing. Its answer lands in `lrclibLyrics`,
+ * keyed by the track and the revision of its tags.
  */
 
 /** A `music.lyrics` job's payload: the track, the revision of its tags, and what LRCLIB is asked. */
 export type Lookup = PayloadOf<"music.lyrics">;
 
-/** How long a miss stands before a request asks LRCLIB again, as in old music. */
+/** How long a miss stands before a request asks LRCLIB again. */
 const MISS_RETRY_MS = 30 * 24 * 60 * 60 * 1000;
 
 /**
- * How long a lookup whose LRCLIB record could not be read waits before its next try, by the
- * strikes it had, as old music waited; its fifth failed try stores a miss.
+ * How long a lookup whose LRCLIB record could not be read waits before its next try, by the strikes
+ * it had; its fifth failed try stores a miss.
  */
 const RETRY_DELAYS_MS = [60_000, 5 * 60_000, 30 * 60_000, 2 * 60 * 60_000] as const;
 
@@ -114,10 +114,9 @@ const answered = (row: Doc<"lrclibLyrics"> | null, lookup: Lookup, now: number):
   (row.answer.status !== "miss" || now < row.checkedAt + MISS_RETRY_MS);
 
 /**
- * Queues a lookup for `track` unless it needs none, as old music's `requestOne` decided: a song
- * missing from disk, one whose own files hold synced lyrics, one LRCLIB cannot match, and one with
- * a standing answer for its tags are skipped. The kind's dedupe joins a lookup already queued or
- * running for the same tags.
+ * Queues a lookup for `track` unless it needs none: a song missing from disk, one whose own files
+ * hold synced lyrics, one LRCLIB cannot match, and one with a standing answer for its tags are
+ * skipped. The kind's dedupe joins a lookup already queued or running for the same tags.
  */
 const request = async (ctx: JobCtx, store: MusicStore, track: Doc<"tracks">): Promise<boolean> => {
   if (track.missing || track.lyricsSynced) return false;
@@ -179,10 +178,9 @@ export const scheduleRequest = async (ctx: JobCtx, trackId: Id<"tracks">): Promi
 
 /**
  * Looks up lyrics for every track of `libraryIds` in path order, a page a step, then the next
- * library, as old music's `lyrics.backfill` did, stopping when lookups are turned off. Unlike old
- * music, which queued every song at once, a step queues only as many lookups as keep fewer than
- * `BACKFILL_AHEAD` waiting, stopping in its page there, and looks again later when none fit
- * (`BACKFILL_WAIT_MS`).
+ * library, stopping when lookups are turned off. A step queues only as many lookups as keep fewer
+ * than `BACKFILL_AHEAD` waiting, stopping in its page there, and looks again later when none fit
+ * (`BACKFILL_WAIT_MS`), so a large library never floods the job queue.
  */
 export const backfill = internalMutation({
   args: {
@@ -315,7 +313,7 @@ export const discover = internalMutation({
 /**
  * What one try learned, as the server sends it: LRCLIB's answer; that the record it sent for the
  * song could not be read (`failed`); or that LRCLIB itself was unavailable, with how long the
- * server holds every request (`unavailable`), as old music's `LookupOutcome` said.
+ * server holds every request (`unavailable`).
  */
 const tryOutcome = v.union(
   v.object({ outcome: v.literal("answered"), answer: lrclibAnswer }),

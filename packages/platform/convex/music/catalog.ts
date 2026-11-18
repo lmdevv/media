@@ -20,7 +20,7 @@ import { LYRICS_ROWS_READ, atBound } from "./write";
 import type { MusicStore, Stored } from "./write";
 import type { LocalLyricSet, ScannedLyrics, ScannedTrack } from "./validators";
 
-/** A short format label such as `FLAC 24/96` or `MP3 320`, as old music shows an album's. */
+/** A short format label such as `FLAC 24/96` or `MP3 320`, as an album shows it. */
 const formatLabel = (track: ScannedTrack): string => {
   const codec = track.codec.toUpperCase();
 
@@ -144,9 +144,9 @@ interface ArtChange {
 }
 
 /**
- * The artwork an album or artist keeps after an upsert, as old music decides it: a row without
- * art takes the track's; a row whose art came from this track follows a replaced cover, or falls
- * back to another track's art when this one's went; any other row keeps its own.
+ * The artwork an album or artist keeps after an upsert: a row without art takes the track's; a row
+ * whose art came from this track follows a replaced cover, or falls back to another track's art
+ * when this one's went; any other row keeps its own.
  */
 const keptArt = async (
   current: string | null,
@@ -183,13 +183,13 @@ const filingOf = (scanned: ScannedTrack): Filing => {
 };
 
 /**
- * The catalog writes of one mutation in one library, as old music's `catalogBatch` made them,
- * through the music store, which charges the call's meter for each read and write (`write.ts`).
- * Songs of a batch mostly share albums and artists, so it reads each album and artist once and
- * keeps it, and it sums count changes and settles them in `finish`, writing each album, artist,
- * and total at most once a call. Every change to which tracks a library holds goes through here,
- * so its counts stay exact: an album's tracks on disk, an artist's albums with tracks on disk, and
- * the library's totals of both, of its tracks on disk, and of their length.
+ * The catalog writes of one mutation in one library, through the music store, which charges the
+ * call's meter for each read and write (`write.ts`). Songs of a batch mostly share albums and
+ * artists, so it reads each album and artist once and keeps it, and it sums count changes and
+ * settles them in `finish`, writing each album, artist, and total at most once a call. Every change
+ * to which tracks a library holds goes through here, so its counts stay exact: an album's tracks on
+ * disk, an artist's albums with tracks on disk, and the library's totals of both, of its tracks on
+ * disk, and of their length.
  */
 export interface CatalogBatch {
   /** Runs `write` on the leading items while `whileBudget` admits another. */

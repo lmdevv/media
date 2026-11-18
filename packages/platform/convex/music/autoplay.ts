@@ -9,11 +9,10 @@ import type { Decider } from "./person";
 import type { MusicStore } from "./write";
 
 /**
- * Autoplay, as old music's `autoplaySongs` picked: when a queue runs out, songs by the same
- * artist, then albums of the same genre around the same year, then albums from around the same
- * year, leaving out songs already queued or recently played. Old music read up to 300 songs of an
- * artist and 24 albums a step; this reads fewer, so a queue command that tops the queue up stays
- * well inside Convex's limits, and each step runs only while the call can still pay for it.
+ * Autoplay: when a queue runs out, songs by the same artist, then albums of the same genre around
+ * the same year, then albums from around the same year, leaving out songs already queued or
+ * recently played. Each step reads few rows, so a queue command that tops the queue up stays well
+ * inside Convex's limits, and each step runs only while the call can still pay for it.
  */
 
 /** Songs autoplay adds each time the queue runs out. */
@@ -22,7 +21,7 @@ export const AUTOPLAY_BATCH = 10;
 /** The person's plays whose songs autoplay leaves out. */
 const RECENT_PLAYS = 100;
 
-/** Artists sharing the seed artist's name across libraries, as old music read them. */
+/** Artists sharing the seed artist's name across libraries. */
 const ARTIST_ENTRIES = 12;
 
 /** Songs read across those artists. */
@@ -34,7 +33,7 @@ const ALBUMS_PER_STEP = 12;
 /** Songs read from each of those albums. */
 const SONGS_PER_ALBUM = 10;
 
-/** Libraries a step reads besides the seed's, as old music's `stepLibraries` chose them. */
+/** Libraries a step reads besides the seed's. */
 const OTHER_LIBRARIES = 12;
 
 /** How many years either side of the seed's album counts as around the same time. */

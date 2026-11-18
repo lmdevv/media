@@ -290,7 +290,7 @@ export const { add, list, fetch, remove, usage, setCap } = register({
     await moveCounter(ctx.db, bytesCounter(device._id), bytes);
     await moveCounter(ctx.db, itemsCounter(device._id), 1);
 
-    // Old music looked up a downloaded song's lyrics on LRCLIB, so they come along offline.
+    // A downloaded song's lyrics are looked up on LRCLIB, so they come along offline.
     if (item.kind === "track") await scheduleLyricsRequest(ctx, item.id);
 
     return null;

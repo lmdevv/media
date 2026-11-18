@@ -1,8 +1,8 @@
 /**
- * Order keys for rows kept in a person's order, a playlist's entries or a queue's: each row holds
- * a number, and a row placed between two others takes one between theirs, so a move or an insert
- * writes one row, never the whole list (old music's `positionBetween`). A tie field unique to each
- * row orders rows whose keys match.
+ * Order keys for rows kept in a person's order, a playlist's entries or a queue's: each row holds a
+ * number, and a row placed between two others takes one between theirs, so a move or an insert
+ * writes one row, never the whole list. A tie field unique to each row orders rows whose keys
+ * match.
  */
 
 /** The gap between keys of rows appended one after another, and after renumbering. */

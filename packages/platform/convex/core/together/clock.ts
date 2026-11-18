@@ -60,17 +60,16 @@ const movedClock = (clock: Clock, now: number, fields: Partial<Clock>): Clock =>
 
 /**
  * Decides `op` on `clock` at server time `now`. Play and a rate are absolute, so a repeat or a race
- * between two members changes nothing. A pause is absolute too, but always makes a new revision,
- * of a paused clock as well, as old movies' rooms did for every host command: a stalled host's
- * player plays the session on only while nothing has moved it since its own pause, and a pause
- * someone asked for since must count (ADR 0017). A seek and a skip mean something only against the
- * clock the member saw, so an older revision is stale: two members skipping at once move the
- * session on once.
+ * between two members changes nothing. A pause is absolute too, but always makes a new revision, of
+ * a paused clock as well: a stalled host's player plays the session on only while nothing has moved
+ * it since its own pause, and a pause someone asked for since must count (ADR 0017). A seek and a
+ * skip mean something only against the clock the member saw, so an older revision is stale: two
+ * members skipping at once move the session on once.
  *
  * A play or a pause with a revision is one a client decided on its own, against the clock at that
  * revision, such as a stalled player's hold and its release. It is stale once the clock moved on,
- * as old rooms fenced every host command, so it never undoes a move its client had not heard of.
- * One a person asks for carries none, so it always applies (ADR 0017).
+ * so it never undoes a move its client had not heard of. One a person asks for carries none, so it
+ * always applies (ADR 0017).
  *
  * A skip starts the next item where the clock stands past the end of the one it leaves, given
  * `carry` (`carriedPast`), so it leaves players that moved on by themselves at that end in step.
@@ -343,9 +342,8 @@ const endOf = (clock: Clock, lengthMs: number, now: number): EndOf => {
 
 /**
  * The host's player says its engine finished what the caller's session in `domain` plays, the
- * session `sessionId` names (ADR 0017). Old music's jams moved on the same way: the host's player
- * said its song ended, and the server read the queue and moved on in one write. Only the host may
- * (`advance`); a guest's player never moves a session on.
+ * session `sessionId` names (ADR 0017), and the session reads its queue and moves on in one write.
+ * Only the host may (`advance`); a guest's player never moves a session on.
  *
  * It applies only while the session still plays that entry under that clock (`Ended`), and only
  * once the session's clock agrees: at or past the end, the session moves on now (`moveOnAtEnd`);
@@ -457,11 +455,11 @@ const moveOnAtEnd = async (
 
 /**
  * Plays `item` now in the caller's session in its domain, the one `sessionId` names, from its
- * start, playing, in one write, as old music's host played a song in a jam: the caller must be
- * able to control the session, add to it, and play `item`. It plays as an entry of its own, which
- * never stays queued, so it differs from any other play of the same item (`itemEntryId`), and the
- * queue stays as it was. Answers the clock in force. Fails `conflict` once the caller is no longer
- * in that session (`requireTogether`), so a late call never plays in the session that replaced it.
+ * start, playing, in one write: the caller must be able to control the session, add to it, and play
+ * `item`. It plays as an entry of its own, which never stays queued, so it differs from any other
+ * play of the same item (`itemEntryId`), and the queue stays as it was. Answers the clock in force.
+ * Fails `conflict` once the caller is no longer in that session (`requireTogether`), so a late call
+ * never plays in the session that replaced it.
  */
 export const playNow = async (
   ctx: Pick<MutationCtx, "db">,

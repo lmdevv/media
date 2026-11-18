@@ -33,9 +33,9 @@ export const MUSIC_BOUNDS = {
   fingerprint: 1024,
   /** A track's length in milliseconds, about 50 days: a million of them still sum safely. */
   durationMs: 2 ** 32,
-  /** A playlist's name, in UTF-16 code units: old music's `Name`. */
+  /** A playlist's name, in UTF-16 code units. */
   playlistName: 120,
-  /** A playlist's description, in UTF-16 code units: old music's `Description`. */
+  /** A playlist's description, in UTF-16 code units. */
   playlistDescription: 500,
   /** The playback id a play keeps, as `music.play.start` makes it. */
   playbackId: 64,
@@ -307,8 +307,8 @@ const setProblem = (set: LyricSet): string | null => {
 };
 
 /**
- * Checks lyric sets as old music's `LocalLyricSet` and `LrclibLyricSet` schemas did, past what the
- * validator checks: a language is a BCP 47 tag, a lyric file has a name, plain text and synced
+ * Checks lyric sets as the contracts' `LocalLyricSet` and `LrclibLyricSet` schemas do, past what
+ * the validator checks: a language is a BCP 47 tag, a lyric file has a name, plain text and synced
  * lines are not empty, and every time is a finite number of milliseconds of at least 0.
  *
  * @throws Error on a set that breaks one, a defect in the server's lyrics reader, which checks
@@ -328,9 +328,8 @@ export interface LyricsFields {
 }
 
 /**
- * The fields a track keeps about lyric sets, already fitted, which its row stores. The hash is
- * Web Crypto's, as old music's was: the synchronous one in `core/lib/sha256.ts` took about 14 ms
- * for a row of dense sets.
+ * The fields a track keeps about lyric sets, already fitted, which its row stores. The hash is Web
+ * Crypto's: the synchronous one in `core/lib/sha256.ts` takes about 14 ms for a row of dense sets.
  */
 export const lyricsFieldsOf = async (sets: ReadonlyArray<LocalLyricSet>): Promise<LyricsFields> =>
   sets.length === 0

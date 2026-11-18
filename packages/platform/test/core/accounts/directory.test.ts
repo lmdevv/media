@@ -55,7 +55,7 @@ const guestOn = async (maker: Member): Promise<Session> => {
 };
 
 describe.skipIf(stack === undefined)("the people directory", { timeout: 120_000 }, () => {
-  it("gives a member everyone else by id, name, and role, as old music's people.directory did", async () => {
+  it("gives a member everyone else by id, name, and role", async () => {
     if (stack === undefined) return;
     const aiko = await member(stack, "aiko");
     const mateo = await member(stack, "mateo");

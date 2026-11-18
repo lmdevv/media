@@ -70,7 +70,7 @@ export const resolveFile = serverQuery({
 /** Most files one page holds. */
 const FILES_PAGE_MAX = 100;
 
-/** Most files the unmatched filter lists of each title, as old movies listed. */
+/** Most files the unmatched filter lists of each title. */
 const FILES_PER_UNMATCHED_TITLE = 50;
 
 /** Most unmatched titles one page holds, each with its files. */

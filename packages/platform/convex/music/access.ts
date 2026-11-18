@@ -166,8 +166,8 @@ export const requireArtist = async (
   requireRow(db, reach, "view", await db.get(artistId), () => ALBUM_FACTS, "No such artist");
 
 /**
- * A track the caller may see, by its library's grants and its own facts, and its library's gate,
- * as old music's `links.get` found a song's album and title. Reads 2 and its library's grants.
+ * A track the caller may see, by its library's grants and its own facts, and its library's gate, so
+ * a link to a song finds its album and title. Reads 2 and its library's grants.
  */
 export const requireTrack = async (
   db: DatabaseReader,

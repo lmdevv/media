@@ -65,8 +65,8 @@ export const placeFile = async (
 
 /**
  * A movies file as a download describes it: the file the server serves as it is on disk, at every
- * quality, as old movies kept downloads. Its revision changes with the file's size or change time.
- * A file a scan marked missing is not on disk, so it is gone until a scan finds it again. Reads 3.
+ * quality. Its revision changes with the file's size or change time. A file a scan marked missing
+ * is not on disk, so it is gone until a scan finds it again. Reads 3.
  */
 export const fileSource: SourceLoader<"file"> = async (db, fileId, libraryOf) => {
   const file = await db.get(fileId);

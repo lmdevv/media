@@ -409,7 +409,7 @@ describe.skipIf(stack === undefined)("music lyrics lookups", { timeout: 180_000 
     });
     expect(await lyricsAs(owner, bare ?? never())).toEqual({ status: "instrumental" });
 
-    // LRCLIB's synced lyrics beat a song's own plain lyrics, as in old music.
+    // LRCLIB's synced lyrics beat a song's own plain lyrics.
     const lease = held.get(plain ?? never()) ?? (await claimLookup(core, plain ?? never()));
 
     expect(await settle(core, lease, found(41, "from LRCLIB"))).toEqual({

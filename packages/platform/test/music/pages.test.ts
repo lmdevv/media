@@ -100,7 +100,7 @@ describe.skipIf(stack === undefined)("music list pages", { timeout: 1_800_000 },
       };
     };
 
-    // No page comes back empty while rows are left: old music's ADS-112 took 205 calls here.
+    // No page comes back empty while rows are left (ADS-112), so the calls stay near the pages.
     const checked = await inOrder([200, 100], async (numItems) => {
       const { first, rows, calls, usage } = await pagesAt(numItems);
 

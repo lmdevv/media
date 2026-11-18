@@ -50,7 +50,7 @@ const itemsOf = async (who: Member, playlistId: Id<"playlists">) =>
   ).rows;
 
 describe.skipIf(stack === undefined)("music playlists", { timeout: 180_000 }, () => {
-  it("share as old music did: viewers view, collaborators edit, everyone views a shared one", async () => {
+  it("share by level: viewers view, collaborators edit, everyone views a shared one", async () => {
     if (stack === undefined) return;
 
     const [aiko, mateo, sam] = await Promise.all([
@@ -365,7 +365,7 @@ describe.skipIf(stack === undefined)("music playlists", { timeout: 180_000 }, ()
     expect(await sharedWith(kid)).not.toContain(playlistId);
   });
 
-  it("refuses names and songs old music refused, and more than 2,000 entries", async () => {
+  it("refuses bad names, unseen songs, and more than 2,000 entries", async () => {
     if (stack === undefined) return;
     const aiko = await member(stack, "aiko");
     const sam = await member(stack, "sam");
