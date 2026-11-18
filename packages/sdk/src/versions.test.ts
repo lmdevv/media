@@ -195,4 +195,22 @@ describe("version labels", () => {
       "1080p · H.264 · AAC 2.0 · 3 audio tracks · 640 MB",
     );
   });
+
+  it("labels a version as the platform lists it, with a plain byte count", () => {
+    const listed = {
+      versionName: null,
+      width: 1920,
+      height: 1080,
+      hdr: "none",
+      videoCodec: "h264",
+      audioCodec: "aac",
+      audioChannels: 2,
+      audioTracks: 1,
+      container: "mp4",
+      sizeBytes: 2_100_000_000,
+    } as const;
+
+    expect(label(listed)).toBe("1080p H.264");
+    expect(detail(listed)).toBe("1080p · H.264 · AAC 2.0 · 2.1 GB");
+  });
 });

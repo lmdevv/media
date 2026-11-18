@@ -1,5 +1,5 @@
 import { describeFailure } from "@media/mobile-core/failure";
-import { MediaLabels } from "@media/sdk/effect";
+import { MediaLabels, Versions } from "@media/sdk/effect";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { useLocalSearchParams } from "expo-router";
 import { Check, Clapperboard, Play } from "lucide-react-native";
@@ -7,7 +7,7 @@ import { useState } from "react";
 
 import { episodeIdParam, fileIdParam, titleIdParam } from "@/components/title/route-params";
 import { Sheet, useSheetExit } from "@/components/title/sheet";
-import { defaultVersion, versionDetail, versionLabel } from "@/components/title/title-model";
+import { defaultVersion } from "@/components/title/title-model";
 import { Button } from "@/components/ui/button";
 import { ListRow } from "@/components/ui/list-row";
 import { Text } from "@/components/ui/text";
@@ -48,7 +48,7 @@ export default function ChooseVersion() {
           <ListRow
             key={version.id}
             icon={selected ? Check : Clapperboard}
-            title={versionLabel(version)}
+            title={Versions.label(version)}
             detail={selected ? "Selected" : MediaLabels.sizeLabel(version.sizeBytes)}
             onPress={() => setChosenId(version.id)}
           />
@@ -58,7 +58,7 @@ export default function ChooseVersion() {
           ? [
               row,
               <Text key={`${version.id}:detail`} variant="secondary" tone="muted">
-                {versionDetail(version)}
+                {Versions.detail(version)}
               </Text>,
             ]
           : [row];
