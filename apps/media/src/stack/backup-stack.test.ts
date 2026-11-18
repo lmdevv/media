@@ -16,9 +16,9 @@ import { makeWorkDir, removeDir } from "../testing/core-host.ts";
 
 const platformRoot = join(import.meta.dirname, "..", "..", "..", "..", "packages", "platform");
 
-const EXPIRED = "movies-nightly-2020-01-01T03-00-00-000Z.zip";
+const EXPIRED = "media-nightly-2020-01-01T03-00-00-000Z.zip";
 
-const PARTIAL = ".partial-movies-manual-2020-01-02T03-00-00-000Z.zip";
+const PARTIAL = ".partial-media-manual-2020-01-02T03-00-00-000Z.zip";
 
 let scope: Scope.Closeable;
 

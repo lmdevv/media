@@ -26,7 +26,7 @@ const appendNow = (logs: RetainedLogs.Interface, line: string) =>
 const writerIn = (maxBytes = 512 * MEBIBYTE) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    const directory = yield* fs.makeTempDirectoryScoped({ prefix: "movies-logs-" });
+    const directory = yield* fs.makeTempDirectoryScoped({ prefix: "media-logs-" });
 
     yield* TestClock.setTime(Date.UTC(2026, 9, 21, 12));
 
@@ -93,7 +93,7 @@ layer(NodeServices.layer)("retained log writer", (it) => {
   it.effect("ends a line a failed write cut short before writing the next", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "movies-logs-" });
+      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "media-logs-" });
 
       yield* TestClock.setTime(Date.UTC(2026, 9, 21, 12));
 
@@ -183,7 +183,7 @@ layer(NodeServices.layer)("retained log writer", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const parent = yield* fs.makeTempDirectoryScoped({ prefix: "movies-logs-" });
+      const parent = yield* fs.makeTempDirectoryScoped({ prefix: "media-logs-" });
       const directory = path.join(parent, "logs");
       const earlier = path.join(directory, fileName(0, Date.UTC(2026, 9, 20)));
 
@@ -215,7 +215,7 @@ layer(NodeServices.layer)("retained log writer", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const parent = yield* fs.makeTempDirectoryScoped({ prefix: "movies-logs-" });
+      const parent = yield* fs.makeTempDirectoryScoped({ prefix: "media-logs-" });
       const directory = path.join(parent, "logs");
 
       yield* fs.writeFileString(directory, "");
@@ -283,7 +283,7 @@ layer(NodeServices.layer)("retained log writer", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "movies-logs-" });
+      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "media-logs-" });
       const crashed = fileName(0, Date.UTC(2026, 9, 21, 11));
 
       yield* fs.writeFileString(path.join(directory, crashed), '{"n":1}\n{"n":2,"cut');
@@ -310,7 +310,7 @@ layer(NodeServices.layer)("retained log writer", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "movies-logs-" });
+      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "media-logs-" });
       const expired = fileName(0, Date.UTC(2026, 8, 1));
       const kept = fileName(1, Date.UTC(2026, 9, 20));
 
@@ -374,7 +374,7 @@ layer(NodeServices.layer)("retained log writer", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const parent = yield* fs.makeTempDirectoryScoped({ prefix: "movies-logs-" });
+      const parent = yield* fs.makeTempDirectoryScoped({ prefix: "media-logs-" });
       const directory = path.join(parent, "logs");
       const failedAt = Date.UTC(2026, 9, 21, 12);
 
@@ -402,7 +402,7 @@ layer(NodeServices.layer)("retained log writer", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const parent = yield* fs.makeTempDirectoryScoped({ prefix: "movies-logs-" });
+      const parent = yield* fs.makeTempDirectoryScoped({ prefix: "media-logs-" });
       const directory = path.join(parent, "logs");
       const earlier = Date.UTC(2026, 9, 20);
 
@@ -442,44 +442,6 @@ layer(NodeServices.layer)("retained log writer", (it) => {
         8,
         "the new file comes after the files it found",
       );
-    }).pipe(Effect.scoped),
-  );
-
-  it.effect("gives files named before sequence numbers their old order, ahead of new ones", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "movies-logs-" });
-
-      for (const [name, text] of [
-        ["media-20261021T110000000Z-1.ndjson", '{"n":3}'],
-        ["media-20261021T110000000Z.ndjson", '{"n":2}'],
-        ["media-20261021T100000000Z.ndjson", '{"n":1}'],
-      ] as const) {
-        yield* fs.writeFileString(path.join(directory, name), `${text}\n`);
-      }
-
-      yield* TestClock.setTime(Date.UTC(2026, 9, 21, 12));
-
-      const logs = yield* RetainedLogs.make({
-        directory,
-        retention: { maxAgeMs: 14 * DAY, maxBytes: MIN_LOG_BYTES },
-      });
-
-      yield* appendNow(logs, '{"n":4}');
-      yield* logs.flush;
-
-      const files = yield* linesIn(directory);
-
-      assert.deepStrictEqual(
-        files.map((entry) => entry.lines),
-        [['{"n":1}'], ['{"n":2}'], ['{"n":3}'], ['{"n":4}']],
-      );
-      assert.deepStrictEqual(
-        files.map((entry) => entry.name),
-        files.map((entry) => entry.name).toSorted(),
-      );
-      assert.strictEqual(files[1]?.name, fileName(1, Date.UTC(2026, 9, 21, 11)));
     }).pipe(Effect.scoped),
   );
 

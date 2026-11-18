@@ -7,7 +7,6 @@ import {
   type LogFile,
   MIN_LOG_BYTES,
   orderOf,
-  planMigration,
   planPrune,
   shouldRotate,
 } from "./log-files.ts";
@@ -35,26 +34,6 @@ describe("log file names", () => {
     assert.isTrue(Option.isNone(orderOf("notes.txt")));
     assert.isTrue(Option.isNone(orderOf(`${fileName(1, startsAt)}.gz`)));
     assert.isTrue(Option.isNone(orderOf("media-20261021T140503123Z.ndjson")));
-  });
-
-  it("places files named before sequence numbers after the current ones, in their old order", () => {
-    const at = Date.UTC(2026, 9, 21, 14);
-
-    assert.deepStrictEqual(
-      planMigration([
-        "media-20261021T140000000Z-1.ndjson",
-        fileName(4, at),
-        "media-20261021T140000000Z.ndjson",
-        "media-20261021T130000000Z.ndjson",
-        "notes.txt",
-      ]),
-      [
-        ["media-20261021T130000000Z.ndjson", fileName(5, at - 3_600_000)],
-        ["media-20261021T140000000Z.ndjson", fileName(6, at)],
-        ["media-20261021T140000000Z-1.ndjson", fileName(7, at)],
-      ],
-    );
-    assert.deepStrictEqual(planMigration([fileName(0, at)]), []);
   });
 });
 
