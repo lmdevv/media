@@ -82,6 +82,15 @@ commands, and observable proof.
   watching row with its resume point and next episode.
 - [Casting](./casting.md) covers Chromecast from the player and from `/music`'s Play on, a
   scripted Chromecast for both, signing out mid-cast, and AirPlay on iOS.
+- [Downloads](./downloads.md) covers keeping a title in the movies iOS app and playing it with the
+  server out of reach, the music iOS app's download settings, and the CLI's downloads and device
+  cap.
+- [Guest links](./guest-links.md) covers turning guest links on, letting a member make them,
+  making, listing, and revoking one, and what a guest sees today.
+- [Fix match](./fix-match.md) covers a library's files in the movies app, editing a title by hand,
+  and refreshing its details.
+- [Diagnostics](./diagnostics.md) covers the player's Stream info and the CLI's `logs` and
+  `diagnostics` commands.
 - [Group sessions](./group-sessions.md) covers starting, joining, and leaving a session, approval
   and locked sessions, the guests' control switch, the shared next-episode countdown, the host
   going away, Up next, and joining from the iOS app.
