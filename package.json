@@ -6,8 +6,7 @@
     "apps/*",
     "apps/web/*",
     "apps/mobile/*",
-    "packages/*",
-    "packages/mobile/*"
+    "packages/*"
   ],
   "type": "module",
   "scripts": {

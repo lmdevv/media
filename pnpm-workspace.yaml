@@ -3,7 +3,6 @@ packages:
   - apps/web/*
   - apps/mobile/*
   - packages/*
-  - packages/mobile/*
 allowBuilds:
   esbuild: true
   lefthook: true

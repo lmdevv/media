@@ -283,7 +283,7 @@ importers:
         version: link:../../../packages/contracts
       '@media/mobile-core':
         specifier: workspace:*
-        version: link:../../../packages/mobile/core
+        version: link:../../../packages/mobile-core
       '@media/sdk':
         specifier: workspace:*
         version: link:../../../packages/sdk
@@ -425,7 +425,7 @@ importers:
         version: link:../../../packages/contracts
       '@media/mobile-core':
         specifier: workspace:*
-        version: link:../../../packages/mobile/core
+        version: link:../../../packages/mobile-core
       '@media/player':
         specifier: workspace:*
         version: link:../../../packages/player
@@ -843,21 +843,21 @@ importers:
         specifier: 5.0.3
         version: 5.0.3(@types/node@26.6.5)(vite@8.3.4(@types/node@26.6.5)(esbuild@0.27.0)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
 
-  packages/mobile/core:
+  packages/mobile-core:
     dependencies:
       '@media/contracts':
         specifier: workspace:*
-        version: link:../../contracts
+        version: link:../contracts
       '@media/sdk':
         specifier: workspace:*
-        version: link:../../sdk
+        version: link:../sdk
       effect:
         specifier: 'catalog:'
         version: 4.0.3
     devDependencies:
       '@media/config':
         specifier: workspace:*
-        version: link:../../config
+        version: link:../config
       '@types/node':
         specifier: 'catalog:'
         version: 26.6.5

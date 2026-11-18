@@ -24,7 +24,7 @@ const everyPackage = [
   "packages/commands",
   "packages/config",
   "packages/contracts",
-  "packages/mobile/core",
+  "packages/mobile-core",
   "packages/platform",
   "packages/player",
   "packages/sdk",
@@ -54,7 +54,7 @@ describe("changed-packages.sh", { timeout: 30_000 }, () => {
       "apps/web/movies",
       "apps/web/music",
       "packages/contracts",
-      "packages/mobile/core",
+      "packages/mobile-core",
       "packages/platform",
       "packages/player",
       "packages/sdk",
@@ -71,10 +71,10 @@ describe("changed-packages.sh", { timeout: 30_000 }, () => {
   });
 
   it("affects both iOS apps when the core they share changed", () => {
-    expect(affected("packages/mobile/core/src/sign-in.ts")).toEqual([
+    expect(affected("packages/mobile-core/src/sign-in.ts")).toEqual([
       "apps/mobile/movies",
       "apps/mobile/music",
-      "packages/mobile/core",
+      "packages/mobile-core",
     ]);
   });
 

@@ -47,7 +47,7 @@ renaming them. The marks are in `brand/`; `scripts/brand-icons.sh` writes every 
 | `apps/mobile/movies`   | Expo + Expo Router + Uniwind movies iOS app over `@media/mobile-core` |
 | `apps/mobile/music`    | Expo + Expo Router + Uniwind music iOS app over `@media/mobile-core`  |
 | `packages/platform`    | The one Convex project: core, movies, and music (ADR 0028)            |
-| `packages/mobile/core` | iOS apps' connection, shared keychain, sign-in, and enrollment        |
+| `packages/mobile-core` | iOS apps' connection, shared keychain, sign-in, and enrollment        |
 | `packages/player`      | Music's player engine and queue controller, shared by web and iOS     |
 | `packages/contracts`   | Effect Schema DTOs, errors, media HttpApi, plugin role interfaces     |
 | `packages/commands`    | Command list; generates Convex functions and skill references         |

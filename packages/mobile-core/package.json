@@ -10,7 +10,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --root ../../.. --project other packages/mobile/core"
+    "test": "vitest run --root ../.. --project other packages/mobile-core"
   },
   "dependencies": {
     "@media/contracts": "workspace:*",
