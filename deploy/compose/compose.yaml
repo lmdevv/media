@@ -61,7 +61,7 @@ services:
       - "${MEDIA_BIND:-127.0.0.1}:${MEDIA_PORT:-8080}:8080"
     volumes:
       # Everything to keep, one folder per domain: /data/core (the core's Convex database, its
-      # secrets, and nightly backups in /data/core/backups) and /data/movies (the media service's
+      # secrets, and nightly backups in /data/core/backups) and /data/server (the media service's
       # state).
       - media-data:/data
       # Disposable HLS segments. To keep them in memory instead, replace this line with

@@ -56,7 +56,7 @@ Registry `media` commands answer `{ code, message }` like Convex.
 
 ## Configuration
 
-Required: `MEDIA_BASE_URL`, `DATA_DIR` (`/data/movies/media` in the image), `TRANSCODE_DIR`.
+Required: `MEDIA_BASE_URL`, `DATA_DIR` (`/data/server/media` in the image), `TRANSCODE_DIR`.
 Optional with defaults: `LIBRARY_ROOTS` (comma list of approved mounts; none approves nothing, so
 every scan is refused), `PORT` (4300), `HOST` (all interfaces), `BACKUP_DIR` (`/data/backups`;
 `/data/core/backups` in the image), `TMDB_API_KEY` (v3 key or v4 read token), `OMDB_API_KEY`

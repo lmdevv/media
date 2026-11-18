@@ -13,7 +13,7 @@ restores, upgrades, hardware acceleration, and telemetry. The README has the qui
 | Web clients       | account client by Caddy, movies client by the media service | the same                                           |
 | Core database     | `media-data` volume, `/data/core`                           | `dataDir/core` (`/var/lib/media/core`)             |
 | Media service key | `media-data` volume, `/data/core/secrets`, root only        | `dataDir/core/secrets`, root only                  |
-| Service state     | `media-data` volume, `/data/movies/media`                   | `dataDir/movies/media`                             |
+| Service state     | `media-data` volume, `/data/server/media`                   | `dataDir/movies/media`                             |
 | Backups           | `media-data` volume, `/data/core/backups`                   | `backupDir` (`dataDir/core/backups`)               |
 | HLS segments      | `media-transcode` volume                                    | `transcodeDir` (`/var/cache/media/transcode`)      |
 | Libraries         | bind mounts under `/media`, read-only                       | `libraryDirs`, read-only to the service            |
@@ -26,7 +26,7 @@ Every start, as root, before the media service runs unprivileged (on NixOS, afte
 `media-server-folders` has checked the folders, ADR 0029):
 
 1. Derive the core's admin key from the backend's instance secret. It is never written to disk
-   except into the service's private environment, under `/run/movies` in the image and
+   except into the service's private environment, under `/run/media` in the image and
    `/run/media-server` on NixOS (tmpfs).
 2. If the release or the core's functions changed, export a backup first:
    `core-manual-<timestamp>.zip` in the backup folder, owned by the service user.
@@ -50,7 +50,7 @@ The core's Convex CLI runs inside the install with the core's admin key. In the 
 ```sh
 docker compose exec media sh -c '
   export CONVEX_SELF_HOSTED_URL=http://127.0.0.1:3210
-  export CONVEX_SELF_HOSTED_ADMIN_KEY="$(sed -n "s/^CONVEX_SELF_HOSTED_ADMIN_KEY=//p" /run/movies/media.env)"
+  export CONVEX_SELF_HOSTED_ADMIN_KEY="$(sed -n "s/^CONVEX_SELF_HOSTED_ADMIN_KEY=//p" /run/media/media.env)"
   cd /app/platform
   node node_modules/convex/bin/main.js env list'
 ```
@@ -116,7 +116,7 @@ before the new key.
 1. Install [media] (Compose or NixOS) and start it once.
 2. Copy the archive into the backup folder
    (`docker compose cp backup.zip media:/data/core/backups/` and
-   `docker compose exec media chown movies:movies /data/core/backups/backup.zip`, or into
+   `docker compose exec media chown media:media /data/core/backups/backup.zip`, or into
    `backupDir` owned by `media-server` on NixOS) and restart the media service, which lists it.
 3. Create a temporary owner account in the account client at `/` (the first account on an empty
    deployment is the owner), then restore the archive as above. The snapshot's accounts replace
@@ -131,7 +131,7 @@ If the media service cannot start, restore with the core's Convex CLI in the ima
 ```sh
 docker compose exec media sh -c '
   export CONVEX_SELF_HOSTED_URL=http://127.0.0.1:3210
-  export CONVEX_SELF_HOSTED_ADMIN_KEY="$(sed -n "s/^CONVEX_SELF_HOSTED_ADMIN_KEY=//p" /run/movies/media.env)"
+  export CONVEX_SELF_HOSTED_ADMIN_KEY="$(sed -n "s/^CONVEX_SELF_HOSTED_ADMIN_KEY=//p" /run/media/media.env)"
   cd /app/platform
   before="$(($(date +%s) * 1000))"
   node node_modules/convex/bin/main.js import --replace-all --yes /data/core/backups/<archive>.zip
@@ -349,7 +349,7 @@ The media service uses Intel Quick Sync (QSV) through ffmpeg's libvpl when it ca
 
 - Logs are one JSON object per line on standard output (`docker compose logs media`,
   `journalctl -u media-server`). The media service keeps the same lines, already redacted, in rotating
-  NDJSON files under its data folder (`/data/movies/media/logs` in the Compose volume,
+  NDJSON files under its data folder (`/data/server/media/logs` in the Compose volume,
   `/var/lib/media/movies/media/logs` on NixOS, private to the service): a new file each day and at
   each start. Each name carries a sequence number and the time of the file's first record
   (`media-000000000042-20261021T140503123Z.ndjson`), so `ls` lists the files in the order they

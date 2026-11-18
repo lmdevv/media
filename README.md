@@ -231,7 +231,7 @@ open it.
 
 In the Compose image, `MEDIA_CORE_URL` and `MEDIA_SERVER_URL` point at that stack from inside the
 container. `docker compose exec media media` runs as root, so its login in the `media-data` volume
-(`/data/movies/config`) is readable by root only, and stays across upgrades. On NixOS,
+(`/data/server/config`) is readable by root only, and stays across upgrades. On NixOS,
 `services.media` sets both variables for every user, so `media auth login` needs no `--server`;
 `programs.media.enable = false` leaves the CLI out. Another NixOS machine, or Home Manager on
 Linux or macOS, sets the two URLs itself:
