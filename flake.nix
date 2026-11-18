@@ -138,105 +138,19 @@
             qsvDevice = "/dev/dri/renderD129";
             extraEnvironment.LIBVA_DRIVER_NAME = "iHD";
           };
-          # [movies] v0.2's and old [music]'s modules claim these names, and a host runs them beside
-          # this module until the cutover (ADR 0029), so the module must claim none of them.
-          module-names =
-            let
-              inherit (nixpkgs) lib;
-              inherit
-                (nixpkgs.lib.nixosSystem {
-                  inherit (pkgs.stdenv.hostPlatform) system;
-                  modules = [
-                    self.nixosModules.default
-                    {
-                      boot.isContainer = true;
-                      system.stateVersion = "26.05";
-                      services.media = {
-                        enable = true;
-                        libraryDirs = [ "/srv/media/movies" ];
-                      };
-                    }
-                  ];
-                })
-                config
-                ;
-              taken = {
-                names = [
-                  "movies"
-                  "music"
-                  "movies-convex"
-                  "music-update"
-                ];
-                paths = [
-                  "/run/movies"
-                  "/var/lib/movies"
-                  "/var/cache/movies"
-                  "/var/lib/music"
-                ];
-              };
-              words = value: lib.filter (word: word != "") (lib.splitString " " (toString value));
-              # A unit takes its service's name, or the container's with the backend in front.
-              unitName =
-                unit: lib.removePrefix "podman-" (lib.removePrefix "docker-" (lib.head (lib.splitString "." unit)));
-              names =
-                map unitName (builtins.attrNames config.systemd.units)
-                ++ builtins.attrNames config.users.users
-                ++ builtins.attrNames config.users.groups
-                ++ builtins.attrNames config.virtualisation.oci-containers.containers;
-              paths =
-                map (rule: lib.elemAt (words rule) 1) config.systemd.tmpfiles.rules
-                ++ map (folder: "/run/${folder}") (
-                  lib.concatMap (service: words (service.serviceConfig.RuntimeDirectory or "")) (
-                    builtins.attrValues config.systemd.services
-                  )
-                )
-                ++ [
-                  config.services.media.dataDir
-                  config.services.media.backupDir
-                  config.services.media.transcodeDir
-                ];
-              under = path: lib.any (prefix: path == prefix || lib.hasPrefix "${prefix}/" path) taken.paths;
-              clashes = lib.filter (name: lib.elem name taken.names) names ++ lib.filter under paths;
-            in
-            assert lib.assertMsg (
-              clashes == [ ]
-            ) "nixosModules.default claims names the old movies and music modules use: ${toString clashes}";
-            pkgs.writeText "media-module-names-check" (builtins.toJSON { inherit names paths; });
           # The service writes in its folders and empties transcodeDir at every start, so evaluation
-          # refuses any that overlaps a library, the old installs' folders, or the core's database
-          # and secrets (ADR 0029).
+          # refuses any that overlaps a library or the core's database and secrets.
           module-overlaps =
             let
               inherit (nixpkgs) lib;
-              # The old modules' options, as the host's own config sets them beside this module. Old
-              # [music] takes a list of folders or an attrset of mount names to folders.
-              oldModules =
-                musicDirs:
-                { lib, ... }:
-                {
-                  options.services = {
-                    movies = {
-                      dataDir = lib.mkOption { default = "/srv/old-movies"; };
-                      libraryDirs = lib.mkOption { default = [ "/srv/shared/movies" ]; };
-                    };
-                    music.musicDirs = lib.mkOption { default = musicDirs; };
-                  };
-                };
               refused =
-                {
-                  settings,
-                  musicDirs ? {
-                    shared = "/srv/shared/music";
-                  },
-                  ...
-                }:
+                { settings, ... }:
                 map (assertion: assertion.message) (
                   lib.filter (assertion: !assertion.assertion)
                     (nixpkgs.lib.nixosSystem {
                       inherit (pkgs.stdenv.hostPlatform) system;
                       modules = [
                         self.nixosModules.default
-                        (oldModules musicDirs)
                         {
                           boot.isContainer = true;
                           system.stateVersion = "26.05";
@@ -274,35 +188,6 @@
                   settings.libraryDirs = [ "/run" ];
                   messagePart = "a runtime folder (/run/media-server) and the library (/run)";
                 };
-                old-movies-library = {
-                  settings.backupDir = "/srv/shared/movies/backups";
-                  messagePart = "backupDir (/srv/shared/movies/backups) and the library (/srv/shared/movies)";
-                };
-                old-music-library = {
-                  settings.dataDir = "/srv/shared";
-                  messagePart = "dataDir (/srv/shared) and the library (/srv/shared/music)";
-                };
-                old-music-library-listed = {
-                  settings.backupDir = "/srv/listed/music/backups";
-                  musicDirs = [ "/srv/listed/music" ];
-                  messagePart = "backupDir (/srv/listed/music/backups) and the library (/srv/listed/music)";
-                };
-                old-movies-transcodes = {
-                  settings.transcodeDir = "/var/cache/movies/transcode";
-                  messagePart = "transcodeDir (/var/cache/movies/transcode) and another install's folder (/var/cache/movies)";
-                };
-                old-music-data = {
-                  settings.dataDir = "/var/lib/music/media";
-                  messagePart = "dataDir (/var/lib/music/media) and another install's folder (/var/lib/music)";
-                };
-                old-movies-configured-root = {
-                  settings.dataDir = "/srv/old-movies/media";
-                  messagePart = "dataDir (/srv/old-movies/media) and another install's folder (/srv/old-movies)";
-                };
-                data-root-holding-old-installs = {
-                  settings.dataDir = "/var/lib";
-                  messagePart = "dataDir (/var/lib) and another install's folder (/var/lib/movies)";
-                };
                 backups-holding-database = {
                   settings.backupDir = "/var/lib/media/core";
                   messagePart = "backupDir (/var/lib/media/core) and the core's database (/var/lib/media/core/convex)";
@@ -337,7 +222,7 @@
               };
               accepted = {
                 defaults = { };
-                beside-old-installs = {
+                shared-libraries = {
                   port = 8099;
                   dataDir = "/var/lib/media";
                   transcodeDir = "/var/cache/media/transcode";

@@ -141,7 +141,6 @@ testers.runNixOSTest {
 
     with subtest("one address serves every path"):
         assert machine.succeed("curl -fsS http://127.0.0.1:8080/convex/instance_name").strip() == "core"
-        machine.fail("systemctl cat podman-movies-convex.service")
         machine.succeed("curl -fsS http://127.0.0.1:8080/api/health")
         assert "<title>[media]</title>" in page("http://127.0.0.1:8080/")
         assert "<title>[media]</title>" in page("http://127.0.0.1:8080/people")
@@ -299,12 +298,11 @@ testers.runNixOSTest {
             f"find {' '.join(folders)} -xdev \\( -type d -o -links 1 \\) -execdir chown -h media-server:media-server {{}} +"
         )
 
-    # 0.3.0 and 0.4.0 ran the service as `movies` in these same folders, and NixOS drops that user
-    # and group once nothing declares them; 9999 stands in for their ids.
-    with subtest("an install from 0.4.0 refuses to start until the admin runs the chown it names"):
+    # 9999 stands in for a user and group that no longer exist.
+    with subtest("folders of another owner refuse the start until the admin runs the chown it names"):
         key = machine.succeed("cat /var/lib/media/core/secrets/media-service-key")
         machine.succeed("systemctl stop media-server.service")
-        machine.succeed(f"touch {state}/from-0.4.0 && mkdir -p {transcodes}/downloads")
+        machine.succeed(f"touch {state}/theirs && mkdir -p {transcodes}/downloads")
         machine.succeed(f"chown -R 9999:9999 {state} {backups} {transcodes}")
         before = listing(state, backups, transcodes)
         log = start_refused()
@@ -315,15 +313,15 @@ testers.runNixOSTest {
         assert commands == [fix_for(transcodes, backups, state)], commands
         machine.succeed(commands[0])
         start()
-        machine.succeed(f"test -e {state}/from-0.4.0")
+        machine.succeed(f"test -e {state}/theirs")
         machine.succeed(f"ls {backups} | grep -q '^core-manual-.*\\.zip$'")
         owners = machine.succeed(f"find {state} {backups} {transcodes} -printf '%u:%g\\n' | sort -u").split()
         assert owners == ["media-server:media-server"], owners
         assert machine.succeed("cat /var/lib/media/core/secrets/media-service-key") == key
 
     with subtest("a library file hard-linked into the state folder keeps its owner, through the printed fix too"):
-        # A library file of the old ids, hard-linked into a state folder of the old ids: a recursive
-        # chown of the folder would re-own it.
+        # A library file of another owner's, hard-linked into a state folder of that owner's: a
+        # recursive chown of the folder would re-own it.
         machine.succeed("systemctl stop media-server.service")
         machine.succeed("install -o 9999 -g 9999 -m 644 /dev/null /srv/media/movies/library-file")
         machine.succeed(f"ln /srv/media/movies/library-file {state}/linked && chown 9999:9999 {state}")

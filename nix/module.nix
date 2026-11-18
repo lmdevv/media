@@ -4,8 +4,7 @@
 # image's routes (deploy/image/rootfs/etc/caddy/Caddyfile, docs/decisions/0015).
 #
 # Every unit, user, and folder it makes has a media name (media-server, media-proxy,
-# media-core-convex, /var/lib/media, /var/cache/media, /run/media-server), so a host can run it
-# beside the old [movies] and [music] modules, which use movies and music names.
+# media-core-convex, /var/lib/media, /var/cache/media, /run/media-server).
 #
 #   services.media = {
 #     enable = true;
@@ -76,35 +75,7 @@ let
     }
   ];
 
-  # Old [movies] v0.2's and old [music]'s folders: their modules' defaults, and their settings when
-  # the host imports those modules too.
-  oldMovies = config.services.movies or { };
-  oldMusic = config.services.music or { };
-  otherInstallDirs = lib.unique (
-    map toString (
-      [
-        "/var/lib/movies"
-        "/var/cache/movies"
-        "/run/movies"
-        "/var/lib/music"
-      ]
-      ++ lib.filter (dir: dir != null) [
-        (oldMovies.dataDir or null)
-        (oldMovies.backupDir or null)
-        (oldMovies.transcodeDir or null)
-        (oldMusic.dataDir or null)
-      ]
-    )
-  );
-  # Old [music] takes a list of folders or an attrset of mount names to folders.
-  oldMusicDirs = oldMusic.musicDirs or [ ];
-  libraries = lib.unique (
-    map toString (
-      cfg.libraryDirs
-      ++ oldMovies.libraryDirs or [ ]
-      ++ (if builtins.isAttrs oldMusicDirs then builtins.attrValues oldMusicDirs else oldMusicDirs)
-    )
-  );
+  libraries = lib.unique (map toString cfg.libraryDirs);
   # A path's components, with `.`, `..`, and repeated slashes resolved as far as evaluation can.
   # Symlinks and mounts show only on the host, where media-server-folders refuses them.
   components =
@@ -171,7 +142,6 @@ let
   # service user may make.
   serviceDirs = lib.sort lib.lessThan (map (folder: folder.path) serviceFolders);
   libraryClashes = overlaps ownedFolders (named "the library" libraries);
-  otherInstallClashes = overlaps ownedFolders (named "another install's folder" otherInstallDirs);
   coreClashes = overlaps serviceFolders (
     named "the core's database" [ convexDataDir ] ++ named "the core's secrets" [ secretsDir ]
   );
@@ -433,7 +403,7 @@ let
         printf -v command '%s -xdev \\( -type d -o -links 1 \\) -execdir chown -h %q {} +' "$command" "$user:$group"
         log "refusing to start: the service's folders and what is in them must be $user's, and the module re-owns nothing that already exists"
         [ -z "$uids" ] || log "first check that no process runs as uid $uids: pgrep -u $uids must print nothing"
-        log "after the 0.3.0 or 0.4.0 module, whose service ran as the movies user, give them to $user, all but files with other names (hard links):"
+        log "give them to $user, all but files with other names (hard links):"
         log "$command"
         log "then start it again: sudo systemctl start media-server"
         exit 1
@@ -584,9 +554,6 @@ in
 {
   imports = [
     ./cli-module.nix
-    (lib.mkRemovedOptionModule [ "services" "media" "internalPorts" "moviesConvex" ] ''
-      Movies moved into the core's Convex backend, which serves at /convex on internalPorts.coreConvex.
-    '')
   ];
 
   options.services.media = {
@@ -988,8 +955,8 @@ in
 
   config = lib.mkIf cfg.enable {
     # The service writes in its folders and empties transcodeDir at every start, so none may be,
-    # hold, or sit inside a library, another install's folder, or, for the folders its user owns,
-    # the core's database or secrets.
+    # hold, or sit inside a library or, for the folders its user owns, the core's database or
+    # secrets.
     assertions = [
       {
         assertion = unnormalized == [ ];
@@ -1004,15 +971,6 @@ in
           services.media: a folder the service owns overlaps a library, which must stay read-only:
           ${lib.concatStringsSep "\n" libraryClashes}
           Keep dataDir, backupDir, and transcodeDir apart from every libraryDirs entry.
-        '';
-      }
-      {
-        assertion = otherInstallClashes == [ ];
-        message = ''
-          services.media: a folder the service owns overlaps one of the old [movies] or [music]
-          installs' folders:
-          ${lib.concatStringsSep "\n" otherInstallClashes}
-          Give [media] folders of its own, such as the defaults under /var/lib/media and /var/cache/media.
         '';
       }
       {

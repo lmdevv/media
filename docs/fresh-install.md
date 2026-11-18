@@ -125,9 +125,9 @@ They share only the library folders, which each mounts read-only.
 | Cache          | `/var/cache/media/transcode`                                                         | `/var/cache/movies/transcode`        | in its state folder               |
 | Runtime        | `/run/media-server`, `/run/media-proxy`, `/run/media-account`, `/run/media-music`    | `/run/movies`                        | none                              |
 
-Pick a `port` and `internalPorts` that none of them uses. Evaluation refuses a `dataDir`,
-`backupDir`, or `transcodeDir` that is, holds, or sits inside a library or one of the old installs'
-folders, theirs set in `services.movies` and `services.music` included. At `v0.4.0` the module still used
+Pick a `port` and `internalPorts` that none of them uses, and keep `dataDir`, `backupDir`, and
+`transcodeDir` apart from their folders: evaluation refuses only one that is, holds, or sits inside
+a library. At `v0.4.0` the module still used
 `movies` names, and a host that imported it beside [movies] v0.2's module failed to evaluate.
 
 ### Add the release to the flake
