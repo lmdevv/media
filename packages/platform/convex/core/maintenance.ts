@@ -4,17 +4,19 @@ import { internal } from "../_generated/api";
 import type { Doc } from "../_generated/dataModel";
 import { internalMutation } from "../_generated/server";
 import type { MutationCtx } from "../_generated/server";
+import { KINDS } from "./jobs/kinds";
 import { applyEvent } from "./jobs/store";
 import { inOrder } from "./lib/inOrder";
 import { paginate } from "./lib/paginate";
 import { dropSession } from "./sessions";
 
 /**
- * Running jobs one call settles. A kind's cap bounds its running jobs, so a snapshot holds at most
- * the caps added up, 27 today. A row a worker wrote before job text was bounded may approach
- * Convex's 1 MiB, read twice to rewrite it, so 4 a call stays inside the 16 MiB a call may read.
+ * Running jobs one call reads: one more than a snapshot can hold, since a kind's cap bounds its
+ * running jobs, so the page that holds them all also finds the end and schedules no later call. A
+ * job keeps at most `JOB_TEXT_MAX` characters of message, so each row is a few KiB, and reading
+ * each twice to rewrite it stays far inside the 16 MiB a call may read.
  */
-const JOBS_PER_CALL = 4;
+const JOBS_PER_CALL = KINDS.reduce((sum, def) => sum + def.cap, 1);
 
 /**
  * Sessions one call ends. Each costs a read, a delete, and a scheduled deletion of its refresh

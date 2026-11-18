@@ -5,15 +5,16 @@ import { describe, expect, it } from "vitest";
 
 import { api, internal } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { RESTORED_ERROR } from "../../convex/core/jobs/machine";
+import { JOB_TEXT_MAX, RESTORED_ERROR } from "../../convex/core/jobs/machine";
 import { runFunction } from "../admin";
 import { member } from "../devices";
 import { runServer, runServerAs } from "../service";
 import { refusal, signIn, unique } from "../sign-in";
 import { coreStackFromEnvFile } from "../stack-env";
 import type { CoreStack } from "../stack-env";
-import { kindDef } from "../../convex/core/jobs/kinds";
+import { KINDS, kindDef } from "../../convex/core/jobs/kinds";
 import {
+  Lease,
   enqueue,
   eventually,
   freshKind,
@@ -108,10 +109,22 @@ const settle = (core: CoreStack, before?: number) =>
 
 const PROBE_KINDS: ReadonlyArray<ProbeRunKind> = ["probe.wide", "probe.capped", "probe.items"];
 
-/** One claim per slot of every probe kind: 8, past the 4 jobs one call settles. */
+/** One claim per slot of every probe kind: 8. */
 const PROBE_SLOTS = PROBE_KINDS.flatMap((kind) =>
   Array.from({ length: kindDef(kind).cap }, () => kind),
 );
+
+/** Every running job a restored snapshot can hold: each kind's cap, added up. */
+const RUNNING_MAX = KINDS.reduce((sum, def) => sum + def.cap, 0);
+
+/** The longest lease a claim or report may ask for, so no lease lapses before the settle. */
+const LONG_LEASE_MS = 10 * 60 * 1000;
+
+/** Settles until a call finds no running job, so a test starts with none. */
+const settleAll = (core: CoreStack) =>
+  eventually("no running job to be left", async () =>
+    (await settle(core)).settled === 0 ? true : null,
+  );
 
 const freeSlots = async (core: CoreStack): Promise<ReadonlyArray<number>> => {
   const states = await waiting(core, PROBE_KINDS);
@@ -154,7 +167,7 @@ describe.skipIf(stack === undefined)("restore maintenance", { timeout: 300_000 }
 
     await inSequence(PROBE_KINDS, async (kind) => freshKind(stack, kind));
 
-    // Every probe slot taken, more running jobs than one call settles, and one job left queued.
+    // Every probe slot taken, and one job left queued.
     const queued = await inSequence(PROBE_KINDS, async (kind) =>
       enqueue(stack, kind, kindDef(kind).cap + 1),
     );
@@ -209,6 +222,44 @@ describe.skipIf(stack === undefined)("restore maintenance", { timeout: 300_000 }
     if (again.outcome === "claimed") await probe.finish(again.lease, { outcome: "succeeded" });
 
     await inSequence(PROBE_KINDS, async (kind) => freshKind(stack, kind));
+  });
+
+  it("settle in one call every running job the caps allow, each with the longest message", async () => {
+    if (stack === undefined) return;
+    await freshKind(stack, "probe.wide");
+    await settleAll(stack);
+
+    const workerId = `restore-full-${unique()}`;
+    const jobIds = await enqueue(stack, "probe.wide", RUNNING_MAX);
+
+    const leases = await runFunction(
+      stack,
+      internal.core.jobs.probe.claimPastCap,
+      { jobIds: [...jobIds], workerId, leaseMs: LONG_LEASE_MS },
+      Schema.Array(Lease),
+    );
+
+    const probe = worker(stack, workerId);
+    const message = "m".repeat(JOB_TEXT_MAX);
+
+    await inSequence(leases, async (lease) =>
+      probe.report(lease, { message, leaseMs: LONG_LEASE_MS }),
+    );
+
+    expect(await settle(stack)).toEqual({ settled: RUNNING_MAX });
+
+    // Read at once: a job a later call would settle is still running here.
+    await inSequence(jobIds, async (jobId) => {
+      expect(await jobOf(stack, jobId)).toEqual({
+        status: "queued",
+        attempts: 1,
+        strikes: 0,
+        message,
+        error: RESTORED_ERROR,
+      });
+    });
+
+    await freshKind(stack, "probe.wide");
   });
 
   it("leave a job a live worker claimed after the import started", async () => {

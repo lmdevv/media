@@ -3,7 +3,10 @@ import { v } from "convex/values";
 import { internalMutation, internalQuery } from "../../_generated/server";
 import { inOrder } from "../lib/inOrder";
 import { kindDef } from "./kinds";
+import type { JobKind } from "./kinds";
+import { lease } from "./model";
 import { cancel, enqueue as enqueueJob } from "./queue";
+import { applyEvent } from "./store";
 
 const probeRunKind = v.union(
   v.literal("probe.capped"),
@@ -11,10 +14,9 @@ const probeRunKind = v.union(
   v.literal("probe.items"),
 );
 
-const PROBE_BATCH = 1000;
+const PROBE_KINDS: ReadonlySet<JobKind> = new Set(["probe.capped", "probe.wide", "probe.items"]);
 
-/** Most characters `inflate` writes, under a Convex document's 1 MiB. */
-const INFLATE_CHARS_MAX = 900_000;
+const PROBE_BATCH = 1000;
 
 /**
  * Queues `count` probe jobs `{ run, n }` of one kind, n from 0.
@@ -95,28 +97,31 @@ export const backdate = internalMutation({
 });
 
 /**
- * Gives a finished job a message of `chars` characters, past the bound a worker's message gets,
- * as a job written before that bound may hold, so a test can fill the sweep's read budget.
+ * Claims each of `jobIds`, queued probe jobs, whether or not its kind has a free slot, so a test
+ * can hold as many running jobs as every kind's cap allows together, past the probe kinds' own.
  *
- * @throws Error when the job is gone, queued, or running, or `chars` is not a whole number from 0
- * to 900,000.
+ * @throws Error when a job is gone, not a probe job, or not queued.
  */
-export const inflate = internalMutation({
-  args: { jobId: v.id("jobs"), chars: v.number() },
-  returns: v.null(),
-  handler: async (ctx, { jobId, chars }) => {
-    const job = await ctx.db.get("jobs", jobId);
+export const claimPastCap = internalMutation({
+  args: { jobIds: v.array(v.id("jobs")), workerId: v.string(), leaseMs: v.number() },
+  returns: v.array(lease),
+  handler: async (ctx, { jobIds, workerId, leaseMs }) => {
+    const leases = await inOrder(jobIds, async (jobId) => {
+      const job = await ctx.db.get("jobs", jobId);
 
-    if (job === null || job.status === "queued" || job.status === "running") {
-      throw new Error(`Only a finished job is inflated; ${jobId} is ${job?.status ?? "gone"}`);
-    }
+      if (job === null || !PROBE_KINDS.has(job.payload.kind)) {
+        throw new Error(`Only a probe job is claimed past its cap; ${jobId} is not one`);
+      }
 
-    if (!Number.isSafeInteger(chars) || chars < 0 || chars > INFLATE_CHARS_MAX) {
-      throw new Error(`A job is inflated by 0 to ${INFLATE_CHARS_MAX} characters; got ${chars}`);
-    }
+      const result = await applyEvent(ctx, job, { type: "claim", workerId, leaseMs });
 
-    await ctx.db.patch("jobs", jobId, { message: "x".repeat(chars) });
+      if (!result.ok || result.next.status !== "running") {
+        throw new Error(`The probe job ${jobId} refused its claim`);
+      }
 
-    return null;
+      return { jobId, attempt: result.next.attempts };
+    });
+
+    return [...leases];
   },
 });
