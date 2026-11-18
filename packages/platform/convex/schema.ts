@@ -34,9 +34,8 @@ const boundDevice = v.object({
   /**
    * The session's number in the order sessions took the device: joined a personal device, or took
    * a shared device's tile. A later one ends this session there, so a client keeps the highest.
-   * Absent on a session bound before the count began.
    */
-  joined: v.optional(v.number()),
+  joined: v.number(),
 });
 
 const generations = {

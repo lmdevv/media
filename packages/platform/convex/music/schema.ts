@@ -248,10 +248,9 @@ export const musicTables = {
     autoplay: v.boolean(),
     /**
      * Moves on with every change to the queue or its entries, so a client can tell a listing read
-     * under this queue from one read under another (ADR 0018). Missing on a queue last written
-     * before it was kept, which reads as 0.
+     * under this queue from one read under another (ADR 0018).
      */
-    revision: v.optional(v.number()),
+    revision: v.number(),
   }).index("by_user", ["userId"]),
 
   /**

@@ -23,7 +23,7 @@ const name = "probe.doublePositions";
 
 const Started = Schema.Array(
   Schema.Struct({
-    name: Schema.Literals(["probe.doublePositions", "connect.clearRowsBeforeItems"]),
+    name: Schema.Literal("probe.doublePositions"),
     state: Schema.Literals(["done", "scheduled"]),
     cursor: Schema.optionalKey(Schema.NullOr(Schema.String)),
   }),

@@ -4,7 +4,6 @@
  * for one session never lands in another, and a host's player fills a new session's queue.
  */
 import type { FunctionArgs, FunctionReturnType } from "convex/server";
-import { Schema } from "effect";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
@@ -15,8 +14,7 @@ import { inOrder } from "../../../convex/core/lib/inOrder";
 import { CARRY_MAX_MS, FIRST_BY_MS } from "../../../convex/core/together/clock";
 import type { Member } from "../../devices";
 import { seedLibrary, share, song } from "../../probe";
-import { importRows, newestRows } from "../../rows";
-import { failureOf, refusal, unique } from "../../sign-in";
+import { failureOf, refusal } from "../../sign-in";
 import { coreStackFromEnvFile } from "../../stack-env";
 import { catalog, guestOf, joinedView, kidOf, sleep } from "../../together";
 
@@ -45,25 +43,6 @@ const trackIdOf = (item: DomainItem): Id<"tracks"> => {
   if (item.ref.type !== "track") throw new Error("expected a song");
 
   return item.ref.id;
-};
-
-const SessionRow = Schema.fromJsonString(
-  Schema.Struct({ _id: Schema.String, linkSecret: Schema.optional(Schema.String) }),
-);
-
-// SAFETY: a type predicate, not checked by the compiler. A Convex id is an opaque string, and the
-// stack's export wrote this one as a `togetherSessions` id; the backend checks it again on use.
-const isSessionId = (value: string): value is SessionId => value.length > 0;
-
-/** The session row imported with the link secret `secret`, as a restore of old rows makes one. */
-const sessionWithSecret = (secret: string): SessionId => {
-  const found = newestRows("togetherSessions", 50)
-    .map((line) => Schema.decodeSync(SessionRow)(line))
-    .find((row) => row.linkSecret === secret);
-
-  if (found === undefined || !isSessionId(found._id)) throw new Error("imported no session");
-
-  return found._id;
 };
 
 const create = (who: Member, item: DomainItem) =>
@@ -648,70 +627,6 @@ describe.skipIf(stack === undefined)("music group sessions", { timeout: 120_000 
     await shelf.host.signedIn.client.mutation(api.core.together.leave, { domain: MUSIC });
 
     expect(await removable(guest)).toEqual([false, false]);
-  });
-
-  it("lists the queue of a session from before its facts were kept, as before", async () => {
-    if (stack === undefined) return;
-    const shelf = await catalog(stack);
-    const guest = await guestOf(stack, shelf, "guest");
-    const secret = `before-${unique()}`;
-
-    importRows("togetherSessions", [
-      {
-        hostId: shelf.host.userId,
-        linkSecret: secret,
-        settings: { join: "open", control: false, add: true },
-        blocked: [],
-        clock: {
-          status: "paused",
-          positionAtAnchorMs: 0,
-          anchorServerTime: Date.now(),
-          playbackRate: 1,
-          revision: 0,
-        },
-        item: shelf.track,
-        state: "live",
-      },
-    ]);
-
-    const sessionId = sessionWithSecret(secret);
-
-    importRows(
-      "togetherMembers",
-      [shelf.host, guest].map((who) => ({
-        sessionId,
-        userId: who.userId,
-        domain: MUSIC,
-        state: "joined" as const,
-        awaySince: null,
-      })),
-    );
-
-    importRows(
-      "togetherEntries",
-      [shelf.host, guest].map((who, order) => ({
-        sessionId,
-        order,
-        item: shelf.track,
-        addedBy: who.userId,
-      })),
-    );
-
-    const listed = await everyEntry(guest);
-
-    expect(listed.map((row) => [row.track?.id, row.removable])).toEqual([
-      [trackIdOf(shelf.track), false],
-      [trackIdOf(shelf.track), true],
-    ]);
-
-    await shelf.host.signedIn.client.mutation(api.core.together.configure, {
-      domain: MUSIC,
-      join: "open",
-      control: false,
-      add: false,
-    });
-
-    expect((await everyEntry(guest)).map((row) => row.removable)).toEqual([false, false]);
   });
 });
 

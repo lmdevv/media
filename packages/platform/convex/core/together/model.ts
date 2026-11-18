@@ -45,8 +45,7 @@ const sessionFields = {
   /**
    * The entry queued first, and the server time it got there, kept by every change to the queue;
    * absent while nothing is queued. A skip carries the clock past the end of the item it leaves
-   * only into this entry, and only when it got there by that end (ADR 0017). A session from
-   * before it was kept has none until its first queued entry changes; its skips start at 0.
+   * only into this entry, and only when it got there by that end (ADR 0017).
    */
   queuedFirst: v.optional(v.object({ entryId: v.id("togetherEntries"), since: v.number() })),
 };
@@ -63,8 +62,7 @@ export const sessionDocument = v.union(
 /**
  * The cold half of a session: what `can` reads about it that changes only with its settings or
  * its end, kept beside it by every writer of those, so a query that decides with them, as each
- * page of its queue, re-runs on neither its clock nor what it plays (ADR 0017). A session from
- * before it was kept has none, and decides with its own document.
+ * page of its queue, re-runs on neither its clock nor what it plays (ADR 0017).
  */
 export const factsDocument = v.object({
   sessionId: v.id("togetherSessions"),

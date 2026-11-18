@@ -5,7 +5,7 @@ import { constantTimeEqual, rowForSecret } from "../lib/secrets";
 import { asPerson } from "../accounts/users";
 import { can, isKid, lockOf, principalOf, proverOf } from "../permissions/policy";
 import type { Decision, PersonDoc, Principal, Prover, TileResource } from "../permissions/policy";
-import { endSession } from "../sessions";
+import { endSession, openSession } from "../sessions";
 
 /** A device code is `dv_<deviceId>.<secret>`; the app keeps it and the core keeps its hash. */
 export const DEVICE_PREFIX = "dv";
@@ -152,27 +152,24 @@ export const requireTile = async (
 };
 
 /**
- * Puts a new tile session in the device's slot and ends the session the slot held. Answers the
- * session's number on the device, the same count personal joins take, which it also stores on the
- * session: of two tiles opened at once, the higher number is the one still open.
+ * Opens `person`'s tile session in the device's slot and ends the session the slot held. The
+ * session stores its number on the device, the same count personal joins take: of two tiles
+ * opened at once, the higher number is the one still open.
  */
 export const occupyTile = async (
   ctx: Pick<MutationCtx, "db" | "scheduler">,
   device: SharedDevice,
-  tile: { readonly userId: Id<"users">; readonly sessionId: Id<"authSessions"> },
-): Promise<number> => {
+  person: PersonDoc,
+  now: number,
+): Promise<Id<"authSessions">> => {
   const joined = (device.joins ?? 0) + 1;
+  const sessionId = await openSession(ctx, person, { kind: "tile", device, joined }, now);
 
-  await ctx.db.patch(device._id, { tile, joins: joined });
-  await ctx.db.patch(tile.sessionId, {
-    device: { id: device._id, generation: device.generation, joined },
-  });
+  await ctx.db.patch(device._id, { tile: { userId: person._id, sessionId }, joins: joined });
 
-  if (device.tile !== null && device.tile.sessionId !== tile.sessionId) {
-    await endSession(ctx, device.tile.sessionId);
-  }
+  if (device.tile !== null) await endSession(ctx, device.tile.sessionId);
 
-  return joined;
+  return sessionId;
 };
 
 /** Empties the device's slot, which ends its tile session and any kid's hold. */

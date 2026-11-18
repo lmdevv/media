@@ -206,7 +206,7 @@ export const {
 
       await ctx.db.patch(session._id, { settings: changed });
 
-      if (cold !== null) await ctx.db.patch(cold._id, { settings: changed });
+      await ctx.db.patch(cold._id, { settings: changed });
     }
 
     return null;

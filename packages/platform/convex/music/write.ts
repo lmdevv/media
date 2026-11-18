@@ -69,10 +69,6 @@ type TiedTable =
 
 type Fields<T extends TiedTable> = Omit<WithoutSystemFields<Doc<T>>, "tie">;
 
-/** A queue's revision: 0 for a queue last written before revisions were kept. */
-export const queueRevision = (queue: Pick<Doc<"playQueues">, "revision">): number =>
-  queue.revision ?? 0;
-
 /** Fields a patch writes, as Convex's `db.patch` takes them: `undefined` removes a field. */
 type Patch<Document> = {
   [Field in keyof Document]?: undefined extends Document[Field]
@@ -523,7 +519,7 @@ export const musicStore = (db: Db, meter: Meter): MusicStore => {
 
     insertQueue: (fields) => insert("playQueues", fields),
     setQueue: async (queue, fields) => {
-      const revision = queueRevision(queue) + 1;
+      const revision = queue.revision + 1;
 
       await patch("playQueues", queue._id, { ...fields, revision });
 

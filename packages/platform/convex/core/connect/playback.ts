@@ -1,16 +1,13 @@
 import type { DomainItem } from "../../../commands/access";
 import type { Doc, Id } from "../../_generated/dataModel";
 import { fail } from "../lib/errors";
-import type { Ask, Reported } from "./model";
+import type { Ask } from "./model";
 
 /** What a device last said it plays (ADR 0018). */
 export type Player = Doc<"connectPlayers">;
 
 /** The playback controllers last asked of a device. */
 export type Request = Doc<"connectRequests">;
-
-/** A request with an ask, the shape every request since items has. */
-export type Asked = Extract<Request, { readonly ask: Ask }>;
 
 /** A device that has not reported for this long is offline, and a command to it fails. */
 export const ONLINE_MS = 30_000;
@@ -46,27 +43,14 @@ export interface Change {
 const sameItem = (left: DomainItem, right: DomainItem): boolean =>
   left.domain === right.domain && left.ref.type === right.ref.type && left.ref.id === right.ref.id;
 
-/**
- * What the device's report says it plays, or null. A report from before items (v0.3.0) names no
- * item, so it reads as playing nothing until the device reports again.
- */
-export const reportOf = (player: Player): Reported | null =>
-  player.playback !== null && "item" in player.playback ? player.playback : null;
-
-/**
- * The request a device's reporter has not settled yet, or null. A request from before items
- * (v0.3.0) names no item, so it is never pending.
- */
-export const pendingRequest = (player: Player, request: Request | null): Asked | null =>
-  request !== null &&
-  "ask" in request &&
-  request.reporter === player.reporter &&
-  request.revision > player.settled
+/** The request a device's reporter has not settled yet, or null. */
+export const pendingRequest = (player: Player, request: Request | null): Request | null =>
+  request !== null && request.reporter === player.reporter && request.revision > player.settled
     ? request
     : null;
 
 const reportedOf = (player: Player): Playback | null => {
-  const reported = reportOf(player);
+  const reported = player.playback;
 
   return reported === null
     ? null

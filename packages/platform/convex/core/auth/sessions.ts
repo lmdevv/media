@@ -86,8 +86,7 @@ export const { current, list, end, endAll, revoke } = register({
       kind: caller.sessionKind,
       scopes: caller.scopes,
       // Where the session took a device, and its number there: a later one ends it.
-      device:
-        bound?.joined === undefined ? null : { deviceId: bound.id, joinSequence: bound.joined },
+      device: bound === undefined ? null : { deviceId: bound.id, joinSequence: bound.joined },
     };
   },
   /**

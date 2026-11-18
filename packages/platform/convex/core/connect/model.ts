@@ -2,7 +2,6 @@ import { v } from "convex/values";
 import type { Infer } from "convex/values";
 
 import { domainItem } from "../../../commands/access";
-import { contentDomain } from "../../../commands/scopes";
 
 /**
  * Where a device's picture and sound go: the device itself, or a Chromecast or AirPlay receiver it
@@ -42,21 +41,6 @@ const reported = v.object({
   session: v.optional(v.id("togetherSessions")),
 });
 
-/** What a device says it plays. */
-export type Reported = Infer<typeof reported>;
-
-/**
- * Connect's rows as v0.3.0 wrote them, before items: a report named only the domain, and a request
- * was a flat transport. The schema accepts them until `connect.clearRowsBeforeItems` in
- * `core/schemaMigrations.ts` rewrites them, and Connect reads them as playing and asking nothing.
- * The first release after the one that ships that migration may drop them (ADR 0018).
- */
-const oldReported = v.object({
-  domain: contentDomain,
-  playing: v.boolean(),
-  positionMs: v.number(),
-});
-
 /** What a device last said it plays, one row per device (ADR 0018). */
 export const playerDocument = v.object({
   deviceId: v.id("devices"),
@@ -64,24 +48,19 @@ export const playerDocument = v.object({
   reporter: v.id("authSessions"),
   output,
   /** Null while the device plays nothing. Its position held at `reportedAt`. */
-  playback: v.union(v.null(), reported, oldReported),
+  playback: v.union(v.null(), reported),
   /** The revision up to which requests are done for `reporter`. */
   settled: v.number(),
   /** Server time of the report. */
   reportedAt: v.number(),
 });
 
-const requestFields = {
+/** The playback controllers last asked of a device, one row per device (ADR 0018). */
+export const requestDocument = v.object({
   deviceId: v.id("devices"),
   /** The session it was made for; it never applies to another one on the device. */
   reporter: v.id("authSessions"),
   /** Higher than every revision before it on this device. */
   revision: v.number(),
-};
-
-/** The playback controllers last asked of a device, one row per device (ADR 0018). */
-export const requestDocument = v.union(
-  v.object({ ...requestFields, ask }),
-  /** v0.3.0's flat transport, as `oldReported` says. */
-  v.object({ ...requestFields, ...anchored }),
-);
+  ask,
+});
