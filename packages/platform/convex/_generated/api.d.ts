@@ -83,7 +83,6 @@ import type * as core_permissions_items from "../core/permissions/items.js";
 import type * as core_permissions_policy from "../core/permissions/policy.js";
 import type * as core_restrictions from "../core/restrictions.js";
 import type * as core_scans from "../core/scans.js";
-import type * as core_schemaMigrations from "../core/schemaMigrations.js";
 import type * as core_server from "../core/server.js";
 import type * as core_server_backups from "../core/server/backups.js";
 import type * as core_serverStatus from "../core/serverStatus.js";
@@ -248,7 +247,6 @@ declare const fullApi: ApiFromModules<{
   "core/permissions/policy": typeof core_permissions_policy;
   "core/restrictions": typeof core_restrictions;
   "core/scans": typeof core_scans;
-  "core/schemaMigrations": typeof core_schemaMigrations;
   "core/server": typeof core_server;
   "core/server/backups": typeof core_server_backups;
   "core/serverStatus": typeof core_serverStatus;

@@ -17,7 +17,6 @@ const probeRow = v.object({
   _creationTime: v.number(),
   group: v.string(),
   position: v.number(),
-  doubled: v.optional(v.number()),
 });
 
 export const seed = internalMutation({

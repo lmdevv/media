@@ -33,7 +33,7 @@ Every start, as root, before the media service runs unprivileged (on NixOS, afte
 3. Deploy the core's bundled Convex functions (`packages/platform`).
 4. Configure the deployment with `packages/platform/scripts/configure.ts`: Convex Auth's JWT keys
    and the ticket key ring, `MEDIA_TICKET_KEYS`. Existing values are kept, so this is safe to
-   repeat. Then run the core's schema migrations.
+   repeat.
 5. On the first start, create the media service's service principal and issue its key into
    `core/secrets/media-service-key`, which only root can read. Later starts reuse the file. If
    the file is missing, the start issues a new key to the same principal, and that key's first

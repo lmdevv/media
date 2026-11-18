@@ -78,7 +78,6 @@ log "deploying the core's functions ($version)"
 convex deploy --yes --codegen disable --typecheck disable
 log "configuring the core deployment"
 (cd /app/platform && node scripts/configure.mjs)
-convex run core/schemaMigrations:run >/dev/null
 printf '%s\n' "$version" >/data/core/version
 rm -f /data/core/upgrade-backup
 

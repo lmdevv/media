@@ -24,7 +24,7 @@ new RuleTester().run("music-writer", musicWriterRule, {
     inMusic(`const row = await ctx.db.get(id); const page = ctx.db.query("tracks");`),
     inCore(`await ctx.db.patch(user._id, { role });`),
     inCore(`await ctx.db.delete(row._id);`),
-    inCore(`await ctx.db.delete("schemaMigrations", id);`),
+    inCore(`await ctx.db.delete("counters", id);`),
     inCore(`const rows = ctx.db.table("users").query();`),
     inCatalog(`const found = await store.first("albums", (q) => q.withIndex("by_artist"));`),
     inCatalog(`const batch = { store, meter: store.meter };`),
