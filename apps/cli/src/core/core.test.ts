@@ -210,15 +210,29 @@ describe("a core command", () => {
   );
 
   it.each([
-    ["auth", "targets", "control", "x", "--device-id", "y"],
-    ["auth", "targets", "control", "--device-id", "x", "y"],
-    ["movies", "titles", "search", "alien", "covenant"],
-    ["auth", "targets", "list", "stray"],
-  ])("rejects unconsumed words in %j", async (...argv) => {
+    {
+      argv: ["auth", "targets", "control", "x", "--device-id", "y"],
+      message: "--device-id and the <device-id> argument both supply device-id; use only one",
+    },
+    {
+      argv: ["auth", "targets", "control", "--device-id", "x", "y"],
+      message: "--device-id and the <device-id> argument both supply device-id; use only one",
+    },
+    {
+      argv: ["movies", "titles", "search", "alien", "covenant"],
+      message:
+        "Expected one value for --query; quote values containing spaces or use --query <value>",
+    },
+    {
+      argv: ["auth", "targets", "list", "stray"],
+      message: 'Unexpected argument "stray"; pass values with flags',
+    },
+  ])("rejects unconsumed words in $argv", async ({ argv, message }) => {
     const run = await media(argv);
 
     expect(run.code, run.stderr).toBe(ExitCode.usage);
     expect(run.stdout).toBe("");
+    expect(stderrRecords(run.stderr)).toMatchObject([{ error: { code: "usage", message } }]);
   });
 
   it("asks for a sign-in when none is stored", async () => {

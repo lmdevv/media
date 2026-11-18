@@ -192,18 +192,15 @@ export const tokenize = (
   command: string,
 ): Effect.Effect<ParsedTokens, UsageError> =>
   Effect.try({
-    try: () => {
-      const parsed = parseArgs({
+    try: () =>
+      parseArgs({
         args: [...argv],
         options,
         strict: true,
         allowPositionals: true,
         allowNegative: true,
         tokens: true,
-      });
-
-      return parsed;
-    },
+      }),
     catch: (cause) =>
       new UsageError({
         message: cleanParseMessage(cause instanceof Error ? cause.message : String(cause)),
@@ -413,8 +410,8 @@ const single = (
 };
 
 /**
- * Builds wire arguments from parsed tokens: `--json`, then the positional value, then explicit
- * flags. A positional and its explicit flag cannot both be supplied.
+ * Builds wire arguments from parsed tokens; the positional value and explicit flags override
+ * `--json` fields.
  */
 export const buildArgs = (
   set: FlagSet,
