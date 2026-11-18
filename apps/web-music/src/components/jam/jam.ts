@@ -1,5 +1,5 @@
 /**
- * Jams, old music's name for group sessions, as the music client reaches them over
+ * Jams, music's name for group sessions, as the music client reaches them over
  * `core.together.*` (ADR 0017). A person holds one place per domain, so every call names the music
  * domain and none a session.
  */
@@ -42,7 +42,7 @@ const decoded = (text: string): string => {
 export const parseJamLink = (text: string): string | null =>
   LINK.exec(decoded(text.trim()))?.[1] ?? null;
 
-/** Why a Jam ended, in old music's words. */
+/** Why a Jam ended, for the screen. */
 export const ENDED: Readonly<
   Record<Extract<NonNullable<SessionView>, { readonly state: "ended" }>["reason"], string>
 > = {

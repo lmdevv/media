@@ -295,7 +295,7 @@ describe("NativeEngine", () => {
     expect(lastTime(events)).toBe(60_000);
   });
 
-  it("reports the seek target until the seek lands, never a status from before it", async () => {
+  it("reports the seek target until the seek lands, never the status it left", async () => {
     const { engine, media, output, events } = await setup();
     const loaded = engine.load(media.source("a"), 0, true);
     output(0).ready(false);

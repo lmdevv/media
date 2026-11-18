@@ -24,7 +24,7 @@ const parsePort = (value: string | undefined): number => {
   return port;
 };
 
-/** Preloads the body font, as old music's web app did, so text paints in it the first time. */
+/** Preloads the body font, so text paints in it the first time. */
 const preloadBodyFont = (): Plugin => ({
   name: "music:preload-body-font",
   apply: "build",

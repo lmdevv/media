@@ -36,7 +36,7 @@ describe("moveDone", () => {
     expect(moveDone(toDesk, { here: false, devices: [desk(false)] })).toBe(true);
   });
 
-  it("takes no report from before the core took the move", () => {
+  it("takes no report made before the core took the move", () => {
     expect(moveDone({ ...toDesk, landed: false }, { here: false, devices: [desk(false)] })).toBe(
       false,
     );

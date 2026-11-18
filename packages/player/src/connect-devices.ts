@@ -85,8 +85,8 @@ const byName = (devices: ReadonlyArray<Device>): ReadonlyArray<Device> => {
 
 /**
  * The listener's own devices besides `self` that reported within {@link ONLINE_MS} of `serverNow`,
- * by name, so a device's heartbeat never moves it in the list. Shared devices, which old music
- * never listed, stay out (D62): the list is a person's personal devices, as old music's was.
+ * by name, so a device's heartbeat never moves it in the list. Shared devices stay out (D62): the
+ * list is a person's personal devices.
  */
 export const ownDevices = (
   targets: ReadonlyArray<ConnectTarget>,
@@ -111,7 +111,7 @@ export const ownDevices = (
   );
 
 /**
- * The device the player follows while nothing plays here, as old music's active device: one that
+ * The device the player follows while nothing plays here, the active device: one that
  * plays music, else one that holds music paused. `previous` keeps its place while it still
  * qualifies as well as any other, so two devices that report in turn never swap.
  */
@@ -131,7 +131,7 @@ export const activeDevice = (
  * holds the song (`deviceId` null), or the other device answered the move's load with a report of
  * its own rather than the request standing in for its report (`pending`). Convex shows a mutation's
  * writes to the client's queries before it answers it, so once the move landed, the device's
- * report from before the move no longer counts (ADR 0018). A device that never answers never
+ * earlier report no longer counts (ADR 0018). A device that never answers never
  * arrives, whoever plays meanwhile.
  */
 export const moveArrived = (
@@ -148,7 +148,7 @@ export const moveArrived = (
 
 /**
  * Whether this device, holding a song paused, should let it go: another of the listener's devices
- * plays music, so it took playback over, as a newly active device stopped the old one in old music.
+ * plays music, so it took playback over: one device at a time plays the queue.
  */
 export const yieldsTo = (
   here: { readonly playing: boolean } | null,
@@ -172,7 +172,7 @@ export type DeviceKind = "web" | "phone";
 /** The names the account client gives browsers, such as `Firefox on Linux` or `Safari`. */
 const BROWSER_NAME = /^(?:Edge|Firefox|Chrome|Safari|Browser)(?: on (?<system>.+))?$/u;
 
-/** The systems whose browsers old music counted as phones. */
+/** The systems whose browsers count as phones. */
 const PHONE_SYSTEMS = new Set(["iPhone", "Android"]);
 
 /**
@@ -188,10 +188,9 @@ export const outputLabel = (output: ConnectOutput): string | null => {
 };
 
 /**
- * Whether a device is a computer's browser or a phone, from its name, as old music told them apart:
- * the core keeps no kind, and a browser's name is the one the account client gave it at sign-in. A
- * browser on an iPhone or Android counts as a phone, and so does any other name, such as the phone
- * app's.
+ * Whether a device is a computer's browser or a phone, from its name: the core keeps no kind, and
+ * a browser's name is the one the account client gave it at sign-in. A browser on an iPhone or
+ * Android counts as a phone, and so does any other name, such as the phone app's.
  */
 export const deviceKind = (name: string): DeviceKind => {
   const system = BROWSER_NAME.exec(name)?.groups?.["system"];

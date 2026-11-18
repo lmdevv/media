@@ -187,8 +187,8 @@ function ShareForm({
 }
 
 /**
- * Picks someone to share with from everyone else on the server, by name, as old music's
- * `people.directory` offered them (`core.accounts.directory.list`, which leaves the caller out).
+ * Picks someone to share with from everyone else on the server, by name
+ * (`core.accounts.directory.list`, which leaves the caller out).
  */
 function AddSomeone({
   shared,

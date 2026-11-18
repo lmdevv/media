@@ -318,7 +318,7 @@ const titleOf = (view: ReturnType<typeof useMusicSession>["view"]): string => {
   return view.role === "host" ? "Your Jam" : `${hostName(view)}'s Jam`;
 };
 
-/** The Jam panel: a dialog on desktop, a bottom sheet on phones, as old music's was. */
+/** The Jam panel: a dialog on desktop, a bottom sheet on phones. */
 export function JamPanel() {
   const { jamOpen, setJamOpen } = useUi();
   const { view } = useMusicSession();

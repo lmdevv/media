@@ -1,6 +1,6 @@
 /**
  * The music client's records, as the core's music commands answer them (`packages/commands`
- * `music.*`), named as old music's `@music/commands/models` named them so the screens read the same.
+ * `music.*`).
  */
 import type { PlatformSdk } from "@media/sdk/promise";
 import { Brand } from "effect";
@@ -49,7 +49,7 @@ export type UserId = NonNullable<Playlist["owner"]>["id"];
 
 export type QueueItemId = Row<Music["queue"]["list"]>["itemId"];
 
-/** Songs a playlist holds at most, as old music's `PLAYLIST_LIMIT`. */
+/** Songs a playlist holds at most, as the core allows (`music/playlists.ts`). */
 export const PLAYLIST_LIMIT = 2000;
 
 /**

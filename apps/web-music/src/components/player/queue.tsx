@@ -411,8 +411,7 @@ function HiddenRow({
 
 /**
  * What plays next in the person's Jam, as they see it: who queued each song, and songs they may not
- * play as hidden. The host moves and takes out any entry, a guest who may add only their own, as
- * old music's jams let people move the songs they added.
+ * play as hidden. The host moves and takes out any entry, a guest who may add only their own.
  */
 function JamUpcoming({
   tone,

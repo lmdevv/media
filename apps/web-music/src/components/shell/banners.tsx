@@ -1,9 +1,9 @@
 import { usePlayer } from "@media/player/react";
 
 /**
- * The media server's connection banner from Paper page 10, above the main column. Old music also
- * showed "Reconnecting" from its Convex client's socket state, which the platform SDK does not
- * expose; that banner returns when it does.
+ * The media server's connection banner from Paper page 10, above the main column. No
+ * "Reconnecting" banner yet: it needs the Convex client's socket state, which the platform SDK does
+ * not expose.
  */
 export function ConnectionBanners() {
   const player = usePlayer();

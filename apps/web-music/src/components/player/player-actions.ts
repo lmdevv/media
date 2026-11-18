@@ -15,13 +15,13 @@ export const perform = (action: Promise<void>): void => {
 };
 
 /**
- * This browser's kind, as old music decided it from the user agent: a phone on an iPhone or an
+ * This browser's kind, from its user agent: a phone on an iPhone or an
  * Android phone, else a computer's browser.
  */
 export const thisBrowserKind = (userAgent: string = navigator.userAgent): DeviceKind =>
   /iPhone|iPod|Android.*Mobile/u.test(userAgent) ? "phone" : "web";
 
-/** How old music's device list labels a device of each kind. */
+/** How the device list labels a device of each kind. */
 export const KIND_LABEL: Readonly<Record<DeviceKind, string>> = { web: "Browser", phone: "Phone" };
 
 const DEVICE_ICONS: Readonly<Record<DeviceKind, LucideIcon>> = {

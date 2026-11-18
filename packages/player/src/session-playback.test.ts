@@ -151,7 +151,7 @@ describe("a music session's players", { timeout: 60_000 }, () => {
     });
   });
 
-  it("pause at the end of the last song, back at its start, as old music's player stopped", async () => {
+  it("pauses at the end of the last song, back at its start", async () => {
     await scenario(song("a", 10), [], async (world) => {
       const host = world.join("Lucía", { hosting: true });
       const guest = world.join("Aiko", {});

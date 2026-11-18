@@ -21,7 +21,7 @@ export const streamQualities: ReadonlyArray<StreamQuality> = ["lossless", "high"
 
 /**
  * The core's `streamQuality` setting (ADR 0019): a tier each domain maps to its own presets.
- * Music keeps old music's three: `auto` and `original` play `lossless`, `high` and `standard`
+ * Music plays three: `auto` and `original` play `lossless`, `high` and `standard`
  * play `high`, and `low` plays `data-saver`.
  */
 export type StreamQualitySetting = "auto" | "original" | "high" | "standard" | "low";

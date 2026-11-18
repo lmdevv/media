@@ -261,7 +261,7 @@ function MemberJam({ jam }: { readonly jam: JoinedSession }) {
   );
 }
 
-/** The Jam screen, by where the person stands in their Jam, as old music's was. */
+/** The Jam screen, by where the person stands in their Jam. */
 export function JamHome() {
   const { view, start } = useMusicSession();
   const { nowPlaying } = useNowPlaying();

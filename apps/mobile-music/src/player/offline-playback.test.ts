@@ -313,7 +313,7 @@ describe("losing the server while a downloaded song plays in the background", ()
       expect(phone.loads.at(-1)?.url).toBe(uri(songC.id));
     });
 
-    // The server comes back with B's ticket from before the fallback.
+    // The server comes back with the ticket for B asked for ahead of the fallback.
     for (const start of phone.starts) {
       start.answer({
         playbackId: `p-${start.trackId}`,

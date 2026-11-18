@@ -45,7 +45,7 @@ export const boundedSources = (remote: SourceResolver, check: AwayCheck): Source
 });
 
 /**
- * This phone's sources, as old music's `localFirst`: its downloaded copy of a song first, online
+ * This phone's sources: its downloaded copy of a song first, online
  * too; otherwise `remote`'s stream while the player follows the server's queue; and nothing while
  * the phone plays its own queue without the server, so the player skips the song at once instead
  * of waiting for a connection, or while the player asks for this phone's copies alone. A copy that fails to play is discarded, so the song streams, or is

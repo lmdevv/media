@@ -33,9 +33,8 @@ export const firstActiveScan = (
 
 /**
  * The first waiting or running scan of a music library shared with you, null when none runs, or
- * `undefined` while the libraries load. Old music listed jobs; the core shows each library's
- * latest scan (`core.libraries.get`), which is the same for its one job kind, so every music
- * library is read at once.
+ * `undefined` while the libraries load. The core shows each library's latest scan
+ * (`core.libraries.get`), so every music library is read at once.
  */
 export const useActiveScan = (): ActiveScan | null | undefined => {
   const platform = usePlatform();

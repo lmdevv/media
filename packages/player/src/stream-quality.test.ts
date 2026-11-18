@@ -68,7 +68,7 @@ describe("chooseStreamProfile", () => {
 });
 
 describe("qualityOfSetting", () => {
-  it("plays old music's three qualities from the core's five tiers", () => {
+  it("plays music's three qualities from the core's five tiers", () => {
     expect(qualityOfSetting("auto")).toBe("lossless");
     expect(qualityOfSetting("original")).toBe("lossless");
     expect(qualityOfSetting("high")).toBe("high");

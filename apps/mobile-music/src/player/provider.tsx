@@ -489,8 +489,8 @@ const createPhone = ({
 
   /**
    * Plays the songs this phone holds of `trackIds` as its own new queue, from the one at `index`,
-   * or the next it holds after it, as old music's `playableSongs` and the core's
-   * `music.queue.play` pick.
+   * or the next it holds after it, as the core's `music.queue.play`
+   * picks.
    */
   const playLocally = (trackIds: ReadonlyArray<string>, index: number | undefined) => {
     const found = trackIds.map((id) => trackOfCopy(copies, id));

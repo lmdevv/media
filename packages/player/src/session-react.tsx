@@ -117,7 +117,7 @@ export interface MusicSession extends SessionData {
   readonly starting: boolean;
   /**
    * Starts a session on the song this player plays, where it stands, with the songs queued after it
-   * queued in the session, as old music's jams shared the host's player and queue. Resolves with
+   * queued in the session, so the session goes on from what the host played. Resolves with
    * its join link; rejects with the core's refusal.
    */
   readonly start: () => Promise<string>;
@@ -479,7 +479,7 @@ export const startCommands = (platform: PlatformSdk): StartCommands => ({
     ).taken,
 });
 
-/** Old music's words for a member who may not add to the session. */
+/** What a member hears who may not add to the session. */
 export const NO_ADDS = "The host turned off adding songs in this Jam";
 
 /** The most songs one play in a session queues, as a long playlist would flood it. */
@@ -494,7 +494,7 @@ export interface SessionAdds {
  * Queues `trackIds` in the person's session in order, in front of what is queued or after it, a
  * call at a time: in front, the last goes first. Each add names the session `view` shows, so the
  * core refuses the rest once the person left it, rather than queue them in another. Rejects with
- * old music's words when the host does not take songs, or with the core's refusal, which stops
+ * {@link NO_ADDS} when the host does not take songs, or with the core's refusal, which stops
  * the rest.
  */
 export const addToSession = async (
@@ -521,7 +521,7 @@ export const addToSession = async (
 };
 
 /**
- * Plays `trackIds` from `index` now for everyone, as old music's host played a list in a Jam: the
+ * Plays `trackIds` from `index` now for everyone in the session: the
  * first plays at once from its start, playing in a session that was paused too, in one call to the
  * core bound to the session `view` shows (`SessionPlayback.playNow`), then the rest go in front of
  * the queue in order, up to 100 songs, each add bound to that session too. So once the person is

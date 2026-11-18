@@ -150,8 +150,8 @@ const probe = async (url: string): Promise<number | null> => {
  * The tab joins on its own only a Cast session it started, after a reload too: `/movies` shares the
  * origin, and a session another tab started plays that tab's media. When another sender's media
  * takes the receiver, the song comes back here paused and the tab leaves the session, the receiver
- * playing on. A Jam plays here and casts nowhere, as old music had no casting: joining one ends the
- * cast this tab drives.
+ * playing on. A Jam plays here and casts nowhere (ADR 0018): joining one ends the cast this tab
+ * drives.
  */
 export function CastProvider({ children }: { readonly children: ReactNode }) {
   const player = usePlayer();

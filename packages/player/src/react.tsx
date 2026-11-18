@@ -122,8 +122,8 @@ export interface PlayerState {
   /** The listener's other own devices that are online, by name (ADR 0018). */
   readonly devices: ReadonlyArray<Device>;
   /**
-   * Another of the listener's devices that plays the queue while nothing plays here, as old music's
-   * active device. While it is set, `status`, the position, play, pause, seek, and skips follow and
+   * Another of the listener's devices that plays the queue while nothing plays here: the active
+   * device. While it is set, `status`, the position, play, pause, seek, and skips follow and
    * control it, and playing a list here takes playback back from it. Null while playback is here
    * or nowhere.
    */
@@ -175,20 +175,20 @@ export interface PlayerActions {
   readonly setQuality: (quality: StreamQuality) => void;
   /**
    * Moves playback from the device the player follows to this browser at the same place in the
-   * song (`core.connect.targets.move`), as old music's "Play here" did. Call it inside the tap, so
+   * song (`core.connect.targets.move`), for "Play here". Call it inside the tap, so
    * the browser lets the song start. Resolves whether the core took it.
    */
   readonly moveHere: () => Promise<boolean>;
   /**
    * Moves playback to another of the listener's devices at the same place in the song, from this
-   * browser or the device the player follows, as old music's transfer did; with nothing playing
+   * browser or the device the player follows; with nothing playing
    * anywhere it plays the current song there from where it stands here. Resolves whether the core
    * took it.
    */
   readonly moveTo: (deviceId: string) => Promise<boolean>;
   /**
    * Plays a song or an album on another device (`core.connect.targets.load`), which takes playback
-   * over, as old music's play on a chosen device made it the active one: this browser stops, or
+   * over as the active device: this browser stops, or
    * the device the player followed pauses. Resolves whether the core took it.
    */
   readonly playOn: (deviceId: string, item: MusicItem) => Promise<boolean>;
@@ -867,7 +867,7 @@ const sessionPlayerOf = ({
     moveTo: async () => false,
     playOn: async () => false,
     cast: local.cast,
-    // A Jam plays here and casts nowhere, as old music had no casting (ADR 0018): only the end of a
+    // A Jam plays here and casts nowhere (ADR 0018): only the end of a
     // cast, as the person joins, reaches the controller.
     castTo: (receiver) => {
       if (receiver === null) controller.castTo(null);

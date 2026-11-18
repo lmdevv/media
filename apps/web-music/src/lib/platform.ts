@@ -48,7 +48,7 @@ export const useQueryState = <Args, Result>(
 
 /**
  * Follows a core query: its result, or `undefined` while it loads. Pass `"skip"` to wait. A
- * failure throws to the route's error screen, as old music's reads did, after the SDK's own
+ * failure throws to the route's error screen, after the SDK's own
  * retries of network failures.
  */
 export const useRead = <Args, Result>(

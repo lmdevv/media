@@ -354,7 +354,7 @@ export class CastEngine implements ReceiverEngine {
   /**
    * Whether a load asking `autoplay` should start playing: a play or pause asked while its
    * credential was on its way goes with it. A method, so TypeScript does not keep a narrowing of
-   * the wish from before the await.
+   * the wish made before the await.
    */
   #playAsked(autoplay: boolean): boolean {
     return this.#wanted === null ? autoplay : !this.#wanted;

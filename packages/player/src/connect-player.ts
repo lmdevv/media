@@ -2,8 +2,8 @@ import type { PlaybackController, PlayingHere, StartAt } from "./playback-contro
 
 /**
  * Report at least this often while the page is open: Connect counts a device that has not reported
- * for 30 seconds as offline (ADR 0018), and old music's player reported every 15 seconds while it
- * played. Every change reports at once besides.
+ * for 30 seconds as offline (ADR 0018), so one lost report never shows it offline. Every change
+ * reports at once besides.
  */
 export const HEARTBEAT_MS = 10_000;
 

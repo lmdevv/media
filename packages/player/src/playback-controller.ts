@@ -350,10 +350,9 @@ interface EarlyStart {
 
 /**
  * Plays the listener's queue on this device. The core holds the queue and the entry playing
- * (`music.queue.*`); this device holds whether it plays and where in the song, as old music's
- * player did for the device that played (D62). Connect moves playback here and away, and plays,
- * pauses, or seeks it, through `playCurrentAt`, `playTracksAt`, `steer`, and `release`
- * (`connect-player.ts`, ADR 0018).
+ * (`music.queue.*`); this device holds whether it plays and where in the song (D62). Connect
+ * moves playback here and away, and plays, pauses, or seeks it, through `playCurrentAt`,
+ * `playTracksAt`, `steer`, and `release` (`connect-player.ts`, ADR 0018).
  *
  * Every request that waits on the network carries what it was made for, and its answer, a
  * failure included, applies only while that still holds: a ticket its load's generation, a
@@ -620,8 +619,8 @@ export class PlaybackController {
 
   /**
    * Follows a group session instead of the listener's own queue, or goes back to it with null
-   * (ADR 0017). Their own song stops where it was and waits, paused, until the session ends, as
-   * in old music's jams; the session's queue then reaches `sync`, and the listener's own queue
+   * (ADR 0017). Their own song stops where it was and waits, paused, until the session ends; the
+   * session's queue then reaches `sync`, and the listener's own queue
    * again once it ends. Following another session starts over from its own queue. Each change is
    * the listener's action, so Connect's requests seen so far are moot ({@link onListenerAction}),
    * and a new queue still being written plays nothing once it answers.
@@ -1257,8 +1256,8 @@ export class PlaybackController {
       return;
     }
 
-    // A device that holds a song, paused included, takes the new entry, as old music's active device
-    // did, so Connect still finds it playing the queue and a remote's play reaches it (ADR 0018).
+    // A device that holds a song, paused included, takes the new entry, so Connect still finds it
+    // playing the queue and a remote's play reaches it (ADR 0018).
     if (this.#wantPlaying || this.#loaded !== null) {
       // From the start, unless this device holds a place in it, as in the song that stopped when
       // the media server went away.
@@ -2000,8 +1999,8 @@ export class PlaybackController {
         reported: continuing,
       };
       this.#stamp(startMs, false);
-      // While the media server is away only a copy on this device plays, as old music's player
-      // allowed: the song waits for the server otherwise.
+      // While the media server is away only a copy on this device plays: the song waits for the
+      // server otherwise.
       const reach = this.#reach();
       const engine = this.#wantedEngine();
       this.#setUnanswered(false);
@@ -2101,8 +2100,8 @@ export class PlaybackController {
   }
 
   /**
-   * Moves on from `entry`, which nothing can play now, to the entry after it, as old music's player
-   * skipped a song it could not reach. The error stays on screen when no entry follows, or when the
+   * Moves on from `entry`, which nothing can play now, to the entry after it, so a song nobody can
+   * reach never holds up the queue. The error stays on screen when no entry follows, or when the
    * one that follows was skipped too since a song last played, so a queue nothing can play stops.
    * A queue that no longer holds `entry`, as a phone's own queue of copies holds no song it can't
    * play, already moved on: the move to `entry` the core never confirmed ends, and the player
@@ -2412,7 +2411,7 @@ export class PlaybackController {
     }
 
     if (loaded !== null && this.#queue?.repeat === "one") {
-      // A new start, so history records the song again, as old music counted a repeat.
+      // A new start, so history records each repeat as a play.
       void this.#load(loaded.entry, 0);
 
       return;

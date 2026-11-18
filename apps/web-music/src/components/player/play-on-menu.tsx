@@ -14,7 +14,7 @@ import { deviceIcon } from "./player-actions";
 
 /**
  * "Play on" in an album's menu: plays the album on another of your devices, which takes playback
- * over, as old music's play command with a device did from the album screen.
+ * over.
  */
 export function PlayOnMenu({ item }: { readonly item: MusicItem }) {
   const { devices, playOn } = usePlayer();

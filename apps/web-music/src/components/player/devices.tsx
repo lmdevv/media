@@ -37,8 +37,8 @@ interface DevicesState {
 }
 
 /**
- * The devices you can play on, which one plays, and a move in progress, as old music's device list
- * showed them. A move waits until the device it went to answers it, and gives up after 10 seconds.
+ * The devices you can play on, which one plays, and a move in progress. A move waits until the
+ * device it went to answers it, and gives up after 10 seconds.
  */
 const useDevices = (): DevicesState => {
   const player = usePlayer();
@@ -227,8 +227,8 @@ function ChromecastRow({ cast, touch }: { readonly cast: MusicCast; readonly tou
 /**
  * The "Play on" list shared by the desktop popover and the phone sheet: this browser first, then
  * a Chromecast it can play through, then your other devices, with the playing one marked, each
- * device's Chromecast or AirPlay receiver named, and a move shown as it starts, and the Jam button,
- * as old music's list had. A Jam plays here and offers no other device or Chromecast (ADR 0017).
+ * device's Chromecast or AirPlay receiver named, and a move shown as it starts, and the Jam button.
+ * A Jam plays here and offers no other device or Chromecast (ADR 0017).
  */
 export function DeviceList({ touch = false }: { readonly touch?: boolean }) {
   const player = usePlayer();

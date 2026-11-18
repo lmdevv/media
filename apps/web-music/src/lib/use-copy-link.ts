@@ -21,8 +21,8 @@ const pageUrl = (path: string): string =>
   new URL(`${import.meta.env.BASE_URL}${path}`, window.location.origin).toString();
 
 /**
- * The link's title and address, read from the record it names, which checks that you can open it,
- * as old music's `links.get` did: a song opens its album with the song highlighted.
+ * The link's title and address, read from the record it names, which checks that you can open it:
+ * a song opens its album with the song highlighted.
  */
 const linkFor = (music: PlatformSdk["music"], target: LinkTarget): Promise<ResolvedLink> =>
   Match.value(target.kind).pipe(

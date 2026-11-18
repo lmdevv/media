@@ -12,8 +12,8 @@ interface OfflinePlay {
 }
 
 /**
- * This phone's own queue while the server cannot be reached, as old music's phone kept its own
- * session. It goes back to the server once the server answers (D62).
+ * This phone's own queue while the server cannot be reached. It goes back to the server once the
+ * server answers (D62).
  */
 export interface LocalQueue<T extends Track> {
   /**
@@ -86,7 +86,7 @@ const keptOrder = <T extends Track>(
 
 /**
  * `entries` in their order before shuffle: those `unshuffled` lists in its order, then any it
- * doesn't list (none, normally) in the order they play, as old music's `shuffledOff`.
+ * doesn't list (none, normally) in the order they play.
  */
 const listedOrder = <T extends Track>(
   entries: ReadonlyArray<QueueEntry<T>>,
@@ -215,7 +215,7 @@ const edited = <T extends Track>(
 
 /**
  * Replaces the queue with `tracks` (songs this phone holds) and plays the one at `index`, in the
- * order old music's `playOrder` and the core's `music.queue.play` give: with shuffle on, that song
+ * order the core's `music.queue.play` gives: with shuffle on, that song
  * first and the rest shuffled behind it, keeping their listed order to come back to.
  */
 export const playLocal = <T extends Track>(
@@ -260,7 +260,7 @@ export const jumpLocal = <T extends Track>(queue: LocalQueue<T>, itemId: string)
     : queue;
 
 /**
- * Where songs added "to the end" go, as old music's `endOfQueued`: after the songs people queued,
+ * Where songs added "to the end" go: after the songs people queued,
  * before the first upcoming entry autoplay added, so autoplay always plays last.
  */
 const endOfQueued = <T extends Track>(
@@ -274,7 +274,7 @@ const endOfQueued = <T extends Track>(
 
 /**
  * Adds `tracks` (songs this phone holds) right after the entry playing when `next` is set, else
- * after the songs people queued, keeping at most the queue's limit, as old music's `addedOrder`.
+ * after the songs people queued, keeping at most the queue's limit.
  * While shuffled, they join the order before shuffle at the same place.
  */
 export const addLocal = <T extends Track>(
@@ -380,10 +380,9 @@ export const clearLocal = <T extends Track>(queue: LocalQueue<T>): LocalQueue<T>
 };
 
 /**
- * Turns shuffle on or off, as old music's `shuffledOn` and `shuffledOff` and the core's
- * `music.queue.shuffle`: on puts the entry playing first and the others after it in an order from
- * `random`, autoplay's last; off puts them back in the order before shuffle. Not an edit: the
- * hand-back turns shuffle on the server instead.
+ * Turns shuffle on or off, as the core's `music.queue.shuffle` does: on puts the entry playing
+ * first and the others after it in an order from `random`, autoplay's last; off puts them back in
+ * the order before shuffle. Not an edit: the hand-back turns shuffle on the server instead.
  */
 export const shuffleLocal = <T extends Track>(
   queue: LocalQueue<T>,

@@ -24,9 +24,9 @@ const ROLE_LABELS: Readonly<Record<Me["role"], string>> = {
 };
 
 /**
- * Old music's account settings: the name you go by, and signing out, which ends the browser's one
- * session for every client on this server (D52). The password and the rest of the account live in
- * the account client.
+ * The account settings the music client keeps: the name you go by, and signing out, which ends
+ * the browser's one session for every client on this server (D52). The password and the rest of
+ * the account live in the account client.
  */
 function AccountSettings() {
   const platform = usePlatform();

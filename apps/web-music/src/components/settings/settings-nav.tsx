@@ -10,7 +10,7 @@ import { can } from "@/lib/permissions";
 import { useMe } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 
-/** A settings page in the account client at `/`, where old music's account and server settings moved. */
+/** A settings page in the account client at `/`, which holds the account and server settings. */
 interface AccountPage {
   readonly href: string;
   readonly label: string;
