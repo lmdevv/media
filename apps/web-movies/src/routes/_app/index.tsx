@@ -32,6 +32,15 @@ const newestFirst = (titles: ReadonlyArray<TitleCard>): ReadonlyArray<TitleCard>
   titles.toSorted((a, b) => b.addedAt - a.addedAt);
 
 function HomePage() {
+  return (
+    <>
+      <HeldCollections />
+      <HomeContent />
+    </>
+  );
+}
+
+function HomeContent() {
   const platform = usePlatform();
   const scopes = useScopes();
   const home = usePlatformQuery(platform.movies.titles.home);
@@ -159,14 +168,28 @@ function HomeRows({ home }: { readonly home: Home }) {
   );
 }
 
-function CollectionsRow() {
+const useCollections = () => {
   const platform = usePlatform();
 
-  const collections = useFirstRows(
+  return useFirstRows(
     platform.movies.collections.list,
     (paginationOpts) => ({ paginationOpts }),
     ROW_COLLECTIONS,
   );
+};
+
+/**
+ * Holds the Collections row's query from the moment Home opens, so the row has its answer when it
+ * mounts, which is only after the home query answered.
+ */
+function HeldCollections() {
+  useCollections();
+
+  return null;
+}
+
+function CollectionsRow() {
+  const collections = useCollections();
 
   if (collections.status !== "ready" || collections.rows.length === 0) return null;
 

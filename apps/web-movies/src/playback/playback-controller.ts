@@ -350,6 +350,8 @@ export class PlaybackController {
     this.#startDiagnostics();
     this.#diagnostics?.recorder.intent();
 
+    if (this.#hlsJs) void preloadHlsJs().catch(() => undefined);
+
     return this.#begin();
   }
 
@@ -422,8 +424,6 @@ export class PlaybackController {
 
   async #negotiate(play: StartedPlay, positionMs: number, autoplay = true): Promise<void> {
     this.#update({ phase: PlaybackPhase.Preparing({ startAtMs: positionMs, progress: 0.35 }) });
-
-    if (this.#hlsJs) void preloadHlsJs().catch(() => undefined);
 
     const ticket = ++this.#negotiation;
     const version = this.#choicesVersion;

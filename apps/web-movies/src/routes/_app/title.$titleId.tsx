@@ -7,6 +7,7 @@ import { Link, createFileRoute } from "@tanstack/react-router";
 import { asTitleId } from "@/lib/catalog";
 import { HeroSkeleton } from "@/components/browse/skeletons";
 import { TitleDetailView } from "@/components/browse/title-detail";
+import { HeldSimilar } from "@/components/browse/title-extras";
 import { describeFailure, isFailure } from "@media/ui/lib/failure";
 import { usePhone } from "@/lib/use-phone";
 import { useScopes } from "@/session/session";
@@ -21,6 +22,17 @@ export const Route = createFileRoute("/_app/title/$titleId")({
 });
 
 function TitlePage() {
+  const { titleId } = Route.useParams();
+
+  return (
+    <>
+      <HeldSimilar titleId={titleId} />
+      <TitleContent />
+    </>
+  );
+}
+
+function TitleContent() {
   const platform = usePlatform();
   const { titleId } = Route.useParams();
   const scopes = useScopes();

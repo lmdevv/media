@@ -343,6 +343,22 @@ export function CollectionRow({
   );
 }
 
+const useSimilar = (titleId: TitleId) => {
+  const platform = usePlatform();
+
+  return usePlatformQuery(platform.movies.titles.similar, { titleId });
+};
+
+/**
+ * Holds the More like this query from the moment a title page opens, so the row has its answer
+ * when it mounts, which is only after the title answered.
+ */
+export function HeldSimilar({ titleId }: { readonly titleId: TitleId }) {
+  useSimilar(titleId);
+
+  return null;
+}
+
 /** More like this: recommendations and look-alikes the person may see. */
 export function MoreLikeThis({
   titleId,
@@ -351,8 +367,7 @@ export function MoreLikeThis({
   readonly titleId: TitleId;
   readonly phone: boolean;
 }) {
-  const platform = usePlatform();
-  const similar = usePlatformQuery(platform.movies.titles.similar, { titleId });
+  const similar = useSimilar(titleId);
 
   if (similar.status !== "success" || similar.data.length === 0) return null;
 

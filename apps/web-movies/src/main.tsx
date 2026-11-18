@@ -11,6 +11,7 @@ import { PLATFORM_URL } from "./env";
 import { parseSearch, stringifySearch } from "./lib/search-params";
 import { routeTree } from "./routeTree.gen";
 import { ReportUnhandledErrors } from "./session/error-reporting";
+import { HeldSettings } from "./session/held-settings";
 import { MoviesSession, RequireSession } from "./session/session";
 import { CurrentSessionProvider } from "./together/current-session";
 
@@ -37,6 +38,7 @@ const router = createRouter({
       <MoviesSession store={store} url={PLATFORM_URL}>
         <ReportUnhandledErrors />
         <RequireSession>
+          <HeldSettings />
           <CurrentSessionProvider>{children}</CurrentSessionProvider>
         </RequireSession>
       </MoviesSession>
