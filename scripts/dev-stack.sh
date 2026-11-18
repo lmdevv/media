@@ -15,15 +15,13 @@
 #
 # The stack name defaults to the worktree directory name; override with MEDIA_STACK. Ports derive
 # from the name so worktrees do not collide; override the base with MEDIA_PORT_BASE.
-#   base      unused (old movies' Convex API until its backend was deleted)
-#   base + 1  unused (old movies' Convex HTTP actions)
-#   base + 2  media service
-#   base + 3  movies web dev server (apps/web-movies at /movies/; every other path goes to base + 6)
-#   base + 4  core Convex API
-#   base + 5  core Convex HTTP actions
-#   base + 6  account client dev server (apps/web-account)
-#   base + 7  sign-in boundary (the media service's /api/auth/sign-in route alone)
-#   base + 8  music web dev server (apps/web-music at /music/; every other path goes to base + 6)
+#   base      media service
+#   base + 1  movies web dev server (apps/web-movies at /movies/; every other path goes to base + 4)
+#   base + 2  core Convex API
+#   base + 3  core Convex HTTP actions
+#   base + 4  account client dev server (apps/web-account)
+#   base + 5  sign-in boundary (the media service's /api/auth/sign-in route alone)
+#   base + 6  music web dev server (apps/web-music at /music/; every other path goes to base + 4)
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -39,15 +37,13 @@ else
   base=$((13200 + slot * 10))
 fi
 
-media_port=$((base + 2))
-web_port=$((base + 3))
-core_port=$((base + 4))
-core_site_port=$((base + 5))
-account_port=$((base + 6))
-boundary_port=$((base + 7))
-music_port=$((base + 8))
-# Old movies' backend, which stacks made before its deletion still run; `up` removes it.
-old_container="movies-convex-${name}"
+media_port=${base}
+web_port=$((base + 1))
+core_port=$((base + 2))
+core_site_port=$((base + 3))
+account_port=$((base + 4))
+boundary_port=$((base + 5))
+music_port=$((base + 6))
 core_container="media-platform-convex-${name}"
 boundary_container="media-boundary-${name}"
 state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/movies-dev/${name}"
@@ -81,13 +77,13 @@ case "${1:-up}" in
     exit 0
     ;;
   down)
-    docker rm -f "$old_container" "$core_container" "$boundary_container" >/dev/null 2>&1 || true
+    docker rm -f "$core_container" "$boundary_container" >/dev/null 2>&1 || true
     echo "stopped ${core_container} and ${boundary_container}"
     exit 0
     ;;
   destroy)
-    docker rm -f "$old_container" "$core_container" "$boundary_container" >/dev/null 2>&1 || true
-    docker volume rm "${old_container}-data" "${core_container}-data" >/dev/null 2>&1 || true
+    docker rm -f "$core_container" "$boundary_container" >/dev/null 2>&1 || true
+    docker volume rm "${core_container}-data" >/dev/null 2>&1 || true
     rm -rf "$state_dir" "$(dirname "$transcode_dir")"
     echo "destroyed ${core_container} and ${boundary_container}"
     exit 0
@@ -109,9 +105,9 @@ write_limit=$((256 * 1024 * 1024))
 
 start_backend() {
   local box="$1" api_port="$2" http_port="$3"
-  # A backend started before the stack set the write limit is recreated; its data volume stays.
+  # A backend published on other ports is recreated; its data volume stays.
   if docker inspect "$box" >/dev/null 2>&1 &&
-    ! docker inspect -f '{{join .Config.Env "\n"}}' "$box" | grep -qx "MAX_BYTES_WRITTEN_PER_SECOND=${write_limit}"; then
+    ! docker inspect -f '{{json .HostConfig.PortBindings}}' "$box" | grep -qF "\"${api_port}/tcp\""; then
     docker rm -f "$box" >/dev/null
   fi
   if ! docker inspect "$box" >/dev/null 2>&1; then
@@ -143,8 +139,6 @@ wait_backend() {
   exit 1
 }
 
-# A stack made before old movies' backend was deleted still runs it; its volume goes on `destroy`.
-docker rm -f "$old_container" >/dev/null 2>&1 || true
 start_backend "$core_container" "$core_port" "$core_site_port"
 wait_backend "$core_container" "$core_port"
 

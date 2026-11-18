@@ -92,13 +92,11 @@ names what is missing.
 Each worktree gets its own stack: `scripts/dev-stack.sh up` starts the core's self-hosted Convex
 backend in Docker, deploys and configures it, creates the media service's service principal and
 key, runs the media service's sign-in boundary alone in a second container, and writes the
-`.env.local` files. A stack made before old movies' backend was deleted comes up the same way:
-`up` removes the old container and keeps the core's data, and `destroy` also removes the old volume. Ports, the data volume, and the temporary
-output directory derive from the worktree name; `scripts/dev-stack.sh env` prints them, and
+`.env.local` files. Ports, the data volume, and the temporary output directory derive from the
+worktree name; a backend published on other ports is recreated on `up`, keeping its data; `scripts/dev-stack.sh env` prints them, and
 `down` / `destroy` stop or remove the stack. Commit the regenerated `convex/_generated/`. The stack's backend lifts Convex's
 4 MiB/s write limit (`MAX_BYTES_WRITTEN_PER_SECOND`, a documented self-hosted knob) so back-to-back
-test seeds never meet `TooManyWrites`; a backend from before that is recreated on `up`, keeping its
-data. Only the dev stack sets it: the image and the NixOS module keep the default, so product code
+test seeds never meet `TooManyWrites`. Only the dev stack sets it: the image and the NixOS module keep the default, so product code
 that writes in bulk must still pace or retry as ADR 0012 says.
 
 The Effect reference lives in `.repos/effect-smol`. Effect 4 stable releases are tagged in
@@ -167,10 +165,9 @@ The example identities must be replaced with the model and tool that actually co
 
 ## Verify and review
 
-- Ports come from the worktree's stack: media at base + 2, web at base + 3, the core's Convex API
-  at base + 4, its HTTP actions at base + 5, the account client at base + 6, and the sign-in
-  boundary at base + 7, which every stack suite signs in through. Base and base + 1 stay unused
-  (ADR 0028).
+- Ports come from the worktree's stack: media at base, movies web at base + 1, the core's Convex
+  API at base + 2, its HTTP actions at base + 3, the account client at base + 4, the sign-in
+  boundary at base + 5, which every stack suite signs in through, and music web at base + 6.
   `scripts/dev-stack.sh env` prints them. Playwright uses `E2E_PORT`, else the stack's
   web port, else 3011.
 - Stack suites need Docker and `scripts/dev-stack.sh up`: `pnpm --filter <pkg> test:stack` for
