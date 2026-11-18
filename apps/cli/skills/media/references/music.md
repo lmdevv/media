@@ -188,6 +188,27 @@ Start a song: get a stream ticket for it in this session.
 - Arguments: `{ trackId: Id<"tracks"> }`
 - Result: `{ trackId: Id<"tracks">; playbackId: string; startedAt: number; ticket: string; expiresAt: number }`
 
+## `music.playback.get`
+
+Describe a track or album you may play, with ticketed artwork and no catalog links.
+
+- CLI: `media music playback get`
+- Kind: query
+- Scope: music:play
+- Arguments: `{ item: { type: "track"; id: Id<"tracks"> } | { type: "album"; id: Id<"albums"> } }`
+- Result: `{ kind: "track"; id: Id<"tracks">; title: string; artist: string; album: string; trackNumber: number | null; discNumber: number | null; durationMs: number; artUrl: string | null } | { kind: "album"; id: Id<"albums">; title: string; artist: string; year: number | null; genre: string | null; format: string; artUrl: string | null }`
+
+## `music.playback.tracks`
+
+Page only the songs on disk you may play in this album, in disc and track order.
+
+- CLI: `media music playback tracks`
+- Kind: query
+- Scope: music:play
+- Arguments: `{ albumId: Id<"albums">; paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
+- Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
+- Result: `{ page: Array<{ kind: "track"; id: Id<"tracks">; title: string; artist: string; album: string; trackNumber: number | null; discNumber: number | null; durationMs: number; artUrl: string | null }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
+
 ## `music.playlists.addTracks`
 
 Add songs to the end of a playlist you own or collaborate on (2,000 songs at most); send any songs left in rest again.

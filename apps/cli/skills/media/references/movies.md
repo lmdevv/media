@@ -237,6 +237,38 @@ Start a movie or an episode: choose its file, resume your position, and get a st
 - Arguments: `{ titleId: Id<"titles">; episodeId?: Id<"episodes">; fileId?: Id<"mediaFiles">; capabilities?: { containers: Array<"mp4" | "mov" | "mkv" | "webm" | "avi" | "ts" | "other">; videoCodecs: Array<{ codec: string; profiles?: Array<string>; maxLevel?: number; maxBitDepth?: number; dynamicRanges?: Array<"sdr" | "hdr10" | "hlg" | "dolby-vision"> }>; audioCodecs: Array<{ codec: string; maxChannels?: number }>; maxWidth: number; maxHeight: number; hls: boolean; mse: boolean } }`
 - Result: `{ titleId: Id<"titles">; episodeId: Id<"episodes"> | null; episode: { id: Id<"episodes">; titleId: Id<"titles">; seasonId: Id<"seasons">; seasonNumber: number; episodeNumber: number; name: string; overview: string | null; airDate: string | null; runtimeMs: number | null; still: string | null; rating: number | null; externalIds: { tmdb: string | null; imdb: string | null; tvdb: string | null }; available: boolean; progress: { positionMs: number; durationMs: number; watched: boolean; updatedAt: number } | null } | null; file: { id: Id<"mediaFiles">; titleId: Id<"titles">; episodeId: Id<"episodes"> | null; versionName: string | null; sizeBytes: number; probe: { container: string; formatName?: string; durationMs: number; startMs?: number; bitRate: number | null; video: Array<{ index: number; codec: string; profile: string | null; level?: number; width: number; height: number; frameRate: number | null; bitDepth: number | null; pixelFormat: string | null; hdr: "none" | "hdr10" | "hdr10plus" | "hlg" | "dolby_vision"; bitRate: number | null }>; audio: Array<{ index: number; codec: string; profile: string | null; channels: number; channelLayout: string | null; sampleRate?: number; language: string | null; title: string | null; default: boolean; bitRate: number | null; endMs?: number }>; subtitles: Array<{ index: number; codec: string; kind: "text" | "image"; language: string | null; title: string | null; default: boolean; forced: boolean; hearingImpaired?: boolean }>; chapters: Array<{ startMs: number; endMs: number; title: string | null }> }; externalSubtitles: Array<{ fileName: string; codec: string; language: string | null; title?: string; forced: boolean; hearingImpaired?: boolean; default?: boolean }>; hdr: boolean; trickplay: { version: string; intervalMs: number; tileWidth: number; tileHeight: number; columns: number; rows: number; thumbnailCount: number; sheetCount: number } | null }; resumePositionMs: number; playbackId: string; startedAt: number; ticket: string; expiresAt: number }`
 
+## `movies.playback.episodes`
+
+Page a playable show's episodes in one season; describe an episode to get its versions.
+
+- CLI: `media movies playback episodes`
+- Kind: query
+- Scope: movies:play
+- Arguments: `{ titleId: Id<"titles">; seasonNumber: number; paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
+- Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
+- Result: `{ page: Array<{ id: Id<"episodes">; seasonNumber: number; episodeNumber: number; name: string; overview: string | null; runtimeMs: number | null; still: string | null }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
+
+## `movies.playback.get`
+
+Describe an item you may play, with only its permitted versions and ticketed artwork.
+
+- CLI: `media movies playback get`
+- Kind: query
+- Scope: movies:play
+- Arguments: `{ item: { type: "title"; id: Id<"titles"> } | { type: "episode"; id: Id<"episodes"> } | { type: "file"; id: Id<"mediaFiles"> } }`
+- Result: `{ titleId: Id<"titles">; kind: "movie" | "show"; name: string; year: number | null; overview: string | null; runtimeMs: number | null; certification: string | null; artwork: { poster: string | null; backdrop: string | null; logo: string | null }; episode: { id: Id<"episodes">; seasonNumber: number; episodeNumber: number; name: string; overview: string | null; runtimeMs: number | null; still: string | null } | null; versions: Array<{ id: Id<"mediaFiles">; versionName: string | null; width: number | null; height: number | null; hdr: "none" | "hdr10" | "hdr10plus" | "hlg" | "dolby_vision"; videoCodec: string | null; videoProfile: string | null; videoLevel: number | null; videoBitDepth: number | null; audioCodec: string | null; audioChannels: number | null; audioTracks: number; container: string; sizeBytes: number; durationMs: number; lastPlayed: boolean }> }`
+
+## `movies.playback.seasons`
+
+Page the seasons of a show you may play.
+
+- CLI: `media movies playback seasons`
+- Kind: query
+- Scope: movies:play
+- Arguments: `{ titleId: Id<"titles">; paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
+- Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
+- Result: `{ page: Array<{ seasonNumber: number; name: string; poster: string | null }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
+
 ## `movies.titles.episode`
 
 Show an episode you can play with its show and your progress, as a group session names it.

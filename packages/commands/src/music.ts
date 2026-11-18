@@ -157,12 +157,53 @@ const trackIds = v.array(v.id("tracks"));
  */
 const rest = trackIds;
 
+const playbackTrack = v.object({
+  kind: v.literal("track"),
+  id: v.id("tracks"),
+  title: v.string(),
+  artist: v.string(),
+  album: v.string(),
+  trackNumber: nullable(v.number()),
+  discNumber: nullable(v.number()),
+  durationMs: v.number(),
+  artUrl: nullable(v.string()),
+});
+
 /**
  * The music commands (D23, D62). What each person keeps (playlists, likes, plays, the queue) is
  * theirs alone; a playlist is shared through the core's grants. Jams and moving playback between
  * devices are the core's group sessions and Connect (`core.ts`).
  */
 export const music = [
+  query("music.playback.get", {
+    summary: "Describe a track or album you may play, with ticketed artwork and no catalog links",
+    scope: "music:play",
+    args: {
+      item: v.union(
+        v.object({ type: v.literal("track"), id: v.id("tracks") }),
+        v.object({ type: v.literal("album"), id: v.id("albums") }),
+      ),
+    },
+    result: v.union(
+      playbackTrack,
+      v.object({
+        kind: v.literal("album"),
+        id: v.id("albums"),
+        title: v.string(),
+        artist: v.string(),
+        year: nullable(v.number()),
+        genre: nullable(v.string()),
+        format: v.string(),
+        artUrl: nullable(v.string()),
+      }),
+    ),
+  }),
+  query("music.playback.tracks", {
+    summary: "Page only the songs on disk you may play in this album, in disc and track order",
+    scope: "music:play",
+    args: { albumId: v.id("albums"), paginationOpts: paginationOptsValidator },
+    result: paginationResultValidator(playbackTrack),
+  }),
   query("music.library.home", {
     summary:
       "Show your music home: recently added and recently played albums, recently played artists, and library totals",

@@ -3648,6 +3648,154 @@ const movies_play_start = mutation({
   }),
 });
 
+const movies_playback_episodes = query({
+  name: "movies.playback.episodes",
+  path: "movies/playback:episodes",
+  args: Schema.Struct({
+    titleId: Schema.String.pipe(Schema.brand("Id<titles>")),
+    seasonNumber: Schema.Finite,
+    paginationOpts: Schema.Struct({
+      numItems: Schema.Finite,
+      cursor: Schema.Union([Schema.String, Schema.Null]),
+      endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      id: Schema.optionalKey(Schema.Finite),
+      maximumRowsRead: Schema.optionalKey(Schema.Finite),
+      maximumBytesRead: Schema.optionalKey(Schema.Finite),
+    }),
+  }),
+  result: Schema.Struct({
+    page: Schema.Array(
+      Schema.Struct({
+        id: Schema.String.pipe(Schema.brand("Id<episodes>")),
+        seasonNumber: Schema.Finite,
+        episodeNumber: Schema.Finite,
+        name: Schema.String,
+        overview: Schema.Union([Schema.String, Schema.Null]),
+        runtimeMs: Schema.Union([Schema.Finite, Schema.Null]),
+        still: Schema.Union([Schema.String, Schema.Null]),
+      }),
+    ),
+    continueCursor: Schema.String,
+    isDone: Schema.Boolean,
+    splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+    pageStatus: Schema.optionalKey(
+      Schema.Union([
+        Schema.Literal("SplitRecommended"),
+        Schema.Literal("SplitRequired"),
+        Schema.Null,
+      ]),
+    ),
+  }),
+});
+
+const movies_playback_get = query({
+  name: "movies.playback.get",
+  path: "movies/playback:get",
+  args: Schema.Struct({
+    item: Schema.Union([
+      Schema.Struct({
+        type: Schema.Literal("title"),
+        id: Schema.String.pipe(Schema.brand("Id<titles>")),
+      }),
+      Schema.Struct({
+        type: Schema.Literal("episode"),
+        id: Schema.String.pipe(Schema.brand("Id<episodes>")),
+      }),
+      Schema.Struct({
+        type: Schema.Literal("file"),
+        id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
+      }),
+    ]),
+  }),
+  result: Schema.Struct({
+    titleId: Schema.String.pipe(Schema.brand("Id<titles>")),
+    kind: Schema.Union([Schema.Literal("movie"), Schema.Literal("show")]),
+    name: Schema.String,
+    year: Schema.Union([Schema.Finite, Schema.Null]),
+    overview: Schema.Union([Schema.String, Schema.Null]),
+    runtimeMs: Schema.Union([Schema.Finite, Schema.Null]),
+    certification: Schema.Union([Schema.String, Schema.Null]),
+    artwork: Schema.Struct({
+      poster: Schema.Union([Schema.String, Schema.Null]),
+      backdrop: Schema.Union([Schema.String, Schema.Null]),
+      logo: Schema.Union([Schema.String, Schema.Null]),
+    }),
+    episode: Schema.Union([
+      Schema.Struct({
+        id: Schema.String.pipe(Schema.brand("Id<episodes>")),
+        seasonNumber: Schema.Finite,
+        episodeNumber: Schema.Finite,
+        name: Schema.String,
+        overview: Schema.Union([Schema.String, Schema.Null]),
+        runtimeMs: Schema.Union([Schema.Finite, Schema.Null]),
+        still: Schema.Union([Schema.String, Schema.Null]),
+      }),
+      Schema.Null,
+    ]),
+    versions: Schema.Array(
+      Schema.Struct({
+        id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
+        versionName: Schema.Union([Schema.String, Schema.Null]),
+        width: Schema.Union([Schema.Finite, Schema.Null]),
+        height: Schema.Union([Schema.Finite, Schema.Null]),
+        hdr: Schema.Union([
+          Schema.Literal("none"),
+          Schema.Literal("hdr10"),
+          Schema.Literal("hdr10plus"),
+          Schema.Literal("hlg"),
+          Schema.Literal("dolby_vision"),
+        ]),
+        videoCodec: Schema.Union([Schema.String, Schema.Null]),
+        videoProfile: Schema.Union([Schema.String, Schema.Null]),
+        videoLevel: Schema.Union([Schema.Finite, Schema.Null]),
+        videoBitDepth: Schema.Union([Schema.Finite, Schema.Null]),
+        audioCodec: Schema.Union([Schema.String, Schema.Null]),
+        audioChannels: Schema.Union([Schema.Finite, Schema.Null]),
+        audioTracks: Schema.Finite,
+        container: Schema.String,
+        sizeBytes: Schema.Finite,
+        durationMs: Schema.Finite,
+        lastPlayed: Schema.Boolean,
+      }),
+    ),
+  }),
+});
+
+const movies_playback_seasons = query({
+  name: "movies.playback.seasons",
+  path: "movies/playback:seasons",
+  args: Schema.Struct({
+    titleId: Schema.String.pipe(Schema.brand("Id<titles>")),
+    paginationOpts: Schema.Struct({
+      numItems: Schema.Finite,
+      cursor: Schema.Union([Schema.String, Schema.Null]),
+      endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      id: Schema.optionalKey(Schema.Finite),
+      maximumRowsRead: Schema.optionalKey(Schema.Finite),
+      maximumBytesRead: Schema.optionalKey(Schema.Finite),
+    }),
+  }),
+  result: Schema.Struct({
+    page: Schema.Array(
+      Schema.Struct({
+        seasonNumber: Schema.Finite,
+        name: Schema.String,
+        poster: Schema.Union([Schema.String, Schema.Null]),
+      }),
+    ),
+    continueCursor: Schema.String,
+    isDone: Schema.Boolean,
+    splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+    pageStatus: Schema.optionalKey(
+      Schema.Union([
+        Schema.Literal("SplitRecommended"),
+        Schema.Literal("SplitRequired"),
+        Schema.Null,
+      ]),
+    ),
+  }),
+});
+
 const movies_titles_episode = query({
   name: "movies.titles.episode",
   path: "movies/titles:episode",
@@ -5188,6 +5336,87 @@ const music_play_start = mutation({
   }),
 });
 
+const music_playback_get = query({
+  name: "music.playback.get",
+  path: "music/playback:get",
+  args: Schema.Struct({
+    item: Schema.Union([
+      Schema.Struct({
+        type: Schema.Literal("track"),
+        id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+      }),
+      Schema.Struct({
+        type: Schema.Literal("album"),
+        id: Schema.String.pipe(Schema.brand("Id<albums>")),
+      }),
+    ]),
+  }),
+  result: Schema.Union([
+    Schema.Struct({
+      kind: Schema.Literal("track"),
+      id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+      title: Schema.String,
+      artist: Schema.String,
+      album: Schema.String,
+      trackNumber: Schema.Union([Schema.Finite, Schema.Null]),
+      discNumber: Schema.Union([Schema.Finite, Schema.Null]),
+      durationMs: Schema.Finite,
+      artUrl: Schema.Union([Schema.String, Schema.Null]),
+    }),
+    Schema.Struct({
+      kind: Schema.Literal("album"),
+      id: Schema.String.pipe(Schema.brand("Id<albums>")),
+      title: Schema.String,
+      artist: Schema.String,
+      year: Schema.Union([Schema.Finite, Schema.Null]),
+      genre: Schema.Union([Schema.String, Schema.Null]),
+      format: Schema.String,
+      artUrl: Schema.Union([Schema.String, Schema.Null]),
+    }),
+  ]),
+});
+
+const music_playback_tracks = query({
+  name: "music.playback.tracks",
+  path: "music/playback:tracks",
+  args: Schema.Struct({
+    albumId: Schema.String.pipe(Schema.brand("Id<albums>")),
+    paginationOpts: Schema.Struct({
+      numItems: Schema.Finite,
+      cursor: Schema.Union([Schema.String, Schema.Null]),
+      endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      id: Schema.optionalKey(Schema.Finite),
+      maximumRowsRead: Schema.optionalKey(Schema.Finite),
+      maximumBytesRead: Schema.optionalKey(Schema.Finite),
+    }),
+  }),
+  result: Schema.Struct({
+    page: Schema.Array(
+      Schema.Struct({
+        kind: Schema.Literal("track"),
+        id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+        title: Schema.String,
+        artist: Schema.String,
+        album: Schema.String,
+        trackNumber: Schema.Union([Schema.Finite, Schema.Null]),
+        discNumber: Schema.Union([Schema.Finite, Schema.Null]),
+        durationMs: Schema.Finite,
+        artUrl: Schema.Union([Schema.String, Schema.Null]),
+      }),
+    ),
+    continueCursor: Schema.String,
+    isDone: Schema.Boolean,
+    splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+    pageStatus: Schema.optionalKey(
+      Schema.Union([
+        Schema.Literal("SplitRecommended"),
+        Schema.Literal("SplitRequired"),
+        Schema.Null,
+      ]),
+    ),
+  }),
+});
+
 const music_playlists_addTracks = mutation({
   name: "music.playlists.addTracks",
   path: "music/playlists:addTracks",
@@ -6061,6 +6290,14 @@ export const effectMethods = (method: EffectBuilder) => ({
       /** `movies.play.start` (mutation, movies:play): Start a movie or an episode: choose its file, resume your position, and get a stream ticket for this session. */
       start: method.mutation(movies_play_start),
     },
+    playback: {
+      /** `movies.playback.episodes` (query, movies:play): Page a playable show's episodes in one season; describe an episode to get its versions. */
+      episodes: method.query(movies_playback_episodes),
+      /** `movies.playback.get` (query, movies:play): Describe an item you may play, with only its permitted versions and ticketed artwork. */
+      get: method.query(movies_playback_get),
+      /** `movies.playback.seasons` (query, movies:play): Page the seasons of a show you may play. */
+      seasons: method.query(movies_playback_seasons),
+    },
     titles: {
       /** `movies.titles.episode` (query, movies:play): Show an episode you can play with its show and your progress, as a group session names it. */
       episode: method.query(movies_titles_episode),
@@ -6134,6 +6371,12 @@ export const effectMethods = (method: EffectBuilder) => ({
       reportOffline: method.mutation(music_play_reportOffline),
       /** `music.play.start` (mutation, music:play): Start a song: get a stream ticket for it in this session. */
       start: method.mutation(music_play_start),
+    },
+    playback: {
+      /** `music.playback.get` (query, music:play): Describe a track or album you may play, with ticketed artwork and no catalog links. */
+      get: method.query(music_playback_get),
+      /** `music.playback.tracks` (query, music:play): Page only the songs on disk you may play in this album, in disc and track order. */
+      tracks: method.query(music_playback_tracks),
     },
     playlists: {
       /** `music.playlists.addTracks` (mutation, music:edit): Add songs to the end of a playlist you own or collaborate on (2,000 songs at most); send any songs left in rest again. */
@@ -6547,6 +6790,14 @@ export const promiseMethods = (method: PromiseBuilder) => ({
       /** `movies.play.start` (mutation, movies:play): Start a movie or an episode: choose its file, resume your position, and get a stream ticket for this session. */
       start: method.mutation(movies_play_start),
     },
+    playback: {
+      /** `movies.playback.episodes` (query, movies:play): Page a playable show's episodes in one season; describe an episode to get its versions. */
+      episodes: method.query(movies_playback_episodes),
+      /** `movies.playback.get` (query, movies:play): Describe an item you may play, with only its permitted versions and ticketed artwork. */
+      get: method.query(movies_playback_get),
+      /** `movies.playback.seasons` (query, movies:play): Page the seasons of a show you may play. */
+      seasons: method.query(movies_playback_seasons),
+    },
     titles: {
       /** `movies.titles.episode` (query, movies:play): Show an episode you can play with its show and your progress, as a group session names it. */
       episode: method.query(movies_titles_episode),
@@ -6620,6 +6871,12 @@ export const promiseMethods = (method: PromiseBuilder) => ({
       reportOffline: method.mutation(music_play_reportOffline),
       /** `music.play.start` (mutation, music:play): Start a song: get a stream ticket for it in this session. */
       start: method.mutation(music_play_start),
+    },
+    playback: {
+      /** `music.playback.get` (query, music:play): Describe a track or album you may play, with ticketed artwork and no catalog links. */
+      get: method.query(music_playback_get),
+      /** `music.playback.tracks` (query, music:play): Page only the songs on disk you may play in this album, in disc and track order. */
+      tracks: method.query(music_playback_tracks),
     },
     playlists: {
       /** `music.playlists.addTracks` (mutation, music:edit): Add songs to the end of a playlist you own or collaborate on (2,000 songs at most); send any songs left in rest again. */
