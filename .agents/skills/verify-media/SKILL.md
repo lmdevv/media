@@ -400,9 +400,9 @@ less than 3 GB free, or 10 GB when it must build the dev client. It does these s
 4. It installs the dev client. The build is named for the app's native inputs (`app.json`, its
    `package.json`, the lockfile, the asset names, and the music app's `modules/`, their code
    included, so a Swift change builds a new one) and lives at
-   `~/movies-ios/dev-client-<hash>`
+   `~/media-ios/dev-client-<hash>`
    on the Mac, so every run and worktree with the same inputs installs the same build. When none
-   matches, it syncs this checkout to `~/movies-ios/verify-<run>`, runs `expo prebuild` there,
+   matches, it syncs this checkout to `~/media-ios/verify-<run>`, runs `expo prebuild` there,
    and builds, which takes several minutes.
 5. It turns off the dev client's own UI (its first-launch introduction, its floating button, and
    the gestures that open its menu), so screenshots show only the app.
@@ -488,7 +488,7 @@ an invite link, or an API key screen right after it made a key.
 ```sh
 $S down                 # both sides: simulators, Metro, forwards, browser hosts, projects, volumes, the built images
 $S down --side before   # one side
-$S down --purge         # also remove the iOS build cache on the Mac (~/movies-ios/verify-<run>, and dev-client-<hash> for this checkout)
+$S down --purge         # also remove the iOS build cache on the Mac (~/media-ios/verify-<run>, and dev-client-<hash> for this checkout)
 ```
 
 `down` stops only what this run started: processes by the pids it recorded (the browser host

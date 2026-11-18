@@ -38,7 +38,7 @@ else
 fi
 
 media_port=${base}
-web_port=$((base + 1))
+movies_port=$((base + 1))
 core_port=$((base + 2))
 core_site_port=$((base + 3))
 account_port=$((base + 4))
@@ -46,9 +46,9 @@ boundary_port=$((base + 5))
 music_port=$((base + 6))
 core_container="media-platform-convex-${name}"
 boundary_container="media-boundary-${name}"
-state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/movies-dev/${name}"
+state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/media-dev/${name}"
 data_dir="${state_dir}/data"
-transcode_dir="${TMPDIR:-/tmp}/movies-dev-${name}/transcode"
+transcode_dir="${TMPDIR:-/tmp}/media-dev-${name}/transcode"
 backup_dir="${state_dir}/backups"
 library_roots="${MEDIA_LIBRARY_ROOTS:-${state_dir}/library}"
 
@@ -56,7 +56,7 @@ print_env() {
   cat <<EOF
 name=${name}
 media_url=http://127.0.0.1:${media_port}
-web_url=http://localhost:${web_port}/movies/
+movies_url=http://localhost:${movies_port}/movies/
 music_url=http://localhost:${music_port}/music/
 core_container=${core_container}
 core_convex_url=http://127.0.0.1:${core_port}
@@ -163,7 +163,7 @@ cat >"${root}/apps/web-movies/.env.local" <<ENV
 VITE_PLATFORM_URL=http://127.0.0.1:${core_port}
 VITE_MEDIA_BASE_URL=http://127.0.0.1:${media_port}
 VITE_SIGN_IN_URL=${sign_in_url}
-WEB_PORT=${web_port}
+MOVIES_PORT=${movies_port}
 ACCOUNT_DEV_URL=http://localhost:${account_port}
 ENV
 

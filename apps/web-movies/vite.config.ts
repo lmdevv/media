@@ -13,7 +13,7 @@ const parsePort = (value: string | undefined): number => {
   const port = Number(value);
 
   if (!Number.isInteger(port) || port < 1 || port > 65_535) {
-    throw new Error(`WEB_PORT must be a TCP port number, got "${value}".`);
+    throw new Error(`MOVIES_PORT must be a TCP port number, got "${value}".`);
   }
 
   return port;
@@ -34,7 +34,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     base: "/movies/",
-    server: { port: parsePort(env["WEB_PORT"]), headers: SECURITY_HEADERS, proxy },
+    server: { port: parsePort(env["MOVIES_PORT"]), headers: SECURITY_HEADERS, proxy },
     preview: { headers: SECURITY_HEADERS },
     resolve: { tsconfigPaths: true },
     plugins: [

@@ -168,8 +168,8 @@ The example identities must be replaced with the model and tool that actually co
 - Ports come from the worktree's stack: media at base, movies web at base + 1, the core's Convex
   API at base + 2, its HTTP actions at base + 3, the account client at base + 4, the sign-in
   boundary at base + 5, which every stack suite signs in through, and music web at base + 6.
-  `scripts/dev-stack.sh env` prints them. Playwright uses `E2E_PORT`, else the stack's
-  web port, else 3011.
+  `scripts/dev-stack.sh env` prints them. Each app's Playwright uses `E2E_PORT`, else the
+  stack's port for that app (`MOVIES_PORT`, `MUSIC_PORT`, `ACCOUNT_PORT`), else 3011 or 3012.
 - Stack suites need Docker and `scripts/dev-stack.sh up`: `pnpm --filter <pkg> test:stack` for
   `@media/platform`, `@media/sdk`, `@lmdevv/media`, and `@media/server`, then
   `pnpm --filter @media/web-movies exec playwright test`. For the migration suites, pull the pinned image
