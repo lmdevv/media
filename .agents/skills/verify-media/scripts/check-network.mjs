@@ -44,8 +44,6 @@ const server = createServer((request, response) => {
 });
 const listening = (target) => new Promise((done) => target.listen(0, "127.0.0.1", () => done(target.address().port)));
 const base = `http://localhost:${await listening(server)}`;
-const convex = createServer((request, response) => response.end());
-const convexUrl = `http://localhost:${await listening(convex)}`;
 
 const hosts = new Map();
 const drive = (network, ...args) =>
@@ -66,7 +64,6 @@ const cleanup = () => {
   }
   server.closeAllConnections();
   server.close();
-  convex.close();
 };
 process.on("SIGINT", () => {
   cleanup();
@@ -77,7 +74,7 @@ const results = [];
 try {
   for (const network of NETWORKS) {
     const state = mkdtempSync("/tmp/movies-netcheck-");
-    const host = spawn("node", [browserJs, "serve", "--state", state, "--base", base, "--convex", convexUrl], {
+    const host = spawn("node", [browserJs, "serve", "--state", state, "--base", base, "--account", base], {
       env: { ...process.env, ...(chromium ? { CHROMIUM_PATH: chromium } : {}), MEDIA_VERIFY_BROWSER_NETWORK: network },
       stdio: ["ignore", "ignore", "inherit"],
     });

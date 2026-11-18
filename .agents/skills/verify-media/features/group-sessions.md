@@ -3,7 +3,7 @@
 People watch a movie or show together in step (ADR 0017). The host starts a session from the
 player and shares its link; others open it and follow the session's clock with their own stream.
 The host decides who may join (anyone with the link, approval, or no one new) and whether guests
-may pause and seek or add to Up next. Old movies called these watch rooms, with `/r/<id>` links.
+may pause and seek or add to Up next.
 
 ## Sub-features
 
@@ -38,7 +38,7 @@ may pause and seek or add to Up next. Old movies called these watch rooms, with 
 
 Preconditions:
 
-- `$S doctor` passes on a `one-backend` side, and the side holds the seed.
+- `$S doctor` passes, and the side holds the seed.
 - Each person is a page of their own: `$S browser sign-in --page aiko --username aiko`, and the
   same for `mateo` and `kids`.
 

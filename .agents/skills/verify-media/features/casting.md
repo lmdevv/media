@@ -65,6 +65,6 @@ simulator lists no receivers; a real one is the owner's check.
   disconnected, so cast again after one.
 - Headless Chromium's own user agent has no `Chrome/` token, and the clients load the Cast SDK
   only for Chromium browsers, so a `--cast-fake` page gets desktop Chrome's agent. A phone page
-  (`--device "iPhone 15"`) keeps the iPhone's, which never casts, as in old movies.
+  (`--device "iPhone 15"`) keeps the iPhone's, which never casts.
 - The stack answers on `localhost`, so the Play on menu notes that a real Chromecast could not
   reach it. The scripted one runs in the page and reaches it.

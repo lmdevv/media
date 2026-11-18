@@ -5,13 +5,12 @@
 // --app when the page is created. verify-media.sh calls this; agents call it through
 // `verify-media.sh browser`.
 //
-//   node browser.mjs serve --state <dir> --base <movies url> [--account <url> [--core]] [--convex <url>] [--music <url>]
+//   node browser.mjs serve --state <dir> --base <movies url> --account <url> [--music <url>]
 //   node browser.mjs <command> --state <dir> [--app movies|music|account] [flags]
 //
-// With --core, the movies client has no sign-in of its own: it uses the session the account client
-// at --account keeps (the one-backend layout), so movies pages sign in, set up, invite, and join
-// there, and have no profiles. --music is the image's own music client (`<base>/music`), on that
-// same session and port.
+// The movies client has no sign-in of its own: it uses the session the account client at
+// --account keeps, so movies pages sign in, set up, invite, and join there. --music is the image's
+// own music client (`<base>/music`), on that same session and port.
 //
 // Where the host allows it, the browser runs in a private network namespace (see `isolate`),
 // because Chromium cancels its queued requests whenever any host interface gains or loses an
@@ -25,12 +24,12 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
-const OWNER = { name: "Lucía", email: "admin@movies.local", username: "lucia", password: "password123" };
+const OWNER = { username: "lucia", password: "password123" };
 const APPS = ["movies", "music", "account"];
 
 // Every socket lives in the side's state folder and is named relative to it: a socket address
 // holds at most 107 bytes, which a long TMPDIR and run name can pass.
-const SOCKETS = { control: "browser.sock", web: "web.sock", convex: "convex.sock", proxy: "proxy.sock" };
+const SOCKETS = { control: "browser.sock", web: "web.sock", proxy: "proxy.sock" };
 const NETWORK_CHANGED = "net::ERR_NETWORK_CHANGED";
 // How long a command may take on the host. With --timeout, each of its waits stops then and the
 // host answers right after; without it, setup waits for whole first scans.
@@ -64,8 +63,6 @@ const FLAGS = {
   state: { type: "string" },
   base: { type: "string" },
   account: { type: "string" },
-  core: { type: "boolean", default: false },
-  convex: { type: "string" },
   music: { type: "string" },
   "music-folder": { type: "string" },
   app: { type: "string" },
@@ -98,12 +95,8 @@ const FLAGS = {
   past: { type: "string" },
   advance: { type: "string" },
   js: { type: "string" },
-  email: { type: "string" },
   username: { type: "string" },
   password: { type: "string" },
-  profile: { type: "string" },
-  pin: { type: "string" },
-  kids: { type: "boolean", default: false },
   movies: { type: "string" },
   shows: { type: "string" },
   code: { type: "string" },
@@ -222,7 +215,7 @@ function namespaceUnavailable() {
 }
 
 async function serve(options) {
-  if (!options.base) throw new Error("serve needs --base");
+  if (!options.base || !options.account) throw new Error("serve needs --base and --account");
   const requested = process.env.MEDIA_VERIFY_BROWSER_NETWORK || "auto";
   if (!NETWORKS.includes(requested)) {
     throw new Error(`MEDIA_VERIFY_BROWSER_NETWORK must be ${NETWORKS.join(", ")}, not "${requested}"`);
@@ -244,7 +237,7 @@ async function serve(options) {
 // client, Convex, and streams) keeps its port number inside, so every origin stays
 // `http://localhost:<port>`. The proxy carries HTTPS to the internet for the Cast SDK, TMDB
 // images, and trailers.
-async function isolate({ base, account, core, convex, music }) {
+async function isolate({ base, account, music }) {
   const toHost = (port) =>
     createTcpServer(HALF_OPEN, (client) => pipe(client, connect({ ...HALF_OPEN, port, host: "127.0.0.1" })));
   const proxy = createServer((request, response) => {
@@ -265,7 +258,6 @@ async function isolate({ base, account, core, convex, music }) {
   });
   const relays = await Promise.all([
     listen(toHost(portOf(base, "base")), SOCKETS.web),
-    ...(convex ? [listen(toHost(portOf(convex, "convex")), SOCKETS.convex)] : []),
     listen(proxy, SOCKETS.proxy),
   ]);
 
@@ -275,8 +267,7 @@ async function isolate({ base, account, core, convex, music }) {
     PRIVATE_NETWORK,
     [
       process.execPath, fileURLToPath(import.meta.url), "serve-inside", "--state", ".", "--base", base,
-      ...(account ? ["--account", account] : []), ...(core ? ["--core"] : []),
-      ...(convex ? ["--convex", convex] : []),
+      "--account", account,
       ...(music ? ["--music", music] : []),
     ],
     { stdio: ["pipe", "inherit", "inherit"] },
@@ -286,7 +277,7 @@ async function isolate({ base, account, core, convex, music }) {
   process.on("SIGINT", stop);
   const finish = (code) => {
     for (const relay of relays) relay.close();
-    for (const socket of [SOCKETS.web, SOCKETS.convex, SOCKETS.proxy]) rmSync(socket, { force: true });
+    for (const socket of [SOCKETS.web, SOCKETS.proxy]) rmSync(socket, { force: true });
     if (code !== 0 && !existsSync(SOCKETS.control)) {
       console.error("the browser host stopped before it was ready (see above)");
     }
@@ -303,7 +294,6 @@ async function serveInside(options) {
   process.chdir(options.state);
   const toSocket = (socket) => createTcpServer(HALF_OPEN, (client) => pipe(client, connect({ ...HALF_OPEN, path: socket })));
   await listen(toSocket(SOCKETS.web), portOf(options.base, "base"), "127.0.0.1");
-  if (options.convex) await listen(toSocket(SOCKETS.convex), portOf(options.convex, "convex"), "127.0.0.1");
   const proxy = await listen(toSocket(SOCKETS.proxy), 0, "127.0.0.1");
   // Chromium never proxies loopback, so the apps' ports still reach the relays above.
   await drive(options, "isolated", [`--proxy-server=http://127.0.0.1:${proxy.address().port}`]);
@@ -311,7 +301,7 @@ async function serveInside(options) {
   process.stdin.resume();
 }
 
-async function drive({ base, account, core, music }, network, launchArgs) {
+async function drive({ base, account, music }, network, launchArgs) {
   const { chromium, devices } = await import("@playwright/test");
   const executablePath = process.env.CHROMIUM_PATH || undefined;
   const browser = await chromium.launch({
@@ -582,46 +572,10 @@ async function drive({ base, account, core, music }, network, launchArgs) {
     }
   };
 
-  // Signed-in pages land on the profile picker, or on a page with the app's main navigation.
-  const signedIn = (page) =>
-    page
-      .getByRole("heading", { name: "Who's watching?" })
-      .or(page.getByRole("navigation").first());
+  // Signed-in movies pages show the app's main navigation.
+  const signedIn = (page) => page.getByRole("navigation").first();
 
-  // Picks a profile on /profiles, entering its PIN when it has one, and waits for the app.
-  const chooseProfile = async (page, options) => {
-    await page.getByRole("heading", { name: "Who's watching?" }).waitFor({ timeout: timeout(options) });
-    await page.getByRole("button", { name: options.profile, exact: true }).click();
-    // A PIN profile asks for its PIN unless this session already unlocked it, as creating it does.
-    // The label names both the digits' group and the first digit, so ask for the textbox. The
-    // page doesn't focus it, so click it first, as a person does.
-    const pin = page.getByRole("textbox", { name: `${options.profile}'s PIN`, exact: true });
-    const left = page.waitForURL((url) => !appPathOf(page, url).startsWith("/profiles"), { timeout: timeout(options) });
-    if (await Promise.race([left.then(() => false), pin.waitFor({ timeout: timeout(options) }).then(() => true, () => false)])) {
-      if (!options.pin) throw new Error(`${options.profile} has a PIN; pass --pin`);
-      await pin.click();
-      await page.keyboard.type(options.pin);
-    }
-    await left;
-    return `watching as ${options.profile}`;
-  };
-
-  // Opens a path the way a person would, getting past the profile picker that a page load can
-  // land on: the app forgets nothing, but a fresh tab asks who's watching until one is chosen.
-  const visit = async (page, path, options) => {
-    await openAppPath(page, path);
-    const picker = page.getByRole("heading", { name: "Who's watching?" });
-    await picker.or(page.getByRole("main")).first().waitFor({ timeout: timeout(options) });
-    if (await picker.isVisible()) {
-      if (!options.profile) return;
-      await chooseProfile(page, options);
-    }
-  };
-
-  const openAccount = (page, path) => {
-    if (!account) throw new Error("this side has no account client");
-    return page.goto(new URL(path, account).href);
-  };
+  const openAccount = (page, path) => page.goto(new URL(path, account).href);
   const accountHome = (page, options) =>
     page.waitForURL((url) => url.pathname === "/home", { timeout: timeout(options) });
 
@@ -671,7 +625,7 @@ async function drive({ base, account, core, music }, network, launchArgs) {
       return code;
     },
     async join(page, options) {
-      if (!options.code || !options.username) throw new Error("join needs --code and --username on this side");
+      if (!options.code || !options.username) throw new Error("join needs --code and --username");
       await openAccount(page, `/invite#${options.code}`);
       await page.getByRole("heading", { name: "You're invited." }).waitFor({ timeout: timeout(options) });
       await page.getByLabel("Username").fill(options.username);
@@ -704,11 +658,7 @@ async function drive({ base, account, core, music }, network, launchArgs) {
     "create-account": ({ page }, options) => accountFlows.createAccount(page, options),
   };
 
-  const noProfiles = () => {
-    throw new Error("this side has no profiles: each person, a kid too, is their own user; sign in as them");
-  };
-
-  const coreMoviesCommands = {
+  const moviesCommands = {
     ...accountCommands,
     async "sign-in"(entry, options) {
       await accountFlows.signIn(entry.page, options);
@@ -716,8 +666,6 @@ async function drive({ base, account, core, music }, network, launchArgs) {
       await signedIn(entry.page).first().waitFor({ timeout: timeout(options) });
       return entry.page.url();
     },
-    profile: noProfiles,
-    "add-profile": noProfiles,
   };
 
   const commands = {
@@ -838,106 +786,10 @@ async function drive({ base, account, core, music }, network, launchArgs) {
   commands.audio = commands.video;
   commands["wait-audio"] = commands["wait-video"];
 
-  const moviesCommands = {
-    async "sign-in"({ page }, options) {
-      await openAppPath(page, "/sign-in");
-      await page.getByLabel("Email").fill(options.email ?? OWNER.email);
-      await page.getByLabel("Password", { exact: true }).fill(options.password ?? OWNER.password);
-      await page.getByRole("button", { name: "Sign in", exact: true }).click();
-      await page.waitForURL((url) => appPathOf(page, url) !== "/sign-in", { timeout: timeout(options) });
-      await signedIn(page).first().waitFor({ timeout: timeout(options) });
-      if (options.profile) return chooseProfile(page, options);
-      return page.url();
-    },
-    async profile({ page }, options) {
-      if (!options.profile) throw new Error("profile needs --profile NAME");
-      if (!appPathOf(page, new URL(page.url())).startsWith("/profiles")) await openAppPath(page, "/profiles");
-      return chooseProfile(page, options);
-    },
-    // First-run setup, as an owner does it on a fresh server: the owner account, the Movies
-    // library and its first scan, then the Shows library from Admin, Libraries.
-    async setup({ page }, options) {
-      const long = Number(options.timeout ?? 900_000);
-      await openAppPath(page, "/");
-      await page.waitForURL(/\/welcome/, { timeout: timeout(options) });
-      await page.getByLabel("Your name").fill(OWNER.name);
-      await page.getByLabel("Email").fill(OWNER.email);
-      await page.getByLabel("Password", { exact: true }).fill(OWNER.password);
-      await page.getByRole("button", { name: "Create admin account" }).click();
-      await page.waitForURL(/\/setup\/library/, { timeout: timeout(options) });
-      await page.getByRole("radio", { name: "Movies" }).click();
-      await page.getByLabel("Folder path", { exact: true }).fill(options.movies ?? "/media/library/Movies");
-      await page.getByRole("button", { name: "Save and start scan" }).click();
-      await page.waitForURL(/\/setup\/scan/, { timeout: timeout(options) });
-      await page.getByText("done", { exact: true }).waitFor({ timeout: long });
-      await page.getByRole("link", { name: "Continue to [movies]" }).click();
-      await page.waitForURL((url) => !url.pathname.startsWith("/setup"), { timeout: timeout(options) });
-      if (options.shows) {
-        await visit(page, "/admin/libraries", { ...options, profile: OWNER.name, pin: undefined });
-        await page.getByRole("button", { name: "Add library" }).click();
-        const dialog = page.getByRole("dialog", { name: "Add library" });
-        await dialog.getByLabel("Name").fill("Shows");
-        await dialog.getByRole("radio", { name: "Series" }).click();
-        await dialog.getByLabel("Folder 1").fill(options.shows);
-        await dialog.getByRole("button", { name: "Add library" }).click();
-        await dialog.waitFor({ state: "hidden", timeout: timeout(options) });
-      }
-      return `set up as ${OWNER.email}`;
-    },
-    // Adds a profile to the signed-in account from /profiles/new: a kids profile keeps the form's
-    // PG limit, and --pin sets a four-digit PIN.
-    async "add-profile"({ page }, options) {
-      if (!options.profile) throw new Error("add-profile needs --profile NAME");
-      await openAppPath(page, "/profiles/new");
-      await page.getByRole("heading", { name: "Add profile" }).waitFor({ timeout: timeout(options) });
-      await page.getByLabel("Name", { exact: true }).fill(options.profile);
-      if (options.kids) await page.getByRole("switch", { name: "Kids profile" }).click();
-      if (options.pin) {
-        await page.getByRole("switch", { name: "Profile PIN" }).click();
-        await page.getByRole("textbox", { name: "PIN", exact: true }).click();
-        await page.keyboard.type(options.pin);
-      }
-      await page.getByRole("button", { name: "Save" }).click();
-      await page.getByRole("button", { name: options.profile, exact: true }).waitFor({ timeout: timeout(options) });
-      return `added ${options.profile}`;
-    },
-    // Makes an invite link from Admin, Users and prints its code.
-    async invite({ page }, options) {
-      const role = options["invite-role"] ?? "member";
-      await visit(page, "/admin/users", { ...options, profile: options.profile ?? OWNER.name });
-      await page.getByRole("heading", { name: "New invite" }).waitFor({ timeout: timeout(options) });
-      const section = page.getByRole("region", { name: "New invite" });
-      if (await section.getByRole("button", { name: "Create another" }).isVisible()) {
-        await section.getByRole("button", { name: "Create another" }).click();
-      }
-      await section.getByLabel("Role").selectOption(role);
-      await section.getByRole("button", { name: "Create invite link" }).click();
-      const field = section.getByLabel("Invite link");
-      await field.waitFor({ timeout: timeout(options) });
-      const link = (await field.inputValue().catch(() => null)) ?? (await field.innerText());
-      const code = new URL(link.trim()).pathname.split("/").pop();
-      if (!code) throw new Error(`the invite link looks wrong: "${link}"`);
-      return code;
-    },
-    // Accepts an invite at /invite/<code> and makes the account, as the invited person does.
-    async join({ page }, options) {
-      if (!options.code || !options.name || !options.email) throw new Error("join needs --code, --name, and --email");
-      await openAppPath(page, `/invite/${options.code}`);
-      await page.getByRole("heading", { name: "You're invited." }).waitFor({ timeout: timeout(options) });
-      await page.getByLabel("Your name").fill(options.name);
-      const email = page.getByLabel("Email");
-      if (await email.isEditable()) await email.fill(options.email);
-      await page.getByLabel("Choose a password").fill(options.password ?? OWNER.password);
-      await page.getByRole("button", { name: "Accept and create account" }).click();
-      await page.waitForURL(/\/profiles/, { timeout: timeout(options) });
-      return `joined as ${options.email}`;
-    },
-  };
-
   const musicSignedIn = (page) =>
     page.getByRole("navigation", { name: "Library" }).or(page.getByRole("navigation", { name: "Main" }));
 
-  // The image's own music client signs in at `/`, as movies does on the one-backend layout.
+  // The image's own music client signs in at `/`, as movies does.
   const musicCommands = {
     ...accountCommands,
     async "sign-in"(entry, options) {
@@ -948,7 +800,7 @@ async function drive({ base, account, core, music }, network, launchArgs) {
     },
   };
   const appCommands = {
-    movies: core ? coreMoviesCommands : moviesCommands,
+    movies: moviesCommands,
     music: musicCommands,
     account: accountCommands,
   };
