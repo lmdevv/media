@@ -497,7 +497,10 @@ function PlayerSession({ params, attempt, onRestart, choices, carried }: PlayerS
     [started],
   );
 
-  const chapters = useMemo(() => chapterRows(started?.file.probe.chapters ?? []), [started]);
+  const chapters = useMemo(
+    () => (started === null ? [] : chapterRows(started.file.probe.chapters)),
+    [started],
+  );
 
   const more: ReadonlyArray<MoreItem> = [
     ...(download !== null || (!inSession && (together.mode !== "solo" || together.elsewhere))

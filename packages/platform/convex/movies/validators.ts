@@ -125,7 +125,7 @@ export const probe = v.object({
   video: v.array(videoStream),
   audio: v.array(audioStream),
   subtitles: v.array(subtitleStream),
-  chapters: v.optional(v.array(chapter)),
+  chapters: v.array(chapter),
 });
 
 /** Where a file's scrub thumbnails are and how they are laid out. */

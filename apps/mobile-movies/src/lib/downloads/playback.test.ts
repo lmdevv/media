@@ -23,6 +23,7 @@ const playback = Option.getOrThrow(
         video: [],
         audio: [],
         subtitles: [],
+        chapters: [],
       },
       externalSubtitles: [],
       hdr: false,

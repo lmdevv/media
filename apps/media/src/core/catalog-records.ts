@@ -174,7 +174,7 @@ const toMediaProbe = (probe: Probe): MediaProbe => {
       forced: subtitle.forced,
       hearingImpaired: subtitle.hearingImpaired ?? false,
     })),
-    chapters: (probe.chapters ?? []).map((chapter) => ({
+    chapters: probe.chapters.map((chapter) => ({
       startSeconds: chapter.startMs / 1000,
       endSeconds: chapter.endMs / 1000,
       title: chapter.title ?? undefined,

@@ -3606,14 +3606,12 @@ const movies_play_start = mutation({
             hearingImpaired: Schema.optionalKey(Schema.Boolean),
           }),
         ),
-        chapters: Schema.optionalKey(
-          Schema.Array(
-            Schema.Struct({
-              startMs: Schema.Finite,
-              endMs: Schema.Finite,
-              title: Schema.Union([Schema.String, Schema.Null]),
-            }),
-          ),
+        chapters: Schema.Array(
+          Schema.Struct({
+            startMs: Schema.Finite,
+            endMs: Schema.Finite,
+            title: Schema.Union([Schema.String, Schema.Null]),
+          }),
         ),
       }),
       externalSubtitles: Schema.Array(
@@ -3958,14 +3956,12 @@ const movies_titles_get = query({
               hearingImpaired: Schema.optionalKey(Schema.Boolean),
             }),
           ),
-          chapters: Schema.optionalKey(
-            Schema.Array(
-              Schema.Struct({
-                startMs: Schema.Finite,
-                endMs: Schema.Finite,
-                title: Schema.Union([Schema.String, Schema.Null]),
-              }),
-            ),
+          chapters: Schema.Array(
+            Schema.Struct({
+              startMs: Schema.Finite,
+              endMs: Schema.Finite,
+              title: Schema.Union([Schema.String, Schema.Null]),
+            }),
           ),
         }),
         externalSubtitles: Schema.Array(

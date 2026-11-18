@@ -52,6 +52,7 @@ const EMPTY_PROBE = {
   video: [],
   audio: [],
   subtitles: [],
+  chapters: [],
 };
 
 const seededTitle = v.object({

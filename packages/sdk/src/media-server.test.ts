@@ -110,6 +110,7 @@ const playbackAt = (mediaBaseUrl: string): Playback => ({
         video: [],
         audio: [],
         subtitles: [],
+        chapters: [],
       },
       externalSubtitles: [],
       hdr: false,

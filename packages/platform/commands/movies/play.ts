@@ -175,14 +175,8 @@ const startResult = v.object({
           hearingImpaired: v.optional(v.boolean()),
         }),
       ),
-      chapters: v.optional(
-        v.array(
-          v.object({
-            startMs: v.number(),
-            endMs: v.number(),
-            title: v.union(v.string(), v.null()),
-          }),
-        ),
+      chapters: v.array(
+        v.object({ startMs: v.number(), endMs: v.number(), title: v.union(v.string(), v.null()) }),
       ),
     }),
     externalSubtitles: v.array(

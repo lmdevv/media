@@ -92,6 +92,7 @@ const start: Pick<CoreStart, "episode" | "file" | "resumePositionMs"> = {
       video: [],
       audio: [],
       subtitles: [],
+      chapters: [],
     },
     externalSubtitles: [],
     hdr: false,

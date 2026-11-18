@@ -267,8 +267,8 @@ export const Probe = Schema.Struct({
   video: Schema.Array(VideoStream),
   audio: Schema.Array(AudioStream),
   subtitles: Schema.Array(SubtitleStream),
-  /** Chapters in start order; absent for files scanned before chapters were read. */
-  chapters: Schema.optionalKey(Schema.Array(Chapter)),
+  /** Chapters in start order. */
+  chapters: Schema.Array(Chapter),
 });
 
 /** What ffprobe reported about a file. */

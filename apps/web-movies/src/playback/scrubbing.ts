@@ -95,7 +95,7 @@ export const useScrubbing = (started: StartedPlayback | null): Scrubbing => {
   const loaded = useRef<ReadonlySet<string>>(new Set());
 
   const chapters = useMemo(
-    () => chapterOptions(started?.file.probe.chapters ?? [], tileAt),
+    () => (started === null ? [] : chapterOptions(started.file.probe.chapters, tileAt)),
     [started, tileAt],
   );
 
