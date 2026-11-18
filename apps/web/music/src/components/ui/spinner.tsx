@@ -1,6 +1,5 @@
 import { cn } from "@/lib/utils";
 
-/** The Paper ring spinner: a hairline circle with a quarter arc that turns. */
 export function Spinner({
   className,
   label = "Loading",

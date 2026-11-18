@@ -23,7 +23,7 @@ export interface TitlePosterProps {
   /** The 2:3 poster, or the title's wide still. */
   readonly artwork?: "poster" | "still";
   /**
-   * Tailwind width classes; Paper's rail widths for posters (112, 144 and 168pt by width class) and
+   * Tailwind width classes; rail widths for posters (112, 144 and 168pt by width class) and
    * stills (264, 320 and 360pt), and grids pass `flex-1`.
    */
   readonly widthClassName?: string;

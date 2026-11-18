@@ -14,7 +14,7 @@ import type { LinkTarget } from "@/lib/use-copy-link";
 import { usePlayTracks } from "./cards";
 
 /**
- * The album-style header from Paper (album, playlist, liked songs): a large cover beside a mono
+ * The album-style header (album, playlist, liked songs): a large cover beside a mono
  * eyebrow, the display title, a subtitle, and Play / Shuffle / more. Phones center it iOS-style
  * with Play and Shuffle pills.
  */

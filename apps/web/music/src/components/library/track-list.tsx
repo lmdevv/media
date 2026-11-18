@@ -106,7 +106,7 @@ const useRowPlay = (
 };
 
 /**
- * A list of songs with the Paper track row states: default, hover (play glyph and actions),
+ * A list of songs with the track row states: default, hover (play glyph and actions),
  * playing (accent bars and semibold title), plus like and the row menu everywhere.
  */
 export function TrackList({

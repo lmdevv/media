@@ -38,8 +38,8 @@ interface PhoneNowPlayingProps {
 }
 
 /**
- * Phone Now Playing: the full-screen player, queue, and lyrics (Paper 05 · 04, 04c, 04b) on the
- * linear art-tinted background, with the Play on sheet.
+ * Phone Now Playing: the full-screen player, queue, and lyrics on the linear art-tinted
+ * background, with the Play on sheet.
  */
 export function PhoneNowPlaying({ track, lyrics, view, onView }: PhoneNowPlayingProps) {
   const player = usePlayer();

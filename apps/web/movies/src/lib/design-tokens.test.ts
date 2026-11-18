@@ -59,7 +59,7 @@ describe("design tokens", () => {
     ).toEqual([]);
   });
 
-  it("uses Paper sizes instead of Tailwind's", () => {
+  it("uses theme sizes instead of Tailwind's", () => {
     expect(findings(TAILWIND_DEFAULT_SIZE, () => false)).toEqual([]);
   });
 

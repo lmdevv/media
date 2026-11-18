@@ -171,7 +171,6 @@ export function OfflineNotice({ variant, className }: OfflineNoticeProps) {
 /**
  * A tab that shows nothing without the server, on a launch that never reached it: where to find
  * the downloads instead, and Try again under the same rule as the notice. Nothing otherwise.
- * Paper draws no artboard for it; it follows page 19's empty state.
  */
 export function OfflineState({ body }: { readonly body: string }) {
   const { notice, retry } = useOfflineNotice();

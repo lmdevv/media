@@ -1,7 +1,7 @@
 /** The layout a window width gets. */
 export type WidthClass = "phone" | "tablet" | "wide";
 
-/** The widths, in points, where the iPad layouts start: Paper's `--breakpoint-*` tokens. */
+/** The widths, in points, where the iPad layouts start: the `--breakpoint-*` tokens. */
 export interface Breakpoints {
   readonly tablet: number;
   readonly wide: number;

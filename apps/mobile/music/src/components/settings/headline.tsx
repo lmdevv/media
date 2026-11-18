@@ -3,7 +3,7 @@ import { Text } from "@/components/ui/text";
 const TOP = { compact: "pt-6", regular: "pt-8", loose: "pt-12" } as const;
 
 export interface HeadlineProps {
-  /** Paper breaks the line by hand; pass `\n` where it does. */
+  /** The line breaks by hand; pass `\n` where it should break. */
   readonly children: string;
   readonly top: keyof typeof TOP;
 }

@@ -7,7 +7,7 @@ export interface SegmentedOption<Value extends string> {
 }
 
 /**
- * The Paper segmented control (Appearance, Jobs filter): a surface track with the chosen option
+ * The segmented control (Appearance, Jobs filter): a surface track with the chosen option
  * lifted onto the background. It is a radio group for assistive technology.
  */
 export function Segmented<Value extends string>({

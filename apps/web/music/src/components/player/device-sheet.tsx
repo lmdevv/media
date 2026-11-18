@@ -20,7 +20,7 @@ export function DeviceSheet() {
 }
 
 /**
- * "Play on" wherever the player bar's popover isn't: the phone sheet (Paper 07 · 04), and on
+ * "Play on" wherever the player bar's popover isn't: the phone sheet, and on
  * desktop a dialog when it was opened with nothing loaded or over Now Playing. Opened from the
  * command menu, the `d` key, or the phone Now Playing, so moving playback is always reachable.
  */

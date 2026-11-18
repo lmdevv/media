@@ -18,7 +18,7 @@ describe("layout", () => {
     expect(widthClassOf(1376, breakpoints)).toBe("wide");
   });
 
-  it("sizes an iPad's billboard from the window's height, as Paper draws it", () => {
+  it("sizes an iPad's billboard from the window's height", () => {
     expect(billboardHeight("regular", 1133)).toBe(702);
     expect(billboardHeight("wide", 1032)).toBe(722);
   });

@@ -4,8 +4,8 @@ import { Avatar } from "./avatar";
 import { Button } from "./button";
 
 /**
- * What a room member's row says at its right edge. Members in step say nothing: Paper removed the
- * routine "in sync" label as noise.
+ * What a room member's row says at its right edge. Members in step say nothing: a routine
+ * "in sync" label is noise.
  */
 export type RoomMemberStatus =
   /** Off the shared position by `label`, such as `-2.4s`. */

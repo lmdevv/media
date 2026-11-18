@@ -22,7 +22,7 @@ import { MoviesMark } from "@/components/shell/movies-mark";
 const timecode = (ms: number): string => formatTimecode(ms / 1000);
 
 /**
- * Paper 08 · 01: the session's link to copy, then Start. The session exists as soon as the dialog
+ * The session's link to copy, then Start. The session exists as soon as the dialog
  * opens, so the link works before it starts; Cancel ends it.
  */
 export function StartSessionDialog({
@@ -147,7 +147,7 @@ function Layer({
 }
 
 /**
- * Paper 08 · 03: a member catching up to the session. When the browser wants a click before it
+ * A member catching up to the session. When the browser wants a click before it
  * plays, a Join button gives it one.
  */
 export function SyncingToSession({
@@ -178,7 +178,7 @@ export function SyncingToSession({
   );
 }
 
-/** Paper 08 · 06: the host went away, so the session waits for them; go on alone or leave. */
+/** The host went away, so the session waits for them; go on alone or leave. */
 export function HostAway({
   hostName,
   positionMs,
@@ -312,7 +312,7 @@ const noticeText = (notice: SessionNotice): NoticeText =>
   );
 
 /**
- * Paper 08 · 07: the session page without a player: a link that cannot be joined, waiting for the
+ * The session page without a player: a link that cannot be joined, waiting for the
  * host, or a session playing something the person may not watch.
  */
 export function SessionPage({

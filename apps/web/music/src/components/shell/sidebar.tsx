@@ -67,7 +67,7 @@ function PlaylistLink({
 }
 
 /**
- * The desktop library sidebar from Paper: wordmark and ⌘K, main navigation, your playlists, and
+ * The desktop library sidebar: wordmark and ⌘K, main navigation, your playlists, and
  * your account. Light mode insets it as a rounded surface; dark mode draws it as a panel.
  */
 export function Sidebar() {

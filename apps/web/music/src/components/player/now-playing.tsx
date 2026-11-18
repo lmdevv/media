@@ -12,8 +12,7 @@ import { PhoneNowPlaying } from "./now-playing-phone";
 
 /**
  * Now Playing, always on the art-tinted dark background. Desktop opens on the cover and can add the
- * queue or the lyrics beside it (Paper 05 · 01, 01c, 01b); phones get the full-screen player,
- * queue, and lyrics (05 · 04, 04c, 04b).
+ * queue or the lyrics beside it; phones get the full-screen player, queue, and lyrics.
  */
 export function NowPlaying() {
   const { nowPlaying, setNowPlaying } = useUi();

@@ -304,7 +304,6 @@ export interface GridSpacing {
   readonly gap: number;
 }
 
-/** Paper's grid spacing for each width class, the same as `px-5 gap-2`, `px-8 gap-3`, `px-12 gap-3`. */
 export const GRID_SPACING: Readonly<Record<WidthClass, GridSpacing>> = {
   compact: { gutter: 20, gap: 8 },
   regular: { gutter: 32, gap: 12 },

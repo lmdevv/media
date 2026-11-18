@@ -114,7 +114,7 @@ const badgesOf = (
   return badges.filter((badge): badge is string => badge !== null && badge !== "");
 };
 
-/** The badges Paper draws after a title's facts, in order: resolution, HDR, codec, audio, CC. */
+/** The badges after a title's facts, in order: resolution, HDR, codec, audio, CC. */
 export const fileBadges = (file: MediaFile): ReadonlyArray<string> =>
   badgesOf(
     file.probe.video[0],

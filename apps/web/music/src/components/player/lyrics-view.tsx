@@ -16,7 +16,7 @@ import { formatDuration } from "@/lib/format";
 
 import { perform } from "./player-actions";
 
-/** Which Now Playing shows the lyrics: desktop (Paper 05 · 01b) or phone (05 · 04b). */
+/** Which Now Playing shows the lyrics: desktop or phone. */
 export type LyricsLayout = "desktop" | "phone";
 
 const LAYOUTS = {

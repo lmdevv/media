@@ -75,7 +75,7 @@ export const usePlayArtist = (): ((artistId: ArtistId, shuffle?: boolean) => Pro
 };
 
 /**
- * The heavy screen title with a mono eyebrow, from the Paper desktop headers.
+ * The heavy screen title with a mono eyebrow, for desktop headers.
  *
  * @param eyebrow - The line above the title; `null` while it loads, which keeps its line so the
  *   page doesn't move down when it arrives.

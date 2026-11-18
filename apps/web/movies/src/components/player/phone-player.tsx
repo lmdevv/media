@@ -1,7 +1,6 @@
 /**
- * The player on phones, as Paper's iOS artboards draw it: glass circle buttons, a centered
- * transport, Netflix-style brightness (left) and volume (right) sliders, and track pills
- * (07 · 10 iOS · Player).
+ * The player on phones: glass circle buttons, a centered transport, Netflix-style brightness (left)
+ * and volume (right) sliders, and track pills.
  *
  * Web pages cannot change the screen's brightness, so the brightness slider dims the video itself;
  * iPhones keep the volume with their buttons, so the volume slider shows only where the page can
@@ -176,7 +175,7 @@ export function TrackPill({
 }
 
 /**
- * Paper 07 · 10: the landscape phone controls over the video.
+ * The landscape phone controls over the video.
  *
  * @param volume - The page's volume, or null where only the hardware buttons set it.
  * @param tracks - Track pills, usually wrapped in a track popover.
@@ -345,7 +344,7 @@ export function PhoneControls({
 }
 
 /**
- * Paper 08 · 08: the video overlays of a group session on a phone held upright, with the session
+ * The video overlays of a group session on a phone held upright, with the session
  * under the video: who hosts, or play and pause for a member who may control, and full screen.
  */
 export function PhoneSessionVideoChrome({

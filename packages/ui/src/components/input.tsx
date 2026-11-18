@@ -3,7 +3,7 @@ import { cn } from "@media/ui/lib/utils";
 import type { ComponentProps } from "react";
 
 /**
- * The Paper text input: 44px, raised fill, hairline border. `aria-invalid` turns the border to the
+ * The text input: 44px, raised fill, hairline border. `aria-invalid` turns the border to the
  * danger color. Use {@link TextField} for a labeled field with an error line.
  */
 export function Input({ className, ...props }: ComponentProps<"input">) {

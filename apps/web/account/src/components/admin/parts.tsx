@@ -172,7 +172,7 @@ export interface Choice<Value extends string> {
 }
 
 /**
- * A labeled native select drawn as the Paper dropdown field. Native, so it opens the platform
+ * A labeled native select drawn as the dropdown field. Native, so it opens the platform
  * picker and works with the keyboard and screen readers.
  */
 export function SelectField<Value extends string>({

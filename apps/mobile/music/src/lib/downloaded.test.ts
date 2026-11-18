@@ -63,7 +63,7 @@ const song: DownloadedItem = {
 const usage = { tracks: 55, bytes: 2_400_000_000, freeBytes: 41_000_000_000 };
 
 describe("Downloaded", () => {
-  it("words each finished download as Paper's D10 does", () => {
+  it("words each finished download by kind and artist", () => {
     expect(downloadedLine(album)).toEqual({
       text: "Album · Massive Attack",
       glyph: null,

@@ -28,7 +28,7 @@ function Layer({
   );
 }
 
-/** Paper 04: welcome back, with where the person stopped, and resume or start over. */
+/** Welcome back, with where the person stopped, and resume or start over. */
 export function ResumePrompt({
   titleLabel,
   personName,
@@ -88,7 +88,7 @@ export function ResumePrompt({
   );
 }
 
-/** Paper 07: negotiating and loading a stream, with where it will start. */
+/** Negotiating and loading a stream, with where it will start. */
 export function PreparingStream({
   titleLabel,
   startAtMs,
@@ -132,7 +132,7 @@ export function PreparingStream({
   );
 }
 
-/** Paper 06: the stream stalled; the ring fills as the buffer refills. */
+/** The stream stalled; the ring fills as the buffer refills. */
 export function Buffering({ fraction }: { readonly fraction: number }) {
   const percent = Math.round(Math.min(1, Math.max(0, fraction)) * 100);
 
@@ -144,7 +144,7 @@ export function Buffering({ fraction }: { readonly fraction: number }) {
   );
 }
 
-/** Paper 08: a path failed and the player negotiates the next one. */
+/** A path failed and the player negotiates the next one. */
 export function TryingAnotherWay({
   positionMs,
   onBack,
@@ -173,7 +173,7 @@ export function TryingAnotherWay({
 }
 
 /**
- * Paper 09: a calm stop. `missing` is the file that was moved or went offline; other stops say
+ * A calm stop. `missing` is the file that was moved or went offline; other stops say
  * what happened in `title` and `description`.
  */
 export function PlaybackStopped({

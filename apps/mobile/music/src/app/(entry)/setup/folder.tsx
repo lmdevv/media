@@ -15,7 +15,6 @@ import { parseFolders } from "@/lib/library-folders";
 import { useCore } from "@/lib/platform";
 import { useSetupProgress } from "@/session/session-phase";
 
-/** Who can listen, as Paper offers it: everyone on the server, or only the owner. */
 type Listeners = "shared" | "private";
 
 const LISTENERS = [

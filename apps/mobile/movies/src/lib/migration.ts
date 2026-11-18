@@ -38,7 +38,6 @@ export interface UserRow {
   readonly options: ReadonlyArray<UserOption>;
 }
 
-/** How the choice that skips a source user reads on iOS, in title case like Paper's actions. */
 const SKIP_LABEL = "Don’t Import";
 
 const toUserId = Schema.decodeUnknownSync(UserId);

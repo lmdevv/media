@@ -29,7 +29,7 @@ import { DeviceList } from "./devices";
 import { shownSurface } from "./play-on";
 
 /**
- * The desktop player bar from Paper: the song on the left, transport and progress in the middle,
+ * The desktop player bar: the song on the left, transport and progress in the middle,
  * quality, queue, device, and volume on the right. It shows the buffering, stream error, media
  * offline, and remote control states. Volume stays with the device that plays, as Connect keeps no
  * remote volume (ADR 0018), so the bar hides it while another device plays.

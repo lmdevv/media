@@ -22,7 +22,7 @@ export interface NavBarProps {
   readonly trailing?: ReactNode;
   /**
    * What Back does: pop by default (no Back on a stack's root), a replacement where the page is a
-   * stack's root but Paper still draws Back (Connect goes to Welcome), or null for no Back at all.
+   * stack's root but still has Back (Connect goes to Welcome), or null for no Back at all.
    */
   readonly onBack?: (() => void) | null;
 }

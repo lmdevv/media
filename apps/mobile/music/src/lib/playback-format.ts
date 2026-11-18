@@ -20,9 +20,10 @@ export const clock = (ms: number): string => {
     : `${minutes}:${seconds}`;
 };
 
-/** The time left, with Paper's true minus sign (U+2212): `−2:50`. */
+const MINUS_SIGN = "\u2212";
+
 export const remainingClock = (positionMs: number, durationMs: number): string =>
-  `−${clock(Math.max(0, durationMs - Math.floor(positionMs / 1000) * 1000))}`;
+  `${MINUS_SIGN}${clock(Math.max(0, durationMs - Math.floor(positionMs / 1000) * 1000))}`;
 
 /** How far through the song `positionMs` is, from 0 to 1. */
 export const progressOf = (positionMs: number, durationMs: number): number =>

@@ -4,7 +4,7 @@ import { cn } from "@media/ui/lib/utils";
 import type { VariantProps } from "class-variance-authority";
 
 /**
- * A Paper button. Pick the `variant` by role and the `size` by context: `lg` on the hero, `md` in
+ * A button. Pick the `variant` by role and the `size` by context: `lg` on the hero, `md` in
  * forms and rows, `sm` in panels, `pill` on phones, `icon` for the round icon button (give it an `aria-label`).
  */
 export function Button({

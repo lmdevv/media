@@ -20,7 +20,7 @@ function Block({
 }
 
 /**
- * The billboard placeholder. `inset` draws Paper's scanning layout: a rounded box inside the page
+ * The billboard placeholder. `inset` draws the scanning layout: a rounded box inside the page
  * margins; otherwise it fills the hero's full-bleed space.
  */
 export function HeroSkeleton({ inset = false }: { readonly inset?: boolean }) {

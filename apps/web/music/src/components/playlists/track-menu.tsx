@@ -237,7 +237,7 @@ function TrackMenuKeys({
 }
 
 /**
- * The track row menu from Paper (05 Add to playlist): play next, add to queue, add to a playlist,
+ * The track row menu: play next, add to queue, add to a playlist,
  * like, go to the album or artist, and file info. `extra` adds context items such as "Remove from
  * this playlist".
  */

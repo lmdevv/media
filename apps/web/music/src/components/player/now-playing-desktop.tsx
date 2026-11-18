@@ -35,8 +35,8 @@ interface DesktopNowPlayingProps {
 }
 
 /**
- * Desktop Now Playing on the radial art-tinted background: the cover first (Paper 05 · 01), and
- * the queue (05 · 01c) or the lyrics (05 · 01b) beside the player when their toggle is on.
+ * Desktop Now Playing on the radial art-tinted background: the cover first, and the queue or the
+ * lyrics beside the player when their toggle is on.
  */
 export function DesktopNowPlaying({ track, lyrics, view, onView }: DesktopNowPlayingProps) {
   const colors = useArtColors(track.artUrl, track.albumId);

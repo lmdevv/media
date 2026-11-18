@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { cn } from "./utils";
 
 describe("cn", () => {
-  it("keeps a Paper text size next to a Paper text color", () => {
+  it("keeps a theme text size next to a theme text color", () => {
     expect(cn("text-micro/3.5", "text-on-accent")).toBe("text-micro/3.5 text-on-accent");
     expect(cn("text-label/label text-danger")).toBe("text-label/label text-danger");
   });
@@ -14,7 +14,7 @@ describe("cn", () => {
     expect(cn("text-text", "text-danger")).toBe("text-danger");
   });
 
-  it("knows the labelled Paper literals", () => {
+  it("knows the labelled theme literals", () => {
     expect(cn("text-small/5", "text-text-muted")).toBe("text-small/5 text-text-muted");
     expect(cn("font-hero", "text-text")).toBe("font-hero text-text");
     expect(cn("border-control border-text-muted")).toBe("border-control border-text-muted");

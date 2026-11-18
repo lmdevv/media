@@ -534,7 +534,6 @@ function AutoplaySection({
   );
 }
 
-/** The desktop queue panel from Paper (02 Queue panel), beside the main column. */
 export function QueuePanel() {
   const { setQueueOpen } = useUi();
   const { current, queued, source } = useUpNext();

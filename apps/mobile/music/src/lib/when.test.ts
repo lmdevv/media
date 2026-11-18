@@ -11,7 +11,7 @@ const hours = (count: number) => count * minutes(60);
 const days = (count: number) => count * hours(24);
 
 describe("ago", () => {
-  it("words recent times as Paper's key rows do", () => {
+  it("words recent times relative to now", () => {
     expect(ago(now - 20_000, now)).toBe("just now");
     expect(ago(now - minutes(1), now)).toBe("1 minute ago");
     expect(ago(now - minutes(12), now)).toBe("12 minutes ago");

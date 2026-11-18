@@ -3,7 +3,7 @@ import { cn } from "@media/ui/lib/utils";
 import { CheckIcon } from "lucide-react";
 
 /**
- * The Paper checkbox: an 18px box with a muted outline that fills Netflix red with a check when
+ * The checkbox: an 18px box with a muted outline that fills Netflix red with a check when
  * on, as in Create API key. Label it with a wrapping `<label>` or `aria-label`.
  */
 export function Checkbox({ className, ...props }: CheckboxPrimitive.Root.Props) {

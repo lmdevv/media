@@ -7,7 +7,6 @@ export const Popover = PopoverPrimitive.Root;
 /** The element that opens a {@link Popover}. Use `render` to supply your own button. */
 export const PopoverTrigger = PopoverPrimitive.Trigger;
 
-/** The raised panel from the Paper overlays: 12px radius, hairline border, soft shadow. */
 export function PopoverContent({
   className,
   align = "end",

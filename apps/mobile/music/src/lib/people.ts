@@ -61,7 +61,6 @@ export const ROLE_ACCESS: Readonly<Record<AssignableRole, Callout>> = {
   },
 };
 
-/** The roles to offer on an invite or a role change, in Paper's order. */
 export const ROLE_OPTIONS: ReadonlyArray<AssignableRole> = ["member", "admin"];
 
 export const assignedRole = (role: Role): AssignableRole | null =>

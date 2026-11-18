@@ -8,7 +8,7 @@ const RADIUS = 30;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 
 /**
- * A circular progress ring: a faint full circle and an arc from the top, clockwise. Paper draws it
+ * A circular progress ring: a faint full circle and an arc from the top, clockwise. It shows
  * for buffering (72px, with the percentage below), a guest catching up to the room, and a host's
  * connection (56px, white arc). `spinning` turns it for waits without a measure.
  *

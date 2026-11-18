@@ -38,7 +38,7 @@ const buttonVariants = cva(
 export type ButtonVariants = VariantProps<typeof buttonVariants>;
 
 /**
- * A pill button. Pass `pending` while its action runs: it shows the Paper "Saving…" state and
+ * A pill button. Pass `pending` while its action runs: it shows the "Saving…" state and
  * ignores clicks until the action settles.
  */
 export function Button({

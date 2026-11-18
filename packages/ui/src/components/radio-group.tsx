@@ -14,7 +14,7 @@ export function RadioGroup({ className, ...props }: RadioGroupPrimitive.Props) {
 }
 
 /**
- * The Paper radio: a 16px muted ring that becomes a thick Netflix-red ring around a white center
+ * The radio: a 16px muted ring that becomes a thick Netflix-red ring around a white center
  * when chosen, as in the metadata match picker and the migration source. Label it with a wrapping
  * `<label>`.
  */

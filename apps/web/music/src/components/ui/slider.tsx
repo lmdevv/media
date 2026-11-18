@@ -2,7 +2,7 @@ import { Slider as SliderPrimitive } from "@base-ui/react/slider";
 import { cn } from "@/lib/utils";
 
 /**
- * The thin Paper progress and volume bar. The fill uses `fillClassName` (accent for playback,
+ * The thin progress and volume bar. The fill uses `fillClassName` (accent for playback,
  * text for volume) and a thumb appears on hover or while dragging. `aria-label` names the range
  * input inside the thumb, which is what assistive technology reads.
  */

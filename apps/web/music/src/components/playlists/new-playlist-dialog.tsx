@@ -20,7 +20,6 @@ import { createPlaylist } from "@/lib/playlist-adds";
 import { startsWith } from "./start-with";
 import type { StartWith } from "./start-with";
 
-/** The New playlist dialog from Paper (06 · 02): a name and what the playlist starts with. */
 export function NewPlaylistDialog() {
   const { newPlaylist, closeNewPlaylist } = useUi();
 

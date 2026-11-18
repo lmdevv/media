@@ -37,7 +37,7 @@ function FullscreenGlyph(props: ComponentProps<"svg">) {
 
 /**
  * A bare transport button: a white glyph with a label for assistive tech. `active` draws the
- * translucent square Paper puts behind an open panel's button. The glyph takes no pointer events:
+ * translucent square behind an open panel's button. The glyph takes no pointer events:
  * a glyph swapped under the pointer, as mute swaps it, would take the pointer's `pointerout` with
  * it, and React would miss the pointer leaving.
  */

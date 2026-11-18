@@ -10,7 +10,6 @@ import { perform, playingElsewhere } from "@/components/player/player-actions";
 
 import { useUi } from "./ui-state";
 
-/** The frosted capsule surface Paper draws for phone bars; code adds the blur. */
 export const glassClassName =
   "border-hairline border-text/10 bg-surface-raised/78 shadow-glass backdrop-blur-xl backdrop-saturate-150";
 
@@ -234,7 +233,7 @@ function PhoneSearchField() {
 }
 
 /**
- * The phone chrome from Paper: a fade, the glass mini player, and the floating capsule tab bar
+ * The phone chrome: a fade, the glass mini player, and the floating capsule tab bar
  * (Home, Playlists, Library) with a separate search circle. On the search screen the circle
  * becomes Home and the capsule becomes the search field.
  */

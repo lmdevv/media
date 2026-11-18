@@ -4,7 +4,7 @@ import { View } from "react-native";
 import { Button } from "@/components/ui/button";
 
 /**
- * Each button's width: half the row, or in an iPad header its natural width but at least Paper's
+ * Each button's width: half the row, or in an iPad header its natural width but at least
  * 160pt, so a longer label such as Add songs never truncates.
  */
 export const PAIR_WIDTHS = { fill: "flex-1", natural: "min-w-ios-160" } as const;

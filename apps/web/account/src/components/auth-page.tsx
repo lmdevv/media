@@ -68,8 +68,8 @@ export function Lede({ children }: { readonly children: ReactNode }) {
 }
 
 /**
- * A password field with the eye button that shows the password. `hint` adds the check line Paper
- * draws under a new password once it is long enough.
+ * A password field with the eye button that shows the password. `hint` adds the check line under a
+ * new password once it is long enough.
  */
 export function PasswordField({
   hint,

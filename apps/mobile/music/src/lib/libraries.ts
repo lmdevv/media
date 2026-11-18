@@ -23,7 +23,6 @@ export const librariesSummary = (libraries: ReadonlyArray<Pick<LibraryView, "ite
     "song",
   )}`;
 
-/** Who-can-listen choices in Paper's order (F15, F17). */
 export const REACHES: ReadonlyArray<{ readonly value: LibraryReach; readonly label: string }> = [
   { value: "shared", label: "Shared" },
   { value: "private", label: "Private" },

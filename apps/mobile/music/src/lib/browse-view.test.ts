@@ -10,7 +10,7 @@ describe("decodeView", () => {
     expect(decodeView(encodeView(view))).toEqual(view);
   });
 
-  it("falls back to Paper's defaults when nothing usable is stored", () => {
+  it("falls back to the defaults when nothing usable is stored", () => {
     expect(decodeView(null)).toEqual(DEFAULT_VIEW);
     expect(decodeView("{}")).toEqual(DEFAULT_VIEW);
     expect(

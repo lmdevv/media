@@ -182,7 +182,7 @@ const usePanelColor = (song: NowPlaying): string => {
 };
 
 /**
- * The pane beside the content (B1, B2). Paper's 320pt cover leaves the body too little room in a
+ * The pane beside the content. A 320pt cover leaves the body too little room in a
  * short window, so there the cover drops to a row beside the song.
  */
 export function InspectorPane({
@@ -241,8 +241,8 @@ export function InspectorPane({
 }
 
 /**
- * The sheet above the player bar (B3), in the frame's flow so the page above stays scrollable to
- * its end. Paper draws it at the 13-inch iPad's width; a `tablet` window keeps the body's 320pt by
+ * The sheet above the player bar, in the frame's flow so the page above stays scrollable to its
+ * end. It is laid out for the 13-inch iPad's width; a `tablet` window keeps the body's 320pt by
  * shrinking the cover, or in narrow Split View dropping it, and gives the title the header's
  * label's place to the song's buttons.
  */
