@@ -19,7 +19,7 @@ const isJobId = (value: unknown): value is Id<"jobs"> => Schema.is(Schema.String
 
 const JobId = Schema.declare(isJobId);
 
-const Lease = Schema.Struct({ jobId: JobId, attempt: Schema.Finite });
+export const Lease = Schema.Struct({ jobId: JobId, attempt: Schema.Finite });
 
 export type Lease = typeof Lease.Type;
 
