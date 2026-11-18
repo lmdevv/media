@@ -85,14 +85,6 @@ export const PlaybackSessionId = Schema.NonEmptyString.pipe(
 /** A playback session ID. */
 export type PlaybackSessionId = typeof PlaybackSessionId.Type;
 
-/** A watch room: a shared timeline that members follow. */
-export const RoomId = Schema.NonEmptyString.pipe(Schema.brand("RoomId")).annotate({
-  [CONVEX_TABLE_ANNOTATION]: "rooms",
-});
-
-/** A watch room ID. */
-export type RoomId = typeof RoomId.Type;
-
 /** An API key. The secret itself is never stored. */
 export const ApiKeyId = Schema.NonEmptyString.pipe(Schema.brand("ApiKeyId")).annotate({
   [CONVEX_TABLE_ANNOTATION]: "apiKeys",
@@ -140,14 +132,3 @@ export const PersonId = Schema.NonEmptyString.pipe(Schema.brand("PersonId")).ann
 
 /** A person ID. */
 export type PersonId = typeof PersonId.Type;
-
-/**
- * A client-generated identifier, stable per browser profile, CLI install, or TV app. It separates
- * concurrent devices on one profile; it is not a Convex document ID.
- */
-export const DeviceId = Schema.NonEmptyString.check(Schema.isMaxLength(128)).pipe(
-  Schema.brand("DeviceId"),
-);
-
-/** A client device ID. */
-export type DeviceId = typeof DeviceId.Type;
