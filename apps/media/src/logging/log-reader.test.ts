@@ -46,7 +46,7 @@ const LINES = [
 const messages = (query: LogQuery) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    const directory = yield* fs.makeTempDirectoryScoped({ prefix: "movies-logs-" });
+    const directory = yield* fs.makeTempDirectoryScoped({ prefix: "media-logs-" });
 
     yield* TestClock.setTime(BASE);
 
@@ -140,7 +140,7 @@ layer(NodeServices.layer)("log queries", (it) => {
   it.effect("reads up to until a record logged just before its file began", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "movies-logs-" });
+      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "media-logs-" });
 
       yield* TestClock.setTime(BASE);
 
@@ -168,7 +168,7 @@ layer(NodeServices.layer)("log queries", (it) => {
   it.effect("reads a file whose modification time a share kept coarser than its records", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "movies-logs-" });
+      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "media-logs-" });
 
       yield* TestClock.setTime(BASE);
 
@@ -199,7 +199,7 @@ layer(NodeServices.layer)("log queries", (it) => {
   it.effect("follows: matching lines written after the query arrive live", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "movies-logs-" });
+      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "media-logs-" });
 
       yield* TestClock.setTime(BASE);
 
@@ -264,7 +264,7 @@ layer(NodeServices.layer)("log order across rotations", (it) => {
   it.effect("reads the newest record last after a burst rotated and pruned many files", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "movies-logs-" });
+      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "media-logs-" });
 
       yield* TestClock.setTime(BASE);
 
@@ -303,7 +303,7 @@ layer(NodeServices.layer)("log order across rotations", (it) => {
   it.effect("keeps write order and every record in its window when the clock steps back", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "movies-logs-" });
+      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "media-logs-" });
       const hour = 3_600_000;
 
       yield* TestClock.setTime(BASE);
@@ -340,7 +340,7 @@ describe("log queries without a log", () => {
     it.effect("finds nothing in an empty folder", () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
-        const directory = yield* fs.makeTempDirectoryScoped({ prefix: "movies-logs-" });
+        const directory = yield* fs.makeTempDirectoryScoped({ prefix: "media-logs-" });
 
         const logs = yield* RetainedLogs.make({
           directory,

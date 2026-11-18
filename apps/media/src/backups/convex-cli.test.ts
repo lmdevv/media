@@ -29,7 +29,7 @@ const cliIn = Effect.fnUntraced(function* () {
   const path = yield* Path.Path;
 
   const backendDir = yield* fs.realPath(
-    yield* fs.makeTempDirectoryScoped({ prefix: "movies-convex-cli-" }),
+    yield* fs.makeTempDirectoryScoped({ prefix: "media-convex-cli-" }),
   );
 
   const bin = path.join(backendDir, "node_modules", "convex", "bin");

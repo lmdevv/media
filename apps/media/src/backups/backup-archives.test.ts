@@ -38,13 +38,13 @@ describe("archive names", () => {
 
   it("refuse paths, hidden files, and other extensions", () => {
     for (const name of [
-      "../movies-manual-2026-10-12T03-00-00-000Z.zip",
+      "../media-manual-2026-10-12T03-00-00-000Z.zip",
       "/etc/passwd.zip",
       "a/b.zip",
       "a\\b.zip",
       ".zip",
       "..zip",
-      ".partial-movies.zip",
+      ".partial-media.zip",
       "snapshot.tar",
       "",
     ]) {
@@ -54,14 +54,14 @@ describe("archive names", () => {
     expect(Archives.isArchiveName("snapshot_1791828740404486415.zip")).toBe(true);
   });
 
-  it("name archives for the product, and read the names old movies wrote", () => {
+  it("name archives for the product, and read the trigger and time back from the name", () => {
     expect(Archives.archiveName("manual", 0)).toBe("media-manual-1970-01-01T00-00-00-000Z.zip");
 
-    expect(Archives.parseArchiveName("movies-nightly-2026-10-12T03-00-00-000Z.zip")).toEqual(
+    expect(Archives.parseArchiveName("media-nightly-2026-10-12T03-00-00-000Z.zip")).toEqual(
       Option.some({ trigger: "nightly", takenAt: Date.parse("2026-10-12T03:00:00.000Z") }),
     );
 
-    expect(Archives.parseArchiveName("music-nightly-2026-10-12T03-00-00-000Z.zip")).toEqual(
+    expect(Archives.parseArchiveName("snapshot-nightly-2026-10-12T03-00-00-000Z.zip")).toEqual(
       Option.none(),
     );
   });

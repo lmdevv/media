@@ -5,12 +5,8 @@ import { Duration, Option } from "effect";
 /** Why a backup ran. */
 export type BackupTrigger = BackupArchive["trigger"];
 
-/**
- * An archive name this service writes, `media-…`, or one old movies wrote, `movies-…`, which a
- * restore still reads.
- */
-const NAME =
-  /^(?:media|movies)-(nightly|manual)-(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z\.zip$/u;
+/** An archive name this service writes. */
+const NAME = /^media-(nightly|manual)-(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z\.zip$/u;
 
 const ARCHIVE = /^[^./\\][^/\\]*\.zip$/u;
 

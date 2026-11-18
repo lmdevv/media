@@ -27,7 +27,6 @@ import {
   type LogFile,
   nextSequence,
   orderOf,
-  planMigration,
   planPrune,
   type Retention,
   shouldRotate,
@@ -406,24 +405,9 @@ export const make = Effect.fn("RetainedLogs.make")(function* (settings: Settings
 
   const close = Deferred.succeed(closing, undefined).pipe(Effect.asVoid);
 
-  const migrate = fs.readDirectory(settings.directory).pipe(
-    Effect.flatMap((names) =>
-      Effect.forEach(
-        planMigration(names),
-        ([from, to]) =>
-          fs
-            .rename(path.join(settings.directory, from), path.join(settings.directory, to))
-            .pipe(Effect.ignore),
-        { discard: true },
-      ),
-    ),
-    Effect.ignore,
-  );
-
   const startedAt = yield* Clock.currentTimeMillis;
 
   yield* ensureDirectory.pipe(Effect.catch((error) => failed(startedAt, error)));
-  yield* migrate;
   yield* Effect.forEach(
     yield* listFiles.pipe(Effect.orElseSucceed(() => [])),
     (file) => fs.chmod(path.join(settings.directory, file.name), FILE_MODE).pipe(Effect.ignore),

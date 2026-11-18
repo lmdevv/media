@@ -33,9 +33,6 @@ const SEQUENCE_DIGITS = 12;
 
 const NAME = /^media-(\d{12,})-(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(\d{3})Z\.ndjson$/u;
 
-const LEGACY_NAME =
-  /^media-(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(\d{3})Z(?:-([1-9]\d*))?\.ndjson$/u;
-
 const compactTime = (time: number): string =>
   new Date(time).toISOString().replaceAll(/[-:.]/gu, "");
 
@@ -60,41 +57,6 @@ export const orderOf = (name: string): Option.Option<FileOrder> => {
     sequence: Number(match[1]),
     startsAt,
   }));
-};
-
-interface LegacyFile {
-  readonly name: string;
-  readonly startsAt: number;
-  readonly tie: number;
-}
-
-/**
- * The renames that give files under the earlier naming a place after every current file, in the
- * order the earlier naming listed them: by start time, then by suffix.
- */
-export const planMigration = (
-  names: ReadonlyArray<string>,
-): ReadonlyArray<readonly [from: string, to: string]> => {
-  const next = Math.max(
-    0,
-    ...names.flatMap((name) => Option.toArray(orderOf(name)).map((order) => order.sequence + 1)),
-  );
-
-  const legacy = names
-    .flatMap((name): ReadonlyArray<LegacyFile> => {
-      const match = LEGACY_NAME.exec(name);
-
-      if (match === null) return [];
-
-      return Option.toArray(timeOf(match.slice(1, 8))).map((startsAt) => ({
-        name,
-        startsAt,
-        tie: Number(match[8] ?? 0),
-      }));
-    })
-    .toSorted((left, right) => left.startsAt - right.startsAt || left.tie - right.tie);
-
-  return legacy.map((file, index) => [file.name, fileName(next + index, file.startsAt)] as const);
 };
 
 /** The sequence a new file takes after `files`: one past the largest. */
