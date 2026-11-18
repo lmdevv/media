@@ -54,9 +54,9 @@ two runs on their own. Each side of a run owns these resources and nothing else:
 | Simulator  | `media-verify-<run>-<side>` on `darwin`, made by `ios up`                               |
 | Evidence   | `captures/verify/<run>/`, gitignored and kept after `down`                              |
 
-Never drive or touch anything not named `media-verify-*`. The owner runs a real `movies` stack
-on this host (`movies-convex` and the NixOS media service), plus `music` containers; they hold
-real data. The owner's shell may also export settings for their own servers, so never run
+Never drive or touch anything not named `media-verify-*`. The owner runs a real Lar on this host:
+the `media-core-convex` container and the NixOS module's `media-server` and `media-proxy` units,
+which hold real data. The owner's shell may also export settings for their own servers, so never run
 `apps/cli/dist/media.js` directly: `$S cli` strips those and gives each person their own
 `XDG_CONFIG_HOME`. `scripts/dev-stack.sh` rewrites the `.env.local` files the owner's `pnpm dev`
 reads, so this skill never calls it. Compose sees only the settings `up` writes, never a `deploy/compose/.env`
@@ -132,9 +132,9 @@ $S up --side before    # the before side: pull ghcr.io/lmdevv/media:main
    of kind Music. Each queues its first scan.
 5. It signs Lucía's CLI in with her password (`media auth login --username lucia`) and waits
    until the movies libraries are really done: every library scanned and no scan, metadata, or
-   scrub-thumbnail job pending or running. The core has no command that lists jobs, so the wait
-   reads the media service's `CoreJobs.claimed` and `CoreJobs.job_ended` log records
-   (`core-seed.mjs wait`).
+   scrub-thumbnail job pending or running. The wait reads the media service's `CoreJobs.claimed`
+   and `CoreJobs.job_ended` log records (`core-seed.mjs wait`); afterwards
+   `$S cli -- admin jobs list` lists the same jobs.
 6. It seeds the demo people: in movies, the people, the kid, library access, and watching
    (`core-seed.mjs seed`); in music, the Music library's
    grants, playlists, likes, and sharing (`music-core-seed.mjs`). Each seed checks that each
@@ -167,9 +167,12 @@ the CPU.
 | `--no-seed`                     | Stop after setup: only Lucía and the libraries                         |
 | `--no-setup`                    | Leave fresh servers, to verify first-run setup itself                   |
 
-`up` leaves the browser host running in the background, and it keeps every file descriptor `up`
-inherited. Under `flock(1)`, that is the lock, held until `down`: take it with `flock -o`, which
-closes it for the command, or run `$S browser restart` outside the lock after `up`.
+`up` leaves the browser host running in the background, in a session of its own where `setsid(1)`
+exists, so a harness that stops a finished command's process group leaves it running. It keeps
+every file descriptor `up` inherited. Under `flock(1)`, that is the lock, held until `down`: take
+it with `flock -o`, which closes it for the command, or run `$S browser restart` outside the lock
+after `up`. When the host is gone anyway (`doctor` fails `browser host answers`),
+`$S browser restart` starts it again on the running stack.
 
 The image holds the checkout as it was at `up`. After you change code, run `down --side after`
 and `up` again. `doctor` fails when the checkout has moved on since the build. Changes only to
@@ -217,7 +220,7 @@ personal or unlicensed.
     page reads `This title isn't here`, and the CLI's `titles get` fails.
   - The kid (`kids`) sees Big Buck Bunny, Caminandes, and Cosmos Laundromat.
 - **Watching.** Aiko stopped Elephants Dream halfway and watched Pioneer One episodes 1 and 2, so
-  her `Continue watching for Aiko` row shows `Pioneer One · S1:E3` (next: Alone in the Night) and
+  her `Continue watching for aiko` row shows `Pioneer One · S1:E3` (next: Alone in the Night) and
   `Elephants Dream` (50% watched). Her My List holds Sintel, Tears of Steel, and Caminandes;
   Mateo's holds Cosmos Laundromat.
 - **Music.** Setup adds a `Music` library over `/media/library/Music` from the account client's
@@ -277,7 +280,7 @@ paths inside the page's app: a movies page opens `/title/<id>` at `/movies/title
 
 Each page belongs to one app, which `--app` picks when the page is created: `movies` (the default),
 `music`, or `account`, the account client at `/`. A later command on the page needs no `--app`. With `--app music`, `--page` defaults to
-`music` instead of `main`; `up` signs `music` in as Lucía. A command that names a page with the
+`music` instead of `main`, and with `--app account` to `account`; `up` signs `music` in as Lucía. A command that names a page with the
 other app fails, so give each app's pages their own names.
 
 Name an element with exactly one of these flags, the way the app's ARIA tree names it:
@@ -286,7 +289,8 @@ Name an element with exactly one of these flags, the way the app's ARIA tree nam
 - `--label L`, `--text T`, or `--testid ID`.
 - `--css S` is the last resort, for elements with no accessible name.
 
-Scope with `--in role[=name]`, such as `--in main` or `--in region="Continue watching for Aiko"`.
+Scope with `--in role[=name]`, such as `--in main` or `--in region="Continue watching for aiko"`;
+the name after `=` is matched whole, capitals included.
 Pick one of several matches with `--nth K` (from 0). Without `--nth`, a locator that matches
 several elements fails. Names match by substring unless you pass `--exact`: `Play` without it also
 matches `Play from start`.
@@ -311,7 +315,7 @@ matches `Play from start`.
 | `network`                                        | Prints `isolated` or `host` and the Chromium's pid           |
 | `cast --value A` or `cast --advance S`           | Plays the scripted Chromecast's part on a page made with `--cast-fake`: `devicesAppear`, `holdConnection`, `completeConnection`, `finish`, `fail`, `disconnect`, `refetch`, or moves its position to S seconds |
 | `cast-state`                                     | Prints what the scripted Chromecast loaded, fetched, and plays, as JSON |
-| `restart`                                        | Restarts the host after `browser.mjs` changed; signs `main` and `music` in again as Lucía |
+| `restart`                                        | Restarts the host after `browser.mjs` changed, or starts one that died; signs `main` and `music` in again as Lucía, and every other page is gone |
 
 Movies, music, and account pages take these. They act in the account client, in the page's own browser context, so the session a movies page
 reads is the one they leave:
@@ -339,7 +343,7 @@ it. On that first command, `--device "iPhone 15"` (any Playwright device name) m
 and `--width W --height H` sets the window. `--cast-fake` puts the scripted Chromecast the
 Playwright suites cast to (`apps/web-movies/e2e/playback/cast-fake.ts`), named `Living Room TV`, in
 the new page in place of Google's Cast SDK; `cast` and `cast-state` drive and read it. `--tab-of P`
-instead makes it another tab of page P: the same context, size, and sign-in, as in `$S browser open / --page aiko-2 --tab-of aiko`, to
+instead makes it another tab of page P: the same app, context, size, and sign-in, as in `$S browser open / --page aiko-2 --tab-of aiko`, to
 check what a second tab sees. `close-page` on a tab closes that tab alone. Each app follows the system theme: a movies page is
 dark unless `--light`, and a music page is light unless `--dark`, as each app defaults. Only
 `main` (Lucía) and `music` are signed in by `up`, so start a new page with `sign-in`, as in
@@ -358,11 +362,18 @@ builds it from this checkout for the after side. Each signed in to the core with
 `auth sessions current`, and for admins `admin users list`, and `movies stream <title>` to get a
 stream URL for a local player. A command typed without its group, such as `titles list`, exits 2
 and names the command to use. A command whose arguments nest takes `--json
-'<object>'`. Output is JSON. Exit codes: `0` ok, `1` failed, `2` usage, `3` unauthenticated, `4`
-forbidden, `5` notFound. `$S cli -- --help` lists every command.
+'<object>'`. A yes-or-no flag is `--flag` or `--no-flag`: `--playing false` means `--playing`
+with a stray word, and plays. Output is JSON. Exit codes: `0` ok, `1` failed, `2` usage, `3`
+unauthenticated, `4` forbidden, `5` notFound, `6` conflict, `7` expired, `8` rateLimited, `9`
+unavailable. `$S cli -- --help` lists every command, and `$S cli -- <group> --help` a group's.
 
-Music is the media CLI's `music` group: `$S cli --as aiko -- music albums list`. `cli` takes no
-`--app`, and refuses one with that hint.
+`auth login` may name a config of its own, to verify a sign-in itself:
+`$S cli --as probe -- auth login --server http://localhost:<port>/convex` prints a device code to
+approve at `/device`, and `--api-key` or `--username U` reads the key or password from stdin.
+After `up --no-setup` and the owner step, the same command without `--as` signs Lucía's CLI in.
+
+Music is the media CLI's `music` group: `$S cli --as aiko -- music albums list`. `cli` needs no
+`--app`, and refuses `--app music` with that hint.
 
 The CLI is built from this checkout, so on the before side it talks to main's server: a command
 that is new in the checkout fails there.
@@ -428,8 +439,8 @@ It prints `ready: ios <side> on simulator <udid>` when the app shows Home. Then:
 | `ios appearance light\|dark`                     | Switches the system appearance                          |
 | `ios doctor`                                     | Checks the forwards, Metro, the simulator, and that the Mac reaches the web app and Convex |
 | `ios orientation portrait\|landscape`            | Turns the simulator and checks the app's window turned  |
-| `ios open <path>`                                | Opens an app path, such as `/title/<id>`, and accepts iOS's `Open in` prompt |
-| `ios matrix --out DIR [--orientations portrait,landscape] [--screens a,b]` | Screenshots each screen a layout change reaches, in each orientation, as `<device>-<orientation>-<screen>.png` |
+| `ios open <path>`                                | Opens an app path with the running app's scheme (`movies://` or `music://`), such as `/title/<id>` or `/jam/<link>`, and accepts iOS's `Open in` prompt |
+| `ios matrix --out DIR [--orientations portrait,landscape] [--screens a,b]` | Movies app only. Screenshots each screen a layout change reaches, in each orientation, as `<device>-<orientation>-<screen>.png` |
 | `ios down`                                       | Removes this side's simulator, Metro, and forwards      |
 
 Read labels from `ios describe` before you tap; never guess coordinates. A label is the whole
@@ -525,12 +536,17 @@ never kills by process name. The demo library image stays for the next run. Evid
 
 ## Feature map
 
-`features/README.md` indexes what movies does and what proves each feature works, and
-`features/music/README.md` does the same for music. Read the feature's file before you drive
-it, and add to the map when a change adds a feature.
+`features/README.md` indexes what movies and the account client do and what proves each feature
+works, and `features/music/README.md` does the same for music. Read the feature's file before you
+drive it, and add to the map when a change adds a feature.
 
 ## Gotchas
 
+- `open` returns when the page has loaded, before the app's data arrives: a `snapshot` straight
+  after it can print an empty `main`. `wait` for an element first.
+- `Recently added` follows the order each side scanned its files, so Home's row and a grid's
+  default order differ between two sides with the same data. Pick `Sort`, `Name` before you compare
+  a grid, and expect that row to differ.
 - `--show-actions` draws a pointer and step titles on the page while a recording runs, and they
   also show in screenshots taken then. Take stills outside a recording.
 - A recording runs in real time, and scripted steps finish in about a second, too fast to follow.

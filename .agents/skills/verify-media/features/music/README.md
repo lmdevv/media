@@ -3,8 +3,8 @@
 This directory is the maintained source for verifying what a Lar Music user sees and does on a
 verify-media side: the music client at `/music`, the `media` CLI's `music` group, and the music
 iOS app. Read this index before you drive the app, then use the matching feature file as the
-recipe. Every browser command takes `--app music` on the page's first command, and every CLI
-command starts with `music`.
+recipe. Every browser command takes `--app music` on the page's first command, and the CLI's
+music commands start with `music`; Connect's are `auth targets`.
 
 ## Baseline preconditions
 
@@ -26,7 +26,8 @@ command starts with `music`.
 - Start every recipe from the baseline state unless its preconditions say otherwise.
 - Prefer ARIA roles and accessible names over CSS.
 - Treat every command as literal. Keep quoted names and flags unchanged.
-- Run browser actions through `$S browser --app music` and the CLI through `$S cli -- music`.
+- Run browser actions through `$S browser --app music` and the CLI through `$S cli -- music`
+  (`$S cli -- auth targets` for Connect).
 - A recipe that changes data (a playlist, a like) leaves it there. Remove it through the app or
   the CLI when the next recipe needs the baseline. Never remove proof artifacts.
 
@@ -59,11 +60,13 @@ commands, and observable proof.
 
 - [Music library](./library.md) covers adding the `Music` library from the account client's
   Admin, Libraries, its scan, and opening `/music` with the same sign-in.
+- [Browse](./browse.md) covers Home, the Albums, Artists, and Songs pages, an artist's page, and
+  Liked songs with the like button.
 - [Playback](./playback.md) covers playing, pausing, and skipping with real audio on desktop and
   phone web, the queue and history from the CLI, and the music iOS app.
 - [Search](./search.md) covers the search page, the `/` shortcut, accent folding, and CLI search.
 - [Playlists](./playlists.md) covers creating, adding to, renaming, and deleting playlists from
-  the web and the CLI.
+  the web and from the CLI.
 - [Casting](../casting.md) covers casting a song to a scripted Chromecast from Play on, the cast on
   another device's list, and AirPlay in the iOS app's Now Playing.
 - [Connect](./connect.md) covers "Play on": moving playback between a person's devices, pausing,

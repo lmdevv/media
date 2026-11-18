@@ -8,7 +8,7 @@ import { after, before, describe, test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
-import { cliEnv, grantArgs, GRANTS, KID_LIMITS, openJobs, scanState } from "./core-seed.mjs";
+import { cliEnv, FOREIGN_SETTINGS, grantArgs, GRANTS, KID_LIMITS, openJobs, scanState } from "./core-seed.mjs";
 import { ALBUMS, LIKES, LISTENERS, MUSIC_GRANTS, PLAYLISTS } from "./music-core-seed.mjs";
 
 const here = (file) => fileURLToPath(new URL(file, import.meta.url));
@@ -134,6 +134,19 @@ for (const network of ["isolated", "host"]) {
       const result = await browser("--app", "movies", "--page", "music", "open", "/");
       assert.equal(result.status, 1);
       assert.match(result.stderr, /page music is a music page/);
+    });
+
+    test("opens another tab of a page in that page's app", async () => {
+      const tab = await browser("--page", "music-tab", "--tab-of", "music", "open", "/");
+      assert.equal(tab.status, 0, tab.stderr);
+      assert.equal(tab.stdout.trim(), `http://localhost:${portOf(servers.media)}/music/`);
+      const pages = await browser("pages");
+      assert.match(pages.stdout, /^music-tab\tmusic\t/m);
+      const again = await browser("--tab-of", "music", "open", "/");
+      assert.equal(again.status, 1, "a tab needs a page name of its own");
+      assert.match(again.stderr, /page main is open already; name a new --page for a tab of music/);
+      const closed = await browser("--page", "music-tab", "close-page");
+      assert.equal(closed.status, 0, closed.stderr);
     });
 
     test("gives a movies page the account client's commands", async () => {
@@ -617,6 +630,67 @@ esac
     assert.match(movies.stderr, /no CLI session on the after side/);
   });
 
+  test("signs a CLI config of its own in, and names the sign-in when a person has none", () => {
+    const login = withSide(
+      'cli_raw() { echo "as=$as $*"; }; cmd_cli --side after --as probe -- auth login --server http://core; [[ -d "$state/cli/probe" ]] && echo config',
+    );
+    assert.equal(login.status, 0, login.stderr);
+    assert.match(login.stdout, /^as=probe auth login --server http:\/\/core$/m);
+    assert.match(login.stdout, /^config$/m);
+    const refused = withSide(
+      'cli_raw() { return 3; }; cmd_cli --side after --as refused -- auth login --server http://core || echo "status $?"; [[ -d "$state/cli/refused" ]] || echo "no config"',
+    );
+    assert.match(refused.stdout, /^status 3$/m);
+    assert.match(refused.stdout, /^no config$/m);
+    const stranger = withSide("cmd_cli --side after --as stranger -- movies titles list");
+    assert.equal(stranger.status, 1);
+    assert.match(
+      stranger.stderr,
+      /no CLI session for stranger .* `cli --as stranger -- auth login --server http:\/\/localhost:4100\/convex` prints a code to approve at \/device/,
+    );
+  });
+
+  test("strips the same settings from a person's CLI in the helper and in the seeds", () => {
+    const line = execFileSync("grep", ["-A1", "^  env -u MEDIA_", helper], { encoding: "utf8" });
+    assert.deepEqual([...line.matchAll(/-u (MEDIA_\w+)/g)].map((match) => match[1]).sort(), [...FOREIGN_SETTINGS].sort());
+  });
+
+  test("keeps a restart from killing a process that is not this side's browser host", () => {
+    const result = withSide(
+      'write_state browser.pid "$$"; is_browser_host "$$" && echo host; start_browser() { echo "start $1"; }; cmd_browser --side after restart',
+    );
+    assert.equal(result.status, 0, result.stderr);
+    assert.doesNotMatch(result.stdout, /^host$/m);
+    assert.match(result.stdout, /^start die$/m, "a failed restart fails without removing the side");
+    assert.match(result.stdout, /^browser host restarted$/m);
+  });
+
+  test("points a browser command at restart when the host is gone", () => {
+    const result = withSide("cmd_browser --side after url");
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /no browser host on the after side; run `browser restart --side after`/);
+  });
+
+  test("looks a matrix title up with the movies search command", () => {
+    const result = withSide(
+      `mkdir -p "$state/cli/lucia"; cli_raw() { echo "$*" >&2; echo '[{"id":"title-0","name":"Sintel: The Making"},{"id":"title-1","name":"Sintel"}]'; }; title_id Sintel`,
+    );
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout.trim(), "title-1");
+    assert.match(result.stderr, /^movies titles search --query Sintel$/m);
+  });
+
+  test("opens a path with the scheme of the app the simulator runs, and keeps the matrix to movies", () => {
+    const opened = withSideOffline(
+      'write_state ios_app music; udid() { echo SIM; }; on_mac() { echo "$1"; }; ios_agent_once() { return 1; }; ios_open /jam/abc',
+    );
+    assert.equal(opened.status, 0, opened.stderr);
+    assert.match(opened.stdout, /^xcrun simctl openurl SIM music:\/\/\/jam\/abc$/m);
+    const matrix = withSideOffline('write_state ios_app music; ios_matrix --out "$state/matrix"');
+    assert.equal(matrix.status, 1);
+    assert.match(matrix.stderr, /ios matrix lists the movies app's screens, and the after side runs the music app/);
+  });
+
   test("refuses the music iOS app on an image without the music client before it touches the Mac", () => {
     const result = withSideOffline(
       "write_state people lucia; write_state music_core 0; args=(up --app music); mac=nowhere.invalid cmd_ios_up",
@@ -697,7 +771,7 @@ describe("the core seed", () => {
   });
 
   test("gives each person's CLI their own config and none of the caller's servers", () => {
-    const env = cliEnv("/state", "aiko", { PATH: "/bin", MEDIA_CORE_URL: "http://real", MEDIA_CONVEX_URL: "http://real", MEDIA_CORE_API_KEY: "k" });
+    const env = cliEnv("/state", "aiko", { PATH: "/bin", MEDIA_CORE_URL: "http://real", MEDIA_CORE_SIGN_IN_URL: "http://real/api/auth/sign-in", MEDIA_CORE_API_KEY: "k" });
     assert.deepEqual(env, { PATH: "/bin", XDG_CONFIG_HOME: "/state/cli/aiko" });
   });
 });

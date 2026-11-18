@@ -39,6 +39,8 @@ Preconditions:
 - **Add.** As Lucía on `main`, open Big Buck Bunny's page (see [Browse](./browse.md)) and run
   `$S browser click --role button --name "Add to My List" --in main`. The button becomes
   `Remove from My List` `[pressed]`, and `$S cli -- movies my-list list` includes `Big Buck Bunny`.
+- **Remove.** Run `$S browser click --role button --name "Remove from My List" --in main`. The
+  button reads `Add to My List` again, and `$S cli -- movies my-list list` no longer includes it.
 - **Next episode.** As Aiko, run
   `$S browser click --page aiko --role link --name "Resume Pioneer One" --in region="Continue watching for aiko"`
   and `$S browser wait-video --page aiko --past 3 --timeout 60000`. The player reads

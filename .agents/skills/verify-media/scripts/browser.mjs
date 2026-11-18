@@ -823,10 +823,13 @@ async function drive({ base, account, music }, network, launchArgs) {
       return saved ? `closed ${options.page}; saved ${saved}` : `closed ${options.page}`;
     }
     const existing = pages.get(options.page);
+    if (existing && options["tab-of"]) {
+      throw new Error(`page ${options.page} is open already; name a new --page for a tab of ${options["tab-of"]}`);
+    }
     if (existing && options.app && options.app !== existing.app) {
       throw new Error(`page ${options.page} is a ${existing.app} page; name another --page for ${options.app}`);
     }
-    const app = existing?.app ?? options.app ?? "movies";
+    const app = existing?.app ?? options.app ?? pages.get(options["tab-of"])?.app ?? "movies";
     const run = appCommands[app][options.command] ?? commands[options.command];
     if (!run) throw new Error(`unknown ${app} command "${options.command}"`);
     const entry = await pageFor(options, app);

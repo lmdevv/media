@@ -189,11 +189,18 @@ browser() {
   CHROMIUM_PATH="$(chromium_path)" ${cli_timeout:+timeout --kill-after=5 "$cli_timeout"} node "$scripts/browser.mjs" --state "$state" "$@"
 }
 
+# Starts the browser host. When it doesn't start, `up` removes the side (`start_failed`), and a
+# restart on a running stack only fails (`die`): `$1` names which.
 start_browser() {
+  local failed="${1:-start_failed}"
   rm -f "$state/browser.sock"
   local music=()
   music_core && music=(--music "$(music_url)")
-  CHROMIUM_PATH="$(chromium_path)" nohup node "$scripts/browser.mjs" serve --state "$state" \
+  # Its own session where setsid(1) exists, so a harness that stops the process group of the command
+  # that ran `up` leaves the host running.
+  local own_session=()
+  command -v setsid >/dev/null && own_session=(setsid)
+  CHROMIUM_PATH="$(chromium_path)" nohup "${own_session[@]}" node "$scripts/browser.mjs" serve --state "$state" \
     --base "$(movies_url)/" --account "$(url)" "${music[@]}" > "$state/browser.log" 2>&1 &
   write_state browser.pid "$!"
   for _ in $(seq 1 100); do
@@ -201,11 +208,17 @@ start_browser() {
       sed -n 's/^browser: /verify-media: /p' "$state/browser.log" >&2
       return 0
     fi
-    kill -0 "$(read_state browser.pid)" 2>/dev/null || { cat "$state/browser.log" >&2; start_failed "the browser host exited"; }
+    kill -0 "$(read_state browser.pid)" 2>/dev/null || { cat "$state/browser.log" >&2; "$failed" "the browser host exited"; }
     sleep 0.2
   done
   cat "$state/browser.log" >&2
-  start_failed "the browser host did not start in 20s"
+  "$failed" "the browser host did not start in 20s"
+}
+
+# Whether a pid is this side's browser host. A host that was killed leaves its pid on file, and the
+# number may be another process's by now.
+is_browser_host() {
+  [[ -n "$1" ]] && ps -p "$1" -o args= 2>/dev/null | grep -qF "browser.mjs serve --state $state "
 }
 
 # Runs one step of `up`, such as signing in or seeding, within some seconds: `browser`, the CLIs,
@@ -223,8 +236,8 @@ within() {
 # The CLI for one person, with their own config folder, so sessions never mix. Lucía is the owner.
 as="lucia"
 cli_raw() {
-  env -u MEDIA_CONVEX_URL -u MEDIA_SERVER_URL -u MEDIA_API_KEY -u MEDIA_PROFILE -u MEDIA_PASSWORD \
-    -u MEDIA_CORE_URL -u MEDIA_CORE_API_KEY -u MEDIA_CORE_ADMIN_KEY XDG_CONFIG_HOME="$state/cli/$as" ${cli_timeout:+timeout --kill-after=5 "$cli_timeout"} node "$cli_js" "$@"
+  env -u MEDIA_SERVER_URL -u MEDIA_PROFILE -u MEDIA_PASSWORD -u MEDIA_CORE_URL -u MEDIA_CORE_SIGN_IN_URL \
+    -u MEDIA_CORE_API_KEY -u MEDIA_CORE_ADMIN_KEY XDG_CONFIG_HOME="$state/cli/$as" ${cli_timeout:+timeout --kill-after=5 "$cli_timeout"} node "$cli_js" "$@"
 }
 
 # Signs a person's CLI in with their username and password, the way `media auth login` documents it.
@@ -236,9 +249,6 @@ cli_login() {
 # Who a person's CLI is signed in as.
 cli_whoami() { cli_raw auth sessions current; }
 
-# Waits until the `want` libraries' first scans and their follow-up jobs are done, in core-seed.mjs:
-# the core has no command that lists jobs, so it reads the media service's log for the jobs a scan
-# queues.
 wait_libraries() {
   within 900 "the first scans" core_seed wait --cli "$cli_js" --container "$(container media)" --want "$1" ||
     start_failed "the first scans failed; see \`logs --side $side\`"
@@ -478,16 +488,18 @@ cmd_doctor() {
 
 cmd_browser() {
   take_side "$@"
-  [[ -S "$state/browser.sock" ]] || die "no browser host on the $side side; run \`up --side $side\`"
+  [[ -n "$(read_state port)" ]] || die "no $side side in run $run; run \`up --side $side\`"
   if [[ "${args[0]:-}" == restart ]]; then
     local pid tries=0
     pid="$(read_state browser.pid)"
-    kill "$pid" 2>/dev/null || true
-    while kill -0 "$pid" 2>/dev/null; do
-      (( ++tries <= 300 )) || die "the browser host $pid did not stop"
-      sleep 0.1
-    done
-    start_browser
+    if is_browser_host "$pid"; then
+      kill "$pid" 2>/dev/null || true
+      while is_browser_host "$pid"; do
+        (( ++tries <= 300 )) || die "the browser host $pid did not stop"
+        sleep 0.1
+      done
+    fi
+    start_browser die
     if [[ -n "$(read_state people)" ]]; then
       browser sign-in >/dev/null
       [[ -n "$(read_state music/people)" ]] && browser sign-in --app music >/dev/null
@@ -497,6 +509,7 @@ cmd_browser() {
     fi
     return
   fi
+  [[ -S "$state/browser.sock" ]] || die "no browser host on the $side side; run \`browser restart --side $side\`"
   browser "${args[@]}"
 }
 
@@ -515,9 +528,18 @@ cmd_cli() {
       *) break ;;
     esac
   done
+  if [[ "${1:-} ${2:-}" == "auth login" ]]; then
+    # A sign-in that fails leaves no config behind, so the next command still names the sign-in.
+    local made=0 code=0
+    [[ -d "$state/cli/$as" ]] || { mkdir -p "$state/cli/$as"; made=1; }
+    cli_raw "$@" || code=$?
+    ((code == 0 || made == 0)) || rm -rf "$state/cli/$as"
+    return "$code"
+  fi
   [[ -d "$state/cli/$as" ]] || {
-    [[ "$as" == lucia ]] && die "no CLI session on the $side side; up ran with --no-setup"
-    die "no CLI session for $as on the $side side; up ran with --no-seed, or $as is not a seeded person"
+    local login="cli${as:+ --as $as} -- auth login --server $(convex_url)"
+    [[ "$as" == lucia ]] && die "no CLI session on the $side side; up ran with --no-setup. After the owner step, sign in with \`printf %s <password> | cli -- auth login --server $(convex_url) --username lucia\`"
+    die "no CLI session for $as on the $side side; up ran with --no-seed, or $as is not a seeded person. \`$login\` prints a code to approve at /device and waits for it; with \`--username U\` or \`--api-key\` it reads the password or key from stdin"
   }
   cli_raw "$@"
 }
@@ -997,10 +1019,9 @@ ios_turned() {
   if [[ "$1" == portrait ]]; then ((${size% *} < ${size#* })); else ((${size% *} > ${size#* })); fi
 }
 
-# Opens an app path, such as /title/<id>, as a link to the app's own scheme. Expo Router routes it.
 # iOS often asks "Open in Lar Movies?" first; agent-device reads the system's alert and accepts it.
 ios_open() {
-  on_mac "xcrun simctl openurl $(udid) $(printf %q "movies://$1")"
+  on_mac "xcrun simctl openurl $(udid) $(printf %q "$(ios_app)://$1")"
   local _
   for _ in 1 2 3 4; do
     ios_agent_once alert wait 3000 >/dev/null 2>&1 || return 0
@@ -1033,6 +1054,7 @@ ios_matrix() {
     esac
   done
   [[ -n "$out" ]] || die "ios matrix needs --out DIR"
+  [[ "$(ios_app)" == movies ]] || die "ios matrix lists the movies app's screens, and the $side side runs the $(ios_app) app"
   mkdir -p "$out"
   local device orientation screen name path screens alert
   device="$(slug "$(read_state ios_device)")"
@@ -1082,8 +1104,6 @@ you|/you
 history|/history
 settings|/settings
 appearance|/settings/appearance
-profiles|/switch-profile
-manage-profiles|/manage-profiles
 account|/account
 owner|/owner
 libraries|/owner/libraries
@@ -1093,10 +1113,11 @@ SCREENS
 }
 
 title_id() {
-  "$0" cli --side "$side" -- search "$1" --limit 1 | node -e '
-    const [title] = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+  (cmd_cli --side "$side" -- movies titles search --query "$1") | node -e '
+    const titles = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+    const title = titles.find((found) => found.name === process.argv[1]);
     if (title === undefined) process.exit(1);
-    console.log(title.id);'
+    console.log(title.id);' "$1"
 }
 
 ios_down() {

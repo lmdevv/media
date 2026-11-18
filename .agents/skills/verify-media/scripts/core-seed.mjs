@@ -76,8 +76,8 @@ const missing = (what) => {
 
 /**
  * The core jobs still open in the media service's log: claimed and never ended. The service logs
- * one JSON record per line; the core has no command that lists jobs. Order doesn't count, since
- * Docker keeps the service's two output streams apart.
+ * one JSON record per line. Order doesn't count, since Docker keeps the service's two output
+ * streams apart.
  */
 export const openJobs = (log) => {
   const claimed = new Set();
@@ -115,12 +115,11 @@ export const scanState = (libraries, jobs, want) => {
 
 /** The settings in the caller's shell that would point a CLI at another server or person. */
 export const FOREIGN_SETTINGS = [
-  "MEDIA_CONVEX_URL",
   "MEDIA_SERVER_URL",
-  "MEDIA_API_KEY",
   "MEDIA_PROFILE",
   "MEDIA_PASSWORD",
   "MEDIA_CORE_URL",
+  "MEDIA_CORE_SIGN_IN_URL",
   "MEDIA_CORE_API_KEY",
   "MEDIA_CORE_ADMIN_KEY",
 ];
