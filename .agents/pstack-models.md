@@ -1,4 +1,4 @@
-# Movies pstack model configuration
+# [media] pstack model configuration
 
 Project-local adaptation of pstack's per-role configuration. This file replaces
 `~/.cursor/rules/pstack-models.mdc` and `~/.claude/rules/pstack-models.md` for pstack skills used in

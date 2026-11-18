@@ -12,8 +12,8 @@ This skill runs the real products on one demo library, mounted read-only:
   movies client at `/movies`, which uses the sign-in the account client keeps, and the media
   service, with the library at `/media/library` (ADR 0026). Movies' data lives in the core.
 - **Music.** The image serves the music client (`/app/music`) at `/music` on the same port and
-  session as movies, with its data in the core: `up` records `music_core`. An image from before
-  the music client, `--library fixtures`, or `up --no-music` runs movies alone.
+  session as movies, with its data in the core: `up` records `music_core`. An image without
+  `/app/music`, `--library fixtures`, or `up --no-music` runs movies alone.
 
 A run has two sides, each its own Compose project with one container, the image, for both
 products:
@@ -353,11 +353,11 @@ from the tree.
 `$S cli [--side S] [--as mateo|aiko|sam|kids] -- <args>` runs `apps/cli/dist/media.js` against the
 side as Lucía, or as a seeded person, each signed in with their password and their own config. `up`
 builds it from this checkout for the after side. Each signed in to the core with `media auth login
---username <user>`, so use the core's words: `movies titles list`, `movies titles search --query
-Q`, `movies play start --title-id ID`, `movies my-list list`, `movies history continue-watching`,
+--username <user>`. The commands are `movies titles list`, `movies titles search --query Q`,
+`movies play start --title-id ID`, `movies my-list list`, `movies history continue-watching`,
 `auth sessions current`, and for admins `admin users list`, and `movies stream <title>` to get a
-stream URL for a local player. The old top-level words (`search`, `titles list`, `whoami`, `login`)
-are gone and exit 2 naming where they moved. A command whose arguments nest takes `--json
+stream URL for a local player. Top-level `search`, `titles list`, `whoami`, and `login` exit 2
+and name the command to use. A command whose arguments nest takes `--json
 '<object>'`. Output is JSON. Exit codes: `0` ok, `1` failed, `2` usage, `3` unauthenticated, `4`
 forbidden, `5` notFound. `$S cli -- --help` lists every command.
 
