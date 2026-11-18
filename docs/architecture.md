@@ -60,7 +60,7 @@ and the docs name, with no change in behavior.
 The core lives in `packages/platform/convex/core`, plus the server code that serves bytes and runs
 jobs. Each module is used by every domain. `packages/platform` is the one Convex project: the
 server, the clients, and the image use it (ADR 0027), and each worktree's dev stack runs only its
-backend, with its API on base + 4 and its HTTP actions on base + 5 (ADR 0028).
+backend (ADR 0028), with its API on base + 2 and its HTTP actions on base + 3.
 
 | Module      | Holds                                                                                                                            | ADR        |
 | ----------- | -------------------------------------------------------------------------------------------------------------------------------- | ---------- |
