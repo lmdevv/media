@@ -35,7 +35,7 @@ done
 
 matches="$(
   while IFS= read -r -d '' file; do
-    [[ -f "$file" && ! -L "$file" ]] && printf '%s\0' "$file"
+    if [[ -f "$file" && ! -L "$file" ]]; then printf '%s\0' "$file"; fi
   done <"$files" |
     sort -zu |
     { xargs -0 -r grep -HnIiE -- "$pattern" || [[ $? -eq 123 ]]; }
