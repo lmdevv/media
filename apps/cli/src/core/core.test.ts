@@ -401,6 +401,55 @@ describe("a core command", () => {
     ]);
   });
 
+  it.each([
+    {
+      argv: ["auth", "sessions", "list"],
+      fn: "core/auth/sessions:list",
+      row: {
+        sessionId: "s1",
+        kind: "password",
+        name: "Firefox",
+        device: null,
+        scopes: ["account"],
+        signedInAt: 1_760_000_000_000,
+        expiresAt: 1_770_000_000_000,
+        current: true,
+      },
+      header: /^SESSION ID\s+KIND\s+NAME\s+DEVICE\s+SIGNED IN AT\s+EXPIRES AT\s+CURRENT$/u,
+    },
+    {
+      argv: ["admin", "backups", "list"],
+      fn: "core/server/backups:list",
+      row: {
+        id: "b1",
+        fileName: "media-1.zip",
+        sizeBytes: 1024,
+        trigger: "nightly",
+        takenAt: 1_760_000_000_000,
+      },
+      header: /^ID\s+FILE NAME\s+SIZE BYTES\s+TRIGGER\s+TAKEN AT$/u,
+    },
+  ])("prints $argv as a table for people", async ({ argv, fn, row, header }) => {
+    const env = freshHome();
+
+    const run = await withFakeCore((fake) =>
+      Effect.gen(function* () {
+        yield* storeSession(env, fake.url);
+        yield* fake.reply(
+          fn,
+          Reply.Success({ value: { page: [row], continueCursor: "c", isDone: true } }),
+        );
+
+        return yield* Effect.promise(() => media([...argv, "--human"], env));
+      }),
+    );
+
+    expect(run.code).toBe(ExitCode.ok);
+    expect(run.stdout.split("\n").map((line) => line.trim())).toContainEqual(
+      expect.stringMatching(header),
+    );
+  });
+
   it("refuses a MEDIA_CORE_URL that is not a URL", async () => {
     const run = await media(["auth", "server", "info"], {
       ...freshHome(),

@@ -8,9 +8,6 @@ import {
   TitleCard,
 } from "@media/contracts/models/catalog";
 import { Backup, Job } from "@media/contracts/models/jobs";
-import { PlaybackSession } from "@media/contracts/models/playback";
-import { Profile } from "@media/contracts/models/profiles";
-import { RoomMember } from "@media/contracts/models/rooms";
 import { Predicate, SchemaAST } from "effect";
 import type { Schema } from "effect";
 
@@ -205,17 +202,6 @@ const presets = new Map<SchemaAST.AST, ReadonlyArray<Column>>([
     ],
   ],
   [
-    Profile.ast,
-    [
-      field("ID", "id"),
-      field("NAME", "name"),
-      field("KIDS", "kids"),
-      field("MAX AGE", "maxAgeRating"),
-      field("PIN", "hasPin"),
-      field("LOCKED", "locked"),
-    ],
-  ],
-  [
     SessionInfo.ast,
     [
       field("ID", "id"),
@@ -232,26 +218,6 @@ const presets = new Map<SchemaAST.AST, ReadonlyArray<Column>>([
       field("FILE", "fileName"),
       field("TRIGGER", "trigger"),
       field("CREATED", "createdAt"),
-    ],
-  ],
-  [
-    PlaybackSession.ast,
-    [
-      field("DEVICE", "deviceName"),
-      field("TITLE", "titleId"),
-      field("STATE", "state"),
-      field("AT", "positionMs"),
-      field("MODE", "mode"),
-    ],
-  ],
-  [
-    RoomMember.ast,
-    [
-      field("PROFILE", "profileName"),
-      field("ROLE", "role"),
-      field("DEVICE", "deviceId"),
-      field("PRESENCE", "presence"),
-      field("LAST SEEN", "lastSeenAt"),
     ],
   ],
 ]);
