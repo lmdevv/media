@@ -52,7 +52,7 @@ renaming them. The marks are in `brand/`; `scripts/brand-icons.sh` writes every 
 | `packages/contracts`   | Effect Schema DTOs, errors, media HttpApi, plugin role interfaces     |
 | `packages/commands`    | Command list; generates Convex functions and skill references         |
 | `packages/sdk`         | Effect core with `/effect`, `/react`, `/promise` entry points         |
-| `packages/ui`          | shadcn components restyled through Paper tokens                       |
+| `packages/ui`          | shadcn components restyled through the design tokens                  |
 | `packages/config`      | Shared strict `tsconfig`                                              |
 | `deploy/image`         | All-in-one image: the core's Convex backend, media, and Caddy (s6)    |
 | `deploy/compose`       | Docker Compose: the image plus optional sidecars                      |
@@ -234,24 +234,23 @@ The example identities must be replaced with the model and tool that actually co
 
 ## Design
 
-Build UI through the Paper MCP from the Paper file `[movies]` (ID `01M4PMRM5T60Q4P0YYZ8DY580D`) or
-`[music]` (ID `01M4KQQQ46CWH4S1JGX96NPA0T`). Paper Desktop must be running.
+The code is the design's source of truth. No design file is required: don't open Paper or any
+other design tool unless the owner asks for it in the task.
 
-- Paper is the source of truth. Read structure with `get_tree_summary` and `get_jsx`, exact values
-  with `get_computed_styles`, and the target with `get_screenshot`. Never read colors or sizes from
-  screenshots.
-- Tokens live in `packages/ui/src/styles/globals.css` under their Paper names. Re-export them with
-  `get_tokens` in `tailwind` format when the design changes. Dark maps each `--color-dark-*` token
-  onto its light role inside `.dark`, and is the default theme in movies.
-- Use tokens for every color, size, and font. No raw values in components.
+- Tokens live in `packages/ui/src/styles/globals.css` (movies web), `music.css` (music web), and
+  each iOS app's `src/global.css`. Dark maps each `--color-dark-*` token onto its light role,
+  inside `.dark` on the web and `@variant dark` on iOS, and is the default theme in movies.
+- Use tokens for every color, size, and font. No raw values in components. Add a token by role
+  when a value is new.
+- Prefer the platform's own controls on iOS: native sheets, menus, alerts, and tab bars in their
+  system style, without overriding the glass, corners, or materials the OS draws.
 - Movies: Netflix look on web, the Apple TV app look on iOS, Netflix red in both modes.
 - Music: light follows Apple Music (red accent), dark follows Spotify (green accent, rounded panels
   on black). Phone layouts feel native to iOS.
 - Content rules: no tips or filler copy, no CLI hints in the UI, no colored left stripes, and
   whitespace over bordered cards. One "Search ⌘K" field opens the command menu.
-- Follow the design handoff notes in the owner's vault (`projects/movies/movies Design.md` and
-  `projects/music/music Design.md`): flows, artboard map, decisions, and open questions. If code
-  must differ from Paper, flag it instead of drifting.
+- The design notes in the owner's vault (`projects/movies/movies Design.md` and
+  `projects/music/music Design.md`) hold flows, decisions, and open questions.
 
 ## Pstack skills
 
