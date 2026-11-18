@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { openingPageArgs, openingSeason, seasonPageArgs } from "./opening-season";
+import { allOfSeason, openingPageArgs, openingSeason, seasonPageArgs } from "./opening-season";
 
 describe("openingSeason", () => {
   it("opens on the next episode's season, Specials included", () => {
@@ -16,6 +16,14 @@ describe("openingSeason", () => {
   it("opens a show of Specials alone on them, and a show with no seasons on none", () => {
     expect(openingSeason({ nextSeason: null, seasons: [0] })).toBe(0);
     expect(openingSeason({ nextSeason: null, seasons: [] })).toBeNull();
+  });
+});
+
+describe("allOfSeason", () => {
+  it("holds for a season's own rows and for none, and not once another season's row is among them", () => {
+    expect(allOfSeason([{ seasonNumber: 1 }, { seasonNumber: 1 }], 1)).toBe(true);
+    expect(allOfSeason([], 1)).toBe(true);
+    expect(allOfSeason([{ seasonNumber: 1 }, { seasonNumber: 2 }], 1)).toBe(false);
   });
 });
 

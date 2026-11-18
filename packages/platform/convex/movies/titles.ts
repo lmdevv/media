@@ -448,6 +448,15 @@ export const {
   },
   episodes: async (ctx, { titleId, seasonNumber: named, paginationOpts }, caller) => {
     const { title } = await requireTitle(ctx.db, caller, "view", titleId);
+
+    // A cursor holds within one season, and the opening season moves as the person watches.
+    if (
+      named === undefined &&
+      (paginationOpts.cursor !== null || (paginationOpts.endCursor ?? null) !== null)
+    ) {
+      return fail("invalid_args", "Name the season to read past its first page");
+    }
+
     const seasonNumber = named ?? (await openingSeasonOf(ctx.db, caller.userId, title));
 
     const page = await paginateAtMost(

@@ -1,5 +1,10 @@
 import type { Episode, SeasonEpisode, TitleDetail, TitleId } from "@/lib/catalog";
-import { openingPageArgs, openingSeason, seasonPageArgs } from "@media/contracts/opening-season";
+import {
+  allOfSeason,
+  openingPageArgs,
+  openingSeason,
+  seasonPageArgs,
+} from "@media/contracts/opening-season";
 import { usePlatform } from "@media/sdk/react";
 import { EpisodeRow } from "@media/ui/components/media-card";
 import { ProgressBar } from "@media/ui/components/progress-bar";
@@ -84,14 +89,24 @@ export function HeldEpisodes({ titleId }: { readonly titleId: TitleId }) {
 export function Episodes({ show, phone }: { readonly show: TitleDetail; readonly phone: boolean }) {
   const platform = usePlatform();
   const opening = openingSeasonOf(show);
-  const [seasonNumber, setSeasonNumber] = useState(opening);
+  const [openedOn] = useState(opening);
+  const [seasonNumber, setSeasonNumber] = useState(openedOn);
+  const [named, setNamed] = useState(false);
   const season = show.seasons.find((candidate) => candidate.seasonNumber === seasonNumber);
+  // Only the season the list opened on reads the held page: a season the person picked stays
+  // named, so its loaded pages stay when the opening season moves onto it.
+  const held = !named && seasonNumber === openedOn;
 
   const episodes = useAllPages(platform.movies.titles.episodes, (paginationOpts) =>
-    seasonPageArgs(show.id, seasonNumber, seasonNumber === opening, paginationOpts),
+    seasonPageArgs(show.id, seasonNumber, held, paginationOpts),
   );
 
-  const list = episodes.status === "ready" ? episodes.rows : NO_EPISODES;
+  const ofSeason = episodes.status === "ready" && allOfSeason(episodes.rows, seasonNumber);
+
+  // The held page moved to another season before the title said so: ask for this one by number.
+  if (held && episodes.status === "ready" && !ofSeason) setNamed(true);
+
+  const list = ofSeason ? episodes.rows : NO_EPISODES;
   const watched = list.filter((episode) => episode.progress?.watched === true).length;
   const nextId = show.nextEpisode?.id;
 
@@ -105,10 +120,7 @@ export function Episodes({ show, phone }: { readonly show: TitleDetail; readonly
     />
   );
 
-  const progress =
-    episodes.status === "ready" && list.length > 0
-      ? `${watched} of ${list.length} watched`
-      : undefined;
+  const progress = ofSeason && list.length > 0 ? `${watched} of ${list.length} watched` : undefined;
 
   if (phone) {
     return (

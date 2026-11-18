@@ -385,6 +385,32 @@ describe.skipIf(stack === undefined)("movies browse commands", { timeout: 180_00
     ]);
     expect(await clientsOpenOn()).toBe(1);
 
+    // A cursor belongs to one season, so only the first page may leave the season out.
+    const firstOfOpening = await client.query(api.movies.titles.episodes, {
+      titleId,
+      paginationOpts: { numItems: 1, cursor: null },
+    });
+
+    expect(
+      (
+        await failureOf(
+          client.query(api.movies.titles.episodes, {
+            titleId,
+            paginationOpts: { numItems: 1, cursor: firstOfOpening.continueCursor },
+          }),
+        )
+      ).code,
+    ).toBe("invalid_args");
+    expect(
+      (
+        await client.query(api.movies.titles.episodes, {
+          titleId,
+          seasonNumber: 1,
+          paginationOpts: { numItems: 1, cursor: firstOfOpening.continueCursor },
+        })
+      ).page.map((episode) => [episode.seasonNumber, episode.episodeNumber]),
+    ).toEqual([[1, 2]]);
+
     const lastOfFirst = (await seasonOf(client, titleId, 1))[1];
 
     if (lastOfFirst === undefined) throw new Error("no second episode of season 1");

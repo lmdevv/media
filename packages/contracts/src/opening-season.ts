@@ -21,6 +21,16 @@ export interface OpeningSeasonInput {
 export const openingSeason = ({ nextSeason, seasons }: OpeningSeasonInput): number | null =>
   nextSeason ?? seasons.find((season) => season > 0) ?? seasons[0] ?? null;
 
+/**
+ * Whether every one of `episodes` is of `seasonNumber`. The page that leaves the season out
+ * follows the opening season as it moves, on its own schedule, so a list that heads its rows with
+ * a season shows them only while this holds, and names its season from then on.
+ */
+export const allOfSeason = (
+  episodes: ReadonlyArray<{ readonly seasonNumber: number }>,
+  seasonNumber: number,
+): boolean => episodes.every((episode) => episode.seasonNumber === seasonNumber);
+
 /** Where a page of episodes starts and, once pinned, ends. */
 interface EpisodePageSpan {
   readonly cursor: string | null;

@@ -1,4 +1,4 @@
-import { seasonPageArgs } from "@media/contracts/opening-season";
+import { allOfSeason, seasonPageArgs } from "@media/contracts/opening-season";
 import { describeFailure, isFailure } from "@media/mobile-core/failure";
 import { useAllPages } from "@media/mobile-core/pages";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
@@ -81,8 +81,11 @@ function TitleDetailView({ title }: { readonly title: TitleDetail }) {
   // it has loaded stay on one season when the next episode moves to another.
   const [opened] = useState(opening);
   const seasonNumber = seasonParam(params.season) ?? opened ?? opening;
-  const [namedOnly, setNamedOnly] = useState(false);
+  const [named, setNamed] = useState(false);
   const show = title.kind === "show";
+  // Only the season the list opened on reads the held page: a season the person picked stays
+  // named, so its loaded pages stay when the opening season moves onto it.
+  const held = !named && opened !== null && seasonNumber === opened;
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const widthClass = useWidthClass();
@@ -94,24 +97,23 @@ function TitleDetailView({ title }: { readonly title: TitleDetail }) {
   const episodes = useAllPages(
     platform.movies.titles.episodes,
     show && seasonNumber !== null
-      ? (paginationOpts) =>
-          seasonPageArgs(
-            title.id,
-            seasonNumber,
-            !namedOnly && seasonNumber === opening,
-            paginationOpts,
-          )
+      ? (paginationOpts) => seasonPageArgs(title.id, seasonNumber, held, paginationOpts)
       : "skip",
   );
 
-  // A server that predates the optional season refuses the page that leaves it out; ask by number.
-  if (!namedOnly && seasonNumber === opening && episodes.status === "failed") setNamedOnly(true);
+  const ofSeason =
+    episodes.status === "ready" &&
+    seasonNumber !== null &&
+    allOfSeason(episodes.rows, seasonNumber);
+
+  // The held page moved to another season before the title said so: ask for this one by number.
+  if (held && episodes.status === "ready" && !ofSeason) setNamed(true);
 
   return (
     <View className="flex-1 bg-bg">
       <Animated.FlatList
         data={rowsOf(
-          episodes.status === "ready" ? episodes.rows : NO_EPISODES,
+          ofSeason ? episodes.rows : NO_EPISODES,
           layout.kind === "grid" ? layout.columns : 1,
         )}
         keyExtractor={(row) => row.map((episode) => episode.id).join(" ")}
