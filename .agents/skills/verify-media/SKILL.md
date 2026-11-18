@@ -356,8 +356,8 @@ builds it from this checkout for the after side. Each signed in to the core with
 --username <user>`. The commands are `movies titles list`, `movies titles search --query Q`,
 `movies play start --title-id ID`, `movies my-list list`, `movies history continue-watching`,
 `auth sessions current`, and for admins `admin users list`, and `movies stream <title>` to get a
-stream URL for a local player. Top-level `search`, `titles list`, `whoami`, and `login` exit 2
-and name the command to use. A command whose arguments nest takes `--json
+stream URL for a local player. A command typed without its group, such as `titles list`, exits 2
+and names the command to use. A command whose arguments nest takes `--json
 '<object>'`. Output is JSON. Exit codes: `0` ok, `1` failed, `2` usage, `3` unauthenticated, `4`
 forbidden, `5` notFound. `$S cli -- --help` lists every command.
 

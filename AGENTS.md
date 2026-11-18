@@ -79,10 +79,13 @@ pnpm test:e2e        # Playwright
 pnpm knip            # unused files, exports, and dependencies
 scripts/check-deploy.sh  # installs pin one Convex backend and expose every media setting
 scripts/check-pnpm-deps-hash.sh  # the Nix packages pin pnpm-lock.yaml's dependency hash
+scripts/check-history.sh <path>...  # no comment or doc explains the code by an earlier product or release
 ```
 
-`typecheck`, `lint`, `fmt:check`, `test`, `knip`, and `scripts/check-deploy.sh` run in the lefthook
-pre-commit hook and in CI. The hook also runs `scripts/check-pnpm-deps-hash.sh` when the lockfile
+`typecheck`, `lint`, `fmt:check`, `test`, `knip`, `scripts/check-deploy.sh`, and
+`scripts/check-history.sh` run in the lefthook pre-commit hook and in CI. Say what the code does
+and why, now: `check-history.sh` fails on text that explains it by what came before, and skips
+only the decision records. The hook also runs `scripts/check-pnpm-deps-hash.sh` when the lockfile
 changes, as CI's Nix job finds a stale hash only after the push. All must pass before every
 commit. The hook and pull request CI run typecheck, lint, and test only over the packages a diff
 affects and their dependents, and run everything when a root config file changes;
