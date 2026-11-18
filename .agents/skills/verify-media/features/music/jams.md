@@ -1,6 +1,6 @@
 # Jams
 
-People listen together in a Jam, old music's name for a music group session (ADR 0017). The host
+People listen together in a Jam, a music group session (ADR 0017). The host
 starts one from the song playing; people who open its link listen along to the host's queue and
 player, every page in step with the session's clock, and move on to the next song together,
 without a gap. The host decides who may join (anyone with the link, approval, or no one new) and

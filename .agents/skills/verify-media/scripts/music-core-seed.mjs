@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Seeds music's demo data on the core, after core-seed.mjs made the people and signed each one's
-// media CLI in: the Music library's grants, then the playlists, sharing, and likes old music's seed
-// made, each person through their own CLI. Fails when anyone sees other albums than the demo data.
+// media CLI in: the Music library's grants, then the playlists, sharing, and likes, each person
+// through their own CLI. Fails when anyone sees other albums than the demo data.
 //
 //   music-core-seed.mjs --state <side dir> --cli <media.js>
 import { spawnSync } from "node:child_process";
@@ -14,14 +14,14 @@ import { cliEnv, grantArgs } from "./core-seed.mjs";
 export const ALBUMS = 5;
 
 // Who the Music library is shared with, past Lucía, who made it: Mateo manages it, and everyone on
-// the server plays it, as old music's shared /music folder let everyone play, Sam included. The
+// the server plays it, Sam included. The
 // kid's restrictions (core-seed.mjs) hide explicit songs from them.
 export const MUSIC_GRANTS = [
   { library: "Music", principal: "mateo", level: "manage" },
   { library: "Music", principal: "household", level: "view" },
 ];
 
-// Old music's demo playlists, by owner, with who each is shared with.
+// The demo playlists, by owner, with who each is shared with.
 export const PLAYLISTS = [
   {
     owner: "lucia",

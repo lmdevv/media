@@ -22,19 +22,9 @@ products:
 - `before` is main: `ghcr.io/lmdevv/media:main`, the last image published from main.
 
 Each side runs its own revision's `deploy/compose`, copied into its state folder: the checkout's
-for `after`, `origin/main`'s for `before`. `up` reads the layout from it and from the image, and
-records it:
-
-| Layout        | What runs                                                                                  |
-| ------------- | ------------------------------------------------------------------------------------------ |
-| `one-backend` | The all-in-one image with one Convex backend, the core's. Everyone is a core user who signs in once at `/`; `/movies` has no sign-in or profiles, and the movies iOS app signs in to the core with a username |
-| `one-port`    | The all-in-one image with old movies' Convex at `/movies/convex` beside the core's. Movies signs in at `/movies/sign-in` and has profiles |
-| `two-port`    | A `convex` service beside a `movies` service, movies at `/`                                |
-
-`up` tells `one-backend` from `one-port` by whether the image holds old movies' Convex project
-(`/app/backend`). URLs, setup, the seed, the CLI's sign-in, the browser's relays and sign-in,
-doctor, and the iOS forwards follow each side's layout, so a change to the deploy shape still
-compares before and after. Until the movies cutover merges, the before side is `one-port`.
+for `after`, `origin/main`'s for `before`, so a change to the deploy shape still compares before
+and after. On both sides everyone is a core user who signs in once at `/`; `/movies` and `/music`
+use that session, and the iOS apps sign in to the core with a username.
 
 You drive a side through three surfaces: a Chromium that stays open between commands and opens
 pages in either app, the built `media` CLI signed in as each seeded person, and the movies or
@@ -90,7 +80,7 @@ files. Its loopback has only these, relayed over Unix sockets in the state folde
 - An HTTPS proxy to the internet on the host, for the Cast SDK, TMDB images, and trailers.
   Chromium sends loopback addresses straight to the relays, never through it.
 
-`$S browser` and `seed.mjs` reach the host through `browser.sock` in the state folder. Every
+`$S browser` and `core-seed.mjs` reach the host through `browser.sock` in the state folder. Every
 command fails, naming the requests, when Chromium cancelled any with `net::ERR_NETWORK_CHANGED`
 since the page's last command: open the page again before you trust it. In the namespace that
 should never happen.
@@ -135,21 +125,18 @@ $S up --side before    # the before side: pull ghcr.io/lmdevv/media:main
    URL ever answered, and the container's `ip route get` line, removes the side, and exits 1. A
    route through `tailscale0` or another VPN means the host can't reach that Docker network.
 4. It starts the browser host, in its own network namespace where it can, and runs first-run setup
-   through the web apps, as an owner does. The owner is Lucía, with password `password123`: the
-   core user `lucia` on `one-backend`, and `admin@movies.local` in old movies:
-   - `one-backend`: the owner account at `/` in the account client, then the `Movies` library at
-     `/media/library/Movies` and the `Shows` library at `/media/library/Shows` from its Admin,
-     Libraries, each of kind Movies, and with music the `Music` library at `/media/library/Music`,
-     of kind Music. Each queues its first scan.
-   - `one-port` and `two-port`: old movies' owner account at `/movies/welcome`, the `Movies`
-     library and its first scan, then the `Shows` library from movies' Admin, Libraries.
-5. It signs Lucía's CLI in with her password (`media auth login --username lucia` on
-   `one-backend`, `media login --email` before it) and waits until the movies libraries are
-   really done: every library scanned and no scan, metadata, or scrub-thumbnail job pending or
-   running. The core has no command that lists jobs, so on `one-backend` the wait reads the
-   media service's `CoreJobs.claimed` and `CoreJobs.job_ended` log records (`core-seed.mjs wait`).
+   through the account client, as an owner does. The owner is Lucía, the core user `lucia` with
+   password `password123`: the owner account at `/`, then the `Movies` library at
+   `/media/library/Movies` and the `Shows` library at `/media/library/Shows` from its Admin,
+   Libraries, each of kind Movies, and with music the `Music` library at `/media/library/Music`,
+   of kind Music. Each queues its first scan.
+5. It signs Lucía's CLI in with her password (`media auth login --username lucia`) and waits
+   until the movies libraries are really done: every library scanned and no scan, metadata, or
+   scrub-thumbnail job pending or running. The core has no command that lists jobs, so the wait
+   reads the media service's `CoreJobs.claimed` and `CoreJobs.job_ended` log records
+   (`core-seed.mjs wait`).
 6. It seeds the demo people: in movies, the people, the kid, library access, and watching
-   (`core-seed.mjs seed` on `one-backend`, `seed.mjs` before it); in music, the Music library's
+   (`core-seed.mjs seed`); in music, the Music library's
    grants, playlists, likes, and sharing (`music-core-seed.mjs`). Each seed checks that each
    person sees what the demo data says.
 
@@ -177,7 +164,7 @@ the CPU.
 | `--image IMG`                   | Run another image, such as a release tag, instead of building          |
 | `--library demo\|fixtures\|DIR` | Pick the library. A DIR holds `Movies/`, `Shows/`, and `Music/` (or pass `--no-music`) and must be readable by others (`a+rX`); the fixtures have no music |
 | `--no-music`                    | Run movies alone, without the Music library                            |
-| `--no-seed`                     | Stop after setup: only Lucía (with her own profile in old movies) and the libraries |
+| `--no-seed`                     | Stop after setup: only Lucía and the libraries                         |
 | `--no-setup`                    | Leave fresh servers, to verify first-run setup itself                   |
 
 `up` leaves the browser host running in the background, and it keeps every file descriptor `up`
@@ -204,38 +191,31 @@ personal or unlicensed.
   music demo images, and the Demo library workflow publishes the version in
   `deploy/demo-library/image`. When the pull fails, check Docker and access to `ghcr.io`, then
   retry. [docs/demo-library.md](../../../docs/demo-library.md) has the details.
-- **People.** One set of people for both products, with the password `password123`. On
-  `one-backend` each is a core user named by their username, and a kid is their own user; old
-  movies names them by email and has profiles instead of the kid user:
+- **People.** One set of people for both products, with the password `password123`. Each is a
+  core user named by their username, and a kid is their own user:
 
-  | Who   | Core user | Email (old movies)   | Role   | Old movies' profiles                       | CLI                                        |
-  | ----- | --------- | -------------------- | ------ | ------------------------------------------ | ------------------------------------------ |
-  | Lucía | `lucia`   | `admin@movies.local` | owner  | `Lucía`, and `Kids` (kids, PG, PIN `1234`) | `$S cli --`                                |
-  | Mateo | `mateo`   | `mateo@movies.local` | admin  | `Mateo`                                    | `$S cli --as mateo --`                     |
-  | Aiko  | `aiko`    | `aiko@movies.local`  | member | `Aiko`                                     | `$S cli --as aiko --`                      |
-  | Sam   | `sam`     | `sam@movies.local`   | member | `Sam`                                      | `$S cli --as sam --`                       |
-  | Kid   | `kids`    | none                 | member, limited to PG | none                        | `$S cli --as kids --` (`one-backend` only) |
+  | Who   | Core user | Role                  | CLI                    |
+  | ----- | --------- | --------------------- | ---------------------- |
+  | Lucía | `lucia`   | owner                 | `$S cli --`            |
+  | Mateo | `mateo`   | admin                 | `$S cli --as mateo --` |
+  | Aiko  | `aiko`    | member                | `$S cli --as aiko --`  |
+  | Sam   | `sam`     | member                | `$S cli --as sam --`   |
+  | Kid   | `kids`    | member, limited to PG | `$S cli --as kids --`  |
 
-  On `one-backend`, Mateo, Aiko, and Sam joined from invite links that Lucía made in the account
-  client's Admin, Users (`/admin`), and Lucía made the kid's account there with a password. In old
-  movies they joined from invite links made in its Admin, Users.
-- **Ratings.** The films ship unrated, and a limited person or profile hides unrated titles, so
+  Mateo, Aiko, and Sam joined from invite links that Lucía made in the account client's Admin,
+  Users (`/admin`), and Lucía made the kid's account there with a password.
+- **Ratings.** The films ship unrated, and a limited person hides unrated titles, so
   Lucía rated them: Big Buck Bunny `G`, Caminandes `TV-Y`, Cosmos Laundromat `PG`, Elephants Dream, Sintel,
   and Tears of Steel `PG-13`, and Pioneer One `TV-14`. The Feature Test stays `NR`.
 - **Access.**
-  - `one-backend`: a core library is private to whoever made it until it is shared, admins
+  - A core library is private to whoever made it until it is shared, admins
     included. Lucía made both. `Movies` is shared with Mateo (manages), Aiko, and `kids` (view);
     `Shows` with Mateo (manages) and everyone on the server (view). `kids` is limited to a
     minimum viewer age of 7 (PG) with unrated titles hidden, and is listed on shared devices, so
     a shared browser's picker at `/` shows its tile.
-  - Old movies: `Movies` is restricted (`Only people I choose`) and granted to Aiko; `Shows` is
-    for everyone. Admins see every library.
   - Lucía, Mateo, and Aiko see all 8 titles. Sam sees only Caminandes and Pioneer One: a movie's
-    page reads `This title isn't here`, and the CLI's `titles get` fails (exit 5, notFound, in old
-    movies).
-  - The kid (`kids` on `one-backend`, Lucía's `Kids` profile in old movies) sees Big Buck Bunny,
-    Caminandes, and Cosmos Laundromat. Old movies' `Kids` asks for its PIN when a session picks
-    it, and its CLI refuses its titles until `profiles unlock --profile-id <id> 1234`.
+    page reads `This title isn't here`, and the CLI's `titles get` fails.
+  - The kid (`kids`) sees Big Buck Bunny, Caminandes, and Cosmos Laundromat.
 - **Watching.** Aiko stopped Elephants Dream halfway and watched Pioneer One episodes 1 and 2, so
   her `Continue watching for Aiko` row shows `Pioneer One · S1:E3` (next: Alone in the Night) and
   `Elephants Dream` (50% watched). Her My List holds Sintel, Tears of Steel, and Caminandes;
@@ -251,9 +231,8 @@ personal or unlicensed.
   - Lucía likes `Wanderer`, `Doppelgänger`, and `Hoist`. Mateo likes `Drifting Cargo`. Aiko likes
     `Neptune` and `Naughty Waltz`.
 
-Sign a movies page in as anyone with `$S browser sign-in --page aiko --username aiko` on
-`one-backend` (at `/`, then `/movies`), or `$S browser sign-in --page aiko --email
-aiko@movies.local --profile Aiko` in old movies, and a music page with `$S browser sign-in --app
+Sign a movies page in as anyone with `$S browser sign-in --page aiko --username aiko` (at `/`,
+then `/movies`), and a music page with `$S browser sign-in --app
 music --page aiko-music --username aiko`. `--library fixtures` generates the stack tests' short
 fixture titles instead (`Big Buck Fixture`, `Fixture Show`), with no music. It needs no download,
 but the seeds need the demo titles and songs, so pair it with `--no-seed`.
@@ -266,14 +245,12 @@ one line per check, and exits non-zero on any `FAIL`:
 - The container runs, belongs to this run, and owns its port.
 - `/api/health` reports the backend connected.
 - The media service runs the image that `up` recorded.
-- Init deployed this image's functions for each project the layout runs: `/data/core/version` on
-  `one-backend`, and `/data/movies/version` too on `one-port`, match the image's versions and
-  functions hashes.
+- Init deployed this image's functions: `/data/core/version` matches the image's version and
+  functions hash.
 - The browser host answers.
 - The browser has its own network namespace: its Chromium's `/proc/<pid>/ns/net` differs from
   the helper's. When the browser shares the host network instead, an `info` line says why.
-- Lucía's CLI is signed in: as `lucia` on the core on `one-backend` (`auth sessions current`), else
-  as `admin@movies.local` (`whoami`).
+- Lucía's CLI is signed in as `lucia` on the core (`auth sessions current`).
 - For the after side, the image matches the checkout.
 - With music, `/music` serves the music client.
 
@@ -336,8 +313,7 @@ matches `Play from start`.
 | `cast-state`                                     | Prints what the scripted Chromecast loaded, fetched, and plays, as JSON |
 | `restart`                                        | Restarts the host after `browser.mjs` changed; signs `main` and `music` in again as Lucía |
 
-Movies pages on `one-backend`, and account pages on any side with the account client, take these.
-They act in the account client, in the page's own browser context, so the session a movies page
+Movies, music, and account pages take these. They act in the account client, in the page's own browser context, so the session a movies page
 reads is the one they leave:
 
 | Command                                          | Does                                                         |
@@ -348,22 +324,8 @@ reads is the one they leave:
 | `join --code C --username U [--password P]`      | Accepts an invite at `/invite#<code>` and makes the account  |
 | `create-account --username U [--password P] [--invite-role member\|admin]` | Makes an account with a password in Admin, Users |
 
-A movies page on `one-backend` has no `profile` or `add-profile`: each person, a kid too, is their
-own user, so sign in as them instead.
-
-Movies pages on `one-port` and `two-port`, where old movies signs in on its own, take these:
-
-| Command                                          | Does                                                         |
-| ------------------------------------------------ | ------------------------------------------------------------ |
-| `sign-in [--email E --password P] [--profile N [--pin P]]` | Signs the page in at `/sign-in`, as Lucía by default, and picks a profile |
-| `profile --profile N [--pin P]`                  | Picks a profile at `/profiles`, entering its PIN when asked  |
-| `add-profile --profile N [--kids] [--pin P]`     | Adds a profile from `/profiles/new`                          |
-| `invite [--invite-role member\|admin]`           | Makes an invite link in Admin, Users and prints its code     |
-| `join --code C --name N --email E`               | Accepts an invite at `/invite/<code>` and makes the account  |
-
-Music pages sign in at `/`, as movies pages on `one-backend` do: `sign-in [--username U
---password P]` signs the page in at the account client, as `lucia` by default, then opens
-`/music`. They take the account client's commands too.
+Each person, a kid too, is their own user, so sign in as them. A music page's `sign-in` then
+opens `/music`.
 
 `video` reads the page's media elements, not the player's buttons. `source` is `file` when the
 browser plays the original file and `mse` when the HLS player feeds it, and `requests` counts the
@@ -380,28 +342,24 @@ the new page in place of Google's Cast SDK; `cast` and `cast-state` drive and re
 instead makes it another tab of page P: the same context, size, and sign-in, as in `$S browser open / --page aiko-2 --tab-of aiko`, to
 check what a second tab sees. `close-page` on a tab closes that tab alone. Each app follows the system theme: a movies page is
 dark unless `--light`, and a music page is light unless `--dark`, as each app defaults. Only
-`main` (Lucía, on her own profile in old movies) and `music` are signed in by `up`, so start a
-new page with `sign-in`, as in `$S browser sign-in --page phone --device "iPhone 15"` on
-`one-backend`, `$S browser sign-in --page phone --device "iPhone 15" --profile Lucía` in old
-movies, or `$S browser sign-in --app music --page music-phone --device "iPhone 15" --dark`.
+`main` (Lucía) and `music` are signed in by `up`, so start a new page with `sign-in`, as in
+`$S browser sign-in --page phone --device "iPhone 15"` or `$S browser sign-in --app music --page music-phone --device "iPhone 15" --dark`.
 
 When you don't know an element's name, run `$S browser snapshot --in main` and read the names
 from the tree.
 
 ### CLI
 
-`$S cli [--side S] [--as mateo|aiko|sam|kids] -- <args>` runs `apps/cli/dist/media.js` against
-the side as Lucía, or as a seeded person, each signed in with their password and their own config.
-`up` builds it from this checkout for the after side. On `one-backend` each signed in to the core
-with `media auth login --username <user>`, so use the core's words: `movies titles list`, `movies
-titles search --query Q`, `movies play start --title-id ID`, `movies my-list list`, `movies
-history continue-watching`, `auth sessions current`, and for admins `admin users list`, and
-`movies stream <title>` to get a stream URL for a local player. The old top-level words
-(`search`, `titles list`, `whoami`, `login`) are gone and exit 2 naming where they moved, so the
-CLI can't sign in to a `one-port` side's old movies. A command whose arguments nest takes
-`--json '<object>'`. Output is JSON. Exit codes: `0` ok, `1` failed, `2` usage, `3`
-unauthenticated, `4` forbidden, `5` notFound. `$S cli -- --help` lists every command. `kids` has a
-CLI only on `one-backend`.
+`$S cli [--side S] [--as mateo|aiko|sam|kids] -- <args>` runs `apps/cli/dist/media.js` against the
+side as Lucía, or as a seeded person, each signed in with their password and their own config. `up`
+builds it from this checkout for the after side. Each signed in to the core with `media auth login
+--username <user>`, so use the core's words: `movies titles list`, `movies titles search --query
+Q`, `movies play start --title-id ID`, `movies my-list list`, `movies history continue-watching`,
+`auth sessions current`, and for admins `admin users list`, and `movies stream <title>` to get a
+stream URL for a local player. The old top-level words (`search`, `titles list`, `whoami`, `login`)
+are gone and exit 2 naming where they moved. A command whose arguments nest takes `--json
+'<object>'`. Output is JSON. Exit codes: `0` ok, `1` failed, `2` usage, `3` unauthenticated, `4`
+forbidden, `5` notFound. `$S cli -- --help` lists every command.
 
 Music is the media CLI's `music` group: `$S cli --as aiko -- music albums list`. `cli` takes no
 `--app`, and refuses one with that hint.
@@ -413,9 +371,7 @@ that is new in the checkout fails there.
 
 The movies iOS app (`apps/mobile-movies`), or with `--app music` the music iOS app
 (`apps/mobile-music`), runs on a simulator on `darwin` (set `MAC_HOST` for another Mac). Both sign
-in to the core through the media server's sign-in boundary, so `ios up` refuses a side whose image
-still runs old movies' own Convex (`one-port`, `two-port`): run an iOS lane against such an image
-from a checkout of that image's revision, with its own verify skill. The music app needs an image
+in to the core through the media server's sign-in boundary. The music app needs an image
 with the music client (`music_core`). The app's JavaScript comes from a Metro on this machine. For the before side, Metro serves a main checkout that `ios up`
 makes with `git worktree` under the side's state. The simulator reaches the side as
 `localhost:<port>` through ssh forwards for [media]'s one port and Metro, so every address
@@ -452,7 +408,7 @@ less than 3 GB free, or 10 GB when it must build the dev client. It does these s
    the gestures that open its menu), so screenshots show only the app.
 6. It opens the app on Metro, connects to the side's server, and signs in as Lucía with her
    username and password (the music app: Connect to your server, the address, then Username,
-   Password, and Sign in). The app has no profiles (D12): switching person is signing out, then
+   Password, and Sign in). Switching person is signing out, then
    `ios sign-in --as <person>`. A new simulator's first sign-in brings up iOS's `Save Password?`
    sheet over the app; `ios up` and `ios sign-in` answer `Not Now`.
 
@@ -553,10 +509,9 @@ never kills by process name. The demo library image stays for the next run. Evid
 - `scripts/compare-shots.sh BEFORE_DIR AFTER_DIR [GLOB]` compares same-named screenshots below the
   status bar and prints `same` (no pixel moved by more than 2 of 255) or the largest change, exiting 1 when any differ: the check that a change
   left the iPhone alone.
-- `scripts/core-seed.mjs` creates the movies [demo data](#demo-data) on a `one-backend` side after
-  setup and checks what each person sees, and its `wait` waits for the first scans there.
-  `scripts/seed.mjs` does the same in old movies, and `scripts/music-core-seed.mjs` makes music's
-  on the core. `up` calls the ones the side needs.
+- `scripts/core-seed.mjs` creates the movies [demo data](#demo-data) after setup and checks what
+  each person sees, and its `wait` waits for the first scans. `scripts/music-core-seed.mjs` makes
+  music's. `up` calls both.
 - `node --test .agents/skills/verify-media/scripts/verify-media.test.mjs` runs the skill's own tests, which need no
   stack: the browser host serves pages of both apps from local servers, in its namespace and on
   the host network, and `evidence` builds one block from both apps' captures.
@@ -581,18 +536,15 @@ it, and add to the map when a change adds a feature.
 - A recording runs in real time, and scripted steps finish in about a second, too fast to follow.
   Pause a second or two after each step's result (`sleep 2` between commands) and before
   `record-stop`, so a reviewer sees each state. A still page holds its last frame.
-- In old movies, a full page load (`open`) in a page that hasn't picked a profile lands on
-  `Who's watching?`. Pick one with `profile --profile N`, which returns to the page you asked
-  for. `one-backend` has no profiles.
-- On `one-backend`, a movies page that isn't signed in is sent to `/`, the account client, to
+- A movies page that isn't signed in is sent to `/`, the account client, to
   sign in. Signing out in `/movies` signs out the page's account client too: they share one
   session per browser context.
 - The player hides its controls while the video plays, and the video then takes the clicks. Hover
   the player first (`hover --testid player-video`), then click a control.
 - A title with progress shows `Resume <time>` and `Play from start` instead of `Play`. Playback in
   one recipe changes what the next one sees on both the web and the CLI.
-- Progress, My List, and history are per person on `one-backend`, and per profile in old movies.
-  A second page signed in as the same person on another profile sees other rows.
+- Progress, My List, and history are per person. A second page signed in as another person sees
+  other rows.
 - The before side runs main's server with the CLI and dev client built from this checkout. If the
   change is in the CLI or in native iOS code, the before side shows the new client against the old
   server. Say so beside that evidence.

@@ -1,9 +1,8 @@
 # Connect
 
-A person moves music between their own devices and controls one from another, as old music's
-"Play on" did: a pause in one browser or the music iOS app pauses the song on another device, a
-move continues the song there at the same place, and an album's menu plays the album on another
-device. The list holds only the person's own devices that are online (ADR 0018).
+A person moves music between their own devices and controls one from another: a pause in one
+browser or the music iOS app pauses the song on another device, a move continues the song there
+at the same place, and an album's menu plays the album on another device. The list holds only the person's own devices that are online (ADR 0018).
 
 ## Sub-features
 
@@ -95,14 +94,14 @@ Preconditions:
 
 - The pages of one browser context share one device, and only one tab of a browser reports for
   it: the one that played last, and the tab it took over from stops. Use a page per device.
-- The before side has no Connect in `/music` before p6-connect-web.
 - A target the browser never let play sound may refuse to start a load; the browser host launches
   Chromium so that it can.
-- An iOS simulator can't press the lock screen, Control Center, or headphones. Old music's
-  `legacy/music/scripts/ios-remote-command.m` (at `bd7462a7`, built on the Mac at
-  `~/music-ios/tools/ios-remote-command`) sends MediaRemote's play, pause, toggle, next, and
-  previous inside the simulator as they do, which agent-device can't:
-  `xcrun simctl spawn <udid> ~/music-ios/tools/ios-remote-command pause`.
+- An iOS simulator can't press the lock screen, Control Center, or headphones.
+  `scripts/ios-remote-command.m` sends MediaRemote's play, pause, toggle, next, and previous
+  inside the simulator as they do, which agent-device can't. Copy it to the Mac's
+  `~/music-ios/tools/` and build it there with `xcrun -sdk iphonesimulator clang -arch arm64
+  -mios-simulator-version-min=17.0 -fobjc-arc -framework Foundation ios-remote-command.m -o
+  ios-remote-command`, then run `xcrun simctl spawn <udid> ~/music-ios/tools/ios-remote-command pause`.
 - In Now Playing, snapshot marks the controls `[covered]` and ref taps don't land: tap by point.
 - A killed app leaves the list about 35 seconds after its last report. iOS suspends a backgrounded
   app that plays nothing on a real phone, which then leaves the same way; a simulator keeps it

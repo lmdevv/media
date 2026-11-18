@@ -1,7 +1,7 @@
 # My List and Continue watching
 
-Each person keeps their own My List and their own watching (each profile in old movies). Home
-shows `Continue watching for <username>` (`<profile>` in old movies) with a resume card for a title
+Each person keeps their own My List and their own watching. Home shows
+`Continue watching for <username>` with a resume card for a title
 stopped partway and a next-episode card for a show, and the `My List` page and row hold the titles
 they saved.
 
@@ -12,7 +12,7 @@ they saved.
 - `continue-resume` shows a half-watched title with the time left and the share watched.
 - `continue-next` shows a show's next episode after the watched ones.
 - `continue-cli` reads the same rows with `media movies history continue-watching` and
-  `media movies my-list list` (`media continue` and `media my-list list` in old movies).
+  `media movies my-list list`.
 
 ## How to get to it (user POV)
 
@@ -20,17 +20,13 @@ they saved.
 - `My List` in the `Sections` navigation, and Home's `My List` row with `See all`.
 - Home's `Continue watching for <username>` row.
 - Terminal: `media movies history continue-watching`, `media movies my-list list`,
-  `media movies my-list add --title-id <id>`; in old movies `media continue`,
-  `media my-list list`, `media my-list add <title-id>`.
+  `media movies my-list add --title-id <id>`.
 
 ## Driving it with verify-media
 
 Preconditions:
 
 - `$S doctor` passes, and the side holds the seed. Aiko hasn't played anything since `up`.
-- The steps are for `one-backend`. In old movies, sign in with
-  `--email aiko@movies.local --profile Aiko`, the row is `Continue watching for Aiko`, and the CLI
-  words are `continue`, `my-list list`, and `my-list add <id>`.
 
 - **Continue watching.** Run `$S browser sign-in --page aiko --username aiko` and
   `$S browser snapshot --page aiko --in region="Continue watching for aiko"`. It holds
@@ -54,7 +50,6 @@ Preconditions:
 
 - Watching anything as Aiko changes her row: the played title moves to the front, and a finished
   episode moves the next card on. Take the row's proof before you play from it.
-- My List and progress are per person (per profile in old movies). The kid user `kids` has its
-  own, empty, list, as old movies' `Kids` profile does.
+- My List and progress are per person. The kid user `kids` has its own, empty, list.
 - The row's cards are links named `Resume <title>`, even for a next episode that hasn't started.
 - Mateo's My List holds `Cosmos Laundromat: First Cycle`, to compare with Aiko's.

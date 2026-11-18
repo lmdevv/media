@@ -86,7 +86,7 @@ for (const network of ["isolated", "host"]) {
         [
           browserJs, "serve", "--state", state,
           "--base", `http://localhost:${portOf(servers.media)}/movies/`,
-          "--account", `http://localhost:${portOf(servers.media)}`, "--core",
+          "--account", `http://localhost:${portOf(servers.media)}`,
           "--music", `http://localhost:${portOf(servers.media)}/music`,
         ],
         { env: { ...process.env, CHROMIUM_PATH: chromium() ?? "", MEDIA_VERIFY_BROWSER_NETWORK: network }, stdio: "inherit" },
@@ -134,21 +134,15 @@ for (const network of ["isolated", "host"]) {
       const result = await browser("--app", "movies", "--page", "music", "open", "/");
       assert.equal(result.status, 1);
       assert.match(result.stderr, /page music is a music page/);
-      const moviesOnly = await browser("--page", "music", "add-profile", "--profile", "Kids");
-      assert.equal(moviesOnly.status, 1);
-      assert.match(moviesOnly.stderr, /unknown music command "add-profile"/);
     });
 
-    test("gives a movies page on one backend the account client's commands and no profiles", async () => {
-      const profile = await browser("--page", "kid", "profile", "--profile", "Kids");
-      assert.equal(profile.status, 1);
-      assert.match(profile.stderr, /this side has no profiles: each person, a kid too, is their own user/);
+    test("gives a movies page the account client's commands", async () => {
       const join = await browser("--page", "kid", "join", "--code=abc");
       assert.equal(join.status, 1);
-      assert.match(join.stderr, /join needs --code and --username on this side/);
-      const account = await browser("--page", "account-only", "--app", "account", "add-profile", "--profile", "Kids");
-      assert.equal(account.status, 1);
-      assert.match(account.stderr, /unknown account command "add-profile"/);
+      assert.match(join.stderr, /join needs --code and --username/);
+      const unknown = await browser("--page", "account-only", "--app", "account", "nope");
+      assert.equal(unknown.status, 1);
+      assert.match(unknown.stderr, /unknown account command "nope"/);
     });
 
     test("plays real audio on a music page", async () => {
@@ -519,17 +513,12 @@ setInterval(() => {}, 1_000);
   });
 });
 
-describe("a side's layout", () => {
-  const env = { ...process.env, TMPDIR: join(scratch, "layout-tmp"), MEDIA_VERIFY_RUN: `layout-${process.pid}` };
-  const compose = (name, services) => {
-    const file = join(scratch, `${name}.yaml`);
-    writeFileSync(file, `name: media\nservices:\n${services.map((service) => `  ${service}:\n    image: x\n`).join("")}`);
-    return file;
-  };
-  const withLayout = (layout, body, runEnv = env) =>
+describe("a side", () => {
+  const env = { ...process.env, TMPDIR: join(scratch, "side-tmp"), MEDIA_VERIFY_RUN: `side-${process.pid}` };
+  const withSide = (body, runEnv = env) =>
     spawnSync(
       "bash",
-      ["-c", `source "$1"; take_side --side after; mkdir -p "$state"; write_state port 4100; write_state layout "$2"; ${body}`, "layout-test", helper, layout],
+      ["-c", `source "$1"; take_side --side after; mkdir -p "$state"; write_state port 4100; ${body}`, "side-test", helper],
       { encoding: "utf8", env: runEnv },
     );
 
@@ -538,9 +527,9 @@ describe("a side's layout", () => {
   const remote = join(scratch, "remote-bin");
   const remoteCalls = join(remote, "calls");
   const remoteEnv = { ...env, PATH: `${remote}:${process.env.PATH}` };
-  const withLayoutOffline = (layout, body) => {
+  const withSideOffline = (body) => {
     rmSync(remoteCalls, { force: true });
-    const result = withLayout(layout, body, remoteEnv);
+    const result = withSide(body, remoteEnv);
     assert.equal(existsSync(remoteCalls) ? execFileSync("cat", [remoteCalls], { encoding: "utf8" }) : "", "", "nothing reached the Mac");
     return result;
   };
@@ -557,42 +546,14 @@ describe("a side's layout", () => {
     }
   });
 
-  test("is two-port with a Convex service, else one-port while the image holds old movies' backend", () => {
-    const layoutOf = (file, backend) =>
-      spawnSync("bash", ["-c", `source "$1"; layout_of "$2" "$3"`, "layout-test", helper, file, backend], { encoding: "utf8", env });
-    assert.equal(layoutOf(compose("two", ["convex", "movies"]), "1").stdout.trim(), "two-port");
-    assert.equal(layoutOf(compose("one", ["media"]), "1").stdout.trim(), "one-port");
-    assert.equal(layoutOf(compose("core", ["media"]), "0").stdout.trim(), "one-backend");
-  });
-
-  test("reads old movies' backend from the image, and stops when Docker can't look", () => {
-    const bin = join(scratch, "layout-docker");
-    mkdirSync(bin, { recursive: true });
-    writeFileSync(join(bin, "docker"), '#!/usr/bin/env bash\necho "$*" >> "$FAKE_DOCKER_CALLS"\nexit "$FAKE_DOCKER_CODE"\n', { mode: 0o755 });
-    const calls = join(bin, "calls");
-    const probe = (code) =>
-      spawnSync("bash", ["-c", `source "$1"; movies_backend_in media:x`, "layout-test", helper], {
-        encoding: "utf8",
-        env: { ...env, PATH: `${bin}:${process.env.PATH}`, FAKE_DOCKER_CODE: String(code), FAKE_DOCKER_CALLS: calls },
-      });
-    assert.equal(probe(0).stdout, "1\n");
-    assert.equal(probe(1).stdout, "0\n");
-    const broken = probe(125);
-    assert.equal(broken.status, 1);
-    assert.match(broken.stderr, /could not look inside media:x for its layout \(docker run exited 125\)/);
-    assert.match(execFileSync("cat", [calls], { encoding: "utf8" }), /^run --rm --network none --entrypoint test media:x -d \/app\/backend$/m);
-  });
-
-  test("points the CLI at the core and the browser at the account client on one backend", () => {
-    const urls = 'echo "$(movies_url) $(convex_url) $(owner_name) $(movies_service)"; core_only && echo core';
-    assert.equal(withLayout("one-backend", urls).stdout, "http://localhost:4100/movies http://localhost:4100/convex lucia media\ncore\n");
-    assert.equal(withLayout("one-port", urls).stdout, "http://localhost:4100/movies http://localhost:4100/movies/convex admin@movies.local media\n");
+  test("points the CLI at the core's Convex and movies at /movies on the one port", () => {
+    assert.equal(withSide('echo "$(movies_url) $(convex_url) $owner"').stdout, "http://localhost:4100/movies http://localhost:4100/convex lucia\n");
   });
 
   test("serves music at /music on the image when it holds the music client, and nowhere else", () => {
     const urls = 'echo "$(music_url)"; music_core && echo core';
-    assert.equal(withLayout("one-backend", `write_state music_core 1; ${urls}`).stdout, "http://localhost:4100/music\ncore\n");
-    assert.equal(withLayout("one-port", "write_state music_core 0; music_core || echo none").stdout, "none\n");
+    assert.equal(withSide(`write_state music_core 1; ${urls}`).stdout, "http://localhost:4100/music\ncore\n");
+    assert.equal(withSide("write_state music_core 0; music_core || echo none").stdout, "none\n");
   });
 
   test("reads the music client from the image, and stops when Docker can't look", () => {
@@ -601,7 +562,7 @@ describe("a side's layout", () => {
     writeFileSync(join(bin, "docker"), '#!/usr/bin/env bash\necho "$*" >> "$FAKE_DOCKER_CALLS"\nexit "$FAKE_DOCKER_CODE"\n', { mode: 0o755 });
     const calls = join(bin, "calls");
     const probe = (code) =>
-      spawnSync("bash", ["-c", `source "$1"; music_in media:x`, "layout-test", helper], {
+      spawnSync("bash", ["-c", `source "$1"; music_in media:x`, "side-test", helper], {
         encoding: "utf8",
         env: { ...env, PATH: `${bin}:${process.env.PATH}`, FAKE_DOCKER_CODE: String(code), FAKE_DOCKER_CALLS: calls },
       });
@@ -620,13 +581,11 @@ describe("a side's layout", () => {
     mkdirSync(join(library, "Movies"), { recursive: true });
     mkdirSync(join(library, "Music"), { recursive: true });
     mkdirSync(bin, { recursive: true });
-    // The image holds no old movies' backend, so the side is one-backend and up looks for music.
     writeFileSync(
       join(bin, "docker"),
       `#!/usr/bin/env bash
 echo "$*" >> "$FAKE_DOCKER_CALLS"
 case "$*" in
-  "run "*/app/backend) exit 1 ;;
   "run "*/app/music) exit 125 ;;
 esac
 `,
@@ -650,23 +609,16 @@ esac
   });
 
   test("sends a music CLI call to the media CLI's music group", () => {
-    const result = withLayout("one-backend", "write_state music_core 1; cmd_cli --side after --app music -- albums list");
+    const result = withSide("write_state music_core 1; cmd_cli --side after --app music -- albums list");
     assert.equal(result.status, 1);
     assert.match(result.stderr, /cli runs the media CLI for both products: run `cli -- music …` for music/);
-    const movies = withLayout("one-backend", "cmd_cli --side after --app movies -- movies titles list");
+    const movies = withSide("cmd_cli --side after --app movies -- movies titles list");
     assert.equal(movies.status, 1);
     assert.match(movies.stderr, /no CLI session on the after side/);
   });
 
-  test("refuses the movies iOS app on old movies' backend before it touches the Mac", () => {
-    const result = withLayoutOffline("one-port", "write_state people lucia; args=(up); mac=nowhere.invalid cmd_ios_up");
-    assert.equal(result.status, 1, result.stderr);
-    assert.match(result.stderr, /iOS app signs in to the core, which the after side's one-port image does not serve/);
-  });
-
   test("refuses the music iOS app on an image without the music client before it touches the Mac", () => {
-    const result = withLayoutOffline(
-      "one-backend",
+    const result = withSideOffline(
       "write_state people lucia; write_state music_core 0; args=(up --app music); mac=nowhere.invalid cmd_ios_up",
     );
     assert.equal(result.status, 1, result.stderr);
@@ -674,7 +626,7 @@ esac
   });
 
   test("refuses an iOS app it does not know", () => {
-    const result = withLayoutOffline("one-backend", "args=(up --app tv); mac=nowhere.invalid cmd_ios_up");
+    const result = withSideOffline("args=(up --app tv); mac=nowhere.invalid cmd_ios_up");
     assert.equal(result.status, 1, result.stderr);
     assert.match(result.stderr, /ios up --app must be movies or music, not tv/);
   });
@@ -724,7 +676,7 @@ describe("the core seed", () => {
     for (const grant of GRANTS) assert.ok(grantArgs(grant, libraries, users));
   });
 
-  test("seeds music on the core with old music's demo data for the same people", () => {
+  test("seeds music on the core with the demo data for the same people", () => {
     const libraries = new Map([["Music", "lib-u"]]);
     const users = new Map([["mateo", "u-m"], ["aiko", "u-a"], ["sam", "u-s"]]);
     assert.deepEqual(MUSIC_GRANTS.map((grant) => grantArgs(grant, libraries, users).principal), [
