@@ -69,7 +69,7 @@ testers.runNixOSTest {
     };
     # Root makes no folder inside the service user's state folder, so the service user makes
     # backupDir and the folder on the way to it.
-    nested = install { backupDir = "/var/lib/media/movies/media/custom/backups"; };
+    nested = install { backupDir = "/var/lib/media/server/custom/backups"; };
   };
 
   testScript = ''
@@ -97,9 +97,9 @@ testers.runNixOSTest {
     start_all()
 
     nested_dirs = [
-        "/var/lib/media/movies/media",
-        "/var/lib/media/movies/media/custom",
-        "/var/lib/media/movies/media/custom/backups",
+        "/var/lib/media/server",
+        "/var/lib/media/server/custom",
+        "/var/lib/media/server/custom/backups",
     ]
 
     def nested_owners():
@@ -175,8 +175,7 @@ testers.runNixOSTest {
             "/var/lib/media/core": "root 711",
             "/var/lib/media/core/convex": "root 700",
             "/var/lib/media/core/secrets": "root 700",
-            "/var/lib/media/movies": "root 711",
-            "/var/lib/media/movies/media": "media-server 700",
+            "/var/lib/media/server": "media-server 700",
             "/var/lib/media/core/backups": "media-server 700",
             "/var/cache/media": "root 755",
             "/var/cache/media/transcode": "media-server 700",
@@ -280,7 +279,7 @@ testers.runNixOSTest {
         machine.wait_for_unit("media-server.service")
         wait_connected()
 
-    state = "/var/lib/media/movies/media"
+    state = "/var/lib/media/server"
     backups = "/var/lib/media/core/backups"
     transcodes = "/var/cache/media/transcode"
     service_ids = machine.succeed("echo \"$(id -u media-server):$(getent group media-server | cut -d: -f3)\"").strip()
@@ -337,13 +336,14 @@ testers.runNixOSTest {
         start()
 
     with subtest("a library mounted at or inside a folder of [media]'s stops the start, and keeps its owner and mode"):
-        machine.succeed("systemctl stop media-server.service")
+        # The core's database is inside one of the folders, so its container stops too.
+        machine.succeed("systemctl stop media-server.service podman-media-core-convex.service")
         machine.succeed("install -o 9999 -g 9999 -m 644 /dev/null /srv/media/movies/library-file")
         library = listing("/srv/media")
         for folder, refusal in [
             (state, f"refusing to start: {state} is a mount point"),
             (transcodes, f"refusing to start: {transcodes} is a mount point"),
-            ("/var/lib/media/movies", "refusing to start: /var/lib/media/movies is a mount point"),
+            ("/var/lib/media/core", "refusing to start: /var/lib/media/core is a mount point"),
         ]:
             machine.succeed(f"mount --bind /srv/media/movies {folder}")
             log = start_refused()
@@ -363,7 +363,7 @@ testers.runNixOSTest {
     with subtest("a symlinked dataDir stops everything before it starts, and no tmpfiles rule follows it"):
         # Another install's state behind the symlink, its database folder of another owner and mode.
         machine.succeed("systemctl stop media-server.service podman-media-core-convex.service")
-        machine.succeed("mkdir -p /srv/other/core/convex /srv/other/movies/media && touch /srv/other/core/convex/theirs")
+        machine.succeed("mkdir -p /srv/other/core/convex /srv/other/server && touch /srv/other/core/convex/theirs")
         machine.succeed("chown -R 9999:9999 /srv/other && chmod 2775 /srv/other/core/convex")
         machine.succeed("mv /var/lib/media /var/lib/media.real && ln -s /srv/other /var/lib/media")
         other = listing("/srv/other")
@@ -377,15 +377,15 @@ testers.runNixOSTest {
         machine.succeed("systemctl reset-failed")
         start()
 
-    with subtest("a symlink on the way to the state folder stops the start"):
+    with subtest("a symlinked state folder stops the start"):
         machine.succeed("systemctl stop media-server.service")
-        machine.succeed("mkdir -p /srv/elsewhere/media && touch /srv/elsewhere/media/theirs && chown -R 9999:9999 /srv/elsewhere")
-        machine.succeed("mv /var/lib/media/movies /var/lib/media/movies.real && ln -s /srv/elsewhere /var/lib/media/movies")
+        machine.succeed("mkdir -p /srv/elsewhere && touch /srv/elsewhere/theirs && chown -R 9999:9999 /srv/elsewhere")
+        machine.succeed(f"mv {state} {state}.real && ln -s /srv/elsewhere {state}")
         elsewhere = listing("/srv/elsewhere")
         log = start_refused()
-        assert "refusing to start: /var/lib/media/movies is a symlink to /srv/elsewhere" in log, log
+        assert f"refusing to start: {state} is a symlink to /srv/elsewhere; set the option to a plain folder" in log, log
         assert listing("/srv/elsewhere") == elsewhere
-        machine.succeed("rm /var/lib/media/movies && mv /var/lib/media/movies.real /var/lib/media/movies")
+        machine.succeed(f"rm {state} && mv {state}.real {state}")
         start()
 
     with subtest("nothing is made below a folder another user can change, even while it swaps the folder"):

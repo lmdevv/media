@@ -213,7 +213,7 @@ signs_in_with_stored_key() {
 writes_as_service() { sudo nsenter -t "$pid" -m touch "$1" 2>/dev/null; }
 secret_in_cmdline() { sudo cat "/proc/$pid/cmdline" | tr "\0" "\n" | grep -q "KEY\|SECRET"; }
 foreign_entries() {
-  sudo find "$base/data/movies/media" "$base/data/core/backups" "$base/transcode" \
+  sudo find "$base/data/server" "$base/data/core/backups" "$base/transcode" \
     \( ! -user nobody -o ! -group nogroup \) -printf . | wc -c
 }
 check "the media service runs as its own user" equals "$(sudo stat -c %U "/proc/$pid")" nobody
@@ -225,12 +225,12 @@ folder_modes() {
   for dir in "$@"; do sudo stat -c "%n %U %a" "$dir"; done
 }
 check "root's folders are root's" \
-  equals "$(folder_modes "$base/data" "$base/data/core" "$base/data/core/convex" "$base/data/core/secrets" "$base/data/movies")" \
+  equals "$(folder_modes "$base/data" "$base/data/core" "$base/data/core/convex" "$base/data/core/secrets")" \
   "$(printf '%s\n' "$base/data root 711" "$base/data/core root 711" "$base/data/core/convex root 700" \
-    "$base/data/core/secrets root 700" "$base/data/movies root 711")"
+    "$base/data/core/secrets root 700")"
 check "the service's folders are its user's alone" \
-  equals "$(folder_modes "$base/data/movies/media" "$base/data/core/backups" "$base/transcode")" \
-  "$(printf '%s\n' "$base/data/movies/media nobody 700" "$base/data/core/backups nobody 700" "$base/transcode nobody 700")"
+  equals "$(folder_modes "$base/data/server" "$base/data/core/backups" "$base/transcode")" \
+  "$(printf '%s\n' "$base/data/server nobody 700" "$base/data/core/backups nobody 700" "$base/transcode nobody 700")"
 check "the media service's key is root's and private" \
   equals "$(owner_and_mode "$base/data/core/secrets/media-service-key" "$base/data/core/secrets/media-service-id")" "root 600"
 check "the media service signs in to the core with its stored key and the core's ticket keys" signs_in_with_stored_key

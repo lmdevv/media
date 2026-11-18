@@ -46,8 +46,7 @@ let
   coreConvexUrl = "http://127.0.0.1:${toString ports.coreConvex}";
   coreDataDir = "${cfg.dataDir}/core";
   secretsDir = "${coreDataDir}/secrets";
-  moviesDataDir = "${cfg.dataDir}/movies";
-  mediaDataDir = "${moviesDataDir}/media";
+  serverDataDir = "${cfg.dataDir}/server";
   convexDataDir = "${coreDataDir}/convex";
   # Root's folders. Parents first, so each is made with its own mode rather than as a folder on
   # the way to another. The core's database and secrets stay root's, and setup writes its records
@@ -68,10 +67,6 @@ let
     {
       path = secretsDir;
       mode = "0700";
-    }
-    {
-      path = moviesDataDir;
-      mode = "0711";
     }
   ];
 
@@ -126,8 +121,8 @@ let
   ];
   serviceFolders = [
     {
-      name = "dataDir/movies/media";
-      path = mediaDataDir;
+      name = "dataDir/server";
+      path = serverDataDir;
     }
     {
       name = "backupDir";
@@ -594,11 +589,11 @@ in
       type = lib.types.path;
       default = "/var/lib/media";
       description = ''
-        State, one folder per domain: the core's Convex database (`core/convex/`), the media
-        service's key (`core/secrets/`), and the media service's caches (`movies/media/`). An
-        install from before the movies cutover also keeps old movies' database (`movies/convex/`).
-        A plain folder: no symlink on its path, not a mount point (use a folder inside the mounted
-        file system), and only root may be able to change the folders above it.
+        State: the core's Convex database (`core/convex/`), the media service's key
+        (`core/secrets/`), and the media service's own data (`server/`): its caches, artwork,
+        thumbnails, and logs. A plain folder: no symlink on its path, not a mount point (use a
+        folder inside the mounted file system), and only root may be able to change the folders
+        above it.
       '';
     };
 
@@ -1137,7 +1132,7 @@ in
         CONVEX_URL = coreConvexUrl;
         CONVEX_PUBLIC_URL = "${publicUrl}/convex";
         CONVEX_BACKEND_DIR = "${cfg.package}/lib/media/platform";
-        DATA_DIR = mediaDataDir;
+        DATA_DIR = serverDataDir;
         BACKUP_DIR = cfg.backupDir;
         BACKUP_RETENTION_DAYS = toString cfg.backupRetentionDays;
         TRANSCODE_DIR = cfg.transcodeDir;
@@ -1198,7 +1193,7 @@ in
         RuntimeDirectoryMode = "0755";
 
         ReadWritePaths = [
-          mediaDataDir
+          serverDataDir
           cfg.backupDir
           cfg.transcodeDir
         ];
