@@ -602,11 +602,16 @@ export const movies = [
     result: v.array(mediaVersion),
   }),
   query("movies.titles.episodes", {
-    summary: "List a season's episodes in order with your progress and their credits",
+    summary:
+      "List a season's episodes in order with your progress and their credits; without a season, the one the show's page opens on",
     scope: "movies:read",
     args: {
       titleId: v.id("titles"),
-      seasonNumber: v.number(),
+      /**
+       * Omit for the season a show's page opens on: its next episode's, else its first regular
+       * season, else its first. Every page after the first names the season.
+       */
+      seasonNumber: v.optional(v.number()),
       paginationOpts: paginationOptsValidator,
     },
     result: paginationResultValidator(v.object({ ...episodeFields, credits: v.array(credit) })),

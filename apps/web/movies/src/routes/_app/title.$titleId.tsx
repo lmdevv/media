@@ -5,6 +5,7 @@ import { CalmState } from "@media/ui/components/calm-state";
 import { Link, createFileRoute } from "@tanstack/react-router";
 
 import { asTitleId } from "@/lib/catalog";
+import { HeldEpisodes } from "@/components/browse/episodes";
 import { HeroSkeleton } from "@/components/browse/skeletons";
 import { TitleDetailView } from "@/components/browse/title-detail";
 import { HeldSimilar } from "@/components/browse/title-extras";
@@ -27,6 +28,7 @@ function TitlePage() {
   return (
     <>
       <HeldSimilar titleId={titleId} />
+      <HeldEpisodes titleId={titleId} />
       <TitleContent />
     </>
   );

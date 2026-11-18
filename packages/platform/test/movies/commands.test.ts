@@ -1,4 +1,9 @@
+import { join } from "node:path";
+
+import type { ConvexHttpClient } from "convex/browser";
 import { beforeAll, describe, expect, it } from "vitest";
+
+import { openingSeason } from "@media/contracts/opening-season";
 
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -6,8 +11,10 @@ import type { Member } from "../devices";
 import { movie, seedLibrary, share, unshare } from "../probe";
 import { failureOf, refusal } from "../sign-in";
 import { coreStackFromEnvFile } from "../stack-env";
-import { NONE, seasonOf, shelfOf, titleIn } from "./shelf";
-import type { Shelf } from "./shelf";
+import { finishJob } from "./catalog";
+import { episodeFile, scannedTitle } from "./scanned";
+import { NONE, scanInto, seasonOf, shelfOf, titleIn } from "./shelf";
+import type { SeasonEpisode, Shelf } from "./shelf";
 
 const stack = coreStackFromEnvFile();
 
@@ -59,6 +66,18 @@ const ALL = [
   "Tears of Steel",
   "Unrated Short",
 ];
+
+/** The first page of the season a show's page opens on, with the season left to the server. */
+const openedOn = async (
+  client: ConvexHttpClient,
+  titleId: Id<"titles">,
+): Promise<ReadonlyArray<SeasonEpisode>> =>
+  (
+    await client.query(api.movies.titles.episodes, {
+      titleId,
+      paginationOpts: { numItems: 100, cursor: null },
+    })
+  ).page;
 
 const sorted = (names: ReadonlyArray<string>): ReadonlyArray<string> => names.toSorted();
 
@@ -201,6 +220,12 @@ describe.skipIf(stack === undefined)("movies browse commands", { timeout: 180_00
           paginationOpts: { numItems: 10, cursor: null },
         }),
       ),
+      refusal(
+        client.query(api.movies.titles.episodes, {
+          titleId: sintel,
+          paginationOpts: { numItems: 10, cursor: null },
+        }),
+      ),
       refusal(client.mutation(api.movies.play.start, { titleId: sintel })),
       refusal(client.mutation(api.movies.myList.add, { titleId: sintel })),
       refusal(client.mutation(api.movies.history.markWatched, { titleId: sintel })),
@@ -244,6 +269,8 @@ describe.skipIf(stack === undefined)("movies browse commands", { timeout: 180_00
     const episodes = await seasonOf(client, pioneerId, 1);
 
     expect(episodes.map((episode) => episode.episodeNumber)).toEqual([1, 2, 3]);
+    expect(await openedOn(client, pioneerId)).toEqual(episodes);
+    expect(await openedOn(client, titleIn(shelf, "Sintel"))).toEqual([]);
 
     const [first, second] = episodes;
 
@@ -271,6 +298,84 @@ describe.skipIf(stack === undefined)("movies browse commands", { timeout: 180_00
     expect(
       (await failureOf(client.query(api.movies.titles.versions, { titleId: pioneerId }))).code,
     ).toBe("invalid_args");
+  });
+
+  it("open a show's episodes on its next episode's season, else its first regular one", async () => {
+    if (stack === undefined) return;
+
+    const label = `specials-${Math.random().toString(36).slice(2, 8)}`;
+
+    const numbers = [
+      [0, 1],
+      [1, 1],
+      [1, 2],
+      [2, 1],
+    ] as const;
+
+    const scanned = await scanInto(stack, shelf.owner, `${label} Series`, (root) =>
+      numbers.map(([season, episode]) =>
+        episodeFile(
+          join(root, "Specials Show", `${season}-${episode}.mkv`),
+          scannedTitle("show", `nfo:${label}`, "Specials Show", 0),
+          season,
+          episode,
+        ),
+      ),
+    );
+
+    await finishJob(stack, scanned.lease);
+    await share(
+      shelf.owner,
+      scanned.libraryId,
+      { kind: "user", userId: shelf.aiko.userId },
+      "view",
+    );
+
+    const titleId = scanned.files[0]?.titleId;
+
+    if (titleId === undefined) throw new Error("the scan landed no files");
+
+    const client = shelf.aiko.signedIn.client;
+
+    const opened = async () =>
+      (await openedOn(client, titleId)).map((episode) => [
+        episode.seasonNumber,
+        episode.episodeNumber,
+      ]);
+
+    /** The season the clients head the list with, from what `movies.titles.get` answers. */
+    const clientsOpenOn = async () => {
+      const show = await client.query(api.movies.titles.get, { titleId });
+
+      return openingSeason({
+        nextSeason: show.nextEpisode?.seasonNumber ?? null,
+        seasons: show.seasons.map((season) => season.seasonNumber),
+      });
+    };
+
+    expect(await opened()).toEqual([
+      [1, 1],
+      [1, 2],
+    ]);
+    expect(await clientsOpenOn()).toBe(1);
+
+    const lastOfFirst = (await seasonOf(client, titleId, 1))[1];
+
+    if (lastOfFirst === undefined) throw new Error("no second episode of season 1");
+
+    await client.mutation(api.movies.history.markWatched, { titleId, episodeId: lastOfFirst.id });
+
+    expect(await opened()).toEqual([[2, 1]]);
+    expect(await clientsOpenOn()).toBe(2);
+
+    await client.mutation(api.movies.history.markWatched, { titleId });
+
+    expect((await client.query(api.movies.titles.get, { titleId })).nextEpisode).toBeNull();
+    expect(await opened()).toEqual([
+      [1, 1],
+      [1, 2],
+    ]);
+    expect(await clientsOpenOn()).toBe(1);
   });
 
   it("search titles, count genres, and show home rows of what each person sees", async () => {

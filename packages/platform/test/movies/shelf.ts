@@ -95,7 +95,11 @@ const at = <T>(values: ReadonlyArray<T>, index: number, what: string): T => {
   return value;
 };
 
-const scanInto = async (
+/**
+ * Makes a movies library `name` for `owner` and lands the items `items` names under its folder
+ * through its first scan, which stays claimed: finish it with `finishJob(core, lease)`.
+ */
+export const scanInto = async (
   core: CoreStack,
   owner: Member,
   name: string,

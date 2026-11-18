@@ -1,3 +1,5 @@
+import { openingSeason } from "@media/contracts/opening-season";
+
 import type { Doc, Id } from "../_generated/dataModel";
 import type { DatabaseReader, MutationCtx } from "../_generated/server";
 import type { BudgetedViewer } from "./access";
@@ -351,6 +353,45 @@ export const upNextEpisode = async (
   return isFinished(latest)
     ? scanUnwatched(db, userId, episode, MAX_SKIPPED_EPISODES, true, UNBOUNDED)
     : episode;
+};
+
+/** The season a page of a title's episodes covers when the title has none. */
+const NO_SEASON = 1;
+
+/**
+ * The season a show's page opens on, by the rule its clients share ({@link openingSeason}). It
+ * reads the show's lowest season, and its lowest regular one only when the lowest is Specials. A
+ * movie has no episodes, so any season answers its empty page.
+ */
+export const openingSeasonOf = async (
+  db: DatabaseReader,
+  userId: Id<"users">,
+  title: Doc<"titles">,
+): Promise<number> => {
+  if (title.kind === "movie") return NO_SEASON;
+
+  const next = await upNextEpisode(db, userId, title._id);
+
+  if (next !== null) return next.seasonNumber;
+
+  const lowest = await db
+    .query("seasons")
+    .withIndex("by_title_number", (q) => q.eq("titleId", title._id))
+    .first();
+
+  const regular =
+    lowest === null || lowest.seasonNumber > 0
+      ? null
+      : await db
+          .query("seasons")
+          .withIndex("by_title_number", (q) => q.eq("titleId", title._id).gt("seasonNumber", 0))
+          .first();
+
+  const seasons = [lowest, regular].flatMap((season) =>
+    season === null ? [] : [season.seasonNumber],
+  );
+
+  return openingSeason({ nextSeason: null, seasons }) ?? NO_SEASON;
 };
 
 const CONTINUE_LIMIT = 20;

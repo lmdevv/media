@@ -1,7 +1,9 @@
+import { seasonPageArgs } from "@media/contracts/opening-season";
 import { describeFailure, isFailure } from "@media/mobile-core/failure";
 import { useAllPages } from "@media/mobile-core/pages";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { router, useLocalSearchParams } from "expo-router";
+import { useState } from "react";
 import { ChevronDown, CircleAlert } from "lucide-react-native";
 import { ActivityIndicator, Pressable, useWindowDimensions, View } from "react-native";
 import Animated, { useAnimatedScrollHandler, useSharedValue } from "react-native-reanimated";
@@ -14,6 +16,7 @@ import { seasonParam, titleIdParam } from "@/components/title/route-params";
 import { GUTTER, READABLE_COLUMN } from "@/components/ui/page-layout";
 import { TitleHero, TitleTopBar } from "@/components/title/title-hero";
 import { initialSeason } from "@/components/title/title-model";
+import { useOpeningEpisodes } from "@/components/title/use-opening-episodes";
 import {
   AboutRow,
   AvailableVersions,
@@ -73,7 +76,12 @@ function TitleDetailView({ title }: { readonly title: TitleDetail }) {
     scrollY.value = event.contentOffset.y;
   });
 
-  const seasonNumber = seasonParam(params.season) ?? initialSeason(title);
+  const opening = initialSeason(title);
+  // The list keeps the season it opened on while the screen is open, so its heading and the pages
+  // it has loaded stay on one season when the next episode moves to another.
+  const [opened] = useState(opening);
+  const seasonNumber = seasonParam(params.season) ?? opened ?? opening;
+  const [namedOnly, setNamedOnly] = useState(false);
   const show = title.kind === "show";
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
@@ -86,9 +94,18 @@ function TitleDetailView({ title }: { readonly title: TitleDetail }) {
   const episodes = useAllPages(
     platform.movies.titles.episodes,
     show && seasonNumber !== null
-      ? (paginationOpts) => ({ titleId: title.id, seasonNumber, paginationOpts })
+      ? (paginationOpts) =>
+          seasonPageArgs(
+            title.id,
+            seasonNumber,
+            !namedOnly && seasonNumber === opening,
+            paginationOpts,
+          )
       : "skip",
   );
+
+  // A server that predates the optional season refuses the page that leaves it out; ask by number.
+  if (!namedOnly && seasonNumber === opening && episodes.status === "failed") setNamedOnly(true);
 
   return (
     <View className="flex-1 bg-bg">
@@ -180,6 +197,8 @@ function EpisodeGap() {
 function TitleLoader({ titleId }: { readonly titleId: TitleId }) {
   const platform = usePlatform();
   const title = usePlatformQuery(platform.movies.titles.get, { titleId });
+
+  useOpeningEpisodes(titleId);
 
   if (title.status === "loading") {
     return (

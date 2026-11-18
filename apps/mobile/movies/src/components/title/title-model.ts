@@ -1,3 +1,4 @@
+import { openingSeason } from "@media/contracts/opening-season";
 import { MediaLabels } from "@media/sdk/effect";
 
 import type {
@@ -178,9 +179,15 @@ export const episodeSubtitle = (episode: Episode): string =>
 export const seasonDetail = (season: Season, selected: boolean): string =>
   facts(countOf(season.episodeCount, "Episode", "Episodes"), selected ? "Selected" : null);
 
-/** The season the episode list opens on: the next episode's, else the first regular one. */
+/**
+ * The season the episode list opens on: the next episode's, else the first regular one, by the
+ * rule `movies.titles.episodes` answers when the season is left out.
+ */
 export const initialSeason = (title: TitleDetail): number | null =>
-  title.nextEpisode?.seasonNumber ?? firstSeason(title) ?? null;
+  openingSeason({
+    nextSeason: title.nextEpisode?.seasonNumber ?? null,
+    seasons: title.seasons.map((season) => season.seasonNumber),
+  });
 
 /** An optimistic change waiting on the server: the value it was made from and the one it shows. */
 export interface Pending<A> {

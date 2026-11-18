@@ -3858,7 +3858,7 @@ const movies_titles_episodes = query({
   path: "movies/titles:episodes",
   args: Schema.Struct({
     titleId: Schema.String.pipe(Schema.brand("Id<titles>")),
-    seasonNumber: Schema.Finite,
+    seasonNumber: Schema.optionalKey(Schema.Finite),
     paginationOpts: Schema.Struct({
       numItems: Schema.Finite,
       cursor: Schema.Union([Schema.String, Schema.Null]),
@@ -6325,7 +6325,7 @@ export const effectMethods = (method: EffectBuilder) => ({
     titles: {
       /** `movies.titles.episode` (query, movies:play): Show an episode you can play with its show and your progress, as a group session names it. */
       episode: method.query(movies_titles_episode),
-      /** `movies.titles.episodes` (query, movies:read): List a season's episodes in order with your progress and their credits. */
+      /** `movies.titles.episodes` (query, movies:read): List a season's episodes in order with your progress and their credits; without a season, the one the show's page opens on. */
       episodes: method.query(movies_titles_episodes),
       /** `movies.titles.genres` (query, movies:read): List the genres of the titles you may see, most common first. */
       genres: method.query(movies_titles_genres),
@@ -6825,7 +6825,7 @@ export const promiseMethods = (method: PromiseBuilder) => ({
     titles: {
       /** `movies.titles.episode` (query, movies:play): Show an episode you can play with its show and your progress, as a group session names it. */
       episode: method.query(movies_titles_episode),
-      /** `movies.titles.episodes` (query, movies:read): List a season's episodes in order with your progress and their credits. */
+      /** `movies.titles.episodes` (query, movies:read): List a season's episodes in order with your progress and their credits; without a season, the one the show's page opens on. */
       episodes: method.query(movies_titles_episodes),
       /** `movies.titles.genres` (query, movies:read): List the genres of the titles you may see, most common first. */
       genres: method.query(movies_titles_genres),

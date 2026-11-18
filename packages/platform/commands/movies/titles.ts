@@ -43,7 +43,7 @@ const episodeResult = v.object({
 
 const episodesArgs = v.object({
   titleId: v.id("titles"),
-  seasonNumber: v.number(),
+  seasonNumber: v.optional(v.number()),
   paginationOpts: v.object({
     numItems: v.number(),
     cursor: v.union(v.string(), v.null()),
@@ -692,7 +692,7 @@ export interface Handlers {
     caller: Caller,
   ) => Infer<typeof episodeResult> | Promise<Infer<typeof episodeResult>>;
 
-  /** `movies.titles.episodes` (query, movies:read): List a season's episodes in order with your progress and their credits. */
+  /** `movies.titles.episodes` (query, movies:read): List a season's episodes in order with your progress and their credits; without a season, the one the show's page opens on. */
   readonly episodes: (
     ctx: Omit<QueryCtx, "auth">,
     args: Infer<typeof episodesArgs>,

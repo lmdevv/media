@@ -1,8 +1,9 @@
-import type { Episode, SeasonEpisode, TitleDetail } from "@/lib/catalog";
+import type { Episode, SeasonEpisode, TitleDetail, TitleId } from "@/lib/catalog";
+import { openingPageArgs, openingSeason, seasonPageArgs } from "@media/contracts/opening-season";
 import { usePlatform } from "@media/sdk/react";
 import { EpisodeRow } from "@media/ui/components/media-card";
 import { ProgressBar } from "@media/ui/components/progress-bar";
-import { useAllPages } from "@media/ui/lib/pages";
+import { useAllPages, usePages } from "@media/ui/lib/pages";
 import { cn } from "@media/ui/lib/utils";
 import { Link } from "@tanstack/react-router";
 import { ChevronDownIcon } from "lucide-react";
@@ -50,18 +51,45 @@ const episodeCredits = (episode: SeasonEpisode): string | undefined => {
   return lines.length === 0 ? undefined : lines.join(" · ");
 };
 
-/** The episodes section of a show's page. Starts on the season of the next episode. */
+/** The season the server opens a show's episodes on, by the rule both share. */
+const openingSeasonOf = (show: TitleDetail): number =>
+  openingSeason({
+    nextSeason: show.nextEpisode?.seasonNumber ?? null,
+    seasons: show.seasons.map((season) => season.seasonNumber),
+  }) ?? 1;
+
+const useOpeningEpisodes = (titleId: TitleId) => {
+  const platform = usePlatform();
+
+  return usePages(platform.movies.titles.episodes, (paginationOpts) =>
+    openingPageArgs(titleId, paginationOpts),
+  );
+};
+
+/**
+ * Holds the first page of the season a title's page opens on from the moment the page opens, so
+ * the episode list has its answer when it mounts, which is only after the title answered. A
+ * movie's page holds an empty page.
+ */
+export function HeldEpisodes({ titleId }: { readonly titleId: TitleId }) {
+  useOpeningEpisodes(titleId);
+
+  return null;
+}
+
+/**
+ * The episodes section of a show's page. Starts on the season of the next episode, else the first
+ * regular season, and stays on the season it opened on.
+ */
 export function Episodes({ show, phone }: { readonly show: TitleDetail; readonly phone: boolean }) {
   const platform = usePlatform();
-  const firstSeason = show.nextEpisode?.seasonNumber ?? show.seasons[0]?.seasonNumber ?? 1;
-  const [seasonNumber, setSeasonNumber] = useState(firstSeason);
+  const opening = openingSeasonOf(show);
+  const [seasonNumber, setSeasonNumber] = useState(opening);
   const season = show.seasons.find((candidate) => candidate.seasonNumber === seasonNumber);
 
-  const episodes = useAllPages(platform.movies.titles.episodes, (paginationOpts) => ({
-    titleId: show.id,
-    seasonNumber,
-    paginationOpts,
-  }));
+  const episodes = useAllPages(platform.movies.titles.episodes, (paginationOpts) =>
+    seasonPageArgs(show.id, seasonNumber, seasonNumber === opening, paginationOpts),
+  );
 
   const list = episodes.status === "ready" ? episodes.rows : NO_EPISODES;
   const watched = list.filter((episode) => episode.progress?.watched === true).length;

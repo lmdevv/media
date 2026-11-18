@@ -4760,12 +4760,13 @@ export const generatedCommands = [
     kind: "query",
     scope: "movies:read",
     refusesKeys: false,
-    summary: "List a season's episodes in order with your progress and their credits",
+    summary:
+      "List a season's episodes in order with your progress and their credits; without a season, the one the show's page opens on",
     secrets: [],
     paginated: true,
     args: Schema.Struct({
       titleId: Schema.String.pipe(Schema.brand("Id<titles>")),
-      seasonNumber: Schema.Finite,
+      seasonNumber: Schema.optionalKey(Schema.Finite),
       paginationOpts: Schema.Struct({
         numItems: Schema.Finite,
         cursor: Schema.Union([Schema.String, Schema.Null]),

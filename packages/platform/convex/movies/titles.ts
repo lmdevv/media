@@ -37,6 +37,7 @@ import {
   continueWatching,
   findProgress,
   nextEpisodeAfter,
+  openingSeasonOf,
   presentEpisodeFor,
   upNextEpisode,
 } from "./viewing";
@@ -446,8 +447,9 @@ export const {
 
     return files.map((file) => presentVersion(file, progress?.fileId ?? null));
   },
-  episodes: async (ctx, { titleId, seasonNumber, paginationOpts }, caller) => {
-    await requireTitle(ctx.db, caller, "view", titleId);
+  episodes: async (ctx, { titleId, seasonNumber: named, paginationOpts }, caller) => {
+    const { title } = await requireTitle(ctx.db, caller, "view", titleId);
+    const seasonNumber = named ?? (await openingSeasonOf(ctx.db, caller.userId, title));
 
     const page = await paginateAtMost(
       ctx.db,
