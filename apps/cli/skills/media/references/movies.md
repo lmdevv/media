@@ -23,6 +23,16 @@ List collections by name with the titles you may see in each.
 - Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
 - Result: `{ page: Array<{ id: Id<"collections">; name: string; overview: string | null; artwork: { poster: string | null; backdrop: string | null }; titles: Array<{ id: Id<"titles">; kind: "movie" | "show"; name: string; year: number | null; certification: string | null; ageRating: number | null; runtimeMs: number | null; genres: Array<string>; artwork: { poster: string | null; backdrop: string | null; logo: string | null }; available: boolean; addedAt: number }> }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
 
+## `movies.collections.ofTitle`
+
+Show the collection a title's page shows and the titles you may see in it, or null when it is in none you may see.
+
+- CLI: `media movies collections of-title`
+- Kind: query
+- Scope: movies:read
+- Arguments: `{ titleId: Id<"titles"> }`
+- Result: `{ id: Id<"collections">; name: string; overview: string | null; artwork: { poster: string | null; backdrop: string | null }; titles: Array<{ id: Id<"titles">; kind: "movie" | "show"; name: string; year: number | null; certification: string | null; ageRating: number | null; runtimeMs: number | null; genres: Array<string>; artwork: { poster: string | null; backdrop: string | null; logo: string | null }; available: boolean; addedAt: number }> } | null`
+
 ## `movies.files.list`
 
 List a library's files by path with their quality, size, match, and whether they are missing.

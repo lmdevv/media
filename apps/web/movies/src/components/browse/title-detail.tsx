@@ -89,9 +89,7 @@ function TitleRows({ title, phone }: { readonly title: TitleDetail; readonly pho
   return (
     <div className={cn("flex flex-col", phone ? "pt-2" : "gap-11 pb-20")}>
       <CastAndCrew title={title} />
-      {title.collection === null ? null : (
-        <CollectionRow collectionId={title.collection.id} titleId={title.id} phone={phone} />
-      )}
+      {title.collection === null ? null : <CollectionRow titleId={title.id} phone={phone} />}
       <MoreLikeThis titleId={title.id} phone={phone} />
     </div>
   );

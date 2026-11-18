@@ -3605,6 +3605,50 @@ export const generatedCommands = [
     method: (platform) => platform.movies.collections.list,
   }),
   coreCommand({
+    name: "movies.collections.ofTitle",
+    path: ["movies", "collections", "of-title"],
+    kind: "query",
+    scope: "movies:read",
+    refusesKeys: false,
+    summary:
+      "Show the collection a title's page shows and the titles you may see in it, or null when it is in none you may see",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({ titleId: Schema.String.pipe(Schema.brand("Id<titles>")) }),
+    result: Schema.Union([
+      Schema.Struct({
+        id: Schema.String.pipe(Schema.brand("Id<collections>")),
+        name: Schema.String,
+        overview: Schema.Union([Schema.String, Schema.Null]),
+        artwork: Schema.Struct({
+          poster: Schema.Union([Schema.String, Schema.Null]),
+          backdrop: Schema.Union([Schema.String, Schema.Null]),
+        }),
+        titles: Schema.Array(
+          Schema.Struct({
+            id: Schema.String.pipe(Schema.brand("Id<titles>")),
+            kind: Schema.Union([Schema.Literal("movie"), Schema.Literal("show")]),
+            name: Schema.String,
+            year: Schema.Union([Schema.Finite, Schema.Null]),
+            certification: Schema.Union([Schema.String, Schema.Null]),
+            ageRating: Schema.Union([Schema.Finite, Schema.Null]),
+            runtimeMs: Schema.Union([Schema.Finite, Schema.Null]),
+            genres: Schema.Array(Schema.String),
+            artwork: Schema.Struct({
+              poster: Schema.Union([Schema.String, Schema.Null]),
+              backdrop: Schema.Union([Schema.String, Schema.Null]),
+              logo: Schema.Union([Schema.String, Schema.Null]),
+            }),
+            available: Schema.Boolean,
+            addedAt: Schema.Finite,
+          }),
+        ),
+      }),
+      Schema.Null,
+    ]),
+    method: (platform) => platform.movies.collections.ofTitle,
+  }),
+  coreCommand({
     name: "movies.files.list",
     path: ["movies", "files", "list"],
     kind: "query",

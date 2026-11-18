@@ -217,6 +217,8 @@ export const commandRefs = {
   "core.together.reorder": api.core.together.reorder satisfies core_together["reorder"],
   "movies.collections.get": api.movies.collections.get satisfies movies_collections["get"],
   "movies.collections.list": api.movies.collections.list satisfies movies_collections["list"],
+  "movies.collections.ofTitle": api.movies.collections
+    .ofTitle satisfies movies_collections["ofTitle"],
   "movies.files.list": api.movies.files.list satisfies movies_files["list"],
   "movies.files.summary": api.movies.files.summary satisfies movies_files["summary"],
   "movies.history.continueWatching": api.movies.history

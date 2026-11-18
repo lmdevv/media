@@ -667,6 +667,13 @@ export const movies = [
     args: { collectionId: v.id("collections") },
     result: collection,
   }),
+  query("movies.collections.ofTitle", {
+    summary:
+      "Show the collection a title's page shows and the titles you may see in it, or null when it is in none you may see",
+    scope: "movies:read",
+    args: { titleId: v.id("titles") },
+    result: nullable(collection),
+  }),
   query("movies.myList.list", {
     summary: "List your list, most recently added first",
     scope: "movies:read",

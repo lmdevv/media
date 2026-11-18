@@ -213,6 +213,7 @@ describe.skipIf(stack === undefined)("movies browse commands", { timeout: 180_00
       refusal(client.query(api.movies.titles.get, { titleId: sintel })),
       refusal(client.query(api.movies.titles.versions, { titleId: sintel })),
       refusal(client.query(api.movies.titles.similar, { titleId: sintel })),
+      refusal(client.query(api.movies.collections.ofTitle, { titleId: sintel })),
       refusal(
         client.query(api.movies.titles.episodes, {
           titleId: sintel,
@@ -465,6 +466,25 @@ describe.skipIf(stack === undefined)("movies browse commands", { timeout: 180_00
     expect(
       await refusal(shelf.sam.signedIn.client.query(api.movies.collections.get, { collectionId })),
     ).toBe("not_found");
+
+    const kid = shelf.kid.signedIn.client;
+
+    expect(
+      await aiko.query(api.movies.collections.ofTitle, { titleId: titleIn(shelf, "Sintel") }),
+    ).toEqual(await aiko.query(api.movies.collections.get, { collectionId }));
+    expect(
+      await kid.query(api.movies.collections.ofTitle, {
+        titleId: titleIn(shelf, "Big Buck Bunny"),
+      }),
+    ).toEqual(await kid.query(api.movies.collections.get, { collectionId }));
+    expect(
+      await refusal(
+        kid.query(api.movies.collections.ofTitle, { titleId: titleIn(shelf, "Sintel") }),
+      ),
+    ).toBe("not_found");
+    expect(
+      await aiko.query(api.movies.collections.ofTitle, { titleId: titleIn(shelf, "Pioneer One") }),
+    ).toBeNull();
 
     const firstPage = await aiko.query(api.movies.collections.list, {
       paginationOpts: { numItems: 20, cursor: null },

@@ -2862,6 +2862,43 @@ const movies_collections_list = query({
   }),
 });
 
+const movies_collections_ofTitle = query({
+  name: "movies.collections.ofTitle",
+  path: "movies/collections:ofTitle",
+  args: Schema.Struct({ titleId: Schema.String.pipe(Schema.brand("Id<titles>")) }),
+  result: Schema.Union([
+    Schema.Struct({
+      id: Schema.String.pipe(Schema.brand("Id<collections>")),
+      name: Schema.String,
+      overview: Schema.Union([Schema.String, Schema.Null]),
+      artwork: Schema.Struct({
+        poster: Schema.Union([Schema.String, Schema.Null]),
+        backdrop: Schema.Union([Schema.String, Schema.Null]),
+      }),
+      titles: Schema.Array(
+        Schema.Struct({
+          id: Schema.String.pipe(Schema.brand("Id<titles>")),
+          kind: Schema.Union([Schema.Literal("movie"), Schema.Literal("show")]),
+          name: Schema.String,
+          year: Schema.Union([Schema.Finite, Schema.Null]),
+          certification: Schema.Union([Schema.String, Schema.Null]),
+          ageRating: Schema.Union([Schema.Finite, Schema.Null]),
+          runtimeMs: Schema.Union([Schema.Finite, Schema.Null]),
+          genres: Schema.Array(Schema.String),
+          artwork: Schema.Struct({
+            poster: Schema.Union([Schema.String, Schema.Null]),
+            backdrop: Schema.Union([Schema.String, Schema.Null]),
+            logo: Schema.Union([Schema.String, Schema.Null]),
+          }),
+          available: Schema.Boolean,
+          addedAt: Schema.Finite,
+        }),
+      ),
+    }),
+    Schema.Null,
+  ]),
+});
+
 const movies_files_list = query({
   name: "movies.files.list",
   path: "movies/files:list",
@@ -6257,6 +6294,8 @@ export const effectMethods = (method: EffectBuilder) => ({
       get: method.query(movies_collections_get),
       /** `movies.collections.list` (query, movies:read): List collections by name with the titles you may see in each. */
       list: method.query(movies_collections_list),
+      /** `movies.collections.ofTitle` (query, movies:read): Show the collection a title's page shows and the titles you may see in it, or null when it is in none you may see. */
+      ofTitle: method.query(movies_collections_ofTitle),
     },
     files: {
       /** `movies.files.list` (query, movies:edit): List a library's files by path with their quality, size, match, and whether they are missing. */
@@ -6757,6 +6796,8 @@ export const promiseMethods = (method: PromiseBuilder) => ({
       get: method.query(movies_collections_get),
       /** `movies.collections.list` (query, movies:read): List collections by name with the titles you may see in each. */
       list: method.query(movies_collections_list),
+      /** `movies.collections.ofTitle` (query, movies:read): Show the collection a title's page shows and the titles you may see in it, or null when it is in none you may see. */
+      ofTitle: method.query(movies_collections_ofTitle),
     },
     files: {
       /** `movies.files.list` (query, movies:edit): List a library's files by path with their quality, size, match, and whether they are missing. */

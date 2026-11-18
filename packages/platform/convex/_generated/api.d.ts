@@ -116,6 +116,7 @@ import type * as movies_historyProbe from "../movies/historyProbe.js";
 import type * as movies_imports from "../movies/imports.js";
 import type * as movies_items from "../movies/items.js";
 import type * as movies_matching from "../movies/matching.js";
+import type * as movies_membership from "../movies/membership.js";
 import type * as movies_metadata from "../movies/metadata.js";
 import type * as movies_myList from "../movies/myList.js";
 import type * as movies_newest from "../movies/newest.js";
@@ -283,6 +284,7 @@ declare const fullApi: ApiFromModules<{
   "movies/imports": typeof movies_imports;
   "movies/items": typeof movies_items;
   "movies/matching": typeof movies_matching;
+  "movies/membership": typeof movies_membership;
   "movies/metadata": typeof movies_metadata;
   "movies/myList": typeof movies_myList;
   "movies/newest": typeof movies_newest;

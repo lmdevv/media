@@ -10,6 +10,7 @@ import type { BudgetedViewer } from "./access";
 import { registerWithArtworkTickets } from "./artwork";
 import { countGenres, rankBySimilarity, titlePage } from "./browse";
 import { CREDIT_LIMIT, creditsOf } from "./credits";
+import { collectionOf } from "./membership";
 import { newestAcross } from "./newest";
 import {
   TITLE_GET,
@@ -367,7 +368,7 @@ export const {
     const { userId } = caller;
     const movie = title.kind === "movie";
 
-    const [seasons, files, progress, next, listed, rows, memberships] = await Promise.all([
+    const [seasons, files, progress, next, listed, rows, collection] = await Promise.all([
       ctx.db
         .query("seasons")
         .withIndex("by_title_number", (q) => q.eq("titleId", titleId))
@@ -380,10 +381,7 @@ export const {
         .withIndex("by_user_title", (q) => q.eq("userId", userId).eq("titleId", titleId))
         .unique(),
       creditsOf(ctx.db, titleId, null, CREDIT_LIMIT),
-      ctx.db
-        .query("collectionItems")
-        .withIndex("by_title", (q) => q.eq("titleId", titleId))
-        .take(20),
+      collectionOf(ctx.db, titleId),
     ]);
 
     const castRows = rows.filter((row) => row.kind === "actor").slice(0, CAST_LIMIT);
@@ -393,11 +391,8 @@ export const {
       CREW_LIMIT,
     );
 
-    const membership = memberships.find((member) => member.source === "metadata") ?? memberships[0];
-
-    const [[cast = [], crew = []], collection, upNext] = await Promise.all([
+    const [[cast = [], crew = []], upNext] = await Promise.all([
       presentCreditGroups(ctx.db, [castRows, crewRows]),
-      membership === undefined ? null : ctx.db.get(membership.collectionId),
       next === null ? null : presentEpisodeFor(ctx.db, userId, next),
     ]);
 
