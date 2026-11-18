@@ -71,8 +71,8 @@ const redirectedClient = Layer.effect(
 const storeLayer = Layer.unwrap(
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    const dataDir = yield* fs.makeTempDirectoryScoped({ prefix: "movies-artwork-" });
-    const library = yield* fs.makeTempDirectoryScoped({ prefix: "movies-artwork-library-" });
+    const dataDir = yield* fs.makeTempDirectoryScoped({ prefix: "media-artwork-" });
+    const library = yield* fs.makeTempDirectoryScoped({ prefix: "media-artwork-library-" });
 
     return ArtworkStore.layer.pipe(
       Layer.provideMerge(testArtworkKeysLayer),

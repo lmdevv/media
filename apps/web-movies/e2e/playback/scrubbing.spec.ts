@@ -68,7 +68,7 @@ test.beforeAll(async ({ browser }) => {
   if (stack === null) return;
 
   test.setTimeout(SETUP_TIMEOUT_MS);
-  workspace = await mkdtemp(join(tmpdir(), "movies-web-scrubbing-"));
+  workspace = await mkdtemp(join(tmpdir(), "media-web-scrubbing-"));
 
   const folder = join(workspace, "Films", `${MOVIE} (2021)`);
 

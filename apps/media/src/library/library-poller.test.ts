@@ -10,7 +10,7 @@ describe("library poller", () => {
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
-        const root = yield* fs.makeTempDirectoryScoped({ prefix: "movies-poll-" });
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "media-poll-" });
         const deep = path.join(root, "Show", "Season 01");
 
         yield* fs.makeDirectory(deep, { recursive: true });

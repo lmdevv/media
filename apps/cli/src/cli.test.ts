@@ -424,7 +424,7 @@ describe("troubleshooting commands", () => {
       (_request, response) => {
         response.writeHead(200, {
           "content-type": "application/x-ndjson",
-          "x-movies-log-unavailable-since": "2026-10-21T20:00:00.000Z",
+          "x-media-log-unavailable-since": "2026-10-21T20:00:00.000Z",
         });
         response.end();
       },

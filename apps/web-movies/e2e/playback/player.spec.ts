@@ -134,7 +134,7 @@ test.beforeAll(async ({ browser }) => {
   if (stack === null) return;
 
   test.setTimeout(SETUP_TIMEOUT_MS);
-  workspace = await mkdtemp(join(tmpdir(), "movies-web-player-"));
+  workspace = await mkdtemp(join(tmpdir(), "media-web-player-"));
 
   const films = join(workspace, "Films");
   const shows = join(workspace, "Shows");

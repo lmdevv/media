@@ -54,7 +54,7 @@ class JellyfinSetupFailed extends Schema.TaggedError<JellyfinSetupFailed>()("Jel
 }
 
 const CLIENT =
-  'MediaBrowser Client="movies-test", Device="test", DeviceId="movies-test", Version="1.0"';
+  'MediaBrowser Client="media-test", Device="test", DeviceId="media-test", Version="1.0"';
 
 const docker = Effect.fnUntraced(function* (args: ReadonlyArray<string>) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -156,7 +156,7 @@ const LIBRARIES = [
   ["Shows", "tvshows", "/media/shows"],
 ] as const;
 
-const CONTAINER_PREFIX = "movies-jellyfin-test-";
+const CONTAINER_PREFIX = "media-jellyfin-test-";
 
 const ORPHAN_AGE_MS = 10 * 60 * 1000;
 

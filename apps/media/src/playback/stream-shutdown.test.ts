@@ -267,7 +267,7 @@ describe.skipIf(!hasFfmpeg)("service shutdown", () => {
       () =>
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem;
-          const transcodeDir = yield* fs.makeTempDirectoryScoped({ prefix: "movies-shutdown-" });
+          const transcodeDir = yield* fs.makeTempDirectoryScoped({ prefix: "media-shutdown-" });
           const scope = yield* Scope.make();
 
           const context = yield* Layer.buildWithScope(

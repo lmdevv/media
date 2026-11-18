@@ -58,7 +58,7 @@ test.beforeAll(async ({ browser }) => {
   if (stack === null) return;
 
   test.setTimeout(SETUP_TIMEOUT_MS);
-  workspace = await mkdtemp(join(tmpdir(), "movies-web-e2e-"));
+  workspace = await mkdtemp(join(tmpdir(), "media-web-e2e-"));
   libraryRoot = join(workspace, "library");
   nasRoot = join(workspace, "nas");
   await mkdir(libraryRoot, { recursive: true });

@@ -76,7 +76,7 @@ class Server extends Context.Service<Server, { readonly baseUrl: string }>()(
 const serverLayer = Layer.unwrap(
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    const directory = yield* fs.makeTempDirectoryScoped({ prefix: "movies-client-errors-" });
+    const directory = yield* fs.makeTempDirectoryScoped({ prefix: "media-client-errors-" });
 
     const logs = yield* RetainedLogs.make({
       directory,

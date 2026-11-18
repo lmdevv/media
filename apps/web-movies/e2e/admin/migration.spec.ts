@@ -46,7 +46,7 @@ test.beforeAll(async () => {
   if (stack === null) return;
 
   test.setTimeout(SETUP_TIMEOUT_MS);
-  workspace = await mkdtemp(join(tmpdir(), "movies-web-migration-"));
+  workspace = await mkdtemp(join(tmpdir(), "media-web-migration-"));
   source = await startJellyfinSource(workspace);
   buildMediaService();
   media = await startMediaService(stack, [workspace]);

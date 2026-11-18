@@ -17,7 +17,7 @@ let workspace = "";
 
 beforeAll(async () => {
   buildService();
-  workspace = await makeTempDir("movies-media-main-");
+  workspace = await makeTempDir("media-main-");
   await mkdir(join(workspace, "library"));
 }, 60_000);
 

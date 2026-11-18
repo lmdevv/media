@@ -549,12 +549,12 @@ describe("media admin reset-password", () => {
     expect(run.code).toBe(ExitCode.usage);
   });
 
-  it("asks where the admin key is, never taking the movies backend's from the environment", async () => {
+  it("asks where the admin key is, never taking the backend's from the environment", async () => {
     const run = await media(["admin", "reset-password", "lucia"], {
       ...freshHome(),
       MEDIA_ARG_PASSWORD: "new-password",
       CONVEX_SELF_HOSTED_URL: "http://127.0.0.1:3210",
-      CONVEX_SELF_HOSTED_ADMIN_KEY: "movies-admin-key",
+      CONVEX_SELF_HOSTED_ADMIN_KEY: "media-admin-key",
     });
 
     expect(run.code).toBe(ExitCode.usage);

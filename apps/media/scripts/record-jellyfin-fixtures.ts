@@ -20,7 +20,7 @@ const OUTPUT = new URL("../src/migration/fixtures/jellyfin.json", import.meta.ur
 
 const record = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
-  const workspace = yield* fs.makeTempDirectoryScoped({ prefix: "movies-jellyfin-record-" });
+  const workspace = yield* fs.makeTempDirectoryScoped({ prefix: "media-jellyfin-record-" });
   const server = yield* startJellyfin(workspace);
 
   const recorder = yield* Effect.acquireRelease(

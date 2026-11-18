@@ -159,7 +159,7 @@ const failsAfterFirst =
 
 if (stalls || failsAfterFirst) {
   const output = dirname(args.at(-1) ?? "");
-  const aside = mkdtempSync(join(tmpdir(), "movies-fake-hls-"));
+  const aside = mkdtempSync(join(tmpdir(), "media-fake-hls-"));
   const redirected = args.map((arg) => (arg.startsWith(output) ? aside + arg.slice(output.length) : arg));
 
   let status = 0;
@@ -195,7 +195,7 @@ if (stalls || failsAfterFirst) {
 
 /** Writes the stand-in into a new temporary folder and returns its path, for `FFMPEG_PATH`. */
 export const writeFakeFfmpeg = async (behavior: FakeFfmpegBehavior): Promise<string> => {
-  const file = join(await mkdtemp(join(tmpdir(), "movies-fake-ffmpeg-")), "ffmpeg.mjs");
+  const file = join(await mkdtemp(join(tmpdir(), "media-fake-ffmpeg-")), "ffmpeg.mjs");
 
   await writeFile(file, script(process.env["FFMPEG_PATH"] ?? "ffmpeg", behavior));
   await chmod(file, 0o755);
@@ -226,7 +226,7 @@ process.exit(result.status ?? 1);
  * `packetScanDelayMs` longer, as on a large file over a slow share; returns its path.
  */
 export const writeSlowFfprobe = async (packetScanDelayMs: number): Promise<string> => {
-  const file = join(await mkdtemp(join(tmpdir(), "movies-fake-ffprobe-")), "ffprobe.mjs");
+  const file = join(await mkdtemp(join(tmpdir(), "media-fake-ffprobe-")), "ffprobe.mjs");
 
   await writeFile(file, ffprobeScript(process.env["FFPROBE_PATH"] ?? "ffprobe", packetScanDelayMs));
   await chmod(file, 0o755);

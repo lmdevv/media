@@ -30,9 +30,7 @@ export const layer: Layer.Layer<Service, never, FileSystem.FileSystem | Path.Pat
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
 
-    const root = yield* fs
-      .makeTempDirectoryScoped({ prefix: "movies-media-test-" })
-      .pipe(Effect.orDie);
+    const root = yield* fs.makeTempDirectoryScoped({ prefix: "media-test-" }).pipe(Effect.orDie);
 
     const pristine = path.join(root, "pristine");
     const library = yield* Effect.promise(() => generateFixtureLibrary(pristine));

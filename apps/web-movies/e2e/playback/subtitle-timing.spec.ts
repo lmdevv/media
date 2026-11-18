@@ -98,7 +98,7 @@ test.beforeAll(async ({ browser }) => {
   if (stack === null) return;
 
   test.setTimeout(SETUP_TIMEOUT_MS);
-  workspace = await makeWorkspace("movies-web-subtitle-delay-");
+  workspace = await makeWorkspace("media-web-subtitle-delay-");
 
   const films = join(workspace, "Films");
   const folder = (name: string): string => join(films, `${name} (2022)`);

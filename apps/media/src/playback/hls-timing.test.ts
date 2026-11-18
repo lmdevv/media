@@ -331,7 +331,7 @@ const workspaceLayer = Layer.effect(
   Workspace,
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    const root = yield* fs.makeTempDirectoryScoped({ prefix: "movies-hls-timing-" });
+    const root = yield* fs.makeTempDirectoryScoped({ prefix: "media-hls-timing-" });
 
     return { root };
   }).pipe(Effect.orDie),

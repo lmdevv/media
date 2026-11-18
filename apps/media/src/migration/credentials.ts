@@ -4,7 +4,7 @@ import { MigrationCredentials } from "@media/contracts/models/migration";
 import type { SealedCredentials } from "@media/contracts/models/migration-service";
 import { Effect, Redacted, Schema } from "effect";
 
-const SALT = "movies/migration-credentials";
+const SALT = "media/migration-credentials";
 
 const INFO = "v1";
 

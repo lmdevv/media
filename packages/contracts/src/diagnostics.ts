@@ -90,13 +90,13 @@ export interface LogQuery extends Schema.Schema.Type<typeof LogQuery> {}
  * Response header that is `true` when earlier records may match too: `limit` was reached before
  * the oldest file. Narrow the query or raise the limit to see them.
  */
-export const LOG_TRUNCATED_HEADER = "x-movies-log-truncated";
+export const LOG_TRUNCATED_HEADER = "x-media-log-truncated";
 
 /**
  * Response header present when the media service cannot write or read its retained log: the ISO
  * 8601 time it began failing. Records logged since then went to its standard output only.
  */
-export const LOG_UNAVAILABLE_SINCE_HEADER = "x-movies-log-unavailable-since";
+export const LOG_UNAVAILABLE_SINCE_HEADER = "x-media-log-unavailable-since";
 
 const AgeMs = Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 600_000 }));
 
