@@ -10,7 +10,6 @@ export type FailureTag =
   | "Expired"
   | "RateLimited"
   | "InvalidArgs"
-  | "StaleRevision"
   | "Internal";
 
 /** Whether `cause` is the expected command failure tagged `tag`. */

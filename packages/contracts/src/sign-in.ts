@@ -64,7 +64,6 @@ export const signInRefusalStatus = {
   denied: 403,
   not_found: 404,
   conflict: 409,
-  stale_revision: 409,
   pending: 409,
   expired: 410,
   rate_limited: 429,

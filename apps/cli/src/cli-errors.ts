@@ -99,7 +99,6 @@ const commandCode: (error: CommandError) => string = Match.type<CommandError>().
     InvalidArgs: () => "invalid_args",
     Conflict: () => "conflict",
     Expired: () => "expired",
-    StaleRevision: () => "stale_revision",
     RateLimited: () => "rate_limited",
     Internal: () => "internal",
   }),
@@ -125,7 +124,6 @@ export const exitCodeOf: (error: CliError) => ExitCode = Match.type<CliError>().
     InvalidArgs: () => ExitCode.usage,
     UsageError: () => ExitCode.usage,
     Conflict: () => ExitCode.conflict,
-    StaleRevision: () => ExitCode.conflict,
     Expired: () => ExitCode.expired,
     RateLimited: () => ExitCode.rateLimited,
     TransportError: () => ExitCode.unavailable,
@@ -147,7 +145,6 @@ export const reportOf: (error: CliError) => ErrorReport = Match.type<CliError>()
     InvalidArgs: commandReport,
     Conflict: commandReport,
     Expired: commandReport,
-    StaleRevision: commandReport,
     RateLimited: commandReport,
     Internal: commandReport,
     TransportError: (error) => ({

@@ -11,7 +11,6 @@ import {
   InvalidArgs,
   NotFound,
   RateLimited,
-  StaleRevision,
   Unauthenticated,
 } from "./errors";
 import type { ErrorCode } from "./errors";
@@ -27,7 +26,6 @@ const expected: ReadonlyArray<readonly [ErrorCode, unknown]> = [
   ["invalid_args", new InvalidArgs({ message })],
   ["conflict", new Conflict({ message })],
   ["expired", new Expired({ message })],
-  ["stale_revision", new StaleRevision({ message })],
   ["rate_limited", new RateLimited({ message })],
   ["internal", new Internal({ message })],
 ];
