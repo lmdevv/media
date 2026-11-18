@@ -5,7 +5,6 @@ import type { NegotiateResponse } from "@media/contracts/media-playback";
 import { Playback, Versions } from "@media/sdk/effect";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { ChapterPopover } from "@media/ui/components/chapter-popover";
-import { CommandMenu } from "@media/ui/components/command-menu";
 import {
   EpisodesGlyph,
   PlayerButton,
@@ -31,10 +30,10 @@ import { toast } from "sonner";
 import type { CastItem } from "@/casting/cast-profile";
 import { useAirPlay, useRemotePlayback } from "@/casting/system-targets";
 import { useCast, useRemoteState } from "@/casting/use-cast";
-import { useCommandRoot } from "@/commands";
+import { MemberPlayerMenu } from "./member-player-menu";
 import type { PlayerCommands, PlayerTogether } from "@/commands";
 import { artworkUrl } from "@/lib/artwork";
-import type { EpisodeId, MediaFileId, MediaVersion, TitleId } from "@/lib/catalog";
+import type { EpisodeId, MediaFileId, MediaVersion, PlaybackDetail, TitleId } from "@/lib/catalog";
 import { loadQualityChoice, saveQualityChoice } from "@/lib/device-storage";
 import { episodeCode } from "@/lib/format";
 import { playerKeymap } from "@/lib/keymap";
@@ -118,6 +117,10 @@ export interface PlayerScreenProps {
   readonly version: MediaFileId | undefined;
   /** `0` starts at the beginning; `resume` resumes without asking. */
   readonly start: "0" | "resume" | undefined;
+  readonly guest?: {
+    readonly detail: PlaybackDetail;
+    readonly onBack: () => void;
+  };
 }
 
 const startChoice = (start: PlayerScreenProps["start"]): StartChoice => {
@@ -145,7 +148,7 @@ const useSettled = (value: boolean, ms: number): boolean => {
 };
 
 /** The player screen. */
-export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScreenProps) {
+export function PlayerScreen({ titleId, episodeId, version, start, guest }: PlayerScreenProps) {
   const platform = usePlatform();
   const me = useMe();
   const scopes = useScopes();
@@ -154,8 +157,13 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
   const [frame, setFrame] = useState<HTMLDivElement | null>(null);
   const [overlays, setOverlays] = useState<HTMLDivElement | null>(null);
   const [video, setVideo] = useState<HTMLVideoElement | null>(null);
-  const title = usePlatformQuery(platform.movies.titles.get, { titleId });
-  const detail = title.status === "success" ? title.data : null;
+
+  const title = usePlatformQuery(
+    platform.movies.titles.get,
+    ...(guest === undefined ? [{ titleId }] : (["skip"] as const)),
+  );
+
+  const detail = guest?.detail ?? (title.status === "success" ? title.data : null);
 
   const [menu, setMenu] = useState(false);
   const [info, setInfo] = useState(false);
@@ -177,13 +185,20 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
 
   const versionList = usePlatformQuery(
     platform.movies.titles.versions,
-    episodeId === undefined ? { titleId } : { titleId, episodeId },
+    ...(guest !== undefined
+      ? (["skip"] as const)
+      : [episodeId === undefined ? { titleId } : { titleId, episodeId }]),
   );
 
-  const versions = versionList.status === "success" ? versionList.data : NO_VERSIONS;
+  const versions =
+    guest?.detail.versions ?? (versionList.status === "success" ? versionList.data : NO_VERSIONS);
+
   const versionFacts = useMemo(() => withFacts(versions), [versions]);
 
-  const settings = usePlatformQuery(platform.core.settings.get);
+  const settings = usePlatformQuery(
+    platform.core.settings.get,
+    ...(guest === undefined ? [] : (["skip"] as const)),
+  );
 
   const deviceQuality =
     settings.status === "success" ? (settings.data.device?.streamQuality ?? null) : null;
@@ -207,12 +222,12 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
     quality: deviceQuality === null ? loadQualityChoice() : qualityOfSetting(deviceQuality),
   });
 
-  // The first request takes the person's saved quality, so playback waits for the settings to
+  // Household playback takes the person's saved quality, so it waits for the settings to
   // answer once; settings that fail to load fall back to this browser's choice, and a later reload
   // of them never stops playback.
   const [settled, setSettled] = useState(false);
 
-  if (!settled && settings.status !== "loading") setSettled(true);
+  if (!settled && (guest !== undefined || settings.status !== "loading")) setSettled(true);
 
   const handle = usePlayback(
     video,
@@ -258,11 +273,11 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
     [started, episode, titleName, artworkKey],
   );
 
-  const chromecast = useCast(controller, isPlaying, castItem);
+  const chromecast = useCast(controller, isPlaying, castItem, guest === undefined);
   const casting = chromecast.playback;
   const remote = useRemoteState(casting);
-  const airplay = useAirPlay(video);
-  const remotePlayback = useRemotePlayback(video);
+  const airplay = useAirPlay(guest === undefined ? video : null);
+  const remotePlayback = useRemotePlayback(guest === undefined ? video : null);
 
   const media =
     remote === null ? localMedia : { ...localMedia, ...remote, bufferedAheadSeconds: 0 };
@@ -275,7 +290,9 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
 
   const next = usePlatformQuery(
     platform.movies.titles.nextEpisode,
-    ...(episode === null ? (["skip"] as const) : ([{ episodeId: episode.id }] as const)),
+    ...(episode === null || guest !== undefined
+      ? (["skip"] as const)
+      : ([{ episodeId: episode.id }] as const)),
   );
 
   const nextEpisode = next.status === "success" ? next.data : null;
@@ -289,8 +306,14 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
   const sessionMove = follow.move;
 
   const backToDetails = useCallback(() => {
+    if (guest !== undefined) {
+      guest.onBack();
+
+      return;
+    }
+
     void navigate({ to: "/title/$titleId", params: { titleId } });
-  }, [navigate, titleId]);
+  }, [navigate, titleId, guest]);
 
   const { toggle: toggleFullscreen, takeEscape } = useFullscreen(frame, video);
 
@@ -551,13 +574,15 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
       return;
     }
 
+    if (guest !== undefined) return;
+
     void navigate({
       to: "/watch/$titleId",
       params: { titleId },
       search: (previous) => ({ ...previous, version: pick.id }),
       replace: true,
     });
-  }, [coreStart, stream, navigate, titleId]);
+  }, [coreStart, stream, navigate, titleId, guest]);
 
   const loadedQuality = snapshot?.loadedQuality ?? null;
 
@@ -677,7 +702,7 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
 
   const seasonEpisodes = useSeasonEpisodes(
     coreStart?.titleId ?? titleId,
-    episode?.seasonNumber ?? null,
+    guest === undefined ? (episode?.seasonNumber ?? null) : null,
   );
 
   const previousEpisode = (() => {
@@ -693,7 +718,7 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
 
   const episodeIdNow = episode?.id ?? null;
   const seasonNow = episode?.seasonNumber ?? null;
-  const seasons = detail?.seasons ?? null;
+  const seasons = detail !== null && "seasons" in detail ? detail.seasons : null;
 
   const picking = useMemo(
     () =>
@@ -840,7 +865,9 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
   useKeymap(
     playerKeymap,
     {
-      "menu.toggle": () => setMenu((open) => !open),
+      "menu.toggle": () => {
+        if (guest === undefined) setMenu((open) => !open);
+      },
       "player.toggle": togglePlay,
       "player.toggle-k": togglePlay,
       "player.back-10": () => skipByKey(-10),
@@ -869,7 +896,13 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
     !menu && leaving === null && together.starting === undefined,
   );
 
-  const canStart = isPlaying && started !== null && together.mode === "solo" && !together.elsewhere;
+  const canStart =
+    guest === undefined &&
+    isPlaying &&
+    started !== null &&
+    together.mode === "solo" &&
+    !together.elsewhere;
+
   const startSession = together.actions.start;
   const copySessionLink = together.actions.copyLink;
   const leaveSession = together.actions.leave;
@@ -939,8 +972,6 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
       playerTogether,
     ],
   );
-
-  const root = useCommandRoot({ navigate, query: menuQuery, scopes, player: commands });
 
   const backdrop = artworkUrl(detail?.artwork.backdrop ?? null, "backdrop");
 
@@ -1069,7 +1100,7 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
             description="The video file was moved, renamed, or its drive is offline."
             onBack={backToDetails}
             secondary={
-              scopes.has("movies:edit") && detail !== null
+              scopes.has("movies:edit") && detail !== null && "libraryId" in detail
                 ? {
                     label: "Show missing files",
                     onClick: () =>
@@ -1207,7 +1238,8 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
       data-testid="player-video"
       crossOrigin="anonymous"
       playsInline
-      x-webkit-airplay="allow"
+      x-webkit-airplay={guest === undefined ? "allow" : "deny"}
+      disableRemotePlayback={guest !== undefined}
       poster={backdrop}
       className="size-full bg-dark-bg object-contain"
       style={brightness < 1 ? { filter: `brightness(${String(brightness)})` } : undefined}
@@ -1501,19 +1533,21 @@ export function PlayerScreen({ titleId, episodeId, version, start }: PlayerScree
             onStay={stay}
             onLeave={backToDetails}
           />
-          <CommandMenu
-            open={menu}
-            container={overlays}
-            onOpenChange={(open) => {
-              setMenu(open);
+          {guest === undefined ? (
+            <MemberPlayerMenu
+              context={{ navigate, query: menuQuery, scopes, player: commands }}
+              open={menu}
+              container={overlays}
+              onOpenChange={(open) => {
+                setMenu(open);
 
-              if (!open) setMenuQuery("");
-            }}
-            onQueryChange={(text, page) => {
-              if (page.id === "root") setMenuQuery(text);
-            }}
-            root={root}
-          />
+                if (!open) setMenuQuery("");
+              }}
+              onQueryChange={(text, page) => {
+                if (page.id === "root") setMenuQuery(text);
+              }}
+            />
+          ) : null}
         </>
       )}
       <div ref={setOverlays} className="contents cursor-auto select-text" />

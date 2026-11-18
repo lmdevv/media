@@ -2,6 +2,7 @@ import { Toaster } from "@media/ui/components/sonner";
 import { HeadContent, Outlet, createRootRouteWithContext } from "@tanstack/react-router";
 import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
 
+import { MoviesAccess } from "@/session/access";
 import { ThemeColor } from "@/components/theme-color";
 import { ThemeProvider } from "@/components/theme-provider";
 
@@ -48,7 +49,9 @@ function RootComponent() {
         scriptProps={{ type: "application/json" }}
       >
         <ThemeColor />
-        <Outlet />
+        <MoviesAccess>
+          <Outlet />
+        </MoviesAccess>
         <Toaster />
       </ThemeProvider>
       {import.meta.env.DEV ? <TanStackRouterDevtools position="bottom-left" /> : null}

@@ -1,0 +1,153 @@
+import { usePlatform, usePlatformQuery, usePlatformStatus } from "@media/sdk/react";
+import { Button } from "@media/ui/components/button";
+import { GuestUnavailable } from "@media/ui/components/guest-unavailable";
+import { TextField } from "@media/ui/components/text-field";
+import { createFileRoute } from "@tanstack/react-router";
+import { useEffect, useRef, useState } from "react";
+
+import { AuthPage, Lede, PageTitle } from "@/components/auth-page";
+import { BlankPage } from "@/screens/states";
+import { guestFailure, guestGate } from "@/screens/guest/state";
+import type { GuestSubmission } from "@/screens/guest/state";
+import { useAccountActions } from "@/session/account";
+import { linkSecretFor } from "@/session/link-secret";
+import { nameOf } from "@/session/me";
+
+export const Route = createFileRoute("/guest")({
+  staticData: { need: "public" },
+  head: () => ({ meta: [{ title: "Watch as a guest · Lar" }] }),
+  component: GuestPage,
+});
+
+function GuestDestination() {
+  const { signOut } = useAccountActions();
+  const platform = usePlatform();
+  const guest = usePlatformQuery(platform.core.guests.current);
+  const target = guest.status === "success" ? guest.data?.target : undefined;
+  const movies = target?.kind === "item" && target.item.domain === "movies";
+
+  useEffect(() => {
+    if (movies) window.location.replace("/movies/guest");
+  }, [movies]);
+
+  if (guest.status === "loading" || movies) return <BlankPage />;
+
+  if (guest.status === "error" || target === undefined || target.kind !== "item")
+    return <GuestUnavailable onLeave={signOut} />;
+
+  return (
+    <AuthPage>
+      <Lede>Open this on Lar Music when guest playback is available.</Lede>
+      <Button
+        variant="secondary"
+        onClick={() => {
+          void signOut().catch(() => undefined);
+        }}
+      >
+        Leave
+      </Button>
+    </AuthPage>
+  );
+}
+
+function GuestPage() {
+  const code = linkSecretFor(Route.useRouteContext().linkSecret, "/guest");
+  const platform = usePlatform();
+  const status = usePlatformStatus();
+
+  const me = usePlatformQuery(
+    platform.core.auth.sessions.current,
+    ...(status === "signedIn" ? [] : (["skip"] as const)),
+  );
+
+  const { signInAsGuest, signOut } = useAccountActions();
+  const [confirmed, setConfirmed] = useState<string | null>(null);
+  const [name, setName] = useState("");
+  const [submission, setSubmission] = useState<GuestSubmission>({ kind: "idle" });
+  const busy = useRef(false);
+  const [opened, setOpened] = useState(false);
+
+  const gate = guestGate({
+    status,
+    role: me.status !== "success" ? "loading" : me.data.role === "guest" ? "guest" : "household",
+    hasCode: code !== "",
+    opened,
+    confirmed: me.status === "success" && confirmed === me.data.userId,
+    submitting: submission.kind === "submitting",
+  });
+
+  if (gate === "loading") return <BlankPage />;
+
+  if (gate === "resume") return <GuestDestination />;
+
+  if (gate === "unavailable" || submission.kind === "unavailable")
+    return <GuestUnavailable onLeave={signOut} />;
+
+  if (gate === "confirm" && me.status === "success") {
+    return (
+      <AuthPage>
+        <PageTitle>Replace this sign-in?</PageTitle>
+        <Lede>{nameOf(me.data)} is signed in on this browser.</Lede>
+        <Button onClick={() => setConfirmed(me.data.userId)}>Continue as a guest</Button>
+        <Button variant="secondary" onClick={() => window.location.replace("/home")}>
+          Cancel
+        </Button>
+      </AuthPage>
+    );
+  }
+
+  if (submission.kind === "full")
+    return (
+      <AuthPage>
+        <PageTitle>This link is full</PageTitle>
+      </AuthPage>
+    );
+
+  const submit = async (): Promise<void> => {
+    if (busy.current) return;
+    busy.current = true;
+    setSubmission({ kind: "submitting" });
+
+    try {
+      await signInAsGuest({ code, name: name.trim() });
+      setOpened(true);
+    } catch (cause) {
+      setSubmission(guestFailure(cause));
+      busy.current = false;
+    }
+  };
+
+  return (
+    <AuthPage>
+      <PageTitle>Watch as a guest</PageTitle>
+      <form
+        className="flex flex-col gap-5"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void submit();
+        }}
+      >
+        <TextField
+          label="Display name"
+          autoComplete="nickname"
+          value={name}
+          disabled={submission.kind === "submitting"}
+          onChange={(event) => {
+            setName(event.target.value);
+
+            if (submission.kind === "failed") setSubmission({ kind: "idle" });
+          }}
+          required
+        />
+        {submission.kind === "failed" ? (
+          <p role="alert" className="text-body/body text-destructive">
+            {submission.message}
+          </p>
+        ) : null}
+        <Button type="submit" disabled={submission.kind === "submitting" || name.trim() === ""}>
+          {submission.kind === "submitting" ? "Opening…" : "Watch"}
+        </Button>
+      </form>
+    </AuthPage>
+  );
+}

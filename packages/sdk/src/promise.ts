@@ -15,7 +15,7 @@ export type { MediaServer, MediaServerOptions, MediaServerSession } from "./medi
 
 export { openIndexedDb } from "./shared-store";
 
-export { holdSignIn, readDevice } from "./token-storage";
+export { holdGuestSignIn, holdSignIn, readDevice } from "./token-storage";
 
 export type { BrowserDevice, DeviceOrder, HeldSignIn } from "./token-storage";
 

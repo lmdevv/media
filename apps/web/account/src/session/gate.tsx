@@ -89,8 +89,13 @@ const render: (screen: Screen) => ReactNode = Match.type<Screen>().pipe(
   }),
 );
 
-/** Decides from the server, the session, and this browser which screen shows, and shows it. */
 export function Gate() {
+  const guest = useRouterState({ select: (state) => state.matches.at(-1)?.routeId === "/guest" });
+
+  return guest ? <Outlet /> : <HouseholdGate />;
+}
+
+function HouseholdGate() {
   const platform = usePlatform();
   const status = usePlatformStatus();
   const device = useDevice()?.code ?? null;
@@ -109,6 +114,8 @@ export function Gate() {
   );
 
   useAskAgain(me);
+
+  if (me.status === "success" && me.data.role === "guest") return <Navigate to="/guest" replace />;
 
   return render(screenOf({ intent, server, status, me, device, picker }));
 }

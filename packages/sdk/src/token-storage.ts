@@ -380,13 +380,55 @@ export const holdSignIn = (): HeldSignIn => {
   };
 };
 
+/** Holds a guest sign-in until it can replace exactly the session present when it began. */
+export const holdGuestSignIn = async (store: SharedStore) => {
+  const expected = await store.read(sessionIn);
+  const expectedId = Option.getOrNull(Option.flatMap(expected, sessionOf));
+  const held = holdSignIn();
+
+  return {
+    storage: held.storage,
+    keep: async (): Promise<boolean> => {
+      const text = await held.storage.getItem(SESSION);
+      const session = text === null ? Option.none<StoredSession>() : parseStoredSession(text);
+
+      if (Option.isNone(session)) return false;
+      const value = session.value;
+      const id = Option.getOrNull(sessionOf(value));
+
+      return store.write(async (tx) => {
+        if (id === null || (await isRevoked(tx, id))) return false;
+
+        if (await holds(tx, id)) return true;
+
+        const current = await sessionIn(tx);
+        const currentId = Option.getOrNull(Option.flatMap(current, sessionOf));
+
+        if (currentId !== expectedId) {
+          await signOutIn(tx, id, value);
+
+          return false;
+        }
+
+        if (Option.isSome(current) && currentId !== null) {
+          await signOutIn(tx, currentId, current.value);
+        }
+
+        await tx.set(SESSION, serializeSession(value));
+
+        return true;
+      });
+    },
+  };
+};
+
 /**
  * The browser's one session, in a store every client on the origin shares (ADR 0020). Every
  * operation is one transaction, so a check and the write it guards never interleave with another
  * client's:
  *
  * - `media.device` is the browser's device and the number of the session kept last, and
- *   `media.session` that session's tokens. Only `keepSession` puts a session there.
+ *   `media.session` that session's tokens. `keepSession` or a held guest sign-in puts a session there.
  * - A renewal replaces the tokens only while they are still the ones it started from and the
  *   session has no revocation.
  * - `media.revoked:<session>` records a sign-out and is never deleted, and

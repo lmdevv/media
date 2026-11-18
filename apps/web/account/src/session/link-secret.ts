@@ -1,5 +1,5 @@
-/** The pages whose links carry a secret after `#`: accepting an invite and a reset link. */
-export type SecretPage = "/invite" | "/reset";
+/** The pages whose links carry a secret after `#`: accepting an invite, resetting a password, and opening a guest link. */
+export type SecretPage = "/invite" | "/reset" | "/guest";
 
 /** A link's secret, held in memory for the page it opened. */
 export interface LinkSecret {
@@ -7,19 +7,20 @@ export interface LinkSecret {
   readonly secret: string;
 }
 
-const isSecretPage = (path: string): path is SecretPage => path === "/invite" || path === "/reset";
+const isSecretPage = (path: string): path is SecretPage =>
+  path === "/invite" || path === "/reset" || path === "/guest";
 
 type Address = Pick<Location, "pathname" | "search" | "hash">;
 
-/** Whether `address` is an invite or reset page whose link still shows its secret. */
+/** Whether `address` is an invite, reset, or guest page whose link still shows its secret. */
 export const showsLinkSecret = (address: Address): boolean =>
   isSecretPage(address.pathname) && address.hash.length > 1;
 
 /**
- * Moves an invite or reset link's secret from the address into memory, and replaces the history
+ * Moves an invite, reset, or guest link's secret from the address into memory, and replaces the history
  * entry with the bare page. The secret travels after `#`, so no request or referrer carries it,
  * and once taken it is in neither the address bar nor history. Run before the router reads the
- * address. A reload finds no secret, so the link has to be opened again.
+ * address. A reload finds no secret; an existing session resumes separately.
  */
 export const takeLinkSecret = (
   address: Address,

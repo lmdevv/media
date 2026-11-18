@@ -85,6 +85,10 @@ export function CurrentSessionProvider({ children }: { readonly children: ReactN
   );
 }
 
+export function SoloSessionProvider({ children }: { readonly children: ReactNode }) {
+  return <CurrentSessionContext value={null}>{children}</CurrentSessionContext>;
+}
+
 /** The person's movies session inside `CurrentSessionProvider`: undefined while it loads. */
 export const useCurrentSession = (): CurrentSession => useContext(CurrentSessionContext);
 

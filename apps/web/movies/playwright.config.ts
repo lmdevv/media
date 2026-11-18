@@ -98,6 +98,7 @@ const suites: ReadonlyArray<Suite> = [
     testMatch: /e2e\/playback\/player\.spec\.ts$/u,
     chained: true,
   },
+  { name: "guest", group: "player", testMatch: /e2e\/playback\/guest\.spec\.ts$/u, chained: true },
   {
     name: "scrubbing",
     group: "player",

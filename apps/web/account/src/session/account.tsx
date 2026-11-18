@@ -1,4 +1,4 @@
-import { createPlatform, holdSignIn, readDevice } from "@media/sdk/promise";
+import { createPlatform, holdGuestSignIn, holdSignIn, readDevice } from "@media/sdk/promise";
 import type { BrowserDevice, DeviceOrder, PlatformSdk } from "@media/sdk/promise";
 import { PlatformProvider, usePlatform } from "@media/sdk/react";
 import { useNavigate, useRouter } from "@tanstack/react-router";
@@ -86,6 +86,11 @@ export class SharedDeviceError extends Error {
 export interface AccountActions {
   /** Signs in, registers this browser as a device, and makes the person this browser's one. */
   readonly signIn: (signIn: SignIn) => Promise<void>;
+  /** Redeems a guest link, then atomically replaces this browser's session. */
+  readonly signInAsGuest: (guest: {
+    readonly code: string;
+    readonly name: string;
+  }) => Promise<void>;
   /** Opens a person's tile on this shared device, with a proof for a locked tile. */
   readonly openTile: (userId: UserId, proof?: TileProof) => Promise<void>;
   /** Signs this browser's person out; switching person is signing out, then in. */
@@ -154,6 +159,22 @@ export const useAccountActions = (): AccountActions => {
 
       if (returnsToStartAfterSignIn(router.state.location.pathname)) {
         await navigate({ to: "/", replace: true });
+      }
+    },
+    signInAsGuest: async (guest) => {
+      const held = await holdGuestSignIn(store.sessions);
+      const opener = createPlatform({ url, signInUrl, connection: "http", storage: held.storage });
+
+      try {
+        await opener.session.signInAsGuest(guest);
+
+        if (!(await held.keep()))
+          throw new Error("Someone else signed in here. Open the link again.");
+      } catch (cause) {
+        await opener.session.signOut().catch(() => undefined);
+        throw cause;
+      } finally {
+        await opener.dispose();
       }
     },
     openTile: async (userId, proof) => {

@@ -93,6 +93,7 @@ export const useCast = (
   controller: PlaybackController | null,
   ready: boolean,
   item: CastItem | null,
+  enabled = true,
 ): Chromecast => {
   const [sdk, setSdk] = useState<CastSdk | null>(null);
   const [playback, setPlayback] = useState<CastPlayback | null>(null);
@@ -106,6 +107,7 @@ export const useCast = (
     let active = true;
 
     const load = async (): Promise<void> => {
+      if (!enabled) return;
       const loaded = await loadCastSdk();
 
       if (!active || loaded === null) return;
@@ -123,7 +125,7 @@ export const useCast = (
     return () => {
       active = false;
     };
-  }, []);
+  }, [enabled]);
 
   const context = sdk?.framework.CastContext.getInstance() ?? null;
   const state = useCastState(sdk, context);
