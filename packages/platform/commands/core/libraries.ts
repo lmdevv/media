@@ -79,6 +79,29 @@ const listResult = v.object({
       name: v.string(),
       kind: v.union(v.literal("movies"), v.literal("music")),
       level: v.union(v.literal("view"), v.literal("edit"), v.literal("manage")),
+      scan: v.optional(
+        v.union(
+          v.object({
+            jobId: v.id("jobs"),
+            status: v.union(
+              v.literal("queued"),
+              v.literal("running"),
+              v.literal("succeeded"),
+              v.literal("failed"),
+              v.literal("canceled"),
+            ),
+            done: v.union(v.number(), v.null()),
+            total: v.union(v.number(), v.null()),
+            error: v.union(v.string(), v.null()),
+            message: v.union(v.string(), v.null()),
+            startedAt: v.union(v.number(), v.null()),
+            attempt: v.number(),
+            canceling: v.boolean(),
+            finishedAt: v.union(v.number(), v.null()),
+          }),
+          v.null(),
+        ),
+      ),
     }),
   ),
   continueCursor: v.string(),
@@ -131,7 +154,7 @@ export interface Handlers {
     caller: Caller,
   ) => Infer<typeof getResult> | Promise<Infer<typeof getResult>>;
 
-  /** `core.libraries.list` (query, signed-in): List the libraries shared with you. */
+  /** `core.libraries.list` (query, signed-in): List the libraries shared with you, each with its latest scan. */
   readonly list: (
     ctx: Omit<QueryCtx, "auth">,
     args: Infer<typeof listArgs>,

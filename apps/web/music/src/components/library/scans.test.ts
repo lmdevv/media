@@ -1,5 +1,3 @@
-import { NotFound } from "@media/contracts/errors";
-import type { QueryState } from "@media/sdk/react";
 import type { PlatformSdk } from "@media/sdk/promise";
 import { Brand } from "effect";
 import { describe, expect, it } from "vitest";
@@ -8,7 +6,7 @@ import type { Scan } from "@/lib/job-progress";
 
 import { firstActiveScan } from "./scans";
 
-type Library = Awaited<ReturnType<PlatformSdk["core"]["libraries"]["get"]>>;
+type Library = Awaited<ReturnType<PlatformSdk["core"]["libraries"]["list"]>>["page"][number];
 
 const libraryId = Brand.nominal<Library["libraryId"]>();
 
@@ -27,47 +25,34 @@ const scan = (status: Scan["status"]): Scan => ({
   finishedAt: null,
 });
 
-const library = (name: string, latest: Scan | null): QueryState<Library> => ({
-  status: "success",
-  data: {
-    libraryId: libraryId(name),
-    name,
-    kind: "music",
-    level: "view",
-    items: 28,
-    folders: null,
-    scan: latest,
-  },
+const library = (name: string, latest: Scan | null, kind: Library["kind"] = "music"): Library => ({
+  libraryId: libraryId(name),
+  name,
+  kind,
+  level: "view",
+  scan: latest,
 });
 
-const loading: QueryState<Library> = { status: "loading" };
-
 describe("firstActiveScan", () => {
-  it("is the first waiting or running scan, with its library's name", () => {
+  it("is the first waiting or running scan of a music library, with its name", () => {
     expect(
-      firstActiveScan([library("Old", scan("succeeded")), library("New", scan("running"))]),
-    ).toMatchObject({ status: "running", library: "New" });
+      firstActiveScan([
+        library("Old", scan("succeeded")),
+        library("Films", scan("running"), "movies"),
+        library("New", scan("queued")),
+        library("Newer", scan("running")),
+      ]),
+    ).toMatchObject({ status: "queued", library: "New" });
   });
 
-  it("shows a running scan while another library still loads", () => {
-    expect(firstActiveScan([loading, library("New", scan("queued"))])).toMatchObject({
-      library: "New",
-    });
-  });
-
-  it("is unknown while a library loads and none runs yet, and null once none does", () => {
-    expect(firstActiveScan([loading, library("Old", null)])).toBeUndefined();
+  it("is null when no music library scans", () => {
     expect(firstActiveScan([library("Old", scan("failed")), library("Empty", null)])).toBeNull();
     expect(firstActiveScan([])).toBeNull();
   });
 
-  it("skips a library the person lost between the list and its read", () => {
-    const lost: QueryState<Library> = {
-      status: "error",
-      error: new NotFound({ message: "No such library" }),
-      retry: () => undefined,
-    };
-
-    expect(firstActiveScan([lost, library("Old", null)])).toBeNull();
+  it("counts a row its server sent without a scan as not scanning", () => {
+    expect(
+      firstActiveScan([{ libraryId: libraryId("Old"), name: "Old", kind: "music", level: "view" }]),
+    ).toBeNull();
   });
 });

@@ -2091,7 +2091,7 @@ export const generatedCommands = [
     kind: "query",
     scope: "signed-in",
     refusesKeys: false,
-    summary: "List the libraries shared with you",
+    summary: "List the libraries shared with you, each with its latest scan",
     secrets: [],
     paginated: true,
     args: Schema.Struct({
@@ -2115,6 +2115,29 @@ export const generatedCommands = [
             Schema.Literal("edit"),
             Schema.Literal("manage"),
           ]),
+          scan: Schema.optionalKey(
+            Schema.Union([
+              Schema.Struct({
+                jobId: Schema.String.pipe(Schema.brand("Id<jobs>")),
+                status: Schema.Union([
+                  Schema.Literal("queued"),
+                  Schema.Literal("running"),
+                  Schema.Literal("succeeded"),
+                  Schema.Literal("failed"),
+                  Schema.Literal("canceled"),
+                ]),
+                done: Schema.Union([Schema.Finite, Schema.Null]),
+                total: Schema.Union([Schema.Finite, Schema.Null]),
+                error: Schema.Union([Schema.String, Schema.Null]),
+                message: Schema.Union([Schema.String, Schema.Null]),
+                startedAt: Schema.Union([Schema.Finite, Schema.Null]),
+                attempt: Schema.Finite,
+                canceling: Schema.Boolean,
+                finishedAt: Schema.Union([Schema.Finite, Schema.Null]),
+              }),
+              Schema.Null,
+            ]),
+          ),
         }),
       ),
       continueCursor: Schema.String,

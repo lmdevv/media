@@ -58,6 +58,9 @@ const scanOf = async (db: DatabaseReader, jobId: Id<"jobs"> | null, shown: ScanS
   };
 };
 
+/** A listed library reads its own document and its latest scan's job. */
+const LIST_ROW_READS = 2;
+
 /**
  * Makes a library of `kind` on `folders` with `creator` its first manager and queues its first
  * scan: the one way a library is made, for `create` and for an import that adds one (ADR 0024).
@@ -102,16 +105,20 @@ export const { create, list, get, rename, setFolders, scan, cancelScan, remove }
     return makeLibrary(ctx, { name, kind, folders, creator: caller.userId });
   },
   list: async (ctx, { paginationOpts }, caller) => {
-    const page = await visiblePage(ctx, caller, "library", paginationOpts);
+    const page = await visiblePage(ctx, caller, "library", paginationOpts, LIST_ROW_READS);
+    const counts = caller.restrictions === null;
 
     return {
       ...page,
-      page: page.page.map(({ doc, level }) => ({
-        libraryId: doc._id,
-        name: doc.name,
-        kind: doc.kind,
-        level,
-      })),
+      page: await Promise.all(
+        page.page.map(async ({ doc, level }) => ({
+          libraryId: doc._id,
+          name: doc.name,
+          kind: doc.kind,
+          level,
+          scan: await scanOf(ctx.db, doc.lastScan, { error: level === "manage", progress: counts }),
+        })),
+      ),
     };
   },
   get: async (ctx, { libraryId }, caller) => {

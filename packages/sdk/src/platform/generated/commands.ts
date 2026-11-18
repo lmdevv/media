@@ -1669,6 +1669,29 @@ const core_libraries_list = query({
           Schema.Literal("edit"),
           Schema.Literal("manage"),
         ]),
+        scan: Schema.optionalKey(
+          Schema.Union([
+            Schema.Struct({
+              jobId: Schema.String.pipe(Schema.brand("Id<jobs>")),
+              status: Schema.Union([
+                Schema.Literal("queued"),
+                Schema.Literal("running"),
+                Schema.Literal("succeeded"),
+                Schema.Literal("failed"),
+                Schema.Literal("canceled"),
+              ]),
+              done: Schema.Union([Schema.Finite, Schema.Null]),
+              total: Schema.Union([Schema.Finite, Schema.Null]),
+              error: Schema.Union([Schema.String, Schema.Null]),
+              message: Schema.Union([Schema.String, Schema.Null]),
+              startedAt: Schema.Union([Schema.Finite, Schema.Null]),
+              attempt: Schema.Finite,
+              canceling: Schema.Boolean,
+              finishedAt: Schema.Union([Schema.Finite, Schema.Null]),
+            }),
+            Schema.Null,
+          ]),
+        ),
       }),
     ),
     continueCursor: Schema.String,
@@ -6127,7 +6150,7 @@ export const effectMethods = (method: EffectBuilder) => ({
       create: method.mutation(core_libraries_create),
       /** `core.libraries.get` (query, signed-in): Show a library, how many items it holds, its latest scan, and to its managers its folders. */
       get: method.query(core_libraries_get),
-      /** `core.libraries.list` (query, signed-in): List the libraries shared with you. */
+      /** `core.libraries.list` (query, signed-in): List the libraries shared with you, each with its latest scan. */
       list: method.query(core_libraries_list),
       /** `core.libraries.remove` (mutation, signed-in, API keys refused): Delete a library you manage and everything it lists; the files on disk stay. */
       remove: method.mutation(core_libraries_remove),
@@ -6627,7 +6650,7 @@ export const promiseMethods = (method: PromiseBuilder) => ({
       create: method.mutation(core_libraries_create),
       /** `core.libraries.get` (query, signed-in): Show a library, how many items it holds, its latest scan, and to its managers its folders. */
       get: method.query(core_libraries_get),
-      /** `core.libraries.list` (query, signed-in): List the libraries shared with you. */
+      /** `core.libraries.list` (query, signed-in): List the libraries shared with you, each with its latest scan. */
       list: method.query(core_libraries_list),
       /** `core.libraries.remove` (mutation, signed-in, API keys refused): Delete a library you manage and everything it lists; the files on disk stay. */
       remove: method.mutation(core_libraries_remove),
