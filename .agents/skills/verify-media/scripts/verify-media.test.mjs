@@ -692,31 +692,47 @@ esac
   });
 
   test("makes the lyrics folder only on a side with music, and cuts the server off only with a simulator", () => {
-    const lyrics = withSide('rm -f "$state/music_core"; cmd_lyrics_probe --side after');
+    // A run of its own: these leave a simulator's id behind, which the other tests must not see.
+    const own = { ...remoteEnv, MEDIA_VERIFY_RUN: `guards-${process.pid}` };
+    const lyrics = withSide("cmd_lyrics_probe --side after", own);
     assert.equal(lyrics.status, 1);
     assert.match(lyrics.stderr, /the after side has no music/);
-    const offline = withSideOffline("cmd_ios --side after offline on");
+    const offline = withSide("cmd_ios --side after offline on", own);
     assert.equal(offline.status, 1);
     assert.match(offline.stderr, /no simulator on the after side/);
-    const usage = withSideOffline("write_state ios_udid SIM; cmd_ios --side after offline sideways");
+    const usage = withSide("write_state ios_udid SIM; cmd_ios --side after offline sideways", own);
     assert.equal(usage.status, 1);
     assert.match(usage.stderr, /ios offline on\|off/);
   });
 
-  test("forwards Metro alone when the server is cut off, and both ports otherwise", () => {
+  test("cuts the server's forward alone, keeps Metro's, and starts again whichever stopped", () => {
     const calls = join(scratch, "forward-calls");
-    const body = (mode) =>
-      `write_state metro_port 4200; nohup() { echo "$*" >> ${JSON.stringify(calls)}; sleep 4; }; ios_forward ${mode}; read_state ios_forward`;
     rmSync(calls, { force: true });
-    const metro = withSide(body("metro"));
-    assert.equal(metro.status, 0, metro.stderr);
-    assert.equal(metro.stdout.trim(), "metro");
-    const server = withSide(body("server"));
-    assert.equal(server.status, 0, server.stderr);
-    const [first, second] = execFileSync("cat", [calls], { encoding: "utf8" }).trim().split("\n");
-    assert.match(first, /-R 4200:127\.0\.0\.1:4200/);
-    assert.doesNotMatch(first, /-R 4100:/);
-    assert.match(second, /-R 4200:127\.0\.0\.1:4200 -R 4100:127\.0\.0\.1:4100/);
+    // Stands in for ssh: a process `ps` shows as `ssh -N`, which is how the helper knows its own.
+    const result = withSide(
+      `nohup() { echo "$*" >> ${JSON.stringify(calls)}; exec -a "ssh -N stand-in" node -e "setTimeout(() => {}, 30000)"; }
+       write_state metro_port 4200
+       forwards_up; forward_runs forward_pid && forward_runs server_forward_pid && echo both
+       metro="$(read_state forward_pid)"
+       write_state ios_udid SIM; cmd_ios --side after offline on
+       forward_runs server_forward_pid || echo cut
+       [[ "$(read_state forward_pid)" == "$metro" ]] && forward_runs forward_pid && echo metro-kept
+       kill "$metro"; cmd_ios --side after offline off
+       forward_runs forward_pid && forward_runs server_forward_pid && echo both-again
+       forward_stop forward_pid; forward_stop server_forward_pid`,
+      { ...remoteEnv, MEDIA_VERIFY_RUN: `forwards-${process.pid}`, MEDIA_VERIFY_FORWARD_SETTLE: "0.2" },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(result.stdout.trim().split("\n"), [
+      "both",
+      "the app's server is out of reach",
+      "cut",
+      "metro-kept",
+      "the app reaches its server again",
+      "both-again",
+    ]);
+    const ports = execFileSync("cat", [calls], { encoding: "utf8" }).trim().split("\n").map((call) => /-R (\d+):/.exec(call)?.[1]);
+    assert.deepEqual(ports, ["4200", "4100", "4200", "4100"]);
   });
 
   test("refuses the music iOS app on an image without the music client before it touches the Mac", () => {

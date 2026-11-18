@@ -52,9 +52,11 @@ Preconditions:
   session's records, from `Stream.started` to `Stream.ended`; `--grep Stream.started` keeps
   records with that text; `--slow 200ms` keeps timed records at least that long; `--level warn`
   prints nothing on a clean run.
-- **Follow.** Run `timeout 6 $S cli -- logs --follow --since 1s` in the background, with its
-  output in a file, and play and leave a title meanwhile: the file gains that play's
-  `Player.startup_ended` and `Stream.ended` records as they happen.
+- **Follow.** Run `timeout 40 $S cli -- logs --follow --since 1s` in the background, with its
+  output in a file, and meanwhile play a title past 4 seconds and leave it: the file gains that
+  play's `Player.startup_ended` and `Stream.ended` records as they are logged, and the command
+  exits 124 when its time is up. Give it the whole play and ten seconds more, since the player's
+  records arrive late.
 - **Access.** `$S cli --as mateo -- logs --since 10m --limit 1` prints a record, since Mateo is an
   admin. `$S cli --as aiko -- logs --limit 2` exits 4 with `Only an owner or an admin may do
   this`. `$S cli --as aiko -- diagnostics sessions` prints `[]` until Aiko plays something, and

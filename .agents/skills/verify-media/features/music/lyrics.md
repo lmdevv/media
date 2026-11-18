@@ -59,8 +59,10 @@ Preconditions:
   after `$S ios tap --label Lyrics`, `$S ios describe` lists the buttons `First line` to `Fourth
   line` above `Position`.
 - **Lookups.** `$S cli -- music lyrics status` prints `"remote": true`, and
-  `$S cli --as aiko -- music lyrics status` exits 4. In the account client, on `/admin/libraries`,
-  `$S browser click --page owner --role switch --name "Look up lyrics online"` turns it off:
+  `$S cli --as aiko -- music lyrics status` exits 4. On Lucía's account page
+  (`$S browser sign-in --app account --page owner`), run
+  `$S browser open --page owner /admin/libraries` and
+  `$S browser click --page owner --role switch --name "Look up lyrics online"` to turn it off:
   `status` prints `"remote": false`, and `$S cli -- music lyrics backfill` exits 6 with `Lyrics
   lookups on LRCLIB are off`. `$S cli -- music lyrics configure --remote` turns it on again, and
   `backfill` prints the number of `libraries` it queued; `$S cli -- admin jobs list` then lists a

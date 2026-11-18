@@ -34,7 +34,7 @@ Preconditions:
 - `$S doctor` passes, the side holds the demo library and the seed, and `$S ios up` printed
   `ready` with the movies app signed in as Lucía.
 - Big Buck Bunny's title id, from `$S cli -- movies titles search --query "Big Buck Bunny"`, and
-  its file id, the `file.id` that `$S cli -- movies play start --title-id <id>` prints.
+  its file id, the first `id` under `files` in `$S cli -- movies titles get --title-id <id>`.
 
 - **Empty.** `$S ios open /downloads`: the heading `Downloads`, then `Nothing downloaded yet.` and
   the button `Browse Library`.
@@ -89,9 +89,9 @@ Preconditions:
 
 ## Gotchas
 
-- `ios offline on` keeps Metro's forward, so the dev client still loads its code, and cuts only
-  the server's. A forward that died, as when the Mac dropped the connection, comes back with
-  `$S ios offline off` too.
+- Metro and the server each have an ssh forward of their own. `ios offline on` stops the
+  server's alone, so the dev client keeps its code, and `ios offline off` starts whichever isn't
+  running, which also repairs a forward the Mac dropped.
 - `ios open` puts a screen on top of the one before, so `ios describe` lists both. Read the last
   matching lines, and tap a button two screens share by point.
 - A CLI session is on no device until `auth registry enroll`, which no seeded person's CLI has
