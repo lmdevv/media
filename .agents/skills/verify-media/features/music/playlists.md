@@ -49,6 +49,14 @@ Preconditions:
   `$S browser --app music click --role menuitem --name "Delete playlist…"`, and
   `$S browser --app music click --role button --name "Delete playlist"`. The URL ends in `/playlists`, the
   text `Deleted Night drive` appears, and `$S cli -- music playlists list` no longer lists it.
+- **CLI.** `$S cli -- music playlists create "CLI probe"` prints its `playlistId`. With a song's id
+  from `$S cli -- music library search wanderer` (`tracks[0].id`), run
+  `$S cli -- music playlists add-tracks --playlist-id <id> --track-ids <song>`, which prints the new
+  `itemIds`; `$S cli -- music playlists items <id>` lists `Wanderer`. Then
+  `$S cli -- music playlists remove-item --playlist-id <id> --item-id <item>`,
+  `$S cli -- music playlists update <id> --name "CLI probe 2"`, after which
+  `$S cli -- music playlists list` shows that name with `"trackCount": 0`, and
+  `$S cli -- music playlists remove <id>`.
 - **Proof.** Screenshot each state with `$S browser --app music screenshot --path
   captures/verify/<run>/after/music/playlists/<step>.png`.
 

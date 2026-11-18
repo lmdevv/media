@@ -10,6 +10,10 @@ CLI. Everything shown is limited to the libraries and ratings the person may see
 - `browse-grid` lists the `Movies` and `Shows` pages with their genre, year, score, and sort filters.
 - `browse-title` opens a title's page: rating, runtime, codecs, `Play`, `Add to My List`, and cast.
 - `browse-episodes` lists a show's seasons and episodes on its page.
+- `browse-genre` lists a genre's movies and shows at `/genre/<name>`, and filters a grid by a genre
+  chip.
+- `browse-collection` lists a collection's titles at `/collection/<id>`.
+- `browse-person` lists a director's or actor's titles in the library at `/person/<id>`.
 - `search-menu` finds a title from the command menu (`Search`).
 - `search-page` finds titles on `/search`, with `All`, `Movies`, and `Shows` counts.
 - `search-cli` finds titles with `media movies titles search`.
@@ -18,7 +22,9 @@ CLI. Everything shown is limited to the libraries and ratings the person may see
 
 - Desktop and phone web: the `Sections` navigation (`Home`, `Movies`, `Shows`, `My List`) and the
   `Search` button in the banner.
-- Any poster opens `/title/<id>`.
+- Any poster opens `/title/<id>`. Its `Genres` links open `/genre/<name>`, and its `Directed by`,
+  `Written by`, and `Starring` links open `/person/<id>`.
+- Home's `Collections` row, or `See all` beside it for `/collections`.
 - `/search?q=<words>` directly.
 - Terminal: `media movies titles search --query <words>`, `media movies titles list`,
   `media movies titles get --title-id <id>`.
@@ -40,6 +46,15 @@ Preconditions:
 - **Episodes.** Run `$S browser open /shows`, then `$S browser click --role link --name Caminandes --in main`.
   The region `Episodes` has `Season 1 3 episodes`, `0 of 3 watched`, and one link per episode,
   starting `1 Llama Drama`. The page's `Play S1:E1` link starts the first.
+- **Genre.** On `/movies`, `$S browser click --role button --name Animation --in main` leaves the
+  heading `Movies` with `5 titles` and the chip pressed. On Sintel's page,
+  `$S browser click --role link --name Animation --in main` opens `/genre/Animation`: the heading
+  `Animation` reads `6 titles`, movies and shows together.
+- **Collection.** On Home, `$S browser click --role link --name "Blender Open Movies" --in region=Collections`
+  opens `/collection/<id>`: the heading `Blender Open Movies` reads `5 titles`, oldest first.
+- **Person.** On Sintel's page, `$S browser click --role link --name "Colin Levy" --exact --in main`
+  opens `/person/<id>`: the heading `Colin Levy`, and under `In your library` the links
+  `[movies] Feature Test 2010 · Director` and `Sintel 2010 · Director`.
 - **Command menu.** Run `$S browser click --role button --name Search --exact` and
   `$S browser type --value sint`. The dialog `Command menu` lists the option
   `Sintel Movie · 2010` under `Titles`, selected. `$S browser press --key Enter` opens its page
@@ -61,5 +76,10 @@ Preconditions:
 - Search matches titles, not plots: `llama` finds nothing, `caminandes` finds the show.
 - The command menu also lists actions and pages, so typed words can select an action. Read the
   option under `Titles` before you press `Enter`.
+- A grid's default order, `Recently added`, follows the order the side scanned its files. Pick
+  `$S browser click --role button --name Sort`, then `--role menuitemradio --name Name`, for an
+  order that is the same on every side.
+- A person's name is two links on a title's page, the credit line's and the cast row's
+  (`Colin Levy Director`). `--exact` picks the credit line's.
 - What a page lists depends on who is signed in: the kid and Sam
   see fewer titles, and a title they may not see reads `This title isn't here`.

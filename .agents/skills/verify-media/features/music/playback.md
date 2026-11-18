@@ -2,8 +2,8 @@
 
 A user plays an album, pauses, resumes, and skips, and the music really plays: audio advances in
 the browser or on the phone, and the player bar and Now Playing follow. The queue is the
-person's, so the CLI reads the queue the browser started, and each finished play lands in their
-history.
+person's, so the CLI reads the queue the browser started, and each song that starts playing
+lands in their history.
 
 ## Sub-features
 
@@ -52,9 +52,10 @@ Preconditions:
   `$S ios up --app music --udid <id> --no-sign-in` on the simulator T3's device tools opened, then
   open the printed link and sign in there (`Connect to your server`, the side's address, then
   `Username`, `Password`, and `Sign in`; answer `Not Now` to `Save Password?`). Tap the `Library`
-  tab, `Albums`, `Vienna Blue`, then `Play`. The mini player reads
-  `Now playing: Wanderer, Doc & Lena Selyanina` with a `Pause` button, and in Now Playing the
-  `Position` time advances.
+  tab, `Albums`, `Vienna Blue, Doc & Lena Selyanina`, then the album's `Play` (`$S ios find Play`
+  prints its point, for `ios tap -x X -y Y`). The mini player reads
+  `Now playing: Wanderer, Doc & Lena Selyanina` with a `Pause` button; tapping it opens Now
+  Playing, where the `Position` time advances beside `AirPlay`, `Start a Jam`, and `This iPhone`.
 - **Proof.** Record the journey with `$S browser --app music record-start --page music-phone --show-actions --path
   captures/verify/<run>/after/music/playback/phone.mp4` before the first step, and
   `$S browser --app music close-page --page music-phone` at the end. Take stills with
@@ -65,13 +66,17 @@ Preconditions:
 
 - `--exact` matters on `Play`: without it the locator also matches buttons such as `Play Dawn`
   and fails as ambiguous.
-- The album page has a `Play` button in the header and one per row on hover. Scope it with
-  `--in main --nth 0` for the album's own button.
+- The album page has a `Play` button in the header, and each row has a `Play <title>` button.
+  Scope it with `--exact --in main --nth 0` for the album's own button.
 - The queue is the person's, but whether a page plays and where in the song is the page's own.
 - The before side holds its own playback. Run the same steps on both sides before you compare.
 - `audio` reads only the page's own media elements.
 - An iOS app that kept a session to an earlier stack's server, with downloads from it, opens on
   Home offline and never offers another server. Uninstall it before `ios up` installs it again:
   it then opens on `Your server is out of reach.`, whose `Server address` goes back to Welcome.
+- On iOS, an album in the grid's last row sits under the mini player and the tab bar, and a tap
+  on its label opens Now Playing instead. Swipe the grid up first (`$S ios swipe 200 600 200
+  300`). With a mini player on screen, `Play` names its button and the album's: tap the album's
+  by point.
 - The CLI has no pause, resume, or next of its own; it controls a device through Connect
   (`media auth targets control`, [Connect](./connect.md)).

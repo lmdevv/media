@@ -13,7 +13,7 @@ and shows a top result with the title as tagged. The CLI returns the same matche
 ## How to get to it (user POV)
 
 - Desktop web: `Search` in the Library sidebar, or `/` with focus outside a field.
-- Phone web: the `Search` tab.
+- Phone web: the `Search` link beside the tabs.
 - Terminal: `media music library search <query>`.
 - iOS app: the search button beside the tab bar.
 
@@ -25,7 +25,7 @@ Preconditions:
 
 - **Shortcut.** From the home page, run `$S browser --app music open /`, `$S browser --app music press --key /`, and
   `$S browser --app music wait --url /search`. The search field has focus.
-- **Accents.** Run `$S browser --app music fill --css "#search-input" --value doppelganger`, then
+- **Accents.** Run `$S browser --app music fill --role searchbox --name "Search your library" --value doppelganger`, then
   `$S browser --app music wait --role heading --name "Top result"`. Then
   `$S browser --app music text --css "main section" --nth 0` prints `Top result`, `Doppelgänger`, and
   `Song · Doc & Lena Selyanina`.
@@ -36,6 +36,6 @@ Preconditions:
 
 ## Gotchas
 
-- The search field has no accessible name. Use `--css "#search-input"`.
+- The search field is the searchbox `Search your library`, on desktop and on a phone.
 - Results update as you type. Wait for `Top result`, never sleep.
 - `/` types a slash when a field has focus. Press it from a page with focus outside fields.

@@ -25,8 +25,9 @@ at the same place, and an album's menu plays the album on another device. The li
   command menu's `Play on another device…`.
 - Phone web: the mini player, then Now Playing's `Play on another device. Now: <device>` button.
 - An album's `More actions for <album>` menu, then `Play on` and a device.
-- Terminal: `media auth targets list`, `media auth targets control --device-id <id> --playing false`,
-  `media auth targets load`, and `media auth targets move`.
+- Terminal: `media auth targets list`, `media auth targets control --device-id <id> --no-playing`
+  (`--playing` to play, `--position-ms <ms>` to seek), `media auth targets load`, and
+  `media auth targets move`.
 - iOS app: Now Playing's device button (`This iPhone`, or `Playing on <device>` while another
   device plays), the iPad player bar's speaker button, and Settings, `Devices`, each open the
   `Play on` sheet. An album's `Album actions` sheet has `Play on`.
@@ -47,19 +48,26 @@ Preconditions:
   `Open Now Playing: <song>, playing on Chrome on Linux`.
 - **Pause it remotely.** Click the mini player's `Pause` on `aiko-phone`; `$S browser --page
   aiko-desk audio` prints `"playing":false` within a quarter second. To time it, attach a `pause`
-  listener to `window.mediaVerifyMedia` on the target with `eval --js`, and record `Date.now()` on
-  the controller just before its click: both pages share Chromium's clock.
+  listener to each element in `window.mediaVerifyMedia`, the set of media elements the page has
+  played, on the target with `eval --js`, and record `Date.now()` on the controller just before
+  its click: both pages share Chromium's clock.
+- **From the terminal.** `$S cli --as aiko -- auth targets list` prints each device's `deviceId`,
+  `name`, and `playback`. `$S cli --as aiko -- auth targets control --device-id <desk> --no-playing`
+  pauses the desk, `--playing` plays it, and `--position-ms 120000` moves it to 2:00, each within
+  a second on the desk's `audio`.
 - **Move it.** On `aiko-desk`, click `Play on another device`, then
   `--role menuitemradio --name "Safari on iPhone"`. `aiko-phone` plays on at the desk's position
   (`wait-audio --advance 1`), the desk's audio stops, and its bar shows the band
   `Playing on Safari on iPhone`.
-- **Seek it.** On the controller, click the `Seek` slider's control two thirds along on a 3-minute
-  song; the target's `audio` reads about 2 minutes.
-- **Load an album there.** On the controller's album page, open `More actions for <album>`, then
-  `Play on` and the device. The target plays the album's first song.
-- **Another person.** As Sam, `d` opens a list with only `This browser` and
+- **Seek it.** On the controller, drag the `Seek` slider two thirds along on a 3-minute song; the
+  target's `audio` reads about 2 minutes. The helper's `click` lands on the slider's thumb, not a
+  point along it, so drive a seek with `auth targets control --position-ms`.
+- **Load an album there.** On the controller's album page, click `--role button --name "More
+  actions for <album>" --nth 0`, then `--role menuitem --name "Play on"` and `--role menuitem
+  --name "<device>"`. The target plays the album's first song.
+- **Another person.** As Sam, `d` opens the dialog `Play on` with only `This browser` and
   `No other devices right now`. As Mateo, `$S cli --as mateo -- auth targets control --device-id
-  <Aiko's device> --playing false` exits 5 (notFound), and `auth targets list` is empty.
+  <Aiko's device> --no-playing` exits 5 (notFound), and `auth targets list` prints `[]`.
 - **Take over in a second tab.** While `aiko-desk` plays, open another tab of it with
   `$S browser --page aiko-desk-2 --tab-of aiko-desk open /albums/<id>` and play there. The new tab
   speaks for the browser's device, and the first tab's `audio` reads `"playing":false`. A pause
@@ -69,14 +77,19 @@ Preconditions:
 - **Proof.** Record the controller with `record-start --show-actions`, take stills of both pages,
   and save `delay.txt` with each pause's delay.
 - **The phone.** Run `$S ios up --app music --udid <id> --no-sign-in` on the simulator T3's device
-  tools opened, open the printed link with agent-device, and sign in as `aiko`. The phone's device
-  has the name iOS gives it (`iPhone 18 Pro` on that simulator). With `aiko-desk` playing, the app's
+  tools opened, open the printed link with agent-device, and sign in as `aiko`; `$S ios up --app
+  music` alone signs in as Lucía on a simulator of its own. The phone's device has the name iOS
+  gives it (`iPhone 18 Pro` on that simulator, `media-verify-<run>-<side>` on the helper's own). With `aiko-desk` playing, the app's
   mini player follows it, and Now Playing's button reads `Playing on Chrome on Linux`; its Pause
   pauses the desk. The button opens `Play on`: `This iPhone` moves the song to the phone at the
   desk's position, and the sheet closes once the phone plays. From the desk, `Play on another
   device`, then the phone, moves it back, and the bar's Pause then pauses the phone. An album's
   `Album actions`, then `Play on`, then `Chrome on Linux` plays the album on the desk. As Sam the
   sheet holds only `This iPhone` (or `This iPad`) and `No other devices right now`.
+- **The phone from the terminal.** With the phone playing, `$S cli -- auth targets control
+  --device-id <phone> --no-playing` turns Now Playing's `Pause` into `Play`, and a web page of the
+  same person shows the band `Playing on <phone>`, whose `Play` starts the phone again. In the
+  phone's `Play on`, the rows read `This iPhone, Playing now` and `Chrome on Linux, Online`.
 - **A move that never lands.** With the phone playing, close the desk's page (`close-page`) and,
   within 20 seconds, while the core still counts its last report, pick `Chrome on Linux` in the
   phone's `Play on`. The core takes the move and the phone stops, but nothing loads it: the sheet
@@ -92,6 +105,12 @@ Preconditions:
 
 ## Gotchas
 
+- `auth targets control --playing false` plays: `--playing` is a yes-or-no flag, and `false` is a
+  stray word it ignores. Pause with `--no-playing`.
+- A device in the bar's `Play on` menu is a `menuitemradio`; in an album's `Play on` submenu it is
+  a `menuitem`.
+- `More actions for <album>` also names the row of a song titled like its album, such as
+  `Vienna Blue`. `--nth 0` is the album's own.
 - The pages of one browser context share one device, and only one tab of a browser reports for
   it: the one that played last, and the tab it took over from stops. Use a page per device.
 - A target the browser never let play sound may refuse to start a load; the browser host launches

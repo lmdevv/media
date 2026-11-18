@@ -43,27 +43,54 @@ Preconditions:
   same for `mateo` and `kids`.
 
 - **Start.** As Lucía open `Sintel` with `$S browser open /title/<id>`, play it, hover the
-  player (`hover --testid player-video`), click `--role button --name "Watch together"`, read
-  the link with `text --label "Session link"`, then click `--role button --name "Start
-  session"`. The header shows `Live · 1 watching` and the `Watching together` panel.
+  player (`hover --testid player-video`), click `--role button --name "Watch together"`, wait for
+  the link with `wait --text "/movies/together#"`, read it with `text --label "Session link"`,
+  then click `--role button --name "Start session"`. The header shows `Live · 1 watching` and the
+  `Watching together` panel, whose `Members` list reads `lucia You · Host`.
 - **Join.** `$S browser open "/together#<link>" --page aiko`, then `wait-video --page aiko
-  --advance 5`. Lucía's panel lists `aiko`.
+  --advance 5`. Lucía's `Members` list gains `aiko`, and the header reads `Live · 2 watching`.
 - **In step.** Read both pages' `video` position with `eval --js` and their wall clocks
-  (`performance.timeOrigin + performance.now()`); carried to one instant they stay within 250 ms.
-- **Approval and locked.** In Lucía's panel pick `Ask me first`, open the link as Mateo: he sees
-  `Waiting for lucia` until Lucía clicks `Let in`. Pick `No one new` and a new joiner sees `This
-  session is locked`.
+  (`performance.timeOrigin + performance.now()`); carried to one instant they stay within 250 ms
+  once the joiner has caught up.
+- **Approval and locked.** In Lucía's panel click `--role radio --name "Ask me first"`, open the
+  link as Mateo: he sees the heading `Waiting for lucia` until Lucía clicks `Let in` under
+  `Waiting to join`. Click `--role radio --name "No one new"` and a new joiner sees the heading
+  `This session is locked`.
 - **No control.** As Aiko press `ArrowRight` and `Space` on the player: a toast says `Only lucia
-  can pause or seek`, and her video keeps playing on the clock.
-- **Next episode.** Start a session on `Caminandes` episode 1, seek near its end, and join as
-  Aiko: both pages show the `Next episode` card and move to episode 2 together (`url`).
-- **Host away.** `close-page --page main` for 40 seconds: Aiko sees `lucia left the session`
-  and a paused video. Sign Lucía in again, open `/together`, and press Play.
-- **Kid.** As Lucía queue `Sintel` (PG-13) with `Add to Up next` while `kids` is in a session on
-  `Big Buck Bunny`: the kid's `Up next` shows `Hidden`.
+  can pause or seek`, the same line stands in place of her `Pause` button, and her video keeps
+  playing on the clock. Lucía's `--role switch --name "Pause and seek"` gives guests the button,
+  and a guest's `Pause` then pauses the host's video too.
+- **Next episode.** Start a session on `Caminandes` episode 1 (90 seconds long), join as Aiko, and
+  as Lucía press `ArrowRight` until `video` reads about 79 seconds: both pages show the region
+  `Next episode` with `S1:E2`, `Gran Dillama`, and a `Starts in` timer, and move to episode 2
+  together (`url` carries the same `episodeId` on both).
+- **Host away.** `close-page --page main` for 40 seconds: Aiko sees the heading `lucia left the
+  session`, the buttons `Keep watching on my own` and `Leave session`, and a paused video. Sign
+  Lucía in again (`$S browser sign-in`), open `/together`, which goes back to the player, and
+  click `Play`: Aiko's video plays on.
+- **Kid.** Start a session on `Big Buck Bunny` and join as `kids`. As Lucía open Sintel's page
+  (PG-13) and click `--role button --name "Add to Up next" --in main`: the kid's panel lists
+  `Hidden Added by lucia` under `Up next`.
+- **iOS.** With the movies app up (`$S ios up`) as Lucía, start the session as another person on
+  the web, such as Aiko, and run `$S ios open /together/<link>` with the part of the link after
+  `#`. The app opens the player in landscape; the host's `Members` list gains `lucia`, the header
+  reads `Live · 2 watching`, and with the controls up (`$S ios tap -x 400 -y 200`) the app's
+  `Playback position` reads within a second of the host's `video`.
+- **Leave and end.** A guest's panel has `Leave session`, which leaves them on the player alone
+  and takes one off the host's count. The host's `End session`, in the panel or as the command
+  menu's option, shows guests the heading `lucia ended the session`.
+- **Proof.** `$S browser screenshot --path captures/verify/<run>/after/sessions/host-panel.png`
+  with the panel open, and the same on a guest's page. Never capture the `Watch together` dialog
+  or `Copy invite link`'s result: a session link lets anyone in.
 
 ## Gotchas
 
+- `Session link` reads `…` for a moment after the dialog opens. Wait for the link's text before
+  you read it, and read it before `Start session`, which closes the dialog.
+- The panel opens by itself when a session starts or a person joins, and `Watch together` then
+  closes it. Look for `region "Watching together"` before you click the button.
+- A joiner starts a little behind and catches up at 1.05 times the speed for about 15 seconds.
+  Measure the two pages only once both `playbackRate`s read 1.
 - A person holds one place per domain: joining another movies session leaves the current one.
 - Browsers block autoplay without a click; a joiner whose player waits shows `Join`.
 - The host's player pauses the session when it stalls for a second and plays it on once it

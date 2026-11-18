@@ -53,25 +53,44 @@ Preconditions:
   read the link with `attr --testid jam-link --attr value`, and press `Escape`.
 - **Join.** `$S browser open "/jam#<link>" --page aiko-music`, then `wait-audio --page aiko-music
   --advance 5`. The band reads `lucia's Jam`; Lucía's panel lists `aiko`.
-- **In step.** Read both pages' playing `audio` element (`currentTime`) and wall clocks with `eval
-  --js`; carried to one instant they stay within 250 ms.
-- **Add.** In Lucía's panel switch on `People can add songs`; as Aiko open a song's `More actions
-  for <title>`, `Play next`. Every queue panel shows it first, `Added by aiko`, and it plays next.
-- **Reorder.** In Lucía's queue focus a song's `Move <title>` handle and press `ArrowUp`: every
-  member's queue shows the new order.
-- **Gapless.** Note each page's `advanced`-time with an `eval --js` listener on the audio
-  elements' `timeupdate`: every page changes song within 250 ms of the others, with no pause.
-- **Approval and locked.** In Lucía's panel pick `You approve`, open the link as Mateo: his band
-  reads `Waiting to join lucia's Jam` until Lucía clicks `Let in` under `Waiting to join`. Pick
-  `Locked` and a new joiner sees `This Jam is locked`.
+- **In step.** Read both pages' playing element, the one in `window.mediaVerifyMedia` that isn't
+  paused, (`currentTime`) and wall clocks with `eval --js`; carried to one instant they stay
+  within 250 ms.
+- **Add.** As Aiko open a song's `More actions for <title>`, `Play next`: a toast reads `The host
+  turned off adding songs in this Jam`. In Lucía's panel (`Manage` in the band) click `--role
+  switch --name "People can add songs"`, and Aiko's `Play next` then lands: every queue panel
+  shows it first, `Added by aiko`, and it plays next.
+- **Reorder.** In Lucía's queue run `press --role button --name "Move <title>" --exact --in
+  complementary=Queue --key ArrowUp`: every member's queue shows the new order.
+- **No control.** As Aiko click `--role button --name Pause --exact --in region=Player`: a toast
+  reads `The host controls playback in this Jam`, and her audio plays on.
+- **Gapless.** Note when each page's element starts the next song with an `eval --js` listener on
+  the elements in `window.mediaVerifyMedia`, then end the song as the host with `press --role
+  slider --name Seek --in region=Player --key End`: every page changes song within 250 ms of the
+  others, with no pause.
+- **Approval and locked.** In Lucía's panel click `--role radio --name "You approve"`, open the
+  link as Mateo: his band reads `Waiting to join lucia's Jam` until Lucía clicks `Let in` in
+  `--in list="Waiting to join"`. Click `--role radio --name Locked` and a new joiner sees the
+  heading `This Jam is locked`.
 - **Hidden.** As Lucía queue an explicit song while `kids` is in the Jam: the kid's queue shows
-  `Hidden song`.
+  `Hidden song`. The demo library has no explicit song, so this needs a side started with
+  `--library DIR` whose `Music` holds one.
 - **Connect.** As Aiko in the Jam press `d`: the list shows `This browser` and `Jam` only. Read her
   page's device from `$S cli --as aiko -- auth targets list`, then send `auth targets control
-  --device-id <id> --playing false`: the page plays on in step (`wait-audio --advance 2`).
+  --device-id <id> --no-playing`: the page plays on in step (`wait-audio --advance 2`).
+- **iOS.** With the music app up (`$S ios up --app music`) as Lucía, start the Jam as another
+  person on the web, such as Aiko, and run `$S ios open /jam/<link>` with the part of the link
+  after `#`. The app opens the Jam's page, headed `aiko's Jam` with `In this Jam`, the mini player
+  reads `Now playing: <the Jam's song>`, and the host's band reads `Your Jam · 2 people`.
+- **Leave and end.** As Aiko click `Open` in the band, then `Leave Jam`: her band goes and her
+  page stops playing the Jam's song. As Lucía click `Manage`, then `End Jam`: her player bar is
+  back on her own song, and the others' bands read `The Jam ended` with `Back to your music`.
 
 ## Gotchas
 
+- `Move <title>` needs `--exact`: `Remove <title> from the queue` holds the same words.
+- A page that already shows a Jam link's page, such as `This Jam is locked`, doesn't load it again
+  on a second `open` of the same link. Open `/` first, then the link.
 - A person holds one place per domain: joining another music Jam leaves the current one.
 - The Jam panel is modal: close it (`Escape`) before driving the player bar behind it.
 - A full page load (`open`) stops the page's audio; navigate in the app (`click --role link`)

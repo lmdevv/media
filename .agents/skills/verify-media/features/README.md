@@ -1,7 +1,8 @@
 # Lar Movies verification map
 
-This directory is the maintained source for verifying what a Lar Movies user sees and does. Read
-this index before you drive the app, then use the matching feature file as the recipe.
+This directory is the maintained source for verifying what a Lar Movies user sees and does, and
+what anyone does in the account client at `/`, which movies and music share. Read this index
+before you drive the app, then use the matching feature file as the recipe.
 
 ## Baseline preconditions
 
@@ -68,12 +69,15 @@ commands, and observable proof.
 
 - [First-run setup](./first-run-setup.md) covers the owner account, the first library and its
   scan, and adding a second library from Admin.
-- [Browse and search](./browse.md) covers Home, the Movies and Shows pages, a title's page, the
-  command menu, the search page, and CLI search.
+- [Browse and search](./browse.md) covers Home, the Movies and Shows pages, a title's page, genre,
+  collection, and person pages, the command menu, the search page, and CLI search.
 - [Playback](./playback.md) covers direct play, HLS with the audio or the whole video transcoded,
   resuming, the player's controls, and the iOS app.
 - [People and access](./people-and-access.md) covers signing in once at `/` for `/movies`, the
-  kid user, and a library that a member wasn't shared.
+  kid user, a library that a member wasn't shared, and a shared device's picker.
+- [Account and admin](./account-and-admin.md) covers the account client: a person's name, devices,
+  and API keys, approving a device from its code, and an admin's users, kid limits, groups,
+  libraries, jobs, devices, guests, server, and backups.
 - [My List and Continue watching](./my-list.md) covers adding to My List and the Continue
   watching row with its resume point and next episode.
 - [Casting](./casting.md) covers Chromecast from the player and from `/music`'s Play on, a
@@ -83,4 +87,5 @@ commands, and observable proof.
   going away, Up next, and joining from the iOS app.
 
 Music runs on every side too, at `/music` on the same image. Its map is
-[music/README.md](./music/README.md), with the music library, playback, search, and playlists.
+[music/README.md](./music/README.md), with the music library, browsing, playback, search,
+playlists, Connect, and Jams.
