@@ -26,8 +26,6 @@ import {
   resumeOf,
   seasonDetail,
   titleFacts,
-  versionDetail,
-  versionLabel,
   watchedMarks,
 } from "./title-model";
 
@@ -301,24 +299,6 @@ describe("defaultVersion", () => {
     expect(defaultVersion(versions)?.id).toBe("played");
     expect(defaultVersion(versions.slice(0, 1))?.id).toBe("best");
     expect(defaultVersion([])).toBeUndefined();
-  });
-});
-
-describe("version labels", () => {
-  it("names a version by its edition, else its picture, else its container", () => {
-    expect(versionLabel(version())).toBe("4K HEVC");
-    expect(versionLabel(version({ versionName: "Director's Cut" }))).toBe("Director's Cut");
-    expect(
-      versionLabel(version({ width: null, height: null, videoCodec: null, container: "mkv" })),
-    ).toBe("MKV");
-    expect(versionLabel(version({ width: 640, height: 360, videoCodec: "h264" }))).toBe("SD H.264");
-  });
-
-  it("lists the facts that tell versions apart", () => {
-    expect(versionDetail(version())).toBe("4K · HDR10 · HEVC · EAC3 5.1 · 18.4 GB");
-    expect(
-      versionDetail(version({ hdr: "none", audioTracks: 3, audioCodec: null, sizeBytes: 640e6 })),
-    ).toBe("4K · HEVC · 3 audio tracks · 640 MB");
   });
 });
 

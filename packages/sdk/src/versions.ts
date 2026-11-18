@@ -1,6 +1,6 @@
 import { dynamicRangeOf, playsDirectly as filePlaysDirectly } from "@media/contracts/direct-play";
 import type { ClientCapabilities } from "@media/contracts/media-playback";
-import type { MediaVersion } from "@media/contracts/models/catalog";
+import type { HdrFormat, MediaVersion } from "@media/contracts/models/catalog";
 import { Option } from "effect";
 
 import { channelLabel, codecLabel, hdrLabel, resolutionLabel, sizeLabel } from "./media-labels";
@@ -42,13 +42,30 @@ export const preferredVersion = (
       versions[0],
   );
 
-const pictureClass = (version: MediaVersion): string | null =>
+/**
+ * The facts `label` and `detail` read, which every version list carries: the media contracts'
+ * `MediaVersion` and the platform's `movies.titles.versions` answer alike.
+ */
+interface LabelledVersion {
+  readonly versionName: string | null;
+  readonly width: number | null;
+  readonly height: number | null;
+  readonly hdr: HdrFormat;
+  readonly videoCodec: string | null;
+  readonly audioCodec: string | null;
+  readonly audioChannels: number | null;
+  readonly audioTracks: number;
+  readonly container: string;
+  readonly sizeBytes: number;
+}
+
+const pictureClass = (version: LabelledVersion): string | null =>
   version.width === null || version.height === null
     ? null
     : (resolutionLabel(version.width, version.height) ?? "SD");
 
 /** A version's name: its edition or part, else its picture, such as `4K HEVC`, else its container. */
-export const label = (version: MediaVersion): string =>
+export const label = (version: LabelledVersion): string =>
   version.versionName ??
   ([pictureClass(version), version.videoCodec === null ? null : codecLabel(version.videoCodec)]
     .filter((part) => part !== null)
@@ -59,7 +76,7 @@ export const label = (version: MediaVersion): string =>
  * What tells a version apart besides its name: `4K · HDR10 · HEVC · EAC3 5.1 · 41.2 GB`, with
  * `3 audio tracks` when it has several.
  */
-export const detail = (version: MediaVersion): string =>
+export const detail = (version: LabelledVersion): string =>
   [
     pictureClass(version),
     hdrLabel(version.hdr),

@@ -1,3 +1,4 @@
+import { Versions } from "@media/sdk/effect";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { router } from "expo-router";
 import { ChevronRight, Clapperboard, Info, UserRound } from "lucide-react-native";
@@ -12,7 +13,7 @@ import type { TitleCard, TitleDetail, TitleId } from "@/lib/catalog";
 import { useServer } from "@/session/connection";
 
 import { GUTTER } from "@/components/ui/page-layout";
-import { castAndCrew, defaultVersion, versionLabel } from "./title-model";
+import { castAndCrew, defaultVersion } from "./title-model";
 import type { PersonLine } from "./title-model";
 
 const SIMILAR_LIMIT = 12;
@@ -113,7 +114,7 @@ export function AvailableVersions({ title }: { readonly title: TitleDetail }) {
         <ListRow
           key={version.id}
           icon={Clapperboard}
-          title={versionLabel(version)}
+          title={Versions.label(version)}
           {...(version.id === preferred?.id ? { detail: "Default" } : {})}
           onPress={() => router.push(`/title/${title.id}/versions?fileId=${version.id}`)}
         />

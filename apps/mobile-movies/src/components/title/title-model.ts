@@ -206,45 +206,6 @@ export const optimisticValue = <A>(
 export const defaultVersion = (versions: ReadonlyArray<MediaVersion>): MediaVersion | undefined =>
   versions.find((version) => version.lastPlayed) ?? versions[0];
 
-const pictureClass = (version: MediaVersion): string | null =>
-  version.width === null || version.height === null
-    ? null
-    : (MediaLabels.resolutionLabel(version.width, version.height) ?? "SD");
-
-const present = (parts: ReadonlyArray<string | null>): ReadonlyArray<string> =>
-  parts.flatMap((part) => (part === null ? [] : [part]));
-
-/**
- * A version's name: its edition or part, else its picture, such as `4K HEVC`, else its container.
- * The SDK's `Versions.label` reads the old movies contracts' version, so this reads the core's.
- */
-export const versionLabel = (version: MediaVersion): string =>
-  version.versionName ??
-  (present([
-    pictureClass(version),
-    version.videoCodec === null ? null : MediaLabels.codecLabel(version.videoCodec),
-  ]).join(" ") ||
-    version.container.toUpperCase());
-
-/**
- * What tells a version apart besides its name: `4K · HDR10 · HEVC · EAC3 5.1 · 41.2 GB`, with
- * `3 audio tracks` when it has several.
- */
-export const versionDetail = (version: MediaVersion): string =>
-  present([
-    pictureClass(version),
-    MediaLabels.hdrLabel(version.hdr),
-    version.videoCodec === null ? null : MediaLabels.codecLabel(version.videoCodec),
-    version.audioCodec === null
-      ? null
-      : present([
-          MediaLabels.codecLabel(version.audioCodec),
-          MediaLabels.channelLabel(version.audioChannels ?? 0),
-        ]).join(" "),
-    version.audioTracks > 1 ? `${String(version.audioTracks)} audio tracks` : null,
-    MediaLabels.sizeLabel(version.sizeBytes),
-  ]).join(" · ");
-
 const MONTHS = [
   "January",
   "February",
