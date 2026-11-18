@@ -43,45 +43,45 @@
         let
           inherit (pkgs.stdenv.hostPlatform) isLinux;
           cli = pkgs.callPackage ./nix/cli.nix { };
-          movies = pkgs.callPackage ./nix/package.nix { };
+          media = pkgs.callPackage ./nix/package.nix { };
         in
         {
           inherit cli;
-          default = if isLinux then movies else cli;
+          default = if isLinux then media else cli;
         }
-        // nixpkgs.lib.optionalAttrs isLinux { inherit movies; }
+        // nixpkgs.lib.optionalAttrs isLinux { inherit media; }
       );
 
       apps = forAllSystems (
         pkgs:
         let
-          movies = {
+          media = {
             type = "app";
             program = nixpkgs.lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.cli;
-            meta.description = "The [movies] command line";
+            meta.description = "The [media] command line";
           };
         in
         {
-          default = movies;
-          cli = movies;
+          default = media;
+          cli = media;
         }
       );
 
       overlays.default = final: _prev: {
-        movies = final.callPackage ./nix/package.nix { };
-        movies-cli = final.callPackage ./nix/cli.nix { };
+        media = final.callPackage ./nix/package.nix { };
+        media-cli = final.callPackage ./nix/cli.nix { };
       };
 
       # `cli` is a path, like the server module's own import of it, so a system can import both.
       nixosModules = {
-        movies = import ./nix/module.nix;
-        default = self.nixosModules.movies;
+        media = import ./nix/module.nix;
+        default = self.nixosModules.media;
         cli = ./nix/cli-module.nix;
       };
 
       homeManagerModules = {
-        movies = ./nix/home-module.nix;
-        default = self.homeManagerModules.movies;
+        media = ./nix/home-module.nix;
+        default = self.homeManagerModules.media;
       };
 
       checks = forLinux (
@@ -108,7 +108,7 @@
               inherit (evaluated) config;
               service = config.systemd.services.media-server;
             in
-            pkgs.writeText "movies-module-check" (
+            pkgs.writeText "media-module-check" (
               builtins.toJSON {
                 containers = builtins.mapAttrs (_: container: {
                   inherit (container)
@@ -126,14 +126,14 @@
             );
         in
         {
-          package = self.packages.${pkgs.stdenv.hostPlatform.system}.movies;
+          package = self.packages.${pkgs.stdenv.hostPlatform.system}.media;
           inherit (self.packages.${pkgs.stdenv.hostPlatform.system}) cli;
           module = evaluate { };
           module-qsv = evaluate {
             hardwareAcceleration = "qsv";
             openFirewall = true;
             tmdbApiKeyFile = "/run/secrets/tmdb-api-key";
-            environmentFile = "/run/secrets/movies.env";
+            environmentFile = "/run/secrets/media.env";
             otlpEndpoint = "http://127.0.0.1:4318";
             qsvDevice = "/dev/dri/renderD129";
             extraEnvironment.LIBVA_DRIVER_NAME = "iHD";
@@ -271,7 +271,7 @@
                   ];
                 }).config;
               summary = config: {
-                cli = builtins.any (package: package.pname or "" == "movies-cli") config.environment.systemPackages;
+                cli = builtins.any (package: package.pname or "" == "media-cli") config.environment.systemPackages;
                 convexUrl = config.environment.sessionVariables.MEDIA_CORE_URL or null;
                 mediaUrl = config.environment.sessionVariables.MEDIA_SERVER_URL or null;
                 server = config.systemd.services ? media-server;
@@ -329,7 +329,7 @@
             assert nixpkgs.lib.assertMsg (
               actual == expected
             ) "programs.media: expected ${builtins.toJSON expected}, got ${builtins.toJSON actual}";
-            pkgs.writeText "movies-cli-module-check" (builtins.toJSON actual);
+            pkgs.writeText "media-cli-module-check" (builtins.toJSON actual);
           home-module =
             let
               inherit (nixpkgs) lib;
@@ -337,7 +337,7 @@
                 settings:
                 (lib.evalModules {
                   modules = [
-                    self.homeManagerModules.movies
+                    self.homeManagerModules.media
                     {
                       options.home = {
                         packages = lib.mkOption {
@@ -362,7 +362,7 @@
                   ];
                 }).config;
               summary = config: {
-                cli = builtins.any (package: package.pname or "" == "movies-cli") config.home.packages;
+                cli = builtins.any (package: package.pname or "" == "media-cli") config.home.packages;
                 inherit (config.home) sessionVariables;
               };
               actual = {
@@ -398,8 +398,8 @@
             in
             assert lib.assertMsg (actual == expected)
               "Home Manager programs.media: expected ${builtins.toJSON expected}, got ${builtins.toJSON actual}";
-            pkgs.writeText "movies-home-module-check" (builtins.toJSON actual);
-          vm = pkgs.callPackage ./nix/vm-test.nix { module = self.nixosModules.movies; };
+            pkgs.writeText "media-home-module-check" (builtins.toJSON actual);
+          vm = pkgs.callPackage ./nix/vm-test.nix { module = self.nixosModules.media; };
         }
       );
     };

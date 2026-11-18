@@ -70,10 +70,10 @@ open with that sign-in.
 
 ```nix
 # flake.nix
-inputs.movies.url = "github:lmdevv/media";   # or github:lmdevv/media/v0.4.1 to pin a release
+inputs.media.url = "github:lmdevv/media";    # or github:lmdevv/media/v0.4.1 to pin a release
 
 # in nixosSystem { modules = [ ... ]; }
-inputs.movies.nixosModules.default
+inputs.media.nixosModules.default
 {
   services.media = {
     enable = true;
@@ -81,7 +81,7 @@ inputs.movies.nixosModules.default
     listenAddress = "100.64.0.1";                     # the host's Tailscale address
     publicUrl = "http://nas.tailnet.ts.net:8080";
     hardwareAcceleration = "qsv";                     # see GPU below; "auto" by default
-    environmentFile = "/run/secrets/movies.env";      # TMDB_API_KEY=..., from agenix or sops-nix
+    environmentFile = "/run/secrets/media.env";       # TMDB_API_KEY=..., from agenix or sops-nix
   };
 }
 ```
@@ -99,7 +99,7 @@ beside the old [movies] and [music] modules (ADR 0029).
 
 Every setting has an option (`nixos-option services.media` lists them); `extraEnvironment` sets
 anything else, and `environmentFile` keeps secrets out of the Nix store. The flake also exports
-`packages.<system>.movies`, `overlays.default` (`pkgs.movies`), and a VM test
+`packages.<system>.media`, `overlays.default` (`pkgs.media`), and a VM test
 (`nix build .#checks.x86_64-linux.vm`).
 
 ## Remote access
@@ -255,7 +255,7 @@ old one with [fresh-install.md](fresh-install.md) (`docs/operations.md`, "Upgrad
 [movies] v0.2 NixOS install, use the module from 0.4.1 on: 0.4.0's can't be imported beside
 v0.2's.
 
-NixOS: `nix flake update movies && nixos-rebuild switch` (or move the pinned tag). Both back up
+NixOS: `nix flake update media && nixos-rebuild switch` (or move the pinned tag). Both back up
 before the new version deploys its functions; `docs/operations.md` ("Upgrading") covers rolling
 back. From 0.4.0 to 0.4.1 the unit and user `movies` become `media-server`: move any
 `systemd.services.movies` or `users.users.movies` override to the new name, and run the command

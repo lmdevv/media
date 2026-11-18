@@ -180,7 +180,7 @@ jobs:
 
           - Server: the image \`ghcr.io/lmdevv/media:$version\` with this tag's \`deploy/compose\`, or the NixOS module from \`github:lmdevv/media/$GITHUB_REF_NAME\`. Both include the \`media\` CLI.
           - CLI with Node 22 or newer: \`npm install -g @lmdevv/media@$version\`.
-          - CLI with Nix: \`nix run github:lmdevv/media/$GITHUB_REF_NAME -- --help\`, or \`programs.media\` from \`nixosModules.cli\` or \`homeManagerModules.movies\`.
+          - CLI with Nix: \`nix run github:lmdevv/media/$GITHUB_REF_NAME -- --help\`, or \`programs.media\` from \`nixosModules.cli\` or \`homeManagerModules.media\`.
           - CLI without Node: the \`media-<os>-<arch>\` binary below. Download it with \`curl\`, check it, and put it on your PATH (here Linux x64; use \`media-linux-arm64\` or \`media-darwin-arm64\` likewise):
 
             \`\`\`sh

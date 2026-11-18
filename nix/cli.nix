@@ -38,7 +38,7 @@ let
   };
 in
 stdenvNoCC.mkDerivation (finalAttrs: {
-  pname = "movies-cli";
+  pname = "media-cli";
   inherit (packageJson) version;
   inherit src;
 
@@ -72,7 +72,7 @@ stdenvNoCC.mkDerivation (finalAttrs: {
   installPhase = ''
     runHook preInstall
     install -Dm644 apps/cli/dist/media.js "$out/lib/media/media.mjs"
-    install -Dm644 apps/cli/dist/THIRD_PARTY_LICENSES.md -t "$out/share/doc/movies-cli"
+    install -Dm644 apps/cli/dist/THIRD_PARTY_LICENSES.md -t "$out/share/doc/media-cli"
     makeWrapper ${lib.getExe nodejs_24} "$out/bin/media" --add-flags "$out/lib/media/media.mjs"
     runHook postInstall
   '';

@@ -28,7 +28,7 @@ that argument.
 - **The NixOS module** did not, until the movies cutover's fix round: it started the upstream
   entrypoint and ran `generate_admin_key.sh`, which exposed the secret to every local user of the
   host, since the container's processes show in the host's `/proc`. The Nix package now builds
-  the same shim (`lib/movies/convex/argv-secret.so`, with no store path, so it loads into the
+  the same shim (`lib/media/convex/argv-secret.so`, with no store path, so it loads into the
   container's own glibc). The module mounts it and `nix/convex-entry.sh` into the container, the
   entrypoint keeps the secret in `credentials/instance_secret` on the data volume (creating it on
   first start), and the setup runs `generate_key` through the shim with `podman exec -e`.

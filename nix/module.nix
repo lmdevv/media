@@ -432,7 +432,7 @@ let
     volumes = [
       "${dataDir}:/convex/data"
       "${./convex-entry.sh}:/media-convex-entry.sh:ro"
-      "${cfg.package}/lib/movies/convex/argv-secret.so:/argv-secret.so:ro"
+      "${cfg.package}/lib/media/convex/argv-secret.so:/argv-secret.so:ro"
     ];
   };
 
@@ -464,7 +464,7 @@ let
       data=${lib.escapeShellArg coreDataDir}
       backups=${lib.escapeShellArg cfg.backupDir}
       version=${lib.escapeShellArg cfg.package.version}
-      hash_file=${lib.escapeShellArg "${cfg.package}/lib/movies/platform/.functions-hash"}
+      hash_file=${lib.escapeShellArg "${cfg.package}/lib/media/platform/.functions-hash"}
       [ -s "$hash_file" ] && version="$version+$(cat "$hash_file")"
 
       log "waiting for the core's Convex backend at $url"
@@ -529,9 +529,9 @@ let
       [ -n "$media_ticket_keys" ] || { log "the core deployment has no MEDIA_TICKET_KEYS"; exit 1; }
 
       umask 022
-      movies-configure-account --to /run/media-account --convex-url "$public_url/convex"
-      movies-configure-music --to /run/media-music --convex-url "$public_url/convex"
-      movies-configure-web --to /run/media-server/web --convex-url "$public_url/convex"
+      media-configure-account --to /run/media-account --convex-url "$public_url/convex"
+      media-configure-music --to /run/media-music --convex-url "$public_url/convex"
+      media-configure-movies --to /run/media-server/web --convex-url "$public_url/convex"
 
       umask 077
       env_file=/run/media-server/media.env
@@ -564,9 +564,8 @@ in
       defaultText = lib.literalExpression "pkgs.callPackage ./package.nix { }";
       description = ''
         The [media] package: media service, web clients, and the core's Convex project. Set it to
-        the flake's own build, `inputs.media.packages.''${system}.movies`, to use the nixpkgs it was
-        tested with. The flake's overlay names it `pkgs.movies`, as [movies] v0.2's overlay names
-        its own package, so on a host with both overlays name the flake's output instead.
+        the flake's own build, `inputs.media.packages.''${system}.media`, to use the nixpkgs it was
+        tested with. The flake's overlay names it `pkgs.media`.
       '';
     };
 
@@ -1043,7 +1042,7 @@ in
         XDG_DATA_HOME = "/run/media-proxy/data";
       };
       serviceConfig = {
-        ExecStart = "${lib.getExe pkgs.caddy} run --config ${cfg.package}/lib/movies/Caddyfile --adapter caddyfile";
+        ExecStart = "${lib.getExe pkgs.caddy} run --config ${cfg.package}/lib/media/Caddyfile --adapter caddyfile";
         Restart = "on-failure";
         RestartSec = 5;
         DynamicUser = true;
@@ -1137,7 +1136,7 @@ in
         MEDIA_BASE_URL = publicUrl;
         CONVEX_URL = coreConvexUrl;
         CONVEX_PUBLIC_URL = "${publicUrl}/convex";
-        CONVEX_BACKEND_DIR = "${cfg.package}/lib/movies/platform";
+        CONVEX_BACKEND_DIR = "${cfg.package}/lib/media/platform";
         DATA_DIR = mediaDataDir;
         BACKUP_DIR = cfg.backupDir;
         BACKUP_RETENTION_DAYS = toString cfg.backupRetentionDays;
@@ -1191,7 +1190,7 @@ in
         EnvironmentFile = lib.optional (cfg.environmentFile != null) cfg.environmentFile ++ [
           "-/run/media-server/media.env"
         ];
-        ExecStart = lib.getExe' cfg.package "movies-media";
+        ExecStart = lib.getExe' cfg.package "media-server";
         Restart = "on-failure";
         RestartSec = 5;
         TimeoutStartSec = "10min";

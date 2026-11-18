@@ -41,7 +41,7 @@ system="$(nix eval --impure --raw --expr builtins.currentSystem)"
 logs="$(mktemp -d)"
 trap 'rm -rf "$logs"' EXIT
 
-declare -A files=([movies]=nix/package.nix [cli]=nix/cli.nix)
+declare -A files=([media]=nix/package.nix [cli]=nix/cli.nix)
 
 for package in "${!files[@]}"; do
   nix build --impure --no-link --expr "

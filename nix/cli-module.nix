@@ -1,6 +1,6 @@
 # NixOS module for the `media` CLI. A host that runs services.media gets it already pointed at
 # that server (nix/module.nix). Any other machine that talks to the same server imports just this
-# module (`movies.nixosModules.cli`) and sets:
+# module (`media.nixosModules.cli`) and sets:
 #
 #   programs.media = {
 #     enable = true;
