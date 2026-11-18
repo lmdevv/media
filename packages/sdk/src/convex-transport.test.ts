@@ -233,6 +233,62 @@ describe.concurrent("layerWebSocket", () => {
     expect(peak).toBe(1);
   }, 20_000);
 
+  it("hands a second subscriber to a query and its arguments the first one's subscription and answer", async () => {
+    const seen = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fake = yield* FakeConvex.make;
+
+          yield* fake.reply("account:viewer", Reply.Success({ value: "answered" }));
+          const context = yield* Layer.build(ConvexTransport.layerWebSocket(fake.url));
+          const connection = Context.get(context, ConvexTransport.ConvexTransport);
+          const first = yield* Deferred.make<Schema.Json>();
+
+          // The first subscriber stays subscribed, as a held query does, for the rest of the test.
+          yield* connection.subscribe("account:viewer", { ask: 1 }).pipe(
+            Stream.runForEach((value) => Deferred.succeed(first, value)),
+            Effect.forkScoped,
+          );
+
+          const answered = yield* Deferred.await(first);
+
+          const second = yield* connection
+            .subscribe("account:viewer", { ask: 1 })
+            .pipe(Stream.runHead, Effect.timeout(Duration.seconds(5)));
+
+          const shared = {
+            asked: (yield* fake.requestsTo("account:viewer")).length,
+            peak: yield* fake.peakSubscriptions("account:viewer"),
+          };
+
+          // Other arguments are another query, so it takes a subscription of its own.
+          const other = yield* connection
+            .subscribe("account:viewer", { ask: 2 })
+            .pipe(Stream.runHead, Effect.timeout(Duration.seconds(5)));
+
+          return {
+            answered,
+            second,
+            shared,
+            other,
+            apart: {
+              asked: (yield* fake.requestsTo("account:viewer")).length,
+              peak: yield* fake.peakSubscriptions("account:viewer"),
+            },
+          };
+        }),
+      ),
+    );
+
+    expect(seen).toEqual({
+      answered: "answered",
+      second: Option.some("answered"),
+      shared: { asked: 1, peak: 1 },
+      other: Option.some("answered"),
+      apart: { asked: 2, peak: 2 },
+    });
+  }, 20_000);
+
   it("runs signed out while the server keeps failing to renew the session, then signs in again", async () => {
     const outcome = await Effect.runPromise(
       Effect.scoped(
