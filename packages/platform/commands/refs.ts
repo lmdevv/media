@@ -39,6 +39,7 @@ import type { Refs as movies_metadata } from "./movies/metadata";
 import type { Refs as movies_myList } from "./movies/myList";
 import type { Refs as movies_people } from "./movies/people";
 import type { Refs as movies_play } from "./movies/play";
+import type { Refs as movies_playback } from "./movies/playback";
 import type { Refs as movies_titles } from "./movies/titles";
 import type { Refs as music_albums } from "./music/albums";
 import type { Refs as music_artists } from "./music/artists";
@@ -47,6 +48,7 @@ import type { Refs as music_library } from "./music/library";
 import type { Refs as music_likes } from "./music/likes";
 import type { Refs as music_lyrics } from "./music/lyrics";
 import type { Refs as music_play } from "./music/play";
+import type { Refs as music_playback } from "./music/playback";
 import type { Refs as music_playlists } from "./music/playlists";
 import type { Refs as music_queue } from "./music/queue";
 import type { Refs as music_tracks } from "./music/tracks";
@@ -240,6 +242,9 @@ export const commandRefs = {
   "movies.play.report": api.movies.play.report satisfies movies_play["report"],
   "movies.play.reportOffline": api.movies.play.reportOffline satisfies movies_play["reportOffline"],
   "movies.play.start": api.movies.play.start satisfies movies_play["start"],
+  "movies.playback.episodes": api.movies.playback.episodes satisfies movies_playback["episodes"],
+  "movies.playback.get": api.movies.playback.get satisfies movies_playback["get"],
+  "movies.playback.seasons": api.movies.playback.seasons satisfies movies_playback["seasons"],
   "movies.titles.episode": api.movies.titles.episode satisfies movies_titles["episode"],
   "movies.titles.episodes": api.movies.titles.episodes satisfies movies_titles["episodes"],
   "movies.titles.genres": api.movies.titles.genres satisfies movies_titles["genres"],
@@ -268,6 +273,8 @@ export const commandRefs = {
   "music.play.report": api.music.play.report satisfies music_play["report"],
   "music.play.reportOffline": api.music.play.reportOffline satisfies music_play["reportOffline"],
   "music.play.start": api.music.play.start satisfies music_play["start"],
+  "music.playback.get": api.music.playback.get satisfies music_playback["get"],
+  "music.playback.tracks": api.music.playback.tracks satisfies music_playback["tracks"],
   "music.playlists.addTracks": api.music.playlists.addTracks satisfies music_playlists["addTracks"],
   "music.playlists.create": api.music.playlists.create satisfies music_playlists["create"],
   "music.playlists.get": api.music.playlists.get satisfies music_playlists["get"],

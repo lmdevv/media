@@ -479,11 +479,67 @@ const libraryFile = v.object({
   ),
 });
 
+const playbackItem = v.union(
+  v.object({ type: v.literal("title"), id: v.id("titles") }),
+  v.object({ type: v.literal("episode"), id: v.id("episodes") }),
+  v.object({ type: v.literal("file"), id: v.id("mediaFiles") }),
+);
+
+const playbackEpisode = v.object({
+  id: v.id("episodes"),
+  seasonNumber: v.number(),
+  episodeNumber: v.number(),
+  name: v.string(),
+  overview: nullable(v.string()),
+  runtimeMs: nullable(v.number()),
+  still: nullable(v.string()),
+});
+
 /**
  * The movies commands (D62). Everything a person keeps (progress,
  * history, their list) is theirs alone (D36); nothing is keyed by a profile.
  */
 export const movies = [
+  query("movies.playback.get", {
+    summary: "Describe an item you may play, with only its permitted versions and ticketed artwork",
+    scope: "movies:play",
+    args: { item: playbackItem },
+    result: v.object({
+      titleId: v.id("titles"),
+      kind: titleKind,
+      name: v.string(),
+      year: nullable(v.number()),
+      overview: nullable(v.string()),
+      runtimeMs: nullable(v.number()),
+      certification: nullable(v.string()),
+      artwork,
+      episode: nullable(playbackEpisode),
+      versions: v.array(mediaVersion),
+    }),
+  }),
+  query("movies.playback.seasons", {
+    summary: "Page the seasons of a show you may play",
+    scope: "movies:play",
+    args: { titleId: v.id("titles"), paginationOpts: paginationOptsValidator },
+    result: paginationResultValidator(
+      v.object({
+        seasonNumber: v.number(),
+        name: v.string(),
+        poster: nullable(v.string()),
+      }),
+    ),
+  }),
+  query("movies.playback.episodes", {
+    summary:
+      "Page a playable show's episodes in one season; describe an episode to get its versions",
+    scope: "movies:play",
+    args: {
+      titleId: v.id("titles"),
+      seasonNumber: v.number(),
+      paginationOpts: paginationOptsValidator,
+    },
+    result: paginationResultValidator(playbackEpisode),
+  }),
   query("movies.titles.home", {
     summary:
       "Show your home rows: a featured title, continue watching, your list, and the newest movies and shows",

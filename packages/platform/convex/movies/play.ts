@@ -1,4 +1,3 @@
-import type { DomainItem } from "../../commands/access";
 import { register } from "../../commands/movies/play";
 import type { Doc } from "../_generated/dataModel";
 import type { DatabaseReader } from "../_generated/server";
@@ -8,56 +7,16 @@ import { playableBy } from "../core/permissions/items";
 import { issuePersonalTicket } from "../core/tickets";
 import { registerWithArtworkTickets } from "./artwork";
 import { BOUNDS } from "./bounds";
+import { mayPlayFile } from "./playable";
 import { choosePlayableFile, presentEpisode, presentMediaFile, resolveEpisode } from "./present";
 import { findProgress, nextWatchGeneration, reachedEnd, writeProgress } from "./viewing";
 
 const NO_TITLE = "No such title";
 
-const titleItem = (title: Doc<"titles">): DomainItem => ({
-  domain: "movies",
-  ref: { type: "title", id: title._id },
-});
-
-const episodeItem = (episode: Doc<"episodes">): DomainItem => ({
-  domain: "movies",
-  ref: { type: "episode", id: episode._id },
-});
-
-const fileItem = (file: Doc<"mediaFiles">): DomainItem => ({
-  domain: "movies",
-  ref: { type: "file", id: file._id },
-});
-
 const milliseconds = (value: number, what: string): number =>
   Number.isSafeInteger(value) && value >= 0
     ? value
     : fail("invalid_args", `${what} are whole milliseconds, 0 or more`);
-
-/**
- * Whether `caller` may play `file` of `title`, decided through `can()` by the core's item rules.
- * A person in the household plays what their grants show them; a guest plays what their share
- * link covers, whether it names the title, the episode, or the file (ADR 0007).
- */
-const mayPlayFile = async (
-  decide: (item: DomainItem) => Promise<boolean>,
-  title: Doc<"titles">,
-  episode: Doc<"episodes"> | null,
-  file: Doc<"mediaFiles">,
-): Promise<boolean> => {
-  const items = [
-    fileItem(file),
-    ...(episode === null ? [] : [episodeItem(episode)]),
-    titleItem(title),
-  ];
-
-  const tried = async (index: number): Promise<boolean> => {
-    const item = items[index];
-
-    return item !== undefined && ((await decide(item)) || tried(index + 1));
-  };
-
-  return tried(0);
-};
 
 const liveTitle = async (db: DatabaseReader, file: Doc<"mediaFiles">) => {
   const title = await db.get(file.titleId);
@@ -72,7 +31,10 @@ export const { start, report, reportOffline } = registerWithArtworkTickets(regis
     const reach = await reachOf(ctx.db, caller);
     const decide = playableBy(ctx.db, reach);
 
-    if (reach.lent === null && !(await decide(titleItem(title)))) {
+    if (
+      reach.lent === null &&
+      !(await decide({ domain: "movies", ref: { type: "title", id: title._id } }))
+    ) {
       return fail("not_found", NO_TITLE);
     }
 
