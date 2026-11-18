@@ -22,8 +22,8 @@ this index before you drive the app, then use the matching feature file as the r
   | Sam (`sam`, member)   | `Caminandes` and `Pioneer One` only                     | nothing                                                                            |
 
 - Page `main` is signed in as `lucia` at `/` and opens `/movies` with that session. `$S cli`
-  runs as Lucía, and `--as mateo|aiko|sam|kids` as the others, with the core's `movies …`,
-  `auth …`, and `admin …` words.
+  runs as Lucía, and `--as mateo|aiko|sam|kids` as the others, with the `movies …`,
+  `auth …`, and `admin …` commands.
 - For iOS steps, `$S ios up [--side S]` printed `ready` and `$S ios doctor` passes.
 - Never drive a stack or simulator that this run did not start.
 
