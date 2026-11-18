@@ -158,8 +158,9 @@ const failureOf = (data: ErrorData, mediaError: boolean): StreamFailure | null =
 };
 
 /**
- * Loads hls.js ahead of the stream that needs it. The player calls this while it negotiates, so
- * the script downloads alongside the request instead of after it; the module loads once.
+ * Loads hls.js ahead of the stream that needs it. The player calls this as playback starts, so
+ * the script downloads alongside the start and the negotiation instead of after them; the module
+ * loads once.
  */
 // The light build leaves out subtitles, DRM, and alternate audio renditions, which these streams
 // never use: subtitles load as WebVTT `<track>` elements and audio is muxed.

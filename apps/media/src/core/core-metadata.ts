@@ -8,7 +8,7 @@ import { Effect, Option, Predicate } from "effect";
 import * as ArtworkKeys from "../artwork/artwork-keys.ts";
 import { digestOf, toScannedCollection, toScannedCredits } from "./catalog-records.ts";
 import { JobFailed } from "./core-jobs.ts";
-import { lookUp, TOP_BILLED } from "../jobs/metadata-job.ts";
+import { lookUp, PROVIDER_CONCURRENCY, TOP_BILLED } from "../jobs/metadata-job.ts";
 import { lookUpPerson, personDetailsOf } from "../jobs/person-job.ts";
 import * as MetadataPlugin from "../metadata/metadata-plugin.ts";
 import type * as Omdb from "../metadata/omdb.ts";
@@ -190,7 +190,7 @@ export const handler = Effect.gen(function* () {
                 ),
             ),
           ),
-        { discard: true },
+        { concurrency: PROVIDER_CONCURRENCY, discard: true },
       );
 
       return `Matched to TMDB ${providerId}: ${details.title}${details.year === undefined ? "" : ` (${String(details.year)})`}`;
