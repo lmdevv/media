@@ -35,6 +35,13 @@ export type TileProof = Data.TaggedEnum<{
 
 export const TileProof = Data.taggedEnum<TileProof>();
 
+/** A guest link's code and the display name its holder gives. */
+export interface GuestSignIn {
+  /** The code after `/guest#`, kept only for this sign-in. */
+  readonly code: Redacted.Redacted;
+  readonly name: string;
+}
+
 /** What to sign in with. Each case is one of the platform's sign-in providers. */
 export type Credentials = Data.TaggedEnum<{
   /** A username and its password. */
@@ -51,6 +58,8 @@ export type Credentials = Data.TaggedEnum<{
   };
   /** A new password from a reset link code, as `core.accounts.resetLinks.create` shows it once. */
   Reset: { readonly code: Redacted.Redacted; readonly password: Redacted.Redacted };
+  /** A guest session restricted to the link's shared target. */
+  Guest: GuestSignIn;
   /**
    * Opens the tile of `userId` on the shared device whose code is `device`, as a tile session
    * with content scopes only. It ends the session that held the device's slot. A locked tile
@@ -112,6 +121,14 @@ export interface Session {
    */
   readonly signIn: (
     credentials: Credentials,
+  ) => Effect.Effect<void, PlatformError | TokenStorageError>;
+  /**
+   * Signs in from a guest link and stores only the session tokens. Fails with `Expired` for an
+   * unavailable link, `Conflict` for a full link, `InvalidArgs` for a rejected name, or
+   * `RateLimited` for too many attempts.
+   */
+  readonly signInAsGuest: (
+    guest: GuestSignIn,
   ) => Effect.Effect<void, PlatformError | TokenStorageError>;
   /** Starts a device sign-in named `clientName`, as the person approving it will see it. */
   readonly startDeviceSignIn: (clientName: string) => Effect.Effect<DeviceSignIn, PlatformError>;
@@ -401,6 +418,10 @@ const make = Effect.fn("Platform.make")(function* (url: string, signInRoute: Aut
           provider: "reset",
           params: { code: Redacted.value(code), password: Redacted.value(password) },
         }),
+        Guest: ({ code, name }) => ({
+          provider: "guest",
+          params: { code: Redacted.value(code), name },
+        }),
         Grant: ({ userId, grant }) => ({
           provider: "grant",
           params: { userId, grant: Redacted.value(grant) },
@@ -465,6 +486,7 @@ const make = Effect.fn("Platform.make")(function* (url: string, signInRoute: Aut
       status: engine.status,
       currentStatus: engine.currentStatus,
       signIn,
+      signInAsGuest: (guest) => signIn(Credentials.Guest(guest)),
       startDeviceSignIn,
       signOut: engine.signOut,
       accessToken: engine.accessToken(false),

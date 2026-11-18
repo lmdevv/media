@@ -59,6 +59,13 @@ export interface PlatformReset {
   readonly password: string;
 }
 
+/** A guest link's code and the display name its holder gives. */
+export interface PlatformGuest {
+  /** The code after `/guest#`, used only for sign-in; never log or store it. */
+  readonly code: string;
+  readonly name: string;
+}
+
 /** What lets a person past their tile's lock, as `Credentials.Tile` describes it. */
 export type PlatformTileProof =
   | { readonly kind: "password"; readonly by: Id<"users">; readonly password: string }
@@ -117,6 +124,12 @@ export interface PlatformSession {
    * keys. Rejects with `Expired` for a used or expired link.
    */
   readonly resetPassword: (reset: PlatformReset) => Promise<void>;
+  /**
+   * Signs in from a guest link and stores only session tokens. Rejects with `Expired` for an
+   * unavailable link, `Conflict` for a full link, `InvalidArgs` for a rejected name, or
+   * `RateLimited` for too many attempts.
+   */
+  readonly signInAsGuest: (guest: PlatformGuest) => Promise<void>;
   /** Starts a device sign-in named `clientName`, as the person approving it will see it. */
   readonly startDeviceSignIn: (clientName: string) => Promise<PendingDeviceSignIn>;
   /**
@@ -274,6 +287,11 @@ export const createPlatform = (options: PlatformOptions): PlatformSdk => {
           expiresAt: pending.expiresAt,
           complete: () => runtime.runPromise(pending.complete),
         };
+      },
+      signInAsGuest: ({ code, name }) => {
+        const guest = { code: Redacted.make(code), name };
+
+        return withClient((client) => client.session.signInAsGuest(guest));
       },
       openTile: ({ device, userId, proof }) =>
         withClient((client) =>

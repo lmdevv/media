@@ -24,6 +24,7 @@ export type { Channel, IdbFactory, SharedStore, SharedTransaction } from "./shar
 export type {
   PendingDeviceSignIn,
   PlatformGrant,
+  PlatformGuest,
   PlatformInvite,
   PlatformOptions,
   PlatformPassword,
