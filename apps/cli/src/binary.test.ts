@@ -97,6 +97,24 @@ const SESSION = {
 };
 
 describe("the media binary", () => {
+  it("rejects a value after a yes-or-no flag before connecting", async () => {
+    const run = await runCli(
+      ["auth", "targets", "control", "--device-id", "x", "--playing", "false"],
+      { XDG_CONFIG_HOME: home, HOME: home },
+    );
+
+    expect(run.code, run.stderr).toBe(ExitCode.usage);
+    expect(run.stdout).toBe("");
+    expect(stderrRecords(run.stderr)).toMatchObject([
+      {
+        error: {
+          code: "usage",
+          message: "--playing takes no value: use --playing or --no-playing",
+        },
+      },
+    ]);
+  });
+
   it("rejects an empty secret on stdin before connecting", async () => {
     const env = { XDG_CONFIG_HOME: home, HOME: home };
 

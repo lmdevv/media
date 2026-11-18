@@ -365,8 +365,8 @@ builds it from this checkout for the after side. Each signed in to the core with
 `auth sessions current`, and for admins `admin users list`, and `movies stream <title>` to get a
 stream URL for a local player. A command typed without its group, such as `titles list`, exits 2
 and names the command to use. A command whose arguments nest takes `--json
-'<object>'`. A yes-or-no flag is `--flag` or `--no-flag`: `--playing false` means `--playing`
-with a stray word, and plays. Output is JSON. Exit codes: `0` ok, `1` failed, `2` usage, `3`
+'<object>'`. A yes-or-no flag is `--flag` or `--no-flag`: pause with `--no-playing`, and play with
+`--playing`. Value words after a yes-or-no flag are usage errors. Output is JSON. Exit codes: `0` ok, `1` failed, `2` usage, `3`
 unauthenticated, `4` forbidden, `5` notFound, `6` conflict, `7` expired, `8` rateLimited, `9`
 unavailable. `$S cli -- --help` lists every command, and `$S cli -- <group> --help` a group's.
 

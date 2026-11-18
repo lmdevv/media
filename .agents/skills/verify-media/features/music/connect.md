@@ -105,8 +105,8 @@ Preconditions:
 
 ## Gotchas
 
-- `auth targets control --playing false` plays: `--playing` is a yes-or-no flag, and `false` is a
-  stray word it ignores. Pause with `--no-playing`.
+- Pause with `auth targets control --device-id <id> --no-playing`; play with `--playing`.
+  These yes-or-no flags take no value words.
 - A device in the bar's `Play on` menu is a `menuitemradio`; in an album's `Play on` submenu it is
   a `menuitem`.
 - `More actions for <album>` also names the row of a song titled like its album, such as
