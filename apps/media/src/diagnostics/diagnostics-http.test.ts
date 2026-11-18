@@ -178,62 +178,6 @@ const failureOf = decoded(Schema.Struct({ code: Schema.String }));
 
 const timelineOf = decoded(Schema.toCodecJson(PlaybackDiagnostics));
 
-const Count020 = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
-
-const EpochMillis020 = Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 864e13 }));
-
-// The timeline schema of the published CLI @lmdevv/movies@0.2.0, frozen: every timeline the
-// service serves to a caller that does not ask for measured drift must decode under it.
-const PlaybackDiagnostics020 = Schema.Struct({
-  sessionId: Schema.NonEmptyString,
-  firstSeenAt: EpochMillis020,
-  lastSeenAt: EpochMillis020,
-  platform: Schema.NullOr(Schema.Literals(["web", "ios"])),
-  counts: Schema.Struct({
-    streams: Count020,
-    stalls: Count020,
-    stalledMs: Count020,
-    slowSegments: Count020,
-    failedRequests: Count020,
-    playerErrors: Count020,
-    recoveries: Count020,
-    slowFragments: Count020,
-    droppedFrames: Count020,
-  }),
-  drift: Schema.Struct({ status: Schema.Literal("not-measured"), reason: Schema.String }),
-  missing: Schema.Array(Schema.String),
-  truncated: Schema.Boolean,
-  entries: Schema.Array(
-    Schema.Struct({
-      at: EpochMillis020,
-      source: Schema.Literals(["server", "player"]),
-      kind: Schema.Literals([
-        "stream-started",
-        "stream-moved",
-        "stream-ended",
-        "mode-changed",
-        "encoder-failed",
-        "slow-segment",
-        "request-failed",
-        "player-attached",
-        "startup",
-        "buffering-started",
-        "buffering-ended",
-        "player-error",
-        "dropped-frames",
-        "slow-fragment",
-        "recovery",
-      ]),
-      level: Schema.Literals(["TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL"]),
-      streamId: Schema.NullOr(Schema.String),
-      summary: Schema.String,
-      details: Schema.Record(Schema.String, Schema.Json),
-    }),
-  ),
-});
-
-const timeline020Of = decoded(Schema.toCodecJson(PlaybackDiagnostics020));
-
 const sessionIdsOf = (response: Response) =>
   Effect.map(decoded(Schema.toCodecJson(Schema.Array(DiagnosedSession)))(response), (sessions) =>
     sessions.map((session) => session.sessionId),
@@ -375,7 +319,7 @@ layer(serverLayer, { timeout: 30_000 })("log and diagnostics routes", (it) => {
     }),
   );
 
-  it.effect("serve measured drift only to callers that ask for it, and decode for 0.2.0", () =>
+  it.effect("serve measured drift in the timeline", () =>
     Effect.gen(function* () {
       const { logs } = yield* Server;
 
@@ -423,24 +367,15 @@ layer(serverLayer, { timeout: 30_000 })("log and diagnostics routes", (it) => {
 
       yield* logs.flush;
 
-      const legacy = yield* timeline020Of(
+      const current = yield* timelineOf(
         yield* post("/api/diagnostics/playback", MEMBER, { sessionId: "session_d" }),
       );
 
-      const current = yield* timelineOf(
-        yield* post("/api/diagnostics/playback", MEMBER, {
-          sessionId: "session_d",
-          measuredDrift: true,
-        }),
-      );
-
-      assert.strictEqual(legacy.drift.status, "not-measured");
-      assert.include(legacy.drift.reason, "14 times: median -12 ms, worst -41 ms");
       assert.deepStrictEqual(
-        legacy.entries.map((entry) => entry.kind),
+        current.entries.map((entry) => entry.kind),
         ["stream-started", "player-attached", "startup", "recovery"],
       );
-      assert.strictEqual(legacy.counts.recoveries, 0);
+      assert.strictEqual(current.counts.recoveries, 0);
       assert.deepStrictEqual(current.drift, {
         status: "measured",
         method: "video-frame-vs-media-clock",

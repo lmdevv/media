@@ -442,10 +442,7 @@ export const PlaybackDiagnostics = Schema.Struct({
   lastSeenAt: EpochMillis,
   platform: Schema.NullOr(ClientPlatform),
   counts: DiagnosticsCounts,
-  /**
-   * Audio/video drift. `measured` only for callers that ask for it (`measuredDrift`); clients
-   * before it decode `not-measured` only.
-   */
+  /** Audio/video drift. */
   drift: Drift,
   missing: Schema.Array(Schema.String),
   /** More records matched than one timeline holds; the earliest were left out. */

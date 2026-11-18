@@ -34,8 +34,8 @@ export const PlannedLibrary = Schema.Struct({
   name: Schema.String,
   kind: LibraryKind,
   roots: LibraryRoots,
-  /** Who sees the library if the import adds it; plans stored before this field open it to admins. */
-  access: Schema.optionalKey(PlannedLibraryAccess),
+  /** Who sees the library if the import adds it. */
+  access: PlannedLibraryAccess,
 });
 
 /** A source library as a migration plan imports it. */

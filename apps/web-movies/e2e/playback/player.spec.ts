@@ -357,12 +357,12 @@ const PAST_THE_HELD_SEGMENTS_SECONDS = 100;
 
 const DRIFT_SAMPLED_PAST_SECONDS = 12;
 
-const latestWebTimeline = async (measuredDrift = false) => {
+const latestWebTimeline = async () => {
   const [session] = await owner.media.run("diagnostics.sessions", {});
 
   if (session === undefined || session.platform !== "web") return null;
 
-  return owner.media.run("diagnostics.playback", { sessionId: session.sessionId, measuredDrift });
+  return owner.media.run("diagnostics.playback", { sessionId: session.sessionId });
 };
 
 const activeRung = (target: Page) =>
@@ -1171,10 +1171,10 @@ test("the playback timeline splits startup by stage, names the audio, and sample
   await leaveWithEscape(page);
 
   await expect
-    .poll(async () => (await latestWebTimeline(true))?.drift.status ?? null, { timeout: 30_000 })
+    .poll(async () => (await latestWebTimeline())?.drift.status ?? null, { timeout: 30_000 })
     .toBe("measured");
 
-  const diagnostics = await latestWebTimeline(true);
+  const diagnostics = await latestWebTimeline();
   const entries = diagnostics?.entries ?? [];
 
   const startups = entries.filter((entry) => entry.kind === "startup");
@@ -1207,7 +1207,6 @@ test("the playback timeline splits startup by stage, names the audio, and sample
     status: "measured",
     method: "video-frame-vs-media-clock",
   });
-  expect((await latestWebTimeline(false))?.drift.status).toBe("not-measured");
 });
 
 test("a stall while segments are held back reaches the playback timeline", async () => {

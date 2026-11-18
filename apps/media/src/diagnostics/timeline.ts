@@ -506,9 +506,6 @@ interface StartupLoad {
   readonly load: SegmentLoad;
 }
 
-const DRIFT_METHOD =
-  "video frame against the media clock; negative means the picture trails the sound";
-
 const finite = (value: Schema.Json | undefined): value is number =>
   Predicate.isNumber(value) && Number.isFinite(value);
 
@@ -553,15 +550,6 @@ const driftOf = (
 
   return { status: "not-measured", reason };
 };
-
-/** `drift` as a caller decodes it: measured only when it sent `measuredDrift`. */
-export const driftFor = (drift: Drift, measuredDrift: boolean): Drift =>
-  drift.status === "not-measured" || measuredDrift
-    ? drift
-    : {
-        status: "not-measured",
-        reason: `This client predates measured drift; update it to see it. The player sampled it ${drift.samples === 1 ? "once" : `${String(drift.samples)} times`}: median ${String(drift.medianMs)} ms, worst ${String(drift.worstMs)} ms (${DRIFT_METHOD}).`,
-      };
 
 const startupLoadsOf = (records: ReadonlyArray<LogRecord>): ReadonlyArray<StartupLoad> =>
   records

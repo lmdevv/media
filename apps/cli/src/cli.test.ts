@@ -514,33 +514,22 @@ describe("troubleshooting commands", () => {
     );
   });
 
-  it("asks the service for measured drift and prints it", async () => {
+  it("prints the measured drift", async () => {
     await withSignedInMedia(
-      (request, response) => {
-        let body = "";
-
-        request.on("data", (chunk: Buffer) => {
-          body += chunk.toString();
-        });
-        request.on("end", () => {
-          const measured = body.includes('"measuredDrift":true');
-
-          response.writeHead(200, { "content-type": "application/json" });
-          response.end(
-            JSON.stringify({
-              ...timeline,
-              drift: measured
-                ? {
-                    status: "measured",
-                    method: "video-frame-vs-media-clock",
-                    samples: 54,
-                    medianMs: -12,
-                    worstMs: -41,
-                  }
-                : { status: "not-measured", reason: "This client predates measured drift." },
-            }),
-          );
-        });
+      (_request, response) => {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({
+            ...timeline,
+            drift: {
+              status: "measured",
+              method: "video-frame-vs-media-clock",
+              samples: 54,
+              medianMs: -12,
+              worstMs: -41,
+            },
+          }),
+        );
       },
       async (signedIn) => {
         const run = await signedIn("diagnostics", "playback", "s1", "--human");

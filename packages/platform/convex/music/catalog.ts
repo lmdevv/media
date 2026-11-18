@@ -135,7 +135,7 @@ interface AlbumDelta {
 
 /** How one upsert changes the artwork of the album and artist a track files under. */
 interface ArtChange {
-  /** The track as stored before the upsert, or null for a new one. */
+  /** The track's row before the upsert, or null for a new one. */
   readonly previous: string | null;
   /** The artwork the scan found for it. */
   readonly next: string | null;
