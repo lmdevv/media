@@ -11,7 +11,6 @@ import {
   Path,
   Predicate,
   References,
-  Struct,
 } from "effect";
 import type { HttpRouter } from "effect/http";
 
@@ -20,7 +19,7 @@ import { commandRoute } from "../http/command-routes.ts";
 import { makeLimiter } from "../http/rate-limit.ts";
 import * as LogReader from "../logging/log-reader.ts";
 import * as RetainedLogs from "../logging/retained-logs.ts";
-import { driftFor, ownersOf, sessionsOf, timelineOf } from "./timeline.ts";
+import { ownersOf, sessionsOf, timelineOf } from "./timeline.ts";
 
 const RECENT = Duration.days(1);
 
@@ -86,7 +85,7 @@ export const layer: Layer.Layer<
 
     yield* commandRoute(
       "diagnostics.playback",
-      Effect.fn("DiagnosticsRoutes.playback")(function* ({ sessionId, measuredDrift }, caller) {
+      Effect.fn("DiagnosticsRoutes.playback")(function* ({ sessionId }, caller) {
         yield* allowRead(caller);
         const found = yield* read({ sessionId });
         const records = found.matches.map((match) => match.record);
@@ -108,9 +107,7 @@ export const layer: Layer.Layer<
           });
         }
 
-        return Struct.evolve(timeline.value, {
-          drift: (drift) => driftFor(drift, measuredDrift === true),
-        });
+        return timeline.value;
       }),
     );
 

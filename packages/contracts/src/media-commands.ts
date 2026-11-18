@@ -86,14 +86,7 @@ export const mediaCommands = {
       "Build the timeline of a playback session from the retained logs: streams, slow and failed segments, stalls, player errors, and recoveries",
     group: "diagnostics",
     scope: "read",
-    args: Schema.Struct({
-      sessionId: PlaybackSessionId,
-      /**
-       * The caller decodes a measured `drift`. Without it a measured drift comes back as
-       * `not-measured` with the numbers in its reason, which clients before it can decode.
-       */
-      measuredDrift: Schema.optionalKey(Schema.Boolean),
-    }),
+    args: Schema.Struct({ sessionId: PlaybackSessionId }),
     result: PlaybackDiagnostics,
     route: { method: "POST", path: "/api/diagnostics/playback" },
   },

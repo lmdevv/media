@@ -366,7 +366,6 @@ const playbackTimeline: ShortcutCommand = {
       const diagnostics = yield* connection.media((routes) =>
         MediaRoutes.run(routes, "diagnostics.playback", {
           sessionId: PlaybackSessionId.make(sessionId.value),
-          measuredDrift: true,
         }),
       );
 

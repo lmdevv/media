@@ -4,7 +4,7 @@ import { Option } from "effect";
 import { assert, describe, it } from "vitest";
 
 import { LogEvent } from "./log-events.ts";
-import { driftFor, ownersOf, sessionsOf, timelineOf } from "./timeline.ts";
+import { ownersOf, sessionsOf, timelineOf } from "./timeline.ts";
 
 const BASE = Date.UTC(2026, 9, 21, 20);
 
@@ -665,21 +665,6 @@ describe("audio/video drift", () => {
     assert.include(reasonOf(timelineWith([attached])), "browser sent no drift samples");
     assert.include(reasonOf(timelineWith([])), "player sent no diagnostics");
     assert.include(reasonOf(timelineWith([], "Warn")), "LOG_LEVEL=warn");
-  });
-
-  it("hands a measured drift to a client before it as not measured, with its numbers", () => {
-    const measured = timelineWith([attached, ...windows]).drift;
-
-    assert.deepStrictEqual(driftFor(measured, false), {
-      status: "not-measured",
-      reason:
-        "This client predates measured drift; update it to see it. The player sampled it 15 times: median -12 ms, worst -41 ms (video frame against the media clock; negative means the picture trails the sound).",
-    });
-    assert.deepStrictEqual(driftFor(measured, true), measured);
-
-    const unmeasured = timelineWith([attached]).drift;
-
-    assert.deepStrictEqual(driftFor(unmeasured, false), unmeasured);
   });
 });
 
