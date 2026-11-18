@@ -151,14 +151,27 @@ function SimilarTitle({ title }: { readonly title: TitleCard }) {
   );
 }
 
-/** More Like This, when the server knows similar titles you may see. */
-export function MoreLikeThis({ titleId }: { readonly titleId: TitleId }) {
+/** The titles More Like This shows for `titleId`. */
+const useSimilar = (titleId: TitleId) => {
   const platform = usePlatform();
 
-  const similar = usePlatformQuery(platform.movies.titles.similar, {
-    titleId,
-    limit: SIMILAR_LIMIT,
-  });
+  return usePlatformQuery(platform.movies.titles.similar, { titleId, limit: SIMILAR_LIMIT });
+};
+
+/**
+ * Keeps More Like This's query open from the moment a title screen opens, through the same hook
+ * the row reads it with, so the row finds its answer when it mounts, which is only after the title
+ * answered. Renders nothing and reads no answer.
+ */
+export function HeldSimilar({ titleId }: { readonly titleId: TitleId }) {
+  useSimilar(titleId);
+
+  return null;
+}
+
+/** More Like This, when the server knows similar titles you may see. */
+export function MoreLikeThis({ titleId }: { readonly titleId: TitleId }) {
+  const similar = useSimilar(titleId);
 
   if (similar.status !== "success" || similar.data.length === 0) return null;
 

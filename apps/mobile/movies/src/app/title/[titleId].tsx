@@ -18,6 +18,7 @@ import {
   AboutRow,
   AvailableVersions,
   CastAndCrew,
+  HeldSimilar,
   MoreLikeThis,
 } from "@/components/title/title-sections";
 import { Button } from "@/components/ui/button";
@@ -226,5 +227,10 @@ export default function TitleScreen() {
     );
   }
 
-  return <TitleLoader key={titleId} titleId={titleId} />;
+  return (
+    <>
+      <HeldSimilar titleId={titleId} />
+      <TitleLoader key={titleId} titleId={titleId} />
+    </>
+  );
 }
