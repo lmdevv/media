@@ -5,7 +5,7 @@ import type { DatabaseReader, MutationCtx } from "../_generated/server";
 import type { BudgetedViewer } from "./access";
 import { presentEpisode, presentProgress, presentTitleCard } from "./present";
 import type { ContinueItem, Episode } from "./present";
-import { EPISODE_GET, TITLE_GET, episodesOf, queryOf, settleRead } from "./reads";
+import { EPISODE_GET, TITLE_GET, episodesOf, plus, queryOf, settleRead, times } from "./reads";
 import { insertProgress, insertWatchMark, patchProgress, patchWatchMark } from "./write";
 import type { ReadBudget, Reads } from "./reads";
 
@@ -393,6 +393,19 @@ export const openingSeasonOf = async (
 
   return openingSeason({ nextSeason: null, seasons }) ?? NO_SEASON;
 };
+
+/**
+ * What {@link upNextEpisode} reads at most: the latest progress and its episode, then a scan past
+ * up to `MAX_SKIPPED_EPISODES` watched episodes, `SCAN_BATCH` at a time over two ranges each, with
+ * each one's progress. Starting from the first episode reads less.
+ */
+export const UP_NEXT_READS: Reads = plus(
+  plus(queryOf(1), EPISODE_GET),
+  plus(
+    episodesOf(MAX_SKIPPED_EPISODES + 1, 2 * Math.ceil(MAX_SKIPPED_EPISODES / SCAN_BATCH)),
+    times(queryOf(1), MAX_SKIPPED_EPISODES),
+  ),
+);
 
 const CONTINUE_LIMIT = 20;
 

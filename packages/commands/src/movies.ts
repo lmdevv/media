@@ -547,6 +547,25 @@ export const movies = [
     args: {},
     result: v.object({
       featured: nullable(titleCard),
+      /**
+       * What Home's billboard shows of `featured` beyond its card, as `movies.titles.get` answers
+       * it. Absent when nothing is featured, when the call's reads could not pay for it, and from
+       * a server without this field; a client then asks `movies.titles.get`.
+       */
+      featuredDetail: v.optional(
+        v.object({
+          id: v.id("titles"),
+          overview: nullable(v.string()),
+          seasonCount: v.number(),
+          /** A movie's best version, for its badges; null for a show, whose files are on its episodes. */
+          version: nullable(mediaVersion),
+          /** A movie's progress; a show's is on `nextEpisode`. */
+          progress: nullable(progress),
+          /** The episode a show's Play button starts; null for a movie or a finished show. */
+          nextEpisode: nullable(episode),
+          inMyList: v.boolean(),
+        }),
+      ),
       continueWatching: v.array(continueWatchingItem),
       myList: v.array(titleCard),
       recentlyAddedMovies: v.array(titleCard),

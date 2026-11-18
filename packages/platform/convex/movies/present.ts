@@ -7,6 +7,9 @@ import type { Handlers as TitleHandlers } from "../../commands/movies/titles";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { DatabaseReader } from "../_generated/server";
 import { fail } from "../core/lib/errors";
+import { DOCUMENT_BYTES } from "./fit";
+import { readsOf } from "./reads";
+import type { Reads } from "./reads";
 import { currentManifest } from "./trickplayState";
 
 type Result<H> = H extends (...args: never) => infer Answer ? Awaited<Answer> : never;
@@ -22,6 +25,9 @@ export type Episode = NonNullable<Result<TitleHandlers["nextEpisode"]>>;
 
 /** A version of a movie or an episode to choose. */
 export type MediaVersion = Result<TitleHandlers["versions"]>[number];
+
+/** What Home's billboard shows of its featured title beyond its card. */
+export type FeaturedDetail = NonNullable<Result<TitleHandlers["home"]>["featuredDetail"]>;
 
 /** A file on disk as a player sees it, without its path. */
 export type MediaFile = TitleDetail["files"][number];
@@ -179,6 +185,13 @@ const onDiskBestFirst = (
   files.filter((file) => !file.missing && file.episodeId === episodeId).toSorted(byQuality);
 
 const FILES_PER_ITEM_MAX = 100;
+
+/** What {@link filesOnDisk} reads at most: one range of up to `FILES_PER_ITEM_MAX` files. */
+export const FILES_ON_DISK: Reads = readsOf(
+  1,
+  FILES_PER_ITEM_MAX,
+  FILES_PER_ITEM_MAX * DOCUMENT_BYTES.mediaFiles,
+);
 
 /** A movie's (`episode` null) or an episode's files on disk, best quality first. */
 export const filesOnDisk = async (

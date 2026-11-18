@@ -13,7 +13,8 @@ import { Image } from "@/components/ui/image";
 import { Text } from "@/components/ui/text";
 import { artworkUrl } from "@/lib/artwork";
 import { heroFacts, playTarget } from "@/lib/browse";
-import type { TitleCard, TitleDetail } from "@/lib/catalog";
+import { featuredDetailOf } from "@/lib/catalog";
+import type { FeaturedDetail, TitleCard } from "@/lib/catalog";
 import { billboardHeight, pageAt } from "@/lib/layout";
 import { useThemeColor } from "@/lib/theme-color";
 import { useWidthClass } from "@/lib/use-width-class";
@@ -25,6 +26,8 @@ import { useTitleStates } from "./title-states";
 export interface HeroProps {
   /** The titles to page through, featured first. */
   readonly titles: ReadonlyArray<TitleCard>;
+  /** What Home sent of the featured title beyond its card; other pages ask for their titles. */
+  readonly featuredDetail?: FeaturedDetail | undefined;
   /** The large title and filters drawn over the top of the artwork. */
   readonly header?: ReactNode;
 }
@@ -144,7 +147,7 @@ function BillboardPage({ title, width }: { readonly title: TitleCard; readonly w
 }
 
 /** The paging billboard. */
-export function Hero({ titles, header }: HeroProps) {
+export function Hero({ titles, featuredDetail, header }: HeroProps) {
   const { width, height } = useWindowDimensions();
   const widthClass = useWidthClass();
   const billboard = widthClass !== "compact";
@@ -190,9 +193,14 @@ export function Hero({ titles, header }: HeroProps) {
         {header}
       </View>
       {billboard ? (
-        <BillboardDetails title={current} pages={titles.length} index={index} />
+        <BillboardDetails
+          title={current}
+          given={featuredDetail}
+          pages={titles.length}
+          index={index}
+        />
       ) : (
-        <HeroDetails title={current} pages={titles.length} index={index} />
+        <HeroDetails title={current} given={featuredDetail} pages={titles.length} index={index} />
       )}
     </View>
   );
@@ -226,11 +234,22 @@ function PageDots({
   );
 }
 
-const useFeaturedDetail = (title: TitleCard): TitleDetail | null => {
+/** What the billboard shows of `title`: what Home sent when it is the featured one, else its page's. */
+const useFeaturedDetail = (
+  title: TitleCard,
+  given: FeaturedDetail | undefined,
+): FeaturedDetail | null => {
   const platform = usePlatform();
-  const detail = usePlatformQuery(platform.movies.titles.get, { titleId: title.id });
+  const sent = given?.id === title.id ? given : undefined;
 
-  return detail.status === "success" ? detail.data : null;
+  const detail = usePlatformQuery(
+    platform.movies.titles.get,
+    ...(sent === undefined ? [{ titleId: title.id }] : (["skip"] as const)),
+  );
+
+  if (sent !== undefined) return sent;
+
+  return detail.status === "success" ? featuredDetailOf(detail.data) : null;
 };
 
 function HeroActions({
@@ -241,13 +260,13 @@ function HeroActions({
   listSize,
 }: {
   readonly title: TitleCard;
-  readonly detail: TitleDetail | null;
+  readonly detail: FeaturedDetail | null;
   readonly className: string;
   readonly playClassName: string;
   readonly listSize: "control" | "large";
 }) {
   const states = useTitleStates();
-  const play = playTarget(title.id, detail);
+  const play = playTarget(title.id, detail === null ? null : { kind: title.kind, ...detail });
   const inList = states.inMyList(title.id);
 
   return (
@@ -280,15 +299,17 @@ function HeroActions({
 
 function BillboardDetails({
   title,
+  given,
   pages,
   index,
 }: {
   readonly title: TitleCard;
+  readonly given: FeaturedDetail | undefined;
   readonly pages: number;
   readonly index: number;
 }) {
   const { mediaUrl } = useServer();
-  const loaded = useFeaturedDetail(title);
+  const loaded = useFeaturedDetail(title, given);
   const logo = artworkUrl(mediaUrl, title.artwork.logo, "card");
 
   return (
@@ -309,7 +330,7 @@ function BillboardDetails({
             />
           )}
           <Text variant="label" tone="onMedia" numberOfLines={1}>
-            {heroFacts(title, loaded?.seasons.length ?? null)}
+            {heroFacts(title, loaded?.seasonCount ?? null)}
           </Text>
         </View>
         {loaded === null || loaded.overview === null ? null : (
@@ -338,19 +359,21 @@ function BillboardDetails({
 
 function HeroDetails({
   title,
+  given,
   pages,
   index,
 }: {
   readonly title: TitleCard;
+  readonly given: FeaturedDetail | undefined;
   readonly pages: number;
   readonly index: number;
 }) {
-  const loaded = useFeaturedDetail(title);
+  const loaded = useFeaturedDetail(title, given);
 
   return (
     <View className="absolute inset-x-0 bottom-0 gap-4 px-5 pb-4" pointerEvents="box-none">
       <Text variant="metaStrong" tone="onMedia" className="text-center" numberOfLines={1}>
-        {heroFacts(title, loaded?.seasons.length ?? null)}
+        {heroFacts(title, loaded?.seasonCount ?? null)}
       </Text>
       <HeroActions
         title={title}

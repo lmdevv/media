@@ -98,7 +98,11 @@ export default function Home() {
         ) : loaded === null ? null : (
           <>
             {loaded.screen.fullBleed ? (
-              <Hero titles={loaded.screen.pages} header={<LargeTitle title="Home" overMedia />} />
+              <Hero
+                titles={loaded.screen.pages}
+                featuredDetail={loaded.rows.featuredDetail}
+                header={<LargeTitle title="Home" overMedia />}
+              />
             ) : (
               <LargeTitle title="Home" />
             )}

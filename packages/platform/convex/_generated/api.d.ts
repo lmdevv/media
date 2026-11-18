@@ -122,6 +122,7 @@ import type * as movies_myList from "../movies/myList.js";
 import type * as movies_newest from "../movies/newest.js";
 import type * as movies_people from "../movies/people.js";
 import type * as movies_play from "../movies/play.js";
+import type * as movies_playState from "../movies/playState.js";
 import type * as movies_playable from "../movies/playable.js";
 import type * as movies_playback from "../movies/playback.js";
 import type * as movies_present from "../movies/present.js";
@@ -290,6 +291,7 @@ declare const fullApi: ApiFromModules<{
   "movies/newest": typeof movies_newest;
   "movies/people": typeof movies_people;
   "movies/play": typeof movies_play;
+  "movies/playState": typeof movies_playState;
   "movies/playable": typeof movies_playable;
   "movies/playback": typeof movies_playback;
   "movies/present": typeof movies_present;

@@ -11,6 +11,7 @@ import { registerWithArtworkTickets } from "./artwork";
 import { countGenres, rankBySimilarity, titlePage } from "./browse";
 import { CREDIT_LIMIT, creditsOf } from "./credits";
 import { collectionOf } from "./membership";
+import { featuredDetailOf, overviewOf, playStateOf } from "./playState";
 import { newestAcross } from "./newest";
 import {
   TITLE_GET,
@@ -82,8 +83,6 @@ const LIST_ENTRY_READS = plus(readsOf(0, 1), TITLE_GET);
  * people, so a page stays far inside one call's reads.
  */
 const SEASON_PAGE_MAX = 32;
-
-const SEASONS_MAX = 200;
 
 const CREW_ORDER = ["creator", "director", "writer", "producer", "composer"] as const;
 
@@ -236,13 +235,22 @@ export const {
       .filter((title) => title.artwork.backdrop !== null && title.presentFileCount > 0)
       .toSorted((left, right) => right.addedAt - left.addedAt)[0];
 
-    return {
+    // The billboard is the last read, so it takes what the rows left, or is left out and the
+    // client asks `movies.titles.get`. `featured` passed the same gate `get` decides a title by.
+    const featuredDetail =
+      featured === undefined
+        ? undefined
+        : await featuredDetailOf(ctx.db, caller.userId, featured, budget);
+
+    const rows = {
       featured: featured === undefined ? null : presentTitleCard(featured),
       continueWatching: [...resume],
       myList: myList.map(presentTitleCard),
       recentlyAddedMovies: movies.map(presentTitleCard),
       recentlyAddedShows: shows.map(presentTitleCard),
     };
+
+    return featuredDetail === undefined ? rows : { ...rows, featuredDetail };
   },
   list: async (ctx, { paginationOpts, libraryId, sort, ...filter }, caller) => {
     const reach = await reachOf(ctx.db, caller);
@@ -366,20 +374,9 @@ export const {
   get: async (ctx, { titleId }, caller) => {
     const { title } = await requireTitle(ctx.db, caller, "view", titleId);
     const { userId } = caller;
-    const movie = title.kind === "movie";
 
-    const [seasons, files, progress, next, listed, rows, collection] = await Promise.all([
-      ctx.db
-        .query("seasons")
-        .withIndex("by_title_number", (q) => q.eq("titleId", titleId))
-        .take(SEASONS_MAX),
-      movie ? filesOnDisk(ctx.db, title, null) : [],
-      movie ? findProgress(ctx.db, userId, titleId, null) : null,
-      movie ? null : upNextEpisode(ctx.db, userId, titleId),
-      ctx.db
-        .query("myList")
-        .withIndex("by_user_title", (q) => q.eq("userId", userId).eq("titleId", titleId))
-        .unique(),
+    const [{ seasons, files, progress, next, inMyList }, rows, collection] = await Promise.all([
+      playStateOf(ctx.db, userId, title),
       creditsOf(ctx.db, titleId, null, CREDIT_LIMIT),
       collectionOf(ctx.db, titleId),
     ]);
@@ -400,7 +397,7 @@ export const {
       ...presentTitleCard(title),
       libraryId: title.libraryId,
       sortName: title.overrides?.sortName ?? title.sortName,
-      overview: title.overrides?.overview ?? title.overview,
+      overview: overviewOf(title),
       tagline: title.tagline,
       externalIds: title.externalIds,
       matchStatus: title.matchStatus,
@@ -428,7 +425,7 @@ export const {
       versions: files.map((file) => presentVersion(file, progress?.fileId ?? null)),
       progress: progress === null ? null : presentProgress(progress),
       nextEpisode: upNext,
-      inMyList: listed !== null,
+      inMyList,
     };
   },
   versions: async (ctx, { titleId, episodeId }, caller) => {

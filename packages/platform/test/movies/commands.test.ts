@@ -1,18 +1,20 @@
 import { join } from "node:path";
 
 import type { ConvexHttpClient } from "convex/browser";
+import { Schema } from "effect";
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { openingSeason } from "@media/contracts/opening-season";
 
-import { api } from "../../convex/_generated/api";
+import { api, internal } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import type { Member } from "../devices";
 import { movie, seedLibrary, share, unshare } from "../probe";
-import { failureOf, refusal } from "../sign-in";
+import { runFunction } from "../admin";
+import { failureOf, refusal, unique } from "../sign-in";
 import { coreStackFromEnvFile } from "../stack-env";
 import { finishJob } from "./catalog";
-import { episodeFile, scannedTitle } from "./scanned";
+import { episodeFile, movieFile, scannedTitle } from "./scanned";
 import { NONE, scanInto, seasonOf, shelfOf, titleIn } from "./shelf";
 import type { SeasonEpisode, Shelf } from "./shelf";
 
@@ -66,6 +68,23 @@ const ALL = [
   "Tears of Steel",
   "Unrated Short",
 ];
+
+/** What Home's billboard shows of a title, read from `movies.titles.get`'s answer. */
+const billboardOf = async (client: ConvexHttpClient, titleId: Id<"titles">) => {
+  const detail = await client.query(api.movies.titles.get, { titleId });
+
+  return {
+    id: detail.id,
+    overview: detail.overview,
+    seasonCount: detail.seasons.length,
+    version: detail.versions[0] ?? null,
+    progress: detail.progress,
+    nextEpisode: detail.nextEpisode,
+    inMyList: detail.inMyList,
+  };
+};
+
+const homeOf = async (client: ConvexHttpClient) => client.query(api.movies.titles.home, {});
 
 /** The first page of the season a show's page opens on, with the season left to the server. */
 const openedOn = async (
@@ -392,6 +411,107 @@ describe.skipIf(stack === undefined)("movies browse commands", { timeout: 180_00
       [1, 2],
     ]);
     expect(await clientsOpenOn()).toBe(1);
+  });
+
+  it("show home's billboard as titles.get shows its title, to whoever may see it", async () => {
+    if (stack === undefined) return;
+
+    const label = `hero-${unique()}`;
+
+    const artwork = {
+      poster: null,
+      backdrop: `a1.${unique()}-${unique()}_${unique()}`,
+      logo: null,
+    };
+
+    // The show lands first, so the film is the newest title for whoever may see it.
+    const series = await scanInto(stack, shelf.owner, `${label} Series`, (root) =>
+      [1, 2].map((episode) =>
+        episodeFile(
+          join(root, "Hero Show", `${episode}.mkv`),
+          { ...scannedTitle("show", `nfo:${label}:show`, "Hero Show", 0), artwork },
+          1,
+          episode,
+        ),
+      ),
+    );
+
+    await finishJob(stack, series.lease);
+
+    const films = await scanInto(stack, shelf.owner, `${label} Films`, (root) => [
+      movieFile(join(root, "Hero Film.mkv"), 1, 1, {
+        ...scannedTitle("movie", `nfo:${label}:film`, "Hero Film", 13),
+        artwork,
+        overview: "A heist in one night.",
+      }),
+    ]);
+
+    await finishJob(stack, films.lease);
+
+    await Promise.all(
+      [series.libraryId, films.libraryId].flatMap((libraryId) =>
+        [shelf.aiko, shelf.kid].map(async (who) =>
+          share(shelf.owner, libraryId, { kind: "user", userId: who.userId }, "view"),
+        ),
+      ),
+    );
+
+    const film = films.files[0]?.titleId;
+    const show = series.files[0]?.titleId;
+
+    if (film === undefined || show === undefined) throw new Error("the scans landed no titles");
+
+    const aiko = shelf.aiko.signedIn.client;
+    const kid = shelf.kid.signedIn.client;
+
+    expect((await homeOf(aiko)).featured?.id).toBe(film);
+    expect((await homeOf(aiko)).featuredDetail).toEqual(await billboardOf(aiko, film));
+    expect((await homeOf(kid)).featured?.id).toBe(show);
+    expect((await homeOf(kid)).featuredDetail).toEqual(await billboardOf(kid, show));
+    expect(await refusal(kid.query(api.movies.titles.get, { titleId: film }))).toBe("not_found");
+
+    const strangers = await Promise.all(
+      [shelf.sam, shelf.outsider].map(async (stranger) => homeOf(stranger.signedIn.client)),
+    );
+
+    for (const home of strangers) {
+      expect([film, show]).not.toContain(home.featured?.id);
+      expect(home.featuredDetail?.id).toBe(home.featured?.id);
+    }
+
+    await aiko.mutation(api.movies.myList.add, { titleId: film });
+    await aiko.mutation(api.movies.history.markWatched, { titleId: film });
+
+    expect((await homeOf(aiko)).featuredDetail).toMatchObject({
+      inMyList: true,
+      progress: { watched: true },
+    });
+    expect((await homeOf(aiko)).featuredDetail).toEqual(await billboardOf(aiko, film));
+
+    const [firstEpisode] = await seasonOf(kid, show, 1);
+
+    if (firstEpisode === undefined) throw new Error("no first episode");
+
+    await kid.mutation(api.movies.history.markWatched, {
+      titleId: show,
+      episodeId: firstEpisode.id,
+    });
+
+    expect((await homeOf(kid)).featuredDetail?.nextEpisode?.episodeNumber).toBe(2);
+    expect((await homeOf(kid)).featuredDetail).toEqual(await billboardOf(kid, show));
+
+    const fits = async (who: Member, titleId: Id<"titles">, shortBy: number) =>
+      runFunction(
+        stack,
+        internal.movies.probe.featuredDetailFits,
+        { userId: who.userId, titleId, shortBy },
+        Schema.Boolean,
+      );
+
+    expect(await fits(shelf.aiko, film, 0)).toBe(true);
+    expect(await fits(shelf.aiko, film, 1)).toBe(false);
+    expect(await fits(shelf.kid, show, 0)).toBe(true);
+    expect(await fits(shelf.kid, show, 1)).toBe(false);
   });
 
   it("search titles, count genres, and show home rows of what each person sees", async () => {

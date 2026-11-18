@@ -1,5 +1,5 @@
 import { BITMAP_SUBTITLE_FORMATS, type SubtitleTrack } from "@media/contracts/media-playback";
-import type { AudioStream, MediaFile } from "@/lib/catalog";
+import type { AudioStream, MediaFile, MediaVersion } from "@/lib/catalog";
 import { MediaLabels } from "@media/sdk/effect";
 
 const { channelLabel, codecLabel, hdrLabel, resolutionLabel } = MediaLabels;
@@ -88,12 +88,17 @@ const distinct = (labels: ReadonlyArray<string>): ReadonlyArray<string> =>
       )
     : labels;
 
-/** The badges Paper draws after a title's facts, in order: resolution, HDR, codec, audio, CC. */
-export const fileBadges = (file: MediaFile): ReadonlyArray<string> => {
-  const video = file.probe.video[0];
-  const audio = file.probe.audio.find((track) => track.default) ?? file.probe.audio[0];
-  const subtitled = file.probe.subtitles.length > 0 || file.externalSubtitles.length > 0;
+/** The main video stream as the badges read it. */
+type BadgeVideo = Pick<MediaFile["probe"]["video"][number], "width" | "height" | "hdr" | "codec">;
 
+/** The default audio track as the badges read it. */
+type BadgeAudio = Pick<AudioStream, "codec" | "channels">;
+
+const badgesOf = (
+  video: BadgeVideo | undefined,
+  audio: BadgeAudio | undefined,
+  subtitled: boolean,
+): ReadonlyArray<string> => {
   const badges = [
     video === undefined ? null : resolutionLabel(video.width, video.height),
     video === undefined ? null : hdrLabel(video.hdr),
@@ -108,6 +113,34 @@ export const fileBadges = (file: MediaFile): ReadonlyArray<string> => {
 
   return badges.filter((badge): badge is string => badge !== null && badge !== "");
 };
+
+/** The badges Paper draws after a title's facts, in order: resolution, HDR, codec, audio, CC. */
+export const fileBadges = (file: MediaFile): ReadonlyArray<string> =>
+  badgesOf(
+    file.probe.video[0],
+    file.probe.audio.find((track) => track.default) ?? file.probe.audio[0],
+    file.probe.subtitles.length > 0 || file.externalSubtitles.length > 0,
+  );
+
+/**
+ * The badges of a version, as {@link fileBadges} reads them from its file: the version names the
+ * same video and default audio. It does not say whether the file has subtitles, so it has no CC.
+ */
+export const versionBadges = (version: MediaVersion): ReadonlyArray<string> =>
+  badgesOf(
+    version.videoCodec === null || version.width === null || version.height === null
+      ? undefined
+      : {
+          width: version.width,
+          height: version.height,
+          hdr: version.hdr,
+          codec: version.videoCodec,
+        },
+    version.audioCodec === null || version.audioChannels === null
+      ? undefined
+      : { codec: version.audioCodec, channels: version.audioChannels },
+    false,
+  );
 
 /** `English EAC3 5.1, Spanish · English CC, Español`: audio tracks, then subtitle languages. */
 export const trackSummary = (file: MediaFile): string | null => {

@@ -16,6 +16,20 @@ export type TitleDetail = Result<Movies["titles"]["get"]>;
 
 export type Home = Result<Movies["titles"]["home"]>;
 
+/** What Home's billboard shows of its featured title beyond the title's card. */
+export type FeaturedDetail = NonNullable<Home["featuredDetail"]>;
+
+/** What Home's billboard shows of a title, from the title's page when Home did not send it. */
+export const featuredDetailOf = (detail: TitleDetail): FeaturedDetail => ({
+  id: detail.id,
+  overview: detail.overview,
+  seasonCount: detail.seasons.length,
+  version: detail.versions[0] ?? null,
+  progress: detail.progress,
+  nextEpisode: detail.nextEpisode,
+  inMyList: detail.inMyList,
+});
+
 export type TitleKind = TitleCard["kind"];
 
 export type TitleSort = NonNullable<Parameters<Movies["titles"]["list"]>[0]["sort"]>;
