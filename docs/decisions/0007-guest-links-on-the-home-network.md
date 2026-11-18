@@ -1,7 +1,7 @@
 # 0007. Build guests into identity and keep v1 on the home network or Tailscale
 
 - Status: Accepted, 2026-11-03. Amended 2026-11-07 with the phase 3 review fixes, and 2026-11-11
-  with the sign-in boundary.
+  with the sign-in boundary, and 2026-11-18 with live checks on refresh.
 - Decisions: D20, D21, D45
 
 ## Context
@@ -52,7 +52,7 @@ household needs a guest model and an address that person can reach.
 - A guest in a group session can control playback only if the host allows it (ADR 0018).
 - Links carry the configured guest address, which can differ from the address the household uses.
 
-## Guest links as built (amended 2026-11-06)
+## Guest links as built (amended 2026-11-18)
 
 The commands are in `packages/platform/convex/core/guests.ts` and `convex/core/guests/`, the
 rules are in `convex/core/permissions/policy.ts`, and the `guest` sign-in provider is in
@@ -122,6 +122,10 @@ links in phase 7.
   generation ends the guest at once, in every command and in the server's ticket watch. The watch
   (`core/tickets:sessionStatus`) reruns because it read those rows. A guest session expires with
   its link, so the watch's `endsAt` is the link's expiry.
+- Refresh uses the same `liveSession` check before Convex Auth can issue tokens. A link that
+  stops holding can no longer refresh its guest sessions. Refresh answers `{ tokens: null }`
+  just as any ended session does. The SDK reports `Unauthenticated`, clears its stored tokens, and
+  changes its status to `signedOut`. This applies to item links and group-session links.
 - `sessionStatus` answers `guest: true` for a guest's session. The phase 4 server uses it to put
   guest streams at the lowest transcode priority (ADR 0014).
 - The maker's access to what the link names is decided when the link opens and at every play,
@@ -208,7 +212,8 @@ three of them the live check on the link.
 
 - Phase 4: the server reads `sessionStatus.guest` for transcode priority. The sign-in boundary
   below applies `@media/contracts/rate-limit`.
-- Phase 7: the guest page in the account web client and a guest sign-in in the SDK.
+- Phase 7: the guest page in the account web client. The SDK signs guests in from a link code
+  and display name, stores their session, and refreshes it under the same rules as other sessions.
 - A purge of old links and their guests. The caps bound the rows until then.
 - Connect: `deviceFor` names a guest's session membership once a device report names the session
   it plays (phase 6).

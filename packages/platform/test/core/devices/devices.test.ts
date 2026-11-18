@@ -198,6 +198,22 @@ describe.skipIf(stack === undefined)("devices", { timeout: 180_000 }, () => {
     expect(await refusal(momTile.client.query(api.core.auth.sessions.current, {}))).toBe(
       "unauthenticated",
     );
+    expect(
+      await anonymous(stack).action(api.auth.signIn, { refreshToken: momTile.refreshToken }),
+    ).toEqual({ tokens: null });
+
+    await mom.signedIn.client.mutation(api.core.devices.tiles.setListed, {
+      userId: mom.userId,
+      listed: true,
+    });
+
+    expect(await refusal(momTile.client.query(api.core.auth.sessions.current, {}))).toBe(
+      "accepted",
+    );
+    expect(
+      (await anonymous(stack).action(api.auth.signIn, { refreshToken: momTile.refreshToken }))
+        .tokens,
+    ).not.toBeNull();
   });
 
   it("opens a kid's tile freely and locks every adult tile while a kid is listed", async () => {
