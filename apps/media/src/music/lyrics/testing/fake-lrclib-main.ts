@@ -1,6 +1,6 @@
 /**
  * Runs the stand-in LRCLIB (`lrclib-catalog.ts`) as its own process, for the live lanes and the
- * perf runs: test code. Old music and the server both point `LRCLIB_URL` at it.
+ * perf runs: test code. The server points `LRCLIB_URL` at it.
  *
  *   node apps/media/src/music/lyrics/testing/fake-lrclib-main.ts --port 18090 --delay-ms 100
  *

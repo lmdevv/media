@@ -30,10 +30,7 @@ import type {
 
 const SAMPLE_LIMIT = 25;
 
-/**
- * A source user and who receives their history, if anyone: a profile of old movies, or a user of
- * the core (`Person`).
- */
+/** A source user and the core user (`Person`) who receives their history, if anyone. */
 export interface ResolvedUser<Person extends string> {
   readonly sourceUserId: string;
   readonly name: string;

@@ -76,9 +76,9 @@ const marksExplicit = (tag: ITag): boolean => {
 };
 
 /**
- * Whether a file's tags mark it explicit, which a kid's explicit filter hides (D17). Old music
- * kept no such flag; the core asks for one, so this reads iTunes' content advisory wherever a
- * tag format carries it (`ADVISORY_TAG`), and is false for every other file.
+ * Whether a file's tags mark it explicit, which a kid's explicit filter hides (D17). It reads
+ * iTunes' content advisory wherever a tag format carries it (`ADVISORY_TAG`), and is false for
+ * every other file.
  */
 export const isExplicit = (metadata: Pick<IAudioMetadata, "native">): boolean =>
   Object.values(metadata.native).some((tags) => tags.some(marksExplicit));

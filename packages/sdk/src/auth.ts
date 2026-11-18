@@ -1162,7 +1162,7 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
     );
 
     // A sign-in ends once the connection runs as the new session, so the next call never gets an
-    // answer from before it, such as a query's refusal from while signed out.
+    // answer meant for the earlier session, such as a query's refusal from while signed out.
     const answered = yield* transport.authenticated.pipe(Effect.timeoutOption(AUTHENTICATION_WAIT));
 
     if (Option.exists(answered, (answer) => answer !== "refused")) return undefined;

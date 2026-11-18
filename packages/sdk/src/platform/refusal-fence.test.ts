@@ -418,7 +418,7 @@ describe("a refusal over the WebSocket connection", () => {
 });
 
 describe("a sign-in over the WebSocket connection", () => {
-  it("returns only once the server has taken the new token, so no answer from before reaches the next call", async () => {
+  it("returns only once the server has taken the new token, so no answer under the earlier token reaches the next call", async () => {
     const token = jwtIssuedAt(Date.now(), 3600, "user-1|session-1");
 
     const answer = await withPlatform(

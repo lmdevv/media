@@ -119,7 +119,7 @@ const make = Effect.gen(function* () {
 
   // One loop keeps signing in. A wake-up while it retries coalesces into the queue's one slot, so
   // the loop runs again after it finishes and no request to sign in is ever dropped. It never
-  // carries the generation it started from: a retry from before a sign-in cannot mistake a later
+  // carries the generation it started from: a retry started before a sign-in cannot mistake a later
   // refusal for that sign-in and stop, leaving the server signed out.
   const wake = yield* Queue.sliding<void>(1);
 

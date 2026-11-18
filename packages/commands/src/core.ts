@@ -1144,8 +1144,8 @@ export const core = [
         entryId: v.union(v.id("togetherEntries"), v.null()),
         /**
          * The length of what plays, in milliseconds, when the core knows one, a music song's, even
-         * when `item` is hidden from you, as old music's jams kept a withheld song's length: a host's
-         * player moves the session on at its end without playing it. Null otherwise.
+         * when `item` is hidden from you, so a host's player moves the session on at its end
+         * without playing it. Null otherwise.
          */
         lengthMs: v.union(v.number(), v.null()),
         members: v.array(

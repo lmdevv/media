@@ -1,9 +1,8 @@
 /**
- * Music's byte routes on the media server, as old music's media service served them: a song's
- * stream at a profile, and album art. Players fetch both by URL, so like movies' media bytes they
- * are plain routes, not `MediaApi` endpoints, and carry their ticket in the `ticket` query
- * parameter (ADR 0011): a song's personal ticket from `music.play.start` or a download, and art's
- * shareable ticket from the music commands.
+ * Music's byte routes on the media server: a song's stream at a profile, and album art. Players
+ * fetch both by URL, so like movies' media bytes they are plain routes, not `MediaApi` endpoints,
+ * and carry their ticket in the `ticket` query parameter (ADR 0011): a song's personal ticket from
+ * `music.play.start` or a download, and art's shareable ticket from the music commands.
  */
 import { Schema } from "effect";
 

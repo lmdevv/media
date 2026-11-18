@@ -90,9 +90,9 @@ const jobs = (sealKey: Redacted.Redacted) =>
       movies: 2,
       "movies.background": config.trickplay.concurrency,
       "movies.import": 1,
-      // One music scan at a time, as old music ran its scans (ADR 0014).
+      // One music scan at a time (ADR 0014).
       music: 1,
-      // One LRCLIB lookup at a time, as old music's worker asked (ADR 0014).
+      // One LRCLIB lookup at a time (ADR 0014).
       "music.background": 1,
       server: 1,
     };

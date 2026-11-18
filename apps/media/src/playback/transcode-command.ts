@@ -114,7 +114,7 @@ const gpuFilters = (command: EncodeSource, video: Encode, uploaded: boolean): st
  * on the finished SDR picture at the output size, after tone mapping (subtitles are SDR): in
  * software straight away, on a GPU after downloading its frames, which are then uploaded again
  * for the encoder. The subtitle's canvas (720x576 for DVD) is scaled to the picture it covers.
- * After a seek, picture frames from before `from` still configure the graph, so trimming them
+ * After a seek, picture frames earlier than `from` still configure the graph, so trimming them
  * comes first and they skip the rest of the work. ffmpeg appears to repeat the subtitle's current
  * image as it reads packets, so a caption that started earlier survives trimming the subtitle's own
  * frames to shortly before `from`. Untrimmed, memory peaked near 4 GB at 1080p, apparently scaled

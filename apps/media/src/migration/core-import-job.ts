@@ -228,7 +228,7 @@ const runImport = Effect.fn("CoreImports.run")(function* (
   const unmatched = plan.summary.itemsUnmatched + plan.summary.itemsAwaitingScan;
   const watch = watchItemsOf(plan);
 
-  // A collection keeps its first members up to the bound, as old movies kept them.
+  // A collection keeps its first members up to the bound.
   const collections = plan.collections.map((collection): CollectionImport => ({
     sourceKey: collection.sourceKey,
     name: collection.name,

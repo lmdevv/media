@@ -65,8 +65,7 @@ export const jobFacts = (job: Job): string => {
 
 /**
  * Jobs: the server's jobs of every kind, newest first, with their progress, attempts, and errors,
- * and a way to stop a library's scan or run a failed one again, as old music's jobs page did for
- * its scans. The failed ones are counted, as old music counted its recent ones.
+ * and a way to stop a library's scan or run a failed one again. The failed ones are counted.
  */
 export function JobsScreen() {
   const platform = usePlatform();

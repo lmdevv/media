@@ -2,9 +2,9 @@
  * Invite links (A01 Open an Invite). The account client's links are `<server>/invite#<code>`, the
  * code in the fragment so no request carries it (ADR 0020); the app's own deep link is
  * `movies://invite?server=<server>&code=<code>`. Both name the server to connect to and the invite
- * code to redeem there. Old path links, `<server>/invite/<code>`, are refused as the account client
- * refuses them. Parsed with patterns rather than `URL`, whose
- * query support React Native only partly implements.
+ * code to redeem there. A link with the code in its path, `<server>/invite/<code>`, is refused, as
+ * the account client refuses it. Parsed with patterns rather than `URL`, whose query support React
+ * Native only partly implements.
  */
 import { normalizeServerUrl } from "@media/mobile-core/server";
 

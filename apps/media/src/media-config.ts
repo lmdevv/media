@@ -61,7 +61,7 @@ export interface Interface {
   readonly otlpEndpoint: Option.Option<string>;
   /**
    * Where music looks lyrics up (`LRCLIB_URL`), without a trailing slash: LRCLIB itself unless
-   * pointed at a stand-in, as old music's was.
+   * pointed at a stand-in.
    */
   readonly lrclibUrl: string;
   readonly logs: LogSettings;

@@ -76,7 +76,7 @@ const EMPTY = {
   auth: "None yet",
   admin: "None yet",
   movies: "None yet",
-  music: "None yet; they arrive with the music port",
+  music: "None yet",
 } as const satisfies { readonly [Group in CoreGroup]: string };
 
 const inGroup = (group: CoreGroup): ReadonlyArray<CoreEntry> =>

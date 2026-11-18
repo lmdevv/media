@@ -1,8 +1,8 @@
 /**
- * Music's byte routes (`@media/contracts/music-playback`), as old music's media service served
- * them on Hono, on the server's Effect HTTP router (ADR 0010): a song's stream at a profile to its
- * personal ticket, and album art to its shareable ticket (ADR 0011). Answers are plain text with
- * the statuses old music's players read. No answer, log, or span carries a ticket.
+ * Music's byte routes (`@media/contracts/music-playback`) on the server's Effect HTTP router
+ * (ADR 0010): a song's stream at a profile to its personal ticket, and album art to its shareable
+ * ticket (ADR 0011). Answers are plain text with the statuses music's players read. No answer,
+ * log, or span carries a ticket.
  */
 import { isReceiverCredential } from "@media/contracts/cast";
 import { TrackId } from "@media/contracts/ids";
@@ -147,10 +147,10 @@ export const layer: Layer.Layer<
         return text(400, "Invalid start");
       }
 
-      // Every request needs an unexpired ticket, as old music's signed URLs did, so a listener who
-      // lost access gets nothing once their play's ticket runs out (ADR 0010). A response under way
-      // runs to its end unless its session ends. A Cast receiver's credential reads the song its
-      // sender's start was for, while that start's admission stands and its session is live.
+      // Every request needs an unexpired ticket, so a listener who lost access gets nothing once
+      // their play's ticket runs out (ADR 0010). A response under way runs to its end unless its
+      // session ends. A Cast receiver's credential reads the song its sender's start was for,
+      // while that start's admission stands and its session is live.
       const grant = yield* Effect.result(
         Effect.gen(function* () {
           const token = yield* PlaybackToken.tokenOf(request, tokens.param);
@@ -221,7 +221,7 @@ export const layer: Layer.Layer<
           Effect.as(text(502, "Transcode failed")),
         );
 
-      // A browser plays the original of a song whose AAC transcode failed, as old music served it.
+      // A browser plays the original of a song whose AAC transcode failed, when it can play it.
       const failedOrOriginal = (error: MusicTranscoder.TranscodeError) =>
         !isFragmentedProfile(transcodeProfile) && isBrowserPlayable(source.codec, source.path)
           ? Effect.logWarning("MusicRoutes.transcode_fallback", error).pipe(

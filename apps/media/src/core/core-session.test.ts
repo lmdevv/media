@@ -134,12 +134,12 @@ describe("CoreSession", () => {
   );
 
   it.effect(
-    "signs in again after a refusal even while an older backoff from before a sign-in sleeps",
+    "signs in again after a refusal even while a backoff that predates the sign-in sleeps",
     () =>
       Effect.gen(function* () {
         const core = yield* makeCore;
 
-        // The first sign-in is refused, so a backoff retry from before any sign-in sleeps.
+        // The first sign-in is refused, so a backoff retry that predates any sign-in sleeps.
         const session = yield* openSession(core);
 
         // A call signs in while that retry still sleeps.

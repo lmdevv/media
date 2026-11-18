@@ -1,6 +1,6 @@
 /**
- * The `music.lyrics` job on the core's worker protocol (ADR 0012): one LRCLIB lookup of one song,
- * replacing old music's lyrics worker. It asks LRCLIB through the paced client and sends what the
+ * The `music.lyrics` job on the core's worker protocol (ADR 0012): one LRCLIB lookup of one song.
+ * It asks LRCLIB through the paced client and sends what the
  * try learned to `music/lyricLookups:settle`, which stores the answer and ends the job in one
  * mutation, so a server stopped before that call leaves the job to run again and one stopped
  * after it never asks LRCLIB for that song again. Before each request it asks the core whether it

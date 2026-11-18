@@ -158,10 +158,9 @@ const trackIds = v.array(v.id("tracks"));
 const rest = trackIds;
 
 /**
- * The music commands, ported from old music's command registry (D23, D62). What each person
- * keeps (playlists, likes, plays, the queue) is theirs alone; a playlist is shared through the
- * core's grants. Jams and moving playback between devices come back with group sessions and
- * Connect.
+ * The music commands (D23, D62). What each person keeps (playlists, likes, plays, the queue) is
+ * theirs alone; a playlist is shared through the core's grants. Jams and moving playback between
+ * devices are the core's group sessions and Connect (`core.ts`).
  */
 export const music = [
   query("music.library.home", {

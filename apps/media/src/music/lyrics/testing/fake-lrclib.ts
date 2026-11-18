@@ -1,6 +1,6 @@
 /**
- * A stand-in LRCLIB on a local port for the server's tests, ported from old music's: it answers
- * through a handler and records each request.
+ * A stand-in LRCLIB on a local port for the server's tests: it answers through a handler and
+ * records each request.
  */
 import { createServer } from "node:http";
 

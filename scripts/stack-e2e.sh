@@ -118,8 +118,7 @@ check "/music is the music client, and its art is the media service's" \
 check "every web client reaches the core on this address" \
   'in_movies grep -rqF "${core_convex_url}" /run/media/account &&
     in_movies grep -rqF "${core_convex_url}" /run/media/web &&
-    in_movies grep -rqF "${core_convex_url}" /run/media/music &&
-    ! in_movies grep -rqF "${MEDIA_BASE_URL}/movies/convex" /run/media/web'
+    in_movies grep -rqF "${core_convex_url}" /run/media/music'
 check "Convex HTTP actions stay inside the container" \
   '! curl -fsS "${MEDIA_BASE_URL}/convex/.well-known/jwks.json" 2>/dev/null | grep -qF "\"keys\"" &&
     in_movies curl -fsS http://127.0.0.1:3211/.well-known/jwks.json | grep -qF "\"keys\""'

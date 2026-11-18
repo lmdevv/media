@@ -1,10 +1,9 @@
 /**
  * A stand-in for LRCLIB's catalog that answers any song, the same way every time: test code, used
- * by the server's tests, the live lanes, and the perf runs (`fake-lrclib-main.ts`), against old
- * music and the server alike. A song's answer follows from its title's hash, so a run and its
- * rerun, or old music and the port, see the same catalog: one in six has no record, one in six is
- * instrumental, one in six has plain lyrics only, and the rest have synced lyrics. Plain
- * TypeScript, so Node runs it without a build.
+ * by the server's tests, the live lanes, and the perf runs (`fake-lrclib-main.ts`). A song's answer
+ * follows from its title's hash, so a run and its rerun see the same catalog: one in six has no
+ * record, one in six is instrumental, one in six has plain lyrics only, and the rest have synced
+ * lyrics. Plain TypeScript, so Node runs it without a build.
  */
 import { createHash } from "node:crypto";
 

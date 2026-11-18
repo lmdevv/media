@@ -38,7 +38,7 @@ test.describe.configure({ mode: "serial" });
 
 const SETUP_TIMEOUT_MS = 240_000;
 
-/** Members of a session stay within a quarter second of each other (plan, p6-together-movies). */
+/** Members of a session stay within a quarter second of each other. */
 const IN_STEP_MS = 250;
 
 const run = Date.now().toString(36);

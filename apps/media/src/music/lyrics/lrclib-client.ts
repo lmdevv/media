@@ -226,7 +226,7 @@ const searchMatches = (query: LyricsQuery, text: string) => {
 };
 
 /**
- * Builds the client. It calls `fetch` directly, as old music's did: one GET with a timeout needs
+ * Builds the client. It calls `fetch` directly: one GET with a timeout needs
  * none of `effect/http`'s transforms, and the client must act on a refusal's status and
  * `Retry-After` without reading its body and read an answer only up to `maxBodyBytes`, which a
  * `fetch` body stream does directly.

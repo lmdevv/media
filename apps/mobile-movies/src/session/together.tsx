@@ -28,9 +28,9 @@ const ServerNowContext = createContext<ServerNow>(deviceNow);
 /**
  * Reads the person's movies session for the app, and keeps them present in it with a heartbeat
  * every `HEARTBEAT_MS` while the app runs (ADR 0017). iOS runs it in the background only while it
- * plays or shows picture in picture, so a host watching there stays present, as old rooms' player
- * reports kept them; leaving the app otherwise suspends it, and after 30 seconds the person counts
- * as away, and a host away pauses the session.
+ * plays or shows picture in picture, so a host watching there stays present; leaving the app
+ * otherwise suspends it, and after 30 seconds the person counts as away, and a host away pauses
+ * the session.
  */
 export function CurrentSessionProvider({ children }: { readonly children: ReactNode }) {
   const platform = usePlatform();

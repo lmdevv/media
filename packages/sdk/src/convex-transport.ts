@@ -151,9 +151,10 @@ export interface Interface {
   /** Uses `source` for the auth token of every later call; null signs the connection out. */
   readonly setAuth: (source: AuthTokenSource | null) => Effect.Effect<void>;
   /**
-   * Waits until the server has answered the connection's current token source, so a call made
-   * then runs as that session and no answer from before reaches it, and tells what it answered.
-   * A connection that authenticates each request, or has no source, answers `none` at once.
+   * Waits until the server has answered the connection's current token source, so a call made then
+   * runs as that session and no answer under an earlier token reaches it, and tells what it
+   * answered. A connection that authenticates each request, or has no source, answers `none` at
+   * once.
    */
   readonly authenticated: Effect.Effect<Authentication>;
 }
@@ -417,7 +418,7 @@ interface HeldToken {
   held: Option.Option<IssuedToken | null>;
   /**
    * Whether the server has answered the source yet. Until it has, the client's results may still
-   * come from before it, under the token it replaced.
+   * come under the token it replaced.
    */
   answered: boolean;
   /** Resolves with the server's first answer once `answered`. */

@@ -10,7 +10,7 @@ const NOW = Date.UTC(2026, 10, 10, 12);
 const MINUTE_MS = 60 * 1000;
 
 const reported: NonNullable<ServerStatus> = {
-  version: "0.3.0",
+  version: "0.4.1",
   hardwareAcceleration: "qsv",
   activeStreams: 2,
   runsAwaitingExit: 1,
@@ -36,7 +36,7 @@ describe("ServerView", () => {
     expect(text).toContain("Hardware transcoding Detected Intel Quick Sync");
     expect(text).toContain("Playing now 2");
     expect(text).toContain("Streams stopping 1");
-    expect(text).toContain("Media service https://media.example.com · 0.3.0");
+    expect(text).toContain("Media service https://media.example.com · 0.4.1");
     expect(text).toContain("Database https://media.example.com/convex · 0.2.0");
   });
 

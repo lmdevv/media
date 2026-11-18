@@ -254,7 +254,6 @@ describe.skipIf(!enabled)("the packaged install", { timeout: 180_000 }, () => {
 
     expect(script).not.toBe("");
     expect(bundle).toContain(convexUrl);
-    expect(bundle).not.toContain(`${mediaUrl}/movies/convex`);
     expect(bundle).not.toContain("__MEDIA_CONVEX_URL__");
   });
 

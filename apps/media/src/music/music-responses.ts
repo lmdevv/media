@@ -1,6 +1,5 @@
 /**
- * Music's byte responses, as old music's media service answered them (`file-response.ts` and
- * `transcoded-response.ts`), on Effect's HTTP server: a file with byte ranges and validators, a
+ * Music's byte responses on Effect's HTTP server: a file with byte ranges and validators, a
  * transcode streamed as ffmpeg writes it, the finished transcode a client polls for, and a fresh
  * encode from an offset. Each stops mid-body once the session that admitted its ticket ends
  * (ADR 0011).
@@ -64,8 +63,8 @@ interface FileResponseOptions {
 }
 
 /**
- * The version of a file's bytes, its size and change time in base 36 in quotes, as old music's
- * `ETag` and the core's track download revision name it, so a device resumes with `If-Range`.
+ * The version of a file's bytes, its size and change time in base 36 in quotes, as the core's
+ * track download revision names it, so a device resumes with `If-Range`.
  */
 const etagOf = (size: number, mtimeMs: number): string =>
   `"${size.toString(36)}-${Math.trunc(mtimeMs).toString(36)}"`;

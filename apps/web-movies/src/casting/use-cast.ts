@@ -111,7 +111,7 @@ export const useCast = (
       if (!active || loaded === null) return;
       loaded.framework.CastContext.getInstance().setOptions({
         receiverApplicationId: loaded.cast.media.DEFAULT_MEDIA_RECEIVER_APP_ID,
-        // A tab rejoins its own cast after a reload, as `v0.2.0` did, and no other tab's: `/music`
+        // A tab rejoins its own cast after a reload, and no other tab's: `/music`
         // shares the origin, and a session another tab started plays that tab's media.
         autoJoinPolicy: loaded.cast.AutoJoinPolicy.TAB_AND_ORIGIN_SCOPED,
       });

@@ -101,7 +101,7 @@ export const sessionFacts = (session: SessionRow): string =>
     scopeLabels(session.scopes),
   ].join(" · ");
 
-/** What signing a session out does, as old movies said it: a key signs in again on its next use. */
+/** What signing a session out does: a key signs in again on its next use. */
 export const signOutNote = (session: SessionRow): string =>
   session.kind === "apiKey"
     ? "The key signs in again the next time it is used. Revoke the key to stop it."
@@ -239,7 +239,7 @@ const EXPIRY_CHOICES: ReadonlyArray<Choice<"30" | "90" | "365" | "never">> = [
 
 type Expiry = (typeof EXPIRY_CHOICES)[number]["value"];
 
-/** What a new key holds until the person changes it, as old movies started it: browse and play. */
+/** What a new key holds until the person changes it: browse and play. */
 const DEFAULT_KEY_SCOPES: ReadonlyArray<KeyScope> = ["movies:read", "movies:play"];
 
 const isKeyScope = (scope: string): scope is KeyScope =>

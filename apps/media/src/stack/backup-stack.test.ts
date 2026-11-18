@@ -174,8 +174,8 @@ describe.skipIf(core === undefined)(
 
       expect(restored.status, await restored.clone().text()).toBe(200);
 
-      // Every session from before the import ends, the one of an account made after the backup
-      // included. The core ends them 100 a call in scheduled calls, so a stack holding many
+      // Every session that existed before the import ends, the one of an account made after the
+      // backup included. The core ends them 100 a call in scheduled calls, so a stack holding many
       // sessions reaches these two a little after the restore answers.
       await eventually("the admin's session to end", async () =>
         Exit.isFailure(await run(Effect.exit(admin.platform.core.auth.sessions.current())))

@@ -12,7 +12,7 @@ if [ ! -s "$secret" ]; then
   head -c 32 /dev/urandom | od -An -v -tx1 | tr -d ' \n' >"$secret.new"
   mv "$secret.new" "$secret"
 fi
-# An older install may have left the secret readable; it is the backend's alone at every start.
+# Every start makes the secret and its folder the backend's alone, whatever modes they arrived with.
 chown "$(id -u):$(id -g)" "$data/credentials" "$secret"
 chmod 700 "$data/credentials"
 chmod 600 "$secret"
