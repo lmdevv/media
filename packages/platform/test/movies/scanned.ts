@@ -18,6 +18,7 @@ const EMPTY_PROBE = {
   video: [],
   audio: [],
   subtitles: [],
+  chapters: [],
 };
 
 /** A probe of a file with one H.264 video stream, which a scan queues scrub thumbnails for. */

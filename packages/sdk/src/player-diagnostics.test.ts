@@ -84,6 +84,7 @@ const playbackAt = (
         video: [],
         audio: audio.tracks,
         subtitles: [],
+        chapters: [],
       },
       externalSubtitles: [],
       hdr: false,

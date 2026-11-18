@@ -470,17 +470,15 @@ const trickplayWithin = <Fields extends FileFields>(fields: Fields): Fields => {
 
 const fileTexts = <Fields extends FileFields>(): ReadonlyArray<Shrinker<Fields>> => [
   {
-    spare: (f) => spareAll((f.probe.chapters ?? []).map((chapter) => chapter.title)),
+    spare: (f) => spareAll(f.probe.chapters.map((chapter) => chapter.title)),
     shrink: (f) =>
-      f.probe.chapters === undefined
-        ? f
-        : withProbe(f, {
-            ...f.probe,
-            chapters: f.probe.chapters.map((chapter) => ({
-              ...chapter,
-              title: shortenedOrNull(chapter.title),
-            })),
-          }),
+      withProbe(f, {
+        ...f.probe,
+        chapters: f.probe.chapters.map((chapter) => ({
+          ...chapter,
+          title: shortenedOrNull(chapter.title),
+        })),
+      }),
   },
   {
     spare: (f) =>
@@ -579,11 +577,8 @@ const fileTexts = <Fields extends FileFields>(): ReadonlyArray<Shrinker<Fields>>
 
 const fileLists = <Fields extends FileFields>(): ReadonlyArray<Shrinker<Fields>> => [
   {
-    spare: (f) => f.probe.chapters?.length ?? 0,
-    shrink: (f) =>
-      f.probe.chapters === undefined
-        ? f
-        : withProbe(f, { ...f.probe, chapters: firstHalf(f.probe.chapters) }),
+    spare: (f) => f.probe.chapters.length,
+    shrink: (f) => withProbe(f, { ...f.probe, chapters: firstHalf(f.probe.chapters) }),
   },
   {
     spare: (f) => f.probe.subtitles.length,

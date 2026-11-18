@@ -29,6 +29,7 @@ const started = Schema.decodeSync(StartedPlayback)({
       video: [],
       audio: [],
       subtitles: [],
+      chapters: [],
     },
     externalSubtitles: [],
     hdr: false,

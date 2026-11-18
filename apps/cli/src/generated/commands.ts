@@ -4481,14 +4481,12 @@ export const generatedCommands = [
               hearingImpaired: Schema.optionalKey(Schema.Boolean),
             }),
           ),
-          chapters: Schema.optionalKey(
-            Schema.Array(
-              Schema.Struct({
-                startMs: Schema.Finite,
-                endMs: Schema.Finite,
-                title: Schema.Union([Schema.String, Schema.Null]),
-              }),
-            ),
+          chapters: Schema.Array(
+            Schema.Struct({
+              startMs: Schema.Finite,
+              endMs: Schema.Finite,
+              title: Schema.Union([Schema.String, Schema.Null]),
+            }),
           ),
         }),
         externalSubtitles: Schema.Array(
@@ -4865,14 +4863,12 @@ export const generatedCommands = [
                 hearingImpaired: Schema.optionalKey(Schema.Boolean),
               }),
             ),
-            chapters: Schema.optionalKey(
-              Schema.Array(
-                Schema.Struct({
-                  startMs: Schema.Finite,
-                  endMs: Schema.Finite,
-                  title: Schema.Union([Schema.String, Schema.Null]),
-                }),
-              ),
+            chapters: Schema.Array(
+              Schema.Struct({
+                startMs: Schema.Finite,
+                endMs: Schema.Finite,
+                title: Schema.Union([Schema.String, Schema.Null]),
+              }),
             ),
           }),
           externalSubtitles: Schema.Array(

@@ -65,7 +65,7 @@ describe("thumbnailsOf", () => {
 });
 
 describe("chapters", () => {
-  const options = chapterOptions(file.probe.chapters ?? [], () => null);
+  const options = chapterOptions(file.probe.chapters, () => null);
 
   it("numbers unnamed chapters and finds the chapter playing", () => {
     expect(options.map((chapter) => [chapter.title, chapter.startSeconds])).toEqual([

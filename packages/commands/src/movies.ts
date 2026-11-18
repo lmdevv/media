@@ -126,7 +126,7 @@ const probe = v.object({
   video: v.array(videoStream),
   audio: v.array(audioStream),
   subtitles: v.array(subtitleStream),
-  chapters: v.optional(v.array(chapter)),
+  chapters: v.array(chapter),
 });
 
 const trickplayManifest = v.object({

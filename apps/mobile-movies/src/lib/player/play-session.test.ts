@@ -32,6 +32,7 @@ const coreStart = (overrides: Partial<CoreStart> = {}): CoreStart => ({
       video: [],
       audio: [],
       subtitles: [],
+      chapters: [],
     },
     externalSubtitles: [],
     hdr: false,
