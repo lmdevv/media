@@ -2,8 +2,8 @@
 
 `ghcr.io/lmdevv/media-demo-library:v1` holds demo films, shows, and music as a data-only image,
 so a server can show every feature without your own media and without a download script. It
-holds about 7.5 GB: the full set of `scripts/demo-library.sh` (about 6.9 GB) and the five albums
-that `[music]` used for its demo (about 520 MB).
+holds about 7.5 GB: the full set of `scripts/demo-library.sh` (about 6.9 GB) and five albums
+from `ghcr.io/lmdevv/music-demo-library:v1` (about 520 MB).
 
 | Folder                                          | What it exercises                                                                                                                            |
 | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -44,8 +44,8 @@ only the music, add `image-subpath=Music` to that mount.
 
 `deploy/demo-library/Dockerfile` builds the image from two published images, each pinned by
 digest. `ghcr.io/lmdevv/movies-demo-library:v1` is the base, so its film and show layers carry
-over byte for byte, and a machine that already has it pulls only the music. The albums come from
-`ghcr.io/lmdevv/music-demo-library:v1`, one layer each, under `Music`. The build downloads nothing
+over byte for byte. The albums come from `ghcr.io/lmdevv/music-demo-library:v1`, one layer each,
+under `Music`. The build downloads nothing
 from the films' and albums' own sources.
 
 `scripts/build-demo-library.sh` builds the image into the local Docker and checks that it holds

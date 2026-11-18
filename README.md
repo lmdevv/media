@@ -5,10 +5,8 @@ install, with an account per person and one sign-in across the apps, Netflix-sty
 watching and listening together at the same second, migration from Jellyfin and Plex, and a CLI
 that can do everything the app can.
 
-[media] merges [movies] and [music] into one server. Since 0.4.0 it carries both, movies at
-`/movies` and music at `/music`. A [media] 0.3.0 install upgrades to 0.4.0 in place. It is a fresh
-install for a [movies] v0.2 or [music] v0.3 install: nothing moves over from either
-([docs/operations.md](docs/operations.md#upgrading)).
+One server carries both: movies and TV at `/movies` and music at `/music`, over one database and
+one account system.
 
 ## Stack
 
@@ -24,8 +22,7 @@ install for a [movies] v0.2 or [music] v0.3 install: nothing moves over from eit
 [docs/homelab.md](docs/homelab.md) walks through a homelab install end to end: Compose or NixOS,
 Tailscale and a Caddy reverse proxy, GPU passthrough, where data lives, backups, and upgrading.
 [docs/fresh-install.md](docs/fresh-install.md) has the exact steps for a first install from a
-release tag beside other installs, such as an old [movies] or [music] one, from the owner account
-to the first scan and a play.
+release tag beside other installs, from the owner account to the first scan and a play.
 
 ### Docker Compose
 
@@ -82,8 +79,8 @@ The core's Convex backend runs as a pinned OCI container; the media service runs
 sandboxed `media-server` systemd unit, built from this repository
 (`nix build github:lmdevv/media#media`). Caddy serves all of them on one port with the image's
 routes. Library folders are read-only to the media service, and `openFirewall` is off by default.
-Every unit, user, and folder the module makes has a `media` name, so from 0.4.1 it runs beside the
-old [movies] and [music] modules ([docs/fresh-install.md](docs/fresh-install.md)).
+Every unit, user, and folder the module makes has a `media` name
+([docs/fresh-install.md](docs/fresh-install.md)).
 
 ## Configuration
 
@@ -178,8 +175,7 @@ Every night at 03:00 UTC the media service exports the core's whole database, fi
 included, to the backup folder (`/data/core/backups` in the `media-data` volume, or `backupDir`,
 `dataDir/core/backups` by default, on NixOS) and keeps 14 days. Each upgrade also backs up there
 before it deploys. Back up and restore from Admin → Backups at `MEDIA_BASE_URL`; after a restore
-everyone signs in again. An install from before the movies cutover keeps old movies' backups in
-`/data/movies/backups` (`dataDir/movies/backups`).
+everyone signs in again.
 
 Archives hold password hashes; store copies as carefully as the server. See
 [docs/operations.md](docs/operations.md) for restoring onto a new machine or without the media
@@ -194,7 +190,7 @@ version as the server.
 | --------------------------- | ---------------------------------------------------------------------------------------------- |
 | The Compose server          | In the image: `docker compose exec media media auth login --username <name>`                   |
 | The NixOS server            | Installed by `services.media`, pointed at the server                                           |
-| Anywhere with Node 22+      | `npm install -g @lmdevv/media` (it replaces `@lmdevv/movies`)                                  |
+| Anywhere with Node 22+      | `npm install -g @lmdevv/media`                                                                 |
 | Linux or macOS without Node | `media-<os>-<arch>` from the [latest release](https://github.com/lmdevv/media/releases/latest) |
 | Another NixOS machine       | `nixosModules.cli` with `programs.media` (below)                                               |
 | Home Manager (Linux, macOS) | `homeManagerModules.media` with `programs.media` (below)                                       |

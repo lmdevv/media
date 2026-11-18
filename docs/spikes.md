@@ -10,19 +10,14 @@ Run 2026-10-12 against the self-hosted backend started by `scripts/dev-stack.sh`
 dev stack now pin it in `deploy/convex-backend.image`, from `ghcr.io/convex` since Convex moved it), `convex` 1.46.0, `@convex-dev/auth` 0.0.96,
 `@auth/core` 0.41.3, Node 24.20.
 
-### HMAC playback tokens in the Convex runtime
+### HMAC signing in the Convex runtime
 
 - **Result: works in every function type.** A throwaway module ran `crypto.subtle.importKey`
   (raw, HMAC SHA-256), `sign`, `verify`, and `digest("SHA-256")` in a query, a mutation, and an
   action; each produced the same signature as Node's `createHmac` for the same key and message.
   `btoa`/`atob` and `crypto.getRandomValues` are present too. `Buffer` is not.
-- **Choice:** `playback.createSession` is a single **mutation**: it authorizes, writes the
-  session, and signs the token in one transaction. No action wrapper is needed.
-- **Proof, in old movies' backend until `p4-movies-delete` deleted it:** its
-  `test/registry.test.ts` checked that the Convex signer (`convex/lib/playbackToken.ts`)
-  reproduced `PLAYBACK_TOKEN_TEST_VECTORS` byte for byte, and its `test/stack.test.ts` verified a
-  token minted by the live backend with the contracts verifier (`verifyPlaybackToken`) and the
-  stack's `PLAYBACK_TOKEN_SECRET`.
+- **Choice:** a ticket is issued by a single **mutation** that authorizes the caller and signs the
+  ticket in one transaction (`core/tickets.ts`, ADR 0011). No action wrapper is needed.
 - **Randomness:** `getRandomValues` in mutations returned different values per call, but Convex
   documents query and mutation randomness as seeded for determinism. Secrets (API keys, invite
   codes, device codes) are therefore minted in **actions** that call an internal mutation; only
@@ -30,7 +25,7 @@ dev stack now pin it in `deploy/convex-backend.image`, from `ghcr.io/convex` sin
 
 ### Convex Auth: password, API key, and device flows with scoped revocation
 
-- **Result: works.** Verified by `pnpm --filter @movies/backend test:stack` (22 tests).
+- **Result: works.** Verified by a stack suite of 22 tests.
 - `ConvexCredentials.authorize` may return an existing `sessionId`, and Convex Auth then issues
   tokens for that session instead of creating one. The `apikey` and `device` providers create (or
   reuse) the session themselves in an internal mutation and store the **grant on the

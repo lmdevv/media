@@ -21,6 +21,9 @@ Invites open from a pasted account client link (`<server>/invite#<code>`) on Ope
 from the app's own link `movies://invite?server=<server>&code=<code>`, which connects to that
 server first. A shared title opens the movies web client at `<server>/movies/title/<id>`.
 
+The owner screens (libraries, users, import, backups) read and change the core through
+`@media/sdk/react`.
+
 ## Tabs
 
 The tab bar has Home and Downloads, with Search as the system search tab in its own circle

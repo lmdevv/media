@@ -147,26 +147,15 @@ again before the restart.
 ## Upgrading
 
 Releases are git tags `vX.Y.Z`. Each one publishes the image as `X.Y.Z`, `X.Y`, and, unless a
-higher version is already tagged, `latest` (pre-releases such as `v0.4.0-rc.1` only as
-`0.4.0-rc.1`); `main` publishes `:main`, the edge,
+higher version is already tagged, `latest` (pre-releases such as `v0.5.0-rc.1` only as
+`0.5.0-rc.1`); `main` publishes `:main`, the edge,
 and every build also gets `sha-<commit>`. The NixOS module follows whatever revision the flake
 input points at. A release also publishes the `media` CLI at the same version: `@lmdevv/media` on
 npm and standalone binaries on the tag's GitHub Release. Upgrade a CLI installed that way with
 `npm install -g @lmdevv/media@X.Y.Z` or the release's binary, fetched with `curl` as in the
 [README](../README.md#cli) (macOS quarantines a browser download, and Gatekeeper then blocks the
 ad hoc signed binary until `xattr -d com.apple.quarantine`); the image and the Nix modules carry
-their own. `@lmdevv/media` replaces the [movies] CLI's package, `@lmdevv/movies`, which ends at
-0.2.0 and is deprecated. Its `movies` command cannot reach a [media] server; remove it with
-`npm uninstall -g @lmdevv/movies`.
-
-The all-in-one image (ADR 0027), first released as 0.3.0, is a fresh install, not an upgrade of a
-v0.2 install. Its Compose project, volumes, and data layout are new (`media`, `media-data`, `/data/core` and `/data/movies`),
-and the NixOS module's `dataDir` moved to `/var/lib/media`. Nothing moves the old data over (ADR
-0002). Both take port 8080 by default: stop the old install before starting the new one, or run
-the new one beside it on a port and data folder of its own ([fresh-install.md](fresh-install.md)).
-From 0.4.1 the NixOS module names everything it makes `media`, so it also runs beside v0.2's
-module (ADR 0029); 0.4.0's can't, since both define the `movies` unit. Keep the old volumes or `/var/lib/movies` until
-you no longer need them.
+their own.
 
 | Track     | Compose `MEDIA_IMAGE`                              | NixOS flake input            |
 | --------- | -------------------------------------------------- | ---------------------------- |
@@ -185,7 +174,7 @@ cd deploy/compose
 # .env: MEDIA_IMAGE=ghcr.io/lmdevv/media:0.4.1             # or :main for the edge
 docker compose pull
 docker compose up -d
-docker compose logs -f media     # "upgrading the core from 0.4.0 to 0.4.1; backing up to ... first"
+docker compose logs -f media     # "upgrading the core from <previous> to 0.4.1; backing up to ... first"
 ```
 
 ### NixOS
@@ -196,29 +185,7 @@ nixos-rebuild switch
 journalctl -u media-server -f
 ```
 
-From 0.4.0 to 0.4.1 the module renames what it makes so it can run beside [movies] v0.2's module
-(ADR 0029). The media service's unit and user are `media-server`, no longer `movies`, and its
-runtime folder is `/run/media-server`. Move any override of `systemd.services.movies` or
-`users.users.movies`, such as `extraGroups`, to `media-server`. The database and the service's
-state stay in `dataDir`, where the old `movies` user's files keep its ids. The module re-owns
-nothing that already exists, so the first start refuses, names the folders, and prints the
-command that gives them to `media-server`. Run the exact line the check prints, once. First
-confirm that no process runs as the old owner's uid, which the check names: `pgrep -u <uid>` must
-print nothing. With the default folders, and 9999 standing in for that uid:
-
-```sh
-pgrep -u 9999
-sudo find /var/lib/media/core/backups /var/lib/media/movies/media -xdev \( -type d -o -links 1 \) -execdir chown -h media-server:media-server {} +
-sudo systemctl start media-server
-```
-
-It changes the owner of every folder and file in them except a file with other names (a hard
-link), which may be another file outside them. `-xdev` alone would not stop at a bind mount from
-the same file system, so the check refuses a folder with a mount at or inside it first, and prints
-no command for it. With a custom `transcodeDir` or `backupDir`, the printed line names those
-folders. Transcode segments move to `/var/cache/media/transcode`, which starts empty;
-`/var/cache/movies/transcode` is left alone, since [movies] v0.2 uses that path too. Evaluation refuses a `dataDir`, `backupDir`, or
-`transcodeDir` that overlaps a library or an old install's folder.
+Evaluation refuses a `dataDir`, `backupDir`, or `transcodeDir` that overlaps a library.
 
 Before every start, `media-server-folders` checks the folders, and the media service and the
 core's Convex container start only if it passes. As root, it refuses a `dataDir` that is a
@@ -243,8 +210,8 @@ Convex backend upgrades ride along with [media] releases; never change its image
 
 ### Rolling back
 
-1. Go back to the previous version: `git checkout v0.3.0` and its image tag
-   (`MEDIA_IMAGE=ghcr.io/lmdevv/media:0.3.0`, then `docker compose up -d`), or
+1. Go back to the previous version: `git checkout vX.Y.Z` and its image tag
+   (`MEDIA_IMAGE=ghcr.io/lmdevv/media:X.Y.Z`, then `docker compose up -d`), or
    `nixos-rebuild switch --rollback`.
 2. If the older functions start, restore the `core-manual-…` archive the upgrade took (**Admin** →
    **Backups** in the account client). If they do not deploy over the newer data, restore without the
@@ -260,15 +227,15 @@ another version.
 1. On `main`, set every package's version, then commit and merge it:
 
    ```sh
-   pnpm -r exec npm pkg set version=0.3.0
-   node -e 'const fs = require("node:fs"); for (const f of process.argv.slice(1)) { const app = JSON.parse(fs.readFileSync(f, "utf8")); app.expo.version = "0.3.0"; fs.writeFileSync(f, `${JSON.stringify(app, null, 2)}\n`); }' apps/mobile-*/app.json
-   scripts/check-version.sh     # 0.3.0
+   pnpm -r exec npm pkg set version=0.5.0
+   node -e 'const fs = require("node:fs"); for (const f of process.argv.slice(1)) { const app = JSON.parse(fs.readFileSync(f, "utf8")); app.expo.version = "0.5.0"; fs.writeFileSync(f, `${JSON.stringify(app, null, 2)}\n`); }' apps/mobile-*/app.json
+   scripts/check-version.sh     # 0.5.0
    ```
 
 2. Tag the merged commit and push the tag:
 
    ```sh
-   git tag -a v0.3.0 -m "[media] 0.3.0" && git push origin v0.3.0
+   git tag -a v0.5.0 -m "[media] 0.5.0" && git push origin v0.5.0
    ```
 
 The tag runs two workflows, and each refuses a tag that does not name the package version:
@@ -288,8 +255,8 @@ replaces its assets and publishes a release an earlier run left as a draft.
 
 `scripts/release-channel.sh` decides what a version becomes. The highest stable version among the
 `v*` tags is npm's `latest` and the latest GitHub Release. A backport to an older line, such as
-`v0.2.5` after `v0.3.0`, publishes under the npm dist-tag `release-0.2` and is not marked latest.
-A pre-release such as `v0.3.0-rc.1` publishes under `next` and makes a GitHub pre-release.
+`v0.4.2` after `v0.5.0`, publishes under the npm dist-tag `release-0.4` and is not marked latest.
+A pre-release such as `v0.5.0-rc.1` publishes under `next` and makes a GitHub pre-release.
 
 npm only lets a trusted publisher be set on a package that exists, so a new package's name is
 claimed by hand with a placeholder version, `0.0.0-stage`, just before its first tag is pushed; the
@@ -312,14 +279,6 @@ and enter the owner `lmdevv`, the repository `media`, and the workflow `release.
 `npm view @lmdevv/media dist-tags` then shows `latest` on the release. Once a tag has published
 through it, set Publishing access to require two-factor authentication and
 disallow tokens.
-
-`@lmdevv/movies`, the [movies] CLI's package, stays on npm, deprecated with a pointer to
-`@lmdevv/media`, once `@lmdevv/media` has a release (ADR 0021):
-
-```sh
-npm deprecate @lmdevv/movies "Replaced by @lmdevv/media: npm install -g @lmdevv/media"
-npm view @lmdevv/movies deprecated
-```
 
 ## Remote access
 

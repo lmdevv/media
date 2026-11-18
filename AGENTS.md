@@ -1,8 +1,8 @@
 # [media]
 
 MIT-licensed, agent-first, self-hosted media platform. It streams the user's own folders or NAS
-shares, and it is merging [movies] and [music] into one server, one Convex database, and one
-account system with a branded client per product. `[media]`, brackets included, is the working
+shares: movies, TV, and music from one server, one Convex database, and one account system, with
+a web and iOS client for movies and another for music. `[media]`, brackets included, is the working
 name until a later rebrand. The repo is `lmdevv/media`, the workspace scope is `@media/*`, settings
 start with `MEDIA_`, the CLI binary is `media`, and the image is `ghcr.io/lmdevv/media`.
 
@@ -39,6 +39,7 @@ start with `MEDIA_`, the CLI binary is `media`, and the image is `ghcr.io/lmdevv
 | ---------------------- | --------------------------------------------------------------------- |
 | `apps/web-movies`      | `@media/web-movies`: Vite + React + TanStack Router SPA, `/movies`    |
 | `apps/web-music`       | `@media/web-music`: Vite + React + TanStack Router SPA, `/music`      |
+| `apps/web-account`     | `@media/web-account`: Vite + React account and admin SPA, `/`         |
 | `apps/media`           | `@media/server`: Effect HttpApi media service; serves the SPA         |
 | `apps/cli`             | Effect CLI with JSON output; agent skill in `skills/media/`           |
 | `apps/mobile-movies`   | Expo + Expo Router + Uniwind movies iOS app over `@media/mobile-core` |
@@ -47,6 +48,7 @@ start with `MEDIA_`, the CLI binary is `media`, and the image is `ghcr.io/lmdevv
 | `packages/mobile-core` | iOS apps' connection, shared keychain, sign-in, and enrollment        |
 | `packages/player`      | Music's player engine and queue controller, shared by web and iOS     |
 | `packages/contracts`   | Effect Schema DTOs, errors, media HttpApi, plugin role interfaces     |
+| `packages/commands`    | Command list; generates Convex functions and skill references         |
 | `packages/sdk`         | Effect core with `/effect`, `/react`, `/promise` entry points         |
 | `packages/ui`          | shadcn components restyled through Paper tokens                       |
 | `packages/config`      | Shared strict `tsconfig`                                              |

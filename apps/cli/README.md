@@ -1,8 +1,7 @@
 # @lmdevv/media
 
 The `media` command line for a self-hosted [media] server: everything the apps can do, for people
-and agents, with JSON output by default. It replaces `@lmdevv/movies` and its `movies` command,
-which cannot reach a [media] server.
+and agents, with JSON output by default.
 
 ```sh
 npm install -g @lmdevv/media
