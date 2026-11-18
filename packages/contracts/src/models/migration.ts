@@ -73,7 +73,7 @@ export const MigrationSourceFailure = Schema.Struct({
 /** The source server could not be used. */
 export interface MigrationSourceFailure extends Schema.Schema.Type<typeof MigrationSourceFailure> {}
 
-/** The [movies] profile a source user's history goes to by default. */
+/** The [media] profile a source user's history goes to by default. */
 export const UserSuggestion = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("profile"),
@@ -86,7 +86,7 @@ export const UserSuggestion = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("invite") }),
 ]);
 
-/** A source user who can be mapped to a [movies] profile. */
+/** A source user who can be mapped to a [media] profile. */
 export const SourceUser = Schema.Struct({
   sourceUserId: Schema.String,
   name: Schema.String,
@@ -167,7 +167,7 @@ export const MigrationConnection = Schema.Struct({
 /** A connected source server. */
 export interface MigrationConnection extends Schema.Schema.Type<typeof MigrationConnection> {}
 
-/** Which [movies] profile receives a source user's history; null skips the user. */
+/** Which [media] profile receives a source user's history; null skips the user. */
 export const UserMapping = Schema.Struct({
   sourceUserId: Schema.String,
   profileId: Schema.NullOr(ProfileId),

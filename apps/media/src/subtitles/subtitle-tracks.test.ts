@@ -19,7 +19,7 @@ const srt = (text: string): string => `1\n00:00:01,000 --> 00:00:02,000\n${text}
 const filmFolder = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const folder = yield* fs.makeTempDirectoryScoped({ prefix: "movies-subtitles-" });
+  const folder = yield* fs.makeTempDirectoryScoped({ prefix: "media-subtitles-" });
 
   const sidecar = (name: string): CheckedMediaFile["subtitles"][number] => ({
     path: path.join(folder, name),

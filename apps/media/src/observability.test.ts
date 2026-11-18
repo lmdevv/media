@@ -98,7 +98,7 @@ const runWriting = (
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const dataDir = yield* fs.makeTempDirectoryScoped({ prefix: "movies-observability-" });
+    const dataDir = yield* fs.makeTempDirectoryScoped({ prefix: "media-observability-" });
     const lines: Array<string> = [];
 
     yield* Effect.gen(function* () {

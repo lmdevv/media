@@ -135,7 +135,7 @@ const pluginLayer = (apiKey: string) =>
     Effect.gen(function* () {
       const server = yield* FixtureServer;
       const fs = yield* FileSystem.FileSystem;
-      const dataDir = yield* fs.makeTempDirectoryScoped({ prefix: "movies-tmdb-" });
+      const dataDir = yield* fs.makeTempDirectoryScoped({ prefix: "media-tmdb-" });
 
       return Tmdb.layerWithOptions(tmdbOptions(server.baseUrl, apiKey)).pipe(
         Layer.provide(DiskCache.layer),
@@ -148,7 +148,7 @@ const omdbLayer = Layer.unwrap(
   Effect.gen(function* () {
     const server = yield* FixtureServer;
     const fs = yield* FileSystem.FileSystem;
-    const dataDir = yield* fs.makeTempDirectoryScoped({ prefix: "movies-omdb-" });
+    const dataDir = yield* fs.makeTempDirectoryScoped({ prefix: "media-omdb-" });
 
     return Omdb.layerWithOptions({
       ...Omdb.defaultOptions(Option.some(Redacted.make(OMDB_KEY))),
@@ -161,7 +161,7 @@ const refusedOmdbLayer = Layer.unwrap(
   Effect.gen(function* () {
     const server = yield* FixtureServer;
     const fs = yield* FileSystem.FileSystem;
-    const dataDir = yield* fs.makeTempDirectoryScoped({ prefix: "movies-omdb-refused-" });
+    const dataDir = yield* fs.makeTempDirectoryScoped({ prefix: "media-omdb-refused-" });
 
     return Omdb.layerWithOptions({
       ...Omdb.defaultOptions(Option.some(Redacted.make("wrong-key"))),

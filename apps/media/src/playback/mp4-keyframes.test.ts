@@ -18,7 +18,7 @@ const encode = Effect.fn(function* (name: string, options: ReadonlyArray<string>
   const tools = yield* MediaTools.Service;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const folder = yield* fs.makeTempDirectoryScoped({ prefix: "movies-mp4-" });
+  const folder = yield* fs.makeTempDirectoryScoped({ prefix: "media-mp4-" });
   const output = path.join(folder, name);
 
   yield* tools.ffmpeg(

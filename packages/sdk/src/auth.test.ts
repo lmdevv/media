@@ -26,7 +26,7 @@ import type { KeyValueStore } from "./token-storage";
 
 const START = 1_760_000_000_000;
 
-const KEY = "movies.session";
+const KEY = "media.session";
 
 const FRESH = jwtExpiringAt(START + 3_600_000, "alex");
 

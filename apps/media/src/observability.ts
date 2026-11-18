@@ -15,7 +15,7 @@ import { OtlpLogger, OtlpSerialization, OtlpTracer } from "effect/observability"
 import * as RetainedLogs from "./logging/retained-logs.ts";
 import * as MediaConfig from "./media-config.ts";
 
-const resource = { serviceName: "movies-media" };
+const resource = { serviceName: "media-server" };
 
 const REDACTED = "<redacted>";
 

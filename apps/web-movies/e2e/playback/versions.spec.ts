@@ -120,7 +120,7 @@ test.beforeAll(async ({ browser }) => {
   if (stack === null) return;
 
   test.setTimeout(SETUP_TIMEOUT_MS);
-  workspace = await mkdtemp(join(tmpdir(), "movies-web-versions-"));
+  workspace = await mkdtemp(join(tmpdir(), "media-web-versions-"));
 
   const films = join(workspace, "Films");
   const film = join(films, `${MOVIE} (2021)`);

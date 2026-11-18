@@ -14,7 +14,7 @@ const siteLayer = Layer.unwrap(
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const root = yield* fs.makeTempDirectoryScoped({ prefix: "movies-web-" });
+    const root = yield* fs.makeTempDirectoryScoped({ prefix: "media-web-" });
     const dist = path.join(root, "dist");
 
     yield* fs.makeDirectory(path.join(dist, "assets"), { recursive: true });

@@ -10,7 +10,7 @@ import { testConfigLayer } from "./testing/test-config.ts";
 const withDataDir = <A, E, R>(use: (dataDir: string) => Effect.Effect<A, E, R>) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    const dataDir = yield* fs.makeTempDirectoryScoped({ prefix: "movies-cache-" });
+    const dataDir = yield* fs.makeTempDirectoryScoped({ prefix: "media-cache-" });
 
     return yield* use(dataDir);
   });

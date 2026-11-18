@@ -176,7 +176,7 @@ describe.skipIf(!hasFfmpeg || process.platform !== "linux")("tool lifetime", () 
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem;
           const path = yield* Path.Path;
-          const folder = yield* fs.makeTempDirectoryScoped({ prefix: "movies-tool-lifetime-" });
+          const folder = yield* fs.makeTempDirectoryScoped({ prefix: "media-tool-lifetime-" });
           const pidFile = path.join(folder, "ffmpeg.pid");
           const server = yield* startServer(folder, pidFile);
 
@@ -218,7 +218,7 @@ describe.skipIf(!hasFfmpeg || process.platform !== "linux")("tool lifetime", () 
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem;
           const path = yield* Path.Path;
-          const folder = yield* fs.makeTempDirectoryScoped({ prefix: "movies-tool-lifetime-" });
+          const folder = yield* fs.makeTempDirectoryScoped({ prefix: "media-tool-lifetime-" });
           const pidFile = path.join(folder, "ffmpeg.pid");
           const bin = path.join(folder, "bin");
 
@@ -261,7 +261,7 @@ describe.skipIf(!hasFfmpeg || process.platform !== "linux")("tool lifetime", () 
           const fs = yield* FileSystem.FileSystem;
           const path = yield* Path.Path;
           const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-          const folder = yield* fs.makeTempDirectoryScoped({ prefix: "movies-tool-lifetime-" });
+          const folder = yield* fs.makeTempDirectoryScoped({ prefix: "media-tool-lifetime-" });
           const script = yield* writeExecutable(path.join(folder, "recycled.mjs"), recycledScript);
 
           const printed = yield* spawner
@@ -297,7 +297,7 @@ describe.skipIf(!hasFfmpeg || process.platform !== "linux")("tool lifetime", () 
           const fs = yield* FileSystem.FileSystem;
           const path = yield* Path.Path;
           const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-          const folder = yield* fs.makeTempDirectoryScoped({ prefix: "movies-tool-lifetime-" });
+          const folder = yield* fs.makeTempDirectoryScoped({ prefix: "media-tool-lifetime-" });
           const transcodeDir = path.join(folder, "transcode");
           const sleeper = yield* writeExecutable(path.join(folder, "ffmpeg.mjs"), sleeperScript);
 

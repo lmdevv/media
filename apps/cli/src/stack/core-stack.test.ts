@@ -15,8 +15,8 @@ import {
   permissions,
   readText,
   removeDir,
-  runMovies,
-  startMovies,
+  runCli,
+  startCli,
   writeExecutable,
 } from "../testing/process";
 import { findCoreStack } from "../testing/stack-env";
@@ -143,7 +143,7 @@ const setUpOwner = (username: string) =>
   );
 
 const login = (env: Readonly<Record<string, string>>, username: string, password = PASSWORD) =>
-  runMovies(["auth", "login", "--server", url, "--username", username], env, password);
+  runCli(["auth", "login", "--server", url, "--username", username], env, password);
 
 let owner: Readonly<Record<string, string>>;
 
@@ -155,15 +155,11 @@ describe.skipIf(core === undefined)("the media CLI against the core", () => {
     proxy = await startOwnClientProxy(core?.signInUrl ?? "");
     owner = await install();
 
-    const info = await runMovies(["auth", "server", "info"], { ...owner, MEDIA_CORE_URL: url });
+    const info = await runCli(["auth", "server", "info"], { ...owner, MEDIA_CORE_URL: url });
 
     if (!Info(info.stdout).hasOwner) await setUpOwner(`owner-${id}`);
 
-    const reset = await runMovies(
-      ["admin", "reset-password", "--env-file", envFile],
-      owner,
-      PASSWORD,
-    );
+    const reset = await runCli(["admin", "reset-password", "--env-file", envFile], owner, PASSWORD);
 
     expect(reset.code, reset.stderr).toBe(ExitCode.ok);
     ownerName = Reset(reset.stdout).username;
@@ -180,7 +176,7 @@ describe.skipIf(core === undefined)("the media CLI against the core", () => {
 
     expect((await login(home, ownerName)).code).toBe(ExitCode.ok);
 
-    const session = await runMovies(["auth", "sessions", "current", "--json"], home);
+    const session = await runCli(["auth", "sessions", "current", "--json"], home);
 
     expect(session.code, session.stderr).toBe(ExitCode.ok);
 
@@ -188,7 +184,7 @@ describe.skipIf(core === undefined)("the media CLI against the core", () => {
 
     await seedMovies(me.userId, [`Sintel ${id}`, `Pioneer One ${id}`]);
 
-    const titles = await runMovies(["movies", "titles", "list", "--limit", "1000"], home);
+    const titles = await runCli(["movies", "titles", "list", "--limit", "1000"], home);
 
     expect(titles.code, titles.stderr).toBe(ExitCode.ok);
     expect(Titles(titles.stdout).page.map((title) => title.name)).toEqual(
@@ -215,7 +211,7 @@ describe.skipIf(core === undefined)("the media CLI against the core", () => {
     expect((await login(home, ownerName)).code).toBe(ExitCode.ok);
 
     const me = parse(Schema.Struct({ userId: Schema.String }))(
-      (await runMovies(["auth", "sessions", "current"], home)).stdout,
+      (await runCli(["auth", "sessions", "current"], home)).stdout,
     );
 
     await seedMovies(me.userId, [`Big Buck Bunny ${id}`]);
@@ -246,7 +242,7 @@ describe.skipIf(core === undefined)("the media CLI against the core", () => {
         });
       },
       (mediaUrl) =>
-        runMovies(["movies", "stream", `Big Buck Bunny ${id}`, "--open"], {
+        runCli(["movies", "stream", `Big Buck Bunny ${id}`, "--open"], {
           ...home,
           MEDIA_SERVER_URL: mediaUrl,
           PATH: `${bin}:${process.env["PATH"] ?? ""}`,
@@ -266,7 +262,7 @@ describe.skipIf(core === undefined)("the media CLI against the core", () => {
   });
 
   it("lists the core's users as its owner", async () => {
-    const users = await runMovies(["admin", "users", "list", "--limit", "1000"], owner);
+    const users = await runCli(["admin", "users", "list", "--limit", "1000"], owner);
 
     expect(users.code, users.stderr).toBe(ExitCode.ok);
     expect(Users(users.stdout).page).toContainEqual({ username: ownerName, role: "owner" });
@@ -275,7 +271,7 @@ describe.skipIf(core === undefined)("the media CLI against the core", () => {
   it("refuses media admin to a member with a JSON error", async () => {
     const member = `member-${id}`;
 
-    const created = await runMovies(["admin", "users", "create", member], {
+    const created = await runCli(["admin", "users", "create", member], {
       ...owner,
       MEDIA_ARG_PASSWORD: PASSWORD,
     });
@@ -286,7 +282,7 @@ describe.skipIf(core === undefined)("the media CLI against the core", () => {
 
     expect((await login(home, member)).code).toBe(ExitCode.ok);
 
-    const refused = await runMovies(["admin", "users", "list"], home);
+    const refused = await runCli(["admin", "users", "list"], home);
 
     expect(refused.code).toBe(ExitCode.forbidden);
     expect(errorCode(refused.stderr)).toBe("forbidden");
@@ -295,7 +291,7 @@ describe.skipIf(core === undefined)("the media CLI against the core", () => {
   it("sets a new password from the host, which ends the old sessions", async () => {
     const person = `lucia-${id}`;
 
-    await runMovies(["admin", "users", "create", person], {
+    await runCli(["admin", "users", "create", person], {
       ...owner,
       MEDIA_ARG_PASSWORD: PASSWORD,
     });
@@ -304,7 +300,7 @@ describe.skipIf(core === undefined)("the media CLI against the core", () => {
 
     expect((await login(home, person)).code).toBe(ExitCode.ok);
 
-    const reset = await runMovies(
+    const reset = await runCli(
       ["admin", "reset-password", person, "--env-file", envFile],
       await install(),
       "lucia-new-password",
@@ -313,7 +309,7 @@ describe.skipIf(core === undefined)("the media CLI against the core", () => {
     expect(reset.code, reset.stderr).toBe(ExitCode.ok);
     expect(Reset(reset.stdout).username).toBe(person);
 
-    const ended = await runMovies(["auth", "sessions", "current"], home);
+    const ended = await runCli(["auth", "sessions", "current"], home);
 
     expect(ended.code).toBe(ExitCode.unauthenticated);
     expect(errorCode(ended.stderr)).toBe("not_logged_in");
@@ -328,10 +324,10 @@ describe.skipIf(core === undefined)("the media CLI against the core", () => {
 
   it("signs in with a device code that a signed-in session approves", async () => {
     const device = await install();
-    const waiting = startMovies(["auth", "login", "--server", url], device);
+    const waiting = startCli(["auth", "login", "--server", url], device);
     const { userCode } = DeviceCode(await waiting.nextErrorLine());
 
-    const approved = await runMovies(
+    const approved = await runCli(
       ["auth", "device-codes", "approve", "--user-code", userCode, "--scopes", "account"],
       owner,
     );
@@ -342,7 +338,7 @@ describe.skipIf(core === undefined)("the media CLI against the core", () => {
 
     expect(done.code, done.stderr).toBe(ExitCode.ok);
 
-    const session = await runMovies(["auth", "sessions", "current"], device);
+    const session = await runCli(["auth", "sessions", "current"], device);
 
     expect(Session(session.stdout)).toMatchObject({ username: ownerName, kind: "deviceCode" });
   }, 30_000);
@@ -352,12 +348,12 @@ describe.skipIf(core === undefined)("the media CLI against the core", () => {
 
     expect((await login(home, ownerName)).code).toBe(ExitCode.ok);
 
-    const created = await runMovies(["auth", "registry", "enroll", "--name", "laptop"], home);
+    const created = await runCli(["auth", "registry", "enroll", "--name", "laptop"], home);
 
     expect(created.code, created.stderr).toBe(ExitCode.ok);
     const first = Enrolled(created.stdout);
 
-    const again = await runMovies(["auth", "registry", "enroll", "--name", "laptop"], {
+    const again = await runCli(["auth", "registry", "enroll", "--name", "laptop"], {
       ...home,
       MEDIA_ARG_DEVICE: first.device,
     });
@@ -370,10 +366,10 @@ describe.skipIf(core === undefined)("the media CLI against the core", () => {
     const home = await install();
 
     expect((await login(home, ownerName)).code).toBe(ExitCode.ok);
-    expect((await runMovies(["auth", "logout"], home)).code).toBe(ExitCode.ok);
-    expect((await runMovies(["auth", "logout"], home)).code).toBe(ExitCode.ok);
+    expect((await runCli(["auth", "logout"], home)).code).toBe(ExitCode.ok);
+    expect((await runCli(["auth", "logout"], home)).code).toBe(ExitCode.ok);
 
-    const after = await runMovies(["auth", "sessions", "current"], home);
+    const after = await runCli(["auth", "sessions", "current"], home);
 
     expect(errorCode(after.stderr)).toBe("not_logged_in");
   });

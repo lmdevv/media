@@ -33,7 +33,7 @@ export interface Running {
  * Starts the built CLI with only PATH plus `env` in its environment, feeding `stdin` if given.
  * `null` leaves stdin a pipe that never closes, as an agent's or a CI step's often is.
  */
-export const startMovies = (
+export const startCli = (
   args: ReadonlyArray<string>,
   env: Readonly<Record<string, string>>,
   stdin: string | null = "",
@@ -82,11 +82,11 @@ export const startMovies = (
 };
 
 /** Runs the built CLI to completion. */
-export const runMovies = (
+export const runCli = (
   args: ReadonlyArray<string>,
   env: Readonly<Record<string, string>>,
   stdin = "",
-): Promise<Run> => startMovies(args, env, stdin).done;
+): Promise<Run> => startCli(args, env, stdin).done;
 
 /** Creates an empty temporary directory. */
 export const makeTempDir = (prefix: string): Promise<string> => mkdtemp(join(tmpdir(), prefix));

@@ -120,7 +120,7 @@ class Server extends Context.Service<
 const serverLayer = Layer.unwrap(
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    const directory = yield* fs.makeTempDirectoryScoped({ prefix: "movies-diagnostics-" });
+    const directory = yield* fs.makeTempDirectoryScoped({ prefix: "media-diagnostics-" });
 
     const logs = yield* RetainedLogs.make({
       directory,
@@ -251,7 +251,7 @@ layer(serverLayer, { timeout: 30_000 })("log and diagnostics routes", (it) => {
 
       assert.strictEqual(response.status, 200);
       assert.strictEqual(response.headers.get("content-type"), "application/x-ndjson");
-      assert.strictEqual(response.headers.get("x-movies-log-truncated"), "false");
+      assert.strictEqual(response.headers.get("x-media-log-truncated"), "false");
       assert.deepStrictEqual(lines, SEED);
     }),
   );
@@ -570,7 +570,7 @@ layer(serverLayer, { timeout: 30_000 })("log routes without a log folder", (it) 
 
       assert.strictEqual(response.status, 200);
       assert.isFalse(
-        Number.isNaN(Date.parse(response.headers.get("x-movies-log-unavailable-since") ?? "")),
+        Number.isNaN(Date.parse(response.headers.get("x-media-log-unavailable-since") ?? "")),
       );
     }),
   );

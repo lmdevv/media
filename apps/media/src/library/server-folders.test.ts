@@ -16,7 +16,7 @@ const testLayer = Layer.unwrap(
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const base = yield* fs.makeTempDirectoryScoped({ prefix: "movies-server-folders-" });
+    const base = yield* fs.makeTempDirectoryScoped({ prefix: "media-server-folders-" });
     const root = path.join(base, "media");
     const missing = path.join(base, "nas");
     const outside = path.join(base, "private");

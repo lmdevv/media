@@ -146,7 +146,7 @@ test.beforeAll(async ({ browser }) => {
   if (stack === null) return;
 
   test.setTimeout(SETUP_TIMEOUT_MS);
-  workspace = await mkdtemp(join(tmpdir(), "movies-web-metadata-"));
+  workspace = await mkdtemp(join(tmpdir(), "media-web-metadata-"));
 
   const library = join(workspace, `Metadata ${run}`);
   const alien = join(library, "Alien Fixture (1979)");

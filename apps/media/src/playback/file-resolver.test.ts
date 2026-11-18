@@ -25,7 +25,7 @@ const testLayer = Layer.unwrap(
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const base = yield* fs.makeTempDirectoryScoped({ prefix: "movies-file-resolver-" });
+    const base = yield* fs.makeTempDirectoryScoped({ prefix: "media-file-resolver-" });
     const library = path.join(base, "library");
     const outside = path.join(base, "outside");
     const inLibrary = (name: string) => path.join(library, name);

@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { ExitCode } from "./cli-errors";
 import { withMediaService } from "./testing/media-service";
-import { buildCli, makeTempDir, removeDir, runMovies, startMovies } from "./testing/process";
+import { buildCli, makeTempDir, removeDir, runCli, startCli } from "./testing/process";
 import { stderrRecords } from "./testing/run-cli";
 
 let home = "";
@@ -77,7 +77,7 @@ const afterFailedSave = (
         session: { token: jwtExpiringAt(1_000_000_000), refreshToken: "refresh-home" },
       });
 
-      return runMovies(["auth", "sessions", "current", ...flags], {
+      return runCli(["auth", "sessions", "current", ...flags], {
         XDG_CONFIG_HOME: signedIn,
         HOME: signedIn,
       });
@@ -101,16 +101,12 @@ describe("the media binary", () => {
     const env = { XDG_CONFIG_HOME: home, HOME: home };
 
     const runs = await Promise.all([
-      runMovies(
+      runCli(
         ["admin", "reset-password", "ana"],
         { ...env, MEDIA_CORE_URL: "http://127.0.0.1:9", MEDIA_CORE_ADMIN_KEY: "admin-key" },
         " \n",
       ),
-      runMovies(
-        ["auth", "login", "--server", "http://127.0.0.1:9", "--username", "ana"],
-        env,
-        " \n",
-      ),
+      runCli(["auth", "login", "--server", "http://127.0.0.1:9", "--username", "ana"], env, " \n"),
     ]);
 
     for (const run of runs) {
@@ -143,7 +139,7 @@ describe("the media binary", () => {
             }),
           );
 
-          const running = startMovies(
+          const running = startCli(
             ["auth", "registry", "enroll", "--name", "Laptop"],
             { XDG_CONFIG_HOME: signedIn, HOME: signedIn, MEDIA_CORE_URL: url },
             null,
@@ -168,7 +164,7 @@ describe("the media binary", () => {
     const env = { XDG_CONFIG_HOME: home, HOME: home };
 
     const runs = await Promise.all([
-      runMovies(
+      runCli(
         ["admin", "reset-password", "ana"],
         {
           ...env,
@@ -178,7 +174,7 @@ describe("the media binary", () => {
         },
         "password\n",
       ),
-      runMovies(
+      runCli(
         ["auth", "login", "--server", "http://127.0.0.1:9", "--username", "ana"],
         { ...env, MEDIA_PASSWORD: " " },
         "password\n",
@@ -212,7 +208,7 @@ describe("the media binary", () => {
         response.end(record.repeat(5000));
       },
       (mediaUrl) => {
-        const running = startMovies(["logs", "--json", "--limit", "5000"], {
+        const running = startCli(["logs", "--json", "--limit", "5000"], {
           XDG_CONFIG_HOME: signedIn,
           HOME: signedIn,
           MEDIA_SERVER_URL: mediaUrl,
