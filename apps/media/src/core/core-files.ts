@@ -26,7 +26,7 @@ const make = Effect.gen(function* () {
       );
 
     // The core answers null for a missing file and for one whose title is being purged.
-    if (resolved === null || resolved.missing) return yield* new MediaFileNotFound({ fileId });
+    if (resolved === null) return yield* new MediaFileNotFound({ fileId });
 
     const insideLibrary = resolved.roots.some((root) =>
       Option.isSome(relativeTo(root, resolved.path)),

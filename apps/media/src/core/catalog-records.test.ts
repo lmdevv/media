@@ -110,7 +110,6 @@ describe.skipIf(!hasFfmpeg)("catalog records", () => {
                   roots: [root],
                   probe: decoded.file.probe,
                   externalSubtitles: decoded.file.externalSubtitles,
-                  missing: false,
                 },
                 decoded.file.sizeBytes,
                 decoded.file.mtimeMs,
