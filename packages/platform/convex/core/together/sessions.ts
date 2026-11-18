@@ -92,7 +92,7 @@ export const endSession = async (
 
   const cold = await factsIn(ctx.db, sessionId);
 
-  if (cold !== null) await ctx.db.patch(cold._id, { live: false });
+  await ctx.db.patch(cold._id, { live: false });
 
   await dropBeats(ctx, sessionId);
   await ctx.scheduler.runAfter(ENDED_KEEP_MS, internal.core.together.sessions.purge, {
@@ -136,7 +136,7 @@ export const purge = internalMutation({
     await Promise.all(members.map(async (member) => ctx.db.delete(member._id)));
     await deleteCounter(ctx.db, queueCounter(sessionId));
 
-    if (cold !== null) await ctx.db.delete(cold._id);
+    await ctx.db.delete(cold._id);
     await ctx.db.delete(sessionId);
 
     return null;

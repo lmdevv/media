@@ -26,7 +26,7 @@ import {
 import type { Decider } from "./person";
 import { likedAmong, musicPresenter } from "./present";
 import { TRACK_ROW_BYTES, pageRowsFor } from "./reads";
-import { musicStore, queueRevision } from "./write";
+import { musicStore } from "./write";
 import type { MusicStore } from "./write";
 
 /** The longest queue kept, as old music's `MAX_QUEUE`. */
@@ -594,7 +594,7 @@ export const { get, list, play, add, remove, move, clear, jump, shuffle, repeat,
         shuffle: queue.shuffle,
         repeat: queue.repeat,
         autoplay: queue.autoplay,
-        revision: queueRevision(queue),
+        revision: queue.revision,
       };
     },
     list: async (ctx, { paginationOpts }, caller) => {
@@ -648,7 +648,7 @@ export const { get, list, play, add, remove, move, clear, jump, shuffle, repeat,
             track: await present.track(track, liked.has(track._id)),
           })),
         ),
-        revision: queueRevision(queue),
+        revision: queue.revision,
       };
     },
     play: async (ctx, args, caller) => {

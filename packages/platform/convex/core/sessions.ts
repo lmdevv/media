@@ -58,7 +58,7 @@ export type Opening =
       readonly kind: "deviceCode";
       readonly code: Extract<Doc<"deviceCodes">, { readonly state: "approved" }>;
     }
-  | { readonly kind: "tile"; readonly device: Doc<"devices"> }
+  | { readonly kind: "tile"; readonly device: Doc<"devices">; readonly joined: number }
   | { readonly kind: "guest"; readonly link: LinkDoc }
   | { readonly kind: "grant"; readonly grant: Doc<"deviceGrants"> };
 
@@ -289,7 +289,11 @@ export const openSession = async (
       kind: "tile",
       expirationTime: now + TILE_SESSION_MS,
       generation: user.sessionGeneration,
-      device: { id: opening.device._id, generation: opening.device.generation },
+      device: {
+        id: opening.device._id,
+        generation: opening.device.generation,
+        joined: opening.joined,
+      },
     });
   }
 

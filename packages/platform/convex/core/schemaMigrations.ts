@@ -3,7 +3,6 @@ import { v } from "convex/values";
 import { internal } from "../_generated/api";
 import type { DatabaseReader, MutationCtx } from "../_generated/server";
 import { internalMutation, internalQuery } from "../_generated/server";
-import { clearRowsBeforeItems } from "./connect/beforeItems";
 
 interface Batch {
   readonly continueCursor: string;
@@ -37,7 +36,6 @@ const MIGRATIONS = [
 
     return page;
   }),
-  defineMigration("connect.clearRowsBeforeItems", clearRowsBeforeItems),
 ] as const;
 
 type MigrationName = (typeof MIGRATIONS)[number]["name"];

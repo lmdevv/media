@@ -10,12 +10,11 @@ import {
   moveAsk,
   nextRevision,
   ONLINE_MS,
-  pendingRequest,
   playbackOf,
   positionAt,
   settledAfter,
 } from "../../../convex/core/connect/playback";
-import type { Asked, Player, Request } from "../../../convex/core/connect/playback";
+import type { Player, Request } from "../../../convex/core/connect/playback";
 
 // SAFETY: a type predicate, not checked by the compiler. A Convex id is an opaque string; these
 // functions only compare ids for equality and never send one to a backend.
@@ -64,7 +63,7 @@ const pause = (item: DomainItem): Ask => ({
   at: 2_000,
 });
 
-const request = (fields: Partial<Omit<Asked, "_id" | "_creationTime">> = {}): Asked => ({
+const request = (fields: Partial<Omit<Request, "_id" | "_creationTime">> = {}): Request => ({
   _id: idOf("connectRequests", "tv"),
   _creationTime: 0,
   deviceId: TV,
@@ -156,41 +155,6 @@ describe("what a device plays, as controllers see it", () => {
 
     expect(playbackOf(player({ reportedAt: 2_100 }), stopped)).toBeNull();
     expect(playbackOf(player({ settled: 1, playback: null }), stopped)).toBeNull();
-  });
-});
-
-describe("rows v0.3.0 wrote, before items", () => {
-  const oldReport = player({ playback: { domain: "movies", playing: true, positionMs: 60_000 } });
-
-  const oldRequest: Request = {
-    _id: idOf("connectRequests", "tv"),
-    _creationTime: 0,
-    deviceId: TV,
-    reporter: LUCIA,
-    revision: 1,
-    playing: false,
-    positionMs: 61_000,
-    at: 2_000,
-  };
-
-  it("read a report that names no item as playing nothing", () => {
-    expect(playbackOf(oldReport, null)).toBeNull();
-    expect(playbackOf(oldReport, oldRequest)).toBeNull();
-  });
-
-  it("never take a flat transport as pending, so the report stands", () => {
-    expect(pendingRequest(player(), oldRequest)).toBeNull();
-    expect(playbackOf(player(), oldRequest)).toMatchObject({ item: FILM, pending: false });
-  });
-
-  it("still count an old request's revision, so the next one is above it", () => {
-    expect(nextRevision({ ...oldRequest, revision: 4 })).toBe(5);
-  });
-
-  it("show a load made after the upgrade over an old report", () => {
-    expect(
-      playbackOf(oldReport, request({ ask: loadAsk(SONG, 0, 2_000, 2), revision: 2 })),
-    ).toMatchObject({ item: SONG, pending: true, loading: 2 });
   });
 });
 

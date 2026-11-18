@@ -136,7 +136,7 @@ const tileSession = (user: Doc<"users">): Doc<"authSessions"> => ({
   expirationTime: 1,
   generation: 0,
   kind: "tile",
-  device: { id: idOf("devices", "tv"), generation: 0 },
+  device: { id: idOf("devices", "tv"), generation: 0, joined: 1 },
 });
 
 describe("a tile's lock", () => {

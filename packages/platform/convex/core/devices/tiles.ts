@@ -11,7 +11,7 @@ import { refundAttempt } from "../lib/rateLimit";
 import { requireAccount } from "../permissions/authorize";
 import { proverOf } from "../permissions/policy";
 import type { PersonDoc } from "../permissions/policy";
-import { openSession, signedIn } from "../sessions";
+import { signedIn } from "../sessions";
 import { markRedeemed, redeemable } from "./approvals";
 import type { Redeemed } from "./approvals";
 import {
@@ -89,9 +89,7 @@ export const open = internalMutation({
 
     await requireOpen(ctx.db, device, person, prover);
 
-    const sessionId = await openSession(ctx, person, { kind: "tile", device }, now);
-
-    await occupyTile(ctx, device, { userId: person._id, sessionId });
+    const sessionId = await occupyTile(ctx, device, person, now);
 
     if (prover !== null) await clearStrikes(ctx, device._id, prover.userId);
 

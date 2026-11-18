@@ -479,7 +479,7 @@ describe.skipIf(stack === undefined)("Connect", { timeout: 180_000 }, () => {
       expirationTime: Date.now() + 24 * 60 * 60 * 1000,
       generation: -1,
       kind: "password" as const,
-      device: { id: deviceId, generation: 0 },
+      device: { id: deviceId, generation: 0, joined: 1 },
     });
 
     const [crowded = laptop.deviceId] = above;

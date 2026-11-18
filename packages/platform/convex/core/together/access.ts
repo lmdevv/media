@@ -119,6 +119,13 @@ export const factsOf = (
     standing,
   );
 
+/** Fails `action` for a caller in no session in `domain`: `not_found`, or the refusal's own code. */
+const outside = (caller: Principal, action: TogetherAction, domain: ContentDomain): never => {
+  const decision = can(caller, action, { on: "together", domain, session: null });
+
+  return decision.allowed ? fail("not_found", NOT_IN) : refuse(decision);
+};
+
 /** The caller's session in a domain, their row in it, and where they stand. */
 export interface InSession {
   readonly session: SessionDoc;
@@ -149,11 +156,7 @@ export const requireTogether = async (
 
   const session = member === null ? null : await ctx.db.get(member.sessionId);
 
-  if (member === null || session === null) {
-    const decision = can(caller, action, { on: "together", domain, session: null });
-
-    return decision.allowed ? fail("not_found", NOT_IN) : refuse(decision);
-  }
+  if (member === null || session === null) return outside(caller, action, domain);
 
   const place = placeOf(session, caller.userId, member);
   const decision = can(caller, action, factsOf(session, place));
@@ -169,21 +172,20 @@ export interface InQueue {
   readonly factsFor: (standing: Standing) => TogetherResource;
 }
 
-/** The cold facts kept beside `sessionId` (`factsDocument`); null for a session from before. */
-export const factsIn = (
+/** The cold facts kept beside `sessionId` (`factsDocument`). */
+export const factsIn = async (
   db: DatabaseReader,
   sessionId: Id<"togetherSessions">,
-): Promise<FactsDoc | null> =>
-  db
+): Promise<FactsDoc> =>
+  (await db
     .query("togetherFacts")
     .withIndex("by_session", (q) => q.eq("sessionId", sessionId))
-    .unique();
+    .unique()) ?? fail("not_found", NOT_IN);
 
 /**
  * Loads the caller's session in `domain` and decides `view` on its queue, as `requireTogether`
  * does, from the session's cold facts rather than its document, so a query over its queue re-runs
- * on neither its clock nor what it plays (ADR 0017). A session from before its facts were kept is
- * decided from its document, as before.
+ * on neither its clock nor what it plays (ADR 0017).
  */
 export const requireQueue = async (
   ctx: Pick<QueryCtx, "db">,
@@ -191,14 +193,10 @@ export const requireQueue = async (
   domain: ContentDomain,
 ): Promise<InQueue> => {
   const member = await memberIn(ctx.db, caller.userId, domain);
-  const cold = member === null ? null : await factsIn(ctx.db, member.sessionId);
 
-  if (member === null || cold === null) {
-    const { session, place } = await requireTogether(ctx, caller, domain, "view");
+  if (member === null) return outside(caller, "view", domain);
 
-    return { sessionId: session._id, factsFor: (standing) => factsOf(session, place, standing) };
-  }
-
+  const cold = await factsIn(ctx.db, member.sessionId);
   const place = placeInside(cold.hostId, caller.userId, member);
   const factsFor = (standing: Standing): TogetherResource => factsAbout(cold, place, standing);
   const decision = can(caller, "view", factsFor({}));
