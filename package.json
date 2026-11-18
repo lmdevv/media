@@ -1,5 +1,5 @@
 {
-  "name": "movies",
+  "name": "media",
   "private": true,
   "license": "MIT",
   "workspaces": [
@@ -10,7 +10,6 @@
   "scripts": {
     "dev": "turbo run dev",
     "build": "turbo run build",
-    "dev:web": "turbo run dev -F web --",
     "prepare": "effect-tsgo patch --typescript --oxlint && lefthook install",
     "typecheck": "turbo run typecheck && tsc --noEmit -p scripts",
     "lint": "oxlint --disable-nested-config",

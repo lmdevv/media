@@ -7,7 +7,7 @@ import { stackEnv } from "./e2e/stack/stack-env";
 
 const stack = stackEnv();
 
-const port = Number(process.env["E2E_PORT"] ?? stack?.webPort ?? 3011);
+const port = Number(process.env["E2E_PORT"] ?? stack?.moviesPort ?? 3011);
 
 const accountUrl = new URL(stack?.accountUrl ?? `http://localhost:${port + 3}`);
 

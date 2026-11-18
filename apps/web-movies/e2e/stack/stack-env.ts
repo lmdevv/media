@@ -30,7 +30,7 @@ export interface StackEnv {
   readonly adminKey: string;
   readonly mediaUrl: string;
   /** The movies dev server's port; it serves `/movies/` and passes the rest to the account's. */
-  readonly webPort: number;
+  readonly moviesPort: number;
   /** The account client's dev server. */
   readonly accountUrl: string;
   /** The stack's sign-in boundary (`scripts/dev-stack.sh`), where every sign-in goes. */
@@ -47,7 +47,7 @@ export const stackEnv = (): StackEnv | null => {
 
   const platformUrl = pick("VITE_PLATFORM_URL", web);
   const mediaUrl = pick("VITE_MEDIA_BASE_URL", web);
-  const webPort = pick("WEB_PORT", web);
+  const moviesPort = pick("MOVIES_PORT", web);
   const accountUrl = pick("ACCOUNT_DEV_URL", web);
   const signInUrl = pick("VITE_SIGN_IN_URL", web);
   const adminKey = platform.get("CONVEX_SELF_HOSTED_ADMIN_KEY");
@@ -55,7 +55,7 @@ export const stackEnv = (): StackEnv | null => {
   if (
     platformUrl === undefined ||
     mediaUrl === undefined ||
-    webPort === undefined ||
+    moviesPort === undefined ||
     accountUrl === undefined ||
     signInUrl === undefined ||
     adminKey === undefined ||
@@ -68,7 +68,7 @@ export const stackEnv = (): StackEnv | null => {
     platformUrl,
     adminKey,
     mediaUrl,
-    webPort: Number(webPort),
+    moviesPort: Number(moviesPort),
     accountUrl,
     signInUrl,
     mediaEnv: Object.fromEntries(media),

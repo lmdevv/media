@@ -29,8 +29,8 @@ run="$(slug "${MEDIA_VERIFY_RUN:-$(basename "$root")}")"
 state_root="${TMPDIR:-/tmp}/media-verify/$run"
 evidence_root="$root/captures/verify/$run"
 mac="${MAC_HOST:-darwin}"
-axe='$HOME/music-ios/tools/axe/axe'
-mac_dir="movies-ios"
+axe='$HOME/media-ios/tools/axe/axe'
+mac_dir="media-ios"
 before_image_default="ghcr.io/lmdevv/media:main"
 demo_image="$(<"$root/deploy/demo-library/image")"
 cli_js="$root/apps/cli/dist/media.js"
@@ -666,9 +666,9 @@ ios_app() {
   echo "${app:-movies}"
 }
 
-# The dev client, built on the Mac from this checkout: the checkout syncs to ~/movies-ios/verify-<run>
+# The dev client, built on the Mac from this checkout: the checkout syncs to ~/media-ios/verify-<run>
 # there, `expo prebuild` runs only when the native inputs changed, and xcodebuild builds into
-# ~/movies-ios/dd-verify-<run>. The app then moves to ~/movies-ios/dev-client-<hash>, named for the
+# ~/media-ios/dd-verify-<run>. The app then moves to ~/media-ios/dev-client-<hash>, named for the
 # native inputs, and the derived data goes, so every run and worktree with the same inputs installs
 # one build. JavaScript always comes from Metro.
 native_inputs='cat app.json package.json ../../pnpm-lock.yaml; if [ -d modules ]; then find assets modules -type f | sort; find modules -type f -print0 | sort -z | xargs -0 cat; else find assets -type f | sort; fi'
@@ -718,7 +718,7 @@ cmd_ios_up() {
     || die "the music iOS app signs in to the core's music, which the $side side's image does not serve; run it against an image with the music client (music_core)"
   [[ -n "$(read_state people)" ]] || die "start the $side side first: \`up --side $side\` (with setup)"
   [[ -z "$(read_state ios_udid)" ]] || die "the $side side already has a simulator; run \`ios down --side $side\`"
-  ((sign_in == 0)) || on_mac "test -x $axe" || die "AXe is missing on $mac at ~/music-ios/tools/axe/axe; unpack the release from github.com/cameroncooke/AXe there"
+  ((sign_in == 0)) || on_mac "test -x $axe" || die "AXe is missing on $mac at ~/media-ios/tools/axe/axe; unpack the release from github.com/cameroncooke/AXe there"
   write_state ios_app "$name"
   # The Mac's disk runs nearly full, and a full disk fails a build or a boot halfway with errors
   # that don't say why. A simulator needs about 2 GB; a first build also needs about 7 GB for the

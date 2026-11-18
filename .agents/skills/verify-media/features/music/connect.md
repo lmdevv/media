@@ -99,9 +99,9 @@ Preconditions:
 - An iOS simulator can't press the lock screen, Control Center, or headphones.
   `scripts/ios-remote-command.m` sends MediaRemote's play, pause, toggle, next, and previous
   inside the simulator as they do, which agent-device can't. Copy it to the Mac's
-  `~/music-ios/tools/` and build it there with `xcrun -sdk iphonesimulator clang -arch arm64
+  `~/media-ios/tools/` and build it there with `xcrun -sdk iphonesimulator clang -arch arm64
   -mios-simulator-version-min=17.0 -fobjc-arc -framework Foundation ios-remote-command.m -o
-  ios-remote-command`, then run `xcrun simctl spawn <udid> ~/music-ios/tools/ios-remote-command pause`.
+  ios-remote-command`, then run `xcrun simctl spawn <udid> ~/media-ios/tools/ios-remote-command pause`.
 - In Now Playing, snapshot marks the controls `[covered]` and ref taps don't land: tap by point.
 - A killed app leaves the list about 35 seconds after its last report. iOS suspends a backgrounded
   app that plays nothing on a real phone, which then leaves the same way; a simulator keeps it
