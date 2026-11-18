@@ -50,7 +50,7 @@ server is out of reach, the player plays the phone's own queue of downloaded son
 ## Downloads
 
 `src/downloads` keeps the albums, playlists, and songs someone downloads on this phone. The phone
-keeps each download as a pin and reads its songs from the core; old music's sync engine
+keeps each download as a pin and reads its songs from the core; the sync engine
 (`src/downloads/sync`) plans what to fetch and delete, keeps each song on the core with
 `core.downloads.add`, and fetches its finished file (`&finished=1`) with a ticket from
 `core.downloads.fetch`. It keeps each downloaded song's lyrics too, so Now Playing shows them with

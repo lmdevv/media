@@ -102,7 +102,7 @@ export interface PlayerEngine {
   pause(): void;
   /**
    * Moves to `positionMs` in the current source. Reports `time` at `positionMs` at once, and never
-   * a position from before the seek after that, even while the seek is still landing.
+   * the position it left after that, even while the seek is still landing.
    */
   seek(positionMs: number): void;
   /** Sets the output volume, from 0 to 1. */

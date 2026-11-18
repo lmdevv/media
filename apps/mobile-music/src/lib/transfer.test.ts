@@ -144,7 +144,7 @@ describe("transferArrived", () => {
     expect(transferArrived(landed, { here: false, devices: [laptopPlaying(false)] })).toBe(true);
   });
 
-  it("counts nothing before the core took the move, as the device's report from before it", () => {
+  it("counts nothing before the core took the move, as the device's earlier report", () => {
     expect(
       transferArrived(
         { state: "pending", move: toLaptop, landed: false },

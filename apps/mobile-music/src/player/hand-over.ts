@@ -33,9 +33,7 @@ export interface HandOver {
  * entry this phone plays, and the song stays where it is. A new queue's entries get new ids, so
  * the song loaded here takes the id the core answered.
  *
- * Old music did the same: its router kept showing the phone's own session while it reconciled,
- * and sent the position with it (`devices.reconcile`). The core's queue keeps no position, so the
- * phone keeps it.
+ * The core's queue keeps no position, so the phone keeps it.
  *
  * A step that never settles, as when the media server answers but the core does not, would hold
  * the player on the phone's queue while commands go to the core. Past `deadlineMs` the phone stops

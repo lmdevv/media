@@ -12,8 +12,8 @@ import { Page } from "@/components/ui/page";
 import { parseJamLink } from "@/lib/jam";
 
 /**
- * A Jam's link opened in the app, `music://jam/<link>`: joins through it, as old music's
- * `jam/<code>` did, then shows the Jam, or why it cannot be joined.
+ * A Jam's link opened in the app, `music://jam/<link>`: joins through it, then shows the Jam, or
+ * why it cannot be joined.
  */
 export default function JoinByLink() {
   const platform = usePlatform();

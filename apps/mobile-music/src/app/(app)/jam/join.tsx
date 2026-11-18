@@ -9,7 +9,7 @@ import { Page } from "@/components/ui/page";
 import { Text } from "@/components/ui/text";
 import { parseJamLink } from "@/lib/jam";
 
-/** Joins a Jam by the link someone sent, pasted here, as old music's Join a Jam did. */
+/** Joins a Jam by the link someone sent, pasted here. */
 export default function JoinJam() {
   const [text, setText] = useState("");
   const [failure, setFailure] = useState<string | null>(null);

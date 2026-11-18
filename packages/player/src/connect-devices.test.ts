@@ -183,7 +183,7 @@ describe("deviceKind", () => {
     expect(deviceKind("Browser on Windows")).toBe("web");
   });
 
-  it("counts a browser on a phone as a phone, as old music did", () => {
+  it("counts a browser on a phone as a phone", () => {
     expect(deviceKind("Safari on iPhone")).toBe("phone");
     expect(deviceKind("Chrome on Android")).toBe("phone");
   });

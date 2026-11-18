@@ -6,7 +6,7 @@ import { Data, Result } from "effect";
 import type { EngineSource } from "./engine";
 import { messageOf } from "./failure";
 
-/** Renew a ticket this long before it expires, as old music renewed its signed URLs. */
+/** Renew a ticket this long before it expires, so a load near its expiry never meets a dead one. */
 const RENEW_MARGIN_MS = 5 * 60_000;
 
 /** Why a stream can't answer from this device alone. */
@@ -58,7 +58,7 @@ export class StreamRefused extends Data.TaggedError("StreamRefused")<{
 /**
  * Nothing can provide the song now: this device holds no copy of it, and the server can't be
  * asked, as while a phone plays its own queue without the server. The player moves on to the next
- * song, as old music's did.
+ * song.
  */
 export class SourceUnreachable extends Data.TaggedError("SourceUnreachable")<{
   /** Safe to show the listener. */

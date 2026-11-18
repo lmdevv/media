@@ -56,7 +56,7 @@ test("one sign-in at / opens /music signed in; a song plays and moves on to the 
   await page.getByRole("link", { name: album }).first().click();
   await expect(page.getByRole("heading", { name: album })).toBeVisible();
 
-  // A desktop row plays on a double click, as old music's did; its play button shows on hover.
+  // A desktop row plays on a double click; its play button shows on hover.
   await page
     .getByRole("main")
     .getByRole("row", { name: new RegExp(FIRST_SONG, "u") })

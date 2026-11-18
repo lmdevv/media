@@ -11,8 +11,8 @@ import { describeFailure } from "@/lib/action";
 
 /**
  * A Jam's link, `/jam#<link>`: the link travels after `#`, so no request or referrer carries it,
- * and it leaves the address and history once read. The page joins through it, as old music's
- * `/jam/<code>` did, and goes home, where the Jam band shows the Jam and the player follows it;
+ * and it leaves the address and history once read. The page joins through it and goes home, where
+ * the Jam band shows the Jam and the player follows it;
  * or it says why it cannot: waiting for the host, or a locked, ended, or unknown Jam.
  */
 export const Route = createFileRoute("/_app/jam")({

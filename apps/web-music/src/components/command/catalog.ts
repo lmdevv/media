@@ -34,7 +34,7 @@ export type Destination =
   | { readonly kind: "account"; readonly href: string };
 
 interface Screen {
-  /** A word search matches, as old music's command name did. */
+  /** A word search matches. */
   readonly name: string;
   readonly title: string;
   readonly destination: Destination;

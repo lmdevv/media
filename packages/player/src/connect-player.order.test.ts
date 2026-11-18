@@ -14,7 +14,7 @@ const track = (id: string) => ({ domain: "music", ref: { type: "track", id } }) 
 /**
  * Once everything settled, the engine plays exactly when the controller says this device plays,
  * and the controller means it: a skip made on another device carries this device's play or pause
- * to the next song, as old music's active device followed the queue.
+ * to the next song.
  */
 const expectEngineAsMeant = async (run: Run): Promise<void> => {
   const here = run.controller.playingHere();

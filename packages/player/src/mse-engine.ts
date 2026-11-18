@@ -169,7 +169,7 @@ const mediaSourceClass = (): typeof MediaSource | null => {
   return globalThis.ManagedMediaSource ?? null;
 };
 
-/** Reads a session's flag after an await; TypeScript would keep a narrowing from before it. */
+/** Reads a session's flag after an await; TypeScript would keep a narrowing made before it. */
 const isCancelled = (session: Session): boolean => session.cancelled;
 
 const elementErrorReason = (error: MediaError): EngineErrorReason =>

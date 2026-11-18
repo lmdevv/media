@@ -75,7 +75,7 @@ export const useRevokeInvite = (): ((invite: PendingInvite) => Promise<void>) =>
 
 /**
  * Saves a person's page: their new role first, then the libraries given to them and taken away.
- * A library is given at `view`, as old movies' library access let a member browse and play it.
+ * A library is given at `view`, which lets the person browse and play it.
  */
 export const useSavePerson = (): ((change: {
   readonly userId: UserId;

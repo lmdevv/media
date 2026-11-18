@@ -1,5 +1,5 @@
 /**
- * Jams, old music's name for group sessions, as the music app reaches them over `core.together.*`
+ * Jams, music's name for group sessions, as the music app reaches them over `core.together.*`
  * (ADR 0017): their links, and the words for how one ended.
  */
 import type { SessionView } from "@media/player/session-react";
@@ -31,7 +31,7 @@ export const jamWebUrl = (mediaUrl: string, link: string): string =>
 
 type Ended = Extract<NonNullable<SessionView>, { readonly state: "ended" }>;
 
-/** Why a Jam ended, in old music's words. */
+/** Why a Jam ended, for the screen. */
 export const endedLine = (reason: Ended["reason"]): string =>
   reason === "host-left" ? "The host ended it." : "The host was away for half an hour.";
 

@@ -45,6 +45,6 @@ export interface ProbeInputs {
 /**
  * Whether the app keeps asking the server whether it answers: on screen, and in the background
  * while audio plays, so an outage met with the phone in a pocket still moves the player to the
- * downloaded songs. Old music's app read its socket's state, which it kept in the background too.
+ * downloaded songs.
  */
 export const probesReach = ({ active, audible }: ProbeInputs): boolean => active || audible;

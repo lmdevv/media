@@ -5,7 +5,7 @@
  *
  * The session's queue reaches the controller as a queue whose playing entry is first, so the
  * gapless engine preloads what the session plays next and moves on to it by itself at the end of
- * a song. Only the session moves on, though, and the core decides when, as old music's jams did:
+ * a song. Only the session moves on, though, and the core decides when:
  * the host's player says when its engine finished the session's song (`core.together.ended`), and
  * the core, once its own clock agrees, reads its queue and moves on to what is queued then, as far
  * in as the clock ran past the end (`carriedPast`), so every member's engine, which moved on at
@@ -202,7 +202,7 @@ const RETRY_MS = 2_000;
  */
 const CLOCKS_APART_MS = 1_000;
 
-/** What a member hears who may not move the session, in old music's words. */
+/** What a member hears who may not move the session. */
 export const NO_CONTROL = "The host controls playback in this Jam";
 
 /** A session call the core refused or that did not reach it; `message` says why, for the screen. */
@@ -555,7 +555,7 @@ export class SessionPlayback<T extends Track = Track> {
 
   /**
    * Starts the song again, as a member who may control: a session keeps no songs it played, so
-   * there is no song before to go back to, as old music's jam queue had.
+   * there is no song before to go back to.
    */
   previous(): Promise<string | null> {
     return this.seek(0);
@@ -771,8 +771,8 @@ export class SessionPlayback<T extends Track = Track> {
   }
 
   /**
-   * As the host, hears the engine's end of the session's playing entry, as old music's player
-   * moved its jam on at the end of the host's song: the engine says the entry finished, by itself
+   * As the host, hears the engine's end of the session's playing entry, so the session moves on at
+   * the end of the host's song: the engine says the entry finished, by itself
    * at its end or by moving on to the preloaded entry without a gap, and the host's player tells
    * the core (`#sayEnded`), which decides. Nobody else's engine moves the session on.
    */
@@ -976,7 +976,7 @@ const SESSION_QUEUE_MAX = 500;
 
 /**
  * Starts a music session on the song the listener plays, where it stands, playing if it played,
- * as old music's jams shared the host's player and queue (ADR 0017). Resolves once the session
+ * so the session goes on from the host's player and queue (ADR 0017). Resolves once the session
  * stands there; the songs queued after it then join its queue in order, as many a call as the core
  * takes, up to the session's limit. Every call names the session `create` made, so once it ended
  * or the person left it, the core refuses the next one, and the fill stops for good rather than

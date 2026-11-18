@@ -60,8 +60,7 @@ const ONLINE = "Online";
  * The sheet for the person's devices and the move in progress: this phone first, then the device
  * that plays, then the rest by name. With nothing playing anywhere, this phone is the current one.
  * A move shows the devices it went from and to, as listed when it started, even once one of them
- * leaves the list, as old music's sheet, which listed offline devices too, showed them. A device
- * that casts or AirPlays says so in place of its status (ADR 0018).
+ * leaves the list. A device that casts or AirPlays says so in place of its status (ADR 0018).
  */
 export const deviceSheet = ({
   family,

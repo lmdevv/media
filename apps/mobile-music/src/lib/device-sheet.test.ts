@@ -77,7 +77,7 @@ describe("deviceSheet", () => {
     ]);
   });
 
-  it("counts this phone as current while nothing plays anywhere, as old music did", () => {
+  it("counts this phone as current while nothing plays anywhere", () => {
     const sheet = deviceSheet(input({ devices: [mac] }));
 
     expect(sheet.kind === "picker" && sheet.rows[0]).toMatchObject({
@@ -107,7 +107,7 @@ describe("deviceSheet", () => {
     });
   });
 
-  it("moves here from the device that plays, as old music's Play here did", () => {
+  it("moves here from the device that plays", () => {
     const sheet = deviceSheet(
       input({
         devices: [mac],

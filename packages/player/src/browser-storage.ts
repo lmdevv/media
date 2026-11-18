@@ -63,7 +63,7 @@ const encodeResume = Schema.encodeSync(ResumeJson);
 
 /**
  * What this browser chose the last time, for a session whose settings the core cannot keep for
- * this device, or before they load: old music kept quality and volume per browser.
+ * this device, or before they load: quality and volume as this browser left them.
  */
 export const browserSettings = (
   storage: KeyValueStorage | null,
@@ -91,7 +91,7 @@ export const saveBrowserVolume = (storage: KeyValueStorage | null, volume: numbe
   writeItem(storage, VOLUME_KEY, String(volume));
 };
 
-/** Where this browser left the playing song, kept across page loads as old music's server kept it. */
+/** Where this browser left the playing song, kept across page loads so a reload resumes it. */
 export const browserResume = (storage: KeyValueStorage | null) => ({
   load: (): ResumePoint | null => Option.getOrNull(decodeResume(readItem(storage, RESUME_KEY))),
   save: (point: ResumePoint | null): void => {

@@ -396,7 +396,7 @@ function ActionRow({
   readonly onPanel: (panel: Panel) => void;
 }) {
   const queueOpen = selected === "queue";
-  // In a Jam the phone offers no AirPlay button, as old music offered none there (ADR 0018).
+  // In a Jam the phone offers no AirPlay button (ADR 0018).
   const inJam = useMusicSession().view?.state === "joined";
 
   return (

@@ -1,6 +1,6 @@
 /**
- * Pages of the account client at the origin's root (ADR 0020), where old music's account, key,
- * people, library, and job settings moved. They sit outside the music client's base path, so links
+ * Pages of the account client at the origin's root (ADR 0020), which holds the account, key,
+ * people, library, and job settings. They sit outside the music client's base path, so links
  * to them load the account client rather than route here.
  */
 

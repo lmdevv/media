@@ -19,8 +19,7 @@ const decodeId = Schema.decodeUnknownOption(AlbumId);
 const FAILED = "Couldn’t play it there. Try again.";
 
 /**
- * Plays the album on another of the person's devices, which takes playback over, as old music's
- * play on a chosen device did (ADR 0018).
+ * Plays the album on another of the person's devices, which takes playback over (ADR 0018).
  */
 function Sheet({ detail }: { readonly detail: AlbumDetail }) {
   const { devices, active, playOn } = useDevices();

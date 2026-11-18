@@ -2,7 +2,7 @@ import type { PlaylistAccess } from "@/lib/models";
 import type { Me } from "@/lib/platform";
 
 /**
- * What the music client offers a role, as old music's `can` did:
+ * What the music client offers a role:
  * `share` lists other people and shares playlists with them, which guests may not; `admin` runs
  * the server from the account client. The core decides every command again (ADR 0005).
  */

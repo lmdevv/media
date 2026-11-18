@@ -168,7 +168,7 @@ const useOnlineCheck = (active: boolean): number => {
  * devices. In a browser, one tab reports and applies requests; a tab that plays takes that over,
  * and the tab it took over from lets go of its song. A phone app is one device and speaks for it
  * while it plays the queue on the core. A song held paused here goes when another of the
- * listener's devices plays, as old music's single active device did.
+ * listener's devices plays, so one device at a time plays the queue.
  */
 export const useConnect = (
   platform: Sdk,
