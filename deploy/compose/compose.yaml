@@ -12,7 +12,7 @@ name: media
 
 services:
   media:
-    # `latest` is the newest release; pin a version (`:0.4`, `:0.4.1`) or follow `main` for the edge.
+    # `latest` is the newest release; pin a version (`:0.5`, `:0.5.0`) or follow `main` for the edge.
     image: ${MEDIA_IMAGE:-ghcr.io/lmdevv/media:latest}
     build:
       context: ../..

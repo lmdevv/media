@@ -4,8 +4,8 @@
 # binaries, and the iOS apps all report it. Given a release tag, also fails unless the tag names that
 # version.
 #
-#   scripts/check-version.sh            # 0.4.1
-#   scripts/check-version.sh v0.4.1     # the release workflows, with the pushed tag
+#   scripts/check-version.sh            # 0.5.0
+#   scripts/check-version.sh v0.5.0     # the release workflows, with the pushed tag
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
