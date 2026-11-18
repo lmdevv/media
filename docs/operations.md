@@ -13,7 +13,7 @@ restores, upgrades, hardware acceleration, and telemetry. The README has the qui
 | Web clients       | account client by Caddy, movies client by the media service | the same                                           |
 | Core database     | `media-data` volume, `/data/core`                           | `dataDir/core` (`/var/lib/media/core`)             |
 | Media service key | `media-data` volume, `/data/core/secrets`, root only        | `dataDir/core/secrets`, root only                  |
-| Service state     | `media-data` volume, `/data/server/media`                   | `dataDir/movies/media`                             |
+| Service state     | `media-data` volume, `/data/server/media`                   | `dataDir/server`                                   |
 | Backups           | `media-data` volume, `/data/core/backups`                   | `backupDir` (`dataDir/core/backups`)               |
 | HLS segments      | `media-transcode` volume                                    | `transcodeDir` (`/var/cache/media/transcode`)      |
 | Libraries         | bind mounts under `/media`, read-only                       | `libraryDirs`, read-only to the service            |
@@ -190,7 +190,7 @@ Evaluation refuses a `dataDir`, `backupDir`, or `transcodeDir` that overlaps a l
 Before every start, `media-server-folders` checks the folders, and the media service and the
 core's Convex container start only if it passes. As root, it refuses a `dataDir` that is a
 symlink, a mount point, or under a folder another user can change, then makes the folders that
-are missing. As `media-server`, it refuses to start unless `dataDir/movies/media`, `backupDir`,
+are missing. As `media-server`, it refuses to start unless `dataDir/server`, `backupDir`,
 and `transcodeDir` are plain folders of `media-server`'s, with everything in them: no symlink on
 their paths, no mount at or inside them, and no folder above them that a user other than root or
 `media-server` can change. `journalctl -u media-server-folders` says which check failed and how
@@ -309,7 +309,7 @@ The media service uses Intel Quick Sync (QSV) through ffmpeg's libvpl when it ca
 - Logs are one JSON object per line on standard output (`docker compose logs media`,
   `journalctl -u media-server`). The media service keeps the same lines, already redacted, in rotating
   NDJSON files under its data folder (`/data/server/media/logs` in the Compose volume,
-  `/var/lib/media/movies/media/logs` on NixOS, private to the service): a new file each day and at
+  `/var/lib/media/server/logs` on NixOS, private to the service): a new file each day and at
   each start. Each name carries a sequence number and the time of the file's first record
   (`media-000000000042-20261021T140503123Z.ndjson`), so `ls` lists the files in the order they
   were written, and reading and retention follow that order even when the clock steps back. The

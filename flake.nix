@@ -165,8 +165,8 @@
                 );
               refusals = {
                 library-inside-data-root = {
-                  settings.libraryDirs = [ "/var/lib/media/movies/media/library" ];
-                  messagePart = "dataDir (/var/lib/media) and the library (/var/lib/media/movies/media/library)";
+                  settings.libraryDirs = [ "/var/lib/media/server/library" ];
+                  messagePart = "dataDir (/var/lib/media) and the library (/var/lib/media/server/library)";
                 };
                 library-holding-data-root = {
                   settings.libraryDirs = [ "/var/lib" ];
@@ -209,8 +209,8 @@
                   messagePart = "transcodeDir (/var/lib/media/core) and backupDir (/var/lib/media/core/backups)";
                 };
                 transcodes-holding-state = {
-                  settings.transcodeDir = "/var/lib/media/movies";
-                  messagePart = "transcodeDir (/var/lib/media/movies) and dataDir/movies/media (/var/lib/media/movies/media)";
+                  settings.transcodeDir = "/var/lib/media";
+                  messagePart = "transcodeDir (/var/lib/media) and dataDir/server (/var/lib/media/server)";
                 };
                 backups-inside-transcodes = {
                   settings = {

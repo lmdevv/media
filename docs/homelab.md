@@ -205,7 +205,7 @@ docker compose exec -u movies media vainfo --display drm --device /dev/dri/rende
 | The core's database, file storage, and secrets | `media-data` volume, `/data/core`          | `/var/lib/media/core`         |
 | The media service's key (root only)            | `media-data` volume, `/data/core/secrets`  | `/var/lib/media/core/secrets` |
 | Nightly backups                                | `media-data` volume, `/data/core/backups`  | `/var/lib/media/core/backups` |
-| Service state and caches                       | `media-data` volume, `/data/server/media`  | `/var/lib/media/movies/media` |
+| Service state and caches                       | `media-data` volume, `/data/server/media`  | `/var/lib/media/server`       |
 | `media` CLI logins                             | `media-data` volume, `/data/server/config` | each user's `~/.config/media` |
 | Transcode segments (disposable)                | `media-transcode` volume                   | `/var/cache/media/transcode`  |
 | Your library                                   | read-only bind mounts under `/media`       | `libraryDirs`, read-only      |
