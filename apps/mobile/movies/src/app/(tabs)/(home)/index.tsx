@@ -1,6 +1,4 @@
 import { describeFailure } from "@media/mobile-core/failure";
-import { useFirstRows } from "@media/mobile-core/pages";
-import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { router } from "expo-router";
 import { Folder, Plus, Popcorn } from "lucide-react-native";
 import { useState } from "react";
@@ -9,6 +7,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { CollectionCard } from "@/components/browse/collection-card";
 import { EmptyState } from "@/components/browse/empty-state";
+import { ROW_COLLECTIONS, useHomeRows, useRowCollections } from "@/components/browse/held-home";
 import { Hero } from "@/components/browse/hero";
 import { TAB_BAR_CLEARANCE } from "@/components/browse/layout";
 import { useActiveScans, useMovieLibraries } from "@/components/browse/libraries";
@@ -32,11 +31,8 @@ const STICKY_BAR = [0];
 
 const NO_LIBRARIES: ReadonlyArray<Library> = [];
 
-const ROW_COLLECTIONS = 20;
-
 export default function Home() {
-  const platform = usePlatform();
-  const home = usePlatformQuery(platform.movies.titles.home);
+  const home = useHomeRows();
   const libraries = useMovieLibraries();
   const scans = useActiveScans(libraries.status === "ready" ? libraries.rows : NO_LIBRARIES);
   const collapse = useCollapse();
@@ -179,13 +175,7 @@ function HomeBody({
 }
 
 function CollectionsRow() {
-  const platform = usePlatform();
-
-  const collections = useFirstRows(
-    platform.movies.collections.list,
-    (paginationOpts) => ({ paginationOpts }),
-    ROW_COLLECTIONS,
-  );
+  const collections = useRowCollections();
 
   if (collections.status !== "ready" || collections.rows.length === 0) return null;
 

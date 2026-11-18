@@ -1,6 +1,7 @@
 import "../global.css";
 
 import { describeFailure } from "@media/mobile-core/failure";
+import { usePlatformStatus } from "@media/sdk/react";
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect, useMemo, useState } from "react";
@@ -11,7 +12,8 @@ import { useUniwind } from "uniwind";
 
 import { StorageFullPrompt } from "@/components/downloads/storage-full-prompt";
 import { ServerUnavailable } from "@/components/server-unavailable";
-import { TitleStatesProvider } from "@/components/browse/title-states";
+import { HeldHome } from "@/components/browse/held-home";
+import { HeldTitleStates, TitleStatesProvider } from "@/components/browse/title-states";
 import { Button } from "@/components/ui/button";
 import { applyAppearance } from "@/lib/appearance";
 import { displayHost } from "@/lib/local-network";
@@ -21,7 +23,7 @@ import { ConnectionProvider, useConnection, useServer } from "@/session/connecti
 import { DownloadsProvider, useOfflinePerson } from "@/session/downloads";
 import { ReportRenderErrors } from "@/session/error-reporting";
 import { OfflineContext } from "@/session/offline";
-import { FirstRunProvider, useHomeAfterSetup } from "@/session/first-run";
+import { FirstRunProvider, useFirstRun, useHomeAfterSetup } from "@/session/first-run";
 import { InviteLinks } from "@/session/invite-links";
 import {
   PendingInviteProvider,
@@ -233,11 +235,37 @@ function ConnectionTrouble({
   );
 }
 
-function ConnectedApp() {
+/**
+ * Opens Home's queries and the person's list and history as soon as the session is signed in, in
+ * the same batch as `core.auth.sessions.current`, and keeps them open, so Home and the title
+ * states find their answers when the stack mounts them after the session answers. Off while
+ * signed out, while the owner sets up the server (the owner screens show then, not Home), and in
+ * offline mode.
+ */
+function HeldLaunch({ offline }: { readonly offline: boolean }) {
+  const status = usePlatformStatus();
+  const settingUp = useFirstRun().active;
+
+  if (status !== "signedIn" || settingUp || offline) return null;
+
+  return (
+    <>
+      <HeldHome />
+      <HeldTitleStates />
+    </>
+  );
+}
+
+function ConnectedScreens({
+  offline,
+  onOffline,
+}: {
+  readonly offline: boolean;
+  readonly onOffline: (offline: boolean) => void;
+}) {
   const phase = useLiveSessionPhase();
   const settled = useSettledPhase(phase);
   const offlinePerson = useOfflinePerson();
-  const [offline, setOffline] = useState(false);
 
   useDropInviteWhenSignedIn(settled !== null && settled.kind !== "signedOut");
   const slow = useSlowLoad(phase.kind === "loading");
@@ -253,7 +281,7 @@ function ConnectedApp() {
       <OfflineContext.Provider
         value={{
           leave: () => {
-            setOffline(false);
+            onOffline(false);
 
             if (phase.kind === "unavailable") phase.retry();
           },
@@ -269,7 +297,7 @@ function ConnectedApp() {
     );
   }
 
-  const toDownloads = offlinePerson === null ? undefined : () => setOffline(true);
+  const toDownloads = offlinePerson === null ? undefined : () => onOffline(true);
   let trouble: ReactNode = null;
 
   if (phase.kind === "unavailable") {
@@ -307,6 +335,18 @@ function ConnectedApp() {
         )}
       </PersonContext.Provider>
     </SessionPhaseContext.Provider>
+  );
+}
+
+function ConnectedApp() {
+  const offlinePerson = useOfflinePerson();
+  const [offline, setOffline] = useState(false);
+
+  return (
+    <>
+      <HeldLaunch offline={offline && offlinePerson !== null} />
+      <ConnectedScreens offline={offline} onOffline={setOffline} />
+    </>
   );
 }
 
