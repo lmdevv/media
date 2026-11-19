@@ -3,11 +3,12 @@ import { useGuestPlayer, useGuestPosition } from "@media/player/guest-react";
 import type { GuestTrack } from "@media/player/guest-react";
 import type { PlatformSdk } from "@media/sdk/promise";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
+import type { QueryState } from "@media/sdk/react";
 import { GuestUnavailable } from "@/guest/unavailable";
 import { useAllPages } from "@media/ui/lib/pages";
 import { isRenewing, linkRefused, useIdentityRetry } from "@media/ui/lib/session-identity";
 import { PauseIcon, PlayIcon, SkipBackIcon, SkipForwardIcon } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
@@ -67,11 +68,19 @@ function GuestAlbum({
         ? songs.next
         : null;
 
-  useIdentityRetry(
-    failure === null
-      ? { status: "loading" }
-      : { status: "error", error: failure.error, retry: failure.retry },
+  const error = failure?.error;
+  const retry = failure?.retry;
+
+  // One state per failure, so a re-render doesn't restart the retry timer.
+  const failedRead = useMemo<QueryState<unknown>>(
+    () =>
+      error === undefined || retry === undefined
+        ? { status: "loading" }
+        : { status: "error", error, retry },
+    [error, retry],
   );
+
+  useIdentityRetry(failedRead);
 
   if (failure !== null) {
     if (isRenewing(failure.error)) return <BlankPage />;

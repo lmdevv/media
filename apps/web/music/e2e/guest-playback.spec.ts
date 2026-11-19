@@ -87,10 +87,10 @@ const openGuest = async (page: Page, url: string): Promise<void> => {
   await page.goto(url).catch(() => {
     throw new Error("Guest navigation failed");
   });
-  await expect(page.getByRole("heading", { name: "Watch as a guest" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Open as a guest" })).toBeVisible();
   expect(new URL(page.url()).hash).toBe("");
   await page.getByLabel("Display name").fill("Visitor");
-  await page.getByRole("button", { name: "Watch", exact: true }).click();
+  await page.getByRole("button", { name: "Open", exact: true }).click();
   await expect(page).toHaveURL(/\/music\/guest$/u);
 };
 

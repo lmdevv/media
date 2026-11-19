@@ -1,12 +1,13 @@
 import type { PlatformSdk } from "@media/sdk/promise";
 import { usePlatform } from "@media/sdk/react";
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 
 import { GuestQueue } from "./guest-queue";
 import { browserEngines } from "./browser-engine";
 import { setMediaSessionHandlers, showNowPlaying } from "./media-session";
 import type { ControllerSnapshot } from "./playback-controller";
 import { PlaybackController } from "./playback-controller";
+import { usePositionTicks } from "./position-ticks";
 import { ticketSources } from "./source-resolver";
 
 type Detail = Awaited<ReturnType<PlatformSdk["music"]["playback"]["get"]>>;
@@ -96,12 +97,7 @@ export const useGuestPlayer = (tracks: ReadonlyArray<GuestTrack>, baseUrl: strin
 
 /** Ticks only the mounted seek control, independently of the share's song list and artwork. */
 export const useGuestPosition = (controller: PlaybackController): number => {
-  const [position, setPosition] = useState(0);
-  useEffect(() => {
-    const timer = setInterval(() => setPosition(Math.round(controller.positionMs())), 250);
+  const read = useCallback(() => controller.positionMs(), [controller]);
 
-    return () => clearInterval(timer);
-  }, [controller]);
-
-  return position;
+  return usePositionTicks(read);
 };

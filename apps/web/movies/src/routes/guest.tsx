@@ -69,17 +69,18 @@ function GuestShare() {
 
   if (guest === null || guest.target.kind !== "item") return <GuestUnavailable onLeave={leave} />;
 
-  if (guest.target.item.domain !== "movies") return <OtherShare />;
+  if (guest.target.item.domain !== "movies")
+    return <OtherShare to={`/${guest.target.item.domain}/guest`} />;
 
   return (
     <GuestItem item={guest.target.item.ref} sharedBy={guest.sharedBy} expiresAt={guest.expiresAt} />
   );
 }
 
-function OtherShare() {
+function OtherShare({ to }: { readonly to: string }) {
   useEffect(() => {
-    window.location.replace("/guest");
-  }, []);
+    window.location.replace(to);
+  }, [to]);
 
   return <BlankPage />;
 }

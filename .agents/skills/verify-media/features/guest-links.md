@@ -90,9 +90,9 @@ Preconditions:
   `Nobody has opened it.` `$S cli -- auth links activity --link-id <linkId>` prints an empty
   `page`.
 - **Open.** On a page that isn't signed in, `$S browser --app account --page guest open
-  "/guest#<link>"` shows `Watch as a guest` and a `Display name` field. Read the link from its
+  "/guest#<link>"` shows `Open as a guest` and a `Display name` field. Read the link from its
   private file in the command, never print it. Before capturing, verify that the address has
-  become `/guest`, with no fragment. Fill the name and click `Watch`: a movie link goes to
+  become `/guest`, with no fragment. Fill the name and click `Open`: a movie link goes to
   `/movies/guest`, showing the title and `Shared by guestprobe`. If someone is signed in,
   `Replace this sign-in?` names them; `Cancel` keeps them signed in.
 - **Household safety.** On a household tab, open `/guest` without a code and click `Leave`:
@@ -102,7 +102,7 @@ Preconditions:
 - **Music guard.** With a movie guest signed in, open `/music`: the account entrance resumes
   `/movies/guest` on the shared item, without showing music's library, search, or settings.
 - **Movies playback.** Make a movie link with Lucía's CLI and the movie's title id. On a new
-  signed-out guest page, enter a display name, click `Watch`, then `Play`, and use
+  signed-out guest page, enter a display name, click `Open`, then `Play`, and use
   `$S browser wait-video --page guest --past 2`. Hover `--testid player-video`, press
   `ArrowRight`, and wait for playback past the seek. Audio, subtitles, quality, versions, and
   fullscreen use the household player's controls. Search, account navigation, casting, downloads,
@@ -115,7 +115,7 @@ Preconditions:
   Mask `[data-sensitive="guest-link"]` before Create link. Read New guest link into a private
   file with browser `eval` and the Node filesystem, returning only a boolean; never print it.
   On a new signed-out account page, open that address, wait for Display name, and confirm the
-  fragment is gone before recording or taking screenshots. Fill a name, click Watch, and wait
+  fragment is gone before recording or taking screenshots. Fill a name, click Open, and wait
   for `/music/guest`. The page shows Vienna Blue, Doc & Lena Selyanina, the year, art, who
   shared it, when it ends, and only its songs. Click Play and run `wait-audio --page guest
   --past 2`. Next plays Doppelgänger, Previous returns within the album, and Seek moves the

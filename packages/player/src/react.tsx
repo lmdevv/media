@@ -52,14 +52,13 @@ import type { JoinedSession, MusicSession, SessionData } from "./session-react";
 import { ticketSources } from "./source-resolver";
 import { qualityOfSetting, settingOfQuality } from "./stream-quality";
 import type { StreamQuality } from "./stream-quality";
+import { usePositionTicks } from "./position-ticks";
 import { browserLocks, useConnect } from "./use-connect";
 import type { ConnectView, MusicItem } from "./use-connect";
 
 export type { Device, DevicePlayback } from "./connect-devices";
 
 export type { MusicItem } from "./use-connect";
-
-const POSITION_INTERVAL_MS = 250;
 
 /** Wait this long after the last volume change before saving it. */
 const VOLUME_SAVE_MS = 500;
@@ -407,17 +406,7 @@ function PositionTicker({
   readonly read: () => number;
   readonly children: ReactNode;
 }) {
-  const [position, setPosition] = useState(() => Math.round(read()));
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setPosition(Math.round(read()));
-    }, POSITION_INTERVAL_MS);
-
-    return () => {
-      clearInterval(timer);
-    };
-  }, [read]);
+  const position = usePositionTicks(read);
 
   return <PositionContext.Provider value={position}>{children}</PositionContext.Provider>;
 }

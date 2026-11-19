@@ -19,7 +19,6 @@ export const cn = createCn({
   extend: {
     theme: {
       text: [
-        "title",
         "md",
         "display",
         "phone-subhead",
@@ -30,7 +29,7 @@ export const cn = createCn({
         "lyric",
         "phone-lyric",
       ],
-      leading: ["title", "xs", "sm", "base", "md", "lg", "xl", "2xl", "display"],
+      leading: ["xs", "sm", "base", "md", "lg", "xl", "2xl", "display"],
       tracking: ["display", "mono", "snug"],
       "font-weight": ["regular", "heavy"],
       radius: ["phone-art", "phone-card", "sheet"],

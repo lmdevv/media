@@ -16,7 +16,7 @@ import { isRenewing, linkRefused, useIdentityRetry } from "@media/ui/lib/session
 
 export const Route = createFileRoute("/guest")({
   staticData: { need: "public" },
-  head: () => ({ meta: [{ title: "Watch as a guest · Lar" }] }),
+  head: () => ({ meta: [{ title: "Open as a guest · Lar" }] }),
   component: GuestPage,
 });
 
@@ -158,7 +158,7 @@ function GuestPage() {
 
   return (
     <AuthPage>
-      <PageTitle>Watch as a guest</PageTitle>
+      <PageTitle>Open as a guest</PageTitle>
       <form
         className="flex flex-col gap-5"
         onSubmit={(event) => {
@@ -184,7 +184,7 @@ function GuestPage() {
           </p>
         ) : null}
         <Button type="submit" disabled={submission.kind === "submitting" || name.trim() === ""}>
-          {submission.kind === "submitting" ? "Opening…" : "Watch"}
+          {submission.kind === "submitting" ? "Opening…" : "Open"}
         </Button>
       </form>
     </AuthPage>

@@ -149,10 +149,10 @@ const openGuest = async (page: Page, url: string): Promise<void> => {
     throw new Error("Guest link navigation failed");
   }
 
-  await expect(page.getByRole("heading", { name: "Watch as a guest" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Open as a guest" })).toBeVisible();
   expect(new URL(page.url()).hash).toBe("");
   await page.getByLabel("Display name").fill("Visitor");
-  await page.getByRole("button", { name: "Watch", exact: true }).click();
+  await page.getByRole("button", { name: "Open", exact: true }).click();
   await expect(page).toHaveURL(/\/movies\/guest$/u);
 };
 
@@ -251,7 +251,7 @@ test("a guest whose link lookup fails after opening can try again", async ({ pag
   const refusals = await refuseQueryOnce(page, "core/guests:current", "internal");
   await page.goto(link.url);
   await page.getByLabel("Display name").fill("Visitor");
-  await page.getByRole("button", { name: "Watch", exact: true }).click();
+  await page.getByRole("button", { name: "Open", exact: true }).click();
   await expect.poll(refusals).toBe(1);
   await expect(page.getByRole("heading", { name: "Can't reach the server" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "This link isn't available" })).toHaveCount(0);
@@ -365,7 +365,7 @@ test("a new household session wins a guest redemption race without retrying it",
     await release.promise;
     await route.fulfill({ response });
   });
-  await page.getByRole("button", { name: "Watch", exact: true }).click();
+  await page.getByRole("button", { name: "Open", exact: true }).click();
   await arrived.promise;
   const other = await context.newPage();
   await other.goto("/home");
@@ -375,7 +375,7 @@ test("a new household session wins a guest redemption race without retrying it",
   await expect(other).toHaveURL(/\/home$/u);
   release.resolve();
   await expect(page.getByRole("heading", { name: "Someone else signed in here" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Watch", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Open", exact: true })).toHaveCount(0);
   expect(redemptions).toBe(1);
 
   const activity = await host.platform.core.guests.links.activity({
