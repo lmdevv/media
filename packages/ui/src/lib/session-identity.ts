@@ -11,6 +11,15 @@ type QueryError = Extract<QueryState<unknown>, { readonly status: "error" }>["er
 export const isRenewing = (error: QueryError): boolean =>
   Predicate.isTagged(error, "Unauthenticated");
 
+/**
+ * Whether a guest's read was refused because the link or what it shares is gone, as opposed to a
+ * server or connection failure that a retry can recover from.
+ */
+export const linkRefused = (error: QueryError): boolean =>
+  Predicate.isTagged(error, "NotFound") ||
+  Predicate.isTagged(error, "Forbidden") ||
+  Predicate.isTagged(error, "Expired");
+
 /** Retries identity after the SDK has had time to settle its session. */
 export const useIdentityRetry = (me: QueryState<unknown>): void => {
   useEffect(() => {

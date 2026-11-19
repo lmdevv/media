@@ -3,7 +3,7 @@ import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { Button } from "@media/ui/components/button";
 import { GuestUnavailable } from "@media/ui/components/guest-unavailable";
 import { useAllPages } from "@media/ui/lib/pages";
-import { isRenewing, useIdentityRetry } from "@media/ui/lib/session-identity";
+import { isRenewing, linkRefused, useIdentityRetry } from "@media/ui/lib/session-identity";
 import { useCallback, useMemo, useState } from "react";
 
 import { PlayerScreen } from "@/components/player/player-screen";
@@ -13,8 +13,6 @@ import { episodeCode, facts, formatRuntime } from "@/lib/format";
 import { useSignOut } from "@/session/session";
 import { BlankPage } from "@/session/redirect";
 import { UnreachableScreen } from "@/session/unreachable";
-
-import { linkRefused } from "./refused";
 
 type Item = Parameters<PlatformSdk["movies"]["playback"]["get"]>[0]["item"];
 

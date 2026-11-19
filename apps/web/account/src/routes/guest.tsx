@@ -12,7 +12,7 @@ import type { GuestSubmission } from "@/screens/guest/state";
 import { useAccountActions } from "@/session/account";
 import { linkSecretFor } from "@/session/link-secret";
 import { nameOf } from "@/session/me";
-import { isRenewing, useIdentityRetry } from "@media/ui/lib/session-identity";
+import { isRenewing, linkRefused, useIdentityRetry } from "@media/ui/lib/session-identity";
 
 export const Route = createFileRoute("/guest")({
   staticData: { need: "public" },
@@ -34,6 +34,9 @@ function GuestDestination() {
 
   if (guest.status === "loading" || (guest.status === "error" && isRenewing(guest.error)) || movies)
     return <BlankPage />;
+
+  if (guest.status === "error" && !linkRefused(guest.error))
+    return <UnreachableScreen retry={guest.retry} />;
 
   if (guest.status === "error" || target === undefined || target.kind !== "item")
     return <GuestUnavailable onLeave={signOut} />;

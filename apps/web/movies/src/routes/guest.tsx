@@ -1,10 +1,14 @@
 import { usePlatform, usePlatformQuery, usePlatformStatus } from "@media/sdk/react";
 import { GuestUnavailable } from "@media/ui/components/guest-unavailable";
 import { createFileRoute, Navigate } from "@tanstack/react-router";
-import { isRenewing, sessionAccess, useIdentityRetry } from "@media/ui/lib/session-identity";
+import {
+  isRenewing,
+  linkRefused,
+  sessionAccess,
+  useIdentityRetry,
+} from "@media/ui/lib/session-identity";
 
 import { GuestItem } from "@/guest/item";
-import { linkRefused } from "@/guest/refused";
 import { useSignOut } from "@/session/session";
 import { BlankPage } from "@/session/redirect";
 import { UnreachableScreen } from "@/session/unreachable";

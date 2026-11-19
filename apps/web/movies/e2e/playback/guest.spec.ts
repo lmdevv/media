@@ -246,6 +246,20 @@ test("a guest whose shared item fails to load can try again", async ({ page }) =
   await expect(page.getByRole("heading", { name: MOVIE })).toBeVisible();
 });
 
+test("a guest whose link lookup fails after opening can try again", async ({ page }) => {
+  const link = await linkFor({ domain: "movies", ref: { type: "title", id: titleId(MOVIE) } });
+  const refusals = await refuseQueryOnce(page, "core/guests:current", "internal");
+  await page.goto(link.url);
+  await page.getByLabel("Display name").fill("Visitor");
+  await page.getByRole("button", { name: "Watch", exact: true }).click();
+  await expect.poll(refusals).toBe(1);
+  await expect(page.getByRole("heading", { name: "Can't reach the server" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "This link isn't available" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Try again", exact: true }).click();
+  await expect(page).toHaveURL(/\/movies\/guest$/u);
+  await expect(page.getByRole("heading", { name: MOVIE })).toBeVisible();
+});
+
 test("a show lists episodes, but episode and file links cannot reach siblings", async ({
   browser,
 }) => {

@@ -1,11 +1,29 @@
-import { Internal, Unauthenticated } from "@media/contracts/errors";
+import {
+  Expired,
+  Forbidden,
+  Internal,
+  NotFound,
+  RateLimited,
+  Unauthenticated,
+} from "@media/contracts/errors";
 import { describe, expect, it } from "vitest";
-import { isRenewing, sessionAccess } from "@media/ui/lib/session-identity";
+import { isRenewing, linkRefused, sessionAccess } from "@media/ui/lib/session-identity";
 
 describe("session identity renewal", () => {
   it("waits for a refused session but keeps server failures visible", () => {
     expect(isRenewing(new Unauthenticated({ message: "Session renewing" }))).toBe(true);
     expect(isRenewing(new Internal({ message: "Server failed" }))).toBe(false);
+  });
+});
+
+describe("guest link refusal", () => {
+  it("treats a gone link or item as refused and a server failure as retryable", () => {
+    expect(linkRefused(new NotFound({ message: "No such item" }))).toBe(true);
+    expect(linkRefused(new Forbidden({ message: "Not shared" }))).toBe(true);
+    expect(linkRefused(new Expired({ message: "Link ended" }))).toBe(true);
+    expect(linkRefused(new Internal({ message: "Server failed" }))).toBe(false);
+    expect(linkRefused(new RateLimited({ message: "Slow down" }))).toBe(false);
+    expect(linkRefused(new Unauthenticated({ message: "Session renewing" }))).toBe(false);
   });
 });
 
