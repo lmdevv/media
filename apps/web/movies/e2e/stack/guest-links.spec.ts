@@ -19,6 +19,8 @@ const stack = await reachableStack();
 
 test.skip(stack === null, NO_STACK);
 
+test.describe.configure({ mode: "serial" });
+
 let context: BrowserContext | undefined;
 
 let page: Page;
