@@ -70,6 +70,28 @@ const createResult = v.object({
 
 const listArgs = v.object({
   whose: v.union(v.literal("mine"), v.literal("everyone")),
+  target: v.optional(
+    v.object({
+      kind: v.literal("item"),
+      item: v.union(
+        v.object({
+          domain: v.literal("movies"),
+          ref: v.union(
+            v.object({ type: v.literal("title"), id: v.id("titles") }),
+            v.object({ type: v.literal("episode"), id: v.id("episodes") }),
+            v.object({ type: v.literal("file"), id: v.id("mediaFiles") }),
+          ),
+        }),
+        v.object({
+          domain: v.literal("music"),
+          ref: v.union(
+            v.object({ type: v.literal("track"), id: v.id("tracks") }),
+            v.object({ type: v.literal("album"), id: v.id("albums") }),
+          ),
+        }),
+      ),
+    }),
+  ),
   paginationOpts: v.object({
     numItems: v.number(),
     cursor: v.union(v.string(), v.null()),

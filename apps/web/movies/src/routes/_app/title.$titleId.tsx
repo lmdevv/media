@@ -1,3 +1,4 @@
+import { useMayShareGuests } from "@media/ui/lib/use-guest-links";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { Button } from "@media/ui/components/button";
 import { buttonVariants } from "@media/ui/lib/button-variants";
@@ -41,6 +42,7 @@ function TitleContent() {
   const { titleId } = Route.useParams();
   const scopes = useScopes();
   const phone = usePhone();
+  const mayShareGuests = useMayShareGuests();
   const title = usePlatformQuery(platform.movies.titles.get, { titleId });
 
   if (title.status === "loading") return <HeroSkeleton />;
@@ -69,7 +71,13 @@ function TitleContent() {
   return (
     <>
       <title>{`${title.data.name} · Lar Movies`}</title>
-      <TitleDetailView title={title.data} canManage={scopes.has("movies:edit")} phone={phone} />
+      <TitleDetailView
+        key={titleId}
+        title={title.data}
+        canManage={scopes.has("movies:edit")}
+        phone={phone}
+        mayShareGuests={mayShareGuests}
+      />
     </>
   );
 }

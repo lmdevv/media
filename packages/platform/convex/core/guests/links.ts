@@ -306,7 +306,7 @@ export const { create, list, activity, revoke } = register({
       expiresAt: made.expiresAt,
     };
   },
-  list: async (ctx, { whose, paginationOpts }, caller) => {
+  list: async (ctx, { whose, target, paginationOpts }, caller) => {
     const listing = can(caller, "audit", {
       on: "shareRecord",
       maker: whose === "mine" ? caller.userId : null,
@@ -314,25 +314,41 @@ export const { create, list, activity, revoke } = register({
 
     if (!listing.allowed) return fail("forbidden", "Only an admin can list everyone's guest links");
 
+    if (target !== undefined && whose !== "mine") {
+      return fail("invalid_args", "Filter only your own guest links by target");
+    }
+
     const page =
-      whose === "mine"
+      target !== undefined
         ? await paginateAtMost(
             ctx.db,
             {
               table: "shareLinks",
-              index: "by_maker",
-              range: (q) => q.eq("maker", caller.userId),
+              index: "by_maker_target",
+              range: (q) => q.eq("maker", caller.userId).eq("target", target),
               order: "desc",
             },
             paginationOpts,
             LIST_ROWS,
           )
-        : await paginateAtMost(
-            ctx.db,
-            { table: "shareLinks", index: "by_creation_time", order: "desc" },
-            paginationOpts,
-            LIST_ROWS,
-          );
+        : whose === "mine"
+          ? await paginateAtMost(
+              ctx.db,
+              {
+                table: "shareLinks",
+                index: "by_maker",
+                range: (q) => q.eq("maker", caller.userId),
+                order: "desc",
+              },
+              paginationOpts,
+              LIST_ROWS,
+            )
+          : await paginateAtMost(
+              ctx.db,
+              { table: "shareLinks", index: "by_creation_time", order: "desc" },
+              paginationOpts,
+              LIST_ROWS,
+            );
 
     const now = Date.now();
     const access = await guestAccessOf(ctx.db);

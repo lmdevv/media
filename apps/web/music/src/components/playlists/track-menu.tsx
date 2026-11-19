@@ -19,6 +19,7 @@ import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 
+import { GuestLinkMenuItem } from "@/components/guests/guest-links";
 import { Artwork } from "@/components/library/artwork";
 import { useUi } from "@/components/shell/ui-state";
 import { toastFailure } from "@/lib/action";
@@ -351,6 +352,15 @@ export function TrackMenu({
               <DropdownMenuItem onClick={() => copyLink({ kind: "track", id: track.id })}>
                 Copy link
               </DropdownMenuItem>
+              {playable ? (
+                <GuestLinkMenuItem
+                  name={track.title}
+                  target={{
+                    kind: "item",
+                    item: { domain: "music", ref: { type: "track", id: track.id } },
+                  }}
+                />
+              ) : null}
               <DropdownMenuItem onClick={() => setInfo(true)}>File info</DropdownMenuItem>
             </>
           )}

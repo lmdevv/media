@@ -6,6 +6,8 @@ import { Schema } from "effect";
 
 import { DetailError } from "@/components/route-error";
 import type { MissingCopy } from "@/components/route-error";
+
+import { GuestLinkMenuItem } from "@/components/guests/guest-links";
 import { Artwork } from "@/components/library/artwork";
 import { CollectionHeader } from "@/components/library/collection-header";
 import { PlayOnMenu } from "@/components/player/play-on-menu";
@@ -104,7 +106,18 @@ function AlbumPage() {
         badge={<Badge tone="outline">{detail.format}</Badge>}
         tracks={tracks}
         link={{ kind: "album", id: album.id }}
-        menuExtra={<PlayOnMenu item={{ domain: "music", ref: { type: "album", id: album.id } }} />}
+        menuExtra={
+          <>
+            <GuestLinkMenuItem
+              name={album.title}
+              target={{
+                kind: "item",
+                item: { domain: "music", ref: { type: "album", id: album.id } },
+              }}
+            />
+            <PlayOnMenu item={{ domain: "music", ref: { type: "album", id: album.id } }} />
+          </>
+        }
       />
       <div className="-mx-5 pl-5 lg:mx-0 lg:pl-0">
         <TrackList

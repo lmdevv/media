@@ -1375,6 +1375,7 @@ export const core = [
     scope: "account",
     args: {
       whose: v.union(v.literal("mine"), v.literal("everyone")),
+      target: v.optional(v.object({ kind: v.literal("item"), item: domainItem })),
       paginationOpts: paginationOptsValidator,
     },
     result: paginationResultValidator(

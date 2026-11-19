@@ -1,6 +1,7 @@
 import { PlayerProvider } from "@media/player/react";
 import { Outlet, createFileRoute } from "@tanstack/react-router";
 
+import { GuestLinksProvider } from "@/components/guests/guest-links";
 import { CastProvider } from "@/casting/cast-provider";
 import { AppShell } from "@/components/shell/app-shell";
 import { MEDIA_BASE_URL } from "@/env";
@@ -12,9 +13,11 @@ function AppLayout() {
   return (
     <PlayerProvider mediaBaseUrl={MEDIA_BASE_URL}>
       <CastProvider>
-        <AppShell>
-          <Outlet />
-        </AppShell>
+        <GuestLinksProvider>
+          <AppShell>
+            <Outlet />
+          </AppShell>
+        </GuestLinksProvider>
       </CastProvider>
     </PlayerProvider>
   );

@@ -1395,6 +1395,43 @@ const core_guests_links_list = query({
   path: "core/guests/links:list",
   args: Schema.Struct({
     whose: Schema.Union([Schema.Literal("mine"), Schema.Literal("everyone")]),
+    target: Schema.optionalKey(
+      Schema.Struct({
+        kind: Schema.Literal("item"),
+        item: Schema.Union([
+          Schema.Struct({
+            domain: Schema.Literal("movies"),
+            ref: Schema.Union([
+              Schema.Struct({
+                type: Schema.Literal("title"),
+                id: Schema.String.pipe(Schema.brand("Id<titles>")),
+              }),
+              Schema.Struct({
+                type: Schema.Literal("episode"),
+                id: Schema.String.pipe(Schema.brand("Id<episodes>")),
+              }),
+              Schema.Struct({
+                type: Schema.Literal("file"),
+                id: Schema.String.pipe(Schema.brand("Id<mediaFiles>")),
+              }),
+            ]),
+          }),
+          Schema.Struct({
+            domain: Schema.Literal("music"),
+            ref: Schema.Union([
+              Schema.Struct({
+                type: Schema.Literal("track"),
+                id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+              }),
+              Schema.Struct({
+                type: Schema.Literal("album"),
+                id: Schema.String.pipe(Schema.brand("Id<albums>")),
+              }),
+            ]),
+          }),
+        ]),
+      }),
+    ),
     paginationOpts: Schema.Struct({
       numItems: Schema.Finite,
       cursor: Schema.Union([Schema.String, Schema.Null]),

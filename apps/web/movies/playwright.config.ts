@@ -78,7 +78,13 @@ const suites: ReadonlyArray<Suite> = [
     device: phone,
     chained: false,
   },
-  { name: "stack", group: "core", testMatch: /e2e\/stack\/.*\.spec\.ts$/u, chained: true },
+  { name: "stack", group: "core", testMatch: /e2e\/stack\/flows\.spec\.ts$/u, chained: true },
+  {
+    name: "guest links",
+    group: "core",
+    testMatch: /e2e\/stack\/guest-links\.spec\.ts$/u,
+    chained: true,
+  },
   {
     name: "admin",
     group: "core",

@@ -2,18 +2,17 @@
 
 A person shares one movie, show, song, album, or session with someone who has no account, through
 a link that ends by itself. An owner or admin decides whether the server makes guest links at all,
-which address they carry, and which members may make them, and can see and revoke everyone's. Today
-a link is made, listed, and revoked from the terminal and governed in the account client; opening
-one as a guest is not built in the clients yet.
+which address they carry, and which members may make them, and can see and revoke everyone's. A maker creates, lists, and revokes links from a movies title
+page or a music album or song menu, beside the terminal commands. The account client governs them.
 
 ## Sub-features
 
 - `guest-policy` turns guest links on or off for the server and sets the address they carry.
 - `guest-allow` lets a member make guest links, or stops them.
-- `guest-create` makes a link to one thing the maker can play, for 1 to 30 days.
-- `guest-list` lists a person's own links, and for an admin everyone's.
+- `guest-create` makes a link from a title page or an album or song menu, or the CLI, for 1 to 30 days.
+- `guest-list` shows the maker's links for the current item in its dialog; the CLI lists all their links, and for an admin everyone's.
 - `guest-activity` shows who opened a link.
-- `guest-revoke` ends a link, the maker's own or as an admin anyone's.
+- `guest-revoke` ends an open link in its item's dialog or the CLI; an admin may also end anyone's in Admin, Guests.
 - `guest-open` opens a link without an account. Not built: the page shows the sign-in form.
 
 ## How to get to it (user POV)
@@ -21,6 +20,8 @@ one as a guest is not built in the clients yet.
 - The account client's Admin, Guests (`/admin/guests`): the switch `Allow guest links`, the field
   `Guest address`, and `Everyone's links` with each link's `Activity` and `Revoke`.
 - Admin, Users, a member's `Manage`, then `Allow guest links` or `Stop guest links`.
+- Movies: open a movie or show, then `Guest link` beside My List. A show shares the whole show.
+- Music: open an album, its `More actions` menu, then `Guest link`; a playable song's menu has the same action.
 - Terminal: `media auth guests status`, `media auth links create|list|activity|revoke`,
   `media admin guests configure|allow`.
 
@@ -51,7 +52,30 @@ Preconditions:
   `An admin has not let you share with guests`. On `/admin`, click `--role button --name "Manage
   guestprobe"` and `--role button --name "Allow guest links"`: a toast reads `guestprobe can make
   guest links`, and `$S cli --as guestprobe -- auth guests status` prints `"mayShare": true`.
-- **Create.** The same `auth links create` now prints `linkId`, `expiresAt` seven days on, and a
+- **Web create, copy, list, revoke.** On the after side, open a movie or show as Lucía and
+  click `Guest link`, or open an album in music and choose `Guest link` in `More actions`.
+  Before creating anything, use `browser eval` to add a stylesheet hiding the field
+  `[data-sensitive="guest-link"]` (`visibility: hidden !important`). Keep this stylesheet for every screenshot and every
+  recording frame; add it again after navigation. Never snapshot or print the input value.
+  The dialog names the item, starts `Expires in days` at 7, and accepts whole days 1 through 30.
+  Click `Create link`, check the field's origin against the configured guest address inside
+  `browser eval` and return only a boolean, then click `Copy`: it reads `Copied`.
+  `Your guest links` lists this item's new link as `Open` with its expiry. Check
+  `$S cli -- auth links list --whose mine` for that target and `"state": "open"` (this command
+  never returns the secret). Close and reopen the dialog: `New guest link` is gone, while the
+  row stays. Click its `Revoke`: the row reads `Revoked`, and the CLI's list agrees.
+  Repeat for an album and capture desktop and phone sizes. Before-side captures show the same
+  title action area and album menu without the entry. Record the after flow only after the
+  masking stylesheet is installed, and publish each pair and the video with `evidence publish`.
+  As Aiko, who has no permission to share by default, these entries are absent even when guest links are on.
+- **Dialog lifetime.** With a title dialog open, switch between desktop and phone sizes: the
+  dialog and its masked one-time address stay. Open a song's guest dialog from a playlist, create a link, and remove that
+  song from the playlist in another signed-in page. The row disappears, but the dialog and its
+  masked one-time address stay, and Copy still works. Revoke that link from Admin, Guests: its
+  row becomes Revoked and both the address and Copy disappear. Turning guest links off closes
+  the dialog; turning them back on never reopens it. A pending Create keeps the dialog open and
+  disables another Create until the server answers.
+- **Create (CLI).** The same `auth links create` now prints `linkId`, `expiresAt` seven days on, and a
   `url` of the form `http://localhost:<port>/guest#mg_…`. Send its output to a file in the side's
   state folder, never to the terminal. A music album takes `"domain":"music"` and
   `"type":"album"`, and `--expires-in-days 1` shortens it.
