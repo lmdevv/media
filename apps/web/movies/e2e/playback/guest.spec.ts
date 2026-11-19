@@ -216,6 +216,14 @@ test("a show lists episodes, but episode and file links cannot reach siblings", 
   await expect(page.getByRole("region", { name: "Episodes" })).toContainText(EPISODES[1]);
   await page.getByRole("button", { name: new RegExp(EPISODES[0], "u") }).click();
   await expectPlayingPast(page, 1);
+  await revealControls(page);
+  await page.getByRole("button", { name: "Back to details", exact: true }).click();
+  await expect(page.getByRole("heading", { name: SHOW, exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Episodes" })).toContainText(EPISODES[1]);
+  await expect(page.getByRole("heading", { level: 2 })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Play", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: new RegExp(EPISODES[1], "u") }).click();
+  await expectPlayingPast(page, 1);
 
   const episodes = await host.platform.movies.playback.episodes({
     titleId: showId,

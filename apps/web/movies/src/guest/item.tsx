@@ -3,11 +3,11 @@ import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { Button } from "@media/ui/components/button";
 import { GuestUnavailable } from "@media/ui/components/guest-unavailable";
 import { useAllPages } from "@media/ui/lib/pages";
-import { useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import { PlayerScreen } from "@/components/player/player-screen";
 import { artworkUrl } from "@/lib/artwork";
-import type { EpisodeId, TitleId } from "@/lib/catalog";
+import type { EpisodeId, TitleId, PlaybackDetail, MediaFileId } from "@/lib/catalog";
 import { episodeCode, facts, formatRuntime } from "@/lib/format";
 import { useSignOut } from "@/session/session";
 import { BlankPage } from "@/session/redirect";
@@ -30,6 +30,11 @@ export function GuestItem({
   const result = usePlatformQuery(platform.movies.playback.get, { item: target });
   const [playing, setPlaying] = useState(false);
 
+  const onBack = useCallback(() => {
+    setSelected(null);
+    setPlaying(false);
+  }, []);
+
   if (result.status === "loading") return <BlankPage />;
 
   if (result.status === "error") return <GuestUnavailable onLeave={leave} />;
@@ -45,13 +50,11 @@ export function GuestItem({
 
   if (playing && detail.versions.length > 0)
     return (
-      <PlayerScreen
+      <GuestPlayer
         key={`${detail.titleId}:${episode?.id ?? ""}`}
-        titleId={detail.titleId}
-        episodeId={episode?.id}
+        detail={detail}
         version={item.type === "file" ? item.id : undefined}
-        start="resume"
-        guest={{ detail, onBack: () => setPlaying(false) }}
+        onBack={onBack}
       />
     );
 
@@ -102,6 +105,29 @@ export function GuestItem({
         ) : null}
       </section>
     </main>
+  );
+}
+
+function GuestPlayer({
+  detail,
+  version,
+  onBack,
+}: {
+  readonly detail: PlaybackDetail;
+  readonly version: MediaFileId | undefined;
+  readonly onBack: () => void;
+}) {
+  const [opened] = useState(detail);
+  const guest = useMemo(() => ({ detail: opened, onBack }), [opened, onBack]);
+
+  return (
+    <PlayerScreen
+      titleId={opened.titleId}
+      episodeId={opened.episode?.id}
+      version={version}
+      start="resume"
+      guest={guest}
+    />
   );
 }
 
