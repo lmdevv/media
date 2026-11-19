@@ -353,29 +353,82 @@ export interface HeldSignIn {
   readonly keep: (store: SharedStore, order: DeviceOrder) => Promise<boolean>;
 }
 
+const holdTokens = () => {
+  const held = new Map<string, string>();
+
+  const storage: KeyValueStore = {
+    getItem: (key) => held.get(key) ?? null,
+    setItem: (key, value) => {
+      held.set(key, value);
+    },
+    removeItem: (key) => {
+      held.delete(key);
+    },
+  };
+
+  const session = (): StoredSession | undefined =>
+    [...held.values()].flatMap((text) => Option.toArray(parseStoredSession(text)))[0];
+
+  return { storage, session };
+};
+
 /**
  * A place in memory for a new sign-in. A browser learns a session's order only after it signs in,
  * when the core binds it to the device, so a client of its own signs in here first.
  */
 export const holdSignIn = (): HeldSignIn => {
-  const held = new Map<string, string>();
+  const held = holdTokens();
 
   return {
-    storage: {
-      getItem: (key) => held.get(key) ?? null,
-      setItem: (key, value) => {
-        held.set(key, value);
-      },
-      removeItem: (key) => {
-        held.delete(key);
-      },
-    },
+    storage: held.storage,
     keep: async (store, order) => {
-      const [session] = [...held.values()].flatMap((text) =>
-        Option.toArray(parseStoredSession(text)),
-      );
+      const session = held.session();
 
       return session === undefined ? false : keepSession(store, session, order);
+    },
+  };
+};
+
+/** Holds a guest sign-in only for the session the person confirmed; null if it changed. */
+export const holdGuestSignIn = async (
+  store: SharedStore,
+  expectedId: string | null,
+): Promise<{ readonly storage: KeyValueStore; readonly keep: () => Promise<boolean> } | null> => {
+  const expected = await store.read(sessionIn);
+
+  if (Option.getOrNull(Option.flatMap(expected, sessionOf)) !== expectedId) return null;
+  const held = holdTokens();
+
+  return {
+    storage: held.storage,
+    keep: async (): Promise<boolean> => {
+      const value = held.session();
+
+      if (value === undefined) return false;
+      const id = Option.getOrNull(sessionOf(value));
+
+      return store.write(async (tx) => {
+        if (id === null || (await isRevoked(tx, id))) return false;
+
+        if (await holds(tx, id)) return true;
+
+        const current = await sessionIn(tx);
+        const currentId = Option.getOrNull(Option.flatMap(current, sessionOf));
+
+        if (currentId !== expectedId) {
+          await signOutIn(tx, id, value);
+
+          return false;
+        }
+
+        if (Option.isSome(current) && currentId !== null) {
+          await signOutIn(tx, currentId, current.value);
+        }
+
+        await tx.set(SESSION, serializeSession(value));
+
+        return true;
+      });
     },
   };
 };
@@ -386,7 +439,7 @@ export const holdSignIn = (): HeldSignIn => {
  * client's:
  *
  * - `media.device` is the browser's device and the number of the session kept last, and
- *   `media.session` that session's tokens. Only `keepSession` puts a session there.
+ *   `media.session` that session's tokens. `keepSession` or a held guest sign-in puts a session there.
  * - A renewal replaces the tokens only while they are still the ones it started from and the
  *   session has no revocation.
  * - `media.revoked:<session>` records a sign-out and is never deleted, and

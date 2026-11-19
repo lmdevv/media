@@ -1,3 +1,4 @@
+import { refuseIdentityOnce } from "./identity";
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
@@ -77,4 +78,37 @@ test("movies greets a person by the name they go by, and by their username once 
   } finally {
     await client.platform.dispose();
   }
+});
+
+for (const path of ["/movies/", "/movies/guest"]) {
+  test(`a member recovers a refused identity at ${path}`, async ({ page }) => {
+    if (stack === null) return;
+    const person = await createPerson(stack, "identity-retry", "member");
+    await signIn(page, person);
+    const refusals = await refuseIdentityOnce(page);
+    await page.goto(path);
+    await expect.poll(refusals).toBe(1);
+    await expectMoviesHome(page, person.username);
+    await expect(page.getByRole("heading", { name: "Can't reach the server" })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "This link isn't available" })).toHaveCount(0);
+  });
+}
+
+test("a member retries a failed Music identity without reloading or losing their sign-in", async ({
+  page,
+}) => {
+  if (stack === null) return;
+  const person = await createPerson(stack, "music-identity-retry", "member");
+  await signIn(page, person);
+  const refusals = await refuseIdentityOnce(page, "internal");
+  await page.goto("/music/");
+  await expect.poll(refusals).toBe(1);
+  await expect(page.getByRole("heading", { name: "Can't reach the server" })).toBeVisible();
+  await page.getByRole("button", { name: "Try again", exact: true }).click();
+  await expect(page.getByRole("link", { name: "Home", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Can't reach the server" })).toHaveCount(0);
+  await page.goto("/home");
+  await expect(
+    page.getByRole("heading", { name: `Hi, ${person.username}.`, exact: true }),
+  ).toBeVisible();
 });

@@ -58,6 +58,7 @@ const shared = (tiles: ReadonlyArray<SharedTile>): SharedPicker => ({
 });
 
 const base: ScreenInputs = {
+  deviceEntrance: false,
   intent: { kind: "picker" },
   server: success<ServerInfo>({ name: "Lar", version: "0.2.0", hasOwner: true }),
   status: "signedOut",
@@ -215,5 +216,41 @@ describe("which screen shows", () => {
     };
 
     expect(screenOf(inputs({ server }))).toStrictEqual({ kind: "unreachable", retry });
+  });
+});
+
+describe("guest account entrances", () => {
+  const guest: Me = { ...meAs([]), role: "guest", kind: "guest" };
+  it("keeps public links and the device entrance on their routes", () => {
+    expect(
+      screenOf(
+        inputs({
+          status: "signedIn",
+          me: success(guest),
+          intent: { kind: "page", need: "public" },
+        }),
+      ),
+    ).toEqual({ kind: "page", me: guest });
+    expect(
+      screenOf(
+        inputs({
+          status: "signedIn",
+          me: success(guest),
+          deviceEntrance: true,
+          intent: { kind: "page", need: "account" },
+        }),
+      ),
+    ).toEqual({ kind: "needsAccount", me: guest });
+  });
+  it("resumes the guest instead of showing household pages", () => {
+    expect(
+      screenOf(
+        inputs({
+          status: "signedIn",
+          me: success(guest),
+          intent: { kind: "page", need: "anyone" },
+        }),
+      ),
+    ).toEqual({ kind: "guest" });
   });
 });

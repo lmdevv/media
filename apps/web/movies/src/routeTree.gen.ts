@@ -4,6 +4,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as AppRouteImport } from './routes/_app'
+import { Route as GuestRouteImport } from './routes/guest'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppAdminRouteImport } from './routes/_app/admin'
 import { Route as AppCollectionsRouteImport } from './routes/_app/collections'
@@ -31,6 +32,11 @@ import { Route as AppAdminLibrariesLibraryIdMatchTitleIdRouteImport } from './ro
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GuestRoute = GuestRouteImport.update({
+  id: '/guest',
+  path: '/guest',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppIndexRoute = AppIndexRouteImport.update({
@@ -159,6 +165,7 @@ const AppAdminLibrariesLibraryIdMatchTitleIdRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
+  '/guest': typeof GuestRoute
   '/admin': typeof AppAdminRouteWithChildren
   '/collections': typeof AppCollectionsRoute
   '/movies': typeof AppMoviesRoute
@@ -184,6 +191,7 @@ export interface FileRoutesByFullPath {
   '/admin/libraries/$libraryId/match/$titleId': typeof AppAdminLibrariesLibraryIdMatchTitleIdRoute
 }
 export interface FileRoutesByTo {
+  '/guest': typeof GuestRoute
   '/collections': typeof AppCollectionsRoute
   '/movies': typeof AppMoviesRoute
   '/my-list': typeof AppMyListRoute
@@ -210,6 +218,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_app': typeof AppRouteWithChildren
+  '/guest': typeof GuestRoute
   '/_app/admin': typeof AppAdminRouteWithChildren
   '/_app/collections': typeof AppCollectionsRoute
   '/_app/movies': typeof AppMoviesRoute
@@ -239,6 +248,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/guest'
     | '/admin'
     | '/collections'
     | '/movies'
@@ -264,6 +274,7 @@ export interface FileRouteTypes {
     | '/admin/libraries/$libraryId/match/$titleId'
   fileRoutesByTo: FileRoutesByTo
   to:
+    | '/guest'
     | '/collections'
     | '/movies'
     | '/my-list'
@@ -289,6 +300,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/_app'
+    | '/guest'
     | '/_app/admin'
     | '/_app/collections'
     | '/_app/movies'
@@ -317,6 +329,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   AppRoute: typeof AppRouteWithChildren
+  GuestRoute: typeof GuestRoute
   DevAutoplayRoute: typeof DevAutoplayRoute
   DevCrashRoute: typeof DevCrashRoute
   DevKitRoute: typeof DevKitRoute
@@ -332,6 +345,13 @@ declare module '@tanstack/react-router' {
       path: ''
       fullPath: '/'
       preLoaderRoute: typeof AppRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/guest': {
+      id: '/guest'
+      path: '/guest'
+      fullPath: '/guest'
+      preLoaderRoute: typeof GuestRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_app/': {
@@ -572,6 +592,7 @@ const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   AppRoute: AppRouteWithChildren,
+  GuestRoute: GuestRoute,
   DevAutoplayRoute: DevAutoplayRoute,
   DevCrashRoute: DevCrashRoute,
   DevKitRoute: DevKitRoute,

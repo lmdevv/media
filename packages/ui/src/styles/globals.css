@@ -116,6 +116,7 @@
   --spacing-episode-panel: 28rem;
   --spacing-command-list: 30rem;
   --spacing-next-card: 26rem;
+  --spacing-guest-artwork: 28rem;
   /* The side gutter that keeps full-bleed content, such as a row's track, in line with the centered
      top bar: 64px, widening once the parent is wider than the content. */
   --spacing-page-inset: max(var(--spacing-16), calc((100% - var(--container-content)) / 2));

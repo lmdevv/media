@@ -98,6 +98,7 @@ const suites: ReadonlyArray<Suite> = [
     testMatch: /e2e\/playback\/player\.spec\.ts$/u,
     chained: true,
   },
+  { name: "guest", group: "player", testMatch: /e2e\/playback\/guest\.spec\.ts$/u, chained: true },
   {
     name: "scrubbing",
     group: "player",
@@ -175,6 +176,17 @@ export default defineConfig({
   }),
   webServer: [
     {
+      command: `pnpm exec vite --port ${port + 5} --strictPort`,
+      cwd: fileURLToPath(new URL("../music", import.meta.url)),
+      url: `http://localhost:${port + 5}/music/`,
+      reuseExistingServer: true,
+      env: {
+        VITE_PLATFORM_URL: platformUrl,
+        VITE_MEDIA_BASE_URL: mediaUrl,
+        VITE_SIGN_IN_URL: signInUrl,
+      },
+    },
+    {
       command: `pnpm exec vite --port ${accountUrl.port} --strictPort`,
       cwd: fileURLToPath(new URL("../account", import.meta.url)),
       url: accountUrl.origin,
@@ -194,6 +206,7 @@ export default defineConfig({
         VITE_MEDIA_BASE_URL: mediaUrl,
         VITE_SIGN_IN_URL: signInUrl,
         ACCOUNT_DEV_URL: accountUrl.origin,
+        MUSIC_DEV_URL: `http://localhost:${port + 5}`,
       },
     },
   ],

@@ -34,6 +34,8 @@ export type TitleKind = TitleCard["kind"];
 
 export type TitleSort = NonNullable<Parameters<Movies["titles"]["list"]>[0]["sort"]>;
 
+export type PlaybackDetail = Result<Movies["playback"]["get"]>;
+
 /** An episode with your progress. */
 export type Episode = NonNullable<TitleDetail["nextEpisode"]>;
 

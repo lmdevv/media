@@ -4,6 +4,7 @@ A person shares one movie, show, song, album, or session with someone who has no
 a link that ends by itself. An owner or admin decides whether the server makes guest links at all,
 which address they carry, and which members may make them, and can see and revoke everyone's. A maker creates, lists, and revokes links from a movies title
 page or a music album or song menu, beside the terminal commands. The account client governs them.
+A movie guest opens one in the account client and watches only its target in Lar Movies.
 
 ## Sub-features
 
@@ -13,7 +14,8 @@ page or a music album or song menu, beside the terminal commands. The account cl
 - `guest-list` shows the maker's links for the current item in its dialog; the CLI lists all their links, and for an admin everyone's.
 - `guest-activity` shows who opened a link.
 - `guest-revoke` ends an open link in its item's dialog or the CLI; an admin may also end anyone's in Admin, Guests.
-- `guest-open` opens a link without an account. Not built: the page shows the sign-in form.
+- `guest-open` takes a display name, redeems the link, and resumes the guest on reload.
+- `guest-movies` shows the shared movie, show, episode, or file and plays its permitted versions.
 
 ## How to get to it (user POV)
 
@@ -87,7 +89,29 @@ Preconditions:
   `Nobody has opened it.` `$S cli -- auth links activity --link-id <linkId>` prints an empty
   `page`.
 - **Open.** On a page that isn't signed in, `$S browser --app account --page guest open
-  "/guest#<link>"` shows the heading `Sign in.` and the sign-in form: nothing takes the link.
+  "/guest#<link>"` shows `Watch as a guest` and a `Display name` field. Read the link from its
+  private file in the command, never print it. Before capturing, verify that the address has
+  become `/guest`, with no fragment. Fill the name and click `Watch`: a movie link goes to
+  `/movies/guest`, showing the title and `Shared by guestprobe`. If someone is signed in,
+  `Replace this sign-in?` names them; `Cancel` keeps them signed in.
+- **Household safety.** On a household tab, open `/guest` without a code and click `Leave`:
+  that tab returns home and a second household tab stays signed in. A fresh guest link asks
+  before replacing the exact session shown. Another tab's new sign-in requires fresh consent;
+  a sign-in that wins during redemption stays signed in and the entrance stops for `Continue`.
+- **Music guard.** With a movie guest signed in, open `/music`: the account entrance resumes
+  `/movies/guest` on the shared item, without showing music's library, search, or settings.
+- **Movies playback.** Make a movie link with Lucía's CLI and the movie's title id. On a new
+  signed-out guest page, enter a display name, click `Watch`, then `Play`, and use
+  `$S browser wait-video --page guest --past 2`. Hover `--testid player-video`, press
+  `ArrowRight`, and wait for playback past the seek. Audio, subtitles, quality, versions, and
+  fullscreen use the household player's controls. Search, account navigation, casting, downloads,
+  settings, and watch-together are absent. Reload, then run `auth links activity --link-id <id>`:
+  exactly one guest remains. A show link lists its seasons and episodes; click an episode to play.
+  Back from a show episode returns to the shared show and its episodes.
+  An episode or file link shows no siblings or episode picker. Opening `/movies/title/<id>` as
+  that guest returns to `/movies/guest`. A music target holds at the account entrance.
+- **Revoke while watching.** With the guest playing, revoke the link from its maker's CLI.
+  The guest video disappears and `This link isn't available` appears, as it does at expiry.
 - **Revoke.** Click `--in region="Everyone's links" --role button --name Revoke`: the row reads
   `Revoked`, with no confirmation, and the maker's list shows `"state": "revoked"`. From the terminal,
   `$S cli -- auth links revoke --link-id <linkId>` prints `null` and does the same.
@@ -104,7 +128,8 @@ Preconditions:
 ## Gotchas
 
 - A link's address is its secret. Never print `auth links create`'s output, and never capture a
-  page whose address bar or body shows it: `/guest#…` keeps the secret in the address.
+  page whose address bar or body shows it. The guest entrance removes `/guest#…`'s fragment
+  before rendering; the code stays only in memory until redemption.
 - The switch and the address change nothing until `Save`.
 - Stopping a member signs them out everywhere. Never try it on a seeded person: their CLI session
   and pages go with it.

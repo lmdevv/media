@@ -1,16 +1,10 @@
 import type { BrowserStore } from "@media/ui/lib/browser-session";
-import {
-  PlatformProvider,
-  usePlatform,
-  usePlatformQuery,
-  usePlatformStatus,
-} from "@media/sdk/react";
+import { PlatformProvider, usePlatform, usePlatformQuery } from "@media/sdk/react";
 import type { PlatformSdk } from "@media/sdk/promise";
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import type { ReactNode } from "react";
 
 import { SIGN_IN_URL } from "../env";
-import { BlankPage } from "./redirect";
 
 /** Where a signed-out browser signs in: the account client at the origin's root (ADR 0020). */
 const SIGN_IN_PATH = "/";
@@ -41,24 +35,9 @@ const leaveToSignIn = (): void => {
   window.location.replace(SIGN_IN_PATH);
 };
 
-/**
- * Renders `children` only while the browser holds a session. A browser that holds none, or whose
- * session ends here or in another tab, goes to `/` to sign in.
- */
-export function RequireSession({ children }: { readonly children: ReactNode }) {
-  const status = usePlatformStatus();
-
-  useEffect(() => {
-    if (status === "signedOut") leaveToSignIn();
-  }, [status]);
-
-  return status === "signedIn" ? children : <BlankPage />;
-}
-
 /** Who is signed in, as `core.auth.sessions.current` answers. */
 export type Me = Awaited<ReturnType<PlatformSdk["core"]["auth"]["sessions"]["current"]>>;
 
-/** The signed-in person and their session, or null while loading. Use inside `RequireSession`. */
 export const useMe = (): Me | null => {
   const platform = usePlatform();
   const me = usePlatformQuery(platform.core.auth.sessions.current);

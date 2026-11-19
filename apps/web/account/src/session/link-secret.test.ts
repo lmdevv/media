@@ -42,6 +42,16 @@ describe("link secrets", () => {
     expect(linkSecretFor(held, "/reset")).toBe("");
   });
 
+  it("takes a guest code before the router and never leaves it in history", () => {
+    const tab = tabAt("https://media.test/guest#mg_3.secret");
+    const held = takeLinkSecret(tab.address(), tab.history);
+
+    expect(held).toStrictEqual({ page: "/guest", secret: "mg_3.secret" });
+    expect(tab.entries()).toStrictEqual(["https://media.test/guest"]);
+    expect(linkSecretFor(held, "/guest")).toBe("mg_3.secret");
+    expect(takeLinkSecret(tab.address(), tab.history)).toBeNull();
+  });
+
   it("takes a reset link's secret the same way", () => {
     const tab = tabAt("https://media.test/reset#mr_2.secret");
 

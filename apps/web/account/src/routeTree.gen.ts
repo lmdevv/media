@@ -8,6 +8,7 @@ import { Route as AdminRouteImport } from './routes/admin'
 import { Route as ApiKeysRouteImport } from './routes/api-keys'
 import { Route as DeviceRouteImport } from './routes/device'
 import { Route as DevicesRouteImport } from './routes/devices'
+import { Route as GuestRouteImport } from './routes/guest'
 import { Route as HomeRouteImport } from './routes/home'
 import { Route as InviteRouteImport } from './routes/invite'
 import { Route as ResetRouteImport } from './routes/reset'
@@ -46,6 +47,11 @@ const DeviceRoute = DeviceRouteImport.update({
 const DevicesRoute = DevicesRouteImport.update({
   id: '/devices',
   path: '/devices',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GuestRoute = GuestRouteImport.update({
+  id: '/guest',
+  path: '/guest',
   getParentRoute: () => rootRouteImport,
 } as any)
 const HomeRoute = HomeRouteImport.update({
@@ -125,6 +131,7 @@ export interface FileRoutesByFullPath {
   '/api-keys': typeof ApiKeysRoute
   '/device': typeof DeviceRoute
   '/devices': typeof DevicesRoute
+  '/guest': typeof GuestRoute
   '/home': typeof HomeRoute
   '/invite': typeof InviteRoute
   '/reset': typeof ResetRoute
@@ -145,6 +152,7 @@ export interface FileRoutesByTo {
   '/api-keys': typeof ApiKeysRoute
   '/device': typeof DeviceRoute
   '/devices': typeof DevicesRoute
+  '/guest': typeof GuestRoute
   '/home': typeof HomeRoute
   '/invite': typeof InviteRoute
   '/reset': typeof ResetRoute
@@ -167,6 +175,7 @@ export interface FileRoutesById {
   '/api-keys': typeof ApiKeysRoute
   '/device': typeof DeviceRoute
   '/devices': typeof DevicesRoute
+  '/guest': typeof GuestRoute
   '/home': typeof HomeRoute
   '/invite': typeof InviteRoute
   '/reset': typeof ResetRoute
@@ -190,6 +199,7 @@ export interface FileRouteTypes {
     | '/api-keys'
     | '/device'
     | '/devices'
+    | '/guest'
     | '/home'
     | '/invite'
     | '/reset'
@@ -210,6 +220,7 @@ export interface FileRouteTypes {
     | '/api-keys'
     | '/device'
     | '/devices'
+    | '/guest'
     | '/home'
     | '/invite'
     | '/reset'
@@ -231,6 +242,7 @@ export interface FileRouteTypes {
     | '/api-keys'
     | '/device'
     | '/devices'
+    | '/guest'
     | '/home'
     | '/invite'
     | '/reset'
@@ -253,6 +265,7 @@ export interface RootRouteChildren {
   ApiKeysRoute: typeof ApiKeysRoute
   DeviceRoute: typeof DeviceRoute
   DevicesRoute: typeof DevicesRoute
+  GuestRoute: typeof GuestRoute
   HomeRoute: typeof HomeRoute
   InviteRoute: typeof InviteRoute
   ResetRoute: typeof ResetRoute
@@ -295,6 +308,13 @@ declare module '@tanstack/react-router' {
       path: '/devices'
       fullPath: '/devices'
       preLoaderRoute: typeof DevicesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/guest': {
+      id: '/guest'
+      path: '/guest'
+      fullPath: '/guest'
+      preLoaderRoute: typeof GuestRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/home': {
@@ -430,6 +450,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiKeysRoute: ApiKeysRoute,
   DeviceRoute: DeviceRoute,
   DevicesRoute: DevicesRoute,
+  GuestRoute: GuestRoute,
   HomeRoute: HomeRoute,
   InviteRoute: InviteRoute,
   ResetRoute: ResetRoute,

@@ -1,9 +1,16 @@
 import type { BrowserStore } from "@media/ui/lib/browser-session";
-import { PlatformProvider, usePlatform, usePlatformStatus } from "@media/sdk/react";
+import {
+  PlatformProvider,
+  usePlatform,
+  usePlatformQuery,
+  usePlatformStatus,
+} from "@media/sdk/react";
+import { sessionAccess, useIdentityRetry } from "@media/ui/lib/session-identity";
 import { useCallback, useEffect } from "react";
 import type { ReactNode } from "react";
 
 import { SIGN_IN_URL } from "../env";
+import { Button } from "@/components/ui/button";
 
 /** Where a signed-out browser signs in: the account client at the origin's root (ADR 0020). */
 const SIGN_IN_PATH = "/";
@@ -45,12 +52,31 @@ function BlankPage() {
  */
 export function RequireSession({ children }: { readonly children: ReactNode }) {
   const status = usePlatformStatus();
+  const platform = usePlatform();
+
+  const me = usePlatformQuery(
+    platform.core.auth.sessions.current,
+    ...(status === "signedIn" ? [] : (["skip"] as const)),
+  );
+
+  useIdentityRetry(me);
+  const access = sessionAccess(status, me);
 
   useEffect(() => {
-    if (status === "signedOut") leaveToSignIn();
-  }, [status]);
+    if (access === "signedOut" || access === "guest") leaveToSignIn();
+  }, [access]);
 
-  return status === "signedIn" ? children : <BlankPage />;
+  if (access === "failed" && me.status === "error")
+    return (
+      <main className="flex min-h-dvh flex-col items-center justify-center gap-3 bg-bg px-6 text-text">
+        <h1 className="font-sans text-xl/xl font-heavy tracking-tight">Can't reach the server</h1>
+        <Button variant="solid" onClick={me.retry}>
+          Try again
+        </Button>
+      </main>
+    );
+
+  return access === "household" ? children : <BlankPage />;
 }
 
 /**
