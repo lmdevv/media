@@ -39,7 +39,8 @@ import { useAddToSession } from "@/together/use-add-to-session";
 import { useVersionChoice, withFacts } from "@/playback/use-version-choice";
 import type { VersionChoice } from "@/playback/use-version-choice";
 
-import { TitleGuestLinks } from "../guests/guest-links";
+import { useGuestLinkDialog } from "@media/ui/lib/use-guest-links";
+import { TitleGuestLinkDialog, TitleGuestLinks } from "../guests/guest-links";
 
 import { Episodes } from "./episodes";
 import { playTarget, useMyListToggle, watchSearch } from "./play-target";
@@ -171,6 +172,7 @@ function VersionSelect({
 
 interface DetailParts {
   readonly title: TitleDetail;
+  readonly shareGuests: (() => void) | null;
   /** Queues what the main button plays in the person's group session; null outside one. */
   readonly addToSession: (() => void) | null;
   readonly canManage: boolean;
@@ -188,13 +190,16 @@ interface DetailParts {
 
 export function TitleDetailView({
   title,
+  mayShareGuests,
   canManage,
   phone,
 }: {
   readonly title: TitleDetail;
   readonly canManage: boolean;
   readonly phone: boolean;
+  readonly mayShareGuests: boolean;
 }) {
+  const guests = useGuestLinkDialog(mayShareGuests);
   const myList = useMyListToggle(title.id, title.inMyList, title.name);
   const versions = usePlayVersions(title);
   const versionChoice = useVersionChoice(versions);
@@ -208,6 +213,16 @@ export function TitleDetailView({
 
   const parts: DetailParts = {
     title,
+    shareGuests: mayShareGuests
+      ? () =>
+          guests.show({
+            name: title.name,
+            target: {
+              kind: "item",
+              item: { domain: "movies", ref: { type: "title", id: title.id } },
+            },
+          })
+      : null,
     addToSession,
     canManage,
     target,
@@ -222,7 +237,14 @@ export function TitleDetailView({
     links: titleLinks(title.kind, title.externalIds),
   };
 
-  return phone ? <PhoneTitleDetail {...parts} /> : <DesktopTitleDetail {...parts} />;
+  return (
+    <>
+      {phone ? <PhoneTitleDetail {...parts} /> : <DesktopTitleDetail {...parts} />}
+      {mayShareGuests && guests.selected !== null ? (
+        <TitleGuestLinkDialog selected={guests.selected} onClose={guests.close} />
+      ) : null}
+    </>
+  );
 }
 
 function FactLine({
@@ -382,6 +404,7 @@ function TitleHeading({
 
 function PhoneTitleDetail({
   title,
+  shareGuests,
   addToSession,
   canManage,
   target,
@@ -424,6 +447,7 @@ function PhoneTitleDetail({
       </div>
       <PhoneActions
         title={title}
+        shareGuests={shareGuests}
         target={target}
         version={version}
         myList={myList}
@@ -442,12 +466,14 @@ function PhoneTitleDetail({
 
 function PhoneActions({
   title,
+  shareGuests,
   target,
   version,
   myList,
   addToSession,
 }: {
   readonly title: TitleDetail;
+  readonly shareGuests: (() => void) | null;
   readonly target: PlayTarget;
   readonly version: MediaFileId | undefined;
   readonly myList: MyListToggle;
@@ -468,7 +494,7 @@ function PhoneActions({
         )}
         My List
       </button>
-      <TitleGuestLinks title={title} phone />
+      <TitleGuestLinks phone onClick={shareGuests} />
       {target.resuming ? (
         <Link
           to="/watch/$titleId"
@@ -499,6 +525,7 @@ function PhoneActions({
 
 function DesktopTitleDetail({
   title,
+  shareGuests,
   addToSession,
   canManage,
   target,
@@ -562,7 +589,7 @@ function DesktopTitleDetail({
             >
               {myList.inList ? <CheckIcon strokeWidth={1.75} /> : <PlusIcon strokeWidth={1.75} />}
             </Button>
-            <TitleGuestLinks title={title} />
+            <TitleGuestLinks onClick={shareGuests} />
             {addToSession === null ? null : (
               <Button variant="secondary" size="lg" onClick={addToSession}>
                 <ListPlusIcon strokeWidth={1.75} aria-hidden />

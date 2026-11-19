@@ -1,17 +1,14 @@
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
-import { Redacted } from "effect";
-import { useState } from "react";
+import type { Redacted } from "effect";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 
-import { toastFailure } from "@media/ui/lib/failure";
-import {
-  canQueryGuestLinks,
-  guestExpiryDays,
-  guestLinksAllowed,
-  sameGuestTarget,
-} from "@media/ui/lib/guest-links";
+import { guestLinkDialog } from "@media/ui/lib/guest-link-dialog";
+import type { GuestLinkSelection } from "@media/ui/lib/guest-link-dialog";
+import { guestLinkActions } from "@media/ui/lib/guest-link-actions";
+import { describeFailure, toastFailure } from "@media/ui/lib/failure";
+import { canQueryGuestLinks, guestExpiryDays, guestLinksAllowed } from "@media/ui/lib/guest-links";
 import type { GuestLinkRow, GuestTarget } from "@media/ui/lib/guest-links";
-import { useAllPages } from "@media/ui/lib/pages";
 import { copyText } from "@media/ui/lib/secure-context";
 
 /** Reads guest policy only after this session proves it can hold account queries. */
@@ -31,10 +28,15 @@ export const useMayShareGuests = (): boolean => {
 export interface GuestLinksModel {
   readonly expiry: string;
   readonly setExpiry: (value: string) => void;
+  /** The one-time address, visible only while its live row is open. */
   readonly created: Redacted.Redacted | null;
+  /** Create or revoke is awaiting the server. */
   readonly pending: boolean;
+  /** A link was made in this dialog; keep Create disabled until it closes or revokes that link. */
+  readonly made: boolean;
   readonly copied: boolean;
   readonly rows: ReadonlyArray<GuestLinkRow>;
+  /** Null when the expiry is not a whole number of days from 1 to 30. */
   readonly days: number | null;
   readonly create: () => Promise<void>;
   readonly revoke: (linkId: GuestLinkRow["linkId"]) => Promise<void>;
@@ -46,87 +48,56 @@ export interface GuestLinksModel {
 /** Holds a new secret only for the mounted dialog; list subscriptions never return it. */
 export const useGuestLinks = (target: GuestTarget): GuestLinksModel => {
   const links = usePlatform().core.guests.links;
-  const [expiry, setExpiry] = useState("7");
 
-  const [newLink, setNewLink] = useState<{
-    readonly url: Redacted.Redacted;
-    readonly linkId: Parameters<typeof links.revoke>[0]["linkId"];
-  } | null>(null);
+  const [actions] = useState(() =>
+    guestLinkActions(target, links, copyText, {
+      copied: () => toast.success("Copied link"),
+      failed: toastFailure,
+    }),
+  );
 
-  const [pending, setPending] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const state = useSyncExternalStore(actions.subscribe, actions.getSnapshot, actions.getSnapshot);
 
-  const pages = useAllPages(links.list, (paginationOpts) => ({
-    whose: "mine" as const,
-    paginationOpts,
-  }));
+  const page = usePlatformQuery(links.list, {
+    whose: "mine",
+    target,
+    paginationOpts: { numItems: 25, cursor: null },
+  });
 
-  const next = pages.status === "ready" ? pages.next : null;
-
-  const days = guestExpiryDays(expiry);
-
-  const rows =
-    pages.status === "ready" ? pages.rows.filter((row) => sameGuestTarget(row.target, target)) : [];
-
-  const create = async () => {
-    if (days === null || pending) return;
-    setPending(true);
-
-    try {
-      const result = await links.create({ target, expiresInDays: days });
-      setNewLink({ url: Redacted.make(result.url), linkId: result.linkId });
-      setCopied(false);
-    } catch (cause) {
-      toastFailure(cause);
-    } finally {
-      setPending(false);
-    }
-  };
-
-  const revoke = async (linkId: Parameters<typeof links.revoke>[0]["linkId"]) => {
-    if (pending) return;
-    setPending(true);
-
-    try {
-      await links.revoke({ linkId });
-
-      if (newLink?.linkId === linkId) setNewLink(null);
-    } catch (cause) {
-      toastFailure(cause);
-    } finally {
-      setPending(false);
-    }
-  };
-
-  const copy = async () => {
-    if (newLink === null) return;
-
-    try {
-      await copyText(Redacted.value(newLink.url));
-      setCopied(true);
-      toast.success("Copied link");
-    } catch (cause) {
-      toastFailure(cause);
-    }
-  };
-
-  let failure: GuestLinksModel["failure"] = null;
-
-  if (pages.status === "failed") failure = pages;
-  else if (next?.kind === "failed") failure = next;
+  const rows = page.status === "success" ? page.data.page : [];
 
   return {
-    expiry,
-    setExpiry,
-    created: newLink?.url ?? null,
-    pending,
-    copied,
+    expiry: state.expiry,
+    setExpiry: actions.setExpiry,
+    created: actions.visible(rows),
+    pending: state.pending,
+    made: state.newLink !== null,
+    copied: state.copied,
     rows,
-    days,
-    create,
-    revoke,
-    copy,
-    loading: pages.status === "loading" || next?.kind === "loading" || next?.kind === "more",
-    failure,
+    days: guestExpiryDays(state.expiry),
+    create: actions.create,
+    revoke: actions.revoke,
+    copy: () => actions.copy(rows),
+    loading: page.status === "loading",
+    failure:
+      page.status === "error" ? { message: describeFailure(page.error), retry: page.retry } : null,
   };
+};
+
+interface GuestLinkDialogModel {
+  readonly selected: GuestLinkSelection | null;
+  readonly show: (selection: GuestLinkSelection) => void;
+  readonly close: () => void;
+}
+
+/** Keeps one selection above transient entries, and resets it when sharing permission is lost. */
+export const useGuestLinkDialog = (allowed: boolean): GuestLinkDialogModel => {
+  const [dialog] = useState(guestLinkDialog);
+  const selected = useSyncExternalStore(dialog.subscribe, dialog.getSnapshot, dialog.getSnapshot);
+
+  useEffect(() => {
+    dialog.setAllowed(allowed);
+  }, [dialog, allowed]);
+
+  return { selected, show: dialog.show, close: dialog.close };
 };

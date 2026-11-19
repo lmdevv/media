@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { ComponentProps } from "react";
 import { describe, expect, it } from "vitest";
 
-import { GuestLinksForm } from "./guest-links-form";
+import { GuestLinksFields } from "./guest-links-form";
 import type { GuestLinkButtonProps } from "./guest-links-form";
 import type { GuestLinkRow } from "@media/ui/lib/guest-links";
 import type { useGuestLinks } from "@media/ui/lib/use-guest-links";
@@ -23,6 +23,7 @@ const model: ReturnType<typeof useGuestLinks> = {
   setExpiry: noop,
   created: null,
   pending: false,
+  made: false,
   copied: false,
   rows: [],
   days: 7,
@@ -35,7 +36,7 @@ const model: ReturnType<typeof useGuestLinks> = {
 
 const markup = (fields: Partial<typeof model> = {}) =>
   renderToStaticMarkup(
-    <GuestLinksForm model={{ ...model, ...fields }} Button={Button} Input={Input} />,
+    <GuestLinksFields model={{ ...model, ...fields }} Button={Button} Input={Input} />,
   );
 
 describe("guest link fields", () => {

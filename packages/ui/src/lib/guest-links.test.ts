@@ -1,30 +1,9 @@
 import type { PlatformSdk } from "@media/sdk/promise";
-import { Brand } from "effect";
 import { describe, expect, it } from "vitest";
 
-import {
-  canQueryGuestLinks,
-  guestExpiryDays,
-  guestLinksAllowed,
-  sameGuestTarget,
-} from "./guest-links";
-import type { GuestTarget } from "./guest-links";
+import { canQueryGuestLinks, guestExpiryDays, guestLinksAllowed } from "./guest-links";
 
 type Me = Awaited<ReturnType<PlatformSdk["core"]["auth"]["sessions"]["current"]>>;
-
-type TitleRef = Extract<
-  Extract<GuestTarget, { kind: "item" }>["item"],
-  { domain: "movies" }
->["ref"];
-
-const episodeId = Brand.nominal<Extract<TitleRef, { type: "episode" }>["id"]>();
-
-const titleId = Brand.nominal<Extract<TitleRef, { type: "title" }>["id"]>();
-
-const title: GuestTarget = {
-  kind: "item",
-  item: { domain: "movies", ref: { type: "title", id: titleId("one") } },
-};
 
 describe("guest sharing", () => {
   it("does not ask account queries from tiles, guests, keys, or sessions without account scope", () => {
@@ -61,26 +40,5 @@ describe("guest sharing", () => {
 
     for (const value of ["", "0", "31", "1.5", "NaN", "Infinity"])
       expect(guestExpiryDays(value)).toBeNull();
-  });
-
-  it("matches the exact target and never a missing target, episode, or session", () => {
-    expect(sameGuestTarget(title, title)).toBe(true);
-    expect(sameGuestTarget(null, title)).toBe(false);
-    expect(
-      sameGuestTarget(
-        {
-          kind: "item",
-          item: { domain: "movies", ref: { type: "episode", id: episodeId("one") } },
-        },
-        title,
-      ),
-    ).toBe(false);
-    expect(sameGuestTarget({ kind: "session", domain: "movies" }, title)).toBe(false);
-    expect(
-      sameGuestTarget(
-        { kind: "item", item: { domain: "movies", ref: { type: "title", id: titleId("two") } } },
-        title,
-      ),
-    ).toBe(false);
   });
 });

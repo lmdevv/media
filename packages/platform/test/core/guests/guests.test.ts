@@ -12,6 +12,7 @@ import { inOrder } from "../../../convex/core/lib/inOrder";
 import { BLOCKED_MAX, MEMBERS_MAX, PRESENT_MS } from "../../../convex/core/together/model";
 import { patchByHand, runFunction } from "../../admin";
 import { member } from "../../devices";
+import { allPages } from "../../pages";
 import type { Member } from "../../devices";
 import { GUEST_ADDRESS, guestsOn, makeLink, openLink } from "../../guests";
 import {
@@ -465,6 +466,57 @@ describe.skipIf(stack === undefined)("guest links", { timeout: 180_000 }, () => 
         }),
       ),
     ).toBe("forbidden");
+  });
+
+  it("pages only this maker's links for the exact target without changing unfiltered listing", async () => {
+    if (stack === undefined) return;
+    const { admin, libraryId, shared, other } = await shelf(stack);
+    const maya = await member(stack, "filtered-maker");
+    await share(admin, libraryId, { kind: "user", userId: maya.userId }, "view");
+    await allowAs(admin, maya.userId, true);
+    const target = { kind: "item", item: shared } as const;
+    const first = await makeLink(maya, target);
+    const unrelated = await makeLink(maya, { kind: "item", item: other });
+    const second = await makeLink(maya, target);
+    const stranger = await makeLink(admin, target);
+    const third = await makeLink(maya, target);
+
+    const pages = await allPages(
+      (paginationOpts) =>
+        maya.signedIn.client.query(api.core.guests.links.list, {
+          whose: "mine",
+          target,
+          paginationOpts,
+        }),
+      1,
+    );
+
+    expect(pages.length).toBeGreaterThanOrEqual(3);
+    const rows = pages.flatMap((page) => page.page);
+    expect(
+      rows.every(
+        (row) =>
+          row.madeBy === maya.username &&
+          row.target?.kind === "item" &&
+          row.target.item.ref.id === shared.ref.id,
+      ),
+    ).toBe(true);
+    const ids = rows.map((row) => row.linkId);
+    expect(ids).toEqual([third.linkId, second.linkId, first.linkId]);
+    expect(ids.includes(stranger.linkId)).toBe(false);
+    expect(ids.includes(unrelated.linkId)).toBe(false);
+
+    const unfiltered = await maya.signedIn.client.query(api.core.guests.links.list, {
+      whose: "mine",
+      paginationOpts: { numItems: 10, cursor: null },
+    });
+
+    expect(unfiltered.page.map((row) => row.linkId)).toEqual([
+      third.linkId,
+      second.linkId,
+      unrelated.linkId,
+      first.linkId,
+    ]);
   });
 
   it("seats a session link's guests under the join setting, and revoking it takes them out", async () => {

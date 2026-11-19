@@ -555,7 +555,9 @@ export default defineSchema({
     .index("by_session_item", ["sessionId", "item.ref.type", "item.ref.id"]),
 
   /** Share links that let guests in (ADR 0007). `core/guests/` is their only writer. */
-  shareLinks: defineTable(linkDocument).index("by_maker", ["maker"]),
+  shareLinks: defineTable(linkDocument)
+    .index("by_maker", ["maker"])
+    .index("by_maker_target", ["maker", "target"]),
 
   guestAccess: defineTable(guestAccessDocument),
 

@@ -1,27 +1,47 @@
 import { Redacted } from "effect";
-import type { ComponentProps, ComponentType } from "react";
+import type { ComponentProps, ComponentType, ReactNode } from "react";
 
+import { useGuestLinks } from "@media/ui/lib/use-guest-links";
 import type { GuestLinksModel } from "@media/ui/lib/use-guest-links";
+import type { GuestTarget } from "@media/ui/lib/guest-links";
 
 /** Actions use each app's button styles. */
 export type GuestLinkButtonProps = ComponentProps<"button"> & {
   readonly tone: "primary" | "secondary" | "danger";
 };
 
-/** Shared fields and maker's links; the app supplies its controls and dialog shell. */
-export function GuestLinksForm({
+type GuestLinkInputProps = Pick<
+  ComponentProps<"input">,
+  "type" | "min" | "max" | "step" | "required" | "value" | "onChange" | "readOnly" | "onFocus"
+>;
+
+interface GuestLinksFormProps {
+  readonly target: GuestTarget;
+  readonly Button: ComponentType<GuestLinkButtonProps>;
+  readonly Input: ComponentType<GuestLinkInputProps>;
+  readonly children: (form: ReactNode, pending: boolean) => ReactNode;
+}
+
+/** Keeps each target's form separate and passes pending create or revoke state to its dialog. */
+export function GuestLinksForm(props: GuestLinksFormProps) {
+  return <GuestLinksSession key={JSON.stringify(props.target)} {...props} />;
+}
+
+function GuestLinksSession({ target, Button, Input, children }: GuestLinksFormProps) {
+  const model = useGuestLinks(target);
+
+  return children(<GuestLinksFields model={model} Button={Button} Input={Input} />, model.pending);
+}
+
+/** Fields use each app's controls and never recover a secret from list metadata. */
+export function GuestLinksFields({
   model,
   Button,
   Input,
 }: {
   readonly model: GuestLinksModel;
   readonly Button: ComponentType<GuestLinkButtonProps>;
-  readonly Input: ComponentType<
-    Pick<
-      ComponentProps<"input">,
-      "type" | "min" | "max" | "step" | "required" | "value" | "onChange" | "readOnly" | "onFocus"
-    >
-  >;
+  readonly Input: ComponentType<GuestLinkInputProps>;
 }) {
   return (
     <div className="flex flex-col gap-6">
@@ -45,7 +65,11 @@ export function GuestLinksForm({
           />
         </label>
         <div>
-          <Button tone="primary" type="submit" disabled={model.pending || model.days === null}>
+          <Button
+            tone="primary"
+            type="submit"
+            disabled={model.pending || model.made || model.days === null}
+          >
             Create link
           </Button>
         </div>

@@ -67,7 +67,14 @@ Preconditions:
   Repeat for an album and capture desktop and phone sizes. Before-side captures show the same
   title action area and album menu without the entry. Record the after flow only after the
   masking stylesheet is installed, and publish each pair and the video with `evidence publish`.
-  As Aiko, who has no leave by default, these entries are absent even when guest links are on.
+  As Aiko, who has no permission to share by default, these entries are absent even when guest links are on.
+- **Dialog lifetime.** With a title dialog open, switch between desktop and phone sizes: the
+  dialog and its masked one-time address stay. Open a song's guest dialog from a playlist, create a link, and remove that
+  song from the playlist in another signed-in page. The row disappears, but the dialog and its
+  masked one-time address stay, and Copy still works. Revoke that link from Admin, Guests: its
+  row becomes Revoked and both the address and Copy disappear. Turning guest links off closes
+  the dialog; turning them back on never reopens it. A pending Create keeps the dialog open and
+  disables another Create until the server answers.
 - **Create (CLI).** The same `auth links create` now prints `linkId`, `expiresAt` seven days on, and a
   `url` of the form `http://localhost:<port>/guest#mg_…`. Send its output to a file in the side's
   state folder, never to the terminal. A music album takes `"domain":"music"` and

@@ -3,12 +3,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import type { ErrorComponentProps } from "@tanstack/react-router";
 import { Schema } from "effect";
-import { useState } from "react";
 
 import { DetailError } from "@/components/route-error";
 import type { MissingCopy } from "@/components/route-error";
 
-import { GuestLinkDialog, GuestLinkMenuItem } from "@/components/guests/guest-links";
+import { GuestLinkMenuItem } from "@/components/guests/guest-links";
 import { Artwork } from "@/components/library/artwork";
 import { CollectionHeader } from "@/components/library/collection-header";
 import { PlayOnMenu } from "@/components/player/play-on-menu";
@@ -41,7 +40,6 @@ function AlbumPage() {
   const { albumId } = Route.useParams();
   const { track: highlight } = Route.useSearch();
   const music = useMusic();
-  const [guestOpen, setGuestOpen] = useState(false);
   const detail = useRead(music.albums.get, { albumId });
 
   const tracks = useAllRows(music.albums.tracks, (paginationOpts) => ({
@@ -110,19 +108,17 @@ function AlbumPage() {
         link={{ kind: "album", id: album.id }}
         menuExtra={
           <>
-            <GuestLinkMenuItem onClick={() => setGuestOpen(true)} />
+            <GuestLinkMenuItem
+              name={album.title}
+              target={{
+                kind: "item",
+                item: { domain: "music", ref: { type: "album", id: album.id } },
+              }}
+            />
             <PlayOnMenu item={{ domain: "music", ref: { type: "album", id: album.id } }} />
           </>
         }
       />
-      {guestOpen ? (
-        <GuestLinkDialog
-          name={album.title}
-          open={guestOpen}
-          onOpenChange={setGuestOpen}
-          target={{ kind: "item", item: { domain: "music", ref: { type: "album", id: album.id } } }}
-        />
-      ) : null}
       <div className="-mx-5 pl-5 lg:mx-0 lg:pl-0">
         <TrackList
           tracks={tracks}

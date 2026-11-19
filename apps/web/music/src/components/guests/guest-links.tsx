@@ -1,51 +1,57 @@
 import { GuestLinksForm } from "@media/ui/components/guest-links-form";
 import type { GuestLinkButtonProps } from "@media/ui/components/guest-links-form";
-import type { GuestTarget } from "@media/ui/lib/guest-links";
-import { useGuestLinks, useMayShareGuests } from "@media/ui/lib/use-guest-links";
+import type { GuestLinkSelection } from "@media/ui/lib/guest-link-dialog";
+import { useGuestLinkDialog, useMayShareGuests } from "@media/ui/lib/use-guest-links";
+import { createContext, useContext, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 
+const GuestLinksContext = createContext<{
+  readonly allowed: boolean;
+  readonly show: (selection: GuestLinkSelection) => void;
+} | null>(null);
+
 function GuestButton({ tone, ...props }: GuestLinkButtonProps) {
   return <Button variant={tone} {...props} />;
 }
 
-function GuestForm({ target }: { readonly target: GuestTarget }) {
-  const model = useGuestLinks(target);
-
-  return <GuestLinksForm model={model} Button={GuestButton} Input={Input} />;
-}
-
-/** The menu entry stays absent until this session is allowed to share. */
-export function GuestLinkMenuItem({ onClick }: { readonly onClick: () => void }) {
+/** Reads policy once for the signed-in page and keeps its dialog above transient song rows. */
+export function GuestLinksProvider({ children }: { readonly children: ReactNode }) {
   const allowed = useMayShareGuests();
-
-  return allowed ? <DropdownMenuItem onClick={onClick}>Guest link</DropdownMenuItem> : null;
-}
-
-/** The dialog lives outside the menu so closing the menu preserves the active form. */
-export function GuestLinkDialog({
-  target,
-  name,
-  open,
-  onOpenChange,
-}: {
-  readonly target: GuestTarget;
-  readonly name: string;
-  readonly open: boolean;
-  readonly onOpenChange: (open: boolean) => void;
-}) {
-  const allowed = useMayShareGuests();
+  const { selected, show, close } = useGuestLinkDialog(allowed);
+  const value = useMemo(() => ({ allowed, show }), [allowed, show]);
 
   return (
-    <Dialog open={open && allowed} onOpenChange={onOpenChange}>
-      {open && allowed ? (
-        <DialogContent title={`Share ${name}`}>
-          <GuestForm key={JSON.stringify(target)} target={target} />
-        </DialogContent>
+    <GuestLinksContext value={value}>
+      {children}
+      {allowed && selected !== null ? (
+        <GuestLinksForm target={selected.target} Button={GuestButton} Input={Input}>
+          {(form, pending) => (
+            <Dialog
+              open
+              onOpenChange={(open) => {
+                if (!open && !pending) close();
+              }}
+            >
+              <DialogContent title={`Share ${selected.name}`}>{form}</DialogContent>
+            </Dialog>
+          )}
+        </GuestLinksForm>
       ) : null}
-    </Dialog>
+    </GuestLinksContext>
   );
+}
+
+/** Uses the page's already-loaded gate; a menu never starts its own policy query. */
+export function GuestLinkMenuItem({ target, name }: GuestLinkSelection) {
+  const sharing = useContext(GuestLinksContext);
+  const [offered] = useState(sharing?.allowed ?? false);
+
+  return offered && sharing !== null && sharing.allowed ? (
+    <DropdownMenuItem onClick={() => sharing.show({ target, name })}>Guest link</DropdownMenuItem>
+  ) : null;
 }

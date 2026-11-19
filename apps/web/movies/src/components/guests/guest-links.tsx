@@ -3,11 +3,8 @@ import { Dialog, DialogBody, DialogContent } from "@media/ui/components/dialog";
 import { GuestLinksForm } from "@media/ui/components/guest-links-form";
 import type { GuestLinkButtonProps } from "@media/ui/components/guest-links-form";
 import { Input } from "@media/ui/components/input";
-import type { TitleDetail } from "@/lib/catalog";
-import type { GuestTarget } from "@media/ui/lib/guest-links";
-import { useGuestLinks, useMayShareGuests } from "@media/ui/lib/use-guest-links";
 import { LinkIcon } from "lucide-react";
-import { useState } from "react";
+import type { GuestLinkSelection } from "@media/ui/lib/guest-link-dialog";
 
 const GUEST_VARIANTS = { primary: "primary", secondary: "subtle", danger: "destructive" } as const;
 
@@ -15,71 +12,60 @@ function GuestButton({ tone, ...props }: GuestLinkButtonProps) {
   return <Button variant={GUEST_VARIANTS[tone]} size="dialog" {...props} />;
 }
 
-function GuestForm({ target }: { readonly target: GuestTarget }) {
-  const model = useGuestLinks(target);
-
-  return <GuestLinksForm model={model} Button={GuestButton} Input={Input} />;
-}
-
-/** A title's guest action appears only for people allowed to share from this session. */
+/** The title's action uses the page's sharing permission and dialog owner. */
 export function TitleGuestLinks({
-  title,
   phone = false,
+  onClick,
 }: {
-  readonly title: Pick<TitleDetail, "id" | "name">;
   readonly phone?: boolean;
+  readonly onClick: (() => void) | null;
 }) {
-  const allowed = useMayShareGuests();
+  if (onClick === null) return null;
 
-  return allowed ? <TitleGuestAction title={title} phone={phone} /> : null;
+  return phone ? (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex w-26 cursor-pointer flex-col items-center gap-1.5 text-caption/caption text-text-muted"
+    >
+      <LinkIcon className="size-5.5 text-text" aria-hidden />
+      Guest link
+    </button>
+  ) : (
+    <Button
+      variant="icon"
+      size="icon"
+      className="size-12"
+      aria-label="Guest link"
+      onClick={onClick}
+    >
+      <LinkIcon aria-hidden />
+    </Button>
+  );
 }
 
-function TitleGuestAction({
-  title,
-  phone,
+/** Lives above the phone and desktop action layouts so resizing preserves the one-time address. */
+export function TitleGuestLinkDialog({
+  selected,
+  onClose,
 }: {
-  readonly title: Pick<TitleDetail, "id" | "name">;
-  readonly phone: boolean;
+  readonly selected: GuestLinkSelection;
+  readonly onClose: () => void;
 }) {
-  const [open, setOpen] = useState(false);
-
   return (
-    <>
-      {phone ? (
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          className="flex w-26 cursor-pointer flex-col items-center gap-1.5 text-caption/caption text-text-muted"
+    <GuestLinksForm target={selected.target} Button={GuestButton} Input={Input}>
+      {(form, pending) => (
+        <Dialog
+          open
+          onOpenChange={(next) => {
+            if (!next && !pending) onClose();
+          }}
         >
-          <LinkIcon className="size-5.5 text-text" aria-hidden />
-          Guest link
-        </button>
-      ) : (
-        <Button
-          variant="icon"
-          size="icon"
-          className="size-12"
-          aria-label="Guest link"
-          onClick={() => setOpen(true)}
-        >
-          <LinkIcon aria-hidden />
-        </Button>
-      )}
-      <Dialog open={open} onOpenChange={setOpen}>
-        {open ? (
-          <DialogContent title={`Share ${title.name}`}>
-            <DialogBody>
-              <GuestForm
-                key={title.id}
-                target={{
-                  kind: "item",
-                  item: { domain: "movies", ref: { type: "title", id: title.id } },
-                }}
-              />
-            </DialogBody>
+          <DialogContent title={`Share ${selected.name}`}>
+            <DialogBody>{form}</DialogBody>
           </DialogContent>
-        ) : null}
-      </Dialog>
-    </>
+        </Dialog>
+      )}
+    </GuestLinksForm>
   );
 }

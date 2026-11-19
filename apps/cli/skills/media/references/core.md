@@ -652,7 +652,7 @@ List the guest links you made, or as an admin everyone's, newest first.
 - CLI: `media auth links list`
 - Kind: query
 - Scope: account
-- Arguments: `{ whose: "mine" | "everyone"; paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
+- Arguments: `{ whose: "mine" | "everyone"; target?: { kind: "item"; item: { domain: "movies"; ref: { type: "title"; id: Id<"titles"> } | { type: "episode"; id: Id<"episodes"> } | { type: "file"; id: Id<"mediaFiles"> } } | { domain: "music"; ref: { type: "track"; id: Id<"tracks"> } | { type: "album"; id: Id<"albums"> } } }; paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
 - Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
 - Result: `{ page: Array<{ linkId: Id<"shareLinks">; madeBy: string; kind: "item" | "session"; domain: "movies" | "music"; target: { kind: "item"; item: { domain: "movies"; ref: { type: "title"; id: Id<"titles"> } | { type: "episode"; id: Id<"episodes"> } | { type: "file"; id: Id<"mediaFiles"> } } | { domain: "music"; ref: { type: "track"; id: Id<"tracks"> } | { type: "album"; id: Id<"albums"> } } } | { kind: "session"; domain: "movies" | "music" } | null; state: "open" | "revoked" | "expired" | "dead"; madeAt: number; expiresAt: number }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
 
