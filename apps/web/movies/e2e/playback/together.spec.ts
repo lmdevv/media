@@ -203,10 +203,13 @@ test.beforeAll(async () => {
   for (const byName of scanned) byName.forEach((id, name) => titles.set(name, id));
 });
 
+test.afterEach(async () => {
+  await Promise.all(pages.splice(0).map((page) => page.context().close()));
+});
+
 test.afterAll(async () => {
   if (stack === null) return;
 
-  await Promise.all(pages.map((page) => page.context().close()));
   await Promise.all(libraries.map((libraryId) => removeLibrary(host.platform, libraryId)));
   await media?.stop();
   await rm(workspace, { recursive: true, force: true });
@@ -276,12 +279,15 @@ test("a host and two members watch together in step, and only the host moves the
   await expect(aiko.getByRole("heading", { name: /ended the session/u })).toBeVisible();
 });
 
-test("the session counts down to the next episode and moves every member on together", async () => {
+test("the session counts down to the next episode and moves every member on together", async ({
+  browser,
+}) => {
   test.setTimeout(180_000);
 
-  const [hostPage, aiko] = [pages[0], pages[1]];
+  const hostPage = await signedInPage(browser, host.person);
+  const aiko = await member(browser, "aiko-next");
 
-  if (hostPage === undefined || aiko === undefined) throw new Error("The first test runs first");
+  pages.push(hostPage);
 
   const show = titleId(SHOW);
 
@@ -295,11 +301,29 @@ test("the session counts down to the next episode and moves every member on toge
 
   if (first === undefined || second === undefined) throw new Error("The show has two episodes");
 
+  let delayedLookup = false;
+
+  await hostPage.routeWebSocket("**/api/*/sync", (socket) => {
+    const server = socket.connectToServer();
+    let sending = Promise.resolve();
+
+    socket.onMessage((message) => {
+      sending = sending.then(async () => {
+        if (!delayedLookup && message.includes('"udfPath":"movies/titles:episode"')) {
+          delayedLookup = true;
+          await new Promise((resolve) => setTimeout(resolve, 1_000));
+        }
+
+        return server.send(message);
+      });
+    });
+  });
   await hostPage.goto(moviesPath(`/watch/${show}?episodeId=${first.id}&start=0`));
   await expectPlayingPast(hostPage, 0.5);
 
   const link = await startSession(hostPage);
 
+  expect(delayedLookup).toBe(true);
   await aiko.goto(link);
   await expectPlayingPast(aiko, 1);
   await expectInStep([hostPage, aiko]);

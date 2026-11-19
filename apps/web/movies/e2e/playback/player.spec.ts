@@ -309,11 +309,6 @@ const STALLED_SHORT_OF_EDGE_SECONDS = 0.2;
 
 const EDGE_WINDOW_SECONDS = 0.05;
 
-/**
- * How long the page stays busy once the held segment is buffered, before it pauses. Chrome
- * finishes the seek about 15 ms after the append unloaded, so it lands before the pause event
- * dispatches, with room for a loaded runner.
- */
 const BUSY_MAIN_THREAD_MS = 250;
 
 interface PlannedSegment {
@@ -823,7 +818,9 @@ test("a page back from the back-forward cache plays on from where it left, at it
     const leftAt = (await videoState(viewer)).currentTime;
     const before = viewerStreams.length;
 
-    await viewer.goto(moviesPath());
+    // Chromium evicts cached pages on BroadcastChannel messages. An inert destination keeps
+    // another app document's auth-store broadcasts out of this cache-restore test.
+    await viewer.goto("about:blank");
     // The page in the cache keeps no transcode slot.
     await expect
       .poll(() =>
@@ -1039,6 +1036,10 @@ test("pausing while a stream moves to where it resumes keeps the position", asyn
     (element, { heldEnd, busyMs }) => {
       if (!(element instanceof HTMLVideoElement)) return;
 
+      const rateAfterPause = element.playbackRate;
+
+      element.playbackRate = 0;
+
       const ends = () =>
         Array.from({ length: element.buffered.length }, (_, index) => element.buffered.end(index));
 
@@ -1059,6 +1060,7 @@ test("pausing while a stream moves to where it resumes keeps the position", asyn
         () => {
           element.dataset["pausedSeeking"] = String(element.seeking);
           element.dataset["pausedAt"] = String(element.currentTime);
+          element.playbackRate = rateAfterPause;
         },
         { capture: true, once: true },
       );

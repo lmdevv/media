@@ -12,7 +12,7 @@ import type { Episode } from "@/lib/catalog";
 import { useLatest } from "@/lib/use-latest";
 
 import { useCurrentSession, useServerNow } from "./current-session";
-import { MOVIES, itemKey, itemOf, moviesItem, sessionUrl } from "./session";
+import { MOVIES, itemKey, itemOf, moviesItem, namesTarget, sessionUrl } from "./session";
 import type {
   JoinedSession,
   MoviesItem,
@@ -120,7 +120,8 @@ export const useSessionPlayer = (
   const navigate = useNavigate();
   const view = useCurrentSession();
   const joined = view?.state === "joined" ? view : null;
-  const target = useSessionTarget(moviesItem(joined?.item ?? null));
+  const item = moviesItem(joined?.item ?? null);
+  const target = useSessionTarget(item);
   const [following, setFollowing] = useState(false);
   /** The start dialog: open while not undefined, with the session it created once known. */
   const [created, setCreated] = useState<JoinedSession["sessionId"] | null | undefined>(undefined);
@@ -132,6 +133,8 @@ export const useSessionPlayer = (
     target.status === "ready" &&
     target.target.titleId === page.titleId &&
     target.target.episodeId === page.episodeId;
+
+  const namesPage = item !== null && namesTarget(item, page);
 
   const mine = joined !== null && joined.sessionId !== left;
   const [lastHost, setLastHost] = useState("The host");
@@ -177,7 +180,9 @@ export const useSessionPlayer = (
     if (unavailable) void navigate({ to: "/together", replace: true });
   }, [unavailable, navigate]);
 
-  const loading = view === undefined || (mine && target.status === "loading" && stopped === null);
+  const loading =
+    view === undefined || (mine && !namesPage && target.status === "loading" && stopped === null);
+
   const latestSession = useLatest(session);
   const latestJoined = useLatest(joined);
   const latestCreated = useLatest(created);
