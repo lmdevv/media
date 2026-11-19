@@ -207,12 +207,12 @@ test.describe("guest links", () => {
 
       const older = await platform.core.guests.links.create({ target, expiresInDays: 7 });
 
-      await Promise.all(
-        Array.from({ length: 25 }, async () => {
-          const newer = await platform.core.guests.links.create({ target, expiresInDays: 7 });
-          await platform.core.guests.links.revoke({ linkId: newer.linkId });
-        }),
-      );
+      // One after another: every create writes the maker's guest-link rate-limit row.
+      await Array.from({ length: 25 }).reduce<Promise<void>>(async (earlier) => {
+        await earlier;
+        const newer = await platform.core.guests.links.create({ target, expiresInDays: 7 });
+        await platform.core.guests.links.revoke({ linkId: newer.linkId });
+      }, Promise.resolve());
 
       await page.goto(moviesPath(`/title/${title.id}`));
       await page.getByRole("button", { name: "Guest link", exact: true }).click();
