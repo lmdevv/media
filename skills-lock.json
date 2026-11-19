@@ -1,23 +1,37 @@
 {
-  "version": 1,
+  "version": 2,
   "skills": {
+    "browser-testing-with-devtools": {
+      "source": "addyosmani/agent-skills",
+      "commit": "8c99fa36d90068c82d547f7c12a9d67a3e95f4ee",
+      "sourceType": "github",
+      "skillPath": "skills/browser-testing-with-devtools/SKILL.md",
+      "computedHash": "4e76269b455e079e76f29e11fdd80c61a7dd6ef0ab12e26432ea1b782c0a245e"
+    },
     "diagnosing-bugs": {
       "source": "mattpocock/skills",
       "sourceType": "github",
       "skillPath": "skills/engineering/diagnosing-bugs/SKILL.md",
-      "computedHash": "ede7254edbd22fcab97a0941511f7d440d8f9a249348fea97c50987ad5501674"
+      "computedHash": "87c78ae966e591f9ceb177789cc5cc9de69277cd26679ffd36ca5300f430d513"
+    },
+    "performance-optimization": {
+      "source": "addyosmani/agent-skills",
+      "commit": "8c99fa36d90068c82d547f7c12a9d67a3e95f4ee",
+      "sourceType": "github",
+      "skillPath": "skills/performance-optimization/SKILL.md",
+      "computedHash": "cfa0c39804554198a33e3beb2b0f920a1b468bb2e066822e1d08f4abeda3db33"
     },
     "react-best-practices": {
       "source": "poteto/noodle",
       "sourceType": "github",
       "skillPath": ".agents/skills/react-best-practices/SKILL.md",
-      "computedHash": "4fbe0a3acd9812bbd18b4c5332cc6eb37279e620a976daca24d9e5762403d60c"
+      "computedHash": "1086d12253cf5eb051a77306679018a3b6a73e35ceeccc02e25cfb70e9363f2b"
     },
     "react-doctor": {
       "source": "millionco/react-doctor",
       "sourceType": "github",
       "skillPath": "skills/react-doctor/SKILL.md",
-      "computedHash": "b9d5b1d47dcfef41a33119090c908a31bcf62320d2547d4d80929a37c3b607c1"
+      "computedHash": "115ed1c9f769be54f64dff537fbde6ec1a5256053568853f94684a86b678fd11"
     }
   }
 }
