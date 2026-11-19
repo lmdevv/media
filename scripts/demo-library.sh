@@ -11,7 +11,7 @@
 #   full      about 6 GB: adds the six episodes of Pioneer One
 #
 # Add `DIR/Movies` as a movies library and `DIR/Shows` as a shows library. The NFO files carry
-# full metadata, so titles match without a TMDB key. Downloads resume, and finished files are kept,
+# full metadata, so titles match with `TMDB=off`. Downloads resume, and finished files are kept,
 # so the script is safe to rerun. Credits and licenses are written to DIR/CREDITS.md.
 set -euo pipefail
 

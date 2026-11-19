@@ -962,6 +962,13 @@ in
     # secrets.
     assertions = [
       {
+        assertion = cfg.tmdb.enable || cfg.tmdbApiKeyFile == null;
+        message = ''
+          services.media: tmdbApiKeyFile is set but tmdb.enable is false, so the key would go
+          unused. Remove tmdbApiKeyFile or turn tmdb.enable back on.
+        '';
+      }
+      {
         assertion = unnormalized == [ ];
         message = ''
           services.media: dataDir, backupDir, transcodeDir, and libraryDirs take absolute paths

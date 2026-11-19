@@ -146,9 +146,8 @@ const LogMaxMb = Schema.Int.check(
 const TrickplayIntervalSeconds = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 600 }));
 
 /**
- * The TMDB v3 API key a server uses when `TMDB_API_KEY` is unset, so metadata and artwork work
- * with no setup. It is the key Jellyfin publishes for its own installs, the `ApiKey` constant in
- * its `MediaBrowser.Providers/Plugins/Tmdb/TmdbUtils.cs`.
+ * Jellyfin's published TMDB v3 key: the `ApiKey` constant in its
+ * `MediaBrowser.Providers/Plugins/Tmdb/TmdbUtils.cs`.
  */
 const BUILT_IN_TMDB_API_KEY = Redacted.make("4219e299c89411838049ab0dab19ebd5");
 
@@ -300,9 +299,7 @@ export const layer: Layer.Layer<Service, Config.ConfigError> = Layer.effect(
       convexAdminKey,
       convexBackendDir: Option.map(convexBackendDir, absolute),
       tmdbApiKey:
-        tmdb === "off"
-          ? Option.none()
-          : Option.some(Option.getOrElse(tmdbApiKey, () => BUILT_IN_TMDB_API_KEY)),
+        tmdb === "off" ? Option.none() : Option.orElseSome(tmdbApiKey, () => BUILT_IN_TMDB_API_KEY),
       omdbApiKey,
       otlpEndpoint: Option.map(otlpEndpoint, withoutTrailingSlash),
       lrclibUrl: withoutTrailingSlash(lrclibUrl),

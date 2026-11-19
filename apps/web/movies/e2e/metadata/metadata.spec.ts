@@ -8,6 +8,7 @@ import type { Page } from "@playwright/test";
 import { drawPoster, encodeClip } from "../stack/fixture-library";
 import { createLibrary, removeLibrary } from "../stack/libraries";
 import type { LibraryId, TitleId } from "../stack/libraries";
+import { offline } from "../playback/playback-stack";
 import { buildMediaService, startMediaService } from "../stack/media-service";
 import type { MediaService } from "../stack/media-service";
 import {
@@ -19,7 +20,6 @@ import {
   signInClient,
 } from "../stack/people";
 import type { Client, Person } from "../stack/people";
-import type { StackEnv } from "../stack/stack-env";
 
 const stack = await reachableStack();
 
@@ -34,11 +34,6 @@ const SCAN_TIMEOUT_MS = 60_000;
 const run = Date.now().toString(36);
 
 const mod = process.platform === "darwin" ? "Meta" : "Control";
-
-const withoutProvider = (env: StackEnv): StackEnv => ({
-  ...env,
-  mediaEnv: { ...env.mediaEnv, TMDB: "off" },
-});
 
 const ALIEN = `<?xml version="1.0" encoding="UTF-8"?>
 <movie>
@@ -173,7 +168,7 @@ test.beforeAll(async ({ browser }) => {
   ]);
 
   buildMediaService();
-  media = await startMediaService(withoutProvider(stack), [workspace]);
+  media = await startMediaService(offline(stack), [workspace]);
   admin = await createPerson(stack, "admin");
   client = await signInClient(stack, admin);
 

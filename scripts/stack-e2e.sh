@@ -35,7 +35,6 @@ export MEDIA_IMAGE="$image"
 export MEDIA_LIBRARY="$library"
 export MEDIA_PORT="$port"
 export MEDIA_BASE_URL="http://127.0.0.1:${port}"
-# The smoke test stays offline: scans name titles from their files and never call TMDB.
 export TMDB=off
 core_convex_url="${MEDIA_BASE_URL}/convex"
 # The owner the packaged-stack suite sets the core up with, and the image's CLI signs in as.

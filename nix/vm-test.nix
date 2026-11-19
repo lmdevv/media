@@ -55,7 +55,6 @@ let
         enable = true;
         libraryDirs = [ "/srv/media/movies" ];
         convexImage = "${imageName}:${imageTag}";
-        # The test stays offline: scans name titles from their files and never call TMDB.
         tmdb.enable = false;
       }
       // services;

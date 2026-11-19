@@ -144,15 +144,16 @@ Old movies' Convex project, its SDK client, and its command registry were delete
   then OMDb for IMDb, Rotten Tomatoes, and Metacritic scores (`OMDB_API_KEY`, by IMDb ID), then
   TMDB. NFO values win field by field; for cast and crew the NFO's list of a kind (actors,
   directors, writers) replaces TMDB's, and each NFO person is matched to TMDB's credit of the same
-  name for a TMDB ID and photo. TMDB alone supplies creators, producers, and composers. A library
-  without a TMDB key gets everything its NFO files state.
+  name for a TMDB ID and photo. TMDB alone supplies creators, producers, and composers. With
+  `TMDB=off` a library gets everything its NFO files state.
 - TMDB: one details request per title with `append_to_response` (credits or `aggregate_credits`
   for shows, keywords, videos, recommendations, similar, release dates or content ratings, external
   IDs), one per season (guest stars and episode crew come with it), one per collection, and one per
   person. Requests time out after 20 seconds, share a 20 per second budget, and are cached on disk
   for a week; OMDb answers for a day, so scores refresh at most daily, and OMDb is not asked again
-  for an hour after it refuses the key (wrong, or over the free tier's daily limit). Without a key
-  either provider is simply absent.
+  for an hour after it refuses the key (wrong, or over the free tier's daily limit). OMDb is absent
+  without a key; TMDB uses the built-in key unless `TMDB_API_KEY` replaces it, and `TMDB=off` turns
+  it off.
 - The media service writes metadata through the server functions `movies.metadata.apply`,
   `movies.metadata.applyCredits`, and `movies.metadata.applyCollection`, and a person's details
   through `movies.people.apply`. Opening a person page calls `movies.people.requestDetails`, which

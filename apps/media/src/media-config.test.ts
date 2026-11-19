@@ -26,7 +26,6 @@ const decode = (env: Readonly<Record<string, string>>) =>
     Effect.exit,
   );
 
-/** The TMDB key `env` resolves to, unredacted. */
 const tmdbKey = (env: Readonly<Record<string, string>>) =>
   decode(env).pipe(Effect.map(Exit.map((config) => Option.map(config.tmdbApiKey, Redacted.value))));
 
