@@ -142,6 +142,7 @@ setting WEB_DIST_DIR /run/media/web
 setting LIBRARY_ROOTS "${LIBRARY_ROOTS:-/media}"
 optional_settings=(
   BACKUP_RETENTION_DAYS
+  TMDB
   TMDB_API_KEY
   OMDB_API_KEY
   OTEL_EXPORTER_OTLP_ENDPOINT

@@ -9,7 +9,7 @@ import {
   Layer,
   type LogLevel,
   Option,
-  type Redacted,
+  Redacted,
   Schema,
 } from "effect";
 
@@ -53,7 +53,10 @@ export interface Interface {
   readonly convexAdminKey: Option.Option<Redacted.Redacted>;
   /** The deployed `packages/platform` folder, whose Convex CLI backs up and restores the core. */
   readonly convexBackendDir: Option.Option<string>;
-  /** TMDB API key or read access token. Without it the TMDB plugin reports itself unavailable. */
+  /**
+   * TMDB API key or read access token: `TMDB_API_KEY`, else the built-in key. None with `TMDB=off`,
+   * which makes the TMDB plugin report itself unavailable.
+   */
   readonly tmdbApiKey: Option.Option<Redacted.Redacted>;
   /** OMDb API key for IMDb, Rotten Tomatoes, and Metacritic scores. Without it titles keep TMDB's. */
   readonly omdbApiKey: Option.Option<Redacted.Redacted>;
@@ -142,6 +145,12 @@ const LogMaxMb = Schema.Int.check(
 
 const TrickplayIntervalSeconds = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 600 }));
 
+/**
+ * Jellyfin's published TMDB v3 key: the `ApiKey` constant in its
+ * `MediaBrowser.Providers/Plugins/Tmdb/TmdbUtils.cs`.
+ */
+const BUILT_IN_TMDB_API_KEY = Redacted.make("4219e299c89411838049ab0dab19ebd5");
+
 const absolute = (path: string): string => (isAbsolute(path) ? path : resolve(path));
 
 const withoutTrailingSlash = (url: URL): string =>
@@ -172,6 +181,7 @@ export const layer: Layer.Layer<Service, Config.ConfigError> = Layer.effect(
 
     const convexAdminKey = yield* Config.option(Config.Redacted("CONVEX_SELF_HOSTED_ADMIN_KEY"));
     const convexBackendDir = yield* Config.option(Config.NonEmptyString("CONVEX_BACKEND_DIR"));
+    const tmdb = yield* Config.Literals(["on", "off"], "TMDB").pipe(Config.withDefault("on"));
     const tmdbApiKey = yield* Config.option(Config.Redacted("TMDB_API_KEY"));
     const omdbApiKey = yield* Config.option(Config.Redacted("OMDB_API_KEY"));
     const otlpEndpoint = yield* Config.option(Config.URL("OTEL_EXPORTER_OTLP_ENDPOINT"));
@@ -288,7 +298,8 @@ export const layer: Layer.Layer<Service, Config.ConfigError> = Layer.effect(
       backupRetention: Duration.days(backupRetentionDays),
       convexAdminKey,
       convexBackendDir: Option.map(convexBackendDir, absolute),
-      tmdbApiKey,
+      tmdbApiKey:
+        tmdb === "off" ? Option.none() : Option.orElseSome(tmdbApiKey, () => BUILT_IN_TMDB_API_KEY),
       omdbApiKey,
       otlpEndpoint: Option.map(otlpEndpoint, withoutTrailingSlash),
       lrclibUrl: withoutTrailingSlash(lrclibUrl),

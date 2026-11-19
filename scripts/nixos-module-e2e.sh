@@ -118,6 +118,7 @@ evaluated="$(
               libraryDirs = [ \"$base/library\" ];
               publicUrl = \"http://127.0.0.1:$media_port\";
               hardwareAcceleration = \"$acceleration\";
+              tmdb.enable = false;
             };
           }
         ];

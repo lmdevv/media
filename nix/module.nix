@@ -855,13 +855,23 @@ in
       '';
     };
 
+    tmdb.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Look up metadata and artwork on TMDB, with a built-in key unless `tmdbApiKeyFile` is set.
+        Off, titles keep what their files and NFO files say.
+      '';
+    };
+
     tmdbApiKeyFile = lib.mkOption {
       type = lib.types.nullOr lib.types.path;
       default = null;
       example = "/run/secrets/tmdb-api-key";
       description = ''
-        File holding a TMDB v3 API key or v4 read access token, for metadata and artwork. Read at
-        startup by root; keep it out of the Nix store (agenix, sops-nix, or a root-only file).
+        File holding a TMDB v3 API key or v4 read access token, used instead of the built-in key.
+        Read at startup by root; keep it out of the Nix store (agenix, sops-nix, or a root-only
+        file).
       '';
     };
 
@@ -951,6 +961,13 @@ in
     # hold, or sit inside a library or, for the folders its user owns, the core's database or
     # secrets.
     assertions = [
+      {
+        assertion = cfg.tmdb.enable || cfg.tmdbApiKeyFile == null;
+        message = ''
+          services.media: tmdbApiKeyFile is set but tmdb.enable is false, so the key would go
+          unused. Remove tmdbApiKeyFile or turn tmdb.enable back on.
+        '';
+      }
       {
         assertion = unnormalized == [ ];
         message = ''
@@ -1147,6 +1164,7 @@ in
         STREAM_BUFFER_AHEAD_SECONDS = toString cfg.streamBufferAheadSeconds;
         MIN_FREE_TRANSCODE_MB = toString cfg.minFreeTranscodeMb;
         LIBRARY_RECONCILE_MINUTES = toString cfg.libraryReconcileMinutes;
+        TMDB = if cfg.tmdb.enable then "on" else "off";
         TRICKPLAY = if cfg.trickplay.enable then "on" else "off";
         TRICKPLAY_INTERVAL_SECONDS = toString cfg.trickplay.intervalSeconds;
         TRICKPLAY_CONCURRENCY = toString cfg.trickplay.concurrency;

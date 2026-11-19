@@ -6,6 +6,7 @@ import { expect, test } from "@playwright/test";
 
 import { drawPoster, encodeClip } from "../stack/fixture-library";
 import { removeLibrariesUnder } from "../stack/libraries";
+import { offline } from "../playback/playback-stack";
 import { buildMediaService, startMediaService } from "../stack/media-service";
 import type { MediaService } from "../stack/media-service";
 import {
@@ -17,7 +18,6 @@ import {
   signInClient,
 } from "../stack/people";
 import type { Client } from "../stack/people";
-import type { StackEnv } from "../stack/stack-env";
 
 const stack = await reachableStack();
 
@@ -41,13 +41,6 @@ let workspace = "";
 let media: MediaService | undefined;
 
 let admin: Client | undefined;
-
-const withoutProvider = (env: StackEnv): StackEnv => ({
-  ...env,
-  mediaEnv: Object.fromEntries(
-    Object.entries(env.mediaEnv).filter(([name]) => name !== "TMDB_API_KEY"),
-  ),
-});
 
 const ARRIVAL_NFO = `<?xml version="1.0" encoding="UTF-8"?>
 <movie>
@@ -129,7 +122,7 @@ test("an admin adds a library in the account client, cancels and restarts its sc
   await row.getByRole("button", { name: `Scan ${name} now` }).click();
   await expect(row).toContainText("Queued");
 
-  media = await startMediaService(withoutProvider(stack), [workspace], OWN_SCANS);
+  media = await startMediaService(offline(stack), [workspace], OWN_SCANS);
   await expect(row).toContainText("Ready", { timeout: SCAN_TIMEOUT_MS });
   await expect(row).toContainText("3 titles");
 

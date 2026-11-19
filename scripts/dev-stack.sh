@@ -13,6 +13,8 @@
 # `up` creates the media service's service principal on the core and issues its key once, keeping
 # it in the state directory while the core's volume lives.
 #
+# `up` writes TMDB=off to the media service's .env.local so the stack suites stay offline.
+#
 # The stack name defaults to the worktree directory name; override with MEDIA_STACK. Ports derive
 # from the name so worktrees do not collide; override the base with MEDIA_PORT_BASE.
 #   base      media service
@@ -250,6 +252,7 @@ if ! boundary_ready; then
   exit 1
 fi
 
+
 (
   umask 077
   cat >"${root}/apps/media/.env.local" <<ENV
@@ -265,6 +268,7 @@ DATA_DIR=${data_dir}
 TRANSCODE_DIR=${transcode_dir}
 BACKUP_DIR=${backup_dir}
 LIBRARY_ROOTS=${library_roots}
+TMDB=off
 ENV
 )
 

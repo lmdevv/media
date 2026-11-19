@@ -33,7 +33,7 @@ import {
 
 /** How the TMDB plugin reaches TMDB. */
 export interface TmdbOptions {
-  /** v3 API key or v4 read access token; absent makes the plugin report itself unavailable. */
+  /** v3 API key or v4 read access token; absent turns the plugin off (`TMDB=off`). */
   readonly apiKey: Option.Option<Redacted.Redacted>;
   /** API root, `https://api.themoviedb.org/3` in production. */
   readonly apiBaseUrl: string;
@@ -448,7 +448,7 @@ const make = Effect.fn("Tmdb.make")(function* (options: TmdbOptions) {
       if (Option.isNone(options.apiKey)) {
         return yield* new MetadataProviderUnavailable({
           provider: PROVIDER,
-          reason: "missing-credentials",
+          reason: "disabled",
         });
       }
 
@@ -889,7 +889,7 @@ const make = Effect.fn("Tmdb.make")(function* (options: TmdbOptions) {
     availability: Effect.succeed(
       Option.isSome(options.apiKey)
         ? { _tag: "Available" as const }
-        : { _tag: "Unavailable" as const, reason: "missing-credentials" as const },
+        : { _tag: "Unavailable" as const, reason: "disabled" as const },
     ),
     search,
     findByExternalId,
@@ -910,7 +910,7 @@ export const layerWithOptions = (
     Layer.provide(RateLimiter.layerStoreMemory),
   );
 
-/** The TMDB plugin configured from `TMDB_API_KEY`. */
+/** The TMDB plugin with `MediaConfig`'s TMDB key. */
 export const layer: Layer.Layer<
   Service,
   never,

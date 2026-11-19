@@ -55,6 +55,7 @@ let
         enable = true;
         libraryDirs = [ "/srv/media/movies" ];
         convexImage = "${imageName}:${imageTag}";
+        tmdb.enable = false;
       }
       // services;
     };

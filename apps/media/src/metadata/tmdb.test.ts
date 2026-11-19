@@ -603,7 +603,7 @@ describe("TMDB plugin", () => {
 
         assert.deepStrictEqual(yield* plugin.availability, {
           _tag: "Unavailable",
-          reason: "missing-credentials",
+          reason: "disabled",
         });
 
         const error = yield* plugin

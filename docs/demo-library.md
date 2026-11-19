@@ -21,7 +21,7 @@ from `ghcr.io/lmdevv/music-demo-library:v1` (about 520 MB).
 | `Music/Doc & Lena Selyanina/Vienna Blue`        | Seven MP3 tracks with per-track credits                                                                                                      |
 | `Music/Andy G. Cohen/Prisma`                    | An eleven-track MP3 album                                                                                                                    |
 
-Every title has a Kodi-style NFO, so it matches without a TMDB key, and local artwork. Every album
+Every title has a Kodi-style NFO, so it matches with `TMDB=off`, and local artwork. Every album
 has its cover as `cover.jpg`. The image also holds `CREDITS.md` for the films and
 `Music/CREDITS.md` for the music; the credits are below.
 
