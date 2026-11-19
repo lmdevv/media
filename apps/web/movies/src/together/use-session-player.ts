@@ -12,7 +12,7 @@ import type { Episode } from "@/lib/catalog";
 import { useLatest } from "@/lib/use-latest";
 
 import { useCurrentSession, useServerNow } from "./current-session";
-import { MOVIES, itemKey, itemOf, moviesItem, sessionUrl } from "./session";
+import { MOVIES, itemKey, itemOf, moviesItem, namesTarget, sessionUrl } from "./session";
 import type {
   JoinedSession,
   MoviesItem,
@@ -109,8 +109,7 @@ const copyText = async (text: string): Promise<void> => {
 /**
  * The player's group session: whether the page follows it, and the session's commands. The page
  * follows the person's movies session when it plays the session's item; once following, it moves
- * with the session to whatever plays next. `player` is read only when an action needs where the
- * player stands.
+ * with the session to whatever plays next.
  */
 export const useSessionPlayer = (
   page: WatchTarget,
@@ -120,7 +119,8 @@ export const useSessionPlayer = (
   const navigate = useNavigate();
   const view = useCurrentSession();
   const joined = view?.state === "joined" ? view : null;
-  const target = useSessionTarget(moviesItem(joined?.item ?? null));
+  const item = moviesItem(joined?.item ?? null);
+  const target = useSessionTarget(item);
   const [following, setFollowing] = useState(false);
   /** The start dialog: open while not undefined, with the session it created once known. */
   const [created, setCreated] = useState<JoinedSession["sessionId"] | null | undefined>(undefined);
@@ -132,6 +132,8 @@ export const useSessionPlayer = (
     target.status === "ready" &&
     target.target.titleId === page.titleId &&
     target.target.episodeId === page.episodeId;
+
+  const namesPage = item !== null && namesTarget(item, page);
 
   const mine = joined !== null && joined.sessionId !== left;
   const [lastHost, setLastHost] = useState("The host");
@@ -177,7 +179,13 @@ export const useSessionPlayer = (
     if (unavailable) void navigate({ to: "/together", replace: true });
   }, [unavailable, navigate]);
 
-  const loading = view === undefined || (mine && target.status === "loading" && stopped === null);
+  const loading =
+    view === undefined ||
+    (mine &&
+      target.status === "loading" &&
+      stopped === null &&
+      (!namesPage || player.current === null));
+
   const latestSession = useLatest(session);
   const latestJoined = useLatest(joined);
   const latestCreated = useLatest(created);
