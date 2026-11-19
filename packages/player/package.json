@@ -22,7 +22,8 @@
     "./source-resolver": "./src/source-resolver.ts",
     "./stream-offset": "./src/stream-offset.ts",
     "./stream-quality": "./src/stream-quality.ts",
-    "./use-connect": "./src/use-connect.ts"
+    "./use-connect": "./src/use-connect.ts",
+    "./guest-react": "./src/guest-react.tsx"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

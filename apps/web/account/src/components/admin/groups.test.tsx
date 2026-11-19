@@ -1,3 +1,4 @@
+import { TransportError } from "@media/sdk/effect";
 import { Brand } from "effect";
 import { describe, expect, it } from "vitest";
 
@@ -68,9 +69,16 @@ describe("GroupsView", () => {
   });
 
   it("shows a failure with Try again", () => {
-    expect(textOf(groups({ status: "failed", message: "No access", retry: noop }))).toContain(
-      "No access Try again",
-    );
+    expect(
+      textOf(
+        groups({
+          status: "failed",
+          error: new TransportError({ operation: "list", message: "Unavailable", cause: null }),
+          message: "No access",
+          retry: noop,
+        }),
+      ),
+    ).toContain("No access Try again");
   });
 });
 

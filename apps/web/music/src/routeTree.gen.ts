@@ -4,6 +4,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as AppRouteImport } from './routes/_app'
+import { Route as GuestRouteImport } from './routes/guest'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppSplatRouteImport } from './routes/_app/$'
 import { Route as AppJamRouteImport } from './routes/_app/jam'
@@ -24,6 +25,11 @@ import { Route as AppSettingsPlaybackRouteImport } from './routes/_app/settings.
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GuestRoute = GuestRouteImport.update({
+  id: '/guest',
+  path: '/guest',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppIndexRoute = AppIndexRouteImport.update({
@@ -114,6 +120,7 @@ const AppSettingsPlaybackRoute = AppSettingsPlaybackRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
+  '/guest': typeof GuestRoute
   '/$': typeof AppSplatRoute
   '/jam': typeof AppJamRoute
   '/library': typeof AppLibraryRoute
@@ -132,6 +139,7 @@ export interface FileRoutesByFullPath {
   '/settings/': typeof AppSettingsIndexRoute
 }
 export interface FileRoutesByTo {
+  '/guest': typeof GuestRoute
   '/$': typeof AppSplatRoute
   '/jam': typeof AppJamRoute
   '/library': typeof AppLibraryRoute
@@ -152,6 +160,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_app': typeof AppRouteWithChildren
+  '/guest': typeof GuestRoute
   '/_app/$': typeof AppSplatRoute
   '/_app/jam': typeof AppJamRoute
   '/_app/library': typeof AppLibraryRoute
@@ -174,6 +183,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/guest'
     | '/$'
     | '/jam'
     | '/library'
@@ -192,6 +202,7 @@ export interface FileRouteTypes {
     | '/settings/'
   fileRoutesByTo: FileRoutesByTo
   to:
+    | '/guest'
     | '/$'
     | '/jam'
     | '/library'
@@ -211,6 +222,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/_app'
+    | '/guest'
     | '/_app/$'
     | '/_app/jam'
     | '/_app/library'
@@ -232,6 +244,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   AppRoute: typeof AppRouteWithChildren
+  GuestRoute: typeof GuestRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -241,6 +254,13 @@ declare module '@tanstack/react-router' {
       path: ''
       fullPath: '/'
       preLoaderRoute: typeof AppRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/guest': {
+      id: '/guest'
+      path: '/guest'
+      fullPath: '/guest'
+      preLoaderRoute: typeof GuestRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_app/': {
@@ -419,6 +439,7 @@ const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   AppRoute: AppRouteWithChildren,
+  GuestRoute: GuestRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

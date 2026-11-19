@@ -29,17 +29,10 @@ import type { Device } from "./connect-devices";
 import type { ConnectOutput } from "./connect-player";
 import type { EngineKind, PlayerEngine } from "./engine";
 import { messageOf } from "./failure";
-import { HtmlAudioEngine } from "./html-audio-engine";
+import { browserEngines } from "./browser-engine";
 import { setMediaSessionHandlers, showNowPlaying } from "./media-session";
-import { MseEngine } from "./mse-engine";
 import { PlaybackController } from "./playback-controller";
-import type {
-  EngineFactory,
-  PlayerSettings,
-  QueueEntry,
-  QueueState,
-  Receiver,
-} from "./playback-controller";
+import type { PlayerSettings, QueueEntry, QueueState, Receiver } from "./playback-controller";
 import { queueStateOf, useQueueListing } from "./queue-listing";
 import type { QueueRow } from "./queue-listing";
 import type { RepeatMode } from "./queue-order";
@@ -286,15 +279,6 @@ export const useLatestPlayer = (): (() => Player) => useReaders().player;
  */
 export const usePositionReader = (): (() => number) => useReaders().positionMs;
 
-const engineFactory = (engine: (() => PlayerEngine) | undefined): EngineFactory => {
-  if (engine !== undefined) return { mse: null, create: engine };
-
-  return {
-    mse: MseEngine.detectSupport(),
-    create: (kind) => (kind === "mse" ? new MseEngine(new Audio()) : new HtmlAudioEngine()),
-  };
-};
-
 /** A queue row as the player shows it: its song with the entry's own id and how it joined. */
 const queueTrack = (row: QueueRow): QueueEntry<QueueTrack> => ({
   itemId: row.itemId,
@@ -366,7 +350,7 @@ const createController = ({
       },
     },
     sources,
-    engineFactory(engine),
+    browserEngines(engine),
     {
       canPlay: (mimeType) => probe.canPlayType(mimeType) !== "",
       now: Date.now,

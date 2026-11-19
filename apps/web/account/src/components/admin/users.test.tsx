@@ -1,3 +1,4 @@
+import { TransportError } from "@media/sdk/effect";
 import { Brand } from "effect";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
@@ -67,9 +68,14 @@ describe("PeopleView", () => {
         />,
       ),
     ).toContain('aria-label="Loading People"');
-    expect(people({ status: "failed", message: "Can't reach the server.", retry: noop })).toContain(
-      "Can't reach the server. Try again",
-    );
+    expect(
+      people({
+        status: "failed",
+        error: new TransportError({ operation: "list", message: "Unavailable", cause: null }),
+        message: "Can't reach the server.",
+        retry: noop,
+      }),
+    ).toContain("Can't reach the server. Try again");
   });
 
   it("lists everyone with their role, marks you, and offers Manage to all but guests", () => {

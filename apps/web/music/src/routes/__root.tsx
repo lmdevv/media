@@ -2,6 +2,8 @@ import { CatchBoundary, HeadContent, Outlet, createRootRoute } from "@tanstack/r
 import { ThemeProvider } from "next-themes";
 import { Suspense, lazy } from "react";
 
+import { RequireSession } from "@/session/session";
+
 import { LazyRouteError } from "@/components/lazy-route-error";
 
 import "../index.css";
@@ -39,7 +41,9 @@ function RootComponent() {
       scriptProps={{ type: "application/json" }}
     >
       <HeadContent />
-      <Outlet />
+      <RequireSession>
+        <Outlet />
+      </RequireSession>
       <CatchBoundary getResetKey={() => 0} errorComponent={NoToaster}>
         <Suspense fallback={null}>
           <Toaster />

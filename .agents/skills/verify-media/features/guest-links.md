@@ -4,7 +4,7 @@ A person shares one movie, show, song, album, or session with someone who has no
 a link that ends by itself. An owner or admin decides whether the server makes guest links at all,
 which address they carry, and which members may make them, and can see and revoke everyone's. A maker creates, lists, and revokes links from a movies title
 page or a music album or song menu, beside the terminal commands. The account client governs them.
-A movie guest opens one in the account client and watches only its target in Lar Movies.
+A guest opens one in the account client and watches only its target in Lar Movies or listens to it in Lar Music.
 
 ## Sub-features
 
@@ -16,6 +16,7 @@ A movie guest opens one in the account client and watches only its target in Lar
 - `guest-revoke` ends an open link in its item's dialog or the CLI; an admin may also end anyone's in Admin, Guests.
 - `guest-open` takes a display name, redeems the link, and resumes the guest on reload.
 - `guest-movies` shows the shared movie, show, episode, or file and plays its permitted versions.
+- `guest-music` plays only the shared song or the permitted songs of the shared album.
 
 ## How to get to it (user POV)
 
@@ -109,7 +110,24 @@ Preconditions:
   exactly one guest remains. A show link lists its seasons and episodes; click an episode to play.
   Back from a show episode returns to the shared show and its episodes.
   An episode or file link shows no siblings or episode picker. Opening `/movies/title/<id>` as
-  that guest returns to `/movies/guest`. A music target holds at the account entrance.
+  that guest returns to `/movies/guest`. A music target opens `/music/guest`.
+- **Music guest.** As Lucía, open Vienna Blue in music, then its album menu and Guest link.
+  Mask `[data-sensitive="guest-link"]` before Create link. Read New guest link into a private
+  file with browser `eval` and the Node filesystem, returning only a boolean; never print it.
+  On a new signed-out account page, open that address, wait for Display name, and confirm the
+  fragment is gone before recording or taking screenshots. Fill a name, click Watch, and wait
+  for `/music/guest`. The page shows Vienna Blue, Doc & Lena Selyanina, the year, art, who
+  shared it, when it ends, and only its songs. Click Play and run `wait-audio --page guest
+  --past 2`. Next plays Doppelgänger, Previous returns within the album, and Seek moves the
+  position. No navigation, search, likes, playlists, devices, casting, Jams, settings, or
+  downloads appear. Opening `/music/albums` returns this guest to `/music/guest`.
+  Make a song link from a song menu: its queue has one song and Next is disabled. A household
+  page opening `/music/guest` returns to `/music`. Revoke the album link in Lucía's CLI:
+  the guest's audio stops and This link isn't available replaces the player. Guest sessions
+  also end at expiry on the server's clock, including buffered audio; the browser's clock does not end a link. Capture the
+  account entrance on the before side at desktop and phone size: Watch ends at its holding
+  line. Capture the same journey on after, plus the guest player at both sizes and a short
+  video ending with real audio proven by `wait-audio`. Add and publish these with evidence.
 - **Revoke while watching.** With the guest playing, revoke the link from its maker's CLI.
   The guest video disappears and `This link isn't available` appears, as it does at expiry.
 - **Revoke.** Click `--in region="Everyone's links" --role button --name Revoke`: the row reads

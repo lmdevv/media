@@ -1,3 +1,4 @@
+import { TransportError } from "@media/sdk/effect";
 import type { Paged as PagedRows } from "@media/ui/lib/pages";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
@@ -11,7 +12,16 @@ const retry = () => undefined;
 const failedAfter = (rows: ReadonlyArray<string>): PagedRows<string> => ({
   status: "ready",
   rows,
-  next: { kind: "failed", message: "The server didn't answer.", retry },
+  next: {
+    kind: "failed",
+    message: "The server didn't answer.",
+    error: new TransportError({
+      operation: "list",
+      message: "The server didn't answer.",
+      cause: null,
+    }),
+    retry,
+  },
 });
 
 const offersRetry = (html: string) => {

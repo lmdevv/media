@@ -87,8 +87,10 @@ describe("combinePages", () => {
       next: { kind: "loading" },
     });
 
+    const failure = new Error("Gone");
+
     const failed = combinePages<string, Error>(
-      [page(["a"], false), { status: "error", error: new Error("Gone"), retry: () => undefined }],
+      [page(["a"], false), { status: "error", error: failure, retry: () => undefined }],
       () => undefined,
     );
 
@@ -97,15 +99,21 @@ describe("combinePages", () => {
       rows: ["a"],
       next: { kind: "failed", message: "Gone" },
     });
+    expect(
+      failed.status === "ready" && failed.next.kind === "failed" ? failed.next.error : null,
+    ).toBe(failure);
   });
 
   it("fails the list when the first page fails", () => {
+    const failure = new Error("Forbidden");
+
     const list = combinePages<string, Error>(
-      [{ status: "error", error: new Error("Forbidden"), retry: () => undefined }],
+      [{ status: "error", error: failure, retry: () => undefined }],
       () => undefined,
     );
 
     expect(list).toMatchObject({ status: "failed", message: "Forbidden" });
+    expect(list.status === "failed" ? list.error : null).toBe(failure);
   });
 });
 

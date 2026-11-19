@@ -3,6 +3,7 @@
 @import "shadcn/tailwind.css";
 @source "../../../../apps/web/music/src/**/*.{ts,tsx}";
 @source "../components/guest-links-form.tsx";
+@source "../components/guest-unavailable.tsx";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -12,6 +13,9 @@
    of these names with other values. Re-export with the Paper MCP
    `get_tokens` (tailwind format) when the design changes. */
 @theme {
+  --color-page: var(--color-bg);
+  --text-title: var(--text-xl);
+  --leading-title: var(--leading-xl);
   --color-bg: #ffffff;
   --color-surface: #f5f5f7;
   --color-surface-raised: #ffffff;

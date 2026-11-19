@@ -26,34 +26,23 @@ function GuestDestination() {
   const guest = usePlatformQuery(platform.core.guests.current);
   useIdentityRetry(guest);
   const target = guest.status === "success" ? guest.data?.target : undefined;
-  const movies = target?.kind === "item" && target.item.domain === "movies";
+  const destination = target?.kind === "item" ? `/${target.item.domain}/guest` : null;
 
   useEffect(() => {
-    if (movies) window.location.replace("/movies/guest");
-  }, [movies]);
+    if (destination !== null) window.location.replace(destination);
+  }, [destination]);
 
-  if (guest.status === "loading" || (guest.status === "error" && isRenewing(guest.error)) || movies)
+  if (
+    guest.status === "loading" ||
+    (guest.status === "error" && isRenewing(guest.error)) ||
+    destination !== null
+  )
     return <BlankPage />;
 
   if (guest.status === "error" && !linkRefused(guest.error))
     return <UnreachableScreen retry={guest.retry} />;
 
-  if (guest.status === "error" || target === undefined || target.kind !== "item")
-    return <GuestUnavailable onLeave={signOut} />;
-
-  return (
-    <AuthPage>
-      <Lede>Open this on Lar Music when guest playback is available.</Lede>
-      <Button
-        variant="secondary"
-        onClick={() => {
-          void signOut().catch(() => undefined);
-        }}
-      >
-        Leave
-      </Button>
-    </AuthPage>
-  );
+  return <GuestUnavailable onLeave={signOut} />;
 }
 
 function GuestPage() {

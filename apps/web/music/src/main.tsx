@@ -12,7 +12,7 @@ import { PLATFORM_URL } from "./env";
 import { parseSearch, stringifySearch } from "./lib/search-params";
 import { whenSettled } from "./lib/when-settled";
 import { routeTree } from "./routeTree.gen";
-import { MusicSession, RequireSession } from "./session/session";
+import { MusicSession } from "./session/session";
 
 /** The origin's one session store, shared with the account client at `/` (ADR 0020). */
 const store = await openBrowserSession();
@@ -29,7 +29,7 @@ const router = createRouter({
   Wrap: function Providers({ children }: { readonly children: ReactNode }) {
     return (
       <MusicSession store={store} url={PLATFORM_URL}>
-        <RequireSession>{children}</RequireSession>
+        {children}
       </MusicSession>
     );
   },

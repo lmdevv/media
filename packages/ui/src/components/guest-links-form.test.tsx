@@ -257,7 +257,18 @@ describe("paged guest link fields", () => {
     expect(markup({ list: store.getSnapshot() }).match(/<li /gu)).toHaveLength(2);
     stop();
     expect(
-      markup({ list: { status: "failed", message: "Could not load links", retry } }),
+      markup({
+        list: {
+          status: "failed",
+          message: "Could not load links",
+          error: new TransportError({
+            operation: "guests.links.list",
+            message: "Could not load links",
+            cause: null,
+          }),
+          retry,
+        },
+      }),
     ).toContain("Could not load links");
     expect(markup({ list: { status: "loading" } })).toContain("Loading links…");
   });
