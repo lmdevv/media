@@ -223,9 +223,10 @@ personal or unlicensed.
   her `Continue watching for aiko` row shows `Pioneer One · S1:E3` (next: Alone in the Night) and
   `Elephants Dream` (50% watched). Her My List holds Sintel, Tears of Steel, and Caminandes;
   Mateo's holds Cosmos Laundromat.
-- **Keys.** A side has no TMDB or OMDb key: `up` hands Compose only the settings it writes. The
-  demo titles carry their own details, so pages look complete, but a TMDB search finds nothing and
-  a metadata refresh fails with `missing-credentials`.
+- **Keys.** `up` hands Compose only the settings it writes, so a side has no OMDb key and reaches
+  TMDB with the built-in key, through the internet. Scans add TMDB's details to the demo titles'
+  own: Elephants Dream gains a `TMDB 5.8` score, a `Trailer` button, its writers, and cast photos.
+  A TMDB search in Fix match finds real titles, and a metadata refresh succeeds.
 - **Music.** Setup adds a `Music` library over `/media/library/Music` from the account client's
   Admin, Libraries, and `music-core-seed.mjs` shares it with Mateo (manages) and everyone on the
   server (view), so everyone plays it, then makes these playlists, sharing, and likes through each

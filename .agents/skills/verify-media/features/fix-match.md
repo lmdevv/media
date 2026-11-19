@@ -11,7 +11,8 @@ they matched, and the CLI's `movies metadata` group edits, matches, and refreshe
   `Missing`.
 - `match-edit` changes a title's name, year, or other fields by hand, and clears a change to bring
   the scanned value back.
-- `match-search` looks a title up on TMDB and applies the chosen match. It needs a TMDB key.
+- `match-search` looks a title up on TMDB and applies the chosen match, with the server's built-in
+  TMDB key unless `TMDB_API_KEY` replaces it. `TMDB=off` turns it off.
 - `match-refresh` queues a metadata lookup for a title.
 - `match-access` refuses a person without edit access to the library.
 
@@ -39,20 +40,24 @@ Preconditions:
   the Feature Test's four files, each `Unmatched best guess · [movies] Feature Test (2010)` with
   a `Fix match` link.
 - **Open.** `$S browser click --in table=Files --role link --name "Fix match" --nth 0`. The heading
-  `Fix match` reads `Film · … · 4 versions`, the region `Matched to now` reads `No match`, and
-  without a TMDB key the status reads `TMDB search isn’t available on this server` and `Edit the
-  title, year, or TMDB ID by hand below.` `$S browser url` ends in the title's id.
+  `Fix match` reads `Film · … · 4 versions`, and the region `Matched to now` reads `No match`. The
+  search starts with the title's name and reads `No matches on TMDB.` `$S browser url` ends in the
+  title's id.
 - **Edit by hand.** Run `$S browser fill --label Title --value "Match probe"` and
   `$S browser click --role button --name "Apply match" --exact`. The page goes back to the
   library with the toast `Saved Match probe`; `$S cli -- movies titles get --title-id <id>` prints
   `"name": "Match probe"`, and `/title/<id>` is headed `MATCH PROBE`.
+- **Search.** `$S browser fill --label "Search TMDB" --value Sintel` lists, in the radio group
+  `Matches`, `Sintel (2010)` with its overview and TMDB ID `45745`. Clicking that radio fills the
+  hand-edit fields with `Sintel`, `2010`, and `45745`; `Apply match` goes back to the library with
+  `Unmatched 0`, and the four files read `Matched by hand` under `Sintel (2010)`. Run this last:
+  the Feature Test is no longer unmatched afterwards.
 - **Put it back.** `$S cli -- movies metadata edit --json
   '{"titleId":"<id>","set":{},"clear":["name"]}'` prints `null`, and the name reads
   `[movies] Feature Test` again. With flags, `--title-id <id> --set '{"overview":"Probe"}'` sets a
   field and `--set '{}' --clear overview` clears it.
-- **Refresh.** `$S cli -- movies metadata refresh --title-id <id>` prints a `jobId`. Without a
-  TMDB key, `$S cli -- admin jobs list` then shows that `movies.metadata` job `"failed"` with
-  `Metadata provider unavailable: tmdb (missing-credentials)`, and the title keeps its details.
+- **Refresh.** `$S cli -- movies metadata refresh --title-id <id>` prints a `jobId`, and
+  `$S cli -- admin jobs list` then shows that `movies.metadata` job `succeeded`.
 - **Access.** `$S cli --as aiko -- movies metadata edit --title-id <id> --set '{}' --clear
   overview` exits 4 with `This needs edit access, and you have view`. As Mateo, who manages the
   library, the same command prints `null`.
@@ -61,11 +66,11 @@ Preconditions:
 
 ## Gotchas
 
-- A side has no TMDB key: `up` hands Compose only the settings it writes. So `Search TMDB` finds
-  nothing, `match-search` can't run, and a refresh fails. Hand edits and their clearing work.
+- A side reaches TMDB with the built-in key, so search and refresh need the internet. With
+  `TMDB=off` in a Compose override, the search status reads `TMDB search isn’t available on this
+  server` and `Edit the title, year, or TMDB ID by hand below.`, and a refresh job fails with
+  `Metadata provider unavailable: tmdb (disabled)`.
 - `metadata edit` needs `--set` even to clear: pass `--set '{}'` with `--clear`.
-- A failed refresh adds to Admin, Jobs' `Failed` count for the rest of the side's life. Run it
-  after any recipe that reads that count.
 - `Fix match` shows only on unmatched files, and each of a title's files has its own link to the
   same page. Use `--nth 0`.
 - The page has two `Year` fields, the search's and the hand edit's. Pick one with `--nth`.
