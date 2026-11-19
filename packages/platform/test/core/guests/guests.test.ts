@@ -321,6 +321,45 @@ describe.skipIf(stack === undefined)("guest links", { timeout: 180_000 }, () => 
     },
   );
 
+  it("ends a guest's session on the server once the link runs out", async () => {
+    if (stack === undefined) return;
+    const { admin, shared } = await shelf(stack);
+    const made = await makeLink(admin, { kind: "item", item: shared });
+
+    await patchByHand(stack, "shareLinks", [made.linkId], { expiresAt: Date.now() + 3000 });
+
+    const guest = await openLink(stack, made.code, "Sam");
+
+    const sessionRow = () =>
+      newestRows("authSessions", 500).some((line) => line.includes(guest.sessionId));
+
+    expect(sessionRow()).toBe(true);
+    await expect.poll(sessionRow, { timeout: 30_000, interval: 1000 }).toBe(false);
+    expect(await refresh(stack, guest)).toEqual({ tokens: null });
+  });
+
+  it("leaves a guest whose time has not run out, and anyone who is not a guest", async () => {
+    if (stack === undefined) return;
+    const { admin, shared } = await shelf(stack);
+    const made = await makeLink(admin, { kind: "item", item: shared });
+    const guest = await openLink(stack, made.code, "Sam");
+    const sessions = [guest.sessionId, admin.sessionId];
+
+    await patchByHand(stack, "authSessions", [admin.sessionId], {
+      expirationTime: Date.now() - 1000,
+    });
+
+    await Promise.all(
+      sessions.map((sessionId) =>
+        runFunction(stack, internal.core.sessions.expireGuest, { sessionId }, Schema.Null),
+      ),
+    );
+
+    const rows = newestRows("authSessions", 500);
+
+    expect(sessions.filter((id) => rows.some((line) => line.includes(id)))).toEqual(sessions);
+  });
+
   it("opens an expired link for no one, and makes links that last 7 days unless asked", async () => {
     if (stack === undefined) return;
     const { admin, shared } = await shelf(stack);

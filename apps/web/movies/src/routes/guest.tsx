@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { usePlatform, usePlatformQuery, usePlatformStatus } from "@media/sdk/react";
 import { GuestUnavailable } from "@media/ui/components/guest-unavailable";
 import { createFileRoute, Navigate } from "@tanstack/react-router";
@@ -66,10 +67,20 @@ function GuestShare() {
   if (current.status === "loading") return <BlankPage />;
   const guest = current.data;
 
-  if (guest === null || guest.target.kind !== "item" || guest.target.item.domain !== "movies")
-    return <GuestUnavailable onLeave={leave} />;
+  if (guest === null || guest.target.kind !== "item") return <GuestUnavailable onLeave={leave} />;
+
+  if (guest.target.item.domain !== "movies")
+    return <OtherShare to={`/${guest.target.item.domain}/guest`} />;
 
   return (
     <GuestItem item={guest.target.item.ref} sharedBy={guest.sharedBy} expiresAt={guest.expiresAt} />
   );
+}
+
+function OtherShare({ to }: { readonly to: string }) {
+  useEffect(() => {
+    window.location.replace(to);
+  }, [to]);
+
+  return <BlankPage />;
 }

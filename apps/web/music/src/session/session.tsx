@@ -6,11 +6,14 @@ import {
   usePlatformStatus,
 } from "@media/sdk/react";
 import { sessionAccess, useIdentityRetry } from "@media/ui/lib/session-identity";
+import { Navigate, useRouterState } from "@tanstack/react-router";
 import { useCallback, useEffect } from "react";
 import type { ReactNode } from "react";
 
+import { musicAccess } from "./access";
+import { UnreachableScreen } from "@/guest/unreachable";
+
 import { SIGN_IN_URL } from "../env";
-import { Button } from "@/components/ui/button";
 
 /** Where a signed-out browser signs in: the account client at the origin's root (ADR 0020). */
 const SIGN_IN_PATH = "/";
@@ -42,15 +45,23 @@ const leaveToSignIn = (): void => {
 };
 
 /** The empty page canvas shown while the session loads or the browser leaves to sign in. */
-function BlankPage() {
+export function BlankPage() {
   return <div aria-busy className="min-h-dvh bg-bg" />;
 }
 
 /**
- * Renders `children` only while the browser holds a session. A browser that holds none, or whose
- * session ends here or in another tab, goes to `/` to sign in.
+ * The guest route owns its identity checks. Every other route requires a household session;
+ * guests return to their share, and signed-out browsers go to the account entrance.
  */
 export function RequireSession({ children }: { readonly children: ReactNode }) {
+  const guest = useRouterState({
+    select: (state) => state.matches.some((match) => match.routeId === "/guest"),
+  });
+
+  return guest ? children : <Household>{children}</Household>;
+}
+
+function Household({ children }: { readonly children: ReactNode }) {
   const status = usePlatformStatus();
   const platform = usePlatform();
 
@@ -63,20 +74,14 @@ export function RequireSession({ children }: { readonly children: ReactNode }) {
   const access = sessionAccess(status, me);
 
   useEffect(() => {
-    if (access === "signedOut" || access === "guest") leaveToSignIn();
+    if (access === "signedOut") leaveToSignIn();
   }, [access]);
 
-  if (access === "failed" && me.status === "error")
-    return (
-      <main className="flex min-h-dvh flex-col items-center justify-center gap-3 bg-bg px-6 text-text">
-        <h1 className="font-sans text-xl/xl font-heavy tracking-tight">Can't reach the server</h1>
-        <Button variant="solid" onClick={me.retry}>
-          Try again
-        </Button>
-      </main>
-    );
+  if (musicAccess(access, false) === "guest") return <Navigate to="/guest" replace />;
 
-  return access === "household" ? children : <BlankPage />;
+  if (access === "failed" && me.status === "error") return <UnreachableScreen retry={me.retry} />;
+
+  return musicAccess(access, false) === "render" ? children : <BlankPage />;
 }
 
 /**

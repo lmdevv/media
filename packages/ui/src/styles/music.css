@@ -3,6 +3,7 @@
 @import "shadcn/tailwind.css";
 @source "../../../../apps/web/music/src/**/*.{ts,tsx}";
 @source "../components/guest-links-form.tsx";
+@source "../components/guest-unavailable.tsx";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -169,6 +170,9 @@
 }
 
 @theme inline {
+  --color-page: var(--color-bg);
+  --text-title: var(--text-xl);
+  --leading-title: var(--leading-xl);
   --color-background: var(--color-bg);
   --color-foreground: var(--color-text);
   --color-card: var(--color-surface-raised);

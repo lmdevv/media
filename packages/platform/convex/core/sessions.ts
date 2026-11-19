@@ -262,12 +262,18 @@ export const openSession = async (
   }
 
   if (opening.kind === "guest") {
-    return ctx.db.insert("authSessions", {
+    const expirationTime = Math.min(fields.expirationTime, opening.link.expiresAt);
+
+    const sessionId = await ctx.db.insert("authSessions", {
       ...fields,
       kind: "guest",
-      expirationTime: Math.min(fields.expirationTime, opening.link.expiresAt),
+      expirationTime,
       generation: user.sessionGeneration,
     });
+
+    await ctx.scheduler.runAt(expirationTime, internal.core.sessions.expireGuest, { sessionId });
+
+    return sessionId;
   }
 
   if (opening.kind === "grant") {
@@ -346,6 +352,21 @@ export const endSession = async (
   await ctx.db.delete(sessionId);
   await deleteRefreshTokens(ctx, sessionId);
 };
+
+/** Ends a guest on the server's clock, invalidating live reads even while audio is buffered. */
+export const expireGuest = internalMutation({
+  args: { sessionId: v.id("authSessions") },
+  returns: v.null(),
+  handler: async (ctx, { sessionId }) => {
+    const session = await ctx.db.get(sessionId);
+
+    if (session?.kind === "guest" && session.expirationTime <= Date.now()) {
+      await endSession(ctx, sessionId);
+    }
+
+    return null;
+  },
+});
 
 /** The refresh tokens an ended session still has, past the batch `endSession` deleted. */
 export const endRefreshTokens = internalMutation({

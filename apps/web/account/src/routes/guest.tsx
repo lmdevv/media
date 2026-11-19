@@ -16,7 +16,7 @@ import { isRenewing, linkRefused, useIdentityRetry } from "@media/ui/lib/session
 
 export const Route = createFileRoute("/guest")({
   staticData: { need: "public" },
-  head: () => ({ meta: [{ title: "Watch as a guest · Lar" }] }),
+  head: () => ({ meta: [{ title: "Open as a guest · Lar" }] }),
   component: GuestPage,
 });
 
@@ -26,34 +26,23 @@ function GuestDestination() {
   const guest = usePlatformQuery(platform.core.guests.current);
   useIdentityRetry(guest);
   const target = guest.status === "success" ? guest.data?.target : undefined;
-  const movies = target?.kind === "item" && target.item.domain === "movies";
+  const destination = target?.kind === "item" ? `/${target.item.domain}/guest` : null;
 
   useEffect(() => {
-    if (movies) window.location.replace("/movies/guest");
-  }, [movies]);
+    if (destination !== null) window.location.replace(destination);
+  }, [destination]);
 
-  if (guest.status === "loading" || (guest.status === "error" && isRenewing(guest.error)) || movies)
+  if (
+    guest.status === "loading" ||
+    (guest.status === "error" && isRenewing(guest.error)) ||
+    destination !== null
+  )
     return <BlankPage />;
 
   if (guest.status === "error" && !linkRefused(guest.error))
     return <UnreachableScreen retry={guest.retry} />;
 
-  if (guest.status === "error" || target === undefined || target.kind !== "item")
-    return <GuestUnavailable onLeave={signOut} />;
-
-  return (
-    <AuthPage>
-      <Lede>Open this on Lar Music when guest playback is available.</Lede>
-      <Button
-        variant="secondary"
-        onClick={() => {
-          void signOut().catch(() => undefined);
-        }}
-      >
-        Leave
-      </Button>
-    </AuthPage>
-  );
+  return <GuestUnavailable onLeave={signOut} />;
 }
 
 function GuestPage() {
@@ -169,7 +158,7 @@ function GuestPage() {
 
   return (
     <AuthPage>
-      <PageTitle>Watch as a guest</PageTitle>
+      <PageTitle>Open as a guest</PageTitle>
       <form
         className="flex flex-col gap-5"
         onSubmit={(event) => {
@@ -195,7 +184,7 @@ function GuestPage() {
           </p>
         ) : null}
         <Button type="submit" disabled={submission.kind === "submitting" || name.trim() === ""}>
-          {submission.kind === "submitting" ? "Opening…" : "Watch"}
+          {submission.kind === "submitting" ? "Opening…" : "Open"}
         </Button>
       </form>
     </AuthPage>

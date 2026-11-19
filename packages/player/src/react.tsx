@@ -29,17 +29,10 @@ import type { Device } from "./connect-devices";
 import type { ConnectOutput } from "./connect-player";
 import type { EngineKind, PlayerEngine } from "./engine";
 import { messageOf } from "./failure";
-import { HtmlAudioEngine } from "./html-audio-engine";
+import { browserEngines } from "./browser-engine";
 import { setMediaSessionHandlers, showNowPlaying } from "./media-session";
-import { MseEngine } from "./mse-engine";
 import { PlaybackController } from "./playback-controller";
-import type {
-  EngineFactory,
-  PlayerSettings,
-  QueueEntry,
-  QueueState,
-  Receiver,
-} from "./playback-controller";
+import type { PlayerSettings, QueueEntry, QueueState, Receiver } from "./playback-controller";
 import { queueStateOf, useQueueListing } from "./queue-listing";
 import type { QueueRow } from "./queue-listing";
 import type { RepeatMode } from "./queue-order";
@@ -59,14 +52,13 @@ import type { JoinedSession, MusicSession, SessionData } from "./session-react";
 import { ticketSources } from "./source-resolver";
 import { qualityOfSetting, settingOfQuality } from "./stream-quality";
 import type { StreamQuality } from "./stream-quality";
+import { usePositionTicks } from "./position-ticks";
 import { browserLocks, useConnect } from "./use-connect";
 import type { ConnectView, MusicItem } from "./use-connect";
 
 export type { Device, DevicePlayback } from "./connect-devices";
 
 export type { MusicItem } from "./use-connect";
-
-const POSITION_INTERVAL_MS = 250;
 
 /** Wait this long after the last volume change before saving it. */
 const VOLUME_SAVE_MS = 500;
@@ -286,15 +278,6 @@ export const useLatestPlayer = (): (() => Player) => useReaders().player;
  */
 export const usePositionReader = (): (() => number) => useReaders().positionMs;
 
-const engineFactory = (engine: (() => PlayerEngine) | undefined): EngineFactory => {
-  if (engine !== undefined) return { mse: null, create: engine };
-
-  return {
-    mse: MseEngine.detectSupport(),
-    create: (kind) => (kind === "mse" ? new MseEngine(new Audio()) : new HtmlAudioEngine()),
-  };
-};
-
 /** A queue row as the player shows it: its song with the entry's own id and how it joined. */
 const queueTrack = (row: QueueRow): QueueEntry<QueueTrack> => ({
   itemId: row.itemId,
@@ -366,7 +349,7 @@ const createController = ({
       },
     },
     sources,
-    engineFactory(engine),
+    browserEngines(engine),
     {
       canPlay: (mimeType) => probe.canPlayType(mimeType) !== "",
       now: Date.now,
@@ -423,17 +406,7 @@ function PositionTicker({
   readonly read: () => number;
   readonly children: ReactNode;
 }) {
-  const [position, setPosition] = useState(() => Math.round(read()));
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setPosition(Math.round(read()));
-    }, POSITION_INTERVAL_MS);
-
-    return () => {
-      clearInterval(timer);
-    };
-  }, [read]);
+  const position = usePositionTicks(read);
 
   return <PositionContext.Provider value={position}>{children}</PositionContext.Provider>;
 }

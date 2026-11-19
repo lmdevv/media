@@ -56,18 +56,30 @@ export type PageState<Row, Failure> =
   | { readonly status: "success"; readonly data: PageOf<Row> }
   | { readonly status: "error"; readonly error: Failure; readonly retry: () => void };
 
+type QueryFailure = Extract<QueryState<unknown>, { readonly status: "error" }>["error"];
+
 /** What follows the rows loaded so far. */
-type Next =
+type Next<Failure> =
   | { readonly kind: "done" }
   | { readonly kind: "more"; readonly load: () => void }
   | { readonly kind: "loading" }
-  | { readonly kind: "failed"; readonly message: string; readonly retry: () => void };
+  | {
+      readonly kind: "failed";
+      readonly message: string;
+      readonly error: Failure;
+      readonly retry: () => void;
+    };
 
 /** A paginated list as a screen shows it: every loaded page's rows in order, and what follows. */
-export type Paged<Row> =
+export type Paged<Row, Failure = QueryFailure> =
   | { readonly status: "loading" }
-  | { readonly status: "failed"; readonly message: string; readonly retry: () => void }
-  | { readonly status: "ready"; readonly rows: ReadonlyArray<Row>; readonly next: Next };
+  | {
+      readonly status: "failed";
+      readonly message: string;
+      readonly error: Failure;
+      readonly retry: () => void;
+    }
+  | { readonly status: "ready"; readonly rows: ReadonlyArray<Row>; readonly next: Next<Failure> };
 
 /**
  * Folds the states of a list's pages, first to last, into one {@link Paged}. A failed first page
@@ -79,7 +91,7 @@ export type Paged<Row> =
 export const combinePages = <Row, Failure>(
   pages: ReadonlyArray<PageState<Row, Failure>>,
   more: (cursor: string) => void,
-): Paged<Row> => {
+): Paged<Row, Failure> => {
   const rows: Array<Row> = [];
 
   for (const [index, state] of pages.entries()) {
@@ -93,8 +105,12 @@ export const combinePages = <Row, Failure>(
       const message = describeFailure(state.error);
 
       return index === 0
-        ? { status: "failed", message, retry: state.retry }
-        : { status: "ready", rows, next: { kind: "failed", message, retry: state.retry } };
+        ? { status: "failed", message, error: state.error, retry: state.retry }
+        : {
+            status: "ready",
+            rows,
+            next: { kind: "failed", message, error: state.error, retry: state.retry },
+          };
     }
 
     rows.push(...state.data.page);

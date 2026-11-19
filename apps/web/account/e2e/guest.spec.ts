@@ -9,10 +9,10 @@ test.skip(stack === null, "needs scripts/dev-stack.sh up");
 
 test("a guest code leaves the address before the name form renders", async ({ page }) => {
   await page.goto("/guest#mg_invalid.secret");
-  await expect(page.getByRole("heading", { name: "Watch as a guest" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Open as a guest" })).toBeVisible();
   expect(new URL(page.url()).hash).toBe("");
   await page.getByLabel("Display name").fill("Visitor");
-  await page.getByRole("button", { name: "Watch", exact: true }).click();
+  await page.getByRole("button", { name: "Open", exact: true }).click();
   await expect(page.getByRole("heading", { name: "This link isn't available" })).toBeVisible();
 });
 
@@ -44,7 +44,7 @@ for (const failed of [false, true]) {
     if (failed) {
       await page.getByRole("button", { name: "Continue as a guest" }).click();
       await page.getByLabel("Display name").fill("Visitor");
-      await page.getByRole("button", { name: "Watch", exact: true }).click();
+      await page.getByRole("button", { name: "Open", exact: true }).click();
     }
 
     await expect(page.getByRole("heading", { name: "This link isn't available" })).toBeVisible();
