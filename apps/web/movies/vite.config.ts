@@ -22,13 +22,16 @@ const parsePort = (value: string | undefined): number => {
 /**
  * The movies client lives at `/movies/` on the same origin as the account client at `/`, so both
  * share the browser's one session (ADR 0020). In development this server serves `/movies/` and
- * passes every other path, the account client's pages and its module graph included, to the
- * account client's dev server at `ACCOUNT_DEV_URL`.
+ * passes `/music/` to `MUSIC_DEV_URL` when configured. Other paths, the account client's pages
+ * and its module graph included, go to the account client at `ACCOUNT_DEV_URL`.
  */
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, import.meta.dirname, "");
   const account = env["ACCOUNT_DEV_URL"] ?? "";
+  const music = env["MUSIC_DEV_URL"] ?? "";
   const proxy: Record<string, { target: string; ws: boolean }> = {};
+
+  if (music !== "") proxy["^/music(?:/|$)"] = { target: music, ws: true };
 
   if (account !== "") proxy["^/(?!movies(?:/|$))"] = { target: account, ws: true };
 

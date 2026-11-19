@@ -1,3 +1,4 @@
+import { isRenewing } from "@media/ui/lib/session-identity";
 import type { QueryState, usePlatformStatus } from "@media/sdk/react";
 import { Predicate } from "effect";
 
@@ -12,8 +13,6 @@ import type {
 } from "./platform-types";
 
 type AuthStatus = ReturnType<typeof usePlatformStatus>;
-
-type QueryError = Extract<QueryState<unknown>, { readonly status: "error" }>["error"];
 
 /**
  * What a page needs before it shows: nothing (`public`), a sign-in of any kind (`anyone`), a
@@ -33,6 +32,7 @@ export type Intent =
 /** Everything that decides the screen. */
 export interface ScreenInputs {
   readonly intent: Intent;
+  readonly deviceEntrance: boolean;
   readonly server: QueryState<ServerInfo>;
   readonly status: AuthStatus;
   /** Skipped (loading) unless signed in. */
@@ -51,6 +51,7 @@ export type Screen =
   | { readonly kind: "signIn" }
   /** `/` signed in on a personal device, which goes to the person's home. */
   | { readonly kind: "home" }
+  | { readonly kind: "guest" }
   | { readonly kind: "sharedPicker"; readonly picker: SharedPicker }
   | {
       readonly kind: "tileLock";
@@ -65,13 +66,6 @@ export type Screen =
   | { readonly kind: "page"; readonly me: Me | null };
 
 const LOADING: Screen = { kind: "loading" };
-
-/**
- * The server refused a session the client still holds: the SDK is renewing it, or a tile that
- * opened on this shared device replaced it. Either way the status settles, so the gate waits.
- */
-export const isRenewing = (error: QueryError): boolean =>
-  Predicate.isTagged(error, "Unauthenticated");
 
 const pageFor = (need: Need, me: Me): Screen => {
   if (need === "admin" && !me.scopes.includes("admin")) {
@@ -137,6 +131,14 @@ export const screenOf = (inputs: ScreenInputs): Screen => {
   if (intent.kind === "page" && intent.need === "public") {
     return { kind: "page", me: me.status === "success" ? me.data : null };
   }
+
+  if (
+    status === "signedIn" &&
+    me.status === "success" &&
+    me.data.role === "guest" &&
+    !inputs.deviceEntrance
+  )
+    return { kind: "guest" };
 
   if (server.status === "loading") return LOADING;
 

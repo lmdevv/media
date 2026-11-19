@@ -1,3 +1,4 @@
+import { refuseIdentityOnce } from "./identity";
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
@@ -78,3 +79,17 @@ test("movies greets a person by the name they go by, and by their username once 
     await client.platform.dispose();
   }
 });
+
+for (const path of ["/movies/", "/movies/guest"]) {
+  test(`a member recovers a refused identity at ${path}`, async ({ page }) => {
+    if (stack === null) return;
+    const person = await createPerson(stack, "identity-retry", "member");
+    await signIn(page, person);
+    const refusals = await refuseIdentityOnce(page);
+    await page.goto(path);
+    await expect.poll(refusals).toBe(1);
+    await expectMoviesHome(page, person.username);
+    await expect(page.getByRole("heading", { name: "Can't reach the server" })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "This link isn't available" })).toHaveCount(0);
+  });
+}

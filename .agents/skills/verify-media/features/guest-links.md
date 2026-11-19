@@ -94,6 +94,12 @@ Preconditions:
   become `/guest`, with no fragment. Fill the name and click `Watch`: a movie link goes to
   `/movies/guest`, showing the title and `Shared by guestprobe`. If someone is signed in,
   `Replace this sign-in?` names them; `Cancel` keeps them signed in.
+- **Household safety.** On a household tab, open `/guest` without a code and click `Leave`:
+  that tab returns home and a second household tab stays signed in. A fresh guest link asks
+  before replacing the exact session shown. Another tab's new sign-in requires fresh consent;
+  a sign-in that wins during redemption stays signed in and the entrance stops for `Continue`.
+- **Music guard.** With a movie guest signed in, open `/music`: the account entrance resumes
+  `/movies/guest` on the shared item, without showing music's library, search, or settings.
 - **Movies playback.** Make a movie link with Lucía's CLI and the movie's title id. On a new
   signed-out guest page, enter a display name, click `Watch`, then `Play`, and use
   `$S browser wait-video --page guest --past 2`. Hover `--testid player-video`, press
@@ -101,6 +107,7 @@ Preconditions:
   fullscreen use the household player's controls. Search, account navigation, casting, downloads,
   settings, and watch-together are absent. Reload, then run `auth links activity --link-id <id>`:
   exactly one guest remains. A show link lists its seasons and episodes; click an episode to play.
+  Back from a show episode returns to the shared show and its episodes.
   An episode or file link shows no siblings or episode picker. Opening `/movies/title/<id>` as
   that guest returns to `/movies/guest`. A music target holds at the account entrance.
 - **Revoke while watching.** With the guest playing, revoke the link from its maker's CLI.

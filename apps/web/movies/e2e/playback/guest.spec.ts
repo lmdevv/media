@@ -9,7 +9,7 @@ import { createLibrary, removeLibrary, titlesByName } from "../stack/libraries";
 import type { LibraryId, TitleId } from "../stack/libraries";
 import { buildMediaService, startMediaService } from "../stack/media-service";
 import type { MediaService } from "../stack/media-service";
-import { NO_STACK, createPerson, reachableStack, signInClient } from "../stack/people";
+import { NO_STACK, createPerson, reachableStack, signInClient, signIn } from "../stack/people";
 import type { Client } from "../stack/people";
 import {
   encodeClip,
@@ -264,4 +264,85 @@ test("a show lists episodes, but episode and file links cannot reach siblings", 
       },
     ),
   );
+});
+
+for (const path of [
+  "/invite#mi_invalid.secret",
+  "/reset#mr_invalid.secret",
+  "/device?code=ABCD-EFGH",
+]) {
+  test(`a guest keeps the ${path.split("#")[0]} entrance`, async ({ page }) => {
+    const link = await linkFor({ domain: "movies", ref: { type: "title", id: titleId(MOVIE) } });
+    await openGuest(page, link.url);
+
+    await page.goto(path);
+    await expect
+      .poll(() => `${new URL(page.url()).pathname}${new URL(page.url()).search}`)
+      .toBe(path.split("#")[0]);
+    await expect(page.locator("main")).not.toBeEmpty();
+    await expect(page.getByRole("heading", { name: MOVIE })).toHaveCount(0);
+    expect(new URL(page.url()).hash).toBe("");
+  });
+}
+
+test("a new household session wins a guest redemption race without retrying it", async ({
+  page,
+  context,
+}) => {
+  if (stack === null) return;
+  const person = await createPerson(stack, "guest-race", "member");
+  await signIn(page, person);
+  const link = await linkFor({ domain: "movies", ref: { type: "title", id: titleId(MOVIE) } });
+  await page.goto(link.url).catch(() => {
+    throw new Error("Guest navigation failed");
+  });
+  await page.getByRole("button", { name: "Continue as a guest" }).click();
+  await page.getByLabel("Display name").fill("Visitor");
+  const arrived = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  let redemptions = 0;
+  await page.route("**/api/auth/sign-in", async (route) => {
+    redemptions += 1;
+    const response = await route.fetch();
+    arrived.resolve();
+    await release.promise;
+    await route.fulfill({ response });
+  });
+  await page.getByRole("button", { name: "Watch", exact: true }).click();
+  await arrived.promise;
+  const other = await context.newPage();
+  await other.goto("/home");
+  await other.getByRole("button", { name: "Sign out", exact: true }).click();
+  await expect(other.getByLabel("Username")).toBeVisible();
+  await signIn(other, person);
+  await expect(other).toHaveURL(/\/home$/u);
+  release.resolve();
+  await expect(page.getByRole("heading", { name: "Someone else signed in here" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Watch", exact: true })).toHaveCount(0);
+  expect(redemptions).toBe(1);
+
+  const activity = await host.platform.core.guests.links.activity({
+    linkId: link.linkId,
+    paginationOpts: { numItems: 50, cursor: null },
+  });
+
+  expect(activity.page).toHaveLength(1);
+  await page.getByRole("button", { name: "Leave", exact: true }).click();
+  await expect(page.getByRole("heading", { name: `Hi, ${person.username}.` })).toBeVisible();
+  await other.reload();
+  await expect(other.getByRole("heading", { name: `Hi, ${person.username}.` })).toBeVisible();
+});
+
+test("music returns a movie guest to exactly its shared item", async ({ page }) => {
+  if (stack === null) return;
+  const errors: Array<string> = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  const link = await linkFor({ domain: "movies", ref: { type: "title", id: titleId(MOVIE) } });
+  await openGuest(page, link.url);
+  await expect(page.getByRole("heading", { name: MOVIE })).toBeVisible();
+  await page.goto("/music/");
+  await expect(page).toHaveURL(/\/movies\/guest$/u);
+  expect(errors).toEqual([]);
+  await expect(page.getByRole("heading", { name: MOVIE })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Search", exact: true })).toHaveCount(0);
 });

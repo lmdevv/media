@@ -1,4 +1,5 @@
 import { usePlatform, usePlatformQuery, usePlatformStatus } from "@media/sdk/react";
+import { sessionAccess, useIdentityRetry } from "@media/ui/lib/session-identity";
 import { useRouterState, Navigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 import type { ReactNode } from "react";
@@ -25,11 +26,14 @@ function Household({ children }: { readonly children: ReactNode }) {
     ...(status === "signedIn" ? [] : (["skip"] as const)),
   );
 
+  useIdentityRetry(me);
+  const access = sessionAccess(status, me);
+
   useEffect(() => {
     if (status === "signedOut") window.location.replace("/");
   }, [status]);
 
-  if (status !== "signedIn" || me.status === "loading") return <BlankPage />;
+  if (access === "loading" || access === "signedOut") return <BlankPage />;
 
   if (me.status === "error")
     return (
@@ -39,7 +43,7 @@ function Household({ children }: { readonly children: ReactNode }) {
       </main>
     );
 
-  if (me.data.role === "guest") return <Navigate to="/guest" replace />;
+  if (access === "guest") return <Navigate to="/guest" replace />;
 
   return (
     <>

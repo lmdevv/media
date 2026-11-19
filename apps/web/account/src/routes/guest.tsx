@@ -12,8 +12,7 @@ import type { GuestSubmission } from "@/screens/guest/state";
 import { useAccountActions } from "@/session/account";
 import { linkSecretFor } from "@/session/link-secret";
 import { nameOf } from "@/session/me";
-import { isRenewing } from "@/session/screen";
-import { useIdentityRetry } from "@/session/use-identity-retry";
+import { isRenewing, useIdentityRetry } from "@media/ui/lib/session-identity";
 
 export const Route = createFileRoute("/guest")({
   staticData: { need: "public" },
@@ -25,6 +24,7 @@ function GuestDestination() {
   const { signOut } = useAccountActions();
   const platform = usePlatform();
   const guest = usePlatformQuery(platform.core.guests.current);
+  useIdentityRetry(guest);
   const target = guest.status === "success" ? guest.data?.target : undefined;
   const movies = target?.kind === "item" && target.item.domain === "movies";
 
@@ -32,7 +32,8 @@ function GuestDestination() {
     if (movies) window.location.replace("/movies/guest");
   }, [movies]);
 
-  if (guest.status === "loading" || movies) return <BlankPage />;
+  if (guest.status === "loading" || (guest.status === "error" && isRenewing(guest.error)) || movies)
+    return <BlankPage />;
 
   if (guest.status === "error" || target === undefined || target.kind !== "item")
     return <GuestUnavailable onLeave={signOut} />;
@@ -85,7 +86,7 @@ function GuestPage() {
           : "household",
     hasCode: code !== "",
     opened,
-    confirmed: me.status === "success" && confirmed === me.data.userId,
+    confirmed: me.status === "success" && confirmed === `${me.data.userId}|${me.data.sessionId}`,
     submitting: submission.kind === "submitting",
   });
 
@@ -96,15 +97,41 @@ function GuestPage() {
 
   if (gate === "resume") return <GuestDestination />;
 
+  const leave = async (): Promise<void> => {
+    if (me.status === "success" && me.data.role === "guest") await signOut();
+    else window.location.replace("/home");
+  };
+
   if (gate === "unavailable" || submission.kind === "unavailable")
-    return <GuestUnavailable onLeave={signOut} />;
+    return <GuestUnavailable onLeave={leave} />;
+
+  if (submission.kind === "changed")
+    return (
+      <AuthPage>
+        <PageTitle>Someone else signed in here</PageTitle>
+        <Lede>Their sign-in was kept. Continue to review it before opening this link again.</Lede>
+        <Button
+          onClick={() => {
+            setConfirmed(null);
+            setSubmission({ kind: "idle" });
+          }}
+        >
+          Continue
+        </Button>
+        <Button variant="secondary" onClick={() => window.location.replace("/home")}>
+          Leave
+        </Button>
+      </AuthPage>
+    );
 
   if (gate === "confirm" && me.status === "success") {
     return (
       <AuthPage>
         <PageTitle>Replace this sign-in?</PageTitle>
         <Lede>{nameOf(me.data)} is signed in on this browser.</Lede>
-        <Button onClick={() => setConfirmed(me.data.userId)}>Continue as a guest</Button>
+        <Button onClick={() => setConfirmed(`${me.data.userId}|${me.data.sessionId}`)}>
+          Continue as a guest
+        </Button>
         <Button variant="secondary" onClick={() => window.location.replace("/home")}>
           Cancel
         </Button>
@@ -125,8 +152,12 @@ function GuestPage() {
     setSubmission({ kind: "submitting" });
 
     try {
-      await signInAsGuest({ code, name: name.trim() });
-      setOpened(true);
+      const outcome = await signInAsGuest({ code, name: name.trim(), replacing: confirmed });
+
+      if (outcome === "changed") {
+        setSubmission({ kind: "changed" });
+        busy.current = false;
+      } else setOpened(true);
     } catch (cause) {
       setSubmission(guestFailure(cause));
       busy.current = false;

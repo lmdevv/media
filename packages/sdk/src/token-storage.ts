@@ -353,47 +353,58 @@ export interface HeldSignIn {
   readonly keep: (store: SharedStore, order: DeviceOrder) => Promise<boolean>;
 }
 
+const holdTokens = () => {
+  const held = new Map<string, string>();
+
+  const storage: KeyValueStore = {
+    getItem: (key) => held.get(key) ?? null,
+    setItem: (key, value) => {
+      held.set(key, value);
+    },
+    removeItem: (key) => {
+      held.delete(key);
+    },
+  };
+
+  const session = (): StoredSession | undefined =>
+    [...held.values()].flatMap((text) => Option.toArray(parseStoredSession(text)))[0];
+
+  return { storage, session };
+};
+
 /**
  * A place in memory for a new sign-in. A browser learns a session's order only after it signs in,
  * when the core binds it to the device, so a client of its own signs in here first.
  */
 export const holdSignIn = (): HeldSignIn => {
-  const held = new Map<string, string>();
+  const held = holdTokens();
 
   return {
-    storage: {
-      getItem: (key) => held.get(key) ?? null,
-      setItem: (key, value) => {
-        held.set(key, value);
-      },
-      removeItem: (key) => {
-        held.delete(key);
-      },
-    },
+    storage: held.storage,
     keep: async (store, order) => {
-      const [session] = [...held.values()].flatMap((text) =>
-        Option.toArray(parseStoredSession(text)),
-      );
+      const session = held.session();
 
       return session === undefined ? false : keepSession(store, session, order);
     },
   };
 };
 
-/** Holds a guest sign-in until it can replace exactly the session present when it began. */
-export const holdGuestSignIn = async (store: SharedStore) => {
+/** Holds a guest sign-in only for the session the person confirmed; null if it changed. */
+export const holdGuestSignIn = async (
+  store: SharedStore,
+  expectedId: string | null,
+): Promise<{ readonly storage: KeyValueStore; readonly keep: () => Promise<boolean> } | null> => {
   const expected = await store.read(sessionIn);
-  const expectedId = Option.getOrNull(Option.flatMap(expected, sessionOf));
-  const held = holdSignIn();
+
+  if (Option.getOrNull(Option.flatMap(expected, sessionOf)) !== expectedId) return null;
+  const held = holdTokens();
 
   return {
     storage: held.storage,
     keep: async (): Promise<boolean> => {
-      const text = await held.storage.getItem(SESSION);
-      const session = text === null ? Option.none<StoredSession>() : parseStoredSession(text);
+      const value = held.session();
 
-      if (Option.isNone(session)) return false;
-      const value = session.value;
+      if (value === undefined) return false;
       const id = Option.getOrNull(sessionOf(value));
 
       return store.write(async (tx) => {

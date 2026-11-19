@@ -10,7 +10,7 @@ import { SignInScreen } from "@/screens/sign-in";
 import { TileLockScreen } from "@/screens/tile-lock";
 import { BlankPage, UnreachableScreen } from "@/screens/states";
 
-import { useIdentityRetry } from "./use-identity-retry";
+import { useIdentityRetry } from "@media/ui/lib/session-identity";
 import { useDevice } from "./account";
 import { MeContext } from "./me";
 import { screenOf } from "./screen";
@@ -57,6 +57,7 @@ const render: (screen: Screen) => ReactNode = Match.type<Screen>().pipe(
     setUpOwner: () => <SetUpOwnerScreen />,
     signIn: () => <SignInScreen />,
     home: () => <Navigate to="/home" replace />,
+    guest: () => <Navigate to="/guest" replace />,
     sharedPicker: ({ picker }) => <SharedPickerScreen picker={picker} />,
     tileLock: ({ picker, tile, approval }) => (
       <TileLockScreen picker={picker} tile={tile} approval={approval} />
@@ -72,12 +73,12 @@ const render: (screen: Screen) => ReactNode = Match.type<Screen>().pipe(
 );
 
 export function Gate() {
-  const guest = useRouterState({ select: (state) => state.matches.at(-1)?.routeId === "/guest" });
+  const route = useRouterState({ select: (state) => state.matches.at(-1)?.routeId });
 
-  return guest ? <Outlet /> : <HouseholdGate />;
+  return route === "/guest" ? <Outlet /> : <HouseholdGate deviceEntrance={route === "/device"} />;
 }
 
-function HouseholdGate() {
+function HouseholdGate({ deviceEntrance }: { readonly deviceEntrance: boolean }) {
   const platform = usePlatform();
   const status = usePlatformStatus();
   const device = useDevice()?.code ?? null;
@@ -97,7 +98,5 @@ function HouseholdGate() {
 
   useIdentityRetry(me);
 
-  if (me.status === "success" && me.data.role === "guest") return <Navigate to="/guest" replace />;
-
-  return render(screenOf({ intent, server, status, me, device, picker }));
+  return render(screenOf({ intent, deviceEntrance, server, status, me, device, picker }));
 }

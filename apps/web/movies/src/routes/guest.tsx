@@ -1,10 +1,9 @@
 import { usePlatform, usePlatformQuery, usePlatformStatus } from "@media/sdk/react";
 import { GuestUnavailable } from "@media/ui/components/guest-unavailable";
 import { createFileRoute, Navigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { isRenewing, sessionAccess, useIdentityRetry } from "@media/ui/lib/session-identity";
 
 import { GuestItem } from "@/guest/item";
-import { guestGuard } from "@/guest/guard";
 import { useSignOut } from "@/session/session";
 import { BlankPage } from "@/session/redirect";
 import { SoloSessionProvider } from "@/together/current-session";
@@ -24,13 +23,22 @@ function GuestRoute() {
     ...(status === "signedIn" ? [] : (["skip"] as const)),
   );
 
-  const guard = guestGuard(status, me.status === "success" ? me.data.role : undefined);
+  useIdentityRetry(me);
 
-  if (me.status === "error") return <GuestUnavailable onLeave={leave} />;
+  const guard = sessionAccess(status, me);
 
-  if (guard === "member") return <Navigate to="/" replace />;
+  if (guard === "failed")
+    return (
+      <GuestUnavailable
+        onLeave={async () => {
+          window.location.replace("/");
+        }}
+      />
+    );
 
-  if (guard === "unavailable") return <GuestUnavailable onLeave={leave} />;
+  if (guard === "household") return <Navigate to="/" replace />;
+
+  if (guard === "signedOut") return <GuestUnavailable onLeave={leave} />;
 
   if (guard === "loading") return <BlankPage />;
 
@@ -45,27 +53,11 @@ function GuestShare() {
   const platform = usePlatform();
   const leave = useSignOut();
   const current = usePlatformQuery(platform.core.guests.current);
-  const [ended, setEnded] = useState(false);
-  const expiresAt = current.status === "success" ? current.data?.expiresAt : undefined;
+  useIdentityRetry(current);
 
-  useEffect(() => {
-    if (expiresAt === undefined) return undefined;
+  if (current.status === "error" && isRenewing(current.error)) return <BlankPage />;
 
-    const check = (): ReturnType<typeof setTimeout> =>
-      setTimeout(
-        () => {
-          if (Date.now() >= expiresAt) setEnded(true);
-          else timer = check();
-        },
-        Math.min(Math.max(0, expiresAt - Date.now()), 2_000_000_000),
-      );
-
-    let timer = check();
-
-    return () => clearTimeout(timer);
-  }, [expiresAt]);
-
-  if (ended || current.status === "error") return <GuestUnavailable onLeave={leave} />;
+  if (current.status === "error") return <GuestUnavailable onLeave={leave} />;
 
   if (current.status === "loading") return <BlankPage />;
   const guest = current.data;

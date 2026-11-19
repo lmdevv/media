@@ -5,6 +5,7 @@ export type GuestSubmission =
   | { readonly kind: "submitting" }
   | { readonly kind: "unavailable" }
   | { readonly kind: "full" }
+  | { readonly kind: "changed" }
   | { readonly kind: "failed"; readonly message: string };
 
 export const guestFailure = (cause: unknown): GuestSubmission => {
