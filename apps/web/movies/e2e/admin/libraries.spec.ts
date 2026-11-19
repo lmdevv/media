@@ -44,9 +44,7 @@ let admin: Client | undefined;
 
 const withoutProvider = (env: StackEnv): StackEnv => ({
   ...env,
-  mediaEnv: Object.fromEntries(
-    Object.entries(env.mediaEnv).filter(([name]) => name !== "TMDB_API_KEY"),
-  ),
+  mediaEnv: { ...env.mediaEnv, TMDB: "off" },
 });
 
 const ARRIVAL_NFO = `<?xml version="1.0" encoding="UTF-8"?>

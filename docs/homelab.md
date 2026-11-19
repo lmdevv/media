@@ -34,7 +34,7 @@ MEDIA_BASE_URL=http://nas.tailnet.ts.net:8080
 MEDIA_BIND=100.64.0.1                    # the host's Tailscale address (`tailscale ip -4`)
 PUID=1000                                 # a user that can read MEDIA_LIBRARY (`id -u you`)
 PGID=1000
-TMDB_API_KEY=...                          # optional: posters and metadata from TMDB
+# TMDB_API_KEY=...                        # optional: your own TMDB key instead of the built-in one
 ```
 
 Then start it and watch it come up (the first start deploys the database functions, about a
@@ -80,7 +80,7 @@ inputs.media.nixosModules.default
     listenAddress = "100.64.0.1";                     # the host's Tailscale address
     publicUrl = "http://nas.tailnet.ts.net:8080";
     hardwareAcceleration = "qsv";                     # see GPU below; "auto" by default
-    environmentFile = "/run/secrets/media.env";       # TMDB_API_KEY=..., from agenix or sops-nix
+    environmentFile = "/run/secrets/media.env";       # OMDB_API_KEY=..., from agenix or sops-nix
   };
 }
 ```

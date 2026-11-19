@@ -11,10 +11,11 @@ import { commandRoute } from "./command-routes.ts";
 
 const MAX_CANDIDATES = 20;
 
+const NO_PROVIDER = "No metadata provider is configured: this server sets TMDB=off";
+
 const providerFailure = Match.type<MetadataPlugin.MetadataError>().pipe(
   Match.tagsExhaustive({
-    MetadataProviderUnavailable: () =>
-      new Internal({ message: "No metadata provider is configured; set TMDB_API_KEY" }),
+    MetadataProviderUnavailable: () => new Internal({ message: NO_PROVIDER }),
     MetadataRequestFailed: (error) =>
       error.status === 429
         ? new RateLimited({ message: "The metadata provider is rate limiting; retry shortly" })
@@ -39,9 +40,7 @@ export const layer: Layer.Layer<
         const target = yield* core.call(serverFunctions.metadataTarget, { titleId, cursor: null });
 
         if (MetadataPlugin.PluginAvailability.guards.Unavailable(yield* plugin.availability)) {
-          return yield* new Internal({
-            message: "No metadata provider is configured; set TMDB_API_KEY",
-          });
+          return yield* new Internal({ message: NO_PROVIDER });
         }
 
         const matches = yield* plugin

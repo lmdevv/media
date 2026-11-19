@@ -166,7 +166,8 @@ in
   inside it. `media-server-folders` checks this before every start, and
   `journalctl -u media-server-folders` says what to fix.
 - **Secrets.** `tmdbApiKeyFile` and `omdbApiKeyFile` take files outside the Nix store, such as
-  sops-nix or agenix secrets.
+  sops-nix or agenix secrets. TMDB metadata and artwork work without a key, through a built-in
+  one; `tmdbApiKeyFile` replaces it and `tmdb.enable = false` turns TMDB off.
 - **GPU.** `hardwareAcceleration` defaults to `auto`
   ([homelab.md](homelab.md#gpu-transcoding)).
 

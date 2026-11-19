@@ -59,7 +59,8 @@ Registry `media` commands answer `{ code, message }` like Convex.
 Required: `MEDIA_BASE_URL`, `DATA_DIR` (`/data/server/media` in the image), `TRANSCODE_DIR`.
 Optional with defaults: `LIBRARY_ROOTS` (comma list of approved mounts; none approves nothing, so
 every scan is refused), `PORT` (4300), `HOST` (all interfaces), `BACKUP_DIR` (`/data/backups`;
-`/data/core/backups` in the image), `TMDB_API_KEY` (v3 key or v4 read token), `OMDB_API_KEY`
+`/data/core/backups` in the image), `TMDB` (`on` or `off`: metadata and artwork from TMDB), `TMDB_API_KEY` (v3 key or v4 read token
+used instead of the built-in key, which works with no setup), `OMDB_API_KEY`
 (IMDb, Rotten Tomatoes, and Metacritic scores; without it titles keep TMDB's), `WEB_DIST_DIR`,
 `MAX_CONCURRENT_TRANSCODES` (3), `MAX_CONCURRENT_REMUXES` (10: HLS streams that copy the video),
 `HARDWARE_ACCELERATION` (`auto` tries Quick Sync, then VA-API, then software; `qsv`, `vaapi`,

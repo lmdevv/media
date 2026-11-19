@@ -202,9 +202,7 @@ export const writeText = async (path: string, text: string): Promise<void> => {
  */
 export const offline = (stack: StackEnv): StackEnv => ({
   ...stack,
-  mediaEnv: Object.fromEntries(
-    Object.entries(stack.mediaEnv).filter(([name]) => name !== "TMDB_API_KEY"),
-  ),
+  mediaEnv: { ...stack.mediaEnv, TMDB: "off" },
 });
 
 /** `HTMLMediaElement.HAVE_CURRENT_DATA`: the element has the frame at its position. */

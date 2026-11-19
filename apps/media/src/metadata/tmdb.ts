@@ -910,7 +910,7 @@ export const layerWithOptions = (
     Layer.provide(RateLimiter.layerStoreMemory),
   );
 
-/** The TMDB plugin configured from `TMDB_API_KEY`. */
+/** The TMDB plugin with the configured key (`TMDB_API_KEY`, the built-in key, or none with `TMDB=off`). */
 export const layer: Layer.Layer<
   Service,
   never,

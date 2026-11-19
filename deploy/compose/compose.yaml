@@ -31,6 +31,7 @@ services:
       # Media service settings, set in .env. Empty means the service's default (README.md,
       # Configuration).
       LIBRARY_ROOTS: ${LIBRARY_ROOTS:-}
+      TMDB: ${TMDB:-}
       TMDB_API_KEY: ${TMDB_API_KEY:-}
       OMDB_API_KEY: ${OMDB_API_KEY:-}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}

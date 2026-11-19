@@ -82,7 +82,7 @@ services.media = {
   listenAddress = "100.64.0.1";                       # the host's Tailscale address
   publicUrl = "http://nas.tailnet.ts.net:8080";
   hardwareAcceleration = "qsv";                       # Intel Gen12+ iGPU or Arc
-  environmentFile = "/run/secrets/media.env";         # TMDB_API_KEY=...; agenix or sops-nix
+  environmentFile = "/run/secrets/media.env";         # OMDB_API_KEY=...; agenix or sops-nix
 };
 ```
 
@@ -107,7 +107,8 @@ default. The NixOS options are in brackets.
 | `MEDIA_TRUSTED_PROXIES`       | CIDRs of proxies in front whose `X-Forwarded-For` names the client, none by default (`trustedProxies`) |
 | `PUID`, `PGID`                | User and group of the media service, 1000 (`user`, `group`)                                            |
 | `MEDIA_IMAGE`, `TZ`           | Image to run, `ghcr.io/lmdevv/media:latest`; time zone, UTC                                            |
-| `TMDB_API_KEY`                | TMDB key or read token for metadata and artwork (`tmdbApiKeyFile`)                                     |
+| `TMDB`                        | Metadata and artwork from TMDB, `on` or `off`, `on`, with a built-in key (`tmdb.enable`)               |
+| `TMDB_API_KEY`                | TMDB key or read token to use instead of the built-in key (`tmdbApiKeyFile`)                           |
 | `OMDB_API_KEY`                | OMDb key for IMDb, RT, and Metacritic scores (`omdbApiKeyFile`)                                        |
 | `LIBRARY_ROOTS`               | Approved library folders in the container, `/media` (from `libraryDirs`)                               |
 | `HARDWARE_ACCELERATION`       | `auto`, `qsv`, `vaapi`, or `none`, `auto` (`hardwareAcceleration`)                                     |
@@ -135,7 +136,7 @@ default. The NixOS options are in brackets.
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Optional OTLP/HTTP collector for traces and logs (`otlpEndpoint`)                                      |
 | `LRCLIB_URL`                  | Where music looks up lyrics, `https://lrclib.net` (`lrclibUrl`)                                        |
 
-On NixOS, `environmentFile` adds secrets (such as `TMDB_API_KEY`) from a root-only file and
+On NixOS, `environmentFile` adds secrets (such as `OMDB_API_KEY`) from a root-only file and
 `extraEnvironment` sets anything else. The image and the NixOS module connect the media service
 to the core themselves (`CONVEX_URL`, `CONVEX_PUBLIC_URL`, `MEDIA_SERVICE_API_KEY`,
 `MEDIA_TICKET_KEYS`, `CONVEX_SELF_HOSTED_ADMIN_KEY`, `CONVEX_BACKEND_DIR`); the media service's
@@ -165,7 +166,7 @@ It needs `curl`, `ffmpeg`, and `unzip`, plus `spumux` from dvdauthor for the ima
   stereo with ten text subtitles and an image (VobSub) subtitle, and an interlaced PAL MPEG-2
   "DVD rip".
 - Every title has a Kodi-style NFO with IMDb and TMDB IDs, cast and crew, genres, and studios,
-  so it matches without a TMDB key, and local posters and backgrounds taken from the film.
+  so it matches with `TMDB=off`, and local posters and backgrounds taken from the film.
   Credits and licenses are written to `CREDITS.md` in the library folder.
 
 The full set also ships, with five Creative Commons albums under `Music`, as a data-only image,

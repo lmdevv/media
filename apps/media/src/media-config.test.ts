@@ -26,6 +26,10 @@ const decode = (env: Readonly<Record<string, string>>) =>
     Effect.exit,
   );
 
+/** The TMDB key `env` resolves to, unredacted. */
+const tmdbKey = (env: Readonly<Record<string, string>>) =>
+  decode(env).pipe(Effect.map(Exit.map((config) => Option.map(config.tmdbApiKey, Redacted.value))));
+
 describe("media configuration", () => {
   it.effect("keeps the retained log at least 8 MiB, so it always holds several files", () =>
     Effect.gen(function* () {
@@ -56,5 +60,27 @@ describe("media configuration", () => {
         Exit.succeed(Option.none()),
       );
     }),
+  );
+
+  it.effect(
+    "uses TMDB with the built-in key by default, a given key instead, and none when off",
+    () =>
+      Effect.gen(function* () {
+        const builtIn = yield* tmdbKey({});
+
+        assert.isTrue(Exit.isSuccess(builtIn) && Option.isSome(builtIn.value));
+        assert.deepStrictEqual(yield* tmdbKey({ TMDB_API_KEY: "" }), builtIn);
+        assert.deepStrictEqual(yield* tmdbKey({ TMDB: "on" }), builtIn);
+        assert.deepStrictEqual(
+          yield* tmdbKey({ TMDB_API_KEY: "own-key" }),
+          Exit.succeed(Option.some("own-key")),
+        );
+        assert.deepStrictEqual(yield* tmdbKey({ TMDB: "off" }), Exit.succeed(Option.none()));
+        assert.deepStrictEqual(
+          yield* tmdbKey({ TMDB: "off", TMDB_API_KEY: "own-key" }),
+          Exit.succeed(Option.none()),
+        );
+        assert.isTrue(Exit.isFailure(yield* tmdbKey({ TMDB: "yes" })));
+      }),
   );
 });

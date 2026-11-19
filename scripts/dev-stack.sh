@@ -13,6 +13,9 @@
 # `up` creates the media service's service principal on the core and issues its key once, keeping
 # it in the state directory while the core's volume lives.
 #
+# The media service's .env.local sets TMDB=off, so the stack suites stay offline. Run `up` with
+# TMDB_API_KEY set to write that key there instead and use TMDB.
+#
 # The stack name defaults to the worktree directory name; override with MEDIA_STACK. Ports derive
 # from the name so worktrees do not collide; override the base with MEDIA_PORT_BASE.
 #   base      media service
@@ -250,6 +253,12 @@ if ! boundary_ready; then
   exit 1
 fi
 
+if [[ -n "${TMDB_API_KEY:-}" ]]; then
+  tmdb_setting="TMDB_API_KEY=${TMDB_API_KEY}"
+else
+  tmdb_setting="TMDB=off"
+fi
+
 (
   umask 077
   cat >"${root}/apps/media/.env.local" <<ENV
@@ -265,6 +274,7 @@ DATA_DIR=${data_dir}
 TRANSCODE_DIR=${transcode_dir}
 BACKUP_DIR=${backup_dir}
 LIBRARY_ROOTS=${library_roots}
+${tmdb_setting}
 ENV
 )
 

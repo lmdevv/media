@@ -3,7 +3,8 @@ import { ConfigProvider, Layer } from "effect";
 import * as MediaConfig from "../media-config.ts";
 
 /**
- * `MediaConfig` decoded from an environment record, with defaults for the required names.
+ * `MediaConfig` decoded from an environment record, with defaults for the required names and
+ * `TMDB=off`, so no test reaches TMDB.
  * `overrides` replace defaults; pass `DATA_DIR`, `TRANSCODE_DIR`, and `LIBRARY_ROOTS` for tests
  * that touch the disk.
  */
@@ -20,6 +21,7 @@ export const testConfigLayer = (
             DATA_DIR: "/nonexistent/data",
             TRANSCODE_DIR: "/nonexistent/transcode",
             HARDWARE_ACCELERATION: "none",
+            TMDB: "off",
             ...overrides,
           },
         }),
