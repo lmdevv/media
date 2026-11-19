@@ -4,6 +4,7 @@ import { createFileRoute, Navigate } from "@tanstack/react-router";
 import { isRenewing, sessionAccess, useIdentityRetry } from "@media/ui/lib/session-identity";
 
 import { GuestItem } from "@/guest/item";
+import { linkRefused } from "@/guest/refused";
 import { useSignOut } from "@/session/session";
 import { BlankPage } from "@/session/redirect";
 import { UnreachableScreen } from "@/session/unreachable";
@@ -51,7 +52,12 @@ function GuestShare() {
 
   if (current.status === "error" && isRenewing(current.error)) return <BlankPage />;
 
-  if (current.status === "error") return <GuestUnavailable onLeave={leave} />;
+  if (current.status === "error")
+    return linkRefused(current.error) ? (
+      <GuestUnavailable onLeave={leave} />
+    ) : (
+      <UnreachableScreen retry={current.retry} />
+    );
 
   if (current.status === "loading") return <BlankPage />;
   const guest = current.data;

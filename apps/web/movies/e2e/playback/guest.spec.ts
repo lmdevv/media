@@ -10,7 +10,7 @@ import type { LibraryId, TitleId } from "../stack/libraries";
 import { buildMediaService, startMediaService } from "../stack/media-service";
 import type { MediaService } from "../stack/media-service";
 import { NO_STACK, createPerson, reachableStack, signInClient, signIn } from "../stack/people";
-import { refuseIdentityOnce } from "../session/identity";
+import { refuseIdentityOnce, refuseQueryOnce } from "../session/identity";
 import type { Client } from "../stack/people";
 import {
   encodeClip,
@@ -231,6 +231,19 @@ test("a guest whose identity check fails can try again and keep watching", async
   await page.getByRole("button", { name: "Try again", exact: true }).click();
   await expect(page.getByRole("heading", { name: MOVIE })).toBeVisible();
   await expect(page).toHaveURL(/\/movies\/guest$/u);
+});
+
+test("a guest whose shared item fails to load can try again", async ({ page }) => {
+  const link = await linkFor({ domain: "movies", ref: { type: "title", id: titleId(MOVIE) } });
+  await openGuest(page, link.url);
+  await expect(page.getByRole("heading", { name: MOVIE })).toBeVisible();
+  const refusals = await refuseQueryOnce(page, "movies/playback:get", "internal");
+  await page.reload();
+  await expect.poll(refusals).toBe(1);
+  await expect(page.getByRole("heading", { name: "Can't reach the server" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "This link isn't available" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Try again", exact: true }).click();
+  await expect(page.getByRole("heading", { name: MOVIE })).toBeVisible();
 });
 
 test("a show lists episodes, but episode and file links cannot reach siblings", async ({

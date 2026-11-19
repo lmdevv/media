@@ -23,11 +23,18 @@ const parse = Schema.decodeUnknownSync(
 );
 
 /** Refuses one real identity subscription, then lets its retry reach the core. */
-export const refuseIdentityOnce = async (
+export const refuseIdentityOnce = (
   page: Page,
   code: "unauthenticated" | "internal" = "unauthenticated",
+): Promise<() => number> => refuseQueryOnce(page, "core/auth/sessions:current", code);
+
+/** Refuses one real subscription to the query at `udfPath`, then lets its retry reach the core. */
+export const refuseQueryOnce = async (
+  page: Page,
+  udfPath: string,
+  code: "unauthenticated" | "internal",
 ): Promise<() => number> => {
-  const failureMessage = code === "unauthenticated" ? "Session renewing" : "Identity unavailable";
+  const failureMessage = code === "unauthenticated" ? "Session renewing" : "Query unavailable";
   let refusals = 0;
   await page.routeWebSocket("**/sync", (socket) => {
     const upstream = socket.connectToServer();
@@ -37,10 +44,7 @@ export const refuseIdentityOnce = async (
 
       if (data.modifications !== undefined) {
         for (const modification of data.modifications) {
-          if (
-            modification["udfPath"] === "core/auth/sessions:current" &&
-            modification.queryId !== undefined
-          )
+          if (modification["udfPath"] === udfPath && modification.queryId !== undefined)
             identities.add(modification["queryId"]);
         }
       }

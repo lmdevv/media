@@ -3,6 +3,7 @@ import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { Button } from "@media/ui/components/button";
 import { GuestUnavailable } from "@media/ui/components/guest-unavailable";
 import { useAllPages } from "@media/ui/lib/pages";
+import { isRenewing, useIdentityRetry } from "@media/ui/lib/session-identity";
 import { useCallback, useMemo, useState } from "react";
 
 import { PlayerScreen } from "@/components/player/player-screen";
@@ -11,6 +12,9 @@ import type { EpisodeId, TitleId, PlaybackDetail, MediaFileId } from "@/lib/cata
 import { episodeCode, facts, formatRuntime } from "@/lib/format";
 import { useSignOut } from "@/session/session";
 import { BlankPage } from "@/session/redirect";
+import { UnreachableScreen } from "@/session/unreachable";
+
+import { linkRefused } from "./refused";
 
 type Item = Parameters<PlatformSdk["movies"]["playback"]["get"]>[0]["item"];
 
@@ -28,6 +32,7 @@ export function GuestItem({
   const [selected, setSelected] = useState<EpisodeId | null>(null);
   const target: Item = selected === null ? item : { type: "episode", id: selected };
   const result = usePlatformQuery(platform.movies.playback.get, { item: target });
+  useIdentityRetry(result);
   const [playing, setPlaying] = useState(false);
 
   const onBack = useCallback(() => {
@@ -37,7 +42,14 @@ export function GuestItem({
 
   if (result.status === "loading") return <BlankPage />;
 
-  if (result.status === "error") return <GuestUnavailable onLeave={leave} />;
+  if (result.status === "error" && isRenewing(result.error)) return <BlankPage />;
+
+  if (result.status === "error")
+    return linkRefused(result.error) ? (
+      <GuestUnavailable onLeave={leave} />
+    ) : (
+      <UnreachableScreen retry={result.retry} />
+    );
   const detail = result.data;
   const show = item.type === "title" && detail.kind === "show";
   const episode = detail.episode;
