@@ -5,8 +5,8 @@ import { useEffect } from "react";
 import type { ReactNode } from "react";
 
 import { BlankPage } from "./redirect";
-import { Button } from "@media/ui/components/button";
 import { HeldSettings } from "./held-settings";
+import { UnreachableScreen } from "./unreachable";
 import { CurrentSessionProvider } from "@/together/current-session";
 
 export function MoviesAccess({ children }: { readonly children: ReactNode }) {
@@ -35,13 +35,7 @@ function Household({ children }: { readonly children: ReactNode }) {
 
   if (access === "loading" || access === "signedOut") return <BlankPage />;
 
-  if (me.status === "error")
-    return (
-      <main className="flex min-h-svh flex-col items-center justify-center gap-5 bg-page text-text">
-        <h1 className="text-title/title font-bold">Can't reach the server</h1>
-        <Button onClick={me.retry}>Try again</Button>
-      </main>
-    );
+  if (me.status === "error") return <UnreachableScreen retry={me.retry} />;
 
   if (access === "guest") return <Navigate to="/guest" replace />;
 

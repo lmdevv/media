@@ -6,6 +6,7 @@ import { isRenewing, sessionAccess, useIdentityRetry } from "@media/ui/lib/sessi
 import { GuestItem } from "@/guest/item";
 import { useSignOut } from "@/session/session";
 import { BlankPage } from "@/session/redirect";
+import { UnreachableScreen } from "@/session/unreachable";
 import { SoloSessionProvider } from "@/together/current-session";
 
 export const Route = createFileRoute("/guest")({
@@ -27,14 +28,7 @@ function GuestRoute() {
 
   const guard = sessionAccess(status, me);
 
-  if (guard === "failed")
-    return (
-      <GuestUnavailable
-        onLeave={async () => {
-          window.location.replace("/");
-        }}
-      />
-    );
+  if (guard === "failed" && me.status === "error") return <UnreachableScreen retry={me.retry} />;
 
   if (guard === "household") return <Navigate to="/" replace />;
 
