@@ -20,14 +20,40 @@ export const linkRefused = (error: QueryError): boolean =>
   Predicate.isTagged(error, "Forbidden") ||
   Predicate.isTagged(error, "Expired");
 
+/** What a guest's read shows. */
+type GuestView<A> =
+  | { readonly kind: "blank" }
+  | { readonly kind: "unavailable" }
+  | { readonly kind: "unreachable"; readonly retry: () => void }
+  | { readonly kind: "ready"; readonly data: A };
+
+/**
+ * A guest's read as a page: blank while it loads or the session renews, unavailable once the link
+ * refuses it, a retry for any other failure, else its data.
+ */
+export const guestView = <A>(state: QueryState<A>): GuestView<A> => {
+  if (state.status === "loading") return { kind: "blank" };
+
+  if (state.status === "success") return { kind: "ready", data: state.data };
+
+  if (isRenewing(state.error)) return { kind: "blank" };
+
+  return linkRefused(state.error)
+    ? { kind: "unavailable" }
+    : { kind: "unreachable", retry: state.retry };
+};
+
 /** Retries identity after the SDK has had time to settle its session. */
 export const useIdentityRetry = (me: QueryState<unknown>): void => {
+  const renewal = me.status === "error" && isRenewing(me.error) ? me : null;
+  const failure = renewal?.error;
+  const retry = renewal?.retry;
+
   useEffect(() => {
-    const timer =
-      me.status === "error" && isRenewing(me.error) ? setTimeout(me.retry, 1000) : undefined;
+    const timer = retry === undefined ? undefined : setTimeout(retry, 1000);
 
     return () => clearTimeout(timer);
-  }, [me]);
+  }, [failure, retry]);
 };
 
 /** Separates session transitions from failed identity reads and household access. */

@@ -7,7 +7,7 @@ import {
   Unauthenticated,
 } from "@media/contracts/errors";
 import { describe, expect, it } from "vitest";
-import { isRenewing, linkRefused, sessionAccess } from "@media/ui/lib/session-identity";
+import { guestView, isRenewing, linkRefused, sessionAccess } from "@media/ui/lib/session-identity";
 
 describe("session identity renewal", () => {
   it("waits for a refused session but keeps server failures visible", () => {
@@ -61,5 +61,30 @@ describe("session access", () => {
 
     for (const role of ["owner", "admin", "member"] as const)
       expect(sessionAccess("signedIn", { status: "success", data: { role } })).toBe("household");
+  });
+});
+
+describe("guest view", () => {
+  it("stays blank while a read loads or the session renews", () => {
+    expect(guestView({ status: "loading" })).toEqual({ kind: "blank" });
+
+    expect(
+      guestView({ status: "error", error: new Unauthenticated({ message: "Renewing" }), retry }),
+    ).toEqual({ kind: "blank" });
+  });
+  it("shows a refused link as unavailable and any other failure as a retry", () => {
+    for (const error of [
+      new NotFound({ message: "No such item" }),
+      new Forbidden({ message: "Not shared" }),
+      new Expired({ message: "Link ended" }),
+    ])
+      expect(guestView({ status: "error", error, retry })).toEqual({ kind: "unavailable" });
+
+    expect(
+      guestView({ status: "error", error: new Internal({ message: "Server failed" }), retry }),
+    ).toEqual({ kind: "unreachable", retry });
+  });
+  it("hands over the data once the read holds it", () => {
+    expect(guestView({ status: "success", data: null })).toEqual({ kind: "ready", data: null });
   });
 });

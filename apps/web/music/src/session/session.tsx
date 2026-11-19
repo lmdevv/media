@@ -77,11 +77,11 @@ function Household({ children }: { readonly children: ReactNode }) {
     if (access === "signedOut") leaveToSignIn();
   }, [access]);
 
-  if (musicAccess(access, false) === "guest") return <Navigate to="/guest" replace />;
+  if (musicAccess(access) === "guest") return <Navigate to="/guest" replace />;
 
   if (access === "failed" && me.status === "error") return <UnreachableScreen retry={me.retry} />;
 
-  return musicAccess(access, false) === "render" ? children : <BlankPage />;
+  return musicAccess(access) === "render" ? children : <BlankPage />;
 }
 
 /**

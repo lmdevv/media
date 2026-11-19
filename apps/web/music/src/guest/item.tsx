@@ -4,18 +4,18 @@ import type { GuestTrack } from "@media/player/guest-react";
 import type { PlatformSdk } from "@media/sdk/promise";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import type { QueryState } from "@media/sdk/react";
-import { GuestUnavailable } from "@/guest/unavailable";
+import { GuestRead } from "@media/ui/components/guest-share";
 import { useAllPages } from "@media/ui/lib/pages";
-import { isRenewing, linkRefused, useIdentityRetry } from "@media/ui/lib/session-identity";
+import type { Paged } from "@media/ui/lib/pages";
 import { PauseIcon, PlayIcon, SkipBackIcon, SkipForwardIcon } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { MEDIA_BASE_URL } from "@/env";
 import { formatDuration } from "@/lib/format";
-import { BlankPage, useSignOut } from "@/session/session";
-import { UnreachableScreen } from "./unreachable";
+import { useSignOut } from "@/session/session";
+import { guestPages } from "./pages";
 
 type Item = Parameters<PlatformSdk["music"]["playback"]["get"]>[0]["item"];
 
@@ -26,27 +26,33 @@ type Share = { readonly sharedBy: string; readonly expiresAt: number };
 /** A shell-free share whose reads and playback stay within the link's target. */
 export function GuestItem({ item, ...share }: Share & { readonly item: Item }) {
   const platform = usePlatform();
-  const leave = useSignOut();
   const result = usePlatformQuery(platform.music.playback.get, { item });
-  useIdentityRetry(result);
 
-  if (result.status === "loading" || (result.status === "error" && isRenewing(result.error)))
-    return <BlankPage />;
-
-  if (result.status === "error")
-    return linkRefused(result.error) ? (
-      <GuestUnavailable onLeave={leave} />
-    ) : (
-      <UnreachableScreen retry={result.retry} />
-    );
-  const detail = result.data;
-
-  return detail.kind === "album" ? (
-    <GuestAlbum detail={detail} {...share} />
-  ) : (
-    <GuestPlayer key={detail.id} detail={detail} tracks={[detail]} {...share} />
+  return (
+    <GuestRead pages={guestPages} state={result}>
+      {(detail) =>
+        detail.kind === "album" ? (
+          <GuestAlbum detail={detail} {...share} />
+        ) : (
+          <GuestPlayer key={detail.id} detail={detail} tracks={[detail]} {...share} />
+        )
+      }
+    </GuestRead>
   );
 }
+
+const wholeList = <Row,>(paged: Paged<Row>): QueryState<ReadonlyArray<Row>> => {
+  if (paged.status === "failed") return { status: "error", error: paged.error, retry: paged.retry };
+
+  if (paged.status === "loading") return { status: "loading" };
+
+  if (paged.next.kind === "failed")
+    return { status: "error", error: paged.next.error, retry: paged.next.retry };
+
+  return paged.next.kind === "done"
+    ? { status: "success", data: paged.rows }
+    : { status: "loading" };
+};
 
 function GuestAlbum({
   detail,
@@ -59,50 +65,19 @@ function GuestAlbum({
     paginationOpts,
   }));
 
-  const leave = useSignOut();
-
-  const failure =
-    songs.status === "failed"
-      ? songs
-      : songs.status === "ready" && songs.next.kind === "failed"
-        ? songs.next
-        : null;
-
-  const error = failure?.error;
-  const retry = failure?.retry;
-
-  // One state per failure, so a re-render doesn't restart the retry timer.
-  const failedRead = useMemo<QueryState<unknown>>(
-    () =>
-      error === undefined || retry === undefined
-        ? { status: "loading" }
-        : { status: "error", error, retry },
-    [error, retry],
-  );
-
-  useIdentityRetry(failedRead);
-
-  if (failure !== null) {
-    if (isRenewing(failure.error)) return <BlankPage />;
-
-    return linkRefused(failure.error) ? (
-      <GuestUnavailable onLeave={leave} />
-    ) : (
-      <UnreachableScreen retry={failure.retry} />
-    );
-  }
-
-  if (songs.status !== "ready") return <BlankPage />;
-
-  if (songs.next.kind !== "done") return <BlankPage />;
+  const list = wholeList(songs);
 
   return (
-    <GuestPlayer
-      key={songs.rows.map((track) => track.id).join(":")}
-      detail={detail}
-      tracks={songs.rows}
-      {...share}
-    />
+    <GuestRead pages={guestPages} state={list}>
+      {(tracks) => (
+        <GuestPlayer
+          key={tracks.map((track) => track.id).join(":")}
+          detail={detail}
+          tracks={tracks}
+          {...share}
+        />
+      )}
+    </GuestRead>
   );
 }
 

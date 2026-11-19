@@ -1,18 +1,8 @@
-import { useEffect } from "react";
-import { usePlatform, usePlatformQuery, usePlatformStatus } from "@media/sdk/react";
-import { GuestUnavailable } from "@media/ui/components/guest-unavailable";
+import { GuestShare } from "@media/ui/components/guest-share";
 import { createFileRoute, Navigate } from "@tanstack/react-router";
-import {
-  isRenewing,
-  linkRefused,
-  sessionAccess,
-  useIdentityRetry,
-} from "@media/ui/lib/session-identity";
 
 import { GuestItem } from "@/guest/item";
-import { useSignOut } from "@/session/session";
-import { BlankPage } from "@/session/redirect";
-import { UnreachableScreen } from "@/session/unreachable";
+import { guestPages } from "@/guest/pages";
 import { SoloSessionProvider } from "@/together/current-session";
 
 export const Route = createFileRoute("/guest")({
@@ -21,66 +11,11 @@ export const Route = createFileRoute("/guest")({
 });
 
 function GuestRoute() {
-  const status = usePlatformStatus();
-  const platform = usePlatform();
-  const leave = useSignOut();
-
-  const me = usePlatformQuery(
-    platform.core.auth.sessions.current,
-    ...(status === "signedIn" ? [] : (["skip"] as const)),
-  );
-
-  useIdentityRetry(me);
-
-  const guard = sessionAccess(status, me);
-
-  if (guard === "failed" && me.status === "error") return <UnreachableScreen retry={me.retry} />;
-
-  if (guard === "household") return <Navigate to="/" replace />;
-
-  if (guard === "signedOut") return <GuestUnavailable onLeave={leave} />;
-
-  if (guard === "loading") return <BlankPage />;
-
   return (
     <SoloSessionProvider>
-      <GuestShare />
+      <GuestShare domain="movies" pages={guestPages} home={<Navigate to="/" replace />}>
+        {({ item, ...share }) => <GuestItem item={item.ref} {...share} />}
+      </GuestShare>
     </SoloSessionProvider>
   );
-}
-
-function GuestShare() {
-  const platform = usePlatform();
-  const leave = useSignOut();
-  const current = usePlatformQuery(platform.core.guests.current);
-  useIdentityRetry(current);
-
-  if (current.status === "error" && isRenewing(current.error)) return <BlankPage />;
-
-  if (current.status === "error")
-    return linkRefused(current.error) ? (
-      <GuestUnavailable onLeave={leave} />
-    ) : (
-      <UnreachableScreen retry={current.retry} />
-    );
-
-  if (current.status === "loading") return <BlankPage />;
-  const guest = current.data;
-
-  if (guest === null || guest.target.kind !== "item") return <GuestUnavailable onLeave={leave} />;
-
-  if (guest.target.item.domain !== "movies")
-    return <OtherShare to={`/${guest.target.item.domain}/guest`} />;
-
-  return (
-    <GuestItem item={guest.target.item.ref} sharedBy={guest.sharedBy} expiresAt={guest.expiresAt} />
-  );
-}
-
-function OtherShare({ to }: { readonly to: string }) {
-  useEffect(() => {
-    window.location.replace(to);
-  }, [to]);
-
-  return <BlankPage />;
 }

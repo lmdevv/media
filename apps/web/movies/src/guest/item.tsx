@@ -1,36 +1,26 @@
 import type { PlatformSdk } from "@media/sdk/promise";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { Button } from "@media/ui/components/button";
-import { GuestUnavailable } from "@media/ui/components/guest-unavailable";
+import { GuestRead } from "@media/ui/components/guest-share";
 import { useAllPages } from "@media/ui/lib/pages";
-import { isRenewing, linkRefused, useIdentityRetry } from "@media/ui/lib/session-identity";
 import { useCallback, useMemo, useState } from "react";
 
 import { PlayerScreen } from "@/components/player/player-screen";
+import { guestPages } from "@/guest/pages";
 import { artworkUrl } from "@/lib/artwork";
 import type { EpisodeId, TitleId, PlaybackDetail, MediaFileId } from "@/lib/catalog";
 import { episodeCode, facts, formatRuntime } from "@/lib/format";
 import { useSignOut } from "@/session/session";
-import { BlankPage } from "@/session/redirect";
-import { UnreachableScreen } from "@/session/unreachable";
 
 type Item = Parameters<PlatformSdk["movies"]["playback"]["get"]>[0]["item"];
 
-export function GuestItem({
-  item,
-  sharedBy,
-  expiresAt,
-}: {
-  readonly item: Item;
-  readonly sharedBy: string;
-  readonly expiresAt: number;
-}) {
+type Share = { readonly sharedBy: string; readonly expiresAt: number };
+
+export function GuestItem({ item, ...share }: Share & { readonly item: Item }) {
   const platform = usePlatform();
-  const leave = useSignOut();
   const [selected, setSelected] = useState<EpisodeId | null>(null);
   const target: Item = selected === null ? item : { type: "episode", id: selected };
   const result = usePlatformQuery(platform.movies.playback.get, { item: target });
-  useIdentityRetry(result);
   const [playing, setPlaying] = useState(false);
 
   const onBack = useCallback(() => {
@@ -38,18 +28,47 @@ export function GuestItem({
     setPlaying(false);
   }, []);
 
-  if (result.status === "loading") return <BlankPage />;
+  return (
+    <GuestRead pages={guestPages} state={result}>
+      {(detail) =>
+        playing && detail.versions.length > 0 ? (
+          <GuestPlayer
+            key={`${detail.titleId}:${detail.episode?.id ?? ""}`}
+            detail={detail}
+            version={item.type === "file" ? item.id : undefined}
+            onBack={onBack}
+          />
+        ) : (
+          <GuestTitle
+            detail={detail}
+            show={item.type === "title" && detail.kind === "show"}
+            onPlay={() => setPlaying(true)}
+            onEpisode={(id) => {
+              setSelected(id);
+              setPlaying(true);
+            }}
+            {...share}
+          />
+        )
+      }
+    </GuestRead>
+  );
+}
 
-  if (result.status === "error" && isRenewing(result.error)) return <BlankPage />;
-
-  if (result.status === "error")
-    return linkRefused(result.error) ? (
-      <GuestUnavailable onLeave={leave} />
-    ) : (
-      <UnreachableScreen retry={result.retry} />
-    );
-  const detail = result.data;
-  const show = item.type === "title" && detail.kind === "show";
+function GuestTitle({
+  detail,
+  show,
+  sharedBy,
+  expiresAt,
+  onPlay,
+  onEpisode,
+}: Share & {
+  readonly detail: PlaybackDetail;
+  readonly show: boolean;
+  readonly onPlay: () => void;
+  readonly onEpisode: (id: EpisodeId) => void;
+}) {
+  const leave = useSignOut();
   const episode = detail.episode;
   const runtime = episode?.runtimeMs ?? detail.runtimeMs;
 
@@ -57,16 +76,6 @@ export function GuestItem({
     episode?.still ?? detail.artwork.backdrop ?? detail.artwork.poster,
     "backdrop",
   );
-
-  if (playing && detail.versions.length > 0)
-    return (
-      <GuestPlayer
-        key={`${detail.titleId}:${episode?.id ?? ""}`}
-        detail={detail}
-        version={item.type === "file" ? item.id : undefined}
-        onBack={onBack}
-      />
-    );
 
   return (
     <main className="min-h-svh bg-page pb-16 text-text">
@@ -88,7 +97,7 @@ export function GuestItem({
         </p>
         <p className="max-w-dialog text-body/body">{episode?.overview ?? detail.overview}</p>
         {detail.versions.length > 0 ? (
-          <Button className="self-start" onClick={() => setPlaying(true)}>
+          <Button className="self-start" onClick={onPlay}>
             Play
           </Button>
         ) : null}
@@ -104,15 +113,7 @@ export function GuestItem({
         >
           Leave
         </Button>
-        {show ? (
-          <GuestEpisodes
-            titleId={detail.titleId}
-            onPlay={(id) => {
-              setSelected(id);
-              setPlaying(true);
-            }}
-          />
-        ) : null}
+        {show ? <GuestEpisodes titleId={detail.titleId} onPlay={onEpisode} /> : null}
       </section>
     </main>
   );
