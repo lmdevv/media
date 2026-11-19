@@ -16,7 +16,6 @@ export const DropdownMenuSub = MenuPrimitive.SubmenuRoot;
 const popupClassName =
   "flex max-h-(--available-height) min-w-62 origin-(--transform-origin) flex-col overflow-y-auto rounded-md border border-border bg-surface-raised p-1.5 text-text shadow-menu outline-none data-closed:animate-out data-closed:fade-out-0 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95";
 
-/** The Paper menu panel: 8px radius, hairline border, 6px padding. */
 export function DropdownMenuContent({
   className,
   align = "end",

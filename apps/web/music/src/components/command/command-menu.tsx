@@ -18,7 +18,7 @@ import { Preview } from "./previews";
 import { useMenuItems } from "./use-menu-items";
 
 /**
- * The ⌘K command menu (Paper page 08): search your library (D38: songs, albums, artists, and your
+ * The ⌘K command menu: search your library (D38: songs, albums, artists, and your
  * playlists, never another client's catalog), open screens, and run the player's actions, with a
  * preview pane.
  */

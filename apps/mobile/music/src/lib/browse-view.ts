@@ -30,7 +30,6 @@ export const BrowseView = Schema.Struct({
 /** Every browse list's order and layout, as this device remembers them. */
 export type BrowseView = typeof BrowseView.Type;
 
-/** Albums newest first in a grid (A03) and songs by title (A05), as Paper draws them. */
 export const DEFAULT_VIEW: BrowseView = {
   albums: { sort: "added", layout: "grid" },
   songs: { sort: "title" },

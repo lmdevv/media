@@ -23,7 +23,6 @@ import { useServer } from "@/session/connection";
 
 import { QrCode } from "./qr-code";
 
-/** Paper's decorative users glyph in the nav bar of the Jam screens. */
 export const jamNavGlyph = (
   <View className="size-hit-target items-center justify-center">
     <Icon icon={Users} />

@@ -1,9 +1,8 @@
 # Lar Music for iPhone and iPad
 
 The iOS app: Expo SDK 58, Expo Router, and Uniwind (Tailwind 4 for React Native) over the platform
-SDK (`@media/sdk/react`) and `@media/mobile-core`. Screens follow the Paper pages **12–20 iOS** in
-the `[music]` file. `src/global.css` keeps the Paper token names: light mode is red on white, dark
-mode is green on a black canvas, and the theme follows the system.
+SDK (`@media/sdk/react`) and `@media/mobile-core`. In the tokens in `src/global.css`, light mode is
+red on white, dark mode is green on a black canvas, and the theme follows the system.
 
 ## How it connects
 
@@ -61,7 +60,7 @@ see files.
 
 ## iPad
 
-`lib/shell-layout.ts` says what frames the tabs at each window size (Paper page 26). The native tabs
+`lib/shell-layout.ts` says what frames the tabs at each window size. The native tabs
 stay mounted with their bar hidden, so every page keeps its stack, and `components/shell` draws a
 sidebar and a player bar around them; the sidebar drives the tabs by route and reads its selection
 from their navigation state. It holds library sections and playlists, which the native iPadOS

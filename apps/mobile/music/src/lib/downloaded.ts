@@ -146,10 +146,6 @@ export const ownSongLine = (item: DownloadedSong): DownloadedLine =>
 export const ownSongsLine = (songs: DownloadedSongs): DownloadedLine =>
   statusLine(songs.status, countOf(songs.items.length, "song"), null);
 
-/**
- * The Settings row's subtitle (D15), without Paper's "cellular": the app can't tell cellular from
- * Wi-Fi yet, so there is no cellular setting.
- */
 export const downloadsSettingsLine = (usage: DownloadUsage): string =>
   usage.bytes === 0 ? "Quality and storage" : `${formatBytes(usage.bytes)} · quality and storage`;
 

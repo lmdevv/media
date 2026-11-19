@@ -12,15 +12,14 @@ const STICKY_BAR = [0];
 export interface PageProps extends NavBarProps {
   readonly children: ReactNode;
   /**
-   * `tabs` leaves Paper's 180pt under the content for a phone's tab bar and mini player (40pt from
+   * `tabs` leaves 180pt under the content for a phone's tab bar and mini player (40pt from
    * `tablet` up, where the player bar sits below the page); `plain` leaves 40pt on pages pushed
    * over the tabs (settings, Jams, entry), which hold settings and forms and
-   * so on an iPad keep the bar and content on a centered readable column (P10).
+   * so on an iPad keep the bar and content on a centered readable column.
    */
   readonly bottom?: "tabs" | "plain";
 }
 
-/** A scrolling pushed page with Paper's nav bar. */
 export function Page({ children, bottom = "tabs", ...bar }: PageProps) {
   const readable = bottom === "plain";
   const background = usePageBackground();

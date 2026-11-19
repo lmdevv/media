@@ -1,7 +1,7 @@
 import { createCn } from "cn/config";
 
 /**
- * Join class names and resolve Tailwind conflicts (the last class wins), knowing the Paper theme
+ * Join class names and resolve Tailwind conflicts (the last class wins), knowing the theme
  * scale: without it, custom sizes such as `text-micro` read as colors and get dropped next to
  * `text-danger`.
  */

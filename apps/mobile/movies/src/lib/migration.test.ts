@@ -177,7 +177,7 @@ describe("migration", () => {
     expect(importFraction(run({ job: { status: "succeeded" } }))).toBe(1);
   });
 
-  it("offers every person here, a suggestion not listed, and skipping in Paper's title case", () => {
+  it("offers every person here, a suggestion not listed, and skipping in title case", () => {
     const rows = userRows(connection, report, [lucia]);
 
     expect(rows.map((row) => row.choice)).toStrictEqual(["u1", SKIP]);

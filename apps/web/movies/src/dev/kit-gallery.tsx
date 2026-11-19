@@ -320,10 +320,6 @@ const sampleMenu = (
   };
 };
 
-/**
- * Every Lar Movies UI kit component with sample data, laid out like Paper's 02 Components page, for
- * visual comparison. Development builds only.
- */
 export function KitGallery() {
   const [playing, setPlaying] = useState(true);
   const [position, setPosition] = useState(1882);

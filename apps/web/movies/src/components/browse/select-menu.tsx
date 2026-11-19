@@ -17,8 +17,8 @@ export interface SelectOption<Value extends string> {
 }
 
 /**
- * A button that opens a short list of choices, as Paper draws the Sort and Season controls. Choosing
- * one closes the list.
+ * A button that opens a short list of choices, such as the Sort and Season controls. Choosing one
+ * closes the list.
  *
  * @param children - The button's content, such as `Sort Recently added ⌄`.
  */

@@ -83,7 +83,7 @@ describe("totalLength", () => {
 });
 
 describe("playlistMeta", () => {
-  it("is Paper's mono line in caps", () => {
+  it("counts songs and length in caps", () => {
     expect(playlistMeta(24, 106 * 60_000)).toBe("24 SONGS · 1 HR 46 MIN");
     expect(playlistMeta(0, 0)).toBe("NO SONGS YET");
   });

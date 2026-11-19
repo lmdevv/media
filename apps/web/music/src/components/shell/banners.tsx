@@ -1,7 +1,7 @@
 import { usePlayer } from "@media/player/react";
 
 /**
- * The media server's connection banner from Paper page 10, above the main column. No
+ * The media server's connection banner, above the main column. No
  * "Reconnecting" banner yet: it needs the Convex client's socket state, which the platform SDK does
  * not expose.
  */

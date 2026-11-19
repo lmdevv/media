@@ -3,7 +3,6 @@ import { View } from "react-native";
 
 import { Icon } from "@/components/ui/icon";
 
-/** A decorative nav bar glyph in Paper's 44pt slot. */
 export function NavGlyph({ icon }: { readonly icon: LucideIcon }) {
   return (
     <View

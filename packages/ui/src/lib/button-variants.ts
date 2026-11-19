@@ -1,7 +1,7 @@
 import { cva } from "class-variance-authority";
 
 /**
- * Class names for the Paper buttons, for elements that only look like a button (such as a router
+ * Class names for the buttons, for elements that only look like a button (such as a router
  * link). Prefer {@link Button}.
  */
 export const buttonVariants = cva(

@@ -1,7 +1,6 @@
 import { Switch as SwitchPrimitive } from "@base-ui/react/switch";
 import { cn } from "@/lib/utils";
 
-/** The Paper toggle: a 44×26 pill, neutral when on (switches stay neutral, not accent). */
 export function Switch({ className, ...props }: SwitchPrimitive.Root.Props) {
   return (
     <SwitchPrimitive.Root

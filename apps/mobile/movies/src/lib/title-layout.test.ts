@@ -9,7 +9,7 @@ describe("title layout", () => {
     expect(heroHeight(956, "compact")).toBe(480);
   });
 
-  it("gives an iPad hero about 56% of the window's height, as Paper draws it", () => {
+  it("gives an iPad hero about 56% of the window's height", () => {
     expect(heroHeight(1032, "wide")).toBe(578);
     expect(heroHeight(1133, "regular")).toBe(634);
   });

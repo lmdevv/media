@@ -10,7 +10,6 @@ export interface ValueFieldProps {
   readonly wrap?: boolean;
 }
 
-/** A labeled, read-only value on Paper's field surface. */
 export function ValueField({ label, value, helper, wrap = false }: ValueFieldProps) {
   return (
     <View className="gap-2 pt-4">

@@ -1,9 +1,7 @@
 @import "tailwindcss";
 @import "uniwind";
 
-/* Tokens from the [movies] Paper file (01M4PMRM5T60Q4P0YYZ8DY580D), names unchanged, as in
-   packages/ui. Paper keeps light roles and `dark-` twins; the dark theme (the default) swaps each
-   role for its twin below. React Native loads one font file per weight, so each weight is a family. */
+/* React Native loads one font file per weight, so each weight is a family. */
 @theme {
   --color-dark-bg: #000000;
   --color-dark-surface: #141414;
@@ -72,7 +70,7 @@
   --radius-pill: 999px;
 }
 
-/* Paper's iPad width classes. Layout follows the window, not the device, so rotation and Split View
+/* The iPad width classes. Layout follows the window, not the device, so rotation and Split View
    land on the right one: under `regular` is the iPhone layout, `regular:` starts at iPad portrait,
    and `wide:` at iPad landscape. `useWidthClass` reads the same values, so `static` keeps them. */
 @theme static {
@@ -86,7 +84,6 @@
   --color-video-track: rgb(255 255 255 / 30%);
   --color-video-muted: rgb(255 255 255 / 70%);
   --text-tab: 10px;
-  --radius-sheet: 28px;
 }
 
 /* The profile avatar set, shared with the web app (`apps/web/movies/public/avatars/<key>.svg`): each key

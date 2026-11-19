@@ -7,11 +7,8 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* Tokens from the [music] Paper file (01M4KQQQ46CWH4S1JGX96NPA0T), under their Paper names:
-   light follows Apple Music (red accent), dark follows Spotify (green accent on black). The music
-   client at /music imports this sheet instead of `globals.css`, whose [movies] tokens share some
-   of these names with other values. Re-export with the Paper MCP
-   `get_tokens` (tailwind format) when the design changes. */
+/* The music client imports this sheet instead of `globals.css`: the two give some of the same
+   token names different values. */
 @theme {
   --color-bg: #ffffff;
   --color-surface: #f5f5f7;
@@ -89,8 +86,6 @@
   --radius-full: 9999px;
 }
 
-/* Literal values the music client draws that are not Paper tokens yet, named by role so
-   components use theme utilities only. */
 @theme {
   --color-shadow: #1d1d1f;
   --color-shadow-cover: color-mix(in oklab, #1d1d1f 22%, transparent);

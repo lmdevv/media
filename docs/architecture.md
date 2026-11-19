@@ -179,11 +179,8 @@ build is in the Linear media project.
 - **Per-user personalization.** The register settles which settings sync per user and which stay
   per device (ADR 0019). It does not settle personalization beyond that list.
 - **The exact shared UI split.** Each client has its own look on a shared shadcn base and type
-  scale. Which components are shared and which belong to one client is decided in Paper
-  (ADR 0020). `packages/ui` holds the helpers both web clients share, chosen without reading
-  Paper, so Paper still has to settle the split. The music client's screens, components, and
-  tokens (`packages/ui`'s `music.css`) have not yet been checked against the music Paper file's
-  artboards.
+  scale (ADR 0020). `packages/ui` holds the helpers both web clients share. Which other components
+  belong there is open.
 
 ## Facts behind the core's helpers
 

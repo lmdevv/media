@@ -24,7 +24,7 @@ export function DialogBackdrop({ className, ...props }: DialogPrimitive.Backdrop
 }
 
 /**
- * The Paper dialog: a 560px raised card with 28px padding. `title` and `description` render the
+ * The dialog: a 560px raised card with 28px padding. `title` and `description` render the
  * heavy heading and muted lead; a close button sits top right unless `showClose` is false.
  */
 export function DialogContent({

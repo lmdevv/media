@@ -376,7 +376,7 @@ export const clickScrubber = async (page: Page, fraction: number): Promise<void>
 
 /**
  * Saves a JPEG of `page` to `$E2E_SCREENSHOTS/<name>.jpg` when that folder is set, for design
- * review against Paper.
+ * review.
  */
 export const capture = async (page: Page, name: string): Promise<void> => {
   const folder = process.env["E2E_SCREENSHOTS"];

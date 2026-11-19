@@ -26,7 +26,7 @@ export function Sheet({ title, subtitle, error, loading = false, exit, children 
   const { close } = exit ?? own;
 
   return (
-    <View className="gap-4 bg-surface-raised px-5 pt-6 pb-4 regular:px-6 regular:pb-6">
+    <View className="gap-4 px-5 pt-6 pb-4 regular:px-6 regular:pb-6">
       <View className="flex-row items-center gap-3">
         <Text variant="heading" className="flex-1" numberOfLines={2} accessibilityRole="header">
           {title}

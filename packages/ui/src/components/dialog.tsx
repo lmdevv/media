@@ -10,7 +10,7 @@ export const Dialog = DialogPrimitive.Root;
 export const DialogClose = DialogPrimitive.Close;
 
 /**
- * The Paper dialog over the scrim: a surface card with a heading row and a close button. Put the
+ * The dialog over the scrim: a surface card with a heading row and a close button. Put the
  * body in {@link DialogBody} and the actions in {@link DialogFooter}.
  *
  * @param size - `md` is the 560px dialog (Create API key); `sm` is the 480px confirmation.

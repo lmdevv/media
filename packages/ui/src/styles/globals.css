@@ -9,8 +9,6 @@
 @custom-variant dark (&:is(.dark *));
 @custom-variant short (@media (height < 30rem));
 
-/* Tokens from the [movies] Paper file (01M4PMRM5T60Q4P0YYZ8DY580D), names unchanged.
-   Re-export with the Paper MCP `get_tokens` (tailwind format) when the design changes. */
 @theme {
   --color-bg: #ffffff;
   --color-surface: #f2f2f7;
@@ -77,9 +75,6 @@
   --radius-pill: 999px;
 }
 
-/* Literal values Paper draws on 02 Components and 05 Browse that are not Paper tokens yet. They live
-   here, named by role, so components still use theme utilities only. Promote them to Paper tokens
-   (and re-export) if the design adopts them. */
 @theme {
   --color-media-secondary: rgb(109 109 110 / 70%);
   --color-glass: rgb(44 44 46 / 62%);
@@ -120,10 +115,11 @@
   /* The side gutter that keeps full-bleed content, such as a row's track, in line with the centered
      top bar: 64px, widening once the parent is wider than the content. */
   --spacing-page-inset: max(var(--spacing-16), calc((100% - var(--container-content)) / 2));
-  /* Paddings, gaps, margins, and offsets between the Paper spacing steps. The key is the step on
+  /* Paddings, gaps, margins, and offsets between the theme's spacing steps. The key is the step on
      Tailwind's 4px grid (`gap-1.5` reads `--spacing-1_5`), so classes keep their usual names, and
      the value is in rem, as Tailwind's multiplier drew it, so it follows the text size setting;
-     `apps/web/movies/src/lib/design-tokens.test.ts` keeps every such class on this list or the Paper scale. */
+     `apps/web/movies/src/lib/design-tokens.test.ts` keeps every such class on this list or the
+     theme scale. */
   --spacing-0_5: 0.125rem;
   --spacing-0_75: 0.1875rem;
   --spacing-1_25: 0.3125rem;

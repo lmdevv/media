@@ -12,7 +12,7 @@ import {
 } from "./playback-format";
 
 describe("clock", () => {
-  it("prints positions as Paper's scrubber does", () => {
+  it("prints positions as minutes and seconds", () => {
     expect(clock(138_000)).toBe("2:18");
     expect(clock(0)).toBe("0:00");
     expect(clock(59_999)).toBe("0:59");

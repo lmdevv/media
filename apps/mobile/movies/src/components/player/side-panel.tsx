@@ -10,7 +10,7 @@ import { Text } from "@/components/ui/text";
 /** Props for `SidePanel`. */
 export interface SidePanelProps {
   readonly title: string;
-  /** Width classes from the panel's artboard, such as `w-100` for F03's 400pt panel. */
+  /** Width classes, such as `w-100` for a 400pt panel. */
   readonly widthClassName: string;
   readonly onClose: () => void;
   readonly children: ReactNode;

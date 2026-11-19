@@ -1,7 +1,7 @@
 /**
- * Text in the iOS type scale from Paper's foundations board (`01 · iOS Foundations & Components`):
- * Inter Tight at 34/40 for large titles, 22/28 for section headings, 17/23 for body, 15/21 for
- * labels and 13/19 for metadata. Each weight is its own font file, so weight lives in the variant.
+ * Text in the iOS type scale: Inter Tight at 34/40 for large titles, 22/28 for section headings,
+ * 17/23 for body, 15/21 for labels and 13/19 for metadata. Each weight is its own font file, so
+ * weight lives in the variant.
  */
 import type { ReactNode } from "react";
 import { Text as NativeText } from "react-native";

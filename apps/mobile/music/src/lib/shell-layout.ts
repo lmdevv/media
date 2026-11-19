@@ -183,7 +183,6 @@ export const playlistPlace = (id: string): Place => ({
   id,
 });
 
-/** The routes over the tabs that Paper draws as bottom sheets, presented as native form sheets. */
 export const SHEET_ROUTES = [
   "audio",
   "clear-queue",

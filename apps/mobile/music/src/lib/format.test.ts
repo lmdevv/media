@@ -11,7 +11,7 @@ describe("countOf", () => {
 });
 
 describe("librarySummary", () => {
-  it("reads like Paper's summary line", () => {
+  it("counts songs, albums, and artists", () => {
     expect(librarySummary({ tracks: 1248, albums: 126, artists: 84 })).toBe(
       "1,248 songs · 126 albums · 84 artists",
     );
@@ -19,7 +19,7 @@ describe("librarySummary", () => {
 });
 
 describe("homeStats", () => {
-  it("reads like Paper's mono line", () => {
+  it("counts albums and songs in caps", () => {
     expect(homeStats({ tracks: 14_920, albums: 1284 })).toBe("1,284 ALBUMS · 14,920 SONGS");
     expect(homeStats({ tracks: 1, albums: 1 })).toBe("1 ALBUM · 1 SONG");
   });

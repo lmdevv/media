@@ -52,7 +52,7 @@ describe("downloadRows", () => {
     ]);
   });
 
-  it("removes a finished download and says what it frees, as Paper's C08 row does", () => {
+  it("removes a finished download and says what it frees", () => {
     expect(
       downloadRows({ kind: "downloaded", bytes: 1_400_000_000 }, true, 1_400_000_000, "iPhone"),
     ).toEqual([

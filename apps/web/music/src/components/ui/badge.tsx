@@ -17,7 +17,6 @@ const badgeVariants = cva(
   },
 );
 
-/** The mono quality badge from Paper (`FLAC 24/96`, `AAC 256 · CELLULAR`) and status tags. */
 export function Badge({
   className,
   tone,

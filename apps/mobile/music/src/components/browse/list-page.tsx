@@ -23,7 +23,6 @@ export interface ListPageProps<Item> extends Omit<
   readonly footer?: ReactNode;
 }
 
-/** A pushed page of rows under Paper's back bar, with room for the tab bar below. */
 export function ListPage<Item>({ bar, header, footer, ...list }: ListPageProps<Item>) {
   const insets = useSafeAreaInsets();
   const [measured, setBarHeight] = useState(insets.top + BAR_HEIGHT);

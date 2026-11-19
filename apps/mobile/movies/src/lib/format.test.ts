@@ -18,7 +18,7 @@ const progress = (positionMs: number, durationMs: number, watched = false): Prog
 });
 
 describe("format", () => {
-  it("writes running times the way Paper does", () => {
+  it("writes running times in hours and minutes", () => {
     expect(formatRuntime(166 * 60_000)).toBe("2h 46m");
     expect(formatRuntime(52 * 60_000)).toBe("52m");
     expect(formatRuntime(180 * 60_000)).toBe("3h 0m");

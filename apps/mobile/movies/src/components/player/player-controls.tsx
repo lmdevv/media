@@ -198,10 +198,9 @@ function MoreMenu({
 }
 
 /**
- * F01's margins from the screen's edges: 32pt for the top bar and the side sliders, 64pt for the
+ * The margins from the screen's edges: 32pt for the top bar and the side sliders, 64pt for the
  * scrubber and the bottom row. On a phone whose notch or home indicator takes more, the safe area
- * wins, so controls sit where Paper puts them or just clear of the hardware, whichever is further
- * in.
+ * wins, so controls sit at these margins or just clear of the hardware, whichever is further in.
  */
 export const PLAYER_MARGINS = { bar: 32, slider: 22, row: 64 } as const;
 

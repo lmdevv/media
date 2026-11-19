@@ -5,7 +5,7 @@ const toasterTheme = (theme: string | undefined): "light" | "dark" | "system" =>
   theme === "light" || theme === "dark" ? theme : "system";
 
 /**
- * Toasts in the Paper style: a dark pill with inverse text and an accent action ("Undo"). Errors
+ * Toasts as a dark pill with inverse text and an accent action ("Undo"). Errors
  * carry a danger dot and their message, so they never rely on color alone.
  */
 export function Toaster() {

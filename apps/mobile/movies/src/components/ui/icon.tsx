@@ -19,7 +19,7 @@ const TONE_VARIABLES = {
 } as const satisfies Record<TextTone, string>;
 
 /**
- * Glyph sizes as Paper draws them: 14 under profile tiles, 16 for row chevrons, 20 in buttons and
+ * Glyph sizes: 14 under profile tiles, 16 for row chevrons, 20 in buttons and
  * on artwork, 22 in list rows, 24 in navigation, 28 large controls, 32 in the round badge of calm
  * states and for the player's skip buttons and spinner, 40 on small avatar tiles, 52 for the
  * player's play and pause, and 56 on large tiles. Lucide takes a point size, so the scale lives

@@ -1,6 +1,5 @@
 const grouped = new Intl.NumberFormat("en-US");
 
-/** A count grouped as Paper writes it: `1,248`. */
 export const formatCount = (count: number): string => grouped.format(count);
 
 /** `count` with its noun, singular for one: `1 song`, `1,248 songs`. */

@@ -6,7 +6,7 @@ import { albumOf, trackOf } from "./test-fixtures";
 const tracks = Array.from({ length: 9 }, (_, index) => trackOf(`Song ${String(index)}`));
 
 describe("albumMeta", () => {
-  it("reads like Paper's line, in caps", () => {
+  it("reads year, genre, songs, and length in caps", () => {
     expect(
       albumMeta({ album: albumOf("Blue Lines"), genre: "Trip-hop", durationMs: 2_700_000, tracks }),
     ).toBe("1991 · TRIP-HOP · 9 SONGS · 45 MIN");

@@ -67,7 +67,6 @@ export function SectionHeading({ children }: { readonly children: string }) {
   );
 }
 
-/** The 24pt pause Paper leaves between a list and the action under it. */
 export function Spacer() {
   return <View className="h-6" />;
 }

@@ -7,7 +7,7 @@ const PLAYER_LIGHT = parseHex("#f3ece3");
 
 const PLAYER_DARK = parseHex("#211b16");
 
-if (PLAYER_LIGHT === null || PLAYER_DARK === null) throw new Error("the Paper tokens must parse");
+if (PLAYER_LIGHT === null || PLAYER_DARK === null) throw new Error("the player tokens must parse");
 
 const BLUE_LINES: Rgb = { r: 190, g: 130, b: 100 };
 
@@ -41,7 +41,7 @@ describe("blurhashAverage", () => {
 });
 
 describe("playerTint", () => {
-  it("reproduces Paper's player colors for Blue Lines in both themes", () => {
+  it("reproduces the player tokens for Blue Lines in both themes", () => {
     expect(distance(playerTint(BLUE_LINES, PLAYER_LIGHT), PLAYER_LIGHT)).toBeLessThanOrEqual(4);
     expect(distance(playerTint(BLUE_LINES, PLAYER_DARK), PLAYER_DARK)).toBeLessThanOrEqual(4);
   });
