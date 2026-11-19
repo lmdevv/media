@@ -6,9 +6,11 @@ import { toast } from "sonner";
 import { guestLinkDialog } from "@media/ui/lib/guest-link-dialog";
 import type { GuestLinkSelection } from "@media/ui/lib/guest-link-dialog";
 import { guestLinkActions } from "@media/ui/lib/guest-link-actions";
-import { describeFailure, toastFailure } from "@media/ui/lib/failure";
+import { toastFailure } from "@media/ui/lib/failure";
 import { canQueryGuestLinks, guestExpiryDays, guestLinksAllowed } from "@media/ui/lib/guest-links";
 import type { GuestLinkRow, GuestTarget } from "@media/ui/lib/guest-links";
+import { usePages } from "@media/ui/lib/pages";
+import type { Paged } from "@media/ui/lib/pages";
 import { copyText } from "@media/ui/lib/secure-context";
 
 /** Reads guest policy only after this session proves it can hold account queries. */
@@ -35,14 +37,12 @@ export interface GuestLinksModel {
   /** A link was made in this dialog; keep Create disabled until it closes or revokes that link. */
   readonly made: boolean;
   readonly copied: boolean;
-  readonly rows: ReadonlyArray<GuestLinkRow>;
+  readonly list: Paged<GuestLinkRow>;
   /** Null when the expiry is not a whole number of days from 1 to 30. */
   readonly days: number | null;
   readonly create: () => Promise<void>;
   readonly revoke: (linkId: GuestLinkRow["linkId"]) => Promise<void>;
   readonly copy: () => Promise<void>;
-  readonly loading: boolean;
-  readonly failure: { readonly message: string; readonly retry: () => void } | null;
 }
 
 /** Holds a new secret only for the mounted dialog; list subscriptions never return it. */
@@ -58,13 +58,13 @@ export const useGuestLinks = (target: GuestTarget): GuestLinksModel => {
 
   const state = useSyncExternalStore(actions.subscribe, actions.getSnapshot, actions.getSnapshot);
 
-  const page = usePlatformQuery(links.list, {
-    whose: "mine",
+  const list = usePages(links.list, (paginationOpts) => ({
+    whose: "mine" as const,
     target,
-    paginationOpts: { numItems: 25, cursor: null },
-  });
+    paginationOpts,
+  }));
 
-  const rows = page.status === "success" ? page.data.page : [];
+  const rows = list.status === "ready" ? list.rows : [];
 
   return {
     expiry: state.expiry,
@@ -73,14 +73,11 @@ export const useGuestLinks = (target: GuestTarget): GuestLinksModel => {
     pending: state.pending,
     made: state.newLink !== null,
     copied: state.copied,
-    rows,
+    list,
     days: guestExpiryDays(state.expiry),
     create: actions.create,
     revoke: actions.revoke,
     copy: () => actions.copy(rows),
-    loading: page.status === "loading",
-    failure:
-      page.status === "error" ? { message: describeFailure(page.error), retry: page.retry } : null,
   };
 };
 

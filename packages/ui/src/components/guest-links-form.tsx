@@ -43,6 +43,12 @@ export function GuestLinksFields({
   readonly Button: ComponentType<GuestLinkButtonProps>;
   readonly Input: ComponentType<GuestLinkInputProps>;
 }) {
+  const { list } = model;
+  const rows = list.status === "ready" ? list.rows : [];
+  const next = list.status === "ready" ? list.next : null;
+  const loading = list.status === "loading" || next?.kind === "loading";
+  const failure = list.status === "failed" ? list : next?.kind === "failed" ? next : null;
+
   return (
     <div className="flex flex-col gap-6">
       <form
@@ -95,11 +101,11 @@ export function GuestLinksFields({
       )}
       <section aria-label="Your guest links" className="flex flex-col gap-3">
         <h3 className="font-semibold">Your guest links</h3>
-        {model.rows.length === 0 && !model.loading && model.failure === null ? (
+        {rows.length === 0 && !loading && failure === null ? (
           <p className="text-text-muted">No guest links yet.</p>
         ) : null}
         <ul className="flex flex-col gap-3">
-          {model.rows.map((row) => (
+          {rows.map((row) => (
             <li key={row.linkId} className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <span className="capitalize">{row.state}</span>
@@ -120,15 +126,22 @@ export function GuestLinksFields({
             </li>
           ))}
         </ul>
-        {model.loading ? (
+        {next?.kind === "more" ? (
+          <div>
+            <Button tone="secondary" type="button" onClick={next.load}>
+              Show more
+            </Button>
+          </div>
+        ) : null}
+        {loading ? (
           <p role="status" className="text-text-muted">
             Loading links…
           </p>
         ) : null}
-        {model.failure === null ? null : (
+        {failure === null ? null : (
           <div role="alert">
-            <p>{model.failure.message}</p>
-            <Button tone="secondary" type="button" onClick={model.failure.retry}>
+            <p>{failure.message}</p>
+            <Button tone="secondary" type="button" onClick={failure.retry}>
               Try again
             </Button>
           </div>

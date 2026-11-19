@@ -188,4 +188,55 @@ test.describe("guest links", () => {
       });
     }
   });
+  test("a maker loads past closed links and revokes an older open link", async () => {
+    const { platform } = signedIn();
+    const originalPolicy = await platform.core.guests.status();
+    await platform.core.guests.configure({ enabled: true, address: "http://guests.example.test" });
+
+    try {
+      const [title] = await platform.movies.titles.search({ query: "Past Lives" });
+
+      if (title === undefined) throw new Error("the scanned title is missing");
+
+      const target = {
+        kind: "item",
+        item: { domain: "movies", ref: { type: "title", id: title.id } },
+      } as const;
+
+      const older = await platform.core.guests.links.create({ target, expiresInDays: 7 });
+
+      await Promise.all(
+        Array.from({ length: 25 }, async () => {
+          const newer = await platform.core.guests.links.create({ target, expiresInDays: 7 });
+          await platform.core.guests.links.revoke({ linkId: newer.linkId });
+        }),
+      );
+
+      await page.goto(moviesPath(`/title/${title.id}`));
+      await page.getByRole("button", { name: "Guest link", exact: true }).click();
+      const dialog = page.getByRole("dialog", { name: `Share ${title.name}` });
+      const list = dialog.getByRole("region", { name: "Your guest links" });
+      await expect(list.getByRole("listitem")).toHaveCount(25);
+      await expect(list.getByRole("button", { name: "Revoke", exact: true })).toHaveCount(0);
+      await list.getByRole("button", { name: "Show more", exact: true }).click();
+      await expect(list.getByRole("listitem")).toHaveCount(26);
+      await expect(dialog.getByLabel("New guest link")).toHaveCount(0);
+      await list.getByRole("button", { name: "Revoke", exact: true }).click();
+      await expect(list.getByRole("button", { name: "Revoke", exact: true })).toHaveCount(0);
+      await expect(list.getByRole("button", { name: "Show more", exact: true })).toHaveCount(0);
+
+      const saved = await platform.core.guests.links.list({
+        target,
+        whose: "mine",
+        paginationOpts: { numItems: 100, cursor: null },
+      });
+
+      expect(saved.page.find((row) => row.linkId === older.linkId)?.state).toBe("revoked");
+    } finally {
+      await platform.core.guests.configure({
+        enabled: originalPolicy.enabled,
+        address: originalPolicy.address,
+      });
+    }
+  });
 });
