@@ -93,3 +93,22 @@ for (const path of ["/movies/", "/movies/guest"]) {
     await expect(page.getByRole("heading", { name: "This link isn't available" })).toHaveCount(0);
   });
 }
+
+test("a member retries a failed Music identity without reloading or losing their sign-in", async ({
+  page,
+}) => {
+  if (stack === null) return;
+  const person = await createPerson(stack, "music-identity-retry", "member");
+  await signIn(page, person);
+  const refusals = await refuseIdentityOnce(page, "internal");
+  await page.goto("/music/");
+  await expect.poll(refusals).toBe(1);
+  await expect(page.getByRole("heading", { name: "Can't reach the server" })).toBeVisible();
+  await page.getByRole("button", { name: "Try again", exact: true }).click();
+  await expect(page.getByRole("link", { name: "Home", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Can't reach the server" })).toHaveCount(0);
+  await page.goto("/home");
+  await expect(
+    page.getByRole("heading", { name: `Hi, ${person.username}.`, exact: true }),
+  ).toBeVisible();
+});

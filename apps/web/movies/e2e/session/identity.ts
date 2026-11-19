@@ -23,7 +23,11 @@ const parse = Schema.decodeUnknownSync(
 );
 
 /** Refuses one real identity subscription, then lets its retry reach the core. */
-export const refuseIdentityOnce = async (page: Page): Promise<() => number> => {
+export const refuseIdentityOnce = async (
+  page: Page,
+  code: "unauthenticated" | "internal" = "unauthenticated",
+): Promise<() => number> => {
+  const failureMessage = code === "unauthenticated" ? "Session renewing" : "Identity unavailable";
   let refusals = 0;
   await page.routeWebSocket("**/sync", (socket) => {
     const upstream = socket.connectToServer();
@@ -64,8 +68,8 @@ export const refuseIdentityOnce = async (page: Page): Promise<() => number> => {
         return {
           type: "QueryFailed",
           queryId: modification["queryId"],
-          errorMessage: "Session renewing",
-          errorData: { code: "unauthenticated", message: "Session renewing" },
+          errorMessage: failureMessage,
+          errorData: { code, message: failureMessage },
           logLines: [],
           journal: null,
         };

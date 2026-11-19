@@ -10,6 +10,7 @@ import { useCallback, useEffect } from "react";
 import type { ReactNode } from "react";
 
 import { SIGN_IN_URL } from "../env";
+import { Button } from "@/components/ui/button";
 
 /** Where a signed-out browser signs in: the account client at the origin's root (ADR 0020). */
 const SIGN_IN_PATH = "/";
@@ -64,6 +65,16 @@ export function RequireSession({ children }: { readonly children: ReactNode }) {
   useEffect(() => {
     if (access === "signedOut" || access === "guest") leaveToSignIn();
   }, [access]);
+
+  if (access === "failed" && me.status === "error")
+    return (
+      <main className="flex min-h-dvh flex-col items-center justify-center gap-3 bg-bg px-6 text-text">
+        <h1 className="font-sans text-xl/xl font-heavy tracking-tight">Can't reach the server</h1>
+        <Button variant="solid" onClick={me.retry}>
+          Try again
+        </Button>
+      </main>
+    );
 
   return access === "household" ? children : <BlankPage />;
 }
