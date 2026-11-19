@@ -11,7 +11,13 @@ import {
   signInClient,
 } from "./people";
 
-test.use({ trace: "off", screenshot: "off", video: "off" });
+// The dialog copies the one-time address; CI's headless Chromium refuses the clipboard without these.
+test.use({
+  trace: "off",
+  screenshot: "off",
+  video: "off",
+  permissions: ["clipboard-read", "clipboard-write"],
+});
 
 const stack = await reachableStack();
 

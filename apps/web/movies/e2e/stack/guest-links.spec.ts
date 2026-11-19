@@ -54,7 +54,8 @@ test.beforeAll(async ({ browser }) => {
       cause,
     });
   });
-  context = await browser.newContext();
+  // The dialog copies the one-time address; CI's headless Chromium refuses the clipboard without these.
+  context = await browser.newContext({ permissions: ["clipboard-read", "clipboard-write"] });
   page = await context.newPage();
   await signIn(page, person);
 });
