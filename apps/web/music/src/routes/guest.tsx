@@ -1,18 +1,8 @@
-import { usePlatform, usePlatformQuery, usePlatformStatus } from "@media/sdk/react";
-import { GuestUnavailable } from "@/guest/unavailable";
-import {
-  isRenewing,
-  linkRefused,
-  sessionAccess,
-  useIdentityRetry,
-} from "@media/ui/lib/session-identity";
+import { GuestShare } from "@media/ui/components/guest-share";
 import { Navigate, createFileRoute } from "@tanstack/react-router";
-import { useEffect } from "react";
 
-import { musicAccess } from "@/session/access";
 import { GuestItem } from "@/guest/item";
-import { UnreachableScreen } from "@/guest/unreachable";
-import { BlankPage, useSignOut } from "@/session/session";
+import { guestPages } from "@/guest/pages";
 
 export const Route = createFileRoute("/guest")({
   head: () => ({ meta: [{ title: "Shared with you · Lar Music" }] }),
@@ -20,60 +10,9 @@ export const Route = createFileRoute("/guest")({
 });
 
 function GuestRoute() {
-  const platform = usePlatform();
-  const status = usePlatformStatus();
-  const leave = useSignOut();
-
-  const me = usePlatformQuery(
-    platform.core.auth.sessions.current,
-    ...(status === "signedIn" ? [] : (["skip"] as const)),
-  );
-
-  useIdentityRetry(me);
-  const guard = sessionAccess(status, me);
-
-  if (musicAccess(guard, true) === "home") return <Navigate to="/" replace />;
-
-  if (guard === "failed" && me.status === "error") return <UnreachableScreen retry={me.retry} />;
-
-  if (guard === "signedOut") return <GuestUnavailable onLeave={leave} />;
-
-  if (guard === "loading") return <BlankPage />;
-
-  return <GuestShare />;
-}
-
-function GuestShare() {
-  const platform = usePlatform();
-  const leave = useSignOut();
-  const current = usePlatformQuery(platform.core.guests.current);
-  useIdentityRetry(current);
-
-  if (current.status === "loading" || (current.status === "error" && isRenewing(current.error)))
-    return <BlankPage />;
-
-  if (current.status === "error")
-    return linkRefused(current.error) ? (
-      <GuestUnavailable onLeave={leave} />
-    ) : (
-      <UnreachableScreen retry={current.retry} />
-    );
-  const guest = current.data;
-
-  if (guest === null || guest.target.kind !== "item") return <GuestUnavailable onLeave={leave} />;
-
-  if (guest.target.item.domain !== "music")
-    return <OtherShare to={`/${guest.target.item.domain}/guest`} />;
-
   return (
-    <GuestItem item={guest.target.item.ref} sharedBy={guest.sharedBy} expiresAt={guest.expiresAt} />
+    <GuestShare domain="music" pages={guestPages} home={<Navigate to="/" replace />}>
+      {({ item, ...share }) => <GuestItem item={item.ref} {...share} />}
+    </GuestShare>
   );
-}
-
-function OtherShare({ to }: { readonly to: string }) {
-  useEffect(() => {
-    window.location.replace(to);
-  }, [to]);
-
-  return <BlankPage />;
 }

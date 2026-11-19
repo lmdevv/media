@@ -12,7 +12,7 @@ import type { GuestSubmission } from "@/screens/guest/state";
 import { useAccountActions } from "@/session/account";
 import { linkSecretFor } from "@/session/link-secret";
 import { nameOf } from "@/session/me";
-import { isRenewing, linkRefused, useIdentityRetry } from "@media/ui/lib/session-identity";
+import { guestView, isRenewing, useIdentityRetry } from "@media/ui/lib/session-identity";
 
 export const Route = createFileRoute("/guest")({
   staticData: { need: "public" },
@@ -25,22 +25,17 @@ function GuestDestination() {
   const platform = usePlatform();
   const guest = usePlatformQuery(platform.core.guests.current);
   useIdentityRetry(guest);
-  const target = guest.status === "success" ? guest.data?.target : undefined;
+  const view = guestView(guest);
+  const target = view.kind === "ready" ? view.data?.target : undefined;
   const destination = target?.kind === "item" ? `/${target.item.domain}/guest` : null;
 
   useEffect(() => {
     if (destination !== null) window.location.replace(destination);
   }, [destination]);
 
-  if (
-    guest.status === "loading" ||
-    (guest.status === "error" && isRenewing(guest.error)) ||
-    destination !== null
-  )
-    return <BlankPage />;
+  if (view.kind === "blank" || destination !== null) return <BlankPage />;
 
-  if (guest.status === "error" && !linkRefused(guest.error))
-    return <UnreachableScreen retry={guest.retry} />;
+  if (view.kind === "unreachable") return <UnreachableScreen retry={view.retry} />;
 
   return <GuestUnavailable onLeave={signOut} />;
 }
