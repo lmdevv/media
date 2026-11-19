@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { Milliseconds } from "@media/contracts/units";
 import { expect, test } from "@playwright/test";
 import type { Browser, Page } from "@playwright/test";
 
@@ -19,6 +20,7 @@ import {
 } from "../stack/people";
 import type { Client } from "../stack/people";
 import {
+  HAVE_CURRENT_DATA,
   encodeClip,
   episodeNfo,
   expectPlayingPast,
@@ -144,6 +146,28 @@ const startSession = async (page: Page): Promise<string> => {
   const opened = new URL(address);
 
   return `${opened.pathname}${opened.hash}`;
+};
+
+const delayFirstEpisodeLookup = async (page: Page): Promise<() => boolean> => {
+  let delayed = false;
+
+  await page.routeWebSocket("**/api/*/sync", (socket) => {
+    const server = socket.connectToServer();
+    let sending = Promise.resolve();
+
+    socket.onMessage((message) => {
+      sending = sending.then(async () => {
+        if (!delayed && message.includes('"udfPath":"movies/titles:episode"')) {
+          delayed = true;
+          await new Promise((resolve) => setTimeout(resolve, 1_000));
+        }
+
+        return server.send(message);
+      });
+    });
+  });
+
+  return () => delayed;
 };
 
 test.beforeAll(async () => {
@@ -284,10 +308,14 @@ test("the session counts down to the next episode and moves every member on toge
 }) => {
   test.setTimeout(180_000);
 
-  const hostPage = await signedInPage(browser, host.person);
-  const aiko = await member(browser, "aiko-next");
+  if (stack === null) throw new Error(NO_STACK);
 
-  pages.push(hostPage);
+  const guest = await createPerson(stack, "aiko-next");
+  const guestClient = await signInClient(stack, guest);
+  const hostPage = await signedInPage(browser, host.person);
+  const aiko = await signedInPage(browser, guest);
+
+  pages.push(hostPage, aiko);
 
   const show = titleId(SHOW);
 
@@ -301,32 +329,49 @@ test("the session counts down to the next episode and moves every member on toge
 
   if (first === undefined || second === undefined) throw new Error("The show has two episodes");
 
-  let delayedLookup = false;
-
-  await hostPage.routeWebSocket("**/api/*/sync", (socket) => {
-    const server = socket.connectToServer();
-    let sending = Promise.resolve();
-
-    socket.onMessage((message) => {
-      sending = sending.then(async () => {
-        if (!delayedLookup && message.includes('"udfPath":"movies/titles:episode"')) {
-          delayedLookup = true;
-          await new Promise((resolve) => setTimeout(resolve, 1_000));
-        }
-
-        return server.send(message);
-      });
-    });
-  });
+  const delayedLookup = await delayFirstEpisodeLookup(hostPage);
   await hostPage.goto(moviesPath(`/watch/${show}?episodeId=${first.id}&start=0`));
   await expectPlayingPast(hostPage, 0.5);
 
   const link = await startSession(hostPage);
 
-  expect(delayedLookup).toBe(true);
+  expect(delayedLookup()).toBe(true);
   await aiko.goto(link);
   await expectPlayingPast(aiko, 1);
   await expectInStep([hostPage, aiko]);
+
+  await hostPage.getByTestId("player").press("k");
+  await expect.poll(async () => (await videoState(aiko)).paused).toBe(true);
+
+  const saved = await guestClient.platform.movies.play.start({
+    titleId: show,
+    episodeId: first.id,
+  });
+
+  await guestClient.platform.movies.play.report({
+    fileId: saved.file.id,
+    positionMs: Milliseconds.make(12_000),
+    event: "pause",
+    playbackId: saved.playbackId,
+    startedAt: saved.startedAt,
+  });
+
+  const resume = await guestClient.platform.movies.play.start({
+    titleId: show,
+    episodeId: first.id,
+  });
+
+  expect(resume.resumePositionMs).toBeGreaterThanOrEqual(10_000);
+
+  const delayedReload = await delayFirstEpisodeLookup(aiko);
+
+  await aiko.reload();
+  await expect.poll(delayedReload).toBe(true);
+  await expect
+    .poll(async () => (await videoState(aiko)).readyState)
+    .toBeGreaterThanOrEqual(HAVE_CURRENT_DATA);
+  await expectInStep([hostPage, aiko]);
+  await hostPage.getByTestId("player").press("k");
 
   await expect(aiko.getByRole("region", { name: "Next episode" })).toBeVisible({
     timeout: 30_000,

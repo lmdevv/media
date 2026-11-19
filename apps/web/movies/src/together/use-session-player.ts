@@ -109,8 +109,7 @@ const copyText = async (text: string): Promise<void> => {
 /**
  * The player's group session: whether the page follows it, and the session's commands. The page
  * follows the person's movies session when it plays the session's item; once following, it moves
- * with the session to whatever plays next. `player` is read only when an action needs where the
- * player stands.
+ * with the session to whatever plays next.
  */
 export const useSessionPlayer = (
   page: WatchTarget,
@@ -181,7 +180,11 @@ export const useSessionPlayer = (
   }, [unavailable, navigate]);
 
   const loading =
-    view === undefined || (mine && !namesPage && target.status === "loading" && stopped === null);
+    view === undefined ||
+    (mine &&
+      target.status === "loading" &&
+      stopped === null &&
+      (!namesPage || player.current === null));
 
   const latestSession = useLatest(session);
   const latestJoined = useLatest(joined);
