@@ -203,6 +203,21 @@ test("a movie guest plays, seeks, resumes once, and stops on revoke", async ({ p
   await expect(page.getByRole("heading", { name: "This link isn't available" })).toBeVisible();
 });
 
+test("a guest with a clock past the link expiry keeps watching until the server ends the link", async ({
+  page,
+}) => {
+  const link = await linkFor({ domain: "movies", ref: { type: "title", id: titleId(MOVIE) } });
+  await openGuest(page, link.url);
+  await expect(page.getByRole("heading", { name: MOVIE })).toBeVisible();
+  await page.clock.setFixedTime(new Date(link.expiresAt + 60_000));
+  await page.reload();
+  await expect(page.getByRole("heading", { name: MOVIE })).toBeVisible();
+  await play(page);
+  await host.platform.core.guests.links.revoke({ linkId: link.linkId });
+  await expect(page.getByRole("heading", { name: "This link isn't available" })).toBeVisible();
+  await expect(page.getByTestId("player-video")).toHaveCount(0);
+});
+
 test("a show lists episodes, but episode and file links cannot reach siblings", async ({
   browser,
 }) => {
