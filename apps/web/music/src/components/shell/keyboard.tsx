@@ -1,5 +1,5 @@
 import { usePlayer, usePositionReader } from "@media/player/react";
-import { keyPressYields } from "@media/ui/lib/focus-policy";
+import { isTypingTarget, keyPressYields } from "@media/ui/lib/focus-policy";
 import { useHotkeys } from "@tanstack/react-hotkeys";
 import { useNavigate } from "@tanstack/react-router";
 
@@ -31,7 +31,7 @@ const unlessYielding =
 /**
  * Binds the global shortcuts in {@link HOTKEYS}. They fire whatever button has focus and yield
  * only to text fields, open menus and dialogs, and the keys a focused control uses itself. ⌘K
- * always toggles the command menu.
+ * always toggles the command menu. D closes Play on, itself an overlay, unless you type in a field.
  */
 export function KeyboardShortcuts() {
   const player = usePlayer();
@@ -100,7 +100,18 @@ export function KeyboardShortcuts() {
       },
       {
         hotkey: HOTKEYS["devices.toggle"],
-        callback: unlessYielding(() => (ui.playOn === null ? ui.openPlayOn() : ui.closePlayOn())),
+        callback: (event) => {
+          if (ui.playOn === null) {
+            unlessYielding(ui.openPlayOn)(event);
+
+            return;
+          }
+
+          if (isTypingTarget(event.target)) return;
+
+          event.preventDefault();
+          ui.closePlayOn();
+        },
       },
     ],
     { ignoreInputs: false, preventDefault: false, stopPropagation: false },

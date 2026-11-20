@@ -87,3 +87,38 @@ test("the command menu returns focus to its button only when the keyboard opened
   await expect(menu).toBeHidden();
   await expect.poll(() => ringed(button)).toBe(true);
 });
+
+test("a click on a popover's plain text keeps focus inside the popover", async ({ page }) => {
+  const popover = page.getByRole("dialog", { name: "Audio and subtitles" });
+
+  await page.getByRole("button", { name: "Audio and subtitles" }).click();
+  await expect(popover).toBeVisible();
+  await popover.getByText("Audio", { exact: true }).click();
+
+  await expect(popover).toBeVisible();
+  expect(await popover.evaluate((element) => element.contains(document.activeElement))).toBe(true);
+});
+
+test("a popover reopened by a click while it closes returns focus to nothing", async ({ page }) => {
+  const trigger = page.getByRole("button", { name: "Audio and subtitles" });
+  const popover = page.getByRole("dialog", { name: "Audio and subtitles" });
+
+  await trigger.focus();
+  await page.keyboard.press("Enter");
+  await expect(popover).toBeVisible();
+  await popover.evaluate((element) => element.setAttribute("data-first-open", ""));
+
+  const box = await trigger.boundingBox();
+
+  if (box === null) throw new Error("The trigger has no box.");
+
+  // The click lands during the closing animation, so the popover keeps its popup element.
+  await page.keyboard.press("Escape");
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await expect(popover).toHaveAttribute("data-open", "");
+  await expect(popover).toHaveAttribute("data-first-open", "");
+
+  await page.keyboard.press("Escape");
+  await expect(popover).toBeHidden();
+  await expect.poll(() => focusedTag(page)).toBe("BODY");
+});

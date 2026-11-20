@@ -9,7 +9,8 @@ import { useRef } from "react";
  *
  * @param container - Where the dialog renders; the body when undefined.
  * @param returnFocus - Where focus goes when the dialog closes and playback continues, or false when
- *   the caller has moved it already.
+ *   the caller has moved it already. Called only when the keyboard opened the dialog; after a
+ *   mouse, touch, or pen open, focus goes nowhere.
  */
 export function LeaveDialog({
   open,

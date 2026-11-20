@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { Ref } from "react";
 
 /**
@@ -51,6 +51,7 @@ const KEEPS_SHORTCUTS_ATTRIBUTE = "data-keeps-shortcuts";
  */
 export const keepsShortcutsProps = { [KEEPS_SHORTCUTS_ATTRIBUTE]: "" } as const;
 
+// No `listbox`: every listbox in the apps sits inside a dialog, which this already matches.
 const OPEN_OVERLAY = `:is([role="dialog"], [role="alertdialog"], [role="menu"], dialog[open]):not([data-closed], [hidden], [${KEEPS_SHORTCUTS_ATTRIBUTE}])`;
 
 /**
@@ -101,6 +102,11 @@ function controlKindOf(target: EventTarget | null): ControlKind {
   return TEXT_ROLES.has(role) ? "text" : "control";
 }
 
+/** Whether the element is a place to type text, which keeps every key. */
+export function isTypingTarget(target: EventTarget | null): boolean {
+  return controlKindOf(target) === "text";
+}
+
 /** Whether a menu or dialog is open, other than a full-screen view marked {@link keepsShortcutsProps}. */
 export function isOverlayOpen(): boolean {
   return document.querySelector(OPEN_OVERLAY) !== null;
@@ -125,15 +131,22 @@ const markPointer = (): void => {
   lastModality = "pointer";
 };
 
+/**
+ * What a click presses: the nearest of these around its target. Dialog, menu, and listbox popups
+ * and other focusable containers are not on the list, so a click on plain content inside one keeps
+ * focus where it is.
+ */
+const PRESSABLE = `:is(button, a[href], input, select, textarea, [role="button"], [role="link"], [role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"], [role="tab"], [role="option"], [role="checkbox"], [role="switch"], [role="radio"], [role="slider"])`;
+
 /** After a pointer click on a button or link, take focus off it so later keys go to shortcuts. */
 const blurAfterPointerClick = (event: MouseEvent): void => {
-  if (event.detail === 0 || !(event.target instanceof Node)) return;
+  if (event.detail === 0 || !(event.target instanceof Element)) return;
 
-  const active = event.target.ownerDocument?.activeElement;
+  const pressed = event.target.closest(PRESSABLE);
 
-  if (!(active instanceof HTMLElement) || !active.contains(event.target)) return;
+  if (!(pressed instanceof HTMLElement) || pressed !== pressed.ownerDocument.activeElement) return;
 
-  if (!keepsFocusOnClick(controlKindOf(active))) active.blur();
+  if (!keepsFocusOnClick(controlKindOf(pressed))) pressed.blur();
 };
 
 /**
@@ -162,11 +175,15 @@ const assignRef = <T>(ref: Ref<T> | undefined, value: T | null): void => {
   else ref(value);
 };
 
+/** The attribute Base UI sets on a popup each time it opens, a reopen mid-close included. */
+const OPEN_ATTRIBUTE = "data-open";
+
 /**
  * Rule 3 for an overlay popup: spread the result on the popup. It records how the overlay opened
- * when the popup mounts. After a keyboard open, `finalFocus` is `afterKeyboard`, which by default
- * gives the opener focus back. After a mouse, touch, or pen open it is `false`, so focus goes
- * nowhere, however the overlay closes.
+ * on every open, including a reopen during its closing animation, which keeps the same popup
+ * element. After a keyboard open, `finalFocus` is `afterKeyboard`, which by default gives the
+ * opener focus back. After a mouse, touch, or pen open it is `false`, so focus goes nowhere,
+ * however the overlay closes.
  *
  * @param forwarded - A ref the popup's caller passed, kept working alongside the hook's own.
  * @param afterKeyboard - Where focus goes on close after a keyboard open, as the popup's
@@ -177,19 +194,31 @@ export function useKeyboardFocusReturn<T extends HTMLElement, F = true>(
   afterKeyboard?: F,
 ) {
   const [openedByKeyboard, setOpenedByKeyboard] = useState(false);
-  const mounted = useRef<T | null>(null);
+  const [popup, setPopup] = useState<T | null>(null);
 
   const ref = useCallback(
     (element: T | null) => {
-      if (element !== null && element !== mounted.current) {
-        mounted.current = element;
-        setOpenedByKeyboard(lastModality === "keyboard");
-      }
-
+      setPopup(element);
       assignRef(forwarded, element);
     },
     [forwarded],
   );
+
+  useEffect(() => {
+    if (popup === null) return undefined;
+
+    const recordOpen = (): void => {
+      if (popup.hasAttribute(OPEN_ATTRIBUTE)) setOpenedByKeyboard(lastModality === "keyboard");
+    };
+
+    recordOpen();
+
+    const observer = new MutationObserver(recordOpen);
+
+    observer.observe(popup, { attributeFilter: [OPEN_ATTRIBUTE] });
+
+    return () => observer.disconnect();
+  }, [popup]);
 
   return { ref, finalFocus: openedByKeyboard ? (afterKeyboard ?? true) : false };
 }

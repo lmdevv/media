@@ -153,3 +153,29 @@ test("Play on returns focus to its button after a keyboard open, and to nothing 
   await expect(popover).toBeHidden();
   await expect.poll(() => focusedTag(page)).toBe("BODY");
 });
+
+test("D closes Play on wherever focus sits in it, and opens it", async ({ page }) => {
+  if (stack === null) return;
+
+  const player = await playFirstSong(page);
+  const popover = page.getByRole("dialog").filter({ hasText: "Play on" });
+
+  await player.getByRole("button", { name: "Play on another device" }).click();
+  await expect(popover).toBeVisible();
+  // A click on the popover's padding leaves focus in the popover but outside its device menu.
+  await popover.click({ position: { x: 3, y: 3 } });
+  expect(
+    await popover.evaluate(
+      (element) =>
+        element.contains(document.activeElement) &&
+        document.activeElement?.closest('[role="menu"]') === null,
+    ),
+  ).toBe(true);
+  await page.keyboard.press("d");
+  await expect(popover).toBeHidden();
+
+  await page.keyboard.press("d");
+  await expect(popover).toBeVisible();
+  await page.keyboard.press("d");
+  await expect(popover).toBeHidden();
+});

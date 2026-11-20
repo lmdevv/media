@@ -634,8 +634,9 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
     setLeaving(null);
   }, [leaving, play]);
 
-  // Back to where focus was in the player, or to the player itself. The dialog would move focus
-  // from the frame, which only script can focus, to its first button, so the frame is focused here.
+  // After a keyboard open, back to where focus was in the player, or to the player itself. The
+  // dialog would move focus from the frame, which only script can focus, to its first button, so
+  // the frame is focused here. After a pointer open the dialog never calls this.
   const focusAfterLeaving = useCallback((): HTMLElement | false => {
     const previous = focusBeforeLeaving.current;
 
@@ -864,7 +865,10 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
 
   useKeymap(playerKeymap, {
     "menu.toggle": () => {
-      if (guest === undefined) setMenu((open) => !open);
+      if (guest !== undefined) return;
+
+      if (menu) setMenu(false);
+      else if (leaving === null && together.starting === undefined) setMenu(true);
     },
     "player.toggle": togglePlay,
     "player.toggle-k": togglePlay,

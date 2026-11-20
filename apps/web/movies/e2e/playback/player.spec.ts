@@ -616,6 +616,12 @@ test("Escape asks before leaving: open layers close first, Stay plays on, Leave 
   await expect.poll(paused).toBe(true);
   await expect(leave).toHaveCSS("opacity", "1");
   await capture(page, "07-12-leave-playback");
+  await page.keyboard.press("ControlOrMeta+k");
+  await page.waitForTimeout(500);
+  await expect(commandMenu(page).menu).toBeHidden();
+  await expect(stay).toBeFocused();
+  await leave.getByRole("heading", { name: "Leave playback?" }).click();
+  expect(await leave.evaluate((element) => element.contains(document.activeElement))).toBe(true);
   await page.keyboard.press("Escape");
   await expect(leave).toBeHidden();
   await expect(player).toBeFocused();
