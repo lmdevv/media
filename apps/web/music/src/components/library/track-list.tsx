@@ -708,19 +708,22 @@ function UnavailableRow({
 }
 
 /**
- * Skeleton rows matching the track list of `variant` while songs load: its column header on
- * desktop, then rows of the list's height, so the songs replace them without moving.
+ * Skeleton rows matching the track list of `variant` while songs load, at the list's row height,
+ * so the songs replace them without moving.
  */
 export function TrackListSkeleton({
   rows = 8,
   variant = "list",
+  header = false,
 }: {
   readonly rows?: number;
   readonly variant?: TrackListVariant;
+  /** Draws the list's desktop column header first, for a skeleton that stands for a whole list. */
+  readonly header?: boolean;
 }) {
   return (
     <div aria-hidden className="flex flex-col">
-      <div className="hidden h-8 shrink-0 border-b border-border lg:block" />
+      {header ? <div className="hidden h-8 shrink-0 border-b border-border lg:block" /> : null}
       {Array.from({ length: rows }, (_, index) => (
         <div
           key={index}

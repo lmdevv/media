@@ -51,7 +51,7 @@ function AlbumSkeleton() {
     <div className="flex flex-col gap-8 px-5 pt-safe-top-sm lg:px-12 lg:pt-row">
       <CollectionHeaderSkeleton />
       <div className="-mx-5 pl-5 lg:mx-0 lg:pl-0">
-        <TrackListSkeleton variant="album" />
+        <TrackListSkeleton variant="album" header />
       </div>
     </div>
   );

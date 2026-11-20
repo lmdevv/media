@@ -1,6 +1,6 @@
 import { Brand, Context, Effect, Layer, Predicate, Redacted } from "effect";
 import type { Scope } from "effect";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { Forbidden, Unauthenticated } from "@media/contracts/errors";
 
@@ -530,25 +530,24 @@ describe("createPlatform", () => {
 
             leave();
             await platform.session.signInWithPassword({ username: "grace", password: "secret" });
-            await vi.waitFor(() => {
-              expect(platform.core.server.info.watch().getSnapshot()).toStrictEqual({
-                status: "loading",
-              });
-            });
 
-            return handedOver;
+            return { handedOver, afterSignIn: platform.core.server.info.watch().getSnapshot() };
           });
 
           const peak = yield* fake.peakSubscriptions("core/server:info");
 
           yield* Effect.promise(() => platform.dispose());
 
-          return { shown, peak };
+          return { ...shown, peak };
         }),
       ),
     );
 
-    expect(seen).toStrictEqual({ shown: { status: "success", data: SERVER }, peak: 1 });
+    expect(seen).toStrictEqual({
+      handedOver: { status: "success", data: SERVER },
+      afterSignIn: { status: "loading" },
+      peak: 1,
+    });
   }, 20_000);
 });
 

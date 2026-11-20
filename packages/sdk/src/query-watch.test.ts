@@ -210,7 +210,7 @@ describe("QueryWatch", () => {
   });
 });
 
-const ONE_MINUTE: QueryWatch.Keep = { idleFor: "1 minute", maxIdle: 10 };
+const ONE_MINUTE: QueryWatch.Keep = { idleFor: "1 minute", failedFor: "1 second", maxIdle: 10 };
 
 const kept = (script: ReadonlyArray<Attempt>, keep = ONE_MINUTE) => {
   const { counts, runtime, results, advance } = scripted(script);
@@ -279,10 +279,7 @@ describe("QueryWatch.keeper", () => {
   });
 
   it("stops the longest idle query once more than the most allowed wait", async () => {
-    const { counts, watch, advance } = kept([{ values: [["a"]] }], {
-      idleFor: "1 minute",
-      maxIdle: 1,
-    });
+    const { counts, watch, advance } = kept([{ values: [["a"]] }], { ...ONE_MINUTE, maxIdle: 1 });
 
     const leaveFirst = watch("first").subscribe(ignore);
     const leaveSecond = watch("second").subscribe(ignore);
@@ -299,11 +296,15 @@ describe("QueryWatch.keeper", () => {
 
   it("stops a query as its last listener leaves when the keep time is zero", async () => {
     const { counts, built, watch, advance } = kept([{ values: [["a"]] }], {
+      ...ONE_MINUTE,
       idleFor: 0,
-      maxIdle: 10,
     });
 
-    const leave = watch().subscribe(ignore);
+    const first = watch();
+
+    expect(watch()).toBe(first);
+
+    const leave = first.subscribe(ignore);
 
     await advance(100);
     leave();
@@ -314,7 +315,7 @@ describe("QueryWatch.keeper", () => {
     expect(built.watches).toBe(2);
   });
 
-  it("never keeps a failed query, so the next listener subscribes again", async () => {
+  it("hands a failure to the next listener only within the failure keep time", async () => {
     const { counts, built, watch, advance } = kept([
       { values: [], error: missing },
       { values: [["a"]] },
@@ -323,10 +324,16 @@ describe("QueryWatch.keeper", () => {
     const leave = watch().subscribe(ignore);
 
     await advance(100);
-
-    expect(watch().getSnapshot()).toMatchObject({ status: "error", error: { _tag: "NotFound" } });
-
     leave();
+
+    const handedOver = watch();
+
+    expect(handedOver.getSnapshot()).toMatchObject({
+      status: "error",
+      error: { _tag: "NotFound" },
+    });
+
+    await advance(1000);
 
     const again = watch();
 
@@ -337,6 +344,44 @@ describe("QueryWatch.keeper", () => {
 
     expect(again.getSnapshot()).toStrictEqual({ status: "success", data: ["a"] });
     expect({ ...built, ...counts }).toStrictEqual({ watches: 2, opened: 2, closed: 1 });
+  });
+
+  it("keeps a query that fails while idle only for the failure keep time", async () => {
+    const { built, watch, advance } = kept([
+      { values: [["a"]], error: missing },
+      { values: [["b"]] },
+    ]);
+
+    watch().subscribe(ignore)();
+    await advance(100);
+
+    expect(watch().getSnapshot()).toMatchObject({ status: "error" });
+
+    await advance(1000);
+
+    expect(watch().getSnapshot()).toStrictEqual({ status: "loading" });
+    expect(built.watches).toBe(2);
+  });
+
+  it("lets the next listener retry a failure handed to it", async () => {
+    const { counts, watch, advance } = kept([{ values: [], error: missing }, { values: [["a"]] }]);
+
+    watch().subscribe(ignore)();
+    await advance(100);
+
+    const handedOver = watch();
+
+    handedOver.subscribe(ignore);
+
+    const failure = handedOver.getSnapshot();
+
+    if (failure.status !== "error") throw new Error(`Expected a failure, got ${failure.status}`);
+
+    failure.retry();
+    await advance(100);
+
+    expect(handedOver.getSnapshot()).toStrictEqual({ status: "success", data: ["a"] });
+    expect(counts).toStrictEqual({ opened: 2, closed: 1 });
   });
 
   it("releases every query: idle ones stop, followed ones once their listeners leave", async () => {
@@ -383,13 +428,15 @@ describe("QueryWatch.whenAnswered", () => {
     expect(counts).toStrictEqual({ opened: 1, closed: 0 });
   });
 
-  it("resolves on a failure, without rejecting", async () => {
-    const { watch, advance } = kept([{ values: [], error: missing }]);
+  it("resolves on a failure without rejecting, and hands the failure to the next listener", async () => {
+    const { counts, watch, advance } = kept([{ values: [], error: missing }]);
     const answered = QueryWatch.whenAnswered(watch());
 
     await advance(100);
 
     await expect(answered).resolves.toBeUndefined();
+    expect(watch().getSnapshot()).toMatchObject({ status: "error", error: { _tag: "NotFound" } });
+    expect(counts).toStrictEqual({ opened: 1, closed: 1 });
   });
 
   it("resolves at once for a kept answer", async () => {

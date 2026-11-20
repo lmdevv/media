@@ -225,13 +225,12 @@ export const createPlatform = (options: PlatformOptions): PlatformSdk => {
       withClient((client) => client.run(command, params));
 
   const kept = QueryWatch.keeper(runtime, QueryWatch.DEFAULT_KEEP);
-  let releasingOnSessionChange = false;
+  let sessionChangesInOtherTabs: Fiber.Fiber<void, unknown> | null = null;
 
   const releaseKeptOnSessionChange = (): void => {
-    if (releasingOnSessionChange) return;
+    if (sessionChangesInOtherTabs !== null) return;
 
-    releasingOnSessionChange = true;
-    runtime.runFork(
+    sessionChangesInOtherTabs = runtime.runFork(
       Stream.runForEach(
         Stream.unwrap(Effect.map(Client.Client, (client) => client.session.identity)).pipe(
           Stream.drop(1),
@@ -240,6 +239,12 @@ export const createPlatform = (options: PlatformOptions): PlatformSdk => {
       ),
     );
   };
+
+  /** Runs a session change here, then stops sharing kept answers before the caller goes on. */
+  const changingSession = <A>(change: Promise<A>): Promise<A> => change.finally(kept.release);
+
+  const signIn = (credentials: Client.Credentials): Promise<void> =>
+    changingSession(withClient((client) => client.session.signIn(credentials)));
 
   const watchOf = <Args, Result>(command: Command<"query", Args, Result>) => {
     const share = kept.group<Result>();
@@ -296,39 +301,24 @@ export const createPlatform = (options: PlatformOptions): PlatformSdk => {
       status: () => withClient((client) => client.session.currentStatus),
       onStatus,
       signInWithPassword: ({ username, password }) =>
-        withClient((client) =>
-          client.session.signIn(
-            Client.Credentials.Password({ username, password: Redacted.make(password) }),
-          ),
-        ),
-      signInWithApiKey: (key) =>
-        withClient((client) =>
-          client.session.signIn(Client.Credentials.ApiKey({ key: Redacted.make(key) })),
-        ),
+        signIn(Client.Credentials.Password({ username, password: Redacted.make(password) })),
+      signInWithApiKey: (key) => signIn(Client.Credentials.ApiKey({ key: Redacted.make(key) })),
       setUpOwner: ({ username, password }) =>
-        withClient((client) =>
-          client.session.signIn(
-            Client.Credentials.Setup({ username, password: Redacted.make(password) }),
-          ),
-        ),
+        signIn(Client.Credentials.Setup({ username, password: Redacted.make(password) })),
       acceptInvite: ({ code, username, password }) =>
-        withClient((client) =>
-          client.session.signIn(
-            Client.Credentials.Invite({
-              code: Redacted.make(code),
-              username,
-              password: Redacted.make(password),
-            }),
-          ),
+        signIn(
+          Client.Credentials.Invite({
+            code: Redacted.make(code),
+            username,
+            password: Redacted.make(password),
+          }),
         ),
       resetPassword: ({ code, password }) =>
-        withClient((client) =>
-          client.session.signIn(
-            Client.Credentials.Reset({
-              code: Redacted.make(code),
-              password: Redacted.make(password),
-            }),
-          ),
+        signIn(
+          Client.Credentials.Reset({
+            code: Redacted.make(code),
+            password: Redacted.make(password),
+          }),
         ),
       startDeviceSignIn: async (clientName) => {
         const pending = await withClient((client) => client.session.startDeviceSignIn(clientName));
@@ -336,29 +326,25 @@ export const createPlatform = (options: PlatformOptions): PlatformSdk => {
         return {
           userCode: pending.userCode,
           expiresAt: pending.expiresAt,
-          complete: () => runtime.runPromise(pending.complete),
+          complete: () => changingSession(runtime.runPromise(pending.complete)),
         };
       },
       signInAsGuest: ({ code, name }) => {
         const guest = { code: Redacted.make(code), name };
 
-        return withClient((client) => client.session.signInAsGuest(guest));
+        return changingSession(withClient((client) => client.session.signInAsGuest(guest)));
       },
       openTile: ({ device, userId, proof }) =>
-        withClient((client) =>
-          client.session.signIn(
-            Client.Credentials.Tile({
-              device: Redacted.make(device),
-              userId,
-              proof: Option.map(Option.fromUndefinedOr(proof), tileProof),
-            }),
-          ),
+        signIn(
+          Client.Credentials.Tile({
+            device: Redacted.make(device),
+            userId,
+            proof: Option.map(Option.fromUndefinedOr(proof), tileProof),
+          }),
         ),
       exchangeGrant: ({ userId, grant }) =>
-        withClient((client) =>
-          client.session.signIn(Client.Credentials.Grant({ userId, grant: Redacted.make(grant) })),
-        ),
-      signOut: () => withClient((client) => client.session.signOut),
+        signIn(Client.Credentials.Grant({ userId, grant: Redacted.make(grant) })),
+      signOut: () => changingSession(withClient((client) => client.session.signOut)),
       accessToken: () =>
         withClient((client) =>
           Effect.map(client.session.accessToken, (token) =>
@@ -381,10 +367,14 @@ export const createPlatform = (options: PlatformOptions): PlatformSdk => {
             ),
         ),
     },
-    dispose: () => {
+    dispose: async () => {
       kept.release();
 
-      return runtime.dispose();
+      if (sessionChangesInOtherTabs !== null) {
+        await Effect.runPromise(Fiber.interrupt(sessionChangesInOtherTabs));
+      }
+
+      await runtime.dispose();
     },
   };
 };

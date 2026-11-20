@@ -134,6 +134,12 @@ export interface Keep {
    * it again shows the answer at once. Zero stops it as the last listener leaves.
    */
   readonly idleFor: Duration.Input;
+  /**
+   * How long a failed query nothing follows keeps its failure, so the screen a route loader
+   * prepared shows the failure rather than asking again; the next caller after that subscribes
+   * again.
+   */
+  readonly failedFor: Duration.Input;
   /** How many queries may stay subscribed with nothing following them; past it the oldest stops. */
   readonly maxIdle: number;
 }
@@ -142,7 +148,7 @@ export interface Keep {
  * A query kept subscribed stays live, as Convex pushes its every change, but runs again on the
  * server whenever what it read changes; the bound keeps that cost small.
  */
-export const DEFAULT_KEEP: Keep = { idleFor: "5 minutes", maxIdle: 50 };
+export const DEFAULT_KEEP: Keep = { idleFor: "5 minutes", failedFor: "1 second", maxIdle: 50 };
 
 /** Watches shared by key, and kept subscribed for a while after their last listener leaves. */
 export interface Keeper {
@@ -167,11 +173,11 @@ interface Entry<A> {
 
 const failed = (entry: Entry<unknown>): boolean => entry.watch.getSnapshot().status === "error";
 
-const ignore = (): void => undefined;
+const UNSUBSCRIBED_FOR = Duration.seconds(1);
 
 /**
  * Shares watches by key and keeps each subscribed for `keep.idleFor` after its last listener
- * leaves. A failed watch is never kept, so the next caller subscribes again, as a new watch would.
+ * leaves, or `keep.failedFor` once it has failed.
  * Effect's `Cache` does not fit: its time to live runs from the lookup, not from the last
  * listener leaving, and a screen must read a kept answer synchronously as it renders.
  *
@@ -182,6 +188,7 @@ export const keeper = <R>(
   keep: Keep,
 ): Keeper => {
   const idleFor = Duration.fromInputUnsafe(keep.idleFor);
+  const failedFor = Duration.fromInputUnsafe(keep.failedFor);
   const shared = new Set<Entry<unknown>>();
   const idleOldestFirst = new Set<Entry<unknown>>();
 
@@ -210,16 +217,10 @@ export const keeper = <R>(
     dropKeepAlive(entry);
   };
 
-  const startIdle = (entry: Entry<unknown>): void => {
-    if (Duration.isZero(idleFor)) {
-      release(entry);
-
-      return;
-    }
-
-    idleOldestFirst.add(entry);
+  const releaseAfter = (entry: Entry<unknown>, wait: Duration.Duration): void => {
+    stopExpiry(entry);
     entry.expiry = runtime.runFork(
-      Effect.sleep(idleFor).pipe(
+      Effect.sleep(wait).pipe(
         Effect.andThen(
           Effect.sync(() => {
             entry.expiry = null;
@@ -228,6 +229,23 @@ export const keeper = <R>(
         ),
       ),
     );
+  };
+
+  /** Holds `entry` subscribed with nothing following it, before its last listener leaves. */
+  const startIdle = (entry: Entry<unknown>): void => {
+    const wait = failed(entry) ? failedFor : idleFor;
+
+    if (Duration.isZero(wait)) {
+      release(entry);
+
+      return;
+    }
+
+    entry.keepAlive = entry.watch.subscribe(() => {
+      if (failed(entry)) releaseAfter(entry, failedFor);
+    });
+    idleOldestFirst.add(entry);
+    releaseAfter(entry, wait);
 
     for (const oldest of idleOldestFirst) {
       if (idleOldestFirst.size <= keep.maxIdle) break;
@@ -256,22 +274,9 @@ export const keeper = <R>(
         subscribed = false;
         entry.listeners -= 1;
 
-        if (entry.listeners > 0 || entry.released) {
-          stop();
+        if (entry.listeners === 0 && !entry.released) startIdle(entry);
 
-          return;
-        }
-
-        if (failed(entry)) {
-          stop();
-          release(entry);
-
-          return;
-        }
-
-        entry.keepAlive = watch.subscribe(ignore);
         stop();
-        startIdle(entry);
       };
     };
 
@@ -295,9 +300,7 @@ export const keeper = <R>(
       return (key: string, open: () => QueryWatch<A>): QueryWatch<A> => {
         const found = entries.get(key);
 
-        if (found !== undefined && (found.listeners > 0 || !failed(found))) return found.shared;
-
-        if (found !== undefined) release(found);
+        if (found !== undefined) return found.shared;
 
         const entry = share(open(), () => {
           if (entries.get(key) === entry) entries.delete(key);
@@ -305,7 +308,9 @@ export const keeper = <R>(
 
         entries.set(key, entry);
         shared.add(entry);
-        startIdle(entry);
+        // Not yet running, so it neither holds a subscription nor counts toward `maxIdle`; the
+        // render that opened it subscribes as it commits, which the second covers.
+        releaseAfter(entry, Duration.max(idleFor, UNSUBSCRIBED_FOR));
 
         return entry.shared;
       };
