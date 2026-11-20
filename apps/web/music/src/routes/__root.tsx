@@ -1,3 +1,4 @@
+import { useFocusPolicy } from "@media/ui/lib/focus-policy";
 import { CatchBoundary, HeadContent, Outlet, createRootRoute } from "@tanstack/react-router";
 import { ThemeProvider } from "next-themes";
 import { Suspense, lazy } from "react";
@@ -32,6 +33,8 @@ export const Route = createRootRoute({
 const NoToaster = () => null;
 
 function RootComponent() {
+  useFocusPolicy();
+
   return (
     <ThemeProvider
       attribute="class"

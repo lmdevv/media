@@ -22,6 +22,22 @@ for the dev stack, stack suites, and CI.
 - **Comments and docs say what the code does now**, not what came before;
   `scripts/check-history.sh` enforces it.
 
+## Web UI
+
+The web apps share one focus policy, `packages/ui/src/lib/focus-policy.ts`:
+
+- **Shortcuts are global.** They yield only to text fields, open menus and dialogs, and the keys a
+  focused control uses itself: Enter on any control, Space on a checkbox, switch, or radio, arrows
+  on a slider. Space on a focused button plays or pauses; it does not press the button.
+- **An overlay that is part of the screen under it keeps its shortcuts.** Spread
+  `keepsShortcutsProps` on a full-screen view or a player panel, such as Now Playing or the
+  tracks popover; without it, the open overlay turns the screen's shortcuts off.
+- **A pointer click leaves nothing focused.** Text fields, sliders, and radio buttons keep the
+  focus a click gives them, since typing and arrow keys need it.
+- **Focus returns to an overlay's opener only after a keyboard open.** Build overlays on the
+  shared wrappers, which apply `useKeyboardFocusReturn`.
+- **Focus rings stay.** `:focus-visible` shows them after keyboard use; never remove or hide them.
+
 ## Commits and PRs
 
 - Format: `type(scope): summary`, imperative and lowercase. Types: `feat`, `fix`, `chore`, `docs`,

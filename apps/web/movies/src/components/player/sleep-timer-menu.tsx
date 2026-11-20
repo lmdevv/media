@@ -23,6 +23,7 @@ import {
   DropdownMenuTrigger,
 } from "@media/ui/components/dropdown-menu";
 import { FieldError, TextField } from "@media/ui/components/text-field";
+import { keepsShortcutsProps } from "@media/ui/lib/focus-policy";
 import { useState } from "react";
 import type { ReactElement } from "react";
 
@@ -71,6 +72,7 @@ export function SleepTimerMenu({
     <DropdownMenu>
       <DropdownMenuTrigger render={trigger} />
       <DropdownMenuContent
+        {...keepsShortcutsProps}
         container={container}
         side="bottom"
         align="end"

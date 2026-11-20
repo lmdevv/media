@@ -706,8 +706,9 @@ export function PlayerScreen({
     setLeaving(null);
   }, [leaving, play]);
 
-  // Back to where focus was in the player, or to the player itself. The dialog would move focus
-  // from the frame, which only script can focus, to its first button, so the frame is focused here.
+  // After a keyboard open, back to where focus was in the player, or to the player itself. The
+  // dialog would move focus from the frame, which only script can focus, to its first button, so
+  // the frame is focused here. After a pointer open the dialog never calls this.
   const focusAfterLeaving = useCallback((): HTMLElement | false => {
     const previous = focusBeforeLeaving.current;
 
@@ -1023,39 +1024,40 @@ export function PlayerScreen({
       remotePlayback?.active !== true,
   });
 
-  useKeymap(
-    playerKeymap,
-    {
-      "menu.toggle": () => {
-        if (guest === undefined) setMenu((open) => !open);
-      },
-      "player.toggle": togglePlay,
-      "player.toggle-k": togglePlay,
-      "player.back-10": () => skipByKey(-10),
-      "player.forward-10": () => skipByKey(10),
-      "player.back-5": () => skipByKey(-5),
-      "player.forward-5": () => skipByKey(5),
-      "player.volume-up": () => {
-        if (volumeSettable) commitVolume(media.volume + VOLUME_STEP);
-        else if (media.muted) setMuted(false);
-      },
-      "player.volume-down": () => {
-        if (volumeSettable) commitVolume(media.volume - VOLUME_STEP);
-      },
-      "player.fullscreen": toggleFullscreen,
-      "player.mute": () => setMuted(!(media.muted || silent)),
-      "player.subtitles": toggleSubtitles,
-      "player.subtitles-earlier": () => subtitleDelay.stepWithNotice(-1),
-      "player.subtitles-later": () => subtitleDelay.stepWithNotice(1),
-      "player.exit": (event) => {
-        if (takeEscape(event)) return;
+  useKeymap(playerKeymap, {
+    "menu.toggle": () => {
+      if (guest !== undefined) return;
 
-        if (infoShown) setInfo(false);
-        else askToLeave();
-      },
+      if (menu) setMenu(false);
+      else if (leaving === null && !asking && together.starting === undefined && !customSleepOpen) {
+        setMenu(true);
+      }
     },
-    !menu && !customSleepOpen && leaving === null && !asking && together.starting === undefined,
-  );
+    "player.toggle": togglePlay,
+    "player.toggle-k": togglePlay,
+    "player.back-10": () => skipByKey(-10),
+    "player.forward-10": () => skipByKey(10),
+    "player.back-5": () => skipByKey(-5),
+    "player.forward-5": () => skipByKey(5),
+    "player.volume-up": () => {
+      if (volumeSettable) commitVolume(media.volume + VOLUME_STEP);
+      else if (media.muted) setMuted(false);
+    },
+    "player.volume-down": () => {
+      if (volumeSettable) commitVolume(media.volume - VOLUME_STEP);
+    },
+    "player.fullscreen": toggleFullscreen,
+    "player.mute": () => setMuted(!(media.muted || silent)),
+    "player.subtitles": toggleSubtitles,
+    "player.subtitles-earlier": () => subtitleDelay.stepWithNotice(-1),
+    "player.subtitles-later": () => subtitleDelay.stepWithNotice(1),
+    "player.exit": (event) => {
+      if (takeEscape(event)) return;
+
+      if (infoShown) setInfo(false);
+      else askToLeave();
+    },
+  });
 
   const canStart =
     guest === undefined &&

@@ -1,4 +1,5 @@
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
+import { useKeyboardFocusReturn } from "@media/ui/lib/focus-policy";
 import { cn } from "@/lib/utils";
 import { XIcon } from "lucide-react";
 import type { ComponentProps } from "react";
@@ -33,12 +34,16 @@ export function DialogContent({
   title,
   description,
   showClose = true,
+  ref,
+  finalFocus,
   ...props
 }: DialogPrimitive.Popup.Props & {
   readonly title: string;
   readonly description?: string | undefined;
   readonly showClose?: boolean;
 }) {
+  const focusReturn = useKeyboardFocusReturn(ref, finalFocus);
+
   return (
     <DialogPrimitive.Portal>
       <DialogBackdrop />
@@ -49,6 +54,7 @@ export function DialogContent({
           className,
         )}
         {...props}
+        {...focusReturn}
       >
         <div className={cn("flex flex-col gap-1", showClose && "pr-10")}>
           <DialogPrimitive.Title className="font-sans text-xl/xl font-heavy tracking-tight text-text">
@@ -82,5 +88,9 @@ export function DialogFooter({ className, ...props }: ComponentProps<"div">) {
 /** The portal for a custom full-screen {@link Dialog} surface, such as Now Playing. */
 export const DialogPortal = DialogPrimitive.Portal;
 
-/** A bare dialog surface for full-screen views; style it yourself. */
-export const DialogPopup = DialogPrimitive.Popup;
+/** A bare dialog surface for full-screen views and the command menu; style it yourself. */
+export function DialogPopup({ ref, finalFocus, ...props }: DialogPrimitive.Popup.Props) {
+  const focusReturn = useKeyboardFocusReturn(ref, finalFocus);
+
+  return <DialogPrimitive.Popup {...props} {...focusReturn} />;
+}
