@@ -14,8 +14,13 @@ import { useMusic } from "@/lib/platform";
 /** The arguments of each page of your playlists, shared by the loader and the page. */
 const playlistsPage = (paginationOpts: PageOpts) => ({ paginationOpts });
 
+/** The arguments of each page of playlists shared with you, shared by the loader and the page. */
+const sharedPage = (paginationOpts: PageOpts) => ({ paginationOpts });
+
 export const Route = createFileRoute("/_app/playlists/")({
   loader: async ({ context: { platform } }) => {
+    // Shared with you, started with your playlists so it arrives with them.
+    void preloadAllRows(platform.music.playlists.shared, sharedPage);
     await preloadAllRows(platform.music.playlists.list, playlistsPage);
   },
   pendingComponent: PlaylistsSkeleton,
@@ -87,7 +92,7 @@ function PlaylistsSkeleton() {
 function PlaylistsPage() {
   const music = useMusic();
   const playlists = useAllRows(music.playlists.list, playlistsPage);
-  const shared = useAllRows(music.playlists.shared, (paginationOpts) => ({ paginationOpts }));
+  const shared = useAllRows(music.playlists.shared, sharedPage);
 
   if (playlists === undefined) return <PlaylistsSkeleton />;
 

@@ -22,6 +22,8 @@ const songsPage = (paginationOpts: PageOpts) => ({ paginationOpts });
 
 export const Route = createFileRoute("/_app/songs")({
   loader: async ({ context: { platform } }) => {
+    // The header's counts, started with the list so they arrive with it.
+    void platform.music.library.home.preload({});
     await preloadFirstPage(platform.music.tracks.list, songsPage, PAGE_SIZE);
   },
   pendingComponent: SongsSkeleton,
