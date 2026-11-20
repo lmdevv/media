@@ -1,4 +1,5 @@
 import type { PlatformSdk } from "@media/sdk/promise";
+import { useFocusPolicy } from "@media/ui/lib/focus-policy";
 import {
   CatchBoundary,
   HeadContent,
@@ -44,6 +45,8 @@ export const Route = createRootRouteWithContext<RouterAppContext>()({
 const NoToaster = () => null;
 
 function RootComponent() {
+  useFocusPolicy();
+
   return (
     <ThemeProvider
       attribute="class"

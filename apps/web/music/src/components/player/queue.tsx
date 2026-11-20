@@ -1,5 +1,6 @@
 import { usePlayer } from "@media/player/react";
 import { hostName, useMusicSession } from "@media/player/session-react";
+import { isOverlayOpen } from "@media/ui/lib/focus-policy";
 import type { SessionEntry } from "@media/player/session-react";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -547,7 +548,7 @@ export function QueuePanel() {
     (event) => {
       if (event.defaultPrevented) return;
 
-      if (document.querySelector("[role=dialog], [role=menu], [role=listbox]") !== null) return;
+      if (isOverlayOpen()) return;
 
       setQueueOpen(false);
     },

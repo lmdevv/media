@@ -6,6 +6,7 @@ import {
   visibleCommands,
 } from "@media/ui/lib/command-menu";
 import type { CommandItem, CommandLeading, CommandPage } from "@media/ui/lib/command-menu";
+import { useKeyboardFocusReturn } from "@media/ui/lib/focus-policy";
 import { cn } from "@media/ui/lib/utils";
 import { CheckIcon } from "lucide-react";
 import { useEffect, useEffectEvent, useId, useReducer, useRef, useState } from "react";
@@ -254,6 +255,8 @@ export function CommandMenu({
     }
   };
 
+  const focusReturn = useKeyboardFocusReturn();
+
   let index = -1;
 
   return (
@@ -273,6 +276,7 @@ export function CommandMenu({
       <Dialog.Portal container={container}>
         <Dialog.Backdrop className="fixed inset-0 z-50 bg-scrim transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0" />
         <Dialog.Popup
+          {...focusReturn}
           initialFocus={inputRef}
           aria-label="Command menu"
           data-slot="command-menu"

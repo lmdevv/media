@@ -2,6 +2,14 @@ import { localOnly } from "@media/contracts/cast";
 import { DRIFT_THRESHOLDS } from "@media/contracts/clock";
 import type { FollowerPlayer } from "@media/contracts/follower";
 import type { NegotiateResponse } from "@media/contracts/media-playback";
+import { sessionSkip } from "@media/contracts/session-next";
+import {
+  SLEEP_FADE_MS,
+  formatSleepTimeLeft,
+  sleepHoldsAutoplay,
+  sleepPausesPlayback,
+  sleepTimerRuns,
+} from "@media/contracts/sleep-timer";
 import { Playback, Versions } from "@media/sdk/effect";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { ChapterPopover } from "@media/ui/components/chapter-popover";
@@ -13,6 +21,8 @@ import {
 } from "@media/ui/components/player-controls";
 import { TrackPopover } from "@media/ui/components/track-popover";
 import type { TrackOption } from "@media/ui/components/track-popover";
+import { fixedValue, useLiveValue } from "@media/ui/lib/live-value";
+import type { LiveValue } from "@media/ui/lib/live-value";
 import { useKeymap } from "@media/ui/lib/use-keymap";
 import { cn } from "@media/ui/lib/utils";
 import { useNavigate } from "@tanstack/react-router";
@@ -22,6 +32,7 @@ import {
   CastIcon,
   InfoIcon,
   ListVideoIcon,
+  MoonIcon,
   PictureInPicture2Icon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -52,7 +63,9 @@ import type { QualityChoice } from "@/playback/quality";
 import { chapterAt, useScrubbing } from "@/playback/scrubbing";
 import { useMediaSession } from "@/playback/use-media-session";
 import { usePictureInPicture } from "@/playback/use-picture-in-picture";
-import { useMediaState, usePlayback } from "@/playback/use-playback";
+import { NO_PROGRESS } from "@/playback/media-progress";
+import type { MediaProgress } from "@/playback/media-progress";
+import { useMediaProgress, useMediaState, usePlayback } from "@/playback/use-playback";
 import { withFacts } from "@/playback/use-version-choice";
 import { nameOf, useMe, useScopes } from "@/session/session";
 import { itemOf } from "@/together/session";
@@ -81,12 +94,16 @@ import {
   SubtitleDelayNotice,
   TryingAnotherWay,
 } from "./player-states";
+import { CustomSleepTimerDialog, SleepTimerMenu, sleepTimerButtonLabel } from "./sleep-timer-menu";
+import { StillWatchingDialog } from "./still-watching-dialog";
 import { StreamInfo } from "./stream-info";
 import { useControlsVisible, useFullscreen, usePlayerLayout } from "./use-player-frame";
 import type { PlayerLayout } from "./use-player-frame";
 import { useSeasonEpisodes } from "./use-season-episodes";
 import { useSubtitleDelay } from "./use-subtitle-delay";
 import { useSubtitlePlacement } from "./use-subtitle-placement";
+import type { SleepTimerControl } from "./use-sleep-timer";
+import type { StillWatchingControl } from "./use-still-watching";
 
 const BUFFER_TARGET_SECONDS = 4;
 
@@ -122,6 +139,10 @@ export interface PlayerScreenProps {
     readonly detail: PlaybackDetail;
     readonly onBack: () => void;
   };
+  /** The page's sleep timer, which outlives this episode's player. */
+  readonly sleepTimer: SleepTimerControl;
+  /** The page's count of autoplay's jumps since the viewer's last input, kept across players. */
+  readonly stillWatching: StillWatchingControl;
 }
 
 const startChoice = (start: PlayerScreenProps["start"]): StartChoice => {
@@ -148,8 +169,39 @@ const useSettled = (value: boolean, ms: number): boolean => {
   return value && settled;
 };
 
+/** The buffering state, filling as the buffer ahead grows. */
+function BufferingAhead({ bufferedAhead }: { readonly bufferedAhead: LiveValue<number> }) {
+  const fraction = useLiveValue(bufferedAhead, (seconds) => seconds / BUFFER_TARGET_SECONDS);
+
+  return <Buffering fraction={fraction} />;
+}
+
+/** Syncing to the session, filling as the buffer ahead grows once the stream plays. */
+function SyncingAhead({
+  bufferedAhead,
+  playing,
+  ...props
+}: Omit<React.ComponentProps<typeof SyncingToSession>, "progress"> & {
+  readonly bufferedAhead: LiveValue<number>;
+  readonly playing: boolean;
+}) {
+  const progress = useLiveValue(bufferedAhead, (seconds) =>
+    playing ? Math.min(1, seconds / BUFFER_TARGET_SECONDS) : 0.2,
+  );
+
+  return <SyncingToSession {...props} progress={progress} />;
+}
+
 /** The player screen. */
-export function PlayerScreen({ titleId, episodeId, version, start, guest }: PlayerScreenProps) {
+export function PlayerScreen({
+  titleId,
+  episodeId,
+  version,
+  start,
+  guest,
+  sleepTimer,
+  stillWatching,
+}: PlayerScreenProps) {
   const platform = usePlatform();
   const me = useMe();
   const scopes = useScopes();
@@ -171,6 +223,7 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
   const [info, setInfo] = useState(false);
   const [episodesOpenIn, setEpisodesOpenIn] = useState<PlayerLayout | null>(null);
   const [volumeOpen, setVolumeOpen] = useState(false);
+  const [customSleepOpen, setCustomSleepOpen] = useState(false);
 
   const [creditsDismissed, setCreditsDismissed] = useState(false);
 
@@ -204,6 +257,9 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
 
   const deviceQuality =
     settings.status === "success" ? (settings.data.device?.streamQuality ?? null) : null;
+
+  // The person's Autoplay setting; on while it loads, or when it fails to.
+  const autoplay = settings.status === "success" ? settings.data.user.autoplay : true;
 
   const watching = useMemo(() => ({ titleId, episodeId: episodeId ?? null }), [titleId, episodeId]);
   const playerNow = useRef<FollowerPlayer | null>(null);
@@ -248,6 +304,7 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
     playerNow.current = output;
   }, [output]);
   const localMedia = useMediaState(video, player);
+  const localProgress = useMediaProgress(video, player);
   const stream = snapshot?.stream ?? null;
   const started = snapshot?.started ?? null;
   const coreStart = snapshot?.coreStart ?? null;
@@ -281,11 +338,22 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
   const airplay = useAirPlay(guest === undefined ? video : null);
   const remotePlayback = useRemotePlayback(guest === undefined ? video : null);
 
-  const media =
-    remote === null ? localMedia : { ...localMedia, ...remote, bufferedAheadSeconds: 0 };
+  const media = remote === null ? localMedia : { ...localMedia, ...remote };
+
+  const progress = useMemo(
+    (): MediaProgress =>
+      casting === null
+        ? localProgress
+        : { position: casting.player.position, bufferedAhead: NO_PROGRESS.bufferedAhead },
+    [casting, localProgress],
+  );
 
   const duration = stream?.durationSeconds ?? (started?.file.probe.durationMs ?? 0) / 1000;
-  const position = scrub ?? media.positionSeconds;
+
+  const position = useMemo(
+    () => (scrub === null ? progress.position : fixedValue(scrub)),
+    [scrub, progress.position],
+  );
 
   const heading =
     episode === null ? titleName : `${titleName} ${episodeCode(episode)} ${episode.name}`;
@@ -360,7 +428,9 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
 
   useEffect(() => () => clearTimeout(keyPreviewTimer.current), []);
 
-  const currentChapter = chapterAt(scrubbing.chapters, media.positionSeconds);
+  const currentChapter = useLiveValue(progress.position, (seconds) =>
+    chapterAt(scrubbing.chapters, seconds),
+  );
 
   // A TV never needs a gesture.
   const needsGesture = snapshot?.needsGesture === true && casting === null;
@@ -636,8 +706,9 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
     setLeaving(null);
   }, [leaving, play]);
 
-  // Back to where focus was in the player, or to the player itself. The dialog would move focus
-  // from the frame, which only script can focus, to its first button, so the frame is focused here.
+  // After a keyboard open, back to where focus was in the player, or to the player itself. The
+  // dialog would move focus from the frame, which only script can focus, to its first button, so
+  // the frame is focused here. After a pointer open the dialog never calls this.
   const focusAfterLeaving = useCallback((): HTMLElement | false => {
     const previous = focusBeforeLeaving.current;
 
@@ -654,16 +725,84 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
     return false;
   }, [frame]);
 
-  const remaining = Math.max(0, duration - media.positionSeconds);
+  const creditsReached = useLiveValue(
+    progress.position,
+    (seconds) => duration - seconds <= creditsSeconds(duration),
+  );
 
   const inCredits =
     isPlaying &&
     leaving === null &&
     (!media.paused || media.ended) &&
     duration > 0 &&
-    (media.ended || remaining <= creditsSeconds(duration));
+    (media.ended || creditsReached);
 
-  const showNext = inCredits && nextEpisode !== null && !creditsDismissed && !inSession;
+  const sleepKey = `${titleId}:${episodeId ?? ""}`;
+  const { report: reportToSleepTimer, cancel: cancelSleepTimer } = sleepTimer;
+  const playingForSleep = isPlaying && !media.paused;
+  const playbackPosition = progress.position;
+
+  // Reports from the position without re-rendering the screen: once a second while the end is
+  // further off than the fade, then on every move so the fade starts on time. A change of
+  // playing runs the effect again, which reports at once.
+  useEffect(() => {
+    if (!isPlaying) return undefined;
+
+    let reported: { readonly seconds: number | null } | null = null;
+
+    const report = (): void => {
+      const leftMs = duration > 0 ? Math.max(0, duration - playbackPosition.get()) * 1000 : null;
+      const seconds = leftMs === null ? null : Math.ceil(leftMs / 1000);
+      const nearFade = leftMs !== null && leftMs <= SLEEP_FADE_MS + 1000;
+
+      if (!nearFade && reported !== null && reported.seconds === seconds) return;
+
+      reported = { seconds };
+      reportToSleepTimer({ itemKey: sleepKey, leftMs, playing: playingForSleep });
+    };
+
+    report();
+
+    return playbackPosition.subscribe(report);
+  }, [reportToSleepTimer, isPlaying, sleepKey, duration, playbackPosition, playingForSleep]);
+
+  // A group session plays for everyone, so a timer on one device has no place in it.
+  useEffect(() => {
+    if (inSession) cancelSleepTimer();
+  }, [inSession, cancelSleepTimer]);
+
+  const sleepPauses = sleepPausesPlayback(sleepTimer.timer);
+  const sleepFade = sleepTimer.volume;
+  const levelBeforeFade = useRef<number | null>(null);
+  const asking = stillWatching.watching.state === "asking";
+
+  // Pauses as the timer runs out, before the effect below puts the volume back, and pauses the
+  // next episode too if the timer ran out while it loaded. Asking whether anyone is still watching
+  // pauses too.
+  useEffect(() => {
+    if ((sleepPauses || asking) && playingForSleep) output?.pause();
+  }, [sleepPauses, asking, playingForSleep, output]);
+
+  // The fade scales the level the viewer set and puts it back after; a TV keeps its own level.
+  useEffect(() => {
+    if (video === null) return;
+
+    if (sleepFade < 1 && casting === null) {
+      levelBeforeFade.current ??= video.volume;
+      video.volume = levelBeforeFade.current * sleepFade;
+    } else if (levelBeforeFade.current !== null) {
+      video.volume = levelBeforeFade.current;
+      levelBeforeFade.current = null;
+    }
+  }, [video, sleepFade, casting]);
+
+  const showNext =
+    inCredits &&
+    nextEpisode !== null &&
+    !creditsDismissed &&
+    !inSession &&
+    !asking &&
+    !sleepHoldsAutoplay(sleepTimer.timer, sleepKey);
 
   const sessionPlayNow = together.actions.playNow;
   const sessionPlayQueued = together.actions.playQueued;
@@ -690,15 +829,15 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
     if (nextEpisode !== null) playEpisode(nextEpisode.id);
   }, [nextEpisode, playEpisode]);
 
-  const queuedFirst = follow.queue.length > 0;
+  const nextSkip = sessionSkip({
+    mayControl: together.mayControl,
+    mayAdd: together.mayAdd,
+    queued: follow.queue.length > 0,
+    nextPlayable: nextEpisode?.available === true,
+  });
 
-  const sessionNextAction = !together.mayControl
-    ? null
-    : queuedFirst
-      ? sessionPlayQueued
-      : together.mayAdd && nextEpisode?.available === true
-        ? playNext
-        : null;
+  const sessionNextAction =
+    nextSkip === null ? null : { queued: sessionPlayQueued, episode: playNext }[nextSkip];
 
   const nextAction = inSession ? sessionNextAction : nextEpisode === null ? null : playNext;
 
@@ -777,7 +916,7 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
           album: episode === null ? "" : episodeCode(episode),
           artwork: artworkUrl(artworkKey, "poster") ?? null,
           durationSeconds: duration,
-          positionSeconds: media.positionSeconds,
+          position: progress.position,
           paused: media.paused,
           play: () => {
             if (output?.isPaused() === true) togglePlay();
@@ -791,8 +930,11 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
         },
   );
 
+  const { countdownEnded } = stillWatching;
+
+  // Only the countdown's end is autoplay's jump; the card's Play next is the viewer's own input.
   useEffect(() => {
-    if (!showNext) {
+    if (!showNext || !autoplay) {
       setCountdown(null);
 
       return undefined;
@@ -802,13 +944,19 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
       Stream.runForEach(
         Playback.autoplayCountdown(AUTOPLAY_COUNTDOWN.totalMs, AUTOPLAY_COUNTDOWN.stepMs),
         (left) => Effect.sync(() => setCountdown(left)),
-      ).pipe(Effect.andThen(Effect.sync(playNext))),
+      ).pipe(
+        Effect.andThen(
+          Effect.sync(() => {
+            if (countdownEnded()) playNext();
+          }),
+        ),
+      ),
     );
 
     return () => {
       Effect.runFork(Fiber.interrupt(fiber));
     };
-  }, [showNext, playNext]);
+  }, [showNext, autoplay, playNext, countdownEnded]);
 
   const stalled = useSettled(isPlaying && media.buffering, BUFFERING_GRACE_MS);
 
@@ -856,6 +1004,7 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
     menu ||
     episodesShown ||
     (volumeOpen && volumeSettable) ||
+    customSleepOpen ||
     leaving !== null ||
     showNext ||
     sessionCard !== null ||
@@ -875,39 +1024,40 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
       remotePlayback?.active !== true,
   });
 
-  useKeymap(
-    playerKeymap,
-    {
-      "menu.toggle": () => {
-        if (guest === undefined) setMenu((open) => !open);
-      },
-      "player.toggle": togglePlay,
-      "player.toggle-k": togglePlay,
-      "player.back-10": () => skipByKey(-10),
-      "player.forward-10": () => skipByKey(10),
-      "player.back-5": () => skipByKey(-5),
-      "player.forward-5": () => skipByKey(5),
-      "player.volume-up": () => {
-        if (volumeSettable) commitVolume(media.volume + VOLUME_STEP);
-        else if (media.muted) setMuted(false);
-      },
-      "player.volume-down": () => {
-        if (volumeSettable) commitVolume(media.volume - VOLUME_STEP);
-      },
-      "player.fullscreen": toggleFullscreen,
-      "player.mute": () => setMuted(!(media.muted || silent)),
-      "player.subtitles": toggleSubtitles,
-      "player.subtitles-earlier": () => subtitleDelay.stepWithNotice(-1),
-      "player.subtitles-later": () => subtitleDelay.stepWithNotice(1),
-      "player.exit": (event) => {
-        if (takeEscape(event)) return;
+  useKeymap(playerKeymap, {
+    "menu.toggle": () => {
+      if (guest !== undefined) return;
 
-        if (infoShown) setInfo(false);
-        else askToLeave();
-      },
+      if (menu) setMenu(false);
+      else if (leaving === null && !asking && together.starting === undefined && !customSleepOpen) {
+        setMenu(true);
+      }
     },
-    !menu && leaving === null && together.starting === undefined,
-  );
+    "player.toggle": togglePlay,
+    "player.toggle-k": togglePlay,
+    "player.back-10": () => skipByKey(-10),
+    "player.forward-10": () => skipByKey(10),
+    "player.back-5": () => skipByKey(-5),
+    "player.forward-5": () => skipByKey(5),
+    "player.volume-up": () => {
+      if (volumeSettable) commitVolume(media.volume + VOLUME_STEP);
+      else if (media.muted) setMuted(false);
+    },
+    "player.volume-down": () => {
+      if (volumeSettable) commitVolume(media.volume - VOLUME_STEP);
+    },
+    "player.fullscreen": toggleFullscreen,
+    "player.mute": () => setMuted(!(media.muted || silent)),
+    "player.subtitles": toggleSubtitles,
+    "player.subtitles-earlier": () => subtitleDelay.stepWithNotice(-1),
+    "player.subtitles-later": () => subtitleDelay.stepWithNotice(1),
+    "player.exit": (event) => {
+      if (takeEscape(event)) return;
+
+      if (infoShown) setInfo(false);
+      else askToLeave();
+    },
+  });
 
   const canStart =
     guest === undefined &&
@@ -1094,6 +1244,21 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
     <CastMenu trigger={trigger} container={overlayContainer} {...castTargets} />
   );
 
+  const showSleepTimer = isPlaying && !inSession;
+  const sleepTimeLeft = sleepTimer.leftMs === null ? null : formatSleepTimeLeft(sleepTimer.leftMs);
+
+  const sleepMenu = (trigger: React.ReactElement) => (
+    <SleepTimerMenu
+      trigger={trigger}
+      container={overlayContainer}
+      timeLeft={sleepTimeLeft}
+      itemKey={episodeId === undefined ? null : sleepKey}
+      onChoose={sleepTimer.set}
+      onCustom={() => setCustomSleepOpen(true)}
+      onCancel={sleepTimerRuns(sleepTimer.timer) ? cancelSleepTimer : null}
+    />
+  );
+
   const scrubProps = {
     describe: scrubbing.describe,
     chapters: scrubbing.chapterStarts,
@@ -1195,12 +1360,11 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
       const blocked = followState?.follow === "blocked" || snapshot?.needsGesture === true;
 
       return (
-        <SyncingToSession
+        <SyncingAhead
           hostName={together.hostName}
           targetMs={together.positionNow()}
-          progress={
-            isPlaying ? Math.min(1, media.bufferedAheadSeconds / BUFFER_TARGET_SECONDS) : 0.2
-          }
+          bufferedAhead={progress.bufferedAhead}
+          playing={isPlaying}
           onJoin={blocked ? () => controller?.resumeWithGesture() : undefined}
         />
       );
@@ -1223,7 +1387,7 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
     }
 
     if (stalled) {
-      return <Buffering fraction={media.bufferedAheadSeconds / BUFFER_TARGET_SECONDS} />;
+      return <BufferingAhead bufferedAhead={progress.bufferedAhead} />;
     }
 
     return null;
@@ -1298,6 +1462,21 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
           )}
         </div>
         <div className="flex items-center gap-6">
+          {showSleepTimer
+            ? sleepMenu(
+                <PlayerButton
+                  aria-label={sleepTimerButtonLabel(sleepTimeLeft)}
+                  active={sleepTimerRuns(sleepTimer.timer)}
+                >
+                  <MoonIcon strokeWidth={1.75} aria-hidden />
+                  {sleepTimeLeft === null ? null : (
+                    <span className="relative font-sans text-label/label font-semibold tabular-nums">
+                      {sleepTimeLeft}
+                    </span>
+                  )}
+                </PlayerButton>,
+              )
+            : null}
           {isPlaying && pip !== null && casting === null ? (
             <PlayerButton
               aria-label="Picture in picture"
@@ -1331,7 +1510,7 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
         <StreamInfo
           file={started.file}
           stream={stream}
-          bufferedAheadSeconds={media.bufferedAheadSeconds}
+          bufferedAhead={progress.bufferedAhead}
           onClose={() => setInfo(false)}
           className="absolute top-21 right-10"
         />
@@ -1440,6 +1619,7 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
         locked={locked}
         onRoom={session === null ? onRoom : undefined}
         castMenu={canCast ? castMenu : undefined}
+        sleepTimer={showSleepTimer ? { menu: sleepMenu, timeLeft: sleepTimeLeft } : undefined}
         bottomBarRef={setControlsTop}
       />
     </div>
@@ -1472,7 +1652,8 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
           <PhoneSessionVideoChrome
             label={together.mayControl ? null : `${together.hostName} is hosting`}
             playing={!media.paused}
-            fraction={duration <= 0 ? 0 : Math.min(1, position / duration)}
+            position={position}
+            duration={duration}
             onPlayPause={together.mayControl ? togglePlay : null}
             onFullscreen={toggleFullscreen}
           />
@@ -1489,7 +1670,7 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
             still={artworkUrl(nextEpisode.still, "card")}
             actions={{
               kind: "advance",
-              countdownMs: countdown ?? AUTOPLAY_COUNTDOWN.totalMs,
+              countdownMs: autoplay ? (countdown ?? AUTOPLAY_COUNTDOWN.totalMs) : null,
               onPlayNext: playNext,
               onWatchCredits: () => setCreditsDismissed(true),
             }}
@@ -1541,12 +1722,27 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
             onCancel={together.actions.cancelStart}
             onStart={together.actions.confirmStart}
           />
+          <CustomSleepTimerDialog
+            open={customSleepOpen && showSleepTimer}
+            container={overlays}
+            onOpenChange={setCustomSleepOpen}
+            onStart={(minutes) => sleepTimer.set({ kind: "after", minutes })}
+          />
           <LeaveDialog
             open={leaving !== null}
             container={overlays}
             returnFocus={focusAfterLeaving}
             onStay={stay}
             onLeave={backToDetails}
+          />
+          <StillWatchingDialog
+            open={asking}
+            container={overlays}
+            onContinue={() => {
+              stillWatching.continueWatching();
+              playNext();
+            }}
+            onDone={stillWatching.done}
           />
           {guest === undefined ? (
             <MemberPlayerMenu
