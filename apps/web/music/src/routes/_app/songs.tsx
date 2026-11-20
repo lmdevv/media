@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import { createFileRoute } from "@tanstack/react-router";
 import { SearchIcon, ShuffleIcon } from "lucide-react";
 import { useDeferredValue, useState } from "react";
@@ -9,13 +10,41 @@ import { ListTail } from "@/components/library/paged";
 import { TrackList, TrackListSkeleton } from "@/components/library/track-list";
 import { formatTotal, plural } from "@/lib/format";
 import { readPages } from "@/lib/pages";
-import { usePages } from "@media/ui/lib/pages";
+import { preloadFirstPage, usePages } from "@media/ui/lib/pages";
+import type { PageOpts } from "@media/ui/lib/pages";
 import { useMusic, useRead } from "@/lib/platform";
 import { useHeld } from "@/lib/use-held";
 
-export const Route = createFileRoute("/_app/songs")({ component: SongsPage });
-
 const PAGE_SIZE = 100;
+
+/** The arguments of each page of every song, shared by the loader and the list. */
+const songsPage = (paginationOpts: PageOpts) => ({ paginationOpts });
+
+export const Route = createFileRoute("/_app/songs")({
+  loader: async ({ context: { platform } }) => {
+    await preloadFirstPage(platform.music.tracks.list, songsPage, PAGE_SIZE);
+  },
+  pendingComponent: SongsSkeleton,
+  component: SongsPage,
+});
+
+function SongsSkeleton() {
+  return (
+    <div className="flex flex-col gap-7 px-5 pt-safe-top lg:px-12 lg:pt-row">
+      <PageHeader
+        eyebrow={null}
+        title="Songs"
+        actions={
+          <div aria-hidden className="flex w-full items-center gap-2 lg:w-auto">
+            <Skeleton className="h-9 w-full min-w-0 shrink grow rounded-sm lg:w-sidebar lg:grow-0" />
+            <Skeleton className="h-9 w-30 shrink-0 rounded-full" />
+          </div>
+        }
+      />
+      <TrackListSkeleton />
+    </div>
+  );
+}
 
 const SHUFFLE_LIMIT = 2000;
 
@@ -97,7 +126,7 @@ function FilteredSongs({ query }: { readonly query: string }) {
 
 function AllSongs() {
   const music = useMusic();
-  const paged = usePages(music.tracks.list, (paginationOpts) => ({ paginationOpts }), PAGE_SIZE);
+  const paged = usePages(music.tracks.list, songsPage, PAGE_SIZE);
 
   if (paged.status === "loading") return <TrackListSkeleton />;
 

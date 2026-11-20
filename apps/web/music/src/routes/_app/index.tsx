@@ -1,5 +1,6 @@
 import { usePlayer } from "@media/player/react";
 import { buttonClassName } from "@/components/ui/button";
+import { Skeleton, SkeletonLine } from "@/components/ui/skeleton";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { DiscIcon, FolderIcon } from "lucide-react";
 import type { ReactNode } from "react";
@@ -25,7 +26,16 @@ import { formatCount, formatTotal, greeting, initial, weekday } from "@/lib/form
 import { placeholderAt } from "@/lib/art";
 import { useNow } from "@/lib/use-now";
 
-export const Route = createFileRoute("/_app/")({ component: HomeScreen });
+export const Route = createFileRoute("/_app/")({
+  loader: async ({ context: { platform } }) => {
+    await Promise.all([
+      platform.music.library.home.preload({}),
+      platform.core.auth.sessions.current.preload({}),
+    ]);
+  },
+  pendingComponent: HomeSkeleton,
+  component: HomeScreen,
+});
 
 const firstName = (name: string): string => name.split(/\s+/)[0] ?? "";
 
@@ -218,12 +228,90 @@ function EmptyLibrary({ admin }: { readonly admin: boolean }) {
   );
 }
 
+const SIX = Array.from({ length: 6 }, (_, index) => index);
+
+/** A desktop section title's line. */
+const sectionTitle = <SkeletonLine className="font-sans text-lg/lg" bar="h-3.5 w-45" />;
+
+/** A phone section title's line. */
+const phoneSectionTitle = (
+  <SkeletonLine className="px-5 font-sans text-phone-title leading-lg" bar="h-4 w-36" />
+);
+
+/** Home's shape while it loads, at desktop and phone width, laid out as the loaded page is. */
 function HomeSkeleton() {
   return (
-    <div className="flex flex-col gap-row px-5 pt-row lg:px-12">
-      <div className="h-17.5" />
-      <AlbumRowSkeleton title={false} />
-      <AlbumRowSkeleton />
+    <div aria-hidden>
+      <div className="hidden flex-col gap-row px-12 pt-row pb-12 lg:flex">
+        <div className="flex flex-col gap-1.5">
+          <SkeletonLine className="font-mono text-xs/xs" bar="h-3 w-56" />
+          <SkeletonLine className="font-sans text-2xl/2xl" bar="h-8 w-80 max-w-full" />
+        </div>
+        <div className="grid grid-cols-2 gap-2 xl:grid-cols-3">
+          {SIX.map((index) => (
+            <Skeleton key={index} className="h-row-touch rounded-sm" />
+          ))}
+        </div>
+        <div className="flex flex-col gap-4">
+          {sectionTitle}
+          <div className="grid grid-cols-3 gap-5 xl:grid-cols-6">
+            {SIX.map((index) => (
+              <div key={index} className="flex flex-col gap-2.5">
+                <Skeleton className="aspect-square w-full rounded-md" />
+                <div className="flex flex-col gap-0.5">
+                  <SkeletonLine className="font-sans text-base/sm" bar="h-2.5 w-[70%]" />
+                  <SkeletonLine className="font-sans text-sm/xs" bar="h-2.5 w-[45%]" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="flex flex-col gap-4">
+          {sectionTitle}
+          <div className="grid grid-cols-3 gap-5 xl:grid-cols-6">
+            {SIX.map((index) => (
+              <div key={index} className="flex flex-col items-center gap-2.5">
+                <Skeleton className="aspect-square w-full rounded-full" />
+                <SkeletonLine className="font-sans text-base/sm" bar="h-2.5 w-20" />
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-7.5 pt-safe-top lg:hidden">
+        <div className="flex items-end justify-between px-5">
+          <span className="font-sans text-phone-large-title leading-10.25 font-heavy tracking-tighter text-text">
+            Home
+          </span>
+          <Skeleton className="mb-1 size-8.5 rounded-full" />
+        </div>
+        <div className="flex flex-col gap-3">
+          {phoneSectionTitle}
+          <div className="flex gap-3 overflow-hidden px-5">
+            {SIX.slice(0, 2).map((index) => (
+              <div key={index} className="flex w-62.5 shrink-0 flex-col gap-2">
+                <SkeletonLine className="font-sans text-sm/xs" bar="h-2.5 w-24" />
+                <Skeleton className="h-80 w-62.5 rounded-phone-card" />
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="flex flex-col gap-3">
+          {phoneSectionTitle}
+          <div className="flex gap-3 overflow-hidden px-5">
+            {SIX.slice(0, 3).map((index) => (
+              <div key={index} className="flex w-42.5 shrink-0 flex-col gap-1.5">
+                <Skeleton className="size-42.5 rounded-phone-art" />
+                <div className="flex flex-col">
+                  <SkeletonLine className="font-sans text-sm/sm" bar="h-2.5 w-28" />
+                  <SkeletonLine className="font-sans text-sm/sm" bar="h-2.5 w-20" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
