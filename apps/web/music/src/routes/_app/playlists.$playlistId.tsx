@@ -72,7 +72,7 @@ function PlaylistSkeleton() {
   return (
     <div className="flex flex-col gap-8 px-5 pt-safe-top-sm lg:px-12 lg:pt-row">
       <CollectionHeaderSkeleton />
-      <TrackListSkeleton />
+      <TrackListSkeleton header />
     </div>
   );
 }

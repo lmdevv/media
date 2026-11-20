@@ -41,7 +41,7 @@ function SongsSkeleton() {
           </div>
         }
       />
-      <TrackListSkeleton />
+      <TrackListSkeleton header />
     </div>
   );
 }
@@ -109,7 +109,7 @@ function FilteredSongs({ query }: { readonly query: string }) {
   const results = useRead(useMusic().library.search, { query, limit: 50 });
   const shown = useHeld(results);
 
-  if (shown === undefined) return <TrackListSkeleton />;
+  if (shown === undefined) return <TrackListSkeleton header />;
 
   if (shown.tracks.length === 0) {
     return <p className="font-sans text-md/md text-text-muted">No songs match “{query}”.</p>;
@@ -128,7 +128,7 @@ function AllSongs() {
   const music = useMusic();
   const paged = usePages(music.tracks.list, songsPage, PAGE_SIZE);
 
-  if (paged.status === "loading") return <TrackListSkeleton />;
+  if (paged.status === "loading") return <TrackListSkeleton header />;
 
   if (paged.status === "failed") throw new Error(paged.message);
 

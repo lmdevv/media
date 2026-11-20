@@ -59,7 +59,7 @@ function LikedFrame({
 function LikedSkeleton() {
   return (
     <LikedFrame eyebrow="Liked songs" tracks={[]}>
-      <TrackListSkeleton />
+      <TrackListSkeleton header />
     </LikedFrame>
   );
 }
