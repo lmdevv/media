@@ -1,5 +1,5 @@
 import { Popover } from "@base-ui/react/popover";
-import { useKeyboardFocusReturn } from "@media/ui/lib/focus-policy";
+import { keepsShortcutsProps, useKeyboardFocusReturn } from "@media/ui/lib/focus-policy";
 import { Radio } from "@base-ui/react/radio";
 import { RadioGroup } from "@base-ui/react/radio-group";
 import { cn } from "@media/ui/lib/utils";
@@ -244,6 +244,7 @@ export function TrackPopover({
           className="z-50"
         >
           <Popover.Popup
+            {...keepsShortcutsProps}
             {...focusReturn}
             aria-label={label}
             className="origin-(--transform-origin) shadow-overlay transition-[opacity,scale] data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0"

@@ -42,12 +42,16 @@ const RADIO_ROLES = new Set(["radio", "menuitemradio"]);
 
 const TEXT_ROLES = new Set(["textbox", "searchbox"]);
 
-/** The attribute that marks a full-screen view built on a dialog, such as Now Playing. */
+/**
+ * The attribute that marks an overlay that is part of the screen under it rather than a dialog:
+ * Now Playing, or a player panel such as the tracks or episodes popover.
+ */
 const KEEPS_SHORTCUTS_ATTRIBUTE = "data-keeps-shortcuts";
 
 /**
- * Spread on a dialog popup that is a full-screen view rather than a dialog, so the app's shortcuts
- * keep working while it is open.
+ * Spread on an overlay popup that is part of the screen under it, such as a full-screen view or a
+ * player panel, so the screen's shortcuts keep working while it is open. Keys the overlay handles
+ * itself stay its own, since a handled key press is not a shortcut.
  */
 export const keepsShortcutsProps = { [KEEPS_SHORTCUTS_ATTRIBUTE]: "" } as const;
 

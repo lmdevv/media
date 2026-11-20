@@ -1,5 +1,5 @@
 import { Popover } from "@base-ui/react/popover";
-import { useKeyboardFocusReturn } from "@media/ui/lib/focus-policy";
+import { keepsShortcutsProps, useKeyboardFocusReturn } from "@media/ui/lib/focus-policy";
 import { formatTimecode } from "@media/ui/lib/timecode";
 import { cn } from "@media/ui/lib/utils";
 import { useState } from "react";
@@ -108,6 +108,7 @@ export function ChapterPopover({
           className="z-50"
         >
           <Popover.Popup
+            {...keepsShortcutsProps}
             {...focusReturn}
             aria-label="Chapters"
             className="origin-(--transform-origin) shadow-overlay transition-[opacity,scale] data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0"

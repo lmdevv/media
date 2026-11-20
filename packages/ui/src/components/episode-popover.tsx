@@ -1,5 +1,5 @@
 import { Popover } from "@base-ui/react/popover";
-import { useKeyboardFocusReturn } from "@media/ui/lib/focus-policy";
+import { keepsShortcutsProps, useKeyboardFocusReturn } from "@media/ui/lib/focus-policy";
 import { cn } from "@media/ui/lib/utils";
 import { useCallback, useRef } from "react";
 import type { KeyboardEvent, ReactElement, Ref } from "react";
@@ -268,6 +268,7 @@ export function EpisodePopover<Id extends string>({
           className="z-50"
         >
           <Popover.Popup
+            {...keepsShortcutsProps}
             {...focusReturn}
             aria-label="Episodes"
             initialFocus={() => {
