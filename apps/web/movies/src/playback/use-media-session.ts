@@ -1,3 +1,4 @@
+import type { LiveValue } from "@media/ui/lib/live-value";
 import { useEffect, useLayoutEffect, useRef } from "react";
 
 /** What the system shows and what its buttons do. */
@@ -10,7 +11,8 @@ export interface MediaSessionInput {
   /** An absolute artwork URL, or null. */
   readonly artwork: string | null;
   readonly durationSeconds: number;
-  readonly positionSeconds: number;
+  /** Seconds played; the system hears it to the whole second, without a re-render. */
+  readonly position: LiveValue<number>;
   readonly paused: boolean;
   readonly play: () => void;
   readonly pause: () => void;
@@ -62,7 +64,7 @@ export const useMediaSession = (input: MediaSessionInput | null): void => {
 
     if (session === null) return undefined;
 
-    const position = (): number => latest.current?.positionSeconds ?? 0;
+    const position = (): number => latest.current?.position.get() ?? 0;
 
     const handlers: ReadonlyArray<readonly [MediaSessionAction, MediaSessionActionHandler | null]> =
       [
@@ -104,22 +106,32 @@ export const useMediaSession = (input: MediaSessionInput | null): void => {
 
   const paused = input?.paused ?? true;
   const duration = input?.durationSeconds ?? 0;
-  const second = Math.floor(input?.positionSeconds ?? 0);
-
-  const open = input !== null;
+  const position = input?.position ?? null;
 
   useEffect(() => {
     const session = mediaSession();
 
-    if (session === null || !open) return;
+    if (session === null || position === null) return undefined;
     session.playbackState = paused ? "paused" : "playing";
 
-    if (duration > 0 && "setPositionState" in session) {
+    if (duration <= 0 || !("setPositionState" in session)) return undefined;
+
+    let published: number | null = null;
+
+    const publish = (): void => {
+      const second = Math.floor(position.get());
+
+      if (second === published) return;
+      published = second;
       session.setPositionState({
         duration,
         playbackRate: 1,
         position: Math.min(duration, Math.max(0, second)),
       });
-    }
-  }, [open, paused, duration, second]);
+    };
+
+    publish();
+
+    return position.subscribe(publish);
+  }, [position, paused, duration]);
 };

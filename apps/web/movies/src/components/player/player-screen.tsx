@@ -14,6 +14,8 @@ import {
 } from "@media/ui/components/player-controls";
 import { TrackPopover } from "@media/ui/components/track-popover";
 import type { TrackOption } from "@media/ui/components/track-popover";
+import { fixedValue, useLiveValue } from "@media/ui/lib/live-value";
+import type { LiveValue } from "@media/ui/lib/live-value";
 import { useKeymap } from "@media/ui/lib/use-keymap";
 import { cn } from "@media/ui/lib/utils";
 import { useNavigate } from "@tanstack/react-router";
@@ -53,7 +55,9 @@ import type { QualityChoice } from "@/playback/quality";
 import { chapterAt, useScrubbing } from "@/playback/scrubbing";
 import { useMediaSession } from "@/playback/use-media-session";
 import { usePictureInPicture } from "@/playback/use-picture-in-picture";
-import { useMediaState, usePlayback } from "@/playback/use-playback";
+import { NO_PROGRESS } from "@/playback/media-progress";
+import type { MediaProgress } from "@/playback/media-progress";
+import { useMediaProgress, useMediaState, usePlayback } from "@/playback/use-playback";
 import { withFacts } from "@/playback/use-version-choice";
 import { nameOf, useMe, useScopes } from "@/session/session";
 import { itemOf } from "@/together/session";
@@ -148,6 +152,29 @@ const useSettled = (value: boolean, ms: number): boolean => {
 
   return value && settled;
 };
+
+/** The buffering state, filling as the buffer ahead grows. */
+function BufferingAhead({ bufferedAhead }: { readonly bufferedAhead: LiveValue<number> }) {
+  const fraction = useLiveValue(bufferedAhead, (seconds) => seconds / BUFFER_TARGET_SECONDS);
+
+  return <Buffering fraction={fraction} />;
+}
+
+/** Syncing to the session, filling as the buffer ahead grows once the stream plays. */
+function SyncingAhead({
+  bufferedAhead,
+  playing,
+  ...props
+}: Omit<React.ComponentProps<typeof SyncingToSession>, "progress"> & {
+  readonly bufferedAhead: LiveValue<number>;
+  readonly playing: boolean;
+}) {
+  const progress = useLiveValue(bufferedAhead, (seconds) =>
+    playing ? Math.min(1, seconds / BUFFER_TARGET_SECONDS) : 0.2,
+  );
+
+  return <SyncingToSession {...props} progress={progress} />;
+}
 
 /** The player screen. */
 export function PlayerScreen({ titleId, episodeId, version, start, guest }: PlayerScreenProps) {
@@ -249,6 +276,7 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
     playerNow.current = output;
   }, [output]);
   const localMedia = useMediaState(video, player);
+  const localProgress = useMediaProgress(video, player);
   const stream = snapshot?.stream ?? null;
   const started = snapshot?.started ?? null;
   const coreStart = snapshot?.coreStart ?? null;
@@ -282,11 +310,22 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
   const airplay = useAirPlay(guest === undefined ? video : null);
   const remotePlayback = useRemotePlayback(guest === undefined ? video : null);
 
-  const media =
-    remote === null ? localMedia : { ...localMedia, ...remote, bufferedAheadSeconds: 0 };
+  const media = remote === null ? localMedia : { ...localMedia, ...remote };
+
+  const progress = useMemo(
+    (): MediaProgress =>
+      casting === null
+        ? localProgress
+        : { position: casting.player.position, bufferedAhead: NO_PROGRESS.bufferedAhead },
+    [casting, localProgress],
+  );
 
   const duration = stream?.durationSeconds ?? (started?.file.probe.durationMs ?? 0) / 1000;
-  const position = scrub ?? media.positionSeconds;
+
+  const position = useMemo(
+    () => (scrub === null ? progress.position : fixedValue(scrub)),
+    [scrub, progress.position],
+  );
 
   const heading =
     episode === null ? titleName : `${titleName} ${episodeCode(episode)} ${episode.name}`;
@@ -361,7 +400,9 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
 
   useEffect(() => () => clearTimeout(keyPreviewTimer.current), []);
 
-  const currentChapter = chapterAt(scrubbing.chapters, media.positionSeconds);
+  const currentChapter = useLiveValue(progress.position, (seconds) =>
+    chapterAt(scrubbing.chapters, seconds),
+  );
 
   // A TV never needs a gesture.
   const needsGesture = snapshot?.needsGesture === true && casting === null;
@@ -655,14 +696,17 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
     return false;
   }, [frame]);
 
-  const remaining = Math.max(0, duration - media.positionSeconds);
+  const creditsReached = useLiveValue(
+    progress.position,
+    (seconds) => duration - seconds <= creditsSeconds(duration),
+  );
 
   const inCredits =
     isPlaying &&
     leaving === null &&
     (!media.paused || media.ended) &&
     duration > 0 &&
-    (media.ended || remaining <= creditsSeconds(duration));
+    (media.ended || creditsReached);
 
   const showNext = inCredits && nextEpisode !== null && !creditsDismissed && !inSession;
 
@@ -778,7 +822,7 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
           album: episode === null ? "" : episodeCode(episode),
           artwork: artworkUrl(artworkKey, "poster") ?? null,
           durationSeconds: duration,
-          positionSeconds: media.positionSeconds,
+          position: progress.position,
           paused: media.paused,
           play: () => {
             if (output?.isPaused() === true) togglePlay();
@@ -1196,12 +1240,11 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
       const blocked = followState?.follow === "blocked" || snapshot?.needsGesture === true;
 
       return (
-        <SyncingToSession
+        <SyncingAhead
           hostName={together.hostName}
           targetMs={together.positionNow()}
-          progress={
-            isPlaying ? Math.min(1, media.bufferedAheadSeconds / BUFFER_TARGET_SECONDS) : 0.2
-          }
+          bufferedAhead={progress.bufferedAhead}
+          playing={isPlaying}
           onJoin={blocked ? () => controller?.resumeWithGesture() : undefined}
         />
       );
@@ -1224,7 +1267,7 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
     }
 
     if (stalled) {
-      return <Buffering fraction={media.bufferedAheadSeconds / BUFFER_TARGET_SECONDS} />;
+      return <BufferingAhead bufferedAhead={progress.bufferedAhead} />;
     }
 
     return null;
@@ -1332,7 +1375,7 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
         <StreamInfo
           file={started.file}
           stream={stream}
-          bufferedAheadSeconds={media.bufferedAheadSeconds}
+          bufferedAhead={progress.bufferedAhead}
           onClose={() => setInfo(false)}
           className="absolute top-21 right-10"
         />
@@ -1473,7 +1516,8 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
           <PhoneSessionVideoChrome
             label={together.mayControl ? null : `${together.hostName} is hosting`}
             playing={!media.paused}
-            fraction={duration <= 0 ? 0 : Math.min(1, position / duration)}
+            position={position}
+            duration={duration}
             onPlayPause={together.mayControl ? togglePlay : null}
             onFullscreen={toggleFullscreen}
           />
