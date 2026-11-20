@@ -86,6 +86,7 @@ import { useControlsVisible, useFullscreen, usePlayerLayout } from "./use-player
 import type { PlayerLayout } from "./use-player-frame";
 import { useSeasonEpisodes } from "./use-season-episodes";
 import { useSubtitleDelay } from "./use-subtitle-delay";
+import { useSubtitlePlacement } from "./use-subtitle-placement";
 
 const BUFFER_TARGET_SECONDS = 4;
 
@@ -157,6 +158,7 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
   const [frame, setFrame] = useState<HTMLDivElement | null>(null);
   const [overlays, setOverlays] = useState<HTMLDivElement | null>(null);
   const [video, setVideo] = useState<HTMLVideoElement | null>(null);
+  const [controlsTop, setControlsTop] = useState<HTMLDivElement | null>(null);
 
   const title = usePlatformQuery(
     platform.movies.titles.get,
@@ -862,6 +864,17 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
 
   const controlsVisible = useControlsVisible(frame, hold);
 
+  useSubtitlePlacement({
+    video,
+    controls: controlsTop,
+    raised:
+      controlsVisible &&
+      casting === null &&
+      pip?.active !== true &&
+      airplay?.active !== true &&
+      remotePlayback?.active !== true,
+  });
+
   useKeymap(
     playerKeymap,
     {
@@ -1367,6 +1380,7 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
           onVolumeOpenChange={setVolumeOpen}
           onNext={nextAction ?? undefined}
           onFullscreen={toggleFullscreen}
+          topRowRef={setControlsTop}
         />
       ) : null}
     </>
@@ -1426,6 +1440,7 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
         locked={locked}
         onRoom={session === null ? onRoom : undefined}
         castMenu={canCast ? castMenu : undefined}
+        bottomBarRef={setControlsTop}
       />
     </div>
   ) : null;
