@@ -5,8 +5,6 @@ import { Link } from "@tanstack/react-router";
 import { artworkUrl } from "@/lib/artwork";
 import { episodeCode, facts, formatRemaining, progressFraction, titleFacts } from "@/lib/format";
 
-import { usePrefetchTitle } from "./prefetch";
-
 /** A 2:3 poster linking to the title's page. `subtitle` adds the grid's `2024 · 2h 46m` line. */
 export function TitlePosterCard({
   title,
@@ -19,8 +17,6 @@ export function TitlePosterCard({
   readonly badge?: string | undefined;
   readonly className?: string;
 }) {
-  const prefetch = usePrefetchTitle(title.id);
-
   return (
     <PosterCard
       title={title.name}
@@ -28,7 +24,7 @@ export function TitlePosterCard({
       image={artworkUrl(title.artwork.poster, "poster")}
       badge={badge}
       className={className}
-      render={<Link to="/title/$titleId" params={{ titleId: title.id }} {...prefetch} />}
+      render={<Link to="/title/$titleId" params={{ titleId: title.id }} />}
     />
   );
 }
@@ -43,8 +39,6 @@ export function TitleLandscapeCard({
   readonly size?: "desktop" | "phone";
   readonly className?: string;
 }) {
-  const prefetch = usePrefetchTitle(title.id);
-
   return (
     <LandscapeCard
       title={title.name}
@@ -52,7 +46,7 @@ export function TitleLandscapeCard({
       image={artworkUrl(title.artwork.backdrop ?? title.artwork.poster, "card")}
       size={size}
       className={className}
-      render={<Link to="/title/$titleId" params={{ titleId: title.id }} {...prefetch} />}
+      render={<Link to="/title/$titleId" params={{ titleId: title.id }} />}
     />
   );
 }

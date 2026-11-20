@@ -11,7 +11,6 @@ import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
 import { SWITCH_PERSON_COMMAND, useCommandRoot } from "@/commands";
-import { TitlePrefetchProvider } from "@/components/browse/prefetch";
 import { keymap, shortcutLabel } from "@/lib/keymap";
 import { nameOf, useMe, useScopes } from "@/session/session";
 
@@ -163,9 +162,7 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
             trailing={accountButton("sm", true)}
           />
         )}
-        <TitlePrefetchProvider>
-          <InShell>{children}</InShell>
-        </TitlePrefetchProvider>
+        <InShell>{children}</InShell>
       </main>
 
       <TabBar
