@@ -32,13 +32,13 @@ export const Route = createFileRoute("/_you/settings")({
   component: SettingsPage,
 });
 
-/** Preloads the person's own limits, which decide whether Shared devices shows and what it holds. */
+/**
+ * Preloads the person's own limits, which decide whether Shared devices shows and what it holds,
+ * once the session the gate follows has answered. The gate owns that session query, and its
+ * failure screen, so this never asks for it.
+ */
 const preloadRestrictions = async (platform: PlatformSdk): Promise<void> => {
-  const { current } = platform.core.auth.sessions;
-
-  await current.preload();
-
-  const me = current.watch().getSnapshot();
+  const me = platform.core.auth.sessions.current.watch().getSnapshot();
 
   if (me.status === "success") {
     await platform.core.restrictions.get.preload({ userId: me.data.userId });
