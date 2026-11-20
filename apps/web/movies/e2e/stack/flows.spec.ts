@@ -214,6 +214,52 @@ test("home shows the library; a title opens, joins My List, and the keyboard nav
   await expect(page.getByRole("link", { name: /Sicario/u })).toBeVisible();
 });
 
+test("a title card's own menu opens by right click, the Menu key, and Shift+F10", async () => {
+  await page.goto(moviesPath());
+
+  const arrival = page.getByRole("region", { name: "Recently added" }).getByRole("link", {
+    name: "Arrival",
+  });
+
+  const menu = page.getByRole("menu");
+
+  await arrival.click({ button: "right" });
+  await expect(menu.getByRole("menuitem")).toHaveText([
+    "Play",
+    "Remove from My List",
+    "Mark as watched",
+    "Go to title",
+  ]);
+  await capture(page, "05-04-title-menu");
+  await page.keyboard.press("Escape");
+  await expect(menu).toBeHidden();
+  expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
+
+  await arrival.focus();
+  await page.keyboard.press("Shift+F10");
+  await expect(menu).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(arrival).toBeFocused();
+
+  await page.keyboard.press("ContextMenu");
+  await menu.getByRole("menuitem", { name: "Remove from My List" }).click();
+  await expect(page.getByText("Removed Arrival from My List")).toBeVisible();
+
+  await arrival.click({ button: "right" });
+  await menu.getByRole("menuitem", { name: "Mark as watched" }).click();
+  await expect(page.getByText("Marked Arrival as watched")).toBeVisible();
+
+  await arrival.click({ button: "right" });
+  await expect(menu.getByRole("menuitem")).toHaveText([
+    "Play",
+    "Add to My List",
+    "Mark as unwatched",
+    "Go to title",
+  ]);
+  await menu.getByRole("menuitem", { name: "Go to title" }).click();
+  await expect(page.getByRole("heading", { name: "ARRIVAL" })).toBeVisible();
+});
+
 test("a kid limited to PG finds what they may see and nothing rated above it", async ({
   browser,
 }) => {

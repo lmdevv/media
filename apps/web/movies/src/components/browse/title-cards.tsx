@@ -9,6 +9,7 @@ import { artworkUrl } from "@/lib/artwork";
 import { episodeCode, facts, formatRemaining, progressFraction, titleFacts } from "@/lib/format";
 
 import { usePrefetchTitle } from "./prefetch";
+import { ContinueMenu, TitleMenu } from "./title-menu";
 
 /** A 2:3 poster linking to the title's page. `subtitle` adds the grid's `2024 · 2h 46m` line. */
 export function TitlePosterCard({
@@ -25,14 +26,16 @@ export function TitlePosterCard({
   const prefetch = usePrefetchTitle(title.id);
 
   return (
-    <PosterCard
-      title={title.name}
-      subtitle={subtitle}
-      image={artworkUrl(title.artwork.poster, "poster")}
-      badge={badge}
-      className={className}
-      render={<Link to="/title/$titleId" params={{ titleId: title.id }} {...prefetch} />}
-    />
+    <TitleMenu title={title}>
+      <PosterCard
+        title={title.name}
+        subtitle={subtitle}
+        image={artworkUrl(title.artwork.poster, "poster")}
+        badge={badge}
+        className={className}
+        render={<Link to="/title/$titleId" params={{ titleId: title.id }} {...prefetch} />}
+      />
+    </TitleMenu>
   );
 }
 
@@ -49,14 +52,16 @@ export function TitleLandscapeCard({
   const prefetch = usePrefetchTitle(title.id);
 
   return (
-    <LandscapeCard
-      title={title.name}
-      subtitle={titleFacts(title) || undefined}
-      image={artworkUrl(title.artwork.backdrop ?? title.artwork.poster, "card")}
-      size={size}
-      className={className}
-      render={<Link to="/title/$titleId" params={{ titleId: title.id }} {...prefetch} />}
-    />
+    <TitleMenu title={title}>
+      <LandscapeCard
+        title={title.name}
+        subtitle={titleFacts(title) || undefined}
+        image={artworkUrl(title.artwork.backdrop ?? title.artwork.poster, "card")}
+        size={size}
+        className={className}
+        render={<Link to="/title/$titleId" params={{ titleId: title.id }} {...prefetch} />}
+      />
+    </TitleMenu>
   );
 }
 
@@ -104,37 +109,40 @@ export function ContinueCard({
   const prefetch = usePrefetchTitle(item.title.id);
 
   return (
-    <LandscapeCard
-      title={text.title}
-      subtitle={text.subtitle}
-      image={artworkUrl(
-        item.episode?.still ?? item.title.artwork.backdrop ?? item.title.artwork.poster,
-        "card",
-      )}
-      progress={progress ?? undefined}
-      size={size}
-      action={
-        <Link
-          to="/title/$titleId"
-          params={{ titleId: item.title.id }}
-          aria-label={`More info about ${item.title.name}`}
-          className={cn(
-            buttonVariants({ variant: "secondary" }),
-            "size-8 rounded-pill p-0 [&_svg]:size-4.5",
-          )}
-          {...prefetch}
-        >
-          <InfoIcon strokeWidth={1.75} aria-hidden />
-        </Link>
-      }
-      render={
-        <Link
-          to="/watch/$titleId"
-          params={{ titleId: item.title.id }}
-          search={item.episode === null ? {} : { episodeId: item.episode.id }}
-          aria-label={`Resume ${text.title}`}
-        />
-      }
-    />
+    <ContinueMenu item={item} name={continueText(item, false).title}>
+      <LandscapeCard
+        title={text.title}
+        subtitle={text.subtitle}
+        image={artworkUrl(
+          item.episode?.still ?? item.title.artwork.backdrop ?? item.title.artwork.poster,
+          "card",
+        )}
+        progress={progress ?? undefined}
+        size={size}
+        action={
+          <Link
+            to="/title/$titleId"
+            params={{ titleId: item.title.id }}
+            aria-label={`More info about ${item.title.name}`}
+            className={cn(
+              buttonVariants({ variant: "secondary" }),
+              "size-8 rounded-pill p-0 [&_svg]:size-4.5",
+            )}
+            {...prefetch}
+          >
+            <InfoIcon strokeWidth={1.75} aria-hidden />
+          </Link>
+        }
+        render={
+          <Link
+            to="/watch/$titleId"
+            params={{ titleId: item.title.id }}
+            search={item.episode === null ? {} : { episodeId: item.episode.id }}
+            aria-label={`Resume ${text.title}`}
+            {...prefetch}
+          />
+        }
+      />
+    </ContinueMenu>
   );
 }
