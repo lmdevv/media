@@ -1,3 +1,4 @@
+import { createPlatform } from "@media/sdk/promise";
 import { Spinner } from "@media/ui/components/spinner";
 import { RouterProvider, createRouter } from "@tanstack/react-router";
 import { StrictMode } from "react";
@@ -7,7 +8,7 @@ import ReactDOM from "react-dom/client";
 import { NotFoundPage, RouteErrorPage } from "./components/shell/route-states";
 import { openBrowserSession } from "@media/ui/lib/browser-session";
 
-import { PLATFORM_URL } from "./env";
+import { PLATFORM_URL, SIGN_IN_URL } from "./env";
 import { parseSearch, stringifySearch } from "./lib/search-params";
 import { routeTree } from "./routeTree.gen";
 import { ReportUnhandledErrors } from "./session/error-reporting";
@@ -16,10 +17,18 @@ import { MoviesSession } from "./session/session";
 /** The origin's one session store, shared with the account client at `/` (ADR 0020). */
 const store = await openBrowserSession();
 
+const platform = createPlatform({
+  url: PLATFORM_URL,
+  signInUrl: SIGN_IN_URL,
+  storage: store.sessions,
+});
+
 const router = createRouter({
   routeTree,
   basepath: import.meta.env.BASE_URL,
   defaultPreload: "intent",
+  defaultPendingMs: 300,
+  defaultPendingMinMs: 300,
   scrollRestoration: true,
   parseSearch,
   stringifySearch,
@@ -30,10 +39,10 @@ const router = createRouter({
       <Spinner className="size-12 text-text" label="Loading" />
     </div>
   ),
-  context: {},
+  context: { platform },
   Wrap: function Providers({ children }: { readonly children: ReactNode }) {
     return (
-      <MoviesSession store={store} url={PLATFORM_URL}>
+      <MoviesSession platform={platform}>
         <ReportUnhandledErrors />
         {children}
       </MoviesSession>

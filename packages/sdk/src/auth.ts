@@ -115,6 +115,8 @@ export interface Interface {
    * as another account or session changes it. None while signed out.
    */
   readonly currentIdentity: Effect.Effect<Option.Option<string>>;
+  /** Who is signed in, as `currentIdentity` names them: now, then every change. */
+  readonly identity: Stream.Stream<Option.Option<string>>;
   /** Ends the session on the server when reachable, then forgets it locally. */
   readonly signOut: Effect.Effect<void, TokenStorage.TokenStorageError>;
   /**
@@ -336,12 +338,14 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
 
   const heldSession = Effect.map(Ref.get(epoch), (now) => now.held);
 
+  const identity = yield* SubscriptionRef.make(Option.none<string>());
+
   const setSession = (next: Option.Option<StoredSession>): Effect.Effect<void> =>
     Ref.update(epoch, (now) =>
       TokenStorage.sameStored(now.held, next)
         ? { ...now, held: next }
         : { held: next, generation: now.generation + 1, heldSince: now.generation + 1 },
-    );
+    ).pipe(Effect.andThen(SubscriptionRef.set(identity, Option.flatMap(next, sessionOf))));
 
   /**
    * What this client last read from or wrote to the store. The store differs from it only after
@@ -1247,6 +1251,7 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
     reconnecting: SubscriptionRef.changes(reconnecting),
     isReconnecting: SubscriptionRef.get(reconnecting),
     currentIdentity: Effect.map(heldSession, Option.flatMap(sessionOf)),
+    identity: Stream.changes(SubscriptionRef.changes(identity)),
     open,
     signOut: signOut(),
     accessToken,

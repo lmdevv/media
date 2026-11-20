@@ -104,11 +104,43 @@ export const PlatformProvider = (props: PlatformProviderProps): ReactNode => {
   return <PlatformContext.Provider value={open}>{props.children}</PlatformContext.Provider>;
 };
 
+const openedOncePerClient = new WeakMap<PlatformSdk, OpenPlatform>();
+
+const openOf = (platform: PlatformSdk): OpenPlatform => {
+  const known = openedOncePerClient.get(platform);
+
+  if (known !== undefined) return known;
+
+  const open = { platform, status: followStatus(platform) };
+
+  openedOncePerClient.set(platform, open);
+
+  return open;
+};
+
+/** Props for `PlatformClientProvider`. */
+export interface PlatformClientProviderProps {
+  /** A client from `createPlatform` that the caller keeps open, and disposes if ever. */
+  readonly platform: PlatformSdk;
+  readonly children: ReactNode;
+}
+
+/**
+ * Provides a platform client its caller opened, such as the one a web app's entry point opens for
+ * the page's lifetime so its route loaders reach the same client as its screens.
+ */
+export const PlatformClientProvider = ({
+  platform,
+  children,
+}: PlatformClientProviderProps): ReactNode => (
+  <PlatformContext.Provider value={openOf(platform)}>{children}</PlatformContext.Provider>
+);
+
 /**
  * Every platform command as a Promise method, such as `usePlatform().core.server.info()`, and the
  * session. The same object for the provider's lifetime.
  *
- * @throws When used outside `PlatformProvider`, a programming error.
+ * @throws When used outside `PlatformProvider` or `PlatformClientProvider`, a programming error.
  */
 export const usePlatform = (): PlatformSdk => useOpenPlatform().platform;
 

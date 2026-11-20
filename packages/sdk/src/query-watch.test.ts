@@ -23,6 +23,8 @@ const crashed = new Internal({ message: "The server failed while running librari
 
 const missing = new NotFound({ message: "No such item: nothing has that ID" });
 
+const ignore = (): void => undefined;
+
 const scripted = (script: ReadonlyArray<Attempt>) => {
   const counts = { opened: 0, closed: 0 };
 
@@ -47,6 +49,8 @@ const scripted = (script: ReadonlyArray<Attempt>) => {
 
   return {
     counts,
+    runtime,
+    results,
     watch: QueryWatch.fromStream(runtime, results),
     advance: (ms: number) =>
       runtime.runPromise(
@@ -186,5 +190,288 @@ describe("QueryWatch", () => {
     await advance(100);
 
     expect(counts).toStrictEqual({ opened: 1, closed: 1 });
+  });
+
+  it("counts each subscription, even of one listener twice", async () => {
+    const { counts, watch, advance } = scripted([{ values: [[]] }]);
+    const stop = watch.subscribe(ignore);
+    const stopAlso = watch.subscribe(ignore);
+
+    await advance(100);
+    stop();
+    await advance(100);
+
+    expect(counts).toStrictEqual({ opened: 1, closed: 0 });
+
+    stopAlso();
+    await advance(100);
+
+    expect(counts).toStrictEqual({ opened: 1, closed: 1 });
+  });
+});
+
+const ONE_MINUTE: QueryWatch.Keep = { idleFor: "1 minute", failedFor: "1 second", maxIdle: 10 };
+
+const kept = (script: ReadonlyArray<Attempt>, keep = ONE_MINUTE) => {
+  const { counts, runtime, results, advance } = scripted(script);
+  const keeper = QueryWatch.keeper(runtime, keep);
+  const group = keeper.group<Schema.Json>();
+  const built = { watches: 0 };
+
+  const open = () => {
+    built.watches += 1;
+
+    return QueryWatch.fromStream(runtime, results);
+  };
+
+  return {
+    counts,
+    built,
+    keeper,
+    advance,
+    watch: (key = "albums") => group.watch(key, open),
+    preload: (key = "albums") => group.preload(key, open),
+  };
+};
+
+describe("QueryWatch.keeper", () => {
+  it("shares one subscription among the watches of one key", async () => {
+    const { counts, built, watch, advance } = kept([{ values: [["a"]] }]);
+    const first = watch();
+    const second = watch();
+
+    first.subscribe(ignore);
+    second.subscribe(ignore);
+    await advance(100);
+
+    expect(second).toBe(first);
+    expect(second.getSnapshot()).toStrictEqual({ status: "success", data: ["a"] });
+    expect({ ...built, ...counts }).toStrictEqual({ watches: 1, opened: 1, closed: 0 });
+  });
+
+  it("keeps a query subscribed after its last listener leaves, so the next one has its answer at once", async () => {
+    const { counts, built, watch, advance } = kept([{ values: [["a"]] }]);
+    const leave = watch().subscribe(ignore);
+
+    await advance(100);
+    leave();
+    await advance(30_000);
+
+    const again = watch();
+
+    expect(again.getSnapshot()).toStrictEqual({ status: "success", data: ["a"] });
+
+    again.subscribe(ignore);
+    await advance(60_000);
+
+    expect({ ...built, ...counts }).toStrictEqual({ watches: 1, opened: 1, closed: 0 });
+  });
+
+  it("stops a query nothing has followed for the keep time", async () => {
+    const { counts, built, watch, advance } = kept([{ values: [["a"]] }]);
+    const leave = watch().subscribe(ignore);
+
+    await advance(100);
+    leave();
+    await advance(60_000);
+
+    expect(counts).toStrictEqual({ opened: 1, closed: 1 });
+    expect(watch().getSnapshot()).toStrictEqual({ status: "loading" });
+    expect(built.watches).toBe(2);
+  });
+
+  it("stops the longest idle query once more than the most allowed wait", async () => {
+    const { counts, watch, advance } = kept([{ values: [["a"]] }], { ...ONE_MINUTE, maxIdle: 1 });
+
+    const leaveFirst = watch("first").subscribe(ignore);
+    const leaveSecond = watch("second").subscribe(ignore);
+
+    await advance(100);
+    leaveFirst();
+    leaveSecond();
+    await advance(100);
+
+    expect(counts).toStrictEqual({ opened: 2, closed: 1 });
+    expect(watch("second").getSnapshot()).toMatchObject({ status: "success" });
+    expect(watch("first").getSnapshot()).toStrictEqual({ status: "loading" });
+  });
+
+  it("stops a query as its last listener leaves when the keep time is zero", async () => {
+    const { counts, built, watch, advance } = kept([{ values: [["a"]] }], {
+      ...ONE_MINUTE,
+      idleFor: 0,
+    });
+
+    const first = watch();
+
+    expect(watch()).toBe(first);
+
+    const leave = first.subscribe(ignore);
+
+    await advance(100);
+    leave();
+    await advance(100);
+
+    expect(counts).toStrictEqual({ opened: 1, closed: 1 });
+    expect(watch().getSnapshot()).toStrictEqual({ status: "loading" });
+    expect(built.watches).toBe(2);
+  });
+
+  it("hands a preload's failure to the next listener only within the failure keep time", async () => {
+    const { counts, built, watch, preload, advance } = kept([
+      { values: [], error: missing },
+      { values: [["a"]] },
+    ]);
+
+    const answered = preload();
+
+    await advance(100);
+    await answered;
+
+    const handedOver = watch();
+
+    expect(handedOver.getSnapshot()).toMatchObject({
+      status: "error",
+      error: { _tag: "NotFound" },
+    });
+
+    await advance(1000);
+
+    const again = watch();
+
+    expect(again.getSnapshot()).toStrictEqual({ status: "loading" });
+
+    again.subscribe(ignore);
+    await advance(100);
+
+    expect(again.getSnapshot()).toStrictEqual({ status: "success", data: ["a"] });
+    expect({ ...built, ...counts }).toStrictEqual({ watches: 2, opened: 2, closed: 1 });
+  });
+
+  it("asks again for a failure a screen saw, even while that screen still follows it", async () => {
+    const { counts, built, watch, advance } = kept([
+      { values: [], error: missing },
+      { values: [["a"]] },
+    ]);
+
+    const failedPages = watch();
+    const leave = failedPages.subscribe(ignore);
+
+    await advance(100);
+
+    const restarted = watch();
+
+    expect(restarted).not.toBe(failedPages);
+    expect(restarted.getSnapshot()).toStrictEqual({ status: "loading" });
+
+    restarted.subscribe(ignore);
+    leave();
+    await advance(100);
+
+    expect(restarted.getSnapshot()).toStrictEqual({ status: "success", data: ["a"] });
+    expect({ ...built, ...counts }).toStrictEqual({ watches: 2, opened: 2, closed: 1 });
+  });
+
+  it("stops a query that fails while idle", async () => {
+    const { built, watch, advance } = kept([
+      { values: [["a"]], error: missing },
+      { values: [["b"]] },
+    ]);
+
+    watch().subscribe(ignore)();
+    await advance(100);
+
+    expect(watch().getSnapshot()).toStrictEqual({ status: "loading" });
+    expect(built.watches).toBe(2);
+  });
+
+  it("lets the next listener retry a failure handed to it", async () => {
+    const { counts, watch, preload, advance } = kept([
+      { values: [], error: missing },
+      { values: [["a"]] },
+    ]);
+
+    const answered = preload();
+
+    await advance(100);
+    await answered;
+
+    const handedOver = watch();
+
+    handedOver.subscribe(ignore);
+
+    const failure = handedOver.getSnapshot();
+
+    if (failure.status !== "error") throw new Error(`Expected a failure, got ${failure.status}`);
+
+    failure.retry();
+    await advance(100);
+
+    expect(handedOver.getSnapshot()).toStrictEqual({ status: "success", data: ["a"] });
+    expect(counts).toStrictEqual({ opened: 2, closed: 1 });
+  });
+
+  it("releases every query: idle ones stop, followed ones once their listeners leave", async () => {
+    const { counts, keeper, watch, advance } = kept([{ values: [["a"]] }]);
+    const leaveIdle = watch("idle").subscribe(ignore);
+    const followed = watch("followed");
+    const leaveFollowed = followed.subscribe(ignore);
+
+    await advance(100);
+    leaveIdle();
+    keeper.release();
+    await advance(100);
+
+    expect(counts).toStrictEqual({ opened: 2, closed: 1 });
+    expect(followed.getSnapshot()).toStrictEqual({ status: "success", data: ["a"] });
+    expect(watch("followed")).not.toBe(followed);
+
+    leaveFollowed();
+    await advance(100);
+
+    expect(counts).toStrictEqual({ opened: 2, closed: 2 });
+  });
+
+  it("releases a watch no one subscribed to once the keep time passes", async () => {
+    const { counts, built, watch, advance } = kept([{ values: [["a"]] }]);
+    const unused = watch();
+
+    await advance(60_000);
+
+    expect(watch()).not.toBe(unused);
+    expect({ ...built, ...counts }).toStrictEqual({ watches: 2, opened: 0, closed: 0 });
+  });
+});
+
+describe("a kept preload", () => {
+  it("resolves with the first result and leaves the query kept for the next listener", async () => {
+    const { counts, watch, preload, advance } = kept([{ values: [["a"]] }]);
+    const answered = preload();
+
+    await advance(100);
+    await answered;
+
+    expect(watch().getSnapshot()).toStrictEqual({ status: "success", data: ["a"] });
+    expect(counts).toStrictEqual({ opened: 1, closed: 0 });
+  });
+
+  it("resolves on a failure without rejecting", async () => {
+    const { preload, advance } = kept([{ values: [], error: missing }]);
+    const answered = preload();
+
+    await advance(100);
+
+    await expect(answered).resolves.toBeUndefined();
+  });
+
+  it("resolves at once for a kept answer", async () => {
+    const { counts, watch, preload, advance } = kept([{ values: [["a"]] }]);
+    const leave = watch().subscribe(ignore);
+
+    await advance(100);
+    leave();
+    await preload();
+
+    expect(counts).toStrictEqual({ opened: 1, closed: 0 });
   });
 });

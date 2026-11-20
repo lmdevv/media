@@ -38,6 +38,13 @@ The web apps share one focus policy, `packages/ui/src/lib/focus-policy.ts`:
   shared wrappers, which apply `useKeyboardFocusReturn`.
 - **Focus rings stay.** `:focus-visible` shows them after keyboard use; never remove or hide them.
 
+Route loaders build on the SDK's kept queries:
+
+- **Route loaders wait only for the data that decides a page's layout.** They start the rest with
+  `void query.preload(args)`, and the SDK keeps both live for the page.
+- **Loaders never preload the signed-in session** (`core.auth.sessions.current`). The signed-in
+  shell owns that query and its failure screen.
+
 ## Commits and PRs
 
 - Format: `type(scope): summary`, imperative and lowercase. Types: `feat`, `fix`, `chore`, `docs`,

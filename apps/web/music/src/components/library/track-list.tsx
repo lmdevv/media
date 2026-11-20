@@ -707,19 +707,35 @@ function UnavailableRow({
   );
 }
 
-/** Skeleton rows matching the track list while songs load. */
-export function TrackListSkeleton({ rows = 8 }: { readonly rows?: number }) {
+/**
+ * Skeleton rows matching the track list of `variant` while songs load, at the list's row height,
+ * so the songs replace them without moving.
+ */
+export function TrackListSkeleton({
+  rows = 8,
+  variant = "list",
+  header = false,
+}: {
+  readonly rows?: number;
+  readonly variant?: TrackListVariant;
+  /** Draws the list's desktop column header first, for a skeleton that stands for a whole list. */
+  readonly header?: boolean;
+}) {
   return (
     <div aria-hidden className="flex flex-col">
+      {header ? <div className="hidden h-8 shrink-0 border-b border-border lg:block" /> : null}
       {Array.from({ length: rows }, (_, index) => (
-        <div key={index} className="flex h-row items-center gap-3 px-2">
+        <div
+          key={index}
+          className={cn("flex items-center gap-3 px-2", rowHeightClassName(variant))}
+        >
           <span className="flex w-7 shrink-0 justify-end">
             <Skeleton className="h-2.5 w-3" />
           </span>
-          <span className="grow-2 basis-0">
+          <span className={variant === "album" ? "grow" : "grow-2 basis-0"}>
             <Skeleton className="h-2.5 w-45 max-w-full" />
           </span>
-          <span className="hidden grow-[1.4] basis-0 lg:block">
+          <span className={cn("hidden grow-[1.4] basis-0", variant === "list" && "lg:block")}>
             <Skeleton className="h-2.5 w-27.5" />
           </span>
           <span className="flex w-row-touch shrink-0 justify-end">

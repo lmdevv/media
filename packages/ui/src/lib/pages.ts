@@ -310,6 +310,26 @@ export const pagedStore = <Row>(
   };
 };
 
+/** A core query a route loader can preload, such as `platform.music.albums.tracks`. */
+export interface PreloadableQuery<Args> {
+  /** Follows the query until its first answer and resolves then; never rejects. */
+  readonly preload: (args: Args) => Promise<void>;
+}
+
+/**
+ * Preloads the first page that `usePages`, `useAllPages`, or `useFirstRows` opens for the same
+ * `argsAt` and `rows`, so the screen a route loader prepares shows it at once. Resolves on its
+ * first answer and never rejects.
+ *
+ * @param argsAt - The same builder of the query's arguments the screen passes.
+ * @param rows - The same rows per page the screen asks for.
+ */
+export const preloadFirstPage = <Args>(
+  query: PreloadableQuery<Args>,
+  argsAt: (paginationOpts: PageOpts) => Args,
+  rows = PAGE_SIZE,
+): Promise<void> => query.preload(argsAt({ numItems: rows, cursor: null }));
+
 /**
  * Follows a paginated core query page by page. Each page is its own subscription from the cursor
  * the page before ended at, pinned to end where the page after it starts.

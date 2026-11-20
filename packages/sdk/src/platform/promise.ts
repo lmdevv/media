@@ -1,5 +1,15 @@
 import { Unauthenticated } from "@media/contracts/errors";
-import { Data, Effect, Fiber, ManagedRuntime, Match, Option, Redacted, Stream } from "effect";
+import {
+  Data,
+  Effect,
+  Fiber,
+  ManagedRuntime,
+  Match,
+  Option,
+  Redacted,
+  Schema,
+  Stream,
+} from "effect";
 
 import { SignInRoute } from "../auth";
 import type { AuthStatus } from "../auth";
@@ -9,7 +19,7 @@ import * as TokenStorage from "../token-storage";
 import type { SharedStore } from "../shared-store";
 import type { KeyValueStore } from "../token-storage";
 import * as Client from "./client";
-import type { Command, Id, Params, PromiseBuilder } from "./command";
+import type { Command, Id, Params, PromiseBuilder, PromiseQuery } from "./command";
 import { promiseMethods } from "./generated/commands";
 
 /** Where the platform client connects and where it keeps its session. */
@@ -214,19 +224,67 @@ export const createPlatform = (options: PlatformOptions): PlatformSdk => {
     (...params: Params<Args>) =>
       withClient((client) => client.run(command, params));
 
-  const watchOf =
-    <Args, Result>(command: Command<"query", Args, Result>) =>
-    (...params: Params<Args>) =>
+  const kept = QueryWatch.keeper(runtime, QueryWatch.DEFAULT_KEEP);
+  let sessionChangesInOtherTabs: Fiber.Fiber<void, unknown> | null = null;
+
+  const releaseKeptOnSessionChange = (): void => {
+    if (sessionChangesInOtherTabs !== null) return;
+
+    sessionChangesInOtherTabs = runtime.runFork(
+      Stream.runForEach(
+        Stream.unwrap(Effect.map(Client.Client, (client) => client.session.identity)).pipe(
+          Stream.drop(1),
+        ),
+        () => Effect.sync(kept.release),
+      ),
+    );
+  };
+
+  /** Runs a session change here, then stops sharing kept answers before the caller goes on. */
+  const changingSession = <A>(change: Promise<A>): Promise<A> => change.finally(kept.release);
+
+  const signIn = (credentials: Client.Credentials): Promise<void> =>
+    changingSession(withClient((client) => client.session.signIn(credentials)));
+
+  const queryOf = <Args, Result>(
+    command: Command<"query", Args, Result>,
+  ): PromiseQuery<Args, Result> => {
+    const group = kept.group<Result>();
+    const encode = Schema.encodeUnknownOption(command.args);
+
+    const keyInSchemaOrder = (params: Params<Args>): Option.Option<string> =>
+      Option.map(encode(params[0] ?? {}), (wire) => JSON.stringify(wire));
+
+    const openOf = (params: Params<Args>) => () =>
       QueryWatch.fromStream(
         runtime,
         Stream.unwrap(Effect.map(Client.Client, (client) => client.watch(command, params))),
       );
 
-  const builder: PromiseBuilder = {
-    query: (command) => Object.assign(call(command), { watch: watchOf(command) }),
-    mutation: call,
-    action: call,
+    const watch = (...params: Params<Args>): QueryWatch.QueryWatch<Result> =>
+      Option.match(keyInSchemaOrder(params), {
+        onNone: openOf(params),
+        onSome: (key) => {
+          releaseKeptOnSessionChange();
+
+          return group.watch(key, openOf(params));
+        },
+      });
+
+    const preload = (...params: Params<Args>): Promise<void> =>
+      Option.match(keyInSchemaOrder(params), {
+        onNone: () => QueryWatch.whenAnswered(openOf(params)()),
+        onSome: (key) => {
+          releaseKeptOnSessionChange();
+
+          return group.preload(key, openOf(params));
+        },
+      });
+
+    return Object.assign(call(command), { watch, preload });
   };
+
+  const builder: PromiseBuilder = { query: queryOf, mutation: call, action: call };
 
   const onStatus: PlatformSession["onStatus"] = (listener) => {
     const fiber = runtime.runFork(
@@ -245,39 +303,24 @@ export const createPlatform = (options: PlatformOptions): PlatformSdk => {
       status: () => withClient((client) => client.session.currentStatus),
       onStatus,
       signInWithPassword: ({ username, password }) =>
-        withClient((client) =>
-          client.session.signIn(
-            Client.Credentials.Password({ username, password: Redacted.make(password) }),
-          ),
-        ),
-      signInWithApiKey: (key) =>
-        withClient((client) =>
-          client.session.signIn(Client.Credentials.ApiKey({ key: Redacted.make(key) })),
-        ),
+        signIn(Client.Credentials.Password({ username, password: Redacted.make(password) })),
+      signInWithApiKey: (key) => signIn(Client.Credentials.ApiKey({ key: Redacted.make(key) })),
       setUpOwner: ({ username, password }) =>
-        withClient((client) =>
-          client.session.signIn(
-            Client.Credentials.Setup({ username, password: Redacted.make(password) }),
-          ),
-        ),
+        signIn(Client.Credentials.Setup({ username, password: Redacted.make(password) })),
       acceptInvite: ({ code, username, password }) =>
-        withClient((client) =>
-          client.session.signIn(
-            Client.Credentials.Invite({
-              code: Redacted.make(code),
-              username,
-              password: Redacted.make(password),
-            }),
-          ),
+        signIn(
+          Client.Credentials.Invite({
+            code: Redacted.make(code),
+            username,
+            password: Redacted.make(password),
+          }),
         ),
       resetPassword: ({ code, password }) =>
-        withClient((client) =>
-          client.session.signIn(
-            Client.Credentials.Reset({
-              code: Redacted.make(code),
-              password: Redacted.make(password),
-            }),
-          ),
+        signIn(
+          Client.Credentials.Reset({
+            code: Redacted.make(code),
+            password: Redacted.make(password),
+          }),
         ),
       startDeviceSignIn: async (clientName) => {
         const pending = await withClient((client) => client.session.startDeviceSignIn(clientName));
@@ -285,29 +328,25 @@ export const createPlatform = (options: PlatformOptions): PlatformSdk => {
         return {
           userCode: pending.userCode,
           expiresAt: pending.expiresAt,
-          complete: () => runtime.runPromise(pending.complete),
+          complete: () => changingSession(runtime.runPromise(pending.complete)),
         };
       },
       signInAsGuest: ({ code, name }) => {
         const guest = { code: Redacted.make(code), name };
 
-        return withClient((client) => client.session.signInAsGuest(guest));
+        return changingSession(withClient((client) => client.session.signInAsGuest(guest)));
       },
       openTile: ({ device, userId, proof }) =>
-        withClient((client) =>
-          client.session.signIn(
-            Client.Credentials.Tile({
-              device: Redacted.make(device),
-              userId,
-              proof: Option.map(Option.fromUndefinedOr(proof), tileProof),
-            }),
-          ),
+        signIn(
+          Client.Credentials.Tile({
+            device: Redacted.make(device),
+            userId,
+            proof: Option.map(Option.fromUndefinedOr(proof), tileProof),
+          }),
         ),
       exchangeGrant: ({ userId, grant }) =>
-        withClient((client) =>
-          client.session.signIn(Client.Credentials.Grant({ userId, grant: Redacted.make(grant) })),
-        ),
-      signOut: () => withClient((client) => client.session.signOut),
+        signIn(Client.Credentials.Grant({ userId, grant: Redacted.make(grant) })),
+      signOut: () => changingSession(withClient((client) => client.session.signOut)),
       accessToken: () =>
         withClient((client) =>
           Effect.map(client.session.accessToken, (token) =>
@@ -330,6 +369,14 @@ export const createPlatform = (options: PlatformOptions): PlatformSdk => {
             ),
         ),
     },
-    dispose: () => runtime.dispose(),
+    dispose: async () => {
+      kept.release();
+
+      if (sessionChangesInOtherTabs !== null) {
+        await Effect.runPromise(Fiber.interrupt(sessionChangesInOtherTabs));
+      }
+
+      await runtime.dispose();
+    },
   };
 };

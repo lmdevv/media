@@ -1,3 +1,4 @@
+import type { PlatformSdk } from "@media/sdk/promise";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import type { Redacted } from "effect";
 import { useEffect, useState, useSyncExternalStore } from "react";
@@ -12,6 +13,19 @@ import type { GuestLinkRow, GuestTarget } from "@media/ui/lib/guest-links";
 import { usePages } from "@media/ui/lib/pages";
 import type { Paged } from "@media/ui/lib/pages";
 import { copyText } from "@media/ui/lib/secure-context";
+
+/**
+ * Loads the guest policy `useMayShareGuests` reads, for a route loader, once the session the
+ * signed-in shell follows has answered and may hold account queries. The shell owns that session
+ * query, and its failure screen, so this never asks for it. Never rejects.
+ */
+export const preloadGuestPolicy = async (platform: PlatformSdk): Promise<void> => {
+  const me = platform.core.auth.sessions.current.watch().getSnapshot();
+
+  if (canQueryGuestLinks(me.status === "success" ? me.data : undefined)) {
+    await platform.core.guests.status.preload({});
+  }
+};
 
 /** Reads guest policy only after this session proves it can hold account queries. */
 export const useMayShareGuests = (): boolean => {

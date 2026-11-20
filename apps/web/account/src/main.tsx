@@ -1,9 +1,11 @@
+import { createPlatform } from "@media/sdk/promise";
 import { RouterProvider, createRouter } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import ReactDOM from "react-dom/client";
 
 import { openBrowserSession } from "@media/ui/lib/browser-session";
 
+import { PLATFORM_URL, SIGN_IN_URL } from "./env";
 import { showsLinkSecret, takeLinkSecret } from "./session/link-secret";
 import { routeTree } from "./routeTree.gen";
 
@@ -17,13 +19,22 @@ window.addEventListener("hashchange", () => {
 
 const store = await openBrowserSession();
 
+const platform = createPlatform({
+  url: PLATFORM_URL,
+  signInUrl: SIGN_IN_URL,
+  storage: store.sessions,
+});
+
 const router = createRouter({
   routeTree,
   defaultPreload: "intent",
+  defaultPendingMs: 300,
+  defaultPendingMinMs: 300,
   scrollRestoration: true,
   context: {
     store,
     linkSecret,
+    platform,
   },
 });
 

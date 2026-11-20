@@ -1,5 +1,5 @@
 import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
+import type { PageOpts } from "@media/ui/lib/pages";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import type { ErrorComponentProps } from "@tanstack/react-router";
 import { Schema } from "effect";
@@ -9,12 +9,13 @@ import type { MissingCopy } from "@/components/route-error";
 
 import { GuestLinkMenuItem } from "@/components/guests/guest-links";
 import { Artwork } from "@/components/library/artwork";
-import { CollectionHeader } from "@/components/library/collection-header";
+import { CollectionHeader, CollectionHeaderSkeleton } from "@/components/library/collection-header";
 import { PlayOnMenu } from "@/components/player/play-on-menu";
 import { TrackList, TrackListSkeleton } from "@/components/library/track-list";
 import { formatTotal, plural } from "@/lib/format";
 import { asAlbumId, asTrackId } from "@/lib/models";
-import { useAllRows } from "@/lib/pages";
+import type { AlbumId } from "@/lib/models";
+import { preloadAllRows, useAllRows } from "@/lib/pages";
 import { useMusic, useRead } from "@/lib/platform";
 
 const MISSING: MissingCopy = {
@@ -26,41 +27,44 @@ const MISSING: MissingCopy = {
 
 const AlbumSearch = Schema.Struct({ track: Schema.optionalKey(Schema.String) });
 
+const tracksOf = (albumId: AlbumId) => (paginationOpts: PageOpts) => ({ albumId, paginationOpts });
+
 export const Route = createFileRoute("/_app/albums/$albumId")({
   params: {
     parse: (params) => ({ albumId: asAlbumId(params.albumId) }),
     stringify: (params) => ({ albumId: params.albumId }),
   },
   validateSearch: Schema.toStandardSchemaV1(AlbumSearch),
+  loader: async ({ context: { platform }, params: { albumId } }) => {
+    await Promise.all([
+      platform.music.albums.get.preload({ albumId }),
+      preloadAllRows(platform.music.albums.tracks, tracksOf(albumId)),
+    ]);
+  },
+  pendingComponent: AlbumSkeleton,
   component: AlbumPage,
   errorComponent: AlbumError,
 });
+
+function AlbumSkeleton() {
+  return (
+    <div className="flex flex-col gap-8 px-5 pt-safe-top-sm lg:px-12 lg:pt-row">
+      <CollectionHeaderSkeleton />
+      <div className="-mx-5 pl-5 lg:mx-0 lg:pl-0">
+        <TrackListSkeleton variant="album" header />
+      </div>
+    </div>
+  );
+}
 
 function AlbumPage() {
   const { albumId } = Route.useParams();
   const { track: highlight } = Route.useSearch();
   const music = useMusic();
   const detail = useRead(music.albums.get, { albumId });
+  const tracks = useAllRows(music.albums.tracks, tracksOf(albumId));
 
-  const tracks = useAllRows(music.albums.tracks, (paginationOpts) => ({
-    albumId,
-    paginationOpts,
-  }));
-
-  if (detail === undefined || tracks === undefined) {
-    return (
-      <div className="flex flex-col gap-8 px-5 pt-row lg:px-12">
-        <div className="flex items-end gap-8">
-          <Skeleton className="size-58 rounded-md" />
-          <div className="flex grow flex-col gap-3">
-            <Skeleton className="h-3 w-48" />
-            <Skeleton className="h-12 w-96 max-w-full" />
-          </div>
-        </div>
-        <TrackListSkeleton />
-      </div>
-    );
-  }
+  if (detail === undefined || tracks === undefined) return <AlbumSkeleton />;
 
   const { album } = detail;
   const lossless = tracks.length > 0 && tracks.every((track) => track.lossless);

@@ -1,5 +1,11 @@
+import type { PlatformSdk } from "@media/sdk/promise";
 import { useFocusPolicy } from "@media/ui/lib/focus-policy";
-import { CatchBoundary, HeadContent, Outlet, createRootRoute } from "@tanstack/react-router";
+import {
+  CatchBoundary,
+  HeadContent,
+  Outlet,
+  createRootRouteWithContext,
+} from "@tanstack/react-router";
 import { ThemeProvider } from "next-themes";
 import { Suspense, lazy } from "react";
 
@@ -13,7 +19,13 @@ const Toaster = lazy(async () => ({
   default: (await import("@/components/ui/sonner")).Toaster,
 }));
 
-export const Route = createRootRoute({
+/** What every route can read from the router context. */
+export interface RouterAppContext {
+  /** The page's platform client, which route loaders preload into for the screens they open. */
+  readonly platform: PlatformSdk;
+}
+
+export const Route = createRootRouteWithContext<RouterAppContext>()({
   component: RootComponent,
   errorComponent: LazyRouteError,
   head: () => ({
