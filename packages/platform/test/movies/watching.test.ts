@@ -349,8 +349,8 @@ describe.skipIf(stack === undefined)("movies watching commands", { timeout: 180_
 
     expect(await watchedFlags()).toEqual([true, true, true]);
     expect(
-      (await client.query(api.movies.titles.get, { titleId: pioneer })).nextEpisode,
-    ).toBeNull();
+      (await client.query(api.movies.titles.get, { titleId: pioneer })).nextEpisode?.episodeNumber,
+    ).toBe(1);
 
     const pageOne = await client.query(api.movies.history.list, {
       paginationOpts: { numItems: 2, cursor: null },

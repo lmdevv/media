@@ -86,6 +86,7 @@ const FLAGS = {
   nth: { type: "string" },
   value: { type: "string" },
   key: { type: "string" },
+  button: { type: "string" },
   attr: { type: "string" },
   path: { type: "string" },
   full: { type: "boolean", default: false },
@@ -700,7 +701,13 @@ async function drive({ base, account, music }, network, launchArgs) {
       return page.url();
     },
     async click({ page }, options) {
-      await locate(page, options).click({ timeout: timeout(options) });
+      const button = options.button ?? "left";
+
+      if (!["left", "right", "middle"].includes(button)) {
+        throw new Error("click --button takes left, right, or middle");
+      }
+
+      await locate(page, options).click({ button, timeout: timeout(options) });
     },
     async hover({ page }, options) {
       await locate(page, options).hover({ timeout: timeout(options) });

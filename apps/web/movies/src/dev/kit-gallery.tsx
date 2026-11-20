@@ -39,7 +39,9 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 
 import { moveRowFocus } from "@media/ui/lib/row-focus";
+import { buttonVariants } from "@media/ui/lib/button-variants";
 import { useKeymap } from "@media/ui/lib/use-keymap";
+import { cn } from "@media/ui/lib/utils";
 
 import { MoviesMark } from "@/components/shell/movies-mark";
 import { keymap, shortcutLabel } from "@/lib/keymap";
@@ -95,6 +97,19 @@ const TITLES = [
   { id: "seven-samurai", title: "Seven Samurai", detail: "Movie · 1954", art: ART.holdovers },
   { id: "dune", title: "Dune: Part Two", detail: "Movie · 2024", art: ART.dune },
 ] as const;
+
+const infoLink = (title: string) => (
+  <a
+    href="#"
+    aria-label={`More info about ${title}`}
+    className={cn(
+      buttonVariants({ variant: "secondary" }),
+      "size-8 rounded-pill p-0 [&_svg]:size-4.5",
+    )}
+  >
+    <InfoIcon strokeWidth={1.75} aria-hidden />
+  </a>
+);
 
 const wait = (ms: number): Promise<void> =>
   new Promise((resolve) => {
@@ -408,6 +423,7 @@ export function KitGallery() {
           <LandscapeCard
             href="#"
             title="Dune: Part Two"
+            action={infoLink("Dune: Part Two")}
             subtitle="1h 03m left"
             image={ART.dune}
             progress={0.62}
@@ -415,6 +431,7 @@ export function KitGallery() {
           <LandscapeCard
             href="#"
             title="Severance · S2:E4"
+            action={infoLink("Severance")}
             subtitle="41m left"
             image={ART.severance}
             progress={0.3}
@@ -422,6 +439,7 @@ export function KitGallery() {
           <LandscapeCard
             href="#"
             title="The Bear · S3:E2"
+            action={infoLink("The Bear")}
             subtitle="18m left"
             image={ART.bear}
             progress={0.55}
@@ -429,6 +447,7 @@ export function KitGallery() {
           <LandscapeCard
             href="#"
             title="Shōgun · S1:E7"
+            action={infoLink("Shōgun")}
             subtitle="52m left"
             image={ART.shogun}
             progress={0.12}
@@ -436,6 +455,7 @@ export function KitGallery() {
           <LandscapeCard
             href="#"
             title="Past Lives"
+            action={infoLink("Past Lives")}
             subtitle="22m left"
             image={ART.pastLives}
             progress={0.8}

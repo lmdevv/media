@@ -25,7 +25,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
-import type { ComponentProps, ReactElement, ReactNode } from "react";
+import type { ComponentProps, ReactElement, ReactNode, Ref } from "react";
 
 function GlassButton({
   className,
@@ -241,6 +241,7 @@ export function PhoneControls({
   locked,
   onRoom,
   castMenu,
+  bottomBarRef,
 }: {
   readonly title: string;
   readonly playing: boolean;
@@ -271,6 +272,8 @@ export function PhoneControls({
   readonly onRoom?: (() => void) | undefined;
   /** Wraps the cast button in the cast menu, where this browser can play elsewhere. */
   readonly castMenu?: ((trigger: ReactElement) => ReactNode) | undefined;
+  /** The bar of scrubber and track pills along the bottom. */
+  readonly bottomBarRef?: Ref<HTMLDivElement> | undefined;
 }) {
   return (
     <div className="on-media absolute inset-0 bg-linear-to-b from-dark-bg/55 via-dark-bg/25 via-35% to-dark-bg/75 font-sans">
@@ -321,7 +324,10 @@ export function PhoneControls({
           className="right-14"
         />
       )}
-      <div className="absolute inset-x-0 bottom-0 flex flex-col gap-3 px-14 pb-5.5">
+      <div
+        ref={bottomBarRef}
+        className="absolute inset-x-0 bottom-0 flex flex-col gap-3 px-14 pb-5.5"
+      >
         <div className="flex items-center gap-3">
           <span className="w-14 shrink-0 font-mono text-caption/caption text-text">
             {formatTimecode(position)}

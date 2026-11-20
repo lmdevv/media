@@ -430,13 +430,110 @@ describe.skipIf(stack === undefined)("movies browse commands", { timeout: 180_00
 
     await client.mutation(api.movies.history.markWatched, { titleId });
 
-    expect((await client.query(api.movies.titles.get, { titleId })).nextEpisode).toBeNull();
-    expect(await client.query(api.movies.titles.versions, { titleId })).toEqual([]);
+    const [firstRegular] = await seasonOf(client, titleId, 1);
+
+    expect((await client.query(api.movies.titles.get, { titleId })).nextEpisode?.id).toBe(
+      firstRegular?.id,
+    );
+    expect(
+      (await client.query(api.movies.titles.versions, { titleId })).map((version) => version.id),
+    ).toEqual(
+      scanned.files.flatMap((file) => (file.episodeId === firstRegular?.id ? [file.fileId] : [])),
+    );
     expect(await opened()).toEqual([
       [1, 1],
       [1, 2],
     ]);
     expect(await clientsOpenOn()).toBe(1);
+  });
+
+  it("play a show's first unwatched episode once nothing follows the last one finished, else S1:E1", async () => {
+    if (stack === undefined) return;
+
+    const label = `wrap-${unique()}`;
+
+    const numbers = [
+      [0, 1],
+      [1, 1],
+      [1, 2],
+      [1, 3],
+      [2, 1],
+    ] as const;
+
+    const scanned = await scanInto(stack, shelf.owner, `${label} Series`, (root) =>
+      numbers.map(([season, episode]) =>
+        episodeFile(
+          join(root, "Wrap Show", `${season}-${episode}.mkv`),
+          scannedTitle("show", `nfo:${label}`, "Wrap Show", 0),
+          season,
+          episode,
+        ),
+      ),
+    );
+
+    await finishJob(stack, scanned.lease);
+    await share(
+      shelf.owner,
+      scanned.libraryId,
+      { kind: "user", userId: shelf.aiko.userId },
+      "view",
+    );
+
+    const titleId = scanned.files[0]?.titleId;
+
+    if (titleId === undefined) throw new Error("the scan landed no files");
+
+    const client = shelf.aiko.signedIn.client;
+    const [special] = await seasonOf(client, titleId, 0);
+    const [s1e1, s1e2, s1e3] = await seasonOf(client, titleId, 1);
+    const [finale] = await seasonOf(client, titleId, 2);
+
+    if ([special, s1e1, s1e2, s1e3, finale].includes(undefined)) {
+      throw new Error("the scan landed too few episodes");
+    }
+
+    /** What Play starts, as the title page, the versions list, and a bare start all answer it. */
+    const playStarts = async () => {
+      const detail = await client.query(api.movies.titles.get, { titleId });
+      const versions = await client.query(api.movies.titles.versions, { titleId });
+      const started = await client.mutation(api.movies.play.start, { titleId });
+      const next = detail.nextEpisode;
+
+      expect(started.episodeId).toBe(next?.id);
+      expect(versions.map((version) => version.id)).toEqual(
+        scanned.files.flatMap((file) => (file.episodeId === next?.id ? [file.fileId] : [])),
+      );
+
+      return next === null ? null : `S${next.seasonNumber}:E${next.episodeNumber}`;
+    };
+
+    const watch = async (episodeId: Id<"episodes"> | undefined) =>
+      client.mutation(
+        api.movies.history.markWatched,
+        episodeId === undefined ? { titleId } : { titleId, episodeId },
+      );
+
+    await watch(s1e1?.id);
+
+    expect(await playStarts()).toBe("S1:E2");
+
+    // The finale has nothing after it, so Play goes back to the first episode not yet watched.
+    await watch(finale?.id);
+
+    expect(await playStarts()).toBe("S1:E2");
+
+    await watch(s1e3?.id);
+
+    expect(await playStarts()).toBe("S1:E2");
+
+    // A special sits outside the order, so past one Play heads back into the regular seasons.
+    await watch(special?.id);
+
+    expect(await playStarts()).toBe("S1:E2");
+
+    await watch(undefined);
+
+    expect(await playStarts()).toBe("S1:E1");
   });
 
   it("show home's billboard as titles.get shows its title, to whoever may see it", async () => {

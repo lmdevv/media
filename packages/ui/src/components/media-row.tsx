@@ -1,13 +1,14 @@
 import { useRender } from "@base-ui/react/use-render";
-import { focusRowItem, rowItems } from "@media/ui/lib/row-focus";
+import { focusRowItem, rowCards, rowIndexOf } from "@media/ui/lib/row-focus";
 import { cn } from "@media/ui/lib/utils";
 import { ChevronRightIcon } from "lucide-react";
 import { useId } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
 
 const onTrackKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
-  const items = rowItems(event.currentTarget);
-  const index = items.findIndex((item) => item === document.activeElement);
+  const cards = rowCards(event.currentTarget);
+  const items = cards.map(({ item }) => item);
+  const index = rowIndexOf(cards, document.activeElement);
 
   if (index === -1) return;
 
@@ -39,16 +40,16 @@ function SeeAll(props: useRender.ComponentProps<"a">) {
 }
 
 /**
- * A labeled, horizontally scrolling row of cards, such as Continue watching. Its title, "See all",
- * and first card line up with the centered page content under the top bar, and the track bleeds off
- * the right edge and snaps to cards; ←/→ move between cards and `j`/`k` (see `moveRowFocus`) move
- * between rows.
+ * A labeled, horizontally scrolling row of cards, such as Continue watching. Its title and first
+ * card line up with the centered page content under the top bar, "See all" follows the title on the
+ * same line, and the track bleeds off the right edge and snaps to cards; ←/→ move between cards and
+ * `j`/`k` (see `moveRowFocus`) move between rows.
  *
- * In containers narrower than 48rem it uses the phone layout: a chevron after the title instead of
- * "See all", and tighter insets. It sizes by its container, not the viewport.
+ * In containers narrower than 48rem it uses the phone layout: only the chevron after the title, and
+ * tighter insets. It sizes by its container, not the viewport.
  *
- * @param seeAll - The link behind "See all" (desktop) and the chevron (phone), such as the router's
- *   `<Link to="/movies" />`. Its children are supplied.
+ * @param seeAll - The link behind "See all", such as the router's `<Link to="/movies" />`. Its
+ *   children and accessible name are supplied.
  */
 export function MediaRow({
   title,
@@ -68,7 +69,7 @@ export function MediaRow({
       aria-labelledby={headingId}
       className={cn("@container flex w-full flex-col", className)}
     >
-      <div className="flex items-center gap-1 px-5 pt-6 pb-2.5 @3xl:items-baseline @3xl:justify-between @3xl:px-page-inset @3xl:pt-0 @3xl:pb-3.5">
+      <div className="flex items-center gap-1 px-5 pt-6 pb-2.5 @3xl:items-baseline @3xl:gap-3 @3xl:px-page-inset @3xl:pt-0 @3xl:pb-3.5">
         <h2
           id={headingId}
           className="font-sans text-heading/6 font-bold text-text @3xl:text-heading/heading @3xl:tracking-tight"
@@ -76,17 +77,14 @@ export function MediaRow({
           {title}
         </h2>
         {seeAll === undefined ? null : (
-          <>
-            <SeeAll render={seeAll} className="@3xl:hidden" aria-label={`See all ${title}`}>
-              <ChevronRightIcon className="size-4 text-text-muted" strokeWidth={2.25} aria-hidden />
-            </SeeAll>
-            <SeeAll
-              render={seeAll}
-              className="hidden font-sans text-label/label font-medium text-text-muted transition-colors hover:text-text @3xl:inline"
-            >
-              See all
-            </SeeAll>
-          </>
+          <SeeAll
+            render={seeAll}
+            aria-label={`See all ${title}`}
+            className="flex items-center gap-0.5 font-sans text-label/label font-medium text-text-muted transition-colors hover:text-text"
+          >
+            <span className="hidden @3xl:inline">See all</span>
+            <ChevronRightIcon className="size-4" strokeWidth={2.25} aria-hidden />
+          </SeeAll>
         )}
       </div>
       <div

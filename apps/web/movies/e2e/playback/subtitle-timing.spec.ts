@@ -47,9 +47,12 @@ const FILM = "Tide Clock";
 
 const PICTURES = "Paper Kite";
 
+const LONG_LINE = { text: "A line that stays a while.", start: 40, end: 48 } as const;
+
 const ENGLISH = [
   { text: "Ten seconds.", start: 10, end: 12 },
   { text: "Thirty seconds.", start: 30, end: 32 },
+  LONG_LINE,
 ] as const;
 
 const srt = (
@@ -175,6 +178,57 @@ const showing = (target: Page) =>
   });
 
 const englishStarts = (delayMs: number) => ENGLISH.map((cue) => cue.start * 1000 + delayMs);
+
+/** The lines the shown track's cues sit on: `auto` at the bottom, negative while raised. */
+const cueLines = (target: Page) =>
+  target.getByTestId("player-video").evaluate((element) => {
+    if (!(element instanceof HTMLVideoElement)) return null;
+
+    const track = Array.from(element.textTracks).find((each) => each.mode === "showing");
+
+    return Array.from(track?.cues ?? [], (cue) => (cue instanceof VTTCue ? cue.line : null));
+  });
+
+interface Span {
+  readonly top: number;
+  readonly bottom: number;
+}
+
+/** Where Chromium draws the showing cues, read from the video's shadow tree, top first. */
+const cueBoxes = async (target: Page): Promise<ReadonlyArray<Span>> => {
+  const cdp = await target.context().newCDPSession(target);
+  const { root } = await cdp.send("DOM.getDocument", { depth: -1, pierce: true });
+  const displays: Array<number> = [];
+
+  const collect = (node: typeof root): void => {
+    const attributes = node.attributes ?? [];
+
+    for (let index = 0; index < attributes.length; index += 2) {
+      if (
+        attributes[index] === "pseudo" &&
+        attributes[index + 1] === "-webkit-media-text-track-display"
+      )
+        displays.push(node.backendNodeId);
+    }
+
+    for (const child of [...(node.children ?? []), ...(node.shadowRoots ?? [])]) collect(child);
+  };
+
+  collect(root);
+
+  const spans = await Promise.all(
+    displays.map(async (backendNodeId) => {
+      const { model } = await cdp.send("DOM.getBoxModel", { backendNodeId });
+      const ys = model.border.filter((_, index) => index % 2 === 1);
+
+      return { top: Math.min(...ys), bottom: Math.max(...ys) };
+    }),
+  );
+
+  await cdp.detach();
+
+  return spans.toSorted((above, below) => above.top - below.top);
+};
 
 const seekElement = async (target: Page, seconds: number): Promise<void> => {
   await target.getByTestId("player-video").evaluate(async (element, to) => {
@@ -446,6 +500,45 @@ test("a picture subtitle is drawn into the video, so its delay is off with the r
   await expect(control.getByRole("button", { name: "Earlier" })).toBeDisabled();
   await expect(control.getByRole("textbox")).toBeDisabled();
   await capture(page, "subtitle-delay-burned-in");
+});
+
+test("subtitles rise above the controls, and a line keeps its place until it ends", async () => {
+  await openPaused(page, FILM);
+  await chooseSubtitle(page, "English");
+  await closeTracks(page);
+  await expect.poll(() => showing(page)).toMatchObject({ starts: englishStarts(0) });
+
+  await seekElement(page, LONG_LINE.start + 0.5);
+  await expect.poll(() => showing(page)).toMatchObject({ active: [LONG_LINE.text] });
+
+  const controls = page.locator('[data-slot="player-controls"]');
+  const row = await controls.locator("> div").first().boundingBox();
+  const video = await page.getByTestId("player-video").boundingBox();
+
+  if (row === null || video === null) throw new Error("The player is not on screen");
+
+  const raised = await cueBoxes(page);
+
+  expect(raised).toHaveLength(1);
+  expect(raised[0]?.bottom).toBeLessThanOrEqual(row.y);
+  await capture(page, "subtitles-above-controls");
+
+  await page.getByTestId("player").press("k");
+  await expect(controls).toHaveCSS("opacity", "0", { timeout: 10_000 });
+  await expect.poll(() => showing(page)).toMatchObject({ active: [LONG_LINE.text] });
+  expect(await cueBoxes(page)).toEqual(raised);
+
+  await expectPlayingPast(page, LONG_LINE.end + 0.2);
+  await expect.poll(() => cueLines(page)).toEqual(ENGLISH.map(() => "auto"));
+
+  await seekElement(page, ENGLISH[0].start + 0.5);
+  await expect.poll(() => showing(page)).toMatchObject({ active: [ENGLISH[0].text] });
+
+  const lowered = await cueBoxes(page);
+
+  expect(lowered).toHaveLength(1);
+  expect(lowered[0]?.bottom).toBeGreaterThanOrEqual(video.y + video.height - 1);
+  await capture(page, "subtitles-at-the-bottom");
 });
 
 test("on a phone the delay sits under the subtitles too, without keycaps", async ({ browser }) => {
