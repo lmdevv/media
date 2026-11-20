@@ -11,7 +11,8 @@ import type { ActiveScan } from "@/components/library/scans";
 import { ACCOUNT_LIBRARIES } from "@/lib/account-links";
 import { jobEta, jobPercent } from "@/lib/job-progress";
 import type { AlbumCard as Album } from "@/lib/models";
-import { useAllRows } from "@/lib/pages";
+import type { PageOpts } from "@media/ui/lib/pages";
+import { preloadAllRows, useAllRows } from "@/lib/pages";
 import { can } from "@/lib/permissions";
 import { nameOf, useMe, useMusic, useRead } from "@/lib/platform";
 import {
@@ -26,11 +27,15 @@ import { formatCount, formatTotal, greeting, initial, weekday } from "@/lib/form
 import { placeholderAt } from "@/lib/art";
 import { useNow } from "@/lib/use-now";
 
+const playlistsPage = (paginationOpts: PageOpts) => ({ paginationOpts });
+
 export const Route = createFileRoute("/_app/")({
   loader: async ({ context: { platform } }) => {
     await Promise.all([
       platform.music.library.home.preload({}),
       platform.core.auth.sessions.current.preload({}),
+      // The quick tiles mix playlists with albums, so they wait for both rather than reshuffle.
+      preloadAllRows(platform.music.playlists.list, playlistsPage),
     ]);
   },
   pendingComponent: HomeSkeleton,
@@ -44,7 +49,7 @@ function HomeScreen() {
   const music = useMusic();
   const home = useRead(music.library.home, {});
   const me = useMe();
-  const playlists = useAllRows(music.playlists.list, (paginationOpts) => ({ paginationOpts }));
+  const playlists = useAllRows(music.playlists.list, playlistsPage);
   const player = usePlayer();
   const now = useNow(60_000);
 
