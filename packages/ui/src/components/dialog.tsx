@@ -1,4 +1,5 @@
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
+import { useKeyboardFocusReturn } from "@media/ui/lib/focus-policy";
 import { cn } from "@media/ui/lib/utils";
 import { XIcon } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
@@ -24,6 +25,8 @@ export function DialogContent({
   container,
   className,
   children,
+  ref,
+  finalFocus,
   ...props
 }: Omit<DialogPrimitive.Popup.Props, "title" | "children"> & {
   readonly title: string;
@@ -32,6 +35,8 @@ export function DialogContent({
   readonly container?: HTMLElement | undefined;
   readonly children: ReactNode;
 }) {
+  const focusReturn = useKeyboardFocusReturn(ref, finalFocus);
+
   return (
     <DialogPrimitive.Portal container={container}>
       <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-scrim transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0" />
@@ -43,6 +48,7 @@ export function DialogContent({
           className,
         )}
         {...props}
+        {...focusReturn}
       >
         <div className="flex items-center justify-between gap-4 px-6 pt-6 pb-2">
           <DialogPrimitive.Title className="text-heading/heading font-bold tracking-tight text-text">

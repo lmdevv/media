@@ -47,7 +47,7 @@ const phone = { ...devices["iPhone 15"], defaultBrowserType: "chromium" };
  * needs the worktree's dev stack (`scripts/dev-stack.sh up`), since the movies client opens only
  * on the browser's one session, signed in at `/`; each skips without it.
  *
- * `kit` checks the UI kit gallery, the player's track menu and next-episode benches, and the
+ * `kit` checks the UI kit gallery and its focus rules, the player's track menu and next-episode benches, and the
  * not-found and error screens. `session` signs in once at `/` and opens `/movies` signed in, on a
  * desktop and on a phone. `stack` runs Home, a title, My List, the keyboard, and error reports on
  * a scanned library with the real media service, which the suites start themselves from
@@ -67,7 +67,7 @@ const suites: ReadonlyArray<Suite> = [
   {
     name: "kit",
     group: "core",
-    testMatch: /e2e\/(kit|route-states|track-menu|autoplay-next)\.spec\.ts$/u,
+    testMatch: /e2e\/(kit|focus|route-states|track-menu|autoplay-next)\.spec\.ts$/u,
     chained: false,
   },
   { name: "session", group: "core", testMatch: /e2e\/session\/.*\.spec\.ts$/u, chained: false },

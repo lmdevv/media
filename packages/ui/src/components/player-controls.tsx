@@ -1,4 +1,6 @@
 import { Slider } from "@base-ui/react/slider";
+import { useLiveValue } from "@media/ui/lib/live-value";
+import type { LiveValue } from "@media/ui/lib/live-value";
 import { formatTimecode } from "@media/ui/lib/timecode";
 import { cn } from "@media/ui/lib/utils";
 import {
@@ -43,8 +45,9 @@ function FullscreenGlyph(props: ComponentProps<"svg">) {
 }
 
 /**
- * A bare transport button: a white glyph with a label for assistive tech. `active` draws the
- * translucent square behind an open panel's button. The glyph takes no pointer events:
+ * A bare transport button: a white glyph with a label for assistive tech, and room for a short
+ * text after the glyph, such as a timer's time left. `active` draws the translucent square behind
+ * an open panel's button. The glyph takes no pointer events:
  * a glyph swapped under the pointer, as mute swaps it, would take the pointer's `pointerout` with
  * it, and React would miss the pointer leaving.
  */
@@ -59,7 +62,7 @@ export function PlayerButton({
       type={type}
       data-active={active || undefined}
       className={cn(
-        "relative flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-bar text-text transition-opacity before:absolute before:-inset-2 before:rounded-control before:bg-text/14 before:opacity-0 hover:opacity-80 disabled:opacity-(--opacity-disabled) data-active:before:opacity-100 data-popup-open:before:opacity-100 [&_svg]:pointer-events-none [&_svg]:relative [&_svg]:size-6.5",
+        "relative flex h-7 min-w-7 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-bar text-text transition-opacity before:absolute before:-inset-2 before:rounded-control before:bg-text/14 before:opacity-0 hover:opacity-80 disabled:opacity-(--opacity-disabled) data-active:before:opacity-100 data-popup-open:before:opacity-100 [&_svg]:pointer-events-none [&_svg]:relative [&_svg]:size-6.5",
         className,
       )}
       {...props}
@@ -258,6 +261,48 @@ function ProgressLine({
       className="flex h-1 flex-1 rounded-bar bg-text/25"
     >
       <div className="h-1 rounded-bar bg-accent" style={{ width: `${String(fraction * 100)}%` }} />
+    </div>
+  );
+}
+
+/** The scrubber, or a room guest's progress line, and the time left: what follows the position. */
+function PositionRow({
+  position,
+  duration,
+  locked,
+  onSeek,
+  onSeekCommit,
+  scrub,
+  rowRef,
+}: {
+  readonly position: LiveValue<number>;
+  readonly duration: number;
+  readonly locked: boolean;
+  readonly onSeek: (seconds: number) => void;
+  readonly onSeekCommit?: ((seconds: number) => void) | undefined;
+  readonly scrub?:
+    | Pick<ComponentProps<typeof Scrubber>, "describe" | "chapters" | "preview" | "onPreviewStart">
+    | undefined;
+  readonly rowRef?: Ref<HTMLDivElement> | undefined;
+}) {
+  const seconds = useLiveValue(position, (value) => value);
+
+  return (
+    <div ref={rowRef} className="flex items-center gap-3.5">
+      {locked ? (
+        <ProgressLine position={seconds} duration={duration} />
+      ) : (
+        <Scrubber
+          position={seconds}
+          duration={duration}
+          onSeek={onSeek}
+          onSeekCommit={onSeekCommit}
+          {...scrub}
+        />
+      )}
+      <span className="font-mono text-label/caption text-text tabular-nums">
+        {formatTimecode(seconds - duration)}
+      </span>
     </div>
   );
 }
@@ -566,7 +611,7 @@ function VolumeControl({
  * The player's bottom controls over a dark gradient: scrubber and remaining time, transport on the
  * left, the title in the middle, and next episode, tracks, room and fullscreen on the right.
  *
- * @param position - Seconds played.
+ * @param position - Seconds played; only the scrubber row follows it as it moves.
  * @param onSeek - Follows the scrubber while it moves; `onSeekCommit` gets where it was let go,
  *   and the skip buttons' targets.
  * @param duration - Length in seconds.
@@ -612,7 +657,7 @@ export function PlayerControls({
 }: {
   readonly title: string;
   readonly playing: boolean;
-  readonly position: number;
+  readonly position: LiveValue<number>;
   readonly duration: number;
   readonly muted?: boolean;
   readonly volume?: number | null;
@@ -640,7 +685,7 @@ export function PlayerControls({
   readonly className?: string;
 }) {
   const skip = (by: number): void =>
-    (onSeekCommit ?? onSeek)(Math.min(duration, Math.max(0, position + by)));
+    (onSeekCommit ?? onSeek)(Math.min(duration, Math.max(0, position.get() + by)));
 
   return (
     <div
@@ -650,22 +695,15 @@ export function PlayerControls({
         className,
       )}
     >
-      <div ref={topRowRef} className="flex items-center gap-3.5">
-        {locked === undefined ? (
-          <Scrubber
-            position={position}
-            duration={duration}
-            onSeek={onSeek}
-            onSeekCommit={onSeekCommit}
-            {...scrub}
-          />
-        ) : (
-          <ProgressLine position={position} duration={duration} />
-        )}
-        <span className="font-mono text-label/caption text-text tabular-nums">
-          {formatTimecode(position - duration)}
-        </span>
-      </div>
+      <PositionRow
+        position={position}
+        duration={duration}
+        locked={locked !== undefined}
+        onSeek={onSeek}
+        onSeekCommit={onSeekCommit}
+        scrub={scrub}
+        rowRef={topRowRef}
+      />
       <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-6">
         <div className="flex items-center gap-6.5">
           {locked === undefined ? (
