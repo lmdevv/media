@@ -3,6 +3,7 @@ import { usePlatform } from "@media/sdk/react";
 import { Button } from "@media/ui/components/button";
 import { Checkbox } from "@media/ui/components/checkbox";
 import { PageHeader } from "@media/ui/components/page-header";
+import { Skeleton } from "@media/ui/components/skeleton";
 import { TextField } from "@media/ui/components/text-field";
 import { useAllPages, usePages } from "@media/ui/lib/pages";
 import type { Paged } from "@media/ui/lib/pages";
@@ -14,12 +15,14 @@ import { useActions } from "@/components/admin/action";
 import {
   CopyField,
   ItemRow,
+  ListSkeleton,
   Muted,
   Notice,
   PagedList,
   Section,
   SelectField,
   formatTime,
+  pageArgs,
 } from "@/components/admin/parts";
 import type { Choice } from "@/components/admin/parts";
 import { useMe } from "@/session/me";
@@ -131,9 +134,7 @@ export function DevicesScreen() {
   const platform = usePlatform();
 
   // Every page: API keys' sessions are read and left out, so a page can come back empty.
-  const sessions = useAllPages(platform.core.auth.sessions.list, (paginationOpts) => ({
-    paginationOpts,
-  }));
+  const sessions = useAllPages(platform.core.auth.sessions.list, pageArgs);
 
   const actions = useActions<"end">();
   const [ending, setEnding] = useState<SessionRow["sessionId"] | null>(null);
@@ -156,6 +157,16 @@ export function DevicesScreen() {
         })();
       }}
     />
+  );
+}
+
+/** The devices page while its sessions load. */
+export function DevicesSkeleton() {
+  return (
+    <>
+      <PageHeader title="Devices" />
+      <ListSkeleton label="Signed-in devices" />
+    </>
   );
 }
 
@@ -249,7 +260,7 @@ const isKeyScope = (scope: string): scope is KeyScope =>
 export function ApiKeysScreen() {
   const platform = usePlatform();
   const me = useMe();
-  const keys = usePages(platform.core.auth.apiKeys.list, (paginationOpts) => ({ paginationOpts }));
+  const keys = usePages(platform.core.auth.apiKeys.list, pageArgs);
   const actions = useActions<"create" | "revoke">();
   const [creating, setCreating] = useState(false);
   const [created, setCreated] = useState<CreatedKey | null>(null);
@@ -290,6 +301,16 @@ export function ApiKeysScreen() {
         })();
       }}
     />
+  );
+}
+
+/** The API keys page while its keys load: Create key's place, then the list. */
+export function ApiKeysSkeleton() {
+  return (
+    <>
+      <PageHeader title="API keys" actions={<Skeleton className="h-9 w-30 rounded-control" />} />
+      <ListSkeleton label="API keys" />
+    </>
   );
 }
 

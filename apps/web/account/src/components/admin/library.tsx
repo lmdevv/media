@@ -1,5 +1,6 @@
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { Button } from "@media/ui/components/button";
+import { Skeleton } from "@media/ui/components/skeleton";
 import { TextField } from "@media/ui/components/text-field";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { Match } from "effect";
@@ -87,21 +88,42 @@ export function LibraryScreen({ libraryId }: { readonly libraryId: LibraryId }) 
       mode={mode}
       running={actions.running}
       sharing={<Sharing libraryId={libraryId} />}
-      back={
-        <Link
-          key="libraries"
-          to="/admin/libraries"
-          className="font-sans text-label/label text-text-muted hover:text-text"
-        >
-          Libraries
-        </Link>
-      }
+      back={<LibrariesCrumb />}
       onMode={setMode}
       onScan={() => void actions.run("scan", () => libraries.scan({ libraryId }), "Scan queued")}
       onRename={(name) => void rename(name)}
       onFolders={(text) => void changeFolders(text)}
       onRemove={() => void remove()}
     />
+  );
+}
+
+/** The library page's breadcrumb back to the libraries list. */
+export function LibrariesCrumb() {
+  return (
+    <Link
+      to="/admin/libraries"
+      className="font-sans text-label/label text-text-muted hover:text-text"
+    >
+      Libraries
+    </Link>
+  );
+}
+
+/** The library page while the library loads: its header with facts and Scan now, the scan line. */
+export function LibrarySkeleton({ back }: { readonly back: ReactNode }) {
+  return (
+    <>
+      <PageHeader
+        title="Library"
+        crumbs={[back]}
+        facts={
+          <span className="inline-block h-3 w-48 animate-pulse rounded-control bg-muted align-middle" />
+        }
+        actions={<Skeleton className="h-8 w-26 rounded-control" />}
+      />
+      <Skeleton aria-label="Loading the library" className="h-4.5 w-56 rounded-control" />
+    </>
   );
 }
 
@@ -149,7 +171,7 @@ export function LibraryView({
 }) {
   return Match.value(state).pipe(
     Match.discriminatorsExhaustive("kind")({
-      loading: () => <PageHeader title="Library" crumbs={[back]} />,
+      loading: () => <LibrarySkeleton back={back} />,
       missing: () => (
         <>
           <PageHeader title="Library" crumbs={[back]} />

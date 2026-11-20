@@ -1,5 +1,6 @@
 import { usePlatform } from "@media/sdk/react";
 import { Button } from "@media/ui/components/button";
+import { Skeleton } from "@media/ui/components/skeleton";
 import { TextField } from "@media/ui/components/text-field";
 import { useState } from "react";
 import type { ReactNode } from "react";
@@ -10,7 +11,7 @@ import type { UserId } from "@/session/platform-types";
 import { useActions } from "./action";
 import { useAllPages, usePages } from "@media/ui/lib/pages";
 import type { Paged } from "@media/ui/lib/pages";
-import { ItemRow, Muted, Notice, PagedList, SelectField } from "./parts";
+import { ItemRow, ListSkeleton, Muted, Notice, PagedList, SelectField, pageArgs } from "./parts";
 import type { Group, Member, User } from "./types";
 
 type GroupId = Group["groupId"];
@@ -19,10 +20,7 @@ type GroupId = Group["groupId"];
 export function GroupsScreen() {
   const platform = usePlatform();
 
-  const groups = usePages(platform.core.permissions.groups.list, (paginationOpts) => ({
-    paginationOpts,
-  }));
-
+  const groups = usePages(platform.core.permissions.groups.list, pageArgs);
   const actions = useActions<"create">();
   const [name, setName] = useState("");
   const [open, setOpen] = useState<GroupId | null>(null);
@@ -50,6 +48,17 @@ export function GroupsScreen() {
       onToggle={(groupId) => setOpen((current) => (current === groupId ? null : groupId))}
       panel={(group) => <GroupPanel group={group} />}
     />
+  );
+}
+
+/** The groups page while its groups load: the create form's row, then the list. */
+export function GroupsSkeleton() {
+  return (
+    <>
+      <PageHeader title="Groups" />
+      <Skeleton className="h-16.5 w-full rounded-control" />
+      <ListSkeleton label="Groups" />
+    </>
   );
 }
 

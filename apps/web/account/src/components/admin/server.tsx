@@ -98,6 +98,45 @@ export function ServerScreen({
   );
 }
 
+/** The server page while the media service's report loads. */
+export function ServerSkeleton({ mediaUrl }: { readonly mediaUrl: string }) {
+  return (
+    <>
+      <ServerHeader mediaUrl={mediaUrl} health="checking" />
+      <ReportsSkeleton />
+    </>
+  );
+}
+
+function ServerHeader({
+  mediaUrl,
+  health,
+}: {
+  readonly mediaUrl: string;
+  readonly health: Health;
+}) {
+  return (
+    <PageHeader
+      title="Server"
+      facts={
+        <span className="font-sans text-label/label">
+          {hostOf(mediaUrl)} · {HEALTH_LABELS[health]}
+        </span>
+      }
+    />
+  );
+}
+
+/** The reports while they load: hardware transcoding, then the six settings rows. */
+function ReportsSkeleton() {
+  return (
+    <>
+      <Skeleton aria-label="Loading" className="h-10 w-64 rounded-control" />
+      <Skeleton className="h-66 w-full rounded-control" />
+    </>
+  );
+}
+
 /** The server page for each {@link ServerState}. */
 export function ServerView({
   state,
@@ -117,17 +156,10 @@ export function ServerView({
 
   return (
     <>
-      <PageHeader
-        title="Server"
-        facts={
-          <span className="font-sans text-label/label">
-            {hostOf(mediaUrl)} · {HEALTH_LABELS[health]}
-          </span>
-        }
-      />
+      <ServerHeader mediaUrl={mediaUrl} health={health} />
       {Match.value(state).pipe(
         Match.discriminatorsExhaustive("kind")({
-          loading: () => <Skeleton aria-label="Loading" className="h-28 w-full rounded-control" />,
+          loading: () => <ReportsSkeleton />,
           failed: ({ message, retry }) => <Failed message={message} retry={retry} />,
           ready: ({ status }) => (
             <Reports

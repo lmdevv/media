@@ -8,7 +8,7 @@ import type { UserId } from "@/session/platform-types";
 import { useActions } from "./action";
 import { useAllPages, usePages } from "@media/ui/lib/pages";
 import type { Paged } from "@media/ui/lib/pages";
-import { ItemRow, Notice, PagedList, SelectField } from "./parts";
+import { ItemRow, ListSkeleton, Notice, PagedList, SelectField, pageArgs } from "./parts";
 import type { Device, DeviceMode, User } from "./types";
 
 type DeviceId = Device["deviceId"];
@@ -35,7 +35,7 @@ export interface DeviceFocus {
 export function DevicesScreen() {
   const platform = usePlatform();
   const registry = platform.core.devices.registry;
-  const devices = usePages(registry.list, (paginationOpts) => ({ paginationOpts }));
+  const devices = usePages(registry.list, pageArgs);
 
   const users = useAllPages(platform.core.accounts.users.list, (paginationOpts) => ({
     paginationOpts,
@@ -84,6 +84,16 @@ export function DevicesScreen() {
         )
       }
     />
+  );
+}
+
+/** The devices page while its list loads. */
+export function DevicesSkeleton() {
+  return (
+    <>
+      <PageHeader title="Devices" />
+      <ListSkeleton label="Devices" />
+    </>
   );
 }
 

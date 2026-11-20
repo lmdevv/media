@@ -1,10 +1,13 @@
+import type { PlatformSdk } from "@media/sdk/promise";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { Button } from "@media/ui/components/button";
 import { Skeleton } from "@media/ui/components/skeleton";
 import { FieldError } from "@media/ui/components/text-field";
+import { cn } from "@media/ui/lib/utils";
 import { createFileRoute } from "@tanstack/react-router";
 
 import { PageHeader } from "@media/ui/components/page-header";
+import { Section } from "@/components/admin/parts";
 import { SettingsFrame } from "@/components/shell";
 import { describeFailure } from "@media/ui/lib/failure";
 import { useAction } from "@/screens/people/action";
@@ -22,8 +25,53 @@ import { useMe } from "@/session/me";
 export const Route = createFileRoute("/settings")({
   staticData: { need: "account" },
   head: () => ({ meta: [{ title: "Settings · Lar" }] }),
+  loader: async ({ context: { platform } }) => {
+    await Promise.all([platform.core.settings.get.preload(), preloadRestrictions(platform)]);
+  },
+  pendingComponent: SettingsSkeleton,
   component: SettingsPage,
 });
+
+/** Preloads the person's own limits, which decide whether Shared devices shows. */
+const preloadRestrictions = async (platform: PlatformSdk): Promise<void> => {
+  const { current } = platform.core.auth.sessions;
+
+  await current.preload();
+
+  const me = current.watch().getSnapshot();
+
+  if (me.status === "success") {
+    await platform.core.restrictions.get.preload({ userId: me.data.userId });
+  }
+};
+
+/** Each section's title and the height of the form under it, top to bottom. */
+const SECTIONS = [
+  { title: "Name", form: "h-29.5" },
+  { title: "Username", form: "h-29.5" },
+  { title: "Password", form: "h-58.5" },
+  { title: "Unlock code", form: "h-38" },
+  { title: "Shared devices", form: "h-17.5" },
+] as const;
+
+/** The settings page while its settings load: each section's title over its form's place. */
+function SettingsSkeleton() {
+  return (
+    <SettingsFrame>
+      <PageHeader title="Settings" />
+      {SECTIONS.map(({ title, form }) => (
+        <Section key={title} title={title}>
+          <Skeleton className={cn("w-full max-w-120 rounded-control", form)} />
+        </Section>
+      ))}
+      <PlaybackSkeleton />
+    </SettingsFrame>
+  );
+}
+
+function PlaybackSkeleton() {
+  return <Skeleton className="h-64 w-full max-w-180 rounded-control" />;
+}
 
 function SettingsPage() {
   const platform = usePlatform();
@@ -84,9 +132,7 @@ function SettingsPage() {
           onList={(listed) => void listing.run(listed)}
         />
       ) : null}
-      {settings.status === "loading" ? (
-        <Skeleton className="h-64 w-full max-w-180 rounded-control" />
-      ) : null}
+      {settings.status === "loading" ? <PlaybackSkeleton /> : null}
       {settings.status === "error" ? (
         <div className="flex flex-col items-start gap-3">
           <FieldError className="pt-0">{describeFailure(settings.error)}</FieldError>

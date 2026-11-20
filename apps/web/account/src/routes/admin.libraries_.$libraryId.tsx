@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Brand } from "effect";
 
-import { LibraryScreen } from "@/components/admin/library";
+import { LibrariesCrumb, LibraryScreen, LibrarySkeleton } from "@/components/admin/library";
 import type { LibraryId } from "@/components/admin/types";
 
 const libraryId = Brand.nominal<LibraryId>();
@@ -14,5 +14,8 @@ function Library() {
 
 export const Route = createFileRoute("/admin/libraries_/$libraryId")({
   head: () => ({ meta: [{ title: "Library · Lar" }] }),
+  loader: ({ context: { platform }, params }) =>
+    platform.core.libraries.get.preload({ libraryId: libraryId(params.libraryId) }),
+  pendingComponent: () => <LibrarySkeleton back={<LibrariesCrumb />} />,
   component: Library,
 });

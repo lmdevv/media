@@ -2,6 +2,7 @@ import { BackupId } from "@media/contracts/ids";
 import { createMediaServer } from "@media/sdk/promise";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { Button } from "@media/ui/components/button";
+import { Skeleton } from "@media/ui/components/skeleton";
 import { UploadIcon } from "lucide-react";
 import { Schema } from "effect";
 import { useMemo, useState } from "react";
@@ -13,7 +14,16 @@ import { useActions } from "./action";
 import { useNow } from "@media/ui/lib/use-now";
 import { usePages } from "@media/ui/lib/pages";
 import type { Paged } from "@media/ui/lib/pages";
-import { ItemRow, Muted, Notice, PagedList, Section, formatTime } from "./parts";
+import {
+  ItemRow,
+  ListSkeleton,
+  Muted,
+  Notice,
+  PagedList,
+  Section,
+  formatTime,
+  pageArgs,
+} from "./parts";
 import type { Backup } from "./types";
 
 const NOW_EVERY_MS = 60_000;
@@ -69,7 +79,7 @@ const backupLabel = (running: BackupAction | null, job: "queued" | "running" | n
 export function BackupsScreen({ mediaUrl }: { readonly mediaUrl: string }) {
   const platform = usePlatform();
   const backups = platform.core.server.backups;
-  const list = usePages(backups.list, (paginationOpts) => ({ paginationOpts }));
+  const list = usePages(backups.list, pageArgs);
   const active = usePlatformQuery(backups.active, {});
   const actions = useActions<BackupAction>();
   const { signOut } = useAccountActions();
@@ -100,6 +110,28 @@ export function BackupsScreen({ mediaUrl }: { readonly mediaUrl: string }) {
       onSelect={setSelected}
       onRestore={(backup) => void restore(backup)}
     />
+  );
+}
+
+/** The backups page while its list loads: Back up now's place, the schedule, then the list. */
+export function BackupsSkeleton() {
+  return (
+    <>
+      <PageHeader title="Backups" actions={<Skeleton className="h-8 w-30 rounded-control" />} />
+      <Schedule />
+      <Section title="Backups">
+        <ListSkeleton label="Backups" />
+      </Section>
+    </>
+  );
+}
+
+function Schedule() {
+  return (
+    <div className="flex h-11 items-center justify-between">
+      <span className="font-sans text-label/label font-medium text-text">Schedule</span>
+      <span className="font-mono text-caption/caption text-text">Nightly · 03:00 UTC</span>
+    </div>
   );
 }
 
@@ -146,10 +178,7 @@ export function BackupsView({
           </Button>
         }
       />
-      <div className="flex h-11 items-center justify-between">
-        <span className="font-sans text-label/label font-medium text-text">Schedule</span>
-        <span className="font-mono text-caption/caption text-text">Nightly · 03:00 UTC</span>
-      </div>
+      <Schedule />
       <Section title="Backups">
         {oldest === undefined || backups.status !== "ready" ? null : (
           <Muted>{`${backups.rows.length} kept · oldest ${DATES.format(oldest.takenAt)}`}</Muted>

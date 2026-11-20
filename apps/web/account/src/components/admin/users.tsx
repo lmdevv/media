@@ -18,6 +18,7 @@ import type { Paged } from "@media/ui/lib/pages";
 import {
   Failed,
   ItemRow,
+  ListSkeleton,
   Muted,
   Notice,
   OnceLink,
@@ -25,6 +26,7 @@ import {
   Section,
   SelectField,
   formatTime,
+  pageArgs,
 } from "./parts";
 import type { Choice } from "./parts";
 import type { AssignableRole, Invite, Restrictions, Role, User } from "./types";
@@ -61,10 +63,7 @@ export function UsersScreen() {
   const platform = usePlatform();
   const me = useMe();
 
-  const users = usePages(platform.core.accounts.users.list, (paginationOpts) => ({
-    paginationOpts,
-  }));
-
+  const users = usePages(platform.core.accounts.users.list, pageArgs);
   const [open, setOpen] = useState<UserId | null>(null);
 
   return (
@@ -79,6 +78,18 @@ export function UsersScreen() {
       />
       <AddSomeone />
       <PendingInvites />
+    </>
+  );
+}
+
+/** The users page while its people load. */
+export function UsersSkeleton() {
+  return (
+    <>
+      <PageHeader title="Users" />
+      <Section title="People">
+        <ListSkeleton label="People" />
+      </Section>
     </>
   );
 }

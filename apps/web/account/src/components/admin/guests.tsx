@@ -1,5 +1,6 @@
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { Button } from "@media/ui/components/button";
+import { Skeleton } from "@media/ui/components/skeleton";
 import { Switch } from "@media/ui/components/switch";
 import { TextField } from "@media/ui/components/text-field";
 import { Match } from "effect";
@@ -11,11 +12,17 @@ import { describeFailure } from "@media/ui/lib/failure";
 
 import { useActions } from "./action";
 import { usePages } from "@media/ui/lib/pages";
-import type { Paged } from "@media/ui/lib/pages";
-import { Failed, ItemRow, Muted, Notice, PagedList, Section, formatTime } from "./parts";
+import type { PageOpts, Paged } from "@media/ui/lib/pages";
+import { Failed, ItemRow, ListSkeleton, Notice, PagedList, Section, formatTime } from "./parts";
 import type { GuestLink, GuestStatus, GuestVisit } from "./types";
 
 type LinkId = GuestLink["linkId"];
+
+/** The arguments of each page of everyone's guest links, shared by the screen and its loader. */
+export const everyoneLinks = (paginationOpts: PageOpts) => ({
+  whose: "everyone" as const,
+  paginationOpts,
+});
 
 const STATE_LABELS: Readonly<Record<GuestLink["state"], string>> = {
   open: "Open",
@@ -39,11 +46,7 @@ export function GuestsScreen() {
   const platform = usePlatform();
   const status = usePlatformQuery(platform.core.guests.status);
 
-  const links = usePages(platform.core.guests.links.list, (paginationOpts) => ({
-    whose: "everyone" as const,
-    paginationOpts,
-  }));
-
+  const links = usePages(platform.core.guests.links.list, everyoneLinks);
   const actions = useActions<string>();
   const [open, setOpen] = useState<LinkId | null>(null);
 
@@ -51,7 +54,7 @@ export function GuestsScreen() {
     <GuestsView
       settings={Match.value(status).pipe(
         Match.discriminatorsExhaustive("status")({
-          loading: () => <Muted>Loading…</Muted>,
+          loading: () => <GuestSettingsSkeleton />,
           error: ({ error, retry }) => <Failed message={describeFailure(error)} retry={retry} />,
           success: ({ data }) => <GuestSettings key={JSON.stringify(data)} saved={data} />,
         }),
@@ -69,6 +72,31 @@ export function GuestsScreen() {
       }
       activity={(linkId) => <Activity linkId={linkId} />}
     />
+  );
+}
+
+/** The guests page while its settings and links load. */
+export function GuestsSkeleton() {
+  return (
+    <>
+      <PageHeader title="Guests" />
+      <GuestSettingsSkeleton />
+      <Section title="Everyone's links">
+        <ListSkeleton label="Everyone's links" />
+      </Section>
+    </>
+  );
+}
+
+/** The guest-link settings while they load: the switch, the address, and Save. */
+function GuestSettingsSkeleton() {
+  return (
+    <Section title="Guest links">
+      <Skeleton
+        aria-label="Loading guest links"
+        className="h-39 w-full rounded-control md:max-w-120"
+      />
+    </Section>
   );
 }
 
