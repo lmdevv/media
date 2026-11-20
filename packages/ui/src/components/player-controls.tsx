@@ -13,7 +13,14 @@ import {
   VolumeXIcon,
 } from "lucide-react";
 import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
-import type { ComponentProps, FocusEvent, KeyboardEvent, PointerEvent, ReactNode } from "react";
+import type {
+  ComponentProps,
+  FocusEvent,
+  KeyboardEvent,
+  PointerEvent,
+  ReactNode,
+  Ref,
+} from "react";
 
 import { PauseGlyph, PlayGlyph, SkipNextGlyph } from "./icons";
 import { SpriteThumbnail } from "./sprite-thumbnail";
@@ -574,6 +581,8 @@ function VolumeControl({
  *   ({@link VolumeControl}).
  * @param episodes - The Episodes control, usually an `EpisodePopover` trigger; shows beside next
  *   episode.
+ * @param topRowRef - The scrubber row, the topmost of the controls; the space above it is the
+ *   gradient's.
  */
 export function PlayerControls({
   title,
@@ -598,6 +607,7 @@ export function PlayerControls({
   onNext,
   onRoom,
   onFullscreen,
+  topRowRef,
   className,
 }: {
   readonly title: string;
@@ -626,6 +636,7 @@ export function PlayerControls({
   readonly onNext?: (() => void) | undefined;
   readonly onRoom?: (() => void) | undefined;
   readonly onFullscreen?: (() => void) | undefined;
+  readonly topRowRef?: Ref<HTMLDivElement> | undefined;
   readonly className?: string;
 }) {
   const skip = (by: number): void =>
@@ -639,7 +650,7 @@ export function PlayerControls({
         className,
       )}
     >
-      <div className="flex items-center gap-3.5">
+      <div ref={topRowRef} className="flex items-center gap-3.5">
         {locked === undefined ? (
           <Scrubber
             position={position}
