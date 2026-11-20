@@ -90,6 +90,7 @@ import {
   TryingAnotherWay,
 } from "./player-states";
 import { CustomSleepTimerDialog, SleepTimerMenu, sleepTimerButtonLabel } from "./sleep-timer-menu";
+import { StillWatchingDialog } from "./still-watching-dialog";
 import { StreamInfo } from "./stream-info";
 import { useControlsVisible, useFullscreen, usePlayerLayout } from "./use-player-frame";
 import type { PlayerLayout } from "./use-player-frame";
@@ -97,6 +98,7 @@ import { useSeasonEpisodes } from "./use-season-episodes";
 import { useSubtitleDelay } from "./use-subtitle-delay";
 import { useSubtitlePlacement } from "./use-subtitle-placement";
 import type { SleepTimerControl } from "./use-sleep-timer";
+import type { StillWatchingControl } from "./use-still-watching";
 
 const BUFFER_TARGET_SECONDS = 4;
 
@@ -134,6 +136,8 @@ export interface PlayerScreenProps {
   };
   /** The page's sleep timer, which outlives this episode's player. */
   readonly sleepTimer: SleepTimerControl;
+  /** The page's count of autoplay's jumps since the viewer's last input, kept across players. */
+  readonly stillWatching: StillWatchingControl;
 }
 
 const startChoice = (start: PlayerScreenProps["start"]): StartChoice => {
@@ -168,6 +172,7 @@ export function PlayerScreen({
   start,
   guest,
   sleepTimer,
+  stillWatching,
 }: PlayerScreenProps) {
   const platform = usePlatform();
   const me = useMe();
@@ -224,6 +229,9 @@ export function PlayerScreen({
 
   const deviceQuality =
     settings.status === "success" ? (settings.data.device?.streamQuality ?? null) : null;
+
+  // The person's Autoplay setting; on while it loads, or when it fails to.
+  const autoplay = settings.status === "success" ? settings.data.user.autoplay : true;
 
   const watching = useMemo(() => ({ titleId, episodeId: episodeId ?? null }), [titleId, episodeId]);
   const playerNow = useRef<FollowerPlayer | null>(null);
@@ -703,12 +711,14 @@ export function PlayerScreen({
   const sleepPauses = sleepPausesPlayback(sleepTimer.timer);
   const sleepFade = sleepTimer.volume;
   const levelBeforeFade = useRef<number | null>(null);
+  const asking = stillWatching.watching.state === "asking";
 
   // Pauses as the timer runs out, before the effect below puts the volume back, and pauses the
-  // next episode too if the timer ran out while it loaded.
+  // next episode too if the timer ran out while it loaded. Asking whether anyone is still watching
+  // pauses too.
   useEffect(() => {
-    if (sleepPauses && playingForSleep) output?.pause();
-  }, [sleepPauses, playingForSleep, output]);
+    if ((sleepPauses || asking) && playingForSleep) output?.pause();
+  }, [sleepPauses, asking, playingForSleep, output]);
 
   // The fade scales the level the viewer set and puts it back after; a TV keeps its own level.
   useEffect(() => {
@@ -728,6 +738,7 @@ export function PlayerScreen({
     nextEpisode !== null &&
     !creditsDismissed &&
     !inSession &&
+    !asking &&
     !sleepHoldsAutoplay(sleepTimer.timer, sleepKey);
 
   const sessionPlayNow = together.actions.playNow;
@@ -856,8 +867,11 @@ export function PlayerScreen({
         },
   );
 
+  const { countdownEnded } = stillWatching;
+
+  // Only the countdown's end is autoplay's jump; the card's Play next is the viewer's own input.
   useEffect(() => {
-    if (!showNext) {
+    if (!showNext || !autoplay) {
       setCountdown(null);
 
       return undefined;
@@ -867,13 +881,19 @@ export function PlayerScreen({
       Stream.runForEach(
         Playback.autoplayCountdown(AUTOPLAY_COUNTDOWN.totalMs, AUTOPLAY_COUNTDOWN.stepMs),
         (left) => Effect.sync(() => setCountdown(left)),
-      ).pipe(Effect.andThen(Effect.sync(playNext))),
+      ).pipe(
+        Effect.andThen(
+          Effect.sync(() => {
+            if (countdownEnded()) playNext();
+          }),
+        ),
+      ),
     );
 
     return () => {
       Effect.runFork(Fiber.interrupt(fiber));
     };
-  }, [showNext, playNext]);
+  }, [showNext, autoplay, playNext, countdownEnded]);
 
   const stalled = useSettled(isPlaying && media.buffering, BUFFERING_GRACE_MS);
 
@@ -946,7 +966,7 @@ export function PlayerScreen({
       if (guest !== undefined) return;
 
       if (menu) setMenu(false);
-      else if (leaving === null && together.starting === undefined && !customSleepOpen) {
+      else if (leaving === null && !asking && together.starting === undefined && !customSleepOpen) {
         setMenu(true);
       }
     },
@@ -1587,7 +1607,7 @@ export function PlayerScreen({
             still={artworkUrl(nextEpisode.still, "card")}
             actions={{
               kind: "advance",
-              countdownMs: countdown ?? AUTOPLAY_COUNTDOWN.totalMs,
+              countdownMs: autoplay ? (countdown ?? AUTOPLAY_COUNTDOWN.totalMs) : null,
               onPlayNext: playNext,
               onWatchCredits: () => setCreditsDismissed(true),
             }}
@@ -1651,6 +1671,15 @@ export function PlayerScreen({
             returnFocus={focusAfterLeaving}
             onStay={stay}
             onLeave={backToDetails}
+          />
+          <StillWatchingDialog
+            open={asking}
+            container={overlays}
+            onContinue={() => {
+              stillWatching.continueWatching();
+              playNext();
+            }}
+            onDone={stillWatching.done}
           />
           {guest === undefined ? (
             <MemberPlayerMenu
