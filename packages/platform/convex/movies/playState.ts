@@ -31,7 +31,7 @@ interface PlayState {
   readonly files: ReadonlyArray<Doc<"mediaFiles">>;
   /** A movie's progress; a show's is on its episodes. */
   readonly progress: Doc<"watchProgress"> | null;
-  /** The episode a show's Play button starts, null for a movie or a finished show. */
+  /** The episode a show's Play button starts, null for a movie or a show with no episodes. */
   readonly next: Doc<"episodes"> | null;
   readonly inMyList: boolean;
 }
