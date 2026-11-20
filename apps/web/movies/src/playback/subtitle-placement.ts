@@ -1,14 +1,73 @@
 /**
  * The parts of a `VTTCue` the placement reads and moves. Its `line` is `auto` where the cue's file
- * leaves it at the bottom of the picture, and a negative line number while the placement holds it
- * above the bottom.
+ * leaves it at the bottom of the picture. `lineAlign` is missing in browsers whose cues lack it.
  */
 export interface PlacedCue {
   line: LineAndPositionSetting;
-  readonly snapToLines: boolean;
+  snapToLines: boolean;
+  lineAlign?: LineAlignSetting;
   readonly vertical: DirectionSetting;
   readonly text: string;
 }
+
+/** The settings of a `VTTCue` that place it; `lineAlign` is left alone where it is missing. */
+export interface CueLine {
+  readonly line: LineAndPositionSetting;
+  readonly snapToLines: boolean;
+  readonly lineAlign?: LineAlignSetting;
+}
+
+/**
+ * Where to put a cue so its last line sits `liftPx` pixels above the bottom of the video. Takes
+ * the lift once for every cue it places, then each cue.
+ */
+export type CuePosition = (liftPx: number) => (cue: PlacedCue) => CueLine;
+
+/** Line counts for the snapped position, at the video's size now. */
+export interface CueLineCounts {
+  /** Reads the video's size again and returns one line's height there, 0 while it has no box. */
+  readonly lineHeight: () => number;
+  /** The lines `cue` takes on screen at the size `lineHeight` last read. */
+  readonly count: (cue: PlacedCue) => number;
+}
+
+/**
+ * Places cues snapped to lines, as Chromium and Firefox pin a cue at a negative line by its first
+ * line: a cue of `n` lines raised `lift` lines gets line `-(n + lift)`, which puts its first line
+ * `n + lift` lines up from the bottom and its last line `lift` lines up. Snapped cues that show
+ * together still stack.
+ */
+export const snappedPosition =
+  (lines: CueLineCounts): CuePosition =>
+  (liftPx) => {
+    const step = lines.lineHeight();
+    const lift = step === 0 ? 0 : Math.ceil(liftPx / step);
+
+    return (cue) => ({ line: -(lines.count(cue) + lift), snapToLines: true });
+  };
+
+/**
+ * Places cues by the bottom of their last line, a percentage of the video element's height, as
+ * WebKit lays an end-aligned cue: exact for any font or caption style, whatever the line count.
+ */
+export const endAlignedPosition =
+  (video: { readonly clientHeight: number }): CuePosition =>
+  (liftPx) => {
+    const height = video.clientHeight;
+
+    const line =
+      height === 0 ? 100 : Math.min(100, Math.max(0, (100 * (height - liftPx)) / height));
+
+    const placed: CueLine = { line, snapToLines: false, lineAlign: "end" };
+
+    return () => placed;
+  };
+
+/** A cue as its file leaves it at the bottom of the picture. */
+const atBottom = (cue: PlacedCue): CueLine =>
+  "lineAlign" in cue
+    ? { line: "auto", snapToLines: true, lineAlign: "start" }
+    : { line: "auto", snapToLines: true };
 
 /**
  * The parts of a `TextTrack` the placement uses: its cues, and those showing now, are null while
@@ -36,27 +95,24 @@ const PLACED_KINDS: ReadonlySet<string> = new Set(["subtitles", "captions"]);
 const isPlacedCue = (cue: TextTrackCue | PlacedCue): cue is PlacedCue => "line" in cue;
 
 /**
- * Holds one element's text subtitles some lines above the bottom of the picture, such as over the
+ * Holds one element's text subtitles some pixels above the bottom of the picture, such as over the
  * player's controls, also for cues that load later. A raise applies at once, since a line under
  * the controls cannot be read; a lower one waits until none of the lines it moves shows, so a line
  * never moves down while it is on screen. Cues the file positions itself (a sign at the top,
- * vertical text) keep their place, and do not hold a lower one back.
- *
- * Cues stay snapped to lines, so the browser still stacks cues that show together: a cue of `n`
- * lines raised `lift` lines gets line `-(n + lift)`, which puts its first line `n + lift` lines up
- * from the bottom and its last line `lift` lines up.
+ * vertical text) keep their place, and do not hold a lower one back. Lowered to 0, cues get back
+ * the settings their file gave them.
  */
 export class SubtitlePlacement {
   readonly #element: PlacedElement;
-  readonly #linesOf: (cue: PlacedCue) => number;
+  readonly #position: CuePosition;
   readonly #placed = new WeakSet<PlacedCue>();
   #lift = 0;
   #wanted = 0;
 
-  /** @param linesOf - How many lines `cue` takes on screen once its text wraps. */
-  constructor(element: PlacedElement, linesOf: (cue: PlacedCue) => number) {
+  /** @param position - Where a raised cue goes in this browser. */
+  constructor(element: PlacedElement, position: CuePosition) {
     this.#element = element;
-    this.#linesOf = linesOf;
+    this.#position = position;
     // Neither event bubbles from a `<track>`; the element hears them while they are captured.
     element.addEventListener("load", this.#onCues, true);
     element.addEventListener("cuechange", this.#onCueChange, true);
@@ -65,12 +121,12 @@ export class SubtitlePlacement {
   }
 
   /**
-   * Holds the cues `lines` lines above the bottom: at once when that raises them, and once no
-   * line shows when it lowers them. Also places the cues again for a new line count, such as
-   * after the picture changed size.
+   * Holds the last line of each cue `liftPx` pixels above the bottom: at once when that raises
+   * them, and once no line shows when it lowers them. Also places the cues again for a new size of
+   * the picture.
    */
-  raise(lines: number): void {
-    this.#wanted = lines;
+  raise(liftPx: number): void {
+    this.#wanted = liftPx;
     this.#onCues();
   }
 
@@ -118,6 +174,8 @@ export class SubtitlePlacement {
   }
 
   #place(): void {
+    const position = this.#lift === 0 ? atBottom : this.#position(this.#lift);
+
     for (const track of this.#element.textTracks) {
       if (!PLACED_KINDS.has(track.kind)) continue;
 
@@ -125,7 +183,12 @@ export class SubtitlePlacement {
       let movedShowing = false;
 
       for (const cue of track.cues ?? []) {
-        if (isPlacedCue(cue) && this.#movable(cue) && this.#move(cue) && showing.has(cue))
+        if (
+          isPlacedCue(cue) &&
+          this.#movable(cue) &&
+          this.#move(cue, position(cue)) &&
+          showing.has(cue)
+        )
           movedShowing = true;
       }
 
@@ -142,14 +205,17 @@ export class SubtitlePlacement {
     return this.#placed.has(cue) || (cue.line === "auto" && cue.snapToLines && cue.vertical === "");
   }
 
-  /** Puts `cue` on the line for the lift now; true when that moved it. */
-  #move(cue: PlacedCue): boolean {
-    const line = this.#lift === 0 ? "auto" : -(this.#linesOf(cue) + this.#lift);
+  /** Gives `cue` the settings of `to`; true when that moved it. */
+  #move(cue: PlacedCue, to: CueLine): boolean {
+    const aligned = to.lineAlign === undefined || cue.lineAlign === to.lineAlign;
 
-    if (cue.line === line) return false;
+    if (cue.line === to.line && cue.snapToLines === to.snapToLines && aligned) return false;
 
     this.#placed.add(cue);
-    cue.line = line;
+    cue.line = to.line;
+    cue.snapToLines = to.snapToLines;
+
+    if (to.lineAlign !== undefined) cue.lineAlign = to.lineAlign;
 
     return true;
   }

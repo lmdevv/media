@@ -1,8 +1,8 @@
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
-import type { PlacedCue, PlacedElement, PlacedTrack } from "./subtitle-placement";
-import { SubtitlePlacement } from "./subtitle-placement";
+import type { CuePosition, PlacedCue, PlacedElement, PlacedTrack } from "./subtitle-placement";
+import { endAlignedPosition, snappedPosition, SubtitlePlacement } from "./subtitle-placement";
 import type { RetimedElement, TextTrackLike } from "./subtitle-timing";
 import { SubtitleRetimer } from "./subtitle-timing";
 
@@ -20,6 +20,11 @@ class FakeCue implements PlacedCue {
     this.startTime = startTime;
     this.endTime = endTime;
   }
+}
+
+/** A cue as WebKit and Firefox give it, which can align its line by its end. */
+class AlignedCue extends FakeCue {
+  lineAlign: LineAlignSetting = "start";
 }
 
 /**
@@ -88,28 +93,54 @@ class FakeElement extends EventTarget implements PlacedElement, RetimedElement {
 /** Lines as the file breaks them; the browser wraps none of these. */
 const linesOf = (cue: PlacedCue): number => cue.text.split("\n").length;
 
-const setup = () => {
+/** Snapped lines one pixel high, so a lift in pixels reads as a lift in lines. */
+const snapped = snappedPosition({ lineHeight: () => 1, count: linesOf });
+
+/** The height of the video element WebKit lays end-aligned cues over, in pixels. */
+const HEIGHT_PX = 400;
+
+const endAligned = endAlignedPosition({ clientHeight: HEIGHT_PX });
+
+const setup = (position: CuePosition = snapped, Cue: typeof FakeCue = FakeCue) => {
   const element = new FakeElement();
   const track = new FakeTrack();
-  const one = new FakeCue("One line.");
-  const two = new FakeCue("First of two,\nthen the second.");
+  const one = new Cue("One line.");
+  const two = new Cue("First of two,\nthen the second.");
 
   element.textTracks.add(track);
   element.load(track, [one, two]);
 
-  return { element, track, one, two, placement: new SubtitlePlacement(element, linesOf) };
+  return { element, track, one, two, placement: new SubtitlePlacement(element, position) };
 };
 
 const lines = (track: FakeTrack) => track.loaded.map((cue) => cue.line);
 
-/** How far up a cue's last line sits, in lines from the bottom. */
+/** How far up a snapped cue's last line sits, in lines from the bottom. */
 const liftOf = (cue: FakeCue): number => (cue.line === "auto" ? 0 : -cue.line - linesOf(cue));
+
+/** How far up an end-aligned cue's last line sits, in pixels from the bottom. */
+const endLiftOf = (cue: FakeCue): number =>
+  cue.line === "auto" ? 0 : HEIGHT_PX - (HEIGHT_PX * cue.line) / 100;
+
+const settings = (cue: PlacedCue) => ({
+  line: cue.line,
+  snapToLines: cue.snapToLines,
+  lineAlign: cue.lineAlign,
+});
 
 describe("SubtitlePlacement", () => {
   it("raises cues at once, the last line of each the given lines above the bottom", () => {
     const { track, placement } = setup();
 
     placement.raise(3);
+
+    expect(lines(track)).toEqual([-4, -5]);
+  });
+
+  it("raises snapped cues by whole lines, enough to clear the lift", () => {
+    const { track, placement } = setup(snappedPosition({ lineHeight: () => 20, count: linesOf }));
+
+    placement.raise(41);
 
     expect(lines(track)).toEqual([-4, -5]);
   });
@@ -268,7 +299,11 @@ describe("SubtitlePlacement", () => {
     const element = new FakeElement();
     const track = new FakeTrack();
     let wrap = 1;
-    const placement = new SubtitlePlacement(element, () => wrap);
+
+    const placement = new SubtitlePlacement(
+      element,
+      snappedPosition({ lineHeight: () => 1, count: () => wrap }),
+    );
 
     element.textTracks.add(track);
     element.load(track, [new FakeCue("A line that wraps on a narrow screen.")]);
@@ -301,7 +336,7 @@ describe("SubtitlePlacement", () => {
     element.textTracks.add(track);
     element.load(track, [new FakeCue("Ten seconds.", 10, 12)]);
 
-    const placement = new SubtitlePlacement(element, linesOf);
+    const placement = new SubtitlePlacement(element, snapped);
     const retimer = new SubtitleRetimer(element);
 
     retimer.set(1500);
@@ -325,7 +360,84 @@ describe("SubtitlePlacement", () => {
     expect(track.loaded.map((cue) => [cue.startTime, cue.line])).toEqual([[10, "auto"]]);
   });
 
-  it("never moves a showing line down, and holds no line lower than asked", () => {
+  it("puts cues back as their file gave them, without a lineAlign where cues lack one", () => {
+    const { track, placement } = setup();
+
+    placement.raise(3);
+    placement.raise(0);
+
+    expect(track.loaded.map(settings)).toEqual([
+      { line: "auto", snapToLines: true, lineAlign: undefined },
+      { line: "auto", snapToLines: true, lineAlign: undefined },
+    ]);
+    expect(track.loaded.some((cue) => "lineAlign" in cue)).toBe(false);
+  });
+
+  describe("end-aligned, as in WebKit", () => {
+    it("puts the bottom of every cue the lift above the bottom of the video, whatever its lines", () => {
+      const { track, placement } = setup(endAligned, AlignedCue);
+
+      placement.raise(100);
+
+      expect(track.loaded.map(settings)).toEqual([
+        { line: 75, snapToLines: false, lineAlign: "end" },
+        { line: 75, snapToLines: false, lineAlign: "end" },
+      ]);
+    });
+
+    it("keeps cues inside the video when the lift is taller than it", () => {
+      const { track, placement } = setup(endAligned, AlignedCue);
+
+      placement.raise(HEIGHT_PX * 2);
+
+      expect(lines(track)).toEqual([0, 0]);
+    });
+
+    it("follows the video's height as it changes", () => {
+      const video = { clientHeight: 400 };
+      const { track, placement } = setup(endAlignedPosition(video), AlignedCue);
+
+      placement.raise(100);
+      video.clientHeight = 200;
+      placement.raise(100);
+
+      expect(lines(track)).toEqual([50, 50]);
+    });
+
+    it("lowers a line it moved only once it ends, then puts it back as its file gave it", () => {
+      const { element, track, one, placement } = setup(endAligned, AlignedCue);
+
+      placement.raise(100);
+      element.show(track, one);
+      placement.raise(0);
+      expect(lines(track)).toEqual([75, 75]);
+
+      element.end(track, one);
+      expect(track.loaded.map(settings)).toEqual([
+        { line: "auto", snapToLines: true, lineAlign: "start" },
+        { line: "auto", snapToLines: true, lineAlign: "start" },
+      ]);
+    });
+
+    it("leaves cues their file places by percentage", () => {
+      const { element, track, placement } = setup(endAligned, AlignedCue);
+      const placed = new AlignedCue("Placed at 80%");
+
+      placed.line = 80;
+      placed.snapToLines = false;
+      element.load(track, [placed]);
+      placement.raise(100);
+
+      expect(track.loaded.map(settings)).toEqual([
+        { line: 80, snapToLines: false, lineAlign: "start" },
+      ]);
+    });
+  });
+
+  it.each([
+    { name: "snapped", position: snapped, Cue: FakeCue, liftOf },
+    { name: "end-aligned", position: endAligned, Cue: AlignedCue, liftOf: endLiftOf },
+  ])("never moves a showing $name line down, and holds no line lower than asked", (cases) => {
     type Step =
       | { readonly kind: "raise"; readonly lines: number }
       | { readonly kind: "show" | "end"; readonly cue: 0 | 1 };
@@ -337,12 +449,12 @@ describe("SubtitlePlacement", () => {
 
     fc.assert(
       fc.property(fc.array(step, { maxLength: 30 }), (steps) => {
-        const { element, track, one, two, placement } = setup();
+        const { element, track, one, two, placement } = setup(cases.position, cases.Cue);
         const cues = [one, two] as const;
         let asked = 0;
 
         for (const each of steps) {
-          const before = new Map(cues.map((cue) => [cue, liftOf(cue)]));
+          const before = new Map(cues.map((cue) => [cue, cases.liftOf(cue)]));
           const showing = new Set(track.active);
 
           if (each.kind === "raise") {
@@ -352,14 +464,14 @@ describe("SubtitlePlacement", () => {
           else element.end(track, cues[each.cue]);
 
           for (const cue of cues) {
-            expect(liftOf(cue)).toBeGreaterThanOrEqual(asked);
+            expect(cases.liftOf(cue)).toBeGreaterThanOrEqual(asked);
 
             if (showing.has(cue) && track.active.has(cue)) {
-              expect(liftOf(cue)).toBeGreaterThanOrEqual(before.get(cue) ?? 0);
+              expect(cases.liftOf(cue)).toBeGreaterThanOrEqual(before.get(cue) ?? 0);
             }
           }
 
-          if (track.active.size === 0) expect(cues.map(liftOf)).toEqual([asked, asked]);
+          if (track.active.size === 0) expect(cues.map(cases.liftOf)).toEqual([asked, asked]);
         }
       }),
     );

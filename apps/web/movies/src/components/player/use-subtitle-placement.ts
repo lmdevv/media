@@ -1,7 +1,11 @@
 import { useEffect, useRef } from "react";
 
-import type { PlacedCue } from "@/playback/subtitle-placement";
-import { SubtitlePlacement } from "@/playback/subtitle-placement";
+import type { CueLineCounts, PlacedCue } from "@/playback/subtitle-placement";
+import {
+  endAlignedPosition,
+  snappedPosition,
+  SubtitlePlacement,
+} from "@/playback/subtitle-placement";
 
 /** Space between the top of the controls and the last line of a raised subtitle, in pixels. */
 const GAP_PX = 8;
@@ -17,7 +21,7 @@ const COUNTED_KINDS: ReadonlySet<string> = new Set(["subtitles", "captions"]);
  * at the box's width (the picture's, where bars show at its sides). Counts are kept per cue until
  * the box changes size.
  */
-class CueLines {
+class CueLines implements CueLineCounts {
   readonly #video: HTMLVideoElement;
   readonly #counts = new WeakMap<PlacedCue, { readonly box: string; readonly lines: number }>();
   #box = "";
@@ -29,18 +33,18 @@ class CueLines {
     this.#video = video;
   }
 
-  /** One line's height in pixels, 0 while the video has no box. */
-  get lineHeightPx(): number {
-    return this.#lineHeightPx;
-  }
+  readonly lineHeight = (): number => {
+    this.#resize();
 
-  /** Reads the video's box again, as after a resize. */
-  resize(): void {
+    return this.#lineHeightPx;
+  };
+
+  #resize(): void {
     const { clientWidth, clientHeight, videoWidth, videoHeight } = this.#video;
     const fontPx = Math.min(clientWidth, clientHeight) * CUE_FONT_SHARE;
 
-    // Safari lays cues over the picture, which is narrower than the box when bars show at its
-    // sides; wrapping at the narrower width never counts fewer lines than a browser draws.
+    // Wrapping at the picture's width, narrower than the box when bars show at its sides, never
+    // counts fewer lines than a browser draws.
     const pictureWidth =
       videoHeight === 0 ? clientWidth : (clientHeight * videoWidth) / videoHeight;
 
@@ -165,6 +169,14 @@ class CueLines {
 }
 
 /**
+ * WebKit alone lays a cue's last line exactly on an end-aligned percentage line. Firefox has
+ * `lineAlign` but centres such a cue, and Chromium lacks it; both pin a snapped cue by its first
+ * line.
+ */
+const alignsCueEnds = (): boolean =>
+  "lineAlign" in VTTCue.prototype && "webkitPresentationMode" in HTMLVideoElement.prototype;
+
+/**
  * Holds `video`'s text subtitles above `controls` while `raised` is set, and lowers them back to
  * the bottom once the line showing when it is cleared ends. Lowers them as well while the iPhone
  * plays the video in its own full screen player, where the page's controls do not show.
@@ -183,17 +195,17 @@ export const useSubtitlePlacement = ({
   readonly controls: HTMLElement | null;
   readonly raised: boolean;
 }): void => {
-  const placed = useRef<{ readonly placement: SubtitlePlacement; readonly lines: CueLines } | null>(
-    null,
-  );
+  const placed = useRef<SubtitlePlacement | null>(null);
 
   useEffect(() => {
     if (video === null) return undefined;
 
-    const lines = new CueLines(video);
-    const placement = new SubtitlePlacement(video, lines.count);
+    const placement = new SubtitlePlacement(
+      video,
+      alignsCueEnds() ? endAlignedPosition(video) : snappedPosition(new CueLines(video)),
+    );
 
-    placed.current = { placement, lines };
+    placed.current = placement;
 
     return () => {
       placement.dispose();
@@ -202,26 +214,24 @@ export const useSubtitlePlacement = ({
   }, [video]);
 
   useEffect(() => {
-    const current = placed.current;
+    const placement = placed.current;
 
-    if (video === null || current === null) return undefined;
+    if (video === null || placement === null) return undefined;
 
     if (!raised || controls === null) {
-      current.placement.raise(0);
+      placement.raise(0);
 
       return undefined;
     }
 
     const update = (): void => {
-      current.lines.resize();
-
       const covered =
         video.getBoundingClientRect().bottom - controls.getBoundingClientRect().top + GAP_PX;
 
-      const step = current.lines.lineHeightPx;
-      const atBottom = video.webkitDisplayingFullscreen === true || step === 0 || covered <= 0;
+      const noBox = video.clientWidth === 0 || video.clientHeight === 0;
+      const atBottom = video.webkitDisplayingFullscreen === true || noBox || covered <= 0;
 
-      current.placement.raise(atBottom ? 0 : Math.ceil(covered / step));
+      placement.raise(atBottom ? 0 : covered);
     };
 
     const observer = new ResizeObserver(update);
