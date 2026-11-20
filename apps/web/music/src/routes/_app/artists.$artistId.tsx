@@ -1,6 +1,7 @@
 import { usePlayer } from "@media/player/react";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Skeleton, SkeletonLine } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import type { PageOpts } from "@media/ui/lib/pages";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import type { ErrorComponentProps } from "@tanstack/react-router";
 import { PlayIcon } from "lucide-react";
@@ -16,8 +17,8 @@ import { placeholderColors } from "@/lib/art";
 import { artSrc } from "@/lib/art-src";
 import { formatDuration, plural } from "@/lib/format";
 import { asArtistId } from "@/lib/models";
-import type { Track } from "@/lib/models";
-import { useAllRows } from "@/lib/pages";
+import type { ArtistId, Track } from "@/lib/models";
+import { preloadAllRows, useAllRows } from "@/lib/pages";
 import { useMusic, useRead } from "@/lib/platform";
 
 const MISSING: MissingCopy = {
@@ -27,37 +28,69 @@ const MISSING: MissingCopy = {
   back: { to: "/artists", label: "Back to artists" },
 };
 
+/** The arguments of each page of an artist's albums, shared by the loader and the page. */
+const albumsOf = (artistId: ArtistId) => (paginationOpts: PageOpts) => ({
+  artistId,
+  paginationOpts,
+});
+
 export const Route = createFileRoute("/_app/artists/$artistId")({
   params: {
     parse: (params) => ({ artistId: asArtistId(params.artistId) }),
     stringify: (params) => ({ artistId: params.artistId }),
   },
+  loader: async ({ context: { platform }, params: { artistId } }) => {
+    await Promise.all([
+      platform.music.artists.get.preload({ artistId }),
+      preloadAllRows(platform.music.artists.albums, albumsOf(artistId)),
+    ]);
+  },
+  pendingComponent: ArtistSkeleton,
   component: ArtistPage,
   errorComponent: ArtistError,
 });
+
+/** The top songs an artist page shows, as the core caps them. */
+const TOP_SONGS = 10;
+
+function ArtistSkeleton() {
+  return (
+    <div aria-hidden className="flex flex-col gap-8 pb-12">
+      <Skeleton className="h-65 w-full shrink-0 rounded-none lg:h-75" />
+      <div className="flex flex-col gap-12 px-5 lg:flex-row lg:px-12">
+        <div className="flex w-full shrink-0 flex-col gap-3.5 lg:w-sidebar">
+          <SkeletonLine className="font-sans text-lg/lg" bar="h-4 w-36" />
+          <Skeleton className="aspect-square w-full max-w-sidebar rounded-md" />
+          <div className="flex flex-col gap-0.5">
+            <SkeletonLine className="font-sans text-base/sm" bar="h-2.5 w-32" />
+            <SkeletonLine className="font-sans text-sm/xs" bar="h-2.5 w-20" />
+          </div>
+        </div>
+        <div className="flex min-w-0 grow flex-col gap-1.5">
+          <SkeletonLine className="pb-2 font-sans text-lg/lg" bar="h-4 w-28" />
+          {Array.from({ length: TOP_SONGS }, (_, index) => (
+            <div key={index} className="flex h-13 shrink-0 items-center gap-3 px-2">
+              <Skeleton className="size-row shrink-0 rounded-xs" />
+              <div className="flex min-w-0 grow flex-col gap-px">
+                <SkeletonLine className="font-sans text-base/sm" bar="h-2.5 w-45 max-w-full" />
+                <SkeletonLine className="font-sans text-sm/xs" bar="h-2.5 w-27.5" />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function ArtistPage() {
   const { artistId } = Route.useParams();
   const music = useMusic();
   const detail = useRead(music.artists.get, { artistId });
-
-  const albums = useAllRows(music.artists.albums, (paginationOpts) => ({
-    artistId,
-    paginationOpts,
-  }));
-
+  const albums = useAllRows(music.artists.albums, albumsOf(artistId));
   const play = usePlayTracks();
 
-  if (detail === undefined || albums === undefined) {
-    return (
-      <div className="flex flex-col gap-8">
-        <Skeleton className="h-75 w-full rounded-none" />
-        <div className="px-12">
-          <Skeleton className="h-4 w-48" />
-        </div>
-      </div>
-    );
-  }
+  if (detail === undefined || albums === undefined) return <ArtistSkeleton />;
 
   const { artist, topTracks } = detail;
   const latest = albums.toSorted((left, right) => (right.year ?? 0) - (left.year ?? 0))[0];

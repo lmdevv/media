@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import { createFileRoute } from "@tanstack/react-router";
 import { SearchIcon, ShuffleIcon } from "lucide-react";
 import { useDeferredValue, useState } from "react";
@@ -9,13 +10,43 @@ import { ListTail } from "@/components/library/paged";
 import { TrackList, TrackListSkeleton } from "@/components/library/track-list";
 import { formatTotal, plural } from "@/lib/format";
 import { readPages } from "@/lib/pages";
-import { usePages } from "@media/ui/lib/pages";
+import { preloadFirstPage, usePages } from "@media/ui/lib/pages";
+import type { PageOpts } from "@media/ui/lib/pages";
 import { useMusic, useRead } from "@/lib/platform";
 import { useHeld } from "@/lib/use-held";
 
-export const Route = createFileRoute("/_app/songs")({ component: SongsPage });
-
 const PAGE_SIZE = 100;
+
+/** The arguments of each page of every song, shared by the loader and the list. */
+const songsPage = (paginationOpts: PageOpts) => ({ paginationOpts });
+
+export const Route = createFileRoute("/_app/songs")({
+  loader: async ({ context: { platform } }) => {
+    // The header's counts, started with the list so they arrive with it.
+    void platform.music.library.home.preload({});
+    await preloadFirstPage(platform.music.tracks.list, songsPage, PAGE_SIZE);
+  },
+  pendingComponent: SongsSkeleton,
+  component: SongsPage,
+});
+
+function SongsSkeleton() {
+  return (
+    <div className="flex flex-col gap-7 px-5 pt-safe-top lg:px-12 lg:pt-row">
+      <PageHeader
+        eyebrow={null}
+        title="Songs"
+        actions={
+          <div aria-hidden className="flex w-full items-center gap-2 lg:w-auto">
+            <Skeleton className="h-9 w-full min-w-0 shrink grow rounded-sm lg:w-sidebar lg:grow-0" />
+            <Skeleton className="h-9 w-30 shrink-0 rounded-full" />
+          </div>
+        }
+      />
+      <TrackListSkeleton header />
+    </div>
+  );
+}
 
 const SHUFFLE_LIMIT = 2000;
 
@@ -80,7 +111,7 @@ function FilteredSongs({ query }: { readonly query: string }) {
   const results = useRead(useMusic().library.search, { query, limit: 50 });
   const shown = useHeld(results);
 
-  if (shown === undefined) return <TrackListSkeleton />;
+  if (shown === undefined) return <TrackListSkeleton header />;
 
   if (shown.tracks.length === 0) {
     return <p className="font-sans text-md/md text-text-muted">No songs match “{query}”.</p>;
@@ -97,9 +128,9 @@ function FilteredSongs({ query }: { readonly query: string }) {
 
 function AllSongs() {
   const music = useMusic();
-  const paged = usePages(music.tracks.list, (paginationOpts) => ({ paginationOpts }), PAGE_SIZE);
+  const paged = usePages(music.tracks.list, songsPage, PAGE_SIZE);
 
-  if (paged.status === "loading") return <TrackListSkeleton />;
+  if (paged.status === "loading") return <TrackListSkeleton header />;
 
   if (paged.status === "failed") throw new Error(paged.message);
 

@@ -1,15 +1,28 @@
 import { Skeleton } from "@/components/ui/skeleton";
 import { createFileRoute } from "@tanstack/react-router";
+import type { ReactNode } from "react";
 
 import { ArtistCircle, PageHeader } from "@/components/library/cards";
 import { Paged } from "@/components/library/paged";
 import { plural } from "@/lib/format";
-import { usePages } from "@media/ui/lib/pages";
+import { preloadFirstPage, usePages } from "@media/ui/lib/pages";
+import type { PageOpts } from "@media/ui/lib/pages";
 import { useMusic, useRead } from "@/lib/platform";
 
-export const Route = createFileRoute("/_app/artists/")({ component: ArtistsPage });
-
 const PAGE_SIZE = 60;
+
+/** The arguments of each page of artists, shared by the loader and the page. */
+const artistsPage = (paginationOpts: PageOpts) => ({ paginationOpts });
+
+export const Route = createFileRoute("/_app/artists/")({
+  loader: async ({ context: { platform } }) => {
+    // The header's counts, started with the list so they arrive with it.
+    void platform.music.library.home.preload({});
+    await preloadFirstPage(platform.music.artists.list, artistsPage, PAGE_SIZE);
+  },
+  pendingComponent: ArtistsSkeleton,
+  component: ArtistsPage,
+});
 
 const skeleton = Array.from({ length: 12 }, (_, index) => (
   <div key={`skeleton-${index}`} className="flex flex-col items-center gap-2.5">
@@ -18,27 +31,43 @@ const skeleton = Array.from({ length: 12 }, (_, index) => (
   </div>
 ));
 
+/** The artists screen around its grid: the header, with the artist count once it loads. */
+function ArtistsFrame({
+  eyebrow,
+  children,
+}: {
+  readonly eyebrow: string | null;
+  readonly children: ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-7 px-5 pt-safe-top lg:px-12 lg:pt-row">
+      <PageHeader eyebrow={eyebrow} title="Artists" />
+      <div className="grid grid-cols-2 gap-x-3 gap-y-6 sm:grid-cols-3 lg:gap-x-5 lg:gap-y-7 xl:grid-cols-6">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function ArtistsSkeleton() {
+  return <ArtistsFrame eyebrow={null}>{skeleton}</ArtistsFrame>;
+}
+
 function ArtistsPage() {
   const music = useMusic();
   const home = useRead(music.library.home, {});
-  const paged = usePages(music.artists.list, (paginationOpts) => ({ paginationOpts }), PAGE_SIZE);
+  const paged = usePages(music.artists.list, artistsPage, PAGE_SIZE);
 
   return (
-    <div className="flex flex-col gap-7 px-5 pt-safe-top lg:px-12 lg:pt-row">
-      <PageHeader
-        eyebrow={home === undefined ? null : plural(home.stats.artists, "artist")}
-        title="Artists"
+    <ArtistsFrame eyebrow={home === undefined ? null : plural(home.stats.artists, "artist")}>
+      <Paged
+        paged={paged}
+        skeleton={skeleton}
+        empty={
+          <p className="col-span-full font-sans text-md/md text-text-muted">No artists yet.</p>
+        }
+        renderItem={(artist) => <ArtistCircle key={artist.id} artist={artist} />}
       />
-      <div className="grid grid-cols-2 gap-x-3 gap-y-6 sm:grid-cols-3 lg:gap-x-5 lg:gap-y-7 xl:grid-cols-6">
-        <Paged
-          paged={paged}
-          skeleton={skeleton}
-          empty={
-            <p className="col-span-full font-sans text-md/md text-text-muted">No artists yet.</p>
-          }
-          renderItem={(artist) => <ArtistCircle key={artist.id} artist={artist} />}
-        />
-      </div>
-    </div>
+    </ArtistsFrame>
   );
 }

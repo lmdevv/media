@@ -1,11 +1,19 @@
-import { useFirstRows } from "@media/ui/lib/pages";
-import type { Paged } from "@media/ui/lib/pages";
+import type { PlatformSdk } from "@media/sdk/promise";
+import { preloadFirstPage, useFirstRows } from "@media/ui/lib/pages";
+import type { PageOpts, Paged } from "@media/ui/lib/pages";
 
 import type { Track } from "@/lib/models";
 import { PAGE_ROWS } from "@/lib/pages";
 import { useMusic } from "@/lib/platform";
 
 const LIKED_LIMIT = 5000;
+
+/** The arguments of each page of liked songs, shared by the route loader and the hook. */
+const likedPage = (paginationOpts: PageOpts) => ({ paginationOpts });
+
+/** Preloads the first page `useLikedSongs` opens, for a route loader. */
+export const preloadLikedSongs = (music: PlatformSdk["music"]): Promise<void> =>
+  preloadFirstPage(music.likes.list, likedPage, PAGE_ROWS);
 
 /** A page of the list that failed to load, and how to load it again. */
 interface PageFailure {
@@ -47,12 +55,5 @@ export const likedSongsOf = <Song>(paged: Paged<Song>): LikedSongs<Song> | undef
 export const useLikedSongs = (): LikedSongs | undefined => {
   const music = useMusic();
 
-  return likedSongsOf(
-    useFirstRows(
-      music.likes.list,
-      (paginationOpts) => ({ paginationOpts }),
-      LIKED_LIMIT,
-      PAGE_ROWS,
-    ),
-  );
+  return likedSongsOf(useFirstRows(music.likes.list, likedPage, LIKED_LIMIT, PAGE_ROWS));
 };

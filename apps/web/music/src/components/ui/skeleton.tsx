@@ -12,3 +12,23 @@ export function Skeleton({ className, ...props }: ComponentProps<"div">) {
     />
   );
 }
+
+/**
+ * A skeleton bar on one line of the text set in `className`, so it takes that line's height.
+ *
+ * @param bar - The bar's own size, such as `h-3 w-48`.
+ */
+export function SkeletonLine({
+  className,
+  bar,
+}: {
+  readonly className: string;
+  readonly bar: string;
+}) {
+  return (
+    <span aria-hidden className={cn("flex items-center", className)}>
+      <Skeleton className={bar} />
+      {"​"}
+    </span>
+  );
+}

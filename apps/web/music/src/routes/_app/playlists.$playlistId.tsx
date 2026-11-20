@@ -3,8 +3,8 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogFooter } from "@/components/ui/dialog";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { FieldLabel, Input } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import type { PageOpts } from "@media/ui/lib/pages";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import type { ErrorComponentProps } from "@tanstack/react-router";
 import { PlusIcon, SearchIcon, UsersIcon } from "lucide-react";
@@ -15,7 +15,7 @@ import { toast } from "sonner";
 import { DetailError } from "@/components/route-error";
 import type { MissingCopy } from "@/components/route-error";
 import { Artwork } from "@/components/library/artwork";
-import { CollectionHeader } from "@/components/library/collection-header";
+import { CollectionHeader, CollectionHeaderSkeleton } from "@/components/library/collection-header";
 import { useReorder } from "@/components/library/reorder";
 import { TrackList, TrackListSkeleton } from "@/components/library/track-list";
 import { ShareDialog } from "@/components/playlists/share-dialog";
@@ -25,8 +25,15 @@ import { artSrc } from "@/lib/art-src";
 import { entryTrack, playableTracks } from "@/lib/playlist-entries";
 import { formatAgo, formatDuration, formatTotal, plural } from "@/lib/format";
 import { asPlaylistId } from "@/lib/models";
-import type { Playlist, PlaylistEntry, PlaylistItemId, Track, UserId } from "@/lib/models";
-import { useAllRows } from "@/lib/pages";
+import type {
+  Playlist,
+  PlaylistEntry,
+  PlaylistId,
+  PlaylistItemId,
+  Track,
+  UserId,
+} from "@/lib/models";
+import { preloadAllRows, useAllRows } from "@/lib/pages";
 import { can, canEditPlaylistItems, canManagePlaylist } from "@/lib/permissions";
 import { useMe, useMusic, useRead } from "@/lib/platform";
 
@@ -39,14 +46,36 @@ const MISSING: MissingCopy = {
   back: { to: "/playlists", label: "Back to playlists" },
 };
 
+/** The arguments of each page of a playlist's entries, shared by the loader and the page. */
+const itemsOf = (playlistId: PlaylistId) => (paginationOpts: PageOpts) => ({
+  playlistId,
+  paginationOpts,
+});
+
 export const Route = createFileRoute("/_app/playlists/$playlistId")({
   params: {
     parse: (params) => ({ playlistId: asPlaylistId(params.playlistId) }),
     stringify: (params) => ({ playlistId: params.playlistId }),
   },
+  loader: async ({ context: { platform }, params: { playlistId } }) => {
+    await Promise.all([
+      platform.music.playlists.get.preload({ playlistId }),
+      preloadAllRows(platform.music.playlists.items, itemsOf(playlistId)),
+    ]);
+  },
+  pendingComponent: PlaylistSkeleton,
   component: PlaylistPage,
   errorComponent: PlaylistError,
 });
+
+function PlaylistSkeleton() {
+  return (
+    <div className="flex flex-col gap-8 px-5 pt-safe-top-sm lg:px-12 lg:pt-row">
+      <CollectionHeaderSkeleton />
+      <TrackListSkeleton header />
+    </div>
+  );
+}
 
 const REASONS: Readonly<Record<UnavailableReason, string>> = {
   missing: "Unavailable",
@@ -117,25 +146,9 @@ function PlaylistPage() {
   const music = useMusic();
   const playlist = useRead(music.playlists.get, { playlistId });
 
-  const items = useAllRows(music.playlists.items, (paginationOpts) => ({
-    playlistId,
-    paginationOpts,
-  }));
+  const items = useAllRows(music.playlists.items, itemsOf(playlistId));
 
-  if (playlist === undefined || items === undefined) {
-    return (
-      <div className="flex flex-col gap-8 px-5 pt-row lg:px-12">
-        <div className="flex items-end gap-8">
-          <Skeleton className="size-58 rounded-md" />
-          <div className="flex grow flex-col gap-3">
-            <Skeleton className="h-3 w-48" />
-            <Skeleton className="h-12 w-96 max-w-full" />
-          </div>
-        </div>
-        <TrackListSkeleton />
-      </div>
-    );
-  }
+  if (playlist === undefined || items === undefined) return <PlaylistSkeleton />;
 
   return <PlaylistView playlist={playlist} items={items} />;
 }

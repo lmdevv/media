@@ -1,3 +1,4 @@
+import { Skeleton, SkeletonLine } from "@/components/ui/skeleton";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import type { LinkProps } from "@tanstack/react-router";
 import {
@@ -13,10 +14,23 @@ import type { LucideIcon } from "lucide-react";
 import { Artwork } from "@/components/library/artwork";
 import { AlbumCard, PageHeader, SectionHeader } from "@/components/library/cards";
 import { plural } from "@/lib/format";
-import { useAllRows } from "@/lib/pages";
+import type { PageOpts } from "@media/ui/lib/pages";
+import { preloadAllRows, useAllRows } from "@/lib/pages";
 import { useMusic, useRead } from "@/lib/platform";
 
-export const Route = createFileRoute("/_app/library")({ component: LibraryPage });
+/** The arguments of each page of playlists shared with you, shared by the loader and the page. */
+const sharedPage = (paginationOpts: PageOpts) => ({ paginationOpts });
+
+export const Route = createFileRoute("/_app/library")({
+  loader: async ({ context: { platform } }) => {
+    await Promise.all([
+      platform.music.library.home.preload({}),
+      preloadAllRows(platform.music.playlists.shared, sharedPage),
+    ]);
+  },
+  pendingComponent: LibrarySkeleton,
+  component: LibraryPage,
+});
 
 const LINKS: ReadonlyArray<{
   readonly to: NonNullable<LinkProps["to"]>;
@@ -30,31 +44,66 @@ const LINKS: ReadonlyArray<{
   { to: "/liked", label: "Liked songs", icon: HeartIcon },
 ];
 
+const nav = (
+  <nav aria-label="Library" className="flex flex-col">
+    {LINKS.map((link) => (
+      <Link
+        key={link.label}
+        to={link.to}
+        className="flex h-12 items-center gap-3.5 border-b-hairline border-border font-sans text-lg leading-lg text-text"
+      >
+        <link.icon aria-hidden className="size-6 text-accent" />
+        <span className="grow">{link.label}</span>
+        <ChevronRightIcon aria-hidden className="size-5 text-text-muted" />
+      </Link>
+    ))}
+  </nav>
+);
+
+const gridClassName = "grid grid-cols-2 gap-x-3 gap-y-5 sm:grid-cols-3 xl:grid-cols-6";
+
+/** The links, which need no data, above a skeleton of the Recently Added row. */
+function LibrarySkeleton() {
+  return (
+    <div className="flex flex-col gap-6 px-5 pt-safe-top lg:px-12 lg:pt-row">
+      <PageHeader title="Library" />
+      {nav}
+      <div aria-hidden className="flex flex-col gap-3 pt-2">
+        <SkeletonLine
+          className="font-sans text-phone-title leading-lg lg:text-lg/lg"
+          bar="h-4 w-36"
+        />
+        <div className={gridClassName}>
+          {Array.from({ length: 6 }, (_, index) => (
+            <div key={index} className="flex flex-col gap-2.5">
+              <Skeleton className="aspect-square w-full rounded-md" />
+              <div className="flex flex-col gap-0.5">
+                <SkeletonLine className="font-sans text-base/sm" bar="h-2.5 w-[70%]" />
+                <SkeletonLine className="font-sans text-sm/xs" bar="h-2.5 w-[45%]" />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function LibraryPage() {
   const music = useMusic();
   const home = useRead(music.library.home, {});
-  const shared = useAllRows(music.playlists.shared, (paginationOpts) => ({ paginationOpts }));
+  const shared = useAllRows(music.playlists.shared, sharedPage);
+
+  if (home === undefined || shared === undefined) return <LibrarySkeleton />;
 
   return (
     <div className="flex flex-col gap-6 px-5 pt-safe-top lg:px-12 lg:pt-row">
       <PageHeader title="Library" />
-      <nav aria-label="Library" className="flex flex-col">
-        {LINKS.map((link) => (
-          <Link
-            key={link.label}
-            to={link.to}
-            className="flex h-12 items-center gap-3.5 border-b-hairline border-border font-sans text-lg leading-lg text-text"
-          >
-            <link.icon aria-hidden className="size-6 text-accent" />
-            <span className="grow">{link.label}</span>
-            <ChevronRightIcon aria-hidden className="size-5 text-text-muted" />
-          </Link>
-        ))}
-      </nav>
-      {shared === undefined || shared.length === 0 ? null : (
+      {nav}
+      {shared.length === 0 ? null : (
         <section aria-label="Shared with you" className="flex flex-col gap-3 pt-2">
           <SectionHeader title="Shared with you" to="/playlists" />
-          <div className="grid grid-cols-2 gap-x-3 gap-y-5 sm:grid-cols-3 xl:grid-cols-6">
+          <div className={gridClassName}>
             {shared.map((playlist) => (
               <Link
                 key={playlist.id}
@@ -80,10 +129,10 @@ function LibraryPage() {
           </div>
         </section>
       )}
-      {home !== undefined && home.recentlyAdded.length > 0 ? (
+      {home.recentlyAdded.length > 0 ? (
         <section className="flex flex-col gap-3 pt-2">
           <SectionHeader title="Recently Added" to="/albums" />
-          <div className="grid grid-cols-2 gap-x-3 gap-y-5 sm:grid-cols-3 xl:grid-cols-6">
+          <div className={gridClassName}>
             {home.recentlyAdded.map((album) => (
               <AlbumCard key={album.id} album={album} />
             ))}
