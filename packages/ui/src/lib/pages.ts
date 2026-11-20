@@ -312,6 +312,7 @@ export const pagedStore = <Row>(
 
 /** A core query a route loader can preload, such as `platform.music.albums.tracks`. */
 export interface PreloadableQuery<Args> {
+  /** Follows the query until its first answer and resolves then; never rejects. */
   readonly preload: (args: Args) => Promise<void>;
 }
 

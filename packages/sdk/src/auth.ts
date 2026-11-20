@@ -338,7 +338,6 @@ export const makeEngine = Effect.fn("Auth.makeEngine")(function* (options: Optio
 
   const heldSession = Effect.map(Ref.get(epoch), (now) => now.held);
 
-  /** Who the held session signs in, kept beside `epoch` for `identity`. */
   const identity = yield* SubscriptionRef.make(Option.none<string>());
 
   const setSession = (next: Option.Option<StoredSession>): Effect.Effect<void> =>

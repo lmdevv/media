@@ -530,7 +530,6 @@ describe("createPlatform", () => {
 
             leave();
             await platform.session.signInWithPassword({ username: "grace", password: "secret" });
-            // Once the session changes, the next screen subscribes again rather than share.
             await vi.waitFor(() => {
               expect(platform.core.server.info.watch().getSnapshot()).toStrictEqual({
                 status: "loading",

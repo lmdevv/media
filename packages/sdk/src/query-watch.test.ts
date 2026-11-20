@@ -212,7 +212,6 @@ describe("QueryWatch", () => {
 
 const ONE_MINUTE: QueryWatch.Keep = { idleFor: "1 minute", maxIdle: 10 };
 
-/** A keeper over scripted queries; the first watch of each key opens its own subscription. */
 const kept = (script: ReadonlyArray<Attempt>, keep = ONE_MINUTE) => {
   const { counts, runtime, results, advance } = scripted(script);
   const keeper = QueryWatch.keeper(runtime, keep);
@@ -261,7 +260,6 @@ describe("QueryWatch.keeper", () => {
     expect(again.getSnapshot()).toStrictEqual({ status: "success", data: ["a"] });
 
     again.subscribe(ignore);
-    // Followed again, so the keep time no longer runs.
     await advance(60_000);
 
     expect({ ...built, ...counts }).toStrictEqual({ watches: 1, opened: 1, closed: 0 });

@@ -27,7 +27,6 @@ const MISSING: MissingCopy = {
 
 const AlbumSearch = Schema.Struct({ track: Schema.optionalKey(Schema.String) });
 
-/** The arguments of each page of an album's songs, shared by the loader and the page. */
 const tracksOf = (albumId: AlbumId) => (paginationOpts: PageOpts) => ({ albumId, paginationOpts });
 
 export const Route = createFileRoute("/_app/albums/$albumId")({

@@ -19,7 +19,6 @@ window.addEventListener("hashchange", () => {
 
 const store = await openBrowserSession();
 
-/** The page's one platform client, which route loaders and screens share. */
 const platform = createPlatform({
   url: PLATFORM_URL,
   signInUrl: SIGN_IN_URL,
@@ -29,8 +28,6 @@ const platform = createPlatform({
 const router = createRouter({
   routeTree,
   defaultPreload: "intent",
-  // A page stays on screen while the next one's loader runs; past 300 ms the next one's skeleton
-  // shows, for at least 300 ms so it never flashes.
   defaultPendingMs: 300,
   defaultPendingMinMs: 300,
   scrollRestoration: true,

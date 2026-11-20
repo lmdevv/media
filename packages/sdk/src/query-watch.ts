@@ -87,7 +87,6 @@ export const fromStream = <A, R>(
 
   return {
     subscribe: (onChange) => {
-      // Its own entry per subscription, so one function subscribed twice counts twice.
       const listener = (): void => onChange();
 
       listeners.add(listener);
@@ -125,7 +124,6 @@ export const whenAnswered = <A>(watch: QueryWatch<A>): Promise<void> =>
     };
 
     stop = watch.subscribe(settle);
-    // A kept query that already has its answer settles here; subscribing restarted its keep time.
     settle();
   });
 
@@ -141,9 +139,8 @@ export interface Keep {
 }
 
 /**
- * Five minutes, for at most 50 queries. A query kept subscribed stays live, as Convex pushes its
- * every change, but runs again on the server whenever what it read changes; the bound keeps that
- * cost small. convex-helpers' query cache keeps its queries for the same five minutes.
+ * A query kept subscribed stays live, as Convex pushes its every change, but runs again on the
+ * server whenever what it read changes; the bound keeps that cost small.
  */
 export const DEFAULT_KEEP: Keep = { idleFor: "5 minutes", maxIdle: 50 };
 
@@ -158,19 +155,13 @@ export interface Keeper {
   readonly release: () => void;
 }
 
-/** One shared watch and what keeps it subscribed. */
 interface Entry<A> {
   readonly watch: QueryWatch<A>;
-  /** The watch callers get, which keeps the query subscribed when its last listener leaves. */
   readonly shared: QueryWatch<A>;
-  /** Removes the entry from its group, so the next caller of its key opens a new watch. */
   readonly forget: () => void;
   listeners: number;
-  /** Removes the listener that holds the query subscribed while nothing else follows it. */
-  hold: (() => void) | null;
-  /** Releases the entry once it has been idle for the keep time. */
+  keepAlive: (() => void) | null;
   expiry: Fiber.Fiber<void, unknown> | null;
-  /** No longer shared: it runs until its listeners leave, then stops. */
   released: boolean;
 }
 
@@ -192,8 +183,7 @@ export const keeper = <R>(
 ): Keeper => {
   const idleFor = Duration.fromInputUnsafe(keep.idleFor);
   const shared = new Set<Entry<unknown>>();
-  /** Entries nothing follows, oldest first. */
-  const idle = new Set<Entry<unknown>>();
+  const idleOldestFirst = new Set<Entry<unknown>>();
 
   const stopExpiry = (entry: Entry<unknown>): void => {
     if (entry.expiry === null) return;
@@ -202,29 +192,32 @@ export const keeper = <R>(
     entry.expiry = null;
   };
 
+  const dropKeepAlive = (entry: Entry<unknown>): void => {
+    const { keepAlive } = entry;
+
+    entry.keepAlive = null;
+    keepAlive?.();
+  };
+
   const release = (entry: Entry<unknown>): void => {
     if (entry.released) return;
 
     entry.released = true;
     entry.forget();
     shared.delete(entry);
-    idle.delete(entry);
+    idleOldestFirst.delete(entry);
     stopExpiry(entry);
-
-    const { hold } = entry;
-
-    entry.hold = null;
-    hold?.();
+    dropKeepAlive(entry);
   };
 
-  const rest = (entry: Entry<unknown>): void => {
+  const startIdle = (entry: Entry<unknown>): void => {
     if (Duration.isZero(idleFor)) {
       release(entry);
 
       return;
     }
 
-    idle.add(entry);
+    idleOldestFirst.add(entry);
     entry.expiry = runtime.runFork(
       Effect.sleep(idleFor).pipe(
         Effect.andThen(
@@ -236,8 +229,8 @@ export const keeper = <R>(
       ),
     );
 
-    for (const oldest of idle) {
-      if (idle.size <= keep.maxIdle) break;
+    for (const oldest of idleOldestFirst) {
+      if (idleOldestFirst.size <= keep.maxIdle) break;
       release(oldest);
     }
   };
@@ -247,16 +240,13 @@ export const keeper = <R>(
       entry.listeners += 1;
 
       if (entry.listeners === 1) {
-        idle.delete(entry);
+        idleOldestFirst.delete(entry);
         stopExpiry(entry);
       }
 
       const stop = watch.subscribe(onChange);
-      const { hold } = entry;
 
-      // Dropped only after the listener above joined, so the query never stops in between.
-      entry.hold = null;
-      hold?.();
+      dropKeepAlive(entry);
 
       let subscribed = true;
 
@@ -279,9 +269,9 @@ export const keeper = <R>(
           return;
         }
 
-        entry.hold = watch.subscribe(ignore);
+        entry.keepAlive = watch.subscribe(ignore);
         stop();
-        rest(entry);
+        startIdle(entry);
       };
     };
 
@@ -290,7 +280,7 @@ export const keeper = <R>(
       shared: { subscribe, getSnapshot: watch.getSnapshot },
       forget,
       listeners: 0,
-      hold: null,
+      keepAlive: null,
       expiry: null,
       released: false,
     };
@@ -315,8 +305,7 @@ export const keeper = <R>(
 
         entries.set(key, entry);
         shared.add(entry);
-        // Idle until its first listener, so a watch no one subscribes to is released in time.
-        rest(entry);
+        startIdle(entry);
 
         return entry.shared;
       };

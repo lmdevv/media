@@ -104,17 +104,16 @@ export const PlatformProvider = (props: PlatformProviderProps): ReactNode => {
   return <PlatformContext.Provider value={open}>{props.children}</PlatformContext.Provider>;
 };
 
-/** Each client's status store, made once however often a provider of it renders. */
-const opened = new WeakMap<PlatformSdk, OpenPlatform>();
+const openedOncePerClient = new WeakMap<PlatformSdk, OpenPlatform>();
 
 const openOf = (platform: PlatformSdk): OpenPlatform => {
-  const known = opened.get(platform);
+  const known = openedOncePerClient.get(platform);
 
   if (known !== undefined) return known;
 
   const open = { platform, status: followStatus(platform) };
 
-  opened.set(platform, open);
+  openedOncePerClient.set(platform, open);
 
   return open;
 };
@@ -141,7 +140,7 @@ export const PlatformClientProvider = ({
  * Every platform command as a Promise method, such as `usePlatform().core.server.info()`, and the
  * session. The same object for the provider's lifetime.
  *
- * @throws When used outside `PlatformProvider`, a programming error.
+ * @throws When used outside `PlatformProvider` or `PlatformClientProvider`, a programming error.
  */
 export const usePlatform = (): PlatformSdk => useOpenPlatform().platform;
 

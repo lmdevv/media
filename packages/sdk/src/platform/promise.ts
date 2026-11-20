@@ -225,16 +225,12 @@ export const createPlatform = (options: PlatformOptions): PlatformSdk => {
       withClient((client) => client.run(command, params));
 
   const kept = QueryWatch.keeper(runtime, QueryWatch.DEFAULT_KEEP);
-  let followingIdentity = false;
+  let releasingOnSessionChange = false;
 
-  /**
-   * Stops sharing kept queries once another person or session signs in, or the session ends, so
-   * no screen shows an answer given to the session before.
-   */
-  const followIdentity = (): void => {
-    if (followingIdentity) return;
+  const releaseKeptOnSessionChange = (): void => {
+    if (releasingOnSessionChange) return;
 
-    followingIdentity = true;
+    releasingOnSessionChange = true;
     runtime.runFork(
       Stream.runForEach(
         Stream.unwrap(Effect.map(Client.Client, (client) => client.session.identity)).pipe(
@@ -245,13 +241,12 @@ export const createPlatform = (options: PlatformOptions): PlatformSdk => {
     );
   };
 
-  /**
-   * One command's watches, shared by their encoded arguments: the schema writes the fields in its
-   * own order, so arguments that differ only in key order share a watch.
-   */
   const watchOf = <Args, Result>(command: Command<"query", Args, Result>) => {
     const share = kept.group<Result>();
     const encode = Schema.encodeUnknownOption(command.args);
+
+    const keyInSchemaOrder = (params: Params<Args>): Option.Option<string> =>
+      Option.map(encode(params[0] ?? {}), (wire) => JSON.stringify(wire));
 
     return (...params: Params<Args>): QueryWatch.QueryWatch<Result> => {
       const open = () =>
@@ -260,14 +255,14 @@ export const createPlatform = (options: PlatformOptions): PlatformSdk => {
           Stream.unwrap(Effect.map(Client.Client, (client) => client.watch(command, params))),
         );
 
-      const wire = encode(params[0] ?? {});
+      return Option.match(keyInSchemaOrder(params), {
+        onNone: () => open(),
+        onSome: (key) => {
+          releaseKeptOnSessionChange();
 
-      // Arguments the schema refuses fail with `InvalidArgs` through a watch of their own.
-      if (Option.isNone(wire)) return open();
-
-      followIdentity();
-
-      return share(JSON.stringify(wire.value), open);
+          return share(key, open);
+        },
+      });
     };
   };
 
