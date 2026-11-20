@@ -1,22 +1,28 @@
 import { usePlatform } from "@media/sdk/react";
 import { Button } from "@media/ui/components/button";
 import { CalmState } from "@media/ui/components/calm-state";
-import { useAllPages } from "@media/ui/lib/pages";
+import { preloadFirstPage, useAllPages } from "@media/ui/lib/pages";
+import type { PageOpts } from "@media/ui/lib/pages";
 import { createFileRoute } from "@tanstack/react-router";
 
 import { PosterGridSkeleton } from "@/components/browse/skeletons";
 import { TitlePosterCard } from "@/components/browse/title-cards";
-import { GridHeader, PosterGrid } from "@/components/browse/title-grid-page";
+import { GridHeader, GridPageSkeleton, PosterGrid } from "@/components/browse/title-grid-page";
 import { plural, titleFacts } from "@/lib/format";
+
+/** The arguments of each page of the list, shared by the loader and the page. */
+const listPage = (paginationOpts: PageOpts) => ({ paginationOpts });
 
 export const Route = createFileRoute("/_app/my-list")({
   head: () => ({ meta: [{ title: "My List · Lar Movies" }] }),
+  loader: ({ context: { platform } }) => preloadFirstPage(platform.movies.myList.list, listPage),
+  pendingComponent: () => <GridPageSkeleton heading="My List" />,
   component: MyListPage,
 });
 
 function MyListPage() {
   const platform = usePlatform();
-  const list = useAllPages(platform.movies.myList.list, (paginationOpts) => ({ paginationOpts }));
+  const list = useAllPages(platform.movies.myList.list, listPage);
   const complete = list.status === "ready" && list.next.kind === "done";
 
   return (

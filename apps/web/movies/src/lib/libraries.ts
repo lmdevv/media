@@ -1,7 +1,7 @@
 import type { PlatformSdk } from "@media/sdk/promise";
 import { usePlatform } from "@media/sdk/react";
 import { useAllPages } from "@media/ui/lib/pages";
-import type { Paged } from "@media/ui/lib/pages";
+import type { PageOpts, Paged } from "@media/ui/lib/pages";
 import { useMemo } from "react";
 
 import { isActive } from "./scan-progress";
@@ -23,13 +23,16 @@ export interface ActiveScan {
   readonly scan: Scan;
 }
 
+/**
+ * The arguments of each page of the libraries shared with this person, shared by the screens that
+ * list them and their routes' loaders.
+ */
+export const librariesPage = (paginationOpts: PageOpts) => ({ paginationOpts });
+
 /** The movies libraries shared with this person, every page of them. */
 export const useMovieLibraries = (): Paged<Library> => {
   const platform = usePlatform();
-
-  const paged = useAllPages(platform.core.libraries.list, (paginationOpts) => ({
-    paginationOpts,
-  }));
+  const paged = useAllPages(platform.core.libraries.list, librariesPage);
 
   return useMemo(
     () =>

@@ -1,4 +1,5 @@
 import type { PlatformSdk } from "@media/sdk/promise";
+import type { PageOpts } from "@media/ui/lib/pages";
 import { Brand } from "effect";
 
 type Result<Method> = Method extends (...args: never) => Promise<infer A> ? A : never;
@@ -91,3 +92,9 @@ export const asTitleId = Brand.nominal<TitleId>();
 export const asPersonId = Brand.nominal<PersonId>();
 
 export const asCollectionId = Brand.nominal<CollectionId>();
+
+/**
+ * The arguments of each page of the collections, shared by the Collections page, Home's
+ * Collections row, and their routes' loaders, so all of them follow one subscription.
+ */
+export const collectionsPage = (paginationOpts: PageOpts) => ({ paginationOpts });

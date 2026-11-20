@@ -1,5 +1,6 @@
 import type { MigrationSourceFailure } from "@media/contracts/models/migration";
 import { SOURCE_NAMES } from "@media/contracts/migration-plan";
+import type { PlatformSdk } from "@media/sdk/promise";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { Button } from "@media/ui/components/button";
 import { CalmState } from "@media/ui/components/calm-state";
@@ -20,8 +21,31 @@ import { EMPTY_FORM, isRunning } from "./migration-model";
 import type { SourceForm } from "./migration-model";
 import { Review } from "./review";
 
-/** How many of the newest imports the page looks through for one still running. */
-const RECENT_RUNS = 10;
+/** The newest imports the page looks through for one still running. */
+const RECENT_RUNS = { paginationOpts: { numItems: 10, cursor: null } };
+
+/**
+ * Preloads what the import page opens with, for its route's loader: the newest imports, and the
+ * import the address pins when it names one.
+ */
+export const preloadMigration = async (
+  platform: PlatformSdk,
+  importId: ImportRunId | undefined,
+): Promise<void> => {
+  await Promise.all([
+    platform.movies.imports.list.preload(RECENT_RUNS),
+    importId === undefined ? undefined : platform.movies.imports.get.preload({ importId }),
+  ]);
+};
+
+/** The import page while it finds out whether an import is running. */
+export function MigrationLoading() {
+  return (
+    <div className="flex justify-center py-24">
+      <Spinner className="size-8 text-text" label="Loading" />
+    </div>
+  );
+}
 
 type Step =
   | { readonly kind: "connect"; readonly failure: MigrationSourceFailure | null }
@@ -37,9 +61,7 @@ type Step =
 export function MigrationScreen({ importId }: { readonly importId: ImportRunId | undefined }) {
   const platform = usePlatform();
 
-  const runs = usePlatformQuery(platform.movies.imports.list, {
-    paginationOpts: { numItems: RECENT_RUNS, cursor: null },
-  });
+  const runs = usePlatformQuery(platform.movies.imports.list, RECENT_RUNS);
 
   const pinned = usePlatformQuery(
     platform.movies.imports.get,
@@ -59,11 +81,7 @@ export function MigrationScreen({ importId }: { readonly importId: ImportRunId |
   }, [activeId, importId, navigate]);
 
   if (runs.status === "loading" || (importId !== undefined && pinned.status === "loading")) {
-    return (
-      <div className="flex justify-center py-24">
-        <Spinner className="size-8 text-text" label="Loading" />
-      </div>
-    );
+    return <MigrationLoading />;
   }
 
   if (runs.status === "error") {

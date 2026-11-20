@@ -1,6 +1,7 @@
 import { cn } from "@media/ui/lib/utils";
 
-function Block({
+/** One pulsing placeholder shape: `bar` for a line of text, `card` for artwork. */
+export function Block({
   className,
   tone = "card",
 }: {

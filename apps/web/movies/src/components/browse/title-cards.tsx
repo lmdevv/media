@@ -2,13 +2,13 @@ import type { ContinueWatchingItem, TitleCard } from "@/lib/catalog";
 import { LandscapeCard, PosterCard } from "@media/ui/components/media-card";
 import { buttonVariants } from "@media/ui/lib/button-variants";
 import { cn } from "@media/ui/lib/utils";
+import { usePlatform } from "@media/sdk/react";
 import { Link } from "@tanstack/react-router";
 import { InfoIcon } from "lucide-react";
 
 import { artworkUrl } from "@/lib/artwork";
 import { episodeCode, facts, formatRemaining, progressFraction, titleFacts } from "@/lib/format";
 
-import { usePrefetchTitle } from "./prefetch";
 import { ContinueMenu, TitleMenu } from "./title-menu";
 
 /** A 2:3 poster linking to the title's page. `subtitle` adds the grid's `2024 · 2h 46m` line. */
@@ -23,8 +23,6 @@ export function TitlePosterCard({
   readonly badge?: string | undefined;
   readonly className?: string;
 }) {
-  const prefetch = usePrefetchTitle(title.id);
-
   return (
     <TitleMenu title={title}>
       <PosterCard
@@ -33,7 +31,7 @@ export function TitlePosterCard({
         image={artworkUrl(title.artwork.poster, "poster")}
         badge={badge}
         className={className}
-        render={<Link to="/title/$titleId" params={{ titleId: title.id }} {...prefetch} />}
+        render={<Link to="/title/$titleId" params={{ titleId: title.id }} />}
       />
     </TitleMenu>
   );
@@ -49,8 +47,6 @@ export function TitleLandscapeCard({
   readonly size?: "desktop" | "phone";
   readonly className?: string;
 }) {
-  const prefetch = usePrefetchTitle(title.id);
-
   return (
     <TitleMenu title={title}>
       <LandscapeCard
@@ -59,7 +55,7 @@ export function TitleLandscapeCard({
         image={artworkUrl(title.artwork.backdrop ?? title.artwork.poster, "card")}
         size={size}
         className={className}
-        render={<Link to="/title/$titleId" params={{ titleId: title.id }} {...prefetch} />}
+        render={<Link to="/title/$titleId" params={{ titleId: title.id }} />}
       />
     </TitleMenu>
   );
@@ -106,7 +102,14 @@ export function ContinueCard({
 }) {
   const text = continueText(item, size === "phone");
   const progress = progressFraction(item.progress);
-  const prefetch = usePrefetchTitle(item.title.id);
+  const platform = usePlatform();
+
+  // The card opens the player, whose route loads nothing on hover, but its menu reads the title's
+  // page: hovering or focusing it starts that read, which the SDK then keeps.
+  const warmTitle = {
+    onPointerEnter: () => void platform.movies.titles.get.preload({ titleId: item.title.id }),
+    onFocus: () => void platform.movies.titles.get.preload({ titleId: item.title.id }),
+  };
 
   return (
     <ContinueMenu item={item} name={continueText(item, false).title}>
@@ -128,7 +131,7 @@ export function ContinueCard({
               buttonVariants({ variant: "secondary" }),
               "size-8 rounded-pill p-0 [&_svg]:size-4.5",
             )}
-            {...prefetch}
+            {...warmTitle}
           >
             <InfoIcon strokeWidth={1.75} aria-hidden />
           </Link>
@@ -139,7 +142,7 @@ export function ContinueCard({
             params={{ titleId: item.title.id }}
             search={item.episode === null ? {} : { episodeId: item.episode.id }}
             aria-label={`Resume ${text.title}`}
-            {...prefetch}
+            {...warmTitle}
           />
         }
       />

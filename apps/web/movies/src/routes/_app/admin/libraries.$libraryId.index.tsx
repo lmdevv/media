@@ -1,6 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { LibraryDetailScreen } from "@/components/admin/library-detail";
+import {
+  LibraryDetailScreen,
+  LibraryDetailSkeleton,
+  preloadLibraryDetail,
+} from "@/components/admin/library-detail";
 import { parseLibraryId } from "@/components/admin/route-params";
 import { ScopeGate } from "@/components/admin/scope-gate";
 
@@ -10,6 +14,9 @@ export const Route = createFileRoute("/_app/admin/libraries/$libraryId/")({
     stringify: (params) => ({ libraryId: params.libraryId }),
   },
   head: () => ({ meta: [{ title: "Library · Lar Movies" }] }),
+  loader: ({ context: { platform }, params: { libraryId } }) =>
+    preloadLibraryDetail(platform, libraryId),
+  pendingComponent: LibraryDetailSkeleton,
   component: LibraryDetailPage,
 });
 

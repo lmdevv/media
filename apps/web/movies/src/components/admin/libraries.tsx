@@ -17,6 +17,7 @@ import { useAction } from "./action";
 import { formatCount, formatPercent, plural } from "./format";
 import { isActive, lastScanLabel, scanFraction } from "./scan";
 import { ACCOUNT_LIBRARIES } from "@/lib/account-links";
+import { librariesPage } from "@/lib/libraries";
 import { reportMovedOn } from "@/lib/canceled";
 
 import { PagedView, ShowMore } from "./paged-view";
@@ -32,6 +33,16 @@ export const accountLibraryHref = (library?: Library["libraryId"]): string =>
 const editable = (library: Library): boolean =>
   library.kind === "movies" && library.level !== "view";
 
+/** The libraries screen while its first page of libraries loads. */
+export function LibrariesSkeleton() {
+  return (
+    <div aria-busy className="flex flex-col gap-6">
+      <PageHeader title="Libraries" />
+      <Skeleton className="h-36 w-full rounded-control" />
+    </div>
+  );
+}
+
 /**
  * Libraries and scans: every movies library this person may edit, with its folders, size, last
  * scan, and live scan progress. Admins make and share libraries in the account client.
@@ -42,10 +53,7 @@ export function LibrariesScreen() {
   const now = useNow(10_000);
   const admin = me !== null && allows(me, "admin");
 
-  const libraries = usePages(platform.core.libraries.list, (paginationOpts) => ({
-    paginationOpts,
-  }));
-
+  const libraries = usePages(platform.core.libraries.list, librariesPage);
   const list = libraries.status === "ready" ? libraries.rows.filter(editable) : [];
 
   const scanAll = useAction(

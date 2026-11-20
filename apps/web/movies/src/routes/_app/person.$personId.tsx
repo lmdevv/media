@@ -8,7 +8,7 @@ import { CalmState } from "@media/ui/components/calm-state";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useEffect } from "react";
 
-import { PosterGridSkeleton } from "@/components/browse/skeletons";
+import { Block, PosterGridSkeleton } from "@/components/browse/skeletons";
 import { TitlePosterCard } from "@/components/browse/title-cards";
 import { ExternalLinks } from "@/components/browse/title-extras";
 import { PosterGrid } from "@/components/browse/title-grid-page";
@@ -22,8 +22,36 @@ export const Route = createFileRoute("/_app/person/$personId")({
     parse: (raw) => ({ personId: asPersonId(raw.personId) }),
     stringify: (params) => ({ personId: params.personId }),
   },
+  loader: ({ context: { platform }, params: { personId } }) =>
+    platform.movies.people.get.preload({ personId }),
+  pendingComponent: PersonSkeleton,
   component: PersonPage,
 });
+
+/** The person page while it loads: the photo beside the name and life lines, then their titles. */
+function PersonSkeleton() {
+  return (
+    <div
+      aria-busy
+      className="mx-auto box-content flex max-w-content flex-col gap-10 px-4 pt-6 pb-20 md:gap-14 md:px-16 md:pt-26"
+    >
+      <div className="flex flex-col gap-6 md:flex-row md:gap-12">
+        <Block className="aspect-2/3 w-40 rounded-poster md:w-64" />
+        <div className="flex w-full max-w-170 flex-col gap-4">
+          <div className="flex flex-col gap-1.5">
+            <Block tone="bar" className="h-9 w-56 rounded-inner" />
+            <Block tone="bar" className="h-5.5 w-24 rounded-bar" />
+          </div>
+          <Block tone="bar" className="h-5.5 w-72 max-w-full rounded-bar" />
+        </div>
+      </div>
+      <div className="flex flex-col gap-5">
+        <Block tone="bar" className="h-6.5 w-40 rounded-bar" />
+        <PosterGridSkeleton count={7} />
+      </div>
+    </div>
+  );
+}
 
 const today = (): string => new Date().toISOString().slice(0, 10);
 
@@ -61,13 +89,7 @@ function PersonPage() {
     }
   }, [pending, personId, requestDetails]);
 
-  if (person.status === "loading") {
-    return (
-      <div aria-busy className="mx-auto box-content max-w-content px-4 pt-8 md:px-16 md:pt-26">
-        <PosterGridSkeleton count={7} />
-      </div>
-    );
-  }
+  if (person.status === "loading") return <PersonSkeleton />;
 
   if (person.status === "error") {
     const missing = isFailure(person.error, "NotFound");
