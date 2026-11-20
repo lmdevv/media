@@ -246,40 +246,42 @@ export const createPlatform = (options: PlatformOptions): PlatformSdk => {
   const signIn = (credentials: Client.Credentials): Promise<void> =>
     changingSession(withClient((client) => client.session.signIn(credentials)));
 
-  const watchOf = <Args, Result>(command: Command<"query", Args, Result>) => {
-    const share = kept.group<Result>();
+  const queryOf = <Args, Result>(
+    command: Command<"query", Args, Result>,
+  ): PromiseQuery<Args, Result> => {
+    const group = kept.group<Result>();
     const encode = Schema.encodeUnknownOption(command.args);
 
     const keyInSchemaOrder = (params: Params<Args>): Option.Option<string> =>
       Option.map(encode(params[0] ?? {}), (wire) => JSON.stringify(wire));
 
-    return (...params: Params<Args>): QueryWatch.QueryWatch<Result> => {
-      const open = () =>
-        QueryWatch.fromStream(
-          runtime,
-          Stream.unwrap(Effect.map(Client.Client, (client) => client.watch(command, params))),
-        );
+    const openOf = (params: Params<Args>) => () =>
+      QueryWatch.fromStream(
+        runtime,
+        Stream.unwrap(Effect.map(Client.Client, (client) => client.watch(command, params))),
+      );
 
-      return Option.match(keyInSchemaOrder(params), {
-        onNone: () => open(),
+    const watch = (...params: Params<Args>): QueryWatch.QueryWatch<Result> =>
+      Option.match(keyInSchemaOrder(params), {
+        onNone: openOf(params),
         onSome: (key) => {
           releaseKeptOnSessionChange();
 
-          return share(key, open);
+          return group.watch(key, openOf(params));
         },
       });
-    };
-  };
 
-  const queryOf = <Args, Result>(
-    command: Command<"query", Args, Result>,
-  ): PromiseQuery<Args, Result> => {
-    const watch = watchOf(command);
+    const preload = (...params: Params<Args>): Promise<void> =>
+      Option.match(keyInSchemaOrder(params), {
+        onNone: () => QueryWatch.whenAnswered(openOf(params)()),
+        onSome: (key) => {
+          releaseKeptOnSessionChange();
 
-    return Object.assign(call(command), {
-      watch,
-      preload: (...params: Params<Args>) => QueryWatch.whenAnswered(watch(...params)),
-    });
+          return group.preload(key, openOf(params));
+        },
+      });
+
+    return Object.assign(call(command), { watch, preload });
   };
 
   const builder: PromiseBuilder = { query: queryOf, mutation: call, action: call };
