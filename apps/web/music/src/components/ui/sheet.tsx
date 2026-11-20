@@ -1,4 +1,5 @@
 import { Dialog as SheetPrimitive } from "@base-ui/react/dialog";
+import { useKeyboardFocusReturn } from "@media/ui/lib/focus-policy";
 import { cn } from "@/lib/utils";
 
 /** An iOS-style bottom sheet for phone layouts, such as the device sheet. */
@@ -13,11 +14,15 @@ export function SheetContent({
   children,
   title,
   description,
+  ref,
+  finalFocus,
   ...props
 }: SheetPrimitive.Popup.Props & {
   readonly title: string;
   readonly description?: string | undefined;
 }) {
+  const focusReturn = useKeyboardFocusReturn(ref, finalFocus);
+
   return (
     <SheetPrimitive.Portal>
       <SheetPrimitive.Backdrop className="fixed inset-0 z-50 bg-dark-canvas/45 transition-opacity duration-200 data-ending-style:opacity-0 data-starting-style:opacity-0" />
@@ -27,6 +32,7 @@ export function SheetContent({
           className,
         )}
         {...props}
+        {...focusReturn}
       >
         <div
           aria-hidden

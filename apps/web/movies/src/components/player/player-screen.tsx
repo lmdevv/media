@@ -862,39 +862,35 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
 
   const controlsVisible = useControlsVisible(frame, hold);
 
-  useKeymap(
-    playerKeymap,
-    {
-      "menu.toggle": () => {
-        if (guest === undefined) setMenu((open) => !open);
-      },
-      "player.toggle": togglePlay,
-      "player.toggle-k": togglePlay,
-      "player.back-10": () => skipByKey(-10),
-      "player.forward-10": () => skipByKey(10),
-      "player.back-5": () => skipByKey(-5),
-      "player.forward-5": () => skipByKey(5),
-      "player.volume-up": () => {
-        if (volumeSettable) commitVolume(media.volume + VOLUME_STEP);
-        else if (media.muted) setMuted(false);
-      },
-      "player.volume-down": () => {
-        if (volumeSettable) commitVolume(media.volume - VOLUME_STEP);
-      },
-      "player.fullscreen": toggleFullscreen,
-      "player.mute": () => setMuted(!(media.muted || silent)),
-      "player.subtitles": toggleSubtitles,
-      "player.subtitles-earlier": () => subtitleDelay.stepWithNotice(-1),
-      "player.subtitles-later": () => subtitleDelay.stepWithNotice(1),
-      "player.exit": (event) => {
-        if (takeEscape(event)) return;
-
-        if (infoShown) setInfo(false);
-        else askToLeave();
-      },
+  useKeymap(playerKeymap, {
+    "menu.toggle": () => {
+      if (guest === undefined) setMenu((open) => !open);
     },
-    !menu && leaving === null && together.starting === undefined,
-  );
+    "player.toggle": togglePlay,
+    "player.toggle-k": togglePlay,
+    "player.back-10": () => skipByKey(-10),
+    "player.forward-10": () => skipByKey(10),
+    "player.back-5": () => skipByKey(-5),
+    "player.forward-5": () => skipByKey(5),
+    "player.volume-up": () => {
+      if (volumeSettable) commitVolume(media.volume + VOLUME_STEP);
+      else if (media.muted) setMuted(false);
+    },
+    "player.volume-down": () => {
+      if (volumeSettable) commitVolume(media.volume - VOLUME_STEP);
+    },
+    "player.fullscreen": toggleFullscreen,
+    "player.mute": () => setMuted(!(media.muted || silent)),
+    "player.subtitles": toggleSubtitles,
+    "player.subtitles-earlier": () => subtitleDelay.stepWithNotice(-1),
+    "player.subtitles-later": () => subtitleDelay.stepWithNotice(1),
+    "player.exit": (event) => {
+      if (takeEscape(event)) return;
+
+      if (infoShown) setInfo(false);
+      else askToLeave();
+    },
+  });
 
   const canStart =
     guest === undefined &&

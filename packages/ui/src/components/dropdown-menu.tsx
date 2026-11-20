@@ -1,6 +1,7 @@
 "use client";
 
 import { Menu as MenuPrimitive } from "@base-ui/react/menu";
+import { useKeyboardFocusReturn } from "@media/ui/lib/focus-policy";
 import { cn } from "@media/ui/lib/utils";
 import { CheckIcon } from "lucide-react";
 
@@ -18,9 +19,13 @@ function DropdownMenuContent({
   side = "bottom",
   sideOffset = 4,
   className,
+  ref,
+  finalFocus,
   ...props
 }: MenuPrimitive.Popup.Props &
   Pick<MenuPrimitive.Positioner.Props, "align" | "alignOffset" | "side" | "sideOffset">) {
+  const focusReturn = useKeyboardFocusReturn(ref, finalFocus);
+
   return (
     <MenuPrimitive.Portal>
       <MenuPrimitive.Positioner
@@ -37,6 +42,7 @@ function DropdownMenuContent({
             className,
           )}
           {...props}
+          {...focusReturn}
         />
       </MenuPrimitive.Positioner>
     </MenuPrimitive.Portal>

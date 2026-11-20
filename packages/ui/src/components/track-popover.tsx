@@ -1,4 +1,5 @@
 import { Popover } from "@base-ui/react/popover";
+import { useKeyboardFocusReturn } from "@media/ui/lib/focus-policy";
 import { Radio } from "@base-ui/react/radio";
 import { RadioGroup } from "@base-ui/react/radio-group";
 import { cn } from "@media/ui/lib/utils";
@@ -227,6 +228,8 @@ export function TrackPopover({
   /** Where the popover renders, such as the player while it is full screen; the body otherwise. */
   readonly container?: HTMLElement | null | undefined;
 }) {
+  const focusReturn = useKeyboardFocusReturn();
+
   return (
     <Popover.Root>
       <Popover.Trigger render={trigger} />
@@ -241,6 +244,7 @@ export function TrackPopover({
           className="z-50"
         >
           <Popover.Popup
+            {...focusReturn}
             aria-label={label}
             className="origin-(--transform-origin) shadow-overlay transition-[opacity,scale] data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0"
           >

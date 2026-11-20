@@ -1,4 +1,5 @@
 import { Menu as MenuPrimitive } from "@base-ui/react/menu";
+import { useKeyboardFocusReturn } from "@media/ui/lib/focus-policy";
 import { Keys } from "@/components/ui/keys";
 import { cn } from "@/lib/utils";
 import type { Hotkey } from "@tanstack/hotkeys";
@@ -22,9 +23,13 @@ export function DropdownMenuContent({
   side = "bottom",
   sideOffset = 4,
   alignOffset = 0,
+  ref,
+  finalFocus,
   ...props
 }: MenuPrimitive.Popup.Props &
   Pick<MenuPrimitive.Positioner.Props, "align" | "side" | "sideOffset" | "alignOffset">) {
+  const focusReturn = useKeyboardFocusReturn(ref, finalFocus);
+
   return (
     <MenuPrimitive.Portal>
       <MenuPrimitive.Positioner
@@ -34,7 +39,11 @@ export function DropdownMenuContent({
         sideOffset={sideOffset}
         alignOffset={alignOffset}
       >
-        <MenuPrimitive.Popup className={cn(popupClassName, className)} {...props} />
+        <MenuPrimitive.Popup
+          className={cn(popupClassName, className)}
+          {...props}
+          {...focusReturn}
+        />
       </MenuPrimitive.Positioner>
     </MenuPrimitive.Portal>
   );

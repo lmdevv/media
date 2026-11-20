@@ -3,6 +3,7 @@
  * device picker, whichever this browser offers) and what the player shows while a TV plays.
  */
 import { Popover } from "@base-ui/react/popover";
+import { useKeyboardFocusReturn } from "@media/ui/lib/focus-policy";
 import { cn } from "@media/ui/lib/utils";
 import { AirplayIcon, CastIcon, MonitorSmartphoneIcon } from "lucide-react";
 import { useState } from "react";
@@ -131,6 +132,8 @@ export function CastMenu({
     action();
   };
 
+  const focusReturn = useKeyboardFocusReturn();
+
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Trigger render={trigger} />
@@ -143,6 +146,7 @@ export function CastMenu({
           className="z-50"
         >
           <Popover.Popup
+            {...focusReturn}
             aria-label="Play on"
             className="origin-(--transform-origin) shadow-overlay transition-[opacity,scale] data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0"
           >
