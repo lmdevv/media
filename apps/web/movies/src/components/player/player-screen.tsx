@@ -4,6 +4,7 @@ import type { FollowerPlayer } from "@media/contracts/follower";
 import type { NegotiateResponse } from "@media/contracts/media-playback";
 import { sessionSkip } from "@media/contracts/session-next";
 import {
+  SLEEP_FADE_MS,
   formatSleepTimeLeft,
   sleepHoldsAutoplay,
   sleepPausesPlayback,
@@ -732,14 +733,22 @@ export function PlayerScreen({
   const playingForSleep = isPlaying && !media.paused;
   const playbackPosition = progress.position;
 
-  // Reports on every position change without re-rendering the screen; the timer itself re-renders
-  // only when its own state moves.
+  // Reports from the position without re-rendering the screen: once a second while the end is
+  // further off than the fade, then on every move so the fade starts on time. A change of
+  // playing runs the effect again, which reports at once.
   useEffect(() => {
     if (!isPlaying) return undefined;
 
+    let reported: { readonly seconds: number | null } | null = null;
+
     const report = (): void => {
       const leftMs = duration > 0 ? Math.max(0, duration - playbackPosition.get()) * 1000 : null;
+      const seconds = leftMs === null ? null : Math.ceil(leftMs / 1000);
+      const nearFade = leftMs !== null && leftMs <= SLEEP_FADE_MS + 1000;
 
+      if (!nearFade && reported !== null && reported.seconds === seconds) return;
+
+      reported = { seconds };
       reportToSleepTimer({ itemKey: sleepKey, leftMs, playing: playingForSleep });
     };
 

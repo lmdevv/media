@@ -19,6 +19,26 @@ class FakeElement extends EventTarget implements ProgressElement {
   }
 }
 
+/** An element that counts the listeners attached for each event type. */
+class CountingElement extends FakeElement {
+  private readonly counts = new Map<string, number>();
+
+  override addEventListener(...args: Parameters<EventTarget["addEventListener"]>): void {
+    this.counts.set(args[0], (this.counts.get(args[0]) ?? 0) + 1);
+    super.addEventListener(...args);
+  }
+
+  override removeEventListener(...args: Parameters<EventTarget["removeEventListener"]>): void {
+    this.counts.set(args[0], (this.counts.get(args[0]) ?? 0) - 1);
+    super.removeEventListener(...args);
+  }
+
+  /** How many listeners are attached for `type`. */
+  listening(type: string): number {
+    return this.counts.get(type) ?? 0;
+  }
+}
+
 /** A player at `positionMs` that tells its subscribers when it starts playing, on `change`. */
 const fakePlayer = () => {
   const listeners = new Set<Parameters<ProgressPlayer["subscribe"]>[0]>();
@@ -111,5 +131,53 @@ describe("mediaProgress", () => {
     fake.change();
 
     expect(heard).toStrictEqual([1, 30, 31]);
+  });
+
+  it("answers the same position between events while followed", () => {
+    const element = new FakeElement();
+    const fake = fakePlayer();
+    const progress = mediaProgress(element, fake.player);
+
+    progress.position.subscribe(() => undefined);
+    fake.moveTo(10_000);
+    element.dispatchEvent(new Event("timeupdate"));
+    fake.moveTo(10_400);
+
+    expect(progress.position.get()).toBe(10);
+  });
+
+  it("takes the exact position where the element rests, however small the move", () => {
+    const element = new FakeElement();
+    const fake = fakePlayer();
+    const progress = mediaProgress(element, fake.player);
+    const heard: Array<number> = [];
+
+    progress.position.subscribe(() => heard.push(progress.position.get()));
+    fake.moveTo(10_000);
+    element.dispatchEvent(new Event("timeupdate"));
+    fake.moveTo(10_030);
+    element.dispatchEvent(new Event("timeupdate"));
+    element.dispatchEvent(new Event("pause"));
+
+    expect(heard).toStrictEqual([10, 10.03]);
+  });
+
+  it("listens to the element once, however many follow it, until the last one stops", () => {
+    const element = new CountingElement();
+    const fake = fakePlayer();
+    const progress = mediaProgress(element, fake.player);
+
+    const stopPosition = progress.position.subscribe(() => undefined);
+    const stopBuffered = progress.bufferedAhead.subscribe(() => undefined);
+
+    expect(element.listening("timeupdate")).toBe(1);
+
+    stopPosition();
+
+    expect(element.listening("timeupdate")).toBe(1);
+
+    stopBuffered();
+
+    expect(element.listening("timeupdate")).toBe(0);
   });
 });

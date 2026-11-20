@@ -63,35 +63,83 @@ export const followMedia = (
   };
 };
 
-const settled = (
-  read: () => number,
-  tolerance: number,
-  subscribe: LiveValue<number>["subscribe"],
-): LiveValue<number> => {
+/** Events after which the element rests where it is, so its position is taken exactly. */
+const EXACT_EVENTS: ReadonlySet<string> = new Set(["pause", "seeked", "ended", "emptied"]);
+
+/** A reading kept until a new one moves past `tolerance`, or is taken exactly. */
+const settledReading = (read: () => number, tolerance: number) => {
   let current = read();
 
   return {
-    get: () => {
+    current: () => current,
+    /** Takes a new reading, and answers whether it changed the kept one. */
+    take: (exact: boolean): boolean => {
       const next = read();
 
-      if (Math.abs(next - current) >= tolerance) current = next;
+      if (next === current || (!exact && Math.abs(next - current) < tolerance)) return false;
 
-      return current;
+      current = next;
+
+      return true;
     },
-    subscribe,
   };
 };
 
-/** `element`'s position through `player`, and its buffer ahead, followed through its events. */
+/**
+ * `element`'s position through `player`, and its buffer ahead. While followed, both come from one
+ * set of listeners on the element and the player, and each answers the same value between the
+ * events that change it; unfollowed, each read takes a new reading.
+ */
 export const mediaProgress = (element: ProgressElement, player: ProgressPlayer): MediaProgress => {
-  const subscribe = (onChange: () => void): (() => void) => followMedia(element, player, onChange);
+  const position = settledReading(() => player.positionMs() / 1000, POSITION_TOLERANCE_SECONDS);
+  const buffered = settledReading(() => bufferedAheadSeconds(element), BUFFERED_TOLERANCE_SECONDS);
+  const followers = new Set<() => void>();
+  let stopListening: (() => void) | null = null;
 
-  return {
-    position: settled(() => player.positionMs() / 1000, POSITION_TOLERANCE_SECONDS, subscribe),
-    bufferedAhead: settled(
-      () => bufferedAheadSeconds(element),
-      BUFFERED_TOLERANCE_SECONDS,
-      subscribe,
-    ),
+  const update = (exact: boolean): void => {
+    const moved = position.take(exact);
+    const grew = buffered.take(exact);
+
+    if (!moved && !grew) return;
+
+    for (const follower of followers) follower();
   };
+
+  const onElementEvent = (event: Event): void => update(EXACT_EVENTS.has(event.type));
+  const onPlayerChange = (): void => update(true);
+
+  const subscribe = (onChange: () => void): (() => void) => {
+    followers.add(onChange);
+
+    if (stopListening === null) {
+      for (const type of MEDIA_EVENTS) element.addEventListener(type, onElementEvent);
+
+      const unsubscribe = player.subscribe(onPlayerChange);
+
+      stopListening = () => {
+        for (const type of MEDIA_EVENTS) element.removeEventListener(type, onElementEvent);
+        unsubscribe();
+      };
+    }
+
+    return () => {
+      followers.delete(onChange);
+
+      if (followers.size > 0 || stopListening === null) return;
+
+      stopListening();
+      stopListening = null;
+    };
+  };
+
+  const liveOf = (reading: ReturnType<typeof settledReading>): LiveValue<number> => ({
+    get: () => {
+      if (stopListening === null) reading.take(false);
+
+      return reading.current();
+    },
+    subscribe,
+  });
+
+  return { position: liveOf(position), bufferedAhead: liveOf(buffered) };
 };
