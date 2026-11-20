@@ -2,6 +2,7 @@ import { localOnly } from "@media/contracts/cast";
 import { DRIFT_THRESHOLDS } from "@media/contracts/clock";
 import type { FollowerPlayer } from "@media/contracts/follower";
 import type { NegotiateResponse } from "@media/contracts/media-playback";
+import { sessionSkip } from "@media/contracts/session-next";
 import { Playback, Versions } from "@media/sdk/effect";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { ChapterPopover } from "@media/ui/components/chapter-popover";
@@ -690,15 +691,15 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
     if (nextEpisode !== null) playEpisode(nextEpisode.id);
   }, [nextEpisode, playEpisode]);
 
-  const queuedFirst = follow.queue.length > 0;
+  const nextSkip = sessionSkip({
+    mayControl: together.mayControl,
+    mayAdd: together.mayAdd,
+    queued: follow.queue.length > 0,
+    nextPlayable: nextEpisode?.available === true,
+  });
 
-  const sessionNextAction = !together.mayControl
-    ? null
-    : queuedFirst
-      ? sessionPlayQueued
-      : together.mayAdd && nextEpisode?.available === true
-        ? playNext
-        : null;
+  const sessionNextAction =
+    nextSkip === null ? null : { queued: sessionPlayQueued, episode: playNext }[nextSkip];
 
   const nextAction = inSession ? sessionNextAction : nextEpisode === null ? null : playNext;
 
