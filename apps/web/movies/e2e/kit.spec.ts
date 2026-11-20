@@ -66,7 +66,12 @@ test("rows take focus with j and k and move between cards with arrows", async ({
 
 const edges = async (
   locator: Locator,
-): Promise<{ readonly left: number; readonly right: number; readonly bottom: number }> => {
+): Promise<{
+  readonly left: number;
+  readonly right: number;
+  readonly top: number;
+  readonly bottom: number;
+}> => {
   const box = await locator.boundingBox();
 
   if (box === null) throw new Error(`${locator.toString()} is not on screen`);
@@ -74,6 +79,7 @@ const edges = async (
   return {
     left: Math.round(box.x),
     right: Math.round(box.x + box.width),
+    top: Math.round(box.y),
     bottom: Math.round(box.y + box.height),
   };
 };
@@ -110,17 +116,23 @@ test("a long hero overview shows three lines until Read more opens it", async ({
 });
 
 for (const width of [1710, 1280]) {
-  test(`at ${width}px a row's title, See all and first card line up with the top bar`, async ({
-    page,
-  }) => {
-    await page.setViewportSize({ width, height: 1000 });
-    await page.goto(moviesPath("/dev/kit"));
+  for (const name of ["Continue watching for Alex", "Recently added"]) {
+    test(`at ${width}px ${name} lines up with the top bar, with See all beside its title`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 1000 });
+      await page.goto(moviesPath("/dev/kit"));
 
-    const bar = await edges(page.locator('[data-slot="hero"] [data-slot="top-bar"]'));
-    const row = page.getByRole("region", { name: "Continue watching for Alex" });
+      const bar = await edges(page.locator('[data-slot="hero"] [data-slot="top-bar"]'));
+      const row = page.getByRole("region", { name }).first();
+      const heading = await edges(row.getByRole("heading"));
+      const seeAll = await edges(row.getByRole("link", { name: `See all ${name}` }));
 
-    expect((await edges(row.getByRole("heading"))).left).toBe(bar.left);
-    expect((await edges(row.locator("[data-media-row] > *").first())).left).toBe(bar.left);
-    expect((await edges(row.getByText("See all"))).right).toBe(bar.right);
-  });
+      expect(heading.left).toBe(bar.left);
+      expect((await edges(row.locator("[data-media-row] > *").first())).left).toBe(bar.left);
+      expect(seeAll.left - heading.right).toBe(12);
+      expect(seeAll.top).toBeLessThan(heading.bottom);
+      expect(seeAll.bottom).toBeGreaterThan(heading.top);
+    });
+  }
 }
