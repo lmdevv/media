@@ -22,6 +22,13 @@ for the dev stack, stack suites, and CI.
 - **Comments and docs say what the code does now**, not what came before;
   `scripts/check-history.sh` enforces it.
 
+## Web UI
+
+- **Route loaders wait only for the data that decides a page's layout.** They start the rest with
+  `void query.preload(args)`, and the SDK keeps both live for the page.
+- **Loaders never preload the signed-in session** (`core.auth.sessions.current`). The signed-in
+  shell owns that query and its failure screen.
+
 ## Commits and PRs
 
 - Format: `type(scope): summary`, imperative and lowercase. Types: `feat`, `fix`, `chore`, `docs`,
