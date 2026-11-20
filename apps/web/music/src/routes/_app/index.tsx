@@ -31,9 +31,9 @@ const playlistsPage = (paginationOpts: PageOpts) => ({ paginationOpts });
 
 export const Route = createFileRoute("/_app/")({
   loader: async ({ context: { platform } }) => {
+    // The signed-in shell owns the session query, which the greeting reads, and its failure screen.
     await Promise.all([
       platform.music.library.home.preload({}),
-      platform.core.auth.sessions.current.preload({}),
       // The quick tiles mix playlists with albums, so they wait for both rather than reshuffle.
       preloadAllRows(platform.music.playlists.list, playlistsPage),
     ]);
