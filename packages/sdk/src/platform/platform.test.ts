@@ -1,6 +1,6 @@
 import { Brand, Context, Effect, Layer, Predicate, Redacted } from "effect";
 import type { Scope } from "effect";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { Forbidden, Unauthenticated } from "@media/contracts/errors";
 
@@ -488,6 +488,69 @@ describe("createPlatform", () => {
       watched: { status: "success", data: SERVER },
     });
   });
+
+  it("hands a preloaded answer to the next watch on one subscription, until another person signs in", async () => {
+    const other = jwtExpiringAt(Date.now() + 3_600_000, "user-2|session-2");
+
+    const seen = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fake = yield* FakeConvex.make;
+          const signIns = { count: 0 };
+
+          yield* fake.handle("auth:signIn", () =>
+            Effect.sync(() => {
+              signIns.count += 1;
+
+              return Reply.Success({
+                value: {
+                  tokens: {
+                    token: signIns.count === 1 ? TOKEN : other,
+                    refreshToken: `refresh-${signIns.count}`,
+                  },
+                },
+              });
+            }),
+          );
+          yield* fake.reply("core/server:info", Reply.Success({ value: SERVER }));
+
+          const platform = createPlatform({
+            url: fake.url,
+            signInUrl: fake.signInUrl,
+            connection: "websocket",
+          });
+
+          const shown = yield* Effect.promise(async () => {
+            await platform.session.signInWithPassword({ username: "ada", password: "secret" });
+            await platform.core.server.info.preload();
+
+            const watch = platform.core.server.info.watch();
+            const handedOver = watch.getSnapshot();
+            const leave = watch.subscribe(() => undefined);
+
+            leave();
+            await platform.session.signInWithPassword({ username: "grace", password: "secret" });
+            // Once the session changes, the next screen subscribes again rather than share.
+            await vi.waitFor(() => {
+              expect(platform.core.server.info.watch().getSnapshot()).toStrictEqual({
+                status: "loading",
+              });
+            });
+
+            return handedOver;
+          });
+
+          const peak = yield* fake.peakSubscriptions("core/server:info");
+
+          yield* Effect.promise(() => platform.dispose());
+
+          return { shown, peak };
+        }),
+      ),
+    );
+
+    expect(seen).toStrictEqual({ shown: { status: "success", data: SERVER }, peak: 1 });
+  }, 20_000);
 });
 
 describe("opening a tile", () => {

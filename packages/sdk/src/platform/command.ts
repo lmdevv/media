@@ -82,6 +82,12 @@ export interface PromiseQuery<Args, Result> {
    * renders, and what scripts can subscribe to.
    */
   readonly watch: (...params: Params<Args>) => QueryWatch<Result>;
+  /**
+   * Follows the query until its first answer, a result or a failure, then resolves; never
+   * rejects. The answer stays subscribed for the client's keep time, so a screen that follows the
+   * same query next shows it at once: what a route loader calls before its page opens.
+   */
+  readonly preload: (...params: Params<Args>) => Promise<void>;
 }
 
 /** Builds the Promise method of each command. */

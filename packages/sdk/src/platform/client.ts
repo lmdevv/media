@@ -115,6 +115,11 @@ export interface Session {
   /** The status now, without waiting for a change. */
   readonly currentStatus: Effect.Effect<AuthStatus>;
   /**
+   * Who is signed in, as the account and session, then every change: renewing the session keeps
+   * it, signing in as another account or session changes it. None while signed out.
+   */
+  readonly identity: Stream.Stream<Option.Option<string>>;
+  /**
    * Signs in and stores the session. Refused credentials fail with `Unauthenticated`, a setup once
    * the server has an owner with `Conflict`, and a used or expired invite or reset code with
    * `Expired`.
@@ -485,6 +490,7 @@ const make = Effect.fn("Platform.make")(function* (url: string, signInRoute: Aut
     session: {
       status: engine.status,
       currentStatus: engine.currentStatus,
+      identity: engine.identity,
       signIn,
       signInAsGuest: (guest) => signIn(Credentials.Guest(guest)),
       startDeviceSignIn,

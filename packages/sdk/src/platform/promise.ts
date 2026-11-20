@@ -1,5 +1,15 @@
 import { Unauthenticated } from "@media/contracts/errors";
-import { Data, Effect, Fiber, ManagedRuntime, Match, Option, Redacted, Stream } from "effect";
+import {
+  Data,
+  Effect,
+  Fiber,
+  ManagedRuntime,
+  Match,
+  Option,
+  Redacted,
+  Schema,
+  Stream,
+} from "effect";
 
 import { SignInRoute } from "../auth";
 import type { AuthStatus } from "../auth";
@@ -9,7 +19,7 @@ import * as TokenStorage from "../token-storage";
 import type { SharedStore } from "../shared-store";
 import type { KeyValueStore } from "../token-storage";
 import * as Client from "./client";
-import type { Command, Id, Params, PromiseBuilder } from "./command";
+import type { Command, Id, Params, PromiseBuilder, PromiseQuery } from "./command";
 import { promiseMethods } from "./generated/commands";
 
 /** Where the platform client connects and where it keeps its session. */
@@ -214,19 +224,65 @@ export const createPlatform = (options: PlatformOptions): PlatformSdk => {
     (...params: Params<Args>) =>
       withClient((client) => client.run(command, params));
 
-  const watchOf =
-    <Args, Result>(command: Command<"query", Args, Result>) =>
-    (...params: Params<Args>) =>
-      QueryWatch.fromStream(
-        runtime,
-        Stream.unwrap(Effect.map(Client.Client, (client) => client.watch(command, params))),
-      );
+  const kept = QueryWatch.keeper(runtime, QueryWatch.DEFAULT_KEEP);
+  let followingIdentity = false;
 
-  const builder: PromiseBuilder = {
-    query: (command) => Object.assign(call(command), { watch: watchOf(command) }),
-    mutation: call,
-    action: call,
+  /**
+   * Stops sharing kept queries once another person or session signs in, or the session ends, so
+   * no screen shows an answer given to the session before.
+   */
+  const followIdentity = (): void => {
+    if (followingIdentity) return;
+
+    followingIdentity = true;
+    runtime.runFork(
+      Stream.runForEach(
+        Stream.unwrap(Effect.map(Client.Client, (client) => client.session.identity)).pipe(
+          Stream.drop(1),
+        ),
+        () => Effect.sync(kept.release),
+      ),
+    );
   };
+
+  /**
+   * One command's watches, shared by their encoded arguments: the schema writes the fields in its
+   * own order, so arguments that differ only in key order share a watch.
+   */
+  const watchOf = <Args, Result>(command: Command<"query", Args, Result>) => {
+    const share = kept.group<Result>();
+    const encode = Schema.encodeUnknownOption(command.args);
+
+    return (...params: Params<Args>): QueryWatch.QueryWatch<Result> => {
+      const open = () =>
+        QueryWatch.fromStream(
+          runtime,
+          Stream.unwrap(Effect.map(Client.Client, (client) => client.watch(command, params))),
+        );
+
+      const wire = encode(params[0] ?? {});
+
+      // Arguments the schema refuses fail with `InvalidArgs` through a watch of their own.
+      if (Option.isNone(wire)) return open();
+
+      followIdentity();
+
+      return share(JSON.stringify(wire.value), open);
+    };
+  };
+
+  const queryOf = <Args, Result>(
+    command: Command<"query", Args, Result>,
+  ): PromiseQuery<Args, Result> => {
+    const watch = watchOf(command);
+
+    return Object.assign(call(command), {
+      watch,
+      preload: (...params: Params<Args>) => QueryWatch.whenAnswered(watch(...params)),
+    });
+  };
+
+  const builder: PromiseBuilder = { query: queryOf, mutation: call, action: call };
 
   const onStatus: PlatformSession["onStatus"] = (listener) => {
     const fiber = runtime.runFork(
@@ -330,6 +386,10 @@ export const createPlatform = (options: PlatformOptions): PlatformSdk => {
             ),
         ),
     },
-    dispose: () => runtime.dispose(),
+    dispose: () => {
+      kept.release();
+
+      return runtime.dispose();
+    },
   };
 };
