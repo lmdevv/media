@@ -182,6 +182,26 @@ afterEach(() => {
 });
 
 describe("CastPlayer", () => {
+  it("moves its position as the receiver plays and keeps its state until something else changes", () => {
+    const receiver = laggingReceiver();
+    const player = castPlayer(receiver.framework);
+    const state = player.getState();
+    const heard: Array<number> = [];
+
+    player.position.subscribe(() => heard.push(player.position.get()));
+    receiver.reachTime(31);
+    receiver.reachTime(32);
+
+    expect(heard).toStrictEqual([31, 32]);
+    expect(player.getState()).toBe(state);
+
+    receiver.reachPaused(true);
+
+    expect(player.getState()).not.toBe(state);
+    expect(player.getState().paused).toBe(true);
+    expect(player.position.get()).toBe(32);
+  });
+
   it("lets the receiver be once a second tab's movie takes it, and keeps where this cast was", () => {
     const receiver = laggingReceiver();
     const taken: Array<true> = [];

@@ -1,4 +1,5 @@
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
+import { useKeyboardFocusReturn } from "@media/ui/lib/focus-policy";
 import { Button } from "@media/ui/components/button";
 import { PlayGlyph } from "@media/ui/components/icons";
 import { ProgressRing } from "@media/ui/components/progress-ring";
@@ -42,6 +43,8 @@ export function StartSessionDialog({
   readonly onCancel: () => void;
   readonly onStart: () => void;
 }) {
+  const focusReturn = useKeyboardFocusReturn();
+
   return (
     <DialogPrimitive.Root
       open={open}
@@ -52,7 +55,10 @@ export function StartSessionDialog({
       {/* A null container renders nothing; undefined renders into the body. */}
       <DialogPrimitive.Portal container={container ?? undefined}>
         <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-scrim transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0" />
-        <DialogPrimitive.Popup className="on-media fixed top-1/2 left-1/2 z-50 flex w-dialog max-w-[calc(100vw-var(--spacing-8))] -translate-1/2 flex-col gap-7 rounded-card border border-hairline bg-dark-surface p-8 font-sans text-text shadow-overlay transition-[opacity,scale] duration-150 outline-none data-ending-style:scale-98 data-ending-style:opacity-0 data-starting-style:scale-98 data-starting-style:opacity-0">
+        <DialogPrimitive.Popup
+          {...focusReturn}
+          className="on-media fixed top-1/2 left-1/2 z-50 flex w-dialog max-w-[calc(100vw-var(--spacing-8))] -translate-1/2 flex-col gap-7 rounded-card border border-hairline bg-dark-surface p-8 font-sans text-text shadow-overlay transition-[opacity,scale] duration-150 outline-none data-ending-style:scale-98 data-ending-style:opacity-0 data-starting-style:scale-98 data-starting-style:opacity-0"
+        >
           <DialogPrimitive.Title className="text-title/title font-heavy tracking-tight">
             Watch together
           </DialogPrimitive.Title>

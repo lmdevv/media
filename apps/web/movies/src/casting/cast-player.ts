@@ -12,6 +12,7 @@
  * `taken` hears it, and the player follows the receiver no more.
  */
 import type { PlayerEvent, PlayerPort } from "@media/sdk/effect";
+import type { LiveValue } from "@media/ui/lib/live-value";
 
 import type {
   CastFramework,
@@ -36,9 +37,8 @@ const OWN_MEDIA_KEPT = 32;
 /** How long a play or pause may take to show in the receiver's mirror before it counts as lost. */
 const TOGGLE_TIMEOUT_MS = 5_000;
 
-/** What the controls draw while casting. */
+/** What the controls draw while casting, apart from the position ({@link CastPlayer.position}). */
 export interface RemoteState {
-  readonly positionSeconds: number;
   readonly paused: boolean;
   readonly ended: boolean;
   readonly buffering: boolean;
@@ -47,6 +47,14 @@ export interface RemoteState {
   /** Whether the page can set the receiver's volume; mute works either way. */
   readonly volumeSettable: boolean;
 }
+
+const sameRemoteState = (left: RemoteState, right: RemoteState): boolean =>
+  left.paused === right.paused &&
+  left.ended === right.ended &&
+  left.buffering === right.buffering &&
+  left.volume === right.volume &&
+  left.muted === right.muted &&
+  left.volumeSettable === right.volumeSettable;
 
 /** The media a cast loaded on the receiver, as the mirror names it. */
 interface OwnMedia {
@@ -103,6 +111,7 @@ export class CastPlayer implements PlayerPort {
   /** Where the receiver was and whether it was paused while connected; a disconnect resets the mirror. */
   #last = { positionMs: 0, paused: true };
   #state: RemoteState;
+  #positionSeconds: number;
 
   /**
    * @param contentId - The media the cast loaded on the receiver.
@@ -131,6 +140,7 @@ export class CastPlayer implements PlayerPort {
     this.#own = { contentId, shown: named === contentId, before: named };
     this.#loaded.push(contentId);
     this.#state = this.#read();
+    this.#positionSeconds = this.positionMs() / 1000;
     this.#controller.addEventListener(this.#changeEvent, this.#onChange);
   }
 
@@ -172,8 +182,14 @@ export class CastPlayer implements PlayerPort {
     return media === null || media === this.#own.contentId;
   }
 
-  /** The receiver's state now; a new object after every change. */
+  /** The receiver's state now; a new object after each change of it, the position's aside. */
   readonly getState = (): RemoteState => this.#state;
+
+  /** Seconds played as of the receiver's last change, holding a seek's target until it lands. */
+  readonly position: LiveValue<number> = {
+    get: () => this.#positionSeconds,
+    subscribe: (onChange) => this.watch(onChange),
+  };
 
   /** Calls `onChange` after every change of the receiver's state. */
   readonly watch = (onChange: () => void): (() => void) => {
@@ -186,7 +202,6 @@ export class CastPlayer implements PlayerPort {
 
   #read(): RemoteState {
     return {
-      positionSeconds: this.positionMs() / 1000,
       paused: this.isPaused(),
       ended: this.#ended,
       buffering: this.isBuffering(),
@@ -202,7 +217,10 @@ export class CastPlayer implements PlayerPort {
   }
 
   #refresh(): void {
-    this.#state = this.#read();
+    const next = this.#read();
+
+    if (!sameRemoteState(this.#state, next)) this.#state = next;
+    this.#positionSeconds = this.positionMs() / 1000;
 
     for (const watcher of this.#watchers) watcher();
   }

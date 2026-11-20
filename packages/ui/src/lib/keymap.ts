@@ -30,7 +30,10 @@ export type KeymapEntry<Id extends string> = {
    * `mod+shift+p`, `/`.
    */
   readonly keys: string;
-  /** Fire even while a text field has focus. Reserve it for chords with `mod`, like `mod+k`. */
+  /**
+   * Fire even while a text field has focus or a menu or dialog is open. Reserve it for chords with
+   * `mod`, like `mod+k`.
+   */
   readonly whileTyping?: boolean;
 };
 

@@ -7,6 +7,8 @@ import { useMediaServer } from "@/session/error-reporting";
 import { browserMediaSupport } from "./browser-support";
 import { detectCapabilities } from "./capabilities";
 import type { MediaElementPlayer } from "./media-element-player";
+import { NO_PROGRESS, followMedia, mediaProgress } from "./media-progress";
+import type { MediaProgress } from "./media-progress";
 import { PlaybackController } from "./playback-controller";
 import type { PlaybackRequest, PlaybackServices, PlaybackSnapshot } from "./playback-controller";
 import { usesHlsJs } from "./stream-attachment";
@@ -82,65 +84,31 @@ export const usePlayback = (
   );
 };
 
-/** The element's state as the controls draw it. */
+/** The element's state as the controls draw it, apart from its progress ({@link useMediaProgress}). */
 export interface MediaState {
-  /** Where playback is, holding a seek's target until it lands. */
-  readonly positionSeconds: number;
   readonly paused: boolean;
   readonly ended: boolean;
   readonly buffering: boolean;
-  /** Seconds buffered ahead of the position. */
-  readonly bufferedAheadSeconds: number;
   readonly volume: number;
   readonly muted: boolean;
 }
 
-const MEDIA_EVENTS = [
-  "timeupdate",
-  "play",
-  "pause",
-  "playing",
-  "waiting",
-  "seeking",
-  "seeked",
-  "progress",
-  "volumechange",
-  "ended",
-  "loadeddata",
-  "emptied",
-] as const;
-
 const IDLE: MediaState = {
-  positionSeconds: 0,
   paused: true,
   ended: false,
   buffering: false,
-  bufferedAheadSeconds: 0,
   volume: 1,
   muted: false,
 };
 
-const bufferedAhead = (element: HTMLVideoElement): number => {
-  const now = element.currentTime;
-  const { buffered } = element;
-
-  const range = Array.from({ length: buffered.length }, (_, index) => index).find(
-    (index) => buffered.start(index) - 0.5 <= now && now <= buffered.end(index),
-  );
-
-  return range === undefined ? 0 : Math.max(0, buffered.end(range) - now);
-};
-
 const sameState = (left: MediaState, right: MediaState): boolean =>
-  Math.abs(left.positionSeconds - right.positionSeconds) < 0.05 &&
   left.paused === right.paused &&
   left.ended === right.ended &&
   left.buffering === right.buffering &&
-  Math.abs(left.bufferedAheadSeconds - right.bufferedAheadSeconds) < 0.5 &&
   left.volume === right.volume &&
   left.muted === right.muted;
 
-/** Follows `element` through `player`, re-rendering on its media events. */
+/** Follows `element` through `player`, re-rendering when its state changes. */
 export const useMediaState = (
   element: HTMLVideoElement | null,
   player: MediaElementPlayer | null,
@@ -152,11 +120,9 @@ export const useMediaState = (
       if (element === null || player === null) return IDLE;
 
       const next: MediaState = {
-        positionSeconds: player.positionMs() / 1000,
         paused: element.paused,
         ended: element.ended,
         buffering: player.isBuffering(),
-        bufferedAheadSeconds: bufferedAhead(element),
         volume: element.volume,
         muted: element.muted,
       };
@@ -166,21 +132,26 @@ export const useMediaState = (
       return current;
     };
 
-    const subscribe = (onChange: () => void): (() => void) => {
-      if (element === null || player === null) return () => undefined;
-
-      for (const type of MEDIA_EVENTS) element.addEventListener(type, onChange);
-
-      const unsubscribe = player.subscribe(onChange);
-
-      return () => {
-        for (const type of MEDIA_EVENTS) element.removeEventListener(type, onChange);
-        unsubscribe();
-      };
-    };
+    const subscribe = (onChange: () => void): (() => void) =>
+      element === null || player === null
+        ? () => undefined
+        : followMedia(element, player, onChange);
 
     return { read, subscribe };
   }, [element, player]);
 
   return useSyncExternalStore(store.subscribe, store.read, store.read);
 };
+
+/**
+ * `element`'s position and buffer ahead through `player`, for the parts of the screen that follow
+ * them to read with `useLiveValue`, so the rest does not re-render as playback moves.
+ */
+export const useMediaProgress = (
+  element: HTMLVideoElement | null,
+  player: MediaElementPlayer | null,
+): MediaProgress =>
+  useMemo(
+    () => (element === null || player === null ? NO_PROGRESS : mediaProgress(element, player)),
+    [element, player],
+  );

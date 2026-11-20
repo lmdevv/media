@@ -1,5 +1,6 @@
 import type { PlatformSdk } from "@media/sdk/promise";
 import { Toaster } from "@media/ui/components/sonner";
+import { useFocusPolicy } from "@media/ui/lib/focus-policy";
 import { HeadContent, Outlet, createRootRouteWithContext } from "@tanstack/react-router";
 import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
 
@@ -41,6 +42,8 @@ export const Route = createRootRouteWithContext<RouterAppContext>()({
 });
 
 function RootComponent() {
+  useFocusPolicy();
+
   return (
     <>
       <HeadContent />
