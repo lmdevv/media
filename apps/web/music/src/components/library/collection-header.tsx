@@ -1,5 +1,6 @@
 import type { Track } from "@/lib/models";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { useRouter } from "@tanstack/react-router";
 import { ChevronLeftIcon, PlayIcon, PlusIcon, ShuffleIcon } from "lucide-react";
@@ -169,6 +170,65 @@ export function CollectionHeader({
           </button>
         </div>
       </header>
+    </>
+  );
+}
+
+/** A skeleton bar on one line of text set in `className`, so it takes that line's height. */
+function TextLine({ className, bar }: { readonly className: string; readonly bar: string }) {
+  return (
+    <span className={cn("flex items-center", className)}>
+      <Skeleton className={bar} />
+      {"​"}
+    </span>
+  );
+}
+
+/**
+ * `CollectionHeader`'s shape while its collection loads, at desktop and phone width, so nothing
+ * moves when the header replaces it.
+ */
+export function CollectionHeaderSkeleton({
+  cover = "size-58 rounded-md",
+  phoneCover = "size-67.5 rounded-lg",
+}: {
+  /** The desktop cover's size and corners, as the page draws it. */
+  readonly cover?: string;
+  /** The phone cover's size and corners, as the page draws it. */
+  readonly phoneCover?: string;
+}) {
+  return (
+    <>
+      <div aria-hidden className="hidden items-end gap-8 lg:flex">
+        <Skeleton className={cn("shrink-0", cover)} />
+        <div className="flex min-w-0 grow flex-col gap-4">
+          <div className="flex flex-col gap-1">
+            <TextLine className="font-mono text-xs/xs" bar="h-3 w-48" />
+            <TextLine
+              className="font-sans text-2xl/2xl xl:text-display/display"
+              bar="h-8 w-96 max-w-full xl:h-12"
+            />
+            <TextLine className="font-sans text-lg/lg" bar="h-4 w-40" />
+          </div>
+          <div className="flex items-center gap-3">
+            <Skeleton className="h-row w-24 rounded-full" />
+            <Skeleton className="h-row w-28 rounded-full" />
+          </div>
+        </div>
+      </div>
+
+      <div aria-hidden className="flex flex-col items-center pt-1 lg:hidden">
+        <div className="h-11 self-stretch" />
+        <Skeleton className={cn("mt-3.5", phoneCover)} />
+        <div className="flex flex-col items-center gap-0.5 px-6 pt-5">
+          <TextLine className="font-sans text-phone-title leading-lg" bar="h-5 w-48" />
+          <TextLine className="font-sans text-phone-title leading-lg" bar="h-5 w-32" />
+        </div>
+        <div className="flex gap-3.5 self-stretch pt-4.5">
+          <Skeleton className="h-12 grow basis-0 rounded-3xl" />
+          <Skeleton className="h-12 grow basis-0 rounded-3xl" />
+        </div>
+      </div>
     </>
   );
 }

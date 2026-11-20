@@ -1,3 +1,4 @@
+import type { PlatformSdk } from "@media/sdk/promise";
 import { Toaster } from "@media/ui/components/sonner";
 import { HeadContent, Outlet, createRootRouteWithContext } from "@tanstack/react-router";
 import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
@@ -9,7 +10,10 @@ import { ThemeProvider } from "@/components/theme-provider";
 import "../index.css";
 
 /** Values every route can read from the router context. */
-export interface RouterAppContext {}
+export interface RouterAppContext {
+  /** The page's platform client, which route loaders preload into for the screens they open. */
+  readonly platform: PlatformSdk;
+}
 
 declare module "@tanstack/react-router" {
   interface StaticDataRouteOption {

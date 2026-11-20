@@ -1,9 +1,18 @@
-import { useAllPages } from "@media/ui/lib/pages";
-import type { PageOf, PageOpts, PagedQuery } from "@media/ui/lib/pages";
+import { preloadFirstPage, useAllPages } from "@media/ui/lib/pages";
+import type { PageOf, PageOpts, PagedQuery, PreloadableQuery } from "@media/ui/lib/pages";
 import { useState } from "react";
 
 /** Rows a page asks for; the core caps a page to what one call may read. */
 export const PAGE_ROWS = 100;
+
+/**
+ * Preloads the first page `useAllRows(query, argsAt)` opens, for a route loader. A list longer
+ * than one page loads the rest once its screen opens.
+ */
+export const preloadAllRows = <Args>(
+  query: PreloadableQuery<Args>,
+  argsAt: (paginationOpts: PageOpts) => Args,
+): Promise<void> => preloadFirstPage(query, argsAt, PAGE_ROWS);
 
 /** The last whole list a query answered, for its arguments' key. */
 interface WholeList<Args, Row> {

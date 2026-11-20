@@ -1,6 +1,6 @@
 import { createPlatform, holdGuestSignIn, holdSignIn, readDevice } from "@media/sdk/promise";
 import type { BrowserDevice, DeviceOrder, PlatformSdk } from "@media/sdk/promise";
-import { PlatformProvider, usePlatform } from "@media/sdk/react";
+import { PlatformClientProvider, usePlatform } from "@media/sdk/react";
 import { useNavigate, useRouter } from "@tanstack/react-router";
 import { Match, Predicate } from "effect";
 import { createContext, use, useMemo, useSyncExternalStore } from "react";
@@ -30,14 +30,17 @@ const useAccountContext = (): AccountContext => {
 /** The device this browser keeps, current across tabs; null before its first sign-in. */
 export const useDevice = (): BrowserDevice | null => useAccountContext().device;
 
-/** Runs the platform client on the browser's one session, which every tab follows. */
+/** Provides the platform client on the browser's one session, which every tab follows. */
 export function AccountProvider({
   store,
+  platform,
   url,
   signInUrl,
   children,
 }: {
   readonly store: BrowserStore;
+  /** The page's client on `store`'s session, opened by the entry point. */
+  readonly platform: PlatformSdk;
   readonly url: string;
   /** The media server's sign-in boundary, where every sign-in goes (ADR 0007). */
   readonly signInUrl: string;
@@ -52,9 +55,7 @@ export function AccountProvider({
 
   return (
     <Context value={context}>
-      <PlatformProvider url={url} signInUrl={signInUrl} storage={store.sessions}>
-        {children}
-      </PlatformProvider>
+      <PlatformClientProvider platform={platform}>{children}</PlatformClientProvider>
     </Context>
   );
 }

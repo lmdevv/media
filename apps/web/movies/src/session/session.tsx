@@ -1,33 +1,24 @@
-import type { BrowserStore } from "@media/ui/lib/browser-session";
-import { PlatformProvider, usePlatform, usePlatformQuery } from "@media/sdk/react";
+import { PlatformClientProvider, usePlatform, usePlatformQuery } from "@media/sdk/react";
 import type { PlatformSdk } from "@media/sdk/promise";
 import { useCallback, useMemo } from "react";
 import type { ReactNode } from "react";
-
-import { SIGN_IN_URL } from "../env";
 
 /** Where a signed-out browser signs in: the account client at the origin's root (ADR 0020). */
 const SIGN_IN_PATH = "/";
 
 /**
- * Runs the platform client on the browser's one session (D52). The movies client never signs in
- * itself: it reads the session the account client at `/` keeps, and follows sign-in, switching,
+ * Provides the platform client on the browser's one session (D52). The movies client never signs
+ * in itself: it reads the session the account client at `/` keeps, and follows sign-in, switching,
  * and sign-out in every tab through the shared store.
  */
 export function MoviesSession({
-  store,
-  url,
+  platform,
   children,
 }: {
-  readonly store: BrowserStore;
-  readonly url: string;
+  readonly platform: PlatformSdk;
   readonly children: ReactNode;
 }) {
-  return (
-    <PlatformProvider url={url} signInUrl={SIGN_IN_URL} storage={store.sessions}>
-      {children}
-    </PlatformProvider>
-  );
+  return <PlatformClientProvider platform={platform}>{children}</PlatformClientProvider>;
 }
 
 /** Leaves the movies client for the account client, which shows sign-in or the shared picker. */

@@ -1,6 +1,6 @@
-import type { BrowserStore } from "@media/ui/lib/browser-session";
+import type { PlatformSdk } from "@media/sdk/promise";
 import {
-  PlatformProvider,
+  PlatformClientProvider,
   usePlatform,
   usePlatformQuery,
   usePlatformStatus,
@@ -13,30 +13,22 @@ import type { ReactNode } from "react";
 import { musicAccess } from "./access";
 import { UnreachableScreen } from "@/guest/unreachable";
 
-import { SIGN_IN_URL } from "../env";
-
 /** Where a signed-out browser signs in: the account client at the origin's root (ADR 0020). */
 const SIGN_IN_PATH = "/";
 
 /**
- * Runs the platform client on the browser's one session (D52). The music client never signs in
- * itself: it reads the session the account client at `/` keeps, and follows sign-in, switching,
+ * Provides the platform client on the browser's one session (D52). The music client never signs
+ * in itself: it reads the session the account client at `/` keeps, and follows sign-in, switching,
  * and sign-out in every tab through the shared store, as the movies client does.
  */
 export function MusicSession({
-  store,
-  url,
+  platform,
   children,
 }: {
-  readonly store: BrowserStore;
-  readonly url: string;
+  readonly platform: PlatformSdk;
   readonly children: ReactNode;
 }) {
-  return (
-    <PlatformProvider url={url} signInUrl={SIGN_IN_URL} storage={store.sessions}>
-      {children}
-    </PlatformProvider>
-  );
+  return <PlatformClientProvider platform={platform}>{children}</PlatformClientProvider>;
 }
 
 /** Leaves the music client for the account client, which shows sign-in or the shared picker. */
