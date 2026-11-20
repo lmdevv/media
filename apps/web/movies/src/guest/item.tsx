@@ -7,6 +7,7 @@ import { useCallback, useMemo, useState } from "react";
 
 import { PlayerScreen } from "@/components/player/player-screen";
 import { useSleepTimer } from "@/components/player/use-sleep-timer";
+import { useStillWatching } from "@/components/player/use-still-watching";
 import { guestPages } from "@/guest/pages";
 import { artworkUrl } from "@/lib/artwork";
 import type { EpisodeId, TitleId, PlaybackDetail, MediaFileId } from "@/lib/catalog";
@@ -132,6 +133,7 @@ function GuestPlayer({
   const [opened] = useState(detail);
   const guest = useMemo(() => ({ detail: opened, onBack }), [opened, onBack]);
   const sleepTimer = useSleepTimer();
+  const stillWatching = useStillWatching(onBack);
 
   return (
     <PlayerScreen
@@ -141,6 +143,7 @@ function GuestPlayer({
       start="resume"
       guest={guest}
       sleepTimer={sleepTimer}
+      stillWatching={stillWatching}
     />
   );
 }

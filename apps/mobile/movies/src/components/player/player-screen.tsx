@@ -64,6 +64,7 @@ import {
   ProblemPanel,
   QualityPanel,
   SpeedPanel,
+  StillWatchingPanel,
   speedLabel,
 } from "./player-panels";
 import { SleepTimerPanel } from "./sleep-timer";
@@ -73,6 +74,7 @@ import { transportOf } from "./transport";
 import { usePlayStart } from "./use-play-start";
 import { useSeasonEpisodes } from "./use-season-episodes";
 import type { SleepTimerControl } from "./use-sleep-timer";
+import type { StillWatchingControl } from "./use-still-watching";
 
 const CONTROLS_HIDE_MS = 4_000;
 
@@ -169,6 +171,8 @@ interface PlayerSessionProps {
   readonly carried: RefObject<CarriedHold>;
   /** The watch screen's sleep timer, which outlives each episode's player. */
   readonly sleepTimer: SleepTimerControl;
+  /** The watch screen's count of autoplay's jumps since the last touch; it outlives each player. */
+  readonly stillWatching: StillWatchingControl;
 }
 
 /** What `params` asks `movies.play.start` for. */
@@ -198,6 +202,7 @@ function PlayerSession({
   choices,
   carried,
   sleepTimer,
+  stillWatching,
 }: PlayerSessionProps) {
   const platform = usePlatform();
   const mediaServer = useMediaServer();
@@ -499,12 +504,14 @@ function PlayerSession({
 
   const sleepPauses = sleepPausesPlayback(sleepTimer.timer);
   const sleepFade = sleepTimer.volume;
+  const asking = stillWatching.watching.state === "asking";
 
   // Pauses as the sleep timer runs out, before the effect below puts the volume back, and pauses
-  // the next episode too if the timer ran out while it loaded.
+  // the next episode too if the timer ran out while it loaded. Asking whether anyone is still
+  // watching pauses too.
   useEffect(() => {
-    if (sleepPauses && playingForSleep) controller?.port.pause();
-  }, [sleepPauses, playingForSleep, controller]);
+    if ((sleepPauses || asking) && playingForSleep) controller?.port.pause();
+  }, [sleepPauses, asking, playingForSleep, controller]);
 
   // The app's own volume, scaled down while the sleep timer fades the sound.
   useEffect(() => {
@@ -523,6 +530,7 @@ function PlayerSession({
     panel === null &&
     !locked &&
     !inSession &&
+    !asking &&
     !sleepHoldsAutoplay(sleepTimer.timer, sleepKey);
 
   const [countdownStart, setCountdownStart] = useState<number | null>(null);
@@ -578,9 +586,25 @@ function PlayerSession({
 
   const nextAction = inSession ? sessionNextAction : playNext;
 
+  const { countdownEnded } = stillWatching;
+
+  // The countdown that already ended, as the clock ticks on until the next episode remounts the
+  // player.
+  const endedCountdown = useRef<number | null>(null);
+
+  // Only the countdown's end is autoplay's jump; the card's Play Next is the viewer's own touch.
   useEffect(() => {
-    if (showNext && countdownStart !== null && countdownMs <= 0) playEpisode(next.id);
-  }, [showNext, next, countdownStart, countdownMs, playEpisode]);
+    if (
+      showNext &&
+      countdownStart !== null &&
+      countdownMs <= 0 &&
+      endedCountdown.current !== countdownStart
+    ) {
+      endedCountdown.current = countdownStart;
+
+      if (countdownEnded()) playEpisode(next.id);
+    }
+  }, [showNext, next, countdownStart, countdownMs, playEpisode, countdownEnded]);
 
   const tileAt = useCallback(
     (seconds: number): ScrubTile | null =>
@@ -682,7 +706,7 @@ function PlayerSession({
   const covered = locked || showNext || shownCard !== null;
 
   return (
-    <View className="flex-1 bg-dark-bg">
+    <View className="flex-1 bg-dark-bg" onTouchStart={stillWatching.acted}>
       {sleepLetsScreenOff(sleepTimer.timer) ? null : <ScreenAwake />}
       <View className="absolute inset-0">
         {snapshot.video === null ? null : (
@@ -836,6 +860,16 @@ function PlayerSession({
         }}
         onClose={close}
       />
+
+      {asking ? (
+        <StillWatchingPanel
+          onContinue={() => {
+            stillWatching.continueWatching();
+            playNext?.();
+          }}
+          onDone={stillWatching.done}
+        />
+      ) : null}
 
       {panel === "session" && together.session !== null ? (
         <SessionPanel
@@ -1145,13 +1179,16 @@ function MobileDataPanel({
  * The player for `params`, starting again when the last start ended or failed to start.
  *
  * @param sleepTimer - The watch screen's sleep timer, which outlives each episode's player.
+ * @param stillWatching - The watch screen's still-watching count, which outlives each player.
  */
 export function PlayerScreen({
   params,
   sleepTimer,
+  stillWatching,
 }: {
   readonly params: WatchParams;
   readonly sleepTimer: SleepTimerControl;
+  readonly stillWatching: StillWatchingControl;
 }) {
   const preferences = usePreferences();
 
@@ -1222,6 +1259,7 @@ export function PlayerScreen({
         choices={choices}
         carried={carried}
         sleepTimer={sleepTimer}
+        stillWatching={stillWatching}
       />
     </SafeAreaProvider>
   );
