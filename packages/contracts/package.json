@@ -16,6 +16,7 @@
     "./follower-policy": "./src/follower-policy.ts",
     "./session-next": "./src/session-next.ts",
     "./sleep-timer": "./src/sleep-timer.ts",
+    "./still-watching": "./src/still-watching.ts",
     "./opening-season": "./src/opening-season.ts",
     "./testing/follower-session": "./src/testing/follower-session.ts",
     "./ticket": "./src/ticket.ts",
