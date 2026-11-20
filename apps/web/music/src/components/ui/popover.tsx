@@ -1,4 +1,5 @@
 import { Popover as PopoverPrimitive } from "@base-ui/react/popover";
+import { useKeyboardFocusReturn } from "@media/ui/lib/focus-policy";
 import { cn } from "@/lib/utils";
 
 /** A floating panel anchored to its trigger, such as the device picker. */
@@ -12,9 +13,13 @@ export function PopoverContent({
   align = "end",
   side = "top",
   sideOffset = 12,
+  ref,
+  finalFocus,
   ...props
 }: PopoverPrimitive.Popup.Props &
   Pick<PopoverPrimitive.Positioner.Props, "align" | "side" | "sideOffset">) {
+  const focusReturn = useKeyboardFocusReturn(ref, finalFocus);
+
   return (
     <PopoverPrimitive.Portal>
       <PopoverPrimitive.Positioner
@@ -30,6 +35,7 @@ export function PopoverContent({
             className,
           )}
           {...props}
+          {...focusReturn}
         />
       </PopoverPrimitive.Positioner>
     </PopoverPrimitive.Portal>

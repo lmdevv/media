@@ -11,14 +11,15 @@ import { AUTOPLAY_COUNTDOWN } from "./autoplay";
 /**
  * What the viewer can do about the countdown, `countdownMs` before the next episode starts.
  * `advance`: playing on their own, or hosting a group session (for everyone in it), they play the
- * next episode now or watch the credits instead. `follow`: a session's guest sees the shared
- * countdown and closes the card on this screen, and plays the next episode now for everyone when
- * they may control the session (`onPlayNext`).
+ * next episode now or watch the credits instead; with autoplay off (`countdownMs` null) the card
+ * waits for them. `follow`: a session's guest sees the shared countdown and closes the card on this
+ * screen, and plays the next episode now for everyone when they may control the session
+ * (`onPlayNext`).
  */
 export type NextEpisodeActions =
   | {
       readonly kind: "advance";
-      readonly countdownMs: number;
+      readonly countdownMs: number | null;
       readonly onPlayNext: () => void;
       readonly onWatchCredits: () => void;
     }
@@ -131,26 +132,35 @@ function CardActions({ actions }: { readonly actions: NextEpisodeActions }) {
     );
   }
 
+  const { countdownMs } = actions;
+
   return (
     <div className="flex flex-wrap gap-3">
       <Button
         variant="inverse"
         size="md"
-        className="relative isolate grow overflow-hidden bg-text/70 hover:bg-text/80"
+        className={cn(
+          "relative isolate grow overflow-hidden",
+          countdownMs !== null && "bg-text/70 hover:bg-text/80",
+        )}
         autoFocus
-        aria-describedby={describedBy}
+        aria-describedby={countdownMs === null ? undefined : describedBy}
         onClick={actions.onPlayNext ?? undefined}
       >
-        <CountdownFill countdownMs={actions.countdownMs} className="bg-text" />
+        {countdownMs === null ? null : (
+          <CountdownFill countdownMs={countdownMs} className="bg-text" />
+        )}
         <PlayIcon aria-hidden className="fill-current" />
         <span>Play next</span>
-        <Seconds value={secondsLeft(actions.countdownMs)} />
+        {countdownMs === null ? null : <Seconds value={secondsLeft(countdownMs)} />}
       </Button>
       {/* Outside the button, so it describes Play next without joining its name; hidden, so it is
           read only as that description. */}
-      <span id={describedBy} hidden>
-        {startsIn(actions.countdownMs)}
-      </span>
+      {countdownMs === null ? null : (
+        <span id={describedBy} hidden>
+          {startsIn(countdownMs)}
+        </span>
+      )}
       <Button
         variant="secondary"
         size="md"

@@ -37,6 +37,14 @@ import { SessionPanel } from "@/components/together/session-panel";
 import { useSessionFollow, useSessionPlayer } from "@/components/together/use-session-player";
 import type { SessionStop } from "@/components/together/use-session-player";
 import type { FollowerPlayer } from "@media/contracts/follower";
+import { sessionSkip } from "@media/contracts/session-next";
+import {
+  formatSleepTimeLeft,
+  sleepHoldsAutoplay,
+  sleepLetsScreenOff,
+  sleepPausesPlayback,
+  sleepTimerRuns,
+} from "@media/contracts/sleep-timer";
 import { usePerson } from "@/session/me";
 import { NO_HOLD, itemOf } from "@/lib/together/session";
 import type { CarriedHold } from "@/lib/together/session";
@@ -56,19 +64,23 @@ import {
   ProblemPanel,
   QualityPanel,
   SpeedPanel,
+  StillWatchingPanel,
   speedLabel,
 } from "./player-panels";
+import { SleepTimerPanel } from "./sleep-timer";
 import { Spinner } from "./spinner";
 import { SubtitleOverlay } from "./subtitle-overlay";
 import { transportOf } from "./transport";
 import { usePlayStart } from "./use-play-start";
 import { useSeasonEpisodes } from "./use-season-episodes";
+import type { SleepTimerControl } from "./use-sleep-timer";
+import type { StillWatchingControl } from "./use-still-watching";
 
 const CONTROLS_HIDE_MS = 4_000;
 
 const UNLOCK_HINT_MS = 3_000;
 
-type Panel = "audio" | "quality" | "speed" | "episodes" | "chapters" | "session";
+type Panel = "audio" | "quality" | "speed" | "episodes" | "chapters" | "session" | "sleep";
 
 interface Attempt {
   readonly key: number;
@@ -157,6 +169,10 @@ interface PlayerSessionProps {
   readonly choices: StartChoices;
   /** The screen's stall hold, which outlives each attempt so the next one plays the session on. */
   readonly carried: RefObject<CarriedHold>;
+  /** The watch screen's sleep timer, which outlives each episode's player. */
+  readonly sleepTimer: SleepTimerControl;
+  /** The watch screen's count of autoplay's jumps since the last touch; it outlives each player. */
+  readonly stillWatching: StillWatchingControl;
 }
 
 /** What `params` asks `movies.play.start` for. */
@@ -172,7 +188,22 @@ const startArgsOf = (params: WatchParams): StartArgs =>
 
 const MISSING_DOWNLOAD = PlaybackStep.Stop({ stop: PlaybackStop.Missing() });
 
-function PlayerSession({ params, attempt, onRestart, choices, carried }: PlayerSessionProps) {
+/** Keeps the screen on for as long as it is mounted. */
+function ScreenAwake() {
+  useKeepAwake();
+
+  return null;
+}
+
+function PlayerSession({
+  params,
+  attempt,
+  onRestart,
+  choices,
+  carried,
+  sleepTimer,
+  stillWatching,
+}: PlayerSessionProps) {
   const platform = usePlatform();
   const mediaServer = useMediaServer();
   const startQuality = choices.quality;
@@ -360,8 +391,6 @@ function PlayerSession({ params, attempt, onRestart, choices, carried }: PlayerS
     controller.setMetadata(metadata);
   }, [controller, title, episode, mediaUrl]);
 
-  useKeepAwake();
-
   const [brightness, setBrightness] = useBrightness();
   const [volume, setVolume] = useState(1);
   const [visible, setVisible] = useState(true);
@@ -457,8 +486,52 @@ function PlayerSession({ params, attempt, onRestart, choices, carried }: PlayerS
       ended: media.ended,
     });
 
+  const sleepKey = `${params.titleId}:${params.episodeId ?? ""}`;
+  const { report: reportToSleepTimer, cancel: cancelSleepTimer } = sleepTimer;
+
+  const sleepLeftMs =
+    durationSeconds > 0
+      ? (Math.max(0, durationSeconds - media.positionSeconds) * 1000) / snapshot.rate
+      : null;
+
+  const playingForSleep = playing && media.playing;
+
+  useEffect(() => {
+    if (playing) {
+      reportToSleepTimer({ itemKey: sleepKey, leftMs: sleepLeftMs, playing: playingForSleep });
+    }
+  }, [reportToSleepTimer, playing, sleepKey, sleepLeftMs, playingForSleep]);
+
+  const sleepPauses = sleepPausesPlayback(sleepTimer.timer);
+  const sleepFade = sleepTimer.volume;
+  const asking = stillWatching.watching.state === "asking";
+
+  // Pauses as the sleep timer runs out, before the effect below puts the volume back, and pauses
+  // the next episode too if the timer ran out while it loaded. Asking whether anyone is still
+  // watching pauses too.
+  useEffect(() => {
+    if ((sleepPauses || asking) && playingForSleep) controller?.port.pause();
+  }, [sleepPauses, asking, playingForSleep, controller]);
+
+  // The app's own volume, scaled down while the sleep timer fades the sound.
+  useEffect(() => {
+    controller?.setVolume(volume * sleepFade);
+  }, [controller, volume, sleepFade]);
+
+  // A group session plays for everyone, so a timer on one device has no place in it.
+  useEffect(() => {
+    if (inSession) cancelSleepTimer();
+  }, [inSession, cancelSleepTimer]);
+
   const showNext =
-    credits && next !== null && !creditsDismissed && panel === null && !locked && !inSession;
+    credits &&
+    next !== null &&
+    !creditsDismissed &&
+    panel === null &&
+    !locked &&
+    !inSession &&
+    !asking &&
+    !sleepHoldsAutoplay(sleepTimer.timer, sleepKey);
 
   const [countdownStart, setCountdownStart] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -499,9 +572,39 @@ function PlayerSession({ params, attempt, onRestart, choices, carried }: PlayerS
     [inSession, sessionPlayNow, titleId],
   );
 
+  const playNext = next === null ? null : () => playEpisode(next.id);
+
+  const nextSkip = sessionSkip({
+    mayControl: together.mayControl,
+    mayAdd: together.mayAdd,
+    queued: follow.queue.length > 0,
+    nextPlayable: next?.available === true,
+  });
+
+  const sessionNextAction =
+    nextSkip === null ? null : { queued: together.actions.playQueued, episode: playNext }[nextSkip];
+
+  const nextAction = inSession ? sessionNextAction : playNext;
+
+  const { countdownEnded } = stillWatching;
+
+  // The countdown that already ended, as the clock ticks on until the next episode remounts the
+  // player.
+  const endedCountdown = useRef<number | null>(null);
+
+  // Only the countdown's end is autoplay's jump; the card's Play Next is the viewer's own touch.
   useEffect(() => {
-    if (showNext && countdownStart !== null && countdownMs <= 0) playEpisode(next.id);
-  }, [showNext, next, countdownStart, countdownMs, playEpisode]);
+    if (
+      showNext &&
+      countdownStart !== null &&
+      countdownMs <= 0 &&
+      endedCountdown.current !== countdownStart
+    ) {
+      endedCountdown.current = countdownStart;
+
+      if (countdownEnded()) playEpisode(next.id);
+    }
+  }, [showNext, next, countdownStart, countdownMs, playEpisode, countdownEnded]);
 
   const tileAt = useCallback(
     (seconds: number): ScrubTile | null =>
@@ -603,7 +706,8 @@ function PlayerSession({ params, attempt, onRestart, choices, carried }: PlayerS
   const covered = locked || showNext || shownCard !== null;
 
   return (
-    <View className="flex-1 bg-dark-bg">
+    <View className="flex-1 bg-dark-bg" onTouchStart={stillWatching.acted}>
+      {sleepLetsScreenOff(sleepTimer.timer) ? null : <ScreenAwake />}
       <View className="absolute inset-0">
         {snapshot.video === null ? null : (
           <VideoView
@@ -672,6 +776,18 @@ function PlayerSession({ params, attempt, onRestart, choices, carried }: PlayerS
               brightness={brightness}
               volume={volume}
               more={more}
+              sleepTimer={
+                inSession
+                  ? null
+                  : {
+                      timeLeft:
+                        sleepTimer.leftMs === null ? null : formatSleepTimeLeft(sleepTimer.leftMs),
+                      itemKey: params.episodeId === undefined ? null : sleepKey,
+                      onChoose: sleepTimer.set,
+                      onCustom: () => setPanel("sleep"),
+                      onCancel: sleepTimerRuns(sleepTimer.timer) ? cancelSleepTimer : null,
+                    }
+              }
               tileAt={tileAt}
               onClose={close}
               onTogglePlay={togglePlay}
@@ -685,11 +801,9 @@ function PlayerSession({ params, attempt, onRestart, choices, carried }: PlayerS
               onAudioSubtitles={() => {
                 if (snapshot.playback !== null) setPanel("audio");
               }}
+              onNext={nextAction}
               onBrightness={setBrightness}
-              onVolume={(value) => {
-                setVolume(value);
-                controller?.setVolume(value);
-              }}
+              onVolume={setVolume}
               onInteract={poke}
               onDismiss={() => {
                 setVisible(false);
@@ -746,6 +860,16 @@ function PlayerSession({ params, attempt, onRestart, choices, carried }: PlayerS
         }}
         onClose={close}
       />
+
+      {asking ? (
+        <StillWatchingPanel
+          onContinue={() => {
+            stillWatching.continueWatching();
+            playNext?.();
+          }}
+          onDone={stillWatching.done}
+        />
+      ) : null}
 
       {panel === "session" && together.session !== null ? (
         <SessionPanel
@@ -826,6 +950,16 @@ function PlayerSession({ params, attempt, onRestart, choices, carried }: PlayerS
           onEpisode={(item) => {
             setPanel(null);
             playEpisode(item.id);
+          }}
+          onClose={() => setPanel(null)}
+        />
+      ) : null}
+
+      {panel === "sleep" ? (
+        <SleepTimerPanel
+          onStart={(minutes) => {
+            sleepTimer.set({ kind: "after", minutes });
+            setPanel(null);
           }}
           onClose={() => setPanel(null)}
         />
@@ -1041,8 +1175,21 @@ function MobileDataPanel({
   );
 }
 
-/** The player for `params`, starting again when the last start ended or failed to start. */
-export function PlayerScreen({ params }: { readonly params: WatchParams }) {
+/**
+ * The player for `params`, starting again when the last start ended or failed to start.
+ *
+ * @param sleepTimer - The watch screen's sleep timer, which outlives each episode's player.
+ * @param stillWatching - The watch screen's still-watching count, which outlives each player.
+ */
+export function PlayerScreen({
+  params,
+  sleepTimer,
+  stillWatching,
+}: {
+  readonly params: WatchParams;
+  readonly sleepTimer: SleepTimerControl;
+  readonly stillWatching: StillWatchingControl;
+}) {
   const preferences = usePreferences();
 
   const [choices, setChoices] = useState<StartChoices>({
@@ -1111,6 +1258,8 @@ export function PlayerScreen({ params }: { readonly params: WatchParams }) {
         onRestart={restart}
         choices={choices}
         carried={carried}
+        sleepTimer={sleepTimer}
+        stillWatching={stillWatching}
       />
     </SafeAreaProvider>
   );

@@ -364,7 +364,9 @@ test("four columns and thirty-two subtitles stay inside a short full screen and 
 
     const trigger = page.getByRole("button", { name: TRACKS });
 
-    await trigger.click();
+    // Opened from the keyboard, so Escape gives the trigger its focus back.
+    await trigger.focus();
+    await page.keyboard.press("Enter");
 
     const menu = page.getByRole("dialog", { name: TRACKS });
 

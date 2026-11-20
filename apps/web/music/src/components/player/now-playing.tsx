@@ -1,5 +1,6 @@
 import { lyricsAnswer } from "@media/player/lyrics";
 import { usePlayer } from "@media/player/react";
+import { keepsShortcutsProps } from "@media/ui/lib/focus-policy";
 import { Dialog, DialogPopup, DialogPortal } from "@/components/ui/dialog";
 
 import { useUi } from "@/components/shell/ui-state";
@@ -30,6 +31,7 @@ export function NowPlaying() {
     <Dialog open={open} onOpenChange={(next) => (next ? undefined : setNowPlaying(null))}>
       <DialogPortal>
         <DialogPopup
+          {...keepsShortcutsProps}
           aria-label="Now Playing"
           className="dark fixed inset-0 z-50 overflow-y-auto bg-dark-bg text-text outline-none data-closed:animate-out data-closed:fade-out-0 data-closed:slide-out-to-bottom-8 data-open:animate-in data-open:fade-in-0 data-open:slide-in-from-bottom-8"
         >

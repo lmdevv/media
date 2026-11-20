@@ -616,6 +616,12 @@ test("Escape asks before leaving: open layers close first, Stay plays on, Leave 
   await expect.poll(paused).toBe(true);
   await expect(leave).toHaveCSS("opacity", "1");
   await capture(page, "07-12-leave-playback");
+  await page.keyboard.press("ControlOrMeta+k");
+  await page.waitForTimeout(500);
+  await expect(commandMenu(page).menu).toBeHidden();
+  await expect(stay).toBeFocused();
+  await leave.getByRole("heading", { name: "Leave playback?" }).click();
+  expect(await leave.evaluate((element) => element.contains(document.activeElement))).toBe(true);
   await page.keyboard.press("Escape");
   await expect(leave).toBeHidden();
   await expect(player).toBeFocused();
@@ -1347,6 +1353,84 @@ test("the next episode plays itself after the countdown; Watch credits cancels i
     .poll(async () => (await videoState(page)).currentTime, { timeout: 15_000 })
     .toBeGreaterThan(29);
   await expect(page).toHaveURL(new RegExp(`episodeId=${second}`, "u"));
+});
+
+test("with Autoplay off, the card offers the next episode without a countdown", async () => {
+  const [first] = episodes;
+
+  if (first === undefined) throw new Error("The show has no episodes");
+
+  await owner.platform.core.settings.set({ autoplay: false });
+
+  try {
+    await page.goto(moviesPath(`/watch/${titleId(SHOW)}?episodeId=${first}&start=0`));
+    await expectPlayingPast(page, 0.5);
+
+    const player = page.getByTestId("player");
+
+    await player.press("l");
+    await player.press("l");
+    await player.press("ArrowRight");
+
+    const card = page.getByRole("region", { name: "Next episode" });
+    const playNext = card.getByRole("button", { name: "Play next" });
+
+    await expect(playNext).toBeVisible({ timeout: 10_000 });
+    await expect(playNext).toHaveAccessibleDescription("");
+    await expect(card.locator('[data-slot="countdown-seconds"]')).toHaveCount(0);
+    await capture(page, "07-06-autoplay-off");
+    await page.waitForTimeout(11_000);
+    await expect(page).toHaveURL(new RegExp(`episodeId=${first}`, "u"));
+    await expect(card).toBeVisible();
+  } finally {
+    await owner.platform.core.settings.set({ autoplay: true });
+  }
+});
+
+test("after two autoplay jumps with no click or key press, the third asks instead of playing", async () => {
+  test.setTimeout(150_000);
+
+  const [first, second, third] = episodes;
+
+  if (first === undefined || second === undefined || third === undefined) {
+    throw new Error("The show has no episodes");
+  }
+
+  const player = page.getByTestId("player");
+
+  // Autoplay resumes each episode where it was left, so this leaves the next two 7 s short of
+  // their credits.
+  const leaveShortOfCredits = async (episode: EpisodeId): Promise<void> => {
+    await page.goto(moviesPath(`/watch/${titleId(SHOW)}?episodeId=${episode}&start=0`));
+    await expectPlayingPast(page, 0.5);
+    await player.press("l");
+    await player.press("l");
+    await expectPlayingPast(page, 20);
+    await leaveWithEscape(page);
+    await expect(page).toHaveURL(new RegExp(`/title/${titleId(SHOW)}`, "u"));
+  };
+
+  await leaveShortOfCredits(second);
+  await leaveShortOfCredits(third);
+  await page.goto(moviesPath(`/watch/${titleId(SHOW)}?episodeId=${first}&start=0`));
+  await expectPlayingPast(page, 0.5);
+  await player.press("l");
+  await player.press("l");
+  await expect(page).toHaveURL(new RegExp(`episodeId=${second}`, "u"), { timeout: 30_000 });
+  await expectPlayingPast(page, 20);
+  // Moving the pointer is not an answer to the question to come.
+  await revealControls(page);
+  await expect(page).toHaveURL(new RegExp(`episodeId=${third}`, "u"), { timeout: 30_000 });
+
+  const asking = page.getByRole("dialog", { name: "Are you still watching?" });
+
+  await expect(asking).toBeVisible({ timeout: 30_000 });
+  await expect(page).toHaveURL(new RegExp(`episodeId=${third}`, "u"));
+  await expect.poll(async () => (await videoState(page)).paused).toBe(true);
+  await expect(asking.getByRole("button", { name: "Continue watching" })).toBeFocused();
+  await capture(page, "07-07-still-watching");
+  await asking.getByRole("button", { name: "I'm done" }).click();
+  await expect(page).toHaveURL(new RegExp(`/title/${titleId(SHOW)}`, "u"));
 });
 
 const controlsShown = (target: Page) =>

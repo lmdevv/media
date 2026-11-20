@@ -1,6 +1,7 @@
 import { PlayerButton, PlayerControls, TracksGlyph } from "@media/ui/components/player-controls";
 import { TrackPopover } from "@media/ui/components/track-popover";
 import type { TrackChoice, TrackOption } from "@media/ui/components/track-popover";
+import { fixedValue } from "@media/ui/lib/live-value";
 import { useState } from "react";
 
 import { useFullscreen } from "@/components/player/use-player-frame";
@@ -17,6 +18,8 @@ const VERSIONS: ReadonlyArray<TrackOption> = [
   { id: "hd", label: "1080p Theatrical", detail: "1080p · H.264 · AAC 2.0 · 4.2 GB" },
   { id: "sd", label: "DVD", detail: "480p · MPEG-2 · AC-3 2.0 · 3.9 GB" },
 ];
+
+const POSITION = fixedValue(1882);
 
 const AUDIO: ReadonlyArray<TrackOption> = [
   { id: "en", label: "English · Dolby TrueHD 7.1 Atmos" },
@@ -118,7 +121,7 @@ export function TrackMenuBench({ columns }: { readonly columns: "1" | "3" | "4" 
         className="absolute inset-x-0 bottom-0"
         title="Severance S2:E4 Woe's Hollow"
         playing={false}
-        position={1882}
+        position={POSITION}
         duration={3480}
         onPlayPause={() => undefined}
         onSeek={() => undefined}

@@ -379,3 +379,22 @@ export function ProblemPanel({
     </SidePanel>
   );
 }
+
+/**
+ * "Are you still watching?", over the paused player in place of autoplay's next episode. Closing
+ * the panel keeps watching too, since someone is there to touch it; only I'm Done leaves.
+ */
+export function StillWatchingPanel({
+  onContinue,
+  onDone,
+}: {
+  readonly onContinue: () => void;
+  readonly onDone: () => void;
+}) {
+  return (
+    <SidePanel title="Are you still watching?" widthClassName="w-105" onClose={onContinue}>
+      <Button label="Continue Watching" onPress={onContinue} />
+      <Button label="I'm Done" variant="onDark" onPress={onDone} />
+    </SidePanel>
+  );
+}

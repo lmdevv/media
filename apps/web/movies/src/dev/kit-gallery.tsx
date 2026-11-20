@@ -19,6 +19,7 @@ import { TextField } from "@media/ui/components/text-field";
 import { RoomPill, SearchTrigger, TopBar, TopBarLink } from "@media/ui/components/top-bar";
 import { TrackPanel, TrackPopover } from "@media/ui/components/track-popover";
 import type { CommandItem, CommandPage } from "@media/ui/lib/command-menu";
+import { fixedValue } from "@media/ui/lib/live-value";
 import {
   BookmarkIcon,
   CircleXIcon,
@@ -35,7 +36,7 @@ import {
   UserRoundIcon,
   CaptionsIcon,
 } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
 import { moveRowFocus } from "@media/ui/lib/row-focus";
@@ -338,6 +339,7 @@ const sampleMenu = (
 export function KitGallery() {
   const [playing, setPlaying] = useState(true);
   const [position, setPosition] = useState(1882);
+  const shownPosition = useMemo(() => fixedValue(position), [position]);
   const [muted, setMuted] = useState(false);
   const [audio, setAudio] = useState("en-51");
   const [subtitle, setSubtitle] = useState("en-cc");
@@ -558,7 +560,7 @@ export function KitGallery() {
               <PlayerControls
                 title="Severance S2:E4 Woe's Hollow"
                 playing={playing}
-                position={position}
+                position={shownPosition}
                 duration={duration}
                 muted={muted}
                 onPlayPause={() => setPlaying((value) => !value)}
