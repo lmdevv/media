@@ -34,20 +34,12 @@ const stateOf = (progress: Progress | null): WatchState =>
   progress === null ? "unwatched" : progress.watched ? "watched" : "started";
 
 /**
- * How much of a title the person has watched, from its page's answer. A show is watched when it
- * has no next episode, and unwatched when its next is a first episode never started.
+ * How much of a title the person has watched, from its page's answer. A movie's progress says.
+ * A show's page names only the episode to play next, never whether the others were watched, so a
+ * show counts as started and its menu offers both marks.
  */
-const titleState = (detail: Pick<TitleDetail, "kind" | "progress" | "nextEpisode">): WatchState => {
-  if (detail.kind === "movie") return stateOf(detail.progress);
-
-  const next = detail.nextEpisode;
-
-  if (next === null) return "watched";
-
-  if (next.progress !== null) return "started";
-
-  return next.seasonNumber <= 1 && next.episodeNumber === 1 ? "unwatched" : "started";
-};
+const titleState = (detail: Pick<TitleDetail, "kind" | "progress">): WatchState =>
+  detail.kind === "movie" ? stateOf(detail.progress) : "started";
 
 const marks = (state: WatchState, episodeId: EpisodeId | undefined): ReadonlyArray<MenuItem> => [
   ...(state === "watched" ? [] : [{ kind: "mark", watched: true, episodeId } as const]),

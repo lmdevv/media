@@ -102,28 +102,21 @@ describe("titleMenu", () => {
     ]);
   });
 
-  it("reads a show's state from its next episode", () => {
+  it("offers a show both marks, since its page doesn't say what was watched", () => {
     expect(showMenu(episode(1, 1))).toEqual([
       "Play S1:E1",
       "Add to My List",
       "Mark as watched",
+      "Mark as unwatched",
       "Go to title",
     ]);
-    expect(showMenu(episode(1, 3))).toEqual([
-      "Play S1:E3",
+    expect(showMenu(episode(1, 3, progress(false)))).toEqual([
+      "Resume S1:E3",
       "Add to My List",
       "Mark as watched",
       "Mark as unwatched",
       "Go to title",
     ]);
-    expect(showMenu(episode(1, 1, progress(false)))).toEqual([
-      "Resume S1:E1",
-      "Add to My List",
-      "Mark as watched",
-      "Mark as unwatched",
-      "Go to title",
-    ]);
-    expect(showMenu(null)).toEqual(["Play", "Add to My List", "Mark as unwatched", "Go to title"]);
   });
 });
 
