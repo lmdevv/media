@@ -135,9 +135,9 @@ export interface Keep {
    */
   readonly idleFor: Duration.Input;
   /**
-   * How long a failed query nothing follows keeps its failure, so the screen a route loader
-   * prepared shows the failure rather than asking again; the next caller after that subscribes
-   * again.
+   * How long a failure a preload saw stays for the screen its route loader prepared, so the
+   * screen shows it rather than asking again. A failure a screen saw is never kept: the next
+   * caller subscribes again.
    */
   readonly failedFor: Duration.Input;
   /** How many queries may stay subscribed with nothing following them; past it the oldest stops. */
@@ -150,13 +150,20 @@ export interface Keep {
  */
 export const DEFAULT_KEEP: Keep = { idleFor: "5 minutes", failedFor: "1 second", maxIdle: 50 };
 
+/** One result type's shared watches, such as one command's. */
+interface KeptGroup<A> {
+  /** The watch of `key`, shared by every caller while it is kept; `open` makes a new one. */
+  readonly watch: (key: string, open: () => QueryWatch<A>) => QueryWatch<A>;
+  /**
+   * Follows the watch of `key` until its first answer, as `whenAnswered` does, and hands a
+   * failure to the next caller for `keep.failedFor`.
+   */
+  readonly preload: (key: string, open: () => QueryWatch<A>) => Promise<void>;
+}
+
 /** Watches shared by key, and kept subscribed for a while after their last listener leaves. */
 export interface Keeper {
-  /**
-   * A group of watches with one result type, such as one command's: `share(key, open)` gives the
-   * watch of `key`, shared by every caller while it is kept, and calls `open` for a new one.
-   */
-  readonly group: <A>() => (key: string, open: () => QueryWatch<A>) => QueryWatch<A>;
+  readonly group: <A>() => KeptGroup<A>;
   /** Stops sharing every watch: idle ones stop, and followed ones stop once their listeners leave. */
   readonly release: () => void;
 }
@@ -164,11 +171,15 @@ export interface Keeper {
 interface Entry<A> {
   readonly watch: QueryWatch<A>;
   readonly shared: QueryWatch<A>;
+  /** The watch a preload follows: a failure it sees waits for the next caller. */
+  readonly preloaded: QueryWatch<A>;
   readonly forget: () => void;
   listeners: number;
   keepAlive: (() => void) | null;
   expiry: Fiber.Fiber<void, unknown> | null;
   released: boolean;
+  /** A preload followed it last, so its failure is handed to the next caller. */
+  handsOverFailure: boolean;
 }
 
 const failed = (entry: Entry<unknown>): boolean => entry.watch.getSnapshot().status === "error";
@@ -233,7 +244,7 @@ export const keeper = <R>(
 
   /** Holds `entry` subscribed with nothing following it, before its last listener leaves. */
   const startIdle = (entry: Entry<unknown>): void => {
-    const wait = failed(entry) ? failedFor : idleFor;
+    const wait = failed(entry) ? (entry.handsOverFailure ? failedFor : Duration.zero) : idleFor;
 
     if (Duration.isZero(wait)) {
       release(entry);
@@ -242,7 +253,10 @@ export const keeper = <R>(
     }
 
     entry.keepAlive = entry.watch.subscribe(() => {
-      if (failed(entry)) releaseAfter(entry, failedFor);
+      if (!failed(entry)) return;
+
+      if (entry.handsOverFailure) releaseAfter(entry, failedFor);
+      else release(entry);
     });
     idleOldestFirst.add(entry);
     releaseAfter(entry, wait);
@@ -254,7 +268,8 @@ export const keeper = <R>(
   };
 
   const share = <A>(watch: QueryWatch<A>, forget: () => void): Entry<A> => {
-    const subscribe = (onChange: () => void): (() => void) => {
+    const subscribeAs = (preload: boolean, onChange: () => void): (() => void) => {
+      entry.handsOverFailure = preload;
       entry.listeners += 1;
 
       if (entry.listeners === 1) {
@@ -282,25 +297,36 @@ export const keeper = <R>(
 
     const entry: Entry<A> = {
       watch,
-      shared: { subscribe, getSnapshot: watch.getSnapshot },
+      shared: {
+        subscribe: (onChange) => subscribeAs(false, onChange),
+        getSnapshot: watch.getSnapshot,
+      },
+      preloaded: {
+        subscribe: (onChange) => subscribeAs(true, onChange),
+        getSnapshot: watch.getSnapshot,
+      },
       forget,
       listeners: 0,
       keepAlive: null,
       expiry: null,
       released: false,
+      handsOverFailure: false,
     };
 
     return entry;
   };
 
   return {
-    group: <A>() => {
+    group: <A>(): KeptGroup<A> => {
       const entries = new Map<string, Entry<A>>();
 
-      return (key: string, open: () => QueryWatch<A>): QueryWatch<A> => {
+      const entryOf = (key: string, open: () => QueryWatch<A>): Entry<A> => {
         const found = entries.get(key);
 
-        if (found !== undefined) return found.shared;
+        if (found !== undefined && (!failed(found) || found.handsOverFailure)) return found;
+
+        // A failure a screen saw: its listeners keep it, and this caller asks again.
+        if (found !== undefined) release(found);
 
         const entry = share(open(), () => {
           if (entries.get(key) === entry) entries.delete(key);
@@ -312,7 +338,12 @@ export const keeper = <R>(
         // render that opened it subscribes as it commits, which the second covers.
         releaseAfter(entry, Duration.max(idleFor, UNSUBSCRIBED_FOR));
 
-        return entry.shared;
+        return entry;
+      };
+
+      return {
+        watch: (key, open) => entryOf(key, open).shared,
+        preload: (key, open) => whenAnswered(entryOf(key, open).preloaded),
       };
     },
     release: () => {
