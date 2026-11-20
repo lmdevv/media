@@ -25,6 +25,8 @@ import { useThemeColor } from "@/lib/theme-color";
 import type { ScrubTile } from "@/lib/player/scrubbing";
 
 import { Scrubber } from "./scrubber";
+import { SleepTimerMenu } from "./sleep-timer";
+import type { SleepTimerButton } from "./sleep-timer";
 import { Spinner } from "./spinner";
 import type { Transport } from "./transport";
 import { VerticalSlider } from "./vertical-slider";
@@ -58,6 +60,8 @@ export interface PlayerControlsProps {
   readonly brightness: number;
   readonly volume: number;
   readonly more: ReadonlyArray<MoreItem>;
+  /** The sleep timer's button; null hides it, as in a group session. */
+  readonly sleepTimer: SleepTimerButton | null;
   readonly tileAt: (seconds: number) => ScrubTile | null;
   readonly onClose: () => void;
   readonly onTogglePlay: () => void;
@@ -305,6 +309,13 @@ export function PlayerControls(props: PlayerControlsProps) {
               </Text>
             )}
           </View>
+          {props.sleepTimer === null ? null : (
+            <SleepTimerMenu
+              timer={props.sleepTimer}
+              onOpen={() => onInteract(true)}
+              onRelease={() => onInteract(false)}
+            />
+          )}
           <View className="size-11 items-center justify-center overflow-hidden rounded-pill bg-dark-surface-raised/80">
             <VideoAirPlayButton
               tint={white}

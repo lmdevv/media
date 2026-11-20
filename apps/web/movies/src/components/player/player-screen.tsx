@@ -3,6 +3,12 @@ import { DRIFT_THRESHOLDS } from "@media/contracts/clock";
 import type { FollowerPlayer } from "@media/contracts/follower";
 import type { NegotiateResponse } from "@media/contracts/media-playback";
 import { sessionSkip } from "@media/contracts/session-next";
+import {
+  formatSleepTimeLeft,
+  sleepHoldsAutoplay,
+  sleepPausesPlayback,
+  sleepTimerRuns,
+} from "@media/contracts/sleep-timer";
 import { Playback, Versions } from "@media/sdk/effect";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { ChapterPopover } from "@media/ui/components/chapter-popover";
@@ -23,6 +29,7 @@ import {
   CastIcon,
   InfoIcon,
   ListVideoIcon,
+  MoonIcon,
   PictureInPicture2Icon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -82,12 +89,14 @@ import {
   SubtitleDelayNotice,
   TryingAnotherWay,
 } from "./player-states";
+import { CustomSleepTimerDialog, SleepTimerMenu, sleepTimerButtonLabel } from "./sleep-timer-menu";
 import { StreamInfo } from "./stream-info";
 import { useControlsVisible, useFullscreen, usePlayerLayout } from "./use-player-frame";
 import type { PlayerLayout } from "./use-player-frame";
 import { useSeasonEpisodes } from "./use-season-episodes";
 import { useSubtitleDelay } from "./use-subtitle-delay";
 import { useSubtitlePlacement } from "./use-subtitle-placement";
+import type { SleepTimerControl } from "./use-sleep-timer";
 
 const BUFFER_TARGET_SECONDS = 4;
 
@@ -123,6 +132,8 @@ export interface PlayerScreenProps {
     readonly detail: PlaybackDetail;
     readonly onBack: () => void;
   };
+  /** The page's sleep timer, which outlives this episode's player. */
+  readonly sleepTimer: SleepTimerControl;
 }
 
 const startChoice = (start: PlayerScreenProps["start"]): StartChoice => {
@@ -150,7 +161,14 @@ const useSettled = (value: boolean, ms: number): boolean => {
 };
 
 /** The player screen. */
-export function PlayerScreen({ titleId, episodeId, version, start, guest }: PlayerScreenProps) {
+export function PlayerScreen({
+  titleId,
+  episodeId,
+  version,
+  start,
+  guest,
+  sleepTimer,
+}: PlayerScreenProps) {
   const platform = usePlatform();
   const me = useMe();
   const scopes = useScopes();
@@ -172,6 +190,7 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
   const [info, setInfo] = useState(false);
   const [episodesOpenIn, setEpisodesOpenIn] = useState<PlayerLayout | null>(null);
   const [volumeOpen, setVolumeOpen] = useState(false);
+  const [customSleepOpen, setCustomSleepOpen] = useState(false);
 
   const [creditsDismissed, setCreditsDismissed] = useState(false);
 
@@ -664,7 +683,51 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
     duration > 0 &&
     (media.ended || remaining <= creditsSeconds(duration));
 
-  const showNext = inCredits && nextEpisode !== null && !creditsDismissed && !inSession;
+  const sleepKey = `${titleId}:${episodeId ?? ""}`;
+  const { report: reportToSleepTimer, cancel: cancelSleepTimer } = sleepTimer;
+  const sleepLeftMs = duration > 0 ? remaining * 1000 : null;
+  const playingForSleep = isPlaying && !media.paused;
+
+  useEffect(() => {
+    if (isPlaying) {
+      reportToSleepTimer({ itemKey: sleepKey, leftMs: sleepLeftMs, playing: playingForSleep });
+    }
+  }, [reportToSleepTimer, isPlaying, sleepKey, sleepLeftMs, playingForSleep]);
+
+  // A group session plays for everyone, so a timer on one device has no place in it.
+  useEffect(() => {
+    if (inSession) cancelSleepTimer();
+  }, [inSession, cancelSleepTimer]);
+
+  const sleepPauses = sleepPausesPlayback(sleepTimer.timer);
+  const sleepFade = sleepTimer.volume;
+  const levelBeforeFade = useRef<number | null>(null);
+
+  // Pauses as the timer runs out, before the effect below puts the volume back, and pauses the
+  // next episode too if the timer ran out while it loaded.
+  useEffect(() => {
+    if (sleepPauses && playingForSleep) output?.pause();
+  }, [sleepPauses, playingForSleep, output]);
+
+  // The fade scales the level the viewer set and puts it back after; a TV keeps its own level.
+  useEffect(() => {
+    if (video === null) return;
+
+    if (sleepFade < 1 && casting === null) {
+      levelBeforeFade.current ??= video.volume;
+      video.volume = levelBeforeFade.current * sleepFade;
+    } else if (levelBeforeFade.current !== null) {
+      video.volume = levelBeforeFade.current;
+      levelBeforeFade.current = null;
+    }
+  }, [video, sleepFade, casting]);
+
+  const showNext =
+    inCredits &&
+    nextEpisode !== null &&
+    !creditsDismissed &&
+    !inSession &&
+    !sleepHoldsAutoplay(sleepTimer.timer, sleepKey);
 
   const sessionPlayNow = together.actions.playNow;
   const sessionPlayQueued = together.actions.playQueued;
@@ -857,6 +920,7 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
     menu ||
     episodesShown ||
     (volumeOpen && volumeSettable) ||
+    customSleepOpen ||
     leaving !== null ||
     showNext ||
     sessionCard !== null ||
@@ -907,7 +971,7 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
         else askToLeave();
       },
     },
-    !menu && leaving === null && together.starting === undefined,
+    !menu && !customSleepOpen && leaving === null && together.starting === undefined,
   );
 
   const canStart =
@@ -1093,6 +1157,21 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
 
   const castMenu = (trigger: React.ReactElement) => (
     <CastMenu trigger={trigger} container={overlayContainer} {...castTargets} />
+  );
+
+  const showSleepTimer = isPlaying && !inSession;
+  const sleepTimeLeft = sleepTimer.leftMs === null ? null : formatSleepTimeLeft(sleepTimer.leftMs);
+
+  const sleepMenu = (trigger: React.ReactElement) => (
+    <SleepTimerMenu
+      trigger={trigger}
+      container={overlayContainer}
+      timeLeft={sleepTimeLeft}
+      itemKey={episodeId === undefined ? null : sleepKey}
+      onChoose={sleepTimer.set}
+      onCustom={() => setCustomSleepOpen(true)}
+      onCancel={sleepTimerRuns(sleepTimer.timer) ? cancelSleepTimer : null}
+    />
   );
 
   const scrubProps = {
@@ -1299,6 +1378,21 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
           )}
         </div>
         <div className="flex items-center gap-6">
+          {showSleepTimer
+            ? sleepMenu(
+                <PlayerButton
+                  aria-label={sleepTimerButtonLabel(sleepTimeLeft)}
+                  active={sleepTimerRuns(sleepTimer.timer)}
+                >
+                  <MoonIcon strokeWidth={1.75} aria-hidden />
+                  {sleepTimeLeft === null ? null : (
+                    <span className="relative font-sans text-label/label font-semibold tabular-nums">
+                      {sleepTimeLeft}
+                    </span>
+                  )}
+                </PlayerButton>,
+              )
+            : null}
           {isPlaying && pip !== null && casting === null ? (
             <PlayerButton
               aria-label="Picture in picture"
@@ -1441,6 +1535,7 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
         locked={locked}
         onRoom={session === null ? onRoom : undefined}
         castMenu={canCast ? castMenu : undefined}
+        sleepTimer={showSleepTimer ? { menu: sleepMenu, timeLeft: sleepTimeLeft } : undefined}
         bottomBarRef={setControlsTop}
       />
     </div>
@@ -1541,6 +1636,12 @@ export function PlayerScreen({ titleId, episodeId, version, start, guest }: Play
             onCopy={together.actions.copyLink}
             onCancel={together.actions.cancelStart}
             onStart={together.actions.confirmStart}
+          />
+          <CustomSleepTimerDialog
+            open={customSleepOpen && showSleepTimer}
+            container={overlays}
+            onOpenChange={setCustomSleepOpen}
+            onStart={(minutes) => sleepTimer.set({ kind: "after", minutes })}
           />
           <LeaveDialog
             open={leaving !== null}
