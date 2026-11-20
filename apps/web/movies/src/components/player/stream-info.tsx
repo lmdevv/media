@@ -1,6 +1,8 @@
 import type { DynamicRange, NegotiateResponse } from "@media/contracts/media-playback";
 import type { HdrFormat, MediaFile } from "@media/contracts/models/catalog";
 import { MediaLabels } from "@media/sdk/effect";
+import { useLiveValue } from "@media/ui/lib/live-value";
+import type { LiveValue } from "@media/ui/lib/live-value";
 import { cn } from "@media/ui/lib/utils";
 import { XIcon } from "lucide-react";
 
@@ -156,17 +158,19 @@ const streamInfoRows = (
 export function StreamInfo({
   file,
   stream,
-  bufferedAheadSeconds,
+  bufferedAhead,
   onClose,
   className,
 }: {
   readonly file: MediaFile;
   readonly stream: NegotiateResponse;
-  readonly bufferedAheadSeconds: number;
+  /** Seconds buffered ahead of the position. */
+  readonly bufferedAhead: LiveValue<number>;
   readonly onClose: () => void;
   readonly className?: string;
 }) {
   const rung = rungOf(stream.mode);
+  const bufferedAheadSeconds = useLiveValue(bufferedAhead, Math.round);
 
   return (
     <section

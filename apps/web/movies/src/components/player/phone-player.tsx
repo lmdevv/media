@@ -9,6 +9,8 @@
 import { Slider } from "@base-ui/react/slider";
 import { PauseGlyph, PlayGlyph } from "@media/ui/components/icons";
 import { Scrubber } from "@media/ui/components/player-controls";
+import { useLiveValue } from "@media/ui/lib/live-value";
+import type { LiveValue } from "@media/ui/lib/live-value";
 import { formatTimecode } from "@media/ui/lib/timecode";
 import { cn } from "@media/ui/lib/utils";
 import {
@@ -177,6 +179,46 @@ export function TrackPill({
   );
 }
 
+type ScrubDetails = Pick<
+  ComponentProps<typeof Scrubber>,
+  "describe" | "chapters" | "preview" | "onPreviewStart"
+>;
+
+/** The time played, the scrubber, and the time left: what follows the position. */
+function PhonePositionRow({
+  position,
+  duration,
+  onSeek,
+  onSeekCommit,
+  scrub,
+}: {
+  readonly position: LiveValue<number>;
+  readonly duration: number;
+  readonly onSeek: (seconds: number) => void;
+  readonly onSeekCommit: (seconds: number) => void;
+  readonly scrub?: ScrubDetails | undefined;
+}) {
+  const seconds = useLiveValue(position, (value) => value);
+
+  return (
+    <div className="flex items-center gap-3">
+      <span className="w-14 shrink-0 font-mono text-caption/caption text-text">
+        {formatTimecode(seconds)}
+      </span>
+      <Scrubber
+        position={seconds}
+        duration={duration}
+        onSeek={onSeek}
+        onSeekCommit={onSeekCommit}
+        {...scrub}
+      />
+      <span className="w-16 shrink-0 text-right font-mono text-caption/caption text-text">
+        {formatTimecode(seconds - duration)}
+      </span>
+    </div>
+  );
+}
+
 /**
  * The landscape phone controls over the video.
  *
@@ -249,7 +291,8 @@ export function PhoneControls({
 }: {
   readonly title: string;
   readonly playing: boolean;
-  readonly position: number;
+  /** Seconds played; only the scrubber row follows it as it moves. */
+  readonly position: LiveValue<number>;
   readonly duration: number;
   readonly brightness: number;
   readonly volume: number | null;
@@ -259,10 +302,7 @@ export function PhoneControls({
   readonly onSkip: (seconds: number) => void;
   readonly onSeek: (seconds: number) => void;
   readonly onSeekCommit: (seconds: number) => void;
-  readonly scrub?: Pick<
-    ComponentProps<typeof Scrubber>,
-    "describe" | "chapters" | "preview" | "onPreviewStart"
-  >;
+  readonly scrub?: ScrubDetails;
   readonly onBrightness: (value: number) => void;
   readonly onVolume: (value: number) => void;
   /** Where the volume slider settled, which unmuting from silence returns to. */
@@ -355,21 +395,13 @@ export function PhoneControls({
         ref={bottomBarRef}
         className="absolute inset-x-0 bottom-0 flex flex-col gap-3 px-14 pb-5.5"
       >
-        <div className="flex items-center gap-3">
-          <span className="w-14 shrink-0 font-mono text-caption/caption text-text">
-            {formatTimecode(position)}
-          </span>
-          <Scrubber
-            position={position}
-            duration={duration}
-            onSeek={onSeek}
-            onSeekCommit={onSeekCommit}
-            {...scrub}
-          />
-          <span className="w-16 shrink-0 text-right font-mono text-caption/caption text-text">
-            {formatTimecode(position - duration)}
-          </span>
-        </div>
+        <PhonePositionRow
+          position={position}
+          duration={duration}
+          onSeek={onSeek}
+          onSeekCommit={onSeekCommit}
+          scrub={scrub}
+        />
         <div className="flex justify-center gap-2">{tracks}</div>
       </div>
     </div>
@@ -383,14 +415,17 @@ export function PhoneControls({
 export function PhoneSessionVideoChrome({
   label,
   playing,
-  fraction,
+  position,
+  duration,
   onPlayPause,
   onFullscreen,
 }: {
   /** The lock line for a member who may not control, such as `Lucía is hosting`. */
   readonly label: string | null;
   readonly playing: boolean;
-  readonly fraction: number;
+  /** Seconds played, which the progress line along the bottom follows. */
+  readonly position: LiveValue<number>;
+  readonly duration: number;
   /** Plays or pauses for everyone; null for a member who may not control. */
   readonly onPlayPause: (() => void) | null;
   readonly onFullscreen: () => void;
@@ -421,9 +456,26 @@ export function PhoneSessionVideoChrome({
       >
         <Maximize2Icon className="size-3.5" strokeWidth={2} aria-hidden />
       </button>
-      <div className="absolute inset-x-0 bottom-0 flex h-0.75 bg-text/25">
-        <div className="h-0.75 bg-accent" style={{ width: `${String(fraction * 100)}%` }} />
-      </div>
+      <ProgressStripe position={position} duration={duration} />
+    </div>
+  );
+}
+
+/** The thin progress line along the video's bottom edge. */
+function ProgressStripe({
+  position,
+  duration,
+}: {
+  readonly position: LiveValue<number>;
+  readonly duration: number;
+}) {
+  const fraction = useLiveValue(position, (seconds) =>
+    duration <= 0 ? 0 : Math.min(1, seconds / duration),
+  );
+
+  return (
+    <div className="absolute inset-x-0 bottom-0 flex h-0.75 bg-text/25">
+      <div className="h-0.75 bg-accent" style={{ width: `${String(fraction * 100)}%` }} />
     </div>
   );
 }
