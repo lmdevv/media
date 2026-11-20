@@ -4,15 +4,16 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as YouRouteImport } from './routes/_you'
 import { Route as AdminRouteImport } from './routes/admin'
-import { Route as ApiKeysRouteImport } from './routes/api-keys'
 import { Route as DeviceRouteImport } from './routes/device'
-import { Route as DevicesRouteImport } from './routes/devices'
 import { Route as GuestRouteImport } from './routes/guest'
 import { Route as HomeRouteImport } from './routes/home'
 import { Route as InviteRouteImport } from './routes/invite'
 import { Route as ResetRouteImport } from './routes/reset'
-import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as YouApiKeysRouteImport } from './routes/_you.api-keys'
+import { Route as YouDevicesRouteImport } from './routes/_you.devices'
+import { Route as YouSettingsRouteImport } from './routes/_you.settings'
 import { Route as AdminIndexRouteImport } from './routes/admin.index'
 import { Route as AdminBackupsRouteImport } from './routes/admin.backups'
 import { Route as AdminDevicesRouteImport } from './routes/admin.devices'
@@ -29,24 +30,18 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const YouRoute = YouRouteImport.update({
+  id: '/_you',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AdminRoute = AdminRouteImport.update({
   id: '/admin',
   path: '/admin',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiKeysRoute = ApiKeysRouteImport.update({
-  id: '/api-keys',
-  path: '/api-keys',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const DeviceRoute = DeviceRouteImport.update({
   id: '/device',
   path: '/device',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DevicesRoute = DevicesRouteImport.update({
-  id: '/devices',
-  path: '/devices',
   getParentRoute: () => rootRouteImport,
 } as any)
 const GuestRoute = GuestRouteImport.update({
@@ -69,10 +64,20 @@ const ResetRoute = ResetRouteImport.update({
   path: '/reset',
   getParentRoute: () => rootRouteImport,
 } as any)
-const SettingsRoute = SettingsRouteImport.update({
+const YouApiKeysRoute = YouApiKeysRouteImport.update({
+  id: '/api-keys',
+  path: '/api-keys',
+  getParentRoute: () => YouRoute,
+} as any)
+const YouDevicesRoute = YouDevicesRouteImport.update({
+  id: '/devices',
+  path: '/devices',
+  getParentRoute: () => YouRoute,
+} as any)
+const YouSettingsRoute = YouSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => YouRoute,
 } as any)
 const AdminIndexRoute = AdminIndexRouteImport.update({
   id: '/',
@@ -128,14 +133,14 @@ const AdminLibrariesLibraryIdRoute = AdminLibrariesLibraryIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRouteWithChildren
-  '/api-keys': typeof ApiKeysRoute
   '/device': typeof DeviceRoute
-  '/devices': typeof DevicesRoute
   '/guest': typeof GuestRoute
   '/home': typeof HomeRoute
   '/invite': typeof InviteRoute
   '/reset': typeof ResetRoute
-  '/settings': typeof SettingsRoute
+  '/api-keys': typeof YouApiKeysRoute
+  '/devices': typeof YouDevicesRoute
+  '/settings': typeof YouSettingsRoute
   '/admin/backups': typeof AdminBackupsRoute
   '/admin/devices': typeof AdminDevicesRoute
   '/admin/groups': typeof AdminGroupsRoute
@@ -149,14 +154,14 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/api-keys': typeof ApiKeysRoute
   '/device': typeof DeviceRoute
-  '/devices': typeof DevicesRoute
   '/guest': typeof GuestRoute
   '/home': typeof HomeRoute
   '/invite': typeof InviteRoute
   '/reset': typeof ResetRoute
-  '/settings': typeof SettingsRoute
+  '/api-keys': typeof YouApiKeysRoute
+  '/devices': typeof YouDevicesRoute
+  '/settings': typeof YouSettingsRoute
   '/admin/backups': typeof AdminBackupsRoute
   '/admin/devices': typeof AdminDevicesRoute
   '/admin/groups': typeof AdminGroupsRoute
@@ -171,15 +176,16 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/_you': typeof YouRouteWithChildren
   '/admin': typeof AdminRouteWithChildren
-  '/api-keys': typeof ApiKeysRoute
   '/device': typeof DeviceRoute
-  '/devices': typeof DevicesRoute
   '/guest': typeof GuestRoute
   '/home': typeof HomeRoute
   '/invite': typeof InviteRoute
   '/reset': typeof ResetRoute
-  '/settings': typeof SettingsRoute
+  '/_you/api-keys': typeof YouApiKeysRoute
+  '/_you/devices': typeof YouDevicesRoute
+  '/_you/settings': typeof YouSettingsRoute
   '/admin/backups': typeof AdminBackupsRoute
   '/admin/devices': typeof AdminDevicesRoute
   '/admin/groups': typeof AdminGroupsRoute
@@ -196,13 +202,13 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/admin'
-    | '/api-keys'
     | '/device'
-    | '/devices'
     | '/guest'
     | '/home'
     | '/invite'
     | '/reset'
+    | '/api-keys'
+    | '/devices'
     | '/settings'
     | '/admin/backups'
     | '/admin/devices'
@@ -217,13 +223,13 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
-    | '/api-keys'
     | '/device'
-    | '/devices'
     | '/guest'
     | '/home'
     | '/invite'
     | '/reset'
+    | '/api-keys'
+    | '/devices'
     | '/settings'
     | '/admin/backups'
     | '/admin/devices'
@@ -238,15 +244,16 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/_you'
     | '/admin'
-    | '/api-keys'
     | '/device'
-    | '/devices'
     | '/guest'
     | '/home'
     | '/invite'
     | '/reset'
-    | '/settings'
+    | '/_you/api-keys'
+    | '/_you/devices'
+    | '/_you/settings'
     | '/admin/backups'
     | '/admin/devices'
     | '/admin/groups'
@@ -261,15 +268,13 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  YouRoute: typeof YouRouteWithChildren
   AdminRoute: typeof AdminRouteWithChildren
-  ApiKeysRoute: typeof ApiKeysRoute
   DeviceRoute: typeof DeviceRoute
-  DevicesRoute: typeof DevicesRoute
   GuestRoute: typeof GuestRoute
   HomeRoute: typeof HomeRoute
   InviteRoute: typeof InviteRoute
   ResetRoute: typeof ResetRoute
-  SettingsRoute: typeof SettingsRoute
   TileUserIdRoute: typeof TileUserIdRoute
 }
 
@@ -282,6 +287,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_you': {
+      id: '/_you'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof YouRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/admin': {
       id: '/admin'
       path: '/admin'
@@ -289,25 +301,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api-keys': {
-      id: '/api-keys'
-      path: '/api-keys'
-      fullPath: '/api-keys'
-      preLoaderRoute: typeof ApiKeysRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/device': {
       id: '/device'
       path: '/device'
       fullPath: '/device'
       preLoaderRoute: typeof DeviceRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/devices': {
-      id: '/devices'
-      path: '/devices'
-      fullPath: '/devices'
-      preLoaderRoute: typeof DevicesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/guest': {
@@ -338,12 +336,26 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ResetRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/settings': {
-      id: '/settings'
+    '/_you/api-keys': {
+      id: '/_you/api-keys'
+      path: '/api-keys'
+      fullPath: '/api-keys'
+      preLoaderRoute: typeof YouApiKeysRouteImport
+      parentRoute: typeof YouRoute
+    }
+    '/_you/devices': {
+      id: '/_you/devices'
+      path: '/devices'
+      fullPath: '/devices'
+      preLoaderRoute: typeof YouDevicesRouteImport
+      parentRoute: typeof YouRoute
+    }
+    '/_you/settings': {
+      id: '/_you/settings'
       path: '/settings'
       fullPath: '/settings'
-      preLoaderRoute: typeof SettingsRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof YouSettingsRouteImport
+      parentRoute: typeof YouRoute
     }
     '/admin/': {
       id: '/admin/'
@@ -418,6 +430,20 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface YouRouteChildren {
+  YouApiKeysRoute: typeof YouApiKeysRoute
+  YouDevicesRoute: typeof YouDevicesRoute
+  YouSettingsRoute: typeof YouSettingsRoute
+}
+
+const YouRouteChildren: YouRouteChildren = {
+  YouApiKeysRoute: YouApiKeysRoute,
+  YouDevicesRoute: YouDevicesRoute,
+  YouSettingsRoute: YouSettingsRoute,
+}
+
+const YouRouteWithChildren = YouRoute._addFileChildren(YouRouteChildren)
+
 interface AdminRouteChildren {
   AdminBackupsRoute: typeof AdminBackupsRoute
   AdminDevicesRoute: typeof AdminDevicesRoute
@@ -446,15 +472,13 @@ const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  YouRoute: YouRouteWithChildren,
   AdminRoute: AdminRouteWithChildren,
-  ApiKeysRoute: ApiKeysRoute,
   DeviceRoute: DeviceRoute,
-  DevicesRoute: DevicesRoute,
   GuestRoute: GuestRoute,
   HomeRoute: HomeRoute,
   InviteRoute: InviteRoute,
   ResetRoute: ResetRoute,
-  SettingsRoute: SettingsRoute,
   TileUserIdRoute: TileUserIdRoute,
 }
 export const routeTree = rootRouteImport

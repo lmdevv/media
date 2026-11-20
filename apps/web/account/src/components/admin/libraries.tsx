@@ -11,7 +11,7 @@ import { useActions } from "./action";
 import { RemoteLyricsSetting } from "./lyrics";
 import { usePages } from "@media/ui/lib/pages";
 import type { Paged } from "@media/ui/lib/pages";
-import { ItemRow, PagedList, Section, SelectField } from "./parts";
+import { ItemRow, ListSkeleton, PagedList, Section, SelectField, pageArgs } from "./parts";
 import type { Choice } from "./parts";
 import type { Level, Library, LibraryKind } from "./types";
 
@@ -51,10 +51,7 @@ const EMPTY_LIBRARY: NewLibrary = { name: "", kind: "movies", folders: "" };
 export function LibrariesScreen() {
   const platform = usePlatform();
 
-  const libraries = usePages(platform.core.libraries.list, (paginationOpts) => ({
-    paginationOpts,
-  }));
-
+  const libraries = usePages(platform.core.libraries.list, pageArgs);
   const actions = useActions<"create">();
   const [draft, setDraft] = useState<NewLibrary>(EMPTY_LIBRARY);
 
@@ -93,6 +90,16 @@ export function LibrariesScreen() {
         </Link>
       )}
     />
+  );
+}
+
+/** The libraries page while its list loads. */
+export function LibrariesSkeleton() {
+  return (
+    <>
+      <PageHeader title="Libraries" />
+      <ListSkeleton label="Libraries" />
+    </>
   );
 }
 

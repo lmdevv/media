@@ -7,7 +7,7 @@ import { useId, useState } from "react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 
-import type { Paged } from "@media/ui/lib/pages";
+import type { PageOpts, Paged } from "@media/ui/lib/pages";
 
 /** A titled part of an admin screen. */
 export function Section({
@@ -58,6 +58,17 @@ export function Failed({
 }
 
 /**
+ * The arguments of each page of a list that takes nothing besides its page, shared by a screen and
+ * its route's loader so both follow the same first page.
+ */
+export const pageArgs = (paginationOpts: PageOpts) => ({ paginationOpts });
+
+/** A list's place while its first page loads. */
+export function ListSkeleton({ label }: { readonly label: string }) {
+  return <Skeleton aria-label={`Loading ${label}`} className="h-24 w-full rounded-control" />;
+}
+
+/**
  * A paginated list: a skeleton until the first page, its failure with Try again, `empty` when it
  * holds nothing, then each row and Load more while pages remain.
  */
@@ -74,9 +85,7 @@ export function PagedList<Row>({
   readonly rowKey: (row: Row) => string;
   readonly children: (row: Row) => ReactNode;
 }) {
-  if (list.status === "loading") {
-    return <Skeleton aria-label={`Loading ${label}`} className="h-24 w-full rounded-control" />;
-  }
+  if (list.status === "loading") return <ListSkeleton label={label} />;
 
   if (list.status === "failed") return <Failed message={list.message} retry={list.retry} />;
 

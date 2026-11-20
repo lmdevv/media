@@ -1,14 +1,15 @@
 import { usePlatform } from "@media/sdk/react";
 import { Button } from "@media/ui/components/button";
 import { PageHeader } from "@media/ui/components/page-header";
+import { Skeleton } from "@media/ui/components/skeleton";
 import { useFirstRows, usePages } from "@media/ui/lib/pages";
-import type { Paged } from "@media/ui/lib/pages";
+import type { PageOpts, Paged } from "@media/ui/lib/pages";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
 import { useActions } from "./action";
 import { KIND_LABELS } from "./libraries";
-import { ItemRow, PagedList, formatTime } from "./parts";
+import { ItemRow, ListSkeleton, PagedList, formatTime, pageArgs } from "./parts";
 import type { Job, LibraryId } from "./types";
 
 /** Which jobs the list shows: all of them, or the failed ones. */
@@ -16,6 +17,12 @@ export type JobFilter = "all" | "failed";
 
 /** The failed jobs counted in the filter's label; more shows as `100+`. */
 const FAILED_COUNTED = 100;
+
+/** The failed jobs' arguments for each page. */
+export const failedArgs = (paginationOpts: PageOpts) => ({
+  status: "failed" as const,
+  paginationOpts,
+});
 
 const STATUS: Readonly<Record<Job["status"], string>> = {
   queued: "Waiting",
@@ -70,13 +77,9 @@ export const jobFacts = (job: Job): string => {
 export function JobsScreen() {
   const platform = usePlatform();
   const [filter, setFilter] = useState<JobFilter>("all");
-  const all = usePages(platform.core.jobs.list, (paginationOpts) => ({ paginationOpts }));
+  const all = usePages(platform.core.jobs.list, pageArgs);
 
-  const failed = useFirstRows(
-    platform.core.jobs.list,
-    (paginationOpts) => ({ status: "failed" as const, paginationOpts }),
-    FAILED_COUNTED,
-  );
+  const failed = useFirstRows(platform.core.jobs.list, failedArgs, FAILED_COUNTED);
 
   return (
     <JobsView
@@ -99,6 +102,16 @@ const failedCount = (failed: Paged<Job>): string => {
 
   return failed.rows.length >= FAILED_COUNTED ? ` · ${FAILED_COUNTED}+` : "";
 };
+
+/** The jobs page while its jobs load: the All and Failed switch, then the list. */
+export function JobsSkeleton() {
+  return (
+    <>
+      <PageHeader title="Jobs" actions={<Skeleton className="h-8 w-32 rounded-control" />} />
+      <ListSkeleton label="Jobs" />
+    </>
+  );
+}
 
 /** The jobs list, all of them or the failed ones. */
 export function JobsView({

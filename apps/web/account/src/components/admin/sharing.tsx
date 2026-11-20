@@ -6,8 +6,8 @@ import { useState } from "react";
 import { useActions } from "./action";
 import { LEVEL_LABELS } from "./libraries";
 import { useAllPages, usePages } from "@media/ui/lib/pages";
-import type { Paged } from "@media/ui/lib/pages";
-import { ItemRow, PagedList, Section, SelectField } from "./parts";
+import type { PageOpts, Paged } from "@media/ui/lib/pages";
+import { ItemRow, PagedList, Section, SelectField, pageArgs } from "./parts";
 import type { Choice } from "./parts";
 import type { Grant, Group, Level, LibraryId, Principal, User } from "./types";
 
@@ -56,20 +56,23 @@ const levelChoices = (kind: Grant["principal"]["kind"]): ReadonlyArray<Choice<Le
         { value: "edit", label: LEVEL_LABELS.edit },
       ];
 
+/** A library as the grants name it. */
+const resourceOf = (libraryId: LibraryId) => ({ type: "library", id: libraryId }) as const;
+
+/** The arguments for each page of a library's grants. */
+export const grantArgs = (libraryId: LibraryId) => (paginationOpts: PageOpts) => ({
+  resource: resourceOf(libraryId),
+  paginationOpts,
+});
+
 /** Who a library is shared with, for a manager of it. */
 export function Sharing({ libraryId }: { readonly libraryId: LibraryId }) {
   const platform = usePlatform();
   const grantsApi = platform.core.permissions.grants;
-  const resource = { type: "library", id: libraryId } as const;
-  const grants = usePages(grantsApi.list, (paginationOpts) => ({ resource, paginationOpts }));
-
-  const users = useAllPages(platform.core.accounts.users.list, (paginationOpts) => ({
-    paginationOpts,
-  }));
-
-  const groups = useAllPages(platform.core.permissions.groups.list, (paginationOpts) => ({
-    paginationOpts,
-  }));
+  const resource = resourceOf(libraryId);
+  const grants = usePages(grantsApi.list, grantArgs(libraryId));
+  const users = useAllPages(platform.core.accounts.users.list, pageArgs);
+  const groups = useAllPages(platform.core.permissions.groups.list, pageArgs);
 
   const actions = useActions<string>();
 
