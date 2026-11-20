@@ -4,12 +4,18 @@ import { CircleAlert } from "lucide-react-native";
 import { View } from "react-native";
 
 import { PlayerScreen } from "@/components/player/player-screen";
+import { useSleepTimer } from "@/components/player/use-sleep-timer";
 import { Button } from "@/components/ui/button";
 import { CalmState } from "@/components/ui/calm-state";
 import { parseWatchParams } from "@/lib/routes";
 
+/**
+ * The player screen. The sleep timer lives here, above the player, so it carries on into the next
+ * episode and ends when the player closes.
+ */
 export default function Watch() {
   const params = parseWatchParams(useLocalSearchParams());
+  const sleepTimer = useSleepTimer();
 
   if (Option.isNone(params)) {
     return (
@@ -27,6 +33,10 @@ export default function Watch() {
   const { titleId, episodeId, fileId, start, at } = params.value;
 
   return (
-    <PlayerScreen key={[titleId, episodeId, fileId, start, at].join("|")} params={params.value} />
+    <PlayerScreen
+      key={[titleId, episodeId, fileId, start, at].join("|")}
+      params={params.value}
+      sleepTimer={sleepTimer}
+    />
   );
 }

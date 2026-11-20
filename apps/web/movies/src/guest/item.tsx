@@ -6,6 +6,7 @@ import { useAllPages } from "@media/ui/lib/pages";
 import { useCallback, useMemo, useState } from "react";
 
 import { PlayerScreen } from "@/components/player/player-screen";
+import { useSleepTimer } from "@/components/player/use-sleep-timer";
 import { guestPages } from "@/guest/pages";
 import { artworkUrl } from "@/lib/artwork";
 import type { EpisodeId, TitleId, PlaybackDetail, MediaFileId } from "@/lib/catalog";
@@ -130,6 +131,7 @@ function GuestPlayer({
 }) {
   const [opened] = useState(detail);
   const guest = useMemo(() => ({ detail: opened, onBack }), [opened, onBack]);
+  const sleepTimer = useSleepTimer();
 
   return (
     <PlayerScreen
@@ -138,6 +140,7 @@ function GuestPlayer({
       version={version}
       start="resume"
       guest={guest}
+      sleepTimer={sleepTimer}
     />
   );
 }
