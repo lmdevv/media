@@ -302,7 +302,7 @@ matches `Play from start`.
 | Command                                          | Does                                                         |
 | ------------------------------------------------ | ------------------------------------------------------------ |
 | `open [path]`                                    | Full page load. Prints the URL                               |
-| `click`, `hover`                                 | Acts on the element                                          |
+| `click [--button right]`, `hover`                | Acts on the element; `--button right` opens its context menu |
 | `fill --value V`                                 | Replaces a field's value                                     |
 | `select --value V`                               | Picks the option labelled V in a select                      |
 | `type --value V`                                 | Types into whatever has focus, such as a PIN or the command menu |

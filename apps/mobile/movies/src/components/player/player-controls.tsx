@@ -24,6 +24,8 @@ import { useThemeColor } from "@/lib/theme-color";
 import type { ScrubTile } from "@/lib/player/scrubbing";
 
 import { Scrubber } from "./scrubber";
+import { Spinner } from "./spinner";
+import type { Transport } from "./transport";
 import { VerticalSlider } from "./vertical-slider";
 
 /** How far the skip buttons move, in seconds. */
@@ -47,7 +49,8 @@ export interface PlayerControlsProps {
   readonly title: string;
   /** The episode under a show's name, such as `S1, E2 · Gran Dillama`. */
   readonly detail: string | null;
-  readonly playing: boolean;
+  /** The centre: a spinner while the video loads, else play or pause. */
+  readonly transport: Transport;
   readonly positionSeconds: number;
   readonly durationSeconds: number;
   readonly rateLabel: string;
@@ -69,13 +72,13 @@ export interface PlayerControlsProps {
   readonly onDismiss: () => void;
   /**
    * Replaces the transport with a lock line, such as `Only Lucía can pause or seek`, for a group
-   * session's member who may not control it.
+   * session's member who may not control it. While the video loads, the spinner shows instead.
    */
   readonly locked?: string | undefined;
 }
 
 /** A round 44pt button on the controls' glass. */
-export function RoundButton({
+function RoundButton({
   icon,
   label,
   onPress,
@@ -119,6 +122,54 @@ function SkipButton({
       <Text variant="metaSemibold" tone="onMedia">
         {String(SKIP_SECONDS)}
       </Text>
+    </Pressable>
+  );
+}
+
+/**
+ * The spinner in a box the size of the play button. A note such as `Reconnecting…` hangs below the
+ * box without moving what sits beside it.
+ */
+export function TransportSpinner({ note }: { readonly note: string | null }) {
+  return (
+    <View className="size-13 items-center justify-center" pointerEvents="none">
+      <Spinner size="transport" />
+      {note === null ? null : (
+        <Text
+          variant="status"
+          tone="onMedia"
+          numberOfLines={1}
+          className="absolute top-full mt-4 w-60 text-center"
+        >
+          {note}
+        </Text>
+      )}
+    </View>
+  );
+}
+
+/**
+ * The centre of the controls: one box the size of the play button, holding the spinner while the
+ * video loads and play or pause once it can play, so the swap moves nothing.
+ */
+function TransportSlot({
+  transport,
+  onTogglePlay,
+}: {
+  readonly transport: Transport;
+  readonly onTogglePlay: () => void;
+}) {
+  if (transport.kind === "loading") return <TransportSpinner note={transport.note} />;
+
+  return (
+    <Pressable
+      onPress={onTogglePlay}
+      hitSlop={12}
+      accessibilityRole="button"
+      accessibilityLabel={transport.playing ? "Pause" : "Play"}
+      className="size-13 items-center justify-center active:opacity-60"
+    >
+      <Icon icon={transport.playing ? Pause : Play} tone="onMedia" size="transport" filled />
     </Pressable>
   );
 }
@@ -202,10 +253,10 @@ function MoreMenu({
  * scrubber and the bottom row. On a phone whose notch or home indicator takes more, the safe area
  * wins, so controls sit at these margins or just clear of the hardware, whichever is further in.
  */
-export const PLAYER_MARGINS = { bar: 32, slider: 22, row: 64 } as const;
+const PLAYER_MARGINS = { bar: 32, slider: 22, row: 64 } as const;
 
 /** The horizontal padding that puts a row `margin` points in, or inside the safe area. */
-export const useMargin = (margin: number) => {
+const useMargin = (margin: number) => {
   const insets = useSafeAreaInsets();
 
   return {
@@ -283,20 +334,14 @@ export function PlayerControls(props: PlayerControlsProps) {
                 direction="back"
                 onPress={() => props.onSeek(props.positionSeconds - SKIP_SECONDS)}
               />
-              <Pressable
-                onPress={props.onTogglePlay}
-                hitSlop={12}
-                accessibilityRole="button"
-                accessibilityLabel={props.playing ? "Pause" : "Play"}
-                className="active:opacity-60"
-              >
-                <Icon icon={props.playing ? Pause : Play} tone="onMedia" size="transport" filled />
-              </Pressable>
+              <TransportSlot transport={props.transport} onTogglePlay={props.onTogglePlay} />
               <SkipButton
                 direction="forward"
                 onPress={() => props.onSeek(props.positionSeconds + SKIP_SECONDS)}
               />
             </View>
+          ) : props.transport.kind === "loading" ? (
+            <TransportSpinner note={props.transport.note} />
           ) : (
             <View className="h-9 flex-row items-center gap-2 rounded-pill bg-dark-surface-raised/80 px-3.5">
               <Icon icon={LockKeyhole} tone="onMedia" size="inline" />

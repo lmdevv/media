@@ -8,8 +8,14 @@ import { issuePersonalTicket } from "../core/tickets";
 import { registerWithArtworkTickets } from "./artwork";
 import { BOUNDS } from "./bounds";
 import { mayPlayFile } from "./playable";
-import { choosePlayableFile, presentEpisode, presentMediaFile, resolveEpisode } from "./present";
-import { findProgress, nextWatchGeneration, reachedEnd, writeProgress } from "./viewing";
+import { choosePlayableFile, presentEpisode, presentMediaFile } from "./present";
+import {
+  findProgress,
+  nextWatchGeneration,
+  reachedEnd,
+  resolveEpisode,
+  writeProgress,
+} from "./viewing";
 
 const NO_TITLE = "No such title";
 
@@ -38,7 +44,12 @@ export const { start, report, reportOffline } = registerWithArtworkTickets(regis
       return fail("not_found", NO_TITLE);
     }
 
-    const episode = await resolveEpisode(ctx.db, title, episodeId ?? null);
+    const episode = await resolveEpisode(ctx.db, caller.userId, title, episodeId);
+
+    if (title.kind === "show" && episode === null) {
+      return fail("not_found", "This show has no episodes to play");
+    }
+
     const saved = await findProgress(ctx.db, caller.userId, title._id, episode?._id ?? null);
 
     const file = await choosePlayableFile(ctx.db, title, episode, fileId ?? null, {
