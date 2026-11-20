@@ -5,7 +5,7 @@ import * as Network from "expo-network";
 import { router } from "expo-router";
 import { VideoView } from "expo-video";
 import type { VideoMetadata } from "expo-video";
-import { ChevronLeft, LockKeyhole } from "lucide-react-native";
+import { LockKeyhole } from "lucide-react-native";
 import { Result } from "effect";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { RefObject } from "react";
@@ -47,7 +47,7 @@ import { usePreferences } from "@/session/preferences";
 import { NextEpisodeCard } from "./next-episode-card";
 import { PlaySource, PlayerController, PlayerPhase } from "./playback-controller";
 import type { PlayerSnapshot } from "./playback-controller";
-import { PLAYER_MARGINS, PlayerControls, RoundButton, useMargin } from "./player-controls";
+import { PlayerControls, TransportSpinner } from "./player-controls";
 import type { MoreItem } from "./player-controls";
 import {
   AudioSubtitlesPanel,
@@ -60,6 +60,7 @@ import {
 } from "./player-panels";
 import { Spinner } from "./spinner";
 import { SubtitleOverlay } from "./subtitle-overlay";
+import { transportOf } from "./transport";
 import { usePlayStart } from "./use-play-start";
 import { useSeasonEpisodes } from "./use-season-episodes";
 
@@ -382,14 +383,6 @@ function PlayerSession({ params, attempt, onRestart, choices, carried }: PlayerS
   const holding = held || panel !== null;
 
   useEffect(() => {
-    if (!visible || holding || !media.playing || !playing) return undefined;
-
-    const timer = setTimeout(() => setVisible(false), CONTROLS_HIDE_MS);
-
-    return () => clearTimeout(timer);
-  }, [visible, holding, media.playing, playing, touch]);
-
-  useEffect(() => {
     if (!unlockHint) return undefined;
 
     const timer = setTimeout(() => setUnlockHint(false), UNLOCK_HINT_MS);
@@ -401,6 +394,25 @@ function PlayerSession({ params, attempt, onRestart, choices, carried }: PlayerS
   const stop = startStep !== null && PlaybackStep.$is("Stop")(startStep) ? startStep.stop : null;
   const stopped = PlayerPhase.$is("Stopped")(snapshot.phase) ? snapshot.phase.stop : stop;
   const failedStart = startStep !== null && !retryable && stop === null;
+
+  const transport = transportOf({
+    phase: snapshot.phase,
+    stopped: stopped !== null || failedStart,
+    playing: media.playing,
+    buffering: media.buffering,
+    recovering: snapshot.recovering,
+  });
+
+  // The controls stay up while the video loads, with the spinner in the play button's place.
+  const loading = transport?.kind === "loading";
+
+  useEffect(() => {
+    if (!visible || holding || loading || !media.playing || !playing) return undefined;
+
+    const timer = setTimeout(() => setVisible(false), CONTROLS_HIDE_MS);
+
+    return () => clearTimeout(timer);
+  }, [visible, holding, loading, media.playing, playing, touch]);
 
   const subtitlesFor = useRef<string | null>(null);
 
@@ -560,9 +572,11 @@ function PlayerSession({ params, attempt, onRestart, choices, carried }: PlayerS
   const detailLine = episode === null ? null : episodeLine(episode);
 
   const port = controller?.port ?? null;
-  const bar = useMargin(PLAYER_MARGINS.bar);
 
   const seekTo = (seconds: number): void => {
+    // Until the stream shows its first frame there is nothing to move.
+    if (!playing) return;
+
     const positionMs = Math.min(Math.max(0, seconds), durationSeconds) * 1000;
 
     if (inSession) follow.move({ kind: "seek", positionMs });
@@ -584,6 +598,9 @@ function PlayerSession({ params, attempt, onRestart, choices, carried }: PlayerS
     poke();
     seekTo(seconds);
   };
+
+  // The screen lock or a next-episode card takes the controls' place.
+  const covered = locked || showNext || shownCard !== null;
 
   return (
     <View className="flex-1 bg-dark-bg">
@@ -610,7 +627,7 @@ function PlayerSession({ params, attempt, onRestart, choices, carried }: PlayerS
           url={subtitleUrl}
           positionSeconds={media.positionSeconds}
           delayMs={snapshot.subtitleDelayMs}
-          raised={locked ? unlockHint : visible}
+          raised={locked ? unlockHint : visible || loading}
         />
 
         <Pressable
@@ -632,18 +649,13 @@ function PlayerSession({ params, attempt, onRestart, choices, carried }: PlayerS
           }}
         />
 
-        {playing && media.buffering ? (
-          <View className="absolute inset-0 items-center justify-center gap-4" pointerEvents="none">
-            <Spinner />
-            {snapshot.recovering ? (
-              <Text variant="status" tone="onMedia">
-                Reconnecting…
-              </Text>
-            ) : null}
+        {transport?.kind === "loading" && covered ? (
+          <View className="absolute inset-0 items-center justify-center" pointerEvents="none">
+            <TransportSpinner note={transport.note} />
           </View>
         ) : null}
 
-        {visible && playing && !locked && !showNext && shownCard === null && stopped === null ? (
+        {transport !== null && (visible || loading) && !covered ? (
           <Animated.View
             entering={FadeIn}
             exiting={FadeOut}
@@ -653,7 +665,7 @@ function PlayerSession({ params, attempt, onRestart, choices, carried }: PlayerS
             <PlayerControls
               title={name}
               detail={detailLine}
-              playing={media.playing}
+              transport={transport}
               positionSeconds={media.positionSeconds}
               durationSeconds={durationSeconds}
               rateLabel={`${speedLabel(snapshot.rate)} Speed`}
@@ -670,7 +682,9 @@ function PlayerSession({ params, attempt, onRestart, choices, carried }: PlayerS
                 setUnlockHint(true);
               }}
               onSpeed={() => setPanel("speed")}
-              onAudioSubtitles={() => setPanel("audio")}
+              onAudioSubtitles={() => {
+                if (snapshot.playback !== null) setPanel("audio");
+              }}
               onBrightness={setBrightness}
               onVolume={(value) => {
                 setVolume(value);
@@ -690,18 +704,6 @@ function PlayerSession({ params, attempt, onRestart, choices, carried }: PlayerS
           </Animated.View>
         ) : null}
       </View>
-
-      {PlayerPhase.$is("Preparing")(snapshot.phase) && stopped === null && !failedStart ? (
-        <View className="absolute inset-0 items-center justify-center gap-4 bg-scrim">
-          <Spinner />
-          <Text variant="status" tone="onMedia">
-            {snapshot.recovering ? "Reconnecting…" : "Preparing stream…"}
-          </Text>
-          <View className="absolute top-0 left-0 h-17 justify-center" style={bar}>
-            <RoundButton icon={ChevronLeft} label="Close" onPress={close} />
-          </View>
-        </View>
-      ) : null}
 
       {showNext ? (
         <NextEpisodeCard
