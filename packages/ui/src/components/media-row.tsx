@@ -1,13 +1,14 @@
 import { useRender } from "@base-ui/react/use-render";
-import { focusRowItem, rowItems } from "@media/ui/lib/row-focus";
+import { focusRowItem, rowCards, rowIndexOf } from "@media/ui/lib/row-focus";
 import { cn } from "@media/ui/lib/utils";
 import { ChevronRightIcon } from "lucide-react";
 import { useId } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
 
 const onTrackKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
-  const items = rowItems(event.currentTarget);
-  const index = items.findIndex((item) => item === document.activeElement);
+  const cards = rowCards(event.currentTarget);
+  const items = cards.map(({ item }) => item);
+  const index = rowIndexOf(cards, document.activeElement);
 
   if (index === -1) return;
 

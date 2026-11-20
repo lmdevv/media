@@ -1,6 +1,9 @@
 import type { ContinueWatchingItem, TitleCard } from "@/lib/catalog";
 import { LandscapeCard, PosterCard } from "@media/ui/components/media-card";
+import { buttonVariants } from "@media/ui/lib/button-variants";
+import { cn } from "@media/ui/lib/utils";
 import { Link } from "@tanstack/react-router";
+import { InfoIcon } from "lucide-react";
 
 import { artworkUrl } from "@/lib/artwork";
 import { episodeCode, facts, formatRemaining, progressFraction, titleFacts } from "@/lib/format";
@@ -85,7 +88,10 @@ const continueText = (item: ContinueWatchingItem, phone: boolean): ContinueText 
   };
 };
 
-/** A Continue watching card: resumes the movie or episode in one click. */
+/**
+ * A Continue watching card: resumes the movie or episode in one click, with an info link in the
+ * artwork's corner to the title's page.
+ */
 export function ContinueCard({
   item,
   size = "desktop",
@@ -95,6 +101,7 @@ export function ContinueCard({
 }) {
   const text = continueText(item, size === "phone");
   const progress = progressFraction(item.progress);
+  const prefetch = usePrefetchTitle(item.title.id);
 
   return (
     <LandscapeCard
@@ -106,6 +113,20 @@ export function ContinueCard({
       )}
       progress={progress ?? undefined}
       size={size}
+      action={
+        <Link
+          to="/title/$titleId"
+          params={{ titleId: item.title.id }}
+          aria-label={`More info about ${item.title.name}`}
+          className={cn(
+            buttonVariants({ variant: "secondary" }),
+            "size-8 rounded-pill p-0 [&_svg]:size-4.5",
+          )}
+          {...prefetch}
+        >
+          <InfoIcon strokeWidth={1.75} aria-hidden />
+        </Link>
+      }
       render={
         <Link
           to="/watch/$titleId"
