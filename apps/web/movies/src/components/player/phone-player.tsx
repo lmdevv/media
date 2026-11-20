@@ -20,6 +20,7 @@ import {
   ListVideoIcon,
   LockIcon,
   Maximize2Icon,
+  MoonIcon,
   SunIcon,
   UsersIcon,
   Volume1Icon,
@@ -29,6 +30,8 @@ import {
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import type { ComponentProps, ReactElement, ReactNode, Ref } from "react";
 
+import { sleepTimerButtonLabel } from "./sleep-timer-menu";
+
 function GlassButton({
   className,
   ...props
@@ -37,7 +40,7 @@ function GlassButton({
     <button
       type="button"
       className={cn(
-        "flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-pill bg-text/18 text-text [&_svg]:size-4.5",
+        "flex h-9 min-w-9 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-pill bg-text/18 text-text [&_svg]:size-4.5",
         className,
       )}
       {...props}
@@ -283,6 +286,7 @@ export function PhoneControls({
   locked,
   onRoom,
   castMenu,
+  sleepTimer,
   bottomBarRef,
 }: {
   readonly title: string;
@@ -312,6 +316,16 @@ export function PhoneControls({
   readonly onRoom?: (() => void) | undefined;
   /** Wraps the cast button in the cast menu, where this browser can play elsewhere. */
   readonly castMenu?: ((trigger: ReactElement) => ReactNode) | undefined;
+  /**
+   * The sleep timer button: `menu` wraps it in the timer's menu, and `timeLeft`, such as `29:41`,
+   * shows beside its icon while a timer runs. Omit to hide the button.
+   */
+  readonly sleepTimer?:
+    | {
+        readonly menu: (trigger: ReactElement) => ReactNode;
+        readonly timeLeft: string | null;
+      }
+    | undefined;
   /** The bar of scrubber and track pills along the bottom. */
   readonly bottomBarRef?: Ref<HTMLDivElement> | undefined;
 }) {
@@ -329,6 +343,19 @@ export function PhoneControls({
             <GlassButton aria-label="Watch together" onClick={onRoom} className="relative">
               <UsersIcon strokeWidth={1.75} aria-hidden />
             </GlassButton>
+          )}
+          {sleepTimer?.menu(
+            <GlassButton
+              aria-label={sleepTimerButtonLabel(sleepTimer.timeLeft)}
+              className={sleepTimer.timeLeft === null ? undefined : "px-3"}
+            >
+              <MoonIcon strokeWidth={1.75} aria-hidden />
+              {sleepTimer.timeLeft === null ? null : (
+                <span className="text-label/caption font-semibold tabular-nums">
+                  {sleepTimer.timeLeft}
+                </span>
+              )}
+            </GlassButton>,
           )}
           {castMenu?.(
             <GlassButton aria-label="Cast">

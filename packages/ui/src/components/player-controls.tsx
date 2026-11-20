@@ -45,8 +45,9 @@ function FullscreenGlyph(props: ComponentProps<"svg">) {
 }
 
 /**
- * A bare transport button: a white glyph with a label for assistive tech. `active` draws the
- * translucent square behind an open panel's button. The glyph takes no pointer events:
+ * A bare transport button: a white glyph with a label for assistive tech, and room for a short
+ * text after the glyph, such as a timer's time left. `active` draws the translucent square behind
+ * an open panel's button. The glyph takes no pointer events:
  * a glyph swapped under the pointer, as mute swaps it, would take the pointer's `pointerout` with
  * it, and React would miss the pointer leaving.
  */
@@ -61,7 +62,7 @@ export function PlayerButton({
       type={type}
       data-active={active || undefined}
       className={cn(
-        "relative flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-bar text-text transition-opacity before:absolute before:-inset-2 before:rounded-control before:bg-text/14 before:opacity-0 hover:opacity-80 disabled:opacity-(--opacity-disabled) data-active:before:opacity-100 data-popup-open:before:opacity-100 [&_svg]:pointer-events-none [&_svg]:relative [&_svg]:size-6.5",
+        "relative flex h-7 min-w-7 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-bar text-text transition-opacity before:absolute before:-inset-2 before:rounded-control before:bg-text/14 before:opacity-0 hover:opacity-80 disabled:opacity-(--opacity-disabled) data-active:before:opacity-100 data-popup-open:before:opacity-100 [&_svg]:pointer-events-none [&_svg]:relative [&_svg]:size-6.5",
         className,
       )}
       {...props}
