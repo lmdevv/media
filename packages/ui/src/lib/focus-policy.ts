@@ -6,7 +6,7 @@ import type { Ref } from "react";
  *
  * 1. Shortcuts are global. They yield only to text fields, to open menus and dialogs, and to the
  *    keys a focused control uses itself (Space on a checkbox, arrows on a slider, Enter anywhere).
- * 2. A pointer click leaves nothing focused, except on text fields and sliders.
+ * 2. A pointer click leaves nothing focused, except on text fields, sliders, and radio buttons.
  * 3. An overlay returns focus to its opener on close only when it was opened from the keyboard.
  *
  * Focus rings stay: `:focus-visible` shows them after keyboard use.
@@ -67,7 +67,7 @@ export function shortcutYields(key: string, focused: ControlKind, overlayOpen: b
 
 /** Whether a control keeps the focus a pointer click gives it: typing and arrow keys need it. */
 export function keepsFocusOnClick(kind: ControlKind): boolean {
-  return kind === "text" || kind === "slider";
+  return kind === "text" || kind === "slider" || kind === "radio";
 }
 
 const inputKind = (input: HTMLInputElement): ControlKind => {

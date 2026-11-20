@@ -278,7 +278,13 @@ test("the wheel scrolls one column, leaving the headings and the other columns s
 test("arrow keys bring each subtitle into view; Escape closes back to the trigger", async ({
   page,
 }) => {
-  const menu = await open(page, "4");
+  await page.goto(moviesPath("/dev/tracks?columns=4"));
+  await page.getByRole("button", { name: LABEL }).focus();
+  await page.keyboard.press("Enter");
+
+  const menu = page.getByRole("dialog", { name: LABEL });
+
+  await settled(menu);
 
   await expect(menu.getByRole("radio", { name: /^1080p Theatrical/u })).toBeFocused();
   await page.keyboard.press("Tab");
@@ -376,7 +382,8 @@ test("in full screen the menu renders inside the player and inside the screen", 
   await expectHeadings(menu, HEADINGS["4"]);
   await expect(subtitle(menu, CHOSEN_SUBTITLE)).toBeInViewport({ ratio: 1 });
 
+  // Opened with a click, so it closes with nothing focused.
   await page.keyboard.press("Escape");
   await expect(menu).toBeHidden();
-  await expect(page.getByRole("button", { name: LABEL })).toBeFocused();
+  await expect.poll(() => page.evaluate(() => document.activeElement?.tagName)).toBe("BODY");
 });

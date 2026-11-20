@@ -68,7 +68,11 @@ describe("shortcutYields", () => {
 });
 
 describe("keepsFocusOnClick", () => {
-  it("keeps focus only on text fields and sliders, which typing and arrows need", () => {
-    expect(KINDS.filter((focused) => keepsFocusOnClick(focused))).toEqual(["text", "slider"]);
+  it("keeps focus only on text fields, sliders, and radios, which typing and arrows need", () => {
+    expect(KINDS.filter((focused) => keepsFocusOnClick(focused))).toEqual([
+      "text",
+      "slider",
+      "radio",
+    ]);
   });
 });
