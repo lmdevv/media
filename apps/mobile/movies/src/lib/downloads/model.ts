@@ -383,6 +383,25 @@ export const downloadsOf = (store: DownloadStore): ReadonlyArray<DownloadRecord>
 export const downloadFor = (store: DownloadStore, id: string | null): DownloadRecord | undefined =>
   store.downloads.find((download) => download.id === id);
 
+/**
+ * The download of a movie (`episodeId` null) or an episode in any of its versions: a ready one,
+ * else the latest added, or none. A card's menu shows it before it knows which version to get.
+ */
+export const downloadOfItem = (
+  store: DownloadStore,
+  titleId: DownloadRecord["titleId"],
+  episodeId: DownloadRecord["episodeId"],
+): DownloadRecord | undefined => {
+  const versions = store.downloads.filter(
+    (download) => download.titleId === titleId && download.episodeId === episodeId,
+  );
+
+  return (
+    versions.find((download) => download.phase === "ready") ??
+    sortedBy(versions, (left, right) => right.addedAt - left.addedAt)[0]
+  );
+};
+
 /** One entry of the core's list of what this device keeps, as the sync reads it. */
 export type ListedDownload =
   | { readonly id: FileId; readonly state: "available"; readonly revision: string }

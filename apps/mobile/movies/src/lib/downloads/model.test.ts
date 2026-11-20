@@ -6,6 +6,7 @@ import {
   DownloadEvent,
   EMPTY_STORE,
   downloadFor,
+  downloadOfItem,
   downloadsOf,
   factsOf,
   headingOf,
@@ -142,6 +143,24 @@ describe("the download store", () => {
     expect(downloadFor(store, null)).toBeUndefined();
     expect(nextToRun(store)?.id).toBe(duneFile);
     expect(nextToRun(store, new Set([duneFile]))?.id).toBe(episodeFile);
+  });
+
+  it("finds a movie's or an episode's download in any version, a ready one first", () => {
+    const remaster = asFileId("file-dune-remaster");
+
+    const queued = run(
+      DownloadEvent.Added({ download: movie, at: 1 }),
+      DownloadEvent.Added({ download: { ...movie, id: remaster }, at: 2 }),
+      DownloadEvent.Added({ download: show, at: 3 }),
+    );
+
+    expect(downloadOfItem(queued, movie.titleId, null)?.id).toBe(remaster);
+    expect(downloadOfItem(queued, show.titleId, show.episodeId)?.id).toBe(episodeFile);
+    expect(downloadOfItem(queued, show.titleId, asEpisodeId("episode-4"))).toBeUndefined();
+    expect(downloadOfItem(queued, show.titleId, null)).toBeUndefined();
+    expect(downloadOfItem(kept(duneFile).reduce(reduce, queued), movie.titleId, null)?.id).toBe(
+      duneFile,
+    );
   });
 
   it("names an episode once its playback is described", () => {
