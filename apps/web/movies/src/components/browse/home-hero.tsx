@@ -109,7 +109,7 @@ function DesktopHero({
               className={buttonVariants({ size: "lg" })}
             >
               <PlayGlyph />
-              {target?.resuming === true ? "Resume" : "Play"}
+              {target?.label ?? "Play"}
             </Link>
           ) : null}
           <Link
@@ -154,7 +154,7 @@ function PhoneHero({
                 className={buttonVariants({ size: "pill" })}
               >
                 <PlayGlyph className="size-4" />
-                {target?.resuming === true ? "Resume" : "Play"}
+                {target?.label ?? "Play"}
               </Link>
             ) : (
               <Link

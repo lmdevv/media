@@ -15,8 +15,9 @@ export interface OpeningSeasonInput {
 }
 
 /**
- * The next episode's season, else the first regular season, so a finished show opens on Season 1
- * rather than its Specials (season 0), else its first season. Null for a show with no seasons.
+ * The next episode's season, else the first regular season, so a show with no next episode opens
+ * on Season 1 rather than its Specials (season 0), else its first season. Null for a show with no
+ * seasons.
  */
 export const openingSeason = ({ nextSeason, seasons }: OpeningSeasonInput): number | null =>
   nextSeason ?? seasons.find((season) => season > 0) ?? seasons[0] ?? null;
