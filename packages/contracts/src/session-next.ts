@@ -90,3 +90,31 @@ export const sessionNext = (input: NextInput): SessionNext => {
 
   return { countdown, step: input.queued ? "next" : "pause" };
 };
+
+/** What a member's Next episode button does: skip to what is queued, or play the next episode. */
+export type SessionSkip = "queued" | "episode";
+
+/** What `sessionSkip` reads. */
+export interface SkipInput {
+  /** This member may move the clock and skip to what is queued. */
+  readonly mayControl: boolean;
+  /** This member may add to the queue. */
+  readonly mayAdd: boolean;
+  /** Whether anything is queued. */
+  readonly queued: boolean;
+  /** Whether the episode after the item can play. */
+  readonly nextPlayable: boolean;
+}
+
+/**
+ * The Next episode button in a group session, by the countdown's rules: only members who may
+ * control see it, and what is queued plays first. With nothing queued, it plays the next episode
+ * for a member who may also add. `null` hides the button.
+ */
+export const sessionSkip = (input: SkipInput): SessionSkip | null => {
+  if (!input.mayControl) return null;
+
+  if (input.queued) return "queued";
+
+  return input.mayAdd && input.nextPlayable ? "episode" : null;
+};

@@ -11,6 +11,7 @@ import {
   Play,
   RotateCcw,
   RotateCw,
+  SkipForward,
   Sun,
   Volume2,
 } from "lucide-react-native";
@@ -24,6 +25,8 @@ import { useThemeColor } from "@/lib/theme-color";
 import type { ScrubTile } from "@/lib/player/scrubbing";
 
 import { Scrubber } from "./scrubber";
+import { SleepTimerMenu } from "./sleep-timer";
+import type { SleepTimerButton } from "./sleep-timer";
 import { Spinner } from "./spinner";
 import type { Transport } from "./transport";
 import { VerticalSlider } from "./vertical-slider";
@@ -57,6 +60,8 @@ export interface PlayerControlsProps {
   readonly brightness: number;
   readonly volume: number;
   readonly more: ReadonlyArray<MoreItem>;
+  /** The sleep timer's button; null hides it, as in a group session. */
+  readonly sleepTimer: SleepTimerButton | null;
   readonly tileAt: (seconds: number) => ScrubTile | null;
   readonly onClose: () => void;
   readonly onTogglePlay: () => void;
@@ -64,6 +69,8 @@ export interface PlayerControlsProps {
   readonly onLock: () => void;
   readonly onSpeed: () => void;
   readonly onAudioSubtitles: () => void;
+  /** Plays the next episode; `null` hides the button, as for a movie or a show's last episode. */
+  readonly onNext: (() => void) | null;
   readonly onBrightness: (value: number) => void;
   readonly onVolume: (value: number) => void;
   /** The viewer is using the controls; keep them up. `true` holds them while a drag lasts. */
@@ -302,6 +309,13 @@ export function PlayerControls(props: PlayerControlsProps) {
               </Text>
             )}
           </View>
+          {props.sleepTimer === null ? null : (
+            <SleepTimerMenu
+              timer={props.sleepTimer}
+              onOpen={() => onInteract(true)}
+              onRelease={() => onInteract(false)}
+            />
+          )}
           <View className="size-11 items-center justify-center overflow-hidden rounded-pill bg-dark-surface-raised/80">
             <VideoAirPlayButton
               tint={white}
@@ -368,22 +382,24 @@ export function PlayerControls(props: PlayerControlsProps) {
             onSeek={props.onSeek}
           />
         </View>
-        <View
-          className="flex-row items-center gap-8 pt-1 pb-3"
-          style={row}
-          pointerEvents="box-none"
-        >
-          <View className="min-w-0 flex-1 flex-row items-center gap-8" pointerEvents="box-none">
+        <View className="flex-row items-center pt-1 pb-3" style={row} pointerEvents="box-none">
+          <View className="flex-1" pointerEvents="none" />
+          <View className="min-w-0 shrink flex-row items-center gap-8" pointerEvents="box-none">
             <BarAction label={props.rateLabel} onPress={props.onSpeed} />
             <BarAction icon={Captions} label="Audio & Subtitles" onPress={props.onAudioSubtitles} />
+            {props.onNext === null ? null : (
+              <BarAction icon={SkipForward} label="Next Episode" onPress={props.onNext} />
+            )}
           </View>
-          {props.more.length === 0 ? null : (
-            <MoreMenu
-              items={props.more}
-              onOpen={() => onInteract(true)}
-              onRelease={() => onInteract(false)}
-            />
-          )}
+          <View className="flex-1 flex-row justify-end" pointerEvents="box-none">
+            {props.more.length === 0 ? null : (
+              <MoreMenu
+                items={props.more}
+                onOpen={() => onInteract(true)}
+                onRelease={() => onInteract(false)}
+              />
+            )}
+          </View>
         </View>
       </View>
     </View>
