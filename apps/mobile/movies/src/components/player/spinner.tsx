@@ -10,11 +10,12 @@ import Animated, {
 } from "react-native-reanimated";
 
 import { Icon } from "@/components/ui/icon";
+import type { IconProps } from "@/components/ui/icon";
 
 const TURN_MS = 1_000;
 
-/** A turning loader in white over video. */
-export function Spinner() {
+/** A turning loader in white over video, at a control's size unless `size` says otherwise. */
+export function Spinner({ size = "control" }: { readonly size?: IconProps["size"] }) {
   const turn = useSharedValue(0);
 
   useEffect(() => {
@@ -29,7 +30,7 @@ export function Spinner() {
 
   return (
     <Animated.View style={style} accessibilityRole="progressbar" accessibilityLabel="Loading">
-      <Icon icon={LoaderCircle} tone="onMedia" size="control" />
+      <Icon icon={LoaderCircle} tone="onMedia" size={size} />
     </Animated.View>
   );
 }
