@@ -8,7 +8,7 @@ import { AccessibilityInfo, Alert } from "react-native";
 
 import { watchStates } from "@/lib/browse";
 import type { WatchState } from "@/lib/browse";
-import type { TitleCard, TitleId } from "@/lib/catalog";
+import type { EpisodeId, TitleCard, TitleId } from "@/lib/catalog";
 import type { Me } from "@/session/me";
 import { SessionPhaseContext } from "@/session/session-phase";
 
@@ -22,8 +22,9 @@ export interface TitleStates {
   readonly watchState: (titleId: TitleId) => WatchState | null;
   readonly addToMyList: (title: TitleCard) => Promise<void>;
   readonly removeFromMyList: (title: TitleCard) => Promise<void>;
-  readonly markWatched: (title: TitleCard) => Promise<void>;
-  readonly markUnwatched: (title: TitleCard) => Promise<void>;
+  /** Marks the whole title, or the one episode `episodeId` names. */
+  readonly markWatched: (title: TitleCard, episodeId: EpisodeId | null) => Promise<void>;
+  readonly markUnwatched: (title: TitleCard, episodeId: EpisodeId | null) => Promise<void>;
   /** The title last removed from My List while Undo is still offered. */
   readonly removed: TitleCard | null;
   /** Puts the last removed title back on My List. */
@@ -44,6 +45,10 @@ const settle = async (change: Promise<unknown>): Promise<boolean> => {
     return false;
   }
 };
+
+/** What a mark applies to: the whole title, or one episode of a show. */
+const watchTarget = (title: TitleCard, episodeId: EpisodeId | null) =>
+  episodeId === null ? { titleId: title.id } : { titleId: title.id, episodeId };
 
 /** The person's whole list, while `on`. */
 const useMyListRows = (on: boolean) => {
@@ -133,11 +138,11 @@ export function TitleStatesProvider({ children }: { readonly children: ReactNode
           AccessibilityInfo.announceForAccessibility(`Removed ${title.name} from My List`);
         }
       },
-      markWatched: async (title) => {
-        await settle(watched({ titleId: title.id }));
+      markWatched: async (title, episodeId) => {
+        await settle(watched(watchTarget(title, episodeId)));
       },
-      markUnwatched: async (title) => {
-        await settle(unwatched({ titleId: title.id }));
+      markUnwatched: async (title, episodeId) => {
+        await settle(unwatched(watchTarget(title, episodeId)));
       },
       removed,
       undoRemove: async () => {

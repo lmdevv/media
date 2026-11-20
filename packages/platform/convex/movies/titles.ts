@@ -33,7 +33,6 @@ import {
   presentProgress,
   presentTitleCard,
   presentVersion,
-  resolveEpisode,
 } from "./present";
 import {
   continueWatching,
@@ -41,7 +40,7 @@ import {
   nextEpisodeAfter,
   openingSeasonOf,
   presentEpisodeFor,
-  upNextEpisode,
+  resolveEpisode,
 } from "./viewing";
 
 const ROW_SCAN = 200;
@@ -430,14 +429,10 @@ export const {
   },
   versions: async (ctx, { titleId, episodeId }, caller) => {
     const { title } = await requireTitle(ctx.db, caller, "view", titleId);
-    const upNext = title.kind === "show" && episodeId === undefined;
+    const chosen = await resolveEpisode(ctx.db, caller.userId, title, episodeId);
 
-    const chosen = upNext
-      ? await upNextEpisode(ctx.db, caller.userId, titleId)
-      : await resolveEpisode(ctx.db, title, episodeId ?? null);
-
-    // A finished show's Play button starts nothing, so it has no versions to offer.
-    if (upNext && chosen === null) return [];
+    // A show with no episodes has nothing to play, so it has no versions to offer.
+    if (title.kind === "show" && chosen === null) return [];
 
     const [files, progress] = await Promise.all([
       filesOnDisk(ctx.db, title, chosen),

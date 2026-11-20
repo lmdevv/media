@@ -1,6 +1,7 @@
 import { openingSeason } from "@media/contracts/opening-season";
 
 import type { Doc, Id } from "../_generated/dataModel";
+import { fail } from "../core/lib/errors";
 import type { DatabaseReader, MutationCtx } from "../_generated/server";
 import type { BudgetedViewer } from "./access";
 import { presentEpisode, presentProgress, presentTitleCard } from "./present";
@@ -211,22 +212,39 @@ const firstEpisode = async (
 
 const MAX_SKIPPED_EPISODES = 100;
 
+/** A point in a show's episode order that a scan for the next unwatched episode starts past. */
+type ScanStart = Pick<Doc<"episodes">, "titleId" | "seasonNumber" | "episodeNumber">;
+
+/** Before a show's first regular episode: any special counts as here. */
+const regularStart = (titleId: Id<"titles">): ScanStart => ({
+  titleId,
+  seasonNumber: 0,
+  episodeNumber: 0,
+});
+
+/**
+ * Up to `count` regular episodes past `episode` in season and episode order. Specials (season 0)
+ * sit outside that order, so past one come the regular episodes from the first.
+ */
 const followingEpisodes = async (
   db: DatabaseReader,
-  episode: Doc<"episodes">,
+  episode: ScanStart,
   count: number,
 ): Promise<ReadonlyArray<Doc<"episodes">>> => {
-  const sameSeason = await db
-    .query("episodes")
-    .withIndex("by_title_order", (q) =>
-      q
-        .eq("titleId", episode.titleId)
-        .eq("seasonNumber", episode.seasonNumber)
-        .gt("episodeNumber", episode.episodeNumber),
-    )
-    .take(count);
+  const sameSeason =
+    episode.seasonNumber === 0
+      ? []
+      : await db
+          .query("episodes")
+          .withIndex("by_title_order", (q) =>
+            q
+              .eq("titleId", episode.titleId)
+              .eq("seasonNumber", episode.seasonNumber)
+              .gt("episodeNumber", episode.episodeNumber),
+          )
+          .take(count);
 
-  if (sameSeason.length >= count || episode.seasonNumber === 0) return sameSeason;
+  if (sameSeason.length >= count) return sameSeason;
 
   const later = await db
     .query("episodes")
@@ -286,13 +304,13 @@ const SCAN_BATCH = 10;
 const scanUnwatched = async (
   db: DatabaseReader,
   userId: Id<"users">,
-  episode: Doc<"episodes">,
+  episode: ScanStart,
   maxSkipped: number,
   giveUp: boolean,
   charge: Charge,
   settle: Settle = NO_SETTLE,
 ): Promise<Doc<"episodes"> | null> => {
-  const step = async (after: Doc<"episodes">, skipped: number): Promise<Doc<"episodes"> | null> => {
+  const step = async (after: ScanStart, skipped: number): Promise<Doc<"episodes"> | null> => {
     const left = maxSkipped - skipped;
     const wanted = left <= SCAN_BATCH ? left + 1 : SCAN_BATCH;
 
@@ -334,8 +352,9 @@ const latestShowProgress = async (
 };
 
 /**
- * The episode a show's Play button starts: the one in progress, the one after the last finished
- * one, or the first. Null when the show is finished or has no episodes.
+ * The episode a show's Play button starts: the one in progress, else the first unwatched one after
+ * the last finished one, else the first unwatched one from the start, else the first. Null only
+ * when the show has no episodes.
  */
 export const upNextEpisode = async (
   db: DatabaseReader,
@@ -344,15 +363,45 @@ export const upNextEpisode = async (
 ): Promise<Doc<"episodes"> | null> => {
   const latest = await latestShowProgress(db, userId, titleId);
 
-  if (latest?.episodeId === null || latest === null) return firstEpisode(db, titleId);
+  const episode =
+    latest === null || latest.episodeId === null ? null : await db.get(latest.episodeId);
 
-  const episode = await db.get(latest.episodeId);
+  if (latest === null || episode === null) return firstEpisode(db, titleId);
 
-  if (episode === null) return firstEpisode(db, titleId);
+  if (!isFinished(latest)) return episode;
 
-  return isFinished(latest)
-    ? scanUnwatched(db, userId, episode, MAX_SKIPPED_EPISODES, true, UNBOUNDED)
-    : episode;
+  return (
+    (await scanUnwatched(db, userId, episode, MAX_SKIPPED_EPISODES, true, UNBOUNDED)) ??
+    (await scanUnwatched(
+      db,
+      userId,
+      regularStart(titleId),
+      MAX_SKIPPED_EPISODES,
+      false,
+      UNBOUNDED,
+    )) ??
+    firstEpisode(db, titleId)
+  );
+};
+
+/**
+ * The episode a start of `title` plays: none for a movie, the episode `episodeId` names, or else
+ * the one the show's Play button starts, null only for a show with no episodes. An episode of
+ * another show fails `not_found`.
+ */
+export const resolveEpisode = async (
+  db: DatabaseReader,
+  userId: Id<"users">,
+  title: Doc<"titles">,
+  episodeId: Id<"episodes"> | undefined,
+): Promise<Doc<"episodes"> | null> => {
+  if (title.kind === "movie") return null;
+
+  if (episodeId === undefined) return upNextEpisode(db, userId, title._id);
+
+  const episode = await db.get(episodeId);
+
+  return episode?.titleId === title._id ? episode : fail("not_found", "No such episode");
 };
 
 /** The season a page of a title's episodes covers when the title has none. */
@@ -395,16 +444,21 @@ export const openingSeasonOf = async (
 };
 
 /**
- * What {@link upNextEpisode} reads at most: the latest progress and its episode, then a scan past
- * up to `MAX_SKIPPED_EPISODES` watched episodes, `SCAN_BATCH` at a time over two ranges each, with
- * each one's progress. Starting from the first episode reads less.
+ * What one {@link scanUnwatched} reads at most: past up to `MAX_SKIPPED_EPISODES` watched episodes,
+ * `SCAN_BATCH` at a time over two ranges each, with each one's progress.
+ */
+const SCAN_READS: Reads = plus(
+  episodesOf(MAX_SKIPPED_EPISODES + 1, 2 * Math.ceil(MAX_SKIPPED_EPISODES / SCAN_BATCH)),
+  times(queryOf(1), MAX_SKIPPED_EPISODES),
+);
+
+/**
+ * What {@link upNextEpisode} reads at most: the latest progress and its episode, a scan past it, a
+ * scan from the start, and the first episode over two ranges.
  */
 export const UP_NEXT_READS: Reads = plus(
-  plus(queryOf(1), EPISODE_GET),
-  plus(
-    episodesOf(MAX_SKIPPED_EPISODES + 1, 2 * Math.ceil(MAX_SKIPPED_EPISODES / SCAN_BATCH)),
-    times(queryOf(1), MAX_SKIPPED_EPISODES),
-  ),
+  plus(plus(queryOf(1), EPISODE_GET), times(SCAN_READS, 2)),
+  episodesOf(2, 2),
 );
 
 const CONTINUE_LIMIT = 20;

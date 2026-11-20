@@ -8,7 +8,7 @@ describe("openingSeason", () => {
     expect(openingSeason({ nextSeason: 0, seasons: [0, 1] })).toBe(0);
   });
 
-  it("opens a finished show on its first regular season, not its Specials", () => {
+  it("opens a show with no next episode on its first regular season, not its Specials", () => {
     expect(openingSeason({ nextSeason: null, seasons: [0, 1, 2] })).toBe(1);
     expect(openingSeason({ nextSeason: null, seasons: [0, 3] })).toBe(3);
   });
