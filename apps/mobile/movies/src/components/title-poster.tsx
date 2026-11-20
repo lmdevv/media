@@ -46,7 +46,7 @@ export function TitlePoster({
     ? artworkUrl(mediaUrl, title.artwork.backdrop ?? title.artwork.poster, "card")
     : artworkUrl(mediaUrl, title.artwork.poster, "poster");
 
-  const menu = useTitleMenu(title, watchHref({ titleId: title.id }));
+  const menu = useTitleMenu({ title, episode: null }, watchHref({ titleId: title.id }));
 
   // One view around the link, sized here: its preview and menu render beside the poster and would
   // take a parent's gap of their own.

@@ -4,6 +4,7 @@ import type { LucideIcon } from "lucide-react-native";
 
 import type { EpisodeId, MediaFileId, TitleId } from "@/lib/catalog";
 import { statusOf } from "@/lib/downloads/model";
+import type { DownloadRecord } from "@/lib/downloads/model";
 import { downloadHref } from "@/lib/routes";
 import { useDownloads } from "@/session/downloads";
 
@@ -24,6 +25,12 @@ export interface DownloadAction {
   /** Queues the download; returns the page to open instead when it is already queued or kept. */
   readonly press: () => string | null;
 }
+
+/** The page of a download already queued or kept: its storage-full page when space ran out. */
+export const keptPageOf = (download: DownloadRecord): string =>
+  download.phase === "noSpace"
+    ? `${downloadHref(download.id)}/storage-full`
+    : downloadHref(download.id);
 
 /**
  * The Download row for `target`, or null while no one is signed in here or the title loads. The
@@ -57,10 +64,7 @@ export const useDownloadAction = (target: DownloadTarget): DownloadAction | null
     };
   }
 
-  const href =
-    existing.phase === "noSpace"
-      ? `${downloadHref(existing.id)}/storage-full`
-      : downloadHref(existing.id);
+  const href = keptPageOf(existing);
 
   if (existing.phase === "ready") {
     return { icon: Check, title: "Downloaded", detail: undefined, press: () => href };
