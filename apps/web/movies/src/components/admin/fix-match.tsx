@@ -1,5 +1,6 @@
 import { TitleId as MediaTitleId } from "@media/contracts/ids";
 import type { MetadataCandidate } from "@media/contracts/models/catalog";
+import type { PlatformSdk } from "@media/sdk/promise";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { Button } from "@media/ui/components/button";
 import { CalmState } from "@media/ui/components/calm-state";
@@ -53,6 +54,34 @@ const searchFailure = (cause: unknown): SearchResults => {
 
 const OVERVIEW_PREVIEW = 90;
 
+/**
+ * Preloads what the fix match screen opens with, for its route's loader: the title, and the
+ * library its breadcrumb names.
+ */
+export const preloadFixMatch = async (
+  platform: PlatformSdk,
+  { libraryId, titleId }: { readonly libraryId: LibraryId; readonly titleId: TitleId },
+): Promise<void> => {
+  await Promise.all([
+    platform.core.libraries.get.preload({ libraryId }),
+    platform.movies.titles.get.preload({ titleId }),
+  ]);
+};
+
+/** The fix match screen while the title loads: the breadcrumb, heading, and facts, then the editor. */
+export function FixMatchSkeleton() {
+  return (
+    <>
+      <div aria-busy className="flex flex-col gap-1.5">
+        <Skeleton className="h-4.5 w-40 rounded-control" />
+        <Skeleton className="h-9 w-40 rounded-control" />
+        <Skeleton className="h-4.5 w-56 max-w-full rounded-control" />
+      </div>
+      <Skeleton className="h-96 w-full rounded-control" />
+    </>
+  );
+}
+
 /** Fix metadata match: the current match beside TMDB search results, and edits by hand. */
 export function FixMatchScreen({
   libraryId,
@@ -66,7 +95,7 @@ export function FixMatchScreen({
   const title = usePlatformQuery(platform.movies.titles.get, { titleId });
   const libraryName = library.status === "success" ? library.data.name : "Library";
 
-  if (title.status === "loading") return <Skeleton className="h-96 w-full rounded-control" />;
+  if (title.status === "loading") return <FixMatchSkeleton />;
 
   if (title.status === "error") {
     const gone = isFailure(title.error, "NotFound") || isFailure(title.error, "InvalidArgs");

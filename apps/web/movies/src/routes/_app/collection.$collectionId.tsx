@@ -5,7 +5,7 @@ import { CalmState } from "@media/ui/components/calm-state";
 import { Link, createFileRoute } from "@tanstack/react-router";
 
 import { asCollectionId } from "@/lib/catalog";
-import { HeroSkeleton } from "@/components/browse/skeletons";
+import { Block, PosterGridSkeleton } from "@/components/browse/skeletons";
 import { TitlePosterCard } from "@/components/browse/title-cards";
 import { PosterGrid } from "@/components/browse/title-grid-page";
 import { artworkUrl } from "@/lib/artwork";
@@ -18,15 +18,35 @@ export const Route = createFileRoute("/_app/collection/$collectionId")({
     stringify: (params) => ({ collectionId: params.collectionId }),
   },
   staticData: { hero: true },
+  loader: ({ context: { platform }, params: { collectionId } }) =>
+    platform.movies.collections.get.preload({ collectionId }),
+  pendingComponent: CollectionSkeleton,
   component: CollectionPage,
 });
+
+/** The collection page while it loads: the backdrop with the name and count, then its posters. */
+function CollectionSkeleton() {
+  return (
+    <div aria-busy className="flex flex-col pb-20">
+      <div className="flex h-110 flex-col justify-end bg-surface-raised px-4 pb-8 md:px-16">
+        <div className="mx-auto flex w-full max-w-content flex-col gap-3">
+          <Block tone="bar" className="h-14 w-60 rounded-inner md:w-90" />
+          <Block tone="bar" className="h-4.5 w-20 rounded-bar" />
+        </div>
+      </div>
+      <div className="mx-auto box-content w-full max-w-content px-4 pt-6 md:px-16">
+        <PosterGridSkeleton count={7} />
+      </div>
+    </div>
+  );
+}
 
 function CollectionPage() {
   const platform = usePlatform();
   const { collectionId } = Route.useParams();
   const collection = usePlatformQuery(platform.movies.collections.get, { collectionId });
 
-  if (collection.status === "loading") return <HeroSkeleton />;
+  if (collection.status === "loading") return <CollectionSkeleton />;
 
   if (collection.status === "error") {
     const missing = isFailure(collection.error, "NotFound");

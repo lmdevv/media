@@ -1,6 +1,6 @@
 import type { Home, TitleCard } from "@/lib/catalog";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
-import { useFirstRows } from "@media/ui/lib/pages";
+import { preloadFirstPage, useFirstRows } from "@media/ui/lib/pages";
 import { Button } from "@media/ui/components/button";
 import { CalmState } from "@media/ui/components/calm-state";
 import { MediaRow } from "@media/ui/components/media-row";
@@ -13,12 +13,19 @@ import { HeroSkeleton, RowSkeleton } from "@/components/browse/skeletons";
 import { newBadge } from "@/components/browse/new-badge";
 import { ContinueCard, TitleLandscapeCard, TitlePosterCard } from "@/components/browse/title-cards";
 import { describeFailure } from "@media/ui/lib/failure";
-import { useActiveScans, useMovieLibraries } from "@/lib/libraries";
+import { librariesPage, useActiveScans, useMovieLibraries } from "@/lib/libraries";
 import { nameOf, useMe, useScopes } from "@/session/session";
 import { usePhone } from "@/lib/use-phone";
 
 export const Route = createFileRoute("/_app/")({
   staticData: { hero: true },
+  loader: async ({ context: { platform } }) => {
+    await Promise.all([
+      platform.movies.titles.home.preload(),
+      preloadFirstPage(platform.core.libraries.list, librariesPage),
+    ]);
+  },
+  pendingComponent: HomeSkeleton,
   component: HomePage,
 });
 

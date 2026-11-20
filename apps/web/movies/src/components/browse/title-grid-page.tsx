@@ -3,7 +3,7 @@ import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { Button } from "@media/ui/components/button";
 import { CalmState } from "@media/ui/components/calm-state";
 import { Chip } from "@media/ui/components/chip";
-import { usePages } from "@media/ui/lib/pages";
+import { preloadFirstPage, usePages } from "@media/ui/lib/pages";
 import type { PageOpts, Paged } from "@media/ui/lib/pages";
 import { ChevronDownIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -88,6 +88,37 @@ const listArgs = (
   if (filters.score !== ANY) args.minRating = Number(filters.score);
 
   return args;
+};
+
+/** The arguments of each page of a grid's titles, shared by its route's loader and the grid. */
+const titlesOf =
+  (kind: TitleKind | undefined, filters: GridFilters) =>
+  (paginationOpts: PageOpts): ListArgs =>
+    listArgs(kind, filters, paginationOpts);
+
+/** The filters a grid opens with: newest first, narrowed to `genre` when the grid fixes one. */
+const openingFilters = (genre: string | undefined): GridFilters => ({
+  sort: "added",
+  genre: genre ?? null,
+  decade: ANY,
+  score: ANY,
+});
+
+/** The arguments of the genres a grid of `kind` offers as chips. */
+const genresOf = (kind: TitleKind | undefined) => (kind === undefined ? {} : { kind });
+
+/**
+ * Preloads what a grid opens with, for its route's loader: the first page of its titles and,
+ * unless it fixes a genre, the genre chips above them, so the grid does not move when they arrive.
+ */
+export const preloadTitleGrid = async (
+  platform: PlatformSdk,
+  { kind, genre }: { readonly kind?: TitleKind; readonly genre?: string },
+): Promise<void> => {
+  await Promise.all([
+    preloadFirstPage(platform.movies.titles.list, titlesOf(kind, openingFilters(genre))),
+    genre === undefined ? platform.movies.titles.genres.preload(genresOf(kind)) : undefined,
+  ]);
 };
 
 interface NearViewport {
@@ -196,10 +227,7 @@ function GenreChips({
 }) {
   const platform = usePlatform();
 
-  const genres = usePlatformQuery(
-    platform.movies.titles.genres,
-    kind === undefined ? {} : { kind },
-  );
+  const genres = usePlatformQuery(platform.movies.titles.genres, genresOf(kind));
 
   const names = genres.status === "success" ? genres.data.slice(0, GENRE_CHIPS) : [];
 
@@ -234,16 +262,8 @@ export function TitleGridPage({
 }) {
   const platform = usePlatform();
 
-  const [filters, setFilters] = useState<GridFilters>({
-    sort: "added",
-    genre: fixedGenre ?? null,
-    decade: ANY,
-    score: ANY,
-  });
-
-  const titles = usePages(platform.movies.titles.list, (paginationOpts) =>
-    listArgs(kind, filters, paginationOpts),
-  );
+  const [filters, setFilters] = useState(() => openingFilters(fixedGenre));
+  const titles = usePages(platform.movies.titles.list, titlesOf(kind, filters));
 
   const next = titles.status === "ready" ? titles.next : null;
   const load = next?.kind === "more" ? next.load : null;
@@ -311,6 +331,16 @@ export function TitleGridPage({
         now={now}
         sentinel={end.ref}
       />
+    </div>
+  );
+}
+
+/** A poster grid page while its first page loads: its heading over blank posters. */
+export function GridPageSkeleton({ heading }: { readonly heading: string }) {
+  return (
+    <div aria-busy className="mx-auto box-content max-w-content px-4 md:px-16">
+      <GridHeader title={heading} />
+      <PosterGridSkeleton />
     </div>
   );
 }

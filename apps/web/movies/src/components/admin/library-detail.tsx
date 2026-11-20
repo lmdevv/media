@@ -1,3 +1,4 @@
+import type { PlatformSdk } from "@media/sdk/promise";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { Button } from "@media/ui/components/button";
 import { CalmState } from "@media/ui/components/calm-state";
@@ -13,7 +14,8 @@ import { PageHeader, crumbLinkClass } from "@media/ui/components/page-header";
 import { Skeleton } from "@media/ui/components/skeleton";
 import { buttonVariants } from "@media/ui/lib/button-variants";
 import { describeFailure, isFailure } from "@media/ui/lib/failure";
-import { usePages } from "@media/ui/lib/pages";
+import { preloadFirstPage, usePages } from "@media/ui/lib/pages";
+import type { PageOpts } from "@media/ui/lib/pages";
 import { cn } from "@media/ui/lib/utils";
 import { Link } from "@tanstack/react-router";
 import { CircleHelpIcon, RotateCwIcon, SearchIcon, TriangleAlertIcon } from "lucide-react";
@@ -51,6 +53,46 @@ import type {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+/** The files a library's page lists when it opens. */
+const OPENING_FILTER: LibraryFileFilter = "all";
+
+/** The arguments of each page of a library's files, shared by its route's loader and the list. */
+const filesOf =
+  (libraryId: LibraryId, filter: LibraryFileFilter) => (paginationOpts: PageOpts) => ({
+    paginationOpts,
+    libraryId,
+    filter,
+  });
+
+/**
+ * Preloads what a library's page opens with, for its route's loader: the library, its first page
+ * of files, and the counts above them, so the list does not move when the counts arrive.
+ */
+export const preloadLibraryDetail = async (
+  platform: PlatformSdk,
+  libraryId: LibraryId,
+): Promise<void> => {
+  await Promise.all([
+    platform.core.libraries.get.preload({ libraryId }),
+    platform.movies.files.summary.preload({ libraryId }),
+    preloadFirstPage(platform.movies.files.list, filesOf(libraryId, OPENING_FILTER)),
+  ]);
+};
+
+/** A library's page while it loads: the breadcrumb, name, and facts, then its files. */
+export function LibraryDetailSkeleton() {
+  return (
+    <>
+      <div aria-busy className="flex flex-col gap-1.5">
+        <Skeleton className="h-4.5 w-16 rounded-control" />
+        <Skeleton className="h-9 w-56 rounded-control" />
+        <Skeleton className="h-4.5 w-72 max-w-full rounded-control" />
+      </div>
+      <Skeleton className="h-60 w-full rounded-control" />
+    </>
+  );
+}
+
 /**
  * A library's page: its scan, its files with their quality, size, and state, and the missing
  * files to review.
@@ -59,11 +101,11 @@ export function LibraryDetailScreen({ libraryId }: { readonly libraryId: Library
   const platform = usePlatform();
   const library = usePlatformQuery(platform.core.libraries.get, { libraryId });
   const summary = usePlatformQuery(platform.movies.files.summary, { libraryId });
-  const [filter, setFilter] = useState<LibraryFileFilter>("all");
+  const [filter, setFilter] = useState(OPENING_FILTER);
   const me = useMe();
   const now = useNow(30_000);
 
-  if (library.status === "loading") return <Skeleton className="h-60 w-full rounded-control" />;
+  if (library.status === "loading") return <LibraryDetailSkeleton />;
 
   if (library.status === "error") {
     return <LibraryLoadError error={library.error} onRetry={library.retry} />;
@@ -326,11 +368,7 @@ function FileList({
   const [search, setSearch] = useState("");
   const needle = search.trim().toLowerCase();
 
-  const files = usePages(platform.movies.files.list, (paginationOpts) => ({
-    paginationOpts,
-    libraryId,
-    filter,
-  }));
+  const files = usePages(platform.movies.files.list, filesOf(libraryId, filter));
 
   return (
     <>
