@@ -3,7 +3,7 @@
     "name": "music",
     "slug": "music",
     "scheme": "music",
-    "version": "0.6.0",
+    "version": "0.7.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "ios": {
