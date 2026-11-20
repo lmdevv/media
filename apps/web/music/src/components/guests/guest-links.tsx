@@ -2,7 +2,7 @@ import { GuestLinksForm } from "@media/ui/components/guest-links-form";
 import type { GuestLinkButtonProps } from "@media/ui/components/guest-links-form";
 import type { GuestLinkSelection } from "@media/ui/lib/guest-link-dialog";
 import { useGuestLinkDialog, useMayShareGuests } from "@media/ui/lib/use-guest-links";
-import { createContext, useContext, useMemo, useState } from "react";
+import { createContext, useContext, useMemo } from "react";
 import type { ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -46,12 +46,14 @@ export function GuestLinksProvider({ children }: { readonly children: ReactNode 
   );
 }
 
-/** Uses the page's already-loaded gate; a menu never starts its own policy query. */
+/**
+ * Follows the page's gate, which the signed-in layout starts loading with every page; a menu
+ * never starts its own policy query, and one opened before the gate answers gains the item then.
+ */
 export function GuestLinkMenuItem({ target, name }: GuestLinkSelection) {
   const sharing = useContext(GuestLinksContext);
-  const [offered] = useState(sharing?.allowed ?? false);
 
-  return offered && sharing !== null && sharing.allowed ? (
+  return sharing !== null && sharing.allowed ? (
     <DropdownMenuItem onClick={() => sharing.show({ target, name })}>Guest link</DropdownMenuItem>
   ) : null;
 }
