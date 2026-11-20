@@ -299,7 +299,7 @@ const titleDetail = v.object({
   versions: v.array(mediaVersion),
   /** A movie's progress; a show's is on its episodes. */
   progress: nullable(progress),
-  /** The episode a show's Play button starts, null for a movie or a finished show. */
+  /** The episode a show's Play button starts, null for a movie or a show with no episodes. */
   nextEpisode: nullable(episode),
   inMyList: v.boolean(),
 });
@@ -561,7 +561,7 @@ export const movies = [
           version: nullable(mediaVersion),
           /** A movie's progress; a show's is on `nextEpisode`. */
           progress: nullable(progress),
-          /** The episode a show's Play button starts; null for a movie or a finished show. */
+          /** The episode a show's Play button starts; null for a movie or a show with no episodes. */
           nextEpisode: nullable(episode),
           inMyList: v.boolean(),
         }),
@@ -622,7 +622,7 @@ export const movies = [
       titleId: v.id("titles"),
       /**
        * An episode of the show. Omit for a movie, or for the episode a show's Play button starts:
-       * none for a finished show.
+       * none for a show with no episodes.
        */
       episodeId: v.optional(v.id("episodes")),
     },
@@ -740,7 +740,9 @@ export const movies = [
       "Start a movie or an episode: choose its file, resume your position, and get a stream ticket for this session",
     scope: "movies:play",
     args: {
-      ...watchTarget,
+      titleId: v.id("titles"),
+      /** An episode of the show; omit for a movie, or for the episode the show's Play button starts. */
+      episodeId: v.optional(v.id("episodes")),
       /** A version from `movies.titles.versions`; omit for the one you last played, else the best. */
       fileId: v.optional(v.id("mediaFiles")),
       /** What this device plays directly, preferred after the version you last played. */

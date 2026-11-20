@@ -56,6 +56,9 @@ function Artwork({
  *
  * @param progress - Fraction watched, from 0 to 1; omit to hide the bar.
  * @param size - `desktop` is 288px wide; `phone` is 200px with softer corners.
+ * @param action - A second control in the artwork's bottom-right corner, such as an info link. It
+ *   sits beside the card's link, not inside it, and shows on hover, on keyboard focus, and always on
+ *   touch screens.
  */
 export function LandscapeCard({
   title,
@@ -64,6 +67,7 @@ export function LandscapeCard({
   badge,
   progress,
   size = "desktop",
+  action,
   className,
   render,
   ...props
@@ -71,18 +75,25 @@ export function LandscapeCard({
   readonly subtitle?: string | undefined;
   readonly progress?: number | undefined;
   readonly size?: "desktop" | "phone";
+  readonly action?: ReactNode;
 }) {
   const percent = progress === undefined ? undefined : Math.round(progress * 100);
 
-  return useRender({
+  const frame = cn(
+    "group/card shrink-0 snap-start",
+    size === "desktop" ? "w-72" : "w-50",
+    className,
+  );
+
+  const link = useRender({
     defaultTagName: "a",
     render,
     props: mergeProps<"a">(
       {
         className: cn(
-          "group/card flex shrink-0 snap-start flex-col rounded-poster",
-          size === "desktop" ? "w-72 gap-2" : "w-50 gap-1.5",
-          className,
+          "flex flex-col rounded-poster",
+          size === "desktop" ? "gap-2" : "gap-1.5",
+          action === undefined && frame,
         ),
         children: (
           <>
@@ -113,6 +124,17 @@ export function LandscapeCard({
       props,
     ),
   });
+
+  if (action === undefined) return link;
+
+  return (
+    <div className={cn("relative", frame)}>
+      {link}
+      <span className="pointer-events-none absolute inset-x-0 top-0 flex aspect-video items-end justify-end p-2 opacity-0 transition-opacity group-hover/card:opacity-100 group-has-focus-visible/card:opacity-100 pointer-coarse:opacity-100 *:pointer-events-auto">
+        {action}
+      </span>
+    </div>
+  );
 }
 
 /**

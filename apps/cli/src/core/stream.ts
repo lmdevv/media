@@ -188,7 +188,7 @@ const stream = coreShortcut("movies", "stream", {
           ? flagEpisode
           : title.nextEpisode === null
             ? yield* new NotFound({
-                message: `${title.name} has no episode to play next; pass --episode-id`,
+                message: `${title.name} has no episodes to play`,
               })
             : Option.some(title.nextEpisode.id);
 

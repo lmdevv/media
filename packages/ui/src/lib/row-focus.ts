@@ -2,9 +2,27 @@ const MEDIA_ROW_ATTRIBUTE = "data-media-row";
 
 const FOCUSABLE = "a[href], button:not([disabled]), [tabindex]:not([tabindex='-1'])";
 
-/** The focusable cards of a row track, in order. */
-export function rowItems(track: Element): ReadonlyArray<HTMLElement> {
-  return [...track.querySelectorAll<HTMLElement>(FOCUSABLE)];
+/**
+ * The cards of a row track, in order, each with the element that takes its focus: the card itself
+ * when it is focusable, else its first focusable element. A card's other controls, such as an info
+ * link, belong to it, so arrows move from them to the next card.
+ */
+export function rowCards(
+  track: Element,
+): ReadonlyArray<{ readonly card: Element; readonly item: HTMLElement }> {
+  return [...track.children].flatMap((card) => {
+    const item = card.matches(FOCUSABLE) ? card : card.querySelector(FOCUSABLE);
+
+    return item instanceof HTMLElement ? [{ card, item }] : [];
+  });
+}
+
+/** The index of the card holding `element`, or -1. */
+export function rowIndexOf(
+  cards: ReadonlyArray<{ readonly card: Element }>,
+  element: Element | null,
+): number {
+  return element === null ? -1 : cards.findIndex(({ card }) => card.contains(element));
 }
 
 const scrollBehavior = (): ScrollBehavior =>
@@ -34,15 +52,10 @@ export function moveRowFocus(direction: 1 | -1): boolean {
   if (target === undefined) return false;
 
   const column =
-    current === -1
-      ? 0
-      : Math.max(
-          0,
-          rowItems(tracks[current] ?? target).findIndex((item) => item === active),
-        );
+    current === -1 ? 0 : Math.max(0, rowIndexOf(rowCards(tracks[current] ?? target), active));
 
-  const items = rowItems(target);
-  const item = items[Math.min(column, items.length - 1)];
+  const cards = rowCards(target);
+  const item = cards[Math.min(column, cards.length - 1)]?.item;
 
   if (item === undefined) return false;
 

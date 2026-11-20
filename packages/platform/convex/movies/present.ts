@@ -213,24 +213,6 @@ export const filesOnDisk = async (
   return onDiskBestFirst(files, episode?._id ?? null);
 };
 
-/**
- * The episode `episodeId` names, for a show, or null for a movie. A show needs an episode, and an
- * episode of another show fails `not_found`.
- */
-export const resolveEpisode = async (
-  db: DatabaseReader,
-  title: Doc<"titles">,
-  episodeId: Id<"episodes"> | null,
-): Promise<Doc<"episodes"> | null> => {
-  if (title.kind === "movie") return null;
-
-  if (episodeId === null) return fail("invalid_args", "Pick an episode");
-
-  const episode = await db.get(episodeId);
-
-  return episode?.titleId === title._id ? episode : fail("not_found", "No such episode");
-};
-
 const directPlayFile = (file: Doc<"mediaFiles">): DirectPlayFile => {
   const video = primaryVideo(file);
   const audio = defaultAudio(file);

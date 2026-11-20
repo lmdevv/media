@@ -9,6 +9,7 @@ import { Schema } from "effect";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
+import { TitleMenu } from "@/components/browse/title-menu";
 import { artworkUrl } from "@/lib/artwork";
 import { toastFailure } from "@media/ui/lib/failure";
 import { formatCount, plural, titleKindFacts } from "@/lib/format";
@@ -183,13 +184,15 @@ function KindChips({
 
 function ResultCard({ title }: { readonly title: TitleCard }) {
   return (
-    <LandscapeCard
-      title={title.name}
-      subtitle={titleKindFacts(title)}
-      image={artworkUrl(title.artwork.backdrop ?? title.artwork.poster, "card")}
-      className="w-full gap-1.5 md:gap-2 md:[&>span:nth-child(2)]:text-body/5 md:[&>span:nth-child(3)]:text-label/label"
-      render={<Link to="/title/$titleId" params={{ titleId: title.id }} />}
-    />
+    <TitleMenu title={title}>
+      <LandscapeCard
+        title={title.name}
+        subtitle={titleKindFacts(title)}
+        image={artworkUrl(title.artwork.backdrop ?? title.artwork.poster, "card")}
+        className="w-full gap-1.5 md:gap-2 md:[&>span:nth-child(2)]:text-body/5 md:[&>span:nth-child(3)]:text-label/label"
+        render={<Link to="/title/$titleId" params={{ titleId: title.id }} />}
+      />
+    </TitleMenu>
   );
 }
 

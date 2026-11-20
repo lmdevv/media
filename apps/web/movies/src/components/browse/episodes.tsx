@@ -21,6 +21,7 @@ import {
 import { creditLines, formatDate } from "@/lib/metadata";
 
 import { SelectMenu } from "./select-menu";
+import { EpisodeMenu } from "./title-menu";
 
 const NO_EPISODES: ReadonlyArray<SeasonEpisode> = [];
 
@@ -110,7 +111,9 @@ export function Episodes({ show, phone }: { readonly show: TitleDetail; readonly
         <ol className="flex flex-col gap-4 px-4 pt-2">
           {list.map((episode) => (
             <li key={episode.id}>
-              <PhoneEpisode show={show} episode={episode} />
+              <EpisodeMenu show={show} episode={episode}>
+                <PhoneEpisode show={show} episode={episode} />
+              </EpisodeMenu>
             </li>
           ))}
         </ol>
@@ -140,7 +143,9 @@ export function Episodes({ show, phone }: { readonly show: TitleDetail; readonly
               ))
             : list.map((episode) => (
                 <li key={episode.id}>
-                  <DesktopEpisode show={show} episode={episode} next={episode.id === nextId} />
+                  <EpisodeMenu show={show} episode={episode}>
+                    <DesktopEpisode show={show} episode={episode} next={episode.id === nextId} />
+                  </EpisodeMenu>
                 </li>
               ))}
         </ol>
