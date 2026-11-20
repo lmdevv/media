@@ -110,7 +110,10 @@ export function LibrariesCrumb() {
   );
 }
 
-/** The library page while the library loads: its header with facts and Scan now, the scan line. */
+/**
+ * The library page while the library loads: its header with facts, and the scan line. A library
+ * shared to view has no Scan now, so the header holds no place for it.
+ */
 export function LibrarySkeleton({ back }: { readonly back: ReactNode }) {
   return (
     <>
@@ -120,7 +123,6 @@ export function LibrarySkeleton({ back }: { readonly back: ReactNode }) {
         facts={
           <span className="inline-block h-3 w-48 animate-pulse rounded-control bg-muted align-middle" />
         }
-        actions={<Skeleton className="h-8 w-26 rounded-control" />}
       />
       <Skeleton aria-label="Loading the library" className="h-4.5 w-56 rounded-control" />
     </>

@@ -8,7 +8,6 @@ import { createFileRoute } from "@tanstack/react-router";
 
 import { PageHeader } from "@media/ui/components/page-header";
 import { Section } from "@/components/admin/parts";
-import { SettingsFrame } from "@/components/shell";
 import { describeFailure } from "@media/ui/lib/failure";
 import { useAction } from "@/screens/people/action";
 import {
@@ -22,17 +21,18 @@ import {
 import type { SettingsChange } from "@/screens/people/settings";
 import { useMe } from "@/session/me";
 
-export const Route = createFileRoute("/settings")({
-  staticData: { need: "account" },
+export const Route = createFileRoute("/_you/settings")({
   head: () => ({ meta: [{ title: "Settings · Lar" }] }),
   loader: async ({ context: { platform } }) => {
-    await Promise.all([platform.core.settings.get.preload(), preloadRestrictions(platform)]);
+    // Playback has a skeleton of its own size, so its settings need not hold the page.
+    void platform.core.settings.get.preload();
+    await preloadRestrictions(platform);
   },
   pendingComponent: SettingsSkeleton,
   component: SettingsPage,
 });
 
-/** Preloads the person's own limits, which decide whether Shared devices shows. */
+/** Preloads the person's own limits, which decide whether Shared devices shows and what it holds. */
 const preloadRestrictions = async (platform: PlatformSdk): Promise<void> => {
   const { current } = platform.core.auth.sessions;
 
@@ -57,7 +57,7 @@ const SECTIONS = [
 /** The settings page while its settings load: each section's title over its form's place. */
 function SettingsSkeleton() {
   return (
-    <SettingsFrame>
+    <>
       <PageHeader title="Settings" />
       {SECTIONS.map(({ title, form }) => (
         <Section key={title} title={title}>
@@ -65,7 +65,7 @@ function SettingsSkeleton() {
         </Section>
       ))}
       <PlaybackSkeleton />
-    </SettingsFrame>
+    </>
   );
 }
 
@@ -108,7 +108,7 @@ function SettingsPage() {
   const settings = usePlatformQuery(platform.core.settings.get);
 
   return (
-    <SettingsFrame>
+    <>
       <PageHeader title="Settings" />
       <DisplayNameSection
         key={me.displayName ?? ""}
@@ -148,6 +148,6 @@ function SettingsPage() {
           onChange={(change) => void playback.run(change)}
         />
       ) : null}
-    </SettingsFrame>
+    </>
   );
 }

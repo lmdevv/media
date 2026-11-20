@@ -3,7 +3,7 @@ import { Button } from "@media/ui/components/button";
 import { PageHeader } from "@media/ui/components/page-header";
 import { Skeleton } from "@media/ui/components/skeleton";
 import { useFirstRows, usePages } from "@media/ui/lib/pages";
-import type { Paged } from "@media/ui/lib/pages";
+import type { PageOpts, Paged } from "@media/ui/lib/pages";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
@@ -17,6 +17,12 @@ export type JobFilter = "all" | "failed";
 
 /** The failed jobs counted in the filter's label; more shows as `100+`. */
 const FAILED_COUNTED = 100;
+
+/** The failed jobs' arguments for each page. */
+export const failedArgs = (paginationOpts: PageOpts) => ({
+  status: "failed" as const,
+  paginationOpts,
+});
 
 const STATUS: Readonly<Record<Job["status"], string>> = {
   queued: "Waiting",
@@ -73,11 +79,7 @@ export function JobsScreen() {
   const [filter, setFilter] = useState<JobFilter>("all");
   const all = usePages(platform.core.jobs.list, pageArgs);
 
-  const failed = useFirstRows(
-    platform.core.jobs.list,
-    (paginationOpts) => ({ status: "failed" as const, paginationOpts }),
-    FAILED_COUNTED,
-  );
+  const failed = useFirstRows(platform.core.jobs.list, failedArgs, FAILED_COUNTED);
 
   return (
     <JobsView

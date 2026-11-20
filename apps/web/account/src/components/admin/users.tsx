@@ -1,5 +1,6 @@
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { Button } from "@media/ui/components/button";
+import { Skeleton } from "@media/ui/components/skeleton";
 import { TextField } from "@media/ui/components/text-field";
 import { Match } from "effect";
 import { useState } from "react";
@@ -82,13 +83,30 @@ export function UsersScreen() {
   );
 }
 
-/** The users page while its people load. */
+/** The users page while its people load: the people, both ways to add someone, and the invites. */
 export function UsersSkeleton() {
   return (
     <>
       <PageHeader title="Users" />
       <Section title="People">
         <ListSkeleton label="People" />
+      </Section>
+      <div className="grid gap-10 md:grid-cols-2 md:gap-12">
+        <Section title="Invite someone">
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-wrap gap-3">
+              <Skeleton className="h-15 min-w-36 flex-1 rounded-control" />
+              <Skeleton className="h-15 min-w-36 flex-1 rounded-control" />
+            </div>
+            <Skeleton className="h-8 w-36 rounded-control" />
+          </div>
+        </Section>
+        <Section title="Create an account">
+          <Skeleton className="h-68 w-full rounded-control" />
+        </Section>
+      </div>
+      <Section title="Pending invites">
+        <ListSkeleton label="Pending invites" />
       </Section>
     </>
   );
@@ -668,9 +686,7 @@ export function AddSomeoneView({
 function PendingInvites() {
   const platform = usePlatform();
 
-  const invites = usePages(platform.core.accounts.invites.list, (paginationOpts) => ({
-    paginationOpts,
-  }));
+  const invites = usePages(platform.core.accounts.invites.list, pageArgs);
 
   const actions = useActions<Invite["inviteId"]>();
 

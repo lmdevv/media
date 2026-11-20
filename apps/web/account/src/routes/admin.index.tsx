@@ -6,8 +6,10 @@ import { UsersScreen, UsersSkeleton } from "@/components/admin/users";
 
 export const Route = createFileRoute("/admin/")({
   head: () => ({ meta: [{ title: "Users · Lar" }] }),
-  loader: ({ context: { platform } }) =>
-    preloadFirstPage(platform.core.accounts.users.list, pageArgs),
+  loader: async ({ context: { platform } }) => {
+    void preloadFirstPage(platform.core.accounts.invites.list, pageArgs);
+    await preloadFirstPage(platform.core.accounts.users.list, pageArgs);
+  },
   pendingComponent: UsersSkeleton,
   component: UsersScreen,
 });
