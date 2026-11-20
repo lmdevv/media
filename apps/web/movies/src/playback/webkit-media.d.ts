@@ -21,4 +21,6 @@ interface HTMLVideoElement {
   readonly webkitPresentationMode?: string;
   /** Plays the video full screen in the system player (iPhone Safari). */
   readonly webkitEnterFullscreen?: () => void;
+  /** Whether the system player shows the video full screen now (iPhone Safari). */
+  readonly webkitDisplayingFullscreen?: boolean;
 }

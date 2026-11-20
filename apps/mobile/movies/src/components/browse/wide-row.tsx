@@ -17,7 +17,7 @@ import { useTitleMenu } from "./title-menu";
 export function WideRow({ title }: { readonly title: TitleCard }) {
   const { mediaUrl } = useServer();
   const uri = artworkUrl(mediaUrl, title.artwork.backdrop ?? title.artwork.poster, "card");
-  const menu = useTitleMenu(title, watchHref({ titleId: title.id }));
+  const menu = useTitleMenu({ title, episode: null }, watchHref({ titleId: title.id }));
   const detail = kindFacts(title);
 
   // The link sits in its own row beside `…`: its preview and menu render beside the row and would
