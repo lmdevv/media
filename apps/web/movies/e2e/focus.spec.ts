@@ -38,7 +38,7 @@ test("a clicked button keeps no focus; Tab rings the next one and Enter presses 
 
   await all.click();
   await expect(all).toHaveAttribute("aria-pressed", "true");
-  expect(await focusedTag(page)).toBe("BODY");
+  await expect.poll(() => focusedTag(page)).toBe("BODY");
 
   await page.keyboard.press("Tab");
   await expect.poll(() => ringed(sciFi)).toBe(true);

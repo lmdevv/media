@@ -120,7 +120,7 @@ test("a clicked button keeps no focus; Tab rings the next one and Enter presses 
   const player = await playFirstSong(page);
 
   await player.getByRole("button", { name: "Previous", exact: true }).click();
-  expect(await focusedTag(page)).toBe("BODY");
+  await expect.poll(() => focusedTag(page)).toBe("BODY");
 
   await page.keyboard.press("Tab");
 
@@ -129,6 +129,25 @@ test("a clicked button keeps no focus; Tab rings the next one and Enter presses 
   await expect.poll(() => ringed(pause)).toBe(true);
   await page.keyboard.press("Enter");
   await expect(player.getByRole("button", { name: "Play", exact: true })).toBeVisible();
+});
+
+test("a clicked heart that stops its click keeps no focus, so Enter does not like it again", async ({
+  page,
+}) => {
+  if (stack === null) return;
+
+  const player = await playFirstSong(page);
+
+  // The heart stops its click from reaching the page, as the track list's play buttons do.
+  await player.getByRole("button", { name: `Like ${FIRST_SONG}`, exact: true }).click();
+
+  const unlike = player.getByRole("button", { name: `Unlike ${FIRST_SONG}`, exact: true });
+
+  await expect(unlike).toBeVisible();
+  await expect.poll(() => focusedTag(page)).toBe("BODY");
+
+  await page.keyboard.press("Enter");
+  await expect(unlike).toBeVisible();
 });
 
 test("Play on returns focus to its button after a keyboard open, and to nothing after a click", async ({

@@ -138,15 +138,21 @@ const markPointer = (): void => {
  */
 const PRESSABLE = `:is(button, a[href], input, select, textarea, [role="button"], [role="link"], [role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"], [role="tab"], [role="option"], [role="checkbox"], [role="switch"], [role="radio"], [role="slider"])`;
 
-/** After a pointer click on a button or link, take focus off it so later keys go to shortcuts. */
+/**
+ * After a pointer click on a button or link, take focus off it so later keys go to shortcuts.
+ * Heard while the click is captured, so a handler that stops its propagation cannot hide it, and
+ * checked once the click's handlers have run, so focus a handler moved elsewhere stays there.
+ */
 const blurAfterPointerClick = (event: MouseEvent): void => {
   if (event.detail === 0 || !(event.target instanceof Element)) return;
 
   const pressed = event.target.closest(PRESSABLE);
 
-  if (!(pressed instanceof HTMLElement) || pressed !== pressed.ownerDocument.activeElement) return;
+  if (!(pressed instanceof HTMLElement) || keepsFocusOnClick(controlKindOf(pressed))) return;
 
-  if (!keepsFocusOnClick(controlKindOf(pressed))) pressed.blur();
+  setTimeout(() => {
+    if (pressed === pressed.ownerDocument.activeElement) pressed.blur();
+  }, 0);
 };
 
 /**
@@ -158,12 +164,12 @@ export function useFocusPolicy(): void {
   useEffect(() => {
     document.addEventListener("keydown", markKeyboard, true);
     document.addEventListener("pointerdown", markPointer, true);
-    document.addEventListener("click", blurAfterPointerClick);
+    document.addEventListener("click", blurAfterPointerClick, true);
 
     return () => {
       document.removeEventListener("keydown", markKeyboard, true);
       document.removeEventListener("pointerdown", markPointer, true);
-      document.removeEventListener("click", blurAfterPointerClick);
+      document.removeEventListener("click", blurAfterPointerClick, true);
     };
   }, []);
 }
