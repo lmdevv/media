@@ -82,14 +82,14 @@ export const preloadLibraryDetail = async (
 /** A library's page while it loads: the breadcrumb, name, and facts, then its files. */
 export function LibraryDetailSkeleton() {
   return (
-    <>
-      <div aria-busy className="flex flex-col gap-1.5">
+    <div aria-busy className="flex flex-col gap-6">
+      <div className="flex flex-col gap-1.5">
         <Skeleton className="h-4.5 w-16 rounded-control" />
         <Skeleton className="h-9 w-56 rounded-control" />
         <Skeleton className="h-4.5 w-72 max-w-full rounded-control" />
       </div>
       <Skeleton className="h-60 w-full rounded-control" />
-    </>
+    </div>
   );
 }
 

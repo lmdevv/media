@@ -4,6 +4,7 @@ import { Button } from "@media/ui/components/button";
 import { CalmState } from "@media/ui/components/calm-state";
 import { Chip } from "@media/ui/components/chip";
 import { preloadFirstPage, usePages } from "@media/ui/lib/pages";
+import { cn } from "@media/ui/lib/utils";
 import type { PageOpts, Paged } from "@media/ui/lib/pages";
 import { ChevronDownIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -14,7 +15,7 @@ import { plural, titleFacts } from "@/lib/format";
 import { useLatest } from "@/lib/use-latest";
 import { decadesUntil } from "@/lib/metadata";
 
-import { PosterGridSkeleton } from "./skeletons";
+import { Block, PosterGridSkeleton } from "./skeletons";
 import { SelectMenu } from "./select-menu";
 import type { SelectOption } from "./select-menu";
 import { newBadge } from "./new-badge";
@@ -340,6 +341,45 @@ export function GridPageSkeleton({ heading }: { readonly heading: string }) {
   return (
     <div aria-busy className="mx-auto box-content max-w-content px-4 md:px-16">
       <GridHeader title={heading} />
+      <PosterGridSkeleton />
+    </div>
+  );
+}
+
+const MENU_WIDTHS = ["w-36", "w-40", "w-46"];
+
+const CHIP_WIDTHS = ["w-12", "w-20", "w-16", "w-24", "w-18", "w-20", "w-16", "w-22", "w-18"];
+
+/**
+ * A {@link TitleGridPage} while its first page loads: its heading with the Year, Score, and Sort
+ * menus, the genre chips unless it fixes a genre, and blank posters, at the page's heights.
+ */
+export function TitleGridSkeleton({
+  genre,
+  heading,
+}: {
+  readonly genre?: string | undefined;
+  readonly heading: string;
+}) {
+  return (
+    <div aria-busy className="mx-auto box-content max-w-content px-4 md:px-16">
+      <GridHeader
+        title={heading}
+        controls={
+          <div className="flex items-center gap-2">
+            {MENU_WIDTHS.map((width) => (
+              <Block key={width} tone="bar" className={cn("h-9 rounded-control", width)} />
+            ))}
+          </div>
+        }
+      />
+      {genre === undefined ? (
+        <div className="flex gap-2 overflow-hidden pb-6 md:pb-8">
+          {CHIP_WIDTHS.map((width, index) => (
+            <Block key={index} tone="bar" className={cn("h-8 rounded-pill", width)} />
+          ))}
+        </div>
+      ) : null}
       <PosterGridSkeleton />
     </div>
   );

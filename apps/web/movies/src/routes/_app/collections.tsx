@@ -2,16 +2,13 @@ import { usePlatform } from "@media/sdk/react";
 import { Button } from "@media/ui/components/button";
 import { CalmState } from "@media/ui/components/calm-state";
 import { preloadFirstPage, useAllPages } from "@media/ui/lib/pages";
-import type { PageOpts } from "@media/ui/lib/pages";
 import { createFileRoute } from "@tanstack/react-router";
 
 import { CollectionCard } from "@/components/browse/collection-card";
 import { PosterGridSkeleton } from "@/components/browse/skeletons";
 import { GridHeader, GridPageSkeleton, PosterGrid } from "@/components/browse/title-grid-page";
+import { collectionsPage } from "@/lib/catalog";
 import { plural } from "@/lib/format";
-
-/** The arguments of each page of the collections, shared by the loader and the page. */
-const collectionsPage = (paginationOpts: PageOpts) => ({ paginationOpts });
 
 export const Route = createFileRoute("/_app/collections")({
   head: () => ({ meta: [{ title: "Collections · Lar Movies" }] }),

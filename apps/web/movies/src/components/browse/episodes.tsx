@@ -1,14 +1,9 @@
-import type { Episode, SeasonEpisode, TitleDetail, TitleId } from "@/lib/catalog";
-import {
-  allOfSeason,
-  openingPageArgs,
-  openingSeason,
-  seasonPageArgs,
-} from "@media/contracts/opening-season";
+import type { Episode, SeasonEpisode, TitleDetail } from "@/lib/catalog";
+import { allOfSeason, openingSeason, seasonPageArgs } from "@media/contracts/opening-season";
 import { usePlatform } from "@media/sdk/react";
 import { EpisodeRow } from "@media/ui/components/media-card";
 import { ProgressBar } from "@media/ui/components/progress-bar";
-import { useAllPages, usePages } from "@media/ui/lib/pages";
+import { useAllPages } from "@media/ui/lib/pages";
 import { cn } from "@media/ui/lib/utils";
 import { Link } from "@tanstack/react-router";
 import { ChevronDownIcon } from "lucide-react";
@@ -62,25 +57,6 @@ const openingSeasonOf = (show: TitleDetail): number =>
     nextSeason: show.nextEpisode?.seasonNumber ?? null,
     seasons: show.seasons.map((season) => season.seasonNumber),
   }) ?? 1;
-
-const useOpeningEpisodes = (titleId: TitleId) => {
-  const platform = usePlatform();
-
-  return usePages(platform.movies.titles.episodes, (paginationOpts) =>
-    openingPageArgs(titleId, paginationOpts),
-  );
-};
-
-/**
- * Holds the first page of the season a title's page opens on from the moment the page opens, so
- * the episode list has its answer when it mounts, which is only after the title answered. A
- * movie's page holds an empty page.
- */
-export function HeldEpisodes({ titleId }: { readonly titleId: TitleId }) {
-  useOpeningEpisodes(titleId);
-
-  return null;
-}
 
 /**
  * The episodes section of a show's page. Starts on the season of the next episode, else the first

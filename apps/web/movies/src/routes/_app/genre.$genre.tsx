@@ -3,7 +3,7 @@ import { Schema } from "effect";
 
 import {
   TitleGridPage,
-  GridPageSkeleton,
+  TitleGridSkeleton,
   preloadTitleGrid,
 } from "@/components/browse/title-grid-page";
 
@@ -25,7 +25,7 @@ export const Route = createFileRoute("/_app/genre/$genre")({
 function GenreSkeleton() {
   const { genre } = Route.useParams();
 
-  return <GridPageSkeleton heading={genre} />;
+  return <TitleGridSkeleton genre={genre} heading={genre} />;
 }
 
 function GenrePage() {

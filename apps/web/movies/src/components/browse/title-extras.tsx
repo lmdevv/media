@@ -300,22 +300,6 @@ export function TrailerButton({
   );
 }
 
-const useCollectionOf = (titleId: TitleId) => {
-  const platform = usePlatform();
-
-  return usePlatformQuery(platform.movies.collections.ofTitle, { titleId });
-};
-
-/**
- * Holds the collection a title belongs to from the moment the title's page opens, so its row has
- * its answer when it mounts, which is only after the title answered.
- */
-export function HeldCollection({ titleId }: { readonly titleId: TitleId }) {
-  useCollectionOf(titleId);
-
-  return null;
-}
-
 /** "Part of the Alien Collection": the other titles of the collection, in order. */
 export function CollectionRow({
   titleId,
@@ -324,7 +308,8 @@ export function CollectionRow({
   readonly titleId: TitleId;
   readonly phone: boolean;
 }) {
-  const collection = useCollectionOf(titleId);
+  const platform = usePlatform();
+  const collection = usePlatformQuery(platform.movies.collections.ofTitle, { titleId });
 
   if (
     collection.status !== "success" ||
@@ -354,22 +339,6 @@ export function CollectionRow({
   );
 }
 
-const useSimilar = (titleId: TitleId) => {
-  const platform = usePlatform();
-
-  return usePlatformQuery(platform.movies.titles.similar, { titleId });
-};
-
-/**
- * Holds the More like this query from the moment a title page opens, so the row has its answer
- * when it mounts, which is only after the title answered.
- */
-export function HeldSimilar({ titleId }: { readonly titleId: TitleId }) {
-  useSimilar(titleId);
-
-  return null;
-}
-
 /** More like this: recommendations and look-alikes the person may see. */
 export function MoreLikeThis({
   titleId,
@@ -378,7 +347,8 @@ export function MoreLikeThis({
   readonly titleId: TitleId;
   readonly phone: boolean;
 }) {
-  const similar = useSimilar(titleId);
+  const platform = usePlatform();
+  const similar = usePlatformQuery(platform.movies.titles.similar, { titleId });
 
   if (similar.status !== "success" || similar.data.length === 0) return null;
 

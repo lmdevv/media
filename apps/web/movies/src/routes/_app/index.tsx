@@ -1,3 +1,4 @@
+import { collectionsPage } from "@/lib/catalog";
 import type { Home, TitleCard } from "@/lib/catalog";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { preloadFirstPage, useFirstRows } from "@media/ui/lib/pages";
@@ -20,6 +21,9 @@ import { usePhone } from "@/lib/use-phone";
 export const Route = createFileRoute("/_app/")({
   staticData: { hero: true },
   loader: async ({ context: { platform } }) => {
+    // The Collections row starts with the rows above it, so it arrives with them rather than a
+    // round trip after them.
+    void preloadFirstPage(platform.movies.collections.list, collectionsPage);
     await Promise.all([
       platform.movies.titles.home.preload(),
       preloadFirstPage(platform.core.libraries.list, librariesPage),
@@ -39,15 +43,6 @@ const newestFirst = (titles: ReadonlyArray<TitleCard>): ReadonlyArray<TitleCard>
   titles.toSorted((a, b) => b.addedAt - a.addedAt);
 
 function HomePage() {
-  return (
-    <>
-      <HeldCollections />
-      <HomeContent />
-    </>
-  );
-}
-
-function HomeContent() {
   const platform = usePlatform();
   const scopes = useScopes();
   const home = usePlatformQuery(platform.movies.titles.home);
@@ -175,28 +170,14 @@ function HomeRows({ home }: { readonly home: Home }) {
   );
 }
 
-const useCollections = () => {
+function CollectionsRow() {
   const platform = usePlatform();
 
-  return useFirstRows(
+  const collections = useFirstRows(
     platform.movies.collections.list,
-    (paginationOpts) => ({ paginationOpts }),
+    collectionsPage,
     ROW_COLLECTIONS,
   );
-};
-
-/**
- * Holds the Collections row's query from the moment Home opens, so the row has its answer when it
- * mounts, which is only after the home query answered.
- */
-function HeldCollections() {
-  useCollections();
-
-  return null;
-}
-
-function CollectionsRow() {
-  const collections = useCollections();
 
   if (collections.status !== "ready" || collections.rows.length === 0) return null;
 

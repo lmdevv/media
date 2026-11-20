@@ -71,14 +71,14 @@ export const preloadFixMatch = async (
 /** The fix match screen while the title loads: the breadcrumb, heading, and facts, then the editor. */
 export function FixMatchSkeleton() {
   return (
-    <>
-      <div aria-busy className="flex flex-col gap-1.5">
+    <div aria-busy className="flex flex-col gap-6">
+      <div className="flex flex-col gap-1.5">
         <Skeleton className="h-4.5 w-40 rounded-control" />
         <Skeleton className="h-9 w-40 rounded-control" />
         <Skeleton className="h-4.5 w-56 max-w-full rounded-control" />
       </div>
       <Skeleton className="h-96 w-full rounded-control" />
-    </>
+    </div>
   );
 }
 

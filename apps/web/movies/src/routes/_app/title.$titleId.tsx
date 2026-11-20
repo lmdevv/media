@@ -1,15 +1,15 @@
 import { useMayShareGuests } from "@media/ui/lib/use-guest-links";
+import { openingPageArgs } from "@media/contracts/opening-season";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { Button } from "@media/ui/components/button";
 import { buttonVariants } from "@media/ui/lib/button-variants";
 import { CalmState } from "@media/ui/components/calm-state";
+import { preloadFirstPage } from "@media/ui/lib/pages";
 import { Link, createFileRoute } from "@tanstack/react-router";
 
 import { asTitleId } from "@/lib/catalog";
-import { HeldEpisodes } from "@/components/browse/episodes";
 import { Block } from "@/components/browse/skeletons";
-import { HeldPlayVersions, TitleDetailView } from "@/components/browse/title-detail";
-import { HeldCollection, HeldSimilar } from "@/components/browse/title-extras";
+import { TitleDetailView } from "@/components/browse/title-detail";
 import { describeFailure, isFailure } from "@media/ui/lib/failure";
 import { usePhone } from "@/lib/use-phone";
 import { useScopes } from "@/session/session";
@@ -20,8 +20,17 @@ export const Route = createFileRoute("/_app/title/$titleId")({
     stringify: (params) => ({ titleId: params.titleId }),
   },
   staticData: { hero: true, phoneTitle: false },
-  loader: ({ context: { platform }, params: { titleId } }) =>
-    platform.movies.titles.get.preload({ titleId }),
+  loader: async ({ context: { platform }, params: { titleId } }) => {
+    // The page's other queries start with the title's, so they arrive with it rather than a round
+    // trip after it. The episodes page is the one the list opens on; a movie's is empty.
+    void platform.movies.titles.versions.preload({ titleId });
+    void preloadFirstPage(platform.movies.titles.episodes, (paginationOpts) =>
+      openingPageArgs(titleId, paginationOpts),
+    );
+    void platform.movies.titles.similar.preload({ titleId });
+    void platform.movies.collections.ofTitle.preload({ titleId });
+    await platform.movies.titles.get.preload({ titleId });
+  },
   pendingComponent: TitleSkeleton,
   component: TitlePage,
 });
@@ -53,20 +62,6 @@ function TitleSkeleton() {
 }
 
 function TitlePage() {
-  const { titleId } = Route.useParams();
-
-  return (
-    <>
-      <HeldSimilar titleId={titleId} />
-      <HeldEpisodes titleId={titleId} />
-      <HeldPlayVersions titleId={titleId} />
-      <HeldCollection titleId={titleId} />
-      <TitleContent />
-    </>
-  );
-}
-
-function TitleContent() {
   const platform = usePlatform();
   const { titleId } = Route.useParams();
   const scopes = useScopes();

@@ -1,11 +1,4 @@
-import type {
-  MediaFile,
-  MediaFileId,
-  MediaVersion,
-  ShowStatus,
-  TitleDetail,
-  TitleId,
-} from "@/lib/catalog";
+import type { MediaFile, MediaFileId, MediaVersion, ShowStatus, TitleDetail } from "@/lib/catalog";
 import { MediaLabels, Versions } from "@media/sdk/effect";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { Badge } from "@media/ui/components/badge";
@@ -107,24 +100,9 @@ const NO_VERSIONS: ReadonlyArray<MediaVersion> = [];
  * The versions of what a title's Play button starts: a movie's, or the next episode of a show.
  * The server picks the episode by the same answers as the title's `nextEpisode`, so the two agree.
  */
-const usePlayVersionsOf = (titleId: TitleId) => {
-  const platform = usePlatform();
-
-  return usePlatformQuery(platform.movies.titles.versions, { titleId });
-};
-
-/**
- * Holds the versions of what a title's Play button starts from the moment the title's page opens,
- * so the version menu beside Play has its answer when the page mounts after the title answered.
- */
-export function HeldPlayVersions({ titleId }: { readonly titleId: TitleId }) {
-  usePlayVersionsOf(titleId);
-
-  return null;
-}
-
 const usePlayVersions = (title: TitleDetail): ReadonlyArray<MediaVersion> => {
-  const versions = usePlayVersionsOf(title.id);
+  const platform = usePlatform();
+  const versions = usePlatformQuery(platform.movies.titles.versions, { titleId: title.id });
 
   if (title.kind === "movie") return title.versions;
 

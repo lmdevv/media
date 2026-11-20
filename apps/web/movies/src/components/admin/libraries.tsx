@@ -36,10 +36,10 @@ const editable = (library: Library): boolean =>
 /** The libraries screen while its first page of libraries loads. */
 export function LibrariesSkeleton() {
   return (
-    <>
+    <div aria-busy className="flex flex-col gap-6">
       <PageHeader title="Libraries" />
       <Skeleton className="h-36 w-full rounded-control" />
-    </>
+    </div>
   );
 }
 
