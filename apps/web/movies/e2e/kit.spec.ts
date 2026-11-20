@@ -64,6 +64,33 @@ test("rows take focus with j and k and move between cards with arrows", async ({
   await expect(focused).toContainText("Severance · S2:E4");
 });
 
+test("a Continue watching card's info link shows on hover and focus, and arrows skip it", async ({
+  page,
+}) => {
+  await page.goto(moviesPath("/dev/kit"));
+  await expect(page.getByRole("button", { name: "Open command menu" })).toBeVisible();
+
+  const row = page.getByRole("region", { name: "Continue watching for Alex" });
+  const info = row.getByRole("link", { name: "More info about Dune: Part Two" });
+  const corner = info.locator("..");
+  const focused = page.locator(":focus");
+
+  await expect(corner).toHaveCSS("opacity", "0");
+  await row.getByRole("link", { name: /^Dune: Part Two/u }).hover();
+  await expect(corner).toHaveCSS("opacity", "1");
+  await page.mouse.move(0, 0);
+  await expect(corner).toHaveCSS("opacity", "0");
+
+  await page.keyboard.press("j");
+  await expect(focused).toContainText("Dune: Part Two");
+  await expect(corner).toHaveCSS("opacity", "1");
+  await page.keyboard.press("Tab");
+  await expect(info).toBeFocused();
+  await page.keyboard.press("ArrowRight");
+  await expect(focused).toContainText("Severance · S2:E4");
+  await expect(corner).toHaveCSS("opacity", "0");
+});
+
 const edges = async (
   locator: Locator,
 ): Promise<{
