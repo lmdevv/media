@@ -15,12 +15,11 @@ import type { Paged } from "@media/ui/lib/pages";
 import { copyText } from "@media/ui/lib/secure-context";
 
 /**
- * Loads the guest policy `useMayShareGuests` reads, for a route loader: the session first, then
- * the policy when the session may hold account queries. Never rejects.
+ * Loads the guest policy `useMayShareGuests` reads, for a route loader, once the session the
+ * signed-in shell follows has answered and may hold account queries. The shell owns that session
+ * query, and its failure screen, so this never asks for it. Never rejects.
  */
 export const preloadGuestPolicy = async (platform: PlatformSdk): Promise<void> => {
-  await platform.core.auth.sessions.current.preload();
-
   const me = platform.core.auth.sessions.current.watch().getSnapshot();
 
   if (canQueryGuestLinks(me.status === "success" ? me.data : undefined)) {
