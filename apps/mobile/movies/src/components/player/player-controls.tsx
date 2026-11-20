@@ -11,6 +11,7 @@ import {
   Play,
   RotateCcw,
   RotateCw,
+  SkipForward,
   Sun,
   Volume2,
 } from "lucide-react-native";
@@ -64,6 +65,8 @@ export interface PlayerControlsProps {
   readonly onLock: () => void;
   readonly onSpeed: () => void;
   readonly onAudioSubtitles: () => void;
+  /** Plays the next episode; `null` hides the button, as for a movie or a show's last episode. */
+  readonly onNext: (() => void) | null;
   readonly onBrightness: (value: number) => void;
   readonly onVolume: (value: number) => void;
   /** The viewer is using the controls; keep them up. `true` holds them while a drag lasts. */
@@ -368,22 +371,24 @@ export function PlayerControls(props: PlayerControlsProps) {
             onSeek={props.onSeek}
           />
         </View>
-        <View
-          className="flex-row items-center gap-8 pt-1 pb-3"
-          style={row}
-          pointerEvents="box-none"
-        >
-          <View className="min-w-0 flex-1 flex-row items-center gap-8" pointerEvents="box-none">
+        <View className="flex-row items-center pt-1 pb-3" style={row} pointerEvents="box-none">
+          <View className="flex-1" pointerEvents="none" />
+          <View className="min-w-0 shrink flex-row items-center gap-8" pointerEvents="box-none">
             <BarAction label={props.rateLabel} onPress={props.onSpeed} />
             <BarAction icon={Captions} label="Audio & Subtitles" onPress={props.onAudioSubtitles} />
+            {props.onNext === null ? null : (
+              <BarAction icon={SkipForward} label="Next Episode" onPress={props.onNext} />
+            )}
           </View>
-          {props.more.length === 0 ? null : (
-            <MoreMenu
-              items={props.more}
-              onOpen={() => onInteract(true)}
-              onRelease={() => onInteract(false)}
-            />
-          )}
+          <View className="flex-1 flex-row justify-end" pointerEvents="box-none">
+            {props.more.length === 0 ? null : (
+              <MoreMenu
+                items={props.more}
+                onOpen={() => onInteract(true)}
+                onRelease={() => onInteract(false)}
+              />
+            )}
+          </View>
         </View>
       </View>
     </View>

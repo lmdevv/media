@@ -37,6 +37,7 @@ import { SessionPanel } from "@/components/together/session-panel";
 import { useSessionFollow, useSessionPlayer } from "@/components/together/use-session-player";
 import type { SessionStop } from "@/components/together/use-session-player";
 import type { FollowerPlayer } from "@media/contracts/follower";
+import { sessionSkip } from "@media/contracts/session-next";
 import { usePerson } from "@/session/me";
 import { NO_HOLD, itemOf } from "@/lib/together/session";
 import type { CarriedHold } from "@/lib/together/session";
@@ -499,6 +500,20 @@ function PlayerSession({ params, attempt, onRestart, choices, carried }: PlayerS
     [inSession, sessionPlayNow, titleId],
   );
 
+  const playNext = next === null ? null : () => playEpisode(next.id);
+
+  const nextSkip = sessionSkip({
+    mayControl: together.mayControl,
+    mayAdd: together.mayAdd,
+    queued: follow.queue.length > 0,
+    nextPlayable: next?.available === true,
+  });
+
+  const sessionNextAction =
+    nextSkip === null ? null : { queued: together.actions.playQueued, episode: playNext }[nextSkip];
+
+  const nextAction = inSession ? sessionNextAction : playNext;
+
   useEffect(() => {
     if (showNext && countdownStart !== null && countdownMs <= 0) playEpisode(next.id);
   }, [showNext, next, countdownStart, countdownMs, playEpisode]);
@@ -685,6 +700,7 @@ function PlayerSession({ params, attempt, onRestart, choices, carried }: PlayerS
               onAudioSubtitles={() => {
                 if (snapshot.playback !== null) setPanel("audio");
               }}
+              onNext={nextAction}
               onBrightness={setBrightness}
               onVolume={(value) => {
                 setVolume(value);

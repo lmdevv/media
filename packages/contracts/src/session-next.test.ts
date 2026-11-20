@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 
 import { NEXT_EPISODE_COUNTDOWN_MS, creditsStartMs } from "./clock";
 import type { SessionClock } from "./clock";
-import { sessionNext } from "./session-next";
-import type { NextInput } from "./session-next";
+import { sessionNext, sessionSkip } from "./session-next";
+import type { NextInput, SkipInput } from "./session-next";
 import { EpochMillis } from "./units";
 
 const NOW = 1_760_000_000_000;
@@ -130,5 +130,29 @@ describe("sessionNext", () => {
       step: null,
     });
     expect(sessionNext(input({ clock: at(credits), durationMs: null })).step).toBeNull();
+  });
+});
+
+const skip = (overrides: Partial<SkipInput>) =>
+  sessionSkip({ mayControl: true, mayAdd: true, queued: false, nextPlayable: true, ...overrides });
+
+describe("sessionSkip", () => {
+  it("plays the next episode for a member who may control and add", () => {
+    expect(skip({})).toBe("episode");
+  });
+
+  it("skips to what is queued first, even without leave to add", () => {
+    expect(skip({ queued: true })).toBe("queued");
+    expect(skip({ queued: true, mayAdd: false, nextPlayable: false })).toBe("queued");
+  });
+
+  it("hides the button from a member who may not control", () => {
+    expect(skip({ mayControl: false })).toBeNull();
+    expect(skip({ mayControl: false, queued: true })).toBeNull();
+  });
+
+  it("hides the button with nothing queued and no next episode to add", () => {
+    expect(skip({ nextPlayable: false })).toBeNull();
+    expect(skip({ mayAdd: false })).toBeNull();
   });
 });
