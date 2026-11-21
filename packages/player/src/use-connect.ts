@@ -4,7 +4,7 @@ import { Brand } from "effect";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { activeDevice, ownDevices, yieldsTo } from "./connect-devices";
-import type { Device, DevicePlayback } from "./connect-devices";
+import type { ConnectTarget, Device, DevicePlayback } from "./connect-devices";
 import { ConnectPlayer, systemConnectClock } from "./connect-player";
 import type { ConnectCommands, ConnectOutput } from "./connect-player";
 import type { ControllerSnapshot, PlaybackController } from "./playback-controller";
@@ -145,22 +145,40 @@ export interface ConnectView {
   readonly serverNow: () => number;
 }
 
-const useOnlineCheck = (active: boolean): number => {
-  const [tick, setTick] = useState(0);
+/**
+ * The server time to judge the listed devices' last reports at: read when the list changes, and
+ * again every `ONLINE_CHECK_MS` while it lists any, so a device that goes quiet drops out as time
+ * passes.
+ */
+const useCheckedAt = (
+  listed: ReadonlyArray<ConnectTarget> | null,
+  player: ConnectPlayer,
+): number => {
+  const [check, setCheck] = useState(() => ({ listed, at: player.serverNow() }));
+  let { at } = check;
+
+  if (check.listed !== listed) {
+    at = player.serverNow();
+    setCheck({ listed, at });
+  }
+
+  const active = listed !== null && listed.length > 0;
 
   useEffect(() => {
     if (!active) return undefined;
 
     const timer = setInterval(() => {
-      setTick((count) => count + 1);
+      const now = player.serverNow();
+
+      setCheck((last) => ({ listed: last.listed, at: now }));
     }, ONLINE_CHECK_MS);
 
     return () => {
       clearInterval(timer);
     };
-  }, [active]);
+  }, [active, player]);
 
-  return tick;
+  return at;
 };
 
 /**
@@ -237,12 +255,11 @@ export const useConnect = (
   );
 
   const listed = targets.status === "success" ? targets.data : null;
-  const tick = useOnlineCheck(listed !== null && listed.length > 0);
+  const checkedAt = useCheckedAt(listed, player);
 
   const online = useMemo(
-    () => (listed === null || !speaks ? [] : ownDevices(listed, deviceId, player.serverNow())),
-    // `tick` drops a device that went quiet once its last report is 30 seconds old.
-    [listed, speaks, deviceId, player, tick],
+    () => (listed === null || !speaks ? [] : ownDevices(listed, deviceId, checkedAt)),
+    [listed, speaks, deviceId, checkedAt],
   );
 
   const devices = useStable(online);
@@ -257,12 +274,11 @@ export const useConnect = (
     [],
   );
 
-  const previous = useRef<string | null>(null);
-  const remote = here ? null : activeDevice(devices, previous.current);
+  const [followed, setFollowed] = useState<string | null>(null);
+  const remote = here ? null : activeDevice(devices, followed);
+  const remoteId = remote?.id ?? null;
 
-  useEffect(() => {
-    previous.current = remote?.id ?? null;
-  }, [remote]);
+  if (remoteId !== followed) setFollowed(remoteId);
 
   // A song the browser would not start without a tap stays, to show "Tap play to start here".
   const yields = pausedHere && !local.autoplayBlocked;

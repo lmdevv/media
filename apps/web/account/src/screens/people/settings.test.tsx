@@ -53,7 +53,7 @@ describe("NameSection", () => {
   });
 
   it("says when it saved and why it failed", () => {
-    expect(renderName(DONE)).toContain("Username saved.");
+    expect(renderName(DONE)).toMatch(/<output[^>]*>.*Username saved\.<\/output>/u);
     expect(renderName(FAILED)).toContain("That username is taken.");
   });
 });

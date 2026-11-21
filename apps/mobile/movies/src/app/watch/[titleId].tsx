@@ -16,9 +16,9 @@ import { parseWatchParams } from "@/lib/routes";
  * above the player, so they carry on into the next episode and end when the player closes.
  */
 export default function Watch() {
-  const params = parseWatchParams(useLocalSearchParams());
+  const params = Option.getOrNull(parseWatchParams(useLocalSearchParams()));
   const sleepTimer = useSleepTimer();
-  const shownTitle = Option.isSome(params) ? params.value.titleId : null;
+  const shownTitle = params === null ? null : params.titleId;
 
   // Back to the title's page under the player, or in the player's place when it opened from
   // elsewhere, such as Home.
@@ -29,7 +29,7 @@ export default function Watch() {
 
   const stillWatching = useStillWatching(toTitle);
 
-  if (Option.isNone(params)) {
+  if (params === null) {
     return (
       <View className="flex-1 bg-bg">
         <CalmState
@@ -42,12 +42,12 @@ export default function Watch() {
     );
   }
 
-  const { titleId, episodeId, fileId, start, at } = params.value;
+  const { titleId, episodeId, fileId, start, at } = params;
 
   return (
     <PlayerScreen
       key={[titleId, episodeId, fileId, start, at].join("|")}
-      params={params.value}
+      params={params}
       sleepTimer={sleepTimer}
       stillWatching={stillWatching}
     />

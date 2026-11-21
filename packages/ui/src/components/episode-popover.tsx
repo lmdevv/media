@@ -124,11 +124,10 @@ function EpisodeList<Id extends string>({
           Episodes
         </span>
         {seasons.length > 1 ? (
-          <div
+          <fieldset
             data-slot="season-chips"
-            role="group"
             aria-label="Season"
-            className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1"
+            className="-mx-1 flex min-w-0 gap-2 overflow-x-auto px-1 pb-1"
           >
             {seasons.map((candidate) => {
               const selected = candidate.seasonNumber === seasonNumber;
@@ -144,7 +143,7 @@ function EpisodeList<Id extends string>({
                 </Chip>
               );
             })}
-          </div>
+          </fieldset>
         ) : (
           <span className="font-sans text-body/label font-semibold text-text">
             {season?.name ?? `Season ${String(seasonNumber)}`}

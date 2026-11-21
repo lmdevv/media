@@ -1,4 +1,5 @@
 import { Redacted } from "effect";
+import { useId } from "react";
 import type { ComponentProps, ComponentType, ReactNode } from "react";
 
 import { useGuestLinks } from "@media/ui/lib/use-guest-links";
@@ -12,7 +13,16 @@ export type GuestLinkButtonProps = ComponentProps<"button"> & {
 
 type GuestLinkInputProps = Pick<
   ComponentProps<"input">,
-  "type" | "min" | "max" | "step" | "required" | "value" | "onChange" | "readOnly" | "onFocus"
+  | "id"
+  | "type"
+  | "min"
+  | "max"
+  | "step"
+  | "required"
+  | "value"
+  | "onChange"
+  | "readOnly"
+  | "onFocus"
 >;
 
 interface GuestLinksFormProps {
@@ -48,6 +58,8 @@ export function GuestLinksFields({
   const next = list.status === "ready" ? list.next : null;
   const loading = list.status === "loading" || next?.kind === "loading";
   const failure = list.status === "failed" ? list : next?.kind === "failed" ? next : null;
+  const expiryId = useId();
+  const createdId = useId();
 
   return (
     <div className="flex flex-col gap-6">
@@ -58,9 +70,10 @@ export function GuestLinksFields({
           void model.create();
         }}
       >
-        <label className="flex flex-col gap-2">
+        <label htmlFor={expiryId} className="flex flex-col gap-2">
           <span>Expires in days</span>
           <Input
+            id={expiryId}
             type="number"
             min={1}
             max={30}
@@ -82,9 +95,10 @@ export function GuestLinksFields({
       </form>
       {model.created === null ? null : (
         <div className="flex flex-col gap-2">
-          <label className="flex flex-col gap-2">
+          <label htmlFor={createdId} className="flex flex-col gap-2">
             <span>New guest link</span>
             <Input
+              id={createdId}
               data-sensitive="guest-link"
               readOnly
               value={Redacted.value(model.created)}
@@ -133,11 +147,7 @@ export function GuestLinksFields({
             </Button>
           </div>
         ) : null}
-        {loading ? (
-          <p role="status" className="text-text-muted">
-            Loading links…
-          </p>
-        ) : null}
+        {loading ? <output className="block text-text-muted">Loading links…</output> : null}
         {failure === null ? null : (
           <div role="alert">
             <p>{failure.message}</p>

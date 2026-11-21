@@ -75,7 +75,7 @@ export function UsersScreen() {
         selfId={me.userId}
         open={open}
         onToggle={(userId) => setOpen((current) => (current === userId ? null : userId))}
-        panel={(user) => <UserPanel user={user} />}
+        renderPanel={(user) => <UserPanel user={user} />}
       />
       <AddSomeone />
       <PendingInvites />
@@ -118,13 +118,13 @@ export function PeopleView({
   selfId,
   open,
   onToggle,
-  panel,
+  renderPanel,
 }: {
   readonly users: Paged<User>;
   readonly selfId: UserId;
   readonly open: UserId | null;
   readonly onToggle: (userId: UserId) => void;
-  readonly panel: (user: User) => ReactNode;
+  readonly renderPanel: (user: User) => ReactNode;
 }) {
   return (
     <Section title="People">
@@ -151,7 +151,7 @@ export function PeopleView({
               )
             }
           >
-            {open === user.userId ? panel(user) : null}
+            {open === user.userId ? renderPanel(user) : null}
           </ItemRow>
         )}
       </PagedList>
@@ -184,7 +184,7 @@ function UserPanel({ user }: { readonly user: User }) {
   return user.role === "member" ? (
     <MemberPanel user={user} />
   ) : (
-    <PanelActions user={user} limits={{ kind: "notMember" }} limitsForm={() => null} />
+    <PanelActions user={user} limits={{ kind: "notMember" }} renderLimitsForm={() => null} />
   );
 }
 
@@ -213,7 +213,7 @@ function MemberPanel({ user }: { readonly user: User }) {
     <PanelActions
       user={user}
       limits={limits}
-      limitsForm={(saved) => (
+      renderLimitsForm={(saved) => (
         <KidLimits
           key={JSON.stringify(saved)}
           userId={user.userId}
@@ -228,11 +228,11 @@ function MemberPanel({ user }: { readonly user: User }) {
 function PanelActions({
   user,
   limits,
-  limitsForm,
+  renderLimitsForm,
 }: {
   readonly user: User;
   readonly limits: LimitsState;
-  readonly limitsForm: (saved: Restrictions | null) => ReactNode;
+  readonly renderLimitsForm: (saved: Restrictions | null) => ReactNode;
 }) {
   const platform = usePlatform();
   const me = useMe();
@@ -284,7 +284,7 @@ function PanelActions({
       reset={reset}
       confirm={confirm}
       limits={limits}
-      limitsForm={limitsForm}
+      renderLimitsForm={renderLimitsForm}
       onConfirm={setConfirm}
       onRole={(role) =>
         void actions.run(
@@ -326,7 +326,7 @@ export interface UserPanelViewProps {
   readonly reset: MadeLink | null;
   readonly confirm: Confirm | null;
   readonly limits: LimitsState;
-  readonly limitsForm: (saved: Restrictions | null) => ReactNode;
+  readonly renderLimitsForm: (saved: Restrictions | null) => ReactNode;
   readonly onConfirm: (confirm: Confirm | null) => void;
   readonly onRole: (role: AssignableRole) => void;
   readonly onHandOver: () => void;
@@ -350,7 +350,7 @@ export function UserPanelView({
   reset,
   confirm,
   limits,
-  limitsForm,
+  renderLimitsForm,
   onConfirm,
   onRole,
   onHandOver,
@@ -440,7 +440,7 @@ export function UserPanelView({
           {limits.kind === "failed" ? (
             <Failed message={limits.message} retry={limits.retry} />
           ) : null}
-          {limits.kind === "ready" ? limitsForm(limits.saved) : null}
+          {limits.kind === "ready" ? renderLimitsForm(limits.saved) : null}
         </Part>
       )}
       <Part title="Shared devices">
