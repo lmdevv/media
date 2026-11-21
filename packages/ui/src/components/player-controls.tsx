@@ -248,20 +248,14 @@ function ProgressLine({
   readonly position: number;
   readonly duration: number;
 }) {
-  const fraction = duration <= 0 ? 0 : Math.min(1, Math.max(0, position / duration));
-
   return (
-    <div
-      role="progressbar"
+    <progress
       aria-label="Position"
-      aria-valuemin={0}
-      aria-valuemax={Math.round(duration)}
-      aria-valuenow={Math.round(position)}
       aria-valuetext={`${formatTimecode(position)} of ${formatTimecode(duration)}`}
-      className="flex h-1 flex-1 rounded-bar bg-text/25"
-    >
-      <div className="h-1 rounded-bar bg-accent" style={{ width: `${String(fraction * 100)}%` }} />
-    </div>
+      max={duration > 0 ? duration : 1}
+      value={duration > 0 ? Math.min(duration, Math.max(0, position)) : 0}
+      className="h-1 min-w-0 flex-1 appearance-none overflow-hidden rounded-bar bg-text/25 [&::-moz-progress-bar]:rounded-bar [&::-moz-progress-bar]:bg-accent [&::-webkit-progress-bar]:bg-transparent [&::-webkit-progress-value]:rounded-bar [&::-webkit-progress-value]:bg-accent"
+    />
   );
 }
 
@@ -519,6 +513,11 @@ function VolumeControl({
     button.current?.focus();
   };
 
+  const onControlKeyDown = (event: KeyboardEvent): void => {
+    dismiss(event);
+    idleAgain();
+  };
+
   const level = muted || volume === null ? 0 : percent(volume);
   const shown = moving ?? level;
 
@@ -537,10 +536,6 @@ function VolumeControl({
       }}
       onFocus={focus}
       onBlur={blur}
-      onKeyDown={(event) => {
-        dismiss(event);
-        idleAgain();
-      }}
     >
       <PlayerButton
         ref={button}
@@ -549,8 +544,9 @@ function VolumeControl({
         onPointerDown={(event) => {
           pressedWith.current = event.pointerType;
         }}
-        onKeyDown={() => {
+        onKeyDown={(event) => {
           pressedWith.current = null;
+          onControlKeyDown(event);
         }}
         onClick={toggleMute}
       >
@@ -593,6 +589,7 @@ function VolumeControl({
                 <Slider.Indicator className="w-1 rounded-bar bg-accent" />
                 <Slider.Thumb
                   aria-label="Volume"
+                  onKeyDown={onControlKeyDown}
                   getAriaValueText={(_, value) =>
                     muted && moving === null ? "Muted" : `${String(value)}%`
                   }

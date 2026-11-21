@@ -77,13 +77,18 @@ export type CommandPage = {
   readonly fallback?: ((query: string) => ReadonlyArray<CommandItem>) | undefined;
 };
 
+/** A group of rows the menu shows. */
+type VisibleGroup = {
+  readonly id: string;
+  readonly label: string | undefined;
+  readonly items: ReadonlyArray<CommandItem>;
+  /** Where the group's first row sits in {@link VisibleCommands.items}. */
+  readonly start: number;
+};
+
 /** The rows the menu shows for a page and query, grouped and flattened in display order. */
 export type VisibleCommands = {
-  readonly groups: ReadonlyArray<{
-    readonly id: string;
-    readonly label: string | undefined;
-    readonly items: ReadonlyArray<CommandItem>;
-  }>;
+  readonly groups: ReadonlyArray<VisibleGroup>;
   /** Every visible row in display order; the active index points into this list. */
   readonly items: ReadonlyArray<CommandItem>;
   /** True when a query matched nothing; any rows are the page's fallback commands. */
@@ -95,6 +100,15 @@ const searchTexts = (item: CommandItem): ReadonlyArray<string> => [
   item.detail ?? "",
   ...(item.keywords ?? []),
 ];
+
+/** Number each group's first row by the rows before it. */
+const numbered = (
+  groups: ReadonlyArray<Omit<VisibleGroup, "start">>,
+): ReadonlyArray<VisibleGroup> =>
+  groups.map((group, at) => ({
+    ...group,
+    start: groups.slice(0, at).reduce((rows, before) => rows + before.items.length, 0),
+  }));
 
 /** Work out which rows a page shows for a query. */
 export function visibleCommands(page: CommandPage, query: string): VisibleCommands {
@@ -112,13 +126,20 @@ export function visibleCommands(page: CommandPage, query: string): VisibleComman
   });
 
   if (groups.length > 0 || !searching) {
-    return { groups, items: groups.flatMap((group) => group.items), noResults: false };
+    return {
+      groups: numbered(groups),
+      items: groups.flatMap((group) => group.items),
+      noResults: false,
+    };
   }
 
   const fallback = page.fallback?.(query) ?? [];
 
   return {
-    groups: fallback.length === 0 ? [] : [{ id: "fallback", label: undefined, items: fallback }],
+    groups:
+      fallback.length === 0
+        ? []
+        : [{ id: "fallback", label: undefined, items: fallback, start: 0 }],
     items: fallback,
     noResults: true,
   };
