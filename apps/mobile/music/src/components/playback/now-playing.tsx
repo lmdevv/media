@@ -152,7 +152,7 @@ function DragToClose({
     onUpdate: (event) => {
       "worklet";
 
-      if (drag !== null) drag.value = Math.max(0, event.translationY);
+      if (drag !== null) drag.set(Math.max(0, event.translationY));
     },
     onDeactivate: (event) => {
       "worklet";
@@ -163,7 +163,7 @@ function DragToClose({
       if (!event.canceled && (past || event.velocityY > DISMISS.flick)) {
         scheduleOnRN(close);
       } else {
-        drag.value = withSpring(0, MORPH);
+        drag.set(withSpring(0, MORPH));
       }
     },
   });
@@ -742,7 +742,7 @@ function Controls({
         pointerEvents={folds && folded ? "none" : "box-none"}
         accessibilityElementsHidden={folds && folded}
         onLayout={(event) => {
-          rowsHeight.value = event.nativeEvent.layout.height;
+          rowsHeight.set(event.nativeEvent.layout.height);
           measure("rows", event.nativeEvent.layout.height);
         }}
       >
@@ -930,16 +930,18 @@ export function NowPlayingScreen() {
     if (panel !== null) {
       setView({ open: true, panel });
 
-      if (!parts.morphs) progress.value = 0;
-      progress.value = instant ? 1 : withSpring(1, MORPH);
+      if (!parts.morphs) progress.set(0);
+      progress.set(instant ? 1 : withSpring(1, MORPH));
     } else if (instant) {
       setView(CLOSED);
-      progress.value = 0;
+      progress.set(0);
     } else {
       setView({ open: false, panel: view.panel });
-      progress.value = withSpring(0, MORPH, (finished) => {
-        if (finished === true) scheduleOnRN(unmountClosed);
-      });
+      progress.set(
+        withSpring(0, MORPH, (finished) => {
+          if (finished === true) scheduleOnRN(unmountClosed);
+        }),
+      );
     }
   };
 

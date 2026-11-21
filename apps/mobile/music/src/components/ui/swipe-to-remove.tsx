@@ -55,20 +55,20 @@ export function SwipeToRemove({
   const letGoRight = useSharedValue(closedLetGo);
 
   useEffect(() => {
-    offset.value = 0;
-    letGoRight.value = closedLetGo;
+    offset.set(0);
+    letGoRight.set(closedLetGo);
   }, [offset, letGoRight, closedLetGo, resetKey]);
 
   const remove = () => {
-    offset.value = 0;
-    letGoRight.value = closedLetGo;
+    offset.set(0);
+    letGoRight.set(closedLetGo);
     onRemove();
   };
 
   const settle = (): boolean => {
     if (offset.value >= 0) return false;
-    offset.value = withSpring(0, SETTLE);
-    letGoRight.value = closedLetGo;
+    offset.set(withSpring(0, SETTLE));
+    letGoRight.set(closedLetGo);
 
     return true;
   };
@@ -80,12 +80,12 @@ export function SwipeToRemove({
     failOffsetY: [-SLOP, SLOP],
     onBegin: () => {
       "worklet";
-      start.value = offset.value;
+      start.set(offset.value);
     },
     onUpdate: (event) => {
       "worklet";
-      offset.value = Math.min(0, Math.max(-REMOVE_WIDTH, start.value + event.translationX));
-      speed.value = event.velocityX;
+      offset.set(Math.min(0, Math.max(-REMOVE_WIDTH, start.value + event.translationX)));
+      speed.set(event.velocityX);
     },
     onFinalize: () => {
       "worklet";
@@ -94,9 +94,9 @@ export function SwipeToRemove({
         speed.value < -FLICK_SPEED ||
         (speed.value <= FLICK_SPEED && offset.value < -REMOVE_WIDTH / 2);
 
-      speed.value = 0;
-      offset.value = withSpring(open ? -REMOVE_WIDTH : 0, SETTLE);
-      letGoRight.value = open ? Number.POSITIVE_INFINITY : closedLetGo;
+      speed.set(0);
+      offset.set(withSpring(open ? -REMOVE_WIDTH : 0, SETTLE));
+      letGoRight.set(open ? Number.POSITIVE_INFINITY : closedLetGo);
     },
   });
 

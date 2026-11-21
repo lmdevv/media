@@ -54,7 +54,7 @@ export function Slider({
   useEffect(() => {
     const settled = Date.now() - releasedAt.value > SETTLE_MS;
 
-    if (!dragging.value && settled) shown.value = clamp(value);
+    if (!dragging.value && settled) shown.set(clamp(value));
   }, [value, dragging, releasedAt, shown]);
 
   const report = (next: number | null) => {
@@ -71,27 +71,27 @@ export function Slider({
     shouldCancelWhenOutside: false,
     onBegin: () => {
       "worklet";
-      dragging.value = true;
-      start.value = shown.value;
+      dragging.set(true);
+      start.set(shown.value);
       scheduleOnRN(report, shown.value);
     },
     onUpdate: (event) => {
       "worklet";
 
       if (width.value <= 0) return;
-      shown.value = clamp(start.value + event.translationX / width.value);
+      shown.set(clamp(start.value + event.translationX / width.value));
       scheduleOnRN(report, shown.value);
     },
     onDeactivate: () => {
       "worklet";
-      releasedAt.value = Date.now();
+      releasedAt.set(Date.now());
       scheduleOnRN(release, shown.value);
     },
     onFinalize: () => {
       "worklet";
 
       if (dragging.value) scheduleOnRN(report, null);
-      dragging.value = false;
+      dragging.set(false);
     },
   });
 
@@ -104,8 +104,8 @@ export function Slider({
   const adjust = (event: AccessibilityActionEvent) => {
     const step = event.nativeEvent.actionName === "increment" ? STEP : -STEP;
     const next = clamp(shown.value + step);
-    shown.value = next;
-    releasedAt.value = Date.now();
+    shown.set(next);
+    releasedAt.set(Date.now());
     onChange(next);
   };
 
@@ -120,7 +120,7 @@ export function Slider({
         accessibilityActions={[{ name: "increment" }, { name: "decrement" }]}
         onAccessibilityAction={adjust}
         onLayout={(event) => {
-          width.value = event.nativeEvent.layout.width;
+          width.set(event.nativeEvent.layout.width);
         }}
       >
         <View className="h-6 justify-center">

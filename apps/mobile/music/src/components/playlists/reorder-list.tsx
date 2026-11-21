@@ -78,19 +78,19 @@ function ReorderRow({
     minDistance: 0,
     onActivate: () => {
       "worklet";
-      drag.from.value = index;
-      drag.to.value = index;
-      drag.offset.value = 0;
-      drag.travel.value = 0;
-      drag.startScroll.value = scroll.value;
+      drag.from.set(index);
+      drag.to.set(index);
+      drag.offset.set(0);
+      drag.travel.set(0);
+      drag.startScroll.set(scroll.value);
       scheduleOnRN(onLift);
     },
     onUpdate: (event) => {
       "worklet";
-      drag.travel.value = event.translationY;
-      drag.finger.value = event.absoluteY;
-      drag.offset.value = event.translationY + scroll.value - drag.startScroll.value;
-      drag.to.value = slotFor(index, drag.offset.value, drag.rowHeight.value, count);
+      drag.travel.set(event.translationY);
+      drag.finger.set(event.absoluteY);
+      drag.offset.set(event.translationY + scroll.value - drag.startScroll.value);
+      drag.to.set(slotFor(index, drag.offset.value, drag.rowHeight.value, count));
     },
     onFinalize: () => {
       "worklet";
@@ -99,12 +99,10 @@ function ReorderRow({
       if (drag.from.value !== index) return;
       const to = drag.to.value;
 
-      drag.offset.value = withTiming(
-        (to - index) * drag.rowHeight.value,
-        { duration: 120 },
-        (finished) => {
+      drag.offset.set(
+        withTiming((to - index) * drag.rowHeight.value, { duration: 120 }, (finished) => {
           if (finished === true) scheduleOnRN(onDrop, index, to);
-        },
+        }),
       );
     },
   });
@@ -222,8 +220,8 @@ export function ReorderList<Item>({
 
     if (speed === 0) return;
     scrollTo(scrollRef, 0, Math.max(0, Math.min(maxScroll.value, scroll.value + speed)), false);
-    drag.offset.value = drag.travel.value + scroll.value - drag.startScroll.value;
-    drag.to.value = slotFor(drag.from.value, drag.offset.value, drag.rowHeight.value, count);
+    drag.offset.set(drag.travel.value + scroll.value - drag.startScroll.value);
+    drag.to.set(slotFor(drag.from.value, drag.offset.value, drag.rowHeight.value, count));
   }, false);
 
   return items.map((item, index) => (

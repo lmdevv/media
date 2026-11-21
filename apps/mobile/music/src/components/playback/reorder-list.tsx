@@ -87,16 +87,16 @@ function Handle({
     shouldCancelWhenOutside: false,
     onBegin: (event) => {
       "worklet";
-      drag.startY.value = event.absoluteY;
-      drag.from.value = index;
-      drag.to.value = index;
-      drag.offset.value = 0;
-      drag.startScroll.value = drag.scrollY.value;
+      drag.startY.set(event.absoluteY);
+      drag.from.set(index);
+      drag.to.set(index);
+      drag.offset.set(0);
+      drag.startScroll.set(drag.scrollY.value);
       scheduleOnRN(actions.onLift, index);
     },
     onUpdate: (event) => {
       "worklet";
-      drag.offset.value = event.absoluteY - drag.startY.value;
+      drag.offset.set(event.absoluteY - drag.startY.value);
     },
     onFinalize: (event) => {
       "worklet";
@@ -243,7 +243,7 @@ function Cell({
     <Animated.View
       style={style}
       onLayout={(event) => {
-        if (index === 0) drag.rowHeight.value = event.nativeEvent.layout.height;
+        if (index === 0) drag.rowHeight.set(event.nativeEvent.layout.height);
       }}
     >
       {children}
@@ -306,14 +306,14 @@ export function ReorderList({
   };
 
   useEffect(() => {
-    drag.count.value = shown.length;
+    drag.count.set(shown.length);
   }, [drag.count, shown.length]);
 
   useAnimatedReaction(
     () => (drag.from.value < 0 ? -1 : landing(drag, drag.offset.value)),
     (next, previous) => {
       if (next < 0 || next === previous) return;
-      drag.to.value = next;
+      drag.to.set(next);
 
       if (previous !== null && previous >= 0) scheduleOnRN(Haptics.selectionAsync);
     },
@@ -350,8 +350,8 @@ export function ReorderList({
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     },
     onDrop: (from, to) => {
-      drag.from.value = -1;
-      drag.to.value = -1;
+      drag.from.set(-1);
+      drag.to.set(-1);
       setLifted(null);
       const item = shown[from];
 
@@ -395,14 +395,14 @@ export function ReorderList({
         keyExtractor={(item) => item.itemId}
         scrollEnabled={lifted === null}
         onScroll={(event) => {
-          drag.scrollY.value = event.nativeEvent.contentOffset.y;
+          drag.scrollY.set(event.nativeEvent.contentOffset.y);
         }}
         scrollEventThrottle={16}
         contentContainerClassName="pb-row"
         ListHeaderComponent={
           <View
             onLayout={(event) => {
-              drag.headerHeight.value = event.nativeEvent.layout.height;
+              drag.headerHeight.set(event.nativeEvent.layout.height);
             }}
           >
             {header}
