@@ -216,6 +216,10 @@ const FIRST_RUN_WAIT = Duration.sum(
 
 const FRAGMENT_FILE = /^f\d+\.m4s$/;
 
+class FragmentWatchFailed extends Data.TaggedError("FragmentWatchFailed")<{
+  readonly cause: unknown;
+}> {}
+
 /**
  * When a segment counts as produced: `written` once its last fragment is, and `followed` once the
  * encoder has also started the next one. A hardware run's first segment, and so its init, waits
@@ -879,16 +883,18 @@ const make = Effect.gen(function* () {
       );
 
     yield* Effect.acquireRelease(
-      Effect.try(() =>
-        watchRenames(
-          directory,
-          (name) => FRAGMENT_FILE.test(name),
-          wakeWaits,
-          (cause) => {
-            Effect.runForkWith(services)(watchFailed(cause));
-          },
-        ),
-      ),
+      Effect.try({
+        try: () =>
+          watchRenames(
+            directory,
+            (name) => FRAGMENT_FILE.test(name),
+            wakeWaits,
+            (cause) => {
+              Effect.runForkWith(services)(watchFailed(cause));
+            },
+          ),
+        catch: (cause) => new FragmentWatchFailed({ cause }),
+      }),
       (stop) => Effect.sync(stop),
     ).pipe(
       Effect.catch((error) => watchFailed(error.cause)),

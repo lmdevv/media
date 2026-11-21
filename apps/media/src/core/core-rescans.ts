@@ -9,7 +9,17 @@
  */
 import type { LibraryId } from "@media/contracts/ids";
 import { serverFunctions } from "@media/contracts/server-functions";
-import { Duration, Effect, FileSystem, Layer, Option, type Path, Semaphore, Stream } from "effect";
+import {
+  Data,
+  Duration,
+  Effect,
+  FileSystem,
+  Layer,
+  Option,
+  type Path,
+  Semaphore,
+  Stream,
+} from "effect";
 
 import * as LibraryMonitor from "../library/library-monitor.ts";
 import { folderChain, folderSource } from "../platform/folder-identity.ts";
@@ -67,15 +77,22 @@ const RESOLVE_TIMEOUT = Duration.seconds(5);
 /** Folders resolved at once, so a share that stops answering holds the list for one timeout. */
 const RESOLVE_CONCURRENCY = 16;
 
+class FolderUnresolved extends Data.TaggedError("FolderUnresolved")<{
+  readonly cause: unknown;
+}> {}
+
 /** What a folder is to the claims (ADR 0024): its real path's device and inode, and its source. */
 const identitiesOf = (folder: string) =>
-  Effect.tryPromise(async () => {
-    const [chain, source] = await Promise.all([folderChain(folder), folderSource(folder)]);
+  Effect.tryPromise({
+    try: async () => {
+      const [chain, source] = await Promise.all([folderChain(folder), folderSource(folder)]);
 
-    return [
-      ...chain.slice(0, 1).map((head) => `inode ${head}`),
-      ...(source === null ? [] : [`source ${source.device} ${source.path}`]),
-    ];
+      return [
+        ...chain.slice(0, 1).map((head) => `inode ${head}`),
+        ...(source === null ? [] : [`source ${source.device} ${source.path}`]),
+      ];
+    },
+    catch: (cause) => new FolderUnresolved({ cause }),
   }).pipe(
     Effect.timeoutOption(RESOLVE_TIMEOUT),
     Effect.map(Option.getOrElse((): ReadonlyArray<string> => [])),

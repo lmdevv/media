@@ -5,6 +5,7 @@ import type { CallError } from "@media/sdk/effect";
 import {
   Clock,
   Context,
+  Data,
   Duration,
   Effect,
   Fiber,
@@ -83,6 +84,10 @@ class WatchEnded extends Schema.TaggedError<WatchEnded, { readonly brand: unique
   {},
 ) {}
 
+class FileSystemUnknown extends Data.TaggedError("FileSystemUnknown")<{
+  readonly cause: unknown;
+}> {}
+
 type WatchMode = "events" | "poll";
 
 const keyOf = (library: MonitoredLibrary): string =>
@@ -129,7 +134,10 @@ const make = Effect.fn("LibraryMonitor.make")(function* (
   const watchModeOf = Effect.fnUntraced(function* (root: string) {
     if (config.libraryWatch !== "auto") return config.libraryWatch satisfies WatchMode;
 
-    const type = yield* Effect.tryPromise(() => fileSystemType(root)).pipe(Effect.option);
+    const type = yield* Effect.tryPromise({
+      try: () => fileSystemType(root),
+      catch: (cause) => new FileSystemUnknown({ cause }),
+    }).pipe(Effect.option);
 
     // A folder `statfs` cannot read yet is usually a share that is not mounted; polling finds
     // its files once it is, where events would never report them.

@@ -1,7 +1,8 @@
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { assert, layer } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Logger, References } from "effect";
 
 import { InsufficientTranscodeSpace } from "@media/contracts/media-playback";
 
@@ -32,6 +33,38 @@ layer(spaceLayer)("TranscodeSpace", (it) => {
       yield* space.check(0);
       yield* space.release("download:a");
       yield* space.check(most);
+    }),
+  );
+});
+
+const warnings: Array<{ readonly message: unknown; readonly code: unknown }> = [];
+
+const unreadableLayer = Layer.mergeAll(
+  TranscodeSpace.layer.pipe(
+    Layer.provide(
+      testConfigLayer({ TRANSCODE_DIR: join(transcodeDir, "media-transcode-space-missing") }),
+    ),
+  ),
+  Logger.layer([
+    Logger.make((options) => {
+      warnings.push({
+        message: options.message,
+        code: options.fiber.getRef(References.CurrentLogAnnotations)["code"],
+      });
+    }),
+  ]),
+);
+
+layer(unreadableLayer)("TranscodeSpace over a folder it cannot read", (it) => {
+  it.effect("lets a session start, and logs why it could not check", () =>
+    Effect.gen(function* () {
+      const space = yield* TranscodeSpace.Service;
+
+      yield* space.check(Number.MAX_SAFE_INTEGER);
+
+      assert.deepStrictEqual(warnings, [
+        { message: ["TranscodeSpace.free_space_unknown"], code: "ENOENT" },
+      ]);
     }),
   );
 });
