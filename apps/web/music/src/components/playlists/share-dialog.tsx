@@ -130,10 +130,9 @@ function ShareForm({
                 <span className="min-w-0 grow truncate font-sans text-base/sm text-text">
                   {entry.person.name}
                 </span>
-                <div
-                  role="group"
+                <fieldset
                   aria-label={`What ${entry.person.name} can do`}
-                  className="flex gap-1.5"
+                  className="m-0 flex min-w-0 gap-1.5 border-0 p-0"
                 >
                   {ROLES.map((role) => (
                     <Chip
@@ -146,7 +145,7 @@ function ShareForm({
                       {ROLE_LABELS[role]}
                     </Chip>
                   ))}
-                </div>
+                </fieldset>
                 <button
                   type="button"
                   aria-label={`Stop sharing with ${entry.person.name}`}

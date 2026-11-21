@@ -56,10 +56,11 @@ export function Artwork({
 /** The three accent bars that mark the playing song. */
 export function PlayingBars({ className }: { readonly className?: string }) {
   return (
-    <span role="img" aria-label="Playing" className={cn("flex h-3.5 items-end gap-0.5", className)}>
+    <span className={cn("flex h-3.5 items-end gap-0.5", className)}>
       <span className="h-2 w-0.75 rounded-3xs bg-accent" />
       <span className="h-3.5 w-0.75 rounded-3xs bg-accent" />
       <span className="h-1.25 w-0.75 rounded-3xs bg-accent" />
+      <span className="sr-only">Playing</span>
     </span>
   );
 }

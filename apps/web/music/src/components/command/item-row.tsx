@@ -56,7 +56,7 @@ function NowSubtitle({ artist }: { readonly artist: string }) {
  * @param index - Position in the list, written to `data-index` so the list can scroll to it.
  * @param header - The section name to show above the row, or null inside a section.
  * @param onHover - Called with the row's index when the pointer moves over it.
- * @param onSelect - Called with the row's index when it is clicked.
+ * @param onSelect - Called with the row's index when it is clicked, or on Enter while it has focus.
  */
 export const ItemRow = memo(function ItemRow({
   item,
@@ -112,6 +112,9 @@ export const ItemRow = memo(function ItemRow({
         tabIndex={-1}
         onMouseMove={(event) => onHover(index, event)}
         onClick={() => onSelect(index)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") onSelect(index);
+        }}
         className={cn(
           "flex shrink-0 cursor-pointer items-center gap-3 rounded-md px-2.5",
           subtitle === null ? "h-11" : "h-12",

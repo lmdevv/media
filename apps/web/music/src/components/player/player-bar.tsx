@@ -104,12 +104,12 @@ export function PlayerBar() {
         </div>
 
         {offline ? (
-          <div role="status" className="flex grow items-center justify-center gap-3">
+          <output className="flex grow items-center justify-center gap-3">
             <span aria-hidden className="size-2 shrink-0 rounded-full bg-danger" />
             <span className="font-sans text-base/sm text-text">
               Playback is unavailable. Lar Music can't reach the media service.
             </span>
-          </div>
+          </output>
         ) : failed ? (
           <div role="alert" className="flex grow items-center justify-center gap-3">
             <Button variant="outline" size="sm" onClick={() => perform(player.togglePlay())}>
@@ -219,12 +219,9 @@ function RemoteBand() {
   const { Icon, name } = elsewhere;
 
   return (
-    <div
-      role="status"
-      className="flex h-7 shrink-0 items-center justify-end gap-2 bg-accent px-6 text-on-accent"
-    >
+    <output className="flex h-7 shrink-0 items-center justify-end gap-2 bg-accent px-6 text-on-accent">
       <Icon aria-hidden className="size-3.5" />
       <span className="font-sans text-sm/xs font-semibold">Playing on {name}</span>
-    </div>
+    </output>
   );
 }

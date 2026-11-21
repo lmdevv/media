@@ -16,8 +16,7 @@ export function RemotePill({ className }: { readonly className?: string }) {
   const { Icon, name } = elsewhere;
 
   return (
-    <span
-      role="status"
+    <output
       className={cn(
         "inline-flex h-7 w-fit items-center gap-1.5 rounded-full bg-accent px-3 font-sans text-sm/xs font-semibold text-on-accent",
         className,
@@ -25,6 +24,6 @@ export function RemotePill({ className }: { readonly className?: string }) {
     >
       <Icon aria-hidden className="size-3.5" />
       Playing on {name}
-    </span>
+    </output>
   );
 }

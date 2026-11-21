@@ -182,8 +182,8 @@ function ScanBanner({ job }: { readonly job: ActiveScan }) {
   const eta = jobEta(job, now);
 
   return (
-    <div role="status" className="flex flex-col gap-2.5 rounded-md bg-surface px-4 py-3.5">
-      <div className="flex flex-wrap items-center gap-3">
+    <output className="flex flex-col gap-2.5 rounded-md bg-surface px-4 py-3.5">
+      <span className="flex flex-wrap items-center gap-3">
         <span aria-hidden className="size-2 shrink-0 rounded-full bg-accent" />
         <span className="grow font-sans text-base/sm font-medium text-text">
           {job.status === "queued"
@@ -198,9 +198,9 @@ function ScanBanner({ job }: { readonly job: ActiveScan }) {
             {eta === null ? "" : ` · ${eta}`}
           </span>
         )}
-      </div>
+      </span>
       <ProgressBar percent={percent} className="h-0.75" label={`Scanning ${path}`} />
-    </div>
+    </output>
   );
 }
 

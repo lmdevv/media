@@ -55,7 +55,10 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
     input.current?.focus();
   }, []);
 
-  const [runWhenShown, setRunWhenShown] = useState<string | null>(null);
+  // A click on a row whose preview isn't shown yet: its Enter action runs once, when the preview
+  // registers it. Each click is a new request, so `ran` tells a handled one from the next.
+  const [runWhenShown, setRunWhenShown] = useState<{ readonly id: string } | null>(null);
+  const ran = useRef<{ readonly id: string } | null>(null);
   const [selectionQuery, setSelectionQuery] = useState(deferred);
 
   if (selectionQuery !== deferred) {
@@ -92,6 +95,9 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
   } | null>(null);
 
   const currentId = current?.id ?? null;
+
+  if (runWhenShown !== null && runWhenShown.id !== currentId) setRunWhenShown(null);
+
   const footerLabel = footer !== null && footer.id === currentId ? footer.label : null;
 
   const registerActions = useCallback(
@@ -126,19 +132,13 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
   );
 
   useEffect(() => {
-    if (runWhenShown === null) return;
-
-    if (runWhenShown !== currentId) {
-      setRunWhenShown(null);
-
+    if (runWhenShown === null || ran.current === runWhenShown || footer?.id !== runWhenShown.id) {
       return;
     }
 
-    if (footer?.id !== runWhenShown) return;
-
-    setRunWhenShown(null);
+    ran.current = runWhenShown;
     run("command-menu.enter");
-  }, [currentId, footer, run, runWhenShown]);
+  }, [footer, run, runWhenShown]);
 
   const latest = useRef({ active, run });
 
@@ -166,7 +166,7 @@ function Menu({ onClose }: { readonly onClose: () => void }) {
 
       if (item.kind === "now") setDetail(true);
       else if (index === latest.current.active) latest.current.run("command-menu.enter");
-      else setRunWhenShown(item.id);
+      else setRunWhenShown({ id: item.id });
     },
     [items, select],
   );

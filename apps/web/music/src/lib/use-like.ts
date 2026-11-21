@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { toast } from "sonner";
 
 import { toastFailure } from "@/lib/action";
@@ -24,13 +24,15 @@ export const useLike = (track: Pick<Track, "id" | "liked" | "title"> | null): Li
   } | null>(null);
 
   const serverLiked = track?.liked ?? false;
-  const liked = optimistic !== null && optimistic.id === track?.id ? optimistic.liked : serverLiked;
+  const [lastServerLiked, setLastServerLiked] = useState(serverLiked);
 
-  useEffect(() => {
-    setOptimistic((current) =>
-      current !== null && current.liked === serverLiked ? null : current,
-    );
-  }, [serverLiked]);
+  if (lastServerLiked !== serverLiked) {
+    setLastServerLiked(serverLiked);
+
+    if (optimistic !== null && optimistic.liked === serverLiked) setOptimistic(null);
+  }
+
+  const liked = optimistic !== null && optimistic.id === track?.id ? optimistic.liked : serverLiked;
 
   const toggle = useCallback(async () => {
     if (track === null) return;

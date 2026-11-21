@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils";
 import { ChevronDownIcon, ChevronUpIcon, GripVerticalIcon } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { DragEvent, KeyboardEvent } from "react";
 
 import {
@@ -198,6 +198,8 @@ export function ReorderHandle({
   readonly reorder: Pick<Reorder, "moveBy">;
   readonly className?: string;
 }) {
+  const hintId = useId();
+
   const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
     const delta = KEY_STEPS.get(event.key);
 
@@ -208,18 +210,23 @@ export function ReorderHandle({
   };
 
   return (
-    <button
-      type="button"
-      aria-label={`Move ${label}`}
-      aria-description={`Position ${index + 1} of ${count}. Press the up or down arrow to move it.`}
-      onKeyDown={onKeyDown}
-      className={cn(
-        "relative flex size-7 shrink-0 cursor-grab items-center justify-center rounded-sm text-text-muted outline-none hover:text-text focus-visible:ring-2 focus-visible:ring-ring/50 active:cursor-grabbing",
-        className,
-      )}
-    >
-      <GripVerticalIcon aria-hidden className="size-4" />
-    </button>
+    <>
+      <button
+        type="button"
+        aria-label={`Move ${label}`}
+        aria-describedby={hintId}
+        onKeyDown={onKeyDown}
+        className={cn(
+          "relative flex size-7 shrink-0 cursor-grab items-center justify-center rounded-sm text-text-muted outline-none hover:text-text focus-visible:ring-2 focus-visible:ring-ring/50 active:cursor-grabbing",
+          className,
+        )}
+      >
+        <GripVerticalIcon aria-hidden className="size-4" />
+      </button>
+      <span id={hintId} hidden>
+        Position {index + 1} of {count}. Press the up or down arrow to move it.
+      </span>
+    </>
   );
 }
 
