@@ -19,7 +19,7 @@ export function Spinner({ size = "control" }: { readonly size?: IconProps["size"
   const turn = useSharedValue(0);
 
   useEffect(() => {
-    turn.value = withRepeat(withTiming(360, { duration: TURN_MS, easing: Easing.linear }), -1);
+    turn.set(withRepeat(withTiming(360, { duration: TURN_MS, easing: Easing.linear }), -1));
 
     return () => {
       cancelAnimation(turn);

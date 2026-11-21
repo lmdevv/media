@@ -37,9 +37,13 @@ export function ConnectionProvider({ children }: { readonly children: ReactNode 
     readConnection(appKeychains().own),
   );
 
-  const [joining, setJoining] = useState(
-    () => connection === null && readPhoneAccount(appKeychains().shared) !== null,
+  // The account another Lar app on the phone signed in to, which an install that remembers no
+  // server joins.
+  const [joinable] = useState(() =>
+    connection === null ? readPhoneAccount(appKeychains().shared) : null,
   );
+
+  const [joining, setJoining] = useState(joinable !== null);
 
   const connect = useCallback((next: ServerConnection) => {
     writeConnection(appKeychains().own, next);
@@ -47,20 +51,12 @@ export function ConnectionProvider({ children }: { readonly children: ReactNode 
   }, []);
 
   useEffect(() => {
-    if (!joining) return undefined;
-
-    const account = readPhoneAccount(appKeychains().shared);
-
-    if (account === null) {
-      setJoining(false);
-
-      return undefined;
-    }
+    if (!joining || joinable === null) return undefined;
 
     const stop = new AbortController();
 
     const join = async () => {
-      const result = await discoverServer(account.server);
+      const result = await discoverServer(joinable.server);
 
       if (stop.signal.aborted) return;
 
@@ -72,7 +68,7 @@ export function ConnectionProvider({ children }: { readonly children: ReactNode 
     void join();
 
     return () => stop.abort();
-  }, [joining, connect]);
+  }, [joining, joinable, connect]);
 
   const disconnect = useCallback(() => {
     writeConnection(appKeychains().own, null);
