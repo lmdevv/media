@@ -33,10 +33,8 @@ const streamArbitrary = fc
       box("mdat", mdat, wide),
     ]);
 
-    const starts = boxes.reduce<ReadonlyArray<number>>(
-      (offsets, current, index) =>
-        index === 0 ? [0] : [...offsets, (offsets.at(-1) ?? 0) + (boxes[index - 1]?.length ?? 0)],
-      [],
+    const starts = boxes.map((_, index) =>
+      boxes.slice(0, index).reduce((offset, previous) => offset + previous.length, 0),
     );
 
     return {

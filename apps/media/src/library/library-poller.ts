@@ -6,7 +6,7 @@
  * when its time moved. A file rewritten in place keeps its folder's time; the periodic
  * reconciliation scan catches that.
  */
-import { Effect, FileSystem, Option, Path } from "effect";
+import { Data, Effect, FileSystem, Option, Path } from "effect";
 
 import { listEntries } from "../platform/node-directories.ts";
 import { modifiedAtMs } from "../platform/file-info.ts";
@@ -15,6 +15,10 @@ interface FolderState {
   readonly modifiedAt: number;
   readonly folders: ReadonlyArray<string>;
 }
+
+class FolderUnlistable extends Data.TaggedError("FolderUnlistable")<{
+  readonly cause: unknown;
+}> {}
 
 /** Every folder under a root, by absolute path. */
 export type Snapshot = ReadonlyMap<string, FolderState>;
@@ -66,9 +70,10 @@ export const snapshot = Effect.fn("LibraryPoller.snapshot")(function* (
         ? known
         : {
             modifiedAt: time,
-            folders: (yield* Effect.tryPromise(() => listEntries(folder)).pipe(
-              Effect.orElseSucceed(() => []),
-            ))
+            folders: (yield* Effect.tryPromise({
+              try: () => listEntries(folder),
+              catch: (cause) => new FolderUnlistable({ cause }),
+            }).pipe(Effect.orElseSucceed(() => [])))
               .filter((entry) => entry.kind === "directory" && !entry.name.startsWith("."))
               .map((entry) => path.join(folder, entry.name)),
           };

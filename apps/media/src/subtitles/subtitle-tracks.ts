@@ -43,18 +43,20 @@ export const subtitleTracks = (file: ResolvedMediaFile): ReadonlyArray<SubtitleT
 ];
 
 /** The file has no subtitle track with this ID. */
-export class SubtitleTrackNotFound extends Schema.TaggedError<SubtitleTrackNotFound>()(
-  "SubtitleTrackNotFound",
-  { trackId: Schema.String },
-  { httpApiStatus: 404 },
-) {
+export class SubtitleTrackNotFound extends Schema.TaggedError<
+  SubtitleTrackNotFound,
+  { readonly brand: unique symbol }
+>()("SubtitleTrackNotFound", { trackId: Schema.String }, { httpApiStatus: 404 }) {
   override get message(): string {
     return `Subtitle track not found: ${this.trackId}`;
   }
 }
 
 /** The track is a bitmap format, which cannot become WebVTT. */
-export class SubtitleUnsupported extends Schema.TaggedError<SubtitleUnsupported>()(
+export class SubtitleUnsupported extends Schema.TaggedError<
+  SubtitleUnsupported,
+  { readonly brand: unique symbol }
+>()(
   "SubtitleUnsupported",
   { trackId: Schema.String, codec: Schema.String },
   { httpApiStatus: 415 },
@@ -65,7 +67,10 @@ export class SubtitleUnsupported extends Schema.TaggedError<SubtitleUnsupported>
 }
 
 /** ffmpeg could not convert the track. */
-export class SubtitleConversionFailed extends Schema.TaggedError<SubtitleConversionFailed>()(
+export class SubtitleConversionFailed extends Schema.TaggedError<
+  SubtitleConversionFailed,
+  { readonly brand: unique symbol }
+>()(
   "SubtitleConversionFailed",
   { trackId: Schema.String, detail: Schema.String },
   { httpApiStatus: 500 },

@@ -17,7 +17,10 @@ export const SignInBody = Schema.Struct({
 const decodeSignIn = Schema.decodeUnknownEffect(SignInBody);
 
 /** `MEDIA_TICKET_KEYS` does not hold a ring the pass keys derive from. */
-export class PassKeysUnusable extends Schema.TaggedError<PassKeysUnusable>()("PassKeysUnusable", {
+export class PassKeysUnusable extends Schema.TaggedError<
+  PassKeysUnusable,
+  { readonly brand: unique symbol }
+>()("PassKeysUnusable", {
   problem: Schema.String,
 }) {
   override get message(): string {

@@ -4,31 +4,46 @@ import type { CallError } from "@media/sdk/effect";
 import { Match, Schema } from "effect";
 
 /** The command line was wrong: an unknown command, a missing flag, or a value the schema rejects. */
-export class UsageError extends Schema.TaggedError<UsageError>()("UsageError", {
-  message: Schema.String,
-  /** The command whose help explains the fix, such as `movies titles get`. */
-  command: Schema.NullOr(Schema.String),
-}) {}
+export class UsageError extends Schema.TaggedError<UsageError, { readonly brand: unique symbol }>()(
+  "UsageError",
+  {
+    message: Schema.String,
+    /** The command whose help explains the fix, such as `movies titles get`. */
+    command: Schema.NullOr(Schema.String),
+  },
+) {}
 
 /** Reading or writing the config file failed, or it holds something the CLI cannot read. */
-export class ConfigFileError extends Schema.TaggedError<ConfigFileError>()("ConfigFileError", {
+export class ConfigFileError extends Schema.TaggedError<
+  ConfigFileError,
+  { readonly brand: unique symbol }
+>()("ConfigFileError", {
   path: Schema.String,
   message: Schema.String,
   cause: Schema.Defect(),
 }) {}
 
 /** The CLI is not signed in to any server yet. */
-export class NotLoggedIn extends Schema.TaggedError<NotLoggedIn>()("NotLoggedIn", {
+export class NotLoggedIn extends Schema.TaggedError<
+  NotLoggedIn,
+  { readonly brand: unique symbol }
+>()("NotLoggedIn", {
   message: Schema.String,
 }) {}
 
 /** A device sign-in was denied, expired, or already used. */
-export class LoginRefused extends Schema.TaggedError<LoginRefused>()("LoginRefused", {
+export class LoginRefused extends Schema.TaggedError<
+  LoginRefused,
+  { readonly brand: unique symbol }
+>()("LoginRefused", {
   message: Schema.String,
 }) {}
 
 /** An external program such as mpv could not be started. */
-export class LaunchError extends Schema.TaggedError<LaunchError>()("LaunchError", {
+export class LaunchError extends Schema.TaggedError<
+  LaunchError,
+  { readonly brand: unique symbol }
+>()("LaunchError", {
   program: Schema.String,
   message: Schema.String,
   cause: Schema.Defect(),
@@ -38,7 +53,10 @@ export class LaunchError extends Schema.TaggedError<LaunchError>()("LaunchError"
  * The media service refused to play. `error` is the playback API's tagged error, such as
  * `UnsupportedPlayback`; `recovery` is what a player does about it (`Playback.recoveryFor`).
  */
-export class PlaybackRefused extends Schema.TaggedError<PlaybackRefused>()("PlaybackRefused", {
+export class PlaybackRefused extends Schema.TaggedError<
+  PlaybackRefused,
+  { readonly brand: unique symbol }
+>()("PlaybackRefused", {
   error: PlaybackApiError,
   recovery: Schema.Literals([
     "reload-playlist",

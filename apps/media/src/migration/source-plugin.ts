@@ -102,21 +102,24 @@ export interface SourceCollection {
 }
 
 /** The source server cannot be reached: wrong URL, server down, timeout, or TLS failure. */
-export class SourceUnreachable extends Schema.TaggedError<SourceUnreachable>()(
-  "SourceUnreachable",
-  {
-    source: Schema.Literals(["jellyfin", "plex"]),
-    operation: Schema.String,
-    detail: Schema.String,
-  },
-) {
+export class SourceUnreachable extends Schema.TaggedError<
+  SourceUnreachable,
+  { readonly brand: unique symbol }
+>()("SourceUnreachable", {
+  source: Schema.Literals(["jellyfin", "plex"]),
+  operation: Schema.String,
+  detail: Schema.String,
+}) {
   override get message(): string {
     return `Source unreachable: ${this.source} ${this.operation} (${this.detail})`;
   }
 }
 
 /** The source refused the credentials. */
-export class SourceAuthFailed extends Schema.TaggedError<SourceAuthFailed>()("SourceAuthFailed", {
+export class SourceAuthFailed extends Schema.TaggedError<
+  SourceAuthFailed,
+  { readonly brand: unique symbol }
+>()("SourceAuthFailed", {
   source: Schema.Literals(["jellyfin", "plex"]),
 }) {
   override get message(): string {
@@ -125,7 +128,10 @@ export class SourceAuthFailed extends Schema.TaggedError<SourceAuthFailed>()("So
 }
 
 /** The credentials work but are not an administrator's. */
-export class SourceNotAdmin extends Schema.TaggedError<SourceNotAdmin>()("SourceNotAdmin", {
+export class SourceNotAdmin extends Schema.TaggedError<
+  SourceNotAdmin,
+  { readonly brand: unique symbol }
+>()("SourceNotAdmin", {
   source: Schema.Literals(["jellyfin", "plex"]),
 }) {
   override get message(): string {
@@ -134,40 +140,40 @@ export class SourceNotAdmin extends Schema.TaggedError<SourceNotAdmin>()("Source
 }
 
 /** The source is older than the plugin supports. */
-export class SourceVersionUnsupported extends Schema.TaggedError<SourceVersionUnsupported>()(
-  "SourceVersionUnsupported",
-  {
-    source: Schema.Literals(["jellyfin", "plex"]),
-    version: Schema.String,
-    minimum: Schema.String,
-  },
-) {
+export class SourceVersionUnsupported extends Schema.TaggedError<
+  SourceVersionUnsupported,
+  { readonly brand: unique symbol }
+>()("SourceVersionUnsupported", {
+  source: Schema.Literals(["jellyfin", "plex"]),
+  version: Schema.String,
+  minimum: Schema.String,
+}) {
   override get message(): string {
     return `Source version unsupported: ${this.source} ${this.version} is older than ${this.minimum}`;
   }
 }
 
 /** The source answered, but not as expected: another kind of server, or a changed API. */
-export class SourceUnexpectedResponse extends Schema.TaggedError<SourceUnexpectedResponse>()(
-  "SourceUnexpectedResponse",
-  {
-    source: Schema.Literals(["jellyfin", "plex"]),
-    operation: Schema.String,
-    status: Schema.NullOr(Schema.Int),
-    /** What went wrong, without URLs or headers (they may carry the token). */
-    detail: Schema.String,
-  },
-) {
+export class SourceUnexpectedResponse extends Schema.TaggedError<
+  SourceUnexpectedResponse,
+  { readonly brand: unique symbol }
+>()("SourceUnexpectedResponse", {
+  source: Schema.Literals(["jellyfin", "plex"]),
+  operation: Schema.String,
+  status: Schema.NullOr(Schema.Int),
+  /** What went wrong, without URLs or headers (they may carry the token). */
+  detail: Schema.String,
+}) {
   override get message(): string {
     return `Source answered unexpectedly: ${this.source} ${this.operation} (status ${String(this.status)}): ${this.detail}`;
   }
 }
 
 /** The plugin tried a request its manifest does not allow. */
-export class SourceRequestDenied extends Schema.TaggedError<SourceRequestDenied>()(
-  "SourceRequestDenied",
-  { plugin: Schema.String, method: Schema.String, host: Schema.String },
-) {
+export class SourceRequestDenied extends Schema.TaggedError<
+  SourceRequestDenied,
+  { readonly brand: unique symbol }
+>()("SourceRequestDenied", { plugin: Schema.String, method: Schema.String, host: Schema.String }) {
   override get message(): string {
     return `Source request denied: ${this.plugin} may not ${this.method} ${this.host}`;
   }

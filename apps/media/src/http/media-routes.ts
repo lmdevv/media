@@ -58,21 +58,19 @@ import {
 import { ByteRange, parseByteRange } from "./byte-range.ts";
 import { type FailureBudget, type FailureKind, makeFailureBudget } from "./failure-budget.ts";
 
-class MediaAccessDenied extends Schema.TaggedError<MediaAccessDenied>()(
-  "MediaAccessDenied",
-  {},
-  { httpApiStatus: 403 },
-) {
+class MediaAccessDenied extends Schema.TaggedError<
+  MediaAccessDenied,
+  { readonly brand: unique symbol }
+>()("MediaAccessDenied", {}, { httpApiStatus: 403 }) {
   override get message(): string {
     return "Media access denied: the token is for another file";
   }
 }
 
-class MediaFileUnreadable extends Schema.TaggedError<MediaFileUnreadable>()(
-  "MediaFileUnreadable",
-  {},
-  { httpApiStatus: 503 },
-) {
+class MediaFileUnreadable extends Schema.TaggedError<
+  MediaFileUnreadable,
+  { readonly brand: unique symbol }
+>()("MediaFileUnreadable", {}, { httpApiStatus: 503 }) {
   override get message(): string {
     return "Media file unreadable: the library may be offline";
   }
@@ -147,10 +145,10 @@ const SEGMENT_CACHE = "private, max-age=3600";
 const FILE_WAIT = Duration.seconds(30);
 
 /** A byte response stopped because the session that admitted it ended. */
-class SessionEndedMidResponse extends Schema.TaggedError<SessionEndedMidResponse>()(
-  "SessionEndedMidResponse",
-  {},
-) {}
+class SessionEndedMidResponse extends Schema.TaggedError<
+  SessionEndedMidResponse,
+  { readonly brand: unique symbol }
+>()("SessionEndedMidResponse", {}) {}
 
 const withinFileWait = <A, E, R>(waiting: Effect.Effect<A, E, R>) =>
   waiting.pipe(

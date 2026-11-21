@@ -19,6 +19,8 @@ const isWithin = (root: string, candidate: string, separator: string): boolean =
   candidate === root ||
   candidate.startsWith(root.endsWith(separator) ? root : `${root}${separator}`);
 
+const decodeComponent = Option.liftThrowable(decodeURIComponent);
+
 const notFound = HttpServerResponse.text("Not found", {
   status: 404,
   headers: { "cache-control": "no-store" },
@@ -69,7 +71,7 @@ export const layer: Layer.Layer<
     const handler = Effect.gen(function* () {
       const request = yield* HttpServerRequest.HttpServerRequest;
       const pathname = new URL(request.url, "http://web.invalid").pathname;
-      const decoded = yield* Effect.try(() => decodeURIComponent(pathname)).pipe(Effect.option);
+      const decoded = decodeComponent(pathname);
 
       if (Option.isNone(decoded) || decoded.value.includes("\u0000")) return notFound;
 

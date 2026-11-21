@@ -119,6 +119,7 @@ describe("web app", () => {
           "/leak.txt",
           "/../secret.txt",
           "/%2e%2e/secret.txt",
+          "/%E0%A4%A",
           "/missing.js",
           "/api/nothing",
           "/media/x",

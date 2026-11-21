@@ -16,7 +16,10 @@ export const mediaBaseUrl = (streamUrl: string): string | null => {
 };
 
 /** The media service health check did not answer with a success status in time. */
-export class MediaUnreachable extends Schema.TaggedError<MediaUnreachable>()("MediaUnreachable", {
+export class MediaUnreachable extends Schema.TaggedError<
+  MediaUnreachable,
+  { readonly brand: unique symbol }
+>()("MediaUnreachable", {
   baseUrl: Schema.String,
   /** The HTTP status when the service answered with an error, else null. */
   status: Schema.NullOr(Schema.Finite),

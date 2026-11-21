@@ -43,53 +43,77 @@ export const RequestIdentity = Schema.Struct({
 export type RequestIdentity = typeof RequestIdentity.Type;
 
 /** No session, or the session ended (sign-out, key revoked, account disabled). Sign in again. */
-export class Unauthenticated extends Schema.TaggedError<Unauthenticated>()("Unauthenticated", {
+export class Unauthenticated extends Schema.TaggedError<
+  Unauthenticated,
+  { readonly brand: unique symbol }
+>()("Unauthenticated", {
   message: Schema.String,
   ...RequestIdentity.fields,
 }) {}
 
 /** The session lacks the scope, role, ownership, PIN unlock, or host role the command needs. */
-export class Forbidden extends Schema.TaggedError<Forbidden>()("Forbidden", {
-  message: Schema.String,
-  ...RequestIdentity.fields,
-}) {}
+export class Forbidden extends Schema.TaggedError<Forbidden, { readonly brand: unique symbol }>()(
+  "Forbidden",
+  {
+    message: Schema.String,
+    ...RequestIdentity.fields,
+  },
+) {}
 
 /** The record does not exist or the viewer may not see it. Hidden titles report this too. */
-export class NotFound extends Schema.TaggedError<NotFound>()("NotFound", {
-  message: Schema.String,
-  ...RequestIdentity.fields,
-}) {}
+export class NotFound extends Schema.TaggedError<NotFound, { readonly brand: unique symbol }>()(
+  "NotFound",
+  {
+    message: Schema.String,
+    ...RequestIdentity.fields,
+  },
+) {}
 
 /** The arguments were well-formed but not acceptable, such as an unknown scope or a bad PIN format. */
-export class InvalidArgs extends Schema.TaggedError<InvalidArgs>()("InvalidArgs", {
+export class InvalidArgs extends Schema.TaggedError<
+  InvalidArgs,
+  { readonly brand: unique symbol }
+>()("InvalidArgs", {
   message: Schema.String,
   ...RequestIdentity.fields,
 }) {}
 
 /** The record is not in a state that allows this, such as a used invite or a lost job lease. */
-export class Conflict extends Schema.TaggedError<Conflict>()("Conflict", {
-  message: Schema.String,
-  ...RequestIdentity.fields,
-}) {}
+export class Conflict extends Schema.TaggedError<Conflict, { readonly brand: unique symbol }>()(
+  "Conflict",
+  {
+    message: Schema.String,
+    ...RequestIdentity.fields,
+  },
+) {}
 
 /** A code, invite, key, or token has expired. */
-export class Expired extends Schema.TaggedError<Expired>()("Expired", {
-  message: Schema.String,
-  ...RequestIdentity.fields,
-}) {}
+export class Expired extends Schema.TaggedError<Expired, { readonly brand: unique symbol }>()(
+  "Expired",
+  {
+    message: Schema.String,
+    ...RequestIdentity.fields,
+  },
+) {}
 
 /** Too many attempts. Wait and retry, after `retryAfterSeconds` when it is known. */
-export class RateLimited extends Schema.TaggedError<RateLimited>()("RateLimited", {
+export class RateLimited extends Schema.TaggedError<
+  RateLimited,
+  { readonly brand: unique symbol }
+>()("RateLimited", {
   message: Schema.String,
   retryAfterSeconds: Schema.optional(Schema.Int),
   ...RequestIdentity.fields,
 }) {}
 
 /** The server failed in a way the caller cannot fix, such as a missing deployment secret. */
-export class Internal extends Schema.TaggedError<Internal>()("Internal", {
-  message: Schema.String,
-  ...RequestIdentity.fields,
-}) {}
+export class Internal extends Schema.TaggedError<Internal, { readonly brand: unique symbol }>()(
+  "Internal",
+  {
+    message: Schema.String,
+    ...RequestIdentity.fields,
+  },
+) {}
 
 /** Any expected command failure. */
 export type CommandError =

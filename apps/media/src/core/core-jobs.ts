@@ -27,17 +27,23 @@ import {
 import * as CoreSession from "./core-session.ts";
 
 /** A handler's expected failure, recorded on the job. */
-export class JobFailed extends Schema.TaggedError<JobFailed>()("JobFailed", {
-  /** Shown to admins on the job; no paths outside the library or secrets. */
-  message: Schema.String,
-  /** Return the job to the queue while it has attempts left, instead of failing it for good. */
-  retry: Schema.Boolean,
-}) {}
+export class JobFailed extends Schema.TaggedError<JobFailed, { readonly brand: unique symbol }>()(
+  "JobFailed",
+  {
+    /** Shown to admins on the job; no paths outside the library or secrets. */
+    message: Schema.String,
+    /** Return the job to the queue while it has attempts left, instead of failing it for good. */
+    retry: Schema.Boolean,
+  },
+) {}
 
 /** The core answered that this attempt no longer holds its job: canceled, or another holds it. */
-export class JobStopped extends Schema.TaggedError<JobStopped>()("JobStopped", {
-  outcome: Schema.Literals(["canceled", "lost"]),
-}) {}
+export class JobStopped extends Schema.TaggedError<JobStopped, { readonly brand: unique symbol }>()(
+  "JobStopped",
+  {
+    outcome: Schema.Literals(["canceled", "lost"]),
+  },
+) {}
 
 /** A job this server holds, with its payload narrowed to the handler's kind. */
 interface HeldJob<Kind extends CoreJobKind> {

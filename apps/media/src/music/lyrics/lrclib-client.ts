@@ -21,24 +21,27 @@ import * as MediaConfig from "../../media-config.ts";
 import { type LrclibLyrics, parseLrclibRecord } from "./lrclib-record.ts";
 
 /** LRCLIB could not answer: every request now waits `pauseMs`, and the song is asked again. */
-export class LrclibUnavailable extends Schema.TaggedError<LrclibUnavailable>()(
-  "LrclibUnavailable",
-  {
-    reason: Schema.Literals(["network", "timeout", "server_error", "rate_limited", "rejected"]),
-    /** The HTTP status, when LRCLIB answered. */
-    status: Schema.NullOr(Schema.Finite),
-    /** How long the client holds every request: `Retry-After`, or its backoff. */
-    pauseMs: Schema.Finite,
-    cause: Schema.optional(Schema.Defect()),
-  },
-) {
+export class LrclibUnavailable extends Schema.TaggedError<
+  LrclibUnavailable,
+  { readonly brand: unique symbol }
+>()("LrclibUnavailable", {
+  reason: Schema.Literals(["network", "timeout", "server_error", "rate_limited", "rejected"]),
+  /** The HTTP status, when LRCLIB answered. */
+  status: Schema.NullOr(Schema.Finite),
+  /** How long the client holds every request: `Retry-After`, or its backoff. */
+  pauseMs: Schema.Finite,
+  cause: Schema.optional(Schema.Defect()),
+}) {
   override get message(): string {
     return `LRCLIB unavailable: ${this.reason}${this.status === null ? "" : ` (HTTP ${String(this.status)})`}`;
   }
 }
 
 /** LRCLIB answered with a record for this song that cannot be read, or one too large to. */
-class LrclibMalformed extends Schema.TaggedError<LrclibMalformed>()("LrclibMalformed", {
+class LrclibMalformed extends Schema.TaggedError<
+  LrclibMalformed,
+  { readonly brand: unique symbol }
+>()("LrclibMalformed", {
   path: Schema.String,
   cause: Schema.optional(Schema.Defect()),
 }) {

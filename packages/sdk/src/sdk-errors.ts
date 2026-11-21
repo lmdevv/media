@@ -6,7 +6,10 @@ import { Predicate, Schema } from "effect";
  * The server could not be reached or the connection dropped before an answer arrived. A mutation
  * that fails this way may still have run; read the state again before retrying it.
  */
-export class TransportError extends Schema.TaggedError<TransportError>()("TransportError", {
+export class TransportError extends Schema.TaggedError<
+  TransportError,
+  { readonly brand: unique symbol }
+>()("TransportError", {
   /** The command or function that was running, such as `titles.list`. */
   operation: Schema.String,
   message: Schema.String,
@@ -18,7 +21,10 @@ export class TransportError extends Schema.TaggedError<TransportError>()("Transp
  * The server answered with a value the contracts do not describe. This points at mismatched
  * client and server versions or a server bug; retrying does not help.
  */
-export class ProtocolError extends Schema.TaggedError<ProtocolError>()("ProtocolError", {
+export class ProtocolError extends Schema.TaggedError<
+  ProtocolError,
+  { readonly brand: unique symbol }
+>()("ProtocolError", {
   /** The command or function whose answer did not match, such as `titles.list`. */
   operation: Schema.String,
   message: Schema.String,

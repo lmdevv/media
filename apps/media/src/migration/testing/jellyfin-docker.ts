@@ -44,7 +44,10 @@ export interface JellyfinServer {
   };
 }
 
-class JellyfinSetupFailed extends Schema.TaggedError<JellyfinSetupFailed>()("JellyfinSetupFailed", {
+class JellyfinSetupFailed extends Schema.TaggedError<
+  JellyfinSetupFailed,
+  { readonly brand: unique symbol }
+>()("JellyfinSetupFailed", {
   step: Schema.String,
   cause: Schema.Defect(),
 }) {

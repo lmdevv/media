@@ -47,10 +47,10 @@ import * as StreamOwners from "../playback/stream-owners.ts";
 import * as CoreSession from "./core-session.ts";
 
 /** `MEDIA_TICKET_KEYS` cannot be used. Names the problem, never the keys. */
-export class TicketKeysUnusable extends Schema.TaggedError<TicketKeysUnusable>()(
-  "TicketKeysUnusable",
-  { problem: Schema.String },
-) {
+export class TicketKeysUnusable extends Schema.TaggedError<
+  TicketKeysUnusable,
+  { readonly brand: unique symbol }
+>()("TicketKeysUnusable", { problem: Schema.String }) {
   override get message(): string {
     return `MEDIA_TICKET_KEYS is not usable: ${this.problem}`;
   }

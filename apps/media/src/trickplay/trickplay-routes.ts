@@ -5,16 +5,19 @@ import { HttpPlatform, HttpRouter, HttpServerRequest, HttpServerResponse } from 
 import * as PlaybackToken from "../playback/playback-grants.ts";
 import * as TrickplayStore from "./trickplay-store.ts";
 
-class TrickplayAccessDenied extends Schema.TaggedError<TrickplayAccessDenied>()(
-  "TrickplayAccessDenied",
-  {},
-) {
+class TrickplayAccessDenied extends Schema.TaggedError<
+  TrickplayAccessDenied,
+  { readonly brand: unique symbol }
+>()("TrickplayAccessDenied", {}) {
   override get message(): string {
     return "Trickplay access denied: the token is for another file";
   }
 }
 
-class TrickplayNotFound extends Schema.TaggedError<TrickplayNotFound>()("TrickplayNotFound", {}) {
+class TrickplayNotFound extends Schema.TaggedError<
+  TrickplayNotFound,
+  { readonly brand: unique symbol }
+>()("TrickplayNotFound", {}) {
   override get message(): string {
     return "Trickplay not found";
   }

@@ -88,7 +88,10 @@ export const MediaProbe = Schema.Struct({
 /** What ffprobe found in a media file. */
 export interface MediaProbe extends Schema.Schema.Type<typeof MediaProbe> {}
 
-class MediaProbeInvalid extends Schema.TaggedError<MediaProbeInvalid>()("MediaProbeInvalid", {
+class MediaProbeInvalid extends Schema.TaggedError<
+  MediaProbeInvalid,
+  { readonly brand: unique symbol }
+>()("MediaProbeInvalid", {
   cause: Schema.Defect(),
 }) {
   override get message(): string {

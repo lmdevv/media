@@ -4,7 +4,10 @@ import * as MediaConfig from "../media-config.ts";
 import * as ScopedProcess from "../platform/scoped-process.ts";
 
 /** A media tool could not start, or exited unsuccessfully. */
-export class MediaToolFailed extends Schema.TaggedError<MediaToolFailed>()("MediaToolFailed", {
+export class MediaToolFailed extends Schema.TaggedError<
+  MediaToolFailed,
+  { readonly brand: unique symbol }
+>()("MediaToolFailed", {
   tool: Schema.Literals(["ffmpeg", "ffprobe"]),
   exitCode: Schema.NullOr(Schema.Int),
   /** Tail of the tool's standard error with absolute paths from its arguments replaced. */

@@ -5,10 +5,10 @@ import * as MediaConfig from "../media-config.ts";
 import { modifiedAtMs } from "../platform/file-info.ts";
 
 /** Thumbnails could not be written to the data folder. */
-export class TrickplayStorageFailed extends Schema.TaggedError<TrickplayStorageFailed>()(
-  "TrickplayStorageFailed",
-  { cause: Schema.Defect() },
-) {
+export class TrickplayStorageFailed extends Schema.TaggedError<
+  TrickplayStorageFailed,
+  { readonly brand: unique symbol }
+>()("TrickplayStorageFailed", { cause: Schema.Defect() }) {
   override get message(): string {
     return "Scrub thumbnails could not be stored in the data folder";
   }

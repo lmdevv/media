@@ -31,13 +31,19 @@ interface ArtworkImage {
   readonly contentType: string;
 }
 
-class ArtworkNotFound extends Schema.TaggedError<ArtworkNotFound>()("ArtworkNotFound", {}) {
+class ArtworkNotFound extends Schema.TaggedError<
+  ArtworkNotFound,
+  { readonly brand: unique symbol }
+>()("ArtworkNotFound", {}) {
   override get message(): string {
     return "Artwork not found";
   }
 }
 
-class ArtworkUnavailable extends Schema.TaggedError<ArtworkUnavailable>()("ArtworkUnavailable", {
+class ArtworkUnavailable extends Schema.TaggedError<
+  ArtworkUnavailable,
+  { readonly brand: unique symbol }
+>()("ArtworkUnavailable", {
   cause: Schema.Defect(),
 }) {
   override get message(): string {
@@ -73,16 +79,19 @@ const DOWNLOAD_TIMEOUT = Duration.seconds(30);
 
 const MAX_RESIZES = 2;
 
-class ArtworkTooLarge extends Schema.TaggedError<ArtworkTooLarge>()("ArtworkTooLarge", {}) {
+class ArtworkTooLarge extends Schema.TaggedError<
+  ArtworkTooLarge,
+  { readonly brand: unique symbol }
+>()("ArtworkTooLarge", {}) {
   override get message(): string {
     return "Artwork too large";
   }
 }
 
-class ArtworkDownloadTimedOut extends Schema.TaggedError<ArtworkDownloadTimedOut>()(
-  "ArtworkDownloadTimedOut",
-  {},
-) {
+class ArtworkDownloadTimedOut extends Schema.TaggedError<
+  ArtworkDownloadTimedOut,
+  { readonly brand: unique symbol }
+>()("ArtworkDownloadTimedOut", {}) {
   override get message(): string {
     return "Artwork download timed out";
   }

@@ -28,7 +28,10 @@ export const MEDIA_ROUTES = {
  * it with status 401. `wrong_purpose` is a download ticket on a playback route, or a playback
  * ticket on a download route.
  */
-export class PlaybackTokenInvalid extends Schema.TaggedError<PlaybackTokenInvalid>()(
+export class PlaybackTokenInvalid extends Schema.TaggedError<
+  PlaybackTokenInvalid,
+  { readonly brand: unique symbol }
+>()(
   "PlaybackTokenInvalid",
   {
     reason: Schema.Literals([
@@ -357,51 +360,50 @@ export const UnsupportedReason = Schema.Literals([
 export type UnsupportedReason = typeof UnsupportedReason.Type;
 
 /** The client cannot play this file in any mode the service offers. Do not retry. */
-export class UnsupportedPlayback extends Schema.TaggedError<UnsupportedPlayback>()(
-  "UnsupportedPlayback",
-  { reason: UnsupportedReason },
-  { httpApiStatus: 422 },
-) {
+export class UnsupportedPlayback extends Schema.TaggedError<
+  UnsupportedPlayback,
+  { readonly brand: unique symbol }
+>()("UnsupportedPlayback", { reason: UnsupportedReason }, { httpApiStatus: 422 }) {
   override get message(): string {
     return `Unsupported playback: ${this.reason}`;
   }
 }
 
 /** The token's playback session ended. Start a new session with `playback.createSession`. */
-export class PlaybackSessionEnded extends Schema.TaggedError<PlaybackSessionEnded>()(
-  "PlaybackSessionEnded",
-  { sessionId: PlaybackSessionId },
-  { httpApiStatus: 410 },
-) {
+export class PlaybackSessionEnded extends Schema.TaggedError<
+  PlaybackSessionEnded,
+  { readonly brand: unique symbol }
+>()("PlaybackSessionEnded", { sessionId: PlaybackSessionId }, { httpApiStatus: 410 }) {
   override get message(): string {
     return "Playback session ended: start a new session";
   }
 }
 
 /** No stored file has this ID, it is marked missing, or it lies outside the approved folders. */
-export class MediaFileNotFound extends Schema.TaggedError<MediaFileNotFound>()(
-  "MediaFileNotFound",
-  { fileId: Schema.String },
-  { httpApiStatus: 404 },
-) {
+export class MediaFileNotFound extends Schema.TaggedError<
+  MediaFileNotFound,
+  { readonly brand: unique symbol }
+>()("MediaFileNotFound", { fileId: Schema.String }, { httpApiStatus: 404 }) {
   override get message(): string {
     return `Media file not found: ${this.fileId}`;
   }
 }
 
 /** The media service cannot reach its file records right now. Retry shortly. */
-export class FileResolverUnavailable extends Schema.TaggedError<FileResolverUnavailable>()(
-  "FileResolverUnavailable",
-  { cause: Schema.Defect() },
-  { httpApiStatus: 503 },
-) {
+export class FileResolverUnavailable extends Schema.TaggedError<
+  FileResolverUnavailable,
+  { readonly brand: unique symbol }
+>()("FileResolverUnavailable", { cause: Schema.Defect() }, { httpApiStatus: 503 }) {
   override get message(): string {
     return "File resolver unavailable: the file store did not answer";
   }
 }
 
 /** The file's keyframes could not be read, so its HLS segments cannot be planned. */
-export class KeyframeIndexFailed extends Schema.TaggedError<KeyframeIndexFailed>()(
+export class KeyframeIndexFailed extends Schema.TaggedError<
+  KeyframeIndexFailed,
+  { readonly brand: unique symbol }
+>()(
   "KeyframeIndexFailed",
   { fileId: Schema.String, cause: Schema.Defect() },
   { httpApiStatus: 500 },
@@ -412,18 +414,20 @@ export class KeyframeIndexFailed extends Schema.TaggedError<KeyframeIndexFailed>
 }
 
 /** The stream ID is unknown, for example after a restart. Renegotiate to get a new one. */
-export class StreamNotFound extends Schema.TaggedError<StreamNotFound>()(
-  "StreamNotFound",
-  { streamId: Schema.String },
-  { httpApiStatus: 404 },
-) {
+export class StreamNotFound extends Schema.TaggedError<
+  StreamNotFound,
+  { readonly brand: unique symbol }
+>()("StreamNotFound", { streamId: Schema.String }, { httpApiStatus: 404 }) {
   override get message(): string {
     return "Stream not found: renegotiate playback";
   }
 }
 
 /** The request names an old generation; load the current generation's playlist instead. */
-export class StreamGenerationGone extends Schema.TaggedError<StreamGenerationGone>()(
+export class StreamGenerationGone extends Schema.TaggedError<
+  StreamGenerationGone,
+  { readonly brand: unique symbol }
+>()(
   "StreamGenerationGone",
   { streamId: Schema.String, generation: Schema.Int, currentGeneration: Schema.Int },
   { httpApiStatus: 410 },
@@ -434,29 +438,30 @@ export class StreamGenerationGone extends Schema.TaggedError<StreamGenerationGon
 }
 
 /** The token belongs to another playback session or file. */
-export class StreamAccessDenied extends Schema.TaggedError<StreamAccessDenied>()(
-  "StreamAccessDenied",
-  { streamId: Schema.String },
-  { httpApiStatus: 403 },
-) {
+export class StreamAccessDenied extends Schema.TaggedError<
+  StreamAccessDenied,
+  { readonly brand: unique symbol }
+>()("StreamAccessDenied", { streamId: Schema.String }, { httpApiStatus: 403 }) {
   override get message(): string {
     return "Stream access denied: the token does not match this stream";
   }
 }
 
 /** All transcode slots are busy. Retry later. */
-export class TranscodeCapacityReached extends Schema.TaggedError<TranscodeCapacityReached>()(
-  "TranscodeCapacityReached",
-  { limit: Schema.Int },
-  { httpApiStatus: 503 },
-) {
+export class TranscodeCapacityReached extends Schema.TaggedError<
+  TranscodeCapacityReached,
+  { readonly brand: unique symbol }
+>()("TranscodeCapacityReached", { limit: Schema.Int }, { httpApiStatus: 503 }) {
   override get message(): string {
     return `Transcode capacity reached: ${this.limit} transcodes are running`;
   }
 }
 
 /** `TRANSCODE_DIR` is too full to start another stream. Retry later. */
-export class InsufficientTranscodeSpace extends Schema.TaggedError<InsufficientTranscodeSpace>()(
+export class InsufficientTranscodeSpace extends Schema.TaggedError<
+  InsufficientTranscodeSpace,
+  { readonly brand: unique symbol }
+>()(
   "InsufficientTranscodeSpace",
   { freeBytes: Schema.Finite, requiredBytes: Schema.Finite },
   { httpApiStatus: 507 },
@@ -467,29 +472,30 @@ export class InsufficientTranscodeSpace extends Schema.TaggedError<InsufficientT
 }
 
 /** The segment index is outside the stream. */
-export class SegmentNotFound extends Schema.TaggedError<SegmentNotFound>()(
-  "SegmentNotFound",
-  { index: Schema.Int },
-  { httpApiStatus: 404 },
-) {
+export class SegmentNotFound extends Schema.TaggedError<
+  SegmentNotFound,
+  { readonly brand: unique symbol }
+>()("SegmentNotFound", { index: Schema.Int }, { httpApiStatus: 404 }) {
   override get message(): string {
     return `Segment not found: ${this.index}`;
   }
 }
 
 /** The segment was not produced in time. Retry the request. */
-export class SegmentNotReady extends Schema.TaggedError<SegmentNotReady>()(
-  "SegmentNotReady",
-  { index: Schema.Int },
-  { httpApiStatus: 503 },
-) {
+export class SegmentNotReady extends Schema.TaggedError<
+  SegmentNotReady,
+  { readonly brand: unique symbol }
+>()("SegmentNotReady", { index: Schema.Int }, { httpApiStatus: 503 }) {
   override get message(): string {
     return `Segment not ready: ${this.index}`;
   }
 }
 
 /** ffmpeg failed and no fallback applies. */
-export class TranscodeFailed extends Schema.TaggedError<TranscodeFailed>()(
+export class TranscodeFailed extends Schema.TaggedError<
+  TranscodeFailed,
+  { readonly brand: unique symbol }
+>()(
   "TranscodeFailed",
   { streamId: Schema.String, mode: Schema.String, detail: Schema.String },
   { httpApiStatus: 500 },

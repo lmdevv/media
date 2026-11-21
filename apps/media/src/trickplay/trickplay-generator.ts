@@ -28,10 +28,10 @@ const FAILURE_MESSAGES: Readonly<Record<typeof TrickplayFailure.Type, string>> =
   "no-output": "ffmpeg could not read frames from this file",
 };
 
-class TrickplayUnavailable extends Schema.TaggedError<TrickplayUnavailable>()(
-  "TrickplayUnavailable",
-  { reason: TrickplayFailure, cause: Schema.Defect() },
-) {
+class TrickplayUnavailable extends Schema.TaggedError<
+  TrickplayUnavailable,
+  { readonly brand: unique symbol }
+>()("TrickplayUnavailable", { reason: TrickplayFailure, cause: Schema.Defect() }) {
   override get message(): string {
     return FAILURE_MESSAGES[this.reason];
   }

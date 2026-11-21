@@ -86,13 +86,13 @@ export type Credentials = Data.TaggedEnum<{
 export const Credentials = Data.taggedEnum<Credentials>();
 
 /** The device sign-in was denied, or expired before anyone approved it. Start a new one. */
-export class DeviceSignInRefused extends Schema.TaggedError<DeviceSignInRefused>()(
-  "DeviceSignInRefused",
-  {
-    state: Schema.Literals(["denied", "expired"]),
-    message: Schema.String,
-  },
-) {}
+export class DeviceSignInRefused extends Schema.TaggedError<
+  DeviceSignInRefused,
+  { readonly brand: unique symbol }
+>()("DeviceSignInRefused", {
+  state: Schema.Literals(["denied", "expired"]),
+  message: Schema.String,
+}) {}
 
 /** A device sign-in waiting for someone signed in elsewhere to approve its code. */
 export interface DeviceSignIn {

@@ -18,12 +18,15 @@ export const isInsideFolder = (path: string, folder: string): boolean =>
   path === folder || path.startsWith(`${folder}/`);
 
 /** A file system operation failed. `missing` is true when the path does not exist. */
-export class FileError extends Schema.TaggedError<FileError>()("FileError", {
-  operation: Schema.String,
-  path: Schema.String,
-  missing: Schema.Boolean,
-  cause: Schema.Defect(),
-}) {
+export class FileError extends Schema.TaggedError<FileError, { readonly brand: unique symbol }>()(
+  "FileError",
+  {
+    operation: Schema.String,
+    path: Schema.String,
+    missing: Schema.Boolean,
+    cause: Schema.Defect(),
+  },
+) {
   override get message(): string {
     return `File operation failed: ${this.operation} ${this.path}${this.missing ? " (missing)" : ""}`;
   }

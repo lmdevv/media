@@ -47,14 +47,14 @@ export const sessionOf = (session: StoredSession): Option.Option<string> =>
   subjectOf(session.token);
 
 /** Reading or writing the token store failed. */
-export class TokenStorageError extends Schema.TaggedError<TokenStorageError>()(
-  "TokenStorageError",
-  {
-    operation: Schema.Literals(["load", "save", "clear"]),
-    message: Schema.String,
-    cause: Schema.Defect(),
-  },
-) {}
+export class TokenStorageError extends Schema.TaggedError<
+  TokenStorageError,
+  { readonly brand: unique symbol }
+>()("TokenStorageError", {
+  operation: Schema.Literals(["load", "save", "clear"]),
+  message: Schema.String,
+  cause: Schema.Defect(),
+}) {}
 
 /**
  * Whether a session may still be used from this store: `none` while the store holds its

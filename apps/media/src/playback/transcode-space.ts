@@ -1,5 +1,5 @@
 import { InsufficientTranscodeSpace } from "@media/contracts/media-playback";
-import { Context, Effect, Layer, Ref } from "effect";
+import { Context, Data, Effect, Layer, Ref } from "effect";
 
 import * as MediaConfig from "../media-config.ts";
 import { errorCode, freeBytes } from "../platform/node-directories.ts";
@@ -18,6 +18,10 @@ export interface Interface {
   readonly release: (key: string) => Effect.Effect<void>;
 }
 
+class FreeSpaceUnknown extends Data.TaggedError("FreeSpaceUnknown")<{
+  readonly cause: unknown;
+}> {}
+
 /** The transcode space ledger. */
 export class Service extends Context.Service<Service, Interface>()(
   "@media/server/TranscodeSpace",
@@ -31,7 +35,10 @@ export const layer: Layer.Layer<Service, never, MediaConfig.Service> = Layer.eff
     const reserved = yield* Ref.make<ReadonlyMap<string, number>>(new Map());
 
     const check = Effect.fn("TranscodeSpace.check")(function* (bytes: number) {
-      const available = yield* Effect.tryPromise(() => freeBytes(config.transcodeDir)).pipe(
+      const available = yield* Effect.tryPromise({
+        try: () => freeBytes(config.transcodeDir),
+        catch: (cause) => new FreeSpaceUnknown({ cause }),
+      }).pipe(
         Effect.tapError((error) =>
           Effect.logWarning("TranscodeSpace.free_space_unknown").pipe(
             Effect.annotateLogs({ code: errorCode(error.cause) }),

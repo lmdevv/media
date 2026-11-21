@@ -21,7 +21,10 @@ import * as SessionReports from "./playback/session-reports.ts";
 import * as StreamOwners from "./playback/stream-owners.ts";
 import { STOP_DEADLINE, withShutdownDeadline } from "./shutdown-deadline.ts";
 
-class CoreSettingMissing extends Schema.TaggedError<CoreSettingMissing>()("CoreSettingMissing", {
+class CoreSettingMissing extends Schema.TaggedError<
+  CoreSettingMissing,
+  { readonly brand: unique symbol }
+>()("CoreSettingMissing", {
   setting: Schema.Literals(["MEDIA_SERVICE_API_KEY", "MEDIA_TICKET_KEYS"]),
 }) {
   override get message(): string {
