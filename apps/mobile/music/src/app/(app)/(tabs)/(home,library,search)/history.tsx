@@ -1,5 +1,4 @@
 import { Clock } from "lucide-react-native";
-import { useState } from "react";
 import { View } from "react-native";
 
 import { ListPage } from "@/components/browse/list-page";
@@ -9,6 +8,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { SectionHeader } from "@/components/ui/section-header";
 import { useHistory } from "@/lib/details";
 import { historyRows } from "@/lib/history";
+import { useToday } from "@/lib/use-today";
 import { useNowPlaying } from "@/player";
 
 const HISTORY_LIMIT = 200;
@@ -17,10 +17,10 @@ export default function History() {
   const history = useHistory(HISTORY_LIMIT);
   const playingId = useNowPlaying().nowPlaying?.trackId ?? null;
   const { playFrom } = usePlayList();
-  const [now] = useState(Date.now);
+  const today = useToday();
 
   const plays = history ?? [];
-  const rows = historyRows(plays, now);
+  const rows = historyRows(plays, today);
   const trackIds = plays.map((play) => play.track.id);
 
   return (
