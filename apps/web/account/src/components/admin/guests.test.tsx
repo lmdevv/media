@@ -38,7 +38,7 @@ const links = (list: Paged<GuestLink>, expanded: GuestLink["linkId"] | null = nu
     revoking={null}
     onToggle={noop}
     onRevoke={noop}
-    activity={(id) => <p>{`activity of ${id}`}</p>}
+    renderActivity={(id) => <p>{`activity of ${id}`}</p>}
   />
 );
 

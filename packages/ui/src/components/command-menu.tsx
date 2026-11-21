@@ -257,8 +257,6 @@ export function CommandMenu({
 
   const focusReturn = useKeyboardFocusReturn();
 
-  let index = -1;
-
   return (
     <Dialog.Root
       open={open}
@@ -321,11 +319,10 @@ export function CommandMenu({
               const labelId = `${listboxId}-${group.id}`;
 
               return (
-                <div
+                <fieldset
                   key={group.id}
-                  role="group"
                   aria-labelledby={group.label === undefined ? undefined : labelId}
-                  className="flex flex-col not-first:pt-2"
+                  className="flex min-w-0 flex-col not-first:pt-2"
                 >
                   {group.label === undefined ? null : (
                     <div
@@ -335,10 +332,8 @@ export function CommandMenu({
                       {group.label}
                     </div>
                   )}
-                  {group.items.map((item) => {
-                    index += 1;
-
-                    const position = index;
+                  {group.items.map((item, offset) => {
+                    const position = group.start + offset;
 
                     return (
                       <CommandRow
@@ -352,7 +347,7 @@ export function CommandMenu({
                       />
                     );
                   })}
-                </div>
+                </fieldset>
               );
             })}
           </div>

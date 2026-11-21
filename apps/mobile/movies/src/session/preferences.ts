@@ -33,27 +33,29 @@ export interface AppPreferences extends PlaybackPreferences {
 
 type Synced = Partial<SyncedPreferences>;
 
-/** This phone's own preferences, and its last choice of the synced ones for whoever is signed in. */
-let local: AppPreferences = {
-  appearance: loadAppearance(),
-  ...parsePreferences(readValue(KEY)),
+/** What the phone holds, replaced as a whole on every change. */
+interface Held {
+  /** This phone's own preferences, and its last choice of the synced ones for whoever is signed in. */
+  readonly local: AppPreferences;
+  /** The synced preferences each person's settings last held, read from the keychain on first use. */
+  readonly known: ReadonlyMap<string, Synced>;
+  /** Synced preferences sent to the server and not yet answered, by person, oldest first. */
+  readonly pending: ReadonlyMap<string, ReadonlyArray<Synced>>;
+}
+
+let held: Held = {
+  local: { appearance: loadAppearance(), ...parsePreferences(readValue(KEY)) },
+  known: new Map(),
+  pending: new Map(),
 };
 
-/** The synced preferences each person's settings last held, read from the keychain on first use. */
-const known = new Map<string, Synced>();
-
-/** Synced preferences sent to the server and not yet answered, by person, oldest first. */
-const pending = new Map<string, ReadonlyArray<Synced>>();
-
-const pendingFor = (userId: string): Synced => {
+const pendingIn = (from: Held, userId: string): Synced => {
   const all: Synced = {};
 
-  for (const sent of pending.get(userId) ?? []) Object.assign(all, sent);
+  for (const sent of from.pending.get(userId) ?? []) Object.assign(all, sent);
 
   return all;
 };
-
-let version = 0;
 
 const listeners = new Set<() => void>();
 
@@ -65,21 +67,26 @@ const subscribe = (listener: () => void): (() => void) => {
   };
 };
 
-const readVersion = (): number => version;
+const readHeld = (): Held => held;
 
 const changed = (): void => {
-  version += 1;
-
   for (const listener of listeners) listener();
 };
 
+const storedSynced = (userId: string): Synced => parseSynced(readValue(syncedKey(userId)));
+
+/** What `userId`'s settings last held, from the keychain when this launch has not read them yet. */
+const knownIn = (from: Held, userId: string): Synced =>
+  from.known.get(userId) ?? storedSynced(userId);
+
+/** As `knownIn`, keeping what the keychain held for the next read. */
 const knownFor = (userId: string): Synced => {
-  const cached = known.get(userId);
+  const cached = held.known.get(userId);
 
   if (cached !== undefined) return cached;
-  const stored = parseSynced(readValue(syncedKey(userId)));
+  const stored = storedSynced(userId);
 
-  known.set(userId, stored);
+  held = { ...held, known: new Map(held.known).set(userId, stored) };
 
   return stored;
 };
@@ -91,28 +98,30 @@ const sameSynced = (left: Synced, right: Synced): boolean =>
 const remember = (userId: string, next: Synced): void => {
   if (sameSynced(knownFor(userId), next)) return;
 
-  known.set(userId, next);
+  held = { ...held, known: new Map(held.known).set(userId, next) };
   writeValue(syncedKey(userId), serializeSynced(next));
   changed();
 };
 
 /** Stops waiting on `sent`, the server having answered it. */
 const settle = (userId: string, sent: Synced): void => {
-  const left = (pending.get(userId) ?? []).filter((each) => each !== sent);
+  const left = (held.pending.get(userId) ?? []).filter((each) => each !== sent);
+  const pending = new Map(held.pending);
 
   if (left.length === 0) pending.delete(userId);
   else pending.set(userId, left);
 
+  held = { ...held, pending };
   changed();
 };
 
 const setLocal = (change: Partial<AppPreferences>): void => {
-  const { appearance, ...playback } = { ...local, ...change };
+  const { appearance, ...playback } = { ...held.local, ...change };
 
-  if (appearance !== local.appearance) saveAppearance(appearance);
+  if (appearance !== held.local.appearance) saveAppearance(appearance);
 
   writeValue(KEY, serializePreferences(playback));
-  local = { appearance, ...playback };
+  held = { ...held, local: { appearance, ...playback } };
   changed();
 };
 
@@ -142,7 +151,7 @@ const usePreferencesState = (): PreferencesState => {
   const { userId } = usePerson();
   const offline = useOffline() !== null;
   const settings = useSettings(offline);
-  const seen = useSyncExternalStore(subscribe, readVersion, readVersion);
+  const phone = useSyncExternalStore(subscribe, readHeld, readHeld);
   const live = settings.status === "success" ? settings.data : null;
 
   useEffect(() => {
@@ -151,12 +160,11 @@ const usePreferencesState = (): PreferencesState => {
 
   const preferences = useMemo(
     (): AppPreferences => ({
-      ...local,
-      ...(live === null ? knownFor(userId) : syncedOf(live)),
-      ...pendingFor(userId),
+      ...phone.local,
+      ...(live === null ? knownIn(phone, userId) : syncedOf(live)),
+      ...pendingIn(phone, userId),
     }),
-    // `seen` changes whenever the phone's preferences do.
-    [seen, live, userId],
+    [phone, live, userId],
   );
 
   return { preferences, settled: offline || settings.status !== "loading" };
@@ -190,7 +198,10 @@ export const useUpdatePreferences = (): ((change: Partial<AppPreferences>) => vo
 
       const before = knownFor(userId);
 
-      pending.set(userId, [...(pending.get(userId) ?? []), synced]);
+      held = {
+        ...held,
+        pending: new Map(held.pending).set(userId, [...(held.pending.get(userId) ?? []), synced]),
+      };
       remember(userId, { ...before, ...synced });
 
       platform.core.settings.set(request).then(

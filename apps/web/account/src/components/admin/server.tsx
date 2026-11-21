@@ -157,22 +157,45 @@ export function ServerView({
   return (
     <>
       <ServerHeader mediaUrl={mediaUrl} health={health} />
-      {Match.value(state).pipe(
-        Match.discriminatorsExhaustive("kind")({
-          loading: () => <ReportsSkeleton />,
-          failed: ({ message, retry }) => <Failed message={message} retry={retry} />,
-          ready: ({ status }) => (
-            <Reports
-              status={status}
-              health={health}
-              databaseVersion={databaseVersion}
-              mediaUrl={mediaUrl}
-              databaseUrl={databaseUrl}
-            />
-          ),
-        }),
-      )}
+      <ServerBody
+        state={state}
+        health={health}
+        databaseVersion={databaseVersion}
+        mediaUrl={mediaUrl}
+        databaseUrl={databaseUrl}
+      />
     </>
+  );
+}
+
+/** What the server page shows under its header for each {@link ServerState}. */
+function ServerBody({
+  state,
+  health,
+  databaseVersion,
+  mediaUrl,
+  databaseUrl,
+}: {
+  readonly state: ServerState;
+  readonly health: Health;
+  readonly databaseVersion: string | null;
+  readonly mediaUrl: string;
+  readonly databaseUrl: string;
+}) {
+  return Match.value(state).pipe(
+    Match.discriminatorsExhaustive("kind")({
+      loading: () => <ReportsSkeleton />,
+      failed: ({ message, retry }) => <Failed message={message} retry={retry} />,
+      ready: ({ status }) => (
+        <Reports
+          status={status}
+          health={health}
+          databaseVersion={databaseVersion}
+          mediaUrl={mediaUrl}
+          databaseUrl={databaseUrl}
+        />
+      ),
+    }),
   );
 }
 

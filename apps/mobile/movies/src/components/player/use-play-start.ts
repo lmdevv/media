@@ -1,6 +1,6 @@
 import { usePlatform } from "@media/sdk/react";
 import { Result } from "effect";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 
 import { startPlay } from "@/lib/player/play-session";
 import type { StartArgs, StartedPlay } from "@/lib/player/play-session";
@@ -37,19 +37,23 @@ export const usePlayStart = (args: StartArgs | null): PlayStart => {
   // Development's double mount runs the effect twice; the start goes out once.
   const asked = useRef<Promise<PlayStart> | null>(null);
 
-  useEffect(() => {
-    if (args === null) return undefined;
-
-    let live = true;
-
-    asked.current ??= startPlay(platform.movies.play, args, mediaUrl).then(
+  const ask = useEffectEvent((start: StartArgs): Promise<PlayStart> =>
+    startPlay(platform.movies.play, start, mediaUrl).then(
       (started): PlayStart =>
         Result.match(started, {
           onSuccess: (play) => ({ status: "started", play }),
           onFailure: (failure) => ({ status: "failed", step: afterSessionFailure(failure) }),
         }),
       () => UNEXPECTED,
-    );
+    ),
+  );
+
+  useEffect(() => {
+    if (args === null) return undefined;
+
+    let live = true;
+
+    asked.current ??= ask(args);
 
     void asked.current.then((answered) => {
       if (live) setState(answered);
@@ -60,7 +64,7 @@ export const usePlayStart = (args: StartArgs | null): PlayStart => {
     return () => {
       live = false;
     };
-  }, [args, platform, mediaUrl]);
+  }, [args]);
 
   return state;
 };

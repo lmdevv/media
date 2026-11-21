@@ -41,15 +41,13 @@ const useSecondClock = (active: boolean): number => {
 /** Where a signed-in person approves a code: the account client's device page on the server. */
 const DEVICE_PATH = "/device";
 
-const useDeviceLogin = (round: number): Attempt => {
+const useDeviceLogin = (): Attempt => {
   const { startDeviceSignIn } = useSignIn();
   const { mediaUrl } = useServer();
   const [attempt, setAttempt] = useState<Attempt>({ kind: "starting" });
 
   useEffect(() => {
     const stop = new AbortController();
-
-    setAttempt({ kind: "starting" });
 
     void (async () => {
       try {
@@ -74,7 +72,7 @@ const useDeviceLogin = (round: number): Attempt => {
     })();
 
     return () => stop.abort();
-  }, [round, startDeviceSignIn, mediaUrl]);
+  }, [startDeviceSignIn, mediaUrl]);
 
   return attempt;
 };
@@ -104,11 +102,16 @@ function CodeBoxes({ userCode }: { readonly userCode: string }) {
   );
 }
 
+/** Each round of asking for a code mounts afresh, so Get a New Code starts a new sign-in. */
 export default function SignInWithCode() {
   const [round, setRound] = useState(0);
-  const attempt = useDeviceLogin(round);
+
+  return <DeviceSignIn key={round} again={() => setRound((current) => current + 1)} />;
+}
+
+function DeviceSignIn({ again }: { readonly again: () => void }) {
+  const attempt = useDeviceLogin();
   const now = useSecondClock(attempt.kind === "waiting");
-  const again = () => setRound((current) => current + 1);
 
   if (attempt.kind === "expired" || attempt.kind === "failed") {
     return (

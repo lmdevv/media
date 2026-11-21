@@ -5,7 +5,14 @@
  * tagged errors.
  */
 import type { ReactNode } from "react";
-import { createContext, useContext, useEffect, useState, useSyncExternalStore } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from "react";
 
 import type { AuthStatus } from "./auth";
 import type { Params, PromiseQuery } from "./platform/command";
@@ -132,9 +139,11 @@ export interface PlatformClientProviderProps {
 export const PlatformClientProvider = ({
   platform,
   children,
-}: PlatformClientProviderProps): ReactNode => (
-  <PlatformContext.Provider value={openOf(platform)}>{children}</PlatformContext.Provider>
-);
+}: PlatformClientProviderProps): ReactNode => {
+  const open = useMemo(() => openOf(platform), [platform]);
+
+  return <PlatformContext.Provider value={open}>{children}</PlatformContext.Provider>;
+};
 
 /**
  * Every platform command as a Promise method, such as `usePlatform().core.server.info()`, and the
