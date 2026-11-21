@@ -59,9 +59,7 @@ export function AutoplayBench({ still, title, overview, seconds }: AutoplayBench
           actions={actionsFor(seconds * 1000, setDone)}
         />
       ) : (
-        <p role="status" className="absolute top-4 left-4 text-body/body">
-          {done}
-        </p>
+        <output className="absolute top-4 left-4 text-body/body">{done}</output>
       )}
     </div>
   );

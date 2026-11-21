@@ -194,9 +194,8 @@ export function CastingState({
   readonly className?: string;
 }) {
   return (
-    <div
+    <output
       data-testid="casting-state"
-      role="status"
       className={cn(
         "on-media pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 bg-dark-bg/70 font-sans",
         className,
@@ -204,6 +203,6 @@ export function CastingState({
     >
       <CastIcon className="size-10 text-text" strokeWidth={1.5} aria-hidden />
       <p className="text-lead/body font-semibold text-text">Playing on {deviceName}</p>
-    </div>
+    </output>
   );
 }

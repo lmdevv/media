@@ -104,7 +104,7 @@ function GuestTitle({
           </Button>
         ) : null}
         {episode !== null && detail.versions.length === 0 ? (
-          <p role="status">This episode isn't available</p>
+          <output className="block">This episode isn't available</output>
         ) : null}
         <Button
           variant="secondary"
@@ -166,7 +166,7 @@ function GuestEpisodes({
 
   if (seasons.status === "failed") return <Button onClick={seasons.retry}>Try again</Button>;
 
-  if (seasons.status !== "ready") return <p role="status">Loading episodes…</p>;
+  if (seasons.status !== "ready") return <output className="block">Loading episodes…</output>;
   const season = picked ?? seasons.rows[0]?.seasonNumber;
 
   return (
@@ -214,7 +214,7 @@ function Season({
 
   if (episodes.status === "failed") return <Button onClick={episodes.retry}>Try again</Button>;
 
-  if (episodes.status !== "ready") return <p role="status">Loading episodes…</p>;
+  if (episodes.status !== "ready") return <output className="block">Loading episodes…</output>;
 
   return (
     <>
