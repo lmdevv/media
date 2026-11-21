@@ -264,6 +264,7 @@ export function TitleGridPage({
   const platform = usePlatform();
 
   const [filters, setFilters] = useState(() => openingFilters(fixedGenre));
+  const [now] = useState(Date.now);
   const titles = usePages(platform.movies.titles.list, titlesOf(kind, filters));
 
   const next = titles.status === "ready" ? titles.next : null;
@@ -280,7 +281,6 @@ export function TitleGridPage({
   };
 
   const complete = next?.kind === "done";
-  const now = Date.now();
 
   const noun = kind === "show" ? ["show", "shows"] : ["title", "titles"];
 

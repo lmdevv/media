@@ -98,18 +98,20 @@ export const useSessionFollower = ({
     if (heldIn.current !== sessionId) hold.current = null;
     heldIn.current = sessionId;
 
+    const following = run({
+      player,
+      port,
+      clock: latest.current.clock,
+      durationMs: () => latest.current.durationMs,
+      controls: latest.current.controls,
+      pausesForStalls: hosting,
+      resumeHold: hold.current,
+    });
+
     const fiber = Effect.runFork(
       Effect.scoped(
         Effect.gen(function* () {
-          const running = yield* run({
-            player,
-            port,
-            clock: latest.current.clock,
-            durationMs: () => latest.current.durationMs,
-            controls: latest.current.controls,
-            pausesForStalls: hosting,
-            resumeHold: hold.current,
-          });
+          const running = yield* following;
 
           follower.current = running;
           yield* running.allow(latest.current.controls);

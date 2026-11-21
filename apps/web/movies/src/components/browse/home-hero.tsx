@@ -9,6 +9,7 @@ import { PlayGlyph } from "@media/ui/components/icons";
 import { cn } from "@media/ui/lib/utils";
 import { Link } from "@tanstack/react-router";
 import { CheckIcon, InfoIcon, PlusIcon } from "lucide-react";
+import { useState } from "react";
 import type { ReactNode } from "react";
 
 import { artworkUrl } from "@/lib/artwork";
@@ -73,6 +74,7 @@ function DesktopHero({
   readonly featured: TitleCard;
   readonly detail: FeaturedDetail | null;
 }) {
+  const [now] = useState(Date.now);
   const target = detail === null ? null : playTarget({ kind: featured.kind, ...detail });
   const version = detail?.version ?? null;
   const badges = version === null ? [] : versionBadges(version).slice(0, 2);
@@ -83,7 +85,7 @@ function DesktopHero({
       title={featured.name}
       titleArt={titleArt(featured, false)}
       backdrop={artworkUrl(featured.artwork.backdrop, "backdrop")}
-      highlight={newBadge(featured, Date.now()) === undefined ? undefined : "New this week"}
+      highlight={newBadge(featured, now) === undefined ? undefined : "New this week"}
       facts={facts(
         featured.year,
         featured.kind === "show"

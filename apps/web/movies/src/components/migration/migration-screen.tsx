@@ -121,32 +121,31 @@ export function MigrationScreen({ importId }: { readonly importId: ImportRunId |
     );
   }
 
-  return Match.value(step).pipe(
-    Match.discriminatorsExhaustive("kind")({
-      connect: ({ failure }) => (
-        <Connect
-          form={form}
-          failure={failure}
-          onFormChange={setForm}
-          onReady={(preview) => setStep({ kind: "review", preview })}
-          onFailed={(next) => setStep({ kind: "connect", failure: next })}
-        />
-      ),
-      review: ({ preview }) => (
-        <Review
-          form={form}
-          preview={preview}
-          onPreview={(next) => setStep({ kind: "review", preview: next })}
-          onFailed={(next) => setStep({ kind: "connect", failure: next })}
-          onBack={() => setStep({ kind: "connect", failure: null })}
-          onStarted={(started) =>
-            void navigate({
-              to: "/admin/migration",
-              search: { run: parseImportRunId(started.importId) },
-            })
-          }
-        />
-      ),
-    }),
+  if (step.kind === "connect") {
+    return (
+      <Connect
+        form={form}
+        failure={step.failure}
+        onFormChange={setForm}
+        onReady={(preview) => setStep({ kind: "review", preview })}
+        onFailed={(next) => setStep({ kind: "connect", failure: next })}
+      />
+    );
+  }
+
+  return (
+    <Review
+      form={form}
+      preview={step.preview}
+      onPreview={(next) => setStep({ kind: "review", preview: next })}
+      onFailed={(next) => setStep({ kind: "connect", failure: next })}
+      onBack={() => setStep({ kind: "connect", failure: null })}
+      onStarted={(started) =>
+        void navigate({
+          to: "/admin/migration",
+          search: { run: parseImportRunId(started.importId) },
+        })
+      }
+    />
   );
 }

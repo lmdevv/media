@@ -6,6 +6,7 @@ import { Button } from "@media/ui/components/button";
 import { CalmState } from "@media/ui/components/calm-state";
 import { MediaRow } from "@media/ui/components/media-row";
 import { Link, createFileRoute } from "@tanstack/react-router";
+import { useState } from "react";
 
 import { CollectionCard } from "@/components/browse/collection-card";
 import { HomeHero } from "@/components/browse/home-hero";
@@ -114,7 +115,7 @@ function HomeSkeleton() {
 function HomeRows({ home }: { readonly home: Home }) {
   const me = useMe();
   const phone = usePhone();
-  const now = Date.now();
+  const [now] = useState(Date.now);
   const size = phone ? "phone" : "desktop";
 
   const titleRow = (titles: ReadonlyArray<TitleCard>) =>

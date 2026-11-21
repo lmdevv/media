@@ -1,6 +1,7 @@
 import { CalmState } from "@media/ui/components/calm-state";
 import { createFileRoute } from "@tanstack/react-router";
 import { Schema } from "effect";
+import { useState } from "react";
 
 import { NotFoundPage } from "@/components/shell/route-states";
 
@@ -20,8 +21,9 @@ export const Route = createFileRoute("/dev/crash")({
 
 function CrashPage() {
   const { until } = Route.useSearch();
+  const [now] = useState(Date.now);
 
-  if (until === undefined || !(Date.now() >= Number(until))) {
+  if (until === undefined || !(now >= Number(until))) {
     throw new Error("This screen crashed on purpose");
   }
 

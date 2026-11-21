@@ -125,6 +125,8 @@ const TRACKS_LABEL = "Audio, subtitles, and quality";
 
 const NO_VERSIONS: ReadonlyArray<MediaVersion> = [];
 
+const STARTING = PlaybackPhase.Starting();
+
 const creditsSeconds = (duration: number): number => Math.min(30, duration * 0.1);
 
 /** What the player was asked to play. */
@@ -154,12 +156,10 @@ const startChoice = (start: PlayerScreenProps["start"]): StartChoice => {
 const useSettled = (value: boolean, ms: number): boolean => {
   const [settled, setSettled] = useState(false);
 
-  useEffect(() => {
-    if (!value) {
-      setSettled(false);
+  if (!value && settled) setSettled(false);
 
-      return undefined;
-    }
+  useEffect(() => {
+    if (!value) return undefined;
 
     const timer = setTimeout(() => setSettled(true), ms);
 
@@ -295,7 +295,7 @@ export function PlayerScreen({
 
   const controller = handle?.controller ?? null;
   const snapshot = handle?.snapshot ?? null;
-  const phase = snapshot?.phase ?? PlaybackPhase.Starting();
+  const phase = snapshot?.phase ?? STARTING;
   const isPlaying = PlaybackPhase.$is("Playing")(phase);
   const player = controller?.player ?? null;
   const output = controller?.output ?? null;
@@ -674,13 +674,23 @@ export function PlayerScreen({
 
   const shownSubtitle = casting === null ? subtitleId : OFF;
 
+  // A new stream's subtitles arrive as new tracks, which take the shown subtitle as they are added.
   useEffect(() => {
-    if (video === null) return;
+    if (video === null) return undefined;
 
-    for (const track of Array.from(video.textTracks)) {
-      track.mode = track.id === shownSubtitle ? "showing" : "disabled";
-    }
-  }, [video, shownSubtitle, stream]);
+    const tracks = video.textTracks;
+
+    const show = (): void => {
+      for (const track of Array.from(tracks)) {
+        track.mode = track.id === shownSubtitle ? "showing" : "disabled";
+      }
+    };
+
+    show();
+    tracks.addEventListener("addtrack", show);
+
+    return () => tracks.removeEventListener("addtrack", show);
+  }, [video, shownSubtitle]);
 
   const subtitleDelay = useSubtitleDelay({
     controller,
@@ -931,14 +941,13 @@ export function PlayerScreen({
   );
 
   const { countdownEnded } = stillWatching;
+  const countingDown = showNext && autoplay;
+
+  if (!countingDown && countdown !== null) setCountdown(null);
 
   // Only the countdown's end is autoplay's jump; the card's Play next is the viewer's own input.
   useEffect(() => {
-    if (!showNext || !autoplay) {
-      setCountdown(null);
-
-      return undefined;
-    }
+    if (!countingDown) return undefined;
 
     const fiber = Effect.runFork(
       Stream.runForEach(
@@ -956,7 +965,7 @@ export function PlayerScreen({
     return () => {
       Effect.runFork(Fiber.interrupt(fiber));
     };
-  }, [showNext, autoplay, playNext, countdownEnded]);
+  }, [countingDown, playNext, countdownEnded]);
 
   const stalled = useSettled(isPlaying && media.buffering, BUFFERING_GRACE_MS);
 
@@ -1270,45 +1279,46 @@ export function PlayerScreen({
     const stopped = PlaybackPhase.$is("Stopped")(phase) ? phase.stop : null;
 
     if (stopped !== null) {
-      return PlaybackStop.$match(stopped, {
-        Missing: () => (
-          <PlaybackStopped
-            missing
-            title="We can't find this file"
-            description="The video file was moved, renamed, or its drive is offline."
-            onBack={backToDetails}
-            secondary={
-              scopes.has("movies:edit") && detail !== null && "libraryId" in detail
-                ? {
-                    label: "Show missing files",
-                    onClick: () =>
-                      void navigate({
-                        to: "/admin/libraries/$libraryId",
-                        params: { libraryId: detail.libraryId },
-                      }),
-                  }
-                : undefined
-            }
-          />
-        ),
-        Unsupported: () => (
-          <PlaybackStopped
-            missing={false}
-            title="This can't play here"
-            description="This device can't play the file in any way the server offers."
-            onBack={backToDetails}
-          />
-        ),
-        Failed: ({ message }) => (
-          <PlaybackStopped
-            missing={false}
-            title="Playback stopped"
-            description={message}
-            onBack={backToDetails}
-            secondary={{ label: "Try again", onClick: () => controller?.retry() }}
-          />
-        ),
+      const shown = PlaybackStop.$match(stopped, {
+        Missing: () => ({
+          missing: true,
+          title: "We can't find this file",
+          description: "The video file was moved, renamed, or its drive is offline.",
+          secondary:
+            scopes.has("movies:edit") && detail !== null && "libraryId" in detail
+              ? {
+                  label: "Show missing files",
+                  onClick: () =>
+                    void navigate({
+                      to: "/admin/libraries/$libraryId",
+                      params: { libraryId: detail.libraryId },
+                    }),
+                }
+              : undefined,
+        }),
+        Unsupported: () => ({
+          missing: false,
+          title: "This can't play here",
+          description: "This device can't play the file in any way the server offers.",
+          secondary: undefined,
+        }),
+        Failed: ({ message }) => ({
+          missing: false,
+          title: "Playback stopped",
+          description: message,
+          secondary: { label: "Try again", onClick: () => controller?.retry() },
+        }),
       });
+
+      return (
+        <PlaybackStopped
+          missing={shown.missing}
+          title={shown.title}
+          description={shown.description}
+          onBack={backToDetails}
+          secondary={shown.secondary}
+        />
+      );
     }
 
     if (PlaybackPhase.$is("Choosing")(phase)) {

@@ -108,37 +108,38 @@ const sameState = (left: MediaState, right: MediaState): boolean =>
   left.volume === right.volume &&
   left.muted === right.muted;
 
+/** `element`'s state through `player` as an external store, which keeps its last read stable. */
+const mediaStateStore = (element: HTMLVideoElement | null, player: MediaElementPlayer | null) => {
+  let current = IDLE;
+
+  const read = (): MediaState => {
+    if (element === null || player === null) return IDLE;
+
+    const next: MediaState = {
+      paused: element.paused,
+      ended: element.ended,
+      buffering: player.isBuffering(),
+      volume: element.volume,
+      muted: element.muted,
+    };
+
+    if (!sameState(current, next)) current = next;
+
+    return current;
+  };
+
+  const subscribe = (onChange: () => void): (() => void) =>
+    element === null || player === null ? () => undefined : followMedia(element, player, onChange);
+
+  return { read, subscribe };
+};
+
 /** Follows `element` through `player`, re-rendering when its state changes. */
 export const useMediaState = (
   element: HTMLVideoElement | null,
   player: MediaElementPlayer | null,
 ): MediaState => {
-  const store = useMemo(() => {
-    let current = IDLE;
-
-    const read = (): MediaState => {
-      if (element === null || player === null) return IDLE;
-
-      const next: MediaState = {
-        paused: element.paused,
-        ended: element.ended,
-        buffering: player.isBuffering(),
-        volume: element.volume,
-        muted: element.muted,
-      };
-
-      if (!sameState(current, next)) current = next;
-
-      return current;
-    };
-
-    const subscribe = (onChange: () => void): (() => void) =>
-      element === null || player === null
-        ? () => undefined
-        : followMedia(element, player, onChange);
-
-    return { read, subscribe };
-  }, [element, player]);
+  const store = useMemo(() => mediaStateStore(element, player), [element, player]);
 
   return useSyncExternalStore(store.subscribe, store.read, store.read);
 };
