@@ -36,6 +36,7 @@ import {
   UserRoundIcon,
   CaptionsIcon,
 } from "lucide-react";
+import { Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
@@ -100,8 +101,9 @@ const TITLES = [
 ] as const;
 
 const infoLink = (title: string) => (
-  <a
-    href="#"
+  <Link
+    to="/search"
+    search={{ q: title }}
     aria-label={`More info about ${title}`}
     className={cn(
       buttonVariants({ variant: "secondary" }),
@@ -109,7 +111,7 @@ const infoLink = (title: string) => (
     )}
   >
     <InfoIcon strokeWidth={1.75} aria-hidden />
-  </a>
+  </Link>
 );
 
 const wait = (ms: number): Promise<void> =>
@@ -421,7 +423,7 @@ export function KitGallery() {
       />
 
       <div className="flex flex-col gap-11">
-        <MediaRow title="Continue watching for Alex" seeAll={<a href="#" />}>
+        <MediaRow title="Continue watching for Alex" seeAll={<Link to="/" />}>
           <LandscapeCard
             href="#"
             title="Dune: Part Two"
@@ -463,7 +465,7 @@ export function KitGallery() {
             progress={0.8}
           />
         </MediaRow>
-        <MediaRow title="Recently added" seeAll={<a href="#" />}>
+        <MediaRow title="Recently added" seeAll={<Link to="/movies" />}>
           <PosterCard href="#" title="Perfect Days" image={ART.perfectDays} badge="New" />
           <PosterCard href="#" title="Andor" image={ART.andor} badge="New" />
           <PosterCard href="#" title="Blue Eye Samurai" image={ART.severancePoster} />
@@ -545,9 +547,12 @@ export function KitGallery() {
               error="Wrong password. 2 tries left."
               className="w-100"
               labelAction={
-                <a href="#" className="font-sans text-label/4 font-medium text-text">
+                <button
+                  type="button"
+                  className="cursor-pointer font-sans text-label/4 font-medium text-text"
+                >
                   Forgot?
-                </a>
+                </button>
               }
               trailing={<EyeIcon className="size-4.5" strokeWidth={1.75} aria-hidden />}
             />
@@ -716,7 +721,7 @@ export function KitGallery() {
                   }
                 />
               </div>
-              <MediaRow title="Continue watching" seeAll={<a href="#" />}>
+              <MediaRow title="Continue watching" seeAll={<Link to="/" />}>
                 <LandscapeCard
                   href="#"
                   size="phone"
@@ -747,7 +752,7 @@ export function KitGallery() {
                 trailing={<Avatar name="Alex" image={ART.alex} size="xs" round />}
               />
               <div className="flex flex-col pt-24">
-                <MediaRow title="Recently added" seeAll={<a href="#" />}>
+                <MediaRow title="Recently added" seeAll={<Link to="/movies" />}>
                   <LandscapeCard
                     href="#"
                     size="phone"
@@ -763,7 +768,7 @@ export function KitGallery() {
                     image={ART.poorThings}
                   />
                 </MediaRow>
-                <MediaRow title="Because you watched Dune" seeAll={<a href="#" />}>
+                <MediaRow title="Because you watched Dune" seeAll={<Link to="/movies" />}>
                   <LandscapeCard
                     href="#"
                     size="phone"

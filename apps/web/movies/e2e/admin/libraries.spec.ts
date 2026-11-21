@@ -140,7 +140,7 @@ test("an admin adds a library in the account client, cancels and restarts its sc
   await expect(fileRow("Stalker.1979.Criterion.mkv")).toContainText("Unmatched");
   await expect(fileRow("Stalker.1979.Criterion.mkv")).toContainText(/\d+p · /u);
   await expect(fileRow("The.Prestige.2006.mkv")).toBeVisible();
-  await expect(filter("Unmatched")).toContainText(/\d/u);
+  await expect(filter("Unmatched")).toHaveAccessibleName(/^Unmatched\s*\d/u);
 
   await rm(join(root, "The.Prestige.2006.mkv"));
   await page.getByRole("button", { name: "Scan now" }).click();
@@ -153,7 +153,7 @@ test("an admin adds a library in the account client, cancels and restarts its sc
   const notice = page.getByRole("note");
   await expect(notice).toContainText("1 file disappeared since");
   await notice.getByRole("button", { name: "Review 1 missing" }).click();
-  await expect(filter("Missing")).toHaveAttribute("aria-checked", "true");
+  await expect(filter("Missing")).toBeChecked();
   await expect(fileRow("The.Prestige.2006.mkv")).toBeVisible();
   await expect(fileRow("Stalker.1979.Criterion.mkv")).toBeHidden();
   await expect(notice.getByRole("button", { name: "Review 1 missing" })).toBeHidden();

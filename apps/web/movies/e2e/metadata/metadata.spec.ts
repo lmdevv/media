@@ -312,7 +312,7 @@ test("a person page shows their photo, life, links, and titles in the library", 
   await expect(page.getByRole("heading", { level: 1, name: "Sigourney Weaver" })).toBeVisible();
 
   await expect(page.getByRole("img", { name: "Sigourney Weaver" })).toHaveAttribute(
-    "style",
+    "src",
     /artwork/u,
   );
 

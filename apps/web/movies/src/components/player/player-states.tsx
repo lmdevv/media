@@ -109,19 +109,12 @@ export function PreparingStream({
         </h2>
       </div>
       <div className="flex w-90 max-w-full flex-col gap-3">
-        <div
-          role="progressbar"
+        <progress
           aria-label="Preparing your stream"
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={Math.round(progress * 100)}
-          className="flex h-0.75 shrink-0 rounded-bar bg-text/15"
-        >
-          <div
-            className="h-0.75 rounded-bar bg-accent transition-[width] duration-700 ease-out"
-            style={{ width: `${String(progress * 100)}%` }}
-          />
-        </div>
+          value={progress}
+          max={1}
+          className="h-0.75 w-full shrink-0 appearance-none overflow-hidden rounded-bar bg-text/15 [&::-moz-progress-bar]:rounded-bar [&::-moz-progress-bar]:bg-accent [&::-webkit-progress-bar]:bg-transparent [&::-webkit-progress-value]:rounded-bar [&::-webkit-progress-value]:bg-accent [&::-webkit-progress-value]:transition-[width] [&::-webkit-progress-value]:duration-700 [&::-webkit-progress-value]:ease-out"
+        />
         {startAtMs <= 0 ? null : (
           <p className="text-center font-mono text-caption/caption text-text-muted">
             Starting at {timecode(startAtMs)}
@@ -250,10 +243,7 @@ export function PressPlay({ onPlay }: { readonly onPlay: () => void }) {
  */
 export function SubtitleDelayNotice({ text }: { readonly text: string | null }) {
   return (
-    <div
-      role="status"
-      className="on-media pointer-events-none absolute top-8 left-1/2 -translate-x-1/2"
-    >
+    <output className="on-media pointer-events-none absolute top-8 left-1/2 -translate-x-1/2">
       {text === null ? null : (
         <div className="flex h-10 items-center gap-2 rounded-pill border border-text/10 bg-glass px-4 font-sans text-label/label text-text shadow-glass backdrop-blur-xl [&_svg]:size-4">
           <CaptionsIcon strokeWidth={1.75} aria-hidden />
@@ -261,6 +251,6 @@ export function SubtitleDelayNotice({ text }: { readonly text: string | null }) 
           <span className="font-semibold tabular-nums">{text}</span>
         </div>
       )}
-    </div>
+    </output>
   );
 }

@@ -179,11 +179,8 @@ function LibraryRow({ library, now }: { readonly library: Library; readonly now:
   const fraction = running === null ? null : scanFraction(running);
 
   return (
-    <div
-      role="rowgroup"
-      className={cn("flex flex-col rounded-control", active && "bg-surface-raised/55")}
-    >
-      <div role="row" className="flex h-11 shrink-0 items-center gap-3 px-3">
+    <tbody className={cn("flex flex-col rounded-control", active && "bg-surface-raised/55")}>
+      <tr className="flex h-11 shrink-0 items-center gap-3 px-3">
         <Cell className="flex w-40 items-center gap-2.5">
           <span aria-hidden className="h-7 w-5 shrink-0 rounded-bar bg-text/10" />
           <Link
@@ -231,31 +228,33 @@ function LibraryRow({ library, now }: { readonly library: Library; readonly now:
             </button>
           )}
         </Cell>
-      </div>
+      </tr>
       {running === null ? null : (
-        <div className="flex flex-col gap-2 pr-3 pb-3.5 pl-10.5">
-          <div className="flex items-center gap-3">
-            <ProgressBar
-              tone="surface"
-              value={fraction ?? 0}
-              label={`${library.name} scan progress`}
-              className="flex-1 rounded-pill bg-hairline [&>div]:rounded-pill"
-            />
-            <span className="w-55 shrink-0 text-right font-mono text-caption/caption text-text">
-              {running.done === null
-                ? ""
-                : running.total === null
-                  ? `${formatCount(running.done)} files`
-                  : `${formatCount(running.done)} / ${formatCount(running.total)} files · ${formatPercent(fraction ?? 0)}`}
-            </span>
-          </div>
-          {running.message === null ? null : (
-            <span className="truncate font-mono text-caption/caption text-text-muted">
-              {running.message}
-            </span>
-          )}
-        </div>
+        <tr>
+          <td colSpan={6} className="flex flex-col gap-2 pr-3 pb-3.5 pl-10.5">
+            <div className="flex items-center gap-3">
+              <ProgressBar
+                tone="surface"
+                value={fraction ?? 0}
+                label={`${library.name} scan progress`}
+                className="flex-1 rounded-pill bg-hairline [&>div]:rounded-pill"
+              />
+              <span className="w-55 shrink-0 text-right font-mono text-caption/caption text-text">
+                {running.done === null
+                  ? ""
+                  : running.total === null
+                    ? `${formatCount(running.done)} files`
+                    : `${formatCount(running.done)} / ${formatCount(running.total)} files · ${formatPercent(fraction ?? 0)}`}
+              </span>
+            </div>
+            {running.message === null ? null : (
+              <span className="truncate font-mono text-caption/caption text-text-muted">
+                {running.message}
+              </span>
+            )}
+          </td>
+        </tr>
       )}
-    </div>
+    </tbody>
   );
 }

@@ -2,9 +2,9 @@ import { cn } from "@media/ui/lib/utils";
 import type { ReactNode } from "react";
 
 /**
- * A data table drawn as flex rows, so columns are fixed-width lanes that line up across rows.
- * `ruled` draws hairlines between rows, as on API keys; otherwise rows sit on whitespace, as on
- * the admin screens.
+ * A data table drawn as flex rows, so columns are fixed-width lanes that line up across rows. Put a
+ * {@link TableHead} and a {@link TableBody} in it. `ruled` draws hairlines between rows, as on API
+ * keys; otherwise rows sit on whitespace, as on the admin screens.
  */
 export function Table({
   label,
@@ -18,8 +18,7 @@ export function Table({
   readonly children: ReactNode;
 }) {
   return (
-    <div
-      role="table"
+    <table
       aria-label={label}
       data-ruled={ruled || undefined}
       className={cn(
@@ -29,7 +28,7 @@ export function Table({
       )}
     >
       {children}
-    </div>
+    </table>
   );
 }
 
@@ -42,16 +41,17 @@ export function TableHead({
   readonly children: ReactNode;
 }) {
   return (
-    <div
-      role="row"
-      className={cn(
-        "flex h-8 shrink-0 items-center gap-3 group-data-ruled/table:h-9 group-data-ruled/table:border-b group-data-ruled/table:border-hairline",
-        "px-3 group-data-ruled/table:px-0",
-        className,
-      )}
-    >
-      {children}
-    </div>
+    <thead>
+      <tr
+        className={cn(
+          "flex h-8 shrink-0 items-center gap-3 group-data-ruled/table:h-9 group-data-ruled/table:border-b group-data-ruled/table:border-hairline",
+          "px-3 group-data-ruled/table:px-0",
+          className,
+        )}
+      >
+        {children}
+      </tr>
+    </thead>
   );
 }
 
@@ -64,16 +64,21 @@ export function Column({
   readonly children?: ReactNode;
 }) {
   return (
-    <span
-      role="columnheader"
+    <th
+      scope="col"
       className={cn(
-        "shrink-0 font-sans text-micro/caption font-semibold tracking-eyebrow text-text-muted uppercase group-data-ruled/table:text-caption/caption group-data-ruled/table:tracking-caps",
+        "shrink-0 text-start font-sans text-micro/caption font-semibold tracking-eyebrow text-text-muted uppercase group-data-ruled/table:text-caption/caption group-data-ruled/table:tracking-caps",
         className,
       )}
     >
       {children}
-    </span>
+    </th>
   );
+}
+
+/** The body of a {@link Table}, holding its {@link TableRow}s. */
+export function TableBody({ children }: { readonly children: ReactNode }) {
+  return <tbody className="flex flex-col gap-1 group-data-ruled/table:gap-0">{children}</tbody>;
 }
 
 /** A body row of a {@link Table}. */
@@ -85,15 +90,14 @@ export function TableRow({
   readonly children: ReactNode;
 }) {
   return (
-    <div
-      role="row"
+    <tr
       className={cn(
         "flex h-11 shrink-0 items-center gap-3 px-3 group-data-ruled/table:h-13 group-data-ruled/table:border-b group-data-ruled/table:border-hairline group-data-ruled/table:px-0",
         className,
       )}
     >
       {children}
-    </div>
+    </tr>
   );
 }
 
@@ -105,11 +109,7 @@ export function Cell({
   readonly className?: string;
   readonly children?: ReactNode;
 }) {
-  return (
-    <div role="cell" className={cn("min-w-0 shrink-0", className)}>
-      {children}
-    </div>
-  );
+  return <td className={cn("min-w-0 shrink-0", className)}>{children}</td>;
 }
 
 /** A colored dot before a status word, such as Ready or Scanning. */

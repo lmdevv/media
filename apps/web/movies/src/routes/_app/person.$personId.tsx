@@ -127,11 +127,10 @@ function PersonPage() {
             {monogramOf(data.name)}
           </div>
         ) : (
-          <div
-            role="img"
-            aria-label={data.name}
-            className="aspect-2/3 w-40 shrink-0 rounded-poster bg-surface-raised bg-cover bg-center md:w-64"
-            style={{ backgroundImage: `url("${photo}")` }}
+          <img
+            src={photo}
+            alt={data.name}
+            className="aspect-2/3 w-40 shrink-0 rounded-poster bg-surface-raised object-cover object-center md:w-64"
           />
         )}
         <div className="flex max-w-170 flex-col gap-4">

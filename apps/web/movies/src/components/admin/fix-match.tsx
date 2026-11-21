@@ -170,11 +170,7 @@ function MatchEditor({
   useEffect(() => {
     const text = query.trim();
 
-    if (text === "") {
-      setResults({ status: "idle" });
-
-      return () => undefined;
-    }
+    if (text === "") return () => undefined;
 
     let live = true;
     const year = parseYear(yearFilter);
@@ -314,7 +310,13 @@ function MatchEditor({
                   type="search"
                   aria-label="Search TMDB"
                   value={query}
-                  onChange={(event) => setQuery(event.target.value)}
+                  onChange={(event) => {
+                    const next = event.target.value;
+
+                    setQuery(next);
+
+                    if (next.trim() === "") setResults({ status: "idle" });
+                  }}
                   className="min-w-0 flex-1 bg-transparent font-sans text-body/body text-text outline-none"
                 />
               </label>
@@ -390,14 +392,14 @@ function Candidates({
 
   if (results.status === "unavailable") {
     return (
-      <div role="status" className="flex flex-col gap-1 px-3.5 py-4">
+      <output className="flex flex-col gap-1 px-3.5 py-4">
         <p className="font-sans text-body/body font-semibold text-text">
           TMDB search isn’t available on this server
         </p>
         <p className="font-sans text-label/label text-text-muted">
           Edit the title, year, or TMDB ID by hand below.
         </p>
-      </div>
+      </output>
     );
   }
 

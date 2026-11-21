@@ -5,6 +5,7 @@ import { RadioGroup, RadioItem } from "@media/ui/components/radio-group";
 import { Switch } from "@media/ui/components/switch";
 import { cn } from "@media/ui/lib/utils";
 import { EyeOffIcon, XIcon } from "lucide-react";
+import { useId } from "react";
 import type { ReactNode } from "react";
 
 import { episodeCode } from "@/lib/format";
@@ -215,6 +216,9 @@ function Settings({
   readonly settings: SessionSettings;
   readonly onChange: (settings: SessionSettings) => void;
 }) {
+  const controlId = useId();
+  const addId = useId();
+
   return (
     <>
       <Section title="Who can join">
@@ -237,16 +241,24 @@ function Settings({
         </RadioGroup>
       </Section>
       <Section title="Guests can">
-        <label className="flex cursor-pointer items-center justify-between gap-3 text-body/5 text-text">
+        <label
+          htmlFor={controlId}
+          className="flex cursor-pointer items-center justify-between gap-3 text-body/5 text-text"
+        >
           Pause and seek
           <Switch
+            id={controlId}
             checked={settings.control}
             onCheckedChange={(control) => onChange({ ...settings, control })}
           />
         </label>
-        <label className="flex cursor-pointer items-center justify-between gap-3 text-body/5 text-text">
+        <label
+          htmlFor={addId}
+          className="flex cursor-pointer items-center justify-between gap-3 text-body/5 text-text"
+        >
           Add to Up next
           <Switch
+            id={addId}
             checked={settings.add}
             onCheckedChange={(add) => onChange({ ...settings, add })}
           />

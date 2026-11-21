@@ -2,7 +2,6 @@ import type { PlatformSdk } from "@media/sdk/promise";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { Button } from "@media/ui/components/button";
 import { CalmState } from "@media/ui/components/calm-state";
-import { Chip } from "@media/ui/components/chip";
 import {
   Dialog,
   DialogBody,
@@ -42,7 +41,7 @@ import { Poster } from "./poster";
 import type { LibraryId } from "./route-params";
 import { isActive, isUnreachable } from "./scan";
 import { allows } from "./scope-gate";
-import { Cell, Column, StatusDot, Table, TableHead, TableRow } from "./table";
+import { Cell, Column, StatusDot, Table, TableBody, TableHead, TableRow } from "./table";
 import type {
   LibraryDetail,
   LibraryFile,
@@ -376,19 +375,29 @@ function FileList({
         <div role="radiogroup" aria-label="Show" className="flex flex-wrap items-center gap-2">
           {FILTERS.map((each) => {
             const count = chipCount(each.id, counts);
+            const selected = each.id === filter;
 
             return (
-              <Chip
+              <label
                 key={each.id}
-                role="radio"
-                aria-checked={each.id === filter}
-                selected={each.id === filter}
-                onClick={() => onFilterChange(each.id)}
-                className="gap-2"
+                className={cn(
+                  "relative inline-flex h-8 shrink-0 items-center gap-2 rounded-pill px-3.5 font-sans text-label/4 transition-colors",
+                  selected
+                    ? "bg-text font-semibold text-bg"
+                    : "bg-surface-raised font-medium text-text hover:bg-text/15",
+                )}
               >
+                <input
+                  type="radio"
+                  name="library-file-filter"
+                  value={each.id}
+                  checked={selected}
+                  onChange={() => onFilterChange(each.id)}
+                  className="absolute inset-0 cursor-pointer appearance-none rounded-pill"
+                />
                 {each.label}
                 {count === null ? null : <span>{count}</span>}
-              </Chip>
+              </label>
             );
           })}
         </div>
@@ -410,19 +419,23 @@ function FileList({
       </div>
       <PagedView list={files} loading={<Skeleton className="h-13 w-full rounded-control" />}>
         {({ rows, next }) => (
-          <Table label="Files">
-            <TableHead>
-              <Column className="min-w-80 flex-1">File</Column>
-              <Column className="w-37">Quality</Column>
-              <Column className="w-20">Size</Column>
-              <Column className="w-50">Status</Column>
-              <Column className="w-24" />
-            </TableHead>
-            {rows
-              .filter((file) => matches(file, needle))
-              .map((file) => (
-                <FileRow key={file.id} file={file} libraryId={libraryId} now={now} />
-              ))}
+          <div className="flex flex-col gap-1">
+            <Table label="Files">
+              <TableHead>
+                <Column className="min-w-80 flex-1">File</Column>
+                <Column className="w-37">Quality</Column>
+                <Column className="w-20">Size</Column>
+                <Column className="w-50">Status</Column>
+                <Column className="w-24" />
+              </TableHead>
+              <TableBody>
+                {rows
+                  .filter((file) => matches(file, needle))
+                  .map((file) => (
+                    <FileRow key={file.id} file={file} libraryId={libraryId} now={now} />
+                  ))}
+              </TableBody>
+            </Table>
             {rows.length === 0 && next.kind === "done" ? (
               <p className="px-3 py-4 font-sans text-body/body text-text-muted">
                 {EMPTY_MESSAGES[filter]}
@@ -431,7 +444,7 @@ function FileList({
             <div className="px-3 pt-3 empty:hidden">
               <ShowMore next={next} />
             </div>
-          </Table>
+          </div>
         )}
       </PagedView>
     </>

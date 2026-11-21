@@ -60,11 +60,5 @@ export const useScopes = (): ReadonlySet<Scope> => {
 export const useSignOut = (): (() => Promise<void>) => {
   const platform = usePlatform();
 
-  return useCallback(async () => {
-    try {
-      await platform.session.signOut();
-    } finally {
-      leaveToSignIn();
-    }
-  }, [platform]);
+  return useCallback(() => platform.session.signOut().finally(leaveToSignIn), [platform]);
 };
