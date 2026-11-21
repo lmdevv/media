@@ -183,12 +183,13 @@ const useSlowLoad = (loading: boolean): boolean => {
   const [slow, setSlow] = useState(false);
 
   useEffect(() => {
-    setSlow(false);
-
     if (!loading) return undefined;
     const timer = setTimeout(() => setSlow(true), SLOW_LOAD_MS);
 
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      setSlow(false);
+    };
   }, [loading]);
 
   return slow;
@@ -276,17 +277,20 @@ function ConnectedScreens({
     [signedIn],
   );
 
+  const offlineMode = useMemo(
+    () => ({
+      leave: () => {
+        onOffline(false);
+
+        if (phase.kind === "unavailable") phase.retry();
+      },
+    }),
+    [onOffline, phase],
+  );
+
   if (offline && offlinePerson !== null) {
     return (
-      <OfflineContext.Provider
-        value={{
-          leave: () => {
-            onOffline(false);
-
-            if (phase.kind === "unavailable") phase.retry();
-          },
-        }}
-      >
+      <OfflineContext.Provider value={offlineMode}>
         <PersonContext.Provider value={offlinePerson}>
           <HideSplash />
           <TitleStatesProvider>

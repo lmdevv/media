@@ -44,21 +44,13 @@ const DOMAIN_LABELS: Readonly<Record<GuestLink["domain"], string>> = {
 /** Guests: the switch and address for guest links, and everyone's links with their activity. */
 export function GuestsScreen() {
   const platform = usePlatform();
-  const status = usePlatformQuery(platform.core.guests.status);
-
   const links = usePages(platform.core.guests.links.list, everyoneLinks);
   const actions = useActions<string>();
   const [open, setOpen] = useState<LinkId | null>(null);
 
   return (
     <GuestsView
-      settings={Match.value(status).pipe(
-        Match.discriminatorsExhaustive("status")({
-          loading: () => <GuestSettingsSkeleton />,
-          error: ({ error, retry }) => <Failed message={describeFailure(error)} retry={retry} />,
-          success: ({ data }) => <GuestSettings key={JSON.stringify(data)} saved={data} />,
-        }),
-      )}
+      settings={<SavedGuestSettings />}
       links={links}
       open={open}
       revoking={actions.running}
@@ -70,7 +62,7 @@ export function GuestsScreen() {
           "Link revoked",
         )
       }
-      activity={(linkId) => <Activity linkId={linkId} />}
+      renderActivity={(linkId) => <Activity linkId={linkId} />}
     />
   );
 }
@@ -108,7 +100,7 @@ export function GuestsView({
   revoking,
   onToggle,
   onRevoke,
-  activity,
+  renderActivity,
 }: {
   readonly settings: ReactNode;
   readonly links: Paged<GuestLink>;
@@ -116,7 +108,7 @@ export function GuestsView({
   readonly revoking: string | null;
   readonly onToggle: (linkId: LinkId) => void;
   readonly onRevoke: (linkId: LinkId) => void;
-  readonly activity: (linkId: LinkId) => ReactNode;
+  readonly renderActivity: (linkId: LinkId) => ReactNode;
 }) {
   return (
     <>
@@ -158,12 +150,26 @@ export function GuestsView({
                 </>
               }
             >
-              {open === link.linkId ? activity(link.linkId) : null}
+              {open === link.linkId ? renderActivity(link.linkId) : null}
             </ItemRow>
           )}
         </PagedList>
       </Section>
     </>
+  );
+}
+
+/** The guest-link settings form once the saved settings load, or why they didn't. */
+function SavedGuestSettings() {
+  const platform = usePlatform();
+  const status = usePlatformQuery(platform.core.guests.status);
+
+  return Match.value(status).pipe(
+    Match.discriminatorsExhaustive("status")({
+      loading: () => <GuestSettingsSkeleton />,
+      error: ({ error, retry }) => <Failed message={describeFailure(error)} retry={retry} />,
+      success: ({ data }) => <GuestSettings key={JSON.stringify(data)} saved={data} />,
+    }),
   );
 }
 

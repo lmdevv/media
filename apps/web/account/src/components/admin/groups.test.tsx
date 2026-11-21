@@ -29,7 +29,7 @@ const groups = (list: Paged<Group>, name = "", open: Group["groupId"] | null = n
     onName={noop}
     onCreate={noop}
     onToggle={noop}
-    panel={(group) => <p>{`panel of ${group.name}`}</p>}
+    renderPanel={(group) => <p>{`panel of ${group.name}`}</p>}
   />
 );
 

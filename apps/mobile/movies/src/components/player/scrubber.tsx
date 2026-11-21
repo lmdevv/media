@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { PanResponder, View } from "react-native";
+import { useRef, useState } from "react";
+import { View } from "react-native";
 import type { GestureResponderEvent, HostInstance } from "react-native";
 
 import { Image } from "@/components/ui/image";
@@ -55,40 +55,9 @@ export function Scrubber({
   const bounds = useRef({ left: 0, width: 1 });
   const [scrub, setScrub] = useState<number | null>(null);
   const [trackWidth, setTrackWidth] = useState(0);
-  const latest = useRef({ durationSeconds, onScrubbing, onSeek });
 
-  useEffect(() => {
-    latest.current = { durationSeconds, onScrubbing, onSeek };
-  }, [durationSeconds, onScrubbing, onSeek]);
-
-  const [responder] = useState(() => {
-    const fractionOf = (event: GestureResponderEvent): number =>
-      clamp((event.nativeEvent.pageX - bounds.current.left) / bounds.current.width);
-
-    return PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: (event) => {
-        latest.current.onScrubbing(true);
-        setScrub(fractionOf(event));
-      },
-      onPanResponderMove: (event) => {
-        setScrub(fractionOf(event));
-      },
-      onPanResponderRelease: (event) => {
-        const fraction = fractionOf(event);
-
-        setScrub(null);
-        latest.current.onScrubbing(false);
-        latest.current.onSeek(fraction * latest.current.durationSeconds);
-      },
-      onPanResponderTerminate: () => {
-        setScrub(null);
-        latest.current.onScrubbing(false);
-      },
-      onPanResponderTerminationRequest: () => false,
-    });
-  });
+  const fractionOf = (event: GestureResponderEvent): number =>
+    clamp((event.nativeEvent.pageX - bounds.current.left) / bounds.current.width);
 
   const duration = Math.max(0, durationSeconds);
   const shownSeconds = scrub === null ? positionSeconds : scrub * duration;
@@ -111,7 +80,28 @@ export function Scrubber({
           onSeek(positionSeconds + (event.nativeEvent.actionName === "increment" ? 10 : -10));
         }}
         onLayout={(event) => setTrackWidth(event.nativeEvent.layout.width)}
-        {...responder.panHandlers}
+        onStartShouldSetResponder={() => true}
+        onMoveShouldSetResponder={() => true}
+        onResponderGrant={(event) => {
+          onScrubbing(true);
+          setScrub(fractionOf(event));
+
+          // Keeps native views from taking the touch while the drag lasts.
+          return true;
+        }}
+        onResponderMove={(event) => setScrub(fractionOf(event))}
+        onResponderRelease={(event) => {
+          const released = fractionOf(event);
+
+          setScrub(null);
+          onScrubbing(false);
+          onSeek(released * durationSeconds);
+        }}
+        onResponderTerminate={() => {
+          setScrub(null);
+          onScrubbing(false);
+        }}
+        onResponderTerminationRequest={() => false}
       >
         <View
           ref={track}

@@ -68,6 +68,7 @@ describe("visibleCommands", () => {
     const visible = visibleCommands(root, "");
 
     expect(visible.groups.map((group) => group.id)).toEqual(["continue", "go", "actions"]);
+    expect(visible.groups.map((group) => group.start)).toEqual([0, 2, 5]);
     expect(visible.items).toHaveLength(6);
     expect(visible.noResults).toBe(false);
   });
@@ -76,6 +77,7 @@ describe("visibleCommands", () => {
     const visible = visibleCommands(root, "set");
 
     expect(visible.groups.map((group) => group.id)).toEqual(["titles", "go"]);
+    expect(visible.groups.map((group) => group.start)).toEqual([0, 1]);
     expect(visible.items.map((item) => item.id)).toEqual(["t1", "settings"]);
   });
 

@@ -93,13 +93,12 @@ export function SubtitleDelay({
   };
 
   return (
-    <div
-      role="group"
+    <fieldset
       aria-label="Subtitle delay"
       aria-describedby={disabled ? reasonId : undefined}
       data-slot="subtitle-delay"
       className={cn(
-        "flex shrink-0 flex-col gap-2 border-t border-hairline px-5 pt-3 pb-5",
+        "flex min-w-0 shrink-0 flex-col gap-2 border-t border-hairline px-5 pt-3 pb-5",
         className,
       )}
     >
@@ -149,6 +148,6 @@ export function SubtitleDelay({
           {unavailable}
         </p>
       ) : null}
-    </div>
+    </fieldset>
   );
 }

@@ -17,20 +17,22 @@ export type TrackOption = {
 
 type OptionSpan = { readonly top: number; readonly bottom: number };
 
-function checkedSpan(list: HTMLElement): OptionSpan | null {
-  const checked = list.querySelector<HTMLElement>('[role="radio"][aria-checked="true"]');
-
-  if (checked === null) return null;
-
+function spanOf(list: HTMLElement, option: HTMLElement): OptionSpan {
   // Offsets, unlike client rects, ignore the popup's opening scale.
   const { scrollPaddingTop, scrollPaddingBottom } = getComputedStyle(list);
   const above = Number.parseFloat(scrollPaddingTop) || 0;
   const below = Number.parseFloat(scrollPaddingBottom) || 0;
 
   return {
-    top: checked.offsetTop - above,
-    bottom: checked.offsetTop + checked.offsetHeight + below,
+    top: option.offsetTop - above,
+    bottom: option.offsetTop + option.offsetHeight + below,
   };
+}
+
+function checkedSpan(list: HTMLElement): OptionSpan | null {
+  const checked = list.querySelector<HTMLElement>('[role="radio"][aria-checked="true"]');
+
+  return checked === null ? null : spanOf(list, checked);
 }
 
 function shows(list: HTMLElement, span: OptionSpan, height: number): boolean {
@@ -42,12 +44,6 @@ function reveal(list: HTMLElement, span: OptionSpan): void {
   else if (span.bottom > list.scrollTop + list.clientHeight) {
     list.scrollTop = span.bottom - list.clientHeight;
   }
-}
-
-function revealChecked(list: HTMLElement): void {
-  const span = checkedSpan(list);
-
-  if (span !== null) reveal(list, span);
 }
 
 function keepCheckedInView(list: HTMLElement | null): (() => void) | undefined {
@@ -96,11 +92,15 @@ function TrackColumn({
     };
   }, []);
 
-  const optionIds = options.map((option) => option.id).join("\n");
+  const checkedAt = options.findIndex((option) => option.id === value);
 
   useLayoutEffect(() => {
-    if (list.current !== null) revealChecked(list.current);
-  }, [value, optionIds]);
+    const option = list.current?.querySelectorAll<HTMLElement>('[role="radio"]')[checkedAt];
+
+    if (list.current !== null && option !== undefined) {
+      reveal(list.current, spanOf(list.current, option));
+    }
+  }, [checkedAt]);
 
   return (
     <div className="flex min-w-50 flex-1 flex-col gap-0.5 pt-5">

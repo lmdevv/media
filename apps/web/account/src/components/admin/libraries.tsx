@@ -80,7 +80,7 @@ export function LibrariesScreen() {
       onDraft={setDraft}
       onCreate={() => void create()}
       lyrics={<RemoteLyricsSetting />}
-      nameLink={(library) => (
+      renderNameLink={(library) => (
         <Link
           to="/admin/libraries/$libraryId"
           params={{ libraryId: library.libraryId }}
@@ -111,7 +111,7 @@ export function LibrariesView({
   onDraft,
   onCreate,
   lyrics,
-  nameLink,
+  renderNameLink,
 }: {
   readonly libraries: Paged<Library>;
   readonly draft: NewLibrary;
@@ -121,7 +121,7 @@ export function LibrariesView({
   /** Music's lyrics lookups switch, shown with the libraries. */
   readonly lyrics?: ReactNode;
   /** The library's name, linked to its page. */
-  readonly nameLink: (library: Library) => ReactNode;
+  readonly renderNameLink: (library: Library) => ReactNode;
 }) {
   const ready = draft.name.trim() !== "" && foldersOf(draft.folders).length > 0;
 
@@ -136,7 +136,7 @@ export function LibrariesView({
       >
         {(library) => (
           <ItemRow
-            title={nameLink(library)}
+            title={renderNameLink(library)}
             facts={`${KIND_LABELS[library.kind]} · ${LEVEL_LABELS[library.level]}`}
           />
         )}

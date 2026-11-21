@@ -1,7 +1,7 @@
 import { describeFailure, isFailure } from "@media/mobile-core/failure";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { useLocalSearchParams } from "expo-router";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, View } from "react-native";
 
 import { PosterGrid } from "@/components/browse/poster-grid";
@@ -43,15 +43,16 @@ function PersonScreen({ personId }: { readonly personId: PersonId }) {
   const pending = person.status === "success" && person.data.detailsPending;
 
   const [detailsFailure, setDetailsFailure] = useState<{ readonly cause: unknown } | null>(null);
-  const [detailsAttempt, setDetailsAttempt] = useState(0);
 
-  useEffect(() => {
-    if (!pending) return;
-
+  const askForDetails = useCallback(() => {
     requestDetails({ personId }).catch((cause: unknown) => {
       setDetailsFailure({ cause });
     });
-  }, [pending, personId, requestDetails, detailsAttempt]);
+  }, [requestDetails, personId]);
+
+  useEffect(() => {
+    if (pending) askForDetails();
+  }, [pending, askForDetails]);
 
   if (person.status === "loading") {
     return (
@@ -119,7 +120,8 @@ function PersonScreen({ personId }: { readonly personId: PersonId }) {
                   variant="plain"
                   onPress={() => {
                     setDetailsFailure(null);
-                    setDetailsAttempt((attempt) => attempt + 1);
+
+                    if (pending) askForDetails();
                   }}
                 />
               </View>

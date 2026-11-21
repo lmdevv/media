@@ -42,7 +42,7 @@ export interface FollowingInput {
    * The screen's stall hold, which outlives this hook: each follower starts with it and keeps it
    * current, so the next one, after a stream reload or a new playback attempt, takes it over.
    */
-  readonly carried: RefObject<CarriedHold>;
+  readonly carriedRef: RefObject<CarriedHold>;
 }
 
 /** The player's follower, for the screen. */
@@ -61,7 +61,7 @@ export interface Following {
  * delivers is applied in revision order; an older one changes nothing. Stops when the player goes
  * away or the screen unmounts, putting the player back at the session's rate. A follower started
  * again for the same screen, as after a stream reload or a new playback attempt, takes over its
- * predecessor's hold on the session from `carried`, a pause still on its way included.
+ * predecessor's hold on the session from `carriedRef`, a pause still on its way included.
  */
 export const useSessionFollower = ({
   player,
@@ -70,7 +70,7 @@ export const useSessionFollower = ({
   durationMs,
   controls,
   hosting,
-  carried,
+  carriedRef,
 }: FollowingInput): Following => {
   const platform = usePlatform();
   const [state, setState] = useState<FollowerState | null>(null);
@@ -101,27 +101,29 @@ export const useSessionFollower = ({
     if (player === null || !known || sessionId === null) return undefined;
 
     // A hold belongs to its session: a follower of another one starts without it.
-    if (carried.current.sessionId !== sessionId) carried.current = { sessionId, hold: null };
+    if (carriedRef.current.sessionId !== sessionId) carriedRef.current = { sessionId, hold: null };
+
+    const following = run({
+      player,
+      port,
+      clock: latest.current.clock,
+      durationMs: () => latest.current.durationMs,
+      controls: latest.current.controls,
+      pausesForStalls: hosting,
+      resumeHold: carriedRef.current.hold,
+    });
 
     const fiber = Effect.runFork(
       Effect.scoped(
         Effect.gen(function* () {
-          const running = yield* run({
-            player,
-            port,
-            clock: latest.current.clock,
-            durationMs: () => latest.current.durationMs,
-            controls: latest.current.controls,
-            pausesForStalls: hosting,
-            resumeHold: carried.current.hold,
-          });
+          const running = yield* following;
 
           follower.current = running;
           yield* running.allow(latest.current.controls);
           yield* running.apply(latest.current.clock);
           yield* Stream.runForEach(running.state, (next) =>
             Effect.sync(() => {
-              carried.current = { sessionId, hold: next.holding };
+              carriedRef.current = { sessionId, hold: next.holding };
               setState(next);
             }),
           );
@@ -134,7 +136,7 @@ export const useSessionFollower = ({
       setState(null);
       Effect.runFork(Fiber.interrupt(fiber));
     };
-  }, [player, port, known, hosting, sessionId, latest, carried]);
+  }, [player, port, known, hosting, sessionId, carriedRef]);
 
   useEffect(() => {
     const running = follower.current;

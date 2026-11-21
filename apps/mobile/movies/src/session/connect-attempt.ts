@@ -39,21 +39,21 @@ export const useConnectAttempt = (): ConnectAttempt => {
       setBusy(true);
       setFailure(null);
 
-      try {
-        const result = await attempt();
+      return attempt()
+        .then((result) => {
+          if (result.ok) {
+            beforeConnect?.(result.connection);
+            connect(result.connection);
+          } else {
+            setFailure(result.failure);
+          }
 
-        if (result.ok) {
-          beforeConnect?.(result.connection);
-          connect(result.connection);
-        } else {
-          setFailure(result.failure);
-        }
-
-        return result;
-      } finally {
-        running.current = false;
-        setBusy(false);
-      }
+          return result;
+        })
+        .finally(() => {
+          running.current = false;
+          setBusy(false);
+        });
     },
     [connect],
   );

@@ -35,7 +35,7 @@ const list = (libraries: Paged<Library>, draft: NewLibrary = empty) => (
     creating={false}
     onDraft={noop}
     onCreate={noop}
-    nameLink={(library) => <a href="#library">{library.name}</a>}
+    renderNameLink={(library) => <a href="#library">{library.name}</a>}
   />
 );
 

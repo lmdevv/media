@@ -87,7 +87,7 @@ export function JobsScreen() {
       failed={failed}
       filter={filter}
       onFilter={setFilter}
-      row={(job) => <JobRow job={job} />}
+      renderRow={(job) => <JobRow job={job} />}
     />
   );
 }
@@ -119,7 +119,7 @@ export function JobsView({
   failed,
   filter,
   onFilter,
-  row,
+  renderRow,
 }: {
   readonly jobs: Paged<Job>;
   /** The failed jobs, counted in the filter's label. */
@@ -127,14 +127,14 @@ export function JobsView({
   readonly filter: JobFilter;
   readonly onFilter: (filter: JobFilter) => void;
   /** A job's row, with its actions. */
-  readonly row: (job: Job) => ReactNode;
+  readonly renderRow: (job: Job) => ReactNode;
 }) {
   return (
     <>
       <PageHeader
         title="Jobs"
         actions={
-          <div role="group" aria-label="Show" className="flex gap-1">
+          <fieldset aria-label="Show" className="m-0 flex min-w-0 gap-1 border-0 p-0">
             <Button
               variant={filter === "all" ? "raised" : "ghost"}
               size="xs"
@@ -151,7 +151,7 @@ export function JobsView({
             >
               {`Failed${failedCount(failed)}`}
             </Button>
-          </div>
+          </fieldset>
         }
       />
       <PagedList
@@ -160,7 +160,7 @@ export function JobsView({
         empty={filter === "failed" ? "No failed jobs." : "No jobs yet."}
         rowKey={(job) => job.jobId}
       >
-        {row}
+        {renderRow}
       </PagedList>
     </>
   );

@@ -168,7 +168,7 @@ interface PlayerSessionProps {
   readonly onRestart: (restart: Restart) => void;
   readonly choices: StartChoices;
   /** The screen's stall hold, which outlives each attempt so the next one plays the session on. */
-  readonly carried: RefObject<CarriedHold>;
+  readonly carriedRef: RefObject<CarriedHold>;
   /** The watch screen's sleep timer, which outlives each episode's player. */
   readonly sleepTimer: SleepTimerControl;
   /** The watch screen's count of autoplay's jumps since the last touch; it outlives each player. */
@@ -188,6 +188,15 @@ const startArgsOf = (params: WatchParams): StartArgs =>
 
 const MISSING_DOWNLOAD = PlaybackStep.Stop({ stop: PlaybackStop.Missing() });
 
+/**
+ * The viewer's touches on the player, counted, and the touch the controls were last hidden after.
+ * The controls show while a touch came after that one.
+ */
+interface Touches {
+  readonly touch: number;
+  readonly hiddenAfter: number | null;
+}
+
 /** Keeps the screen on for as long as it is mounted. */
 function ScreenAwake() {
   useKeepAwake();
@@ -200,7 +209,7 @@ function PlayerSession({
   attempt,
   onRestart,
   choices,
-  carried,
+  carriedRef,
   sleepTimer,
   stillWatching,
 }: PlayerSessionProps) {
@@ -333,7 +342,11 @@ function PlayerSession({
     playerNow.current = controller?.port ?? null;
   }, [controller]);
 
-  const together = useSessionPlayer(watching, playerNow, { follows: download === null, carried });
+  const together = useSessionPlayer(watching, playerNow, {
+    follows: download === null,
+    carriedRef,
+  });
+
   const inSession = together.session !== null && download === null;
   const sessionMode = download === null ? together.mode : "solo";
   const sessionStart = together.startAt;
@@ -393,17 +406,19 @@ function PlayerSession({
 
   const [brightness, setBrightness] = useBrightness();
   const [volume, setVolume] = useState(1);
-  const [visible, setVisible] = useState(true);
   const [held, setHeld] = useState(false);
-  const [touch, setTouch] = useState(0);
+  const [touches, setTouches] = useState<Touches>({ touch: 0, hiddenAfter: null });
+  const { touch } = touches;
+  const visible = touches.hiddenAfter !== touch;
   const [locked, setLocked] = useState(false);
   const [unlockHint, setUnlockHint] = useState(false);
   const [panel, setPanel] = useState<Panel | null>(null);
   const [creditsDismissed, setCreditsDismissed] = useState(false);
 
+  const hideControls = () => setTouches((current) => ({ ...current, hiddenAfter: current.touch }));
+
   const poke = useCallback((holding?: boolean) => {
-    setVisible(true);
-    setTouch((count) => count + 1);
+    setTouches((current) => ({ ...current, touch: current.touch + 1 }));
 
     if (holding !== undefined) setHeld(holding);
   }, []);
@@ -438,7 +453,10 @@ function PlayerSession({
   useEffect(() => {
     if (!visible || holding || loading || !media.playing || !playing) return undefined;
 
-    const timer = setTimeout(() => setVisible(false), CONTROLS_HIDE_MS);
+    const timer = setTimeout(
+      () => setTouches((current) => ({ ...current, hiddenAfter: touch })),
+      CONTROLS_HIDE_MS,
+    );
 
     return () => clearTimeout(timer);
   }, [visible, holding, loading, media.playing, playing, touch]);
@@ -467,7 +485,7 @@ function PlayerSession({
     player: playing && inSession ? (controller?.port ?? null) : null,
     durationMs: durationSeconds > 0 ? durationSeconds * 1000 : null,
     nextEpisode: next,
-    carried,
+    carriedRef,
   });
 
   const person = usePerson();
@@ -533,29 +551,36 @@ function PlayerSession({
     !asking &&
     !sleepHoldsAutoplay(sleepTimer.timer, sleepKey);
 
-  const [countdownStart, setCountdownStart] = useState<number | null>(null);
-  const [now, setNow] = useState(() => Date.now());
+  const [countdown, setCountdown] = useState<{
+    readonly start: number;
+    readonly now: number;
+  } | null>(null);
+
   const autoplay = preferences.autoplayNext;
+  const counting = showNext && autoplay;
 
   useEffect(() => {
-    if (!showNext || !autoplay) {
-      setCountdownStart(null);
+    if (!counting) return undefined;
 
-      return undefined;
-    }
+    const start = Date.now();
 
-    setCountdownStart(Date.now());
-    setNow(Date.now());
+    const timer = setInterval(
+      () => setCountdown({ start, now: Date.now() }),
+      NEXT_COUNTDOWN.stepMs / 4,
+    );
 
-    const timer = setInterval(() => setNow(Date.now()), NEXT_COUNTDOWN.stepMs / 4);
+    return () => {
+      clearInterval(timer);
+      setCountdown(null);
+    };
+  }, [counting]);
 
-    return () => clearInterval(timer);
-  }, [showNext, autoplay]);
+  const countdownStart = countdown === null ? null : countdown.start;
 
   const countdownMs =
-    countdownStart === null
+    countdown === null
       ? NEXT_COUNTDOWN.totalMs
-      : NEXT_COUNTDOWN.totalMs - (now - countdownStart);
+      : NEXT_COUNTDOWN.totalMs - (countdown.now - countdown.start);
 
   const sessionPlayNow = together.actions.playNow;
 
@@ -745,7 +770,7 @@ function PlayerSession({
             }
 
             if (visible) {
-              setVisible(false);
+              hideControls();
               setHeld(false);
             } else {
               poke();
@@ -794,7 +819,7 @@ function PlayerSession({
               onSeek={seekFromControls}
               onLock={() => {
                 setLocked(true);
-                setVisible(false);
+                hideControls();
                 setUnlockHint(true);
               }}
               onSpeed={() => setPanel("speed")}
@@ -806,7 +831,7 @@ function PlayerSession({
               onVolume={setVolume}
               onInteract={poke}
               onDismiss={() => {
-                setVisible(false);
+                hideControls();
                 setHeld(false);
               }}
               locked={
@@ -1199,7 +1224,7 @@ export function PlayerScreen({
 
   // A stall hold outlives the attempt that took it: a new playback session remounts the attempt,
   // and its follower plays the session on (ADR 0017).
-  const carried = useRef<CarriedHold>(NO_HOLD);
+  const carriedRef = useRef<CarriedHold>(NO_HOLD);
 
   const [attempt, setAttempt] = useState<Attempt>(() => ({
     key: 0,
@@ -1257,7 +1282,7 @@ export function PlayerScreen({
         attempt={attempt}
         onRestart={restart}
         choices={choices}
-        carried={carried}
+        carriedRef={carriedRef}
         sleepTimer={sleepTimer}
         stillWatching={stillWatching}
       />

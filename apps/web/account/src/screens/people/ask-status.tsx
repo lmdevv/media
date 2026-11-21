@@ -17,10 +17,10 @@ export interface AskCopy {
 
 function Waiting({ children }: { readonly children: string }) {
   return (
-    <p role="status" className="flex items-center gap-2 text-body/body text-text-muted">
+    <output className="flex items-center gap-2 text-body/body text-text-muted">
       <Spinner />
       {children}
-    </p>
+    </output>
   );
 }
 

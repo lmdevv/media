@@ -42,10 +42,10 @@ const LABELS = {
 function Outcome({ status, done }: { readonly status: ActionStatus; readonly done?: string }) {
   if (status.kind === "done" && done !== undefined) {
     return (
-      <p role="status" className="flex items-center gap-1.5 text-label/label text-text-muted">
+      <output className="flex items-center gap-1.5 text-label/label text-text-muted">
         <CheckIcon className="size-3.5 text-success" strokeWidth={2} aria-hidden />
         {done}
-      </p>
+      </output>
     );
   }
 
