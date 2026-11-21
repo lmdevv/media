@@ -342,7 +342,16 @@ export function ReorderList({
     return () => {
       clearInterval(timer);
     };
-  }, [lifted, listHeight, drag]);
+  }, [
+    lifted,
+    listHeight,
+    drag.headerHeight,
+    drag.from,
+    drag.rowHeight,
+    drag.startScroll,
+    drag.offset,
+    drag.scrollY,
+  ]);
 
   const actions: RowActions = {
     onLift: (index) => {

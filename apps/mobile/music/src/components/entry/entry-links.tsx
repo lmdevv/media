@@ -1,6 +1,15 @@
 import * as Linking from "expo-linking";
 import { router, usePathname } from "expo-router";
-import { createContext, use, useEffect, useEffectEvent, useRef, useState } from "react";
+import {
+  createContext,
+  use,
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { ReactNode } from "react";
 import { Alert } from "react-native";
 
@@ -66,9 +75,9 @@ export function EntryLinksProvider({ children }: { readonly children: ReactNode 
   const { connection, connect } = useConnectionControls();
   const [held, setHeld] = useState<HeldLink | null>(null);
 
-  const setLink = (link: EntryLink) => {
+  const setLink = useCallback((link: EntryLink) => {
     setHeld({ link });
-  };
+  }, []);
 
   const latest = useRef(connection);
 
@@ -124,19 +133,18 @@ export function EntryLinksProvider({ children }: { readonly children: ReactNode 
     return () => subscription.remove();
   }, []);
 
-  return (
-    <PendingLinkContext
-      value={{
-        held,
-        hold: setLink,
-        drop: () => {
-          setHeld(null);
-        },
-      }}
-    >
-      {children}
-    </PendingLinkContext>
+  const pending = useMemo(
+    () => ({
+      held,
+      hold: setLink,
+      drop: () => {
+        setHeld(null);
+      },
+    }),
+    [held, setLink],
   );
+
+  return <PendingLinkContext value={pending}>{children}</PendingLinkContext>;
 }
 
 const SIGNED_IN = {

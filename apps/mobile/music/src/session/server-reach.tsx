@@ -1,6 +1,14 @@
 import { readHealth } from "@media/mobile-core/server";
 import { Option } from "effect";
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { ReactNode } from "react";
 import { AppState } from "react-native";
 
@@ -38,14 +46,17 @@ interface Lost {
  */
 const useLost = (mediaUrl: string, audible: boolean): Lost => {
   const [failures, setFailures] = useState(0);
-  const [asked, setAsked] = useState(0);
   const [active, setActive] = useState(AppState.currentState === "active");
   const lost = failures >= LOST_AFTER;
   const watching = probesReach({ active, audible });
+  /** Asks at once and starts the timer over, while the checks run; null while they don't. */
+  const askNow = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
       setActive(state === "active");
+
+      if (state === "active") askNow.current?.();
     });
 
     return () => {
@@ -55,27 +66,38 @@ const useLost = (mediaUrl: string, audible: boolean): Lost => {
 
   useEffect(() => {
     if (!watching) return undefined;
-    const stop = new AbortController();
+    let stop = new AbortController();
+    let timer: ReturnType<typeof setInterval> | undefined;
 
-    const ask = async (): Promise<void> => {
+    const ask = async (signal: AbortSignal): Promise<void> => {
       const health = await readHealth(mediaUrl);
 
-      if (stop.signal.aborted) return;
+      if (signal.aborted) return;
       setFailures((count) => (Option.isSome(health) ? 0 : count + 1));
     };
 
-    void ask();
-    const timer = setInterval(() => void ask(), lost ? LOST_PROBE_MS : ONLINE_PROBE_MS);
+    const begin = (): void => {
+      stop.abort();
+      clearInterval(timer);
+      stop = new AbortController();
+      const { signal } = stop;
+
+      void ask(signal);
+      timer = setInterval(() => void ask(signal), lost ? LOST_PROBE_MS : ONLINE_PROBE_MS);
+    };
+
+    begin();
+    askNow.current = begin;
 
     return () => {
+      askNow.current = null;
       stop.abort();
       clearInterval(timer);
     };
-    // `active` too, so the app asks at once when it comes back on screen.
-  }, [mediaUrl, watching, active, lost, asked]);
+  }, [mediaUrl, watching, lost]);
 
   const probe = useCallback(() => {
-    setAsked((count) => count + 1);
+    askNow.current?.();
   }, []);
 
   return { lost, probe };

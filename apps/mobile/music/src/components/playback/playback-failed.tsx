@@ -18,11 +18,10 @@ export function PlaybackFailed() {
   const { mediaUrl } = useConnection();
   const [retrying, setRetrying] = useState(false);
 
-  useEffect(() => {
-    if (!retrying) return;
+  if (retrying && status === "failed") setRetrying(false);
 
-    if (status === "playing" || status === "paused") router.back();
-    else if (status === "failed") setRetrying(false);
+  useEffect(() => {
+    if (retrying && (status === "playing" || status === "paused")) router.back();
   }, [retrying, status]);
 
   return (

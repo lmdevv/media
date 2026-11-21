@@ -309,7 +309,20 @@ function SyncedLyrics({
   const { seek } = usePlayerActions();
   const reduceMotion = useReducedMotion();
   const [moment, setMoment] = useState(() => lyricsMoment(lines, readPosition()));
-  const follow = useLineFollow(moment.started, !reduceMotion);
+
+  const {
+    scroller,
+    following,
+    direction,
+    follow: followAgain,
+    height,
+    onLayout,
+    onContentSizeChange,
+    onLineLayout,
+    onScroll,
+    onScrollBeginDrag,
+    onMomentumScrollEnd,
+  } = useLineFollow(moment.started, !reduceMotion);
 
   useEffect(() => {
     if (paused) return undefined;
@@ -332,8 +345,6 @@ function SyncedLyrics({
     };
   }, [lines, readPosition, paused]);
 
-  const { follow: followAgain, onLineLayout } = follow;
-
   const onSeek = useCallback(
     (startMs: number) => {
       void Haptics.selectionAsync();
@@ -346,14 +357,14 @@ function SyncedLyrics({
   return (
     <View className="min-h-0 flex-1">
       <ScrollView
-        ref={follow.scroller}
+        ref={scroller}
         showsVerticalScrollIndicator={false}
         scrollEventThrottle={16}
-        onLayout={follow.onLayout}
-        onContentSizeChange={follow.onContentSizeChange}
-        onScroll={follow.onScroll}
-        onScrollBeginDrag={follow.onScrollBeginDrag}
-        onMomentumScrollEnd={follow.onMomentumScrollEnd}
+        onLayout={onLayout}
+        onContentSizeChange={onContentSizeChange}
+        onScroll={onScroll}
+        onScrollBeginDrag={onScrollBeginDrag}
+        onMomentumScrollEnd={onMomentumScrollEnd}
         contentContainerClassName={LINES[place].list}
       >
         {lines.map((line, index) => (
@@ -368,11 +379,11 @@ function SyncedLyrics({
             onBox={onLineLayout}
           />
         ))}
-        <View style={{ height: follow.height }} />
+        <View style={{ height }} />
       </ScrollView>
       <EdgeFade edge="top" background={background} />
       <EdgeFade edge="bottom" background={background} />
-      {follow.following ? null : <BackToLine direction={follow.direction} onPress={followAgain} />}
+      {following ? null : <BackToLine direction={direction} onPress={followAgain} />}
     </View>
   );
 }

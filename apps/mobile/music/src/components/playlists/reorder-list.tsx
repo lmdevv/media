@@ -186,7 +186,8 @@ export function ReorderList<Item>({
   maxScroll,
 }: ReorderListProps<Item>) {
   const { height: screen } = useWindowDimensions();
-  const dropped = useRef(false);
+  /** The rows as they stood when a drop moved one, until the moved order arrives. */
+  const droppedOn = useRef<ReadonlyArray<Item> | null>(null);
 
   const drag: Drag = {
     from: useSharedValue(-1),
@@ -201,8 +202,8 @@ export function ReorderList<Item>({
   const count = items.length;
 
   useLayoutEffect(() => {
-    if (!dropped.current) return;
-    dropped.current = false;
+    if (droppedOn.current === null || droppedOn.current === items) return;
+    droppedOn.current = null;
     drag.from.set(-1);
     drag.offset.set(0);
   }, [items, drag.from, drag.offset]);
@@ -247,7 +248,7 @@ export function ReorderList<Item>({
           return;
         }
 
-        dropped.current = true;
+        droppedOn.current = items;
         onMove(from, to);
       }}
       onLayout={

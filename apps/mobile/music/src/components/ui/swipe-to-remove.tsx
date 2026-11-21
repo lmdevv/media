@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 import { Pressable, View } from "react-native";
 import { GestureDetector, usePanGesture } from "react-native-gesture-handler";
@@ -53,8 +53,13 @@ export function SwipeToRemove({
   const speed = useSharedValue(0);
   const closedLetGo = swipeBack ? SLOP : Number.POSITIVE_INFINITY;
   const letGoRight = useSharedValue(closedLetGo);
+  const resetFor = useRef({ resetKey, closedLetGo });
 
   useEffect(() => {
+    const last = resetFor.current;
+
+    if (last.resetKey === resetKey && last.closedLetGo === closedLetGo) return;
+    resetFor.current = { resetKey, closedLetGo };
     offset.set(0);
     letGoRight.set(closedLetGo);
   }, [offset, letGoRight, closedLetGo, resetKey]);
