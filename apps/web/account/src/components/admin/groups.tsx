@@ -46,7 +46,7 @@ export function GroupsScreen() {
       onName={setName}
       onCreate={() => void create()}
       onToggle={(groupId) => setOpen((current) => (current === groupId ? null : groupId))}
-      panel={(group) => <GroupPanel group={group} />}
+      renderPanel={(group) => <GroupPanel group={group} />}
     />
   );
 }
@@ -71,7 +71,7 @@ export function GroupsView({
   onName,
   onCreate,
   onToggle,
-  panel,
+  renderPanel,
 }: {
   readonly groups: Paged<Group>;
   readonly name: string;
@@ -80,7 +80,7 @@ export function GroupsView({
   readonly onName: (name: string) => void;
   readonly onCreate: () => void;
   readonly onToggle: (groupId: GroupId) => void;
-  readonly panel: (group: Group) => ReactNode;
+  readonly renderPanel: (group: Group) => ReactNode;
 }) {
   return (
     <>
@@ -124,7 +124,7 @@ export function GroupsView({
               </Button>
             }
           >
-            {open === group.groupId ? panel(group) : null}
+            {open === group.groupId ? renderPanel(group) : null}
           </ItemRow>
         )}
       </PagedList>
