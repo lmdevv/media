@@ -1,5 +1,5 @@
 import { router } from "expo-router";
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
 /** A failed save, as the G13 sheet shows and retries it. */
@@ -20,8 +20,9 @@ const SaveFailureContext = createContext<SaveFailures | null>(null);
 /** Holds the failed save the G13 sheet shows, for the signed-in app. */
 export function SaveFailureProvider({ children }: { readonly children: ReactNode }) {
   const [failure, setFailure] = useState<SaveFailure | null>(null);
+  const failures = useMemo(() => ({ failure, setFailure }), [failure]);
 
-  return <SaveFailureContext value={{ failure, setFailure }}>{children}</SaveFailureContext>;
+  return <SaveFailureContext value={failures}>{children}</SaveFailureContext>;
 }
 
 const useSaveFailures = (): SaveFailures => {

@@ -1,13 +1,14 @@
 import { router } from "expo-router";
-import { useEffect } from "react";
+import { useEffect, useEffectEvent } from "react";
 
 import { useFailedSave } from "@/components/states/save-failure";
 import { ConfirmSheet } from "@/components/ui/confirm-sheet";
 
 export default function SaveFailed() {
   const { failure, dismiss } = useFailedSave();
+  const dismissOnLeave = useEffectEvent(dismiss);
 
-  useEffect(() => dismiss, []);
+  useEffect(() => () => dismissOnLeave(), []);
 
   useEffect(() => {
     if (failure === null) router.back();

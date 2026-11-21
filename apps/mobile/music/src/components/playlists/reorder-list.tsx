@@ -78,48 +78,46 @@ function ReorderRow({
     minDistance: 0,
     onActivate: () => {
       "worklet";
-      drag.from.value = index;
-      drag.to.value = index;
-      drag.offset.value = 0;
-      drag.travel.value = 0;
-      drag.startScroll.value = scroll.value;
+      drag.from.set(index);
+      drag.to.set(index);
+      drag.offset.set(0);
+      drag.travel.set(0);
+      drag.startScroll.set(scroll.get());
       scheduleOnRN(onLift);
     },
     onUpdate: (event) => {
       "worklet";
-      drag.travel.value = event.translationY;
-      drag.finger.value = event.absoluteY;
-      drag.offset.value = event.translationY + scroll.value - drag.startScroll.value;
-      drag.to.value = slotFor(index, drag.offset.value, drag.rowHeight.value, count);
+      drag.travel.set(event.translationY);
+      drag.finger.set(event.absoluteY);
+      drag.offset.set(event.translationY + scroll.get() - drag.startScroll.get());
+      drag.to.set(slotFor(index, drag.offset.get(), drag.rowHeight.get(), count));
     },
     onFinalize: () => {
       "worklet";
       scheduleOnRN(onRelease);
 
-      if (drag.from.value !== index) return;
-      const to = drag.to.value;
+      if (drag.from.get() !== index) return;
+      const to = drag.to.get();
 
-      drag.offset.value = withTiming(
-        (to - index) * drag.rowHeight.value,
-        { duration: 120 },
-        (finished) => {
+      drag.offset.set(
+        withTiming((to - index) * drag.rowHeight.get(), { duration: 120 }, (finished) => {
           if (finished === true) scheduleOnRN(onDrop, index, to);
-        },
+        }),
       );
     },
   });
 
   const style = useAnimatedStyle(() => {
-    const from = drag.from.value;
+    const from = drag.from.get();
 
     if (from === -1) return { transform: [{ translateY: 0 }], zIndex: 0 };
 
     if (from === index) {
-      return { transform: [{ translateY: drag.offset.value }, { scale: 1.02 }], zIndex: 10 };
+      return { transform: [{ translateY: drag.offset.get() }, { scale: 1.02 }], zIndex: 10 };
     }
 
-    const to = drag.to.value;
-    const height = drag.rowHeight.value;
+    const to = drag.to.get();
+    const height = drag.rowHeight.get();
     const shift = from < index && index <= to ? -height : to <= index && index < from ? height : 0;
 
     return { transform: [{ translateY: withTiming(shift, { duration: SLIDE_MS }) }], zIndex: 0 };
@@ -188,7 +186,8 @@ export function ReorderList<Item>({
   maxScroll,
 }: ReorderListProps<Item>) {
   const { height: screen } = useWindowDimensions();
-  const dropped = useRef(false);
+  /** The rows as they stood when a drop moved one, until the moved order arrives. */
+  const droppedOn = useRef<ReadonlyArray<Item> | null>(null);
 
   const drag: Drag = {
     from: useSharedValue(-1),
@@ -203,15 +202,15 @@ export function ReorderList<Item>({
   const count = items.length;
 
   useLayoutEffect(() => {
-    if (!dropped.current) return;
-    dropped.current = false;
+    if (droppedOn.current === null || droppedOn.current === items) return;
+    droppedOn.current = null;
     drag.from.set(-1);
     drag.offset.set(0);
   }, [items, drag.from, drag.offset]);
 
   const edgeScroll = useFrameCallback(() => {
-    if (drag.from.value === -1) return;
-    const finger = drag.finger.value;
+    if (drag.from.get() === -1) return;
+    const finger = drag.finger.get();
 
     const speed =
       finger > screen - EDGE
@@ -221,9 +220,9 @@ export function ReorderList<Item>({
           : 0;
 
     if (speed === 0) return;
-    scrollTo(scrollRef, 0, Math.max(0, Math.min(maxScroll.value, scroll.value + speed)), false);
-    drag.offset.value = drag.travel.value + scroll.value - drag.startScroll.value;
-    drag.to.value = slotFor(drag.from.value, drag.offset.value, drag.rowHeight.value, count);
+    scrollTo(scrollRef, 0, Math.max(0, Math.min(maxScroll.get(), scroll.get() + speed)), false);
+    drag.offset.set(drag.travel.get() + scroll.get() - drag.startScroll.get());
+    drag.to.set(slotFor(drag.from.get(), drag.offset.get(), drag.rowHeight.get(), count));
   }, false);
 
   return items.map((item, index) => (
@@ -249,7 +248,7 @@ export function ReorderList<Item>({
           return;
         }
 
-        dropped.current = true;
+        droppedOn.current = items;
         onMove(from, to);
       }}
       onLayout={

@@ -56,10 +56,10 @@ const landing = (drag: Drag, travel: number): number => {
   "worklet";
 
   return dropIndex(
-    drag.from.value,
-    travel + drag.scrollY.value - drag.startScroll.value,
-    drag.rowHeight.value,
-    drag.count.value,
+    drag.from.get(),
+    travel + drag.scrollY.get() - drag.startScroll.get(),
+    drag.rowHeight.get(),
+    drag.count.get(),
   );
 };
 
@@ -87,25 +87,25 @@ function Handle({
     shouldCancelWhenOutside: false,
     onBegin: (event) => {
       "worklet";
-      drag.startY.value = event.absoluteY;
-      drag.from.value = index;
-      drag.to.value = index;
-      drag.offset.value = 0;
-      drag.startScroll.value = drag.scrollY.value;
+      drag.startY.set(event.absoluteY);
+      drag.from.set(index);
+      drag.to.set(index);
+      drag.offset.set(0);
+      drag.startScroll.set(drag.scrollY.get());
       scheduleOnRN(actions.onLift, index);
     },
     onUpdate: (event) => {
       "worklet";
-      drag.offset.value = event.absoluteY - drag.startY.value;
+      drag.offset.set(event.absoluteY - drag.startY.get());
     },
     onFinalize: (event) => {
       "worklet";
 
-      if (drag.from.value < 0) return;
+      if (drag.from.get() < 0) return;
       scheduleOnRN(
         actions.onDrop,
-        drag.from.value,
-        landing(drag, event.absoluteY - drag.startY.value),
+        drag.from.get(),
+        landing(drag, event.absoluteY - drag.startY.get()),
       );
     },
   });
@@ -227,11 +227,11 @@ function Cell({
   readonly children: ReactNode;
 }) {
   const style = useAnimatedStyle(() => {
-    const from = drag.from.value;
+    const from = drag.from.get();
 
     if (from < 0) return { opacity: 1, transform: [{ translateY: 0 }] };
 
-    const shift = shiftOf(index, from, drag.to.value) * drag.rowHeight.value;
+    const shift = shiftOf(index, from, drag.to.get()) * drag.rowHeight.get();
 
     return {
       opacity: index === from ? 0 : 1,
@@ -243,7 +243,7 @@ function Cell({
     <Animated.View
       style={style}
       onLayout={(event) => {
-        if (index === 0) drag.rowHeight.value = event.nativeEvent.layout.height;
+        if (index === 0) drag.rowHeight.set(event.nativeEvent.layout.height);
       }}
     >
       {children}
@@ -306,14 +306,14 @@ export function ReorderList({
   };
 
   useEffect(() => {
-    drag.count.value = shown.length;
+    drag.count.set(shown.length);
   }, [drag.count, shown.length]);
 
   useAnimatedReaction(
-    () => (drag.from.value < 0 ? -1 : landing(drag, drag.offset.value)),
+    () => (drag.from.get() < 0 ? -1 : landing(drag, drag.offset.get())),
     (next, previous) => {
       if (next < 0 || next === previous) return;
-      drag.to.value = next;
+      drag.to.set(next);
 
       if (previous !== null && previous >= 0) scheduleOnRN(Haptics.selectionAsync);
     },
@@ -324,16 +324,16 @@ export function ReorderList({
 
     const timer = setInterval(() => {
       const top =
-        drag.headerHeight.value +
-        drag.from.value * drag.rowHeight.value -
-        drag.startScroll.value +
-        drag.offset.value;
+        drag.headerHeight.get() +
+        drag.from.get() * drag.rowHeight.get() -
+        drag.startScroll.get() +
+        drag.offset.get();
 
-      const speed = edgeScroll(top + drag.rowHeight.value / 2, listHeight);
+      const speed = edgeScroll(top + drag.rowHeight.get() / 2, listHeight);
 
       if (speed !== 0) {
         list.current?.scrollToOffset({
-          offset: Math.max(0, drag.scrollY.value + speed),
+          offset: Math.max(0, drag.scrollY.get() + speed),
           animated: false,
         });
       }
@@ -342,7 +342,16 @@ export function ReorderList({
     return () => {
       clearInterval(timer);
     };
-  }, [lifted, listHeight, drag]);
+  }, [
+    lifted,
+    listHeight,
+    drag.headerHeight,
+    drag.from,
+    drag.rowHeight,
+    drag.startScroll,
+    drag.offset,
+    drag.scrollY,
+  ]);
 
   const actions: RowActions = {
     onLift: (index) => {
@@ -350,8 +359,8 @@ export function ReorderList({
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     },
     onDrop: (from, to) => {
-      drag.from.value = -1;
-      drag.to.value = -1;
+      drag.from.set(-1);
+      drag.to.set(-1);
       setLifted(null);
       const item = shown[from];
 
@@ -368,14 +377,14 @@ export function ReorderList({
   };
 
   const ghost = useAnimatedStyle(() => ({
-    opacity: drag.from.value < 0 ? 0 : 1,
+    opacity: drag.from.get() < 0 ? 0 : 1,
     transform: [
       {
         translateY:
-          drag.headerHeight.value +
-          Math.max(0, drag.from.value) * drag.rowHeight.value -
-          drag.startScroll.value +
-          drag.offset.value,
+          drag.headerHeight.get() +
+          Math.max(0, drag.from.get()) * drag.rowHeight.get() -
+          drag.startScroll.get() +
+          drag.offset.get(),
       },
     ],
   }));
@@ -395,14 +404,14 @@ export function ReorderList({
         keyExtractor={(item) => item.itemId}
         scrollEnabled={lifted === null}
         onScroll={(event) => {
-          drag.scrollY.value = event.nativeEvent.contentOffset.y;
+          drag.scrollY.set(event.nativeEvent.contentOffset.y);
         }}
         scrollEventThrottle={16}
         contentContainerClassName="pb-row"
         ListHeaderComponent={
           <View
             onLayout={(event) => {
-              drag.headerHeight.value = event.nativeEvent.layout.height;
+              drag.headerHeight.set(event.nativeEvent.layout.height);
             }}
           >
             {header}

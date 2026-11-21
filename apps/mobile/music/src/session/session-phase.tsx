@@ -1,7 +1,7 @@
 import { isFailure } from "@media/mobile-core/failure";
 import { lastPerson } from "@media/mobile-core/sign-in";
 import { usePlatform, usePlatformStatus } from "@media/sdk/react";
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
 import { useHasDownloads } from "@/downloads";
@@ -42,7 +42,9 @@ export function SetupProgressProvider({ children }: { readonly children: ReactNo
     setProgress("addingLibrary");
   }
 
-  return <SetupStepsContext value={{ progress, setProgress }}>{children}</SetupStepsContext>;
+  const steps = useMemo(() => ({ progress, setProgress }), [progress]);
+
+  return <SetupStepsContext value={steps}>{children}</SetupStepsContext>;
 }
 
 /**
@@ -68,14 +70,10 @@ const useLaunchSignIn = (status: "loading" | "signedIn" | "signedOut"): Launch =
   const { onLaunch } = useSignIn();
   const [launch, setLaunch] = useState<Launch>("pending");
 
+  if (status === "signedIn" && launch === "pending") setLaunch("done");
+
   useEffect(() => {
-    if (status === "loading" || launch !== "pending") return undefined;
-
-    if (status === "signedIn") {
-      setLaunch("done");
-
-      return undefined;
-    }
+    if (status !== "signedOut" || launch !== "pending") return undefined;
 
     const stop = new AbortController();
 
@@ -99,19 +97,21 @@ const useLaunchSignIn = (status: "loading" | "signedIn" | "signedOut"): Launch =
 
 /** Whether `waiting` has lasted `afterMs`. */
 const useSilent = (waiting: boolean, afterMs: number): boolean => {
-  const [silent, setSilent] = useState(false);
+  const [timed, setTimed] = useState({ waiting, afterMs });
+  /** The wait whose time ran out; a change to either input starts a new one. */
+  const [ranOut, setRanOut] = useState<typeof timed | null>(null);
+
+  if (timed.waiting !== waiting || timed.afterMs !== afterMs) setTimed({ waiting, afterMs });
 
   useEffect(() => {
-    setSilent(false);
+    if (!timed.waiting) return undefined;
 
-    if (!waiting) return undefined;
-
-    const timer = setTimeout(() => setSilent(true), afterMs);
+    const timer = setTimeout(() => setRanOut(timed), timed.afterMs);
 
     return () => clearTimeout(timer);
-  }, [waiting, afterMs]);
+  }, [timed]);
 
-  return silent;
+  return ranOut === timed;
 };
 
 const useLivePhase = (): SessionPhase => {

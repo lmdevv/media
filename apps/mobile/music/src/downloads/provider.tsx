@@ -346,7 +346,7 @@ function LyricsWatcher({
 
       if (answers.some((answer) => !answer.settled)) {
         timer = setTimeout(() => {
-          setRound((count) => count + 1);
+          setRound(round + 1);
         }, LYRICS_RETRY_MS);
       }
     };

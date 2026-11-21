@@ -8,6 +8,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { SectionHeader } from "@/components/ui/section-header";
 import { useHistory } from "@/lib/details";
 import { historyRows } from "@/lib/history";
+import { useToday } from "@/lib/use-today";
 import { useNowPlaying } from "@/player";
 
 const HISTORY_LIMIT = 200;
@@ -16,9 +17,10 @@ export default function History() {
   const history = useHistory(HISTORY_LIMIT);
   const playingId = useNowPlaying().nowPlaying?.trackId ?? null;
   const { playFrom } = usePlayList();
+  const today = useToday();
 
   const plays = history ?? [];
-  const rows = historyRows(plays, Date.now());
+  const rows = historyRows(plays, today);
   const trackIds = plays.map((play) => play.track.id);
 
   return (

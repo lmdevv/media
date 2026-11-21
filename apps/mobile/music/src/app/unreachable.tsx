@@ -11,18 +11,17 @@ import { useConnection, useConnectionControls } from "@/session/connection";
 const TRYING_MS = 8000;
 
 const useTrying = (attempt: number): boolean => {
-  const [trying, setTrying] = useState(attempt > 0);
+  const [waited, setWaited] = useState(0);
 
   useEffect(() => {
     if (attempt === 0) return undefined;
-    setTrying(true);
 
-    const timer = setTimeout(() => setTrying(false), TRYING_MS);
+    const timer = setTimeout(() => setWaited(attempt), TRYING_MS);
 
     return () => clearTimeout(timer);
   }, [attempt]);
 
-  return trying;
+  return attempt > 0 && waited !== attempt;
 };
 
 export default function Unreachable() {

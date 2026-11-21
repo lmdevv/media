@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 import { Pressable, View } from "react-native";
 import { GestureDetector, usePanGesture } from "react-native-gesture-handler";
@@ -53,22 +53,27 @@ export function SwipeToRemove({
   const speed = useSharedValue(0);
   const closedLetGo = swipeBack ? SLOP : Number.POSITIVE_INFINITY;
   const letGoRight = useSharedValue(closedLetGo);
+  const resetFor = useRef({ resetKey, closedLetGo });
 
   useEffect(() => {
-    offset.value = 0;
-    letGoRight.value = closedLetGo;
+    const last = resetFor.current;
+
+    if (last.resetKey === resetKey && last.closedLetGo === closedLetGo) return;
+    resetFor.current = { resetKey, closedLetGo };
+    offset.set(0);
+    letGoRight.set(closedLetGo);
   }, [offset, letGoRight, closedLetGo, resetKey]);
 
   const remove = () => {
-    offset.value = 0;
-    letGoRight.value = closedLetGo;
+    offset.set(0);
+    letGoRight.set(closedLetGo);
     onRemove();
   };
 
   const settle = (): boolean => {
-    if (offset.value >= 0) return false;
-    offset.value = withSpring(0, SETTLE);
-    letGoRight.value = closedLetGo;
+    if (offset.get() >= 0) return false;
+    offset.set(withSpring(0, SETTLE));
+    letGoRight.set(closedLetGo);
 
     return true;
   };
@@ -80,28 +85,28 @@ export function SwipeToRemove({
     failOffsetY: [-SLOP, SLOP],
     onBegin: () => {
       "worklet";
-      start.value = offset.value;
+      start.set(offset.get());
     },
     onUpdate: (event) => {
       "worklet";
-      offset.value = Math.min(0, Math.max(-REMOVE_WIDTH, start.value + event.translationX));
-      speed.value = event.velocityX;
+      offset.set(Math.min(0, Math.max(-REMOVE_WIDTH, start.get() + event.translationX)));
+      speed.set(event.velocityX);
     },
     onFinalize: () => {
       "worklet";
 
       const open =
-        speed.value < -FLICK_SPEED ||
-        (speed.value <= FLICK_SPEED && offset.value < -REMOVE_WIDTH / 2);
+        speed.get() < -FLICK_SPEED ||
+        (speed.get() <= FLICK_SPEED && offset.get() < -REMOVE_WIDTH / 2);
 
-      speed.value = 0;
-      offset.value = withSpring(open ? -REMOVE_WIDTH : 0, SETTLE);
-      letGoRight.value = open ? Number.POSITIVE_INFINITY : closedLetGo;
+      speed.set(0);
+      offset.set(withSpring(open ? -REMOVE_WIDTH : 0, SETTLE));
+      letGoRight.set(open ? Number.POSITIVE_INFINITY : closedLetGo);
     },
   });
 
-  const slide = useAnimatedStyle(() => ({ transform: [{ translateX: offset.value }] }));
-  const uncovered = useAnimatedStyle(() => ({ opacity: offset.value < 0 ? 1 : 0 }));
+  const slide = useAnimatedStyle(() => ({ transform: [{ translateX: offset.get() }] }));
+  const uncovered = useAnimatedStyle(() => ({ opacity: offset.get() < 0 ? 1 : 0 }));
 
   return (
     <View>

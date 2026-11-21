@@ -1140,7 +1140,7 @@ const useHandBack = (
     void send().catch(() => {
       sending.current = false;
       timer = setTimeout(() => {
-        setRetry((count) => count + 1);
+        setRetry(retry + 1);
       }, OFFLINE_PLAYS_RETRY_MS);
     });
 
@@ -1186,7 +1186,7 @@ const useHandBack = (
         for (const sent of newQueues) holdUnanswered({ mode, unanswered }, sent);
         clearTimeout(againTimer.current);
         againTimer.current = setTimeout(() => {
-          setAgain((count) => count + 1);
+          setAgain(again + 1);
         }, HAND_BACK_RETRY_MS);
       },
     });
@@ -1300,6 +1300,8 @@ const usePlayerPerson = (mediaUrl: string): string | null => {
 
   return lastPerson({ own: appKeychains().own, server: mediaUrl })?.userId ?? null;
 };
+
+const NO_ENTRIES: ReadonlyArray<QueueEntry<Track>> = [];
 
 /**
  * Provides the player hooks. Mount it inside the platform provider of a signed-in person, or of
@@ -1449,8 +1451,9 @@ export function PlayerProvider({ children }: { readonly children: ReactNode }) {
     controller.sync(queue);
   }, [controller, queue, follow, mode, sessionView]);
 
-  const entries = queue?.entries ?? [];
-  const found = entries.findIndex((entry) => entry.itemId === snapshot.current);
+  const entries = queue?.entries ?? NO_ENTRIES;
+  const playingId = snapshot.current;
+  const found = entries.findIndex((entry) => entry.itemId === playingId);
   const entry: QueueEntry<Track> | null = found === -1 ? null : (entries[found] ?? null);
   const wantsPlay = snapshot.engineStatus === "loading";
   const playing = isPlaying(snapshot, wantsPlay);
@@ -1510,9 +1513,8 @@ export function PlayerProvider({ children }: { readonly children: ReactNode }) {
   );
 
   const sessionSongs = useMemo(
-    () =>
-      inSession === null ? null : sessionSongsOf(sessionData, inSession, snapshot.current, art),
-    [inSession, sessionData, snapshot, art],
+    () => (inSession === null ? null : sessionSongsOf(sessionData, inSession, playingId, art)),
+    [inSession, sessionData, playingId, art],
   );
 
   const sessionSong = useMemo(
@@ -1529,7 +1531,7 @@ export function PlayerProvider({ children }: { readonly children: ReactNode }) {
         // A hidden song plays nothing here, but the Jam plays it on: its controls show the Jam's.
         status: sessionSongs.hidden
           ? inSession.clock.status
-          : statusOf({ hasCurrent: sessionSongs.current !== null }, snapshot, null),
+          : statusOf({ hasCurrent: sessionSong !== null }, snapshot, null),
         remote: null,
         nowPlaying: sessionSong,
         queue: sessionSongs.rows,

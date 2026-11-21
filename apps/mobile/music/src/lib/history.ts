@@ -30,7 +30,8 @@ export type HistoryRow =
 
 const DAY_MS = 86_400_000;
 
-const dayOf = (at: number): number => {
+/** The start of the local calendar day `at` falls in. */
+export const dayOf = (at: number): number => {
   const date = new Date(at);
 
   return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
