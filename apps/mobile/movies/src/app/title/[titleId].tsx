@@ -73,7 +73,7 @@ function TitleDetailView({ title }: { readonly title: TitleDetail }) {
   const scrollY = useSharedValue(0);
 
   const onScroll = useAnimatedScrollHandler((event) => {
-    scrollY.value = event.contentOffset.y;
+    scrollY.set(event.contentOffset.y);
   });
 
   const opening = initialSeason(title);

@@ -58,16 +58,12 @@ type Launch =
 const useLaunchSignIn = (status: "loading" | "signedIn" | "signedOut"): [Launch, () => void] => {
   const { onLaunch } = useSignIn();
   const [launch, setLaunch] = useState<Launch>({ kind: "pending" });
-  const [attempt, setAttempt] = useState(0);
+
+  // Already signed in: there is nothing to sign in silently, then or after a sign-out.
+  if (status === "signedIn" && launch.kind === "pending") setLaunch({ kind: "done" });
 
   useEffect(() => {
-    if (status === "loading" || launch.kind !== "pending") return undefined;
-
-    if (status === "signedIn") {
-      setLaunch({ kind: "done" });
-
-      return undefined;
-    }
+    if (status !== "signedOut" || launch.kind !== "pending") return undefined;
 
     const stop = new AbortController();
 
@@ -84,15 +80,9 @@ const useLaunchSignIn = (status: "loading" | "signedIn" | "signedOut"): [Launch,
     void run();
 
     return () => stop.abort();
-  }, [status, launch.kind, onLaunch, attempt]);
+  }, [status, launch.kind, onLaunch]);
 
-  return [
-    launch,
-    () => {
-      setLaunch({ kind: "pending" });
-      setAttempt((count) => count + 1);
-    },
-  ];
+  return [launch, () => setLaunch({ kind: "pending" })];
 };
 
 /** The phase of the connected app, from the session, who it is, and the server's setup. */

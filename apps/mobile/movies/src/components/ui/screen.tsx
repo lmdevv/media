@@ -11,6 +11,8 @@ import type { Edge } from "react-native-safe-area-context";
 export const READABLE_COLUMN =
   "regular:w-full regular:max-w-readable regular:self-center regular:px-0";
 
+const SAFE_EDGES: ReadonlyArray<Edge> = ["top", "bottom"];
+
 /** Props for `Screen`. */
 export interface ScreenProps {
   readonly children: ReactNode;
@@ -31,7 +33,7 @@ export function Screen({
   children,
   scroll = false,
   readable = false,
-  edges = ["top", "bottom"],
+  edges = SAFE_EDGES,
   header,
   contentClassName,
 }: ScreenProps) {

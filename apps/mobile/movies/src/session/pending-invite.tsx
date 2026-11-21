@@ -21,10 +21,14 @@ const PendingInviteContext = createContext<PendingInvite | null>(null);
 export function PendingInviteProvider({ children }: { readonly children: ReactNode }) {
   const { connection } = useConnection();
   const [invite, setInvite] = useState<InviteLink | null>(null);
+  const [connectedTo, setConnectedTo] = useState(connection);
 
-  useEffect(() => {
+  // Disconnecting forgets the invite.
+  if (connection !== connectedTo) {
+    setConnectedTo(connection);
+
     if (connection === null) setInvite(null);
-  }, [connection]);
+  }
 
   const code =
     invite !== null && connection !== null && sameServer(connection.mediaUrl, invite.server)

@@ -128,10 +128,13 @@ export const useSessionPlayer = (
   player: { readonly current: FollowerPlayer | null },
   /**
    * `follows`: whether the player may follow a session at all; a download plays on its own.
-   * `carried`: the screen's stall hold. Playback that starts while it holds the session starts
+   * `carriedRef`: the screen's stall hold. Playback that starts while it holds the session starts
    * playing, since the hold plays the session on only once the player plays.
    */
-  { follows, carried }: { readonly follows: boolean; readonly carried: RefObject<CarriedHold> },
+  {
+    follows,
+    carriedRef,
+  }: { readonly follows: boolean; readonly carriedRef: RefObject<CarriedHold> },
 ): SessionPlayer => {
   const platform = usePlatform();
   const { moviesUrl } = useServer();
@@ -302,9 +305,9 @@ export const useSessionPlayer = (
       positionMs: positionAt(current.clock, serverNow()),
       play:
         current.clock.status === "playing" ||
-        holdsSession(carried.current, current.sessionId, current.clock),
+        holdsSession(carriedRef.current, current.sessionId, current.clock),
     };
-  }, [latestSession, serverNow, carried]);
+  }, [latestSession, serverNow, carriedRef]);
 
   const actions = useMemo(
     (): SessionActions => ({
@@ -353,7 +356,7 @@ export interface SessionFollowInput {
   /** The episode after the playing one, as the viewer sees it. */
   readonly nextEpisode: Episode | null;
   /** The screen's stall hold, which every follower of the screen's playback attempts shares. */
-  readonly carried: RefObject<CarriedHold>;
+  readonly carriedRef: RefObject<CarriedHold>;
 }
 
 /** The player following its session. */
@@ -379,6 +382,12 @@ const IDLE_CLOCK = {
   revision: -1,
 } as const;
 
+/** Adds `key` to a set of keys, keeping the same set when it is already there. */
+const withKey =
+  (key: string) =>
+  (keys: ReadonlySet<string>): ReadonlySet<string> =>
+    keys.has(key) ? keys : new Set(keys).add(key);
+
 /** The current time, refreshed every `intervalMs` while `enabled`. */
 const useTicking = (enabled: boolean, intervalMs: number): number => {
   const [now, setNow] = useState(Date.now);
@@ -400,12 +409,12 @@ const useTicking = (enabled: boolean, intervalMs: number): number => {
  */
 export const useSessionFollow = (
   sessionPlayer: SessionPlayer,
-  { player, durationMs, nextEpisode, carried }: SessionFollowInput,
+  { player, durationMs, nextEpisode, carriedRef }: SessionFollowInput,
 ): SessionFollow => {
   const platform = usePlatform();
   const { session, hosting, mayControl } = sessionPlayer;
   const clock = session?.clock ?? null;
-  const watched = useRef(new Set<string>());
+  const [watched, setWatched] = useState<ReadonlySet<string>>(() => new Set());
 
   const followed = useSessionFollower({
     player: session === null ? null : player,
@@ -414,7 +423,7 @@ export const useSessionFollow = (
     durationMs,
     controls: mayControl,
     hosting,
-    carried,
+    carriedRef,
   });
 
   const queue = usePlatformQuery(
@@ -450,7 +459,7 @@ export const useSessionFollow = (
           queued: head !== null,
           hosting,
           mayControl,
-          creditsWatched: watchedKey !== null && watched.current.has(watchedKey),
+          creditsWatched: watchedKey !== null && watched.has(watchedKey),
         });
 
   const step = decided?.step ?? null;
@@ -458,9 +467,9 @@ export const useSessionFollow = (
 
   // Queued once per item, by whichever of the host's screens did it: any of them that sees the
   // countdown counts it as queued, so Watch credits on one stops it on all.
-  useEffect(() => {
-    if (hosting && counting && watchedKey !== null) watched.current.add(watchedKey);
-  }, [hosting, counting, watchedKey]);
+  if (hosting && counting && watchedKey !== null && !watched.has(watchedKey)) {
+    setWatched(withKey(watchedKey));
+  }
 
   const stepKey =
     step === null || clock === null || item === null
@@ -497,7 +506,7 @@ export const useSessionFollow = (
         }
 
         // Queued once per item: whoever takes it out stops the countdown for everyone.
-        if (queuedFor !== null) watched.current.add(queuedFor);
+        if (queuedFor !== null) setWatched(withKey(queuedFor));
 
         return;
       }
@@ -566,7 +575,7 @@ export const useSessionFollow = (
 
     if (key === null) return;
 
-    watched.current.add(key);
+    setWatched(withKey(key));
 
     if (first !== undefined) {
       void platform.core.together

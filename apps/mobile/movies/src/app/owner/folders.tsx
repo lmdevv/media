@@ -15,9 +15,8 @@ type Listing =
   | { readonly status: "ready"; readonly listing: ServerFolders }
   | { readonly status: "failed"; readonly cause: unknown };
 
-const useListing = (path: string | undefined) => {
+const useListing = (path: string | undefined): Listing => {
   const media = useMediaServer();
-  const [attempt, setAttempt] = useState(0);
   const [listing, setListing] = useState<Listing>({ status: "loading" });
 
   useEffect(() => {
@@ -51,14 +50,25 @@ const useListing = (path: string | undefined) => {
     return () => {
       live = false;
     };
-  }, [media, path, attempt]);
+  }, [media, path]);
 
-  return { listing, retry: () => setAttempt((count) => count + 1) };
+  return listing;
 };
 
+/** Try Again mounts a fresh listing, which loads the folders again from the start. */
 export default function ServerFoldersScreen() {
+  const [attempt, setAttempt] = useState(0);
+
+  return (
+    <OwnerScreen title="Server Folders">
+      <FolderListing key={attempt} retry={() => setAttempt((count) => count + 1)} />
+    </OwnerScreen>
+  );
+}
+
+function FolderListing({ retry }: { readonly retry: () => void }) {
   const params = useLocalSearchParams<{ returnTo: string; field?: string; path?: string }>();
-  const { listing, retry } = useListing(params.path);
+  const listing = useListing(params.path);
 
   const open = (path: string) =>
     router.push({ pathname: "/owner/folders", params: { ...params, path } });
@@ -70,7 +80,7 @@ export default function ServerFoldersScreen() {
     });
 
   return (
-    <OwnerScreen title="Server Folders">
+    <>
       {listing.status === "loading" ? <Loading /> : null}
       {listing.status === "failed" ? (
         <>
@@ -126,6 +136,6 @@ export default function ServerFoldersScreen() {
           )}
         </>
       ) : null}
-    </OwnerScreen>
+    </>
   );
 }

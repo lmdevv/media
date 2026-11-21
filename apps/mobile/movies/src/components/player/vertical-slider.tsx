@@ -1,6 +1,6 @@
 import type { LucideIcon } from "lucide-react-native";
-import { useEffect, useRef, useState } from "react";
-import { PanResponder, View } from "react-native";
+import { useRef } from "react";
+import { View } from "react-native";
 import type { GestureResponderEvent, HostInstance } from "react-native";
 
 import { Icon } from "@/components/ui/icon";
@@ -23,32 +23,13 @@ const clamp = (value: number): number => Math.min(1, Math.max(0, value));
 export function VerticalSlider({ icon, label, value, onChange, onInteract }: VerticalSliderProps) {
   const track = useRef<HostInstance>(null);
   const bounds = useRef({ top: 0, height: 1 });
-  const latest = useRef({ onChange, onInteract });
 
-  useEffect(() => {
-    latest.current = { onChange, onInteract };
-  }, [onChange, onInteract]);
+  const set = (event: GestureResponderEvent): void => {
+    const { top, height } = bounds.current;
 
-  const [responder] = useState(() => {
-    const set = (event: GestureResponderEvent): void => {
-      const { top, height } = bounds.current;
-
-      latest.current.onInteract();
-      latest.current.onChange(clamp(1 - (event.nativeEvent.pageY - top) / height));
-    };
-
-    return PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: (event) => {
-        set(event);
-      },
-      onPanResponderMove: (event) => {
-        set(event);
-      },
-      onPanResponderTerminationRequest: () => false,
-    });
-  });
+    onInteract();
+    onChange(clamp(1 - (event.nativeEvent.pageY - top) / height));
+  };
 
   return (
     <View
@@ -61,7 +42,16 @@ export function VerticalSlider({ icon, label, value, onChange, onInteract }: Ver
       onAccessibilityAction={(event) => {
         onChange(clamp(value + (event.nativeEvent.actionName === "increment" ? 0.1 : -0.1)));
       }}
-      {...responder.panHandlers}
+      onStartShouldSetResponder={() => true}
+      onMoveShouldSetResponder={() => true}
+      onResponderGrant={(event) => {
+        set(event);
+
+        // Keeps native views from taking the touch while the drag lasts.
+        return true;
+      }}
+      onResponderMove={set}
+      onResponderTerminationRequest={() => false}
     >
       <Icon icon={icon} tone="onMedia" size="row" />
       <View
