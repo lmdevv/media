@@ -1,6 +1,6 @@
 {
   "name": "@lmdevv/media",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Search, play, and manage your self-hosted Lar server from the command line.",
   "keywords": [
     "agent",
