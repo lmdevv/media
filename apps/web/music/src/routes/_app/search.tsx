@@ -484,7 +484,7 @@ function PhoneResults({ results }: { readonly results: SearchResults }) {
 
   return (
     <div className="flex flex-col gap-5 lg:hidden">
-      <div role="group" aria-label="Show" className="flex gap-2 overflow-x-auto">
+      <fieldset aria-label="Show" className="m-0 flex min-w-0 gap-2 overflow-x-auto border-0 p-0">
         {(["all", "songs", "albums", "artists"] as const).map((value) => (
           <Chip
             key={value}
@@ -496,7 +496,7 @@ function PhoneResults({ results }: { readonly results: SearchResults }) {
             {value === "all" ? "All" : value.charAt(0).toUpperCase() + value.slice(1)}
           </Chip>
         ))}
-      </div>
+      </fieldset>
       <div className="flex flex-col">
         {rows.length === 0 ? (
           <p className="font-sans text-md/md text-text-muted">No {scope} match.</p>

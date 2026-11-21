@@ -76,7 +76,7 @@ export function ListTail({
   readonly paged: Extract<PagedRows<unknown>, { readonly status: "ready" }>;
   readonly skeleton: ReactNode;
 }) {
-  const sentinel = useMoreOnView(paged);
+  const { ref, more } = useMoreOnView(paged);
   const { next } = paged;
 
   return (
@@ -85,7 +85,7 @@ export function ListTail({
       {next.kind === "failed" ? (
         <MoreFailed message={next.message} retry={next.retry} className="col-span-full" />
       ) : null}
-      {sentinel.more ? <div ref={sentinel.ref} aria-hidden className="col-span-full h-px" /> : null}
+      {more ? <div ref={ref} aria-hidden className="col-span-full h-px" /> : null}
     </>
   );
 }

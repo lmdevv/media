@@ -3,7 +3,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { HotkeysProvider } from "@tanstack/react-hotkeys";
 import { CatchBoundary, useLocation } from "@tanstack/react-router";
 import type { ErrorComponentProps } from "@tanstack/react-router";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 
@@ -142,7 +142,12 @@ function Surfaces() {
 
   usePreloadSurfaces();
 
+  const lastPath = useRef(pathname);
+
   useEffect(() => {
+    if (lastPath.current === pathname) return;
+
+    lastPath.current = pathname;
     setNowPlaying(null);
   }, [pathname, setNowPlaying]);
 

@@ -94,7 +94,7 @@ function NowProgress({ durationMs }: { readonly durationMs: number }) {
       <ProgressBar
         percent={Math.min(100, (position / Math.max(1, durationMs)) * 100)}
         label="Position"
-        className="h-1 [&>div]:bg-text"
+        className="h-1 [&::-moz-progress-bar]:bg-text [&::-webkit-progress-value]:bg-text"
       />
       <div className="flex justify-between font-mono text-xs/xs text-text-muted">
         <span>{formatDuration(position)}</span>

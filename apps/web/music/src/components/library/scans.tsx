@@ -4,6 +4,7 @@ import type { PlatformSdk } from "@media/sdk/promise";
 import { isActive } from "@/lib/job-progress";
 import type { Scan } from "@/lib/job-progress";
 import { useAllRows } from "@/lib/pages";
+import { cn } from "@/lib/utils";
 
 type Library = Awaited<ReturnType<PlatformSdk["core"]["libraries"]["list"]>>["page"][number];
 
@@ -53,18 +54,15 @@ export function ProgressBar({
   readonly label: string;
 }) {
   return (
-    <div
-      role="progressbar"
+    <progress
       aria-label={label}
-      aria-valuemin={0}
-      aria-valuemax={100}
-      aria-valuenow={percent}
-      className={`flex shrink-0 overflow-hidden rounded-full bg-border ${className}`}
-    >
-      <div
-        className="h-full rounded-full bg-accent transition-[width]"
-        style={{ width: `${percent}%` }}
-      />
-    </div>
+      max={100}
+      value={percent}
+      className={cn(
+        "block w-full shrink-0 appearance-none overflow-hidden rounded-full bg-border",
+        "[&::-webkit-progress-bar]:bg-border [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:bg-accent [&::-webkit-progress-value]:transition-[width] [&::-moz-progress-bar]:rounded-full [&::-moz-progress-bar]:bg-accent",
+        className,
+      )}
+    />
   );
 }

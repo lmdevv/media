@@ -42,8 +42,7 @@ export function JamBand() {
   const ended = view.state === "ended";
 
   return (
-    <div
-      role="status"
+    <output
       aria-label="Jam"
       className={cn(
         "flex min-h-11 shrink-0 items-center gap-3 px-5 lg:px-6",
@@ -58,7 +57,7 @@ export function JamBand() {
       <Button variant={ended ? "solid" : "secondary"} size="sm" onClick={() => setJamOpen(true)}>
         {actionLabel(view)}
       </Button>
-    </div>
+    </output>
   );
 }
 

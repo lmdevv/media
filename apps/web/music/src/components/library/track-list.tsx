@@ -44,7 +44,7 @@ export interface ListReorder {
  */
 export type TrackListVariant = "album" | "list";
 
-const headerCell = "font-mono text-xs/xs tracking-mono text-text-muted";
+const headerCell = "text-left font-mono text-xs/xs font-normal tracking-mono text-text-muted";
 
 const rowHeightClassName = (variant: TrackListVariant): string =>
   variant === "album" ? "h-12 lg:h-row" : "h-12 lg:h-13";
@@ -157,7 +157,7 @@ export function TrackList({
   readonly rowKey?: ((index: number) => string) | undefined;
 }) {
   const play = useRowPlay(tracks, unavailable);
-  const table = useRef<HTMLDivElement>(null);
+  const table = useRef<HTMLTableElement>(null);
 
   const highlightIndex =
     highlight === undefined || highlight === null
@@ -179,6 +179,7 @@ export function TrackList({
   const dragging = reorder?.reorder.dragging ?? null;
   const [probe, setProbe] = useState<HTMLElement | null>(null);
   const rowHeight = useRowHeight(probe);
+  const desktop = useIsDesktop();
   const scrolledTo = useRef<TrackId | null>(null);
 
   useEffect(() => {
@@ -187,9 +188,8 @@ export function TrackList({
     if (rowHeight === null || scrolledTo.current === highlight) return undefined;
 
     const frame = requestAnimationFrame(() => {
-      const block = table.current?.querySelectorAll(":scope > [role=rowgroup]")[
-        Math.floor(highlightIndex / BLOCK_ROWS)
-      ];
+      const block =
+        table.current?.querySelectorAll(":scope > tbody")[Math.floor(highlightIndex / BLOCK_ROWS)];
 
       const row = block?.children[highlightIndex % BLOCK_ROWS];
 
@@ -221,57 +221,63 @@ export function TrackList({
   );
 
   return (
-    <div ref={table} role="table" aria-label={label} className="relative flex flex-col">
+    <div className="relative">
+      {/* Remounts at the desktop breakpoint, so the row height is read again before paint: the
+          probe's resize observer reports a frame later. */}
       <div
+        key={desktop ? "desktop" : "phone"}
         ref={setProbe}
         aria-hidden
         className={cn(rowHeightClassName(variant), "pointer-events-none invisible absolute")}
       />
-      <div
-        role="row"
-        className={cn(
-          "hidden h-8 shrink-0 items-center gap-3 border-b border-border px-2",
-          header && "lg:flex",
-        )}
-      >
-        {variant === "album" ? (
-          <>
-            <span role="columnheader" className={cn(headerCell, "w-7 shrink-0 text-right")}>
-              #
-            </span>
-            <span role="columnheader" className={cn(headerCell, "grow")}>
-              TITLE
-            </span>
-          </>
-        ) : (
-          <>
-            <span aria-hidden className="w-row shrink-0" />
-            <span role="columnheader" className={cn(headerCell, "grow-2 basis-0")}>
-              TITLE
-            </span>
-            <span role="columnheader" className={cn(headerCell, "grow-[1.4] basis-0")}>
-              ALBUM
-            </span>
-            <span role="columnheader" className={cn(headerCell, "w-27.5 shrink-0")}>
-              FORMAT
-            </span>
-          </>
-        )}
-        <span aria-hidden className="w-9 shrink-0" />
-        <span role="columnheader" className={cn(headerCell, "w-row-touch shrink-0 text-right")}>
-          TIME
-        </span>
-        <span aria-hidden className="w-9 shrink-0" />
-      </div>
-      <ListLengthContext value={tracks.length}>
-        <WindowedRows
-          tracks={tracks}
-          renderRow={renderRow}
-          pinned={[highlightIndex, dragging ?? -1]}
-          pinOneBlock={windowing === "long"}
-          rowHeight={rowHeight}
-        />
-      </ListLengthContext>
+      <table ref={table} aria-label={label} className="flex flex-col">
+        <thead>
+          <tr
+            className={cn(
+              "hidden h-8 shrink-0 items-center gap-3 border-b border-border px-2",
+              header && "lg:flex",
+            )}
+          >
+            {variant === "album" ? (
+              <>
+                <th scope="col" className={cn(headerCell, "w-7 shrink-0 text-right")}>
+                  #
+                </th>
+                <th scope="col" className={cn(headerCell, "grow")}>
+                  TITLE
+                </th>
+              </>
+            ) : (
+              <>
+                <td aria-hidden className="w-row shrink-0" />
+                <th scope="col" className={cn(headerCell, "grow-2 basis-0")}>
+                  TITLE
+                </th>
+                <th scope="col" className={cn(headerCell, "grow-[1.4] basis-0")}>
+                  ALBUM
+                </th>
+                <th scope="col" className={cn(headerCell, "w-27.5 shrink-0")}>
+                  FORMAT
+                </th>
+              </>
+            )}
+            <td aria-hidden className="w-9 shrink-0" />
+            <th scope="col" className={cn(headerCell, "w-row-touch shrink-0 text-right")}>
+              TIME
+            </th>
+            <td aria-hidden className="w-9 shrink-0" />
+          </tr>
+        </thead>
+        <ListLengthContext value={tracks.length}>
+          <WindowedRows
+            tracks={tracks}
+            renderRow={renderRow}
+            pinned={[highlightIndex, dragging ?? -1]}
+            pinOneBlock={windowing === "long"}
+            rowHeight={rowHeight}
+          />
+        </ListLengthContext>
+      </table>
     </div>
   );
 }
@@ -314,7 +320,6 @@ function WindowedRows({
 
 const useRowHeight = (probe: HTMLElement | null): number | null => {
   const [height, setHeight] = useState<number | null>(null);
-  const desktop = useIsDesktop();
 
   useLayoutEffect(() => {
     if (probe === null) return undefined;
@@ -334,7 +339,7 @@ const useRowHeight = (probe: HTMLElement | null): number | null => {
     observer.observe(probe);
 
     return () => observer.disconnect();
-  }, [probe, desktop]);
+  }, [probe]);
 
   return height;
 };
@@ -356,7 +361,7 @@ function RowBlock({
 }) {
   const count = Math.min(BLOCK_ROWS, tracks.length - start);
 
-  const windowed = useWindowed({
+  const { ref, shown, height } = useWindowed({
     initiallyNear: first,
     pinned,
     estimate: rowHeight === null ? null : rowHeight * count,
@@ -364,15 +369,11 @@ function RowBlock({
   });
 
   return (
-    <div
-      ref={windowed.ref}
-      role="rowgroup"
-      style={windowed.shown ? undefined : { height: windowed.height ?? 0 }}
-    >
-      {windowed.shown ? (
+    <tbody ref={ref} style={shown ? undefined : { height: height ?? 0 }}>
+      {shown ? (
         <ShownRows tracks={tracks} start={start} count={count} renderRow={renderRow} />
       ) : null}
-    </div>
+    </tbody>
   );
 }
 
@@ -412,7 +413,7 @@ function RowMover({
 
   if (reorder.mode === "drag" && place === "start") {
     return (
-      <span role="cell" className="relative hidden shrink-0 lg:flex">
+      <td className="relative hidden shrink-0 lg:flex">
         <ReorderHandle
           label={label}
           index={index}
@@ -420,15 +421,15 @@ function RowMover({
           reorder={reorder}
           className="-mx-1 opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100"
         />
-      </span>
+      </td>
     );
   }
 
   if (reorder.mode === "buttons" && place === "end") {
     return (
-      <span role="cell" className="relative flex shrink-0">
+      <td className="relative flex shrink-0">
         <MoveButtons label={label} index={index} count={count} reorder={reorder} />
-      </span>
+      </td>
     );
   }
 
@@ -504,8 +505,7 @@ const TrackRow = memo(function TrackRow({
   );
 
   return (
-    <div
-      role="row"
+    <tr
       aria-current={current ? "true" : undefined}
       data-highlighted={highlighted ? "" : undefined}
       onDoubleClick={playRow}
@@ -518,10 +518,7 @@ const TrackRow = memo(function TrackRow({
     >
       <RowMover reorder={reorder} label={track.title} index={index} place="start" />
       {variant === "album" ? (
-        <span
-          role="cell"
-          className={cn(numberCell, "relative flex h-full items-center lg:justify-end")}
-        >
+        <td className={cn(numberCell, "relative flex h-full items-center lg:justify-end")}>
           {playing ? (
             <PlayingBars />
           ) : (
@@ -535,9 +532,9 @@ const TrackRow = memo(function TrackRow({
             </span>
           )}
           {playing ? null : <span className="hidden lg:contents">{playButton}</span>}
-        </span>
+        </td>
       ) : (
-        <span role="cell" className="relative shrink-0">
+        <td className="relative shrink-0">
           <Artwork url={track.artUrl} seed={track.albumId} className={coverClassName}>
             {playing ? (
               <span className="absolute inset-0 flex items-end justify-center bg-dark-canvas/35 pb-2.5">
@@ -547,11 +544,10 @@ const TrackRow = memo(function TrackRow({
               <span className="hidden lg:contents">{playButton}</span>
             )}
           </Artwork>
-        </span>
+        </td>
       )}
 
-      <span
-        role="cell"
+      <td
         className={cn(
           "flex min-w-0 flex-col gap-px",
           variant === "album" ? "grow" : "grow lg:grow-2 lg:basis-0",
@@ -577,11 +573,11 @@ const TrackRow = memo(function TrackRow({
             {byline === null ? track.artist : `${track.artist} · ${byline}`}
           </span>
         ) : null}
-      </span>
+      </td>
 
       {variant === "list" ? (
         <>
-          <span role="cell" className="hidden min-w-0 grow-[1.4] basis-0 lg:block">
+          <td className="hidden min-w-0 grow-[1.4] basis-0 lg:block">
             <Link
               to="/albums/$albumId"
               params={{ albumId: track.albumId }}
@@ -589,14 +585,12 @@ const TrackRow = memo(function TrackRow({
             >
               {track.album}
             </Link>
-          </span>
-          <span role="cell" className={formatCell}>
-            {formatQuality(track)}
-          </span>
+          </td>
+          <td className={formatCell}>{formatQuality(track)}</td>
         </>
       ) : null}
 
-      <span role="cell" className="relative hidden w-9 shrink-0 justify-center lg:flex">
+      <td className="relative hidden w-9 shrink-0 justify-center lg:flex">
         <LikeButton
           track={track}
           className={cn(
@@ -605,23 +599,20 @@ const TrackRow = memo(function TrackRow({
           )}
           iconClassName="size-4.5"
         />
-      </span>
-      <span
-        role="cell"
-        className="hidden w-row-touch shrink-0 text-right font-mono text-sm/xs text-text-muted lg:block"
-      >
+      </td>
+      <td className="hidden w-row-touch shrink-0 text-right font-mono text-sm/xs text-text-muted lg:block">
         {formatDuration(track.durationMs)}
-      </span>
+      </td>
       <RowMover reorder={reorder} label={track.title} index={index} place="end" />
-      <span role="cell" className="relative flex w-12 shrink-0 justify-center lg:w-9">
+      <td className="relative flex w-12 shrink-0 justify-center lg:w-9">
         <TrackMenu
           track={track}
           extra={extra}
           className="lg:opacity-0 lg:group-hover/row:opacity-100 lg:focus-visible:opacity-100 lg:data-popup-open:opacity-100"
           trigger={<MoreHorizontalIcon className="size-5" />}
         />
-      </span>
-    </div>
+      </td>
+    </tr>
   );
 });
 
@@ -651,9 +642,9 @@ function UnavailableRow({
   const move = movable(mover.reorder, mover.index, mover.dropSide);
 
   return (
-    <div role="row" {...move.props} className={cn(rowClassName(variant), "gap-3", move.line)}>
+    <tr {...move.props} className={cn(rowClassName(variant), "gap-3", move.line)}>
       <RowMover reorder={mover.reorder} index={mover.index} label={track.title} place="start" />
-      <span role="cell" className="flex min-w-0 grow items-center gap-3 opacity-(--opacity-muted)">
+      <td className="flex min-w-0 grow items-center gap-3 opacity-(--opacity-muted)">
         {variant === "album" ? (
           <span
             aria-hidden
@@ -691,9 +682,9 @@ function UnavailableRow({
         <span className="hidden w-row-touch shrink-0 text-right font-mono text-sm/xs text-text-muted lg:block">
           {formatDuration(track.durationMs)}
         </span>
-      </span>
+      </td>
       <RowMover reorder={mover.reorder} index={mover.index} label={track.title} place="end" />
-      <span role="cell" className="relative flex w-12 shrink-0 justify-center lg:w-9">
+      <td className="relative flex w-12 shrink-0 justify-center lg:w-9">
         <TrackMenu
           track={track}
           playable={false}
@@ -702,8 +693,8 @@ function UnavailableRow({
           className="lg:opacity-0 lg:group-hover/row:opacity-100 lg:focus-visible:opacity-100 lg:data-popup-open:opacity-100"
           trigger={<MoreHorizontalIcon className="size-5" />}
         />
-      </span>
-    </div>
+      </td>
+    </tr>
   );
 }
 

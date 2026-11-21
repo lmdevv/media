@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { useId } from "react";
 
 /** One choice in a {@link Segmented} control. */
 export interface SegmentedOption<Value extends string> {
@@ -8,7 +9,8 @@ export interface SegmentedOption<Value extends string> {
 
 /**
  * The segmented control (Appearance, Jobs filter): a surface track with the chosen option
- * lifted onto the background. It is a radio group for assistive technology.
+ * lifted onto the background. Each option is a native radio button, so the group takes one Tab
+ * stop and the arrow keys change the choice.
  */
 export function Segmented<Value extends string>({
   value,
@@ -23,6 +25,8 @@ export function Segmented<Value extends string>({
   readonly label: string;
   readonly className?: string;
 }) {
+  const name = useId();
+
   return (
     <div
       role="radiogroup"
@@ -33,21 +37,25 @@ export function Segmented<Value extends string>({
         const selected = option.value === value;
 
         return (
-          <button
+          <label
             key={option.value}
-            type="button"
-            role="radio"
-            aria-checked={selected}
-            onClick={() => onChange(option.value)}
             className={cn(
-              "flex h-7.5 cursor-pointer items-center rounded-full px-3.5 font-sans text-sm/xs transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+              "relative flex h-7.5 cursor-pointer items-center rounded-full px-3.5 font-sans text-sm/xs transition-colors",
               selected
                 ? "bg-bg font-semibold text-text shadow-segment"
                 : "font-medium text-text-muted hover:text-text",
             )}
           >
+            <input
+              type="radio"
+              name={name}
+              value={option.value}
+              checked={selected}
+              onChange={() => onChange(option.value)}
+              className="absolute inset-0 cursor-pointer appearance-none rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            />
             {option.label}
-          </button>
+          </label>
         );
       })}
     </div>

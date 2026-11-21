@@ -109,7 +109,10 @@ function NewPlaylistForm({
         </div>
         <div className="flex flex-col gap-1.5">
           <span className="font-sans text-sm/xs font-medium text-text">Start with</span>
-          <div role="group" aria-label="Start with" className="flex flex-wrap gap-2">
+          <fieldset
+            aria-label="Start with"
+            className="m-0 flex min-w-0 flex-wrap gap-2 border-0 p-0"
+          >
             {seed.length > 0 ? (
               <Chip selected={startWith === "selection"} onClick={() => setStartWith("selection")}>
                 {seed.length === 1 ? "This song" : `These songs · ${formatCount(seed.length)}`}
@@ -128,7 +131,7 @@ function NewPlaylistForm({
             <Chip selected={startWith === "liked"} onClick={() => setStartWith("liked")}>
               Liked songs
             </Chip>
-          </div>
+          </fieldset>
         </div>
         <DialogFooter>
           <DialogClose render={<Button variant="ghost" type="button" />}>Cancel</DialogClose>
@@ -144,9 +147,9 @@ function NewPlaylistForm({
             </span>
           </Button>
         </DialogFooter>
-        <span role="status" className="sr-only">
+        <output className="sr-only">
           {startsWith(startWith, seed.length, player.queue.length)}
-        </span>
+        </output>
       </form>
     </DialogContent>
   );

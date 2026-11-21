@@ -328,7 +328,7 @@ function OwnUpcoming({
   const move = useMusic().queue.move;
   const { current, queued, autoplay } = useUpNext();
   const ids = queued.map((entry) => entry.itemId);
-  const removal = useQueueRemoval(queued.map((entry) => entry.itemId));
+  const { list, remove } = useQueueRemoval(queued.map((entry) => entry.itemId));
 
   const reorder = useReorder<QueueItemId>(
     ids,
@@ -347,7 +347,7 @@ function OwnUpcoming({
     <>
       <div className="flex flex-col gap-0.5">
         {heading}
-        <div ref={removal.list} tabIndex={-1} className="flex flex-col gap-0.5 outline-none">
+        <div ref={list} tabIndex={-1} className="flex flex-col gap-0.5 outline-none">
           {queued.length === 0
             ? empty
             : queued.map((entry, index) => (
@@ -355,7 +355,7 @@ function OwnUpcoming({
                   key={entry.itemId}
                   entry={entry}
                   tone={tone}
-                  onRemove={() => void removal.remove(entry.itemId, index)}
+                  onRemove={() => void remove(entry.itemId, index)}
                   reorder={{
                     index,
                     count: queued.length,
@@ -434,7 +434,9 @@ function JamUpcoming({
 
   const upcoming = upcomingInJam(entries, current);
 
-  const removal = useQueueRemoval(upcoming.map((entry) => asQueueItemId(entry.key)));
+  const { list, remove: removeAt } = useQueueRemoval(
+    upcoming.map((entry) => asQueueItemId(entry.key)),
+  );
 
   const reorder = useReorder<EntryId>(
     upcoming.map((entry) => entry.key),
@@ -452,12 +454,12 @@ function JamUpcoming({
   return (
     <div className="flex flex-col gap-0.5">
       {heading}
-      <div ref={removal.list} tabIndex={-1} className="flex flex-col gap-0.5 outline-none">
+      <div ref={list} tabIndex={-1} className="flex flex-col gap-0.5 outline-none">
         {upcoming.length === 0
           ? empty
           : upcoming.map((entry, index) => {
               const remove = entry.removable
-                ? () => void removal.remove(asQueueItemId(entry.key), index)
+                ? () => void removeAt(asQueueItemId(entry.key), index)
                 : undefined;
 
               if (entry.track === null) {
@@ -498,7 +500,7 @@ function AutoplaySection({
 }) {
   const player = usePlayer();
   const glass = tone === "glass";
-  const removal = useQueueRemoval(entries.map((entry) => entry.itemId));
+  const { list, remove } = useQueueRemoval(entries.map((entry) => entry.itemId));
 
   return (
     <section aria-label="Autoplay" className="flex flex-col gap-0.5">
@@ -520,13 +522,13 @@ function AutoplaySection({
         />
       </div>
       {player.autoplay ? (
-        <div ref={removal.list} tabIndex={-1} className="flex flex-col gap-0.5 outline-none">
+        <div ref={list} tabIndex={-1} className="flex flex-col gap-0.5 outline-none">
           {entries.map((entry, index) => (
             <QueueRow
               key={entry.itemId}
               entry={entry}
               tone={tone}
-              onRemove={() => void removal.remove(entry.itemId, index)}
+              onRemove={() => void remove(entry.itemId, index)}
             />
           ))}
         </div>

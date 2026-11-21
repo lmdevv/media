@@ -46,11 +46,19 @@ export function Input({ className, fieldClassName, size, start, end, ...props }:
 
 /** The small label above a field. */
 export function FieldLabel({
+  htmlFor,
   className,
+  children,
   ...props
 }: ComponentProps<"label"> & { readonly htmlFor: string }) {
   return (
-    <label className={cn("font-sans text-sm/xs font-medium text-text", className)} {...props} />
+    <label
+      htmlFor={htmlFor}
+      className={cn("font-sans text-sm/xs font-medium text-text", className)}
+      {...props}
+    >
+      {children}
+    </label>
   );
 }
 

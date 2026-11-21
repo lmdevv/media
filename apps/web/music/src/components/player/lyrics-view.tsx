@@ -123,13 +123,10 @@ function LyricsMessage({
   readonly children: ReactNode;
 }) {
   return (
-    <div
-      role="status"
-      className="flex grow items-center justify-center gap-3 font-sans text-lg/lg font-semibold text-text/60"
-    >
+    <output className="flex grow items-center justify-center gap-3 font-sans text-lg/lg font-semibold text-text/60">
       {looking ? <Spinner label="Loading" className="size-5 text-text" /> : null}
       {children}
-    </div>
+    </output>
   );
 }
 

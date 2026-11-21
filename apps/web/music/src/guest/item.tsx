@@ -171,7 +171,7 @@ function GuestPlayer({
             </Button>
           </div>
           <GuestProgress controller={controller} duration={track?.durationMs ?? 0} />
-          {state.error === null ? null : <p role="status">{state.error}</p>}
+          {state.error === null ? null : <output className="block">{state.error}</output>}
         </section>
         <section aria-label="Queue" className="flex flex-col gap-3">
           <h2 className="text-lg/lg font-bold">Songs</h2>
