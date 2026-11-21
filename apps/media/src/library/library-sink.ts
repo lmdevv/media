@@ -59,13 +59,13 @@ export const ScanProgress = Schema.Struct({
 export interface ScanProgress extends Schema.Schema.Type<typeof ScanProgress> {}
 
 /** The store rejected or could not take a scan update. */
-export class LibrarySinkFailed extends Schema.TaggedError<LibrarySinkFailed>()(
-  "LibrarySinkFailed",
-  {
-    operation: Schema.Literals(["previousIndex", "upsertBatch", "markMissing", "reportProgress"]),
-    cause: Schema.Defect(),
-  },
-) {
+export class LibrarySinkFailed extends Schema.TaggedError<
+  LibrarySinkFailed,
+  { readonly brand: unique symbol }
+>()("LibrarySinkFailed", {
+  operation: Schema.Literals(["previousIndex", "upsertBatch", "markMissing", "reportProgress"]),
+  cause: Schema.Defect(),
+}) {
   override get message(): string {
     return `Library sink failed during ${this.operation}`;
   }

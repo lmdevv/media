@@ -78,7 +78,10 @@ export const failuresAfter = (previous: number, ranMillis: number): number =>
 export const restartDelay = (failures: number): Duration.Duration =>
   Duration.min(Duration.seconds(2 ** Math.min(Math.max(failures - 1, 0), 9)), Duration.minutes(5));
 
-class WatchEnded extends Schema.TaggedError<WatchEnded>()("WatchEnded", {}) {}
+class WatchEnded extends Schema.TaggedError<WatchEnded, { readonly brand: unique symbol }>()(
+  "WatchEnded",
+  {},
+) {}
 
 type WatchMode = "events" | "poll";
 

@@ -24,9 +24,12 @@ const secrets = {
   receiverCredential: `r1.${"BwcH".repeat(10)}Bwc`,
 };
 
-class ImportFailed extends Schema.TaggedError<ImportFailed>()("ImportFailed", {
-  output: Schema.String,
-}) {
+class ImportFailed extends Schema.TaggedError<ImportFailed, { readonly brand: unique symbol }>()(
+  "ImportFailed",
+  {
+    output: Schema.String,
+  },
+) {
   override get message(): string {
     return `convex import failed: ${this.output}`;
   }

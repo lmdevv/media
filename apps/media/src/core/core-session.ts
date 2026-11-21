@@ -52,9 +52,12 @@ export interface Interface {
 export class Service extends Context.Service<Service, Interface>()("@media/server/CoreSession") {}
 
 /** A server query's subscription ended without failing; the watch subscribes again. */
-class WatchEnded extends Schema.TaggedError<WatchEnded>()("WatchEnded", {
-  function: Schema.String,
-}) {}
+class WatchEnded extends Schema.TaggedError<WatchEnded, { readonly brand: unique symbol }>()(
+  "WatchEnded",
+  {
+    function: Schema.String,
+  },
+) {}
 
 /** The core's client and the one way the server signs in to it. */
 export interface ConnectionInterface {

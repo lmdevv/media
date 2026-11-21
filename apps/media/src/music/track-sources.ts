@@ -5,10 +5,10 @@ import { Cache, Context, Duration, Effect, Exit, Layer, Option, Predicate, Schem
 import * as CoreSession from "../core/core-session.ts";
 
 /** The core did not answer where a track is. */
-class TrackSourcesUnavailable extends Schema.TaggedError<TrackSourcesUnavailable>()(
-  "TrackSourcesUnavailable",
-  {},
-) {
+class TrackSourcesUnavailable extends Schema.TaggedError<
+  TrackSourcesUnavailable,
+  { readonly brand: unique symbol }
+>()("TrackSourcesUnavailable", {}) {
   override get message(): string {
     return "The music catalog did not answer";
   }

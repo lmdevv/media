@@ -70,38 +70,38 @@ export interface ScanSummary {
 }
 
 /** The library folder is not inside an approved `LIBRARY_ROOTS` entry. */
-export class LibraryRootNotApproved extends Schema.TaggedError<LibraryRootNotApproved>()(
-  "LibraryRootNotApproved",
-  { root: Schema.String },
-) {
+export class LibraryRootNotApproved extends Schema.TaggedError<
+  LibraryRootNotApproved,
+  { readonly brand: unique symbol }
+>()("LibraryRootNotApproved", { root: Schema.String }) {
   override get message(): string {
     return `${SCAN_FAILURE_PREFIXES.rootNotApproved}: ${this.root} is outside LIBRARY_ROOTS`;
   }
 }
 
 /** The library folder cannot be read right now. Its files are not marked missing. */
-export class LibraryRootUnavailable extends Schema.TaggedError<LibraryRootUnavailable>()(
-  "LibraryRootUnavailable",
-  {
-    root: Schema.String,
-    reason: Schema.Literals([
-      "missing",
-      "not-a-directory",
-      "permission-denied",
-      "unreadable",
-      "empty",
-    ]),
-  },
-) {
+export class LibraryRootUnavailable extends Schema.TaggedError<
+  LibraryRootUnavailable,
+  { readonly brand: unique symbol }
+>()("LibraryRootUnavailable", {
+  root: Schema.String,
+  reason: Schema.Literals([
+    "missing",
+    "not-a-directory",
+    "permission-denied",
+    "unreadable",
+    "empty",
+  ]),
+}) {
   override get message(): string {
     return `${SCAN_FAILURE_PREFIXES.rootUnavailable}: ${this.root} (${this.reason}); known files were left untouched`;
   }
 }
 
-class LibraryFolderUnreadable extends Schema.TaggedError<LibraryFolderUnreadable>()(
-  "LibraryFolderUnreadable",
-  { folder: Schema.String, code: Schema.String },
-) {
+class LibraryFolderUnreadable extends Schema.TaggedError<
+  LibraryFolderUnreadable,
+  { readonly brand: unique symbol }
+>()("LibraryFolderUnreadable", { folder: Schema.String, code: Schema.String }) {
   override get message(): string {
     return `${SCAN_FAILURE_PREFIXES.folderUnreadable}: ${this.folder === "" ? "(root)" : this.folder} (${this.code}); known files were left untouched`;
   }

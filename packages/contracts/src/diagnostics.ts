@@ -295,11 +295,10 @@ export interface ClientDiagnosticsRequest extends Schema.Schema.Type<
 > {}
 
 /** The session sent more events than the service keeps. Drop the batch. */
-export class DiagnosticsRateLimited extends Schema.TaggedError<DiagnosticsRateLimited>()(
-  "DiagnosticsRateLimited",
-  { retryAfterSeconds: Schema.Int },
-  { httpApiStatus: 429 },
-) {
+export class DiagnosticsRateLimited extends Schema.TaggedError<
+  DiagnosticsRateLimited,
+  { readonly brand: unique symbol }
+>()("DiagnosticsRateLimited", { retryAfterSeconds: Schema.Int }, { httpApiStatus: 429 }) {
   override get message(): string {
     return `Diagnostics rate limited: retry after ${this.retryAfterSeconds} s`;
   }

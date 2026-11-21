@@ -13,10 +13,10 @@ const NONCE_BYTES = 12;
 const TAG_BYTES = 16;
 
 /** The sealed credentials cannot be opened: the service key changed, or the value was altered. */
-export class CredentialsUnreadable extends Schema.TaggedError<CredentialsUnreadable>()(
-  "CredentialsUnreadable",
-  {},
-) {
+export class CredentialsUnreadable extends Schema.TaggedError<
+  CredentialsUnreadable,
+  { readonly brand: unique symbol }
+>()("CredentialsUnreadable", {}) {
   override get message(): string {
     return "Source credentials unreadable: the media service key changed since the import started; start the import again";
   }

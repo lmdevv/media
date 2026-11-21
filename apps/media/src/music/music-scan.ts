@@ -43,10 +43,10 @@ const KNOWN_RANGE = 800;
 const KNOWN_CONCURRENCY = 4;
 
 /** A library folder is missing or is not a readable folder. Its songs are left as they are. */
-export class LibraryUnavailable extends Schema.TaggedError<LibraryUnavailable>()(
-  "LibraryUnavailable",
-  { folder: Schema.String, reason: Schema.String },
-) {
+export class LibraryUnavailable extends Schema.TaggedError<
+  LibraryUnavailable,
+  { readonly brand: unique symbol }
+>()("LibraryUnavailable", { folder: Schema.String, reason: Schema.String }) {
   override get message(): string {
     return this.reason;
   }
@@ -58,7 +58,10 @@ export class LibraryUnavailable extends Schema.TaggedError<LibraryUnavailable>()
  * marking anything missing. Losing every song to an unmounted drive is worse than keeping songs
  * that were all deleted on purpose, which removing the folder clears.
  */
-export class LibraryEmpty extends Schema.TaggedError<LibraryEmpty>()("LibraryEmpty", {
+export class LibraryEmpty extends Schema.TaggedError<
+  LibraryEmpty,
+  { readonly brand: unique symbol }
+>()("LibraryEmpty", {
   folder: Schema.String,
 }) {
   override get message(): string {

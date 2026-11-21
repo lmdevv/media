@@ -4,10 +4,10 @@ import { Schema } from "effect";
  * The keychain refused a write that sign-in's safety depends on, such as while the device is
  * locked. Nothing was kept, in the keychain or in memory.
  */
-export class KeychainWriteFailed extends Schema.TaggedError<KeychainWriteFailed>()(
-  "KeychainWriteFailed",
-  { key: Schema.String, message: Schema.String },
-) {}
+export class KeychainWriteFailed extends Schema.TaggedError<
+  KeychainWriteFailed,
+  { readonly brand: unique symbol }
+>()("KeychainWriteFailed", { key: Schema.String, message: Schema.String }) {}
 
 /**
  * One group of keychain items, read and written synchronously. An app has two (D48): its own,

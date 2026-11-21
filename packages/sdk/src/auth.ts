@@ -81,7 +81,10 @@ const straight = SignInRoute.Direct({ prepare: Effect.succeed });
  * The provider has not signed anyone in yet: the core's device code provider answers `pending`
  * until the code is approved and `denied` once it is refused.
  */
-export class SignInWaiting extends Schema.TaggedError<SignInWaiting>()("SignInWaiting", {
+export class SignInWaiting extends Schema.TaggedError<
+  SignInWaiting,
+  { readonly brand: unique symbol }
+>()("SignInWaiting", {
   state: Schema.Literals(["pending", "denied"]),
   message: Schema.String,
 }) {}

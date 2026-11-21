@@ -199,37 +199,40 @@ export const ProviderSeason = Schema.Struct({
 export interface ProviderSeason extends Schema.Schema.Type<typeof ProviderSeason> {}
 
 /** The plugin cannot serve requests, for example because no API key is configured. */
-export class MetadataProviderUnavailable extends Schema.TaggedError<MetadataProviderUnavailable>()(
-  "MetadataProviderUnavailable",
-  { provider: Schema.String, reason: Schema.Literals(["missing-credentials", "disabled"]) },
-) {
+export class MetadataProviderUnavailable extends Schema.TaggedError<
+  MetadataProviderUnavailable,
+  { readonly brand: unique symbol }
+>()("MetadataProviderUnavailable", {
+  provider: Schema.String,
+  reason: Schema.Literals(["missing-credentials", "disabled"]),
+}) {
   override get message(): string {
     return `Metadata provider unavailable: ${this.provider} (${this.reason})`;
   }
 }
 
 /** A provider request failed in transport, status, rate limiting, or decoding. */
-export class MetadataRequestFailed extends Schema.TaggedError<MetadataRequestFailed>()(
-  "MetadataRequestFailed",
-  {
-    provider: Schema.String,
-    operation: Schema.String,
-    /** HTTP status when the provider answered. */
-    status: Schema.NullOr(Schema.Int),
-    /** What went wrong, without the request URL (it may carry the API key). */
-    detail: Schema.String,
-  },
-) {
+export class MetadataRequestFailed extends Schema.TaggedError<
+  MetadataRequestFailed,
+  { readonly brand: unique symbol }
+>()("MetadataRequestFailed", {
+  provider: Schema.String,
+  operation: Schema.String,
+  /** HTTP status when the provider answered. */
+  status: Schema.NullOr(Schema.Int),
+  /** What went wrong, without the request URL (it may carry the API key). */
+  detail: Schema.String,
+}) {
   override get message(): string {
     return `Metadata request failed: ${this.provider} ${this.operation} (status ${String(this.status)}): ${this.detail}`;
   }
 }
 
 /** A plugin tried to reach a host its manifest does not list. */
-export class PluginPermissionDenied extends Schema.TaggedError<PluginPermissionDenied>()(
-  "PluginPermissionDenied",
-  { plugin: Schema.String, host: Schema.String },
-) {
+export class PluginPermissionDenied extends Schema.TaggedError<
+  PluginPermissionDenied,
+  { readonly brand: unique symbol }
+>()("PluginPermissionDenied", { plugin: Schema.String, host: Schema.String }) {
   override get message(): string {
     return `Plugin permission denied: ${this.plugin} may not reach ${this.host}`;
   }

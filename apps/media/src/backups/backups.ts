@@ -21,13 +21,19 @@ import { modifiedAtMs } from "../platform/file-info.ts";
 import * as Archives from "./backup-archives.ts";
 import * as ConvexCli from "./convex-cli.ts";
 
-class BackupBusy extends Schema.TaggedError<BackupBusy>()("BackupBusy", {}) {
+class BackupBusy extends Schema.TaggedError<BackupBusy, { readonly brand: unique symbol }>()(
+  "BackupBusy",
+  {},
+) {
   override get message(): string {
     return "Backup busy: another backup or restore is running; try again when it finished";
   }
 }
 
-class BackupFolderFailed extends Schema.TaggedError<BackupFolderFailed>()("BackupFolderFailed", {
+class BackupFolderFailed extends Schema.TaggedError<
+  BackupFolderFailed,
+  { readonly brand: unique symbol }
+>()("BackupFolderFailed", {
   operation: Schema.Literals(["prepare", "list", "finish", "remove", "resolve"]),
   reason: Schema.String,
   cause: Schema.Defect(),
@@ -37,10 +43,10 @@ class BackupFolderFailed extends Schema.TaggedError<BackupFolderFailed>()("Backu
   }
 }
 
-class BackupArchiveMissing extends Schema.TaggedError<BackupArchiveMissing>()(
-  "BackupArchiveMissing",
-  { fileName: Schema.String },
-) {
+class BackupArchiveMissing extends Schema.TaggedError<
+  BackupArchiveMissing,
+  { readonly brand: unique symbol }
+>()("BackupArchiveMissing", { fileName: Schema.String }) {
   override get message(): string {
     return `Backup archive missing: ${this.fileName} is not in the backup folder`;
   }

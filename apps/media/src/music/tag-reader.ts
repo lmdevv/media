@@ -6,10 +6,13 @@ import { normalizeCodec } from "./audio-format.ts";
 import { embeddedLyrics } from "./lyrics/embedded.ts";
 
 /** A file's tags could not be read, or it holds no audio stream. */
-class TagReadError extends Schema.TaggedError<TagReadError>()("TagReadError", {
-  path: Schema.String,
-  cause: Schema.Defect(),
-}) {
+class TagReadError extends Schema.TaggedError<TagReadError, { readonly brand: unique symbol }>()(
+  "TagReadError",
+  {
+    path: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {
   override get message(): string {
     return `Could not read tags: ${this.path}`;
   }

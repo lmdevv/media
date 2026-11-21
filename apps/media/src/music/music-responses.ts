@@ -35,10 +35,10 @@ const pending = (retryAfter: Duration.Duration) =>
 const PREPARE_AGAIN = Duration.seconds(2);
 
 /** A byte response stopped because the session that admitted it ended. */
-class SessionEndedMidResponse extends Schema.TaggedError<SessionEndedMidResponse>()(
-  "SessionEndedMidResponse",
-  {},
-) {}
+class SessionEndedMidResponse extends Schema.TaggedError<
+  SessionEndedMidResponse,
+  { readonly brand: unique symbol }
+>()("SessionEndedMidResponse", {}) {}
 
 /**
  * `body`, failing once `sessionEnded` completes, which aborts the response (ADR 0011). Without a

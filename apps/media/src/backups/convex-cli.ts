@@ -7,16 +7,19 @@ import * as ScopedProcess from "../platform/scoped-process.ts";
 
 type Operation = "export" | "import" | "run";
 
-class ConvexCliUnavailable extends Schema.TaggedError<ConvexCliUnavailable>()(
-  "ConvexCliUnavailable",
-  { missing: Schema.Array(Schema.String) },
-) {
+class ConvexCliUnavailable extends Schema.TaggedError<
+  ConvexCliUnavailable,
+  { readonly brand: unique symbol }
+>()("ConvexCliUnavailable", { missing: Schema.Array(Schema.String) }) {
   override get message(): string {
     return `Convex CLI unavailable: set ${this.missing.join(" and ")} to back up and restore`;
   }
 }
 
-class ConvexCliFailed extends Schema.TaggedError<ConvexCliFailed>()("ConvexCliFailed", {
+class ConvexCliFailed extends Schema.TaggedError<
+  ConvexCliFailed,
+  { readonly brand: unique symbol }
+>()("ConvexCliFailed", {
   operation: Schema.Literals(["export", "import", "run"]),
   exitCode: Schema.NullOr(Schema.Int),
   output: Schema.String,

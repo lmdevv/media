@@ -55,9 +55,15 @@ const REFUSED_PAUSE = Duration.hours(1);
 
 const REFUSALS: ReadonlySet<number> = new Set([401, 403, 429]);
 
-class OmdbPaused extends Schema.TaggedError<OmdbPaused>()("OmdbPaused", {}) {}
+class OmdbPaused extends Schema.TaggedError<OmdbPaused, { readonly brand: unique symbol }>()(
+  "OmdbPaused",
+  {},
+) {}
 
-class OmdbRequestFailed extends Schema.TaggedError<OmdbRequestFailed>()("OmdbRequestFailed", {
+class OmdbRequestFailed extends Schema.TaggedError<
+  OmdbRequestFailed,
+  { readonly brand: unique symbol }
+>()("OmdbRequestFailed", {
   status: Schema.Int,
 }) {
   override get message(): string {
