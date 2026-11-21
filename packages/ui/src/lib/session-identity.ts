@@ -1,7 +1,7 @@
 import type { PlatformSdk } from "@media/sdk/promise";
 import type { QueryState } from "@media/sdk/react";
 import { Predicate } from "effect";
-import { useEffect } from "react";
+import { useEffect, useEffectEvent } from "react";
 
 type Identity = Awaited<ReturnType<PlatformSdk["core"]["auth"]["sessions"]["current"]>>;
 
@@ -47,13 +47,18 @@ export const guestView = <A>(state: QueryState<A>): GuestView<A> => {
 export const useIdentityRetry = (me: QueryState<unknown>): void => {
   const renewal = me.status === "error" && isRenewing(me.error) ? me : null;
   const failure = renewal?.error;
-  const retry = renewal?.retry;
+
+  const retry = useEffectEvent(() => {
+    renewal?.retry();
+  });
 
   useEffect(() => {
-    const timer = retry === undefined ? undefined : setTimeout(retry, 1000);
+    if (failure === undefined) return undefined;
+
+    const timer = setTimeout(() => retry(), 1000);
 
     return () => clearTimeout(timer);
-  }, [failure, retry]);
+  }, [failure]);
 };
 
 /** Separates session transitions from failed identity reads and household access. */

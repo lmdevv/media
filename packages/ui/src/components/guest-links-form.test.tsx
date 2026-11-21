@@ -83,6 +83,20 @@ describe("guest link fields", () => {
     expect(markup({ days: null })).toMatch(/disabled=""[^>]*>Create link/u);
   });
 
+  it("names each field by its label and announces loading as a status", () => {
+    const created = markup({ created: Redacted.make("http://guest.example/guest#mg_secret") });
+
+    expect(markup()).toMatch(
+      /<label for="([^"]+)"[^>]*><span>Expires in days<\/span><input id="\1"/u,
+    );
+    expect(created).toMatch(
+      /<label for="([^"]+)"[^>]*><span>New guest link<\/span><input id="\1"/u,
+    );
+    expect(markup({ list: { status: "loading" } })).toMatch(
+      /<output[^>]*>Loading links…<\/output>/u,
+    );
+  });
+
   it("shows a newly created address read-only, and a fresh dialog never recovers it", () => {
     const secret = "http://guest.example/guest#mg_test-secret";
     const created = markup({ created: Redacted.make(secret) });

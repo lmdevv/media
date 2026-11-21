@@ -27,6 +27,7 @@ import type { TransportActions } from "./connect-actions";
 import { devicePosition } from "./connect-devices";
 import type { Device } from "./connect-devices";
 import type { ConnectOutput } from "./connect-player";
+import { DeviceSettingsSaves } from "./device-settings";
 import type { EngineKind, PlayerEngine } from "./engine";
 import { messageOf } from "./failure";
 import { browserEngines } from "./browser-engine";
@@ -50,7 +51,7 @@ import {
 } from "./session-react";
 import type { JoinedSession, MusicSession, SessionData } from "./session-react";
 import { ticketSources } from "./source-resolver";
-import { qualityOfSetting, settingOfQuality } from "./stream-quality";
+import { qualityOfSetting } from "./stream-quality";
 import type { StreamQuality } from "./stream-quality";
 import { usePositionTicks } from "./position-ticks";
 import { browserLocks, useConnect } from "./use-connect";
@@ -59,9 +60,6 @@ import type { ConnectView, MusicItem } from "./use-connect";
 export type { Device, DevicePlayback } from "./connect-devices";
 
 export type { MusicItem } from "./use-connect";
-
-/** Wait this long after the last volume change before saving it. */
-const VOLUME_SAVE_MS = 500;
 
 /** A song as the music commands answer it. */
 export type Track = Awaited<ReturnType<PlatformSdk["music"]["tracks"]["get"]>>;
@@ -302,10 +300,7 @@ interface ControllerProps {
   readonly mediaBaseUrl: string;
   readonly engine: (() => PlayerEngine) | undefined;
   readonly settings: PlayerSettings;
-  /** Whether the core keeps settings for this device, read when a change is saved. */
-  readonly deviceSettings: () => boolean;
-  /** The volume chosen here whose save the core has not answered yet, set when it is saved. */
-  readonly unsavedVolume: { current: number | null };
+  readonly saves: DeviceSettingsSaves;
 }
 
 const createController = ({
@@ -313,16 +308,10 @@ const createController = ({
   mediaBaseUrl,
   engine,
   settings,
-  deviceSettings,
-  unsavedVolume,
+  saves,
 }: ControllerProps): PlaybackController => {
   const storage = browserStorage();
   const probe = document.createElement("audio");
-  let volumeTimer: ReturnType<typeof setTimeout> | undefined;
-
-  const saveSetting = (patch: Parameters<PlatformSdk["core"]["settings"]["set"]>[0]): void => {
-    if (deviceSettings()) void platform.core.settings.set(patch).catch(() => undefined);
-  };
 
   const sources = ticketSources(
     (trackId) => platform.music.play.start({ trackId: asTrackId(trackId) }),
@@ -357,16 +346,11 @@ const createController = ({
       settings,
       saveQuality: (quality) => {
         saveBrowserQuality(storage, quality);
-        saveSetting({ streamQuality: settingOfQuality(quality) });
+        saves.quality(quality);
       },
       saveVolume: (volume) => {
         saveBrowserVolume(storage, volume);
-
-        if (deviceSettings()) unsavedVolume.current = volume;
-        clearTimeout(volumeTimer);
-        volumeTimer = setTimeout(() => {
-          saveSetting({ volume });
-        }, VOLUME_SAVE_MS);
+        saves.volume(volume);
       },
       nowPlaying: {
         setHandlers: setMediaSessionHandlers,
@@ -435,12 +419,15 @@ export function PlayerProvider({
   const settings = usePlatformQuery(platform.core.settings.get);
   const [fallback] = useState(() => browserSettings(browserStorage(), true));
   const keepsDeviceSettings = settings.status === "success" && settings.data.device !== null;
-  const deviceSettings = useRef(keepsDeviceSettings);
-  const unsavedVolume = useRef<number | null>(null);
+
+  const [saves] = useState(
+    () =>
+      new DeviceSettingsSaves((patch) => platform.core.settings.set(patch), keepsDeviceSettings),
+  );
 
   useLayoutEffect(() => {
-    deviceSettings.current = keepsDeviceSettings;
-  }, [keepsDeviceSettings]);
+    saves.keepsDevice(keepsDeviceSettings);
+  }, [saves, keepsDeviceSettings]);
 
   // State rather than a memo: React may drop a memo, which would build a second controller.
   const [controller] = useState(() =>
@@ -449,8 +436,7 @@ export function PlayerProvider({
       mediaBaseUrl,
       engine,
       settings: fallback,
-      deviceSettings: () => deviceSettings.current,
-      unsavedVolume,
+      saves,
     }),
   );
 
@@ -536,16 +522,12 @@ export function PlayerProvider({
     // rather than at mount, so a change from elsewhere never undoes one made here since.
     const browser = browserSettings(browserStorage(), latestGapless);
 
-    // The core answers each volume save with the value saved, which may be older than the one
-    // chosen since; the newest choice stands until the core answers with it.
-    if (unsavedVolume.current === deviceVolume) unsavedVolume.current = null;
-
     controller.applySettings({
       quality: deviceQuality === undefined ? browser.quality : qualityOfSetting(deviceQuality),
-      volume: deviceVolume === undefined ? browser.volume : (unsavedVolume.current ?? deviceVolume),
+      volume: deviceVolume === undefined ? browser.volume : saves.volumeOf(deviceVolume),
       gapless: latestGapless,
     });
-  }, [controller, latestGapless, deviceQuality, deviceVolume]);
+  }, [controller, saves, latestGapless, deviceQuality, deviceVolume]);
 
   const player = useMemo((): Player => {
     if (follow !== null && view?.state === "joined") {
