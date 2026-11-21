@@ -1,4 +1,5 @@
 import { Brand } from "effect";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { JobRowView, JobsView, jobFacts, jobTitle } from "./jobs";
@@ -106,7 +107,7 @@ describe("JobsView", () => {
           failed={loaded([])}
           filter="all"
           onFilter={noop}
-          row={nameOf}
+          renderRow={nameOf}
         />,
       ),
     ).toContain("No jobs yet.");
@@ -116,11 +117,25 @@ describe("JobsView", () => {
     const failed = loaded([job({ kind: "movies.trickplay", library: null, status: "failed" })]);
 
     const shown = textOf(
-      <JobsView jobs={failed} failed={failed} filter="failed" onFilter={noop} row={nameOf} />,
+      <JobsView jobs={failed} failed={failed} filter="failed" onFilter={noop} renderRow={nameOf} />,
     );
 
     expect(shown).toContain("Failed · 1");
     expect(shown).toContain("Scrub thumbnails row");
+  });
+
+  it("groups the All and Failed switch under Show", () => {
+    const markup = renderToStaticMarkup(
+      <JobsView
+        jobs={loaded([])}
+        failed={loaded([])}
+        filter="all"
+        onFilter={noop}
+        renderRow={nameOf}
+      />,
+    );
+
+    expect(markup).toMatch(/<fieldset aria-label="Show"[^>]*>.*All.*Failed.*<\/fieldset>/u);
   });
 
   it("says when no job failed", () => {
@@ -131,7 +146,7 @@ describe("JobsView", () => {
           failed={loaded([])}
           filter="failed"
           onFilter={noop}
-          row={nameOf}
+          renderRow={nameOf}
         />,
       ),
     ).toContain("No failed jobs.");

@@ -31,7 +31,7 @@ const people = (users: Paged<User>, open: UserId | null = null) =>
       selfId={ada.userId}
       open={open}
       onToggle={noop}
-      panel={(user) => <p>{`panel of ${user.username}`}</p>}
+      renderPanel={(user) => <p>{`panel of ${user.username}`}</p>}
     />,
   );
 
@@ -64,7 +64,7 @@ describe("PeopleView", () => {
           selfId={ada.userId}
           open={null}
           onToggle={noop}
-          panel={() => null}
+          renderPanel={() => null}
         />,
       ),
     ).toContain('aria-label="Loading People"');
@@ -105,7 +105,7 @@ describe("UserPanelView", () => {
     reset: null,
     confirm: null,
     limits: { kind: "ready", saved: null },
-    limitsForm: (saved) => (
+    renderLimitsForm: (saved) => (
       <p>{saved === null ? "limits form, none saved" : "limits form, saved"}</p>
     ),
     onConfirm: noop,
