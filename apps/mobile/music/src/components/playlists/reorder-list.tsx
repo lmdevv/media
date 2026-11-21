@@ -82,25 +82,25 @@ function ReorderRow({
       drag.to.set(index);
       drag.offset.set(0);
       drag.travel.set(0);
-      drag.startScroll.set(scroll.value);
+      drag.startScroll.set(scroll.get());
       scheduleOnRN(onLift);
     },
     onUpdate: (event) => {
       "worklet";
       drag.travel.set(event.translationY);
       drag.finger.set(event.absoluteY);
-      drag.offset.set(event.translationY + scroll.value - drag.startScroll.value);
-      drag.to.set(slotFor(index, drag.offset.value, drag.rowHeight.value, count));
+      drag.offset.set(event.translationY + scroll.get() - drag.startScroll.get());
+      drag.to.set(slotFor(index, drag.offset.get(), drag.rowHeight.get(), count));
     },
     onFinalize: () => {
       "worklet";
       scheduleOnRN(onRelease);
 
-      if (drag.from.value !== index) return;
-      const to = drag.to.value;
+      if (drag.from.get() !== index) return;
+      const to = drag.to.get();
 
       drag.offset.set(
-        withTiming((to - index) * drag.rowHeight.value, { duration: 120 }, (finished) => {
+        withTiming((to - index) * drag.rowHeight.get(), { duration: 120 }, (finished) => {
           if (finished === true) scheduleOnRN(onDrop, index, to);
         }),
       );
@@ -108,16 +108,16 @@ function ReorderRow({
   });
 
   const style = useAnimatedStyle(() => {
-    const from = drag.from.value;
+    const from = drag.from.get();
 
     if (from === -1) return { transform: [{ translateY: 0 }], zIndex: 0 };
 
     if (from === index) {
-      return { transform: [{ translateY: drag.offset.value }, { scale: 1.02 }], zIndex: 10 };
+      return { transform: [{ translateY: drag.offset.get() }, { scale: 1.02 }], zIndex: 10 };
     }
 
-    const to = drag.to.value;
-    const height = drag.rowHeight.value;
+    const to = drag.to.get();
+    const height = drag.rowHeight.get();
     const shift = from < index && index <= to ? -height : to <= index && index < from ? height : 0;
 
     return { transform: [{ translateY: withTiming(shift, { duration: SLIDE_MS }) }], zIndex: 0 };
@@ -209,8 +209,8 @@ export function ReorderList<Item>({
   }, [items, drag.from, drag.offset]);
 
   const edgeScroll = useFrameCallback(() => {
-    if (drag.from.value === -1) return;
-    const finger = drag.finger.value;
+    if (drag.from.get() === -1) return;
+    const finger = drag.finger.get();
 
     const speed =
       finger > screen - EDGE
@@ -220,9 +220,9 @@ export function ReorderList<Item>({
           : 0;
 
     if (speed === 0) return;
-    scrollTo(scrollRef, 0, Math.max(0, Math.min(maxScroll.value, scroll.value + speed)), false);
-    drag.offset.set(drag.travel.value + scroll.value - drag.startScroll.value);
-    drag.to.set(slotFor(drag.from.value, drag.offset.value, drag.rowHeight.value, count));
+    scrollTo(scrollRef, 0, Math.max(0, Math.min(maxScroll.get(), scroll.get() + speed)), false);
+    drag.offset.set(drag.travel.get() + scroll.get() - drag.startScroll.get());
+    drag.to.set(slotFor(drag.from.get(), drag.offset.get(), drag.rowHeight.get(), count));
   }, false);
 
   return items.map((item, index) => (

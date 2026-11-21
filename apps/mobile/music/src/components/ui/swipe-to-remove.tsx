@@ -71,7 +71,7 @@ export function SwipeToRemove({
   };
 
   const settle = (): boolean => {
-    if (offset.value >= 0) return false;
+    if (offset.get() >= 0) return false;
     offset.set(withSpring(0, SETTLE));
     letGoRight.set(closedLetGo);
 
@@ -85,19 +85,19 @@ export function SwipeToRemove({
     failOffsetY: [-SLOP, SLOP],
     onBegin: () => {
       "worklet";
-      start.set(offset.value);
+      start.set(offset.get());
     },
     onUpdate: (event) => {
       "worklet";
-      offset.set(Math.min(0, Math.max(-REMOVE_WIDTH, start.value + event.translationX)));
+      offset.set(Math.min(0, Math.max(-REMOVE_WIDTH, start.get() + event.translationX)));
       speed.set(event.velocityX);
     },
     onFinalize: () => {
       "worklet";
 
       const open =
-        speed.value < -FLICK_SPEED ||
-        (speed.value <= FLICK_SPEED && offset.value < -REMOVE_WIDTH / 2);
+        speed.get() < -FLICK_SPEED ||
+        (speed.get() <= FLICK_SPEED && offset.get() < -REMOVE_WIDTH / 2);
 
       speed.set(0);
       offset.set(withSpring(open ? -REMOVE_WIDTH : 0, SETTLE));
@@ -105,8 +105,8 @@ export function SwipeToRemove({
     },
   });
 
-  const slide = useAnimatedStyle(() => ({ transform: [{ translateX: offset.value }] }));
-  const uncovered = useAnimatedStyle(() => ({ opacity: offset.value < 0 ? 1 : 0 }));
+  const slide = useAnimatedStyle(() => ({ transform: [{ translateX: offset.get() }] }));
+  const uncovered = useAnimatedStyle(() => ({ opacity: offset.get() < 0 ? 1 : 0 }));
 
   return (
     <View>

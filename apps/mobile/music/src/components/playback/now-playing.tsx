@@ -515,7 +515,7 @@ function LyricsChip({
   const white = useThemeColor("--color-dark-text");
 
   const fade = useAnimatedStyle(() => ({
-    opacity: interpolate(progress.value, [0, 0.3], [1, 0], Extrapolation.CLAMP),
+    opacity: interpolate(progress.get(), [0, 0.3], [1, 0], Extrapolation.CLAMP),
   }));
 
   return (
@@ -600,7 +600,7 @@ function Stage({
   const measured = box !== null;
 
   const cover = useAnimatedStyle(() => {
-    const at = progress.value;
+    const at = progress.get();
     const scale = 1 + (small / size - 1) * at;
 
     return {
@@ -616,13 +616,13 @@ function Stage({
   }, [progress, measured, left, top, size, small, coverRadius, rowRadius]);
 
   const title = useAnimatedStyle(() => ({
-    opacity: interpolate(progress.value, [0, 0.4], [1, 0], Extrapolation.CLAMP),
-    transform: [{ translateY: -12 * progress.value }],
+    opacity: interpolate(progress.get(), [0, 0.4], [1, 0], Extrapolation.CLAMP),
+    transform: [{ translateY: -12 * progress.get() }],
   }));
 
   const panel = useAnimatedStyle(() => ({
-    opacity: interpolate(progress.value, [0.35, 1], [0, 1], Extrapolation.CLAMP),
-    transform: [{ translateY: 24 * (1 - progress.value) }],
+    opacity: interpolate(progress.get(), [0.35, 1], [0, 1], Extrapolation.CLAMP),
+    transform: [{ translateY: 24 * (1 - progress.get()) }],
   }));
 
   return (
@@ -706,17 +706,17 @@ function Controls({
   };
 
   const transport = useAnimatedStyle(() => {
-    const shut = folds ? progress.value : 0;
+    const shut = folds ? progress.get() : 0;
 
     return { marginVertical: -tighten * shut };
   }, [progress, folds, tighten]);
 
   const rows = useAnimatedStyle(() => {
-    const shut = folds ? progress.value : 0;
+    const shut = folds ? progress.get() : 0;
 
     return {
       opacity: interpolate(shut, [0, 0.5], [1, 0], Extrapolation.CLAMP),
-      marginBottom: -rowsHeight.value * shut,
+      marginBottom: -rowsHeight.get() * shut,
     };
   }, [progress, folds]);
 
@@ -913,7 +913,7 @@ export function NowPlayingScreen() {
 
   useFailureSheet(status === "failed", error, nowPlaying?.itemId);
 
-  const dragged = useAnimatedStyle(() => ({ transform: [{ translateY: offset.value }] }));
+  const dragged = useAnimatedStyle(() => ({ transform: [{ translateY: offset.get() }] }));
 
   const windowed = NOW_PLAYING_PRESENTATION === "window";
   const drag = windowed ? offset : null;
