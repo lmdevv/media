@@ -31,6 +31,19 @@ const convexAuthBan = {
     "Read the caller through requireCaller in convex/core/auth/caller.ts; only convex/auth.ts and convex/core/auth/ use Convex Auth.",
 };
 
+/** Folders holding React components and hooks: the web and iOS apps and their shared packages. */
+const reactCode = [
+  "apps/web/**",
+  "apps/mobile/**",
+  "packages/ui/**",
+  "packages/player/**",
+  "packages/mobile-core/**",
+  "packages/sdk/src/react.tsx",
+];
+
+/** Folders that render to the DOM. React Native components take their own accessibility props. */
+const domCode = ["apps/web/**", "packages/ui/**"];
+
 export default defineConfig({
   extends: [effectStrict],
   plugins: ["typescript", "unicorn", "oxc", "import", "promise"],
@@ -147,6 +160,49 @@ export default defineConfig({
       rules: {
         "no-restricted-imports": ["error", { ...genericBans, patterns: [convexAuthBan] }],
       },
+    },
+    {
+      files: reactCode,
+      plugins: ["react"],
+      rules: {
+        // Categories leave it out as pedantic; it catches hooks called outside components and hooks.
+        "react/rules-of-hooks": "error",
+        // Every JSX build uses the automatic runtime (tsconfig `jsx: react-jsx`).
+        "react/react-in-jsx-scope": "off",
+        // Fixed lists, such as skeleton slots, code digits, and lyric lines, key by position.
+        "react/no-array-index-key": "off",
+        // Effects that create a socket, engine, or controller store it in state as they start.
+        "react/set-state-in-effect": "off",
+        // react/exhaustive-deps checks the same dependency lists.
+        "react/exhaustive-effect-dependencies": "off",
+        "react/immutability": "off",
+        "react/refs": "off",
+        // Expo Router calls the stack header's buttons as render functions.
+        "react/no-unstable-nested-components": [
+          "error",
+          { propNamePattern: "{render*,headerLeft,headerRight}" },
+        ],
+      },
+    },
+    {
+      files: domCode,
+      plugins: ["jsx-a11y"],
+      rules: {
+        // The focus policy (packages/ui/src/lib/focus-policy.ts) decides where focus starts.
+        "jsx-a11y/no-autofocus": "off",
+        // The player adds its caption tracks from the stream as it loads.
+        "jsx-a11y/media-has-caption": "off",
+        // Roles stay where a native element would change the layout, such as flex rows.
+        "jsx-a11y/prefer-tag-over-role": "off",
+      },
+    },
+    {
+      // The YouTube trailer player needs allow-scripts and allow-same-origin to play. The rule
+      // rejects that pair, which only lets a frame of this site's own origin lift its sandbox,
+      // and the trailer frame is cross-origin (youtube-nocookie.com).
+      files: ["apps/web/movies/src/components/browse/trailer-dialog.tsx"],
+      plugins: ["react"],
+      rules: { "react/iframe-missing-sandbox": "off" },
     },
   ],
 });
