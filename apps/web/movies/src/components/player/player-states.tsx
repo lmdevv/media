@@ -245,11 +245,11 @@ export function SubtitleDelayNotice({ text }: { readonly text: string | null }) 
   return (
     <output className="on-media pointer-events-none absolute top-8 left-1/2 -translate-x-1/2">
       {text === null ? null : (
-        <div className="flex h-10 items-center gap-2 rounded-pill border border-text/10 bg-glass px-4 font-sans text-label/label text-text shadow-glass backdrop-blur-xl [&_svg]:size-4">
+        <span className="flex h-10 items-center gap-2 rounded-pill border border-text/10 bg-glass px-4 font-sans text-label/label text-text shadow-glass backdrop-blur-xl [&_svg]:size-4">
           <CaptionsIcon strokeWidth={1.75} aria-hidden />
           <span className="text-text-muted">Subtitle delay</span>
           <span className="font-semibold tabular-nums">{text}</span>
-        </div>
+        </span>
       )}
     </output>
   );

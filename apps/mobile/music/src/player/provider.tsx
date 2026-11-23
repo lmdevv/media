@@ -1140,7 +1140,7 @@ const useHandBack = (
     void send().catch(() => {
       sending.current = false;
       timer = setTimeout(() => {
-        setRetry(retry + 1);
+        setRetry((count) => count + 1);
       }, OFFLINE_PLAYS_RETRY_MS);
     });
 
@@ -1186,7 +1186,7 @@ const useHandBack = (
         for (const sent of newQueues) holdUnanswered({ mode, unanswered }, sent);
         clearTimeout(againTimer.current);
         againTimer.current = setTimeout(() => {
-          setAgain(again + 1);
+          setAgain((count) => count + 1);
         }, HAND_BACK_RETRY_MS);
       },
     });

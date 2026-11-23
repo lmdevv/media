@@ -25,6 +25,7 @@ export function TrailerDialog({
             <iframe
               src={src}
               title={frameTitle}
+              sandbox="allow-scripts allow-same-origin"
               allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
               allowFullScreen
               referrerPolicy="strict-origin-when-cross-origin"

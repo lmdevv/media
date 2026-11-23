@@ -89,6 +89,8 @@ export function MediaRow({
       </div>
       <div
         data-media-row=""
+        // Catches the arrow keys its cards send up; it is no control itself.
+        role="presentation"
         onKeyDown={onTrackKeyDown}
         className="flex snap-x snap-mandatory scroll-px-4 gap-2.5 overflow-x-auto overscroll-x-contain px-4 py-1 scrollbar-none @3xl:scroll-pr-16 @3xl:scroll-pl-page-inset @3xl:gap-4 @3xl:px-page-inset"
       >
