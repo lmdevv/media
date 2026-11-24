@@ -20,9 +20,14 @@ import type { Cost, Meter } from "./budget";
 import {
   TABLE_BYTES,
   artHashWithin,
+  creditsWithin,
   fingerprint,
   fitAlbum,
   fitArtist,
+  fitCredit,
+  keyWithin,
+  nameWithin,
+  resolvedWithin,
   fitLrclibLyrics,
   descriptionWithin,
   fitPlay,
@@ -37,8 +42,9 @@ import type { Moved } from "./totals";
 import type { LocalLyricSet, LrclibAnswer } from "./validators";
 
 /**
- * The music store: the only module that reads or writes the music tables, the catalog's and the
- * per-person ones (playlists, likes, plays, the queue), in a mutation that writes them. Every insert, patch, and delete goes through here, and each keeps the document
+ * The music store: the only module that reads or writes the music tables, the catalog's, its
+ * artist credits, and the per-person ones (playlists, likes, plays, the queue), in a mutation that
+ * writes them. Every insert, patch, and delete goes through here, and each keeps the document
  * within its bound in `fit.ts` (ADR 0024), so reads may reserve those bounds (ADR 0005). The store
  * sets each new row's tie. It charges its meter for each read and write as it makes it, at the
  * size of the documents Convex reads: a query reads each document it returns, and a patch or a
@@ -63,6 +69,8 @@ type TiedTable =
   | "artists"
   | "albums"
   | "tracks"
+  | "trackArtists"
+  | "albumArtists"
   | "playlists"
   | "playlistItems"
   | "playQueueEntries";
@@ -82,7 +90,10 @@ export type PlaylistChanges = Partial<
 >;
 
 /** A row as the store wrote it, which a call keeps instead of reading it again. */
-export type Stored<T extends "artists" | "albums" | "tracks"> = Omit<Doc<T>, "_creationTime">;
+export type Stored<T extends "artists" | "albums" | "tracks" | "artistCredits"> = Omit<
+  Doc<T>,
+  "_creationTime"
+>;
 
 /** Reading `bytes` of documents through one index range. */
 const readCost = (bytes: number): Cost => cost(1, 0, bytes);
@@ -139,7 +150,11 @@ export interface MusicStore {
 
   readonly insertArtist: (fields: Fields<"artists">) => Promise<Stored<"artists">>;
   readonly setArtistArt: (id: Id<"artists">, artHash: string | null) => Promise<void>;
-  readonly setArtistAlbums: (id: Id<"artists">, albumCount: number) => Promise<void>;
+  /** Writes an artist's albums and tracks on disk that credit them. */
+  readonly setArtistCounts: (
+    id: Id<"artists">,
+    counts: { readonly albumCount: number; readonly trackCount: number },
+  ) => Promise<void>;
   readonly deleteArtist: (id: Id<"artists">) => Promise<void>;
 
   readonly insertAlbum: (fields: Fields<"albums">) => Promise<Stored<"albums">>;
@@ -151,6 +166,13 @@ export interface MusicStore {
   readonly setAlbumCounts: (
     id: Id<"albums">,
     counts: Pick<Fields<"albums">, "trackCount" | "durationMs">,
+  ) => Promise<void>;
+  /** Writes whom an album credits, and the album artist, and its key, it files under. */
+  readonly setAlbumCredits: (
+    id: Id<"albums">,
+    credits: Required<
+      Pick<Fields<"albums">, "artistId" | "artistName" | "artistKey" | "credits" | "creditsTagged">
+    >,
   ) => Promise<void>;
   readonly deleteAlbum: (id: Id<"albums">) => Promise<void>;
 
@@ -166,6 +188,11 @@ export interface MusicStore {
   /** Writes every field of a track but its tie, as a scan read the file again. */
   readonly writeTrack: (id: Id<"tracks">, fields: Fields<"tracks">) => Promise<void>;
   readonly setTrackMissing: (id: Id<"tracks">) => Promise<void>;
+  /** Writes whom a track credits, as its credit strings resolve now. */
+  readonly setTrackCredits: (
+    id: Id<"tracks">,
+    credits: Required<Pick<Fields<"tracks">, "artistId" | "credits">>,
+  ) => Promise<void>;
   /** Writes what a track keeps about its own lyrics. */
   readonly setTrackLyrics: (
     id: Id<"tracks">,
@@ -205,6 +232,37 @@ export interface MusicStore {
   readonly deleteLrclibLyrics: (trackId: Id<"tracks">) => Promise<void>;
   /** Turns LRCLIB lookups on or off (`lyricsSettings`), deleting a second row a defect left. */
   readonly setRemoteLyrics: (remote: boolean) => Promise<void>;
+
+  /** Inserts a credit string a library's tags name, with its names within their maximums. */
+  readonly insertCredit: (
+    fields: WithoutSystemFields<Doc<"artistCredits">>,
+  ) => Promise<Stored<"artistCredits">>;
+  readonly setCreditUses: (id: Id<"artistCredits">, uses: number) => Promise<void>;
+  /** Writes how a credit string resolves now. */
+  readonly setCreditArtists: (
+    id: Id<"artistCredits">,
+    artists: ReadonlyArray<string>,
+  ) => Promise<void>;
+  readonly deleteCredit: (id: Id<"artistCredits">) => Promise<void>;
+  readonly insertCreditPart: (fields: WithoutSystemFields<Doc<"creditParts">>) => Promise<void>;
+  readonly deleteCreditPart: (id: Id<"creditParts">) => Promise<void>;
+  readonly insertCreditTrack: (fields: WithoutSystemFields<Doc<"creditTracks">>) => Promise<void>;
+  readonly deleteCreditTrack: (id: Id<"creditTracks">) => Promise<void>;
+  /** Writes a manager's correction of a credit string, inserting it or changing its mode. */
+  readonly setCreditOverride: (
+    existing: Id<"creditOverrides"> | null,
+    fields: WithoutSystemFields<Doc<"creditOverrides">>,
+  ) => Promise<void>;
+  readonly deleteCreditOverride: (id: Id<"creditOverrides">) => Promise<void>;
+
+  readonly insertTrackArtist: (fields: Fields<"trackArtists">) => Promise<void>;
+  /** Writes the title key a track's artist link orders by. */
+  readonly setTrackArtistTitle: (id: Id<"trackArtists">, titleKey: string) => Promise<void>;
+  readonly deleteTrackArtist: (id: Id<"trackArtists">) => Promise<void>;
+  readonly insertAlbumArtist: (fields: Fields<"albumArtists">) => Promise<void>;
+  /** Writes the year an album's artist link orders by. */
+  readonly setAlbumArtistYear: (id: Id<"albumArtists">, year: number | null) => Promise<void>;
+  readonly deleteAlbumArtist: (id: Id<"albumArtists">) => Promise<void>;
 
   /**
    * Moves a library's album, artist, and duration totals (`totals.ts`). It runs at a call's end,
@@ -381,7 +439,7 @@ export const musicStore = (db: Db, meter: Meter): MusicStore => {
       return { ...stored, _id: await insert("artists", stored) };
     },
     setArtistArt: (id, artHash) => patch("artists", id, { artHash: artHashWithin(artHash) }),
-    setArtistAlbums: (id, albumCount) => patch("artists", id, { albumCount }),
+    setArtistCounts: (id, counts) => patch("artists", id, counts),
     deleteArtist: (id) => remove("artists", id),
 
     insertAlbum: async (fields) => {
@@ -396,6 +454,13 @@ export const musicStore = (db: Db, meter: Meter): MusicStore => {
         genre: labelWithin(tags.genre),
       }),
     setAlbumCounts: (id, counts) => patch("albums", id, counts),
+    setAlbumCredits: (id, credits) =>
+      patch("albums", id, {
+        ...credits,
+        artistName: nameWithin(credits.artistName),
+        artistKey: keyWithin(credits.artistKey),
+        credits: creditsWithin(credits.credits),
+      }),
     deleteAlbum: (id) => remove("albums", id),
 
     insertTrack: async (fields, sets) => {
@@ -407,6 +472,8 @@ export const musicStore = (db: Db, meter: Meter): MusicStore => {
     },
     writeTrack: (id, fields) => patch("tracks", id, fitTrack(fields)),
     setTrackMissing: (id) => patch("tracks", id, { missing: true }),
+    setTrackCredits: (id, credits) =>
+      patch("tracks", id, { artistId: credits.artistId, credits: creditsWithin(credits.credits) }),
     setTrackLyrics: (id, lyrics) =>
       patch("tracks", id, { ...lyrics, lyricsFiles: fingerprint(lyrics.lyricsFiles) }),
     deleteTrack: (id) => remove("tracks", id),
@@ -483,6 +550,42 @@ export const musicStore = (db: Db, meter: Meter): MusicStore => {
       if (row === undefined) await insert("lyricsSettings", { remote });
       else if (row.remote !== remote) await patch("lyricsSettings", row._id, { remote });
     },
+
+    insertCredit: async (fields) => {
+      const stored = fitCredit(fields);
+
+      return { ...stored, _id: await insert("artistCredits", stored) };
+    },
+    setCreditUses: (id, uses) => patch("artistCredits", id, { uses }),
+    setCreditArtists: (id, artists) =>
+      patch("artistCredits", id, { artists: resolvedWithin(artists).slice() }),
+    deleteCredit: (id) => remove("artistCredits", id),
+    insertCreditPart: async (fields) => {
+      await insert("creditParts", fields);
+    },
+    deleteCreditPart: (id) => remove("creditParts", id),
+    insertCreditTrack: async (fields) => {
+      await insert("creditTracks", fields);
+    },
+    deleteCreditTrack: (id) => remove("creditTracks", id),
+    setCreditOverride: async (existing, fields) => {
+      const fitted = { ...fields, key: keyWithin(fields.key), text: nameWithin(fields.text) };
+
+      if (existing === null) await insert("creditOverrides", fitted);
+      else await patch("creditOverrides", existing, { text: fitted.text, mode: fitted.mode });
+    },
+    deleteCreditOverride: (id) => remove("creditOverrides", id),
+
+    insertTrackArtist: async (fields) => {
+      await insert("trackArtists", { ...fields, tie: newTie() });
+    },
+    setTrackArtistTitle: (id, titleKey) => patch("trackArtists", id, { titleKey }),
+    deleteTrackArtist: (id) => remove("trackArtists", id),
+    insertAlbumArtist: async (fields) => {
+      await insert("albumArtists", { ...fields, tie: newTie() });
+    },
+    setAlbumArtistYear: (id, year) => patch("albumArtists", id, { year }),
+    deleteAlbumArtist: (id) => remove("albumArtists", id),
 
     moveTotals: async (libraryId, moved) => {
       await moveTotals(db, libraryId, moved);

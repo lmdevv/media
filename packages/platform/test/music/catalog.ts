@@ -27,9 +27,9 @@ export const JobId = Schema.declare(isId("jobs"));
 
 export const TrackId = Schema.declare(isId("tracks"));
 
-const AlbumId = Schema.declare(isId("albums"));
+export const AlbumId = Schema.declare(isId("albums"));
 
-const ArtistId = Schema.declare(isId("artists"));
+export const ArtistId = Schema.declare(isId("artists"));
 
 const LyricsId = Schema.declare(isId("localLyrics"));
 

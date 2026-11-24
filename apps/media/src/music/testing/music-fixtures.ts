@@ -123,6 +123,8 @@ export interface KeptTrack {
   readonly track: ScannedTrack;
   readonly missing: boolean;
   readonly lyrics: KeptLyrics;
+  /** The tag reader `known` answers for it: its own, or 0 once `olderReader` ran. */
+  readonly tagsReader: number;
 }
 
 /** What one scan sent the in-memory catalog. */
@@ -139,6 +141,8 @@ export interface MemoryCatalog {
   readonly tracks: Effect.Effect<ReadonlyMap<string, KeptTrack>>;
   /** What the catalog was sent since the last call, and forgets it. */
   readonly writes: Effect.Effect<CatalogWrites>;
+  /** Makes every track one a tag reader before artist values read, as `known` answers it then. */
+  readonly olderReader: Effect.Effect<void>;
 }
 
 const NO_WRITES: CatalogWrites = { upserted: [], moved: [], missing: [], lyrics: [] };
@@ -146,6 +150,7 @@ const NO_WRITES: CatalogWrites = { upserted: [], moved: [], missing: [], lyrics:
 const kept = (track: ScannedTrack): KeptTrack => ({
   track,
   missing: false,
+  tagsReader: track.tagsReader,
   lyrics: {
     lyricsFiles: track.lyricsFiles,
     lyricsReader: track.lyricsReader,
@@ -153,7 +158,7 @@ const kept = (track: ScannedTrack): KeptTrack => ({
   },
 });
 
-const knownOf = ({ track, missing, lyrics }: KeptTrack): KnownTrack => ({
+const knownOf = ({ track, missing, lyrics, tagsReader }: KeptTrack): KnownTrack => ({
   path: track.path,
   size: track.size,
   mtimeMs: track.mtimeMs,
@@ -162,6 +167,7 @@ const knownOf = ({ track, missing, lyrics }: KeptTrack): KnownTrack => ({
   lyricsFiles: coreFingerprint(lyrics.lyricsFiles),
   lyricsReader: lyrics.lyricsReader,
   lyricsBytes: lyrics.lyrics.length === 0 ? null : Buffer.byteLength(JSON.stringify(lyrics.lyrics)),
+  tagsReader,
   durationMs: track.durationMs,
   title: track.title,
   artist: track.artist,
@@ -231,7 +237,12 @@ export const memoryCatalog = Effect.gen(function* () {
           const row = next.get(path);
 
           if (row !== undefined)
-            next.set(path, { track: row.track, missing: true, lyrics: row.lyrics });
+            next.set(path, {
+              track: row.track,
+              missing: true,
+              lyrics: row.lyrics,
+              tagsReader: row.tagsReader,
+            });
         }
       }).pipe(Effect.andThen(record({ missing: paths })), Effect.as([])),
     lyrics: (tracks: ReadonlyArray<ScannedLyrics>) =>
@@ -244,6 +255,7 @@ export const memoryCatalog = Effect.gen(function* () {
               track: row.track,
               missing: row.missing,
               lyrics: { lyricsFiles, lyricsReader, lyrics },
+              tagsReader: row.tagsReader,
             });
           }
         }
@@ -254,5 +266,15 @@ export const memoryCatalog = Effect.gen(function* () {
     catalog,
     tracks: Ref.get(rows),
     writes: Ref.getAndSet(sent, NO_WRITES),
+    olderReader: changed((next) => {
+      for (const [path, row] of next) {
+        next.set(path, {
+          track: row.track,
+          missing: row.missing,
+          lyrics: row.lyrics,
+          tagsReader: 0,
+        });
+      }
+    }),
   } satisfies MemoryCatalog;
 });

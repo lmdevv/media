@@ -3470,6 +3470,14 @@ export const generatedCommands = [
               title: Schema.String,
               artist: Schema.String,
               artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+              credits: Schema.optionalKey(
+                Schema.Array(
+                  Schema.Struct({
+                    artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+                    name: Schema.String,
+                  }),
+                ),
+              ),
               album: Schema.String,
               albumId: Schema.String.pipe(Schema.brand("Id<albums>")),
               trackNumber: Schema.Union([Schema.Finite, Schema.Null]),
@@ -5698,6 +5706,14 @@ export const generatedCommands = [
         title: Schema.String,
         artist: Schema.String,
         artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+        credits: Schema.optionalKey(
+          Schema.Array(
+            Schema.Struct({
+              artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+              name: Schema.String,
+            }),
+          ),
+        ),
         year: Schema.Union([Schema.Finite, Schema.Null]),
         artUrl: Schema.Union([Schema.String, Schema.Null]),
         trackCount: Schema.Finite,
@@ -5734,6 +5750,14 @@ export const generatedCommands = [
           title: Schema.String,
           artist: Schema.String,
           artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+          credits: Schema.optionalKey(
+            Schema.Array(
+              Schema.Struct({
+                artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+                name: Schema.String,
+              }),
+            ),
+          ),
           year: Schema.Union([Schema.Finite, Schema.Null]),
           artUrl: Schema.Union([Schema.String, Schema.Null]),
           trackCount: Schema.Finite,
@@ -5779,6 +5803,14 @@ export const generatedCommands = [
           title: Schema.String,
           artist: Schema.String,
           artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+          credits: Schema.optionalKey(
+            Schema.Array(
+              Schema.Struct({
+                artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+                name: Schema.String,
+              }),
+            ),
+          ),
           album: Schema.String,
           albumId: Schema.String.pipe(Schema.brand("Id<albums>")),
           trackNumber: Schema.Union([Schema.Finite, Schema.Null]),
@@ -5812,7 +5844,7 @@ export const generatedCommands = [
     kind: "query",
     scope: "music:read",
     refusesKeys: false,
-    summary: "List an artist's albums, newest year first",
+    summary: "List the albums crediting an artist, newest year first",
     secrets: [],
     paginated: true,
     args: Schema.Struct({
@@ -5833,6 +5865,14 @@ export const generatedCommands = [
           title: Schema.String,
           artist: Schema.String,
           artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+          credits: Schema.optionalKey(
+            Schema.Array(
+              Schema.Struct({
+                artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+                name: Schema.String,
+              }),
+            ),
+          ),
           year: Schema.Union([Schema.Finite, Schema.Null]),
           artUrl: Schema.Union([Schema.String, Schema.Null]),
           trackCount: Schema.Finite,
@@ -5866,6 +5906,7 @@ export const generatedCommands = [
         id: Schema.String.pipe(Schema.brand("Id<artists>")),
         name: Schema.String,
         albumCount: Schema.Finite,
+        trackCount: Schema.optionalKey(Schema.Finite),
         artUrl: Schema.Union([Schema.String, Schema.Null]),
       }),
       topTracks: Schema.Array(
@@ -5874,6 +5915,14 @@ export const generatedCommands = [
           title: Schema.String,
           artist: Schema.String,
           artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+          credits: Schema.optionalKey(
+            Schema.Array(
+              Schema.Struct({
+                artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+                name: Schema.String,
+              }),
+            ),
+          ),
           album: Schema.String,
           albumId: Schema.String.pipe(Schema.brand("Id<albums>")),
           trackNumber: Schema.Union([Schema.Finite, Schema.Null]),
@@ -5916,6 +5965,7 @@ export const generatedCommands = [
           id: Schema.String.pipe(Schema.brand("Id<artists>")),
           name: Schema.String,
           albumCount: Schema.Finite,
+          trackCount: Schema.optionalKey(Schema.Finite),
           artUrl: Schema.Union([Schema.String, Schema.Null]),
         }),
       ),
@@ -5931,6 +5981,190 @@ export const generatedCommands = [
       ),
     }),
     method: (platform) => platform.music.artists.list,
+  }),
+  coreCommand({
+    name: "music.artists.tracks",
+    path: ["music", "artists", "tracks"],
+    kind: "query",
+    scope: "music:read",
+    refusesKeys: false,
+    summary:
+      "List the songs on disk you may play that credit an artist, theirs and the ones they feature on, by title",
+    secrets: [],
+    paginated: true,
+    args: Schema.Struct({
+      artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+      paginationOpts: Schema.Struct({
+        numItems: Schema.Finite,
+        cursor: Schema.Union([Schema.String, Schema.Null]),
+        endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+        id: Schema.optionalKey(Schema.Finite),
+        maximumRowsRead: Schema.optionalKey(Schema.Finite),
+        maximumBytesRead: Schema.optionalKey(Schema.Finite),
+      }),
+    }),
+    result: Schema.Struct({
+      page: Schema.Array(
+        Schema.Struct({
+          id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+          title: Schema.String,
+          artist: Schema.String,
+          artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+          credits: Schema.optionalKey(
+            Schema.Array(
+              Schema.Struct({
+                artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+                name: Schema.String,
+              }),
+            ),
+          ),
+          album: Schema.String,
+          albumId: Schema.String.pipe(Schema.brand("Id<albums>")),
+          trackNumber: Schema.Union([Schema.Finite, Schema.Null]),
+          discNumber: Schema.Union([Schema.Finite, Schema.Null]),
+          durationMs: Schema.Finite,
+          codec: Schema.String,
+          lossless: Schema.Boolean,
+          bitrate: Schema.Union([Schema.Finite, Schema.Null]),
+          sampleRate: Schema.Union([Schema.Finite, Schema.Null]),
+          bitDepth: Schema.Union([Schema.Finite, Schema.Null]),
+          artUrl: Schema.Union([Schema.String, Schema.Null]),
+          liked: Schema.Boolean,
+        }),
+      ),
+      continueCursor: Schema.String,
+      isDone: Schema.Boolean,
+      splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      pageStatus: Schema.optionalKey(
+        Schema.Union([
+          Schema.Literal("SplitRecommended"),
+          Schema.Literal("SplitRequired"),
+          Schema.Null,
+        ]),
+      ),
+    }),
+    method: (platform) => platform.music.artists.tracks,
+  }),
+  coreCommand({
+    name: "music.credits.list",
+    path: ["music", "credits", "list"],
+    kind: "query",
+    scope: "music:edit",
+    refusesKeys: false,
+    summary:
+      "List the artist credits in a music library you manage that name several artists, how each resolves, and how it was corrected",
+    secrets: [],
+    paginated: true,
+    args: Schema.Struct({
+      libraryId: Schema.String.pipe(Schema.brand("Id<libraries>")),
+      paginationOpts: Schema.Struct({
+        numItems: Schema.Finite,
+        cursor: Schema.Union([Schema.String, Schema.Null]),
+        endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+        id: Schema.optionalKey(Schema.Finite),
+        maximumRowsRead: Schema.optionalKey(Schema.Finite),
+        maximumBytesRead: Schema.optionalKey(Schema.Finite),
+      }),
+    }),
+    result: Schema.Struct({
+      page: Schema.Array(
+        Schema.Struct({
+          name: Schema.String,
+          artists: Schema.Array(Schema.String),
+          override: Schema.Union([
+            Schema.Union([Schema.Literal("together"), Schema.Literal("split")]),
+            Schema.Null,
+          ]),
+          uses: Schema.Finite,
+        }),
+      ),
+      continueCursor: Schema.String,
+      isDone: Schema.Boolean,
+      splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      pageStatus: Schema.optionalKey(
+        Schema.Union([
+          Schema.Literal("SplitRecommended"),
+          Schema.Literal("SplitRequired"),
+          Schema.Null,
+        ]),
+      ),
+    }),
+    method: (platform) => platform.music.credits.list,
+  }),
+  coreCommand({
+    name: "music.credits.overrides",
+    path: ["music", "credits", "overrides"],
+    kind: "query",
+    scope: "music:edit",
+    refusesKeys: false,
+    summary: "List the corrections to artist credits in a music library you manage",
+    secrets: [],
+    paginated: true,
+    args: Schema.Struct({
+      libraryId: Schema.String.pipe(Schema.brand("Id<libraries>")),
+      paginationOpts: Schema.Struct({
+        numItems: Schema.Finite,
+        cursor: Schema.Union([Schema.String, Schema.Null]),
+        endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+        id: Schema.optionalKey(Schema.Finite),
+        maximumRowsRead: Schema.optionalKey(Schema.Finite),
+        maximumBytesRead: Schema.optionalKey(Schema.Finite),
+      }),
+    }),
+    result: Schema.Struct({
+      page: Schema.Array(
+        Schema.Struct({
+          name: Schema.String,
+          mode: Schema.Union([Schema.Literal("together"), Schema.Literal("split")]),
+        }),
+      ),
+      continueCursor: Schema.String,
+      isDone: Schema.Boolean,
+      splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      pageStatus: Schema.optionalKey(
+        Schema.Union([
+          Schema.Literal("SplitRecommended"),
+          Schema.Literal("SplitRequired"),
+          Schema.Null,
+        ]),
+      ),
+    }),
+    method: (platform) => platform.music.credits.overrides,
+  }),
+  coreCommand({
+    name: "music.credits.removeOverride",
+    path: ["music", "credits", "remove-override"],
+    kind: "mutation",
+    scope: "music:edit",
+    refusesKeys: false,
+    summary:
+      "Remove a correction to an artist credit in a music library you manage, so the library's evidence decides it again",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({
+      libraryId: Schema.String.pipe(Schema.brand("Id<libraries>")),
+      name: Schema.String,
+    }),
+    result: Schema.Null,
+    method: (platform) => platform.music.credits.removeOverride,
+  }),
+  coreCommand({
+    name: "music.credits.setOverride",
+    path: ["music", "credits", "set-override"],
+    kind: "mutation",
+    scope: "music:edit",
+    refusesKeys: false,
+    summary:
+      "Correct an artist credit in a music library you manage: together keeps it one artist, also inside longer credits; split always splits it",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({
+      libraryId: Schema.String.pipe(Schema.brand("Id<libraries>")),
+      name: Schema.String,
+      mode: Schema.Union([Schema.Literal("together"), Schema.Literal("split")]),
+    }),
+    result: Schema.Null,
+    method: (platform) => platform.music.credits.setOverride,
   }),
   coreCommand({
     name: "music.history.list",
@@ -5960,6 +6194,14 @@ export const generatedCommands = [
             title: Schema.String,
             artist: Schema.String,
             artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+            credits: Schema.optionalKey(
+              Schema.Array(
+                Schema.Struct({
+                  artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+                  name: Schema.String,
+                }),
+              ),
+            ),
             album: Schema.String,
             albumId: Schema.String.pipe(Schema.brand("Id<albums>")),
             trackNumber: Schema.Union([Schema.Finite, Schema.Null]),
@@ -6006,6 +6248,14 @@ export const generatedCommands = [
           title: Schema.String,
           artist: Schema.String,
           artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+          credits: Schema.optionalKey(
+            Schema.Array(
+              Schema.Struct({
+                artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+                name: Schema.String,
+              }),
+            ),
+          ),
           year: Schema.Union([Schema.Finite, Schema.Null]),
           artUrl: Schema.Union([Schema.String, Schema.Null]),
           trackCount: Schema.Finite,
@@ -6017,6 +6267,14 @@ export const generatedCommands = [
           title: Schema.String,
           artist: Schema.String,
           artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+          credits: Schema.optionalKey(
+            Schema.Array(
+              Schema.Struct({
+                artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+                name: Schema.String,
+              }),
+            ),
+          ),
           year: Schema.Union([Schema.Finite, Schema.Null]),
           artUrl: Schema.Union([Schema.String, Schema.Null]),
           trackCount: Schema.Finite,
@@ -6027,6 +6285,7 @@ export const generatedCommands = [
           id: Schema.String.pipe(Schema.brand("Id<artists>")),
           name: Schema.String,
           albumCount: Schema.Finite,
+          trackCount: Schema.optionalKey(Schema.Finite),
           artUrl: Schema.Union([Schema.String, Schema.Null]),
         }),
       ),
@@ -6056,6 +6315,14 @@ export const generatedCommands = [
           title: Schema.String,
           artist: Schema.String,
           artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+          credits: Schema.optionalKey(
+            Schema.Array(
+              Schema.Struct({
+                artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+                name: Schema.String,
+              }),
+            ),
+          ),
           album: Schema.String,
           albumId: Schema.String.pipe(Schema.brand("Id<albums>")),
           trackNumber: Schema.Union([Schema.Finite, Schema.Null]),
@@ -6076,6 +6343,14 @@ export const generatedCommands = [
           title: Schema.String,
           artist: Schema.String,
           artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+          credits: Schema.optionalKey(
+            Schema.Array(
+              Schema.Struct({
+                artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+                name: Schema.String,
+              }),
+            ),
+          ),
           year: Schema.Union([Schema.Finite, Schema.Null]),
           artUrl: Schema.Union([Schema.String, Schema.Null]),
           trackCount: Schema.Finite,
@@ -6086,6 +6361,7 @@ export const generatedCommands = [
           id: Schema.String.pipe(Schema.brand("Id<artists>")),
           name: Schema.String,
           albumCount: Schema.Finite,
+          trackCount: Schema.optionalKey(Schema.Finite),
           artUrl: Schema.Union([Schema.String, Schema.Null]),
         }),
       ),
@@ -6118,6 +6394,14 @@ export const generatedCommands = [
           title: Schema.String,
           artist: Schema.String,
           artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+          credits: Schema.optionalKey(
+            Schema.Array(
+              Schema.Struct({
+                artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+                name: Schema.String,
+              }),
+            ),
+          ),
           album: Schema.String,
           albumId: Schema.String.pipe(Schema.brand("Id<albums>")),
           trackNumber: Schema.Union([Schema.Finite, Schema.Null]),
@@ -6790,6 +7074,14 @@ export const generatedCommands = [
               title: Schema.String,
               artist: Schema.String,
               artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+              credits: Schema.optionalKey(
+                Schema.Array(
+                  Schema.Struct({
+                    artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+                    name: Schema.String,
+                  }),
+                ),
+              ),
               album: Schema.String,
               albumId: Schema.String.pipe(Schema.brand("Id<albums>")),
               trackNumber: Schema.Union([Schema.Finite, Schema.Null]),
@@ -7205,6 +7497,14 @@ export const generatedCommands = [
             title: Schema.String,
             artist: Schema.String,
             artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+            credits: Schema.optionalKey(
+              Schema.Array(
+                Schema.Struct({
+                  artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+                  name: Schema.String,
+                }),
+              ),
+            ),
             album: Schema.String,
             albumId: Schema.String.pipe(Schema.brand("Id<albums>")),
             trackNumber: Schema.Union([Schema.Finite, Schema.Null]),
@@ -7325,6 +7625,14 @@ export const generatedCommands = [
       title: Schema.String,
       artist: Schema.String,
       artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+      credits: Schema.optionalKey(
+        Schema.Array(
+          Schema.Struct({
+            artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+            name: Schema.String,
+          }),
+        ),
+      ),
       album: Schema.String,
       albumId: Schema.String.pipe(Schema.brand("Id<albums>")),
       trackNumber: Schema.Union([Schema.Finite, Schema.Null]),
@@ -7366,6 +7674,14 @@ export const generatedCommands = [
           title: Schema.String,
           artist: Schema.String,
           artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+          credits: Schema.optionalKey(
+            Schema.Array(
+              Schema.Struct({
+                artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+                name: Schema.String,
+              }),
+            ),
+          ),
           album: Schema.String,
           albumId: Schema.String.pipe(Schema.brand("Id<albums>")),
           trackNumber: Schema.Union([Schema.Finite, Schema.Null]),

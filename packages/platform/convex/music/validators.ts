@@ -118,9 +118,18 @@ export const scannedTrack = v.object({
   size: v.number(),
   mtimeMs: v.number(),
   title: v.string(),
+  /** The song's artist as a client shows it: its artist tag, or its separate values joined. */
   artist: v.string(),
+  /**
+   * The song's artists when its tags hold them as separate values, two or more: its credits as
+   * they are, which no evidence splits further (ADR 0024, "Artist credits"). Absent when its tags
+   * name its artists in one string.
+   */
+  artists: v.optional(v.array(v.string())),
   /** The album's artist when the tags name one; the album files under it, else under `artist`. */
   albumArtist: v.optional(v.string()),
+  /** The album's artists when its tags hold them as separate values, two or more. */
+  albumArtists: v.optional(v.array(v.string())),
   album: v.string(),
   trackNumber: v.optional(v.number()),
   discNumber: v.optional(v.number()),
@@ -137,6 +146,8 @@ export const scannedTrack = v.object({
   /** The folder artwork file beside the file, as `path:size:mtime`, so replacing it rescans. */
   folderArt: v.optional(v.string()),
   explicit: v.boolean(),
+  /** The version of the server's tag reader that read the file's tags and artists. */
+  tagsReader: v.number(),
 });
 
 export type ScannedTrack = Infer<typeof scannedTrack>;
@@ -157,8 +168,24 @@ export const knownTrack = v.object({
   lyricsReader: v.number(),
   /** The size of the file's own lyrics as stored, null when it has none. */
   lyricsBytes: nullable(v.number()),
+  /**
+   * The version of the server's tag reader that read the file's tags, 0 for a song stored before
+   * the core kept it, so a newer reader reads the file again.
+   */
+  tagsReader: v.number(),
   durationMs: v.number(),
   title: v.string(),
   artist: v.string(),
   album: v.string(),
 });
+
+/**
+ * One artist a song or an album credits, in order: the artist's row and the name as the tags
+ * spell it there (ADR 0024, "Artist credits").
+ */
+export const artistCredit = v.object({ artistId: v.id("artists"), name: v.string() });
+
+export type ArtistCredit = Infer<typeof artistCredit>;
+
+/** A manager's correction of how a library resolves one credit string (`creditOverrides`). */
+export const creditOverride = v.union(v.literal("together"), v.literal("split"));

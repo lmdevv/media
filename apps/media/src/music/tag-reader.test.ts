@@ -4,6 +4,7 @@ import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { isExplicit, readTrackTags } from "./tag-reader.ts";
+import { setFlacComments } from "./testing/flac-comments.ts";
 import {
   makeDirectory,
   MEDIA_TEST_TIMEOUT,
@@ -67,5 +68,69 @@ describe("readTrackTags", { timeout: MEDIA_TEST_TIMEOUT }, () => {
     );
 
     expect(read).toEqual(cases.map(([name, , explicit]) => ({ name, explicit, title: name })));
+  });
+});
+
+/** The artists the tags of a fresh FLAC file with `comments` name. */
+const tagged = async (name: string, comments: ReadonlyArray<readonly [string, string]>) => {
+  const path = join(work, name);
+
+  await writeSong(path, { seconds: 1 });
+  await setFlacComments(path, comments);
+
+  const tags = await Effect.runPromise(readTrackTags(path));
+
+  return {
+    artist: tags.artist,
+    artists: tags.artists,
+    albumArtist: tags.albumArtist,
+    albumArtists: tags.albumArtists,
+  };
+};
+
+describe("readTrackTags artists", { timeout: MEDIA_TEST_TIMEOUT }, () => {
+  it("reads a field repeated once per artist as separate values, shown joined", async () => {
+    expect(
+      await tagged("repeated.flac", [
+        ["TITLE", "Song"],
+        ["ARTIST", "Mora"],
+        ["ARTIST", "JHAYCO"],
+        ["ARTIST", "Mora"],
+        ["ALBUMARTIST", "Mora"],
+        ["ALBUMARTIST", "Bad Bunny"],
+        ["ALBUMARTIST", "Sech"],
+      ]),
+    ).toEqual({
+      artist: "Mora & JHAYCO",
+      artists: ["Mora", "JHAYCO"],
+      albumArtist: "Mora, Bad Bunny & Sech",
+      albumArtists: ["Mora", "Bad Bunny", "Sech"],
+    });
+  });
+
+  it("keeps an artist tag beside separate values, and one string of several artists as it is", async () => {
+    expect(
+      await tagged("picard.flac", [
+        ["ARTIST", "Mora feat. JHAYCO"],
+        ["ARTISTS", "Mora"],
+        ["ARTISTS", "JHAYCO"],
+      ]),
+    ).toEqual({
+      artist: "Mora feat. JHAYCO",
+      artists: ["Mora", "JHAYCO"],
+      albumArtist: undefined,
+      albumArtists: undefined,
+    });
+    expect(
+      await tagged("combined.flac", [
+        ["ARTIST", "Mora & JHAYCO"],
+        ["ALBUMARTIST", "Mora & JHAYCO"],
+      ]),
+    ).toEqual({
+      artist: "Mora & JHAYCO",
+      artists: undefined,
+      albumArtist: "Mora & JHAYCO",
+      albumArtists: undefined,
+    });
   });
 });

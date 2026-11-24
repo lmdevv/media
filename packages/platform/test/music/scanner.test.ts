@@ -109,20 +109,21 @@ describe.skipIf(stack === undefined)("music scanner", { timeout: 180_000 }, () =
 
     await upsertAll(stack, lease, tracks);
 
+    // "Third" files under its album artist, Various, and its songs credit Other.
     expect(await expectExact(stack, libraryId)).toEqual({
       tracks: 25,
       albums: 3,
-      artists: 2,
+      artists: 3,
       durationMs: tracks.reduce((sum, track) => sum + track.durationMs, 0),
     });
-    expect(await catalogRowsOf(stack, libraryId)).toEqual({ albums: 3, artists: 2 });
+    expect(await catalogRowsOf(stack, libraryId)).toEqual({ albums: 3, artists: 3 });
     expect((await admin.signedIn.client.query(api.core.libraries.get, { libraryId })).items).toBe(
       25,
     );
 
     await upsertAll(stack, lease, tracks);
     await expectExact(stack, libraryId);
-    expect(await catalogRowsOf(stack, libraryId)).toEqual({ albums: 3, artists: 2 });
+    expect(await catalogRowsOf(stack, libraryId)).toEqual({ albums: 3, artists: 3 });
 
     const known = await knownFiles(stack, lease);
 

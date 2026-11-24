@@ -1,3 +1,4 @@
+import { distinctNames, joinCreditNames } from "@media/contracts/artist-credits";
 import type { LocalLyricSet } from "@media/contracts/models/music";
 import { Effect, Option, Schema } from "effect";
 import { type IAudioMetadata, type ITag, parseFile, selectCover } from "music-metadata";
@@ -18,11 +19,23 @@ class TagReadError extends Schema.TaggedError<TagReadError, { readonly brand: un
   }
 }
 
+/**
+ * The version of this tag reader, which a song's row keeps (`tagsReader`). A scan reads a file
+ * whose row an older reader wrote again whatever its size and modification time, as it does a
+ * file whose lyrics an older lyrics reader read (`LYRICS_READER_VERSION`). Version 1 reads
+ * separate artist values, which the core credits one by one (ADR 0024, "Artist credits").
+ */
+export const TAGS_READER_VERSION = 1;
+
 /** What one file says about itself. Absent tags are `undefined`. */
 interface TrackTags {
   readonly title: string | undefined;
+  /** The artist as a client shows it: the artist tag, or its separate values joined. */
   readonly artist: string | undefined;
+  /** The artists when the tags hold them as two or more separate values. */
+  readonly artists: ReadonlyArray<string> | undefined;
   readonly albumArtist: string | undefined;
+  readonly albumArtists: ReadonlyArray<string> | undefined;
   readonly album: string | undefined;
   readonly trackNumber: number | undefined;
   readonly discNumber: number | undefined;
@@ -47,6 +60,29 @@ const text = (value: string | undefined): string | undefined => {
 
   return trimmed === undefined || trimmed === "" ? undefined : trimmed;
 };
+
+/**
+ * Separate artist values, trimmed and without a later spelling of one already named, when there
+ * are two or more: music-metadata lists a multi-value tag's values, or the one string a tag that
+ * names several artists at once holds.
+ */
+const separateValues = (
+  values: ReadonlyArray<string> | undefined,
+): ReadonlyArray<string> | undefined => {
+  const names = distinctNames((values ?? []).flatMap((value) => text(value) ?? []));
+
+  return names.length >= 2 ? names : undefined;
+};
+
+/**
+ * The artist a client shows for a tag and its separate values: the tag, unless it is only the
+ * first value, as music-metadata reads a tag repeated once per artist; then the values joined.
+ */
+const shownArtist = (
+  tag: string | undefined,
+  values: ReadonlyArray<string> | undefined,
+): string | undefined =>
+  values !== undefined && (tag === undefined || tag === values[0]) ? joinCreditNames(values) : tag;
 
 const positive = (value: number | null | undefined): number | undefined =>
   value === null || value === undefined || !Number.isFinite(value) || value <= 0
@@ -93,8 +129,8 @@ const parseTags = (path: string, options: { readonly covers: boolean }) =>
   });
 
 /**
- * Reads tags, duration, codec, embedded art, embedded lyrics, and the explicit advisory from the
- * file at `path`.
+ * Reads tags, separate artist values, duration, codec, embedded art, embedded lyrics, and the
+ * explicit advisory from the file at `path`.
  */
 export const readTrackTags = Effect.fn("TagReader.read")(function* (path: string) {
   const metadata = yield* parseTags(path, { covers: true });
@@ -104,10 +140,15 @@ export const readTrackTags = Effect.fn("TagReader.read")(function* (path: string
     return yield* new TagReadError({ path, cause: new Error("No audio stream found") });
   }
 
+  const artists = separateValues(common.artists);
+  const albumArtists = separateValues(common.albumartists);
+
   const tags: TrackTags = {
     title: text(common.title),
-    artist: text(common.artist),
-    albumArtist: text(common.albumartist),
+    artist: shownArtist(text(common.artist), artists),
+    artists,
+    albumArtist: shownArtist(text(common.albumartist), albumArtists),
+    albumArtists,
     album: text(common.album),
     trackNumber: positive(common.track.no),
     discNumber: positive(common.disk.no),

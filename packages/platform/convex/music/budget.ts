@@ -37,6 +37,10 @@ export const addCost = (left: Cost, right: Cost): Cost => ({
 
 export const sumCost = (costs: ReadonlyArray<Cost>): Cost => costs.reduce(addCost, NO_COST);
 
+/** `one` cost `count` times over. */
+export const repeated = (one: Cost, count: number): Cost =>
+  sumCost(Array.from({ length: count }, () => one));
+
 /** The bytes a call reads, and writes, at most: 12 MiB each, under Convex's 16 MiB. */
 const CALL_BYTES = 12 * 1024 * 1024;
 

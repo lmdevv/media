@@ -2754,6 +2754,14 @@ const core_together_queue = query({
             title: Schema.String,
             artist: Schema.String,
             artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+            credits: Schema.optionalKey(
+              Schema.Array(
+                Schema.Struct({
+                  artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+                  name: Schema.String,
+                }),
+              ),
+            ),
             album: Schema.String,
             albumId: Schema.String.pipe(Schema.brand("Id<albums>")),
             trackNumber: Schema.Union([Schema.Finite, Schema.Null]),
@@ -4719,6 +4727,14 @@ const music_albums_get = query({
       title: Schema.String,
       artist: Schema.String,
       artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+      credits: Schema.optionalKey(
+        Schema.Array(
+          Schema.Struct({
+            artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+            name: Schema.String,
+          }),
+        ),
+      ),
       year: Schema.Union([Schema.Finite, Schema.Null]),
       artUrl: Schema.Union([Schema.String, Schema.Null]),
       trackCount: Schema.Finite,
@@ -4749,6 +4765,14 @@ const music_albums_list = query({
         title: Schema.String,
         artist: Schema.String,
         artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+        credits: Schema.optionalKey(
+          Schema.Array(
+            Schema.Struct({
+              artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+              name: Schema.String,
+            }),
+          ),
+        ),
         year: Schema.Union([Schema.Finite, Schema.Null]),
         artUrl: Schema.Union([Schema.String, Schema.Null]),
         trackCount: Schema.Finite,
@@ -4788,6 +4812,14 @@ const music_albums_tracks = query({
         title: Schema.String,
         artist: Schema.String,
         artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+        credits: Schema.optionalKey(
+          Schema.Array(
+            Schema.Struct({
+              artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+              name: Schema.String,
+            }),
+          ),
+        ),
         album: Schema.String,
         albumId: Schema.String.pipe(Schema.brand("Id<albums>")),
         trackNumber: Schema.Union([Schema.Finite, Schema.Null]),
@@ -4836,6 +4868,14 @@ const music_artists_albums = query({
         title: Schema.String,
         artist: Schema.String,
         artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+        credits: Schema.optionalKey(
+          Schema.Array(
+            Schema.Struct({
+              artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+              name: Schema.String,
+            }),
+          ),
+        ),
         year: Schema.Union([Schema.Finite, Schema.Null]),
         artUrl: Schema.Union([Schema.String, Schema.Null]),
         trackCount: Schema.Finite,
@@ -4863,6 +4903,7 @@ const music_artists_get = query({
       id: Schema.String.pipe(Schema.brand("Id<artists>")),
       name: Schema.String,
       albumCount: Schema.Finite,
+      trackCount: Schema.optionalKey(Schema.Finite),
       artUrl: Schema.Union([Schema.String, Schema.Null]),
     }),
     topTracks: Schema.Array(
@@ -4871,6 +4912,14 @@ const music_artists_get = query({
         title: Schema.String,
         artist: Schema.String,
         artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+        credits: Schema.optionalKey(
+          Schema.Array(
+            Schema.Struct({
+              artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+              name: Schema.String,
+            }),
+          ),
+        ),
         album: Schema.String,
         albumId: Schema.String.pipe(Schema.brand("Id<albums>")),
         trackNumber: Schema.Union([Schema.Finite, Schema.Null]),
@@ -4907,6 +4956,7 @@ const music_artists_list = query({
         id: Schema.String.pipe(Schema.brand("Id<artists>")),
         name: Schema.String,
         albumCount: Schema.Finite,
+        trackCount: Schema.optionalKey(Schema.Finite),
         artUrl: Schema.Union([Schema.String, Schema.Null]),
       }),
     ),
@@ -4921,6 +4971,156 @@ const music_artists_list = query({
       ]),
     ),
   }),
+});
+
+const music_artists_tracks = query({
+  name: "music.artists.tracks",
+  path: "music/artists:tracks",
+  args: Schema.Struct({
+    artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+    paginationOpts: Schema.Struct({
+      numItems: Schema.Finite,
+      cursor: Schema.Union([Schema.String, Schema.Null]),
+      endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      id: Schema.optionalKey(Schema.Finite),
+      maximumRowsRead: Schema.optionalKey(Schema.Finite),
+      maximumBytesRead: Schema.optionalKey(Schema.Finite),
+    }),
+  }),
+  result: Schema.Struct({
+    page: Schema.Array(
+      Schema.Struct({
+        id: Schema.String.pipe(Schema.brand("Id<tracks>")),
+        title: Schema.String,
+        artist: Schema.String,
+        artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+        credits: Schema.optionalKey(
+          Schema.Array(
+            Schema.Struct({
+              artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+              name: Schema.String,
+            }),
+          ),
+        ),
+        album: Schema.String,
+        albumId: Schema.String.pipe(Schema.brand("Id<albums>")),
+        trackNumber: Schema.Union([Schema.Finite, Schema.Null]),
+        discNumber: Schema.Union([Schema.Finite, Schema.Null]),
+        durationMs: Schema.Finite,
+        codec: Schema.String,
+        lossless: Schema.Boolean,
+        bitrate: Schema.Union([Schema.Finite, Schema.Null]),
+        sampleRate: Schema.Union([Schema.Finite, Schema.Null]),
+        bitDepth: Schema.Union([Schema.Finite, Schema.Null]),
+        artUrl: Schema.Union([Schema.String, Schema.Null]),
+        liked: Schema.Boolean,
+      }),
+    ),
+    continueCursor: Schema.String,
+    isDone: Schema.Boolean,
+    splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+    pageStatus: Schema.optionalKey(
+      Schema.Union([
+        Schema.Literal("SplitRecommended"),
+        Schema.Literal("SplitRequired"),
+        Schema.Null,
+      ]),
+    ),
+  }),
+});
+
+const music_credits_list = query({
+  name: "music.credits.list",
+  path: "music/credits:list",
+  args: Schema.Struct({
+    libraryId: Schema.String.pipe(Schema.brand("Id<libraries>")),
+    paginationOpts: Schema.Struct({
+      numItems: Schema.Finite,
+      cursor: Schema.Union([Schema.String, Schema.Null]),
+      endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      id: Schema.optionalKey(Schema.Finite),
+      maximumRowsRead: Schema.optionalKey(Schema.Finite),
+      maximumBytesRead: Schema.optionalKey(Schema.Finite),
+    }),
+  }),
+  result: Schema.Struct({
+    page: Schema.Array(
+      Schema.Struct({
+        name: Schema.String,
+        artists: Schema.Array(Schema.String),
+        override: Schema.Union([
+          Schema.Union([Schema.Literal("together"), Schema.Literal("split")]),
+          Schema.Null,
+        ]),
+        uses: Schema.Finite,
+      }),
+    ),
+    continueCursor: Schema.String,
+    isDone: Schema.Boolean,
+    splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+    pageStatus: Schema.optionalKey(
+      Schema.Union([
+        Schema.Literal("SplitRecommended"),
+        Schema.Literal("SplitRequired"),
+        Schema.Null,
+      ]),
+    ),
+  }),
+});
+
+const music_credits_overrides = query({
+  name: "music.credits.overrides",
+  path: "music/credits:overrides",
+  args: Schema.Struct({
+    libraryId: Schema.String.pipe(Schema.brand("Id<libraries>")),
+    paginationOpts: Schema.Struct({
+      numItems: Schema.Finite,
+      cursor: Schema.Union([Schema.String, Schema.Null]),
+      endCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+      id: Schema.optionalKey(Schema.Finite),
+      maximumRowsRead: Schema.optionalKey(Schema.Finite),
+      maximumBytesRead: Schema.optionalKey(Schema.Finite),
+    }),
+  }),
+  result: Schema.Struct({
+    page: Schema.Array(
+      Schema.Struct({
+        name: Schema.String,
+        mode: Schema.Union([Schema.Literal("together"), Schema.Literal("split")]),
+      }),
+    ),
+    continueCursor: Schema.String,
+    isDone: Schema.Boolean,
+    splitCursor: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+    pageStatus: Schema.optionalKey(
+      Schema.Union([
+        Schema.Literal("SplitRecommended"),
+        Schema.Literal("SplitRequired"),
+        Schema.Null,
+      ]),
+    ),
+  }),
+});
+
+const music_credits_removeOverride = mutation({
+  name: "music.credits.removeOverride",
+  path: "music/credits:removeOverride",
+  args: Schema.Struct({
+    libraryId: Schema.String.pipe(Schema.brand("Id<libraries>")),
+    name: Schema.String,
+  }),
+  result: Schema.Null,
+});
+
+const music_credits_setOverride = mutation({
+  name: "music.credits.setOverride",
+  path: "music/credits:setOverride",
+  args: Schema.Struct({
+    libraryId: Schema.String.pipe(Schema.brand("Id<libraries>")),
+    name: Schema.String,
+    mode: Schema.Union([Schema.Literal("together"), Schema.Literal("split")]),
+  }),
+  result: Schema.Null,
 });
 
 const music_history_list = query({
@@ -4945,6 +5145,14 @@ const music_history_list = query({
           title: Schema.String,
           artist: Schema.String,
           artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+          credits: Schema.optionalKey(
+            Schema.Array(
+              Schema.Struct({
+                artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+                name: Schema.String,
+              }),
+            ),
+          ),
           album: Schema.String,
           albumId: Schema.String.pipe(Schema.brand("Id<albums>")),
           trackNumber: Schema.Union([Schema.Finite, Schema.Null]),
@@ -4984,6 +5192,14 @@ const music_library_home = query({
         title: Schema.String,
         artist: Schema.String,
         artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+        credits: Schema.optionalKey(
+          Schema.Array(
+            Schema.Struct({
+              artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+              name: Schema.String,
+            }),
+          ),
+        ),
         year: Schema.Union([Schema.Finite, Schema.Null]),
         artUrl: Schema.Union([Schema.String, Schema.Null]),
         trackCount: Schema.Finite,
@@ -4995,6 +5211,14 @@ const music_library_home = query({
         title: Schema.String,
         artist: Schema.String,
         artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+        credits: Schema.optionalKey(
+          Schema.Array(
+            Schema.Struct({
+              artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+              name: Schema.String,
+            }),
+          ),
+        ),
         year: Schema.Union([Schema.Finite, Schema.Null]),
         artUrl: Schema.Union([Schema.String, Schema.Null]),
         trackCount: Schema.Finite,
@@ -5005,6 +5229,7 @@ const music_library_home = query({
         id: Schema.String.pipe(Schema.brand("Id<artists>")),
         name: Schema.String,
         albumCount: Schema.Finite,
+        trackCount: Schema.optionalKey(Schema.Finite),
         artUrl: Schema.Union([Schema.String, Schema.Null]),
       }),
     ),
@@ -5028,6 +5253,14 @@ const music_library_search = query({
         title: Schema.String,
         artist: Schema.String,
         artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+        credits: Schema.optionalKey(
+          Schema.Array(
+            Schema.Struct({
+              artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+              name: Schema.String,
+            }),
+          ),
+        ),
         album: Schema.String,
         albumId: Schema.String.pipe(Schema.brand("Id<albums>")),
         trackNumber: Schema.Union([Schema.Finite, Schema.Null]),
@@ -5048,6 +5281,14 @@ const music_library_search = query({
         title: Schema.String,
         artist: Schema.String,
         artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+        credits: Schema.optionalKey(
+          Schema.Array(
+            Schema.Struct({
+              artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+              name: Schema.String,
+            }),
+          ),
+        ),
         year: Schema.Union([Schema.Finite, Schema.Null]),
         artUrl: Schema.Union([Schema.String, Schema.Null]),
         trackCount: Schema.Finite,
@@ -5058,6 +5299,7 @@ const music_library_search = query({
         id: Schema.String.pipe(Schema.brand("Id<artists>")),
         name: Schema.String,
         albumCount: Schema.Finite,
+        trackCount: Schema.optionalKey(Schema.Finite),
         artUrl: Schema.Union([Schema.String, Schema.Null]),
       }),
     ),
@@ -5084,6 +5326,14 @@ const music_likes_list = query({
         title: Schema.String,
         artist: Schema.String,
         artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+        credits: Schema.optionalKey(
+          Schema.Array(
+            Schema.Struct({
+              artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+              name: Schema.String,
+            }),
+          ),
+        ),
         album: Schema.String,
         albumId: Schema.String.pipe(Schema.brand("Id<albums>")),
         trackNumber: Schema.Union([Schema.Finite, Schema.Null]),
@@ -5667,6 +5917,14 @@ const music_playlists_items = query({
             title: Schema.String,
             artist: Schema.String,
             artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+            credits: Schema.optionalKey(
+              Schema.Array(
+                Schema.Struct({
+                  artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+                  name: Schema.String,
+                }),
+              ),
+            ),
             album: Schema.String,
             albumId: Schema.String.pipe(Schema.brand("Id<albums>")),
             trackNumber: Schema.Union([Schema.Finite, Schema.Null]),
@@ -5967,6 +6225,14 @@ const music_queue_list = query({
           title: Schema.String,
           artist: Schema.String,
           artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+          credits: Schema.optionalKey(
+            Schema.Array(
+              Schema.Struct({
+                artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+                name: Schema.String,
+              }),
+            ),
+          ),
           album: Schema.String,
           albumId: Schema.String.pipe(Schema.brand("Id<albums>")),
           trackNumber: Schema.Union([Schema.Finite, Schema.Null]),
@@ -6049,6 +6315,14 @@ const music_tracks_get = query({
     title: Schema.String,
     artist: Schema.String,
     artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+    credits: Schema.optionalKey(
+      Schema.Array(
+        Schema.Struct({
+          artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+          name: Schema.String,
+        }),
+      ),
+    ),
     album: Schema.String,
     albumId: Schema.String.pipe(Schema.brand("Id<albums>")),
     trackNumber: Schema.Union([Schema.Finite, Schema.Null]),
@@ -6084,6 +6358,14 @@ const music_tracks_list = query({
         title: Schema.String,
         artist: Schema.String,
         artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+        credits: Schema.optionalKey(
+          Schema.Array(
+            Schema.Struct({
+              artistId: Schema.String.pipe(Schema.brand("Id<artists>")),
+              name: Schema.String,
+            }),
+          ),
+        ),
         album: Schema.String,
         albumId: Schema.String.pipe(Schema.brand("Id<albums>")),
         trackNumber: Schema.Union([Schema.Finite, Schema.Null]),
@@ -6506,12 +6788,24 @@ export const effectMethods = (method: EffectBuilder) => ({
       tracks: method.query(music_albums_tracks),
     },
     artists: {
-      /** `music.artists.albums` (query, music:read): List an artist's albums, newest year first. */
+      /** `music.artists.albums` (query, music:read): List the albums crediting an artist, newest year first. */
       albums: method.query(music_artists_albums),
       /** `music.artists.get` (query, music:read): Show an artist and their top songs. */
       get: method.query(music_artists_get),
       /** `music.artists.list` (query, music:read): List the artists you may play, by name. */
       list: method.query(music_artists_list),
+      /** `music.artists.tracks` (query, music:read): List the songs on disk you may play that credit an artist, theirs and the ones they feature on, by title. */
+      tracks: method.query(music_artists_tracks),
+    },
+    credits: {
+      /** `music.credits.list` (query, music:edit): List the artist credits in a music library you manage that name several artists, how each resolves, and how it was corrected. */
+      list: method.query(music_credits_list),
+      /** `music.credits.overrides` (query, music:edit): List the corrections to artist credits in a music library you manage. */
+      overrides: method.query(music_credits_overrides),
+      /** `music.credits.removeOverride` (mutation, music:edit): Remove a correction to an artist credit in a music library you manage, so the library's evidence decides it again. */
+      removeOverride: method.mutation(music_credits_removeOverride),
+      /** `music.credits.setOverride` (mutation, music:edit): Correct an artist credit in a music library you manage: together keeps it one artist, also inside longer credits; split always splits it. */
+      setOverride: method.mutation(music_credits_setOverride),
     },
     history: {
       /** `music.history.list` (query, music:read): List the songs you played, most recent first. */
@@ -7008,12 +7302,24 @@ export const promiseMethods = (method: PromiseBuilder) => ({
       tracks: method.query(music_albums_tracks),
     },
     artists: {
-      /** `music.artists.albums` (query, music:read): List an artist's albums, newest year first. */
+      /** `music.artists.albums` (query, music:read): List the albums crediting an artist, newest year first. */
       albums: method.query(music_artists_albums),
       /** `music.artists.get` (query, music:read): Show an artist and their top songs. */
       get: method.query(music_artists_get),
       /** `music.artists.list` (query, music:read): List the artists you may play, by name. */
       list: method.query(music_artists_list),
+      /** `music.artists.tracks` (query, music:read): List the songs on disk you may play that credit an artist, theirs and the ones they feature on, by title. */
+      tracks: method.query(music_artists_tracks),
+    },
+    credits: {
+      /** `music.credits.list` (query, music:edit): List the artist credits in a music library you manage that name several artists, how each resolves, and how it was corrected. */
+      list: method.query(music_credits_list),
+      /** `music.credits.overrides` (query, music:edit): List the corrections to artist credits in a music library you manage. */
+      overrides: method.query(music_credits_overrides),
+      /** `music.credits.removeOverride` (mutation, music:edit): Remove a correction to an artist credit in a music library you manage, so the library's evidence decides it again. */
+      removeOverride: method.mutation(music_credits_removeOverride),
+      /** `music.credits.setOverride` (mutation, music:edit): Correct an artist credit in a music library you manage: together keeps it one artist, also inside longer credits; split always splits it. */
+      setOverride: method.mutation(music_credits_setOverride),
     },
     history: {
       /** `music.history.list` (query, music:read): List the songs you played, most recent first. */

@@ -3,13 +3,16 @@ import { describe, expect, it } from "vitest";
 
 import type { Id } from "../../convex/_generated/dataModel";
 import { NO_COST, cost, meterFrom, whileBudget } from "../../convex/music/budget";
+import { RECHECK_PAGE } from "../../convex/music/credits";
 import {
   MUSIC_BOUNDS,
   TABLE_BYTES,
   artHashWithin,
   checkLyrics,
+  creditsWithin,
   fitAlbum,
   fitArtist,
+  fitCredit,
   fitLyrics,
   fitTrack,
   keyOf,
@@ -23,12 +26,14 @@ const wide = (count: number): string => "語".repeat(count);
 
 // SAFETY: a type predicate over a fixed string. Convex ids are opaque strings of 32 characters,
 // and these documents are only measured, never written.
-const isId = <Table extends "libraries" | "albums" | "artists">(
+const isId = <Table extends "libraries" | "albums" | "artists" | "tracks">(
   _table: Table,
   value: string,
 ): value is Id<Table> => value.length === 32;
 
-const idOf = <Table extends "libraries" | "albums" | "artists">(table: Table): Id<Table> => {
+const idOf = <Table extends "libraries" | "albums" | "artists" | "tracks">(
+  table: Table,
+): Id<Table> => {
   const value = "k".repeat(32);
 
   if (!isId(table, value)) throw new Error("an id is 32 characters");
@@ -43,12 +48,41 @@ const plain = (text: string): LocalLyricSet => ({
   body: { _tag: "Plain", text },
 });
 
+/** Credits at their most: as many as a song keeps, each with a long name in 3-byte characters. */
+const longCredits = () =>
+  Array.from({ length: MUSIC_BOUNDS.credits + 5 }, () => ({
+    artistId: idOf("artists"),
+    name: wide(10_000),
+  }));
+
 describe("music document bounds", () => {
+  it("keep a song's and an album's credits to their count and the length of their names", () => {
+    const kept = creditsWithin(longCredits());
+
+    expect(kept.length).toBeLessThanOrEqual(MUSIC_BOUNDS.credits);
+    expect(kept.reduce((sum, credit) => sum + credit.name.length, 0)).toBeLessThanOrEqual(
+      MUSIC_BOUNDS.creditNames,
+    );
+    expect(creditsWithin(kept)).toEqual(kept);
+
+    const short = Array.from({ length: 12 }, (_, n) => ({
+      artistId: idOf("artists"),
+      name: `A${n}`,
+    }));
+
+    expect(creditsWithin(short).map((credit) => credit.name)).toEqual(
+      short.slice(0, MUSIC_BOUNDS.credits).map((credit) => credit.name),
+    );
+  });
+
   it("keep a track with every field at its longest within its bound", () => {
     const track = fitTrack({
       libraryId: idOf("libraries"),
       albumId: idOf("albums"),
       artistId: idOf("artists"),
+      credits: longCredits(),
+      creditsTagged: true,
+      tagsReader: 1,
       path: `/${"p".repeat(4095)}`,
       size: Number.MAX_SAFE_INTEGER,
       mtimeMs: Number.MAX_SAFE_INTEGER,
@@ -87,6 +121,9 @@ describe("music document bounds", () => {
       libraryId: idOf("libraries"),
       artistId: idOf("artists"),
       artistName: wide(10_000),
+      artistKey: keyOf(wide(10_000)),
+      credits: longCredits(),
+      creditsTagged: true,
       title: wide(10_000),
       key: keyOf(wide(10_000)),
       year: 1,
@@ -105,6 +142,7 @@ describe("music document bounds", () => {
       name: wide(10_000),
       key: keyOf(wide(10_000)),
       albumCount: Number.MAX_SAFE_INTEGER,
+      trackCount: Number.MAX_SAFE_INTEGER,
       artHash: "a".repeat(MUSIC_BOUNDS.artHash),
       searchText: wide(10_000),
       tie: crypto.randomUUID(),
@@ -112,6 +150,53 @@ describe("music document bounds", () => {
 
     expect(getDocumentSize(album)).toBeLessThanOrEqual(TABLE_BYTES.albums);
     expect(getDocumentSize(artist)).toBeLessThanOrEqual(TABLE_BYTES.artists);
+  });
+
+  it("keep a credit string and the rows that find it again within their bounds", () => {
+    const text = wide(10_000);
+
+    const credit = fitCredit({
+      libraryId: idOf("libraries"),
+      key: keyOf(text),
+      text,
+      combined: true,
+      uses: Number.MAX_SAFE_INTEGER,
+      artists: Array.from({ length: MUSIC_BOUNDS.credits }, () => wide(10_000)),
+    });
+
+    expect(getDocumentSize(credit)).toBeLessThanOrEqual(TABLE_BYTES.artistCredits);
+    expect(
+      getDocumentSize({
+        libraryId: idOf("libraries"),
+        partKey: keyOf(text),
+        creditKey: keyOf(text),
+      }),
+    ).toBeLessThanOrEqual(TABLE_BYTES.creditParts);
+    expect(
+      getDocumentSize({
+        libraryId: idOf("libraries"),
+        creditKey: keyOf(text),
+        trackId: idOf("tracks"),
+      }),
+    ).toBeLessThanOrEqual(TABLE_BYTES.creditTracks);
+    expect(
+      getDocumentSize({
+        libraryId: idOf("libraries"),
+        key: keyOf(text),
+        text: wide(MUSIC_BOUNDS.name),
+        mode: "together",
+      }),
+    ).toBeLessThanOrEqual(TABLE_BYTES.creditOverrides);
+    expect(
+      getDocumentSize({
+        libraryId: idOf("libraries"),
+        artistId: idOf("artists"),
+        trackId: idOf("tracks"),
+        titleKey: wide(MUSIC_BOUNDS.sortKey),
+        tie: crypto.randomUUID(),
+      }),
+    ).toBeLessThanOrEqual(TABLE_BYTES.trackArtists);
+    expect(RECHECK_PAGE).toBeGreaterThanOrEqual(16);
   });
 
   it("keep two names that differ past the key's maximum as two keys", () => {

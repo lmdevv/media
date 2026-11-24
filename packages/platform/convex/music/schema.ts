@@ -2,17 +2,21 @@ import { defineTable } from "convex/server";
 import { v } from "convex/values";
 
 import { nullable } from "../movies/validators";
-import { localLyricSet, lrclibAnswer } from "./validators";
+import { artistCredit, creditOverride, localLyricSet, lrclibAnswer } from "./validators";
 
 /** How a queue repeats: not at all, the whole queue, or the current song. */
 export const repeatMode = v.union(v.literal("off"), v.literal("all"), v.literal("one"));
 
 /**
- * The music catalog (`artists`, `albums`, `tracks`, and `localLyrics`; ADR 0024), and what each
- * person keeps of it: playlists, likes, plays, and the queue (ADR 0005). A library's track total is
- * its core item count, and its album, artist, and duration totals are counters in `totals.ts`.
- * LRCLIB's answers are in `lrclibLyrics`. Every write goes through
- * `write.ts`, which keeps each document within its bound in `fit.ts`.
+ * The music catalog (`artists`, `albums`, `tracks`, and `localLyrics`; ADR 0024), the artist
+ * credits that link each song and album to every artist it credits, and what each person keeps of
+ * it: playlists, likes, plays, and the queue (ADR 0005). A library's track total is its core item
+ * count, and its album, artist, and duration totals are counters in `totals.ts`. LRCLIB's answers
+ * are in `lrclibLyrics`. Every write goes through `write.ts`, which keeps each document within its
+ * bound in `fit.ts`.
+ *
+ * Rows a release before artist credits wrote lack the credit fields, which are optional until
+ * every install's first scan after it rewrote them (ADR 0012, "a shape change to stored rows").
  */
 export const musicTables = {
   artists: defineTable({
@@ -21,8 +25,10 @@ export const musicTables = {
     name: v.string(),
     /** The name trimmed and lowercased, so spellings that differ only in case are one artist. */
     key: v.string(),
-    /** Albums of this artist that hold at least one track on disk. */
+    /** Albums crediting this artist that hold at least one track on disk. */
     albumCount: v.number(),
+    /** Tracks on disk crediting this artist; absent, as 0, on a row no credit has touched yet. */
+    trackCount: v.optional(v.number()),
     artHash: nullable(v.string()),
     /** The name folded for accent-insensitive search. */
     searchText: v.string(),
@@ -40,10 +46,21 @@ export const musicTables = {
 
   albums: defineTable({
     libraryId: v.id("libraries"),
+    /** The album's first credited artist. */
     artistId: v.id("artists"),
+    /** The album artist as the tags name it, which the album files under. */
     artistName: v.string(),
+    /**
+     * The key of `artistName`: one album per library, `artistKey`, `creditsTagged`, and `key`,
+     * however the evidence splits the name.
+     */
+    artistKey: v.optional(v.string()),
+    /** Every artist the album credits, in order, from its album artist (`artistCredits`). */
+    credits: v.optional(v.array(artistCredit)),
+    /** Whether `credits` are the separate values of its tags, which no evidence changes. */
+    creditsTagged: v.optional(v.boolean()),
     title: v.string(),
-    /** The title trimmed and lowercased; one album per artist and key. */
+    /** The title trimmed and lowercased; one album per album artist and key. */
     key: v.string(),
     year: nullable(v.number()),
     genre: nullable(v.string()),
@@ -58,13 +75,15 @@ export const musicTables = {
     searchText: v.string(),
     tie: v.string(),
   })
+    .index("by_library_filing", ["libraryId", "artistKey", "creditsTagged", "key"])
+    /** How a release before artist credits found an album, which its first scan after adopts. */
     .index("by_library_artist_key", ["libraryId", "artistId", "key"])
     .index("by_library_added", ["libraryId", "addedAt", "tie"])
     /** Every library's albums by when they were added, which the album list pages. */
     .index("by_added", ["addedAt", "tie"])
     .index("by_artist", ["artistId"])
-    /** An artist's albums by year, which the artist's page lists newest first. */
-    .index("by_artist_year", ["artistId", "year", "tie"])
+    /** An artist's albums a release before artist credits wrote, by year (no `artistKey`). */
+    .index("by_artist_year", ["artistId", "artistKey", "year", "tie"])
     /** Autoplay's picks: albums of one genre near a year, then of any genre near it. */
     .index("by_library_genre", ["libraryId", "genre", "year", "tie"])
     .index("by_library_year", ["libraryId", "year", "tie"])
@@ -74,8 +93,14 @@ export const musicTables = {
   tracks: defineTable({
     libraryId: v.id("libraries"),
     albumId: v.id("albums"),
-    /** The album's artist, which the track files under. */
+    /** The track's first credited artist. */
     artistId: v.id("artists"),
+    /** Every artist the track credits, in order: its artist, then its title's featured artists. */
+    credits: v.optional(v.array(artistCredit)),
+    /** Whether `credits` are the separate values of its tags, which no evidence changes. */
+    creditsTagged: v.optional(v.boolean()),
+    /** The version of the server's tag reader that read its tags; absent before credits. */
+    tagsReader: v.optional(v.number()),
     path: v.string(),
     size: v.number(),
     mtimeMs: v.number(),
@@ -123,7 +148,8 @@ export const musicTables = {
     /** Every library's tracks on disk by title, which the song list pages. */
     .index("by_title", ["missing", "titleKey", "tie"])
     .index("by_album", ["albumId", "discNumber", "trackNumber", "tie"])
-    .index("by_artist", ["artistId"])
+    /** Tracks by first credited artist; with no `tagsReader`, those written before credits. */
+    .index("by_artist", ["artistId", "tagsReader"])
     .index("by_album_art", ["albumId", "missing", "artHash"])
     .index("by_artist_art", ["artistId", "missing", "artHash"])
     .index("by_art", ["artHash"])
@@ -131,6 +157,85 @@ export const musicTables = {
       searchField: "searchText",
       filterFields: ["libraryId", "missing"],
     }),
+
+  /**
+   * A credit string as one library's tags write it: a song's or an album's artist tag, or a
+   * featured-artist list in a title (ADR 0024, "Artist credits"). A string of one part is
+   * evidence: its name is known on its own in the library. A combined string's `artists` is how it
+   * resolves now, which every song and album it names follows. The row goes with its last use.
+   */
+  artistCredits: defineTable({
+    libraryId: v.id("libraries"),
+    /** The string trimmed and lowercased (`keyOf`). */
+    key: v.string(),
+    /** The string as a scan first spelled it. */
+    text: v.string(),
+    /** Whether the string has two or more parts it may split into (`isCombined`). */
+    combined: v.boolean(),
+    /** Songs and albums whose tags name it as a whole credit. */
+    uses: v.number(),
+    /** The artists it credits now, in order: itself, or the parts the evidence split it into. */
+    artists: v.array(v.string()),
+  })
+    .index("by_library_key", ["libraryId", "key"])
+    /** A library's combined credits by key, which its managers review. */
+    .index("by_library_combined", ["libraryId", "combined", "key"]),
+
+  /**
+   * One part of a combined credit string, so a change in what the library knows of a name finds
+   * every combined credit that name is part of.
+   */
+  creditParts: defineTable({
+    libraryId: v.id("libraries"),
+    partKey: v.string(),
+    creditKey: v.string(),
+  }).index("by_library_part", ["libraryId", "partKey", "creditKey"]),
+
+  /**
+   * A song whose tags name a combined credit string, so a credit that resolves anew rewrites the
+   * credits of every song it names. Albums are found by their `artistKey`.
+   */
+  creditTracks: defineTable({
+    libraryId: v.id("libraries"),
+    creditKey: v.string(),
+    trackId: v.id("tracks"),
+  }).index("by_library_credit", ["libraryId", "creditKey", "trackId"]),
+
+  /**
+   * A manager's correction of how one library resolves a credit string: `together` keeps it one
+   * artist, also as a run inside longer credits, and `split` splits it whatever the evidence.
+   */
+  creditOverrides: defineTable({
+    libraryId: v.id("libraries"),
+    key: v.string(),
+    /** The string as the manager typed it. */
+    text: v.string(),
+    mode: creditOverride,
+  }).index("by_library_key", ["libraryId", "key"]),
+
+  /** A track crediting an artist, once per artist, which the artist's page lists by title. */
+  trackArtists: defineTable({
+    libraryId: v.id("libraries"),
+    artistId: v.id("artists"),
+    trackId: v.id("tracks"),
+    /** The track's `titleKey`, kept with it. */
+    titleKey: v.string(),
+    tie: v.string(),
+  })
+    .index("by_artist_title", ["artistId", "titleKey", "tie"])
+    .index("by_track", ["trackId"]),
+
+  /** An album crediting an artist, once per artist, which the artist's page lists newest first. */
+  albumArtists: defineTable({
+    libraryId: v.id("libraries"),
+    artistId: v.id("artists"),
+    albumId: v.id("albums"),
+    /** The album's `year`, kept with it. */
+    year: nullable(v.number()),
+    tie: v.string(),
+  })
+    .index("by_artist_year", ["artistId", "year", "tie"])
+    .index("by_album", ["albumId"]),
 
   /**
    * The lyrics a song's own files hold: the lyric files beside it and the lyrics in its tags. One

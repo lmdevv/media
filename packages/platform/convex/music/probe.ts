@@ -14,6 +14,7 @@ import { contentActions } from "../core/permissions/policy";
 import { itemCount, withLibraryItems } from "../core/scans";
 import { CALL_COST, NO_COST, cost, meterFrom } from "./budget";
 import { catalogBatch } from "./catalog";
+import { rechecksFor } from "./credits";
 import { trackFacts } from "./items";
 import { activeJobFor } from "../core/jobs/store";
 import { lookupOf } from "./lyricLookups";
@@ -57,6 +58,7 @@ const scannedOf = (
   lyricsFiles: "",
   lyricsReader: 1,
   lyrics: [],
+  tagsReader: 1,
 });
 
 /**
@@ -101,7 +103,12 @@ export const seed = internalMutation({
       );
 
       const itemIds = await withLibraryItems(ctx, libraryId, async () => {
-        const batch = catalogBatch(musicStore(ctx.db, meterFrom(NO_COST)), libraryId);
+        const batch = catalogBatch(
+          musicStore(ctx.db, meterFrom(NO_COST)),
+          libraryId,
+          rechecksFor(ctx, libraryId),
+        );
+
         const written = await inOrder(items, async (item) => batch.upsert(scannedOf(folder, item)));
 
         const settled = await batch.finish();
@@ -209,8 +216,8 @@ const ROWS_PAGE = 500;
 
 /**
  * One page of a library's tracks as a test recounts them from the rows: how many rows, how many
- * on disk and their length, and the albums and artists those on disk file under. A test sums the
- * pages and compares them with the counters.
+ * on disk and their length, the albums those on disk file under, and the artists they and those
+ * albums credit. A test sums the pages and compares them with the counters.
  */
 export const rows = internalQuery({
   args: { libraryId: v.id("libraries"), cursor: v.union(v.string(), v.null()) },
@@ -235,13 +242,19 @@ export const rows = internalQuery({
     );
 
     const onDisk = found.page.filter((track) => !track.missing);
+    const albumIds = [...new Set(onDisk.map((track) => track.albumId))];
+    const albums = await Promise.all(albumIds.map(async (albumId) => ctx.db.get(albumId)));
+
+    const credited = [...onDisk, ...albums.filter((album) => album !== null)].flatMap(
+      (row) => row.credits?.map((credit) => credit.artistId) ?? [row.artistId],
+    );
 
     return {
       rows: found.page.length,
       present: onDisk.length,
       durationMs: onDisk.reduce((sum, track) => sum + track.durationMs, 0),
-      albumIds: [...new Set(onDisk.map((track) => track.albumId))],
-      artistIds: [...new Set(onDisk.map((track) => track.artistId))],
+      albumIds,
+      artistIds: [...new Set(credited)],
       continueCursor: found.continueCursor,
       isDone: found.isDone,
     };

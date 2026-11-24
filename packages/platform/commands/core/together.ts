@@ -315,6 +315,7 @@ const queueResult = v.object({
           title: v.string(),
           artist: v.string(),
           artistId: v.id("artists"),
+          credits: v.optional(v.array(v.object({ artistId: v.id("artists"), name: v.string() }))),
           album: v.string(),
           albumId: v.id("albums"),
           trackNumber: v.union(v.number(), v.null()),

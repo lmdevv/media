@@ -29,6 +29,7 @@ const albumsResult = v.object({
       title: v.string(),
       artist: v.string(),
       artistId: v.id("artists"),
+      credits: v.optional(v.array(v.object({ artistId: v.id("artists"), name: v.string() }))),
       year: v.union(v.number(), v.null()),
       artUrl: v.union(v.string(), v.null()),
       trackCount: v.number(),
@@ -49,6 +50,7 @@ const getResult = v.object({
     id: v.id("artists"),
     name: v.string(),
     albumCount: v.number(),
+    trackCount: v.optional(v.number()),
     artUrl: v.union(v.string(), v.null()),
   }),
   topTracks: v.array(
@@ -57,6 +59,7 @@ const getResult = v.object({
       title: v.string(),
       artist: v.string(),
       artistId: v.id("artists"),
+      credits: v.optional(v.array(v.object({ artistId: v.id("artists"), name: v.string() }))),
       album: v.string(),
       albumId: v.id("albums"),
       trackNumber: v.union(v.number(), v.null()),
@@ -90,7 +93,50 @@ const listResult = v.object({
       id: v.id("artists"),
       name: v.string(),
       albumCount: v.number(),
+      trackCount: v.optional(v.number()),
       artUrl: v.union(v.string(), v.null()),
+    }),
+  ),
+  continueCursor: v.string(),
+  isDone: v.boolean(),
+  splitCursor: v.optional(v.union(v.string(), v.null())),
+  pageStatus: v.optional(
+    v.union(v.literal("SplitRecommended"), v.literal("SplitRequired"), v.null()),
+  ),
+});
+
+const tracksArgs = v.object({
+  artistId: v.id("artists"),
+  paginationOpts: v.object({
+    numItems: v.number(),
+    cursor: v.union(v.string(), v.null()),
+    endCursor: v.optional(v.union(v.string(), v.null())),
+    id: v.optional(v.number()),
+    maximumRowsRead: v.optional(v.number()),
+    maximumBytesRead: v.optional(v.number()),
+  }),
+});
+
+const tracksResult = v.object({
+  page: v.array(
+    v.object({
+      id: v.id("tracks"),
+      title: v.string(),
+      artist: v.string(),
+      artistId: v.id("artists"),
+      credits: v.optional(v.array(v.object({ artistId: v.id("artists"), name: v.string() }))),
+      album: v.string(),
+      albumId: v.id("albums"),
+      trackNumber: v.union(v.number(), v.null()),
+      discNumber: v.union(v.number(), v.null()),
+      durationMs: v.number(),
+      codec: v.string(),
+      lossless: v.boolean(),
+      bitrate: v.union(v.number(), v.null()),
+      sampleRate: v.union(v.number(), v.null()),
+      bitDepth: v.union(v.number(), v.null()),
+      artUrl: v.union(v.string(), v.null()),
+      liked: v.boolean(),
     }),
   ),
   continueCursor: v.string(),
@@ -103,7 +149,7 @@ const listResult = v.object({
 
 /** The handlers `convex/music/artists.ts` passes to `register`, one per `music.artists` command. */
 export interface Handlers {
-  /** `music.artists.albums` (query, music:read): List an artist's albums, newest year first. */
+  /** `music.artists.albums` (query, music:read): List the albums crediting an artist, newest year first. */
   readonly albums: (
     ctx: Omit<QueryCtx, "auth">,
     args: Infer<typeof albumsArgs>,
@@ -123,6 +169,13 @@ export interface Handlers {
     args: Infer<typeof listArgs>,
     caller: Caller,
   ) => Infer<typeof listResult> | Promise<Infer<typeof listResult>>;
+
+  /** `music.artists.tracks` (query, music:read): List the songs on disk you may play that credit an artist, theirs and the ones they feature on, by title. */
+  readonly tracks: (
+    ctx: Omit<QueryCtx, "auth">,
+    args: Infer<typeof tracksArgs>,
+    caller: Caller,
+  ) => Infer<typeof tracksResult> | Promise<Infer<typeof tracksResult>>;
 }
 
 /** The `api` reference of each `music.artists` command; `commands/refs.ts` checks them. */
@@ -145,6 +198,12 @@ export interface Refs {
     Infer<typeof listArgs>,
     Infer<typeof listResult>
   >;
+  readonly tracks: FunctionReference<
+    "query",
+    "public",
+    Infer<typeof tracksArgs>,
+    Infer<typeof tracksResult>
+  >;
 }
 
 /** Registers the `music.artists` commands as public Convex functions with their declared arguments and result. */
@@ -164,5 +223,11 @@ export const register = (handlers: Handlers) => ({
     args: listArgs,
     returns: listResult,
     handler: async (ctx, args) => handlers.list(ctx, args, await requireCaller(ctx, "music:read")),
+  }),
+  tracks: query({
+    args: tracksArgs,
+    returns: tracksResult,
+    handler: async (ctx, args) =>
+      handlers.tracks(ctx, args, await requireCaller(ctx, "music:read")),
   }),
 });

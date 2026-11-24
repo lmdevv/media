@@ -36,6 +36,7 @@ export const musicTrack = (
   lyricsFiles: "",
   lyricsReader: 1,
   lyrics: [],
+  tagsReader: 1,
   ...fields,
 });
 

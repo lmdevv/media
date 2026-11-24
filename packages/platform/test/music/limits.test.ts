@@ -1,10 +1,13 @@
+import { setTimeout as sleep } from "node:timers/promises";
+
+import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { api, internal } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { fitLyrics, lyricsFieldsOf } from "../../convex/music/fit";
-import { logMark, usageSince } from "../admin";
-import type { CallUsage } from "../admin";
+import { followLog, logMark, runFunction, usageSince } from "../admin";
+import type { CallUsage, LogFollower } from "../admin";
 import { member } from "../devices";
 import { coreStackFromEnvFile } from "../stack-env";
 import type { CoreStack } from "../stack-env";
@@ -473,5 +476,116 @@ describe.skipIf(stack === undefined)("music call limits", { timeout: 600_000 }, 
     expect(same.every((call) => call.writeBytes < 64 * 1024)).toBe(true);
     expect(patched.every((call) => call.writeBytes > 512 * 1024)).toBe(true);
     expect(await totalsOf(stack, libraryId)).toMatchObject({ tracks: 16, albums: 1, artists: 1 });
+  });
+
+  it("credit up to ten long names a song, and re-resolve them when each is credited alone, inside each call's limits", async () => {
+    if (stack === undefined) return;
+    const admin = await member(stack, "credits-limits-admin", "admin");
+    const { libraryId, scanJobId, roots } = await musicLibrary(admin, "Many credits");
+    const [root] = roots;
+
+    if (root === undefined) throw new Error("one folder");
+
+    // 30 names of 45 three-byte characters; each song credits a different run of them.
+    const names = Array.from({ length: 30 }, (_, n) => wide(45, n));
+
+    const pick = (from: number, count: number) =>
+      Array.from({ length: count }, (_, k) => names[(from + k * 7) % names.length] ?? "");
+
+    const combined = Array.from({ length: 40 }, (_, n) =>
+      musicTrack(`${root}/combined/${n}.flac`, 1000, 1, {
+        title: `${wide(100, n)} (feat. ${pick(n + 1, 2).join(" & ")}) [with ${pick(n + 2, 2).join(" & ")}]`,
+        artist: pick(n, 10).join(", "),
+        albumArtist: pick(n + 3, 4).join(" & "),
+        album: wide(300, n % 8),
+      }),
+    );
+
+    const alone = names.map((name, n) =>
+      musicTrack(`${root}/alone/${n}.flac`, 1000, 1, { artist: name, album: wide(300, n) }),
+    );
+
+    const lease = await claimScan(stack, scanJobId);
+    const mark = await logMark(stack);
+    const log = followLog(stack, mark);
+
+    /** Waits for the rechecks and rewrites, reading the log as it goes so it never piles up. */
+    const settled = async (
+      follower: LogFollower,
+      deadline = Date.now() + 120_000,
+    ): Promise<void> => {
+      await follower.catchUp();
+
+      const pending = await runFunction(stack, internal.music.creditsProbe.work, {}, Schema.Finite);
+
+      if (pending === 0) return;
+
+      if (Date.now() > deadline) throw new Error(`${pending} credit rechecks still running`);
+
+      await sleep(200);
+
+      return settled(follower, deadline);
+    };
+
+    const written = await upsertAll(stack, lease, combined);
+
+    await settled(log);
+
+    const artistsOf = async () =>
+      (
+        await runFunction(
+          stack,
+          internal.music.creditsProbe.state,
+          { libraryId },
+          Schema.Struct({ artists: Schema.Array(Schema.Struct({ name: Schema.String })) }),
+        )
+      ).artists.map((artist) => artist.name);
+
+    // No part is credited alone yet: each string is one artist.
+    expect((await artistsOf()).filter((name) => names.includes(name))).toEqual([]);
+    expect(await exact(stack, libraryId)).toBe(true);
+
+    const writtenAlone = await upsertAll(stack, lease, alone);
+
+    await settled(log);
+    await log.catchUp();
+
+    const scanned = log.usage(api.music.scanner.upsert);
+    const rechecks = log.usage(internal.music.credits.recheck);
+    const rewrites = log.usage(internal.music.credits.rewrite);
+
+    expect(scanned.filter((call) => call.committed)).toHaveLength(
+      written.length + writtenAlone.length,
+    );
+    expect(rechecks.length).toBeGreaterThan(0);
+    expect(rewrites.length).toBeGreaterThan(0);
+    expect(inside([...scanned, ...rechecks, ...rewrites].filter((call) => call.committed))).toBe(
+      true,
+    );
+
+    const credited = await runFunction(
+      stack,
+      internal.music.creditsProbe.state,
+      { libraryId },
+      Schema.Struct({
+        tracks: Schema.Array(
+          Schema.Struct({
+            path: Schema.String,
+            credits: Schema.NullOr(Schema.Array(Schema.Struct({ name: Schema.String }))),
+          }),
+        ),
+      }),
+    );
+
+    const combinedCredits = credited.tracks
+      .filter((track) => track.path.includes("/combined/"))
+      .map((track) => track.credits?.length ?? 0);
+
+    expect(combinedCredits).toEqual(combined.map(() => 10));
+    expect((await artistsOf()).toSorted()).toEqual(names.toSorted());
+    expect(await exact(stack, libraryId)).toBe(true);
+    expect(await totalsOf(stack, libraryId)).toMatchObject({ tracks: 70, artists: 30 });
+
+    await finishScan(stack, lease);
   });
 });
