@@ -77,12 +77,15 @@ export function PagedList<Row>({
   list,
   empty,
   rowKey,
+  rowLabel,
   children,
 }: {
   readonly label: string;
   readonly list: Paged<Row>;
   readonly empty: string;
   readonly rowKey: (row: Row) => string;
+  /** Names each row's list item for assistive technology, when its text alone is ambiguous. */
+  readonly rowLabel?: (row: Row) => string;
   readonly children: (row: Row) => ReactNode;
 }) {
   if (list.status === "loading") return <ListSkeleton label={label} />;
@@ -97,7 +100,7 @@ export function PagedList<Row>({
     <div className="flex min-w-0 flex-col">
       <ul aria-label={label} className="flex min-w-0 flex-col">
         {list.rows.map((row) => (
-          <li key={rowKey(row)} className="min-w-0">
+          <li key={rowKey(row)} aria-label={rowLabel?.(row)} className="min-w-0">
             {children(row)}
           </li>
         ))}

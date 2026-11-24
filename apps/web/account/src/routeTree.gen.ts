@@ -24,6 +24,7 @@ import { Route as AdminLibrariesRouteImport } from './routes/admin.libraries'
 import { Route as AdminServerRouteImport } from './routes/admin.server'
 import { Route as TileUserIdRouteImport } from './routes/tile.$userId'
 import { Route as AdminLibrariesLibraryIdRouteImport } from './routes/admin.libraries_.$libraryId'
+import { Route as AdminLibrariesLibraryIdCreditsRouteImport } from './routes/admin.libraries_.$libraryId_.credits'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -129,6 +130,12 @@ const AdminLibrariesLibraryIdRoute = AdminLibrariesLibraryIdRouteImport.update({
   path: '/libraries/$libraryId',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminLibrariesLibraryIdCreditsRoute =
+  AdminLibrariesLibraryIdCreditsRouteImport.update({
+    id: '/libraries_/$libraryId_/credits',
+    path: '/libraries/$libraryId/credits',
+    getParentRoute: () => AdminRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -151,6 +158,7 @@ export interface FileRoutesByFullPath {
   '/tile/$userId': typeof TileUserIdRoute
   '/admin/': typeof AdminIndexRoute
   '/admin/libraries/$libraryId': typeof AdminLibrariesLibraryIdRoute
+  '/admin/libraries/$libraryId/credits': typeof AdminLibrariesLibraryIdCreditsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -172,6 +180,7 @@ export interface FileRoutesByTo {
   '/tile/$userId': typeof TileUserIdRoute
   '/admin': typeof AdminIndexRoute
   '/admin/libraries/$libraryId': typeof AdminLibrariesLibraryIdRoute
+  '/admin/libraries/$libraryId/credits': typeof AdminLibrariesLibraryIdCreditsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -196,6 +205,7 @@ export interface FileRoutesById {
   '/tile/$userId': typeof TileUserIdRoute
   '/admin/': typeof AdminIndexRoute
   '/admin/libraries_/$libraryId': typeof AdminLibrariesLibraryIdRoute
+  '/admin/libraries_/$libraryId_/credits': typeof AdminLibrariesLibraryIdCreditsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -220,6 +230,7 @@ export interface FileRouteTypes {
     | '/tile/$userId'
     | '/admin/'
     | '/admin/libraries/$libraryId'
+    | '/admin/libraries/$libraryId/credits'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -241,6 +252,7 @@ export interface FileRouteTypes {
     | '/tile/$userId'
     | '/admin'
     | '/admin/libraries/$libraryId'
+    | '/admin/libraries/$libraryId/credits'
   id:
     | '__root__'
     | '/'
@@ -264,6 +276,7 @@ export interface FileRouteTypes {
     | '/tile/$userId'
     | '/admin/'
     | '/admin/libraries_/$libraryId'
+    | '/admin/libraries_/$libraryId_/credits'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -427,6 +440,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminLibrariesLibraryIdRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/admin/libraries_/$libraryId_/credits': {
+      id: '/admin/libraries_/$libraryId_/credits'
+      path: '/libraries/$libraryId/credits'
+      fullPath: '/admin/libraries/$libraryId/credits'
+      preLoaderRoute: typeof AdminLibrariesLibraryIdCreditsRouteImport
+      parentRoute: typeof AdminRoute
+    }
   }
 }
 
@@ -454,6 +474,7 @@ interface AdminRouteChildren {
   AdminServerRoute: typeof AdminServerRoute
   AdminIndexRoute: typeof AdminIndexRoute
   AdminLibrariesLibraryIdRoute: typeof AdminLibrariesLibraryIdRoute
+  AdminLibrariesLibraryIdCreditsRoute: typeof AdminLibrariesLibraryIdCreditsRoute
 }
 
 const AdminRouteChildren: AdminRouteChildren = {
@@ -466,6 +487,7 @@ const AdminRouteChildren: AdminRouteChildren = {
   AdminServerRoute: AdminServerRoute,
   AdminIndexRoute: AdminIndexRoute,
   AdminLibrariesLibraryIdRoute: AdminLibrariesLibraryIdRoute,
+  AdminLibrariesLibraryIdCreditsRoute: AdminLibrariesLibraryIdCreditsRoute,
 }
 
 const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
