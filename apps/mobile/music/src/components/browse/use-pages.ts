@@ -1,7 +1,9 @@
 import { useAllPages, usePages as useCorePages } from "@media/mobile-core/pages";
 import type { Paged, PagedQuery, PageOpts } from "@media/mobile-core/pages";
+import { useMemo } from "react";
 
-import type { AlbumCard, ArtistCard, Track } from "@/lib/models";
+import { distinctTracks } from "@/lib/artists";
+import type { AlbumCard, ArtistCard, ArtistId, Track } from "@/lib/models";
 import { useMusic } from "@/lib/platform";
 
 type ChainStatus =
@@ -73,3 +75,22 @@ export const useArtistPages = (options: PagesOptions): Pages<ArtistCard> =>
 /** The songs you may play, by title, a page at a time. */
 export const useTrackPages = (options: PagesOptions): Pages<Track> =>
   usePages(useMusic().tracks.list, options);
+
+/**
+ * The songs crediting an artist, by title, a page at a time, each once: their own, and the ones
+ * they share or only feature on.
+ */
+export const useArtistSongPages = (artistId: ArtistId, limit: number): Pages<Track> => {
+  const pages = pagesOf(
+    useCorePages(
+      useMusic().artists.tracks,
+      (paginationOpts) => ({ artistId, paginationOpts }),
+      limit,
+    ),
+  );
+
+  const { items } = pages;
+  const distinct = useMemo(() => distinctTracks(items), [items]);
+
+  return { ...pages, items: distinct };
+};

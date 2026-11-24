@@ -7,6 +7,7 @@ import { useArtistPages } from "@/components/browse/use-pages";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Text } from "@/components/ui/text";
 import { countOf } from "@/lib/format";
+import { artistSummary } from "@/lib/artists";
 import { LIBRARY_HOME } from "@/lib/details";
 import { useMusic, useRead } from "@/lib/platform";
 
@@ -44,9 +45,7 @@ export default function Artists() {
           </View>
         ) : null
       }
-      renderItem={({ item }) => (
-        <ArtistRow artist={item} subtitle={countOf(item.albumCount, "album")} />
-      )}
+      renderItem={({ item }) => <ArtistRow artist={item} subtitle={artistSummary(item)} />}
     />
   );
 }

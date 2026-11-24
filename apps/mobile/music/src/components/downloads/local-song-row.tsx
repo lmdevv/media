@@ -2,6 +2,7 @@ import type { LocalCopy } from "@/downloads/sync";
 import { View } from "react-native";
 
 import { Row } from "@/components/ui/row";
+import { creditText } from "@/lib/credits";
 import { formatBytes } from "@/lib/format";
 
 import { TrackDownloadGlyph } from "./download-glyphs";
@@ -23,7 +24,8 @@ export function LocalSongRow({
   /** Opens the Remove download sheet; Downloaded gives it only to a song downloaded on its own. */
   readonly onRemove?: (() => void) | undefined;
 }) {
-  const { title, artist } = copy.track;
+  const { title } = copy.track;
+  const artist = creditText(copy.track);
 
   return (
     <RemovableRow

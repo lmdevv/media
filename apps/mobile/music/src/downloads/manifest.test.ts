@@ -1,7 +1,8 @@
 import { Brand } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { asPlaylistId, asUserId } from "@/lib/models";
+import { creditText } from "@/lib/credits";
+import { asArtistId, asPlaylistId, asUserId } from "@/lib/models";
 import type { Playlist, PlaylistEntry } from "@/lib/models";
 import { albumOf, trackOf } from "@/lib/test-fixtures";
 
@@ -58,6 +59,26 @@ describe("manifestOf", () => {
       ["One Love", UNKNOWN_REVISION],
     ]);
     expect(manifest.entries[0]?.track).not.toHaveProperty("liked");
+  });
+
+  it("keeps a song's credits and names a song download by every artist it credits", () => {
+    const mora = asArtistId("ar-Mora");
+
+    const song = {
+      ...trackOf("TOA (feat. Young Miko)", "Mora"),
+      artistId: mora,
+      credits: [
+        { artistId: mora, name: "Mora" },
+        { artistId: asArtistId("ar-Young Miko"), name: "Young Miko" },
+      ],
+    };
+
+    const songPin: DownloadPin = { ...pin, target: { kind: "track", id: song.id } };
+    const manifest = manifestOf(songPin, { kind: "track", track: song }, kept([]));
+
+    expect(manifest.entries[0]?.track.credits).toEqual(song.credits);
+    expect(manifest.pin).toMatchObject({ subtitle: creditText(song) });
+    expect(creditText(song)).toContain("Young Miko");
   });
 
   it("leaves out a song the core says expired here or is gone", () => {

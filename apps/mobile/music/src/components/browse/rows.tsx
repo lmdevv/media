@@ -4,6 +4,7 @@ import { View } from "react-native";
 
 import { useSongDownloadLine } from "@/components/downloads/song-download";
 import { Row, RowChevron, RowMore } from "@/components/ui/row";
+import { creditText } from "@/lib/credits";
 import { songSheetParams } from "@/lib/song-sheet";
 import type { SheetSong } from "@/lib/song-sheet";
 
@@ -23,8 +24,8 @@ export const openArtist = (artist: Pick<ArtistCard, "id">): void => {
 };
 
 /**
- * A song: art, title, artist with its download state, and its actions. The playing song's title is
- * the accent.
+ * A song: art, title, its artists with its download state, and its actions. The playing song's
+ * title is the accent. The row's tap plays the song, so its artists show as one line of text.
  */
 export function TrackRow({
   song,
@@ -35,12 +36,12 @@ export function TrackRow({
 }: {
   readonly song: SheetSong;
   readonly artUrl: string | null;
-  /** The artist by default; search results say more. */
+  /** The song's artists by default; search results say more. */
   readonly subtitle?: string;
   readonly active: boolean;
   readonly onPress: () => void;
 }) {
-  const line = useSongDownloadLine(song.id, song.title, subtitle ?? song.artist, onPress);
+  const line = useSongDownloadLine(song.id, song.title, subtitle ?? creditText(song), onPress);
 
   return (
     <View className="px-page">
@@ -59,9 +60,9 @@ export function TrackRow({
 }
 
 /** What an album row shows. */
-type AlbumLine = Pick<AlbumCard, "id" | "title" | "artist" | "year" | "artUrl">;
+type AlbumLine = Pick<AlbumCard, "id" | "title" | "artist" | "credits" | "year" | "artUrl">;
 
-/** An album as a row: art, title, and artist with the year. */
+/** An album as a row: art, title, and its artists with the year. */
 export function AlbumRow({
   album,
   onPress,
@@ -73,7 +74,9 @@ export function AlbumRow({
     <View className="px-page">
       <Row
         title={album.title}
-        subtitle={album.year === null ? album.artist : `${album.artist} · ${String(album.year)}`}
+        subtitle={
+          album.year === null ? creditText(album) : `${creditText(album)} · ${String(album.year)}`
+        }
         leading={{ kind: "art", url: album.artUrl, recyclingKey: album.id }}
         trailing={<RowChevron />}
         onPress={onPress ?? (() => openAlbum(album))}
@@ -82,7 +85,7 @@ export function AlbumRow({
   );
 }
 
-/** An artist as a row: art, name, and how many of their albums the library holds. */
+/** An artist as a row: art, name, and what the library holds of theirs. */
 export function ArtistRow({
   artist,
   subtitle,

@@ -11,6 +11,7 @@ import { BarTransport } from "@/components/playback/transport";
 import { Artwork } from "@/components/ui/artwork";
 import { IconButton } from "@/components/ui/icon-button";
 import { Text } from "@/components/ui/text";
+import { creditText } from "@/lib/credits";
 import { formatBadge } from "@/lib/playback-format";
 import { whereItPlays } from "@/lib/this-device";
 import { useWindowLayout } from "@/lib/window-layout";
@@ -69,6 +70,7 @@ export function PlayerBar({ inspector }: { readonly inspector: Inspector }) {
   const badge = extras ? formatBadge(nowPlaying) : null;
   const lit = inspector.open ? inspector.tab : null;
   const lyrics = lyricsButton(inspector.offer, false);
+  const artists = creditText(nowPlaying);
 
   return (
     <View
@@ -79,7 +81,7 @@ export function PlayerBar({ inspector }: { readonly inspector: Inspector }) {
         <View className={`flex-row items-center gap-3 ${song}`}>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`Now playing: ${nowPlaying.title}, ${nowPlaying.artist}`}
+            accessibilityLabel={`Now playing: ${nowPlaying.title}, ${artists}`}
             accessibilityHint="Opens Now Playing"
             onPress={() => router.push("/player")}
             className="min-w-0 flex-1 flex-row items-center gap-3 active:opacity-60"
@@ -94,7 +96,7 @@ export function PlayerBar({ inspector }: { readonly inspector: Inspector }) {
                 {nowPlaying.title}
               </Text>
               <Text variant="secondary" tone="muted" numberOfLines={1}>
-                {nowPlaying.artist}
+                {artists}
               </Text>
             </View>
           </Pressable>

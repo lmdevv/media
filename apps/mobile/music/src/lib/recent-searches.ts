@@ -1,6 +1,6 @@
-import { Option, Schema } from "effect";
+import { Option, Schema, Struct } from "effect";
 
-import { AlbumId, ArtistId, TrackId } from "@/downloads/sync/models";
+import { AlbumId, ArtistId, TrackCredits, TrackId } from "@/downloads/sync/models";
 
 import type { AlbumCard, ArtistCard, Track } from "./models";
 
@@ -14,6 +14,8 @@ export const RecentItem = Schema.Union([
     title: Schema.String,
     artist: Schema.String,
     artistId: ArtistId,
+    /** Absent from a song searched before the app kept credits, which credits `artistId`. */
+    credits: Schema.optionalKey(TrackCredits),
     album: Schema.String,
     albumId: AlbumId,
     artUrl: ArtUrl,
@@ -60,14 +62,17 @@ const utf8 = new TextEncoder();
 /** A song as recently searched. */
 export const recentTrack = (track: Track): RecentItem => ({
   kind: "track",
-  id: track.id,
-  title: track.title,
-  artist: track.artist,
-  artistId: track.artistId,
-  album: track.album,
-  albumId: track.albumId,
-  artUrl: track.artUrl,
-  liked: track.liked,
+  ...Struct.pick(track, [
+    "id",
+    "title",
+    "artist",
+    "artistId",
+    "credits",
+    "album",
+    "albumId",
+    "artUrl",
+    "liked",
+  ]),
 });
 
 /** An album as recently searched. */

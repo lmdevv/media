@@ -8,6 +8,7 @@ import { FastForward, List, Share, Speaker, Users } from "lucide-react-native";
 import type { LucideIcon } from "lucide-react-native";
 import { useState } from "react";
 
+import { ArtistMenu } from "@/components/browse/artist-menu";
 import { openArtist } from "@/components/browse/rows";
 import { DownloadRow } from "@/components/downloads/download-row";
 import { useCopyLink } from "@/components/playlists/copy-link";
@@ -15,6 +16,7 @@ import { useCloseAfter } from "@/components/playlists/use-close-after";
 import { Row, RowCheck, RowChevron } from "@/components/ui/row";
 import { SheetLayout } from "@/components/ui/sheet-layout";
 import { Text } from "@/components/ui/text";
+import { creditText } from "@/lib/credits";
 import { countOf } from "@/lib/format";
 import { useDevices, usePlayerActions } from "@/player";
 
@@ -39,7 +41,11 @@ const QUIET_ACTIONS = {
 >;
 
 const subtitleOf = ({ album, tracks }: AlbumDetail): string =>
-  [album.artist, album.year === null ? null : String(album.year), countOf(tracks.length, "song")]
+  [
+    creditText(album),
+    album.year === null ? null : String(album.year),
+    countOf(tracks.length, "song"),
+  ]
     .filter((part) => part !== null)
     .join(" · ");
 
@@ -109,14 +115,17 @@ function Sheet({ detail }: { readonly detail: AlbumDetail }) {
           }
         />
       )}
-      <Row
-        title="Go to artist"
-        leading={{ kind: "icon", icon: Users }}
-        onPress={() => {
+      <ArtistMenu
+        item={album}
+        label="Go to artist"
+        role="button"
+        onOpen={(id) => {
           router.back();
-          openArtist({ id: album.artistId });
+          openArtist({ id });
         }}
-      />
+      >
+        <Row title="Go to artist" leading={{ kind: "icon", icon: Users }} />
+      </ArtistMenu>
       {quiet("copy")}
       {failure === null ? null : (
         <Text variant="calloutMedium" tone="danger" className="pt-3">

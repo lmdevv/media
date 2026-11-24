@@ -6,8 +6,10 @@ import { Pressable, View } from "react-native";
 import { IconButton } from "@/components/ui/icon-button";
 import { Text } from "@/components/ui/text";
 import { Artwork } from "@/components/ui/artwork";
+import { creditText } from "@/lib/credits";
 import { playsOn, progressOf } from "@/lib/playback-format";
 import { useNowPlaying, usePlaybackPosition, usePlayerActions } from "@/player";
+import type { NowPlaying } from "@/player";
 
 function Progress() {
   const { positionMs, durationMs } = usePlaybackPosition();
@@ -29,6 +31,7 @@ const openNowPlaying = () => {
 /** What the mini player shows of a song. */
 interface Shown {
   readonly title: string;
+  /** The song's artists as one line: the player opens Now Playing, so they aren't links. */
   readonly artist: string;
   readonly artUrl: string | null;
 }
@@ -40,12 +43,19 @@ export const HIDDEN_SONG: Shown = {
   artUrl: null,
 };
 
+/** What the mini player shows of the playing song, of a Jam's hidden one, or null for none. */
+const shownOf = (song: NowPlaying | null, hidden: boolean): Shown | null => {
+  if (song !== null) return { title: song.title, artist: creditText(song), artUrl: song.artUrl };
+
+  return hidden ? HIDDEN_SONG : null;
+};
+
 /** The mini player for the accessory's current placement. */
 export function MiniPlayer() {
   const placement = NativeTabs.BottomAccessory.usePlacement();
   const { nowPlaying: song, status, hidden } = useNowPlaying();
   const actions = usePlayerActions();
-  const nowPlaying = song ?? (hidden ? HIDDEN_SONG : null);
+  const nowPlaying = shownOf(song, hidden);
 
   if (nowPlaying === null) return null;
   const playing = playsOn(status);

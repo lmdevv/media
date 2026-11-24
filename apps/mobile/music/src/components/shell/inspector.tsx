@@ -11,6 +11,7 @@ import Animated, {
   SlideOutRight,
 } from "react-native-reanimated";
 
+import { ArtistMenu } from "@/components/browse/artist-menu";
 import { AudioDetailRows } from "@/components/playback/audio-details";
 import { EdgeFade } from "@/components/playback/edge-fade";
 import { LikeButton } from "@/components/playback/like-button";
@@ -21,6 +22,7 @@ import { IconButton } from "@/components/ui/icon-button";
 import { Icon } from "@/components/ui/icon";
 import { Row } from "@/components/ui/row";
 import { Text } from "@/components/ui/text";
+import { creditArtists, creditText } from "@/lib/credits";
 import type { InspectorTab } from "@/lib/inspector";
 import { useThemeColor, useThemeLength } from "@/lib/theme-color";
 import { useWindowLayout } from "@/lib/window-layout";
@@ -95,7 +97,7 @@ function SongText({ song }: { readonly song: NowPlaying }) {
         {song.title}
       </Text>
       <Text variant="callout" tone="muted" numberOfLines={1}>
-        {`${song.artist} · ${song.album}`}
+        {`${creditText(song)} · ${song.album}`}
       </Text>
     </View>
   );
@@ -111,7 +113,8 @@ function SongActions({ song }: { readonly song: NowPlaying }) {
 }
 
 function About({ song, background }: { readonly song: NowPlaying; readonly background: string }) {
-  const { albumId, artistId } = song;
+  const { albumId } = song;
+  const several = creditArtists(song).length > 1;
 
   return (
     <View className="min-h-0 flex-1">
@@ -125,15 +128,21 @@ function About({ song, background }: { readonly song: NowPlaying; readonly backg
             router.push({ pathname: "/album/[id]", params: { id: albumId } });
           }}
         />
-        <Row
-          title={song.artist}
-          subtitle="Artist"
-          leading={{ kind: "icon", icon: MicVocal }}
-          trailing={<Icon icon={ChevronRight} tone="muted" size="inline" />}
-          onPress={() => {
-            router.push({ pathname: "/artist/[id]", params: { id: artistId } });
+        <ArtistMenu
+          item={song}
+          label={`${several ? "Artists" : "Artist"}, ${creditText(song)}`}
+          role="button"
+          onOpen={(id) => {
+            router.push({ pathname: "/artist/[id]", params: { id } });
           }}
-        />
+        >
+          <Row
+            title={creditText(song)}
+            subtitle={several ? "Artists" : "Artist"}
+            leading={{ kind: "icon", icon: MicVocal }}
+            trailing={<Icon icon={ChevronRight} tone="muted" size="inline" />}
+          />
+        </ArtistMenu>
         <AudioDetailRows song={song} />
         <Row
           title="Playback settings"

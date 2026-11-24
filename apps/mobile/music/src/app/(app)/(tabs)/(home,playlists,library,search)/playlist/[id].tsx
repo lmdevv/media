@@ -1,6 +1,7 @@
 import { PlaylistId } from "@/lib/ids";
 import type { PlaylistDetail, PlaylistEntry } from "@/lib/models";
 import { can, canEditPlaylistItems } from "@/lib/capabilities";
+import { creditText } from "@/lib/credits";
 import { router, useLocalSearchParams } from "expo-router";
 import { Ellipsis, ListMusic, Plus } from "lucide-react-native";
 
@@ -27,12 +28,18 @@ const REASONS = {
   no_access: "In a library you can’t open",
 } as const;
 
+/** Why an entry can't play, or its song's artists. */
+const subtitleOf = (entry: PlaylistEntry): string => {
+  if (!entry.available && entry.reason !== null) return REASONS[entry.reason];
+
+  return entry.track === null ? "" : creditText(entry.track);
+};
+
 const songOf = (entry: PlaylistEntry): SongEntry => ({
   key: entry.itemId,
   song: entry.track,
   title: entry.track?.title ?? "Unavailable song",
-  subtitle:
-    entry.available || entry.reason === null ? (entry.track?.artist ?? "") : REASONS[entry.reason],
+  subtitle: subtitleOf(entry),
   artUrl: entry.track?.artUrl ?? null,
   playable: entry.available && entry.track !== null,
 });

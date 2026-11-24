@@ -43,7 +43,7 @@ import { useConnect } from "@media/player/use-connect";
 import type { ConnectView, MusicItem } from "@media/player/use-connect";
 import type { PlatformSdk } from "@media/sdk/promise";
 import { usePlatform } from "@media/sdk/react";
-import { Option, Schema } from "effect";
+import { Option, Schema, Struct } from "effect";
 import { requireNativeModule } from "expo";
 import type { EventEmitter } from "expo";
 import { randomUUID } from "expo-crypto";
@@ -358,20 +358,23 @@ const trackOfCopy = (copies: DownloadedCopies, trackId: string): Track | null =>
   const { track } = copy;
 
   return {
-    id: track.id,
-    title: track.title,
-    artist: track.artist,
-    artistId: track.artistId,
-    album: track.album,
-    albumId: track.albumId,
-    trackNumber: track.trackNumber,
-    discNumber: track.discNumber,
-    durationMs: track.durationMs,
-    codec: track.codec,
-    lossless: track.lossless,
-    bitrate: track.bitrate,
-    sampleRate: track.sampleRate,
-    bitDepth: track.bitDepth,
+    ...Struct.pick(track, [
+      "id",
+      "title",
+      "artist",
+      "artistId",
+      "credits",
+      "album",
+      "albumId",
+      "trackNumber",
+      "discNumber",
+      "durationMs",
+      "codec",
+      "lossless",
+      "bitrate",
+      "sampleRate",
+      "bitDepth",
+    ]),
     artUrl: copy.artUri,
     liked: false,
   };

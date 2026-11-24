@@ -1,5 +1,6 @@
 import { lyricsButton, lyricsOffer } from "@media/player/lyrics";
 import type { LyricsAnswer, LyricsOffer } from "@media/player/lyrics";
+import { Struct } from "effect";
 import * as Haptics from "expo-haptics";
 import { router, useNavigation } from "expo-router";
 import { useMusicSession } from "@media/player/session-react";
@@ -28,6 +29,7 @@ import type { SharedValue } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { scheduleOnRN } from "react-native-worklets";
 
+import { ArtistMenu } from "@/components/browse/artist-menu";
 import { openSongActions } from "@/components/browse/rows";
 import { LikeButton } from "@/components/playback/like-button";
 import { Artwork } from "@/components/ui/artwork";
@@ -36,6 +38,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Icon } from "@/components/ui/icon";
 import { IconButton } from "@/components/ui/icon-button";
 import { Text } from "@/components/ui/text";
+import { creditText } from "@/lib/credits";
 import { CLOSED, layoutOf, partsOf, pressedPanel } from "@/lib/now-playing-layout";
 import type { NowPlayingLayout, NowPlayingParts, Panel, StageView } from "@/lib/now-playing-layout";
 import type { SheetSong } from "@/lib/song-sheet";
@@ -66,12 +69,7 @@ const leaveTo = (go: () => void) => {
 
 const sheetSongOf = (song: NowPlaying): SheetSong => ({
   id: song.trackId,
-  title: song.title,
-  artist: song.artist,
-  artistId: song.artistId,
-  album: song.album,
-  albumId: song.albumId,
-  liked: song.liked,
+  ...Struct.pick(song, ["title", "artist", "artistId", "credits", "album", "albumId", "liked"]),
 });
 
 const MORPH = { duration: 450, dampingRatio: 0.9 } as const;
@@ -219,6 +217,7 @@ export function MoreButton({
   );
 }
 
+/** The song's artists, which open the artist, or a menu of them when it credits several. */
 function ArtistLink({
   song,
   variant,
@@ -226,24 +225,23 @@ function ArtistLink({
   readonly song: NowPlaying;
   readonly variant: "body" | "secondary";
 }) {
-  const { artistId } = song;
+  const artists = creditText(song);
 
   return (
-    <Pressable
-      accessibilityRole="link"
-      accessibilityLabel={song.artist}
-      accessibilityHint="Opens the artist"
-      onPress={() => {
+    <ArtistMenu
+      item={song}
+      label={artists}
+      className="self-start"
+      onOpen={(id) => {
         leaveTo(() => {
-          router.push({ pathname: "/artist/[id]", params: { id: artistId } });
+          router.push({ pathname: "/artist/[id]", params: { id } });
         });
       }}
-      className="self-start active:opacity-60"
     >
       <Text variant={variant} tone="muted" numberOfLines={1}>
-        {song.artist}
+        {artists}
       </Text>
-    </Pressable>
+    </ArtistMenu>
   );
 }
 
