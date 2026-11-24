@@ -70,9 +70,13 @@ function CommandRow({
       aria-checked={item.checked}
       aria-busy={busy || undefined}
       data-active={active || undefined}
+      tabIndex={-1}
       onPointerMove={active ? undefined : onPoint}
       onMouseDown={(event) => event.preventDefault()}
       onClick={onChoose}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") onChoose();
+      }}
       className={cn(
         "flex shrink-0 cursor-pointer flex-col justify-center gap-2 rounded-control px-3 font-sans",
         running ? "h-14" : "h-10",

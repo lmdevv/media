@@ -393,12 +393,12 @@ function Candidates({
   if (results.status === "unavailable") {
     return (
       <output className="flex flex-col gap-1 px-3.5 py-4">
-        <p className="font-sans text-body/body font-semibold text-text">
+        <span className="font-sans text-body/body font-semibold text-text">
           TMDB search isn’t available on this server
-        </p>
-        <p className="font-sans text-label/label text-text-muted">
+        </span>
+        <span className="font-sans text-label/label text-text-muted">
           Edit the title, year, or TMDB ID by hand below.
-        </p>
+        </span>
       </output>
     );
   }

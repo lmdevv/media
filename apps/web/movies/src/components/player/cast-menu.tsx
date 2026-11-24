@@ -202,7 +202,7 @@ export function CastingState({
       )}
     >
       <CastIcon className="size-10 text-text" strokeWidth={1.5} aria-hidden />
-      <p className="text-lead/body font-semibold text-text">Playing on {deviceName}</p>
+      <span className="text-lead/body font-semibold text-text">Playing on {deviceName}</span>
     </output>
   );
 }

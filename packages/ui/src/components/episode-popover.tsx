@@ -112,6 +112,8 @@ function EpisodeList<Id extends string>({
     <div
       ref={listRef}
       data-slot="episode-list"
+      // Catches the arrow keys its season chips and episode rows send up; it is no control itself.
+      role="presentation"
       tabIndex={-1}
       onKeyDown={onListKeyDown}
       className={cn(
