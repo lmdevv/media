@@ -44,7 +44,7 @@ export const Route = createRootRouteWithContext<RouterAppContext>()({
 });
 
 const SHORTCUTS: HotkeysProviderOptions = {
-  hotkey: { ...shortcutOptions, target: window, requireReset: true, timeout: 1_000 },
+  hotkey: { ...shortcutOptions, target: window, timeout: 1_000 },
 };
 
 function RootComponent() {

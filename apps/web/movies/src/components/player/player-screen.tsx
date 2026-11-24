@@ -25,7 +25,6 @@ import { fixedValue, useLiveValue } from "@media/ui/lib/live-value";
 import type { LiveValue } from "@media/ui/lib/live-value";
 import { unlessYielding } from "@media/ui/lib/focus-policy";
 import { cn } from "@media/ui/lib/utils";
-import { useHotkeys } from "@tanstack/react-hotkeys";
 import { useNavigate } from "@tanstack/react-router";
 import { Effect, Fiber, Stream } from "effect";
 import {
@@ -49,6 +48,7 @@ import type { EpisodeId, MediaFileId, MediaVersion, PlaybackDetail, TitleId } fr
 import { loadQualityChoice, saveQualityChoice } from "@/lib/device-storage";
 import { episodeCode } from "@/lib/format";
 import { HOTKEYS } from "@/lib/hotkeys";
+import { useShortcuts } from "@/lib/use-shortcuts";
 import { audioTrackLabel, subtitleTrackLabels } from "@/lib/media-facts";
 import { volumeIsSettable } from "@/playback/browser-support";
 import { PlaybackPhase, StartChoice } from "@/playback/playback-controller";
@@ -1034,7 +1034,7 @@ export function PlayerScreen({
       remotePlayback?.active !== true,
   });
 
-  useHotkeys([
+  useShortcuts([
     {
       hotkey: HOTKEYS["command-menu.toggle"],
       callback: (event) => {

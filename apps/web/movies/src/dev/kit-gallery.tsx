@@ -37,7 +37,6 @@ import {
   CaptionsIcon,
 } from "lucide-react";
 import { Link } from "@tanstack/react-router";
-import { useHotkeys } from "@tanstack/react-hotkeys";
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
@@ -48,6 +47,7 @@ import { cn } from "@media/ui/lib/utils";
 
 import { MoviesMark } from "@/components/shell/movies-mark";
 import { HOTKEYS } from "@/lib/hotkeys";
+import { useShortcuts } from "@/lib/use-shortcuts";
 
 import { ART } from "./sample-art";
 
@@ -367,7 +367,7 @@ export function KitGallery() {
   const [query, setQuery] = useState("");
   const duration = 3480;
 
-  useHotkeys([
+  useShortcuts([
     {
       hotkey: HOTKEYS["command-menu.toggle"],
       callback: (event) => {

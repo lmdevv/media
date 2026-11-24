@@ -129,6 +129,22 @@ test("a held key runs its shortcut once", async ({ page }) => {
   await expect(focused).toContainText("Dune: Part Two");
 });
 
+test("a held key runs nothing when something else took its first press", async ({ page }) => {
+  await openKit(page);
+  await page.evaluate(() => {
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "j" && !event.repeat) event.stopPropagation();
+    });
+  });
+
+  await page.keyboard.down("j");
+  await page.keyboard.down("j");
+  await page.keyboard.down("j");
+  await page.keyboard.up("j");
+  await page.waitForTimeout(200);
+  expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
+});
+
 test("a shortcut marks its key press handled and skips one something else handled", async ({
   page,
 }) => {

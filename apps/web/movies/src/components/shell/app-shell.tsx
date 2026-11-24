@@ -6,13 +6,13 @@ import { SearchTrigger, TopBar, TopBarLink } from "@media/ui/components/top-bar"
 import { unlessYielding } from "@media/ui/lib/focus-policy";
 import { moveRowFocus } from "@media/ui/lib/row-focus";
 import { cn } from "@media/ui/lib/utils";
-import { useHotkeys } from "@tanstack/react-hotkeys";
 import { Link, useLocation, useMatches, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
 import { SWITCH_PERSON_COMMAND, useCommandRoot } from "@/commands";
 import { HOTKEYS } from "@/lib/hotkeys";
+import { useShortcuts } from "@/lib/use-shortcuts";
 import { nameOf, useMe, useScopes } from "@/session/session";
 
 import { MoviesMark } from "./movies-mark";
@@ -94,7 +94,7 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
     </button>
   );
 
-  useHotkeys([
+  useShortcuts([
     {
       hotkey: HOTKEYS["command-menu.toggle"],
       callback: (event) => {
