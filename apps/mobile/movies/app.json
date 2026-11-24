@@ -3,7 +3,7 @@
     "name": "movies",
     "slug": "movies",
     "scheme": "movies",
-    "version": "0.7.0",
+    "version": "0.8.0",
     "orientation": "default",
     "userInterfaceStyle": "automatic",
     "backgroundColor": "#000000",
