@@ -1,4 +1,5 @@
 import {
+  MAX_CREDIT_OVERRIDES,
   MAX_CREDIT_PARTS,
   MAX_KEPT_PARTS,
   creditParts,
@@ -27,9 +28,6 @@ import type { MusicStore, Stored } from "./write";
  * (`music/credits:recheck`) once the mutation commits. Resolved credits therefore depend only on
  * the library's tags and its managers' corrections, never on the order the tags arrived in.
  */
-
-/** The most corrections one library keeps; a call that resolves a credit reads them all at once. */
-export const MAX_OVERRIDES = 256;
 
 /** The most names one scheduled recheck carries (`music/credits:recheck`). */
 export const RECHECK_KEYS = 64;
@@ -144,7 +142,7 @@ export const creditLedger = (
       .take(
         "creditOverrides",
         (q) => q.withIndex("by_library_key", (index) => index.eq("libraryId", libraryId)),
-        MAX_OVERRIDES,
+        MAX_CREDIT_OVERRIDES,
       )
       .then((rows) => new Map(rows.map((row) => [row.key, row.mode])));
 

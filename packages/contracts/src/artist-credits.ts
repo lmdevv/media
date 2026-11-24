@@ -1,8 +1,8 @@
 /**
  * How a song's and an album's tags name their artists, shared by the core, which links each song
- * and album to every artist it credits (ADR 0024, "Artist credits"), and the server, which joins
- * separate artist values into the string a client shows. Plain TypeScript, so the core's Convex
- * functions import it too.
+ * and album to every artist it credits (ADR 0024, "Artist credits"), the server, which joins
+ * separate artist values into the string a client shows, and the clients, which link each credited
+ * name in that string. Plain TypeScript, so the core's Convex functions import it too.
  *
  * Most tags name several artists in one string, Apple and Spotify style: "Mora & JHAYCO", "Mora,
  * Bad Bunny & Sech", "TOA (feat. Young Miko)". Band names use the same characters ("Mumford &
@@ -112,6 +112,12 @@ export const distinctNames = (names: Iterable<string>): ReadonlyArray<string> =>
 
 /** A manager's correction of how a credit string resolves. */
 export type CreditOverride = "together" | "split";
+
+/**
+ * The most corrections one library keeps: the core refuses another, and a call that resolves a
+ * credit reads them all at once.
+ */
+export const MAX_CREDIT_OVERRIDES = 256;
 
 /**
  * The longest run of parts, in parts, that a whole credit elsewhere in the library keeps together
@@ -238,4 +244,123 @@ export const joinCreditNames = (names: ReadonlyArray<string>): string => {
   if (last === undefined) return "";
 
   return names.length < 2 ? last : `${names.slice(0, -1).join(", ")} & ${last}`;
+};
+
+/** One artist a song or an album credits, as the music commands answer it. */
+export interface ShownCredit<ArtistId> {
+  readonly artistId: ArtistId;
+  /** The name as the song's or album's tags spell it. */
+  readonly name: string;
+}
+
+/** A song or an album as a client shows its artists. */
+export interface CreditedItem<ArtistId> {
+  /** The artist as the tags write it, which a client shows. */
+  readonly artist: string;
+  /** The first artist it credits. */
+  readonly artistId: ArtistId;
+  /**
+   * Every artist it credits, in order. Absent from a song or album the core has not read again
+   * since it kept credits, which credits its one artist under the name it shows.
+   */
+  readonly credits?: ReadonlyArray<ShownCredit<ArtistId>>;
+}
+
+/** The artists `item` credits, in order: its credits, or its one artist under the name it shows. */
+export const creditsOf = <ArtistId>(
+  item: CreditedItem<ArtistId>,
+): ReadonlyArray<ShownCredit<ArtistId>> =>
+  item.credits !== undefined && item.credits.length > 0
+    ? item.credits
+    : [{ artistId: item.artistId, name: item.artist }];
+
+/** A piece of the artist line a client shows: text that joins names, or one credited artist. */
+export type CreditPiece<ArtistId> =
+  | { readonly kind: "text"; readonly text: string }
+  | { readonly kind: "artist"; readonly artistId: ArtistId; readonly name: string };
+
+/**
+ * Where `name` next appears in `text` from `from` on, ignoring case, or -1: first as a run of the
+ * text's parts, so "eat" in "A feat. Eat" is the last part, not inside " feat. ", else anywhere.
+ */
+const nameAt = (
+  text: string,
+  parts: ReadonlyArray<CreditPart>,
+  name: string,
+  from: number,
+): number => {
+  const key = name.toLowerCase();
+
+  const matches = (start: number): boolean =>
+    text.slice(start, start + name.length).toLowerCase() === key;
+
+  const run = parts.find(
+    (part) =>
+      part.start >= from &&
+      matches(part.start) &&
+      parts.some((end) => end.end === part.start + name.length),
+  );
+
+  if (run !== undefined) return run.start;
+
+  for (let index = from; index + name.length <= text.length; index += 1) {
+    if (matches(index)) return index;
+  }
+
+  return -1;
+};
+
+/**
+ * The artist line of `item` cut into its credited artists and the text that joins them, so a
+ * client links each name and keeps the joins as the tags write them: "Mora & JHAYCO" is Mora,
+ * " & ", and JHAYCO. Each credit's name is found in the line in credit order, ignoring case, as a
+ * run of the line's parts where it can be. A
+ * credit the line does not name, such as a featured artist the title names, follows the line
+ * joined the way a combined credit string writes it: "Mora" crediting Sech too reads "Mora & Sech",
+ * and "Mora & JHAYCO" crediting Sech reads "Mora & JHAYCO, Sech".
+ * Every credit is one piece, in order of where it shows.
+ */
+export const creditLine = <ArtistId>(
+  item: CreditedItem<ArtistId>,
+): ReadonlyArray<CreditPiece<ArtistId>> => {
+  const shown = item.artist;
+  const parts = creditParts(shown);
+  const pieces: Array<CreditPiece<ArtistId>> = [];
+  const unnamed: Array<ShownCredit<ArtistId>> = [];
+  let cursor = 0;
+
+  for (const credit of creditsOf(item)) {
+    const name = credit.name.trim();
+    const at = name.length === 0 ? -1 : nameAt(shown, parts, name, cursor);
+
+    if (at < 0) {
+      unnamed.push(credit);
+    } else {
+      if (at > cursor) pieces.push({ kind: "text", text: shown.slice(cursor, at) });
+
+      pieces.push({
+        kind: "artist",
+        artistId: credit.artistId,
+        name: shown.slice(at, at + name.length),
+      });
+      cursor = at + name.length;
+    }
+  }
+
+  if (cursor < shown.length) pieces.push({ kind: "text", text: shown.slice(cursor) });
+
+  // After a line that already joins several names, each name follows a comma.
+  const listed = pieces.filter((piece) => piece.kind === "artist").length >= 2;
+
+  unnamed.forEach((credit, index) => {
+    const last = index === unnamed.length - 1 && !listed;
+
+    if (index > 0 || shown.trim().length > 0) {
+      pieces.push({ kind: "text", text: last ? " & " : ", " });
+    }
+
+    pieces.push({ kind: "artist", artistId: credit.artistId, name: credit.name });
+  });
+
+  return pieces;
 };
