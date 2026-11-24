@@ -1,5 +1,5 @@
 import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip";
-import { Keys } from "@/components/ui/keys";
+import { Keys } from "@media/ui/components/keys";
 import { cn } from "@/lib/utils";
 import type { Hotkey } from "@tanstack/hotkeys";
 import type { ReactElement, ReactNode } from "react";

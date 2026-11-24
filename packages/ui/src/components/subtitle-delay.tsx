@@ -1,19 +1,20 @@
 import { cn } from "@media/ui/lib/utils";
+import type { Hotkey } from "@tanstack/hotkeys";
 import { MinusIcon, PlusIcon } from "lucide-react";
 import { useId, useState } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
 
-import { Keycaps } from "./keycap";
+import { Keys, ariaKeyShortcuts } from "./keys";
 
 function StepButton({
   label,
-  keys,
+  hotkey,
   disabled,
   onClick,
   children,
 }: {
   readonly label: string;
-  readonly keys: ReadonlyArray<string>;
+  readonly hotkey: Hotkey | undefined;
   readonly disabled: boolean;
   readonly onClick: () => void;
   readonly children: ReactNode;
@@ -22,13 +23,13 @@ function StepButton({
     <button
       type="button"
       aria-label={label}
-      aria-keyshortcuts={keys.length === 0 ? undefined : keys.join("+")}
+      aria-keyshortcuts={hotkey === undefined ? undefined : ariaKeyShortcuts(hotkey)}
       disabled={disabled}
       onClick={onClick}
       className="flex h-8 shrink-0 cursor-pointer items-center gap-1 rounded-inner bg-text/6 px-1.5 text-text transition-colors hover:bg-text/10 disabled:cursor-default disabled:opacity-disabled disabled:hover:bg-text/6 [&_svg]:size-4"
     >
       {children}
-      <Keycaps keys={keys} />
+      {hotkey === undefined ? null : <Keys hotkey={hotkey} />}
     </button>
   );
 }
@@ -46,8 +47,8 @@ export function SubtitleDelay({
   value,
   unavailable,
   resettable,
-  earlierKeys,
-  laterKeys,
+  earlierHotkey,
+  laterHotkey,
   onEarlier,
   onLater,
   onReset,
@@ -59,8 +60,9 @@ export function SubtitleDelay({
   readonly unavailable?: string | undefined;
   /** Whether Reset has a delay to clear. */
   readonly resettable: boolean;
-  readonly earlierKeys: ReadonlyArray<string>;
-  readonly laterKeys: ReadonlyArray<string>;
+  /** The shortcuts drawn on Earlier and Later. */
+  readonly earlierHotkey?: Hotkey | undefined;
+  readonly laterHotkey?: Hotkey | undefined;
   readonly onEarlier: () => void;
   readonly onLater: () => void;
   readonly onReset: () => void;
@@ -119,7 +121,7 @@ export function SubtitleDelay({
         </button>
       </div>
       <div className="flex items-center gap-2">
-        <StepButton label="Earlier" keys={earlierKeys} disabled={disabled} onClick={onEarlier}>
+        <StepButton label="Earlier" hotkey={earlierHotkey} disabled={disabled} onClick={onEarlier}>
           <MinusIcon strokeWidth={2} aria-hidden />
         </StepButton>
         <label className="flex h-8 min-w-0 flex-1 items-center justify-center gap-0.5 rounded-inner bg-text/6 px-2 font-mono text-label/label text-text has-disabled:opacity-disabled has-focus-visible:ring-2 has-focus-visible:ring-accent">
@@ -139,7 +141,7 @@ export function SubtitleDelay({
             s
           </span>
         </label>
-        <StepButton label="Later" keys={laterKeys} disabled={disabled} onClick={onLater}>
+        <StepButton label="Later" hotkey={laterHotkey} disabled={disabled} onClick={onLater}>
           <PlusIcon strokeWidth={2} aria-hidden />
         </StepButton>
       </div>

@@ -1,5 +1,5 @@
 import { usePlayer, usePlayerPosition } from "@media/player/react";
-import { Keys } from "@/components/ui/keys";
+import { Keys } from "@media/ui/components/keys";
 import { cn } from "@/lib/utils";
 import { memo } from "react";
 import type { MouseEvent, ReactNode } from "react";

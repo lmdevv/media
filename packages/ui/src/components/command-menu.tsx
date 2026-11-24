@@ -1,5 +1,6 @@
 import { Dialog } from "@base-ui/react/dialog";
 import {
+  COMMAND_MENU_KEYS,
   commandMenuReducer,
   currentFrame,
   initialCommandMenuState,
@@ -8,11 +9,12 @@ import {
 import type { CommandItem, CommandLeading, CommandPage } from "@media/ui/lib/command-menu";
 import { useKeyboardFocusReturn } from "@media/ui/lib/focus-policy";
 import { cn } from "@media/ui/lib/utils";
+import { matchesKeyboardEvent } from "@tanstack/hotkeys";
 import { CheckIcon } from "lucide-react";
 import { useEffect, useEffectEvent, useId, useReducer, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 
-import { Keycaps } from "./keycap";
+import { Keys } from "./keys";
 import { ProgressBar } from "./progress-bar";
 import { Spinner } from "./spinner";
 
@@ -97,8 +99,8 @@ function CommandRow({
           <span className="shrink-0 font-mono text-caption/4 text-text-muted tabular-nums">
             {percent}%
           </span>
-        ) : (
-          <Keycaps keys={item.keycaps ?? []} />
+        ) : item.hotkey === undefined ? null : (
+          <Keys hotkey={item.hotkey} />
         )}
       </div>
       {running ? (
@@ -241,19 +243,19 @@ export function CommandMenu({
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>): void => {
-    const ctrlOnly = event.ctrlKey && !event.metaKey && !event.altKey;
-    const key = event.key.toLowerCase();
+    const pressed = (id: keyof typeof COMMAND_MENU_KEYS): boolean =>
+      matchesKeyboardEvent(event.nativeEvent, COMMAND_MENU_KEYS[id].hotkey);
 
-    if (event.key === "ArrowDown" || (ctrlOnly && key === "n")) {
+    if (pressed("command-menu.down") || pressed("command-menu.next")) {
       event.preventDefault();
       dispatch({ type: "move", by: 1, count });
-    } else if (event.key === "ArrowUp" || (ctrlOnly && key === "p")) {
+    } else if (pressed("command-menu.up") || pressed("command-menu.previous")) {
       event.preventDefault();
       dispatch({ type: "move", by: -1, count });
-    } else if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+    } else if (pressed("command-menu.run")) {
       event.preventDefault();
       choose(visible.items[active]);
-    } else if (event.key === "Backspace" && frame.query === "" && nested) {
+    } else if (pressed("command-menu.back") && frame.query === "" && nested) {
       event.preventDefault();
       back();
     }
@@ -359,9 +361,23 @@ export function CommandMenu({
             aria-hidden
             className="flex shrink-0 items-center gap-5 px-5 pt-3 pb-3.5 font-mono text-micro/3.5 text-text-muted"
           >
-            <span>↵ {nested ? "Select" : "Open"}</span>
-            <span>↑↓ Navigate</span>
-            <span>{nested ? "⌫ Back" : "esc Close"}</span>
+            <span className="flex items-center gap-1.5">
+              <Keys hotkey={COMMAND_MENU_KEYS["command-menu.run"].hotkey} />
+              {nested ? "Select" : "Open"}
+            </span>
+            <span className="flex items-center gap-1">
+              <Keys hotkey={COMMAND_MENU_KEYS["command-menu.up"].hotkey} />
+              <Keys hotkey={COMMAND_MENU_KEYS["command-menu.down"].hotkey} />
+              <span className="pl-0.5">Navigate</span>
+            </span>
+            <span className="flex items-center gap-1.5">
+              <Keys
+                hotkey={
+                  COMMAND_MENU_KEYS[nested ? "command-menu.back" : "command-menu.close"].hotkey
+                }
+              />
+              {nested ? "Back" : "Close"}
+            </span>
           </div>
         </Dialog.Popup>
       </Dialog.Portal>

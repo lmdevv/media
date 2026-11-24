@@ -1,5 +1,5 @@
 import type { Playlist } from "@/lib/models";
-import { Keys } from "@/components/ui/keys";
+import { Keys } from "@media/ui/components/keys";
 import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { Link } from "@tanstack/react-router";

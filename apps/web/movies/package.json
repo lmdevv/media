@@ -17,6 +17,7 @@
     "@media/sdk": "workspace:*",
     "@media/ui": "workspace:*",
     "@tailwindcss/vite": "^4.3.3",
+    "@tanstack/react-hotkeys": "0.20.2",
     "@tanstack/react-router": "^1.170.32",
     "effect": "catalog:",
     "hls.js": "^1.7.3",

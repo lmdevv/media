@@ -23,7 +23,7 @@ import { TrackPopover } from "@media/ui/components/track-popover";
 import type { TrackOption } from "@media/ui/components/track-popover";
 import { fixedValue, useLiveValue } from "@media/ui/lib/live-value";
 import type { LiveValue } from "@media/ui/lib/live-value";
-import { useKeymap } from "@media/ui/lib/use-keymap";
+import { unlessYielding } from "@media/ui/lib/focus-policy";
 import { cn } from "@media/ui/lib/utils";
 import { useNavigate } from "@tanstack/react-router";
 import { Effect, Fiber, Stream } from "effect";
@@ -47,7 +47,8 @@ import { artworkUrl } from "@/lib/artwork";
 import type { EpisodeId, MediaFileId, MediaVersion, PlaybackDetail, TitleId } from "@/lib/catalog";
 import { loadQualityChoice, saveQualityChoice } from "@/lib/device-storage";
 import { episodeCode } from "@/lib/format";
-import { playerKeymap } from "@/lib/keymap";
+import { HOTKEYS } from "@/lib/hotkeys";
+import { useShortcuts } from "@/lib/use-shortcuts";
 import { audioTrackLabel, subtitleTrackLabels } from "@/lib/media-facts";
 import { volumeIsSettable } from "@/playback/browser-support";
 import { PlaybackPhase, StartChoice } from "@/playback/playback-controller";
@@ -1033,40 +1034,68 @@ export function PlayerScreen({
       remotePlayback?.active !== true,
   });
 
-  useKeymap(playerKeymap, {
-    "menu.toggle": () => {
-      if (guest !== undefined) return;
+  useShortcuts([
+    {
+      hotkey: HOTKEYS["command-menu.toggle"],
+      callback: (event) => {
+        event.preventDefault();
 
-      if (menu) setMenu(false);
-      else if (leaving === null && !asking && together.starting === undefined && !customSleepOpen) {
-        setMenu(true);
-      }
-    },
-    "player.toggle": togglePlay,
-    "player.toggle-k": togglePlay,
-    "player.back-10": () => skipByKey(-10),
-    "player.forward-10": () => skipByKey(10),
-    "player.back-5": () => skipByKey(-5),
-    "player.forward-5": () => skipByKey(5),
-    "player.volume-up": () => {
-      if (volumeSettable) commitVolume(media.volume + VOLUME_STEP);
-      else if (media.muted) setMuted(false);
-    },
-    "player.volume-down": () => {
-      if (volumeSettable) commitVolume(media.volume - VOLUME_STEP);
-    },
-    "player.fullscreen": toggleFullscreen,
-    "player.mute": () => setMuted(!(media.muted || silent)),
-    "player.subtitles": toggleSubtitles,
-    "player.subtitles-earlier": () => subtitleDelay.stepWithNotice(-1),
-    "player.subtitles-later": () => subtitleDelay.stepWithNotice(1),
-    "player.exit": (event) => {
-      if (takeEscape(event)) return;
+        if (guest !== undefined) return;
 
-      if (infoShown) setInfo(false);
-      else askToLeave();
+        if (menu) setMenu(false);
+        else if (
+          leaving === null &&
+          !asking &&
+          together.starting === undefined &&
+          !customSleepOpen
+        ) {
+          setMenu(true);
+        }
+      },
     },
-  });
+    { hotkey: HOTKEYS["player.toggle"], callback: unlessYielding(togglePlay) },
+    { hotkey: HOTKEYS["player.toggle-k"], callback: unlessYielding(togglePlay) },
+    { hotkey: HOTKEYS["player.back-10"], callback: unlessYielding(() => skipByKey(-10)) },
+    { hotkey: HOTKEYS["player.forward-10"], callback: unlessYielding(() => skipByKey(10)) },
+    { hotkey: HOTKEYS["player.back-5"], callback: unlessYielding(() => skipByKey(-5)) },
+    { hotkey: HOTKEYS["player.forward-5"], callback: unlessYielding(() => skipByKey(5)) },
+    {
+      hotkey: HOTKEYS["player.volume-up"],
+      callback: unlessYielding(() => {
+        if (volumeSettable) commitVolume(media.volume + VOLUME_STEP);
+        else if (media.muted) setMuted(false);
+      }),
+    },
+    {
+      hotkey: HOTKEYS["player.volume-down"],
+      callback: unlessYielding(() => {
+        if (volumeSettable) commitVolume(media.volume - VOLUME_STEP);
+      }),
+    },
+    { hotkey: HOTKEYS["player.fullscreen"], callback: unlessYielding(toggleFullscreen) },
+    {
+      hotkey: HOTKEYS["player.mute"],
+      callback: unlessYielding(() => setMuted(!(media.muted || silent))),
+    },
+    { hotkey: HOTKEYS["player.subtitles"], callback: unlessYielding(toggleSubtitles) },
+    {
+      hotkey: HOTKEYS["player.subtitles-earlier"],
+      callback: unlessYielding(() => subtitleDelay.stepWithNotice(-1)),
+    },
+    {
+      hotkey: HOTKEYS["player.subtitles-later"],
+      callback: unlessYielding(() => subtitleDelay.stepWithNotice(1)),
+    },
+    {
+      hotkey: HOTKEYS["player.exit"],
+      callback: unlessYielding((event) => {
+        if (takeEscape(event)) return;
+
+        if (infoShown) setInfo(false);
+        else askToLeave();
+      }),
+    },
+  ]);
 
   const canStart =
     guest === undefined &&

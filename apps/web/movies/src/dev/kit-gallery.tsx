@@ -40,13 +40,14 @@ import { Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
+import { unlessYielding } from "@media/ui/lib/focus-policy";
 import { moveRowFocus } from "@media/ui/lib/row-focus";
 import { buttonVariants } from "@media/ui/lib/button-variants";
-import { useKeymap } from "@media/ui/lib/use-keymap";
 import { cn } from "@media/ui/lib/utils";
 
 import { MoviesMark } from "@/components/shell/movies-mark";
-import { keymap, shortcutLabel } from "@/lib/keymap";
+import { HOTKEYS } from "@/lib/hotkeys";
+import { useShortcuts } from "@/lib/use-shortcuts";
 
 import { ART } from "./sample-art";
 
@@ -234,7 +235,7 @@ const sampleMenu = (
             id: "scan-cancel",
             title: "Cancel scan",
             keywords: ["scan"],
-            keycaps: ["⌘", "."],
+            hotkey: "Mod+.",
             leading: { kind: "icon", icon: CircleXIcon },
             perform: () => undefined,
           },
@@ -249,7 +250,7 @@ const sampleMenu = (
             id: "home",
             title: "Home",
             leading: { kind: "icon", icon: HouseIcon },
-            keycaps: keymap.keycaps("go.home"),
+            hotkey: HOTKEYS["go.home"].defaultHotkey,
             perform: () => undefined,
           },
           {
@@ -257,7 +258,7 @@ const sampleMenu = (
             id: "list",
             title: "My List",
             leading: { kind: "icon", icon: BookmarkIcon },
-            keycaps: keymap.keycaps("go.my-list"),
+            hotkey: HOTKEYS["go.my-list"].defaultHotkey,
             perform: () => undefined,
           },
           {
@@ -265,7 +266,7 @@ const sampleMenu = (
             id: "settings",
             title: "Settings",
             leading: { kind: "icon", icon: Settings2Icon },
-            keycaps: keymap.keycaps("go.settings"),
+            hotkey: HOTKEYS["go.settings"].defaultHotkey,
             perform: () => undefined,
           },
         ],
@@ -280,7 +281,7 @@ const sampleMenu = (
             title: "Switch profile",
             detail: "Alex",
             leading: { kind: "icon", icon: UserRoundIcon },
-            keycaps: ["⌘", "⇧", "P"],
+            hotkey: "Mod+Shift+P",
             perform: () => undefined,
           },
           {
@@ -288,7 +289,7 @@ const sampleMenu = (
             id: "subtitles",
             title: "Subtitles…",
             leading: { kind: "icon", icon: CaptionsIcon },
-            keycaps: ["C"],
+            hotkey: "C",
             page: {
               id: "subtitles",
               breadcrumb: "Subtitles · Severance",
@@ -366,12 +367,18 @@ export function KitGallery() {
   const [query, setQuery] = useState("");
   const duration = 3480;
 
-  useKeymap(keymap, {
-    "menu.toggle": () => setMenuOpen((open) => !open),
-    "search.open": () => setMenuOpen(true),
-    "rows.next": () => moveRowFocus(1),
-    "rows.previous": () => moveRowFocus(-1),
-  });
+  useShortcuts([
+    {
+      hotkey: HOTKEYS["command-menu.toggle"],
+      callback: (event) => {
+        event.preventDefault();
+        setMenuOpen((open) => !open);
+      },
+    },
+    { hotkey: HOTKEYS["search.open"], callback: unlessYielding(() => setMenuOpen(true)) },
+    { hotkey: HOTKEYS["rows.next"], callback: unlessYielding(() => moveRowFocus(1)) },
+    { hotkey: HOTKEYS["rows.previous"], callback: unlessYielding(() => moveRowFocus(-1)) },
+  ]);
 
   const topBar = (overMedia: boolean) => (
     <TopBar
@@ -384,7 +391,10 @@ export function KitGallery() {
       ))}
       actions={
         <>
-          <SearchTrigger keycaps={shortcutLabel("menu.toggle")} onClick={() => setMenuOpen(true)} />
+          <SearchTrigger
+            hotkey={HOTKEYS["command-menu.toggle"].defaultHotkey}
+            onClick={() => setMenuOpen(true)}
+          />
           <RoomPill count={3} />
           <Avatar name="Alex" image={ART.alex} />
         </>

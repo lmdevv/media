@@ -333,9 +333,16 @@ Old movies' Convex project, its SDK client, and its command registry were delete
   as `text-micro` merge away next to colors such as `text-danger`.
 - Desktop layout starts at `md` (48rem). Rows switch layouts with container queries, so they also
   fit narrow panels.
-- Keyboard shortcuts are listed once in `apps/web/movies/src/lib/keymap.ts` and resolved by
-  `@media/ui/lib/keymap` (`mod` is `⌘` on Apple devices and `Ctrl` elsewhere). The command menu
-  draws its keycaps from that list. Sequences such as `g h` wait one second for the next key.
+- Keyboard shortcuts are declared once in `apps/web/movies/src/lib/hotkeys.ts` with TanStack
+  Hotkeys' `defineAppHotkeys` (`Mod` is `⌘` on Apple devices and `Ctrl` elsewhere), beside the
+  command menu's own keys (`COMMAND_MENU_KEYS` in `@media/ui/lib/command-menu`). Screens bind them
+  with `useShortcuts` (`apps/web/movies/src/lib/use-shortcuts.ts`) over TanStack's `useHotkeys`,
+  and `Keys` (`@media/ui/components/keys`) draws one keycap per key in the platform's labels: on
+  the command menu's rows and footer, the top bar's search button, and the subtitle delay. Each
+  app's stylesheet styles the caps through its `keycaps` and `keycap` utilities. The root's
+  `HotkeysProvider` registers every shortcut on the window and leaves yielding to the focus
+  policy's `unlessYielding`. A held key runs a shortcut once, even when something else took its
+  first press, and sequences such as `G H` wait one second for the next key.
 - The command menu takes a typed page model (`@media/ui/lib/command-menu`): groups scoped to
   browsing or searching, fuzzy or caller-ranked filtering, actions (sync or async) and submenus
   that replace the list in the same panel, running-job progress, and fallback commands for no

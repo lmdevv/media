@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import { useMemo } from "react";
 
-import { playerKeymap } from "@/lib/keymap";
+import { HOTKEYS } from "@/lib/hotkeys";
 
 import type { CommandContext, CommandContribution, PlayerCommands } from "./contribution";
 
@@ -60,7 +60,7 @@ const subtitleDelayItems = (delay: PlayerCommands["subtitleDelay"]): ReadonlyArr
       title: "Subtitles earlier",
       keywords,
       leading: { kind: "icon", icon: ChevronsLeftIcon },
-      keycaps: playerKeymap.keycaps("player.subtitles-earlier"),
+      hotkey: HOTKEYS["player.subtitles-earlier"].defaultHotkey,
       perform: () => delay.step(-1),
     },
     {
@@ -69,7 +69,7 @@ const subtitleDelayItems = (delay: PlayerCommands["subtitleDelay"]): ReadonlyArr
       title: "Subtitles later",
       keywords,
       leading: { kind: "icon", icon: ChevronsRightIcon },
-      keycaps: playerKeymap.keycaps("player.subtitles-later"),
+      hotkey: HOTKEYS["player.subtitles-later"].defaultHotkey,
       perform: () => delay.step(1),
     },
     ...(delay.delayMs === 0
@@ -97,7 +97,7 @@ export const playbackCommands = (player: PlayerCommands | null): CommandContribu
       id: "player:toggle",
       title: player.playing ? "Pause" : "Play",
       leading: { kind: "icon", icon: player.playing ? PauseIcon : PlayIcon },
-      keycaps: playerKeymap.keycaps("player.toggle"),
+      hotkey: HOTKEYS["player.toggle"].defaultHotkey,
       perform: player.togglePlay,
     },
     {
@@ -106,7 +106,7 @@ export const playbackCommands = (player: PlayerCommands | null): CommandContribu
       title: "Back 10 seconds",
       keywords: ["rewind", "seek"],
       leading: { kind: "icon", icon: RewindIcon },
-      keycaps: playerKeymap.keycaps("player.back-10"),
+      hotkey: HOTKEYS["player.back-10"].defaultHotkey,
       perform: () => player.skip(-10),
     },
     {
@@ -115,7 +115,7 @@ export const playbackCommands = (player: PlayerCommands | null): CommandContribu
       title: "Forward 10 seconds",
       keywords: ["skip", "seek"],
       leading: { kind: "icon", icon: FastForwardIcon },
-      keycaps: playerKeymap.keycaps("player.forward-10"),
+      hotkey: HOTKEYS["player.forward-10"].defaultHotkey,
       perform: () => player.skip(10),
     },
     ...(player.nextEpisode === null
@@ -221,7 +221,7 @@ export const playbackCommands = (player: PlayerCommands | null): CommandContribu
       id: "player:fullscreen",
       title: "Full screen",
       leading: { kind: "icon", icon: MaximizeIcon },
-      keycaps: playerKeymap.keycaps("player.fullscreen"),
+      hotkey: HOTKEYS["player.fullscreen"].defaultHotkey,
       perform: player.toggleFullscreen,
     },
   ];

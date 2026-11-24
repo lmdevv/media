@@ -70,7 +70,7 @@ const submenu = (player: PlayerCommands, id: string): CommandPage => {
 const delayCommands = (player: PlayerCommands) =>
   items(player)
     .filter((item) => item.id.startsWith("player:subtitles-"))
-    .map((item) => [item.title, item.keycaps ?? []]);
+    .map((item) => [item.title, item.hotkey]);
 
 const options = (page: CommandPage): ReadonlyArray<CommandItem> =>
   page.groups.flatMap((group) => group.items);
@@ -155,8 +155,8 @@ describe("playbackCommands", () => {
 
     expect(delayCommands(recordingPlayer().player)).toEqual([]);
     expect(delayCommands(recordingPlayer({ subtitleDelay: delay(0) }).player)).toEqual([
-      ["Subtitles earlier", ["G"]],
-      ["Subtitles later", ["H"]],
+      ["Subtitles earlier", "G"],
+      ["Subtitles later", "H"],
     ]);
 
     const { player } = recordingPlayer({ subtitleDelay: delay(-300) });

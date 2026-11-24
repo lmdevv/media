@@ -641,6 +641,9 @@ importers:
       '@tailwindcss/vite':
         specifier: ^4.3.3
         version: 4.3.3(vite@8.3.4(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
+      '@tanstack/react-hotkeys':
+        specifier: 0.20.2
+        version: 0.20.2(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@tanstack/react-router':
         specifier: ^1.170.32
         version: 1.170.42(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -999,6 +1002,9 @@ importers:
       '@media/sdk':
         specifier: workspace:*
         version: link:../sdk
+      '@tanstack/hotkeys':
+        specifier: 0.22.1
+        version: 0.22.1
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1

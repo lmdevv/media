@@ -1,6 +1,38 @@
+import type { AppHotkeyInput, Hotkey } from "@tanstack/hotkeys";
 import type { ComponentType } from "react";
 
 import { fuzzyFilter } from "./fuzzy";
+
+const GROUP = "Command menu";
+
+/** The command menu's own keys, which its field runs and its footer draws. */
+export const COMMAND_MENU_KEYS = {
+  "command-menu.run": { hotkey: "Enter", meta: { name: "Run the highlighted row", group: GROUP } },
+  "command-menu.down": {
+    hotkey: "ArrowDown",
+    meta: { name: "Highlight the next row", group: GROUP },
+  },
+  "command-menu.up": {
+    hotkey: "ArrowUp",
+    meta: { name: "Highlight the previous row", group: GROUP },
+  },
+  "command-menu.next": {
+    hotkey: "Control+N",
+    meta: { name: "Highlight the next row", group: GROUP },
+  },
+  "command-menu.previous": {
+    hotkey: "Control+P",
+    meta: { name: "Highlight the previous row", group: GROUP },
+  },
+  "command-menu.back": {
+    hotkey: "Backspace",
+    meta: { name: "Go back a level from an empty field", group: GROUP },
+  },
+  "command-menu.close": {
+    hotkey: "Escape",
+    meta: { name: "Go back a level, then close", group: GROUP },
+  },
+} as const satisfies Record<string, AppHotkeyInput>;
 
 /** What fills the fixed 20px slot in front of a command's title; a checked row draws a check. */
 export type CommandLeading =
@@ -22,8 +54,8 @@ type CommandItemFields = {
    * and tells assistive technology it is checked.
    */
   readonly checked?: boolean | undefined;
-  /** Keycaps drawn at the right edge, such as `["G", "H"]`. Omit when the command has no shortcut. */
-  readonly keycaps?: ReadonlyArray<string> | undefined;
+  /** The command's shortcut, drawn as keycaps at the right edge. Omit when it has none. */
+  readonly hotkey?: Hotkey | undefined;
   /** Fraction done, from 0 to 1, of a running job this row reports, such as a library scan. */
   readonly progress?: number | undefined;
 };

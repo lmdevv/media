@@ -67,7 +67,7 @@ const suites: ReadonlyArray<Suite> = [
   {
     name: "kit",
     group: "core",
-    testMatch: /e2e\/(kit|focus|route-states|track-menu|autoplay-next)\.spec\.ts$/u,
+    testMatch: /e2e\/(kit|focus|keyboard|route-states|track-menu|autoplay-next)\.spec\.ts$/u,
     chained: false,
   },
   { name: "session", group: "core", testMatch: /e2e\/session\/.*\.spec\.ts$/u, chained: false },
