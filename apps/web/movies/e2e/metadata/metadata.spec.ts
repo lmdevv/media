@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { expect, test } from "@playwright/test";
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 
 import { drawPoster, encodeClip } from "../stack/fixture-library";
 import { createLibrary, removeLibrary } from "../stack/libraries";
@@ -16,6 +16,7 @@ import {
   createPerson,
   moviesPath,
   reachableStack,
+  runAsHost,
   signIn,
   signInClient,
 } from "../stack/people";
@@ -342,6 +343,81 @@ test("a person without a photo shows their letter in place of one", async ({ pag
     }),
   ).toContainText("as Dallas");
   await capture(page, "person-without-photo");
+});
+
+const BIOGRAPHY_LINE =
+  "After drama school came a decade of stage work, then film after film across science fiction, comedy, and drama.";
+
+const LONG_BIOGRAPHY = Array.from({ length: 12 }, () => BIOGRAPHY_LINE).join("\n\n");
+
+/** Where a sticky portrait rests while the biography scrolls: under the 68px top bar, 28px down. */
+const STUCK_TOP = 96;
+
+const SCROLL_BY = 400;
+
+const SCREENS = [
+  { width: 390, height: 844, portraitWidth: 160, sticky: false },
+  { width: 820, height: 1180, portraitWidth: 288, sticky: true },
+  { width: 1440, height: 900, portraitWidth: 288, sticky: true },
+];
+
+const openWithLongBiography = async (page: Page, name: string): Promise<void> => {
+  if (stack === null) return;
+
+  await openTitle(page, "Alien Fixture");
+  await page
+    .getByRole("region", { name: "Cast & crew" })
+    .getByRole("link", { name: new RegExp(name, "u") })
+    .click();
+  await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
+
+  const personId = new URL(page.url()).pathname.split("/").at(-1);
+
+  if (personId === undefined) throw new Error(`No person in ${page.url()}`);
+
+  await runAsHost(stack, "movies/probe:setBiography", { personId, biography: LONG_BIOGRAPHY });
+  await expect(page.getByText(BIOGRAPHY_LINE)).toBeVisible();
+};
+
+const expectPortrait = (page: Page, portrait: Locator): Promise<void> =>
+  SCREENS.reduce(async (previous, { portraitWidth, sticky, ...viewport }) => {
+    await previous;
+    await page.setViewportSize(viewport);
+    await page.evaluate(() => window.scrollTo(0, 0));
+
+    const box = await portrait.boundingBox();
+
+    if (box === null) throw new Error("The portrait is not drawn");
+
+    const drawn = `${String(viewport.width)}px screen: ${String(box.width)}×${String(box.height)}`;
+
+    expect.soft(Math.abs(box.width - portraitWidth), drawn).toBeLessThanOrEqual(1);
+    expect.soft(Math.abs(box.height - box.width * 1.5), drawn).toBeLessThanOrEqual(1);
+
+    await page.evaluate((by) => window.scrollTo(0, by), SCROLL_BY);
+
+    const scrolled = await portrait.boundingBox();
+
+    if (scrolled === null) throw new Error("The portrait is not drawn after scrolling");
+
+    const expectedTop = sticky ? STUCK_TOP : box.y - SCROLL_BY;
+
+    expect
+      .soft(
+        Math.abs(scrolled.y - expectedTop),
+        `${String(viewport.width)}px screen scrolled: top ${String(scrolled.y)}`,
+      )
+      .toBeLessThanOrEqual(1);
+  }, Promise.resolve());
+
+test("a person's photo or letter stays 2:3 beside a long biography, and stays in view on a tablet or desktop as it scrolls", async ({
+  page,
+}) => {
+  await openWithLongBiography(page, "Sigourney Weaver");
+  await expectPortrait(page, page.getByRole("img", { name: "Sigourney Weaver" }));
+
+  await openWithLongBiography(page, "Tom Skerritt");
+  await expectPortrait(page, page.locator("main").getByText("T", { exact: true }));
 });
 
 test("genre pages and the grid's year and score filters narrow titles on the server", async ({
