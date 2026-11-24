@@ -1,5 +1,6 @@
-import { creditKey } from "@media/contracts/artist-credits";
-import type { TrackId } from "@/lib/models";
+import { creditKey, creditsOf } from "@media/contracts/artist-credits";
+import type { CreditedItem } from "@media/contracts/artist-credits";
+import type { ArtistId, TrackId } from "@/lib/models";
 import type { Track } from "@/lib/models";
 import { useCurrentTrack } from "@media/player/react";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -77,6 +78,18 @@ type RenderRow = (track: Track, index: number, now: NowPlaying) => ReactNode;
 
 const ListLengthContext = createContext(0);
 
+/**
+ * Whether a song names artists its album doesn't: another artist string, or a credit the album
+ * lacks, such as a featured artist the title names.
+ */
+const namesOthers = (track: Track, album: CreditedItem<ArtistId>): boolean => {
+  if (creditKey(track.artist) !== creditKey(album.artist)) return true;
+
+  const albumArtists = new Set(creditsOf(album).map((credit) => credit.artistId));
+
+  return creditsOf(track).some((credit) => !albumArtists.has(credit.artistId));
+};
+
 const numberCell = "w-7.5 shrink-0 lg:w-7";
 
 const coverClassName = "size-11 rounded-xs lg:size-row";
@@ -120,7 +133,7 @@ export function TrackList({
   unavailable,
   withheld,
   byline,
-  albumArtist,
+  album,
   highlight,
   reorder,
   windowing = "long",
@@ -145,10 +158,10 @@ export function TrackList({
   /** More to say under a row's artist, such as who added it to a shared playlist. */
   readonly byline?: ((index: number) => string | null) | undefined;
   /**
-   * The album's artist as its tags write it, on an album's list: a row whose song names other
-   * artists, such as a compilation's or a featured song's, shows them under its title.
+   * The album, on an album's list: a row whose song names artists the album doesn't, such as a
+   * compilation's song or one with a featured artist, shows the song's artists under its title.
    */
-  readonly albumArtist?: string | undefined;
+  readonly album?: CreditedItem<ArtistId> | undefined;
   /** A song to highlight and scroll to, from a shared song link. */
   readonly highlight?: TrackId | null;
   /** Lets rows be moved; the list's order then comes back from the server. */
@@ -220,10 +233,7 @@ export function TrackList({
       unavailable={unavailable?.(index) ?? null}
       withheld={withheld?.(index) ?? false}
       byline={byline?.(index) ?? null}
-      artists={
-        variant === "list" ||
-        (albumArtist !== undefined && creditKey(track.artist) !== creditKey(albumArtist))
-      }
+      artists={variant === "list" || (album !== undefined && namesOthers(track, album))}
       highlighted={highlight === track.id}
       reorder={controls}
       dropSide={reorder?.mode === "drag" ? reorder.reorder.dropSide(index) : null}

@@ -125,7 +125,7 @@ function AlbumPage() {
           tracks={tracks}
           variant="album"
           label={`Songs on ${album.title}`}
-          albumArtist={album.artist}
+          album={album}
           highlight={highlight === undefined ? null : asTrackId(highlight)}
         />
       </div>

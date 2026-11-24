@@ -30,6 +30,9 @@ const ANA = `Ana Vega ${run}`;
 
 const BRUNO = `Bruno Sol ${run}`;
 
+/** A featured artist only a title names. */
+const CORA = `Cora Lux ${run}`;
+
 /** The credit two artists share: Ana has a song of her own, so it splits into both of them. */
 const DUET = `${ANA} & ${BRUNO}`;
 
@@ -38,6 +41,8 @@ const SOLO_ALBUM = `On My Own ${run}`;
 const DUETS_ALBUM = `Duets ${run}`;
 
 const SHARED_SONG = "Shared Song";
+
+const FEATURED_SONG = `Night Ride (feat. ${CORA})`;
 
 let media: MediaService | undefined;
 
@@ -60,6 +65,14 @@ test.beforeAll(async () => {
       albumArtist: ANA,
       album: DUETS_ALBUM,
       track: 1,
+    },
+    {
+      ...tone,
+      title: FEATURED_SONG,
+      artist: ANA,
+      albumArtist: ANA,
+      album: DUETS_ALBUM,
+      track: 2,
     },
   ]);
 
@@ -104,6 +117,12 @@ test("each artist a song credits links to their own page, which lists the song o
   await expect(row.getByRole("link", { name: ANA, exact: true })).toBeVisible();
   await expect(row.getByRole("link", { name: BRUNO, exact: true })).toBeVisible();
   await expect(row).toContainText(DUET);
+
+  // A song whose artist is the album's names its featured artist too.
+  const featured = page.getByRole("main").getByRole("row", { name: /Night Ride/u });
+
+  await expect(featured.getByRole("link", { name: CORA, exact: true })).toBeVisible();
+  await expect(featured).toContainText(`${ANA} & ${CORA}`);
 
   await row.getByRole("link", { name: BRUNO, exact: true }).click();
   await expect(page.getByRole("heading", { name: BRUNO, level: 1 })).toBeVisible();
