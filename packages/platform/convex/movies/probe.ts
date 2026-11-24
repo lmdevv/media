@@ -33,6 +33,7 @@ import {
   insertSeason,
   insertTitle,
   insertTitleGenre,
+  patchPerson,
   patchTitle,
 } from "./write";
 import { findProgress, watchGeneration } from "./viewing";
@@ -516,6 +517,19 @@ export const seedCredits = internalMutation({
     );
 
     return personId;
+  },
+});
+
+/** Sets a person's biography, as a person job would, without TMDB. */
+export const setBiography = internalMutation({
+  args: { personId: v.id("people"), biography: v.string() },
+  returns: v.null(),
+  handler: async (ctx, { personId, biography }) => {
+    const person = (await ctx.db.get(personId)) ?? fail("not_found", "No such person");
+
+    await patchPerson(ctx.db, person, { biography, updatedAt: Date.now() });
+
+    return null;
   },
 });
 

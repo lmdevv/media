@@ -32,17 +32,16 @@ const HostAnswer = Schema.fromJsonString(
   }),
 );
 
-/** Creates a user with the core's admin key, as `media admin` does on the server host. */
-const createUserAsHost = async (
+/** Runs the core function at `path` with its admin key, as the server host does. */
+export const runAsHost = async (
   stack: StackEnv,
-  user: Person & { readonly role: "admin" | "member" },
+  path: string,
+  args: Schema.Json,
 ): Promise<void> => {
-  const path = "core/accounts/host:createUser";
-
   const response = await fetch(`${stack.platformUrl}/api/function`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Convex ${stack.adminKey}` },
-    body: JSON.stringify({ path, args: user, format: "json" }),
+    body: JSON.stringify({ path, args, format: "json" }),
   });
 
   const answer = Schema.decodeSync(HostAnswer)(await response.text());
@@ -109,7 +108,7 @@ export const createPerson = async (
 ): Promise<Person> => {
   const person = newPerson(label);
 
-  await createUserAsHost(stack, { ...person, role });
+  await runAsHost(stack, "core/accounts/host:createUser", { ...person, role });
 
   return person;
 };
