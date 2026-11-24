@@ -2,7 +2,7 @@
 
 - Status: Accepted, 2026-11-03. Amended 2026-11-04 with the generator's layout, and again on
   2026-11-04 with `refusesKeys` and with the SDK target. Amended 2026-11-09 with the movies
-  commands, and 2026-11-13 with the music commands.
+  commands, and 2026-11-13 with the music commands. Amended 2026-11-24 with artist credits.
 - Decisions: D23
 
 ## Context
@@ -297,3 +297,17 @@ string dispatchers that took `v.any()` arguments (D23).
 - **Artwork.** A result names a song's, album's, or artist's artwork as
   `/music/art/<hash>?ticket=<ticket>`, a shareable `image` ticket for `artworkTicketId(hash)`
   (ADR 0011), which the server's music routes serve (p5-music-server).
+
+## Artist credits (amended 2026-11-24)
+
+Songs and albums credit every artist they name (ADR 0024, "Artist credits").
+
+- **Models.** The `track` and album card validators gain `credits`, each an artist id and the name
+  as credited, in order, and the artist card `trackCount`. Both are optional, so an SDK, CLI, or
+  app built before them decodes a newer server's answers and a newer one an older server's;
+  `artistId` stays the first credit and `artist` the string as tagged.
+- **Commands.** `music.artists.tracks` pages the songs crediting an artist. `music.credits.list`,
+  `overrides`, `setOverride`, and `removeOverride` let a manager of a music library review and
+  correct how its combined credits resolve, with `music:edit` and `manage` on the library, as
+  renaming a library needs. They do not set `refusesKeys`: a correction makes nothing that would
+  outlive a revoked key, and a manager can undo it.

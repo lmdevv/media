@@ -312,6 +312,32 @@ Old movies' Convex project, its SDK client, and its command registry were delete
 - The web migration suite imports from the recorded Jellyfin server by default and from a real
   Jellyfin in Docker with `MEDIA_JELLYFIN_DOCKER=1`, as CI runs it.
 
+## Music artist credits
+
+- Songs and albums credit every artist they name, in order (ADR 0024, "Artist credits"): separate
+  artist values as they are, otherwise the artist string and the title's featured lists by the
+  evidence rule in `@media/contracts/artist-credits`. A combined string splits only when a part is
+  a whole credit by itself elsewhere in the same library, or a manager split it; a run that is a
+  whole credit staying whole, or that a manager keeps together, stays one artist inside longer
+  credits. Separators are ", ", " & ", " feat. ", " ft. ", and " featuring "; never " y ", " x ",
+  " and ", or "/".
+- An album files under its album artist string as tagged (`artistKey`), so splitting never merges
+  or divides albums, and it credits that string's artists, never its tracks' contributors.
+- The public song and album models carry `credits` (`artistId`, `name`), optional so clients built
+  before them decode either server; `artistId` is the first credit and `artist` the string as
+  tagged. Artist cards carry `trackCount`, and `music.artists.tracks` pages every song crediting an
+  artist. Join phrases are not kept: clients show the tagged string and link each credited name.
+- Credit strings live in `artistCredits` with their resolution, `creditParts` finds the combined
+  strings a name is part of, and `creditTracks` the songs naming one. A change in a name's evidence
+  or a manager's correction rechecks those strings in scheduled pages (`music/credits:recheck`),
+  and each string that resolves anew rewrites its songs and albums (`music/credits:rewrite`).
+- Corrections are per library: `music.credits.setOverride` (`together` or `split`),
+  `removeOverride`, `list`, and `overrides`, with `manage` on the library and `music:edit`; API
+  keys are not refused. A library keeps at most 256.
+- The tag reader's version (`TAGS_READER_VERSION`) is kept per song, so the first scan after an
+  upgrade reads every file again and adopts rows written before credits, keeping track and album
+  ids.
+
 ## Web UI kit
 
 - `@media/ui` holds presentational components with typed props and no data access; routes wire
