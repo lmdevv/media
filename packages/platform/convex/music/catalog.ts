@@ -234,8 +234,11 @@ const BARE_CHECK = sumCost([
   atBound.delete("artists"),
 ]);
 
-/** Settling the credit strings an album names: one combined string, or its separate values. */
-const ALBUM_SOURCES_SETTLING = repeated(SINGLE_SETTLING, CREDITS);
+/**
+ * Settling the credit strings an album names: one combined string, or its separate values, those
+ * it lost and those it gained.
+ */
+const ALBUM_SOURCES_SETTLING = repeated(SINGLE_SETTLING, 2 * CREDITS);
 
 /**
  * Deleting an emptied album (`deleteIfEmpty`): a track looked for, its artist links read and
@@ -886,6 +889,47 @@ export const catalogBatch = (
     return adopted;
   };
 
+  /**
+   * Credits an album with separate album artist values as the file a scan read last names them,
+   * when they differ from its credits while showing as the same album artist.
+   */
+  const retag = async (
+    album: Stored<"albums">,
+    names: ReadonlyArray<string>,
+    art: ArtChange,
+  ): Promise<Stored<"albums">> => {
+    const credits = await creditsOf(names, album.artistName, art.next);
+
+    if (album.credits !== undefined && sameCredits(credits.all, album.credits)) return album;
+
+    recreditedAlbum(album);
+
+    const changes = {
+      artistId: credits.first.artistId,
+      artistName: album.artistName,
+      artistKey: album.artistKey ?? keyOf(album.artistName),
+      credits: [...credits.all],
+      creditsTagged: true,
+    };
+
+    await store.setAlbumCredits(album._id, changes);
+    await linkAlbum(album, credits.all, false);
+
+    if (album.artistId !== credits.first.artistId) mayBeBare(album.artistId);
+
+    const updated = { ...album, ...changes };
+    const before = albumSources(album);
+    const after = albumSources(updated);
+
+    await ledger.use({
+      trackId: null,
+      gained: without(after, before),
+      lost: without(before, after),
+    });
+
+    return updated;
+  };
+
   const albumFor = async (
     scanned: ScannedTrack,
     filing: Filing,
@@ -930,7 +974,13 @@ export const catalogBatch = (
       return created;
     }
 
-    const existing = found.artistKey === undefined ? await adopt(found, filing, art) : found;
+    const filed = found.artistKey === undefined ? await adopt(found, filing, art) : found;
+
+    const existing =
+      filing.tagged !== null && filed.creditsTagged === true
+        ? await retag(filed, filing.tagged, art)
+        : filed;
+
     const artHash = await keptArt(existing.artHash, art, () => albumArt(existing._id, except));
 
     const changes = {

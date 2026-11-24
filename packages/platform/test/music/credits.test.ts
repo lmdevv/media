@@ -366,6 +366,27 @@ describe.skipIf(stack === undefined)("music artist credits", { timeout: 240_000 
 
     expect(variousAlbums.page.map((album) => album.title)).toEqual(["Hits"]);
     await expectExact(stack, libraryId);
+
+    // Retagged values that show as the same album artist credit the same album anew.
+    await scan(stack, lease, [
+      song(root, "Boogie", "Earth, Wind & Fire & The Emotions", "Boogie", {
+        artists: ["Earth, Wind & Fire", "The Emotions"],
+        albumArtists: ["Earth, Wind & Fire", "The Emotions", "Maurice White"],
+        albumArtist: "Earth, Wind & Fire & The Emotions",
+      }),
+    ]);
+
+    const retagged = await stateOf(stack, libraryId);
+    const boogie = albumOf(retagged, "Earth, Wind & Fire & The Emotions", "Boogie");
+
+    expect(boogie.id).toBe(albumOf(state, "Earth, Wind & Fire & The Emotions", "Boogie").id);
+    expect(boogie.credits?.map((one) => one.name)).toEqual([
+      "Earth, Wind & Fire",
+      "The Emotions",
+      "Maurice White",
+    ]);
+    expect(artistOf(retagged, "Maurice White")).toMatchObject({ albumCount: 1, trackCount: 0 });
+    await expectExact(stack, libraryId);
     await finishScan(stack, lease);
   });
 

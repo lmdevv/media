@@ -685,8 +685,10 @@ artist's page lists it once.
   `creditsTagged`, and title key (`by_library_filing`). Splitting the string into credits never
   merges or divides albums: "Greatest Hits" by "Celia Cruz" and by "Celia Cruz & Johnny Pacheco"
   stay two albums. The album credits its separate values, or its album artist string's
-  resolution; track contributors never group or credit an album. A compilation by "Various
-  Artists" credits that name, and each of its songs credits its own artists.
+  resolution; track contributors never group or credit an album. Separate album artist values
+  that change while they show as the same album artist credit the album as the file a scan wrote
+  last names them. A compilation by "Various Artists" credits that name, and each of its songs
+  credits its own artists.
 - **Links and pages.** `trackArtists` and `albumArtists` hold one row per credited artist, kept
   with the song's title key and the album's year, which `music.artists.tracks` (new: every song
   on disk crediting the artist, by title), the top songs of `music.artists.get`, and
