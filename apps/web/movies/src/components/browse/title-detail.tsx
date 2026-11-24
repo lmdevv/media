@@ -5,9 +5,10 @@ import { Badge } from "@media/ui/components/badge";
 import { Button } from "@media/ui/components/button";
 import { buttonVariants } from "@media/ui/lib/button-variants";
 import { PlayGlyph } from "@media/ui/components/icons";
+import { unlessYielding } from "@media/ui/lib/focus-policy";
 import { formatTimecode } from "@media/ui/lib/timecode";
 import { cn } from "@media/ui/lib/utils";
-import { Link, useRouter } from "@tanstack/react-router";
+import { Link, useNavigate, useRouter } from "@tanstack/react-router";
 import {
   CheckIcon,
   ChevronDownIcon,
@@ -24,6 +25,8 @@ import type { ReactNode } from "react";
 import { toast } from "sonner";
 
 import { artworkUrl } from "@/lib/artwork";
+import { HOTKEYS } from "@/lib/hotkeys";
+import { useShortcuts } from "@/lib/use-shortcuts";
 import { toastFailure } from "@media/ui/lib/failure";
 import { facts, formatRemaining, formatRuntime, plural } from "@/lib/format";
 import { fileBadges, trackSummary } from "@/lib/media-facts";
@@ -36,6 +39,7 @@ import { useGuestLinkDialog } from "@media/ui/lib/use-guest-links";
 import { TitleGuestLinkDialog, TitleGuestLinks } from "../guests/guest-links";
 
 import { Episodes } from "./episodes";
+import { KeyHint } from "./key-hint";
 import { playTarget, useMyListToggle, watchSearch } from "./play-target";
 import type { MyListToggle, PlayTarget } from "./play-target";
 import { SelectMenu } from "./select-menu";
@@ -189,6 +193,30 @@ export function TitleDetailView({
     title.name,
   );
 
+  const navigate = useNavigate();
+  const version = versions.length > 1 ? versionChoice.chosen?.id : undefined;
+
+  const watch = (start: boolean): void =>
+    void navigate({
+      to: "/watch/$titleId",
+      params: { titleId: title.id },
+      search: watchSearch(target.episodeId, start, version),
+    });
+
+  useShortcuts([
+    {
+      hotkey: HOTKEYS["title.play"],
+      callback: unlessYielding(() => watch(false)),
+      options: { enabled: title.available },
+    },
+    {
+      hotkey: HOTKEYS["title.play-from-start"],
+      callback: unlessYielding(() => watch(true)),
+      options: { enabled: title.available && target.resuming },
+    },
+    { hotkey: HOTKEYS["title.my-list"], callback: unlessYielding(() => void myList.toggle()) },
+  ]);
+
   const parts: DetailParts = {
     title,
     shareGuests: mayShareGuests
@@ -207,7 +235,7 @@ export function TitleDetailView({
     myList,
     versions,
     versionChoice,
-    version: versions.length > 1 ? versionChoice.chosen?.id : undefined,
+    version,
     file,
     badges: file === undefined ? [] : fileBadges(file),
     backdrop: artworkUrl(title.artwork.backdrop, "backdrop"),
@@ -255,6 +283,9 @@ const lengthFact = (title: TitleDetail): string | null =>
       ? null
       : formatRuntime(title.runtimeMs);
 
+const myListLabel = (myList: MyListToggle): string =>
+  myList.inList ? "Remove from My List" : "Add to My List";
+
 function WatchLink({
   title,
   target,
@@ -270,7 +301,7 @@ function WatchLink({
 }) {
   const missing = !title.available;
 
-  return (
+  const link = (
     <Link
       to="/watch/$titleId"
       params={{ titleId: title.id }}
@@ -296,6 +327,17 @@ function WatchLink({
         </span>
       ) : null}
     </Link>
+  );
+
+  return missing ? (
+    link
+  ) : (
+    <KeyHint
+      hotkey={HOTKEYS[start ? "title.play-from-start" : "title.play"].defaultHotkey}
+      label={start ? "Play from start" : target.label}
+    >
+      {link}
+    </KeyHint>
   );
 }
 
@@ -459,30 +501,34 @@ function PhoneActions({
 }) {
   return (
     <div className="flex flex-wrap justify-around gap-y-3 px-6 pt-4.5 pb-1">
-      <button
-        type="button"
-        aria-pressed={myList.inList}
-        onClick={() => void myList.toggle()}
-        className="flex w-26 cursor-pointer flex-col items-center gap-1.5 text-caption/caption text-text-muted"
-      >
-        {myList.inList ? (
-          <CheckIcon className="size-5.5 text-text" strokeWidth={1.75} aria-hidden />
-        ) : (
-          <PlusIcon className="size-5.5 text-text" strokeWidth={1.75} aria-hidden />
-        )}
-        My List
-      </button>
+      <KeyHint hotkey={HOTKEYS["title.my-list"].defaultHotkey} label={myListLabel(myList)}>
+        <button
+          type="button"
+          aria-pressed={myList.inList}
+          onClick={() => void myList.toggle()}
+          className="flex w-26 cursor-pointer flex-col items-center gap-1.5 text-caption/caption text-text-muted"
+        >
+          {myList.inList ? (
+            <CheckIcon className="size-5.5 text-text" strokeWidth={1.75} aria-hidden />
+          ) : (
+            <PlusIcon className="size-5.5 text-text" strokeWidth={1.75} aria-hidden />
+          )}
+          My List
+        </button>
+      </KeyHint>
       <TitleGuestLinks phone onClick={shareGuests} />
       {target.resuming ? (
-        <Link
-          to="/watch/$titleId"
-          params={{ titleId: title.id }}
-          search={watchSearch(target.episodeId, true, version)}
-          className="flex w-26 flex-col items-center gap-1.5 text-caption/caption text-text-muted"
-        >
-          <RotateCcwIcon className="size-5.5 text-text" strokeWidth={1.75} aria-hidden />
-          Play from start
-        </Link>
+        <KeyHint hotkey={HOTKEYS["title.play-from-start"].defaultHotkey} label="Play from start">
+          <Link
+            to="/watch/$titleId"
+            params={{ titleId: title.id }}
+            search={watchSearch(target.episodeId, true, version)}
+            className="flex w-26 flex-col items-center gap-1.5 text-caption/caption text-text-muted"
+          >
+            <RotateCcwIcon className="size-5.5 text-text" strokeWidth={1.75} aria-hidden />
+            Play from start
+          </Link>
+        </KeyHint>
       ) : null}
       {title.trailer === null ? null : (
         <TrailerButton trailer={title.trailer} name={title.name} phone />
@@ -557,16 +603,18 @@ function DesktopTitleDetail({
             {title.trailer === null ? null : (
               <TrailerButton trailer={title.trailer} name={title.name} phone={false} />
             )}
-            <Button
-              variant="icon"
-              size="icon"
-              className="size-12"
-              aria-pressed={myList.inList}
-              aria-label={myList.inList ? "Remove from My List" : "Add to My List"}
-              onClick={() => void myList.toggle()}
-            >
-              {myList.inList ? <CheckIcon strokeWidth={1.75} /> : <PlusIcon strokeWidth={1.75} />}
-            </Button>
+            <KeyHint hotkey={HOTKEYS["title.my-list"].defaultHotkey} label={myListLabel(myList)}>
+              <Button
+                variant="icon"
+                size="icon"
+                className="size-12"
+                aria-pressed={myList.inList}
+                aria-label={myListLabel(myList)}
+                onClick={() => void myList.toggle()}
+              >
+                {myList.inList ? <CheckIcon strokeWidth={1.75} /> : <PlusIcon strokeWidth={1.75} />}
+              </Button>
+            </KeyHint>
             <TitleGuestLinks onClick={shareGuests} />
             {addToSession === null ? null : (
               <Button variant="secondary" size="lg" onClick={addToSession}>

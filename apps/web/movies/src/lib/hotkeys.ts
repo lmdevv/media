@@ -1,7 +1,11 @@
 import { COMMAND_MENU_KEYS } from "@media/ui/lib/command-menu";
 import { defineAppHotkeys } from "@tanstack/react-hotkeys";
 
-const GLOBAL = "Global";
+const EVERYWHERE = "Everywhere";
+
+const BROWSING = "Browsing";
+
+const TITLE_PAGE = "Title page";
 
 const PLAYER = "Player";
 
@@ -10,16 +14,26 @@ export const HOTKEYS = defineAppHotkeys({
   ...COMMAND_MENU_KEYS,
   "command-menu.toggle": {
     hotkey: "Mod+K",
-    meta: { name: "Search or jump to…", group: GLOBAL },
+    meta: { name: "Search or jump to…", group: EVERYWHERE },
   },
-  "search.open": { hotkey: "/", meta: { name: "Search", group: GLOBAL } },
-  "go.home": { hotkey: ["G", "H"], meta: { name: "Home", group: GLOBAL } },
-  "go.movies": { hotkey: ["G", "M"], meta: { name: "Movies", group: GLOBAL } },
-  "go.shows": { hotkey: ["G", "S"], meta: { name: "Shows", group: GLOBAL } },
-  "go.my-list": { hotkey: ["G", "L"], meta: { name: "My List", group: GLOBAL } },
-  "go.settings": { hotkey: ["G", ","], meta: { name: "Settings", group: GLOBAL } },
-  "rows.next": { hotkey: "J", meta: { name: "Next row", group: GLOBAL } },
-  "rows.previous": { hotkey: "K", meta: { name: "Previous row", group: GLOBAL } },
+  "search.open": { hotkey: "/", meta: { name: "Search", group: BROWSING } },
+  "go.home": { hotkey: ["G", "H"], meta: { name: "Home", group: BROWSING } },
+  "go.movies": { hotkey: ["G", "M"], meta: { name: "Movies", group: BROWSING } },
+  "go.shows": { hotkey: ["G", "S"], meta: { name: "Shows", group: BROWSING } },
+  "go.my-list": { hotkey: ["G", "L"], meta: { name: "My List", group: BROWSING } },
+  "go.settings": { hotkey: ["G", ","], meta: { name: "Settings", group: BROWSING } },
+  "rows.next": { hotkey: "J", meta: { name: "Next row", group: BROWSING } },
+  "rows.previous": { hotkey: "K", meta: { name: "Previous row", group: BROWSING } },
+  "title.play": { hotkey: "P", meta: { name: "Play or resume", group: TITLE_PAGE } },
+  "title.play-from-start": {
+    hotkey: "Shift+P",
+    meta: { name: "Play from start", group: TITLE_PAGE },
+  },
+  "title.trailer": { hotkey: "T", meta: { name: "Watch the trailer", group: TITLE_PAGE } },
+  "title.my-list": {
+    hotkey: "L",
+    meta: { name: "Add to or remove from My List", group: TITLE_PAGE },
+  },
   "player.toggle": { hotkey: "Space", meta: { name: "Play or pause", group: PLAYER } },
   "player.toggle-k": { hotkey: "K", meta: { name: "Play or pause", group: PLAYER } },
   "player.back-10": { hotkey: "J", meta: { name: "Back 10 seconds", group: PLAYER } },
