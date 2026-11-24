@@ -1,4 +1,6 @@
 import { keyLabels } from "@media/ui/components/keys";
+import { formatHotkey, parseHotkey } from "@tanstack/hotkeys";
+import type { Hotkey } from "@tanstack/hotkeys";
 import { describe, expect, it } from "vitest";
 
 import { HOTKEYS } from "./hotkeys";
@@ -47,5 +49,67 @@ describe("HOTKEYS", () => {
       expect(hotkey.meta?.name, hotkey.id).toBeTruthy();
       expect(hotkey.meta?.group, hotkey.id).toBeTruthy();
     }
+  });
+});
+
+const SCREEN_NAMES = ["browsing", "title page", "player", "command menu"] as const;
+
+type Screen = (typeof SCREEN_NAMES)[number];
+
+const SCREENS: Readonly<Record<Screen, ReadonlyArray<string>>> = {
+  browsing: ["Everywhere", "Browsing"],
+  "title page": ["Everywhere", "Browsing", "Title page"],
+  player: ["Everywhere", "Player"],
+  "command menu": ["Everywhere", "Command menu"],
+};
+
+const PLATFORMS = ["mac", "linux"] as const;
+
+const steps = (hotkey: Hotkey, platform: (typeof PLATFORMS)[number]): ReadonlyArray<string> => {
+  const parsed = parseHotkey(hotkey, platform);
+
+  return (Array.isArray(parsed) ? parsed : [parsed]).map((chord) => formatHotkey(chord));
+};
+
+const collide = (left: ReadonlyArray<string>, right: ReadonlyArray<string>): boolean => {
+  const [short, long] = left.length <= right.length ? [left, right] : [right, left];
+
+  return short.every((chord, index) => chord === long[index]);
+};
+
+const collisions = (screen: Screen): ReadonlyArray<string> => {
+  const groups = SCREENS[screen];
+  const live = Object.values(HOTKEYS).filter((hotkey) => groups.includes(hotkey.meta?.group ?? ""));
+
+  return PLATFORMS.flatMap((platform) =>
+    live.flatMap((left, index) =>
+      live
+        .slice(index + 1)
+        .filter((right) =>
+          collide(steps(left.defaultHotkey, platform), steps(right.defaultHotkey, platform)),
+        )
+        .map((right) => `${platform}: ${left.id} and ${right.id}`),
+    ),
+  );
+};
+
+describe("shortcuts on one screen", () => {
+  it("puts every shortcut on some screen", () => {
+    const groups = new Set<string>(Object.values(SCREENS).flat());
+
+    for (const hotkey of Object.values(HOTKEYS)) {
+      expect(groups.has(hotkey.meta?.group ?? ""), hotkey.id).toBe(true);
+    }
+  });
+
+  it.each(SCREEN_NAMES)("never share keys on the %s screen", (screen) => {
+    expect(collisions(screen)).toEqual([]);
+  });
+
+  it("counts the same keys and a sequence's first key as collisions", () => {
+    expect(collide(steps("G", "mac"), steps(["G", "H"], "mac"))).toBe(true);
+    expect(collide(steps("Mod+K", "linux"), steps("Control+K", "linux"))).toBe(true);
+    expect(collide(steps("Mod+K", "mac"), steps("Control+K", "mac"))).toBe(false);
+    expect(collide(steps(["G", "H"], "mac"), steps(["G", "L"], "mac"))).toBe(false);
   });
 });

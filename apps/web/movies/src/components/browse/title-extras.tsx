@@ -3,16 +3,20 @@ import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { Avatar } from "@media/ui/components/avatar";
 import { buttonVariants } from "@media/ui/lib/button-variants";
 import { MediaRow } from "@media/ui/components/media-row";
+import { unlessYielding } from "@media/ui/lib/focus-policy";
 import { cn } from "@media/ui/lib/utils";
 import { Link } from "@tanstack/react-router";
 import { ArrowUpRightIcon, ClapperboardIcon, StarIcon } from "lucide-react";
 import { Fragment, useRef, useState } from "react";
 
 import { artworkUrl } from "@/lib/artwork";
+import { HOTKEYS } from "@/lib/hotkeys";
+import { useShortcuts } from "@/lib/use-shortcuts";
 import { toastFailure } from "@media/ui/lib/failure";
 import type { ExternalLink } from "@/lib/metadata";
 import { creditLines, creditRole, scoresOf, trailerEmbedUrl } from "@/lib/metadata";
 
+import { KeyHint } from "./key-hint";
 import { TitleLandscapeCard, TitlePosterCard } from "./title-cards";
 import type { TrailerDialog as TrailerDialogComponent } from "./trailer-dialog";
 
@@ -219,8 +223,6 @@ export function TrailerButton({
   const loading = useRef<Promise<typeof TrailerDialogComponent> | null>(null);
   const src = trailerEmbedUrl(trailer.key);
 
-  if (src === undefined) return null;
-
   const load = (): Promise<typeof TrailerDialogComponent> => {
     loading.current ??= loadTrailerDialog().then(
       (loaded) => {
@@ -264,29 +266,44 @@ export function TrailerButton({
     }
   };
 
+  useShortcuts([
+    {
+      hotkey: HOTKEYS["title.trailer"],
+      callback: unlessYielding(() => void show()),
+      options: { enabled: src !== undefined },
+    },
+  ]);
+
+  if (src === undefined) return null;
+
   const Dialog = dialog;
 
   return (
     <>
-      <button
-        type="button"
-        aria-busy={pending || undefined}
-        onPointerEnter={prepare}
-        onFocus={prepare}
-        onClick={() => void show()}
-        className={
-          phone
-            ? "flex w-26 cursor-pointer flex-col items-center gap-1.5 text-caption/caption text-text-muted aria-busy:cursor-progress"
-            : cn(buttonVariants({ variant: "secondary", size: "lg" }), "aria-busy:cursor-progress")
-        }
-      >
-        <ClapperboardIcon
-          className={phone ? "size-5.5 text-text" : undefined}
-          strokeWidth={1.75}
-          aria-hidden
-        />
-        Trailer
-      </button>
+      <KeyHint hotkey={HOTKEYS["title.trailer"].defaultHotkey} label="Watch the trailer">
+        <button
+          type="button"
+          aria-busy={pending || undefined}
+          onPointerEnter={prepare}
+          onFocus={prepare}
+          onClick={() => void show()}
+          className={
+            phone
+              ? "flex w-26 cursor-pointer flex-col items-center gap-1.5 text-caption/caption text-text-muted aria-busy:cursor-progress"
+              : cn(
+                  buttonVariants({ variant: "secondary", size: "lg" }),
+                  "aria-busy:cursor-progress",
+                )
+          }
+        >
+          <ClapperboardIcon
+            className={phone ? "size-5.5 text-text" : undefined}
+            strokeWidth={1.75}
+            aria-hidden
+          />
+          Trailer
+        </button>
+      </KeyHint>
       {Dialog === null ? null : (
         <Dialog
           open={open}

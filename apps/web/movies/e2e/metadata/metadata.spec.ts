@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { expect, test } from "@playwright/test";
+import { devices, expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 
 import { drawPoster, encodeClip } from "../stack/fixture-library";
@@ -19,6 +19,7 @@ import {
   runAsHost,
   signIn,
   signInClient,
+  signedInPage,
 } from "../stack/people";
 import type { Client, Person } from "../stack/people";
 
@@ -502,4 +503,143 @@ test("the command menu finds people", async ({ page }) => {
   await capture(page, "command-menu-people");
   await person.click();
   await expect(page.getByRole("heading", { level: 1, name: "Sigourney Weaver" })).toBeVisible();
+});
+
+const MAC_USER_AGENT =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36";
+
+const PAUSED_AT_MS = 600_000;
+
+const pauseAlienPartWay = async (): Promise<void> => {
+  if (client === undefined) throw new Error("The admin did not sign in");
+
+  const { platform } = client;
+  const started = await platform.movies.play.start({ titleId: titleId("Alien Fixture") });
+
+  await platform.movies.play.report({
+    fileId: started.file.id,
+    positionMs: PAUSED_AT_MS,
+    durationMs: 7_020_000,
+    event: "pause",
+    playbackId: started.playbackId,
+    startedAt: started.startedAt,
+  });
+};
+
+test("a title page's actions run from the keyboard and show their keys on hover and focus", async ({
+  page,
+}) => {
+  await pauseAlienPartWay();
+  await openTitle(page, "Alien Fixture");
+
+  const resume = page.getByRole("link", { name: /^Resume/u });
+  const fromStart = page.getByRole("link", { name: "Play from start" });
+  const trailer = page.getByRole("button", { name: "Trailer" });
+  const hint = page.locator('[data-slot="key-hint"]');
+  const inList = page.getByRole("button", { name: "Remove from My List" });
+  const notInList = page.getByRole("button", { name: "Add to My List" });
+
+  await expect(resume).toHaveAttribute("aria-keyshortcuts", "P");
+  await expect(fromStart).toHaveAttribute("aria-keyshortcuts", "Shift+P");
+  await expect(trailer).toHaveAttribute("aria-keyshortcuts", "T");
+  await expect(notInList).toHaveAttribute("aria-keyshortcuts", "L");
+
+  await resume.hover();
+  await expect(hint).toContainText("Resume");
+  await expect(hint.locator("kbd > kbd")).toHaveText(["P"]);
+  await capture(page, "title-key-hint");
+  await page.mouse.move(0, 0);
+  await expect(hint).toBeHidden();
+
+  await page.keyboard.press("Shift");
+  await fromStart.focus();
+  await expect(hint).toContainText("Play from start");
+  await expect(hint.locator("kbd > kbd")).toHaveText(["Shift", "P"]);
+  await fromStart.blur();
+
+  await page.keyboard.press("l");
+  await expect(inList).toHaveAttribute("aria-pressed", "true");
+
+  await page.keyboard.press(`${mod}+k`);
+  await page.keyboard.press("l");
+  await expect(page.getByRole("combobox")).toHaveValue("l");
+  await page.keyboard.press("Escape");
+
+  const dialog = page.getByRole("dialog");
+
+  await expect(dialog).toBeHidden();
+  await expect(inList).toBeVisible();
+
+  await page.keyboard.press("t");
+
+  await expect(dialog.locator("iframe")).toBeVisible();
+  await page.keyboard.press("l");
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(inList).toBeVisible();
+
+  await page.keyboard.press("g");
+  await page.keyboard.press("l");
+  await expect(page).toHaveURL(/\/movies\/my-list$/u);
+  await expect(page.getByRole("link", { name: /Alien Fixture/u })).toBeVisible();
+
+  await openTitle(page, "Alien Fixture");
+  await page.keyboard.press("l");
+  await expect(notInList).toHaveAttribute("aria-pressed", "false");
+
+  await page.keyboard.press("Shift+P");
+  await expect(page).toHaveURL(new RegExp(`/watch/${titleId("Alien Fixture")}\\?start=0$`, "u"));
+
+  await openTitle(page, "Alien Fixture");
+  await page.keyboard.press("p");
+  await expect(page).toHaveURL(new RegExp(`/watch/${titleId("Alien Fixture")}$`, "u"));
+
+  await openTitle(page, "Fixture Series");
+  await page.keyboard.press("p");
+  await expect(page).toHaveURL(new RegExp(`/watch/${titleId("Fixture Series")}\\?episodeId=`, "u"));
+});
+
+test("a Mac draws a title page action's keys as its symbols", async ({ browser }) => {
+  if (admin === undefined) return;
+
+  await pauseAlienPartWay();
+
+  const page = await signedInPage(browser, admin, { userAgent: MAC_USER_AGENT });
+
+  try {
+    await openTitle(page, "Alien Fixture");
+
+    const fromStart = page.getByRole("link", { name: "Play from start" });
+
+    await page.keyboard.press("Shift");
+    await fromStart.focus();
+    await expect(page.locator('[data-slot="key-hint"] kbd > kbd')).toHaveText(["⇧", "P"]);
+    await expect(fromStart).toHaveAttribute("aria-keyshortcuts", "Shift+P");
+  } finally {
+    await page.context().close();
+  }
+});
+
+test("a touch screen runs a title page's actions without drawing their keys", async ({
+  browser,
+}) => {
+  if (admin === undefined) return;
+
+  await pauseAlienPartWay();
+
+  const page = await signedInPage(browser, admin, { ...devices["iPhone 13"] });
+
+  try {
+    await openTitle(page, "Alien Fixture");
+    expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
+
+    const fromStart = page.getByRole("link", { name: "Play from start" });
+
+    await expect(fromStart).toHaveAttribute("aria-keyshortcuts", "Shift+P");
+    await page.keyboard.press("Shift");
+    await fromStart.focus();
+    await expect(page.locator('[data-slot="key-hint"]')).toBeHidden();
+  } finally {
+    await page.context().close();
+  }
 });

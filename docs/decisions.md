@@ -343,6 +343,14 @@ Old movies' Convex project, its SDK client, and its command registry were delete
   `HotkeysProvider` registers every shortcut on the window and leaves yielding to the focus
   policy's `unlessYielding`. A held key runs a shortcut once, even when something else took its
   first press, and sequences such as `G H` wait one second for the next key.
+- Each registry entry's `meta.group` says where it is live: `Everywhere`, `Browsing`, `Title page`,
+  `Player`, or `Command menu`. `apps/web/movies/src/lib/hotkeys.test.ts` lists which groups share a
+  screen and fails when two of them bind the same keys, or when one binding starts another's
+  sequence, on macOS or elsewhere.
+- The title page's Play or Resume, Play from start, Trailer, and My List actions have shortcuts in
+  the `Title page` group. `KeyHint` names each action and draws its keys in a tooltip above it,
+  after a short hover and at once on keyboard focus, never for a touch, and the action carries
+  `aria-keyshortcuts`.
 - The command menu takes a typed page model (`@media/ui/lib/command-menu`): groups scoped to
   browsing or searching, fuzzy or caller-ranked filtering, actions (sync or async) and submenus
   that replace the list in the same panel, running-job progress, and fallback commands for no
