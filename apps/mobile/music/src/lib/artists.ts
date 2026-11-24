@@ -41,11 +41,14 @@ export const artistStats = (
 
 /**
  * Whether an artist has songs past their top songs, which their page's Songs list then opens:
- * the core answered every top song it gives, and the artist's song count, when known, is more.
+ * their song count, when known, is more than the top songs hold. The top songs read a bounded
+ * window of the artist's songs before hiding the ones the listener may not play, so a short list
+ * doesn't prove there are no more. Without a count, a full list of top songs may have more.
  */
 export const hasMoreSongs = (artist: ArtistCounts, topTracks: ReadonlyArray<unknown>): boolean =>
-  topTracks.length >= TOP_SONGS &&
-  (artist.trackCount === undefined || artist.trackCount > topTracks.length);
+  artist.trackCount === undefined
+    ? topTracks.length >= TOP_SONGS
+    : artist.trackCount > topTracks.length;
 
 /**
  * What a song's row on an artist's pages says under its title: the song's artists when it credits

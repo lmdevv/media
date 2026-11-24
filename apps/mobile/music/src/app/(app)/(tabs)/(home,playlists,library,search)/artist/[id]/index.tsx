@@ -258,6 +258,7 @@ function Artist({ artistId }: { readonly artistId: ArtistId }) {
 
   const detail = state.kind === "ready" ? state.detail : undefined;
   const tracks = detail?.topTracks ?? [];
+  const more = detail !== undefined && hasMoreSongs(detail.artist, tracks);
   const trackIds = tracks.map((track) => track.id);
 
   const years = new Map<AlbumId, number | null>(
@@ -325,12 +326,12 @@ function Artist({ artistId }: { readonly artistId: ArtistId }) {
         header={
           <>
             {top}
-            {tracks.length === 0 ? null : (
+            {tracks.length === 0 && !more ? null : (
               <View className="px-page pt-1">
                 <SectionHeader
                   title="Songs"
                   action={
-                    detail !== undefined && hasMoreSongs(detail.artist, tracks)
+                    more
                       ? {
                           kind: "chevron",
                           onPress: () =>

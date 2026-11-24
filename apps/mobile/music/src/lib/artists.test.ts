@@ -56,6 +56,10 @@ describe("hasMoreSongs", () => {
     expect(hasMoreSongs({ albumCount: 1, trackCount: 40 }, songs(TOP_SONGS))).toBe(true);
     expect(hasMoreSongs({ albumCount: 1 }, songs(TOP_SONGS))).toBe(true);
   });
+
+  it("is true when the top songs came back short of the artist's songs, as a filter hides some", () => {
+    expect(hasMoreSongs({ albumCount: 1, trackCount: 40 }, songs(3))).toBe(true);
+  });
 });
 
 describe("artistSongLine", () => {
