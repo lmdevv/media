@@ -30,10 +30,10 @@ export function KeyHint({
         <Tooltip.Positioner side="top" sideOffset={10} className="z-50">
           <Tooltip.Popup
             data-slot="key-hint"
-            className="flex items-center gap-2 rounded-control bg-text py-1.5 pr-1.5 pl-2.5 font-sans text-label/label font-semibold text-bg shadow-overlay transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0 pointer-coarse:hidden"
+            className="flex items-center gap-2 rounded-control border border-hairline bg-surface-raised py-1.5 pr-1.5 pl-2.5 font-sans text-label/label font-semibold text-text shadow-overlay transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0 pointer-coarse:hidden"
           >
             {label}
-            <Keys hotkey={hotkey} tone="inverse" />
+            <Keys hotkey={hotkey} />
           </Tooltip.Popup>
         </Tooltip.Positioner>
       </Tooltip.Portal>
