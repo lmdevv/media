@@ -1,5 +1,5 @@
 import { Dialog, DialogBackdrop, DialogPopup, DialogPortal } from "@/components/ui/dialog";
-import { Keys } from "@/components/ui/keys";
+import { Keys } from "@media/ui/components/keys";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { useHotkeys } from "@tanstack/react-hotkeys";

@@ -4,6 +4,7 @@
 @source "../../../../apps/web/music/src/**/*.{ts,tsx}";
 @source "../components/guest-links-form.tsx";
 @source "../components/guest-unavailable.tsx";
+@source "../components/keys.tsx";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -187,6 +188,18 @@
 
 :root {
   --radius: var(--radius-lg);
+}
+
+@utility keycaps {
+  @apply inline-flex shrink-0 gap-0.5;
+}
+
+@utility keycap {
+  @apply inline-flex h-4.5 min-w-4.5 items-center justify-center rounded-xs bg-text/(--opacity-tint) px-1 font-sans text-xs/xs font-medium text-text-muted;
+
+  &[data-tone="inverse"] {
+    @apply bg-text-inverse/(--opacity-tint-strong) text-text-inverse/(--opacity-muted);
+  }
 }
 
 @layer base {

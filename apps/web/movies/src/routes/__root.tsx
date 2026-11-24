@@ -1,6 +1,8 @@
 import type { PlatformSdk } from "@media/sdk/promise";
 import { Toaster } from "@media/ui/components/sonner";
-import { useFocusPolicy } from "@media/ui/lib/focus-policy";
+import { shortcutOptions, useFocusPolicy } from "@media/ui/lib/focus-policy";
+import { HotkeysProvider } from "@tanstack/react-hotkeys";
+import type { HotkeysProviderOptions } from "@tanstack/react-hotkeys";
 import { HeadContent, Outlet, createRootRouteWithContext } from "@tanstack/react-router";
 import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
 
@@ -41,6 +43,10 @@ export const Route = createRootRouteWithContext<RouterAppContext>()({
   }),
 });
 
+const SHORTCUTS: HotkeysProviderOptions = {
+  hotkey: { ...shortcutOptions, target: window, requireReset: true, timeout: 1_000 },
+};
+
 function RootComponent() {
   useFocusPolicy();
 
@@ -56,9 +62,11 @@ function RootComponent() {
         scriptProps={{ type: "application/json" }}
       >
         <ThemeColor />
-        <MoviesAccess>
-          <Outlet />
-        </MoviesAccess>
+        <HotkeysProvider defaultOptions={SHORTCUTS}>
+          <MoviesAccess>
+            <Outlet />
+          </MoviesAccess>
+        </HotkeysProvider>
         <Toaster />
       </ThemeProvider>
       {import.meta.env.DEV ? <TanStackRouterDevtools position="bottom-left" /> : null}

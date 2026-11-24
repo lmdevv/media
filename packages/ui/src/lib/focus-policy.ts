@@ -125,6 +125,30 @@ export function keyPressYields(event: KeyboardEvent): boolean {
   return shortcutYields(event.key, controlKindOf(event.target), isOverlayOpen());
 }
 
+/**
+ * The registration options {@link unlessYielding} needs from a hotkey library such as TanStack
+ * Hotkeys: the library neither skips nor prevents a key press, since the policy decides both.
+ */
+export const shortcutOptions = {
+  ignoreInputs: false,
+  preventDefault: false,
+  stopPropagation: false,
+} as const;
+
+/**
+ * Wrap a global shortcut's action in rule 1. The action skips a key press that something already
+ * handled (`defaultPrevented`) or that {@link keyPressYields}; otherwise it prevents the default,
+ * so Space on a focused button plays instead of pressing the button, and runs.
+ */
+export const unlessYielding =
+  (run: (event: KeyboardEvent) => void) =>
+  (event: KeyboardEvent): void => {
+    if (event.defaultPrevented || keyPressYields(event)) return;
+
+    event.preventDefault();
+    run(event);
+  };
+
 let lastModality: InputModality = "pointer";
 
 const markKeyboard = (): void => {

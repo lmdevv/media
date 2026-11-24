@@ -3,15 +3,16 @@ import { CommandMenu } from "@media/ui/components/command-menu";
 import { CompactTopBar, LargeTitle } from "@media/ui/components/phone-title";
 import { TabBar, TabBarItem, TabBarSearch } from "@media/ui/components/tab-bar";
 import { SearchTrigger, TopBar, TopBarLink } from "@media/ui/components/top-bar";
+import { unlessYielding } from "@media/ui/lib/focus-policy";
 import { moveRowFocus } from "@media/ui/lib/row-focus";
-import { useKeymap } from "@media/ui/lib/use-keymap";
 import { cn } from "@media/ui/lib/utils";
+import { useHotkeys } from "@tanstack/react-hotkeys";
 import { Link, useLocation, useMatches, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
 import { SWITCH_PERSON_COMMAND, useCommandRoot } from "@/commands";
-import { keymap, shortcutLabel } from "@/lib/keymap";
+import { HOTKEYS } from "@/lib/hotkeys";
 import { nameOf, useMe, useScopes } from "@/session/session";
 
 import { MoviesMark } from "./movies-mark";
@@ -93,17 +94,35 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
     </button>
   );
 
-  useKeymap(keymap, {
-    "menu.toggle": () => setMenu((state) => (state.open ? { open: false } : { open: true })),
-    "search.open": () => openMenu(),
-    "go.home": () => void navigate({ to: "/" }),
-    "go.movies": () => void navigate({ to: "/movies" }),
-    "go.shows": () => void navigate({ to: "/shows" }),
-    "go.my-list": () => void navigate({ to: "/my-list" }),
-    "go.settings": () => void navigate({ to: "/settings" }),
-    "rows.next": () => moveRowFocus(1),
-    "rows.previous": () => moveRowFocus(-1),
-  });
+  useHotkeys([
+    {
+      hotkey: HOTKEYS["command-menu.toggle"],
+      callback: (event) => {
+        event.preventDefault();
+        setMenu((state) => (state.open ? { open: false } : { open: true }));
+      },
+    },
+    { hotkey: HOTKEYS["search.open"], callback: unlessYielding(() => openMenu()) },
+    { hotkey: HOTKEYS["go.home"], callback: unlessYielding(() => void navigate({ to: "/" })) },
+    {
+      hotkey: HOTKEYS["go.movies"],
+      callback: unlessYielding(() => void navigate({ to: "/movies" })),
+    },
+    {
+      hotkey: HOTKEYS["go.shows"],
+      callback: unlessYielding(() => void navigate({ to: "/shows" })),
+    },
+    {
+      hotkey: HOTKEYS["go.my-list"],
+      callback: unlessYielding(() => void navigate({ to: "/my-list" })),
+    },
+    {
+      hotkey: HOTKEYS["go.settings"],
+      callback: unlessYielding(() => void navigate({ to: "/settings" })),
+    },
+    { hotkey: HOTKEYS["rows.next"], callback: unlessYielding(() => moveRowFocus(1)) },
+    { hotkey: HOTKEYS["rows.previous"], callback: unlessYielding(() => moveRowFocus(-1)) },
+  ]);
 
   const overMedia = hero && !scrolled;
 
@@ -135,8 +154,7 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
           actions={
             <>
               <SearchTrigger
-                keycaps={shortcutLabel("menu.toggle")}
-                aria-keyshortcuts="Meta+K Control+K"
+                hotkey={HOTKEYS["command-menu.toggle"].defaultHotkey}
                 onClick={() => openMenu()}
               />
               {accountButton("sm", false)}

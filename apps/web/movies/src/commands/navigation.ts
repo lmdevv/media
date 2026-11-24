@@ -4,7 +4,7 @@ import { useMemo } from "react";
 
 import { SECTIONS } from "@/components/shell/sections";
 import { ACCOUNT_SETTINGS } from "@/lib/account-links";
-import { keymap } from "@/lib/keymap";
+import { HOTKEYS } from "@/lib/hotkeys";
 
 import type { CommandContext, CommandContribution } from "./contribution";
 
@@ -21,7 +21,7 @@ export const useNavigationCommands = (context: CommandContext): CommandContribut
       id: `go:${section.to}`,
       title: section.label,
       leading: { kind: "icon", icon: section.icon },
-      keycaps: keymap.keycaps(section.shortcut),
+      hotkey: HOTKEYS[section.shortcut].defaultHotkey,
       perform: () => navigate({ to: section.to }),
     }));
 
@@ -38,7 +38,7 @@ export const useNavigationCommands = (context: CommandContext): CommandContribut
       id: "go:/settings",
       title: "Settings",
       leading: { kind: "icon", icon: Settings2Icon },
-      keycaps: keymap.keycaps("go.settings"),
+      hotkey: HOTKEYS["go.settings"].defaultHotkey,
       perform: () => navigate({ to: "/settings" }),
     };
 

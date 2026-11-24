@@ -1,6 +1,6 @@
 import { Menu as MenuPrimitive } from "@base-ui/react/menu";
 import { useKeyboardFocusReturn } from "@media/ui/lib/focus-policy";
-import { Keys } from "@/components/ui/keys";
+import { Keys } from "@media/ui/components/keys";
 import { cn } from "@/lib/utils";
 import type { Hotkey } from "@tanstack/hotkeys";
 import { ChevronRightIcon } from "lucide-react";

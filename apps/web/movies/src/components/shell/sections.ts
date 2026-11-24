@@ -1,14 +1,14 @@
 import { BookmarkIcon, FilmIcon, HouseIcon, TvIcon } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
-import type { ShortcutId } from "@/lib/keymap";
+import type { HotkeyId } from "@/lib/hotkeys";
 
 /** A top-level section: a top bar link on desktop and a tab on phones. */
 export type Section = {
   readonly to: "/" | "/movies" | "/shows" | "/my-list";
   readonly label: string;
   readonly icon: LucideIcon;
-  readonly shortcut: ShortcutId;
+  readonly shortcut: HotkeyId;
 };
 
 /** The four sections in navigation order. */

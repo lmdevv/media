@@ -3,7 +3,7 @@ import { SubtitleDelay } from "@media/ui/components/subtitle-delay";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 
-import { playerKeymap } from "@/lib/keymap";
+import { HOTKEYS } from "@/lib/hotkeys";
 import type { PlaybackController } from "@/playback/playback-controller";
 import {
   SUBTITLE_DELAY,
@@ -12,8 +12,6 @@ import {
   subtitleTiming,
 } from "@/playback/subtitle-timing";
 import type { SubtitleTiming } from "@/playback/subtitle-timing";
-
-const NO_KEYS: ReadonlyArray<string> = [];
 
 const NOTICE_MS = 1_500;
 
@@ -114,8 +112,8 @@ export const useSubtitleDelay = ({
       value={formatSubtitleDelay(shownMs)}
       unavailable={reason ?? undefined}
       resettable={shownMs !== 0}
-      earlierKeys={keycaps ? playerKeymap.keycaps("player.subtitles-earlier") : NO_KEYS}
-      laterKeys={keycaps ? playerKeymap.keycaps("player.subtitles-later") : NO_KEYS}
+      earlierHotkey={keycaps ? HOTKEYS["player.subtitles-earlier"].defaultHotkey : undefined}
+      laterHotkey={keycaps ? HOTKEYS["player.subtitles-later"].defaultHotkey : undefined}
       onEarlier={() => step(-1)}
       onLater={() => step(1)}
       onReset={() => step(0)}

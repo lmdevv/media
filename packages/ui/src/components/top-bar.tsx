@@ -1,8 +1,11 @@
 import { mergeProps } from "@base-ui/react/merge-props";
 import { useRender } from "@base-ui/react/use-render";
 import { cn } from "@media/ui/lib/utils";
+import type { Hotkey } from "@tanstack/hotkeys";
 import { SearchIcon, UsersIcon } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
+
+import { Keys, ariaKeyShortcuts } from "./keys";
 
 /**
  * The desktop top bar: the app's mark and section links on the left; search, the room pill and the
@@ -79,19 +82,20 @@ export function TopBarLink({
 /**
  * The single "Search ⌘K" field. It is a button that opens the command menu, not a text input.
  *
- * @param keycaps - The shortcut as shown on this platform, such as `⌘K` or `Ctrl K`.
+ * @param hotkey - The shortcut that opens the menu, drawn as this platform's keycaps.
  */
 export function SearchTrigger({
-  keycaps,
+  hotkey,
   className,
   type = "button",
   ...props
-}: ComponentProps<"button"> & { readonly keycaps: string }) {
+}: ComponentProps<"button"> & { readonly hotkey: Hotkey }) {
   return (
     <button
       data-slot="search-trigger"
       type={type}
       aria-haspopup="dialog"
+      aria-keyshortcuts={ariaKeyShortcuts(hotkey)}
       className={cn(
         "flex h-8.5 w-55 shrink-0 cursor-pointer items-center gap-2 rounded-control bg-text/10 pr-2.5 pl-3 text-left text-text-muted transition-colors hover:bg-text/15",
         className,
@@ -100,9 +104,7 @@ export function SearchTrigger({
     >
       <SearchIcon className="size-4 shrink-0" strokeWidth={1.75} aria-hidden />
       <span className="flex-1 font-sans text-label/label">Search</span>
-      <span aria-hidden className="font-mono text-caption/4 opacity-70">
-        {keycaps}
-      </span>
+      <Keys aria-hidden hotkey={hotkey} />
     </button>
   );
 }

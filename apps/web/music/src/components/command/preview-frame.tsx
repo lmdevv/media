@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { Keys } from "@/components/ui/keys";
+import { Keys } from "@media/ui/components/keys";
 import { cn } from "@/lib/utils";
 import { ArrowLeftIcon } from "lucide-react";
 import { useLayoutEffect } from "react";

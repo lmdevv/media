@@ -1,6 +1,6 @@
 import { usePlayer } from "@media/player/react";
 import type { StreamQuality } from "@media/player/stream-quality";
-import { Keys } from "@/components/ui/keys";
+import { Keys } from "@media/ui/components/keys";
 import { Segmented } from "@/components/ui/segmented";
 import { useAppHotkeyList } from "@tanstack/react-hotkeys";
 import { createFileRoute } from "@tanstack/react-router";
