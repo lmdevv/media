@@ -1,40 +1,43 @@
 diff --git a/dist/cjs/router.cjs b/dist/cjs/router.cjs
-index 68b6ef850a1e1cd10d492dff39b8542adcc372db..7cc6b586dfa4037ddac27ad03e72e5f810a6bb1f 100644
+index 68b6ef850a1e1cd10d492dff39b8542adcc372db..0738db0a59245adfc6860cbfc1ebe308a9be39fc 100644
 --- a/dist/cjs/router.cjs
 +++ b/dist/cjs/router.cjs
-@@ -341,8 +341,8 @@ var RouterCore = class {
+@@ -341,8 +341,9 @@ var RouterCore = class {
  				if (this.rewrite) {
  					const url = new URL(fullPath, this.origin);
  					const origin = url.origin;
 -					const rewrittenUrl = require_rewrite.executeRewriteOutput(this.rewrite, url);
++					// Read the in-app href before the rewrite adds the basepath to `url`: https://github.com/TanStack/router/issues/8986
  					href = getUrlPath(url);
 +					const rewrittenUrl = require_rewrite.executeRewriteOutput(this.rewrite, url);
  					if (isExternalUrl(rewrittenUrl, origin)) {
  						publicHref = rewrittenUrl.href;
  						external = true;
 diff --git a/dist/esm/router.js b/dist/esm/router.js
-index a31886020d1dfff3c10ee27fea6ae781e6211f9a..3ad6927e081d81a255b2d608fa5316e3f1610ce6 100644
+index a31886020d1dfff3c10ee27fea6ae781e6211f9a..fad1d54eccecceec68ce6a1a5d22a72f4f59a080 100644
 --- a/dist/esm/router.js
 +++ b/dist/esm/router.js
-@@ -341,8 +341,8 @@ var RouterCore = class {
+@@ -341,8 +341,9 @@ var RouterCore = class {
  				if (this.rewrite) {
  					const url = new URL(fullPath, this.origin);
  					const origin = url.origin;
 -					const rewrittenUrl = executeRewriteOutput(this.rewrite, url);
++					// Read the in-app href before the rewrite adds the basepath to `url`: https://github.com/TanStack/router/issues/8986
  					href = getUrlPath(url);
 +					const rewrittenUrl = executeRewriteOutput(this.rewrite, url);
  					if (isExternalUrl(rewrittenUrl, origin)) {
  						publicHref = rewrittenUrl.href;
  						external = true;
 diff --git a/src/router.ts b/src/router.ts
-index ab3fe231949431818eea8c5acaa89a66b9c5c31c..3821efa00e62f7bb0e0e746c0405127bd37c4d75 100644
+index ab3fe231949431818eea8c5acaa89a66b9c5c31c..8cef7562f9e0b33724261881dd16529af61c31b9 100644
 --- a/src/router.ts
 +++ b/src/router.ts
-@@ -2143,8 +2143,8 @@ export class RouterCore<
+@@ -2143,8 +2143,9 @@ export class RouterCore<
          // With rewrite, we need to construct URL to apply the rewrite
          const url = new URL(fullPath, this.origin)
          const origin = url.origin
 -        const rewrittenUrl = executeRewriteOutput(this.rewrite, url)
++        // Read the in-app href before the rewrite adds the basepath to `url`: https://github.com/TanStack/router/issues/8986
          href = getUrlPath(url)
 +        const rewrittenUrl = executeRewriteOutput(this.rewrite, url)
          // If rewrite changed the origin, publicHref needs full URL
