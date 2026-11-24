@@ -50,7 +50,7 @@ RUN VITE_PLATFORM_URL=__MEDIA_CONVEX_URL__ pnpm --config.verify-deps-before-run=
 # The core's tsconfig extends the shared config, which `convex deploy` reads. Its configure script
 # imports TypeScript from a workspace package, which Node does not strip inside node_modules, so it
 # ships bundled.
-RUN pnpm --filter @media/platform deploy --prod --legacy /out/platform \
+RUN pnpm --config.allow-unused-patches=true --filter @media/platform deploy --prod --legacy /out/platform \
  && rm -rf /out/platform/test \
  && mkdir -p /out/platform/node_modules/@media \
  && cp -r packages/config /out/platform/node_modules/@media/config \

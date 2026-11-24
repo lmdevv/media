@@ -24,6 +24,7 @@ let
       ../package.json
       ../pnpm-lock.yaml
       ../pnpm-workspace.yaml
+      ../patches
       (lib.fileset.fileFilter (file: file.name == "package.json") ../apps)
       (lib.fileset.fileFilter (file: file.name == "package.json") ../packages)
       ../apps/cli/src

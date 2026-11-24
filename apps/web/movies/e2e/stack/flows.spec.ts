@@ -214,6 +214,98 @@ test("home shows the library; a title opens, joins My List, and the keyboard nav
   await expect(page.getByRole("link", { name: /Sicario/u })).toBeVisible();
 });
 
+interface Section {
+  readonly label: string;
+  readonly path: string;
+}
+
+const HOME: Section = { label: "Home", path: "/" };
+
+const MOVIES: Section = { label: "Movies", path: "/movies" };
+
+const SHOWS: Section = { label: "Shows", path: "/shows" };
+
+const SECTIONS: ReadonlyArray<Section> = [
+  HOME,
+  MOVIES,
+  SHOWS,
+  { label: "My List", path: "/my-list" },
+];
+
+const PHONE = { width: 390, height: 844 };
+
+const DESKTOP = { width: 1440, height: 900 };
+
+const NAVIGATION_TIMEOUT_MS = 120_000;
+
+const sectionLink = (section: Section) =>
+  page
+    .getByRole("navigation", { name: "Sections" })
+    .getByRole("link", { name: section.label, exact: true });
+
+const sectionUrl = (section: Section): RegExp => new RegExp(`${moviesPath(section.path)}$`, "u");
+
+const expectSection = async (section: Section, step: string): Promise<void> => {
+  await expect.soft(page, step).toHaveURL(sectionUrl(section));
+  await expect.soft(sectionLink(section), step).toHaveAttribute("aria-current", "page");
+};
+
+const navigates = async (
+  from: Section,
+  to: Section,
+  how: string,
+  go: () => Promise<void>,
+): Promise<void> => {
+  await page.goto(moviesPath(from.path));
+  await expect(sectionLink(from)).toHaveAttribute("aria-current", "page");
+  await go();
+  await expectSection(to, `${from.label} → ${to.label} by ${how}`);
+};
+
+const inOrder = <T>(items: ReadonlyArray<T>, step: (item: T) => Promise<void>): Promise<void> =>
+  items.reduce(async (previous, item) => {
+    await previous;
+    await step(item);
+  }, Promise.resolve());
+
+test("every section opens from every other by the top bar, phone tabs, keys, the menu, and Back", async () => {
+  test.setTimeout(NAVIGATION_TIMEOUT_MS);
+
+  await inOrder(SECTIONS, (from) =>
+    inOrder(
+      SECTIONS.filter((to) => to !== from),
+      (to) => navigates(from, to, "the top bar", () => sectionLink(to).click()),
+    ),
+  );
+
+  await inOrder([MOVIES, SHOWS], async (from) => {
+    await navigates(from, HOME, "g h", async () => {
+      await page.keyboard.press("g");
+      await page.keyboard.press("h");
+    });
+
+    await navigates(from, HOME, "the command menu", async () => {
+      await openMenu(page);
+      await page
+        .getByRole("group", { name: "Go to" })
+        .getByRole("option", { name: /^Home/u })
+        .click();
+    });
+
+    await page.goto(moviesPath(HOME.path));
+    await sectionLink(from).click();
+    await expect(page).toHaveURL(sectionUrl(from));
+    await page.goBack();
+    await expectSection(HOME, `${from.label} → Home by Back`);
+  });
+
+  await page.setViewportSize(PHONE);
+  await inOrder([MOVIES, SHOWS], (from) =>
+    navigates(from, HOME, "a phone tab", () => sectionLink(HOME).click()),
+  );
+  await page.setViewportSize(DESKTOP);
+});
+
 test("a title card's own menu opens by right click, the Menu key, and Shift+F10", async () => {
   await page.goto(moviesPath());
 
