@@ -350,10 +350,15 @@ const BIOGRAPHY_LINE =
 
 const LONG_BIOGRAPHY = Array.from({ length: 12 }, () => BIOGRAPHY_LINE).join("\n\n");
 
+/** Where a sticky portrait rests while the biography scrolls: under the 68px top bar, 28px down. */
+const STUCK_TOP = 96;
+
+const SCROLL_BY = 400;
+
 const SCREENS = [
-  { width: 390, height: 844, portraitWidth: 160 },
-  { width: 820, height: 1180, portraitWidth: 256 },
-  { width: 1440, height: 900, portraitWidth: 256 },
+  { width: 390, height: 844, portraitWidth: 160, sticky: false },
+  { width: 820, height: 1180, portraitWidth: 288, sticky: true },
+  { width: 1440, height: 900, portraitWidth: 288, sticky: true },
 ];
 
 const openWithLongBiography = async (page: Page, name: string): Promise<void> => {
@@ -375,9 +380,10 @@ const openWithLongBiography = async (page: Page, name: string): Promise<void> =>
 };
 
 const expectPortrait = (page: Page, portrait: Locator): Promise<void> =>
-  SCREENS.reduce(async (previous, { portraitWidth, ...viewport }) => {
+  SCREENS.reduce(async (previous, { portraitWidth, sticky, ...viewport }) => {
     await previous;
     await page.setViewportSize(viewport);
+    await page.evaluate(() => window.scrollTo(0, 0));
 
     const box = await portrait.boundingBox();
 
@@ -387,9 +393,24 @@ const expectPortrait = (page: Page, portrait: Locator): Promise<void> =>
 
     expect.soft(Math.abs(box.width - portraitWidth), drawn).toBeLessThanOrEqual(1);
     expect.soft(Math.abs(box.height - box.width * 1.5), drawn).toBeLessThanOrEqual(1);
+
+    await page.evaluate((by) => window.scrollTo(0, by), SCROLL_BY);
+
+    const scrolled = await portrait.boundingBox();
+
+    if (scrolled === null) throw new Error("The portrait is not drawn after scrolling");
+
+    const expectedTop = sticky ? STUCK_TOP : box.y - SCROLL_BY;
+
+    expect
+      .soft(
+        Math.abs(scrolled.y - expectedTop),
+        `${String(viewport.width)}px screen scrolled: top ${String(scrolled.y)}`,
+      )
+      .toBeLessThanOrEqual(1);
   }, Promise.resolve());
 
-test("a person's photo or letter stays 2:3 beside a long biography on a phone, tablet, and desktop", async ({
+test("a person's photo or letter stays 2:3 beside a long biography, and stays in view on a tablet or desktop as it scrolls", async ({
   page,
 }) => {
   await openWithLongBiography(page, "Sigourney Weaver");

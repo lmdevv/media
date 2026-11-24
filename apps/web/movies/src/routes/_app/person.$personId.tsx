@@ -36,7 +36,7 @@ function PersonSkeleton() {
       className="mx-auto box-content flex max-w-content flex-col gap-10 px-4 pt-6 pb-20 md:gap-14 md:px-16 md:pt-26"
     >
       <div className="flex flex-col gap-6 md:flex-row md:gap-12">
-        <Block className="aspect-2/3 w-40 rounded-poster md:w-64" />
+        <Block className="aspect-2/3 w-40 rounded-poster md:w-72" />
         <div className="flex w-full max-w-170 flex-col gap-4">
           <div className="flex flex-col gap-1.5">
             <Block tone="bar" className="h-9 w-56 rounded-inner" />
@@ -122,7 +122,7 @@ function PersonPage() {
         {photo === undefined ? (
           <div
             aria-hidden
-            className="flex aspect-2/3 w-40 shrink-0 self-start items-center justify-center rounded-poster bg-surface-raised font-sans text-display/display font-heavy tracking-display text-text-muted select-none md:w-64"
+            className="flex aspect-2/3 w-40 shrink-0 self-start items-center justify-center rounded-poster bg-surface-raised font-sans text-display/display font-heavy tracking-display text-text-muted select-none md:sticky md:top-24 md:w-72"
           >
             {monogramOf(data.name)}
           </div>
@@ -130,7 +130,7 @@ function PersonPage() {
           <img
             src={photo}
             alt={data.name}
-            className="aspect-2/3 w-40 shrink-0 self-start rounded-poster bg-surface-raised object-cover object-center md:w-64"
+            className="aspect-2/3 w-40 shrink-0 self-start rounded-poster bg-surface-raised object-cover object-center md:sticky md:top-24 md:w-72"
           />
         )}
         <div className="flex max-w-170 flex-col gap-4">
