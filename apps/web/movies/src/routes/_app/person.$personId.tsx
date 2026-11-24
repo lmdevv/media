@@ -122,7 +122,7 @@ function PersonPage() {
         {photo === undefined ? (
           <div
             aria-hidden
-            className="flex aspect-2/3 w-40 shrink-0 items-center justify-center rounded-poster bg-surface-raised font-sans text-display/display font-heavy tracking-display text-text-muted select-none md:w-64"
+            className="flex aspect-2/3 w-40 shrink-0 self-start items-center justify-center rounded-poster bg-surface-raised font-sans text-display/display font-heavy tracking-display text-text-muted select-none md:w-64"
           >
             {monogramOf(data.name)}
           </div>
@@ -130,7 +130,7 @@ function PersonPage() {
           <img
             src={photo}
             alt={data.name}
-            className="aspect-2/3 w-40 shrink-0 rounded-poster bg-surface-raised object-cover object-center md:w-64"
+            className="aspect-2/3 w-40 shrink-0 self-start rounded-poster bg-surface-raised object-cover object-center md:w-64"
           />
         )}
         <div className="flex max-w-170 flex-col gap-4">
