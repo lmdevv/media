@@ -3,7 +3,8 @@
 - Status: Accepted, 2026-11-04. Amended 2026-11-09 with the movies catalog, and again the same
   day with each movies document's size bound. Amended 2026-11-10 with folder identity, and again
   the same day with rescans after a file changes. Amended 2026-11-13 with the music catalog, and
-  again the same day with music's scanner on the server. Amended 2026-11-24 with artist credits.
+  again the same day with music's scanner on the server. Amended 2026-11-24 with artist credits,
+  and again the same day with how the clients show and correct them.
 - Decisions: D01, D02, D16, D17, D28, D29, D50
 
 ## Context
@@ -731,8 +732,22 @@ artist's page lists it once.
   corrections. Each needs `manage` on the library and `music:edit`, as renaming one does; API keys
   are not refused, since a correction outlives nothing a revoked key should end and a manager can
   undo it (ADR 0009, "Refusing API keys"). Corrections are per library (`creditOverrides`, at most
-  256): credits, evidence, and managers are per library, and one library's manager must not change
-  another's. Setting or removing one rechecks the strings its first part is in.
+  256, `MAX_CREDIT_OVERRIDES`): credits, evidence, and managers are per library, and one library's
+  manager must not change another's. Setting or removing one rechecks the strings its first part is
+  in. A manager corrects them on the library's page in the account client, under Artist credits
+  (`/admin/libraries/$libraryId/credits`), which lists the combined credits, how each resolves,
+  and the corrections against the limit; it shows only to a manager of a music library.
+- **In the clients.** A client shows the artist string as tagged and cuts it into each credited
+  name and the text that joins them (`creditLine`), finding the names in credit order, ignoring
+  case; a credit the string does not name, such as a featured artist the title names, follows it
+  ("Mora" crediting Sech reads "Mora & Sech"). The web client links each name to its artist page
+  wherever a song's or album's artists show, and shows the names as text inside another link or
+  button, and to guests, who cannot open artist pages. The iOS app shows the line as text in rows
+  whose tap plays or opens something; where the line is a control (Now Playing, an album's header,
+  the inspector, Go to artist), one artist opens directly and several open a native menu of them.
+  An artist's page lists `music.artists.tracks` under Songs, the first ten, which are its top
+  songs, and the rest on asking: the web page pages them in place, the iOS app on a page of its
+  own.
 - **Rows before credits.** Rows a release before credits wrote have no `credits`, `artistKey`,
   `trackCount`, or `tagsReader`, so the schema keeps those fields optional (ADR 0012, "a shape
   change to stored rows"). `music/scanner:known` answers such a track's tag reader as 0, so the
