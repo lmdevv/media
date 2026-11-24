@@ -4,10 +4,10 @@ import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { Link } from "@tanstack/react-router";
 import { ListMusicIcon, SpeakerIcon } from "lucide-react";
 import { useEffect } from "react";
 
+import { ArtistCredits } from "@/components/library/artist-credits";
 import { Artwork } from "@/components/library/artwork";
 import { LikeButton } from "@/components/library/like-button";
 import { useUi } from "@/components/shell/ui-state";
@@ -89,13 +89,9 @@ export function PlayerBar() {
                 Couldn't play this song
               </span>
             ) : (
-              <Link
-                to="/artists/$artistId"
-                params={{ artistId: track.artistId }}
-                className="truncate font-sans text-sm/xs text-text-muted hover:text-text hover:underline"
-              >
-                {track.artist}
-              </Link>
+              <span className="truncate font-sans text-sm/xs text-text-muted">
+                <ArtistCredits item={track} />
+              </span>
             )}
           </div>
           {failed || offline ? null : (

@@ -1,3 +1,4 @@
+import { creditKey } from "@media/contracts/artist-credits";
 import type { TrackId } from "@/lib/models";
 import type { Track } from "@/lib/models";
 import { useCurrentTrack } from "@media/player/react";
@@ -21,6 +22,7 @@ import type { ReactNode } from "react";
 import { TrackMenu } from "@/components/playlists/track-menu";
 import { formatDuration, formatQuality } from "@/lib/format";
 
+import { ArtistCredits, creditText } from "./artist-credits";
 import { Artwork, PlayingBars } from "./artwork";
 import { usePlayTracks } from "./cards";
 import { LikeButton } from "./like-button";
@@ -118,6 +120,7 @@ export function TrackList({
   unavailable,
   withheld,
   byline,
+  albumArtist,
   highlight,
   reorder,
   windowing = "long",
@@ -141,6 +144,11 @@ export function TrackList({
   readonly withheld?: (index: number) => boolean;
   /** More to say under a row's artist, such as who added it to a shared playlist. */
   readonly byline?: ((index: number) => string | null) | undefined;
+  /**
+   * The album's artist as its tags write it, on an album's list: a row whose song names other
+   * artists, such as a compilation's or a featured song's, shows them under its title.
+   */
+  readonly albumArtist?: string | undefined;
   /** A song to highlight and scroll to, from a shared song link. */
   readonly highlight?: TrackId | null;
   /** Lets rows be moved; the list's order then comes back from the server. */
@@ -212,6 +220,10 @@ export function TrackList({
       unavailable={unavailable?.(index) ?? null}
       withheld={withheld?.(index) ?? false}
       byline={byline?.(index) ?? null}
+      artists={
+        variant === "list" ||
+        (albumArtist !== undefined && creditKey(track.artist) !== creditKey(albumArtist))
+      }
       highlighted={highlight === track.id}
       reorder={controls}
       dropSide={reorder?.mode === "drag" ? reorder.reorder.dropSide(index) : null}
@@ -450,6 +462,7 @@ const TrackRow = memo(function TrackRow({
   unavailable,
   withheld,
   byline,
+  artists,
   highlighted,
   reorder,
   dropSide,
@@ -464,6 +477,8 @@ const TrackRow = memo(function TrackRow({
   readonly unavailable: string | null;
   readonly withheld: boolean;
   readonly byline: string | null;
+  /** Whether the row names the song's artists under its title. */
+  readonly artists: boolean;
   readonly highlighted: boolean;
   readonly reorder: RowReorder | undefined;
   readonly dropSide: DropSide | null;
@@ -568,9 +583,11 @@ const TrackRow = memo(function TrackRow({
         >
           {track.title}
         </span>
-        {variant === "list" ? (
+        {artists ? (
           <span className="truncate font-sans text-sm/xs text-text-muted">
-            {byline === null ? track.artist : `${track.artist} · ${byline}`}
+            {/* On a phone the row's play button covers the names; a desktop links each one. */}
+            <ArtistCredits item={track} linkClassName="lg:relative" />
+            {byline === null ? null : ` · ${byline}`}
           </span>
         ) : null}
       </td>
@@ -667,7 +684,7 @@ function UnavailableRow({
             {track.title}
           </span>
           <span className="truncate font-sans text-sm/xs text-text-muted">
-            {[reason, track.artist, byline].filter((part) => part !== null).join(" · ")}
+            {[reason, creditText(track), byline].filter((part) => part !== null).join(" · ")}
           </span>
         </span>
         {variant === "list" ? (

@@ -15,6 +15,7 @@ import { useMusic } from "@/lib/platform";
 import { startPlay } from "@/lib/start-play";
 import type { PlayOptions, PlaySource } from "@/lib/start-play";
 
+import { ArtistCredits } from "./artist-credits";
 import { Artwork, PlayingBars } from "./artwork";
 
 /** The most songs one album plays, more than any album holds. */
@@ -178,16 +179,19 @@ export const AlbumCard = memo(function AlbumCard({
           <PlayIcon className="size-4 translate-x-px" fill="currentColor" strokeWidth={0} />
         </button>
       </Artwork>
-      <Link
-        to="/albums/$albumId"
-        params={{ albumId: album.id }}
-        className="flex min-w-0 flex-col gap-0.5 outline-none after:absolute after:inset-0 focus-visible:underline"
-      >
-        <span className="truncate font-sans text-base/sm font-medium text-text">{album.title}</span>
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <Link
+          to="/albums/$albumId"
+          params={{ albumId: album.id }}
+          className="truncate font-sans text-base/sm font-medium text-text outline-none after:absolute after:inset-0 focus-visible:underline"
+        >
+          {album.title}
+        </Link>
         <span className="truncate font-sans text-sm/xs text-text-muted">
-          {subtitle ?? album.artist}
+          {/* Each name sits over the card's link to the album and opens its artist. */}
+          {subtitle ?? <ArtistCredits item={album} linkClassName="relative" />}
         </span>
-      </Link>
+      </div>
     </div>
   );
 });

@@ -119,17 +119,26 @@ export const signIn = async (page: Page, person: Person): Promise<void> => {
   await expect(page.getByRole("heading", { name: `Hi, ${person.username}.` })).toBeVisible();
 };
 
+/** A music library and the admin who made it, and so manages it. */
+export interface ManagedLibrary {
+  readonly manager: Person;
+  readonly libraryId: Awaited<ReturnType<PlatformSdk["core"]["libraries"]["create"]>>["libraryId"];
+}
+
 /**
- * Adds a music library over `folder` that the whole household may use, as an admin, and resolves
- * once its first scan finished.
+ * Adds a music library over `folder` that the whole household may use, made by a new admin who
+ * manages it, and resolves once its first scan finished.
  */
-export const addHouseholdLibrary = async (stack: StackEnv, folder: string): Promise<void> => {
-  const admin = await createPerson(stack, "music-admin", "admin");
-  const platform = await signInClient(stack, admin);
+export const addManagedLibrary = async (
+  stack: StackEnv,
+  folder: string,
+): Promise<ManagedLibrary> => {
+  const manager = await createPerson(stack, "music-admin", "admin");
+  const platform = await signInClient(stack, manager);
 
   try {
     const { libraryId } = await platform.core.libraries.create({
-      name: `Music ${admin.username}`,
+      name: `Music ${manager.username}`,
       kind: "music",
       folders: [folder],
     });
@@ -145,7 +154,17 @@ export const addHouseholdLibrary = async (stack: StackEnv, folder: string): Prom
         timeout: 60_000,
       })
       .toBe("succeeded");
+
+    return { manager, libraryId };
   } finally {
     await platform.dispose();
   }
+};
+
+/**
+ * Adds a music library over `folder` that the whole household may use, as an admin, and resolves
+ * once its first scan finished.
+ */
+export const addHouseholdLibrary = async (stack: StackEnv, folder: string): Promise<void> => {
+  await addManagedLibrary(stack, folder);
 };

@@ -9,6 +9,7 @@ import { ListMusicIcon, MessageCircleIcon, MoreHorizontalIcon } from "lucide-rea
 import { useState } from "react";
 import type { ReactNode } from "react";
 
+import { ArtistCredits } from "@/components/library/artist-credits";
 import { Artwork } from "@/components/library/artwork";
 import { LikeButton } from "@/components/library/like-button";
 import { TrackMenu } from "@/components/playlists/track-menu";
@@ -112,7 +113,7 @@ function PhonePlayer({ track }: { readonly track: Track }) {
             {track.title}
           </span>
           <span className="truncate font-sans text-lg leading-6.25 text-text/60">
-            {track.artist}
+            <ArtistCredits item={track} />
           </span>
         </div>
         <div className="flex gap-3">
@@ -196,7 +197,7 @@ function TrackHeader({ track, showLike }: { readonly track: Track; readonly show
           {track.title}
         </span>
         <span className="truncate font-sans text-phone-body leading-5.5 text-text/60">
-          {track.artist}
+          <ArtistCredits item={track} />
         </span>
       </div>
       {showLike ? (

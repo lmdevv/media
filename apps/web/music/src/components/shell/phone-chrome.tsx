@@ -5,6 +5,7 @@ import type { LinkProps } from "@tanstack/react-router";
 import { ListMusicIcon, SearchIcon, XIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
+import { ArtistCredits } from "@/components/library/artist-credits";
 import { Artwork } from "@/components/library/artwork";
 import { perform, playingElsewhere } from "@/components/player/player-actions";
 
@@ -122,12 +123,15 @@ function MiniPlayer() {
           <span className="truncate font-sans text-phone-subhead leading-5 font-medium text-text">
             {track.title}
             {device === null ? null : (
-              <span className="font-normal text-text-muted"> · {track.artist}</span>
+              <span className="font-normal text-text-muted">
+                {" · "}
+                <ArtistCredits item={track} links={false} />
+              </span>
             )}
           </span>
           {device === null ? (
             <span className="truncate font-sans text-sm leading-4.25 text-text-muted">
-              {track.artist}
+              <ArtistCredits item={track} links={false} />
             </span>
           ) : (
             <span className="flex min-w-0 items-center gap-1 font-sans text-sm leading-4.25 font-medium text-accent">

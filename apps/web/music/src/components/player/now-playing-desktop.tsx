@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import { ChevronDownIcon, ListMusicIcon, MessageCircleIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
+import { ArtistCredits } from "@/components/library/artist-credits";
 import { Artwork } from "@/components/library/artwork";
 import type { NowPlayingView } from "@/components/shell/ui-state";
 import { formatQuality } from "@/lib/format";
@@ -69,7 +70,7 @@ export function DesktopNowPlaying({ track, lyrics, view, onView }: DesktopNowPla
                   {track.title}
                 </h2>
                 <span className="truncate font-sans text-md/base text-text-muted">
-                  {track.artist}
+                  <ArtistCredits item={track} />
                 </span>
               </div>
               <Badge tone="accent">{formatQuality(track)}</Badge>
@@ -113,7 +114,9 @@ export function DesktopNowPlaying({ track, lyrics, view, onView }: DesktopNowPla
             <h2 className="font-sans text-xl/xl font-heavy tracking-tight text-text">
               {track.title}
             </h2>
-            <span className="font-sans text-md/base text-text-muted">{track.artist}</span>
+            <span className="font-sans text-md/base text-text-muted">
+              <ArtistCredits item={track} />
+            </span>
           </div>
           <div className="flex w-140 max-w-full items-center gap-4">
             <Progress

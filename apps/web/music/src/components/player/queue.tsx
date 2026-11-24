@@ -10,6 +10,7 @@ import { XIcon } from "lucide-react";
 import { useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
+import { ArtistCredits } from "@/components/library/artist-credits";
 import { Artwork, PlayingBars } from "@/components/library/artwork";
 import { JamButton } from "@/components/jam/jam-band";
 import { frontOf, upcomingInJam, useJamActions, useJoinedJam } from "@/components/jam/jam";
@@ -175,7 +176,9 @@ function QueueRowText({
       <span
         className={cn("truncate font-sans text-sm/xs", glass ? "text-text/60" : "text-text-muted")}
       >
-        {addedBy === null ? entry.artist : `${entry.artist} · Added by ${addedBy}`}
+        {/* The row plays its song; on a desktop each name opens its artist. */}
+        <ArtistCredits item={entry} linkClassName="relative lg:pointer-events-auto" />
+        {addedBy === null ? null : ` · Added by ${addedBy}`}
       </span>
     </div>
   );

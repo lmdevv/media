@@ -14,6 +14,7 @@ import { toast } from "sonner";
 
 import { DetailError } from "@/components/route-error";
 import type { MissingCopy } from "@/components/route-error";
+import { ArtistCredits } from "@/components/library/artist-credits";
 import { Artwork } from "@/components/library/artwork";
 import { CollectionHeader, CollectionHeaderSkeleton } from "@/components/library/collection-header";
 import { useReorder } from "@/components/library/reorder";
@@ -444,7 +445,7 @@ function AddResults({ playlist, query }: { readonly playlist: Playlist; readonly
           <span className="flex min-w-0 grow flex-col gap-px">
             <span className="truncate font-sans text-base/sm text-text">{track.title}</span>
             <span className="truncate font-sans text-sm/xs text-text-muted">
-              {track.artist} · {track.album}
+              <ArtistCredits item={track} links={false} /> · {track.album}
             </span>
           </span>
           <span className="font-mono text-sm/xs text-text-muted">

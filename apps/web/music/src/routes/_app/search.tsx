@@ -6,12 +6,13 @@ import { Match, Schema } from "effect";
 import { PlayIcon, SearchIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
+import { ArtistCredits } from "@/components/library/artist-credits";
 import { Artwork, PlayingBars } from "@/components/library/artwork";
 import { usePlayAlbum, usePlayArtist, usePlayTracks } from "@/components/library/cards";
 import { TrackMenu } from "@/components/playlists/track-menu";
 import { SEARCH_INPUT_ID } from "@/components/shell/keyboard";
 import { ACCOUNT_LIBRARIES } from "@/lib/account-links";
-import { formatCount, formatDuration, plural } from "@/lib/format";
+import { artistCount, formatCount, formatDuration } from "@/lib/format";
 import type { AlbumCard as Album, ArtistCard as Artist, SearchResults, Track } from "@/lib/models";
 import { useMusic, useRead } from "@/lib/platform";
 import { foldSearchText } from "@/lib/search-text";
@@ -210,7 +211,7 @@ function TopResultCard({
   const card = Match.value(result).pipe(
     Match.when({ kind: "artist" }, ({ artist }) => ({
       title: artist.name,
-      meta: `Artist · ${plural(artist.albumCount, "album")}`,
+      meta: `Artist · ${artistCount(artist)}`,
       art: <Artwork url={artist.artUrl} seed={artist.id} round className="size-24" />,
       link: (
         <Link
@@ -224,7 +225,12 @@ function TopResultCard({
     })),
     Match.when({ kind: "album" }, ({ album }) => ({
       title: album.title,
-      meta: `Album · ${album.artist}`,
+      meta: (
+        <>
+          {"Album · "}
+          <ArtistCredits item={album} linkClassName="relative" />
+        </>
+      ),
       art: <Artwork url={album.artUrl} seed={album.id} className="size-24 rounded-md" />,
       link: (
         <Link
@@ -238,7 +244,12 @@ function TopResultCard({
     })),
     Match.when({ kind: "track" }, ({ track }) => ({
       title: track.title,
-      meta: `Song · ${track.artist}`,
+      meta: (
+        <>
+          {"Song · "}
+          <ArtistCredits item={track} linkClassName="relative" />
+        </>
+      ),
       art: <Artwork url={track.artUrl} seed={track.albumId} className="size-24 rounded-md" />,
       link: null,
       play: () => void playTracks(results.tracks, { index: 0 }),
@@ -314,7 +325,7 @@ function SongRow({
           {track.title}
         </span>
         <span className="truncate font-sans text-sm/xs text-text-muted">
-          {track.artist} · {track.album}
+          <ArtistCredits item={track} /> · {track.album}
         </span>
       </span>
       <span className="font-mono text-sm/xs text-text-muted group-hover/row:hidden">
@@ -361,22 +372,22 @@ function DesktopResults({
           <h2 className="font-sans text-lg/md font-semibold tracking-tight text-text">Albums</h2>
           <div className="flex gap-5 overflow-x-auto pb-1">
             {results.albums.map((album) => (
-              <Link
-                key={album.id}
-                to="/albums/$albumId"
-                params={{ albumId: album.id }}
-                className="flex w-42 shrink-0 flex-col gap-2.5"
-              >
+              <div key={album.id} className="relative flex w-42 shrink-0 flex-col gap-2.5">
                 <Artwork url={album.artUrl} seed={album.id} className="size-42 rounded-md" />
                 <span className="flex flex-col gap-0.5">
-                  <span className="truncate font-sans text-base/sm font-medium text-text">
+                  <Link
+                    to="/albums/$albumId"
+                    params={{ albumId: album.id }}
+                    className="truncate font-sans text-base/sm font-medium text-text after:absolute after:inset-0"
+                  >
                     {album.title}
-                  </span>
+                  </Link>
                   <span className="truncate font-sans text-sm/xs text-text-muted">
-                    {album.year === null ? album.artist : `${album.artist} · ${album.year}`}
+                    <ArtistCredits item={album} linkClassName="relative" />
+                    {album.year === null ? null : ` · ${album.year}`}
                   </span>
                 </span>
-              </Link>
+              </div>
             ))}
           </div>
         </section>
@@ -453,7 +464,7 @@ function PhoneResults({ results }: { readonly results: SearchResults }) {
               <span className="flex min-w-0 flex-col gap-px">
                 <span className="truncate font-sans text-md/base text-text">{track.title}</span>
                 <span className="truncate font-sans text-sm/xs text-text-muted">
-                  Song · {track.artist}
+                  Song · <ArtistCredits item={track} links={false} />
                 </span>
               </span>
             </button>

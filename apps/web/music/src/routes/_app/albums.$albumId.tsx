@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import type { PageOpts } from "@media/ui/lib/pages";
-import { Link, createFileRoute } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import type { ErrorComponentProps } from "@tanstack/react-router";
 import { Schema } from "effect";
 
@@ -8,6 +8,7 @@ import { DetailError } from "@/components/route-error";
 import type { MissingCopy } from "@/components/route-error";
 
 import { GuestLinkMenuItem } from "@/components/guests/guest-links";
+import { ArtistCredits } from "@/components/library/artist-credits";
 import { Artwork } from "@/components/library/artwork";
 import { CollectionHeader, CollectionHeaderSkeleton } from "@/components/library/collection-header";
 import { PlayOnMenu } from "@/components/player/play-on-menu";
@@ -78,11 +79,7 @@ function AlbumPage() {
     .filter((part) => part !== null)
     .join(" · ");
 
-  const artistLink = (
-    <Link to="/artists/$artistId" params={{ artistId: album.artistId }} className="hover:underline">
-      {album.artist}
-    </Link>
-  );
+  const artistLink = <ArtistCredits item={album} />;
 
   return (
     <div className="flex flex-col gap-8 px-5 pt-safe-top-sm lg:px-12 lg:pt-row">
@@ -128,6 +125,7 @@ function AlbumPage() {
           tracks={tracks}
           variant="album"
           label={`Songs on ${album.title}`}
+          albumArtist={album.artist}
           highlight={highlight === undefined ? null : asTrackId(highlight)}
         />
       </div>
