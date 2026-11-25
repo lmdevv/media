@@ -25,8 +25,10 @@ import type { MusicStore, Stored } from "./write";
  * string resolves from the library as the mutation found it, so a name that gains or loses its
  * last whole credit in the mutation changes no string the mutation resolves; `settle` answers the
  * names whose evidence changed, and the caller rechecks every combined string they are part of
- * (`music/credits:recheck`) once the mutation commits. Resolved credits therefore depend only on
- * the library's tags and its managers' corrections, never on the order the tags arrived in.
+ * (`music/credits:recheck`) once the mutation commits. Only songs on disk and albums with a song
+ * on disk use a string: a missing file's tags are not the library's now. Resolved credits
+ * therefore depend only on the tags of the library's files on disk and its managers' corrections,
+ * never on the order the tags arrived in.
  */
 
 /** The most names one scheduled recheck carries (`music/credits:recheck`). */
@@ -36,10 +38,15 @@ export const RECHECK_KEYS = 64;
 export const SCHEDULING = cost(0, 1, 0, 1600);
 
 /**
- * Settling a credit string of one part at a call's end: its row inserted, patched, or deleted, and
- * a recheck of the combined strings it is part of when its evidence changed.
+ * Settling a credit string of one part at a call's end: its row read, when nothing earlier in the
+ * call read it, then inserted, patched, or deleted, and a recheck of the combined strings it is
+ * part of when its evidence changed.
  */
-export const SINGLE_SETTLING = sumCost([atBound.patch("artistCredits"), SCHEDULING]);
+export const SINGLE_SETTLING = sumCost([
+  atBound.read("artistCredits"),
+  atBound.patch("artistCredits"),
+  SCHEDULING,
+]);
 
 /** Settling a combined credit string: also its parts' rows, inserted or found and deleted. */
 export const COMBINED_SETTLING = sumCost([

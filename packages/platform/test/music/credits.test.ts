@@ -18,8 +18,12 @@ import {
   TrackId,
   claimScan,
   finishScan,
+  markMissingAll,
+  moveAll,
   musicLibrary,
+  purgePage,
   rowsOf,
+  setFoldersQuietly,
   totalsOf,
   trackIdsAt,
   upsertAll,
@@ -27,7 +31,7 @@ import {
 import type { Lease } from "./catalog";
 import { musicTrack } from "./scanned";
 import type { ScannedTrack } from "./scanned";
-import { allPages } from "./shelf";
+import { allPages, at } from "./shelf";
 
 const stack = coreStackFromEnvFile();
 
@@ -108,9 +112,9 @@ const expectExact = async (core: CoreStack, libraryId: Id<"libraries">) => {
   });
 };
 
-/** A scan held on a new music library of `admin`'s, with one folder. */
-const heldScan = async (core: CoreStack, admin: Member, name: string) => {
-  const library = await musicLibrary(admin, name);
+/** A scan held on a new music library of `admin`'s, with `folders` folders, the first `root`. */
+const heldScan = async (core: CoreStack, admin: Member, name: string, folders = 1) => {
+  const library = await musicLibrary(admin, name, folders);
   const lease = await claimScan(core, library.scanJobId);
   const [root] = library.roots;
 
@@ -132,6 +136,25 @@ const song = (
 /** Writes `tracks` under the scan lease and waits for the rechecks they caused. */
 const scan = async (core: CoreStack, lease: Lease, tracks: ReadonlyArray<ScannedTrack>) => {
   await upsertAll(core, lease, tracks);
+  await settle(core);
+};
+
+/** Marks `paths` missing under the scan lease and waits for the rechecks that caused. */
+const markGone = async (core: CoreStack, lease: Lease, paths: ReadonlyArray<string>) => {
+  await markMissingAll(core, lease, paths);
+  await settle(core);
+};
+
+/** Runs the purge of the tracks no folder keeps, page by page, and waits for its rechecks. */
+const purge = async (
+  core: CoreStack,
+  libraryId: Id<"libraries">,
+  cursor: string | null = null,
+): Promise<void> => {
+  const page = await purgePage(core, libraryId, "tracks", cursor);
+
+  if (page.more) return purge(core, libraryId, page.cursor);
+
   await settle(core);
 };
 
@@ -181,6 +204,62 @@ const songsOn = async (who: Member, artistId: Id<"artists">) => {
   );
 
   return listed.rows.map((track) => track.title);
+};
+
+const COMBINED = "Calvin Harris & Clementine Douglas";
+
+const WHOLE = [COMBINED];
+
+const SPLIT = ["Calvin Harris", "Clementine Douglas"];
+
+/** A combined credit as `music.credits.list` pages it, or undefined when it lists none. */
+const listedCredit = async (who: Member, libraryId: Id<"libraries">, name: string) => {
+  const listed = await allPages((cursor) =>
+    who.signedIn.client.query(api.music.credits.list, {
+      libraryId,
+      paginationOpts: { numItems: 50, cursor },
+    }),
+  );
+
+  return listed.rows.find((credit) => credit.name === name);
+};
+
+/**
+ * Whom the song `trackId` and its album credit, as `music.tracks.get` and `music.albums.get`
+ * answer, and the resolution `music.credits.list` shows for `name`, null when it lists none.
+ */
+const creditedAs = async (
+  who: Member,
+  libraryId: Id<"libraries">,
+  trackId: Id<"tracks">,
+  name: string,
+) => {
+  const track = await who.signedIn.client.query(api.music.tracks.get, { trackId });
+
+  const { album } = await who.signedIn.client.query(api.music.albums.get, {
+    albumId: track.albumId,
+  });
+
+  return {
+    track: (track.credits ?? []).map((credit) => credit.name),
+    album: (album.credits ?? []).map((credit) => credit.name),
+    listed: (await listedCredit(who, libraryId, name))?.artists ?? null,
+  };
+};
+
+/** The artists the song `trackId` credits, as `music.artists.get` shows each. */
+const artistCards = async (who: Member, trackId: Id<"tracks">) => {
+  const track = await who.signedIn.client.query(api.music.tracks.get, { trackId });
+
+  return Promise.all(
+    (track.credits ?? []).map(async (credit) => {
+      const { artist } = await who.signedIn.client.query(api.music.artists.get, {
+        artistId: credit.artistId,
+      });
+
+      return { name: artist.name, albumCount: artist.albumCount, trackCount: artist.trackCount };
+    }),
+  );
 };
 
 describe.skipIf(stack === undefined)("music artist credits", { timeout: 240_000 }, () => {
@@ -441,6 +520,154 @@ describe.skipIf(stack === undefined)("music artist credits", { timeout: 240_000 
       "Calvin Harris & Clementine Douglas",
       "Somebody Else",
     ]);
+    await expectExact(stack, libraryId);
+    await finishScan(stack, lease);
+  });
+
+  it("count a song as evidence only while its file is on disk, and again once it is back", async () => {
+    if (stack === undefined) return;
+    const admin = await member(stack, "credits-missing", "admin");
+    const { libraryId, lease, root } = await heldScan(stack, admin, "Missing evidence");
+    const duet = song(root, "Blessings", COMBINED, "Blessings");
+    const solo = song(root, "Solo", "Calvin Harris", "Solo");
+
+    await scan(stack, lease, [duet]);
+
+    const duetId = await trackOf(stack, libraryId, duet.path);
+    const credited = () => creditedAs(admin, libraryId, duetId, COMBINED);
+
+    expect(await credited()).toEqual({ track: WHOLE, album: WHOLE, listed: WHOLE });
+
+    await scan(stack, lease, [solo]);
+    expect(await credited()).toEqual({ track: SPLIT, album: SPLIT, listed: SPLIT });
+    expect(await artistCards(admin, duetId)).toEqual([
+      { name: "Calvin Harris", albumCount: 2, trackCount: 2 },
+      { name: "Clementine Douglas", albumCount: 1, trackCount: 1 },
+    ]);
+
+    // The solo file leaves the disk: its tags are no longer the library's, so the duet is one
+    // again.
+    await markGone(stack, lease, [solo.path]);
+    expect(await credited()).toEqual({ track: WHOLE, album: WHOLE, listed: WHOLE });
+    expect(await artistCards(admin, duetId)).toEqual([
+      { name: COMBINED, albumCount: 1, trackCount: 1 },
+    ]);
+    await expectExact(stack, libraryId);
+
+    // The file comes back.
+    await scan(stack, lease, [solo]);
+    expect(await credited()).toEqual({ track: SPLIT, album: SPLIT, listed: SPLIT });
+    await expectExact(stack, libraryId);
+    await finishScan(stack, lease);
+  });
+
+  it("count an album artist as evidence only while the album has a song on disk, and re-credit an album that comes back", async () => {
+    if (stack === undefined) return;
+    const admin = await member(stack, "credits-album-missing", "admin");
+    const { libraryId, lease, root } = await heldScan(stack, admin, "Album evidence");
+    const duet = song(root, "Blessings", COMBINED, "Blessings");
+    const remix = song(root, "Remix", "Somebody", "Remixes", { albumArtist: "Calvin Harris" });
+
+    await scan(stack, lease, [duet, remix]);
+
+    const duetId = await trackOf(stack, libraryId, duet.path);
+    const credited = () => creditedAs(admin, libraryId, duetId, COMBINED);
+
+    const { albumId } = await admin.signedIn.client.query(api.music.tracks.get, {
+      trackId: duetId,
+    });
+
+    expect(await credited()).toEqual({ track: SPLIT, album: SPLIT, listed: SPLIT });
+
+    // The album's one song leaves the disk, and its album artist with it.
+    await markGone(stack, lease, [remix.path]);
+    expect(await credited()).toEqual({ track: WHOLE, album: WHOLE, listed: WHOLE });
+
+    // Once the duet is gone too, nothing on disk names its credit. Calvin Harris comes back on
+    // the album alone, then the duet, and both the song and its album credit the two artists.
+    await markGone(stack, lease, [duet.path]);
+    expect(await listedCredit(admin, libraryId, COMBINED)).toBeUndefined();
+    await scan(stack, lease, [remix]);
+    await scan(stack, lease, [duet]);
+    expect(await credited()).toEqual({ track: SPLIT, album: SPLIT, listed: SPLIT });
+    expect(
+      (await admin.signedIn.client.query(api.music.tracks.get, { trackId: duetId })).albumId,
+    ).toBe(albumId);
+    expect(await artistCards(admin, duetId)).toEqual([
+      { name: "Calvin Harris", albumCount: 2, trackCount: 1 },
+      { name: "Clementine Douglas", albumCount: 1, trackCount: 1 },
+    ]);
+    await expectExact(stack, libraryId);
+    await finishScan(stack, lease);
+  });
+
+  it("count a moved song's evidence at its new path alone", async () => {
+    if (stack === undefined) return;
+    const admin = await member(stack, "credits-moved", "admin");
+    const { libraryId, lease, root } = await heldScan(stack, admin, "Moved evidence");
+    const duet = song(root, "Blessings", COMBINED, "Blessings");
+    const solo = song(root, "Solo", "Calvin Harris", "Solo");
+    const other = song(root, "Other", "Somebody", "Other");
+
+    await scan(stack, lease, [duet, solo, other]);
+
+    const duetId = await trackOf(stack, libraryId, duet.path);
+    const credited = () => creditedAs(admin, libraryId, duetId, COMBINED);
+
+    expect(await credited()).toEqual({ track: SPLIT, album: SPLIT, listed: SPLIT });
+
+    // The solo file moves onto the path of a song that left: its old path is marked missing, and
+    // its tags are written over the row at the new path.
+    await moveAll(stack, lease, [{ from: solo.path, track: { ...solo, path: other.path } }]);
+    await settle(stack);
+    expect(await credited()).toEqual({ track: SPLIT, album: SPLIT, listed: SPLIT });
+
+    // The file at the new path is retagged: no file on disk credits Calvin Harris alone.
+    await scan(stack, lease, [song(root, "Other", "Somebody Else", "Other")]);
+    expect(await credited()).toEqual({ track: WHOLE, album: WHOLE, listed: WHOLE });
+
+    // A file the library has marked missing turns up at a new path, and its tags count again.
+    await moveAll(stack, lease, [
+      { from: solo.path, track: song(root, "Moved", "Calvin Harris", "Solo") },
+    ]);
+    await settle(stack);
+    expect(await credited()).toEqual({ track: SPLIT, album: SPLIT, listed: SPLIT });
+    await expectExact(stack, libraryId);
+    await finishScan(stack, lease);
+  });
+
+  it("take a purged song's evidence away once, whether it was on disk or missing", async () => {
+    if (stack === undefined) return;
+    const admin = await member(stack, "credits-purged", "admin");
+    const { libraryId, lease, roots } = await heldScan(stack, admin, "Purged evidence", 3);
+    const [kept, missingFolder, onDiskFolder] = [at(roots, 0), at(roots, 1), at(roots, 2)];
+    const duet = song(kept, "Blessings", COMBINED, "Blessings");
+
+    // Calvin Harris's only credit by a song alone: an album by another artist.
+    const feature = song(onDiskFolder, "Feature", "Calvin Harris", "Mixed", {
+      albumArtist: "Various Artists",
+    });
+
+    const solo = song(missingFolder, "Solo", "Calvin Harris", "Solo");
+
+    await scan(stack, lease, [duet, feature, solo]);
+
+    const duetId = await trackOf(stack, libraryId, duet.path);
+    const credited = () => creditedAs(admin, libraryId, duetId, COMBINED);
+
+    expect(await credited()).toEqual({ track: SPLIT, album: SPLIT, listed: SPLIT });
+
+    // A missing song's purge takes nothing more away: the feature on disk still credits him.
+    await markGone(stack, lease, [solo.path]);
+    await setFoldersQuietly(stack, libraryId, [kept, onDiskFolder]);
+    await purge(stack, libraryId);
+    expect(await credited()).toEqual({ track: SPLIT, album: SPLIT, listed: SPLIT });
+    await expectExact(stack, libraryId);
+
+    // The purge of the song on disk takes its credit away.
+    await setFoldersQuietly(stack, libraryId, [kept]);
+    await purge(stack, libraryId);
+    expect(await credited()).toEqual({ track: WHOLE, album: WHOLE, listed: WHOLE });
     await expectExact(stack, libraryId);
     await finishScan(stack, lease);
   });

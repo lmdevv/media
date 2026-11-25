@@ -663,17 +663,19 @@ artist's page lists it once.
   " y ", " x ", " and ", and "/" never do, so "Alexis y Fido" and "Jon Z X Ele A" are one act. A
   string of 2 to 10 parts is combined; one of more stays one artist.
 - **The evidence rule.** A combined string splits into its parts only when at least one part is
-  known on its own in the same library: a song's or album's artist tag that is exactly that name,
-  a separate value, or a lone featured artist. A string's own appearance never counts for itself,
-  so "Mumford & Sons" and "Wuki & Lee Foss" stay whole while neither part appears alone, and
-  "Mora & JHAYCO" splits once "Mora" has a song of its own. A run of up to 4 parts that is itself
-  a whole credit in the library and stays whole is kept together inside a longer string and counts
-  as known: "CA7RIEL & Paco Amoroso, PinkPantheress" credits "CA7RIEL & Paco Amoroso" and
-  "PinkPantheress". Each run's resolution depends only on shorter strings, so a library's tags
-  and corrections decide every resolution, whatever order they arrived in. A later spelling of a
-  name a song already credits is dropped ("Imael Angel, Imael Angel"; "El Perdón (with Enrique
-  Iglesias)" by "Nicky Jam & Enrique Iglesias"). Keys are trimmed and lowercased, as artist keys
-  were, so one artist row serves every spelling that differs only in case.
+  known on its own in the same library's files on disk: the artist tag of a song on disk, or of an
+  album with a song on disk, that is exactly that name, a separate value, or a lone featured
+  artist. A missing file's tags are not the library's now, so they prove nothing until the file is
+  back. A string's own appearance never counts for itself, so "Mumford & Sons" and "Wuki & Lee
+  Foss" stay whole while neither part appears alone, and "Mora & JHAYCO" splits once "Mora" has a
+  song of its own. A run of up to 4 parts that is itself a whole credit in the library and stays
+  whole is kept together inside a longer string and counts as known: "CA7RIEL & Paco Amoroso,
+  PinkPantheress" credits "CA7RIEL & Paco Amoroso" and "PinkPantheress". Each run's resolution
+  depends only on shorter strings, so a library's tags and corrections decide every resolution,
+  whatever order they arrived in. A later spelling of a name a song already credits is dropped
+  ("Imael Angel, Imael Angel"; "El Perdón (with Enrique Iglesias)" by "Nicky Jam & Enrique
+  Iglesias"). Keys are trimmed and lowercased, as artist keys were, so one artist row serves every
+  spelling that differs only in case.
 - **Songs.** A song credits its separate values, or its artist string's resolution followed by each
   featured list's, at most 10 credits whose names run to at most 1,024 characters
   (`MUSIC_BOUNDS.credits`, `creditNames`). `tracks.credits` keeps them in order as artist row and
@@ -701,29 +703,35 @@ artist's page lists it once.
   artist either counts, and the library's artist total counts those artists. `deleteIfBare`
   deletes an artist with no count, no link, and no song or album naming them first (or filed under
   them by a release before credits), so a combined artist goes once nothing credits it, and a
-  featured artist stays while a song credits them. A song's credits keep counting while it is
-  missing, as its row does.
+  featured artist stays while a song credits them. A missing song keeps its credits and links, as
+  its row does, but no artist counts it until its file is back.
 - **Credit strings as rows.** `artistCredits` holds each credit string a library's tags name: its
-  key, first spelling, uses (songs and albums naming it whole), and resolution (`artists`). A
-  string of one part with uses is the evidence that its name is known. `creditParts` indexes each
-  combined string by each part's key, and `creditTracks` lists the songs naming a combined string;
-  albums are found by `artistKey`. A song's and an album's strings come from its own row (its
-  artist, title, and album artist as stored), so every write diffs what a row named before and
-  after, and `creditLedger.ts` settles the uses at the call's end.
+  key, first spelling, uses (songs on disk, and albums with a song on disk, naming it whole), and
+  resolution (`artists`). A string of one part with uses is the evidence that its name is known.
+  `creditParts` indexes each combined string by each part's key, and `creditTracks` lists the
+  songs on disk naming a combined string; albums are found by `artistKey`. A song's and an album's
+  strings come from its own row (its artist, title, and album artist as stored), so every write
+  diffs what a row named before and after, and `creditLedger.ts` settles the uses at the call's
+  end. A song's strings are uses while its file is on disk, so marking it missing, a missing file
+  coming back, a move, a retag, and a purge each move them; an album's while it has a track on
+  disk, which the batch's `finish` settles from the tracks on disk and credits each album had when
+  the call found it and has when the call leaves it.
 - **Re-resolution.** A call resolves a new string from the library as the call found it, and every
-  later write of a song or album uses its string's stored resolution. When the call's end finds
-  that a name of one part gained its first use or lost its last, or that a combined string of up to
-  4 parts that stays whole did, it schedules `music/credits:recheck` with those names' keys after
-  the call commits. A recheck pages `creditParts` for each key and resolves each combined string
-  fresh; one that resolves anew stores its resolution and schedules `music/credits:rewrite`, which
-  pages its songs, then its albums, rewriting their credits and links through the catalog batch,
-  which settles counts and deletes artists left bare. A string that starts or stops staying whole
-  rechecks the strings it is a run of. Both are chains of internal mutations a page each, as the
-  purge is (ADR 0013), not jobs: the work is the core's own, no server pool claims it, and a job
-  kind needs a worker. Each step reads the library's state when it runs, so steps that cross or
-  repeat converge on the resolution the tags and corrections decide. Adding a solo "Calvin
-  Harris" song splits "Calvin Harris & Clementine Douglas" and its album, and retagging it joins
-  them again; the album keeps its id.
+  later write of a song, or of an album a scan files a song under, uses its string's stored
+  resolution, so a file that comes back after its credit resolved anew credits its song and album
+  as the credit resolves now. When the call's end finds that a name of one part gained its first
+  use or lost its last, or that a combined string of up to 4 parts that stays whole did, it
+  schedules `music/credits:recheck` with those names' keys after the call commits. A recheck pages
+  `creditParts` for each key and resolves each combined string fresh; one that resolves anew
+  stores its resolution and schedules `music/credits:rewrite`, which pages its songs, then its
+  albums, rewriting their credits and links through the catalog batch, which settles counts and
+  deletes artists left bare. A string that starts or stops staying whole rechecks the strings it
+  is a run of. Both are chains of internal mutations a page each, as the purge is (ADR 0013), not
+  jobs: the work is the core's own, no server pool claims it, and a job kind needs a worker. Each
+  step reads the library's state when it runs, so steps that cross or repeat converge on the
+  resolution the tags and corrections decide. Adding a solo "Calvin Harris" song splits "Calvin
+  Harris & Clementine Douglas" and its album, and retagging it, its file going missing, or its
+  purge joins them again; the album keeps its id.
 - **Corrections.** A manager of a music library corrects a combined credit with
   `music.credits.setOverride`: `together` keeps it one artist, also as a run inside longer credits
   ("Zion & Lennox" in "Bad Bunny & Zion & Lennox"), and `split` splits it whatever the evidence.
@@ -762,14 +770,16 @@ artist's page lists it once.
   those reads and `by_library_artist_key`.
 - **Budget.** The batch's `WRITE_MOST` adds, for one write, each credit string resolved (the song's
   three and its album's), each a row of its own, its parts', and its runs' read at their bound; the
-  artists of the song's and album's credits found or made; their links rewritten; the credit
-  strings it gained and lost settled; and each artist of three tracks' credits settled and of a
-  rewrite's stale links checked, beside the albums it settles. `RECREDIT_COST` bounds a rewrite's
-  item, and a recheck takes `RECHECK_PAGE` strings, as many as resolve within a call at their
-  bounds. The stack suite writes 40 songs crediting ten long names each and re-resolves them all
-  inside every call's limits. On a household library of 1,078 songs whose credits are all single
-  strings, 288 strings are combined: 265 split and 23 stay whole, among them "CA7RIEL & Paco
-  Amoroso", "HUGEL & SOLTO (FR)", and "Wuki & Lee Foss".
+  artists of the song's and album's credits found or made; their links rewritten, once each; the
+  credit strings settled that the song gained and lost and that a track a move leaves missing
+  loses, and those its album gains and loses and the two albums it and that track leave lose, each
+  string's row read, then written, and a recheck scheduled; and each artist of three tracks'
+  credits settled and of a rewrite's stale links checked, beside the albums it settles.
+  `RECREDIT_COST` bounds a rewrite's item, and a recheck takes `RECHECK_PAGE` strings, as many as
+  resolve within a call at their bounds. The stack suite writes 40 songs crediting ten long names
+  each and re-resolves them all inside every call's limits. On a household library of 1,078 songs
+  whose credits are all single strings, 288 strings are combined: 265 split and 23 stay whole,
+  among them "CA7RIEL & Paco Amoroso", "HUGEL & SOLTO (FR)", and "Wuki & Lee Foss".
 - **Left open.** A run kept together matches only its exact separators, so "Wuki, Lee Foss" in
   "Wuki, Lee Foss & Cheryl Lynn" does not match the whole credit "Wuki & Lee Foss". "(with …)"
   credits a lone name such as "(with Strings)" as an artist; no correction makes a one-part name
