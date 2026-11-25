@@ -81,11 +81,15 @@ const stageLayer = Layer.effect(
   }),
 );
 
-/** The capability service over `ffmpeg`, forcing Quick Sync on a render node unless `env` says otherwise. */
+/**
+ * The capability service over `ffmpeg`, forcing Quick Sync on a render node unless `env` says
+ * otherwise; negotiations wait up to `budget` for their probes.
+ */
 const servicesOf = (
   ffmpeg: string,
   env: Readonly<Record<string, string>> = {},
   probeTimeout = Duration.seconds(5),
+  budget = Duration.seconds(30),
 ) =>
   Layer.unwrap(
     Effect.gen(function* () {
@@ -94,7 +98,7 @@ const servicesOf = (
 
       return TranscodeCapabilities.layer.pipe(
         Layer.provide(Layer.succeed(TranscodeCapabilities.ProbeTimeout, probeTimeout)),
-        Layer.provide(Layer.succeed(TranscodeCapabilities.NegotiationBudget, Duration.seconds(30))),
+        Layer.provide(Layer.succeed(TranscodeCapabilities.NegotiationBudget, budget)),
         Layer.provideMerge(MediaTools.layer),
         Layer.provide(
           testConfigLayer({
@@ -275,6 +279,12 @@ const provingNothing = await Promise.all(
 /** A tone map probe that crashes, which ffmpeg ran: a refusal. */
 const crashing = await standIn({
   rules: [{ token: "tonemap=1", runs: "probe", signal: "SIGSEGV" }],
+});
+
+/** Making the generated MPEG-2 clip takes four seconds, longer than a negotiation waits. */
+const slowClip = await writeFakeFfmpeg({
+  rules: [{ token: "mpeg2-8.mkv.part", runs: "any", delayMs: 4000 }],
+  logInvocations: true,
 });
 
 /** The build's first `-version` listing fails, as a transient error would make it; later ones work. */
@@ -522,6 +532,44 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
 
           yield* capabilities.resolve(request(HDR));
           assert.strictEqual(yield* statusOf(TONE_MAP_QSV), "unsupported");
+        }),
+      60_000,
+    );
+  });
+
+  layer(
+    servicesOf(slowClip, {}, Duration.seconds(5), Duration.seconds(3)),
+    live,
+  )((it) => {
+    it.effect(
+      "keeps making a probe clip after the negotiation that asked for it stops waiting",
+      () =>
+        Effect.gen(function* () {
+          const capabilities = yield* TranscodeCapabilities.Service;
+          const mpeg2: SourceVideo = { ...JPEG_RANGE, codec: "mpeg2video", pixelFormat: "yuv420p" };
+          const key = capabilityKey(ImplId("decode.qsv"), "mpeg2video/yuv420p");
+          const first = yield* capabilities.resolve(request(mpeg2));
+
+          assert.isFalse(first.verified.has(key), "the clip was not ready within the budget");
+          assert.strictEqual(
+            plannedImpls(mpeg2, first)
+              .pipe(Result.getOrElse(() => []))
+              .at(0),
+            "decode.cpu",
+          );
+
+          // The clip is finished in the background; the next negotiation probes on it.
+          yield* Effect.sleep("3 seconds");
+          const later = yield* capabilities.resolve(request(mpeg2));
+
+          assert.isTrue(later.verified.has(key));
+          assert.strictEqual(
+            plannedImpls(mpeg2, later)
+              .pipe(Result.getOrElse(() => []))
+              .at(0),
+            "decode.qsv",
+          );
+          assert.strictEqual(yield* runsWith(slowClip, "mpeg2-8.mkv.part"), 1);
         }),
       60_000,
     );

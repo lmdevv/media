@@ -262,11 +262,6 @@ const plannedProbe = (
   return fromSource === undefined ? undefined : { plan: fromSource, scope: request.scope };
 };
 
-/** A clip being made, or made: its path, or none when this build cannot make it. */
-type ClipMaking = Deferred.Deferred<Option.Option<string>>;
-
-type ClipMakings = ReadonlyMap<ClipName, ClipMaking>;
-
 /** When nobody waits on a probe; warmup takes a turn only then. */
 interface Demand {
   readonly waiting: number;
@@ -334,8 +329,8 @@ const make = Effect.gen(function* () {
   const scope = yield* Effect.scope;
   const inventory = yield* Ref.make(Inventory.empty);
   const queue = yield* Semaphore.make(1);
-  const inFlight = yield* Ref.make<ReadonlyMap<string, Deferred.Deferred<void>>>(new Map());
-  const clips = yield* Ref.make<ClipMakings>(new Map());
+  const probes = yield* sharing<string, never>(scope);
+  const clips = yield* sharing<ClipName, string>(scope);
   const identified = yield* Deferred.make<void>();
   const builds = yield* sharing<"build", Inventory.BuildIdentity>(scope);
   const idle = yield* Deferred.make<void>();
@@ -542,59 +537,50 @@ const make = Effect.gen(function* () {
     return true;
   });
 
-  const clipOf = (clip: ClipName): Effect.Effect<Option.Option<string>> =>
-    Effect.gen(function* () {
-      const fresh = yield* Deferred.make<Option.Option<string>>();
+  /** Makes generated clip `clip`, or finds it made; none when this build cannot make it now. */
+  const makeClip = (clip: ClipName): Effect.Effect<Option.Option<string>> => {
+    const file = path.join(clipFolder, `${clip}.mkv`);
+    const made = PROBE_CLIPS[clip];
 
-      const [existing, owner] = yield* Ref.modify(
-        clips,
-        (current): readonly [readonly [ClipMaking, boolean], ClipMakings] => {
-          const known = current.get(clip);
-
-          return known === undefined
-            ? [[fresh, true], new Map(current).set(clip, fresh)]
-            : [[known, false], current];
-        },
+    return Effect.gen(function* () {
+      const size = yield* fs.stat(file).pipe(
+        Effect.map((info) => Number(info.size)),
+        Effect.orElseSucceed(() => 0),
       );
 
-      if (!owner) return yield* Deferred.await(existing);
-      const file = path.join(clipFolder, `${clip}.mkv`);
-      const made = PROBE_CLIPS[clip];
+      if (size > 0) return Option.some(file);
+      const build = (yield* Ref.get(inventory)).build;
 
-      const written = yield* Effect.gen(function* () {
-        const size = yield* fs.stat(file).pipe(
-          Effect.map((info) => Number(info.size)),
-          Effect.orElseSucceed(() => 0),
-        );
+      if (Option.isNone(build) || !build.value.features.has(made.needs)) {
+        return Option.none<string>();
+      }
 
-        if (size > 0) return Option.some(file);
-        const build = (yield* Ref.get(inventory)).build;
+      const temporary = `${file}.part.mkv`;
 
-        if (Option.isNone(build) || !build.value.features.has(made.needs))
-          return Option.none<string>();
-        const temporary = `${file}.part.mkv`;
+      yield* fs.makeDirectory(clipFolder, { recursive: true });
+      yield* tools.ffmpegInBackground(
+        ["-hide_banner", "-nostdin", "-v", "error", "-y", ...made.args, temporary],
+        { timeout: Duration.times(probeTimeout, 4) },
+      );
+      yield* fs.rename(temporary, file);
 
-        yield* fs.makeDirectory(clipFolder, { recursive: true });
-        yield* tools.ffmpegInBackground(
-          ["-hide_banner", "-nostdin", "-v", "error", "-y", ...made.args, temporary],
-          { timeout: Duration.times(probeTimeout, 4) },
-        );
-        yield* fs.rename(temporary, file);
-
-        return Option.some(file);
-      }).pipe(
-        Effect.tapError((error) =>
-          Effect.logWarning("TranscodeCapabilities.clip_failed", error).pipe(
-            Effect.annotateLogs({ clip }),
-          ),
+      return Option.some(file);
+    }).pipe(
+      Effect.tapError((error) =>
+        Effect.logWarning("TranscodeCapabilities.clip_failed", error).pipe(
+          Effect.annotateLogs({ clip }),
         ),
-        Effect.orElseSucceed(() => Option.none<string>()),
-      );
+      ),
+      Effect.orElseSucceed(() => Option.none<string>()),
+    );
+  };
 
-      yield* Deferred.succeed(fresh, written);
-
-      return written;
-    });
+  /**
+   * The path of generated clip `clip`, made once in the service's scope: a caller that stops
+   * waiting leaves it being made, and only a made clip is kept, so one that failed is tried again.
+   */
+  const clipOf = (clip: ClipName): Effect.Effect<Option.Option<string>> =>
+    clips(clip, makeClip(clip), true);
 
   /** Holds warmup back while a negotiation or a diagnosis waits on a probe. */
   const asDemand = <A, E>(effect: Effect.Effect<A, E>) =>
@@ -740,72 +726,51 @@ const make = Effect.gen(function* () {
       const at = yield* now;
 
       if (!Inventory.probeable(yield* Ref.get(inventory), target.key, at, sourceScope)) return;
-      const id = `${target.key}@${sourceScope ?? ""}`;
-      const mine = yield* Deferred.make<void>();
-
-      const theirs = yield* Ref.modify(inFlight, (current) => {
-        const running = current.get(id);
-
-        return running === undefined
-          ? ([undefined, new Map(current).set(id, mine)] as const)
-          : ([running, current] as const);
-      });
-
-      if (theirs !== undefined) {
-        yield* Deferred.await(theirs);
-
-        return;
-      }
-
-      const epoch = Inventory.capabilityOf(yield* Ref.get(inventory), target.key).epoch;
-
-      const probe = runProbe(plan, request, priority).pipe(
-        Effect.flatMap(
-          Option.match({
-            onNone: () => Effect.void,
-            onSome: (probed) =>
-              update((current) =>
-                Inventory.record(
-                  current,
-                  target.key,
-                  Inventory.Evidence.Probe({
-                    at,
-                    outcome: probed.outcome,
-                    source: sourceScope,
-                    detail: probed.detail,
-                    millis: probed.millis,
-                  }),
-                  epoch,
-                ),
-              ).pipe(
-                Effect.andThen(
-                  Effect.logDebug("TranscodeCapabilities.probed").pipe(
-                    Effect.annotateLogs({
-                      key: target.key,
-                      outcome: probed.outcome,
-                      source: sourceScope !== undefined,
-                      millis: probed.millis,
-                      detail: probed.detail,
-                    }),
-                  ),
-                ),
-              ),
-          }),
-        ),
-        Effect.ensuring(
-          Ref.update(inFlight, (current) => {
-            const next = new Map(current);
-            next.delete(id);
-
-            return next;
-          }).pipe(Effect.andThen(Deferred.succeed(mine, undefined))),
-        ),
-      );
 
       // The probe runs to its end in the service's scope, so a caller that stops waiting for it,
-      // as at a negotiation's deadline, still leaves its evidence behind.
-      yield* probe.pipe(Effect.forkIn(scope));
-      yield* Deferred.await(mine);
+      // as at a negotiation's deadline, still leaves its evidence behind; a second caller of the
+      // key waits for the first's run, and one that comes after it finds the key known.
+      const probe = Effect.gen(function* () {
+        const known = yield* Ref.get(inventory);
+
+        if (!Inventory.probeable(known, target.key, yield* now, sourceScope)) {
+          return Option.none();
+        }
+
+        const epoch = Inventory.capabilityOf(known, target.key).epoch;
+        const probed = yield* runProbe(plan, request, priority);
+
+        if (Option.isNone(probed)) return Option.none();
+        const shown = probed.value;
+
+        yield* update((current) =>
+          Inventory.record(
+            current,
+            target.key,
+            Inventory.Evidence.Probe({
+              at,
+              outcome: shown.outcome,
+              source: sourceScope,
+              detail: shown.detail,
+              millis: shown.millis,
+            }),
+            epoch,
+          ),
+        );
+        yield* Effect.logDebug("TranscodeCapabilities.probed").pipe(
+          Effect.annotateLogs({
+            key: target.key,
+            outcome: shown.outcome,
+            source: sourceScope !== undefined,
+            millis: shown.millis,
+            detail: shown.detail,
+          }),
+        );
+
+        return Option.none();
+      });
+
+      yield* probes(`${target.key}@${sourceScope ?? ""}`, probe, false);
     });
 
   const targetsOf = (request: Request): ReadonlyMap<CapabilityKey, Step> =>
