@@ -5,6 +5,7 @@ import * as BackupRoutes from "../backups/backup-routes.ts";
 import * as Backups from "../backups/backups.ts";
 import * as ConvexCli from "../backups/convex-cli.ts";
 import * as CachePruner from "../cache-pruner.ts";
+import * as AppEvents from "../diagnostics/app-events.ts";
 import * as ClientErrors from "../diagnostics/client-errors.ts";
 import * as DiagnosticsRoutes from "../diagnostics/diagnostics-routes.ts";
 import * as HttpServer from "../http/http-server.ts";
@@ -68,6 +69,7 @@ const commandRoutes = (coreUrl: string) =>
     LogsRoutes.layer,
     DiagnosticsRoutes.layer,
     ClientErrors.layer,
+    AppEvents.layer,
     MusicRoutes.layer,
   );
 

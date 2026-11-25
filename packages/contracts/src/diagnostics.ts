@@ -7,8 +7,10 @@
  * they see (stalls, errors, segment loads, recoveries) in batches of `ClientDiagnosticEvent`
  * through `POST /api/playback/diagnostics`, authenticated by their playback token; the service
  * writes them into the same log. `PlaybackDiagnostics` is the timeline of one playback session
- * that the service assembles from those records. Apps report their own unexpected errors
- * (`ClientErrorReport`) through `POST /api/client-errors` with the account's Convex auth token.
+ * that the service assembles from those records. Web apps report their own unexpected errors
+ * (`ClientErrorReport`) through `POST /api/client-errors` with the account's Convex auth token, and
+ * the iOS apps report their launches, screen opens, and errors in batches of `AppEvent` through
+ * `POST /api/app-events` the same way.
  */
 import { Schema } from "effect";
 
@@ -23,6 +25,7 @@ export const DIAGNOSTICS_ROUTES = {
   logs: "/api/logs",
   clientEvents: "/api/playback/diagnostics",
   clientErrors: "/api/client-errors",
+  appEvents: "/api/app-events",
 } as const;
 
 /** A log level as a record carries it. */
@@ -350,6 +353,107 @@ export const ClientErrorReport = Schema.Struct({
 
 /** An unexpected error an app caught. */
 export interface ClientErrorReport extends Schema.Schema.Type<typeof ClientErrorReport> {}
+
+/** Which Lar app sent an app event. */
+export const AppName = Schema.Literals(["movies", "music"]);
+
+/** Which Lar app sent an app event. */
+export type AppName = typeof AppName.Type;
+
+/** The longest duration an app event carries; a slower launch or screen open is not reported. */
+export const MAX_APP_TIMING_MS = 600_000;
+
+const TimingMs = Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: MAX_APP_TIMING_MS }));
+
+/** Where the content a screen first showed came from: the server, or the downloads on the device. */
+export const ContentSource = Schema.Literals(["network", "downloads"]);
+
+/** Where the content a screen first showed came from. */
+export type ContentSource = typeof ContentSource.Type;
+
+/**
+ * How a launch began. `cold` started a new process, timed from the process start the operating
+ * system records. `warm` brought a running app back from the background, timed from the moment
+ * its JavaScript learned the app was active again.
+ */
+export const LaunchKind = Schema.Literals(["cold", "warm"]);
+
+/** How a launch began. */
+export type LaunchKind = typeof LaunchKind.Type;
+
+/** A screen whose opening an app times: a movies title, a music album, or a music artist. */
+export const TimedScreen = Schema.Literals(["title", "album", "artist"]);
+
+/** A screen whose opening an app times. */
+export type TimedScreen = typeof TimedScreen.Type;
+
+/** The id of a record the server knows, such as a title or an album, and never its name. */
+export const RecordId = Schema.String.check(Schema.isPattern(/^[\w-]{1,64}$/u));
+
+/**
+ * Something an app reports about itself. Events carry ids the server knows, durations, and an
+ * error's own text, never a title, a name, a path, or a route's values.
+ */
+export const AppEvent = Schema.TaggedUnion({
+  /**
+   * A launch drew its first frame of the app's own screen `firstFrameMs` after it began. `home`
+   * is the first frame of Home with real content, for a cold launch that landed on Home; a launch
+   * that landed elsewhere, or went to the background first, has none.
+   */
+  Launched: {
+    kind: LaunchKind,
+    firstFrameMs: TimingMs,
+    home: Schema.optionalKey(Schema.Struct({ ms: TimingMs, source: ContentSource })),
+  },
+  /** A press opened the screen for the record `id`, which drew its real content `durationMs` later. */
+  ScreenOpened: { screen: TimedScreen, id: RecordId, durationMs: TimingMs },
+  /**
+   * An unexpected error the app caught. `route` is the screen's route pattern, such as
+   * `/album/[id]`. A `fatal` error ended the app; it was saved on the device and sent at the next
+   * launch.
+   */
+  ErrorCaught: {
+    kind: ClientErrorReport.fields.kind,
+    fatal: Schema.Boolean,
+    route: ClientErrorReport.fields.route,
+    name: ClientErrorReport.fields.name,
+    message: ClientErrorReport.fields.message,
+    stack: ClientErrorReport.fields.stack,
+    requestId: ClientErrorReport.fields.requestId,
+  },
+});
+
+/** Something an app reports about itself. */
+export type AppEvent = typeof AppEvent.Type;
+
+/** The longest an app event waits on the device; a crash report waits for the next launch. */
+export const MAX_APP_EVENT_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** An app event as a batch carries it: how long before the batch it happened. */
+export const QueuedAppEvent = Schema.Struct({
+  ageMs: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: MAX_APP_EVENT_AGE_MS })),
+  event: AppEvent,
+});
+
+/** An app event as a batch carries it. */
+export interface QueuedAppEvent extends Schema.Schema.Type<typeof QueuedAppEvent> {}
+
+/** The most events one batch of app events may carry. */
+export const MAX_APP_EVENTS = 50;
+
+/** A batch of an app's events, sent as the signed-in person to `POST /api/app-events`. */
+export const AppEventsRequest = Schema.Struct({
+  platform: ClientPlatform,
+  app: AppName,
+  /** The app's release, such as `0.9.0`. */
+  release: ClientErrorReport.fields.appVersion,
+  /** The app runs development JavaScript, whose timings run several times slower than a release's. */
+  development: Schema.Boolean,
+  events: Schema.Array(QueuedAppEvent).check(Schema.isBetweenLength(1, MAX_APP_EVENTS)),
+});
+
+/** A batch of an app's events. */
+export interface AppEventsRequest extends Schema.Schema.Type<typeof AppEventsRequest> {}
 
 /** What a timeline entry records. */
 export const TimelineKind = Schema.Literals([
