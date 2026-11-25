@@ -1,6 +1,16 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, layer } from "@effect/vitest";
-import { Context, Duration, Effect, FileSystem, Layer, Option, Path, Result } from "effect";
+import {
+  Context,
+  Duration,
+  Effect,
+  FileSystem,
+  Layer,
+  Option,
+  Path,
+  Result,
+  Schedule,
+} from "effect";
 import { TestClock } from "effect/testing";
 
 import { MediaFileId } from "@media/contracts/ids";
@@ -538,7 +548,9 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
   });
 
   layer(
-    servicesOf(slowClip, {}, Duration.seconds(5), Duration.seconds(3)),
+    // Probes may take as long as they need on a busy machine: the negotiation's budget is the
+    // production one, and what is under test is what happens after it runs out.
+    servicesOf(slowClip, {}, Duration.seconds(30), Duration.seconds(3)),
     live,
   )((it) => {
     it.effect(
@@ -558,8 +570,13 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
             "decode.cpu",
           );
 
-          // The clip is finished in the background; the next negotiation probes on it.
-          yield* Effect.sleep("3 seconds");
+          // The clip is finished in the background and the key probed on it, however busy the
+          // machine; a pending clip left behind by the first negotiation never gets that far.
+          yield* statusOf(key).pipe(
+            Effect.filterOrFail((status) => status === "verified"),
+            Effect.retry({ schedule: Schedule.spaced("200 millis"), times: 200 }),
+            Effect.orDie,
+          );
           const later = yield* capabilities.resolve(request(mpeg2));
 
           assert.isTrue(later.verified.has(key));

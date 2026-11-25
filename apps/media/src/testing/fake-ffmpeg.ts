@@ -146,6 +146,9 @@ for (const [index, rule] of (behavior.rules ?? []).entries()) {
     if (rule.arm !== undefined) writeFileSync(join(here, "armed-" + rule.arm), "");
     if (rule.delayMs !== undefined) await new Promise((resolve) => setTimeout(resolve, rule.delayMs));
     if (rule.stderr !== undefined) process.stderr.write(rule.stderr + "\\n");
+    // A core size limit of 1 makes Linux skip the core dump, which a dump collector such as
+    // systemd-coredump would otherwise take seconds to write before the run ends.
+    if (rule.signal !== undefined) spawnSync("prlimit", ["--pid", String(process.pid), "--core=1:1"]);
     if (rule.signal !== undefined) process.kill(process.pid, rule.signal);
     if (rule.hang === true || rule.signal !== undefined) await new Promise(() => setInterval(() => {}, 60_000));
     if (rule.exitCode !== undefined) process.exit(rule.exitCode);
