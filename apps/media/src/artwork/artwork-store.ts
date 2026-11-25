@@ -258,13 +258,14 @@ const make = Effect.gen(function* () {
     return target;
   });
 
-  // Concurrent requests for one copy share a single ffmpeg run.
+  // Concurrent requests for one copy share a single ffmpeg run. Nothing outlives that run, so each
+  // later request finds the copy on disk again, or makes it again after the cache pruner removed it.
   const copies = yield* Cache.makeWith(
     ([file, fingerprint, width]: readonly [string, string, ArtworkWidth]) =>
       resizeFile(file, fingerprint, width).pipe(
         Effect.map((target): ArtworkImage => ({ path: target, contentType: "image/jpeg" })),
       ),
-    { capacity: 2048, timeToLive },
+    { capacity: 2048, timeToLive: () => Duration.zero },
   );
 
   const resize = (file: string, fingerprint: string, width: ArtworkWidth) =>

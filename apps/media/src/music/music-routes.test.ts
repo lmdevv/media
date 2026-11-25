@@ -478,6 +478,10 @@ describe("music routes", { timeout: 60_000 }, () => {
     expect(length).toBeLessThan(bytes.length);
     expect((await widthOf(small, "small.jpg")).trim()).toBe("185");
 
+    // A copy the cache pruner removed is made again on the next request.
+    await removeDirectory(join(work, "data", "artwork", "w185"));
+    expect((await widthOf(await fetch(sized("185")), "again.jpg")).trim()).toBe("185");
+
     // The server never enlarges a cover, so a width past it answers the cover's own size.
     expect((await widthOf(await fetch(sized("1280")), "large.jpg")).trim()).toBe("600");
 
