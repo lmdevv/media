@@ -44,7 +44,7 @@ const qsvLostAfterEarlyFirstFragment = await writeFakeFfmpeg({
 
 const qsvLostWithoutToneMapping = await writeFakeFfmpeg({
   qsvFailsFromSeconds: 1,
-  withoutSoftwareToneMapping: true,
+  withoutCpuToneMap: true,
 });
 
 const smallScreen: ClientCapabilities = {

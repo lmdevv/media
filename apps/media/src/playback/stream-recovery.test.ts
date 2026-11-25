@@ -104,7 +104,7 @@ const damagedLate = await writeFakeFfmpeg(DAMAGED_LATE);
 /** The same on a build whose CPU cannot tone-map, so a tone map off the GPU has nowhere to go. */
 const damagedLateWithoutCpuToneMap = await writeFakeFfmpeg({
   ...DAMAGED_LATE,
-  withoutSoftwareToneMapping: true,
+  withoutCpuToneMap: true,
 });
 
 /** Runs stall after their first fragment until killed, so a seek replaces a live run. */

@@ -290,8 +290,8 @@ export const pidNamespacesAvailable = async (): Promise<boolean> => {
   }
 };
 
-/** Whether this ffmpeg can tone-map HDR in software (`zscale` and `tonemap`). */
-export const softwareToneMappingAvailable = async (): Promise<boolean> => {
+/** Whether this ffmpeg can tone-map HDR on the CPU (`zscale` and `tonemap`). */
+export const cpuToneMapAvailable = async (): Promise<boolean> => {
   try {
     const { stdout } = await run(ffmpegPath, ["-hide_banner", "-filters"]);
 

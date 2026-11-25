@@ -46,7 +46,7 @@ export interface FakeFfmpegBehavior {
   /** HLS runs write their init segment and first fragment, then exit with status 1. */
   readonly hlsFailsAfterFirstFragment?: true;
   /** The filter list lacks `zscale` and `tonemap`, as a build without libzimg would. */
-  readonly withoutSoftwareToneMapping?: true;
+  readonly withoutCpuToneMap?: true;
   /** Runs these rules pick fail, hang, or start late, as a broken or slow stage would. */
   readonly rules?: ReadonlyArray<RunRule>;
   /** Each run appends its arguments, one JSON array per line, to `invocationsOf` the stand-in. */
@@ -229,7 +229,7 @@ if (listing !== undefined) {
   const lines = (listed.stdout + emulated[listing]).split("\\n");
 
   process.stdout.write(
-    (behavior.withoutSoftwareToneMapping === true && listing === "-filters"
+    (behavior.withoutCpuToneMap === true && listing === "-filters"
       ? lines.filter((line) => !/\\s(zscale|tonemap)\\s/.test(line))
       : lines
     ).join("\\n"),

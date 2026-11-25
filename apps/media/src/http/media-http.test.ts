@@ -26,7 +26,7 @@ import * as PlaybackReporter from "../playback/playback-reporter.ts";
 import {
   ffmpegAvailable,
   qsvUsable,
-  softwareToneMappingAvailable,
+  cpuToneMapAvailable,
   vaapiUsable,
 } from "../testing/fixture-library.ts";
 import { copyBytes } from "../testing/byte-copies.ts";
@@ -42,7 +42,7 @@ const hasQsv = hasFfmpeg && (await qsvUsable());
 
 const hasVaapi = hasFfmpeg && (await vaapiUsable());
 
-const canToneMap = hasFfmpeg && (await softwareToneMappingAvailable());
+const canToneMap = hasFfmpeg && (await cpuToneMapAvailable());
 
 const browser: ClientCapabilities = {
   containers: ["mp4", "webm"],

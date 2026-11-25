@@ -133,8 +133,8 @@ const deciding =
 /** The CPU alone, without the filters software tone mapping needs. */
 const software = deciding([], withoutToneMaps);
 
-/** The CPU alone, with software tone mapping. */
-const softwareToneMapping = deciding([], () => false);
+/** The CPU alone, tone mapping with `zscale` and `tonemap`. */
+const cpuToneMap = deciding([], () => false);
 
 /** Quick Sync and the CPU, tone mapping only on the GPU. */
 const hardware = deciding(["qsv"], (key) => key.startsWith("tonemap.cpu"));
@@ -271,7 +271,7 @@ describe("decidePlayback", () => {
     });
     expect(impls(onVaapi)).toContain("tonemap.vaapi");
 
-    expect(softwareToneMapping(probe("mkv", hevcHdr, [aac]), chrome)).toMatchObject({
+    expect(cpuToneMap(probe("mkv", hevcHdr, [aac]), chrome)).toMatchObject({
       mode: "transcode-software",
       video: { output: { width: 1920, height: 1080 } },
     });
