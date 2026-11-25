@@ -7,6 +7,7 @@ import {
   type CapabilitySnapshot,
   type DomainBinding,
   planVideo,
+  probedSteps,
   probeFor,
   Purpose,
   Rejection,
@@ -524,6 +525,24 @@ describe("the seal", () => {
 
     assert.throws(() => renderVideo(withoutUpload, OPTIONS), /assemble/u);
     assert.throws(() => renderVideo({ ...pipeline }, OPTIONS), /assemble/u);
+  });
+});
+
+describe("warmup", () => {
+  it("proves the chain most files play through first", () => {
+    const first = probedSteps("qsv", snapshot([QSV], [])).slice(0, 6);
+
+    assert.sameMembers(
+      first.map((step) => step.capability),
+      [
+        capabilityKey(ImplId("move.cpu>qsv"), "nv12"),
+        capabilityKey(ImplId("move.qsv>cpu"), "nv12"),
+        capabilityKey(ImplId("encode.qsv"), "h264/8/cbr"),
+        capabilityKey(ImplId("scale.qsv"), "8>8"),
+        capabilityKey(ImplId("decode.qsv"), "h264/yuv420p"),
+        capabilityKey(ImplId("decode.qsv"), "hevc/yuv420p"),
+      ],
+    );
   });
 });
 

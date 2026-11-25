@@ -710,9 +710,21 @@ const WARMUP_ORDER: ReadonlyArray<OpName> = [
   "BurnImage",
 ];
 
+/** The codecs most sources are, whose 8-bit decoders warmup proves first. */
+const COMMON_CODECS: ReadonlySet<string> = new Set(["h264", "hevc"]);
+
+/** Whether `step` belongs to the chain most files play through: 8-bit SDR H.264 or HEVC. */
+const common = (step: Step): boolean =>
+  step.input.depth === 8 &&
+  step.output.depth === 8 &&
+  step.output.colour === "sdr" &&
+  (Op.$is("Decode")(step.op) ? COMMON_CODECS.has(step.op.codec) : !Op.$is("BurnImage")(step.op));
+
 /**
- * The steps generated clips prove for the rows of `domain`, one per key, the ones most chains need
- * first: moves, the encoder, scaling, decoders, then tone maps.
+ * The steps generated clips prove for the rows of `domain`, one per key: first those of the chain
+ * most files play through (8-bit moves, the encoder, scaling, H.264 and HEVC decoding), then the
+ * rest, each group in the order most chains need them: moves, the encoder, scaling, decoders,
+ * then tone maps.
  */
 export const probedSteps = (domain: Domain, snapshot: CapabilitySnapshot): ReadonlyArray<Step> => {
   const steps = new Map<CapabilityKey, Step>();
@@ -739,5 +751,7 @@ export const probedSteps = (domain: Domain, snapshot: CapabilitySnapshot): Reado
     }
   }
 
-  return [...steps.values()];
+  const all = [...steps.values()];
+
+  return [...all.filter(common), ...all.filter((step) => !common(step))];
 };
