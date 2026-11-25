@@ -247,9 +247,14 @@ Old movies' Convex project, its SDK client, and its command registry were delete
   ticket for that file. A failed job's `TranscodeFailed.detail` is ffmpeg's path-scrubbed output,
   or a fixed sentence for any other failure, so it never names a path in `TRANSCODE_DIR`.
 - The iOS app keeps one store per server and person in `downloads/<server>/<person>/index.json`
-  under its documents folder, with one folder per download. A kept download plays from its local
-  file with no server call, and the progress it makes is sent with `movies.play.reportOffline`
-  when the server answers.
+  under its documents folder, with one folder per download that also holds the download's own copy
+  of its row (`download.json`). A save writes `index.json.new` and moves it over the index, so a
+  crash or a full disk leaves the old index or the new one, and a save that fails shows on the
+  Downloads screen. An index that cannot be read is moved aside to `index.unreadable.json`, its
+  downloads are rebuilt from their copies, and the core is told to forget none of them. After an
+  index that reads, the app deletes what in the person's folder no download owns. A kept download
+  plays from its local file with no server call, and the progress it makes is sent with
+  `movies.play.reportOffline` when the server answers.
 
 ## Subtitle delay
 
