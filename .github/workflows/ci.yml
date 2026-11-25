@@ -25,7 +25,8 @@ jobs:
       workspaces: ${{ steps.scope.outputs.workspaces }}
       verify-media: ${{ steps.skill.outputs.changed }}
       e2e-groups: ${{ steps.e2e.outputs.groups }}
-      ios-apps: ${{ steps.scope.outputs.ios-apps }}
+      ios-bundle: ${{ steps.ios.outputs.bundle }}
+      ios-build: ${{ steps.ios.outputs.build }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -41,7 +42,8 @@ jobs:
         run: |
           workspaces="$(scripts/changed-packages.sh $CHANGED)"
           echo "workspaces=$(jq -Rsc 'split("\n") | map(select(. != ""))' <<<"$workspaces")" >> "$GITHUB_OUTPUT"
-          echo "ios-apps=$(jq -Rsc 'split("\n") | map(select(startswith("apps/mobile/")) | ltrimstr("apps/mobile/"))' <<<"$workspaces")" >> "$GITHUB_OUTPUT"
+      - id: ios
+        run: scripts/ios-apps.sh $CHANGED >> "$GITHUB_OUTPUT"
       # The verify-media skill lives outside the workspaces, so its tests key off its own paths.
       - id: skill
         run: |
@@ -110,17 +112,17 @@ jobs:
       - run: unshare --user --map-root-user --pid --fork --mount-proc true
       - run: scripts/changed-packages.sh $CHANGED test --project ${{ matrix.project }}
 
-  # An iOS app is affected by its own files, the packages it depends on, the lockfile, and this
-  # workflow, as scripts/changed-packages.sh maps them.
+  # scripts/ios-apps.sh scopes both iOS jobs: the bundle job to each app a diff affects, and the
+  # build job to the apps whose native code or generated project it can change.
   ios-bundle:
     name: iOS bundle (${{ matrix.app }})
     needs: changes
-    if: needs.changes.outputs.ios-apps != '[]'
+    if: needs.changes.outputs.ios-bundle != '[]'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        app: ${{ fromJSON(needs.changes.outputs.ios-apps) }}
+        app: ${{ fromJSON(needs.changes.outputs.ios-bundle) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -152,13 +154,15 @@ jobs:
   ios-build:
     name: iOS build (${{ matrix.app }})
     needs: changes
-    if: needs.changes.outputs.ios-apps != '[]'
+    if: needs.changes.outputs.ios-build != '[]'
     runs-on: macos-26
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        app: ${{ fromJSON(needs.changes.outputs.ios-apps) }}
+        app: ${{ fromJSON(needs.changes.outputs.ios-build) }}
+    env:
+      APP: ${{ matrix.app }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -183,10 +187,10 @@ jobs:
           key: ios-downloads-${{ matrix.app }}-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: ios-downloads-${{ matrix.app }}-
       - run: pnpm install --frozen-lockfile --ignore-scripts
-      - run: pnpm --filter "@media/mobile-${{ matrix.app }}" exec expo prebuild --platform ios --clean
-      - working-directory: apps/mobile/${{ matrix.app }}/ios
-        run: >-
-          xcodebuild -workspace ${{ matrix.app }}.xcworkspace -scheme ${{ matrix.app }}
+      - run: pnpm --filter "@media/mobile-$APP" exec expo prebuild --platform ios --clean
+      - run: >-
+          cd "apps/mobile/$APP/ios" &&
+          xcodebuild -workspace "$APP.xcworkspace" -scheme "$APP"
           -configuration Debug -sdk iphonesimulator -destination "generic/platform=iOS Simulator"
           -derivedDataPath "$RUNNER_TEMP/derived-data" ARCHS=arm64 CODE_SIGNING_ALLOWED=NO
           build -quiet

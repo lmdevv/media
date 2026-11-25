@@ -45,7 +45,7 @@ route() {
   done
   case "$path" in
     .github/workflows/ci.yml | .github/actions/*) echo . ;;
-    scripts/changed-packages.sh) echo . ;;
+    scripts/changed-packages.sh | scripts/ios-apps.sh) echo . ;;
     nix/* | scripts/check-sandbox.sh) echo apps/media ;;
     scripts/dev-stack.sh | deploy/convex-backend.image | deploy/functions-hash.sh) echo packages/platform ;;
     scripts/check-version.sh) echo apps/cli ;;
