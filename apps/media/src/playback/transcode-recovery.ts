@@ -1,9 +1,10 @@
 /**
  * What a failed ffmpeg run points at, and what the stream does next. `attribute` reads the head of
- * ffmpeg's standard error, where the first role-tagged line names the failing part: a filter by
- * its parsed instance name, the decoder, the encoder, the device, or something that is not video
- * at all (audio, the muxer, the input, the disk). That is a hint, never evidence: the capability
- * service re-probes what it names before it sets anything aside. `advance` bounds the retries: a
+ * ffmpeg's standard error. A line anywhere in it that says a part other than the video failed (the
+ * disk, the muxer, the input, the audio, a stop) settles it first, whatever video lines came
+ * before; otherwise the first role-tagged line names the failing video part: a filter by its
+ * parsed instance name, the decoder, the encoder, or the device. That is a hint, never evidence:
+ * the capability service re-probes what it names before it sets anything aside. `advance` bounds the retries: a
  * targeted replacement, then the CPU, then a typed failure, so one position starts ffmpeg at most
  * three times. Pure.
  */
@@ -48,7 +49,7 @@ const TAG = /\[([^\]@[]+?) @ 0x[0-9a-f]+\]/gu;
 
 const DEVICE_TAGS: ReadonlySet<string> = new Set(["VAAPI", "QSV", "AVHWDeviceContext"]);
 
-const DEMUXERS = /^(?:in#\d+|matroska,webm|mpegts|mov,mp4,m4a,3gp,3g2,mj2|avi|mpeg)$/u;
+const DEMUXERS = /^(?:in#\d+(?:\/.+)?|matroska,webm|mpegts|mov,mp4,m4a,3gp,3g2,mj2|avi|mpeg)$/u;
 
 const MUXERS = /^(?:out#\d+\/.+|hls|mp4|mov|null)$/u;
 
@@ -57,16 +58,66 @@ const STOPPED: ReadonlySet<string> = new Set(["SIGKILL", "SIGTERM"]);
 /** The filters of the audio graph the service writes (`-af`). */
 const AUDIO_FILTERS = /^Parsed_(?:aresample|anull|asetpts)_\d+$/u;
 
+/** A full disk, whichever part met it. */
+const DISK_FULL = /No space left on device|Disk quota exceeded/u;
+
+/** What ffmpeg writes when a signal ended it. */
+const ENDED_BY_SIGNAL = /received signal \d+|system signals, hard exiting/u;
+
+/**
+ * What ffmpeg writes after a part failed, about every part the failure stopped: it names the
+ * stream or file it stopped, not the part that failed.
+ */
+const AFTERMATH =
+  /Task finished with error code|Terminating thread with return code|Nothing was written into output file|Error submitting a packet to the muxer|Could not open encoder before EOF|Error while filtering|Error sending frames to consumers|Conversion failed/u;
+
 const gpuSteps = (pipeline: VideoPipeline): ReadonlyArray<number> =>
   pipeline.steps.flatMap((step, index) => (step.on === "cpu" ? [] : [index]));
 
 const named = (suspects: ReadonlyArray<number>): Attribution =>
   Attribution.Video({ named: true, suspects: [...new Set(suspects)] });
 
-/** What one tag says, or undefined when it names nothing this run owns. */
+const tagsOf = (line: string): ReadonlyArray<string> =>
+  [...line.matchAll(TAG)].map((match) => match[1] ?? "");
+
+/**
+ * Which part other than the video a line says failed, or undefined: a full disk, a stop, or a
+ * line of the audio, the input, or the muxer that is not the aftermath of another part's failure.
+ */
+const notVideoOf = (line: string): NotVideo | undefined => {
+  if (DISK_FULL.test(line)) return "disk";
+
+  if (ENDED_BY_SIGNAL.test(line)) return "stopped";
+
+  if (AFTERMATH.test(line)) return undefined;
+
+  if (line.startsWith("Error opening input file")) return "input";
+  const tags = tagsOf(line);
+  const stream = tags.length > 1 ? tags[0] : undefined;
+  const audio = stream?.startsWith("aist#") === true || stream?.startsWith("aost#") === true;
+
+  for (const tag of tags.toReversed()) {
+    if (
+      audio ||
+      AUDIO_FILTERS.test(tag) ||
+      tag.startsWith("aist#") ||
+      tag.startsWith("aost#") ||
+      tag.startsWith("af#")
+    ) {
+      return "audio";
+    }
+
+    if (DEMUXERS.test(tag)) return "input";
+
+    if (MUXERS.test(tag)) return "mux";
+  }
+
+  return undefined;
+};
+
+/** What one tag says of the video, or undefined when it names nothing this run owns. */
 const ofTag = (
   tag: string,
-  stream: string | undefined,
   pipeline: VideoPipeline,
   owners: LogOwners,
 ): Attribution | undefined => {
@@ -74,19 +125,10 @@ const ofTag = (
 
   if (filter !== undefined) return named(filter);
 
-  // The audio graph numbers its own filters; any other parsed name this run does not own says
-  // nothing about it.
-  if (tag.startsWith("Parsed_")) {
-    return AUDIO_FILTERS.test(tag) ? Attribution.NotVideo({ reason: "audio" }) : undefined;
-  }
-
+  // Any other parsed name, of the audio graph or of another run, says nothing about this one.
+  if (tag.startsWith("Parsed_")) return undefined;
   const role = /^(dec|enc):(.+)$/u.exec(tag);
   const name = role?.[2] ?? tag;
-  const audio = stream?.startsWith("aist#") === true || stream?.startsWith("aost#") === true;
-
-  if (audio || tag.startsWith("aist#") || tag.startsWith("aost#") || tag.startsWith("af#")) {
-    return Attribution.NotVideo({ reason: "audio" });
-  }
 
   const steps = [
     ...(owners.decoder !== undefined &&
@@ -107,32 +149,21 @@ const ofTag = (
 
   if (DEVICE_TAGS.has(tag)) return named(gpuSteps(pipeline));
 
-  if (DEMUXERS.test(tag)) return Attribution.NotVideo({ reason: "input" });
-
-  if (MUXERS.test(tag)) return Attribution.NotVideo({ reason: "mux" });
-
   return undefined;
 };
 
-/** What one line of standard error says, or undefined when it names nothing. */
+/** Which video steps one line of standard error names, or undefined when it names none. */
 const ofLine = (
   line: string,
   pipeline: VideoPipeline,
   owners: LogOwners,
 ): Attribution | undefined => {
-  if (/No space left on device|Disk quota exceeded/u.test(line)) {
-    return Attribution.NotVideo({ reason: "disk" });
-  }
-
   if (/^Device creation failed|for option 'init_hw_device'/u.test(line)) {
     return named(gpuSteps(pipeline));
   }
 
-  const tags = [...line.matchAll(TAG)].map((match) => match[1] ?? "");
-  const stream = tags.length > 1 ? tags[0] : undefined;
-
-  for (const tag of tags.toReversed()) {
-    const said = ofTag(tag, stream, pipeline, owners);
+  for (const tag of tagsOf(line).toReversed()) {
+    const said = ofTag(tag, pipeline, owners);
 
     if (said !== undefined) return said;
   }
@@ -141,8 +172,9 @@ const ofLine = (
 };
 
 /**
- * What a failed run of `pipeline` points at: its first line that names a part, a signal that
- * stopped it, or, with nothing named, every step outside the CPU.
+ * What a failed run of `pipeline` points at: a signal that stopped it; a line that says a part
+ * other than the video failed, wherever it stands; else its first line that names a video step;
+ * or, with nothing named, every step outside the CPU.
  */
 export const attribute = (
   pipeline: VideoPipeline,
@@ -157,7 +189,15 @@ export const attribute = (
     return Attribution.NotVideo({ reason: "spawn" });
   }
 
-  for (const line of failure.stderrHead.split("\n")) {
+  const lines = failure.stderrHead.split("\n");
+
+  for (const line of lines) {
+    const reason = notVideoOf(line);
+
+    if (reason !== undefined) return Attribution.NotVideo({ reason });
+  }
+
+  for (const line of lines) {
     const said = ofLine(line, pipeline, owners);
 
     if (said !== undefined) return said;

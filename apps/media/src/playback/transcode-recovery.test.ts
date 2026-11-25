@@ -192,7 +192,27 @@ const HEADS = {
     "Error opening input file <path>.",
   ],
   disk: ["[hls @ 0x6477b151ffc0] Failed to write segment: No space left on device"],
+  /** What ffmpeg writes after a stream's own failure, whatever failed. */
+  aftermath: [
+    "[vf#0:0 @ 0x566ff4ef0680] Task finished with error code: -22 (Invalid argument)",
+    "[aost#0:1/aac @ 0x566ff4ef7cc0] Terminating thread with return code -32 (Broken pipe)",
+    "[out#0/hls @ 0x566ff4ef5ec0] Nothing was written into output file, because at least one of its streams received no packets.",
+    "Conversion failed!",
+  ],
 } as const;
+
+/** A decode error H.264 recovers from, logged as the run goes on. */
+const RECOVERED_DECODE = "[h264 @ 0x5d1c2a0] error while decoding MB 45 30, bytestream -7";
+
+/** Lines that say a part other than the video failed, each a failure of its own. */
+const NOT_VIDEO = [
+  ["disk", "[out#0/hls @ 0x6477b151fec0] Error writing trailer: No space left on device"],
+  ["disk", "[hls @ 0x6477b151ffc0] Failed to write segment: Disk quota exceeded"],
+  ["mux", "[hls @ 0x6477b151ffc0] Failed to open segment 'f3.m4s'"],
+  ["input", "[in#0/matroska,webm @ 0x56b3de574080] Error during demuxing: Input/output error"],
+  ["audio", "[aost#0:1/aac @ 0x5f1fe88a2d80] Error while opening encoder"],
+  ["stopped", "Exiting normally, received signal 15."],
+] as const;
 
 describe("attribute", () => {
   it("names the decoder, a filter, a fused filter's steps, and the encoder", () => {
@@ -297,6 +317,72 @@ describe("attribute", () => {
     );
     assert.strictEqual(suspects(attribute(QSV_CHAIN, QSV_OWNERS, failed("", null, null))), "spawn");
   });
+
+  it("classifies a failure that is not about video first, whatever video lines came before it", () => {
+    // A decode error the run recovered from, then the muxer meets a full disk.
+    assert.deepStrictEqual(
+      attribute(
+        QSV_CHAIN,
+        { ...QSV_OWNERS, decoder: { step: 0, names: ["h264", "h264_qsv"] } },
+        failed([RECOVERED_DECODE, HEADS.disk[0]].join("\n"), 1),
+      ),
+      Attribution.NotVideo({ reason: "disk" }),
+    );
+
+    for (const [reason, line] of NOT_VIDEO) {
+      assert.strictEqual(
+        suspects(attribute(QSV_CHAIN, QSV_OWNERS, failed([...HEADS.fused, line].join("\n")))),
+        reason,
+        line,
+      );
+    }
+  });
+
+  it("reads past what ffmpeg writes after any failure to the part that failed", () => {
+    assert.deepStrictEqual(
+      suspects(
+        attribute(
+          VAAPI_CHAIN,
+          VAAPI_OWNERS,
+          failed([...HEADS.encoder, ...HEADS.aftermath].join("\n"), 218),
+        ),
+      ),
+      [3],
+    );
+    assert.deepStrictEqual(
+      suspects(
+        attribute(QSV_CHAIN, QSV_OWNERS, failed([...HEADS.fused, ...HEADS.aftermath].join("\n"))),
+      ),
+      [1, 2],
+    );
+  });
+
+  it.prop(
+    "never suspects a video step when a line says another part failed",
+    {
+      before: Schema.Array(
+        Schema.Literals(["fused", "encoder", "qsvDecoder", "device", "aftermath"]),
+      ),
+      after: Schema.Array(
+        Schema.Literals(["fused", "encoder", "qsvDecoder", "device", "aftermath"]),
+      ),
+      cause: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: NOT_VIDEO.length - 1 })),
+    },
+    ({ before, after, cause }) => {
+      const [reason, line] = NOT_VIDEO[cause] ?? NOT_VIDEO[0];
+
+      const head = [
+        ...before.flatMap((name) => HEADS[name]),
+        line,
+        ...after.flatMap((name) => HEADS[name]),
+      ].join("\n");
+
+      assert.deepStrictEqual(
+        attribute(QSV_CHAIN, QSV_OWNERS, failed(head)),
+        Attribution.NotVideo({ reason }),
+      );
+    },
+  );
 
   it("suspects every GPU step of a crash that named nothing", () => {
     assert.deepStrictEqual(

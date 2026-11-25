@@ -12,7 +12,7 @@ import { testConfigLayer } from "../testing/test-config.ts";
 import * as Inventory from "./capability-inventory.ts";
 import * as TranscodeCapabilities from "./transcode-capabilities.ts";
 import { Diagnosis } from "./transcode-recovery.ts";
-import { planVideo, type VideoIntent, type VideoPipeline } from "./video-pipeline.ts";
+import { planVideo, samePipeline, type VideoIntent, type VideoPipeline } from "./video-pipeline.ts";
 import { capabilityKey, ImplId, type SourceVideo } from "./video-ops.ts";
 
 const hasFfmpeg = await ffmpegAvailable();
@@ -675,6 +675,52 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
               capability.key,
               capability.quarantine,
             ]),
+          );
+        }),
+      60_000,
+    );
+  });
+
+  layer(
+    plain.services,
+    live,
+  )((it) => {
+    it.effect(
+      "blames the disk, not the decoder, for a full disk after a decode error the run recovered from",
+      () =>
+        Effect.gen(function* () {
+          const capabilities = yield* TranscodeCapabilities.Service;
+          const sdr: SourceVideo = { ...JPEG_RANGE, codec: "hevc", pixelFormat: "yuv420p" };
+          const warm = yield* capabilities.resolve(request(sdr));
+          const pipeline = pipelineOf(sdr, warm);
+
+          assert.strictEqual(pipeline.steps[0]?.impl, ImplId("decode.qsv"));
+
+          const diagnosis = yield* capabilities.diagnose({
+            request: request(sdr),
+            pipeline,
+            owners: {
+              decoder: { step: 0, names: ["hevc", "hevc_qsv"] },
+              encoder: { step: pipeline.steps.length - 1, names: ["h264_qsv"] },
+              filters: new Map(),
+            },
+            failure: {
+              exitCode: 1,
+              signal: null,
+              stderrHead: [
+                "[hevc @ 0x1] Could not find ref with POC 12",
+                "[out#0/hls @ 0x2] Error writing trailer: No space left on device",
+              ].join("\n"),
+            },
+          });
+
+          assert.deepStrictEqual(diagnosis, Diagnosis.NotVideo({ reason: "disk" }));
+
+          const next = yield* capabilities.resolve(request(sdr));
+
+          assert.isTrue(
+            samePipeline(pipelineOf(sdr, next), pipeline),
+            "the next play keeps its chain",
           );
         }),
       60_000,
