@@ -25,9 +25,9 @@ export function Section({
   return (
     <section
       aria-labelledby={id}
-      className="flex min-w-0 flex-col gap-4 border-t border-hairline pt-8 first-of-type:border-t-0 first-of-type:pt-0 md:flex-row md:gap-12"
+      className="flex min-w-0 flex-col gap-4 border-t border-hairline pt-8 first-of-type:border-t-0 first-of-type:pt-0 xl:flex-row xl:gap-12"
     >
-      <div className="flex flex-wrap items-center justify-between gap-3 md:w-55 md:shrink-0 md:flex-col md:items-start md:justify-start">
+      <div className="flex flex-wrap items-center justify-between gap-3 xl:w-55 xl:shrink-0 xl:flex-col xl:items-start xl:justify-start">
         <h2
           id={id}
           className="flex items-center gap-3 font-sans text-section/6 font-semibold tracking-tight text-text"

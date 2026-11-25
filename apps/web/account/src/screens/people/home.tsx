@@ -35,11 +35,11 @@ export function HomeView({ me }: { readonly me: Me }) {
         <h1 className="flex flex-col justify-end pt-16 pb-10 font-display text-product/11 font-heavy tracking-hero break-words text-text font-stretch-125% md:h-81 md:pt-0 md:pb-14 md:text-greeting/20">
           {`Hi, ${nameOf(me)}.`}
         </h1>
-        <ul className="flex flex-col border-b border-hairline md:flex-row">
+        <ul className="flex flex-col border-b border-hairline lg:flex-row">
           {PRODUCTS.map((product) => (
             <li
               key={product.href}
-              className="flex-1 not-first:border-t not-first:border-hairline md:not-first:ml-12 md:not-first:border-t-0 md:not-first:border-l md:not-first:pl-12"
+              className="flex-1 not-first:border-t not-first:border-hairline lg:not-first:ml-12 lg:not-first:border-t-0 lg:not-first:border-l lg:not-first:pl-12"
             >
               <a
                 href={product.href}
