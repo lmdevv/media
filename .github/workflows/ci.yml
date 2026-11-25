@@ -147,8 +147,8 @@ jobs:
             echo "| JavaScript | $(bytes '*.js') |"
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
-  # An unsigned Debug build for the simulator: prebuild, CocoaPods, and every native module compile,
-  # while the JavaScript comes from the bundle job above.
+  # An unsigned Debug build for the simulator: prebuild, CocoaPods, and every native module compile.
+  # A Debug simulator build skips the JavaScript bundle, which the bundle job above exports.
   ios-build:
     name: iOS build (${{ matrix.app }})
     needs: changes
