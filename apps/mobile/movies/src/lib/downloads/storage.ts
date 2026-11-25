@@ -99,7 +99,7 @@ export type Launch = Data.TaggedEnum<{
    */
   Held: { readonly shown: DownloadStore; readonly cause: DiskFailed };
   /**
-   * The downloads, and how far they speak for the folder. `misplaced` when the index at
+   * The downloads and their standing. `misplaced` when the index at
    * `index.json` did not read whole and must move aside before a save replaces it; `fromCopies`
    * counts the downloads rebuilt from their own copies, which a save keeps.
    */

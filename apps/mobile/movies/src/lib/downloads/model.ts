@@ -157,10 +157,10 @@ export const serializeStore = Schema.encodeSync(StoredStore);
 const earned = Symbol("earned");
 
 /**
- * Whether the store speaks for every download kept in the person's folder and listed on the core
- * for this device. Only a `Whole` store's gaps prove a removal: a folder it does not own, or a
- * listed download it lacks, was removed by the person or the engine, so its files may be deleted
- * and the core told to forget it. An `Unproven` store's gaps prove nothing.
+ * Whether the store lists every download kept in the person's folder and on the core's list for
+ * this device. Only a `Whole` store's lack of a folder or a listed download proves the person or
+ * the engine removed it, so its files may be deleted and the core told to forget it. What an
+ * `Unproven` store lacks proves nothing.
  */
 export type Standing = Data.TaggedEnum<{
   /**
@@ -179,13 +179,13 @@ type Whole = Data.TaggedEnum.Value<Standing, "Whole">;
 
 const whole = (): Standing => Standing.Whole({ earned });
 
-/** The store and how far it speaks for the person's folder and the core's list. */
+/** The store and its standing. */
 export interface KnownStore {
   readonly store: DownloadStore;
   readonly standing: Standing;
 }
 
-/** A store whose gaps prove a removal. */
+/** A store whose lack of a folder or a listed download proves a removal. */
 export interface WholeStore extends KnownStore {
   readonly standing: Whole;
 }
@@ -223,8 +223,8 @@ export const IndexText = Data.taggedEnum<IndexText>();
 
 /**
  * The index kept in `text`. Each row is read on its own, so one this version cannot decode costs
- * only itself, but its index is no longer `Whole`: the folder of a row that did not decode is
- * never taken for one no download owns. Unsent progress that does not decode is dropped.
+ * only itself, and an index holding one is never `Whole`: the folder of a row that did not decode
+ * is never taken for one no download owns. Unsent progress that does not decode is dropped.
  */
 export const parseIndex = (text: string): IndexText =>
   Option.match(decodeIndex(text), {
@@ -277,7 +277,7 @@ export const unowned = (
 
 /**
  * A first run's standing: `Whole` when the person's folder holds nothing (`names` is empty, or
- * null because the folder is not there), so the empty store speaks for it.
+ * null because the folder is not there), so the empty store lists all of it.
  */
 export const emptyFolder = (names: ReadonlyArray<string> | null): Standing =>
   names === null || names.length === 0 ? whole() : Standing.Unproven();

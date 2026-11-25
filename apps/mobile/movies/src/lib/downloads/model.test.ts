@@ -393,7 +393,7 @@ describe("the store's standing", () => {
   });
 });
 
-/** `store` as one whose gaps prove a removal. */
+/** `store` as one whose lack of a folder or a listed download proves a removal. */
 const complete = (store: DownloadStore): KnownStore => ({ store, standing: whole });
 
 describe("following the core's list", () => {

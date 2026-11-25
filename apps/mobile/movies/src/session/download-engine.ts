@@ -289,7 +289,6 @@ export class DownloadEngine {
   #sending = false;
   #started = false;
   #disposed = false;
-  /** How far the store speaks for the person's folder and the core's list. */
   #standing: Standing = Standing.Unproven();
   /** Whether an index that did not read whole still sits where a save would overwrite it. */
   #unreadableInPlace = false;
@@ -299,15 +298,13 @@ export class DownloadEngine {
    */
   #held: Array<DownloadEvent> | null = null;
   #readTimer: ReturnType<typeof setTimeout> | undefined;
-  /** Whether `start` was called while the index could not be read. */
   #startWhenRead = false;
-  /** The downloads whose own copy is still to be checked since the launch. */
   #copiesLeft: ReadonlyArray<FileId> = [];
   #copyTimer: ReturnType<typeof setTimeout> | undefined;
 
   /**
-   * Reads the person's downloads index. Only a `Whole` store's gaps are taken for removals: after
-   * one, the files no download owns are deleted, before any transfer of its own can start. An
+   * Reads the person's downloads index. Only a `Whole` store's lack of a folder proves a removal:
+   * after one, the files no download owns are deleted, before any transfer of its own can start. An
    * index that read but not whole keeps every folder, and the downloads it lacks come back from
    * their own copies. A read that fails decides nothing: the downloads rebuilt from their copies
    * show and play, nothing is saved, deleted, or sent, and the read is tried again.

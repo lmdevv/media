@@ -28,9 +28,7 @@ export class NodeDisk implements DownloadDisk {
   #dead = false;
   /** Whether writes run out of space. */
   full = false;
-  /** Reads of each path still to fail, as an I/O error fails them. */
   readonly #readFailures = new Map<string, number>();
-  /** Listings of the folder still to fail. */
   #listFailures = 0;
 
   constructor(root: string) {
