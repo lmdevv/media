@@ -229,12 +229,16 @@ describe("the after-first-unlock class", () => {
 
   const signedIn = { account, record, connection, session: "tokens" };
 
-  const KEYS = [
-    [SHARED, "media.phone"],
+  const GRANT = [SHARED, "media.phone"] as const;
+
+  /** The items in the app's private group, which the first read moves to the class. */
+  const OWN_KEYS = [
     [OWN, `media.app.${server.replace(/[^\w.-]/gu, "_")}`],
     [OWN, "media.server"],
     [OWN, sessionKeyFor(server)],
   ] as const;
+
+  const KEYS = [GRANT, ...OWN_KEYS];
 
   it("stores every item a build writes after first unlock, so a locked phone reads the sign-in", async () => {
     const { store, device, accessibleAt } = recordingStore(new Set([OWN, SHARED]));
@@ -250,7 +254,7 @@ describe("the after-first-unlock class", () => {
     await expect(readBack(store)).resolves.toEqual(signedIn);
   });
 
-  it("keeps an older build's sign-in on update and moves each item to the class on first read", async () => {
+  it("keeps an older build's sign-in on update and moves each private item to the class on first read", async () => {
     const { store, device, accessibleAt } = recordingStore(new Set([OWN, SHARED]));
 
     await signIn(olderBuild(store));
@@ -259,13 +263,33 @@ describe("the after-first-unlock class", () => {
 
     await expect(readBack(store)).resolves.toEqual(signedIn);
 
-    for (const [group, key] of KEYS) {
+    for (const [group, key] of OWN_KEYS) {
       expect(accessibleAt(group, key)).toBe(AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY);
     }
 
     device.locked = true;
 
-    await expect(readBack(store)).resolves.toEqual(signedIn);
+    await expect(readBack(store)).resolves.toEqual({ ...signedIn, account: null });
+  });
+
+  it("never rewrites the shared grant on read, so another app's newer grant is never put back", async () => {
+    const { store, calls, accessibleAt } = recordingStore(new Set([OWN, SHARED]));
+
+    await signIn(olderBuild(store));
+
+    const before = calls.length;
+    const launch = openKeychains(store, { own: OWN, shared: SHARED });
+
+    expect(readPhoneAccount(launch.shared)).toEqual(account);
+    expect(
+      calls.slice(before).filter((call) => call.call === "setItem" && call.key === GRANT[1]),
+    ).toEqual([]);
+    expect(accessibleAt(...GRANT)).toBe(WHEN_UNLOCKED);
+
+    // The next password sign-in writes the grant, and that write moves it.
+    writePhoneAccount(launch.shared, { ...account, grant: "dg_y" });
+
+    expect(accessibleAt(...GRANT)).toBe(AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY);
   });
 
   it("cannot read an older build's items on a locked phone until an unlocked launch moves them", async () => {
@@ -280,7 +304,7 @@ describe("the after-first-unlock class", () => {
     await readBack(store);
     device.locked = true;
 
-    await expect(readBack(store)).resolves.toEqual(signedIn);
+    await expect(readBack(store)).resolves.toEqual({ ...signedIn, account: null });
   });
 
   it("rewrites each older item once, not on every launch", async () => {
@@ -298,8 +322,8 @@ describe("the after-first-unlock class", () => {
       .filter((call) => call.call === "setItem" && KEYS.some(([, key]) => key === call.key))
       .map((call) => call.key);
 
-    expect(rewrites).toHaveLength(KEYS.length);
-    expect(new Set(rewrites)).toEqual(new Set(KEYS.map(([, key]) => key)));
+    expect(rewrites).toHaveLength(OWN_KEYS.length);
+    expect(new Set(rewrites)).toEqual(new Set(OWN_KEYS.map(([, key]) => key)));
   });
 
   it("starts a session save the SDK makes during a read only after the read moved its item", async () => {

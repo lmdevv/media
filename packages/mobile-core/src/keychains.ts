@@ -102,8 +102,17 @@ interface Group {
  * write the keychain refuses, as while the device is locked, holds in memory until a later write
  * lands or the app quits; a durable write throws instead and holds nothing. Only refused writes
  * are held, so values another app writes to the shared group are read fresh.
+ *
+ * With `onRead` "move", the first read of an item rewrites it in the group's class. Only this app
+ * writes its private group, so nothing lands between that read and its rewrite. The shared group
+ * takes "leave": another app can write it at any moment, and a rewrite of the value just read
+ * could put an older grant back over that app's newer one.
  */
-const groupIn = (store: SecureStoreModule, options: StoreOptions): Group => {
+const groupIn = (
+  store: SecureStoreModule,
+  options: StoreOptions,
+  onRead: "move" | "leave",
+): Group => {
   const refused = new Map<string, string | null>();
 
   // Loaded by the first read that finds a value; null when the keychain could not read the list,
@@ -139,9 +148,10 @@ const groupIn = (store: SecureStoreModule, options: StoreOptions): Group => {
   };
 
   // The rewrite stores the value it was handed: callers pass one read in the same synchronous
-  // turn, so no write from this app lands between the read and the rewrite. Another app writing
-  // the shared group in that instant would lose its write.
+  // turn, so no write from this app lands between the read and the rewrite.
   const move = (key: string, value: string): void => {
+    if (onRead === "leave") return;
+
     const keys = movedKeys();
 
     if (keys === null || keys.has(key) || !lands(() => store.setItem(key, value, options))) return;
@@ -211,7 +221,7 @@ const PROBE_KEY = "media.probe";
  */
 export const openKeychains = (store: SecureStoreModule, groups: KeychainGroups): Keychains => {
   const ownOptions = optionsFor(store, groups.own);
-  const own = groupIn(store, ownOptions);
+  const own = groupIn(store, ownOptions, "move");
 
   // Session calls run one at a time, in the order the SDK makes them: the read moves its item
   // with a synchronous read and rewrite, which no session write may land between.
@@ -258,7 +268,9 @@ export const openKeychains = (store: SecureStoreModule, groups: KeychainGroups):
 
   return {
     own: own.keychain,
-    shared: groupIn(store, sharedOptions).keychain,
+    // The shared grant is read only in the foreground, at a password sign-in or a signed-out
+    // launch, so it never has to be readable while locked; the next sign-in's write moves it.
+    shared: groupIn(store, sharedOptions, "leave").keychain,
     sharesWithApps: true,
     sessions,
   };
