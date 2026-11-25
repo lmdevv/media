@@ -45,6 +45,9 @@ let follows = 0;
 /** Answers this app couldn't read that have already asked for the release again. */
 const reread = new WeakSet<UnreadableAnswer>();
 
+/** Whether a read that an unreadable answer asked for is still out. */
+let rereading = false;
+
 const isNewer = Order.isGreaterThan(ReleaseOrder);
 
 /**
@@ -106,11 +109,20 @@ export const followServer = (mediaUrl: string, app: ThisApp): ServerFollow => {
 /**
  * Reads the followed server's release again after `unreadable`, an answer this app couldn't read:
  * the server may have been updated while the app stayed open. Each answer asks once, however often
- * its line is described, and the read belongs to whichever server the app follows now.
+ * its line is described, and the read belongs to whichever server the app follows now. Answers
+ * that arrive while such a read is out share it, so a burst of them sends one request.
  */
 export const rereadAfter = (unreadable: UnreadableAnswer): void => {
   if (followed === null || reread.has(unreadable)) return;
 
   reread.add(unreadable);
-  void followed.refresh();
+
+  if (rereading) return;
+
+  const settled = (): void => {
+    rereading = false;
+  };
+
+  rereading = true;
+  void followed.refresh().then(settled, settled);
 };

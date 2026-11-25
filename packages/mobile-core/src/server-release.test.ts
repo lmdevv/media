@@ -165,6 +165,30 @@ describe("followServer", () => {
     await vi.waitFor(() => expect(asks).toBe(3));
   });
 
+  it("sends one read for a burst of answers it can't read", async () => {
+    let asks = 0;
+
+    const mediaUrl = await startServer({
+      "/api/health": async () => {
+        asks += 1;
+
+        return healthOf("0.10.0");
+      },
+    });
+
+    const followed = followServer(mediaUrl, iPhone("0.9.0"));
+
+    following.push(followed);
+
+    for (let answer = 0; answer < 20; answer += 1) describeFailure(unreadableAnswer());
+
+    await vi.waitFor(() => expect(describeUnreadable()).toBe(UPDATE_ON_IPHONE));
+    expect(asks).toBe(1);
+
+    describeFailure(unreadableAnswer());
+    await vi.waitFor(() => expect(asks).toBe(2));
+  });
+
   it("reads nothing after an unreadable answer while the app follows no server", async () => {
     let asks = 0;
 
