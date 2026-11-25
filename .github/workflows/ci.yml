@@ -169,40 +169,27 @@ jobs:
           node-version: 24
           cache: pnpm
       # The newest released Xcode on the image, as the owner's Mac runs the newest release.
-      - id: xcode
-        run: |
+      - run: |
           xcode="$(printf '%s\n' /Applications/Xcode_*.app | grep -E '/Xcode_[0-9.]+\.app$' | sort -V | tail -1)"
           sudo xcode-select --switch "$xcode"
           xcodebuild -version
-          echo "build=$(xcodebuild -version | awk '/Build version/ { print $3 }')" >> "$GITHUB_OUTPUT"
-      # Pods download into this cache by name and version, so an older cache is safe to start from.
+      # CocoaPods and React Native keep their downloads (pods, the prebuilt React Native core, and
+      # Hermes) under a name and version, so an older cache is safe to start from.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/Library/Caches/CocoaPods
-          key: cocoapods-${{ matrix.app }}-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: cocoapods-${{ matrix.app }}-
-      # ccache keys each C, C++, and Objective-C compile on its preprocessed input, so an older cache
-      # is safe to start from; Swift compiles every run.
-      - run: brew install ccache
-        env:
-          HOMEBREW_NO_AUTO_UPDATE: "1"
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/Library/Caches/ccache
-          key: ccache-${{ matrix.app }}-${{ steps.xcode.outputs.build }}-${{ hashFiles('pnpm-lock.yaml', format('apps/mobile/{0}/app.json', matrix.app), format('apps/mobile/{0}/modules/**', matrix.app)) }}
-          restore-keys: ccache-${{ matrix.app }}-${{ steps.xcode.outputs.build }}-
+          path: |
+            ~/Library/Caches/CocoaPods
+            ~/Library/Caches/ReactNative
+          key: ios-downloads-${{ matrix.app }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: ios-downloads-${{ matrix.app }}-
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: pnpm --filter "@media/mobile-${{ matrix.app }}" exec expo prebuild --platform ios --clean
-        env:
-          USE_CCACHE: "1"
       - working-directory: apps/mobile/${{ matrix.app }}/ios
         run: >-
           xcodebuild -workspace ${{ matrix.app }}.xcworkspace -scheme ${{ matrix.app }}
           -configuration Debug -sdk iphonesimulator -destination "generic/platform=iOS Simulator"
           -derivedDataPath "$RUNNER_TEMP/derived-data" ARCHS=arm64 CODE_SIGNING_ALLOWED=NO
           build -quiet
-      - if: always()
-        run: ccache --show-stats
 
   verify-media-skill:
     name: verify-media skill tests
