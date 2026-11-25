@@ -24,14 +24,28 @@ interface Call {
 /** The keys expo-secure-store 58 takes (`isValidKey` in its `SecureStore.ts`); it throws on any other. */
 const SECURE_STORE_KEY = /^[\w.-]+$/u;
 
+/** expo-secure-store 58's `keychainAccessible` values (`SecureStoreAccessible.swift`). */
+const AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY = 1;
+
+const WHEN_UNLOCKED = 5;
+
+interface Item {
+  readonly value: string;
+  readonly accessible: number;
+}
+
 /**
- * expo-secure-store as the keychain behaves: items live per access group, a group the build is not
- * entitled to refuses every call, as iOS does, and a key outside expo-secure-store's characters is
- * refused before the keychain sees it.
+ * expo-secure-store 58 as the keychain behaves (`SecureStoreModule.swift`): items live per access
+ * group, and a group the build is not entitled to refuses every call, as iOS does. Lookups ignore
+ * the accessibility class. A new item takes the class the call names, or when-unlocked; a write to
+ * an existing item keeps its class unless the call names one. While `device.locked`, a
+ * when-unlocked item can be neither read nor written. A key outside expo-secure-store's characters
+ * is refused before the keychain sees it.
  */
 const recordingStore = (entitled: ReadonlySet<string>) => {
   const calls: Array<Call> = [];
-  const items = new Map<string, string>();
+  const items = new Map<string, Item>();
+  const device = { locked: false };
 
   const slot = (call: string, key: string, options: StoreOptions): string => {
     calls.push({ call, key, group: options.accessGroup });
@@ -45,22 +59,62 @@ const recordingStore = (entitled: ReadonlySet<string>) => {
     return `${options.accessGroup ?? "(first listed)"}/${key}`;
   };
 
+  const read = (call: string, key: string, options: StoreOptions): string | null => {
+    const item = items.get(slot(call, key, options));
+
+    if (item === undefined) return null;
+
+    if (device.locked && item.accessible === WHEN_UNLOCKED) {
+      throw new Error("errSecInteractionNotAllowed");
+    }
+
+    return item.value;
+  };
+
+  const write = (call: string, key: string, value: string, options: StoreOptions): void => {
+    const at = slot(call, key, options);
+    const held = items.get(at)?.accessible;
+    const accessible = options.keychainAccessible ?? held ?? WHEN_UNLOCKED;
+
+    if (device.locked && (held === WHEN_UNLOCKED || accessible === WHEN_UNLOCKED)) {
+      throw new Error("errSecInteractionNotAllowed");
+    }
+
+    items.set(at, { value, accessible });
+  };
+
   const store: SecureStoreModule = {
-    getItem: (key, options) => items.get(slot("getItem", key, options)) ?? null,
+    AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
+    getItem: (key, options) => read("getItem", key, options),
     setItem: (key, value, options) => {
-      items.set(slot("setItem", key, options), value);
+      write("setItem", key, value, options);
     },
-    getItemAsync: async (key, options) => items.get(slot("getItemAsync", key, options)) ?? null,
+    getItemAsync: async (key, options) => read("getItemAsync", key, options),
     setItemAsync: async (key, value, options) => {
-      items.set(slot("setItemAsync", key, options), value);
+      write("setItemAsync", key, value, options);
     },
     deleteItemAsync: async (key, options) => {
       items.delete(slot("deleteItemAsync", key, options));
     },
   };
 
-  return { store, calls };
+  /** The class of the item at `key` in `group`. */
+  const accessibleAt = (group: string, key: string) => items.get(`${group}/${key}`)?.accessible;
+
+  return { store, calls, device, accessibleAt };
 };
+
+const groupOnly = (options: StoreOptions): StoreOptions =>
+  options.accessGroup === undefined ? {} : { accessGroup: options.accessGroup };
+
+/** `store` as an older build called it, naming only the access group, so items take the default. */
+const olderBuild = (store: SecureStoreModule): SecureStoreModule => ({
+  ...store,
+  setItem: (key, value, options) => {
+    store.setItem(key, value, groupOnly(options));
+  },
+  setItemAsync: async (key, value, options) => store.setItemAsync(key, value, groupOnly(options)),
+});
 
 const OWN = "J9DZZ82K23.dev.lmdevv.movies";
 
@@ -109,10 +163,9 @@ describe("openKeychains", () => {
 
     expect(keychains.sharesWithApps).toBe(false);
     expect(keychains.shared.read("media.phone")).toBe("grant");
-    expect(calls.filter((call) => call.key === "media.phone").map((call) => call.group)).toEqual([
-      OWN,
-      OWN,
-    ]);
+    expect(
+      new Set(calls.filter((call) => call.key === "media.phone").map((call) => call.group)),
+    ).toEqual(new Set([OWN]));
   });
 
   it("throws on a refused durable write and holds nothing, not even over an earlier held value", () => {
@@ -134,6 +187,200 @@ describe("openKeychains", () => {
     keychains.own.write("media.server", "connection");
 
     expect(keychains.own.read("media.server")).toBe("connection");
+  });
+});
+
+describe("the after-first-unlock class", () => {
+  const server = "https://cinema.home/";
+  const userId = Brand.nominal<UserId>()("jd7f3k2m9x8b1c4v5n6q0w2e3r4t5y6u");
+  const account = { server, userId, grant: "dg_x" };
+  const record = { device: "dv_x", person: { userId, username: "aiko" }, opened: true };
+
+  const connection = {
+    mediaUrl: server,
+    convexUrl: `${server}convex`,
+    moviesUrl: `${server}movies`,
+  };
+
+  /** Signs Aiko in on `store` the way a build writes its records: the grant, the record, the session. */
+  const signIn = async (store: SecureStoreModule) => {
+    const launch = openKeychains(store, { own: OWN, shared: SHARED });
+
+    writePhoneAccount(launch.shared, account);
+    writeAppRecord(launch.own, server, record);
+    writeConnection(launch.own, connection);
+    await launch.sessions.setItem(sessionKeyFor(server), "tokens");
+  };
+
+  /** Reads back everything sign-in wrote, as a launch does. */
+  const readBack = async (store: SecureStoreModule) => {
+    const launch = openKeychains(store, { own: OWN, shared: SHARED });
+
+    return {
+      account: readPhoneAccount(launch.shared),
+      record: readAppRecord(launch.own, server),
+      connection: readConnection(launch.own),
+      // The SDK treats a session it cannot load as none.
+      session: await Promise.resolve()
+        .then(async () => launch.sessions.getItem(sessionKeyFor(server)))
+        .catch(() => null),
+    };
+  };
+
+  const signedIn = { account, record, connection, session: "tokens" };
+
+  const GRANT = [SHARED, "media.phone"] as const;
+
+  /** The items in the app's private group, which the first read moves to the class. */
+  const OWN_KEYS = [
+    [OWN, `media.app.${server.replace(/[^\w.-]/gu, "_")}`],
+    [OWN, "media.server"],
+    [OWN, sessionKeyFor(server)],
+  ] as const;
+
+  const KEYS = [GRANT, ...OWN_KEYS];
+
+  it("stores every item a build writes after first unlock, so a locked phone reads the sign-in", async () => {
+    const { store, device, accessibleAt } = recordingStore(new Set([OWN, SHARED]));
+
+    await signIn(store);
+
+    for (const [group, key] of [...KEYS, [SHARED, "media.probe"] as const]) {
+      expect(accessibleAt(group, key)).toBe(AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY);
+    }
+
+    device.locked = true;
+
+    await expect(readBack(store)).resolves.toEqual(signedIn);
+  });
+
+  it("keeps an older build's sign-in on update and moves each private item to the class on first read", async () => {
+    const { store, device, accessibleAt } = recordingStore(new Set([OWN, SHARED]));
+
+    await signIn(olderBuild(store));
+
+    for (const [group, key] of KEYS) expect(accessibleAt(group, key)).toBe(WHEN_UNLOCKED);
+
+    await expect(readBack(store)).resolves.toEqual(signedIn);
+
+    for (const [group, key] of OWN_KEYS) {
+      expect(accessibleAt(group, key)).toBe(AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY);
+    }
+
+    device.locked = true;
+
+    await expect(readBack(store)).resolves.toEqual({ ...signedIn, account: null });
+  });
+
+  it("never rewrites the shared grant on read, so another app's newer grant is never put back", async () => {
+    const { store, calls, accessibleAt } = recordingStore(new Set([OWN, SHARED]));
+
+    await signIn(olderBuild(store));
+
+    const before = calls.length;
+    const launch = openKeychains(store, { own: OWN, shared: SHARED });
+
+    expect(readPhoneAccount(launch.shared)).toEqual(account);
+    expect(
+      calls.slice(before).filter((call) => call.call === "setItem" && call.key === GRANT[1]),
+    ).toEqual([]);
+    expect(accessibleAt(...GRANT)).toBe(WHEN_UNLOCKED);
+
+    // The next password sign-in writes the grant, and that write moves it.
+    writePhoneAccount(launch.shared, { ...account, grant: "dg_y" });
+
+    expect(accessibleAt(...GRANT)).toBe(AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY);
+  });
+
+  it("cannot read an older build's items on a locked phone until an unlocked launch moves them", async () => {
+    const { store, device } = recordingStore(new Set([OWN, SHARED]));
+
+    await signIn(olderBuild(store));
+    device.locked = true;
+
+    await expect(readBack(store)).resolves.toMatchObject({ account: null, connection: null });
+
+    device.locked = false;
+    await readBack(store);
+    device.locked = true;
+
+    await expect(readBack(store)).resolves.toEqual({ ...signedIn, account: null });
+  });
+
+  it("rewrites each older item once, not on every launch", async () => {
+    const { store, calls } = recordingStore(new Set([OWN, SHARED]));
+
+    await signIn(olderBuild(store));
+    const before = calls.length;
+
+    await readBack(store);
+    await readBack(store);
+    await readBack(store);
+
+    const rewrites = calls
+      .slice(before)
+      .filter((call) => call.call === "setItem" && KEYS.some(([, key]) => key === call.key))
+      .map((call) => call.key);
+
+    expect(rewrites).toHaveLength(OWN_KEYS.length);
+    expect(new Set(rewrites)).toEqual(new Set(OWN_KEYS.map(([, key]) => key)));
+  });
+
+  it("starts a session save the SDK makes during a read only after the read moved its item", async () => {
+    const { store, calls } = recordingStore(new Set([OWN, SHARED]));
+
+    await signIn(olderBuild(store));
+
+    const launch = openKeychains(store, { own: OWN, shared: SHARED });
+    const key = sessionKeyFor(server);
+    const before = calls.length;
+    const read = launch.sessions.getItem(key);
+    const saved = launch.sessions.setItem(key, "renewed tokens");
+
+    await expect(read).resolves.toBe("tokens");
+    await saved;
+
+    expect(
+      calls
+        .slice(before)
+        .filter((call) => call.key === key)
+        .map((call) => call.call),
+    ).toEqual(["getItemAsync", "getItem", "setItem", "setItemAsync"]);
+    await expect(launch.sessions.getItem(key)).resolves.toBe("renewed tokens");
+  });
+
+  it("never lets a session read's move write over a clear made while the read was away", async () => {
+    const { store } = recordingStore(new Set([OWN, SHARED]));
+
+    await signIn(olderBuild(store));
+
+    const reached = Promise.withResolvers<void>();
+    const answer = Promise.withResolvers<void>();
+
+    // The keychain has read the session, and the answer has not reached JavaScript yet.
+    const slow: SecureStoreModule = {
+      ...store,
+      getItemAsync: async (key, options) => {
+        const value = store.getItem(key, options);
+
+        reached.resolve();
+        await answer.promise;
+
+        return value;
+      },
+    };
+
+    const launch = openKeychains(slow, { own: OWN, shared: SHARED });
+    const key = sessionKeyFor(server);
+    const read = launch.sessions.getItem(key);
+
+    await reached.promise;
+    // A disconnect clears the session synchronously.
+    launch.own.write(key, null);
+    answer.resolve();
+
+    await expect(read).resolves.toBe("tokens");
+    expect(launch.own.read(key)).toBeNull();
   });
 });
 
