@@ -53,7 +53,10 @@ export class Service extends Context.Service<Service, Interface>()(
 
 const KEYFRAME_WAIT = Duration.seconds(2);
 
-/** A snapshot that verifies nothing, for a file no encode can serve. */
+/**
+ * A snapshot that verifies nothing: what Direct play and copies are decided from, as they need no
+ * evidence, and what a file no encode can serve plans with.
+ */
 const NOTHING_VERIFIED: CapabilitySnapshot = {
   domains: [],
   verified: new Set(),
@@ -164,10 +167,9 @@ const make = Effect.gen(function* () {
             excluded: new Set<never>(),
           };
 
-    const known = asked === undefined ? NOTHING_VERIFIED : yield* capabilities.current(asked);
-
-    // Direct play and copies never consult the transcoder; an encode probes, within the
-    // negotiation's budget, what its cheapest chain still needs, once per negotiation.
+    // Direct play and copies are decided before anything waits on the capability service; only
+    // an encode asks it, once per negotiation and within its budget, to identify the device and
+    // probe what the cheapest chain still needs.
     const resolved = yield* Effect.cached(
       asked === undefined ? Effect.succeed(NOTHING_VERIFIED) : capabilities.resolve(asked),
     );
@@ -175,7 +177,7 @@ const make = Effect.gen(function* () {
     const decide = Effect.fnUntraced(function* (copyVideo: boolean) {
       const options: DecisionOptions = {
         audioIndex: request.audioStreamIndex,
-        capabilities: known,
+        capabilities: NOTHING_VERIFIED,
         quality: request.quality,
         burnSubtitle,
         copyVideo,

@@ -91,13 +91,14 @@ export interface FailedRun {
 /** What this ffmpeg build does on this machine. */
 export interface Interface {
   /**
-   * What planning may use for `request` now, without probing; the build listing settles the
-   * CPU's rows at once.
+   * What planning may use for `request` now, without probing or waiting for a device: the build
+   * listing settles the CPU's rows at once, and only devices already identified are bound.
    */
   readonly current: (request: Request) => Effect.Effect<CapabilitySnapshot>;
   /**
-   * Probes, within the negotiation budget, the unknown keys the cheapest chain for `request` would
-   * use, then answers what planning may use. A key still unknown at the deadline stays out.
+   * Waits for the devices' identities and probes the unknown keys the cheapest chain for
+   * `request` would use, all within the negotiation budget, then answers what planning may use.
+   * A device or a key still unknown at the deadline stays out.
    */
   readonly resolve: (request: Request) => Effect.Effect<CapabilitySnapshot>;
   /**
@@ -797,18 +798,21 @@ const make = Effect.gen(function* () {
   });
 
   const knownNow = Effect.fn("TranscodeCapabilities.current")(function* (request: Request) {
-    yield* ready;
+    yield* knowBuild;
     yield* settleAll(targetsOf(request));
 
     return yield* snapshotFor(request);
   });
 
   const resolve = Effect.fn("TranscodeCapabilities.resolve")(function* (request: Request) {
-    yield* ready;
+    const deadline = (yield* now) + Duration.toMillis(budget);
+
+    // The listings and device identities run in the service's scope; one that has not answered
+    // by the deadline leaves its device out of this plan.
+    yield* ready.pipe(Effect.timeoutOption(budget));
     const targets = targetsOf(request);
 
     yield* settleAll(targets);
-    const deadline = (yield* now) + Duration.toMillis(budget);
 
     for (let round = 0; round <= targets.size; round += 1) {
       const known = yield* Ref.get(inventory);

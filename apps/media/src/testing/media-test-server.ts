@@ -64,6 +64,10 @@ interface Options {
   readonly reports?: true;
   /** Wraps the real ffmpeg and ffprobe the server's own services run, such as to hold an exit. */
   readonly mediaTools?: (real: MediaTools.Interface) => MediaTools.Interface;
+  /** How long a negotiation waits for its probes; 60 seconds when absent. */
+  readonly negotiationBudget?: Duration.Duration;
+  /** How long one capability probe or device check runs; the service's own when absent. */
+  readonly probeTimeout?: Duration.Duration;
 }
 
 /**
@@ -120,10 +124,19 @@ export const layer = (overrides: Readonly<Record<string, string>> = {}, options:
 
       // Negotiations wait for every probe their chain needs, so the stages a test's first stream
       // runs on do not depend on how busy the machine is.
-      const budget = Layer.succeed(TranscodeCapabilities.NegotiationBudget, Duration.seconds(60));
+      const budget = Layer.succeed(
+        TranscodeCapabilities.NegotiationBudget,
+        options.negotiationBudget ?? Duration.seconds(60),
+      );
+
+      const probeTimeout =
+        options.probeTimeout === undefined
+          ? Layer.empty
+          : Layer.succeed(TranscodeCapabilities.ProbeTimeout, options.probeTimeout);
 
       const services = servicesLayerWith(tools).pipe(
         Layer.provide(budget),
+        Layer.provide(probeTimeout),
         Layer.provideMerge(testTokensLayer),
         Layer.provideMerge(StreamOwners.layer),
         Layer.provideMerge(testArtworkKeysLayer),
