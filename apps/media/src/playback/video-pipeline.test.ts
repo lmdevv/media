@@ -418,8 +418,10 @@ describe("assemble", () => {
     const blocked = assemble(video, choices, without, Purpose.Probe({ key: encode }));
 
     assert.deepStrictEqual(
-      Result.isFailure(blocked) ? blocked.failure : undefined,
-      Rejection.NotVerified({ key: upload }),
+      Result.isFailure(blocked) && Rejection.$is("NotVerified")(blocked.failure)
+        ? blocked.failure.key
+        : undefined,
+      upload,
     );
 
     const withUpload = snapshot([QSV], [...without.verified, upload]);
@@ -467,8 +469,12 @@ describe("probes", () => {
     );
 
     assert.deepStrictEqual(
-      blocked !== undefined && Result.isFailure(blocked) ? blocked.failure : undefined,
-      Rejection.NotVerified({ key: upload }),
+      blocked !== undefined &&
+        Result.isFailure(blocked) &&
+        Rejection.$is("NotVerified")(blocked.failure)
+        ? blocked.failure.key
+        : undefined,
+      upload,
     );
   });
 

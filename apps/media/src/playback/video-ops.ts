@@ -9,6 +9,8 @@
 import type { DynamicRange } from "@media/contracts/media-playback";
 import { Brand, Data } from "effect";
 
+import type * as MediaConfig from "../media-config.ts";
+
 /** Where frames live: CPU memory or one GPU API's surfaces. A backend adds a member. */
 export type Domain = "cpu" | "qsv" | "vaapi";
 
@@ -236,6 +238,16 @@ export const row = <T extends OpName>(impl: OpImpl<T>): Row => ({
     runs: probe.runs,
   })),
 });
+
+/** What the transcoder knows about a GPU domain besides its rows. */
+export interface DomainSpec {
+  /** The render node it opens, from the configuration. */
+  readonly device: (config: MediaConfig.Interface) => string;
+  /** Arguments that open the device and name it for filters, before the input. */
+  readonly deviceArgs: (device: string) => ReadonlyArray<string>;
+  /** Components every use of the domain needs. */
+  readonly needs: ReadonlyArray<BuildFeature>;
+}
 
 /** Bit depths rows accept. */
 export const DEPTHS: ReadonlySet<number> = new Set([8, 10, 12]);

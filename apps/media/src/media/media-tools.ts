@@ -10,8 +10,15 @@ export class MediaToolFailed extends Schema.TaggedError<
 >()("MediaToolFailed", {
   tool: Schema.Literals(["ffmpeg", "ffprobe"]),
   exitCode: Schema.NullOr(Schema.Int),
+  /** The signal that ended it, such as `SIGSEGV`; null when it exited or never started. */
+  signal: Schema.NullOr(Schema.String),
   /** Tail of the tool's standard error with absolute paths from its arguments replaced. */
   stderr: Schema.String,
+  /**
+   * Head of the tool's standard error, paths replaced: where ffmpeg names the part that failed
+   * first, which the tail, full of what failed after it, no longer shows.
+   */
+  stderrHead: Schema.String,
   cause: Schema.Defect(),
 }) {
   override get message(): string {
@@ -61,6 +68,15 @@ export interface Interface {
    */
   readonly ffmpegInBackground: (
     args: ReadonlyArray<string>,
+    options?: RunOptions,
+  ) => Effect.Effect<string, MediaToolFailed>;
+  /**
+   * Runs ffmpeg to completion and returns the start of what it logged to standard error, paths
+   * replaced, such as the driver a hardware device opened with; times out as `ffprobe` does.
+   */
+  readonly ffmpegLog: (
+    args: ReadonlyArray<string>,
+    options?: RunOptions,
   ) => Effect.Effect<string, MediaToolFailed>;
   /**
    * Starts ffmpeg in the current scope. Closing the scope kills it with `SIGKILL` and waits until
@@ -85,6 +101,8 @@ export interface Interface {
 export class Service extends Context.Service<Service, Interface>()("@media/server/MediaTools") {}
 
 const STDERR_TAIL = 4096;
+
+const STDERR_HEAD = 2048;
 
 /**
  * Starts a tool so it dies with the server, even by SIGKILL. util-linux `setpriv` sets the
@@ -151,8 +169,21 @@ const make = Effect.gen(function* () {
     background: boolean = false,
     piped: { readonly onStdout: ((text: string) => void) | undefined } | null = null,
   ) {
-    const failed = (exitCode: number | null, stderr: string, cause: unknown) =>
-      new MediaToolFailed({ tool, exitCode, stderr: scrubPaths(stderr, args), cause });
+    const failed = (
+      exitCode: number | null,
+      signal: string | null,
+      stderr: string,
+      stderrHead: string,
+      cause: unknown,
+    ) =>
+      new MediaToolFailed({
+        tool,
+        exitCode,
+        signal,
+        stderr: scrubPaths(stderr, args),
+        stderrHead: scrubPaths(stderrHead, args),
+        cause,
+      });
 
     const program = tool === "ffmpeg" ? config.ffmpegPath : config.ffprobePath;
 
@@ -160,6 +191,7 @@ const make = Effect.gen(function* () {
       env,
       background,
       stderrTail: STDERR_TAIL,
+      stderrHead: STDERR_HEAD,
       stopSignal: "SIGKILL",
       forceKillAfter: "2 seconds",
       output: piped !== null,
@@ -170,20 +202,29 @@ const make = Effect.gen(function* () {
       process.platform === "linux"
         ? ScopedProcess.start("setpriv", dyingWithServer(program, args), options)
         : ScopedProcess.start(program, args, options)
-    ).pipe(Effect.mapError((cause) => failed(null, "", cause)));
+    ).pipe(Effect.mapError((cause) => failed(null, null, "", "", cause)));
 
     const exit = Effect.gen(function* () {
       const { code, signal } = yield* Effect.promise(() => running.exited);
 
-      // A stopped run fails as soon as it is reaped, which is when its slot is released.
+      // A stopped run fails as soon as it is reaped, which is when its slot is released, with
+      // whatever it wrote so far.
       if (code === null) {
-        return yield* failed(null, "", new Error(`${tool} was ended by ${String(signal)}`));
+        return yield* failed(
+          null,
+          signal,
+          running.stderrTail(),
+          running.stderrHead(),
+          new Error(`${tool} was ended by ${String(signal)}`),
+        );
       }
 
       // Otherwise its output is read to the end first.
       yield* Effect.promise(() => running.closed);
 
-      if (code !== 0) return yield* failed(code, running.stderrTail(), null);
+      if (code !== 0) {
+        return yield* failed(code, null, running.stderrTail(), running.stderrHead(), null);
+      }
 
       return running.stdout();
     });
@@ -197,11 +238,16 @@ const make = Effect.gen(function* () {
       exit,
       output: running.output,
       stderrTail: Effect.sync(() => scrubPaths(running.stderrTail(), args)),
+      stderrHead: Effect.sync(() => scrubPaths(running.stderrHead(), args)),
       suspend,
     };
   });
 
-  const runToCompletion = (tool: "ffmpeg" | "ffprobe", background: boolean) =>
+  const runToCompletion = (
+    tool: "ffmpeg" | "ffprobe",
+    background: boolean,
+    read: "stdout" | "stderr" = "stdout",
+  ) =>
     Effect.fn(`MediaTools.${tool}`)(function* (
       args: ReadonlyArray<string>,
       options: RunOptions = {},
@@ -209,10 +255,13 @@ const make = Effect.gen(function* () {
       const running = yield* spawn(tool, args, background);
       const timeout = options.timeout ?? (background ? undefined : config.probeTimeout);
 
-      if (timeout === undefined) return yield* running.exit;
+      const finished =
+        read === "stdout" ? running.exit : running.exit.pipe(Effect.andThen(running.stderrHead));
+
+      if (timeout === undefined) return yield* finished;
 
       // Leaving the scope on timeout kills the tool.
-      return yield* running.exit.pipe(
+      return yield* finished.pipe(
         Effect.timeoutOrElse({
           duration: timeout,
           orElse: () =>
@@ -220,7 +269,9 @@ const make = Effect.gen(function* () {
               new MediaToolFailed({
                 tool,
                 exitCode: null,
+                signal: null,
                 stderr: `timed out after ${String(Duration.toSeconds(timeout))} seconds`,
+                stderrHead: "",
                 cause: null,
               }),
             ),
@@ -250,7 +301,9 @@ const make = Effect.gen(function* () {
       return yield* new MediaToolFailed({
         tool: "ffmpeg",
         exitCode: null,
+        signal: null,
         stderr: "",
+        stderrHead: "",
         cause: new Error("ffmpeg started without its output pipe"),
       });
     }
@@ -262,6 +315,7 @@ const make = Effect.gen(function* () {
     ffprobe: runToCompletion("ffprobe", false),
     ffmpeg: runToCompletion("ffmpeg", false),
     ffmpegInBackground: runToCompletion("ffmpeg", true),
+    ffmpegLog: runToCompletion("ffmpeg", false, "stderr"),
     startFfmpeg,
     startFfmpegPiped,
   });

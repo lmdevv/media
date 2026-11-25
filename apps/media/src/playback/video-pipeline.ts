@@ -10,13 +10,14 @@ import { Data, Result } from "effect";
 
 import { PROBE_CLIPS } from "./probe-clips.ts";
 import { CPU_ROWS } from "./video-ops-cpu.ts";
-import { INTEL_ROWS } from "./video-ops-intel.ts";
+import { INTEL_ROWS, QSV, VAAPI } from "./video-ops-intel.ts";
 import {
   type BuildFeature,
   type CapabilityKey,
   capabilityKey,
   type ClipName,
   type Domain,
+  type DomainSpec,
   type Frame,
   type GpuDomain,
   ImplId,
@@ -32,6 +33,12 @@ import {
 
 /** Every row of the table. A backend adds its file's rows here. */
 export const VIDEO_OPS: ReadonlyArray<Row> = [...CPU_ROWS, ...INTEL_ROWS];
+
+/** What the transcoder knows about each GPU domain besides its rows. A backend adds its entry. */
+export const DOMAINS: Readonly<Record<GpuDomain, DomainSpec>> = { qsv: QSV, vaapi: VAAPI };
+
+/** GPU domains in the order `HARDWARE_ACCELERATION=auto` prefers them. */
+export const GPU_PREFERENCE: ReadonlyArray<GpuDomain> = ["qsv", "vaapi"];
 
 /** One step of a pipeline: a row doing one operation on one frame. */
 export interface Step {
@@ -88,7 +95,12 @@ export type Rejection = Data.TaggedEnum<{
   /** The snapshot binds no device for the domain. */
   Unavailable: { readonly domain: Domain };
   Excluded: { readonly impl: ImplId };
-  NotVerified: { readonly key: CapabilityKey };
+  /** `on` and `needs` are the unverified step's, so a listing can settle it. */
+  NotVerified: {
+    readonly key: CapabilityKey;
+    readonly on: Domain;
+    readonly needs: ReadonlyArray<BuildFeature>;
+  };
   /** The chain would hold frames on a second GPU device context. */
   SecondDevice: { readonly memory: Domain; readonly device: string };
   /** No operation needs a row. */
@@ -194,7 +206,9 @@ const build = (
         Probe: (probe) => probe.key === key,
       });
 
-      if (!exempt && !snapshot.verified.has(key)) return Rejection.NotVerified({ key });
+      if (!exempt && !snapshot.verified.has(key)) {
+        return Rejection.NotVerified({ key, on: entry.on, needs: use.needs });
+      }
     }
 
     const output: Frame = { ...use.output, device: deviceOf(use.output.memory) };
@@ -493,7 +507,7 @@ export const candidateKeys = (
 };
 
 /** How a probe reads its frames. */
-type ProbeInput = Data.TaggedEnum<{
+export type ProbeInput = Data.TaggedEnum<{
   /** A generated clip. */
   Clip: { readonly clip: ClipName };
   /** The first second of a real source's video stream. */
@@ -501,7 +515,7 @@ type ProbeInput = Data.TaggedEnum<{
 }>;
 
 /** Constructors and matchers for `ProbeInput`. */
-const ProbeInput = Data.taggedEnum<ProbeInput>();
+export const ProbeInput = Data.taggedEnum<ProbeInput>();
 
 /** The smallest chain that proves one key, and what it reads. */
 export interface ProbePlan {
@@ -621,4 +635,45 @@ export const sourceProbeFor = (
   return built === undefined
     ? undefined
     : Result.map(built, (pipeline) => ({ key, pipeline, input: ProbeInput.Source(), runs: 1 }));
+};
+
+const WARMUP_ORDER: ReadonlyArray<OpName> = [
+  "Move",
+  "Encode",
+  "Scale",
+  "Decode",
+  "ToneMap",
+  "BurnImage",
+];
+
+/**
+ * The steps generated clips prove for the rows of `domain`, one per key, the ones most chains need
+ * first: moves, the encoder, scaling, decoders, then tone maps.
+ */
+export const probedSteps = (domain: Domain, snapshot: CapabilitySnapshot): ReadonlyArray<Step> => {
+  const steps = new Map<CapabilityKey, Step>();
+
+  const rows = VIDEO_OPS.filter((entry) => entry.on === domain).toSorted(
+    (left, right) => WARMUP_ORDER.indexOf(left.op) - WARMUP_ORDER.indexOf(right.op),
+  );
+
+  for (const entry of rows) {
+    for (const probe of entry.probes) {
+      const source = PROBE_CLIPS[probe.clip].source;
+      const choices = probeChoices(entry, probe.op, source);
+
+      const chain =
+        choices === undefined ? undefined : build(source, choices, snapshot, Checks.Structure());
+
+      const tested =
+        chain !== undefined && Result.isSuccess(chain)
+          ? chain.success.find((step) => step.impl === entry.id && Op.$is(entry.op)(step.op))
+          : undefined;
+
+      if (tested !== undefined && !steps.has(tested.capability))
+        steps.set(tested.capability, tested);
+    }
+  }
+
+  return [...steps.values()];
 };

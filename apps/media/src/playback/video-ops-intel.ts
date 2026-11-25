@@ -8,6 +8,7 @@ import { DECODE_CLIPS, PROBE_CLIPS } from "./probe-clips.ts";
 import {
   type BuildFeature,
   type Domain,
+  type DomainSpec,
   filter,
   fusing,
   type GpuDomain,
@@ -41,6 +42,27 @@ const QSV_DECODERS: ReadonlyMap<string, string> = new Map([
   ["vp9", "vp9_qsv"],
   ["mpeg2video", "mpeg2_qsv"],
 ]);
+
+/**
+ * The `-init_hw_device` value for Quick Sync on the render node `device`. With oneVPL builds,
+ * `qsv=hw:<path>` ignores the path and opens the default GPU, so the node is named as the child
+ * VA-API device instead; a missing node then fails, as it should.
+ */
+const qsvDeviceInit = (device: string): string => `qsv=hw,child_device=${device}`;
+
+/** Quick Sync on `QSV_DEVICE`. */
+export const QSV: DomainSpec = {
+  device: (config) => config.qsvDevice,
+  deviceArgs: (device) => ["-init_hw_device", qsvDeviceInit(device), "-filter_hw_device", "hw"],
+  needs: ["hwaccel:qsv"],
+};
+
+/** VA-API on `VAAPI_DEVICE`. */
+export const VAAPI: DomainSpec = {
+  device: (config) => config.vaapiDevice,
+  deviceArgs: (device) => ["-init_hw_device", `vaapi=va:${device}`, "-filter_hw_device", "va"],
+  needs: ["hwaccel:vaapi"],
+};
 
 const decodeProbes: ReadonlyArray<ProbeCase<"Decode">> = DECODE_CLIPS.map((clip) => ({
   op: Op.Decode({ codec: PROBE_CLIPS[clip].source.codec }),

@@ -35,6 +35,8 @@ export interface RunningChild {
   readonly output: AsyncIterable<Uint8Array> | null;
   /** The last `stderrTail` characters of standard error. */
   readonly stderrTail: () => string;
+  /** The first `stderrHead` characters of standard error. */
+  readonly stderrHead: () => string;
   /** Signals the process until Node reaps it; afterwards it sends nothing. */
   readonly signal: (signal: ChildSignal) => void;
 }
@@ -48,6 +50,8 @@ export interface ChildOptions {
   readonly background?: boolean;
   /** How many trailing characters of standard error to keep. */
   readonly stderrTail: number;
+  /** How many leading characters of standard error to keep. */
+  readonly stderrHead?: number;
   /** Open file descriptor 3 as a pipe to this process, for a tool that writes a stream there. */
   readonly output?: boolean | undefined;
   /**
@@ -90,6 +94,8 @@ export const startChild = (
 
   let stdout = "";
   let stderr = "";
+  let stderrHead = "";
+  const headLength = options.stderrHead ?? 0;
 
   // Node reaps children only from the event loop, which has not run since the spawn, so the pid
   // is still the child's. Lowering a child's priority needs no privileges.
@@ -111,6 +117,8 @@ export const startChild = (
   stderrPipe.setEncoding("utf8");
   stderrPipe.on("data", (chunk: string) => {
     stderr = (stderr + chunk).slice(-options.stderrTail);
+
+    if (stderrHead.length < headLength) stderrHead = (stderrHead + chunk).slice(0, headLength);
   });
 
   const exited = new Promise<ChildExit>((resolve) => {
@@ -144,6 +152,7 @@ export const startChild = (
       stdout: () => stdout,
       output,
       stderrTail: () => stderr,
+      stderrHead: () => stderrHead,
       signal: (signal) => {
         child.kill(signal);
       },
