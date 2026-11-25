@@ -1287,7 +1287,9 @@ ios_matrix() {
 timing_opens() {
   case "$1" in
     movies) echo "Elephants Dream|About This Movie" ;;
-    music) printf '%s\n' "Neptune|Artist, Pamela Laverdure" "Artist, Pamela Laverdure|Albums" ;;
+    music)
+      printf '%s\n' "translations ep, raymundo mendoza|Artist, raymundo mendoza" \
+        "Artist, raymundo mendoza|Albums" ;;
   esac
 }
 
