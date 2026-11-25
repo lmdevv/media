@@ -8,14 +8,14 @@
 # It prints two lines, each a JSON list of app directory names under apps/mobile:
 #
 #   bundle=["movies","music"]  the apps scripts/changed-packages.sh reports for the diff
-#   build=["music"]            those apps again, counting only the paths that can change the native app
+#   build=["music"]            those apps, counting only the paths that can change the native app
 #
 # A Debug simulator build skips the JavaScript bundle, so a path that only Metro reads cannot change
 # what Xcode compiles or what `expo prebuild` generates. That is TypeScript, JavaScript, and CSS in a
-# workspace package or in an app's src/, outside any ios/ or plugin/ folder, and the root files only
-# typecheck, lint, format, test, and Nix read. Every other path counts, including Swift and podspecs
-# anywhere, an app's files outside src/, every package.json, the lockfile, the pnpm workspace file,
-# patches, and CI.
+# workspace package or in an app's src/, outside any ios/ or plugin/ folder, and the root files that
+# only typecheck, lint and its plugins, format, test, turbo, and Nix read. Every other path counts,
+# including Swift and podspecs anywhere, an app's files outside src/, every package.json, the
+# lockfile, the pnpm workspace file, patches, and CI.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -46,7 +46,7 @@ native() {
   fi
   case "$path" in
     tsconfig.json | vitest.config.ts | knip.json | oxlint.config.ts | .oxfmtrc.json | lefthook.yml) return ;;
-    flake.nix | flake.lock | scripts/*.test.ts) return ;;
+    turbo.json | tools/oxlint/* | flake.nix | flake.lock | scripts/*.test.ts) return ;;
   esac
   echo "$path"
 }

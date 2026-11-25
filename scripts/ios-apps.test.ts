@@ -62,6 +62,8 @@ const cases: ReadonlyArray<readonly [string, Scope]> = [
   ["scripts/ios-apps.sh", { bundle: both, build: both }],
   ["scripts/changed-packages.sh", { bundle: both, build: both }],
   ["tsconfig.json", { bundle: both, build: [] }],
+  ["turbo.json", { bundle: both, build: [] }],
+  ["tools/oxlint/media/rules/music-writer.ts", { bundle: both, build: [] }],
   ["scripts/ios-apps.test.ts", { bundle: both, build: [] }],
   ["packages/config/tsconfig.base.json", { bundle: both, build: [] }],
 ];
