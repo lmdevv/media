@@ -9,7 +9,7 @@ import { foldSearchText } from "@media/contracts/search-text";
 import type { Doc, Id } from "../_generated/dataModel";
 import { inOrder } from "../core/lib/inOrder";
 import type { Counted } from "../core/scans";
-import { CALL_COST, repeated, sumCost, whileBudget } from "./budget";
+import { CALL_COST, maxCost, repeated, sumCost, whileBudget } from "./budget";
 import type { Cost } from "./budget";
 import {
   COMBINED_SETTLING,
@@ -242,11 +242,10 @@ const BARE_CHECK = sumCost([
 ]);
 
 /**
- * Settling the credit strings an album names in `finish`, as it gains or loses its tracks on disk
- * or its credits change: one combined string, or its separate values, those it lost and those it
- * gained.
+ * Settling in `finish` the credit strings an album gains, or those it loses, as evidence
+ * (`albumSources`): one combined string or its separate values of one part.
  */
-const ALBUM_SOURCES_SETTLING = repeated(SINGLE_SETTLING, 2 * CREDITS);
+const ALBUM_STRINGS = maxCost([COMBINED_SETTLING, repeated(SINGLE_SETTLING, CREDITS)]);
 
 /**
  * Deleting an emptied album (`deleteIfEmpty`): a track looked for, its artist links read and
@@ -271,7 +270,10 @@ const TRACK_LINKS = sumCost([
   repeated(atBound.patch("trackArtists"), CREDITS),
 ]);
 
-/** Rewriting one album's artist links, as `TRACK_LINKS` does a song's, or their years. */
+/**
+ * Rewriting one album's artist links once, as `TRACK_LINKS` does a song's: for new credits, a
+ * year filled in, or both at once.
+ */
 const ALBUM_LINKS = sumCost([
   atBound.read("albumArtists", LINKS_READ),
   repeated(atBound.delete("albumArtists"), LINKS_READ),
@@ -289,9 +291,9 @@ const SONG_STRINGS = 1 + MAX_FEATURED_LISTS;
 
 /**
  * The credit strings one song's tags name, gained or lost and settled at the call's end: its
- * combined ones, each recorded, or its separate values of one part.
+ * artist and featured lists, each recorded when combined, or its separate values of one part.
  */
-const SONG_SOURCES = sumCost([
+const SONG_SOURCES = maxCost([
   repeated(sumCost([USE_RECORDING, COMBINED_SETTLING]), SONG_STRINGS),
   repeated(SINGLE_SETTLING, CREDITS),
 ]);
@@ -324,10 +326,11 @@ export const RECREDIT_COST = sumCost([
  * joins, which it may make or adopt from a release before credits, the one it leaves, and the one
  * the other track leaves), two of them perhaps emptied. Its credits add each credit string
  * resolved (its artist, two featured lists, its album artist), the artists of its credits and its
- * album's found or made, its links and its album's rewritten, each artist of the moved track,
+ * album's found or made, its links and its album's rewritten once, each artist of the moved track,
  * of the track it replaces, and of the new credits settled, each artist a link left checked, the
  * credit strings its tags gained and lost and those of the track left missing at the old path
- * settled, and the credit strings of each of the three albums. Every other write costs less.
+ * settled, and the credit strings its album gains and loses and the two others lose. Every other
+ * write costs less.
  */
 const WRITE_MOST = sumCost([
   atBound.read("tracks"),
@@ -356,7 +359,7 @@ const WRITE_MOST = sumCost([
   TRACK_LINKS,
   ALBUM_LINKS,
   repeated(SONG_SOURCES, 3),
-  repeated(ALBUM_SOURCES_SETTLING, 3),
+  repeated(ALBUM_STRINGS, 4),
   repeated(ARTIST_SETTLING, 3 * CREDITS),
   repeated(BARE_CHECK, LINKS_READ + 1),
   ALBUM_SETTLING,
@@ -564,11 +567,11 @@ export const catalogBatch = (
   };
 
   /**
-   * An album whose credit strings may start or stop being evidence: it gains or loses tracks on
-   * disk, or what it names changes. `finish` settles them.
+   * An album whose credit strings may start (`gain`) or stop (`loss`) being evidence: it gains or
+   * loses tracks on disk, or what it names changes. `finish` settles them.
    */
-  const mayMoveEvidence = (albumId: Id<"albums">): void => {
-    owe(`evidence:${albumId}`, ALBUM_SOURCES_SETTLING);
+  const mayMoveEvidence = (albumId: Id<"albums">, move: "gain" | "loss"): void => {
+    owe(`evidence-${move}:${albumId}`, ALBUM_STRINGS);
   };
 
   const adjust = (albumId: Id<"albums">, tracks: number, length: number): void => {
@@ -576,7 +579,9 @@ export const catalogBatch = (
 
     touchAlbum(albumId);
 
-    if (tracks !== 0) mayMoveEvidence(albumId);
+    if (tracks > 0) mayMoveEvidence(albumId, "gain");
+
+    if (tracks < 0) mayMoveEvidence(albumId, "loss");
 
     deltas.set(albumId, {
       tracks: previous.tracks + tracks,
@@ -875,9 +880,10 @@ export const catalogBatch = (
 
   /**
    * Credits an album as its album artist `artistName`, keyed `artistKey`, names it now: its
-   * separate values `tagged`, or the string as it resolves now. Writes the album's credits and
-   * links when they change, and answers the album as it is then, with whether they changed. A row
-   * a release before credits wrote takes its album artist key and credits here.
+   * separate values `tagged`, or the string as it resolves now. Writes the album's credits when
+   * they change, and answers the album as it is then, its credits, and whether they changed, so
+   * the caller rewrites its links once (`linkAlbum`). A row a release before credits wrote takes
+   * its album artist key and credits here.
    */
   const creditAlbum = async (
     album: Stored<"albums">,
@@ -887,7 +893,11 @@ export const catalogBatch = (
       readonly tagged: ReadonlyArray<string> | null;
     },
     artHash: string | null,
-  ): Promise<{ readonly album: Stored<"albums">; readonly changed: boolean }> => {
+  ): Promise<{
+    readonly album: Stored<"albums">;
+    readonly credits: ReadonlyArray<ArtistCredit>;
+    readonly changed: boolean;
+  }> => {
     const credits = await creditsOf(
       await albumNamesOf(named.artistName, named.tagged),
       named.artistName,
@@ -909,12 +919,11 @@ export const catalogBatch = (
       album.creditsTagged === changes.creditsTagged &&
       sameCredits(credits.all, album.credits)
     ) {
-      return { album, changed: false };
+      return { album, credits: album.credits, changed: false };
     }
 
     recreditedAlbum(album);
     await store.setAlbumCredits(album._id, changes);
-    await linkAlbum(album, credits.all, false);
 
     if (album.artistId !== changes.artistId) mayBeBare(album.artistId);
 
@@ -922,11 +931,11 @@ export const catalogBatch = (
     const before = albumSources(album);
     const after = albumSources(updated);
 
-    if (without(after, before).length > 0 || without(before, after).length > 0) {
-      mayMoveEvidence(album._id);
-    }
+    if (without(after, before).length > 0) mayMoveEvidence(album._id, "gain");
 
-    return { album: updated, changed: true };
+    if (without(before, after).length > 0) mayMoveEvidence(album._id, "loss");
+
+    return { album: updated, credits: credits.all, changed: true };
   };
 
   const albumFor = async (
@@ -997,23 +1006,21 @@ export const catalogBatch = (
       genre: existing.genre ?? scanned.genre ?? null,
     };
 
-    if (
-      changes.artHash === existing.artHash &&
-      changes.year === existing.year &&
-      changes.genre === existing.genre
-    ) {
-      albums.set(cacheKey, existing);
+    const tagsChanged =
+      changes.artHash !== existing.artHash ||
+      changes.year !== existing.year ||
+      changes.genre !== existing.genre;
 
-      return existing;
+    if (tagsChanged) {
+      await store.setAlbumTags(existing._id, changes);
+      release(existing.artHash, artHash);
     }
 
-    await store.setAlbumTags(existing._id, changes);
-    release(existing.artHash, artHash);
+    const updated = tagsChanged ? { ...existing, ...changes } : existing;
 
-    const updated = { ...existing, ...changes };
-
-    if (changes.year !== existing.year && updated.credits !== undefined) {
-      await linkAlbum(updated, updated.credits, false);
+    // One rewrite of its links serves new credits and a year filled in.
+    if (credited.changed || updated.year !== existing.year) {
+      await linkAlbum(updated, credited.credits, false);
     }
 
     albums.set(cacheKey, updated);
@@ -1262,6 +1269,8 @@ export const catalogBatch = (
       },
       album.artHash,
     );
+
+    if (credited.changed) await linkAlbum(album, credited.credits, false);
 
     return credited.changed;
   };
