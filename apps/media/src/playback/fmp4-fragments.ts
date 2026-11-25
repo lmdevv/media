@@ -1,9 +1,10 @@
 /**
  * Reads where an fMP4 fragment file starts and ends. ffmpeg's HLS muxer writes one file per
- * keyframe interval here: `styp`, one `sidx` per track, then a `moof` with one `traf` per track.
+ * keyframe interval here: `styp`, a `sidx` per track unless the run skips them, then a `moof`
+ * with one `traf` per track.
  *
  * The times come from the video `traf` (its `tfdt` and `trun`) and the init segment's edit list,
- * not from the `sidx`: ffmpeg 8.0 writes a `sidx` earliest presentation time one frame late for
+ * never from a `sidx`: ffmpeg 8.0 writes a `sidx` earliest presentation time one frame late for
  * runs that start at the beginning of the file, while the `moof` it writes is the same as other
  * versions'.
  */
@@ -26,14 +27,19 @@ export interface VideoTiming {
 }
 
 /**
- * Where a fragment's video starts and ends, in seconds on the source timeline: from its first
- * sample's presentation time, for the sum of its sample durations, so `end` is the next
- * fragment's `start` to within a tick of the track's timescale (a next fragment whose first
- * frame is presented before it is decoded starts that much early). `end` is `undefined` when the
- * fragment gives no sample durations.
+ * Where a fragment's video starts and ends, in seconds on the source timeline.
+ *
+ * With open-GOP video, leading pictures follow a keyframe in decode order but are presented
+ * before it, so a fragment's `start` is later than its earliest picture, and the fragment before
+ * it ends short of that `start` by the leading pictures' span.
  */
 export interface FragmentSpan {
+  /** Presentation time of the first sample in decode order: the fragment's keyframe. */
   readonly start: number;
+  /**
+   * The latest presentation end among the samples (presentation time plus duration);
+   * `undefined` when the fragment gives no sample durations.
+   */
   readonly end: number | undefined;
 }
 
@@ -289,7 +295,7 @@ export const fragmentSpan = (
   const defaultDuration = tfhdDuration(fragment, tfhd) ?? timing.defaultSampleDuration;
   let decode = tfdtVersion === 1 ? uint64(view, tfdt.body + 4) : view.getUint32(tfdt.body + 4);
   let first: number | undefined;
-  let total = 0;
+  let latestEnd = Number.NEGATIVE_INFINITY;
   let durationsKnown = true;
 
   for (const trun of childrenOf(fragment, traf, "trun")) {
@@ -328,7 +334,7 @@ export const fragmentSpan = (
       first ??= presented;
 
       if (duration === undefined) durationsKnown = false;
-      total += (duration ?? 0) * repeats;
+      latestEnd = Math.max(latestEnd, presented + (duration ?? 0) * repeats);
       decode += (duration ?? 0) * repeats;
       offset += fields.length * 4;
     }
@@ -338,6 +344,6 @@ export const fragmentSpan = (
 
   return {
     start: first / timing.timescale,
-    end: durationsKnown ? (first + total) / timing.timescale : undefined,
+    end: durationsKnown ? latestEnd / timing.timescale : undefined,
   };
 };

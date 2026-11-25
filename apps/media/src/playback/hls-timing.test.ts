@@ -62,6 +62,7 @@ const RESUME_SEGMENTS = [1, 2] as const;
 
 type Property =
   | "planned"
+  | "packets"
   | "audio start"
   | "video seam"
   | "audio seam"
@@ -72,6 +73,7 @@ type Property =
 
 interface Source {
   readonly name: string;
+  readonly videoArgs?: ReadonlyArray<string>;
   readonly audioArgs: ReadonlyArray<string>;
   readonly container: "mkv" | "mp4" | "ts";
   readonly seconds?: number;
@@ -182,6 +184,23 @@ const AC3_TS_LONG_GOP: Source = {
   keyframeFrames: 240,
 };
 
+const OPEN_GOP_HEVC: Source = {
+  name: "hevc-open-gop",
+  videoArgs: [
+    "-c:v",
+    "libx265",
+    "-preset",
+    "ultrafast",
+    "-pix_fmt",
+    "yuv420p",
+    "-x265-params",
+    "log-level=error:keyint=240:min-keyint=240:scenecut=0:open-gop=1:bframes=3",
+  ],
+  audioArgs: [...sine(48_000, 30), "-c:a", "aac"],
+  container: "mkv",
+  seconds: 30,
+};
+
 const ENCODER_SEAM: ReadonlyArray<Property> = ["audio seam"];
 
 const CASES: ReadonlyArray<Case> = [
@@ -233,6 +252,13 @@ const CASES: ReadonlyArray<Case> = [
     source: AC3_TS_LONG_GOP,
     video: "copy",
     audio: "aac",
+    expectedFailures: [],
+  },
+  {
+    name: "remux, open-GOP HEVC, AAC copied",
+    source: OPEN_GOP_HEVC,
+    video: "copy",
+    audio: "copy",
     expectedFailures: [],
   },
   {
@@ -290,6 +316,13 @@ interface Span {
   readonly first: number;
   readonly end: number;
   readonly steps: ReadonlyArray<number>;
+  readonly firstDecodedPts: number;
+  readonly sortedPts: ReadonlyArray<number>;
+}
+
+interface Streams {
+  readonly video: Span;
+  readonly audio: Span;
 }
 
 interface SegmentTiming {
@@ -300,6 +333,7 @@ interface SegmentTiming {
 }
 
 interface Run {
+  readonly startSegment: number;
   readonly from: number;
   readonly init: Uint8Array;
   /** Streams ffprobe finds in `init.mp4` alone. */
@@ -314,7 +348,7 @@ interface Ends {
 
 interface Measurement {
   readonly plan: SegmentPlan;
-  readonly sourceEnds: Ends;
+  readonly source: Streams;
   readonly fromStart: Run;
   readonly resumed: ReadonlyArray<Run>;
 }
@@ -382,16 +416,18 @@ const generateSource = Effect.fn("HlsTiming.generateSource")(function* (source: 
     "0:v",
     "-map",
     "1:a",
-    "-c:v",
-    "libx264",
-    "-preset",
-    "ultrafast",
-    "-pix_fmt",
-    "yuv420p",
-    "-g",
-    String(source.keyframeFrames ?? 48),
-    "-bf",
-    "3",
+    ...(source.videoArgs ?? [
+      "-c:v",
+      "libx264",
+      "-preset",
+      "ultrafast",
+      "-pix_fmt",
+      "yuv420p",
+      "-g",
+      String(source.keyframeFrames ?? 48),
+      "-bf",
+      "3",
+    ]),
     output,
   ]);
 
@@ -425,6 +461,8 @@ const span = (packets: ReadonlyArray<Packet>): Span => {
     first: sorted[0]?.pts ?? Number.NaN,
     end: (last?.pts ?? Number.NaN) + (last?.duration ?? steps.at(-1) ?? Number.NaN),
     steps,
+    firstDecodedPts: packets[0]?.pts ?? Number.NaN,
+    sortedPts: sorted.map((packet) => packet.pts),
   };
 };
 
@@ -580,6 +618,7 @@ const runFrom = Effect.fn("HlsTiming.runFrom")(function* (
   );
 
   return {
+    startSegment,
     from,
     init,
     initStreams,
@@ -650,13 +689,13 @@ const measure = (testCase: Case) =>
         runFrom(testCase, input, probe, plan, start),
       );
 
-      const sourceEnds = yield* probeSpans(input);
+      const source = yield* probeSpans(input);
 
       if (optIn) {
         yield* Console.log(
           [
             `${testCase.name} (plan ${plan.starts.map(ms).join(", ")})`,
-            `  audio ends ${ms(endGap(sourceEnds))} ms after video in the source, ${ms(endGap(runEnds(fromStart)))} ms in a run from the start`,
+            `  audio ends ${ms(endGap(source))} ms after video in the source, ${ms(endGap(runEnds(fromStart)))} ms in a run from the start`,
             describeRun("from the start", fromStart.segments),
             ...resumed.map((run) =>
               describeRun(`continued at ${ms(run.from)}`, continued(fromStart, run)),
@@ -665,7 +704,7 @@ const measure = (testCase: Case) =>
         );
       }
 
-      return { plan, sourceEnds, fromStart, resumed };
+      return { plan, source, fromStart, resumed };
     }).pipe(Effect.orDie),
   );
 
@@ -674,7 +713,7 @@ const lateness = (testCase: Case): number =>
 
 const checkPlanned = (testCase: Case, run: Run, label: string) => {
   for (const segment of run.segments) {
-    const offset = segment.video.first - segment.planned;
+    const offset = segment.video.firstDecodedPts - segment.planned;
 
     assert.isTrue(
       offset >= -ROUNDING && offset <= lateness(testCase),
@@ -703,6 +742,73 @@ const checkSeams = (stream: "video" | "audio", limit: number) =>
     }
   });
 
+const audioFromZero = (times: ReadonlyArray<number>): ReadonlyArray<number> =>
+  times.filter((time) => time >= 0);
+
+const checkPackets = (
+  segments: ReadonlyArray<SegmentTiming>,
+  source: Streams,
+  stream: "video" | "audio",
+  label: string,
+) => {
+  const served = segments.flatMap((segment) => segment[stream].sortedPts).toSorted((a, b) => a - b);
+
+  const expected =
+    stream === "video" ? source.video.sortedPts : audioFromZero(source.audio.sortedPts);
+
+  const differ = Array.from(
+    { length: Math.max(served.length, expected.length) },
+    (_, index) => index,
+  ).find(
+    (index) =>
+      !(Math.abs((served[index] ?? Number.NaN) - (expected[index] ?? Number.NaN)) <= ROUNDING),
+  );
+
+  assert.isTrue(
+    differ === undefined,
+    `${label}: ${String(served.length)} ${stream} packets served, ${String(expected.length)} in the source; packet ${String(differ)} is at ${ms(served[differ ?? 0] ?? Number.NaN)} ms served, ${ms(expected[differ ?? 0] ?? Number.NaN)} ms in the source`,
+  );
+};
+
+const checkContiguous = (run: Run) => {
+  const indexes = run.segments.map((segment) => segment.index);
+  const last = indexes.at(-1) ?? run.startSegment;
+
+  assert.deepStrictEqual(
+    indexes,
+    Array.from({ length: last - run.startSegment + 1 }, (_, offset) => run.startSegment + offset),
+    `segments of the run from ${ms(run.from)} ms`,
+  );
+};
+
+const PacketOrder = Schema.fromJsonString(
+  Schema.Struct({
+    packets: Schema.Array(
+      Schema.Struct({ pts_time: Schema.FiniteFromString, flags: Schema.String }),
+    ),
+  }),
+);
+
+const HEVC_CRA = 21;
+
+const HEVC_RASL: ReadonlySet<number> = new Set([8, 9]);
+
+const pictureTypes = (annexBBytes: Uint8Array): ReadonlyArray<number> => {
+  const types: Array<number> = [];
+
+  for (let index = 0; index + 5 < annexBBytes.length; index += 1) {
+    if (annexBBytes[index] === 0 && annexBBytes[index + 1] === 0 && annexBBytes[index + 2] === 1) {
+      const type = ((annexBBytes[index + 3] ?? 0) >> 1) & 0x3f;
+
+      // A slice opens with first_slice_segment_in_pic_flag, set on a picture's first slice.
+      if (type < 32 && ((annexBBytes[index + 5] ?? 0) & 0x80) !== 0) types.push(type);
+      index += 2;
+    }
+  }
+
+  return types;
+};
+
 const sourcesLayer = Layer.effect(
   Sources,
   Effect.gen(function* () {
@@ -726,6 +832,78 @@ const sourcesLayer = Layer.effect(
 
 describe.runIf(hasFfmpeg)("HLS timing", () => {
   layer(sourcesLayer, { excludeTestServices: true, timeout: "180 seconds" })((shared) => {
+    shared.effect(
+      "makes the open-GOP source of CRA keyframes with leading pictures after them",
+      () =>
+        Effect.gen(function* () {
+          const tools = yield* MediaTools.Service;
+          const fs = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const { root } = yield* Workspace;
+          const input = yield* (yield* Sources).file(OPEN_GOP_HEVC);
+          const annexB = path.join(root, `${OPEN_GOP_HEVC.name}.hevc`);
+
+          yield* tools.ffmpeg([
+            "-hide_banner",
+            "-nostdin",
+            "-v",
+            "error",
+            "-y",
+            "-i",
+            input,
+            "-map",
+            "0:v",
+            "-c:v",
+            "copy",
+            "-bsf:v",
+            "hevc_mp4toannexb",
+            "-f",
+            "hevc",
+            annexB,
+          ]);
+
+          const types = pictureTypes(yield* fs.readFile(annexB));
+
+          const { packets } = yield* Schema.decodeEffect(PacketOrder)(
+            yield* tools.ffprobe([
+              "-v",
+              "error",
+              "-select_streams",
+              "v:0",
+              "-show_entries",
+              "packet=pts_time,flags",
+              "-of",
+              "json",
+              input,
+            ]),
+          );
+
+          assert.strictEqual(types.length, packets.length, "pictures and packets");
+
+          const keyframes = packets.flatMap((packet, index) =>
+            index > 0 && packet.flags.startsWith("K") ? [index] : [],
+          );
+
+          assert.isAtLeast(keyframes.length, 2, "keyframes after the first");
+
+          for (const at of keyframes) {
+            const keyframe = packets[at]?.pts_time ?? Number.NaN;
+
+            assert.strictEqual(types[at], HEVC_CRA, `the keyframe at ${ms(keyframe)} ms`);
+            assert.isTrue(
+              HEVC_RASL.has(types[at + 1] ?? -1),
+              `the picture after the keyframe at ${ms(keyframe)} ms is a leading picture`,
+            );
+            assert.isBelow(
+              packets[at + 1]?.pts_time ?? Number.NaN,
+              keyframe,
+              `the leading picture after the keyframe at ${ms(keyframe)} ms is presented before it`,
+            );
+          }
+        }).pipe(Effect.orDie),
+      60_000,
+    );
+
     for (const testCase of CASES) {
       describe.runIf(runnable[testCase.video])(testCase.name, () => {
         shared.layer(measure(testCase), { timeout: "180 seconds" })((it) => {
@@ -789,14 +967,42 @@ describe.runIf(hasFfmpeg)("HLS timing", () => {
             );
           }
 
+          if (testCase.video === "copy") {
+            test("packets")(
+              testCase.audio === "copy"
+                ? "serves every source packet once, from the start and after each resume"
+                : "serves every source video packet once, from the start and after each resume",
+              () =>
+                Effect.gen(function* () {
+                  const { source, fromStart, resumed } = yield* Measured;
+
+                  const served = [
+                    ["from the start", fromStart.segments] as const,
+                    ...resumed.map(
+                      (run) =>
+                        [`continued at ${ms(run.from)} ms`, continued(fromStart, run)] as const,
+                    ),
+                  ];
+
+                  for (const [label, segments] of served) {
+                    checkPackets(segments, source, "video", label);
+
+                    if (testCase.audio === "copy") checkPackets(segments, source, "audio", label);
+                  }
+
+                  for (const run of [fromStart, ...resumed]) checkContiguous(run);
+                }),
+            );
+          }
+
           if (testCase.video !== "copy") {
             test("audio start")("starts a later run's audio at most a frame before its start", () =>
               Effect.gen(function* () {
-                const { resumed, sourceEnds } = yield* Measured;
+                const { resumed, source } = yield* Measured;
 
                 // A run that starts after the audio ends keeps what its seek lands before.
                 for (const run of resumed.filter(
-                  (each) => sourceEnds.audio.end >= each.from + AUDIO_END_MARGIN,
+                  (each) => source.audio.end >= each.from + AUDIO_END_MARGIN,
                 )) {
                   const early = run.from - (run.segments[0]?.audio.first ?? Number.NaN);
 
@@ -812,8 +1018,8 @@ describe.runIf(hasFfmpeg)("HLS timing", () => {
 
           test("sync")("keeps audio as far from video at the end as the source does", () =>
             Effect.gen(function* () {
-              const { sourceEnds, fromStart } = yield* Measured;
-              const drift = endGap(runEnds(fromStart)) - endGap(sourceEnds);
+              const { source, fromStart } = yield* Measured;
+              const drift = endGap(runEnds(fromStart)) - endGap(source);
 
               assert.isAtMost(
                 Math.abs(drift),

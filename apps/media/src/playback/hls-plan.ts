@@ -118,14 +118,20 @@ export const segmentAt = (plan: SegmentPlan, seconds: number): number => {
 const segmentDuration = (plan: SegmentPlan, index: number): number =>
   (plan.starts[index + 1] ?? plan.end) - (plan.starts[index] ?? plan.end);
 
+/**
+ * How far a fragment's start may sit from the planned start it was cut at: the keyframe index
+ * and the muxer round the same keyframe's time a millisecond or so apart.
+ */
 const FRAGMENT_EPSILON_SECONDS = 0.005;
 
 /**
  * The planned segments a generation's fragments make up, each fragment in the segment its start
- * falls in and none before `startSegment`. Fragments before the last one that starts by `from`
- * are left out: ffmpeg's stream-copy seek can start a keyframe or more before `from`, and a
- * keyframe index a few milliseconds late puts `from` just after the fragment that starts the
- * segment. `fragments` must be in start order.
+ * falls in and none before `startSegment`. A fragment's start is its keyframe's own presentation
+ * time, as the plan's starts are, even when leading pictures presented before the keyframe follow
+ * it in the fragment. Fragments before the last one that starts by `from` are left out: ffmpeg's
+ * stream-copy seek can start a keyframe or more before `from`, and a keyframe index a few
+ * milliseconds late puts `from` just after the fragment that starts the segment. `fragments` must
+ * be in start order.
  */
 export const groupFragments = <F extends { readonly start: number }>(
   plan: SegmentPlan,
@@ -156,13 +162,18 @@ export interface Reach {
   /** A fragment starts at or after the next start, so the encoder got past it. */
   readonly followed: boolean;
   /**
-   * A fragment ends at the next start, so the segment before it is whole; an end well past the
-   * next start is not trusted, as ffmpeg did not cut there.
+   * A fragment ends at the next start, so the segment before it is whole. An end well past the
+   * next start is not trusted, as ffmpeg did not cut there, and neither is an end short of it:
+   * the next keyframe's leading pictures, presented before it, may follow in the next fragment.
    */
   readonly written: boolean;
 }
 
-/** How far `fragments` reach toward `next`, the start of the segment after the one awaited. */
+/**
+ * How far `fragments` reach toward `next`, the start of the segment after the one awaited. Each
+ * fragment's start is its keyframe's presentation time and its end the latest presentation end of
+ * its pictures (see `FragmentSpan`).
+ */
 export const reachOf = (
   fragments: ReadonlyArray<{ readonly start: number; readonly end: number | undefined }>,
   next: number | undefined,
