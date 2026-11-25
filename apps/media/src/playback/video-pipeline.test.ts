@@ -17,6 +17,7 @@ import {
   type VideoPipeline,
   VIDEO_OPS,
 } from "./video-pipeline.ts";
+import { renderVideo } from "./video-render.ts";
 import {
   type CapabilityKey,
   capabilityKey,
@@ -451,6 +452,78 @@ describe("assemble", () => {
       Result.isSuccess(assemble(video, choices, withUpload, Purpose.Probe({ key: encode }))),
     );
     assert.isTrue(Result.isFailure(assemble(video, choices, withUpload, Purpose.Run())));
+  });
+});
+
+describe("the seal", () => {
+  const OPTIONS = { input: 0, stream: 0, trimPicture: undefined, trimSubtitle: undefined };
+
+  it("refuses a chain to run that does not decode first and encode last, but not a probe's", () => {
+    const video = source();
+    const known = everything(video, [QSV]);
+
+    const encodeOnly = assemble(
+      video,
+      [[Op.Encode({ codec: "h264", bitrate: 1_000_000 }), row("encode.cpu")]],
+      known,
+      Purpose.Run(),
+    );
+
+    const decodeOnly = assemble(
+      video,
+      [
+        [Op.Decode({ codec: "h264" }), row("decode.cpu")],
+        [Op.Scale({ width: 1280, height: 720, depth: 8 }), row("scale.cpu")],
+      ],
+      known,
+      Purpose.Run(),
+    );
+
+    const probe = assemble(
+      video,
+      [
+        [Op.Decode({ codec: "h264" }), row("decode.qsv")],
+        [Op.Move({ to: "cpu" }), row("move.qsv>cpu")],
+      ],
+      known,
+      Purpose.Probe({ key: capabilityKey(ImplId("decode.qsv"), "h264/yuv420p") }),
+    );
+
+    assert.deepStrictEqual(
+      Result.flip(encodeOnly),
+      Result.succeed(Rejection.Incomplete({ needs: "Decode" })),
+    );
+    assert.deepStrictEqual(
+      Result.flip(decodeOnly),
+      Result.succeed(Rejection.Incomplete({ needs: "Encode" })),
+    );
+    assert.isTrue(Result.isSuccess(probe));
+  });
+
+  it("renders only a pipeline assemble returned, not a copy of one", () => {
+    const video = source({ pixelFormat: "yuv420p10le", depth: 10 });
+    const intent = intentFor(video);
+    const unproven = capabilityKey(ImplId("decode.qsv"), "h264/yuv420p10le");
+
+    const pipeline = planned(
+      video,
+      intent,
+      snapshot(
+        [QSV],
+        everyKey(video, intent, [QSV]).filter((key) => key !== unproven),
+      ),
+    );
+
+    assert.include(renderVideo(pipeline, OPTIONS).graph?.text, "hwupload");
+
+    // A copy without the upload would feed Quick Sync's scaler frames in CPU memory.
+    const withoutUpload = {
+      ...pipeline,
+      steps: pipeline.steps.filter((step) => !Op.$is("Move")(step.op)),
+    };
+
+    assert.throws(() => renderVideo(withoutUpload, OPTIONS), /assemble/u);
+    assert.throws(() => renderVideo({ ...pipeline }, OPTIONS), /assemble/u);
   });
 });
 

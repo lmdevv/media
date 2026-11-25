@@ -9,7 +9,13 @@
 import { Predicate } from "effect";
 
 import type { LogOwners } from "./transcode-recovery.ts";
-import { DOMAINS, ProbeInput, type Step, type VideoPipeline } from "./video-pipeline.ts";
+import {
+  DOMAINS,
+  isAssembled,
+  ProbeInput,
+  type Step,
+  type VideoPipeline,
+} from "./video-pipeline.ts";
 import { type FilterCall, filter, type GpuDomain, Op } from "./video-ops.ts";
 
 /** A filter graph: one chain for `-vf`, or several for `-filter_complex`. */
@@ -108,8 +114,12 @@ const deviceArgs = (pipeline: VideoPipeline): ReadonlyArray<string> => {
   return DOMAINS[domain].deviceArgs(frame.device);
 };
 
-/** Renders `pipeline` for one run. */
+/**
+ * Renders `pipeline` for one run. Only a pipeline `assemble` returned renders: anything else, a
+ * copy with its steps changed for one, is a defect, as its moves and evidence went unchecked.
+ */
 export const renderVideo = (pipeline: VideoPipeline, options: RenderOptions): RenderedVideo => {
+  if (!isAssembled(pipeline)) throw new Error("Only a pipeline assemble returned can be rendered");
   const { steps } = pipeline;
   const burn = steps.findIndex((step) => Op.$is("BurnImage")(step.op));
   const burnStep = steps[burn];

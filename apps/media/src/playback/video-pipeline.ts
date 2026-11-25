@@ -3,8 +3,9 @@
  * a pipeline. It walks the chosen rows, inserts the move each pair of memories needs, asks each
  * row what it does with the frame it gets, and refuses any step whose capability the snapshot has
  * not verified, so a GPU filter fed CPU frames, an H.264 encoder fed HDR frames, or an unproven
- * stage cannot be written. `planVideo` picks the cheapest chain that assembles; it names no
- * backend, so a new one is a rows file and a `Domain` member.
+ * stage cannot be written. A chain that runs decodes first and encodes last. The renderer takes
+ * only a pipeline `assemble` itself returned, not a copy. `planVideo` picks the cheapest chain
+ * that assembles; it names no backend, so a new one is a rows file and a `Domain` member.
  */
 import { Data, Result } from "effect";
 
@@ -57,11 +58,20 @@ export interface Step {
 
 const checked: unique symbol = Symbol("VideoPipeline");
 
-/** A chain `assemble` built. Only this module holds the symbol, so nothing else can make one. */
+/**
+ * A chain `assemble` built. Only this module holds the symbol, so no other module can write one
+ * out, and `isAssembled` tells `assemble`'s own results from copies.
+ */
 export interface VideoPipeline {
   readonly steps: ReadonlyArray<Step>;
   readonly [checked]: true;
 }
+
+/** Every pipeline `assemble` returned, and nothing else: a copy of one is not in it. */
+const assembledPipelines = new WeakSet<VideoPipeline>();
+
+/** Whether `assemble` returned `pipeline` itself, as the renderer requires. */
+export const isAssembled = (pipeline: VideoPipeline): boolean => assembledPipelines.has(pipeline);
 
 /** A GPU domain planning may use, and the render node it binds. */
 export interface DomainBinding {
@@ -104,6 +114,8 @@ export type Rejection = Data.TaggedEnum<{
   };
   /** The chain would hold frames on a second GPU device context. */
   SecondDevice: { readonly memory: Domain; readonly device: string };
+  /** A chain that runs must decode first and encode last; this one lacks `needs` there. */
+  Incomplete: { readonly needs: "Decode" | "Encode" };
   /** No operation needs a row. */
   Empty: {};
 }>;
@@ -273,18 +285,39 @@ const build = (
  * the moves between memories are inserted, and a `Move` given as a choice is placed where it
  * stands, as probes use to visit a memory. Every step's capability must be verified in `snapshot`
  * and its row not excluded, except the one key a probe proves, and the chain may hold frames on at
- * most one GPU device context besides the CPU.
+ * most one GPU device context besides the CPU. A chain to run must decode first and encode last;
+ * a probe's chain may stop anywhere.
  */
 export const assemble = (
   source: SourceVideo,
   choices: ReadonlyArray<readonly [Op, Row]>,
   snapshot: CapabilitySnapshot,
   purpose: Purpose,
-): Result.Result<VideoPipeline, Rejection> =>
-  Result.map(
-    build(source, choices, snapshot, Checks.Evidence({ purpose })),
-    (steps): VideoPipeline => ({ steps, [checked]: true }),
-  );
+): Result.Result<VideoPipeline, Rejection> => {
+  const built = build(source, choices, snapshot, Checks.Evidence({ purpose }));
+
+  if (Result.isFailure(built)) return Result.fail(built.failure);
+  const steps = built.success;
+
+  if (Purpose.$is("Run")(purpose)) {
+    const first = steps[0];
+    const last = steps.at(-1);
+
+    if (first === undefined || !Op.$is("Decode")(first.op)) {
+      return Result.fail(Rejection.Incomplete({ needs: "Decode" }));
+    }
+
+    if (last === undefined || !Op.$is("Encode")(last.op)) {
+      return Result.fail(Rejection.Incomplete({ needs: "Encode" }));
+    }
+  }
+
+  const pipeline: VideoPipeline = { steps, [checked]: true };
+
+  assembledPipelines.add(pipeline);
+
+  return Result.succeed(pipeline);
+};
 
 /** The rows of `op`, in table order. */
 export const rowsOf = (op: OpName): ReadonlyArray<Row> =>
@@ -475,21 +508,20 @@ export const planVideo = (
     return Result.fail(Result.isFailure(refused) ? refused.failure : chosen.failure);
   }
 
-  const { steps } = chosen.success;
-  const last = steps.at(-1);
-  const encode = steps.find((step) => Op.$is("Encode")(step.op))?.op;
+  const pipeline = assemble(source, chosen.success.candidate.choices, snapshot, Purpose.Run());
 
-  if (last === undefined || encode === undefined || !Op.$is("Encode")(encode)) {
-    return Result.fail(Rejection.Empty());
-  }
+  if (Result.isFailure(pipeline)) return Result.fail(pipeline.failure);
+  const last = pipeline.success.steps.at(-1);
+
+  if (last === undefined || !Op.$is("Encode")(last.op)) return Result.fail(Rejection.Empty());
 
   return Result.succeed({
-    pipeline: { steps, [checked]: true },
+    pipeline: pipeline.success,
     output: {
-      codec: encode.codec,
+      codec: last.op.codec,
       width: last.output.width,
       height: last.output.height,
-      bitrate: encode.bitrate,
+      bitrate: last.op.bitrate,
       dynamicRange: "sdr",
     },
   });
