@@ -1286,7 +1286,7 @@ ios_matrix() {
 # to tap, then a label that shows only once the opened screen draws its content.
 timing_opens() {
   case "$1" in
-    movies) echo "Sintel|Cast & Crew" ;;
+    movies) echo "Elephants Dream|About This Movie" ;;
     music) printf '%s\n' "Neptune|Artist, Pamela Laverdure" "Artist, Pamela Laverdure|Albums" ;;
   esac
 }

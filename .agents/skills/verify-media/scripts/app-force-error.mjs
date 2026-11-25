@@ -22,10 +22,14 @@ export const debuggerUrl = (targets) => {
   return runtimes.at(-1)?.webSocketDebuggerUrl;
 };
 
-/** Runs `expression` in the runtime at `url` and resolves with its value. */
+/**
+ * Runs `expression` in the runtime at `url` and resolves with its value. Metro takes a debugger only
+ * from its own origin, so the connection names it.
+ */
 const evaluate = (url, expression) =>
   new Promise((resolve, reject) => {
-    const socket = new WebSocket(url);
+    const origin = new URL(url).origin.replace(/^ws/u, "http");
+    const socket = new WebSocket(url, { headers: { origin } });
     const timer = setTimeout(() => {
       socket.close();
       reject(new Error(`The app's runtime did not answer at ${url}`));
