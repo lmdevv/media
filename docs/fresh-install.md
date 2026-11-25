@@ -1,6 +1,6 @@
 # Fresh install
 
-The exact steps to install Lar from a release tag, `v0.8.0` here, on a host that already runs
+The exact steps to install Lar from a release tag, `v0.9.0` here, on a host that already runs
 other things: Jellyfin, another media server, or anything else. Lar gets its own
 port and its own data folder, mounts the library read-only, and leaves the other installs alone.
 There are two methods, the image under Docker Compose and the NixOS module; pick one. Both end in
@@ -35,8 +35,8 @@ Keep the checkout and the image on the same release: `compose.yaml` passes the s
 release's image reads.
 
 ```sh
-git clone --branch v0.8.0 --depth 1 https://github.com/lmdevv/media media-0.8.0
-cd media-0.8.0/deploy/compose
+git clone --branch v0.9.0 --depth 1 https://github.com/lmdevv/media media-0.9.0
+cd media-0.9.0/deploy/compose
 cp .env.example .env
 docker compose ls      # the projects already running here
 ```
@@ -46,7 +46,7 @@ docker compose ls      # the projects already running here
 Edit `.env`:
 
 ```sh
-MEDIA_IMAGE=ghcr.io/lmdevv/media:0.8.0
+MEDIA_IMAGE=ghcr.io/lmdevv/media:0.9.0
 MEDIA_PORT=8099
 MEDIA_BIND=127.0.0.1
 MEDIA_BASE_URL=http://localhost:8099
@@ -120,7 +120,7 @@ upgrade later, move the tag and run `nix flake update media`.
 
 ```nix
 # flake.nix
-inputs.media.url = "github:lmdevv/media/v0.8.0";
+inputs.media.url = "github:lmdevv/media/v0.9.0";
 ```
 
 ```nix

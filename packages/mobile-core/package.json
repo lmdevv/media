@@ -1,6 +1,6 @@
 {
   "name": "@media/mobile-core",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "private": true,
   "description": "What every Lar iOS app shares: the server connection, the shared keychain, sign-in, device enrollment, paging, and the users and invites screens' state.",
   "type": "module",

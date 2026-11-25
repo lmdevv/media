@@ -159,7 +159,7 @@ their own.
 
 | Track     | Compose `MEDIA_IMAGE`                              | NixOS flake input            |
 | --------- | -------------------------------------------------- | ---------------------------- |
-| A release | `ghcr.io/lmdevv/media:latest`, `:0.8`, or `:0.8.0` | `github:lmdevv/media/v0.8.0` |
+| A release | `ghcr.io/lmdevv/media:latest`, `:0.9`, or `:0.9.0` | `github:lmdevv/media/v0.9.0` |
 | Edge      | `ghcr.io/lmdevv/media:main`                        | `github:lmdevv/media`        |
 
 ### Compose
@@ -169,12 +169,12 @@ and volumes that release's image expects. The image carries the core's Convex ba
 follows the newest release whatever the checkout, so pin the version when you check out a tag.
 
 ```sh
-cd media && git fetch --tags && git checkout v0.8.0      # or `git pull` on main for the edge
+cd media && git fetch --tags && git checkout v0.9.0      # or `git pull` on main for the edge
 cd deploy/compose
-# .env: MEDIA_IMAGE=ghcr.io/lmdevv/media:0.8.0             # or :main for the edge
+# .env: MEDIA_IMAGE=ghcr.io/lmdevv/media:0.9.0             # or :main for the edge
 docker compose pull
 docker compose up -d
-docker compose logs -f media     # "upgrading the core from <previous> to 0.8.0; backing up to ... first"
+docker compose logs -f media     # "upgrading the core from <previous> to 0.9.0; backing up to ... first"
 ```
 
 ### NixOS
