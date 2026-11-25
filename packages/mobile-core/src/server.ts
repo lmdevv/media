@@ -3,7 +3,7 @@ import {
   HealthResponse,
   MEDIA_ROUTES,
 } from "@media/contracts/media-playback";
-import type { Release } from "@media/contracts/release";
+import { Release } from "@media/contracts/release";
 import { Option, Schema, Struct } from "effect";
 
 /** Where this install connects. */
@@ -101,7 +101,8 @@ export interface Health {
 /** A health answer counts as a Lar server's when it has a success status and `"status": "ok"`. */
 const decodeAnswer = decoderOf(HealthResponse.mapFields(Struct.pick(["status"])));
 
-const decodeRelease = decoderOf(HealthResponse.mapFields(Struct.pick(["release"])));
+/** The health check names its release as text; this app reads it as a release it can compare. */
+const decodeRelease = decoderOf(Schema.Struct({ release: Release }));
 
 const decodeReport = decoderOf(HealthResponse);
 

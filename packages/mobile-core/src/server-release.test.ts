@@ -1,18 +1,22 @@
 import { ProtocolError, TransportError } from "@media/sdk/effect";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { describeFailure, describeUnreadable } from "./failure";
-import { followServer } from "./server-release";
+import { followServer, rereadAfter } from "./server-release";
 import type { ServerFollow, ThisApp } from "./server-release";
 import { closeServers, startServer } from "./testing/local-server";
 
 const GENERIC = "Something went wrong. Try again.";
 
-const unreadable = new ProtocolError({
-  operation: "movies.titles.get",
-  message: "Protocol error in movies.titles.get: the result does not match the contract",
-  cause: null,
-});
+/** One answer from the server that this app can't read; each call is another answer. */
+const unreadableAnswer = (): ProtocolError =>
+  new ProtocolError({
+    operation: "movies.titles.get",
+    message: "Protocol error in movies.titles.get: the result does not match the contract",
+    cause: null,
+  });
+
+const unreadable = unreadableAnswer();
 
 const UPDATE_ON_IPHONE = "Update Lar on this iPhone. Its server runs a newer version.";
 
@@ -56,6 +60,20 @@ describe("the line for an answer the app can't read", () => {
     await follow("1.0.0", { version: "0.9.0", device: "iPad" });
 
     expect(describeUnreadable()).toBe("Update Lar on this iPad. Its server runs a newer version.");
+  });
+
+  it("compares pre-releases the way semver does", async () => {
+    await follow("0.10.0-rc.1", iPhone("0.9.0"));
+    expect(describeUnreadable()).toBe(UPDATE_ON_IPHONE);
+
+    await follow("0.10.0", iPhone("0.10.0-rc.1"));
+    expect(describeUnreadable()).toBe(UPDATE_ON_IPHONE);
+
+    await follow("0.10.0-rc.10", iPhone("0.10.0-rc.2"));
+    expect(describeUnreadable()).toBe(UPDATE_ON_IPHONE);
+
+    await follow("0.10.0-rc.2", iPhone("0.10.0"));
+    expect(describeUnreadable()).toBe(GENERIC);
   });
 
   it("stays generic when the releases match, which means a bug", async () => {
@@ -115,6 +133,53 @@ describe("followServer", () => {
     answering = false;
     await followed.refresh();
     expect(describeUnreadable()).toBe(UPDATE_ON_IPHONE);
+  });
+
+  it("reads the release again after an answer it can't read, once per answer", async () => {
+    let release = "0.9.0";
+    let asks = 0;
+
+    const mediaUrl = await startServer({
+      "/api/health": async () => {
+        asks += 1;
+
+        return healthOf(release);
+      },
+    });
+
+    const followed = followServer(mediaUrl, iPhone("0.9.0"));
+
+    following.push(followed);
+    await followed.refresh();
+    release = "0.10.0";
+
+    const first = unreadableAnswer();
+
+    for (const render of [1, 2, 3])
+      expect([render, describeFailure(first)]).toEqual([render, GENERIC]);
+
+    await vi.waitFor(() => expect(describeUnreadable()).toBe(UPDATE_ON_IPHONE));
+    expect(asks).toBe(2);
+
+    expect(describeFailure(unreadableAnswer())).toBe(UPDATE_ON_IPHONE);
+    await vi.waitFor(() => expect(asks).toBe(3));
+  });
+
+  it("reads nothing after an unreadable answer while the app follows no server", async () => {
+    let asks = 0;
+
+    const mediaUrl = await startServer({
+      "/api/health": async () => {
+        asks += 1;
+
+        return healthOf("0.10.0");
+      },
+    });
+
+    followServer(mediaUrl, iPhone("0.9.0")).stop();
+    rereadAfter(unreadableAnswer());
+
+    expect([asks, describeUnreadable()]).toEqual([0, GENERIC]);
   });
 
   it("drops an answer for a server the app has since left", async () => {

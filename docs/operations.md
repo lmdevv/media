@@ -222,7 +222,8 @@ Convex backend upgrades ride along with Lar releases; never change its image on 
 For maintainers. One version covers the image, the Nix packages, `@lmdevv/media` on npm, the CLI
 binaries, and the iOS apps. `scripts/check-version.sh`, run by CI and the pre-commit hook, fails
 while any workspace package or iOS app's `expo.version` (in `apps/mobile/*/app.json`) carries
-another version.
+another version, and when the version is not a semantic version without build metadata (`0.5.0`,
+`0.5.0-rc.1`), the only versions the iOS apps compare.
 
 1. On `main`, set every package's version, then commit and merge it:
 

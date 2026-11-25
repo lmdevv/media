@@ -1,7 +1,7 @@
 import type { CommandError } from "@media/contracts/errors";
 import { Predicate } from "effect";
 
-import { updateLine } from "./server-release";
+import { rereadAfter, updateLine } from "./server-release";
 
 /** The tag of an expected command failure, such as `Unauthenticated` or `Expired`. */
 export type FailureTag = CommandError["_tag"];
@@ -28,7 +28,11 @@ export const describeFailure = (cause: unknown): string => {
     return "This iPhone couldn’t save your sign-in. Unlock it and try again.";
   }
 
-  if (Predicate.isTagged(cause, "ProtocolError")) return describeUnreadable();
+  if (Predicate.isTagged(cause, "ProtocolError")) {
+    rereadAfter(cause);
+
+    return describeUnreadable();
+  }
 
   if (Predicate.isTagged(cause, "TokenStorageError")) return SOMETHING_WENT_WRONG;
 

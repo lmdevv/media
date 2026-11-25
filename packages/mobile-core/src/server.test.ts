@@ -84,6 +84,19 @@ describe("readHealth", () => {
     );
   });
 
+  it("reads a pre-release", async () => {
+    const mediaUrl = await start({
+      "/api/health": JSON.stringify({ ...report, release: "0.10.0-rc.1" }),
+    });
+
+    expect(await readHealth(mediaUrl)).toEqual(
+      Option.some({
+        release: Option.some("0.10.0-rc.1"),
+        report: Option.some({ ...report, release: "0.10.0-rc.1" }),
+      }),
+    );
+  });
+
   it("reads past a field this app doesn't know", async () => {
     const mediaUrl = await start({
       "/api/health": JSON.stringify({ ...report, storage: { freeBytes: 1 } }),
@@ -99,14 +112,17 @@ describe("readHealth", () => {
     const withoutRelease = await start({ "/api/health": JSON.stringify(unnamed) });
 
     const otherRelease = await start({
-      "/api/health": JSON.stringify({ ...report, release: "1.0.0-beta.1" }),
+      "/api/health": JSON.stringify({ ...report, release: "nightly" }),
     });
 
     expect(await readHealth(withoutRelease)).toEqual(
       Option.some({ release: Option.none(), report: Option.none() }),
     );
     expect(await readHealth(otherRelease)).toEqual(
-      Option.some({ release: Option.none(), report: Option.none() }),
+      Option.some({
+        release: Option.none(),
+        report: Option.some({ ...report, release: "nightly" }),
+      }),
     );
   });
 

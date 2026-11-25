@@ -4,9 +4,13 @@
  * tells that apart from a bug.
  */
 import { Release, ReleaseOrder } from "@media/contracts/release";
+import type { ProtocolError } from "@media/sdk/effect";
 import { Option, Order, Schema } from "effect";
 
 import { readHealth } from "./server";
+
+/** An answer this app couldn't read, as the SDK fails it. */
+export type UnreadableAnswer = Pick<ProtocolError, "_tag">;
 
 /** What the app runs on, as the update line names it. */
 export type DeviceFamily = "iPhone" | "iPad";
@@ -29,12 +33,17 @@ interface Followed {
   readonly device: DeviceFamily;
   /** The server's release from its latest readable health answer; none until one. */
   readonly server: Option.Option<Release>;
+  /** Reads the server's release again. */
+  readonly refresh: () => Promise<void>;
 }
 
 /** The one server the app follows now, null while none. */
 let followed: Followed | null = null;
 
 let follows = 0;
+
+/** Answers this app couldn't read that have already asked for the release again. */
+const reread = new WeakSet<UnreadableAnswer>();
 
 const isNewer = Order.isGreaterThan(ReleaseOrder);
 
@@ -64,15 +73,17 @@ export interface ServerFollow {
  * release it last named.
  */
 export const followServer = (mediaUrl: string, app: ThisApp): ServerFollow => {
+  let asked = 0;
+
   const mine: Followed = {
     follow: ++follows,
     app: Schema.decodeUnknownOption(Release)(app.version),
     device: app.device,
     server: Option.none(),
+    refresh: () => refresh(),
   };
 
   followed = mine;
-  let asked = 0;
 
   const refresh = async (): Promise<void> => {
     const ask = ++asked;
@@ -90,4 +101,16 @@ export const followServer = (mediaUrl: string, app: ThisApp): ServerFollow => {
   };
 
   return { refresh, stop };
+};
+
+/**
+ * Reads the followed server's release again after `unreadable`, an answer this app couldn't read:
+ * the server may have been updated while the app stayed open. Each answer asks once, however often
+ * its line is described, and the read belongs to whichever server the app follows now.
+ */
+export const rereadAfter = (unreadable: UnreadableAnswer): void => {
+  if (followed === null || reread.has(unreadable)) return;
+
+  reread.add(unreadable);
+  void followed.refresh();
 };
