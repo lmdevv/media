@@ -17,6 +17,10 @@ export const STORE_FILE = "index.json";
 /** The folder of one download inside its person's folder. */
 export const itemFolder = (downloadId: string): string => segment(downloadId);
 
+/** A file of one download, relative to its person's folder. */
+export const itemPath = (downloadId: string, file: string): string =>
+  `${itemFolder(downloadId)}/${file}`;
+
 /** The video's file name, by its container, so AVPlayer reads it by its extension. */
 export const videoFile = (container: "mp4" | "mov"): string => `video.${container}`;
 

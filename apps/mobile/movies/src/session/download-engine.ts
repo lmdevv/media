@@ -5,14 +5,16 @@ import { EpochMillis } from "@media/contracts/units";
 import { Downloads } from "@media/sdk/effect";
 import type { PlatformSdk } from "@media/sdk/promise";
 import { Effect, Option, Predicate, Result, Schema } from "effect";
-import { Directory, DownloadTask, File, Paths } from "expo-file-system";
 import type { DownloadPauseState } from "expo-file-system";
 
 import { artworkUrl } from "@/lib/artwork";
+import { byteCount } from "@/lib/downloads/disk";
+import type { DownloadDisk, Transfer, TransferProgress } from "@/lib/downloads/disk";
 import {
   ARTWORK_FILE,
   STORE_FILE,
   itemFolder,
+  itemPath,
   subtitleFile,
   videoFile,
 } from "@/lib/downloads/files";
@@ -72,19 +74,20 @@ export interface DownloadsSnapshot {
 /** Where an engine keeps its files and which server it downloads from. */
 export interface EngineOptions {
   /** The person's folder, `downloads/<server>/<person>` under the documents folder. */
-  readonly folder: Directory;
+  readonly disk: DownloadDisk;
   readonly mediaUrl: string;
   readonly settings: DownloadSettings;
 }
 
-/**
- * A byte count from expo-file-system as a number. Its iOS module answers an `Int64`, which Expo
- * hands over as a BigInt although it is typed as a number, and no sum with a number survives one.
- */
-const byteCount = (value: number | bigint): number => Number(value);
-
-/** The phone's free space in bytes. */
-export const freeSpace = (): number => byteCount(Paths.availableDiskSpace);
+/** The platform calls an engine makes: the core's list of downloads, and playback. */
+export interface EnginePlatform {
+  readonly core: {
+    readonly downloads: Pick<PlatformSdk["core"]["downloads"], "list" | "add" | "remove" | "fetch">;
+  };
+  readonly movies: {
+    readonly play: Pick<PlatformSdk["movies"]["play"], "start" | "reportOffline">;
+  };
+}
 
 /** Rows asked for per page of `core.downloads.list`, the most it answers. */
 const LIST_PAGE_SIZE = 200;
@@ -187,7 +190,7 @@ const prepareDownload = async (
 
 interface Active {
   readonly id: string;
-  task: DownloadTask | null;
+  task: Transfer | null;
   cancelled: boolean;
   /** Paused for Wi-Fi Only: the task's own promise resolves with null. */
   pausing: boolean;
@@ -228,7 +231,7 @@ const deliveryOf = (ready: DownloadReady, kept: ReadonlySet<string>): Delivery =
  * this device keeps (ADR 0019). Create it, then `dispose` it.
  */
 export class DownloadEngine {
-  readonly #platform: PlatformSdk;
+  readonly #platform: EnginePlatform;
   readonly #coreCalls = coreQueue();
   readonly #options: EngineOptions;
   readonly #listeners = new Set<() => void>();
@@ -250,7 +253,7 @@ export class DownloadEngine {
   #started = false;
   #disposed = false;
 
-  constructor(platform: PlatformSdk, options: EngineOptions) {
+  constructor(platform: EnginePlatform, options: EngineOptions) {
     this.#platform = platform;
     this.#options = options;
 
@@ -383,12 +386,12 @@ export class DownloadEngine {
   videoUri(download: DownloadRecord): string | null {
     if (download.phase !== "ready" || download.delivery === null) return null;
 
-    return new File(this.#itemDirectory(download.id), videoFile(download.delivery.container)).uri;
+    return this.#options.disk.uri(itemPath(download.id, videoFile(download.delivery.container)));
   }
 
   /** The kept WebVTT file of a subtitle track. */
   subtitleUri(download: DownloadRecord, trackId: string): string {
-    return new File(this.#itemDirectory(download.id), subtitleFile(trackId)).uri;
+    return this.#options.disk.uri(itemPath(download.id, subtitleFile(trackId)));
   }
 
   /** The kept picture of `download`, or null when there is none yet. */
@@ -396,8 +399,8 @@ export class DownloadEngine {
     const known = this.#artwork.get(download.id);
 
     if (known !== undefined) return known;
-    const file = new File(this.#itemDirectory(download.id), ARTWORK_FILE);
-    const uri = file.exists ? file.uri : null;
+    const path = itemPath(download.id, ARTWORK_FILE);
+    const uri = this.#options.disk.exists(path) ? this.#options.disk.uri(path) : null;
 
     this.#artwork.set(download.id, uri);
 
@@ -606,37 +609,18 @@ export class DownloadEngine {
   }
 
   #readStore(): string | null {
-    try {
-      const file = new File(this.#options.folder, STORE_FILE);
-
-      return file.exists ? file.textSync() : null;
-    } catch {
-      return null;
-    }
+    return Result.getOrNull(this.#options.disk.read(STORE_FILE));
   }
 
   #save(): void {
     clearTimeout(this.#saveTimer);
     this.#saveTimer = undefined;
-
-    try {
-      this.#options.folder.create({ intermediates: true, idempotent: true });
-      new File(this.#options.folder, STORE_FILE).writeSync(serializeStore(this.#snapshot.store));
-    } catch {}
-  }
-
-  #itemDirectory(id: string): Directory {
-    return new Directory(this.#options.folder, itemFolder(id));
+    this.#options.disk.write(STORE_FILE, serializeStore(this.#snapshot.store));
   }
 
   #deleteFiles(id: string): void {
     this.#artwork.delete(id);
-
-    try {
-      const directory = this.#itemDirectory(id);
-
-      if (directory.exists) directory.delete();
-    } catch {}
+    this.#options.disk.remove(itemFolder(id));
   }
 
   #reconsider(): void {
@@ -866,7 +850,7 @@ export class DownloadEngine {
 
     const received = this.#find(download.id)?.receivedBytes ?? 0;
 
-    if (spaceShortfall(response.estimatedBytes - received, freeSpace()) > 0) {
+    if (spaceShortfall(response.estimatedBytes - received, this.#options.disk.freeBytes()) > 0) {
       this.#dispatch(
         DownloadEvent.NoSpace({ id: download.id, totalBytes: response.estimatedBytes }),
       );
@@ -889,32 +873,22 @@ export class DownloadEngine {
   async #keepCompanions(
     download: DownloadRecord,
     ready: DownloadReady,
-    directory: Directory,
   ): Promise<ReadonlySet<string>> {
     const kept = await Promise.all(
-      ready.subtitles.map(async (subtitle) => {
-        try {
-          await File.downloadFileAsync(
-            subtitle.url,
-            new File(directory, subtitleFile(subtitle.id)),
-            {
-              idempotent: true,
-            },
-          );
-
-          return subtitle.id;
-        } catch {
-          return null;
-        }
-      }),
+      ready.subtitles.map(async (subtitle) =>
+        (await this.#options.disk.fetch(
+          subtitle.url,
+          itemPath(download.id, subtitleFile(subtitle.id)),
+        ))
+          ? subtitle.id
+          : null,
+      ),
     );
 
     const picture = artworkUrl(this.#options.mediaUrl, pictureOf(download), "card");
 
     if (picture !== undefined) {
-      await File.downloadFileAsync(picture, new File(directory, ARTWORK_FILE), {
-        idempotent: true,
-      }).catch(() => null);
+      await this.#options.disk.fetch(picture, itemPath(download.id, ARTWORK_FILE));
     }
 
     return new Set(kept.filter(Predicate.isNotNull));
@@ -957,23 +931,19 @@ export class DownloadEngine {
 
     const { ticket, ready } = prepared;
 
-    if (spaceShortfall(ready.sizeBytes, freeSpace()) > 0) {
+    if (spaceShortfall(ready.sizeBytes, this.#options.disk.freeBytes()) > 0) {
       this.#dispatch(DownloadEvent.NoSpace({ id: queued.id, totalBytes: ready.sizeBytes }));
 
       return;
     }
 
-    const directory = this.#itemDirectory(queued.id);
-
-    try {
-      directory.create({ intermediates: true, idempotent: true });
-    } catch {
+    if (Result.isFailure(this.#options.disk.createFolder(itemFolder(queued.id)))) {
       this.#interrupt(active, "This iPhone couldn't save the download.");
 
       return;
     }
 
-    const kept = await this.#keepCompanions(this.#find(queued.id) ?? queued, ready, directory);
+    const kept = await this.#keepCompanions(this.#find(queued.id) ?? queued, ready);
 
     this.#artwork.delete(queued.id);
 
@@ -988,14 +958,12 @@ export class DownloadEngine {
       }),
     );
 
-    const destination = new File(directory, videoFile(ready.container === "mov" ? "mov" : "mp4"));
+    const destination = itemPath(queued.id, videoFile(ready.container === "mov" ? "mov" : "mp4"));
 
     const outcome = await this.#transfer(
       queued.id,
       active,
-      File.createDownloadTask(ready.url, destination, {
-        onProgress: this.#progressOf(queued.id),
-      }),
+      this.#options.disk.transfer(ready.url, destination, this.#progressOf(queued.id)),
       "start",
     );
 
@@ -1004,19 +972,13 @@ export class DownloadEngine {
     }
   }
 
-  #restore(id: string, resume: string): DownloadTask | null {
+  #restore(id: string, resume: string): Transfer | null {
     const state = resumeState(resume);
 
-    if (state === null) return null;
-
-    try {
-      return DownloadTask.fromSavable(state, { onProgress: this.#progressOf(id) });
-    } catch {
-      return null;
-    }
+    return state === null ? null : this.#options.disk.resume(state, this.#progressOf(id));
   }
 
-  #progressOf(id: string): (progress: { readonly bytesWritten: number | bigint }) => void {
+  #progressOf(id: string): TransferProgress {
     return ({ bytesWritten }) =>
       this.#dispatch(DownloadEvent.Received({ id, bytes: byteCount(bytesWritten) }), "soon");
   }
@@ -1024,7 +986,7 @@ export class DownloadEngine {
   async #transfer(
     id: string,
     active: Active,
-    task: DownloadTask,
+    task: Transfer,
     how: "start" | "resume",
   ): Promise<"done" | "stopped" | "failed"> {
     active.task = task;
@@ -1056,7 +1018,7 @@ export class DownloadEngine {
    * it answers; when it does not, the transfer pauses (keeping its resume data) and the download
    * is interrupted (H19). Returns the function that stops watching.
    */
-  #watchStall(id: string, active: Active, task: DownloadTask): () => void {
+  #watchStall(id: string, active: Active, task: Transfer): () => void {
     let lastBytes = -1;
     let since = Date.now();
 
@@ -1098,7 +1060,7 @@ export class DownloadEngine {
     }
   }
 
-  async #pauseStalled(id: string, active: Active, task: DownloadTask): Promise<void> {
+  async #pauseStalled(id: string, active: Active, task: Transfer): Promise<void> {
     if (this.#stopped(active)) return;
     active.pausing = true;
 
@@ -1108,7 +1070,7 @@ export class DownloadEngine {
   }
 }
 
-const pauseKeeping = async (task: DownloadTask): Promise<string | null> => {
+const pauseKeeping = async (task: Transfer): Promise<string | null> => {
   try {
     await task.pauseAsync();
 

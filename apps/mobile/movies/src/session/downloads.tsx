@@ -21,6 +21,7 @@ import { useServer } from "./connection";
 import { DownloadEngine } from "./download-engine";
 import type { DownloadsSnapshot } from "./download-engine";
 import { useDownloadSettings } from "./download-settings";
+import { expoDisk } from "./expo-disk";
 import type { Person } from "./me";
 
 const DownloadsContext = createContext<DownloadEngine | null>(null);
@@ -77,7 +78,7 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
     }
 
     const created = new DownloadEngine(platform, {
-      folder: new Directory(Paths.document, accountFolder(mediaUrl, userId)),
+      disk: expoDisk(new Directory(Paths.document, accountFolder(mediaUrl, userId))),
       mediaUrl,
       settings: initialSettings,
     });
