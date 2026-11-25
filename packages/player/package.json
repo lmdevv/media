@@ -1,6 +1,6 @@
 {
   "name": "@media/player",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "private": true,
   "description": "Music's PlayerEngine (MSE gapless with an HTML audio fallback), the playback controller over the core's queue and tickets, and the web's React player provider.",
   "type": "module",
