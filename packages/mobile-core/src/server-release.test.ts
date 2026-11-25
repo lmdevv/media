@@ -217,6 +217,16 @@ describe("followServer", () => {
     expect(asks).toBe(2);
   });
 
+  it("stays generic against a release a screen read itself, whatever the app last read", async () => {
+    await follow("0.10.0", iPhone("0.9.0"));
+
+    expect(describeUnreadable()).toBe(UPDATE_ON_IPHONE);
+
+    for (const rolledBack of ["0.9.0", "0.8.0"]) {
+      expect(describeUnreadable(Schema.decodeOption(Release)(rolledBack))).toBe(GENERIC);
+    }
+  });
+
   it("asks to update against a release a screen read itself, ahead of the one last read", async () => {
     await follow("0.9.0", iPhone("0.9.0"));
 

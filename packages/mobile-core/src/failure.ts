@@ -16,11 +16,11 @@ const SOMETHING_WENT_WRONG = "Something went wrong. Try again.";
 /**
  * The line for a server answer this app can't read. It asks to update the app while the server
  * runs a newer release, and stays generic otherwise, since matching releases mean a bug. A screen
- * that read the server's release itself passes it as `seen`, which counts ahead of the release the
- * app last read.
+ * that read the server's release itself passes it as `seen`, and that release alone decides the
+ * line; without one, the release the app last read does.
  */
 export const describeUnreadable = (seen: Option.Option<Release> = Option.none()): string =>
-  updateLineAgainst(seen) ?? updateLine() ?? SOMETHING_WENT_WRONG;
+  (Option.isSome(seen) ? updateLineAgainst(seen) : updateLine()) ?? SOMETHING_WENT_WRONG;
 
 /** The line to show for any failure of a command or sign-in. */
 export const describeFailure = (cause: unknown): string => {
