@@ -695,6 +695,23 @@ const fetchesOf = (obs) => [obs.fetches?.start, obs.fetches?.seek].filter((fetch
 
 const outputMedia = (obs) => obs.fetches?.seek?.media ?? obs.fetches?.start?.media;
 
+/**
+ * Judges the stream description of every fetch with `read`. The first fetch that fails decides, and
+ * its evidence names the fetch; a fetch with no description fails. The start and the seek can be
+ * served by different ffmpeg runs, so one right description says nothing about the other.
+ */
+const everyOutput = (obs, read) => {
+  const fetches = fetchesOf(obs);
+  if (fetches.length === 0) return no("no output was fetched");
+  let last;
+  for (const fetch of fetches) {
+    if (fetch.media === undefined) return no(`the ${fetch.name} output has no stream description`);
+    last = read(fetch.media);
+    if (!last.ok) return { ...last, evidence: `${last.evidence} (${fetch.name})` };
+  }
+  return last;
+};
+
 const fmt = (value, digits = 2) => (value === undefined ? "?" : Number(value.toFixed(digits)).toString());
 
 const ok = (evidence) => ({ ok: true, evidence });
@@ -781,67 +798,67 @@ export const CHECKS = {
   },
   codec: {
     class: "output",
-    run: (obs, params) => {
-      const media = outputMedia(obs);
-      return media?.codec === params.codec ? ok(`${media.codec}`) : no(`the output is ${media?.codec ?? "missing"}, not ${params.codec}`);
-    },
+    run: (obs, params) =>
+      everyOutput(obs, (media) =>
+        media.codec === params.codec ? ok(`${media.codec}`) : no(`the output is ${media.codec ?? "missing"}, not ${params.codec}`),
+      ),
   },
   profile: {
     class: "output",
-    run: (obs, params) => {
-      const profile = outputMedia(obs)?.profile;
-      return params.profiles.includes(profile) ? ok(`profile ${profile}`) : no(`profile ${profile ?? "unknown"}, not ${params.profiles.join(" or ")}`);
-    },
+    run: (obs, params) =>
+      everyOutput(obs, ({ profile }) =>
+        params.profiles.includes(profile) ? ok(`profile ${profile}`) : no(`profile ${profile ?? "unknown"}, not ${params.profiles.join(" or ")}`),
+      ),
   },
   "codec-tag": {
     class: "output",
-    run: (obs, params) => {
-      const tag = outputMedia(obs)?.tag;
-      return tag === params.tag ? ok(`tagged ${tag}`) : no(`tagged ${tag ?? "nothing"}, not ${params.tag}`);
-    },
+    run: (obs, params) =>
+      everyOutput(obs, ({ tag }) => (tag === params.tag ? ok(`tagged ${tag}`) : no(`tagged ${tag ?? "nothing"}, not ${params.tag}`))),
   },
   "bit-depth": {
     class: "output",
-    run: (obs, params) => {
-      const depth = outputMedia(obs)?.bitDepth;
-      return depth !== undefined && depth <= params.max ? ok(`${depth}-bit`) : no(`${depth ?? "unknown"}-bit, above ${params.max}`);
-    },
+    run: (obs, params) =>
+      everyOutput(obs, ({ bitDepth: depth }) =>
+        depth !== undefined && depth <= params.max ? ok(`${depth}-bit`) : no(`${depth ?? "unknown"}-bit, above ${params.max}`),
+      ),
   },
   dimensions: {
     class: "output",
     run: (obs, params) => {
-      const media = outputMedia(obs);
       const told = obs.negotiation?.body?.video;
       const want = params.expect === "source" ? obs.source : told;
       const size = (item) => `${item?.width ?? "?"}x${item?.height ?? "?"}`;
-      if (media?.width !== want?.width || media?.height !== want?.height) {
-        return no(`the output is ${size(media)}, expected ${size(want)} (${params.expect})`);
-      }
-      if (told !== undefined && (told.width !== media.width || told.height !== media.height)) {
-        return no(`the output is ${size(media)}, but negotiation said ${size(told)}`);
-      }
-      return ok(size(media));
+      return everyOutput(obs, (media) => {
+        if (media.width !== want?.width || media.height !== want?.height) {
+          return no(`the output is ${size(media)}, expected ${size(want)} (${params.expect})`);
+        }
+        if (told !== undefined && (told.width !== media.width || told.height !== media.height)) {
+          return no(`the output is ${size(media)}, but negotiation said ${size(told)}`);
+        }
+        return ok(size(media));
+      });
     },
   },
   aspect: {
     class: "output",
     run: (obs, params) => {
-      const media = outputMedia(obs);
-      const out = media?.width / media?.height;
       const source = obs.source?.width / obs.source?.height;
-      return Math.abs(out - source) / source <= params.tolerance
-        ? ok(`aspect ${fmt(out, 3)} of ${fmt(source, 3)}`)
-        : no(`aspect ${fmt(out, 3)}, the source ${fmt(source, 3)}`);
+      return everyOutput(obs, (media) => {
+        const out = media.width / media.height;
+        return Math.abs(out - source) / source <= params.tolerance
+          ? ok(`aspect ${fmt(out, 3)} of ${fmt(source, 3)}`)
+          : no(`aspect ${fmt(out, 3)}, the source ${fmt(source, 3)}`);
+      });
     },
   },
   scaled: {
     class: "stage",
-    run: (obs, params) => {
-      const height = outputMedia(obs)?.height;
-      return height !== undefined && height <= params.maxHeight
-        ? ok(`scaled to ${height} lines`)
-        : no(`the output keeps ${height ?? "?"} lines, above ${params.maxHeight}`);
-    },
+    run: (obs, params) =>
+      everyOutput(obs, ({ height }) =>
+        height !== undefined && height <= params.maxHeight
+          ? ok(`scaled to ${height} lines`)
+          : no(`the output keeps ${height ?? "?"} lines, above ${params.maxHeight}`),
+      ),
   },
   "frame-rate": {
     class: "output",
@@ -883,21 +900,21 @@ export const CHECKS = {
   },
   "hdr-removed": {
     class: "stage",
-    run: (obs) => {
-      const media = outputMedia(obs);
-      const hdr = ["smpte2084", "arib-std-b67"].includes(media?.transfer) || media?.primaries === "bt2020";
-      return hdr ? no(`the output is still ${media.transfer}/${media.primaries}`) : ok("no HDR tags");
-    },
+    run: (obs) =>
+      everyOutput(obs, (media) => {
+        const hdr = ["smpte2084", "arib-std-b67"].includes(media.transfer) || media.primaries === "bt2020";
+        return hdr ? no(`the output is still ${media.transfer}/${media.primaries}`) : ok("no HDR tags");
+      }),
   },
   "sdr-tags": {
     class: "output",
-    run: (obs) => {
-      const media = outputMedia(obs);
-      const tags = `${media?.transfer ?? "untagged"}/${media?.primaries ?? "untagged"}/${media?.space ?? "untagged"}`;
-      return media?.transfer === "bt709" && media?.primaries === "bt709" && media?.space === "bt709"
-        ? ok(`tagged ${tags}`)
-        : no(`tagged ${tags}, not bt709/bt709/bt709`);
-    },
+    run: (obs) =>
+      everyOutput(obs, (media) => {
+        const tags = `${media.transfer ?? "untagged"}/${media.primaries ?? "untagged"}/${media.space ?? "untagged"}`;
+        return media.transfer === "bt709" && media.primaries === "bt709" && media.space === "bt709"
+          ? ok(`tagged ${tags}`)
+          : no(`tagged ${tags}, not bt709/bt709/bt709`);
+      }),
   },
   picture: {
     class: "output",
@@ -914,6 +931,9 @@ export const CHECKS = {
       const shown = obs.analysis?.burn?.shown;
       const hidden = obs.analysis?.burn?.hidden;
       if (shown === undefined || hidden === undefined) return { ok: false, class: "output", evidence: "no frames to compare" };
+      if (![shown.band, shown.elsewhere, hidden.band].every(Number.isFinite)) {
+        return { ok: false, class: "output", evidence: "the frame comparison produced no statistics" };
+      }
       const pct = (value) => `${fmt(value * 100, 2)}%`;
       const summary = `${pct(shown.band)} of the subtitle band changed at ${params.shownAt} s, ${pct(shown.elsewhere)} elsewhere; ${pct(hidden.band)} at ${params.hiddenAt} s`;
       if (shown.band < params.minBand) return no(`no subtitle drawn: ${summary}`);

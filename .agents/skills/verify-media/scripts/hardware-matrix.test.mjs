@@ -363,6 +363,39 @@ describe("verdicts", () => {
     assert.match(result.evidence, /^hdr-removed: the service ran tone-map, but the output is still smpte2084\/bt2020/);
   });
 
+  test("HDR tags on the opening stream alone fail the tone map", () => {
+    const cell = cellOf("hdr-to-sdr", "cpu");
+    const obs = healthy(cell);
+    obs.runs[0].args = ["ffmpeg", "-i", "/media/library/x.mkv", "-vf", "scale=1920:818,zscale=t=linear,format=gbrpf32le,tonemap=hable", "-c:v", "libx264", "/transcode/s/1/ffmpeg.m3u8"];
+    obs.analysis.picture = { output: { YAVG: 70, YMIN: 16, YMAX: 235, SATAVG: 20, UAVG: 120, VAVG: 130 }, reference: { YAVG: 72, YMIN: 16, YMAX: 235, SATAVG: 20, UAVG: 120, VAVG: 130 } };
+    assert.equal(judge(cell, obs).verdict, "PASS", judge(cell, obs).evidence);
+    obs.fetches.start.media = { ...obs.fetches.start.media, transfer: "smpte2084", primaries: "bt2020", space: "bt2020nc" };
+    const result = judge(cell, obs);
+    assert.equal(result.verdict, "FAIL");
+    assert.match(result.evidence, /still smpte2084\/bt2020 \(start\)/);
+  });
+
+  test("a fetch with no stream description fails", () => {
+    const cell = cellOf("decode", "cpu");
+    const obs = healthy(cell);
+    obs.fetches.start.media = undefined;
+    const result = judge(cell, obs);
+    assert.equal(result.verdict, "FAIL");
+    assert.match(result.evidence, /the start output has no stream description/);
+  });
+
+  test("a subtitle comparison with no statistics fails", () => {
+    const cell = cellOf("subtitle-burn-in", "cpu");
+    const obs = healthy(cell);
+    obs.runs[0].args = ["ffmpeg", "-i", "/media/library/x.mkv", "-filter_complex", "[0:v]scale=1920:818[v];[v][0:s:0]overlay=eof_action=pass,format=yuv420p", "-c:v", "libx264", "/transcode/s/1/ffmpeg.m3u8"];
+    obs.analysis.burn = { shown: { band: 0.04, elsewhere: 0 }, hidden: { band: 0, elsewhere: 0 } };
+    assert.equal(judge(cell, obs).verdict, "PASS", judge(cell, obs).evidence);
+    obs.analysis.burn = { shown: { band: undefined, elsewhere: undefined }, hidden: { band: undefined, elsewhere: undefined } };
+    const result = judge(cell, obs);
+    assert.equal(result.verdict, "FAIL");
+    assert.match(result.evidence, /the frame comparison produced no statistics/);
+  });
+
   test("a subtitle drawn on the CPU between GPU stages fails the GPU path", () => {
     const cell = cellOf("subtitle-burn-in", "qsv");
     const obs = healthy(cell);
