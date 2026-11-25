@@ -748,6 +748,12 @@ esac
     assert.equal(result.status, 1, result.stderr);
     assert.match(result.stderr, /ios up --app must be movies or music, not tv/);
   });
+
+  test("refuses a JavaScript mode it does not know", () => {
+    const result = withSideOffline("args=(up --js fast); mac=nowhere.invalid cmd_ios_up");
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /ios up --js must be dev or production, not fast/);
+  });
 });
 
 describe("the core seed", () => {

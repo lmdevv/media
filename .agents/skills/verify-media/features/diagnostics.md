@@ -17,6 +17,9 @@ reported side by side.
 - `logs-read` prints the retained log, filtered by time, level, session, stream, text, or slowness.
 - `logs-follow` keeps printing new records.
 - `diag-access` refuses a member the log, and hides other people's sessions from them.
+- `app-events` writes each iOS app's launches, screen opens, and unexpected errors to the log as
+  `App.launched`, `App.screenOpened`, and `Client.error`; the skill's [App timings](../SKILL.md#app-timings)
+  says how `ios timings` and `ios force-error` drive and read them.
 
 ## How to get to it (user POV)
 

@@ -399,8 +399,13 @@ makes with `git worktree` under the side's state. The simulator reaches the side
 matches the side's public URLs.
 
 ```sh
-$S ios up [--side S] [--app movies|music] [--device "iPhone 17 Pro"] [--udid ID] [--light] [--source DIR] [--no-sign-in]
+$S ios up [--side S] [--app movies|music] [--device "iPhone 17 Pro"] [--udid ID] [--light] [--source DIR] [--no-sign-in] [--js dev|production]
 ```
+
+`--js production` has Metro serve production JavaScript (`expo start --no-dev --minify`): no
+React development checks, minified, as a release build runs it, though Hermes still compiles it
+from source at each launch. Measure timings with it; the default, `dev`, runs several times
+slower.
 
 `--udid ID` installs and runs the app on a simulator someone else keeps, such as one T3's device
 tools opened, instead of making one; `ios down` then leaves that simulator alone. `--no-sign-in`
@@ -452,6 +457,8 @@ It prints `ready: ios <side> on simulator <udid>` when the app shows Home. Then:
 | `ios orientation portrait\|landscape`            | Turns the simulator and checks the app's window turned  |
 | `ios open <path>`                                | Opens an app path with the running app's scheme (`movies://` or `music://`), such as `/title/<id>` or `/jam/<link>`, and accepts iOS's `Open in` prompt |
 | `ios matrix --out DIR [--orientations portrait,landscape] [--screens a,b]` | Movies app only. Screenshots each screen a layout change reaches, in each orientation, as `<device>-<orientation>-<screen>.png` |
+| `ios timings [--runs N] [--out DIR]`             | Times N cold launches, each opening the records `timing_opens` names, and N warm launches, then prints each metric's median and spread from the `App.*` records the server received (see [App timings](#app-timings)) |
+| `ios force-error fatal\|rejection`               | Throws from a timer in the running app, or leaves a promise rejection unhandled, through Metro's inspector, to check the app reports it |
 | `ios down`                                       | Removes this side's simulator, Metro, and forwards      |
 
 Read labels from `ios describe` before you tap; never guess coordinates. A label is the whole
@@ -460,6 +467,31 @@ button over plain text. It taps only an element whose centre is on screen: a row
 sideways lists cards past the edge too, so swipe the row first (`ios swipe 350 729 80 729` on an
 iPhone 17 Pro's Continue Watching). Every tap is a touch held for 0.15 s, since AXe's instant
 tap misses the tab bar. Every `ios` command takes `--side S`.
+
+### App timings
+
+Both iOS apps report each launch, each open of a movies title, a music album, or an artist, and
+each unexpected error to `POST /api/app-events`, which writes `App.launched`, `App.screenOpened`,
+and `Client.error` to the retained log (`@media/mobile-core/app-events`). `ios timings` reads those
+records back with `$S cli -- logs --grep App. --json`, so the numbers are the ones the server
+received, and writes them and the table to `captures/verify/<run>/<side>/app-timings/`.
+
+- **Cold launch**: the probe ends the app's process (`simctl terminate`) and opens it on Metro.
+  First frame (TTID) runs from the process start the kernel records to the first frame after the
+  splash screen; Home content (TTFD) to the first frame of Home with real content.
+- **Warm launch**: the Home button, then `simctl launch` brings the running app back. It runs from
+  the moment JavaScript learns the app is active to the next frame.
+- **Opens**: from the press to the first frame of the screen's real content, not its spinner.
+  Each cold launch opens the same records, so each open starts with nothing cached in the app.
+
+A cold launch on the dev client includes fetching the bundle from Metro through the ssh forward,
+and the simulator runs on the Mac's CPU, so these are a relative baseline to compare two builds by,
+never a phone's numbers. Compare runs made with the same `--js` mode, device, and run count.
+
+To see a forced error arrive: `ios force-error rejection`, then the Home button, which sends the
+batch; and `ios force-error fatal`, which ends the app or shows its error screen with the report
+saved, then `ios up`'s link again (or `ios timings --runs 1`) to launch it, which sends the saved
+report. `$S cli -- logs --grep Client.error --json` shows each with `"fatal"` and its route.
 
 ### Hardware paths
 

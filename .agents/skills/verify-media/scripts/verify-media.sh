@@ -9,7 +9,7 @@
 #   verify-media.sh cli [--side S] [--as PERSON] -- <media args>
 #   verify-media.sh logs [--side S] [lines]
 #   verify-media.sh lyrics-probe [--side S]
-#   verify-media.sh ios <up|doctor|describe|find|tap|type|swipe|wait|shot|record|appearance|orientation|open|matrix|offline|sign-in|down> [--side S] ...
+#   verify-media.sh ios <up|doctor|describe|find|tap|type|swipe|wait|shot|record|appearance|orientation|open|matrix|timings|force-error|offline|sign-in|down> [--side S] ...
 #   verify-media.sh evidence <add|list|clear|publish> ...
 #   verify-media.sh status
 #   verify-media.sh down [--side S] [--purge]
@@ -890,11 +890,12 @@ forwards_up() {
 }
 
 cmd_ios_up() {
-  local sim_type="iPhone 17 Pro" dark=1 source="" name=movies given="" sign_in=1
+  local sim_type="iPhone 17 Pro" dark=1 source="" name=movies given="" sign_in=1 js=dev
   set -- "${args[@]:1}"
   while (($#)); do
     case "$1" in
       --device) sim_type="$2"; shift 2 ;;
+      --js) js="$2"; shift 2 ;;
       --source) source="$(cd "$2" && pwd)"; shift 2 ;;
       --light) dark=0; shift ;;
       --app) name="$2"; shift 2 ;;
@@ -904,6 +905,7 @@ cmd_ios_up() {
     esac
   done
   [[ "$name" == movies || "$name" == music ]] || die "ios up --app must be movies or music, not $name"
+  [[ "$js" == dev || "$js" == production ]] || die "ios up --js must be dev or production, not $js"
   [[ "$name" == movies || "$(read_state music_core)" == 1 ]] \
     || die "the music iOS app signs in to the core's music, which the $side side's image does not serve; run it against an image with the music client (music_core)"
   [[ -n "$(read_state people)" ]] || die "start the $side side first: \`up --side $side\` (with setup)"
@@ -937,8 +939,12 @@ cmd_ios_up() {
   # Not CI=1: that turns off file watching and the app keeps serving the first bundle.
   # Its own session, so `ios down` stops pnpm, Expo, and Metro's workers as one process group. The
   # log takes all its output, so nothing that reads this script's output waits on it.
+  # Production JavaScript (`--js production`) runs without React's development checks, minified,
+  # as a release build's does, though Hermes still compiles it from source on each launch.
+  local mode=()
+  [[ "$js" == production ]] && mode=(--no-dev --minify)
   setsid bash -c 'cd "$1" && REACT_NATIVE_PACKAGER_HOSTNAME=127.0.0.1 exec pnpm --filter "@media/mobile-$3" exec \
-    expo start --dev-client --port "$2"' metro "$src" "$metro" "$name" < /dev/null > "$state/metro.log" 2>&1 &
+    expo start --dev-client --port "$2" "${@:4}"' metro "$src" "$metro" "$name" "${mode[@]}" < /dev/null > "$state/metro.log" 2>&1 &
   write_state metro_pid "$!"
   for _ in $(seq 1 120); do
     curl -fsS --max-time 5 "http://127.0.0.1:$metro/status" 2>/dev/null | grep -q running && break
@@ -984,19 +990,32 @@ cmd_ios_up() {
     echo "ready: ios $side $name on simulator $id (Metro $metro, server $(url)); open exp+$name://expo-development-client/?url=$metro_url"
     return 0
   fi
-  on_mac "xcrun simctl openurl $id 'exp+$name://expo-development-client/?url=$metro_url'"
-  # iOS asks once whether to open the link in the app. Tap only that prompt's button.
-  local tree deadline=$((SECONDS + 240))
-  while ((SECONDS < deadline)); do
-    tree="$(ios_tree 2>/dev/null || true)"
-    grep -qE 'Connect to Server|Connect to your server|Sign In|Sign in' <<<"$tree" && break
-    grep -q 'Open in' <<<"$tree" && ios_tap_label "Open" >/dev/null 2>&1
-    sleep 2
-  done
+  ios_open_on_metro
+  ios_wait_opened 'Connect to Server|Connect to your server|Sign In|Sign in' 240 || true
 
   say "connecting to $(url) and signing in"
   ios_sign_in
   echo "ready: ios $side on simulator $id (Metro $metro, server $(url))"
+}
+
+# Opens the app on this side's Metro: a new process when none runs, else the running one.
+ios_open_on_metro() {
+  local metro_url
+  metro_url="$(node -p 'encodeURIComponent(process.argv[1])' "http://127.0.0.1:$(read_state metro_port)")"
+  on_mac "xcrun simctl openurl $(udid) 'exp+$(ios_app)://expo-development-client/?url=$metro_url'"
+}
+
+# Waits up to $2 seconds for a line of the app's tree to match $1. iOS asks once whether to open
+# the dev client's link in the app; only that prompt's button is tapped.
+ios_wait_opened() {
+  local tree deadline=$((SECONDS + $2))
+  while ((SECONDS < deadline)); do
+    tree="$(ios_tree 2>/dev/null || true)"
+    grep -qE "$1" <<<"$tree" && return 0
+    grep -q 'Open in' <<<"$tree" && ios_tap_label "Open" >/dev/null 2>&1
+    sleep 1
+  done
+  return 1
 }
 
 # A first password sign-in on a new simulator brings up iOS's own "Save Password?" sheet over the
@@ -1152,6 +1171,9 @@ cmd_ios() {
     orientation) ios_orientation "${args[1]:?ios orientation portrait|landscape}" ;;
     open) ios_open "${args[1]:?ios open <path>}" ;;
     matrix) ios_matrix "${args[@]:1}" ;;
+    timings) ios_timings "${args[@]:1}" ;;
+    force-error)
+      node "$scripts/app-force-error.mjs" "$(read_state metro_port)" "${args[1]:?ios force-error fatal|rejection}" ;;
     down) ios_down ;;
     *) die "ios: unknown command ${sub:-<none>}" ;;
   esac
@@ -1258,6 +1280,67 @@ ios_matrix() {
     done
   done
   ios_orientation portrait
+}
+
+# What a timing run opens in each app on the demo library, one tap|wait line per screen: the label
+# to tap, then a label that shows only once the opened screen draws its content.
+timing_opens() {
+  case "$1" in
+    movies) echo "Sintel|Cast & Crew" ;;
+    music) printf '%s\n' "Neptune|Artist, Pamela Laverdure" "Artist, Pamela Laverdure|Albums" ;;
+  esac
+}
+
+# The label Home shows once its content has drawn, in each app.
+timing_home() {
+  case "$1" in
+    movies) echo "Recently Added" ;;
+    music) echo "Recently added" ;;
+  esac
+}
+
+# Times $runs cold launches of this side's app, each opening the screens timing_opens names, and
+# $runs warm launches, then prints each metric's median and spread from the App.launched and
+# App.screenOpened records the media service received (app-timings.mjs). A cold launch ends the
+# app's process and opens it on Metro again; a warm one sends the app to the Home Screen and brings
+# it back. Each launch goes to the Home Screen when it is done, which sends its events.
+ios_timings() {
+  local runs=10 out="$evidence_root/$side/app-timings"
+  while (($#)); do
+    case "$1" in
+      --runs) runs="$2"; shift 2 ;;
+      --out) out="$2"; shift 2 ;;
+      *) die "ios timings [--runs N] [--out DIR]" ;;
+    esac
+  done
+  local app id since run opens open
+  app="$(ios_app)"
+  id="$(udid)"
+  mapfile -t opens < <(timing_opens "$app")
+  since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  mkdir -p "$out"
+  for run in $(seq 1 "$runs"); do
+    on_mac "xcrun simctl terminate $id dev.lmdevv.$app || true"
+    sleep 2
+    ios_open_on_metro
+    ios_wait_opened "$(timing_home "$app")" 180 || die "run $run: Home did not show its content"
+    sleep 2
+    for open in "${opens[@]}"; do
+      ios_tap_label "${open%%|*}"
+      ios_wait "${open#*|}" 60
+      sleep 1
+    done
+    on_mac "$axe button home --udid $id"
+    sleep 3
+    on_mac "xcrun simctl launch $id dev.lmdevv.$app >/dev/null"
+    sleep 3
+    on_mac "$axe button home --udid $id"
+    sleep 3
+    say "timings: run $run of $runs done"
+  done
+  sleep 2
+  (cmd_cli --side "$side" -- logs --since "$since" --grep App. --json --limit 5000) > "$out/records.ndjson"
+  node "$scripts/app-timings.mjs" "$app" "$out/records.ndjson" | tee "$out/timings.md"
 }
 
 # The screens a layout change can reach, as name|path. Titles are looked up by name, since their
