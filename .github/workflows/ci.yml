@@ -130,20 +130,22 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - run: pnpm install --frozen-lockfile --ignore-scripts --filter "@media/mobile-${{ matrix.app }}..."
+      - run: pnpm install --frozen-lockfile --ignore-scripts
       # The production export fails the job when a module doesn't resolve; its size never does.
-      - run: pnpm --filter "@media/mobile-${{ matrix.app }}" bundle
-      - name: Bundle size
-        working-directory: apps/mobile/${{ matrix.app }}
+      - name: Bundle and its size
+        env:
+          APP: ${{ matrix.app }}
         run: |
-          pnpm exec expo export --platform ios --no-bytecode --output-dir dist-js
-          bytes() { find "$1" -name "$2" -exec cat {} + | wc -c | tr -d ' '; }
+          bytes() { find "apps/mobile/$APP/dist/_expo/static/js/ios" -name "$1" -exec cat {} + | wc -c | tr -d ' '; }
+          pnpm --filter "@media/mobile-$APP" bundle
+          bytecode="$(bytes '*.hbc')"
+          pnpm --filter "@media/mobile-$APP" bundle --no-bytecode
           {
-            echo "| ${{ matrix.app }} iOS bundle | bytes |"
+            echo "| $APP iOS bundle | bytes |"
             echo "| --- | ---: |"
-            echo "| Hermes bytecode | $(bytes dist/_expo/static/js/ios '*.hbc') |"
-            echo "| JavaScript | $(bytes dist-js/_expo/static/js/ios '*.js') |"
-          } >> "$GITHUB_STEP_SUMMARY"
+            echo "| Hermes bytecode | $bytecode |"
+            echo "| JavaScript | $(bytes '*.js') |"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
 
   # An unsigned Debug build for the simulator: prebuild, CocoaPods, and every native module compile,
   # while the JavaScript comes from the bundle job above.
@@ -166,22 +168,41 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      # The newest released Xcode on the image, as the owner's Mac runs the newest release.
+      - id: xcode
+        run: |
+          xcode="$(printf '%s\n' /Applications/Xcode_*.app | grep -E '/Xcode_[0-9.]+\.app$' | sort -V | tail -1)"
+          sudo xcode-select --switch "$xcode"
+          xcodebuild -version
+          echo "build=$(xcodebuild -version | awk '/Build version/ { print $3 }')" >> "$GITHUB_OUTPUT"
       # Pods download into this cache by name and version, so an older cache is safe to start from.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/Library/Caches/CocoaPods
           key: cocoapods-${{ matrix.app }}-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: cocoapods-${{ matrix.app }}-
-      - run: pnpm install --frozen-lockfile --ignore-scripts --filter "@media/mobile-${{ matrix.app }}..."
-      - run: xcodebuild -version
-      - working-directory: apps/mobile/${{ matrix.app }}
-        run: pnpm exec expo prebuild --platform ios --clean
+      # ccache keys each C, C++, and Objective-C compile on its preprocessed input, so an older cache
+      # is safe to start from; Swift compiles every run.
+      - run: brew install ccache
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/Library/Caches/ccache
+          key: ccache-${{ matrix.app }}-${{ steps.xcode.outputs.build }}-${{ hashFiles('pnpm-lock.yaml', format('apps/mobile/{0}/app.json', matrix.app), format('apps/mobile/{0}/modules/**', matrix.app)) }}
+          restore-keys: ccache-${{ matrix.app }}-${{ steps.xcode.outputs.build }}-
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm --filter "@media/mobile-${{ matrix.app }}" exec expo prebuild --platform ios --clean
+        env:
+          USE_CCACHE: "1"
       - working-directory: apps/mobile/${{ matrix.app }}/ios
         run: >-
           xcodebuild -workspace ${{ matrix.app }}.xcworkspace -scheme ${{ matrix.app }}
           -configuration Debug -sdk iphonesimulator -destination "generic/platform=iOS Simulator"
           -derivedDataPath "$RUNNER_TEMP/derived-data" ARCHS=arm64 CODE_SIGNING_ALLOWED=NO
           build -quiet
+      - if: always()
+        run: ccache --show-stats
 
   verify-media-skill:
     name: verify-media skill tests
