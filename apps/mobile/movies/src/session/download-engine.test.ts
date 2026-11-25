@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { PlatformSdk } from "@media/sdk/promise";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { asMediaFileId, asTitleId } from "@/lib/catalog";
 import { STORE_FILE, UNREADABLE_STORE_FILE, itemPath, videoFile } from "@/lib/downloads/files";
@@ -142,6 +142,7 @@ describe("DownloadEngine", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     rmSync(root, { recursive: true, force: true });
   });
 
@@ -212,6 +213,7 @@ describe("DownloadEngine", () => {
   });
 
   it("shows a save that ran out of space as failed, and saves again once there is room", () => {
+    vi.useFakeTimers();
     keep([dune]);
     const disk = new NodeDisk(root);
     const engine = launch(disk);
@@ -226,10 +228,10 @@ describe("DownloadEngine", () => {
     expect(names(root)).toStrictEqual([dune, STORE_FILE]);
 
     disk.full = false;
-    engine.played(dune, 120_000, 9_960_000);
+    vi.advanceTimersByTime(30_000);
 
     expect(engine.getSnapshot().save).toBe("saved");
-    expect(positionsOf(launch())).toStrictEqual([120_000]);
+    expect(positionsOf(launch())).toStrictEqual([60_000]);
   });
 
   it.each(["", '{"downloads":[{"id":"file-du', "not an index"])(

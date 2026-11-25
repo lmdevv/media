@@ -59,8 +59,7 @@ function DownloadsBody({
     <View className="gap-4 px-5 py-4 regular:w-full regular:max-w-readable regular:self-center regular:px-0">
       {snapshot?.save === "failed" ? (
         <Text variant="secondary" tone="danger">
-          This iPhone couldn't save your downloads list. Free up some space, and the next change
-          saves it.
+          This iPhone couldn't save your downloads list. Free up some space, and it saves again.
         </Text>
       ) : null}
       <ListRow icon={Download} title={summary.items} detail={summary.size} onPress={openSettings} />

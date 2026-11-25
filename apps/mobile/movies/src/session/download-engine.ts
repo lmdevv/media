@@ -120,6 +120,9 @@ const MAX_RESTARTS = 3;
 
 const SAVE_EVERY_MS = 2_000;
 
+/** How long after a save that failed, such as on a full disk, the engine tries again. */
+const SAVE_RETRY_MS = 30_000;
+
 const SHOW_EVERY_MS = 500;
 
 const DownloadPauseStateJson = Schema.fromJsonString(
@@ -645,8 +648,8 @@ export class DownloadEngine {
   }
 
   /**
-   * Saves the store, and shows whether it reached the disk. An unreadable index is moved aside
-   * first; while it cannot be, nothing is saved over it.
+   * Saves the store, and shows whether it reached the disk; one that failed is tried again later.
+   * An unreadable index is moved aside first; while it cannot be, nothing is saved over it.
    */
   #save(): void {
     clearTimeout(this.#saveTimer);
@@ -661,6 +664,10 @@ export class DownloadEngine {
       Result.isSuccess(saveIndex(this.#options.disk, this.#snapshot.store))
         ? "saved"
         : "failed";
+
+    if (save === "failed" && !this.#disposed) {
+      this.#saveTimer = setTimeout(() => this.#save(), SAVE_RETRY_MS);
+    }
 
     if (save === this.#snapshot.save) return;
     this.#snapshot = { ...this.#snapshot, save };
