@@ -30,6 +30,7 @@ const keychainStore = (): SecureStoreModule => {
   const items = new Map<string, string>();
 
   return {
+    AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 1,
     getItem: (key, options) => items.get(slot(key, options)) ?? null,
     setItem: (key, value, options) => {
       items.set(slot(key, options), value);

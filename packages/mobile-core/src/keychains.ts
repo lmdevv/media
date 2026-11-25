@@ -1,10 +1,16 @@
 import type { PlatformOptions, SharedStore } from "@media/sdk/promise";
+import { Option, Schema } from "effect";
 
 import { KeychainWriteFailed } from "./keychain";
 import type { Keychain } from "./keychain";
 
 /** The calls the keychains make on expo-secure-store, which the app passes in as itself. */
 export interface SecureStoreModule {
+  /**
+   * The class that keeps an item readable while the device is locked, once it has been unlocked
+   * after a restart, and never restores it to another device from a backup.
+   */
+  readonly AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: number;
   readonly getItem: (key: string, options: StoreOptions) => string | null;
   readonly setItem: (key: string, value: string, options: StoreOptions) => void;
   readonly getItemAsync: (key: string, options: StoreOptions) => Promise<string | null>;
@@ -12,9 +18,14 @@ export interface SecureStoreModule {
   readonly deleteItemAsync: (key: string, options: StoreOptions) => Promise<void>;
 }
 
-/** The options each call names: the keychain access group the item belongs to, if any. */
+/**
+ * The options each call names: the keychain access group the item belongs to, if any, and the
+ * accessibility class a write stores it in. Lookups ignore the class, so a read finds an item
+ * stored in any class, and writing an existing item moves it to the class named.
+ */
 export interface StoreOptions {
   readonly accessGroup?: string;
+  readonly keychainAccessible?: number;
 }
 
 /** A store the SDK keeps one client's session in, under one key. */
@@ -43,8 +54,47 @@ export interface Keychains {
   readonly sessions: SessionStore;
 }
 
-const optionsFor = (group: string | null): StoreOptions =>
-  group === null ? {} : { accessGroup: group };
+/**
+ * Every item is stored after-first-unlock, so iOS can wake the app while the phone is locked, for
+ * background audio, a finished download, or a relaunch, and it still reads the sign-in.
+ */
+const optionsFor = (store: SecureStoreModule, group: string | null): StoreOptions => {
+  const keychainAccessible = store.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY;
+
+  return group === null ? { keychainAccessible } : { accessGroup: group, keychainAccessible };
+};
+
+/**
+ * The keys in a group whose items an app rewrote in the after-first-unlock class, as a JSON array.
+ * Items an older build wrote sit in expo-secure-store's default class, readable only while the
+ * device is unlocked; the first read of each rewrites it once, and this list keeps later launches
+ * from rewriting it again.
+ */
+const MOVED_KEY = "media.accessible";
+
+const MovedJson = Schema.fromJsonString(Schema.Array(Schema.String));
+
+const decodeMoved = Schema.decodeOption(MovedJson);
+
+const encodeMoved = Schema.encodeSync(MovedJson);
+
+/** Runs a keychain call and reports whether it landed. */
+const lands = (call: () => void): boolean => {
+  try {
+    call();
+
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/** A keychain in one access group, and the step that moves a stored item to its class. */
+interface Group {
+  readonly keychain: Keychain;
+  /** Rewrites the value stored at `key` in the group's class, unless an earlier read already did. */
+  readonly settle: (key: string) => void;
+}
 
 /**
  * A keychain in one access group. Every call names the group: an item written without one lands
@@ -53,8 +103,53 @@ const optionsFor = (group: string | null): StoreOptions =>
  * lands or the app quits; a durable write throws instead and holds nothing. Only refused writes
  * are held, so values another app writes to the shared group are read fresh.
  */
-const keychainIn = (store: SecureStoreModule, options: StoreOptions): Keychain => {
+const groupIn = (store: SecureStoreModule, options: StoreOptions): Group => {
   const refused = new Map<string, string | null>();
+
+  // Loaded by the first read that finds a value; null when the keychain could not read the list,
+  // and then nothing moves this launch, so a list that failed to load is never written over.
+  let moved: Set<string> | null | undefined;
+
+  const movedKeys = (): Set<string> | null => {
+    if (moved !== undefined) return moved;
+
+    try {
+      const stored = store.getItem(MOVED_KEY, options);
+
+      moved = new Set(
+        stored === null
+          ? []
+          : Option.getOrElse(decodeMoved(stored), (): ReadonlyArray<string> => []),
+      );
+    } catch {
+      moved = null;
+    }
+
+    return moved;
+  };
+
+  const stored = (key: string): string | null => {
+    try {
+      const value = store.getItem(key, options);
+
+      return value === "" ? null : value;
+    } catch {
+      return null;
+    }
+  };
+
+  // The rewrite stores the value it was handed: callers pass one read in the same synchronous
+  // turn, so no write from this app lands between the read and the rewrite. Another app writing
+  // the shared group in that instant would lose its write.
+  const move = (key: string, value: string): void => {
+    const keys = movedKeys();
+
+    if (keys === null || keys.has(key) || !lands(() => store.setItem(key, value, options))) return;
+
+    keys.add(key);
+    // A list that fails to save costs one more rewrite of the key on a later launch.
+    lands(() => store.setItem(MOVED_KEY, encodeMoved([...keys]), options));
+  };
 
   // Clearing writes an empty value synchronously rather than deleting, so a clear followed by a
   // write can never land out of order.
@@ -63,19 +158,17 @@ const keychainIn = (store: SecureStoreModule, options: StoreOptions): Keychain =
     refused.delete(key);
   };
 
-  return {
+  const keychain: Keychain = {
     read: (key) => {
       const held = refused.get(key);
 
       if (held !== undefined) return held;
 
-      try {
-        const value = store.getItem(key, options);
+      const value = stored(key);
 
-        return value === "" ? null : value;
-      } catch {
-        return null;
-      }
+      if (value !== null) move(key, value);
+
+      return value;
     },
     write: (key, value) => {
       try {
@@ -98,6 +191,15 @@ const keychainIn = (store: SecureStoreModule, options: StoreOptions): Keychain =
       }
     },
   };
+
+  return {
+    keychain,
+    settle: (key) => {
+      const value = stored(key);
+
+      if (value !== null) move(key, value);
+    },
+  };
 };
 
 const PROBE_KEY = "media.probe";
@@ -108,26 +210,58 @@ const PROBE_KEY = "media.probe";
  * works alone.
  */
 export const openKeychains = (store: SecureStoreModule, groups: KeychainGroups): Keychains => {
-  const ownOptions = optionsFor(groups.own);
-  const own = keychainIn(store, ownOptions);
+  const ownOptions = optionsFor(store, groups.own);
+  const own = groupIn(store, ownOptions);
 
-  const sessions: SessionStore = {
-    getItem: (key) => store.getItemAsync(key, ownOptions),
-    setItem: (key, value) => store.setItemAsync(key, value, ownOptions),
-    removeItem: (key) => store.deleteItemAsync(key, ownOptions),
+  // Session calls run one at a time, in the order the SDK makes them: the read moves its item
+  // with a synchronous read and rewrite, which no session write may land between.
+  let turn: Promise<unknown> = Promise.resolve();
+
+  const inTurn = <A>(call: () => Promise<A>): Promise<A> => {
+    const next = turn.then(call, call);
+
+    turn = next.then(
+      () => undefined,
+      () => undefined,
+    );
+
+    return next;
   };
 
-  if (groups.shared === null) return { own, shared: own, sharesWithApps: false, sessions };
+  const sessions: SessionStore = {
+    getItem: (key) =>
+      inTurn(async () => {
+        const value = await store.getItemAsync(key, ownOptions);
 
-  const sharedOptions = optionsFor(groups.shared);
+        // The read reaches the keychain again: a synchronous write, such as a disconnect
+        // clearing the session, may have landed while this one was away from the thread.
+        if (value !== null) own.settle(key);
 
-  try {
-    store.setItem(PROBE_KEY, "1", sharedOptions);
-  } catch {
-    return { own, shared: own, sharesWithApps: false, sessions };
+        return value;
+      }),
+    setItem: (key, value) => inTurn(() => store.setItemAsync(key, value, ownOptions)),
+    removeItem: (key) => inTurn(() => store.deleteItemAsync(key, ownOptions)),
+  };
+
+  if (groups.shared === null) {
+    return { own: own.keychain, shared: own.keychain, sharesWithApps: false, sessions };
   }
 
-  return { own, shared: keychainIn(store, sharedOptions), sharesWithApps: true, sessions };
+  // The probe runs at open, ahead of the first render's shared read. Deferred to the first shared
+  // write, it could meet a phone locked since launch and send the grant to the private group,
+  // where no other app reads it.
+  const sharedOptions = optionsFor(store, groups.shared);
+
+  if (!lands(() => store.setItem(PROBE_KEY, "1", sharedOptions))) {
+    return { own: own.keychain, shared: own.keychain, sharesWithApps: false, sessions };
+  }
+
+  return {
+    own: own.keychain,
+    shared: groupIn(store, sharedOptions).keychain,
+    sharesWithApps: true,
+    sessions,
+  };
 };
 
 /**
