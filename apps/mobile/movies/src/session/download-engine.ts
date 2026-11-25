@@ -764,6 +764,17 @@ export class DownloadEngine {
     this.#notify();
   }
 
+  /**
+   * Whether the index on disk holds every download kept now, saving it first when the last save
+   * failed. A download's folder is made only then, so a folder the saved index does not own is
+   * always one the person or the engine removed.
+   */
+  #indexCurrent(): boolean {
+    if (this.#snapshot.save !== "saved") this.#save();
+
+    return this.#snapshot.save === "saved";
+  }
+
   /** The downloads of `ids` still kept. */
   #rows(ids: ReadonlyArray<FileId>): ReadonlyArray<DownloadRecord> {
     const kept = new Map(this.#snapshot.store.downloads.map((download) => [download.id, download]));
@@ -1113,7 +1124,10 @@ export class DownloadEngine {
       return;
     }
 
-    if (Result.isFailure(this.#options.disk.createFolder(itemFolder(queued.id)))) {
+    if (
+      !this.#indexCurrent() ||
+      Result.isFailure(this.#options.disk.createFolder(itemFolder(queued.id)))
+    ) {
       this.#interrupt(active, "This iPhone couldn't save the download.");
 
       return;
