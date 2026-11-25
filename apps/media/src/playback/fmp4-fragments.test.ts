@@ -231,14 +231,41 @@ describe("videoTiming", () => {
 });
 
 describe("fragmentSpan", () => {
-  it("starts at the first sample's presentation time and runs for its samples' durations", () => {
+  it("starts at the first sample's presentation time and ends where the last-presented one ends", () => {
     const samples = gop(48);
     const decodeTime = 31_984;
+    const presentedLast = samples.length - 3;
+    const last = samples[presentedLast] ?? { duration: 0, composition: 0 };
+
+    const lastEnd =
+      decodeTime +
+      total(samples.slice(0, presentedLast)) +
+      (last.composition ?? 0) -
+      VIDEO.presentationOffset +
+      (last.duration ?? 0);
 
     expect(fragmentSpan(VIDEO, fragment([], [traf({ trackId: 1, decodeTime, samples })]))).toEqual({
-      start: 31_984 / 16_000,
-      end: (31_984 + total(samples)) / 16_000,
+      start: decodeTime / 16_000,
+      end: lastEnd / 16_000,
     });
+  });
+
+  it("starts an open-GOP fragment at its keyframe, presented after the leading pictures that follow it", () => {
+    const frame = 1001;
+    const shift = 2 * frame;
+    const decoded = 235;
+
+    const samples = [240, 238, 237, 239, 244, 242, 241, 243].map((presented, index) => ({
+      duration: frame,
+      composition: (presented - decoded - index) * frame + shift,
+    }));
+
+    expect(
+      fragmentSpan(
+        { trackId: 1, timescale: 24_000, presentationOffset: shift, defaultSampleDuration: 0 },
+        fragment([], [traf({ trackId: 1, decodeTime: decoded * frame, samples })]),
+      ),
+    ).toEqual({ start: (240 * frame) / 24_000, end: (245 * frame) / 24_000 });
   });
 
   it("ignores a sidx that places the fragment a frame late, as ffmpeg 8.0 writes", () => {
@@ -277,11 +304,11 @@ describe("fragmentSpan", () => {
           ],
         ),
       ),
-    ).toEqual({ start: 31_500 / 16_000, end: 33_500 / 16_000 });
+    ).toEqual({ start: 31_500 / 16_000, end: 34_500 / 16_000 });
   });
 
   it("takes sample durations from tfhd, then trex, and leaves the end unknown without them", () => {
-    const samples = [{ composition: 1328 }, { composition: 2672 }];
+    const samples = [{ composition: 1328 }, { composition: 1328 }];
 
     const at = (defaultDuration: number | undefined, timing: VideoTiming) =>
       fragmentSpan(

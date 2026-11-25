@@ -4,6 +4,9 @@
  * (its `tfdt` and `trun`, read past the init segment's edit list) match the session's segment
  * plan wherever a run starts, and the HLS muxer starts a new
  * fragment file at every keyframe; the session groups fragments into the planned segments.
+ * Copies skip the per-fragment `sidx` (`skip_sidx`): without it, the muxer's DASH mode presents
+ * each fragment's first sample where the previous fragment's pictures end, which at an open-GOP
+ * keyframe is where its leading pictures start: frames before its own time, the time plans use.
  * Transcodes place keyframes on the planned segment starts. Encodes run in software (libx264), on
  * Intel Quick Sync, or through VA-API (Intel and AMD); a GPU decodes the source itself when it
  * can, and tone-maps HDR to SDR (`vpp_qsv`, `tonemap_vaapi`), as does the software path with
@@ -477,7 +480,9 @@ export const hlsCommandArgs = (command: HlsCommand): ReadonlyArray<string> => {
     "-hls_fmp4_init_filename",
     "init.mp4",
     "-hls_segment_options",
-    "movflags=+frag_discont",
+    VideoPlan.$is("Copy")(command.video)
+      ? "movflags=+frag_discont+skip_sidx"
+      : "movflags=+frag_discont",
     "-start_number",
     "0",
     "-hls_segment_filename",

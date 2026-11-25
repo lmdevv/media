@@ -23,6 +23,11 @@ export interface FakeFfmpegBehavior {
   /** HLS runs from the start of the file write only this many seconds, then finish. */
   readonly hlsFromStartSeconds?: number;
   /**
+   * HLS runs ask the muxer for fragments this many seconds long (`-hls_time`) rather than one per
+   * keyframe, so it cuts at none of the planned segment starts within that span.
+   */
+  readonly hlsFragmentSeconds?: number;
+  /**
    * HLS runs write their init segment and this many fragments, then hang until stopped, as an
    * encoder that falls behind would.
    */
@@ -118,6 +123,12 @@ if (hls && !args.includes("-ss") && behavior.hlsFromStartSeconds !== undefined) 
   const format = args.indexOf("hls") - 1;
 
   args = [...args.slice(0, format), "-t", String(behavior.hlsFromStartSeconds), ...args.slice(format)];
+}
+
+if (hls && behavior.hlsFragmentSeconds !== undefined) {
+  const value = args.indexOf("-hls_time") + 1;
+
+  args = args.map((arg, index) => (index === value ? String(behavior.hlsFragmentSeconds) : arg));
 }
 
 if (hls && (behavior.hlsFailsAtStart === true || damaged)) {

@@ -1152,17 +1152,32 @@ const make = Effect.gen(function* () {
       if (finished || ready) {
         const members = produced.members.get(index) ?? [];
 
-        // A planned start ffmpeg did not cut at: serve the fragment that covers it.
-        const covering =
-          members.length > 0
-            ? members
-            : fragments
-                .filter((fragment) => fragment.start <= (session.plan.starts[index] ?? 0))
-                .slice(-1);
+        if (members.length === 0) {
+          const mode = yield* Ref.get(session.mode);
+          const planned = session.plan.starts[index] ?? session.plan.end;
+
+          yield* Effect.logWarning("StreamSessions.segment_not_cut").pipe(
+            Effect.annotateLogs({
+              sessionId: session.sessionId,
+              userId: session.userId,
+              streamId: session.streamId,
+              mode,
+              generation: generation.number,
+              segmentIndex: index,
+              plannedSeconds: planned,
+            }),
+          );
+
+          return yield* new TranscodeFailed({
+            streamId: session.streamId,
+            mode,
+            detail: `ffmpeg did not cut at planned segment ${String(index)} (${planned.toFixed(3)} s)`,
+          });
+        }
 
         yield* Ref.set(session.served, true);
 
-        return covering.map((fragment) => fragment.path);
+        return members.map((fragment) => fragment.path);
       }
 
       if (stopped || (yield* Clock.currentTimeMillis) > deadline) {
