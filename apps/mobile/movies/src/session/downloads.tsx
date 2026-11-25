@@ -1,6 +1,6 @@
 import { lastPerson } from "@media/mobile-core/sign-in";
 import { usePlatform, usePlatformQuery, usePlatformStatus } from "@media/sdk/react";
-import { Directory, Paths } from "expo-file-system";
+import { Paths } from "expo-file-system";
 import * as Network from "expo-network";
 import {
   createContext,
@@ -78,7 +78,7 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
     }
 
     const created = new DownloadEngine(platform, {
-      disk: expoDisk(new Directory(Paths.document, accountFolder(mediaUrl, userId))),
+      disk: expoDisk(Paths.document, accountFolder(mediaUrl, userId)),
       mediaUrl,
       settings: initialSettings,
     });

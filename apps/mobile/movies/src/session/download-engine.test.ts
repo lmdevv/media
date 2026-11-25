@@ -188,6 +188,13 @@ describe("DownloadEngine", () => {
   const filesUnder = (path: string): ReadonlyArray<string> =>
     readdirSync(join(root, path), { recursive: true, encoding: "utf8" });
 
+  /** Starts `engine`, has the core list `ids` for this device, and waits for it to follow. */
+  const follow = async (engine: DownloadEngine, ids: ReadonlyArray<FileId>): Promise<void> => {
+    engine.start();
+    core.lists(ids);
+    await settle();
+  };
+
   it("keeps every download when the app is killed partway through saving", () => {
     keep([dune, arrival]);
     const disk = new NodeDisk(root);
@@ -339,9 +346,14 @@ describe("DownloadEngine", () => {
     expect(filesUnder(arrival)).toContain(videoFile("mp4"));
   });
 
-  it("removes the files no download owns, and keeps the ones it does", () => {
-    keep([dune, stranger]);
-    writeFileSync(join(root, STORE_FILE), serializeStore(readyStore([dune])));
+  it("removes the files no download owns once the index, the folder, and the core's list agree", async () => {
+    keep([dune]);
+    const engine = launch();
+
+    await follow(engine, [dune]);
+    engine.dispose();
+    mkdirSync(join(root, stranger));
+    writeFileSync(join(root, itemPath(stranger, videoFile("mp4"))), "video bytes!");
     writeFileSync(join(root, "stray.part"), "left by a crash");
 
     launch();
@@ -356,12 +368,51 @@ describe("DownloadEngine", () => {
     expect(filesUnder("")).toStrictEqual(swept);
   });
 
-  /** Starts `engine`, has the core list `ids` for this device, and waits for it to follow. */
-  const follow = async (engine: DownloadEngine, ids: ReadonlyArray<FileId>): Promise<void> => {
-    engine.start();
-    core.lists(ids);
-    await settle();
-  };
+  it("keeps the files no download owns while the index is main's, until the core's list agrees", async () => {
+    keep([dune]);
+    mkdirSync(join(root, stranger));
+    writeFileSync(join(root, itemPath(stranger, videoFile("mp4"))), "video bytes!");
+
+    const engine = launch();
+
+    await follow(engine, [dune, stranger]);
+    engine.dispose();
+    launch().dispose();
+
+    expect(filesUnder(stranger)).toContain(videoFile("mp4"));
+    expect(core.calls).toStrictEqual([]);
+  });
+
+  it("shows the downloads from their own copies while the index cannot be read", () => {
+    keep([dune]);
+    launch().dispose();
+    const disk = new NodeDisk(root);
+
+    disk.failReads(STORE_FILE);
+    const engine = launch(disk);
+
+    expect(listed(engine)).toStrictEqual([`${dune}:ready`]);
+    expect(engine.getSnapshot().save).toBe("unread");
+  });
+
+  it("keeps what changed while the index could not be read once it reads", () => {
+    vi.useFakeTimers();
+    keep([dune, arrival]);
+    launch().dispose();
+    const disk = new NodeDisk(root);
+
+    disk.failReads(STORE_FILE, 1);
+    const engine = launch(disk);
+
+    engine.played(dune, 60_000, 9_960_000);
+    void engine.remove(arrival);
+    vi.advanceTimersByTime(30_000);
+
+    expect(engine.getSnapshot().save).toBe("saved");
+    expect(listed(launch())).toStrictEqual([`${dune}:ready`]);
+    expect(positionsOf(launch())).toStrictEqual([60_000]);
+    expect(names(root)).not.toContain(arrival);
+  });
 
   it("keeps a download through a read error on the first launch over main's index", async () => {
     keep([dune]);

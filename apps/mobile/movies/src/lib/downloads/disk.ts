@@ -71,8 +71,11 @@ export interface DownloadDisk {
   readonly move: (from: string, to: string) => Result.Result<void, DiskFailed>;
   /** Deletes a file, or a folder with everything in it; nothing there is fine. */
   readonly remove: (path: string) => Result.Result<void, DiskFailed>;
-  /** The names in the person's folder; none when it isn't there yet. */
-  readonly list: () => Result.Result<ReadonlyArray<string>, DiskFailed>;
+  /**
+   * The names in the person's folder, or null when it is not there. A folder whose existence
+   * cannot be told fails, as one that cannot be listed does.
+   */
+  readonly list: () => Result.Result<ReadonlyArray<string> | null, DiskFailed>;
   /** Creates the folder at `path` and those above it; one already there is fine. */
   readonly createFolder: (path: string) => Result.Result<void, DiskFailed>;
   /** Whether a file or folder is there. */

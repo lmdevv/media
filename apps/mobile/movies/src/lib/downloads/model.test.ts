@@ -3,12 +3,17 @@ import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
 import type { EpisodeId, TitleId } from "../catalog";
+import { RECORD_FILE, STORE_FILE, nextOf } from "./files";
 import {
   DownloadEvent,
   EMPTY_STORE,
+  IndexText,
+  Standing,
+  agreed,
   downloadFor,
   downloadOfItem,
   downloadsOf,
+  emptyFolder,
   factsOf,
   headingOf,
   keptLine,
@@ -17,10 +22,11 @@ import {
   mayTransfer,
   nameOf,
   nextToRun,
-  parseStore,
+  parseIndex,
   pictureOf,
   planSync,
   reduce,
+  serializeIndex,
   serializeStore,
   spaceShortfall,
   statusOf,
@@ -128,6 +134,9 @@ const kept = (id: FileId, revision = "r1"): ReadonlyArray<DownloadEvent> => [
   delivering(id, revision),
   DownloadEvent.Finished({ id }),
 ];
+
+/** A `Whole` standing, as a first run's empty folder earns one. */
+const whole = emptyFolder([]);
 
 describe("the download store", () => {
   it("queues each file once, oldest first", () => {
@@ -324,23 +333,68 @@ describe("the download store", () => {
       DownloadEvent.Described({ id: episodeFile, playback }),
     );
 
-    expect(parseStore(serializeStore(store))).toStrictEqual(Option.some(store));
-    expect(parseStore("{")).toStrictEqual(Option.none());
-    expect(parseStore("")).toStrictEqual(Option.none());
+    expect(parseIndex(serializeIndex({ store, standing: whole }))).toStrictEqual(
+      IndexText.AllRows({ store, standing: whole }),
+    );
+    expect(parseIndex("{")).toStrictEqual(IndexText.NotAnIndex());
+    expect(parseIndex("")).toStrictEqual(IndexText.NotAnIndex());
 
     const older = { id: "profile-title-movie", profileId: "profile", phase: "ready" };
 
     const mixed = JSON.stringify({
       downloads: [older, ...store.downloads],
       pendingProgress: [{ profileId: "profile" }],
+      whole: true,
     });
 
-    expect(parseStore(mixed)).toStrictEqual(Option.some(store));
+    expect(parseIndex(mixed)).toStrictEqual(IndexText.SomeRows({ store }));
+  });
+
+  it("takes an index as whole only when the engine that saved it marked it so", () => {
+    const store = run(DownloadEvent.Added({ download: movie, at: 1 }), ...kept(duneFile));
+    const unproven = Standing.Unproven();
+
+    expect(parseIndex(serializeStore(store))).toStrictEqual(
+      IndexText.AllRows({ store, standing: unproven }),
+    );
+    expect(parseIndex(serializeIndex({ store, standing: unproven }))).toStrictEqual(
+      IndexText.AllRows({ store, standing: unproven }),
+    );
   });
 });
 
-/** `store` as one read from the index. */
-const complete = (store: DownloadStore): KnownStore => ({ _tag: "complete", store });
+describe("the store's standing", () => {
+  const store = run(DownloadEvent.Added({ download: movie, at: 1 }), ...kept(duneFile));
+  const unproven = { store, standing: Standing.Unproven() };
+  const listedDune = [{ id: duneFile, state: "available", revision: "r1" }] as const;
+
+  it("is whole on a first run only when the folder holds nothing", () => {
+    expect(emptyFolder(null)).toStrictEqual(whole);
+    expect(emptyFolder([duneFile])).toStrictEqual(Standing.Unproven());
+  });
+
+  it("becomes whole once the folder and the core's list hold nothing the store lacks", () => {
+    expect(agreed(unproven, [duneFile, STORE_FILE, nextOf(STORE_FILE)], listedDune)).toStrictEqual(
+      whole,
+    );
+    expect(agreed(unproven, null, [])).toStrictEqual(whole);
+  });
+
+  it("stays unproven while the folder or the core's list holds something the store lacks", () => {
+    const stranger = asFileId("file-unknown");
+
+    expect(agreed(unproven, [duneFile, stranger], listedDune)).toStrictEqual(Standing.Unproven());
+    expect(agreed(unproven, [duneFile, RECORD_FILE], listedDune)).toStrictEqual(
+      Standing.Unproven(),
+    );
+    expect(
+      agreed(unproven, [duneFile], [...listedDune, { id: stranger, state: "gone" }]),
+    ).toStrictEqual(Standing.Unproven());
+  });
+});
+
+/** `store` as one whose gaps prove a removal. */
+const complete = (store: DownloadStore): KnownStore => ({ store, standing: whole });
 
 describe("following the core's list", () => {
   const store = run(
@@ -430,7 +484,7 @@ describe("following the core's list", () => {
   });
 });
 
-describe("following the core's list with a recovered store", () => {
+describe("following the core's list with an unproven store", () => {
   const ids = [duneFile, episodeFile, asFileId("file-unknown"), asFileId("file-other")];
 
   const listing = fc.array(
@@ -457,14 +511,14 @@ describe("following the core's list with a recovered store", () => {
     ])
     .map((parts) => run(...parts.flat()));
 
-  it("plans what a complete store plans, but forgets nothing", () => {
+  it("plans what a whole store plans, but forgets nothing", () => {
     fc.assert(
       fc.property(stores, listing, fc.subarray(ids), (store, listed, before) => {
         const addedBefore = new Set<string>(before);
-        const recovered = planSync({ _tag: "recovered", store }, listed, addedBefore);
-        const known = planSync({ _tag: "complete", store }, listed, addedBefore);
 
-        expect(recovered).toStrictEqual({ ...known, forget: [] });
+        expect(
+          planSync({ store, standing: Standing.Unproven() }, listed, addedBefore),
+        ).toStrictEqual({ ...planSync(complete(store), listed, addedBefore), forget: [] });
       }),
     );
   });

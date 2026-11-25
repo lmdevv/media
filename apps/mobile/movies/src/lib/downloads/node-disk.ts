@@ -135,7 +135,7 @@ export class NodeDisk implements DownloadDisk {
         throw new Error("EIO: i/o error, scandir");
       }
 
-      return existsSync(this.#root) ? readdirSync(this.#root) : [];
+      return existsSync(this.#root) ? readdirSync(this.#root) : null;
     });
 
   readonly createFolder: DownloadDisk["createFolder"] = (path) =>

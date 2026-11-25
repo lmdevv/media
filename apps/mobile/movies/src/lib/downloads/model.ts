@@ -5,6 +5,7 @@ import { Data, Option, Schema, Struct } from "effect";
 import { formatRuntime } from "../format";
 import { sortedBy } from "../sorted-by";
 import { formatBytes, formatPercent } from "../owner-format";
+import { STORE_FILE, UNREADABLE_STORE_FILE, itemFolder, nextOf } from "./files";
 
 const TitleId = Schema.String.pipe(Schema.brand("Id<titles>"));
 
@@ -150,34 +151,156 @@ export const EMPTY_STORE: DownloadStore = { downloads: [], pendingProgress: [] }
 
 const StoredStore = Schema.fromJsonString(DownloadStore);
 
-const StoredEntries = Schema.fromJsonString(
+/** The store as the JSON it is kept as, without the mark `serializeIndex` adds. */
+export const serializeStore = Schema.encodeSync(StoredStore);
+
+const earned = Symbol("earned");
+
+/**
+ * Whether the store speaks for every download kept in the person's folder and listed on the core
+ * for this device. Only a `Whole` store's gaps prove a removal: a folder it does not own, or a
+ * listed download it lacks, was removed by the person or the engine, so its files may be deleted
+ * and the core told to forget it. An `Unproven` store's gaps prove nothing.
+ */
+export type Standing = Data.TaggedEnum<{
+  /**
+   * The index this engine last saved whole, a first run's empty folder, or a store the folder and
+   * the core's list agree with. Only this module makes one, from that evidence.
+   */
+  Whole: { readonly earned: typeof earned };
+  /** Rebuilt from the downloads' own copies, read with rows that did not decode, or saved by another version. */
+  Unproven: {};
+}>;
+
+/** Matchers for `Standing`; a `Whole` one comes only from `parseIndex`, `emptyFolder`, and `agreed`. */
+export const Standing = Data.taggedEnum<Standing>();
+
+type Whole = Data.TaggedEnum.Value<Standing, "Whole">;
+
+const whole = (): Standing => Standing.Whole({ earned });
+
+/** The store and how far it speaks for the person's folder and the core's list. */
+export interface KnownStore {
+  readonly store: DownloadStore;
+  readonly standing: Standing;
+}
+
+/** A store whose gaps prove a removal. */
+export interface WholeStore extends KnownStore {
+  readonly standing: Whole;
+}
+
+const StoredIndex = Schema.fromJsonString(
   Schema.Struct({
     downloads: Schema.Array(Schema.Unknown),
     pendingProgress: Schema.Array(Schema.Unknown),
+    /** Whether the engine that saved it held a `Whole` store; main's app writes no mark. */
+    whole: Schema.optionalKey(Schema.Boolean),
   }),
 );
 
-const decodeEntries = Schema.decodeUnknownOption(StoredEntries);
+const decodeIndex = Schema.decodeUnknownOption(StoredIndex);
 
 const decodeRecord = Schema.decodeUnknownOption(DownloadRecord);
 
 const decodePending = Schema.decodeUnknownOption(PendingProgress);
 
-/**
- * The store kept in `text`, or none when `text` is not a store, such as an index a crash cut
- * short. Each entry is read on its own, so one that cannot be read (written by another version)
- * costs only itself.
- */
-export const parseStore = (text: string): Option.Option<DownloadStore> =>
-  Option.map(decodeEntries(text), (entries) => ({
-    downloads: entries.downloads.flatMap((entry) => Option.toArray(decodeRecord(entry))),
-    pendingProgress: entries.pendingProgress.flatMap((entry) =>
-      Option.toArray(decodePending(entry)),
-    ),
-  }));
+/** What the text of a downloads index holds. */
+export type IndexText = Data.TaggedEnum<{
+  /** Not an index, such as one a crash cut short. */
+  NotAnIndex: {};
+  /**
+   * An index with rows this version cannot decode, as after going back from a newer version.
+   * `store` holds the rows that did decode; the others still own their folders.
+   */
+  SomeRows: { readonly store: DownloadStore };
+  /** An index whose every row decoded, `Whole` only when the engine that saved it marked it so. */
+  AllRows: { readonly store: DownloadStore; readonly standing: Standing };
+}>;
 
-/** The store as the JSON it is kept as. */
-export const serializeStore = Schema.encodeSync(StoredStore);
+/** Constructors and matchers for `IndexText`. */
+export const IndexText = Data.taggedEnum<IndexText>();
+
+/**
+ * The index kept in `text`. Each row is read on its own, so one this version cannot decode costs
+ * only itself, but its index is no longer `Whole`: the folder of a row that did not decode is
+ * never taken for one no download owns. Unsent progress that does not decode is dropped.
+ */
+export const parseIndex = (text: string): IndexText =>
+  Option.match(decodeIndex(text), {
+    onNone: () => IndexText.NotAnIndex(),
+    onSome: (index) => {
+      const downloads = index.downloads.flatMap((entry) => Option.toArray(decodeRecord(entry)));
+
+      const store: DownloadStore = {
+        downloads,
+        pendingProgress: index.pendingProgress.flatMap((entry) =>
+          Option.toArray(decodePending(entry)),
+        ),
+      };
+
+      if (downloads.length < index.downloads.length) return IndexText.SomeRows({ store });
+
+      return IndexText.AllRows({
+        store,
+        standing: index.whole === true ? whole() : Standing.Unproven(),
+      });
+    },
+  });
+
+const encodeIndex = Schema.encodeSync(
+  Schema.fromJsonString(Schema.Struct({ ...DownloadStore.fields, whole: Schema.Boolean })),
+);
+
+/** The index as the JSON it is kept as, marked with whether `standing` is `Whole`. */
+export const serializeIndex = ({ store, standing }: KnownStore): string =>
+  encodeIndex({
+    downloads: store.downloads,
+    pendingProgress: store.pendingProgress,
+    whole: Standing.$is("Whole")(standing),
+  });
+
+/** The names in the person's folder that neither the index nor a download of `store` owns. */
+export const unowned = (
+  store: DownloadStore,
+  names: ReadonlyArray<string>,
+): ReadonlyArray<string> => {
+  const owned = new Set([
+    STORE_FILE,
+    nextOf(STORE_FILE),
+    UNREADABLE_STORE_FILE,
+    ...store.downloads.map((download) => itemFolder(download.id)),
+  ]);
+
+  return names.filter((name) => !owned.has(name));
+};
+
+/**
+ * A first run's standing: `Whole` when the person's folder holds nothing (`names` is empty, or
+ * null because the folder is not there), so the empty store speaks for it.
+ */
+export const emptyFolder = (names: ReadonlyArray<string> | null): Standing =>
+  names === null || names.length === 0 ? whole() : Standing.Unproven();
+
+/**
+ * `known`'s standing once the person's folder (`names`, null when it is not there) and the core's
+ * whole list (`listed`) are read: `Whole` when every name in the folder is owned and every listed
+ * download is in the store. Then there is nothing to delete or forget, so marking the store whole
+ * deletes nothing and tells the core nothing.
+ */
+export const agreed = (
+  { store, standing }: KnownStore,
+  names: ReadonlyArray<string> | null,
+  listed: ReadonlyArray<ListedDownload>,
+): Standing => {
+  const kept = new Set(store.downloads.map((download) => download.id));
+
+  return Standing.$is("Unproven")(standing) &&
+    unowned(store, names ?? []).length === 0 &&
+    listed.every((entry) => kept.has(entry.id))
+    ? whole()
+    : standing;
+};
 
 const StoredRecord = Schema.fromJsonString(DownloadRecord);
 
@@ -429,23 +552,13 @@ export interface SyncPlan {
 }
 
 /**
- * The store the device follows the core's list with, and whether it speaks for every download kept
- * here. A `complete` store was read from the index, or is a first run's, so a listed download it
- * lacks holds nothing here. A `recovered` store was rebuilt from the downloads' own copies after
- * the index could not be read, so a listed download it lacks may still be on this iPhone.
- */
-export type KnownStore =
-  | { readonly _tag: "complete"; readonly store: DownloadStore }
-  | { readonly _tag: "recovered"; readonly store: DownloadStore };
-
-/**
  * How the device follows `listed`, every page of the core's list. Only a download in `addedBefore`
  * (the ones the core had taken when the list was first read) is purged for being unlisted, so one
- * added while the pages were read is never mistaken for one the core dropped. A recovered store
- * forgets nothing.
+ * added while the pages were read is never mistaken for one the core dropped. Only a `Whole` store
+ * forgets a listed download it lacks.
  */
 export const planSync = (
-  { _tag, store }: KnownStore,
+  { store, standing }: KnownStore,
   listed: ReadonlyArray<ListedDownload>,
   addedBefore: ReadonlySet<string>,
 ): SyncPlan => {
@@ -479,8 +592,9 @@ export const planSync = (
     refresh,
     drop,
     purge,
-    forget:
-      _tag === "recovered" ? [] : listed.flatMap((entry) => (kept.has(entry.id) ? [] : [entry.id])),
+    forget: Standing.$is("Whole")(standing)
+      ? listed.flatMap((entry) => (kept.has(entry.id) ? [] : [entry.id]))
+      : [],
   };
 };
 

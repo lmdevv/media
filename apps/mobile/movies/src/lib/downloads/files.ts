@@ -14,6 +14,12 @@ export const accountFolder = (mediaUrl: string, userId: string): string =>
 /** The store's file name in the person's folder. */
 export const STORE_FILE = "index.json";
 
+/**
+ * The file a new copy of `path` is written to before it moves over `path`, so a crash leaves the
+ * old file or the new one, never part of one.
+ */
+export const nextOf = (path: string): string => `${path}.new`;
+
 /** Where a store that could not be read is kept, beside the one rebuilt in its place. */
 export const UNREADABLE_STORE_FILE = "index.unreadable.json";
 

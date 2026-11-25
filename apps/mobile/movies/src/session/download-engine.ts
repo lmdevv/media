@@ -21,6 +21,7 @@ import {
 import {
   DownloadEvent,
   EMPTY_STORE,
+  Standing,
   keptPlaybackOf,
   mayTransfer,
   nextToRun,
@@ -44,7 +45,8 @@ import type {
 } from "@/lib/downloads/model";
 import type { DownloadSettings } from "@/lib/downloads/settings";
 import {
-  IndexRead,
+  Launch,
+  agree,
   keepRecord,
   keepRecords,
   readIndex,
@@ -67,10 +69,11 @@ type ListPage = Awaited<ReturnType<PlatformSdk["core"]["downloads"]["list"]>>;
 type ListRow = ListPage["page"][number];
 
 /**
- * Whether the last save of the downloads index reached this iPhone's disk. After a save that
- * failed, such as on a full disk, a crash loses what changed since the last save that did.
+ * Whether the downloads index on this iPhone holds the latest changes: `saved`; `failed` after a
+ * save that did not reach the disk, such as on a full disk; or `unread` while the index cannot be
+ * read, when nothing is saved over it. A crash loses what changed since the last save.
  */
-type SaveState = "saved" | "failed";
+type SaveState = "saved" | "failed" | "unread";
 
 /** Everything the screens read. */
 export interface DownloadsSnapshot {
@@ -120,7 +123,10 @@ const MAX_RESTARTS = 3;
 
 const SAVE_EVERY_MS = 2_000;
 
-/** How long after a save that failed, such as on a full disk, the engine tries again. */
+/**
+ * How long after a save that failed, such as on a full disk, or a read of the index that failed,
+ * the engine tries again.
+ */
 const SAVE_RETRY_MS = 30_000;
 
 const SHOW_EVERY_MS = 500;
@@ -238,6 +244,19 @@ const deliveryOf = (ready: DownloadReady, kept: ReadonlySet<string>): Delivery =
   ),
 });
 
+/** `store` with each transfer a quit or a crash stopped waiting to run again. */
+const requeued = (store: DownloadStore): DownloadStore =>
+  store.downloads.reduce(
+    (settling, download) =>
+      download.phase === "preparing" || download.phase === "downloading"
+        ? reduce(
+            settling,
+            DownloadEvent.Waiting({ id: download.id, wifi: false, resume: download.resume }),
+          )
+        : settling,
+    store,
+  );
+
 /**
  * Keeps and downloads one person's downloads on one server, following the core's list of what
  * this device keeps (ADR 0019). Create it, then `dispose` it.
@@ -264,60 +283,90 @@ export class DownloadEngine {
   #sending = false;
   #started = false;
   #disposed = false;
-  /** Whether the store speaks for every download kept here, or was rebuilt after a failed read. */
-  readonly #known: KnownStore["_tag"];
-  /** Whether an index that could not be read still sits where a save would overwrite it. */
-  #unreadableInPlace: boolean;
+  /** How far the store speaks for the person's folder and the core's list. */
+  #standing: Standing = Standing.Unproven();
+  /** Whether an index that did not read whole still sits where a save would overwrite it. */
+  #unreadableInPlace = false;
+  /**
+   * While the index cannot be read: the changes made since launch, applied again over the index
+   * once it reads. Null once it has read.
+   */
+  #held: Array<DownloadEvent> | null = null;
+  #readTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Whether `start` was called while the index could not be read. */
+  #startWhenRead = false;
 
   /**
-   * Reads the person's downloads index. One that cannot be read is never taken for no downloads:
-   * the downloads come back from their own copies, the core is told to forget none of them, and
-   * the unreadable index is moved aside before the rebuilt one is saved. Only after an index that
-   * read does it delete the files no download owns, before any transfer of its own can start.
+   * Reads the person's downloads index. Only a `Whole` store's gaps are taken for removals: after
+   * one, the files no download owns are deleted, before any transfer of its own can start. An
+   * index that read but not whole keeps every folder, and the downloads it lacks come back from
+   * their own copies. A read that fails decides nothing: the downloads rebuilt from their copies
+   * show and play, nothing is saved, deleted, or sent, and the read is tried again.
    */
   constructor(platform: EnginePlatform, options: EngineOptions) {
     this.#platform = platform;
     this.#options = options;
-
-    const read = readIndex(options.disk);
-
-    const stored = IndexRead.$match(read, {
-      None: () => EMPTY_STORE,
-      Readable: ({ store }) => store,
-      Unreadable: ({ recovered }) => recovered,
-    });
-
-    this.#known = IndexRead.$is("Unreadable")(read) ? "recovered" : "complete";
-    this.#unreadableInPlace = IndexRead.$is("Unreadable")(read);
-
-    const settled = stored.downloads.reduce(
-      (store, download) =>
-        download.phase === "preparing" || download.phase === "downloading"
-          ? reduce(
-              store,
-              DownloadEvent.Waiting({ id: download.id, wifi: false, resume: download.resume }),
-            )
-          : store,
-      stored,
-    );
-
-    this.#settled = new Set(
-      stored.downloads.filter((download) => download.added).map((download) => download.id),
-    );
+    this.#settled = new Set();
 
     this.#snapshot = {
-      store: settled,
+      store: EMPTY_STORE,
       settings: options.settings,
       network: { connected: false, wifi: false },
       save: "saved",
     };
 
-    if (IndexRead.$is("Readable")(read)) {
-      sweep(options.disk, settled);
-      keepRecords(options.disk, settled);
-    }
+    this.#load(readIndex(options.disk));
+  }
 
-    if (IndexRead.$is("Unreadable")(read)) this.#save();
+  #load(launch: Launch): void {
+    Launch.$match(launch, {
+      Held: ({ shown }) => {
+        this.#held ??= [];
+        this.#snapshot = {
+          ...this.#snapshot,
+          store: this.#held.reduce(reduce, requeued(shown)),
+          save: "unread",
+        };
+
+        if (!this.#disposed) {
+          clearTimeout(this.#readTimer);
+          this.#readTimer = setTimeout(
+            () => this.#load(readIndex(this.#options.disk)),
+            SAVE_RETRY_MS,
+          );
+        }
+
+        this.#notify();
+      },
+      Loaded: ({ store, standing, misplaced, fromCopies }) => {
+        const changes = this.#held ?? [];
+
+        this.#held = null;
+        clearTimeout(this.#readTimer);
+        this.#standing = standing;
+        this.#unreadableInPlace = misplaced;
+        this.#settled.clear();
+
+        for (const download of store.downloads) {
+          if (download.added) this.#settled.add(download.id);
+        }
+
+        const known = changes.reduce(reduce, requeued(store));
+
+        this.#snapshot = { ...this.#snapshot, store: known, save: "saved" };
+
+        if (Standing.$is("Whole")(standing)) {
+          sweep(this.#options.disk, { store: known, standing });
+        }
+
+        keepRecords(this.#options.disk, known);
+
+        if (misplaced || fromCopies > 0 || changes.length > 0) this.#save();
+        this.#notify();
+
+        if (this.#startWhenRead) this.start();
+      },
+    });
   }
 
   /** The current state; a new object after every change. */
@@ -339,6 +388,13 @@ export class DownloadEngine {
    */
   start(): void {
     if (this.#started || this.#disposed) return;
+
+    if (this.#held !== null) {
+      this.#startWhenRead = true;
+
+      return;
+    }
+
     this.#started = true;
     this.#followList();
     this.#pump();
@@ -350,6 +406,7 @@ export class DownloadEngine {
     this.#disposed = true;
     this.#unfollowList?.();
     clearTimeout(this.#showTimer);
+    clearTimeout(this.#readTimer);
     this.#save();
 
     for (const active of this.#active.values()) active.task?.cancel();
@@ -547,7 +604,15 @@ export class DownloadEngine {
     const listed = rows.flatMap(listedOf);
 
     for (const entry of listed) this.#settled.add(entry.id);
-    this.#follow(planSync({ _tag: this.#known, store: this.#snapshot.store }, listed, settled));
+    const known: KnownStore = { store: this.#snapshot.store, standing: this.#standing };
+    const plan = planSync(known, listed, settled);
+
+    this.#standing = agree(this.#options.disk, known, listed);
+    this.#follow(plan);
+
+    if (Standing.$is("Unproven")(known.standing) && Standing.$is("Whole")(this.#standing)) {
+      this.#save();
+    }
   }
 
   /** `rows` and the rows of every page after `page`, read in order; null when a page fails. */
@@ -633,6 +698,7 @@ export class DownloadEngine {
 
   #dispatch(event: DownloadEvent, save: "now" | "soon" = "now"): void {
     if (this.#disposed) return;
+    this.#held?.push(event);
     this.#snapshot = { ...this.#snapshot, store: reduce(this.#snapshot.store, event) };
 
     if (save === "now") {
@@ -649,11 +715,19 @@ export class DownloadEngine {
 
   /**
    * Saves the store, and shows whether it reached the disk; one that failed is tried again later.
-   * An unreadable index is moved aside first; while it cannot be, nothing is saved over it.
+   * While the index cannot be read, it is read again instead, and nothing is saved over it. An
+   * index that did not read whole is moved aside first; while it cannot be, nothing is saved over
+   * it.
    */
   #save(): void {
     clearTimeout(this.#saveTimer);
     this.#saveTimer = undefined;
+
+    if (this.#held !== null) {
+      this.#load(readIndex(this.#options.disk));
+
+      return;
+    }
 
     if (this.#unreadableInPlace) {
       this.#unreadableInPlace = Result.isFailure(setAsideIndex(this.#options.disk));
@@ -661,7 +735,9 @@ export class DownloadEngine {
 
     const save =
       !this.#unreadableInPlace &&
-      Result.isSuccess(saveIndex(this.#options.disk, this.#snapshot.store))
+      Result.isSuccess(
+        saveIndex(this.#options.disk, { store: this.#snapshot.store, standing: this.#standing }),
+      )
         ? "saved"
         : "failed";
 
