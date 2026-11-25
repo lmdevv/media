@@ -75,15 +75,18 @@ const cases: ReadonlyArray<readonly [string, Scope]> = [
   ["packages/mobile-core/app.plugin.ts", { bundle: both, build: both }],
 ];
 
-/** The script's exit status and stderr in a repository whose one app registers `plugins`. */
-const withPlugins = (plugins: ReadonlyArray<unknown>) => {
+/** The script's exit status and stderr in a repository whose one app holds `files`. */
+const withApp = (files: Readonly<Record<string, string>>) => {
   const root = mkdtempSync(join(tmpdir(), "ios-apps-"));
 
   try {
     mkdirSync(join(root, "scripts"));
     mkdirSync(join(root, "apps/mobile/music"), { recursive: true });
     copyFileSync(script, join(root, "scripts/ios-apps.sh"));
-    writeFileSync(join(root, "apps/mobile/music/app.json"), JSON.stringify({ expo: { plugins } }));
+
+    for (const [name, text] of Object.entries(files)) {
+      writeFileSync(join(root, "apps/mobile/music", name), text);
+    }
 
     const { status, stderr } = spawnSync(join(root, "scripts/ios-apps.sh"), ["-"], {
       input: "",
@@ -95,6 +98,12 @@ const withPlugins = (plugins: ReadonlyArray<unknown>) => {
     rmSync(root, { recursive: true, force: true });
   }
 };
+
+type Plugin = string | readonly [string, Readonly<Record<string, never>>];
+
+const withPlugins = (
+  plugins: ReadonlyArray<Plugin | readonly [string, { fonts: ReadonlyArray<string> }]>,
+) => withApp({ "app.json": JSON.stringify({ expo: { plugins } }) });
 
 // Each call starts the script, which runs changed-packages.sh twice, which each start turbo and node.
 describe("ios-apps.sh", { timeout: 30_000 }, () => {
@@ -112,15 +121,51 @@ describe("ios-apps.sh", { timeout: 30_000 }, () => {
     ).toBe(lines({ bundle: both, build: ["music"] }));
   });
 
-  it("fails while an app registers a config plugin from this repository", () => {
-    for (const plugin of ["./src/with-local-config.cjs", "@media/mobile-core"]) {
-      const { status, stderr } = withPlugins(["expo-router", ["expo-font", { fonts: [] }], plugin]);
+  it("fails for a config plugin that is not on its list, however it is named", () => {
+    for (const plugin of [
+      "./src/with-local-config.cjs",
+      "/abs/apps/mobile/music/src/with-local-config.cjs",
+      "@media/mobile-core",
+      "@lmdevv/media",
+      "expo-some-new-plugin",
+    ]) {
+      for (const entry of [plugin, [plugin, {}] as const] satisfies ReadonlyArray<Plugin>) {
+        const { status, stderr } = withPlugins([
+          "expo-router",
+          ["expo-font", { fonts: [] }],
+          entry,
+        ]);
 
-      expect([plugin, status]).toEqual([plugin, 1]);
-      expect(stderr).toContain(`apps/mobile/music/app.json: ${plugin}`);
+        expect([plugin, status]).toEqual([plugin, 1]);
+        expect(stderr).toContain(`apps/mobile/music/app.json: the plugin "${plugin}"`);
+      }
     }
+  });
 
-    expect(withPlugins(["expo-router", ["@media/mobile-core/plugin", {}]]).status).toBe(1);
+  it("fails for a dynamic app config, which can register any plugin", () => {
+    for (const name of ["app.config.js", "app.config.ts"]) {
+      const { status, stderr } = withApp({
+        "app.json": JSON.stringify({ expo: { plugins: ["expo-router"] } }),
+        [name]: "",
+      });
+
+      expect([name, status]).toEqual([name, 1]);
+      expect(stderr).toContain(`apps/mobile/music/${name}: a dynamic config`);
+    }
+  });
+
+  it("names a plugins entry that is not a list, and reads an app.json without one", () => {
+    expect(withApp({ "app.json": '{"expo":{"plugins":{}}}' }).stderr).toContain(
+      "apps/mobile/music/app.json: plugins is not a list",
+    );
+
+    // The config check passes these; the script then stops for want of changed-packages.sh here.
+    for (const config of ["null", "{}", '{"expo":{"plugins":["expo-router"]}}']) {
+      const { stderr } = withApp({ "app.json": config });
+
+      expect([config, stderr.includes("an app config may run code")]).toEqual([config, false]);
+      expect([config, stderr.includes("TypeError")]).toEqual([config, false]);
+    }
   });
 
   it("scopes nothing for an empty diff", () => {

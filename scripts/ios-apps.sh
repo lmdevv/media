@@ -19,8 +19,9 @@
 #
 # That holds only while every config plugin comes from an npm package: a plugin kept in this
 # repository runs during prebuild and may import any JavaScript beside it, which no path rule can
-# follow. So the script fails when an app.json registers a plugin by a relative path or from an
-# @media package, until `native` below counts the files that plugin reads.
+# follow. So the script fails unless each app's config is an app.json whose plugins are all on the
+# list below. A new plugin, or an app.config.* file, is added here once `native` counts the files
+# it reads.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -68,27 +69,46 @@ apps() {
   echo "[${list[*]}]"
 }
 
-# Prints each config plugin an app registers from this repository, as `<app.json>: <plugin>`.
-repository_plugins() {
-  node -e '
+# The config plugins an app may register. Each comes from an npm package, so its code changes only
+# with the lockfile or a patch, and both count as native.
+known_plugins="expo-audio expo-build-properties expo-camera expo-font expo-router expo-screen-orientation expo-secure-store expo-splash-screen expo-video"
+
+# Prints each way an app's config could run code from this repository during prebuild, as
+# `<file>: <reason>`: a dynamic config, or a plugin that is not on the list.
+unknown_config() {
+  KNOWN="$known_plugins" node -e '
     const { readFileSync, readdirSync } = require("node:fs");
+    const known = new Set(process.env.KNOWN.split(" "));
     for (const app of readdirSync("apps/mobile")) {
-      const path = `apps/mobile/${app}/app.json`;
+      const dir = `apps/mobile/${app}`;
+      let files;
+      try { files = readdirSync(dir); } catch { continue; }
+      for (const file of files) {
+        if (file.startsWith("app.config.")) console.log(`${dir}/${file}: a dynamic config`);
+      }
+      if (!files.includes("app.json")) continue;
       let config;
-      try { config = JSON.parse(readFileSync(path, "utf8")); } catch { continue; }
-      for (const plugin of config.expo?.plugins ?? []) {
+      try { config = JSON.parse(readFileSync(`${dir}/app.json`, "utf8")); } catch { continue; }
+      const plugins = config?.expo?.plugins ?? [];
+      if (!Array.isArray(plugins)) {
+        console.log(`${dir}/app.json: plugins is not a list`);
+        continue;
+      }
+      for (const plugin of plugins) {
         const name = Array.isArray(plugin) ? plugin[0] : plugin;
-        if (typeof name === "string" && /^(?:\.|@media\/)/u.test(name)) console.log(`${path}: ${name}`);
+        if (typeof name !== "string" || !known.has(name)) {
+          console.log(`${dir}/app.json: the plugin ${JSON.stringify(name)}`);
+        }
       }
     }
   '
 }
 
-plugins="$(repository_plugins)"
-if [[ -n "$plugins" ]]; then
-  echo "ios-apps.sh: a config plugin from this repository can read any file during prebuild." >&2
-  echo "Count the files it reads in native(), then allow it here:" >&2
-  echo "$plugins" >&2
+unknown="$(unknown_config)"
+if [[ -n "$unknown" ]]; then
+  echo "ios-apps.sh: an app config may run code from this repository during prebuild." >&2
+  echo "Count the files it reads in native(), then add it to known_plugins:" >&2
+  echo "$unknown" >&2
   exit 1
 fi
 
