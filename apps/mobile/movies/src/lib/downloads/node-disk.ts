@@ -12,7 +12,6 @@ import { dirname, join } from "node:path";
 import { onDisk } from "./disk";
 import type { DownloadDisk, Transfer } from "./disk";
 
-/** What the app's next file change does once a test has set it to die. */
 type Change = "lands" | "cut" | "dead";
 
 /**

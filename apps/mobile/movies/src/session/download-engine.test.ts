@@ -116,15 +116,12 @@ const readyStore = (ids: ReadonlyArray<FileId>): DownloadStore =>
     EMPTY_STORE,
   );
 
-/** Each download the engine lists, with its phase. */
 const listed = (engine: DownloadEngine): ReadonlyArray<string> =>
   engine.getSnapshot().store.downloads.map((download) => `${download.id}:${download.phase}`);
 
-/** Where each download the engine lists was last played to. */
 const positionsOf = (engine: DownloadEngine): ReadonlyArray<number> =>
   engine.getSnapshot().store.downloads.map((download) => download.positionMs);
 
-/** The names in the folder at `path`, in order. */
 const names = (path: string): ReadonlyArray<string> => readdirSync(path).toSorted();
 
 const settle = (): Promise<void> =>
@@ -146,7 +143,6 @@ describe("DownloadEngine", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  /** The engine an app launch makes over the folder. */
   const launch = (disk: NodeDisk = new NodeDisk(root)): DownloadEngine =>
     new DownloadEngine(core, {
       disk,
