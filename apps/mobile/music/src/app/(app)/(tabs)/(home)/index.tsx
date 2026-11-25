@@ -1,3 +1,4 @@
+// Throwaway: a TypeScript-only change to prove the iOS build skips.
 import type { OfflineAlbum } from "@/downloads/sync";
 import { router } from "expo-router";
 import { View } from "react-native";
