@@ -244,7 +244,23 @@ describe("attribute", () => {
     );
   });
 
-  it("reads past a tag the run does not own to the next line that names a step", () => {
+  it("reads past a tag the run does not own, and a filter name of another graph, to a line that names a step", () => {
+    assert.deepStrictEqual(
+      suspects(
+        attribute(
+          VAAPI_CHAIN,
+          VAAPI_OWNERS,
+          failed(["[Parsed_vpp_qsv_7 @ 0x1] Not this run's.", ...HEADS.toneMap].join("\n")),
+        ),
+      ),
+      [2],
+    );
+    assert.strictEqual(
+      suspects(
+        attribute(VAAPI_CHAIN, VAAPI_OWNERS, failed("[Parsed_aresample_1 @ 0x1] Invalid argument")),
+      ),
+      "audio",
+    );
     assert.deepStrictEqual(
       suspects(attribute(UPLOAD_CHAIN, UPLOAD_OWNERS, failed(HEADS.download.join("\n")))),
       [1],
@@ -376,5 +392,8 @@ describe("advance", () => {
       Recovery.$is("Replan")(advance(fresh, Diagnosis.NotVideo({ reason: "audio" }), QSV_CHAIN)),
     );
     assert.isTrue(Recovery.$is("GiveUp")(advance(fresh, Diagnosis.Unexplained(), cpu)));
+    assert.isTrue(
+      Recovery.$is("GiveUp")(advance(fresh, Diagnosis.NotVideo({ reason: "spawn" }), QSV_CHAIN)),
+    );
   });
 });

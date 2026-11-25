@@ -224,8 +224,9 @@ export const record = (
 
 /**
  * Sets `key` aside after a reproduced failure: 15 minutes at the first strike, 2 hours at the
- * second, then until a restart. Its status returns to `unknown`, so it is probed again once the
- * quarantine ends, and its epoch moves on, so no probe that started earlier is recorded.
+ * second, then until a restart. Its status returns to `unknown`, and every source's own evidence
+ * for it goes, so it is probed again once the quarantine ends; its epoch moves on, so no probe that
+ * started earlier is recorded.
  */
 export const quarantine = (inventory: Inventory, key: CapabilityKey, now: number): Inventory => {
   const capability = capabilityOf(inventory, key);
@@ -239,6 +240,13 @@ export const quarantine = (inventory: Inventory, key: CapabilityKey, now: number
 
   return {
     ...inventory,
+    // A source's own evidence for the key goes too: it must be proven again after the quarantine.
+    sources: new Map(
+      [...inventory.sources].map(([scope, known]) => [
+        scope,
+        new Map([...known].filter(([sourceKey]) => sourceKey !== key)),
+      ]),
+    ),
     capabilities: new Map(inventory.capabilities).set(key, {
       ...capability,
       status: "unknown",

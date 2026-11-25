@@ -3,8 +3,6 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 
-import { qsvProbeArgs, vaapiProbeArgs } from "../playback/hardware-acceleration.ts";
-
 const run = promisify(execFile);
 
 const ffmpegPath = process.env["FFMPEG_PATH"] ?? "ffmpeg";
@@ -303,22 +301,30 @@ export const softwareToneMappingAvailable = async (): Promise<boolean> => {
   }
 };
 
-/** True when `FFMPEG_PATH` (or `ffmpeg`) can encode with Intel QSV on `QSV_DEVICE`. */
-export const qsvUsable = async (): Promise<boolean> => {
-  try {
-    await run(ffmpegPath, [...qsvProbeArgs(process.env["QSV_DEVICE"] ?? "/dev/dri/renderD128")]);
-
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-/** True when `FFMPEG_PATH` (or `ffmpeg`) can encode with VA-API on `VAAPI_DEVICE`. */
-export const vaapiUsable = async (): Promise<boolean> => {
+/** One second of generated video uploaded to a device and encoded there, into the null output. */
+const deviceEncodes = async (
+  device: ReadonlyArray<string>,
+  upload: string,
+  encoder: string,
+): Promise<boolean> => {
   try {
     await run(ffmpegPath, [
-      ...vaapiProbeArgs(process.env["VAAPI_DEVICE"] ?? "/dev/dri/renderD128"),
+      "-hide_banner",
+      "-nostdin",
+      "-v",
+      "error",
+      ...device,
+      "-f",
+      "lavfi",
+      "-i",
+      "testsrc2=size=320x240:rate=10:duration=1",
+      "-vf",
+      upload,
+      "-c:v",
+      encoder,
+      "-f",
+      "null",
+      "-",
     ]);
 
     return true;
@@ -326,3 +332,29 @@ export const vaapiUsable = async (): Promise<boolean> => {
     return false;
   }
 };
+
+/** True when `FFMPEG_PATH` (or `ffmpeg`) can encode with Intel QSV on `QSV_DEVICE`. */
+export const qsvUsable = (): Promise<boolean> =>
+  deviceEncodes(
+    [
+      "-init_hw_device",
+      `qsv=hw,child_device=${process.env["QSV_DEVICE"] ?? "/dev/dri/renderD128"}`,
+      "-filter_hw_device",
+      "hw",
+    ],
+    "hwupload=extra_hw_frames=16,format=qsv",
+    "h264_qsv",
+  );
+
+/** True when `FFMPEG_PATH` (or `ffmpeg`) can encode with VA-API on `VAAPI_DEVICE`. */
+export const vaapiUsable = (): Promise<boolean> =>
+  deviceEncodes(
+    [
+      "-init_hw_device",
+      `vaapi=va:${process.env["VAAPI_DEVICE"] ?? "/dev/dri/renderD128"}`,
+      "-filter_hw_device",
+      "va",
+    ],
+    "format=nv12,hwupload",
+    "h264_vaapi",
+  );

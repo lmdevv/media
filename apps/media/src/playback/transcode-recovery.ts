@@ -54,6 +54,9 @@ const MUXERS = /^(?:out#\d+\/.+|hls|mp4|mov|null)$/u;
 
 const STOPPED: ReadonlySet<string> = new Set(["SIGKILL", "SIGTERM"]);
 
+/** The filters of the audio graph the service writes (`-af`). */
+const AUDIO_FILTERS = /^Parsed_(?:aresample|anull|asetpts)_\d+$/u;
+
 const gpuSteps = (pipeline: VideoPipeline): ReadonlyArray<number> =>
   pipeline.steps.flatMap((step, index) => (step.on === "cpu" ? [] : [index]));
 
@@ -71,7 +74,12 @@ const ofTag = (
 
   if (filter !== undefined) return named(filter);
 
-  if (tag.startsWith("Parsed_")) return Attribution.NotVideo({ reason: "audio" });
+  // The audio graph numbers its own filters; any other parsed name this run does not own says
+  // nothing about it.
+  if (tag.startsWith("Parsed_")) {
+    return AUDIO_FILTERS.test(tag) ? Attribution.NotVideo({ reason: "audio" }) : undefined;
+  }
+
   const role = /^(dec|enc):(.+)$/u.exec(tag);
   const name = role?.[2] ?? tag;
   const audio = stream?.startsWith("aist#") === true || stream?.startsWith("aost#") === true;
@@ -207,7 +215,7 @@ const GPU_ROWS: ReadonlyArray<ImplId> = VIDEO_OPS.flatMap((entry) =>
  * The next move after a failure of `failed`: the first replans without what the diagnosis points
  * at, the second keeps off every row outside the CPU for the rest of the stream, the third gives
  * up. A failure that points at nothing goes to the CPU at once, and gives up when it is already
- * there. Exclusions only grow.
+ * there; a run whose ffmpeg never started gives up at once. Exclusions only grow.
  */
 export const advance = (
   state: RecoveryState,
@@ -234,7 +242,8 @@ export const advance = (
     Capability: ({ impls }) => targeted(impls),
     Source: ({ impls }) => targeted(impls),
     Undecided: ({ impls }) => targeted(impls),
-    NotVideo: () => toCpu,
+    // ffmpeg that could not start fails the same under any plan.
+    NotVideo: ({ reason }) => (reason === "spawn" ? Recovery.GiveUp() : toCpu),
     Unexplained: () => toCpu,
   });
 };

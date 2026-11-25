@@ -364,5 +364,5 @@ if [[ "${QSV:-0}" == 1 ]]; then
       -i testsrc2=size=320x240:rate=10:duration=1 -vf hwupload=extra_hw_frames=16,format=qsv \
       -c:v h264_qsv -f null -'
   check "no transcode fell back from Quick Sync" \
-    '! compose logs media | grep -q "HardwareAcceleration.disabled\|encoder_failed"'
+    '! compose logs media | grep -q "TranscodeCapabilities.quarantined\|encoder_failed"'
 fi

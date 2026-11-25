@@ -18,9 +18,9 @@ import { writeFakeFfmpeg } from "../testing/fake-ffmpeg.ts";
 import { ffmpegAvailable } from "../testing/fixture-library.ts";
 import * as FixtureWorkspace from "../testing/fixture-workspace.ts";
 import * as MediaTestServer from "../testing/media-test-server.ts";
+import { verifiedFor, withoutToneMaps } from "../testing/capability-snapshots.ts";
 import { signTestToken } from "../testing/test-tokens.ts";
 import { resolveInsideRoots } from "./file-resolver.ts";
-import type { HardwareEncoder } from "./hardware-acceleration.ts";
 import { decidePlayback, PlaybackPlan } from "./playback-decision.ts";
 import * as PlaybackToken from "./playback-grants.ts";
 import * as StreamSessions from "./stream-sessions.ts";
@@ -107,7 +107,7 @@ const smallScreen: ClientCapabilities = {
   mse: true,
 };
 
-const viewer = (audience: PlaybackToken.PlaybackGrant["audience"], hardware?: HardwareEncoder) =>
+const viewer = (audience: PlaybackToken.PlaybackGrant["audience"], gpu?: "qsv") =>
   Effect.gen(function* () {
     const server = yield* MediaTestServer.Service;
     const { library } = yield* FixtureWorkspace.Service;
@@ -126,8 +126,7 @@ const viewer = (audience: PlaybackToken.PlaybackGrant["audience"], hardware?: Ha
 
     const plan = decidePlayback(file.probe, smallScreen, {
       audioIndex: undefined,
-      hardware,
-      softwareToneMapping: false,
+      capabilities: verifiedFor(file.probe, gpu === undefined ? [] : [gpu], withoutToneMaps),
     });
 
     if (!PlaybackPlan.$is("Hls")(plan)) return yield* Effect.die("expected HLS");

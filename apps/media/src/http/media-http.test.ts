@@ -1195,8 +1195,8 @@ describe.skipIf(!hasFfmpeg)("media service over HTTP", () => {
       excludeTestServices: true,
       timeout: "120 seconds",
     },
-  )("when QSV fails", (it) => {
-    it.effect("falls back to software and reports the mode change", () =>
+  )("when the Quick Sync device will not open", (it) => {
+    it.effect("probes the forced Quick Sync and transcodes in software from the start", () =>
       Effect.gen(function* () {
         const server = yield* MediaTestServer.Service;
         const { library } = yield* FixtureWorkspace.Service;
@@ -1213,13 +1213,9 @@ describe.skipIf(!hasFfmpeg)("media service over HTTP", () => {
         assert.strictEqual(segment.status, 200);
         const events = yield* (yield* PlaybackReporter.Recording).events;
 
-        assert.isTrue(
-          events.some(
-            (event) =>
-              PlaybackReporter.PlaybackEvent.guards.ModeChanged(event) &&
-              event.from === "transcode-qsv" &&
-              event.to === "transcode-software",
-          ),
+        assert.isFalse(
+          events.some((event) => PlaybackReporter.PlaybackEvent.guards.ModeChanged(event)),
+          "no Quick Sync run started, so nothing changed mode",
         );
 
         const health = yield* get(`${server.baseUrl}/api/health`);

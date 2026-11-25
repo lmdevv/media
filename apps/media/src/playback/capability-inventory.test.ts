@@ -130,6 +130,19 @@ describe("quarantine", () => {
   });
 });
 
+describe("quarantine of a key a source proved", () => {
+  it("drops the source's evidence, so the key is probed again once the quarantine ends", () => {
+    const proven = record(empty, DECODE, probe("passed", 0, "source"), 0, FILM);
+
+    assert.isTrue(verifiedIn(proven, 0).has(DECODE));
+    const quarantined = quarantine(proven, DECODE, 0);
+    const later = 15 * 60_000;
+
+    assert.isFalse(verifiedIn(quarantined, later).has(DECODE));
+    assert.isTrue(probeable(quarantined, DECODE, later, FILM));
+  });
+});
+
 describe("snapshot", () => {
   it("excludes a source's rows only for that source, and only until they expire", () => {
     const excluded = exclude(recorded(empty), FILM, [ImplId("tonemap.qsv")], 1000);

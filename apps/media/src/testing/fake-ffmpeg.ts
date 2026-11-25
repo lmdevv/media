@@ -61,7 +61,7 @@ export interface FakeFfmpegBehavior {
  * that name has matched, so a probe can pass at start and fail after a stream's failure; `limit`
  * caps how many runs a rule matches.
  */
-interface RunRule {
+export interface RunRule {
   readonly token: string;
   readonly runs: "hls" | "probe" | "any";
   readonly stderr?: string;

@@ -28,6 +28,7 @@ import { decidePlayback, PlaybackPlan } from "./playback-decision.ts";
 import * as PlaybackReporter from "./playback-reporter.ts";
 import * as PlaybackToken from "./playback-grants.ts";
 import * as StreamSessions from "./stream-sessions.ts";
+import { verifiedFor, withoutToneMaps } from "../testing/capability-snapshots.ts";
 
 const hasFfmpeg = await ffmpegAvailable();
 
@@ -112,8 +113,7 @@ const viewer = Effect.gen(function* () {
 
   const plan = decidePlayback(file.probe, smallScreen, {
     audioIndex: undefined,
-    hardware: undefined,
-    softwareToneMapping: false,
+    capabilities: verifiedFor(file.probe, [], withoutToneMaps),
   });
 
   if (!PlaybackPlan.$is("Hls")(plan)) return yield* Effect.die("expected HLS");

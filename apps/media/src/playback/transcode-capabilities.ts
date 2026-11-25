@@ -153,7 +153,14 @@ const STOPPED: ReadonlySet<string> = new Set(["SIGKILL", "SIGTERM"]);
 const DEVICE_FAILED =
   /Device creation failed|for option 'init_hw_device'|Failed to (?:open|initialise) VAAPI/u;
 
-const firstLine = (text: string): string => (text.trim().split("\n")[0] ?? "").slice(0, 200);
+/** The first line ffmpeg itself wrote, past libva's informational lines. */
+const firstLine = (text: string): string =>
+  (
+    text
+      .trim()
+      .split("\n")
+      .find((line) => !line.startsWith("libva info:")) ?? ""
+  ).slice(0, 200);
 
 /** What a failed probe run proves: a crash or a refusal rejects; a timeout, kill, or closed device proves nothing. */
 const outcomeOf = (failure: MediaTools.MediaToolFailed): Inventory.ProbeOutcome => {
@@ -207,17 +214,22 @@ const featuresOf = (
   return features;
 };
 
+/**
+ * The probe that would prove `target`: a generated clip's, unless `sourceOnly`, else the asking
+ * source's first second for a decoder; undefined when neither exercises it.
+ */
 const plannedProbe = (
   target: Target,
   snapshot: CapabilitySnapshot,
   request: Request | undefined,
+  sourceOnly: boolean,
 ):
   | {
       readonly plan: Result.Result<ProbePlan, Rejection>;
       readonly scope: Inventory.SourceScope | undefined;
     }
   | undefined => {
-  const generated = probeFor(target.key, snapshot);
+  const generated = sourceOnly ? undefined : probeFor(target.key, snapshot);
 
   if (generated !== undefined) return { plan: generated, scope: undefined };
 
@@ -370,13 +382,16 @@ const make = Effect.gen(function* () {
       };
 
       yield* update((known) => Inventory.withBuild(known, build));
-      yield* Effect.logInfo("TranscodeCapabilities.build").pipe(
-        Effect.annotateLogs({
-          version: build.version,
-          kernel: build.kernel,
-          features: build.features.size,
-        }),
-      );
+
+      if (domains.length > 0) {
+        yield* Effect.logDebug("TranscodeCapabilities.build").pipe(
+          Effect.annotateLogs({
+            version: build.version,
+            kernel: build.kernel,
+            features: build.features.size,
+          }),
+        );
+      }
     } else {
       yield* Effect.logWarning("TranscodeCapabilities.listing_failed", listed.failure);
     }
@@ -536,7 +551,7 @@ const make = Effect.gen(function* () {
     });
 
     if (Option.isNone(input)) return Option.none<Probed>();
-    const args = probeCommandArgs(plan, input.value.file, input.value.stream);
+    const args = probeCommandArgs(plan.pipeline, plan.input, input.value.file, input.value.stream);
     const run = priority === "warmup" ? tools.ffmpegInBackground : tools.ffmpeg;
     const started = yield* now;
     let probed: Probed | undefined;
@@ -571,6 +586,32 @@ const make = Effect.gen(function* () {
   });
 
   /**
+   * The probe to run for `target`: a generated clip's when this build can make the clip, else the
+   * asking source's, so a decoder whose clip this build cannot encode is still proven on real
+   * files.
+   */
+  const chosenProbe = Effect.fnUntraced(function* (
+    target: Target,
+    snapshot: CapabilitySnapshot,
+    request: Request | undefined,
+  ) {
+    const planned = plannedProbe(target, snapshot, request, false);
+
+    if (planned === undefined || planned.scope !== undefined || Result.isFailure(planned.plan)) {
+      return planned;
+    }
+
+    const clip = ProbeInput.$match(planned.plan.success.input, {
+      Clip: (input): ClipName | undefined => input.clip,
+      Source: () => undefined,
+    });
+
+    if (clip === undefined || Option.isSome(yield* clipOf(clip))) return planned;
+
+    return plannedProbe(target, snapshot, request, true);
+  });
+
+  /**
    * Makes `target` known if it can: the listing settles what it can, a probe the rest, after the
    * prerequisites its probe needs. Only one probe of a key runs at a time; a second caller waits
    * for the first's result. Evidence counts only under the epoch the probe started in.
@@ -590,7 +631,7 @@ const make = Effect.gen(function* () {
       if (binding === undefined) return;
 
       if (!(yield* opened).some((open) => open.domain === binding.domain)) return;
-      let planned = plannedProbe(target, yield* probeSnapshot, request);
+      let planned = yield* chosenProbe(target, yield* probeSnapshot, request);
 
       if (planned === undefined) return;
 
@@ -602,7 +643,7 @@ const make = Effect.gen(function* () {
         const { key, on, needs } = planned.plan.failure;
 
         yield* ensure({ key, on, needs }, priority, request, depth + 1);
-        planned = plannedProbe(target, yield* probeSnapshot, request);
+        planned = yield* chosenProbe(target, yield* probeSnapshot, request);
       }
 
       if (planned === undefined || Result.isFailure(planned.plan)) return;
@@ -651,7 +692,7 @@ const make = Effect.gen(function* () {
                 ),
               ).pipe(
                 Effect.andThen(
-                  Effect.logInfo("TranscodeCapabilities.probed").pipe(
+                  Effect.logDebug("TranscodeCapabilities.probed").pipe(
                     Effect.annotateLogs({
                       key: target.key,
                       outcome: probed.outcome,
@@ -816,7 +857,7 @@ const make = Effect.gen(function* () {
       const at = yield* now;
       const snapshot = yield* probeSnapshot;
 
-      const planned = plannedProbe(
+      const planned = yield* chosenProbe(
         { key: step.capability, on: step.on, needs: step.needs },
         snapshot,
         failed.request,
@@ -917,7 +958,9 @@ const make = Effect.gen(function* () {
       }
     }
 
-    yield* Effect.logInfo("TranscodeCapabilities.warm").pipe(
+    if (domains.length === 0) return;
+
+    yield* Effect.logDebug("TranscodeCapabilities.warm").pipe(
       Effect.annotateLogs({
         verified: [...(yield* Ref.get(inventory)).capabilities.values()].filter(
           (capability) => capability.status === "verified",

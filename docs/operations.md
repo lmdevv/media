@@ -289,8 +289,10 @@ the internet. It speaks plain HTTP, and every browser and CLI that uses Lar must
 
 ## Hardware acceleration
 
-The media service uses Intel Quick Sync (QSV) through ffmpeg's libvpl when it can, then VA-API
-(Intel and AMD), and falls back to software encoding when a GPU run fails.
+The media service runs each video stage (decode, scale, tone map, encode) on Intel Quick Sync
+(QSV) through ffmpeg's libvpl when the device proves it can, then on VA-API (Intel and AMD), and
+otherwise on the CPU. It probes each stage at start, in the background, and replaces a stage that
+fails during a stream, first on the GPU without it and then in software.
 
 - Compose: add `-f compose.qsv.yaml` (or `-f compose.vaapi.yaml` for VA-API) to pass `/dev/dri`
   through. The image carries Debian's ffmpeg 7.1 (built with libvpl), Intel's iHD VA-API driver,
@@ -379,7 +381,7 @@ The media service uses Intel Quick Sync (QSV) through ffmpeg's libvpl when it ca
   the account was known). `media logs --grep Client.error` lists the reports.
 - With `OTEL_EXPORTER_OTLP_ENDPOINT` (Compose) or `otlpEndpoint` (NixOS) set to an OTLP/HTTP
   collector, the media service exports traces and logs: library scans, playback negotiation, the
-  first HLS segment, seeks, encoder failures and GPU-to-software fallbacks, backups and restores, and
+  first HLS segment, seeks, encoder failures and the stages that replaced them, backups and restores, and
   migrations. `docker compose --profile telemetry up -d` starts a local collector that prints
   them (`deploy/compose/otel-collector.yaml`).
 - Every log line and export is redacted on the way out: fields named like credentials and values

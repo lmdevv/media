@@ -9,13 +9,7 @@
 import { Predicate } from "effect";
 
 import type { LogOwners } from "./transcode-recovery.ts";
-import {
-  DOMAINS,
-  ProbeInput,
-  type ProbePlan,
-  type Step,
-  type VideoPipeline,
-} from "./video-pipeline.ts";
+import { DOMAINS, ProbeInput, type Step, type VideoPipeline } from "./video-pipeline.ts";
 import { type FilterCall, filter, type GpuDomain, Op } from "./video-ops.ts";
 
 /** A filter graph: one chain for `-vf`, or several for `-filter_complex`. */
@@ -25,7 +19,7 @@ interface FilterGraph {
 }
 
 /** A pipeline's part of an ffmpeg run. */
-interface RenderedVideo {
+export interface RenderedVideo {
   /** Before the input: the device and the decoder's flags. */
   readonly input: ReadonlyArray<string>;
   readonly graph: FilterGraph | undefined;
@@ -35,7 +29,7 @@ interface RenderedVideo {
 }
 
 /** Where a run reads the picture from, and what it drops after a seek. */
-interface RenderOptions {
+export interface RenderOptions {
   readonly input: number;
   readonly stream: number;
   /** Picture frames before this time only configure the graph; they are dropped first. */
@@ -115,7 +109,7 @@ const deviceArgs = (pipeline: VideoPipeline): ReadonlyArray<string> => {
 };
 
 /** Renders `pipeline` for one run. */
-const renderVideo = (pipeline: VideoPipeline, options: RenderOptions): RenderedVideo => {
+export const renderVideo = (pipeline: VideoPipeline, options: RenderOptions): RenderedVideo => {
   const { steps } = pipeline;
   const burn = steps.findIndex((step) => Op.$is("BurnImage")(step.op));
   const burnStep = steps[burn];
@@ -183,7 +177,7 @@ const renderVideo = (pipeline: VideoPipeline, options: RenderOptions): RenderedV
 };
 
 /** The arguments that map the picture through `rendered`'s graph, or as it is without one. */
-const graphArgs = (
+export const graphArgs = (
   rendered: RenderedVideo,
   options: Pick<RenderOptions, "input" | "stream">,
 ): ReadonlyArray<string> => {
@@ -200,12 +194,13 @@ const graphArgs = (
 const PROBE_SUBTITLE = "color=c=white@0.5:s=320x240:d=1,format=yuva420p";
 
 /**
- * The ffmpeg arguments of `plan` reading `path`: the whole of a generated clip, or a real source's
- * first second of stream `stream`, through the pipeline into ffmpeg's null output, with progress
- * on standard output so the run's frame count can be read.
+ * The ffmpeg arguments that run `pipeline` reading `path`: the whole of a generated clip, or a real
+ * source's first second of stream `stream`, into ffmpeg's null output, with progress on standard
+ * output so the run's frame count can be read. Probes run this way.
  */
 export const probeCommandArgs = (
-  plan: ProbePlan,
+  pipeline: VideoPipeline,
+  input: ProbeInput,
   path: string,
   stream: number,
 ): ReadonlyArray<string> => {
@@ -216,9 +211,9 @@ export const probeCommandArgs = (
     trimSubtitle: undefined,
   };
 
-  const rendered = renderVideo(plan.pipeline, options);
+  const rendered = renderVideo(pipeline, options);
 
-  const overlaid = plan.pipeline.steps.some(
+  const overlaid = pipeline.steps.some(
     (step) => step.rendering.side !== undefined && step.rendering.side.input > 0,
   );
 
@@ -231,7 +226,7 @@ export const probeCommandArgs = (
     "-progress",
     "pipe:1",
     ...rendered.input,
-    ...ProbeInput.$match(plan.input, { Clip: () => [], Source: () => ["-t", "1"] }),
+    ...ProbeInput.$match(input, { Clip: () => [], Source: () => ["-t", "1"] }),
     "-i",
     path,
     ...(overlaid ? ["-f", "lavfi", "-i", PROBE_SUBTITLE] : []),

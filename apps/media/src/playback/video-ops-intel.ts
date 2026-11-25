@@ -207,14 +207,17 @@ const scaleQsv: OpImpl<"Scale"> = {
   probes: scaleProbes,
 };
 
-/** `vpp_qsv`'s tone map to BT.709 SDR in NV12. */
+/** `vpp_qsv`'s tone map from P010 HDR surfaces to BT.709 SDR in NV12. */
 const toneMapQsv: OpImpl<"ToneMap"> = {
   id: ImplId("tonemap.qsv"),
   op: "ToneMap",
   on: "qsv",
   takes: "qsv",
   needs: () => ["filter:vpp_qsv"],
-  variant: (_, frame) => (HDR_COLOURS.has(frame.colour) ? transferOf(frame.colour) : undefined),
+  variant: (_, frame) =>
+    HDR_COLOURS.has(frame.colour) && frame.pixelFormat === "p010le"
+      ? transferOf(frame.colour)
+      : undefined,
   output: (_, frame) => ({ ...frame, colour: "sdr", depth: 8, pixelFormat: "nv12" }),
   render: () => ({
     ...NOTHING,
@@ -299,14 +302,20 @@ const scaleVaapi: OpImpl<"Scale"> = {
   probes: scaleProbes,
 };
 
-/** `tonemap_vaapi` to BT.709 SDR in NV12; it needs the stream's mastering display metadata. */
+/**
+ * `tonemap_vaapi` from P010 HDR surfaces to BT.709 SDR in NV12; it needs the stream's mastering
+ * display metadata.
+ */
 const toneMapVaapi: OpImpl<"ToneMap"> = {
   id: ImplId("tonemap.vaapi"),
   op: "ToneMap",
   on: "vaapi",
   takes: "vaapi",
   needs: () => ["filter:tonemap_vaapi"],
-  variant: (_, frame) => (HDR_COLOURS.has(frame.colour) ? transferOf(frame.colour) : undefined),
+  variant: (_, frame) =>
+    HDR_COLOURS.has(frame.colour) && frame.pixelFormat === "p010le"
+      ? transferOf(frame.colour)
+      : undefined,
   output: (_, frame) => ({ ...frame, colour: "sdr", depth: 8, pixelFormat: "nv12" }),
   render: () => ({
     ...NOTHING,

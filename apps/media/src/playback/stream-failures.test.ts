@@ -87,6 +87,17 @@ const smallScreen: ClientCapabilities = {
   mse: true,
 };
 
+/** A screen too small for any fixture, so every negotiation for it encodes. */
+const tinyScreen: ClientCapabilities = {
+  containers: [],
+  videoCodecs: [{ codec: "h264", maxBitDepth: 8 }],
+  audioCodecs: [{ codec: "aac" }],
+  maxWidth: 1920,
+  maxHeight: 60,
+  hls: false,
+  mse: true,
+};
+
 const FIRST_RUN_FOLDER = /\/transcode\/[^/]+\/1$/u;
 
 const listings = {
@@ -255,6 +266,36 @@ describe.skipIf(!hasFfmpeg)("stream failures", () => {
           const recording = yield* PlaybackReporter.Recording;
           const fileId = server.fileId("movies", library.directMovie);
 
+          // A first negotiation, of another H.264 file, probes what the device does, so the
+          // abandoned one reaches the stream's start before its caller leaves. Its run fails, which
+          // keeps only that file off the GPU.
+          const warmToken = signTestToken({
+            fid: server.fileId("movies", library.messyMovie),
+            sid: "warm",
+          });
+
+          const warm = yield* HttpClient.execute(
+            HttpClientRequest.post(`${server.baseUrl}/api/playback/negotiate`).pipe(
+              HttpClientRequest.bodyJsonUnsafe({
+                token: warmToken,
+                capabilities: tinyScreen,
+              }),
+            ),
+          ).pipe(
+            Effect.flatMap((response) => response.json),
+            Effect.flatMap(decodeNegotiation),
+            Effect.orDie,
+          );
+
+          assert.notStrictEqual(warm.mode, "remux", "the warming negotiation encodes");
+
+          yield* HttpClient.execute(
+            HttpClientRequest.post(`${server.baseUrl}/api/playback/stop`).pipe(
+              HttpClientRequest.bodyJsonUnsafe({ token: warmToken, streamId: warm.streamId }),
+            ),
+          ).pipe(Effect.orDie);
+          yield* awaitNoStreams(Duration.seconds(5));
+
           const abandoned = yield* negotiateRequest(
             server.baseUrl,
             signTestToken({ fid: fileId, sid: "abandoned" }),
@@ -265,11 +306,15 @@ describe.skipIf(!hasFfmpeg)("stream failures", () => {
           yield* awaitNoStreams(Duration.seconds(2));
 
           const ended = (yield* recording.events).filter(
-            PlaybackReporter.PlaybackEvent.guards.StreamEnded,
+            (event) =>
+              PlaybackReporter.PlaybackEvent.guards.StreamEnded(event) &&
+              event.sessionId === PlaybackSessionId.make("abandoned"),
           );
 
           assert.deepStrictEqual(
-            ended.map((event) => event.reason),
+            ended.map((event) =>
+              PlaybackReporter.PlaybackEvent.guards.StreamEnded(event) ? event.reason : "",
+            ),
             ["abandoned"],
           );
 

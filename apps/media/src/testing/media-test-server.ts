@@ -1,7 +1,17 @@
 import { createServer } from "node:http";
 
 import { NodeHttpServer, NodeServices } from "@effect/platform-node";
-import { Context, Effect, FileSystem, Layer, Logger, Option, Path, References } from "effect";
+import {
+  Context,
+  Duration,
+  Effect,
+  FileSystem,
+  Layer,
+  Logger,
+  Option,
+  Path,
+  References,
+} from "effect";
 import { FetchHttpClient, HttpServer } from "effect/http";
 
 import * as BackendHealth from "../backend-health.ts";
@@ -17,6 +27,7 @@ import { servicesLayerWith } from "../media-service.ts";
 import { redactedLine } from "../observability.ts";
 import * as EndedSessions from "../playback/ended-sessions.ts";
 import * as PlaybackReporter from "../playback/playback-reporter.ts";
+import * as TranscodeCapabilities from "../playback/transcode-capabilities.ts";
 import * as StreamOwners from "../playback/stream-owners.ts";
 import * as SessionReports from "../playback/session-reports.ts";
 import * as FixtureWorkspace from "./fixture-workspace.ts";
@@ -107,7 +118,12 @@ export const layer = (overrides: Readonly<Record<string, string>> = {}, options:
         Effect.map(MediaTools.Service, options.mediaTools ?? ((real) => real)),
       ).pipe(Layer.provide(MediaTools.layer));
 
+      // Negotiations wait for every probe their chain needs, so the stages a test's first stream
+      // runs on do not depend on how busy the machine is.
+      const budget = Layer.succeed(TranscodeCapabilities.NegotiationBudget, Duration.seconds(60));
+
       const services = servicesLayerWith(tools).pipe(
+        Layer.provide(budget),
         Layer.provideMerge(testTokensLayer),
         Layer.provideMerge(StreamOwners.layer),
         Layer.provideMerge(testArtworkKeysLayer),

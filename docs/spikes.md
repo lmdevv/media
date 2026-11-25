@@ -151,5 +151,7 @@ Findings that shaped the stream design:
 - Verified for real: QSV H.264 encode, hardware decode of H.264 and HEVC Main 10, and
   `vpp_qsv=tonemap=1` turning HDR10 HEVC into BT.709 H.264 (an end-to-end test runs when a QSV
   test encode succeeds; CI has no GPU and skips it).
-- A failing QSV run (for example a missing render node) falls back to software when the ladder
-  allows it and reports the mode change; this path is tested everywhere.
+- A Quick Sync device that will not open (a missing render node, for example) leaves its stages
+  unproven, so streams plan in software from the start; a QSV run that fails is replaced without
+  the failing stage, then in software, and a change of mode is reported. These paths are tested
+  everywhere.

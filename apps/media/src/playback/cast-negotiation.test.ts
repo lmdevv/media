@@ -3,6 +3,7 @@ import { castCapabilities } from "@media/contracts/cast";
 
 import type { AudioTrack, MediaProbe, VideoStream } from "../media/media-probe.ts";
 import { decidePlayback, PlaybackPlan } from "./playback-decision.ts";
+import { verifiedFor, withoutToneMaps } from "../testing/capability-snapshots.ts";
 
 const video = (codec: string, options: Partial<VideoStream> = {}): VideoStream => ({
   index: 0,
@@ -47,9 +48,12 @@ const hevcHdr = video("hevc", {
   dynamicRange: "hdr10",
 });
 
-const options = { audioIndex: undefined, hardware: undefined, softwareToneMapping: false };
-
 const rung = (file: MediaProbe, modelName: string | undefined): string => {
+  const options = {
+    audioIndex: undefined,
+    capabilities: verifiedFor(file, [], withoutToneMaps),
+  };
+
   return PlaybackPlan.$match(decidePlayback(file, castCapabilities(modelName), options), {
     Direct: () => "direct",
     Hls: ({ mode }) => mode,

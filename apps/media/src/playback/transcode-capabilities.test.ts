@@ -163,6 +163,36 @@ const vppFailed = (pipeline: VideoPipeline): TranscodeCapabilities.FailedRun => 
   failure: { exitCode: 234, signal: null, stderrHead: VPP_FAILED },
 });
 
+/** Writes a one-second VP9 file into the stage, not the way the generated clip is made. */
+const vp9File = Effect.gen(function* () {
+  const tools = yield* MediaTools.Service;
+  const path = yield* Path.Path;
+  const file = path.join((yield* Stage).folder, "vp9.mkv");
+
+  yield* tools.ffmpeg([
+    "-hide_banner",
+    "-nostdin",
+    "-v",
+    "error",
+    "-y",
+    "-f",
+    "lavfi",
+    "-i",
+    "testsrc2=size=320x240:rate=10:duration=1",
+    "-c:v",
+    "libvpx-vp9",
+    "-b:v",
+    "0",
+    "-crf",
+    "50",
+    "-pix_fmt",
+    "yuv420p",
+    file,
+  ]);
+
+  return file;
+});
+
 /** Writes a one-second H.264 file in full (JPEG) range into the stage. */
 const jpegRangeFile = (name: string) =>
   Effect.gen(function* () {
@@ -221,6 +251,17 @@ const relapsing = await standIn({
 });
 
 const plain = await standIn({});
+
+/** This build cannot make the generated VP9 clip, as one without that encoder setting couldn't. */
+const clipless = await standIn({
+  rules: [
+    {
+      token: "libvpx-vp9 -deadline realtime",
+      runs: "any",
+      stderr: "Unknown encoder 'libvpx-vp9'",
+    },
+  ],
+});
 
 const live = { excludeTestServices: true, timeout: "60 seconds" } as const;
 
@@ -443,6 +484,28 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
             plannedImpls(HDR, snapshot),
             Result.succeed(["decode.cpu", "scale.cpu", "tonemap.cpu", "encode.cpu"]),
           );
+        }),
+      60_000,
+    );
+  });
+
+  layer(
+    clipless.services,
+    live,
+  )((it) => {
+    it.effect(
+      "proves a decoder on the real source when this build cannot make its generated clip",
+      () =>
+        Effect.gen(function* () {
+          const capabilities = yield* TranscodeCapabilities.Service;
+          const vp9: SourceVideo = { ...JPEG_RANGE, codec: "vp9", pixelFormat: "yuv420p" };
+          const asked = request(vp9, "vp9", yield* vp9File);
+          const snapshot = yield* capabilities.resolve(asked);
+          const key = capabilityKey(ImplId("decode.qsv"), "vp9/yuv420p");
+
+          assert.isTrue(snapshot.verified.has(key));
+          assert.strictEqual(yield* statusOf(key), "unknown");
+          assert.strictEqual(yield* statusOf(key, asked.scope), "verified");
         }),
       60_000,
     );

@@ -63,8 +63,9 @@ every scan is refused), `PORT` (4300), `HOST` (all interfaces), `BACKUP_DIR` (`/
 used instead of the built-in key, which works with no setup), `OMDB_API_KEY`
 (IMDb, Rotten Tomatoes, and Metacritic scores; without it titles keep TMDB's), `WEB_DIST_DIR`,
 `MAX_CONCURRENT_TRANSCODES` (3), `MAX_CONCURRENT_REMUXES` (10: HLS streams that copy the video),
-`HARDWARE_ACCELERATION` (`auto` tries Quick Sync, then VA-API, then software; `qsv`, `vaapi`,
-`none`), `QSV_DEVICE` and `VAAPI_DEVICE` (`/dev/dri/renderD128`), `STREAM_IDLE_SECONDS` (60: a
+`HARDWARE_ACCELERATION` (`auto` considers Quick Sync, then VA-API, then software, stage by stage, as
+probes on the device prove each; `qsv`, `vaapi`, `none`), `QSV_DEVICE` and `VAAPI_DEVICE`
+(`/dev/dri/renderD128`), `STREAM_IDLE_SECONDS` (60: a
 stream's encoder stops after this long with no requests and no playing progress; the stream stays,
 and its next request restarts the encoder; with no playback session reports, as in standalone mode,
 a stream closes once its encoder has been stopped and unused for ten times this),

@@ -14,12 +14,22 @@ import * as MediaConfig from "../media-config.ts";
 import { subtitleTracks } from "../subtitles/subtitle-tracks.ts";
 import * as FileResolver from "./file-resolver.ts";
 import { resolveInsideRoots } from "./file-resolver.ts";
-import * as HardwareAcceleration from "./hardware-acceleration.ts";
+import { sourceScope } from "./capability-inventory.ts";
 import * as KeyframeIndex from "./keyframe-index.ts";
-import { AudioPlan, decidePlayback, PlaybackPlan, VideoPlan } from "./playback-decision.ts";
+import {
+  AudioPlan,
+  decidePlayback,
+  decideWithin,
+  type DecisionOptions,
+  encodeIntent,
+  PlaybackPlan,
+  VideoPlan,
+} from "./playback-decision.ts";
 import * as PlaybackReporter from "./playback-reporter.ts";
 import * as PlaybackToken from "./playback-grants.ts";
 import * as StreamSessions from "./stream-sessions.ts";
+import * as TranscodeCapabilities from "./transcode-capabilities.ts";
+import { type CapabilitySnapshot, sourceOf } from "./video-pipeline.ts";
 
 type NegotiateError =
   | PlaybackTokenInvalid
@@ -42,6 +52,22 @@ export class Service extends Context.Service<Service, Interface>()(
 ) {}
 
 const KEYFRAME_WAIT = Duration.seconds(2);
+
+/** A snapshot that verifies nothing, for a file no encode can serve. */
+const NOTHING_VERIFIED: CapabilitySnapshot = {
+  domains: [],
+  verified: new Set(),
+  excluded: new Set(),
+};
+
+/** Whether `plan` reached the encode rung: an encode, or none that this server could run. */
+const reachesEncode = (plan: PlaybackPlan): boolean =>
+  PlaybackPlan.$match(plan, {
+    Direct: () => false,
+    Hls: ({ video }) => VideoPlan.$is("Encode")(video),
+    Unsupported: ({ reason }) =>
+      reason === "no-transcode-target" || reason === "hdr-tone-mapping-requires-hardware",
+  });
 
 const burnedStreamIndex = (
   file: FileResolver.ResolvedMediaFile,
@@ -84,7 +110,7 @@ const make = Effect.gen(function* () {
   const config = yield* MediaConfig.Service;
   const verifier = yield* PlaybackToken.Service;
   const sessions = yield* StreamSessions.Service;
-  const hardware = yield* HardwareAcceleration.Service;
+  const capabilities = yield* TranscodeCapabilities.Service;
   const reporter = yield* PlaybackReporter.Service;
   const resolver = yield* FileResolver.Service;
   const keyframes = yield* KeyframeIndex.Service;
@@ -116,15 +142,54 @@ const make = Effect.gen(function* () {
     yield* Effect.annotateCurrentSpan({ fileId: grant.fileId, sessionId: grant.sessionId });
     const burnSubtitle = burnedStreamIndex(file, request.burnInSubtitle);
 
-    const decision = {
-      audioIndex: request.audioStreamIndex,
-      hardware: yield* hardware.encoder,
-      softwareToneMapping: yield* hardware.softwareToneMapping,
-      quality: request.quality,
-      burnSubtitle,
-    };
+    const source = file.probe.video;
 
-    const preferred = decidePlayback(file.probe, request.capabilities, decision);
+    const intent =
+      source === undefined
+        ? undefined
+        : encodeIntent(file.probe, source, request.capabilities, {
+            quality: request.quality,
+            burnSubtitle,
+          });
+
+    const asked =
+      source === undefined || intent === undefined
+        ? undefined
+        : {
+            scope: sourceScope(file.fileId, file.sizeBytes, file.modifiedAtMs, source.index),
+            path: file.path,
+            stream: source.index,
+            source: sourceOf(source),
+            intent,
+            excluded: new Set<never>(),
+          };
+
+    const known = asked === undefined ? NOTHING_VERIFIED : yield* capabilities.current(asked);
+
+    // Direct play and copies never consult the transcoder; an encode probes, within the
+    // negotiation's budget, what its cheapest chain still needs, once per negotiation.
+    const resolved = yield* Effect.cached(
+      asked === undefined ? Effect.succeed(NOTHING_VERIFIED) : capabilities.resolve(asked),
+    );
+
+    const decide = Effect.fnUntraced(function* (copyVideo: boolean) {
+      const options: DecisionOptions = {
+        audioIndex: request.audioStreamIndex,
+        capabilities: known,
+        quality: request.quality,
+        burnSubtitle,
+        copyVideo,
+      };
+
+      return reachesEncode(decideWithin(file.probe, request.capabilities, options))
+        ? decidePlayback(file.probe, request.capabilities, {
+            ...options,
+            capabilities: yield* resolved,
+          })
+        : decidePlayback(file.probe, request.capabilities, options);
+    });
+
+    const preferred = yield* decide(true);
 
     const copied =
       PlaybackPlan.$is("Hls")(preferred) && VideoPlan.$is("Copy")(preferred.video)
@@ -135,7 +200,7 @@ const make = Effect.gen(function* () {
       PlaybackPlan.$is("Hls")(preferred) &&
       VideoPlan.$is("Copy")(preferred.video) &&
       Option.isNone(copied)
-        ? decidePlayback(file.probe, request.capabilities, { ...decision, copyVideo: false })
+        ? yield* decide(false)
         : undefined;
 
     const indexing = encoded !== undefined && PlaybackPlan.$is("Hls")(encoded);
@@ -233,7 +298,7 @@ const make = Effect.gen(function* () {
         })
         .pipe(Effect.map((started) => ({ started, chosen })));
 
-    const { started, chosen } = yield* startWith(plan, knownKeyframes).pipe(
+    const { started } = yield* startWith(plan, knownKeyframes).pipe(
       Effect.catchTag("TranscodeCapacityReached", (full) =>
         indexing && PlaybackPlan.$is("Hls")(preferred)
           ? keyframes
@@ -243,17 +308,15 @@ const make = Effect.gen(function* () {
       ),
     );
 
-    const outputVideo =
-      VideoPlan.$is("Encode")(chosen.video) &&
-      started.mode !== "remux" &&
-      started.mode !== "audio-transcode"
-        ? {
-            codec: "h264",
-            width: chosen.video.width,
-            height: chosen.video.height,
-            dynamicRange: "sdr" as const,
-          }
-        : common.video;
+    const outputVideo = VideoPlan.$match(started.video, {
+      Copy: () => common.video,
+      Encode: ({ output }) => ({
+        codec: output.codec,
+        width: output.width,
+        height: output.height,
+        dynamicRange: output.dynamicRange,
+      }),
+    });
 
     return {
       ...common,
@@ -279,7 +342,7 @@ export const layer: Layer.Layer<
   | MediaConfig.Service
   | PlaybackToken.Service
   | StreamSessions.Service
-  | HardwareAcceleration.Service
+  | TranscodeCapabilities.Service
   | PlaybackReporter.Service
   | FileResolver.Service
   | KeyframeIndex.Service

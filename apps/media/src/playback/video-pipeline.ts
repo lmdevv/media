@@ -8,6 +8,7 @@
  */
 import { Data, Result } from "effect";
 
+import type { VideoStream } from "../media/media-probe.ts";
 import { PROBE_CLIPS } from "./probe-clips.ts";
 import { CPU_ROWS } from "./video-ops-cpu.ts";
 import { INTEL_ROWS, QSV, VAAPI } from "./video-ops-intel.ts";
@@ -139,7 +140,7 @@ export interface VideoIntent {
 }
 
 /** What an encode produces. */
-interface VideoOutput extends Size {
+export interface VideoOutput extends Size {
   readonly codec: OutputCodec;
   readonly bitrate: number;
   readonly dynamicRange: "sdr";
@@ -150,6 +151,17 @@ export interface PlannedVideo {
   readonly pipeline: VideoPipeline;
   readonly output: VideoOutput;
 }
+
+/** The source of `video` as rows see it; the one mapping from ffprobe. */
+export const sourceOf = (video: VideoStream): SourceVideo => ({
+  codec: video.codec,
+  pixelFormat: video.pixelFormat ?? (video.bitDepth > 8 ? "yuv420p10le" : "yuv420p"),
+  depth: video.bitDepth,
+  colour: video.dynamicRange,
+  scan: "progressive",
+  width: video.width,
+  height: video.height,
+});
 
 /** The frame a source enters a chain as: packets the CPU reads. */
 const packetsOf = (source: SourceVideo): Frame => ({
@@ -317,8 +329,8 @@ interface Candidate {
 
 /**
  * Every chain that could encode `source` for `intent` within the snapshot's domains: each encode
- * row sizes the picture (the CPU within its bounds), and the scale leaves frames at 8 bits or the
- * source's depth, whichever the rows after it take.
+ * row sizes the picture (the CPU within its bounds), and the scale leaves frames at the source's
+ * depth or at 8 bits, whichever the rows after it take.
  */
 const candidates = (
   source: SourceVideo,
@@ -326,7 +338,8 @@ const candidates = (
   snapshot: CapabilitySnapshot,
 ): ReadonlyArray<Candidate> => {
   const bound = new Set<Domain>(["cpu", ...snapshot.domains.map((binding) => binding.domain)]);
-  const depths = [...new Set([8, source.depth])];
+  // The source's depth first: of two chains that cost the same, the one that keeps depth longer.
+  const depths = [...new Set([source.depth, 8])];
 
   const usable = (op: Op) =>
     VIDEO_OPS.filter((entry) => Op.$is(entry.op)(op) && bound.has(entry.on));
@@ -505,6 +518,25 @@ export const candidateKeys = (
 
   return keys;
 };
+
+/** Whether the pipeline runs any step outside the CPU. */
+export const usesGpu = (pipeline: VideoPipeline): boolean =>
+  pipeline.steps.some((step) => step.on !== "cpu");
+
+/** The domain the pipeline encodes in. */
+export const encodeDomain = (pipeline: VideoPipeline): Domain =>
+  pipeline.steps.find((step) => Op.$is("Encode")(step.op))?.on ?? "cpu";
+
+/** Whether two pipelines exercise the same capabilities in the same order. */
+export const samePipeline = (left: VideoPipeline, right: VideoPipeline): boolean =>
+  left.steps.length === right.steps.length &&
+  left.steps.every((step, index) => step.capability === right.steps[index]?.capability);
+
+/** Whether every step of `pipeline` may still run under `snapshot`. */
+export const stillVerified = (pipeline: VideoPipeline, snapshot: CapabilitySnapshot): boolean =>
+  pipeline.steps.every(
+    (step) => snapshot.verified.has(step.capability) && !snapshot.excluded.has(step.impl),
+  );
 
 /** How a probe reads its frames. */
 export type ProbeInput = Data.TaggedEnum<{
