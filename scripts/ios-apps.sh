@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Maps a diff to the iOS apps CI bundles and the iOS apps it builds natively, as GitHub step outputs.
+# Maps a diff to the iOS apps CI bundles and the ones it builds natively, as GitHub step outputs.
 #
 #   scripts/ios-apps.sh --since <ref>  changes from the merge base of <ref> to HEAD
 #   scripts/ios-apps.sh --all          every app
@@ -11,11 +11,11 @@
 #   build=["music"]            those apps, counting only the paths that can change the native app
 #
 # A Debug simulator build skips the JavaScript bundle, so a path that only Metro reads cannot change
-# what Xcode compiles or what `expo prebuild` generates. That is TypeScript, JavaScript, and CSS in a
-# workspace package or in an app's src/, outside any ios/ or plugin/ folder, and the root files that
-# only typecheck, lint and its plugins, format, test, turbo, and Nix read. Every other path counts,
-# including Swift and podspecs anywhere, an app's files outside src/, every package.json, the
-# lockfile, the pnpm workspace file, patches, and CI.
+# what Xcode compiles or what `expo prebuild` generates. That is TypeScript, JavaScript, and CSS in
+# a workspace package or in an app's src/, outside any ios/ or plugin/ folder, Markdown in any
+# workspace, and the root files that only typecheck, lint and its plugins, format, test, turbo, and
+# Nix read. Every other path counts, including Swift and podspecs anywhere, an app's other files
+# outside src/, every package.json, the lockfile, the pnpm workspace file, patches, and CI.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -41,8 +41,9 @@ native() {
     return
     ;;
   esac
+  if [[ "$path" =~ ^(packages|apps/mobile)/ && "$name" == *.md ]]; then return; fi
   if [[ "$path" =~ ^packages/[^/]+/ || "$path" =~ ^apps/mobile/[^/]+/src/ ]]; then
-    case "$name" in *.ts | *.tsx | *.js | *.jsx | *.mjs | *.cjs | *.css | *.md | *.snap | tsconfig*.json) return ;; esac
+    case "$name" in *.ts | *.tsx | *.js | *.jsx | *.mjs | *.cjs | *.css | *.snap | tsconfig*.json) return ;; esac
   fi
   case "$path" in
     tsconfig.json | vitest.config.ts | knip.json | oxlint.config.ts | .oxfmtrc.json | lefthook.yml) return ;;

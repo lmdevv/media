@@ -56,6 +56,8 @@ const cases: ReadonlyArray<readonly [string, Scope]> = [
     { bundle: ["movies"], build: ["movies"] },
   ],
   ["apps/mobile/movies/metro.config.js", { bundle: ["movies"], build: ["movies"] }],
+  ["apps/mobile/music/README.md", { bundle: ["music"], build: [] }],
+  ["packages/sdk/README.md", { bundle: both, build: [] }],
   ["package.json", { bundle: both, build: both }],
   ["patches/react-native@0.88.0.patch", { bundle: both, build: both }],
   [".github/actions/ffmpeg/action.yml", { bundle: both, build: both }],
