@@ -598,6 +598,7 @@ const deviceKeychain = (refusing: ReadonlySet<string>): SecureStoreModule => {
   };
 
   return {
+    AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: 1,
     getItem: (key, options) => items.get(slot(key, options)) ?? null,
     setItem: (key, value, options) => {
       refuse(options);
