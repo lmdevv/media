@@ -129,7 +129,11 @@ export const NegotiationBudget = Context.Reference<Duration.Duration>(
   { defaultValue: () => Duration.seconds(3) },
 );
 
-const DIAGNOSIS_BUDGET = Duration.seconds(5);
+/** How long a diagnosis re-probes a failed run's suspects, in all, before the rest stay undecided. */
+export const DiagnosisBudget = Context.Reference<Duration.Duration>(
+  "@media/server/TranscodeCapabilities/DiagnosisBudget",
+  { defaultValue: () => Duration.seconds(5) },
+);
 
 /** Quarantines on one device this close together make the service open the device again. */
 const DEVICE_CHECK_WINDOW_MS = 60_000;
@@ -327,6 +331,7 @@ const make = Effect.gen(function* () {
   const path = yield* Path.Path;
   const probeTimeout = yield* ProbeTimeout;
   const budget = yield* NegotiationBudget;
+  const diagnosisBudget = yield* DiagnosisBudget;
   const scope = yield* Effect.scope;
   const inventory = yield* Ref.make(Inventory.empty);
   const queue = yield* Semaphore.make(1);
@@ -906,7 +911,7 @@ const make = Effect.gen(function* () {
     const epochOf = (step: Step): number => Inventory.capabilityOf(began, step.capability).epoch;
 
     yield* ready;
-    const deadline = (yield* now) + Duration.toMillis(DIAGNOSIS_BUDGET);
+    const deadline = (yield* now) + Duration.toMillis(diagnosisBudget);
     const passed: Array<Step> = [];
     const undecided: Array<Step> = [];
 

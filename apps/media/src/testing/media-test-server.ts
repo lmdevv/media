@@ -122,11 +122,15 @@ export const layer = (overrides: Readonly<Record<string, string>> = {}, options:
         Effect.map(MediaTools.Service, options.mediaTools ?? ((real) => real)),
       ).pipe(Layer.provide(MediaTools.layer));
 
-      // Negotiations wait for every probe their chain needs, so the stages a test's first stream
-      // runs on do not depend on how busy the machine is.
-      const budget = Layer.succeed(
-        TranscodeCapabilities.NegotiationBudget,
-        options.negotiationBudget ?? Duration.seconds(60),
+      // Negotiations wait for every probe their chain needs, and diagnoses for every probe of
+      // their suspects, so the stages a test's streams run on and recover to do not depend on how
+      // busy the machine is.
+      const budget = Layer.mergeAll(
+        Layer.succeed(
+          TranscodeCapabilities.NegotiationBudget,
+          options.negotiationBudget ?? Duration.seconds(60),
+        ),
+        Layer.succeed(TranscodeCapabilities.DiagnosisBudget, Duration.seconds(30)),
       );
 
       const probeTimeout =
