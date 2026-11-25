@@ -89,6 +89,24 @@ const replacementNeverStarts = (real: MediaTools.Interface): MediaTools.Interfac
   });
 };
 
+/**
+ * Runs from the start write two seconds, so a seek past them starts a new run, and every run that
+ * starts eight seconds in or later fails at once, whatever its stages.
+ */
+const DAMAGED_LATE = {
+  hlsFromStartSeconds: 2,
+  hlsFailsFromSeconds: 8,
+  logInvocations: true,
+} as const;
+
+const damagedLate = await writeFakeFfmpeg(DAMAGED_LATE);
+
+/** The same on a build whose CPU cannot tone-map, so a tone map off the GPU has nowhere to go. */
+const damagedLateWithoutCpuToneMap = await writeFakeFfmpeg({
+  ...DAMAGED_LATE,
+  withoutSoftwareToneMapping: true,
+});
+
 /** Runs stall after their first fragment until killed, so a seek replaces a live run. */
 const stalling = await writeFakeFfmpeg({ hlsStallsAfterFragments: 1, logInvocations: true });
 
@@ -234,6 +252,65 @@ const fetchStatus = Effect.fn(function* (url: string) {
     Effect.orDie,
   );
 });
+
+/** The status and body of a GET of `url` on the test server. */
+const fetchAnswer = Effect.fn(function* (url: string) {
+  const server = yield* MediaTestServer.Service;
+  const parsed = new URL(url);
+
+  const response = yield* HttpClient.get(
+    `${server.baseUrl}${parsed.pathname}${parsed.search}`,
+  ).pipe(Effect.orDie);
+
+  return { status: response.status, body: yield* response.text.pipe(Effect.orDie) };
+});
+
+const seekTo = Effect.fn(function* (token: string, streamId: string, positionSeconds: number) {
+  const server = yield* MediaTestServer.Service;
+
+  return yield* HttpClient.execute(
+    HttpClientRequest.post(`${server.baseUrl}/api/playback/seek`).pipe(
+      HttpClientRequest.bodyJsonUnsafe({ token, streamId, positionSeconds }),
+    ),
+  ).pipe(
+    Effect.flatMap((response) => response.json),
+    Effect.flatMap(decodeSeek),
+    Effect.orDie,
+  );
+});
+
+/** The index of the segment of the playlist at `url` that holds `seconds` into the stream. */
+const segmentHolding = Effect.fn(function* (url: string, seconds: number) {
+  const playlist = yield* fetchAnswer(url);
+
+  const durations = playlist.body
+    .split("\n")
+    .filter((line) => line.startsWith("#EXTINF:"))
+    .map((line) => Number.parseFloat(line.slice("#EXTINF:".length)));
+
+  let start = 0;
+
+  for (const [index, duration] of durations.entries()) {
+    if (seconds < start + duration) return index;
+    start += duration;
+  }
+
+  return durations.length - 1;
+});
+
+/** Waits until the server logged `message` for `streamId`. */
+const awaitLogged = (message: string, streamId: string) =>
+  Effect.gen(function* () {
+    const server = yield* MediaTestServer.Service;
+
+    return server
+      .logged()
+      .filter((entry) => entry.message === message && entry.annotations["streamId"] === streamId);
+  }).pipe(
+    Effect.filterOrFail((entries) => entries.length > 0),
+    Effect.retry({ schedule: Schedule.spaced("100 millis"), times: 100 }),
+    Effect.orDie,
+  );
 
 const segmentOf = (playlist: string, index: number): string => {
   const url = new URL(playlist);
@@ -404,6 +481,74 @@ describe.skipIf(!hasFfmpeg)("stream recovery", () => {
             [],
             "no stream is left behind",
           );
+        }),
+      120_000,
+    );
+  });
+
+  layer(
+    recovering(damagedLateWithoutCpuToneMap),
+    options,
+  )((it) => {
+    it.effect(
+      "answers TranscodeFailed to the request that meets the end of recovery mid-stream",
+      () =>
+        Effect.gen(function* () {
+          const fileId = yield* addFilm("no-chain-left");
+          const token = signTestToken({ fid: fileId, sid: "film" });
+          const film = yield* negotiated({ token });
+
+          assert.strictEqual(film.mode, "transcode-qsv");
+          assert.strictEqual(yield* fetchStatus(segmentOf(film.url, 0)), 200);
+
+          // Ten seconds in, every run fails; without the GPU nothing else can tone-map.
+          const moved = yield* seekTo(token, film.streamId ?? "", 10);
+          const index = yield* segmentHolding(moved.playlistUrl, 10);
+          const ended = yield* fetchAnswer(segmentOf(moved.playlistUrl, index));
+
+          assert.strictEqual(ended.status, 500, ended.body);
+          assert.include(ended.body, '"_tag":"TranscodeFailed"');
+          assert.strictEqual(yield* fetchStatus(segmentOf(moved.playlistUrl, index)), 404);
+        }),
+      120_000,
+    );
+  });
+
+  layer(
+    MediaTestServer.layer({ FFMPEG_PATH: damagedLate, STREAM_IDLE_SECONDS: "1" }),
+    options,
+  )((it) => {
+    it.effect(
+      "remembers a position that ended in failure: an idle release and a retry start no run there",
+      () =>
+        Effect.gen(function* () {
+          const server = yield* MediaTestServer.Service;
+          const { library } = yield* FixtureWorkspace.Service;
+
+          const token = signTestToken({
+            fid: server.fileId("movies", library.directMovie),
+            sid: "damaged",
+          });
+
+          const stream = yield* negotiated({ token, capabilities: smallBrowser });
+          const streamId = stream.streamId ?? "";
+
+          assert.strictEqual(stream.mode, "transcode-software");
+          assert.strictEqual(yield* fetchStatus(segmentOf(stream.url, 0)), 200);
+
+          const moved = yield* seekTo(token, streamId, 10);
+          const index = yield* segmentHolding(moved.playlistUrl, 10);
+          const failed = yield* fetchAnswer(segmentOf(moved.playlistUrl, index));
+
+          assert.strictEqual(failed.status, 500, failed.body);
+          const runs = (yield* runsOf(damagedLate, streamId)).length;
+
+          yield* awaitLogged("Stream.released", streamId);
+          const retried = yield* fetchAnswer(segmentOf(moved.playlistUrl, index));
+
+          assert.strictEqual(retried.status, 500, retried.body);
+          assert.include(retried.body, '"_tag":"TranscodeFailed"');
+          assert.lengthOf(yield* runsOf(damagedLate, streamId), runs, "no run starts there again");
         }),
       120_000,
     );

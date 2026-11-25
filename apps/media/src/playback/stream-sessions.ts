@@ -385,6 +385,8 @@ interface Session extends Lifecycle {
   readonly recovery: Ref.Ref<RecoveryState>;
   /** How the transcode changed after failures, oldest first. */
   readonly changes: Ref.Ref<ReadonlyArray<PipelineChange>>;
+  /** Segments where recovery gave up, and what their requests answer: no run starts there again. */
+  readonly ended: Ref.Ref<ReadonlyMap<number, TranscodeFailed>>;
 
   readonly generation: Ref.Ref<Generation>;
   readonly lane: Semaphore.Semaphore;
@@ -420,12 +422,29 @@ const isEncode = VideoPlan.$is("Encode");
 const onGpu = (video: VideoPlan): boolean => isEncode(video) && usesGpu(video.pipeline);
 
 /**
- * Ends recovery at `generation`'s position: its requests answer `failure` from now on, while a
- * seek elsewhere starts afresh.
+ * Ends recovery at segment `index`: requests of `generation` answer `failure` from now on, and the
+ * session remembers the position, so an idle release and a revive start no run there again, while
+ * a seek elsewhere starts afresh.
  */
-const giveUp = (generation: Generation, failure: TranscodeFailed) =>
+const giveUp = (
+  session: Session,
+  generation: Generation,
+  index: number,
+  failure: TranscodeFailed,
+) =>
   Effect.sync(() => MutableRef.set(generation.failed, Option.some(failure))).pipe(
+    Effect.andThen(Ref.update(session.ended, (known) => new Map(known).set(index, failure))),
     Effect.andThen(Effect.fail(failure)),
+  );
+
+/** Fails with what segment `index` answers when recovery gave up there. */
+const unlessEnded = (session: Session, index: number) =>
+  Ref.get(session.ended).pipe(
+    Effect.flatMap((known) => {
+      const failure = known.get(index);
+
+      return failure === undefined ? Effect.void : Effect.fail(failure);
+    }),
   );
 
 /** What a diagnosis found, as a change's cause. */
@@ -1221,13 +1240,13 @@ const make = Effect.gen(function* () {
         const stream = session.file.probe.video;
 
         if (!isEncode(video) || generation.owners === undefined || stream === undefined) {
-          return yield* giveUp(generation, terminal);
+          return yield* giveUp(session, generation, index, terminal);
         }
 
         const state = yield* Ref.get(session.recovery);
         const asked = capabilityRequest(session, video.intent, state.excluded);
 
-        if (asked === undefined) return yield* giveUp(generation, terminal);
+        if (asked === undefined) return yield* giveUp(session, generation, index, terminal);
 
         const diagnosis = yield* capabilities.diagnose({
           request: asked,
@@ -1242,7 +1261,8 @@ const make = Effect.gen(function* () {
 
         const next = advance(state, diagnosis, video.pipeline);
 
-        if (Recovery.$is("GiveUp")(next)) return yield* giveUp(generation, terminal);
+        if (Recovery.$is("GiveUp")(next))
+          return yield* giveUp(session, generation, index, terminal);
         const snapshot = yield* capabilities.current({ ...asked, excluded: next.state.excluded });
         const replanned = replan(stream, video.intent, snapshot);
 
@@ -1252,7 +1272,7 @@ const make = Effect.gen(function* () {
         }
 
         if (samePipeline(replanned.success.pipeline, video.pipeline)) {
-          return yield* giveUp(generation, terminal);
+          return yield* giveUp(session, generation, index, terminal);
         }
 
         yield* Ref.set(session.recovery, next.state);
@@ -1269,7 +1289,9 @@ const make = Effect.gen(function* () {
             Ref.get(session.generation).pipe(
               Effect.flatMap((replacement) =>
                 giveUp(
+                  session,
                   replacement,
+                  index,
                   new TranscodeFailed({
                     streamId: session.streamId,
                     mode: modeOf(replanned.success, session.audio),
@@ -1357,21 +1379,25 @@ const make = Effect.gen(function* () {
             onSome: (cause) => encoderFailed(session, generation, index, cause),
           });
 
-          // A stream that served nothing ends with its failure; one that served ends when nothing
-          // can take it over, and its player's next negotiation says why.
+          // A stream that served nothing ends with its failure. One that served ends when nothing
+          // can take it over; the request that met that end hears why, later ones that the stream
+          // is gone.
           return yield* recovering.pipe(
             Effect.tapErrorTag("TranscodeFailed", () =>
               neverServed ? closeSession(session, "failed") : Effect.void,
             ),
-            Effect.catchTag("UnsupportedPlayback", (refused) =>
-              closeSession(session, "failed").pipe(
-                Effect.andThen(
-                  Effect.fail(
-                    neverServed ? refused : new StreamNotFound({ streamId: session.streamId }),
-                  ),
-                ),
-              ),
-            ),
+            Effect.catchTag("UnsupportedPlayback", (refused) => {
+              const ended = new TranscodeFailed({
+                streamId: session.streamId,
+                mode: modeOf(generation.video, session.audio),
+                detail: `nothing left can encode the file (${refused.reason})`,
+              });
+
+              return Effect.sync(() => MutableRef.set(generation.failed, Option.some(ended))).pipe(
+                Effect.andThen(closeSession(session, "failed")),
+                Effect.andThen(Effect.fail(ended)),
+              );
+            }),
           );
         }
       }
@@ -1631,6 +1657,7 @@ const make = Effect.gen(function* () {
     index: number,
     callerGone: Effect.Effect<void>,
   ) {
+    yield* unlessEnded(session, index);
     const current = yield* Ref.get(session.generation);
     const transcoding = isEncode(yield* Ref.get(session.video));
 
@@ -1735,6 +1762,7 @@ const make = Effect.gen(function* () {
         if (index >= current.startSegment && index <= produced.head + LOOKAHEAD_SEGMENTS)
           return current;
 
+        yield* unlessEnded(session, index);
         yield* recheckVideo(session, current.number);
         yield* Ref.update(session.recovery, (state) => ({ ...state, failures: 0 }));
 
@@ -2076,6 +2104,7 @@ const make = Effect.gen(function* () {
       ),
       recovery: yield* Ref.make<RecoveryState>(recovered),
       changes: yield* Ref.make<ReadonlyArray<PipelineChange>>([]),
+      ended: yield* Ref.make<ReadonlyMap<number, TranscodeFailed>>(new Map()),
 
       generation: yield* Ref.make(placeholder),
       lane: yield* Semaphore.make(1),
