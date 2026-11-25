@@ -3,7 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Schema } from "effect";
 import { useState } from "react";
 
-import { PageHeader } from "@media/ui/components/page-header";
+import { PageHeader } from "@/components/page-header";
 import { SettingsFrame } from "@/components/shell";
 import { describeFailure, isFailure } from "@media/ui/lib/failure";
 import { DeviceApprovalView } from "@/screens/entry/device";

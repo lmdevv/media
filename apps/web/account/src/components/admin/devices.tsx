@@ -2,7 +2,7 @@ import { usePlatform } from "@media/sdk/react";
 import { Button } from "@media/ui/components/button";
 import { useState } from "react";
 
-import { PageHeader } from "@media/ui/components/page-header";
+import { PageHeader } from "@/components/page-header";
 import type { UserId } from "@/session/platform-types";
 
 import { useActions } from "./action";
