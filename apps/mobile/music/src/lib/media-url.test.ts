@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveMediaUrl } from "./media-url";
+import { artSource, resolveMediaUrl } from "./media-url";
 import { displayHost, sameServer } from "./server";
 
 const origin = "http://100.94.55.81:8090";
@@ -27,6 +27,43 @@ describe("resolveMediaUrl", () => {
 
   it("resolves a relative path under the server", () => {
     expect(resolveMediaUrl(origin, "media/x")).toBe("http://100.94.55.81:8090/media/x");
+  });
+});
+
+describe("artSource", () => {
+  const cover = "/music/art/a1?ticket=t1.week-one";
+
+  it("asks for the smallest width that covers a 48-point row on a 3x phone", () => {
+    expect(artSource(origin, cover, 48 * 3)).toEqual({
+      uri: `${origin}/music/art/a1?ticket=t1.week-one&w=185`,
+      cacheKey: `${origin}/music/art/a1?w=185`,
+    });
+  });
+
+  it("keeps each width under its own key, and the original under the cover's path", () => {
+    expect(artSource(origin, cover, 240 * 3)?.cacheKey).toBe(`${origin}/music/art/a1?w=780`);
+    expect(artSource(origin, cover, 2000)).toEqual({
+      uri: `${origin}${cover}`,
+      cacheKey: `${origin}/music/art/a1`,
+    });
+    expect(artSource(origin, cover, "original")).toEqual(artSource(origin, cover, 2000));
+  });
+
+  it("keeps a cover's key when its ticket changes", () => {
+    const nextWeek = cover.replace("week-one", "week-two");
+
+    expect(artSource(origin, nextWeek, 144)?.cacheKey).toBe(
+      artSource(origin, cover, 144)?.cacheKey,
+    );
+    expect(artSource(origin, nextWeek, 144)?.uri).not.toBe(artSource(origin, cover, 144)?.uri);
+  });
+
+  it("loads a cover saved on this phone as it is, and nothing without artwork", () => {
+    expect(artSource(origin, "file:///vault/art/a1.jpg", 144)).toEqual({
+      uri: "file:///vault/art/a1.jpg",
+      cacheKey: "file:///vault/art/a1.jpg",
+    });
+    expect(artSource(origin, null, 144)).toBeNull();
   });
 });
 

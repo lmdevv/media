@@ -3,13 +3,15 @@ import { useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 
 import { placeholderGradient } from "@/lib/art";
-import { artSrc } from "@/lib/art-src";
+import { artSrc, artSrcSet } from "@/lib/art-src";
 
 /**
  * A cover or artist image. Without a URL, or when the image fails, it draws the deterministic
  * placeholder gradient for `seed`, so the same album looks the same everywhere. The image is
  * decorative (`alt=""`), but `children`, such as a play button on the cover, stay in the
- * accessibility tree, so the frame itself is not `aria-hidden`.
+ * accessibility tree, so the frame itself is not `aria-hidden`. The browser loads the smallest
+ * resized copy that covers the size the image is laid out at (`sizes="auto"`, which needs
+ * `loading="lazy"`); one without `auto` picks for the window's width.
  */
 export function Artwork({
   url,
@@ -41,6 +43,8 @@ export function Artwork({
       {showImage ? (
         <img
           src={artSrc(url)}
+          srcSet={artSrcSet(url)}
+          sizes="auto, 100vw"
           alt=""
           loading="lazy"
           decoding="async"

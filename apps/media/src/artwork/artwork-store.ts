@@ -58,6 +58,16 @@ export interface Interface {
     key: string,
     width: Option.Option<ArtworkWidth>,
   ) => Effect.Effect<ArtworkImage, ArtworkNotFound | ArtworkUnavailable>;
+  /**
+   * An image file the server holds, such as a music cover, resized to `width` as `image` resizes
+   * artwork. `fingerprint` names the file's content: the copy is kept under it with the other
+   * resized artwork, within `CACHE_MAX_MB`.
+   */
+  readonly resize: (
+    file: string,
+    fingerprint: string,
+    width: ArtworkWidth,
+  ) => Effect.Effect<ArtworkImage, ArtworkUnavailable>;
 }
 
 /** The artwork store. */
@@ -96,6 +106,9 @@ class ArtworkDownloadTimedOut extends Schema.TaggedError<
     return "Artwork download timed out";
   }
 }
+
+const timeToLive = (exit: Exit.Exit<unknown, unknown>): Duration.Duration =>
+  Exit.isSuccess(exit) ? Duration.minutes(5) : Duration.zero;
 
 const contentTypeOf = (path: string): string =>
   CONTENT_TYPES.get(path.split(".").at(-1)?.toLowerCase() ?? "") ?? "application/octet-stream";
@@ -203,7 +216,7 @@ const make = Effect.gen(function* () {
     });
   });
 
-  const resize = Effect.fn("ArtworkStore.resize")(function* (
+  const resizeFile = Effect.fn("ArtworkStore.resize")(function* (
     file: string,
     fingerprint: string,
     width: ArtworkWidth,
@@ -245,6 +258,18 @@ const make = Effect.gen(function* () {
     return target;
   });
 
+  // Concurrent requests for one copy share a single ffmpeg run.
+  const copies = yield* Cache.makeWith(
+    ([file, fingerprint, width]: readonly [string, string, ArtworkWidth]) =>
+      resizeFile(file, fingerprint, width).pipe(
+        Effect.map((target): ArtworkImage => ({ path: target, contentType: "image/jpeg" })),
+      ),
+    { capacity: 2048, timeToLive },
+  );
+
+  const resize = (file: string, fingerprint: string, width: ArtworkWidth) =>
+    Cache.get(copies, [file, fingerprint, width] as const);
+
   const images = yield* Cache.makeWith(
     ([key, width]: readonly [string, Option.Option<ArtworkWidth>]) =>
       Effect.gen(function* () {
@@ -255,16 +280,14 @@ const make = Effect.gen(function* () {
 
         if (Option.isNone(width)) return { path: file, contentType: contentTypeOf(file) };
 
-        return { path: yield* resize(file, fingerprint, width.value), contentType: "image/jpeg" };
+        return yield* resize(file, fingerprint, width.value);
       }),
-    {
-      capacity: 2048,
-      timeToLive: (exit) => (Exit.isSuccess(exit) ? Duration.minutes(5) : Duration.zero),
-    },
+    { capacity: 2048, timeToLive },
   );
 
   return Service.of({
     image: (key, width) => Cache.get(images, [key, width] as const),
+    resize,
   });
 });
 

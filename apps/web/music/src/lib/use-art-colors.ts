@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { placeholderColors } from "./art";
-import { artSrc } from "./art-src";
+import { smallestArtSrc } from "./art-src";
 
 const SAMPLE = 8;
 
@@ -60,7 +60,7 @@ export const useArtColors = (url: string | null, seed: string): readonly [string
       },
       { signal: loading.signal },
     );
-    image.src = artSrc(url);
+    image.src = smallestArtSrc(url);
 
     return () => loading.abort();
   }, [url]);

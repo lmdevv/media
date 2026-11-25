@@ -1,9 +1,10 @@
 /**
  * Music's byte routes (`@media/contracts/music-playback`) on the server's Effect HTTP router
  * (ADR 0010): a song's stream at a profile to its personal ticket, and album art to its shareable
- * ticket (ADR 0011). Answers are plain text with the statuses music's players read. No answer,
- * log, or span carries a ticket.
+ * ticket (ADR 0011), as stored or resized to one of `ARTWORK_WIDTHS`. Answers are plain text with
+ * the statuses music's players read. No answer, log, or span carries a ticket.
  */
+import { requestedArtworkWidth } from "@media/contracts/artwork";
 import { isReceiverCredential } from "@media/contracts/cast";
 import { TrackId } from "@media/contracts/ids";
 import {
@@ -25,6 +26,7 @@ import {
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 
 import * as ArtworkGate from "../artwork/artwork-gate.ts";
+import * as ArtworkStore from "../artwork/artwork-store.ts";
 import * as MediaConfig from "../media-config.ts";
 import { realPathInsideApprovedRoots } from "../playback/file-resolver.ts";
 import * as PlaybackToken from "../playback/playback-grants.ts";
@@ -76,6 +78,7 @@ export const layer: Layer.Layer<
   | MediaConfig.Service
   | PlaybackToken.Service
   | ArtworkGate.Service
+  | ArtworkStore.Service
   | TrackSources.Service
   | MusicTranscoder.Service
   | FileSystem.FileSystem
@@ -86,6 +89,7 @@ export const layer: Layer.Layer<
     const config = yield* MediaConfig.Service;
     const tokens = yield* PlaybackToken.Service;
     const gate = yield* ArtworkGate.Service;
+    const store = yield* ArtworkStore.Service;
     const sources = yield* TrackSources.Service;
 
     const transcoder = yield* MusicTranscoder.Service;
@@ -294,7 +298,12 @@ export const layer: Layer.Layer<
 
       if (!isArtHash(hash)) return text(404, "Artwork not found");
 
-      const ticket = searchOf(request).get(gate.param);
+      const search = searchOf(request);
+      const width = requestedArtworkWidth(search);
+
+      if (Result.isFailure(width)) return text(400, "Invalid width");
+
+      const ticket = search.get(gate.param);
 
       if (ticket === null || !(yield* gate.admits(ticket, hash))) {
         return text(401, "Invalid or expired ticket");
@@ -303,18 +312,28 @@ export const layer: Layer.Layer<
       const path = artPath(config.dataDir, hash);
       const head = yield* Files.readHead(path, 16);
 
-      return yield* fileResponse(request, path, {
-        contentType: imageContentType(head),
+      // The art store names a cover by its content hash, so the hash alone names each resized copy.
+      const image = Option.isNone(width.success)
+        ? { path, contentType: imageContentType(head) }
+        : yield* store.resize(path, `music-art:${hash}`, width.success.value);
+
+      return yield* fileResponse(request, image.path, {
+        contentType: image.contentType,
         sessionEnded: undefined,
       }).pipe(Effect.map(HttpServerResponse.setHeader("cache-control", ART_CACHE_CONTROL)));
     }).pipe(
-      Effect.catchTag("FileError", (error) =>
-        error.missing
-          ? Effect.succeed(text(404, "Artwork not found"))
-          : Effect.logError("MusicRoutes.art_unreadable", error).pipe(
-              Effect.as(text(500, "Artwork unreadable")),
-            ),
-      ),
+      Effect.catchTags({
+        FileError: (error) =>
+          error.missing
+            ? Effect.succeed(text(404, "Artwork not found"))
+            : Effect.logError("MusicRoutes.art_unreadable", error).pipe(
+                Effect.as(text(500, "Artwork unreadable")),
+              ),
+        ArtworkUnavailable: (error) =>
+          Effect.logWarning("MusicRoutes.art_unavailable", error).pipe(
+            Effect.as(text(503, "Artwork unavailable")),
+          ),
+      }),
       services,
       Effect.withSpan("MusicRoutes.art"),
     );

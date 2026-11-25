@@ -670,7 +670,7 @@ function Stage({
           onPress={open ? onClose : onOpenLyrics}
           className="size-full"
         >
-          <Artwork url={song.artUrl} className="size-full" />
+          <Artwork url={song.artUrl} className="size-full" resolution="original" />
         </Pressable>
         {chip === null ? null : <LyricsChip loading={chip === "spinner"} progress={progress} />}
       </Animated.View>

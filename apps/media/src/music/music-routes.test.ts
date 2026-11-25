@@ -22,9 +22,10 @@ import {
   Scope,
   SubscriptionRef,
 } from "effect";
-import { HttpServer } from "effect/http";
+import { FetchHttpClient, HttpServer } from "effect/http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import * as ArtworkStore from "../artwork/artwork-store.ts";
 import * as CachePruner from "../cache-pruner.ts";
 import * as CoreTickets from "../core/core-tickets.ts";
 import { serve } from "../http/http-server.ts";
@@ -33,7 +34,9 @@ import * as PlaybackToken from "../playback/playback-grants.ts";
 import * as StreamOwners from "../playback/stream-owners.ts";
 import { makeFakeCore, stream } from "../testing/fake-core.ts";
 import { testConfigLayer } from "../testing/test-config.ts";
+import { testArtworkKeysLayer } from "../testing/test-tokens.ts";
 import { saveArt } from "./art-store.ts";
+import * as Files from "./music-files.ts";
 import * as MusicRoutes from "./music-routes.ts";
 import {
   makeDirectory,
@@ -43,7 +46,7 @@ import {
   writeBytes,
   writeSong,
 } from "./testing/music-fixtures.ts";
-import { ffprobe } from "./testing/music-songs.ts";
+import { ffmpeg, ffprobe } from "./testing/music-songs.ts";
 import * as TrackSources from "./track-sources.ts";
 import * as MusicTranscoder from "./transcoder.ts";
 
@@ -217,6 +220,11 @@ beforeAll(async () => {
       }).pipe(Layer.provide(fake.layer), Layer.provide(StreamOwners.layer)),
     ),
     Layer.provide(sources(tracks)),
+    Layer.provide(
+      ArtworkStore.layer.pipe(
+        Layer.provide([testArtworkKeysLayer, MediaTools.layer, FetchHttpClient.layer]),
+      ),
+    ),
     Layer.provide(MusicTranscoder.layer.pipe(Layer.provide([MediaTools.layer, CachePruner.layer]))),
     Layer.provide(config),
     Layer.provide(NodeServices.layer),
@@ -438,6 +446,61 @@ describe("music routes", { timeout: 60_000 }, () => {
     expect((await fetch(`${baseUrl}/music/art/${hash}`)).status).toBe(401);
     expect(
       (await fetch(`${baseUrl}/music/art/not-a-hash?ticket=${await artTicket(hash)}`)).status,
+    ).toBe(404);
+  });
+
+  it("serve art resized to an allowed width, with ranges, and refuse other widths", async () => {
+    const original = join(work, "cover.jpg");
+
+    await ffmpeg(["-f", "lavfi", "-i", "testsrc=size=600x600", "-frames:v", "1", original]);
+    const bytes = await run(Files.readWholeFile(original));
+    const hash = await run(saveArt(join(work, "data"), bytes).pipe(Effect.map(Option.getOrThrow)));
+    const ticket = await artTicket(hash);
+
+    const sized = (width: string, query = `ticket=${ticket}`) =>
+      `${baseUrl}/music/art/${hash}?${query}&w=${width}`;
+
+    const widthOf = async (response: Response, name: string) => {
+      const file = join(work, name);
+
+      await writeBytes(file, new Uint8Array(await response.arrayBuffer()));
+
+      return ffprobe(["-v", "error", "-show_entries", "stream=width", "-of", "csv=p=0", file]);
+    };
+
+    const small = await fetch(sized("185"));
+
+    expect(small.status).toBe(200);
+    expect(small.headers.get("content-type")).toBe("image/jpeg");
+    expect(small.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
+    const length = Number(small.headers.get("content-length"));
+
+    expect(length).toBeLessThan(bytes.length);
+    expect((await widthOf(small, "small.jpg")).trim()).toBe("185");
+
+    // The server never enlarges a cover, so a width past it answers the cover's own size.
+    expect((await widthOf(await fetch(sized("1280")), "large.jpg")).trim()).toBe("600");
+
+    const head = await fetch(sized("185"), { method: "HEAD" });
+
+    expect(head.status).toBe(200);
+    expect(head.headers.get("content-length")).toBe(String(length));
+
+    const part = await fetch(sized("185"), { headers: { range: "bytes=0-9" } });
+
+    expect(part.status).toBe(206);
+    expect(part.headers.get("content-range")).toBe(`bytes 0-9/${String(length)}`);
+    await part.arrayBuffer();
+
+    const refused = await fetch(sized("186"));
+
+    expect([refused.status, await refused.text()]).toEqual([400, "Invalid width"]);
+    expect((await fetch(sized("185", "ticket=nope"))).status).toBe(401);
+    const missing = "f".repeat(64);
+
+    expect(
+      (await fetch(`${baseUrl}/music/art/${missing}?ticket=${await artTicket(missing)}&w=185`))
+        .status,
     ).toBe(404);
   });
 
