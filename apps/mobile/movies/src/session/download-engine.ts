@@ -367,7 +367,8 @@ export class DownloadEngine {
 
         this.#copiesLeft = known.downloads.map((download) => download.id);
         clearTimeout(this.#copyTimer);
-        this.#copyTimer = setTimeout(() => this.#keepCopies(), 0);
+
+        if (!this.#disposed) this.#copyTimer = setTimeout(() => this.#keepCopies(), 0);
 
         if (misplaced || fromCopies > 0 || changes.length > 0) this.#save();
         this.#notify();
