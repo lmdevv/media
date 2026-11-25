@@ -1,7 +1,7 @@
 import { join } from "node:path";
 
 import { assert, describe, layer } from "@effect/vitest";
-import { Effect, Fiber, FileSystem, Path, Schedule, Schema } from "effect";
+import { Clock, Effect, Fiber, FileSystem, Path, Schedule, Schema } from "effect";
 import { HttpClient, HttpClientRequest } from "effect/http";
 
 import { LibraryId } from "@media/contracts/ids";
@@ -12,6 +12,9 @@ import {
 } from "@media/contracts/media-playback";
 
 import * as LibraryScanner from "../library/library-scanner.ts";
+import { capabilityOf } from "./capability-inventory.ts";
+import * as TranscodeCapabilities from "./transcode-capabilities.ts";
+import { capabilityKey, ImplId } from "./video-ops.ts";
 import * as MemoryLibrary from "../library/memory-library.ts";
 import * as MediaTools from "../media/media-tools.ts";
 import { invocationsOf, type RunRule, writeFakeFfmpeg } from "../testing/fake-ffmpeg.ts";
@@ -106,6 +109,18 @@ const damagedLateWithoutCpuToneMap = await writeFakeFfmpeg({
   ...DAMAGED_LATE,
   withoutCpuToneMap: true,
 });
+
+/** As `damagedLate`, and once a run seeks, every probe takes four seconds, so a diagnosis is slow. */
+const slowDiagnosis = await writeFakeFfmpeg({
+  ...DAMAGED_LATE,
+  rules: [
+    { token: "-ss ", runs: "hls", arm: "seeked" },
+    { token: "-progress", runs: "probe", armedBy: "seeked", delayMs: 4000 },
+  ],
+});
+
+/** Runs as usual, logging every run. */
+const plain = await writeFakeFfmpeg({ logInvocations: true });
 
 /** Runs stall after their first fragment until killed, so a seek replaces a live run. */
 const stalling = await writeFakeFfmpeg({ hlsStallsAfterFragments: 1, logInvocations: true });
@@ -549,6 +564,121 @@ describe.skipIf(!hasFfmpeg)("stream recovery", () => {
           assert.strictEqual(retried.status, 500, retried.body);
           assert.include(retried.body, '"_tag":"TranscodeFailed"');
           assert.lengthOf(yield* runsOf(damagedLate, streamId), runs, "no run starts there again");
+        }),
+      120_000,
+    );
+  });
+
+  layer(
+    recovering(slowDiagnosis),
+    options,
+  )((it) => {
+    it.effect(
+      "stops a stream at once while its failed run is being diagnosed, and starts nothing after",
+      () =>
+        Effect.gen(function* () {
+          const server = yield* MediaTestServer.Service;
+          const { library } = yield* FixtureWorkspace.Service;
+          const fs = yield* FileSystem.FileSystem;
+
+          const token = signTestToken({
+            fid: server.fileId("movies", library.directMovie),
+            sid: "stopped",
+          });
+
+          const stream = yield* negotiated({ token, capabilities: smallBrowser });
+          const streamId = stream.streamId ?? "";
+
+          assert.strictEqual(stream.mode, "transcode-qsv");
+          assert.strictEqual(yield* fetchStatus(segmentOf(stream.url, 0)), 200);
+
+          const moved = yield* seekTo(token, streamId, 10);
+          const index = yield* segmentHolding(moved.playlistUrl, 10);
+
+          const waiting = yield* fetchAnswer(segmentOf(moved.playlistUrl, index)).pipe(
+            Effect.forkChild,
+          );
+
+          // The run at ten seconds failed; its diagnosis's probes now take four seconds each.
+          yield* awaitLogged("StreamSessions.encoder_failed", streamId);
+          const started = yield* Clock.currentTimeMillis;
+
+          const stopped = yield* HttpClient.execute(
+            HttpClientRequest.post(`${server.baseUrl}/api/playback/stop`).pipe(
+              HttpClientRequest.bodyJsonUnsafe({ token, streamId }),
+            ),
+          ).pipe(Effect.orDie);
+
+          const stopMillis = (yield* Clock.currentTimeMillis) - started;
+          const answered = yield* Fiber.join(waiting);
+
+          assert.isBelow(stopped.status, 300);
+          assert.isBelow(stopMillis, 2000, "the stop does not wait for the diagnosis");
+          assert.strictEqual(answered.status, 404, answered.body);
+
+          // Give a replacement every chance to start, then look.
+          yield* Effect.sleep("5 seconds");
+
+          assert.lengthOf(yield* runsOf(slowDiagnosis, streamId), 2, "no replacement run");
+          assert.isFalse(yield* fs.exists(join(server.transcodeDir, streamId)));
+          assert.deepStrictEqual(
+            server
+              .logged()
+              .filter(
+                (entry) =>
+                  entry.annotations["streamId"] === streamId &&
+                  entry.message === "StreamSessions.pipeline_replaced",
+              ),
+            [],
+          );
+        }),
+      120_000,
+    );
+  });
+
+  layer(
+    MediaTestServer.layer({
+      FFMPEG_PATH: plain,
+      HARDWARE_ACCELERATION: "qsv",
+      MAX_CONCURRENT_TRANSCODES: "1",
+    }),
+    options,
+  )((it) => {
+    it.effect(
+      "probes while playback fills every encoder slot, without disturbing that playback",
+      () =>
+        Effect.gen(function* () {
+          const server = yield* MediaTestServer.Service;
+          const { library } = yield* FixtureWorkspace.Service;
+          const capabilities = yield* TranscodeCapabilities.Service;
+          const fileId = yield* addFilm("full-slots");
+
+          const playing = yield* negotiated({
+            token: signTestToken({ fid: server.fileId("movies", library.directMovie), sid: "a" }),
+            capabilities: smallBrowser,
+          });
+
+          assert.strictEqual(playing.mode, "transcode-qsv");
+          assert.strictEqual(yield* fetchStatus(segmentOf(playing.url, 0)), 200);
+
+          // The HDR film needs a tone map the only slot's playback never probed.
+          const refused = yield* negotiate({ token: signTestToken({ fid: fileId, sid: "b" }) });
+
+          const toneMap = capabilityOf(
+            yield* capabilities.inventory,
+            capabilityKey(ImplId("tonemap.qsv"), "pq"),
+          );
+
+          assert.strictEqual(refused.status, 503, JSON.stringify(refused.body));
+          assert.deepInclude(refused.body, { _tag: "TranscodeCapacityReached" });
+          assert.strictEqual(toneMap.status, "verified", "its probes ran with every slot taken");
+
+          assert.strictEqual(yield* fetchStatus(segmentOf(playing.url, 1)), 200);
+          assert.lengthOf(
+            yield* runsOf(plain, playing.streamId ?? ""),
+            1,
+            "the playback kept its run",
+          );
         }),
       120_000,
     );
