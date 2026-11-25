@@ -1,7 +1,7 @@
 /**
  * Where downloads live on this iPhone, under the app's documents folder, which iOS keeps:
  * `downloads/<server>/<person>/` holds the store (`index.json`) and one folder per download with
- * its video, WebVTT subtitles, and picture.
+ * its video, WebVTT subtitles, picture, and its own copy of its row (`download.json`).
  * Names come only from IDs, never from titles, so they are always safe file names.
  */
 
@@ -13,6 +13,12 @@ export const accountFolder = (mediaUrl: string, userId: string): string =>
 
 /** The store's file name in the person's folder. */
 export const STORE_FILE = "index.json";
+
+/** Where a store that could not be read is kept, beside the one rebuilt in its place. */
+export const UNREADABLE_STORE_FILE = "index.unreadable.json";
+
+/** A download's own copy of its row, in its folder, from which an unreadable store is rebuilt. */
+export const RECORD_FILE = "download.json";
 
 /** The folder of one download inside its person's folder. */
 export const itemFolder = (downloadId: string): string => segment(downloadId);

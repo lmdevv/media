@@ -8,7 +8,7 @@ import type { DownloadPauseState } from "expo-file-system";
 export const byteCount = (value: number | bigint): number => Number(value);
 
 /** What a file operation on the downloads folder was doing when it failed. */
-export type DiskOperation = "read" | "write" | "move" | "remove" | "createFolder";
+export type DiskOperation = "read" | "write" | "move" | "remove" | "list" | "createFolder";
 
 /** A file operation on the person's downloads folder failed, such as a write to a full disk. */
 export class DiskFailed extends Data.TaggedError("DiskFailed")<{
@@ -71,6 +71,8 @@ export interface DownloadDisk {
   readonly move: (from: string, to: string) => Result.Result<void, DiskFailed>;
   /** Deletes a file, or a folder with everything in it; nothing there is fine. */
   readonly remove: (path: string) => Result.Result<void, DiskFailed>;
+  /** The names in the person's folder; none when it isn't there yet. */
+  readonly list: () => Result.Result<ReadonlyArray<string>, DiskFailed>;
   /** Creates the folder at `path` and those above it; one already there is fine. */
   readonly createFolder: (path: string) => Result.Result<void, DiskFailed>;
   /** Whether a file or folder is there. */

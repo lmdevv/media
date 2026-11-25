@@ -20,10 +20,10 @@ import {
 } from "@/lib/downloads/failures";
 import {
   DownloadEvent,
+  EMPTY_STORE,
   keptPlaybackOf,
   mayTransfer,
   nextToRun,
-  parseStore,
   pictureOf,
   planSync,
   reduce,
@@ -35,6 +35,7 @@ import type {
   DownloadStore,
   FileId,
   KeptPlayback,
+  KnownStore,
   ListedDownload,
   NetworkNow,
   NewDownload,
@@ -42,7 +43,14 @@ import type {
   SyncPlan,
 } from "@/lib/downloads/model";
 import type { DownloadSettings } from "@/lib/downloads/settings";
-import { readIndexText, saveIndex } from "@/lib/downloads/storage";
+import {
+  IndexRead,
+  keepRecord,
+  keepRecords,
+  readIndex,
+  saveIndex,
+  setAsideIndex,
+} from "@/lib/downloads/storage";
 import { coreQueue } from "@/lib/downloads/core-queue";
 import { IOS_CAPABILITIES } from "@/lib/player/capabilities";
 
@@ -252,12 +260,30 @@ export class DownloadEngine {
   #sending = false;
   #started = false;
   #disposed = false;
+  /** Whether the store speaks for every download kept here, or was rebuilt after a failed read. */
+  readonly #known: KnownStore["_tag"];
+  /** Whether an index that could not be read still sits where a save would overwrite it. */
+  #unreadableInPlace: boolean;
 
+  /**
+   * Reads the person's downloads index. One that cannot be read is never taken for no downloads:
+   * the downloads come back from their own copies, the core is told to forget none of them, and
+   * the unreadable index is moved aside before the rebuilt one is saved.
+   */
   constructor(platform: EnginePlatform, options: EngineOptions) {
     this.#platform = platform;
     this.#options = options;
 
-    const stored = parseStore(readIndexText(options.disk));
+    const read = readIndex(options.disk);
+
+    const stored = IndexRead.$match(read, {
+      None: () => EMPTY_STORE,
+      Readable: ({ store }) => store,
+      Unreadable: ({ recovered }) => recovered,
+    });
+
+    this.#known = IndexRead.$is("Unreadable")(read) ? "recovered" : "complete";
+    this.#unreadableInPlace = IndexRead.$is("Unreadable")(read);
 
     const settled = stored.downloads.reduce(
       (store, download) =>
@@ -280,6 +306,10 @@ export class DownloadEngine {
       network: { connected: false, wifi: false },
       save: "saved",
     };
+
+    if (IndexRead.$is("Readable")(read)) keepRecords(options.disk, settled);
+
+    if (IndexRead.$is("Unreadable")(read)) this.#save();
   }
 
   /** The current state; a new object after every change. */
@@ -509,7 +539,7 @@ export class DownloadEngine {
     const listed = rows.flatMap(listedOf);
 
     for (const entry of listed) this.#settled.add(entry.id);
-    this.#follow(planSync(this.#snapshot.store, listed, settled));
+    this.#follow(planSync({ _tag: this.#known, store: this.#snapshot.store }, listed, settled));
   }
 
   /** `rows` and the rows of every page after `page`, read in order; null when a page fails. */
@@ -609,18 +639,37 @@ export class DownloadEngine {
     }
   }
 
-  /** Saves the store, and shows whether it reached the disk. */
+  /**
+   * Saves the store, and shows whether it reached the disk. An unreadable index is moved aside
+   * first; while it cannot be, nothing is saved over it.
+   */
   #save(): void {
     clearTimeout(this.#saveTimer);
     this.#saveTimer = undefined;
 
-    const save = Result.isSuccess(saveIndex(this.#options.disk, this.#snapshot.store))
-      ? "saved"
-      : "failed";
+    if (this.#unreadableInPlace) {
+      this.#unreadableInPlace = Result.isFailure(setAsideIndex(this.#options.disk));
+    }
+
+    const save =
+      !this.#unreadableInPlace &&
+      Result.isSuccess(saveIndex(this.#options.disk, this.#snapshot.store))
+        ? "saved"
+        : "failed";
 
     if (save === this.#snapshot.save) return;
     this.#snapshot = { ...this.#snapshot, save };
     this.#notify();
+  }
+
+  /**
+   * Saves a download's own copy of its row once its transfer starts and once it lands. A copy that
+   * fails to save is saved again at the next launch.
+   */
+  #keepRecord(id: string): void {
+    const download = this.#find(id);
+
+    if (download !== undefined) keepRecord(this.#options.disk, download);
   }
 
   #deleteFiles(id: string): void {
@@ -962,6 +1011,7 @@ export class DownloadEngine {
         ticketExpiresAt: ticket.expiresAt,
       }),
     );
+    this.#keepRecord(queued.id);
 
     const destination = itemPath(queued.id, videoFile(ready.container === "mov" ? "mov" : "mp4"));
 
@@ -1005,6 +1055,7 @@ export class DownloadEngine {
       if (file === null) return "failed";
 
       this.#dispatch(DownloadEvent.Finished({ id }));
+      this.#keepRecord(id);
 
       return "done";
     } catch {

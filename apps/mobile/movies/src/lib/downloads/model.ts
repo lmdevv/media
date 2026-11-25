@@ -164,22 +164,28 @@ const decodeRecord = Schema.decodeUnknownOption(DownloadRecord);
 const decodePending = Schema.decodeUnknownOption(PendingProgress);
 
 /**
- * The store kept in `text`, or an empty one when there is none or it cannot be read. Each entry is
- * read on its own, so one that cannot be read (written by another version) costs only itself.
+ * The store kept in `text`, or none when `text` is not a store, such as an index a crash cut
+ * short. Each entry is read on its own, so one that cannot be read (written by another version)
+ * costs only itself.
  */
-export const parseStore = (text: string | null): DownloadStore =>
-  Option.match(text === null ? Option.none() : decodeEntries(text), {
-    onNone: () => EMPTY_STORE,
-    onSome: (entries) => ({
-      downloads: entries.downloads.flatMap((entry) => Option.toArray(decodeRecord(entry))),
-      pendingProgress: entries.pendingProgress.flatMap((entry) =>
-        Option.toArray(decodePending(entry)),
-      ),
-    }),
-  });
+export const parseStore = (text: string): Option.Option<DownloadStore> =>
+  Option.map(decodeEntries(text), (entries) => ({
+    downloads: entries.downloads.flatMap((entry) => Option.toArray(decodeRecord(entry))),
+    pendingProgress: entries.pendingProgress.flatMap((entry) =>
+      Option.toArray(decodePending(entry)),
+    ),
+  }));
 
 /** The store as the JSON it is kept as. */
 export const serializeStore = Schema.encodeSync(StoredStore);
+
+const StoredRecord = Schema.fromJsonString(DownloadRecord);
+
+/** The download kept in `text`, a download's own copy of its row, or none when it does not read. */
+export const parseRecord = Schema.decodeUnknownOption(StoredRecord);
+
+/** A download as the JSON of its own copy of its row. */
+export const serializeRecord = Schema.encodeSync(StoredRecord);
 
 /** What a new download starts from: the file, its title and episode, and how it is shown. */
 export type NewDownload = Pick<
@@ -423,12 +429,23 @@ export interface SyncPlan {
 }
 
 /**
+ * The store the device follows the core's list with, and whether it speaks for every download kept
+ * here. A `complete` store was read from the index, or is a first run's, so a listed download it
+ * lacks holds nothing here. A `recovered` store was rebuilt from the downloads' own copies after
+ * the index could not be read, so a listed download it lacks may still be on this iPhone.
+ */
+export type KnownStore =
+  | { readonly _tag: "complete"; readonly store: DownloadStore }
+  | { readonly _tag: "recovered"; readonly store: DownloadStore };
+
+/**
  * How the device follows `listed`, every page of the core's list. Only a download in `addedBefore`
  * (the ones the core had taken when the list was first read) is purged for being unlisted, so one
- * added while the pages were read is never mistaken for one the core dropped.
+ * added while the pages were read is never mistaken for one the core dropped. A recovered store
+ * forgets nothing.
  */
 export const planSync = (
-  store: DownloadStore,
+  { _tag, store }: KnownStore,
   listed: ReadonlyArray<ListedDownload>,
   addedBefore: ReadonlySet<string>,
 ): SyncPlan => {
@@ -462,7 +479,8 @@ export const planSync = (
     refresh,
     drop,
     purge,
-    forget: listed.flatMap((entry) => (kept.has(entry.id) ? [] : [entry.id])),
+    forget:
+      _tag === "recovered" ? [] : listed.flatMap((entry) => (kept.has(entry.id) ? [] : [entry.id])),
   };
 };
 

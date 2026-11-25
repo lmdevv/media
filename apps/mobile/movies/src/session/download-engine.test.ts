@@ -6,7 +6,7 @@ import type { PlatformSdk } from "@media/sdk/promise";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { asMediaFileId, asTitleId } from "@/lib/catalog";
-import { STORE_FILE, itemPath, videoFile } from "@/lib/downloads/files";
+import { STORE_FILE, UNREADABLE_STORE_FILE, itemPath, videoFile } from "@/lib/downloads/files";
 import { DownloadEvent, EMPTY_STORE, reduce, serializeStore } from "@/lib/downloads/model";
 import type { Delivery, DownloadStore, FileId, NewDownload } from "@/lib/downloads/model";
 import { NodeDisk } from "@/lib/downloads/node-disk";
@@ -253,6 +253,52 @@ describe("DownloadEngine", () => {
       ).toBe(true);
     },
   );
+
+  it("rebuilds the downloads an unreadable index lost from their own folders, ready to play", async () => {
+    keep([dune, arrival]);
+    launch().dispose();
+    writeFileSync(join(root, STORE_FILE), "not an index");
+
+    const engine = launch();
+
+    engine.start();
+    core.lists([dune, arrival]);
+    await settle();
+
+    expect(listed(engine).toSorted()).toStrictEqual([`${arrival}:ready`, `${dune}:ready`]);
+    expect(
+      engine.getSnapshot().store.downloads.map((download) => engine.videoUri(download)),
+    ).not.toContain(null);
+    expect(core.calls).toStrictEqual([]);
+    expect(readFileSync(join(root, UNREADABLE_STORE_FILE), "utf8")).toBe("not an index");
+    expect(listed(launch()).toSorted()).toStrictEqual([`${arrival}:ready`, `${dune}:ready`]);
+  });
+
+  it("takes downloads without an index for an unreadable index, not a first run", async () => {
+    keep([dune]);
+    launch().dispose();
+    rmSync(join(root, STORE_FILE));
+
+    const engine = launch();
+
+    engine.start();
+    core.lists([dune]);
+    await settle();
+
+    expect(listed(engine)).toStrictEqual([`${dune}:ready`]);
+    expect(core.calls).toStrictEqual([]);
+  });
+
+  it("frees on the core what it lists on a first run, when this iPhone holds nothing", async () => {
+    const engine = launch();
+
+    engine.start();
+    core.lists([stranger]);
+    await settle();
+
+    expect(listed(engine)).toStrictEqual([]);
+    expect(core.calls).toStrictEqual([`remove:${stranger}`]);
+  });
 
   it("removes the files no download owns, and keeps the ones it does", () => {
     keep([dune, stranger]);

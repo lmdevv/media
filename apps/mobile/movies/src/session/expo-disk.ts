@@ -35,6 +35,8 @@ export const expoDisk = (folder: Directory): DownloadDisk => {
         if (directory.exists) directory.delete();
         else if (file.exists) file.delete();
       }),
+    list: () =>
+      onDisk("list", "", () => (folder.exists ? folder.list().map((entry) => entry.name) : [])),
     createFolder: (path) =>
       onDisk("createFolder", path, () =>
         directoryAt(path).create({ intermediates: true, idempotent: true }),

@@ -1,4 +1,5 @@
 import { Brand, Option } from "effect";
+import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
 import type { EpisodeId, TitleId } from "../catalog";
@@ -31,6 +32,7 @@ import type {
   DownloadStore,
   FileId,
   KeptPlayback,
+  KnownStore,
   NewDownload,
 } from "./model";
 
@@ -322,9 +324,9 @@ describe("the download store", () => {
       DownloadEvent.Described({ id: episodeFile, playback }),
     );
 
-    expect(parseStore(serializeStore(store))).toStrictEqual(store);
-    expect(parseStore("{")).toStrictEqual(EMPTY_STORE);
-    expect(parseStore(null)).toStrictEqual(EMPTY_STORE);
+    expect(parseStore(serializeStore(store))).toStrictEqual(Option.some(store));
+    expect(parseStore("{")).toStrictEqual(Option.none());
+    expect(parseStore("")).toStrictEqual(Option.none());
 
     const older = { id: "profile-title-movie", profileId: "profile", phase: "ready" };
 
@@ -333,9 +335,12 @@ describe("the download store", () => {
       pendingProgress: [{ profileId: "profile" }],
     });
 
-    expect(parseStore(mixed)).toStrictEqual(store);
+    expect(parseStore(mixed)).toStrictEqual(Option.some(store));
   });
 });
+
+/** `store` as one read from the index. */
+const complete = (store: DownloadStore): KnownStore => ({ _tag: "complete", store });
 
 describe("following the core's list", () => {
   const store = run(
@@ -350,7 +355,7 @@ describe("following the core's list", () => {
   it("keeps what is available at the revision it holds", () => {
     expect(
       planSync(
-        store,
+        complete(store),
         [
           { id: duneFile, state: "available", revision: "r1" },
           { id: episodeFile, state: "available", revision: "r1" },
@@ -363,7 +368,7 @@ describe("following the core's list", () => {
   it("expires, drops, and downloads a new revision again", () => {
     expect(
       planSync(
-        store,
+        complete(store),
         [
           { id: duneFile, state: "expired" },
           { id: episodeFile, state: "available", revision: "r2" },
@@ -380,7 +385,7 @@ describe("following the core's list", () => {
 
     expect(
       planSync(
-        store,
+        complete(store),
         [
           { id: duneFile, state: "gone" },
           { id: episodeFile, state: "available", revision: "r1" },
@@ -393,9 +398,12 @@ describe("following the core's list", () => {
   it("brings an expired download back once access returns", () => {
     const expired = reduce(store, DownloadEvent.Expired({ id: duneFile }));
 
-    expect(planSync(expired, [{ id: duneFile, state: "expired" }], both).expire).toStrictEqual([]);
     expect(
-      planSync(expired, [{ id: duneFile, state: "available", revision: "r1" }], both).refresh,
+      planSync(complete(expired), [{ id: duneFile, state: "expired" }], both).expire,
+    ).toStrictEqual([]);
+    expect(
+      planSync(complete(expired), [{ id: duneFile, state: "available", revision: "r1" }], both)
+        .refresh,
     ).toStrictEqual([duneFile]);
   });
 
@@ -411,7 +419,7 @@ describe("following the core's list", () => {
     );
 
     expect(
-      planSync(withNew, [{ id: stranger, state: "available", revision: "r1" }], both),
+      planSync(complete(withNew), [{ id: stranger, state: "available", revision: "r1" }], both),
     ).toStrictEqual({
       expire: [],
       refresh: [],
@@ -419,6 +427,46 @@ describe("following the core's list", () => {
       purge: [duneFile, episodeFile],
       forget: [stranger],
     });
+  });
+});
+
+describe("following the core's list with a recovered store", () => {
+  const ids = [duneFile, episodeFile, asFileId("file-unknown"), asFileId("file-other")];
+
+  const listing = fc.array(
+    fc.oneof(
+      fc.record({
+        id: fc.constantFrom(...ids),
+        state: fc.constant("available" as const),
+        revision: fc.constantFrom("r1", "r2"),
+      }),
+      fc.record({
+        id: fc.constantFrom(...ids),
+        state: fc.constantFrom("expired" as const, "gone" as const),
+      }),
+    ),
+  );
+
+  const stores = fc
+    .subarray([
+      [DownloadEvent.Added({ download: movie, at: 1 }), ...kept(duneFile)],
+      [
+        DownloadEvent.Added({ download: show, at: 2 }),
+        DownloadEvent.Confirmed({ id: episodeFile }),
+      ],
+    ])
+    .map((parts) => run(...parts.flat()));
+
+  it("plans what a complete store plans, but forgets nothing", () => {
+    fc.assert(
+      fc.property(stores, listing, fc.subarray(ids), (store, listed, before) => {
+        const addedBefore = new Set<string>(before);
+        const recovered = planSync({ _tag: "recovered", store }, listed, addedBefore);
+        const known = planSync({ _tag: "complete", store }, listed, addedBefore);
+
+        expect(recovered).toStrictEqual({ ...known, forget: [] });
+      }),
+    );
   });
 });
 

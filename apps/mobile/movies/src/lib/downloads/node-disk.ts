@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 
 import { onDisk } from "./disk";
@@ -92,6 +100,13 @@ export class NodeDisk implements DownloadDisk {
     onDisk("remove", path, () => {
       if (this.#change() !== "lands") throw new Error("killed");
       rmSync(this.#at(path), { recursive: true, force: true });
+    });
+
+  readonly list: DownloadDisk["list"] = () =>
+    onDisk("list", "", () => {
+      if (this.#dead) throw new Error("killed");
+
+      return existsSync(this.#root) ? readdirSync(this.#root) : [];
     });
 
   readonly createFolder: DownloadDisk["createFolder"] = (path) =>
