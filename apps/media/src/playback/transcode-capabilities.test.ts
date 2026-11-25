@@ -262,6 +262,24 @@ const outage = await standIn({
   ],
 });
 
+/**
+ * Once armed, Quick Sync's tone map and its 8-bit HEVC decoder fail their probes, and the device
+ * no longer opens, as when its driver went away.
+ */
+const deviceLost = await standIn({
+  rules: [
+    { token: "arm-outage", runs: "any", arm: "outage", stderr: "armed" },
+    { token: "tonemap=1", runs: "probe", armedBy: "outage", stderr: VPP_FAILED },
+    { token: "hevc-8.mkv", runs: "probe", armedBy: "outage", stderr: IO_SURFACE },
+    {
+      token: "nullsrc=s=64x64",
+      runs: "any",
+      armedBy: "outage",
+      stderr: "Device creation failed: -5.",
+    },
+  ],
+});
+
 /** Tone map probes that end in a way that proves nothing about the tone map. */
 const PROVES_NOTHING: ReadonlyArray<readonly [string, FakeFfmpegBehavior]> = [
   ["stopped by SIGINT", { rules: [{ token: "tonemap=1", runs: "probe", signal: "SIGINT" }] }],
@@ -496,6 +514,73 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
               (quarantine) => quarantine.strikes,
             ),
             Option.some(1),
+          );
+        }),
+      60_000,
+    );
+  });
+
+  layer(
+    deviceLost.services,
+    live,
+  )((it) => {
+    it.effect(
+      "opens the device again after two of its keys are quarantined within a minute, and forgets it when it no longer opens",
+      () =>
+        Effect.gen(function* () {
+          const capabilities = yield* TranscodeCapabilities.Service;
+          const tools = yield* MediaTools.Service;
+          const warm = yield* capabilities.resolve(request(HDR));
+          const pipeline = pipelineOf(HDR, warm);
+          const sdr: SourceVideo = { ...HDR, pixelFormat: "yuv420p", depth: 8, colour: "sdr" };
+          const sdrPipeline = pipelineOf(sdr, yield* capabilities.resolve(request(sdr)));
+          const identified = (yield* capabilities.inventory).devices.get("qsv");
+
+          assert.strictEqual(identified?.opened, true);
+          assert.strictEqual(pipeline.steps[0]?.impl, ImplId("decode.qsv"));
+          assert.strictEqual(sdrPipeline.steps[0]?.impl, ImplId("decode.qsv"));
+          yield* tools.ffmpeg(["arm-outage"]).pipe(Effect.ignore);
+
+          // One quarantine on the device opens nothing.
+          assert.deepStrictEqual(
+            yield* capabilities.diagnose(vppFailed(pipeline)),
+            Diagnosis.Capability({ keys: [TONE_MAP_QSV], impls: [ImplId("tonemap.qsv")] }),
+          );
+          assert.strictEqual((yield* capabilities.inventory).devices.get("qsv"), identified);
+
+          const decoderFailed = yield* capabilities.diagnose({
+            request: request(sdr),
+            pipeline: sdrPipeline,
+            owners: {
+              decoder: { step: 0, names: ["hevc", "hevc_qsv"] },
+              encoder: { step: sdrPipeline.steps.length - 1, names: ["h264_qsv"] },
+              filters: new Map(),
+            },
+            failure: { exitCode: 69, signal: null, stderrHead: IO_SURFACE.replace("h264", "hevc") },
+          });
+
+          assert.isTrue(Diagnosis.$is("Capability")(decoderFailed));
+
+          // The second opens the device again, which fails: its keys are forgotten.
+          const reopened = yield* capabilities.inventory.pipe(
+            Effect.map((known) => known.devices.get("qsv")),
+            Effect.filterOrFail((device) => device !== identified),
+            Effect.retry({ schedule: Schedule.spaced("100 millis"), times: 100 }),
+            Effect.orDie,
+          );
+
+          assert.strictEqual(reopened?.opened, false);
+          assert.strictEqual(
+            yield* statusOf(capabilityKey(ImplId("encode.qsv"), "h264/8/cbr")),
+            "unknown",
+          );
+
+          const after = yield* capabilities.resolve(request(HDR));
+
+          assert.deepStrictEqual(after.domains, []);
+          assert.deepStrictEqual(
+            plannedImpls(HDR, after),
+            Result.succeed(["decode.cpu", "scale.cpu", "tonemap.cpu", "encode.cpu"]),
           );
         }),
       60_000,

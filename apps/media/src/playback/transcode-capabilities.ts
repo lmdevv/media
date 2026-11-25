@@ -911,30 +911,30 @@ const make = Effect.gen(function* () {
     const undecided: Array<Step> = [];
 
     for (const step of suspects) {
-      const at = yield* now;
-      const snapshot = yield* probeSnapshot;
+      const left = deadline - (yield* now);
 
-      const planned = yield* chosenProbe(
-        { key: step.capability, on: step.on, needs: step.needs },
-        snapshot,
-        failed.request,
-      );
+      // Choosing the probe, which may wait for its clip, counts toward the deadline too.
+      const shown = yield* Effect.gen(function* () {
+        const planned = yield* chosenProbe(
+          { key: step.capability, on: step.on, needs: step.needs },
+          yield* probeSnapshot,
+          failed.request,
+        );
 
-      if (deadline <= at || planned === undefined || Result.isFailure(planned.plan)) {
+        if (planned === undefined || Result.isFailure(planned.plan)) return Option.none();
+        const probed = yield* asDemand(runProbe(planned.plan.success, failed.request, "demand"));
+
+        return Option.map(probed, (result) => ({ result, source: planned.scope }));
+      }).pipe(Effect.timeoutOption(Duration.millis(Math.max(0, left))), Effect.map(Option.flatten));
+
+      if (Option.isNone(shown)) {
         undecided.push(step);
       } else {
-        const probed = yield* asDemand(
-          runProbe(planned.plan.success, failed.request, "demand"),
-        ).pipe(Effect.timeoutOption(Duration.millis(deadline - at)), Effect.map(Option.flatten));
-
-        const outcome = Option.match(probed, {
-          onNone: () => "inconclusive" as const,
-          onSome: (shown) => shown.outcome,
-        });
+        const { result, source } = shown.value;
+        const outcome = result.outcome;
 
         if (outcome === "rejected") {
           const reproducedAt = yield* now;
-          const source = planned.scope;
 
           yield* update((current) =>
             Inventory.reproduced(current, step.capability, source, reproducedAt, epochOf(step)),
@@ -943,16 +943,13 @@ const make = Effect.gen(function* () {
             source === undefined
               ? "TranscodeCapabilities.quarantined"
               : "TranscodeCapabilities.source_reproduced",
-          ).pipe(
-            Effect.annotateLogs({
-              key: step.capability,
-              detail: Option.match(probed, { onNone: () => "", onSome: (shown) => shown.detail }),
-            }),
-          );
+          ).pipe(Effect.annotateLogs({ key: step.capability, detail: result.detail }));
 
           // Only a generated clip's failure speaks for other files; the source's is its own.
           if (source !== undefined) return Diagnosis.Source({ impls: [step.impl] });
-          yield* reopenIfStruck(step.on, reproducedAt);
+
+          // The device check informs later plans; the failed stream does not wait for it.
+          yield* reopenIfStruck(step.on, reproducedAt).pipe(Effect.forkIn(scope));
 
           return Diagnosis.Capability({ keys: [step.capability], impls: [step.impl] });
         }
