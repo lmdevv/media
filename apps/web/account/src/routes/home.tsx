@@ -13,7 +13,7 @@ function HomePage() {
   const me = useMe();
 
   return (
-    <Shell>
+    <Shell field="home">
       <HomeView me={me} />
     </Shell>
   );

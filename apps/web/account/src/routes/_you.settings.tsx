@@ -6,7 +6,7 @@ import { FieldError } from "@media/ui/components/text-field";
 import { cn } from "@media/ui/lib/utils";
 import { createFileRoute } from "@tanstack/react-router";
 
-import { PageHeader } from "@media/ui/components/page-header";
+import { PageHeader } from "@/components/page-header";
 import { Section } from "@/components/admin/parts";
 import { describeFailure } from "@media/ui/lib/failure";
 import { useAction } from "@/screens/people/action";

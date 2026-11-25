@@ -6,7 +6,7 @@ import { Match } from "effect";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
-import { PageHeader } from "@media/ui/components/page-header";
+import { PageHeader } from "@/components/page-header";
 import { describeFailure } from "@media/ui/lib/failure";
 import { secretLink } from "@/session/link-secret";
 import { useMe } from "@/session/me";
@@ -91,20 +91,18 @@ export function UsersSkeleton() {
       <Section title="People">
         <ListSkeleton label="People" />
       </Section>
-      <div className="grid gap-10 md:grid-cols-2 md:gap-12">
-        <Section title="Invite someone">
-          <div className="flex flex-col gap-4">
-            <div className="flex flex-wrap gap-3">
-              <Skeleton className="h-15 min-w-36 flex-1 rounded-control" />
-              <Skeleton className="h-15 min-w-36 flex-1 rounded-control" />
-            </div>
-            <Skeleton className="h-8 w-36 rounded-control" />
+      <Section title="Invite someone">
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-wrap gap-3">
+            <Skeleton className="h-15 min-w-36 flex-1 rounded-control" />
+            <Skeleton className="h-15 min-w-36 flex-1 rounded-control" />
           </div>
-        </Section>
-        <Section title="Create an account">
-          <Skeleton className="h-68 w-full rounded-control" />
-        </Section>
-      </div>
+          <Skeleton className="h-8 w-36 rounded-control" />
+        </div>
+      </Section>
+      <Section title="Create an account">
+        <Skeleton className="h-68 w-full rounded-control" />
+      </Section>
       <Section title="Pending invites">
         <ListSkeleton label="Pending invites" />
       </Section>
@@ -609,7 +607,7 @@ export function AddSomeoneView({
   const ready = account.username.trim() !== "" && account.password !== "";
 
   return (
-    <div className="grid gap-10 md:grid-cols-2 md:gap-12">
+    <>
       <Section title="Invite someone">
         {invite.made === null ? (
           <div className="flex flex-col gap-4">
@@ -679,7 +677,7 @@ export function AddSomeoneView({
           </div>
         </form>
       </Section>
-    </div>
+    </>
   );
 }
 

@@ -73,6 +73,8 @@
   --radius-control: 8px;
   --radius-card: 14px;
   --radius-pill: 999px;
+  --radius-switch: 999px;
+  --radius-switch-thumb: 999px;
 }
 
 @theme {

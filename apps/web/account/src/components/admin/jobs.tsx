@@ -1,6 +1,6 @@
 import { usePlatform } from "@media/sdk/react";
 import { Button } from "@media/ui/components/button";
-import { PageHeader } from "@media/ui/components/page-header";
+import { PageHeader } from "@/components/page-header";
 import { Skeleton } from "@media/ui/components/skeleton";
 import { useFirstRows, usePages } from "@media/ui/lib/pages";
 import type { PageOpts, Paged } from "@media/ui/lib/pages";

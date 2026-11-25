@@ -2,7 +2,7 @@ import type { PlatformSdk } from "@media/sdk/promise";
 import { usePlatform } from "@media/sdk/react";
 import { Button } from "@media/ui/components/button";
 import { Checkbox } from "@media/ui/components/checkbox";
-import { PageHeader } from "@media/ui/components/page-header";
+import { PageHeader } from "@/components/page-header";
 import { Skeleton } from "@media/ui/components/skeleton";
 import { TextField } from "@media/ui/components/text-field";
 import { useAllPages, usePages } from "@media/ui/lib/pages";

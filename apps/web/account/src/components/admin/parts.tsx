@@ -9,7 +9,8 @@ import { toast } from "sonner";
 
 import type { PageOpts, Paged } from "@media/ui/lib/pages";
 
-/** A titled part of an admin screen. */
+import { Cube, TONES } from "../cube";
+
 export function Section({
   title,
   actions,
@@ -22,14 +23,21 @@ export function Section({
   const id = useId();
 
   return (
-    <section aria-labelledby={id} className="flex min-w-0 flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 id={id} className="font-sans text-heading/heading font-bold tracking-tight text-text">
+    <section
+      aria-labelledby={id}
+      className="flex min-w-0 flex-col gap-4 border-t border-hairline pt-8 first-of-type:border-t-0 first-of-type:pt-0 md:flex-row md:gap-12"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3 md:w-55 md:shrink-0 md:flex-col md:items-start md:justify-start">
+        <h2
+          id={id}
+          className="flex items-center gap-3 font-sans text-section/6 font-semibold tracking-tight text-text"
+        >
+          <Cube faces={TONES.glyph} className="size-4.5" />
           {title}
         </h2>
         {actions}
       </div>
-      {children}
+      <div className="flex min-w-0 flex-1 flex-col gap-4">{children}</div>
     </section>
   );
 }

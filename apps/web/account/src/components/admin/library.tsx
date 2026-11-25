@@ -8,7 +8,7 @@ import { Match } from "effect";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
-import { PageHeader } from "@media/ui/components/page-header";
+import { PageHeader } from "@/components/page-header";
 import { buttonVariants } from "@media/ui/lib/button-variants";
 import { describeFailure, isFailure } from "@media/ui/lib/failure";
 
