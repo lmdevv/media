@@ -27,12 +27,48 @@ import { NodeDisk } from "@/lib/downloads/node-disk";
 
 import { DownloadEngine } from "./download-engine";
 import type { EnginePlatform } from "./download-engine";
+import { readyMediaService } from "./ready-media-service";
 
 type ListPage = Awaited<ReturnType<PlatformSdk["core"]["downloads"]["list"]>>;
+
+type Started = Awaited<ReturnType<EnginePlatform["movies"]["play"]["start"]>>;
+
+/** What `movies.play.start` describes for a movie's file, as the core answers it. */
+const startedMovie = (id: FileId): Started => ({
+  titleId: asTitleId(`title-${id}`),
+  episodeId: null,
+  episode: null,
+  file: {
+    id,
+    titleId: asTitleId(`title-${id}`),
+    episodeId: null,
+    versionName: null,
+    sizeBytes: 1_000,
+    probe: {
+      container: "mp4",
+      durationMs: 600_000,
+      bitRate: null,
+      video: [],
+      audio: [],
+      subtitles: [],
+      chapters: [],
+    },
+    externalSubtitles: [],
+    hdr: false,
+    trickplay: null,
+  },
+  resumePositionMs: 0,
+  playbackId: "playback-1",
+  startedAt: 0,
+  ticket: "playback-ticket",
+  expiresAt: Date.now() + 3_600_000,
+});
 
 /** The core as the engine calls it: a list of what this device keeps, and the calls it records. */
 class FakeCore implements EnginePlatform {
   readonly calls: Array<string> = [];
+  /** Whether it describes files and hands out tickets, as a core serving downloads does. */
+  serves = false;
   #page: ListPage = { page: [], isDone: true, continueCursor: "" };
   readonly #listeners = new Set<() => void>();
 
@@ -79,13 +115,27 @@ class FakeCore implements EnginePlatform {
 
         return Promise.resolve(null);
       },
-      fetch: () => Promise.reject(new Error("These tests fetch no ticket.")),
+      fetch: ({ item }) =>
+        this.serves
+          ? Promise.resolve({
+              state: "available",
+              revision: "r1",
+              quality: "standard",
+              bytes: 900_000,
+              resource: { kind: item.kind, id: item.id },
+              ticket: "download-ticket",
+              expiresAt: Date.now() + 3_600_000,
+            } as const)
+          : Promise.reject(new Error("This core fetches no ticket.")),
     },
   };
 
   readonly movies: EnginePlatform["movies"] = {
     play: {
-      start: () => Promise.reject(new Error("These tests start no playback.")),
+      start: ({ fileId }) =>
+        this.serves && fileId !== undefined
+          ? Promise.resolve(startedMovie(fileId))
+          : Promise.reject(new Error("This core starts no playback.")),
       reportOffline: () => Promise.resolve({ applied: true, watched: false }),
     },
   };
@@ -169,10 +219,13 @@ describe("DownloadEngine", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  const launch = (disk: NodeDisk = new NodeDisk(root)): DownloadEngine => {
+  const launch = (
+    disk: NodeDisk = new NodeDisk(root),
+    mediaUrl = "http://media.test",
+  ): DownloadEngine => {
     const engine = new DownloadEngine(core, {
       disk,
-      mediaUrl: "http://media.test",
+      mediaUrl,
       settings: { wifiOnly: false },
     });
 
@@ -435,6 +488,28 @@ describe("DownloadEngine", () => {
     launch().dispose();
 
     expect(filesUnder(dune)).toContain(RECORD_FILE);
+  });
+
+  it("makes no folder for a download until the index holding it is saved", async () => {
+    const media = await readyMediaService();
+
+    launch().dispose();
+    const disk = new NodeDisk(root);
+    const engine = launch(disk, media.url);
+
+    core.serves = true;
+    disk.full = true;
+    engine.setNetwork({ connected: true, wifi: true });
+    engine.add(newDownload(dune));
+    engine.start();
+
+    await vi.waitFor(() =>
+      expect(["downloading", "interrupted"]).toContain(listed(engine)[0]?.split(":")[1]),
+    );
+    media.close();
+
+    expect(names(root)).toStrictEqual([STORE_FILE]);
+    expect(listed(engine)).toStrictEqual([`${dune}:interrupted`]);
   });
 
   it("keeps a download through a read error on the first launch over main's index", async () => {
