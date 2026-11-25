@@ -5,7 +5,7 @@
   "workspaces": {
     ".": {
       "entry": [".agents/skills/*/scripts/*.mjs", "scripts/*.ts"],
-      "ignoreBinaries": ["ffmpeg"]
+      "ignoreBinaries": ["ffmpeg", "ffprobe"]
     },
     "apps/media": {
       "entry": [

@@ -91,6 +91,9 @@ commands, and observable proof.
   and refreshing its details.
 - [Diagnostics](./diagnostics.md) covers the player's Stream info and the CLI's `logs` and
   `diagnostics` commands.
+- [Hardware transcoding](./hardware-transcoding.md) covers converting video on the CPU, Quick
+  Sync, and VA-API: which of decode, deinterlace, scale, HDR to SDR, subtitle burn-in, and H.264,
+  HEVC, and AV1 encode works on which path, measured as a grid.
 - [Group sessions](./group-sessions.md) covers starting, joining, and leaving a session, approval
   and locked sessions, the guests' control switch, the shared next-episode countdown, the host
   going away, Up next, and joining from the iOS app.

@@ -50,7 +50,7 @@ two runs on their own. Each side of a run owns these resources and nothing else:
 | Images     | `media:verify-<run>`, built by `up` for the after side                                  |
 | Ports      | One free loopback port chosen at `up`, Lar's, at `http://localhost:<port>` (`MEDIA_BASE_URL`) |
 | Network    | The browser host's own network namespace where the host allows it, reached through Unix sockets in the state folder (see [Network view](#network-view)) |
-| State      | `${TMPDIR:-/tmp}/media-verify/<run>/<side>/`: ports, pids, logs, sockets, and each person's CLI config |
+| State      | `${TMPDIR:-/tmp}/media-verify/<run>/<side>/`: ports, pids, logs, sockets, each person's CLI config, and generated fixtures |
 | Simulator  | `media-verify-<run>-<side>` on `darwin`, made by `ios up`                               |
 | Evidence   | `captures/verify/<run>/`, gitignored and kept after `down`                              |
 
@@ -117,7 +117,9 @@ $S up --side before    # the before side: pull ghcr.io/lmdevv/media:main
    `before`. A warm Docker cache builds in seconds; a cold one takes several minutes.
 2. It mounts the library read-only at `/media/library`. The default is the demo library image
    named in `deploy/demo-library/image` (see [Demo data](#demo-data)), through
-   `deploy/compose/compose.demo.yaml`; `up` pulls it once per machine.
+   `deploy/compose/compose.demo.yaml`; `up` pulls it once per machine. The side's `fixtures`
+   folder, where the hardware matrix generates media, mounts read-only at
+   `/media/verify-fixtures`.
 3. It starts the Compose project and waits until `/api/health` reports `"backend":"connected"`,
    which needs Convex, the deployed functions, and the media service. Each check gives up after
    10 seconds, and the wait after 6 minutes (`MEDIA_VERIFY_HEALTH_SECONDS`). When it runs out, or
@@ -163,6 +165,7 @@ the CPU.
 | `--side before`                 | Start the main side for a before/after comparison                      |
 | `--image IMG`                   | Run another image, such as a release tag, instead of building          |
 | `--library demo\|fixtures\|DIR` | Pick the library. A DIR holds `Movies/`, `Shows/`, and `Music/` (or pass `--no-music`) and must be readable by others (`a+rX`); the fixtures have no music |
+| `--hardware none\|qsv\|vaapi`  | Set `HARDWARE_ACCELERATION`; `qsv` and `vaapi` pass the host's `/dev/dri` through with `compose.qsv.yaml` or `compose.vaapi.yaml`. Without it the side runs the default, `auto`, with no device |
 | `--no-music`                    | Run movies alone, without the Music library                            |
 | `--no-seed`                     | Stop after setup: only Lucía and the libraries                         |
 | `--no-setup`                    | Leave fresh servers, to verify first-run setup itself                   |
@@ -261,7 +264,8 @@ one line per check, and exits non-zero on any `FAIL`:
 - For the after side, the image matches the checkout.
 - With music, `/music` serves the music client.
 
-The `info` lines name the version, the image, the library, and music's address. The
+The `info` lines name the version, the image, the library, `HARDWARE_ACCELERATION` with the
+encoder `/api/health` reports, and music's address. The
 `before` side often shows the same version as the checkout even when the code differs, because
 the `:main` tag moves only when the Image workflow publishes. `$S logs [--side S] [N]` shows the
 container's last lines; the media service logs one JSON record per line, such as
@@ -457,6 +461,17 @@ sideways lists cards past the edge too, so swipe the row first (`ios swipe 350 7
 iPhone 17 Pro's Continue Watching). Every tap is a touch held for 0.15 s, since AXe's instant
 tap misses the tab bar. Every `ios` command takes `--side S`.
 
+### Hardware paths
+
+`$S hardware [--side S] none|qsv|vaapi` moves a running side to another `HARDWARE_ACCELERATION`:
+Compose recreates its container with the GPU override or without it, keeping the data and the
+port, and the command waits for health as `up` does. `$S hardware-matrix [--side S] [--paths
+cpu,qsv,vaapi] [--rows ROW,...]` plays a fixture per video stage on each path through the
+service's playback negotiation, judges the bytes it serves and where each stage ran, and writes
+`captures/verify/<run>/hardware-matrix/grid.md`, `grid.tsv`, and `grid.json`, with each cell's
+evidence beside them. [features/hardware-transcoding.md](features/hardware-transcoding.md) says
+how to run it for a PR and how to read it.
+
 ## Evidence
 
 Evidence lives in `captures/verify/<run>/`, under `before/` and `after/`, and survives `down`.
@@ -534,9 +549,13 @@ never kills by process name. The demo library image stays for the next run. Evid
 - `scripts/core-seed.mjs` creates the movies [demo data](#demo-data) after setup and checks what
   each person sees, and its `wait` waits for the first scans. `scripts/music-core-seed.mjs` makes
   music's. `up` calls both.
-- `node --test .agents/skills/verify-media/scripts/verify-media.test.mjs` runs the skill's own tests, which need no
+- `scripts/hardware-matrix.mjs` is the hardware matrix's table (fixtures, client profiles, rows,
+  and where each operation must run) and the logic that judges a cell;
+  `scripts/hardware-matrix-run.mjs` drives a side for `hardware-matrix`.
+- `node --test .agents/skills/verify-media/scripts/*.test.mjs` runs the skill's own tests, which need no
   stack: the browser host serves pages of both apps from local servers, in its namespace and on
-  the host network, and `evidence` builds one block from both apps' captures.
+  the host network, `evidence` builds one block from both apps' captures, and the hardware matrix's
+  table, parsers, and verdicts read real ffmpeg output.
 - `scripts/check-network.mjs [--trials N] [--image IMG]` proves the [network view](#network-view)
   on this host, with no stack. It runs one browser host on the host network and one isolated,
   stops a bridge container of its own (`media-verify-netcheck-<pid>`, default image
