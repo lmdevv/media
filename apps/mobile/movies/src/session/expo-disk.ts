@@ -25,6 +25,8 @@ export const expoDisk = (folder: Directory): DownloadDisk => {
         file.parentDirectory.create({ intermediates: true, idempotent: true });
         file.writeSync(text);
       }),
+    move: (from, to) =>
+      onDisk("move", to, () => fileAt(from).moveSync(fileAt(to), { overwrite: true })),
     remove: (path) =>
       onDisk("remove", path, () => {
         const file = fileAt(path);

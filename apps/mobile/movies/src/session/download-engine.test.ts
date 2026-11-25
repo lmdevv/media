@@ -120,6 +120,10 @@ const readyStore = (ids: ReadonlyArray<FileId>): DownloadStore =>
 const listed = (engine: DownloadEngine): ReadonlyArray<string> =>
   engine.getSnapshot().store.downloads.map((download) => `${download.id}:${download.phase}`);
 
+/** Where each download the engine lists was last played to. */
+const positionsOf = (engine: DownloadEngine): ReadonlyArray<number> =>
+  engine.getSnapshot().store.downloads.map((download) => download.positionMs);
+
 /** The names in the folder at `path`, in order. */
 const names = (path: string): ReadonlyArray<string> => readdirSync(path).toSorted();
 
@@ -150,12 +154,13 @@ describe("DownloadEngine", () => {
     });
 
   /** What an earlier run left: the index of `ids`, ready, and each one's video. */
-  const keep = (ids: ReadonlyArray<FileId>): void => {
-    writeFileSync(join(root, STORE_FILE), serializeStore(readyStore(ids)));
+  const keep = (ids: ReadonlyArray<FileId>, folder: string = root): void => {
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, STORE_FILE), serializeStore(readyStore(ids)));
 
     for (const id of ids) {
-      mkdirSync(join(root, id));
-      writeFileSync(join(root, itemPath(id, videoFile("mp4"))), "video bytes!");
+      mkdirSync(join(folder, id));
+      writeFileSync(join(folder, itemPath(id, videoFile("mp4"))), "video bytes!");
     }
   };
 
@@ -182,6 +187,49 @@ describe("DownloadEngine", () => {
     engine.played(dune, 60_000, 9_960_000);
 
     expect(listed(launch(disk))).toStrictEqual([`${dune}:ready`, `${arrival}:ready`]);
+  });
+
+  it("lists the downloads as before or after a save, wherever in it the app is killed", () => {
+    const before = { listed: [`${dune}:ready`, `${arrival}:ready`], positions: [0, 0] };
+    const after = { listed: before.listed, positions: [60_000, 0] };
+
+    const outcomes = [1, 2, 3, 4].map((nth) => {
+      const folder = join(root, `killed-at-${nth}`);
+
+      keep([dune, arrival], folder);
+      const disk = new NodeDisk(folder);
+      const engine = launch(disk);
+
+      disk.killAt(nth);
+      engine.played(dune, 60_000, 9_960_000);
+      const relaunched = launch(new NodeDisk(folder));
+
+      return { listed: listed(relaunched), positions: positionsOf(relaunched) };
+    });
+
+    // A save writes the new copy (1), deletes the old index (2), and moves the copy in (3).
+    expect(outcomes).toStrictEqual([before, before, after, after]);
+  });
+
+  it("shows a save that ran out of space as failed, and saves again once there is room", () => {
+    keep([dune]);
+    const disk = new NodeDisk(root);
+    const engine = launch(disk);
+    const heard: Array<string> = [];
+
+    engine.subscribe(() => heard.push(engine.getSnapshot().save));
+    disk.full = true;
+    engine.played(dune, 60_000, 9_960_000);
+
+    expect(engine.getSnapshot().save).toBe("failed");
+    expect(heard).toContain("failed");
+    expect(names(root)).toStrictEqual([dune, STORE_FILE]);
+
+    disk.full = false;
+    engine.played(dune, 120_000, 9_960_000);
+
+    expect(engine.getSnapshot().save).toBe("saved");
+    expect(positionsOf(launch())).toStrictEqual([120_000]);
   });
 
   it.each(["", '{"downloads":[{"id":"file-du', "not an index"])(

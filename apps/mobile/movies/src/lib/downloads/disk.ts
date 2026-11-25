@@ -8,7 +8,7 @@ import type { DownloadPauseState } from "expo-file-system";
 export const byteCount = (value: number | bigint): number => Number(value);
 
 /** What a file operation on the downloads folder was doing when it failed. */
-export type DiskOperation = "read" | "write" | "remove" | "createFolder";
+export type DiskOperation = "read" | "write" | "move" | "remove" | "createFolder";
 
 /** A file operation on the person's downloads folder failed, such as a write to a full disk. */
 export class DiskFailed extends Data.TaggedError("DiskFailed")<{
@@ -64,6 +64,11 @@ export interface DownloadDisk {
    * one cut short by a crash or a full disk leaves part of the text behind.
    */
   readonly write: (path: string, text: string) => Result.Result<void, DiskFailed>;
+  /**
+   * Moves a file over `to`. As expo-file-system does it, a file at `to` is deleted first, so a
+   * crash between the two steps leaves neither file at `to`.
+   */
+  readonly move: (from: string, to: string) => Result.Result<void, DiskFailed>;
   /** Deletes a file, or a folder with everything in it; nothing there is fine. */
   readonly remove: (path: string) => Result.Result<void, DiskFailed>;
   /** Creates the folder at `path` and those above it; one already there is fine. */

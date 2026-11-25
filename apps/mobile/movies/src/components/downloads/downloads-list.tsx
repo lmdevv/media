@@ -9,6 +9,7 @@ import { CompactBar, LargeTitle, useCollapse } from "@/components/browse/tab-chr
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { ListRow } from "@/components/ui/list-row";
+import { Text } from "@/components/ui/text";
 import { downloadsOf, summaryOf } from "@/lib/downloads/model";
 import type { DownloadEngine } from "@/session/download-engine";
 import type { DownloadsSnapshot } from "@/session/download-engine";
@@ -56,6 +57,12 @@ function DownloadsBody({
 
   return (
     <View className="gap-4 px-5 py-4 regular:w-full regular:max-w-readable regular:self-center regular:px-0">
+      {snapshot?.save === "failed" ? (
+        <Text variant="secondary" tone="danger">
+          This iPhone couldn't save your downloads list. Free up some space, and the next change
+          saves it.
+        </Text>
+      ) : null}
       <ListRow icon={Download} title={summary.items} detail={summary.size} onPress={openSettings} />
       {downloads.map((download) => (
         <DownloadRow key={download.id} engine={engine} download={download} />

@@ -10,14 +10,7 @@ import type { DownloadPauseState } from "expo-file-system";
 import { artworkUrl } from "@/lib/artwork";
 import { byteCount } from "@/lib/downloads/disk";
 import type { DownloadDisk, Transfer, TransferProgress } from "@/lib/downloads/disk";
-import {
-  ARTWORK_FILE,
-  STORE_FILE,
-  itemFolder,
-  itemPath,
-  subtitleFile,
-  videoFile,
-} from "@/lib/downloads/files";
+import { ARTWORK_FILE, itemFolder, itemPath, subtitleFile, videoFile } from "@/lib/downloads/files";
 import {
   DOWNLOAD_STOPPED,
   DownloadStep,
@@ -34,7 +27,6 @@ import {
   pictureOf,
   planSync,
   reduce,
-  serializeStore,
   spaceShortfall,
 } from "@/lib/downloads/model";
 import type {
@@ -50,6 +42,7 @@ import type {
   SyncPlan,
 } from "@/lib/downloads/model";
 import type { DownloadSettings } from "@/lib/downloads/settings";
+import { readIndexText, saveIndex } from "@/lib/downloads/storage";
 import { coreQueue } from "@/lib/downloads/core-queue";
 import { IOS_CAPABILITIES } from "@/lib/player/capabilities";
 
@@ -64,11 +57,18 @@ type ListPage = Awaited<ReturnType<PlatformSdk["core"]["downloads"]["list"]>>;
 
 type ListRow = ListPage["page"][number];
 
+/**
+ * Whether the last save of the downloads index reached this iPhone's disk. After a save that
+ * failed, such as on a full disk, a crash loses what changed since the last save that did.
+ */
+type SaveState = "saved" | "failed";
+
 /** Everything the screens read. */
 export interface DownloadsSnapshot {
   readonly store: DownloadStore;
   readonly settings: DownloadSettings;
   readonly network: NetworkNow;
+  readonly save: SaveState;
 }
 
 /** Where an engine keeps its files and which server it downloads from. */
@@ -257,7 +257,7 @@ export class DownloadEngine {
     this.#platform = platform;
     this.#options = options;
 
-    const stored = parseStore(this.#readStore());
+    const stored = parseStore(readIndexText(options.disk));
 
     const settled = stored.downloads.reduce(
       (store, download) =>
@@ -278,6 +278,7 @@ export class DownloadEngine {
       store: settled,
       settings: options.settings,
       network: { connected: false, wifi: false },
+      save: "saved",
     };
   }
 
@@ -608,14 +609,18 @@ export class DownloadEngine {
     }
   }
 
-  #readStore(): string | null {
-    return Result.getOrNull(this.#options.disk.read(STORE_FILE));
-  }
-
+  /** Saves the store, and shows whether it reached the disk. */
   #save(): void {
     clearTimeout(this.#saveTimer);
     this.#saveTimer = undefined;
-    this.#options.disk.write(STORE_FILE, serializeStore(this.#snapshot.store));
+
+    const save = Result.isSuccess(saveIndex(this.#options.disk, this.#snapshot.store))
+      ? "saved"
+      : "failed";
+
+    if (save === this.#snapshot.save) return;
+    this.#snapshot = { ...this.#snapshot, save };
+    this.#notify();
   }
 
   #deleteFiles(id: string): void {

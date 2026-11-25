@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import { onDisk } from "./disk";
@@ -10,8 +10,8 @@ type Change = "lands" | "cut" | "dead";
 /**
  * A downloads folder in a directory on this computer, which a test can kill or fill up the way a
  * phone's can. A write cut short by a kill leaves the first half of its text, as a native write
- * does; a write to a full disk leaves its file empty. Once killed, nothing more reaches the disk.
- * It starts no transfers.
+ * does; a write to a full disk leaves its file empty; a move over a file deletes that file first,
+ * as expo-file-system's does. Once killed, nothing more reaches the disk. It starts no transfers.
  */
 export class NodeDisk implements DownloadDisk {
   readonly #root: string;
@@ -75,6 +75,17 @@ export class NodeDisk implements DownloadDisk {
       }
 
       writeFileSync(this.#at(path), text);
+    });
+
+  readonly move: DownloadDisk["move"] = (from, to) =>
+    onDisk("move", to, () => {
+      if (existsSync(this.#at(to))) {
+        if (this.#change() !== "lands") throw new Error("killed");
+        rmSync(this.#at(to));
+      }
+
+      if (this.#change() !== "lands") throw new Error("killed");
+      renameSync(this.#at(from), this.#at(to));
     });
 
   readonly remove: DownloadDisk["remove"] = (path) =>
