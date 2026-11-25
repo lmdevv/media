@@ -75,8 +75,8 @@ const cases: ReadonlyArray<readonly [string, Scope]> = [
   ["packages/mobile-core/app.plugin.ts", { bundle: both, build: both }],
 ];
 
-/** The script's exit status and stderr in a repository whose one app holds `files`. */
-const withApp = (files: Readonly<Record<string, string>>) => {
+/** What the script exits with and prints in a repository whose one app holds `files` and `folders`. */
+const withApp = (files: Readonly<Record<string, string>>, folders: ReadonlyArray<string> = []) => {
   const root = mkdtempSync(join(tmpdir(), "ios-apps-"));
 
   try {
@@ -88,12 +88,14 @@ const withApp = (files: Readonly<Record<string, string>>) => {
       writeFileSync(join(root, "apps/mobile/music", name), text);
     }
 
-    const { status, stderr } = spawnSync(join(root, "scripts/ios-apps.sh"), ["-"], {
+    for (const name of folders) mkdirSync(join(root, "apps/mobile/music", name));
+
+    const { status, stdout, stderr } = spawnSync(join(root, "scripts/ios-apps.sh"), ["-"], {
       input: "",
       encoding: "utf8",
     });
 
-    return { status, stderr };
+    return { status, stdout, stderr };
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -154,17 +156,36 @@ describe("ios-apps.sh", { timeout: 30_000 }, () => {
     }
   });
 
-  it("names a plugins entry that is not a list, and reads an app.json without one", () => {
-    expect(withApp({ "app.json": '{"expo":{"plugins":{}}}' }).stderr).toContain(
-      "apps/mobile/music/app.json: plugins is not a list",
-    );
+  it("fails for a dynamic config folder", () => {
+    const root = withApp({ "app.json": '{"expo":{}}' }, ["app.config"]);
 
-    // The config check passes these; the script then stops for want of changed-packages.sh here.
-    for (const config of ["null", "{}", '{"expo":{"plugins":["expo-router"]}}']) {
-      const { stderr } = withApp({ "app.json": config });
+    expect(root.status).toBe(1);
+    expect(root.stderr).toContain("apps/mobile/music/app.config: a dynamic config");
+  });
 
-      expect([config, stderr.includes("an app config may run code")]).toEqual([config, false]);
-      expect([config, stderr.includes("TypeError")]).toEqual([config, false]);
+  it("fails for an app.json it does not fully read", () => {
+    const unread: ReadonlyArray<readonly [string, string]> = [
+      ['{ /* JSON5 */ "expo": { "plugins": ["./src/local.cjs"] } }', "not plain JSON"],
+      ['{"name":"music","plugins":["./src/local.cjs"]}', "no expo object"],
+      ["null", "no expo object"],
+      ['{"expo":{"plugins":{}}}', "plugins is not a list"],
+    ];
+
+    for (const [config, reason] of unread) {
+      const { status, stderr } = withApp({ "app.json": config });
+
+      expect([config, status]).toEqual([config, 1]);
+      expect(stderr).toContain(`apps/mobile/music/app.json: ${reason}`);
+    }
+  });
+
+  it("stops when a lookup fails, and prints no scope", () => {
+    // The config passes; this repository has no changed-packages.sh for the lookup to run.
+    for (const config of ['{"expo":{}}', '{"expo":{"plugins":["expo-router"]}}']) {
+      const { status, stdout, stderr } = withApp({ "app.json": config });
+
+      expect([config, status === 0, stdout]).toEqual([config, false, ""]);
+      expect(stderr).not.toContain("an app config may run code");
     }
   });
 

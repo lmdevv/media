@@ -61,7 +61,8 @@ native() {
 # The app names among changed-packages.sh's workspaces, as a JSON list.
 apps() {
   local workspaces dir list=()
-  workspaces="$(scripts/changed-packages.sh "$@")"
+  # A command substitution does not inherit `set -e`, so a failed lookup is returned by hand.
+  workspaces="$(scripts/changed-packages.sh "$@")" || return 1
   while IFS= read -r dir; do
     if [[ "$dir" == apps/mobile/* ]]; then list+=("\"${dir#apps/mobile/}\""); fi
   done < <(nonempty_lines "$workspaces")
@@ -73,23 +74,36 @@ apps() {
 # with the lockfile or a patch, and both count as native.
 known_plugins="expo-audio expo-build-properties expo-camera expo-font expo-router expo-screen-orientation expo-secure-store expo-splash-screen expo-video"
 
-# Prints each way an app's config could run code from this repository during prebuild, as
-# `<file>: <reason>`: a dynamic config, or a plugin that is not on the list.
+# Prints each app config the script does not fully read, as `<file>: <reason>`. Anything it cannot
+# read as plain JSON with an `expo` object counts, as Expo also takes JSON5, a config without that
+# object, and an app.config file or folder, and each could register a plugin unseen.
 unknown_config() {
   KNOWN="$known_plugins" node -e '
-    const { readFileSync, readdirSync } = require("node:fs");
+    const { readFileSync, readdirSync, statSync } = require("node:fs");
     const known = new Set(process.env.KNOWN.split(" "));
+    const isObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
     for (const app of readdirSync("apps/mobile")) {
       const dir = `apps/mobile/${app}`;
-      let files;
-      try { files = readdirSync(dir); } catch { continue; }
+      if (!statSync(dir).isDirectory()) continue;
+      const files = readdirSync(dir);
       for (const file of files) {
-        if (file.startsWith("app.config.")) console.log(`${dir}/${file}: a dynamic config`);
+        if (file === "app.config" || file.startsWith("app.config.")) {
+          console.log(`${dir}/${file}: a dynamic config`);
+        }
       }
       if (!files.includes("app.json")) continue;
       let config;
-      try { config = JSON.parse(readFileSync(`${dir}/app.json`, "utf8")); } catch { continue; }
-      const plugins = config?.expo?.plugins ?? [];
+      try {
+        config = JSON.parse(readFileSync(`${dir}/app.json`, "utf8"));
+      } catch {
+        console.log(`${dir}/app.json: not plain JSON`);
+        continue;
+      }
+      if (!isObject(config) || !isObject(config.expo)) {
+        console.log(`${dir}/app.json: no expo object`);
+        continue;
+      }
+      const plugins = config.expo.plugins ?? [];
       if (!Array.isArray(plugins)) {
         console.log(`${dir}/app.json: plugins is not a list`);
         continue;
@@ -107,7 +121,7 @@ unknown_config() {
 unknown="$(unknown_config)"
 if [[ -n "$unknown" ]]; then
   echo "ios-apps.sh: an app config may run code from this repository during prebuild." >&2
-  echo "Count the files it reads in native(), then add it to known_plugins:" >&2
+  echo "Count the files it reads in native(), then teach this script to read it:" >&2
   echo "$unknown" >&2
   exit 1
 fi
@@ -135,5 +149,8 @@ esac
 
 mapfile -t paths < <(nonempty_lines "$changed")
 built="$(for path in "${paths[@]}"; do native "$path"; done)"
-echo "bundle=$(apps - <<<"$changed")"
-echo "build=$(apps - <<<"$built")"
+# Assigned before they are printed, so a failed lookup stops the script, not an empty list.
+bundle="$(apps - <<<"$changed")"
+build="$(apps - <<<"$built")"
+echo "bundle=$bundle"
+echo "build=$build"
