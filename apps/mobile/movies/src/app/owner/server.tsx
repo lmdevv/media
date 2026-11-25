@@ -1,4 +1,5 @@
 import type { HealthResponse } from "@media/contracts/media-playback";
+import type { Release } from "@media/contracts/release";
 import { describeUnreadable } from "@media/mobile-core/failure";
 import { readHealth } from "@media/mobile-core/server";
 import { Option } from "effect";
@@ -18,7 +19,11 @@ const POLL_MS = 10_000;
 type Health =
   | { readonly status: "loading" }
   /** The server answers; `report` is none when this app can't read its health report. */
-  | { readonly status: "up"; readonly report: Option.Option<HealthResponse> }
+  | {
+      readonly status: "up";
+      readonly release: Option.Option<Release>;
+      readonly report: Option.Option<HealthResponse>;
+    }
   | { readonly status: "down" };
 
 const ACCELERATION = {
@@ -41,7 +46,7 @@ const useHealth = (mediaUrl: string): Health => {
       setHealth(
         Option.match(read, {
           onNone: (): Health => ({ status: "down" }),
-          onSome: ({ report }): Health => ({ status: "up", report }),
+          onSome: ({ release, report }): Health => ({ status: "up", release, report }),
         }),
       );
     };
@@ -69,11 +74,17 @@ const stateOf = (health: Health): string => {
 };
 
 /** What the server's health report says, or, when this app can't read it, why. */
-function Report({ report }: { readonly report: Option.Option<HealthResponse> }) {
+function Report({
+  release,
+  report,
+}: {
+  readonly release: Option.Option<Release>;
+  readonly report: Option.Option<HealthResponse>;
+}) {
   if (Option.isNone(report)) {
     return (
       <Text variant="secondary" tone="muted">
-        {describeUnreadable()}
+        {describeUnreadable(release)}
       </Text>
     );
   }
@@ -102,7 +113,7 @@ export default function ServerScreen() {
     <OwnerScreen title="Server">
       <ListRow icon={Server} title={displayHost(mediaUrl)} detail={stateOf(health)} />
       {health.status === "loading" ? <Loading /> : null}
-      {health.status === "up" ? <Report report={health.report} /> : null}
+      {health.status === "up" ? <Report release={health.release} report={health.report} /> : null}
       <ListRow
         icon={History}
         title="Backups"

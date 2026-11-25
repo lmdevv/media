@@ -1,4 +1,6 @@
 import { ProtocolError, TransportError } from "@media/sdk/effect";
+import { Release } from "@media/contracts/release";
+import { Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { describeFailure, describeUnreadable } from "./failure";
@@ -165,7 +167,7 @@ describe("followServer", () => {
     await vi.waitFor(() => expect(asks).toBe(3));
   });
 
-  it("sends one read for a burst of answers it can't read", async () => {
+  it("sends two reads at most for a burst of answers it can't read", async () => {
     let asks = 0;
 
     const mediaUrl = await startServer({
@@ -183,10 +185,43 @@ describe("followServer", () => {
     for (let answer = 0; answer < 20; answer += 1) describeFailure(unreadableAnswer());
 
     await vi.waitFor(() => expect(describeUnreadable()).toBe(UPDATE_ON_IPHONE));
-    expect(asks).toBe(1);
+    await vi.waitFor(() => expect(asks).toBe(2));
 
     describeFailure(unreadableAnswer());
-    await vi.waitFor(() => expect(asks).toBe(2));
+    await vi.waitFor(() => expect(asks).toBe(3));
+  });
+
+  it("gives an answer that arrives during a read one more read after it", async () => {
+    const before = Promise.withResolvers<string>();
+    let asks = 0;
+
+    const mediaUrl = await startServer({
+      "/api/health": async () => {
+        asks += 1;
+
+        return asks === 1 ? before.promise : healthOf("0.10.0");
+      },
+    });
+
+    const followed = followServer(mediaUrl, iPhone("0.9.0"));
+
+    following.push(followed);
+    describeFailure(unreadableAnswer());
+    await vi.waitFor(() => expect(asks).toBe(1));
+
+    // The server is updated, and the first answer it sends can't be read.
+    expect(describeFailure(unreadableAnswer())).toBe(GENERIC);
+    before.resolve(healthOf("0.9.0"));
+
+    await vi.waitFor(() => expect(describeUnreadable()).toBe(UPDATE_ON_IPHONE));
+    expect(asks).toBe(2);
+  });
+
+  it("asks to update against a release a screen read itself, ahead of the one last read", async () => {
+    await follow("0.9.0", iPhone("0.9.0"));
+
+    expect(describeUnreadable()).toBe(GENERIC);
+    expect(describeUnreadable(Schema.decodeOption(Release)("0.10.0"))).toBe(UPDATE_ON_IPHONE);
   });
 
   it("reads nothing after an unreadable answer while the app follows no server", async () => {

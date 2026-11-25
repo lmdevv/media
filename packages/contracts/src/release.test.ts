@@ -70,6 +70,15 @@ describe("Release", () => {
     }
   });
 
+  it("reads only ASCII letters in a pre-release, as semver does", () => {
+    // U+212A KELVIN SIGN and U+017F LATIN SMALL LETTER LONG S fold to k and s when case is ignored.
+    for (const version of ["0.10.0-\u212A", "0.10.0-rc\u017F.1"]) {
+      expect([version, Option.isNone(parse(version))]).toEqual([version, true]);
+    }
+
+    expect(Option.isSome(parse("0.10.0-RC.1"))).toBe(true);
+  });
+
   it("refuses anything else a server or build could report", () => {
     for (const refused of [
       "",

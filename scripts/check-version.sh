@@ -25,7 +25,7 @@ const versionOf = (path) => {
 };
 const version = versionOf("packages/platform/package.json");
 const semver =
-  /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[a-z-][\da-z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-z-][\da-z-]*))*)?$/iu;
+  /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][\dA-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][\dA-Za-z-]*))*)?$/u;
 const failures = manifests
   .filter((path) => versionOf(path) !== version)
   .map((path) => `${path} is ${versionOf(path)}, not ${version} (packages/platform/package.json)`);

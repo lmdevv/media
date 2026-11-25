@@ -33,8 +33,12 @@ interface Followed {
   readonly device: DeviceFamily;
   /** The server's release from its latest readable health answer; none until one. */
   readonly server: Option.Option<Release>;
-  /** Reads the server's release again. */
-  readonly refresh: () => Promise<void>;
+  /**
+   * Reads the server's release again for an answer the app couldn't read. One read is out at a
+   * time. An answer that arrives during a read gets one more read after it, since the read that is
+   * out may have left before the server changed.
+   */
+  readonly readAgain: () => void;
 }
 
 /** The one server the app follows now, null while none. */
@@ -45,18 +49,22 @@ let follows = 0;
 /** Answers this app couldn't read that have already asked for the release again. */
 const reread = new WeakSet<UnreadableAnswer>();
 
-/** Whether a read that an unreadable answer asked for is still out. */
-let rereading = false;
-
 const isNewer = Order.isGreaterThan(ReleaseOrder);
 
 /**
  * Asks to update the app while the server it follows runs a newer release than the app; null
  * while either release is unknown, while they match, and while the server is older.
  */
-export const updateLine = (): string | null => {
+export const updateLine = (): string | null =>
+  followed === null ? null : updateLineAgainst(followed.server);
+
+/**
+ * `updateLine` against `server`, a release a screen read from the followed server itself, in place
+ * of the one the follow last read.
+ */
+export const updateLineAgainst = (server: Option.Option<Release>): string | null => {
   if (followed === null) return null;
-  const { app, server, device } = followed;
+  const { app, device } = followed;
 
   return Option.isSome(app) && Option.isSome(server) && isNewer(server.value, app.value)
     ? `Update Lar on this ${device}. Its server runs a newer version.`
@@ -83,7 +91,9 @@ export const followServer = (mediaUrl: string, app: ThisApp): ServerFollow => {
     app: Schema.decodeUnknownOption(Release)(app.version),
     device: app.device,
     server: Option.none(),
-    refresh: () => refresh(),
+    readAgain: () => {
+      readAgain();
+    },
   };
 
   followed = mine;
@@ -95,6 +105,28 @@ export const followServer = (mediaUrl: string, app: ThisApp): ServerFollow => {
     if (ask !== asked || followed?.follow !== mine.follow || Option.isNone(health)) return;
 
     followed = { ...followed, server: health.value.release };
+  };
+
+  let out = false;
+  let again = false;
+
+  const readAgain = (): void => {
+    if (out) {
+      again = true;
+
+      return;
+    }
+
+    const settled = (): void => {
+      out = false;
+
+      if (again && followed?.follow === mine.follow) readAgain();
+
+      again = false;
+    };
+
+    out = true;
+    void refresh().then(settled, settled);
   };
 
   const stop = (): void => {
@@ -109,20 +141,12 @@ export const followServer = (mediaUrl: string, app: ThisApp): ServerFollow => {
 /**
  * Reads the followed server's release again after `unreadable`, an answer this app couldn't read:
  * the server may have been updated while the app stayed open. Each answer asks once, however often
- * its line is described, and the read belongs to whichever server the app follows now. Answers
- * that arrive while such a read is out share it, so a burst of them sends one request.
+ * its line is described, and the read belongs to whichever server the app follows now. A burst
+ * of answers sends two requests at most: the one out, and one after the last answer arrived.
  */
 export const rereadAfter = (unreadable: UnreadableAnswer): void => {
   if (followed === null || reread.has(unreadable)) return;
 
   reread.add(unreadable);
-
-  if (rereading) return;
-
-  const settled = (): void => {
-    rereading = false;
-  };
-
-  rereading = true;
-  void followed.refresh().then(settled, settled);
+  followed.readAgain();
 };
