@@ -1437,6 +1437,18 @@ const make = Effect.gen(function* () {
       }
 
       if (stopped || (yield* Clock.currentTimeMillis) > deadline) {
+        // A replacement is published before the run it replaces is stopped, so a run found
+        // stopped after the check above may have been replaced meanwhile: its reader moves on.
+        const latest = yield* Ref.get(session.generation);
+
+        if (latest.number !== generation.number) {
+          return yield* new StreamGenerationGone({
+            streamId: session.streamId,
+            generation: generation.number,
+            currentGeneration: latest.number,
+          });
+        }
+
         return yield* new SegmentNotReady({ index });
       }
 
