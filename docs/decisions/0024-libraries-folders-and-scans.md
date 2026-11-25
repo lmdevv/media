@@ -749,8 +749,10 @@ artist's page lists it once.
   name and the text that joins them (`creditLine`), finding the names in credit order, ignoring
   case; a credit the string does not name, such as a featured artist the title names, follows it
   ("Mora" crediting Sech reads "Mora & Sech"). The web client links each name to its artist page
-  wherever a song's or album's artists show, and shows the names as text inside another link or
-  button, and to guests, who cannot open artist pages. The iOS app shows the line as text in rows
+  wherever a song's or album's artists show. It shows the names as text inside another link or
+  button, in a row that is one play button on a phone (the row menu's Go to artist opens each
+  artist), and to guests, who cannot open artist pages; `music.playback` answers a guest's credits
+  by name alone, without artist ids. The iOS app shows the line as text in rows
   whose tap plays or opens something; where the line is a control (Now Playing, an album's header,
   the inspector, Go to artist), one artist opens directly and several open a native menu of them.
   An artist's page lists `music.artists.tracks` under Songs, the first ten, which are its top

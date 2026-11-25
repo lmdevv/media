@@ -234,6 +234,7 @@ export function TrackList({
       withheld={withheld?.(index) ?? false}
       byline={byline?.(index) ?? null}
       artists={variant === "list" || (album !== undefined && namesOthers(track, album))}
+      artistLinks={desktop}
       highlighted={highlight === track.id}
       reorder={controls}
       dropSide={reorder?.mode === "drag" ? reorder.reorder.dropSide(index) : null}
@@ -473,6 +474,7 @@ const TrackRow = memo(function TrackRow({
   withheld,
   byline,
   artists,
+  artistLinks,
   highlighted,
   reorder,
   dropSide,
@@ -489,6 +491,11 @@ const TrackRow = memo(function TrackRow({
   readonly byline: string | null;
   /** Whether the row names the song's artists under its title. */
   readonly artists: boolean;
+  /**
+   * Whether each name links to its artist: on a desktop. On a phone the whole row is one play
+   * button, so the names are text and the row's menu opens each artist.
+   */
+  readonly artistLinks: boolean;
   readonly highlighted: boolean;
   readonly reorder: RowReorder | undefined;
   readonly dropSide: DropSide | null;
@@ -595,8 +602,7 @@ const TrackRow = memo(function TrackRow({
         </span>
         {artists ? (
           <span className="truncate font-sans text-sm/xs text-text-muted">
-            {/* On a phone the row's play button covers the names; a desktop links each one. */}
-            <ArtistCredits item={track} linkClassName="lg:relative" />
+            <ArtistCredits item={track} links={artistLinks} />
             {byline === null ? null : ` · ${byline}`}
           </span>
         ) : null}

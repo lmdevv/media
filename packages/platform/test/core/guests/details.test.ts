@@ -417,6 +417,8 @@ describe.skipIf(stack === undefined)(
       expect(detail.artUrl).toMatch(/^\/music\/art\/test-art\?ticket=t1\./u);
       expect(detail).not.toHaveProperty("artistId");
       expect(detail).not.toHaveProperty("albumId");
+      // It names whom it credits, without the ids that open their pages.
+      expect(detail.credits).toEqual([{ name: detail.artist }]);
       expect(
         await refusal(
           client.query(api.music.playback.get, { item: { type: "track", id: shelf.otherTrackId } }),

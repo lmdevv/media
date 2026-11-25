@@ -337,9 +337,10 @@ Old movies' Convex project, its SDK client, and its command registry were delete
   keys are not refused. A library keeps at most 256 (`MAX_CREDIT_OVERRIDES`). Managers make them
   on the library's Artist credits page in the account client.
 - Clients cut the tagged string into credited names and joins with `creditLine`. The web client
-  links each name to its artist page (`ArtistCredits`), as text inside links and buttons and for
-  guests; the iOS app shows text in rows and a native menu of the artists on controls. Artist pages
-  list `music.artists.tracks`.
+  links each name to its artist page (`ArtistCredits`), as text inside links and buttons, in phone
+  rows, and for guests, whose `music.playback` reads answer credits by name alone; the iOS app
+  shows text in rows and a native menu of the artists on controls. Artist pages list
+  `music.artists.tracks`.
 - The tag reader's version (`TAGS_READER_VERSION`) is kept per song, so the first scan after an
   upgrade reads every file again and adopts rows written before credits, keeping track and album
   ids.

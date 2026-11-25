@@ -26,6 +26,7 @@ import { asArtistId } from "@/lib/models";
 import type { ArtistId, Track } from "@/lib/models";
 import { PAGE_ROWS, preloadAllRows, useAllRows } from "@/lib/pages";
 import { useMusic, useRead } from "@/lib/platform";
+import { useIsDesktop } from "@/lib/use-media";
 
 const MISSING: MissingCopy = {
   title: "This artist isn't in your library anymore",
@@ -299,6 +300,7 @@ function SongRow({
   readonly onPlay: () => void;
 }) {
   const player = usePlayer();
+  const desktop = useIsDesktop();
   const current = player.track?.id === track.id;
   const shared = creditsOf(track).some((credit) => credit.artistId !== artistId);
 
@@ -338,8 +340,9 @@ function SongRow({
         <span className="truncate font-sans text-sm/xs text-text-muted">
           {shared ? (
             <>
-              {/* On a phone the row's play button covers the names; a desktop links each one. */}
-              <ArtistCredits item={track} linkClassName="lg:relative" />
+              {/* On a phone the row is one play button, so the names are text and its menu
+                  opens each artist. */}
+              <ArtistCredits item={track} links={desktop} />
               {" · "}
             </>
           ) : null}

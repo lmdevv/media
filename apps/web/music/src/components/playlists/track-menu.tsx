@@ -237,11 +237,6 @@ function TrackMenuKeys({
   return null;
 }
 
-/**
- * The track row menu: play next, add to queue, add to a playlist,
- * like, go to the album or artist, and file info. `extra` adds context items such as "Remove from
- * this playlist".
- */
 /** "Go to artist" for one credited artist; for several, a submenu that names each. */
 function GoToArtist({ track }: { readonly track: Track }) {
   const navigate = useNavigate();
@@ -268,6 +263,11 @@ function GoToArtist({ track }: { readonly track: Track }) {
   );
 }
 
+/**
+ * The track row menu: play next, add to queue, add to a playlist,
+ * like, go to the album or artist, and file info. `extra` adds context items such as "Remove from
+ * this playlist".
+ */
 export function TrackMenu({
   track,
   trigger,

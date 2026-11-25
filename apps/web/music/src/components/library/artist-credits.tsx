@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
  * The artists a song or an album credits as one line of text: their names, joined the way its
  * tags write them ("Mora & JHAYCO"). For a label, a toast, or a place that can't hold links.
  */
-export const creditText = (item: CreditedItem<ArtistId>): string =>
+export const creditText = <Id,>(item: CreditedItem<Id>): string =>
   creditLine(item)
     .map((piece) => (piece.kind === "text" ? piece.text : piece.name))
     .join("");
@@ -28,8 +28,9 @@ export function ArtistCredits({
 }: {
   readonly item: CreditedItem<ArtistId>;
   /**
-   * False where the line can't hold links: inside another link or button, or for a guest, who
-   * can't open artist pages. The names then show as plain text.
+   * False where the line can't hold links: inside another link or button, in a row that is one
+   * button on a phone, or for a guest, who can't open artist pages. The names then show as plain
+   * text.
    */
   readonly links?: boolean;
   /** Extra classes for each link, such as `relative` to raise it over a card's stretched link. */

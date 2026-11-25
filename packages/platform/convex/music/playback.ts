@@ -5,9 +5,13 @@ import { paginateAtMost } from "../core/lib/paginate";
 import { reachOf } from "../core/permissions/grants";
 import { playableBy } from "../core/permissions/items";
 import { trackPlayer } from "./access";
-import { musicPresenter } from "./present";
+import { creditsOf, musicPresenter } from "./present";
 
 const PAGE_MAX = 50;
+
+/** Whom a song or an album credits, by name alone: a share opens no artist pages. */
+const creditNames = (row: Doc<"tracks"> | Doc<"albums">) =>
+  creditsOf(row).map(({ name }) => ({ name }));
 
 const trackDescription = async (
   track: Doc<"tracks">,
@@ -17,6 +21,7 @@ const trackDescription = async (
   id: track._id,
   title: track.title,
   artist: track.artistName,
+  credits: creditNames(track),
   album: track.albumTitle,
   trackNumber: track.trackNumber,
   discNumber: track.discNumber,
@@ -50,6 +55,7 @@ export const { get, tracks } = register({
       id: album._id,
       title: album.title,
       artist: album.artistName,
+      credits: creditNames(album),
       year: album.year,
       genre: album.genre,
       format: album.format,

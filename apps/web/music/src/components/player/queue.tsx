@@ -25,6 +25,7 @@ import { asQueueItemId } from "@/lib/models";
 import type { QueueEntry, QueueItemId } from "@/lib/models";
 import { useMusic } from "@/lib/platform";
 import { dropLine } from "@/lib/reorder";
+import { useIsDesktop } from "@/lib/use-media";
 
 import { perform } from "./player-actions";
 import { focusMove } from "./queue-focus";
@@ -162,6 +163,8 @@ function QueueRowText({
   readonly current: boolean;
   readonly addedBy: string | null;
 }) {
+  const desktop = useIsDesktop();
+
   return (
     <div className="pointer-events-none flex min-w-0 grow flex-col gap-px">
       <span
@@ -176,8 +179,9 @@ function QueueRowText({
       <span
         className={cn("truncate font-sans text-sm/xs", glass ? "text-text/60" : "text-text-muted")}
       >
-        {/* The row plays its song; on a desktop each name opens its artist. */}
-        <ArtistCredits item={entry} linkClassName="relative lg:pointer-events-auto" />
+        {/* The row is a button that plays its song. On a phone the names are text; on a
+            desktop each one sits over the button and opens its artist. */}
+        <ArtistCredits item={entry} links={desktop} linkClassName="pointer-events-auto relative" />
         {addedBy === null ? null : ` · Added by ${addedBy}`}
       </span>
     </div>
