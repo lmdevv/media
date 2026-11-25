@@ -60,7 +60,7 @@ export interface Interface {
   ) => Effect.Effect<ArtworkImage, ArtworkNotFound | ArtworkUnavailable>;
   /**
    * An image file the server holds, such as a music cover, resized to `width` as `image` resizes
-   * artwork. `fingerprint` names the file's content: the copy is kept under it with the other
+   * artwork. `fingerprint` names the file's content, and the copy is kept under it with the other
    * resized artwork, within `CACHE_MAX_MB`.
    */
   readonly resize: (

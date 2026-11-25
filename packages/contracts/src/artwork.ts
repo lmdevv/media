@@ -34,7 +34,7 @@ const decodeWidth = Schema.decodeUnknownOption(
  * The width to ask for an image drawn `pixels` wide: the smallest one that covers it, so the image
  * is never soft, or undefined when only the original does.
  *
- * @param pixels - The drawn size in device pixels: the longer side of the image's frame in points
+ * @param pixels - The drawn size in device pixels, the longer side of the image's frame in points
  *   times the screen's pixel density, since a cover fills its frame.
  */
 export const artworkWidthFor = (pixels: number): ArtworkWidth | undefined =>
