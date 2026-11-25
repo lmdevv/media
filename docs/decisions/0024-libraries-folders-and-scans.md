@@ -3,7 +3,7 @@
 - Status: Accepted, 2026-11-04. Amended 2026-11-09 with the movies catalog, and again the same
   day with each movies document's size bound. Amended 2026-11-10 with folder identity, and again
   the same day with rescans after a file changes. Amended 2026-11-13 with the music catalog, and
-  again the same day with music's scanner on the server.
+  again the same day with music's scanner on the server. Amended 2026-11-24 with artist credits.
 - Decisions: D01, D02, D16, D17, D28, D29, D50
 
 ## Context
@@ -483,21 +483,24 @@ a file changes. It asks the core to queue a scan. Until now "Left for later unit
 The music port replaced the test seam with music's own rows in `convex/music/`, ported from old
 music's tables of the same names. No client reads them yet; the music commands come next.
 
-| Table         | Holds                                                                                  | Indexes                                                                                                                             |
-| ------------- | -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `artists`     | an album artist: name, key, albums with a track on disk, artwork, search text, tie     | `by_library_key` (library, key, tie), `by_art`, search                                                                              |
-| `albums`      | an artist's album: title, key, year, genre, artwork, tracks on disk and their length   | `by_library_artist_key`, `by_library_added` (library, added, tie), `by_artist`, `by_art`, search                                    |
-| `tracks`      | one audio file: path, tags, format, artwork, lyrics fingerprint, `explicit`, `missing` | `by_library_path`, `by_library_title` (…, tie), `by_album` (…, tie), `by_artist`, `by_album_art`, `by_artist_art`, `by_art`, search |
-| `localLyrics` | the lyric sets a track's own files hold, one row per track that has any                | `by_track`                                                                                                                          |
+| Table         | Holds                                                                                                   | Indexes                                                                                                                                                  |
+| ------------- | ------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `artists`     | an artist a song or an album credits: name, key, albums and tracks on disk crediting them, artwork      | `by_library_key` (library, key, tie), `by_key`, `by_art`, search                                                                                         |
+| `albums`      | an album: title, key, album artist as tagged and its key, credits, year, genre, artwork, tracks on disk | `by_library_filing`, `by_library_artist_key`, `by_library_added` (library, added, tie), `by_artist`, `by_artist_year`, `by_art`, search                  |
+| `tracks`      | one audio file: path, tags, credits, format, artwork, lyrics fingerprint, `explicit`, `missing`         | `by_library_path`, `by_library_title` (…, tie), `by_album` (…, tie), `by_artist` (artist, tag reader), `by_album_art`, `by_artist_art`, `by_art`, search |
+| `localLyrics` | the lyric sets a track's own files hold, one row per track that has any                                 | `by_track`                                                                                                                                               |
+
+The credit tables (`artistCredits`, `creditParts`, `creditTracks`, `creditOverrides`,
+`trackArtists`, `albumArtists`) are in "Artist credits" below.
 
 - **Scanner callbacks.** `music/scanner:known`, `upsert`, `move`, `missing`, and `lyrics` are
   server functions under `withScanLease`, ports of old music's `fingerprints`, `upsertTracks`,
-  `moveTracks`, `markMissing`, and `saveLocalLyrics`. `known` pages 512 tracks, missing ones
-  included, with what a scan compares, optionally between `from` and `to` as old music's
-  `fingerprints` did. The others take up to 500 items, write the leading ones their budget admits,
-  and answer `done`; `upsert`, `move`, and `missing` also answer `released`, the artwork some row
-  stopped using. A missing track keeps its row, so likes and playlists keep pointing at it. A move
-  keeps the track's id.
+  `moveTracks`, `markMissing`, and `saveLocalLyrics`. `known` pages 438 tracks (12 MiB at the track
+  bound), missing ones included, with what a scan compares, optionally between `from` and `to`
+  as old music's `fingerprints` did. The others take up to 500 items, write the leading ones
+  their budget admits, and answer `done`; `upsert`, `move`, and `missing` also answer
+  `released`, the artwork some row stopped using. A missing track keeps its row, so likes and
+  playlists keep pointing at it. A move keeps the track's id.
 - **Artwork.** Old music writes artwork only in its scan: a track's own, and its album's and
   artist's, which follow a replaced folder cover and fall back to another track's art when the
   one they came from goes. The port keeps those rules in the scanner callbacks, under the lease.
@@ -515,14 +518,15 @@ music's tables of the same names. No client reads them yet; the music commands c
   scanner callbacks, the purge, and the probe's seed all go through its per-call batch, as old
   music's `catalogBatch` did. It reads each album and artist once a
   call, sums what the call moved, and settles it in the same mutation: each album's tracks on disk
-  and their length, each artist's albums with a track on disk, and the library's totals. It
-  deletes an album no track points at any more, then its artist when no album or track files under
-  it. Convex runs two calls that touch one album one after the other, so the counts are exact.
+  and their length, each artist's albums and tracks on disk that credit them, and the library's
+  totals. It deletes an album no track points at any more, then each artist nothing credits any
+  more (artist credits, below). Convex runs two calls that touch one album one after the other,
+  so the counts are exact.
 - **Totals.** A music library's item count is its tracks on disk. Three more counters,
   `music.albums:<id>`, `music.artists:<id>`, and `music.duration:<id>`, hold its albums with a
-  track on disk, its artists with such an album, and the length of its tracks on disk in whole
-  milliseconds: old music's `libraryStats`. A retried call finds its rows and moves nothing. A
-  removed library's totals go once its purge deleted its last rows.
+  track on disk, its artists credited by such an album or by a track on disk, and the length of
+  its tracks on disk in whole milliseconds: old music's `libraryStats`. A retried call finds its
+  rows and moves nothing. A removed library's totals go once its purge deleted its last rows.
 - **Budget charged where the database is touched** (amended 2026-11-13, fix round 1). A music
   call counts movies' index ranges and writes (`music/budget.ts` builds on `movies/budget.ts`),
   and also the bytes it reads and writes, 12 MiB each way. A track's lyrics row may hold 512 KiB,
@@ -576,8 +580,9 @@ music's tables of the same names. No client reads them yet; the music commands c
   | A file's path                                                   | 4,096 bytes            | the file is skipped and counts as done         |
   | A track's length                                                | 2^32 ms, about 50 days | kept at the maximum; not a number is 0         |
   | A track's lyric sets                                            | 512 KiB for the row    | the leading sets that fit                      |
+  | A song's or an album's credits                                  | 10, 1,024 characters   | the leading credits that fit                   |
 
-  So a track is at most 24 KiB, an album 12 KiB, and an artist 8 KiB; a unit test builds each at
+  So a track is at most 28 KiB, an album 16 KiB, and an artist 8 KiB; a unit test builds each at
   its longest. A key keeps its leading part and a hash of the whole, so two names that differ past
   the cut stay two rows and a rescan finds the row it wrote. Lyric sets are checked as old music's
   `LocalLyricSet` schema checked them, in plain TypeScript; a set that breaks it is a defect in
@@ -587,7 +592,7 @@ music's tables of the same names. No client reads them yet; the music commands c
   to 16 MiB of arguments; measuring the whole list again for each set dropped took past a call's
   1 s at 8,192 sets of 100 characters, and the one pass takes about 45 ms.
 
-- **Purge.** `music/purge:tracks` pages a library's tracks by path, 341 a page (8 MiB at the track
+- **Purge.** `music/purge:tracks` pages a library's tracks by path, 292 a page (8 MiB at the track
   bound), and deletes through the batch those no current folder keeps, every track once the
   library is gone, with their lyrics, as many as the budget admits. The batch settles their albums
   and artists in the same mutation, so emptied albums and artists go page by page and the totals
@@ -635,6 +640,136 @@ music's tables of the same names. No client reads them yet; the music commands c
     with `p5-music-commands`, which deletes them with their tracks.
   - Batches are 500 a call with the budget deciding each call's share, where old music's server
     sent 100.
+
+### Artist credits (amended 2026-11-24, ADS-211)
+
+A song credited to several artists was one combined artist ("Mora & JHAYCO", "Revol, Ozuna &
+Cosculluela"), or showed several names and linked to its album artist alone: the scanner read one
+artist string, and the catalog filed song and album under one artist, the album artist or else the
+song's. Each song and album now credits every artist it names, in order, and each credited
+artist's page lists it once.
+
+- **What the tags say.** The server's tag reader (`TAGS_READER_VERSION`, 1) reads music-metadata's
+  artist and album artist values. Two or more distinct values (a tag repeated per artist, or
+  Picard's `ARTISTS`) are separate values: the scanner sends them as `artists` and
+  `albumArtists`, and the core credits them as they are. Otherwise the tag is one string, which a
+  client shows as it is. With separate values, the string shown is the artist tag, or the values
+  joined ("A, B & C") when the tag is only the first value. The tags on disk never change.
+- **Credit strings.** `@media/contracts/artist-credits` holds the rule, plain TypeScript for the
+  core and the server. A credit string is a song's artist tag, a featured-artist list in its title
+  ("(feat. …)", "[feat. …]", "(ft. …)", "(featuring …)", "(with …)", at most two), or an album
+  artist tag. Its parts are what ", ", " & ", " feat. ", " ft. ", and " featuring " separate;
+  " y ", " x ", " and ", and "/" never do, so "Alexis y Fido" and "Jon Z X Ele A" are one act. A
+  string of 2 to 10 parts is combined; one of more stays one artist.
+- **The evidence rule.** A combined string splits into its parts only when at least one part is
+  known on its own in the same library's files on disk: the artist tag of a song on disk, or of an
+  album with a song on disk, that is exactly that name, a separate value, or a lone featured
+  artist. A missing file's tags are not the library's now, so they prove nothing until the file is
+  back. A string's own appearance never counts for itself, so "Mumford & Sons" and "Wuki & Lee
+  Foss" stay whole while neither part appears alone, and "Mora & JHAYCO" splits once "Mora" has a
+  song of its own. A run of up to 4 parts that is itself a whole credit in the library and stays
+  whole is kept together inside a longer string and counts as known: "CA7RIEL & Paco Amoroso,
+  PinkPantheress" credits "CA7RIEL & Paco Amoroso" and "PinkPantheress". Each run's resolution
+  depends only on shorter strings, so a library's tags and corrections decide every resolution,
+  whatever order they arrived in. A later spelling of a name a song already credits is dropped
+  ("Imael Angel, Imael Angel"; "El Perdón (with Enrique Iglesias)" by "Nicky Jam & Enrique
+  Iglesias"). Keys are trimmed and lowercased, as artist keys were, so one artist row serves every
+  spelling that differs only in case.
+- **Songs.** A song credits its separate values, or its artist string's resolution followed by each
+  featured list's, at most 10 credits whose names run to at most 1,024 characters
+  (`MUSIC_BOUNDS.credits`, `creditNames`). `tracks.credits` keeps them in order as artist row and
+  name as credited; `artistId` is the first, and `artistName` stays the string as tagged, which
+  clients show. `creditsTagged` marks separate values, which no evidence changes. Search text
+  holds the title, the artist string, the album, and separate values, so a search for any credited
+  name finds the song.
+- **Albums.** An album files under its album artist string, and an album with separate album
+  artist values under those values joined: one album per library, `artistKey` (the string's key),
+  `creditsTagged`, and title key (`by_library_filing`). Splitting the string into credits never
+  merges or divides albums: "Greatest Hits" by "Celia Cruz" and by "Celia Cruz & Johnny Pacheco"
+  stay two albums. The album credits its separate values, or its album artist string's
+  resolution; track contributors never group or credit an album. Separate album artist values
+  that change while they show as the same album artist credit the album as the file a scan wrote
+  last names them. A compilation by "Various Artists" credits that name, and each of its songs
+  credits its own artists.
+- **Links and pages.** `trackArtists` and `albumArtists` hold one row per credited artist, kept
+  with the song's title key and the album's year, which `music.artists.tracks` (new: every song
+  on disk crediting the artist, by title), the top songs of `music.artists.get`, and
+  `music.artists.albums` (newest year first) page. A song an artist only features on appears on
+  their page. The artist's artwork falls back to the newest album crediting them.
+- **Counts.** An artist's `albumCount` counts albums with a track on disk that credit them, and
+  `trackCount` tracks on disk that credit them, both settled in the catalog batch's `finish` from
+  each album's and track's credits as the call found and left them. Lists and search show an
+  artist either counts, and the library's artist total counts those artists. `deleteIfBare`
+  deletes an artist with no count, no link, and no song or album naming them first (or filed under
+  them by a release before credits), so a combined artist goes once nothing credits it, and a
+  featured artist stays while a song credits them. A missing song keeps its credits and links, as
+  its row does, but no artist counts it until its file is back.
+- **Credit strings as rows.** `artistCredits` holds each credit string a library's tags name: its
+  key, first spelling, uses (songs on disk, and albums with a song on disk, naming it whole), and
+  resolution (`artists`). A string of one part with uses is the evidence that its name is known.
+  `creditParts` indexes each combined string by each part's key, and `creditTracks` lists the
+  songs on disk naming a combined string; albums are found by `artistKey`. A song's and an album's
+  strings come from its own row (its artist, title, and album artist as stored), so every write
+  diffs what a row named before and after, and `creditLedger.ts` settles the uses at the call's
+  end. A song's strings are uses while its file is on disk, so marking it missing, a missing file
+  coming back, a move, a retag, and a purge each move them; an album's while it has a track on
+  disk, which the batch's `finish` settles from the tracks on disk and credits each album had when
+  the call found it and has when the call leaves it.
+- **Re-resolution.** A call resolves a new string from the library as the call found it, and every
+  later write of a song, or of an album a scan files a song under, uses its string's stored
+  resolution, so a file that comes back after its credit resolved anew credits its song and album
+  as the credit resolves now. When the call's end finds that a name of one part gained its first
+  use or lost its last, or that a combined string of up to 4 parts that stays whole did, it
+  schedules `music/credits:recheck` with those names' keys after the call commits. A recheck pages
+  `creditParts` for each key and resolves each combined string fresh; one that resolves anew
+  stores its resolution and schedules `music/credits:rewrite`, which pages its songs, then its
+  albums, rewriting their credits and links through the catalog batch, which settles counts and
+  deletes artists left bare. A string that starts or stops staying whole rechecks the strings it
+  is a run of. Both are chains of internal mutations a page each, as the purge is (ADR 0013), not
+  jobs: the work is the core's own, no server pool claims it, and a job kind needs a worker. Each
+  step reads the library's state when it runs, so steps that cross or repeat converge on the
+  resolution the tags and corrections decide. Adding a solo "Calvin Harris" song splits "Calvin
+  Harris & Clementine Douglas" and its album, and retagging it, its file going missing, or its
+  purge joins them again; the album keeps its id.
+- **Corrections.** A manager of a music library corrects a combined credit with
+  `music.credits.setOverride`: `together` keeps it one artist, also as a run inside longer credits
+  ("Zion & Lennox" in "Bad Bunny & Zion & Lennox"), and `split` splits it whatever the evidence.
+  `music.credits.removeOverride` drops a correction, `music.credits.list` pages a library's
+  combined credits with their resolution, correction, and uses, and `music.credits.overrides` its
+  corrections. Each needs `manage` on the library and `music:edit`, as renaming one does; API keys
+  are not refused, since a correction outlives nothing a revoked key should end and a manager can
+  undo it (ADR 0009, "Refusing API keys"). Corrections are per library (`creditOverrides`, at most
+  256): credits, evidence, and managers are per library, and one library's manager must not change
+  another's. Setting or removing one rechecks the strings its first part is in.
+- **Rows before credits.** Rows a release before credits wrote have no `credits`, `artistKey`,
+  `trackCount`, or `tagsReader`, so the schema keeps those fields optional (ADR 0012, "a shape
+  change to stored rows"). `music/scanner:known` answers such a track's tag reader as 0, so the
+  next scan of any mode reads every file again, and the server queues one on start. Its upserts
+  keep each track's id, and adopt each old album, found by its old artist and key
+  (`by_library_artist_key`), with its id, so history, likes, playlists, queue entries, and
+  downloads keep pointing at the same rows; a combined artist left with no credit goes, releasing
+  its artwork. Until then such rows count, present, and page as they were written: a song credits
+  its one artist under the name it shows, and an artist's pages read the songs and albums filed
+  under them with no tag reader or album artist key (`by_artist`, `by_artist_year`) after their
+  links. A later release, once every install has scanned, makes the fields required and drops
+  those reads and `by_library_artist_key`.
+- **Budget.** The batch's `WRITE_MOST` adds, for one write, each credit string resolved (the song's
+  three and its album's), each a row of its own, its parts', and its runs' read at their bound; the
+  artists of the song's and album's credits found or made; their links rewritten, once each; the
+  credit strings settled that the song gained and lost and that a track a move leaves missing
+  loses, and those its album gains and loses and the two albums it and that track leave lose, each
+  string's row read, then written, and a recheck scheduled; and each artist of three tracks'
+  credits settled and of a rewrite's stale links checked, beside the albums it settles.
+  `RECREDIT_COST` bounds a rewrite's item, and a recheck takes `RECHECK_PAGE` strings, as many as
+  resolve within a call at their bounds. The stack suite writes 40 songs crediting ten long names
+  each and re-resolves them all inside every call's limits. On a household library of 1,078 songs
+  whose credits are all single strings, 288 strings are combined: 265 split and 23 stay whole,
+  among them "CA7RIEL & Paco Amoroso", "HUGEL & SOLTO (FR)", and "Wuki & Lee Foss".
+- **Left open.** A run kept together matches only its exact separators, so "Wuki, Lee Foss" in
+  "Wuki, Lee Foss & Cheryl Lynn" does not match the whole credit "Wuki & Lee Foss". "(with …)"
+  credits a lone name such as "(with Strings)" as an artist; no correction makes a one-part name
+  stop crediting. Albums an artist only features on are not listed as their own albums; the songs
+  are.
 
 ## Consequences
 

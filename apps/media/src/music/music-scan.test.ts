@@ -4,6 +4,7 @@ import { Effect, HashSet, Ref } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { artPath } from "./art-store.ts";
+import { TAGS_READER_VERSION } from "./tag-reader.ts";
 import {
   describeScan,
   LibraryEmpty,
@@ -13,6 +14,7 @@ import {
   storedFingerprint,
   type ScanProgress,
 } from "./music-scan.ts";
+import { setFlacComments } from "./testing/flac-comments.ts";
 import {
   coreFingerprint,
   makeDirectory,
@@ -224,6 +226,53 @@ describe("scanLibrary", { timeout: MEDIA_TEST_TIMEOUT }, () => {
     expect(full).toEqual({ files: 1, updated: 1, moved: 0, missing: 0, failed: 0 });
     expect(writes.upserted).toEqual([song]);
     expect((await Effect.runPromise(memory.tracks)).get(song)?.track.title).toBe("Edited");
+  });
+
+  it("sends separate artist values, and reads every file again that an older tag reader read", async () => {
+    const root = join(work, "music");
+    const together = join(root, "Album", "01 Together.flac");
+    const alone = join(root, "Album", "02 Alone.flac");
+
+    await writeSong(together, { seconds: 1 });
+    await setFlacComments(together, [
+      ["TITLE", "Together"],
+      ["ALBUM", "Album"],
+      ["ARTIST", "Mora"],
+      ["ARTIST", "JHAYCO"],
+      ["ALBUMARTIST", "Mora"],
+      ["ALBUMARTIST", "JHAYCO"],
+    ]);
+    await writeSong(alone, { seconds: 1, tags: { title: "Alone", artist: "Mora & JHAYCO" } });
+
+    const memory = await Effect.runPromise(memoryCatalog);
+
+    await Effect.runPromise(scanOnce(memory, [root]));
+
+    const tracks = await Effect.runPromise(memory.tracks);
+
+    expect(tracks.get(together)?.track).toMatchObject({
+      artist: "Mora & JHAYCO",
+      artists: ["Mora", "JHAYCO"],
+      albumArtist: "Mora & JHAYCO",
+      albumArtists: ["Mora", "JHAYCO"],
+      tagsReader: TAGS_READER_VERSION,
+    });
+    expect(tracks.get(alone)?.track).toMatchObject({
+      artist: "Mora & JHAYCO",
+      tagsReader: TAGS_READER_VERSION,
+    });
+    expect(Object.keys(tracks.get(alone)?.track ?? {})).not.toContain("artists");
+
+    await Effect.runPromise(memory.writes);
+    expect((await Effect.runPromise(scanOnce(memory, [root]))).updated).toBe(0);
+
+    // The core answers what a release before the tag reader stored: tag reader 0.
+    await Effect.runPromise(memory.olderReader);
+
+    const again = await Effect.runPromise(scanOnce(memory, [root]));
+
+    expect(again).toEqual({ files: 2, updated: 2, moved: 0, missing: 0, failed: 0 });
+    expect((await Effect.runPromise(memory.writes)).upserted.toSorted()).toEqual([together, alone]);
   });
 
   it("stops without marking anything missing when a folder the core knows songs in is empty", async () => {

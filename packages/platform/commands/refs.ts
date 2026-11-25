@@ -43,6 +43,7 @@ import type { Refs as movies_playback } from "./movies/playback";
 import type { Refs as movies_titles } from "./movies/titles";
 import type { Refs as music_albums } from "./music/albums";
 import type { Refs as music_artists } from "./music/artists";
+import type { Refs as music_credits } from "./music/credits";
 import type { Refs as music_history } from "./music/history";
 import type { Refs as music_library } from "./music/library";
 import type { Refs as music_likes } from "./music/likes";
@@ -263,6 +264,12 @@ export const commandRefs = {
   "music.artists.albums": api.music.artists.albums satisfies music_artists["albums"],
   "music.artists.get": api.music.artists.get satisfies music_artists["get"],
   "music.artists.list": api.music.artists.list satisfies music_artists["list"],
+  "music.artists.tracks": api.music.artists.tracks satisfies music_artists["tracks"],
+  "music.credits.list": api.music.credits.list satisfies music_credits["list"],
+  "music.credits.overrides": api.music.credits.overrides satisfies music_credits["overrides"],
+  "music.credits.removeOverride": api.music.credits
+    .removeOverride satisfies music_credits["removeOverride"],
+  "music.credits.setOverride": api.music.credits.setOverride satisfies music_credits["setOverride"],
   "music.history.list": api.music.history.list satisfies music_history["list"],
   "music.library.home": api.music.library.home satisfies music_library["home"],
   "music.library.search": api.music.library.search satisfies music_library["search"],

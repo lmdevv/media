@@ -5,7 +5,7 @@ import type { Doc } from "../_generated/dataModel";
 import { sha256Hex } from "../core/lib/secrets";
 import { cut, uniqueWithin } from "../movies/bounds";
 import type { musicTables } from "./schema";
-import type { LocalLyricSet, LrclibLyricSet, LyricSet } from "./validators";
+import type { ArtistCredit, LocalLyricSet, LrclibLyricSet, LyricSet } from "./validators";
 
 /**
  * The longest fields the music tables keep (ADR 0024), in UTF-16 code units. The music writer
@@ -39,17 +39,30 @@ export const MUSIC_BOUNDS = {
   playlistDescription: 500,
   /** The playback id a play keeps, as `music.play.start` makes it. */
   playbackId: 64,
+  /** The most artists one song or album credits; later ones are not linked. */
+  credits: 10,
+  /** The longest the names of a song's or an album's credits run together. */
+  creditNames: 1024,
 } as const;
 
 /**
  * The most bytes, as Convex measures a document, each kind of music document is kept within by
- * the music writer. A track at its bound has a 4,096-byte path and every text at its maximum in
- * 3-byte characters, about 20 KiB. A lyrics row keeps its leading lyric sets within its bound.
+ * the music writer. A track at its bound has a 4,096-byte path, every text at its maximum in
+ * 3-byte characters, and its credits, about 24 KiB. A lyrics row keeps its leading lyric sets
+ * within its bound.
  */
 export const DOCUMENT_BYTES = {
-  tracks: 24 * 1024,
-  albums: 12 * 1024,
+  tracks: 28 * 1024,
+  albums: 16 * 1024,
   artists: 8 * 1024,
+  /** A credit string, its key, and the names it resolves to, which are parts of it. */
+  artistCredits: 6 * 1024,
+  /** Two keys: a part's and its credit string's. */
+  creditParts: 4 * 1024,
+  /** A credit string's key and a track. */
+  creditTracks: 2 * 1024,
+  /** A credit string as a manager typed it, and its key. */
+  creditOverrides: 4 * 1024,
   localLyrics: 512 * 1024,
   /** LRCLIB's lyrics for a song, bounded like its own (#152). */
   lrclibLyrics: 512 * 1024,
@@ -64,6 +77,12 @@ export const TABLE_BYTES = {
   artists: DOCUMENT_BYTES.artists,
   albums: DOCUMENT_BYTES.albums,
   tracks: DOCUMENT_BYTES.tracks,
+  artistCredits: DOCUMENT_BYTES.artistCredits,
+  creditParts: DOCUMENT_BYTES.creditParts,
+  creditTracks: DOCUMENT_BYTES.creditTracks,
+  creditOverrides: DOCUMENT_BYTES.creditOverrides,
+  trackArtists: DOCUMENT_BYTES.small,
+  albumArtists: DOCUMENT_BYTES.small,
   localLyrics: DOCUMENT_BYTES.localLyrics,
   lrclibLyrics: DOCUMENT_BYTES.lrclibLyrics,
   lyricsSettings: DOCUMENT_BYTES.small,
@@ -112,6 +131,7 @@ export type TrackText = Pick<
   | "lyricsFiles"
   | "artHash"
   | "folderArt"
+  | "credits"
 >;
 
 /** A genre or a label within its maximum, or null for none. */
@@ -122,31 +142,81 @@ export const labelWithin = (text: string | null): string | null =>
 const folderArtWithin = (text: string | null): string | null =>
   text === null ? null : fingerprint(text);
 
+/**
+ * Names a song or an album credits within their maximums: each name cut to a name's maximum, at
+ * most `MUSIC_BOUNDS.credits` of them, and the leading ones whose names run to at most `total`
+ * together, `MUSIC_BOUNDS.creditNames` unless given.
+ */
+export const namesWithin = (
+  names: ReadonlyArray<string>,
+  total: number = MUSIC_BOUNDS.creditNames,
+): ReadonlyArray<string> => {
+  const kept: Array<string> = [];
+  let length = 0;
+
+  for (const whole of names.slice(0, MUSIC_BOUNDS.credits)) {
+    const one = name(whole);
+
+    length += one.length;
+
+    if (length > total) break;
+
+    kept.push(one);
+  }
+
+  return kept;
+};
+
+/** Credits within the maximums `namesWithin` keeps their names to. */
+export const creditsWithin = (credits: ReadonlyArray<ArtistCredit>): Array<ArtistCredit> => {
+  const names = namesWithin(credits.map((credit) => credit.name));
+
+  return credits.slice(0, names.length).map((credit, index) => ({
+    artistId: credit.artistId,
+    name: names[index] ?? credit.name,
+  }));
+};
+
 /** A track's fields within their maximums. Its path is a scan's to keep within 4,096 bytes. */
-export const fitTrack = <Track extends TrackText>(track: Track): Track => ({
-  ...track,
-  title: name(track.title),
-  titleKey: cut(track.titleKey, MUSIC_BOUNDS.sortKey),
-  artistName: name(track.artistName),
-  albumTitle: name(track.albumTitle),
-  codec: label(track.codec),
-  searchText: searchable(track.searchText),
-  lyricsFiles: fingerprint(track.lyricsFiles),
-  artHash: artHashWithin(track.artHash),
-  folderArt: folderArtWithin(track.folderArt),
-});
+export const fitTrack = <Track extends TrackText>(track: Track): Track => {
+  const fitted = {
+    ...track,
+    title: name(track.title),
+    titleKey: cut(track.titleKey, MUSIC_BOUNDS.sortKey),
+    artistName: name(track.artistName),
+    albumTitle: name(track.albumTitle),
+    codec: label(track.codec),
+    searchText: searchable(track.searchText),
+    lyricsFiles: fingerprint(track.lyricsFiles),
+    artHash: artHashWithin(track.artHash),
+    folderArt: folderArtWithin(track.folderArt),
+  };
+
+  if (track.credits !== undefined) fitted.credits = creditsWithin(track.credits);
+
+  return fitted;
+};
 
 /** An album's fields within their maximums. */
-export const fitAlbum = (album: Fields<"albums">): Fields<"albums"> => ({
-  ...album,
-  title: name(album.title),
-  artistName: name(album.artistName),
-  key: uniqueWithin(album.key, MUSIC_BOUNDS.key),
-  genre: labelWithin(album.genre),
-  format: label(album.format),
-  searchText: searchable(album.searchText),
-  artHash: artHashWithin(album.artHash),
-});
+export const fitAlbum = (album: Fields<"albums">): Fields<"albums"> => {
+  const fitted = {
+    ...album,
+    title: name(album.title),
+    artistName: name(album.artistName),
+    key: uniqueWithin(album.key, MUSIC_BOUNDS.key),
+    genre: labelWithin(album.genre),
+    format: label(album.format),
+    searchText: searchable(album.searchText),
+    artHash: artHashWithin(album.artHash),
+  };
+
+  if (album.credits !== undefined) fitted.credits = creditsWithin(album.credits);
+
+  if (album.artistKey !== undefined)
+    fitted.artistKey = uniqueWithin(album.artistKey, MUSIC_BOUNDS.key);
+
+  return fitted;
+};
 
 /** An artist's fields within their maximums. */
 export const fitArtist = (artist: Fields<"artists">): Fields<"artists"> => ({
@@ -156,6 +226,27 @@ export const fitArtist = (artist: Fields<"artists">): Fields<"artists"> => ({
   searchText: searchable(artist.searchText),
   artHash: artHashWithin(artist.artHash),
 });
+
+/**
+ * A credit string's fields within their maximums: its text, and the names it resolves to, which
+ * are parts of it and so run no longer together than a name.
+ */
+export const fitCredit = (credit: Fields<"artistCredits">): Fields<"artistCredits"> => ({
+  ...credit,
+  key: uniqueWithin(credit.key, MUSIC_BOUNDS.key),
+  text: name(credit.text),
+  artists: resolvedWithin(credit.artists).slice(),
+});
+
+/** Names a credit string resolves to, within the maximums `fitCredit` keeps them to. */
+export const resolvedWithin = (artists: ReadonlyArray<string>): ReadonlyArray<string> =>
+  namesWithin(artists, MUSIC_BOUNDS.name);
+
+/** A name within a name's maximum. */
+export const nameWithin = (text: string): string => name(text);
+
+/** A key within a key's maximum, keeping a hash of the whole past it (`uniqueWithin`). */
+export const keyWithin = (key: string): string => uniqueWithin(key, MUSIC_BOUNDS.key);
 
 /** A playlist's name within its maximum. */
 export const playlistNameWithin = (typed: string): string => cut(typed, MUSIC_BOUNDS.playlistName);

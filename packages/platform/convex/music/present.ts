@@ -7,6 +7,10 @@ import type { Handlers as TrackHandlers } from "../../commands/music/tracks";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { DatabaseReader } from "../_generated/server";
 import { issueShareableTicket } from "../core/tickets";
+import { plus } from "../movies/reads";
+import type { Reads } from "../movies/reads";
+import { getsOf, rowsOf } from "./reads";
+import type { ArtistCredit } from "./validators";
 
 type Result<H> = H extends (...args: never) => infer Answer ? Awaited<Answer> : never;
 
@@ -48,6 +52,19 @@ export interface MusicPresenter {
   readonly artist: (artist: Doc<"artists">, artHash: string | null) => Promise<ArtistCard>;
 }
 
+/**
+ * Whom a song or an album credits, in order; a row a release before credits wrote credits its one
+ * artist under the name it shows.
+ */
+const creditsOf = (row: {
+  readonly artistId: Id<"artists">;
+  readonly artistName: string;
+  readonly credits?: ReadonlyArray<ArtistCredit>;
+}): Array<ArtistCredit> =>
+  row.credits?.map(({ artistId, name }) => ({ artistId, name })) ?? [
+    { artistId: row.artistId, name: row.artistName },
+  ];
+
 /** A presenter for one call. */
 export const musicPresenter = (): MusicPresenter => {
   const paths = new Map<string, Promise<string>>();
@@ -73,6 +90,7 @@ export const musicPresenter = (): MusicPresenter => {
       title: track.title,
       artist: track.artistName,
       artistId: track.artistId,
+      credits: creditsOf(track),
       album: track.albumTitle,
       albumId: track.albumId,
       trackNumber: track.trackNumber,
@@ -91,6 +109,7 @@ export const musicPresenter = (): MusicPresenter => {
       title: album.title,
       artist: album.artistName,
       artistId: album.artistId,
+      credits: creditsOf(album),
       year: album.year,
       artUrl: await art(album.artHash),
       trackCount: album.trackCount,
@@ -99,6 +118,7 @@ export const musicPresenter = (): MusicPresenter => {
       id: artist._id,
       name: artist.name,
       albumCount: artist.albumCount,
+      trackCount: artist.trackCount ?? 0,
       artUrl: await art(artHash),
     }),
   };
@@ -107,10 +127,17 @@ export const musicPresenter = (): MusicPresenter => {
 /** Albums one artist's artwork fallback reads at most: their newest. */
 export const ARTIST_ART_ALBUMS = 4;
 
+/** What an artist's artwork fallback reads: their newest album links, those albums, and older rows. */
+export const ARTIST_ART_READS: Reads = plus(
+  plus(rowsOf("albumArtists", ARTIST_ART_ALBUMS), getsOf("albums", ARTIST_ART_ALBUMS)),
+  rowsOf("albums", ARTIST_ART_ALBUMS),
+);
+
 /**
- * The artwork to show for an artist: their own, or else the newest of their albums on disk with
- * artwork among their `ARTIST_ART_ALBUMS` newest. An artist's albums are in the artist's own
- * library, so whoever sees the artist sees them. Reads one index range when the artist has no
+ * The artwork to show for an artist: their own, or else the newest of the albums on disk crediting
+ * them with artwork among the `ARTIST_ART_ALBUMS` newest, and among those a release before credits
+ * filed under them. An artist's albums are in the artist's own library, so whoever sees the artist
+ * sees them. Reads up to two index ranges and `ARTIST_ART_ALBUMS` albums when the artist has no
  * artwork of their own.
  */
 export const artistArt = async (
@@ -119,13 +146,25 @@ export const artistArt = async (
 ): Promise<string | null> => {
   if (artist.artHash !== null) return artist.artHash;
 
-  const albums = await db
-    .query("albums")
+  const links = await db
+    .query("albumArtists")
     .withIndex("by_artist_year", (q) => q.eq("artistId", artist._id))
     .order("desc")
     .take(ARTIST_ART_ALBUMS);
 
-  return albums.find((album) => album.artHash !== null && album.trackCount > 0)?.artHash ?? null;
+  const credited = await Promise.all(links.map(async (link) => db.get(link.albumId)));
+
+  const legacy = await db
+    .query("albums")
+    .withIndex("by_artist_year", (q) => q.eq("artistId", artist._id).eq("artistKey", undefined))
+    .order("desc")
+    .take(ARTIST_ART_ALBUMS);
+
+  return (
+    [...credited, ...legacy].find(
+      (album) => album !== null && album.artHash !== null && album.trackCount > 0,
+    )?.artHash ?? null
+  );
 };
 
 /**

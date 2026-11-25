@@ -8,6 +8,7 @@ import { purgeStep } from "../core/scans";
 import { CALL_COST, NO_COST, cost, meterFrom } from "./budget";
 import type { Cost } from "./budget";
 import { catalogBatch } from "./catalog";
+import { rechecksFor } from "./credits";
 import { clearDependents } from "./dependents";
 import { DOCUMENT_BYTES } from "./fit";
 import { dropLookups } from "./lyricLookups";
@@ -29,6 +30,9 @@ const PAGE_COST = cost(30, 12, 64 * 1024, 4 * 1024);
 /** Albums or artists one page of a removed library's last stage deletes. */
 const ROWS_PAGE = 200;
 
+/** Artist links of a leftover album that page deletes with it: one per credit, and two more. */
+const LINKS_LEFT = 12;
+
 /** Where the tracks stage goes next: the same page again when the budget stopped it partway. */
 export interface PurgeNext {
   readonly cursor: string | null;
@@ -44,7 +48,7 @@ export interface PurgeNext {
  * entries, likes, plays, queue entries) goes first, in half the budget (`dependents.ts`), then
  * its queued lyrics lookups, up to three quarters (`dropLookups`). The batch settles the albums and artists those
  * tracks filed under in the same mutation: their counts and the library's totals move, and an
- * album left without any track goes, then its artist when nothing files under it. When the budget
+ * album left without any track goes, then each artist nothing credits any more. When the budget
  * stops it partway, the next call reads the same page again; the tracks it deleted are gone.
  */
 export const tracksPage = (
@@ -67,7 +71,12 @@ export const tracksPage = (
 
     const leaving = found.page.filter((track) => !scope.keeps(track.path));
     const cleared = await dropLookups(ctx, store.meter, await clearDependents(store, leaving));
-    const batch = catalogBatch(store, libraryId, { totals: !scope.gone, limit });
+
+    const batch = catalogBatch(store, libraryId, rechecksFor(ctx, libraryId), {
+      totals: !scope.gone,
+      limit,
+    });
+
     const deleted = await batch.each(cleared, batch.remove);
 
     const settled = await batch.finish();
@@ -104,9 +113,11 @@ export const tracks = internalMutation({
 });
 
 /**
- * One page of a removed library's last stage: deletes up to 200 of the albums, then the artists,
- * that its tracks' purge left, which the catalog batch leaves none of unless a defect did, and
- * once none is left, its totals. Answers whether more is left.
+ * One page of a removed library's last stage: deletes up to 200 of the albums, with their artist
+ * links, then the artists,
+ * then the credit strings and their parts and songs, that its tracks' purge left, which the
+ * catalog batch leaves none of unless a defect did, then up to 200 of its managers' credit
+ * corrections, and once none is left, its totals. Answers whether more is left.
  */
 export const restPage = async (ctx: MutationCtx, libraryId: Id<"libraries">): Promise<boolean> => {
   const store = musicStore(ctx.db, meterFrom(NO_COST));
@@ -118,7 +129,18 @@ export const restPage = async (ctx: MutationCtx, libraryId: Id<"libraries">): Pr
   );
 
   if (albums.length > 0) {
-    await Promise.all(albums.map(async (album) => store.deleteAlbum(album._id)));
+    await Promise.all(
+      albums.map(async (album) => {
+        const links = await store.take(
+          "albumArtists",
+          (q) => q.withIndex("by_album", (index) => index.eq("albumId", album._id)),
+          LINKS_LEFT,
+        );
+
+        await Promise.all(links.map(async (link) => store.deleteAlbumArtist(link._id)));
+        await store.deleteAlbum(album._id);
+      }),
+    );
 
     return true;
   }
@@ -131,6 +153,54 @@ export const restPage = async (ctx: MutationCtx, libraryId: Id<"libraries">): Pr
 
   if (artists.length > 0) {
     await Promise.all(artists.map(async (artist) => store.deleteArtist(artist._id)));
+
+    return true;
+  }
+
+  const credits = await store.take(
+    "artistCredits",
+    (q) => q.withIndex("by_library_key", (index) => index.eq("libraryId", libraryId)),
+    ROWS_PAGE,
+  );
+
+  if (credits.length > 0) {
+    await Promise.all(credits.map(async (credit) => store.deleteCredit(credit._id)));
+
+    return true;
+  }
+
+  const parts = await store.take(
+    "creditParts",
+    (q) => q.withIndex("by_library_part", (index) => index.eq("libraryId", libraryId)),
+    ROWS_PAGE,
+  );
+
+  if (parts.length > 0) {
+    await Promise.all(parts.map(async (part) => store.deleteCreditPart(part._id)));
+
+    return true;
+  }
+
+  const songs = await store.take(
+    "creditTracks",
+    (q) => q.withIndex("by_library_credit", (index) => index.eq("libraryId", libraryId)),
+    ROWS_PAGE,
+  );
+
+  if (songs.length > 0) {
+    await Promise.all(songs.map(async (song) => store.deleteCreditTrack(song._id)));
+
+    return true;
+  }
+
+  const corrections = await store.take(
+    "creditOverrides",
+    (q) => q.withIndex("by_library_key", (index) => index.eq("libraryId", libraryId)),
+    ROWS_PAGE,
+  );
+
+  if (corrections.length > 0) {
+    await Promise.all(corrections.map(async (one) => store.deleteCreditOverride(one._id)));
 
     return true;
   }

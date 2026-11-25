@@ -12,6 +12,7 @@ import { pathFits } from "../movies/bounds";
 import { cost, meterFrom } from "./budget";
 import { catalogBatch } from "./catalog";
 import type { CatalogBatch } from "./catalog";
+import { rechecksFor } from "./credits";
 import { DOCUMENT_BYTES } from "./fit";
 import { knownTrack, scannedLyrics, scannedTrack } from "./validators";
 import { musicStore } from "./write";
@@ -49,7 +50,12 @@ const scanWrite = <Value>(
   ) => Promise<(released: ReadonlyArray<string>) => Value>,
 ) =>
   withScanLease(ctx, "music", held, async (scan) => {
-    const batch = catalogBatch(musicStore(ctx.db, meterFrom(FIXED_COST)), scan.library._id);
+    const batch = catalogBatch(
+      musicStore(ctx.db, meterFrom(FIXED_COST)),
+      scan.library._id,
+      rechecksFor(ctx, scan.library._id),
+    );
+
     const answer = await write(batch, scan);
     const settled = await batch.finish();
 
@@ -105,6 +111,7 @@ export const known = serverMutation({
               lyricsFiles: track.lyricsFiles,
               lyricsReader: track.lyricsReader,
               lyricsBytes: track.lyricsBytes,
+              tagsReader: track.tagsReader ?? 0,
               durationMs: track.durationMs,
               title: track.title,
               artist: track.artistName,

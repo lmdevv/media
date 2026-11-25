@@ -14,12 +14,28 @@ const nullable = <T, FieldPaths extends string>(validator: Validator<T, "require
  */
 const artUrl = nullable(v.string());
 
+/**
+ * One artist a song or an album credits: the artist's id and the name as the tags spell it there.
+ * A tag that names several artists in one string, such as "Mora & JHAYCO", credits each of them
+ * when one is credited on their own elsewhere in the library, or when a manager split it.
+ */
+const credit = v.object({ artistId: v.id("artists"), name: v.string() });
+
+/** Every artist a song or an album credits, in order. Absent from a server before credits. */
+const credits = v.optional(v.array(credit));
+
+/** How a manager corrected a credit: `together` keeps it one artist, `split` always splits it. */
+const creditOverride = v.union(v.literal("together"), v.literal("split"));
+
 /** A song as the music commands answer it, and as a music group session's queue shows it. */
 export const track = v.object({
   id: v.id("tracks"),
   title: v.string(),
+  /** The artist as the tags name it. */
   artist: v.string(),
+  /** The first artist it credits. */
   artistId: v.id("artists"),
+  credits,
   album: v.string(),
   albumId: v.id("albums"),
   trackNumber: nullable(v.number()),
@@ -38,8 +54,11 @@ export const track = v.object({
 const albumCard = v.object({
   id: v.id("albums"),
   title: v.string(),
+  /** The album artist as the tags name it. */
   artist: v.string(),
+  /** The first artist it credits. */
   artistId: v.id("artists"),
+  credits,
   year: nullable(v.number()),
   artUrl,
   trackCount: v.number(),
@@ -48,7 +67,10 @@ const albumCard = v.object({
 const artistCard = v.object({
   id: v.id("artists"),
   name: v.string(),
+  /** Albums on disk crediting the artist. */
   albumCount: v.number(),
+  /** Songs on disk crediting the artist, on their own albums or others'. */
+  trackCount: v.optional(v.number()),
   artUrl,
 });
 
@@ -271,10 +293,17 @@ export const music = [
     result: v.object({ artist: artistCard, topTracks: v.array(track) }),
   }),
   query("music.artists.albums", {
-    summary: "List an artist's albums, newest year first",
+    summary: "List the albums crediting an artist, newest year first",
     scope: "music:read",
     args: { artistId: v.id("artists"), paginationOpts: paginationOptsValidator },
     result: paginationResultValidator(albumCard),
+  }),
+  query("music.artists.tracks", {
+    summary:
+      "List the songs on disk you may play that credit an artist, theirs and the ones they feature on, by title",
+    scope: "music:read",
+    args: { artistId: v.id("artists"), paginationOpts: paginationOptsValidator },
+    result: paginationResultValidator(track),
   }),
   query("music.tracks.list", {
     summary: "List the songs you may play, by title",
@@ -576,6 +605,48 @@ export const music = [
     scope: "music:edit",
     args: {},
     result: v.object({ libraries: v.number() }),
+  }),
+  query("music.credits.list", {
+    summary:
+      "List the artist credits in a music library you manage that name several artists, how each resolves, and how it was corrected",
+    scope: "music:edit",
+    args: { libraryId: v.id("libraries"), paginationOpts: paginationOptsValidator },
+    result: paginationResultValidator(
+      v.object({
+        /** The credit as the tags write it, such as "Mora & JHAYCO". */
+        name: v.string(),
+        /** The artists it credits now: itself, or the artists it splits into. */
+        artists: v.array(v.string()),
+        override: nullable(creditOverride),
+        /** Songs and albums whose tags name it. */
+        uses: v.number(),
+      }),
+    ),
+  }),
+  query("music.credits.overrides", {
+    summary: "List the corrections to artist credits in a music library you manage",
+    scope: "music:edit",
+    args: { libraryId: v.id("libraries"), paginationOpts: paginationOptsValidator },
+    result: paginationResultValidator(v.object({ name: v.string(), mode: creditOverride })),
+  }),
+  mutation("music.credits.setOverride", {
+    summary:
+      "Correct an artist credit in a music library you manage: together keeps it one artist, also inside longer credits; split always splits it",
+    scope: "music:edit",
+    args: {
+      libraryId: v.id("libraries"),
+      /** A credit with separators, such as "Zion & Lennox"; case does not matter. */
+      name: v.string(),
+      mode: creditOverride,
+    },
+    result: v.null(),
+  }),
+  mutation("music.credits.removeOverride", {
+    summary:
+      "Remove a correction to an artist credit in a music library you manage, so the library's evidence decides it again",
+    scope: "music:edit",
+    args: { libraryId: v.id("libraries"), name: v.string() },
+    result: v.null(),
   }),
   mutation("music.play.start", {
     summary: "Start a song: get a stream ticket for it in this session",

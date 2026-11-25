@@ -10,7 +10,7 @@ Show an album: its artist, year, length, genre, and format.
 - Kind: query
 - Scope: music:read
 - Arguments: `{ albumId: Id<"albums"> }`
-- Result: `{ album: { id: Id<"albums">; title: string; artist: string; artistId: Id<"artists">; year: number | null; artUrl: string | null; trackCount: number }; durationMs: number; genre: string | null; format: string }`
+- Result: `{ album: { id: Id<"albums">; title: string; artist: string; artistId: Id<"artists">; credits?: Array<{ artistId: Id<"artists">; name: string }>; year: number | null; artUrl: string | null; trackCount: number }; durationMs: number; genre: string | null; format: string }`
 
 ## `music.albums.list`
 
@@ -21,7 +21,7 @@ List the albums you may play, newest first.
 - Scope: music:read
 - Arguments: `{ paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
 - Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
-- Result: `{ page: Array<{ id: Id<"albums">; title: string; artist: string; artistId: Id<"artists">; year: number | null; artUrl: string | null; trackCount: number }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
+- Result: `{ page: Array<{ id: Id<"albums">; title: string; artist: string; artistId: Id<"artists">; credits?: Array<{ artistId: Id<"artists">; name: string }>; year: number | null; artUrl: string | null; trackCount: number }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
 
 ## `music.albums.tracks`
 
@@ -32,18 +32,18 @@ List an album's songs on disk in disc and track order.
 - Scope: music:read
 - Arguments: `{ albumId: Id<"albums">; paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
 - Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
-- Result: `{ page: Array<{ id: Id<"tracks">; title: string; artist: string; artistId: Id<"artists">; album: string; albumId: Id<"albums">; trackNumber: number | null; discNumber: number | null; durationMs: number; codec: string; lossless: boolean; bitrate: number | null; sampleRate: number | null; bitDepth: number | null; artUrl: string | null; liked: boolean }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
+- Result: `{ page: Array<{ id: Id<"tracks">; title: string; artist: string; artistId: Id<"artists">; credits?: Array<{ artistId: Id<"artists">; name: string }>; album: string; albumId: Id<"albums">; trackNumber: number | null; discNumber: number | null; durationMs: number; codec: string; lossless: boolean; bitrate: number | null; sampleRate: number | null; bitDepth: number | null; artUrl: string | null; liked: boolean }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
 
 ## `music.artists.albums`
 
-List an artist's albums, newest year first.
+List the albums crediting an artist, newest year first.
 
 - CLI: `media music artists albums`
 - Kind: query
 - Scope: music:read
 - Arguments: `{ artistId: Id<"artists">; paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
 - Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
-- Result: `{ page: Array<{ id: Id<"albums">; title: string; artist: string; artistId: Id<"artists">; year: number | null; artUrl: string | null; trackCount: number }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
+- Result: `{ page: Array<{ id: Id<"albums">; title: string; artist: string; artistId: Id<"artists">; credits?: Array<{ artistId: Id<"artists">; name: string }>; year: number | null; artUrl: string | null; trackCount: number }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
 
 ## `music.artists.get`
 
@@ -53,7 +53,7 @@ Show an artist and their top songs.
 - Kind: query
 - Scope: music:read
 - Arguments: `{ artistId: Id<"artists"> }`
-- Result: `{ artist: { id: Id<"artists">; name: string; albumCount: number; artUrl: string | null }; topTracks: Array<{ id: Id<"tracks">; title: string; artist: string; artistId: Id<"artists">; album: string; albumId: Id<"albums">; trackNumber: number | null; discNumber: number | null; durationMs: number; codec: string; lossless: boolean; bitrate: number | null; sampleRate: number | null; bitDepth: number | null; artUrl: string | null; liked: boolean }> }`
+- Result: `{ artist: { id: Id<"artists">; name: string; albumCount: number; trackCount?: number; artUrl: string | null }; topTracks: Array<{ id: Id<"tracks">; title: string; artist: string; artistId: Id<"artists">; credits?: Array<{ artistId: Id<"artists">; name: string }>; album: string; albumId: Id<"albums">; trackNumber: number | null; discNumber: number | null; durationMs: number; codec: string; lossless: boolean; bitrate: number | null; sampleRate: number | null; bitDepth: number | null; artUrl: string | null; liked: boolean }> }`
 
 ## `music.artists.list`
 
@@ -64,7 +64,60 @@ List the artists you may play, by name.
 - Scope: music:read
 - Arguments: `{ paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
 - Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
-- Result: `{ page: Array<{ id: Id<"artists">; name: string; albumCount: number; artUrl: string | null }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
+- Result: `{ page: Array<{ id: Id<"artists">; name: string; albumCount: number; trackCount?: number; artUrl: string | null }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
+
+## `music.artists.tracks`
+
+List the songs on disk you may play that credit an artist, theirs and the ones they feature on, by title.
+
+- CLI: `media music artists tracks`
+- Kind: query
+- Scope: music:read
+- Arguments: `{ artistId: Id<"artists">; paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
+- Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
+- Result: `{ page: Array<{ id: Id<"tracks">; title: string; artist: string; artistId: Id<"artists">; credits?: Array<{ artistId: Id<"artists">; name: string }>; album: string; albumId: Id<"albums">; trackNumber: number | null; discNumber: number | null; durationMs: number; codec: string; lossless: boolean; bitrate: number | null; sampleRate: number | null; bitDepth: number | null; artUrl: string | null; liked: boolean }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
+
+## `music.credits.list`
+
+List the artist credits in a music library you manage that name several artists, how each resolves, and how it was corrected.
+
+- CLI: `media music credits list`
+- Kind: query
+- Scope: music:edit
+- Arguments: `{ libraryId: Id<"libraries">; paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
+- Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
+- Result: `{ page: Array<{ name: string; artists: Array<string>; override: "together" | "split" | null; uses: number }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
+
+## `music.credits.overrides`
+
+List the corrections to artist credits in a music library you manage.
+
+- CLI: `media music credits overrides`
+- Kind: query
+- Scope: music:edit
+- Arguments: `{ libraryId: Id<"libraries">; paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
+- Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
+- Result: `{ page: Array<{ name: string; mode: "together" | "split" }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
+
+## `music.credits.removeOverride`
+
+Remove a correction to an artist credit in a music library you manage, so the library's evidence decides it again.
+
+- CLI: `media music credits remove-override`
+- Kind: mutation
+- Scope: music:edit
+- Arguments: `{ libraryId: Id<"libraries">; name: string }`
+- Result: `null`
+
+## `music.credits.setOverride`
+
+Correct an artist credit in a music library you manage: together keeps it one artist, also inside longer credits; split always splits it.
+
+- CLI: `media music credits set-override`
+- Kind: mutation
+- Scope: music:edit
+- Arguments: `{ libraryId: Id<"libraries">; name: string; mode: "together" | "split" }`
+- Result: `null`
 
 ## `music.history.list`
 
@@ -75,7 +128,7 @@ List the songs you played, most recent first.
 - Scope: music:read
 - Arguments: `{ paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
 - Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
-- Result: `{ page: Array<{ playedAt: number; track: { id: Id<"tracks">; title: string; artist: string; artistId: Id<"artists">; album: string; albumId: Id<"albums">; trackNumber: number | null; discNumber: number | null; durationMs: number; codec: string; lossless: boolean; bitrate: number | null; sampleRate: number | null; bitDepth: number | null; artUrl: string | null; liked: boolean } }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
+- Result: `{ page: Array<{ playedAt: number; track: { id: Id<"tracks">; title: string; artist: string; artistId: Id<"artists">; credits?: Array<{ artistId: Id<"artists">; name: string }>; album: string; albumId: Id<"albums">; trackNumber: number | null; discNumber: number | null; durationMs: number; codec: string; lossless: boolean; bitrate: number | null; sampleRate: number | null; bitDepth: number | null; artUrl: string | null; liked: boolean } }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
 
 ## `music.library.home`
 
@@ -85,7 +138,7 @@ Show your music home: recently added and recently played albums, recently played
 - Kind: query
 - Scope: music:read
 - Arguments: none
-- Result: `{ recentlyAdded: Array<{ id: Id<"albums">; title: string; artist: string; artistId: Id<"artists">; year: number | null; artUrl: string | null; trackCount: number }>; recentlyPlayed: Array<{ id: Id<"albums">; title: string; artist: string; artistId: Id<"artists">; year: number | null; artUrl: string | null; trackCount: number }>; recentlyPlayedArtists: Array<{ id: Id<"artists">; name: string; albumCount: number; artUrl: string | null }>; stats: { tracks: number; albums: number; artists: number; durationMs: number } }`
+- Result: `{ recentlyAdded: Array<{ id: Id<"albums">; title: string; artist: string; artistId: Id<"artists">; credits?: Array<{ artistId: Id<"artists">; name: string }>; year: number | null; artUrl: string | null; trackCount: number }>; recentlyPlayed: Array<{ id: Id<"albums">; title: string; artist: string; artistId: Id<"artists">; credits?: Array<{ artistId: Id<"artists">; name: string }>; year: number | null; artUrl: string | null; trackCount: number }>; recentlyPlayedArtists: Array<{ id: Id<"artists">; name: string; albumCount: number; trackCount?: number; artUrl: string | null }>; stats: { tracks: number; albums: number; artists: number; durationMs: number } }`
 
 ## `music.library.search`
 
@@ -95,7 +148,7 @@ Search the songs, albums, and artists you may play.
 - Kind: query
 - Scope: music:read
 - Arguments: `{ query: string; limit?: number }`
-- Result: `{ tracks: Array<{ id: Id<"tracks">; title: string; artist: string; artistId: Id<"artists">; album: string; albumId: Id<"albums">; trackNumber: number | null; discNumber: number | null; durationMs: number; codec: string; lossless: boolean; bitrate: number | null; sampleRate: number | null; bitDepth: number | null; artUrl: string | null; liked: boolean }>; albums: Array<{ id: Id<"albums">; title: string; artist: string; artistId: Id<"artists">; year: number | null; artUrl: string | null; trackCount: number }>; artists: Array<{ id: Id<"artists">; name: string; albumCount: number; artUrl: string | null }> }`
+- Result: `{ tracks: Array<{ id: Id<"tracks">; title: string; artist: string; artistId: Id<"artists">; credits?: Array<{ artistId: Id<"artists">; name: string }>; album: string; albumId: Id<"albums">; trackNumber: number | null; discNumber: number | null; durationMs: number; codec: string; lossless: boolean; bitrate: number | null; sampleRate: number | null; bitDepth: number | null; artUrl: string | null; liked: boolean }>; albums: Array<{ id: Id<"albums">; title: string; artist: string; artistId: Id<"artists">; credits?: Array<{ artistId: Id<"artists">; name: string }>; year: number | null; artUrl: string | null; trackCount: number }>; artists: Array<{ id: Id<"artists">; name: string; albumCount: number; trackCount?: number; artUrl: string | null }> }`
 
 ## `music.likes.list`
 
@@ -106,7 +159,7 @@ List the songs you like, newest first.
 - Scope: music:read
 - Arguments: `{ paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
 - Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
-- Result: `{ page: Array<{ id: Id<"tracks">; title: string; artist: string; artistId: Id<"artists">; album: string; albumId: Id<"albums">; trackNumber: number | null; discNumber: number | null; durationMs: number; codec: string; lossless: boolean; bitrate: number | null; sampleRate: number | null; bitDepth: number | null; artUrl: string | null; liked: boolean }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
+- Result: `{ page: Array<{ id: Id<"tracks">; title: string; artist: string; artistId: Id<"artists">; credits?: Array<{ artistId: Id<"artists">; name: string }>; album: string; albumId: Id<"albums">; trackNumber: number | null; discNumber: number | null; durationMs: number; codec: string; lossless: boolean; bitrate: number | null; sampleRate: number | null; bitDepth: number | null; artUrl: string | null; liked: boolean }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
 
 ## `music.likes.set`
 
@@ -248,7 +301,7 @@ List a playlist's songs in order, with the ones you cannot play greyed out.
 - Scope: music:read
 - Arguments: `{ playlistId: Id<"playlists">; paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
 - Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
-- Result: `{ page: Array<{ itemId: Id<"playlistItems">; addedAt: number; track: { id: Id<"tracks">; title: string; artist: string; artistId: Id<"artists">; album: string; albumId: Id<"albums">; trackNumber: number | null; discNumber: number | null; durationMs: number; codec: string; lossless: boolean; bitrate: number | null; sampleRate: number | null; bitDepth: number | null; artUrl: string | null; liked: boolean } | null; durationMs: number; available: boolean; reason: "missing" | "no_access" | null; addedBy: { id: Id<"users">; name: string } | null }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
+- Result: `{ page: Array<{ itemId: Id<"playlistItems">; addedAt: number; track: { id: Id<"tracks">; title: string; artist: string; artistId: Id<"artists">; credits?: Array<{ artistId: Id<"artists">; name: string }>; album: string; albumId: Id<"albums">; trackNumber: number | null; discNumber: number | null; durationMs: number; codec: string; lossless: boolean; bitrate: number | null; sampleRate: number | null; bitDepth: number | null; artUrl: string | null; liked: boolean } | null; durationMs: number; available: boolean; reason: "missing" | "no_access" | null; addedBy: { id: Id<"users">; name: string } | null }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
 
 ## `music.playlists.list`
 
@@ -413,7 +466,7 @@ List your queue's entries in play order.
 - Scope: music:play
 - Arguments: `{ paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
 - Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
-- Result: `{ page: Array<{ itemId: Id<"playQueueEntries">; autoplay: boolean; track: { id: Id<"tracks">; title: string; artist: string; artistId: Id<"artists">; album: string; albumId: Id<"albums">; trackNumber: number | null; discNumber: number | null; durationMs: number; codec: string; lossless: boolean; bitrate: number | null; sampleRate: number | null; bitDepth: number | null; artUrl: string | null; liked: boolean } }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null; revision: number }`
+- Result: `{ page: Array<{ itemId: Id<"playQueueEntries">; autoplay: boolean; track: { id: Id<"tracks">; title: string; artist: string; artistId: Id<"artists">; credits?: Array<{ artistId: Id<"artists">; name: string }>; album: string; albumId: Id<"albums">; trackNumber: number | null; discNumber: number | null; durationMs: number; codec: string; lossless: boolean; bitrate: number | null; sampleRate: number | null; bitDepth: number | null; artUrl: string | null; liked: boolean } }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null; revision: number }`
 
 ## `music.queue.move`
 
@@ -473,7 +526,7 @@ Show a song you may see: its title, artist, and album.
 - Kind: query
 - Scope: music:read
 - Arguments: `{ trackId: Id<"tracks"> }`
-- Result: `{ id: Id<"tracks">; title: string; artist: string; artistId: Id<"artists">; album: string; albumId: Id<"albums">; trackNumber: number | null; discNumber: number | null; durationMs: number; codec: string; lossless: boolean; bitrate: number | null; sampleRate: number | null; bitDepth: number | null; artUrl: string | null; liked: boolean }`
+- Result: `{ id: Id<"tracks">; title: string; artist: string; artistId: Id<"artists">; credits?: Array<{ artistId: Id<"artists">; name: string }>; album: string; albumId: Id<"albums">; trackNumber: number | null; discNumber: number | null; durationMs: number; codec: string; lossless: boolean; bitrate: number | null; sampleRate: number | null; bitDepth: number | null; artUrl: string | null; liked: boolean }`
 
 ## `music.tracks.list`
 
@@ -484,4 +537,4 @@ List the songs you may play, by title.
 - Scope: music:read
 - Arguments: `{ paginationOpts: { numItems: number; cursor: string | null; endCursor?: string | null; id?: number; maximumRowsRead?: number; maximumBytesRead?: number } }`
 - Pages: `--limit <n>` (default 100) and `--cursor <continueCursor>`
-- Result: `{ page: Array<{ id: Id<"tracks">; title: string; artist: string; artistId: Id<"artists">; album: string; albumId: Id<"albums">; trackNumber: number | null; discNumber: number | null; durationMs: number; codec: string; lossless: boolean; bitrate: number | null; sampleRate: number | null; bitDepth: number | null; artUrl: string | null; liked: boolean }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`
+- Result: `{ page: Array<{ id: Id<"tracks">; title: string; artist: string; artistId: Id<"artists">; credits?: Array<{ artistId: Id<"artists">; name: string }>; album: string; albumId: Id<"albums">; trackNumber: number | null; discNumber: number | null; durationMs: number; codec: string; lossless: boolean; bitrate: number | null; sampleRate: number | null; bitDepth: number | null; artUrl: string | null; liked: boolean }>; continueCursor: string; isDone: boolean; splitCursor?: string | null; pageStatus?: "SplitRecommended" | "SplitRequired" | null }`

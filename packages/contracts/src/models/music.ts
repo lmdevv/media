@@ -187,9 +187,17 @@ export const ScannedTrack = Schema.Struct({
   size: Schema.Finite,
   mtimeMs: Schema.Finite,
   title: Schema.String,
+  /** The song's artist as a client shows it: its artist tag, or its separate values joined. */
   artist: Schema.String,
+  /**
+   * The song's artists when its tags hold them as separate values, two or more, which the core
+   * credits as they are; absent when its tags name its artists in one string.
+   */
+  artists: Schema.optionalKey(Schema.Array(Schema.String)),
   /** The album's artist when the tags name one; the album files under it, else under `artist`. */
   albumArtist: Schema.optionalKey(Schema.String),
+  /** The album's artists when its tags hold them as separate values, two or more. */
+  albumArtists: Schema.optionalKey(Schema.Array(Schema.String)),
   album: Schema.String,
   trackNumber: Schema.optionalKey(Schema.Finite),
   discNumber: Schema.optionalKey(Schema.Finite),
@@ -207,6 +215,8 @@ export const ScannedTrack = Schema.Struct({
   folderArt: Schema.optionalKey(Schema.String),
   /** Whether the file's tags mark it explicit, which a kid's explicit filter hides (D17). */
   explicit: Schema.Boolean,
+  /** The version of the server's tag reader that read the file's tags and artists. */
+  tagsReader: Schema.Int,
 });
 
 /** One audio file a scan read. */
@@ -240,6 +250,11 @@ export const KnownTrack = Schema.Struct({
   lyricsReader: Schema.Finite,
   /** The size of the file's own lyrics as stored, null when it has none. */
   lyricsBytes: Schema.NullOr(Schema.Finite),
+  /**
+   * The version of the server's tag reader that read the file's tags, 0 for a song the core
+   * stored before it kept one, so a newer reader reads the file again.
+   */
+  tagsReader: Schema.Finite,
   durationMs: Schema.Finite,
   title: Schema.String,
   artist: Schema.String,

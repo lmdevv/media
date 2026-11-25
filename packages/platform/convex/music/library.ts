@@ -10,7 +10,7 @@ import { callBudget, plus, readsOf, settleRead, times } from "../movies/reads";
 import type { ReadBudget, Reads } from "../movies/reads";
 import { ALBUM_FACTS, budgetedGates, walkMusicLibraries } from "./access";
 import { trackFacts } from "./items";
-import { ARTIST_ART_ALBUMS, artistArt, likedAmong, musicPresenter } from "./present";
+import { ARTIST_ART_READS, artistArt, likedAmong, musicPresenter } from "./present";
 import { LIKED_READS, getsOf, rowsOf } from "./reads";
 import { totalsOf } from "./totals";
 import type { Totals } from "./totals";
@@ -37,9 +37,6 @@ const SEARCH_MAX = 50;
 
 /** The longest search query taken. */
 const QUERY_MAX = 200;
-
-/** What an artist's artwork fallback reads. */
-const ARTIST_ART_READS = rowsOf("albums", ARTIST_ART_ALBUMS);
 
 /** Reads `count` docs with `read` when `budget` pays for `cost`, and settles it on what came back. */
 const paid = async <Row extends Parameters<typeof settleRead>[2][number]>(
@@ -180,7 +177,7 @@ const searchLibrary = async (
   return {
     tracks: tracks.filter((track) => gate.admits(trackFacts(track))),
     albums: albums.filter((album) => album.trackCount > 0),
-    artists: artists.filter((artist) => artist.albumCount > 0),
+    artists: artists.filter((artist) => artist.albumCount > 0 || (artist.trackCount ?? 0) > 0),
   };
 };
 

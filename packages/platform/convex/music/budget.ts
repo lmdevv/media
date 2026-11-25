@@ -37,6 +37,25 @@ export const addCost = (left: Cost, right: Cost): Cost => ({
 
 export const sumCost = (costs: ReadonlyArray<Cost>): Cost => costs.reduce(addCost, NO_COST);
 
+/** The most of `costs` in each measure: a bound on a step that does one of them. */
+export const maxCost = (costs: ReadonlyArray<Cost>): Cost =>
+  costs.reduce(
+    (most, one) => ({
+      work: work(
+        Math.max(most.work.ranges, one.work.ranges),
+        Math.max(most.work.writes, one.work.writes),
+      ),
+      readBytes: Math.max(most.readBytes, one.readBytes),
+      writeBytes: Math.max(most.writeBytes, one.writeBytes),
+      lyricBytes: Math.max(most.lyricBytes, one.lyricBytes),
+    }),
+    NO_COST,
+  );
+
+/** `one` cost `count` times over. */
+export const repeated = (one: Cost, count: number): Cost =>
+  sumCost(Array.from({ length: count }, () => one));
+
 /** The bytes a call reads, and writes, at most: 12 MiB each, under Convex's 16 MiB. */
 const CALL_BYTES = 12 * 1024 * 1024;
 

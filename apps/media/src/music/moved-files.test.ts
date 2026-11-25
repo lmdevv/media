@@ -16,6 +16,7 @@ const gone = (path: string, changes: Partial<KnownTrack> = {}): KnownTrack => ({
   lyricsFiles: "",
   lyricsReader: 0,
   lyricsBytes: null,
+  tagsReader: 1,
   durationMs: 180_000,
   title: "Song",
   artist: "Artist",
@@ -34,6 +35,7 @@ const found = (path: string, changes: Partial<ScannedTrack> = {}): ScannedTrack 
   codec: "flac",
   lossless: true,
   explicit: false,
+  tagsReader: 1,
   ...NO_LYRICS,
   ...changes,
 });

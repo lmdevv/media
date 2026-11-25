@@ -21,7 +21,7 @@ import type { LyricsSidecar } from "./lyrics/sidecars.ts";
 import { movedFileMatcher } from "./moved-files.ts";
 import * as Files from "./music-files.ts";
 import type { WalkedFile } from "./music-files.ts";
-import { readTagLyrics, readTrackTags } from "./tag-reader.ts";
+import { TAGS_READER_VERSION, readTagLyrics, readTrackTags } from "./tag-reader.ts";
 import { LYRICS_READER_VERSION, readTrackLyrics } from "./track-lyrics.ts";
 
 /** The artist a scan names for a file whose tags name none. */
@@ -262,6 +262,7 @@ const readNeeded = (
     mode === "full" ||
     known === undefined ||
     known.missing ||
+    known.tagsReader !== TAGS_READER_VERSION ||
     known.size !== file.size ||
     known.mtimeMs !== file.mtimeMs ||
     known.folderArt !== (folderArt === undefined ? null : storedFingerprint(folderArt))
@@ -453,11 +454,19 @@ export const scanLibrary = Effect.fn("MusicScan.library")(function* <E>(
       codec: tags.codec,
       lossless: tags.lossless,
       explicit: tags.explicit,
+      tagsReader: TAGS_READER_VERSION,
       ...lyrics,
     };
 
+    // A song without an artist tag shows its album artist, and so credits the album's artists.
+    const artists = tags.artists ?? (tags.artist === undefined ? tags.albumArtists : undefined);
+
     // The core takes an absent tag as an absent field, never as undefined.
+    if (artists !== undefined) track.artists = [...artists];
+
     if (tags.albumArtist !== undefined) track.albumArtist = tags.albumArtist;
+
+    if (tags.albumArtists !== undefined) track.albumArtists = [...tags.albumArtists];
 
     if (tags.trackNumber !== undefined) track.trackNumber = tags.trackNumber;
 
