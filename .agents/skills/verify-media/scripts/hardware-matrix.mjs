@@ -88,6 +88,38 @@ export const FIXTURES = {
       ].flat(),
     },
   },
+  "h264-10bit": {
+    about: "H.264 High 10 (10-bit) SDR, 1920x1080 at 24 fps, 30 s of testsrc2 with a tone, generated: Intel media engines decode no 10-bit H.264",
+    generate: {
+      title: "Verify Fixture H264 10-bit",
+      year: 2026,
+      file: "Verify Fixture H264 10-bit (2026).mkv",
+      args: [
+        ["-f", "lavfi", "-i", "testsrc2=size=1920x1080:rate=24:duration=30"],
+        ["-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=30"],
+        ["-map", "0:v", "-map", "1:a", "-c:v", "libx264", "-preset", "ultrafast"],
+        ["-pix_fmt", "yuv420p10le", "-g", "48", "-keyint_min", "48", "-sc_threshold", "0"],
+        ["-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-c:a", "aac", "-b:a", "128k"],
+      ].flat(),
+    },
+  },
+  "hlg-hevc": {
+    about: "HEVC Main 10 HLG (BT.2020), 1920x1080 at 24 fps, 30 s of testsrc2 with a tone, generated: HLG carries no mastering display metadata, which VA-API's tone map needs",
+    generate: {
+      title: "Verify Fixture HEVC HLG",
+      year: 2026,
+      file: "Verify Fixture HEVC HLG (2026).mkv",
+      args: [
+        ["-f", "lavfi", "-i", "testsrc2=size=1920x1080:rate=24:duration=30"],
+        ["-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=30"],
+        ["-map", "0:v", "-map", "1:a"],
+        ["-vf", "format=yuv420p10le,setparams=color_primaries=bt2020:color_trc=arib-std-b67:colorspace=bt2020nc"],
+        ["-c:v", "libx265", "-preset", "ultrafast", "-pix_fmt", "yuv420p10le"],
+        ["-x265-params", "keyint=48:min-keyint=48:scenecut=0:log-level=error"],
+        ["-color_primaries", "bt2020", "-color_trc", "arib-std-b67", "-colorspace", "bt2020nc", "-c:a", "aac", "-b:a", "128k"],
+      ].flat(),
+    },
+  },
 };
 
 /** The fixture's file inside a side's container. */
@@ -206,7 +238,8 @@ export const REFERENCE_TONE_MAP =
   "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p";
 
 /**
- * The rows. `start` and `seek` are where the two fetches begin, in seconds, and `span` how much
+ * The rows: one per stage, then hybrid rows, whose `work` fixes an operation to another path than
+ * the cell's. `start` and `seek` are where the two fetches begin, in seconds, and `span` how much
  * each covers. `request` adds negotiation options (`quality`, `burnInSubtitle`). `work` maps each
  * operation to where it must run: `path` (the cell's own) or a fixed path, for a hybrid row.
  * `notBuilt` lists the UnsupportedPlayback reasons that mean the service does not do the stage.
@@ -369,6 +402,46 @@ export const ROWS = [
     checks: [
       { check: "codec", codec: "av1", stage: true },
       { check: "profile", profiles: ["Main"] },
+      { check: "bit-depth", max: 8 },
+      { check: "dimensions", expect: "source" },
+      { check: "frame-rate", expect: ["source"] },
+    ],
+  },
+  {
+    id: "hybrid-cpu-decode",
+    stage: "decode",
+    paths: ["qsv", "vaapi"],
+    fixture: "h264-10bit",
+    profile: "h264-sdr",
+    request: {},
+    start: 0,
+    seek: 20,
+    span: 4,
+    work: { decode: "cpu", "encode-h264": "path" },
+    notBuilt: [],
+    checks: [
+      { check: "codec", codec: "h264", stage: false },
+      { check: "bit-depth", max: 8 },
+      { check: "dimensions", expect: "source" },
+      { check: "frame-rate", expect: ["source"] },
+    ],
+  },
+  {
+    id: "hybrid-cpu-tone-map",
+    stage: "hdr-to-sdr",
+    paths: ["vaapi"],
+    fixture: "hlg-hevc",
+    profile: "h264-sdr",
+    request: {},
+    start: 0,
+    seek: 20,
+    span: 4,
+    work: { decode: "path", "tone-map": "cpu", "encode-h264": "path" },
+    notBuilt: ["hdr-tone-mapping-requires-hardware"],
+    checks: [
+      { check: "hdr-removed" },
+      { check: "sdr-tags" },
+      { check: "codec", codec: "h264", stage: false },
       { check: "bit-depth", max: 8 },
       { check: "dimensions", expect: "source" },
       { check: "frame-rate", expect: ["source"] },
@@ -663,9 +736,10 @@ const unsampled = (run) => !run.gpu && (run.polls ?? SAMPLED_POLLS) < SAMPLED_PO
 /**
  * Whether one run did `operation` on `path` by WORK's rule, with the reason when not. A run too
  * short to sample passes a GPU engine rule on its arguments alone; `work` then wants engine time
- * from another run of the cell.
+ * from another run of the cell. A hybrid row's CPU operation (`beside` a GPU path's stages) is
+ * judged by its arguments alone, since the run's other stages hold the GPU.
  */
-export const ranOn = (operation, path, run, bytes) => {
+export const ranOn = (operation, path, run, bytes, beside = false) => {
   const rule = WORK[operation]?.[path];
   if (rule === undefined) return { ok: false, why: `no rule for ${operation} on ${path}` };
   const joined = run.args.join(" ");
@@ -673,7 +747,9 @@ export const ranOn = (operation, path, run, bytes) => {
   if (missing) return { ok: false, why: `${operation} not on ${path}: the arguments lack ${missing.source}` };
   const avoided = rule.avoids.find((pattern) => pattern.test(joined));
   if (avoided) return { ok: false, why: `${operation} not on ${path}: the arguments use ${avoided.source}` };
-  if (rule.engine === "none" && run.gpu) return { ok: false, why: `${operation} on ${path}, but the run holds a GPU client` };
+  if (rule.engine === "none" && run.gpu && !beside) {
+    return { ok: false, why: `${operation} on ${path}, but the run holds a GPU client` };
+  }
   const busy = rule.engine === "any" ? Object.values(run.engines).some((value) => value > 0) : (run.engines[rule.engine] ?? 0) > 0;
   if (rule.engine !== "none" && !busy && !unsampled(run)) {
     return { ok: false, why: `${operation} on ${path}: no GPU ${rule.engine === "any" ? "" : `${rule.engine} `}engine time` };
@@ -958,7 +1034,7 @@ export const CHECKS = {
       for (const [operation] of Object.entries(cell.row.work)) {
         const path = where(cell, operation);
         for (const run of runs) {
-          const ran = ranOn(operation, path, run, bytes);
+          const ran = ranOn(operation, path, run, bytes, path === "cpu" && cell.path !== "cpu");
           if (!ran.ok) return no(`${ran.why} (${describeRun(run)})`);
         }
         const engine = WORK[operation][path].engine;
