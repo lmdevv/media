@@ -124,11 +124,9 @@ const dyingWithServer = (program: string, args: ReadonlyArray<string>) => [
   ...args,
 ];
 
-const scrubPaths = (text: string, args: ReadonlyArray<string>): string =>
-  args
-    .filter((arg) => arg.startsWith("/") && arg.length > 1)
-    .toSorted((left, right) => right.length - left.length)
-    .reduce((scrubbed, path) => scrubbed.replaceAll(path, "<path>"), text);
+/** The absolute paths among a tool's arguments, which its standard error never shows. */
+const pathsIn = (args: ReadonlyArray<string>): ReadonlyArray<string> =>
+  args.filter((arg) => arg.startsWith("/") && arg.length > 1);
 
 /**
  * Variables ffmpeg and ffprobe may see: where programs live, time and locale, and where VA-API
@@ -175,15 +173,7 @@ const make = Effect.gen(function* () {
       stderr: string,
       stderrHead: string,
       cause: unknown,
-    ) =>
-      new MediaToolFailed({
-        tool,
-        exitCode,
-        signal,
-        stderr: scrubPaths(stderr, args),
-        stderrHead: scrubPaths(stderrHead, args),
-        cause,
-      });
+    ) => new MediaToolFailed({ tool, exitCode, signal, stderr, stderrHead, cause });
 
     const program = tool === "ffmpeg" ? config.ffmpegPath : config.ffprobePath;
 
@@ -192,6 +182,7 @@ const make = Effect.gen(function* () {
       background,
       stderrTail: STDERR_TAIL,
       stderrHead: STDERR_HEAD,
+      stderrRedactions: pathsIn(args),
       stopSignal: "SIGKILL",
       forceKillAfter: "2 seconds",
       output: piped !== null,
@@ -237,8 +228,8 @@ const make = Effect.gen(function* () {
     return {
       exit,
       output: running.output,
-      stderrTail: Effect.sync(() => scrubPaths(running.stderrTail(), args)),
-      stderrHead: Effect.sync(() => scrubPaths(running.stderrHead(), args)),
+      stderrTail: Effect.sync(() => running.stderrTail()),
+      stderrHead: Effect.sync(() => running.stderrHead()),
       suspend,
     };
   });
