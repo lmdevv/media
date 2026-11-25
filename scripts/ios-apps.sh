@@ -16,6 +16,11 @@
 # workspace, and the root files that only typecheck, lint and its plugins, format, test, turbo, and
 # Nix read. Every other path counts, including Swift and podspecs anywhere, an app's other files
 # outside src/, every package.json, the lockfile, the pnpm workspace file, patches, and CI.
+#
+# That holds only while every config plugin comes from an npm package: a plugin kept in this
+# repository runs during prebuild and may import any JavaScript beside it, which no path rule can
+# follow. So the script fails when an app.json registers a plugin by a relative path or from an
+# @media package, until `native` below counts the files that plugin reads.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -36,7 +41,7 @@ native() {
     return
     ;;
   esac
-  case "$name" in package.json | app.json | app.config.* | app.plugin.js | react-native.config.js | expo-module.config.json)
+  case "$name" in package.json | app.json | app.config.* | app.plugin.* | react-native.config.* | expo-module.config.json)
     echo "$path"
     return
     ;;
@@ -62,6 +67,30 @@ apps() {
   local IFS=,
   echo "[${list[*]}]"
 }
+
+# Prints each config plugin an app registers from this repository, as `<app.json>: <plugin>`.
+repository_plugins() {
+  node -e '
+    const { readFileSync, readdirSync } = require("node:fs");
+    for (const app of readdirSync("apps/mobile")) {
+      const path = `apps/mobile/${app}/app.json`;
+      let config;
+      try { config = JSON.parse(readFileSync(path, "utf8")); } catch { continue; }
+      for (const plugin of config.expo?.plugins ?? []) {
+        const name = Array.isArray(plugin) ? plugin[0] : plugin;
+        if (typeof name === "string" && /^(?:\.|@media\/)/u.test(name)) console.log(`${path}: ${name}`);
+      }
+    }
+  '
+}
+
+plugins="$(repository_plugins)"
+if [[ -n "$plugins" ]]; then
+  echo "ios-apps.sh: a config plugin from this repository can read any file during prebuild." >&2
+  echo "Count the files it reads in native(), then allow it here:" >&2
+  echo "$plugins" >&2
+  exit 1
+fi
 
 mode="${1:-}"
 [[ $# -eq 0 ]] || shift

@@ -1,4 +1,7 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
@@ -68,7 +71,30 @@ const cases: ReadonlyArray<readonly [string, Scope]> = [
   ["tools/oxlint/media/rules/music-writer.ts", { bundle: both, build: [] }],
   ["scripts/ios-apps.test.ts", { bundle: both, build: [] }],
   ["packages/config/tsconfig.base.json", { bundle: both, build: [] }],
+  ["packages/player/react-native.config.ts", { bundle: ["music"], build: ["music"] }],
+  ["packages/mobile-core/app.plugin.ts", { bundle: both, build: both }],
 ];
+
+/** The script's exit status and stderr in a repository whose one app registers `plugins`. */
+const withPlugins = (plugins: ReadonlyArray<unknown>) => {
+  const root = mkdtempSync(join(tmpdir(), "ios-apps-"));
+
+  try {
+    mkdirSync(join(root, "scripts"));
+    mkdirSync(join(root, "apps/mobile/music"), { recursive: true });
+    copyFileSync(script, join(root, "scripts/ios-apps.sh"));
+    writeFileSync(join(root, "apps/mobile/music/app.json"), JSON.stringify({ expo: { plugins } }));
+
+    const { status, stderr } = spawnSync(join(root, "scripts/ios-apps.sh"), ["-"], {
+      input: "",
+      encoding: "utf8",
+    });
+
+    return { status, stderr };
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+};
 
 // Each call starts the script, which runs changed-packages.sh twice, which each start turbo and node.
 describe("ios-apps.sh", { timeout: 30_000 }, () => {
@@ -84,6 +110,17 @@ describe("ios-apps.sh", { timeout: 30_000 }, () => {
         "apps/mobile/music/modules/vault-files/ios/VaultFilesModule.swift",
       ),
     ).toBe(lines({ bundle: both, build: ["music"] }));
+  });
+
+  it("fails while an app registers a config plugin from this repository", () => {
+    for (const plugin of ["./src/with-local-config.cjs", "@media/mobile-core"]) {
+      const { status, stderr } = withPlugins(["expo-router", ["expo-font", { fonts: [] }], plugin]);
+
+      expect([plugin, status]).toEqual([plugin, 1]);
+      expect(stderr).toContain(`apps/mobile/music/app.json: ${plugin}`);
+    }
+
+    expect(withPlugins(["expo-router", ["@media/mobile-core/plugin", {}]]).status).toBe(1);
   });
 
   it("scopes nothing for an empty diff", () => {
