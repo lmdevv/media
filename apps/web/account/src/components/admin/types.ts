@@ -67,3 +67,17 @@ export type ServerStatus = Result<Core["server"]["status"]>;
 
 /** A database backup. */
 export type Backup = RowOf<Core["server"]["backups"]["list"]>;
+
+type Credits = PlatformSdk["music"]["credits"];
+
+/**
+ * A credit in a music library that names several artists, such as "Mora & JHAYCO": the artists it
+ * credits now, its correction, and how many songs and albums name it.
+ */
+export type Credit = RowOf<Credits["list"]>;
+
+/** A manager's correction to one artist credit. */
+export type Correction = RowOf<Credits["overrides"]>;
+
+/** What a correction does: `together` keeps the credit one artist, `split` always splits it. */
+export type CorrectionMode = Correction["mode"];

@@ -1,14 +1,20 @@
 import { usePlayer } from "@media/player/react";
+import { Button } from "@/components/ui/button";
 import { Skeleton, SkeletonLine } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import { creditsOf } from "@media/contracts/artist-credits";
+import { preloadFirstPage, usePages } from "@media/ui/lib/pages";
 import type { PageOpts } from "@media/ui/lib/pages";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import type { ErrorComponentProps } from "@tanstack/react-router";
 import { PlayIcon } from "lucide-react";
+import { useEffect, useId, useState } from "react";
 
+import { ArtistCredits } from "@/components/library/artist-credits";
 import { Artwork, PlayingBars } from "@/components/library/artwork";
 import { AlbumCard, SectionHeader, usePlayTracks } from "@/components/library/cards";
 import { LikeButton } from "@/components/library/like-button";
+import { ListTail } from "@/components/library/paged";
 import { CollectionMenu } from "@/components/playlists/collection-menu";
 import { TrackMenu } from "@/components/playlists/track-menu";
 import { DetailError } from "@/components/route-error";
@@ -18,8 +24,9 @@ import { artSrc } from "@/lib/art-src";
 import { formatDuration, plural } from "@/lib/format";
 import { asArtistId } from "@/lib/models";
 import type { ArtistId, Track } from "@/lib/models";
-import { preloadAllRows, useAllRows } from "@/lib/pages";
+import { PAGE_ROWS, preloadAllRows, useAllRows } from "@/lib/pages";
 import { useMusic, useRead } from "@/lib/platform";
+import { useIsDesktop } from "@/lib/use-media";
 
 const MISSING: MissingCopy = {
   title: "This artist isn't in your library anymore",
@@ -28,8 +35,11 @@ const MISSING: MissingCopy = {
   back: { to: "/artists", label: "Back to artists" },
 };
 
-/** The arguments of each page of an artist's albums, shared by the loader and the page. */
-const albumsOf = (artistId: ArtistId) => (paginationOpts: PageOpts) => ({
+/**
+ * The arguments of each page of an artist's albums, or of the songs crediting them, shared by the
+ * loader and the page.
+ */
+const pagesOf = (artistId: ArtistId) => (paginationOpts: PageOpts) => ({
   artistId,
   paginationOpts,
 });
@@ -40,9 +50,11 @@ export const Route = createFileRoute("/_app/artists/$artistId")({
     stringify: (params) => ({ artistId: params.artistId }),
   },
   loader: async ({ context: { platform }, params: { artistId } }) => {
+    // The songs list opens on the top songs, which the artist read brings, until its pages arrive.
+    void preloadFirstPage(platform.music.artists.tracks, pagesOf(artistId), PAGE_ROWS);
     await Promise.all([
       platform.music.artists.get.preload({ artistId }),
-      preloadAllRows(platform.music.artists.albums, albumsOf(artistId)),
+      preloadAllRows(platform.music.artists.albums, pagesOf(artistId)),
     ]);
   },
   pendingComponent: ArtistSkeleton,
@@ -50,7 +62,7 @@ export const Route = createFileRoute("/_app/artists/$artistId")({
   errorComponent: ArtistError,
 });
 
-/** The top songs an artist page shows, as the core caps them. */
+/** The top songs an artist page shows, as the core caps them, and the songs it lists at first. */
 const TOP_SONGS = 10;
 
 function ArtistSkeleton() {
@@ -87,15 +99,26 @@ function ArtistPage() {
   const { artistId } = Route.useParams();
   const music = useMusic();
   const detail = useRead(music.artists.get, { artistId });
-  const albums = useAllRows(music.artists.albums, albumsOf(artistId));
+  const albums = useAllRows(music.artists.albums, pagesOf(artistId));
   const play = usePlayTracks();
 
   if (detail === undefined || albums === undefined) return <ArtistSkeleton />;
 
   const { artist, topTracks } = detail;
   const latest = albums.toSorted((left, right) => (right.year ?? 0) - (left.year ?? 0))[0];
-  const songCount = albums.reduce((total, album) => total + album.trackCount, 0);
   const [from] = placeholderColors(latest?.id ?? artist.id);
+
+  // An artist without a song count of their own counts their albums' songs.
+  const songCount =
+    artist.trackCount ?? albums.reduce((total, album) => total + album.trackCount, 0);
+
+  const facts = [
+    "Artist",
+    albums.length === 0 ? null : plural(albums.length, "album"),
+    `${plural(songCount, "song")} in your library`,
+  ]
+    .filter((fact) => fact !== null)
+    .join(" · ");
 
   return (
     <div className="flex flex-col gap-8 pb-12">
@@ -113,7 +136,7 @@ function ArtistPage() {
           />
         )}
         <span className="relative font-mono text-xs/xs tracking-mono text-dark-text/75 uppercase">
-          Artist · {plural(albums.length, "album")} · {plural(songCount, "song")} in your library
+          {facts}
         </span>
         <div className="relative flex items-center gap-4">
           <button
@@ -164,18 +187,7 @@ function ArtistPage() {
             </Link>
           </section>
         )}
-        <section className="flex min-w-0 grow flex-col gap-1.5">
-          <h2 className="pb-2 font-sans text-lg/lg font-semibold tracking-tight text-text">
-            Top songs
-          </h2>
-          {topTracks.map((track, index) => (
-            <TopSongRow
-              key={track.id}
-              track={track}
-              onPlay={() => void play(topTracks, { index })}
-            />
-          ))}
-        </section>
+        <ArtistSongs artistId={artist.id} topTracks={topTracks} />
       </div>
 
       {albums.length > 1 ? (
@@ -198,9 +210,99 @@ function ArtistPage() {
   );
 }
 
-function TopSongRow({ track, onPlay }: { readonly track: Track; readonly onPlay: () => void }) {
+/** `tracks` without a later row of a song already listed, as two pages may both hold one. */
+const distinctSongs = (tracks: ReadonlyArray<Track>): ReadonlyArray<Track> => {
+  const seen = new Set<Track["id"]>();
+
+  return tracks.filter((track) => {
+    if (seen.has(track.id)) return false;
+
+    seen.add(track.id);
+
+    return true;
+  });
+};
+
+/**
+ * Every song crediting the artist, by title: their own and the ones they feature on, each once.
+ * It lists the first `TOP_SONGS` until "Show all songs", then pages the rest in as the end
+ * scrolls near. Until the first page arrives it lists the top songs, which are the same first
+ * songs by title.
+ */
+function ArtistSongs({
+  artistId,
+  topTracks,
+}: {
+  readonly artistId: ArtistId;
+  readonly topTracks: ReadonlyArray<Track>;
+}) {
+  const music = useMusic();
+  const paged = usePages(music.artists.tracks, pagesOf(artistId), PAGE_ROWS);
+  const play = usePlayTracks();
+  const [all, setAll] = useState(false);
+  const headingId = useId();
+  const next = paged.status === "ready" ? paged.next : null;
+  const songs = paged.status === "ready" ? distinctSongs(paged.rows) : topTracks;
+  const short = !all && songs.length < TOP_SONGS && next?.kind === "more" ? next.load : null;
+
+  // A page can end before the first songs do, where the artist's linked songs end: load on.
+  useEffect(() => short?.(), [short]);
+
+  if (paged.status === "failed") throw new Error(paged.message);
+
+  const shown = all ? songs : songs.slice(0, TOP_SONGS);
+  const more = songs.length > TOP_SONGS || (songs.length === TOP_SONGS && next?.kind === "more");
+
+  return (
+    <section aria-labelledby={headingId} className="flex min-w-0 grow flex-col gap-1.5">
+      <h2
+        id={headingId}
+        className="pb-2 font-sans text-lg/lg font-semibold tracking-tight text-text"
+      >
+        Songs
+      </h2>
+      {shown.map((track, index) => (
+        <SongRow
+          key={track.id}
+          track={track}
+          artistId={artistId}
+          onPlay={() => void play(songs, { index })}
+        />
+      ))}
+      {all && paged.status === "ready" ? (
+        <ListTail
+          paged={paged}
+          skeleton={<SkeletonLine className="h-13 px-2 font-sans text-base/sm" bar="h-2.5 w-45" />}
+        />
+      ) : null}
+      {more && !all ? (
+        <div className="pt-2">
+          <Button variant="secondary" size="sm" onClick={() => setAll(true)}>
+            Show all songs
+          </Button>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+/**
+ * One of the artist's songs: its album, and the song's artists first when it credits anyone else,
+ * as a song they feature on does.
+ */
+function SongRow({
+  track,
+  artistId,
+  onPlay,
+}: {
+  readonly track: Track;
+  readonly artistId: ArtistId;
+  readonly onPlay: () => void;
+}) {
   const player = usePlayer();
+  const desktop = useIsDesktop();
   const current = player.track?.id === track.id;
+  const shared = creditsOf(track).some((credit) => credit.artistId !== artistId);
 
   return (
     <div
@@ -235,7 +337,17 @@ function TopSongRow({ track, onPlay }: { readonly track: Track; readonly onPlay:
         >
           {track.title}
         </span>
-        <span className="truncate font-sans text-sm/xs text-text-muted">{track.album}</span>
+        <span className="truncate font-sans text-sm/xs text-text-muted">
+          {shared ? (
+            <>
+              {/* On a phone the row is one play button, so the names are text and its menu
+                  opens each artist. */}
+              <ArtistCredits item={track} links={desktop} />
+              {" · "}
+            </>
+          ) : null}
+          {track.album}
+        </span>
       </span>
       <LikeButton
         track={track}

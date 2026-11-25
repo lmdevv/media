@@ -10,6 +10,7 @@ import type { Paged } from "@media/ui/lib/pages";
 import { PauseIcon, PlayIcon, SkipBackIcon, SkipForwardIcon } from "lucide-react";
 import { useState } from "react";
 
+import { creditText } from "@/components/library/artist-credits";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { MEDIA_BASE_URL } from "@/env";
@@ -22,6 +23,17 @@ type Item = Parameters<PlatformSdk["music"]["playback"]["get"]>[0]["item"];
 type Detail = Awaited<ReturnType<PlatformSdk["music"]["playback"]["get"]>>;
 
 type Share = { readonly sharedBy: string; readonly expiresAt: number };
+
+/**
+ * Every artist a shared song or album credits, as text joined the way signed-in rows show it. A
+ * share answers names without artist ids, so each name stands in for its artist's id.
+ */
+const creditedNames = ({ artist, credits = [] }: Detail): string =>
+  creditText({
+    artist,
+    artistId: artist,
+    credits: credits.map(({ name }) => ({ artistId: name, name })),
+  });
 
 /** A shell-free share whose reads and playback stay within the link's target. */
 export function GuestItem({ item, ...share }: Share & { readonly item: Item }) {
@@ -126,7 +138,7 @@ function GuestPlayer({
             </p>
             <h1 className="text-xl/xl font-heavy tracking-tight md:text-2xl/2xl">{detail.title}</h1>
             <p className="text-md/base text-text-muted">
-              {detail.artist}
+              {creditedNames(detail)}
               {detail.kind === "album" && detail.year !== null ? ` · ${detail.year}` : ""}
             </p>
           </div>

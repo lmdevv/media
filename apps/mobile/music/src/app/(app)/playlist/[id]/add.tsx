@@ -1,6 +1,7 @@
 import { PlaylistId } from "@/lib/ids";
 import type { TrackId } from "@/lib/models";
 import type { PlaylistDetail, Track } from "@/lib/models";
+import { creditText } from "@/lib/credits";
 import { describeFailure } from "@media/mobile-core/failure";
 import { FlashList } from "@shopify/flash-list";
 import { useLocalSearchParams } from "expo-router";
@@ -123,17 +124,16 @@ function Picker({ detail }: { readonly detail: PlaylistDetail }) {
         }
         renderItem={({ item: track }) => {
           const added = inPlaylist.has(track.id);
+          const artists = creditText(track);
 
           return (
             <View className="px-page">
               <Row
                 title={track.title}
-                subtitle={track.artist}
+                subtitle={artists}
                 leading={{ kind: "art", url: track.artUrl, recyclingKey: track.id }}
                 accessibilityLabel={
-                  added
-                    ? `${track.title}, ${track.artist}, added`
-                    : `Add ${track.title}, ${track.artist}`
+                  added ? `${track.title}, ${artists}, added` : `Add ${track.title}, ${artists}`
                 }
                 onPress={added ? undefined : () => void addTrack(track)}
                 trailing={added ? <RowCheck /> : <Icon icon={Plus} tone="muted" size="inline" />}

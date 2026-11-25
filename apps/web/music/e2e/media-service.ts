@@ -114,6 +114,55 @@ const SONGS = [
   { title: SECOND_SONG, seconds: 6, frequency: 440 },
 ] as const;
 
+/** One fixture song: a tone, written as FLAC with the tags a scan reads. */
+export interface FixtureSong {
+  readonly title: string;
+  readonly artist: string;
+  readonly albumArtist: string;
+  readonly album: string;
+  readonly track: number;
+  readonly seconds: number;
+  readonly frequency: number;
+}
+
+/** Writes each song under `root` in an album artist and album folder, as FLAC with its tags. */
+export const writeSongs = async (
+  root: string,
+  songs: ReadonlyArray<FixtureSong>,
+): Promise<void> => {
+  const ffmpeg = process.env["FFMPEG_PATH"] ?? "ffmpeg";
+
+  await Promise.all(
+    songs.map(async (song) => {
+      const folder = join(root, song.albumArtist, song.album);
+
+      await mkdir(folder, { recursive: true });
+      await run(ffmpeg, [
+        "-hide_banner",
+        "-nostdin",
+        "-v",
+        "error",
+        "-y",
+        "-f",
+        "lavfi",
+        "-i",
+        `sine=frequency=${String(song.frequency)}:sample_rate=44100:duration=${String(song.seconds)}`,
+        "-metadata",
+        `title=${song.title}`,
+        "-metadata",
+        `artist=${song.artist}`,
+        "-metadata",
+        `album_artist=${song.albumArtist}`,
+        "-metadata",
+        `album=${song.album}`,
+        "-metadata",
+        `track=${String(song.track)}`,
+        join(folder, `${String(song.track).padStart(2, "0")} ${song.title}.flac`),
+      ]);
+    }),
+  );
+};
+
 /**
  * Writes the fixture album into a new folder and returns the folder and the album's title.
  *
@@ -127,36 +176,18 @@ export const writeMusicLibrary = async (
 }> => {
   const root = mkdtempSync(join(tmpdir(), "music-e2e-"));
   const album = `Fixture Tones ${root.slice(-6)}`;
-  const folder = join(root, ARTIST, album);
-  const ffmpeg = process.env["FFMPEG_PATH"] ?? "ffmpeg";
 
-  await mkdir(folder, { recursive: true });
-
-  await Promise.all(
-    SONGS.map((song, index) =>
-      run(ffmpeg, [
-        "-hide_banner",
-        "-nostdin",
-        "-v",
-        "error",
-        "-y",
-        "-f",
-        "lavfi",
-        "-i",
-        `sine=frequency=${String(song.frequency)}:sample_rate=44100:duration=${String(seconds ?? song.seconds)}`,
-        "-metadata",
-        `title=${song.title}`,
-        "-metadata",
-        `artist=${ARTIST}`,
-        "-metadata",
-        `album_artist=${ARTIST}`,
-        "-metadata",
-        `album=${album}`,
-        "-metadata",
-        `track=${String(index + 1)}`,
-        join(folder, `${String(index + 1).padStart(2, "0")} ${song.title}.flac`),
-      ]),
-    ),
+  await writeSongs(
+    root,
+    SONGS.map((song, index) => ({
+      title: song.title,
+      artist: ARTIST,
+      albumArtist: ARTIST,
+      album,
+      track: index + 1,
+      seconds: seconds ?? song.seconds,
+      frequency: song.frequency,
+    })),
   );
 
   return { root, album };

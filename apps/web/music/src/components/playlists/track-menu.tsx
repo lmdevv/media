@@ -1,3 +1,4 @@
+import { creditsOf } from "@media/contracts/artist-credits";
 import { useLatestPlayer } from "@media/player/react";
 import { Dialog, DialogContent, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import {
@@ -25,7 +26,7 @@ import { useUi } from "@/components/shell/ui-state";
 import { toastFailure } from "@/lib/action";
 import { formatCount, formatDuration, formatQuality } from "@/lib/format";
 import { HOTKEYS } from "@/lib/hotkeys";
-import type { Playlist, Track, TrackId } from "@/lib/models";
+import type { ArtistId, Playlist, Track, TrackId } from "@/lib/models";
 import { useMusic } from "@/lib/platform";
 import { addAllToPlaylist } from "@/lib/playlist-adds";
 import { useCopyLink } from "@/lib/use-copy-link";
@@ -236,6 +237,32 @@ function TrackMenuKeys({
   return null;
 }
 
+/** "Go to artist" for one credited artist; for several, a submenu that names each. */
+function GoToArtist({ track }: { readonly track: Track }) {
+  const navigate = useNavigate();
+  const credits = creditsOf(track);
+
+  const open = (artistId: ArtistId) =>
+    void navigate({ to: "/artists/$artistId", params: { artistId } });
+
+  if (credits.length === 1) {
+    return <DropdownMenuItem onClick={() => open(track.artistId)}>Go to artist</DropdownMenuItem>;
+  }
+
+  return (
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger>Go to artist</DropdownMenuSubTrigger>
+      <DropdownMenuSubContent>
+        {credits.map((credit) => (
+          <DropdownMenuItem key={credit.artistId} onClick={() => open(credit.artistId)}>
+            {credit.name}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuSubContent>
+    </DropdownMenuSub>
+  );
+}
+
 /**
  * The track row menu: play next, add to queue, add to a playlist,
  * like, go to the album or artist, and file info. `extra` adds context items such as "Remove from
@@ -342,13 +369,7 @@ export function TrackMenu({
               >
                 Go to album
               </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() =>
-                  void navigate({ to: "/artists/$artistId", params: { artistId: track.artistId } })
-                }
-              >
-                Go to artist
-              </DropdownMenuItem>
+              <GoToArtist track={track} />
               <DropdownMenuItem onClick={() => copyLink({ kind: "track", id: track.id })}>
                 Copy link
               </DropdownMenuItem>

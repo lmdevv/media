@@ -56,7 +56,7 @@ export interface MusicPresenter {
  * Whom a song or an album credits, in order; a row a release before credits wrote credits its one
  * artist under the name it shows.
  */
-const creditsOf = (row: {
+export const creditsOf = (row: {
   readonly artistId: Id<"artists">;
   readonly artistName: string;
   readonly credits?: ReadonlyArray<ArtistCredit>;

@@ -10,6 +10,7 @@ import {
   recentTrack,
   rememberRecent,
 } from "./recent-searches";
+import { asArtistId } from "./models";
 import { albumOf, artistOf, trackOf } from "./test-fixtures";
 
 const long = (index: number) =>
@@ -52,5 +53,40 @@ describe("decodeRecents", () => {
     expect(decodeRecents(encodeRecents(recents))).toEqual(recents);
     expect(decodeRecents(null)).toEqual([]);
     expect(decodeRecents('[{"kind":"playlist"}]')).toEqual([]);
+  });
+
+  it("keeps a song's credits, and reads a song stored before it had them", () => {
+    const mora = asArtistId("ar-Mora");
+    const sech = asArtistId("ar-Sech");
+
+    const song = recentTrack({
+      ...trackOf("Volando", "Mora"),
+      artistId: mora,
+      credits: [
+        { artistId: mora, name: "Mora" },
+        { artistId: sech, name: "Sech" },
+      ],
+    });
+
+    expect(decodeRecents(encodeRecents([song]))).toEqual([song]);
+
+    const stored = JSON.stringify([
+      {
+        kind: "track",
+        id: "t-Angel",
+        title: "Angel",
+        artist: "Massive Attack",
+        artistId: "ar-Massive Attack",
+        album: "Mezzanine",
+        albumId: "al-Mezzanine",
+        artUrl: null,
+        liked: false,
+      },
+    ]);
+
+    const [older] = decodeRecents(stored);
+
+    expect(older).toMatchObject({ kind: "track", artist: "Massive Attack" });
+    expect(older).not.toHaveProperty("credits");
   });
 });

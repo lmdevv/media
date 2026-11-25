@@ -3,7 +3,7 @@ import type { AlbumCard } from "./models";
 import type { LocalCopy, OfflineAlbum, OfflineLibrary } from "@/downloads/sync";
 
 /** An album as a card draws it. */
-export type CardAlbum = Pick<AlbumCard, "id" | "title" | "artist" | "artUrl" | "year">;
+export type CardAlbum = Pick<AlbumCard, "id" | "title" | "artist" | "credits" | "artUrl" | "year">;
 
 /** A downloaded album as a card: its cover from this phone, and no year, which it doesn't keep. */
 export const cardOf = (album: OfflineAlbum): CardAlbum => ({

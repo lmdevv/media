@@ -1,4 +1,6 @@
-import type { TrackId } from "@/lib/models";
+import { creditKey, creditsOf } from "@media/contracts/artist-credits";
+import type { CreditedItem } from "@media/contracts/artist-credits";
+import type { ArtistId, TrackId } from "@/lib/models";
 import type { Track } from "@/lib/models";
 import { useCurrentTrack } from "@media/player/react";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -21,6 +23,7 @@ import type { ReactNode } from "react";
 import { TrackMenu } from "@/components/playlists/track-menu";
 import { formatDuration, formatQuality } from "@/lib/format";
 
+import { ArtistCredits, creditText } from "./artist-credits";
 import { Artwork, PlayingBars } from "./artwork";
 import { usePlayTracks } from "./cards";
 import { LikeButton } from "./like-button";
@@ -75,6 +78,18 @@ type RenderRow = (track: Track, index: number, now: NowPlaying) => ReactNode;
 
 const ListLengthContext = createContext(0);
 
+/**
+ * Whether a song names artists its album doesn't: another artist string, or a credit the album
+ * lacks, such as a featured artist the title names.
+ */
+const namesOthers = (track: Track, album: CreditedItem<ArtistId>): boolean => {
+  if (creditKey(track.artist) !== creditKey(album.artist)) return true;
+
+  const albumArtists = new Set(creditsOf(album).map((credit) => credit.artistId));
+
+  return creditsOf(track).some((credit) => !albumArtists.has(credit.artistId));
+};
+
 const numberCell = "w-7.5 shrink-0 lg:w-7";
 
 const coverClassName = "size-11 rounded-xs lg:size-row";
@@ -118,6 +133,7 @@ export function TrackList({
   unavailable,
   withheld,
   byline,
+  album,
   highlight,
   reorder,
   windowing = "long",
@@ -141,6 +157,11 @@ export function TrackList({
   readonly withheld?: (index: number) => boolean;
   /** More to say under a row's artist, such as who added it to a shared playlist. */
   readonly byline?: ((index: number) => string | null) | undefined;
+  /**
+   * The album, on an album's list: a row whose song names artists the album doesn't, such as a
+   * compilation's song or one with a featured artist, shows the song's artists under its title.
+   */
+  readonly album?: CreditedItem<ArtistId> | undefined;
   /** A song to highlight and scroll to, from a shared song link. */
   readonly highlight?: TrackId | null;
   /** Lets rows be moved; the list's order then comes back from the server. */
@@ -212,6 +233,8 @@ export function TrackList({
       unavailable={unavailable?.(index) ?? null}
       withheld={withheld?.(index) ?? false}
       byline={byline?.(index) ?? null}
+      artists={variant === "list" || (album !== undefined && namesOthers(track, album))}
+      artistLinks={desktop}
       highlighted={highlight === track.id}
       reorder={controls}
       dropSide={reorder?.mode === "drag" ? reorder.reorder.dropSide(index) : null}
@@ -450,6 +473,8 @@ const TrackRow = memo(function TrackRow({
   unavailable,
   withheld,
   byline,
+  artists,
+  artistLinks,
   highlighted,
   reorder,
   dropSide,
@@ -464,6 +489,13 @@ const TrackRow = memo(function TrackRow({
   readonly unavailable: string | null;
   readonly withheld: boolean;
   readonly byline: string | null;
+  /** Whether the row names the song's artists under its title. */
+  readonly artists: boolean;
+  /**
+   * Whether each name links to its artist: on a desktop. On a phone the whole row is one play
+   * button, so the names are text and the row's menu opens each artist.
+   */
+  readonly artistLinks: boolean;
   readonly highlighted: boolean;
   readonly reorder: RowReorder | undefined;
   readonly dropSide: DropSide | null;
@@ -568,9 +600,10 @@ const TrackRow = memo(function TrackRow({
         >
           {track.title}
         </span>
-        {variant === "list" ? (
+        {artists ? (
           <span className="truncate font-sans text-sm/xs text-text-muted">
-            {byline === null ? track.artist : `${track.artist} · ${byline}`}
+            <ArtistCredits item={track} links={artistLinks} />
+            {byline === null ? null : ` · ${byline}`}
           </span>
         ) : null}
       </td>
@@ -667,7 +700,7 @@ function UnavailableRow({
             {track.title}
           </span>
           <span className="truncate font-sans text-sm/xs text-text-muted">
-            {[reason, track.artist, byline].filter((part) => part !== null).join(" · ")}
+            {[reason, creditText(track), byline].filter((part) => part !== null).join(" · ")}
           </span>
         </span>
         {variant === "list" ? (

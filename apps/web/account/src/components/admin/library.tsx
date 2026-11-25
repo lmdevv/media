@@ -1,4 +1,5 @@
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
+import type { QueryState } from "@media/sdk/react";
 import { Button } from "@media/ui/components/button";
 import { Skeleton } from "@media/ui/components/skeleton";
 import { TextField } from "@media/ui/components/text-field";
@@ -8,6 +9,7 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 
 import { PageHeader } from "@media/ui/components/page-header";
+import { buttonVariants } from "@media/ui/lib/button-variants";
 import { describeFailure, isFailure } from "@media/ui/lib/failure";
 
 import { useActions } from "./action";
@@ -32,16 +34,9 @@ export type LibraryMode =
 
 type LibraryAction = "rename" | "folders" | "scan" | "remove";
 
-/** One library: its scan, name, folders, who it is shared with, and removing it. */
-export function LibraryScreen({ libraryId }: { readonly libraryId: LibraryId }) {
-  const platform = usePlatform();
-  const libraries = platform.core.libraries;
-  const navigate = useNavigate();
-  const query = usePlatformQuery(libraries.get, { libraryId });
-  const actions = useActions<LibraryAction>();
-  const [mode, setMode] = useState<LibraryMode>({ kind: "idle" });
-
-  const state = Match.value(query).pipe(
+/** A library page's state from its `core.libraries.get` query. */
+export const libraryStateOf = (query: QueryState<LibraryDetail>): LibraryState =>
+  Match.value(query).pipe(
     Match.discriminatorsExhaustive("status")({
       loading: (): LibraryState => ({ kind: "loading" }),
       error: ({ error, retry }): LibraryState =>
@@ -51,6 +46,15 @@ export function LibraryScreen({ libraryId }: { readonly libraryId: LibraryId }) 
       success: ({ data }): LibraryState => ({ kind: "ready", library: data }),
     }),
   );
+
+/** One library: its scan, name, folders, who it is shared with, and removing it. */
+export function LibraryScreen({ libraryId }: { readonly libraryId: LibraryId }) {
+  const platform = usePlatform();
+  const libraries = platform.core.libraries;
+  const navigate = useNavigate();
+  const state = libraryStateOf(usePlatformQuery(libraries.get, { libraryId }));
+  const actions = useActions<LibraryAction>();
+  const [mode, setMode] = useState<LibraryMode>({ kind: "idle" });
 
   const rename = async (name: string): Promise<void> => {
     const done = await actions.run(
@@ -88,6 +92,7 @@ export function LibraryScreen({ libraryId }: { readonly libraryId: LibraryId }) 
       mode={mode}
       running={actions.running}
       sharing={<Sharing libraryId={libraryId} />}
+      creditsLink={<CreditsLink libraryId={libraryId} />}
       back={<LibrariesCrumb />}
       onMode={setMode}
       onScan={() => void actions.run("scan", () => libraries.scan({ libraryId }), "Scan queued")}
@@ -95,6 +100,19 @@ export function LibraryScreen({ libraryId }: { readonly libraryId: LibraryId }) 
       onFolders={(text) => void changeFolders(text)}
       onRemove={() => void remove()}
     />
+  );
+}
+
+/** The link from a music library's page to its artist credits page. */
+function CreditsLink({ libraryId }: { readonly libraryId: LibraryId }) {
+  return (
+    <Link
+      to="/admin/libraries/$libraryId/credits"
+      params={{ libraryId }}
+      className={buttonVariants({ variant: "raised", size: "xs" })}
+    >
+      Correct artist credits
+    </Link>
   );
 }
 
@@ -152,6 +170,7 @@ export function LibraryView({
   mode,
   running,
   sharing,
+  creditsLink,
   back,
   onMode,
   onScan,
@@ -163,6 +182,8 @@ export function LibraryView({
   readonly mode: LibraryMode;
   readonly running: LibraryAction | null;
   readonly sharing: ReactNode;
+  /** The link to the library's artist credits, shown to a manager of a music library. */
+  readonly creditsLink: ReactNode;
   /** The breadcrumb back to the libraries list. */
   readonly back: ReactNode;
   readonly onMode: (mode: LibraryMode) => void;
@@ -192,6 +213,7 @@ export function LibraryView({
           mode={mode}
           running={running}
           sharing={sharing}
+          creditsLink={creditsLink}
           back={back}
           onMode={onMode}
           onScan={onScan}
@@ -209,6 +231,7 @@ function ReadyLibrary({
   mode,
   running,
   sharing,
+  creditsLink,
   back,
   onMode,
   onScan,
@@ -220,6 +243,7 @@ function ReadyLibrary({
   readonly mode: LibraryMode;
   readonly running: LibraryAction | null;
   readonly sharing: ReactNode;
+  readonly creditsLink: ReactNode;
   /** The breadcrumb back to the libraries list. */
   readonly back: ReactNode;
   readonly onMode: (mode: LibraryMode) => void;
@@ -347,6 +371,14 @@ function ReadyLibrary({
           )}
         </Section>
       )}
+      {manages && library.kind === "music" ? (
+        <Section title="Artist credits">
+          <Muted>
+            Keep together or split credits that name several artists, such as “Mora & JHAYCO”.
+          </Muted>
+          <div>{creditsLink}</div>
+        </Section>
+      ) : null}
       {manages ? sharing : null}
       {manages ? (
         <Section title="Remove">

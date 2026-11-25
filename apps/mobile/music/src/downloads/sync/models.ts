@@ -35,12 +35,25 @@ export type StreamProfile = typeof StreamProfile.Type;
 /** The query parameter that asks the media server for a finished file, never a live encode. */
 export const FINISHED_PARAM = "finished";
 
+/**
+ * Every artist a song credits, in order, as the core answers them: the first is the song's
+ * `artistId`, and each name is spelled as the song's tags spell it.
+ */
+export const TrackCredits = Schema.Array(
+  Schema.Struct({ artistId: ArtistId, name: Schema.String }),
+);
+
 /** A song as a download keeps it: the core's song without `liked`, so a like never refetches it. */
 export const OfflineTrack = Schema.Struct({
   id: TrackId,
   title: Schema.String,
   artist: Schema.String,
   artistId: ArtistId,
+  /**
+   * Absent from a copy kept before songs carried credits, and from a song the core hasn't read
+   * again since; such a song credits `artistId`.
+   */
+  credits: Schema.optionalKey(TrackCredits),
   album: Schema.String,
   albumId: AlbumId,
   trackNumber: Schema.NullOr(Schema.Finite),

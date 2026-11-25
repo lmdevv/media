@@ -1,7 +1,10 @@
+import type { ShownCredit } from "@media/contracts/artist-credits";
 import type { ControllerSnapshot, QueueEntry } from "@media/player/playback-controller";
 import type { RepeatMode } from "@media/player/queue-order";
 import type { StreamQuality } from "@media/player/stream-quality";
+import { Struct } from "effect";
 
+import { creditText } from "../lib/credits";
 import { asQueueItemId } from "../lib/models";
 import type { AlbumId, ArtistId, QueueItemId, Track, TrackId } from "../lib/models";
 
@@ -17,6 +20,11 @@ export interface NowPlaying {
   readonly title: string;
   readonly artist: string;
   readonly artistId: ArtistId;
+  /**
+   * Every artist the song credits, in order; absent for a song without credits, which credits
+   * `artistId`.
+   */
+  readonly credits?: ReadonlyArray<ShownCredit<ArtistId>>;
   readonly album: string;
   readonly albumId: AlbumId;
   /** Absolute, ready for an image. */
@@ -37,6 +45,7 @@ export interface QueueItem {
   /** Null for a Jam's song this person may not play, which shows as `Hidden song`. */
   readonly trackId: TrackId | null;
   readonly title: string;
+  /** The song's artists as one line, as a row shows them. */
   readonly artist: string;
   readonly artUrl: string | null;
   readonly durationMs: number;
@@ -83,11 +92,7 @@ export const nowPlayingOf = (
 ): NowPlaying => ({
   itemId: asQueueItemId(entry.itemId),
   trackId: entry.track.id,
-  title: entry.track.title,
-  artist: entry.track.artist,
-  artistId: entry.track.artistId,
-  album: entry.track.album,
-  albumId: entry.track.albumId,
+  ...Struct.pick(entry.track, ["title", "artist", "artistId", "credits", "album", "albumId"]),
   artUrl: art(entry.track),
   durationMs: entry.track.durationMs,
   codec: entry.track.codec,
@@ -98,7 +103,10 @@ export const nowPlayingOf = (
   liked: entry.track.liked,
 });
 
-/** Whether two answers from `nowPlayingOf`, flat as they are, read the same. */
+/**
+ * Whether two answers from `nowPlayingOf` read the same, as JSON: it builds each from a song's
+ * fields in their order.
+ */
 export const sameSong = (a: NowPlaying | null, b: NowPlaying | null): boolean =>
   JSON.stringify(a) === JSON.stringify(b);
 
@@ -109,7 +117,7 @@ export const queueItemOf = (
   itemId: asQueueItemId(entry.itemId),
   trackId: entry.track.id,
   title: entry.track.title,
-  artist: entry.track.artist,
+  artist: creditText(entry.track),
   artUrl: art(entry.track),
   durationMs: entry.track.durationMs,
   autoplay: entry.autoplay,

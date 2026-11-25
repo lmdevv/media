@@ -179,11 +179,18 @@ const trackIds = v.array(v.id("tracks"));
  */
 const rest = trackIds;
 
+/**
+ * Every artist a song or an album you may play credits, by name, in order, without the ids that
+ * open their pages. Absent from a server before credits.
+ */
+const creditNames = v.optional(v.array(v.object({ name: v.string() })));
+
 const playbackTrack = v.object({
   kind: v.literal("track"),
   id: v.id("tracks"),
   title: v.string(),
   artist: v.string(),
+  credits: creditNames,
   album: v.string(),
   trackNumber: nullable(v.number()),
   discNumber: nullable(v.number()),
@@ -213,6 +220,7 @@ export const music = [
         id: v.id("albums"),
         title: v.string(),
         artist: v.string(),
+        credits: creditNames,
         year: nullable(v.number()),
         genre: nullable(v.string()),
         format: v.string(),

@@ -9,7 +9,7 @@ import { usePlayAlbum, usePlayArtist, usePlayTracks } from "@/components/library
 import { perform } from "@/components/player/player-actions";
 import { useQueueActions } from "@/components/playlists/track-menu";
 import { useUi } from "@/components/shell/ui-state";
-import { formatDuration, formatTotal, plural } from "@/lib/format";
+import { artistCount, formatDuration, formatTotal, plural } from "@/lib/format";
 import type { AlbumCard as Album, ArtistCard as Artist, Playlist, Track } from "@/lib/models";
 import { useAllRows } from "@/lib/pages";
 import { useMusic, useRead } from "@/lib/platform";
@@ -258,7 +258,7 @@ function ArtistPreview({
   return (
     <PreviewFrame onBack={onBack}>
       <Artwork url={artist.artUrl} seed={artist.id} round className="size-37" />
-      <PreviewTitle title={artist.name} meta={`Artist · ${plural(artist.albumCount, "album")}`} />
+      <PreviewTitle title={artist.name} meta={`Artist · ${artistCount(artist)}`} />
       <PreviewActions
         registerActions={registerActions}
         actions={{

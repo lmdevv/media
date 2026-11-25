@@ -1,4 +1,4 @@
-import type { Track } from "@/lib/models";
+import type { ArtistCard, Track } from "@/lib/models";
 
 const SECOND = 1000;
 
@@ -47,6 +47,15 @@ export const formatTotal = (ms: number): string => {
 /** `1 song` or `12 songs`; works for any noun with a regular plural. */
 export const plural = (count: number, noun: string): string =>
   `${formatCount(count)} ${count === 1 ? noun : `${noun}s`}`;
+
+/**
+ * What an artist's card counts: their albums, or the songs crediting them when no album does, as
+ * for an artist who only features on others' songs.
+ */
+export const artistCount = (artist: Pick<ArtistCard, "albumCount" | "trackCount">): string =>
+  artist.albumCount === 0 && artist.trackCount !== undefined
+    ? plural(artist.trackCount, "song")
+    : plural(artist.albumCount, "album");
 
 /**
  * The short quality label shown in badges: `FLAC 24/96` for lossless files with known depth and

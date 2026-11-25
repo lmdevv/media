@@ -24,7 +24,8 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { SectionHeader } from "@/components/ui/section-header";
 import { Text } from "@/components/ui/text";
 import type { SectionAction } from "@/components/ui/section-header";
-import { countOf } from "@/lib/format";
+import { artistSummary } from "@/lib/artists";
+import { creditText } from "@/lib/credits";
 import { distinctSongs } from "@/lib/history";
 import { recentAlbum, recentArtist, recentKey, recentTrack } from "@/lib/recent-searches";
 import type { RecentItem } from "@/lib/recent-searches";
@@ -360,7 +361,7 @@ function TopResultRow({
     <TrackRow
       song={top.track}
       artUrl={top.track.artUrl}
-      subtitle={`Song · ${top.track.artist}`}
+      subtitle={`Song · ${creditText(top.track)}`}
       active={top.track.id === playingId}
       onPress={() => onTrack(top.track, top.index)}
     />
@@ -376,12 +377,12 @@ function ArtistResult({
   readonly top: boolean;
   readonly onOpen: (artist: ArtistCard) => void;
 }) {
-  const albums = countOf(artist.albumCount, "album");
+  const summary = artistSummary(artist);
 
   return (
     <ArtistRow
       artist={artist}
-      subtitle={top ? `Artist · ${albums}` : albums}
+      subtitle={top ? `Artist · ${summary}` : summary}
       onPress={() => onOpen(artist)}
     />
   );
@@ -406,13 +407,7 @@ function RecentRow({
     return <AlbumRow album={item} onPress={() => onOpen(item)} />;
   }
 
-  return (
-    <ArtistRow
-      artist={item}
-      subtitle={countOf(item.albumCount, "album")}
-      onPress={() => onOpen(item)}
-    />
-  );
+  return <ArtistRow artist={item} subtitle={artistSummary(item)} onPress={() => onOpen(item)} />;
 }
 
 function NoResults({ query, onEdit }: { readonly query: string; readonly onEdit: () => void }) {

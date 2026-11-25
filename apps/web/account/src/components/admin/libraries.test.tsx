@@ -94,6 +94,7 @@ const library = (
     mode={mode}
     running={null}
     sharing={sharing}
+    creditsLink={<a href="#credits">Correct artist credits</a>}
     back={<a href="#libraries">Libraries</a>}
     onMode={noop}
     onScan={noop}
@@ -139,6 +140,24 @@ describe("LibraryView", () => {
     expect(text).not.toContain("Folders");
     expect(text).not.toContain("sharing part");
     expect(text).not.toContain("Remove library");
+  });
+
+  it("links a manager of a music library, and only them, to its artist credits", () => {
+    const music: LibraryDetail = { ...detail, name: "Songs", kind: "music" };
+    const entry = "Artist credits Keep together or split credits that name several artists";
+
+    expect(textOf(library({ kind: "ready", library: music }))).toContain(
+      `${entry}, such as “Mora & JHAYCO”. Correct artist credits`,
+    );
+    expect(textOf(library({ kind: "ready", library: { ...music, level: "edit" } }))).not.toContain(
+      "Correct artist credits",
+    );
+    expect(textOf(library({ kind: "ready", library: { ...music, level: "view" } }))).not.toContain(
+      "Correct artist credits",
+    );
+    expect(textOf(library({ kind: "ready", library: detail }))).not.toContain(
+      "Correct artist credits",
+    );
   });
 
   it("edits folders and asks before removing", () => {

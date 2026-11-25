@@ -10,6 +10,7 @@ import { XIcon } from "lucide-react";
 import { useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
+import { ArtistCredits } from "@/components/library/artist-credits";
 import { Artwork, PlayingBars } from "@/components/library/artwork";
 import { JamButton } from "@/components/jam/jam-band";
 import { frontOf, upcomingInJam, useJamActions, useJoinedJam } from "@/components/jam/jam";
@@ -24,6 +25,7 @@ import { asQueueItemId } from "@/lib/models";
 import type { QueueEntry, QueueItemId } from "@/lib/models";
 import { useMusic } from "@/lib/platform";
 import { dropLine } from "@/lib/reorder";
+import { useIsDesktop } from "@/lib/use-media";
 
 import { perform } from "./player-actions";
 import { focusMove } from "./queue-focus";
@@ -161,6 +163,8 @@ function QueueRowText({
   readonly current: boolean;
   readonly addedBy: string | null;
 }) {
+  const desktop = useIsDesktop();
+
   return (
     <div className="pointer-events-none flex min-w-0 grow flex-col gap-px">
       <span
@@ -175,7 +179,10 @@ function QueueRowText({
       <span
         className={cn("truncate font-sans text-sm/xs", glass ? "text-text/60" : "text-text-muted")}
       >
-        {addedBy === null ? entry.artist : `${entry.artist} · Added by ${addedBy}`}
+        {/* The row is a button that plays its song. On a phone the names are text; on a
+            desktop each one sits over the button and opens its artist. */}
+        <ArtistCredits item={entry} links={desktop} linkClassName="pointer-events-auto relative" />
+        {addedBy === null ? null : ` · Added by ${addedBy}`}
       </span>
     </div>
   );

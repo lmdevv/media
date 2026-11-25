@@ -1,5 +1,7 @@
 import type { PlatformSdk } from "@media/sdk/promise";
+import { Struct } from "effect";
 
+import { creditText } from "@/lib/credits";
 import type { AlbumCard, Playlist, PlaylistEntry, Track } from "@/lib/models";
 
 import type { DownloadManifest, DownloadPin, ManifestEntry, OfflineTrack } from "./sync/models";
@@ -22,23 +24,25 @@ export type PinRead =
   | { readonly kind: "unavailable" };
 
 /** A song as a download keeps it: without `liked`, so a like never changes a manifest. */
-const offlineTrackOf = (track: Track): OfflineTrack => ({
-  id: track.id,
-  title: track.title,
-  artist: track.artist,
-  artistId: track.artistId,
-  album: track.album,
-  albumId: track.albumId,
-  trackNumber: track.trackNumber,
-  discNumber: track.discNumber,
-  durationMs: track.durationMs,
-  codec: track.codec,
-  lossless: track.lossless,
-  bitrate: track.bitrate,
-  sampleRate: track.sampleRate,
-  bitDepth: track.bitDepth,
-  artUrl: track.artUrl,
-});
+const offlineTrackOf = (track: Track): OfflineTrack =>
+  Struct.pick(track, [
+    "id",
+    "title",
+    "artist",
+    "artistId",
+    "credits",
+    "album",
+    "albumId",
+    "trackNumber",
+    "discNumber",
+    "durationMs",
+    "codec",
+    "lossless",
+    "bitrate",
+    "sampleRate",
+    "bitDepth",
+    "artUrl",
+  ]);
 
 /**
  * One song of a download, as the core keeps it on this device: fetchable at the revision the core
@@ -86,7 +90,7 @@ export const manifestOf = (pin: DownloadPin, read: PinRead, kept: CoreKept): Dow
         ...base,
         available: true,
         title: read.track.title,
-        subtitle: read.track.artist,
+        subtitle: creditText(read.track),
         artUrl: read.track.artUrl,
         artHash: artHashOf(read.track.artUrl),
       },
@@ -100,7 +104,7 @@ export const manifestOf = (pin: DownloadPin, read: PinRead, kept: CoreKept): Dow
         ...base,
         available: true,
         title: read.album.title,
-        subtitle: read.album.artist,
+        subtitle: creditText(read.album),
         artUrl: read.album.artUrl,
         artHash: artHashOf(read.album.artUrl),
       },

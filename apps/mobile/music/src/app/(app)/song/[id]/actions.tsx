@@ -16,6 +16,7 @@ import type { LucideIcon } from "lucide-react-native";
 import { useState } from "react";
 import { View } from "react-native";
 
+import { ArtistMenu } from "@/components/browse/artist-menu";
 import { openAlbum, openArtist } from "@/components/browse/rows";
 import { DownloadRow } from "@/components/downloads/download-row";
 import { useCopyLink } from "@/components/playlists/copy-link";
@@ -23,6 +24,7 @@ import { Icon } from "@/components/ui/icon";
 import { Row, RowChevron } from "@/components/ui/row";
 import { SheetLayout } from "@/components/ui/sheet-layout";
 import { Text } from "@/components/ui/text";
+import { creditText } from "@/lib/credits";
 import { fileDetails } from "@/lib/playback-format";
 import { useMusic } from "@/lib/platform";
 import { parseSongSheet } from "@/lib/song-sheet";
@@ -92,7 +94,7 @@ function Actions({ song }: { readonly song: SheetSong }) {
   };
 
   return (
-    <SheetLayout title={song.title} subtitle={`${song.artist} · ${song.album}`}>
+    <SheetLayout title={song.title} subtitle={`${creditText(song)} · ${song.album}`}>
       <ActionRow
         icon={FastForward}
         filled
@@ -140,11 +142,14 @@ function Actions({ song }: { readonly song: SheetSong }) {
         label="Go to album"
         onPress={() => leaveFor(() => openAlbum({ id: song.albumId }))}
       />
-      <ActionRow
-        icon={Users}
+      <ArtistMenu
+        item={song}
         label="Go to artist"
-        onPress={() => leaveFor(() => openArtist({ id: song.artistId }))}
-      />
+        role="button"
+        onOpen={(id) => leaveFor(() => openArtist({ id }))}
+      >
+        <Row title="Go to artist" leading={{ kind: "icon", icon: Users }} />
+      </ArtistMenu>
       <ActionRow
         icon={Link}
         label={copied ? "Link copied" : "Copy link"}

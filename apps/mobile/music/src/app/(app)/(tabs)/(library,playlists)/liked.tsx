@@ -11,6 +11,7 @@ import { Icon } from "@/components/ui/icon";
 import { Page } from "@/components/ui/page";
 import { Text } from "@/components/ui/text";
 import { countOf } from "@/lib/format";
+import { creditText } from "@/lib/credits";
 import { usePlayerActions } from "@/player";
 
 export default function LikedSongs() {
@@ -47,7 +48,7 @@ export default function LikedSongs() {
         key: track.id,
         song: track,
         title: track.title,
-        subtitle: track.artist,
+        subtitle: creditText(track),
         artUrl: track.artUrl,
         playable: true,
       }))}

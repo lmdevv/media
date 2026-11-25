@@ -5,6 +5,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { DiscIcon, FolderIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
+import { ArtistCredits } from "@/components/library/artist-credits";
 import { Artwork } from "@/components/library/artwork";
 import { ProgressBar, useActiveScan } from "@/components/library/scans";
 import type { ActiveScan } from "@/components/library/scans";
@@ -362,7 +363,7 @@ function PhoneHome({
                 className="flex w-62.5 shrink-0 snap-start flex-col gap-2"
               >
                 <span className="font-sans text-sm/xs text-text-muted">
-                  {index === 0 ? picksLabel : album.artist}
+                  {index === 0 ? picksLabel : <ArtistCredits item={album} links={false} />}
                 </span>
                 <Artwork
                   url={album.artUrl}
@@ -377,7 +378,7 @@ function PhoneHome({
                     {album.title}
                   </span>
                   <span className="relative pt-1 font-sans text-sm/sm text-dark-text/75">
-                    {album.artist}
+                    <ArtistCredits item={album} links={false} />
                   </span>
                 </Artwork>
               </Link>
@@ -404,7 +405,7 @@ function PhoneHome({
                 <span className="flex flex-col">
                   <span className="truncate font-sans text-sm/sm text-text">{album.title}</span>
                   <span className="truncate font-sans text-sm/sm text-text-muted">
-                    {album.artist}
+                    <ArtistCredits item={album} links={false} />
                   </span>
                 </span>
               </Link>

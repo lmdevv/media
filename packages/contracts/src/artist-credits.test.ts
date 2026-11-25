@@ -4,8 +4,10 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_CREDIT_PARTS,
   creditKey,
+  creditLine,
   creditParts,
   creditRuns,
+  creditsOf,
   distinctNames,
   featuredCredits,
   isCombined,
@@ -13,7 +15,7 @@ import {
   resolveCredit,
   staysWhole,
 } from "./artist-credits";
-import type { CreditEvidence, CreditOverride } from "./artist-credits";
+import type { CreditEvidence, CreditOverride, CreditPiece } from "./artist-credits";
 
 /** Evidence from names known on their own, runs kept together, and a manager's corrections. */
 const evidenceOf = (
@@ -193,5 +195,117 @@ describe("distinctNames and joinCreditNames", () => {
     expect(joinCreditNames(["A"])).toBe("A");
     expect(joinCreditNames(["A", "B"])).toBe("A & B");
     expect(joinCreditNames(["A", "B", "C"])).toBe("A, B & C");
+  });
+});
+
+/** The line as text, each credited artist marked `[name→id]`. */
+const lineText = (pieces: ReadonlyArray<CreditPiece<string>>): string =>
+  pieces
+    .map((piece) => (piece.kind === "text" ? piece.text : `[${piece.name}→${piece.artistId}]`))
+    .join("");
+
+/** The line as a client reads it: the joins and names, without the links. */
+const plainText = (pieces: ReadonlyArray<CreditPiece<string>>): string =>
+  pieces.map((piece) => (piece.kind === "text" ? piece.text : piece.name)).join("");
+
+/** The marked line of `artist` crediting each `name→id`, in order. */
+const line = (artist: string, ...credited: ReadonlyArray<string>): string => {
+  const credits = credited.map((each) => {
+    const [name = "", artistId = ""] = each.split("→");
+
+    return { artistId, name };
+  });
+
+  return lineText(creditLine({ artist, artistId: credits[0]?.artistId ?? "none", credits }));
+};
+
+describe("creditLine", () => {
+  it("links each credited name where the tags write it and keeps their joins", () => {
+    expect(line("Mora & JHAYCO", "Mora→m", "JHAYCO→j")).toBe("[Mora→m] & [JHAYCO→j]");
+    expect(
+      line(
+        "CA7RIEL & Paco Amoroso, PinkPantheress",
+        "CA7RIEL & Paco Amoroso→c",
+        "PinkPantheress→p",
+      ),
+    ).toBe("[CA7RIEL & Paco Amoroso→c], [PinkPantheress→p]");
+    expect(line("Mumford & Sons", "Mumford & Sons→ms")).toBe("[Mumford & Sons→ms]");
+    expect(line("Fred again.. feat. Kodak Black", "Fred again..→f", "kodak black→k")).toBe(
+      "[Fred again..→f] feat. [Kodak Black→k]",
+    );
+    expect(line("A feat. Eat", "A→a", "Eat→e")).toBe("[A→a] feat. [Eat→e]");
+    // A later spelling the core dropped stays text.
+    expect(line("Imael Angel, Imael Angel", "Imael Angel→i")).toBe("[Imael Angel→i], Imael Angel");
+    // Featured artists the title names follow the line.
+    expect(line("Mora", "Mora→m", "Sech→s")).toBe("[Mora→m] & [Sech→s]");
+    expect(line("Mora", "Mora→m", "Sech→s", "Feid→f")).toBe("[Mora→m], [Sech→s] & [Feid→f]");
+    expect(line("Mora & JHAYCO", "Mora→m", "JHAYCO→j", "Sech→s")).toBe(
+      "[Mora→m] & [JHAYCO→j], [Sech→s]",
+    );
+    expect(line("", "Sech→s", "Feid→f")).toBe("[Sech→s] & [Feid→f]");
+  });
+
+  it("links a song or album the core has not read again since credits to its one artist", () => {
+    expect(creditsOf({ artist: "Mora & JHAYCO", artistId: "mj" })).toEqual([
+      { artistId: "mj", name: "Mora & JHAYCO" },
+    ]);
+    expect(lineText(creditLine({ artist: "Mora & JHAYCO", artistId: "mj", credits: [] }))).toBe(
+      "[Mora & JHAYCO→mj]",
+    );
+  });
+
+  it("shows the line as tagged with every credit once when the names are the line's parts", () => {
+    const name = fc
+      .stringMatching(/^[A-Za-z0-9][A-Za-z0-9 .'-]{0,10}[A-Za-z0-9.]$/u)
+      .filter((text) => creditParts(text).length === 1);
+
+    const separator = fc.constantFrom(", ", " & ", " feat. ", " Ft. ");
+
+    fc.assert(
+      fc.property(
+        fc.uniqueArray(name, { minLength: 1, maxLength: 6, selector: creditKey }),
+        fc.array(separator, { minLength: 5, maxLength: 5 }),
+        (artists, separators) => {
+          const artist = artists
+            .map((each, index) => (index === 0 ? each : `${separators[index - 1] ?? ", "}${each}`))
+            .join("");
+
+          const pieces = creditLine({
+            artist,
+            artistId: "0",
+            credits: artists.map((each, index) => ({ artistId: String(index), name: each })),
+          });
+
+          expect(plainText(pieces)).toBe(artist);
+          expect(lineText(pieces)).toBe(
+            artists
+              .map((each, index) => {
+                const join = index === 0 ? "" : (separators[index - 1] ?? ", ");
+
+                return `${join}[${each}→${String(index)}]`;
+              })
+              .join(""),
+          );
+        },
+      ),
+    );
+  });
+
+  it("starts with the line as tagged and shows each credit once, whatever the names", () => {
+    fc.assert(
+      fc.property(
+        fc.string({ maxLength: 40 }),
+        fc.uniqueArray(fc.string({ minLength: 1, maxLength: 12 }), { maxLength: 6 }),
+        (artist, spelled) => {
+          const credits = spelled.map((name, index) => ({ artistId: String(index), name }));
+          const pieces = creditLine({ artist, artistId: "first", credits });
+          const ids = pieces.flatMap((piece) => (piece.kind === "artist" ? [piece.artistId] : []));
+          const expected = credits.length === 0 ? ["first"] : credits.map((each) => each.artistId);
+
+          expect(plainText(pieces).startsWith(artist)).toBe(true);
+          expect(ids.toSorted()).toEqual(expected.toSorted());
+        },
+      ),
+    );
   });
 });

@@ -29,7 +29,7 @@ import { SectionHeader } from "@/components/ui/section-header";
 import { Text } from "@/components/ui/text";
 import { clearOf } from "@/lib/color";
 import { detailStateOf } from "@/lib/detail-state";
-import { countOf } from "@/lib/format";
+import { artistSongLine, artistStats, hasMoreSongs } from "@/lib/artists";
 import { useThemeColor } from "@/lib/theme-color";
 import { useContentLayout } from "@/lib/window-layout";
 import { useNowPlaying, usePlayerActions } from "@/player";
@@ -43,14 +43,7 @@ const SCRIM_STOPS = [
   { from: 0.55, to: 1 },
 ] as const;
 
-const statsOf = (detail: ArtistDetail): string =>
-  [
-    countOf(detail.artist.albumCount, "album"),
-    countOf(
-      detail.albums.reduce((sum, album) => sum + album.trackCount, 0),
-      "song",
-    ),
-  ].join(" · ");
+const statsOf = (detail: ArtistDetail): string => artistStats(detail.artist, detail.albums);
 
 function GlassButton({
   icon,
@@ -133,8 +126,13 @@ function Hero({
   );
 }
 
+/**
+ * One of the artist's first songs: its album and year, after the song's artists when it credits
+ * anyone else, as a song they share or feature on does.
+ */
 function TopSong({
   track,
+  artistId,
   rank,
   year,
   last,
@@ -142,13 +140,14 @@ function TopSong({
   onPress,
 }: {
   readonly track: Track;
+  readonly artistId: ArtistId;
   readonly rank: number;
   readonly year: number | null;
   readonly last: boolean;
   readonly active: boolean;
   readonly onPress: () => void;
 }) {
-  const subtitle = year === null ? track.album : `${track.album} · ${String(year)}`;
+  const subtitle = artistSongLine(track, artistId, year);
 
   return (
     <View className="h-row-touch flex-row items-center gap-3 px-page">
@@ -259,6 +258,7 @@ function Artist({ artistId }: { readonly artistId: ArtistId }) {
 
   const detail = state.kind === "ready" ? state.detail : undefined;
   const tracks = detail?.topTracks ?? [];
+  const more = detail !== undefined && hasMoreSongs(detail.artist, tracks);
   const trackIds = tracks.map((track) => track.id);
 
   const years = new Map<AlbumId, number | null>(
@@ -326,9 +326,23 @@ function Artist({ artistId }: { readonly artistId: ArtistId }) {
         header={
           <>
             {top}
-            {tracks.length === 0 ? null : (
+            {tracks.length === 0 && !more ? null : (
               <View className="px-page pt-1">
-                <SectionHeader title="Top songs" />
+                <SectionHeader
+                  title="Songs"
+                  action={
+                    more
+                      ? {
+                          kind: "chevron",
+                          onPress: () =>
+                            router.push({
+                              pathname: "/artist/[id]/songs",
+                              params: { id: artistId },
+                            }),
+                        }
+                      : undefined
+                  }
+                />
               </View>
             )}
           </>
@@ -343,6 +357,7 @@ function Artist({ artistId }: { readonly artistId: ArtistId }) {
         renderItem={({ item, index }) => (
           <TopSong
             track={item}
+            artistId={artistId}
             rank={index + 1}
             year={years.get(item.albumId) ?? null}
             last={index === tracks.length - 1}

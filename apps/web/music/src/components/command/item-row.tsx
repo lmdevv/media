@@ -5,7 +5,7 @@ import { memo } from "react";
 import type { MouseEvent, ReactNode } from "react";
 
 import { Artwork } from "@/components/library/artwork";
-import { formatDuration, plural } from "@/lib/format";
+import { artistCount, formatDuration, plural } from "@/lib/format";
 import { HOTKEYS } from "@/lib/hotkeys";
 
 import { titleOf } from "./items";
@@ -80,7 +80,7 @@ export const ItemRow = memo(function ItemRow({
       case "album":
         return `Album · ${item.album.artist}${item.album.year === null ? "" : ` · ${item.album.year}`}`;
       case "artist":
-        return `Artist · ${plural(item.artist.albumCount, "album")}`;
+        return `Artist · ${artistCount(item.artist)}`;
       case "track":
         return `Song · ${item.track.album} · ${formatDuration(item.track.durationMs)}`;
       case "playlist":

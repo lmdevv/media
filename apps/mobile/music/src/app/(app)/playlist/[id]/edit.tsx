@@ -2,6 +2,7 @@ import { PlaylistId } from "@/lib/ids";
 import type { PlaylistItemId } from "@/lib/models";
 import type { PlaylistDetail, PlaylistEntry } from "@/lib/models";
 import { canEditPlaylistItems, canManagePlaylist } from "@/lib/capabilities";
+import { creditText } from "@/lib/credits";
 import { describeFailure } from "@media/mobile-core/failure";
 import { router, useLocalSearchParams } from "expo-router";
 import * as Haptics from "expo-haptics";
@@ -192,7 +193,7 @@ function Editor({ detail }: { readonly detail: PlaylistDetail }) {
               renderItem={(entry, grip) => (
                 <Row
                   title={entry.track?.title ?? "Unavailable song"}
-                  subtitle={entry.track?.artist ?? ""}
+                  subtitle={entry.track === null ? "" : creditText(entry.track)}
                   leading={{ kind: "art", url: entry.track?.artUrl ?? null }}
                   trailingAction={grip}
                 />

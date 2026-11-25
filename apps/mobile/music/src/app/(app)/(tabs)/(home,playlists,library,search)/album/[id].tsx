@@ -3,8 +3,9 @@ import type { AlbumDetail } from "@/lib/models";
 import { Option, Schema } from "effect";
 import { router, useLocalSearchParams } from "expo-router";
 import { Ellipsis } from "lucide-react-native";
-import { Pressable, View } from "react-native";
+import { View } from "react-native";
 
+import { ArtistMenu } from "@/components/browse/artist-menu";
 import { DetailHeader } from "@/components/browse/detail-header";
 import { ListPage } from "@/components/browse/list-page";
 import { usePlayList } from "@/components/browse/play";
@@ -18,6 +19,7 @@ import { Artwork } from "@/components/ui/artwork";
 import { IconButton } from "@/components/ui/icon-button";
 import { Text } from "@/components/ui/text";
 import { albumMeta } from "@/lib/album-meta";
+import { creditText } from "@/lib/credits";
 import { useAlbumDetail } from "@/lib/details";
 import { detailStateOf } from "@/lib/detail-state";
 import { offlineAlbum } from "@/lib/offline-library";
@@ -32,6 +34,7 @@ const ARTIST_LINES = {
   tablet: { variant: "subtitle", link: "self-start", text: "" },
 } as const;
 
+/** The album's artists, which open the artist, or a menu of them when it credits several. */
 function ArtistLink({
   detail,
   layout,
@@ -40,18 +43,19 @@ function ArtistLink({
   readonly layout: keyof typeof ARTIST_LINES;
 }) {
   const line = ARTIST_LINES[layout];
+  const artists = creditText(detail.album);
 
   return (
-    <Pressable
-      accessibilityRole="link"
-      accessibilityLabel={`Artist, ${detail.album.artist}`}
-      onPress={() => openArtist({ id: detail.album.artistId })}
-      className={`active:opacity-60 ${line.link}`}
+    <ArtistMenu
+      item={detail.album}
+      label={`Artist, ${artists}`}
+      className={line.link}
+      onOpen={(id) => openArtist({ id })}
     >
       <Text variant={line.variant} tone="accent" className={line.text}>
-        {detail.album.artist}
+        {artists}
       </Text>
-    </Pressable>
+    </ArtistMenu>
   );
 }
 

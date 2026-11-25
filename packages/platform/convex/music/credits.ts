@@ -1,4 +1,5 @@
 import {
+  MAX_CREDIT_OVERRIDES,
   MAX_KEPT_PARTS,
   creditParts,
   isCombined,
@@ -19,7 +20,7 @@ import type { Caller } from "../core/auth/caller";
 import { CALL_COST, cost, meterFrom, repeated, sumCost } from "./budget";
 import { RECREDIT_COST, catalogBatch } from "./catalog";
 import type { CatalogBatch, Rechecks } from "./catalog";
-import { MAX_OVERRIDES, RESOLVING, creditLedger } from "./creditLedger";
+import { RESOLVING, creditLedger } from "./creditLedger";
 import { MUSIC_BOUNDS, keyOf } from "./fit";
 import { LIST_PAGE_MAX } from "./reads";
 import { atBound, musicStore } from "./write";
@@ -38,7 +39,7 @@ import type { MusicStore } from "./write";
 const FIXED_COST = cost(30, 12, 64 * 1024, 4 * 1024);
 
 /** A recheck's own work: `FIXED_COST` and the library's corrections, read at their bound. */
-const RECHECK_FIXED = sumCost([FIXED_COST, atBound.read("creditOverrides", MAX_OVERRIDES)]);
+const RECHECK_FIXED = sumCost([FIXED_COST, atBound.read("creditOverrides", MAX_CREDIT_OVERRIDES)]);
 
 /**
  * Rechecking one combined string: its part's row read, the string resolved fresh, its resolution
@@ -359,7 +360,7 @@ export const { list, overrides, setOverride, removeOverride } = register({
         range: (q) => q.eq("libraryId", libraryId),
       },
       paginationOpts,
-      MAX_OVERRIDES,
+      MAX_CREDIT_OVERRIDES,
     );
 
     return { ...page, page: page.page.map((row) => ({ name: row.text, mode: row.mode })) };
@@ -374,17 +375,17 @@ export const { list, overrides, setOverride, removeOverride } = register({
     const all = await store.take(
       "creditOverrides",
       (q) => q.withIndex("by_library_key", (index) => index.eq("libraryId", libraryId)),
-      MAX_OVERRIDES,
+      MAX_CREDIT_OVERRIDES,
     );
 
     const existing = all.find((row) => row.key === key) ?? null;
 
     if (existing?.mode === mode && existing.text === name) return null;
 
-    if (existing === null && all.length >= MAX_OVERRIDES) {
+    if (existing === null && all.length >= MAX_CREDIT_OVERRIDES) {
       return fail(
         "invalid_args",
-        `A library keeps at most ${MAX_OVERRIDES} credit corrections; remove one first`,
+        `A library keeps at most ${MAX_CREDIT_OVERRIDES} credit corrections; remove one first`,
       );
     }
 

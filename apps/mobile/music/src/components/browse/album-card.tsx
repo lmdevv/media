@@ -2,6 +2,7 @@ import { Pressable, View } from "react-native";
 
 import { Artwork } from "@/components/ui/artwork";
 import { Text } from "@/components/ui/text";
+import { creditText } from "@/lib/credits";
 import type { CardAlbum } from "@/lib/offline-library";
 
 import { openAlbum } from "./rows";
@@ -27,11 +28,12 @@ export function AlbumCard({
 }) {
   const { card, art } = SIZES[size];
   const year = album.year === null ? "" : String(album.year);
+  const artists = creditText(album);
 
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${album.title}, ${album.artist}`}
+      accessibilityLabel={`${album.title}, ${artists}`}
       onPress={onPress ?? (() => openAlbum(album))}
       className={`${card} gap-2 active:opacity-70`}
     >
@@ -41,7 +43,7 @@ export function AlbumCard({
           {album.title}
         </Text>
         <Text variant="secondary" tone="muted" numberOfLines={1}>
-          {size === "artist" ? year : album.artist}
+          {size === "artist" ? year : artists}
         </Text>
       </View>
     </Pressable>
