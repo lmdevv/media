@@ -249,17 +249,33 @@ describe.runIf(hasQsv || hasVaapi)("TranscodeCapabilities on this machine's GPU"
                 0,
               );
 
-              const result = yield* tools
-                .ffmpeg(args, { timeout: Duration.seconds(30) })
-                .pipe(Effect.result);
+              const run = tools.ffmpeg(args, { timeout: Duration.seconds(30) }).pipe(Effect.result);
+              const first = yield* run;
 
+              // On the Arc A380, iHD 26.3.5's H.264 encoder under Quick Sync dies of SIGBUS
+              // while it fills a command or batch buffer in about one in twenty chains that hand
+              // it frames from CPU memory. A chain that dies of a signal runs once more, and the
+              // crash is reported with the outcome.
+              const crashed = Result.isFailure(first) && first.failure.signal !== null;
+              const result = crashed ? yield* run : first;
               const frames = Result.isSuccess(result) ? probedFrames(result.success) : 0;
               const stages = pipeline.steps.map((step) => step.impl).join(" → ");
 
+              const how = Result.match(result, {
+                onSuccess: (progress) =>
+                  `exit 0, progress ${progress.trim().split("\n").slice(-3).join(" ")}`,
+                onFailure: (failure) =>
+                  `exit ${String(failure.exitCode)} signal ${String(failure.signal)}: ${failure.stderr.trim()}`,
+              });
+
               outcomes.push(
-                `${chain.name}: ${frames > 0 ? "ran" : "FAILED"} ${String(frames)} frames: ${stages}`,
+                `${chain.name}: ${frames > 0 ? "ran" : "FAILED"} ${String(frames)} frames: ${stages}${
+                  Result.isFailure(first) && crashed
+                    ? ` (the first run died of ${first.failure.signal})`
+                    : ""
+                }`,
               );
-              assert.isAbove(frames, 0, `${chain.name}: ${stages}`);
+              assert.isAbove(frames, 0, `${chain.name}: ${stages}: ${how}`);
 
               for (const step of pipeline.steps) ran.add(step.impl);
             }
