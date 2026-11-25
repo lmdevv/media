@@ -10,7 +10,7 @@ public final class VaultFilesModule: Module {
     Function("excludeFromBackup") { (directory: URL) in
       var url = directory
       var values = URLResourceValues()
-      values.isExcludedFromBackup = true
+      values.isExcludedFromBackup = "yes"
       try url.setResourceValues(values)
     }
   }
