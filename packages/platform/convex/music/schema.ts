@@ -159,10 +159,11 @@ export const musicTables = {
     }),
 
   /**
-   * A credit string as one library's tags write it: a song's or an album's artist tag, or a
-   * featured-artist list in a title (ADR 0024, "Artist credits"). A string of one part is
-   * evidence: its name is known on its own in the library. A combined string's `artists` is how it
-   * resolves now, which every song and album it names follows. The row goes with its last use.
+   * A credit string as the tags of one library's files on disk write it: a song's or an album's
+   * artist tag, or a featured-artist list in a title (ADR 0024, "Artist credits"). A string of one
+   * part is evidence: its name is known on its own in the library. A combined string's `artists`
+   * is how it resolves now, which every song and album it names follows. The row goes with its
+   * last use.
    */
   artistCredits: defineTable({
     libraryId: v.id("libraries"),
@@ -172,7 +173,7 @@ export const musicTables = {
     text: v.string(),
     /** Whether the string has two or more parts it may split into (`isCombined`). */
     combined: v.boolean(),
-    /** Songs and albums whose tags name it as a whole credit. */
+    /** Songs on disk, and albums with a song on disk, whose tags name it as a whole credit. */
     uses: v.number(),
     /** The artists it credits now, in order: itself, or the parts the evidence split it into. */
     artists: v.array(v.string()),
@@ -192,8 +193,9 @@ export const musicTables = {
   }).index("by_library_part", ["libraryId", "partKey", "creditKey"]),
 
   /**
-   * A song whose tags name a combined credit string, so a credit that resolves anew rewrites the
-   * credits of every song it names. Albums are found by their `artistKey`.
+   * A song on disk whose tags name a combined credit string, so a credit that resolves anew
+   * rewrites the credits of every such song; a missing song is credited anew when its file is
+   * back. Albums are found by their `artistKey`.
    */
   creditTracks: defineTable({
     libraryId: v.id("libraries"),

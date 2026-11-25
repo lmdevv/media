@@ -95,9 +95,12 @@ const songSources = (song: SongTags): ReadonlyArray<string> =>
     ? distinctNames([song.artistName, ...featuredCredits(song.title)])
     : song.tagged.filter((name) => !isCombined(name));
 
-/** The credit strings a stored song names: none for a row written before credits. */
+/**
+ * The credit strings a stored song names as evidence: none while its file is missing, since its
+ * tags are not the library's any more, and none for a row written before credits.
+ */
 const storedSongSources = (track: Doc<"tracks">): ReadonlyArray<string> =>
-  track.credits === undefined
+  track.missing || track.credits === undefined
     ? []
     : songSources({
         artistName: track.artistName,
@@ -105,10 +108,14 @@ const storedSongSources = (track: Doc<"tracks">): ReadonlyArray<string> =>
         tagged: track.creditsTagged === true ? track.credits.map((credit) => credit.name) : null,
       });
 
-/** The credit strings an album names: its separate values of one part, or its album artist. */
-const albumSources = (
-  album: Pick<Doc<"albums">, "artistName" | "credits" | "creditsTagged">,
-): ReadonlyArray<string> => {
+/** Whom an album credits and the album artist it shows, as the album's row keeps them. */
+type AlbumCredits = Pick<Doc<"albums">, "artistId" | "artistName" | "credits" | "creditsTagged">;
+
+/**
+ * The credit strings an album names: its separate values of one part, or its album artist. They
+ * are evidence while the album has a track on disk (`finish`).
+ */
+const albumSources = (album: AlbumCredits): ReadonlyArray<string> => {
   if (album.credits === undefined) return [];
 
   return album.creditsTagged === true
@@ -235,14 +242,15 @@ const BARE_CHECK = sumCost([
 ]);
 
 /**
- * Settling the credit strings an album names: one combined string, or its separate values, those
- * it lost and those it gained.
+ * Settling the credit strings an album names in `finish`, as it gains or loses its tracks on disk
+ * or its credits change: one combined string, or its separate values, those it lost and those it
+ * gained.
  */
 const ALBUM_SOURCES_SETTLING = repeated(SINGLE_SETTLING, 2 * CREDITS);
 
 /**
  * Deleting an emptied album (`deleteIfEmpty`): a track looked for, its artist links read and
- * deleted, the album deleted, each artist it credited checked, and its credit strings settled.
+ * deleted, the album deleted, and each artist it credited checked.
  */
 const EMPTYING = sumCost([
   atBound.read("tracks"),
@@ -250,7 +258,6 @@ const EMPTYING = sumCost([
   repeated(atBound.delete("albumArtists"), LINKS_READ),
   atBound.delete("albums"),
   repeated(BARE_CHECK, CREDITS + 1),
-  ALBUM_SOURCES_SETTLING,
 ]);
 
 /**
@@ -281,12 +288,12 @@ const CREDITED_ARTISTS = repeated(
 const SONG_STRINGS = 1 + MAX_FEATURED_LISTS;
 
 /**
- * The credit strings one song's tags gain and lose, settled at the call's end: its combined ones
- * or its separate values of one part, each recorded.
+ * The credit strings one song's tags name, gained or lost and settled at the call's end: its
+ * combined ones, each recorded, or its separate values of one part.
  */
 const SONG_SOURCES = sumCost([
-  repeated(sumCost([USE_RECORDING, COMBINED_SETTLING]), 2 * SONG_STRINGS),
-  repeated(SINGLE_SETTLING, 2 * CREDITS),
+  repeated(sumCost([USE_RECORDING, COMBINED_SETTLING]), SONG_STRINGS),
+  repeated(SINGLE_SETTLING, CREDITS),
 ]);
 
 /**
@@ -317,9 +324,10 @@ export const RECREDIT_COST = sumCost([
  * joins, which it may make or adopt from a release before credits, the one it leaves, and the one
  * the other track leaves), two of them perhaps emptied. Its credits add each credit string
  * resolved (its artist, two featured lists, its album artist), the artists of its credits and its
- * album's found or made, its links and its album's rewritten, each artist of the moved track, of
- * the track it replaces, and of the new credits settled, each artist a link left checked, and the
- * credit strings it gained and lost settled. Every other write costs less.
+ * album's found or made, its links and its album's rewritten, each artist of the moved track,
+ * of the track it replaces, and of the new credits settled, each artist a link left checked, the
+ * credit strings its tags gained and lost and those of the track left missing at the old path
+ * settled, and the credit strings of each of the three albums. Every other write costs less.
  */
 const WRITE_MOST = sumCost([
   atBound.read("tracks"),
@@ -347,8 +355,8 @@ const WRITE_MOST = sumCost([
   CREDITED_ARTISTS,
   TRACK_LINKS,
   ALBUM_LINKS,
-  SONG_SOURCES,
-  ALBUM_SOURCES_SETTLING,
+  repeated(SONG_SOURCES, 3),
+  repeated(ALBUM_SOURCES_SETTLING, 3),
   repeated(ARTIST_SETTLING, 3 * CREDITS),
   repeated(BARE_CHECK, LINKS_READ + 1),
   ALBUM_SETTLING,
@@ -471,7 +479,10 @@ export interface CatalogBatch {
    * marks `from` missing instead, answering false.
    */
   readonly move: (from: string, scanned: ScannedTrack) => Promise<boolean>;
-  /** Marks a file that left the disk missing, keeping its row; answers whether it was on disk. */
+  /**
+   * Marks a file that left the disk missing, keeping its row, and its tags stop being credit
+   * evidence; answers whether it was on disk.
+   */
   readonly markMissing: (path: string) => Promise<boolean>;
   /**
    * Saves lyrics a scan read again for a file whose audio did not change; answers whether the
@@ -522,8 +533,8 @@ export const catalogBatch = (
   const deltas = new Map<Id<"albums">, AlbumDelta>();
   const losing = new Set<Id<"albums">>();
   const recredited = new Set<Id<"albums">>();
-  /** The artists an album credited when the call first changed its credits. */
-  const albumStart = new Map<Id<"albums">, ReadonlyArray<Id<"artists">>>();
+  /** An album's credits when the call first changed them: null for an album the call made. */
+  const albumStart = new Map<Id<"albums">, AlbumCredits | null>();
   /** How the call moved each artist's tracks on disk that credit them. */
   const artistTracks = new Map<Id<"artists">, number>();
   /** Artists the call took a link or a first credit from, which may be credited by nothing now. */
@@ -552,10 +563,21 @@ export const catalogBatch = (
     owe(`settle:${albumId}`, ALBUM_SETTLING);
   };
 
+  /**
+   * An album whose credit strings may start or stop being evidence: it gains or loses tracks on
+   * disk, or what it names changes. `finish` settles them.
+   */
+  const mayMoveEvidence = (albumId: Id<"albums">): void => {
+    owe(`evidence:${albumId}`, ALBUM_SOURCES_SETTLING);
+  };
+
   const adjust = (albumId: Id<"albums">, tracks: number, length: number): void => {
     const previous = deltas.get(albumId) ?? { tracks: 0, durationMs: 0 };
 
     touchAlbum(albumId);
+
+    if (tracks !== 0) mayMoveEvidence(albumId);
+
     deltas.set(albumId, {
       tracks: previous.tracks + tracks,
       durationMs: previous.durationMs + length,
@@ -736,7 +758,7 @@ export const catalogBatch = (
     touchAlbum(album._id);
     recredited.add(album._id);
 
-    if (!albumStart.has(album._id)) albumStart.set(album._id, creditIdsOf(album));
+    if (!albumStart.has(album._id)) albumStart.set(album._id, album);
   };
 
   /** Another track's artwork on disk for an artist, at most two tracks read. */
@@ -852,82 +874,59 @@ export const catalogBatch = (
   ): Promise<ReadonlyArray<string>> => tagged ?? namesWithin(await ledger.artistsOf(albumArtist));
 
   /**
-   * Gives an album a release before credits wrote its album artist key and credits, and, for
-   * separate album artist values, the album artist they show as.
+   * Credits an album as its album artist `artistName`, keyed `artistKey`, names it now: its
+   * separate values `tagged`, or the string as it resolves now. Writes the album's credits and
+   * links when they change, and answers the album as it is then, with whether they changed. A row
+   * a release before credits wrote takes its album artist key and credits here.
    */
-  const adopt = async (
+  const creditAlbum = async (
     album: Stored<"albums">,
-    filing: Filing,
-    art: ArtChange,
-  ): Promise<Stored<"albums">> => {
-    recreditedAlbum(album);
-
-    const artistName = filing.tagged === null ? album.artistName : filing.albumArtist;
-
+    named: {
+      readonly artistName: string;
+      readonly artistKey: string;
+      readonly tagged: ReadonlyArray<string> | null;
+    },
+    artHash: string | null,
+  ): Promise<{ readonly album: Stored<"albums">; readonly changed: boolean }> => {
     const credits = await creditsOf(
-      await albumNamesOf(artistName, filing.tagged),
-      artistName,
-      art.next,
+      await albumNamesOf(named.artistName, named.tagged),
+      named.artistName,
+      artHash,
     );
 
     const changes = {
       artistId: credits.first.artistId,
-      artistName,
-      artistKey: filing.artistKey,
+      artistName: named.artistName,
+      artistKey: named.artistKey,
       credits: [...credits.all],
-      creditsTagged: filing.tagged !== null,
+      creditsTagged: named.tagged !== null,
     };
 
-    await store.setAlbumCredits(album._id, changes);
-    await linkAlbum(album, credits.all, false);
-    mayBeBare(album.artistId);
-
-    const adopted = { ...album, ...changes };
-
-    await ledger.use({ trackId: null, gained: albumSources(adopted), lost: [] });
-
-    return adopted;
-  };
-
-  /**
-   * Credits an album with separate album artist values as the file a scan read last names them,
-   * when they differ from its credits while showing as the same album artist.
-   */
-  const retag = async (
-    album: Stored<"albums">,
-    names: ReadonlyArray<string>,
-    art: ArtChange,
-  ): Promise<Stored<"albums">> => {
-    const credits = await creditsOf(names, album.artistName, art.next);
-
-    if (album.credits !== undefined && sameCredits(credits.all, album.credits)) return album;
+    if (
+      album.credits !== undefined &&
+      album.artistName === changes.artistName &&
+      album.artistKey === changes.artistKey &&
+      album.creditsTagged === changes.creditsTagged &&
+      sameCredits(credits.all, album.credits)
+    ) {
+      return { album, changed: false };
+    }
 
     recreditedAlbum(album);
-
-    const changes = {
-      artistId: credits.first.artistId,
-      artistName: album.artistName,
-      artistKey: album.artistKey ?? keyOf(album.artistName),
-      credits: [...credits.all],
-      creditsTagged: true,
-    };
-
     await store.setAlbumCredits(album._id, changes);
     await linkAlbum(album, credits.all, false);
 
-    if (album.artistId !== credits.first.artistId) mayBeBare(album.artistId);
+    if (album.artistId !== changes.artistId) mayBeBare(album.artistId);
 
     const updated = { ...album, ...changes };
     const before = albumSources(album);
     const after = albumSources(updated);
 
-    await ledger.use({
-      trackId: null,
-      gained: without(after, before),
-      lost: without(before, after),
-    });
+    if (without(after, before).length > 0 || without(before, after).length > 0) {
+      mayMoveEvidence(album._id);
+    }
 
-    return updated;
+    return { album: updated, changed: true };
   };
 
   const albumFor = async (
@@ -966,21 +965,30 @@ export const catalogBatch = (
       });
 
       albums.set(cacheKey, created);
-      albumStart.set(created._id, []);
+      albumStart.set(created._id, null);
       touchAlbum(created._id);
       await linkAlbum(created, credits.all, true);
-      await ledger.use({ trackId: null, gained: albumSources(created), lost: [] });
 
       return created;
     }
 
-    const filed = found.artistKey === undefined ? await adopt(found, filing, art) : found;
+    // Separate album artist values credit the album as the file a scan read last names them,
+    // and an album artist string as it resolves now, which may have changed while the album had
+    // no track on disk. A release before credits filed separate values under the first alone.
+    const credited = await creditAlbum(
+      found,
+      {
+        artistName:
+          found.artistKey === undefined && filing.tagged !== null
+            ? filing.albumArtist
+            : found.artistName,
+        artistKey: filing.artistKey,
+        tagged: filing.tagged,
+      },
+      art.next,
+    );
 
-    const existing =
-      filing.tagged !== null && filed.creditsTagged === true
-        ? await retag(filed, filing.tagged, art)
-        : filed;
-
+    const existing = credited.album;
     const artHash = await keptArt(existing.artHash, art, () => albumArt(existing._id, except));
 
     const changes = {
@@ -1104,11 +1112,15 @@ export const catalogBatch = (
     return existing._id;
   };
 
-  /** Marks `track` missing when it is on disk; answers whether it was. */
+  /**
+   * Marks `track` missing when it is on disk, so its credit strings stop being evidence; answers
+   * whether it was.
+   */
   const markGone = async (track: Doc<"tracks"> | null): Promise<boolean> => {
     if (track === null || track.missing) return false;
 
     await store.setTrackMissing(track._id);
+    await ledger.use({ trackId: track._id, gained: [], lost: storedSongSources(track) });
     countTracks(track.credits?.map((credit) => credit.artistId) ?? [], -1);
     adjust(track.albumId, -1, -track.durationMs);
     mayEmpty(track.albumId);
@@ -1241,29 +1253,17 @@ export const catalogBatch = (
 
     if (album?.credits === undefined || album.creditsTagged === true) return false;
 
-    const artistKey = album.artistKey ?? keyOf(album.artistName);
-
-    const credits = await creditsOf(
-      await albumNamesOf(album.artistName, null),
-      album.artistName,
+    const credited = await creditAlbum(
+      album,
+      {
+        artistName: album.artistName,
+        artistKey: album.artistKey ?? keyOf(album.artistName),
+        tagged: null,
+      },
       album.artHash,
     );
 
-    if (sameCredits(credits.all, album.credits)) return false;
-
-    recreditedAlbum(album);
-    await store.setAlbumCredits(album._id, {
-      artistId: credits.first.artistId,
-      artistName: album.artistName,
-      artistKey,
-      credits: [...credits.all],
-      creditsTagged: false,
-    });
-    await linkAlbum(album, credits.all, false);
-
-    if (album.artistId !== credits.first.artistId) mayBeBare(album.artistId);
-
-    return true;
+    return credited.changed;
   };
 
   /** Deletes an artist nothing credits or files under any more, answering the artwork it held. */
@@ -1295,7 +1295,7 @@ export const catalogBatch = (
     return artist.artHash;
   };
 
-  /** Deletes an album no track points at any more, with its links and its credit strings' uses. */
+  /** Deletes an album no track points at any more, with its links. */
   const deleteIfEmpty = async (album: Doc<"albums">): Promise<void> => {
     const track = await store.first("tracks", (q) =>
       q.withIndex("by_album", (index) => index.eq("albumId", album._id)),
@@ -1313,7 +1313,6 @@ export const catalogBatch = (
 
     await Promise.all(links.map(async (link) => store.deleteAlbumArtist(link._id)));
     mayBeBare(album.artistId);
-    await ledger.use({ trackId: null, gained: [], lost: albumSources(album) });
     await store.deleteAlbum(album._id);
     release(album.artHash, null);
   };
@@ -1353,10 +1352,21 @@ export const catalogBatch = (
 
         const before = Number(album.trackCount > 0);
         const after = Number(trackCount > 0);
+        const start = albumStart.has(album._id) ? (albumStart.get(album._id) ?? null) : album;
 
         albumsMoved += after - before;
-        stepAlbums(albumStart.get(album._id) ?? creditIdsOf(album), -before);
+        stepAlbums(start === null ? [] : creditIdsOf(start), -before);
         stepAlbums(creditIdsOf(album), after);
+
+        // An album's credit strings are evidence while it has a track on disk.
+        const named = before === 1 && start !== null ? albumSources(start) : [];
+        const naming = after === 1 ? albumSources(album) : [];
+
+        await ledger.use({
+          trackId: null,
+          gained: without(naming, named),
+          lost: without(named, naming),
+        });
       }),
     );
 

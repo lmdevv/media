@@ -24,8 +24,10 @@ import type { MusicStore, Stored } from "./write";
  * string resolves from the library as the mutation found it, so a name that gains or loses its
  * last whole credit in the mutation changes no string the mutation resolves; `settle` answers the
  * names whose evidence changed, and the caller rechecks every combined string they are part of
- * (`music/credits:recheck`) once the mutation commits. Resolved credits therefore depend only on
- * the library's tags and its managers' corrections, never on the order the tags arrived in.
+ * (`music/credits:recheck`) once the mutation commits. Only songs on disk and albums with a song
+ * on disk use a string: a missing file's tags are not the library's now. Resolved credits
+ * therefore depend only on the tags of the library's files on disk and its managers' corrections,
+ * never on the order the tags arrived in.
  */
 
 /** The most corrections one library keeps; a call that resolves a credit reads them all at once. */
