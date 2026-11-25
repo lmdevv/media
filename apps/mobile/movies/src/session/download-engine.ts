@@ -131,6 +131,12 @@ const SAVE_RETRY_MS = 30_000;
 
 const SHOW_EVERY_MS = 500;
 
+/**
+ * Downloads whose own copy is checked per turn of the event loop after a launch, so the first
+ * launch after updating, which writes one per download, shows the screen first.
+ */
+const COPIES_PER_TURN = 50;
+
 const DownloadPauseStateJson = Schema.fromJsonString(
   Schema.Struct({
     url: Schema.String,
@@ -295,6 +301,9 @@ export class DownloadEngine {
   #readTimer: ReturnType<typeof setTimeout> | undefined;
   /** Whether `start` was called while the index could not be read. */
   #startWhenRead = false;
+  /** The downloads whose own copy is still to be checked since the launch. */
+  #copiesLeft: ReadonlyArray<FileId> = [];
+  #copyTimer: ReturnType<typeof setTimeout> | undefined;
 
   /**
    * Reads the person's downloads index. Only a `Whole` store's gaps are taken for removals: after
@@ -359,7 +368,9 @@ export class DownloadEngine {
           sweep(this.#options.disk, { store: known, standing });
         }
 
-        keepRecords(this.#options.disk, known);
+        this.#copiesLeft = known.downloads.map((download) => download.id);
+        clearTimeout(this.#copyTimer);
+        this.#copyTimer = setTimeout(() => this.#keepCopies(), 0);
 
         if (misplaced || fromCopies > 0 || changes.length > 0) this.#save();
         this.#notify();
@@ -407,7 +418,10 @@ export class DownloadEngine {
     this.#unfollowList?.();
     clearTimeout(this.#showTimer);
     clearTimeout(this.#readTimer);
+    clearTimeout(this.#copyTimer);
     this.#save();
+    keepRecords(this.#options.disk, this.#rows(this.#copiesLeft));
+    this.#copiesLeft = [];
 
     for (const active of this.#active.values()) active.task?.cancel();
   }
@@ -748,6 +762,26 @@ export class DownloadEngine {
     if (save === this.#snapshot.save) return;
     this.#snapshot = { ...this.#snapshot, save };
     this.#notify();
+  }
+
+  /** The downloads of `ids` still kept. */
+  #rows(ids: ReadonlyArray<FileId>): ReadonlyArray<DownloadRecord> {
+    const kept = new Map(this.#snapshot.store.downloads.map((download) => [download.id, download]));
+
+    return ids.flatMap((id) => Option.toArray(Option.fromNullishOr(kept.get(id))));
+  }
+
+  /**
+   * Saves the own copy of each download, from the launch, that lacks one or holds an older one,
+   * `COPIES_PER_TURN` per turn of the event loop.
+   */
+  #keepCopies(): void {
+    const now = this.#copiesLeft.slice(0, COPIES_PER_TURN);
+
+    this.#copiesLeft = this.#copiesLeft.slice(COPIES_PER_TURN);
+    keepRecords(this.#options.disk, this.#rows(now));
+    this.#copyTimer =
+      this.#copiesLeft.length > 0 ? setTimeout(() => this.#keepCopies(), 0) : undefined;
   }
 
   /**

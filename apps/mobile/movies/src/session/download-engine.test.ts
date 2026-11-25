@@ -156,6 +156,7 @@ const settle = (): Promise<void> =>
 describe("DownloadEngine", () => {
   let root = "";
   let core = new FakeCore();
+  const launched: Array<DownloadEngine> = [];
 
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), "lar-downloads-"));
@@ -163,16 +164,22 @@ describe("DownloadEngine", () => {
   });
 
   afterEach(() => {
+    for (const engine of launched.splice(0)) engine.dispose();
     vi.useRealTimers();
     rmSync(root, { recursive: true, force: true });
   });
 
-  const launch = (disk: NodeDisk = new NodeDisk(root)): DownloadEngine =>
-    new DownloadEngine(core, {
+  const launch = (disk: NodeDisk = new NodeDisk(root)): DownloadEngine => {
+    const engine = new DownloadEngine(core, {
       disk,
       mediaUrl: "http://media.test",
       settings: { wifiOnly: false },
     });
+
+    launched.push(engine);
+
+    return engine;
+  };
 
   /** What an earlier run left: the index of `ids`, ready, and each one's video. */
   const keep = (ids: ReadonlyArray<FileId>, folder: string = root): void => {
@@ -412,6 +419,22 @@ describe("DownloadEngine", () => {
     expect(listed(launch())).toStrictEqual([`${dune}:ready`]);
     expect(positionsOf(launch())).toStrictEqual([60_000]);
     expect(names(root)).not.toContain(arrival);
+  });
+
+  it("writes each download's own copy after the launch shows, or as it closes", async () => {
+    keep([dune]);
+    launch();
+
+    expect(filesUnder(dune)).not.toContain(RECORD_FILE);
+
+    await settle();
+
+    expect(filesUnder(dune)).toContain(RECORD_FILE);
+
+    rmSync(join(root, itemPath(dune, RECORD_FILE)));
+    launch().dispose();
+
+    expect(filesUnder(dune)).toContain(RECORD_FILE);
   });
 
   it("keeps a download through a read error on the first launch over main's index", async () => {

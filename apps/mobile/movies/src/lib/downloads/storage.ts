@@ -252,9 +252,9 @@ export const keepRecord = (
 ): Result.Result<void, DiskFailed> =>
   replaceFile(disk, itemPath(download.id, RECORD_FILE), serializeRecord(download));
 
-/** Saves the copy of each download in `store` whose folder lacks it or holds an older one. */
-export const keepRecords = (disk: DownloadDisk, store: DownloadStore): void => {
-  for (const download of store.downloads) {
+/** Saves the copy of each of `downloads` whose folder lacks it or holds an older one. */
+export const keepRecords = (disk: DownloadDisk, downloads: ReadonlyArray<DownloadRecord>): void => {
+  for (const download of downloads) {
     const kept = Result.getOrNull(disk.read(itemPath(download.id, RECORD_FILE)));
 
     if (kept !== serializeRecord(download)) keepRecord(disk, download);
