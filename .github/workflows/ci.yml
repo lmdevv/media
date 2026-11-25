@@ -25,6 +25,7 @@ jobs:
       workspaces: ${{ steps.scope.outputs.workspaces }}
       verify-media: ${{ steps.skill.outputs.changed }}
       e2e-groups: ${{ steps.e2e.outputs.groups }}
+      ios-apps: ${{ steps.scope.outputs.ios-apps }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -40,6 +41,7 @@ jobs:
         run: |
           workspaces="$(scripts/changed-packages.sh $CHANGED)"
           echo "workspaces=$(jq -Rsc 'split("\n") | map(select(. != ""))' <<<"$workspaces")" >> "$GITHUB_OUTPUT"
+          echo "ios-apps=$(jq -Rsc 'split("\n") | map(select(startswith("apps/mobile/")) | ltrimstr("apps/mobile/"))' <<<"$workspaces")" >> "$GITHUB_OUTPUT"
       # The verify-media skill lives outside the workspaces, so its tests key off its own paths.
       - id: skill
         run: |
@@ -75,10 +77,6 @@ jobs:
       - run: pnpm fmt:check
       - run: pnpm --filter @media/commands check
       - run: pnpm knip
-      - if: contains(fromJSON(steps.scope.outputs.workspaces), 'apps/mobile/movies')
-        run: pnpm --filter @media/mobile-movies bundle
-      - if: contains(fromJSON(steps.scope.outputs.workspaces), 'apps/mobile/music')
-        run: pnpm --filter @media/mobile-music bundle
       - run: scripts/check-deploy.sh
       - run: scripts/check-history.sh apps packages scripts nix deploy .agents tools docs README.md AGENTS.md
       - if: contains(fromJSON(steps.scope.outputs.workspaces), 'apps/cli')
@@ -111,6 +109,79 @@ jobs:
       - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: unshare --user --map-root-user --pid --fork --mount-proc true
       - run: scripts/changed-packages.sh $CHANGED test --project ${{ matrix.project }}
+
+  # An iOS app is affected by its own files, the packages it depends on, the lockfile, and this
+  # workflow, as scripts/changed-packages.sh maps them.
+  ios-bundle:
+    name: iOS bundle (${{ matrix.app }})
+    needs: changes
+    if: needs.changes.outputs.ios-apps != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app: ${{ fromJSON(needs.changes.outputs.ios-apps) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts --filter "@media/mobile-${{ matrix.app }}..."
+      # The production export fails the job when a module doesn't resolve; its size never does.
+      - run: pnpm --filter "@media/mobile-${{ matrix.app }}" bundle
+      - name: Bundle size
+        working-directory: apps/mobile/${{ matrix.app }}
+        run: |
+          pnpm exec expo export --platform ios --no-bytecode --output-dir dist-js
+          bytes() { find "$1" -name "$2" -exec cat {} + | wc -c | tr -d ' '; }
+          {
+            echo "| ${{ matrix.app }} iOS bundle | bytes |"
+            echo "| --- | ---: |"
+            echo "| Hermes bytecode | $(bytes dist/_expo/static/js/ios '*.hbc') |"
+            echo "| JavaScript | $(bytes dist-js/_expo/static/js/ios '*.js') |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # An unsigned Debug build for the simulator: prebuild, CocoaPods, and every native module compile,
+  # while the JavaScript comes from the bundle job above.
+  ios-build:
+    name: iOS build (${{ matrix.app }})
+    needs: changes
+    if: needs.changes.outputs.ios-apps != '[]'
+    runs-on: macos-26
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        app: ${{ fromJSON(needs.changes.outputs.ios-apps) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+      # Pods download into this cache by name and version, so an older cache is safe to start from.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/Library/Caches/CocoaPods
+          key: cocoapods-${{ matrix.app }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: cocoapods-${{ matrix.app }}-
+      - run: pnpm install --frozen-lockfile --ignore-scripts --filter "@media/mobile-${{ matrix.app }}..."
+      - run: xcodebuild -version
+      - working-directory: apps/mobile/${{ matrix.app }}
+        run: pnpm exec expo prebuild --platform ios --clean
+      - working-directory: apps/mobile/${{ matrix.app }}/ios
+        run: >-
+          xcodebuild -workspace ${{ matrix.app }}.xcworkspace -scheme ${{ matrix.app }}
+          -configuration Debug -sdk iphonesimulator -destination "generic/platform=iOS Simulator"
+          -derivedDataPath "$RUNNER_TEMP/derived-data" ARCHS=arm64 CODE_SIGNING_ALLOWED=NO
+          build -quiet
 
   verify-media-skill:
     name: verify-media skill tests
@@ -357,6 +428,8 @@ jobs:
         changes,
         check,
         unit,
+        ios-bundle,
+        ios-build,
         verify-media-skill,
         stack,
         web-stack,
