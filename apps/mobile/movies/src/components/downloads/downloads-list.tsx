@@ -31,6 +31,14 @@ const openSettings = () => router.push("/download-settings");
 
 const openMenu = () => router.push("/download-settings/menu");
 
+/** What the list says about the downloads index on this iPhone, by whether it holds the latest changes. */
+const SAVE_NOTICES: Readonly<Record<DownloadsSnapshot["save"], string | null>> = {
+  saved: null,
+  failed: "This iPhone couldn't save your downloads list. Free up some space, and it saves again.",
+  unread:
+    "This iPhone can't read your downloads list right now. Your downloads stay, and it tries again.",
+};
+
 function DownloadsBody({
   engine,
   snapshot,
@@ -44,24 +52,30 @@ function DownloadsBody({
 }) {
   const downloads = snapshot === null ? [] : downloadsOf(snapshot.store);
   const summary = summaryOf(downloads);
+  const notice = snapshot === null ? null : SAVE_NOTICES[snapshot.save];
 
   if (engine === null || downloads.length === 0) {
-    return (
+    const action = <Button label={empty.label} onPress={empty.onPress} />;
+
+    return snapshot?.save === "unread" ? (
       <EmptyState
         icon={Download}
-        title="Nothing downloaded yet."
-        action={<Button label={empty.label} onPress={empty.onPress} />}
+        title="Can't read your downloads list."
+        description="Your downloads stay on this iPhone, and it tries again in 30 seconds."
+        action={action}
       />
+    ) : (
+      <EmptyState icon={Download} title="Nothing downloaded yet." action={action} />
     );
   }
 
   return (
     <View className="gap-4 px-5 py-4 regular:w-full regular:max-w-readable regular:self-center regular:px-0">
-      {snapshot?.save === "failed" ? (
+      {notice === null ? null : (
         <Text variant="secondary" tone="danger">
-          This iPhone couldn't save your downloads list. Free up some space, and it saves again.
+          {notice}
         </Text>
-      ) : null}
+      )}
       <ListRow icon={Download} title={summary.items} detail={summary.size} onPress={openSettings} />
       {downloads.map((download) => (
         <DownloadRow key={download.id} engine={engine} download={download} />
