@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Runs disposable Lar stacks for verification and drives them. See ../SKILL.md.
 #
-#   verify-media.sh up [--side after|before] [--image IMG] [--library demo|fixtures|DIR] [--no-music] [--no-setup] [--no-seed]
+#   verify-media.sh up [--side after|before] [--image IMG] [--library demo|fixtures|DIR] [--hardware none|qsv|vaapi] [--no-music] [--no-setup] [--no-seed]
 #   verify-media.sh doctor [--side S]
+#   verify-media.sh hardware [--side S] none|qsv|vaapi
+#   verify-media.sh hardware-matrix [--side S] [--paths cpu,qsv,vaapi] [--rows ROW,...] [--grid-only]
 #   verify-media.sh browser [--side S] [--app movies|music|account] <command> [flags]
 #   verify-media.sh cli [--side S] [--as PERSON] -- <media args>
 #   verify-media.sh logs [--side S] [lines]
@@ -117,15 +119,21 @@ container() { echo "$project-$1-1"; }
 
 # Compose for this side only: its own project, the settings `up` wrote, the demo library's own
 # override (deploy/compose/compose.demo.yaml, as self-hosters use it) or a bind mount of another
-# library, and an override that labels the containers. Settings in the caller's shell or in a
+# library, the GPU override (compose.qsv.yaml or compose.vaapi.yaml) when the side runs on one, and
+# an override that labels the containers. Settings in the caller's shell or in a
 # deploy/compose/.env file would change what runs, so neither reaches Compose. A `docker_limit` of
 # some seconds stops a call that takes longer, as when the Docker daemon stalls.
 compose() {
-  local unset=() name dir files
+  local unset=() name dir files hardware
   dir="$state/deploy/compose"
   files=(-f "$dir/compose.yaml")
   while read -r name; do unset+=(-u "$name"); done < <(sed -n 's/^\([A-Z][A-Z0-9_]*\)=.*/\1/p' "$dir/.env.example")
   [[ "$(read_state library)" == "$demo_image" ]] && files+=(-f "$dir/compose.demo.yaml")
+  hardware="$(read_state hardware)"
+  if [[ "$hardware" == qsv || "$hardware" == vaapi ]]; then
+    [[ -f "$dir/compose.$hardware.yaml" ]] || die "this side's deploy/compose has no compose.$hardware.yaml"
+    files+=(-f "$dir/compose.$hardware.yaml")
+  fi
   env "${unset[@]}" -u COMPOSE_PROFILES -u COMPOSE_FILE -u COMPOSE_PROJECT_NAME -u COMPOSE_ENV_FILES \
     ${docker_limit:+timeout --kill-after=5 "$docker_limit"} docker compose -p "$project" --env-file "$state/compose.env" "${files[@]}" -f "$state/compose.verify.yaml" "$@"
 }
@@ -162,8 +170,10 @@ start_failed() {
   die "$1"
 }
 
+# Waits until the side reports its backend connected. On a stack that stops or never answers it
+# prints why and calls $1: `start_failed` (the default) removes the side, as a failed `up` must.
 wait_healthy() {
-  local status ip target service deadline=$((SECONDS + health_seconds))
+  local failed="${1:-start_failed}" status ip target service deadline=$((SECONDS + health_seconds))
   target="$(health_url)"
   service="$(container media)"
   while ((SECONDS < deadline)); do
@@ -171,7 +181,7 @@ wait_healthy() {
     status="$(docker_brief inspect -f '{{.State.Status}}' "$service" 2>/dev/null || echo missing)"
     if [[ "$status" == exited || "$status" == dead ]]; then
       stack_logs
-      start_failed "$service stopped while starting"
+      "$failed" "$service stopped while starting"
     fi
     sleep 2
   done
@@ -183,7 +193,7 @@ wait_healthy() {
   for ip in $(docker_brief inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' "$service" 2>/dev/null || true); do
     say "check the host's route to $service with \`ip route get $ip\`: $(ip route get "$ip" 2>/dev/null | head -1 || true)"
   done
-  start_failed "$project did not become healthy in ${health_seconds}s"
+  "$failed" "$project did not become healthy in ${health_seconds}s"
 }
 
 browser() {
@@ -263,19 +273,21 @@ core_seed() {
 
 cmd_up() {
   take_side "$@"
-  local image="" library="" setup=1 seed=1 music=1 started=$SECONDS step=$SECONDS
+  local image="" library="" hardware="" setup=1 seed=1 music=1 started=$SECONDS step=$SECONDS
   [[ "$health_seconds" =~ ^[1-9][0-9]*$ ]] || die "MEDIA_VERIFY_HEALTH_SECONDS must be a whole number of seconds"
   set -- "${args[@]}"
   while (($#)); do
     case "$1" in
       --image) image="$2"; shift 2 ;;
       --library) library="$2"; shift 2 ;;
+      --hardware) hardware="$2"; shift 2 ;;
       --no-music) music=0; shift ;;
       --no-setup) setup=0; seed=0; shift ;;
       --no-seed) seed=0; shift ;;
       *) die "up: unknown flag $1" ;;
     esac
   done
+  [[ -z "$hardware" ]] || hardware_usable "$hardware"
   [[ -z "$(docker ps -aq --filter "label=com.docker.compose.project=$project")" && ! -d "$state" ]] ||
     die "$project already exists; run \`down --side $side\` first"
   mkdir -p "$state" "$evidence"
@@ -352,10 +364,11 @@ cmd_up() {
     [[ -d "$library/$movies_dir" || -d "$library/$shows_dir" ]] ||
       die "$library has no Movies or Shows folder"
     ((music)) && [[ ! -d "$library/$music_dir" ]] && die "$library has no Music folder; add one or pass --no-music"
-    mount="    volumes:
-      - { type: bind, source: \"$library\", target: /media/library, read_only: true }"
+    mount="      - { type: bind, source: \"$library\", target: /media/library, read_only: true }"
   fi
   write_state library "$library"
+  # Media the hardware matrix generates, which a side reads at /media/verify-fixtures.
+  mkdir -p "$state/fixtures"
   if ((music)); then
     mkdir -p "$state/music"
     write_state music_core 1
@@ -376,12 +389,15 @@ PUID=$(id -u)
 PGID=$(id -g)
 TZ=UTC
 ENV
+  [[ -z "$hardware" ]] || set_hardware "$hardware"
   # Compose merges a service's volumes by their target, so either library mount replaces
   # compose.yaml's MEDIA_LIBRARY line.
   cat > "$state/compose.verify.yaml" <<YAML
 services:
   media:
     labels: { media.verify.run: "$run", media.verify.side: "$side" }
+    volumes:
+      - { type: bind, source: "$state/fixtures", target: /media/verify-fixtures, read_only: true }
 $mount
 YAML
   compose up -d --pull missing --no-build --quiet-pull > "$state/compose.log" 2>&1 ||
@@ -476,6 +492,7 @@ cmd_doctor() {
     else echo "FAIL  the checkout changed since up; run \`down --side $side\` and \`up --side $side\` to test it"; failed=1; fi
   fi
   echo "info  version $(docker exec "$m" cat /data/core/version), image $(read_state image), library $(read_state library)"
+  echo "info  HARDWARE_ACCELERATION=$(hardware_setting); the media service reports $(reported_hardware)"
   if music_core; then
     check "/music is the music client" "curl -fsS '$(music_url)/' | grep -qF '<title>Lar Music</title>'"
     echo "info  music is the image's client at $(music_url), on the core"
@@ -578,6 +595,74 @@ cmd_lyrics_probe() {
   echo "$dir"
 }
 
+# ---------------------------------------------------------------------------------------- hardware
+
+# HARDWARE_ACCELERATION as this side runs it: what `up --hardware` or `hardware` set, else the
+# media service's default.
+hardware_setting() {
+  local setting
+  setting="$(read_state hardware)"
+  echo "${setting:-auto (unset)}"
+}
+
+# What /api/health says the media service encodes with: qsv, vaapi, or none.
+reported_hardware() {
+  curl -fsS --connect-timeout 5 --max-time 10 "$(health_url)" 2>/dev/null |
+    node -e 'try { console.log(JSON.parse(require("node:fs").readFileSync(0, "utf8")).hardwareAcceleration ?? "nothing") } catch { console.log("nothing (no answer)") }'
+}
+
+# Fails unless this host can run a side with HARDWARE_ACCELERATION=$1: qsv and vaapi need a render
+# node, which deploy/compose's override passes through as all of /dev/dri.
+hardware_usable() {
+  case "$1" in
+    none) ;;
+    qsv|vaapi) compgen -G '/dev/dri/renderD*' >/dev/null || die "HARDWARE_ACCELERATION=$1 needs a render node (/dev/dri/renderD*) on this host" ;;
+    *) die "HARDWARE_ACCELERATION is none, qsv, or vaapi, not ${1:-nothing}" ;;
+  esac
+}
+
+# Records HARDWARE_ACCELERATION=$1 for the side: in compose.env, and in the state that makes
+# `compose` add the GPU override.
+set_hardware() {
+  write_state hardware "$1"
+  sed -i '/^HARDWARE_ACCELERATION=/d' "$state/compose.env"
+  echo "HARDWARE_ACCELERATION=$1" >> "$state/compose.env"
+}
+
+# Moves a running side to HARDWARE_ACCELERATION=none, qsv, or vaapi. Compose recreates the one
+# container with the same image, data, and port, so the side keeps its people and libraries; the
+# browser host and the CLI sessions carry on. A side that does not come back is left as it is, for
+# `logs`, then `down`.
+cmd_hardware() {
+  take_side "$@"
+  [[ -n "$(read_state port)" ]] || die "no $side side in run $run; run \`up --side $side\`"
+  local to="${args[0]:-}"
+  hardware_usable "$to"
+  if [[ "$(read_state hardware)" != "$to" ]]; then
+    set_hardware "$to"
+    docker_limit=300 compose up -d --no-build --quiet-pull > "$state/compose.log" 2>&1 ||
+      { cat "$state/compose.log" >&2; die "docker compose up failed for HARDWARE_ACCELERATION=$to"; }
+    say "waiting for $project with HARDWARE_ACCELERATION=$to"
+    wait_healthy die
+  fi
+  echo "$side: HARDWARE_ACCELERATION=$to; the media service reports $(reported_hardware)"
+}
+
+# Measures which video stage works on which path and writes the grid under
+# captures/verify/<run>/hardware-matrix/ (hardware-matrix.mjs holds the table). Each path moves the
+# side to its setting first, so the side ends on the last path measured. `--grid-only` rewrites the
+# grid from the cells on disk and needs no side.
+cmd_hardware_matrix() {
+  take_side "$@"
+  if [[ " ${args[*]} " != *" --grid-only "* ]]; then
+    [[ -n "$(read_state ready)" ]] || die "the $side side is not ready; run \`up --side $side\` first"
+    [[ -n "$(read_state people)" ]] || die "the matrix plays as Lucía, whom up's setup makes; run \`up\` without --no-setup"
+  fi
+  node "$scripts/hardware-matrix-run.mjs" --helper "$scripts/verify-media.sh" --side "$side" --state "$state" \
+    --container "$(container media)" --url "$(url)" --cli "$cli_js" --image "$(read_state image)" \
+    --out "$evidence_root/hardware-matrix" --run "$run" --uid "$(id -u)" --gid "$(id -g)" "${args[@]}"
+}
+
 side_phase() {
   if [[ -n "$(read_state ready)" ]]; then echo ready
   elif kill -0 "$(read_state up.pid)" 2>/dev/null; then echo starting
@@ -589,7 +674,7 @@ cmd_status() {
   for s in after before; do
     take_side --side "$s"
     [[ -n "$(read_state port)" ]] || continue
-    echo "$s: $(side_phase) movies $(movies_url) (Convex $(convex_url)) project $project ($(docker inspect -f '{{.State.Status}}' "$(container media)" 2>/dev/null || echo gone)) image $(read_state image)"
+    echo "$s: $(side_phase) movies $(movies_url) (Convex $(convex_url)) project $project ($(docker inspect -f '{{.State.Status}}' "$(container media)" 2>/dev/null || echo gone)) image $(read_state image), HARDWARE_ACCELERATION=$(hardware_setting)"
     music_core && echo "$s: $(side_phase) music $(music_url) on the image"
     [[ -n "$(read_state ios_udid)" ]] && echo "$s ios: simulator $(read_state ios_udid), metro $(read_state metro_port)"
   done
@@ -1288,11 +1373,13 @@ main() {
     cli) cmd_cli "$@" ;;
     logs) cmd_logs "$@" ;;
     lyrics-probe) cmd_lyrics_probe "$@" ;;
+    hardware) cmd_hardware "$@" ;;
+    hardware-matrix) cmd_hardware_matrix "$@" ;;
     ios) cmd_ios "$@" ;;
     evidence) cmd_evidence "$@" ;;
     status) cmd_status ;;
     down) cmd_down "$@" ;;
-    *) sed -n '2,18p' "$0" >&2; exit 2 ;;
+    *) sed -n '2,20p' "$0" >&2; exit 2 ;;
   esac
 }
 # Tests source the script to call its functions; run as a command, it runs main.

@@ -1,0 +1,109 @@
+# Hardware transcoding
+
+When a device can't play a file as it is, the media service converts the video for it: it decodes
+the source, deinterlaces, scales, maps HDR to SDR, burns in an image subtitle, and encodes H.264,
+HEVC, or AV1, on the CPU or on an Intel GPU through Quick Sync (`qsv`) or VA-API (`vaapi`). The
+hardware matrix plays one fixture per stage on each path through the service's own playback
+negotiation, reads the bytes it serves, and records which stage works on which path, with the
+evidence of where it ran.
+
+## Sub-features
+
+- `hw-decode` decodes a source the device can't play: generated HEVC 8-bit SDR for an H.264-only
+  browser.
+- `hw-deinterlace` makes the interlaced MPEG-2 version progressive.
+- `hw-scale` scales the 818-line H.264 version down to a 480-line quality cap.
+- `hw-hdr-to-sdr` maps the HDR10 HEVC version to BT.709 SDR for an SDR browser.
+- `hw-burn-in` draws the DVD (image) subtitle track into the picture.
+- `hw-encode-h264`, `hw-encode-hevc`, and `hw-encode-av1` encode for a device that plays only that
+  codec (H.264 under a 4 Mb/s cap, since an H.264 browser plays the source as it is).
+- `hw-path` shows where each stage ran: the ffmpeg arguments inside the container, that ffmpeg's
+  GPU engine time, the encoder's fingerprint in the bytes, the negotiated mode, and the service's
+  `Stream.mode_changed` records.
+
+## How to get to it (user POV)
+
+- The web and iOS players: play a title the device can't play as it is. The player's `Stream
+  info` names the mode (`Transcode`).
+- Terminal: `media movies stream <title> [--version N] [--max-height N]` prints the negotiated mode.
+- The owner: `HARDWARE_ACCELERATION` (`auto`, `none`, `qsv`, `vaapi`) with
+  `deploy/compose/compose.qsv.yaml` or `compose.vaapi.yaml`, which pass `/dev/dri` through, or the
+  NixOS module's setting. `/api/health` reports the encoder in use as `hardwareAcceleration`.
+
+## Driving it with verify-media
+
+Preconditions:
+
+- A side up with setup on the demo library: `$S up --no-seed` is enough, since the matrix plays as
+  Lucía. Each path but `cpu` needs a render node on the host (`/dev/dri/renderD*`).
+- No other heavy job on the host: the grid restarts the side's container for each path and
+  transcodes for half a minute on each, about two minutes in all on a 16-core host with an Arc A380,
+  plus a minute the first time for the generated fixture's scan.
+
+- **Pick the path at up.** `$S up --hardware qsv` starts the side with `HARDWARE_ACCELERATION=qsv`
+  and the host's `/dev/dri` passed through by `compose.qsv.yaml`; `vaapi` uses
+  `compose.vaapi.yaml`, and `none` runs on the CPU with no device. Without `--hardware` the side
+  runs the service's default, `auto`, with no device, so software.
+- **Switch a running side.** `$S hardware [--side S] none|qsv|vaapi` has Compose recreate the
+  side's container with the other setting, with the same data and port, waits for health, and
+  prints `after: HARDWARE_ACCELERATION=qsv; the media service reports qsv`. `$S doctor` and
+  `$S status` show the setting.
+- **Run the grid.** `$S hardware-matrix [--side S]` measures every row on `cpu`, `qsv`, and `vaapi`
+  in turn, switching the side to each path first, prints `grid.md`, and leaves the side on the last
+  path. `--paths qsv,vaapi` or `--rows encode-hevc,scale` measure part of it; the cells it skips
+  keep their last result. `--grid-only` rewrites the grid files from the cells on disk, with or
+  without a side.
+- **Before and after for a PR.** Rebase onto main first: the before side is
+  `ghcr.io/lmdevv/media:main`. Run one side at a time to spare the host: `$S up --no-seed`,
+  `$S hardware-matrix`, `$S down --side after`, then `$S up --side before --no-seed`,
+  `$S hardware-matrix --side before`, `$S down`. `grid.md` then shows both sides and a
+  `What changed on the after side` table. A PR that turns a cell green shows that cell going from
+  `NOT-BUILT` or `FAIL` to `PASS`, and no other cell changing.
+- **Read the grid.** `captures/verify/<run>/hardware-matrix/grid.md` has, per side, a stage-by-path
+  table of verdicts, the passes per path, and one line of evidence per cell. `grid.tsv` has one line
+  per cell (`side stage row path verdict evidence measured cell`), and `grid.json` the same as JSON.
+  - `PASS`: the output is right and the stage ran on that path.
+  - `FAIL`: the stream broke, the output is wrong (size, rate, timeline, tags, picture), or the
+    stage ran somewhere else, such as in software on a GPU path. The evidence names which.
+  - `NOT-BUILT`: the service answered correctly but did not do the stage: it refused with a reason
+    the row lists (`no-transcode-target`), or the output lacks the stage (combing left in, H.264
+    where only HEVC plays).
+  - `SKIPPED`: the fixture or the device is absent. Neither `NOT-BUILT` nor `SKIPPED` counts as a
+    pass.
+- **Read a cell.** `<side>/<path>/<row>/cell.json` holds the verdict, each check with its class
+  (`stage`, `output`, `path`) and evidence, and what was observed: the negotiation, each fetch's
+  segments and ffprobe facts, each ffmpeg run's arguments and engine time, and the service's log
+  records for the session. Beside it are the bytes served (`start.mp4`, `seek.mp4`), ffprobe's
+  JSON, `negotiate.json`, `ffmpeg-watch.txt`, `service-log.jsonl`, and the stage's own analysis:
+  `idet.txt`; `picture.txt` with `output-240.png`; or `output-108.png`, `source-108.png`, and
+  `changed-108.png` (the pixels the subtitle changed).
+- **Add a row.** A stage, a path, or a hybrid row (a CPU decode feeding a GPU encode, say) is an
+  entry in `scripts/hardware-matrix.mjs`: a fixture in `FIXTURES` (a demo library version, or one
+  generated with the side's ffmpeg), a client in `PROFILES`, a row in `ROWS` with its request, its
+  checks, and `work` (where each operation must run), and for a new operation its rule in `WORK`.
+  `node --test .agents/skills/verify-media/scripts/hardware-matrix.test.mjs` checks the table.
+- **Proof.** Put `grid.md`'s tables in the PR's Verification section, and the evidence lines or the
+  whole `grid.md` in a PR comment. Keep `start.mp4` and `seek.mp4` out of the PR; they are the demo
+  films' frames, at a few MB each.
+
+## Gotchas
+
+- Switching paths restarts the side's container, Convex inside it included: the browser host and
+  CLI sessions carry on, but a page open in the browser reconnects.
+- The decode row plays a generated fixture, made once per side with the side's image's ffmpeg into
+  the side's state and mounted at `/media/verify-fixtures`; the matrix scans it into a `Verify
+  fixtures` library. A side that `up` started without that mount marks the row `SKIPPED`: run
+  `down` and `up` again.
+- GPU engine time comes from each ffmpeg's DRM fdinfo, read inside the container as the media
+  service's user: `drm-engine-*` nanoseconds on i915, `drm-cycles-*` on xe. Decode and encode share
+  the video engine, so a GPU decode also needs `-hwaccel <path> -hwaccel_output_format <path>`,
+  which fails the run, not silently, when the GPU can't decode the source.
+- `qsv` and `vaapi` set explicitly are trusted at startup, as the service does; `/api/health`
+  reports the setting, not a probe. The cells, not the health line, say whether the GPU did the
+  work.
+- The hdr-to-sdr bounds compare the picture with a software Hable tone map of the same frames: a
+  different tone curve passes, and a black, washed-out, blown-out, or tinted picture fails.
+- The burn-in compare counts pixels that differ from the source frame by more than 40 levels: 1 %
+  of the bottom 30 % must change while the subtitle shows (108 s), and almost none above it or
+  before it shows (105 s).
+- The cells start playback sessions as Lucía, which leaves her progress on the Feature Test.
