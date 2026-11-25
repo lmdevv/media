@@ -2,6 +2,7 @@ import { ArtistId } from "@/lib/ids";
 import type { AlbumId } from "@/lib/models";
 import type { ArtistDetail, Track } from "@/lib/models";
 import { useArtistDetail } from "@/lib/details";
+import { useScreenOpen } from "@media/mobile-core/app-events-react";
 import { Option, Schema } from "effect";
 import { LinearGradient } from "expo-linear-gradient";
 import { router, useLocalSearchParams } from "expo-router";
@@ -27,6 +28,7 @@ import { Icon } from "@/components/ui/icon";
 import { RowMore } from "@/components/ui/row";
 import { SectionHeader } from "@/components/ui/section-header";
 import { Text } from "@/components/ui/text";
+import { appEvents } from "@/lib/app-events";
 import { clearOf } from "@/lib/color";
 import { detailStateOf } from "@/lib/detail-state";
 import { artistSongLine, artistStats, hasMoreSongs } from "@/lib/artists";
@@ -244,6 +246,8 @@ function TopBar({
 
 function Artist({ artistId }: { readonly artistId: ArtistId }) {
   const state = detailStateOf(useArtistDetail(artistId), "Couldn’t load this artist.");
+
+  useScreenOpen(appEvents, "artist", artistId, state.kind === "ready");
 
   const playingId = useNowPlaying().nowPlaying?.trackId ?? null;
   const { playFrom, playAll } = usePlayList();

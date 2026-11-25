@@ -8,6 +8,7 @@ import { Image } from "@/components/ui/image";
 import { Text } from "@/components/ui/text";
 import { artworkUrl } from "@/lib/artwork";
 import { kindFacts } from "@/lib/browse";
+import { pressTitle } from "@/lib/open-title";
 import { watchHref } from "@/lib/routes";
 import { useServer } from "@/session/connection";
 
@@ -24,7 +25,7 @@ export function WideRow({ title }: { readonly title: TitleCard }) {
   // take a parent's gap of their own, and `…` stays a separate VoiceOver element.
   return (
     <View className="flex-row items-center gap-3">
-      <Link href={`/title/${title.id}`} asChild>
+      <Link href={`/title/${title.id}`} asChild onPress={() => pressTitle(title.id)}>
         <Link.Trigger>
           <Pressable
             accessibilityRole="button"

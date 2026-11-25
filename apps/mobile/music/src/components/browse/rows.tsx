@@ -4,6 +4,7 @@ import { View } from "react-native";
 
 import { useSongDownloadLine } from "@/components/downloads/song-download";
 import { Row, RowChevron, RowMore } from "@/components/ui/row";
+import { appEvents } from "@/lib/app-events";
 import { creditText } from "@/lib/credits";
 import { songSheetParams } from "@/lib/song-sheet";
 import type { SheetSong } from "@/lib/song-sheet";
@@ -13,13 +14,15 @@ export const openSongActions = (song: SheetSong): void => {
   router.push({ pathname: "/song/[id]/actions", params: songSheetParams(song) });
 };
 
-/** Opens an album in the current tab's stack. */
+/** Opens an album in the current tab's stack, timing the open until its content draws. */
 export const openAlbum = (album: Pick<AlbumCard, "id">): void => {
+  appEvents.pressed("album", album.id);
   router.push({ pathname: "/album/[id]", params: { id: album.id } });
 };
 
-/** Opens an artist in the current tab's stack. */
+/** Opens an artist in the current tab's stack, timing the open until its content draws. */
 export const openArtist = (artist: Pick<ArtistCard, "id">): void => {
+  appEvents.pressed("artist", artist.id);
   router.push({ pathname: "/artist/[id]", params: { id: artist.id } });
 };
 

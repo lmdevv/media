@@ -13,6 +13,10 @@ export { createMediaServer } from "./media-server";
 
 export type { MediaServer, MediaServerOptions, MediaServerSession } from "./media-server";
 
+export { reportGate, reportOf } from "./client-error-report";
+
+export type { ErrorContext, ReportGate } from "./client-error-report";
+
 export { openIndexedDb } from "./shared-store";
 
 export { holdGuestSignIn, holdSignIn, readDevice } from "./token-storage";

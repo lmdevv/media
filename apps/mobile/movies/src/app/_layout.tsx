@@ -1,8 +1,23 @@
 import "../global.css";
 
+import type { Landing } from "@media/mobile-core/app-events";
+import {
+  AppEventsSender,
+  ReportRenderErrors,
+  useErrorRoute,
+  useFirstScreen,
+} from "@media/mobile-core/app-events-react";
+import type { RenderErrorFallback } from "@media/mobile-core/app-events-react";
 import { describeFailure } from "@media/mobile-core/failure";
 import { usePlatformStatus } from "@media/sdk/react";
-import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from "expo-router";
+import {
+  DarkTheme,
+  DefaultTheme,
+  ErrorBoundary,
+  Stack,
+  ThemeProvider,
+  useSegments,
+} from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
@@ -15,13 +30,13 @@ import { ServerUnavailable } from "@/components/server-unavailable";
 import { HeldHome } from "@/components/browse/held-home";
 import { HeldTitleStates, TitleStatesProvider } from "@/components/browse/title-states";
 import { Button } from "@/components/ui/button";
+import { appEvents } from "@/lib/app-events";
 import { applyAppearance } from "@/lib/appearance";
 import { displayHost } from "@/lib/local-network";
 import { useSheetOptions } from "@/lib/sheet";
 import { useThemeColor } from "@/lib/theme-color";
 import { ConnectionProvider, useConnection, useServer } from "@/session/connection";
 import { DownloadsProvider, useOfflinePerson } from "@/session/downloads";
-import { ReportRenderErrors } from "@/session/error-reporting";
 import { OfflineContext } from "@/session/offline";
 import { FirstRunProvider, useFirstRun, useHomeAfterSetup } from "@/session/first-run";
 import { InviteLinks } from "@/session/invite-links";
@@ -169,10 +184,29 @@ function RootStack({ phase }: { readonly phase: SessionPhase["kind"] | "offline"
   );
 }
 
-function HideSplash() {
+/** Hides the splash screen; the launch's first frame shows the screen that rendered this. */
+function HideSplash({ landing }: { readonly landing: Landing }) {
+  useFirstScreen(appEvents, landing);
+
   useEffect(() => {
     void SplashScreen.hideAsync();
   }, []);
+
+  return null;
+}
+
+/** expo-router's error screen, over the splash screen when a launch fails before hiding it. */
+const RenderFailed: RenderErrorFallback = (props) => {
+  useEffect(() => {
+    void SplashScreen.hideAsync();
+  }, []);
+
+  return <ErrorBoundary {...props} />;
+};
+
+/** Names the route pattern on screen, such as `/title/[titleId]`, in error reports. */
+function ErrorRoute() {
+  useErrorRoute(appEvents, `/${useSegments().join("/")}`);
 
   return null;
 }
@@ -210,7 +244,7 @@ function ConnectionTrouble({
 
   return (
     <>
-      <HideSplash />
+      <HideSplash landing="elsewhere" />
       <ServerUnavailable
         description={description ?? `${displayHost(server.mediaUrl)} is unavailable.`}
         onRetry={retry}
@@ -292,7 +326,7 @@ function ConnectedScreens({
     return (
       <OfflineContext.Provider value={offlineMode}>
         <PersonContext.Provider value={offlinePerson}>
-          <HideSplash />
+          <HideSplash landing="home" />
           <TitleStatesProvider>
             <RootStack phase="offline" />
           </TitleStatesProvider>
@@ -321,7 +355,7 @@ function ConnectedScreens({
   return (
     <SessionPhaseContext.Provider value={settled}>
       <PersonContext.Provider value={person}>
-        <HideSplash />
+        <HideSplash landing={settled.kind === "ready" ? "home" : "elsewhere"} />
         <TitleStatesProvider>
           {settled.kind === "ready" ? (
             <CurrentSessionProvider>
@@ -362,7 +396,7 @@ function App() {
   if (connection === null) {
     return (
       <>
-        <HideSplash />
+        <HideSplash landing="elsewhere" />
         <RootStack phase="disconnected" />
       </>
     );
@@ -370,15 +404,14 @@ function App() {
 
   return (
     <SdkProvider key={connection.convexUrl} connection={connection}>
-      <ReportRenderErrors>
-        <SignInGate>
-          <FirstRunProvider>
-            <DownloadsProvider>
-              <ConnectedApp />
-            </DownloadsProvider>
-          </FirstRunProvider>
-        </SignInGate>
-      </ReportRenderErrors>
+      <AppEventsSender events={appEvents} mediaUrl={connection.mediaUrl} />
+      <SignInGate>
+        <FirstRunProvider>
+          <DownloadsProvider>
+            <ConnectedApp />
+          </DownloadsProvider>
+        </FirstRunProvider>
+      </SignInGate>
     </SdkProvider>
   );
 }
@@ -386,14 +419,17 @@ function App() {
 export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <NavigationTheme>
-        <ConnectionProvider>
-          <PendingInviteProvider>
-            <InviteLinks />
-            <App />
-          </PendingInviteProvider>
-        </ConnectionProvider>
-      </NavigationTheme>
+      <ReportRenderErrors events={appEvents} fallback={RenderFailed}>
+        <ErrorRoute />
+        <NavigationTheme>
+          <ConnectionProvider>
+            <PendingInviteProvider>
+              <InviteLinks />
+              <App />
+            </PendingInviteProvider>
+          </ConnectionProvider>
+        </NavigationTheme>
+      </ReportRenderErrors>
     </GestureHandlerRootView>
   );
 }

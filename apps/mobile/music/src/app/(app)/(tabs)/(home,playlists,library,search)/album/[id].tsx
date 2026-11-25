@@ -1,5 +1,6 @@
 import { AlbumId } from "@/lib/ids";
 import type { AlbumDetail } from "@/lib/models";
+import { useScreenOpen } from "@media/mobile-core/app-events-react";
 import { Option, Schema } from "effect";
 import { router, useLocalSearchParams } from "expo-router";
 import { Ellipsis } from "lucide-react-native";
@@ -19,6 +20,7 @@ import { Artwork } from "@/components/ui/artwork";
 import { IconButton } from "@/components/ui/icon-button";
 import { Text } from "@/components/ui/text";
 import { albumMeta } from "@/lib/album-meta";
+import { appEvents } from "@/lib/app-events";
 import { creditText } from "@/lib/credits";
 import { useAlbumDetail } from "@/lib/details";
 import { detailStateOf } from "@/lib/detail-state";
@@ -61,6 +63,8 @@ function ArtistLink({
 
 function Album({ albumId }: { readonly albumId: AlbumId }) {
   const state = detailStateOf(useAlbumDetail(albumId), "Couldn’t load this album.");
+
+  useScreenOpen(appEvents, "album", albumId, state.kind === "ready");
 
   const playingId = useNowPlaying().nowPlaying?.trackId ?? null;
   const { playFrom, playAll } = usePlayList();

@@ -1,6 +1,21 @@
 import "../global.css";
 
-import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from "expo-router";
+import type { Landing } from "@media/mobile-core/app-events";
+import {
+  AppEventsSender,
+  ReportRenderErrors,
+  useErrorRoute,
+  useFirstScreen,
+} from "@media/mobile-core/app-events-react";
+import type { RenderErrorFallback } from "@media/mobile-core/app-events-react";
+import {
+  DarkTheme,
+  DefaultTheme,
+  ErrorBoundary,
+  Stack,
+  ThemeProvider,
+  useSegments,
+} from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect } from "react";
 import type { ReactNode } from "react";
@@ -10,6 +25,7 @@ import { useUniwind } from "uniwind";
 
 import { EntryLinksProvider, OpenEntryLink } from "@/components/entry/entry-links";
 import { DownloadsProvider } from "@/downloads";
+import { appEvents } from "@/lib/app-events";
 import { applyAppearance } from "@/lib/appearance";
 import type { SettledPhase } from "@/lib/session-phase";
 import { useThemeColor } from "@/lib/theme-color";
@@ -99,10 +115,29 @@ function RootStack({ phase }: { readonly phase: SettledPhase["kind"] }) {
   );
 }
 
-function HideSplash() {
+/** Hides the splash screen; the launch's first frame shows the screen that rendered this. */
+function HideSplash({ landing }: { readonly landing: Landing }) {
+  useFirstScreen(appEvents, landing);
+
   useEffect(() => {
     void SplashScreen.hideAsync();
   }, []);
+
+  return null;
+}
+
+/** expo-router's error screen, over the splash screen when a launch fails before hiding it. */
+const RenderFailed: RenderErrorFallback = (props) => {
+  useEffect(() => {
+    void SplashScreen.hideAsync();
+  }, []);
+
+  return <ErrorBoundary {...props} />;
+};
+
+/** Names the route pattern on screen, such as `/album/[id]`, in error reports. */
+function ErrorRoute() {
+  useErrorRoute(appEvents, `/${useSegments().join("/")}`);
 
   return null;
 }
@@ -119,7 +154,9 @@ function ConnectedApp() {
       ) : (
         <SessionPhaseContext value={phase}>
           <ServerReachProvider phase={phase.kind}>
-            <HideSplash />
+            <HideSplash
+              landing={phase.kind === "ready" || phase.kind === "offline" ? "home" : "elsewhere"}
+            />
             <RootStack phase={phase.kind} />
             <OpenEntryLink phase={phase.kind} />
           </ServerReachProvider>
@@ -137,7 +174,7 @@ function App() {
   if (connection === null) {
     return (
       <>
-        <HideSplash />
+        <HideSplash landing="elsewhere" />
         <RootStack phase="disconnected" />
       </>
     );
@@ -145,6 +182,7 @@ function App() {
 
   return (
     <SdkProvider key={`${connection.mediaUrl}#${String(attempt)}`} connection={connection}>
+      <AppEventsSender events={appEvents} mediaUrl={connection.mediaUrl} />
       <SignInGate>
         <SetupProgressProvider>
           <DownloadsProvider>
@@ -165,14 +203,17 @@ function ThemedStatusBar() {
 export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <ThemedStatusBar />
-      <NavigationTheme>
-        <ConnectionProvider>
-          <EntryLinksProvider>
-            <App />
-          </EntryLinksProvider>
-        </ConnectionProvider>
-      </NavigationTheme>
+      <ReportRenderErrors events={appEvents} fallback={RenderFailed}>
+        <ErrorRoute />
+        <ThemedStatusBar />
+        <NavigationTheme>
+          <ConnectionProvider>
+            <EntryLinksProvider>
+              <App />
+            </EntryLinksProvider>
+          </ConnectionProvider>
+        </NavigationTheme>
+      </ReportRenderErrors>
     </GestureHandlerRootView>
   );
 }

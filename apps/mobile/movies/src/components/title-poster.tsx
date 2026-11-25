@@ -3,6 +3,7 @@ import { Link } from "expo-router";
 import { Pressable, View } from "react-native";
 
 import { artworkUrl } from "@/lib/artwork";
+import { pressTitle } from "@/lib/open-title";
 import { watchHref } from "@/lib/routes";
 import { useServer } from "@/session/connection";
 
@@ -52,7 +53,7 @@ export function TitlePoster({
   // take a parent's gap of their own.
   return (
     <View className={widthClassName}>
-      <Link href={`/title/${title.id}`} asChild>
+      <Link href={`/title/${title.id}`} asChild onPress={() => pressTitle(title.id)}>
         <Link.Trigger>
           <Pressable
             accessibilityRole="button"

@@ -5,6 +5,7 @@ import { Pressable, View } from "react-native";
 
 import { artworkUrl } from "@/lib/artwork";
 import { episodeCode, facts, progressFraction, progressLabel } from "@/lib/format";
+import { openTitle } from "@/lib/open-title";
 import { watchHref } from "@/lib/routes";
 import { useServer } from "@/session/connection";
 
@@ -86,7 +87,7 @@ export function ContinueCard({ item }: { readonly item: ContinueWatchingItem }) 
           label={`More info about ${item.title.name}`}
           variant="glass"
           className="absolute right-1 bottom-1"
-          onPress={() => router.push(`/title/${item.title.id}`)}
+          onPress={() => openTitle(item.title.id)}
         />
       </View>
     </View>
