@@ -75,9 +75,14 @@ diff affects and their dependents, and everything when a root config file change
 - Stack jobs as matrices: the backend one runs the platform's files in four shards and the other
   packages beside them, and the web one runs each Playwright group.
 - The sandbox job and the Nix job.
+- Two jobs per iOS app. `iOS bundle` exports the production JavaScript bundle on Linux. `iOS
+  build` runs `expo prebuild` and an unsigned Debug simulator build on macOS, whose runners can
+  queue for half an hour.
 
 On a PR, the `changed workspaces` job skips each stack job, the sandbox job, and the Nix job when
-the diff does not reach the workspaces they test. `CI passed` fails when any job fails or is
+the diff does not reach the workspaces they test. `scripts/ios-apps.sh` scopes the iOS jobs:
+`iOS bundle` runs for each app the diff affects, and `iOS build` only when the diff can change
+the native app, as the script's header lists. A change to TypeScript or CSS alone never builds. `CI passed` fails when any job fails or is
 cancelled, and `main` requires it. A new push to a PR cancels its older run. PRs matching the
 `paths` in `.github/workflows/image.yml` also run its `build and smoke-test`, which `main` does
 not require, so check it yourself before merging.
