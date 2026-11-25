@@ -156,6 +156,18 @@ describe("ios-apps.sh", { timeout: 30_000 }, () => {
     }
   });
 
+  it("fails for a config file named in another case, which macOS reads as the config", () => {
+    const upper = withApp({ "app.json": '{"expo":{}}', "APP.CONFIG.JSON": "{}" });
+
+    expect(upper.status).toBe(1);
+    expect(upper.stderr).toContain("apps/mobile/music/APP.CONFIG.JSON: a dynamic config");
+
+    const renamed = withApp({ "App.json": '{"expo":{"plugins":["./src/local.cjs"]}}' });
+
+    expect(renamed.status).toBe(1);
+    expect(renamed.stderr).toContain("apps/mobile/music/App.json: app.json under another spelling");
+  });
+
   it("fails for a dynamic config folder", () => {
     const root = withApp({ "app.json": '{"expo":{}}' }, ["app.config"]);
 
