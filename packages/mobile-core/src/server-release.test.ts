@@ -1,0 +1,180 @@
+import { ProtocolError, TransportError } from "@media/sdk/effect";
+import { afterEach, describe, expect, it } from "vitest";
+
+import { describeFailure, describeUnreadable } from "./failure";
+import { followServer } from "./server-release";
+import type { ServerFollow, ThisApp } from "./server-release";
+import { closeServers, startServer } from "./testing/local-server";
+
+const GENERIC = "Something went wrong. Try again.";
+
+const unreadable = new ProtocolError({
+  operation: "movies.titles.get",
+  message: "Protocol error in movies.titles.get: the result does not match the contract",
+  cause: null,
+});
+
+const UPDATE_ON_IPHONE = "Update Lar on this iPhone. Its server runs a newer version.";
+
+/** A health report that names `release`, or none for null, and a value this app doesn't know. */
+const healthOf = (release: string | null): string =>
+  JSON.stringify({
+    status: "ok",
+    release,
+    activeStreams: 0,
+    runsAwaitingExit: 0,
+    hardwareAcceleration: "nvenc",
+    backend: "connected",
+  });
+
+const iPhone = (version: string | undefined): ThisApp => ({ version, device: "iPhone" });
+
+const following: Array<ServerFollow> = [];
+
+/** Follows a server that reports `release`, as an app at `app` does, and reads it once. */
+const follow = async (release: string | null, app: ThisApp): Promise<ServerFollow> => {
+  const mediaUrl = await startServer({ "/api/health": healthOf(release) });
+  const followed = followServer(mediaUrl, app);
+
+  following.push(followed);
+  await followed.refresh();
+
+  return followed;
+};
+
+afterEach(() => {
+  for (const followed of following.splice(0)) followed.stop();
+  closeServers();
+});
+
+describe("the line for an answer the app can't read", () => {
+  it("asks to update the app on this iPhone or iPad when its server runs a newer release", async () => {
+    await follow("0.10.0", iPhone("0.9.0"));
+
+    expect(describeFailure(unreadable)).toBe(UPDATE_ON_IPHONE);
+
+    await follow("1.0.0", { version: "0.9.0", device: "iPad" });
+
+    expect(describeUnreadable()).toBe("Update Lar on this iPad. Its server runs a newer version.");
+  });
+
+  it("stays generic when the releases match, which means a bug", async () => {
+    await follow("0.9.0", iPhone("0.9.0"));
+
+    expect(describeFailure(unreadable)).toBe(GENERIC);
+  });
+
+  it("stays generic for a server older than the app", async () => {
+    await follow("0.8.2", iPhone("0.9.0"));
+
+    expect(describeFailure(unreadable)).toBe(GENERIC);
+  });
+
+  it("stays generic while either release is unknown", async () => {
+    await follow("0.10.0", iPhone(undefined));
+    expect(describeFailure(unreadable)).toBe(GENERIC);
+
+    await follow(null, iPhone("0.9.0"));
+    expect(describeFailure(unreadable)).toBe(GENERIC);
+  });
+
+  it("stays generic when the app follows no server", () => {
+    expect(describeFailure(unreadable)).toBe(GENERIC);
+  });
+
+  it("leaves every other failure's line alone", async () => {
+    await follow("0.10.0", iPhone("0.9.0"));
+
+    expect(
+      describeFailure(
+        new TransportError({ operation: "movies.titles.get", message: "offline", cause: null }),
+      ),
+    ).toBe("Can't reach the server. Check the connection and try again.");
+  });
+});
+
+describe("followServer", () => {
+  it("reads the server's release again on refresh, and keeps it while the server is away", async () => {
+    let release = "0.9.0";
+    let answering = true;
+
+    const mediaUrl = await startServer({
+      "/api/health": async () => (answering ? healthOf(release) : "<html>"),
+    });
+
+    const followed = followServer(mediaUrl, iPhone("0.9.0"));
+
+    following.push(followed);
+    await followed.refresh();
+    expect(describeUnreadable()).toBe(GENERIC);
+
+    release = "0.10.0";
+    await followed.refresh();
+    expect(describeUnreadable()).toBe(UPDATE_ON_IPHONE);
+
+    answering = false;
+    await followed.refresh();
+    expect(describeUnreadable()).toBe(UPDATE_ON_IPHONE);
+  });
+
+  it("drops an answer for a server the app has since left", async () => {
+    const late = Promise.withResolvers<string>();
+    const leftUrl = await startServer({ "/api/health": () => late.promise });
+    const left = followServer(leftUrl, iPhone("0.9.0"));
+    const asked = left.refresh();
+
+    left.stop();
+    await follow("0.9.0", iPhone("0.9.0"));
+    late.resolve(healthOf("0.10.0"));
+    await asked;
+
+    expect(describeUnreadable()).toBe(GENERIC);
+  });
+
+  it("follows only the latest server, and lets an earlier follow's answers and stop pass", async () => {
+    const earlierUrl = await startServer({ "/api/health": healthOf("0.10.0") });
+    const earlier = followServer(earlierUrl, iPhone("0.9.0"));
+
+    following.push(earlier);
+    await follow("0.9.0", iPhone("0.9.0"));
+    await earlier.refresh();
+    expect(describeUnreadable()).toBe(GENERIC);
+
+    const newer = await follow("0.11.0", iPhone("0.9.0"));
+
+    earlier.stop();
+    expect(describeUnreadable()).toBe(UPDATE_ON_IPHONE);
+    newer.stop();
+    expect(describeUnreadable()).toBe(GENERIC);
+  });
+
+  it("drops an answer a later refresh has overtaken", async () => {
+    const arrived = Promise.withResolvers<void>();
+    const late = Promise.withResolvers<string>();
+    let asks = 0;
+
+    const mediaUrl = await startServer({
+      "/api/health": async () => {
+        asks += 1;
+
+        if (asks > 1) return healthOf("0.9.0");
+
+        arrived.resolve();
+
+        return late.promise;
+      },
+    });
+
+    const followed = followServer(mediaUrl, iPhone("0.9.0"));
+
+    following.push(followed);
+    const slow = followed.refresh();
+
+    await arrived.promise;
+    await followed.refresh();
+    late.resolve(healthOf("0.10.0"));
+    await slow;
+
+    expect(describeUnreadable()).toBe(GENERIC);
+  });
+});

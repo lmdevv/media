@@ -1,4 +1,6 @@
 import type { HealthResponse } from "@media/contracts/media-playback";
+import { describeUnreadable } from "@media/mobile-core/failure";
+import { readHealth } from "@media/mobile-core/server";
 import { Option } from "effect";
 import { router } from "expo-router";
 import { History, Play, Server, Settings2 } from "lucide-react-native";
@@ -6,7 +8,7 @@ import { useEffect, useState } from "react";
 
 import { Loading, OwnerScreen } from "@/components/owner/parts";
 import { ListRow } from "@/components/ui/list-row";
-import { readHealth } from "@media/mobile-core/server";
+import { Text } from "@/components/ui/text";
 import { displayHost } from "@/lib/local-network";
 import { formatCount } from "@/lib/owner-format";
 import { useServer } from "@/session/connection";
@@ -15,7 +17,8 @@ const POLL_MS = 10_000;
 
 type Health =
   | { readonly status: "loading" }
-  | { readonly status: "up"; readonly health: HealthResponse }
+  /** The server answers; `report` is none when this app can't read its health report. */
+  | { readonly status: "up"; readonly report: Option.Option<HealthResponse> }
   | { readonly status: "down" };
 
 const ACCELERATION = {
@@ -38,7 +41,7 @@ const useHealth = (mediaUrl: string): Health => {
       setHealth(
         Option.match(read, {
           onNone: (): Health => ({ status: "down" }),
-          onSome: (value): Health => ({ status: "up", health: value }),
+          onSome: ({ report }): Health => ({ status: "up", report }),
         }),
       );
     };
@@ -60,8 +63,36 @@ const stateOf = (health: Health): string => {
 
   if (health.status === "loading") return "Checking";
 
-  return health.health.backend === "connecting" ? "Connecting" : "Online";
+  return Option.exists(health.report, ({ backend }) => backend === "connecting")
+    ? "Connecting"
+    : "Online";
 };
+
+/** What the server's health report says, or, when this app can't read it, why. */
+function Report({ report }: { readonly report: Option.Option<HealthResponse> }) {
+  if (Option.isNone(report)) {
+    return (
+      <Text variant="secondary" tone="muted">
+        {describeUnreadable()}
+      </Text>
+    );
+  }
+
+  return (
+    <>
+      <ListRow
+        icon={Play}
+        title="Active Streams"
+        detail={formatCount(report.value.activeStreams)}
+      />
+      <ListRow
+        icon={Settings2}
+        title="Hardware Acceleration"
+        detail={ACCELERATION[report.value.hardwareAcceleration]}
+      />
+    </>
+  );
+}
 
 export default function ServerScreen() {
   const { mediaUrl } = useServer();
@@ -71,20 +102,7 @@ export default function ServerScreen() {
     <OwnerScreen title="Server">
       <ListRow icon={Server} title={displayHost(mediaUrl)} detail={stateOf(health)} />
       {health.status === "loading" ? <Loading /> : null}
-      {health.status === "up" ? (
-        <>
-          <ListRow
-            icon={Play}
-            title="Active Streams"
-            detail={formatCount(health.health.activeStreams)}
-          />
-          <ListRow
-            icon={Settings2}
-            title="Hardware Acceleration"
-            detail={ACCELERATION[health.health.hardwareAcceleration]}
-          />
-        </>
-      ) : null}
+      {health.status === "up" ? <Report report={health.report} /> : null}
       <ListRow
         icon={History}
         title="Backups"

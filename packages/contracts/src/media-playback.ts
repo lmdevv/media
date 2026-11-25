@@ -12,6 +12,7 @@ import { Schema } from "effect";
 
 import { PlaybackSessionId } from "./ids";
 import { PlaybackMode } from "./models/playback";
+import { Release } from "./release";
 
 /** Paths of the playback API, relative to the media service's base URL. */
 export const MEDIA_ROUTES = {
@@ -312,6 +313,8 @@ export type PrepareDownloadResponse = typeof PrepareDownloadResponse.Type;
 /** Service health. */
 export const HealthResponse = Schema.Struct({
   status: Schema.Literal("ok"),
+  /** The Lar release this server runs. */
+  release: Release,
   /** Streams whose encoder runs; a paused stream whose encoder stopped is not counted. */
   activeStreams: Schema.Int,
   /**
@@ -332,10 +335,13 @@ export const HealthResponse = Schema.Struct({
 export interface HealthResponse extends Schema.Schema.Type<typeof HealthResponse> {}
 
 /**
- * What an app needs to connect when someone types only this service's address: the Convex URL
- * to sign in to, as clients reach it (`CONVEX_PUBLIC_URL`). Absent when none is configured.
+ * What an app needs to connect when someone types only this service's address: the release it
+ * runs, and the Convex URL to sign in to, as clients reach it (`CONVEX_PUBLIC_URL`), absent when
+ * none is configured.
  */
 export const ClientConfigResponse = Schema.Struct({
+  /** The Lar release this server runs. */
+  release: Release,
   /** The core's public Convex URL, which clients sign in to. */
   convexUrl: Schema.optional(Schema.String),
   /** The movies web client's address, `${MEDIA_BASE_URL}/movies`, for links apps build. */

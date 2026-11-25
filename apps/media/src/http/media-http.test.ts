@@ -13,6 +13,7 @@ import {
   SeekResponse,
 } from "@media/contracts/media-playback";
 
+import packageJson from "../../package.json" with { type: "json" };
 import * as ArtworkKeys from "../artwork/artwork-keys.ts";
 import * as DiskCache from "../disk-cache.ts";
 import * as LibraryScanner from "../library/library-scanner.ts";
@@ -343,13 +344,14 @@ const concat = (...parts: ReadonlyArray<Uint8Array>): Uint8Array => {
 
 describe.skipIf(!hasFfmpeg)("media service over HTTP", () => {
   layer(MediaTestServer.layer(), { excludeTestServices: true, timeout: "120 seconds" })((it) => {
-    it.effect("reports health", () =>
+    it.effect("reports health and the release in its package", () =>
       Effect.gen(function* () {
         const server = yield* MediaTestServer.Service;
         const response = yield* get(`${server.baseUrl}/api/health`);
 
         assert.deepStrictEqual(yield* json(response), {
           status: "ok",
+          release: packageJson.version,
           activeStreams: 0,
           runsAwaitingExit: 0,
           hardwareAcceleration: "none",
@@ -363,7 +365,7 @@ describe.skipIf(!hasFfmpeg)("media service over HTTP", () => {
         const server = yield* MediaTestServer.Service;
         const response = yield* get(`${server.baseUrl}/api/client-config`);
 
-        assert.deepStrictEqual(yield* json(response), {});
+        assert.deepStrictEqual(yield* json(response), { release: packageJson.version });
       }),
     );
 
@@ -1698,7 +1700,10 @@ describe.skipIf(!hasFfmpeg)("media service over HTTP", () => {
         const server = yield* MediaTestServer.Service;
         const response = yield* get(`${server.baseUrl}/api/client-config`);
 
-        assert.deepStrictEqual(yield* json(response), { convexUrl: "https://convex.example.com" });
+        assert.deepStrictEqual(yield* json(response), {
+          release: packageJson.version,
+          convexUrl: "https://convex.example.com",
+        });
       }),
     );
   });
@@ -1717,6 +1722,7 @@ describe.skipIf(!hasFfmpeg)("media service over HTTP", () => {
         const response = yield* get(`${server.baseUrl}/api/client-config`);
 
         assert.deepStrictEqual(yield* json(response), {
+          release: packageJson.version,
           convexUrl: "https://media.example.com/convex",
           moviesUrl: "https://media.example.com/movies",
         });

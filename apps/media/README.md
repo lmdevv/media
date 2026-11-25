@@ -29,8 +29,8 @@ playback events are logged. `CONVEX_URL` without the key refuses to start.
 | `POST /api/playback/seek`                                | Move an HLS stream; returns the generation and playlist URL to load |
 | `POST /api/playback/stop`                                | End an HLS stream and delete its output (204)                       |
 | `POST /api/playback/diagnostics`                         | A player's events with its token (204; 429 past the session budget) |
-| `GET /api/health`                                        | Status, active streams, hardware acceleration                       |
-| `GET /api/client-config`                                 | The Convex URL apps sign in to (`CONVEX_PUBLIC_URL`)                |
+| `GET /api/health`                                        | Status, release, active streams, hardware acceleration              |
+| `GET /api/client-config`                                 | Release, and the Convex URL apps sign in to (`CONVEX_PUBLIC_URL`)   |
 | `GET, HEAD /media/direct/:fileId?token=`                 | Original file with single byte ranges                               |
 | `GET /media/hls/:streamId/:generation/index.m3u8?token=` | VOD playlist of one generation                                      |
 | `GET /media/hls/:streamId/:generation/init.mp4?token=`   | fMP4 init segment                                                   |

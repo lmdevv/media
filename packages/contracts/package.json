@@ -41,6 +41,7 @@
     "./migration-plan": "./src/migration-plan.ts",
     "./diagnostics": "./src/diagnostics.ts",
     "./request-id": "./src/request-id.ts",
+    "./release": "./src/release.ts",
     "./models/*": "./src/models/*.ts"
   },
   "scripts": {
