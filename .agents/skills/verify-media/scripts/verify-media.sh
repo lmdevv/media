@@ -611,12 +611,22 @@ reported_hardware() {
     node -e 'try { console.log(JSON.parse(require("node:fs").readFileSync(0, "utf8")).hardwareAcceleration ?? "nothing") } catch { console.log("nothing (no answer)") }'
 }
 
+# Whether this host has a GPU render node. A plain glob, because the Nix dev shell's bash has no
+# compgen.
+has_render_node() {
+  local node
+  for node in /dev/dri/renderD*; do
+    [[ -e $node ]] && return 0
+  done
+  return 1
+}
+
 # Fails unless this host can run a side with HARDWARE_ACCELERATION=$1: qsv and vaapi need a render
 # node, which deploy/compose's override passes through as all of /dev/dri.
 hardware_usable() {
   case "$1" in
     none) ;;
-    qsv|vaapi) compgen -G '/dev/dri/renderD*' >/dev/null || die "HARDWARE_ACCELERATION=$1 needs a render node (/dev/dri/renderD*) on this host" ;;
+    qsv|vaapi) has_render_node || die "HARDWARE_ACCELERATION=$1 needs a render node (/dev/dri/renderD*) on this host" ;;
     *) die "HARDWARE_ACCELERATION is none, qsv, or vaapi, not ${1:-nothing}" ;;
   esac
 }

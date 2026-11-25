@@ -545,7 +545,7 @@ describe("verify-media.sh hardware", () => {
     const sideways = await onSide("hardware_usable sideways");
     assert.equal(sideways.status, 1);
     assert.match(sideways.stderr, /HARDWARE_ACCELERATION is none, qsv, or vaapi, not sideways/);
-    const gpu = await onSide("compgen() { return 1; }; hardware_usable qsv");
+    const gpu = await onSide("has_render_node() { return 1; }; hardware_usable qsv");
     assert.equal(gpu.status, 1);
     assert.match(gpu.stderr, /HARDWARE_ACCELERATION=qsv needs a render node/);
   });
