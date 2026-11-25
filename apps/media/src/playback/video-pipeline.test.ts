@@ -198,10 +198,31 @@ describe("planVideo", () => {
   );
 
   it.prop(
-    "always plans an SDR source with every CPU key verified",
-    { generated: Source, domains: Domains, burn: Schema.Boolean },
-    ({ generated, domains, burn }) => {
-      const video = sourceFrom({ ...generated, colour: "sdr" });
+    "always plans an SDR source of any layout and depth with every CPU key verified",
+    {
+      generated: Source,
+      layout: Schema.Literals([
+        "yuv444p16le",
+        "gray16le",
+        "gray",
+        "rgb24",
+        "bgr0",
+        "yuva420p",
+        "yuv422p",
+        "yuv410p",
+        "yuv420p9le",
+        "yuv444p14le",
+        "nv12",
+        "p010le",
+        "pal8",
+        "monob",
+      ]),
+      depth: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 16 })),
+      domains: Domains,
+      burn: Schema.Boolean,
+    },
+    ({ generated, layout, depth, domains, burn }) => {
+      const video = { ...sourceFrom({ ...generated, colour: "sdr" }), pixelFormat: layout, depth };
       const intent = intentFor(video, { burnImage: burn ? subtitle : undefined });
       const bindings = DOMAIN_CHOICES[domains];
       const cpu = everyKey(video, intent, bindings).filter((key) => key.includes(".cpu:"));

@@ -1,10 +1,11 @@
 /**
  * The CPU's rows: libavcodec's software decoders, `scale`, the `zscale` tone map, the image
  * subtitle overlay, and libx264. A build listing proves these present, as they touch no device.
+ * They are the floor every source falls back to, so they take any layout and depth ffmpeg
+ * decodes, as software transcoding always has; closed lists guard the GPU rows instead.
  */
 import { DECODE_CLIPS, PROBE_CLIPS } from "./probe-clips.ts";
 import {
-  DEPTHS,
   filter,
   HDR_COLOURS,
   ImplId,
@@ -33,7 +34,7 @@ const decodeCpu: OpImpl<"Decode"> = {
   })),
 };
 
-/** Bicubic scaling that keeps the frames' layout. */
+/** Bicubic scaling that keeps the frames' layout, whatever it is. */
 const scaleCpu: OpImpl<"Scale"> = {
   id: ImplId("scale.cpu"),
   op: "Scale",
@@ -41,9 +42,7 @@ const scaleCpu: OpImpl<"Scale"> = {
   takes: "cpu",
   needs: () => ["filter:scale"],
   variant: (op, input) =>
-    DEPTHS.has(input.depth) && op.depth === input.depth
-      ? `${String(input.depth)}>${String(op.depth)}`
-      : undefined,
+    op.depth === input.depth ? `${String(input.depth)}>${String(op.depth)}` : undefined,
   output: (op, input) => ({ ...input, width: op.width, height: op.height }),
   render: (op) => ({
     ...NOTHING,
@@ -130,7 +129,7 @@ const burnImageCpu: OpImpl<"BurnImage"> = {
   ],
 };
 
-/** libx264 at CRF 23 under a VBV cap, from any CPU layout it converts to 8-bit 4:2:0. */
+/** libx264 at CRF 23 under a VBV cap, from any SDR layout and depth, converted to 8-bit 4:2:0. */
 const encodeCpu: OpImpl<"Encode"> = {
   id: ImplId("encode.cpu"),
   op: "Encode",
@@ -138,9 +137,7 @@ const encodeCpu: OpImpl<"Encode"> = {
   takes: "cpu",
   needs: () => ["encoder:libx264"],
   variant: (op, input) =>
-    input.colour === "sdr" && input.scan === "progressive" && DEPTHS.has(input.depth)
-      ? `${op.codec}/8/crf`
-      : undefined,
+    input.colour === "sdr" && input.scan === "progressive" ? `${op.codec}/8/crf` : undefined,
   output: (_, input) => ({ ...input, depth: 8, pixelFormat: "yuv420p" }),
   render: (op) => ({
     input: [],

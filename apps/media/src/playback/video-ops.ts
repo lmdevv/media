@@ -249,9 +249,6 @@ export interface DomainSpec {
   readonly needs: ReadonlyArray<BuildFeature>;
 }
 
-/** Bit depths rows accept. */
-export const DEPTHS: ReadonlySet<number> = new Set([8, 10, 12]);
-
 /** Colours a tone map takes. */
 export const HDR_COLOURS: ReadonlySet<DynamicRange> = new Set(["hdr10", "hlg", "dolby-vision"]);
 
