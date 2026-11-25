@@ -1,6 +1,6 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, layer } from "@effect/vitest";
-import { Console, Context, Effect, FileSystem, Layer, Path, Schema } from "effect";
+import { Console, Context, Effect, FileSystem, Layer, Path, Result, Schema } from "effect";
 
 import { MediaFileId } from "@media/contracts/ids";
 
@@ -17,8 +17,9 @@ import {
   type SegmentPlan,
 } from "./hls-plan.ts";
 import * as KeyframeIndex from "./keyframe-index.ts";
-import { AudioPlan, VideoPlan } from "./playback-decision.ts";
-import { hlsCommandArgs } from "./transcode-command.ts";
+import { verifiedFor } from "../testing/capability-snapshots.ts";
+import { AudioPlan, replan, VideoPlan } from "./playback-decision.ts";
+import { hlsCommand } from "./transcode-command.ts";
 
 const hasFfmpeg = await ffmpegAvailable();
 
@@ -27,6 +28,30 @@ const hasFfmpeg = await ffmpegAvailable();
  * yet (whose measured values depend on the ffmpeg build), and the printed report.
  */
 const optIn = process.env["MEDIA_TIMING"] === "1";
+
+/** An H.264 encode of `probe` at 320x180 and 1 Mbit/s on `domain`, as if it verified everything. */
+const encodedOn = (probe: MediaProbe, domain: "software" | "qsv" | "vaapi"): VideoPlan => {
+  const video = probe.video;
+
+  if (video === undefined) throw new Error("the timing sources have video");
+
+  const planned = replan(
+    video,
+    {
+      codec: "h264",
+      toneMap: false,
+      bounds: { width: 320, height: 180 },
+      cpuEncodeBounds: { width: 1920, height: 1080 },
+      maxBitrate: 1_000_000,
+      burnImage: undefined,
+    },
+    verifiedFor(probe, domain === "software" ? [] : [domain]),
+  );
+
+  if (Result.isFailure(planned)) throw new Error(planned.failure);
+
+  return planned.success;
+};
 
 const runnable = {
   copy: hasFfmpeg,
@@ -535,37 +560,23 @@ const runFrom = Effect.fn("HlsTiming.runFrom")(function* (
   yield* fs.makeDirectory(outputDirectory, { recursive: true });
 
   yield* tools.ffmpegInBackground(
-    hlsCommandArgs({
+    hlsCommand({
       input,
       sourceStart: probe.startSeconds,
       from,
       videoIndex: probe.video?.index ?? 0,
       videoCodec: probe.video?.codec ?? "h264",
-      videoBitDepth: 8,
-      video:
-        testCase.video === "copy"
-          ? VideoPlan.Copy()
-          : VideoPlan.Encode({
-              encoder: testCase.video,
-              width: 320,
-              height: 180,
-              toneMap: false,
-              bitrate: 1_000_000,
-              burnSubtitle: undefined,
-            }),
+      video: testCase.video === "copy" ? VideoPlan.Copy() : encodedOn(probe, testCase.video),
       audio:
         testCase.audio === "copy"
           ? AudioPlan.Copy({ index: audioIndex })
           : AudioPlan.Aac({ index: audioIndex }),
       audioCodec: probe.audio[0]?.codec ?? "",
       copiedAudioEnd: testCase.audio === "copy" ? probe.audio[0]?.endSeconds : undefined,
-      subtitleCodec: "",
       segmentStarts: plan.starts.slice(startSegment),
       previousStart: plan.starts[startSegment - 1],
       outputDirectory,
-      qsvDevice: process.env["QSV_DEVICE"] ?? "/dev/dri/renderD128",
-      vaapiDevice: process.env["VAAPI_DEVICE"] ?? "/dev/dri/renderD128",
-    }),
+    }).args,
   );
 
   const names = (yield* fs.readDirectory(outputDirectory))

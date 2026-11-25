@@ -23,6 +23,7 @@ import { makeFakeCore, stream } from "../testing/fake-core.ts";
 import * as FixtureWorkspace from "../testing/fixture-workspace.ts";
 import * as MediaTestServer from "../testing/media-test-server.ts";
 import * as CoreTickets from "./core-tickets.ts";
+import { verifiedFor, withoutToneMaps } from "../testing/capability-snapshots.ts";
 
 const HOUR = 60 * 60 * 1000;
 
@@ -127,8 +128,7 @@ layer(MediaTestServer.layer(), { excludeTestServices: true, timeout: "120 second
 
           const plan = decidePlayback(file.probe, client, {
             audioIndex: undefined,
-            hardware: undefined,
-            softwareToneMapping: false,
+            capabilities: verifiedFor(file.probe, [], withoutToneMaps),
           });
 
           if (!PlaybackPlan.$is("Hls")(plan)) throw new Error("The fixture should play as HLS");

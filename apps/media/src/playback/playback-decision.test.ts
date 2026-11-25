@@ -1,8 +1,20 @@
-import { describe, expect, it } from "@effect/vitest";
+import { assert, describe, expect, it } from "@effect/vitest";
 import type { ClientCapabilities } from "@media/contracts/media-playback";
+import { Result, Schema } from "effect";
 
 import type { AudioTrack, MediaProbe, VideoStream } from "../media/media-probe.ts";
-import { AudioPlan, decidePlayback, PlaybackPlan, VideoPlan } from "./playback-decision.ts";
+import { verifiedFor, withoutToneMaps } from "../testing/capability-snapshots.ts";
+import {
+  AudioPlan,
+  decidePlayback,
+  type DecisionOptions,
+  encodeIntent,
+  PlaybackPlan,
+  replan,
+  VideoPlan,
+} from "./playback-decision.ts";
+import { encodeDomain } from "./video-pipeline.ts";
+import type { CapabilityKey, GpuDomain } from "./video-ops.ts";
 
 interface VideoOptions {
   readonly profile?: string;
@@ -101,24 +113,52 @@ const safari: ClientCapabilities = {
   mse: false,
 };
 
-const software = { audioIndex: undefined, hardware: undefined, softwareToneMapping: false };
+type Extra = Omit<DecisionOptions, "audioIndex" | "capabilities"> & {
+  readonly audioIndex?: number;
+};
 
-const hardware = { audioIndex: undefined, hardware: "qsv", softwareToneMapping: false } as const;
+/**
+ * Decides on a server whose `domains` and CPU verified everything a chain could use, except the
+ * keys `refused` picks.
+ */
+const deciding =
+  (domains: ReadonlyArray<GpuDomain>, refused: (key: CapabilityKey) => boolean) =>
+  (media: MediaProbe, client: ClientCapabilities, extra: Extra = {}) =>
+    decidePlayback(media, client, {
+      audioIndex: undefined,
+      capabilities: verifiedFor(media, domains, refused),
+      ...extra,
+    });
 
-const vaapi = { audioIndex: undefined, hardware: "vaapi", softwareToneMapping: false } as const;
+/** The CPU alone, without the filters software tone mapping needs. */
+const software = deciding([], withoutToneMaps);
+
+/** The CPU alone, tone mapping with `zscale` and `tonemap`. */
+const cpuToneMap = deciding([], () => false);
+
+/** Quick Sync and the CPU, tone mapping only on the GPU. */
+const hardware = deciding(["qsv"], (key) => key.startsWith("tonemap.cpu"));
+
+/** VA-API and the CPU, tone mapping only on the GPU. */
+const vaapi = deciding(["vaapi"], (key) => key.startsWith("tonemap.cpu"));
+
+const impls = (plan: PlaybackPlan): ReadonlyArray<string> =>
+  PlaybackPlan.$is("Hls")(plan) && VideoPlan.$is("Encode")(plan.video)
+    ? plan.video.pipeline.steps.map((step) => step.impl)
+    : [];
 
 describe("decidePlayback", () => {
   it("plays compatible files directly", () => {
-    expect(decidePlayback(probe("mp4", h264, [aac]), chrome, software)).toStrictEqual(
+    expect(software(probe("mp4", h264, [aac]), chrome)).toStrictEqual(
       PlaybackPlan.Direct({ audioIndex: 1 }),
     );
-    expect(decidePlayback(probe("mp4", hevcHdr, [eac3]), safari, software)).toStrictEqual(
+    expect(software(probe("mp4", hevcHdr, [eac3]), safari)).toStrictEqual(
       PlaybackPlan.Direct({ audioIndex: 2 }),
     );
   });
 
   it("remuxes when only the container is unsupported", () => {
-    expect(decidePlayback(probe("mkv", h264, [aac]), chrome, software)).toStrictEqual(
+    expect(software(probe("mkv", h264, [aac]), chrome)).toStrictEqual(
       PlaybackPlan.Hls({
         mode: "remux",
         video: VideoPlan.Copy(),
@@ -130,7 +170,7 @@ describe("decidePlayback", () => {
   it("remuxes to play a non-default audio track", () => {
     const twoTracks = probe("mp4", h264, [aac, audio(3, "aac", 2, false)]);
 
-    expect(decidePlayback(twoTracks, chrome, { ...software, audioIndex: 3 })).toStrictEqual(
+    expect(software(twoTracks, chrome, { audioIndex: 3 })).toStrictEqual(
       PlaybackPlan.Hls({
         mode: "remux",
         video: VideoPlan.Copy(),
@@ -140,7 +180,7 @@ describe("decidePlayback", () => {
   });
 
   it("transcodes only the audio when the client lacks its codec", () => {
-    expect(decidePlayback(probe("mkv", h264, [eac3]), chrome, software)).toStrictEqual(
+    expect(software(probe("mkv", h264, [eac3]), chrome)).toStrictEqual(
       PlaybackPlan.Hls({
         mode: "audio-transcode",
         video: VideoPlan.Copy(),
@@ -150,24 +190,26 @@ describe("decidePlayback", () => {
   });
 
   it("transcodes HDR HEVC on QSV with tone mapping", () => {
-    expect(decidePlayback(probe("mkv", hevcHdr, [aac]), chrome, hardware)).toStrictEqual(
-      PlaybackPlan.Hls({
-        mode: "transcode-qsv",
-        video: VideoPlan.Encode({
-          encoder: "qsv",
+    const plan = hardware(probe("mkv", hevcHdr, [aac]), chrome);
+
+    expect(plan).toMatchObject({
+      mode: "transcode-qsv",
+      video: {
+        output: {
+          codec: "h264",
           width: 3840,
           height: 2160,
-          toneMap: true,
           bitrate: 20_000_000,
-          burnSubtitle: undefined,
-        }),
-        audio: AudioPlan.Copy({ index: 1 }),
-      }),
-    );
+          dynamicRange: "sdr",
+        },
+      },
+      audio: AudioPlan.Copy({ index: 1 }),
+    });
+    expect(impls(plan)).toStrictEqual(["decode.qsv", "scale.qsv", "tonemap.qsv", "encode.qsv"]);
   });
 
   it("refuses software HDR tone mapping", () => {
-    expect(decidePlayback(probe("mkv", hevcHdr, [aac]), chrome, software)).toStrictEqual(
+    expect(software(probe("mkv", hevcHdr, [aac]), chrome)).toStrictEqual(
       PlaybackPlan.Unsupported({ reason: "hdr-tone-mapping-requires-hardware" }),
     );
   });
@@ -175,107 +217,83 @@ describe("decidePlayback", () => {
   it("caps software transcodes at 1080p and fits the client's screen", () => {
     const sdr4k = video("mpeg2video", { width: 3840, height: 2160 });
 
-    expect(decidePlayback(probe("ts", sdr4k, [aac]), chrome, software)).toStrictEqual(
-      PlaybackPlan.Hls({
-        mode: "transcode-software",
-        video: VideoPlan.Encode({
-          encoder: "software",
-          width: 1920,
-          height: 1080,
-          toneMap: false,
-          bitrate: 8_000_000,
-          burnSubtitle: undefined,
-        }),
-        audio: AudioPlan.Copy({ index: 1 }),
-      }),
-    );
+    expect(software(probe("ts", sdr4k, [aac]), chrome)).toMatchObject({
+      mode: "transcode-software",
+      video: { output: { width: 1920, height: 1080, bitrate: 8_000_000 } },
+      audio: AudioPlan.Copy({ index: 1 }),
+    });
 
     const phone = chromeLike({ maxWidth: 1280, maxHeight: 720 });
 
-    expect(decidePlayback(probe("mp4", h264, [aac]), phone, software)).toStrictEqual(
-      PlaybackPlan.Hls({
-        mode: "transcode-software",
-        video: VideoPlan.Encode({
-          encoder: "software",
-          width: 1280,
-          height: 720,
-          toneMap: false,
-          bitrate: 4_000_000,
-          burnSubtitle: undefined,
-        }),
-        audio: AudioPlan.Copy({ index: 1 }),
-      }),
-    );
+    expect(software(probe("mp4", h264, [aac]), phone)).toMatchObject({
+      mode: "transcode-software",
+      video: { output: { width: 1280, height: 720, bitrate: 4_000_000 } },
+      audio: AudioPlan.Copy({ index: 1 }),
+    });
   });
 
   it("transcodes 10-bit H.264 that browsers cannot decode", () => {
     const hi10 = video("h264", { profile: "High 10", bitDepth: 10 });
 
-    expect(decidePlayback(probe("mkv", hi10, [aac]), chrome, software)).toMatchObject({
+    expect(software(probe("mkv", hi10, [aac]), chrome)).toMatchObject({
       _tag: "Hls",
       mode: "transcode-software",
     });
   });
 
   it("reports unsupported combinations", () => {
-    expect(
-      decidePlayback(probe("mkv", h264, [aac]), chromeLike({ adaptive: false }), software),
-    ).toStrictEqual(PlaybackPlan.Unsupported({ reason: "no-adaptive-streaming" }));
+    expect(software(probe("mkv", h264, [aac]), chromeLike({ adaptive: false }))).toStrictEqual(
+      PlaybackPlan.Unsupported({ reason: "no-adaptive-streaming" }),
+    );
 
-    expect(
-      decidePlayback(probe("mp4", h264, [aac]), chrome, { ...software, audioIndex: 9 }),
-    ).toStrictEqual(PlaybackPlan.Unsupported({ reason: "audio-track-not-found" }));
+    expect(software(probe("mp4", h264, [aac]), chrome, { audioIndex: 9 })).toStrictEqual(
+      PlaybackPlan.Unsupported({ reason: "audio-track-not-found" }),
+    );
 
-    expect(decidePlayback(probe("mkv", h264, [aac], 0), chrome, software)).toStrictEqual(
+    expect(software(probe("mkv", h264, [aac], 0), chrome)).toStrictEqual(
       PlaybackPlan.Unsupported({ reason: "unknown-duration" }),
     );
 
     expect(
-      decidePlayback(
+      software(
         probe("mkv", video("mpeg4"), [aac]),
         chromeLike({ videoCodecs: [{ codec: "vp9" }] }),
-        software,
       ),
     ).toStrictEqual(PlaybackPlan.Unsupported({ reason: "no-transcode-target" }));
   });
 
   it("transcodes on VA-API with tone mapping, and in software with it when ffmpeg can", () => {
-    expect(decidePlayback(probe("mkv", hevcHdr, [aac]), chrome, vaapi)).toMatchObject({
-      mode: "transcode-vaapi",
-      video: { encoder: "vaapi", width: 3840, height: 2160, toneMap: true },
-    });
+    const onVaapi = vaapi(probe("mkv", hevcHdr, [aac]), chrome);
 
-    expect(
-      decidePlayback(probe("mkv", hevcHdr, [aac]), chrome, {
-        ...software,
-        softwareToneMapping: true,
-      }),
-    ).toMatchObject({
+    expect(onVaapi).toMatchObject({
+      mode: "transcode-vaapi",
+      video: { output: { width: 3840, height: 2160 } },
+    });
+    expect(impls(onVaapi)).toContain("tonemap.vaapi");
+
+    expect(cpuToneMap(probe("mkv", hevcHdr, [aac]), chrome)).toMatchObject({
       mode: "transcode-software",
-      video: { encoder: "software", width: 1920, height: 1080, toneMap: true },
+      video: { output: { width: 1920, height: 1080 } },
     });
   });
 
   it("encodes down to the viewer's quality cap, and leaves sources within it alone", () => {
-    const capped = decidePlayback(probe("mp4", h264, [aac]), chrome, {
-      ...software,
-      quality: { maxHeight: 720 },
-    });
+    const capped = software(probe("mp4", h264, [aac]), chrome, { quality: { maxHeight: 720 } });
 
     expect(capped).toMatchObject({
       mode: "transcode-software",
-      video: { width: 1280, height: 720, bitrate: 4_000_000 },
+      video: { output: { width: 1280, height: 720, bitrate: 4_000_000 } },
     });
 
     const heavy = probe("mkv", h264, [aac], 600, { bitRate: 30_000_000 });
 
-    expect(
-      decidePlayback(heavy, chrome, { ...vaapi, quality: { maxBitrate: 3_000_000 } }),
-    ).toMatchObject({ mode: "transcode-vaapi", video: { height: 1080, bitrate: 3_000_000 } });
+    expect(vaapi(heavy, chrome, { quality: { maxBitrate: 3_000_000 } })).toMatchObject({
+      mode: "transcode-vaapi",
+      video: { output: { height: 1080, bitrate: 3_000_000 } },
+    });
 
     expect(
-      decidePlayback(probe("mp4", h264, [aac]), chrome, {
-        ...software,
+      software(probe("mp4", h264, [aac]), chrome, {
         quality: { maxHeight: 1080, maxBitrate: 40_000_000 },
       }),
     ).toStrictEqual(PlaybackPlan.Direct({ audioIndex: 1 }));
@@ -283,10 +301,7 @@ describe("decidePlayback", () => {
 
   it("drops a quality cap it cannot honour, rather than refusing the title", () => {
     expect(
-      decidePlayback(probe("mp4", hevcHdr, [eac3]), safari, {
-        ...software,
-        quality: { maxHeight: 720 },
-      }),
+      software(probe("mp4", hevcHdr, [eac3]), safari, { quality: { maxHeight: 720 } }),
     ).toStrictEqual(PlaybackPlan.Direct({ audioIndex: 2 }));
   });
 
@@ -313,15 +328,75 @@ describe("decidePlayback", () => {
       ],
     });
 
-    expect(decidePlayback(withPgs, chrome, { ...hardware, burnSubtitle: 4 })).toMatchObject({
+    const burned = hardware(withPgs, chrome, { burnSubtitle: 4 });
+
+    expect(burned).toMatchObject({
       mode: "transcode-qsv",
-      video: { encoder: "qsv", burnSubtitle: 4 },
+      video: { intent: { burnImage: { stream: 4, codec: "hdmv_pgs_subtitle" } } },
     });
-    expect(decidePlayback(withPgs, chrome, { ...software, burnSubtitle: 5 })).toStrictEqual(
+    expect(impls(burned)).toStrictEqual([
+      "decode.qsv",
+      "scale.qsv",
+      "move.qsv>cpu",
+      "burn-image.cpu",
+      "move.cpu>qsv",
+      "encode.qsv",
+    ]);
+    expect(software(withPgs, chrome, { burnSubtitle: 5 })).toStrictEqual(
       PlaybackPlan.Unsupported({ reason: "subtitle-not-burnable" }),
     );
-    expect(decidePlayback(withPgs, chrome, software)).toStrictEqual(
-      PlaybackPlan.Direct({ audioIndex: 1 }),
-    );
+    expect(software(withPgs, chrome)).toStrictEqual(PlaybackPlan.Direct({ audioIndex: 1 }));
   });
+
+  it("decodes on the CPU and keeps scaling and encoding on the GPU when the device cannot decode", () => {
+    const hi10 = probe("mkv", video("h264", { profile: "High 10", bitDepth: 10 }), [aac]);
+    const plan = deciding(["qsv"], (key) => key === "decode.qsv:h264/yuv420p10le")(hi10, chrome);
+
+    expect(plan).toMatchObject({ mode: "transcode-qsv" });
+    expect(impls(plan)).toStrictEqual(["decode.cpu", "move.cpu>qsv", "scale.qsv", "encode.qsv"]);
+  });
+});
+
+const Refusals = Schema.Array(Schema.Boolean);
+
+describe("replan", () => {
+  it.prop(
+    "never relaxes the cap, never returns a copy, and names its mode for the encode's domain",
+    {
+      refused: Refusals,
+      capHeight: Schema.Int.check(Schema.isBetween({ minimum: 144, maximum: 2160 })),
+      hdr: Schema.Boolean,
+    },
+    ({ refused, capHeight, hdr }) => {
+      const media = probe("mkv", hdr ? hevcHdr : video("h264", { width: 3840, height: 2160 }), [
+        aac,
+      ]);
+
+      const stream = media.video;
+
+      const intent =
+        stream === undefined
+          ? undefined
+          : encodeIntent(media, stream, chrome, { quality: { maxHeight: capHeight } });
+
+      if (stream === undefined || intent === undefined) return;
+      const everything = verifiedFor(media, ["qsv", "vaapi"]);
+      const keys = [...everything.verified];
+
+      const allowed = new Set(
+        keys.filter((_, index) => !(refused[index % Math.max(1, refused.length)] ?? false)),
+      );
+
+      const replanned = replan(stream, intent, { ...everything, verified: allowed });
+
+      if (Result.isFailure(replanned)) return;
+      const { output, pipeline } = replanned.success;
+
+      assert.isTrue(VideoPlan.$is("Encode")(replanned.success));
+      assert.isAtMost(output.height, capHeight);
+      assert.isAtMost(output.width, intent.bounds.width);
+
+      if (encodeDomain(pipeline) === "cpu") assert.isAtMost(output.height, 1080);
+    },
+  );
 });

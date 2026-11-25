@@ -5,6 +5,8 @@ import type { AudioTrack, MediaProbe, VideoStream } from "../media/media-probe.t
 import { AudioPlan, VideoPlan } from "../playback/playback-decision.ts";
 import { decideDownload, DownloadPlan } from "./download-plan.ts";
 import { progressSeconds } from "./downloads.ts";
+import { verifiedFor, withoutToneMaps } from "../testing/capability-snapshots.ts";
+import type { CapabilityKey } from "../playback/video-ops.ts";
 
 const video = (
   codec: string,
@@ -58,7 +60,12 @@ const iphone: ClientCapabilities = {
   mse: false,
 };
 
-const options = { audioIndex: undefined, softwareToneMapping: true, sizeBytes: 900_000_000 };
+/** A server whose CPU does everything, software tone mapping included. */
+const optionsFor = (media: MediaProbe, refused: (key: CapabilityKey) => boolean = () => false) => ({
+  audioIndex: undefined,
+  capabilities: verifiedFor(media, ["qsv"], refused),
+  sizeBytes: 900_000_000,
+});
 
 const aac = audio(1, "aac", true);
 
@@ -69,14 +76,14 @@ describe("decideDownload", () => {
         probe("mp4", video("h264", 720), [aac], 2_000_000),
         iphone,
         "standard",
-        options,
+        optionsFor(probe("mp4", video("h264", 720), [aac], 2_000_000)),
       ),
     ).toStrictEqual(DownloadPlan.Original());
   });
 
   it("writes an MP4 from another container, or for another audio track, copying what it can", () => {
     const mkv = probe("mkv", video("h264", 720), [aac, audio(2, "dts", false)], 2_000_000);
-    const remux = decideDownload(mkv, iphone, "standard", options);
+    const remux = decideDownload(mkv, iphone, "standard", optionsFor(mkv));
 
     expect(remux).toMatchObject({ _tag: "Mp4", mode: "remux", video: VideoPlan.Copy() });
     expect(remux).toMatchObject({ audio: AudioPlan.Copy({ index: 1 }) });
@@ -87,7 +94,7 @@ describe("decideDownload", () => {
         iphone,
         "standard",
         {
-          ...options,
+          ...optionsFor(probe("mp4", video("h264", 720), [aac, audio(2, "dts", false)])),
           audioIndex: 2,
         },
       ),
@@ -96,41 +103,46 @@ describe("decideDownload", () => {
 
   it("encodes a source above the quality down to it, bounding the size by the bitrate", () => {
     const film = probe("mkv", video("h264", 1080), [aac], 12_000_000);
-    const standard = decideDownload(film, iphone, "standard", options);
+    const standard = decideDownload(film, iphone, "standard", optionsFor(film));
 
     expect(standard).toMatchObject({
       _tag: "Mp4",
       mode: "transcode-software",
-      video: { _tag: "Encode", encoder: "software", height: 720, bitrate: 4_000_000 },
+      video: { _tag: "Encode", output: { height: 720, bitrate: 4_000_000 } },
     });
     expect(standard).toMatchObject({ estimatedBytes: Math.ceil((5_600_000 * 3000) / 8) });
-    expect(decideDownload(film, iphone, "high", options)).toMatchObject({
+    expect(decideDownload(film, iphone, "high", optionsFor(film))).toMatchObject({
       _tag: "Mp4",
-      video: { _tag: "Encode", height: 1080, bitrate: 8_000_000 },
+      video: { _tag: "Encode", output: { height: 1080, bitrate: 8_000_000 } },
     });
   });
 
   it("refuses a source it cannot bring within the quality, rather than the whole original", () => {
     const hdr = probe("mp4", video("hevc", 2160, "hdr10"), [aac], 30_000_000);
 
-    expect(
-      decideDownload(hdr, iphone, "standard", { ...options, softwareToneMapping: false }),
-    ).toStrictEqual(DownloadPlan.Unsupported({ reason: "hdr-tone-mapping-requires-hardware" }));
+    expect(decideDownload(hdr, iphone, "standard", optionsFor(hdr, withoutToneMaps))).toStrictEqual(
+      DownloadPlan.Unsupported({ reason: "hdr-tone-mapping-requires-hardware" }),
+    );
   });
 
   it("bounds the size of an encode with copied audio by a generous audio rate", () => {
     const film = probe("mkv", video("h264", 1080), [audio(1, "eac3", true)], 12_000_000);
 
-    expect(decideDownload(film, iphone, "standard", options)).toMatchObject({
+    expect(decideDownload(film, iphone, "standard", optionsFor(film))).toMatchObject({
       audio: AudioPlan.Copy({ index: 1 }),
       estimatedBytes: Math.ceil(((4_000_000 + 1_600_000) * 3000) / 8),
     });
   });
 
   it("refuses a file without video", () => {
-    expect(decideDownload(probe("mp4", undefined, [aac]), iphone, "high", options)).toStrictEqual(
-      DownloadPlan.Unsupported({ reason: "no-video-stream" }),
-    );
+    expect(
+      decideDownload(
+        probe("mp4", undefined, [aac]),
+        iphone,
+        "high",
+        optionsFor(probe("mp4", undefined, [aac])),
+      ),
+    ).toStrictEqual(DownloadPlan.Unsupported({ reason: "no-video-stream" }));
   });
 });
 

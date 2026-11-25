@@ -1,9 +1,18 @@
+import { Result } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { qsvProbeArgs } from "./hardware-acceleration.ts";
 import { AudioPlan, VideoPlan } from "./playback-decision.ts";
 import type { HlsCommand } from "./transcode-command.ts";
-import { hlsCommandArgs, mp4CommandArgs } from "./transcode-command.ts";
+import { hlsCommand, mp4CommandArgs } from "./transcode-command.ts";
+import {
+  candidateKeys,
+  type DomainBinding,
+  planVideo,
+  type VideoIntent,
+} from "./video-pipeline.ts";
+import type { SourceVideo } from "./video-ops.ts";
+
+const hlsCommandArgs = (command: HlsCommand): ReadonlyArray<string> => hlsCommand(command).args;
 
 const command = (audio: AudioPlan, audioCodec: string): HlsCommand => ({
   input: "/media/Film (2021).ts",
@@ -11,41 +20,94 @@ const command = (audio: AudioPlan, audioCodec: string): HlsCommand => ({
   from: 1.4,
   videoIndex: 0,
   videoCodec: "h264",
-  videoBitDepth: 8,
   video: VideoPlan.Copy(),
   audio,
   audioCodec,
   copiedAudioEnd: undefined,
-  subtitleCodec: "",
   segmentStarts: [1.4, 3.4],
   previousStart: undefined,
   outputDirectory: "/tmp/stream/1",
-  qsvDevice: "/dev/dri/renderD128",
-  vaapiDevice: "/dev/dri/renderD129",
 });
 
 const audioPart = (args: ReadonlyArray<string>): ReadonlyArray<string> =>
   args.slice(args.indexOf("0:1") - 1, args.indexOf("-map_metadata"));
 
-const encode = (
-  encoder: "qsv" | "vaapi" | "software",
-  options: { readonly toneMap?: boolean; readonly burnSubtitle?: number },
-) =>
-  VideoPlan.Encode({
-    encoder,
+interface EncodeOptions {
+  readonly codec?: string;
+  readonly bitDepth?: number;
+  readonly toneMap?: boolean;
+  readonly burnSubtitle?: number;
+  readonly subtitleCodec?: string;
+  readonly device?: string;
+}
+
+const DEVICES = { qsv: "/dev/dri/renderD128", vaapi: "/dev/dri/renderD129" } as const;
+
+/**
+ * The plan a 1920x1080 source gets on `domain` (and the CPU) when the device verified everything:
+ * an 8 Mbit/s H.264 encode at its size, tone-mapped from HDR10 when asked.
+ */
+const encode = (domain: "qsv" | "vaapi" | "software", options: EncodeOptions) => {
+  const depth = options.bitDepth ?? 8;
+  const toneMap = options.toneMap ?? false;
+
+  const source: SourceVideo = {
+    codec: options.codec ?? "h264",
+    pixelFormat: depth > 8 ? "yuv420p10le" : "yuv420p",
+    depth,
+    colour: toneMap ? "hdr10" : "sdr",
+    scan: "progressive",
     width: 1920,
     height: 1080,
-    toneMap: options.toneMap ?? false,
-    bitrate: 8_000_000,
-    burnSubtitle: options.burnSubtitle,
+  };
+
+  const intent: VideoIntent = {
+    codec: "h264",
+    toneMap,
+    bounds: { width: 1920, height: 1080 },
+    cpuEncodeBounds: { width: 1920, height: 1080 },
+    maxBitrate: undefined,
+    burnImage:
+      options.burnSubtitle === undefined
+        ? undefined
+        : {
+            input: 0,
+            stream: options.burnSubtitle,
+            codec: options.subtitleCodec ?? "hdmv_pgs_subtitle",
+            frame: {
+              memory: "cpu",
+              device: undefined,
+              colour: "sdr",
+              depth: 8,
+              pixelFormat: "pal8",
+              scan: "progressive",
+              width: 1920,
+              height: 1080,
+            },
+          },
+  };
+
+  const domains: ReadonlyArray<DomainBinding> =
+    domain === "software" ? [] : [{ domain, device: options.device ?? DEVICES[domain] }];
+
+  const keys = candidateKeys(source, intent, { domains, verified: new Set(), excluded: new Set() });
+
+  const planned = planVideo(source, intent, {
+    domains,
+    verified: new Set(keys.keys()),
+    excluded: new Set(),
   });
+
+  if (Result.isFailure(planned)) throw new Error(JSON.stringify(planned.failure));
+
+  return VideoPlan.Encode({ intent, ...planned.success });
+};
 
 const dvd = (from: number) =>
   hlsCommandArgs({
     ...command(AudioPlan.Copy({ index: 1 }), "aac"),
     from,
-    subtitleCodec: "dvd_subtitle",
-    video: encode("software", { burnSubtitle: 3 }),
+    video: encode("software", { burnSubtitle: 3, subtitleCodec: "dvd_subtitle" }),
   });
 
 const after = (args: ReadonlyArray<string>, flag: string): string | undefined =>
@@ -83,27 +145,22 @@ describe("hlsCommandArgs", () => {
     );
   });
 
-  it("opens Quick Sync on the configured render node, in the stream and in the probe", () => {
+  it("opens Quick Sync on the configured render node", () => {
     // oneVPL builds ignore the path in `qsv=hw:<path>` and use the default GPU; the node must be
-    // the child device, so a wrong one fails (and falls back) instead of encoding elsewhere.
+    // the child device, so a wrong one fails (and is replaced) instead of encoding elsewhere.
     const args = hlsCommandArgs({
       ...command(AudioPlan.Copy({ index: 1 }), "aac"),
-      qsvDevice: "/dev/dri/renderD130",
-      video: encode("qsv", {}),
+      video: encode("qsv", { device: "/dev/dri/renderD130" }),
     });
 
     expect(after(args, "-init_hw_device")).toBe("qsv=hw,child_device=/dev/dri/renderD130");
-    expect(after(qsvProbeArgs("/dev/dri/renderD130"), "-init_hw_device")).toBe(
-      "qsv=hw,child_device=/dev/dri/renderD130",
-    );
   });
 
-  it("encodes on VA-API, decoding and tone-mapping on the GPU", () => {
+  it("encodes on VA-API, decoding, scaling in 10 bits, then tone-mapping on the GPU", () => {
     const args = hlsCommandArgs({
       ...command(AudioPlan.Copy({ index: 1 }), "aac"),
       videoCodec: "hevc",
-      videoBitDepth: 10,
-      video: encode("vaapi", { toneMap: true }),
+      video: encode("vaapi", { codec: "hevc", bitDepth: 10, toneMap: true }),
     });
 
     expect(args.slice(args.indexOf("-init_hw_device"), args.indexOf("-copyts"))).toStrictEqual([
@@ -119,7 +176,7 @@ describe("hlsCommandArgs", () => {
       "va",
     ]);
     expect(after(args, "-vf")).toBe(
-      "tonemap_vaapi=format=nv12:p=bt709:t=bt709:m=bt709,scale_vaapi=w=1920:h=1080:format=nv12",
+      "scale_vaapi=w=1920:h=1080:format=p010,tonemap_vaapi=format=nv12:p=bt709:t=bt709:m=bt709",
     );
     expect(args.slice(args.indexOf("-c:v"), args.indexOf("-force_key_frames"))).toStrictEqual([
       "-c:v",
@@ -140,7 +197,7 @@ describe("hlsCommandArgs", () => {
     const args = hlsCommandArgs({
       ...command(AudioPlan.Copy({ index: 1 }), "aac"),
       videoCodec: "mpeg4",
-      video: encode("vaapi", {}),
+      video: encode("vaapi", { codec: "mpeg4" }),
     });
 
     expect(args).not.toContain("-hwaccel");
@@ -149,12 +206,11 @@ describe("hlsCommandArgs", () => {
     const qsv = hlsCommandArgs({
       ...command(AudioPlan.Copy({ index: 1 }), "aac"),
       videoCodec: "mpeg4",
-      videoBitDepth: 10,
-      video: encode("qsv", {}),
+      video: encode("qsv", { codec: "mpeg4", bitDepth: 10 }),
     });
 
     expect(after(qsv, "-vf")).toBe(
-      "format=p010le,hwupload=extra_hw_frames=64,vpp_qsv=w=1920:h=1080:format=nv12",
+      "format=p010le,hwupload=extra_hw_frames=64,format=qsv,vpp_qsv=w=1920:h=1080:format=nv12",
     );
   });
 
@@ -162,7 +218,7 @@ describe("hlsCommandArgs", () => {
     const args = hlsCommandArgs({
       ...command(AudioPlan.Copy({ index: 1 }), "aac"),
       videoCodec: "hevc",
-      video: encode("software", { toneMap: true }),
+      video: encode("software", { codec: "hevc", bitDepth: 10, toneMap: true }),
     });
 
     expect(after(args, "-vf")).toBe(
@@ -190,14 +246,13 @@ describe("hlsCommandArgs", () => {
     const vaapi = hlsCommandArgs({
       ...command(AudioPlan.Copy({ index: 1 }), "aac"),
       videoCodec: "hevc",
-      videoBitDepth: 10,
-      video: encode("vaapi", { burnSubtitle: 3, toneMap: true }),
+      video: encode("vaapi", { codec: "hevc", bitDepth: 10, burnSubtitle: 3, toneMap: true }),
     });
 
     expect(vaapi).toContain("-hwaccel");
     expect(after(vaapi, "-filter_complex")).toBe(
       [
-        "[0:0]tonemap_vaapi=format=nv12:p=bt709:t=bt709:m=bt709,scale_vaapi=w=1920:h=1080:format=nv12,hwdownload,format=nv12[picture]",
+        "[0:0]scale_vaapi=w=1920:h=1080:format=p010,tonemap_vaapi=format=nv12:p=bt709:t=bt709:m=bt709,hwdownload,format=nv12[picture]",
         "[0:3]scale=1920:1080[subtitle]",
         "[picture][subtitle]overlay=eof_action=pass:repeatlast=0,format=nv12,hwupload[video]",
       ].join(";"),
@@ -319,16 +374,20 @@ describe("hlsCommandArgs", () => {
     const vaapi = hlsCommandArgs({
       ...command(AudioPlan.Copy({ index: 1 }), "aac"),
       from: 61.4,
-      subtitleCodec: "dvd_subtitle",
       videoCodec: "hevc",
-      videoBitDepth: 10,
-      video: encode("vaapi", { burnSubtitle: 3, toneMap: true }),
+      video: encode("vaapi", {
+        codec: "hevc",
+        bitDepth: 10,
+        burnSubtitle: 3,
+        subtitleCodec: "dvd_subtitle",
+        toneMap: true,
+      }),
     });
 
     expect(vaapi.indexOf("-hwaccel")).toBeLessThan(vaapi.indexOf("-i"));
     expect(vaapi.indexOf("-canvas_size")).toBeLessThan(vaapi.indexOf("-i"));
     expect(after(vaapi, "-filter_complex")).toContain(
-      "[0:0]trim=start=61.400000,tonemap_vaapi=format=nv12:p=bt709:t=bt709:m=bt709,",
+      "[0:0]trim=start=61.400000,scale_vaapi=w=1920:h=1080:format=p010,tonemap_vaapi=",
     );
 
     const qsv = hlsCommandArgs({
@@ -349,8 +408,7 @@ describe("hlsCommandArgs", () => {
             hlsCommandArgs({
               ...command(audio, "aac"),
               from,
-              subtitleCodec: "dvd_subtitle",
-              video: encode(encoder, { burnSubtitle: 3 }),
+              video: encode(encoder, { burnSubtitle: 3, subtitleCodec: "dvd_subtitle" }),
             }),
           ),
       ),
@@ -451,12 +509,9 @@ const mp4 = (video: VideoPlan) =>
     input: "/media/Film (2021).mkv",
     videoIndex: 0,
     videoCodec: "hevc",
-    videoBitDepth: 10,
     video,
     audio: AudioPlan.Aac({ index: 2 }),
     audioCodec: "dts",
-    qsvDevice: "/dev/dri/renderD128",
-    vaapiDevice: "/dev/dri/renderD129",
     output: "/tmp/downloads/f/key.mp4.part",
     progress: "/tmp/downloads/f/key.mp4.progress",
   });

@@ -30,6 +30,7 @@ import {
   Path,
   Predicate,
   Ref,
+  Result,
   Schedule,
   MutableRef,
   Scope,
@@ -51,7 +52,6 @@ import {
   type VideoTiming,
   videoTiming,
 } from "./fmp4-fragments.ts";
-import * as HardwareAcceleration from "./hardware-acceleration.ts";
 import {
   groupFragments,
   planGridSegments,
@@ -62,14 +62,32 @@ import {
 } from "./hls-plan.ts";
 import * as KeyframeIndex from "./keyframe-index.ts";
 import * as EncoderSlots from "./encoder-slots.ts";
-import { AudioPlan, decidePlayback, PlaybackPlan, VideoPlan } from "./playback-decision.ts";
+import { AudioPlan, modeOf, type PlaybackPlan, replan, VideoPlan } from "./playback-decision.ts";
 import * as PlaybackReporter from "./playback-reporter.ts";
 import type { PlaybackGrant } from "./playback-grants.ts";
 import * as SessionReports from "./session-reports.ts";
 import * as StreamLiveness from "./stream-liveness.ts";
 import * as StreamOwners from "./stream-owners.ts";
 import * as TranscodeSpace from "./transcode-space.ts";
-import { hlsCommandArgs } from "./transcode-command.ts";
+import { sourceScope, type SourceScope } from "./capability-inventory.ts";
+import * as TranscodeCapabilities from "./transcode-capabilities.ts";
+import { hlsCommand } from "./transcode-command.ts";
+import {
+  advance,
+  Diagnosis,
+  fresh as recovered,
+  type LogOwners,
+  Recovery,
+  type RecoveryState,
+} from "./transcode-recovery.ts";
+import {
+  samePipeline,
+  sourceOf,
+  stillVerified,
+  usesGpu,
+  type VideoIntent,
+} from "./video-pipeline.ts";
+import type { ImplId } from "./video-ops.ts";
 
 interface StartRequest {
   readonly file: ResolvedMediaFile;
@@ -84,8 +102,11 @@ interface StartRequest {
 
 interface StartedStream {
   readonly streamId: StreamId;
+  /** The generation that actually started, after any replacement at startup. */
   readonly generation: number;
   readonly mode: Exclude<PlaybackMode, "direct">;
+  /** What that generation does with the video, which may differ from the plan asked for. */
+  readonly video: VideoPlan;
   readonly segmentIndex: number;
 }
 
@@ -209,9 +230,15 @@ const KEEP_INIT_WAIT = Duration.seconds(2);
 
 const READY_WAIT = Duration.times(Duration.sum(KEEP_INIT_WAIT, STOP_WAIT), 2);
 
+/** How long the capability service may take to diagnose a failed run. */
+const DIAGNOSIS_WAIT = Duration.seconds(5);
+
+/**
+ * A start covers its first run and both replacements recovery may start, each after a diagnosis.
+ */
 const FIRST_RUN_WAIT = Duration.sum(
-  Duration.times(Duration.sum(READY_WAIT, START_WAIT), 2),
-  STOP_WAIT,
+  Duration.times(Duration.sum(READY_WAIT, START_WAIT), 3),
+  Duration.sum(STOP_WAIT, Duration.times(DIAGNOSIS_WAIT, 2)),
 );
 
 const FRAGMENT_FILE = /^f\d+\.m4s$/;
@@ -222,9 +249,9 @@ class FragmentWatchFailed extends Data.TaggedError("FragmentWatchFailed")<{
 
 /**
  * When a segment counts as produced: `written` once its last fragment is, and `followed` once the
- * encoder has also started the next one. A hardware run's first segment, and so its init, waits
- * for `followed`, which shows the device got past its first fragment before any of its bytes
- * reach the player.
+ * encoder has also started the next one. The first segment of a run with a stage on a GPU, and so
+ * its init, waits for `followed`, which shows the device got past its first fragment before any of
+ * its bytes reach the player.
  */
 type Readiness = "written" | "followed";
 
@@ -238,8 +265,14 @@ interface Fragment {
 interface Generation {
   readonly number: number;
   readonly streamId: StreamId;
-  /** Whether the run encodes on a GPU, whose failure falls back to software. */
-  readonly hardware: boolean;
+  /** Whether the run has a stage on a GPU, which a failure replaces before its bytes are served. */
+  readonly onGpu: boolean;
+  /** What the run does with the video. */
+  readonly video: VideoPlan;
+  /** Which of the run's steps own the names in ffmpeg's log; none for a copy. */
+  readonly owners: LogOwners | undefined;
+  /** Set once recovery gave up on this generation: every request of it answers this. */
+  readonly failed: MutableRef.MutableRef<Option.Option<TranscodeFailed>>;
   readonly startSegment: number;
   readonly from: number;
   readonly directory: string;
@@ -343,9 +376,18 @@ interface Session extends Lifecycle {
   readonly quality: PlaybackQuality | undefined;
   readonly burnSubtitle: number | undefined;
   readonly plan: SegmentPlan;
-  readonly mode: Ref.Ref<Exclude<PlaybackMode, "direct">>;
+  /** What new runs do with the video; a replacement after a failure changes it. */
   readonly video: Ref.Ref<VideoPlan>;
   readonly audio: AudioPlan;
+  /** The file version and video stream the capability service keeps its evidence under. */
+  readonly evidence: SourceScope;
+  /** Failures since a run last served a segment, and the rows this stream keeps off. */
+  readonly recovery: Ref.Ref<RecoveryState>;
+  /** How the transcode changed after failures, oldest first. */
+  readonly changes: Ref.Ref<ReadonlyArray<PipelineChange>>;
+  /** Segments where recovery gave up, and what their requests answer: no run starts there again. */
+  readonly ended: Ref.Ref<ReadonlyMap<number, TranscodeFailed>>;
+
   readonly generation: Ref.Ref<Generation>;
   readonly lane: Semaphore.Semaphore;
   readonly encoder: Ref.Ref<Encoder>;
@@ -361,15 +403,68 @@ interface Produced {
   readonly head: number;
 }
 
+/**
+ * A change to a stream's transcode: after a failure, the diagnosis and the rows it kept the
+ * stream off; or a capability its chain used was lost before a new run.
+ */
+interface PipelineChange {
+  readonly at: number;
+  readonly generation: number;
+  readonly cause: Diagnosis["_tag"] | "capability-lost";
+  readonly excluded: ReadonlyArray<ImplId>;
+  /** A scrubbed line from ffmpeg's log. */
+  readonly detail: string;
+}
+
 const isEncode = VideoPlan.$is("Encode");
 
-const HARDWARE_MODES: Partial<Record<PlaybackMode, HardwareAcceleration.HardwareEncoder>> = {
-  "transcode-qsv": "qsv",
-  "transcode-vaapi": "vaapi",
-};
+/** Whether `video` runs any stage on a GPU. */
+const onGpu = (video: VideoPlan): boolean => isEncode(video) && usesGpu(video.pipeline);
 
-const hardwareOf = (mode: PlaybackMode): HardwareAcceleration.HardwareEncoder | undefined =>
-  HARDWARE_MODES[mode];
+/**
+ * Ends recovery at segment `index`: requests of `generation` answer `failure` from now on, and the
+ * session remembers the position, so an idle release and a revive start no run there again, while
+ * a seek elsewhere starts afresh.
+ */
+const giveUp = (
+  session: Session,
+  generation: Generation,
+  index: number,
+  failure: TranscodeFailed,
+) =>
+  Effect.sync(() => MutableRef.set(generation.failed, Option.some(failure))).pipe(
+    Effect.andThen(Ref.update(session.ended, (known) => new Map(known).set(index, failure))),
+    Effect.andThen(Effect.fail(failure)),
+  );
+
+/** Fails with what segment `index` answers when recovery gave up there. */
+const unlessEnded = (session: Session, index: number) =>
+  Ref.get(session.ended).pipe(
+    Effect.flatMap((known) => {
+      const failure = known.get(index);
+
+      return failure === undefined ? Effect.void : Effect.fail(failure);
+    }),
+  );
+
+/** What a diagnosis found, as a change's cause. */
+const causeOf = (diagnosis: Diagnosis): Diagnosis["_tag"] =>
+  Diagnosis.$match(diagnosis, {
+    Capability: () => "Capability" as const,
+    Source: () => "Source" as const,
+    Undecided: () => "Undecided" as const,
+    NotVideo: () => "NotVideo" as const,
+    Unexplained: () => "Unexplained" as const,
+  });
+
+/** The first line of a failed run's log, scrubbed, for the stream's changes and its logs. */
+const firstLine = (failure: MediaTools.MediaToolFailed): string =>
+  (
+    failure.stderrHead
+      .trim()
+      .split("\n")
+      .find((line) => !line.startsWith("libva info:")) ?? ""
+  ).slice(0, 300);
 
 const noSegment = (): number => -1;
 
@@ -483,7 +578,7 @@ const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const tools = yield* MediaTools.Service;
   const keyframes = yield* KeyframeIndex.Service;
-  const hardware = yield* HardwareAcceleration.Service;
+  const capabilities = yield* TranscodeCapabilities.Service;
   const reporter = yield* PlaybackReporter.Service;
   const space = yield* TranscodeSpace.Service;
   const owners = yield* StreamOwners.Service;
@@ -839,13 +934,12 @@ const make = Effect.gen(function* () {
     const from = session.plan.starts[startSegment] ?? session.plan.end;
     const videoPlan = yield* Ref.get(session.video);
 
-    const args = hlsCommandArgs({
+    const command = hlsCommand({
       input: session.file.path,
       sourceStart: session.file.probe.startSeconds,
       from,
       videoIndex: video?.index ?? 0,
       videoCodec: video?.codec ?? "",
-      videoBitDepth: video?.bitDepth ?? 8,
       video: videoPlan,
       audio: session.audio,
       audioCodec: AudioPlan.$match(session.audio, {
@@ -862,12 +956,7 @@ const make = Effect.gen(function* () {
       }),
       segmentStarts: session.plan.starts.slice(startSegment),
       previousStart: session.plan.starts[startSegment - 1],
-      subtitleCodec:
-        session.file.probe.subtitles.find((track) => track.index === session.burnSubtitle)?.codec ??
-        "",
       outputDirectory: directory,
-      qsvDevice: hardware.qsvDevice,
-      vaapiDevice: hardware.vaapiDevice,
     });
 
     const exit = yield* Deferred.make<void, MediaTools.MediaToolFailed>();
@@ -906,7 +995,10 @@ const make = Effect.gen(function* () {
     const generation: Generation = {
       number,
       streamId: session.streamId,
-      hardware: hardwareOf(yield* Ref.get(session.mode)) !== undefined,
+      onGpu: onGpu(videoPlan),
+      video: videoPlan,
+      owners: command.owners,
+      failed: MutableRef.make(Option.none<TranscodeFailed>()),
       startSegment,
       from,
       directory,
@@ -968,7 +1060,7 @@ const make = Effect.gen(function* () {
 
     const spawned = yield* whileOpen(
       scope,
-      tools.startFfmpeg(args).pipe(
+      tools.startFfmpeg(command.args).pipe(
         Scope.provide(scope),
         Effect.catch((error) => Deferred.fail(exit, error).pipe(Effect.as(undefined))),
       ),
@@ -1001,50 +1093,115 @@ const make = Effect.gen(function* () {
     return Option.some(generation);
   });
 
-  const fallBackToSoftware = Effect.fn("StreamSessions.fallBackToSoftware")(function* (
+  /** What the capability service is asked about `session`'s source for `intent`. */
+  const capabilityRequest = (
     session: Session,
+    intent: VideoIntent,
+    excluded: ReadonlySet<ImplId>,
+  ): TranscodeCapabilities.Request | undefined => {
+    const video = session.file.probe.video;
+
+    return video === undefined
+      ? undefined
+      : {
+          scope: session.evidence,
+          path: session.file.path,
+          stream: video.index,
+          source: sourceOf(video),
+          intent,
+          excluded,
+        };
+  };
+
+  /**
+   * Puts `next` in place of the stream's video plan, records why, and reports a change of mode
+   * (from a GPU to software, say); a replacement that stays on its GPU keeps its mode.
+   */
+  const replaceVideo = Effect.fnUntraced(function* (
+    session: Session,
+    next: VideoPlan,
+    change: Omit<PipelineChange, "at">,
   ) {
-    const plan = decidePlayback(session.file.probe, session.client, {
-      audioIndex: session.audioIndex,
-      hardware: undefined,
-      softwareToneMapping: yield* hardware.softwareToneMapping,
-      quality: session.quality,
-      burnSubtitle: session.burnSubtitle,
-      copyVideo: false,
-    });
+    const from = modeOf(yield* Ref.get(session.video), session.audio);
+    const to = modeOf(next, session.audio);
+    const at = yield* Clock.currentTimeMillis;
 
-    if (!PlaybackPlan.$is("Hls")(plan)) {
-      return yield* new UnsupportedPlayback({
-        reason: PlaybackPlan.$is("Unsupported")(plan)
-          ? plan.reason
-          : "hdr-tone-mapping-requires-hardware",
-      });
-    }
-
-    const from = yield* Ref.getAndSet(session.mode, plan.mode);
-    yield* Ref.set(session.video, plan.video);
-
-    yield* reporter.report(
-      PlaybackReporter.PlaybackEvent.cases.ModeChanged.make({
+    yield* Ref.set(session.video, next);
+    yield* Ref.update(session.changes, (known) => [...known, { ...change, at }]);
+    yield* Effect.logWarning("StreamSessions.pipeline_replaced").pipe(
+      Effect.annotateLogs({
         sessionId: session.sessionId,
-        userId: session.userId,
-        fileId: session.fileId,
         streamId: session.streamId,
+        generation: change.generation,
+        cause: change.cause,
+        excluded: change.excluded.join(","),
+        stages: isEncode(next) ? next.pipeline.steps.map((step) => step.impl).join(",") : "copy",
         from,
-        to: plan.mode,
-        reason: "hardware-unavailable",
+        to,
       }),
     );
 
-    return plan.mode;
+    if (from !== to) {
+      yield* reporter.report(
+        PlaybackReporter.PlaybackEvent.cases.ModeChanged.make({
+          sessionId: session.sessionId,
+          userId: session.userId,
+          fileId: session.fileId,
+          streamId: session.streamId,
+          from,
+          to,
+          reason: "hardware-unavailable",
+        }),
+      );
+    }
   });
 
+  /**
+   * The video plan a new run of `session` uses: its current one while every capability it uses is
+   * still verified, otherwise a strict replan, which costs no retry. False when nothing changed.
+   */
+  const recheckVideo = Effect.fnUntraced(function* (session: Session, generation: number) {
+    const video = yield* Ref.get(session.video);
+    const stream = session.file.probe.video;
+
+    if (!isEncode(video) || stream === undefined) return false;
+    const { excluded } = yield* Ref.get(session.recovery);
+    const asked = capabilityRequest(session, video.intent, excluded);
+
+    if (asked === undefined) return false;
+    const snapshot = yield* capabilities.current(asked);
+
+    if (stillVerified(video.pipeline, snapshot)) return false;
+    const next = replan(stream, video.intent, snapshot);
+
+    if (Result.isFailure(next)) return yield* new UnsupportedPlayback({ reason: next.failure });
+
+    yield* replaceVideo(session, next.success, {
+      generation: generation + 1,
+      cause: "capability-lost",
+      excluded: [],
+      detail: "",
+    });
+
+    return true;
+  });
+
+  /**
+   * A run of `generation` failed before `index` was ready. Unless a newer generation replaced it
+   * meanwhile, which leaves everything as it is, the capability service diagnoses the failure and
+   * the stream replans without what it points at: once for the suspects, once without any GPU,
+   * then it gives up with `TranscodeFailed`. A replacement keeps the audio, the burned subtitle,
+   * the output intent, and the caps, and starts at the segment that was waited on.
+   */
   const encoderFailed = Effect.fn("StreamSessions.encoderFailed")(function* (
     session: Session,
     generation: Generation,
     index: number,
-    detail: string,
-  ) {
+    failure: MediaTools.MediaToolFailed,
+  ): Effect.fn.Return<
+    never,
+    StreamGenerationGone | SegmentNotReady | StreamNotFound | TranscodeFailed | UnsupportedPlayback
+  > {
     const restarted = yield* transition(session, () =>
       Effect.gen(function* () {
         const current = yield* Ref.get(session.generation);
@@ -1053,8 +1210,12 @@ const make = Effect.gen(function* () {
         const encoder = yield* Ref.get(session.encoder);
 
         if (!Encoder.$is("Running")(encoder)) return yield* new SegmentNotReady({ index });
+        const failed = MutableRef.get(generation.failed);
 
-        const mode = yield* Ref.get(session.mode);
+        if (Option.isSome(failed)) return yield* failed.value;
+        const video = generation.video;
+        const mode = modeOf(video, session.audio);
+        const detail = failure.stderr.trim().slice(-300);
 
         yield* Effect.annotateCurrentSpan({
           streamId: session.streamId,
@@ -1068,20 +1229,79 @@ const make = Effect.gen(function* () {
             streamId: session.streamId,
             mode,
             generation: generation.number,
+            exitCode: failure.exitCode,
+            signal: failure.signal,
+            first: firstLine(failure),
             detail,
           }),
         );
 
-        const hardwareEncoder = hardwareOf(mode);
+        const terminal = new TranscodeFailed({ streamId: session.streamId, mode, detail });
+        const stream = session.file.probe.video;
 
-        if (hardwareEncoder === undefined) {
-          return yield* new TranscodeFailed({ streamId: session.streamId, mode, detail });
+        if (!isEncode(video) || generation.owners === undefined || stream === undefined) {
+          return yield* giveUp(session, generation, index, terminal);
         }
 
-        yield* hardware.markUnavailable(hardwareEncoder, detail);
-        yield* fallBackToSoftware(session);
+        const state = yield* Ref.get(session.recovery);
+        const asked = capabilityRequest(session, video.intent, state.excluded);
 
-        return yield* nextGeneration(session, encoder, generation.number + 1, index);
+        if (asked === undefined) return yield* giveUp(session, generation, index, terminal);
+
+        const diagnosis = yield* capabilities.diagnose({
+          request: asked,
+          pipeline: video.pipeline,
+          owners: generation.owners,
+          failure: {
+            exitCode: failure.exitCode,
+            signal: failure.signal,
+            stderrHead: failure.stderrHead,
+          },
+        });
+
+        const next = advance(state, diagnosis, video.pipeline);
+
+        if (Recovery.$is("GiveUp")(next))
+          return yield* giveUp(session, generation, index, terminal);
+        const snapshot = yield* capabilities.current({ ...asked, excluded: next.state.excluded });
+        const replanned = replan(stream, video.intent, snapshot);
+
+        // Nothing left can encode the file: the stream ends, as a resume that finds no chain does.
+        if (Result.isFailure(replanned)) {
+          return yield* new UnsupportedPlayback({ reason: replanned.failure });
+        }
+
+        if (samePipeline(replanned.success.pipeline, video.pipeline)) {
+          return yield* giveUp(session, generation, index, terminal);
+        }
+
+        yield* Ref.set(session.recovery, next.state);
+        yield* replaceVideo(session, replanned.success, {
+          generation: generation.number + 1,
+          cause: causeOf(diagnosis),
+          excluded: [...next.state.excluded].filter((impl) => !state.excluded.has(impl)),
+          detail: firstLine(failure),
+        });
+
+        // A replacement whose ffmpeg never starts leaves no generation to attach to.
+        return yield* nextGeneration(session, encoder, generation.number + 1, index).pipe(
+          Effect.catchTag("SegmentNotReady", () =>
+            Ref.get(session.generation).pipe(
+              Effect.flatMap((replacement) =>
+                giveUp(
+                  session,
+                  replacement,
+                  index,
+                  new TranscodeFailed({
+                    streamId: session.streamId,
+                    mode: modeOf(replanned.success, session.audio),
+                    detail: "the replacement run did not start",
+                  }),
+                ),
+              ),
+            ),
+          ),
+        );
       }),
     );
 
@@ -1101,6 +1321,9 @@ const make = Effect.gen(function* () {
     const deadline = (yield* Clock.currentTimeMillis) + Duration.toMillis(maxWait);
 
     for (;;) {
+      const failed = MutableRef.get(generation.failed);
+
+      if (Option.isSome(failed)) return yield* failed.value;
       const current = yield* Ref.get(session.generation);
 
       if (current.number !== generation.number) {
@@ -1124,7 +1347,7 @@ const make = Effect.gen(function* () {
       const { followed, written } = reachOf(fragments, next);
 
       const readiness: Readiness =
-        generation.hardware && index === generation.startSegment ? "followed" : "written";
+        generation.onGpu && index === generation.startSegment ? "followed" : "written";
 
       // A fragment that failed to parse this time may belong to the segment, so only an encoder
       // that started the next one proves the segment whole.
@@ -1134,17 +1357,47 @@ const make = Effect.gen(function* () {
         const result = yield* Deferred.await(generation.exit).pipe(Effect.exit);
 
         if (Exit.isFailure(result) && !ready) {
-          const detail = Exit.match(result, {
-            onSuccess: () => "",
-            onFailure: (cause) => String(cause),
-          }).slice(-300);
-
+          const failure = Exit.findErrorOption(result);
           const neverServed = !(yield* Ref.get(session.served));
 
-          return yield* encoderFailed(session, generation, index, detail).pipe(
+          const recovering: Effect.Effect<
+            never,
+            | StreamGenerationGone
+            | SegmentNotReady
+            | StreamNotFound
+            | TranscodeFailed
+            | UnsupportedPlayback
+          > = Option.match(failure, {
+            onNone: () =>
+              Effect.fail(
+                new TranscodeFailed({
+                  streamId: session.streamId,
+                  mode: modeOf(generation.video, session.audio),
+                  detail: "ffmpeg stopped without an exit status",
+                }),
+              ),
+            onSome: (cause) => encoderFailed(session, generation, index, cause),
+          });
+
+          // A stream that served nothing ends with its failure. One that served ends when nothing
+          // can take it over; the request that met that end hears why, later ones that the stream
+          // is gone.
+          return yield* recovering.pipe(
             Effect.tapErrorTag("TranscodeFailed", () =>
               neverServed ? closeSession(session, "failed") : Effect.void,
             ),
+            Effect.catchTag("UnsupportedPlayback", (refused) => {
+              const ended = new TranscodeFailed({
+                streamId: session.streamId,
+                mode: modeOf(generation.video, session.audio),
+                detail: `nothing left can encode the file (${refused.reason})`,
+              });
+
+              return Effect.sync(() => MutableRef.set(generation.failed, Option.some(ended))).pipe(
+                Effect.andThen(closeSession(session, "failed")),
+                Effect.andThen(Effect.fail(ended)),
+              );
+            }),
           );
         }
       }
@@ -1153,7 +1406,7 @@ const make = Effect.gen(function* () {
         const members = produced.members.get(index) ?? [];
 
         if (members.length === 0) {
-          const mode = yield* Ref.get(session.mode);
+          const mode = modeOf(generation.video, session.audio);
           const planned = session.plan.starts[index] ?? session.plan.end;
 
           yield* Effect.logWarning("StreamSessions.segment_not_cut").pipe(
@@ -1176,11 +1429,26 @@ const make = Effect.gen(function* () {
         }
 
         yield* Ref.set(session.served, true);
+        yield* Ref.update(session.recovery, (state) =>
+          state.failures === 0 ? state : { ...state, failures: 0 },
+        );
 
         return members.map((fragment) => fragment.path);
       }
 
       if (stopped || (yield* Clock.currentTimeMillis) > deadline) {
+        // A replacement is published before the run it replaces is stopped, so a run found
+        // stopped after the check above may have been replaced meanwhile: its reader moves on.
+        const latest = yield* Ref.get(session.generation);
+
+        if (latest.number !== generation.number) {
+          return yield* new StreamGenerationGone({
+            streamId: session.streamId,
+            generation: generation.number,
+            currentGeneration: latest.number,
+          });
+        }
+
         return yield* new SegmentNotReady({ index });
       }
 
@@ -1306,7 +1574,8 @@ const make = Effect.gen(function* () {
     yield* Effect.annotateCurrentSpan({ streamId: session.streamId, segmentIndex });
     let generation = started;
 
-    for (let attempt = 0; attempt < 2; attempt += 1) {
+    // The first run and the two replacements recovery may start.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
       const ready = yield* awaitSegment(session, generation, segmentIndex, START_WAIT).pipe(
         Effect.as(true),
         Effect.catchTags({
@@ -1319,7 +1588,9 @@ const make = Effect.gen(function* () {
       generation = yield* Ref.get(session.generation);
     }
 
-    yield* Effect.annotateCurrentSpan({ mode: yield* Ref.get(session.mode) });
+    yield* Effect.annotateCurrentSpan({
+      mode: modeOf(yield* Ref.get(session.video), session.audio),
+    });
 
     return generation;
   });
@@ -1398,6 +1669,7 @@ const make = Effect.gen(function* () {
     index: number,
     callerGone: Effect.Effect<void>,
   ) {
+    yield* unlessEnded(session, index);
     const current = yield* Ref.get(session.generation);
     const transcoding = isEncode(yield* Ref.get(session.video));
 
@@ -1440,14 +1712,14 @@ const make = Effect.gen(function* () {
       }),
     );
 
-    // The player holds this generation's init segment from the lost encoder, and software segments
-    // do not decode under it, so a fallback moves to the next generation. When software cannot
-    // play the file at all, the negotiation the player falls back to says why.
+    // The player holds this generation's init segment, and segments from another chain may not
+    // decode under it, so a chain that changed because a capability it used was lost moves to the
+    // next generation. When nothing can play the file any more, the negotiation the player falls
+    // back to says why.
     const started = yield* Effect.gen(function* () {
-      const used = hardwareOf(yield* Ref.get(session.mode));
-      const lost = used !== undefined && used !== (yield* hardware.encoder);
+      const lost = yield* recheckVideo(session, current.number);
 
-      if (lost) yield* fallBackToSoftware(session);
+      yield* Ref.update(session.recovery, (state) => ({ ...state, failures: 0 }));
 
       return yield* startGeneration(
         session,
@@ -1501,6 +1773,10 @@ const make = Effect.gen(function* () {
 
         if (index >= current.startSegment && index <= produced.head + LOOKAHEAD_SEGMENTS)
           return current;
+
+        yield* unlessEnded(session, index);
+        yield* recheckVideo(session, current.number);
+        yield* Ref.update(session.recovery, (state) => ({ ...state, failures: 0 }));
 
         return yield* nextGeneration(session, encoder, current.number + 1, index);
       }),
@@ -1794,7 +2070,10 @@ const make = Effect.gen(function* () {
     const placeholder: Generation = {
       number: 0,
       streamId,
-      hardware: false,
+      onGpu: false,
+      video: plan.video,
+      owners: undefined,
+      failed: MutableRef.make(Option.none<TranscodeFailed>()),
       startSegment: 0,
       from: segmentPlan.starts[0] ?? segmentPlan.end,
       directory: "",
@@ -1827,9 +2106,18 @@ const make = Effect.gen(function* () {
       quality: request.quality,
       burnSubtitle: request.burnSubtitle,
       plan: segmentPlan,
-      mode: yield* Ref.make(plan.mode),
       video: yield* Ref.make(plan.video),
       audio: plan.audio,
+      evidence: sourceScope(
+        file.fileId,
+        file.sizeBytes,
+        file.modifiedAtMs,
+        file.probe.video?.index ?? 0,
+      ),
+      recovery: yield* Ref.make<RecoveryState>(recovered),
+      changes: yield* Ref.make<ReadonlyArray<PipelineChange>>([]),
+      ended: yield* Ref.make<ReadonlyMap<number, TranscodeFailed>>(new Map()),
+
       generation: yield* Ref.make(placeholder),
       lane: yield* Semaphore.make(1),
       encoder: yield* Ref.make<Encoder>(Encoder.Running({ run })),
@@ -1893,12 +2181,12 @@ const make = Effect.gen(function* () {
       return yield* refused();
     }
 
-    const generation =
-      hardwareOf(plan.mode) !== undefined
-        ? yield* firstSegment(session, first.value, segmentIndex)
-        : first.value;
+    const generation = onGpu(plan.video)
+      ? yield* firstSegment(session, first.value, segmentIndex)
+      : first.value;
 
-    const mode = yield* Ref.get(session.mode);
+    const video = yield* Ref.get(session.video);
+    const mode = modeOf(video, session.audio);
 
     yield* reporter.report(
       PlaybackReporter.PlaybackEvent.cases.ModeChosen.make({
@@ -1910,7 +2198,13 @@ const make = Effect.gen(function* () {
       }),
     );
 
-    return { streamId, generation: generation.number, mode, segmentIndex } satisfies StartedStream;
+    return {
+      streamId,
+      generation: generation.number,
+      mode,
+      video,
+      segmentIndex,
+    } satisfies StartedStream;
   });
 
   const playlist = Effect.fn("StreamSessions.playlist")(function* (
@@ -1932,6 +2226,9 @@ const make = Effect.gen(function* () {
     return yield* transition(session, (callerGone) =>
       Effect.gen(function* () {
         const current = yield* currentGeneration(session, generation);
+        const failed = MutableRef.get(current.failed);
+
+        if (Option.isSome(failed)) return yield* failed.value;
         const encoder = yield* Ref.get(session.encoder);
 
         if (Encoder.$is("Running")(encoder)) return InitSource.Run({ run: current });
@@ -2193,7 +2490,7 @@ export const layer: Layer.Layer<
   | Crypto.Crypto
   | MediaTools.Service
   | KeyframeIndex.Service
-  | HardwareAcceleration.Service
+  | TranscodeCapabilities.Service
   | PlaybackReporter.Service
   | TranscodeSpace.Service
   | StreamOwners.Service

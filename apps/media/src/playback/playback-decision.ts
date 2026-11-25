@@ -10,23 +10,28 @@ import type {
   UnsupportedReason,
 } from "@media/contracts/media-playback";
 import type { PlaybackMode } from "@media/contracts/models/playback";
-import { Data } from "effect";
+import { Data, Result } from "effect";
 
 import type { AudioTrack, MediaProbe, VideoStream } from "../media/media-probe.ts";
-import type { HardwareEncoder } from "./hardware-acceleration.ts";
+import {
+  type CapabilitySnapshot,
+  encodeDomain,
+  planVideo,
+  sourceOf,
+  type VideoIntent,
+  type VideoOutput,
+  type VideoPipeline,
+} from "./video-pipeline.ts";
+import type { SubtitleInput } from "./video-ops.ts";
 
 /** What happens to the video stream. */
 export type VideoPlan = Data.TaggedEnum<{
   Copy: {};
   Encode: {
-    readonly encoder: HardwareEncoder | "software";
-    readonly width: number;
-    readonly height: number;
-    /** HDR to SDR conversion. */
-    readonly toneMap: boolean;
-    readonly bitrate: number;
-    /** ffmpeg stream index of an image subtitle drawn onto the picture. */
-    readonly burnSubtitle: number | undefined;
+    /** What the decision asked for: a replacement plans from it again and never relaxes it. */
+    readonly intent: VideoIntent;
+    readonly output: VideoOutput;
+    readonly pipeline: VideoPipeline;
   };
 }>;
 
@@ -58,18 +63,20 @@ export type PlaybackPlan = Data.TaggedEnum<{
 /** Constructors and matchers for `PlaybackPlan`. */
 export const PlaybackPlan = Data.taggedEnum<PlaybackPlan>();
 
-/** Inputs besides the probe and the client. */
-export interface DecisionOptions {
-  /** ffmpeg stream index of the requested audio track; the default track when absent. */
-  readonly audioIndex: number | undefined;
-  /** The GPU encoder transcodes use; software when absent. */
-  readonly hardware: HardwareEncoder | undefined;
-  /** Whether this ffmpeg can tone-map HDR to SDR in software (`zscale` and `tonemap`). */
-  readonly softwareToneMapping: boolean;
+/** What an encode is asked to fit: the viewer's cap and an image subtitle to burn in. */
+export interface EncodeRequest {
   /** The viewer's quality cap; none plays the best the client takes. */
   readonly quality?: PlaybackQuality | undefined;
   /** ffmpeg stream index of an embedded image subtitle to burn into the picture. */
   readonly burnSubtitle?: number | undefined;
+}
+
+/** Inputs besides the probe and the client. */
+export interface DecisionOptions extends EncodeRequest {
+  /** ffmpeg stream index of the requested audio track; the default track when absent. */
+  readonly audioIndex: number | undefined;
+  /** What this server's transcoder may use for this file. */
+  readonly capabilities: CapabilitySnapshot;
   /**
    * Whether the video may be copied (remux, audio-only transcode); false when the session must
    * encode, such as while the file's keyframes are still being indexed. Direct play is unaffected.
@@ -90,24 +97,6 @@ const HLS_AUDIO_CODECS: ReadonlySet<string> = new Set([
 ]);
 
 const SOFTWARE_MAX = { width: 1920, height: 1080 } as const;
-
-const bitrateFor = (height: number): number =>
-  height > 1440
-    ? 20_000_000
-    : height > 1080
-      ? 12_000_000
-      : height > 720
-        ? 8_000_000
-        : height > 480
-          ? 4_000_000
-          : 2_000_000;
-
-const fit = (video: VideoStream, bounds: { readonly width: number; readonly height: number }) => {
-  const scale = Math.min(1, bounds.width / video.width, bounds.height / video.height);
-  const even = (value: number) => Math.max(2, Math.floor((value * scale) / 2) * 2);
-
-  return { width: even(video.width), height: even(video.height) };
-};
 
 const selectAudio = (
   probe: MediaProbe,
@@ -200,42 +189,99 @@ export const decideWithin = (
 
   if (videoOk && HLS_VIDEO_CODECS.has(canonical(video.codec)) && options.copyVideo !== false) {
     return PlaybackPlan.Hls({
-      mode: audioCopyable || audio === undefined ? "remux" : "audio-transcode",
+      mode: modeOf(VideoPlan.Copy(), audioPlan),
       video: VideoPlan.Copy(),
       audio: audioPlan,
     });
   }
 
-  const h264 = videoSupport(client, "h264");
+  const intent = encodeIntent(probe, video, client, options);
 
-  if (h264 === undefined) return PlaybackPlan.Unsupported({ reason: "no-transcode-target" });
-  const toneMap = video.dynamicRange !== "sdr";
-  const encoder = options.hardware ?? "software";
+  const encoded =
+    intent === undefined
+      ? Result.fail<UnsupportedReason>("no-transcode-target")
+      : replan(video, intent, options.capabilities);
 
-  if (encoder === "software" && toneMap && !options.softwareToneMapping) {
-    return PlaybackPlan.Unsupported({ reason: "hdr-tone-mapping-requires-hardware" });
-  }
-
-  const capHeight = options.quality?.maxHeight ?? Number.POSITIVE_INFINITY;
-  const softwareMax = encoder === "software" ? SOFTWARE_MAX : { width: Infinity, height: Infinity };
-
-  const size = fit(video, {
-    width: Math.min(client.maxWidth, softwareMax.width),
-    height: Math.min(client.maxHeight, softwareMax.height, capHeight),
-  });
-
-  return PlaybackPlan.Hls({
-    mode: `transcode-${encoder}`,
-    video: VideoPlan.Encode({
-      encoder,
-      ...size,
-      toneMap,
-      bitrate: Math.min(
-        bitrateFor(size.height),
-        options.quality?.maxBitrate ?? Number.POSITIVE_INFINITY,
-      ),
-      burnSubtitle,
-    }),
-    audio: audioPlan,
+  return Result.match(encoded, {
+    onSuccess: (plan) =>
+      PlaybackPlan.Hls({ mode: modeOf(plan, audioPlan), video: plan, audio: audioPlan }),
+    onFailure: (reason) => PlaybackPlan.Unsupported({ reason }),
   });
 };
+
+/**
+ * What an encode of `video` for `client` asks for: H.264, tone-mapped when the source is HDR,
+ * within the client's size and the viewer's cap, the CPU within 1920x1080. Undefined when the
+ * client takes no H.264.
+ */
+export const encodeIntent = (
+  probe: MediaProbe,
+  video: VideoStream,
+  client: ClientCapabilities,
+  request: EncodeRequest,
+): VideoIntent | undefined => {
+  if (videoSupport(client, "h264") === undefined) return undefined;
+  const subtitle = probe.subtitles.find((track) => track.index === request.burnSubtitle);
+
+  const burnImage: SubtitleInput | undefined =
+    subtitle === undefined
+      ? undefined
+      : {
+          input: 0,
+          stream: subtitle.index,
+          codec: subtitle.codec,
+          frame: {
+            memory: "cpu",
+            device: undefined,
+            colour: "sdr",
+            depth: 8,
+            pixelFormat: "pal8",
+            scan: "progressive",
+            width: video.width,
+            height: video.height,
+          },
+        };
+
+  return {
+    codec: "h264",
+    toneMap: video.dynamicRange !== "sdr",
+    bounds: {
+      width: client.maxWidth,
+      height: Math.min(client.maxHeight, request.quality?.maxHeight ?? Number.POSITIVE_INFINITY),
+    },
+    cpuEncodeBounds: SOFTWARE_MAX,
+    maxBitrate: request.quality?.maxBitrate,
+    burnImage,
+  };
+};
+
+/**
+ * Plans `intent` for `video` again from `capabilities`, as a replacement after a failure does: the
+ * same output intent and caps, never relaxed, and always an encode.
+ */
+export const replan = (
+  video: VideoStream,
+  intent: VideoIntent,
+  capabilities: CapabilitySnapshot,
+): Result.Result<Extract<VideoPlan, { readonly _tag: "Encode" }>, UnsupportedReason> =>
+  Result.match(planVideo(sourceOf(video), intent, capabilities), {
+    onSuccess: ({ output, pipeline }) =>
+      Result.succeed(VideoPlan.Encode({ intent, output, pipeline })),
+    onFailure: () =>
+      Result.fail(intent.toneMap ? "hdr-tone-mapping-requires-hardware" : "no-transcode-target"),
+  });
+
+/**
+ * How a plan delivers the file, the one place the mode comes from: copied video is a remux, or an
+ * audio transcode when the audio is converted; encoded video is named for the domain its encoder
+ * runs in, software for the CPU.
+ */
+export const modeOf = (video: VideoPlan, audio: AudioPlan): Exclude<PlaybackMode, "direct"> =>
+  VideoPlan.$match(video, {
+    Copy: () => (AudioPlan.$is("Aac")(audio) ? "audio-transcode" : "remux"),
+    Encode: ({ pipeline }) => {
+      const domain = encodeDomain(pipeline);
+
+      return domain === "cpu" ? "transcode-software" : (`transcode-${domain}` as const);
+    },
+  });

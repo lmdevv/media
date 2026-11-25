@@ -18,7 +18,7 @@ import { fragmentSpan, videoTiming } from "./fmp4-fragments.ts";
 import { AudioPlan, VideoPlan } from "./playback-decision.ts";
 import * as PlaybackReporter from "./playback-reporter.ts";
 import * as StreamSessions from "./stream-sessions.ts";
-import { hlsCommandArgs } from "./transcode-command.ts";
+import { hlsCommand } from "./transcode-command.ts";
 
 const hasFfmpeg = await ffmpegAvailable();
 
@@ -262,24 +262,20 @@ describe.skipIf(!hasFfmpeg)("stream startup", () => {
             variable,
           ]);
           yield* tools.ffmpeg(
-            hlsCommandArgs({
+            hlsCommand({
               input: variable,
               sourceStart: 0,
               from: 0,
               videoIndex: 0,
               videoCodec: "h264",
-              videoBitDepth: 8,
               video: VideoPlan.Copy(),
               audio: AudioPlan.None(),
               audioCodec: "",
               copiedAudioEnd: undefined,
-              subtitleCodec: "",
               segmentStarts: [0, 4, 8, 12, 16, 20],
               previousStart: undefined,
               outputDirectory: output,
-              qsvDevice: "",
-              vaapiDevice: "",
-            }),
+            }).args,
           );
 
           const names = (yield* fs.readDirectory(output))

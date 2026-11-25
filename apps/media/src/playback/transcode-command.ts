@@ -7,12 +7,15 @@
  * Copies skip the per-fragment `sidx` (`skip_sidx`): without it, the muxer's DASH mode presents
  * each fragment's first sample where the previous fragment's pictures end, which at an open-GOP
  * keyframe is where its leading pictures start: frames before its own time, the time plans use.
- * Transcodes place keyframes on the planned segment starts. Encodes run in software (libx264), on
- * Intel Quick Sync, or through VA-API (Intel and AMD); a GPU decodes the source itself when it
- * can, and tone-maps HDR to SDR (`vpp_qsv`, `tonemap_vaapi`), as does the software path with
- * `zscale`.
+ * Transcodes place keyframes on the planned segment starts. An encode renders its pipeline
+ * (`video-render.ts`): the device its GPU stages open, the decoder's flags, one filter graph, and
+ * the encoder, each stage on the CPU or a GPU as the plan placed it.
  */
 import { AudioPlan, VideoPlan } from "./playback-decision.ts";
+import type { LogOwners } from "./transcode-recovery.ts";
+import { type VideoPipeline } from "./video-pipeline.ts";
+import { graphArgs, type RenderedVideo, renderVideo } from "./video-render.ts";
+import { Op } from "./video-ops.ts";
 
 /** Everything one ffmpeg run needs; built only from server-side state. */
 export interface HlsCommand {
@@ -22,16 +25,14 @@ export interface HlsCommand {
   /** First planned segment start this run produces, on the source timeline. */
   readonly from: number;
   readonly videoIndex: number;
+  /** ffprobe's name for the source video's codec, which a copy tags (`hvc1` for HEVC). */
   readonly videoCodec: string;
-  readonly videoBitDepth: number;
   readonly video: VideoPlan;
   readonly audio: AudioPlan;
   /** ffprobe's name for the source audio track's codec, such as `aac`; empty without audio. */
   readonly audioCodec: string;
   /** Where a copied audio track ends on the source timeline, when its probe says. */
   readonly copiedAudioEnd: number | undefined;
-  /** ffprobe's name for the burned-in subtitle's codec, such as `dvd_subtitle`; empty without. */
-  readonly subtitleCodec: string;
   /** Planned segment starts at or after `from`; transcodes force keyframes there. */
   readonly segmentStarts: ReadonlyArray<number>;
   /**
@@ -39,8 +40,13 @@ export interface HlsCommand {
    */
   readonly previousStart: number | undefined;
   readonly outputDirectory: string;
-  readonly qsvDevice: string;
-  readonly vaapiDevice: string;
+}
+
+/** An HLS run's arguments, and which of its steps owns each name in ffmpeg's log. */
+export interface HlsRun {
+  readonly args: ReadonlyArray<string>;
+  /** None for a copy, which runs no pipeline. */
+  readonly owners: LogOwners | undefined;
 }
 
 type EncodeSource = Omit<HlsCommand, "input" | "outputDirectory">;
@@ -50,179 +56,66 @@ export interface Mp4Command {
   readonly input: string;
   readonly videoIndex: number;
   readonly videoCodec: string;
-  readonly videoBitDepth: number;
   /** A copy, or an encode without a burned-in subtitle. */
   readonly video: VideoPlan;
   readonly audio: AudioPlan;
   /** ffprobe's name for the source audio track's codec, such as `aac`; empty without audio. */
   readonly audioCodec: string;
-  readonly qsvDevice: string;
-  readonly vaapiDevice: string;
   /** The MP4 to write. */
   readonly output: string;
   /** Where ffmpeg writes `key=value` progress (`out_time_us`) as it goes. */
   readonly progress: string;
 }
 
-/** Codecs Intel (Quick Sync, VA-API) and AMD (VA-API) media engines decode in hardware. */
-const HARDWARE_DECODERS: ReadonlySet<string> = new Set([
-  "h264",
-  "hevc",
-  "av1",
-  "vp9",
-  "mpeg2video",
-]);
-
-/**
- * HDR to SDR in software: linearize, map with Hable onto 100 nits, convert to BT.709. Needs
- * ffmpeg's `zscale` (libzimg) and `tonemap`; negotiation checks for them first.
- */
-const SOFTWARE_TONE_MAP =
-  "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv";
-
 const seconds = (value: number): string => value.toFixed(6);
 
 type Encode = Extract<VideoPlan, { readonly _tag: "Encode" }>;
 
-interface FilterGraph {
-  readonly kind: "simple" | "complex";
-  readonly graph: string;
-}
+/** The image subtitle a pipeline draws onto the picture, if it burns one in. */
+const burnedSubtitle = (pipeline: VideoPipeline) => {
+  const burn = pipeline.steps.find((step) => Op.$is("BurnImage")(step.op))?.op;
 
-const decodesOnGpu = (command: EncodeSource, video: Encode): boolean =>
-  video.encoder !== "software" && HARDWARE_DECODERS.has(command.videoCodec);
-
-const gpuFilters = (command: EncodeSource, video: Encode, uploaded: boolean): string => {
-  const size = `w=${String(video.width)}:h=${String(video.height)}`;
-
-  const upload = uploaded
-    ? ""
-    : `format=${command.videoBitDepth > 8 ? "p010le" : "nv12"},hwupload${video.encoder === "qsv" ? "=extra_hw_frames=64" : ""},`;
-
-  if (video.encoder === "qsv") {
-    const toneMapping = video.toneMap
-      ? ":tonemap=1:out_color_matrix=bt709:out_color_primaries=bt709:out_color_transfer=bt709"
-      : "";
-
-    return `${upload}vpp_qsv=${size}:format=nv12${toneMapping}`;
-  }
-
-  const toneMapping = video.toneMap ? "tonemap_vaapi=format=nv12:p=bt709:t=bt709:m=bt709," : "";
-
-  return `${upload}${toneMapping}scale_vaapi=${size}:format=nv12`;
+  return burn !== undefined && Op.$is("BurnImage")(burn) ? burn.subtitle : undefined;
 };
 
 /**
- * The video filter graph: scale and tone-map on the CPU or the GPU. An image subtitle is drawn
- * on the finished SDR picture at the output size, after tone mapping (subtitles are SDR): in
- * software straight away, on a GPU after downloading its frames, which are then uploaded again
- * for the encoder. The subtitle's canvas (720x576 for DVD) is scaled to the picture it covers.
- * After a seek, picture frames earlier than `from` still configure the graph, so trimming them
- * comes first and they skip the rest of the work. ffmpeg appears to repeat the subtitle's current
- * image as it reads packets, so a caption that started earlier survives trimming the subtitle's own
- * frames to shortly before `from`. Untrimmed, memory peaked near 4 GB at 1080p, apparently scaled
- * frames waiting on the overlay.
+ * Renders an encode's pipeline for this run. An image subtitle is drawn on the finished SDR
+ * picture at the output size. After a seek, picture frames earlier than `from` still configure
+ * the graph, so trimming them comes first and they skip the rest of the work. ffmpeg appears to
+ * repeat the subtitle's current image as it reads packets, so a caption that started earlier
+ * survives trimming the subtitle's own frames to shortly before `from`. Untrimmed, memory peaked
+ * near 4 GB at 1080p, apparently scaled frames waiting on the overlay.
  */
-const videoFilters = (command: EncodeSource, video: Encode): FilterGraph => {
-  const width = String(video.width);
-  const height = String(video.height);
-
-  const picture =
-    video.encoder === "software"
-      ? [
-          `scale=${width}:${height}:flags=bicubic`,
-          ...(video.toneMap ? [SOFTWARE_TONE_MAP] : []),
-        ].join(",")
-      : gpuFilters(command, video, decodesOnGpu(command, video));
-
-  if (video.burnSubtitle === undefined) {
-    return {
-      kind: "simple",
-      graph: video.encoder === "software" ? `${picture},format=yuv420p` : picture,
-    };
-  }
-
+const rendered = (command: EncodeSource, video: Encode): RenderedVideo => {
   const seeked = subtitleReading(command).seeked;
-  const pictureTrim = seeked ? `trim=start=${seconds(command.from)},` : "";
-  const subtitleTrim = seeked ? `trim=start=${seconds(command.from - SUBTITLE_MARGIN)},` : "";
 
-  const [download, upload] =
-    video.encoder === "software"
-      ? ["", "format=yuv420p"]
-      : [
-          ",hwdownload,format=nv12",
-          `format=nv12,hwupload${video.encoder === "qsv" ? "=extra_hw_frames=64,format=qsv" : ""}`,
-        ];
-
-  return {
-    kind: "complex",
-    graph: [
-      `[0:${String(command.videoIndex)}]${pictureTrim}${picture}${download}[picture]`,
-      `[0:${String(video.burnSubtitle)}]${subtitleTrim}scale=${width}:${height}[subtitle]`,
-      `[picture][subtitle]overlay=eof_action=pass:repeatlast=0,${upload}[video]`,
-    ].join(";"),
-  };
+  return renderVideo(video.pipeline, {
+    input: 0,
+    stream: command.videoIndex,
+    trimPicture: seeked ? command.from : undefined,
+    trimSubtitle: seeked ? command.from - SUBTITLE_MARGIN : undefined,
+  });
 };
 
-const videoArgs = (command: EncodeSource): ReadonlyArray<string> =>
-  VideoPlan.$match(command.video, {
-    Copy: () => [
-      "-map",
-      `0:${String(command.videoIndex)}`,
-      "-c:v",
-      "copy",
-      ...(command.videoCodec === "hevc" ? ["-tag:v", "hvc1"] : []),
-    ],
-    Encode: (video) => {
-      const keyframes =
-        command.segmentStarts.length === 0
+const videoArgs = (
+  command: EncodeSource,
+  encoded: RenderedVideo | undefined,
+): ReadonlyArray<string> =>
+  encoded === undefined
+    ? [
+        "-map",
+        `0:${String(command.videoIndex)}`,
+        "-c:v",
+        "copy",
+        ...(command.videoCodec === "hevc" ? ["-tag:v", "hvc1"] : []),
+      ]
+    : [
+        ...graphArgs(encoded, { input: 0, stream: command.videoIndex }),
+        ...encoded.output,
+        ...(command.segmentStarts.length === 0
           ? []
-          : ["-force_key_frames", command.segmentStarts.map(seconds).join(",")];
-
-      const rate = String(video.bitrate);
-      const filters = videoFilters(command, video);
-
-      const graph =
-        filters.kind === "simple"
-          ? ["-map", `0:${String(command.videoIndex)}`, "-vf", filters.graph]
-          : ["-filter_complex", filters.graph, "-map", "[video]"];
-
-      if (video.encoder === "software") {
-        return [
-          ...graph,
-          "-c:v",
-          "libx264",
-          "-preset",
-          "veryfast",
-          "-profile:v",
-          "high",
-          "-crf",
-          "23",
-          "-maxrate",
-          rate,
-          "-bufsize",
-          String(video.bitrate * 2),
-          ...keyframes,
-        ];
-      }
-
-      const bitrate = ["-b:v", rate, "-maxrate", rate, "-bufsize", String(video.bitrate * 2)];
-
-      return video.encoder === "qsv"
-        ? [
-            ...graph,
-            "-c:v",
-            "h264_qsv",
-            "-preset",
-            "veryfast",
-            ...bitrate,
-            "-forced_idr",
-            "1",
-            ...keyframes,
-          ]
-        : [...graph, "-c:v", "h264_vaapi", "-profile:v", "high", ...bitrate, ...keyframes];
-    },
-  });
+          : ["-force_key_frames", command.segmentStarts.map(seconds).join(",")]),
+      ];
 
 /**
  * Copied AAC from MPEG-TS (and other ADTS sources) carries ADTS headers that MP4 refuses; the
@@ -362,40 +255,6 @@ const runStart = (command: EncodeSource): RunStart => {
 };
 
 /**
- * The `-init_hw_device` value for Quick Sync on the render node `device`. With oneVPL builds,
- * `qsv=hw:<path>` ignores the path and opens the default GPU, so the node is named as the child
- * VA-API device instead; a missing node then fails, as it should.
- */
-export const qsvDeviceInit = (device: string): string => `qsv=hw,child_device=${device}`;
-
-const hardwareInput = (command: EncodeSource): ReadonlyArray<string> => {
-  const video = command.video;
-
-  if (!VideoPlan.$is("Encode")(video) || video.encoder === "software") return [];
-  const onGpu = decodesOnGpu(command, video);
-
-  if (video.encoder === "qsv") {
-    return [
-      "-init_hw_device",
-      qsvDeviceInit(command.qsvDevice),
-      "-filter_hw_device",
-      "hw",
-      ...(onGpu ? ["-hwaccel", "qsv", "-hwaccel_output_format", "qsv"] : []),
-    ];
-  }
-
-  return [
-    "-init_hw_device",
-    `vaapi=va:${command.vaapiDevice}`,
-    "-filter_hw_device",
-    "va",
-    ...(onGpu
-      ? ["-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi", "-hwaccel_device", "va"]
-      : []),
-  ];
-};
-
-/**
  * Subtitles that started before the seek point are still on screen there, but a seek skips
  * their packets. A run that burns one in after a seek therefore reads the picture and the subtitle
  * together from `SUBTITLE_LEAD` earlier, and the filter graph trims the picture back to `from`;
@@ -420,36 +279,39 @@ const seekArgs = (seek: number | undefined): ReadonlyArray<string> =>
 
 const subtitleReading = (command: EncodeSource) => {
   const video = command.video;
-  const burning = VideoPlan.$is("Encode")(video) && video.burnSubtitle !== undefined;
+  const subtitle = VideoPlan.$is("Encode")(video) ? burnedSubtitle(video.pipeline) : undefined;
+  const burning = subtitle !== undefined;
   const offset = command.from - command.sourceStart;
 
   return {
-    canvas: burning && command.subtitleCodec === "dvd_subtitle" ? ["-canvas_size", DVD_CANVAS] : [],
+    canvas: subtitle?.codec === "dvd_subtitle" ? ["-canvas_size", DVD_CANVAS] : [],
     seeked: burning && offset > 0.001,
     lead: offset - SUBTITLE_LEAD > 0.001 ? offset - SUBTITLE_LEAD : undefined,
   };
 };
 
-/** The full ffmpeg argument list for `command`. */
-export const hlsCommandArgs = (command: HlsCommand): ReadonlyArray<string> => {
+/** The full ffmpeg argument list for `command`, and which steps own the names in its log. */
+export const hlsCommand = (command: HlsCommand): HlsRun => {
   const start = runStart(command);
   const subtitles = subtitleReading(command);
   const audioInput = subtitles.seeked && !AudioPlan.$is("None")(command.audio) ? 1 : 0;
+  const video = command.video;
+  const encoded = VideoPlan.$is("Encode")(video) ? rendered(command, video) : undefined;
 
-  return [
+  const args = [
     "-hide_banner",
     "-nostdin",
     "-nostats",
     "-v",
     "error",
-    ...hardwareInput(command),
+    ...(encoded?.input ?? []),
     ...subtitles.canvas,
     ...seekArgs(subtitles.seeked ? subtitles.lead : start.seek),
     "-copyts",
     "-i",
     command.input,
     ...(audioInput === 1 ? [...seekArgs(start.seek), "-copyts", "-i", command.input] : []),
-    ...videoArgs(command),
+    ...videoArgs(command, encoded),
     ...audioArgs(command, {
       input: audioInput,
       copyFilters: start.dropCopiedAudio === undefined ? [] : [dropFilter(start.dropCopiedAudio)],
@@ -489,6 +351,8 @@ export const hlsCommandArgs = (command: HlsCommand): ReadonlyArray<string> => {
     `${command.outputDirectory}/f%d.m4s`,
     `${command.outputDirectory}/ffmpeg.m3u8`,
   ];
+
+  return { args, owners: encoded?.owners };
 };
 
 /**
@@ -502,17 +366,16 @@ export const mp4CommandArgs = (command: Mp4Command): ReadonlyArray<string> => {
     from: 0,
     videoIndex: command.videoIndex,
     videoCodec: command.videoCodec,
-    videoBitDepth: command.videoBitDepth,
     video: command.video,
     audio: command.audio,
     audioCodec: command.audioCodec,
     copiedAudioEnd: undefined,
-    subtitleCodec: "",
     segmentStarts: [],
     previousStart: undefined,
-    qsvDevice: command.qsvDevice,
-    vaapiDevice: command.vaapiDevice,
   };
+
+  const video = command.video;
+  const encoded = VideoPlan.$is("Encode")(video) ? rendered(source, video) : undefined;
 
   return [
     "-hide_banner",
@@ -522,10 +385,10 @@ export const mp4CommandArgs = (command: Mp4Command): ReadonlyArray<string> => {
     "error",
     "-progress",
     command.progress,
-    ...hardwareInput(source),
+    ...(encoded?.input ?? []),
     "-i",
     command.input,
-    ...videoArgs(source),
+    ...videoArgs(source, encoded),
     ...audioArgs(source, { input: 0, copyFilters: [], aac: [] }),
     "-map_metadata",
     "-1",

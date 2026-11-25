@@ -17,6 +17,11 @@ evidence of where it ran.
 - `hw-burn-in` draws the DVD (image) subtitle track into the picture.
 - `hw-encode-h264`, `hw-encode-hevc`, and `hw-encode-av1` encode for a device that plays only that
   codec (H.264 under a 4 Mb/s cap, since an H.264 browser plays the source as it is).
+- `hw-hybrid` runs one stage of a GPU path on the CPU where the device can't do it, as the service
+  plans from what it proved: `hybrid-cpu-decode` decodes generated 10-bit H.264, which Intel media
+  engines don't decode, on the CPU and scales and encodes on the GPU; `hybrid-cpu-tone-map` maps
+  generated HLG HEVC on the CPU between VA-API's decode and encode, since VA-API's tone map needs
+  mastering display metadata HLG lacks.
 - `hw-path` shows where each stage ran: the ffmpeg arguments inside the container, that ffmpeg's
   GPU engine time, the encoder's fingerprint in the bytes, the negotiated mode, and the service's
   `Stream.mode_changed` records.
@@ -78,7 +83,9 @@ Preconditions:
   `idet.txt`; `picture.txt` with `output-240.png`; or `output-108.png`, `source-108.png`, and
   `changed-108.png` (the pixels the subtitle changed).
 - **Add a row.** A stage, a path, or a hybrid row (a CPU decode feeding a GPU encode, say) is an
-  entry in `scripts/hardware-matrix.mjs`: a fixture in `FIXTURES` (a demo library version, or one
+  entry in `scripts/hardware-matrix.mjs`. A hybrid row's id starts with `hybrid-`, and its `work`
+  pins the operation that runs elsewhere (`decode: "cpu"`); that operation is judged by the run's
+  arguments alone, since the run's other stages hold the GPU. A row needs a fixture in `FIXTURES` (a demo library version, or one
   generated with the side's ffmpeg), a client in `PROFILES`, a row in `ROWS` with its request, its
   checks, and `work` (where each operation must run), and for a new operation its rule in `WORK`.
   `node --test .agents/skills/verify-media/scripts/hardware-matrix.test.mjs` checks the table.
@@ -98,9 +105,10 @@ Preconditions:
   service's user: `drm-engine-*` nanoseconds on i915, `drm-cycles-*` on xe. Decode and encode share
   the video engine, so a GPU decode also needs `-hwaccel <path> -hwaccel_output_format <path>`,
   which fails the run, not silently, when the GPU can't decode the source.
-- `qsv` and `vaapi` set explicitly are trusted at startup, as the service does; `/api/health`
-  reports the setting, not a probe. The cells, not the health line, say whether the GPU did the
-  work.
+- The service probes `qsv` and `vaapi` set explicitly as it does `auto`, stage by stage.
+  `/api/health` reports the first of them with a verified encoder, so it reads `none` until the
+  probes finish and when the device can't encode. The cells, not the health line, say whether the
+  GPU did the work.
 - The hdr-to-sdr bounds compare the picture with a software Hable tone map of the same frames: a
   different tone curve passes, and a black, washed-out, blown-out, or tinted picture fails.
 - The burn-in compare counts pixels that differ from the source frame by more than 40 levels: 1 %

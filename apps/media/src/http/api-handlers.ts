@@ -9,7 +9,7 @@ import * as BackendHealth from "../backend-health.ts";
 import * as ClientDiagnostics from "../diagnostics/client-events.ts";
 import * as Downloads from "../downloads/downloads.ts";
 import * as MediaConfig from "../media-config.ts";
-import * as HardwareAcceleration from "../playback/hardware-acceleration.ts";
+import * as TranscodeCapabilities from "../playback/transcode-capabilities.ts";
 import * as PlaybackNegotiator from "../playback/playback-negotiator.ts";
 import * as PlaybackToken from "../playback/playback-grants.ts";
 import * as StreamSessions from "../playback/stream-sessions.ts";
@@ -98,7 +98,7 @@ const systemHandlers = HttpApiBuilder.group(
   "system",
   Effect.fn(function* (handlers) {
     const sessions = yield* StreamSessions.Service;
-    const hardware = yield* HardwareAcceleration.Service;
+    const capabilities = yield* TranscodeCapabilities.Service;
     const backend = yield* BackendHealth.Service;
     const config = yield* MediaConfig.Service;
 
@@ -108,7 +108,7 @@ const systemHandlers = HttpApiBuilder.group(
           status: "ok" as const,
           activeStreams: yield* sessions.activeCount,
           runsAwaitingExit: yield* sessions.runsAwaitingExit,
-          hardwareAcceleration: (yield* hardware.encoder) ?? ("none" as const),
+          hardwareAcceleration: (yield* capabilities.hardwareEncoder) ?? ("none" as const),
           backend: yield* backend.status,
         };
       }),

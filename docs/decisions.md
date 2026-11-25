@@ -89,11 +89,16 @@ Old movies' Convex project, its SDK client, and its command registry were delete
   → tell the viewer.
 - Playback modes are one vocabulary everywhere: `direct`, `remux`, `audio-transcode`,
   `transcode-qsv`, `transcode-vaapi`, `transcode-software`.
-- GPU encoders: `HARDWARE_ACCELERATION=auto` test-encodes with Quick Sync, then VA-API, and uses
-  the first that works; `qsv` and `vaapi` trust the setting. A GPU run that fails marks that
-  encoder unavailable for the process and the session continues in software. HDR is tone-mapped
-  to SDR on the GPU (`vpp_qsv`, `tonemap_vaapi`) or in software with `zscale` and `tonemap` when
-  the ffmpeg build has them; without either, HDR that the client cannot display is refused.
+- GPU stages: `HARDWARE_ACCELERATION=auto` considers Quick Sync, then VA-API, then the CPU;
+  `qsv` and `vaapi` consider that one GPU, and `none` the CPU alone. Every stage (decode, scale,
+  tone map, encode, and the moves between CPU and GPU memory) is a capability the media service
+  proves through ffmpeg on the device, per codec, pixel format, and depth, and a plan uses only
+  proven ones: a 10-bit H.264 source the Arc A380 cannot decode decodes on the CPU and still scales
+  and encodes on the GPU. A run that fails is diagnosed: a stage whose probe fails again is set
+  aside for a while (15 minutes, then 2 hours, then until a restart), and the stream replans without
+  it, then in software, then answers `TranscodeFailed`. HDR is tone-mapped to SDR on the GPU
+  (`vpp_qsv`, `tonemap_vaapi`) or in software with `zscale` and `tonemap` when the ffmpeg build has
+  them; without either, HDR that the client cannot display is refused.
 - A stream's ffmpeg pauses (`SIGSTOP`) once its output runs `STREAM_BUFFER_AHEAD_SECONDS` (120)
   past the furthest segment the player asked for, and continues (`SIGCONT`) when the player is
   within half of that. A remux copies at disk speed, and without the pause every play wrote most of
@@ -103,8 +108,8 @@ Old movies' Convex project, its SDK client, and its command registry were delete
   2, 2, and 2 seconds on a transcode's 4-second grid; one keyframe each for a copy), and the plan
   returns to its normal length after them; the plan is fixed for the session. Negotiation answers
   as soon as ffmpeg is started, so the player loads hls.js, the playlist, and the init segment while
-  the first segment is encoded; only a hardware encode waits for its first segment, since a failure
-  there falls back to software and changes the mode the answer names.
+  the first segment is encoded; only a run with a stage on a GPU waits for its first segment, since
+  a failure there is replaced, which can change the generation and the mode the answer names.
 - Keyframes for copies come from the container's own index (Matroska Cues, MP4 sample tables) in
   a few reads, else from an ffprobe packet scan of the whole file, cached on disk. Negotiation
   waits at most two seconds for a scan; past that it encodes when the client can take an encode,

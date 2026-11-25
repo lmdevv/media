@@ -38,8 +38,10 @@ import * as MediaTools from "../media/media-tools.ts";
 import { MediaToolFailed } from "../media/media-tools.ts";
 import * as FileResolver from "../playback/file-resolver.ts";
 import { type CheckedMediaFile, resolveInsideRoots } from "../playback/file-resolver.ts";
-import * as HardwareAcceleration from "../playback/hardware-acceleration.ts";
-import { AudioPlan, VideoPlan } from "../playback/playback-decision.ts";
+import { sourceScope } from "../playback/capability-inventory.ts";
+import { AudioPlan, encodeIntent, VideoPlan } from "../playback/playback-decision.ts";
+import * as TranscodeCapabilities from "../playback/transcode-capabilities.ts";
+import { sourceOf } from "../playback/video-pipeline.ts";
 import { subtitleViews } from "../playback/playback-negotiator.ts";
 import * as EndedSessions from "../playback/ended-sessions.ts";
 import * as PlaybackToken from "../playback/playback-grants.ts";
@@ -130,7 +132,7 @@ const make = Effect.gen(function* () {
   const config = yield* MediaConfig.Service;
   const verifier = yield* PlaybackToken.Service;
   const resolver = yield* FileResolver.Service;
-  const hardware = yield* HardwareAcceleration.Service;
+  const capabilities = yield* TranscodeCapabilities.Service;
   const tools = yield* MediaTools.Service;
   const space = yield* TranscodeSpace.Service;
   const ended = yield* EndedSessions.Service;
@@ -224,12 +226,9 @@ const make = Effect.gen(function* () {
           input: file.path,
           videoIndex: video?.index ?? 0,
           videoCodec: video?.codec ?? "",
-          videoBitDepth: video?.bitDepth ?? 8,
           video: plan.video,
           audio: plan.audio,
           audioCodec: file.probe.audio.find((track) => track.index === audioIndex)?.codec ?? "",
-          qsvDevice: config.qsvDevice,
-          vaapiDevice: config.vaapiDevice,
           output: part,
           progress,
         }),
@@ -391,9 +390,29 @@ const make = Effect.gen(function* () {
 
     yield* Effect.annotateCurrentSpan({ fileId: grant.fileId, sessionId: grant.sessionId });
 
+    const source = file.probe.video;
+
+    const intent =
+      source === undefined
+        ? undefined
+        : encodeIntent(file.probe, source, request.capabilities, { quality: undefined });
+
+    // Downloads encode on the CPU, so the build listing settles what they need without a probe.
+    const known =
+      source === undefined || intent === undefined
+        ? { domains: [], verified: new Set<never>(), excluded: new Set<never>() }
+        : yield* capabilities.current({
+            scope: sourceScope(file.fileId, file.sizeBytes, file.modifiedAtMs, source.index),
+            path: file.path,
+            stream: source.index,
+            source: sourceOf(source),
+            intent,
+            excluded: new Set(),
+          });
+
     const plan = decideDownload(file.probe, request.capabilities, request.quality, {
       audioIndex: request.audioStreamIndex,
-      softwareToneMapping: yield* hardware.softwareToneMapping,
+      capabilities: known,
       sizeBytes: file.sizeBytes,
     });
 
@@ -484,11 +503,11 @@ const make = Effect.gen(function* () {
       container: "mp4",
       video: VideoPlan.$match(plan.video, {
         Copy: () => sourceVideo,
-        Encode: ({ width, height }) => ({
-          codec: "h264",
-          width,
-          height,
-          dynamicRange: "sdr" as const,
+        Encode: ({ output }) => ({
+          codec: output.codec,
+          width: output.width,
+          height: output.height,
+          dynamicRange: output.dynamicRange,
         }),
       }),
       audio: AudioPlan.$match(plan.audio, {
@@ -561,7 +580,7 @@ export const layer: Layer.Layer<
   | MediaConfig.Service
   | PlaybackToken.Service
   | FileResolver.Service
-  | HardwareAcceleration.Service
+  | TranscodeCapabilities.Service
   | MediaTools.Service
   | TranscodeSpace.Service
   | EndedSessions.Service

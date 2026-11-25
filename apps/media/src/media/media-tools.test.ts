@@ -2,8 +2,21 @@ import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it, layer } from "@effect/vitest";
 import { Duration, Effect, Exit, FileSystem, Layer, Scope } from "effect";
 
+import { ffmpegAvailable } from "../testing/fixture-library.ts";
 import { testConfigLayer } from "../testing/test-config.ts";
 import * as MediaTools from "./media-tools.ts";
+
+const hasFfmpeg = await ffmpegAvailable();
+
+/** A source path longer than the start of standard error the tools keep, of recognizable folders. */
+const LONG_PATH = `/srv/media/${Array.from(
+  { length: 12 },
+  (_, index) => `private-folder-${String(index)}-${"x".repeat(170)}`,
+).join("/")}/film.mkv`;
+
+const ffmpegLayer = MediaTools.layer.pipe(
+  Layer.provide(testConfigLayer({ FFMPEG_PATH: process.env["FFMPEG_PATH"] ?? "ffmpeg" })),
+);
 
 const toolsLayer = MediaTools.layer.pipe(
   Layer.provide(testConfigLayer({ FFPROBE_PATH: "/usr/bin/env" })),
@@ -97,6 +110,53 @@ describe("media tools", () => {
         assert.strictEqual(failure.stderr, "no decoder for <path>");
       }),
     );
+
+    tools.effect("replaces a path that reaches standard error in pieces", () =>
+      Effect.gen(function* () {
+        const service = yield* MediaTools.Service;
+
+        const failure = yield* service
+          .ffmpeg([
+            "-e",
+            [
+              "const path = process.argv[1];",
+              "process.stderr.write(`Error opening input file ${path.slice(0, 2000)}`);",
+              "setTimeout(() => {",
+              "  process.stderr.write(`${path.slice(2000)}.\\n`);",
+              "  process.exit(1);",
+              "}, 50);",
+            ].join(" "),
+            "--",
+            LONG_PATH,
+          ])
+          .pipe(Effect.flip);
+
+        assert.strictEqual(failure.stderrHead, "Error opening input file <path>.\n");
+        assert.strictEqual(failure.stderr, "Error opening input file <path>.\n");
+      }),
+    );
+  });
+
+  describe.skipIf(!hasFfmpeg)("over ffmpeg", () => {
+    layer(ffmpegLayer)((tools) => {
+      tools.effect("keeps no part of a path longer than the start of standard error it keeps", () =>
+        Effect.gen(function* () {
+          const service = yield* MediaTools.Service;
+
+          const failure = yield* service
+            .ffmpeg(["-hide_banner", "-nostdin", "-i", LONG_PATH, "-f", "null", "-"])
+            .pipe(Effect.flip);
+
+          assert.isAbove(LONG_PATH.length, 2048);
+          assert.include(failure.stderrHead, "<path>");
+
+          for (const text of [failure.stderrHead, failure.stderr, failure.message]) {
+            assert.notInclude(text, "private-folder");
+            assert.notInclude(text, "xxxxxxxx");
+          }
+        }),
+      );
+    });
   });
 
   layer(hangingLayer, { excludeTestServices: true })((tools) => {

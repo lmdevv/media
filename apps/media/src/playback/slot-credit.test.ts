@@ -15,6 +15,7 @@ import * as PlaybackReporter from "./playback-reporter.ts";
 import * as PlaybackToken from "./playback-grants.ts";
 import * as StreamOwners from "./stream-owners.ts";
 import * as StreamSessions from "./stream-sessions.ts";
+import { verifiedFor, withoutToneMaps } from "../testing/capability-snapshots.ts";
 
 const hasFfmpeg = await ffmpegAvailable();
 
@@ -174,8 +175,7 @@ const setup = Effect.gen(function* () {
 
   const plan = decidePlayback(file.probe, capabilities, {
     audioIndex: undefined,
-    hardware: undefined,
-    softwareToneMapping: false,
+    capabilities: verifiedFor(file.probe, [], withoutToneMaps),
   });
 
   if (!PlaybackPlan.$is("Hls")(plan)) return yield* Effect.die("expected HLS");

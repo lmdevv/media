@@ -16,6 +16,7 @@ import {
   VideoPlan,
   type VideoPlan as VideoPlanType,
 } from "../playback/playback-decision.ts";
+import type { CapabilitySnapshot } from "../playback/video-pipeline.ts";
 
 const DOWNLOAD_CAPS: Readonly<Record<DownloadQuality, PlaybackQuality>> = {
   standard: { maxHeight: 720, maxBitrate: 4_000_000 },
@@ -50,8 +51,8 @@ export const DownloadPlan = Data.taggedEnum<DownloadPlan>();
 export interface DownloadOptions {
   /** ffmpeg stream index of the audio track to keep; the default track when absent. */
   readonly audioIndex: number | undefined;
-  /** Whether this ffmpeg can tone-map HDR to SDR in software. */
-  readonly softwareToneMapping: boolean;
+  /** What this server's transcoder may use for the file; only its CPU rows are used. */
+  readonly capabilities: CapabilitySnapshot;
   /** The source file's size on disk. */
   readonly sizeBytes: number;
 }
@@ -81,8 +82,7 @@ export const decideDownload = (
     },
     {
       audioIndex: options.audioIndex,
-      hardware: undefined,
-      softwareToneMapping: options.softwareToneMapping,
+      capabilities: { ...options.capabilities, domains: [] },
       quality: DOWNLOAD_CAPS[quality],
     },
   );
@@ -101,7 +101,7 @@ export const decideDownload = (
         Copy: () =>
           options.sizeBytes +
           (AudioPlan.$is("Aac")(audio) ? (AAC_BITRATE * probe.durationSeconds) / 8 : 0),
-        Encode: ({ bitrate }) => ((bitrate + audioBits) * probe.durationSeconds) / 8,
+        Encode: ({ output }) => ((output.bitrate + audioBits) * probe.durationSeconds) / 8,
       });
 
       return DownloadPlan.Mp4({ mode, video, audio, estimatedBytes: Math.ceil(estimatedBytes) });

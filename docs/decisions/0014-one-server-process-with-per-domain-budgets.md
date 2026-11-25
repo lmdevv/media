@@ -125,7 +125,8 @@ mount media read-only.
   reached, that run starts once the stream's previous encoder stopped. Below the limit it starts
   at once.
 - A stream's encoder changes one step at a time, on a fiber the stream owns: the first run, a seek
-  or a resume that starts a new run, a hardware fallback, a release, and a yield. A request only
+  or a resume that starts a new run, a replacement after a failed run, a release, and a yield. A
+  request only
   waits for the step it asked for. When the player disconnects mid-seek, the step still finishes,
   and the stream's next request finds it done.
 - A segment, init, or seek request answers within 30 seconds, counting its wait for a step already
@@ -134,8 +135,9 @@ mount media read-only.
   seconds for the library's disk before its response starts, then fails as unreadable. Reading the
   body after that has no bound of its own yet. A start answers within one bound
   from its arrival, then fails with capacity reached: the guest line (20 seconds), the keyframe
-  scan's timeout, a replaced stream's stop (3 seconds), and its first run (63 seconds, enough for a
-  hardware run to fail and its software fallback to start).
+  scan's timeout, a replaced stream's stop (3 seconds), and its first run (103 seconds, enough for
+  the run and both replacements recovery may start to fail, each after a diagnosis of up to
+  5 seconds).
 - A step that only waits, as a guest's resume does in the line, stops waiting once its request is
   gone, so the stream's next request does not queue behind it.
 - No folder is deleted while the server has a file in it open. Every read of a run's files runs to
