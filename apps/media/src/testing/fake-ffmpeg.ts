@@ -56,15 +56,18 @@ export interface FakeFfmpegBehavior {
 /**
  * A rule for runs whose arguments, as the service wrote them, contain `token`. `runs` picks HLS
  * runs, capability probes (`-progress` into the null output), or any run. A matching run waits
- * `delayMs`, then with `stderr` writes it and exits with status 1, with `hang` never exits until
- * killed, and otherwise runs as usual. A rule with `armedBy` applies only once a rule that `arm`s
- * that name has matched, so a probe can pass at start and fail after a stream's failure; `limit`
- * caps how many runs a rule matches.
+ * `delayMs`, then writes `stderr` if given; then with `signal` it is killed by that signal, with
+ * `hang` it never exits until killed, with `exitCode` it exits with that status, with `stderr`
+ * alone it exits with status 1, and otherwise it runs as usual. A rule with `armedBy` applies only
+ * once a rule that `arm`s that name has matched, so a probe can pass at start and fail after a
+ * stream's failure; `limit` caps how many runs a rule matches.
  */
 export interface RunRule {
   readonly token: string;
   readonly runs: "hls" | "probe" | "any";
   readonly stderr?: string;
+  readonly signal?: NodeJS.Signals;
+  readonly exitCode?: number;
   readonly hang?: true;
   readonly delayMs?: number;
   readonly arm?: string;
@@ -143,7 +146,9 @@ for (const [index, rule] of (behavior.rules ?? []).entries()) {
     if (rule.arm !== undefined) writeFileSync(join(here, "armed-" + rule.arm), "");
     if (rule.delayMs !== undefined) await new Promise((resolve) => setTimeout(resolve, rule.delayMs));
     if (rule.stderr !== undefined) process.stderr.write(rule.stderr + "\\n");
-    if (rule.hang === true) await new Promise(() => setInterval(() => {}, 60_000));
+    if (rule.signal !== undefined) process.kill(process.pid, rule.signal);
+    if (rule.hang === true || rule.signal !== undefined) await new Promise(() => setInterval(() => {}, 60_000));
+    if (rule.exitCode !== undefined) process.exit(rule.exitCode);
     if (rule.stderr !== undefined) process.exit(1);
     break;
   }

@@ -173,7 +173,10 @@ export type Diagnosis = Data.TaggedEnum<{
     readonly keys: ReadonlyArray<CapabilityKey>;
     readonly impls: ReadonlyArray<ImplId>;
   };
-  /** Every suspect's probe passed: the source is the cause, and it is kept from these rows. */
+  /**
+   * The source is the cause, and it is kept from these rows: every suspect ran on generated
+   * frames, or one failed again only on the source itself.
+   */
   Source: { readonly impls: ReadonlyArray<ImplId> };
   /** The probes ran out of time: no verdict, and this stream keeps off these rows. */
   Undecided: { readonly impls: ReadonlyArray<ImplId> };

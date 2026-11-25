@@ -1,6 +1,6 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, layer } from "@effect/vitest";
-import { Context, Duration, Effect, Fiber, FileSystem, Layer, Path, Result } from "effect";
+import { Context, Duration, Effect, FileSystem, Layer, Option, Path, Result } from "effect";
 import { TestClock } from "effect/testing";
 
 import { MediaFileId } from "@media/contracts/ids";
@@ -230,17 +230,64 @@ const hanging = await writeFakeFfmpeg({
   rules: [{ token: "tonemap=1", runs: "probe", hang: true }],
 });
 
-const racing = await standIn({
+const IO_SURFACE = "[h264_qsv @ 0x1] Error querying IO surface: unsupported (-3)";
+
+/** The first file's decoder probe fails once armed; the second file's never does. */
+const sourceOnly = await standIn({
   rules: [
-    { token: "held.mkv", runs: "probe", delayMs: 1500 },
     { token: "arm-first", runs: "any", arm: "first", stderr: "armed" },
+    { token: "first.mkv", runs: "probe", armedBy: "first", stderr: IO_SURFACE },
+  ],
+});
+
+/** Once armed, every Quick Sync tone map probe fails, as through one outage of the device. */
+const outage = await standIn({
+  rules: [
+    { token: "arm-tonemap", runs: "any", arm: "tonemap", stderr: "armed" },
+    { token: "tonemap=1", runs: "probe", armedBy: "tonemap", stderr: VPP_FAILED },
+  ],
+});
+
+/** Tone map probes that end in a way that proves nothing about the tone map. */
+const PROVES_NOTHING: ReadonlyArray<readonly [string, FakeFfmpegBehavior]> = [
+  ["stopped by SIGINT", { rules: [{ token: "tonemap=1", runs: "probe", signal: "SIGINT" }] }],
+  ["hung up (SIGHUP)", { rules: [{ token: "tonemap=1", runs: "probe", signal: "SIGHUP" }] }],
+  [
+    "a wrapper that could not run ffmpeg (127)",
     {
-      token: "first.mkv",
-      runs: "probe",
-      armedBy: "first",
-      stderr: "[h264_qsv @ 0x1] Error querying IO surface: unsupported (-3)",
+      rules: [
+        {
+          token: "tonemap=1",
+          runs: "probe",
+          exitCode: 127,
+          stderr: "sh: line 1: /usr/bin/ffmpeg: No such file or directory",
+        },
+      ],
     },
   ],
+  ["a clean exit with no frames", { rules: [{ token: "tonemap=1", runs: "probe", exitCode: 0 }] }],
+];
+
+const provingNothing = await Promise.all(
+  PROVES_NOTHING.map(async ([name, behavior]) => [name, await standIn(behavior)] as const),
+);
+
+/** A tone map probe that crashes, which ffmpeg ran: a refusal. */
+const crashing = await standIn({
+  rules: [{ token: "tonemap=1", runs: "probe", signal: "SIGSEGV" }],
+});
+
+/** The build's first `-version` listing fails, as a transient error would make it; later ones work. */
+const listingOnceFailed = await writeFakeFfmpeg({
+  rules: [
+    {
+      token: "-version",
+      runs: "any",
+      limit: 1,
+      stderr: "ffmpeg: error while loading shared libraries: libva.so.2: cannot open shared object",
+    },
+  ],
+  logInvocations: true,
 });
 
 const relapsing = await standIn({
@@ -326,62 +373,183 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
   });
 
   layer(
-    racing.services,
+    sourceOnly.services,
     live,
   )((it) => {
     it.effect(
-      "keeps a real source's decoder evidence to that source, and drops a probe a quarantine overtook",
+      "keeps a failure reproduced only on one file to that file: a healthy file of the same variant keeps GPU decode",
       () =>
         Effect.gen(function* () {
           const capabilities = yield* TranscodeCapabilities.Service;
           const tools = yield* MediaTools.Service;
           const first = request(JPEG_RANGE, "first", yield* jpegRangeFile("first"));
           const second = request(JPEG_RANGE, "second", yield* jpegRangeFile("second"));
-          const held = request(JPEG_RANGE, "held", yield* jpegRangeFile("held"));
           const snapshot = yield* capabilities.resolve(first);
 
           assert.isTrue(snapshot.verified.has(DECODE_JPEG_RANGE));
           assert.strictEqual(yield* statusOf(DECODE_JPEG_RANGE), "unknown");
           assert.strictEqual(yield* statusOf(DECODE_JPEG_RANGE, second.scope), "unknown");
 
-          // A slow probe holds the queue; the diagnosis's probe of the first source queues next,
-          // the second source's probe after it, under the epoch before the diagnosis's quarantine.
+          // No generated clip has this layout, so the diagnosis re-probes the first file itself.
           yield* tools.ffmpeg(["arm-first"]).pipe(Effect.ignore);
-          const holding = yield* capabilities.resolve(held).pipe(Effect.forkChild);
-
-          yield* Effect.sleep("300 millis");
           const pipeline = pipelineOf(JPEG_RANGE, snapshot);
 
-          const diagnosing = yield* capabilities
-            .diagnose({
-              request: first,
-              pipeline,
-              owners: {
-                decoder: { step: 0, names: ["h264", "h264_qsv"] },
-                encoder: { step: pipeline.steps.length - 1, names: ["h264_qsv"] },
-                filters: new Map(),
-              },
-              failure: {
-                exitCode: 69,
-                signal: null,
-                stderrHead: "[h264_qsv @ 0x1] Error querying IO surface: unsupported (-3)",
-              },
-            })
-            .pipe(Effect.forkChild);
+          const diagnosis = yield* capabilities.diagnose({
+            request: first,
+            pipeline,
+            owners: {
+              decoder: { step: 0, names: ["h264", "h264_qsv"] },
+              encoder: { step: pipeline.steps.length - 1, names: ["h264_qsv"] },
+              filters: new Map(),
+            },
+            failure: { exitCode: 69, signal: null, stderrHead: IO_SURFACE },
+          });
 
-          yield* Effect.sleep("300 millis");
-          const resolving = yield* capabilities.resolve(second).pipe(Effect.forkChild);
-          const diagnosis = yield* Fiber.join(diagnosing);
+          assert.deepStrictEqual(diagnosis, Diagnosis.Source({ impls: [ImplId("decode.qsv")] }));
 
-          yield* Fiber.join(resolving);
-          yield* Fiber.join(holding);
+          const shared = Inventory.capabilityOf(yield* capabilities.inventory, DECODE_JPEG_RANGE);
 
-          assert.deepStrictEqual(
-            diagnosis,
-            Diagnosis.Capability({ keys: [DECODE_JPEG_RANGE], impls: [ImplId("decode.qsv")] }),
+          assert.strictEqual(shared.status, "unknown");
+          assert.isTrue(Option.isNone(shared.quarantine), "nothing shared is set aside");
+
+          const healthy = yield* capabilities.resolve(second);
+
+          assert.strictEqual(
+            plannedImpls(JPEG_RANGE, healthy)
+              .pipe(Result.getOrElse(() => []))
+              .at(0),
+            "decode.qsv",
+            "the healthy file still decodes on the GPU",
           );
-          assert.strictEqual(yield* runsWith(racing.ffmpeg, "second.mkv"), 2);
-          assert.strictEqual(yield* statusOf(DECODE_JPEG_RANGE, second.scope), "unknown");
+          assert.strictEqual(yield* statusOf(DECODE_JPEG_RANGE, second.scope), "verified");
+
+          const failing = yield* capabilities.resolve(first);
+
+          assert.isTrue(failing.excluded.has(ImplId("decode.qsv")));
+          assert.notInclude(
+            plannedImpls(JPEG_RANGE, failing).pipe(
+              Result.getOrElse((): ReadonlyArray<string> => []),
+            ),
+            "decode.qsv",
+          );
+        }),
+      60_000,
+    );
+  });
+
+  layer(
+    outage.services,
+    live,
+  )((it) => {
+    it.effect(
+      "takes one strike for one outage, however many diagnoses report it",
+      () =>
+        Effect.gen(function* () {
+          const capabilities = yield* TranscodeCapabilities.Service;
+          const tools = yield* MediaTools.Service;
+          const warm = yield* capabilities.resolve(request(HDR));
+
+          assert.isTrue(warm.verified.has(TONE_MAP_QSV));
+          yield* tools.ffmpeg(["arm-tonemap"]).pipe(Effect.ignore);
+          const failed = vppFailed(pipelineOf(HDR, warm));
+
+          const struck = Diagnosis.Capability({
+            keys: [TONE_MAP_QSV],
+            impls: [ImplId("tonemap.qsv")],
+          });
+
+          // Two viewers' runs failed at once, and a third's diagnosis begins after the quarantine.
+          const both = yield* Effect.all(
+            [capabilities.diagnose(failed), capabilities.diagnose(failed)],
+            {
+              concurrency: 2,
+            },
+          );
+
+          const later = yield* capabilities.diagnose(failed);
+
+          assert.deepStrictEqual(both, [struck, struck]);
+          assert.deepStrictEqual(later, struck);
+          assert.deepStrictEqual(
+            Option.map(
+              Inventory.capabilityOf(yield* capabilities.inventory, TONE_MAP_QSV).quarantine,
+              (quarantine) => quarantine.strikes,
+            ),
+            Option.some(1),
+          );
+        }),
+      60_000,
+    );
+  });
+
+  for (const [name, provingNothingOf] of provingNothing) {
+    layer(
+      provingNothingOf.services,
+      live,
+    )((it) => {
+      it.effect(
+        `leaves a key unknown, with a backoff, after a probe ${name}`,
+        () =>
+          Effect.gen(function* () {
+            const capabilities = yield* TranscodeCapabilities.Service;
+            const snapshot = yield* capabilities.resolve(request(HDR));
+            const known = Inventory.capabilityOf(yield* capabilities.inventory, TONE_MAP_QSV);
+
+            assert.strictEqual(known.status, "unknown");
+            assert.deepStrictEqual(
+              known.evidence.map((evidence) =>
+                Inventory.Evidence.$is("Probe")(evidence) ? evidence.outcome : "build",
+              ),
+              ["inconclusive"],
+            );
+            assert.isAbove(known.retryAt, 0);
+            assert.isFalse(snapshot.verified.has(TONE_MAP_QSV));
+          }),
+        60_000,
+      );
+    });
+  }
+
+  layer(
+    crashing.services,
+    live,
+  )((it) => {
+    it.effect(
+      "refuses a key whose probe crashes ffmpeg",
+      () =>
+        Effect.gen(function* () {
+          const capabilities = yield* TranscodeCapabilities.Service;
+
+          yield* capabilities.resolve(request(HDR));
+          assert.strictEqual(yield* statusOf(TONE_MAP_QSV), "unsupported");
+        }),
+      60_000,
+    );
+  });
+
+  layer(
+    servicesOf(listingOnceFailed, { HARDWARE_ACCELERATION: "none" }),
+    live,
+  )((it) => {
+    it.effect(
+      "reads the build's listings again after one failed, and never refuses the CPU for it",
+      () =>
+        Effect.gen(function* () {
+          const capabilities = yield* TranscodeCapabilities.Service;
+          const sdr: SourceVideo = { ...JPEG_RANGE, pixelFormat: "yuv420p" };
+          const encodeCpu = capabilityKey(ImplId("encode.cpu"), "h264/8/crf");
+
+          // The first need may meet the failed listing; the next reads it again.
+          yield* capabilities.current(request(sdr));
+          assert.notStrictEqual(yield* statusOf(encodeCpu), "unsupported");
+          const snapshot = yield* capabilities.current(request(sdr));
+
+          assert.isTrue(Option.isSome((yield* capabilities.inventory).build));
+          assert.deepStrictEqual(
+            plannedImpls(sdr, snapshot),
+            Result.succeed(["decode.cpu", "scale.cpu", "encode.cpu"]),
+          );
+          assert.strictEqual(yield* runsWith(listingOnceFailed, "-version"), 2);
         }),
       60_000,
     );

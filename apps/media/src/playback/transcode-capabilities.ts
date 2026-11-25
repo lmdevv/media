@@ -7,7 +7,8 @@
  * sources where no clip stands in, and then plans once from a snapshot. After a failed run it
  * re-probes the suspects: a reproduced failure quarantines that one key, a failure nothing
  * reproduces keeps that source from the rows involved, and running out of time decides nothing.
- * A listing proves the CPU's rows, which touch no device; it never proves a GPU row.
+ * A listing proves the CPU's rows, which touch no device; it never proves a GPU row. A listing
+ * that fails is read again at the next need, and the CPU's rows stay unknown meanwhile.
  */
 import {
   Clock,
@@ -15,12 +16,14 @@ import {
   Deferred,
   Duration,
   Effect,
+  Exit,
   FileSystem,
   Layer,
   Option,
   Path,
   Ref,
   Result,
+  type Scope,
   Semaphore,
 } from "effect";
 
@@ -127,9 +130,6 @@ export const NegotiationBudget = Context.Reference<Duration.Duration>(
 
 const DIAGNOSIS_BUDGET = Duration.seconds(5);
 
-/** How long a source stays off the rows a failure nothing reproduced pointed at. */
-const SOURCE_EXCLUSION_MS = 24 * 3_600_000;
-
 /** Quarantines on one device this close together make the service open the device again. */
 const DEVICE_CHECK_WINDOW_MS = 60_000;
 
@@ -148,10 +148,17 @@ type Priority = "warmup" | "demand";
 /** The key a step exercises, the domain it runs in, and what it needs from the build. */
 type Target = Pick<Step, "on" | "needs"> & { readonly key: CapabilityKey };
 
-const STOPPED: ReadonlySet<string> = new Set(["SIGKILL", "SIGTERM"]);
+/** Signals of a crash: ffmpeg ran, and the stage it ran broke it. */
+const CRASHES: ReadonlySet<string> = new Set(["SIGSEGV", "SIGBUS", "SIGILL", "SIGABRT", "SIGFPE"]);
+
+/** What a shell that could not run ffmpeg exits with: not executable, or not found. */
+const NOT_RUN: ReadonlySet<number> = new Set([126, 127]);
 
 const DEVICE_FAILED =
   /Device creation failed|for option 'init_hw_device'|Failed to (?:open|initialise) VAAPI/u;
+
+/** What ffmpeg writes when a signal, not the stage, ended it. */
+const ENDED_BY_SIGNAL = /received signal \d+|system signals, hard exiting/u;
 
 /** The first line ffmpeg itself wrote, past libva's informational lines. */
 const firstLine = (text: string): string =>
@@ -162,13 +169,29 @@ const firstLine = (text: string): string =>
       .find((line) => !line.startsWith("libva info:")) ?? ""
   ).slice(0, 200);
 
-/** What a failed probe run proves: a crash or a refusal rejects; a timeout, kill, or closed device proves nothing. */
-const outcomeOf = (failure: MediaTools.MediaToolFailed): Inventory.ProbeOutcome => {
-  if (failure.signal !== null) return STOPPED.has(failure.signal) ? "inconclusive" : "rejected";
+/**
+ * What one probe run proves, decided here alone. It passed when ffmpeg exited 0 and frames came
+ * out. It was rejected when ffmpeg ran and refused by its own decision, exiting non-zero with an
+ * error it wrote, or crashed (SIGSEGV, SIGBUS, SIGILL, SIGABRT, SIGFPE). Anything else proves
+ * nothing: a clean exit without frames, a stop by any other signal or ffmpeg's exit on one, a
+ * shell that could not run ffmpeg (126, 127), a spawn error, a timeout, or a device that would not
+ * open.
+ */
+const probeOutcome = (
+  result: Result.Result<string, MediaTools.MediaToolFailed>,
+): Inventory.ProbeOutcome => {
+  if (Result.isSuccess(result)) return probedFrames(result.success) > 0 ? "passed" : "inconclusive";
+  const { signal, exitCode, stderrHead } = result.failure;
 
-  if (failure.exitCode === null) return "inconclusive";
+  if (signal !== null) return CRASHES.has(signal) ? "rejected" : "inconclusive";
 
-  return DEVICE_FAILED.test(failure.stderrHead) ? "inconclusive" : "rejected";
+  if (exitCode === null || NOT_RUN.has(exitCode)) return "inconclusive";
+
+  return firstLine(stderrHead) === "" ||
+    ENDED_BY_SIGNAL.test(stderrHead) ||
+    DEVICE_FAILED.test(stderrHead)
+    ? "inconclusive"
+    : "rejected";
 };
 
 /** Every component a build listing shows: codecs ffmpeg decodes, decoders, encoders, filters, hardware accelerations. */
@@ -250,6 +273,57 @@ interface Demand {
   readonly idle: Deferred.Deferred<void>;
 }
 
+/** Runs some shared work under `name`, or waits for the run already under way. */
+type Shared<K, A> = (
+  name: K,
+  work: Effect.Effect<Option.Option<A>>,
+  keep: boolean,
+) => Effect.Effect<Option.Option<A>>;
+
+/**
+ * Work every caller of one name shares: one run at a time, forked in `scope`, so a caller that
+ * stops waiting, as at a negotiation's deadline, leaves it running for the others. A run's value
+ * stays for later callers when `keep`; a run that answers none, fails, or is interrupted leaves
+ * nothing behind, and the next caller starts it again.
+ */
+const sharing = <K, A>(scope: Scope.Scope): Effect.Effect<Shared<K, A>> =>
+  Effect.map(
+    Ref.make<ReadonlyMap<K, Deferred.Deferred<Option.Option<A>>>>(new Map()),
+    (runs): Shared<K, A> =>
+      (name, work, keep) =>
+        Effect.uninterruptibleMask((restore) =>
+          Effect.gen(function* () {
+            const fresh = yield* Deferred.make<Option.Option<A>>();
+
+            const running = yield* Ref.modify(runs, (known) => {
+              const existing = known.get(name);
+
+              return existing === undefined
+                ? ([undefined, new Map(known).set(name, fresh)] as const)
+                : ([existing, known] as const);
+            });
+
+            if (running !== undefined) return yield* restore(Deferred.await(running));
+
+            const settle = (result: Option.Option<A>) =>
+              Ref.update(runs, (known) => {
+                if ((keep && Option.isSome(result)) || known.get(name) !== fresh) return known;
+                const next = new Map(known);
+                next.delete(name);
+
+                return next;
+              }).pipe(Effect.andThen(Deferred.succeed(fresh, result)));
+
+            yield* work.pipe(
+              Effect.onExit((exit) => settle(Exit.isSuccess(exit) ? exit.value : Option.none())),
+              Effect.forkIn(scope),
+            );
+
+            return yield* restore(Deferred.await(fresh));
+          }),
+        ),
+  );
+
 const make = Effect.gen(function* () {
   const config = yield* MediaConfig.Service;
   const tools = yield* MediaTools.Service;
@@ -263,6 +337,7 @@ const make = Effect.gen(function* () {
   const inFlight = yield* Ref.make<ReadonlyMap<string, Deferred.Deferred<void>>>(new Map());
   const clips = yield* Ref.make<ClipMakings>(new Map());
   const identified = yield* Deferred.make<void>();
+  const builds = yield* sharing<"build", Inventory.BuildIdentity>(scope);
   const idle = yield* Deferred.make<void>();
   const demand = yield* Ref.make<Demand>({ waiting: 0, idle });
   const clipFolder = path.join(config.dataDir, "transcode-probes");
@@ -363,7 +438,8 @@ const make = Effect.gen(function* () {
     return identity;
   });
 
-  const identify = Effect.gen(function* () {
+  /** Reads the build's listings; none when one failed, which records nothing. */
+  const listBuild = Effect.gen(function* () {
     const listed = yield* Effect.all([
       tools.ffmpeg(["-hide_banner", "-version"]),
       tools.ffmpeg(["-hide_banner", "-codecs"]),
@@ -371,40 +447,56 @@ const make = Effect.gen(function* () {
       tools.ffmpeg(["-hide_banner", "-hwaccels"]),
     ]).pipe(Effect.result);
 
-    if (Result.isSuccess(listed)) {
-      const [version, codecs, filters, hwaccels] = listed.success;
-
-      const build: Inventory.BuildIdentity = {
-        version: firstLine(version),
-        kernel: Option.getOrElse(yield* readTrimmed("/proc/sys/kernel/osrelease"), () => ""),
-        features: featuresOf(codecs, filters, hwaccels),
-        at: yield* now,
-      };
-
-      yield* update((known) => Inventory.withBuild(known, build));
-
-      if (domains.length > 0) {
-        yield* Effect.logDebug("TranscodeCapabilities.build").pipe(
-          Effect.annotateLogs({
-            version: build.version,
-            kernel: build.kernel,
-            features: build.features.size,
-          }),
-        );
-      }
-    } else {
+    if (Result.isFailure(listed)) {
       yield* Effect.logWarning("TranscodeCapabilities.listing_failed", listed.failure);
+
+      return Option.none<Inventory.BuildIdentity>();
     }
 
-    for (const binding of domains) {
-      const identity = yield* identifyDevice(binding);
+    const [version, codecs, filters, hwaccels] = listed.success;
 
-      yield* update((known) => Inventory.withDevice(known, identity));
+    const build: Inventory.BuildIdentity = {
+      version: firstLine(version),
+      kernel: Option.getOrElse(yield* readTrimmed("/proc/sys/kernel/osrelease"), () => ""),
+      features: featuresOf(codecs, filters, hwaccels),
+      at: yield* now,
+    };
+
+    yield* update((known) => Inventory.withBuild(known, build));
+
+    if (domains.length > 0) {
+      yield* Effect.logDebug("TranscodeCapabilities.build").pipe(
+        Effect.annotateLogs({
+          version: build.version,
+          kernel: build.kernel,
+          features: build.features.size,
+        }),
+      );
     }
-  }).pipe(Effect.ensuring(Deferred.succeed(identified, undefined)));
 
-  /** Waits for the start's listings and device identities, which take well under a second. */
-  const ready = Deferred.await(identified);
+    return Option.some(build);
+  });
+
+  /** Reads the build's listings unless a reading worked; one that failed is read again here. */
+  const knowBuild = Effect.gen(function* () {
+    if (Option.isSome((yield* Ref.get(inventory)).build)) return;
+    yield* builds("build", listBuild, false);
+  });
+
+  const identifyDevices = Effect.forEach(
+    domains,
+    (binding) =>
+      identifyDevice(binding).pipe(
+        Effect.flatMap((identity) => update((known) => Inventory.withDevice(known, identity))),
+      ),
+    { discard: true },
+  ).pipe(Effect.ensuring(Deferred.succeed(identified, undefined)));
+
+  /**
+   * Waits for the build's listings, read again if the last reading failed, and the start's device
+   * identities, which take well under a second.
+   */
+  const ready = Effect.andThen(knowBuild, Deferred.await(identified));
 
   /** Settles `target` from the listing where it can: an absent component, or a CPU row present. */
   const settleFromListing = Effect.fnUntraced(function* (target: Target) {
@@ -561,11 +653,7 @@ const make = Effect.gen(function* () {
         run(args, { timeout: probeTimeout }).pipe(Effect.result),
       );
 
-      const outcome: Inventory.ProbeOutcome = Result.isSuccess(result)
-        ? probedFrames(result.success) > 0
-          ? "passed"
-          : "rejected"
-        : outcomeOf(result.failure);
+      const outcome = probeOutcome(result);
 
       probed = {
         outcome,
@@ -683,12 +771,11 @@ const make = Effect.gen(function* () {
                   Inventory.Evidence.Probe({
                     at,
                     outcome: probed.outcome,
-                    input: sourceScope === undefined ? "generated" : "source",
+                    source: sourceScope,
                     detail: probed.detail,
                     millis: probed.millis,
                   }),
                   epoch,
-                  sourceScope,
                 ),
               ).pipe(
                 Effect.andThen(
@@ -823,12 +910,7 @@ const make = Effect.gen(function* () {
     yield* update((inventoryNow) => {
       const recorded = Inventory.withDevice(inventoryNow, identity);
 
-      return changed
-        ? Inventory.forget(
-            recorded,
-            (key) => VIDEO_OPS.find((entry) => entry.id === implOf(key))?.on === domain,
-          )
-        : recorded;
+      return changed ? Inventory.forget(recorded, domain) : recorded;
     });
     yield* Effect.logWarning("TranscodeCapabilities.device_reopened").pipe(
       Effect.annotateLogs({ domain, opened: identity.opened, changed }),
@@ -848,6 +930,12 @@ const make = Effect.gen(function* () {
     });
 
     if (suspects.length === 0) return Diagnosis.Unexplained();
+    // Each verdict counts under the epoch its key had when the diagnosis began, so diagnoses of
+    // one outage that overlap strike once.
+    const began = yield* Ref.get(inventory);
+
+    const epochOf = (step: Step): number => Inventory.capabilityOf(began, step.capability).epoch;
+
     yield* ready;
     const deadline = (yield* now) + Duration.toMillis(DIAGNOSIS_BUDGET);
     const passed: Array<Step> = [];
@@ -876,16 +964,26 @@ const make = Effect.gen(function* () {
         });
 
         if (outcome === "rejected") {
-          const quarantinedAt = yield* now;
+          const reproducedAt = yield* now;
+          const source = planned.scope;
 
-          yield* update((current) => Inventory.quarantine(current, step.capability, quarantinedAt));
-          yield* Effect.logWarning("TranscodeCapabilities.quarantined").pipe(
+          yield* update((current) =>
+            Inventory.reproduced(current, step.capability, source, reproducedAt, epochOf(step)),
+          );
+          yield* Effect.logWarning(
+            source === undefined
+              ? "TranscodeCapabilities.quarantined"
+              : "TranscodeCapabilities.source_reproduced",
+          ).pipe(
             Effect.annotateLogs({
               key: step.capability,
               detail: Option.match(probed, { onNone: () => "", onSome: (shown) => shown.detail }),
             }),
           );
-          yield* reopenIfStruck(step.on, quarantinedAt);
+
+          // Only a generated clip's failure speaks for other files; the source's is its own.
+          if (source !== undefined) return Diagnosis.Source({ impls: [step.impl] });
+          yield* reopenIfStruck(step.on, reproducedAt);
 
           return Diagnosis.Capability({ keys: [step.capability], impls: [step.impl] });
         }
@@ -897,14 +995,9 @@ const make = Effect.gen(function* () {
 
     const at = yield* now;
 
-    if (passed.length > 0) {
+    for (const step of passed) {
       yield* update((current) =>
-        Inventory.exclude(
-          current,
-          failed.request.scope,
-          passed.map((step) => step.impl),
-          at + SOURCE_EXCLUSION_MS,
-        ),
+        Inventory.notReproduced(current, step.capability, failed.request.scope, at, epochOf(step)),
       );
     }
 
@@ -941,7 +1034,7 @@ const make = Effect.gen(function* () {
   });
 
   const warmup = Effect.gen(function* () {
-    yield* identify;
+    yield* Effect.all([knowBuild, identifyDevices], { concurrency: "unbounded", discard: true });
 
     for (const binding of yield* opened) {
       for (const step of probedSteps(binding.domain, {
