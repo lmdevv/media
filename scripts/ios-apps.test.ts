@@ -168,6 +168,16 @@ describe("ios-apps.sh", { timeout: 30_000 }, () => {
     expect(renamed.stderr).toContain("apps/mobile/music/App.json: app.json under another spelling");
   });
 
+  it("fails for a name outside ASCII, which macOS can read as a config", () => {
+    // U+FB01 LATIN SMALL LIGATURE FI and U+017F LATIN SMALL LETTER LONG S.
+    for (const name of ["app.con\uFB01g.json", "app.j\u017Fon"]) {
+      const { status, stderr } = withApp({ "app.json": '{"expo":{}}', [name]: "{}" });
+
+      expect([name, status]).toEqual([name, 1]);
+      expect(stderr).toContain(`apps/mobile/music/${name}: a name outside ASCII`);
+    }
+  });
+
   it("fails for a dynamic config folder", () => {
     const root = withApp({ "app.json": '{"expo":{}}' }, ["app.config"]);
 

@@ -86,11 +86,14 @@ unknown_config() {
       const dir = `apps/mobile/${app}`;
       if (!statSync(dir).isDirectory()) continue;
       const files = readdirSync(dir);
-      // Names compare without case: macOS, where the app is built, finds APP.CONFIG.JSON as
-      // app.config.json.
+      // Names compare the way macOS, where the app is built, finds them: APP.CONFIG.JSON is
+      // app.config.json there, and so is a name that spells a letter with another character, such
+      // as the fi ligature. Only ASCII names lower-case the same way on both, so no other is read.
       for (const file of files) {
         const name = file.toLowerCase();
-        if (name === "app.config" || name.startsWith("app.config.")) {
+        if (/[^\x20-\x7e]/u.test(file)) {
+          console.log(`${dir}/${file}: a name outside ASCII`);
+        } else if (name === "app.config" || name.startsWith("app.config.")) {
           console.log(`${dir}/${file}: a dynamic config`);
         } else if (name === "app.json" && file !== "app.json") {
           console.log(`${dir}/${file}: app.json under another spelling`);
