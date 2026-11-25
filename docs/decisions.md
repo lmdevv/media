@@ -248,13 +248,22 @@ Old movies' Convex project, its SDK client, and its command registry were delete
   or a fixed sentence for any other failure, so it never names a path in `TRANSCODE_DIR`.
 - The iOS app keeps one store per server and person in `downloads/<server>/<person>/index.json`
   under its documents folder, with one folder per download that also holds the download's own copy
-  of its row (`download.json`). A save writes `index.json.new` and moves it over the index, so a
-  crash or a full disk leaves the old index or the new one, and a save that fails shows on the
-  Downloads screen. An index that cannot be read is moved aside to `index.unreadable.json`, its
-  downloads are rebuilt from their copies, and the core is told to forget none of them. After an
-  index that reads, the app deletes what in the person's folder no download owns. A kept download
-  plays from its local file with no server call, and the progress it makes is sent with
-  `movies.play.reportOffline` when the server answers.
+  of its row (`download.json`). Each is saved as a `.new` file moved over the old one, so a crash
+  or a full disk leaves the old file or the new one. A save that fails shows on the Downloads
+  screen, and a download's folder is made only once the index holding it is saved.
+- The app deletes a download's files, or tells the core to forget it, only on proof that the
+  person or the app removed it. A folder or a listed download the store lacks is that proof only
+  when the store is whole: an index that read without an error, decoded every row, and was saved
+  with `"whole": true`; a first run's empty folder; or a store once the folder and the core's whole
+  list hold nothing it lacks. Any other store is saved with `"whole": false` and keeps every folder;
+  only the person's removals and the core's expired, gone, and unlisted answers delete its files.
+- An index that is not one, or holds rows this version cannot decode, moves aside to
+  `index.unreadable.json` before a save replaces it, and the downloads any store lacks come back
+  from their copies. `index.json.new` is the index only when the folder lists no `index.json`. A
+  read or a listing that fails holds the launch: the downloads show from their copies, nothing is
+  saved, moved, deleted, or sent, and the read is tried every 30 seconds.
+- A kept download plays from its local file with no server call, and the progress it makes is sent
+  with `movies.play.reportOffline` when the server answers.
 
 ## Subtitle delay
 
