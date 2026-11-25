@@ -102,6 +102,24 @@ export const setAsideIndex = (disk: DownloadDisk): Result.Result<void, DiskFaile
     : Result.succeed(undefined);
 
 /**
+ * Deletes what no download in `store` owns from the person's folder: the folders of downloads it
+ * no longer keeps, and stray files. The index and its copies stay. Running it again deletes
+ * nothing more; a delete that fails is tried again the next time.
+ */
+export const sweep = (disk: DownloadDisk, store: DownloadStore): void => {
+  const owned = new Set([
+    STORE_FILE,
+    nextOf(STORE_FILE),
+    UNREADABLE_STORE_FILE,
+    ...store.downloads.map((download) => itemFolder(download.id)),
+  ]);
+
+  for (const name of Result.getOrElse(disk.list(), () => [])) {
+    if (!owned.has(name)) disk.remove(name);
+  }
+};
+
+/**
  * Saves `download`'s own copy of its row in its folder, from which `readIndex` rebuilds it when
  * the index cannot be read.
  */

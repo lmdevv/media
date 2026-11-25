@@ -50,6 +50,7 @@ import {
   readIndex,
   saveIndex,
   setAsideIndex,
+  sweep,
 } from "@/lib/downloads/storage";
 import { coreQueue } from "@/lib/downloads/core-queue";
 import { IOS_CAPABILITIES } from "@/lib/player/capabilities";
@@ -268,7 +269,8 @@ export class DownloadEngine {
   /**
    * Reads the person's downloads index. One that cannot be read is never taken for no downloads:
    * the downloads come back from their own copies, the core is told to forget none of them, and
-   * the unreadable index is moved aside before the rebuilt one is saved.
+   * the unreadable index is moved aside before the rebuilt one is saved. Only after an index that
+   * read does it delete the files no download owns, before any transfer of its own can start.
    */
   constructor(platform: EnginePlatform, options: EngineOptions) {
     this.#platform = platform;
@@ -307,7 +309,10 @@ export class DownloadEngine {
       save: "saved",
     };
 
-    if (IndexRead.$is("Readable")(read)) keepRecords(options.disk, settled);
+    if (IndexRead.$is("Readable")(read)) {
+      sweep(options.disk, settled);
+      keepRecords(options.disk, settled);
+    }
 
     if (IndexRead.$is("Unreadable")(read)) this.#save();
   }

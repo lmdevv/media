@@ -300,6 +300,23 @@ describe("DownloadEngine", () => {
     expect(core.calls).toStrictEqual([`remove:${stranger}`]);
   });
 
+  it("keeps the folder of a download a kill stopped partway, and queues it again", () => {
+    keep([dune]);
+
+    const stopped = [
+      DownloadEvent.Added({ download: newDownload(arrival), at: 9 }),
+      DownloadEvent.Confirmed({ id: arrival }),
+      DownloadEvent.Delivering({ id: arrival, delivery, revision: "r1", ticketExpiresAt: 0 }),
+    ].reduce(reduce, readyStore([dune]));
+
+    writeFileSync(join(root, STORE_FILE), serializeStore(stopped));
+    mkdirSync(join(root, arrival));
+    writeFileSync(join(root, itemPath(arrival, videoFile("mp4"))), "video");
+
+    expect(listed(launch())).toStrictEqual([`${dune}:ready`, `${arrival}:queued`]);
+    expect(filesUnder(arrival)).toContain(videoFile("mp4"));
+  });
+
   it("removes the files no download owns, and keeps the ones it does", () => {
     keep([dune, stranger]);
     writeFileSync(join(root, STORE_FILE), serializeStore(readyStore([dune])));
@@ -309,5 +326,11 @@ describe("DownloadEngine", () => {
 
     expect(names(root)).toStrictEqual([dune, STORE_FILE]);
     expect(filesUnder(dune)).toContain(videoFile("mp4"));
+
+    const swept = filesUnder("");
+
+    launch();
+
+    expect(filesUnder("")).toStrictEqual(swept);
   });
 });
