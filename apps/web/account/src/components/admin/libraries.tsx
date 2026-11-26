@@ -5,7 +5,7 @@ import { Link } from "@tanstack/react-router";
 import { useId, useState } from "react";
 import type { ReactNode } from "react";
 
-import { PageHeader } from "@media/ui/components/page-header";
+import { PageHeader } from "@/components/page-header";
 
 import { useActions } from "./action";
 import { RemoteLyricsSetting } from "./lyrics";

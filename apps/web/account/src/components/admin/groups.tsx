@@ -5,7 +5,7 @@ import { TextField } from "@media/ui/components/text-field";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
-import { PageHeader } from "@media/ui/components/page-header";
+import { PageHeader } from "@/components/page-header";
 import type { UserId } from "@/session/platform-types";
 
 import { useActions } from "./action";

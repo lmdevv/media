@@ -44,7 +44,7 @@ const qsvLostAfterEarlyFirstFragment = await writeFakeFfmpeg({
 
 const qsvLostWithoutToneMapping = await writeFakeFfmpeg({
   qsvFailsFromSeconds: 1,
-  withoutSoftwareToneMapping: true,
+  withoutCpuToneMap: true,
 });
 
 const smallScreen: ClientCapabilities = {
@@ -1341,15 +1341,23 @@ describe.skipIf(!hasFfmpeg)("stream liveness", () => {
       assert.strictEqual(elsewhere.mode, "transcode-software", "Quick Sync failed meanwhile");
       yield* stop(elsewhere);
 
-      for (const attempt of ["first", "second"]) {
-        const gone = yield* fetched(stream.file("3.m4s"));
+      // The request whose revive met the end hears why; the stream is gone for the next one.
+      const failed = yield* fetched(stream.file("3.m4s"));
 
-        assert.strictEqual(gone.status, 404, `${attempt} request`);
-        assert.deepStrictEqual(JSON.parse(textOf(gone.body)), {
-          _tag: "StreamNotFound",
-          streamId: stream.streamId,
-        });
-      }
+      assert.strictEqual(failed.status, 500, "the request that met the end");
+      assert.deepInclude(JSON.parse(textOf(failed.body)), {
+        _tag: "TranscodeFailed",
+        streamId: stream.streamId,
+        mode: "transcode-qsv",
+      });
+
+      const gone = yield* fetched(stream.file("3.m4s"));
+
+      assert.strictEqual(gone.status, 404, "a later request");
+      assert.deepStrictEqual(JSON.parse(textOf(gone.body)), {
+        _tag: "StreamNotFound",
+        streamId: stream.streamId,
+      });
 
       const ended = yield* endedEvents(stream.streamId);
 

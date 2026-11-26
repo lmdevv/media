@@ -46,13 +46,21 @@ const ffmpeg = (...args) => spawnSync("ffmpeg", ["-hide_banner", "-nostdin", ...
 const ffprobe = (...args) => spawnSync("ffprobe", ["-v", "error", ...args], { encoding: "utf8", maxBuffer: 1 << 26 });
 
 describe("the table", () => {
-  test("has a row for every stage on every path, once, in the stages' order", () => {
+  test("has a row for every stage on every path, once, in the stages' order, then hybrid rows", () => {
     const keys = cells().map((cell) => cell.key);
     assert.equal(new Set(keys).size, keys.length);
     assert.deepEqual(
-      keys,
+      cells(ROWS.filter((row) => STAGES.includes(row.id))).map((cell) => cell.key),
       STAGES.flatMap((stage) => Object.keys(PATHS).map((path) => `${stage}/${path}`)),
     );
+
+    for (const row of ROWS.filter((row) => !STAGES.includes(row.id))) {
+      assert.ok(row.id.startsWith("hybrid-"), row.id);
+      assert.ok(
+        Object.values(row.work).some((location) => location !== "path"),
+        `${row.id} fixes an operation to another path`,
+      );
+    }
   });
 
   test("names only fixtures, profiles, checks, and operations it defines", () => {
@@ -284,6 +292,21 @@ describe("verdicts", () => {
       const cell = cellOf("decode", path);
       const result = judge(cell, healthy(cell));
       assert.equal(result.verdict, "PASS", `${path}: ${result.evidence}`);
+    }
+  });
+
+  test("a CPU decode beside a GPU encode passes a hybrid row, and a GPU decode fails it", () => {
+    for (const path of ["qsv", "vaapi"]) {
+      const cell = cellOf("hybrid-cpu-decode", path);
+      const onGpu = healthy(cell);
+      const beside = healthy(cell);
+
+      beside.runs[0].args = beside.runs[0].args.filter(
+        (arg, index, args) => !["-hwaccel", "-hwaccel_output_format"].includes(arg) && !["-hwaccel", "-hwaccel_output_format"].includes(args[index - 1]),
+      );
+      assert.equal(judge(cell, beside).verdict, "PASS", `${path}: ${judge(cell, beside).evidence}`);
+      assert.equal(judge(cell, onGpu).verdict, "FAIL", path);
+      assert.match(judge(cell, onGpu).evidence, /decode not on cpu: the arguments use -hwaccel/);
     }
   });
 

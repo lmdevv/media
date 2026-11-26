@@ -9,7 +9,14 @@ import type * as MediaTools from "../media/media-tools.ts";
 import { MediaToolFailed } from "../media/media-tools.ts";
 
 const readFailed = (cause: unknown) =>
-  new MediaToolFailed({ tool: "ffmpeg", exitCode: null, stderr: "", cause });
+  new MediaToolFailed({
+    tool: "ffmpeg",
+    exitCode: null,
+    signal: null,
+    stderr: "",
+    stderrHead: "",
+    cause,
+  });
 
 /**
  * Runs ffmpeg to completion while handing each chunk it writes to `pipe:3` to `onChunk`, in order

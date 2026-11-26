@@ -1,8 +1,24 @@
 import { cn } from "@media/ui/lib/utils";
 
-import logo from "../../../../../brand/lar-flat.svg";
+import bone from "../../../../../brand/lar.svg";
+import ink from "../../../../../brand/lar-flat-ink.svg";
 
-/** The Lar logo where the account client shows the product: Flat, as the brand sets it at this size. */
 export function LarMark({ className }: { readonly className?: string }) {
-  return <img src={logo} alt="Lar" className={cn("size-8 shrink-0", className)} />;
+  return (
+    <picture className="contents">
+      <source srcSet={bone} media="(prefers-color-scheme: dark)" />
+      <img src={ink} alt="Lar" className={cn("size-8 shrink-0", className)} />
+    </picture>
+  );
+}
+
+export function LarWordmark() {
+  return (
+    <span className="flex items-center gap-2.5">
+      <LarMark className="size-7.5" />
+      <span className="font-display text-logo/6 font-heavy tracking-snug text-text font-stretch-112%">
+        Lar
+      </span>
+    </span>
+  );
 }

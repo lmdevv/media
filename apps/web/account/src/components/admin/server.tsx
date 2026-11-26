@@ -5,7 +5,7 @@ import { cn } from "@media/ui/lib/utils";
 import { Match } from "effect";
 import type { ReactNode } from "react";
 
-import { PageHeader } from "@media/ui/components/page-header";
+import { PageHeader } from "@/components/page-header";
 
 import { useNow } from "@media/ui/lib/use-now";
 import { Failed, formatTime } from "./parts";

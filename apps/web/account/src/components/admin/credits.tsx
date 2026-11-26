@@ -9,7 +9,7 @@ import {
   DialogContent,
   DialogFooter,
 } from "@media/ui/components/dialog";
-import { PageHeader } from "@media/ui/components/page-header";
+import { PageHeader } from "@/components/page-header";
 import { RadioGroup, RadioItem } from "@media/ui/components/radio-group";
 import { preloadFirstPage, useAllPages, usePages } from "@media/ui/lib/pages";
 import type { PageOpts, Paged } from "@media/ui/lib/pages";

@@ -13,6 +13,7 @@ import { ffmpegAvailable } from "../testing/fixture-library.ts";
 import * as FixtureWorkspace from "../testing/fixture-workspace.ts";
 import * as MediaTestServer from "../testing/media-test-server.ts";
 import { signTestToken } from "../testing/test-tokens.ts";
+import { verifiedFor, withoutToneMaps } from "../testing/capability-snapshots.ts";
 
 const hasFfmpeg = await ffmpegAvailable();
 
@@ -84,8 +85,7 @@ const playing = Effect.gen(function* () {
 
   const plan = decidePlayback(file.probe, smallScreen, {
     audioIndex: undefined,
-    hardware: undefined,
-    softwareToneMapping: false,
+    capabilities: verifiedFor(file.probe, [], withoutToneMaps),
   });
 
   if (!PlaybackPlan.$is("Hls")(plan)) return yield* Effect.die("expected HLS");

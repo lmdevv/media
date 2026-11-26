@@ -29,8 +29,8 @@ playback events are logged. `CONVEX_URL` without the key refuses to start.
 | `POST /api/playback/seek`                                | Move an HLS stream; returns the generation and playlist URL to load |
 | `POST /api/playback/stop`                                | End an HLS stream and delete its output (204)                       |
 | `POST /api/playback/diagnostics`                         | A player's events with its token (204; 429 past the session budget) |
-| `GET /api/health`                                        | Status, active streams, hardware acceleration                       |
-| `GET /api/client-config`                                 | The Convex URL apps sign in to (`CONVEX_PUBLIC_URL`)                |
+| `GET /api/health`                                        | Status, release, active streams, hardware acceleration              |
+| `GET /api/client-config`                                 | Release, and the Convex URL apps sign in to (`CONVEX_PUBLIC_URL`)   |
 | `GET, HEAD /media/direct/:fileId?token=`                 | Original file with single byte ranges                               |
 | `GET /media/hls/:streamId/:generation/index.m3u8?token=` | VOD playlist of one generation                                      |
 | `GET /media/hls/:streamId/:generation/init.mp4?token=`   | fMP4 init segment                                                   |
@@ -63,8 +63,9 @@ every scan is refused), `PORT` (4300), `HOST` (all interfaces), `BACKUP_DIR` (`/
 used instead of the built-in key, which works with no setup), `OMDB_API_KEY`
 (IMDb, Rotten Tomatoes, and Metacritic scores; without it titles keep TMDB's), `WEB_DIST_DIR`,
 `MAX_CONCURRENT_TRANSCODES` (3), `MAX_CONCURRENT_REMUXES` (10: HLS streams that copy the video),
-`HARDWARE_ACCELERATION` (`auto` tries Quick Sync, then VA-API, then software; `qsv`, `vaapi`,
-`none`), `QSV_DEVICE` and `VAAPI_DEVICE` (`/dev/dri/renderD128`), `STREAM_IDLE_SECONDS` (60: a
+`HARDWARE_ACCELERATION` (`auto` considers Quick Sync, then VA-API, then software, stage by stage, as
+probes on the device prove each; `qsv`, `vaapi`, `none`), `QSV_DEVICE` and `VAAPI_DEVICE`
+(`/dev/dri/renderD128`), `STREAM_IDLE_SECONDS` (60: a
 stream's encoder stops after this long with no requests and no playing progress; the stream stays,
 and its next request restarts the encoder; with no playback session reports, as in standalone mode,
 a stream closes once its encoder has been stopped and unused for ten times this),

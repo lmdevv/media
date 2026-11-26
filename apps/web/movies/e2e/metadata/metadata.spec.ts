@@ -581,6 +581,9 @@ test("a title page's actions run from the keyboard and show their keys on hover 
   await page.keyboard.press("g");
   await page.keyboard.press("l");
   await expect(page).toHaveURL(/\/movies\/my-list$/u);
+  // The address changes while My List loads and the title page still shows its own two links
+  // that name the title, so the list's heading comes first.
+  await expect(page.getByRole("heading", { level: 1, name: "My List" })).toBeVisible();
   await expect(page.getByRole("link", { name: /Alien Fixture/u })).toBeVisible();
 
   await openTitle(page, "Alien Fixture");

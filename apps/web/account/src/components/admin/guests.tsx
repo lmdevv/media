@@ -7,7 +7,7 @@ import { Match } from "effect";
 import { useId, useState } from "react";
 import type { ReactNode } from "react";
 
-import { PageHeader } from "@media/ui/components/page-header";
+import { PageHeader } from "@/components/page-header";
 import { describeFailure } from "@media/ui/lib/failure";
 
 import { useActions } from "./action";

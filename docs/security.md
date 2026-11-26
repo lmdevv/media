@@ -110,8 +110,9 @@ that argument.
 
 - **CORS allows any origin** on the media service. Every call carries an explicit bearer token or a
   ticket and nothing uses cookies, so another site gains no ambient authority; a fixed
-  list would break a separately hosted web app. `/api/health` (stream count, acceleration mode) is
-  readable by anyone who can reach the port.
+  list would break a separately hosted web app. `/api/health` (release, stream count, acceleration
+  mode) is readable by anyone who can reach the port; the core's public `core.server.info` names
+  the release too.
 - **Tickets last up to six hours** and are verified offline; while the media service is
   disconnected from Convex it cannot learn of revocations.
 - **Rate limiting in the media service covers only the routes without a token.** `/artwork/*`

@@ -1,7 +1,17 @@
 import { createServer } from "node:http";
 
 import { NodeHttpServer, NodeServices } from "@effect/platform-node";
-import { Context, Effect, FileSystem, Layer, Logger, Option, Path, References } from "effect";
+import {
+  Context,
+  Duration,
+  Effect,
+  FileSystem,
+  Layer,
+  Logger,
+  Option,
+  Path,
+  References,
+} from "effect";
 import { FetchHttpClient, HttpServer } from "effect/http";
 
 import * as BackendHealth from "../backend-health.ts";
@@ -17,6 +27,7 @@ import { servicesLayerWith } from "../media-service.ts";
 import { redactedLine } from "../observability.ts";
 import * as EndedSessions from "../playback/ended-sessions.ts";
 import * as PlaybackReporter from "../playback/playback-reporter.ts";
+import * as TranscodeCapabilities from "../playback/transcode-capabilities.ts";
 import * as StreamOwners from "../playback/stream-owners.ts";
 import * as SessionReports from "../playback/session-reports.ts";
 import * as FixtureWorkspace from "./fixture-workspace.ts";
@@ -53,6 +64,10 @@ interface Options {
   readonly reports?: true;
   /** Wraps the real ffmpeg and ffprobe the server's own services run, such as to hold an exit. */
   readonly mediaTools?: (real: MediaTools.Interface) => MediaTools.Interface;
+  /** How long a negotiation waits for its probes; 60 seconds when absent. */
+  readonly negotiationBudget?: Duration.Duration;
+  /** How long one capability probe or device check runs; the service's own when absent. */
+  readonly probeTimeout?: Duration.Duration;
 }
 
 /**
@@ -107,7 +122,25 @@ export const layer = (overrides: Readonly<Record<string, string>> = {}, options:
         Effect.map(MediaTools.Service, options.mediaTools ?? ((real) => real)),
       ).pipe(Layer.provide(MediaTools.layer));
 
+      // Negotiations wait for every probe their chain needs, and diagnoses for every probe of
+      // their suspects, so the stages a test's streams run on and recover to do not depend on how
+      // busy the machine is.
+      const budget = Layer.mergeAll(
+        Layer.succeed(
+          TranscodeCapabilities.NegotiationBudget,
+          options.negotiationBudget ?? Duration.seconds(60),
+        ),
+        Layer.succeed(TranscodeCapabilities.DiagnosisBudget, Duration.seconds(30)),
+      );
+
+      const probeTimeout =
+        options.probeTimeout === undefined
+          ? Layer.empty
+          : Layer.succeed(TranscodeCapabilities.ProbeTimeout, options.probeTimeout);
+
       const services = servicesLayerWith(tools).pipe(
+        Layer.provide(budget),
+        Layer.provide(probeTimeout),
         Layer.provideMerge(testTokensLayer),
         Layer.provideMerge(StreamOwners.layer),
         Layer.provideMerge(testArtworkKeysLayer),

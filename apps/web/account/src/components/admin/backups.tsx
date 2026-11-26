@@ -7,7 +7,7 @@ import { UploadIcon } from "lucide-react";
 import { Schema } from "effect";
 import { useMemo, useState } from "react";
 
-import { PageHeader } from "@media/ui/components/page-header";
+import { PageHeader } from "@/components/page-header";
 import { useAccountActions } from "@/session/account";
 
 import { useActions } from "./action";

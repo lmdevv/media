@@ -3,10 +3,10 @@ import type { ServerReport } from "@media/contracts/server-functions";
 import { EpochMillis } from "@media/contracts/units";
 import { Clock, Duration, Effect, Layer, Option, Ref, Schedule } from "effect";
 
-import packageJson from "../../package.json" with { type: "json" };
 import * as BackendHealth from "../backend-health.ts";
-import * as HardwareAcceleration from "../playback/hardware-acceleration.ts";
 import * as StreamSessions from "../playback/stream-sessions.ts";
+import * as TranscodeCapabilities from "../playback/transcode-capabilities.ts";
+import { RELEASE } from "../release.ts";
 import * as CoreSession from "./core-session.ts";
 
 const LOOK_EVERY = Duration.seconds(15);
@@ -28,12 +28,12 @@ const same = (left: ServerReport, right: ServerReport): boolean =>
 export const layer: Layer.Layer<
   never,
   never,
-  CoreSession.Service | StreamSessions.Service | HardwareAcceleration.Service
+  CoreSession.Service | StreamSessions.Service | TranscodeCapabilities.Service
 > = Layer.effectDiscard(
   Effect.gen(function* () {
     const session = yield* CoreSession.Service;
     const sessions = yield* StreamSessions.Service;
-    const hardware = yield* HardwareAcceleration.Service;
+    const capabilities = yield* TranscodeCapabilities.Service;
     const startedAt = EpochMillis.make(yield* Clock.currentTimeMillis);
 
     const sent = yield* Ref.make<{ readonly report: ServerReport; readonly at: number } | null>(
@@ -42,8 +42,8 @@ export const layer: Layer.Layer<
 
     const look = Effect.gen(function* () {
       const report: ServerReport = {
-        version: packageJson.version,
-        hardwareAcceleration: (yield* hardware.encoder) ?? "none",
+        version: RELEASE,
+        hardwareAcceleration: (yield* capabilities.hardwareEncoder) ?? "none",
         activeStreams: yield* sessions.activeCount,
         runsAwaitingExit: yield* sessions.runsAwaitingExit,
         startedAt,

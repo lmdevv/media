@@ -33,8 +33,10 @@ export interface RunningChild {
    * `closed` waits for the pipe to close. Ending the iteration early destroys the pipe at once.
    */
   readonly output: AsyncIterable<Uint8Array> | null;
-  /** The last `stderrTail` characters of standard error. */
+  /** The last `stderrTail` characters of standard error, its redactions made. */
   readonly stderrTail: () => string;
+  /** The first `stderrHead` characters of standard error, its redactions made. */
+  readonly stderrHead: () => string;
   /** Signals the process until Node reaps it; afterwards it sends nothing. */
   readonly signal: (signal: ChildSignal) => void;
 }
@@ -48,6 +50,13 @@ export interface ChildOptions {
   readonly background?: boolean;
   /** How many trailing characters of standard error to keep. */
   readonly stderrTail: number;
+  /** How many leading characters of standard error to keep. */
+  readonly stderrHead?: number;
+  /**
+   * Text replaced with `<path>` wherever it appears in standard error, before any of it is kept
+   * or cut, even when it arrives in pieces: such as the paths in the command's arguments.
+   */
+  readonly stderrRedactions?: ReadonlyArray<string>;
   /** Open file descriptor 3 as a pipe to this process, for a tool that writes a stream there. */
   readonly output?: boolean | undefined;
   /**
@@ -59,6 +68,39 @@ export interface ChildOptions {
 
 /** The nicest CPU priority on Unix systems. */
 const LOWEST_PRIORITY = 19;
+
+/** What a redacted text stands in for. */
+const REDACTED = "<path>";
+
+/**
+ * Replaces every one of `secrets` in a text that arrives in pieces. Each piece comes back with
+ * every whole secret replaced, less its last characters that could begin one not yet finished,
+ * which wait for the next piece; `rest` is what is still waiting.
+ */
+const redactor = (secrets: ReadonlyArray<string>) => {
+  const longestFirst = secrets
+    .filter((secret) => secret.length > 0)
+    .toSorted((left, right) => right.length - left.length);
+
+  const waitAtMost = Math.max(0, (longestFirst[0]?.length ?? 0) - 1);
+  let waiting = "";
+
+  return {
+    push: (piece: string): string => {
+      const text = longestFirst.reduce(
+        (redacted, secret) => redacted.replaceAll(secret, REDACTED),
+        waiting + piece,
+      );
+
+      const ready = Math.max(0, text.length - waitAtMost);
+
+      waiting = text.slice(ready);
+
+      return text.slice(0, ready);
+    },
+    rest: (): string => waiting,
+  };
+};
 
 /**
  * Starts `command` with standard input closed and calls `onStarted` or `onFailed` once. Returns a
@@ -90,6 +132,15 @@ export const startChild = (
 
   let stdout = "";
   let stderr = "";
+  let stderrHead = "";
+  const headLength = options.stderrHead ?? 0;
+  const redaction = redactor(options.stderrRedactions ?? []);
+
+  const keepStderr = (text: string) => {
+    stderr = (stderr + text).slice(-options.stderrTail);
+
+    if (stderrHead.length < headLength) stderrHead = (stderrHead + text).slice(0, headLength);
+  };
 
   // Node reaps children only from the event loop, which has not run since the spawn, so the pid
   // is still the child's. Lowering a child's priority needs no privileges.
@@ -109,8 +160,9 @@ export const startChild = (
     else onStdout(chunk);
   });
   stderrPipe.setEncoding("utf8");
+  // Redacted first, then cut, so no cut ever splits a redaction's text off it.
   stderrPipe.on("data", (chunk: string) => {
-    stderr = (stderr + chunk).slice(-options.stderrTail);
+    keepStderr(redaction.push(chunk));
   });
 
   const exited = new Promise<ChildExit>((resolve) => {
@@ -143,7 +195,11 @@ export const startChild = (
       closed,
       stdout: () => stdout,
       output,
-      stderrTail: () => stderr,
+      stderrTail: () => (stderr + redaction.rest()).slice(-options.stderrTail),
+      stderrHead: () =>
+        stderrHead.length < headLength
+          ? (stderrHead + redaction.rest()).slice(0, headLength)
+          : stderrHead,
       signal: (signal) => {
         child.kill(signal);
       },

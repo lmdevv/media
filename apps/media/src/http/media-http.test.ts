@@ -13,6 +13,7 @@ import {
   SeekResponse,
 } from "@media/contracts/media-playback";
 
+import packageJson from "../../package.json" with { type: "json" };
 import * as ArtworkKeys from "../artwork/artwork-keys.ts";
 import * as DiskCache from "../disk-cache.ts";
 import * as LibraryScanner from "../library/library-scanner.ts";
@@ -26,7 +27,7 @@ import * as PlaybackReporter from "../playback/playback-reporter.ts";
 import {
   ffmpegAvailable,
   qsvUsable,
-  softwareToneMappingAvailable,
+  cpuToneMapAvailable,
   vaapiUsable,
 } from "../testing/fixture-library.ts";
 import { copyBytes } from "../testing/byte-copies.ts";
@@ -42,7 +43,7 @@ const hasQsv = hasFfmpeg && (await qsvUsable());
 
 const hasVaapi = hasFfmpeg && (await vaapiUsable());
 
-const canToneMap = hasFfmpeg && (await softwareToneMappingAvailable());
+const canToneMap = hasFfmpeg && (await cpuToneMapAvailable());
 
 const browser: ClientCapabilities = {
   containers: ["mp4", "webm"],
@@ -343,13 +344,14 @@ const concat = (...parts: ReadonlyArray<Uint8Array>): Uint8Array => {
 
 describe.skipIf(!hasFfmpeg)("media service over HTTP", () => {
   layer(MediaTestServer.layer(), { excludeTestServices: true, timeout: "120 seconds" })((it) => {
-    it.effect("reports health", () =>
+    it.effect("reports health and the release in its package", () =>
       Effect.gen(function* () {
         const server = yield* MediaTestServer.Service;
         const response = yield* get(`${server.baseUrl}/api/health`);
 
         assert.deepStrictEqual(yield* json(response), {
           status: "ok",
+          release: packageJson.version,
           activeStreams: 0,
           runsAwaitingExit: 0,
           hardwareAcceleration: "none",
@@ -363,7 +365,7 @@ describe.skipIf(!hasFfmpeg)("media service over HTTP", () => {
         const server = yield* MediaTestServer.Service;
         const response = yield* get(`${server.baseUrl}/api/client-config`);
 
-        assert.deepStrictEqual(yield* json(response), {});
+        assert.deepStrictEqual(yield* json(response), { release: packageJson.version });
       }),
     );
 
@@ -1195,8 +1197,8 @@ describe.skipIf(!hasFfmpeg)("media service over HTTP", () => {
       excludeTestServices: true,
       timeout: "120 seconds",
     },
-  )("when QSV fails", (it) => {
-    it.effect("falls back to software and reports the mode change", () =>
+  )("when the Quick Sync device will not open", (it) => {
+    it.effect("probes the forced Quick Sync and transcodes in software from the start", () =>
       Effect.gen(function* () {
         const server = yield* MediaTestServer.Service;
         const { library } = yield* FixtureWorkspace.Service;
@@ -1213,13 +1215,9 @@ describe.skipIf(!hasFfmpeg)("media service over HTTP", () => {
         assert.strictEqual(segment.status, 200);
         const events = yield* (yield* PlaybackReporter.Recording).events;
 
-        assert.isTrue(
-          events.some(
-            (event) =>
-              PlaybackReporter.PlaybackEvent.guards.ModeChanged(event) &&
-              event.from === "transcode-qsv" &&
-              event.to === "transcode-software",
-          ),
+        assert.isFalse(
+          events.some((event) => PlaybackReporter.PlaybackEvent.guards.ModeChanged(event)),
+          "no Quick Sync run started, so nothing changed mode",
         );
 
         const health = yield* get(`${server.baseUrl}/api/health`);
@@ -1702,7 +1700,10 @@ describe.skipIf(!hasFfmpeg)("media service over HTTP", () => {
         const server = yield* MediaTestServer.Service;
         const response = yield* get(`${server.baseUrl}/api/client-config`);
 
-        assert.deepStrictEqual(yield* json(response), { convexUrl: "https://convex.example.com" });
+        assert.deepStrictEqual(yield* json(response), {
+          release: packageJson.version,
+          convexUrl: "https://convex.example.com",
+        });
       }),
     );
   });
@@ -1721,6 +1722,7 @@ describe.skipIf(!hasFfmpeg)("media service over HTTP", () => {
         const response = yield* get(`${server.baseUrl}/api/client-config`);
 
         assert.deepStrictEqual(yield* json(response), {
+          release: packageJson.version,
           convexUrl: "https://media.example.com/convex",
           moviesUrl: "https://media.example.com/movies",
         });

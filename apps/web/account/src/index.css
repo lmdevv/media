@@ -1,1 +1,58 @@
 @import "@media/ui/globals.css";
+@import "@fontsource-variable/archivo/wdth.css";
+@import "@fontsource-variable/instrument-sans";
+@import "@fontsource-variable/jetbrains-mono";
+
+@theme {
+  --color-bg: #f3f3f0;
+  --color-surface: #ffffff;
+  --color-surface-raised: #ffffff;
+  --color-hairline: #dcdcd6;
+  --color-text: #141416;
+  --color-text-muted: #5c5d65;
+  --color-dark-bg: #0e0f12;
+  --color-dark-surface: #15161b;
+  --color-dark-surface-raised: #1c1d23;
+  --color-dark-hairline: #2a2b31;
+  --color-dark-text: #f1f1ec;
+  --color-dark-text-muted: #9c9da5;
+  --color-accent: #ee4a1f;
+  --color-accent-pressed: #c23a14;
+  --color-glyph-top: #3a3b42;
+  --color-glyph-left: #2b2c33;
+  --color-glyph-right: #1e1f24;
+  --color-movies-top: #ff5a6e;
+  --color-movies-left: #e11d48;
+  --color-movies-right: #8f1232;
+  --color-music-top: #4be38a;
+  --color-music-left: #16a34a;
+  --color-music-right: #0c6a31;
+  --color-stone-left: #c4c4be;
+  --color-stone-right: #b0b0aa;
+  --color-field-top: #ffffff;
+  --color-field-left: #ecece7;
+  --color-field-right: #e2e2dc;
+  --font-sans: "Instrument Sans Variable", "Instrument Sans", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace;
+  --font-display: "Archivo Variable", "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --text-greeting: 80px;
+  --text-product: 40px;
+  --text-section: 18px;
+  --radius-control: 4px;
+  --radius-switch: 4px;
+  --radius-switch-thumb: 2px;
+}
+
+.dark {
+  --color-stone-left: #35363d;
+  --color-stone-right: #25262c;
+  --color-field-top: #26272d;
+  --color-field-left: #1a1b20;
+  --color-field-right: #131418;
+}
+
+@media (width >= 48rem) {
+  .dark {
+    --color-page: var(--color-dark-bg);
+  }
+}
