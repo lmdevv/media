@@ -382,6 +382,11 @@ const offlineLyricsOf = (lyrics: TrackLyrics): OfflineLyrics => {
   );
 };
 
+/**
+ * Feeds `sync` what the core keeps for this phone's device. Mount it once the session's device is
+ * enrolled, keyed by it: the core refuses the list for a session on no device, and a refused list
+ * is not asked again.
+ */
 function ServerFeed({ sync }: { readonly sync: DownloadSync }) {
   const platform = usePlatform();
 
@@ -413,11 +418,21 @@ function ServerFeed({ sync }: { readonly sync: DownloadSync }) {
   );
 }
 
-/**
- * Whose downloads this phone opens: who is signed in, or while the server has not said, who last
- * signed in to it here. Nobody's while signed out: signing out deletes them.
- */
-const useDownloadsAccount = (mediaUrl: string): UserId | null => {
+/** Whose downloads this phone opens, and the device the core keeps them for. */
+interface DownloadsAccount {
+  /**
+   * Who is signed in, or while the server has not said, who last signed in to it here. Nobody
+   * while signed out: signing out deletes their downloads.
+   */
+  readonly userId: UserId | null;
+  /**
+   * The session's device once the app enrolled it, which the core keeps downloads for; null until
+   * then, and while the server has not said.
+   */
+  readonly deviceId: string | null;
+}
+
+const useDownloadsAccount = (mediaUrl: string): DownloadsAccount => {
   const platform = usePlatform();
   const status = usePlatformStatus();
 
@@ -426,11 +441,15 @@ const useDownloadsAccount = (mediaUrl: string): UserId | null => {
     status === "signedIn" ? {} : "skip",
   );
 
-  const signedIn = me === undefined || me instanceof Error ? null : me.userId;
+  const signedIn = me === undefined || me instanceof Error ? null : me;
 
-  if (status === "signedOut") return null;
+  if (status === "signedOut") return { userId: null, deviceId: null };
 
-  return signedIn ?? lastPerson({ own: appKeychains().own, server: mediaUrl })?.userId ?? null;
+  return {
+    userId:
+      signedIn?.userId ?? lastPerson({ own: appKeychains().own, server: mediaUrl })?.userId ?? null,
+    deviceId: signedIn?.device?.deviceId ?? null,
+  };
 };
 
 /** The download quality, as the core keeps it for this device, or the last one chosen here. */
@@ -468,7 +487,7 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
   const platform = usePlatform();
   const { mediaUrl } = useServer();
   const status = usePlatformStatus();
-  const userId = useDownloadsAccount(mediaUrl);
+  const { userId, deviceId } = useDownloadsAccount(mediaUrl);
   const [sync, setSync] = useState<DownloadSync | null>(null);
   const [quality, setQuality] = useQuality();
   const chosen = useRef(quality);
@@ -569,7 +588,9 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
 
   return (
     <DownloadsContext value={value}>
-      {sync === null || status !== "signedIn" ? null : <ServerFeed sync={sync} />}
+      {sync === null || status !== "signedIn" || deviceId === null ? null : (
+        <ServerFeed key={deviceId} sync={sync} />
+      )}
       {children}
     </DownloadsContext>
   );
