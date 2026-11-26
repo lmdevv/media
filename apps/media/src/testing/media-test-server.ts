@@ -66,6 +66,8 @@ interface Options {
   readonly mediaTools?: (real: MediaTools.Interface) => MediaTools.Interface;
   /** How long a negotiation waits for its probes; 60 seconds when absent. */
   readonly negotiationBudget?: Duration.Duration;
+  /** How long a diagnosis re-probes a failed run's suspects; 30 seconds when absent. */
+  readonly diagnosisBudget?: Duration.Duration;
   /** How long one capability probe or device check runs; the service's own when absent. */
   readonly probeTimeout?: Duration.Duration;
 }
@@ -130,7 +132,10 @@ export const layer = (overrides: Readonly<Record<string, string>> = {}, options:
           TranscodeCapabilities.NegotiationBudget,
           options.negotiationBudget ?? Duration.seconds(60),
         ),
-        Layer.succeed(TranscodeCapabilities.DiagnosisBudget, Duration.seconds(30)),
+        Layer.succeed(
+          TranscodeCapabilities.DiagnosisBudget,
+          options.diagnosisBudget ?? Duration.seconds(30),
+        ),
       );
 
       const probeTimeout =

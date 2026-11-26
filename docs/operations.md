@@ -291,9 +291,11 @@ the internet. It speaks plain HTTP, and every browser and CLI that uses Lar must
 ## Hardware acceleration
 
 The media service runs each video stage (decode, scale, tone map, encode) on Intel Quick Sync
-(QSV) through ffmpeg's libvpl when the device proves it can, then on VA-API (Intel and AMD), and
-otherwise on the CPU. It probes each stage at start, in the background, and replaces a stage that
-fails during a stream, first on the GPU without it and then in software.
+(QSV) when the device proves it can, then on VA-API (Intel and AMD), and otherwise on the CPU.
+Quick Sync scales, tone-maps, and encodes through ffmpeg's libvpl; it decodes through VA-API on
+the same device, and maps the decoded surfaces into Quick Sync's without a copy. It probes each
+stage at start, in the background, and replaces a stage that fails during a stream, first on the
+GPU without it and then in software.
 
 - Compose: add `-f compose.qsv.yaml` (or `-f compose.vaapi.yaml` for VA-API) to pass `/dev/dri`
   through. The image carries Debian's ffmpeg 7.1 (built with libvpl), Intel's iHD VA-API driver,

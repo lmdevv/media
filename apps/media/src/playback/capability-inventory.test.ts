@@ -15,6 +15,7 @@ import {
   quarantinedSince,
   record,
   reproduced,
+  runsToVerify,
   snapshot,
   type SourceScope,
   sourceScope,
@@ -39,7 +40,7 @@ const recorded = (inventory: Inventory, key = TONE_MAP, outcome: ProbeOutcome = 
 
 /** A failure a generated clip reproduced at `at`, under the key's epoch now. */
 const struck = (inventory: Inventory, key: typeof TONE_MAP, at: number) =>
-  reproduced(inventory, key, undefined, at, capabilityOf(inventory, key).epoch);
+  reproduced(inventory, key, probe("rejected", at), capabilityOf(inventory, key).epoch);
 
 const verifiedIn = (inventory: Inventory, at: number, scope = FILM) =>
   snapshot(inventory, scope, at, [], new Set()).verified;
@@ -60,6 +61,48 @@ describe("record", () => {
     assert.strictEqual(capabilityOf(timedOut, TONE_MAP).status, "unknown");
     assert.isFalse(probeable(timedOut, TONE_MAP, 1000));
     assert.isTrue(probeable(timedOut, TONE_MAP, 30_000));
+  });
+
+  it("sets a key aside on a probe that crashed, as on a reproduced failure, and keeps its evidence", () => {
+    const crashedAt = (inventory: Inventory, at: number) =>
+      record(inventory, TONE_MAP, probe("crashed", at), capabilityOf(inventory, TONE_MAP).epoch);
+
+    const first = crashedAt(empty, 0);
+    const known = capabilityOf(first, TONE_MAP);
+
+    assert.strictEqual(known.status, "unknown");
+    assert.deepStrictEqual(
+      known.evidence.map((evidence) => (Evidence.$is("Probe")(evidence) ? evidence.outcome : "")),
+      ["crashed"],
+    );
+    assert.isFalse(probeable(first, TONE_MAP, 15 * 60_000 - 1));
+    assert.isTrue(probeable(first, TONE_MAP, 15 * 60_000));
+
+    const second = crashedAt(first, 15 * 60_000);
+
+    assert.isFalse(probeable(second, TONE_MAP, 15 * 60_000 + 2 * 3_600_000 - 1));
+    assert.isTrue(probeable(second, TONE_MAP, 15 * 60_000 + 2 * 3_600_000));
+
+    const third = crashedAt(second, 3 * 3_600_000);
+
+    assert.isFalse(probeable(third, TONE_MAP, Number.MAX_SAFE_INTEGER));
+    assert.isFalse(verifiedIn(third, Number.MAX_SAFE_INTEGER).has(TONE_MAP));
+  });
+
+  it("keeps a crashed probe of a real source to that source, which stays off the row for a day", () => {
+    const shared = recorded(empty, DECODE);
+
+    const crashed = record(
+      shared,
+      DECODE,
+      probe("crashed", 0, FILM),
+      capabilityOf(shared, DECODE).epoch,
+    );
+
+    assert.deepStrictEqual(crashed.capabilities, shared.capabilities);
+    assert.isTrue(excludedIn(crashed, DAY - 1).has(ImplId("decode.qsv")));
+    assert.isFalse(excludedIn(crashed, DAY).has(ImplId("decode.qsv")));
+    assert.isFalse(excludedIn(crashed, 0, OTHER).has(ImplId("decode.qsv")));
   });
 
   it("proves absence from a listing, and presence only for a key nothing contradicted", () => {
@@ -152,11 +195,60 @@ describe("reproduced", () => {
     assert.deepStrictEqual(quarantinedSince(third, 3 * 3_600_000), [TONE_MAP]);
   });
 
+  it("asks a key with strikes for three times the clean runs per strike, after its quarantine too", () => {
+    assert.strictEqual(runsToVerify(empty, TONE_MAP, 3), 3);
+
+    const once = struck(recorded(empty), TONE_MAP, 0);
+
+    assert.strictEqual(runsToVerify(once, TONE_MAP, 3), 9);
+    assert.strictEqual(
+      runsToVerify(recorded(once), TONE_MAP, 1),
+      3,
+      "a later pass keeps the strike",
+    );
+
+    const twice = struck(recorded(once), TONE_MAP, 15 * 60_000);
+
+    assert.strictEqual(runsToVerify(twice, TONE_MAP, 3), 27);
+    assert.strictEqual(runsToVerify(twice, DECODE, 3), 3, "strikes are the key's own");
+  });
+
+  it("keeps the probe that reproduced the failure as the quarantined key's newest evidence", () => {
+    const verified = recorded(empty);
+
+    const failedAgain = Evidence.Probe({
+      at: 60_000,
+      outcome: "rejected",
+      source: undefined,
+      detail: "[Parsed_vpp_qsv_0 @ 0x1] Invalid color_matrix.",
+      millis: 140,
+    });
+
+    const after = reproduced(
+      verified,
+      TONE_MAP,
+      failedAgain,
+      capabilityOf(verified, TONE_MAP).epoch,
+    );
+
+    const known = capabilityOf(after, TONE_MAP);
+
+    assert.deepStrictEqual(known.evidence, [
+      failedAgain,
+      ...capabilityOf(verified, TONE_MAP).evidence,
+    ]);
+    assert.strictEqual(known.status, "unknown");
+    assert.deepStrictEqual(
+      Option.map(known.quarantine, (q) => q.until),
+      Option.some(60_000 + 15 * 60_000),
+    );
+  });
+
   it("takes one strike for diagnoses of one outage, overlapping or begun during the quarantine", () => {
     const verified = recorded(empty);
     const began = capabilityOf(verified, TONE_MAP).epoch;
-    const once = reproduced(verified, TONE_MAP, undefined, 0, began);
-    const overlapping = reproduced(once, TONE_MAP, undefined, 10, began);
+    const once = reproduced(verified, TONE_MAP, probe("rejected", 0), began);
+    const overlapping = reproduced(once, TONE_MAP, probe("rejected", 10), began);
     const during = struck(overlapping, TONE_MAP, 20);
 
     assert.strictEqual(overlapping, once);
@@ -180,7 +272,13 @@ describe("reproduced", () => {
 
   it("keeps a failure reproduced on a real source to that source", () => {
     const shared = recorded(empty, DECODE);
-    const after = reproduced(shared, DECODE, FILM, 0, capabilityOf(shared, DECODE).epoch);
+
+    const after = reproduced(
+      shared,
+      DECODE,
+      probe("rejected", 0, FILM),
+      capabilityOf(shared, DECODE).epoch,
+    );
 
     assert.deepStrictEqual(capabilityOf(after, DECODE), capabilityOf(shared, DECODE));
     assert.isTrue(excludedIn(after, DAY - 1).has(ImplId("decode.qsv")));
@@ -194,7 +292,7 @@ describe("reproduced", () => {
     {
       steps: Schema.Array(
         Schema.Struct({
-          outcome: Schema.Literals(["passed", "rejected", "inconclusive", "reproduced"]),
+          outcome: Schema.Literals(["passed", "rejected", "crashed", "inconclusive", "reproduced"]),
           key: Schema.Literals(["decode", "tonemap"]),
         }),
       ),
@@ -207,7 +305,7 @@ describe("reproduced", () => {
         const epoch = capabilityOf(inventory, chosen).epoch;
 
         return outcome === "reproduced"
-          ? reproduced(inventory, chosen, FILM, at, epoch)
+          ? reproduced(inventory, chosen, probe("rejected", at, FILM), epoch)
           : record(inventory, chosen, probe(outcome, at, FILM), epoch);
       }, before);
 
@@ -236,6 +334,24 @@ describe("notReproduced", () => {
     const quarantined = struck(shared, TONE_MAP, 0);
 
     assert.strictEqual(notReproduced(quarantined, TONE_MAP, FILM, 0, began), quarantined);
+  });
+
+  it("never keeps a file off a CPU row, whatever a probe of it showed", () => {
+    const encodeCpu = capabilityKey(ImplId("encode.cpu"), "h264/8/crf");
+    const decodeCpu = capabilityKey(ImplId("decode.cpu"), "h264/yuv420p");
+    const shared = recorded(recorded(empty, encodeCpu), decodeCpu);
+    const epochOf = (key: typeof encodeCpu) => capabilityOf(shared, key).epoch;
+
+    const after = [
+      notReproduced(shared, encodeCpu, FILM, 0, epochOf(encodeCpu)),
+      reproduced(shared, encodeCpu, probe("rejected", 0, FILM), epochOf(encodeCpu)),
+      record(shared, decodeCpu, probe("crashed", 0, FILM), epochOf(decodeCpu)),
+    ];
+
+    for (const inventory of after) {
+      assert.isFalse(excludedIn(inventory, 0).has(ImplId("encode.cpu")));
+      assert.isFalse(excludedIn(inventory, 0).has(ImplId("decode.cpu")));
+    }
   });
 });
 

@@ -6,7 +6,9 @@
  * moves every epoch of its domain, even of keys with no entry yet. Evidence from a real source
  * belongs to that file version and stream alone and never changes a shared status or sets a shared
  * key aside; a quarantine sets a key aside for a while after a generated clip reproduced a
- * failure; an exclusion keeps one source from a row. Pure: the service owns probes and the clock.
+ * failure or a probe crashed ffmpeg, and a key with strikes needs more clean runs to verify again
+ * (`runsToVerify`); an exclusion keeps one source from a GPU row, never from a CPU row. Pure: the
+ * service owns probes and the clock.
  */
 import type { MediaFileId } from "@media/contracts/ids";
 import { Brand, Data, Option } from "effect";
@@ -25,10 +27,11 @@ import {
 type Status = "unknown" | "verified" | "unsupported";
 
 /**
- * How a probe ended: its output frames came out (`passed`), ffmpeg refused it (`rejected`), or it
- * proved nothing, as when it timed out, was stopped, or its device would not open.
+ * How a probe ended: its output frames came out (`passed`), ffmpeg refused it (`rejected`), a
+ * signal such as SIGSEGV or SIGBUS killed ffmpeg as the stage ran (`crashed`), or it proved
+ * nothing, as when it timed out, was stopped, or its device would not open.
  */
-export type ProbeOutcome = "passed" | "rejected" | "inconclusive";
+export type ProbeOutcome = "passed" | "rejected" | "crashed" | "inconclusive";
 
 /** A file version and one of its streams, which real-source evidence belongs to. */
 export type SourceScope = string & Brand.Brand<"SourceScope">;
@@ -63,7 +66,7 @@ export type Evidence = Data.TaggedEnum<{
 /** Constructors and matchers for `Evidence`. */
 export const Evidence = Data.taggedEnum<Evidence>();
 
-/** A key set aside after a failure the probes reproduced. */
+/** A key set aside after a failure the probes reproduced, or a probe that crashed. */
 interface Quarantine {
   /** When it ends: 15 minutes, then 2 hours, then not before a restart. */
   readonly until: number | "restart";
@@ -116,7 +119,7 @@ export interface Inventory {
   readonly capabilities: ReadonlyMap<CapabilityKey, Capability>;
   /** Real-source evidence, by the file version and stream it came from. */
   readonly sources: ReadonlyMap<SourceScope, ReadonlyMap<CapabilityKey, Capability>>;
-  /** Rows a source must not use, until a time. */
+  /** GPU rows a source must not use, until a time. */
   readonly exclusions: ReadonlyMap<SourceScope, ReadonlyMap<ImplId, number>>;
   /** The newest epoch handed out; a key's epoch only ever moves to a newer one. */
   readonly clock: number;
@@ -176,9 +179,26 @@ export const isQuarantined = (capability: Capability, now: number): boolean =>
     onSome: ({ until }) => until === "restart" || until > now,
   });
 
+/**
+ * How many clean runs in a row a probe of `key` needs before it verifies the key: the probe's own
+ * `runs`, three times over for each strike the key has taken. Strikes stay after a quarantine
+ * ends, since a key that crashed in a share of runs can pass a few by luck: on an Arc A380,
+ * VA-API's MPEG-2 decoder probe crashed in 46 of 108 runs and passed three in a row a fifth of the
+ * time.
+ */
+export const runsToVerify = (inventory: Inventory, key: CapabilityKey, runs: number): number =>
+  runs *
+  3 **
+    Option.match(capabilityOf(inventory, key).quarantine, {
+      onNone: () => 0,
+      onSome: ({ strikes }) => strikes,
+    });
+
+/** What a probe makes a key's status; a crash sets the key aside instead (`setAside`). */
 const PROBE_STATUS: Readonly<Record<ProbeOutcome, Status | undefined>> = {
   passed: "verified",
   rejected: "unsupported",
+  crashed: undefined,
   inconclusive: undefined,
 };
 
@@ -211,78 +231,34 @@ const updated = (capability: Capability, evidence: Evidence): Capability => {
 const current = (inventory: Inventory, key: CapabilityKey, epoch: number): boolean =>
   capabilityOf(inventory, key).epoch === epoch;
 
-/** Keeps `scope` from the rows `impls` until `until`. */
+/**
+ * Keeps `scope` from the GPU rows among `impls` until `until`. A CPU row is never kept from a
+ * file: it is the floor every file plays on, and a file kept off it can be left with no chain at
+ * all. Only a stream keeps off a CPU row, for itself, so its recovery can try a GPU for that stage.
+ */
 const exclude = (
   inventory: Inventory,
   scope: SourceScope,
   impls: Iterable<ImplId>,
   until: number,
 ): Inventory => {
+  const gpu = [...impls].filter((impl) => (rowOf(impl)?.on ?? "cpu") !== "cpu");
+
+  if (gpu.length === 0) return inventory;
   const known = new Map(inventory.exclusions.get(scope) ?? []);
 
-  for (const impl of impls) known.set(impl, Math.max(until, known.get(impl) ?? 0));
+  for (const impl of gpu) known.set(impl, Math.max(until, known.get(impl) ?? 0));
 
   return { ...inventory, exclusions: new Map(inventory.exclusions).set(scope, known) };
 };
 
 /**
- * Records `evidence` for `key` if `epoch` is still the key's; otherwise a quarantine or an
- * identity change came since, and it is dropped. A probe of a real source goes under that source
- * and never changes the shared status.
+ * Quarantines `key` at `at`: 15 minutes at the first strike, 2 hours at the second, then until a
+ * restart. Its status returns to `unknown`, every source's own evidence for it goes, and its epoch
+ * moves on, so nothing that started earlier is recorded. A key already set aside takes no strike,
+ * as failures of one outage are one.
  */
-export const record = (
-  inventory: Inventory,
-  key: CapabilityKey,
-  evidence: Evidence,
-  epoch: number,
-): Inventory => {
-  if (!current(inventory, key, epoch)) return inventory;
-
-  const source = Evidence.$match(evidence, {
-    Build: () => undefined,
-    Probe: (probe) => probe.source,
-  });
-
-  if (source === undefined) {
-    return {
-      ...inventory,
-      capabilities: new Map(inventory.capabilities).set(
-        key,
-        updated(capabilityOf(inventory, key), evidence),
-      ),
-    };
-  }
-
-  const known = inventory.sources.get(source) ?? new Map<CapabilityKey, Capability>();
-
-  return {
-    ...inventory,
-    sources: new Map(inventory.sources).set(
-      source,
-      new Map(known).set(key, updated(known.get(key) ?? unknown(key, epoch), evidence)),
-    ),
-  };
-};
-
-/**
- * Records that re-probing `key` after a failed run failed again, if `epoch`, the key's when the
- * diagnosis began, is still its. On a generated clip that quarantines the key: 15 minutes at the
- * first strike, 2 hours at the second, then until a restart; its status returns to `unknown`,
- * every source's own evidence for it goes, and its epoch moves on, so nothing that started earlier
- * is recorded. A key already set aside takes no strike, as failures of one outage are one. On the
- * real source `source` it says nothing about other files: that source alone keeps off the row.
- */
-export const reproduced = (
-  inventory: Inventory,
-  key: CapabilityKey,
-  source: SourceScope | undefined,
-  at: number,
-  epoch: number,
-): Inventory => {
-  if (!current(inventory, key, epoch)) return inventory;
-
-  if (source !== undefined)
-    return exclude(inventory, source, [implOf(key)], at + SOURCE_EXCLUSION_MS);
+const setAside = (inventory: Inventory, key: CapabilityKey, at: number): Inventory => {
   const capability = capabilityOf(inventory, key);
 
   if (isQuarantined(capability, at)) return inventory;
@@ -317,6 +293,84 @@ export const reproduced = (
       inconclusive: 0,
     }),
   };
+};
+
+/**
+ * Records `evidence` for `key` if `epoch` is still the key's; otherwise a quarantine or an
+ * identity change came since, and it is dropped. A probe of a real source goes under that source
+ * and never changes the shared status. A probe that crashed counts as a failure the probes
+ * reproduced (`reproduced`): a generated clip's quarantines the key, a real source's keeps that
+ * source off the row, and the probe's evidence is kept either way.
+ */
+export const record = (
+  inventory: Inventory,
+  key: CapabilityKey,
+  evidence: Evidence,
+  epoch: number,
+): Inventory => {
+  if (!current(inventory, key, epoch)) return inventory;
+
+  const probe = Evidence.$is("Probe")(evidence) ? evidence : undefined;
+  const source = probe?.source;
+
+  if (source === undefined) {
+    const recorded: Inventory = {
+      ...inventory,
+      capabilities: new Map(inventory.capabilities).set(
+        key,
+        updated(capabilityOf(inventory, key), evidence),
+      ),
+    };
+
+    return probe?.outcome === "crashed" ? setAside(recorded, key, probe.at) : recorded;
+  }
+
+  const known = inventory.sources.get(source) ?? new Map<CapabilityKey, Capability>();
+
+  const recorded: Inventory = {
+    ...inventory,
+    sources: new Map(inventory.sources).set(
+      source,
+      new Map(known).set(key, updated(known.get(key) ?? unknown(key, epoch), evidence)),
+    ),
+  };
+
+  return probe?.outcome === "crashed"
+    ? exclude(recorded, source, [implOf(key)], probe.at + SOURCE_EXCLUSION_MS)
+    : recorded;
+};
+
+/**
+ * Records that `probe`, re-probing `key` after a failed run, failed again, if `epoch`, the key's
+ * when the diagnosis began, is still its. On a generated clip that quarantines the key
+ * (`setAside`) and keeps the probe as its newest evidence, so what is known shows why. On the real
+ * source the probe read it says nothing about other files: that source alone keeps off the row.
+ */
+export const reproduced = (
+  inventory: Inventory,
+  key: CapabilityKey,
+  probe: Extract<Evidence, { readonly _tag: "Probe" }>,
+  epoch: number,
+): Inventory => {
+  if (!current(inventory, key, epoch)) return inventory;
+
+  if (probe.source !== undefined) {
+    return exclude(inventory, probe.source, [implOf(key)], probe.at + SOURCE_EXCLUSION_MS);
+  }
+
+  const capability = capabilityOf(inventory, key);
+
+  if (isQuarantined(capability, probe.at)) return inventory;
+
+  const shown: Inventory = {
+    ...inventory,
+    capabilities: new Map(inventory.capabilities).set(key, {
+      ...capability,
+      evidence: [probe, ...capability.evidence].slice(0, EVIDENCE_KEPT),
+    }),
+  };
+
+  return setAside(shown, key, probe.at);
 };
 
 /**
