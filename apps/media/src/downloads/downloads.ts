@@ -392,11 +392,13 @@ const make = Effect.gen(function* () {
         ? undefined
         : encodeIntent(file.probe, source, request.capabilities, { quality: undefined });
 
-    // Downloads encode on the CPU, so the build listing settles what they need without a probe.
+    // As a negotiation does, a download probes what its cheapest chain still needs within the
+    // capability service's budget, so the plan, and the job it names, holds from the first
+    // answer on rather than moving to the GPU once warmup proves it.
     const known =
       source === undefined || intent === undefined
         ? { domains: [], verified: new Set<never>(), excluded: new Set<never>() }
-        : yield* capabilities.current({
+        : yield* capabilities.resolve({
             scope: sourceScope(file.fileId, file.sizeBytes, file.modifiedAtMs, source.index),
             path: file.path,
             stream: source.index,

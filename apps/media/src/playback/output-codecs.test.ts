@@ -1,11 +1,12 @@
 import { assert, describe, layer } from "@effect/vitest";
-import { Effect, FileSystem, Path, Schema } from "effect";
+import { Effect, FileSystem, Path, Predicate, Schedule, Schema } from "effect";
 import { HttpClient, HttpClientRequest } from "effect/http";
 
 import { LibraryId, type MediaFileId } from "@media/contracts/ids";
 import {
   type ClientCapabilities,
   NegotiateResponse,
+  PrepareDownloadResponse,
   SeekResponse,
 } from "@media/contracts/media-playback";
 
@@ -101,6 +102,8 @@ const decodeNegotiation = Schema.decodeUnknownEffect(Schema.toCodecJson(Negotiat
 
 const decodeSeek = Schema.decodeUnknownEffect(Schema.toCodecJson(SeekResponse));
 
+const decodePrepared = Schema.decodeUnknownEffect(Schema.toCodecJson(PrepareDownloadResponse));
+
 const Probed = Schema.fromJsonString(
   Schema.Struct({
     streams: Schema.Array(
@@ -172,7 +175,11 @@ const fetched = (url: string) =>
 
 /** The body of a negotiation, or of a seek or stop of a stream. */
 type RequestBody =
-  | { readonly token: string; readonly capabilities: ClientCapabilities }
+  | {
+      readonly token: string;
+      readonly capabilities: ClientCapabilities;
+      readonly quality?: "standard" | "high";
+    }
   | { readonly token: string; readonly streamId: string; readonly positionSeconds?: number };
 
 const posted = (url: string, body: RequestBody) =>
@@ -203,16 +210,15 @@ const segmentsOf = Effect.fn("OutputCodecs.segmentsOf")(function* (playlistUrl: 
   return { init: new URL(init, playlist).href, segments };
 });
 
-/** What ffprobe reads from the init segment followed by `segment`: its stream and packets. */
+/** What ffprobe reads from `parts` written one after another: the video stream and its packets. */
 const probeSegment = Effect.fn("OutputCodecs.probeSegment")(function* (
-  init: Uint8Array,
-  segment: Uint8Array,
+  parts: ReadonlyArray<Uint8Array>,
 ) {
   const fs = yield* FileSystem.FileSystem;
   const tools = yield* MediaTools.Service;
   const file = yield* fs.makeTempFileScoped({ suffix: ".mp4" });
 
-  yield* fs.writeFile(file, Buffer.concat([init, segment]));
+  yield* fs.writeFile(file, Buffer.concat(parts));
 
   return yield* Schema.decodeEffect(Probed)(
     yield* tools.ffprobe([
@@ -254,7 +260,7 @@ const checkSegments = Effect.fn("OutputCodecs.checkSegments")(function* (
     const at = `${expected.name}, the segment at ${segment.start.toFixed(3)} s`;
 
     assert.strictEqual(served.status, 200, `${at}: ${new TextDecoder().decode(served.body)}`);
-    const probed = yield* probeSegment(initBytes.body, served.body).pipe(Effect.orDie);
+    const probed = yield* probeSegment([initBytes.body, served.body]).pipe(Effect.orDie);
     const [stream] = probed.streams;
     const [first] = probed.packets;
 
@@ -323,8 +329,70 @@ const plays = Effect.fn("OutputCodecs.plays")(function* (
   });
 });
 
+/**
+ * Downloads the source at the standard quality for `expected.client` and checks the MP4 the
+ * service wrote: the codec the answer names, where it was encoded, and its codec, profile, and
+ * sample entry.
+ */
+const downloads = Effect.fn("OutputCodecs.downloads")(function* (
+  expected: Case,
+  path: "cpu" | "qsv" | "vaapi",
+) {
+  const server = yield* MediaTestServer.Service;
+  const fileId: MediaFileId = yield* addSource;
+
+  const token = signTestToken({
+    fid: fileId,
+    sid: `download-${path}-${expected.codec}`,
+    pur: "download",
+  });
+
+  const ready = yield* posted(`${server.baseUrl}/api/downloads/prepare`, {
+    token,
+    capabilities: expected.client,
+    quality: "standard",
+  }).pipe(
+    Effect.flatMap(decodePrepared),
+    Effect.orDie,
+    Effect.filterOrFail(
+      (answer): answer is Extract<PrepareDownloadResponse, { readonly _tag: "Ready" }> =>
+        Predicate.isTagged(answer, "Ready"),
+    ),
+    Effect.retry({ schedule: Schedule.spaced("200 millis"), times: 300 }),
+    Effect.orDie,
+  );
+
+  const domain = path === "cpu" || !expected.onGpu ? "cpu" : path;
+
+  assert.strictEqual(
+    ready.mode,
+    domain === "cpu" ? "transcode-software" : `transcode-${domain}`,
+    expected.name,
+  );
+  assert.strictEqual(ready.video.codec, expected.codec, expected.name);
+
+  const file = yield* fetched(ready.url.replace(/^https?:\/\/[^/]+/u, server.baseUrl));
+
+  assert.strictEqual(file.status, 200, expected.name);
+  const [stream] = (yield* probeSegment([file.body]).pipe(Effect.orDie)).streams;
+
+  assert.deepStrictEqual(
+    [stream?.codec_name, stream?.profile, stream?.codec_tag_string],
+    [expected.codec, expected.profile, expected.tag],
+    `${expected.name}'s download`,
+  );
+});
+
 describe.skipIf(!hasFfmpeg)("output codecs", () => {
   layer(MediaTestServer.layer(), { excludeTestServices: true, timeout: "180 seconds" })((it) => {
+    for (const expected of CPU_CASES) {
+      it.effect(
+        `downloads ${expected.codec} encoded on the CPU for ${expected.name}`,
+        () => downloads(expected, "cpu"),
+        120_000,
+      );
+    }
+
     for (const expected of CPU_CASES) {
       it.effect(
         `encodes ${expected.codec} on the CPU for ${expected.name}`,
@@ -348,6 +416,11 @@ describe.skipIf(!hasFfmpeg)("output codecs", () => {
         { excludeTestServices: true, timeout: "180 seconds" },
       )((it) => {
         for (const expected of GPU_CASES) {
+          it.effect(
+            `downloads ${expected.codec} encoded on ${path} for ${expected.name}`,
+            () => downloads(expected, path),
+            120_000,
+          );
           it.effect(
             `encodes ${expected.codec} on ${path} for ${expected.name}`,
             () => plays(expected, path),
