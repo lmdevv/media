@@ -32,6 +32,7 @@ import * as CoreStatus from "../core/core-status.ts";
 import * as LibraryScanner from "../library/library-scanner.ts";
 import * as MemoryLibrary from "../library/memory-library.ts";
 import * as MediaTools from "../media/media-tools.ts";
+import { copyBytes } from "../testing/byte-copies.ts";
 import { invocationsOf, writeFakeFfmpeg } from "../testing/fake-ffmpeg.ts";
 import { ffmpegAvailable } from "../testing/fixture-library.ts";
 import * as FixtureWorkspace from "../testing/fixture-workspace.ts";
@@ -671,7 +672,7 @@ describe.skipIf(!hasFfmpeg)("stream diagnostics", () => {
 
           for (const name of [playing, doomed]) {
             yield* fs.makeDirectory(join(root, name), { recursive: true });
-            yield* fs.copyFile(original, join(root, name, `${name}.mp4`));
+            yield* copyBytes(original, join(root, name, `${name}.mp4`));
           }
 
           yield* scanner.scan({ libraryId, root, mode: "incremental" });
