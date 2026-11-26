@@ -137,8 +137,18 @@ describe("withoutFailedPath", () => {
     ).toBeNull();
   });
 
-  it("has nothing to drop after a transcode failed", () => {
-    expect(withoutFailedPath(IOS_CAPABILITIES, { mode: "transcode-software", video })).toBeNull();
+  it("drops HEVC after an HEVC transcode failed, so the server sends H.264, and never H.264", () => {
+    expect(
+      withoutFailedPath(IOS_CAPABILITIES, { mode: "transcode-qsv", video })?.videoCodecs.map(
+        (support) => support.codec,
+      ),
+    ).toStrictEqual(["h264"]);
+    expect(
+      withoutFailedPath(IOS_CAPABILITIES, {
+        mode: "transcode-software",
+        video: { ...video, codec: "h264" },
+      }),
+    ).toBeNull();
   });
 });
 

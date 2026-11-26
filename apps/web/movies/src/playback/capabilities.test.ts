@@ -9,11 +9,14 @@ const browser = (options: {
   readonly maybe?: ReadonlyArray<string>;
   readonly mse: boolean;
   readonly hdr?: boolean;
+  /** Types the Media Capabilities API answered for, and its answer; the rest are unknown. */
+  readonly efficient?: ReadonlyMap<string, boolean>;
 }): MediaSupport => ({
   canPlayType: (type) =>
     options.types.includes(type) ? "probably" : (options.maybe ?? []).includes(type) ? "maybe" : "",
   isTypeSupported: options.mse ? (type) => options.types.includes(type) : null,
   hdrDisplay: options.hdr ?? false,
+  powerEfficient: (type) => options.efficient?.get(type),
 });
 
 const chrome = browser({
@@ -82,11 +85,33 @@ describe("detectCapabilities", () => {
     ]);
   });
 
+  it("says which codecs decode power-efficiently, once the browser has answered", () => {
+    const answered = browser({
+      types: [
+        'video/mp4; codecs="avc1.640033"',
+        'video/mp4; codecs="hvc1.1.6.L153.B0"',
+        'video/mp4; codecs="av01.0.08M.08"',
+      ],
+      mse: true,
+      efficient: new Map([
+        ['video/mp4; codecs="avc1.640033"', true],
+        ['video/mp4; codecs="av01.0.08M.08"', false],
+      ]),
+    });
+
+    expect(detectCapabilities(answered).videoCodecs).toStrictEqual([
+      { codec: "h264", maxLevel: 51, maxBitDepth: 8, powerEfficient: true },
+      { codec: "hevc", maxBitDepth: 8 },
+      { codec: "av1", maxBitDepth: 8, powerEfficient: false },
+    ]);
+  });
+
   it("offers HDR only on HDR displays", () => {
     const sdr = detectCapabilities({
       canPlayType: iphone.canPlayType,
       isTypeSupported: iphone.isTypeSupported,
       hdrDisplay: false,
+      powerEfficient: () => undefined,
     });
 
     expect(
@@ -128,7 +153,13 @@ describe("withoutFailedPath", () => {
     expect(next?.videoCodecs.map((support) => support.codec)).toStrictEqual(["h264", "vp9"]);
   });
 
-  it("has nothing left to drop after H.264 or a transcode failed", () => {
+  it("drops an encoded codec other than H.264 after a failed transcode, so the server sends H.264", () => {
+    const next = withoutFailedPath(capabilities, stream("transcode-software", "av1"));
+
+    expect(next?.videoCodecs.map((support) => support.codec)).toStrictEqual(["h264", "vp9"]);
+  });
+
+  it("has nothing left to drop after H.264 failed", () => {
     expect(withoutFailedPath(capabilities, stream("remux", "h264"))).toBeNull();
     expect(withoutFailedPath(capabilities, stream("transcode-software", "h264"))).toBeNull();
     expect(

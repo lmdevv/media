@@ -5,8 +5,9 @@
  * A movie negotiates through the same ladder as any other client, with the profile here. Every
  * Chromecast plays 1080p H.264 (up to level 4.1) with AAC, over fMP4 HLS or as an MP4 file; HEVC,
  * 4K, and HDR are offered only to models that report playing them (Chromecast Ultra, Chromecast
- * with Google TV, Google TV Streamer). Cast senders report no codec list, so the model name is the
- * only evidence, and an unknown model gets the safe profile. The web sender SDK reports no model
+ * with Google TV, Google TV Streamer), each decoding them in hardware. Cast senders report no codec
+ * list, so the model name is the only evidence, and an unknown model gets the safe profile; no
+ * profile offers AV1, which only some models decode. The web sender SDK reports no model
  * at all, so the web app always asks for the safe profile; native senders, whose SDKs report the
  * model, can ask for more. A song plays as its original file when every Chromecast decodes it
  * (MP3, AAC), and as the AAC 320 kbps transcode otherwise.
@@ -31,7 +32,9 @@ const H264_PROFILES = ["Constrained Baseline", "Baseline", "Main", "High"];
 
 const HD_CAPABILITIES: ClientCapabilities = {
   containers: ["mp4"],
-  videoCodecs: [{ codec: "h264", profiles: H264_PROFILES, maxLevel: 41, maxBitDepth: 8 }],
+  videoCodecs: [
+    { codec: "h264", profiles: H264_PROFILES, maxLevel: 41, maxBitDepth: 8, powerEfficient: true },
+  ],
   audioCodecs: [
     { codec: "aac", maxChannels: 6 },
     { codec: "mp3", maxChannels: 2 },
@@ -45,13 +48,14 @@ const HD_CAPABILITIES: ClientCapabilities = {
 const UHD_CAPABILITIES: ClientCapabilities = {
   containers: ["mp4"],
   videoCodecs: [
-    { codec: "h264", profiles: H264_PROFILES, maxLevel: 51, maxBitDepth: 8 },
+    { codec: "h264", profiles: H264_PROFILES, maxLevel: 51, maxBitDepth: 8, powerEfficient: true },
     {
       codec: "hevc",
       profiles: ["Main", "Main 10"],
       maxLevel: 153,
       maxBitDepth: 10,
       dynamicRanges: ["hdr10", "hlg"],
+      powerEfficient: true,
     },
   ],
   audioCodecs: HD_CAPABILITIES.audioCodecs,
