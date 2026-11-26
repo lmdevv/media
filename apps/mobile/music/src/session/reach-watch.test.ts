@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CLOSED_RECHECK_MS, LOST_AFTER, RECHECK_MS, SETTLE_MS } from "@/lib/server-reach";
 import type { Observation } from "@/lib/server-reach";
 
+import { doubtsMedia, hearMediaFailures, mediaFailed, onMediaDoubt } from "./media-failures";
 import { reachWatch, STALL_MS } from "./reach-watch";
 
 /** A health check the test answers by hand, recording each one sent. */
@@ -357,7 +358,7 @@ type Learned = "answered" | "doubted" | "failed once" | "lost";
  * The watch's table: the check it has set next, in milliseconds, or null for none, for each row of
  * what the socket last said, what it last learned, and whether anything needs the server (the app
  * on screen, or the server's queue playing). With null, it still hears the socket close, a call
- * stall, and a stream fail.
+ * stall, and any request to the media service fail: a stream, a download, a cover.
  */
 const scheduledNext = (socket: Socket, learned: Learned, needed: boolean): number | null => {
   if (!needed) return null;
@@ -376,7 +377,14 @@ type Event =
   | { readonly kind: "hear"; readonly observation: Observation }
   | { readonly kind: "check"; readonly up: boolean }
   /** A call goes out on the open socket and the core answers it. */
-  | { readonly kind: "call" };
+  | { readonly kind: "call" }
+  /** A request to the media service ends with `status`, null for no answer. */
+  | { readonly kind: "fails"; readonly status: number | null };
+
+const failure = fc.constantFrom<number | null>(null, 404, 500, 502, 503, 504);
+
+/** A failure that hints the media service went away. */
+const doubting = failure.filter(doubtsMedia);
 
 const event: fc.Arbitrary<Event> = fc.oneof(
   fc.record({ kind: fc.constant("socket" as const), open: fc.boolean() }),
@@ -387,6 +395,7 @@ const event: fc.Arbitrary<Event> = fc.oneof(
   }),
   fc.record({ kind: fc.constant("check" as const), up: fc.boolean() }),
   fc.record({ kind: fc.constant("call" as const) }),
+  fc.record({ kind: fc.constant("fails" as const), status: failure }),
 );
 
 interface Row {
@@ -394,7 +403,7 @@ interface Row {
   readonly failures: number;
   /** The socket closed or a call stalled, and the core hasn't answered since. */
   readonly coreDoubted: boolean;
-  /** A stream failed, and no check settled it. */
+  /** A request to the media service went unanswered, and no check settled it. */
   readonly mediaDoubted: boolean;
   readonly needed: boolean;
 }
@@ -419,6 +428,8 @@ const after = (row: Row, happened: Event): Row => {
   if (happened.kind === "check") return media(row, happened.up ? "answered" : "failed");
 
   if (happened.kind === "call") return row.socket === "open" ? { ...row, coreDoubted: false } : row;
+
+  if (happened.kind === "fails") return doubtsMedia(happened.status) ? media(row, "doubted") : row;
 
   const socket: Socket = happened.open ? "open" : "closed";
 
@@ -451,6 +462,7 @@ const watchAfter = async (events: ReadonlyArray<Event>) => {
   const answering = { up: true };
   const server = serverThat(answering);
   const watch = reachWatch(server.answers);
+  const stopHearing = hearMediaFailures(watch);
 
   let open = false;
 
@@ -467,7 +479,8 @@ const watchAfter = async (events: ReadonlyArray<Event>) => {
     } else if (happened.kind === "socket") {
       open = happened.open;
       watch.connection(happened.open ? UP : DOWN);
-    } else if (happened.kind === "need") watch.need(happened.needed);
+    } else if (happened.kind === "fails") mediaFailed(happened.status);
+    else if (happened.kind === "need") watch.need(happened.needed);
     else if (happened.kind === "hear") watch.hear(happened.observation);
     else {
       answering.up = happened.up;
@@ -479,7 +492,15 @@ const watchAfter = async (events: ReadonlyArray<Event>) => {
 
   await run(events);
 
-  return { watch, server, answering };
+  return {
+    watch,
+    server,
+    answering,
+    close: () => {
+      stopHearing();
+      watch.close();
+    },
+  };
 };
 
 /** When the watch sends its next check on its own, within a minute; null for none. */
@@ -502,6 +523,8 @@ const history = fc.array(event, { maxLength: 12 });
 describe("reachWatch's table", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    // Takes any doubt an earlier test left unheard.
+    onMediaDoubt(() => undefined)();
   });
 
   afterEach(() => {
@@ -513,31 +536,49 @@ describe("reachWatch's table", () => {
       fc.asyncProperty(history, async (events) => {
         vi.clearAllTimers();
         const { socket, learned, needed } = rowAfter(events);
-        const { watch, server } = await watchAfter(events);
+        const { server, close } = await watchAfter(events);
 
         expect(await nextCheckAt(server)).toBe(scheduledNext(socket, learned, needed));
-        watch.close();
+        close();
       }),
       { numRuns: 150 },
     );
   });
 
-  it("finds a server gone within seconds while needed, once the socket closes or a stream fails", async () => {
+  it("has a check set whenever a request to the media service went unanswered while needed", async () => {
     await fc.assert(
-      fc.asyncProperty(history, fc.boolean(), async (events, streamFails) => {
+      fc.asyncProperty(history, doubting, async (events, status) => {
         vi.clearAllTimers();
-        const { watch, answering } = await watchAfter(events);
+
+        const { server, close } = await watchAfter([
+          ...events,
+          { kind: "need", needed: true },
+          { kind: "fails", status },
+        ]);
+
+        expect(await nextCheckAt(server)).not.toBeNull();
+        close();
+      }),
+      { numRuns: 100 },
+    );
+  });
+
+  it("finds a server gone within seconds while needed, once the socket closes or a request to it fails", async () => {
+    await fc.assert(
+      fc.asyncProperty(history, fc.boolean(), async (events, requestFails) => {
+        vi.clearAllTimers();
+        const { watch, answering, close } = await watchAfter(events);
 
         watch.need(true);
         answering.up = false;
 
-        if (streamFails) watch.hear("doubted");
+        if (requestFails) mediaFailed(null);
         else watch.connection(DOWN);
 
         await vi.advanceTimersByTimeAsync(CLOSED_RECHECK_MS + SETTLE_MS + 2 * RECHECK_MS);
 
         expect(watch.lost()).toBe(true);
-        watch.close();
+        close();
       }),
       { numRuns: 100 },
     );
@@ -547,14 +588,14 @@ describe("reachWatch's table", () => {
     await fc.assert(
       fc.asyncProperty(history, async (events) => {
         vi.clearAllTimers();
-        const { watch, answering } = await watchAfter(events);
+        const { watch, answering, close } = await watchAfter(events);
 
         watch.need(true);
         answering.up = true;
         await vi.advanceTimersByTimeAsync(CLOSED_RECHECK_MS);
 
         expect(watch.lost()).toBe(false);
-        watch.close();
+        close();
       }),
       { numRuns: 100 },
     );
@@ -565,10 +606,10 @@ describe("reachWatch's table", () => {
       fc.asyncProperty(history, async (events) => {
         vi.clearAllTimers();
         const quiet = events.filter((happened) => happened.kind !== "need");
-        const { watch, server } = await watchAfter(quiet);
+        const { server, close } = await watchAfter(quiet);
 
         expect(await nextCheckAt(server)).toBeNull();
-        watch.close();
+        close();
       }),
       { numRuns: 100 },
     );

@@ -5,13 +5,14 @@ import { followServer } from "@media/mobile-core/server-release";
 import type { ServerFollow, ThisApp } from "@media/mobile-core/server-release";
 import { signInUrlFor } from "@media/sdk/promise";
 import { PlatformProvider } from "@media/sdk/react";
-import type { Option } from "effect";
+import { Option } from "effect";
 import Constants from "expo-constants";
 import { createContext, use, useCallback, useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 
 import { appKeychains } from "@/lib/keychains";
 import { DEVICE_FAMILY } from "@/lib/this-device";
+import { mediaFailed } from "@/session/media-failures";
 
 const THIS_APP: ThisApp = {
   version: Constants.expoConfig?.version,
@@ -21,7 +22,8 @@ const THIS_APP: ThisApp = {
 const ServerHealthContext = createContext<(() => Promise<Option.Option<Health>>) | null>(null);
 
 /**
- * Follows the server's release while the connection lasts, reading it once now. Returns the read
+ * Follows the server's release while the connection lasts, reading it once now; a read that goes
+ * unanswered doubts the media service (`mediaFailed`). Returns the read
  * of its health check, which `ServerReachProvider` sends whenever it checks the server, as on
  * coming back on screen, so the release is read again with it.
  */
@@ -32,7 +34,12 @@ const useServerRelease = (mediaUrl: string): ServerFollow["refresh"] => {
     const followed = followServer(mediaUrl, THIS_APP);
 
     current.current = followed;
-    void followed.refresh();
+
+    const readNow = async (): Promise<void> => {
+      if (Option.isNone(await followed.refresh())) mediaFailed(null);
+    };
+
+    void readNow();
 
     return () => {
       followed.stop();

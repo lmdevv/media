@@ -28,6 +28,7 @@ import type { UserId } from "@/lib/models";
 import { useReadSettled } from "@/lib/platform";
 import { playsOnIos } from "@/player/player-state";
 import { useServer } from "@/session/connection";
+import { mediaFailed } from "@/session/media-failures";
 
 import { expoTransfer } from "./expo-transfer";
 import { openVault, wipeVaults } from "./expo-vault";
@@ -47,6 +48,7 @@ import type {
 import type { HeldLyrics, SyncPolicy } from "./sync/plan";
 import { canToggleDownload, downloadStatus, trackDownloadState } from "./sync/status";
 import type { DownloadStatus } from "./sync/status";
+import { observedTransfer } from "./sync/finished-file";
 import { DownloadSync, EMPTY_DOWNLOADS } from "./sync/sync";
 import type {
   DownloadsCore,
@@ -543,7 +545,7 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
       const opened = new DownloadSync({
         core: coreFor(platform, mediaUrl),
         vault,
-        transfer: expoTransfer,
+        transfer: observedTransfer(expoTransfer, mediaFailed),
         policy: () => policyFor(chosen.current),
         now: Date.now,
       });

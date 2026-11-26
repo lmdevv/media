@@ -38,6 +38,48 @@ export interface Transfer {
   readonly download: (request: DownloadRequest) => Promise<DownloadResult>;
 }
 
+/**
+ * `transfer`, telling `failed` of each request that got an error status, with that status, or no
+ * answer, with null. A request stopped by its signal tells nothing.
+ */
+export const observedTransfer = (
+  transfer: Transfer,
+  failed: (status: number | null) => void,
+): Transfer => ({
+  head: async (url, signal) => {
+    let response: Response;
+
+    try {
+      response = await transfer.head(url, signal);
+    } catch (error) {
+      if (!signal.aborted) failed(null);
+
+      throw error;
+    }
+
+    if (!response.ok) failed(response.status);
+
+    return response;
+  },
+  download: async (request) => {
+    const result = await transfer.download(request);
+
+    if (request.signal.aborted) return result;
+
+    DownloadResult.$match(result, {
+      Written: () => undefined,
+      Refused: ({ status }) => {
+        failed(status);
+      },
+      Broken: () => {
+        failed(null);
+      },
+    });
+
+    return result;
+  },
+});
+
 /** How one fetch of a finished file ended. */
 export type FetchOutcome = Data.TaggedEnum<{
   /** The file is at `destination`, `bytes` long, as the server announced. */

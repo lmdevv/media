@@ -17,6 +17,7 @@ import { useDownloadsReach, useTrackHeld } from "@/downloads";
 import { reachOf } from "@/lib/server-reach";
 import type { Observation, Reach, ServerReach } from "@/lib/server-reach";
 import type { SettledPhase } from "@/lib/session-phase";
+import { hearMediaFailures } from "@/session/media-failures";
 import { reachWatch } from "@/session/reach-watch";
 import type { ReachWatch } from "@/session/reach-watch";
 import { useServerHealth } from "@/session/sdk-provider";
@@ -33,8 +34,8 @@ const ServerReachContext = createContext<ReachState | null>(null);
 const noWatch = (): (() => void) => () => undefined;
 
 /**
- * The connection's `ReachWatch`, fed by the core's socket, by whether the app is on screen, and by
- * whether the server's queue plays here.
+ * The connection's `ReachWatch`, fed by the core's socket, by the app's failed requests to the
+ * media service, by whether the app is on screen, and by whether the server's queue plays here.
  * It checks the server's health on coming back on screen, with the read that also follows the
  * server's release. The watch belongs to this connection, and closes with it.
  */
@@ -48,6 +49,8 @@ const useWatch = (playing: boolean): ReachWatch | null => {
     const made = reachWatch(async () => Option.isSome(await readHealth()));
     const stopConnection = platform.onConnection(made.connection);
 
+    const stopFailures = hearMediaFailures(made);
+
     const foregrounding = AppState.addEventListener("change", (state) => {
       setForeground(state === "active");
 
@@ -58,6 +61,7 @@ const useWatch = (playing: boolean): ReachWatch | null => {
 
     return () => {
       foregrounding.remove();
+      stopFailures();
       void stopConnection();
       made.close();
     };
@@ -73,8 +77,8 @@ const useWatch = (playing: boolean): ReachWatch | null => {
 /**
  * Works out, once for every screen below it, whether the server answers: `phase` is the phase on
  * show, offline when the app opened without the server. Tells the downloads, which fetch only
- * while it answers. The core's socket stands for the core; a health check of the media server
- * decides each doubt.
+ * while it answers. The core's socket stands for the core; a failed request to the media service
+ * doubts it, and a health check decides each doubt.
  */
 export function ServerReachProvider({
   phase,

@@ -6,7 +6,7 @@ import { NotFound } from "@media/contracts/errors";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { FakeMedia } from "./fake-media";
-import { fetchFinishedFile, FetchOutcome } from "./finished-file";
+import { fetchFinishedFile, FetchOutcome, observedTransfer } from "./finished-file";
 import type { FinishedFileRequest } from "./finished-file";
 import { nodeTransfer } from "./node-transfer";
 
@@ -146,5 +146,76 @@ describe("fetchFinishedFile", () => {
 
     expect(outcome).toEqual(FetchOutcome.Stopped());
     expect(media.seen).toHaveLength(1);
+  });
+});
+
+/** A transfer over Node and the statuses it told of, null for no answer. */
+const observed = () => {
+  const told: Array<number | null> = [];
+
+  return {
+    transfer: observedTransfer(nodeTransfer, (status) => {
+      told.push(status);
+    }),
+    told,
+  };
+};
+
+describe("observedTransfer", () => {
+  it("tells nothing for a fetch that lands", async () => {
+    media.serve(SONG, "bytes");
+    const { transfer, told } = observed();
+
+    expect(FetchOutcome.$is("Fetched")(await fetchFinishedFile(transfer, request()))).toBe(true);
+    expect(told).toEqual([]);
+  });
+
+  it("tells each error status the media service or its proxy answers", async () => {
+    media.serve(SONG, "bytes", { refusals: [502], preparing: 1 });
+    const { transfer, told } = observed();
+
+    expect(await fetchFinishedFile(transfer, request())).toEqual(
+      FetchOutcome.Failed({ message: "The media service answered 502", retryable: true }),
+    );
+
+    expect(await fetchFinishedFile(transfer, request())).toEqual(
+      FetchOutcome.Fetched({
+        destination: join(dir, "song.m4a"),
+        bytes: 5,
+        contentType: "audio/mp4",
+      }),
+    );
+
+    expect(told).toEqual([502, 503]);
+  });
+
+  it("tells no answer when nothing listens at the media service's address", async () => {
+    await media.close();
+    const { transfer, told } = observed();
+    const destination = join(dir, "cover.jpg");
+    const signal = new AbortController().signal;
+
+    await fetchFinishedFile(transfer, request());
+    await transfer.download({ url: `${base}/art/a1`, destination, signal });
+
+    expect(told).toEqual([null, null]);
+    media = new FakeMedia();
+    await media.listen();
+  });
+
+  it("tells nothing of a request its signal stopped", async () => {
+    media.serve(SONG, "bytes");
+    const stop = new AbortController();
+    const { transfer, told } = observed();
+
+    stop.abort();
+    await fetchFinishedFile(transfer, request({ signal: stop.signal }));
+    await transfer.download({
+      url: `${base}${SONG}`,
+      destination: join(dir, "s"),
+      signal: stop.signal,
+    });
+
+    expect(told).toEqual([]);
   });
 });
