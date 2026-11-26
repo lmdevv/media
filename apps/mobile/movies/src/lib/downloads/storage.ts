@@ -213,7 +213,13 @@ const copiesIn = (
   names: ReadonlyArray<string>,
 ): ReadonlyArray<DownloadRecord> =>
   unowned(store, names).flatMap((name) =>
-    removedIdOf(name) === null ? Option.toArray(recordIn(disk, name)) : [],
+    removedIdOf(name) === null
+      ? Option.toArray(
+          Option.map(recordIn(disk, name), (download) =>
+            Struct.assign(download, { hasFolder: true }),
+          ),
+        )
+      : [],
   );
 
 const withCopies = (

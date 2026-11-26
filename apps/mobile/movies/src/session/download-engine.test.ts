@@ -939,6 +939,23 @@ describe("DownloadEngine", () => {
     expect(core.calls).toStrictEqual([]);
   });
 
+  it("removes a download the core stops listing through a recorded removal", async () => {
+    keep([dune, arrival]);
+    core.lists([dune, arrival]);
+    const engine = launch();
+
+    engine.start();
+    await settle();
+    core.lists([dune]);
+    await settle();
+
+    expect(listed(engine)).toStrictEqual([`${dune}:ready`]);
+    expect(core.calls).toStrictEqual([`remove:${arrival}`]);
+    expect(names(root)).toStrictEqual([dune, STORE_FILE]);
+    expect(filesUnder(dune)).toContain(videoFile("mp4"));
+    expect(listed(launch())).toStrictEqual([`${dune}:ready`]);
+  });
+
   it("tells the core about a removal before it adds the same download again", async () => {
     keep([dune, arrival]);
     core.lists([dune, arrival]);
