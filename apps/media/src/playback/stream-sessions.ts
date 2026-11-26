@@ -401,7 +401,10 @@ interface Session extends Lifecycle {
   readonly recovery: Ref.Ref<RecoveryState>;
   /** How the transcode changed after failures, oldest first. */
   readonly changes: Ref.Ref<ReadonlyArray<PipelineChange>>;
-  /** Segments where recovery gave up, and what their requests answer: no run starts there again. */
+  /**
+   * Segments where recovery gave up, and what their requests answer: no run starts there again
+   * until a later run serves one, which clears it.
+   */
   readonly ended: Ref.Ref<ReadonlyMap<number, TranscodeFailed>>;
 
   readonly generation: Ref.Ref<Generation>;
@@ -439,7 +442,7 @@ const onGpu = (video: VideoPlan): boolean => isEncode(video) && usesGpu(video.pi
 /**
  * Ends recovery at segment `index`: requests of `generation` answer `failure` from now on, and the
  * session remembers the position, so an idle release and a revive start no run there again, while
- * a seek elsewhere starts afresh.
+ * a seek elsewhere starts afresh; a later run that serves the position makes it forget it.
  */
 const giveUp = (
   session: Session,
@@ -1455,6 +1458,9 @@ const make = Effect.gen(function* () {
         yield* Ref.set(session.served, true);
         yield* Ref.update(session.recovery, (state) =>
           state.failures === 0 ? state : { ...state, failures: 0 },
+        );
+        yield* Ref.update(session.ended, (known) =>
+          known.has(index) ? without(known, index) : known,
         );
 
         return members.map((fragment) => fragment.path);

@@ -119,6 +119,16 @@ const slowDiagnosis = await writeFakeFfmpeg({
   ],
 });
 
+/**
+ * Runs from the start write two seconds, so a seek past them starts a new run, and the first run
+ * that seeks fails at once, naming nothing; every later one plays through.
+ */
+const failsOnceSeeking = await writeFakeFfmpeg({
+  hlsFromStartSeconds: 2,
+  rules: [{ token: "-ss ", runs: "hls", stderr: "Conversion failed!", limit: 1 }],
+  logInvocations: true,
+});
+
 /** Runs as usual, logging every run. */
 const plain = await writeFakeFfmpeg({ logInvocations: true });
 
@@ -292,6 +302,19 @@ const seekTo = Effect.fn(function* (token: string, streamId: string, positionSec
     Effect.flatMap(decodeSeek),
     Effect.orDie,
   );
+});
+
+/** What the server answers a seek of `streamId` to `positionSeconds`: its status and body. */
+const seekAnswer = Effect.fn(function* (token: string, streamId: string, positionSeconds: number) {
+  const server = yield* MediaTestServer.Service;
+
+  const response = yield* HttpClient.execute(
+    HttpClientRequest.post(`${server.baseUrl}/api/playback/seek`).pipe(
+      HttpClientRequest.bodyJsonUnsafe({ token, streamId, positionSeconds }),
+    ),
+  ).pipe(Effect.orDie);
+
+  return { status: response.status, body: yield* response.json.pipe(Effect.orDie) };
 });
 
 /** The index of the segment of the playlist at `url` that holds `seconds` into the stream. */
@@ -564,6 +587,62 @@ describe.skipIf(!hasFfmpeg)("stream recovery", () => {
           assert.strictEqual(retried.status, 500, retried.body);
           assert.include(retried.body, '"_tag":"TranscodeFailed"');
           assert.lengthOf(yield* runsOf(damagedLate, streamId), runs, "no run starts there again");
+        }),
+      120_000,
+    );
+  });
+
+  layer(
+    MediaTestServer.layer({ FFMPEG_PATH: failsOnceSeeking }),
+    options,
+  )((it) => {
+    it.effect(
+      "forgets a position that ended in failure once a later run serves it, so a seek straight back plays",
+      () =>
+        Effect.gen(function* () {
+          const server = yield* MediaTestServer.Service;
+          const { library } = yield* FixtureWorkspace.Service;
+
+          const token = signTestToken({
+            fid: server.fileId("movies", library.directMovie),
+            sid: "forgotten",
+          });
+
+          const stream = yield* negotiated({ token, capabilities: smallBrowser });
+          const streamId = stream.streamId ?? "";
+
+          assert.strictEqual(stream.mode, "transcode-software");
+          assert.strictEqual(yield* fetchStatus(segmentOf(stream.url, 0)), 200);
+
+          // The run at ten seconds fails, and recovery gives up there.
+          const failedAt = yield* seekTo(token, streamId, 10);
+          const index = yield* segmentHolding(failedAt.playlistUrl, 10);
+          const failed = yield* fetchAnswer(segmentOf(failedAt.playlistUrl, index));
+
+          assert.strictEqual(failed.status, 500, failed.body);
+
+          // A run from four seconds plays through that position and serves it.
+          const earlier = yield* seekTo(token, streamId, 4);
+          const from = yield* segmentHolding(earlier.playlistUrl, 4);
+
+          for (let segment = from; segment <= index; segment += 1) {
+            assert.strictEqual(
+              yield* fetchStatus(segmentOf(earlier.playlistUrl, segment)),
+              200,
+              `segment ${String(segment)}`,
+            );
+          }
+
+          // Back to the start, whose run ends early, then straight back to ten seconds.
+          const start = yield* seekTo(token, streamId, 0);
+
+          assert.strictEqual(yield* fetchStatus(segmentOf(start.playlistUrl, 0)), 200);
+          const back = yield* seekAnswer(token, streamId, 10);
+
+          assert.strictEqual(back.status, 200, JSON.stringify(back.body));
+          const moved = yield* decodeSeek(back.body).pipe(Effect.orDie);
+
+          assert.strictEqual(yield* fetchStatus(segmentOf(moved.playlistUrl, index)), 200);
         }),
       120_000,
     );
