@@ -178,9 +178,7 @@ describe("hlsCommandArgs", () => {
       "-hwaccel_device",
       "va",
     ]);
-    expect(after(args, "-vf")).toBe(
-      "hwmap=derive_device=qsv,format=qsv,vpp_qsv=w=1920:h=1080:format=nv12",
-    );
+    expect(after(args, "-vf")).toBe("hwmap,format=qsv,vpp_qsv=w=1920:h=1080:format=nv12");
     expect(after(args, "-c:v")).toBe("h264_qsv");
   });
 
@@ -293,7 +291,7 @@ describe("hlsCommandArgs", () => {
 
     expect(after(qsv, "-filter_complex")).toBe(
       [
-        "[0:0]hwmap=derive_device=qsv,format=qsv,vpp_qsv=w=1920:h=1080:format=nv12,hwdownload,format=nv12[picture]",
+        "[0:0]hwmap,format=qsv,vpp_qsv=w=1920:h=1080:format=nv12,hwdownload,format=nv12[picture]",
         "[0:3]scale=1920:1080[subtitle]",
         "[picture][subtitle]overlay=eof_action=pass:repeatlast=0,format=nv12,hwupload=extra_hw_frames=64,format=qsv[video]",
       ].join(";"),
@@ -426,7 +424,7 @@ describe("hlsCommandArgs", () => {
 
     expect(qsv.indexOf("-hwaccel")).toBeLessThan(qsv.indexOf("-i"));
     expect(after(qsv, "-filter_complex")).toContain(
-      "[0:0]trim=start=61.400000,hwmap=derive_device=qsv,format=qsv,vpp_qsv=",
+      "[0:0]trim=start=61.400000,hwmap,format=qsv,vpp_qsv=",
     );
   });
 

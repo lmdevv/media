@@ -180,18 +180,16 @@ const VAAPI_DECODING: ReadonlyArray<string> = [
 ];
 
 /**
- * Quick Sync's decoder: VA-API's on the same device, its surfaces mapped into Quick Sync's with no
- * copy. oneVPL's own decoders are not used: on an Arc A380 with a 256 MiB BAR, a oneVPL decoder in
- * the same run as `h264_qsv` had the kernel refuse the encoder's page faults (SIGBUS) in 0.9 % of
- * all-GPU HEVC runs and 5 % of HEVC burn-ins; decoding this way crashed in none of 600 and in 1 of
- * 300, VA-API's own rate.
+ * Quick Sync's decoder: VA-API's on the same device, its surfaces mapped with no copy into the
+ * Quick Sync device the run already opened as its filter device (`hw`), so no second Quick Sync
+ * session opens. oneVPL's own decoders are not used: on an Arc A380 with a 256 MiB BAR, a oneVPL
+ * decoder in the same run as `h264_qsv` had the kernel refuse the encoder's page faults (SIGBUS) in
+ * 11 of 1,700 all-GPU HEVC runs and 24 of 800 HEVC burn-ins; decoding this way crashed in none of
+ * 1,200 and none of 300.
  */
 const decodeQsv = decodeOn(
   "qsv",
-  {
-    input: VAAPI_DECODING,
-    filters: [filter("hwmap", ["derive_device", "qsv"]), filter("format", "qsv")],
-  },
+  { input: VAAPI_DECODING, filters: [filter("hwmap"), filter("format", "qsv")] },
   (codec) => ["hwaccel:vaapi", `decodes:${codec}`, "filter:hwmap"],
 );
 

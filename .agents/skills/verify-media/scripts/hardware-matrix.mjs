@@ -186,9 +186,10 @@ const GPU_OVERLAY = /overlay_(qsv|vaapi)/;
 export const WORK = {
   decode: {
     cpu: { uses: [], avoids: [/-hwaccel\s/], engine: "none" },
-    // Quick Sync decodes through oneVPL's decoder (main) or through VA-API's on the device Quick
-    // Sync is derived from, its surfaces mapped into Quick Sync's.
-    qsv: { uses: [/-hwaccel qsv -hwaccel_output_format qsv\b|-hwaccel vaapi -hwaccel_output_format vaapi\b.*hwmap=derive_device=qsv/], avoids: [], engine: "video" },
+    // Quick Sync decodes through oneVPL's decoder, as older images render it, or through VA-API's
+    // on the device Quick Sync is derived from, its surfaces mapped into Quick Sync's. The map
+    // refuses software frames, so a VA-API decoder that falls back to software fails the run.
+    qsv: { uses: [/-hwaccel qsv -hwaccel_output_format qsv\b|-hwaccel vaapi -hwaccel_output_format vaapi\b.*\bhwmap,format=qsv\b/], avoids: [], engine: "video" },
     vaapi: { uses: [/-hwaccel vaapi\b/, /-hwaccel_output_format vaapi\b/], avoids: [], engine: "video" },
   },
   deinterlace: {

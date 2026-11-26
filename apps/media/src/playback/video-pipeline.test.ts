@@ -567,6 +567,45 @@ describe("probes", () => {
     );
   });
 
+  it("prove Quick Sync's decoder through the text its chains render: VA-API's decoder mapped into the open Quick Sync device", () => {
+    const video = source();
+    const keys = everyKey(video, intentFor(video), [QSV]);
+    const decode = capabilityKey(ImplId("decode.qsv"), "h264/yuv420p");
+
+    const probe = probeFor(
+      decode,
+      snapshot(
+        [QSV],
+        keys.filter((key) => key !== decode),
+      ),
+    );
+
+    if (probe === undefined || Result.isFailure(probe)) throw new Error("no probe of decode.qsv");
+
+    const rendered = renderVideo(probe.success.pipeline, {
+      input: 0,
+      stream: 0,
+      trimPicture: undefined,
+      trimSubtitle: undefined,
+    });
+
+    assert.deepStrictEqual(rendered.input, [
+      "-init_hw_device",
+      "vaapi=va:/dev/dri/renderD128",
+      "-init_hw_device",
+      "qsv=hw@va",
+      "-filter_hw_device",
+      "hw",
+      "-hwaccel",
+      "vaapi",
+      "-hwaccel_output_format",
+      "vaapi",
+      "-hwaccel_device",
+      "va",
+    ]);
+    assert.strictEqual(rendered.graph?.text, "hwmap,format=qsv,hwdownload,format=nv12");
+  });
+
   it("probe a row on a GPU after its upload is proven", () => {
     const video = source();
     const keys = everyKey(video, intentFor(video), [QSV]);

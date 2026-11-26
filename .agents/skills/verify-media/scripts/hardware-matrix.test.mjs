@@ -462,7 +462,7 @@ describe("verdicts", () => {
     assert.equal(ranOn("decode", "qsv", { ...run, engines: { video: 1 } }).ok, true);
     const mapped = {
       ...run,
-      args: ["-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi", "-hwaccel_device", "va", "-i", "in.mkv", "-vf", "hwmap=derive_device=qsv,format=qsv,vpp_qsv=w=640:h=360", "-c:v", "h264_qsv"],
+      args: ["-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi", "-hwaccel_device", "va", "-i", "in.mkv", "-vf", "hwmap,format=qsv,vpp_qsv=w=640:h=360", "-c:v", "h264_qsv"],
       engines: { video: 1 },
     };
     assert.equal(ranOn("decode", "qsv", mapped).ok, true, "VA-API's decoder mapped into Quick Sync");
