@@ -59,7 +59,7 @@ private func processStartedAt() -> Double? {
 /// How long a mark waits to be shown before it stops looking.
 private let markPatience: CFTimeInterval = 60
 
-/// A view whose presentation layer is nearly transparent shows nothing.
+/// A view whose layers, multiplied up to the window, are nearly transparent shows nothing.
 private let shownOpacity: Float = 0.01
 
 /// A covering view's background must be this opaque to hide what is under it.
@@ -133,9 +133,11 @@ final class FrameMarkView: ExpoView {
       return false
     }
 
+    var opacity: Float = 1
     var view: UIView? = self
     while let current = view {
-      if current.isHidden || (current.layer.presentation()?.opacity ?? 0) < shownOpacity {
+      opacity *= current.layer.presentation()?.opacity ?? 0
+      if current.isHidden || opacity < shownOpacity {
         return false
       }
       view = current.superview

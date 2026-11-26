@@ -1,5 +1,5 @@
-// Checks the timings an app logged against the screen recording `ios timings --record` made of
-// the same run: a number that reads faster than the screen got is worse than none.
+// Checks each timing an app logged against the screen recording `ios timings --record` made of the
+// same run.
 //
 //   node app-timings-truth.mjs sheets <app-timings-dir>
 //   node app-timings-truth.mjs judge <truth.tsv> [frame-ms]
