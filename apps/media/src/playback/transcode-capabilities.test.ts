@@ -971,7 +971,7 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
     live,
   )((it) => {
     it.effect(
-      "keeps a file off a row for a day only for a named failure its probe runs past; a crash nothing reproduces keeps the stream off alone",
+      "keeps a file on its GPU rows after a crash nothing reproduces, and off a row for a day after a named failure its probe runs past",
       () =>
         Effect.gen(function* () {
           const capabilities = yield* TranscodeCapabilities.Service;
@@ -994,21 +994,6 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
           });
 
           assert.deepStrictEqual(crashed, Diagnosis.Undecided({ impls: gpuRows }));
-
-          // A last line naming a filter instance this run does not have, after an audio warning.
-          const unknownFilter = yield* capabilities.diagnose({
-            ...vppFailed(pipeline),
-            failure: {
-              exitCode: 234,
-              signal: null,
-              stderrTail: [
-                "[aist#0:1/ac3 @ 0x1] [dec:ac3 @ 0x2] Error submitting packet to decoder: Invalid data found when processing input",
-                "[Parsed_vpp_qsv_9 @ 0x3] Invalid color_matrix.",
-              ].join("\n"),
-            },
-          });
-
-          assert.deepStrictEqual(unknownFilter, Diagnosis.Undecided({ impls: gpuRows }));
           assert.isUndefined((yield* capabilities.inventory).exclusions.get(asked.scope));
           assert.isTrue(
             samePipeline(pipelineOf(HDR, yield* capabilities.resolve(asked)), pipeline),
@@ -1024,8 +1009,57 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
           );
           const next = yield* capabilities.resolve(asked);
 
-          assert.isTrue(next.excluded.has(ImplId("scale.qsv")));
-          assert.isTrue(next.excluded.has(ImplId("tonemap.qsv")));
+          assert.deepStrictEqual(
+            gpuRows.filter((impl) => next.excluded.has(impl)),
+            [ImplId("scale.qsv"), ImplId("tonemap.qsv")],
+          );
+        }),
+      60_000,
+    );
+  });
+
+  layer(
+    plain.services,
+    live,
+  )((it) => {
+    it.effect(
+      "keeps a file off every GPU row for a day after a refusal that names no part its probes run past",
+      () =>
+        Effect.gen(function* () {
+          const capabilities = yield* TranscodeCapabilities.Service;
+          const asked = request(HDR);
+          const pipeline = pipelineOf(HDR, yield* capabilities.resolve(asked));
+          const gpuRows = pipeline.steps.map((step) => step.impl);
+
+          // ffmpeg exits by its own decision, its last line naming a filter instance this run does
+          // not have, after an audio warning: no part named, and no crash.
+          const refused = yield* capabilities.diagnose({
+            ...vppFailed(pipeline),
+            failure: {
+              exitCode: 234,
+              signal: null,
+              stderrTail: [
+                "[aist#0:1/ac3 @ 0x1] [dec:ac3 @ 0x2] Error submitting packet to decoder: Invalid data found when processing input",
+                "[Parsed_vpp_qsv_9 @ 0x3] Invalid color_matrix.",
+              ].join("\n"),
+            },
+          });
+
+          assert.deepStrictEqual(refused, Diagnosis.Source({ impls: gpuRows }));
+          const next = yield* capabilities.resolve(asked);
+
+          assert.deepStrictEqual(
+            gpuRows.filter((impl) => next.excluded.has(impl)),
+            gpuRows,
+          );
+          assert.deepStrictEqual(
+            plannedImpls(HDR, next),
+            Result.succeed(["decode.cpu", "scale.cpu", "tonemap.cpu", "encode.cpu"]),
+          );
+          assert.isFalse(
+            (yield* capabilities.resolve(request(HDR, "other"))).excluded.has(ImplId("decode.qsv")),
+            "another file keeps its GPU rows",
+          );
         }),
       60_000,
     );

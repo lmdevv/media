@@ -255,13 +255,13 @@ export type Diagnosis = Data.TaggedEnum<{
     readonly impls: ReadonlyArray<ImplId>;
   };
   /**
-   * The source is the cause, and it is kept from these rows: the failure named these parts and
-   * each ran on generated frames, or one failed again only on the source itself.
+   * The source is the cause, and it is kept from these rows: ffmpeg ended the run by its own
+   * decision and each suspect ran on generated frames, or one failed again only on the source.
    */
   Source: { readonly impls: ReadonlyArray<ImplId> };
   /**
-   * No verdict, and this stream keeps off these rows: the probes ran out of time, or the failure
-   * named no part (a crash signal names none) and the suspects ran on generated frames.
+   * No verdict, and this stream keeps off these rows: the probes ran out of time, or a crash
+   * signal killed the run and the suspects ran on generated frames.
    */
   Undecided: { readonly impls: ReadonlyArray<ImplId> };
   NotVideo: { readonly reason: NotVideo };

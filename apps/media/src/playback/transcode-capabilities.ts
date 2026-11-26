@@ -5,11 +5,11 @@
  * variant of that device's rows, one at a time at the lowest CPU priority. A negotiation probes
  * the unknown keys its cheapest chain would use under one budget, ahead of that warmup, real
  * sources where no clip stands in, and then plans once from a snapshot. After a failed run it
- * re-probes the suspects: a reproduced failure quarantines that one key; a failure whose log
- * named a part that its probe runs past keeps that source from the GPU rows involved for a day; a
- * failure that named nothing, such as a crash signal, that nothing reproduces, and running out of
- * time, decide nothing. The failed stream keeps off every row involved, a CPU row included, while
- * no file is ever kept from a CPU row (the inventory's `exclude`).
+ * re-probes the suspects: a reproduced failure quarantines that one key; a run ffmpeg ended by its
+ * own decision whose suspects its probes run past keeps that source from those GPU rows for a day;
+ * a crash signal that nothing reproduces, and running out of time, decide nothing. The failed
+ * stream keeps off every row involved, a CPU row included, while no file is ever kept from a CPU
+ * row (the inventory's `exclude`).
  * A probe that crashes ffmpeg counts as a reproduced failure: its key is quarantined and probed
  * again when the quarantine ends.
  * A listing proves the CPU's rows, which touch no device; it never proves a GPU row. A listing
@@ -997,11 +997,12 @@ const make = Effect.gen(function* () {
     }
 
     const at = yield* now;
-    // Only a line that named a part says the file is refused there. A failure that named nothing,
-    // as a crash signal's never does, and whose suspects ran on generated frames is no verdict:
-    // the stream keeps off them, the file keeps them.
-    const sourceExcluded = attribution.named ? passed : [];
-    const unsettled = attribution.named ? undecided : [...passed, ...undecided];
+    // A crash signal is no refusal: a driver can crash in a share of runs of a chain that works, so
+    // a crash whose suspects ran on generated frames is no verdict, and only the stream keeps off
+    // them. A run ffmpeg ended by its own decision says the file is refused there.
+    const crashed = failed.failure.signal !== null && CRASH_SIGNALS.has(failed.failure.signal);
+    const sourceExcluded = crashed ? [] : passed;
+    const unsettled = crashed ? [...passed, ...undecided] : undecided;
 
     for (const step of sourceExcluded) {
       yield* update((current) =>
