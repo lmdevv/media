@@ -151,7 +151,8 @@ export const useCast = (
     }
 
     let current: CastPlayback | null = null;
-    let cancelled = false;
+    // Aborted as this run ends: its session ended, another replaced it, or the player left.
+    const sessionEnd = new AbortController();
 
     /**
      * Ends `playing` on the page's side: a disconnect continues on the page; leaving the player
@@ -182,9 +183,10 @@ export const useCast = (
           // Leaving keeps the other sender's media playing; stopping would end it for everyone.
           context?.endCurrentSession(false);
         },
+        sessionEnd.signal,
       );
 
-      if (cancelled) {
+      if (sessionEnd.signal.aborted) {
         if (Result.isSuccess(result)) end(result.success);
 
         return;
@@ -206,7 +208,7 @@ export const useCast = (
     void start();
 
     return () => {
-      cancelled = true;
+      sessionEnd.abort();
       setStarting(false);
       setPlayback(null);
 

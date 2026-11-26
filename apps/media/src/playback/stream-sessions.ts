@@ -1,5 +1,6 @@
 import {
   type ClientCapabilities,
+  type DeliveredVideo,
   type InsufficientTranscodeSpace,
   type PlaybackQuality,
   type KeyframeIndexFailed,
@@ -10,6 +11,8 @@ import {
   StreamNotFound,
   TranscodeCapacityReached,
   TranscodeFailed,
+  type TranscodeReason,
+  type TranscodeSummary,
   UnsupportedPlayback,
 } from "@media/contracts/media-playback";
 import type { PlaybackMode } from "@media/contracts/models/playback";
@@ -72,6 +75,7 @@ import * as TranscodeSpace from "./transcode-space.ts";
 import { sourceScope, type SourceScope } from "./capability-inventory.ts";
 import * as TranscodeCapabilities from "./transcode-capabilities.ts";
 import { hlsCommand } from "./transcode-command.ts";
+import { deliveredVideo, reasonOf, summaryOf } from "./transcode-diagnostics.ts";
 import {
   advance,
   Diagnosis,
@@ -107,6 +111,8 @@ interface StartedStream {
   readonly mode: Exclude<PlaybackMode, "direct">;
   /** What that generation does with the video, which may differ from the plan asked for. */
   readonly video: VideoPlan;
+  /** Where that generation's video is made, and the changes that led there. */
+  readonly transcode: TranscodeSummary;
   readonly segmentIndex: number;
 }
 
@@ -114,6 +120,13 @@ interface StreamView {
   readonly streamId: StreamId;
   readonly generation: number;
   readonly plan: SegmentPlan;
+}
+
+/** Where a seek continues, and how that generation delivers the video. */
+interface MovedStream extends StreamView {
+  readonly mode: Exclude<PlaybackMode, "direct">;
+  readonly video: DeliveredVideo;
+  readonly transcode: TranscodeSummary;
 }
 
 interface ServedPart {
@@ -185,12 +198,15 @@ export interface Interface {
     index: number,
     grant: PlaybackGrant,
   ) => Effect.Effect<ServedSegment, StreamRequestError, Scope.Scope>;
-  /** Moves playback to `seconds`, starting a new generation unless that point is already produced. */
+  /**
+   * Moves playback to `seconds`, starting a new generation unless that point is already produced,
+   * and answers how the generation that covers it delivers the video.
+   */
   readonly seek: (
     streamId: StreamId,
     seconds: number,
     grant: PlaybackGrant,
-  ) => Effect.Effect<StreamView, StreamRequestError>;
+  ) => Effect.Effect<MovedStream, StreamRequestError>;
   readonly stop: (
     streamId: StreamId,
     grant: PlaybackGrant,
@@ -412,8 +428,7 @@ interface PipelineChange {
   readonly generation: number;
   readonly cause: Diagnosis["_tag"] | "capability-lost";
   readonly excluded: ReadonlyArray<ImplId>;
-  /** A scrubbed line from ffmpeg's log. */
-  readonly detail: string;
+  readonly reason: TranscodeReason;
 }
 
 const isEncode = VideoPlan.$is("Encode");
@@ -457,7 +472,7 @@ const causeOf = (diagnosis: Diagnosis): Diagnosis["_tag"] =>
     Unexplained: () => "Unexplained" as const,
   });
 
-/** The first line of a failed run's log, scrubbed, for the stream's changes and its logs. */
+/** The first line of a failed run's log, its paths replaced, for the service's own log. */
 const firstLine = (failure: MediaTools.MediaToolFailed): string =>
   (
     failure.stderrHead
@@ -1134,6 +1149,7 @@ const make = Effect.gen(function* () {
         streamId: session.streamId,
         generation: change.generation,
         cause: change.cause,
+        reason: change.reason,
         excluded: change.excluded.join(","),
         stages: isEncode(next) ? next.pipeline.steps.map((step) => step.impl).join(",") : "copy",
         from,
@@ -1180,7 +1196,7 @@ const make = Effect.gen(function* () {
       generation: generation + 1,
       cause: "capability-lost",
       excluded: [],
-      detail: "",
+      reason: "capability-lost",
     });
 
     return true;
@@ -1236,17 +1252,20 @@ const make = Effect.gen(function* () {
           }),
         );
 
-        const terminal = new TranscodeFailed({ streamId: session.streamId, mode, detail });
+        const terminal = (reason: TranscodeReason) =>
+          new TranscodeFailed({ streamId: session.streamId, mode, reason });
+
         const stream = session.file.probe.video;
 
         if (!isEncode(video) || generation.owners === undefined || stream === undefined) {
-          return yield* giveUp(session, generation, index, terminal);
+          return yield* giveUp(session, generation, index, terminal("other"));
         }
 
         const state = yield* Ref.get(session.recovery);
         const asked = capabilityRequest(session, video.intent, state.excluded);
 
-        if (asked === undefined) return yield* giveUp(session, generation, index, terminal);
+        if (asked === undefined)
+          return yield* giveUp(session, generation, index, terminal("other"));
 
         const diagnosis = yield* capabilities.diagnose({
           request: asked,
@@ -1260,9 +1279,10 @@ const make = Effect.gen(function* () {
         });
 
         const next = advance(state, diagnosis, video.pipeline);
+        const reason = reasonOf(diagnosis);
 
         if (Recovery.$is("GiveUp")(next))
-          return yield* giveUp(session, generation, index, terminal);
+          return yield* giveUp(session, generation, index, terminal(reason));
         const snapshot = yield* capabilities.current({ ...asked, excluded: next.state.excluded });
         const replanned = replan(stream, video.intent, snapshot);
 
@@ -1272,7 +1292,7 @@ const make = Effect.gen(function* () {
         }
 
         if (samePipeline(replanned.success.pipeline, video.pipeline)) {
-          return yield* giveUp(session, generation, index, terminal);
+          return yield* giveUp(session, generation, index, terminal(reason));
         }
 
         yield* Ref.set(session.recovery, next.state);
@@ -1280,7 +1300,7 @@ const make = Effect.gen(function* () {
           generation: generation.number + 1,
           cause: causeOf(diagnosis),
           excluded: [...next.state.excluded].filter((impl) => !state.excluded.has(impl)),
-          detail: firstLine(failure),
+          reason,
         });
 
         // A replacement whose ffmpeg never starts leaves no generation to attach to.
@@ -1295,7 +1315,7 @@ const make = Effect.gen(function* () {
                   new TranscodeFailed({
                     streamId: session.streamId,
                     mode: modeOf(replanned.success, session.audio),
-                    detail: "the replacement run did not start",
+                    reason: "not-started",
                   }),
                 ),
               ),
@@ -1373,7 +1393,7 @@ const make = Effect.gen(function* () {
                 new TranscodeFailed({
                   streamId: session.streamId,
                   mode: modeOf(generation.video, session.audio),
-                  detail: "ffmpeg stopped without an exit status",
+                  reason: "other",
                 }),
               ),
             onSome: (cause) => encoderFailed(session, generation, index, cause),
@@ -1390,10 +1410,14 @@ const make = Effect.gen(function* () {
               const ended = new TranscodeFailed({
                 streamId: session.streamId,
                 mode: modeOf(generation.video, session.audio),
-                detail: `nothing left can encode the file (${refused.reason})`,
+                reason: "nothing-left",
               });
 
-              return Effect.sync(() => MutableRef.set(generation.failed, Option.some(ended))).pipe(
+              return Effect.logWarning("StreamSessions.nothing_left").pipe(
+                Effect.annotateLogs({ streamId: session.streamId, refused: refused.reason }),
+                Effect.andThen(
+                  Effect.sync(() => MutableRef.set(generation.failed, Option.some(ended))),
+                ),
                 Effect.andThen(closeSession(session, "failed")),
                 Effect.andThen(Effect.fail(ended)),
               );
@@ -1424,7 +1448,7 @@ const make = Effect.gen(function* () {
           return yield* new TranscodeFailed({
             streamId: session.streamId,
             mode,
-            detail: `ffmpeg did not cut at planned segment ${String(index)} (${planned.toFixed(3)} s)`,
+            reason: "segment-not-cut",
           });
         }
 
@@ -2203,6 +2227,7 @@ const make = Effect.gen(function* () {
       generation: generation.number,
       mode,
       video,
+      transcode: summaryOf(video, yield* Ref.get(session.changes), generation.number),
       segmentIndex,
     } satisfies StartedStream;
   });
@@ -2368,7 +2393,19 @@ const make = Effect.gen(function* () {
           generation: covering.number,
         });
 
-        return { streamId, generation: covering.number, plan: session.plan } satisfies StreamView;
+        const source = session.file.probe.video;
+
+        if (source === undefined)
+          return yield* new UnsupportedPlayback({ reason: "no-video-stream" });
+
+        return {
+          streamId,
+          generation: covering.number,
+          plan: session.plan,
+          mode: modeOf(covering.video, session.audio),
+          video: deliveredVideo(covering.video, source),
+          transcode: summaryOf(covering.video, yield* Ref.get(session.changes), covering.number),
+        } satisfies MovedStream;
       }),
     );
   });

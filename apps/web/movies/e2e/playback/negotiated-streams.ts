@@ -1,11 +1,14 @@
 import {
   MEDIA_ROUTES,
   NegotiateResponse,
+  SeekRequest,
+  SeekResponse,
   TranscodeCapacityReached,
   UnsupportedPlayback,
 } from "@media/contracts/media-playback";
 import type { PlaybackMode } from "@media/contracts/models/playback";
-import type { Page } from "@playwright/test";
+import { EpochMillis } from "@media/contracts/units";
+import type { Page, Route } from "@playwright/test";
 import { Option, Schema } from "effect";
 
 // The answer's JSON form, as the SDK reads it (an absent burned-in subtitle arrives as null).
@@ -68,6 +71,74 @@ export const refuseQualityCaps = async (page: Page, delayFirstMs = 0): Promise<v
       .fulfill({ status: 503, contentType: "application/json", body: capacityReached })
       .catch(() => undefined);
   });
+};
+
+const seekAnswer = Schema.toCodecJson(SeekResponse);
+
+const seekRequest = Schema.decodeUnknownSync(Schema.toCodecJson(SeekRequest));
+
+/** A seek the page asked for, whose answer waits until `release`. */
+interface HeldSeek {
+  /** Where the seek asked the stream to go, in seconds. */
+  readonly seconds: number;
+  readonly release: () => void;
+}
+
+/** The seeks `markSeekAnswers` holds, and how to remove its route. */
+export interface MarkedSeeks {
+  readonly held: ReadonlyArray<HeldSeek>;
+  /** From now on, answers go back as soon as they come. */
+  readonly letGo: () => void;
+  readonly remove: () => Promise<void>;
+}
+
+/**
+ * Sends each seek the page asks for on to the media server at once, and answers it with two
+ * changes added that read the same and name the generation it moved to (`gen-2`), so stream info
+ * shows which generation it describes. Answers wait in `held` until released or `letGo`.
+ */
+export const markSeekAnswers = async (page: Page): Promise<MarkedSeeks> => {
+  const held: Array<HeldSeek> = [];
+  let holding = true;
+
+  const mark = async (route: Route) => {
+    const response = await route.fetch();
+    const moved = Schema.decodeUnknownSync(seekAnswer)(await response.json());
+
+    if (holding) {
+      const { positionSeconds } = seekRequest(route.request().postDataJSON());
+
+      await new Promise<void>((release) => {
+        held.push({ seconds: positionSeconds, release });
+      });
+    }
+
+    const change = {
+      at: EpochMillis.make(Date.now()),
+      generation: moved.generation,
+      cause: "source",
+      excluded: [`gen-${String(moved.generation)}`],
+      reason: "file-only" as const,
+    };
+
+    await route.fulfill({
+      response,
+      json: Schema.encodeSync(seekAnswer)({
+        ...moved,
+        transcode: { ...moved.transcode, changes: [change, change] },
+      }),
+    });
+  };
+
+  await page.route(`**${MEDIA_ROUTES.seek}`, mark);
+
+  return {
+    held,
+    letGo: () => {
+      holding = false;
+    },
+    remove: () => page.unroute(`**${MEDIA_ROUTES.seek}`, mark),
+  };
 };
 
 const unsupported = Schema.encodeSync(

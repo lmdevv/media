@@ -307,6 +307,8 @@ export function PlayerScreen({
   const localMedia = useMediaState(video, player);
   const localProgress = useMediaProgress(video, player);
   const stream = snapshot?.stream ?? null;
+  // What plays now, here or on a device the start was handed to: what stream info describes.
+  const playing = snapshot?.playing ?? null;
   const started = snapshot?.started ?? null;
   const coreStart = snapshot?.coreStart ?? null;
   const episode = coreStart?.episode ?? null;
@@ -1004,7 +1006,7 @@ export function PlayerScreen({
   const sessionPaused =
     session !== null && (session.clock.status !== "playing" || together.hostAway);
 
-  const streamInfoAvailable = layout === "desktop" && stream !== null && started !== null;
+  const streamInfoAvailable = layout === "desktop" && playing !== null && started !== null;
   const infoShown = info && streamInfoAvailable;
 
   const hold =
@@ -1533,7 +1535,7 @@ export function PlayerScreen({
                 </PlayerButton>,
               )
             : null}
-          {isPlaying && stream !== null && started !== null ? (
+          {isPlaying && playing !== null && started !== null ? (
             <PlayerButton
               aria-label="Stream info"
               aria-pressed={infoShown}
@@ -1548,7 +1550,7 @@ export function PlayerScreen({
       {infoShown ? (
         <StreamInfo
           file={started.file}
-          stream={stream}
+          stream={playing}
           bufferedAhead={progress.bufferedAhead}
           onClose={() => setInfo(false)}
           className="absolute top-21 right-10"

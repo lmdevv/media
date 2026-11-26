@@ -1,7 +1,7 @@
 import type { CommandError, RequestIdentity } from "@media/contracts/errors";
 import { PlaybackApiError } from "@media/contracts/media-playback";
-import type { CallError } from "@media/sdk/effect";
-import { Match, Schema } from "effect";
+import { type CallError, TranscodeLabels } from "@media/sdk/effect";
+import { Match, Predicate, Schema } from "effect";
 
 /** The command line was wrong: an unknown command, a missing flag, or a value the schema rejects. */
 export class UsageError extends Schema.TaggedError<UsageError, { readonly brand: unique symbol }>()(
@@ -69,7 +69,13 @@ export class PlaybackRefused extends Schema.TaggedError<
   ]),
 }) {
   override get message(): string {
-    return `The media service refused to play: ${this.error.message}`;
+    const { error } = this;
+
+    return `The media service refused to play: ${
+      Predicate.isTagged(error, "TranscodeFailed")
+        ? `the transcode in ${error.mode} failed: ${TranscodeLabels.reasonLabel(error.reason)}`
+        : error.message
+    }`;
   }
 }
 

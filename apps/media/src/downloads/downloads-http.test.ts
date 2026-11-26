@@ -10,12 +10,21 @@ import {
 
 import * as MediaTools from "../media/media-tools.ts";
 import { parseFfprobeJson } from "../media/media-probe.ts";
+import { writeFakeFfmpeg } from "../testing/fake-ffmpeg.ts";
 import { ffmpegAvailable } from "../testing/fixture-library.ts";
 import * as FixtureWorkspace from "../testing/fixture-workspace.ts";
 import * as MediaTestServer from "../testing/media-test-server.ts";
 import { signTestToken } from "../testing/test-tokens.ts";
 
 const hasFfmpeg = await ffmpegAvailable();
+
+/** What a failing tool writes: a relative path, which the log's redaction does not know. */
+const TOOL_TEXT = "Error opening input media/Private Film/movie.mkv: Invalid data found";
+
+/** Every MP4 a download writes (`+faststart`) fails with status 1, writing `TOOL_TEXT`. */
+const failingMp4 = await writeFakeFfmpeg({
+  rules: [{ token: "+faststart", runs: "any", stderr: TOOL_TEXT }],
+});
 
 const iphone: ClientCapabilities = {
   containers: ["mp4", "mov"],
@@ -425,6 +434,57 @@ describe.skipIf(!hasFfmpeg)("downloads over HTTP", () => {
             ],
             [401, "wrong_purpose"],
           );
+        }),
+      120_000,
+    );
+  });
+});
+
+describe.skipIf(!hasFfmpeg)("a download whose ffmpeg fails", () => {
+  layer(MediaTestServer.layer({ FFMPEG_PATH: failingMp4 }), {
+    excludeTestServices: true,
+    timeout: "120 seconds",
+  })((it) => {
+    it.effect(
+      "answers a reason code, and logs the code and the exit status but none of ffmpeg's text",
+      () =>
+        Effect.gen(function* () {
+          const server = yield* MediaTestServer.Service;
+          const { library } = yield* FixtureWorkspace.Service;
+          const direct = server.fileId("movies", library.directMovie);
+          const token = signTestToken({ fid: direct, sid: "download-fails", pur: "download" });
+
+          const failed = yield* prepare({
+            token,
+            capabilities: tinyScreen,
+            quality: "standard",
+          }).pipe(
+            Effect.repeat({
+              schedule: Schedule.spaced("200 millis"),
+              until: (answer) => answer.status !== 200,
+              times: 300,
+            }),
+          );
+
+          assert.strictEqual(failed.status, 500);
+          assert.deepInclude(failed.body, {
+            _tag: "TranscodeFailed",
+            mode: "transcode-software",
+            reason: "other",
+          });
+
+          const warnings = server
+            .logged()
+            .filter((record) => record.message === "Downloads.mp4_failed");
+
+          assert.strictEqual(warnings.length, 1);
+          assert.deepInclude(warnings[0]?.annotations, {
+            fileId: direct,
+            mode: "transcode-software",
+            reason: "other",
+            exitCode: 1,
+          });
+          assert.notInclude(JSON.stringify(warnings), "Private Film");
         }),
       120_000,
     );

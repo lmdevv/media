@@ -28,12 +28,17 @@ evidence of where it ran.
 
 ## How to get to it (user POV)
 
-- The web and iOS players: play a title the device can't play as it is. The player's `Stream
-  info` names the mode (`Transcode`).
-- Terminal: `media movies stream <title> [--version N] [--max-height N]` prints the negotiated mode.
+- The web and iOS players: play a title the device can't play as it is. The web player's `Stream
+  info` names the mode (`Transcode`) and where each stage ran (`Stages`).
+- Terminal: `media movies stream <title> [--version N] [--max-height N]` prints the negotiated mode,
+  the stages (`stages: Decode · QSV, Encode · QSV`), and any change of the chain.
+  `media admin server status` prints the ffmpeg build, the devices, and every capability with its
+  status, evidence, and quarantine.
 - The owner: `HARDWARE_ACCELERATION` (`auto`, `none`, `qsv`, `vaapi`) with
   `deploy/compose/compose.qsv.yaml` or `compose.vaapi.yaml`, which pass `/dev/dri` through, or the
-  NixOS module's setting. `/api/health` reports the encoder in use as `hardwareAcceleration`.
+  NixOS module's setting. `/api/health` reports the encoder in use as `hardwareAcceleration`; the
+  admin Server page shows the GPU and how many capabilities are verified, unsupported, and
+  quarantined.
 
 ## Driving it with verify-media
 

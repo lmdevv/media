@@ -7,6 +7,7 @@ import { deviceSettingFields, downloadQuality, userSettingFields } from "../comm
 import { playerDocument, requestDocument } from "./core/connect/model";
 import { guestAccessDocument, linkDocument } from "./core/guests/model";
 import { importSource } from "./core/jobs/kinds";
+import { transcodingReport } from "./core/serverReport";
 import { jobDocument, jobItemDocument, jobKindDocument } from "./core/jobs/model";
 import { moviesTables } from "./movies/schema";
 import { musicTables } from "./music/schema";
@@ -579,13 +580,13 @@ export default defineSchema({
    * What each media server last said about itself, one row per service principal.
    * `core/serverStatus.ts` is its only writer.
    */
-  serverStatus: defineTable({
+  serverReports: defineTable({
     serviceId: v.id("users"),
     version: v.string(),
-    hardwareAcceleration: v.union(v.literal("qsv"), v.literal("vaapi"), v.literal("none")),
     activeStreams: v.number(),
     runsAwaitingExit: v.number(),
     startedAt: v.number(),
+    transcoding: transcodingReport,
     /** Server time of the report; clients judge staleness from it. */
     reportedAt: v.number(),
   })

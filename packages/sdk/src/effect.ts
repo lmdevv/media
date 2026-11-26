@@ -3,7 +3,8 @@
  * gives every platform command a method (`platform.core.server.info()`), and `MediaRoutes` calls
  * the media server's own routes with its session's token. `Playback` (with `PlayerDiagnostics`)
  * and `Downloads` stream and download through the media server, and `Versions` (with
- * `MediaLabels` naming their facts) describes a title's files.
+ * `MediaLabels` naming their facts) describes a title's files. `TranscodeLabels` names where a
+ * stream's stages run and sums up the server's transcoding report.
  */
 export * as Auth from "./auth";
 
@@ -32,5 +33,7 @@ export type { CallError } from "./sdk-errors";
 export { ProtocolError, TransportError } from "./sdk-errors";
 
 export * as TokenStorage from "./token-storage";
+
+export * as TranscodeLabels from "./transcode-labels";
 
 export * as Versions from "./versions";

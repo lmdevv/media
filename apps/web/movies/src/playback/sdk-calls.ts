@@ -1,5 +1,4 @@
-import type { Playback } from "@media/sdk/effect";
-import { Effect, Exit, Struct } from "effect";
+import { Effect, Exit } from "effect";
 import type { Result } from "effect";
 
 /**
@@ -12,15 +11,3 @@ export const runSdk = async <A, E>(
 
   return Exit.isSuccess(exit) ? exit.value : null;
 };
-
-/** `playback` continued in the generation a seek started, at its playlist. */
-export const inGeneration = (
-  playback: Playback.Playback,
-  moved: { readonly generation: number; readonly playlistUrl: string },
-): Playback.Playback => ({
-  started: playback.started,
-  stream: Struct.evolve(playback.stream, {
-    url: () => moved.playlistUrl,
-    generation: () => moved.generation,
-  }),
-});

@@ -12,6 +12,7 @@ import { Schema } from "effect";
 
 import { PlaybackSessionId } from "./ids";
 import { PlaybackMode } from "./models/playback";
+import { EpochMillis } from "./units";
 
 /** Paths of the playback API, relative to the media service's base URL. */
 export const MEDIA_ROUTES = {
@@ -178,6 +179,124 @@ export const NegotiateRequest = Schema.Struct({
 /** A negotiation request. */
 export interface NegotiateRequest extends Schema.Schema.Type<typeof NegotiateRequest> {}
 
+/** The video as the device receives it, after any transcode. */
+export const DeliveredVideo = Schema.Struct({
+  codec: Schema.String,
+  width: Schema.Int,
+  height: Schema.Int,
+  dynamicRange: DynamicRange,
+});
+
+/** The video as the device receives it. */
+export interface DeliveredVideo extends Schema.Schema.Type<typeof DeliveredVideo> {}
+
+/**
+ * One stage of a transcode's video chain, in the order frames pass through it. `op` and `domain`
+ * are strings, so a later operation or GPU backend changes no contract.
+ */
+export const TranscodeStage = Schema.Struct({
+  /**
+   * What it does: `decode`, `scale`, `tonemap` (HDR to SDR), `burn-image` (a picture subtitle
+   * drawn in), `encode`, or `move`, a copy of the frames between CPU and GPU memory.
+   */
+  op: Schema.String,
+  /** Where it runs: `cpu`, or a GPU API such as `qsv` or `vaapi`. A move runs in its GPU's. */
+  domain: Schema.String,
+  /** The implementation, such as `decode.qsv`, `tonemap.cpu`, or `move.qsv>cpu`. */
+  impl: Schema.String,
+  /** A move's memories: where the frames were, and where they go. */
+  move: Schema.optionalKey(Schema.Struct({ from: Schema.String, to: Schema.String })),
+});
+
+/** One stage of a transcode's video chain. */
+export interface TranscodeStage extends Schema.Schema.Type<typeof TranscodeStage> {}
+
+/**
+ * Why a stream's video chain changed or the stream ended, as the media service's failure
+ * classifier found it. A closed list, so no answer carries text from ffmpeg's log; the readable
+ * line goes to the server's log, which admins can read.
+ *
+ * - `reproduced`: a probe on a generated clip failed again at a stage the run used.
+ * - `file-only`: the stages ran on generated frames; only this file fails there.
+ * - `undecided`: the probes could not tell whether a stage the run used fails: they ran out of
+ *   time, proved nothing (as when ffmpeg exited at once with no frames), or could not run.
+ * - `unexplained`: a run on the CPU failed and its log named no part.
+ * - `stopped`: a signal stopped ffmpeg.
+ * - `not-started`: ffmpeg did not start.
+ * - `disk-full`: the disk or its quota was full.
+ * - `input`, `audio`, `mux`: reading the file, the audio, or writing the output failed.
+ * - `capability-lost`: a stage the chain used stopped being verified before a new run (a change).
+ * - `nothing-left`: no chain left can encode the file (a failure).
+ * - `segment-not-cut`: ffmpeg did not cut where the segment plan starts a segment (a failure).
+ * - `other`: a failure the classifier does not read, such as a remux's or a download's.
+ */
+export const TranscodeReason = Schema.Literals([
+  "reproduced",
+  "file-only",
+  "undecided",
+  "unexplained",
+  "stopped",
+  "not-started",
+  "disk-full",
+  "input",
+  "audio",
+  "mux",
+  "capability-lost",
+  "nothing-left",
+  "segment-not-cut",
+  "other",
+]);
+
+/** Why a stream's video chain changed or the stream ended. */
+export type TranscodeReason = typeof TranscodeReason.Type;
+
+/** A reason a newer media service gives, which this client's list lacks, kept as it came. */
+const NewerTranscodeReason = Schema.String.pipe(Schema.brand("NewerTranscodeReason"));
+
+/**
+ * A reason as the wire carries it: one of `TranscodeReason`'s codes, or a code a newer media
+ * service added, kept as it came, so a client still reads the rest of the answer and labels the
+ * code as it labels `other`. Only `TranscodeReason`'s codes type-check where the service builds a
+ * change or a failure; a plain string does not.
+ */
+export const TranscodeReasonCode = Schema.Union([TranscodeReason, NewerTranscodeReason]);
+
+/** A reason as the wire carries it. */
+export type TranscodeReasonCode = typeof TranscodeReasonCode.Type;
+
+/** A change of a stream's video chain, after a failed run or a capability its chain lost. */
+export const TranscodeChange = Schema.Struct({
+  at: EpochMillis,
+  /** The generation the changed chain first ran in. */
+  generation: Schema.Int,
+  /**
+   * Why, as a code: `capability` (a probe reproduced a stage's failure), `source` (only this file
+   * fails there), `undecided` (the probes could not tell), `not-video` (the failure was not the
+   * video's), `unexplained` (a CPU run failed naming nothing), or `capability-lost` (a stage the
+   * chain used stopped being verified). A string, so a new cause changes no contract.
+   */
+  cause: Schema.String,
+  /** The implementations the stream keeps off from then on, such as `tonemap.qsv`. */
+  excluded: Schema.Array(Schema.String),
+  reason: TranscodeReasonCode,
+});
+
+/** A change of a stream's video chain. */
+export interface TranscodeChange extends Schema.Schema.Type<typeof TranscodeChange> {}
+
+/**
+ * Where an HLS generation's video is made: its stages, none when the video is copied, and every
+ * change of the chain up to that generation, oldest first. It carries no ffmpeg arguments, paths,
+ * or log text: only codes and the implementation ids of the service's operation table.
+ */
+export const TranscodeSummary = Schema.Struct({
+  stages: Schema.Array(TranscodeStage),
+  changes: Schema.Array(TranscodeChange),
+});
+
+/** Where an HLS generation's video is made. */
+export interface TranscodeSummary extends Schema.Schema.Type<typeof TranscodeSummary> {}
+
 /** The negotiated playback. */
 export const NegotiateResponse = Schema.Struct({
   mode: PlaybackMode,
@@ -189,13 +308,9 @@ export const NegotiateResponse = Schema.Struct({
   /** Where playback should start; HLS streams start producing here. */
   startSeconds: Schema.Finite,
   durationSeconds: Schema.Finite,
-  /** The video as the device receives it, after any transcode. */
-  video: Schema.Struct({
-    codec: Schema.String,
-    width: Schema.Int,
-    height: Schema.Int,
-    dynamicRange: DynamicRange,
-  }),
+  video: DeliveredVideo,
+  /** HLS only: where the generation's video is made. */
+  transcode: Schema.optional(TranscodeSummary),
   audio: Schema.optional(
     Schema.Struct({ streamIndex: Schema.Int, codec: Schema.String, channels: Schema.Int }),
   ),
@@ -216,11 +331,18 @@ export const SeekRequest = Schema.Struct({
   positionSeconds: Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)),
 });
 
-/** Where the stream continues: the generation to load and its playlist. */
+/**
+ * Where the stream continues: the generation to load and its playlist, with how that generation
+ * delivers the video, which a replacement after a failure may have changed. A player that reloads
+ * after `StreamGenerationGone` seeks to where it is and gets the same.
+ */
 export const SeekResponse = Schema.Struct({
   streamId: StreamId,
   generation: Schema.Int,
   playlistUrl: Schema.String,
+  mode: PlaybackMode,
+  video: DeliveredVideo,
+  transcode: TranscodeSummary,
 });
 
 /** Where an HLS stream continues after a seek. */
@@ -288,12 +410,7 @@ export const DownloadReady = Schema.TaggedStruct("Ready", {
   /** `mp4` or `mov`. */
   container: Container,
   durationSeconds: Schema.Finite,
-  video: Schema.Struct({
-    codec: Schema.String,
-    width: Schema.Int,
-    height: Schema.Int,
-    dynamicRange: DynamicRange,
-  }),
+  video: DeliveredVideo,
   audio: Schema.optional(
     Schema.Struct({ streamIndex: Schema.Int, codec: Schema.String, channels: Schema.Int }),
   ),
@@ -499,17 +616,17 @@ export class SegmentNotReady extends Schema.TaggedError<
   }
 }
 
-/** ffmpeg failed and no fallback applies. */
+/** ffmpeg failed and no fallback applies; `reason` says why, as the failure classifier found it. */
 export class TranscodeFailed extends Schema.TaggedError<
   TranscodeFailed,
   { readonly brand: unique symbol }
 >()(
   "TranscodeFailed",
-  { streamId: Schema.String, mode: Schema.String, detail: Schema.String },
+  { streamId: Schema.String, mode: Schema.String, reason: TranscodeReasonCode },
   { httpApiStatus: 500 },
 ) {
   override get message(): string {
-    return `Transcode failed in ${this.mode}: ${this.detail}`;
+    return `Transcode failed in ${this.mode}: ${this.reason}`;
   }
 }
 

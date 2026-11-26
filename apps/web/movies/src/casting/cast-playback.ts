@@ -4,13 +4,15 @@
  * Casting keeps the page's start (and its ticket): the receiver gets its own stream, negotiated
  * with the Chromecast's profile at the position the page reached, the page's element lets go of
  * its own (`handOff`), and the controller's output switches to the receiver, so progress keeps
- * reaching the core and a group session follows the TV. The receiver's URLs carry a receiver
- * credential the media server lends for the start, never its ticket (ADR 0011), and that
- * credential lasts as long as the stream's admission while the session is live (D46), so nothing
- * renews it. Subtitles, audio, and quality chosen on the page reach the receiver. A seek outside
- * what an HLS stream has produced moves the stream first (`seekStream`), as the page's own player
- * does, because the receiver would otherwise ask for segments of a generation that is gone; a seek
- * within it happens on the receiver at once. A stream whose ticket expired, or whose session the
+ * reaching the core and a group session follows the TV. Each stream the receiver takes, after a
+ * reload or a seek the media server moved, goes to the controller (`playsElsewhere`), whose
+ * `playing` stream info describes. The receiver's URLs carry a receiver credential the media
+ * server lends for the start, never its ticket (ADR 0011), and that credential lasts as long as
+ * the stream's admission while the session is live (D46), so nothing renews it. Subtitles,
+ * audio, and quality chosen on the page reach the receiver. A seek outside what an HLS stream has
+ * produced moves the stream first (`seekStream`), as the page's own player does, because the
+ * receiver would otherwise ask for segments of a generation that is gone; a seek within it happens
+ * on the receiver at once. A stream whose ticket expired, or whose session the
  * server no longer knows, takes a new start (`startHandedOff`) and loads again where the TV was.
  * A receiver that refuses a stream, or a start that can no longer play, ends the cast through
  * `onLost`. Another sender's media taking the receiver, such as a second tab's movie or a song cast
@@ -21,16 +23,21 @@
  *
  * Every load on the receiver has a number, and what the receiver says applies only to the newest
  * load (ADR 0018): an answer to an older `loadMedia`, and the end or failure of the media an older
- * load put there, change nothing.
+ * load put there, change nothing. A load also belongs to one cast session, which ends when the
+ * caller aborts the `sessionEnd` it gave `start`, and stream info hears of a stream in one place,
+ * `#report`, under one rule: a stream is reported once the receiver took the load that carries it,
+ * and only while that load is the newest of a session still in force, so a cast that ended, or a
+ * session its caller ended or replaced, reports nothing more.
  */
 import { castCapabilities } from "@media/contracts/cast";
+import type { NegotiateResponse } from "@media/contracts/media-playback";
 import { Milliseconds } from "@media/contracts/units";
 import { Playback } from "@media/sdk/effect";
 import type { PlaybackCallError } from "@media/sdk/effect";
 import { Option, Predicate, Redacted, Result } from "effect";
 
 import type { PlaybackController } from "@/playback/playback-controller";
-import { inGeneration, runSdk } from "@/playback/sdk-calls";
+import { runSdk } from "@/playback/sdk-calls";
 import { heldPlayer } from "@/playback/switchable-player";
 
 import type { CastLoadRequest, CastSession } from "./cast-api";
@@ -54,6 +61,9 @@ export type CastFailure =
   | "load-failed"
   /** The page had nothing playing to cast. */
   | "not-ready";
+
+/** The number of a cast's first load, the one `start` makes. */
+const FIRST_LOAD = 1;
 
 /** How long a reload waits before it tries again while the media server cannot answer. */
 const RETRY_MS = 30_000;
@@ -213,8 +223,13 @@ export class CastPlayback {
   #changesPending = 0;
   /** Counts the reloads asked for; one that a later reload will redo skips itself. */
   #reloadTicket = 0;
-  /** The number of the newest load on the receiver; what an older one says changes nothing. */
-  #load = 0;
+  /**
+   * The number of the newest load on the receiver, the first being the one `start` made; what an
+   * older one says changes nothing.
+   */
+  #load = FIRST_LOAD;
+  /** Aborted by the caller once this cast's session ends or another replaces it. */
+  readonly #sessionEnd: AbortSignal;
   /** A load on the receiver has not answered yet; the media before it says nothing meanwhile. */
   #loading = false;
   #retryTimer: ReturnType<typeof setTimeout> | undefined;
@@ -229,9 +244,11 @@ export class CastPlayback {
     playing: { readonly receiver: ReceiverStream; readonly plan: CastLoadPlan },
     onLost: (message: string) => void,
     onTaken: (message: string) => void,
+    sessionEnd: AbortSignal,
   ) {
     this.#sdk = sdk;
     this.#session = session;
+    this.#sessionEnd = sessionEnd;
     this.#controller = controller;
     this.#item = item;
     this.#receiver = playing.receiver;
@@ -272,7 +289,9 @@ export class CastPlayback {
    * receiver credential, and hands the start to it. The media server keeps one stream per start,
    * so the receiver's stream replaces the page's, and the page waits (`handOff`) until the cast ends.
    * `onLost` hears when the cast can no longer go on, so the caller ends it; `onTaken` hears that
-   * another sender's media took the receiver, after the page took the start back paused.
+   * another sender's media took the receiver, after the page took the start back paused. The
+   * caller aborts `sessionEnd` once the session ends or another replaces it: a cast whose first load
+   * is answered after that neither plays through the page nor reports, and the caller stops it.
    */
   static async start(
     sdk: CastSdk,
@@ -281,6 +300,7 @@ export class CastPlayback {
     item: CastItem,
     onLost: (message: string) => void,
     onTaken: (message: string) => void,
+    sessionEnd: AbortSignal,
   ): Promise<Result.Result<CastPlayback, CastFailure>> {
     const snapshot = controller.getSnapshot();
     const { started, stream } = snapshot;
@@ -344,12 +364,30 @@ export class CastPlayback {
       { receiver: receiver.success, plan },
       onLost,
       onTaken,
+      sessionEnd,
     );
 
-    controller.output.switchTo(cast.player);
-    cast.#unsubscribe = controller.subscribe(cast.#onSnapshot);
+    if (cast.#current(FIRST_LOAD)) {
+      controller.output.switchTo(cast.player);
+      cast.#unsubscribe = controller.subscribe(cast.#onSnapshot);
+    }
+
+    cast.#report(FIRST_LOAD, receiver.success.playback.stream);
 
     return Result.succeed(cast);
+  }
+
+  /** Whether load `load` is this cast's newest and its session is in force. */
+  #current(load: number): boolean {
+    return load === this.#load && !this.#stopped && !this.#sessionEnd.aborted;
+  }
+
+  /**
+   * Tells stream info that the receiver plays `stream`, which load `load` put there and the
+   * receiver took: the only way a stream reaches it, and only while that load is `#current`.
+   */
+  #report(load: number, stream: NegotiateResponse): void {
+    if (this.#current(load)) this.#controller.playsElsewhere(stream);
   }
 
   /**
@@ -476,14 +514,16 @@ export class CastPlayback {
   }
 
   /**
-   * Loads the current stream on the receiver at `positionMs`, keeping play or pause. A receiver
-   * that refuses it ends the cast, unless a newer load replaced it meanwhile.
+   * Loads the current stream on the receiver at `positionMs`, keeping play or pause, and reports
+   * it once the receiver takes it. A receiver that refuses it ends the cast, unless a newer load
+   * replaced it meanwhile.
    */
   async #loadAt(positionMs: number): Promise<void> {
     const load = ++this.#load;
+    const { stream } = this.#receiver.playback;
 
     this.#plan = castLoadPlan(
-      this.#receiver.playback.stream,
+      stream,
       this.#item,
       this.#subtitleId,
       positionMs / 1000,
@@ -500,7 +540,8 @@ export class CastPlayback {
     if (load !== this.#load) return;
     this.#loading = false;
 
-    if (failure !== undefined && !this.#stopped) this.#onLost(LOST.refused);
+    if (failure === undefined) this.#report(load, stream);
+    else if (!this.#stopped) this.#onLost(LOST.refused);
   }
 
   /**
@@ -559,7 +600,7 @@ export class CastPlayback {
         return;
       }
 
-      this.#receiver = { ...this.#receiver, playback: inGeneration(playback, next) };
+      this.#receiver = { ...this.#receiver, playback: Playback.inGeneration(playback, next) };
       await this.#loadAt(positionMs);
     });
   }

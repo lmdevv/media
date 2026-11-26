@@ -249,8 +249,8 @@ Old movies' Convex project, its SDK client, and its command registry were delete
   `TRANSCODE_DIR`; the app then prepares again.
 - `/media/downloads/<fileId>/<hash>.mp4` serves a finished MP4 with the direct route's validators
   and single byte ranges, so a transfer resumes with a new ticket; the ticket must be a `download`
-  ticket for that file. A failed job's `TranscodeFailed.detail` is ffmpeg's path-scrubbed output,
-  or a fixed sentence for any other failure, so it never names a path in `TRANSCODE_DIR`.
+  ticket for that file. A failed job answers `TranscodeFailed` with the reason `other`; ffmpeg's
+  output stays in the server's log, so the answer never names a path in `TRANSCODE_DIR`.
 - The iOS app keeps one store per server and person in `downloads/<server>/<person>/index.json`
   under its documents folder, with one folder per download. A kept download plays from its local
   file with no server call, and the progress it makes is sent with `movies.play.reportOffline`

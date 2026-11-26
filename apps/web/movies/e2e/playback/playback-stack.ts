@@ -21,8 +21,11 @@ interface ClipAudio {
 /** How to encode one clip. The container follows the output's extension. */
 export interface ClipSpec {
   readonly seconds: number;
-  /** H.264 plays in every browser; Chromium has no HEVC decoder, so HEVC is transcoded. */
-  readonly video: "h264" | "hevc";
+  /**
+   * H.264 plays in every browser; Chromium has no HEVC decoder, so HEVC is transcoded. VP9 plays
+   * in Chromium as it is, and a Chromecast, which plays H.264 alone, gets it transcoded.
+   */
+  readonly video: "h264" | "hevc" | "vp9";
   readonly audio: ReadonlyArray<ClipAudio>;
   /** Chapter markers: start seconds and titles; each runs to the next one or the end. */
   readonly chapters?: ReadonlyArray<{ readonly start: number; readonly title: string }>;
@@ -58,6 +61,18 @@ const VIDEO_ARGS: Readonly<Record<ClipSpec["video"], ReadonlyArray<string>>> = {
     "yuv420p",
     "-x265-params",
     "log-level=error",
+  ],
+  vp9: [
+    "-c:v",
+    "libvpx-vp9",
+    "-deadline",
+    "realtime",
+    "-cpu-used",
+    "8",
+    "-b:v",
+    "300k",
+    "-pix_fmt",
+    "yuv420p",
   ],
 };
 

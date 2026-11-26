@@ -47,14 +47,19 @@ const signInHome = async (page: Page, person: Person): Promise<void> => {
   await expect(page.getByRole("heading", { name: `Hi, ${person.username}.` })).toBeVisible();
 };
 
-test("Server shows the media server running, its encoder, and its address", async ({ page }) => {
+test("Server shows the media server running, its GPU or CPU only, and its address", async ({
+  page,
+}) => {
   if (media === undefined) throw new Error("The media server did not start");
 
   await signInHome(page, signedIn());
   await page.goto("/admin/server");
   await expect(page.getByRole("heading", { level: 1, name: "Server" })).toBeVisible();
   await expect(page.getByText(/· media service running$/u)).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText("Software encoding with ffmpeg")).toBeVisible();
+  // The suite's media server runs with HARDWARE_ACCELERATION=none: no GPU, CPU capabilities only.
+  await expect(page.getByText("Not detected")).toBeVisible();
+  await expect(page.getByText("CPU only", { exact: true })).toBeVisible();
+  await expect(page.getByTitle("verified")).toBeVisible();
   await expect(page.getByText(media.url, { exact: false }).first()).toBeVisible();
 });
 
