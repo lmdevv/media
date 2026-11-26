@@ -4,13 +4,15 @@
  * Casting keeps the page's start (and its ticket): the receiver gets its own stream, negotiated
  * with the Chromecast's profile at the position the page reached, the page's element lets go of
  * its own (`handOff`), and the controller's output switches to the receiver, so progress keeps
- * reaching the core and a group session follows the TV. The receiver's URLs carry a receiver
- * credential the media server lends for the start, never its ticket (ADR 0011), and that
- * credential lasts as long as the stream's admission while the session is live (D46), so nothing
- * renews it. Subtitles, audio, and quality chosen on the page reach the receiver. A seek outside
- * what an HLS stream has produced moves the stream first (`seekStream`), as the page's own player
- * does, because the receiver would otherwise ask for segments of a generation that is gone; a seek
- * within it happens on the receiver at once. A stream whose ticket expired, or whose session the
+ * reaching the core and a group session follows the TV. Each stream the receiver takes, after a
+ * reload or a seek the media server moved, goes to the controller (`playsElsewhere`), whose
+ * `playing` stream info describes. The receiver's URLs carry a receiver credential the media
+ * server lends for the start, never its ticket (ADR 0011), and that credential lasts as long as
+ * the stream's admission while the session is live (D46), so nothing renews it. Subtitles,
+ * audio, and quality chosen on the page reach the receiver. A seek outside what an HLS stream has
+ * produced moves the stream first (`seekStream`), as the page's own player does, because the
+ * receiver would otherwise ask for segments of a generation that is gone; a seek within it happens
+ * on the receiver at once. A stream whose ticket expired, or whose session the
  * server no longer knows, takes a new start (`startHandedOff`) and loads again where the TV was.
  * A receiver that refuses a stream, or a start that can no longer play, ends the cast through
  * `onLost`. Another sender's media taking the receiver, such as a second tab's movie or a song cast
@@ -347,6 +349,7 @@ export class CastPlayback {
     );
 
     controller.output.switchTo(cast.player);
+    controller.playsElsewhere(receiver.success.playback.stream);
     cast.#unsubscribe = controller.subscribe(cast.#onSnapshot);
 
     return Result.succeed(cast);
@@ -471,8 +474,14 @@ export class CastPlayback {
       return;
     }
 
-    this.#receiver = renewed.success;
+    this.#follow(renewed.success);
     await this.#loadAt(positionMs);
+  }
+
+  /** Makes `receiver` the TV's stream, which the page's stream info then describes. */
+  #follow(receiver: ReceiverStream): void {
+    this.#receiver = receiver;
+    this.#controller.playsElsewhere(receiver.playback.stream);
   }
 
   /**
@@ -559,7 +568,7 @@ export class CastPlayback {
         return;
       }
 
-      this.#receiver = { ...this.#receiver, playback: Playback.inGeneration(playback, next) };
+      this.#follow({ ...this.#receiver, playback: Playback.inGeneration(playback, next) });
       await this.#loadAt(positionMs);
     });
   }

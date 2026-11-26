@@ -7,7 +7,8 @@
 import { join } from "node:path";
 
 import { isReceiverCredential } from "@media/contracts/cast";
-import { MEDIA_ROUTES } from "@media/contracts/media-playback";
+import { MEDIA_ROUTES, NegotiateResponse, SeekResponse } from "@media/contracts/media-playback";
+import { EpochMillis } from "@media/contracts/units";
 import { expect, test } from "@playwright/test";
 import { Option, Schema } from "effect";
 import type { BrowserContext, Page, Request } from "@playwright/test";
@@ -71,6 +72,12 @@ const REMUX = "Salt Road";
 /** HEVC, which the web sender's Chromecast profile leaves out: it casts as an H.264 transcode. */
 const HEVC = "Night Ferry";
 
+/**
+ * VP9 in MP4: the browser plays it as it is, a Chromecast as an H.264 transcode. Five minutes, so
+ * a seek near its end lands past what the receiver's stream produced.
+ */
+const VP9 = "Glass Harbor";
+
 const SRT = `1
 00:00:00,500 --> 00:02:00,000
 The pier lights come on one by one.
@@ -125,6 +132,14 @@ const titleId = (name: string): TitleId => {
   return id;
 };
 
+/** The rung of stream info's ladder the stream plays at: `Direct`, `Remux`, or `Transcode`. */
+const activeRung = (target: Page) =>
+  target.getByRole("list", { name: "Playback mode" }).locator('[aria-current="true"]');
+
+const negotiateAnswer = Schema.decodeUnknownSync(Schema.toCodecJson(NegotiateResponse));
+
+const seekAnswer = Schema.toCodecJson(SeekResponse);
+
 /** The volume levels the TV was sent, in order. */
 const levels = (commands: FakeReceiver["commands"]) =>
   commands.filter(([command]) => command === "setVolumeLevel").map(([, value]) => value);
@@ -162,7 +177,13 @@ test.beforeAll(async ({ browser }) => {
       video: "hevc",
       audio: [{ codec: "aac", language: "eng" }],
     }),
-    ...[DIRECT, REMUX, HEVC].map((name) =>
+    encodeClip(join(folder(VP9), `${VP9} (2022).mp4`), {
+      seconds: 300,
+      video: "vp9",
+      audio: [{ codec: "aac", language: "eng" }],
+      size: "426x240",
+    }),
+    ...[DIRECT, REMUX, HEVC, VP9].map((name) =>
       writeText(join(folder(name), "movie.nfo"), movieNfo(name, 2022)),
     ),
   ]);
@@ -469,6 +490,110 @@ test("a codec the receiver cannot play casts as a transcode it plays", async () 
     .poll(async () => (await receiver(page)).fetches.map(({ status }) => status).slice(-2))
     .toEqual([200, 200]);
   await castFake(page, "disconnect");
+});
+
+test("stream info describes the stream the TV plays, follows the generation its seek moves to, and the page's again after", async () => {
+  await page.goto(moviesPath(`/watch/${titleId(VP9)}?start=0`));
+  await expectPlayingPast(page, 1);
+
+  const info = page.getByRole("region", { name: "Stream info" });
+
+  const openInfo = async () => {
+    await revealControls(page);
+    await page.getByRole("button", { name: "Stream info" }).click();
+    await expect(info).toBeVisible();
+  };
+
+  const closeInfo = async () => {
+    await page.getByRole("button", { name: "Close stream info" }).click();
+    await expect(info).toBeHidden();
+  };
+
+  await openInfo();
+  await expect(activeRung(page)).toHaveText("Direct");
+  await expect(info).not.toContainText("Encode");
+  await closeInfo();
+  await castFake(page, "devicesAppear");
+
+  const negotiated = page.waitForResponse(
+    (response) => response.url().endsWith(MEDIA_ROUTES.negotiate) && response.ok(),
+  );
+
+  await castToTv(page);
+
+  const cast = negotiateAnswer(await (await negotiated).json());
+  const first = cast.generation ?? 0;
+
+  expect(cast.mode).toMatch(/^transcode-/u);
+  expect(first).toBeGreaterThan(0);
+
+  // The TV plays the transcode, so stream info shows its stages, not the page's direct file.
+  await openInfo();
+  await expect(activeRung(page)).toHaveText("Transcode");
+  await expect(info).toContainText("Decode · CPU");
+  await expect(info).toContainText("Encode · CPU");
+  await expect(info).not.toContainText("Changed");
+  await closeInfo();
+
+  // On a CPU-only server every generation runs the same stages, so each seek answer gets a change
+  // that names its generation: stream info shows it only once it follows the generation the TV
+  // moved to.
+  const moves: Array<number> = [];
+
+  await page.route(`**${MEDIA_ROUTES.seek}`, async (route) => {
+    const response = await route.fetch();
+    const moved = Schema.decodeUnknownSync(seekAnswer)(await response.json());
+
+    moves.push(moved.generation);
+    await route.fulfill({
+      response,
+      json: Schema.encodeSync(seekAnswer)({
+        ...moved,
+        transcode: {
+          ...moved.transcode,
+          changes: [
+            ...moved.transcode.changes,
+            {
+              at: EpochMillis.make(Date.now()),
+              generation: moved.generation,
+              cause: "capability",
+              excluded: ["encode.qsv"],
+              reason: "reproduced",
+            },
+          ],
+        },
+      }),
+    });
+  });
+
+  const loads = (await receiver(page)).loads.length;
+
+  await revealControls(page);
+  await clickScrubber(page, 0.9);
+  await expect.poll(() => moves.at(-1) ?? 0).toBeGreaterThan(first);
+  await expect.poll(async () => (await receiver(page)).loads.length).toBeGreaterThan(loads);
+  await page.unroute(`**${MEDIA_ROUTES.seek}`);
+  await openInfo();
+  await expect(activeRung(page)).toHaveText("Transcode");
+  await expect(info).toContainText("Encode · CPU");
+  await expect(info).toContainText(/Changed\s*\d\d:\d\d · probe failed too · encode\.qsv/u);
+  await closeInfo();
+
+  // The page takes the start back where the TV was, with the direct file, and stream info says so.
+  await castFake(page, "disconnect");
+  await expect(page.getByTestId("casting-state")).toBeHidden();
+  await expect
+    .poll(async () => {
+      const { readyState, currentTime } = await videoState(page);
+
+      return readyState > 0 && currentTime > 200;
+    })
+    .toBe(true);
+  await openInfo();
+  await expect(activeRung(page)).toHaveText("Direct");
+  await expect(info).not.toContainText("Encode");
+  await expect(info).not.toContainText("Changed");
+  await closeInfo();
 });
 
 test("leaving the player while casting saves where the TV was", async () => {

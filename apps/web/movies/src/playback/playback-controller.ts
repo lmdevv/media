@@ -99,6 +99,12 @@ export interface PlaybackSnapshot {
   /** The same start as the media server reads it, with its ticket as the token. */
   readonly started: StartedPlayback | null;
   readonly stream: NegotiateResponse | null;
+  /**
+   * The stream that plays the start now, which stream info describes: `stream` while the element
+   * plays it; while another device does (`handOff`), the stream that device reported
+   * (`playsElsewhere`), or null until it reports one.
+   */
+  readonly playing: NegotiateResponse | null;
   /** The audio track playing, as an ffmpeg stream index. */
   readonly audioStreamIndex: number | null;
   /**
@@ -193,7 +199,8 @@ const refusesFile = (failure: CallError): boolean =>
  * again from where playback is, which takes a new ticket.
  *
  * Another device, such as a Chromecast, can play the start instead (`handOff`): the element lets go
- * of its stream and nothing here negotiates until `takeBack`, while `output` follows that device.
+ * of its stream and nothing here negotiates until `takeBack`, while `output` follows that device
+ * and `playing` holds the stream it reports (`playsElsewhere`).
  */
 export class PlaybackController {
   /** The element as the SDK sees it, which the diagnostics follow. */
@@ -221,6 +228,7 @@ export class PlaybackController {
     coreStart: null,
     started: null,
     stream: null,
+    playing: null,
     audioStreamIndex: null,
     subtitleId: null,
     subtitleDelayMs: 0,
@@ -245,6 +253,8 @@ export class PlaybackController {
   #parked: { readonly positionMs: number; readonly play: boolean } | null = null;
   /** Another device plays the start (`handOff`); the element holds no stream meanwhile. */
   #handedOff = false;
+  /** The stream the device the start was handed to plays, as it reported it (`playsElsewhere`). */
+  #elsewhere: NegotiateResponse | null = null;
   readonly #retimer: SubtitleRetimer;
   #delay: SubtitleDelay | null = null;
 
@@ -333,7 +343,11 @@ export class PlaybackController {
     const delayMs = delayShown(this.#delay, next);
 
     if (delayMs !== this.#snapshot.subtitleDelayMs) this.#retimer.set(delayMs);
-    this.#snapshot = { ...next, subtitleDelayMs: delayMs };
+    this.#snapshot = {
+      ...next,
+      subtitleDelayMs: delayMs,
+      playing: this.#handedOff ? this.#elsewhere : next.stream,
+    };
 
     for (const listener of this.#listeners) listener();
   }
@@ -646,11 +660,23 @@ export class PlaybackController {
   handOff(): void {
     if (this.#handedOff || this.#disposed) return;
     this.#handedOff = true;
+    this.#elsewhere = null;
     this.#negotiation += 1;
     this.#switching = null;
     // Late callbacks of the released stream belong to an old generation and do nothing.
     this.#generation += 1;
     this.#detach();
+    this.#update({});
+  }
+
+  /**
+   * Records `stream` as what the device the start was handed to plays (`handOff`), for stream
+   * info, until that device reports another or the start comes back (`takeBack`).
+   */
+  playsElsewhere(stream: NegotiateResponse): void {
+    if (!this.#handedOff || this.#disposed) return;
+    this.#elsewhere = stream;
+    this.#update({});
   }
 
   /** Whether another device plays the start now (`handOff`). */
@@ -701,12 +727,18 @@ export class PlaybackController {
   takeBack(positionMs: number, play: boolean): void {
     if (!this.#handedOff || this.#disposed) return;
     this.#handedOff = false;
+    this.#elsewhere = null;
     this.#recoveries = 0;
 
     const current = this.#current;
     const playback = this.#playback;
 
-    if (current === null) return;
+    if (current === null) {
+      this.#update({});
+
+      return;
+    }
+
     this.#update({ phase: PlaybackPhase.Preparing({ startAtMs: positionMs, progress: 0.5 }) });
 
     if (playback === null) {
