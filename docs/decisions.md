@@ -99,6 +99,19 @@ Old movies' Convex project, its SDK client, and its command registry were delete
   it, then in software, then answers `TranscodeFailed`. HDR is tone-mapped to SDR on the GPU
   (`vpp_qsv`, `tonemap_vaapi`) or in software with `zscale` and `tonemap` when the ffmpeg build has
   them; without either, HDR that the client cannot display is refused.
+- Output codec: direct play, remuxes, and audio-only conversions come first, as always; only
+  video that must be encoded gets a codec. The decision lists what the client plays, most wanted
+  first: HEVC; AV1 when the client reports decoding it power-efficiently (in hardware) or plays
+  neither HEVC nor H.264; H.264 last. The CPU encodes HEVC or AV1 only for a client without H.264,
+  since libx265 and libsvtav1 cost several times libx264's CPU for a live stream, so a server
+  without a proven GPU encoder for HEVC sends H.264. The planner tries the list in order, a GPU
+  encode of a later codec before a CPU encode of an earlier one. Encodes are 8-bit SDR (H.264
+  High, HEVC Main, AV1 Main), at H.264's bitrates times 0.75 for HEVC and 0.65 for AV1, within
+  the level a client declares for HEVC or AV1; HEVC is written with the `hvc1` sample entry Apple
+  requires, and every encoder puts an IDR or key frame exactly at each planned segment start
+  (libx265 with closed GOPs, Quick Sync with `forced_idr`). Clients report `powerEfficient` per
+  codec: the movies web app from the Media Capabilities API, the iOS app and Cast profiles for
+  H.264 and HEVC; none of the fixed lists offers AV1.
 - A stream's ffmpeg pauses (`SIGSTOP`) once its output runs `STREAM_BUFFER_AHEAD_SECONDS` (120)
   past the furthest segment the player asked for, and continues (`SIGCONT`) when the player is
   within half of that. A remux copies at disk speed, and without the pause every play wrote most of
@@ -230,8 +243,9 @@ Old movies' Convex project, its SDK client, and its command registry were delete
   audio track. It answers `Ready` at once when the device opens the original file within the
   quality (MP4 or QuickTime, decodable streams, the default audio), with the existing
   `/media/direct` URL. Anything else becomes an MP4 by the playback ladder: the video copied when
-  the device decodes it within the quality, else encoded to H.264 in software; the audio copied
-  when the device decodes it, else stereo AAC; `+faststart` so AVPlayer opens it at once. Until it
+  the device decodes it within the quality, else encoded as a stream for that device would be (HEVC
+  for an iPhone where a GPU encodes it, H.264 on the CPU), on the GPU where a proven chain does it;
+  the audio copied when the device decodes it, else stereo AAC; `+faststart` so AVPlayer opens it at once. Until it
   is written, prepare answers `Preparing` with progress (the tail of ffmpeg's `-progress` output)
   and an upper bound on the size (the encode's rates, with copied audio counted at 1.6 Mb/s), and
   the app asks again. Unlike playback, the quality is a limit: a source this host cannot bring
