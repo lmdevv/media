@@ -8,6 +8,7 @@ import type { ProtocolError } from "@media/sdk/effect";
 import { Option, Order, Schema } from "effect";
 
 import { readHealth } from "./server";
+import type { Health } from "./server";
 
 /** An answer this app couldn't read, as the SDK fails it. */
 export type UnreadableAnswer = Pick<ProtocolError, "_tag">;
@@ -71,9 +72,13 @@ export const updateLineAgainst = (server: Option.Option<Release>): string | null
     : null;
 };
 
-/** One followed server. `refresh` reads its release again, and `stop` lets go of it. */
+/**
+ * One followed server. `refresh` reads its health check again for its release, and resolves with
+ * what it read, so a caller that also wants to know whether the server answers sends no second
+ * request. `stop` lets go of it.
+ */
 export interface ServerFollow {
-  readonly refresh: () => Promise<void>;
+  readonly refresh: () => Promise<Option.Option<Health>>;
   readonly stop: () => void;
 }
 
@@ -98,13 +103,15 @@ export const followServer = (mediaUrl: string, app: ThisApp): ServerFollow => {
 
   followed = mine;
 
-  const refresh = async (): Promise<void> => {
+  const refresh = async (): Promise<Option.Option<Health>> => {
     const ask = ++asked;
     const health = await readHealth(mediaUrl);
 
-    if (ask !== asked || followed?.follow !== mine.follow || Option.isNone(health)) return;
+    if (ask !== asked || followed?.follow !== mine.follow || Option.isNone(health)) return health;
 
     followed = { ...followed, server: health.value.release };
+
+    return health;
   };
 
   let out = false;

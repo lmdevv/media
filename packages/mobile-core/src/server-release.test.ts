@@ -1,6 +1,6 @@
 import { ProtocolError, TransportError } from "@media/sdk/effect";
 import { Release } from "@media/contracts/release";
-import { Schema } from "effect";
+import { Option, Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { describeFailure, describeUnreadable } from "./failure";
@@ -135,6 +135,24 @@ describe("followServer", () => {
     answering = false;
     await followed.refresh();
     expect(describeUnreadable()).toBe(UPDATE_ON_IPHONE);
+  });
+
+  it("resolves each refresh with the health it read, answered or not", async () => {
+    let answering = true;
+
+    const mediaUrl = await startServer({
+      "/api/health": async () => (answering ? healthOf("0.9.0") : "<html>"),
+    });
+
+    const followed = followServer(mediaUrl, iPhone("0.9.0"));
+
+    following.push(followed);
+    expect(Option.map(await followed.refresh(), (health) => health.release)).toEqual(
+      Option.some(Option.some(Schema.decodeSync(Release)("0.9.0"))),
+    );
+
+    answering = false;
+    expect(Option.isNone(await followed.refresh())).toBe(true);
   });
 
   it("reads the release again after an answer it can't read, once per answer", async () => {

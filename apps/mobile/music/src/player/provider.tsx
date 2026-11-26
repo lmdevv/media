@@ -1,6 +1,5 @@
 import { describeFailure } from "@media/mobile-core/failure";
 import { pagedStore } from "@media/mobile-core/pages";
-import { readHealth } from "@media/mobile-core/server";
 import { lastPerson } from "@media/mobile-core/sign-in";
 import { moveHere, moveTo, playOn, remoteActions } from "@media/player/connect-actions";
 import type { TransportActions } from "@media/player/connect-actions";
@@ -47,7 +46,7 @@ import { Option, Schema, Struct } from "effect";
 import { requireNativeModule } from "expo";
 import type { EventEmitter } from "expo";
 import { randomUUID } from "expo-crypto";
-import { Alert } from "react-native";
+import { Alert, AppState } from "react-native";
 import {
   createContext,
   use,
@@ -79,7 +78,12 @@ import {
 } from "../lib/transfer";
 import type { MoveEnd, MoveTarget, Transfer } from "../lib/transfer";
 import { useServer } from "../session/connection";
-import { useProbeReach, useReachWhileAudible, useServerReach } from "../session/server-reach";
+import {
+  useCheckReach,
+  useHearReach,
+  useReachWhilePlaying,
+  useServerReach,
+} from "../session/server-reach";
 import { useSessionPhase } from "../session/session-phase";
 import { openExpoOutput } from "./expo-audio-output";
 import type { LockScreenPlayers } from "./expo-audio-output";
@@ -102,6 +106,8 @@ import { handOver } from "./hand-over";
 import type { HandBackStep, LocalQueue } from "./local-queue";
 import { LocalStore, offlinePlaysKey } from "./local-store";
 import { NativeEngine } from "./native-engine";
+import { positionTicker } from "./position-ticker";
+import type { PositionTicker } from "./position-ticker";
 import type { TimelineMark } from "./native-engine";
 import { lockScreenControls } from "./native-host";
 import type { RemoteCommandEvents, RemoteCommands } from "./native-host";
@@ -242,7 +248,7 @@ const PlayerContext = createContext<PlayerView | null>(null);
 
 const NowPlayingContext = createContext<NowPlayingView | null>(null);
 
-const PositionContext = createContext<PlaybackPosition>({ positionMs: 0, durationMs: 0 });
+const TickerContext = createContext<PositionTicker | null>(null);
 
 const ActionsContext = createContext<PlayerActions | null>(null);
 
@@ -273,10 +279,17 @@ export const useNowPlaying = (): NowPlayingView =>
 export const useSong = (): NowPlaying | null => use(SongContext);
 
 /**
- * The live position, updated four times a second. Only components that call it re-render with
- * it: Now Playing's scrubber and the mini player's progress.
+ * The live position, updated four times a second while a song plays and the app is on screen.
+ * Only components that call it re-render with it: Now Playing's scrubber and the mini player's
+ * progress. While none is mounted, nothing reads the position on a timer.
  */
-export const usePlaybackPosition = (): PlaybackPosition => use(PositionContext);
+export const usePlaybackPosition = (): PlaybackPosition => {
+  const ticker = required(use(TickerContext), "usePlaybackPosition");
+  const positionMs = useSyncExternalStore(ticker.subscribe, ticker.read);
+  const durationMs = use(SongContext)?.durationMs ?? 0;
+
+  return useMemo(() => ({ positionMs, durationMs }), [positionMs, durationMs]);
+};
 
 /**
  * A stable function that returns the live position in milliseconds, worked out afresh on every
@@ -431,8 +444,8 @@ interface PhoneProps {
   readonly platform: PlatformSdk;
   readonly mediaUrl: string;
   readonly copies: DownloadedCopies;
-  /** Asks the server now whether it answers. */
-  readonly probe: { current: () => void };
+  /** Checks the server's health now; resolves whether it answered. */
+  readonly check: { current: () => Promise<boolean> };
   /** Moves the player onto this phone's own queue, seeded from the core's last answer. */
   readonly goLocal: { current: () => void };
   /** Where this server's and person's offline plays wait, or null when no one is known. */
@@ -443,7 +456,7 @@ const createPhone = ({
   platform,
   mediaUrl,
   copies,
-  probe,
+  check,
   goLocal,
   playsKey,
 }: PhoneProps): Phone => {
@@ -484,9 +497,8 @@ const createPhone = ({
     }),
     {
       deadlineMs: ACK_DEADLINE_MS,
-      answers: async () => Option.isSome(await readHealth(mediaUrl)),
+      answers: () => check.current(),
       away: () => {
-        probe.current();
         goLocal.current();
         // At once, so the player is on the phone's queue before the unanswered source fails, and
         // moves on from there.
@@ -537,9 +549,8 @@ const createPhone = ({
 
       // A slow server that still answers gets the play: going local now would hand it a second
       // queue once it is back.
-      if (Option.isSome(await readHealth(mediaUrl))) return pending;
+      if (await check.current()) return pending;
       holdUnanswered({ mode, unanswered }, pending);
-      probe.current();
 
       if (!trackIds.some((id) => copies.find(id) !== null)) throw new Error(SERVER_AWAY);
       goLocal.current();
@@ -1024,32 +1035,6 @@ const inSessionCommands = (
   },
 });
 
-function PositionTicker({
-  read,
-  durationMs,
-  children,
-}: {
-  readonly read: () => number;
-  readonly durationMs: number;
-  readonly children: ReactNode;
-}) {
-  const [positionMs, setPositionMs] = useState(() => Math.round(read()));
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setPositionMs(Math.round(read()));
-    }, POSITION_INTERVAL_MS);
-
-    return () => {
-      clearInterval(timer);
-    };
-  }, [read]);
-
-  const position = useMemo(() => ({ positionMs, durationMs }), [positionMs, durationMs]);
-
-  return <PositionContext value={position}>{children}</PositionContext>;
-}
-
 /** Follows the synced settings (D36): quality and volume for this device, gapless for the person. */
 const useSettings = (platform: PlatformSdk, controller: PlaybackController): void => {
   const settings = useReadSettled(platform.core.settings.get, {});
@@ -1319,15 +1304,16 @@ export function PlayerProvider({ children }: { readonly children: ReactNode }) {
   const { mediaUrl } = useServer();
   const copies = useLocalCopies();
   const reach = useServerReach();
-  const probeReach = useProbeReach();
-  const probe = useRef(probeReach);
+  const checkReach = useCheckReach();
+  const hearReach = useHearReach();
+  const check = useRef(checkReach);
   const goLocal = useRef(() => {});
   const [mode, setMode] = useState<"server" | "local">("server");
   const person = usePlayerPerson(mediaUrl);
 
   useLayoutEffect(() => {
-    probe.current = probeReach;
-  }, [probeReach]);
+    check.current = checkReach;
+  }, [checkReach]);
 
   // State rather than a memo: React may drop a memo, which would build a second player.
   const [phone] = useState(() =>
@@ -1335,7 +1321,7 @@ export function PlayerProvider({ children }: { readonly children: ReactNode }) {
       platform,
       mediaUrl,
       copies,
-      probe,
+      check,
       goLocal,
       playsKey: person === null ? null : offlinePlaysKey(mediaUrl, person),
     }),
@@ -1462,7 +1448,17 @@ export function PlayerProvider({ children }: { readonly children: ReactNode }) {
   const playing = isPlaying(snapshot, wantsPlay);
 
   useHandBack(platform, phone, online, playing, setMode);
-  useReachWhileAudible(playing);
+  useReachWhilePlaying(playing && mode === "server");
+
+  // A stream the media server stopped answering, and its coming back, as the player found them.
+  const mediaOnline = snapshot.mediaOnline;
+  const heardOnline = useRef(mediaOnline);
+
+  useEffect(() => {
+    if (mediaOnline === heardOnline.current) return;
+    heardOnline.current = mediaOnline;
+    hearReach(mediaOnline ? "answered" : "doubted");
+  }, [hearReach, mediaOnline]);
 
   const output = useAudioOutput();
 
@@ -1631,6 +1627,28 @@ export function PlayerProvider({ children }: { readonly children: ReactNode }) {
     [controller],
   );
 
+  const [ticker] = useState(() => positionTicker(readPosition, POSITION_INTERVAL_MS));
+  const [foreground, setForeground] = useState(AppState.currentState === "active");
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      setForeground(state === "active");
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    ticker.update({ playing: shownPlaying, foreground });
+  }, [ticker, shownPlaying, foreground]);
+
+  // A seek, another song, or a followed device's report may move the position while it stands.
+  useEffect(() => {
+    ticker.refresh();
+  }, [ticker, snapshot, connect]);
+
   const devices = useDevicesView(platform, controller, connect, latest);
 
   const queueCommands = useMemo(
@@ -1688,9 +1706,7 @@ export function PlayerProvider({ children }: { readonly children: ReactNode }) {
                 <SongContext value={shownSong}>
                   <OwnSessionContext value={mode === "local"}>
                     <MusicSessionProvider value={musicSession}>
-                      <PositionTicker read={readPosition} durationMs={shownSong?.durationMs ?? 0}>
-                        {children}
-                      </PositionTicker>
+                      <TickerContext value={ticker}>{children}</TickerContext>
                     </MusicSessionProvider>
                   </OwnSessionContext>
                 </SongContext>

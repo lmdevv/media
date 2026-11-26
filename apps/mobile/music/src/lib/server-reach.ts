@@ -34,17 +34,71 @@ export const reachOf = ({ offlinePhase, socketLost, stalled }: ReachInputs): Rea
   return { reach, notice: reach === "online" && stalled ? "reconnecting" : reach };
 };
 
-/** What decides whether the app asks the server whether it answers. */
-export interface ProbeInputs {
-  /** The app is on screen. */
-  readonly active: boolean;
-  /** This phone plays audio, which iOS keeps running in the background. */
-  readonly audible: boolean;
-}
+/** How many health checks in a row must go unanswered before the server counts as gone. */
+export const LOST_AFTER = 2;
 
 /**
- * Whether the app keeps asking the server whether it answers: on screen, and in the background
- * while audio plays, so an outage met with the phone in a pocket still moves the player to the
- * downloaded songs.
+ * What one connection has learned of its server: from the requests the app makes anyway (the
+ * core's socket, the calls on it, the player's streams) and from the health checks it sends when
+ * it must decide. Each observation carries its evidence, a number taken when its request left or
+ * its event happened; evidence older than the newest applied changes nothing, so the answer to a
+ * check a later check or event replaced is dropped.
  */
-export const probesReach = ({ active, audible }: ProbeInputs): boolean => active || audible;
+export interface Reachability {
+  /** Health checks unanswered in a row since the server last answered. */
+  readonly failures: number;
+  /** The socket closed, a call stalled, or a stream failed since the server last answered. */
+  readonly doubted: boolean;
+  /** The newest evidence applied. */
+  readonly newest: number;
+}
+
+/** What one request or event said of the server. */
+export type Observation =
+  /** It answered: a health check, the socket opening, a call's answer. */
+  | "answered"
+  /** A health check went unanswered. */
+  | "failed"
+  /** A hint that it went away, which a health check settles. */
+  | "doubted";
+
+/** Where every connection starts: the server answers until something says otherwise. */
+export const ANSWERING: Reachability = { failures: 0, doubted: false, newest: 0 };
+
+/** `state` after `observation`, made at `evidence`; unchanged for evidence older than its newest. */
+export const observe = (
+  state: Reachability,
+  observation: Observation,
+  evidence: number,
+): Reachability => {
+  if (evidence <= state.newest) return state;
+
+  if (observation === "answered") return { failures: 0, doubted: false, newest: evidence };
+
+  if (observation === "failed") {
+    return { failures: state.failures + 1, doubted: false, newest: evidence };
+  }
+
+  return { ...state, doubted: true, newest: evidence };
+};
+
+/** Whether the server counts as gone: `LOST_AFTER` health checks in a row went unanswered. */
+export const isLost = (state: Reachability): boolean => state.failures >= LOST_AFTER;
+
+/**
+ * When the app checks the server's health on its own: never while nothing needs the server; at
+ * once after a doubt; and again a short while after each unanswered check, until it answers.
+ */
+export type NextCheck = "now" | "soon" | "none";
+
+/**
+ * The check `state` calls for. `needed` says whether anything waits on the server: the app is on
+ * screen, or it plays the server's queue, which goes on with songs from the server.
+ */
+export const nextCheck = (state: Reachability, needed: boolean): NextCheck => {
+  if (!needed) return "none";
+
+  if (state.doubted) return "now";
+
+  return state.failures > 0 ? "soon" : "none";
+};

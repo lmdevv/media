@@ -19,6 +19,8 @@ export { holdGuestSignIn, holdSignIn, readDevice } from "./token-storage";
 
 export type { BrowserDevice, DeviceOrder, HeldSignIn } from "./token-storage";
 
+export type { ConnectionState } from "./convex-transport";
+
 export type { Channel, IdbFactory, SharedStore, SharedTransaction } from "./shared-store";
 
 export type {
