@@ -52,7 +52,8 @@ const TONE_MAP_QSV = capabilityKey(ImplId("tonemap.qsv"), "pq");
 
 const DECODE_JPEG_RANGE = capabilityKey(ImplId("decode.qsv"), "h264/yuvj420p");
 
-const VPP_FAILED = "[Parsed_vpp_qsv_0 @ 0x1] Invalid color_matrix.";
+/** The fused `vpp_qsv` of a Quick Sync chain, named after the decoder's map as the renderer names it. */
+const VPP_FAILED = "[Parsed_vpp_qsv_2 @ 0x1] Invalid color_matrix.";
 
 const intentOf = (source: SourceVideo): VideoIntent => ({
   codec: "h264",
@@ -175,11 +176,7 @@ const ownersOf = (pipeline: VideoPipeline) =>
 const vppFailed = (pipeline: VideoPipeline): TranscodeCapabilities.FailedRun => ({
   request: request(HDR),
   pipeline,
-  owners: {
-    decoder: { step: 0, names: ["hevc", "hevc_qsv"] },
-    encoder: { step: pipeline.steps.length - 1, names: ["h264_qsv"] },
-    filters: new Map([["Parsed_vpp_qsv_0", [1, 2]]]),
-  },
+  owners: ownersOf(pipeline),
   failure: { exitCode: 234, signal: null, stderrTail: VPP_FAILED },
 });
 
@@ -250,13 +247,15 @@ const hanging = await writeFakeFfmpeg({
   rules: [{ token: "tonemap=1", runs: "probe", hang: true }],
 });
 
-const IO_SURFACE = "[h264_qsv @ 0x1] Error querying IO surface: unsupported (-3)";
+/** VA-API's H.264 decoder refusing a packet, as ffmpeg reports it for the decoder's stream. */
+const DECODE_FAILED =
+  "[vist#0:0/h264 @ 0x1] [dec:h264 @ 0x2] Error submitting packet to decoder: Input/output error";
 
 /** The first file's decoder probe fails once armed; the second file's never does. */
 const sourceOnly = await standIn({
   rules: [
     { token: "arm-first", runs: "any", arm: "first", stderr: "armed" },
-    { token: "first.mkv", runs: "probe", armedBy: "first", stderr: IO_SURFACE },
+    { token: "first.mkv", runs: "probe", armedBy: "first", stderr: DECODE_FAILED },
   ],
 });
 
@@ -276,7 +275,7 @@ const deviceLost = await standIn({
   rules: [
     { token: "arm-outage", runs: "any", arm: "outage", stderr: "armed" },
     { token: "tonemap=1", runs: "probe", armedBy: "outage", stderr: VPP_FAILED },
-    { token: "hevc-8.mkv", runs: "probe", armedBy: "outage", stderr: IO_SURFACE },
+    { token: "hevc-8.mkv", runs: "probe", armedBy: "outage", stderr: DECODE_FAILED },
     {
       token: "nullsrc=s=64x64",
       runs: "any",
@@ -332,6 +331,18 @@ const crashingAgain = await standIn({
     { token: TONE_MAP_PROBE, runs: "probe", signal: "SIGBUS", limit: 1 },
     { token: TONE_MAP_PROBE, runs: "probe", limit: 1 },
     { token: TONE_MAP_PROBE, runs: "probe", signal: "SIGBUS", limit: 1 },
+  ],
+});
+
+/**
+ * The Quick Sync HDR10 tone map probe crashes ffmpeg, passes the three runs that verify it again,
+ * then crashes once more, when a diagnosis re-probes it.
+ */
+const crashingInDiagnosis = await standIn({
+  rules: [
+    { token: TONE_MAP_PROBE, runs: "probe", signal: "SIGBUS", limit: 1 },
+    { token: TONE_MAP_PROBE, runs: "probe", limit: 3 },
+    { token: TONE_MAP_PROBE, runs: "probe", signal: "SIGBUS" },
   ],
 });
 
@@ -476,12 +487,8 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
           const diagnosis = yield* capabilities.diagnose({
             request: first,
             pipeline,
-            owners: {
-              decoder: { step: 0, names: ["h264", "h264_qsv"] },
-              encoder: { step: pipeline.steps.length - 1, names: ["h264_qsv"] },
-              filters: new Map(),
-            },
-            failure: { exitCode: 69, signal: null, stderrTail: IO_SURFACE },
+            owners: ownersOf(pipeline),
+            failure: { exitCode: 69, signal: null, stderrTail: DECODE_FAILED },
           });
 
           assert.deepStrictEqual(diagnosis, Diagnosis.Source({ impls: [ImplId("decode.qsv")] }));
@@ -592,12 +599,12 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
           const decoderFailed = yield* capabilities.diagnose({
             request: request(sdr),
             pipeline: sdrPipeline,
-            owners: {
-              decoder: { step: 0, names: ["hevc", "hevc_qsv"] },
-              encoder: { step: sdrPipeline.steps.length - 1, names: ["h264_qsv"] },
-              filters: new Map(),
+            owners: ownersOf(sdrPipeline),
+            failure: {
+              exitCode: 69,
+              signal: null,
+              stderrTail: DECODE_FAILED.replaceAll("h264", "hevc"),
             },
-            failure: { exitCode: 69, signal: null, stderrTail: IO_SURFACE.replace("h264", "hevc") },
           });
 
           assert.isTrue(Diagnosis.$is("Capability")(decoderFailed));
@@ -761,6 +768,39 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
             Option.map(known.quarantine, (quarantine) => quarantine.strikes),
             Option.some(2),
           );
+        }),
+      60_000,
+    );
+  });
+
+  layer(crashingInDiagnosis.services, { timeout: "60 seconds" })((it) => {
+    it.effect(
+      "gives a key its second strike, two hours, when a diagnosis's probe of it crashes",
+      () =>
+        Effect.gen(function* () {
+          const capabilities = yield* TranscodeCapabilities.Service;
+
+          yield* capabilities.resolve(request(HDR));
+          yield* TestClock.adjust(Duration.minutes(15));
+          const verified = yield* capabilities.resolve(request(HDR));
+
+          assert.isTrue(verified.verified.has(TONE_MAP_QSV));
+          const diagnosis = yield* capabilities.diagnose(vppFailed(pipelineOf(HDR, verified)));
+
+          assert.deepStrictEqual(
+            diagnosis,
+            Diagnosis.Capability({ keys: [TONE_MAP_QSV], impls: [ImplId("tonemap.qsv")] }),
+          );
+          const known = Inventory.capabilityOf(yield* capabilities.inventory, TONE_MAP_QSV);
+
+          assert.deepStrictEqual(
+            Option.map(known.quarantine, ({ strikes, until, since }) => [
+              strikes,
+              until === "restart" ? until : until - since,
+            ]),
+            Option.some([2, Duration.toMillis(Duration.hours(2))]),
+          );
+          assert.deepInclude(known.evidence[0], { _tag: "Probe", outcome: "crashed" });
         }),
       60_000,
     );
@@ -958,7 +998,6 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
           // A last line naming a filter instance this run does not have, after an audio warning.
           const unknownFilter = yield* capabilities.diagnose({
             ...vppFailed(pipeline),
-            owners: ownersOf(pipeline),
             failure: {
               exitCode: 234,
               signal: null,
@@ -1056,11 +1095,7 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
           const diagnosis = yield* capabilities.diagnose({
             request: request(sdr),
             pipeline,
-            owners: {
-              decoder: { step: 0, names: ["hevc", "hevc_qsv"] },
-              encoder: { step: pipeline.steps.length - 1, names: ["h264_qsv"] },
-              filters: new Map(),
-            },
+            owners: ownersOf(pipeline),
             failure: {
               exitCode: 1,
               signal: null,

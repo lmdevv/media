@@ -20,9 +20,10 @@ import {
 } from "./video-pipeline.ts";
 import { probeCommandArgs, probedFrames } from "./video-render.ts";
 import {
+  capabilityKey,
   type ClipName,
   type GpuDomain,
-  type ImplId,
+  ImplId,
   implOf,
   type SubtitleInput,
 } from "./video-ops.ts";
@@ -83,6 +84,8 @@ interface Chain {
   readonly burn?: true;
   /** Rows kept out, to make the planner use another. */
   readonly without?: ReadonlyArray<string>;
+  /** The stages the chain must plan, when they are part of what it proves. */
+  readonly stages?: ReadonlyArray<string>;
 }
 
 /** Chains that between them use every row the table has on each domain. */
@@ -94,6 +97,8 @@ const chainsOn = (domain: GpuDomain): ReadonlyArray<Chain> => [
     name: `${domain}: 10-bit H.264 decoded on the CPU, scaled and encoded on the GPU`,
     clip: "h264-10",
     domain,
+    // Intel's media engines decode no 10-bit H.264, and Quick Sync's map takes no software frames.
+    stages: ["decode.cpu", `move.cpu>${domain}`, `scale.${domain}`, `encode.${domain}`],
   },
   {
     name: `${domain}: HDR10 tone-mapped on the CPU between GPU stages`,
@@ -235,6 +240,14 @@ describe.runIf(hasQsv || hasVaapi)("TranscodeCapabilities on this machine's GPU"
             } else {
               const { pipeline } = planned.success;
 
+              if (chain.stages !== undefined) {
+                assert.deepStrictEqual(
+                  pipeline.steps.map((step): string => step.impl),
+                  chain.stages,
+                  chain.name,
+                );
+              }
+
               const clip = path.join(
                 workspace.root,
                 "capabilities",
@@ -283,6 +296,15 @@ describe.runIf(hasQsv || hasVaapi)("TranscodeCapabilities on this machine's GPU"
           }
 
           yield* Console.log(outcomes.join("\n"));
+
+          if (hasQsv) {
+            const tenBitH264 = Inventory.capabilityOf(
+              inventory,
+              capabilityKey(ImplId("decode.qsv"), "h264/yuv420p10le"),
+            );
+
+            assert.strictEqual(tenBitH264.status, "unsupported", "VA-API mapped no 10-bit H.264");
+          }
 
           const verifiedRows = new Set(
             [...inventory.capabilities.values()].flatMap((capability) =>
