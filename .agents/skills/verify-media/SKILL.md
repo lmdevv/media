@@ -508,10 +508,13 @@ shared, and load moves these numbers by more than most changes: each pass record
 one-minute load at the start, before each launch, and at the end, and a pass over 0.4 per CPU on
 the Mac or 0.5 on this host at any of them is **loaded**. `node scripts/app-timings.mjs compare
 <app> <pass-1-dir> <pass-2-dir>` refuses a loaded pass, or one without `loads.tsv`, and prints why
-instead of a difference (exit 3). Compare runs made with the same `--js` mode, device, and run
-count; to compare two builds, interleave their passes on one stack (`ios up --source <main
-checkout>`, then the branch, then main again), discard every loaded pass, and trust a change only
-when it beats how far two quiet passes of one build move.
+instead of a difference (exit 3). Quiet is not enough for launches: two quiet passes of one build
+on two simulators and Metro sessions moved the launch median 231 ms, while three passes on one
+simulator spread 57 ms and opens moved under 10 ms either way. Compare runs made with the same
+`--js` mode, device, and run count; to compare two builds, interleave their passes on one stack,
+one simulator, and one Metro (`ios up --source <main checkout>`, then the branch, then main
+again), discard every loaded pass, and trust a change only when it beats how far two quiet passes
+of one build move.
 
 `--record` checks the marks against the screen without the launch's zero, which no recording can
 see. Within each launch, the app's own clock gives the time from Home's content mark to the first
