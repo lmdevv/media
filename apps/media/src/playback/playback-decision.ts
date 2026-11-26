@@ -22,7 +22,7 @@ import {
   type VideoOutput,
   type VideoPipeline,
 } from "./video-pipeline.ts";
-import type { SubtitleInput } from "./video-ops.ts";
+import type { OutputCodec, OutputTarget, SubtitleInput } from "./video-ops.ts";
 
 /** What happens to the video stream. */
 export type VideoPlan = Data.TaggedEnum<{
@@ -98,6 +98,101 @@ const HLS_AUDIO_CODECS: ReadonlySet<string> = new Set([
 
 const SOFTWARE_MAX = { width: 1920, height: 1080 } as const;
 
+type VideoCodecSupport = ClientCapabilities["videoCodecs"][number];
+
+/** The profile, as ffprobe names it, of each codec's 8-bit SDR encode. */
+const OUTPUT_PROFILES: Readonly<Record<OutputCodec, string>> = {
+  h264: "High",
+  hevc: "Main",
+  av1: "Main",
+};
+
+/**
+ * The largest picture, in luma samples, each level of HEVC and AV1 allows, from the highest level
+ * down, by the level in ffprobe's units: HEVC's `general_level_idc` (30 times the level) and AV1's
+ * `seq_level_idx`. A level also limits the frame rate times the picture, which this leaves to the
+ * encoders. H.264 has no entry: its encodes keep what the client's size allows, as they always
+ * have.
+ */
+const LEVEL_PICTURES: Readonly<Record<OutputCodec, ReadonlyArray<readonly [number, number]>>> = {
+  h264: [],
+  hevc: [
+    [180, 35_651_584],
+    [150, 8_912_896],
+    [120, 2_228_224],
+    [93, 983_040],
+    [90, 552_960],
+    [63, 245_760],
+    [60, 122_880],
+    [0, 36_864],
+  ],
+  av1: [
+    [16, 35_651_584],
+    [12, 8_912_896],
+    [8, 2_359_296],
+    [5, 1_065_024],
+    [4, 665_856],
+    [1, 278_784],
+    [0, 147_456],
+  ],
+};
+
+/** The largest picture `codec` at `level` allows; none when the client declared no level. */
+const levelPicture = (codec: OutputCodec, level: number | undefined): number | undefined =>
+  level === undefined ? undefined : LEVEL_PICTURES[codec].find(([lowest]) => level >= lowest)?.[1];
+
+/** What `client` says of `codec`, when it plays that codec's 8-bit SDR encode in its profile. */
+const playable = (
+  client: ClientCapabilities,
+  codec: OutputCodec,
+): VideoCodecSupport | undefined => {
+  const support = videoSupport(client, codec);
+  const profile = OUTPUT_PROFILES[codec].toLowerCase();
+
+  return support !== undefined &&
+    (support.profiles === undefined ||
+      support.profiles.some((listed) => listed.toLowerCase() === profile))
+    ? support
+    : undefined;
+};
+
+/**
+ * What an encode for `client` may produce, the most wanted first: HEVC when the client plays it;
+ * AV1 when it decodes AV1 in hardware, or plays neither HEVC nor H.264; H.264 last, the broad
+ * fallback. A CPU encodes H.264 when the client plays it, as software HEVC and AV1 cost several
+ * times its CPU for a live stream, and HEVC or AV1 only for a client without H.264. Each target
+ * stays within the level the client declared for its codec. Empty when the client plays none.
+ */
+export const outputTargets = (client: ClientCapabilities): ReadonlyArray<OutputTarget> => {
+  const h264 = playable(client, "h264");
+  const hevc = playable(client, "hevc");
+  const av1 = playable(client, "av1");
+
+  const av1Wanted =
+    av1 !== undefined &&
+    (av1.powerEfficient === true || (hevc === undefined && h264 === undefined));
+
+  const wanted: ReadonlyArray<readonly [OutputCodec, VideoCodecSupport | undefined]> = [
+    ["hevc", hevc],
+    ["av1", av1Wanted ? av1 : undefined],
+    ["h264", h264],
+  ];
+
+  return wanted.flatMap(([codec, support]): ReadonlyArray<OutputTarget> =>
+    support === undefined
+      ? []
+      : [
+          {
+            codec,
+            depth: 8,
+            colour: "sdr",
+            cpuEncode: codec === "h264" || h264 === undefined ? "allowed" : "refused",
+            maxLumaSamples: levelPicture(codec, support.maxLevel),
+          },
+        ],
+  );
+};
+
 const selectAudio = (
   probe: MediaProbe,
   index: number | undefined,
@@ -116,8 +211,9 @@ const exceeds = (probe: MediaProbe, video: VideoStream, quality: PlaybackQuality
 
 /**
  * Chooses how to deliver `probe` to `client`. A quality cap that would need an encode this host
- * cannot do (HDR without tone mapping, a client without H.264) is dropped, so the viewer still
- * gets the source rather than nothing; a subtitle to burn in is not, as nothing else shows it.
+ * cannot do (HDR without tone mapping, a client that plays nothing it encodes to) is dropped, so
+ * the viewer still gets the source rather than nothing; a subtitle to burn in is not, as nothing
+ * else shows it.
  */
 export const decidePlayback = (
   probe: MediaProbe,
@@ -210,9 +306,9 @@ export const decideWithin = (
 };
 
 /**
- * What an encode of `video` for `client` asks for: H.264, tone-mapped when the source is HDR,
- * within the client's size and the viewer's cap, the CPU within 1920x1080. Undefined when the
- * client takes no H.264.
+ * What an encode of `video` for `client` asks for: the client's targets (`outputTargets`),
+ * tone-mapped when the source is HDR, within the client's size and the viewer's cap, the CPU
+ * within 1920x1080. Undefined when the client plays nothing the transcoder encodes to.
  */
 export const encodeIntent = (
   probe: MediaProbe,
@@ -220,7 +316,9 @@ export const encodeIntent = (
   client: ClientCapabilities,
   request: EncodeRequest,
 ): VideoIntent | undefined => {
-  if (videoSupport(client, "h264") === undefined) return undefined;
+  const targets = outputTargets(client);
+
+  if (targets.length === 0) return undefined;
   const subtitle = probe.subtitles.find((track) => track.index === request.burnSubtitle);
 
   const burnImage: SubtitleInput | undefined =
@@ -243,7 +341,7 @@ export const encodeIntent = (
         };
 
   return {
-    codec: "h264",
+    targets,
     toneMap: video.dynamicRange !== "sdr",
     bounds: {
       width: client.maxWidth,

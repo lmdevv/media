@@ -10,7 +10,7 @@ import {
   planVideo,
   type VideoIntent,
 } from "./video-pipeline.ts";
-import type { SourceVideo } from "./video-ops.ts";
+import { sdrTarget, type SourceVideo } from "./video-ops.ts";
 
 const hlsCommandArgs = (command: HlsCommand): ReadonlyArray<string> => hlsCommand(command).args;
 
@@ -62,7 +62,7 @@ const encode = (domain: "qsv" | "vaapi" | "software", options: EncodeOptions) =>
   };
 
   const intent: VideoIntent = {
-    codec: "h264",
+    targets: [sdrTarget("h264")],
     toneMap,
     bounds: { width: 1920, height: 1080 },
     cpuEncodeBounds: { width: 1920, height: 1080 },

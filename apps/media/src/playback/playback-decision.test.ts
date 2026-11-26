@@ -9,12 +9,13 @@ import {
   decidePlayback,
   type DecisionOptions,
   encodeIntent,
+  outputTargets,
   PlaybackPlan,
   replan,
   VideoPlan,
 } from "./playback-decision.ts";
 import { encodeDomain } from "./video-pipeline.ts";
-import type { CapabilityKey, GpuDomain } from "./video-ops.ts";
+import { type CapabilityKey, type GpuDomain, ImplId, type OutputTarget } from "./video-ops.ts";
 
 interface VideoOptions {
   readonly profile?: string;
@@ -146,6 +147,203 @@ const impls = (plan: PlaybackPlan): ReadonlyArray<string> =>
   PlaybackPlan.$is("Hls")(plan) && VideoPlan.$is("Encode")(plan.video)
     ? plan.video.pipeline.steps.map((step) => step.impl)
     : [];
+
+/** The capability the plan's encode step exercises, such as `encode.qsv:hevc/8/cbr`. */
+const encodeKey = (plan: PlaybackPlan): string | undefined =>
+  PlaybackPlan.$is("Hls")(plan) && VideoPlan.$is("Encode")(plan.video)
+    ? plan.video.pipeline.steps.at(-1)?.capability
+    : undefined;
+
+/** A device that decodes `codecs` and nothing else, over HLS, with AAC. */
+const device = (videoCodecs: ClientCapabilities["videoCodecs"]): ClientCapabilities => ({
+  containers: ["mp4"],
+  videoCodecs,
+  audioCodecs: [{ codec: "aac" }],
+  maxWidth: 3840,
+  maxHeight: 2160,
+  hls: true,
+  mse: false,
+});
+
+const hevcOnly = device([{ codec: "hevc", profiles: ["Main"] }]);
+
+const av1Only = device([{ codec: "av1", profiles: ["Main"] }]);
+
+/** An Intel Mac's Chrome: H.264 and HEVC in hardware, AV1 in software. */
+const chromeWithHevc = chromeLike({
+  videoCodecs: [{ codec: "h264" }, { codec: "hevc" }, { codec: "av1", powerEfficient: false }],
+});
+
+/** Chrome on a GPU that decodes AV1. */
+const chromeWithAv1 = chromeLike({
+  videoCodecs: [{ codec: "h264" }, { codec: "av1", powerEfficient: true }],
+});
+
+const target = (
+  codec: OutputTarget["codec"],
+  cpuEncode: OutputTarget["cpuEncode"],
+  maxLumaSamples?: number,
+): OutputTarget => ({ codec, depth: 8, colour: "sdr", cpuEncode, maxLumaSamples });
+
+/** An 8-bit MPEG-2 file no client plays, so every one of them needs an encode. */
+const mpeg2 = probe("ts", video("mpeg2video", { profile: "Main" }), [aac]);
+
+/** Quick Sync, VA-API, and the CPU, all verified. */
+const everywhere = deciding(["qsv", "vaapi"], () => false);
+
+describe("outputTargets", () => {
+  it("prefers HEVC, then AV1 decoded in hardware, then H.264", () => {
+    expect(outputTargets(chrome)).toStrictEqual([target("h264", "allowed")]);
+    expect(outputTargets(safari)).toStrictEqual([
+      target("hevc", "refused"),
+      target("h264", "allowed"),
+    ]);
+    expect(outputTargets(chromeWithHevc)).toStrictEqual([
+      target("hevc", "refused"),
+      target("h264", "allowed"),
+    ]);
+    expect(outputTargets(chromeWithAv1)).toStrictEqual([
+      target("av1", "refused"),
+      target("h264", "allowed"),
+    ]);
+    expect(
+      outputTargets(
+        device([{ codec: "h264" }, { codec: "hevc" }, { codec: "av1", powerEfficient: true }]),
+      ),
+    ).toStrictEqual([
+      target("hevc", "refused"),
+      target("av1", "refused"),
+      target("h264", "allowed"),
+    ]);
+  });
+
+  it("encodes HEVC or AV1 on the CPU only for a client without H.264", () => {
+    expect(outputTargets(hevcOnly)).toStrictEqual([target("hevc", "allowed")]);
+    expect(outputTargets(av1Only)).toStrictEqual([target("av1", "allowed")]);
+    expect(
+      outputTargets(device([{ codec: "hevc" }, { codec: "av1", powerEfficient: true }])),
+    ).toStrictEqual([target("hevc", "allowed"), target("av1", "allowed")]);
+  });
+
+  it("offers only a profile the client lists, and nothing for a client that plays none", () => {
+    expect(
+      outputTargets(device([{ codec: "h264" }, { codec: "hevc", profiles: ["Main 10"] }])),
+    ).toStrictEqual([target("h264", "allowed")]);
+    expect(outputTargets(device([{ codec: "h264", profiles: ["Main", "High"] }]))).toStrictEqual([
+      target("h264", "allowed"),
+    ]);
+    expect(outputTargets(device([{ codec: "vp9" }]))).toStrictEqual([]);
+  });
+
+  it("keeps HEVC and AV1 within the level the client declared", () => {
+    expect(
+      outputTargets(
+        device([
+          { codec: "h264", maxLevel: 41 },
+          { codec: "hevc", maxLevel: 93 },
+          { codec: "av1", maxLevel: 8, powerEfficient: true },
+        ]),
+      ),
+    ).toStrictEqual([
+      target("hevc", "refused", 983_040),
+      target("av1", "refused", 2_359_296),
+      target("h264", "allowed"),
+    ]);
+  });
+});
+
+describe("output codec", () => {
+  it("leaves direct play, remuxes, and audio conversions to an HEVC client alone", () => {
+    const hevc = video("hevc", { profile: "Main" });
+
+    expect(everywhere(probe("mp4", hevc, [aac]), safari)).toStrictEqual(
+      PlaybackPlan.Direct({ audioIndex: 1 }),
+    );
+    expect(everywhere(probe("mkv", hevc, [aac]), safari)).toStrictEqual(
+      PlaybackPlan.Hls({
+        mode: "remux",
+        video: VideoPlan.Copy(),
+        audio: AudioPlan.Copy({ index: 1 }),
+      }),
+    );
+    expect(everywhere(probe("mkv", h264, [audio(1, "dts", 6, true)]), safari)).toStrictEqual(
+      PlaybackPlan.Hls({
+        mode: "audio-transcode",
+        video: VideoPlan.Copy(),
+        audio: AudioPlan.Aac({ index: 1 }),
+      }),
+    );
+  });
+
+  it("encodes HEVC on the GPU for a client that plays it, at three quarters of H.264's bitrate", () => {
+    const plan = hardware(mpeg2, safari);
+
+    expect(plan).toMatchObject({
+      mode: "transcode-qsv",
+      video: { output: { codec: "hevc", width: 1920, height: 1080, bitrate: 6_000_000 } },
+    });
+    expect(encodeKey(plan)).toBe("encode.qsv:hevc/8/cbr");
+    expect(encodeKey(vaapi(mpeg2, chromeWithHevc))).toBe("encode.vaapi:hevc/8/cbr");
+  });
+
+  it("encodes AV1 on the GPU for a client that decodes it in hardware or plays only AV1", () => {
+    expect(hardware(mpeg2, chromeWithAv1)).toMatchObject({
+      mode: "transcode-qsv",
+      video: { output: { codec: "av1", bitrate: 5_200_000 } },
+    });
+    expect(encodeKey(hardware(mpeg2, av1Only))).toBe("encode.qsv:av1/8/cbr");
+    expect(encodeKey(hardware(mpeg2, chromeWithHevc))).toBe("encode.qsv:hevc/8/cbr");
+  });
+
+  it("encodes H.264 on a CPU for a client that plays it, and HEVC or AV1 only for one that does not", () => {
+    expect(software(mpeg2, safari)).toMatchObject({
+      mode: "transcode-software",
+      video: { output: { codec: "h264", bitrate: 8_000_000 } },
+    });
+    expect(software(mpeg2, chromeWithAv1)).toMatchObject({ video: { output: { codec: "h264" } } });
+    expect(encodeKey(software(mpeg2, hevcOnly))).toBe("encode.cpu:hevc/8/crf");
+    expect(encodeKey(software(mpeg2, av1Only))).toBe("encode.cpu:av1/8/crf");
+  });
+
+  it("falls to the next target when an encoder is not verified", () => {
+    const noHevcOnQsv = deciding(["qsv"], (key) => key === "encode.qsv:hevc/8/cbr");
+
+    expect(encodeKey(noHevcOnQsv(mpeg2, safari))).toBe("encode.qsv:h264/8/cbr");
+
+    const noHevcOnAnyGpu = deciding(["qsv", "vaapi"], (key) =>
+      /^encode\.(qsv|vaapi):hevc/u.test(key),
+    );
+
+    expect(encodeKey(noHevcOnAnyGpu(mpeg2, safari))).toBe("encode.qsv:h264/8/cbr");
+    expect(encodeKey(noHevcOnAnyGpu(mpeg2, hevcOnly))).toBe("encode.cpu:hevc/8/crf");
+
+    const noQsvHevc = deciding(["qsv", "vaapi"], (key) => key === "encode.qsv:hevc/8/cbr");
+
+    expect(encodeKey(noQsvHevc(mpeg2, safari))).toBe("encode.vaapi:hevc/8/cbr");
+
+    const noSoftwareHevc = deciding([], (key) => key === "encode.cpu:hevc/8/crf");
+
+    expect(noSoftwareHevc(mpeg2, hevcOnly)).toStrictEqual(
+      PlaybackPlan.Unsupported({ reason: "no-transcode-target" }),
+    );
+  });
+
+  it("sizes an HEVC encode within the level the client declared", () => {
+    const level31 = device([{ codec: "hevc", maxLevel: 93 }]);
+    const plan = hardware(mpeg2, level31);
+
+    expect(plan).toMatchObject({ video: { output: { codec: "hevc" } } });
+
+    const output =
+      PlaybackPlan.$is("Hls")(plan) && VideoPlan.$is("Encode")(plan.video)
+        ? plan.video.output
+        : undefined;
+
+    assert.isDefined(output);
+    assert.isAtMost(output.width * output.height, 983_040);
+    assert.closeTo(output.width / output.height, 1920 / 1080, 0.01);
+  });
+});
 
 describe("decidePlayback", () => {
   it("plays compatible files directly", () => {
@@ -399,4 +597,28 @@ describe("replan", () => {
       if (encodeDomain(pipeline) === "cpu") assert.isAtMost(output.height, 1080);
     },
   );
+
+  it("keeps the codec where a verified row remains, and falls to the next target where none does", () => {
+    const stream = mpeg2.video;
+    const intent = stream === undefined ? undefined : encodeIntent(mpeg2, stream, safari, {});
+
+    assert.isDefined(stream);
+    assert.isDefined(intent);
+    const everything = verifiedFor(mpeg2, ["qsv", "vaapi"]);
+
+    const codecOf = (excluded: ReadonlyArray<string>) =>
+      Result.map(
+        replan(stream, intent, {
+          ...everything,
+          excluded: new Set(excluded.map((impl) => ImplId(impl))),
+        }),
+        (plan) => `${plan.output.codec} ${encodeDomain(plan.pipeline)}`,
+      );
+
+    expect(codecOf([])).toStrictEqual(Result.succeed("hevc qsv"));
+    expect(codecOf(["encode.qsv"])).toStrictEqual(Result.succeed("hevc vaapi"));
+    expect(
+      codecOf(["decode.qsv", "scale.qsv", "encode.qsv", "decode.vaapi", "encode.vaapi"]),
+    ).toStrictEqual(Result.succeed("h264 cpu"));
+  });
 });

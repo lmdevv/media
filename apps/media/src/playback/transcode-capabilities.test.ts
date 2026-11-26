@@ -23,7 +23,7 @@ import * as Inventory from "./capability-inventory.ts";
 import * as TranscodeCapabilities from "./transcode-capabilities.ts";
 import { Diagnosis } from "./transcode-recovery.ts";
 import { planVideo, samePipeline, type VideoIntent, type VideoPipeline } from "./video-pipeline.ts";
-import { capabilityKey, ImplId, type SourceVideo } from "./video-ops.ts";
+import { capabilityKey, ImplId, sdrTarget, type SourceVideo } from "./video-ops.ts";
 import { renderVideo } from "./video-render.ts";
 
 const hasFfmpeg = await ffmpegAvailable();
@@ -56,7 +56,7 @@ const DECODE_JPEG_RANGE = capabilityKey(ImplId("decode.qsv"), "h264/yuvj420p");
 const VPP_FAILED = "[Parsed_vpp_qsv_2 @ 0x1] Invalid color_matrix.";
 
 const intentOf = (source: SourceVideo): VideoIntent => ({
-  codec: "h264",
+  targets: [sdrTarget("h264")],
   toneMap: source.colour !== "sdr",
   bounds: { width: 1920, height: 1080 },
   cpuEncodeBounds: { width: 1920, height: 1080 },

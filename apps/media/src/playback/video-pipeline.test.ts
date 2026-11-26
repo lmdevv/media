@@ -25,6 +25,7 @@ import {
   ImplId,
   Op,
   type Row,
+  sdrTarget,
   type SourceVideo,
 } from "./video-ops.ts";
 
@@ -44,7 +45,7 @@ const source = (overrides: Partial<SourceVideo> = {}): SourceVideo => ({
 });
 
 const intentFor = (video: SourceVideo, overrides: Partial<VideoIntent> = {}): VideoIntent => ({
-  codec: "h264",
+  targets: [sdrTarget("h264")],
   toneMap: video.colour !== "sdr",
   bounds: { width: 3840, height: 2160 },
   cpuEncodeBounds: { width: 1920, height: 1080 },
@@ -373,7 +374,7 @@ describe("assemble", () => {
       video,
       [
         [Op.Decode({ codec: "hevc" }), row("decode.qsv")],
-        [Op.Encode({ codec: "h264", bitrate: 8_000_000 }), row("encode.qsv")],
+        [Op.Encode({ target: sdrTarget("h264"), bitrate: 8_000_000 }), row("encode.qsv")],
       ],
       everything(video, [QSV]),
       Purpose.Run(),
@@ -394,7 +395,7 @@ describe("assemble", () => {
       video,
       [
         [Op.Decode({ codec: "h264" }), row("decode.qsv")],
-        [Op.Encode({ codec: "h264", bitrate: 8_000_000 }), row("encode.vaapi")],
+        [Op.Encode({ target: sdrTarget("h264"), bitrate: 8_000_000 }), row("encode.vaapi")],
       ],
       everything(video, [QSV, VAAPI]),
       Purpose.Run(),
@@ -412,7 +413,7 @@ describe("assemble", () => {
       [
         [Op.Decode({ codec: "h264" }), row("decode.qsv")],
         [Op.Scale({ width: 1280, height: 720, depth: 8 }), row("scale.cpu")],
-        [Op.Encode({ codec: "h264", bitrate: 8_000_000 }), row("encode.vaapi")],
+        [Op.Encode({ target: sdrTarget("h264"), bitrate: 8_000_000 }), row("encode.vaapi")],
       ],
       everything(video, [QSV, other]),
       Purpose.Run(),
@@ -426,7 +427,7 @@ describe("assemble", () => {
 
     const choices = [
       [Op.Decode({ codec: "h264" }), row("decode.cpu")],
-      [Op.Encode({ codec: "h264", bitrate: 1_000_000 }), row("encode.qsv")],
+      [Op.Encode({ target: sdrTarget("h264"), bitrate: 1_000_000 }), row("encode.qsv")],
     ] as const;
 
     const keys = everyKey(video, intentFor(video), [QSV]);
@@ -465,7 +466,7 @@ describe("the seal", () => {
 
     const encodeOnly = assemble(
       video,
-      [[Op.Encode({ codec: "h264", bitrate: 1_000_000 }), row("encode.cpu")]],
+      [[Op.Encode({ target: sdrTarget("h264"), bitrate: 1_000_000 }), row("encode.cpu")]],
       known,
       Purpose.Run(),
     );

@@ -7,6 +7,7 @@
  * only a pipeline `assemble` itself returned, not a copy. `planVideo` picks the cheapest chain
  * that assembles; it names no backend, so a new one is a rows file and a `Domain` member.
  */
+import type { DynamicRange } from "@media/contracts/media-playback";
 import { Data, Result } from "effect";
 
 import type { VideoStream } from "../media/media-probe.ts";
@@ -14,6 +15,7 @@ import { PROBE_CLIPS } from "./probe-clips.ts";
 import { CPU_ROWS } from "./video-ops-cpu.ts";
 import { INTEL_ROWS, QSV, VAAPI } from "./video-ops-intel.ts";
 import {
+  BITRATE_SHARE,
   type BuildFeature,
   type CapabilityKey,
   capabilityKey,
@@ -27,6 +29,7 @@ import {
   Op,
   type OpName,
   type OutputCodec,
+  type OutputTarget,
   type Rendering,
   type Row,
   type SourceVideo,
@@ -139,7 +142,8 @@ interface Size {
 
 /** What a decision wants from an encode; it names no backend. */
 export interface VideoIntent {
-  readonly codec: OutputCodec;
+  /** What the encode may produce, the most wanted first; the planner tries them in this order. */
+  readonly targets: ReadonlyArray<OutputTarget>;
   /** HDR to SDR. */
   readonly toneMap: boolean;
   /** The client's limits and the viewer's height cap. */
@@ -155,7 +159,7 @@ export interface VideoIntent {
 export interface VideoOutput extends Size {
   readonly codec: OutputCodec;
   readonly bitrate: number;
-  readonly dynamicRange: "sdr";
+  readonly dynamicRange: DynamicRange;
 }
 
 /** A chosen pipeline and what it produces. */
@@ -333,16 +337,34 @@ const SDR_BITRATES: ReadonlyArray<readonly [number, number]> = [
   [480, 4_000_000],
 ];
 
-/** The bitrate of an encode `height` pixels tall, within `maxBitrate`. */
-const outputBitrate = (height: number, maxBitrate: number | undefined): number =>
+/**
+ * The bitrate of an encode `height` pixels tall to `codec`, within `maxBitrate`: H.264's table
+ * scaled by the codec's share.
+ */
+const outputBitrate = (
+  height: number,
+  codec: OutputCodec,
+  maxBitrate: number | undefined,
+): number =>
   Math.min(
-    SDR_BITRATES.find(([above]) => height > above)?.[1] ?? 2_000_000,
+    Math.round(
+      (SDR_BITRATES.find(([above]) => height > above)?.[1] ?? 2_000_000) * BITRATE_SHARE[codec],
+    ),
     maxBitrate ?? Number.POSITIVE_INFINITY,
   );
 
-/** The source's size scaled down, never up, to fit `bounds`, in even dimensions. */
-const fit = (source: Size, bounds: Size): Size => {
-  const scale = Math.min(1, bounds.width / source.width, bounds.height / source.height);
+/**
+ * The source's size scaled down, never up, to fit `bounds` and at most `maxSamples` luma samples,
+ * in even dimensions.
+ */
+const fit = (source: Size, bounds: Size, maxSamples: number | undefined): Size => {
+  const scale = Math.min(
+    1,
+    bounds.width / source.width,
+    bounds.height / source.height,
+    Math.sqrt((maxSamples ?? Number.POSITIVE_INFINITY) / (source.width * source.height)),
+  );
+
   const even = (value: number) => Math.max(2, Math.floor((value * scale) / 2) * 2);
 
   return { width: even(source.width), height: even(source.height) };
@@ -358,12 +380,15 @@ const product = <A>(lists: ReadonlyArray<ReadonlyArray<A>>): ReadonlyArray<Reado
 interface Candidate {
   readonly choices: ReadonlyArray<readonly [Op, Row]>;
   readonly encode: Row;
+  /** The target's place in the intent's order. */
+  readonly rank: number;
 }
 
 /**
  * Every chain that could encode `source` for `intent` within the snapshot's domains: each encode
- * row sizes the picture (the CPU within its bounds), and the scale leaves frames at the source's
- * depth or at 8 bits, whichever the rows after it take.
+ * row with each target it may produce (on the CPU only those that allow it) sizes the picture
+ * (the CPU within its bounds, every row within the target's level), and the scale leaves frames
+ * at the source's depth or at 8 bits, whichever the rows after it take.
  */
 const candidates = (
   source: SourceVideo,
@@ -377,8 +402,12 @@ const candidates = (
   const usable = (op: Op) =>
     VIDEO_OPS.filter((entry) => Op.$is(entry.op)(op) && bound.has(entry.on));
 
-  return VIDEO_OPS.filter((entry) => entry.op === "Encode" && bound.has(entry.on)).flatMap(
-    (encode) => {
+  const encodes = VIDEO_OPS.filter((entry) => entry.op === "Encode" && bound.has(entry.on));
+
+  return intent.targets.flatMap((target, rank) =>
+    encodes.flatMap((encode) => {
+      if (encode.on === "cpu" && target.cpuEncode === "refused") return [];
+
       const size = fit(
         source,
         encode.on === "cpu"
@@ -387,11 +416,12 @@ const candidates = (
               height: Math.min(intent.bounds.height, intent.cpuEncodeBounds.height),
             }
           : intent.bounds,
+        target.maxLumaSamples,
       );
 
       const encodeOp = Op.Encode({
-        codec: intent.codec,
-        bitrate: outputBitrate(size.height, intent.maxBitrate),
+        target,
+        bitrate: outputBitrate(size.height, target.codec, intent.maxBitrate),
       });
 
       return depths.flatMap((depth) => {
@@ -412,26 +442,28 @@ const candidates = (
             [encodeOp, encode],
           ],
           encode,
+          rank,
         }));
       });
-    },
+    }),
   );
 };
 
 /**
- * How much a chain costs, compared in order: an encode on the CPU, CPU work, moves between
- * memories, then the snapshot's domain preference.
+ * How much a chain costs, compared in order: an encode on the CPU, the target's place in the
+ * intent's order, CPU work, moves between memories, then the snapshot's domain preference.
  */
 const costOf = (
   steps: ReadonlyArray<Step>,
-  encode: Row,
+  candidate: Candidate,
   snapshot: CapabilitySnapshot,
 ): ReadonlyArray<number> => {
   const gpu = steps.find((step) => step.on !== "cpu")?.on;
   const rank = snapshot.domains.findIndex((binding) => binding.domain === gpu);
 
   return [
-    encode.on === "cpu" ? 1 : 0,
+    candidate.encode.on === "cpu" ? 1 : 0,
+    candidate.rank,
     steps.filter((step) => step.on === "cpu" && !Op.$is("Move")(step.op)).length,
     steps.filter((step) => Op.$is("Move")(step.op)).length,
     rank === -1 ? snapshot.domains.length : rank,
@@ -469,7 +501,7 @@ const cheapest = (
     if (Result.isFailure(built)) {
       first ??= built.failure;
     } else {
-      const cost = costOf(built.success, candidate.encode, snapshot);
+      const cost = costOf(built.success, candidate, snapshot);
 
       if (best === undefined || cheaper(cost, best.cost)) {
         best = { candidate, steps: built.success, cost };
@@ -518,11 +550,11 @@ export const planVideo = (
   return Result.succeed({
     pipeline: pipeline.success,
     output: {
-      codec: last.op.codec,
+      codec: last.op.target.codec,
       width: last.output.width,
       height: last.output.height,
       bitrate: last.op.bitrate,
-      dynamicRange: "sdr",
+      dynamicRange: last.output.colour,
     },
   });
 };
@@ -713,17 +745,30 @@ const WARMUP_ORDER: ReadonlyArray<OpName> = [
 /** The codecs most sources are, whose 8-bit decoders warmup proves first. */
 const COMMON_CODECS: ReadonlySet<string> = new Set(["h264", "hevc"]);
 
-/** Whether `step` belongs to the chain most files play through: 8-bit SDR H.264 or HEVC. */
+/** The codec every client plays, whose encoder warmup proves first. */
+const COMMON_OUTPUT: OutputCodec = "h264";
+
+/**
+ * Whether `step` belongs to the chain most files play through: 8-bit SDR H.264 or HEVC, encoded
+ * to H.264.
+ */
 const common = (step: Step): boolean =>
   step.input.depth === 8 &&
   step.output.depth === 8 &&
   step.output.colour === "sdr" &&
-  (Op.$is("Decode")(step.op) ? COMMON_CODECS.has(step.op.codec) : !Op.$is("BurnImage")(step.op));
+  Op.$match(step.op, {
+    Decode: ({ codec }) => COMMON_CODECS.has(codec),
+    Scale: () => true,
+    ToneMap: () => true,
+    BurnImage: () => false,
+    Encode: ({ target }) => target.codec === COMMON_OUTPUT,
+    Move: () => true,
+  });
 
 /**
  * The steps generated clips prove for the rows of `domain`, one per key: first those of the chain
- * most files play through (8-bit moves, the encoder, scaling, H.264 and HEVC decoding), then the
- * rest, each group in the order most chains need them: moves, the encoder, scaling, decoders,
+ * most files play through (8-bit moves, the H.264 encoder, scaling, H.264 and HEVC decoding), then
+ * the rest, each group in the order most chains need them: moves, the encoders, scaling, decoders,
  * then tone maps.
  */
 export const probedSteps = (domain: Domain, snapshot: CapabilitySnapshot): ReadonlyArray<Step> => {

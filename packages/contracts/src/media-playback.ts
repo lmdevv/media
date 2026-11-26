@@ -81,6 +81,12 @@ const VideoCodecSupport = Schema.Struct({
   maxBitDepth: Schema.optional(Schema.Int),
   /** HDR formats the client decodes and displays; SDR is always accepted. */
   dynamicRanges: Schema.optional(Schema.Array(DynamicRange)),
+  /**
+   * The client decodes the codec in hardware, cheaply enough that the media service may encode to
+   * it for the client's sake; absent when it may decode in software or cannot tell. AV1 is
+   * encoded for a client that plays HEVC or H.264 only when this is true.
+   */
+  powerEfficient: Schema.optional(Schema.Boolean),
 });
 
 /** An audio codec the client decodes. Names follow ffmpeg (`aac`, `ac3`, `eac3`, `opus`, `flac`, `mp3`). */

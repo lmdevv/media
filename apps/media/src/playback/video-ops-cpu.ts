@@ -1,6 +1,7 @@
 /**
  * The CPU's rows: libavcodec's software decoders, `scale`, the `zscale` tone map, the image
- * subtitle overlay, and libx264. A build listing proves these present, as they touch no device.
+ * subtitle overlay, and libx264, libx265, and libsvtav1. A build listing proves these present, as
+ * they touch no device.
  * They are the floor every source falls back to, so they take any layout and depth ffmpeg
  * decodes, as software transcoding always has; closed lists guard the GPU rows instead.
  */
@@ -12,8 +13,12 @@ import {
   NOTHING,
   Op,
   type OpImpl,
+  OUTPUT_CODECS,
+  type OutputCodec,
+  type OutputTarget,
   row,
   type Row,
+  sdrTarget,
   transferOf,
 } from "./video-ops.ts";
 
@@ -129,35 +134,79 @@ const burnImageCpu: OpImpl<"BurnImage"> = {
   ],
 };
 
-/** libx264 at CRF 23 under a VBV cap, from any SDR layout and depth, converted to 8-bit 4:2:0. */
+/**
+ * One codec's software encoder: its name, the options that set its speed, profile, and quality
+ * target before the bitrate cap, and any after it.
+ */
+interface SoftwareEncoder {
+  readonly name: string;
+  readonly quality: ReadonlyArray<string>;
+  readonly after: ReadonlyArray<string>;
+}
+
+/**
+ * The 8-bit SDR encoder of each codec, each at a quality target near libx264's CRF 23 and a speed
+ * that keeps up with a 1080p stream on a desktop CPU. libx265 closes its GOPs, or a forced
+ * keyframe is a CRA picture whose leading pictures need the segment before; it is the slowest,
+ * near 65 frames a second at 1920x818 with Debian's build on a Ryzen 9 5950X (its `veryfast`,
+ * 43). SVT-AV1's presets above 9 warn of artifacts outside its real-time mode.
+ */
+const SOFTWARE_ENCODERS: Readonly<Record<OutputCodec, SoftwareEncoder>> = {
+  h264: {
+    name: "libx264",
+    quality: ["-preset", "veryfast", "-profile:v", "high", "-crf", "23"],
+    after: [],
+  },
+  hevc: {
+    name: "libx265",
+    quality: ["-preset", "superfast", "-profile:v", "main", "-crf", "28"],
+    after: ["-x265-params", "log-level=error:open-gop=0"],
+  },
+  av1: { name: "libsvtav1", quality: ["-preset", "9", "-crf", "30"], after: [] },
+};
+
+/** Whether the CPU's encoders take `target`: 8-bit SDR alone. */
+const softwareTakes = (target: OutputTarget): boolean =>
+  target.depth === 8 && target.colour === "sdr";
+
+/**
+ * A software encode at a quality target under a VBV cap, from any SDR layout and depth, converted
+ * to 8-bit 4:2:0. Every forced keyframe is an IDR frame (H.264, HEVC) or a key frame (AV1).
+ */
 const encodeCpu: OpImpl<"Encode"> = {
   id: ImplId("encode.cpu"),
   op: "Encode",
   on: "cpu",
   takes: "cpu",
-  needs: () => ["encoder:libx264"],
+  needs: (op) => [`encoder:${SOFTWARE_ENCODERS[op.target.codec].name}`],
   variant: (op, input) =>
-    input.colour === "sdr" && input.scan === "progressive" ? `${op.codec}/8/crf` : undefined,
+    softwareTakes(op.target) && input.colour === "sdr" && input.scan === "progressive"
+      ? `${op.target.codec}/8/crf`
+      : undefined,
   output: (_, input) => ({ ...input, depth: 8, pixelFormat: "yuv420p" }),
-  render: (op) => ({
-    input: [],
-    filters: [filter("format", "yuv420p")],
-    output: [
-      "-c:v",
-      "libx264",
-      "-preset",
-      "veryfast",
-      "-profile:v",
-      "high",
-      "-crf",
-      "23",
-      "-maxrate",
-      String(op.bitrate),
-      "-bufsize",
-      String(op.bitrate * 2),
-    ],
-  }),
-  probes: [{ op: Op.Encode({ codec: "h264", bitrate: 1_000_000 }), clip: "h264-8", runs: 1 }],
+  render: (op) => {
+    const encoder = SOFTWARE_ENCODERS[op.target.codec];
+
+    return {
+      input: [],
+      filters: [filter("format", "yuv420p")],
+      output: [
+        "-c:v",
+        encoder.name,
+        ...encoder.quality,
+        "-maxrate",
+        String(op.bitrate),
+        "-bufsize",
+        String(op.bitrate * 2),
+        ...encoder.after,
+      ],
+    };
+  },
+  probes: OUTPUT_CODECS.map((codec) => ({
+    op: Op.Encode({ target: sdrTarget(codec), bitrate: 1_000_000 }),
+    clip: "h264-8",
+    runs: 1,
+  })),
 };
 
 /** Every CPU row. */

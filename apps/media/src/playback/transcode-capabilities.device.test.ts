@@ -25,6 +25,7 @@ import {
   type GpuDomain,
   ImplId,
   implOf,
+  sdrTarget,
   type SubtitleInput,
 } from "./video-ops.ts";
 
@@ -118,7 +119,7 @@ const CPU_CHAINS: ReadonlyArray<Chain> = [
 ];
 
 const intentOf = (chain: Chain): VideoIntent => ({
-  codec: "h264",
+  targets: [sdrTarget("h264")],
   toneMap: PROBE_CLIPS[chain.clip].source.colour !== "sdr",
   bounds: { width: 320, height: 180 },
   cpuEncodeBounds: { width: 1920, height: 1080 },

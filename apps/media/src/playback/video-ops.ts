@@ -18,7 +18,45 @@ export type Domain = "cpu" | "qsv" | "vaapi";
 export type GpuDomain = Exclude<Domain, "cpu">;
 
 /** What the transcoder encodes to. */
-export type OutputCodec = "h264";
+export type OutputCodec = "h264" | "hevc" | "av1";
+
+/** Every codec the transcoder encodes to. */
+export const OUTPUT_CODECS: ReadonlyArray<OutputCodec> = ["h264", "hevc", "av1"];
+
+/**
+ * The share of H.264's bitrate an encode in each codec gets for the same picture. HEVC and AV1
+ * need fewer bits for the same quality; these shares are conservative, keeping more bits than the
+ * savings usually quoted (about a half for HEVC, more for AV1), until measured quality says more.
+ */
+export const BITRATE_SHARE: Readonly<Record<OutputCodec, number>> = {
+  h264: 1,
+  hevc: 0.75,
+  av1: 0.65,
+};
+
+/**
+ * One stream an encode may produce, as the decision asks for it and encode rows read it. Rows take
+ * the codec, depth, and colour as data and accept only the entries they register: 8-bit SDR.
+ */
+export interface OutputTarget {
+  readonly codec: OutputCodec;
+  /** Bits per component of the encoded picture. */
+  readonly depth: number;
+  readonly colour: DynamicRange;
+  /** Whether an encoder on the CPU may produce it, or only one on a GPU. */
+  readonly cpuEncode: "allowed" | "refused";
+  /** The largest picture, in luma samples, the level the client declared allows; none caps nothing. */
+  readonly maxLumaSamples: number | undefined;
+}
+
+/** `codec` at 8-bit SDR, from any encoder and at any size: what probes encode. */
+export const sdrTarget = (codec: OutputCodec): OutputTarget => ({
+  codec,
+  depth: 8,
+  colour: "sdr",
+  cpuEncode: "allowed",
+  maxLumaSamples: undefined,
+});
 
 /** Whether a frame holds a whole picture or two fields. */
 type Scan = "progressive" | "interlaced";
@@ -65,7 +103,8 @@ export type Op = Data.TaggedEnum<{
   /** HDR to SDR. */
   ToneMap: {};
   BurnImage: { readonly subtitle: SubtitleInput };
-  Encode: { readonly codec: OutputCodec; readonly bitrate: number };
+  /** `bitrate` is the target's: a cap on the CPU, the rate on a GPU. */
+  Encode: { readonly target: OutputTarget; readonly bitrate: number };
   /** Only `assemble` creates moves. */
   Move: { readonly to: Domain };
 }>;

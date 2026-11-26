@@ -19,7 +19,7 @@ import {
   rowOf,
   type VideoPipeline,
 } from "./video-pipeline.ts";
-import { ImplId, Op, type Row, type SourceVideo } from "./video-ops.ts";
+import { ImplId, Op, type Row, sdrTarget, type SourceVideo } from "./video-ops.ts";
 import { renderVideo } from "./video-render.ts";
 
 const HDR: SourceVideo = {
@@ -50,7 +50,7 @@ const everything = (domain: "qsv" | "vaapi", source: SourceVideo): CapabilitySna
   const keys = candidateKeys(
     source,
     {
-      codec: "h264",
+      targets: [sdrTarget("h264")],
       toneMap: source.colour !== "sdr",
       bounds: { width: 1920, height: 1080 },
       cpuEncodeBounds: { width: 1920, height: 1080 },
@@ -93,7 +93,7 @@ const QSV_CHAIN = chain("qsv", [
   [Op.Decode({ codec: "hevc" }), "decode.qsv"],
   [Op.Scale({ width: 1280, height: 720, depth: 10 }), "scale.qsv"],
   [Op.ToneMap(), "tonemap.qsv"],
-  [Op.Encode({ codec: "h264", bitrate: 8_000_000 }), "encode.qsv"],
+  [Op.Encode({ target: sdrTarget("h264"), bitrate: 8_000_000 }), "encode.qsv"],
 ]);
 
 const QSV_OWNERS = ownersOf(QSV_CHAIN);
@@ -103,7 +103,7 @@ const VAAPI_CHAIN = chain("vaapi", [
   [Op.Decode({ codec: "hevc" }), "decode.vaapi"],
   [Op.Scale({ width: 1280, height: 720, depth: 10 }), "scale.vaapi"],
   [Op.ToneMap(), "tonemap.vaapi"],
-  [Op.Encode({ codec: "h264", bitrate: 8_000_000 }), "encode.vaapi"],
+  [Op.Encode({ target: sdrTarget("h264"), bitrate: 8_000_000 }), "encode.vaapi"],
 ]);
 
 const VAAPI_OWNERS = ownersOf(VAAPI_CHAIN);
@@ -114,7 +114,7 @@ const VAAPI_H264_CHAIN = chain(
   [
     [Op.Decode({ codec: "h264" }), "decode.vaapi"],
     [Op.Scale({ width: 1280, height: 720, depth: 8 }), "scale.vaapi"],
-    [Op.Encode({ codec: "h264", bitrate: 8_000_000 }), "encode.vaapi"],
+    [Op.Encode({ target: sdrTarget("h264"), bitrate: 8_000_000 }), "encode.vaapi"],
   ],
   { ...HDR, codec: "h264", pixelFormat: "yuv420p", depth: 8, colour: "sdr" },
 );
@@ -125,7 +125,7 @@ const UPLOAD_CHAIN = chain(
   [
     [Op.Decode({ codec: "hevc" }), "decode.cpu"],
     [Op.Scale({ width: 1280, height: 720, depth: 8 }), "scale.vaapi"],
-    [Op.Encode({ codec: "h264", bitrate: 8_000_000 }), "encode.vaapi"],
+    [Op.Encode({ target: sdrTarget("h264"), bitrate: 8_000_000 }), "encode.vaapi"],
   ],
   { ...HDR, colour: "sdr" },
 );
@@ -244,7 +244,7 @@ describe("attribute", () => {
       [
         [Op.Decode({ codec: "hevc" }), "decode.qsv"],
         [Op.Scale({ width: 1280, height: 720, depth: 8 }), "scale.qsv"],
-        [Op.Encode({ codec: "h264", bitrate: 8_000_000 }), "encode.qsv"],
+        [Op.Encode({ target: sdrTarget("h264"), bitrate: 8_000_000 }), "encode.qsv"],
       ],
       { ...HDR, colour: "sdr" },
     );
@@ -593,7 +593,7 @@ describe("advance", () => {
       [Op.Decode({ codec: "hevc" }), "decode.cpu"],
       [Op.Scale({ width: 1280, height: 720, depth: 10 }), "scale.cpu"],
       [Op.ToneMap(), "tonemap.cpu"],
-      [Op.Encode({ codec: "h264", bitrate: 8_000_000 }), "encode.cpu"],
+      [Op.Encode({ target: sdrTarget("h264"), bitrate: 8_000_000 }), "encode.cpu"],
     ]);
 
     assert.isTrue(
