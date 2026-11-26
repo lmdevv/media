@@ -174,7 +174,7 @@ const vppFailed = (pipeline: VideoPipeline): TranscodeCapabilities.FailedRun => 
     encoder: { step: pipeline.steps.length - 1, names: ["h264_qsv"] },
     filters: new Map([["Parsed_vpp_qsv_0", [1, 2]]]),
   },
-  failure: { exitCode: 234, signal: null, stderrHead: VPP_FAILED },
+  failure: { exitCode: 234, signal: null, stderrTail: VPP_FAILED },
 });
 
 /** Writes a one-second VP9 file into the stage, not the way the generated clip is made. */
@@ -448,7 +448,7 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
               encoder: { step: pipeline.steps.length - 1, names: ["h264_qsv"] },
               filters: new Map(),
             },
-            failure: { exitCode: 69, signal: null, stderrHead: IO_SURFACE },
+            failure: { exitCode: 69, signal: null, stderrTail: IO_SURFACE },
           });
 
           assert.deepStrictEqual(diagnosis, Diagnosis.Source({ impls: [ImplId("decode.qsv")] }));
@@ -564,7 +564,7 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
               encoder: { step: sdrPipeline.steps.length - 1, names: ["h264_qsv"] },
               filters: new Map(),
             },
-            failure: { exitCode: 69, signal: null, stderrHead: IO_SURFACE.replace("h264", "hevc") },
+            failure: { exitCode: 69, signal: null, stderrTail: IO_SURFACE.replace("h264", "hevc") },
           });
 
           assert.isTrue(Diagnosis.$is("Capability")(decoderFailed));
@@ -834,7 +834,7 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
             failure: {
               exitCode: 234,
               signal: null,
-              stderrHead:
+              stderrTail:
                 "[aost#0:1/copy @ 0x1] Error initializing bitstream filter: aac_adtstoasc",
             },
           });
@@ -884,7 +884,7 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
             failure: {
               exitCode: 1,
               signal: null,
-              stderrHead: [
+              stderrTail: [
                 "[hevc @ 0x1] Could not find ref with POC 12",
                 "[out#0/hls @ 0x2] Error writing trailer: No space left on device",
               ].join("\n"),

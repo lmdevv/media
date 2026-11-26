@@ -132,13 +132,13 @@ const UPLOAD_OWNERS: LogOwners = {
 };
 
 const failed = (
-  stderrHead: string,
+  stderrTail: string,
   exitCode: number | null = 234,
   signal: string | null = null,
 ) => ({
   exitCode,
   signal,
-  stderrHead,
+  stderrTail,
 });
 
 const suspects = (attribution: Attribution): ReadonlyArray<number> | string =>
@@ -213,6 +213,21 @@ const NOT_VIDEO = [
   ["audio", "[aost#0:1/aac @ 0x5f1fe88a2d80] Error while opening encoder"],
   ["stopped", "Exiting normally, received signal 15."],
 ] as const;
+
+/** Warnings about parts other than the video that a run goes on past, captured as ffmpeg writes them. */
+const RECOVERED = [
+  "[aist#0:1/ac3 @ 0x5f1fe88a2d80] [dec:ac3 @ 0x5f1fe8636cc0] Error submitting packet to decoder: Invalid data found when processing input",
+  "[mpegts @ 0x5f2c3a0c] Packet corrupt (stream = 1, dts = 1234567).",
+  RECOVERED_DECODE,
+] as const;
+
+/** Heads of a video failure, and the steps of `QSV_CHAIN` each names. */
+const VIDEO_FAILURES = {
+  fused: [1, 2],
+  encoder: [3],
+  qsvDecoder: [0],
+  device: [0, 1, 2, 3],
+} as const;
 
 describe("attribute", () => {
   it("names the decoder, a filter, a fused filter's steps, and the encoder", () => {
@@ -318,7 +333,7 @@ describe("attribute", () => {
     assert.strictEqual(suspects(attribute(QSV_CHAIN, QSV_OWNERS, failed("", null, null))), "spawn");
   });
 
-  it("classifies a failure that is not about video first, whatever video lines came before it", () => {
+  it("classifies by the line that ended the run, past warnings the run went on past", () => {
     // A decode error the run recovered from, then the muxer meets a full disk.
     assert.deepStrictEqual(
       attribute(
@@ -327,6 +342,29 @@ describe("attribute", () => {
         failed([RECOVERED_DECODE, HEADS.disk[0]].join("\n"), 1),
       ),
       Attribution.NotVideo({ reason: "disk" }),
+    );
+
+    // An audio packet the run dropped, then the encoder fails: the encoder is named.
+    assert.deepStrictEqual(
+      attribute(
+        QSV_CHAIN,
+        QSV_OWNERS,
+        failed(
+          [
+            RECOVERED[0],
+            "[h264_qsv @ 0x5d1c2a0] Error during encoding: device failed (-17)",
+            "[vost#0:0/h264_qsv @ 0x5d1c3b0] [enc:h264_qsv @ 0x5d1c2a0] Error submitting video frame to the encoder",
+            ...HEADS.aftermath,
+          ].join("\n"),
+        ),
+      ),
+      Attribution.Video({ named: true, suspects: [3] }),
+    );
+
+    // A corrupt container packet the demuxer skipped, then the fused vpp_qsv fails.
+    assert.deepStrictEqual(
+      suspects(attribute(QSV_CHAIN, QSV_OWNERS, failed([RECOVERED[1], ...HEADS.fused].join("\n")))),
+      [1, 2],
     );
 
     for (const [reason, line] of NOT_VIDEO) {
@@ -358,28 +396,49 @@ describe("attribute", () => {
   });
 
   it.prop(
-    "never suspects a video step when a line says another part failed",
+    "never suspects a video step when the run ended on a line that says another part failed",
     {
       before: Schema.Array(
         Schema.Literals(["fused", "encoder", "qsvDecoder", "device", "aftermath"]),
       ),
-      after: Schema.Array(
-        Schema.Literals(["fused", "encoder", "qsvDecoder", "device", "aftermath"]),
-      ),
+      aftermath: Schema.Boolean,
       cause: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: NOT_VIDEO.length - 1 })),
     },
-    ({ before, after, cause }) => {
+    ({ before, aftermath, cause }) => {
       const [reason, line] = NOT_VIDEO[cause] ?? NOT_VIDEO[0];
 
-      const head = [
+      const tail = [
         ...before.flatMap((name) => HEADS[name]),
         line,
-        ...after.flatMap((name) => HEADS[name]),
+        ...(aftermath ? HEADS.aftermath : []),
       ].join("\n");
 
       assert.deepStrictEqual(
-        attribute(QSV_CHAIN, QSV_OWNERS, failed(head)),
+        attribute(QSV_CHAIN, QSV_OWNERS, failed(tail)),
         Attribution.NotVideo({ reason }),
+      );
+    },
+  );
+
+  it.prop(
+    "names the video part that ended the run, whatever warnings came before it",
+    {
+      warnings: Schema.Array(
+        Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: RECOVERED.length - 1 })),
+      ),
+      failure: Schema.Literals(["fused", "encoder", "qsvDecoder", "device"]),
+      aftermath: Schema.Boolean,
+    },
+    ({ warnings, failure, aftermath }) => {
+      const tail = [
+        ...warnings.map((index) => RECOVERED[index] ?? RECOVERED_DECODE),
+        ...HEADS[failure],
+        ...(aftermath ? HEADS.aftermath : []),
+      ].join("\n");
+
+      assert.deepStrictEqual(
+        attribute(QSV_CHAIN, QSV_OWNERS, failed(tail)),
+        Attribution.Video({ named: true, suspects: [...VIDEO_FAILURES[failure]] }),
       );
     },
   );

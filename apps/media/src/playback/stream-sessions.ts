@@ -1274,7 +1274,7 @@ const make = Effect.gen(function* () {
           failure: {
             exitCode: failure.exitCode,
             signal: failure.signal,
-            stderrHead: failure.stderrHead,
+            stderrTail: failure.stderr,
           },
         });
 

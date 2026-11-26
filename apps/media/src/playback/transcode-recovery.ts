@@ -1,12 +1,14 @@
 /**
- * What a failed ffmpeg run points at, and what the stream does next. `attribute` reads the head of
- * ffmpeg's standard error. A line anywhere in it that says a part other than the video failed (the
- * disk, the muxer, the input, the audio, a stop) settles it first, whatever video lines came
- * before; otherwise the first role-tagged line names the failing video part: a filter by its
- * parsed instance name, the decoder, the encoder, or the device. That is a hint, never evidence:
- * the capability service re-probes what it names before it sets anything aside. `advance` bounds the retries: a
- * targeted replacement, then the CPU, then a typed failure, so one position starts ffmpeg at most
- * three times. Pure.
+ * What a failed ffmpeg run points at, and what the stream does next. `attribute` reads the end of
+ * ffmpeg's standard error. A stop or a full disk settles it wherever it stands, as a run never
+ * recovers from either; otherwise the line that ended the run decides: the last line that names a
+ * part, past what ffmpeg writes about every part a failure stopped. It may say a part other than
+ * the video failed (the muxer, the input, the audio), or name the failing video part: a filter by
+ * its parsed instance name, the decoder, the encoder, or the device. Earlier lines are warnings
+ * the run went on past. A named part is a hint, never evidence: the capability service re-probes
+ * what it names before it sets anything aside. `advance` bounds the retries: a targeted
+ * replacement, then the CPU, then a typed failure, so one position starts ffmpeg at most three
+ * times. Pure.
  */
 import { Data } from "effect";
 
@@ -18,8 +20,8 @@ export interface RunFailure {
   readonly exitCode: number | null;
   /** The signal that ended it, such as `SIGSEGV`; null when it exited or never started. */
   readonly signal: string | null;
-  /** The start of its standard error, paths scrubbed. */
-  readonly stderrHead: string;
+  /** The end of its standard error, paths scrubbed, where the line that ended the run is. */
+  readonly stderrTail: string;
 }
 
 /** Which step owns each name ffmpeg's log lines carry, as the renderer laid the run out. */
@@ -80,17 +82,17 @@ const named = (suspects: ReadonlyArray<number>): Attribution =>
 const tagsOf = (line: string): ReadonlyArray<string> =>
   [...line.matchAll(TAG)].map((match) => match[1] ?? "");
 
-/**
- * Which part other than the video a line says failed, or undefined: a full disk, a stop, or a
- * line of the audio, the input, or the muxer that is not the aftermath of another part's failure.
- */
-const notVideoOf = (line: string): NotVideo | undefined => {
+/** What a line says ended the run wherever it stands: a full disk or a stop, or undefined. */
+const settledBy = (line: string): NotVideo | undefined => {
   if (DISK_FULL.test(line)) return "disk";
 
   if (ENDED_BY_SIGNAL.test(line)) return "stopped";
 
-  if (AFTERMATH.test(line)) return undefined;
+  return undefined;
+};
 
+/** Which part other than the video a line says failed, or undefined: the audio, input, or muxer. */
+const notVideoOf = (line: string): NotVideo | undefined => {
   if (line.startsWith("Error opening input file")) return "input";
   const tags = tagsOf(line);
   const stream = tags.length > 1 ? tags[0] : undefined;
@@ -172,9 +174,10 @@ const ofLine = (
 };
 
 /**
- * What a failed run of `pipeline` points at: a signal that stopped it; a line that says a part
- * other than the video failed, wherever it stands; else its first line that names a video step;
- * or, with nothing named, every step outside the CPU.
+ * What a failed run of `pipeline` points at: a signal that stopped it; a stop or a full disk its
+ * log reports anywhere; else the line that ended the run, the last that names a part other than
+ * the video or a video step, past what ffmpeg writes after any failure; or, with nothing named,
+ * every step outside the CPU.
  */
 export const attribute = (
   pipeline: VideoPipeline,
@@ -189,18 +192,23 @@ export const attribute = (
     return Attribution.NotVideo({ reason: "spawn" });
   }
 
-  const lines = failure.stderrHead.split("\n");
+  const lines = failure.stderrTail.split("\n");
 
   for (const line of lines) {
-    const reason = notVideoOf(line);
+    const reason = settledBy(line);
 
     if (reason !== undefined) return Attribution.NotVideo({ reason });
   }
 
-  for (const line of lines) {
-    const said = ofLine(line, pipeline, owners);
+  for (const line of lines.toReversed()) {
+    if (!AFTERMATH.test(line)) {
+      const reason = notVideoOf(line);
 
-    if (said !== undefined) return said;
+      if (reason !== undefined) return Attribution.NotVideo({ reason });
+      const said = ofLine(line, pipeline, owners);
+
+      if (said !== undefined) return said;
+    }
   }
 
   return Attribution.Video({ named: false, suspects: gpuSteps(pipeline) });
