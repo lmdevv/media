@@ -4,7 +4,9 @@
  *
  * A frame mark is the app's `LaunchClock` view (`modules/launch-clock`): an empty view, laid over
  * its screen, that reports once, on the monotonic clock, the display refresh that first shows it
- * in the window, inside the screen's bounds, and under no opaque view such as the splash screen.
+ * in the window, inside the screen's bounds, and under no opaque view such as the splash screen,
+ * and whether that refresh came after one the app missed. It also writes the mark, by its name, to
+ * the device's log (subsystem `dev.lmdevv.launch-clock`), where a probe reads the app's own clock.
  */
 import type { ContentSource, OpenCache, TimedScreen } from "@media/contracts/diagnostics";
 import { createMediaServer } from "@media/sdk/promise";
@@ -21,12 +23,19 @@ import {
 } from "react";
 import type { ComponentType, ReactNode } from "react";
 
-import type { AppEvents, Landing, OpenClaim } from "./app-events";
+import type { AppEvents, FrameEnd, Landing, OpenClaim } from "./app-events";
+
+/** What a frame mark marks, the name it writes to the device's log. */
+export type FrameMarkName = "home-screen" | "home-content" | "open";
 
 /** The props of the app's frame mark view. */
 export interface FrameMarkProps {
-  /** The refresh that first showed the mark, on the monotonic clock, in milliseconds. */
-  readonly onDrawn: (event: { readonly nativeEvent: { readonly at: number } }) => void;
+  readonly name: FrameMarkName;
+  /**
+   * The refresh that first showed the mark, on the monotonic clock, in milliseconds, and whether it
+   * came after one or more the app missed.
+   */
+  readonly onDrawn: (event: { readonly nativeEvent: FrameEnd }) => void;
   readonly style: typeof OVER_SCREEN;
   readonly pointerEvents: "none";
 }
@@ -103,17 +112,19 @@ export function LaunchMarks({
     null,
     createElement(mark, {
       key: "screen",
+      name: "home-screen",
       style: OVER_SCREEN,
       pointerEvents: "none",
-      onDrawn: (event) => events.firstScreenVisible(event.nativeEvent.at),
+      onDrawn: (event) => events.firstScreenVisible(event.nativeEvent),
     }),
     content === null
       ? null
       : createElement(mark, {
           key: "content",
+          name: "home-content",
           style: OVER_SCREEN,
           pointerEvents: "none",
-          onDrawn: (event) => events.homeContentVisible(event.nativeEvent.at, content),
+          onDrawn: (event) => events.homeContentVisible(event.nativeEvent, content),
         }),
   );
 }
@@ -161,16 +172,20 @@ export const useOpenMark = (
   if (!contentReady || drawn) return null;
 
   return createElement(mark, {
+    name: "open",
     style: OVER_SCREEN,
     pointerEvents: "none",
     onDrawn: (event) => {
-      Option.map(claim.current, (held) => events.openContentVisible(held, event.nativeEvent.at));
+      Option.map(claim.current, (held) => events.openContentVisible(held, event.nativeEvent));
       setDrawn(true);
     },
   });
 };
 
-/** Names `route`, a route pattern such as `/album/[id]`, in the error reports made on it. */
+/**
+ * Names `route`, a route pattern such as `/(tabs)/(home)`, in the error reports made on it; one not
+ * in the app's route list is named `unknown`.
+ */
 export const useErrorRoute = (events: AppEvents, route: string): void => {
   useEffect(() => {
     events.routeChanged(route);

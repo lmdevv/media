@@ -229,6 +229,7 @@ const appEvents: AppEventsRequest = {
   platform: "ios",
   app: "music",
   release: "0.9.0",
+  bundle: "embedded",
   development: false,
   events: [
     {
@@ -236,9 +237,9 @@ const appEvents: AppEventsRequest = {
       event: {
         _tag: "ScreenOpened",
         screen: "artist",
-        id: "artist_1",
         cache: "fetched",
         contentVisibleMs: 210,
+        hitched: false,
       },
     },
   ],

@@ -6,7 +6,7 @@ import type {
 } from "@media/contracts/media-commands";
 import { type CommandError, InvalidArgs, Unauthenticated } from "@media/contracts/errors";
 import type { CallError } from "@media/sdk/effect";
-import { Effect, Match, Redacted, Schema, SchemaIssue } from "effect";
+import { Effect, Match, Redacted, Schema, type SchemaAST, SchemaIssue } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 
 import * as CoreCallers from "../core/core-callers.ts";
@@ -79,10 +79,15 @@ const issueText = (issue: SchemaIssue.Issue): string =>
 
 /**
  * Reads a request's JSON body as `schema`'s JSON form; `InvalidArgs` says the body is not JSON, or
- * starts with `invalid` and names the schema issue.
+ * starts with `invalid` and names the schema issue. `options` can refuse fields the schema doesn't
+ * name (`onExcessProperty: "error"`), which are otherwise dropped.
  */
-export const bodyDecoder = <S extends Schema.Top>(schema: S, invalid: string) => {
-  const decode = Schema.decodeUnknownEffect(Schema.toCodecJson(schema));
+export const bodyDecoder = <S extends Schema.Top>(
+  schema: S,
+  invalid: string,
+  options?: SchemaAST.ParseOptions,
+) => {
+  const decode = Schema.decodeUnknownEffect(Schema.toCodecJson(schema), options);
 
   return (request: HttpServerRequest.HttpServerRequest) =>
     request.json.pipe(

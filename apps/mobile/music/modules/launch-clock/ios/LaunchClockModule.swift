@@ -2,6 +2,7 @@ import Darwin
 import ExpoModulesCore
 import QuartzCore
 import UIKit
+import os
 
 /// The clock and frame marks that time launches and screen opens (`@media/mobile-core/app-events`).
 ///
@@ -14,7 +15,11 @@ import UIKit
 ///   start says nothing about how long the launch took.
 /// - `FrameMark` is an empty view that reports, once, the display refresh that first shows it: in
 ///   the window, inside the window's bounds as it moves on screen, and covered by no opaque view,
-///   such as the splash screen over React Native's root view.
+///   such as the splash screen over React Native's root view. It reports the refresh's target time,
+///   when the frame committed before it is due on screen, and whether the refresh is hitched: the
+///   app missed the refresh before it, or ran this one late, so that frame was heavy and may show a
+///   refresh or more after its target. iOS gives no time at which an ordinary frame was really
+///   shown. Each mark also goes to the device's log under its `name`, as numbers only.
 public final class LaunchClockModule: Module {
   public func definition() -> ModuleDefinition {
     Name("LaunchClock")
@@ -29,6 +34,10 @@ public final class LaunchClockModule: Module {
 
     View(FrameMarkView.self) {
       Events("onDrawn")
+
+      Prop("name") { (view: FrameMarkView, name: String) in
+        view.name = name
+      }
     }
   }
 }
@@ -65,11 +74,25 @@ private let shownOpacity: Float = 0.01
 /// A covering view's background must be this opaque to hide what is under it.
 private let coveringAlpha: CGFloat = 0.99
 
+/// A refresh whose callback runs this many refresh intervals after the refresh began ran late.
+private let lateCallback: CFTimeInterval = 0.5
+
+/// Refreshes this many intervals apart, or more, had at least one the app missed between them.
+private let missedRefresh: CFTimeInterval = 1.5
+
+/// Where each mark goes in the device's log, for a probe to read the app's own clock.
+private let markLog = Logger(subsystem: "dev.lmdevv.launch-clock", category: "frame-mark")
+
 final class FrameMarkView: ExpoView {
   let onDrawn = EventDispatcher()
 
+  /// What the mark marks, such as `home-content`; it names the mark in the device's log.
+  var name = ""
+
   private var link: CADisplayLink?
   private var deadline: CFTimeInterval = 0
+  /// When the previous refresh began, or when the mark started looking before the first one.
+  private var previousRefresh: CFTimeInterval = 0
   private var reported = false
 
   required init(appContext: AppContext? = nil) {
@@ -96,7 +119,9 @@ final class FrameMarkView: ExpoView {
   private func start() {
     guard link == nil else { return }
 
-    deadline = CACurrentMediaTime() + markPatience
+    let now = CACurrentMediaTime()
+    deadline = now + markPatience
+    previousRefresh = now
     let link = CADisplayLink(target: WeakTarget(self), selector: #selector(WeakTarget.tick(_:)))
     link.add(to: .main, forMode: .common)
     self.link = link
@@ -108,8 +133,15 @@ final class FrameMarkView: ExpoView {
   }
 
   /// Runs at the start of each display refresh. Whatever the app committed before it is what the
-  /// render server draws for the refresh at `targetTimestamp`.
+  /// render server draws for the refresh at `targetTimestamp`, unless that frame was too heavy to
+  /// draw in time: then the refresh is hitched.
   fileprivate func tick(_ link: CADisplayLink) {
+    let interval = link.targetTimestamp - link.timestamp
+    let hitched =
+      link.timestamp - previousRefresh >= missedRefresh * interval
+      || CACurrentMediaTime() - link.timestamp >= lateCallback * interval
+    previousRefresh = link.timestamp
+
     if link.timestamp > deadline {
       stop()
       return
@@ -119,7 +151,11 @@ final class FrameMarkView: ExpoView {
 
     reported = true
     stop()
-    onDrawn(["at": link.targetTimestamp * 1000])
+    let at = link.targetTimestamp * 1000
+    markLog.notice(
+      "\(self.name, privacy: .public) drawn at \(at, format: .fixed(precision: 3), privacy: .public) hitched \(hitched, privacy: .public)"
+    )
+    onDrawn(["at": at, "hitched": hitched])
   }
 
   /// Whether the render server has this view on screen: every layer up to the window rendered and

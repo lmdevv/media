@@ -1,11 +1,30 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createServer } from "node:http";
 
-import { AppEvent, AppEventsRequest, MAX_APP_EVENTS } from "@media/contracts/diagnostics";
-import { RateLimited } from "@media/contracts/errors";
+import { MOVIES_ROUTES, MUSIC_ROUTES } from "@media/contracts/app-routes";
+import {
+  AppEvent,
+  AppName,
+  AppRelease,
+  AppEventsRequest,
+  BundleOrigin,
+  ClientErrorKind,
+  ClientPlatform,
+  ContentSource,
+  ErrorClass,
+  FrameSource,
+  MAX_APP_EVENTS,
+  MoviesRoute,
+  MusicRoute,
+  OpenCache,
+  TimedScreen,
+} from "@media/contracts/diagnostics";
+import { RequestId } from "@media/contracts/request-id";
+import { RateLimited, commandError } from "@media/contracts/errors";
 import { TransportError } from "@media/sdk/effect";
 import { createMediaServer } from "@media/sdk/promise";
-import { Option, Predicate, Schema } from "effect";
+import { Option, Predicate, Result, Schema } from "effect";
+import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -19,12 +38,25 @@ import {
   reportUncaught,
   touchTime,
 } from "./app-events";
-import type { AppEventsOptions, GlobalErrorUtils, Owner, SendAppEvents } from "./app-events";
+import type {
+  AppEventsOptions,
+  FrameEnd,
+  GlobalErrorUtils,
+  Owner,
+  SendAppEvents,
+} from "./app-events";
 
 /** The monotonic clock at the start of each test, as `CACurrentMediaTime` reads after boot. */
 const BOOTED = 86_400_000;
 
 const WALL = 1_800_000_000_000;
+
+/** The address Metro served the app's JavaScript from, as React Native's `SourceCode` reports it. */
+const SCRIPT_URL =
+  "http://127.0.0.1:8081/node_modules/expo-router/entry.bundle?platform=ios&dev=false&minify=true";
+
+/** A frame mark's refresh at monotonic time `at`, on time unless `hitched`. */
+const drawn = (at: number, hitched = false): FrameEnd => ({ at, hitched });
 
 const LUCIA: Owner = { server: "http://media.local", account: "user_lucia" };
 
@@ -79,6 +111,7 @@ const device = (file: File = emptyFile()) => {
       app: "music",
       release: "0.9.0",
       development: false,
+      scriptUrl: SCRIPT_URL,
       processStartedAt: clock.mono - 900,
       startedInBackground: false,
       crashes: {
@@ -141,18 +174,29 @@ const settled = (): Promise<void> =>
   });
 
 /** An error as Hermes throws it, with a stack of two frames. */
-const thrown = (message: string, name = "TypeError"): Error => {
-  const error = new Error(message);
+/**
+ * An error of `Type` as Hermes throws it from the bundle Metro served: a frame in that bundle, one in
+ * another file, and one in native code.
+ */
+const thrown = (message: string, Type: ErrorConstructor = TypeError): Error => {
+  const error = new Type(message);
 
-  error.name = name;
   error.stack = [
-    `${name}: ${message}`,
-    "    at Album (http://127.0.0.1:8081/index.bundle//&platform=ios&dev=false:4123:17)",
+    `${error.name}: ${message}`,
+    `    at Album (${SCRIPT_URL}:4123:17)`,
     "    at render (address at /var/containers/Bundle/Application/X/Lar.app/main.jsbundle:1:52344)",
+    "    at apply (native)",
   ].join("\n");
 
   return error;
 };
+
+/** The frames `thrown`'s stack reduces to. */
+const THROWN_FRAMES = [
+  { source: "bundle", line: 4123, column: 17 },
+  { source: "other", line: 1, column: 52344 },
+  { source: "native", line: 0, column: 0 },
+];
 
 describe("launch timing", () => {
   it("records Home's screen and its content as two marks, each from the process start", async () => {
@@ -162,17 +206,23 @@ describe("launch timing", () => {
 
     events.attach(LUCIA, server.send);
     events.landed("home");
-    events.firstScreenVisible(BOOTED + 7300);
-    events.homeContentVisible(BOOTED + 7566, "network");
+    events.firstScreenVisible(drawn(BOOTED + 7300, true));
+    events.homeContentVisible(drawn(BOOTED + 7566), "network");
     phone.advance(FLUSH_DELAY_MS);
     await settled();
 
-    expect(server.requests[0]).toMatchObject({ platform: "ios", app: "music", release: "0.9.0" });
+    expect(server.requests[0]).toMatchObject({
+      platform: "ios",
+      app: "music",
+      release: "0.9.0",
+      bundle: "dev-server",
+    });
     expect(server.events()).toEqual([
       {
         _tag: "Launched",
         firstScreenVisibleMs: 8200,
-        homeContent: { ms: 8466, source: "network" },
+        firstScreenHitched: true,
+        homeContent: { ms: 8466, source: "network", hitched: false },
       },
     ]);
   });
@@ -184,8 +234,8 @@ describe("launch timing", () => {
 
     events.attach(LUCIA, server.send);
     events.landed("home");
-    events.homeContentVisible(BOOTED + 120, "downloads");
-    events.firstScreenVisible(BOOTED + 160);
+    events.homeContentVisible(drawn(BOOTED + 120), "downloads");
+    events.firstScreenVisible(drawn(BOOTED + 160));
     phone.advance(FLUSH_DELAY_MS);
     await settled();
 
@@ -193,7 +243,8 @@ describe("launch timing", () => {
       {
         _tag: "Launched",
         firstScreenVisibleMs: 1060,
-        homeContent: { ms: 1020, source: "downloads" },
+        firstScreenHitched: false,
+        homeContent: { ms: 1020, source: "downloads", hitched: false },
       },
     ]);
   });
@@ -205,11 +256,13 @@ describe("launch timing", () => {
 
     events.attach(LUCIA, server.send);
     events.landed("home");
-    events.firstScreenVisible(BOOTED + 100);
+    events.firstScreenVisible(drawn(BOOTED + 100));
     phone.advance(HOME_WAIT_MS + FLUSH_DELAY_MS);
     await settled();
 
-    expect(server.events()).toEqual([{ _tag: "Launched", firstScreenVisibleMs: 1000 }]);
+    expect(server.events()).toEqual([
+      { _tag: "Launched", firstScreenVisibleMs: 1000, firstScreenHitched: false },
+    ]);
   });
 
   it("drops a launch that went to the background before Home showed", async () => {
@@ -221,8 +274,8 @@ describe("launch timing", () => {
     events.landed("home");
     events.appStateChanged("background");
     events.appStateChanged("active");
-    events.firstScreenVisible(BOOTED + 100);
-    events.homeContentVisible(BOOTED + 100, "network");
+    events.firstScreenVisible(drawn(BOOTED + 100));
+    events.homeContentVisible(drawn(BOOTED + 100), "network");
     phone.advance(FLUSH_DELAY_MS);
     await settled();
 
@@ -238,7 +291,7 @@ describe("launch timing", () => {
     events.attach(LUCIA, server.send);
     events.landed("elsewhere");
     events.landed("home");
-    events.firstScreenVisible(BOOTED + 100);
+    events.firstScreenVisible(drawn(BOOTED + 100));
     phone.advance(FLUSH_DELAY_MS);
     await settled();
 
@@ -270,7 +323,7 @@ describe("screen-open timing", () => {
     events.pressed("album", "album_1", BOOTED + 10);
     const claim = Option.getOrThrow(events.claimOpen("album", "album_1", "album-key-1", "fetched"));
 
-    events.openContentVisible(claim, BOOTED + 277);
+    events.openContentVisible(claim, drawn(BOOTED + 277, true));
     phone.advance(FLUSH_DELAY_MS);
     await settled();
 
@@ -278,9 +331,9 @@ describe("screen-open timing", () => {
       {
         _tag: "ScreenOpened",
         screen: "album",
-        id: "album_1",
         cache: "fetched",
         contentVisibleMs: 267,
+        hitched: true,
       },
     ]);
   });
@@ -295,12 +348,18 @@ describe("screen-open timing", () => {
     const claim = Option.getOrThrow(events.claimOpen("title", "title_1", "t", "kept"));
 
     phone.clock.wall -= 500;
-    events.openContentVisible(claim, BOOTED + 81);
+    events.openContentVisible(claim, drawn(BOOTED + 81));
     phone.advance(FLUSH_DELAY_MS);
     await settled();
 
     expect(server.events()).toEqual([
-      { _tag: "ScreenOpened", screen: "title", id: "title_1", cache: "kept", contentVisibleMs: 81 },
+      {
+        _tag: "ScreenOpened",
+        screen: "title",
+        cache: "kept",
+        contentVisibleMs: 81,
+        hitched: false,
+      },
     ]);
   });
 
@@ -317,14 +376,12 @@ describe("screen-open timing", () => {
     events.pressed("album", "album_2", BOOTED + 100);
     const second = Option.getOrThrow(events.claimOpen("album", "album_2", "k2", "fetched"));
 
-    events.openContentVisible(first, BOOTED + 900);
-    events.openContentVisible(second, BOOTED + 400);
+    events.openContentVisible(first, drawn(BOOTED + 900));
+    events.openContentVisible(second, drawn(BOOTED + 400));
     phone.advance(FLUSH_DELAY_MS);
     await settled();
 
-    expect(server.events()).toEqual([
-      expect.objectContaining({ id: "album_2", contentVisibleMs: 300 }),
-    ]);
+    expect(server.events()).toEqual([expect.objectContaining({ contentVisibleMs: 300 })]);
   });
 
   it("closes a timer only for the route instance that claimed it", async () => {
@@ -337,8 +394,8 @@ describe("screen-open timing", () => {
     const claim = Option.getOrThrow(events.claimOpen("artist", "artist_1", "k1", "kept"));
 
     expect(events.claimOpen("artist", "artist_1", "k2", "kept")).toEqual(Option.none());
-    events.openContentVisible({ ...claim, route: "k2" }, BOOTED + 50);
-    events.openContentVisible(claim, BOOTED + 70);
+    events.openContentVisible({ ...claim, route: "k2" }, drawn(BOOTED + 50));
+    events.openContentVisible(claim, drawn(BOOTED + 70));
     phone.advance(FLUSH_DELAY_MS);
     await settled();
 
@@ -373,14 +430,14 @@ describe("screen-open timing", () => {
     const blurred = Option.getOrThrow(events.claimOpen("title", "title_1", "k1", "fetched"));
 
     events.releaseOpen(blurred);
-    events.openContentVisible(blurred, BOOTED + 200);
+    events.openContentVisible(blurred, drawn(BOOTED + 200));
     phone.advance(300);
     events.pressed("title", "title_2", BOOTED + 300);
     const left = Option.getOrThrow(events.claimOpen("title", "title_2", "k2", "fetched"));
 
     events.appStateChanged("background");
     events.appStateChanged("active");
-    events.openContentVisible(left, BOOTED + 500);
+    events.openContentVisible(left, drawn(BOOTED + 500));
     phone.advance(FLUSH_DELAY_MS);
     await settled();
 
@@ -396,7 +453,7 @@ describe("screen-open timing", () => {
     events.pressed("title", "title_1", BOOTED);
     const late = Option.getOrThrow(events.claimOpen("title", "title_1", "k1", "fetched"));
 
-    events.openContentVisible(late, BOOTED + OPEN_WAIT_MS + 1);
+    events.openContentVisible(late, drawn(BOOTED + OPEN_WAIT_MS + 1));
     events.pressed("title", "title_2", BOOTED);
     phone.advance(OPEN_WAIT_MS + 1);
 
@@ -411,13 +468,13 @@ describe("screen-open timing", () => {
 describe("error reports", () => {
   const PRIVATE = ["Lucía", "Garc", "Sintel", "192.168", "lucia", "mkv", "Movies/"];
 
-  it("carries nothing from the error's text, only its class, frames, and route pattern", async () => {
+  it("carries nothing from the error's text, only its class, frame positions, and route", async () => {
     const phone = device();
     const events = phone.open({ processStartedAt: null });
     const server = recordingSender();
 
     events.attach(LUCIA, server.send);
-    events.routeChanged("/(app)/(tabs)/(home,playlists,library,search)/album/[id]");
+    events.routeChanged("/(app)/(tabs)/(library)/album/[id]");
     events.caught(
       thrown("Lucía García can't play Sintel.mkv from http://192.168.1.20:8080/Movies/x"),
       "render",
@@ -431,18 +488,72 @@ describe("error reports", () => {
         _tag: "ErrorCaught",
         kind: "render",
         fatal: false,
-        route: "/(app)/(tabs)/(home,playlists,library,search)/album/[id]",
+        route: "/(app)/(tabs)/(library)/album/[id]",
         errorClass: "TypeError",
-        frames: [
-          { fn: "Album", file: "index.bundle", line: 4123, column: 17 },
-          { fn: "render", file: "main.jsbundle", line: 1, column: 52344 },
-        ],
+        frames: THROWN_FRAMES,
       },
     ]);
 
     const wire = JSON.stringify(server.requests);
 
     for (const text of PRIVATE) expect(wire).not.toContain(text);
+  });
+
+  it("sends a made-up rejection's name, title, file, and host nowhere", async () => {
+    const phone = device();
+    const events = phone.open({ processStartedAt: null });
+    const tracking: Array<{ readonly onUnhandled: (id: number, cause: unknown) => void }> = [];
+
+    reportUncaught(events, {
+      errorUtils: { getGlobalHandler: () => () => undefined, setGlobalHandler: () => undefined },
+      hermes: {
+        enablePromiseRejectionTracker: (options: (typeof tracking)[number]) =>
+          tracking.push(options),
+      },
+      development: false,
+    });
+
+    const server = recordingSender();
+
+    events.attach(LUCIA, server.send);
+    events.routeChanged("/(app)/(tabs)/(home)");
+
+    // The rejection a reviewer forced through Metro's inspector: a renamed Error whose stack names
+    // a person, a title, a file, and a host where a function and a bundle would be.
+    const failure = new Error(
+      "Fictional Nerea Marlow opened Cloud Orchard from leaf.mkv on 192.0.2.44:8112",
+    );
+
+    failure.name = "NereaMarlow";
+    failure.stack = [
+      `${failure.name}: ${failure.message}`,
+      "    at CloudOrchard (address at /synthetic/NereaMarlow/PrivateLeaf.js:14:9)",
+      "    at travel (https://fictional-lar.js/synthetic/index.bundle:18:2)",
+    ].join("\n");
+    tracking[0]?.onUnhandled(1, failure);
+    events.caught(failure, "uncaught", true);
+    phone.advance(FLUSH_DELAY_MS);
+    await settled();
+
+    expect(server.events()).toEqual([
+      {
+        _tag: "ErrorCaught",
+        kind: "unhandled-rejection",
+        fatal: false,
+        route: "/(app)/(tabs)/(home)",
+        errorClass: "Error",
+        frames: [
+          { source: "other", line: 14, column: 9 },
+          { source: "other", line: 18, column: 2 },
+        ],
+      },
+    ]);
+
+    const sent = `${JSON.stringify(server.requests)}${phone.file.contents ?? ""}`;
+
+    for (const word of ["NereaMarlow", "CloudOrchard", "PrivateLeaf.js", "fictional-lar.js"]) {
+      expect(sent).not.toContain(word);
+    }
   });
 
   it("adds no frames from a message whose lines look like a stack", async () => {
@@ -459,35 +570,89 @@ describe("error reports", () => {
     phone.advance(FLUSH_DELAY_MS);
     await settled();
 
-    expect(server.events()).toEqual([
-      expect.objectContaining({
-        frames: [
-          { fn: "Album", file: "index.bundle", line: 4123, column: 17 },
-          { fn: "render", file: "main.jsbundle", line: 1, column: 52344 },
-        ],
-      }),
-    ]);
+    expect(server.events()).toEqual([expect.objectContaining({ frames: THROWN_FRAMES })]);
   });
 
-  it("names a free-form error name, a thrown value, and an SDK error by what they are", async () => {
+  it("names an error's class from a fixed list, never by a name it gives itself", async () => {
     const phone = device();
     const events = phone.open({ processStartedAt: null });
     const server = recordingSender();
     const requestId = "6f1c2b8e-3d4a-4f5b-9c6d-7e8f9a0b1c2d";
 
+    class LuciaGarcia extends Error {}
+
+    const renamed = new RangeError("x");
+
+    renamed.name = "LuciaGarcia";
+    const decodeFailure = Schema.decodeUnknownResult(Schema.Finite)("Lucía");
+
     events.attach(LUCIA, server.send);
-    events.caught(thrown("x", "Lucía's error"), "uncaught", false);
-    events.caught("Lucía García", "unhandled-rejection", false);
-    events.caught({ _tag: "TransportError", requestId, message: "Lucía" }, "uncaught", false);
+
+    const causes: ReadonlyArray<unknown> = [
+      renamed,
+      new LuciaGarcia("x"),
+      new TransportError({ operation: "titles.get", message: "Lucía", cause: "x", requestId }),
+      commandError({ code: "not_found", message: "Lucía" }),
+      Result.isFailure(decodeFailure) ? decodeFailure.failure : null,
+      { _tag: "LuciaGarcia", message: "x" },
+      { _tag: "TypeError" },
+      "Lucía García",
+      undefined,
+    ];
+
+    // Each on its own route, so no two count as one repeated error.
+    for (const [index, cause] of causes.entries()) {
+      events.routeChanged(MUSIC_ROUTES[index] ?? "unknown");
+      events.caught(cause, "uncaught", false);
+    }
+
     phone.advance(FLUSH_DELAY_MS);
     await settled();
 
-    expect(server.events()).toEqual([
-      expect.objectContaining({ errorClass: "Error" }),
-      expect.objectContaining({ errorClass: "string", frames: [] }),
-      expect.objectContaining({ errorClass: "TransportError", requestId }),
+    expect(
+      server
+        .events()
+        .map((event) => (AppEvent.guards.ErrorCaught(event) ? event.errorClass : null)),
+    ).toEqual([
+      "RangeError",
+      "Other",
+      "TransportError",
+      "NotFound",
+      "SchemaError",
+      "NotAnError",
+      "NotAnError",
+      "NotAnError",
+      "NotAnError",
     ]);
+    expect(server.events()[2]).toMatchObject({ requestId });
     expect(JSON.stringify(server.requests)).not.toContain("Lucía");
+  });
+
+  it("counts a frame as the bundle's only in the file the app's JavaScript came from", async () => {
+    const phone = device();
+
+    const events = phone.open({
+      processStartedAt: null,
+      scriptUrl: "file:///private/var/containers/Bundle/Application/X/movies.app/main.jsbundle",
+    });
+
+    const server = recordingSender();
+
+    events.attach(LUCIA, server.send);
+    events.caught(thrown("x"), "uncaught", false);
+    phone.advance(FLUSH_DELAY_MS);
+    await settled();
+
+    expect(server.requests[0]).toMatchObject({ bundle: "embedded" });
+    expect(server.events()).toEqual([
+      expect.objectContaining({
+        frames: [
+          { source: "other", line: 4123, column: 17 },
+          { source: "bundle", line: 1, column: 52344 },
+          { source: "native", line: 0, column: 0 },
+        ],
+      }),
+    ]);
   });
 
   it("has no field that holds an error's message, name, or stack", () => {
@@ -502,7 +667,7 @@ describe("error reports", () => {
     ]);
   });
 
-  it("names the root for a route that is not a pattern", async () => {
+  it("names a route outside the app's own list unknown", async () => {
     const phone = device();
     const events = phone.open({ processStartedAt: null });
     const server = recordingSender();
@@ -510,10 +675,34 @@ describe("error reports", () => {
     events.attach(LUCIA, server.send);
     events.routeChanged("/album/Lucía García");
     events.caught(thrown("x"), "uncaught", false);
+    events.routeChanged("/(tabs)/(home)");
+    events.caught(thrown("x", RangeError), "uncaught", false);
     phone.advance(FLUSH_DELAY_MS);
     await settled();
 
-    expect(server.events()).toEqual([expect.objectContaining({ route: "/" })]);
+    expect(server.events()).toEqual([
+      expect.objectContaining({ route: "unknown", errorClass: "TypeError" }),
+      expect.objectContaining({ route: "unknown", errorClass: "RangeError" }),
+    ]);
+  });
+
+  it("sends a version the server does not read as 0.0.0", async () => {
+    const phone = device();
+
+    const events = phone.open({
+      processStartedAt: null,
+      release: "0.9.0-lucia.1",
+      scriptUrl: null,
+    });
+
+    const server = recordingSender();
+
+    events.attach(LUCIA, server.send);
+    events.caught(thrown("x"), "uncaught", false);
+    phone.advance(FLUSH_DELAY_MS);
+    await settled();
+
+    expect(server.requests[0]).toMatchObject({ release: "0.0.0", bundle: "embedded" });
   });
 
   it("sends a repeated error once per window", async () => {
@@ -611,7 +800,7 @@ describe("owners", () => {
 
     events.signedOut();
     events.attach(MATEO, mateo.send);
-    events.caught(thrown("Mateo's own", "RangeError"), "uncaught", false);
+    events.caught(thrown("Mateo's own", RangeError), "uncaught", false);
     phone.advance(FLUSH_DELAY_MS);
     events.appStateChanged("background");
     await settled();
@@ -657,7 +846,7 @@ describe("owners", () => {
     events.attach(MATEO, mateo.send);
     fail();
     await settled();
-    events.caught(thrown("Mateo's", "RangeError"), "uncaught", false);
+    events.caught(thrown("Mateo's", RangeError), "uncaught", false);
     phone.advance(FLUSH_DELAY_MS);
     await settled();
 
@@ -707,7 +896,7 @@ describe("owners", () => {
     expect(file.reads).toBe(0);
     expect(server.requests).toEqual([]);
 
-    after.firstScreenVisible(BOOTED + 5);
+    after.firstScreenVisible(drawn(BOOTED + 5));
     relaunched.advance(0);
 
     expect(file.reads).toBe(1);
@@ -813,7 +1002,7 @@ describe("sending", () => {
         events.claimOpen("title", `title_${String(index)}`, "k", "kept"),
       );
 
-      events.openContentVisible(claim, phone.clock.mono + 1);
+      events.openContentVisible(claim, drawn(phone.clock.mono + 1));
     }
 
     events.appStateChanged("background");
@@ -865,7 +1054,7 @@ describe("sending", () => {
         events.claimOpen("title", `title_${String(index)}`, "k", "kept"),
       );
 
-      events.openContentVisible(claim, phone.clock.mono + 1);
+      events.openContentVisible(claim, drawn(phone.clock.mono + 1 + index));
     }
 
     events.attach(LUCIA, server.send);
@@ -876,7 +1065,7 @@ describe("sending", () => {
       MAX_APP_EVENTS,
       MAX_PENDING_EVENTS - MAX_APP_EVENTS,
     ]);
-    expect(server.events()[0]).toMatchObject({ id: "title_20" });
+    expect(server.events()[0]).toMatchObject({ contentVisibleMs: 21 });
   });
 
   it("reaches the media server's route through the SDK as the signed-in person", async () => {
@@ -911,8 +1100,8 @@ describe("sending", () => {
 
     events.attach(LUCIA, media.reportAppEvents);
     events.landed("home");
-    events.firstScreenVisible(BOOTED + 100);
-    events.homeContentVisible(BOOTED + 100, "network");
+    events.firstScreenVisible(drawn(BOOTED + 100));
+    events.homeContentVisible(drawn(BOOTED + 100), "network");
     events.appStateChanged("background");
     await new Promise((resolve) => setTimeout(resolve, 200));
     http.close();
@@ -929,9 +1118,238 @@ describe("sending", () => {
         event: {
           _tag: "Launched",
           firstScreenVisibleMs: 1000,
-          homeContent: { ms: 1000, source: "network" },
+          firstScreenHitched: false,
+          homeContent: { ms: 1000, source: "network", hitched: false },
         },
       },
     ]);
+  });
+});
+
+/** Each string the batches carry on the wire, with the name of the field that holds it. */
+const wireStrings = (
+  requests: ReadonlyArray<AppEventsRequest>,
+): ReadonlyArray<readonly [string, string]> => {
+  const found: Array<readonly [string, string]> = [];
+
+  JSON.stringify(requests, (key: string, value: Schema.Json) => {
+    if (Predicate.isString(value)) found.push([key, value]);
+
+    return value;
+  });
+
+  return found;
+};
+
+describe("what goes out", () => {
+  /** Every string a batch may carry outside `release` and `requestId`: the contract's fixed sets. */
+  const FIXED = new Set<string>([
+    ...Object.keys(AppEvent.cases),
+    ...ClientPlatform.literals,
+    ...AppName.literals,
+    ...BundleOrigin.literals,
+    ...ContentSource.literals,
+    ...TimedScreen.literals,
+    ...OpenCache.literals,
+    ...ClientErrorKind.literals,
+    ...ErrorClass.literals,
+    ...FrameSource.literals,
+    ...MoviesRoute.literals,
+    ...MusicRoute.literals,
+  ]);
+
+  const isRelease = Schema.is(AppRelease);
+  const isRequestId = Schema.is(RequestId);
+
+  const inItsSet = ([field, value]: readonly [string, string]): boolean => {
+    if (field === "release") return isRelease(value);
+
+    return field === "requestId" ? isRequestId(value) : FIXED.has(value);
+  };
+
+  const decodeStrictly = Schema.decodeUnknownResult(AppEventsRequest, {
+    onExcessProperty: "error",
+  });
+
+  /** Text a running app might read: anything, names, identifiers, and the contract's own words. */
+  const text = fc.oneof(
+    fc.string(),
+    fc.constantFrom("NereaMarlow", "CloudOrchard", "PrivateLeaf.js", "fictional-lar.js", "Lucía"),
+    fc.stringMatching(/^[A-Za-z_$][\w$]{0,15}$/u),
+    fc.constantFrom(
+      SCRIPT_URL,
+      "native",
+      ...MOVIES_ROUTES,
+      ...MUSIC_ROUTES,
+      ...ErrorClass.literals,
+    ),
+  );
+
+  const stackLine = fc.oneof(
+    fc
+      .tuple(text, fc.oneof(text, fc.constant(SCRIPT_URL)), fc.nat(), fc.nat())
+      .map(
+        ([fn, file, line, column]) => `    at ${fn} (${file}:${String(line)}:${String(column)})`,
+      ),
+    fc.tuple(text, text).map(([fn, file]) => `${fn}@${file}`),
+    text,
+  );
+
+  const stack = fc.array(stackLine, { maxLength: 10 }).map((lines) => lines.join("\n"));
+
+  const BUILT_IN = [Error, TypeError, RangeError, ReferenceError, SyntaxError, EvalError, URIError];
+
+  /** Anything an app might throw or reject with. */
+  const thrownValue: fc.Arbitrary<unknown> = fc.oneof(
+    text,
+    fc.integer(),
+    fc.constantFrom(null, undefined, true),
+    fc.record(
+      {
+        _tag: text,
+        name: text,
+        message: text,
+        stack,
+        requestId: fc.oneof(text, fc.uuid({ version: 4 })),
+      },
+      { requiredKeys: [] },
+    ),
+    fc
+      .tuple(fc.constantFrom(...BUILT_IN), text, fc.option(text), stack)
+      .map(([Type, message, name, trace]) => {
+        const error = new Type(message);
+
+        if (name !== null) error.name = name;
+        error.stack = trace;
+
+        return error;
+      }),
+    fc.tuple(text, text, stack).map(([className, message, trace]) => {
+      class Custom extends Error {}
+
+      Object.defineProperty(Custom, "name", { value: className });
+      const error = new Custom(message);
+
+      error.stack = trace;
+
+      return error;
+    }),
+    fc.tuple(text, fc.uuid({ version: 4 }), stack).map(([message, requestId, trace]) => {
+      const error = new TransportError({ operation: message, message, cause: message, requestId });
+
+      error.stack = trace;
+
+      return error;
+    }),
+  );
+
+  type Action =
+    | {
+        readonly type: "caught";
+        readonly cause: unknown;
+        readonly kind: ClientErrorKind;
+        readonly fatal: boolean;
+      }
+    | { readonly type: "route"; readonly route: string }
+    | {
+        readonly type: "open";
+        readonly screen: TimedScreen;
+        readonly id: string;
+        readonly key: string;
+        readonly cache: OpenCache;
+        readonly ms: number;
+        readonly hitched: boolean;
+      }
+    | {
+        readonly type: "launch";
+        readonly ms: number;
+        readonly hitched: boolean;
+        readonly source: ContentSource;
+      };
+
+  const action: fc.Arbitrary<Action> = fc.oneof(
+    fc.record({
+      type: fc.constant("caught" as const),
+      cause: thrownValue,
+      kind: fc.constantFrom(...ClientErrorKind.literals),
+      fatal: fc.boolean(),
+    }),
+    fc.record({ type: fc.constant("route" as const), route: text }),
+    fc.record({
+      type: fc.constant("open" as const),
+      screen: fc.constantFrom(...TimedScreen.literals),
+      id: text,
+      key: text,
+      cache: fc.constantFrom(...OpenCache.literals),
+      ms: fc.nat(5000),
+      hitched: fc.boolean(),
+    }),
+    fc.record({
+      type: fc.constant("launch" as const),
+      ms: fc.nat(20_000),
+      hitched: fc.boolean(),
+      source: fc.constantFrom(...ContentSource.literals),
+    }),
+  );
+
+  it("never sends a string outside its fixed set, whatever the app reads or throws", async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.constantFrom(...AppName.literals),
+        fc.array(action, { minLength: 1, maxLength: 12 }),
+        async (app, actions) => {
+          const phone = device();
+          const events = phone.open({ app });
+          const server = recordingSender();
+
+          events.attach(LUCIA, server.send);
+          events.landed("home");
+
+          for (const each of actions) {
+            const now = phone.clock.mono;
+
+            if (each.type === "caught") events.caught(each.cause, each.kind, each.fatal);
+            else if (each.type === "route") events.routeChanged(each.route);
+            else if (each.type === "launch") {
+              events.firstScreenVisible(drawn(now + each.ms, each.hitched));
+              events.homeContentVisible(drawn(now + each.ms, each.hitched), each.source);
+            } else {
+              events.pressed(each.screen, each.id, now);
+              Option.map(events.claimOpen(each.screen, each.id, each.key, each.cache), (claim) =>
+                events.openContentVisible(claim, drawn(now + each.ms, each.hitched)),
+              );
+            }
+
+            phone.advance(10);
+          }
+
+          phone.advance(FLUSH_DELAY_MS);
+          await settled();
+          await settled();
+
+          // Fatal reports wait in the crash file for a later launch.
+          const later = phone.open({ app, processStartedAt: null });
+
+          later.attach(LUCIA, server.send);
+          later.landed("elsewhere");
+          phone.advance(CRASH_READ_DELAY_MS + FLUSH_DELAY_MS);
+          await settled();
+          await settled();
+
+          const reports = server.events().filter(AppEvent.guards.ErrorCaught);
+
+          // Something went out for every run that caught an error, so the check below isn't empty.
+          if (actions.some((each) => each.type === "caught")) {
+            expect(reports.length).toBeGreaterThan(0);
+          }
+
+          expect(
+            server.requests.every((request) => Result.isSuccess(decodeStrictly(request))),
+          ).toBe(true);
+          expect(wireStrings(server.requests).filter((each) => !inItsSet(each))).toEqual([]);
+        },
+      ),
+      { numRuns: 300 },
+    );
   });
 });

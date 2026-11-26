@@ -10,12 +10,18 @@ import { File, Paths } from "expo-file-system";
 import { useIsFocused, useRoute } from "expo-router";
 import { createElement } from "react";
 import type { ReactNode } from "react";
-import { AppState } from "react-native";
+import { AppState, TurboModuleRegistry } from "react-native";
+import type { TurboModule } from "react-native";
 
 /** The app's `LaunchClock` module (`modules/launch-clock`). */
 interface LaunchClock {
   readonly processStartedAt: () => number | null;
   readonly now: () => number;
+}
+
+/** React Native's `SourceCode` module: the address the app's JavaScript was loaded from. */
+interface SourceCode extends TurboModule {
+  readonly getConstants: () => { readonly scriptURL: string };
 }
 
 const clock = requireNativeModule<LaunchClock>("LaunchClock");
@@ -34,6 +40,7 @@ export const appEvents = createAppEvents({
   app: "music",
   release: Constants.expoConfig?.version ?? "unknown",
   development: __DEV__,
+  scriptUrl: TurboModuleRegistry.get<SourceCode>("SourceCode")?.getConstants().scriptURL ?? null,
   processStartedAt: clock.processStartedAt(),
   startedInBackground: AppState.currentState === "background",
   crashes: {

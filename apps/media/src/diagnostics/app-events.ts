@@ -4,7 +4,9 @@
  * or `ERROR` for an error that ended the app. The caller's core session token must belong to a
  * signed-in session. The body's size is settled before anything reads it: a body must declare its
  * length, which Node's parser then holds it to, and that length must be within
- * `MAX_APP_EVENTS_BYTES`; a chunked body is refused with 411 and a longer one with 413.
+ * `MAX_APP_EVENTS_BYTES`; a chunked body is refused with 411 and a longer one with 413. A batch
+ * holding any field the contract doesn't name, or any string outside its fixed set, is refused
+ * whole with 400, so no text from the app reaches the log.
  *
  * Three budgets keep a crash loop or a stuck reporter from rotating the log's history out: one for
  * requests from anyone, checked before the core is asked who is calling; one per account; and one
@@ -35,7 +37,9 @@ const ALL_ACCOUNTS_BUDGET = { burst: 600, perSecond: 4 };
 
 const SUPPRESSED_REPORT_INTERVAL = Duration.seconds(30);
 
-const decodeRequest = bodyDecoder(AppEventsRequest, "Invalid app events");
+const decodeRequest = bodyDecoder(AppEventsRequest, "Invalid app events", {
+  onExcessProperty: "error",
+});
 
 const refuseBody = (status: 411 | 413, message: string) =>
   Option.some(
@@ -66,32 +70,35 @@ const commonFields = (
   platform: request.platform,
   app: request.app,
   appVersion: request.release,
+  bundle: request.bundle,
   development: request.development,
   occurredAt: new Date(receivedAt - queued.ageMs).toISOString(),
 });
 
 const logEvent = (event: AppEvent, fields: ReturnType<typeof commonFields>) =>
   AppEvent.match(event, {
-    Launched: ({ firstScreenVisibleMs, homeContent }) =>
+    Launched: ({ firstScreenVisibleMs, firstScreenHitched, homeContent }) =>
       Effect.logInfo("App.launched").pipe(
         Effect.annotateLogs({
           source: "app",
           ...fields,
           launch: "cold",
           firstScreenVisibleMs,
+          firstScreenHitched,
           homeContentVisibleMs: homeContent?.ms ?? null,
+          homeContentHitched: homeContent?.hitched ?? null,
           homeSource: homeContent?.source ?? null,
         }),
       ),
-    ScreenOpened: ({ screen, id, cache, contentVisibleMs }) =>
+    ScreenOpened: ({ screen, cache, contentVisibleMs, hitched }) =>
       Effect.logInfo("App.screenOpened").pipe(
         Effect.annotateLogs({
           source: "app",
           ...fields,
           screen,
-          recordId: id,
           cache,
           contentVisibleMs,
+          hitched,
         }),
       ),
     ErrorCaught: ({ kind, fatal, route, errorClass, frames, requestId }) =>
@@ -103,9 +110,7 @@ const logEvent = (event: AppEvent, fields: ReturnType<typeof commonFields>) =>
           fatal,
           route,
           errorClass,
-          frames: frames.map(
-            ({ fn, file, line, column }) => `${fn} ${file}:${String(line)}:${String(column)}`,
-          ),
+          frames,
           failedRequestId: requestId ?? null,
         }),
       ),

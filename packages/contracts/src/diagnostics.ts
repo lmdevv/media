@@ -14,6 +14,7 @@
  */
 import { Schema } from "effect";
 
+import { MOVIES_ROUTES, MUSIC_ROUTES } from "./app-routes";
 import { PlaybackSessionId, UserId } from "./ids";
 import { PlaybackTokenInvalid, StreamId } from "./media-playback";
 import { PlaybackMode } from "./models/playback";
@@ -360,6 +361,26 @@ export const AppName = Schema.Literals(["movies", "music"]);
 /** Which Lar app sent an app event. */
 export type AppName = typeof AppName.Type;
 
+/**
+ * An app's release as it reports it: three numbers, and a pre-release of `alpha`, `beta`, or `rc`
+ * with its number, such as `0.9.0` or `0.10.0-rc.1`. Nothing else, so no text can ride in it.
+ */
+export const AppRelease = Schema.String.check(
+  Schema.isPattern(
+    /^(?:0|[1-9]\d{0,3})(?:\.(?:0|[1-9]\d{0,3})){2}(?:-(?:alpha|beta|rc)\.(?:0|[1-9]\d{0,3}))?$/u,
+  ),
+);
+
+/**
+ * Where the app's JavaScript came from: `embedded` in the app, as in a release build, or a
+ * `dev-server` such as Metro, whose launches include fetching it. A frame's position is a position
+ * in that bundle.
+ */
+export const BundleOrigin = Schema.Literals(["embedded", "dev-server"]);
+
+/** Where the app's JavaScript came from. */
+export type BundleOrigin = typeof BundleOrigin.Type;
+
 /** The longest duration an app event carries; a slower launch or screen open is not reported. */
 export const MAX_APP_TIMING_MS = 600_000;
 
@@ -386,67 +407,139 @@ export const OpenCache = Schema.Literals(["kept", "fetched"]);
 /** Whether an opened screen had its content when it mounted. */
 export type OpenCache = typeof OpenCache.Type;
 
-/** The id of a record the server knows, such as a title or an album, and never its name. */
-export const RecordId = Schema.String.check(Schema.isPattern(/^[\w-]{1,64}$/u));
+/**
+ * A timing's end: the display refresh at which a frame mark first saw its frame on screen, and
+ * whether `hitched`, the refresh came after one or more the app missed. A missed refresh means the
+ * frame before it was heavy, and a heavy frame can show a refresh or more after the time given, so
+ * a reader can drop or widen a hitched sample.
+ */
+const FrameEnd = { hitched: Schema.Boolean } as const;
+
+/** A route pattern of the movies app, or `unknown` before its first screen or for any other. */
+export const MoviesRoute = Schema.Literals([...MOVIES_ROUTES, "unknown"]);
+
+/** A route pattern of the music app, or `unknown`. */
+export const MusicRoute = Schema.Literals([...MUSIC_ROUTES, "unknown"]);
+
+/** A route pattern of either app, or `unknown`. */
+export const AppRoute = Schema.Union([MoviesRoute, MusicRoute]);
+
+/** A route pattern of either app, or `unknown`. */
+export type AppRoute = typeof AppRoute.Type;
+
+/** Each app's own route patterns, with `unknown`. */
+export const APP_ROUTE: Readonly<Record<AppName, Schema.Schema<AppRoute>>> = {
+  movies: MoviesRoute,
+  music: MusicRoute,
+};
+
+/**
+ * What kind of error was caught, from a list fixed in the code: one of JavaScript's own error
+ * types; a tagged error of the SDK, the contracts, or Effect; `NotAnError` for a thrown value that
+ * is no error; or `Other`. A type's name, never the error's.
+ */
+export const ErrorClass = Schema.Literals([
+  "Error",
+  "TypeError",
+  "RangeError",
+  "ReferenceError",
+  "SyntaxError",
+  "EvalError",
+  "URIError",
+  "AggregateError",
+  "Unauthenticated",
+  "Forbidden",
+  "NotFound",
+  "InvalidArgs",
+  "Conflict",
+  "Expired",
+  "RateLimited",
+  "Internal",
+  "TransportError",
+  "ProtocolError",
+  "TokenStorageError",
+  "SignInWaiting",
+  "DeviceSignInRefused",
+  "UseRejected",
+  "PlaybackTokenInvalid",
+  "PlaybackSessionEnded",
+  "UnsupportedPlayback",
+  "MediaFileNotFound",
+  "StreamNotFound",
+  "StreamGenerationGone",
+  "StreamAccessDenied",
+  "TranscodeCapacityReached",
+  "InsufficientTranscodeSpace",
+  "TranscodeFailed",
+  "DiagnosticsRateLimited",
+  "SchemaError",
+  "NoSuchElementError",
+  "TimeoutError",
+  "UnknownError",
+  "IllegalArgumentError",
+  "ExceededCapacityError",
+  "NotAnError",
+  "Other",
+]);
+
+/** What kind of error was caught. */
+export type ErrorClass = typeof ErrorClass.Type;
 
 /** The most stack frames an error report carries. */
 export const MAX_ERROR_FRAMES = 8;
 
 /**
- * A route pattern as Expo Router names it, such as `/(tabs)/(home)/title/[titleId]`: groups and
- * parameter names, never a parameter's value.
+ * Which code a stack frame runs in: the app's JavaScript `bundle`, `native` code, or `other`
+ * JavaScript, such as code a debugger evaluated or the engine's own.
  */
-export const RoutePattern = Schema.String.check(
-  Schema.isPattern(/^(?:\/(?:\([\w,-]+\)|\[(?:\.\.\.)?\w+\]|[\w+-]+))*\/?$/u),
-  Schema.isMaxLength(CLIENT_ERROR_LIMITS.route),
-);
+export const FrameSource = Schema.Literals(["bundle", "native", "other"]);
+
+/** Which code a stack frame runs in. */
+export type FrameSource = typeof FrameSource.Type;
+
+/** The largest line or column a stack frame carries. */
+export const MAX_FRAME_POSITION = 100_000_000;
+
+const Position = Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: MAX_FRAME_POSITION }));
 
 /**
- * What kind of error was caught: an SDK error's tag, an `Error`'s name or class, or the type of a
- * thrown value that is not an error. An identifier, never the error's text.
+ * One frame of an error's stack, as numbers: which code it runs in and the line and column there,
+ * 0 when the stack gives none. A `bundle` frame's position turns back into a source file, line, and
+ * function with the source map of the bundle the batch names (`release`, `bundle`).
  */
-export const ErrorClass = Schema.String.check(Schema.isPattern(/^[A-Za-z_$][\w$]{0,63}$/u));
-
-/**
- * One frame of an error's stack: the function's name as the bundle has it, the bundle file's
- * name, and the line and column in it. Nothing else of the stack is kept.
- */
-export const ErrorFrame = Schema.Struct({
-  fn: Schema.String.check(Schema.isPattern(/^[\w$.<>?]{1,64}$/u)),
-  file: Schema.String.check(
-    Schema.isPattern(/^(?:[\w-]{1,48}\.(?:bundle|jsbundle|js|hbc)|native|\?)$/u),
-  ),
-  line: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 100_000_000 })),
-  column: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 100_000_000 })),
-});
+export const ErrorFrame = Schema.Struct({ source: FrameSource, line: Position, column: Position });
 
 /** One frame of an error's stack. */
 export interface ErrorFrame extends Schema.Schema.Type<typeof ErrorFrame> {}
 
 /**
- * Something an app reports about itself. Every field is an id the server knows, a duration, a
- * literal, or an identifier from the code; no field holds text from the person, the library, or
- * an error's message, so nothing free-form can reach the server.
+ * Something an app reports about itself. Every field is a number or a member of a set fixed in the
+ * code; no string the running app reads, from the person, the library, the server, or an error,
+ * reaches the server, which refuses any other value or field.
  *
  * Each timing is named for the pixels it ends on, and runs on the device's monotonic clock.
  */
 export const AppEvent = Schema.TaggedUnion({
   /**
-   * A cold launch that landed on Home. Both times run from the process start the kernel records.
-   * `firstScreenVisibleMs` ends on the first frame that shows Home's screen with the splash screen
-   * gone; `homeContent` on the first frame that shows Home's real content (its rows and titles,
-   * not their artwork), and is missing when Home drew none within a minute.
+   * A cold launch that landed on Home. Both times run from the process start the kernel records,
+   * an instant before the app's first frame that no screen shows. `firstScreenVisibleMs` ends on
+   * the first frame that shows Home's screen with the splash screen gone; `homeContent` on the
+   * first frame that shows Home's real content (its rows and titles, not their artwork), and is
+   * missing when Home drew none within a minute.
    */
   Launched: {
     firstScreenVisibleMs: TimingMs,
-    homeContent: Schema.optionalKey(Schema.Struct({ ms: TimingMs, source: ContentSource })),
+    firstScreenHitched: FrameEnd.hitched,
+    homeContent: Schema.optionalKey(
+      Schema.Struct({ ms: TimingMs, source: ContentSource, ...FrameEnd }),
+    ),
   },
   /**
-   * A press opened the screen of record `id`. `contentVisibleMs` runs from the touch that ended
-   * the press to the first frame in which the screen's real content is in view, which is no
-   * earlier than the native transition's first frame.
+   * A press opened a timed screen. `contentVisibleMs` runs from the touch that ended the press to
+   * the first frame in which the screen's real content is in view, which is no earlier than the
+   * native transition's first frame.
    */
-  ScreenOpened: { screen: TimedScreen, id: RecordId, cache: OpenCache, contentVisibleMs: TimingMs },
+  ScreenOpened: { screen: TimedScreen, cache: OpenCache, contentVisibleMs: TimingMs, ...FrameEnd },
   /**
    * An unexpected error the app caught on the screen of route pattern `route`. A `fatal` error
    * ended the app; it was saved on the device and sent at the next launch.
@@ -454,7 +547,7 @@ export const AppEvent = Schema.TaggedUnion({
   ErrorCaught: {
     kind: ClientErrorKind,
     fatal: Schema.Boolean,
-    route: RoutePattern,
+    route: AppRoute,
     errorClass: ErrorClass,
     frames: Schema.Array(ErrorFrame).check(Schema.isMaxLength(MAX_ERROR_FRAMES)),
     /** The media service request that failed, when the error is an SDK error that names one. */
@@ -486,16 +579,26 @@ export const MAX_APP_EVENTS = 50;
  */
 export const MAX_APP_EVENTS_BYTES = 96 * 1024;
 
+/** Whether every error report in `request` names one of its own app's route patterns. */
+const routesAreTheApps = (request: {
+  readonly app: AppName;
+  readonly events: ReadonlyArray<{ readonly event: AppEvent }>;
+}): boolean =>
+  request.events.every(
+    ({ event }) =>
+      !AppEvent.guards.ErrorCaught(event) || Schema.is(APP_ROUTE[request.app])(event.route),
+  );
+
 /** A batch of an app's events, sent as the signed-in person to `POST /api/app-events`. */
 export const AppEventsRequest = Schema.Struct({
   platform: ClientPlatform,
   app: AppName,
-  /** The app's release, such as `0.9.0`. */
-  release: ClientErrorReport.fields.appVersion,
+  release: AppRelease,
+  bundle: BundleOrigin,
   /** The app runs development JavaScript, whose timings run several times slower than a release's. */
   development: Schema.Boolean,
   events: Schema.Array(QueuedAppEvent).check(Schema.isBetweenLength(1, MAX_APP_EVENTS)),
-});
+}).check(Schema.makeFilter(routesAreTheApps, { title: "each error names its own app's route" }));
 
 /** A batch of an app's events. */
 export interface AppEventsRequest extends Schema.Schema.Type<typeof AppEventsRequest> {}

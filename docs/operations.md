@@ -377,9 +377,8 @@ GPU without it and then in software.
   match. `media diagnostics playback <session-id>` builds a session's timeline from both sides;
   admins read any session and other accounts only their own, a few times a minute. Audio/video drift is not measured:
   no player reports it.
-- The web and iOS apps report their unexpected errors, a crashed page or screen and (web only)
-  uncaught errors and unhandled rejections, to `POST /api/client-errors` with the signed-in
-  account's token. Each lands as `Client.error` at `WARN` with the account, platform, app
+- The web apps report their unexpected errors, a crashed page and uncaught errors and unhandled
+  rejections, to `POST /api/client-errors` with the signed-in account's token. Each lands as `Client.error` at `WARN` with the account, platform, app
   version, page, error name, message, and stack, cut to fixed bounds and redacted like every
   other line. The SDK request id an error carries is kept as `failedRequestId`, and a playback
   session the app names as `claimedSessionId`, never as `sessionId`, and `media diagnostics
@@ -391,6 +390,24 @@ GPU without it and then in software.
   reports). The rest answer `429` with `Retry-After`, and every 30 s
   `ClientErrors.suppressed` counts them by account (`userId` null for requests refused before
   the account was known). `media logs --grep Client.error` lists the reports.
+- The iOS apps report each cold launch, each open of a movies title, a music album, or an artist,
+  and each unexpected error (a crashed screen, an uncaught error, an unhandled rejection) to
+  `POST /api/app-events` with the signed-in account's token, in batches logged as `App.launched`,
+  `App.screenOpened`, and `Client.error` with the app, its release, and `bundle` (`embedded` for a
+  release build, `dev-server` for JavaScript from Metro). A batch holds only numbers and members of
+  sets fixed in the code, and the service refuses any other value or field, so no text the app
+  read reaches the log: an error names its class from a fixed list (JavaScript's own types, the
+  SDK's tagged errors, or `Other`), the route pattern from the app's route list, and each stack
+  frame as `{ source, line, column }`. A launch runs from the process start the kernel records to
+  the display refresh that first showed Home, an open from the touch that ended the press to the
+  refresh that first showed the screen's content; `hitched` marks a refresh that came after one the
+  app missed, when the frame may have shown a refresh or more later.
+  To read a frame of a release build, check out the release's tag, run `pnpm install
+  --frozen-lockfile` and `scripts/ios-release-bundle.sh <app> <dir>`, which builds the JavaScript
+  Xcode's Release build compiles and its map, then
+  `media logs --grep Client.error --json | node .agents/skills/verify-media/scripts/symbolicate.mjs <dir>/main.jsbundle.map`.
+  The bytecode keeps hermesc's line table, so a `bundle` frame's line and column are a position in
+  that JavaScript; the same commit and lockfile give the same bundle in any folder.
 - With `OTEL_EXPORTER_OTLP_ENDPOINT` (Compose) or `otlpEndpoint` (NixOS) set to an OTLP/HTTP
   collector, the media service exports traces and logs: library scans, playback negotiation, the
   first HLS segment, seeks, encoder failures and the stages that replaced them, backups and restores, and

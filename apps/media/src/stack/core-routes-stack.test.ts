@@ -143,7 +143,8 @@ describe.skipIf(core === undefined)("the server's own routes on the core's sign-
       {
         platform: "ios",
         app: "movies",
-        release: "test",
+        release: "0.0.0",
+        bundle: "embedded",
         development: false,
         events: [
           {
@@ -151,9 +152,9 @@ describe.skipIf(core === undefined)("the server's own routes on the core's sign-
             event: {
               _tag: "ScreenOpened",
               screen: "title",
-              id: "routes_suite",
               cache: "fetched",
-              contentVisibleMs: 7,
+              contentVisibleMs: 7654,
+              hitched: false,
             },
           },
         ],
@@ -172,7 +173,7 @@ describe.skipIf(core === undefined)("the server's own routes on the core's sign-
         .some(
           (line) =>
             line.includes("App.screenOpened") &&
-            line.includes("routes_suite") &&
+            line.includes('"contentVisibleMs":7654') &&
             line.includes(userId),
         ),
     ).toBe(true);
