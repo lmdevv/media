@@ -49,6 +49,14 @@ export interface OutputTarget {
   readonly maxLumaSamples: number | undefined;
 }
 
+/**
+ * Whether a chain from a source of `colour` to `target` maps HDR to SDR: the target is SDR and the
+ * source is not. Each target says it for itself, so one intent may offer an HDR source as HDR to
+ * one target and tone-mapped to the next.
+ */
+export const toneMapsTo = (colour: DynamicRange, target: OutputTarget): boolean =>
+  colour !== "sdr" && target.colour === "sdr";
+
 /** `codec` at 8-bit SDR, from any encoder and at any size: what probes encode. */
 export const sdrTarget = (codec: OutputCodec): OutputTarget => ({
   codec,

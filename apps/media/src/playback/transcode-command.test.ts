@@ -66,7 +66,6 @@ const encode = (domain: "qsv" | "vaapi" | "software", options: EncodeOptions) =>
 
   const intent: VideoIntent = {
     targets: [sdrTarget(options.output ?? "h264")],
-    toneMap,
     bounds: { width: 1920, height: 1080 },
     cpuEncodeBounds: { width: 1920, height: 1080 },
     maxBitrate: undefined,

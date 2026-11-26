@@ -25,6 +25,7 @@ import {
   ImplId,
   implOf,
   Op,
+  type OutputTarget,
   type Row,
   sdrTarget,
   type SourceVideo,
@@ -47,7 +48,6 @@ const source = (overrides: Partial<SourceVideo> = {}): SourceVideo => ({
 
 const intentFor = (video: SourceVideo, overrides: Partial<VideoIntent> = {}): VideoIntent => ({
   targets: [sdrTarget("h264")],
-  toneMap: video.colour !== "sdr",
   bounds: { width: 3840, height: 2160 },
   cpuEncodeBounds: { width: 1920, height: 1080 },
   maxBitrate: undefined,
@@ -309,6 +309,34 @@ describe("planVideo", () => {
     assert.deepStrictEqual(
       impls(planned(video, intent, snapshot([QSV], keys, [ImplId("tonemap.qsv")]))),
       ["decode.qsv", "scale.qsv", "move.qsv>cpu", "tonemap.cpu", "move.cpu>qsv", "encode.qsv.h264"],
+    );
+  });
+
+  it("tone-maps for an SDR target alone, so targets of different colour plan apart only there", () => {
+    const video = source({ codec: "hevc", pixelFormat: "yuv420p10le", depth: 10, colour: "hdr10" });
+    const sdr = sdrTarget("hevc");
+    const hdr: OutputTarget = { ...sdr, depth: 10, colour: "hdr10" };
+    const keys = everyKey(video, intentFor(video, { targets: [sdr] }), []);
+    const toSdr = planVideo(video, intentFor(video, { targets: [sdr] }), snapshot([], keys));
+    const toHdr = planVideo(video, intentFor(video, { targets: [hdr] }), snapshot([], keys));
+
+    assert.deepStrictEqual(
+      Result.map(toSdr, ({ pipeline }) => impls(pipeline)),
+      Result.succeed(["decode.cpu", "scale.cpu", "tonemap.cpu", "encode.cpu.hevc"]),
+    );
+
+    const toneMapped = Result.isSuccess(toSdr)
+      ? toSdr.success.pipeline.steps.find((step) => Op.$is("ToneMap")(step.op))?.input
+      : undefined;
+
+    // No row encodes HDR, so the HDR target's chain ends refused at its encode: handed the frames
+    // the SDR chain tone-maps, as it runs the same stages without the tone map.
+    assert.isDefined(toneMapped);
+    assert.deepStrictEqual(
+      Result.isFailure(toHdr) && Rejection.$is("Refused")(toHdr.failure)
+        ? toHdr.failure.frame
+        : undefined,
+      toneMapped,
     );
   });
 

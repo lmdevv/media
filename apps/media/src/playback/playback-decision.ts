@@ -22,7 +22,12 @@ import {
   type VideoOutput,
   type VideoPipeline,
 } from "./video-pipeline.ts";
-import type { OutputCodec, OutputTarget, SubtitleInput } from "./video-ops.ts";
+import {
+  type OutputCodec,
+  type OutputTarget,
+  type SubtitleInput,
+  toneMapsTo,
+} from "./video-ops.ts";
 
 /** What happens to the video stream. */
 export type VideoPlan = Data.TaggedEnum<{
@@ -306,9 +311,9 @@ export const decideWithin = (
 };
 
 /**
- * What an encode of `video` for `client` asks for: the client's targets (`outputTargets`),
- * tone-mapped when the source is HDR, within the client's size and the viewer's cap, the CPU
- * within 1920x1080. Undefined when the client plays nothing the transcoder encodes to.
+ * What an encode of `video` for `client` asks for: the client's targets (`outputTargets`), each
+ * tone-mapped from an HDR source when it is SDR, within the client's size and the viewer's cap,
+ * the CPU within 1920x1080. Undefined when the client plays nothing the transcoder encodes to.
  */
 export const encodeIntent = (
   probe: MediaProbe,
@@ -342,7 +347,6 @@ export const encodeIntent = (
 
   return {
     targets,
-    toneMap: video.dynamicRange !== "sdr",
     bounds: {
       width: client.maxWidth,
       height: Math.min(client.maxHeight, request.quality?.maxHeight ?? Number.POSITIVE_INFINITY),
@@ -366,7 +370,11 @@ export const replan = (
     onSuccess: ({ output, pipeline }) =>
       Result.succeed(VideoPlan.Encode({ intent, output, pipeline })),
     onFailure: () =>
-      Result.fail(intent.toneMap ? "hdr-tone-mapping-requires-hardware" : "no-transcode-target"),
+      Result.fail(
+        intent.targets.some((target) => toneMapsTo(video.dynamicRange, target))
+          ? "hdr-tone-mapping-requires-hardware"
+          : "no-transcode-target",
+      ),
   });
 
 /**

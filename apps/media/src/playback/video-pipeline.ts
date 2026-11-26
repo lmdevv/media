@@ -34,6 +34,7 @@ import {
   type Row,
   type SourceVideo,
   type SubtitleInput,
+  toneMapsTo,
 } from "./video-ops.ts";
 
 /** Every row of the table. A backend adds its file's rows here. */
@@ -142,10 +143,11 @@ interface Size {
 
 /** What a decision wants from an encode; it names no backend. */
 export interface VideoIntent {
-  /** What the encode may produce, the most wanted first; the planner tries them in this order. */
+  /**
+   * What the encode may produce, the most wanted first; the planner tries them in this order, and
+   * maps HDR to SDR for each target that asks for SDR (`toneMapsTo`).
+   */
   readonly targets: ReadonlyArray<OutputTarget>;
-  /** HDR to SDR. */
-  readonly toneMap: boolean;
   /** The client's limits and the viewer's height cap. */
   readonly bounds: Size;
   /** The largest picture the CPU encodes. */
@@ -387,8 +389,9 @@ interface Candidate {
 /**
  * Every chain that could encode `source` for `intent` within the snapshot's domains: each encode
  * row with each target it may produce (on the CPU only those that allow it) sizes the picture
- * (the CPU within its bounds, every row within the target's level), and the scale leaves frames
- * at the source's depth or at 8 bits, whichever the rows after it take.
+ * (the CPU within its bounds, every row within the target's level), the scale leaves frames at
+ * the source's depth or at 8 bits, whichever the rows after it take, and a tone map runs where
+ * the target asks for SDR from HDR.
  */
 const candidates = (
   source: SourceVideo,
@@ -428,7 +431,7 @@ const candidates = (
         const ops: ReadonlyArray<Op> = [
           Op.Decode({ codec: source.codec }),
           Op.Scale({ ...size, depth }),
-          ...(intent.toneMap ? [Op.ToneMap()] : []),
+          ...(toneMapsTo(source.colour, target) ? [Op.ToneMap()] : []),
           ...(intent.burnImage === undefined ? [] : [Op.BurnImage({ subtitle: intent.burnImage })]),
         ];
 

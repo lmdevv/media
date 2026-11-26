@@ -129,7 +129,6 @@ const CPU_CHAINS: ReadonlyArray<Chain> = [
 
 const intentOf = (chain: Chain): VideoIntent => ({
   targets: [sdrTarget(chain.output ?? "h264")],
-  toneMap: PROBE_CLIPS[chain.clip].source.colour !== "sdr",
   bounds: { width: 320, height: 180 },
   cpuEncodeBounds: { width: 1920, height: 1080 },
   maxBitrate: 1_000_000,

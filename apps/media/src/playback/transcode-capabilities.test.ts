@@ -55,14 +55,14 @@ const DECODE_JPEG_RANGE = capabilityKey(ImplId("decode.qsv"), "h264/yuvj420p");
 /** The fused `vpp_qsv` of a Quick Sync chain, named after the decoder's map as the renderer names it. */
 const VPP_FAILED = "[Parsed_vpp_qsv_2 @ 0x1] Invalid color_matrix.";
 
-const intentOf = (source: SourceVideo): VideoIntent => ({
+/** H.264 at up to 1080p, the intent every request here asks for. */
+const INTENT: VideoIntent = {
   targets: [sdrTarget("h264")],
-  toneMap: source.colour !== "sdr",
   bounds: { width: 1920, height: 1080 },
   cpuEncodeBounds: { width: 1920, height: 1080 },
   maxBitrate: undefined,
   burnImage: undefined,
-});
+};
 
 const request = (
   source: SourceVideo,
@@ -73,7 +73,7 @@ const request = (
   path: file,
   stream: 0,
   source,
-  intent: intentOf(source),
+  intent: INTENT,
   excluded: new Set(),
 });
 
@@ -140,7 +140,7 @@ const statusOf = (key: ReturnType<typeof capabilityKey>, scope?: Inventory.Sourc
   });
 
 const plannedImpls = (source: SourceVideo, snapshot: Parameters<typeof planVideo>[2]) =>
-  Result.map(planVideo(source, intentOf(source), snapshot), ({ pipeline }) =>
+  Result.map(planVideo(source, INTENT, snapshot), ({ pipeline }) =>
     pipeline.steps.map((step): string => step.impl),
   );
 
@@ -160,7 +160,7 @@ const pipelineOf = (
   source: SourceVideo,
   snapshot: Parameters<typeof planVideo>[2],
 ): VideoPipeline => {
-  const planned = planVideo(source, intentOf(source), snapshot);
+  const planned = planVideo(source, INTENT, snapshot);
 
   if (Result.isFailure(planned)) throw new Error(JSON.stringify(planned.failure));
 
@@ -456,7 +456,7 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
             ["inconclusive"],
           );
           assert.isFalse(snapshot.verified.has(TONE_MAP_QSV));
-          assert.isTrue(Result.isSuccess(planVideo(HDR, intentOf(HDR), snapshot)));
+          assert.isTrue(Result.isSuccess(planVideo(HDR, INTENT, snapshot)));
         }),
       60_000,
     );

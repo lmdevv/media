@@ -51,7 +51,6 @@ const everything = (domain: "qsv" | "vaapi", source: SourceVideo): CapabilitySna
     source,
     {
       targets: [sdrTarget("h264")],
-      toneMap: source.colour !== "sdr",
       bounds: { width: 1920, height: 1080 },
       cpuEncodeBounds: { width: 1920, height: 1080 },
       maxBitrate: undefined,
