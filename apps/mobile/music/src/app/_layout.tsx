@@ -5,7 +5,6 @@ import {
   AppEventsSender,
   ReportRenderErrors,
   useErrorRoute,
-  useFirstScreen,
 } from "@media/mobile-core/app-events-react";
 import type { RenderErrorFallback } from "@media/mobile-core/app-events-react";
 import {
@@ -25,7 +24,7 @@ import { useUniwind } from "uniwind";
 
 import { EntryLinksProvider, OpenEntryLink } from "@/components/entry/entry-links";
 import { DownloadsProvider } from "@/downloads";
-import { appEvents } from "@/lib/app-events";
+import { appEvents, useLaunchLanding } from "@/lib/app-events";
 import { applyAppearance } from "@/lib/appearance";
 import type { SettledPhase } from "@/lib/session-phase";
 import { useThemeColor } from "@/lib/theme-color";
@@ -115,9 +114,9 @@ function RootStack({ phase }: { readonly phase: SettledPhase["kind"] }) {
   );
 }
 
-/** Hides the splash screen; the launch's first frame shows the screen that rendered this. */
+/** Hides the splash screen over the launch's first screen, which `landing` names. */
 function HideSplash({ landing }: { readonly landing: Landing }) {
-  useFirstScreen(appEvents, landing);
+  useLaunchLanding(landing);
 
   useEffect(() => {
     void SplashScreen.hideAsync();
@@ -183,13 +182,15 @@ function App() {
   return (
     <SdkProvider key={`${connection.mediaUrl}#${String(attempt)}`} connection={connection}>
       <AppEventsSender events={appEvents} mediaUrl={connection.mediaUrl} />
-      <SignInGate>
-        <SetupProgressProvider>
-          <DownloadsProvider>
-            <ConnectedApp />
-          </DownloadsProvider>
-        </SetupProgressProvider>
-      </SignInGate>
+      <ReportRenderErrors events={appEvents} fallback={RenderFailed}>
+        <SignInGate>
+          <SetupProgressProvider>
+            <DownloadsProvider>
+              <ConnectedApp />
+            </DownloadsProvider>
+          </SetupProgressProvider>
+        </SignInGate>
+      </ReportRenderErrors>
     </SdkProvider>
   );
 }
@@ -203,17 +204,15 @@ function ThemedStatusBar() {
 export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <ReportRenderErrors events={appEvents} fallback={RenderFailed}>
-        <ErrorRoute />
-        <ThemedStatusBar />
-        <NavigationTheme>
-          <ConnectionProvider>
-            <EntryLinksProvider>
-              <App />
-            </EntryLinksProvider>
-          </ConnectionProvider>
-        </NavigationTheme>
-      </ReportRenderErrors>
+      <ErrorRoute />
+      <ThemedStatusBar />
+      <NavigationTheme>
+        <ConnectionProvider>
+          <EntryLinksProvider>
+            <App />
+          </EntryLinksProvider>
+        </ConnectionProvider>
+      </NavigationTheme>
     </GestureHandlerRootView>
   );
 }

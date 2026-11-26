@@ -233,7 +233,13 @@ const appEvents: AppEventsRequest = {
   events: [
     {
       ageMs: 12,
-      event: { _tag: "ScreenOpened", screen: "artist", id: "artist_1", durationMs: 210 },
+      event: {
+        _tag: "ScreenOpened",
+        screen: "artist",
+        id: "artist_1",
+        cache: "fetched",
+        contentVisibleMs: 210,
+      },
     },
   ],
 };

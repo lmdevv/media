@@ -371,55 +371,94 @@ export const ContentSource = Schema.Literals(["network", "downloads"]);
 /** Where the content a screen first showed came from. */
 export type ContentSource = typeof ContentSource.Type;
 
-/**
- * How a launch began. `cold` started a new process, timed from the process start the operating
- * system records. `warm` brought a running app back from the background, timed from the moment
- * its JavaScript learned the app was active again.
- */
-export const LaunchKind = Schema.Literals(["cold", "warm"]);
-
-/** How a launch began. */
-export type LaunchKind = typeof LaunchKind.Type;
-
 /** A screen whose opening an app times: a movies title, a music album, or a music artist. */
 export const TimedScreen = Schema.Literals(["title", "album", "artist"]);
 
 /** A screen whose opening an app times. */
 export type TimedScreen = typeof TimedScreen.Type;
 
+/**
+ * Whether an opened screen had its content when it mounted: `kept`, the SDK already held its
+ * query, as after an earlier visit; or `fetched`, the screen asked for it and waited.
+ */
+export const OpenCache = Schema.Literals(["kept", "fetched"]);
+
+/** Whether an opened screen had its content when it mounted. */
+export type OpenCache = typeof OpenCache.Type;
+
 /** The id of a record the server knows, such as a title or an album, and never its name. */
 export const RecordId = Schema.String.check(Schema.isPattern(/^[\w-]{1,64}$/u));
 
+/** The most stack frames an error report carries. */
+export const MAX_ERROR_FRAMES = 8;
+
 /**
- * Something an app reports about itself. Events carry ids the server knows, durations, and an
- * error's own text, never a title, a name, a path, or a route's values.
+ * A route pattern as Expo Router names it, such as `/(tabs)/(home)/title/[titleId]`: groups and
+ * parameter names, never a parameter's value.
+ */
+export const RoutePattern = Schema.String.check(
+  Schema.isPattern(/^(?:\/(?:\([\w,-]+\)|\[(?:\.\.\.)?\w+\]|[\w+-]+))*\/?$/u),
+  Schema.isMaxLength(CLIENT_ERROR_LIMITS.route),
+);
+
+/**
+ * What kind of error was caught: an SDK error's tag, an `Error`'s name or class, or the type of a
+ * thrown value that is not an error. An identifier, never the error's text.
+ */
+export const ErrorClass = Schema.String.check(Schema.isPattern(/^[A-Za-z_$][\w$]{0,63}$/u));
+
+/**
+ * One frame of an error's stack: the function's name as the bundle has it, the bundle file's
+ * name, and the line and column in it. Nothing else of the stack is kept.
+ */
+export const ErrorFrame = Schema.Struct({
+  fn: Schema.String.check(Schema.isPattern(/^[\w$.<>?]{1,64}$/u)),
+  file: Schema.String.check(
+    Schema.isPattern(/^(?:[\w-]{1,48}\.(?:bundle|jsbundle|js|hbc)|native|\?)$/u),
+  ),
+  line: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 100_000_000 })),
+  column: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 100_000_000 })),
+});
+
+/** One frame of an error's stack. */
+export interface ErrorFrame extends Schema.Schema.Type<typeof ErrorFrame> {}
+
+/**
+ * Something an app reports about itself. Every field is an id the server knows, a duration, a
+ * literal, or an identifier from the code; no field holds text from the person, the library, or
+ * an error's message, so nothing free-form can reach the server.
+ *
+ * Each timing is named for the pixels it ends on, and runs on the device's monotonic clock.
  */
 export const AppEvent = Schema.TaggedUnion({
   /**
-   * A launch drew its first frame of the app's own screen `firstFrameMs` after it began. `home`
-   * is the first frame of Home with real content, for a cold launch that landed on Home; a launch
-   * that landed elsewhere, or went to the background first, has none.
+   * A cold launch that landed on Home. Both times run from the process start the kernel records.
+   * `firstScreenVisibleMs` ends on the first frame that shows Home's screen with the splash screen
+   * gone; `homeContent` on the first frame that shows Home's real content (its rows and titles,
+   * not their artwork), and is missing when Home drew none within a minute.
    */
   Launched: {
-    kind: LaunchKind,
-    firstFrameMs: TimingMs,
-    home: Schema.optionalKey(Schema.Struct({ ms: TimingMs, source: ContentSource })),
+    firstScreenVisibleMs: TimingMs,
+    homeContent: Schema.optionalKey(Schema.Struct({ ms: TimingMs, source: ContentSource })),
   },
-  /** A press opened the screen for the record `id`, which drew its real content `durationMs` later. */
-  ScreenOpened: { screen: TimedScreen, id: RecordId, durationMs: TimingMs },
   /**
-   * An unexpected error the app caught. `route` is the screen's route pattern, such as
-   * `/album/[id]`. A `fatal` error ended the app; it was saved on the device and sent at the next
-   * launch.
+   * A press opened the screen of record `id`. `contentVisibleMs` runs from the touch that ended
+   * the press to the first frame in which the screen's real content is in view, which is no
+   * earlier than the native transition's first frame.
+   */
+  ScreenOpened: { screen: TimedScreen, id: RecordId, cache: OpenCache, contentVisibleMs: TimingMs },
+  /**
+   * An unexpected error the app caught on the screen of route pattern `route`. A `fatal` error
+   * ended the app; it was saved on the device and sent at the next launch.
    */
   ErrorCaught: {
-    kind: ClientErrorReport.fields.kind,
+    kind: ClientErrorKind,
     fatal: Schema.Boolean,
-    route: ClientErrorReport.fields.route,
-    name: ClientErrorReport.fields.name,
-    message: ClientErrorReport.fields.message,
-    stack: ClientErrorReport.fields.stack,
-    requestId: ClientErrorReport.fields.requestId,
+    route: RoutePattern,
+    errorClass: ErrorClass,
+    frames: Schema.Array(ErrorFrame).check(Schema.isMaxLength(MAX_ERROR_FRAMES)),
+    /** The media service request that failed, when the error is an SDK error that names one. */
+    requestId: Schema.optionalKey(RequestId),
   },
 });
 
@@ -440,6 +479,12 @@ export interface QueuedAppEvent extends Schema.Schema.Type<typeof QueuedAppEvent
 
 /** The most events one batch of app events may carry. */
 export const MAX_APP_EVENTS = 50;
+
+/**
+ * The most bytes a batch of app events may take as JSON. The largest batch the schema accepts fits
+ * well inside it; the service stops reading a body at this size.
+ */
+export const MAX_APP_EVENTS_BYTES = 96 * 1024;
 
 /** A batch of an app's events, sent as the signed-in person to `POST /api/app-events`. */
 export const AppEventsRequest = Schema.Struct({

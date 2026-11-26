@@ -1,20 +1,25 @@
 /**
- * What every Lar iOS app reports about itself: how long each launch and each screen open took,
- * and the unexpected errors it caught, sent in batches through `POST /api/app-events` as
- * `AppEvent`s.
+ * What every Lar iOS app reports about itself: how long a cold launch and each screen open took
+ * until the person saw the result, and the unexpected errors it caught, sent in batches through
+ * `POST /api/app-events` as `AppEvent`s.
  *
- * Times are the wall clock in epoch milliseconds, the clock the process start is recorded in. A
- * cold launch runs from the process start to the first frame of the app's own screen, and to the
- * first frame of Home with real content when the launch landed on Home. A warm launch runs from
- * the moment JavaScript learns the app is active again after the background to its next frame.
- * A screen open runs from the press to the first frame that shows the record's real content.
+ * Every timing is a span of the device's monotonic clock, the one iOS stamps touches and frames
+ * with, and ends on a frame the app's `LaunchClock` module saw drawn: a `FrameMark` view reports
+ * the first display refresh in which it is in the window, inside the screen's bounds, and covered
+ * by no opaque view such as the splash screen. A cold launch runs from the process start the
+ * kernel records; a screen open from the touch that ended the press. A span that crosses a trip to
+ * the background, or comes out negative or past its bound, is dropped.
  *
- * Sending never blocks the app and never polls: events wait in memory, at most
- * `MAX_PENDING_EVENTS`, and go out `FLUSH_DELAY_MS` after the first one while the app is active and
- * someone is signed in, and at once when the app moves to the background. A batch that could not
- * reach the server waits for the next of those moments; nothing retries on a timer. A fatal error
- * ends the app before any request could finish, so its report is written to the crash file at once
- * and goes out with the next launch's first batch.
+ * Every event belongs to one account on one server, its owner. Events wait in memory for their
+ * owner only: a new owner or a sign-out drops them and the saved crash reports of anyone else, and
+ * an event that happens while no one is known is not kept. An error report carries the error's
+ * class, its stack reduced to function and bundle file names, the route pattern, and the SDK
+ * request id; nothing from its message.
+ *
+ * Sending never blocks the app and never polls: events go out `FLUSH_DELAY_MS` after the first one
+ * while the app is active, and in one batch as it leaves for the background; no request starts in
+ * the background otherwise. A fatal error ends the app before any request could finish, so its
+ * report is written to the crash file at once and goes out after a later launch's first frame.
  */
 import {
   AppEvent,
@@ -22,16 +27,29 @@ import {
   type AppName,
   type ClientErrorKind,
   type ContentSource,
+  type ErrorFrame,
   MAX_APP_EVENT_AGE_MS,
   MAX_APP_EVENTS,
+  MAX_APP_TIMING_MS,
+  MAX_ERROR_FRAMES,
+  type OpenCache,
   type QueuedAppEvent,
+  RoutePattern,
   type TimedScreen,
 } from "@media/contracts/diagnostics";
-import { reportGate, reportOf } from "@media/sdk/promise";
+import { RequestId } from "@media/contracts/request-id";
 import { Option, Predicate, Schema } from "effect";
 
-/** Sends one batch as the signed-in person, as `MediaServer.reportAppEvents` does. */
+/** Sends one batch as the owner's session, as `MediaServer.reportAppEvents` does. */
 export type SendAppEvents = (request: AppEventsRequest) => Promise<"sent" | "signed-out">;
+
+/** Who an event belongs to: one account on one server. */
+export interface Owner {
+  /** The media server's address. */
+  readonly server: string;
+  /** The account's user id on that server. */
+  readonly account: string;
+}
 
 /**
  * The file that keeps fatal error reports until a later launch sends them. Both calls are
@@ -46,65 +64,85 @@ export interface CrashFile {
 /** Where the app stands, as React Native's `AppState` names it. */
 export type AppStateName = "active" | "background" | "inactive" | "unknown" | "extension";
 
-/** Whether the screen a launch first drew is Home, whose content the launch then waits for. */
+/** Whether the launch's first screen is Home, whose screen and content the launch times. */
 export type Landing = "home" | "elsewhere";
 
 /** A screen's hold on the press that opened it; only it can close that press's timer. */
 export interface OpenClaim {
   readonly token: number;
+  /** The navigation route instance that claimed it, such as React Navigation's route key. */
+  readonly route: string;
+  readonly cache: OpenCache;
 }
 
-/** What the app runs on: its clock, timers, and frames. */
+/** What the app runs on: its clocks, timers, and crash file. */
 export interface AppEventsOptions {
   readonly app: AppName;
   readonly release: string;
   readonly development: boolean;
   /**
-   * When this process started, in epoch milliseconds, as the operating system records it; null
-   * when it is unknown, or when iOS prewarmed the process before anyone opened the app.
+   * When this process started, on `monotonicNow`'s clock; null when it is unknown, or when iOS
+   * prewarmed the process before anyone opened the app.
    */
   readonly processStartedAt: number | null;
   /** The app's JavaScript started while the app was in the background, as for a background task. */
   readonly startedInBackground: boolean;
   readonly crashes: CrashFile;
-  /** The wall clock, in epoch milliseconds. */
-  readonly now: () => number;
+  /**
+   * The device's monotonic clock in milliseconds, the clock of native touch and frame times
+   * (`CACurrentMediaTime`). It never steps, and stops while the device sleeps.
+   */
+  readonly monotonicNow: () => number;
+  /** The wall clock, in epoch milliseconds: how long ago an event happened, across launches. */
+  readonly wallNow: () => number;
   /** Runs `run` after `ms`; answers a function that cancels it. */
   readonly schedule: (ms: number, run: () => void) => () => void;
-  /** Runs `run` just before the next frame draws, as `requestAnimationFrame` does. */
-  readonly nextFrame: (run: () => void) => void;
 }
 
 /** One app's reporter. */
 export interface AppEvents {
   /**
-   * Sends events with `send` until the answer is called, starting with any already waiting, such
-   * as a crash saved by the last launch. Attach only while someone is signed in.
+   * `owner` is signed in, and `send` sends as them until the answer is called. Events of anyone
+   * else, waiting or saved, are dropped; the owner's own, a saved crash included, go out.
    */
-  readonly attach: (send: SendAppEvents) => () => void;
+  readonly attach: (owner: Owner, send: SendAppEvents) => () => void;
+  /** Nobody is signed in any more: every waiting event and saved crash report is dropped. */
+  readonly signedOut: () => void;
   /** The app moved to `state`; React Native's `AppState` change events go here. */
   readonly appStateChanged: (state: AppStateName) => void;
+  /** The launch's first screen rendered: Home, or another screen, which times no launch. */
+  readonly landed: (landing: Landing) => void;
+  /** Whether a cold launch still waits for Home's frame marks. */
+  readonly launchPending: () => boolean;
+  /** Home's screen was first in view, with the splash screen gone, at monotonic time `at`. */
+  readonly firstScreenVisible: (at: number) => void;
+  /** Home's real content from `source` was first in view at monotonic time `at`. */
+  readonly homeContentVisible: (at: number, source: ContentSource) => void;
   /**
-   * The launch's first screen of the app's own is about to draw: its next frame is the launch's
-   * first. Only the first call of a launch counts.
+   * A press is opening the screen of record `id`; `touchedAt` is the monotonic time of the touch
+   * that ended it. A later press replaces it.
    */
-  readonly firstScreen: (landing: Landing) => void;
-  /** Home is about to draw real content from `source`; only the first call of a launch counts. */
-  readonly homeContent: (source: ContentSource) => void;
-  /** A press is opening the screen of record `id`, which starts that screen's timer. */
-  readonly pressed: (screen: TimedScreen, id: string) => void;
+  readonly pressed: (screen: TimedScreen, id: string, touchedAt: number) => void;
   /**
-   * A screen of record `id` mounted; answers its claim on the press that opened it, or none when
-   * no press is waiting for it, another screen claimed it, or a later press replaced it.
+   * The focused screen of record `id`, navigation route instance `route`, mounted with its content
+   * `cache`d or not; answers its claim on the press that opened it, or none when no press waits
+   * for it, another screen claimed it, or the press is too old.
    */
-  readonly claimOpen: (screen: TimedScreen, id: string) => Option.Option<OpenClaim>;
-  /** The claimed screen is about to draw its real content; times the open when the claim still holds. */
-  readonly openContent: (claim: OpenClaim) => void;
+  readonly claimOpen: (
+    screen: TimedScreen,
+    id: string,
+    route: string,
+    cache: OpenCache,
+  ) => Option.Option<OpenClaim>;
+  /** The claiming screen lost focus or unmounted before its content was in view. */
+  readonly releaseOpen: (claim: OpenClaim) => void;
+  /** The claiming screen's content was first in view at monotonic time `at`. */
+  readonly openContentVisible: (claim: OpenClaim, at: number) => void;
   /** The route pattern on screen now, such as `/album/[id]`, which error reports name. */
   readonly routeChanged: (route: string) => void;
   /**
    * Reports an unexpected error caught as `kind`. A `fatal` one is saved to the crash file at
-   * once; any other goes out with the next batch, at most once per repeat window.
+   * once; any other goes out with the next batch, at most once per repeat window. Never throws.
    */
   readonly caught: (cause: unknown, kind: ClientErrorKind, fatal: boolean) => void;
 }
@@ -118,11 +156,23 @@ export const MAX_PENDING_EVENTS = 100;
 /** The most fatal error reports the crash file keeps. */
 export const MAX_SAVED_CRASHES = 5;
 
-/** How long a cold launch that landed on Home waits for its content before it is sent without. */
+/** How long a cold launch waits for its first screen before it is dropped. */
+export const LAUNCH_WAIT_MS = 120_000;
+
+/** How long a cold launch that showed Home waits for Home's content before it is sent without. */
 export const HOME_WAIT_MS = 60_000;
 
-/** How long a press waits for its screen to claim and draw it. */
+/** How long a press waits for its screen to claim it and show its content. */
 export const OPEN_WAIT_MS = 60_000;
+
+/**
+ * How long after the first screen rendered the crash file may be read when no frame mark said the
+ * first frame was drawn, as on a launch that times nothing.
+ */
+export const CRASH_READ_DELAY_MS = 2000;
+
+/** How long an error report that went out is not sent again. */
+export const REPEAT_WINDOW_MS = 30_000;
 
 /**
  * The longest a process may have run before its JavaScript starts and still count as a cold
@@ -130,8 +180,10 @@ export const OPEN_WAIT_MS = 60_000;
  */
 export const MAX_PROCESS_AGE_MS = 30_000;
 
+const OwnerSchema = Schema.Struct({ server: Schema.String, account: Schema.String });
+
 const SavedCrashes = Schema.Array(
-  Schema.Struct({ id: Schema.String, at: Schema.Finite, event: AppEvent }),
+  Schema.Struct({ id: Schema.String, at: Schema.Finite, owner: OwnerSchema, event: AppEvent }),
 );
 
 const crashCodec = Schema.fromJsonString(Schema.toCodecJson(SavedCrashes));
@@ -140,121 +192,291 @@ const decodeCrashes = Schema.decodeOption(crashCodec);
 
 const encodeCrashes = Schema.encodeOption(crashCodec);
 
-interface SavedCrash {
-  readonly id: string;
-  readonly at: number;
-  readonly event: AppEvent;
-}
+const isRoutePattern = Schema.is(RoutePattern);
+
+const isRequestId = Schema.is(RequestId);
+
+type SavedCrash = (typeof SavedCrashes.Type)[number];
 
 interface Pending {
   readonly event: AppEvent;
+  /** When it happened, on the wall clock. */
   readonly at: number;
   /** The crash file entry this event is, removed once the server has answered it. */
   readonly crashId: Option.Option<string>;
 }
 
 interface LaunchTrace {
-  readonly id: number;
-  readonly kind: "cold" | "warm";
+  /** The process start, on the monotonic clock. */
   readonly zero: number;
-  readonly framing: boolean;
-  readonly firstFrameAt: Option.Option<number>;
-  readonly landing: Landing;
+  readonly firstScreenAt: Option.Option<number>;
   readonly home: Option.Option<{ readonly at: number; readonly source: ContentSource }>;
-  readonly homing: boolean;
-  readonly cancelWait: Option.Option<() => void>;
+  readonly cancelWait: () => void;
 }
 
 interface WaitingOpen {
   readonly token: number;
   readonly screen: TimedScreen;
   readonly id: string;
-  readonly pressedAt: number;
-  readonly claimed: boolean;
+  readonly touchedAt: number;
+  readonly claim: Option.Option<{ readonly route: string }>;
 }
 
-const LOCATION = /(^|[\s(@='"])((?:[a-z][\w+.-]*:\/\/|\/)[^\s()'"]+)/giu;
+const sameOwner = (left: Owner, right: Owner): boolean =>
+  left.server === right.server && left.account === right.account;
 
-const POSITION = /(?::\d+){1,2}$/u;
+const isOwnedBy = (owner: Option.Option<Owner>, candidate: Owner): boolean =>
+  Option.isSome(owner) && sameOwner(owner.value, candidate);
+
+/** A span from `from` to `to` in whole milliseconds, or none when it is negative or past `max`. */
+const span = (from: number, to: number, max: number): Option.Option<number> => {
+  const ms = Math.round(to - from);
+
+  return ms >= 0 && ms <= max ? Option.some(ms) : Option.none();
+};
+
+const IDENTIFIER = /^[A-Za-z_$][\w$]{0,63}$/u;
+
+const FUNCTION_NAME = /^[\w$.<>?]{1,64}$/u;
+
+const BUNDLE_FILE = /([\w-]{1,48}\.(?:bundle|jsbundle|js|hbc))(?=[?#/:]|$)/u;
+
+const POSITION = /:(\d{1,9}):(\d{1,9})$/u;
 
 /**
- * `text` with every URL and absolute path cut to its last segment and its line and column, so a
- * stack names `main.jsbundle:1:2345` and never where the app is installed, a server address, or a
- * query string.
+ * The string `cause` holds at `key`, own or inherited; none when it holds no string there, or
+ * reading it throws, as a getter may.
  */
-export const withoutPaths = (text: string): string =>
-  text.replace(LOCATION, (_whole, before: string, location: string) => {
-    const position = POSITION.exec(location)?.[0] ?? "";
-    const withQuery = location.slice(0, location.length - position.length);
+const stringAt = (cause: unknown, key: string): Option.Option<string> =>
+  Option.liftThrowable(() =>
+    Predicate.hasProperty(cause, key) && Predicate.isString(cause[key]) ? cause[key] : null,
+  )().pipe(Option.flatMap(Option.fromNullishOr));
 
-    const path = (withQuery.split("?")[0] ?? "").replace(/\/+$/u, "");
+const isError = (cause: unknown): boolean =>
+  Option.getOrElse(Option.liftThrowable(() => cause instanceof Error)(), () => false);
 
-    return `${before}${path.slice(path.lastIndexOf("/") + 1)}${position}`;
+/** The name of `cause`'s class, as its constructor names it. */
+const classNameOf = (cause: unknown): Option.Option<string> =>
+  Option.liftThrowable(() =>
+    Predicate.hasProperty(cause, "constructor") ? cause.constructor : null,
+  )().pipe(Option.flatMap((constructor) => stringAt(constructor, "name")));
+
+/** The kinds of thrown value that are not objects, each by the name a report gives it. */
+const PRIMITIVES: ReadonlyArray<readonly [(cause: unknown) => boolean, string]> = [
+  [Predicate.isString, "string"],
+  [Predicate.isNumber, "number"],
+  [Predicate.isBoolean, "boolean"],
+  [Predicate.isUndefined, "undefined"],
+  [Predicate.isNull, "null"],
+  [Predicate.isSymbol, "symbol"],
+  [Predicate.isBigInt, "bigint"],
+];
+
+/**
+ * What kind of error `cause` is, as an identifier: an SDK error's tag, an `Error`'s name or its
+ * class, or the kind of a thrown value that is not an object.
+ */
+export const errorClassOf = (cause: unknown): string => {
+  const primitive = PRIMITIVES.find(([is]) => is(cause));
+
+  if (primitive !== undefined) return primitive[1];
+  const error = isError(cause);
+
+  const named = Option.firstSomeOf(
+    [
+      stringAt(cause, "_tag"),
+      error ? stringAt(cause, "name") : Option.none(),
+      classNameOf(cause),
+    ].map((candidate) => Option.filter(candidate, (name) => IDENTIFIER.test(name))),
+  );
+
+  return Option.getOrElse(named, () => (error ? "Error" : "Object"));
+};
+
+/** A function name as a frame keeps it: `anonymous` for none, `?` for one not shaped like a name. */
+const functionNameOf = (fn: string): string => {
+  if (fn.length === 0) return "anonymous";
+
+  return FUNCTION_NAME.test(fn) ? fn : "?";
+};
+
+/** The frame a stack line names, reduced to its function and bundle file names and position. */
+const frameOf = (line: string): Option.Option<ErrorFrame> => {
+  const text = line.trim();
+  const hermes = /^at (?:(\S+) \((.*)\)|(.*))$/u.exec(text);
+  const jsc = hermes === null ? /^([^@\s]*)@(.+)$/u.exec(text) : null;
+
+  if (hermes === null && jsc === null) return Option.none();
+
+  const fn = (hermes === null ? jsc?.[1] : hermes[1]) ?? "";
+
+  const location = ((hermes === null ? jsc?.[2] : (hermes[2] ?? hermes[3])) ?? "").replace(
+    /^address at /u,
+    "",
+  );
+
+  const position = POSITION.exec(location);
+  const place = position === null ? location : location.slice(0, position.index);
+
+  return Option.some({
+    fn: functionNameOf(fn),
+    file: place === "native" ? "native" : (BUNDLE_FILE.exec(place)?.[1] ?? "?"),
+    line: position === null ? 0 : Number(position[1]),
+    column: position === null ? 0 : Number(position[2]),
   });
+};
 
-const isOlderThan = (at: number, now: number, ms: number): boolean => now - at > ms;
+/**
+ * `cause`'s stack as frames. The stack's text up to the end of the error's message is skipped
+ * first, since a message can span lines that look like frames.
+ */
+export const framesOf = (cause: unknown): ReadonlyArray<ErrorFrame> => {
+  const stack = stringAt(cause, "stack");
 
-const timing = (from: number, to: number): number => Math.max(0, Math.round(to - from));
+  if (Option.isNone(stack)) return [];
 
-/** A reporter for one app, reading the crash file the last launch may have left. */
-export const createAppEvents = (options: AppEventsOptions): AppEvents => {
-  const { now, schedule, nextFrame, crashes } = options;
-  const gate = reportGate();
-  const startedAt = now();
+  const message = Option.getOrElse(stringAt(cause, "message"), () => "");
+  const cut = message.length > 0 ? stack.value.indexOf(message) : -1;
+  const body = cut < 0 ? stack.value : stack.value.slice(cut + message.length);
 
-  const readCrashes = (): ReadonlyArray<SavedCrash> =>
-    Option.getOrElse(
-      Option.flatMap(Option.fromNullishOr(crashes.read()), (text) => decodeCrashes(text)),
-      () => [],
-    );
+  return body
+    .split("\n")
+    .flatMap((line) => Option.toArray(frameOf(line)))
+    .slice(0, MAX_ERROR_FRAMES);
+};
 
-  const writeCrashes = (saved: ReadonlyArray<SavedCrash>): void => {
-    const text = encodeCrashes(saved);
+const TouchEvent = Schema.Struct({
+  timestamp: Schema.Finite.check(Schema.isGreaterThan(0)),
+});
 
-    if (Option.isSome(text)) crashes.write(text.value);
+const decodeTouch = Schema.decodeUnknownOption(TouchEvent);
+
+/**
+ * The monotonic time of the touch that ended `press`: React Native's `nativeEvent.timestamp`,
+ * which iOS stamps on the clock frame marks report on. None for a press with no touch, such as a
+ * menu action.
+ */
+export const touchTime = (press: { readonly nativeEvent: unknown }): Option.Option<number> =>
+  Option.map(decodeTouch(press.nativeEvent), (touch) => touch.timestamp);
+
+/** The request id an SDK error names, when it names one in the media service's shape. */
+const requestIdOf = (cause: unknown): Option.Option<string> =>
+  Option.filter(stringAt(cause, "requestId"), isRequestId);
+
+/** A gate that admits one report per key per `REPEAT_WINDOW_MS`, remembering at most 100 keys. */
+const repeatGate = () => {
+  const sentAt = new Map<string, number>();
+
+  return (key: string, now: number): boolean => {
+    for (const [seen, at] of sentAt) {
+      if (now - at >= REPEAT_WINDOW_MS) sentAt.delete(seen);
+    }
+
+    if (sentAt.has(key)) return false;
+
+    if (sentAt.size >= 100) {
+      const oldest = sentAt.keys().next();
+
+      if (oldest.done !== true) sentAt.delete(oldest.value);
+    }
+
+    sentAt.set(key, now);
+
+    return true;
   };
+};
 
-  const coldLaunch = (): Option.Option<LaunchTrace> =>
-    Option.filter(
-      Option.fromNullishOr(options.processStartedAt),
-      (zero) => !options.startedInBackground && !isOlderThan(zero, startedAt, MAX_PROCESS_AGE_MS),
-    ).pipe(
-      Option.map((zero) => ({
-        id: 0,
-        kind: "cold",
-        zero,
-        framing: false,
-        firstFrameAt: Option.none(),
-        landing: "elsewhere",
-        home: Option.none(),
-        homing: false,
-        cancelWait: Option.none(),
-      })),
-    );
+/** A reporter for one app. It reads the crash file only once a launch has drawn its first frame. */
+export const createAppEvents = (options: AppEventsOptions): AppEvents => {
+  const { monotonicNow, wallNow, schedule, crashes } = options;
+  const admits = repeatGate();
 
-  let pending: Array<Pending> = readCrashes().map(({ id, at, event }) => ({
-    event,
-    at,
-    crashId: Option.some(id),
-  }));
-
-  let sender = Option.none<SendAppEvents>();
+  let owner = Option.none<Owner>();
+  let sender = Option.none<{ readonly owner: Owner; readonly send: SendAppEvents }>();
+  let pending: Array<Pending> = [];
+  /** The crash file as last read or written; null until it has been read. */
+  let saved: Array<SavedCrash> | null = null;
+  const enqueuedCrashes = new Set<string>();
+  let clearSaved = false;
+  let firstFrameDrawn = false;
+  let readWanted = false;
   let sending = false;
   let cancelFlush = Option.none<() => void>();
   let pausedUntil = 0;
   let active = !options.startedInBackground;
-  let wasBackground = !active;
-  let launch = coldLaunch();
+  let landing = Option.none<Landing>();
+  let launch = Option.none<LaunchTrace>();
   let open = Option.none<WaitingOpen>();
   let nextToken = 0;
-  let launches = 0;
   let route = "/";
+
+  const readCrashFile = (): Array<SavedCrash> =>
+    Option.match(
+      Option.flatMap(Option.fromNullishOr(crashes.read()), (text) => decodeCrashes(text)),
+      { onNone: () => [], onSome: (entries) => [...entries] },
+    );
+
+  const writeCrashFile = (entries: Array<SavedCrash>): void => {
+    saved = entries;
+    const text = encodeCrashes(entries);
+
+    if (Option.isSome(text)) crashes.write(text.value);
+  };
+
+  /** Keeps only the current owner's saved crashes, queueing theirs; clears all after sign-out. */
+  const reconcileSaved = (): void => {
+    if (saved === null) return;
+
+    if (Option.isNone(owner)) {
+      if (clearSaved && saved.length > 0) writeCrashFile([]);
+
+      return;
+    }
+
+    const current = owner.value;
+    const kept = saved.filter((entry) => sameOwner(entry.owner, current));
+
+    if (kept.length !== saved.length) writeCrashFile(kept);
+
+    for (const entry of kept) {
+      if (enqueuedCrashes.has(entry.id)) continue;
+      enqueuedCrashes.add(entry.id);
+      pending.push({ event: entry.event, at: entry.at, crashId: Option.some(entry.id) });
+    }
+  };
+
+  const readSaved = (): void => {
+    if (saved !== null) return;
+    saved = readCrashFile();
+    reconcileSaved();
+    arm();
+  };
+
+  /** Reads the crash file once the first frame is drawn; at once when it already was. */
+  const wantSaved = (): void => {
+    if (saved !== null) {
+      reconcileSaved();
+
+      return;
+    }
+
+    readWanted = true;
+
+    if (firstFrameDrawn) schedule(0, readSaved);
+  };
+
+  const frameDrawn = (): void => {
+    if (firstFrameDrawn) return;
+    firstFrameDrawn = true;
+
+    if (readWanted) schedule(0, readSaved);
+  };
 
   const forgetCrashes = (sent: ReadonlyArray<Pending>): void => {
     const ids = new Set(sent.flatMap((each) => Option.toArray(each.crashId)));
 
-    if (ids.size === 0) return;
-    writeCrashes(readCrashes().filter((saved) => !ids.has(saved.id)));
+    if (ids.size === 0 || saved === null) return;
+    writeCrashFile(saved.filter((entry) => !ids.has(entry.id)));
   };
 
   const queued = (batch: ReadonlyArray<Pending>, at: number): Array<QueuedAppEvent> =>
@@ -265,14 +487,14 @@ export const createAppEvents = (options: AppEventsOptions): AppEvents => {
     cancelFlush = Option.none();
   };
 
-  const arm = (): void => {
+  function arm(): void {
     if (
       Option.isSome(cancelFlush) ||
       sending ||
       Option.isNone(sender) ||
       !active ||
       pending.length === 0 ||
-      now() < pausedUntil
+      monotonicNow() < pausedUntil
     ) {
       return;
     }
@@ -280,20 +502,22 @@ export const createAppEvents = (options: AppEventsOptions): AppEvents => {
     cancelFlush = Option.some(
       schedule(FLUSH_DELAY_MS, () => {
         cancelFlush = Option.none();
-        flush();
+        flush(false);
       }),
     );
-  };
+  }
 
-  const requeue = (batch: ReadonlyArray<Pending>): void => {
+  /** Puts `batch`, which `from`'s sender could not deliver, back, unless the owner changed. */
+  const requeue = (from: Owner, batch: ReadonlyArray<Pending>): void => {
+    if (!isOwnedBy(owner, from)) return;
     pending = [...batch, ...pending].slice(-MAX_PENDING_EVENTS);
   };
 
-  const refused = (batch: ReadonlyArray<Pending>, cause: unknown): void => {
+  const refused = (from: Owner, batch: ReadonlyArray<Pending>, cause: unknown): void => {
     // A batch that never reached the server waits for the next send; any answer from the server
     // settles it, so a batch the server refuses can't come back on every launch.
     if (Predicate.isTagged(cause, "TransportError")) {
-      requeue(batch);
+      requeue(from, batch);
 
       return;
     }
@@ -303,14 +527,15 @@ export const createAppEvents = (options: AppEventsOptions): AppEvents => {
         ? cause.retryAfterSeconds
         : undefined;
 
-      pausedUntil = now() + (Predicate.isNumber(seconds) ? seconds : 60) * 1000;
+      pausedUntil = monotonicNow() + (Predicate.isNumber(seconds) ? seconds : 60) * 1000;
     }
 
     forgetCrashes(batch);
   };
 
-  /** Sends `batch`, settles it by the answer, and sends the next batch when this one went out. */
+  /** Sends `batch` as `from`, settles it by the answer, and sends the next while active. */
   const deliver = async (
+    from: Owner,
     send: SendAppEvents,
     batch: ReadonlyArray<Pending>,
     at: number,
@@ -328,23 +553,37 @@ export const createAppEvents = (options: AppEventsOptions): AppEvents => {
         })) === "sent";
 
       if (sent) forgetCrashes(batch);
-      else requeue(batch);
+      else requeue(from, batch);
     } catch (cause) {
-      refused(batch, cause);
+      refused(from, batch, cause);
     }
 
     sending = false;
 
-    if (sent) flush();
+    if (sent) flush(false);
   };
 
-  function flush(): void {
+  /**
+   * Sends the next batch to the attached sender. Only while active, unless `leaving`: the one
+   * batch that goes as the app moves to the background.
+   */
+  function flush(leaving: boolean): void {
     stopTimer();
 
-    if (sending || Option.isNone(sender) || pending.length === 0 || now() < pausedUntil) return;
-    const send = sender.value;
-    const at = now();
-    const fresh = pending.filter((each) => !isOlderThan(each.at, at, MAX_APP_EVENT_AGE_MS));
+    if (
+      (!active && !leaving) ||
+      sending ||
+      Option.isNone(sender) ||
+      !isOwnedBy(owner, sender.value.owner) ||
+      pending.length === 0 ||
+      monotonicNow() < pausedUntil
+    ) {
+      return;
+    }
+
+    const { owner: from, send } = sender.value;
+    const at = wallNow();
+    const fresh = pending.filter((each) => at - each.at <= MAX_APP_EVENT_AGE_MS);
 
     forgetCrashes(pending.filter((each) => !fresh.includes(each)));
     const batch = fresh.slice(0, MAX_APP_EVENTS);
@@ -353,11 +592,13 @@ export const createAppEvents = (options: AppEventsOptions): AppEvents => {
 
     if (batch.length === 0) return;
     sending = true;
-    void deliver(send, batch, at);
+    void deliver(from, send, batch, at);
   }
 
-  const enqueue = (event: AppEvent, at: number): void => {
-    pending.push({ event, at, crashId: Option.none() });
+  /** Keeps `event` for the current owner; with nobody known, it is dropped. */
+  const enqueue = (event: AppEvent): void => {
+    if (Option.isNone(owner)) return;
+    pending.push({ event, at: wallNow(), crashId: Option.none() });
 
     if (pending.length > MAX_PENDING_EVENTS) {
       const oldest = pending.findIndex((each) => Option.isNone(each.crashId));
@@ -368,217 +609,243 @@ export const createAppEvents = (options: AppEventsOptions): AppEvents => {
     arm();
   };
 
-  const finishLaunch = (trace: LaunchTrace): void => {
-    Option.map(trace.cancelWait, (cancel) => cancel());
+  const dropLaunch = (): void => {
+    Option.map(launch, (trace) => trace.cancelWait());
     launch = Option.none();
+  };
 
-    if (Option.isNone(trace.firstFrameAt)) return;
-    const frame = trace.firstFrameAt.value;
+  const sendLaunch = (trace: LaunchTrace): void => {
+    dropLaunch();
 
-    const home = Option.filter(trace.home, () => trace.kind === "cold" && trace.landing === "home");
+    const firstScreen = Option.flatMap(trace.firstScreenAt, (at) =>
+      span(trace.zero, at, MAX_APP_TIMING_MS),
+    );
+
+    if (Option.isNone(firstScreen)) return;
+
+    const home = Option.flatMap(trace.home, ({ at, source }) =>
+      Option.map(span(trace.zero, at, MAX_APP_TIMING_MS), (ms) => ({ ms, source })),
+    );
 
     Option.map(
       AppEvent.cases.Launched.makeOption({
-        kind: trace.kind,
-        firstFrameMs: timing(trace.zero, frame),
+        firstScreenVisibleMs: firstScreen.value,
         ...Option.match(home, {
           onNone: () => ({}),
-          onSome: ({ at, source }) => ({
-            home: { ms: timing(trace.zero, Math.max(at, frame)), source },
-          }),
+          onSome: (homeContent) => ({ homeContent }),
         }),
       }),
-      (event) => enqueue(event, frame),
+      enqueue,
     );
   };
 
-  /** Ends the launch once it knows all it will: its first frame, and Home's when it waits for it. */
+  /** Sends the launch once both marks are in, or waits for Home's content after the first. */
   const settleLaunch = (trace: LaunchTrace): void => {
-    if (Option.isNone(trace.firstFrameAt)) return;
+    if (Option.isNone(trace.firstScreenAt)) return;
 
-    if (trace.kind === "warm" || trace.landing === "elsewhere" || Option.isSome(trace.home)) {
-      finishLaunch(trace);
+    if (Option.isSome(trace.home)) {
+      sendLaunch(trace);
 
       return;
     }
 
-    if (Option.isNone(trace.cancelWait)) {
-      const cancelWait = schedule(HOME_WAIT_MS, () => {
-        Option.map(launch, finishLaunch);
-      });
+    trace.cancelWait();
 
-      launch = Option.some({ ...trace, cancelWait: Option.some(cancelWait) });
-    }
-  };
-
-  const update = (change: (trace: LaunchTrace) => LaunchTrace): Option.Option<LaunchTrace> => {
-    launch = Option.map(launch, change);
-
-    return launch;
-  };
-
-  const firstScreen = (landing: Landing): void => {
-    if (Option.isNone(launch) || launch.value.framing) return;
-    const { id } = launch.value;
-
-    update((trace) => ({ ...trace, framing: true, landing }));
-    nextFrame(() => {
-      const drawn = Option.filter(launch, (trace) => trace.id === id);
-
-      if (Option.isNone(drawn)) return;
-      Option.map(
-        update((trace) => ({ ...trace, firstFrameAt: Option.some(now()) })),
-        settleLaunch,
-      );
+    const cancelWait = schedule(HOME_WAIT_MS, () => {
+      Option.map(launch, sendLaunch);
     });
+
+    launch = Option.some({ ...trace, cancelWait });
   };
 
-  const homeContent = (source: ContentSource): void => {
-    if (Option.isNone(launch) || launch.value.kind === "warm" || launch.value.homing) return;
-    const { id } = launch.value;
+  const coldLaunch = (): Option.Option<LaunchTrace> =>
+    Option.filter(
+      Option.fromNullishOr(options.processStartedAt),
+      (zero) =>
+        !options.startedInBackground &&
+        Option.isSome(span(zero, monotonicNow(), MAX_PROCESS_AGE_MS)),
+    ).pipe(
+      Option.map((zero) => ({
+        zero,
+        firstScreenAt: Option.none(),
+        home: Option.none(),
+        cancelWait: schedule(LAUNCH_WAIT_MS, dropLaunch),
+      })),
+    );
 
-    update((trace) => ({ ...trace, homing: true }));
-    nextFrame(() => {
-      const drawn = Option.filter(launch, (trace) => trace.id === id);
-
-      if (Option.isNone(drawn)) return;
-      Option.map(
-        update((trace) => ({ ...trace, home: Option.some({ at: now(), source }) })),
-        settleLaunch,
-      );
-    });
-  };
+  launch = coldLaunch();
 
   const toBackground = (): void => {
-    Option.map(launch, finishLaunch);
+    dropLaunch();
     open = Option.none();
-    flush();
+    flush(true);
     active = false;
-    wasBackground = true;
   };
 
   const toForeground = (): void => {
     active = true;
-
-    if (wasBackground) {
-      wasBackground = false;
-      launches += 1;
-      launch = Option.some({
-        id: launches,
-        kind: "warm",
-        zero: now(),
-        framing: false,
-        firstFrameAt: Option.none(),
-        landing: "elsewhere",
-        home: Option.none(),
-        homing: false,
-        cancelWait: Option.none(),
-      });
-      firstScreen("elsewhere");
-    }
-
     arm();
   };
 
+  const saveCrash = (from: Owner, event: AppEvent): void => {
+    const at = wallNow();
+    const id = `${at.toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+    const entries = saved ?? readCrashFile();
+
+    writeCrashFile([...entries, { id, at, owner: from, event }].slice(-MAX_SAVED_CRASHES));
+  };
+
+  const report = (cause: unknown, kind: ClientErrorKind, fatal: boolean): void => {
+    if (Option.isNone(owner)) return;
+    const from = owner.value;
+    const frames = framesOf(cause);
+    const errorClass = errorClassOf(cause);
+
+    const event = AppEvent.cases.ErrorCaught.makeOption({
+      kind,
+      fatal,
+      route,
+      errorClass,
+      frames,
+      ...Option.match(requestIdOf(cause), {
+        onNone: () => ({}),
+        onSome: (requestId) => ({ requestId }),
+      }),
+    });
+
+    if (Option.isNone(event)) return;
+
+    if (fatal) {
+      saveCrash(from, event.value);
+
+      return;
+    }
+
+    const first = frames[0];
+    const key = `${kind}\u0000${errorClass}\u0000${route}\u0000${first === undefined ? "" : `${first.fn}@${first.file}:${String(first.line)}:${String(first.column)}`}`;
+
+    if (admits(key, monotonicNow())) enqueue(event.value);
+  };
+
   return {
-    attach: (send) => {
-      sender = Option.some(send);
-      flush();
+    attach: (next, send) => {
+      if (Option.isSome(owner) && !sameOwner(owner.value, next)) pending = [];
+      owner = Option.some(next);
+      clearSaved = false;
+      const attached = { owner: next, send };
+
+      sender = Option.some(attached);
+      wantSaved();
+      flush(false);
+      arm();
 
       return () => {
-        if (Option.contains(sender, send)) {
+        if (Option.contains(sender, attached)) {
           sender = Option.none();
           stopTimer();
         }
       };
     },
+    signedOut: () => {
+      owner = Option.none();
+      sender = Option.none();
+      pending = [];
+      clearSaved = true;
+      stopTimer();
+      wantSaved();
+    },
     appStateChanged: (state) => {
       if (state === "background") toBackground();
       else if (state === "active") toForeground();
     },
-    firstScreen,
-    homeContent,
-    pressed: (screen, id) => {
-      nextToken += 1;
-      open = Option.some({ token: nextToken, screen, id, pressedAt: now(), claimed: false });
+    landed: (next) => {
+      if (Option.isSome(landing)) return;
+      landing = Option.some(next);
+
+      if (next === "elsewhere") dropLaunch();
+      schedule(CRASH_READ_DELAY_MS, frameDrawn);
     },
-    claimOpen: (screen, id) => {
+    launchPending: () => Option.isSome(launch),
+    firstScreenVisible: (at) => {
+      frameDrawn();
+
+      if (Option.isNone(launch) || Option.isSome(launch.value.firstScreenAt)) return;
+      const trace = { ...launch.value, firstScreenAt: Option.some(at) };
+
+      launch = Option.some(trace);
+      settleLaunch(trace);
+    },
+    homeContentVisible: (at, source) => {
+      if (Option.isNone(launch) || Option.isSome(launch.value.home)) return;
+      const trace = { ...launch.value, home: Option.some({ at, source }) };
+
+      launch = Option.some(trace);
+      settleLaunch(trace);
+    },
+    pressed: (screen, id, touchedAt) => {
+      nextToken += 1;
+
+      open = Option.some({
+        token: nextToken,
+        screen,
+        id,
+        touchedAt,
+        claim: Option.none(),
+      }).pipe(Option.filter(() => Option.isSome(span(touchedAt, monotonicNow(), OPEN_WAIT_MS))));
+    },
+    claimOpen: (screen, id, claimingRoute, cache) => {
       if (Option.isNone(open)) return Option.none();
       const waiting = open.value;
 
       if (
-        waiting.claimed ||
+        Option.isSome(waiting.claim) ||
         waiting.screen !== screen ||
         waiting.id !== id ||
-        isOlderThan(waiting.pressedAt, now(), OPEN_WAIT_MS)
+        Option.isNone(span(waiting.touchedAt, monotonicNow(), OPEN_WAIT_MS))
       ) {
         return Option.none();
       }
 
-      open = Option.some({ ...waiting, claimed: true });
+      open = Option.some({ ...waiting, claim: Option.some({ route: claimingRoute }) });
 
-      return Option.some({ token: waiting.token });
+      return Option.some({ token: waiting.token, route: claimingRoute, cache });
     },
-    openContent: (claim) =>
-      nextFrame(() => {
-        const waiting = Option.filter(open, (each) => each.token === claim.token);
+    releaseOpen: (claim) => {
+      if (Option.exists(open, (waiting) => waiting.token === claim.token)) open = Option.none();
+    },
+    openContentVisible: (claim, at) => {
+      const waiting = Option.filter(
+        open,
+        (each) =>
+          each.token === claim.token &&
+          Option.exists(each.claim, (held) => held.route === claim.route),
+      );
 
-        if (Option.isNone(waiting)) return;
-        open = Option.none();
-        const { screen, id, pressedAt } = waiting.value;
-        const at = now();
+      if (Option.isNone(waiting)) return;
+      open = Option.none();
+      const { screen, id, touchedAt } = waiting.value;
 
-        Option.map(
+      Option.map(
+        Option.flatMap(span(touchedAt, at, OPEN_WAIT_MS), (contentVisibleMs) =>
           AppEvent.cases.ScreenOpened.makeOption({
             screen,
             id,
-            durationMs: timing(pressedAt, at),
+            cache: claim.cache,
+            contentVisibleMs,
           }),
-          (event) => enqueue(event, at),
-        );
-      }),
+        ),
+        enqueue,
+      );
+    },
     routeChanged: (next) => {
-      route = next;
+      route = isRoutePattern(next) ? next : "/";
     },
     caught: (cause, kind, fatal) => {
-      const at = now();
-
-      const report = reportOf(cause, {
-        platform: "ios",
-        appVersion: options.release,
-        kind,
-        route,
-      });
-
-      const stack = Option.filter(
-        Option.map(Option.fromNullishOr(report.stack), withoutPaths),
-        (text) => text.length > 0,
-      );
-
-      const event = AppEvent.cases.ErrorCaught.makeOption({
-        kind,
-        fatal,
-        route: report.route,
-        name: report.name,
-        message: withoutPaths(report.message),
-        ...Option.match(stack, { onNone: () => ({}), onSome: (text) => ({ stack: text }) }),
-        ...Option.match(Option.fromNullishOr(report.requestId), {
-          onNone: () => ({}),
-          onSome: (requestId) => ({ requestId }),
-        }),
-      });
-
-      if (Option.isNone(event)) return;
-
-      if (fatal) {
-        const id = `${at.toString(36)}${Math.random().toString(36).slice(2, 8)}`;
-
-        writeCrashes([...readCrashes(), { id, at, event: event.value }].slice(-MAX_SAVED_CRASHES));
-
-        return;
+      try {
+        report(cause, kind, fatal);
+      } catch {
+        // A report that can't be made is dropped; the caller may be ending the app.
       }
-
-      if (gate.admits(report, at)) enqueue(event.value, at);
     },
   };
 };
@@ -615,19 +882,16 @@ export interface UncaughtSources {
 
 /**
  * Reports every uncaught error and unhandled promise rejection to `events`. The global handler
- * React Native set still runs after the report, so a fatal error still ends the app. Hermes tracks
- * rejections only once something turns it on, which React Native does only in development; this
- * turns it on in every build.
+ * React Native set runs after the report, whatever the report did, so a fatal error still ends
+ * the app. Hermes tracks rejections only once something turns it on, which React Native does only
+ * in development; this turns it on in every build.
  */
 export const reportUncaught = (events: AppEvents, sources: UncaughtSources): void => {
   const previous = sources.errorUtils.getGlobalHandler();
 
   sources.errorUtils.setGlobalHandler((cause, isFatal) => {
-    try {
-      events.caught(cause, "uncaught", isFatal === true);
-    } finally {
-      previous(cause, isFatal);
-    }
+    events.caught(cause, "uncaught", isFatal === true);
+    previous(cause, isFatal);
   });
 
   if (!isRejectionTracking(sources.hermes)) return;
@@ -636,7 +900,7 @@ export const reportUncaught = (events: AppEvents, sources: UncaughtSources): voi
     onUnhandled: (_id, cause) => {
       events.caught(cause, "unhandled-rejection", false);
 
-      if (sources.development) console.warn("Unhandled promise rejection", cause);
+      if (sources.development) console.warn("Unhandled promise rejection");
     },
     onHandled: () => undefined,
   });

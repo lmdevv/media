@@ -25,7 +25,7 @@ export function WideRow({ title }: { readonly title: TitleCard }) {
   // take a parent's gap of their own, and `…` stays a separate VoiceOver element.
   return (
     <View className="flex-row items-center gap-3">
-      <Link href={`/title/${title.id}`} asChild onPress={() => pressTitle(title.id)}>
+      <Link href={`/title/${title.id}`} asChild onPress={(press) => pressTitle(title.id, press)}>
         <Link.Trigger>
           <Pressable
             accessibilityRole="button"

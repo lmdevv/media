@@ -1,7 +1,7 @@
 Pod::Spec.new do |s|
   s.name           = 'LaunchClock'
   s.version        = '1.0.0'
-  s.summary        = 'When the process started, for timing a cold launch of the Lar Movies app.'
+  s.summary        = 'The monotonic clock and frame marks that time launches and screen opens of the Lar Movies app.'
   s.license        = 'MIT'
   s.author         = 'Lar Movies'
   s.homepage       = 'https://github.com/lmdevv/media'

@@ -34,7 +34,7 @@ export function AlbumCard({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={`${album.title}, ${artists}`}
-      onPress={onPress ?? (() => openAlbum(album))}
+      onPress={onPress ?? ((press) => openAlbum(album, press))}
       className={`${card} gap-2 active:opacity-70`}
     >
       <Artwork url={album.artUrl} recyclingKey={album.id} className={`${art} rounded-lg`} />

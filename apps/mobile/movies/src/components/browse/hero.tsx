@@ -75,7 +75,7 @@ function HeroPage({ title, width }: { readonly title: TitleCard; readonly width:
         accessibilityRole="button"
         accessibilityLabel={title.name}
         accessibilityHint="Opens the title."
-        onPress={() => openTitle(title.id)}
+        onPress={(press) => openTitle(title.id, press)}
         className="items-center px-5 pb-37 active:opacity-80"
       >
         {logo === undefined ? (
@@ -140,7 +140,7 @@ function BillboardPage({ title, width }: { readonly title: TitleCard; readonly w
         accessibilityRole="button"
         accessibilityLabel={title.name}
         accessibilityHint="Opens the title."
-        onPress={() => openTitle(title.id)}
+        onPress={(press) => openTitle(title.id, press)}
         className="absolute inset-0"
       />
     </View>
@@ -281,7 +281,11 @@ function HeroActions({
           onPress={() => router.push(play.href)}
         />
       ) : (
-        <Button label="More Info" className={playClassName} onPress={() => openTitle(title.id)} />
+        <Button
+          label="More Info"
+          className={playClassName}
+          onPress={(press) => openTitle(title.id, press)}
+        />
       )}
       <IconButton
         icon={inList ? Check : Plus}

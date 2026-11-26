@@ -5,7 +5,6 @@ import {
   AppEventsSender,
   ReportRenderErrors,
   useErrorRoute,
-  useFirstScreen,
 } from "@media/mobile-core/app-events-react";
 import type { RenderErrorFallback } from "@media/mobile-core/app-events-react";
 import { describeFailure } from "@media/mobile-core/failure";
@@ -30,7 +29,7 @@ import { ServerUnavailable } from "@/components/server-unavailable";
 import { HeldHome } from "@/components/browse/held-home";
 import { HeldTitleStates, TitleStatesProvider } from "@/components/browse/title-states";
 import { Button } from "@/components/ui/button";
-import { appEvents } from "@/lib/app-events";
+import { appEvents, useLaunchLanding } from "@/lib/app-events";
 import { applyAppearance } from "@/lib/appearance";
 import { displayHost } from "@/lib/local-network";
 import { useSheetOptions } from "@/lib/sheet";
@@ -184,9 +183,9 @@ function RootStack({ phase }: { readonly phase: SessionPhase["kind"] | "offline"
   );
 }
 
-/** Hides the splash screen; the launch's first frame shows the screen that rendered this. */
+/** Hides the splash screen over the launch's first screen, which `landing` names. */
 function HideSplash({ landing }: { readonly landing: Landing }) {
-  useFirstScreen(appEvents, landing);
+  useLaunchLanding(landing);
 
   useEffect(() => {
     void SplashScreen.hideAsync();
@@ -405,13 +404,15 @@ function App() {
   return (
     <SdkProvider key={connection.convexUrl} connection={connection}>
       <AppEventsSender events={appEvents} mediaUrl={connection.mediaUrl} />
-      <SignInGate>
-        <FirstRunProvider>
-          <DownloadsProvider>
-            <ConnectedApp />
-          </DownloadsProvider>
-        </FirstRunProvider>
-      </SignInGate>
+      <ReportRenderErrors events={appEvents} fallback={RenderFailed}>
+        <SignInGate>
+          <FirstRunProvider>
+            <DownloadsProvider>
+              <ConnectedApp />
+            </DownloadsProvider>
+          </FirstRunProvider>
+        </SignInGate>
+      </ReportRenderErrors>
     </SdkProvider>
   );
 }
@@ -419,17 +420,15 @@ function App() {
 export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <ReportRenderErrors events={appEvents} fallback={RenderFailed}>
-        <ErrorRoute />
-        <NavigationTheme>
-          <ConnectionProvider>
-            <PendingInviteProvider>
-              <InviteLinks />
-              <App />
-            </PendingInviteProvider>
-          </ConnectionProvider>
-        </NavigationTheme>
-      </ReportRenderErrors>
+      <ErrorRoute />
+      <NavigationTheme>
+        <ConnectionProvider>
+          <PendingInviteProvider>
+            <InviteLinks />
+            <App />
+          </PendingInviteProvider>
+        </ConnectionProvider>
+      </NavigationTheme>
     </GestureHandlerRootView>
   );
 }

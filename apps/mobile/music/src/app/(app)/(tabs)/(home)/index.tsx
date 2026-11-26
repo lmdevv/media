@@ -1,5 +1,4 @@
 import type { OfflineAlbum } from "@/downloads/sync";
-import { useHomeContent } from "@media/mobile-core/app-events-react";
 import { router } from "expo-router";
 import { View } from "react-native";
 
@@ -11,7 +10,7 @@ import { OfflineNotice } from "@/components/states/offline-notice";
 import { SectionHeader } from "@/components/ui/section-header";
 import { TabRoot } from "@/components/ui/tab-root";
 import { useDownloadsLibrary } from "@/downloads";
-import { appEvents } from "@/lib/app-events";
+import { HomeLaunchMarks } from "@/lib/app-events";
 import { LIBRARY_HOME, RECENT_PLAYS, useHistory } from "@/lib/details";
 import { homeStats } from "@/lib/format";
 import { distinctSongs } from "@/lib/history";
@@ -70,8 +69,6 @@ export default function Home() {
   const { albums } = useDownloadsLibrary();
   const onPhone = reach === "offline" || (reach === "reconnecting" && albums.length > 0);
 
-  useHomeContent(appEvents, onPhone ? "downloads" : home === undefined ? null : "network");
-
   return (
     <TabRoot
       title="Home"
@@ -103,6 +100,7 @@ export default function Home() {
           <RecentlyPlayed />
         </>
       )}
+      <HomeLaunchMarks content={onPhone ? "downloads" : home === undefined ? null : "network"} />
     </TabRoot>
   );
 }

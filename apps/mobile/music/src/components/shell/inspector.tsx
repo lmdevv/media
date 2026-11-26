@@ -12,7 +12,6 @@ import Animated, {
 } from "react-native-reanimated";
 
 import { ArtistMenu } from "@/components/browse/artist-menu";
-import { openAlbum, openArtist } from "@/components/browse/rows";
 import { AudioDetailRows } from "@/components/playback/audio-details";
 import { EdgeFade } from "@/components/playback/edge-fade";
 import { LikeButton } from "@/components/playback/like-button";
@@ -126,7 +125,7 @@ function About({ song, background }: { readonly song: NowPlaying; readonly backg
           leading={{ kind: "icon", icon: Disc3 }}
           trailing={<Icon icon={ChevronRight} tone="muted" size="inline" />}
           onPress={() => {
-            openAlbum({ id: albumId });
+            router.push({ pathname: "/album/[id]", params: { id: albumId } });
           }}
         />
         <ArtistMenu
@@ -134,7 +133,7 @@ function About({ song, background }: { readonly song: NowPlaying; readonly backg
           label={`${several ? "Artists" : "Artist"}, ${creditText(song)}`}
           role="button"
           onOpen={(id) => {
-            openArtist({ id });
+            router.push({ pathname: "/artist/[id]", params: { id } });
           }}
         >
           <Row

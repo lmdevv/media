@@ -30,7 +30,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { scheduleOnRN } from "react-native-worklets";
 
 import { ArtistMenu } from "@/components/browse/artist-menu";
-import { openArtist, openSongActions } from "@/components/browse/rows";
+import { openSongActions } from "@/components/browse/rows";
 import { LikeButton } from "@/components/playback/like-button";
 import { Artwork } from "@/components/ui/artwork";
 import { Button } from "@/components/ui/button";
@@ -234,7 +234,7 @@ function ArtistLink({
       className="self-start"
       onOpen={(id) => {
         leaveTo(() => {
-          openArtist({ id });
+          router.push({ pathname: "/artist/[id]", params: { id } });
         });
       }}
     >

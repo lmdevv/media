@@ -132,7 +132,7 @@ function SimilarTitle({ title }: { readonly title: TitleCard }) {
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={title.name}
-      onPress={() => openTitle(title.id)}
+      onPress={(press) => openTitle(title.id, press)}
       className="w-28 gap-1.5 active:opacity-80 regular:w-36 wide:w-42"
     >
       <View className="h-42 w-28 overflow-hidden rounded-control bg-surface-raised regular:h-54 regular:w-36 wide:h-63 wide:w-42">

@@ -1,20 +1,38 @@
 /**
- * The React side of `app-events.ts`: the hooks the screens call to time a launch and a screen
- * open, the boundary that reports render errors, and the sender that attaches while someone is
- * signed in.
+ * The React side of `app-events.ts`: the sender that attaches as whoever is signed in, the frame
+ * marks that time a launch and a screen open, and the boundary that reports render errors.
+ *
+ * A frame mark is the app's `LaunchClock` view (`modules/launch-clock`): an empty view, laid over
+ * its screen, that reports once, on the monotonic clock, the display refresh that first shows it
+ * in the window, inside the screen's bounds, and under no opaque view such as the splash screen.
  */
-import type { ContentSource, TimedScreen } from "@media/contracts/diagnostics";
+import type { ContentSource, OpenCache, TimedScreen } from "@media/contracts/diagnostics";
 import { createMediaServer } from "@media/sdk/promise";
-import { usePlatform, usePlatformStatus } from "@media/sdk/react";
+import { usePlatform, usePlatformQuery, usePlatformStatus } from "@media/sdk/react";
 import { Option } from "effect";
-import { Component, createElement, useEffect, useRef } from "react";
+import { Component, Fragment, createElement, useEffect, useLayoutEffect, useState } from "react";
 import type { ComponentType, ReactNode } from "react";
 
 import type { AppEvents, Landing, OpenClaim } from "./app-events";
 
+/** The props of the app's frame mark view. */
+export interface FrameMarkProps {
+  /** The refresh that first showed the mark, on the monotonic clock, in milliseconds. */
+  readonly onDrawn: (event: { readonly nativeEvent: { readonly at: number } }) => void;
+  readonly style: typeof OVER_SCREEN;
+  readonly pointerEvents: "none";
+}
+
+/** The app's frame mark view. */
+export type FrameMark = ComponentType<FrameMarkProps>;
+
+/** A mark covers the view it is the last child of, so it is in view when any of that view is. */
+const OVER_SCREEN = { position: "absolute", top: 0, right: 0, bottom: 0, left: 0 } as const;
+
 /**
- * Sends `events` to the media server at `mediaUrl` as the signed-in person, and holds them while
- * nobody is signed in. Must sit below the SDK's `PlatformProvider`.
+ * Sends `events` to the media server at `mediaUrl` as the person the core says is signed in, the
+ * events' owner, and drops every waiting event when nobody is. Must sit below the SDK's
+ * `PlatformProvider`.
  */
 export function AppEventsSender({
   events,
@@ -24,55 +42,122 @@ export function AppEventsSender({
   readonly mediaUrl: string;
 }) {
   const platform = usePlatform();
-  const signedIn = usePlatformStatus() === "signedIn";
+  const status = usePlatformStatus();
+
+  const me = usePlatformQuery(
+    platform.core.auth.sessions.current,
+    ...(status === "signedIn" ? [] : (["skip"] as const)),
+  );
+
+  const account = status === "signedIn" && me.status === "success" ? me.data.userId : null;
 
   useEffect(() => {
-    if (!signedIn) return undefined;
+    if (status === "signedOut") events.signedOut();
+  }, [events, status]);
+
+  useEffect(() => {
+    if (account === null) return undefined;
     const server = createMediaServer({ url: mediaUrl, session: platform.session });
 
-    return events.attach(server.reportAppEvents);
-  }, [events, mediaUrl, platform, signedIn]);
+    return events.attach({ server: mediaUrl, account }, server.reportAppEvents);
+  }, [events, mediaUrl, platform, account]);
 
   return null;
 }
 
-/** The screen that hides the splash screen: its next frame is the launch's first. */
-export const useFirstScreen = (events: AppEvents, landing: Landing): void => {
+/** Tells `events` where the launch's first screen landed; only the first one counts. */
+export const useLanding = (events: AppEvents, landing: Landing): void => {
   useEffect(() => {
-    events.firstScreen(landing);
+    events.landed(landing);
   }, [events, landing]);
 };
 
-/** Home shows real content from `source`, or none yet while it is null. */
-export const useHomeContent = (events: AppEvents, source: ContentSource | null): void => {
-  useEffect(() => {
-    if (source !== null) events.homeContent(source);
-  }, [events, source]);
-};
+/**
+ * Home's launch marks, as the last child of Home's screen while a cold launch waits for them:
+ * one for its screen, drawn from its first frame, and one for its real content from `content`,
+ * drawn once it is not null.
+ */
+export function LaunchMarks({
+  events,
+  mark,
+  content,
+}: {
+  readonly events: AppEvents;
+  readonly mark: FrameMark;
+  readonly content: ContentSource | null;
+}) {
+  const [waiting] = useState(events.launchPending);
+
+  if (!waiting) return null;
+
+  return createElement(
+    Fragment,
+    null,
+    createElement(mark, {
+      key: "screen",
+      style: OVER_SCREEN,
+      pointerEvents: "none",
+      onDrawn: (event) => events.firstScreenVisible(event.nativeEvent.at),
+    }),
+    content === null
+      ? null
+      : createElement(mark, {
+          key: "content",
+          style: OVER_SCREEN,
+          pointerEvents: "none",
+          onDrawn: (event) => events.homeContentVisible(event.nativeEvent.at, content),
+        }),
+  );
+}
+
+/** Where a timed screen sits in navigation, from the router's `useRoute` and `useIsFocused`. */
+export interface ScreenPlace {
+  /** The navigation route instance's key. */
+  readonly key: string;
+  readonly focused: boolean;
+}
 
 /**
- * Times the opening of the screen of record `id`: the screen claims the press that opened it when
- * it mounts, and closes that press's timer at the first frame `drawn` is true. A screen that
- * mounted for an earlier press holds no claim on a later one, so its late answer never closes a
- * later press's timer.
+ * Times the opening of the screen of record `id`: answers the frame mark to render as the
+ * screen's last child, or null. Identity rule: the screen claims the press that opened it when it
+ * mounts focused, as route instance `place.key`, and only that claim closes that press's timer, at
+ * the first frame its content is in view. A later press, a blur, or an unmount ends the claim, so
+ * an earlier screen's late content never closes a later press's timer.
  */
-export const useScreenOpen = (
+export const useOpenMark = (
   events: AppEvents,
+  mark: FrameMark,
   screen: TimedScreen,
   id: string,
-  drawn: boolean,
-): void => {
-  const claim = useRef(Option.none<OpenClaim>());
+  place: ScreenPlace,
+  contentReady: boolean,
+): ReactNode => {
+  const [cache] = useState<OpenCache>(contentReady ? "kept" : "fetched");
+  const [claim, setClaim] = useState(Option.none<OpenClaim>());
+  const { key, focused } = place;
 
-  useEffect(() => {
-    claim.current = events.claimOpen(screen, id);
-  }, [events, screen, id]);
+  useLayoutEffect(() => {
+    if (!focused) return undefined;
+    const held = events.claimOpen(screen, id, key, cache);
 
-  useEffect(() => {
-    if (!drawn || Option.isNone(claim.current)) return;
-    events.openContent(claim.current.value);
-    claim.current = Option.none();
-  }, [events, screen, id, drawn]);
+    setClaim(held);
+
+    return () => {
+      Option.map(held, events.releaseOpen);
+    };
+  }, [events, screen, id, key, focused, cache]);
+
+  if (!contentReady || Option.isNone(claim)) return null;
+  const held = claim.value;
+
+  return createElement(mark, {
+    style: OVER_SCREEN,
+    pointerEvents: "none",
+    onDrawn: (event) => {
+      events.openContentVisible(held, event.nativeEvent.at);
+      setClaim(Option.none());
+    },
+  });
 };
 
 /** Names `route`, a route pattern such as `/album/[id]`, in the error reports made on it. */
@@ -98,7 +183,10 @@ interface BoundaryState {
   readonly error: Error | null;
 }
 
-/** Shows `fallback` when `children` fails to render, and reports the failure to `events`. */
+/**
+ * Shows `fallback` when `children` fails to render, and reports the failure to `events`. Place it
+ * below `AppEventsSender`, so the sender stays mounted and the report goes out with the next batch.
+ */
 export class ReportRenderErrors extends Component<BoundaryProps, BoundaryState> {
   override state: BoundaryState = { error: null };
 

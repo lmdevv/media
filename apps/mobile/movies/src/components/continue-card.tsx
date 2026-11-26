@@ -87,7 +87,7 @@ export function ContinueCard({ item }: { readonly item: ContinueWatchingItem }) 
           label={`More info about ${item.title.name}`}
           variant="glass"
           className="absolute right-1 bottom-1"
-          onPress={() => openTitle(item.title.id)}
+          onPress={(press) => openTitle(item.title.id, press)}
         />
       </View>
     </View>

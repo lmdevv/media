@@ -1,8 +1,15 @@
-import { createServer } from "node:http";
+import { createServer, request } from "node:http";
 
 import { NodeHttpServer, NodeServices } from "@effect/platform-node";
 import { assert, layer } from "@effect/vitest";
-import { LogRecord, MAX_APP_TIMING_MS } from "@media/contracts/diagnostics";
+import {
+  AppEventsRequest,
+  LogRecord,
+  MAX_APP_EVENTS,
+  MAX_APP_EVENTS_BYTES,
+  MAX_APP_TIMING_MS,
+  MAX_ERROR_FRAMES,
+} from "@media/contracts/diagnostics";
 import { Unauthenticated } from "@media/contracts/errors";
 import { UserId } from "@media/contracts/ids";
 import {
@@ -21,6 +28,7 @@ import { FetchHttpClient, HttpServer } from "effect/http";
 import { TestClock } from "effect/testing";
 
 import * as CoreCallers from "../core/core-callers.ts";
+import { MAX_REQUEST_BODY_BYTES } from "../http/hardening.ts";
 import { serve } from "../http/http-server.ts";
 import * as LogsRoutes from "../logging/logs-routes.ts";
 import * as RetainedLogs from "../logging/retained-logs.ts";
@@ -133,14 +141,75 @@ const batch = (events: ReadonlyArray<Schema.Json>) => ({
   events,
 });
 
-const launched = (firstFrameMs: number) => ({
+const launched = (firstScreenVisibleMs: number) => ({
   ageMs: 0,
   event: {
     _tag: "Launched",
-    kind: "cold",
-    firstFrameMs,
-    home: { ms: firstFrameMs + 400, source: "network" },
+    firstScreenVisibleMs,
+    homeContent: { ms: firstScreenVisibleMs + 400, source: "network" },
   },
+});
+
+const postRaw = (body: string, headers: Record<string, string>) =>
+  Effect.gen(function* () {
+    const { baseUrl } = yield* Server;
+
+    return yield* Effect.promise(() =>
+      fetch(`${baseUrl}/api/app-events`, {
+        method: "POST",
+        headers: { "content-type": "application/json", ...headers },
+        body,
+      }),
+    );
+  });
+
+/** The status the route answers a body sent in chunks, with no declared length. */
+const postChunked = (body: string, token: string) =>
+  Effect.gen(function* () {
+    const { baseUrl } = yield* Server;
+
+    return yield* Effect.callback<number>((resume) => {
+      const outgoing = request(`${baseUrl}/api/app-events`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      });
+
+      outgoing.on("response", (response) => {
+        response.resume();
+        resume(Effect.succeed(response.statusCode ?? 0));
+      });
+      outgoing.on("error", () => {
+        resume(Effect.succeed(0));
+      });
+
+      for (let at = 0; at < body.length; at += 4096) outgoing.write(body.slice(at, at + 4096));
+      outgoing.end();
+    });
+  });
+
+/** The largest batch the schema accepts: every event an error with every field at its bound. */
+const largestBatch = (): AppEventsRequest => ({
+  platform: "ios",
+  app: "movies",
+  release: "x".repeat(64),
+  development: false,
+  events: Array.from({ length: MAX_APP_EVENTS }, () => ({
+    ageMs: 2_592_000_000,
+    event: {
+      _tag: "ErrorCaught",
+      kind: "unhandled-rejection",
+      fatal: false,
+      route: `/${"a".repeat(255)}`,
+      errorClass: `E${"x".repeat(63)}`,
+      frames: Array.from({ length: MAX_ERROR_FRAMES }, () => ({
+        fn: "f".repeat(64),
+        file: `${"b".repeat(48)}.jsbundle`,
+        line: 100_000_000,
+        column: 100_000_000,
+      })),
+      requestId: "6f1c2b8e-3d4a-4f5b-9c6d-7e8f9a0b1c2d",
+    },
+  })),
 });
 
 layer(serverLayer, { timeout: 30_000 })("app events", (it) => {
@@ -157,7 +226,13 @@ layer(serverLayer, { timeout: 30_000 })("app events", (it) => {
           launched(812),
           {
             ageMs: 2000,
-            event: { _tag: "ScreenOpened", screen: "album", id: albumId, durationMs: 345 },
+            event: {
+              _tag: "ScreenOpened",
+              screen: "album",
+              id: albumId,
+              cache: "fetched",
+              contentVisibleMs: 345,
+            },
           },
           {
             ageMs: 90_000,
@@ -166,9 +241,8 @@ layer(serverLayer, { timeout: 30_000 })("app events", (it) => {
               kind: "uncaught",
               fatal: true,
               route: "/album/[id]",
-              name: "TypeError",
-              message: `undefined is not a function ${id}`,
-              stack: "TypeError: undefined is not a function\n    at Album (main.jsbundle:1:2)",
+              errorClass: "TypeError",
+              frames: [{ fn: "Album", file: "main.jsbundle", line: 1, column: 2 }],
             },
           },
         ]),
@@ -193,12 +267,17 @@ layer(serverLayer, { timeout: 30_000 })("app events", (it) => {
         appVersion: "0.9.0",
         development: false,
         launch: "cold",
-        firstFrameMs: 812,
-        homeMs: 1212,
+        firstScreenVisibleMs: 812,
+        homeContentVisibleMs: 1212,
         homeSource: "network",
       });
 
-      assert.deepInclude(open?.annotations, { screen: "album", recordId: albumId, openMs: 345 });
+      assert.deepInclude(open?.annotations, {
+        screen: "album",
+        recordId: albumId,
+        cache: "fetched",
+        contentVisibleMs: 345,
+      });
       assert.strictEqual(open?.annotations["occurredAt"], new Date(now - 2000).toISOString());
       assert.strictEqual(error?.level, "ERROR");
 
@@ -207,15 +286,16 @@ layer(serverLayer, { timeout: 30_000 })("app events", (it) => {
         kind: "uncaught",
         fatal: true,
         route: "/album/[id]",
-        errorName: "TypeError",
+        errorClass: "TypeError",
         failedRequestId: null,
       });
+      assert.deepStrictEqual(error?.annotations["frames"], ["Album main.jsbundle:1:2"]);
 
       assert.strictEqual(error?.annotations["occurredAt"], new Date(now - 90_000).toISOString());
     }),
   );
 
-  it.effect("write a non-fatal error at WARN and a launch that never reached Home without it", () =>
+  it.effect("write a non-fatal error at WARN and a launch whose Home showed no content", () =>
     Effect.gen(function* () {
       const id = unique();
 
@@ -223,7 +303,7 @@ layer(serverLayer, { timeout: 30_000 })("app events", (it) => {
         "/api/app-events",
         Option.some(`member-${id}`),
         batch([
-          { ageMs: 0, event: { _tag: "Launched", kind: "warm", firstFrameMs: 40 } },
+          { ageMs: 0, event: { _tag: "Launched", firstScreenVisibleMs: 940 } },
           {
             ageMs: 0,
             event: {
@@ -231,8 +311,8 @@ layer(serverLayer, { timeout: 30_000 })("app events", (it) => {
               kind: "unhandled-rejection",
               fatal: false,
               route: "/",
-              name: "Error",
-              message: "a rejection nobody handled",
+              errorClass: "Error",
+              frames: [],
             },
           },
         ]),
@@ -242,9 +322,79 @@ layer(serverLayer, { timeout: 30_000 })("app events", (it) => {
       const launch = records.find((record) => record.message === "App.launched");
       const error = records.find((record) => record.message === "Client.error");
 
-      assert.deepInclude(launch?.annotations, { launch: "warm", homeMs: null, homeSource: null });
+      assert.deepInclude(launch?.annotations, {
+        firstScreenVisibleMs: 940,
+        homeContentVisibleMs: null,
+        homeSource: null,
+      });
       assert.strictEqual(error?.level, "WARN");
-      assert.strictEqual(error?.annotations["stack"], null);
+    }),
+  );
+
+  it.effect("refuse an error report with text in place of a route pattern, class, or frame", () =>
+    Effect.gen(function* () {
+      const token = Option.some(`member-${unique()}`);
+
+      const error = (fields: Record<string, Schema.Json>) =>
+        post(
+          "/api/app-events",
+          token,
+          batch([
+            {
+              ageMs: 0,
+              event: {
+                _tag: "ErrorCaught",
+                kind: "uncaught",
+                fatal: false,
+                route: "/",
+                errorClass: "Error",
+                frames: [],
+                ...fields,
+              },
+            },
+          ]),
+        );
+
+      const refused = [
+        yield* error({ route: "/album/Lucía García" }),
+        yield* error({ errorClass: "Lucía can't play Sintel" }),
+        yield* error({
+          frames: [{ fn: "f", file: "/Users/lucia/Sintel.mkv", line: 1, column: 1 }],
+        }),
+        yield* error({ message: "Lucía can't play Sintel" }),
+      ];
+
+      assert.deepStrictEqual(
+        refused.map((response) => response.status),
+        [400, 400, 400, 204],
+      );
+
+      const records = yield* grep("Lucía");
+
+      assert.deepStrictEqual(records, []);
+    }),
+  );
+
+  it.effect("refuse a body past the cap, or of no declared length, before reading it", () =>
+    Effect.gen(function* () {
+      const token = `member-${unique()}`;
+      const oversize = `{"pad":"${"a".repeat(MAX_APP_EVENTS_BYTES)}"}`;
+
+      const declared = yield* postRaw(oversize, { authorization: `Bearer ${token}` });
+
+      const streamed = yield* postChunked(oversize, token);
+
+      const largest = JSON.stringify(
+        yield* Schema.encodeEffect(Schema.toCodecJson(AppEventsRequest))(largestBatch()),
+      );
+
+      const accepted = yield* postRaw(largest, { authorization: `Bearer ${token}` });
+
+      assert.strictEqual(declared.status, 413);
+      assert.strictEqual(streamed, 411);
+      assert.strictEqual(accepted.status, 204);
+      assert.isAtMost(new TextEncoder().encode(largest).length, MAX_APP_EVENTS_BYTES);
+      assert.isAtMost(MAX_APP_EVENTS_BYTES, MAX_REQUEST_BODY_BYTES);
     }),
   );
 
@@ -273,7 +423,13 @@ layer(serverLayer, { timeout: 30_000 })("app events", (it) => {
         batch([
           {
             ageMs: 0,
-            event: { _tag: "ScreenOpened", screen: "title", id: "Big Buck Bunny", durationMs: 9 },
+            event: {
+              _tag: "ScreenOpened",
+              screen: "title",
+              id: "Big Buck Bunny",
+              cache: "kept",
+              contentVisibleMs: 9,
+            },
           },
         ]),
       );

@@ -53,7 +53,7 @@ export function TitlePoster({
   // take a parent's gap of their own.
   return (
     <View className={widthClassName}>
-      <Link href={`/title/${title.id}`} asChild onPress={() => pressTitle(title.id)}>
+      <Link href={`/title/${title.id}`} asChild onPress={(press) => pressTitle(title.id, press)}>
         <Link.Trigger>
           <Pressable
             accessibilityRole="button"

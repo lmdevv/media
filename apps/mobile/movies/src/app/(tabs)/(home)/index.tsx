@@ -1,4 +1,3 @@
-import { useHomeContent } from "@media/mobile-core/app-events-react";
 import { describeFailure } from "@media/mobile-core/failure";
 import { router } from "expo-router";
 import { Folder, Plus, Popcorn } from "lucide-react-native";
@@ -21,7 +20,7 @@ import { ContinueCard } from "@/components/continue-card";
 import { TitlePoster } from "@/components/title-poster";
 import { Button } from "@/components/ui/button";
 import { CalmState } from "@/components/ui/calm-state";
-import { appEvents } from "@/lib/app-events";
+import { HomeLaunchMarks } from "@/lib/app-events";
 import { homeScreen } from "@/lib/browse";
 import type { HomeScreen } from "@/lib/browse";
 import type { Home as HomeRows } from "@/lib/catalog";
@@ -52,8 +51,6 @@ export default function Home() {
           }),
         }
       : null;
-
-  useHomeContent(appEvents, loaded === null ? null : "network");
 
   const failure =
     home.status === "error"
@@ -114,6 +111,7 @@ export default function Home() {
           </>
         )}
       </View>
+      <HomeLaunchMarks content={loaded === null ? null : "network"} />
     </ScrollView>
   );
 }

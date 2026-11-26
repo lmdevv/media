@@ -2,6 +2,7 @@ import { Check, ChevronRight, Ellipsis } from "lucide-react-native";
 import type { LucideIcon } from "lucide-react-native";
 import type { ReactNode } from "react";
 import { Pressable, View } from "react-native";
+import type { GestureResponderEvent } from "react-native";
 
 import { Artwork } from "./artwork";
 import { Icon } from "./icon";
@@ -50,7 +51,7 @@ export type RowProps = RowTrailing & {
   readonly active?: boolean;
   /** A row that can't be used now, such as a song not downloaded while offline (D11, D13). */
   readonly dimmed?: boolean;
-  readonly onPress?: (() => void) | undefined;
+  readonly onPress?: ((press: GestureResponderEvent) => void) | undefined;
   readonly onLongPress?: (() => void) | undefined;
   /** Read instead of the title, subtitle, and detail, when they don't say enough. */
   readonly accessibilityLabel?: string | undefined;
