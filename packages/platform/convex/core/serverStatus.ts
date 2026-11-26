@@ -14,29 +14,47 @@ const DEVICES_MAX = 16;
 /** Far past the capability keys today's operation table can list. */
 const CAPABILITIES_MAX = 1000;
 
-/** The media server cuts each line it reports to 200 characters. */
-const TEXT_CHARS_MAX = 300;
+/** A capability key, such as `decode.qsv:hevc/yuv420p10le`. */
+const KEY_CHARS_MAX = 80;
+
+/** A domain, render node, PCI id, kernel driver, ffmpeg version, or kernel release. */
+const NAME_CHARS_MAX = 64;
+
+/** A userspace driver's name and version. */
+const DRIVER_CHARS_MAX = 128;
 
 const isCount = (value: number): boolean => Number.isSafeInteger(value) && value >= 0;
 
-/** Every text of a transcoding report, to bound them. */
-const textsOf = (report: TranscodingReport): ReadonlyArray<string | null> => [
-  ...(report.build === null ? [] : [report.build.version, report.build.kernel]),
+/**
+ * Every text of a transcoding report with the most characters it may have. At these caps, with
+ * every character three bytes in UTF-8, the largest report stays under Convex's 1 MiB document.
+ */
+const textsOf = (report: TranscodingReport): ReadonlyArray<readonly [string | null, number]> => [
+  ...(report.build === null
+    ? []
+    : [
+        [report.build.version, NAME_CHARS_MAX] as const,
+        [report.build.kernel, NAME_CHARS_MAX] as const,
+      ]),
   ...report.devices.flatMap((device) => [
-    device.domain,
-    device.node,
-    device.pci,
-    device.kernelDriver,
-    device.userDriver,
+    [device.domain, NAME_CHARS_MAX] as const,
+    [device.node, NAME_CHARS_MAX] as const,
+    [device.pci, NAME_CHARS_MAX] as const,
+    [device.kernelDriver, NAME_CHARS_MAX] as const,
+    [device.userDriver, DRIVER_CHARS_MAX] as const,
   ]),
-  ...report.capabilities.flatMap((capability) => [capability.key, capability.domain]),
+  ...report.capabilities.flatMap((capability) => [
+    [capability.key, KEY_CHARS_MAX] as const,
+    [capability.domain, NAME_CHARS_MAX] as const,
+  ]),
 ];
 
 /**
  * What a media server says about itself, upserted into its own row with the server time of the
  * report, every few seconds while it runs. Refuses with `invalid_args` a version past 64
  * characters, a count that is not a whole number of at least 0, a start time that is not a time, or
- * a transcoding report past 16 devices, 1,000 capabilities, or 300 characters in any text.
+ * a transcoding report past 16 devices or 1,000 capabilities, or with a key past 80 characters, a
+ * driver past 128, or any other text past 64.
  */
 export const report = serverMutation({
   args: {
@@ -65,11 +83,11 @@ export const report = serverMutation({
     if (
       transcoding.devices.length > DEVICES_MAX ||
       transcoding.capabilities.length > CAPABILITIES_MAX ||
-      textsOf(transcoding).some((text) => text !== null && text.length > TEXT_CHARS_MAX)
+      textsOf(transcoding).some(([text, most]) => text !== null && text.length > most)
     ) {
       fail(
         "invalid_args",
-        `A transcoding report lists at most ${DEVICES_MAX} devices and ${CAPABILITIES_MAX} capabilities, each text at most ${TEXT_CHARS_MAX} characters`,
+        `A transcoding report lists at most ${DEVICES_MAX} devices and ${CAPABILITIES_MAX} capabilities, keys of at most ${KEY_CHARS_MAX} characters, drivers of at most ${DRIVER_CHARS_MAX}, and other texts of at most ${NAME_CHARS_MAX}`,
       );
     }
 

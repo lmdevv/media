@@ -9,6 +9,9 @@ import { coreStackFromEnvFile } from "../stack-env";
 
 const stack = coreStackFromEnvFile();
 
+/** `length` characters of three bytes each in UTF-8: the most a text under a cap can weigh. */
+const text = (length: number): string => "語".repeat(length);
+
 describe.skipIf(stack === undefined)("server status", { timeout: 60_000 }, () => {
   it("show an admin what the media server reported last, and refuse a member", async () => {
     if (stack === undefined) return;
@@ -139,5 +142,78 @@ describe.skipIf(stack === undefined)("server status", { timeout: 60_000 }, () =>
         ),
       ),
     ).toBe("invalid_args");
+  });
+
+  it("store the largest report the caps allow, and refuse a text one character past its cap", async () => {
+    if (stack === undefined) return;
+
+    const admin = await member(stack, "status-largest", "admin");
+    const startedAt = Date.now() - 60_000;
+
+    const device = {
+      domain: text(64),
+      node: text(64),
+      opened: true,
+      pci: text(64),
+      kernelDriver: text(64),
+      userDriver: text(128),
+      checkedAt: startedAt,
+    };
+
+    const capability = {
+      domain: text(64),
+      status: "unsupported" as const,
+      source: "probe" as const,
+      checkedAt: startedAt,
+      reason: "inconclusive" as const,
+      quarantineEndsAt: startedAt + 900_000,
+    };
+
+    const transcoding = {
+      build: { version: text(64), kernel: text(64), checkedAt: startedAt },
+      devices: Array.from({ length: 16 }, () => device),
+      capabilities: Array.from({ length: 1000 }, (_, index) => ({
+        ...capability,
+        key: `${String(index).padStart(4, "0")}${text(76)}`,
+      })),
+    };
+
+    const largest = {
+      version: `0.0.0-${unique()}`.padEnd(64, "0"),
+      activeStreams: 0,
+      runsAwaitingExit: 0,
+      startedAt,
+      transcoding,
+    };
+
+    await runServer(stack, api.core.serverStatus.report, largest, Schema.Null);
+
+    const stored = await admin.signedIn.client.query(api.core.server.status, {});
+
+    expect(stored?.version).toBe(largest.version);
+    expect(stored?.transcoding).toStrictEqual(transcoding);
+
+    const pastCaps = [
+      { ...transcoding, build: { ...transcoding.build, kernel: text(65) } },
+      { ...transcoding, devices: [{ ...device, userDriver: text(129) }] },
+      { ...transcoding, devices: [{ ...device, pci: text(65) }] },
+      { ...transcoding, capabilities: [{ ...capability, key: text(81) }] },
+      { ...transcoding, capabilities: [{ ...capability, key: "k", domain: text(65) }] },
+    ];
+
+    const refusals = await Promise.all(
+      pastCaps.map((past) =>
+        refusal(
+          runServer(
+            stack,
+            api.core.serverStatus.report,
+            { ...largest, transcoding: past },
+            Schema.Null,
+          ),
+        ),
+      ),
+    );
+
+    expect(refusals).toStrictEqual(pastCaps.map(() => "invalid_args"));
   });
 });
