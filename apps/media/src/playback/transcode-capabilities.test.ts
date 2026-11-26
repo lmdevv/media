@@ -24,6 +24,7 @@ import * as TranscodeCapabilities from "./transcode-capabilities.ts";
 import { Diagnosis } from "./transcode-recovery.ts";
 import { planVideo, samePipeline, type VideoIntent, type VideoPipeline } from "./video-pipeline.ts";
 import { capabilityKey, ImplId, type SourceVideo } from "./video-ops.ts";
+import { renderVideo } from "./video-render.ts";
 
 const hasFfmpeg = await ffmpegAvailable();
 
@@ -51,7 +52,8 @@ const TONE_MAP_QSV = capabilityKey(ImplId("tonemap.qsv"), "pq");
 
 const DECODE_JPEG_RANGE = capabilityKey(ImplId("decode.qsv"), "h264/yuvj420p");
 
-const VPP_FAILED = "[Parsed_vpp_qsv_0 @ 0x1] Invalid color_matrix.";
+/** The fused `vpp_qsv` of a Quick Sync chain, named after the decoder's map as the renderer names it. */
+const VPP_FAILED = "[Parsed_vpp_qsv_2 @ 0x1] Invalid color_matrix.";
 
 const intentOf = (source: SourceVideo): VideoIntent => ({
   codec: "h264",
@@ -165,16 +167,17 @@ const pipelineOf = (
   return planned.success.pipeline;
 };
 
+/** Which step owns each name in a log of `pipeline`'s runs, as the renderer lays a run out. */
+const ownersOf = (pipeline: VideoPipeline) =>
+  renderVideo(pipeline, { input: 0, stream: 0, trimPicture: undefined, trimSubtitle: undefined })
+    .owners;
+
 /** A run of the full Quick Sync chain whose fused `vpp_qsv` failed, as ffmpeg reports it. */
 const vppFailed = (pipeline: VideoPipeline): TranscodeCapabilities.FailedRun => ({
   request: request(HDR),
   pipeline,
-  owners: {
-    decoder: { step: 0, names: ["hevc", "hevc_qsv"] },
-    encoder: { step: pipeline.steps.length - 1, names: ["h264_qsv"] },
-    filters: new Map([["Parsed_vpp_qsv_0", [1, 2]]]),
-  },
-  failure: { exitCode: 234, signal: null, stderrHead: VPP_FAILED },
+  owners: ownersOf(pipeline),
+  failure: { exitCode: 234, signal: null, stderrTail: VPP_FAILED },
 });
 
 /** Writes a one-second VP9 file into the stage, not the way the generated clip is made. */
@@ -244,13 +247,15 @@ const hanging = await writeFakeFfmpeg({
   rules: [{ token: "tonemap=1", runs: "probe", hang: true }],
 });
 
-const IO_SURFACE = "[h264_qsv @ 0x1] Error querying IO surface: unsupported (-3)";
+/** VA-API's H.264 decoder refusing a packet, as ffmpeg reports it for the decoder's stream. */
+const DECODE_FAILED =
+  "[vist#0:0/h264 @ 0x1] [dec:h264 @ 0x2] Error submitting packet to decoder: Input/output error";
 
 /** The first file's decoder probe fails once armed; the second file's never does. */
 const sourceOnly = await standIn({
   rules: [
     { token: "arm-first", runs: "any", arm: "first", stderr: "armed" },
-    { token: "first.mkv", runs: "probe", armedBy: "first", stderr: IO_SURFACE },
+    { token: "first.mkv", runs: "probe", armedBy: "first", stderr: DECODE_FAILED },
   ],
 });
 
@@ -270,7 +275,7 @@ const deviceLost = await standIn({
   rules: [
     { token: "arm-outage", runs: "any", arm: "outage", stderr: "armed" },
     { token: "tonemap=1", runs: "probe", armedBy: "outage", stderr: VPP_FAILED },
-    { token: "hevc-8.mkv", runs: "probe", armedBy: "outage", stderr: IO_SURFACE },
+    { token: "hevc-8.mkv", runs: "probe", armedBy: "outage", stderr: DECODE_FAILED },
     {
       token: "nullsrc=s=64x64",
       runs: "any",
@@ -304,9 +309,41 @@ const provingNothing = await Promise.all(
   PROVES_NOTHING.map(async ([name, behavior]) => [name, await standIn(behavior)] as const),
 );
 
-/** A tone map probe that crashes, which ffmpeg ran: a refusal. */
+/** What the Quick Sync HDR10 tone map probe reads, past the clip's path. */
+const TONE_MAP_PROBE = "hevc-pq.mkv -map";
+
+/** Every Quick Sync HDR10 tone map probe crashes ffmpeg, as a driver that always faults would. */
 const crashing = await standIn({
-  rules: [{ token: "tonemap=1", runs: "probe", signal: "SIGSEGV" }],
+  rules: [{ token: TONE_MAP_PROBE, runs: "probe", signal: "SIGBUS" }],
+});
+
+/** The first Quick Sync HDR10 tone map probe crashes ffmpeg, as an intermittent driver fault would. */
+const crashingOnce = await standIn({
+  rules: [{ token: TONE_MAP_PROBE, runs: "probe", signal: "SIGBUS", limit: 1 }],
+});
+
+/**
+ * The Quick Sync HDR10 tone map probe crashes ffmpeg, passes once, then crashes again: a key that
+ * crashes in a share of runs, which one lucky pass must not verify.
+ */
+const crashingAgain = await standIn({
+  rules: [
+    { token: TONE_MAP_PROBE, runs: "probe", signal: "SIGBUS", limit: 1 },
+    { token: TONE_MAP_PROBE, runs: "probe", limit: 1 },
+    { token: TONE_MAP_PROBE, runs: "probe", signal: "SIGBUS", limit: 1 },
+  ],
+});
+
+/**
+ * The Quick Sync HDR10 tone map probe crashes ffmpeg, passes the three runs that verify it again,
+ * then crashes once more, when a diagnosis re-probes it.
+ */
+const crashingInDiagnosis = await standIn({
+  rules: [
+    { token: TONE_MAP_PROBE, runs: "probe", signal: "SIGBUS", limit: 1 },
+    { token: TONE_MAP_PROBE, runs: "probe", limit: 3 },
+    { token: TONE_MAP_PROBE, runs: "probe", signal: "SIGBUS" },
+  ],
 });
 
 /** Making the generated MPEG-2 clip takes four seconds, longer than a negotiation waits. */
@@ -336,6 +373,21 @@ const relapsing = await standIn({
 });
 
 const plain = await standIn({});
+
+/** The device check opens the device and names its driver as `line` does, then exits 0. */
+const namingDriver = (line: string) =>
+  standIn({
+    rules: [{ token: "nullsrc=s=64x64", runs: "any", stderr: line, exitCode: 0 }],
+  });
+
+/** Debian's iHD 25.2.3 prints an empty build note after its version. */
+const emptyBuildNote = await namingDriver(
+  "[AVHWDeviceContext @ 0x1] VAAPI driver: Intel iHD driver for Intel(R) Gen Graphics - 25.2.3 ().",
+);
+
+const buildNote = await namingDriver(
+  "[AVHWDeviceContext @ 0x1] VAAPI driver: Intel iHD driver for Intel(R) Gen Graphics - 25.2.3 (1.2).",
+);
 
 /** This build cannot make the generated VP9 clip, as one without that encoder setting couldn't. */
 const clipless = await standIn({
@@ -435,12 +487,8 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
           const diagnosis = yield* capabilities.diagnose({
             request: first,
             pipeline,
-            owners: {
-              decoder: { step: 0, names: ["h264", "h264_qsv"] },
-              encoder: { step: pipeline.steps.length - 1, names: ["h264_qsv"] },
-              filters: new Map(),
-            },
-            failure: { exitCode: 69, signal: null, stderrHead: IO_SURFACE },
+            owners: ownersOf(pipeline),
+            failure: { exitCode: 69, signal: null, stderrTail: DECODE_FAILED },
           });
 
           assert.deepStrictEqual(diagnosis, Diagnosis.Source({ impls: [ImplId("decode.qsv")] }));
@@ -551,12 +599,12 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
           const decoderFailed = yield* capabilities.diagnose({
             request: request(sdr),
             pipeline: sdrPipeline,
-            owners: {
-              decoder: { step: 0, names: ["hevc", "hevc_qsv"] },
-              encoder: { step: sdrPipeline.steps.length - 1, names: ["h264_qsv"] },
-              filters: new Map(),
+            owners: ownersOf(sdrPipeline),
+            failure: {
+              exitCode: 69,
+              signal: null,
+              stderrTail: DECODE_FAILED.replaceAll("h264", "hevc"),
             },
-            failure: { exitCode: 69, signal: null, stderrHead: IO_SURFACE.replace("h264", "hevc") },
           });
 
           assert.isTrue(Diagnosis.$is("Capability")(decoderFailed));
@@ -615,18 +663,144 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
     });
   }
 
-  layer(
-    crashing.services,
-    live,
-  )((it) => {
+  layer(crashing.services, { timeout: "60 seconds" })((it) => {
     it.effect(
-      "refuses a key whose probe crashes ffmpeg",
+      "sets a key whose probe crashes ffmpeg aside for 15 minutes, then 2 hours, then until a restart, probing it again after each",
+      () =>
+        Effect.gen(function* () {
+          const capabilities = yield* TranscodeCapabilities.Service;
+
+          const strikes = Effect.map(capabilities.inventory, (known) =>
+            Option.map(
+              Inventory.capabilityOf(known, TONE_MAP_QSV).quarantine,
+              ({ strikes: struck, until }) => [struck, until === "restart"] as const,
+            ),
+          );
+
+          const first = yield* capabilities.resolve(request(HDR));
+          const known = Inventory.capabilityOf(yield* capabilities.inventory, TONE_MAP_QSV);
+
+          assert.strictEqual(known.status, "unknown", "a crash refuses nothing");
+          assert.deepStrictEqual(
+            known.evidence.map((evidence) =>
+              Inventory.Evidence.$is("Probe")(evidence) ? evidence.outcome : "build",
+            ),
+            ["crashed"],
+          );
+          assert.deepStrictEqual(yield* strikes, Option.some([1, false] as const));
+          assert.isFalse(first.verified.has(TONE_MAP_QSV));
+          assert.include(
+            plannedImpls(HDR, first).pipe(Result.getOrElse((): ReadonlyArray<string> => [])),
+            "tonemap.cpu",
+          );
+          // Runs that read the clip: its making, once, and each probe of the tone map.
+          const toneMapRuns = runsWith(crashing.ffmpeg, "hevc-pq.mkv");
+          const probes = yield* toneMapRuns;
+
+          // Within the quarantine nothing probes it; once it ends, the next negotiation does.
+          yield* TestClock.adjust(Duration.minutes(14));
+          yield* capabilities.resolve(request(HDR));
+          assert.strictEqual(yield* toneMapRuns, probes);
+
+          yield* TestClock.adjust(Duration.minutes(1));
+          yield* capabilities.resolve(request(HDR));
+          assert.strictEqual(yield* toneMapRuns, probes + 1);
+          assert.deepStrictEqual(yield* strikes, Option.some([2, false] as const));
+
+          yield* TestClock.adjust(Duration.hours(2));
+          yield* capabilities.resolve(request(HDR));
+          assert.strictEqual(yield* toneMapRuns, probes + 2);
+          assert.deepStrictEqual(yield* strikes, Option.some([3, true] as const));
+
+          // A path that always crashes stays out until the server restarts.
+          yield* TestClock.adjust(Duration.days(7));
+          const last = yield* capabilities.resolve(request(HDR));
+
+          assert.strictEqual(yield* toneMapRuns, probes + 2);
+          assert.isFalse(last.verified.has(TONE_MAP_QSV));
+        }),
+      60_000,
+    );
+  });
+
+  layer(crashingOnce.services, { timeout: "60 seconds" })((it) => {
+    it.effect(
+      "verifies a key whose probe crashed once after three clean runs in a row 15 minutes later",
+      () =>
+        Effect.gen(function* () {
+          const capabilities = yield* TranscodeCapabilities.Service;
+          const first = yield* capabilities.resolve(request(HDR));
+
+          assert.isFalse(first.verified.has(TONE_MAP_QSV));
+          assert.strictEqual(yield* statusOf(TONE_MAP_QSV), "unknown");
+          const probes = yield* runsWith(crashingOnce.ffmpeg, "hevc-pq.mkv");
+
+          yield* TestClock.adjust(Duration.minutes(15));
+          const later = yield* capabilities.resolve(request(HDR));
+
+          // The tone map's probe runs once; with one strike, three times that.
+          assert.strictEqual(yield* runsWith(crashingOnce.ffmpeg, "hevc-pq.mkv"), probes + 3);
+          assert.isTrue(later.verified.has(TONE_MAP_QSV));
+          assert.deepStrictEqual(
+            plannedImpls(HDR, later),
+            Result.succeed(["decode.qsv", "scale.qsv", "tonemap.qsv", "encode.qsv"]),
+          );
+        }),
+      60_000,
+    );
+  });
+
+  layer(crashingAgain.services, { timeout: "60 seconds" })((it) => {
+    it.effect(
+      "keeps a key that crashed set aside when one of its clean runs after the quarantine crashes",
       () =>
         Effect.gen(function* () {
           const capabilities = yield* TranscodeCapabilities.Service;
 
           yield* capabilities.resolve(request(HDR));
-          assert.strictEqual(yield* statusOf(TONE_MAP_QSV), "unsupported");
+          yield* TestClock.adjust(Duration.minutes(15));
+          const later = yield* capabilities.resolve(request(HDR));
+          const known = Inventory.capabilityOf(yield* capabilities.inventory, TONE_MAP_QSV);
+
+          assert.isFalse(later.verified.has(TONE_MAP_QSV), "one lucky pass verifies nothing");
+          assert.strictEqual(known.status, "unknown");
+          assert.deepStrictEqual(
+            Option.map(known.quarantine, (quarantine) => quarantine.strikes),
+            Option.some(2),
+          );
+        }),
+      60_000,
+    );
+  });
+
+  layer(crashingInDiagnosis.services, { timeout: "60 seconds" })((it) => {
+    it.effect(
+      "gives a key its second strike, two hours, when a diagnosis's probe of it crashes",
+      () =>
+        Effect.gen(function* () {
+          const capabilities = yield* TranscodeCapabilities.Service;
+
+          yield* capabilities.resolve(request(HDR));
+          yield* TestClock.adjust(Duration.minutes(15));
+          const verified = yield* capabilities.resolve(request(HDR));
+
+          assert.isTrue(verified.verified.has(TONE_MAP_QSV));
+          const diagnosis = yield* capabilities.diagnose(vppFailed(pipelineOf(HDR, verified)));
+
+          assert.deepStrictEqual(
+            diagnosis,
+            Diagnosis.Capability({ keys: [TONE_MAP_QSV], impls: [ImplId("tonemap.qsv")] }),
+          );
+          const known = Inventory.capabilityOf(yield* capabilities.inventory, TONE_MAP_QSV);
+
+          assert.deepStrictEqual(
+            Option.map(known.quarantine, ({ strikes, until, since }) => [
+              strikes,
+              until === "restart" ? until : until - since,
+            ]),
+            Option.some([2, Duration.toMillis(Duration.hours(2))]),
+          );
+          assert.deepInclude(known.evidence[0], { _tag: "Probe", outcome: "crashed" });
         }),
       60_000,
     );
@@ -723,6 +897,14 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
             Diagnosis.Capability({ keys: [TONE_MAP_QSV], impls: [ImplId("tonemap.qsv")] }),
           );
 
+          // The probe that failed again is the key's newest evidence, beside its quarantine.
+          const [shown] = Inventory.capabilityOf(
+            yield* capabilities.inventory,
+            TONE_MAP_QSV,
+          ).evidence;
+
+          assert.deepInclude(shown, { _tag: "Probe", outcome: "rejected", detail: VPP_FAILED });
+
           const quarantined = yield* capabilities.resolve(request(HDR));
 
           assert.isFalse(quarantined.verified.has(TONE_MAP_QSV));
@@ -735,8 +917,9 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
           yield* TestClock.adjust(Duration.minutes(15));
           const recovered = yield* capabilities.resolve(request(HDR));
 
+          // The probe runs once; with the strike, three clean runs in a row verify it again.
           assert.isTrue(recovered.verified.has(TONE_MAP_QSV));
-          assert.strictEqual(yield* runsWith(relapsing.ffmpeg, "tonemap=1"), probesBefore + 1);
+          assert.strictEqual(yield* runsWith(relapsing.ffmpeg, "tonemap=1"), probesBefore + 3);
         }),
       60_000,
     );
@@ -759,7 +942,7 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
             failure: {
               exitCode: 234,
               signal: null,
-              stderrHead:
+              stderrTail:
                 "[aost#0:1/copy @ 0x1] Error initializing bitstream filter: aac_adtstoasc",
             },
           });
@@ -788,6 +971,151 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
     live,
   )((it) => {
     it.effect(
+      "keeps a file on its GPU rows after a crash nothing reproduces, and off a row for a day after a named failure its probe runs past",
+      () =>
+        Effect.gen(function* () {
+          const capabilities = yield* TranscodeCapabilities.Service;
+          const asked = request(HDR);
+          const warm = yield* capabilities.resolve(asked);
+          const pipeline = pipelineOf(HDR, warm);
+          const gpuRows = pipeline.steps.map((step) => step.impl);
+
+          assert.deepStrictEqual(gpuRows, [
+            ImplId("decode.qsv"),
+            ImplId("scale.qsv"),
+            ImplId("tonemap.qsv"),
+            ImplId("encode.qsv"),
+          ]);
+
+          // A SIGBUS no probe reproduces: no verdict, and nothing kept from the file.
+          const crashed = yield* capabilities.diagnose({
+            ...vppFailed(pipeline),
+            failure: { exitCode: null, signal: "SIGBUS", stderrTail: VPP_FAILED },
+          });
+
+          assert.deepStrictEqual(crashed, Diagnosis.Undecided({ impls: gpuRows }));
+          assert.isUndefined((yield* capabilities.inventory).exclusions.get(asked.scope));
+          assert.isTrue(
+            samePipeline(pipelineOf(HDR, yield* capabilities.resolve(asked)), pipeline),
+            "the file's next stream keeps its GPU chain",
+          );
+
+          // A failure that names vpp_qsv, which ran on the generated clip: the file is refused there.
+          const named = yield* capabilities.diagnose(vppFailed(pipeline));
+
+          assert.deepStrictEqual(
+            named,
+            Diagnosis.Source({ impls: [ImplId("scale.qsv"), ImplId("tonemap.qsv")] }),
+          );
+          const next = yield* capabilities.resolve(asked);
+
+          assert.deepStrictEqual(
+            gpuRows.filter((impl) => next.excluded.has(impl)),
+            [ImplId("scale.qsv"), ImplId("tonemap.qsv")],
+          );
+        }),
+      60_000,
+    );
+  });
+
+  layer(
+    plain.services,
+    live,
+  )((it) => {
+    it.effect(
+      "keeps a file off every GPU row for a day after a refusal that names no part its probes run past",
+      () =>
+        Effect.gen(function* () {
+          const capabilities = yield* TranscodeCapabilities.Service;
+          const asked = request(HDR);
+          const pipeline = pipelineOf(HDR, yield* capabilities.resolve(asked));
+          const gpuRows = pipeline.steps.map((step) => step.impl);
+
+          // ffmpeg exits by its own decision, its last line naming a filter instance this run does
+          // not have, after an audio warning: no part named, and no crash.
+          const refused = yield* capabilities.diagnose({
+            ...vppFailed(pipeline),
+            failure: {
+              exitCode: 234,
+              signal: null,
+              stderrTail: [
+                "[aist#0:1/ac3 @ 0x1] [dec:ac3 @ 0x2] Error submitting packet to decoder: Invalid data found when processing input",
+                "[Parsed_vpp_qsv_9 @ 0x3] Invalid color_matrix.",
+              ].join("\n"),
+            },
+          });
+
+          assert.deepStrictEqual(refused, Diagnosis.Source({ impls: gpuRows }));
+          const next = yield* capabilities.resolve(asked);
+
+          assert.deepStrictEqual(
+            gpuRows.filter((impl) => next.excluded.has(impl)),
+            gpuRows,
+          );
+          assert.deepStrictEqual(
+            plannedImpls(HDR, next),
+            Result.succeed(["decode.cpu", "scale.cpu", "tonemap.cpu", "encode.cpu"]),
+          );
+          assert.isFalse(
+            (yield* capabilities.resolve(request(HDR, "other"))).excluded.has(ImplId("decode.qsv")),
+            "another file keeps its GPU rows",
+          );
+        }),
+      60_000,
+    );
+  });
+
+  layer(
+    servicesOf(plain.ffmpeg, { HARDWARE_ACCELERATION: "none" }),
+    live,
+  )((it) => {
+    it.effect(
+      "keeps the failed stream alone off a CPU row its log named, never the file",
+      () =>
+        Effect.gen(function* () {
+          const capabilities = yield* TranscodeCapabilities.Service;
+          const sdr: SourceVideo = { ...JPEG_RANGE, pixelFormat: "yuv420p" };
+          const asked = request(sdr);
+          const pipeline = pipelineOf(sdr, yield* capabilities.resolve(asked));
+
+          assert.deepStrictEqual(
+            pipeline.steps.map((step) => step.impl),
+            [ImplId("decode.cpu"), ImplId("scale.cpu"), ImplId("encode.cpu")],
+          );
+
+          const diagnosis = yield* capabilities.diagnose({
+            request: asked,
+            pipeline,
+            owners: ownersOf(pipeline),
+            failure: {
+              exitCode: 1,
+              signal: null,
+              stderrTail: [
+                "[libx264 @ 0x5d1c2a0] Error encoding a video frame",
+                "[vost#0:0/libx264 @ 0x5d1c3b0] [enc:libx264 @ 0x5d1c2a0] Error submitting video frame to the encoder",
+              ].join("\n"),
+            },
+          });
+
+          assert.deepStrictEqual(diagnosis, Diagnosis.Source({ impls: [ImplId("encode.cpu")] }));
+          const next = yield* capabilities.resolve(asked);
+
+          assert.isFalse(next.excluded.has(ImplId("encode.cpu")));
+          assert.deepStrictEqual(
+            plannedImpls(sdr, next),
+            Result.succeed(["decode.cpu", "scale.cpu", "encode.cpu"]),
+            "the file's next stream still has a chain",
+          );
+        }),
+      60_000,
+    );
+  });
+
+  layer(
+    plain.services,
+    live,
+  )((it) => {
+    it.effect(
       "blames the disk, not the decoder, for a full disk after a decode error the run recovered from",
       () =>
         Effect.gen(function* () {
@@ -801,15 +1129,11 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
           const diagnosis = yield* capabilities.diagnose({
             request: request(sdr),
             pipeline,
-            owners: {
-              decoder: { step: 0, names: ["hevc", "hevc_qsv"] },
-              encoder: { step: pipeline.steps.length - 1, names: ["h264_qsv"] },
-              filters: new Map(),
-            },
+            owners: ownersOf(pipeline),
             failure: {
               exitCode: 1,
               signal: null,
-              stderrHead: [
+              stderrTail: [
                 "[hevc @ 0x1] Could not find ref with POC 12",
                 "[out#0/hls @ 0x2] Error writing trailer: No space left on device",
               ].join("\n"),
@@ -852,6 +1176,35 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
       60_000,
     );
   });
+
+  for (const [named, standInOf, driver] of [
+    [
+      "drops an empty build note",
+      emptyBuildNote,
+      "Intel iHD driver for Intel(R) Gen Graphics - 25.2.3",
+    ],
+    ["keeps a build note", buildNote, "Intel iHD driver for Intel(R) Gen Graphics - 25.2.3 (1.2)"],
+  ] as const) {
+    layer(
+      standInOf.services,
+      live,
+    )((it) => {
+      it.effect(
+        `records the userspace driver the device check names, and ${named}`,
+        () =>
+          Effect.gen(function* () {
+            const capabilities = yield* TranscodeCapabilities.Service;
+
+            yield* capabilities.resolve(request(HDR));
+            const device = (yield* capabilities.inventory).devices.get("qsv");
+
+            assert.strictEqual(device?.opened, true);
+            assert.strictEqual(device?.userDriver, driver);
+          }),
+        60_000,
+      );
+    });
+  }
 
   layer(
     clipless.services,

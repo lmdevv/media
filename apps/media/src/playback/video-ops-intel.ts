@@ -1,6 +1,6 @@
 /**
  * The rows of Intel's two GPU APIs, written for any Intel GPU and for AMD's VA-API: Quick Sync
- * (`qsv`, oneVPL over a VA-API child device) and VA-API (`vaapi`). Each decodes, scales,
+ * (`qsv`, oneVPL derived from a VA-API device) and VA-API (`vaapi`). Each decodes, scales,
  * tone-maps, and encodes H.264 on the device, and moves frames to and from CPU memory in NV12 or
  * P010. Which of these a device does is evidence, never assumed: a row only says what it may try.
  */
@@ -18,6 +18,7 @@ import {
   Op,
   type OpImpl,
   type ProbeCase,
+  type Rendering,
   row,
   type Row,
   surfaceDepth,
@@ -34,27 +35,22 @@ const DECODED_FORMATS: ReadonlySet<string> = new Set(["yuv420p", "yuvj420p", "yu
 /** Depths GPU surfaces hold. */
 const SURFACE_DEPTHS: ReadonlySet<number> = new Set([8, 10]);
 
-/** Quick Sync's decoder for each codec, which `-hwaccel qsv` selects. */
-const QSV_DECODERS: ReadonlyMap<string, string> = new Map([
-  ["h264", "h264_qsv"],
-  ["hevc", "hevc_qsv"],
-  ["av1", "av1_qsv"],
-  ["vp9", "vp9_qsv"],
-  ["mpeg2video", "mpeg2_qsv"],
-]);
-
 /**
- * The `-init_hw_device` value for Quick Sync on the render node `device`. With oneVPL builds,
- * `qsv=hw:<path>` ignores the path and opens the default GPU, so the node is named as the child
- * VA-API device instead; a missing node then fails, as it should.
+ * Quick Sync on `QSV_DEVICE`, derived from a VA-API device (`va`) on that render node. With oneVPL
+ * builds `qsv=hw:<path>` ignores the path and opens the default GPU; the VA-API device names the
+ * node, so a missing one fails, as it should, and Quick Sync's decoder reads through it.
  */
-const qsvDeviceInit = (device: string): string => `qsv=hw,child_device=${device}`;
-
-/** Quick Sync on `QSV_DEVICE`. */
 export const QSV: DomainSpec = {
   device: (config) => config.qsvDevice,
-  deviceArgs: (device) => ["-init_hw_device", qsvDeviceInit(device), "-filter_hw_device", "hw"],
-  needs: ["hwaccel:qsv"],
+  deviceArgs: (device) => [
+    "-init_hw_device",
+    `vaapi=va:${device}`,
+    "-init_hw_device",
+    "qsv=hw@va",
+    "-filter_hw_device",
+    "hw",
+  ],
+  needs: ["hwaccel:qsv", "hwaccel:vaapi"],
 };
 
 /** VA-API on `VAAPI_DEVICE`. */
@@ -102,10 +98,10 @@ const scaleVariant = (op: { readonly depth: number }, depth: number) =>
 
 const surfaceName = (depth: number): string => (depth > 8 ? "p010" : "nv12");
 
-/** A GPU decoder: surfaces in NV12, or P010 above 8 bits. */
+/** A GPU decoder with `rendering`: surfaces in NV12, or P010 above 8 bits. */
 const decodeOn = (
   domain: GpuDomain,
-  input: ReadonlyArray<string>,
+  rendering: Pick<Rendering, "input" | "filters">,
   needs: (codec: string) => ReadonlyArray<BuildFeature>,
 ): OpImpl<"Decode"> => ({
   id: ImplId(`decode.${domain}`),
@@ -119,7 +115,7 @@ const decodeOn = (
 
     return { ...frame, memory: domain, pixelFormat: format, depth: surfaceDepth(format) };
   },
-  render: () => ({ ...NOTHING, input }),
+  render: () => ({ ...NOTHING, ...rendering }),
   probes: decodeProbes,
 });
 
@@ -173,10 +169,29 @@ const downloadFrom = (domain: GpuDomain): OpImpl<"Move"> => ({
   probes: moveProbes("cpu"),
 });
 
-const decodeQsv = decodeOn("qsv", ["-hwaccel", "qsv", "-hwaccel_output_format", "qsv"], (codec) => [
-  "hwaccel:qsv",
-  `decoder:${QSV_DECODERS.get(codec) ?? `${codec}_qsv`}`,
-]);
+/** VA-API's hardware decoding on the device Quick Sync is derived from. */
+const VAAPI_DECODING: ReadonlyArray<string> = [
+  "-hwaccel",
+  "vaapi",
+  "-hwaccel_output_format",
+  "vaapi",
+  "-hwaccel_device",
+  "va",
+];
+
+/**
+ * Quick Sync's decoder: VA-API's on the same device, its surfaces mapped with no copy into the
+ * Quick Sync device the run already opened as its filter device (`hw`), so no second Quick Sync
+ * session opens. oneVPL's own decoders are not used: on an Arc A380 with a 256 MiB BAR, a oneVPL
+ * decoder in the same run as `h264_qsv` had the kernel refuse the encoder's page faults (SIGBUS) in
+ * 18 of 2,300 all-GPU HEVC runs and 46 of 1,400 HEVC burn-ins; decoding this way crashed in none of
+ * 1,800 and in 1 of 900.
+ */
+const decodeQsv = decodeOn(
+  "qsv",
+  { input: VAAPI_DECODING, filters: [filter("hwmap"), filter("format", "qsv")] },
+  (codec) => ["hwaccel:vaapi", `decodes:${codec}`, "filter:hwmap"],
+);
 
 /** `vpp_qsv` scaling; it fuses with a following tone map into one `vpp_qsv`. */
 const scaleQsv: OpImpl<"Scale"> = {
@@ -267,11 +282,10 @@ const encodeQsv: OpImpl<"Encode"> = {
   probes: encodeProbes,
 };
 
-const decodeVaapi = decodeOn(
-  "vaapi",
-  ["-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi", "-hwaccel_device", "va"],
-  (codec) => ["hwaccel:vaapi", `decodes:${codec}`],
-);
+const decodeVaapi = decodeOn("vaapi", { input: VAAPI_DECODING, filters: [] }, (codec) => [
+  "hwaccel:vaapi",
+  `decodes:${codec}`,
+]);
 
 /** `scale_vaapi` scaling. */
 const scaleVaapi: OpImpl<"Scale"> = {

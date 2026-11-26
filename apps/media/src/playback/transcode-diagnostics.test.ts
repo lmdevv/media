@@ -1,7 +1,17 @@
 import { assert, describe, it } from "@effect/vitest";
 
-import { empty, withBuild, withDevice } from "./capability-inventory.ts";
+import { EpochMillis } from "@media/contracts/units";
+
+import {
+  capabilityOf,
+  empty,
+  Evidence,
+  record,
+  withBuild,
+  withDevice,
+} from "./capability-inventory.ts";
 import { transcodingReport } from "./transcode-diagnostics.ts";
+import { capabilityKey, ImplId } from "./video-ops.ts";
 
 const AT = 1_760_000_000_000;
 
@@ -44,5 +54,27 @@ describe("the transcoding report's identities", () => {
     assert.strictEqual(reportedVersion("ffmpeg version 9.0.2 Copyright (c) 2000-2026"), "9.0.2");
     assert.isNull(reportedVersion(`ffmpeg version ${"9".repeat(65)} Copyright`));
     assert.isNull(reportedVersion("built with gcc 14"));
+  });
+});
+
+describe("the transcoding report's capabilities", () => {
+  it("says a probe crashed, and when the key it set aside is probed again", () => {
+    const key = capabilityKey(ImplId("decode.vaapi"), "mpeg2video/yuv420p");
+
+    const crashed = Evidence.Probe({
+      at: AT,
+      outcome: "crashed",
+      source: undefined,
+      detail: "",
+      millis: 150,
+    });
+
+    const inventory = record(empty, key, crashed, capabilityOf(empty, key).epoch);
+    const [reported] = transcodingReport(inventory, AT).capabilities;
+
+    assert.strictEqual(reported?.key, key);
+    assert.strictEqual(reported?.source, "probe");
+    assert.strictEqual(reported?.reason, "crashed");
+    assert.strictEqual(reported?.quarantineEndsAt, EpochMillis.make(AT + 15 * 60_000));
   });
 });

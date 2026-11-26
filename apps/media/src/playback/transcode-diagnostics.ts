@@ -181,6 +181,7 @@ const byText = (left: string, right: string): number => (left < right ? -1 : lef
 const PROBE_REASONS = {
   passed: "passed",
   rejected: "refused",
+  crashed: "crashed",
   inconclusive: "inconclusive",
 } as const satisfies Record<ProbeOutcome, EvidenceReason>;
 

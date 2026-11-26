@@ -1,7 +1,7 @@
 import { join } from "node:path";
 
 import { assert, describe, layer } from "@effect/vitest";
-import { Clock, Effect, Fiber, FileSystem, Path, Schedule, Schema } from "effect";
+import { Clock, Effect, Fiber, FileSystem, Option, Path, Schedule, Schema } from "effect";
 import { HttpClient, HttpClientRequest } from "effect/http";
 
 import { LibraryId } from "@media/contracts/ids";
@@ -31,10 +31,10 @@ const FILM = "Recovered (2021)/Recovered (2021).mkv";
 
 /**
  * What ffmpeg prints when `vpp_qsv`, here scaling and tone mapping at once, fails at start. In a
- * run that burns a subtitle in after a seek, the picture's `trim` is the graph's first filter, so
- * `vpp_qsv` is its second.
+ * run that burns a subtitle in after a seek, the picture's `trim` is the graph's first filter and
+ * the decoder's map into Quick Sync (`hwmap`, `format`) the next two, so `vpp_qsv` is its fourth.
  */
-const VPP_FAILED = "[Parsed_vpp_qsv_1 @ 0x1] Invalid color_matrix.";
+const VPP_FAILED = "[Parsed_vpp_qsv_3 @ 0x1] Invalid color_matrix.";
 
 /** The first stream run that tone-maps on Quick Sync fails; its probe then fails too. */
 const TONE_MAP_FAILS: ReadonlyArray<RunRule> = [
@@ -117,6 +117,28 @@ const slowDiagnosis = await writeFakeFfmpeg({
     { token: "-ss ", runs: "hls", arm: "seeked" },
     { token: "-progress", runs: "probe", armedBy: "seeked", delayMs: 4000 },
   ],
+});
+
+/**
+ * Runs from the start write two seconds, so a seek past them starts a new run, and the first run
+ * that seeks fails at once, naming nothing; every later one plays through.
+ */
+const failsOnceSeeking = await writeFakeFfmpeg({
+  hlsFromStartSeconds: 2,
+  rules: [{ token: "-ss ", runs: "hls", stderr: "Conversion failed!", limit: 1 }],
+  logInvocations: true,
+});
+
+/**
+ * The first stream run that tone-maps on Quick Sync fails; from then on every probe takes eight
+ * seconds, longer than a diagnosis's whole budget.
+ */
+const outlastsDiagnosis = await writeFakeFfmpeg({
+  rules: [
+    { token: "tonemap=1", runs: "hls", stderr: VPP_FAILED, arm: "slow", limit: 1 },
+    { token: "-progress", runs: "probe", armedBy: "slow", delayMs: 8000 },
+  ],
+  logInvocations: true,
 });
 
 /** Runs as usual, logging every run. */
@@ -292,6 +314,19 @@ const seekTo = Effect.fn(function* (token: string, streamId: string, positionSec
     Effect.flatMap(decodeSeek),
     Effect.orDie,
   );
+});
+
+/** What the server answers a seek of `streamId` to `positionSeconds`: its status and body. */
+const seekAnswer = Effect.fn(function* (token: string, streamId: string, positionSeconds: number) {
+  const server = yield* MediaTestServer.Service;
+
+  const response = yield* HttpClient.execute(
+    HttpClientRequest.post(`${server.baseUrl}/api/playback/seek`).pipe(
+      HttpClientRequest.bodyJsonUnsafe({ token, streamId, positionSeconds }),
+    ),
+  ).pipe(Effect.orDie);
+
+  return { status: response.status, body: yield* response.json.pipe(Effect.orDie) };
 });
 
 /** The index of the segment of the playlist at `url` that holds `seconds` into the stream. */
@@ -564,6 +599,124 @@ describe.skipIf(!hasFfmpeg)("stream recovery", () => {
           assert.strictEqual(retried.status, 500, retried.body);
           assert.include(retried.body, '"_tag":"TranscodeFailed"');
           assert.lengthOf(yield* runsOf(damagedLate, streamId), runs, "no run starts there again");
+        }),
+      120_000,
+    );
+  });
+
+  layer(
+    MediaTestServer.layer({ FFMPEG_PATH: failsOnceSeeking }),
+    options,
+  )((it) => {
+    it.effect(
+      "forgets a position that ended in failure once a later run serves it, so a seek straight back plays",
+      () =>
+        Effect.gen(function* () {
+          const server = yield* MediaTestServer.Service;
+          const { library } = yield* FixtureWorkspace.Service;
+
+          const token = signTestToken({
+            fid: server.fileId("movies", library.directMovie),
+            sid: "forgotten",
+          });
+
+          const stream = yield* negotiated({ token, capabilities: smallBrowser });
+          const streamId = stream.streamId ?? "";
+
+          assert.strictEqual(stream.mode, "transcode-software");
+          assert.strictEqual(yield* fetchStatus(segmentOf(stream.url, 0)), 200);
+
+          // The run at ten seconds fails, and recovery gives up there.
+          const failedAt = yield* seekTo(token, streamId, 10);
+          const index = yield* segmentHolding(failedAt.playlistUrl, 10);
+          const failed = yield* fetchAnswer(segmentOf(failedAt.playlistUrl, index));
+
+          assert.strictEqual(failed.status, 500, failed.body);
+
+          // A run from four seconds plays through that position and serves it.
+          const earlier = yield* seekTo(token, streamId, 4);
+          const from = yield* segmentHolding(earlier.playlistUrl, 4);
+
+          for (let segment = from; segment <= index; segment += 1) {
+            assert.strictEqual(
+              yield* fetchStatus(segmentOf(earlier.playlistUrl, segment)),
+              200,
+              `segment ${String(segment)}`,
+            );
+          }
+
+          // Back to the start, whose run ends early, then straight back to ten seconds.
+          const start = yield* seekTo(token, streamId, 0);
+
+          assert.strictEqual(yield* fetchStatus(segmentOf(start.playlistUrl, 0)), 200);
+          const back = yield* seekAnswer(token, streamId, 10);
+
+          assert.strictEqual(back.status, 200, JSON.stringify(back.body));
+          const moved = yield* decodeSeek(back.body).pipe(Effect.orDie);
+
+          assert.strictEqual(yield* fetchStatus(segmentOf(moved.playlistUrl, index)), 200);
+        }),
+      120_000,
+    );
+  });
+
+  layer(
+    MediaTestServer.layer(
+      { FFMPEG_PATH: outlastsDiagnosis, HARDWARE_ACCELERATION: "qsv" },
+      { diagnosisBudget: TranscodeCapabilities.DiagnosisBudget.defaultValue() },
+    ),
+    options,
+  )((it) => {
+    it.effect(
+      "keeps this stream off the stages a diagnosis could not decide in the service's budget, and sets nothing aside for others",
+      () =>
+        Effect.gen(function* () {
+          const server = yield* MediaTestServer.Service;
+          const capabilities = yield* TranscodeCapabilities.Service;
+          const fileId = yield* addFilm("undecided");
+          const toneMap = capabilityKey(ImplId("tonemap.qsv"), "pq");
+
+          const film = yield* negotiated({
+            token: signTestToken({ fid: fileId, sid: "film" }),
+            ...CHOICES,
+          });
+
+          assert.strictEqual(film.mode, "transcode-qsv", "the encode stays on the GPU");
+          assert.strictEqual(film.generation, 2);
+          assert.strictEqual(yield* fetchStatus(segmentOf(film.url, 3)), 200);
+
+          const [first = [], replacement = []] = yield* runsOf(
+            outlastsDiagnosis,
+            film.streamId ?? "",
+          );
+
+          assert.isTrue(first.join(" ").includes("tonemap=1"));
+          assert.isTrue(replacement.join(" ").includes("zscale"), "tone-mapped on the CPU");
+          assert.notInclude(replacement.join(" "), "vpp_qsv", "both suspects kept off");
+          assert.include(replacement, "h264_qsv");
+
+          const replaced = server
+            .logged()
+            .filter(
+              (entry) =>
+                entry.annotations["streamId"] === film.streamId &&
+                entry.message === "StreamSessions.pipeline_replaced",
+            );
+
+          assert.deepStrictEqual(
+            replaced.map((entry) => [entry.annotations["cause"], entry.annotations["excluded"]]),
+            [["Undecided", "scale.qsv,tonemap.qsv"]],
+          );
+
+          // Nothing was decided: the tone map is neither quarantined nor kept from the file.
+          const known = yield* capabilities.inventory;
+
+          assert.strictEqual(capabilityOf(known, toneMap).status, "verified");
+          assert.isTrue(Option.isNone(capabilityOf(known, toneMap).quarantine));
+          assert.isTrue(
+            [...known.exclusions.values()].every((excluded) => excluded.size === 0),
+            "no file is kept from a row",
+          );
         }),
       120_000,
     );

@@ -20,6 +20,7 @@ import {
   type VideoPipeline,
 } from "./video-pipeline.ts";
 import { ImplId, Op, type Row, type SourceVideo } from "./video-ops.ts";
+import { renderVideo } from "./video-render.ts";
 
 const HDR: SourceVideo = {
   codec: "hevc",
@@ -39,7 +40,7 @@ const row = (id: string): Row => {
   return found;
 };
 
-const everything = (domain: "qsv" | "vaapi"): CapabilitySnapshot => {
+const everything = (domain: "qsv" | "vaapi", source: SourceVideo): CapabilitySnapshot => {
   const bound = {
     domains: [{ domain, device: "/dev/dri/renderD128" }],
     verified: new Set<never>(),
@@ -47,10 +48,10 @@ const everything = (domain: "qsv" | "vaapi"): CapabilitySnapshot => {
   };
 
   const keys = candidateKeys(
-    HDR,
+    source,
     {
       codec: "h264",
-      toneMap: true,
+      toneMap: source.colour !== "sdr",
       bounds: { width: 1920, height: 1080 },
       cpuEncodeBounds: { width: 1920, height: 1080 },
       maxBitrate: undefined,
@@ -70,7 +71,7 @@ const chain = (
   const built = assemble(
     source,
     rows.map(([op, id]) => [op, row(id)] as const),
-    everything(domain),
+    everything(domain, source),
     Purpose.Run(),
   );
 
@@ -79,7 +80,15 @@ const chain = (
   return built.success;
 };
 
-/** decode.qsv, scale.qsv + tonemap.qsv fused into Parsed_vpp_qsv_0, encode.qsv. */
+/** Which step owns each name in a log of `pipeline`'s runs, as the renderer lays a run out. */
+const ownersOf = (pipeline: VideoPipeline): LogOwners =>
+  renderVideo(pipeline, { input: 0, stream: 0, trimPicture: undefined, trimSubtitle: undefined })
+    .owners;
+
+/**
+ * decode.qsv (VA-API's decoder, mapped into Quick Sync by Parsed_hwmap_0 and Parsed_format_1),
+ * scale.qsv + tonemap.qsv fused into Parsed_vpp_qsv_2, encode.qsv.
+ */
 const QSV_CHAIN = chain("qsv", [
   [Op.Decode({ codec: "hevc" }), "decode.qsv"],
   [Op.Scale({ width: 1280, height: 720, depth: 10 }), "scale.qsv"],
@@ -87,11 +96,7 @@ const QSV_CHAIN = chain("qsv", [
   [Op.Encode({ codec: "h264", bitrate: 8_000_000 }), "encode.qsv"],
 ]);
 
-const QSV_OWNERS: LogOwners = {
-  decoder: { step: 0, names: ["hevc", "hevc_qsv"] },
-  encoder: { step: 3, names: ["h264_qsv"] },
-  filters: new Map([["Parsed_vpp_qsv_0", [1, 2]]]),
-};
+const QSV_OWNERS = ownersOf(QSV_CHAIN);
 
 /** decode.vaapi, scale_vaapi (Parsed_scale_vaapi_0), tonemap_vaapi (Parsed_tonemap_vaapi_1), encode. */
 const VAAPI_CHAIN = chain("vaapi", [
@@ -101,14 +106,18 @@ const VAAPI_CHAIN = chain("vaapi", [
   [Op.Encode({ codec: "h264", bitrate: 8_000_000 }), "encode.vaapi"],
 ]);
 
-const VAAPI_OWNERS: LogOwners = {
-  decoder: { step: 0, names: ["hevc"] },
-  encoder: { step: 3, names: ["h264_vaapi"] },
-  filters: new Map([
-    ["Parsed_scale_vaapi_0", [1]],
-    ["Parsed_tonemap_vaapi_1", [2]],
-  ]),
-};
+const VAAPI_OWNERS = ownersOf(VAAPI_CHAIN);
+
+/** decode.vaapi of 8-bit H.264, scale_vaapi, encode.vaapi. */
+const VAAPI_H264_CHAIN = chain(
+  "vaapi",
+  [
+    [Op.Decode({ codec: "h264" }), "decode.vaapi"],
+    [Op.Scale({ width: 1280, height: 720, depth: 8 }), "scale.vaapi"],
+    [Op.Encode({ codec: "h264", bitrate: 8_000_000 }), "encode.vaapi"],
+  ],
+  { ...HDR, codec: "h264", pixelFormat: "yuv420p", depth: 8, colour: "sdr" },
+);
 
 /** decode.cpu, upload (Parsed_format_0, Parsed_hwupload_1), scale_vaapi (Parsed_scale_vaapi_2), encode. */
 const UPLOAD_CHAIN = chain(
@@ -121,24 +130,16 @@ const UPLOAD_CHAIN = chain(
   { ...HDR, colour: "sdr" },
 );
 
-const UPLOAD_OWNERS: LogOwners = {
-  decoder: { step: 0, names: ["hevc"] },
-  encoder: { step: 3, names: ["h264_vaapi"] },
-  filters: new Map([
-    ["Parsed_format_0", [1]],
-    ["Parsed_hwupload_1", [1]],
-    ["Parsed_scale_vaapi_2", [2]],
-  ]),
-};
+const UPLOAD_OWNERS = ownersOf(UPLOAD_CHAIN);
 
 const failed = (
-  stderrHead: string,
+  stderrTail: string,
   exitCode: number | null = 234,
   signal: string | null = null,
 ) => ({
   exitCode,
   signal,
-  stderrHead,
+  stderrTail,
 });
 
 const suspects = (attribution: Attribution): ReadonlyArray<number> | string =>
@@ -147,11 +148,18 @@ const suspects = (attribution: Attribution): ReadonlyArray<number> | string =>
     Video: ({ suspects: steps }) => steps,
   });
 
-/** Heads of standard error captured on the Arc A380 with ffmpeg 9.0.2. */
+/**
+ * Heads of standard error captured on the Arc A380 with ffmpeg 9.0.2; filter instances are named
+ * as the renderer names them in the chain each is read with.
+ */
 const HEADS = {
-  qsvDecoder: [
-    "[h264_qsv @ 0x62a4887c4500] Error querying IO surface: unsupported (-3)",
-    "[vist#0:0/h264 @ 0x62a4888f00c0] [dec:h264_qsv @ 0x62a4887b4fc0] Error submitting packet to decoder: Function not implemented",
+  /** VA-API's decoder refusing 10-bit H.264 for Quick Sync, and the map it feeds. */
+  mappedDecoder: [
+    "[h264 @ 0x55e379556700] Failed setup for format vaapi: hwaccel initialisation returned error.",
+    "[AVHWFramesContext @ 0x7cf7a4007340] Unsupported pixel format",
+    "[Parsed_hwmap_0 @ 0x7cf7a4004a40] Failed to create frame context for reverse mapping: -38.",
+    "[Parsed_hwmap_0 @ 0x7cf7a4004a40] Failed to configure output pad on Parsed_hwmap_0",
+    "[vf#0:0 @ 0x55e3794f73c0] Error reinitializing filters!",
   ],
   vaapiDecoder: [
     "[h264 @ 0x63531be9ce00] Failed setup for format vaapi: hwaccel initialisation returned error.",
@@ -163,7 +171,7 @@ const HEADS = {
     "[vost#0:0/h264_vaapi @ 0x566ff4ef6cc0] [enc:h264_vaapi @ 0x566ff4e6c380] Could not open encoder before EOF",
   ],
   fused: [
-    "[Parsed_vpp_qsv_0 @ 0x586af22e5ac0] Invalid color_matrix.",
+    "[Parsed_vpp_qsv_2 @ 0x586af22e5ac0] Invalid color_matrix.",
     "[AVFilterGraph @ 0x586af23d82c0] Error initializing filters",
   ],
   download: [
@@ -214,6 +222,21 @@ const NOT_VIDEO = [
   ["stopped", "Exiting normally, received signal 15."],
 ] as const;
 
+/** Warnings about parts other than the video that a run goes on past, captured as ffmpeg writes them. */
+const RECOVERED = [
+  "[aist#0:1/ac3 @ 0x5f1fe88a2d80] [dec:ac3 @ 0x5f1fe8636cc0] Error submitting packet to decoder: Invalid data found when processing input",
+  "[mpegts @ 0x5f2c3a0c] Packet corrupt (stream = 1, dts = 1234567).",
+  RECOVERED_DECODE,
+] as const;
+
+/** Heads of a video failure, and the steps of `QSV_CHAIN` each names. */
+const VIDEO_FAILURES = {
+  fused: [1, 2],
+  encoder: [3],
+  mappedDecoder: [0],
+  device: [0, 1, 2, 3],
+} as const;
+
 describe("attribute", () => {
   it("names the decoder, a filter, a fused filter's steps, and the encoder", () => {
     const qsvDecode = chain(
@@ -230,12 +253,8 @@ describe("attribute", () => {
       suspects(
         attribute(
           qsvDecode,
-          {
-            ...QSV_OWNERS,
-            decoder: { step: 0, names: ["h264", "h264_qsv"] },
-            encoder: { step: 2, names: ["libx264"] },
-          },
-          failed(HEADS.qsvDecoder.join("\n"), 69),
+          ownersOf(qsvDecode),
+          failed([...HEADS.mappedDecoder, ...HEADS.aftermath].join("\n"), 218),
         ),
       ),
       [0],
@@ -243,8 +262,8 @@ describe("attribute", () => {
     assert.deepStrictEqual(
       suspects(
         attribute(
-          VAAPI_CHAIN,
-          { ...VAAPI_OWNERS, decoder: { step: 0, names: ["h264"] } },
+          VAAPI_H264_CHAIN,
+          ownersOf(VAAPI_H264_CHAIN),
           failed(HEADS.vaapiDecoder.join("\n"), 218),
         ),
       ),
@@ -264,7 +283,7 @@ describe("attribute", () => {
     );
   });
 
-  it("reads past a tag the run does not own, and a filter name of another graph, to a line that names a step", () => {
+  it("names the step of the line that ended the run, past earlier lines naming parts the run does not have", () => {
     assert.deepStrictEqual(
       suspects(
         attribute(
@@ -318,15 +337,34 @@ describe("attribute", () => {
     assert.strictEqual(suspects(attribute(QSV_CHAIN, QSV_OWNERS, failed("", null, null))), "spawn");
   });
 
-  it("classifies a failure that is not about video first, whatever video lines came before it", () => {
+  it("classifies by the line that ended the run, past warnings the run went on past", () => {
     // A decode error the run recovered from, then the muxer meets a full disk.
+    assert.deepStrictEqual(
+      attribute(QSV_CHAIN, QSV_OWNERS, failed([RECOVERED_DECODE, HEADS.disk[0]].join("\n"), 1)),
+      Attribution.NotVideo({ reason: "disk" }),
+    );
+
+    // An audio packet the run dropped, then the encoder fails: the encoder is named.
     assert.deepStrictEqual(
       attribute(
         QSV_CHAIN,
-        { ...QSV_OWNERS, decoder: { step: 0, names: ["h264", "h264_qsv"] } },
-        failed([RECOVERED_DECODE, HEADS.disk[0]].join("\n"), 1),
+        QSV_OWNERS,
+        failed(
+          [
+            RECOVERED[0],
+            "[h264_qsv @ 0x5d1c2a0] Error during encoding: device failed (-17)",
+            "[vost#0:0/h264_qsv @ 0x5d1c3b0] [enc:h264_qsv @ 0x5d1c2a0] Error submitting video frame to the encoder",
+            ...HEADS.aftermath,
+          ].join("\n"),
+        ),
       ),
-      Attribution.NotVideo({ reason: "disk" }),
+      Attribution.Video({ named: true, suspects: [3] }),
+    );
+
+    // A corrupt container packet the demuxer skipped, then the fused vpp_qsv fails.
+    assert.deepStrictEqual(
+      suspects(attribute(QSV_CHAIN, QSV_OWNERS, failed([RECOVERED[1], ...HEADS.fused].join("\n")))),
+      [1, 2],
     );
 
     for (const [reason, line] of NOT_VIDEO) {
@@ -358,28 +396,49 @@ describe("attribute", () => {
   });
 
   it.prop(
-    "never suspects a video step when a line says another part failed",
+    "never suspects a video step when the run ended on a line that says another part failed",
     {
       before: Schema.Array(
-        Schema.Literals(["fused", "encoder", "qsvDecoder", "device", "aftermath"]),
+        Schema.Literals(["fused", "encoder", "mappedDecoder", "device", "aftermath"]),
       ),
-      after: Schema.Array(
-        Schema.Literals(["fused", "encoder", "qsvDecoder", "device", "aftermath"]),
-      ),
+      aftermath: Schema.Boolean,
       cause: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: NOT_VIDEO.length - 1 })),
     },
-    ({ before, after, cause }) => {
+    ({ before, aftermath, cause }) => {
       const [reason, line] = NOT_VIDEO[cause] ?? NOT_VIDEO[0];
 
-      const head = [
+      const tail = [
         ...before.flatMap((name) => HEADS[name]),
         line,
-        ...after.flatMap((name) => HEADS[name]),
+        ...(aftermath ? HEADS.aftermath : []),
       ].join("\n");
 
       assert.deepStrictEqual(
-        attribute(QSV_CHAIN, QSV_OWNERS, failed(head)),
+        attribute(QSV_CHAIN, QSV_OWNERS, failed(tail)),
         Attribution.NotVideo({ reason }),
+      );
+    },
+  );
+
+  it.prop(
+    "names the video part that ended the run, whatever warnings came before it",
+    {
+      warnings: Schema.Array(
+        Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: RECOVERED.length - 1 })),
+      ),
+      failure: Schema.Literals(["fused", "encoder", "mappedDecoder", "device"]),
+      aftermath: Schema.Boolean,
+    },
+    ({ warnings, failure, aftermath }) => {
+      const tail = [
+        ...warnings.map((index) => RECOVERED[index] ?? RECOVERED_DECODE),
+        ...HEADS[failure],
+        ...(aftermath ? HEADS.aftermath : []),
+      ].join("\n");
+
+      assert.deepStrictEqual(
+        attribute(QSV_CHAIN, QSV_OWNERS, failed(tail)),
+        Attribution.Video({ named: true, suspects: [...VIDEO_FAILURES[failure]] }),
       );
     },
   );
@@ -390,6 +449,69 @@ describe("attribute", () => {
       Attribution.Video({ named: false, suspects: [1, 2, 3] }),
     );
   });
+
+  it("names nothing for a last line naming a filter or codec the run does not have, rather than read an earlier line", () => {
+    const unnamed = Attribution.Video({ named: false, suspects: [0, 1, 2, 3] });
+
+    // The renderer names this chain's vpp_qsv `Parsed_vpp_qsv_2`, and its decoder `hevc`.
+    for (const line of [
+      "[Parsed_vpp_qsv_0 @ 0x1] Invalid color_matrix.",
+      "[hevc_qsv @ 0x1] Error querying IO surface: unsupported (-3)",
+    ]) {
+      assert.deepStrictEqual(
+        attribute(
+          QSV_CHAIN,
+          QSV_OWNERS,
+          failed(
+            [RECOVERED[0], line, "[AVFilterGraph @ 0x2] Error initializing filters"].join("\n"),
+          ),
+        ),
+        unnamed,
+        line,
+      );
+    }
+  });
+
+  it("names nothing for a run a crash signal killed, whatever part its log last named", () => {
+    // Native decoders log this after a seek; the run went on past it until the SIGBUS.
+    const decoderWarning = "[hevc @ 0x5d1c2a0] Could not find ref with POC 12";
+
+    for (const tail of [decoderWarning, RECOVERED[0], HEADS.fused.join("\n")]) {
+      assert.deepStrictEqual(
+        attribute(QSV_CHAIN, QSV_OWNERS, failed(tail, null, "SIGBUS")),
+        Attribution.Video({ named: false, suspects: [0, 1, 2, 3] }),
+        tail,
+      );
+    }
+  });
+
+  it.prop(
+    "suspects every step outside the CPU of a run a crash signal killed, whatever its log says",
+    {
+      lines: Schema.Array(
+        Schema.Literals([
+          "fused",
+          "encoder",
+          "mappedDecoder",
+          "device",
+          "audio",
+          "mux",
+          "input",
+          "disk",
+          "aftermath",
+        ]),
+      ),
+      signal: Schema.Literals(["SIGSEGV", "SIGBUS", "SIGILL", "SIGABRT", "SIGFPE"]),
+    },
+    ({ lines, signal }) => {
+      const tail = lines.flatMap((name) => HEADS[name]).join("\n");
+
+      assert.deepStrictEqual(
+        attribute(UPLOAD_CHAIN, UPLOAD_OWNERS, failed(tail, null, signal)),
+        Attribution.Video({ named: false, suspects: [1, 2, 3] }),
+      );
+    },
+  );
 });
 
 const AnyDiagnosis = Schema.Literals([

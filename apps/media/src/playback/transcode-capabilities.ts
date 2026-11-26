@@ -5,8 +5,13 @@
  * variant of that device's rows, one at a time at the lowest CPU priority. A negotiation probes
  * the unknown keys its cheapest chain would use under one budget, ahead of that warmup, real
  * sources where no clip stands in, and then plans once from a snapshot. After a failed run it
- * re-probes the suspects: a reproduced failure quarantines that one key, a failure nothing
- * reproduces keeps that source from the rows involved, and running out of time decides nothing.
+ * re-probes the suspects: a reproduced failure quarantines that one key; a run ffmpeg ended by its
+ * own decision whose suspects its probes run past keeps that source from those GPU rows for a day;
+ * a crash signal that nothing reproduces, and running out of time, decide nothing. The failed
+ * stream keeps off every row involved, a CPU row included, while no file is ever kept from a CPU
+ * row (the inventory's `exclude`).
+ * A probe that crashes ffmpeg counts as a reproduced failure: its key is quarantined and probed
+ * again when the quarantine ends.
  * A listing proves the CPU's rows, which touch no device; it never proves a GPU row. A listing
  * that fails is read again at the next need, and the CPU's rows stay unknown meanwhile.
  */
@@ -34,6 +39,7 @@ import { PROBE_CLIPS } from "./probe-clips.ts";
 import {
   attribute,
   Attribution,
+  CRASH_SIGNALS,
   Diagnosis,
   type LogOwners,
   type RunFailure,
@@ -153,9 +159,6 @@ type Priority = "warmup" | "demand";
 /** The key a step exercises, the domain it runs in, and what it needs from the build. */
 type Target = Pick<Step, "on" | "needs"> & { readonly key: CapabilityKey };
 
-/** Signals of a crash: ffmpeg ran, and the stage it ran broke it. */
-const CRASHES: ReadonlySet<string> = new Set(["SIGSEGV", "SIGBUS", "SIGILL", "SIGABRT", "SIGFPE"]);
-
 /** What a shell that could not run ffmpeg exits with: not executable, or not found. */
 const NOT_RUN: ReadonlySet<number> = new Set([126, 127]);
 
@@ -164,6 +167,16 @@ const DEVICE_FAILED =
 
 /** What ffmpeg writes when a signal, not the stage, ended it. */
 const ENDED_BY_SIGNAL = /received signal \d+|system signals, hard exiting/u;
+
+/**
+ * The userspace driver a device check's log names, such as `Intel iHD driver for Intel(R) Gen
+ * Graphics - 26.3.5`, without the empty `()` some builds print after the version.
+ */
+const userDriverOf = (log: string): string | undefined =>
+  /driver: (.+?)\.?$/mu
+    .exec(log)?.[1]
+    ?.replace(/\s*\(\)$/u, "")
+    .trim();
 
 /** The first line ffmpeg itself wrote, past libva's informational lines. */
 const firstLine = (text: string): string =>
@@ -177,10 +190,11 @@ const firstLine = (text: string): string =>
 /**
  * What one probe run proves, decided here alone. It passed when ffmpeg exited 0 and frames came
  * out. It was rejected when ffmpeg ran and refused by its own decision, exiting non-zero with an
- * error it wrote, or crashed (SIGSEGV, SIGBUS, SIGILL, SIGABRT, SIGFPE). Anything else proves
- * nothing: a clean exit without frames, a stop by any other signal or ffmpeg's exit on one, a
- * shell that could not run ffmpeg (126, 127), a spawn error, a timeout, or a device that would not
- * open.
+ * error it wrote. It crashed when SIGSEGV, SIGBUS, SIGILL, SIGABRT, or SIGFPE killed it: a driver
+ * can crash in a fraction of runs only (iHD's H.264 encoder on a small-BAR Arc A380), so a crash
+ * sets the key aside for a while rather than refusing it. Anything else proves nothing: a clean
+ * exit without frames, a stop by any other signal or ffmpeg's exit on one, a shell that could not
+ * run ffmpeg (126, 127), a spawn error, a timeout, or a device that would not open.
  */
 const probeOutcome = (
   result: Result.Result<string, MediaTools.MediaToolFailed>,
@@ -188,7 +202,7 @@ const probeOutcome = (
   if (Result.isSuccess(result)) return probedFrames(result.success) > 0 ? "passed" : "inconclusive";
   const { signal, exitCode, stderrHead } = result.failure;
 
-  if (signal !== null) return CRASHES.has(signal) ? "rejected" : "inconclusive";
+  if (signal !== null) return CRASH_SIGNALS.has(signal) ? "crashed" : "inconclusive";
 
   if (exitCode === null || NOT_RUN.has(exitCode)) return "inconclusive";
 
@@ -419,9 +433,7 @@ const make = Effect.gen(function* () {
           ? `${vendor.value.replace(/^0x/u, "")}:${model.value.replace(/^0x/u, "")}${Option.match(revision, { onNone: () => "", onSome: (rev) => ` rev ${rev.replace(/^0x/u, "")}` })}`
           : undefined,
       kernelDriver: Option.getOrUndefined(kernelDriver),
-      userDriver: Result.isSuccess(log)
-        ? /driver: (.+?)\.?$/mu.exec(log.success)?.[1]?.trim()
-        : undefined,
+      userDriver: Result.isSuccess(log) ? userDriverOf(log.success) : undefined,
       at: yield* now,
     };
 
@@ -653,9 +665,13 @@ const make = Effect.gen(function* () {
           ? outcome === "passed"
             ? ""
             : "no frames came out"
-          : firstLine(
-              result.failure.stderrHead === "" ? result.failure.stderr : result.failure.stderrHead,
-            ),
+          : outcome === "crashed"
+            ? `ffmpeg died of ${result.failure.signal ?? "a signal"}`
+            : firstLine(
+                result.failure.stderrHead === ""
+                  ? result.failure.stderr
+                  : result.failure.stderrHead,
+              ),
         millis: (yield* now) - started,
       };
 
@@ -744,7 +760,12 @@ const make = Effect.gen(function* () {
         }
 
         const epoch = Inventory.capabilityOf(known, target.key).epoch;
-        const probed = yield* runProbe(plan, request, priority);
+
+        const probed = yield* runProbe(
+          { ...plan, runs: Inventory.runsToVerify(known, target.key, plan.runs) },
+          request,
+          priority,
+        );
 
         if (Option.isNone(probed)) return Option.none();
         const shown = probed.value;
@@ -938,11 +959,22 @@ const make = Effect.gen(function* () {
         const { result, source } = shown.value;
         const outcome = result.outcome;
 
-        if (outcome === "rejected") {
+        if (outcome === "rejected" || outcome === "crashed") {
           const reproducedAt = yield* now;
 
           yield* update((current) =>
-            Inventory.reproduced(current, step.capability, source, reproducedAt, epochOf(step)),
+            Inventory.reproduced(
+              current,
+              step.capability,
+              Inventory.Evidence.Probe({
+                at: reproducedAt,
+                outcome,
+                source,
+                detail: result.detail,
+                millis: result.millis,
+              }),
+              epochOf(step),
+            ),
           );
           yield* Effect.logWarning(
             source === undefined
@@ -965,8 +997,14 @@ const make = Effect.gen(function* () {
     }
 
     const at = yield* now;
+    // A crash signal is no refusal: a driver can crash in a share of runs of a chain that works, so
+    // a crash whose suspects ran on generated frames is no verdict, and only the stream keeps off
+    // them. A run ffmpeg ended by its own decision says the file is refused there.
+    const crashed = failed.failure.signal !== null && CRASH_SIGNALS.has(failed.failure.signal);
+    const sourceExcluded = crashed ? [] : passed;
+    const unsettled = crashed ? [...passed, ...undecided] : undecided;
 
-    for (const step of passed) {
+    for (const step of sourceExcluded) {
       yield* update((current) =>
         Inventory.notReproduced(current, step.capability, failed.request.scope, at, epochOf(step)),
       );
@@ -975,14 +1013,16 @@ const make = Effect.gen(function* () {
     yield* Effect.logWarning("TranscodeCapabilities.diagnosed").pipe(
       Effect.annotateLogs({
         named: attribution.named,
-        sourceExcluded: passed.map((step) => step.impl).join(","),
-        undecided: undecided.map((step) => step.impl).join(","),
+        sourceExcluded: sourceExcluded.map((step) => step.impl).join(","),
+        undecided: unsettled.map((step) => step.impl).join(","),
       }),
     );
 
-    return undecided.length > 0
-      ? Diagnosis.Undecided({ impls: undecided.map((step) => step.impl) })
-      : Diagnosis.Source({ impls: passed.map((step) => step.impl) });
+    return unsettled.length > 0
+      ? Diagnosis.Undecided({
+          impls: suspects.flatMap((step) => (unsettled.includes(step) ? [step.impl] : [])),
+        })
+      : Diagnosis.Source({ impls: sourceExcluded.map((step) => step.impl) });
   });
 
   const hardwareEncoder = Effect.gen(function* () {

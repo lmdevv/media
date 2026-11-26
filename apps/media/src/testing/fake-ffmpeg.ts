@@ -177,6 +177,7 @@ const graphInSoftware = (text) =>
     .replace(/scale_vaapi=([^,;\\[]*)/g, (_, options) => inSoftware(optionsOf(options)))
     .replace(/tonemap_vaapi=[^,;\\[]*/g, "format=nv12")
     .replace(/hwupload(=[^,;\\[]*)?/g, "null")
+    .replace(/hwmap(=[^,;\\[]*)?/g, "null")
     .replace(/hwdownload/g, "null")
     .replace(/format=(qsv|vaapi)/g, "null");
 const played = [];
@@ -214,6 +215,7 @@ const emulated = {
     " .. tonemap_vaapi     V->V       played in software",
     " .. hwupload          V->V       played in software",
     " .. hwdownload        V->V       played in software",
+    " .. hwmap             V->V       played in software",
     "",
   ].join("\\n"),
   "-codecs": [
