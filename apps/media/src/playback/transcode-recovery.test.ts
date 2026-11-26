@@ -20,6 +20,7 @@ import {
   type VideoPipeline,
 } from "./video-pipeline.ts";
 import { ImplId, Op, type Row, type SourceVideo } from "./video-ops.ts";
+import { renderVideo } from "./video-render.ts";
 
 const HDR: SourceVideo = {
   codec: "hevc",
@@ -86,6 +87,11 @@ const QSV_CHAIN = chain("qsv", [
   [Op.ToneMap(), "tonemap.qsv"],
   [Op.Encode({ codec: "h264", bitrate: 8_000_000 }), "encode.qsv"],
 ]);
+
+/** Which step owns each name in a log of `pipeline`'s runs, as the renderer lays a run out. */
+const ownersOf = (pipeline: VideoPipeline): LogOwners =>
+  renderVideo(pipeline, { input: 0, stream: 0, trimPicture: undefined, trimSubtitle: undefined })
+    .owners;
 
 const QSV_OWNERS: LogOwners = {
   decoder: { step: 0, names: ["hevc", "hevc_qsv"] },
@@ -448,6 +454,28 @@ describe("attribute", () => {
       attribute(UPLOAD_CHAIN, UPLOAD_OWNERS, failed("", null, "SIGSEGV")),
       Attribution.Video({ named: false, suspects: [1, 2, 3] }),
     );
+  });
+
+  it("names nothing for a last line naming a filter or codec the run does not have, rather than read an earlier line", () => {
+    const unnamed = Attribution.Video({ named: false, suspects: [0, 1, 2, 3] });
+
+    // The renderer names this chain's vpp_qsv `Parsed_vpp_qsv_2`, and its decoder `hevc`.
+    for (const line of [
+      "[Parsed_vpp_qsv_0 @ 0x1] Invalid color_matrix.",
+      "[hevc_qsv @ 0x1] Error querying IO surface: unsupported (-3)",
+    ]) {
+      assert.deepStrictEqual(
+        attribute(
+          QSV_CHAIN,
+          ownersOf(QSV_CHAIN),
+          failed(
+            [RECOVERED[0], line, "[AVFilterGraph @ 0x2] Error initializing filters"].join("\n"),
+          ),
+        ),
+        unnamed,
+        line,
+      );
+    }
   });
 
   it("names nothing for a run a crash signal killed, whatever part its log last named", () => {

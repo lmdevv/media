@@ -954,6 +954,22 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
           });
 
           assert.deepStrictEqual(crashed, Diagnosis.Undecided({ impls: gpuRows }));
+
+          // A last line naming a filter instance this run does not have, after an audio warning.
+          const unknownFilter = yield* capabilities.diagnose({
+            ...vppFailed(pipeline),
+            owners: ownersOf(pipeline),
+            failure: {
+              exitCode: 234,
+              signal: null,
+              stderrTail: [
+                "[aist#0:1/ac3 @ 0x1] [dec:ac3 @ 0x2] Error submitting packet to decoder: Invalid data found when processing input",
+                "[Parsed_vpp_qsv_9 @ 0x3] Invalid color_matrix.",
+              ].join("\n"),
+            },
+          });
+
+          assert.deepStrictEqual(unknownFilter, Diagnosis.Undecided({ impls: gpuRows }));
           assert.isUndefined((yield* capabilities.inventory).exclusions.get(asked.scope));
           assert.isTrue(
             samePipeline(pipelineOf(HDR, yield* capabilities.resolve(asked)), pipeline),

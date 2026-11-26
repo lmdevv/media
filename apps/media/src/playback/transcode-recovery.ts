@@ -5,8 +5,9 @@
  * never recovers from either; otherwise the line that ended the run decides: the last line that
  * names a part, past what ffmpeg writes about every part a failure stopped. It may say a part
  * other than the video failed (the muxer, the input, the audio), or name the failing video part: a
- * filter by its parsed instance name, the decoder, the encoder, or the device. Earlier lines are
- * warnings the run went on past. A named part is a hint, never evidence: the capability service
+ * filter by its parsed instance name, the decoder, the encoder, or the device; a filter or codec
+ * the run does not have names no step, so every step outside the CPU is a suspect. Earlier lines
+ * are warnings the run went on past. A named part is a hint, never evidence: the capability service
  * re-probes what it names before it sets anything aside. `advance` bounds the retries: a targeted
  * replacement, then the CPU, then a typed failure, so one position starts ffmpeg at most three
  * times. Pure.
@@ -140,7 +141,7 @@ const ofTag = (
 
   if (filter !== undefined) return named(filter);
 
-  // Any other parsed name, of the audio graph or of another run, says nothing about this one.
+  // Any other parsed name is not this run's video graph: `ofLine` reads it as a stranger.
   if (tag.startsWith("Parsed_")) return undefined;
   const role = /^(dec|enc):(.+)$/u.exec(tag);
   const name = role?.[2] ?? tag;
@@ -167,7 +168,18 @@ const ofTag = (
   return undefined;
 };
 
-/** Which video steps one line of standard error names, or undefined when it names none. */
+/**
+ * Whether `tag` names a filter instance or a codec this run does not have: a parsed instance name
+ * the renderer did not write, or a bare codec name such as `hevc_qsv` that is neither the run's
+ * decoder nor its encoder. Tags of streams, graphs, and devices name no part.
+ */
+const strangerOf = (tag: string): boolean =>
+  tag.startsWith("Parsed_") || /^[a-z][a-z0-9_]*$/u.test(tag);
+
+/**
+ * Which video steps one line of standard error names, or undefined when it names none. A line
+ * whose part this run does not have names no step, and so every step outside the CPU.
+ */
 const ofLine = (
   line: string,
   pipeline: VideoPipeline,
@@ -177,13 +189,17 @@ const ofLine = (
     return named(gpuSteps(pipeline));
   }
 
-  for (const tag of tagsOf(line).toReversed()) {
+  const tags = tagsOf(line).toReversed();
+
+  for (const tag of tags) {
     const said = ofTag(tag, pipeline, owners);
 
     if (said !== undefined) return said;
   }
 
-  return undefined;
+  return tags.some(strangerOf)
+    ? Attribution.Video({ named: false, suspects: gpuSteps(pipeline) })
+    : undefined;
 };
 
 /**
