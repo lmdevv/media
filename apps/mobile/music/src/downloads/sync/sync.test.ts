@@ -251,7 +251,6 @@ describe("DownloadSync in Low Power Mode", () => {
     await settled((snapshot) => snapshot.ready);
     await sync.request(ALBUM, DETAILS);
     sync.setLowPower(true);
-    // The album gained its song on the server while Low Power Mode is on.
     sync.offerManifest(pinIdOf(ALBUM), manifestOf([one]));
     await settled((snapshot) => snapshot.tracks.get(one.id) === "queued");
     await new Promise((resolve) => setTimeout(resolve, 50));

@@ -1450,7 +1450,6 @@ export function PlayerProvider({ children }: { readonly children: ReactNode }) {
   useHandBack(platform, phone, online, playing, setMode);
   useReachWhilePlaying(playing && mode === "server");
 
-  // A stream the media server stopped answering, and its coming back, as the player found them.
   const mediaOnline = snapshot.mediaOnline;
   const heardOnline = useRef(mediaOnline);
 

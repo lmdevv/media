@@ -79,7 +79,6 @@ describe("observe", () => {
   });
 
   it("drops a check's answer once a later check answered, whichever lands first", () => {
-    // The check sent first goes unanswered but lands last; the one sent after it answered.
     const state = applied([
       ["answered", 2],
       ["failed", 1],

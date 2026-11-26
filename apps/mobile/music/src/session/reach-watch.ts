@@ -155,17 +155,14 @@ export const reachWatch = (
     connection: (next) => {
       const was = socket;
 
+      const oldestCallAnswered =
+        next.connected && was.waitingSince !== null && next.waitingSince !== was.waitingSince;
+
       socket = next;
 
       if (next.connected && !was.connected) apply("answered", stamp());
       else if (!next.connected && was.connected) apply("doubted", stamp());
-      // The oldest call waiting got its answer: the server answers.
-      else if (
-        next.connected &&
-        was.waitingSince !== null &&
-        next.waitingSince !== was.waitingSince
-      )
-        apply("answered", stamp());
+      else if (oldestCallAnswered) apply("answered", stamp());
 
       watchStall();
     },

@@ -861,7 +861,6 @@ const httpAdapter = (client: ConvexHttpClient, options: HttpOptions): ClientAdap
       return Promise.resolve();
     },
     authenticated: () => Promise.resolve("none" as const),
-    // Each request opens its own connection, so there is none to report on.
     connection: () => () => undefined,
     close: () => Promise.resolve(),
   };

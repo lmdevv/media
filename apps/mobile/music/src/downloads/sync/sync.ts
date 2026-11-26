@@ -945,7 +945,6 @@ export class DownloadSync {
 
     const may = this.#mayStart();
 
-    // A retry that may not start in Low Power Mode sets no timer either.
     const retries = canStart
       ? [
           ...Array.from(this.#trackFailures, ([trackId, { retryAt }]) =>

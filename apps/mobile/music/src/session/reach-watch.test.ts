@@ -63,7 +63,6 @@ describe("reachWatch", () => {
     watch.need(true);
     watch.connection(UP);
 
-    // A minute at a time: a call goes out and gets its answer 200 ms later.
     const minutes = async (left: number): Promise<void> => {
       if (left === 0) return;
       watch.connection({ connected: true, waitingSince: Date.now() });
@@ -152,7 +151,6 @@ describe("reachWatch", () => {
 
     expect(server.sent()).toBe(0);
 
-    // The app comes back on screen with the server still gone.
     watch.need(true);
     await vi.advanceTimersByTimeAsync(RECHECK_MS);
 
@@ -202,7 +200,6 @@ describe("reachWatch", () => {
     void watch.check();
     void watch.check();
     void watch.check();
-    // The newest check answers; the two sent before it land later, unanswered.
     await checks.answerNewest(true);
     await checks.answer(false);
     await checks.answer(false);
@@ -221,7 +218,6 @@ describe("reachWatch", () => {
 
     expect(checks.sent()).toBe(2);
 
-    // The check sent before the drop answers late; only the one after it counts.
     await checks.answer(true);
     await checks.answer(false);
     await vi.advanceTimersByTimeAsync(RECHECK_MS);
