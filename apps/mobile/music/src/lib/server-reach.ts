@@ -102,14 +102,23 @@ export const CLOSED_RECHECK_MS = 10_000;
 
 /**
  * In how many milliseconds the app checks the server's health on its own, or null for no check:
- * never while nothing waits on the server; `SETTLE_MS` after a doubt; and `RECHECK_MS` after each
- * unanswered check, until it answers. `needed` says whether anything waits on the server: the app
- * is on screen, or it plays the server's queue, which goes on with songs from the server.
+ * never while nothing waits on the server; `SETTLE_MS` after a doubt; `RECHECK_MS` after each
+ * unanswered check, until it answers; and `CLOSED_RECHECK_MS` while the core's socket is not open.
+ * With the socket open and the server answering it checks nothing: the socket closing, a call
+ * stalling, a stream failing, or the core saying the media server went away each bring a doubt.
+ * `needed` says whether anything waits on the server: the app is on screen, or it plays the
+ * server's queue, which goes on with songs from the server.
  */
-export const nextCheck = (state: Reachability, needed: boolean): number | null => {
+export const nextCheck = (
+  state: Reachability,
+  needed: boolean,
+  socketOpen: boolean,
+): number | null => {
   if (!needed) return null;
 
   if (state.doubted) return SETTLE_MS;
 
-  return state.failures > 0 ? RECHECK_MS : null;
+  if (state.failures > 0) return RECHECK_MS;
+
+  return socketOpen ? null : CLOSED_RECHECK_MS;
 };

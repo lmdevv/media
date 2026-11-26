@@ -122,9 +122,14 @@ describe("reachWatch", () => {
     expect(watch.lost()).toBe(false);
     expect(server.sent()).toBe(7);
 
+    await vi.advanceTimersByTimeAsync(CLOSED_RECHECK_MS);
+
+    expect(server.sent()).toBe(8);
+
+    watch.connection(UP);
     await vi.advanceTimersByTimeAsync(60_000);
 
-    expect(server.sent()).toBe(7);
+    expect(server.sent()).toBe(8);
   });
 
   it("clears as soon as the socket opens again, without waiting for a check", async () => {

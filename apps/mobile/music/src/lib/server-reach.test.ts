@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   ANSWERING,
+  CLOSED_RECHECK_MS,
   isLost,
   LOST_AFTER,
   nextCheck,
@@ -73,7 +74,7 @@ describe("observe", () => {
     ]);
 
     expect(isLost(doubted)).toBe(false);
-    expect(nextCheck(doubted, true)).toBe(SETTLE_MS);
+    expect(nextCheck(doubted, true, true)).toBe(SETTLE_MS);
   });
 
   it("drops what lands with evidence older than the newest applied", () => {
@@ -116,15 +117,21 @@ describe("nextCheck", () => {
   it("sends no check while nothing needs the server, whatever it learned", () => {
     fc.assert(
       fc.property(landings, (list) => {
-        expect(nextCheck(applied(list), false)).toBeNull();
+        expect(nextCheck(applied(list), false, false)).toBeNull();
       }),
     );
   });
 
   it("checks a settle after a doubt, a recheck after a failure, and never while it answers", () => {
-    expect(nextCheck(applied([["doubted", 1]]), true)).toBe(SETTLE_MS);
-    expect(nextCheck(applied([["failed", 1]]), true)).toBe(RECHECK_MS);
-    expect(nextCheck(applied([["answered", 1]]), true)).toBeNull();
-    expect(nextCheck(ANSWERING, true)).toBeNull();
+    expect(nextCheck(applied([["doubted", 1]]), true, true)).toBe(SETTLE_MS);
+    expect(nextCheck(applied([["failed", 1]]), true, true)).toBe(RECHECK_MS);
+    expect(nextCheck(applied([["answered", 1]]), true, true)).toBeNull();
+    expect(nextCheck(ANSWERING, true, true)).toBeNull();
+  });
+
+  it("keeps checking while the socket is closed, since the core can't say the server went away", () => {
+    expect(nextCheck(applied([["answered", 1]]), true, false)).toBe(CLOSED_RECHECK_MS);
+    expect(nextCheck(applied([["doubted", 1]]), true, false)).toBe(SETTLE_MS);
+    expect(nextCheck(applied([["failed", 1]]), true, false)).toBe(RECHECK_MS);
   });
 });

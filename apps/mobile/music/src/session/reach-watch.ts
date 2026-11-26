@@ -65,7 +65,8 @@ export const reachWatch = (
   let sent = 0;
   let needed = false;
   let closed = false;
-  let socket: ConnectionState = { connected: false, waitingSince: null };
+  /** What the core's socket last said; null until it says anything. */
+  let socket: ConnectionState | null = null;
   /** The check `nextCheck` set a timer for, and how far out it was set. */
   let pending: { readonly inMs: number; readonly cancel: () => void } | null = null;
   let cancelStall: (() => void) | null = null;
@@ -102,7 +103,8 @@ export const reachWatch = (
 
   /** Sets the check `nextCheck` calls for, unless one sent after the newest evidence is out. */
   function follow(): void {
-    const inMs = closed || sent > state.newest ? null : nextCheck(state, needed);
+    const inMs =
+      closed || sent > state.newest ? null : nextCheck(state, needed, socket?.connected === true);
 
     if (pending !== null && pending.inMs === inMs) return;
     pending?.cancel();
@@ -122,14 +124,16 @@ export const reachWatch = (
   const watchStall = (): void => {
     cancelStall?.();
     cancelStall = null;
-    const { connected, waitingSince } = socket;
 
-    if (closed || !connected || waitingSince === null) return;
+    if (closed || socket === null || !socket.connected || socket.waitingSince === null) return;
+    const { waitingSince } = socket;
 
     cancelStall = timers.after(Math.max(0, waitingSince + STALL_MS - timers.now()), () => {
       cancelStall = null;
 
-      if (socket.connected && socket.waitingSince === waitingSince) apply("doubted", stamp());
+      if (socket?.connected === true && socket.waitingSince === waitingSince) {
+        apply("doubted", stamp());
+      }
     });
   };
 
@@ -149,14 +153,19 @@ export const reachWatch = (
     connection: (next) => {
       const was = socket;
 
-      const oldestCallAnswered =
-        next.connected && was.waitingSince !== null && next.waitingSince !== was.waitingSince;
-
       socket = next;
 
-      if (next.connected && !was.connected) apply("answered", stamp());
+      // The first word decides at once: a socket closed from the start is a doubt like a drop.
+      if (was === null) apply(next.connected ? "answered" : "doubted", stamp());
+      else if (next.connected && !was.connected) apply("answered", stamp());
       else if (!next.connected && was.connected) apply("doubted", stamp());
-      else if (oldestCallAnswered) apply("answered", stamp());
+      else if (
+        next.connected &&
+        was.waitingSince !== null &&
+        next.waitingSince !== was.waitingSince
+      ) {
+        apply("answered", stamp());
+      }
 
       watchStall();
     },
