@@ -61,7 +61,7 @@ export const reachWatch = (
   const listeners = new Set<() => void>();
   let state: Reachability = ANSWERING;
   let evidence = 0;
-  /** The evidence of the newest check sent; none is set again until its answer applies. */
+  /** The evidence of the newest check sent. */
   let sent = 0;
   let needed = false;
   let closed = false;
