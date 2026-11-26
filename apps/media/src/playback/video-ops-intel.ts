@@ -285,7 +285,7 @@ const encodeOn = (
     frame.colour === "sdr" &&
     frame.scan === "progressive" &&
     frame.pixelFormat === "nv12"
-      ? `${op.target.codec}/8/cbr`
+      ? `${op.target.codec}/${String(op.target.depth)}/cbr`
       : undefined,
   output: (_, frame) => frame,
   render: (op) => {

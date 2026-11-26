@@ -181,7 +181,7 @@ const encodeCpu: OpImpl<"Encode"> = {
   needs: (op) => [`encoder:${SOFTWARE_ENCODERS[op.target.codec].name}`],
   variant: (op, input) =>
     softwareTakes(op.target) && input.colour === "sdr" && input.scan === "progressive"
-      ? `${op.target.codec}/8/crf`
+      ? `${op.target.codec}/${String(op.target.depth)}/crf`
       : undefined,
   output: (_, input) => ({ ...input, depth: 8, pixelFormat: "yuv420p" }),
   render: (op) => {
