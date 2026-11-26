@@ -3,7 +3,7 @@ import * as Brightness from "expo-brightness";
 import { useKeepAwake } from "expo-keep-awake";
 import * as Network from "expo-network";
 import { router } from "expo-router";
-import { VideoView } from "expo-video";
+import { VideoView, createVideoPlayer } from "expo-video";
 import type { VideoMetadata } from "expo-video";
 import { LockKeyhole } from "lucide-react-native";
 import { Result } from "effect";
@@ -238,6 +238,7 @@ function PlayerSession({
 
   useEffect(() => {
     const created = new PlayerController({
+      createVideo: createVideoPlayer,
       services: {
         report: platform.movies.play.report,
         sendDiagnostics: mediaServer.reportClientEvents,

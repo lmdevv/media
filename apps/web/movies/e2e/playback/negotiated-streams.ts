@@ -1,5 +1,6 @@
 import {
   MEDIA_ROUTES,
+  NegotiateRequest,
   NegotiateResponse,
   SeekRequest,
   SeekResponse,
@@ -44,6 +45,65 @@ export const recordStreams = (page: Page): ReadonlyArray<NegotiatedStream> => {
   });
 
   return streams;
+};
+
+const negotiateRequest = Schema.toCodecJson(NegotiateRequest);
+
+/**
+ * A negotiation the page sent: the video codecs it listed, and the mode and video codec of the
+ * stream it was answered, once answered.
+ */
+export interface AskedStream {
+  readonly codecs: ReadonlyArray<string>;
+  readonly answered: { readonly mode: PlaybackMode; readonly codec: string } | undefined;
+}
+
+/**
+ * Sends the page's first negotiation on as a device that plays HEVC alone would ask, so a media
+ * service on the CPU encodes HEVC for it, and every later one as the page sent it, until the route
+ * is removed; records each with the codecs the page itself listed.
+ */
+export const askForHevcFirst = async (page: Page): Promise<ReadonlyArray<AskedStream>> => {
+  const asked: Array<AskedStream> = [];
+
+  await page.route(`**${MEDIA_ROUTES.negotiate}`, async (route) => {
+    const request = Schema.decodeUnknownSync(negotiateRequest)(route.request().postDataJSON());
+    const listed = request.capabilities.videoCodecs;
+
+    const sent =
+      asked.length === 0
+        ? {
+            ...request,
+            capabilities: {
+              ...request.capabilities,
+              videoCodecs: listed.filter((support) => support.codec === "hevc"),
+            },
+          }
+        : request;
+
+    const index = asked.length;
+
+    const codecs = listed.map((support) => support.codec);
+
+    asked.push({ codecs, answered: undefined });
+
+    const response = await route.fetch({
+      postData: JSON.stringify(Schema.encodeSync(negotiateRequest)(sent)),
+    });
+
+    asked[index] = {
+      codecs,
+      answered: Option.getOrUndefined(
+        Option.map(decodeStream(await response.text()), ({ mode, video }) => ({
+          mode,
+          codec: video.codec,
+        })),
+      ),
+    };
+    await route.fulfill({ response }).catch(() => undefined);
+  });
+
+  return asked;
 };
 
 const capacityReached = Schema.encodeSync(

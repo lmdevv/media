@@ -46,7 +46,12 @@ import {
   videoState,
   writeText,
 } from "./playback-stack";
-import { markSeekAnswers, recordStreams, refuseQualityCaps } from "./negotiated-streams";
+import {
+  askForHevcFirst,
+  markSeekAnswers,
+  recordStreams,
+  refuseQualityCaps,
+} from "./negotiated-streams";
 import type { NegotiatedStream } from "./negotiated-streams";
 
 const stack = await reachableStack();
@@ -1865,6 +1870,51 @@ test("touch: a tap opens the volume slider before muting, and the picker plays a
   await phonePicker.getByRole("button", { name: new RegExp(EPISODES[0], "u") }).tap();
   await expect(handset).toHaveURL(new RegExp(`episodeId=${first}`, "u"));
   await phone.close();
+});
+
+/** Lists HEVC in Media Source Extensions, as a browser does that names a decoder it cannot use. */
+const listHevc = (): void => {
+  const source = window.MediaSource;
+  const supported = source.isTypeSupported.bind(source);
+
+  source.isTypeSupported = (type) => type.includes("hvc1") || supported(type);
+};
+
+test("a stream that fails in HEVC gives way once to one without it, which plays, and HEVC stays off", async ({
+  browser,
+}) => {
+  if (stack === null) return;
+
+  const viewer = await signedInPage(browser, owner.person);
+  const asked = await askForHevcFirst(viewer);
+  const answered = () => asked.map((each) => each.answered?.codec);
+  const panel = viewer.getByRole("dialog", { name: TRACKS });
+
+  await viewer.context().addInitScript(listHevc);
+  await viewer.goto(moviesPath(`/watch/${titleId(MOVIES.remux)}?start=0`));
+  await expectPlayingPast(viewer, 1, 60_000);
+
+  // This Chromium has no HEVC decoder, so hls.js cannot buffer the HEVC transcode, and the player
+  // asks again without HEVC. It decodes AV1, but not power-efficiently, so H.264 comes next, here
+  // copied from the file; a browser that decodes AV1 efficiently would get AV1 before H.264.
+  expect(answered()).toStrictEqual(["hevc", "h264"]);
+  expect(asked[0]?.codecs).toContain("hevc");
+  expect(asked[1]?.codecs).not.toContain("hevc");
+  expect(asked.map((each) => each.answered?.mode)).toStrictEqual(["transcode-software", "remux"]);
+
+  // Playing on asks for nothing more: the fallback runs once.
+  await expectPlayingPast(viewer, 3);
+  expect(asked).toHaveLength(2);
+
+  // Another quality later in the playback asks without HEVC too.
+  await revealControls(viewer);
+  await viewer.getByRole("button", { name: TRACKS }).click();
+  await panel.getByRole("radio", { name: "480p" }).click();
+  await expect.poll(() => answered()[2]).toBe("h264");
+
+  expect(asked[2]?.codecs).not.toContain("hevc");
+  expect(asked).toHaveLength(3);
+  await viewer.context().close();
 });
 
 test("a file gone from disk says so instead of playing", async () => {
