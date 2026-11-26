@@ -5,6 +5,7 @@
  * to and from CPU memory in NV12 or P010. Which of these a device does is evidence, never
  * assumed: a row only says what it may try.
  */
+import { type Level, levelOf } from "./output-levels.ts";
 import { DECODE_CLIPS, PROBE_CLIPS } from "./probe-clips.ts";
 import {
   type BuildFeature,
@@ -252,11 +253,15 @@ const toneMapQsv: OpImpl<"ToneMap"> = {
   probes: toneMapProbes,
 };
 
-/** One codec's GPU encoder: its name and the options before and after the bitrate. */
+/**
+ * One codec's GPU encoder: its name, the options before and after the bitrate, and how it states a
+ * level the plan has.
+ */
 interface GpuEncoder {
   readonly name: string;
   readonly before: ReadonlyArray<string>;
   readonly after: ReadonlyArray<string>;
+  readonly level: (level: Level) => ReadonlyArray<string>;
 }
 
 /**
@@ -288,6 +293,7 @@ const encodeOn = (
       "-c:v",
       encoder.name,
       ...encoder.before,
+      ...(op.level === undefined ? [] : levelArgs(codec, op.level, encoder)),
       "-b:v",
       String(op.bitrate),
       "-maxrate",
@@ -300,6 +306,13 @@ const encodeOn = (
   probes: encodeProbes(codec),
 });
 
+/** How `encoder` states the level in ffprobe's units `idc`; nothing for a level no table lists. */
+const levelArgs = (codec: OutputCodec, idc: number, encoder: GpuEncoder): ReadonlyArray<string> => {
+  const level = levelOf(codec, idc);
+
+  return level === undefined ? [] : encoder.level(level);
+};
+
 /** Each of `domain`'s encoders as a row of its own. */
 const encodesOn = (
   domain: GpuDomain,
@@ -307,18 +320,31 @@ const encodesOn = (
 ): ReadonlyArray<Row> =>
   OUTPUT_CODECS.map((codec) => row(encodeOn(domain, codec, encoders[codec])));
 
-/** Quick Sync's encoders; `forced_idr` makes each forced keyframe an IDR frame. */
+/** States no level: H.264 encodes have no level table. */
+const NO_LEVEL = (): ReadonlyArray<string> => [];
+
+/**
+ * Quick Sync's encoders; `forced_idr` makes each forced keyframe an IDR frame. oneVPL takes HEVC's
+ * and AV1's level as its tenths (21 for 2.1).
+ */
 const encodeQsv = encodesOn("qsv", {
-  h264: { name: "h264_qsv", before: ["-preset", "veryfast"], after: ["-forced_idr", "1"] },
+  h264: {
+    name: "h264_qsv",
+    before: ["-preset", "veryfast"],
+    after: ["-forced_idr", "1"],
+    level: NO_LEVEL,
+  },
   hevc: {
     name: "hevc_qsv",
     before: ["-preset", "veryfast", "-profile:v", "main"],
     after: ["-forced_idr", "1"],
+    level: (level) => ["-level", String(level.tenths)],
   },
   av1: {
     name: "av1_qsv",
     before: ["-preset", "veryfast", "-profile:v", "main"],
     after: ["-forced_idr", "1"],
+    level: (level) => ["-level", String(level.tenths)],
   },
 });
 
@@ -380,11 +406,24 @@ const toneMapVaapi: OpImpl<"ToneMap"> = {
   probes: toneMapProbes,
 };
 
-/** VA-API's encoders: H.264 High, HEVC Main, AV1 Main. */
+/**
+ * VA-API's encoders: H.264 High, HEVC Main, AV1 Main. They take a level in ffprobe's units
+ * (`general_level_idc`, `seq_level_idx`).
+ */
 const encodeVaapi = encodesOn("vaapi", {
-  h264: { name: "h264_vaapi", before: ["-profile:v", "high"], after: [] },
-  hevc: { name: "hevc_vaapi", before: ["-profile:v", "main"], after: [] },
-  av1: { name: "av1_vaapi", before: ["-profile:v", "main"], after: [] },
+  h264: { name: "h264_vaapi", before: ["-profile:v", "high"], after: [], level: NO_LEVEL },
+  hevc: {
+    name: "hevc_vaapi",
+    before: ["-profile:v", "main"],
+    after: [],
+    level: (level) => ["-level", String(level.idc)],
+  },
+  av1: {
+    name: "av1_vaapi",
+    before: ["-profile:v", "main"],
+    after: [],
+    level: (level) => ["-level", String(level.idc)],
+  },
 });
 
 /** Every Quick Sync and VA-API row. */

@@ -5,6 +5,7 @@
  * They are the floor every source falls back to, so they take any layout and depth ffmpeg
  * decodes, as software transcoding always has; closed lists guard the GPU rows instead.
  */
+import { type Level, levelOf } from "./output-levels.ts";
 import { DECODE_CLIPS, PROBE_CLIPS } from "./probe-clips.ts";
 import {
   encodeProbes,
@@ -137,12 +138,12 @@ const burnImageCpu: OpImpl<"BurnImage"> = {
 
 /**
  * One codec's software encoder: its name, the options that set its speed, profile, and quality
- * target before the bitrate cap, and any after it.
+ * target before the bitrate cap, and those after it, which state the plan's level when it has one.
  */
 interface SoftwareEncoder {
   readonly name: string;
   readonly quality: ReadonlyArray<string>;
-  readonly after: ReadonlyArray<string>;
+  readonly after: (level: Level | undefined) => ReadonlyArray<string>;
 }
 
 /**
@@ -158,14 +159,28 @@ const SOFTWARE_ENCODERS: Readonly<Record<OutputCodec, SoftwareEncoder>> = {
   h264: {
     name: "libx264",
     quality: ["-preset", "veryfast", "-profile:v", "high", "-crf", "23"],
-    after: [],
+    after: () => [],
   },
   hevc: {
     name: "libx265",
     quality: ["-preset", "superfast", "-profile:v", "main", "-crf", "28"],
-    after: ["-forced-idr", "1", "-x265-params", "log-level=error:open-gop=0"],
+    after: (level) => [
+      "-forced-idr",
+      "1",
+      "-x265-params",
+      [
+        "log-level=error",
+        "open-gop=0",
+        ...(level === undefined ? [] : [`level-idc=${String(level.tenths)}`]),
+      ].join(":"),
+    ],
   },
-  av1: { name: "libsvtav1", quality: ["-preset", "9", "-crf", "30"], after: [] },
+  av1: {
+    name: "libsvtav1",
+    quality: ["-preset", "9", "-crf", "30"],
+    after: (level) =>
+      level === undefined ? [] : ["-svtav1-params", `level=${String(level.tenths)}`],
+  },
 };
 
 /**
@@ -198,7 +213,7 @@ const encodeCpu = (codec: OutputCodec): OpImpl<"Encode"> => {
         String(op.bitrate),
         "-bufsize",
         String(op.bitrate * 2),
-        ...encoder.after,
+        ...encoder.after(op.level === undefined ? undefined : levelOf(codec, op.level)),
       ],
     }),
     probes: encodeProbes(codec),

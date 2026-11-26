@@ -112,40 +112,6 @@ const OUTPUT_PROFILES: Readonly<Record<OutputCodec, string>> = {
   av1: "Main",
 };
 
-/**
- * The largest picture, in luma samples, each level of HEVC and AV1 allows, from the highest level
- * down, by the level in ffprobe's units: HEVC's `general_level_idc` (30 times the level) and AV1's
- * `seq_level_idx`. A level also limits the frame rate times the picture, which this leaves to the
- * encoders. H.264 has no entry: its encodes keep what the client's size allows, as they always
- * have.
- */
-const LEVEL_PICTURES: Readonly<Record<OutputCodec, ReadonlyArray<readonly [number, number]>>> = {
-  h264: [],
-  hevc: [
-    [180, 35_651_584],
-    [150, 8_912_896],
-    [120, 2_228_224],
-    [93, 983_040],
-    [90, 552_960],
-    [63, 245_760],
-    [60, 122_880],
-    [0, 36_864],
-  ],
-  av1: [
-    [16, 35_651_584],
-    [12, 8_912_896],
-    [8, 2_359_296],
-    [5, 1_065_024],
-    [4, 665_856],
-    [1, 278_784],
-    [0, 147_456],
-  ],
-};
-
-/** The largest picture `codec` at `level` allows; none when the client declared no level. */
-const levelPicture = (codec: OutputCodec, level: number | undefined): number | undefined =>
-  level === undefined ? undefined : LEVEL_PICTURES[codec].find(([lowest]) => level >= lowest)?.[1];
-
 /** What `client` says of `codec`, when it plays that codec's 8-bit SDR encode in its profile. */
 const playable = (
   client: ClientCapabilities,
@@ -166,7 +132,8 @@ const playable = (
  * AV1 when it decodes AV1 in hardware, or plays neither HEVC nor H.264; H.264 last, the broad
  * fallback. A CPU encodes H.264 when the client plays it, as software HEVC and AV1 cost several
  * times its CPU for a live stream, and HEVC or AV1 only for a client without H.264. Each target
- * stays within the level the client declared for its codec. Empty when the client plays none.
+ * carries the level the client declared for its codec, which HEVC and AV1 encodes fit; H.264 has
+ * no level table, so its declared level limits nothing. Empty when the client plays none.
  */
 export const outputTargets = (client: ClientCapabilities): ReadonlyArray<OutputTarget> => {
   const h264 = playable(client, "h264");
@@ -192,7 +159,7 @@ export const outputTargets = (client: ClientCapabilities): ReadonlyArray<OutputT
             depth: 8,
             colour: "sdr",
             cpuEncode: codec === "h264" || h264 === undefined ? "allowed" : "refused",
-            maxLumaSamples: levelPicture(codec, support.maxLevel),
+            level: support.maxLevel,
           },
         ],
   );
@@ -347,6 +314,7 @@ export const encodeIntent = (
 
   return {
     targets,
+    frameRate: video.frameRate,
     bounds: {
       width: client.maxWidth,
       height: Math.min(client.maxHeight, request.quality?.maxHeight ?? Number.POSITIVE_INFINITY),

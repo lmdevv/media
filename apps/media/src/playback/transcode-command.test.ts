@@ -36,6 +36,8 @@ interface EncodeOptions {
   readonly codec?: string;
   /** What the encode produces; H.264 when absent. */
   readonly output?: OutputCodec;
+  /** The level the client declared for `output`, in ffprobe's units. */
+  readonly level?: number;
   readonly bitDepth?: number;
   readonly toneMap?: boolean;
   readonly burnSubtitle?: number;
@@ -65,7 +67,8 @@ const encode = (domain: "qsv" | "vaapi" | "software", options: EncodeOptions) =>
   };
 
   const intent: VideoIntent = {
-    targets: [sdrTarget(options.output ?? "h264")],
+    targets: [{ ...sdrTarget(options.output ?? "h264"), level: options.level }],
+    frameRate: undefined,
     bounds: { width: 1920, height: 1080 },
     cpuEncodeBounds: { width: 1920, height: 1080 },
     maxBitrate: undefined,
@@ -612,6 +615,29 @@ describe("hlsCommandArgs", () => {
       expect(
         args.slice(args.indexOf("-c:v"), args.indexOf("-map", args.indexOf("-c:v"))),
       ).toStrictEqual(["-c:v", ...encoder, "-force_key_frames", "1.400000,3.400000"]);
+    },
+  );
+
+  it.each<readonly [OutputCodec, "software" | "qsv" | "vaapi", number, ReadonlyArray<string>]>([
+    ["hevc", "software", 153, ["-x265-params", "log-level=error:open-gop=0:level-idc=41"]],
+    ["av1", "software", 19, ["-svtav1-params", "level=41"]],
+    ["hevc", "qsv", 153, ["-level", "41"]],
+    ["av1", "qsv", 19, ["-level", "41"]],
+    ["hevc", "vaapi", 153, ["-level", "123"]],
+    ["av1", "vaapi", 19, ["-level", "9"]],
+  ])(
+    "states the level a %s encode on %s holds as its encoder takes it, under the client's %i",
+    (output, domain, declared, stated) => {
+      // 1080p at 60 frames a second, as an unknown frame rate counts, needs level 4.1 of both.
+      const args = hlsCommandArgs({
+        ...command(AudioPlan.Copy({ index: 1 }), "aac"),
+        video: encode(domain, { output, level: declared }),
+      });
+
+      const encoder = args.slice(args.indexOf("-c:v"), args.indexOf("-force_key_frames"));
+      const at = encoder.indexOf(stated[0] ?? "");
+
+      expect(encoder.slice(at, at + stated.length)).toStrictEqual(stated);
     },
   );
 

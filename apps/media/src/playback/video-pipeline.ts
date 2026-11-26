@@ -11,6 +11,7 @@ import type { DynamicRange } from "@media/contracts/media-playback";
 import { Data, Result } from "effect";
 
 import type { VideoStream } from "../media/media-probe.ts";
+import { fitLevel, statedLevel } from "./output-levels.ts";
 import { PROBE_CLIPS } from "./probe-clips.ts";
 import { CPU_ROWS } from "./video-ops-cpu.ts";
 import { INTEL_ROWS, QSV, VAAPI } from "./video-ops-intel.ts";
@@ -148,6 +149,11 @@ export interface VideoIntent {
    * maps HDR to SDR for each target that asks for SDR (`toneMapsTo`).
    */
   readonly targets: ReadonlyArray<OutputTarget>;
+  /**
+   * The source's frames a second, which a target's level limits with the picture; a level holds an
+   * unknown rate to 60.
+   */
+  readonly frameRate: number | undefined;
   /** The client's limits and the viewer's height cap. */
   readonly bounds: Size;
   /** The largest picture the CPU encodes. */
@@ -343,30 +349,17 @@ const SDR_BITRATES: ReadonlyArray<readonly [number, number]> = [
  * The bitrate of an encode `height` pixels tall to `codec`, within `maxBitrate`: H.264's table
  * scaled by the codec's share.
  */
-const outputBitrate = (
-  height: number,
-  codec: OutputCodec,
-  maxBitrate: number | undefined,
-): number =>
+const outputBitrate = (height: number, codec: OutputCodec, maxBitrate: number): number =>
   Math.min(
     Math.round(
       (SDR_BITRATES.find(([above]) => height > above)?.[1] ?? 2_000_000) * BITRATE_SHARE[codec],
     ),
-    maxBitrate ?? Number.POSITIVE_INFINITY,
+    maxBitrate,
   );
 
-/**
- * The source's size scaled down, never up, to fit `bounds` and at most `maxSamples` luma samples,
- * in even dimensions.
- */
-const fit = (source: Size, bounds: Size, maxSamples: number | undefined): Size => {
-  const scale = Math.min(
-    1,
-    bounds.width / source.width,
-    bounds.height / source.height,
-    Math.sqrt((maxSamples ?? Number.POSITIVE_INFINITY) / (source.width * source.height)),
-  );
-
+/** The source's size scaled down, never up, to fit `bounds`, in even dimensions. */
+const fit = (source: Size, bounds: Size): Size => {
+  const scale = Math.min(1, bounds.width / source.width, bounds.height / source.height);
   const even = (value: number) => Math.max(2, Math.floor((value * scale) / 2) * 2);
 
   return { width: even(source.width), height: even(source.height) };
@@ -389,9 +382,10 @@ interface Candidate {
 /**
  * Every chain that could encode `source` for `intent` within the snapshot's domains: each encode
  * row with each target it may produce (on the CPU only those that allow it) sizes the picture
- * (the CPU within its bounds, every row within the target's level), the scale leaves frames at
- * the source's depth or at 8 bits, whichever the rows after it take, and a tone map runs where
- * the target asks for SDR from HDR.
+ * (the CPU within its bounds) and the bitrate within the target's level at the source's frame
+ * rate, skipping a target whose level holds that rate at no size; the scale leaves frames at the
+ * source's depth or at 8 bits, whichever the rows after it take, and a tone map runs where the
+ * target asks for SDR from HDR.
  */
 const candidates = (
   source: SourceVideo,
@@ -411,20 +405,37 @@ const candidates = (
     encodes.flatMap((encode) => {
       if (encode.on === "cpu" && target.cpuEncode === "refused") return [];
 
-      const size = fit(
-        source,
-        encode.on === "cpu"
-          ? {
-              width: Math.min(intent.bounds.width, intent.cpuEncodeBounds.width),
-              height: Math.min(intent.bounds.height, intent.cpuEncodeBounds.height),
-            }
-          : intent.bounds,
-        target.maxLumaSamples,
+      const fitted = fitLevel(
+        target.codec,
+        target.level,
+        fit(
+          source,
+          encode.on === "cpu"
+            ? {
+                width: Math.min(intent.bounds.width, intent.cpuEncodeBounds.width),
+                height: Math.min(intent.bounds.height, intent.cpuEncodeBounds.height),
+              }
+            : intent.bounds,
+        ),
+        intent.frameRate,
+      );
+
+      if (fitted === undefined) return [];
+      const { size } = fitted;
+
+      const bitrate = outputBitrate(
+        size.height,
+        target.codec,
+        Math.min(
+          intent.maxBitrate ?? Number.POSITIVE_INFINITY,
+          fitted.maxBitrate ?? Number.POSITIVE_INFINITY,
+        ),
       );
 
       const encodeOp = Op.Encode({
         target,
-        bitrate: outputBitrate(size.height, target.codec, intent.maxBitrate),
+        bitrate,
+        level: statedLevel(target.codec, target.level, size, intent.frameRate, bitrate),
       });
 
       return depths.flatMap((depth) => {

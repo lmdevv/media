@@ -45,6 +45,9 @@ const PICTURE = [
 
 const FRAME = 1 / 24;
 
+/** Six seconds of 640x360 at 60 fps in MPEG-2, whose sample rate a low level holds only smaller. */
+const FAST_FILE = "Mpeg Sixty (2013)/Mpeg Sixty (2013).mkv";
+
 const client = (videoCodecs: ClientCapabilities["videoCodecs"]): ClientCapabilities => ({
   containers: [],
   videoCodecs,
@@ -123,6 +126,9 @@ const Probed = Schema.fromJsonString(
         codec_name: Schema.String,
         profile: Schema.optional(Schema.String),
         codec_tag_string: Schema.String,
+        level: Schema.optional(Schema.Finite),
+        width: Schema.optional(Schema.Finite),
+        height: Schema.optional(Schema.Finite),
       }),
     ),
     packets: Schema.Array(
@@ -131,14 +137,20 @@ const Probed = Schema.fromJsonString(
   }),
 );
 
-const addSource = Effect.gen(function* () {
+/** Writes `name` in the sources library from `picture` and a tone of `seconds`, once, and scans it. */
+const addFile = Effect.fn("OutputCodecs.addFile")(function* (
+  name: string,
+  picture: string,
+  seconds: number,
+  keyframeEvery: number,
+) {
   const workspace = yield* FixtureWorkspace.Service;
   const tools = yield* MediaTools.Service;
   const scanner = yield* LibraryScanner.Service;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const root = path.join(workspace.root, "output-codecs");
-  const file = path.join(root, SOURCE_FILE);
+  const file = path.join(root, name);
 
   if (!(yield* fs.exists(file))) {
     yield* fs.makeDirectory(path.dirname(file), { recursive: true });
@@ -151,11 +163,11 @@ const addSource = Effect.gen(function* () {
       "-f",
       "lavfi",
       "-i",
-      PICTURE,
+      picture,
       "-f",
       "lavfi",
       "-i",
-      `sine=frequency=440:sample_rate=48000:duration=${String(SOURCE_SECONDS)}`,
+      `sine=frequency=440:sample_rate=48000:duration=${String(seconds)}`,
       "-map",
       "0:v",
       "-map",
@@ -163,7 +175,7 @@ const addSource = Effect.gen(function* () {
       "-c:v",
       "mpeg2video",
       "-g",
-      "12",
+      String(keyframeEvery),
       "-c:a",
       "aac",
       file,
@@ -172,8 +184,12 @@ const addSource = Effect.gen(function* () {
 
   yield* scanner.scan({ libraryId: SOURCES, root, mode: "incremental" });
 
-  return MemoryLibrary.fileIdOf(SOURCES, SOURCE_FILE);
-}).pipe(Effect.orDie);
+  return MemoryLibrary.fileIdOf(SOURCES, name);
+}, Effect.orDie);
+
+const addSource = addFile(SOURCE_FILE, PICTURE, SOURCE_SECONDS, 12);
+
+const addFastSource = addFile(FAST_FILE, "testsrc2=s=640x360:r=60:duration=6[out0]", 6, 30);
 
 const fetched = (url: string) =>
   HttpClient.get(url).pipe(
@@ -239,7 +255,7 @@ const probeSegment = Effect.fn("OutputCodecs.probeSegment")(function* (
       "-select_streams",
       "v:0",
       "-show_entries",
-      "stream=codec_name,profile,codec_tag_string:packet=pts_time,flags",
+      "stream=codec_name,profile,codec_tag_string,level,width,height:packet=pts_time,flags",
       "-of",
       "json",
       file,
@@ -389,6 +405,80 @@ const downloads = Effect.fn("OutputCodecs.downloads")(function* (
   );
 });
 
+/** A device that plays one codec up to a declared level, and the source that tests it. */
+interface LevelCase {
+  readonly name: string;
+  readonly codec: "hevc" | "av1";
+  /** The highest level the device declares, in ffprobe's units. */
+  readonly declared: number;
+  /** Whether it plays the 60 fps source, else the 24 fps one. */
+  readonly fast: boolean;
+}
+
+const LEVEL_CASES: ReadonlyArray<LevelCase> = [
+  { name: "an HEVC device at level 2.1, from 60 fps", codec: "hevc", declared: 63, fast: true },
+  { name: "an AV1 device at level 2.1, from 60 fps", codec: "av1", declared: 1, fast: true },
+  { name: "an HEVC device at level 2", codec: "hevc", declared: 60, fast: false },
+  { name: "an AV1 device at level 2.0", codec: "av1", declared: 0, fast: false },
+];
+
+/**
+ * Negotiates `expected`'s device on a server on `path` and reads the first segments it serves:
+ * the codec it names, at the size the answer gives, at or under the level the device declared.
+ */
+const holdsLevel = Effect.fn("OutputCodecs.holdsLevel")(function* (
+  expected: LevelCase,
+  path: "cpu" | "qsv" | "vaapi",
+) {
+  const server = yield* MediaTestServer.Service;
+  const fileId: MediaFileId = yield* expected.fast ? addFastSource : addSource;
+  const token = signTestToken({ fid: fileId, sid: `level-${path}-${expected.name}` });
+  const local = (url: string) => url.replace(/^https?:\/\/[^/]+/u, server.baseUrl);
+
+  const negotiated = yield* decodeNegotiation(
+    yield* posted(`${server.baseUrl}/api/playback/negotiate`, {
+      token,
+      capabilities: client([
+        { codec: expected.codec, profiles: ["Main"], maxLevel: expected.declared },
+      ]),
+    }),
+  ).pipe(Effect.orDie);
+
+  assert.strictEqual(
+    negotiated.mode,
+    path === "cpu" ? "transcode-software" : `transcode-${path}`,
+    expected.name,
+  );
+  assert.strictEqual(negotiated.video.codec, expected.codec, expected.name);
+
+  const { init, segments } = yield* segmentsOf(local(negotiated.url));
+  const initBytes = yield* fetched(init);
+
+  for (const segment of segments.slice(0, 2)) {
+    const served = yield* fetched(segment.url);
+    const at = `${expected.name}, the segment at ${segment.start.toFixed(3)} s`;
+
+    assert.strictEqual(served.status, 200, at);
+
+    const [stream] = (yield* probeSegment([initBytes.body, served.body]).pipe(Effect.orDie))
+      .streams;
+
+    assert.isDefined(stream, at);
+    assert.deepStrictEqual(
+      [stream.codec_name, stream.width, stream.height],
+      [expected.codec, negotiated.video.width, negotiated.video.height],
+      at,
+    );
+    assert.isDefined(stream.level, at);
+    assert.isAtMost(stream.level, expected.declared, at);
+  }
+
+  yield* posted(`${server.baseUrl}/api/playback/stop`, {
+    token,
+    streamId: negotiated.streamId ?? "",
+  });
+});
+
 describe.skipIf(!hasFfmpeg)("output codecs", () => {
   layer(MediaTestServer.layer(), { excludeTestServices: true, timeout: "180 seconds" })((it) => {
     for (const expected of CPU_CASES) {
@@ -403,6 +493,14 @@ describe.skipIf(!hasFfmpeg)("output codecs", () => {
       it.effect(
         `encodes ${expected.codec} on the CPU for ${expected.name}`,
         () => plays(expected, "cpu"),
+        120_000,
+      );
+    }
+
+    for (const expected of LEVEL_CASES) {
+      it.effect(
+        `holds ${expected.name} to its level on the CPU`,
+        () => holdsLevel(expected, "cpu"),
         120_000,
       );
     }
@@ -433,6 +531,14 @@ describe.skipIf(!hasFfmpeg)("output codecs", () => {
           it.effect(
             `encodes ${expected.codec} on ${path} for ${expected.name}`,
             () => plays(expected, path),
+            120_000,
+          );
+        }
+
+        for (const expected of LEVEL_CASES) {
+          it.effect(
+            `holds ${expected.name} to its level on ${path}`,
+            () => holdsLevel(expected, path),
             120_000,
           );
         }

@@ -45,8 +45,11 @@ export interface OutputTarget {
   readonly colour: DynamicRange;
   /** Whether an encoder on the CPU may produce it, or only one on a GPU. */
   readonly cpuEncode: "allowed" | "refused";
-  /** The largest picture, in luma samples, the level the client declared allows; none caps nothing. */
-  readonly maxLumaSamples: number | undefined;
+  /**
+   * The highest level the client declared for the codec, in ffprobe's units, which the encode's
+   * picture, frame rate, and bitrate must fit (`output-levels.ts`); none limits nothing.
+   */
+  readonly level: number | undefined;
 }
 
 /**
@@ -63,7 +66,7 @@ export const sdrTarget = (codec: OutputCodec): OutputTarget => ({
   depth: 8,
   colour: "sdr",
   cpuEncode: "allowed",
-  maxLumaSamples: undefined,
+  level: undefined,
 });
 
 /** Whether a frame holds a whole picture or two fields. */
@@ -111,8 +114,15 @@ export type Op = Data.TaggedEnum<{
   /** HDR to SDR. */
   ToneMap: {};
   BurnImage: { readonly subtitle: SubtitleInput };
-  /** `bitrate` is the target's: a cap on the CPU, the rate on a GPU. */
-  Encode: { readonly target: OutputTarget; readonly bitrate: number };
+  /**
+   * `bitrate` is the target's: a cap on the CPU, the rate on a GPU. `level` is the level the
+   * stream states, in ffprobe's units; none leaves it to the encoder.
+   */
+  Encode: {
+    readonly target: OutputTarget;
+    readonly bitrate: number;
+    readonly level: number | undefined;
+  };
   /** Only `assemble` creates moves. */
   Move: { readonly to: Domain };
 }>;
@@ -327,5 +337,9 @@ export const encodesTarget = (codec: OutputCodec, target: OutputTarget): boolean
 
 /** What proves the encode row of `codec`: one 8-bit SDR encode of the 8-bit H.264 clip. */
 export const encodeProbes = (codec: OutputCodec): ReadonlyArray<ProbeCase<"Encode">> => [
-  { op: Op.Encode({ target: sdrTarget(codec), bitrate: 1_000_000 }), clip: "h264-8", runs: 1 },
+  {
+    op: Op.Encode({ target: sdrTarget(codec), bitrate: 1_000_000, level: undefined }),
+    clip: "h264-8",
+    runs: 1,
+  },
 ];

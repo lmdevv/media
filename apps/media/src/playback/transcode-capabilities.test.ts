@@ -58,6 +58,7 @@ const VPP_FAILED = "[Parsed_vpp_qsv_2 @ 0x1] Invalid color_matrix.";
 /** H.264 at up to 1080p, the intent every request here asks for. */
 const INTENT: VideoIntent = {
   targets: [sdrTarget("h264")],
+  frameRate: undefined,
   bounds: { width: 1920, height: 1080 },
   cpuEncodeBounds: { width: 1920, height: 1080 },
   maxBitrate: undefined,

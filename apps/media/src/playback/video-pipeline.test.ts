@@ -48,6 +48,7 @@ const source = (overrides: Partial<SourceVideo> = {}): SourceVideo => ({
 
 const intentFor = (video: SourceVideo, overrides: Partial<VideoIntent> = {}): VideoIntent => ({
   targets: [sdrTarget("h264")],
+  frameRate: undefined,
   bounds: { width: 3840, height: 2160 },
   cpuEncodeBounds: { width: 1920, height: 1080 },
   maxBitrate: undefined,
@@ -404,7 +405,10 @@ describe("assemble", () => {
       video,
       [
         [Op.Decode({ codec: "hevc" }), row("decode.qsv")],
-        [Op.Encode({ target: sdrTarget("h264"), bitrate: 8_000_000 }), row("encode.qsv.h264")],
+        [
+          Op.Encode({ target: sdrTarget("h264"), bitrate: 8_000_000, level: undefined }),
+          row("encode.qsv.h264"),
+        ],
       ],
       everything(video, [QSV]),
       Purpose.Run(),
@@ -425,7 +429,10 @@ describe("assemble", () => {
       video,
       [
         [Op.Decode({ codec: "h264" }), row("decode.qsv")],
-        [Op.Encode({ target: sdrTarget("h264"), bitrate: 8_000_000 }), row("encode.vaapi.h264")],
+        [
+          Op.Encode({ target: sdrTarget("h264"), bitrate: 8_000_000, level: undefined }),
+          row("encode.vaapi.h264"),
+        ],
       ],
       everything(video, [QSV, VAAPI]),
       Purpose.Run(),
@@ -443,7 +450,10 @@ describe("assemble", () => {
       [
         [Op.Decode({ codec: "h264" }), row("decode.qsv")],
         [Op.Scale({ width: 1280, height: 720, depth: 8 }), row("scale.cpu")],
-        [Op.Encode({ target: sdrTarget("h264"), bitrate: 8_000_000 }), row("encode.vaapi.h264")],
+        [
+          Op.Encode({ target: sdrTarget("h264"), bitrate: 8_000_000, level: undefined }),
+          row("encode.vaapi.h264"),
+        ],
       ],
       everything(video, [QSV, other]),
       Purpose.Run(),
@@ -457,7 +467,10 @@ describe("assemble", () => {
 
     const choices = [
       [Op.Decode({ codec: "h264" }), row("decode.cpu")],
-      [Op.Encode({ target: sdrTarget("h264"), bitrate: 1_000_000 }), row("encode.qsv.h264")],
+      [
+        Op.Encode({ target: sdrTarget("h264"), bitrate: 1_000_000, level: undefined }),
+        row("encode.qsv.h264"),
+      ],
     ] as const;
 
     const keys = everyKey(video, intentFor(video), [QSV]);
@@ -496,7 +509,12 @@ describe("the seal", () => {
 
     const encodeOnly = assemble(
       video,
-      [[Op.Encode({ target: sdrTarget("h264"), bitrate: 1_000_000 }), row("encode.cpu.h264")]],
+      [
+        [
+          Op.Encode({ target: sdrTarget("h264"), bitrate: 1_000_000, level: undefined }),
+          row("encode.cpu.h264"),
+        ],
+      ],
       known,
       Purpose.Run(),
     );

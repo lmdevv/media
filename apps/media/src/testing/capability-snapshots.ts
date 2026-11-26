@@ -42,6 +42,7 @@ export const verifiedFor = (
         source,
         {
           targets: OUTPUT_CODECS.map(sdrTarget),
+          frameRate: undefined,
           bounds: { width: source.width, height: source.height },
           cpuEncodeBounds: { width: 1920, height: 1080 },
           maxBitrate: undefined,

@@ -40,6 +40,7 @@ const encodedOn = (probe: MediaProbe, domain: "software" | "qsv" | "vaapi"): Vid
     video,
     {
       targets: [sdrTarget("h264")],
+      frameRate: undefined,
       bounds: { width: 320, height: 180 },
       cpuEncodeBounds: { width: 1920, height: 1080 },
       maxBitrate: 1_000_000,

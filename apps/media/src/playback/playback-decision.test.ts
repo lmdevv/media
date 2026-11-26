@@ -14,8 +14,9 @@ import {
   replan,
   VideoPlan,
 } from "./playback-decision.ts";
+import { levelOf } from "./output-levels.ts";
 import { encodeDomain } from "./video-pipeline.ts";
-import { type CapabilityKey, type GpuDomain, ImplId, type OutputTarget } from "./video-ops.ts";
+import { type CapabilityKey, type GpuDomain, ImplId, Op, type OutputTarget } from "./video-ops.ts";
 
 interface VideoOptions {
   readonly profile?: string;
@@ -23,6 +24,7 @@ interface VideoOptions {
   readonly width?: number;
   readonly height?: number;
   readonly dynamicRange?: VideoStream["dynamicRange"];
+  readonly frameRate?: number;
 }
 
 const video = (codec: string, options: VideoOptions = {}): VideoStream => ({
@@ -34,6 +36,7 @@ const video = (codec: string, options: VideoOptions = {}): VideoStream => ({
   width: options.width ?? 1920,
   height: options.height ?? 1080,
   dynamicRange: options.dynamicRange ?? "sdr",
+  frameRate: options.frameRate,
 });
 
 const h264 = video("h264");
@@ -182,8 +185,8 @@ const chromeWithAv1 = chromeLike({
 const target = (
   codec: OutputTarget["codec"],
   cpuEncode: OutputTarget["cpuEncode"],
-  maxLumaSamples?: number,
-): OutputTarget => ({ codec, depth: 8, colour: "sdr", cpuEncode, maxLumaSamples });
+  level?: number,
+): OutputTarget => ({ codec, depth: 8, colour: "sdr", cpuEncode, level });
 
 /** An 8-bit MPEG-2 file no client plays, so every one of them needs an encode. */
 const mpeg2 = probe("ts", video("mpeg2video", { profile: "Main" }), [aac]);
@@ -235,7 +238,7 @@ describe("outputTargets", () => {
     expect(outputTargets(device([{ codec: "vp9" }]))).toStrictEqual([]);
   });
 
-  it("keeps HEVC and AV1 within the level the client declared", () => {
+  it("carries the level the client declared for each codec", () => {
     expect(
       outputTargets(
         device([
@@ -245,9 +248,9 @@ describe("outputTargets", () => {
         ]),
       ),
     ).toStrictEqual([
-      target("hevc", "refused", 983_040),
-      target("av1", "refused", 2_359_296),
-      target("h264", "allowed"),
+      target("hevc", "refused", 93),
+      target("av1", "refused", 8),
+      target("h264", "allowed", 41),
     ]);
   });
 });
@@ -562,6 +565,144 @@ describe("decidePlayback", () => {
       "scale.qsv",
       "encode.qsv.h264",
     ]);
+  });
+});
+
+/** The encode a plan runs, its output and the level its stream states. */
+const encodeOf = (plan: PlaybackPlan) => {
+  const last =
+    PlaybackPlan.$is("Hls")(plan) && VideoPlan.$is("Encode")(plan.video)
+      ? plan.video.pipeline.steps.at(-1)
+      : undefined;
+
+  return last !== undefined && Op.$is("Encode")(last.op) && PlaybackPlan.$is("Hls")(plan)
+    ? {
+        output: VideoPlan.$is("Encode")(plan.video) ? plan.video.output : undefined,
+        level: last.op.level,
+      }
+    : undefined;
+};
+
+/** An MPEG-2 file of `width` by `height` at `frameRate`, which every client needs encoded. */
+const mpeg2At = (width: number, height: number, frameRate: number) =>
+  probe("ts", video("mpeg2video", { profile: "Main", width, height, frameRate }), [aac]);
+
+const HEVC_LEVELS = [30, 60, 63, 90, 93, 120, 123, 150, 153, 156, 180, 183, 186];
+
+const AV1_LEVELS = [0, 1, 4, 5, 8, 9, 12, 13, 14, 15, 16, 17, 18, 19];
+
+describe("levels", () => {
+  it.prop(
+    "never plans an HEVC or AV1 encode above the level the client declared, at any size and frame rate",
+    {
+      codec: Schema.Literals(["hevc", "av1"]),
+      pick: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 13 })),
+      width: Schema.Int.check(Schema.isBetween({ minimum: 64, maximum: 7680 })),
+      height: Schema.Int.check(Schema.isBetween({ minimum: 64, maximum: 4320 })),
+      frameRate: Schema.Literals([12, 23.976, 25, 29.97, 50, 59.94, 60, 100, 120, 144, 240]),
+      onGpu: Schema.Boolean,
+    },
+    ({ codec, pick, width, height, frameRate, onGpu }) => {
+      const levels = codec === "hevc" ? HEVC_LEVELS : AV1_LEVELS;
+      const declared = levels[pick % levels.length] ?? 0;
+      const limits = levelOf(codec, declared);
+      const media = mpeg2At(width, height, frameRate);
+
+      const plan = deciding(onGpu ? ["qsv", "vaapi"] : [], () => false)(
+        media,
+        device([{ codec, maxLevel: declared }]),
+      );
+
+      const encode = encodeOf(plan);
+
+      assert.isDefined(limits);
+
+      if (encode?.output === undefined) {
+        assert.isTrue(
+          limits.maxFrameRate !== undefined && frameRate > limits.maxFrameRate,
+          `${codec} ${String(declared)} at ${String(frameRate)} fps: ${JSON.stringify(plan)}`,
+        );
+
+        return;
+      }
+
+      const { output } = encode;
+      const block = codec === "hevc" ? 8 : 1;
+      const coded = (side: number) => Math.ceil(side / block) * block;
+      const samples = coded(output.width) * coded(output.height);
+
+      assert.strictEqual(output.codec, codec);
+      assert.isAtMost(output.width, limits.maxWidth);
+      assert.isAtMost(output.height, limits.maxHeight);
+      assert.isAtMost(samples, limits.maxPicture);
+      assert.isAtMost(samples * frameRate, limits.maxSampleRate);
+      assert.isAtMost(output.bitrate, limits.maxBitrate);
+      assert.isAtMost(output.bitrate * 2, limits.maxBuffer ?? Number.POSITIVE_INFINITY);
+      assert.isDefined(encode.level);
+      assert.isAtMost(encode.level, declared);
+    },
+  );
+
+  it("scales a 1080p60 source down to fit HEVC level 4 and AV1 level 4.0, and states that level", () => {
+    const film = mpeg2At(1920, 1080, 60);
+
+    expect(encodeOf(everywhere(film, device([{ codec: "hevc", maxLevel: 120 }])))).toStrictEqual({
+      output: { codec: "hevc", width: 1400, height: 788, bitrate: 6_000_000, dynamicRange: "sdr" },
+      level: 120,
+    });
+    expect(encodeOf(everywhere(film, device([{ codec: "av1", maxLevel: 8 }])))).toStrictEqual({
+      output: { codec: "av1", width: 1446, height: 814, bitrate: 5_200_000, dynamicRange: "sdr" },
+      level: 8,
+    });
+  });
+
+  it("states the lowest level the plan holds, the buffer included, under the client's", () => {
+    const client = device([{ codec: "hevc", maxLevel: 153 }]);
+
+    // 1920x1080 codes as 1920x1088, which level 4 holds, with its 6 Mb/s and 12 Mb buffer.
+    expect(encodeOf(everywhere(mpeg2At(1920, 1080, 24), client))).toMatchObject({
+      output: { width: 1920, height: 1080, bitrate: 6_000_000 },
+      level: 120,
+    });
+    // Level 2 holds the picture and the bitrate, but not the encoders' 3 Mb buffer.
+    expect(encodeOf(everywhere(mpeg2At(320, 180, 24), client))).toMatchObject({
+      output: { width: 320, height: 180, bitrate: 1_500_000 },
+      level: 63,
+    });
+  });
+
+  it("holds a small level's bitrate and buffer as well as its picture", () => {
+    expect(
+      encodeOf(everywhere(mpeg2At(320, 180, 24), device([{ codec: "hevc", maxLevel: 60 }]))),
+    ).toMatchObject({ output: { width: 320, height: 180, bitrate: 750_000 }, level: 60 });
+    expect(
+      encodeOf(everywhere(mpeg2At(640, 360, 24), device([{ codec: "hevc", maxLevel: 30 }]))),
+    ).toMatchObject({ output: { width: 198, height: 112, bitrate: 128_000 }, level: 30 });
+  });
+
+  it("offers the next target where a level holds the source's frame rate at no size", () => {
+    const fast = mpeg2At(1280, 720, 240);
+
+    expect(
+      encodeOf(
+        everywhere(
+          fast,
+          device([{ codec: "av1", maxLevel: 4, powerEfficient: true }, { codec: "h264" }]),
+        ),
+      )?.output,
+    ).toMatchObject({ codec: "h264", width: 1280, height: 720 });
+    expect(everywhere(fast, device([{ codec: "av1", maxLevel: 4 }]))).toStrictEqual(
+      PlaybackPlan.Unsupported({ reason: "no-transcode-target" }),
+    );
+  });
+
+  it("leaves H.264 at the client's size, stating no level, whatever level it declares", () => {
+    expect(
+      encodeOf(everywhere(mpeg2At(1920, 1080, 60), device([{ codec: "h264", maxLevel: 30 }]))),
+    ).toStrictEqual({
+      output: { codec: "h264", width: 1920, height: 1080, bitrate: 8_000_000, dynamicRange: "sdr" },
+      level: undefined,
+    });
   });
 });
 

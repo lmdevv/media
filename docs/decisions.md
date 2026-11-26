@@ -106,12 +106,18 @@ Old movies' Convex project, its SDK client, and its command registry were delete
   since libx265 and libsvtav1 cost several times libx264's CPU for a live stream, so a server
   without a proven GPU encoder for HEVC sends H.264. The planner tries the list in order, a GPU
   encode of a later codec before a CPU encode of an earlier one. Encodes are 8-bit SDR (H.264
-  High, HEVC Main, AV1 Main), at H.264's bitrates times 0.75 for HEVC and 0.65 for AV1, within
-  the level a client declares for HEVC or AV1; HEVC is written with the `hvc1` sample entry Apple
-  requires, and every encoder puts an IDR or key frame exactly at each planned segment start
-  (libx265 with closed GOPs, Quick Sync with `forced_idr`). Clients report `powerEfficient` per
-  codec: the movies web app from the Media Capabilities API, the iOS app and Cast profiles for
-  H.264 and HEVC; none of the fixed lists offers AV1.
+  High, HEVC Main, AV1 Main), at H.264's bitrates times 0.75 for HEVC and 0.65 for AV1. Each
+  encoder is a row of its own, so a failed `hevc_qsv` leaves the stream and the file `h264_qsv`. An HEVC or AV1 encode fits the level the client declares (`output-levels.ts`): the
+  coded picture (HEVC codes whole 8x8 blocks), its samples a second at the source's frame rate,
+  the bitrate, and HEVC's buffer, twice the bitrate, which Quick Sync counts. The picture shrinks
+  until it fits; a target whose level holds the frame rate at no size is skipped. The encode then
+  tells its encoder the lowest level it holds, as the encoders' own choices disagree (VA-API's
+  AV1 writes 2.1 where 2.0 holds; Quick Sync's AV1 writes 4.0 for a 4.1 stream). H.264 keeps no
+  level table. HEVC is written with the `hvc1` sample entry Apple requires, and every encoder
+  puts an IDR or key frame exactly at each planned segment start (libx265 with closed GOPs, Quick
+  Sync with `forced_idr`). Clients report `powerEfficient` per codec: the movies web app from the
+  Media Capabilities API, the iOS app and Cast profiles for H.264 and HEVC; none of the fixed
+  lists offers AV1.
 - A stream's ffmpeg pauses (`SIGSTOP`) once its output runs `STREAM_BUFFER_AHEAD_SECONDS` (120)
   past the furthest segment the player asked for, and continues (`SIGCONT`) when the player is
   within half of that. A remux copies at disk speed, and without the pause every play wrote most of
