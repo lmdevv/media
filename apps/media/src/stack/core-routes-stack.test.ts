@@ -148,7 +148,13 @@ describe.skipIf(core === undefined)("the server's own routes on the core's sign-
         events: [
           {
             ageMs: 0,
-            event: { _tag: "ScreenOpened", screen: "title", id: "routes_suite", durationMs: 7 },
+            event: {
+              _tag: "ScreenOpened",
+              screen: "title",
+              id: "routes_suite",
+              cache: "fetched",
+              contentVisibleMs: 7,
+            },
           },
         ],
       },
