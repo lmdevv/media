@@ -21,7 +21,7 @@ import {
 import {
   DownloadEvent,
   EMPTY_STORE,
-  Standing,
+  holdsNoCopy,
   keptPlaybackOf,
   mayTransfer,
   nextToRun,
@@ -36,7 +36,6 @@ import type {
   DownloadStore,
   FileId,
   KeptPlayback,
-  KnownStore,
   ListedDownload,
   NetworkNow,
   NewDownload,
@@ -46,14 +45,18 @@ import type {
 import type { DownloadSettings } from "@/lib/downloads/settings";
 import {
   Launch,
-  agree,
+  clearMedia,
+  clearRemoval,
+  endRemoval,
+  holdingsOf,
   keepRecord,
   keepRecords,
   readIndex,
+  recordRemoval,
   saveIndex,
   setAsideIndex,
-  sweep,
 } from "@/lib/downloads/storage";
+import type { Removal } from "@/lib/downloads/storage";
 import { coreQueue } from "@/lib/downloads/core-queue";
 import { IOS_CAPABILITIES } from "@/lib/player/capabilities";
 
@@ -287,9 +290,16 @@ export class DownloadEngine {
   #syncing = false;
   #syncNext: ListPage | null = null;
   #sending = false;
+  /** Whether `start` was called, which means the core confirmed the person signed in here. */
+  #confirmed = false;
   #started = false;
   #disposed = false;
-  #standing: Standing = Standing.Unproven();
+  /** The removals recorded on disk that the core has not acknowledged yet, by their folder. */
+  readonly #removals = new Map<string, Removal>();
+  /** The removals being told to the core now, by their folder. */
+  readonly #telling = new Map<string, Promise<boolean>>();
+  /** The stamp of the last removal recorded, so each one's folder gets its own name. */
+  #lastStamp = 0;
   /** Whether an index that did not read whole still sits where a save would overwrite it. */
   #unreadableInPlace = false;
   /**
@@ -303,11 +313,11 @@ export class DownloadEngine {
   #copyTimer: ReturnType<typeof setTimeout> | undefined;
 
   /**
-   * Reads the person's downloads index. Only a `Whole` store's lack of a folder proves a removal:
-   * after one, the files no download owns are deleted, before any transfer of its own can start. An
-   * index that read but not whole keeps every folder, and the downloads it lacks come back from
-   * their own copies. A read that fails decides nothing: the downloads rebuilt from their copies
-   * show and play, nothing is saved, deleted, or sent, and the read is tried again.
+   * Reads the person's downloads index and folder. The downloads the index lacks come back from
+   * their own copies, and a removal recorded before a crash goes on: its files are deleted now, and
+   * the core is told once the engine starts. Nothing else is ever deleted for being missing from
+   * the index. A read that fails decides nothing: what could be read shows and plays, nothing is
+   * saved, deleted, or sent, and the read is tried again.
    */
   constructor(platform: EnginePlatform, options: EngineOptions) {
     this.#platform = platform;
@@ -344,12 +354,11 @@ export class DownloadEngine {
 
         this.#notify();
       },
-      Loaded: ({ store, standing, misplaced, fromCopies }) => {
+      Loaded: ({ store, removals, misplaced, changed }) => {
         const changes = this.#held ?? [];
 
         this.#held = null;
         clearTimeout(this.#readTimer);
-        this.#standing = standing;
         this.#unreadableInPlace = misplaced;
         this.#settled.clear();
 
@@ -361,8 +370,9 @@ export class DownloadEngine {
 
         this.#snapshot = { ...this.#snapshot, store: known, save: "saved" };
 
-        if (Standing.$is("Whole")(standing)) {
-          sweep(this.#options.disk, { store: known, standing });
+        for (const removal of removals) {
+          clearRemoval(this.#options.disk, removal);
+          this.#removals.set(removal.folder, removal);
         }
 
         this.#copiesLeft = known.downloads.map((download) => download.id);
@@ -370,10 +380,11 @@ export class DownloadEngine {
 
         if (!this.#disposed) this.#copyTimer = setTimeout(() => this.#keepCopies(), 0);
 
-        if (misplaced || fromCopies > 0 || changes.length > 0) this.#save();
+        if (misplaced || changed || changes.length > 0) this.#save();
         this.#notify();
 
         if (this.#startWhenRead) this.start();
+        else this.#tellAll();
       },
     });
   }
@@ -397,6 +408,8 @@ export class DownloadEngine {
    */
   start(): void {
     if (this.#started || this.#disposed) return;
+    this.#confirmed = true;
+    this.#tellAll();
 
     if (this.#held !== null) {
       this.#startWhenRead = true;
@@ -424,9 +437,16 @@ export class DownloadEngine {
     for (const active of this.#active.values()) active.task?.cancel();
   }
 
-  /** Queues a download; one already kept for the same file stays as it is. */
+  /**
+   * Queues a download; one already kept for the same file stays as it is. Its folder, with its own
+   * copy of its row, is made once the index holding it is saved.
+   */
   add(download: NewDownload): void {
+    const fresh = this.#find(download.id) === undefined;
+
     this.#dispatch(DownloadEvent.Added({ download, at: Date.now() }));
+
+    if (fresh && this.#snapshot.save === "saved") this.#keepRecord(download.id);
     this.#pump();
   }
 
@@ -437,17 +457,14 @@ export class DownloadEngine {
   }
 
   /**
-   * Cancels a download or removes a kept one, deleting its files (Remove, Cancel Download), and
-   * tells the core. A refusal or a server out of reach leaves the core's row, which the next
-   * reading of the list removes again.
+   * Cancels a download or removes a kept one (Remove, Cancel Download): records the removal, then
+   * deletes its files and tells the core. A core that refuses or is out of reach is told again at
+   * the next launch, sync, or reconnection. A download whose removal cannot be recorded stays.
    */
   async remove(id: string): Promise<void> {
     const download = this.#find(id);
 
-    this.#discard(id);
-    this.#pump();
-
-    if (download !== undefined) void this.#forget(download.id);
+    if (download !== undefined) this.#remove(download.id);
 
     await Promise.resolve();
   }
@@ -484,6 +501,7 @@ export class DownloadEngine {
     this.#reconsider();
 
     if (!network.connected) return;
+    this.#tellAll();
     void this.sendProgress();
     const listed = this.#list?.getSnapshot();
 
@@ -616,15 +634,8 @@ export class DownloadEngine {
     const listed = rows.flatMap(listedOf);
 
     for (const entry of listed) this.#settled.add(entry.id);
-    const known: KnownStore = { store: this.#snapshot.store, standing: this.#standing };
-    const plan = planSync(known, listed, settled);
-
-    this.#standing = agree(this.#options.disk, known, listed);
-    this.#follow(plan);
-
-    if (Standing.$is("Unproven")(known.standing) && Standing.$is("Whole")(this.#standing)) {
-      this.#save();
-    }
+    this.#follow(planSync(this.#snapshot.store, listed, settled, holdingsOf(this.#options.disk)));
+    this.#tellAll();
   }
 
   /** `rows` and the rows of every page after `page`, read in order; null when a page fails. */
@@ -651,45 +662,123 @@ export class DownloadEngine {
     for (const id of plan.expire) this.#expire(id);
 
     for (const id of plan.refresh) {
-      this.#deleteFiles(id);
       this.#dispatch(DownloadEvent.Refreshed({ id }));
+      this.#empty(id);
     }
 
-    for (const id of plan.drop) this.#drop(id);
-
-    for (const id of plan.purge) this.#discard(id);
+    for (const id of [...plan.drop, ...plan.purge]) this.#remove(id);
 
     for (const id of plan.forget) void this.#forget(id);
 
     this.#pump();
   }
 
-  /** The person may no longer keep `id` here: its copy goes, and it shows as expired. */
+  /** The person may no longer keep `id` here: it shows as expired, and its files go. */
   #expire(id: string): void {
     this.#stop(id);
-    this.#deleteFiles(id);
     this.#dispatch(DownloadEvent.Expired({ id }));
+    this.#empty(id);
   }
 
-  /** The file or its library is gone: the copy and the core's row go. */
-  #drop(id: FileId): void {
-    this.#discard(id);
-    void this.#forget(id);
-  }
+  /**
+   * Removes download `id`: records the removal on disk first, then stops it, forgets its row,
+   * deletes its files, and tells the core. A removal that cannot be recorded leaves it as it is.
+   */
+  #remove(id: FileId): void {
+    if (this.#disposed) return;
 
-  /** Stops a download, deletes its files, and forgets it here. */
-  #discard(id: string): void {
+    const recorded = recordRemoval(this.#options.disk, id, this.#stamp());
+
+    if (Result.isFailure(recorded)) return;
+
+    const removal = recorded.success;
+
     this.#stop(id);
-    this.#deleteFiles(id);
+    this.#artwork.delete(id);
+    this.#settled.delete(id);
     this.#dispatch(DownloadEvent.Removed({ id }));
+    clearRemoval(this.#options.disk, removal);
+    this.#removals.set(removal.folder, removal);
+    void this.#tell(removal);
+    this.#pump();
   }
 
+  #stamp(): number {
+    this.#lastStamp = Math.max(Date.now(), this.#lastStamp + 1);
+
+    return this.#lastStamp;
+  }
+
+  /** Tells the core about every removal it has not acknowledged, once the engine has started. */
+  #tellAll(): void {
+    if (!this.#confirmed) return;
+
+    for (const removal of this.#removals.values()) void this.#tell(removal);
+  }
+
+  /**
+   * Tells the core it no longer keeps the download of `removal`, then deletes the removal's
+   * folder; answers whether both are done. A remove of what the core no longer keeps changes
+   * nothing there, so telling it again is safe.
+   */
+  #tell(removal: Removal): Promise<boolean> {
+    const telling = this.#telling.get(removal.folder);
+
+    if (telling !== undefined) return telling;
+
+    const told = this.#tellOnce(removal).finally(() => this.#telling.delete(removal.folder));
+
+    this.#telling.set(removal.folder, told);
+
+    return told;
+  }
+
+  async #tellOnce(removal: Removal): Promise<boolean> {
+    const answer = await attempt(() =>
+      this.#coreCalls.run(removal.id, () =>
+        this.#platform.core.downloads.remove({ item: itemOf(removal.id) }),
+      ),
+    );
+
+    if (Result.isFailure(answer) || this.#disposed) return false;
+
+    if (Result.isFailure(endRemoval(this.#options.disk, removal))) return false;
+    this.#removals.delete(removal.folder);
+
+    return true;
+  }
+
+  /**
+   * Whether every removal of download `id` is done, telling the core about each one still pending
+   * first: a download added again reaches the core only after its removal did.
+   */
+  async #toldAbout(id: string): Promise<boolean> {
+    const pending = [...this.#removals.values()].filter((removal) => removal.id === id);
+    const told = await Promise.all(pending.map((removal) => this.#tell(removal)));
+
+    return told.every(Boolean);
+  }
+
+  /** Frees on the core a listed download this iPhone holds nothing of. */
   async #forget(id: FileId): Promise<void> {
     this.#settled.delete(id);
     // After any add of the same file still in flight, so a cancel right after Download sticks.
     await attempt(() =>
       this.#coreCalls.run(id, () => this.#platform.core.downloads.remove({ item: itemOf(id) })),
     );
+  }
+
+  /**
+   * Deletes the files of download `id` once its row says it holds no copy, as after it expired or
+   * must be fetched again; its folder keeps its own copy of the row, saved first.
+   */
+  #empty(id: string): void {
+    const download = this.#find(id);
+
+    if (download === undefined || !holdsNoCopy(download)) return;
+    this.#artwork.delete(id);
+    this.#keepRecord(id);
+    clearMedia(this.#options.disk, download);
   }
 
   #stop(id: string): void {
@@ -747,9 +836,7 @@ export class DownloadEngine {
 
     const save =
       !this.#unreadableInPlace &&
-      Result.isSuccess(
-        saveIndex(this.#options.disk, { store: this.#snapshot.store, standing: this.#standing }),
-      )
+      Result.isSuccess(saveIndex(this.#options.disk, this.#snapshot.store))
         ? "saved"
         : "failed";
 
@@ -764,8 +851,8 @@ export class DownloadEngine {
 
   /**
    * Whether the index on disk holds every download kept now, saving it first when the last save
-   * failed. A download's folder is made only then, so a folder the saved index does not own is
-   * always one the person or the engine removed.
+   * failed. A transfer starts only then, so a video never lands for a download whose row is on no
+   * disk.
    */
   #indexCurrent(): boolean {
     if (this.#snapshot.save !== "saved") this.#save();
@@ -782,30 +869,38 @@ export class DownloadEngine {
 
   /**
    * Saves the own copy of each download, from the launch, that lacks one or holds an older one,
-   * `COPIES_PER_TURN` per turn of the event loop.
+   * `COPIES_PER_TURN` per turn of the event loop, and marks the rows whose folders were made.
    */
   #keepCopies(): void {
     const now = this.#copiesLeft.slice(0, COPIES_PER_TURN);
 
     this.#copiesLeft = this.#copiesLeft.slice(COPIES_PER_TURN);
-    keepRecords(this.#options.disk, this.#rows(now));
+
+    const made = keepRecords(this.#options.disk, this.#rows(now)).filter(
+      (download) => !download.hasFolder,
+    );
+
+    if (made.length > 0) {
+      this.#dispatch(DownloadEvent.FoldersMade({ ids: made.map((download) => download.id) }));
+    }
+
     this.#copyTimer =
       this.#copiesLeft.length > 0 ? setTimeout(() => this.#keepCopies(), 0) : undefined;
   }
 
   /**
-   * Saves a download's own copy of its row once its transfer starts and once it lands. A copy that
-   * fails to save is saved again at the next launch.
+   * Saves a download's own copy of its row, making its folder when it has none: when it is added,
+   * when its transfer starts and lands, and before its files are emptied. A copy that fails to
+   * save is saved again at the next launch.
    */
   #keepRecord(id: string): void {
     const download = this.#find(id);
 
-    if (download !== undefined) keepRecord(this.#options.disk, download);
-  }
+    if (download === undefined || Result.isFailure(keepRecord(this.#options.disk, download))) {
+      return;
+    }
 
-  #deleteFiles(id: string): void {
-    this.#artwork.delete(id);
-    this.#options.disk.remove(itemFolder(id));
+    if (!download.hasFolder) this.#dispatch(DownloadEvent.FoldersMade({ ids: [download.id] }));
   }
 
   #reconsider(): void {
@@ -899,6 +994,14 @@ export class DownloadEngine {
   async #confirm(download: DownloadRecord, active: Active): Promise<boolean> {
     if (this.#find(download.id)?.added ?? download.added) return true;
 
+    if (!(await this.#toldAbout(download.id))) {
+      if (!this.#stopped(active)) this.#interrupt(active, SERVER_UNAVAILABLE);
+
+      return false;
+    }
+
+    if (this.#stopped(active)) return false;
+
     const added = await attempt(() =>
       this.#coreCalls.run(download.id, () =>
         this.#platform.core.downloads.add({ item: itemOf(download.id) }),
@@ -978,7 +1081,7 @@ export class DownloadEngine {
     if (answer.state === "available") return answer;
 
     if (answer.state === "expired") this.#expire(download.id);
-    else this.#drop(download.id);
+    else this.#remove(download.id);
 
     return null;
   }

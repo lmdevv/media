@@ -1,6 +1,6 @@
 import { StartedPlayback } from "@media/contracts/models/playback";
 import type { PlatformSdk } from "@media/sdk/promise";
-import { Data, Option, Schema, Struct } from "effect";
+import { Data, Effect, Option, Schema, Struct } from "effect";
 
 import { formatRuntime } from "../format";
 import { sortedBy } from "../sorted-by";
@@ -122,10 +122,30 @@ export const DownloadRecord = Schema.Struct({
   error: Schema.NullOr(Schema.String),
   /** Where this iPhone last stopped playing it. */
   positionMs: Schema.Finite,
+  /**
+   * Whether the download's own folder was made. Only a removal moves that folder away, so once it
+   * was made, a missing folder means the person or the engine removed the download. Main's rows
+   * lack the mark.
+   */
+  hasFolder: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false))),
 });
 
 /** One movie or episode downloaded, or being downloaded. */
 export interface DownloadRecord extends Schema.Schema.Type<typeof DownloadRecord> {}
+
+/** A download whose row says this iPhone holds no copy of its file, such as an expired one. */
+export interface EmptyRecord extends DownloadRecord {
+  readonly delivery: null;
+}
+
+/** Whether `download`'s row says this iPhone holds no copy of its file. */
+export const holdsNoCopy = (download: DownloadRecord): download is EmptyRecord =>
+  download.delivery === null;
+
+const decodeFileId = Schema.decodeUnknownOption(FileId);
+
+/** `text` as the ID of a movies file, such as one read back from a folder's name. */
+export const fileIdOf = (text: string): Option.Option<FileId> => decodeFileId(text);
 
 const PendingProgress = Schema.Struct({
   fileId: FileId,
@@ -151,51 +171,13 @@ export const EMPTY_STORE: DownloadStore = { downloads: [], pendingProgress: [] }
 
 const StoredStore = Schema.fromJsonString(DownloadStore);
 
-/** The store as the JSON it is kept as, without the mark `serializeIndex` adds. */
+/** The store as the JSON of the downloads index. */
 export const serializeStore = Schema.encodeSync(StoredStore);
-
-const earned = Symbol("earned");
-
-/**
- * Whether the store lists every download kept in the person's folder and on the core's list for
- * this device. Only a `Whole` store's lack of a folder or a listed download proves the person or
- * the engine removed it, so its files may be deleted and the core told to forget it. What an
- * `Unproven` store lacks proves nothing.
- */
-export type Standing = Data.TaggedEnum<{
-  /**
-   * The index this engine last saved whole, a first run's empty folder, or a store the folder and
-   * the core's list agree with. Only this module makes one, from that evidence.
-   */
-  Whole: { readonly earned: typeof earned };
-  /** Rebuilt from the downloads' own copies, read with rows that did not decode, or saved by another version. */
-  Unproven: {};
-}>;
-
-/** Matchers for `Standing`; a `Whole` one comes only from `parseIndex`, `emptyFolder`, and `agreed`. */
-export const Standing = Data.taggedEnum<Standing>();
-
-type Whole = Data.TaggedEnum.Value<Standing, "Whole">;
-
-const whole = (): Standing => Standing.Whole({ earned });
-
-/** The store and its standing. */
-export interface KnownStore {
-  readonly store: DownloadStore;
-  readonly standing: Standing;
-}
-
-/** A store whose lack of a folder or a listed download proves a removal. */
-export interface WholeStore extends KnownStore {
-  readonly standing: Whole;
-}
 
 const StoredIndex = Schema.fromJsonString(
   Schema.Struct({
     downloads: Schema.Array(Schema.Unknown),
     pendingProgress: Schema.Array(Schema.Unknown),
-    /** Whether the engine that saved it held a `Whole` store; main's app writes no mark. */
-    whole: Schema.optionalKey(Schema.Boolean),
   }),
 );
 
@@ -214,8 +196,8 @@ export type IndexText = Data.TaggedEnum<{
    * `store` holds the rows that did decode; the others still own their folders.
    */
   SomeRows: { readonly store: DownloadStore };
-  /** An index whose every row decoded, `Whole` only when the engine that saved it marked it so. */
-  AllRows: { readonly store: DownloadStore; readonly standing: Standing };
+  /** An index whose every row decoded. */
+  AllRows: { readonly store: DownloadStore };
 }>;
 
 /** Constructors and matchers for `IndexText`. */
@@ -223,8 +205,7 @@ export const IndexText = Data.taggedEnum<IndexText>();
 
 /**
  * The index kept in `text`. Each row is read on its own, so one this version cannot decode costs
- * only itself, and an index holding one is never `Whole`: the folder of a row that did not decode
- * is never taken for one no download owns. Unsent progress that does not decode is dropped.
+ * only itself. Unsent progress that does not decode is dropped.
  */
 export const parseIndex = (text: string): IndexText =>
   Option.match(decodeIndex(text), {
@@ -239,25 +220,10 @@ export const parseIndex = (text: string): IndexText =>
         ),
       };
 
-      if (downloads.length < index.downloads.length) return IndexText.SomeRows({ store });
-
-      return IndexText.AllRows({
-        store,
-        standing: index.whole === true ? whole() : Standing.Unproven(),
-      });
+      return downloads.length < index.downloads.length
+        ? IndexText.SomeRows({ store })
+        : IndexText.AllRows({ store });
     },
-  });
-
-const encodeIndex = Schema.encodeSync(
-  Schema.fromJsonString(Schema.Struct({ ...DownloadStore.fields, whole: Schema.Boolean })),
-);
-
-/** The index as the JSON it is kept as, marked with whether `standing` is `Whole`. */
-export const serializeIndex = ({ store, standing }: KnownStore): string =>
-  encodeIndex({
-    downloads: store.downloads,
-    pendingProgress: store.pendingProgress,
-    whole: Standing.$is("Whole")(standing),
   });
 
 /** The names in the person's folder that neither the index nor a download of `store` owns. */
@@ -275,40 +241,16 @@ export const unowned = (
   return names.filter((name) => !owned.has(name));
 };
 
-/**
- * A first run's standing: `Whole` when the person's folder holds nothing (`names` is empty, or
- * null because the folder is not there), so the empty store lists all of it.
- */
-export const emptyFolder = (names: ReadonlyArray<string> | null): Standing =>
-  names === null || names.length === 0 ? whole() : Standing.Unproven();
-
-/**
- * `known`'s standing once the person's folder (`names`, null when it is not there) and the core's
- * whole list (`listed`) are read: `Whole` when every name in the folder is owned and every listed
- * download is in the store. Then there is nothing to delete or forget, so marking the store whole
- * deletes nothing and tells the core nothing.
- */
-export const agreed = (
-  { store, standing }: KnownStore,
-  names: ReadonlyArray<string> | null,
-  listed: ReadonlyArray<ListedDownload>,
-): Standing => {
-  const kept = new Set(store.downloads.map((download) => download.id));
-
-  return Standing.$is("Unproven")(standing) &&
-    unowned(store, names ?? []).length === 0 &&
-    listed.every((entry) => kept.has(entry.id))
-    ? whole()
-    : standing;
-};
-
 const StoredRecord = Schema.fromJsonString(DownloadRecord);
 
 /** The download kept in `text`, a download's own copy of its row, or none when it does not read. */
 export const parseRecord = Schema.decodeUnknownOption(StoredRecord);
 
-/** A download as the JSON of its own copy of its row. */
-export const serializeRecord = Schema.encodeSync(StoredRecord);
+const encodeRecord = Schema.encodeSync(StoredRecord);
+
+/** A download as the JSON of its own copy of its row, which sits in its folder. */
+export const serializeRecord = (download: DownloadRecord): string =>
+  encodeRecord(Struct.assign(download, { hasFolder: true }));
 
 /** What a new download starts from: the file, its title and episode, and how it is shown. */
 export type NewDownload = Pick<
@@ -324,7 +266,10 @@ export type DownloadEvent = Data.TaggedEnum<{
   Confirmed: { readonly id: string };
   /** `movies.play.start` described its file and episode. */
   Described: { readonly id: string; readonly playback: KeptPlayback };
+  /** Removed by the person, or by the engine following the core. */
   Removed: { readonly id: string };
+  /** The downloads' own folders were made. */
+  FoldersMade: { readonly ids: ReadonlyArray<string> };
   /** Waits for Wi-Fi (`wifi`), or for its turn again. */
   Waiting: { readonly id: string; readonly wifi: boolean; readonly resume: string | null };
   Preparing: { readonly id: string; readonly progress: number; readonly estimatedBytes: number };
@@ -395,6 +340,7 @@ export const reduce = (store: DownloadStore, event: DownloadEvent): DownloadStor
         phase: "queued",
         playback: null,
         positionMs: 0,
+        hasFolder: false,
       };
 
       return { downloads: [...store.downloads, added], pendingProgress: store.pendingProgress };
@@ -405,6 +351,12 @@ export const reduce = (store: DownloadStore, event: DownloadEvent): DownloadStor
       update(store, id, (download) => Struct.assign(download, { playback })),
     Removed: ({ id }) => ({
       downloads: store.downloads.filter((download) => download.id !== id),
+      pendingProgress: store.pendingProgress,
+    }),
+    FoldersMade: ({ ids }) => ({
+      downloads: store.downloads.map((download) =>
+        ids.includes(download.id) ? Struct.assign(download, { hasFolder: true }) : download,
+      ),
       pendingProgress: store.pendingProgress,
     }),
     Waiting: ({ id, wifi, resume }) =>
@@ -543,24 +495,31 @@ export interface SyncPlan {
   readonly expire: ReadonlyArray<FileId>;
   /** Downloads to fetch again: access came back, or the file has a new revision. */
   readonly refresh: ReadonlyArray<FileId>;
-  /** Downloads whose file or library is gone: their copies are deleted, and `remove` is called. */
+  /** Downloads whose file or library is gone: they are removed, and `remove` is called. */
   readonly drop: ReadonlyArray<FileId>;
-  /** Downloads the core no longer lists for this device: their copies are deleted. */
+  /** Downloads the core no longer lists for this device: they are removed. */
   readonly purge: ReadonlyArray<FileId>;
-  /** Listed items this device holds nothing of: `remove` frees them. */
+  /** Listed items this iPhone holds nothing of, neither row, folder, nor removal: `remove` frees them. */
   readonly forget: ReadonlyArray<FileId>;
 }
 
 /**
+ * Whether this iPhone holds a folder or a removal of a download, from a listing of the person's
+ * folder; null when the folder could not be listed, which proves nothing.
+ */
+export type Holdings = ((id: FileId) => boolean) | null;
+
+/**
  * How the device follows `listed`, every page of the core's list. Only a download in `addedBefore`
  * (the ones the core had taken when the list was first read) is purged for being unlisted, so one
- * added while the pages were read is never mistaken for one the core dropped. Only a `Whole` store
- * forgets a listed download it lacks.
+ * added while the pages were read is never mistaken for one the core dropped. A listed download
+ * the store lacks is forgotten only when `holds` shows this iPhone keeps nothing of it.
  */
 export const planSync = (
-  { store, standing }: KnownStore,
+  store: DownloadStore,
   listed: ReadonlyArray<ListedDownload>,
   addedBefore: ReadonlySet<string>,
+  holds: Holdings,
 ): SyncPlan => {
   const entries = new Map(listed.map((entry) => [entry.id, entry]));
   const expire: Array<FileId> = [];
@@ -592,9 +551,10 @@ export const planSync = (
     refresh,
     drop,
     purge,
-    forget: Standing.$is("Whole")(standing)
-      ? listed.flatMap((entry) => (kept.has(entry.id) ? [] : [entry.id]))
-      : [],
+    forget:
+      holds === null
+        ? []
+        : listed.flatMap((entry) => (kept.has(entry.id) || holds(entry.id) ? [] : [entry.id])),
   };
 };
 

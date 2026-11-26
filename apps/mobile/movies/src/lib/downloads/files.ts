@@ -1,7 +1,8 @@
 /**
  * Where downloads live on this iPhone, under the app's documents folder, which iOS keeps:
  * `downloads/<server>/<person>/` holds the store (`index.json`) and one folder per download with
- * its video, WebVTT subtitles, picture, and its own copy of its row (`download.json`).
+ * its video, WebVTT subtitles, picture, and its own copy of its row (`download.json`). A download
+ * being removed has its folder moved to `removal+<stamp>+<id>` until the core forgets it.
  * Names come only from IDs, never from titles, so they are always safe file names.
  */
 
@@ -32,6 +33,29 @@ export const itemFolder = (downloadId: string): string => segment(downloadId);
 /** A file of one download, relative to its person's folder. */
 export const itemPath = (downloadId: string, file: string): string =>
   `${itemFolder(downloadId)}/${file}`;
+
+const REMOVAL_NAME = /^removal\+\d+\+(?<id>[^+]+)$/u;
+
+/**
+ * The name of the folder that records a removal of download `downloadId`, made at `stamp`, in
+ * milliseconds since the epoch. A download's folder name never holds a `+`, so a removal's folder
+ * is never taken for one, and the ID comes back from the name whole.
+ */
+export const removalFolder = (downloadId: string, stamp: number): string =>
+  `removal+${String(stamp)}+${encodeURIComponent(downloadId)}`;
+
+/** The download ID the removal's folder `name` was made for; null when `name` is not one. */
+export const removedIdOf = (name: string): string | null => {
+  const encoded = REMOVAL_NAME.exec(name)?.groups?.["id"];
+
+  if (encoded === undefined) return null;
+
+  try {
+    return decodeURIComponent(encoded);
+  } catch {
+    return null;
+  }
+};
 
 /** The video's file name, by its container, so AVPlayer reads it by its extension. */
 export const videoFile = (container: "mp4" | "mov"): string => `video.${container}`;

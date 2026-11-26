@@ -21,6 +21,7 @@ import {
   itemPath,
   videoFile,
 } from "@/lib/downloads/files";
+import type { DownloadDisk } from "@/lib/downloads/disk";
 import { DownloadEvent, EMPTY_STORE, reduce, serializeStore } from "@/lib/downloads/model";
 import type { Delivery, DownloadStore, FileId, NewDownload } from "@/lib/downloads/model";
 import { NodeDisk } from "@/lib/downloads/node-disk";
@@ -69,13 +70,15 @@ class FakeCore implements EnginePlatform {
   readonly calls: Array<string> = [];
   /** Whether it describes files and hands out tickets, as a core serving downloads does. */
   serves = false;
+  /** Whether it can be reached; one out of reach refuses every remove. */
+  online = true;
   #page: ListPage = { page: [], isDone: true, continueCursor: "" };
   readonly #listeners = new Set<() => void>();
 
   /** Lists `ids` as kept on this device at revision `r1`, and tells the engine. */
   lists(ids: ReadonlyArray<FileId>): void {
-    this.#page = {
-      page: ids.map((id) => ({
+    this.states(
+      ids.map((id) => ({
         item: { kind: "file", id },
         state: "available",
         revision: "r1",
@@ -83,11 +86,19 @@ class FakeCore implements EnginePlatform {
         bytes: 1,
         label: id,
       })),
-      isDone: true,
-      continueCursor: "",
-    };
+    );
+  }
+
+  /** Lists `page` as what this device keeps, and tells the engine. */
+  states(page: ListPage["page"]): void {
+    this.#page = { page, isDone: true, continueCursor: "" };
 
     for (const listener of this.#listeners) listener();
+  }
+
+  /** The files the core lists for this device, and so counts against its space. */
+  listing(): ReadonlyArray<string> {
+    return this.#page.page.map((row) => row.item.id);
   }
 
   readonly core: EnginePlatform["core"] = {
@@ -112,6 +123,12 @@ class FakeCore implements EnginePlatform {
       },
       remove: ({ item }) => {
         this.calls.push(`remove:${item.id}`);
+
+        if (!this.online) return Promise.reject(new Error("The core is out of reach."));
+
+        if (this.#page.page.some((row) => row.item.id === item.id)) {
+          this.states(this.#page.page.filter((row) => row.item.id !== item.id));
+        }
 
         return Promise.resolve(null);
       },
@@ -220,7 +237,7 @@ describe("DownloadEngine", () => {
   });
 
   const launch = (
-    disk: NodeDisk = new NodeDisk(root),
+    disk: DownloadDisk = new NodeDisk(root),
     mediaUrl = "http://media.test",
   ): DownloadEngine => {
     const engine = new DownloadEngine(core, {
@@ -240,7 +257,7 @@ describe("DownloadEngine", () => {
     writeFileSync(join(folder, STORE_FILE), serializeStore(readyStore(ids)));
 
     for (const id of ids) {
-      mkdirSync(join(folder, id));
+      mkdirSync(join(folder, id), { recursive: true });
       writeFileSync(join(folder, itemPath(id, videoFile("mp4"))), "video bytes!");
     }
   };
@@ -406,7 +423,7 @@ describe("DownloadEngine", () => {
     expect(filesUnder(arrival)).toContain(videoFile("mp4"));
   });
 
-  it("removes the files no download owns once the index, the folder, and the core's list agree", async () => {
+  it("keeps the files no download owns, since only a recorded removal deletes any", async () => {
     keep([dune]);
     const engine = launch();
 
@@ -415,20 +432,18 @@ describe("DownloadEngine", () => {
     mkdirSync(join(root, stranger));
     writeFileSync(join(root, itemPath(stranger, videoFile("mp4"))), "video bytes!");
     writeFileSync(join(root, "stray.part"), "left by a crash");
+    const before = filesUnder("").toSorted();
+    const relaunched = launch();
 
-    launch();
+    await follow(relaunched, [dune]);
+    relaunched.dispose();
 
-    expect(names(root)).toStrictEqual([dune, STORE_FILE]);
-    expect(filesUnder(dune)).toContain(videoFile("mp4"));
-
-    const swept = filesUnder("");
-
-    launch();
-
-    expect(filesUnder("")).toStrictEqual(swept);
+    expect(filesUnder("").toSorted()).toStrictEqual(before);
+    expect(listed(launch())).toStrictEqual([`${dune}:ready`]);
+    expect(core.calls).toStrictEqual([]);
   });
 
-  it("keeps the files no download owns while the index is main's, until the core's list agrees", async () => {
+  it("keeps a folder main left without a copy, and the core's row for it", async () => {
     keep([dune]);
     mkdirSync(join(root, stranger));
     writeFileSync(join(root, itemPath(stranger, videoFile("mp4"))), "video bytes!");
@@ -601,7 +616,7 @@ describe("DownloadEngine", () => {
     expect(listed(engine)).toStrictEqual([`${dune}:ready`]);
   });
 
-  it("keeps an index rebuilt from copies marked as rebuilt on the next launch", async () => {
+  it("keeps a folder without a copy through an index rebuilt from copies", async () => {
     keep([dune]);
     launch().dispose();
     mkdirSync(join(root, stranger));
@@ -672,5 +687,366 @@ describe("DownloadEngine", () => {
     expect(filesUnder(dune)).toContain(videoFile("mp4"));
     expect(core.calls).toStrictEqual([]);
     expect(listed(relaunched)).toStrictEqual([`${dune}:ready`]);
+  });
+
+  it("keeps a download an older saved index lacks, and lists it from its own copy", async () => {
+    keep([dune]);
+    const first = launch();
+
+    await follow(first, [dune]);
+    first.dispose();
+    const older = readFileSync(join(root, STORE_FILE), "utf8");
+
+    keep([dune, arrival]);
+    const second = launch();
+
+    await follow(second, [dune, arrival]);
+    second.dispose();
+
+    expect(filesUnder(arrival)).toContain(RECORD_FILE);
+
+    writeFileSync(join(root, STORE_FILE), older);
+    const relaunched = launch();
+
+    expect(listed(relaunched).toSorted()).toStrictEqual([`${arrival}:ready`, `${dune}:ready`]);
+    expect(filesUnder(arrival)).toContain(videoFile("mp4"));
+
+    await follow(relaunched, [dune, arrival]);
+
+    expect(core.calls).toStrictEqual([]);
+    expect(filesUnder(arrival)).toStrictEqual(
+      expect.arrayContaining([RECORD_FILE, videoFile("mp4")]),
+    );
+    expect(listed(launch()).toSorted()).toStrictEqual([`${arrival}:ready`, `${dune}:ready`]);
+  });
+
+  it("tells the core about a download removed offline once it can, after a relaunch", async () => {
+    keep([dune, arrival]);
+    const engine = launch();
+
+    core.online = false;
+    await engine.remove(arrival);
+    engine.dispose();
+
+    expect(names(root)).not.toContain(arrival);
+    expect(filesUnder(dune)).toContain(videoFile("mp4"));
+
+    core.online = true;
+    core.lists([dune, arrival]);
+    const relaunched = launch();
+
+    relaunched.start();
+    await settle();
+
+    expect(core.calls).toStrictEqual([`remove:${arrival}`, `remove:${arrival}`]);
+    expect(core.listing()).toStrictEqual([dune]);
+    expect(listed(relaunched)).toStrictEqual([`${dune}:ready`]);
+    expect(names(root)).toStrictEqual([dune, STORE_FILE]);
+    expect(filesUnder(dune)).toContain(videoFile("mp4"));
+  });
+
+  it("tells the core about a removal made offline when the network comes back", async () => {
+    keep([dune, arrival]);
+    core.lists([dune, arrival]);
+    const engine = launch();
+
+    engine.start();
+    await settle();
+    core.online = false;
+    await engine.remove(arrival);
+    await settle();
+
+    expect(core.listing()).toStrictEqual([dune, arrival]);
+
+    core.online = true;
+    engine.setNetwork({ connected: true, wifi: true });
+    await settle();
+
+    expect(core.calls).toStrictEqual([`remove:${arrival}`, `remove:${arrival}`]);
+    expect(core.listing()).toStrictEqual([dune]);
+    expect(names(root)).toStrictEqual([dune, STORE_FILE]);
+  });
+
+  it("never lists a download removed while the index could not be read", async () => {
+    keep([dune, arrival]);
+    launch().dispose();
+    const disk = new NodeDisk(root);
+
+    disk.failReads(STORE_FILE);
+    const held = launch(disk);
+
+    core.online = false;
+    await held.remove(arrival);
+    held.dispose();
+
+    expect(listed(launch())).toStrictEqual([`${dune}:ready`]);
+
+    core.online = true;
+    core.lists([dune, arrival]);
+    const relaunched = launch();
+
+    relaunched.start();
+    await settle();
+
+    expect(listed(relaunched)).toStrictEqual([`${dune}:ready`]);
+    expect(core.listing()).toStrictEqual([dune]);
+    expect(names(root)).toStrictEqual([dune, STORE_FILE]);
+  });
+
+  it("never brings back a removed download from an older index", async () => {
+    keep([dune, arrival]);
+    core.lists([dune, arrival]);
+    const first = launch();
+
+    first.start();
+    await settle();
+    first.dispose();
+    const older = readFileSync(join(root, STORE_FILE), "utf8");
+
+    core.online = false;
+    const offline = launch();
+
+    await offline.remove(arrival);
+    offline.dispose();
+    writeFileSync(join(root, STORE_FILE), older);
+
+    expect(listed(launch())).toStrictEqual([`${dune}:ready`]);
+
+    core.online = true;
+    const online = launch();
+
+    online.start();
+    await settle();
+    online.dispose();
+    writeFileSync(join(root, STORE_FILE), older);
+    const relaunched = launch();
+
+    relaunched.start();
+    await settle();
+
+    expect(listed(relaunched)).toStrictEqual([`${dune}:ready`]);
+    expect(core.listing()).toStrictEqual([dune]);
+    expect(core.calls.filter((call) => call.startsWith("add:"))).toStrictEqual([]);
+    expect(names(root)).toStrictEqual([dune, STORE_FILE]);
+  });
+
+  it("holds while the folder cannot be listed beside a readable index, then lists every copy", async () => {
+    vi.useFakeTimers();
+    keep([dune, arrival]);
+    launch().dispose();
+    writeFileSync(join(root, STORE_FILE), serializeStore(readyStore([dune])));
+    const disk = new NodeDisk(root);
+
+    disk.failLists(1);
+    const engine = launch(disk);
+
+    engine.start();
+    core.lists([dune, arrival]);
+
+    expect(engine.getSnapshot().save).toBe("unread");
+    expect(listed(engine)).toStrictEqual([`${dune}:ready`]);
+
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(engine.getSnapshot().save).toBe("saved");
+    expect(listed(engine).toSorted()).toStrictEqual([`${arrival}:ready`, `${dune}:ready`]);
+    expect(filesUnder(arrival)).toContain(videoFile("mp4"));
+    expect(core.calls).toStrictEqual([]);
+  });
+
+  it("keeps a folder a listing left out, and lists it once a listing finds it", async () => {
+    keep([dune, arrival]);
+    launch().dispose();
+    writeFileSync(join(root, STORE_FILE), serializeStore(readyStore([dune])));
+    const disk = new NodeDisk(root);
+
+    disk.hideFromLists(arrival);
+    const engine = launch(disk);
+
+    await follow(engine, [dune, arrival]);
+    engine.dispose();
+
+    expect(listed(engine)).toStrictEqual([`${dune}:ready`]);
+    expect(filesUnder(arrival)).toContain(videoFile("mp4"));
+    expect(core.calls).toStrictEqual([]);
+
+    const relaunched = launch();
+
+    await follow(relaunched, [dune, arrival]);
+
+    expect(filesUnder(arrival)).toContain(videoFile("mp4"));
+    expect(listed(relaunched).toSorted()).toStrictEqual([`${arrival}:ready`, `${dune}:ready`]);
+    expect(core.calls).toStrictEqual([]);
+  });
+
+  it("deletes only what the person removed and what the core says is expired or gone", async () => {
+    const gone = asMediaFileId("file-gone");
+    const remain = asMediaFileId("file-remain");
+
+    keep([dune, arrival, gone, remain]);
+    writeFileSync(join(root, "unowned"), "a file no download owns");
+    launch().dispose();
+    const engine = launch();
+
+    engine.start();
+    await engine.remove(dune);
+
+    expect(names(root)).not.toContain(dune);
+
+    core.states([
+      { item: { kind: "file", id: arrival }, state: "expired", because: "access" },
+      { item: { kind: "file", id: gone }, state: "gone" },
+      {
+        item: { kind: "file", id: remain },
+        state: "available",
+        revision: "r1",
+        quality: "standard",
+        bytes: 1,
+        label: remain,
+      },
+    ]);
+    await settle();
+
+    expect(filesUnder(arrival)).toStrictEqual([RECORD_FILE]);
+    expect(filesUnder(remain)).toContain(videoFile("mp4"));
+    expect(listed(engine)).toStrictEqual([`${arrival}:expired`, `${remain}:ready`]);
+    expect(core.calls).toStrictEqual([`remove:${dune}`, `remove:${gone}`]);
+    expect(names(root).toSorted()).toStrictEqual(
+      [arrival, remain, STORE_FILE, "unowned"].toSorted(),
+    );
+    expect(listed(launch())).toStrictEqual([`${arrival}:expired`, `${remain}:ready`]);
+  });
+
+  it("lists a newer index's downloads once its read error passes, never a stale index.json.new", async () => {
+    vi.useFakeTimers();
+    keep([dune, arrival]);
+    writeFileSync(join(root, `${STORE_FILE}.new`), serializeStore(readyStore([dune])));
+    const disk = new NodeDisk(root);
+
+    disk.failReads(STORE_FILE, 1);
+    const engine = launch(disk);
+
+    expect(engine.getSnapshot().save).toBe("unread");
+    expect(names(root)).toContain(arrival);
+    expect(readFileSync(join(root, STORE_FILE), "utf8")).toBe(
+      serializeStore(readyStore([dune, arrival])),
+    );
+
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(listed(engine)).toContain(`${arrival}:ready`);
+    expect(names(root)).toContain(arrival);
+    expect(core.calls).toStrictEqual([]);
+  });
+
+  it("tells the core about a removal before it adds the same download again", async () => {
+    keep([dune, arrival]);
+    core.lists([dune, arrival]);
+    const engine = launch();
+
+    core.online = false;
+    await engine.remove(arrival);
+    engine.add(newDownload(arrival));
+    engine.dispose();
+
+    core.online = true;
+    const relaunched = launch();
+
+    relaunched.setNetwork({ connected: true, wifi: true });
+    relaunched.start();
+    await settle();
+
+    expect(core.calls).toStrictEqual([`remove:${arrival}`, `remove:${arrival}`, `add:${arrival}`]);
+    expect(names(root)).toStrictEqual([arrival, dune, STORE_FILE]);
+    expect(filesUnder(arrival)).not.toContain(videoFile("mp4"));
+    expect(listed(relaunched).map((entry) => entry.split(":")[0])).toStrictEqual([dune, arrival]);
+  });
+
+  it("keeps a download whose removal cannot be recorded, and deletes none of it", async () => {
+    keep([dune, arrival]);
+    launch().dispose();
+    const disk = new NodeDisk(root);
+
+    disk.failRenames();
+    const engine = launch(disk);
+
+    await engine.remove(arrival);
+
+    expect(listed(engine)).toStrictEqual([`${dune}:ready`, `${arrival}:ready`]);
+    expect(filesUnder(arrival)).toContain(videoFile("mp4"));
+    expect(core.calls).toStrictEqual([]);
+  });
+
+  describe.each(["offline", "online"] as const)("killed while removing a download %s", (first) => {
+    it.each([1, 2, 3, 4, 5, 6, 7, 8])(
+      "finishes the removal after a kill at file change %i, and leaves the others",
+      async (nth) => {
+        keep([dune, arrival]);
+        launch().dispose();
+        writeFileSync(join(root, itemPath(arrival, "subtitle-en.vtt")), "WEBVTT");
+        core.lists([dune, arrival]);
+        const disk = new NodeDisk(root);
+        const engine = launch(disk);
+
+        core.online = first === "online";
+        disk.killAt(nth);
+        await engine.remove(arrival);
+        await settle();
+
+        // The removal's file changes: the rename that records it (1), the index save (2 to 4),
+        // and deleting its three files (5 to 7); once the core acknowledged, its folder (8).
+        const recorded = nth > 1;
+
+        const removals = names(root).filter((name) => name.startsWith("removal+"));
+
+        expect(names(root).includes(arrival)).toBe(!recorded);
+        expect(removals).toHaveLength(recorded ? 1 : 0);
+        expect(removals.flatMap((name) => names(join(root, name)))).toHaveLength(
+          recorded ? Math.min(3, 8 - nth) : 0,
+        );
+        expect(core.calls).toStrictEqual(recorded ? [`remove:${arrival}`] : []);
+
+        core.online = false;
+
+        const offline = launch();
+
+        const media = filesUnder("").filter(
+          (path) => !path.startsWith(dune) && /\.(?:mp4|vtt)$/u.test(path),
+        );
+
+        expect(listed(offline)).toStrictEqual(
+          recorded ? [`${dune}:ready`] : [`${dune}:ready`, `${arrival}:ready`],
+        );
+        expect(media).toStrictEqual(
+          recorded
+            ? []
+            : [itemPath(arrival, "subtitle-en.vtt"), itemPath(arrival, videoFile("mp4"))],
+        );
+        offline.dispose();
+
+        core.online = true;
+        const online = launch();
+
+        online.start();
+        await settle();
+
+        expect(filesUnder(dune)).toContain(videoFile("mp4"));
+        expect(core.calls).not.toContain(`remove:${dune}`);
+
+        expect(core.calls).toStrictEqual(
+          recorded ? [`remove:${arrival}`, `remove:${arrival}`] : [],
+        );
+
+        if (recorded) {
+          expect(listed(online)).toStrictEqual([`${dune}:ready`]);
+          expect(core.listing()).toStrictEqual([dune]);
+          expect(names(root)).toStrictEqual([dune, STORE_FILE]);
+        } else {
+          expect(listed(online)).toStrictEqual([`${dune}:ready`, `${arrival}:ready`]);
+          expect(filesUnder(arrival)).toContain(videoFile("mp4"));
+          expect(core.listing()).toStrictEqual([dune, arrival]);
+        }
+      },
+    );
   });
 });

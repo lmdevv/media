@@ -1,4 +1,4 @@
-import { Data, Option, Result } from "effect";
+import { Data, Option, Result, Struct } from "effect";
 
 import { DiskFailed } from "./disk";
 import type { DownloadDisk } from "./disk";
@@ -9,26 +9,20 @@ import {
   itemFolder,
   itemPath,
   nextOf,
+  removalFolder,
+  removedIdOf,
 } from "./files";
 import {
   EMPTY_STORE,
   IndexText,
-  Standing,
-  agreed,
-  emptyFolder,
+  fileIdOf,
   parseIndex,
   parseRecord,
-  serializeIndex,
   serializeRecord,
+  serializeStore,
   unowned,
 } from "./model";
-import type {
-  DownloadRecord,
-  DownloadStore,
-  KnownStore,
-  ListedDownload,
-  WholeStore,
-} from "./model";
+import type { DownloadRecord, DownloadStore, EmptyRecord, FileId, Holdings } from "./model";
 
 /**
  * Writes `text` to `path` so that a reader finds the old file or the new one, never part of one:
@@ -52,9 +46,103 @@ const replaceFile = (
   return disk.move(next, path);
 };
 
-/** Saves the store as the downloads index, marked with its standing, replacing the one there whole. */
-export const saveIndex = (disk: DownloadDisk, known: KnownStore): Result.Result<void, DiskFailed> =>
-  replaceFile(disk, STORE_FILE, serializeIndex(known));
+/** Saves the store as the downloads index, replacing the one there whole. */
+export const saveIndex = (
+  disk: DownloadDisk,
+  store: DownloadStore,
+): Result.Result<void, DiskFailed> => replaceFile(disk, STORE_FILE, serializeStore(store));
+
+const recorded = Symbol("recorded");
+
+/**
+ * A download the person removed, or the engine removed following the core, recorded on this
+ * iPhone before anything of it is deleted. The record is the removal's folder: the download's own
+ * folder renamed in one step, or a new empty folder when the download had none. It lasts until
+ * both halves are done, the files gone and the core acknowledging it no longer counts the
+ * download, and every launch, sync, and reconnection retries them until then. Only this module
+ * makes one, from that folder.
+ */
+export interface Removal {
+  /** The file the core is told to forget. */
+  readonly id: FileId;
+  /** The removal's folder in the person's folder, which holds what is left of the files. */
+  readonly folder: string;
+  readonly recorded: typeof recorded;
+}
+
+const removalAt = (folder: string): Option.Option<Removal> =>
+  Option.map(
+    Option.flatMap(Option.fromNullishOr(removedIdOf(folder)), fileIdOf),
+    (id): Removal => ({ id, folder, recorded }),
+  );
+
+/** The removals recorded in the person's folder, whose names are `names`. */
+const removalsIn = (names: ReadonlyArray<string>): ReadonlyArray<Removal> =>
+  names.flatMap((name) => Option.toArray(removalAt(name)));
+
+/**
+ * Records the removal of download `id` at `stamp`: renames its folder to the removal's folder, or,
+ * when a listing shows it has none, makes that folder. A rename needs no free space, so a full disk
+ * still records one. A download whose removal cannot be recorded is not removed.
+ */
+export const recordRemoval = (
+  disk: DownloadDisk,
+  id: FileId,
+  stamp: number,
+): Result.Result<Removal, DiskFailed> => {
+  const folder = removalFolder(id, stamp);
+  const renamed = disk.rename(itemFolder(id), folder);
+
+  const made = Result.isSuccess(renamed)
+    ? renamed
+    : Result.flatMap(disk.list(), (names) =>
+        names?.includes(itemFolder(id)) === true ? renamed : disk.createFolder(folder),
+      );
+
+  return Result.map(made, (): Removal => ({ id, folder, recorded }));
+};
+
+/**
+ * Deletes the files a removal holds, keeping its folder, which stays the record of it until the
+ * core acknowledges it. A delete that fails is tried again the next time.
+ */
+export const clearRemoval = (disk: DownloadDisk, removal: Removal): void => {
+  for (const name of Result.getOrNull(disk.list(removal.folder)) ?? []) {
+    disk.remove(`${removal.folder}/${name}`);
+  }
+};
+
+/** Deletes a removal's folder and what is left in it, once the core acknowledged the removal. */
+export const endRemoval = (disk: DownloadDisk, removal: Removal): Result.Result<void, DiskFailed> =>
+  disk.remove(removal.folder);
+
+/**
+ * Deletes the files in a download's folder except its own copy of its row, for a download whose
+ * row already says it holds no copy of its file, such as one the core says has expired.
+ */
+export const clearMedia = (disk: DownloadDisk, download: EmptyRecord): void => {
+  const folder = itemFolder(download.id);
+  const kept = new Set([RECORD_FILE, nextOf(RECORD_FILE)]);
+
+  for (const name of Result.getOrNull(disk.list(folder)) ?? []) {
+    if (!kept.has(name)) disk.remove(`${folder}/${name}`);
+  }
+};
+
+/**
+ * Whether this iPhone holds a download's folder, found in a listing of the person's folder or
+ * where the folder would be, or a removal of it; null when the folder cannot be listed.
+ */
+export const holdingsOf = (disk: DownloadDisk): Holdings =>
+  Result.match(disk.list(), {
+    onFailure: () => null,
+    onSuccess: (listed) => {
+      const names = new Set(listed ?? []);
+      const removed = new Set(removalsIn(listed ?? []).map((removal) => removal.id));
+
+      return (id) => names.has(itemFolder(id)) || removed.has(id) || disk.exists(itemFolder(id));
+    },
+  });
 
 /** What reading one copy of the downloads index found. */
 type IndexFile = Data.TaggedEnum<{
@@ -94,75 +182,112 @@ const recordIn = (disk: DownloadDisk, name: string): Option.Option<DownloadRecor
 /** What a launch found of the person's downloads. */
 export type Launch = Data.TaggedEnum<{
   /**
-   * The index, or the folder it decides by, could not be read: nothing is decided, deleted, or
-   * saved until it can. `shown` holds the downloads rebuilt from their own copies, to play meanwhile.
+   * The index, or the folder that holds it, could not be read: nothing is decided, deleted, or
+   * saved until it can. `shown` holds what could be read, the index's rows or the downloads
+   * rebuilt from their own copies, to play meanwhile.
    */
   Held: { readonly shown: DownloadStore; readonly cause: DiskFailed };
   /**
-   * The downloads and their standing. `misplaced` when the index at
-   * `index.json` did not read whole and must move aside before a save replaces it; `fromCopies`
-   * counts the downloads rebuilt from their own copies, which a save keeps.
+   * The downloads, and the removals still to carry out. `misplaced` when the index at
+   * `index.json` did not read whole and must move aside before a save replaces it; `changed` when
+   * the store differs from the index, which a save then catches up.
    */
-  Loaded: KnownStore & { readonly misplaced: boolean; readonly fromCopies: number };
+  Loaded: {
+    readonly store: DownloadStore;
+    readonly removals: ReadonlyArray<Removal>;
+    readonly misplaced: boolean;
+    readonly changed: boolean;
+  };
 }>;
 
 /** Constructors and matchers for `Launch`. */
 export const Launch = Data.taggedEnum<Launch>();
 
-/** `store` with the download of every folder in `names` it does not own whose copy reads. */
+/**
+ * The downloads of the folders in `names` that `store` lacks, from their own copies. A removal's
+ * folder is never one: a removal moves the folder away from the download's name.
+ */
+const copiesIn = (
+  disk: DownloadDisk,
+  store: DownloadStore,
+  names: ReadonlyArray<string>,
+): ReadonlyArray<DownloadRecord> =>
+  unowned(store, names).flatMap((name) =>
+    removedIdOf(name) === null ? Option.toArray(recordIn(disk, name)) : [],
+  );
+
 const withCopies = (
   disk: DownloadDisk,
   store: DownloadStore,
   names: ReadonlyArray<string>,
 ): DownloadStore => ({
-  downloads: [
-    ...store.downloads,
-    ...unowned(store, names).flatMap((name) => Option.toArray(recordIn(disk, name))),
-  ],
+  downloads: [...store.downloads, ...copiesIn(disk, store, names)],
   pendingProgress: store.pendingProgress,
 });
 
-const held = (disk: DownloadDisk, cause: DiskFailed): Launch =>
+const held = (
+  disk: DownloadDisk,
+  store: DownloadStore,
+  listing: Result.Result<ReadonlyArray<string> | null, DiskFailed>,
+  cause: DiskFailed,
+): Launch =>
   Launch.Held({
-    shown: withCopies(disk, EMPTY_STORE, Result.getOrNull(disk.list()) ?? []),
+    shown: Result.match(listing, {
+      onFailure: () => store,
+      onSuccess: (names) => withCopies(disk, store, names ?? []),
+    }),
     cause,
   });
 
-/** An `Unproven` launch of `store`, with the download of every folder in `names` it does not own whose copy reads. */
-const unproven = (
+/**
+ * The launch of the downloads in `indexed` beside the folder's `names`. A folder whose own copy of
+ * its row reads is a kept download, and the store takes it when the index lacks it. An index row
+ * whose folder is missing is dropped when its folder was made or a removal of it is recorded,
+ * since only a removal moves a download's folder away; one never given a folder, from main or
+ * still queued, stays.
+ */
+const loaded = (
   disk: DownloadDisk,
-  store: DownloadStore,
+  indexed: DownloadStore,
   misplaced: boolean,
   names: ReadonlyArray<string>,
 ): Launch => {
-  const merged = withCopies(disk, store, names);
+  const present = new Set(names);
+  const removals = removalsIn(names);
+  const removed = new Set(removals.map((removal) => removal.id));
+  const housed = (download: DownloadRecord): boolean => present.has(itemFolder(download.id));
+
+  const rows = indexed.downloads.flatMap((download): ReadonlyArray<DownloadRecord> => {
+    if (housed(download)) return [Struct.assign(download, { hasFolder: true })];
+
+    return download.hasFolder || removed.has(download.id) ? [] : [download];
+  });
+
+  const kept: DownloadStore = { downloads: rows, pendingProgress: indexed.pendingProgress };
+  const copies = copiesIn(disk, kept, names);
 
   return Launch.Loaded({
-    store: merged,
-    standing: Standing.Unproven(),
+    store: { downloads: [...rows, ...copies], pendingProgress: kept.pendingProgress },
+    removals,
     misplaced,
-    fromCopies: merged.downloads.length - store.downloads.length,
+    changed:
+      rows.length < indexed.downloads.length ||
+      copies.length > 0 ||
+      indexed.downloads.some((download) => housed(download) && !download.hasFolder),
   });
 };
 
-/**
- * The launch an index's text makes. Rebuilding one that is not an index needs the folder's
- * listing, so one that fails holds the launch. An index that read but not whole takes the
- * downloads of the folders it does not own from their copies; a listing that fails adds none, and
- * the next launch tries again.
- */
-const fromText = (disk: DownloadDisk, text: IndexText, misplaced: boolean): Launch =>
+/** The launch an index's text makes, `atIndex` when it was read at `index.json`. */
+const fromText = (
+  disk: DownloadDisk,
+  text: IndexText,
+  atIndex: boolean,
+  names: ReadonlyArray<string>,
+): Launch =>
   IndexText.$match(text, {
-    NotAnIndex: () =>
-      Result.match(disk.list(), {
-        onFailure: (cause) => held(disk, cause),
-        onSuccess: (names) => unproven(disk, EMPTY_STORE, misplaced, names ?? []),
-      }),
-    SomeRows: ({ store }) => unproven(disk, store, misplaced, Result.getOrNull(disk.list()) ?? []),
-    AllRows: ({ store, standing }) =>
-      Standing.$is("Whole")(standing)
-        ? Launch.Loaded({ store, standing, misplaced: false, fromCopies: 0 })
-        : unproven(disk, store, false, Result.getOrNull(disk.list()) ?? []),
+    NotAnIndex: () => loaded(disk, EMPTY_STORE, atIndex, names),
+    SomeRows: ({ store }) => loaded(disk, store, atIndex, names),
+    AllRows: ({ store }) => loaded(disk, store, false, names),
   });
 
 const contradiction = (path: string): DiskFailed =>
@@ -173,46 +298,56 @@ const contradiction = (path: string): DiskFailed =>
   });
 
 /**
- * The launch when there is no `index.json`. The new copy a save left is the index only here,
- * after a crash came between the save deleting the old index and moving the copy in, and only
- * when the folder lists no `index.json`: a stale copy never outranks an index that is there. An
- * empty folder, or none, is a first run; one that cannot be listed is not.
+ * The launch when there is no `index.json`, beside the folder's `names`. The new copy a save left
+ * is the index only here, after a crash came between the save deleting the old index and moving
+ * the copy in, and only when the folder lists no `index.json`: a stale copy never outranks an index
+ * that is there. Otherwise the downloads come from their own copies.
  */
-const withoutIndex = (disk: DownloadDisk): Launch =>
-  Result.match(disk.list(), {
-    onFailure: (cause) => held(disk, cause),
-    onSuccess: (names) => {
-      const standing = emptyFolder(names);
+const withoutIndex = (disk: DownloadDisk, names: ReadonlyArray<string>): Launch => {
+  const listing = Result.succeed(names);
 
-      if (Standing.$is("Whole")(standing)) {
-        return Launch.Loaded({ store: EMPTY_STORE, standing, misplaced: false, fromCopies: 0 });
-      }
+  if (names.includes(STORE_FILE))
+    return held(disk, EMPTY_STORE, listing, contradiction(STORE_FILE));
 
-      const listed = names ?? [];
+  if (!names.includes(nextOf(STORE_FILE))) return loaded(disk, EMPTY_STORE, false, names);
 
-      if (listed.includes(STORE_FILE)) return held(disk, contradiction(STORE_FILE));
+  return IndexFile.$match(readIndexFile(disk, nextOf(STORE_FILE)), {
+    Absent: () => held(disk, EMPTY_STORE, listing, contradiction(nextOf(STORE_FILE))),
+    Failed: ({ cause }) => held(disk, EMPTY_STORE, listing, cause),
+    Read: ({ text }) => fromText(disk, text, false, names),
+  });
+};
 
-      if (!listed.includes(nextOf(STORE_FILE))) return unproven(disk, EMPTY_STORE, false, listed);
-
-      return IndexFile.$match(readIndexFile(disk, nextOf(STORE_FILE)), {
-        Absent: () => held(disk, contradiction(nextOf(STORE_FILE))),
-        Failed: ({ cause }) => held(disk, cause),
-        Read: ({ text }) => fromText(disk, text, false),
-      });
-    },
+const rowsOf = (text: IndexText): DownloadStore =>
+  IndexText.$match(text, {
+    NotAnIndex: () => EMPTY_STORE,
+    SomeRows: ({ store }) => store,
+    AllRows: ({ store }) => store,
   });
 
 /**
- * Reads the person's downloads index. A read that fails decides nothing. An index that read but
- * not whole, or is missing beside downloads' folders, is `Unproven`, and the downloads it lacks
- * come back from their own copies.
+ * Reads the person's downloads: the index, and a listing of their folder. A read or a listing that
+ * fails decides nothing and holds the launch. The downloads the index lacks come back from their
+ * own copies, and the rows of downloads whose removal moved their folder away are dropped.
  */
-export const readIndex = (disk: DownloadDisk): Launch =>
-  IndexFile.$match(readIndexFile(disk, STORE_FILE), {
-    Absent: () => withoutIndex(disk),
-    Failed: ({ cause }) => held(disk, cause),
-    Read: ({ text }) => fromText(disk, text, true),
+export const readIndex = (disk: DownloadDisk): Launch => {
+  const file = readIndexFile(disk, STORE_FILE);
+  const listing = disk.list();
+
+  return IndexFile.$match(file, {
+    Failed: ({ cause }) => held(disk, EMPTY_STORE, listing, cause),
+    Absent: () =>
+      Result.match(listing, {
+        onFailure: (cause) => held(disk, EMPTY_STORE, listing, cause),
+        onSuccess: (names) => withoutIndex(disk, names ?? []),
+      }),
+    Read: ({ text }) =>
+      Result.match(listing, {
+        onFailure: (cause) => held(disk, rowsOf(text), listing, cause),
+        onSuccess: (names) => fromText(disk, text, true, names ?? []),
+      }),
   });
+};
 
 /**
  * Moves an index that did not read whole aside, so the one saved in its place never overwrites
@@ -222,29 +357,8 @@ export const setAsideIndex = (disk: DownloadDisk): Result.Result<void, DiskFaile
   disk.move(STORE_FILE, UNREADABLE_STORE_FILE);
 
 /**
- * Deletes what no download in a `Whole` store owns from the person's folder: the folders of
- * downloads the person or the engine removed, and stray files. The index and its copies stay.
- * Running it again deletes nothing more; a delete that fails is tried again the next time, and a
- * listing that fails deletes nothing.
- */
-export const sweep = (disk: DownloadDisk, { store }: WholeStore): void => {
-  for (const name of unowned(store, Result.getOrNull(disk.list()) ?? [])) disk.remove(name);
-};
-
-/** `known`'s standing after the core's whole list, `listed`; see `agreed`. */
-export const agree = (
-  disk: DownloadDisk,
-  known: KnownStore,
-  listed: ReadonlyArray<ListedDownload>,
-): Standing =>
-  Result.match(disk.list(), {
-    onFailure: () => known.standing,
-    onSuccess: (names) => agreed(known, names, listed),
-  });
-
-/**
- * Saves `download`'s own copy of its row in its folder, from which `readIndex` rebuilds it when
- * the index cannot be read.
+ * Saves `download`'s own copy of its row in its folder, making the folder when it has none. The
+ * copy keeps the download when the index loses it.
  */
 export const keepRecord = (
   disk: DownloadDisk,
@@ -252,11 +366,16 @@ export const keepRecord = (
 ): Result.Result<void, DiskFailed> =>
   replaceFile(disk, itemPath(download.id, RECORD_FILE), serializeRecord(download));
 
-/** Saves the copy of each of `downloads` whose folder lacks it or holds an older one. */
-export const keepRecords = (disk: DownloadDisk, downloads: ReadonlyArray<DownloadRecord>): void => {
-  for (const download of downloads) {
-    const kept = Result.getOrNull(disk.read(itemPath(download.id, RECORD_FILE)));
-
-    if (kept !== serializeRecord(download)) keepRecord(disk, download);
-  }
-};
+/**
+ * Saves the copy of each of `downloads` whose folder lacks it or holds an older one, and answers
+ * the downloads whose folder now holds their current copy.
+ */
+export const keepRecords = (
+  disk: DownloadDisk,
+  downloads: ReadonlyArray<DownloadRecord>,
+): ReadonlyArray<DownloadRecord> =>
+  downloads.filter(
+    (download) =>
+      Result.getOrNull(disk.read(itemPath(download.id, RECORD_FILE))) ===
+        serializeRecord(download) || Result.isSuccess(keepRecord(disk, download)),
+  );

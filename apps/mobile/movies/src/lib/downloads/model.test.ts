@@ -3,17 +3,13 @@ import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
 import type { EpisodeId, TitleId } from "../catalog";
-import { RECORD_FILE, STORE_FILE, nextOf } from "./files";
 import {
   DownloadEvent,
   EMPTY_STORE,
   IndexText,
-  Standing,
-  agreed,
   downloadFor,
   downloadOfItem,
   downloadsOf,
-  emptyFolder,
   factsOf,
   headingOf,
   keptLine,
@@ -26,7 +22,7 @@ import {
   pictureOf,
   planSync,
   reduce,
-  serializeIndex,
+  serializeRecord,
   serializeStore,
   spaceShortfall,
   statusOf,
@@ -38,7 +34,6 @@ import type {
   DownloadStore,
   FileId,
   KeptPlayback,
-  KnownStore,
   NewDownload,
 } from "./model";
 
@@ -134,9 +129,6 @@ const kept = (id: FileId, revision = "r1"): ReadonlyArray<DownloadEvent> => [
   delivering(id, revision),
   DownloadEvent.Finished({ id }),
 ];
-
-/** A `Whole` standing, as a first run's empty folder earns one. */
-const whole = emptyFolder([]);
 
 describe("the download store", () => {
   it("queues each file once, oldest first", () => {
@@ -333,9 +325,7 @@ describe("the download store", () => {
       DownloadEvent.Described({ id: episodeFile, playback }),
     );
 
-    expect(parseIndex(serializeIndex({ store, standing: whole }))).toStrictEqual(
-      IndexText.AllRows({ store, standing: whole }),
-    );
+    expect(parseIndex(serializeStore(store))).toStrictEqual(IndexText.AllRows({ store }));
     expect(parseIndex("{")).toStrictEqual(IndexText.NotAnIndex());
     expect(parseIndex("")).toStrictEqual(IndexText.NotAnIndex());
 
@@ -350,51 +340,34 @@ describe("the download store", () => {
     expect(parseIndex(mixed)).toStrictEqual(IndexText.SomeRows({ store }));
   });
 
-  it("takes an index as whole only when the engine that saved it marked it so", () => {
-    const store = run(DownloadEvent.Added({ download: movie, at: 1 }), ...kept(duneFile));
-    const unproven = Standing.Unproven();
+  it("reads main's rows, which mark no folder, as never given one", () => {
+    const store = run(
+      DownloadEvent.Added({ download: movie, at: 1 }),
+      ...kept(duneFile),
+      DownloadEvent.FoldersMade({ ids: [duneFile] }),
+    );
 
-    expect(parseIndex(serializeStore(store))).toStrictEqual(
-      IndexText.AllRows({ store, standing: unproven }),
+    const row = store.downloads[0] ?? fail();
+    const { hasFolder: _marked, ...mainRow } = row;
+
+    expect(row.hasFolder).toBe(true);
+    expect(parseIndex(JSON.stringify({ downloads: [mainRow], pendingProgress: [] }))).toStrictEqual(
+      IndexText.AllRows({
+        store: { downloads: [{ ...row, hasFolder: false }], pendingProgress: [] },
+      }),
     );
-    expect(parseIndex(serializeIndex({ store, standing: unproven }))).toStrictEqual(
-      IndexText.AllRows({ store, standing: unproven }),
-    );
+  });
+
+  it("writes a download's own copy as one whose folder was made", () => {
+    const [row] = run(DownloadEvent.Added({ download: movie, at: 1 })).downloads;
+
+    expect(row?.hasFolder).toBe(false);
+    expect(JSON.parse(serializeRecord(row ?? fail()))).toMatchObject({ hasFolder: true });
   });
 });
 
-describe("the store's standing", () => {
-  const store = run(DownloadEvent.Added({ download: movie, at: 1 }), ...kept(duneFile));
-  const unproven = { store, standing: Standing.Unproven() };
-  const listedDune = [{ id: duneFile, state: "available", revision: "r1" }] as const;
-
-  it("is whole on a first run only when the folder holds nothing", () => {
-    expect(emptyFolder(null)).toStrictEqual(whole);
-    expect(emptyFolder([duneFile])).toStrictEqual(Standing.Unproven());
-  });
-
-  it("becomes whole once the folder and the core's list hold nothing the store lacks", () => {
-    expect(agreed(unproven, [duneFile, STORE_FILE, nextOf(STORE_FILE)], listedDune)).toStrictEqual(
-      whole,
-    );
-    expect(agreed(unproven, null, [])).toStrictEqual(whole);
-  });
-
-  it("stays unproven while the folder or the core's list holds something the store lacks", () => {
-    const stranger = asFileId("file-unknown");
-
-    expect(agreed(unproven, [duneFile, stranger], listedDune)).toStrictEqual(Standing.Unproven());
-    expect(agreed(unproven, [duneFile, RECORD_FILE], listedDune)).toStrictEqual(
-      Standing.Unproven(),
-    );
-    expect(
-      agreed(unproven, [duneFile], [...listedDune, { id: stranger, state: "gone" }]),
-    ).toStrictEqual(Standing.Unproven());
-  });
-});
-
-/** `store` as one whose lack of a folder or a listed download proves a removal. */
-const complete = (store: DownloadStore): KnownStore => ({ store, standing: whole });
+/** Holds nothing of any download but its row. */
+const holdsNothing = (): boolean => false;
 
 describe("following the core's list", () => {
   const store = run(
@@ -409,12 +382,13 @@ describe("following the core's list", () => {
   it("keeps what is available at the revision it holds", () => {
     expect(
       planSync(
-        complete(store),
+        store,
         [
           { id: duneFile, state: "available", revision: "r1" },
           { id: episodeFile, state: "available", revision: "r1" },
         ],
         both,
+        holdsNothing,
       ),
     ).toStrictEqual({ expire: [], refresh: [], drop: [], purge: [], forget: [] });
   });
@@ -422,12 +396,13 @@ describe("following the core's list", () => {
   it("expires, drops, and downloads a new revision again", () => {
     expect(
       planSync(
-        complete(store),
+        store,
         [
           { id: duneFile, state: "expired" },
           { id: episodeFile, state: "available", revision: "r2" },
         ],
         both,
+        holdsNothing,
       ),
     ).toStrictEqual({
       expire: [duneFile],
@@ -439,12 +414,13 @@ describe("following the core's list", () => {
 
     expect(
       planSync(
-        complete(store),
+        store,
         [
           { id: duneFile, state: "gone" },
           { id: episodeFile, state: "available", revision: "r1" },
         ],
         both,
+        holdsNothing,
       ).drop,
     ).toStrictEqual([duneFile]);
   });
@@ -453,10 +429,10 @@ describe("following the core's list", () => {
     const expired = reduce(store, DownloadEvent.Expired({ id: duneFile }));
 
     expect(
-      planSync(complete(expired), [{ id: duneFile, state: "expired" }], both).expire,
+      planSync(expired, [{ id: duneFile, state: "expired" }], both, holdsNothing).expire,
     ).toStrictEqual([]);
     expect(
-      planSync(complete(expired), [{ id: duneFile, state: "available", revision: "r1" }], both)
+      planSync(expired, [{ id: duneFile, state: "available", revision: "r1" }], both, holdsNothing)
         .refresh,
     ).toStrictEqual([duneFile]);
   });
@@ -473,7 +449,7 @@ describe("following the core's list", () => {
     );
 
     expect(
-      planSync(complete(withNew), [{ id: stranger, state: "available", revision: "r1" }], both),
+      planSync(withNew, [{ id: stranger, state: "available", revision: "r1" }], both, holdsNothing),
     ).toStrictEqual({
       expire: [],
       refresh: [],
@@ -484,7 +460,7 @@ describe("following the core's list", () => {
   });
 });
 
-describe("following the core's list with an unproven store", () => {
+describe("forgetting what the core lists", () => {
   const ids = [duneFile, episodeFile, asFileId("file-unknown"), asFileId("file-other")];
 
   const listing = fc.array(
@@ -511,15 +487,31 @@ describe("following the core's list with an unproven store", () => {
     ])
     .map((parts) => run(...parts.flat()));
 
-  it("plans what a whole store plans, but forgets nothing", () => {
+  it("forgets only listed downloads this iPhone holds nothing of, and nothing unlisted", () => {
     fc.assert(
-      fc.property(stores, listing, fc.subarray(ids), (store, listed, before) => {
-        const addedBefore = new Set<string>(before);
+      fc.property(
+        stores,
+        listing,
+        fc.subarray(ids),
+        fc.subarray(ids),
+        (store, listed, before, heldIds) => {
+          const addedBefore = new Set<string>(before);
+          const held = new Set<string>(heldIds);
+          const inStore = new Set<string>(store.downloads.map((download) => download.id));
+          const plan = planSync(store, listed, addedBefore, (id) => held.has(id));
 
-        expect(
-          planSync({ store, standing: Standing.Unproven() }, listed, addedBefore),
-        ).toStrictEqual({ ...planSync(complete(store), listed, addedBefore), forget: [] });
-      }),
+          expect(plan.forget).toStrictEqual(
+            listed.flatMap((entry) =>
+              inStore.has(entry.id) || held.has(entry.id) ? [] : [entry.id],
+            ),
+          );
+          expect({ ...plan, forget: [] }).toStrictEqual({
+            ...planSync(store, listed, addedBefore, holdsNothing),
+            forget: [],
+          });
+          expect(planSync(store, listed, addedBefore, null).forget).toStrictEqual([]);
+        },
+      ),
     );
   });
 });

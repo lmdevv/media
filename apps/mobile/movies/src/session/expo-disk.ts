@@ -43,6 +43,7 @@ export const expoDisk = (root: Directory, folderPath: string): DownloadDisk => {
       }),
     move: (from, to) =>
       onDisk("move", to, () => fileAt(from).moveSync(fileAt(to), { overwrite: true })),
+    rename: (path, name) => onDisk("rename", path, () => directoryAt(path).rename(name)),
     remove: (path) =>
       onDisk("remove", path, () => {
         const file = fileAt(path);
@@ -51,12 +52,18 @@ export const expoDisk = (root: Directory, folderPath: string): DownloadDisk => {
         if (directory.exists) directory.delete();
         else if (file.exists) file.delete();
       }),
-    list: () =>
-      onDisk("list", "", () =>
-        folder.exists
+    list: (path = "") =>
+      onDisk("list", path, () => {
+        if (path !== "") {
+          const directory = directoryAt(path);
+
+          return directory.exists ? directory.list().map((entry) => entry.name) : null;
+        }
+
+        return folder.exists
           ? folder.list().map((entry) => entry.name)
-          : absent(root, folderPath.split("/")),
-      ),
+          : absent(root, folderPath.split("/"));
+      }),
     createFolder: (path) =>
       onDisk("createFolder", path, () =>
         directoryAt(path).create({ intermediates: true, idempotent: true }),

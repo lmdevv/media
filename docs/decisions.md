@@ -255,18 +255,30 @@ Old movies' Convex project, its SDK client, and its command registry were delete
   under its documents folder, with one folder per download that also holds the download's own copy
   of its row (`download.json`). Each is saved as a `.new` file moved over the old one, so a crash
   or a full disk leaves the old file or the new one. A save that fails shows on the Downloads
-  screen, and a download's folder is made only once the index holding it is saved.
-- The app deletes a download's files, or tells the core to forget it, only on proof that the
-  person or the app removed it. A folder or a listed download the store lacks is that proof only
-  when the store is whole: an index that read without an error, decoded every row, and was saved
-  with `"whole": true`; a first run's empty folder; or a store once the folder and the core's whole
-  list hold nothing it lacks. Any other store is saved with `"whole": false` and keeps every folder;
-  only the person's removals and the core's expired, gone, and unlisted answers delete its files.
+  screen. A download's folder and copy are made once the index holding it is saved, and its row is
+  marked `hasFolder` from then on.
+- The app never decides a download was removed from what the index lacks, since an index can be
+  older than the files beside it after a crash, a restore, or a lost write. A folder whose copy of
+  its row reads is a kept download, and the store takes it when the index lacks it.
+- A removal is recorded before anything is deleted: the download's folder is renamed in one step
+  to `removal+<stamp>+<id>`, which needs no free space, or that folder is made when the download
+  has none. This applies to the person's removals and to the core's gone and unlisted answers. The
+  app then deletes the files inside and calls `core.downloads.remove`, and deletes the removal's
+  folder only once the core has answered. Every launch, sync, and reconnection retries both, so a
+  crash or an offline removal finishes later, and a download added again reaches the core only
+  after its removal did. A download whose folder cannot be renamed is not removed. The record
+  sits beside the files it deletes, so a stale index cannot lose it. A removed download's row in an
+  older index is dropped, because its folder is gone and its row is marked `hasFolder` or a removal
+  of it is recorded. Rows from main, which carry no mark and may never have had a folder, stay.
+- Nothing else is deleted: a folder with no readable copy, such as one main left behind, stays.
+  An expired download keeps its folder with its copy and loses its media. The core is told to
+  forget a listed download only when the store lacks it and the phone holds no folder or removal
+  of it.
 - An index that is not one, or holds rows this version cannot decode, moves aside to
-  `index.unreadable.json` before a save replaces it, and the downloads any store lacks come back
-  from their copies. `index.json.new` is the index only when the folder lists no `index.json`. A
-  read or a listing that fails holds the launch: the downloads show from their copies, nothing is
-  saved, moved, deleted, or sent, and the read is tried every 30 seconds.
+  `index.unreadable.json` before a save replaces it. `index.json.new` is the index only when the
+  folder lists no `index.json`. A read of the index or a listing of the folder that fails holds
+  the launch: what could be read shows, nothing is saved, moved, deleted, or sent but the person's
+  own removals, and the read is tried every 30 seconds.
 - A kept download plays from its local file with no server call, and the progress it makes is sent
   with `movies.play.reportOffline` when the server answers.
 
