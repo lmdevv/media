@@ -184,8 +184,8 @@ const VAAPI_DECODING: ReadonlyArray<string> = [
  * Quick Sync device the run already opened as its filter device (`hw`), so no second Quick Sync
  * session opens. oneVPL's own decoders are not used: on an Arc A380 with a 256 MiB BAR, a oneVPL
  * decoder in the same run as `h264_qsv` had the kernel refuse the encoder's page faults (SIGBUS) in
- * 11 of 1,700 all-GPU HEVC runs and 24 of 800 HEVC burn-ins; decoding this way crashed in none of
- * 1,200 and none of 300.
+ * 18 of 2,300 all-GPU HEVC runs and 46 of 1,400 HEVC burn-ins; decoding this way crashed in none of
+ * 1,800 and in 1 of 900.
  */
 const decodeQsv = decodeOn(
   "qsv",
