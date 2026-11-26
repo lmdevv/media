@@ -51,6 +51,15 @@ const AUDIO_FRAME = 1024 / 48_000;
 /** Six seconds of 640x360 at 60 fps in MPEG-2, whose sample rate a low level holds only smaller. */
 const FAST_FILE = "Mpeg Sixty (2013)/Mpeg Sixty (2013).mkv";
 
+/**
+ * Forty seconds of 320x180 at 6 fps in MPEG-2 with AAC. An encoder's held pictures last longer at
+ * a low rate: without its live options, SVT-AV1 held more than the muxer's 10 seconds of them, at
+ * every level of parallelism, with Debian's 2.3 and with 4.1, so the copied audio ran ahead into
+ * earlier fragments and each fragment after the first opened without sound. At 8 fps its smallest
+ * pipeline already kept up.
+ */
+const SLOW_FILE = "Mpeg Six (2015)/Mpeg Six (2015).mkv";
+
 const client = (videoCodecs: ClientCapabilities["videoCodecs"]): ClientCapabilities => ({
   containers: [],
   videoCodecs,
@@ -203,6 +212,19 @@ const addSource = addFile(SOURCE_FILE, PICTURE, SOURCE_SECONDS, 12);
 
 const addFastSource = addFile(FAST_FILE, "testsrc2=s=640x360:r=60:duration=6[out0]", 6, 30);
 
+const addSlowSource = addFile(SLOW_FILE, "testsrc2=s=320x180:r=6:duration=40[out0]", 40, 12);
+
+/**
+ * The sources streams are played from: a key for session ids, each file, its frame duration, and
+ * where a seek lands.
+ */
+const PLAYED = [
+  { key: "cuts", name: "the scene-cut source", file: addSource, frame: FRAME, seekTo: 7.3 },
+  { key: "slow", name: "a 6 fps source", file: addSlowSource, frame: 1 / 6, seekTo: 20.3 },
+] as const;
+
+type Played = (typeof PLAYED)[number];
+
 /** Six seconds of HEVC Main 10 in HDR10, with mastering display and content light levels. */
 const HDR_FILE = "Pq Ten (2014)/Pq Ten (2014).mkv";
 
@@ -337,14 +359,17 @@ const probeSegment = Effect.fn("OutputCodecs.probeSegment")(function* (
 
 const AudioPackets = Schema.fromJsonString(
   Schema.Struct({
-    packets: Schema.Array(Schema.Struct({ pts_time: Schema.FiniteFromString })),
+    packets: Schema.Array(
+      Schema.Struct({ pts_time: Schema.FiniteFromString, duration_time: Schema.FiniteFromString }),
+    ),
   }),
 );
 
-/** When the audio of `parts`, written one after another, starts: its earliest packet. */
-const audioStart = Effect.fn("OutputCodecs.audioStart")(function* (
-  parts: ReadonlyArray<Uint8Array>,
-) {
+/**
+ * When the audio of `parts`, written one after another, starts and ends: its earliest packet, and
+ * the end of its latest. None without audio.
+ */
+const audioSpan = Effect.fn("OutputCodecs.audioSpan")(function* (parts: ReadonlyArray<Uint8Array>) {
   const fs = yield* FileSystem.FileSystem;
   const tools = yield* MediaTools.Service;
   const file = yield* fs.makeTempFileScoped({ suffix: ".mp4" });
@@ -358,39 +383,47 @@ const audioStart = Effect.fn("OutputCodecs.audioStart")(function* (
       "-select_streams",
       "a:0",
       "-show_entries",
-      "packet=pts_time",
+      "packet=pts_time,duration_time",
       "-of",
       "json",
       file,
     ]),
   );
 
-  return Math.min(...packets.map((packet) => packet.pts_time));
+  return packets.length === 0
+    ? undefined
+    : {
+        start: Math.min(...packets.map((packet) => packet.pts_time)),
+        end: Math.max(...packets.map((packet) => packet.pts_time + packet.duration_time)),
+      };
 }, Effect.scoped);
 
 /**
- * Fetches the segments of `playlistUrl` from the one that holds `position` on and checks each:
- * served, in the case's codec, profile, and sample entry, opening on a keyframe at its planned
- * start that no picture of the segment is presented before, and carrying the sound from its first
- * picture on: its audio starts no later than one audio frame after its video, and no earlier than
- * one audio frame before its first video packet is decoded, as the muxer cuts a fragment there.
+ * Fetches the segments of `playlistUrl` from the one that holds `position` on and checks each,
+ * fetched alone with the init segment: served, in the case's codec, profile, and sample entry,
+ * opening on a keyframe at its planned start that no picture of the segment is presented before,
+ * and carrying the sound of its whole interval: its audio starts no later than one audio frame
+ * after its video, and no earlier than one audio frame before its first video packet is decoded,
+ * as the muxer cuts a fragment there; and, before another segment, runs on to where that one's
+ * first packet is decoded, a `frame` after its own last, within an audio frame.
  */
 const checkSegments = Effect.fn("OutputCodecs.checkSegments")(function* (
   playlistUrl: string,
   position: number,
   expected: Case,
+  frame: number,
 ) {
   const { init, segments } = yield* segmentsOf(playlistUrl);
   const initBytes = yield* fetched(init);
 
   assert.strictEqual(initBytes.status, 200, "init segment");
 
-  const holding = segments.findLastIndex((segment) => segment.start <= position + FRAME / 2);
+  const holding = segments.findLastIndex((segment) => segment.start <= position + frame / 2);
   const checked = segments.slice(Math.max(0, holding));
 
   assert.isAtLeast(checked.length, 2, "segments to check");
 
-  for (const segment of checked) {
+  for (const [index, segment] of checked.entries()) {
     const served = yield* fetched(segment.url);
     const at = `${expected.name}, the segment at ${segment.start.toFixed(3)} s`;
 
@@ -406,37 +439,56 @@ const checkSegments = Effect.fn("OutputCodecs.checkSegments")(function* (
     );
     assert.isDefined(first, at);
     assert.isTrue(first.flags.startsWith("K"), `${at}: the first packet is a keyframe`);
-    assert.approximately(first.pts_time, segment.start, FRAME / 2, `${at}: where it starts`);
+    assert.approximately(first.pts_time, segment.start, frame / 2, `${at}: where it starts`);
     assert.approximately(
       Math.min(...probed.packets.map((packet) => packet.pts_time)),
       first.pts_time,
-      FRAME / 2,
+      frame / 2,
       `${at}: no picture is presented before its keyframe, as an open GOP's leading pictures are`,
     );
 
-    const audio = yield* audioStart([initBytes.body, served.body]).pipe(Effect.orDie);
-    const decoded = Math.min(...probed.packets.map((packet) => packet.dts_time));
+    const audio = yield* audioSpan([initBytes.body, served.body]).pipe(Effect.orDie);
+    const decoded = probed.packets.map((packet) => packet.dts_time);
 
+    assert.isDefined(audio, `${at}: it carries sound`);
     assert.isAtMost(
-      audio,
+      audio.start,
       first.pts_time + AUDIO_FRAME,
       `${at}: its sound starts with its picture`,
     );
-    assert.isAtLeast(audio, decoded - AUDIO_FRAME, `${at}: its sound starts in its own interval`);
+    assert.isAtLeast(
+      audio.start,
+      Math.min(...decoded) - AUDIO_FRAME,
+      `${at}: its sound starts in its own interval`,
+    );
+
+    if (index < checked.length - 1) {
+      assert.isAtLeast(
+        audio.end,
+        Math.max(...decoded) + frame - AUDIO_FRAME,
+        `${at}: its sound runs on to the next segment`,
+      );
+    }
   }
 });
 
 /**
- * Negotiates `expected.client`, checks the codec the answer names and where the encode runs, then
- * every segment from the start, and after a seek every segment from there.
+ * Negotiates `expected.client` for `played`, checks the codec the answer names and where the
+ * encode runs, then every segment from the start, and after a seek every segment from there.
  */
 const plays = Effect.fn("OutputCodecs.plays")(function* (
   expected: Case,
   path: "cpu" | "qsv" | "vaapi",
+  played: Played,
 ) {
   const server = yield* MediaTestServer.Service;
-  const fileId: MediaFileId = yield* addSource;
-  const token = signTestToken({ fid: fileId, sid: `output-${path}-${expected.codec}` });
+  const fileId: MediaFileId = yield* played.file;
+
+  const token = signTestToken({
+    fid: fileId,
+    sid: `output-${path}-${expected.codec}-${played.key}`,
+  });
+
   const local = (url: string) => url.replace(/^https?:\/\/[^/]+/u, server.baseUrl);
 
   const negotiated = yield* decodeNegotiation(
@@ -456,18 +508,18 @@ const plays = Effect.fn("OutputCodecs.plays")(function* (
   assert.strictEqual(negotiated.video.codec, expected.codec, expected.name);
   assert.deepInclude(negotiated.transcode?.stages.at(-1), { op: "encode", domain }, expected.name);
 
-  yield* checkSegments(local(negotiated.url), 0, expected);
+  yield* checkSegments(local(negotiated.url), 0, expected, played.frame);
 
   const sought = yield* decodeSeek(
     yield* posted(`${server.baseUrl}/api/playback/seek`, {
       token,
       streamId: negotiated.streamId ?? "",
-      positionSeconds: 7.3,
+      positionSeconds: played.seekTo,
     }),
   ).pipe(Effect.orDie);
 
   assert.strictEqual(sought.video.codec, expected.codec, `${expected.name}, after a seek`);
-  yield* checkSegments(local(sought.playlistUrl), 7.3, expected);
+  yield* checkSegments(local(sought.playlistUrl), played.seekTo, expected, played.frame);
   yield* posted(`${server.baseUrl}/api/playback/stop`, {
     token,
     streamId: negotiated.streamId ?? "",
@@ -666,12 +718,14 @@ describe.skipIf(!hasFfmpeg)("output codecs", () => {
       );
     }
 
-    for (const expected of CPU_CASES) {
-      it.effect(
-        `encodes ${expected.codec} on the CPU for ${expected.name}`,
-        () => plays(expected, "cpu"),
-        120_000,
-      );
+    for (const played of PLAYED) {
+      for (const expected of CPU_CASES) {
+        it.effect(
+          `encodes ${expected.codec} on the CPU from ${played.name} for ${expected.name}`,
+          () => plays(expected, "cpu", played),
+          120_000,
+        );
+      }
     }
 
     for (const expected of LEVEL_CASES) {
@@ -704,12 +758,14 @@ describe.skipIf(!hasFfmpeg)("output codecs", () => {
           );
         }
 
-        for (const expected of GPU_CASES) {
-          it.effect(
-            `encodes ${expected.codec} on ${path} for ${expected.name}`,
-            () => plays(expected, path),
-            120_000,
-          );
+        for (const played of PLAYED) {
+          for (const expected of GPU_CASES) {
+            it.effect(
+              `encodes ${expected.codec} on ${path} from ${played.name} for ${expected.name}`,
+              () => plays(expected, path, played),
+              120_000,
+            );
+          }
         }
 
         for (const expected of LEVEL_CASES) {

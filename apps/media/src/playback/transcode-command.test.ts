@@ -530,8 +530,8 @@ describe("hlsCommandArgs", () => {
         "5200000",
         "-bufsize",
         "10400000",
-        "-max_interleave_delta",
-        "0",
+        "-svtav1-params",
+        "lp=3:hierarchical-levels=3:lookahead=0",
       ],
     ],
     [
@@ -654,7 +654,7 @@ describe("hlsCommandArgs", () => {
 
   it.each<readonly [OutputCodec, "software" | "qsv" | "vaapi", number, ReadonlyArray<string>]>([
     ["hevc", "software", 153, ["-x265-params", "log-level=error:open-gop=0:level-idc=41"]],
-    ["av1", "software", 19, ["-svtav1-params", "level=41"]],
+    ["av1", "software", 19, ["-svtav1-params", "lp=3:hierarchical-levels=3:lookahead=0:level=41"]],
     ["hevc", "qsv", 153, ["-level", "41"]],
     ["av1", "qsv", 19, ["-level", "41"]],
     ["hevc", "vaapi", 153, ["-level", "123"]],
