@@ -1,8 +1,13 @@
 import { assert, describe, expect, it } from "@effect/vitest";
 import type { ClientCapabilities } from "@media/contracts/media-playback";
-import { Result, Schema } from "effect";
+import { Effect, Result, Schema } from "effect";
 
-import type { AudioTrack, MediaProbe, VideoStream } from "../media/media-probe.ts";
+import {
+  type AudioTrack,
+  type MediaProbe,
+  parseFfprobeJson,
+  type VideoStream,
+} from "../media/media-probe.ts";
 import { verifiedFor, withoutToneMaps } from "../testing/capability-snapshots.ts";
 import {
   AudioPlan,
@@ -695,6 +700,48 @@ describe("levels", () => {
       PlaybackPlan.Unsupported({ reason: "no-transcode-target" }),
     );
   });
+
+  it.effect("holds a variable-rate source's level at its fastest stretch, not its average", () =>
+    Effect.gen(function* () {
+      // 640x360 at 60 fps for 4 s, then at 15 fps for 12 s: an average of 26.25 fps.
+      const phone = yield* parseFfprobeJson(
+        JSON.stringify({
+          format: { format_name: "mov,mp4,m4a,3gp,3g2,mj2", duration: "16.0" },
+          streams: [
+            {
+              index: 0,
+              codec_type: "video",
+              codec_name: "mpeg2video",
+              width: 640,
+              height: 360,
+              avg_frame_rate: "105/4",
+              r_frame_rate: "60/1",
+            },
+          ],
+        }),
+        "/library/Phone (2024)/Phone (2024).mp4",
+      );
+
+      for (const [codec, declared] of [
+        ["hevc", 63],
+        ["av1", 1],
+      ] as const) {
+        const encode = encodeOf(everywhere(phone, device([{ codec, maxLevel: declared }])));
+        const limits = levelOf(codec, declared);
+        const block = codec === "hevc" ? 8 : 1;
+        const coded = (side: number) => Math.ceil(side / block) * block;
+
+        assert.isDefined(encode?.output, codec);
+        assert.isDefined(limits, codec);
+        assert.isAtMost(
+          coded(encode.output.width) * coded(encode.output.height) * 60,
+          limits.maxSampleRate,
+          `${codec} at 60 fps`,
+        );
+        assert.isAtMost(encode.level ?? Number.POSITIVE_INFINITY, declared, codec);
+      }
+    }),
+  );
 
   it("leaves H.264 at the client's size, stating no level, whatever level it declares", () => {
     expect(

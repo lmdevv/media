@@ -13,6 +13,7 @@ interface StreamJson {
   readonly width?: number;
   readonly height?: number;
   readonly avg_frame_rate?: string;
+  readonly r_frame_rate?: string;
   readonly color_transfer?: string;
   readonly side_data_list?: ReadonlyArray<{ readonly side_data_type: string }>;
   readonly channels?: number;
@@ -44,7 +45,37 @@ const ffprobe = (streams: ReadonlyArray<StreamJson>, formatName = "matroska,webm
     streams,
   });
 
+/** The frame rate read for a 640x360 H.264 stream whose rates ffprobe reports as `rates`. */
+const frameRateOf = (rates: Pick<StreamJson, "avg_frame_rate" | "r_frame_rate">) =>
+  parseFfprobeJson(
+    ffprobe(
+      [{ index: 0, codec_type: "video", codec_name: "h264", width: 640, height: 360, ...rates }],
+      "mov,mp4,m4a,3gp,3g2,mj2",
+    ),
+    "/library/Clip (2024)/Clip (2024).mp4",
+  ).pipe(Effect.map((probe) => probe.video?.frameRate));
+
 describe("parseFfprobeJson", () => {
+  it.effect("reads the most frames a second the stream reports", () =>
+    Effect.gen(function* () {
+      // 4 s at 60 fps then 12 s at 15 fps, as ffprobe reads it.
+      assert.strictEqual(yield* frameRateOf({ avg_frame_rate: "105/4", r_frame_rate: "60/1" }), 60);
+      assert.approximately(
+        (yield* frameRateOf({ avg_frame_rate: "30000/1001", r_frame_rate: "30000/1001" })) ?? 0,
+        29.97,
+        0.001,
+      );
+      // A millisecond timestamp clock read as a base rate leaves the average.
+      assert.approximately(
+        (yield* frameRateOf({ avg_frame_rate: "30000/1001", r_frame_rate: "1000/1" })) ?? 0,
+        29.97,
+        0.001,
+      );
+      assert.strictEqual(yield* frameRateOf({ r_frame_rate: "25/1" }), 25);
+      assert.strictEqual(yield* frameRateOf({}), undefined);
+    }),
+  );
+
   it.effect("reads Dolby Vision, bitmap subtitles, and skips cover art", () =>
     Effect.gen(function* () {
       const probe = yield* parseFfprobeJson(

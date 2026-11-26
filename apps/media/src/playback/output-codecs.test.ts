@@ -17,6 +17,7 @@ import { ffmpegAvailable, qsvUsable, vaapiUsable } from "../testing/fixture-libr
 import * as FixtureWorkspace from "../testing/fixture-workspace.ts";
 import * as MediaTestServer from "../testing/media-test-server.ts";
 import { signTestToken } from "../testing/test-tokens.ts";
+import { levelOf } from "./output-levels.ts";
 
 const hasFfmpeg = await ffmpegAvailable();
 
@@ -141,6 +142,8 @@ const Probed = Schema.fromJsonString(
         level: Schema.optional(Schema.Finite),
         width: Schema.optional(Schema.Finite),
         height: Schema.optional(Schema.Finite),
+        coded_width: Schema.optional(Schema.Finite),
+        coded_height: Schema.optional(Schema.Finite),
         color_transfer: Schema.optional(Schema.String),
         color_primaries: Schema.optional(Schema.String),
         side_data_list: Schema.optional(
@@ -224,6 +227,56 @@ const PLAYED = [
 ] as const;
 
 type Played = (typeof PLAYED)[number];
+
+/**
+ * Sixteen seconds of 640x360 H.264 in MP4 at a variable frame rate, as a phone records: 4 s at
+ * 60 fps, then 12 s at 15 fps. ffprobe reads an average of 26.25 fps and a base rate of 60.
+ */
+const VFR_FILE = "Phone Clip (2016)/Phone Clip (2016).mp4";
+
+const addVfrSource = Effect.gen(function* () {
+  const workspace = yield* FixtureWorkspace.Service;
+  const tools = yield* MediaTools.Service;
+  const scanner = yield* LibraryScanner.Service;
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const root = path.join(workspace.root, "output-codecs");
+  const file = path.join(root, VFR_FILE);
+
+  if (!(yield* fs.exists(file))) {
+    yield* fs.makeDirectory(path.dirname(file), { recursive: true });
+    yield* tools.ffmpeg([
+      "-hide_banner",
+      "-nostdin",
+      "-v",
+      "error",
+      "-y",
+      "-f",
+      "lavfi",
+      "-i",
+      "testsrc2=s=640x360:r=60:duration=4",
+      "-f",
+      "lavfi",
+      "-i",
+      "testsrc2=s=640x360:r=15:duration=12",
+      "-filter_complex",
+      "[0:v][1:v]concat=n=2:v=1:a=0[v]",
+      "-map",
+      "[v]",
+      "-fps_mode",
+      "vfr",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "ultrafast",
+      file,
+    ]);
+  }
+
+  yield* scanner.scan({ libraryId: SOURCES, root, mode: "incremental" });
+
+  return MemoryLibrary.fileIdOf(SOURCES, VFR_FILE);
+}).pipe(Effect.orDie);
 
 /** Six seconds of HEVC Main 10 in HDR10, with mastering display and content light levels. */
 const HDR_FILE = "Pq Ten (2014)/Pq Ten (2014).mkv";
@@ -349,7 +402,7 @@ const probeSegment = Effect.fn("OutputCodecs.probeSegment")(function* (
       "-select_streams",
       "v:0",
       "-show_entries",
-      "stream=codec_name,profile,codec_tag_string,level,width,height,color_transfer,color_primaries:stream_side_data=side_data_type:packet=pts_time,dts_time,flags",
+      "stream=codec_name,profile,codec_tag_string,level,width,height,coded_width,coded_height,color_transfer,color_primaries:stream_side_data=side_data_type:packet=pts_time,dts_time,flags",
       "-of",
       "json",
       file,
@@ -574,34 +627,60 @@ const downloads = Effect.fn("OutputCodecs.downloads")(function* (
   );
 });
 
+/** The sources a level is checked against. */
+const LEVEL_SOURCES = {
+  "24 fps": addSource,
+  "60 fps": addFastSource,
+  "a variable frame rate": addVfrSource,
+} as const;
+
 /** A device that plays one codec up to a declared level, and the source that tests it. */
 interface LevelCase {
-  readonly name: string;
   readonly codec: "hevc" | "av1";
   /** The highest level the device declares, in ffprobe's units. */
   readonly declared: number;
-  /** Whether it plays the 60 fps source, else the 24 fps one. */
-  readonly fast: boolean;
+  readonly source: keyof typeof LEVEL_SOURCES;
 }
 
 const LEVEL_CASES: ReadonlyArray<LevelCase> = [
-  { name: "an HEVC device at level 2.1, from 60 fps", codec: "hevc", declared: 63, fast: true },
-  { name: "an AV1 device at level 2.1, from 60 fps", codec: "av1", declared: 1, fast: true },
-  { name: "an HEVC device at level 2", codec: "hevc", declared: 60, fast: false },
-  { name: "an AV1 device at level 2.0", codec: "av1", declared: 0, fast: false },
+  { codec: "hevc", declared: 63, source: "60 fps" },
+  { codec: "av1", declared: 1, source: "60 fps" },
+  { codec: "hevc", declared: 60, source: "24 fps" },
+  { codec: "av1", declared: 0, source: "24 fps" },
+  { codec: "hevc", declared: 63, source: "a variable frame rate" },
+  { codec: "av1", declared: 1, source: "a variable frame rate" },
 ];
+
+/** How a test names `level`'s device and source. */
+const levelName = (level: LevelCase): string =>
+  `an ${level.codec === "hevc" ? "HEVC" : "AV1"} device at level ${String(level.declared)}, from ${level.source}`;
+
+/** The most of `times`, in seconds, that fall in any one second. */
+const mostInASecond = (times: ReadonlyArray<number>): number =>
+  Math.max(
+    0,
+    ...times.map((start) => times.filter((time) => time >= start && time < start + 0.999).length),
+  );
 
 /**
  * Negotiates `expected`'s device on a server on `path` and reads the first segments it serves:
- * the codec it names, at the size the answer gives, at or under the level the device declared.
+ * the codec it names, at the size the answer gives, stating a level at or under the one the device
+ * declared, and within that level's luma samples a second in its fastest second.
  */
 const holdsLevel = Effect.fn("OutputCodecs.holdsLevel")(function* (
   expected: LevelCase,
   path: "cpu" | "qsv" | "vaapi",
 ) {
   const server = yield* MediaTestServer.Service;
-  const fileId: MediaFileId = yield* expected.fast ? addFastSource : addSource;
-  const token = signTestToken({ fid: fileId, sid: `level-${path}-${expected.name}` });
+  const fileId: MediaFileId = yield* LEVEL_SOURCES[expected.source];
+  const name = levelName(expected);
+  const limits = levelOf(expected.codec, expected.declared);
+
+  const token = signTestToken({
+    fid: fileId,
+    sid: `level-${path}-${expected.codec}-${String(expected.declared)}-${expected.source}`,
+  });
+
   const local = (url: string) => url.replace(/^https?:\/\/[^/]+/u, server.baseUrl);
 
   const negotiated = yield* decodeNegotiation(
@@ -616,21 +695,22 @@ const holdsLevel = Effect.fn("OutputCodecs.holdsLevel")(function* (
   assert.strictEqual(
     negotiated.mode,
     path === "cpu" ? "transcode-software" : `transcode-${path}`,
-    expected.name,
+    name,
   );
-  assert.strictEqual(negotiated.video.codec, expected.codec, expected.name);
+  assert.strictEqual(negotiated.video.codec, expected.codec, name);
+  assert.isDefined(limits, name);
 
   const { init, segments } = yield* segmentsOf(local(negotiated.url));
   const initBytes = yield* fetched(init);
 
   for (const segment of segments.slice(0, 2)) {
     const served = yield* fetched(segment.url);
-    const at = `${expected.name}, the segment at ${segment.start.toFixed(3)} s`;
+    const at = `${name}, the segment at ${segment.start.toFixed(3)} s`;
 
     assert.strictEqual(served.status, 200, at);
 
-    const [stream] = (yield* probeSegment([initBytes.body, served.body]).pipe(Effect.orDie))
-      .streams;
+    const probed = yield* probeSegment([initBytes.body, served.body]).pipe(Effect.orDie);
+    const [stream] = probed.streams;
 
     assert.isDefined(stream, at);
     assert.deepStrictEqual(
@@ -640,6 +720,14 @@ const holdsLevel = Effect.fn("OutputCodecs.holdsLevel")(function* (
     );
     assert.isDefined(stream.level, at);
     assert.isAtMost(stream.level, expected.declared, at);
+
+    const pictures = mostInASecond(probed.packets.map((packet) => packet.pts_time));
+
+    assert.isAtMost(
+      pictures * (stream.coded_width ?? Number.NaN) * (stream.coded_height ?? Number.NaN),
+      limits.maxSampleRate,
+      `${at}: luma samples in its fastest second, ${String(pictures)} pictures`,
+    );
   }
 
   yield* posted(`${server.baseUrl}/api/playback/stop`, {
@@ -730,7 +818,7 @@ describe.skipIf(!hasFfmpeg)("output codecs", () => {
 
     for (const expected of LEVEL_CASES) {
       it.effect(
-        `holds ${expected.name} to its level on the CPU`,
+        `holds ${levelName(expected)} to its level on the CPU`,
         () => holdsLevel(expected, "cpu"),
         120_000,
       );
@@ -770,7 +858,7 @@ describe.skipIf(!hasFfmpeg)("output codecs", () => {
 
         for (const expected of LEVEL_CASES) {
           it.effect(
-            `holds ${expected.name} to its level on ${path}`,
+            `holds ${levelName(expected)} to its level on ${path}`,
             () => holdsLevel(expected, path),
             120_000,
           );

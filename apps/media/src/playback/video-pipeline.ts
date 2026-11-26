@@ -150,8 +150,8 @@ export interface VideoIntent {
    */
   readonly targets: ReadonlyArray<OutputTarget>;
   /**
-   * The source's frames a second, which a target's level limits with the picture; a level holds an
-   * unknown rate to 60.
+   * The most frames a second the source carries, as its probe reads them, which a target's level
+   * limits with the picture; a level holds an unknown rate to 60.
    */
   readonly frameRate: number | undefined;
   /** The client's limits and the viewer's height cap. */
