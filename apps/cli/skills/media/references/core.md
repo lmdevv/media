@@ -951,13 +951,13 @@ Show this server's name and version, and whether its owner has set it up.
 
 ## `core.server.status`
 
-Show what the media server last reported: its version, hardware acceleration, streams, and when.
+Show what the media server last reported: its version, streams, transcoding devices and capabilities, and when.
 
 - CLI: `media admin server status`
 - Kind: query
 - Scope: admin
 - Arguments: none
-- Result: `null | { version: string; hardwareAcceleration: "qsv" | "vaapi" | "none"; activeStreams: number; runsAwaitingExit: number; startedAt: number; reportedAt: number }`
+- Result: `null | { version: string; activeStreams: number; runsAwaitingExit: number; startedAt: number; reportedAt: number; transcoding: { build: null | { version: string | null; kernel: string; checkedAt: number }; devices: Array<{ domain: string; node: string; opened: boolean; pci: string | null; kernelDriver: string | null; userDriver: string | null; checkedAt: number }>; capabilities: Array<{ key: string; domain: string; status: "unknown" | "verified" | "unsupported"; source: "listing" | "probe" | null; checkedAt: number | null; reason: string | null; quarantineEndsAt: number | "restart" | null }> } }`
 
 ## `core.settings.get`
 

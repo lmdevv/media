@@ -264,6 +264,46 @@ const linkState = v.union(
   v.literal("dead"),
 );
 
+/**
+ * What the media server knows about transcoding on its machine: the ffmpeg build, each GPU device
+ * as one GPU API sees it, and each capability with its status, where and when its latest evidence
+ * came from, what it showed as a code, and the end of any quarantine in force. The server stores
+ * only the codes of `EvidenceReason` (`@media/contracts/server-functions`); a client reads any
+ * string there, so a code a newer server adds leaves the rest of the report readable.
+ */
+const transcodingReport = v.object({
+  build: v.union(
+    v.null(),
+    v.object({
+      version: v.union(v.string(), v.null()),
+      kernel: v.string(),
+      checkedAt: v.number(),
+    }),
+  ),
+  devices: v.array(
+    v.object({
+      domain: v.string(),
+      node: v.string(),
+      opened: v.boolean(),
+      pci: v.union(v.string(), v.null()),
+      kernelDriver: v.union(v.string(), v.null()),
+      userDriver: v.union(v.string(), v.null()),
+      checkedAt: v.number(),
+    }),
+  ),
+  capabilities: v.array(
+    v.object({
+      key: v.string(),
+      domain: v.string(),
+      status: v.union(v.literal("unknown"), v.literal("verified"), v.literal("unsupported")),
+      source: v.union(v.literal("listing"), v.literal("probe"), v.null()),
+      checkedAt: v.union(v.number(), v.null()),
+      reason: v.union(v.string(), v.null()),
+      quarantineEndsAt: v.union(v.number(), v.literal("restart"), v.null()),
+    }),
+  ),
+});
+
 /** The core's commands: the server itself, accounts, devices, and the other shared modules. */
 export const core = [
   query("core.server.info", {
@@ -274,18 +314,18 @@ export const core = [
   }),
   query("core.server.status", {
     summary:
-      "Show what the media server last reported: its version, hardware acceleration, streams, and when",
+      "Show what the media server last reported: its version, streams, transcoding devices and capabilities, and when",
     scope: "admin",
     args: {},
     result: v.union(
       v.null(),
       v.object({
         version: v.string(),
-        hardwareAcceleration: v.union(v.literal("qsv"), v.literal("vaapi"), v.literal("none")),
         activeStreams: v.number(),
         runsAwaitingExit: v.number(),
         startedAt: v.number(),
         reportedAt: v.number(),
+        transcoding: transcodingReport,
       }),
     ),
   }),

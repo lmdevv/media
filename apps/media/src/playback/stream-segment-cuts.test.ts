@@ -46,7 +46,7 @@ const PacketTimes = Schema.fromJsonString(
 );
 
 const FailedBody = Schema.fromJsonString(
-  Schema.TaggedStruct("TranscodeFailed", { detail: Schema.String }),
+  Schema.TaggedStruct("TranscodeFailed", { reason: Schema.String }),
 );
 
 interface Packets {
@@ -280,7 +280,7 @@ describe.skipIf(!hasFfmpeg)("segment cuts", () => {
               new TextDecoder().decode(answer.body),
             ).pipe(Effect.orDie);
 
-            assert.include(failure.detail, `did not cut at planned segment ${String(index)}`);
+            assert.strictEqual(failure.reason, "segment-not-cut", `segment ${String(index)}`);
           }
 
           const packets = yield* Effect.forEach(

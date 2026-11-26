@@ -1,12 +1,18 @@
-import type { DynamicRange, NegotiateResponse } from "@media/contracts/media-playback";
+import type {
+  DynamicRange,
+  NegotiateResponse,
+  TranscodeChange,
+} from "@media/contracts/media-playback";
 import type { HdrFormat, MediaFile } from "@media/contracts/models/catalog";
-import { MediaLabels } from "@media/sdk/effect";
+import { MediaLabels, TranscodeLabels } from "@media/sdk/effect";
 import { useLiveValue } from "@media/ui/lib/live-value";
 import type { LiveValue } from "@media/ui/lib/live-value";
 import { cn } from "@media/ui/lib/utils";
 import { XIcon } from "lucide-react";
 
 const { channelLabel, codecLabel } = MediaLabels;
+
+const { reasonLabel, stageLabel } = TranscodeLabels;
 
 const RUNGS = [
   { id: "direct", label: "Direct" },
@@ -49,11 +55,36 @@ const sizeLabel = (width: number, height: number): string => {
 
 const megabits = (bitsPerSecond: number): string => (bitsPerSecond / 1_000_000).toFixed(1);
 
-const ENCODER_LABELS = {
-  "transcode-qsv": "Intel QSV",
-  "transcode-vaapi": "VA-API",
-  "transcode-software": "Software",
-} as const;
+const pad = (part: number): string => String(part).padStart(2, "0");
+
+/** `21:04 · probe failed too · tonemap.qsv`: when, why, and what the stream keeps off from then on. */
+const changeLine = (change: TranscodeChange): string => {
+  const at = new Date(change.at);
+  const [first, ...rest] = change.excluded;
+
+  return [
+    `${pad(at.getHours())}:${pad(at.getMinutes())}`,
+    reasonLabel(change.reason),
+    ...(first === undefined
+      ? []
+      : [rest.length === 0 ? first : `${first} +${String(rest.length)}`]),
+  ].join(" · ");
+};
+
+/** One line of a row, keyed apart from lines that read the same, such as two like changes. */
+interface Line {
+  readonly key: string;
+  readonly text: string;
+}
+
+const lineOf = (text: string): Line => ({ key: text, text });
+
+interface Row {
+  readonly label: string;
+  readonly lines: ReadonlyArray<Line>;
+  /** The first line is where the rest came from, such as the source of a transcoded video. */
+  readonly fromFirst?: true;
+}
 
 const CONTAINER_LABELS = new Map([
   ["mkv", "MKV"],
@@ -68,7 +99,7 @@ const streamInfoRows = (
   file: MediaFile,
   stream: NegotiateResponse,
   bufferedAheadSeconds: number,
-): ReadonlyArray<{ readonly label: string; readonly lines: ReadonlyArray<string> }> => {
+): ReadonlyArray<Row> => {
   const source = file.probe.video[0];
 
   const copiedVideo =
@@ -107,46 +138,54 @@ const streamInfoRows = (
   const container =
     CONTAINER_LABELS.get(file.probe.container) ?? file.probe.container.toUpperCase();
 
-  const rows = [
-    ...(file.versionName === null ? [] : [{ label: "Version", lines: [file.versionName] }]),
-    {
-      label: "Video",
-      lines:
-        copiedVideo || sourceVideo === null
-          ? [sourceVideo ?? outputVideo]
-          : [sourceVideo, `→ ${outputVideo}`],
-    },
-    ...(stream.mode === "transcode-qsv" ||
-    stream.mode === "transcode-vaapi" ||
-    stream.mode === "transcode-software"
-      ? [
+  const stages = stream.transcode?.stages ?? [];
+  const changes = stream.transcode?.changes ?? [];
+
+  const rows: ReadonlyArray<Row> = [
+    ...(file.versionName === null ? [] : [{ label: "Version", lines: [lineOf(file.versionName)] }]),
+    copiedVideo || sourceVideo === null
+      ? { label: "Video", lines: [lineOf(sourceVideo ?? outputVideo)] }
+      : {
+          label: "Video",
+          lines: [lineOf(sourceVideo), lineOf(`→ ${outputVideo}`)],
+          fromFirst: true,
+        },
+    ...(stages.length === 0
+      ? []
+      : [
           {
-            label: "Encoder",
-            lines: [
-              [
-                ENCODER_LABELS[stream.mode],
-                ...(source !== undefined &&
-                source.hdr !== "none" &&
-                stream.video.dynamicRange === "sdr"
-                  ? ["tone-map"]
-                  : []),
-              ].join(" · "),
-            ],
+            label: "Stages",
+            lines: stages.map((stage, index) => ({
+              key: `${String(index)}:${stage.impl}`,
+              text: stageLabel(stage),
+            })),
           },
-        ]
-      : []),
-    { label: "Audio", lines: [audio] },
+        ]),
+    ...(changes.length === 0
+      ? []
+      : [
+          {
+            label: "Changed",
+            lines: changes.map((change, index) => ({
+              key: `${String(change.generation)}:${String(index)}`,
+              text: changeLine(change),
+            })),
+          },
+        ]),
+    { label: "Audio", lines: [lineOf(audio)] },
     {
       label: "Container",
-      lines: [stream.mode === "direct" ? container : `${container} → HLS fMP4`],
+      lines: [lineOf(stream.mode === "direct" ? container : `${container} → HLS fMP4`)],
     },
     {
       label: "Bitrate",
       lines: [
-        [
-          ...(file.probe.bitRate === null ? [] : [`${megabits(file.probe.bitRate)} Mb/s`]),
-          `buffer ${String(Math.round(bufferedAheadSeconds))} s`,
-        ].join(" · "),
+        lineOf(
+          [
+            ...(file.probe.bitRate === null ? [] : [`${megabits(file.probe.bitRate)} Mb/s`]),
+            `buffer ${String(Math.round(bufferedAheadSeconds))} s`,
+          ].join(" · "),
+        ),
       ],
     },
   ];
@@ -217,13 +256,13 @@ export function StreamInfo({
             <dd className="flex grow basis-0 flex-col gap-0.5">
               {row.lines.map((line, index) => (
                 <span
-                  key={line}
+                  key={line.key}
                   className={cn(
                     "font-mono text-label/5",
-                    row.lines.length > 1 && index === 0 ? "text-text-muted" : "text-text",
+                    row.fromFirst === true && index === 0 ? "text-text-muted" : "text-text",
                   )}
                 >
-                  {line}
+                  {line.text}
                 </span>
               ))}
             </dd>

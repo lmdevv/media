@@ -2743,7 +2743,7 @@ export const generatedCommands = [
     scope: "admin",
     refusesKeys: false,
     summary:
-      "Show what the media server last reported: its version, hardware acceleration, streams, and when",
+      "Show what the media server last reported: its version, streams, transcoding devices and capabilities, and when",
     secrets: [],
     paginated: false,
     args: Schema.Struct({}),
@@ -2751,15 +2751,54 @@ export const generatedCommands = [
       Schema.Null,
       Schema.Struct({
         version: Schema.String,
-        hardwareAcceleration: Schema.Union([
-          Schema.Literal("qsv"),
-          Schema.Literal("vaapi"),
-          Schema.Literal("none"),
-        ]),
         activeStreams: Schema.Finite,
         runsAwaitingExit: Schema.Finite,
         startedAt: Schema.Finite,
         reportedAt: Schema.Finite,
+        transcoding: Schema.Struct({
+          build: Schema.Union([
+            Schema.Null,
+            Schema.Struct({
+              version: Schema.Union([Schema.String, Schema.Null]),
+              kernel: Schema.String,
+              checkedAt: Schema.Finite,
+            }),
+          ]),
+          devices: Schema.Array(
+            Schema.Struct({
+              domain: Schema.String,
+              node: Schema.String,
+              opened: Schema.Boolean,
+              pci: Schema.Union([Schema.String, Schema.Null]),
+              kernelDriver: Schema.Union([Schema.String, Schema.Null]),
+              userDriver: Schema.Union([Schema.String, Schema.Null]),
+              checkedAt: Schema.Finite,
+            }),
+          ),
+          capabilities: Schema.Array(
+            Schema.Struct({
+              key: Schema.String,
+              domain: Schema.String,
+              status: Schema.Union([
+                Schema.Literal("unknown"),
+                Schema.Literal("verified"),
+                Schema.Literal("unsupported"),
+              ]),
+              source: Schema.Union([
+                Schema.Literal("listing"),
+                Schema.Literal("probe"),
+                Schema.Null,
+              ]),
+              checkedAt: Schema.Union([Schema.Finite, Schema.Null]),
+              reason: Schema.Union([Schema.String, Schema.Null]),
+              quarantineEndsAt: Schema.Union([
+                Schema.Finite,
+                Schema.Literal("restart"),
+                Schema.Null,
+              ]),
+            }),
+          ),
+        }),
       }),
     ]),
     method: (platform) => platform.core.server.status,

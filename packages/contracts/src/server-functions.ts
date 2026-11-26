@@ -274,13 +274,113 @@ const CreditedPerson = Schema.Struct({
   needsDetails: Schema.Boolean,
 });
 
+/** The ffmpeg build the media service transcodes with. */
+const TranscodingBuild = Schema.Struct({
+  /**
+   * ffmpeg's version as its version line gives it, such as `9.0.2` or `7.1.3-0+deb13u1`; null
+   * when that line has none, or one past 64 characters.
+   */
+  version: Schema.NullOr(Schema.String),
+  /** The kernel release the evidence was gathered on, such as `6.18.63`. */
+  kernel: Schema.String,
+  /** When the service read the build's listings. */
+  checkedAt: EpochMillis,
+});
+
+/** A GPU device the media service found, as one GPU API sees it. */
+const TranscodingDevice = Schema.Struct({
+  /** The GPU API: `qsv` or `vaapi`. A string, so a later backend changes no contract. */
+  domain: Schema.String,
+  /** The render node's name, such as `renderD128`, without its folder. */
+  node: Schema.String,
+  /** Whether ffmpeg opened it. */
+  opened: Schema.Boolean,
+  /** PCI vendor, device, and revision, such as `8086:56a5 rev 05`. */
+  pci: Schema.NullOr(Schema.String),
+  /** The kernel driver bound to it, such as `i915`. */
+  kernelDriver: Schema.NullOr(Schema.String),
+  /**
+   * The userspace driver ffmpeg loaded, by name and version alone as the driver names itself, such
+   * as `Intel iHD driver for Intel(R) Gen Graphics 25.2.6`; null when ffmpeg named none in that
+   * form, or one past 64 characters.
+   */
+  userDriver: Schema.NullOr(Schema.String),
+  /** When the service identified it. */
+  checkedAt: EpochMillis,
+});
+
+/** What a transcoding capability is known to be: never planned until verified. */
+const CapabilityStatus = Schema.Literals(["unknown", "verified", "unsupported"]);
+
+/**
+ * What a capability's latest evidence showed, as a code, so no report carries text from ffmpeg's
+ * log; the readable line goes to the server's log, which admins can read.
+ *
+ * - `listed` and `not-listed`: the build's listings show the component it needs, or lack it.
+ * - `passed`: a probe's frames came out.
+ * - `refused`: ffmpeg refused the probe, exiting with an error it wrote.
+ * - `crashed`: a signal such as SIGSEGV killed ffmpeg as the probe ran.
+ * - `inconclusive`: the probe proved nothing, as when it timed out, was stopped, or its device
+ *   would not open.
+ */
+export const EvidenceReason = Schema.Literals([
+  "listed",
+  "not-listed",
+  "passed",
+  "refused",
+  "crashed",
+  "inconclusive",
+]);
+
+/** What a capability's latest evidence showed. */
+export type EvidenceReason = typeof EvidenceReason.Type;
+
+/**
+ * One thing a transcoding stage may be asked to do on this server, and the evidence about it:
+ * `decode.qsv:hevc/yuv420p10le` or `scale.vaapi:10>8`.
+ */
+const TranscodingCapability = Schema.Struct({
+  key: Schema.String,
+  /** Where the stage runs: `cpu`, `qsv`, or `vaapi`. */
+  domain: Schema.String,
+  status: CapabilityStatus,
+  /**
+   * Where the latest evidence came from: the build's listings (`listing`) or a probe on a
+   * generated clip (`probe`); null with none.
+   */
+  source: Schema.NullOr(Schema.Literals(["listing", "probe"])),
+  /** When the latest evidence was gathered; null with none. */
+  checkedAt: Schema.NullOr(EpochMillis),
+  /** What the latest evidence showed; null with none. */
+  reason: Schema.NullOr(EvidenceReason),
+  /**
+   * When its quarantine after a reproduced failure ends: a time, `restart` for not before the
+   * server restarts, or null when it is not quarantined.
+   */
+  quarantineEndsAt: Schema.Union([EpochMillis, Schema.Literal("restart"), Schema.Null]),
+});
+
+/**
+ * What the media service knows about transcoding on its machine: the ffmpeg build, the GPU
+ * devices, and the evidence for each capability, as codes and identities without paths beyond a
+ * render node's name.
+ */
+export const TranscodingReport = Schema.Struct({
+  build: Schema.NullOr(TranscodingBuild),
+  devices: Schema.Array(TranscodingDevice),
+  capabilities: Schema.Array(TranscodingCapability),
+});
+
+/** What the media service knows about transcoding on its machine. */
+export interface TranscodingReport extends Schema.Schema.Type<typeof TranscodingReport> {}
+
 /** What the server reports about itself for admins' server status. */
 export const ServerReport = Schema.Struct({
   version: Schema.String,
-  hardwareAcceleration: Schema.Literals(["qsv", "vaapi", "none"]),
   activeStreams: Schema.Int,
   runsAwaitingExit: Schema.Int,
   startedAt: EpochMillis,
+  transcoding: TranscodingReport,
 });
 
 /** What the server reports about itself. */

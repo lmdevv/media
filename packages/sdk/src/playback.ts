@@ -12,7 +12,17 @@ import {
 } from "@media/contracts/media-playback";
 import type { StartedPlayback } from "@media/contracts/models/playback";
 import { Milliseconds } from "@media/contracts/units";
-import { Duration, Effect, Match, Option, Redacted, Schedule, Schema, Stream } from "effect";
+import {
+  Duration,
+  Effect,
+  Match,
+  Option,
+  Redacted,
+  Schedule,
+  Schema,
+  Stream,
+  Struct,
+} from "effect";
 
 import type { PlaybackCallError } from "./media-http";
 import { baseUrl, encodeJson, mediaUrl, requestPlayback } from "./media-http";
@@ -80,7 +90,11 @@ export const negotiate = Effect.fn("Playback.negotiate")(function* (
   );
 });
 
-/** Moves an HLS stream to `positionMs`; returns the playlist to load next, or none for direct play. */
+/**
+ * Moves an HLS stream to `positionMs`; returns the generation to load next, with how it delivers
+ * the video, or none for direct play. A player reloads after `StreamGenerationGone` the same way,
+ * at the position it holds, then continues with `inGeneration`.
+ */
 export const seekStream = Effect.fn("Playback.seekStream")(function* (
   playback: Playback,
   positionMs: Milliseconds,
@@ -107,6 +121,22 @@ export const seekStream = Effect.fn("Playback.seekStream")(function* (
       SeekResponse,
     ),
   );
+});
+
+/**
+ * `playback` continued in the generation a seek named: its playlist, and the mode, video, and
+ * stages that generation runs, which a replacement after a failure may have changed, the picture
+ * size among them.
+ */
+export const inGeneration = (playback: Playback, moved: SeekResponse): Playback => ({
+  started: playback.started,
+  stream: Struct.assign(playback.stream, {
+    url: moved.playlistUrl,
+    generation: moved.generation,
+    mode: moved.mode,
+    video: moved.video,
+    transcode: moved.transcode,
+  }),
 });
 
 /**
@@ -193,7 +223,8 @@ export const stopNow = (playback: Playback): void => {
 /**
  * What a player should do after a playback API failure:
  *
- * - `reload-playlist`: a seek replaced the HLS generation; load the current one (`seekStream`).
+ * - `reload-playlist`: a seek or a failed run replaced the HLS generation; load the current one
+ *   (`seekStream` at the position held, then `inGeneration`).
  * - `renegotiate`: the stream is gone (a restart, an expired token, or a replaced or stopped
  *   stream); negotiate again.
  * - `renew-token`: the token expired; renew it, then negotiate again.

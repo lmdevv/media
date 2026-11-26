@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { countOf, formatBytes, formatCount, formatPercent, formatWhen } from "./owner-format";
+import {
+  capabilityDetail,
+  countOf,
+  formatBytes,
+  formatCount,
+  formatPercent,
+  formatWhen,
+} from "./owner-format";
 
 const at = (year: number, month: number, day: number, hours: number, minutes: number): number =>
   new Date(year, month - 1, day, hours, minutes).getTime();
@@ -12,6 +19,19 @@ describe("owner format", () => {
     expect(formatCount(1_234_567)).toBe("1,234,567");
     expect(countOf(1, "Title", "Titles")).toBe("1 Title");
     expect(countOf(1312, "Title", "Titles")).toBe("1,312 Titles");
+  });
+
+  it("sums up transcoding capabilities, naming quarantines only when there are some", () => {
+    expect(capabilityDetail({ verified: 31, unsupported: 4, quarantined: [] })).toBe(
+      "31 Verified · 4 Unsupported",
+    );
+    expect(
+      capabilityDetail({
+        verified: 1204,
+        unsupported: 0,
+        quarantined: [{ key: "tonemap.qsv:pq" }],
+      }),
+    ).toBe("1,204 Verified · 0 Unsupported · 1 Quarantined");
   });
 
   it("names moments today, yesterday, this year, and before", () => {

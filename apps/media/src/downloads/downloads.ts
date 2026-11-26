@@ -250,25 +250,20 @@ const make = Effect.gen(function* () {
 
         if (Cause.hasInterrupts(exit.cause)) return;
         const failure = Cause.squash(exit.cause);
+        const error = new TranscodeFailed({ streamId: job.name, mode: plan.mode, reason: "other" });
 
+        // The code and how ffmpeg ended, never its text: retained logs reach admin clients.
         yield* Effect.logWarning("Downloads.mp4_failed").pipe(
-          Effect.annotateLogs({ fileId: job.fileId, mode: plan.mode }),
-        );
-
-        yield* Ref.set(
-          job.state,
-          JobState.Failed({
-            error: new TranscodeFailed({
-              streamId: job.name,
-              mode: plan.mode,
-              detail:
-                failure instanceof MediaToolFailed
-                  ? failure.stderr.trim().slice(-400)
-                  : "The download could not be written",
-            }),
-            at: yield* Clock.currentTimeMillis,
+          Effect.annotateLogs({
+            fileId: job.fileId,
+            mode: plan.mode,
+            reason: error.reason,
+            exitCode: failure instanceof MediaToolFailed ? failure.exitCode : null,
+            signal: failure instanceof MediaToolFailed ? failure.signal : null,
           }),
         );
+
+        yield* Ref.set(job.state, JobState.Failed({ error, at: yield* Clock.currentTimeMillis }));
         yield* touch(job);
       });
 

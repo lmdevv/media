@@ -1,5 +1,6 @@
 import { PlaybackSessionId } from "@media/contracts/ids";
 import {
+  PlaybackApiError,
   PlaybackSessionEnded,
   PlaybackTokenInvalid,
   TranscodeCapacityReached,
@@ -7,6 +8,7 @@ import {
 } from "@media/contracts/media-playback";
 import { Forbidden, NotFound } from "@media/contracts/errors";
 import { TransportError } from "@media/sdk/effect";
+import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { DownloadStep, SERVER_UNAVAILABLE, afterDownloadFailure, failureLine } from "./failures";
@@ -33,7 +35,19 @@ describe("afterDownloadFailure", () => {
       ),
     ).toStrictEqual(DownloadStep.Interrupt({ message: SERVER_UNAVAILABLE }));
     expect(
-      afterDownloadFailure(new TranscodeFailed({ streamId: "k", mode: "remux", detail: "x" })),
+      afterDownloadFailure(new TranscodeFailed({ streamId: "k", mode: "remux", reason: "other" })),
+    ).toStrictEqual(
+      DownloadStep.Interrupt({ message: "Your server couldn't prepare this download." }),
+    );
+    expect(
+      afterDownloadFailure(
+        Schema.decodeSync(PlaybackApiError)({
+          _tag: "TranscodeFailed",
+          streamId: "k",
+          mode: "remux",
+          reason: "driver-reset",
+        }),
+      ),
     ).toStrictEqual(
       DownloadStep.Interrupt({ message: "Your server couldn't prepare this download." }),
     );

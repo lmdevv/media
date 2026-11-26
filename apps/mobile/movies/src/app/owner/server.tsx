@@ -2,16 +2,18 @@ import type { HealthResponse } from "@media/contracts/media-playback";
 import type { Release } from "@media/contracts/release";
 import { describeUnreadable } from "@media/mobile-core/failure";
 import { readHealth } from "@media/mobile-core/server";
+import { TranscodeLabels } from "@media/sdk/effect";
+import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { Option } from "effect";
 import { router } from "expo-router";
-import { History, Play, Server, Settings2 } from "lucide-react-native";
+import { Cpu, History, ListChecks, Play, Server } from "lucide-react-native";
 import { useEffect, useState } from "react";
 
-import { Loading, OwnerScreen } from "@/components/owner/parts";
+import { Loading, OwnerScreen, useNow } from "@/components/owner/parts";
 import { ListRow } from "@/components/ui/list-row";
 import { Text } from "@/components/ui/text";
 import { displayHost } from "@/lib/local-network";
-import { formatCount } from "@/lib/owner-format";
+import { capabilityDetail, formatCount } from "@/lib/owner-format";
 import { useServer } from "@/session/connection";
 
 const POLL_MS = 10_000;
@@ -25,12 +27,6 @@ type Health =
       readonly report: Option.Option<HealthResponse>;
     }
   | { readonly status: "down" };
-
-const ACCELERATION = {
-  qsv: "Intel QSV",
-  vaapi: "VA-API",
-  none: "Software",
-} as const satisfies Record<HealthResponse["hardwareAcceleration"], string>;
 
 const useHealth = (mediaUrl: string): Health => {
   const [health, setHealth] = useState<Health>({ status: "loading" });
@@ -90,16 +86,39 @@ function Report({
   }
 
   return (
+    <ListRow icon={Play} title="Active Streams" detail={formatCount(report.value.activeStreams)} />
+  );
+}
+
+/**
+ * The media server's GPUs, one row per render node with the APIs ffmpeg opened it through, and
+ * how many transcoding capabilities it verified, found unsupported, and quarantined now, from its
+ * last report. The full list is the CLI's.
+ */
+function Transcoding() {
+  const platform = usePlatform();
+  const status = usePlatformQuery(platform.core.server.status);
+  const now = useNow(60_000);
+
+  if (status.status !== "success" || status.data === null) return null;
+  const { transcoding } = status.data;
+  const devices = TranscodeLabels.devicesOf(transcoding.devices);
+
+  return (
     <>
+      {devices.length === 0 ? <ListRow icon={Cpu} title="CPU Only" /> : null}
+      {devices.map((device) => (
+        <ListRow
+          key={device.node}
+          icon={Cpu}
+          title={device.label}
+          detail={device.apis.length === 0 ? "Not Opened" : device.apis.join(" · ")}
+        />
+      ))}
       <ListRow
-        icon={Play}
-        title="Active Streams"
-        detail={formatCount(report.value.activeStreams)}
-      />
-      <ListRow
-        icon={Settings2}
-        title="Hardware Acceleration"
-        detail={ACCELERATION[report.value.hardwareAcceleration]}
+        icon={ListChecks}
+        title="Capabilities"
+        detail={capabilityDetail(TranscodeLabels.capabilityCounts(transcoding.capabilities, now))}
       />
     </>
   );
@@ -114,6 +133,7 @@ export default function ServerScreen() {
       <ListRow icon={Server} title={displayHost(mediaUrl)} detail={stateOf(health)} />
       {health.status === "loading" ? <Loading /> : null}
       {health.status === "up" ? <Report release={health.release} report={health.report} /> : null}
+      <Transcoding />
       <ListRow
         icon={History}
         title="Backups"

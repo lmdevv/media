@@ -13,7 +13,10 @@
  * after a load, not within the call. Its mirror names the media on the receiver (`mediaInfo`),
  * and a test can play another sender's part: another tab of the origin casting before this page
  * opens (`otherTabCasting`), which a page joins on its own only under `ORIGIN_SCOPED`, or loading
- * its media over this page's (`otherSenderLoads`).
+ * its media over this page's (`otherSenderLoads`). A test can also hold the receiver's answer to
+ * the next load (`holdLoad`) and then have it take the load (`releaseLoad`) or refuse it
+ * (`refuseLoad`); a receiver acts on a held load only once it takes it, and not at all when the
+ * session that sent it ended meanwhile, though that session still hears it was taken.
  */
 import type { Page } from "@playwright/test";
 
@@ -89,6 +92,11 @@ const SDK = String.raw`
     // Set by \`holdConnection\`: the next connection waits for \`completeConnection\`.
     holdConnection: false,
     completeConnection: null,
+    // Counts connections, so a held load knows whether the session that sent it still runs.
+    connection: 0,
+    // Set by \`holdLoad\`: the next load waits for \`answerLoad\`, which takes or refuses it.
+    holdLoad: false,
+    answerLoad: null,
     ended: [],
     player: {
       isConnected: false,
@@ -160,6 +168,7 @@ const SDK = String.raw`
     }),
     loadMedia: (request) => {
       const info = request.media;
+      const connection = fake.connection;
       fake.loads.push({
         contentId: info.contentId,
         contentType: info.contentType,
@@ -180,33 +189,54 @@ const SDK = String.raw`
         currentTime: request.currentTime,
         autoplay: request.autoplay,
       });
-      fake.idleReason = null;
-      const current = {
-        url: info.contentId,
-        hls: info.contentType === "application/x-mpegurl",
-        at: request.currentTime,
-      };
-      fake.current = current;
-      fake.playingAt = null;
-      // The receiver reports its new state a moment later, as the SDK relays it.
-      const reported = new Promise((resolve) => setTimeout(resolve, 50)).then(() => {
-        change("mediaInfo", { contentId: info.contentId });
-        change("isMediaLoaded", true);
-        change("duration", info.duration);
-        change("currentTime", request.currentTime);
-        change("playerState", "PLAYING");
-        change("isPaused", !request.autoplay);
-      });
-      const fetched = fetchMedia(current.url, current.hls, current.at);
-      // It plays once it has its media and said so; a newer load replaces this one's moment.
-      void Promise.all([reported, fetched]).then(() => {
-        if (fake.current === current) fake.playingAt = Date.now();
-      });
-      return fetched.then(() => undefined);
+
+      if (fake.holdLoad) {
+        fake.holdLoad = false;
+        return new Promise((resolve, reject) => {
+          fake.answerLoad = (takes) => {
+            fake.answerLoad = null;
+            if (!takes) reject("LOAD_FAILED");
+            // A session that ended meanwhile no longer reaches the receiver.
+            else if (fake.session === null || fake.connection !== connection) resolve(undefined);
+            else resolve(play(request));
+          };
+        });
+      }
+
+      return play(request);
     },
   };
 
+  // The receiver takes a load: it plays the media, reports it, and fetches it.
+  const play = (request) => {
+    const info = request.media;
+    fake.idleReason = null;
+    const current = {
+      url: info.contentId,
+      hls: info.contentType === "application/x-mpegurl",
+      at: request.currentTime,
+    };
+    fake.current = current;
+    fake.playingAt = null;
+    // The receiver reports its new state a moment later, as the SDK relays it.
+    const reported = new Promise((resolve) => setTimeout(resolve, 50)).then(() => {
+      change("mediaInfo", { contentId: info.contentId });
+      change("isMediaLoaded", true);
+      change("duration", info.duration);
+      change("currentTime", request.currentTime);
+      change("playerState", "PLAYING");
+      change("isPaused", !request.autoplay);
+    });
+    const fetched = fetchMedia(current.url, current.hls, current.at);
+    // It plays once it has its media and said so; a newer load replaces this one's moment.
+    void Promise.all([reported, fetched]).then(() => {
+      if (fake.current === current) fake.playingAt = Date.now();
+    });
+    return fetched.then(() => undefined);
+  };
+
   const connect = () => {
+    fake.connection += 1;
     fake.session = session;
     change("isConnected", true);
     emitContext("sessionstatechanged", { sessionState: "SESSION_STARTED" });
@@ -396,6 +426,11 @@ const SDK = String.raw`
       fake.holdConnection = true;
     },
     completeConnection: () => fake.completeConnection?.(),
+    holdLoad: () => {
+      fake.holdLoad = true;
+    },
+    releaseLoad: () => fake.answerLoad?.(true),
+    refuseLoad: () => fake.answerLoad?.(false),
     advanceTo: (seconds) => change("currentTime", seconds),
     finish: () => {
       fake.idleReason = "FINISHED";
@@ -443,6 +478,9 @@ export const castFake = (
     | "devicesAppear"
     | "holdConnection"
     | "completeConnection"
+    | "holdLoad"
+    | "releaseLoad"
+    | "refuseLoad"
     | "finish"
     | "fail"
     | "disconnect"

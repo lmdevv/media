@@ -422,9 +422,14 @@ export class CastPlayer implements PlayerPort {
     this.#toggling = null;
   }
 
-  /** Stops the receiver's media, unless another sender's took it; the device stays connected. */
+  /**
+   * Stops the receiver's media while it is media this cast loaded, or none shows; never another
+   * sender's, or that of a newer cast that took the receiver first. The device stays connected.
+   */
   stopReceiver(): void {
-    if (!this.#lost) this.#controller.stop();
+    const media = this.#remote.mediaInfo?.contentId ?? null;
+
+    if (!this.#lost && (media === null || this.#loaded.includes(media))) this.#controller.stop();
   }
 
   /** Sets the receiver's volume, from 0 to 1: silence mutes it, and any other level unmutes it. */

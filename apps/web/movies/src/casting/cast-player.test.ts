@@ -13,6 +13,9 @@ const ANY_CHANGE = "anyChanged";
 /** The stream this cast loaded on the receiver. */
 const OWN = "http://nas.lan:8080/media/hls/own/1/index.m3u8";
 
+/** The stream a newer cast of this page loaded on the receiver. */
+const NEWER = "http://nas.lan:8080/media/hls/newer/1/index.m3u8";
+
 /** A movie a second tab cast to the same receiver. */
 const OTHER = "http://nas.lan:8080/media/hls/other/1/index.m3u8";
 
@@ -221,6 +224,25 @@ describe("CastPlayer", () => {
     player.stopReceiver();
 
     expect(receiver.stops()).toBe(0);
+  });
+
+  it("stops the receiver only while it plays media this cast loaded", () => {
+    const receiver = laggingReceiver();
+
+    // A newer cast's media took the receiver before this cast's late first load was answered.
+    receiver.mediaArrives(NEWER);
+
+    const late = castPlayer(receiver.framework);
+
+    late.dispose();
+    late.stopReceiver();
+
+    expect(receiver.stops()).toBe(0);
+
+    receiver.mediaArrives(OWN);
+    castPlayer(receiver.framework).stopReceiver();
+
+    expect(receiver.stops()).toBe(1);
   });
 
   it("says nothing of the media before its newest load until that load shows", () => {

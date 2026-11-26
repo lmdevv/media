@@ -111,8 +111,9 @@ const folders = await media.run("libraries.folders", {});
   (`reportClientEvents`). With `session`, a refused call refreshes once while the session is still
   the one it went out with. In Effect, `MediaRoutes.run` does the same, and `MediaRoutes.logs`
   reads the retained log.
-- `Playback`: `negotiate` (a stream of a started playback's file), `seekStream`, `stop` and
-  `stopNow`, `autoplayCountdown`, `PROGRESS_INTERVAL_MS`, and `recoveryFor`, which maps each
+- `Playback`: `negotiate` (a stream of a started playback's file), `seekStream` and
+  `inGeneration` (the generation a seek or a reload names, with its mode, picture, and stages),
+  `stop` and `stopNow`, `autoplayCountdown`, `PROGRESS_INTERVAL_MS`, and `recoveryFor`, which maps each
   playback API failure (`@media/contracts/media-playback`) to what the player does next:
   `reload-playlist`, `renegotiate`, `renew-token`, `new-session`, `retry-later`, `unsupported`,
   or `fail`. On the core, `renew-token` and `new-session` both mean a new `movies.play.start`,
@@ -120,6 +121,11 @@ const folders = await media.run("libraries.folders", {});
 - `Downloads.prepare` asks the media service where a download stands.
 - `PlayerDiagnostics` records a player's startup, stalls, and recoveries and reports them.
 - `Versions` orders a title's files (`preferredVersion`) and `MediaLabels` names their facts.
+- `TranscodeLabels` names a stream's stages (`stageLabel`), its changes' causes (`causeLabel`),
+  and why a chain changed or a stream ended (`reasonLabel`; a code a newer server added reads as
+  `other` does, and the answer keeps the code), and sums up `core.server.status`'s
+  transcoding report: its GPUs (`devicesOf`) and how many capabilities are verified, unsupported,
+  and quarantined (`capabilityCounts`).
 - `MediaOrigin`: playback and download requests go to the public URL the playback names unless
   this reference is provided, as the CLI does with its configured media URL. The URLs the service
   answers with, such as `stream.url`, stay public either way.

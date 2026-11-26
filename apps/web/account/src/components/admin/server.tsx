@@ -1,8 +1,11 @@
+import { TranscodeLabels } from "@media/sdk/effect";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { Skeleton } from "@media/ui/components/skeleton";
 import { describeFailure } from "@media/ui/lib/failure";
 import { cn } from "@media/ui/lib/utils";
 import { Match } from "effect";
+import { CircleCheck, CirclePause, CircleX } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { PageHeader } from "@/components/page-header";
@@ -21,7 +24,7 @@ const NOW_EVERY_MS = 30_000;
 
 type Reported = NonNullable<ServerStatus>;
 
-type Acceleration = Reported["hardwareAcceleration"];
+type Transcoding = Reported["transcoding"];
 
 /** What the server page shows. */
 export type ServerState =
@@ -47,12 +50,6 @@ const HEALTH_LABELS: Readonly<Record<Health, string>> = {
   up: "media service running",
 };
 
-const ENCODER_LABELS: Readonly<Record<Acceleration, string>> = {
-  qsv: "Intel Quick Sync",
-  vaapi: "VA-API",
-  none: "Software encoding with ffmpeg",
-};
-
 const hostOf = (url: string): string => {
   try {
     return new URL(url).host;
@@ -61,7 +58,7 @@ const hostOf = (url: string): string => {
   }
 };
 
-/** Server: whether the media service runs, its hardware transcoding, its streams, and where. */
+/** Server: whether the media service runs, its GPU and what it was shown to do, its streams, and where. */
 export function ServerScreen({
   mediaUrl,
   databaseUrl,
@@ -163,6 +160,7 @@ export function ServerView({
         databaseVersion={databaseVersion}
         mediaUrl={mediaUrl}
         databaseUrl={databaseUrl}
+        now={now}
       />
     </>
   );
@@ -175,12 +173,14 @@ function ServerBody({
   databaseVersion,
   mediaUrl,
   databaseUrl,
+  now,
 }: {
   readonly state: ServerState;
   readonly health: Health;
   readonly databaseVersion: string | null;
   readonly mediaUrl: string;
   readonly databaseUrl: string;
+  readonly now: number;
 }) {
   return Match.value(state).pipe(
     Match.discriminatorsExhaustive("kind")({
@@ -193,6 +193,7 @@ function ServerBody({
           databaseVersion={databaseVersion}
           mediaUrl={mediaUrl}
           databaseUrl={databaseUrl}
+          now={now}
         />
       ),
     }),
@@ -205,25 +206,25 @@ function Reports({
   databaseVersion,
   mediaUrl,
   databaseUrl,
+  now,
 }: {
   readonly status: ServerStatus;
   readonly health: Health;
   readonly databaseVersion: string | null;
   readonly mediaUrl: string;
   readonly databaseUrl: string;
+  readonly now: number;
 }) {
   const live = health === "up" ? status : null;
 
   return (
     <>
-      <div className="flex flex-col gap-0.5">
+      <div className="flex min-w-0 flex-col gap-0.5">
         <div className="flex items-center gap-2">
           <h2 className="font-sans text-body/body font-semibold text-text">Hardware transcoding</h2>
-          <HardwareBadge acceleration={live?.hardwareAcceleration ?? null} />
+          <HardwareBadge transcoding={live?.transcoding ?? null} />
         </div>
-        <p className="font-mono text-caption/caption text-text-muted">
-          {ENCODER_LABELS[status?.hardwareAcceleration ?? "none"]}
-        </p>
+        {status === null ? null : <Transcoder transcoding={status.transcoding} now={now} />}
       </div>
       <dl className="flex flex-col">
         <Setting label="Playing now">{live === null ? "—" : String(live.activeStreams)}</Setting>
@@ -247,10 +248,74 @@ function Reports({
   );
 }
 
-/** Detected, not detected, or unknown while the media service does not report. */
-function HardwareBadge({ acceleration }: { readonly acceleration: Acceleration | null }) {
-  const detected = acceleration !== null && acceleration !== "none";
-  const unknown = acceleration === null;
+/**
+ * Each GPU, one line per render node, with the APIs ffmpeg opened it through and its userspace
+ * driver, then how many capabilities are verified and unsupported and which are quarantined now.
+ * The full list is the CLI's (`media admin server status`).
+ */
+function Transcoder({
+  transcoding,
+  now,
+}: {
+  readonly transcoding: Transcoding;
+  readonly now: number;
+}) {
+  const devices = TranscodeLabels.devicesOf(transcoding.devices);
+  const counts = TranscodeLabels.capabilityCounts(transcoding.capabilities, now);
+
+  return (
+    <div className="flex min-w-0 flex-col gap-0.5 font-mono text-caption/caption text-text-muted">
+      {devices.length === 0 ? <p>CPU only</p> : null}
+      {devices.map((device) => (
+        <p key={device.node} className="truncate">
+          {[
+            device.label,
+            device.apis.length === 0 ? "not opened" : device.apis.join(", "),
+            device.driver,
+          ]
+            .filter((part) => part !== null)
+            .join(" · ")}
+        </p>
+      ))}
+      <p className="flex items-center gap-3">
+        <Count icon={CircleCheck} count={counts.verified} label="verified" />
+        <Count icon={CircleX} count={counts.unsupported} label="unsupported" />
+        {counts.quarantined.length === 0 ? null : (
+          <Count icon={CirclePause} count={counts.quarantined.length} label="quarantined" />
+        )}
+      </p>
+      {counts.quarantined.map(({ key, endsAt }) => (
+        <p key={key} className="flex items-center gap-1 truncate">
+          <CirclePause aria-hidden className="size-3.5 shrink-0" strokeWidth={1.75} />
+          {`${key} · until ${endsAt === "restart" ? "restart" : formatTime(endsAt)}`}
+        </p>
+      ))}
+    </div>
+  );
+}
+
+function Count({
+  icon: Icon,
+  count,
+  label,
+}: {
+  readonly icon: LucideIcon;
+  readonly count: number;
+  readonly label: string;
+}) {
+  return (
+    <span className="flex items-center gap-1" title={label}>
+      <Icon aria-hidden className="size-3.5" strokeWidth={1.75} />
+      {count}
+      <span className="sr-only">{label}</span>
+    </span>
+  );
+}
+
+/** Detected when ffmpeg opened a GPU, not detected when none, unknown while nothing reports. */
+function HardwareBadge({ transcoding }: { readonly transcoding: Transcoding | null }) {
+  const detected = transcoding?.devices.some((device) => device.opened) === true;
+  const unknown = transcoding === null;
 
   return (
     <span
