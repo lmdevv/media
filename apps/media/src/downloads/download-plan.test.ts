@@ -165,7 +165,7 @@ describe("decideDownload", () => {
       expect(stagesOf(standard)).toStrictEqual([
         "decode.cpu:h264/yuv420p",
         "scale.cpu:8>8",
-        "encode.cpu:h264/8/crf",
+        "encode.cpu.h264:8/crf",
       ]);
       expect(decideDownload(film, client, "high", optionsFor(film))).toMatchObject({
         _tag: "Mp4",
@@ -191,7 +191,7 @@ describe("decideDownload", () => {
       mode: "transcode-software",
       video: { _tag: "Encode", output: { codec: "hevc", height: 720, bitrate: 3_000_000 } },
     });
-    expect(stagesOf(hevc).at(-1)).toBe("encode.cpu:hevc/8/crf");
+    expect(stagesOf(hevc).at(-1)).toBe("encode.cpu.hevc:8/crf");
     expect(decideDownload(film, av1Only, "standard", optionsFor(film))).toMatchObject({
       mode: "transcode-software",
       video: { _tag: "Encode", output: { codec: "av1", height: 720, bitrate: 2_600_000 } },

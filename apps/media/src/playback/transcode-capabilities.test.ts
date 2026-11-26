@@ -416,7 +416,7 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
 
           assert.strictEqual(yield* statusOf(TONE_MAP_QSV), "unsupported");
           assert.strictEqual(
-            yield* statusOf(capabilityKey(ImplId("encode.qsv"), "h264/8/cbr")),
+            yield* statusOf(capabilityKey(ImplId("encode.qsv.h264"), "8/cbr")),
             "verified",
           );
           assert.strictEqual(yield* capabilities.hardwareEncoder, "qsv");
@@ -428,7 +428,7 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
               "move.qsv>cpu",
               "tonemap.cpu",
               "move.cpu>qsv",
-              "encode.qsv",
+              "encode.qsv.h264",
             ]),
           );
         }),
@@ -619,7 +619,7 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
 
           assert.strictEqual(reopened?.opened, false);
           assert.strictEqual(
-            yield* statusOf(capabilityKey(ImplId("encode.qsv"), "h264/8/cbr")),
+            yield* statusOf(capabilityKey(ImplId("encode.qsv.h264"), "8/cbr")),
             "unknown",
           );
 
@@ -628,7 +628,7 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
           assert.deepStrictEqual(after.domains, []);
           assert.deepStrictEqual(
             plannedImpls(HDR, after),
-            Result.succeed(["decode.cpu", "scale.cpu", "tonemap.cpu", "encode.cpu"]),
+            Result.succeed(["decode.cpu", "scale.cpu", "tonemap.cpu", "encode.cpu.h264"]),
           );
         }),
       60_000,
@@ -743,7 +743,7 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
           assert.isTrue(later.verified.has(TONE_MAP_QSV));
           assert.deepStrictEqual(
             plannedImpls(HDR, later),
-            Result.succeed(["decode.qsv", "scale.qsv", "tonemap.qsv", "encode.qsv"]),
+            Result.succeed(["decode.qsv", "scale.qsv", "tonemap.qsv", "encode.qsv.h264"]),
           );
         }),
       60_000,
@@ -861,7 +861,7 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
         Effect.gen(function* () {
           const capabilities = yield* TranscodeCapabilities.Service;
           const sdr: SourceVideo = { ...JPEG_RANGE, pixelFormat: "yuv420p" };
-          const encodeCpu = capabilityKey(ImplId("encode.cpu"), "h264/8/crf");
+          const encodeCpu = capabilityKey(ImplId("encode.cpu.h264"), "8/crf");
 
           // The first need may meet the failed listing; the next reads it again.
           yield* capabilities.current(request(sdr));
@@ -871,7 +871,7 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
           assert.isTrue(Option.isSome((yield* capabilities.inventory).build));
           assert.deepStrictEqual(
             plannedImpls(sdr, snapshot),
-            Result.succeed(["decode.cpu", "scale.cpu", "encode.cpu"]),
+            Result.succeed(["decode.cpu", "scale.cpu", "encode.cpu.h264"]),
           );
           assert.strictEqual(yield* runsWith(listingOnceFailed, "-version"), 2);
         }),
@@ -984,7 +984,7 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
             ImplId("decode.qsv"),
             ImplId("scale.qsv"),
             ImplId("tonemap.qsv"),
-            ImplId("encode.qsv"),
+            ImplId("encode.qsv.h264"),
           ]);
 
           // A SIGBUS no probe reproduces: no verdict, and nothing kept from the file.
@@ -1054,7 +1054,7 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
           );
           assert.deepStrictEqual(
             plannedImpls(HDR, next),
-            Result.succeed(["decode.cpu", "scale.cpu", "tonemap.cpu", "encode.cpu"]),
+            Result.succeed(["decode.cpu", "scale.cpu", "tonemap.cpu", "encode.cpu.h264"]),
           );
           assert.isFalse(
             (yield* capabilities.resolve(request(HDR, "other"))).excluded.has(ImplId("decode.qsv")),
@@ -1080,7 +1080,7 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
 
           assert.deepStrictEqual(
             pipeline.steps.map((step) => step.impl),
-            [ImplId("decode.cpu"), ImplId("scale.cpu"), ImplId("encode.cpu")],
+            [ImplId("decode.cpu"), ImplId("scale.cpu"), ImplId("encode.cpu.h264")],
           );
 
           const diagnosis = yield* capabilities.diagnose({
@@ -1097,13 +1097,16 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
             },
           });
 
-          assert.deepStrictEqual(diagnosis, Diagnosis.Source({ impls: [ImplId("encode.cpu")] }));
+          assert.deepStrictEqual(
+            diagnosis,
+            Diagnosis.Source({ impls: [ImplId("encode.cpu.h264")] }),
+          );
           const next = yield* capabilities.resolve(asked);
 
-          assert.isFalse(next.excluded.has(ImplId("encode.cpu")));
+          assert.isFalse(next.excluded.has(ImplId("encode.cpu.h264")));
           assert.deepStrictEqual(
             plannedImpls(sdr, next),
-            Result.succeed(["decode.cpu", "scale.cpu", "encode.cpu"]),
+            Result.succeed(["decode.cpu", "scale.cpu", "encode.cpu.h264"]),
             "the file's next stream still has a chain",
           );
         }),
@@ -1170,7 +1173,7 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
           assert.isUndefined(yield* capabilities.hardwareEncoder);
           assert.deepStrictEqual(
             plannedImpls(HDR, snapshot),
-            Result.succeed(["decode.cpu", "scale.cpu", "tonemap.cpu", "encode.cpu"]),
+            Result.succeed(["decode.cpu", "scale.cpu", "tonemap.cpu", "encode.cpu.h264"]),
           );
         }),
       60_000,

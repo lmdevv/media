@@ -162,6 +162,12 @@ const hevcEncoderFails = await writeFakeFfmpeg({
   logInvocations: true,
 });
 
+/** The first stream run that encodes HEVC on Quick Sync fails, naming the encoder; probes pass. */
+const hevcEncoderFailsOnce = await writeFakeFfmpeg({
+  rules: [{ token: "hevc_qsv", runs: "hls", stderr: HEVC_QSV_FAILED, limit: 1 }],
+  logInvocations: true,
+});
+
 /** Runs stall after their first fragment until killed, so a seek replaces a live run. */
 const stalling = await writeFakeFfmpeg({ hlsStallsAfterFragments: 1, logInvocations: true });
 
@@ -1010,7 +1016,7 @@ describe.skipIf(!hasFfmpeg)("stream recovery", () => {
     options,
   )((it) => {
     it.effect(
-      "falls from HEVC to H.264 when the HEVC encoder fails, and says why",
+      "falls from HEVC to H.264 on Quick Sync when the HEVC encoder fails, and says why",
       () =>
         Effect.gen(function* () {
           const fileId = yield* addFilm("hevc-lost");
@@ -1022,12 +1028,13 @@ describe.skipIf(!hasFfmpeg)("stream recovery", () => {
           });
 
           assert.strictEqual(film.generation, 2);
+          assert.strictEqual(film.mode, "transcode-qsv", "still on Quick Sync");
           assert.strictEqual(film.video.codec, "h264", "the next target");
           assert.strictEqual(yield* fetchStatus(segmentOf(film.url, 3)), 200);
           assert.deepInclude(film.transcode?.changes[0], {
             generation: 2,
             reason: "reproduced",
-            excluded: ["encode.qsv"],
+            excluded: ["encode.qsv.hevc"],
           });
 
           const runs = yield* runsOf(hevcEncoderFails, film.streamId ?? "");
@@ -1035,9 +1042,59 @@ describe.skipIf(!hasFfmpeg)("stream recovery", () => {
 
           assert.lengthOf(runs, 2);
           assert.include(first, "hevc_qsv");
-          assert.notInclude(replacement, "hevc_qsv");
+          assert.include(replacement, "h264_qsv");
           assert.deepStrictEqual(valuesAfter(replacement, "-tag:v"), []);
           assert.deepStrictEqual(kept(replacement), kept(first));
+        }),
+      120_000,
+    );
+  });
+
+  layer(
+    recovering(hevcEncoderFailsOnce),
+    options,
+  )((it) => {
+    it.effect(
+      "continues as H.264 on Quick Sync when only this file fails in the HEVC encoder, and plays the file there again",
+      () =>
+        Effect.gen(function* () {
+          const fileId = yield* addFilm("hevc-file-only");
+
+          const film = yield* negotiated({
+            token: signTestToken({ fid: fileId, sid: "film" }),
+            capabilities: hevcDevice,
+            ...CHOICES,
+          });
+
+          assert.strictEqual(film.generation, 2);
+          assert.strictEqual(film.mode, "transcode-qsv", "still on Quick Sync");
+          assert.strictEqual(film.video.codec, "h264");
+          assert.strictEqual(yield* fetchStatus(segmentOf(film.url, 3)), 200);
+          assert.deepInclude(film.transcode?.changes[0], {
+            generation: 2,
+            reason: "file-only",
+            excluded: ["encode.qsv.hevc"],
+          });
+
+          const runs = yield* runsOf(hevcEncoderFailsOnce, film.streamId ?? "");
+          const [first = [], replacement = []] = runs;
+
+          assert.lengthOf(runs, 2);
+          assert.include(first, "hevc_qsv");
+          assert.include(replacement, "h264_qsv");
+          assert.notInclude(replacement, "libx264");
+          assert.deepStrictEqual(kept(replacement), kept(first));
+          assert.isTrue(kept(first).subtitle);
+          assert.deepStrictEqual(kept(first).maxrate, ["1500000"]);
+
+          const later = yield* negotiated({
+            token: signTestToken({ fid: fileId, sid: "later" }),
+            capabilities: hevcDevice,
+          });
+
+          assert.strictEqual(later.mode, "transcode-qsv", "the file keeps Quick Sync's H.264");
+          assert.strictEqual(later.video.codec, "h264");
+          assert.deepInclude(later.transcode?.stages.at(-1), { op: "encode", domain: "qsv" });
         }),
       120_000,
     );

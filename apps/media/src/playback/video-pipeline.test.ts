@@ -23,6 +23,7 @@ import {
   type CapabilityKey,
   capabilityKey,
   ImplId,
+  implOf,
   Op,
   type Row,
   sdrTarget,
@@ -228,7 +229,7 @@ describe("planVideo", () => {
       const video = { ...sourceFrom({ ...generated, colour: "sdr" }), pixelFormat: layout, depth };
       const intent = intentFor(video, { burnImage: burn ? subtitle : undefined });
       const bindings = DOMAIN_CHOICES[domains];
-      const cpu = everyKey(video, intent, bindings).filter((key) => key.includes(".cpu:"));
+      const cpu = everyKey(video, intent, bindings).filter((key) => row(implOf(key)).on === "cpu");
       const result = planVideo(video, intent, snapshot(bindings, cpu));
 
       assert.isTrue(Result.isSuccess(result));
@@ -246,7 +247,7 @@ describe("planVideo", () => {
 
     assert.deepStrictEqual(
       impls(planned(video, intent, snapshot([QSV, VAAPI], everyKey(video, intent, [QSV, VAAPI])))),
-      ["decode.qsv", "scale.qsv", "encode.qsv"],
+      ["decode.qsv", "scale.qsv", "encode.qsv.h264"],
     );
   });
 
@@ -269,7 +270,7 @@ describe("planVideo", () => {
       "decode.cpu",
       "move.cpu>qsv",
       "scale.qsv",
-      "encode.qsv",
+      "encode.qsv.h264",
     ]);
     assert.deepStrictEqual(
       pipeline.steps.map((step) => step.capability),
@@ -277,7 +278,7 @@ describe("planVideo", () => {
         "decode.cpu:h264/yuv420p10le",
         "move.cpu>qsv:p010le",
         "scale.qsv:10>8",
-        "encode.qsv:h264/8/cbr",
+        "encode.qsv.h264:8/cbr",
       ],
     );
   });
@@ -295,7 +296,7 @@ describe("planVideo", () => {
         "move.qsv>cpu",
         "burn-image.cpu",
         "move.cpu>qsv",
-        "encode.qsv",
+        "encode.qsv.h264",
       ],
     );
   });
@@ -307,7 +308,7 @@ describe("planVideo", () => {
 
     assert.deepStrictEqual(
       impls(planned(video, intent, snapshot([QSV], keys, [ImplId("tonemap.qsv")]))),
-      ["decode.qsv", "scale.qsv", "move.qsv>cpu", "tonemap.cpu", "move.cpu>qsv", "encode.qsv"],
+      ["decode.qsv", "scale.qsv", "move.qsv>cpu", "tonemap.cpu", "move.cpu>qsv", "encode.qsv.h264"],
     );
   });
 
@@ -316,7 +317,8 @@ describe("planVideo", () => {
     const intent = intentFor(video);
     const keys = everyKey(video, intent, [QSV, VAAPI]);
     const gpu = planVideo(video, intent, snapshot([QSV, VAAPI], keys));
-    const vaapi = planVideo(video, intent, snapshot([QSV, VAAPI], keys, [ImplId("encode.qsv")]));
+    const offQsv = snapshot([QSV, VAAPI], keys, [ImplId("encode.qsv.h264")]);
+    const vaapi = planVideo(video, intent, offQsv);
     const cpu = planVideo(video, intent, snapshot([], keys));
 
     assert.deepStrictEqual(
@@ -325,7 +327,7 @@ describe("planVideo", () => {
     );
     assert.deepStrictEqual(
       Result.map(vaapi, ({ pipeline }) => impls(pipeline)),
-      Result.succeed(["decode.vaapi", "scale.vaapi", "encode.vaapi"]),
+      Result.succeed(["decode.vaapi", "scale.vaapi", "encode.vaapi.h264"]),
     );
     assert.deepStrictEqual(
       Result.map(cpu, ({ output }) => [output.width, output.height]),
@@ -374,7 +376,7 @@ describe("assemble", () => {
       video,
       [
         [Op.Decode({ codec: "hevc" }), row("decode.qsv")],
-        [Op.Encode({ target: sdrTarget("h264"), bitrate: 8_000_000 }), row("encode.qsv")],
+        [Op.Encode({ target: sdrTarget("h264"), bitrate: 8_000_000 }), row("encode.qsv.h264")],
       ],
       everything(video, [QSV]),
       Purpose.Run(),
@@ -384,7 +386,7 @@ describe("assemble", () => {
       Result.isFailure(result) && Rejection.$is("Refused")(result.failure)
         ? result.failure.impl
         : undefined,
-      ImplId("encode.qsv"),
+      ImplId("encode.qsv.h264"),
     );
   });
 
@@ -395,7 +397,7 @@ describe("assemble", () => {
       video,
       [
         [Op.Decode({ codec: "h264" }), row("decode.qsv")],
-        [Op.Encode({ target: sdrTarget("h264"), bitrate: 8_000_000 }), row("encode.vaapi")],
+        [Op.Encode({ target: sdrTarget("h264"), bitrate: 8_000_000 }), row("encode.vaapi.h264")],
       ],
       everything(video, [QSV, VAAPI]),
       Purpose.Run(),
@@ -413,7 +415,7 @@ describe("assemble", () => {
       [
         [Op.Decode({ codec: "h264" }), row("decode.qsv")],
         [Op.Scale({ width: 1280, height: 720, depth: 8 }), row("scale.cpu")],
-        [Op.Encode({ target: sdrTarget("h264"), bitrate: 8_000_000 }), row("encode.vaapi")],
+        [Op.Encode({ target: sdrTarget("h264"), bitrate: 8_000_000 }), row("encode.vaapi.h264")],
       ],
       everything(video, [QSV, other]),
       Purpose.Run(),
@@ -427,12 +429,12 @@ describe("assemble", () => {
 
     const choices = [
       [Op.Decode({ codec: "h264" }), row("decode.cpu")],
-      [Op.Encode({ target: sdrTarget("h264"), bitrate: 1_000_000 }), row("encode.qsv")],
+      [Op.Encode({ target: sdrTarget("h264"), bitrate: 1_000_000 }), row("encode.qsv.h264")],
     ] as const;
 
     const keys = everyKey(video, intentFor(video), [QSV]);
     const upload = capabilityKey(ImplId("move.cpu>qsv"), "nv12");
-    const encode = capabilityKey(ImplId("encode.qsv"), "h264/8/cbr");
+    const encode = capabilityKey(ImplId("encode.qsv.h264"), "8/cbr");
 
     const without = snapshot(
       [QSV],
@@ -466,7 +468,7 @@ describe("the seal", () => {
 
     const encodeOnly = assemble(
       video,
-      [[Op.Encode({ target: sdrTarget("h264"), bitrate: 1_000_000 }), row("encode.cpu")]],
+      [[Op.Encode({ target: sdrTarget("h264"), bitrate: 1_000_000 }), row("encode.cpu.h264")]],
       known,
       Purpose.Run(),
     );
@@ -538,7 +540,7 @@ describe("warmup", () => {
       [
         capabilityKey(ImplId("move.cpu>qsv"), "nv12"),
         capabilityKey(ImplId("move.qsv>cpu"), "nv12"),
-        capabilityKey(ImplId("encode.qsv"), "h264/8/cbr"),
+        capabilityKey(ImplId("encode.qsv.h264"), "8/cbr"),
         capabilityKey(ImplId("scale.qsv"), "8>8"),
         capabilityKey(ImplId("decode.qsv"), "h264/yuv420p"),
         capabilityKey(ImplId("decode.qsv"), "hevc/yuv420p"),

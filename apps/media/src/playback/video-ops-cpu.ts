@@ -1,12 +1,15 @@
 /**
  * The CPU's rows: libavcodec's software decoders, `scale`, the `zscale` tone map, the image
- * subtitle overlay, and libx264, libx265, and libsvtav1. A build listing proves these present, as
- * they touch no device.
+ * subtitle overlay, and libx264, libx265, and libsvtav1, a row each. A build listing proves these
+ * present, as they touch no device.
  * They are the floor every source falls back to, so they take any layout and depth ffmpeg
  * decodes, as software transcoding always has; closed lists guard the GPU rows instead.
  */
 import { DECODE_CLIPS, PROBE_CLIPS } from "./probe-clips.ts";
 import {
+  encodeProbes,
+  encodeRowId,
+  encodesTarget,
   filter,
   HDR_COLOURS,
   ImplId,
@@ -15,10 +18,8 @@ import {
   type OpImpl,
   OUTPUT_CODECS,
   type OutputCodec,
-  type OutputTarget,
   row,
   type Row,
-  sdrTarget,
   transferOf,
 } from "./video-ops.ts";
 
@@ -167,29 +168,26 @@ const SOFTWARE_ENCODERS: Readonly<Record<OutputCodec, SoftwareEncoder>> = {
   av1: { name: "libsvtav1", quality: ["-preset", "9", "-crf", "30"], after: [] },
 };
 
-/** Whether the CPU's encoders take `target`: 8-bit SDR alone. */
-const softwareTakes = (target: OutputTarget): boolean =>
-  target.depth === 8 && target.colour === "sdr";
-
 /**
- * A software encode at a quality target under a VBV cap, from any SDR layout and depth, converted
- * to 8-bit 4:2:0. Every forced keyframe is an IDR frame (H.264, HEVC) or a key frame (AV1).
+ * The software encoder of `codec`, a row of its own: a quality target under a VBV cap, from any
+ * SDR layout and depth, converted to 8-bit 4:2:0. Every forced keyframe is an IDR frame (H.264,
+ * HEVC) or a key frame (AV1).
  */
-const encodeCpu: OpImpl<"Encode"> = {
-  id: ImplId("encode.cpu"),
-  op: "Encode",
-  on: "cpu",
-  takes: "cpu",
-  needs: (op) => [`encoder:${SOFTWARE_ENCODERS[op.target.codec].name}`],
-  variant: (op, input) =>
-    softwareTakes(op.target) && input.colour === "sdr" && input.scan === "progressive"
-      ? `${op.target.codec}/${String(op.target.depth)}/crf`
-      : undefined,
-  output: (_, input) => ({ ...input, depth: 8, pixelFormat: "yuv420p" }),
-  render: (op) => {
-    const encoder = SOFTWARE_ENCODERS[op.target.codec];
+const encodeCpu = (codec: OutputCodec): OpImpl<"Encode"> => {
+  const encoder = SOFTWARE_ENCODERS[codec];
 
-    return {
+  return {
+    id: encodeRowId("cpu", codec),
+    op: "Encode",
+    on: "cpu",
+    takes: "cpu",
+    needs: () => [`encoder:${encoder.name}`],
+    variant: (op, input) =>
+      encodesTarget(codec, op.target) && input.colour === "sdr" && input.scan === "progressive"
+        ? `${String(op.target.depth)}/crf`
+        : undefined,
+    output: (_, input) => ({ ...input, depth: 8, pixelFormat: "yuv420p" }),
+    render: (op) => ({
       input: [],
       filters: [filter("format", "yuv420p")],
       output: [
@@ -202,13 +200,9 @@ const encodeCpu: OpImpl<"Encode"> = {
         String(op.bitrate * 2),
         ...encoder.after,
       ],
-    };
-  },
-  probes: OUTPUT_CODECS.map((codec) => ({
-    op: Op.Encode({ target: sdrTarget(codec), bitrate: 1_000_000 }),
-    clip: "h264-8",
-    runs: 1,
-  })),
+    }),
+    probes: encodeProbes(codec),
+  };
 };
 
 /** Every CPU row. */
@@ -217,5 +211,5 @@ export const CPU_ROWS: ReadonlyArray<Row> = [
   row(scaleCpu),
   row(toneMapCpu),
   row(burnImageCpu),
-  row(encodeCpu),
+  ...OUTPUT_CODECS.map((codec) => row(encodeCpu(codec))),
 ];

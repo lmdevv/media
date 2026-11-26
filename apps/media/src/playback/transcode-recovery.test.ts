@@ -93,7 +93,7 @@ const QSV_CHAIN = chain("qsv", [
   [Op.Decode({ codec: "hevc" }), "decode.qsv"],
   [Op.Scale({ width: 1280, height: 720, depth: 10 }), "scale.qsv"],
   [Op.ToneMap(), "tonemap.qsv"],
-  [Op.Encode({ target: sdrTarget("h264"), bitrate: 8_000_000 }), "encode.qsv"],
+  [Op.Encode({ target: sdrTarget("h264"), bitrate: 8_000_000 }), "encode.qsv.h264"],
 ]);
 
 const QSV_OWNERS = ownersOf(QSV_CHAIN);
@@ -103,7 +103,7 @@ const VAAPI_CHAIN = chain("vaapi", [
   [Op.Decode({ codec: "hevc" }), "decode.vaapi"],
   [Op.Scale({ width: 1280, height: 720, depth: 10 }), "scale.vaapi"],
   [Op.ToneMap(), "tonemap.vaapi"],
-  [Op.Encode({ target: sdrTarget("h264"), bitrate: 8_000_000 }), "encode.vaapi"],
+  [Op.Encode({ target: sdrTarget("h264"), bitrate: 8_000_000 }), "encode.vaapi.h264"],
 ]);
 
 const VAAPI_OWNERS = ownersOf(VAAPI_CHAIN);
@@ -114,7 +114,7 @@ const VAAPI_H264_CHAIN = chain(
   [
     [Op.Decode({ codec: "h264" }), "decode.vaapi"],
     [Op.Scale({ width: 1280, height: 720, depth: 8 }), "scale.vaapi"],
-    [Op.Encode({ target: sdrTarget("h264"), bitrate: 8_000_000 }), "encode.vaapi"],
+    [Op.Encode({ target: sdrTarget("h264"), bitrate: 8_000_000 }), "encode.vaapi.h264"],
   ],
   { ...HDR, codec: "h264", pixelFormat: "yuv420p", depth: 8, colour: "sdr" },
 );
@@ -125,7 +125,7 @@ const UPLOAD_CHAIN = chain(
   [
     [Op.Decode({ codec: "hevc" }), "decode.cpu"],
     [Op.Scale({ width: 1280, height: 720, depth: 8 }), "scale.vaapi"],
-    [Op.Encode({ target: sdrTarget("h264"), bitrate: 8_000_000 }), "encode.vaapi"],
+    [Op.Encode({ target: sdrTarget("h264"), bitrate: 8_000_000 }), "encode.vaapi.h264"],
   ],
   { ...HDR, colour: "sdr" },
 );
@@ -244,7 +244,7 @@ describe("attribute", () => {
       [
         [Op.Decode({ codec: "hevc" }), "decode.qsv"],
         [Op.Scale({ width: 1280, height: 720, depth: 8 }), "scale.qsv"],
-        [Op.Encode({ target: sdrTarget("h264"), bitrate: 8_000_000 }), "encode.qsv"],
+        [Op.Encode({ target: sdrTarget("h264"), bitrate: 8_000_000 }), "encode.qsv.h264"],
       ],
       { ...HDR, colour: "sdr" },
     );
@@ -574,7 +574,7 @@ describe("advance", () => {
 
     const second = advance(
       first.state,
-      Diagnosis.Source({ impls: [ImplId("encode.qsv")] }),
+      Diagnosis.Source({ impls: [ImplId("encode.qsv.h264")] }),
       QSV_CHAIN,
     );
 
@@ -582,7 +582,7 @@ describe("advance", () => {
 
     if (!Recovery.$is("Replan")(second)) return;
     assert.isTrue(second.state.excluded.has(ImplId("decode.vaapi")));
-    assert.isFalse(second.state.excluded.has(ImplId("encode.cpu")));
+    assert.isFalse(second.state.excluded.has(ImplId("encode.cpu.h264")));
     assert.isTrue(
       Recovery.$is("GiveUp")(advance(second.state, Diagnosis.Unexplained(), QSV_CHAIN)),
     );
@@ -593,7 +593,7 @@ describe("advance", () => {
       [Op.Decode({ codec: "hevc" }), "decode.cpu"],
       [Op.Scale({ width: 1280, height: 720, depth: 10 }), "scale.cpu"],
       [Op.ToneMap(), "tonemap.cpu"],
-      [Op.Encode({ target: sdrTarget("h264"), bitrate: 8_000_000 }), "encode.cpu"],
+      [Op.Encode({ target: sdrTarget("h264"), bitrate: 8_000_000 }), "encode.cpu.h264"],
     ]);
 
     assert.isTrue(

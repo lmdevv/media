@@ -22,6 +22,7 @@ import { probeCommandArgs, probedFrames } from "./video-render.ts";
 import {
   capabilityKey,
   type ClipName,
+  encodeRowId,
   type GpuDomain,
   ImplId,
   implOf,
@@ -103,7 +104,7 @@ const chainsOn = (domain: GpuDomain): ReadonlyArray<Chain> => [
     clip: "h264-10",
     domain,
     // Intel's media engines decode no 10-bit H.264, and Quick Sync's map takes no software frames.
-    stages: ["decode.cpu", `move.cpu>${domain}`, `scale.${domain}`, `encode.${domain}`],
+    stages: ["decode.cpu", `move.cpu>${domain}`, `scale.${domain}`, `encode.${domain}.h264`],
   },
   {
     name: `${domain}: HDR10 tone-mapped on the CPU between GPU stages`,
@@ -225,7 +226,6 @@ describe.runIf(hasQsv || hasVaapi)("TranscodeCapabilities on this machine's GPU"
           }
 
           const ran = new Set<ImplId>();
-          const ranKeys = new Set<string>();
           const outcomes: Array<string> = [];
           const now = yield* Clock.currentTimeMillis;
 
@@ -301,10 +301,7 @@ describe.runIf(hasQsv || hasVaapi)("TranscodeCapabilities on this machine's GPU"
               );
               assert.isAbove(frames, 0, `${chain.name}: ${stages}: ${how}`);
 
-              for (const step of pipeline.steps) {
-                ran.add(step.impl);
-                ranKeys.add(step.capability);
-              }
+              for (const step of pipeline.steps) ran.add(step.impl);
             }
           }
 
@@ -327,26 +324,20 @@ describe.runIf(hasQsv || hasVaapi)("TranscodeCapabilities on this machine's GPU"
 
           for (const impl of verifiedRows) assert.isTrue(ran.has(impl), `${impl} ran in no chain`);
 
-          // Each encoder is its own key: one this build or device lacks loses only that key, and
-          // every one verified ran in a real chain.
-          const encoders = ["cpu", ...domains].flatMap((domain) =>
+          // Each encoder is a row of its own, so one this build or device lacks loses only that
+          // row, and every one verified ran in a real chain above.
+          const encoders = (["cpu", ...domains] as const).flatMap((domain) =>
             OUTPUT_CODECS.map((codec) => {
               const key = capabilityKey(
-                ImplId(`encode.${domain}`),
-                `${codec}/8/${domain === "cpu" ? "crf" : "cbr"}`,
+                encodeRowId(domain, codec),
+                `8/${domain === "cpu" ? "crf" : "cbr"}`,
               );
 
-              return { key, status: Inventory.capabilityOf(inventory, key).status };
+              return `${key} ${Inventory.capabilityOf(inventory, key).status}`;
             }),
           );
 
-          yield* Console.log(
-            `encoders: ${encoders.map(({ key, status }) => `${key} ${status}`).join(", ")}`,
-          );
-
-          for (const { key, status } of encoders) {
-            if (status === "verified") assert.isTrue(ranKeys.has(key), `${key} ran in no chain`);
-          }
+          yield* Console.log(`encoders: ${encoders.join(", ")}`);
         }),
       300_000,
     );

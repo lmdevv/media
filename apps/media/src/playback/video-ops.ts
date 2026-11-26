@@ -305,3 +305,19 @@ export const surfaceDepth = (format: "nv12" | "p010le"): number => (format === "
 
 /** A rendering with nothing in it, as a CPU decoder's. */
 export const NOTHING: Rendering = { input: [], filters: [], output: [] };
+
+/** The id of the row that encodes `codec` in `domain`, such as `encode.qsv.hevc`. */
+export const encodeRowId = (domain: Domain, codec: OutputCodec): ImplId =>
+  ImplId(`encode.${domain}.${codec}`);
+
+/**
+ * Whether the encode row of `codec` takes `target`: that codec at 8-bit SDR, the one entry encode
+ * rows register.
+ */
+export const encodesTarget = (codec: OutputCodec, target: OutputTarget): boolean =>
+  target.codec === codec && target.depth === 8 && target.colour === "sdr";
+
+/** What proves the encode row of `codec`: one 8-bit SDR encode of the 8-bit H.264 clip. */
+export const encodeProbes = (codec: OutputCodec): ReadonlyArray<ProbeCase<"Encode">> => [
+  { op: Op.Encode({ target: sdrTarget(codec), bitrate: 1_000_000 }), clip: "h264-8", runs: 1 },
+];

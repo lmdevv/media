@@ -47,7 +47,7 @@ const lateHevcProbe = await writeFakeFfmpeg({
 });
 
 /** The capability key of Quick Sync's 8-bit HEVC encode. */
-const HEVC_QSV = capabilityKey(ImplId("encode.qsv"), "hevc/8/cbr");
+const HEVC_QSV = capabilityKey(ImplId("encode.qsv.hevc"), "8/cbr");
 
 const iphone: ClientCapabilities = {
   containers: ["mp4", "mov"],

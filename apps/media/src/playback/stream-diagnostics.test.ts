@@ -429,7 +429,7 @@ describe.skipIf(!hasFfmpeg)("stream diagnostics", () => {
           assert.deepInclude(stream.transcode?.stages.at(-1), {
             op: "encode",
             domain: "qsv",
-            impl: "encode.qsv",
+            impl: "encode.qsv.h264",
           });
           assert.isTrue(
             stream.transcode?.stages.every((stage) => stage.domain === "qsv"),
@@ -494,7 +494,7 @@ describe.skipIf(!hasFfmpeg)("stream diagnostics", () => {
           assert.deepInclude(summary.stages.at(-1), {
             op: "encode",
             domain: "cpu",
-            impl: "encode.cpu",
+            impl: "encode.cpu.h264",
           });
 
           const [change, ...others] = summary.changes;
@@ -502,7 +502,7 @@ describe.skipIf(!hasFfmpeg)("stream diagnostics", () => {
           assert.lengthOf(others, 0);
           assert.strictEqual(change?.generation, 2);
           assert.strictEqual(change?.cause, "source", "the probes passed: only this file fails");
-          assert.include(change?.excluded ?? [], "encode.qsv");
+          assert.include(change?.excluded ?? [], "encode.qsv.h264");
 
           // And that is the chain that runs: the replacement plays, encoding 1080p on the CPU.
           const served = yield* HttpClient.get(
@@ -555,7 +555,7 @@ describe.skipIf(!hasFfmpeg)("stream diagnostics", () => {
           const [change] = stream.transcode?.changes ?? [];
 
           assert.strictEqual(change?.cause, "capability", "the encoder's probe failed again");
-          assert.deepStrictEqual(change?.excluded, ["encode.qsv"]);
+          assert.deepStrictEqual(change?.excluded, ["encode.qsv.h264"]);
           assert.strictEqual(change?.reason, "reproduced");
 
           // Warmup proves the tone maps last; their probes' lines name the path too.
@@ -635,7 +635,7 @@ describe.skipIf(!hasFfmpeg)("stream diagnostics", () => {
             quarantineEndsAt: null,
           });
           assert.isNumber(
-            known("encode.qsv:h264/8/cbr")?.["quarantineEndsAt"],
+            known("encode.qsv.h264:8/cbr")?.["quarantineEndsAt"],
             "the encoder is quarantined after its probe reproduced the failure",
           );
         }),

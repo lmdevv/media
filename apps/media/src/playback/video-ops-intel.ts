@@ -1,14 +1,18 @@
 /**
  * The rows of Intel's two GPU APIs, written for any Intel GPU and for AMD's VA-API: Quick Sync
  * (`qsv`, oneVPL derived from a VA-API device) and VA-API (`vaapi`). Each decodes, scales,
- * tone-maps, and encodes H.264, HEVC, and AV1 on the device, and moves frames to and from CPU
- * memory in NV12 or P010. Which of these a device does is evidence, never assumed: a row only says what it may try.
+ * tone-maps, and encodes H.264, HEVC, and AV1 (a row per codec) on the device, and moves frames
+ * to and from CPU memory in NV12 or P010. Which of these a device does is evidence, never
+ * assumed: a row only says what it may try.
  */
 import { DECODE_CLIPS, PROBE_CLIPS } from "./probe-clips.ts";
 import {
   type BuildFeature,
   type Domain,
   type DomainSpec,
+  encodeProbes,
+  encodeRowId,
+  encodesTarget,
   filter,
   fusing,
   type GpuDomain,
@@ -19,12 +23,10 @@ import {
   type OpImpl,
   OUTPUT_CODECS,
   type OutputCodec,
-  type OutputTarget,
   type ProbeCase,
   type Rendering,
   row,
   type Row,
-  sdrTarget,
   surfaceDepth,
   surfaceFormat,
   transferOf,
@@ -80,12 +82,6 @@ const toneMapProbes: ReadonlyArray<ProbeCase<"ToneMap">> = [
   { op: Op.ToneMap(), clip: "hevc-pq", runs: 1 },
   { op: Op.ToneMap(), clip: "hevc-hlg", runs: 1 },
 ];
-
-const encodeProbes: ReadonlyArray<ProbeCase<"Encode">> = OUTPUT_CODECS.map((codec) => ({
-  op: Op.Encode({ target: sdrTarget(codec), bitrate: 1_000_000 }),
-  clip: "h264-8",
-  runs: 1,
-}));
 
 const moveProbes = (to: Domain): ReadonlyArray<ProbeCase<"Move">> => [
   { op: Op.Move({ to }), clip: "h264-8", runs: 1 },
@@ -256,9 +252,6 @@ const toneMapQsv: OpImpl<"ToneMap"> = {
   probes: toneMapProbes,
 };
 
-/** Whether the GPU encoders take `target`: 8-bit SDR alone. */
-const gpuTakes = (target: OutputTarget): boolean => target.depth === 8 && target.colour === "sdr";
-
 /** One codec's GPU encoder: its name and the options before and after the bitrate. */
 interface GpuEncoder {
   readonly name: string;
@@ -267,51 +260,55 @@ interface GpuEncoder {
 }
 
 /**
- * A GPU encoder at a fixed bitrate from 8-bit SDR NV12 surfaces, an encoder entry per codec. On
- * the Arc A380 every one of them, with ffmpeg 9 and Debian's 7.1, put an IDR frame (H.264, HEVC)
- * or a key frame (AV1) exactly at each forced keyframe.
+ * The row of `domain`'s encoder of `codec`: a fixed bitrate from 8-bit SDR NV12 surfaces. On the
+ * Arc A380 every one of them, with ffmpeg 9 and Debian's 7.1, put an IDR frame (H.264, HEVC) or a
+ * key frame (AV1) exactly at each forced keyframe.
  */
 const encodeOn = (
   domain: GpuDomain,
-  encoders: Readonly<Record<OutputCodec, GpuEncoder>>,
+  codec: OutputCodec,
+  encoder: GpuEncoder,
 ): OpImpl<"Encode"> => ({
-  id: ImplId(`encode.${domain}`),
+  id: encodeRowId(domain, codec),
   op: "Encode",
   on: domain,
   takes: domain,
-  needs: (op) => [`encoder:${encoders[op.target.codec].name}`],
+  needs: () => [`encoder:${encoder.name}`],
   variant: (op, frame) =>
-    gpuTakes(op.target) &&
+    encodesTarget(codec, op.target) &&
     frame.colour === "sdr" &&
     frame.scan === "progressive" &&
     frame.pixelFormat === "nv12"
-      ? `${op.target.codec}/${String(op.target.depth)}/cbr`
+      ? `${String(op.target.depth)}/cbr`
       : undefined,
   output: (_, frame) => frame,
-  render: (op) => {
-    const encoder = encoders[op.target.codec];
-
-    return {
-      ...NOTHING,
-      output: [
-        "-c:v",
-        encoder.name,
-        ...encoder.before,
-        "-b:v",
-        String(op.bitrate),
-        "-maxrate",
-        String(op.bitrate),
-        "-bufsize",
-        String(op.bitrate * 2),
-        ...encoder.after,
-      ],
-    };
-  },
-  probes: encodeProbes,
+  render: (op) => ({
+    ...NOTHING,
+    output: [
+      "-c:v",
+      encoder.name,
+      ...encoder.before,
+      "-b:v",
+      String(op.bitrate),
+      "-maxrate",
+      String(op.bitrate),
+      "-bufsize",
+      String(op.bitrate * 2),
+      ...encoder.after,
+    ],
+  }),
+  probes: encodeProbes(codec),
 });
 
+/** Each of `domain`'s encoders as a row of its own. */
+const encodesOn = (
+  domain: GpuDomain,
+  encoders: Readonly<Record<OutputCodec, GpuEncoder>>,
+): ReadonlyArray<Row> =>
+  OUTPUT_CODECS.map((codec) => row(encodeOn(domain, codec, encoders[codec])));
+
 /** Quick Sync's encoders; `forced_idr` makes each forced keyframe an IDR frame. */
-const encodeQsv = encodeOn("qsv", {
+const encodeQsv = encodesOn("qsv", {
   h264: { name: "h264_qsv", before: ["-preset", "veryfast"], after: ["-forced_idr", "1"] },
   hevc: {
     name: "hevc_qsv",
@@ -384,7 +381,7 @@ const toneMapVaapi: OpImpl<"ToneMap"> = {
 };
 
 /** VA-API's encoders: H.264 High, HEVC Main, AV1 Main. */
-const encodeVaapi = encodeOn("vaapi", {
+const encodeVaapi = encodesOn("vaapi", {
   h264: { name: "h264_vaapi", before: ["-profile:v", "high"], after: [] },
   hevc: { name: "hevc_vaapi", before: ["-profile:v", "main"], after: [] },
   av1: { name: "av1_vaapi", before: ["-profile:v", "main"], after: [] },
@@ -395,13 +392,13 @@ export const INTEL_ROWS: ReadonlyArray<Row> = [
   row(decodeQsv),
   row(scaleQsv),
   row(toneMapQsv),
-  row(encodeQsv),
+  ...encodeQsv,
   row(uploadTo("qsv", [["extra_hw_frames", "64"]], "qsv")),
   row(downloadFrom("qsv")),
   row(decodeVaapi),
   row(scaleVaapi),
   row(toneMapVaapi),
-  row(encodeVaapi),
+  ...encodeVaapi,
   row(uploadTo("vaapi", [], undefined)),
   row(downloadFrom("vaapi")),
 ];

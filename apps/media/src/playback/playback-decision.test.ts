@@ -148,7 +148,7 @@ const impls = (plan: PlaybackPlan): ReadonlyArray<string> =>
     ? plan.video.pipeline.steps.map((step) => step.impl)
     : [];
 
-/** The capability the plan's encode step exercises, such as `encode.qsv:hevc/8/cbr`. */
+/** The capability the plan's encode step exercises, such as `encode.qsv.hevc:8/cbr`. */
 const encodeKey = (plan: PlaybackPlan): string | undefined =>
   PlaybackPlan.$is("Hls")(plan) && VideoPlan.$is("Encode")(plan.video)
     ? plan.video.pipeline.steps.at(-1)?.capability
@@ -282,8 +282,8 @@ describe("output codec", () => {
       mode: "transcode-qsv",
       video: { output: { codec: "hevc", width: 1920, height: 1080, bitrate: 6_000_000 } },
     });
-    expect(encodeKey(plan)).toBe("encode.qsv:hevc/8/cbr");
-    expect(encodeKey(vaapi(mpeg2, chromeWithHevc))).toBe("encode.vaapi:hevc/8/cbr");
+    expect(encodeKey(plan)).toBe("encode.qsv.hevc:8/cbr");
+    expect(encodeKey(vaapi(mpeg2, chromeWithHevc))).toBe("encode.vaapi.hevc:8/cbr");
   });
 
   it("encodes AV1 on the GPU for a client that decodes it in hardware or plays only AV1", () => {
@@ -291,8 +291,8 @@ describe("output codec", () => {
       mode: "transcode-qsv",
       video: { output: { codec: "av1", bitrate: 5_200_000 } },
     });
-    expect(encodeKey(hardware(mpeg2, av1Only))).toBe("encode.qsv:av1/8/cbr");
-    expect(encodeKey(hardware(mpeg2, chromeWithHevc))).toBe("encode.qsv:hevc/8/cbr");
+    expect(encodeKey(hardware(mpeg2, av1Only))).toBe("encode.qsv.av1:8/cbr");
+    expect(encodeKey(hardware(mpeg2, chromeWithHevc))).toBe("encode.qsv.hevc:8/cbr");
   });
 
   it("encodes H.264 on a CPU for a client that plays it, and HEVC or AV1 only for one that does not", () => {
@@ -301,27 +301,27 @@ describe("output codec", () => {
       video: { output: { codec: "h264", bitrate: 8_000_000 } },
     });
     expect(software(mpeg2, chromeWithAv1)).toMatchObject({ video: { output: { codec: "h264" } } });
-    expect(encodeKey(software(mpeg2, hevcOnly))).toBe("encode.cpu:hevc/8/crf");
-    expect(encodeKey(software(mpeg2, av1Only))).toBe("encode.cpu:av1/8/crf");
+    expect(encodeKey(software(mpeg2, hevcOnly))).toBe("encode.cpu.hevc:8/crf");
+    expect(encodeKey(software(mpeg2, av1Only))).toBe("encode.cpu.av1:8/crf");
   });
 
   it("falls to the next target when an encoder is not verified", () => {
-    const noHevcOnQsv = deciding(["qsv"], (key) => key === "encode.qsv:hevc/8/cbr");
+    const noHevcOnQsv = deciding(["qsv"], (key) => key === "encode.qsv.hevc:8/cbr");
 
-    expect(encodeKey(noHevcOnQsv(mpeg2, safari))).toBe("encode.qsv:h264/8/cbr");
+    expect(encodeKey(noHevcOnQsv(mpeg2, safari))).toBe("encode.qsv.h264:8/cbr");
 
     const noHevcOnAnyGpu = deciding(["qsv", "vaapi"], (key) =>
-      /^encode\.(qsv|vaapi):hevc/u.test(key),
+      /^encode\.(qsv|vaapi)\.hevc:/u.test(key),
     );
 
-    expect(encodeKey(noHevcOnAnyGpu(mpeg2, safari))).toBe("encode.qsv:h264/8/cbr");
-    expect(encodeKey(noHevcOnAnyGpu(mpeg2, hevcOnly))).toBe("encode.cpu:hevc/8/crf");
+    expect(encodeKey(noHevcOnAnyGpu(mpeg2, safari))).toBe("encode.qsv.h264:8/cbr");
+    expect(encodeKey(noHevcOnAnyGpu(mpeg2, hevcOnly))).toBe("encode.cpu.hevc:8/crf");
 
-    const noQsvHevc = deciding(["qsv", "vaapi"], (key) => key === "encode.qsv:hevc/8/cbr");
+    const noQsvHevc = deciding(["qsv", "vaapi"], (key) => key === "encode.qsv.hevc:8/cbr");
 
-    expect(encodeKey(noQsvHevc(mpeg2, safari))).toBe("encode.vaapi:hevc/8/cbr");
+    expect(encodeKey(noQsvHevc(mpeg2, safari))).toBe("encode.vaapi.hevc:8/cbr");
 
-    const noSoftwareHevc = deciding([], (key) => key === "encode.cpu:hevc/8/crf");
+    const noSoftwareHevc = deciding([], (key) => key === "encode.cpu.hevc:8/crf");
 
     expect(noSoftwareHevc(mpeg2, hevcOnly)).toStrictEqual(
       PlaybackPlan.Unsupported({ reason: "no-transcode-target" }),
@@ -403,7 +403,12 @@ describe("decidePlayback", () => {
       },
       audio: AudioPlan.Copy({ index: 1 }),
     });
-    expect(impls(plan)).toStrictEqual(["decode.qsv", "scale.qsv", "tonemap.qsv", "encode.qsv"]);
+    expect(impls(plan)).toStrictEqual([
+      "decode.qsv",
+      "scale.qsv",
+      "tonemap.qsv",
+      "encode.qsv.h264",
+    ]);
   });
 
   it("refuses software HDR tone mapping", () => {
@@ -538,7 +543,7 @@ describe("decidePlayback", () => {
       "move.qsv>cpu",
       "burn-image.cpu",
       "move.cpu>qsv",
-      "encode.qsv",
+      "encode.qsv.h264",
     ]);
     expect(software(withPgs, chrome, { burnSubtitle: 5 })).toStrictEqual(
       PlaybackPlan.Unsupported({ reason: "subtitle-not-burnable" }),
@@ -551,7 +556,12 @@ describe("decidePlayback", () => {
     const plan = deciding(["qsv"], (key) => key === "decode.qsv:h264/yuv420p10le")(hi10, chrome);
 
     expect(plan).toMatchObject({ mode: "transcode-qsv" });
-    expect(impls(plan)).toStrictEqual(["decode.cpu", "move.cpu>qsv", "scale.qsv", "encode.qsv"]);
+    expect(impls(plan)).toStrictEqual([
+      "decode.cpu",
+      "move.cpu>qsv",
+      "scale.qsv",
+      "encode.qsv.h264",
+    ]);
   });
 });
 
@@ -616,9 +626,12 @@ describe("replan", () => {
       );
 
     expect(codecOf([])).toStrictEqual(Result.succeed("hevc qsv"));
-    expect(codecOf(["encode.qsv"])).toStrictEqual(Result.succeed("hevc vaapi"));
+    expect(codecOf(["encode.qsv.hevc"])).toStrictEqual(Result.succeed("hevc vaapi"));
+    expect(codecOf(["encode.qsv.hevc", "encode.vaapi.hevc"])).toStrictEqual(
+      Result.succeed("h264 qsv"),
+    );
     expect(
-      codecOf(["decode.qsv", "scale.qsv", "encode.qsv", "decode.vaapi", "encode.vaapi"]),
+      codecOf(["encode.qsv.hevc", "encode.qsv.h264", "encode.vaapi.hevc", "encode.vaapi.h264"]),
     ).toStrictEqual(Result.succeed("h264 cpu"));
   });
 });
