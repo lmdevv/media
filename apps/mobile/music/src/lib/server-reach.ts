@@ -95,6 +95,12 @@ export const SETTLE_MS = 1000;
 export const RECHECK_MS = 3000;
 
 /**
+ * How often the app checks while the core's socket is closed: the core can't tell it then that the
+ * media server went away.
+ */
+export const CLOSED_RECHECK_MS = 10_000;
+
+/**
  * In how many milliseconds the app checks the server's health on its own, or null for no check:
  * never while nothing waits on the server; `SETTLE_MS` after a doubt; and `RECHECK_MS` after each
  * unanswered check, until it answers. `needed` says whether anything waits on the server: the app
