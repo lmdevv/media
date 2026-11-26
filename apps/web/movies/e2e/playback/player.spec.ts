@@ -1917,6 +1917,92 @@ test("a stream that fails in HEVC gives way once to one without it, which plays,
   await viewer.context().close();
 });
 
+test("a seek while the player tries another way plays from where the seek went", async ({
+  browser,
+}) => {
+  if (stack === null) return;
+
+  const viewer = await signedInPage(browser, owner.person);
+  const late = Promise.withResolvers<void>();
+  const asked = await askForHevcFirst(viewer, late.promise);
+
+  await viewer.context().addInitScript(listHevc);
+  await viewer.goto(moviesPath(`/watch/${titleId(MOVIES.remux)}?start=0`));
+
+  // HEVC fails to buffer, and the player asks again without it; that answer waits.
+  await expect.poll(() => asked.length, { timeout: 60_000 }).toBe(2);
+  await expect(viewer.getByText("Trying another way to play")).toBeVisible();
+
+  const from = asked[1]?.startSeconds ?? 0;
+
+  await viewer.keyboard.press("l");
+  await expect(viewer.getByText(`Resuming at ${formatTimecode(from + 10)}`)).toBeVisible();
+  late.resolve();
+
+  // The answer for where the player was goes unused: it asks from 10 s on and plays there.
+  await expect.poll(() => asked.length).toBe(3);
+  expect(asked[2]?.startSeconds ?? Number.NaN).toBeCloseTo(from + 10, 0);
+  expect(asked[2]?.codecs).not.toContain("hevc");
+  await expectPlayingPast(viewer, from + 10);
+  expect((await videoState(viewer)).currentTime).toBeLessThan(from + 20);
+  await viewer.context().close();
+});
+
+test("another title started while the player tries another way plays, and the late answer is stopped unused", async ({
+  browser,
+}) => {
+  if (stack === null) return;
+
+  const viewer = await signedInPage(browser, owner.person);
+  const late = Promise.withResolvers<void>();
+  const asked = await askForHevcFirst(viewer, late.promise);
+  const requested: Array<{ readonly url: string; readonly body: string | null }> = [];
+
+  viewer.on("request", (request) =>
+    requested.push({ url: request.url(), body: request.postData() }),
+  );
+  await viewer.context().addInitScript(listHevc);
+  await viewer.goto(moviesPath(`/watch/${titleId(MOVIES.remux)}?start=0`));
+  await expect.poll(() => asked.length, { timeout: 60_000 }).toBe(2);
+  await expect(viewer.getByText("Trying another way to play")).toBeVisible();
+
+  // Leave and start another title in the same page while that answer waits.
+  await viewer.getByText("Back to details", { exact: true }).click();
+  await expect(viewer).toHaveURL(new RegExp(`/title/${titleId(MOVIES.remux)}$`, "u"));
+  await viewer
+    .getByRole("navigation", { name: "Sections" })
+    .getByRole("link", { name: "Movies" })
+    .click();
+  await viewer.getByRole("link", { name: MOVIES.direct }).first().click();
+  await expect(viewer).toHaveURL(new RegExp(`/title/${titleId(MOVIES.direct)}`, "u"));
+  await viewer.getByRole("link", { name: "Play", exact: true }).click();
+  await expect(viewer).toHaveURL(new RegExp(`/watch/${titleId(MOVIES.direct)}`, "u"));
+  await expect.poll(() => asked[2]?.answered?.mode).toBe("direct");
+  await expectPlayingPast(viewer, 0.5);
+
+  late.resolve();
+  await expect.poll(() => asked[1]?.answered?.streamId).toBeDefined();
+
+  const stale = asked[1]?.answered?.streamId ?? "";
+
+  // The new title plays on; the old player stops the stream it was answered and never loads it.
+  await expect
+    .poll(() =>
+      requested.some(
+        ({ url, body }) => url.endsWith(MEDIA_ROUTES.stop) && (body ?? "").includes(stale),
+      ),
+    )
+    .toBe(true);
+
+  const before = await videoState(viewer);
+
+  await expectPlayingPast(viewer, before.currentTime + 1);
+  await expect(viewer).toHaveURL(new RegExp(`/watch/${titleId(MOVIES.direct)}`, "u"));
+  expect(requested.some(({ url }) => url.includes(`/media/hls/${stale}/`))).toBe(false);
+  expect(asked).toHaveLength(3);
+  await viewer.context().close();
+});
+
 test("a file gone from disk says so instead of playing", async () => {
   await rm(join(workspace, "Films", `${MOVIES.missing} (2021)`, `${MOVIES.missing} (2021).mp4`));
   await page.goto(moviesPath(`/watch/${titleId(MOVIES.missing)}?start=0`));

@@ -82,6 +82,7 @@ export class MediaElementPlayer implements PlayerPort {
   #wantsPlay = false;
   #final: number | null = null;
   #seekTarget: number | null = null;
+  #seeks = 0;
   readonly #listeners = new Set<(event: PlayerEvent) => void>();
 
   /** Wraps `element`; call `dispose` when the element goes away. */
@@ -106,6 +107,9 @@ export class MediaElementPlayer implements PlayerPort {
 
   /** Whether playing was asked for (by `play`) more recently than pausing. */
   readonly wantsToPlay = (): boolean => this.#wantsPlay;
+
+  /** How many seeks the player was asked for since it was made. */
+  readonly seekCount = (): number => this.#seeks;
 
   /**
    * Stops listening to the element and keeps reporting the position it had, paused, so a report
@@ -194,6 +198,7 @@ export class MediaElementPlayer implements PlayerPort {
   readonly seek = (positionMs: number): void => {
     const target = Math.max(0, positionMs);
 
+    this.#seeks += 1;
     this.#move?.abort();
     this.#move = null;
 

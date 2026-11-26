@@ -255,6 +255,19 @@ describe("MediaElementPlayer", () => {
     expect(events).toStrictEqual(["playing", "waiting", "seeked"]);
   });
 
+  it("counts every seek it was asked for, reached in place or moved", () => {
+    const element = new FakeMediaElement();
+    const player = new MediaElementPlayer(element);
+    const { seeker } = manualSeeker(element, (target) => target < 10_000);
+
+    player.setSeeker(seeker);
+    player.seek(5_000);
+    player.seek(600_000);
+    player.seek(700_000);
+
+    expect(player.seekCount()).toBe(3);
+  });
+
   it("reports what was asked for while a stream move empties the element", async () => {
     const element = new FakeMediaElement();
     const player = new MediaElementPlayer(element);
