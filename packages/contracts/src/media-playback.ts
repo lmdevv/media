@@ -218,7 +218,8 @@ export interface TranscodeStage extends Schema.Schema.Type<typeof TranscodeStage
  *
  * - `reproduced`: a probe on a generated clip failed again at a stage the run used.
  * - `file-only`: the stages ran on generated frames; only this file fails there.
- * - `undecided`: the probes ran out of time before they showed anything.
+ * - `undecided`: the probes could not tell whether a stage the run used fails: they ran out of
+ *   time, proved nothing (as when ffmpeg exited at once with no frames), or could not run.
  * - `unexplained`: a run on the CPU failed and its log named no part.
  * - `stopped`: a signal stopped ffmpeg.
  * - `not-started`: ffmpeg did not start.
@@ -270,7 +271,7 @@ export const TranscodeChange = Schema.Struct({
   generation: Schema.Int,
   /**
    * Why, as a code: `capability` (a probe reproduced a stage's failure), `source` (only this file
-   * fails there), `undecided` (the probes ran out of time), `not-video` (the failure was not the
+   * fails there), `undecided` (the probes could not tell), `not-video` (the failure was not the
    * video's), `unexplained` (a CPU run failed naming nothing), or `capability-lost` (a stage the
    * chain used stopped being verified). A string, so a new cause changes no contract.
    */

@@ -51,6 +51,10 @@ describe("TranscodeLabels", () => {
     expect(reasonLabel("disk-full")).toBe("disk full");
   });
 
+  it("names undecided as probes that could not tell, which a timeout or a probe with no frames leaves", () => {
+    expect(reasonLabel("undecided")).toBe("probes inconclusive");
+  });
+
   it("names a reason a newer server added as it names other", () => {
     const newer = Schema.decodeSync(TranscodeReasonCode)("driver-reset");
 

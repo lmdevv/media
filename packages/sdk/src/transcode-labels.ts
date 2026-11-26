@@ -46,7 +46,7 @@ export const causeLabel = (cause: string): string => CAUSES.get(cause) ?? cause;
 const REASONS: Readonly<Record<TranscodeReason, string>> = {
   reproduced: "probe failed too",
   "file-only": "this file only",
-  undecided: "probes timed out",
+  undecided: "probes inconclusive",
   unexplained: "unexplained",
   stopped: "stopped",
   "not-started": "didn't start",
