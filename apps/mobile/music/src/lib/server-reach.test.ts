@@ -1,7 +1,16 @@
 import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
-import { ANSWERING, isLost, LOST_AFTER, nextCheck, observe, reachOf } from "./server-reach";
+import {
+  ANSWERING,
+  isLost,
+  LOST_AFTER,
+  nextCheck,
+  observe,
+  reachOf,
+  RECHECK_MS,
+  SETTLE_MS,
+} from "./server-reach";
 import type { Observation, Reachability } from "./server-reach";
 
 const connected = { offlinePhase: false, socketLost: false, stalled: false };
@@ -64,7 +73,7 @@ describe("observe", () => {
     ]);
 
     expect(isLost(doubted)).toBe(false);
-    expect(nextCheck(doubted, true)).toBe("now");
+    expect(nextCheck(doubted, true)).toBe(SETTLE_MS);
   });
 
   it("drops what lands with evidence older than the newest applied", () => {
@@ -107,15 +116,15 @@ describe("nextCheck", () => {
   it("sends no check while nothing needs the server, whatever it learned", () => {
     fc.assert(
       fc.property(landings, (list) => {
-        expect(nextCheck(applied(list), false)).toBe("none");
+        expect(nextCheck(applied(list), false)).toBeNull();
       }),
     );
   });
 
-  it("checks at once after a doubt, soon after a failure, and not at all while it answers", () => {
-    expect(nextCheck(applied([["doubted", 1]]), true)).toBe("now");
-    expect(nextCheck(applied([["failed", 1]]), true)).toBe("soon");
-    expect(nextCheck(applied([["answered", 1]]), true)).toBe("none");
-    expect(nextCheck(ANSWERING, true)).toBe("none");
+  it("checks a settle after a doubt, a recheck after a failure, and never while it answers", () => {
+    expect(nextCheck(applied([["doubted", 1]]), true)).toBe(SETTLE_MS);
+    expect(nextCheck(applied([["failed", 1]]), true)).toBe(RECHECK_MS);
+    expect(nextCheck(applied([["answered", 1]]), true)).toBeNull();
+    expect(nextCheck(ANSWERING, true)).toBeNull();
   });
 });

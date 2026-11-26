@@ -3,9 +3,6 @@ import type { ConnectionState } from "@media/sdk/promise";
 import { ANSWERING, isLost, nextCheck, observe } from "@/lib/server-reach";
 import type { Observation, Reachability } from "@/lib/server-reach";
 
-/** How long after an unanswered check the next one goes, so the app notices the server back soon. */
-export const RECHECK_MS = 3000;
-
 /**
  * How long a call may wait for its answer with the socket open before the server is doubted: one
  * that stopped answering without closing the socket shows only this way, or after Convex's own
@@ -69,7 +66,8 @@ export const reachWatch = (
   let needed = false;
   let closed = false;
   let socket: ConnectionState = { connected: false, waitingSince: null };
-  let cancelRecheck: (() => void) | null = null;
+  /** The check `nextCheck` set a timer for, and how far out it was set. */
+  let pending: { readonly inMs: number; readonly cancel: () => void } | null = null;
   let cancelStall: (() => void) | null = null;
 
   const stamp = (): number => {
@@ -93,8 +91,8 @@ export const reachWatch = (
     const at = stamp();
 
     sent = at;
-    cancelRecheck?.();
-    cancelRecheck = null;
+    pending?.cancel();
+    pending = null;
     const answered = await answers();
 
     apply(answered ? "answered" : "failed", at);
@@ -102,27 +100,23 @@ export const reachWatch = (
     return answered;
   };
 
-  /** Sends the check `nextCheck` calls for, unless one sent after the newest evidence is out. */
+  /** Sets the check `nextCheck` calls for, unless one sent after the newest evidence is out. */
   function follow(): void {
-    const due = nextCheck(state, needed);
+    const inMs = closed || sent > state.newest ? null : nextCheck(state, needed);
 
-    if (due !== "soon" || closed) {
-      cancelRecheck?.();
-      cancelRecheck = null;
-    }
+    if (pending !== null && pending.inMs === inMs) return;
+    pending?.cancel();
+    pending = null;
 
-    if (closed || due === "none" || sent > state.newest) return;
+    if (inMs === null) return;
 
-    if (due === "now") {
-      void check();
-
-      return;
-    }
-
-    cancelRecheck ??= timers.after(RECHECK_MS, () => {
-      cancelRecheck = null;
-      void check();
-    });
+    pending = {
+      inMs,
+      cancel: timers.after(inMs, () => {
+        pending = null;
+        void check();
+      }),
+    };
   }
 
   const watchStall = (): void => {
@@ -173,9 +167,9 @@ export const reachWatch = (
     },
     close: () => {
       closed = true;
-      cancelRecheck?.();
+      pending?.cancel();
       cancelStall?.();
-      cancelRecheck = null;
+      pending = null;
       cancelStall = null;
       listeners.clear();
     },

@@ -86,19 +86,24 @@ export const observe = (
 export const isLost = (state: Reachability): boolean => state.failures >= LOST_AFTER;
 
 /**
- * When the app checks the server's health on its own: never while nothing needs the server; at
- * once after a doubt; and again a short while after each unanswered check, until it answers.
+ * How long after a doubt the app checks the server, so a socket that drops and opens again at
+ * once, as after the phone slept, settles it without a check.
  */
-export type NextCheck = "now" | "soon" | "none";
+export const SETTLE_MS = 1000;
+
+/** How long after an unanswered check the next one goes, so the app notices the server back soon. */
+export const RECHECK_MS = 3000;
 
 /**
- * The check `state` calls for. `needed` says whether anything waits on the server: the app is on
- * screen, or it plays the server's queue, which goes on with songs from the server.
+ * In how many milliseconds the app checks the server's health on its own, or null for no check:
+ * never while nothing waits on the server; `SETTLE_MS` after a doubt; and `RECHECK_MS` after each
+ * unanswered check, until it answers. `needed` says whether anything waits on the server: the app
+ * is on screen, or it plays the server's queue, which goes on with songs from the server.
  */
-export const nextCheck = (state: Reachability, needed: boolean): NextCheck => {
-  if (!needed) return "none";
+export const nextCheck = (state: Reachability, needed: boolean): number | null => {
+  if (!needed) return null;
 
-  if (state.doubted) return "now";
+  if (state.doubted) return SETTLE_MS;
 
-  return state.failures > 0 ? "soon" : "none";
+  return state.failures > 0 ? RECHECK_MS : null;
 };

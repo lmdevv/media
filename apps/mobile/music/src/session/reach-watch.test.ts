@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { LOST_AFTER } from "@/lib/server-reach";
+import { LOST_AFTER, RECHECK_MS, SETTLE_MS } from "@/lib/server-reach";
 
-import { reachWatch, RECHECK_MS, STALL_MS } from "./reach-watch";
+import { reachWatch, STALL_MS } from "./reach-watch";
 
 /** A health check the test answers by hand, recording each one sent. */
 const healthChecks = () => {
@@ -89,7 +89,7 @@ describe("reachWatch", () => {
     watch.connection(UP);
     answering.up = false;
     watch.connection(DOWN);
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(SETTLE_MS);
 
     expect(server.sent()).toBe(1);
     expect(watch.lost()).toBe(false);
@@ -109,7 +109,7 @@ describe("reachWatch", () => {
     watch.need(true);
     watch.connection(UP);
     watch.connection(DOWN);
-    await vi.advanceTimersByTimeAsync(RECHECK_MS * 5);
+    await vi.advanceTimersByTimeAsync(SETTLE_MS + RECHECK_MS * 5);
 
     expect(server.sent()).toBe(6);
     expect(watch.lost()).toBe(true);
@@ -132,7 +132,7 @@ describe("reachWatch", () => {
     watch.need(true);
     watch.connection(UP);
     watch.connection(DOWN);
-    await vi.advanceTimersByTimeAsync(RECHECK_MS);
+    await vi.advanceTimersByTimeAsync(SETTLE_MS + RECHECK_MS);
 
     expect(watch.lost()).toBe(true);
     watch.connection(UP);
@@ -152,7 +152,7 @@ describe("reachWatch", () => {
     expect(server.sent()).toBe(0);
 
     watch.need(true);
-    await vi.advanceTimersByTimeAsync(RECHECK_MS);
+    await vi.advanceTimersByTimeAsync(SETTLE_MS + RECHECK_MS);
 
     expect(server.sent()).toBe(2);
     expect(watch.lost()).toBe(true);
@@ -165,7 +165,7 @@ describe("reachWatch", () => {
     watch.need(true);
     watch.connection(UP);
     watch.connection(DOWN);
-    await vi.advanceTimersByTimeAsync(RECHECK_MS);
+    await vi.advanceTimersByTimeAsync(SETTLE_MS + RECHECK_MS);
     watch.need(false);
     const sent = server.sent();
 
@@ -182,11 +182,11 @@ describe("reachWatch", () => {
     watch.need(true);
     watch.connection(UP);
     watch.connection({ connected: true, waitingSince: Date.now() });
-    await vi.advanceTimersByTimeAsync(STALL_MS - 1);
+    await vi.advanceTimersByTimeAsync(STALL_MS);
 
     expect(server.sent()).toBe(0);
 
-    await vi.advanceTimersByTimeAsync(1);
+    await vi.advanceTimersByTimeAsync(SETTLE_MS);
 
     expect(server.sent()).toBe(1);
     expect(watch.lost()).toBe(false);
@@ -215,6 +215,7 @@ describe("reachWatch", () => {
     watch.connection(UP);
     void watch.check();
     watch.connection(DOWN);
+    await vi.advanceTimersByTimeAsync(SETTLE_MS);
 
     expect(checks.sent()).toBe(2);
 
@@ -234,6 +235,7 @@ describe("reachWatch", () => {
     watch.subscribe(heard);
     watch.need(true);
     watch.connection(UP);
+    void watch.check();
     watch.connection(DOWN);
     watch.close();
     await checks.answer(false);
@@ -248,14 +250,43 @@ describe("reachWatch", () => {
     expect(checks.sent()).toBe(1);
   });
 
-  it("checks at once when a stream fails, and settles on its answer", async () => {
+  it("sends no check for a socket that drops and opens again within the settle", async () => {
+    const server = serverThat({ up: true });
+    const watch = reachWatch(server.answers);
+
+    watch.need(true);
+    watch.connection(UP);
+    watch.connection(DOWN);
+    await vi.advanceTimersByTimeAsync(SETTLE_MS / 2);
+    watch.connection(UP);
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(server.sent()).toBe(0);
+  });
+
+  it("sends one check on coming back on screen, even when the socket dropped while asleep", async () => {
+    const server = serverThat({ up: true });
+    const watch = reachWatch(server.answers);
+
+    watch.need(true);
+    watch.connection(UP);
+    void watch.check();
+    watch.connection(DOWN);
+    await vi.advanceTimersByTimeAsync(300);
+    watch.connection(UP);
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(server.sent()).toBe(1);
+  });
+
+  it("checks a settle after a stream fails, and settles on its answer", async () => {
     const server = serverThat({ up: true });
     const watch = reachWatch(server.answers);
 
     watch.need(true);
     watch.connection(UP);
     watch.hear("doubted");
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(SETTLE_MS);
 
     expect(server.sent()).toBe(1);
 
