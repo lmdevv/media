@@ -504,7 +504,7 @@ describe("hlsCommandArgs", () => {
         "-profile:v",
         "main",
         "-crf",
-        "28",
+        "23",
         "-maxrate",
         "6000000",
         "-bufsize",

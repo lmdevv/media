@@ -151,9 +151,10 @@ interface SoftwareEncoder {
  * that keeps up with a 1080p stream on a desktop CPU. libx265 closes its GOPs, or a forced
  * keyframe is a CRA picture whose leading pictures need the segment before, and makes each forced
  * keyframe an IDR frame (`forced-idr`): without it, a forced keyframe less than a second after a
- * scene cut's keyframe is dropped. libx265 is the slowest, near 65 frames a second at 1920x818
- * with Debian's build on a Ryzen 9 5950X (its `veryfast`, 43). SVT-AV1's presets above 9 warn of
- * artifacts outside its real-time mode.
+ * scene cut's keyframe is dropped. On 30 s of a 1080p SDR film with Debian's ffmpeg 7.1 on a Ryzen
+ * 9 5950X, libx265 `superfast` at CRF 23 scores an SSIM of 0.9878 against libx264's 0.9892 (CRF
+ * 24: 0.9865; 28: 0.9801) with 81 % of its bytes, near 39 frames a second against libx264's 195.
+ * SVT-AV1's presets above 9 warn of artifacts outside its real-time mode.
  */
 const SOFTWARE_ENCODERS: Readonly<Record<OutputCodec, SoftwareEncoder>> = {
   h264: {
@@ -163,7 +164,7 @@ const SOFTWARE_ENCODERS: Readonly<Record<OutputCodec, SoftwareEncoder>> = {
   },
   hevc: {
     name: "libx265",
-    quality: ["-preset", "superfast", "-profile:v", "main", "-crf", "28"],
+    quality: ["-preset", "superfast", "-profile:v", "main", "-crf", "23"],
     after: (level) => [
       "-forced-idr",
       "1",
