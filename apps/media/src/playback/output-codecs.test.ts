@@ -45,6 +45,9 @@ const PICTURE = [
 
 const FRAME = 1 / 24;
 
+/** One AAC frame of the source's 48 kHz audio. */
+const AUDIO_FRAME = 1024 / 48_000;
+
 /** Six seconds of 640x360 at 60 fps in MPEG-2, whose sample rate a low level holds only smaller. */
 const FAST_FILE = "Mpeg Sixty (2013)/Mpeg Sixty (2013).mkv";
 
@@ -137,7 +140,11 @@ const Probed = Schema.fromJsonString(
       }),
     ),
     packets: Schema.Array(
-      Schema.Struct({ pts_time: Schema.FiniteFromString, flags: Schema.String }),
+      Schema.Struct({
+        pts_time: Schema.FiniteFromString,
+        dts_time: Schema.FiniteFromString,
+        flags: Schema.String,
+      }),
     ),
   }),
 );
@@ -320,7 +327,7 @@ const probeSegment = Effect.fn("OutputCodecs.probeSegment")(function* (
       "-select_streams",
       "v:0",
       "-show_entries",
-      "stream=codec_name,profile,codec_tag_string,level,width,height,color_transfer,color_primaries:stream_side_data=side_data_type:packet=pts_time,flags",
+      "stream=codec_name,profile,codec_tag_string,level,width,height,color_transfer,color_primaries:stream_side_data=side_data_type:packet=pts_time,dts_time,flags",
       "-of",
       "json",
       file,
@@ -328,10 +335,45 @@ const probeSegment = Effect.fn("OutputCodecs.probeSegment")(function* (
   );
 }, Effect.scoped);
 
+const AudioPackets = Schema.fromJsonString(
+  Schema.Struct({
+    packets: Schema.Array(Schema.Struct({ pts_time: Schema.FiniteFromString })),
+  }),
+);
+
+/** When the audio of `parts`, written one after another, starts: its earliest packet. */
+const audioStart = Effect.fn("OutputCodecs.audioStart")(function* (
+  parts: ReadonlyArray<Uint8Array>,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const tools = yield* MediaTools.Service;
+  const file = yield* fs.makeTempFileScoped({ suffix: ".mp4" });
+
+  yield* fs.writeFile(file, Buffer.concat(parts));
+
+  const { packets } = yield* Schema.decodeEffect(AudioPackets)(
+    yield* tools.ffprobe([
+      "-v",
+      "error",
+      "-select_streams",
+      "a:0",
+      "-show_entries",
+      "packet=pts_time",
+      "-of",
+      "json",
+      file,
+    ]),
+  );
+
+  return Math.min(...packets.map((packet) => packet.pts_time));
+}, Effect.scoped);
+
 /**
  * Fetches the segments of `playlistUrl` from the one that holds `position` on and checks each:
- * served, in the case's codec, profile, and sample entry, and opening on a keyframe at its
- * planned start that no picture of the segment is presented before.
+ * served, in the case's codec, profile, and sample entry, opening on a keyframe at its planned
+ * start that no picture of the segment is presented before, and carrying the sound from its first
+ * picture on: its audio starts no later than one audio frame after its video, and no earlier than
+ * one audio frame before its first video packet is decoded, as the muxer cuts a fragment there.
  */
 const checkSegments = Effect.fn("OutputCodecs.checkSegments")(function* (
   playlistUrl: string,
@@ -371,6 +413,16 @@ const checkSegments = Effect.fn("OutputCodecs.checkSegments")(function* (
       FRAME / 2,
       `${at}: no picture is presented before its keyframe, as an open GOP's leading pictures are`,
     );
+
+    const audio = yield* audioStart([initBytes.body, served.body]).pipe(Effect.orDie);
+    const decoded = Math.min(...probed.packets.map((packet) => packet.dts_time));
+
+    assert.isAtMost(
+      audio,
+      first.pts_time + AUDIO_FRAME,
+      `${at}: its sound starts with its picture`,
+    );
+    assert.isAtLeast(audio, decoded - AUDIO_FRAME, `${at}: its sound starts in its own interval`);
   }
 });
 

@@ -178,8 +178,14 @@ const SOFTWARE_ENCODERS: Readonly<Record<OutputCodec, SoftwareEncoder>> = {
   av1: {
     name: "libsvtav1",
     quality: ["-preset", "9", "-crf", "30"],
-    after: (level) =>
-      level === undefined ? [] : ["-svtav1-params", `level=${String(level.tenths)}`],
+    // SVT-AV1 holds many frames before its first packets, and the muxer stops waiting for video
+    // (`max_interleave_delta`) and writes the copied audio ahead into earlier fragments: after a
+    // seek, a fragment opened with up to six seconds of silence. It waits for the video instead.
+    after: (level) => [
+      "-max_interleave_delta",
+      "0",
+      ...(level === undefined ? [] : ["-svtav1-params", `level=${String(level.tenths)}`]),
+    ],
   },
 };
 

@@ -520,7 +520,19 @@ describe("hlsCommandArgs", () => {
     [
       "av1",
       "software",
-      ["libsvtav1", "-preset", "9", "-crf", "30", "-maxrate", "5200000", "-bufsize", "10400000"],
+      [
+        "libsvtav1",
+        "-preset",
+        "9",
+        "-crf",
+        "30",
+        "-maxrate",
+        "5200000",
+        "-bufsize",
+        "10400000",
+        "-max_interleave_delta",
+        "0",
+      ],
     ],
     [
       "h264",
