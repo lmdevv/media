@@ -342,9 +342,9 @@ const plays = Effect.fn("OutputCodecs.plays")(function* (
 });
 
 /**
- * Downloads the source at the standard quality for `expected.client` and checks the MP4 the
- * service wrote: the codec the answer names, where it was encoded, and its codec, profile, and
- * sample entry.
+ * Downloads the source at the standard quality for `expected.client` from a server on `path` and
+ * checks the MP4 the service wrote: encoded on the CPU whatever the path, in the codec the answer
+ * names, and that codec's profile and sample entry.
  */
 const downloads = Effect.fn("OutputCodecs.downloads")(function* (
   expected: Case,
@@ -374,13 +374,7 @@ const downloads = Effect.fn("OutputCodecs.downloads")(function* (
     Effect.orDie,
   );
 
-  const domain = path === "cpu" || !expected.onGpu ? "cpu" : path;
-
-  assert.strictEqual(
-    ready.mode,
-    domain === "cpu" ? "transcode-software" : `transcode-${domain}`,
-    expected.name,
-  );
+  assert.strictEqual(ready.mode, "transcode-software", expected.name);
   assert.strictEqual(ready.video.codec, expected.codec, expected.name);
 
   const file = yield* fetched(ready.url.replace(/^https?:\/\/[^/]+/u, server.baseUrl));
@@ -427,12 +421,15 @@ describe.skipIf(!hasFfmpeg)("output codecs", () => {
         }),
         { excludeTestServices: true, timeout: "180 seconds" },
       )((it) => {
-        for (const expected of GPU_CASES) {
+        for (const expected of CPU_CASES) {
           it.effect(
-            `downloads ${expected.codec} encoded on ${path} for ${expected.name}`,
+            `downloads ${expected.codec} encoded on the CPU of a ${path} server for ${expected.name}`,
             () => downloads(expected, path),
             120_000,
           );
+        }
+
+        for (const expected of GPU_CASES) {
           it.effect(
             `encodes ${expected.codec} on ${path} for ${expected.name}`,
             () => plays(expected, path),

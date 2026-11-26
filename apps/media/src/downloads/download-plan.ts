@@ -51,7 +51,7 @@ export const DownloadPlan = Data.taggedEnum<DownloadPlan>();
 export interface DownloadOptions {
   /** ffmpeg stream index of the audio track to keep; the default track when absent. */
   readonly audioIndex: number | undefined;
-  /** What this server's transcoder may use for the file. */
+  /** What this server's transcoder may use for the file; only its CPU rows are used. */
   readonly capabilities: CapabilitySnapshot;
   /** The source file's size on disk. */
   readonly sizeBytes: number;
@@ -59,9 +59,10 @@ export interface DownloadOptions {
 
 /**
  * Chooses what `client` downloads of `probe` at `quality`, by the decision streams use, strictly
- * within the quality's size and bitrate: the codec the client is sent, on the GPU where a verified
- * chain does it. A file another audio track was asked for, or in a container the device cannot
- * open, is written as an MP4 even when its streams play as they are.
+ * within the quality's size and bitrate. A file another audio track was asked for, or in a
+ * container the device cannot open, is written as an MP4 even when its streams play as they are.
+ * Encodes run in software: a download waits for no player, and the GPU stays free for streams.
+ * The CPU encodes H.264 for a client that plays it, else HEVC or AV1, as it does for streams.
  */
 export const decideDownload = (
   probe: MediaProbe,
@@ -82,7 +83,7 @@ export const decideDownload = (
     },
     {
       audioIndex: options.audioIndex,
-      capabilities: options.capabilities,
+      capabilities: { ...options.capabilities, domains: [] },
       quality: DOWNLOAD_CAPS[quality],
     },
   );

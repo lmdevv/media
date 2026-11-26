@@ -243,9 +243,10 @@ Old movies' Convex project, its SDK client, and its command registry were delete
   audio track. It answers `Ready` at once when the device opens the original file within the
   quality (MP4 or QuickTime, decodable streams, the default audio), with the existing
   `/media/direct` URL. Anything else becomes an MP4 by the playback ladder: the video copied when
-  the device decodes it within the quality, else encoded as a stream for that device would be (HEVC
-  for an iPhone where a GPU encodes it, H.264 on the CPU), on the GPU where a proven chain does it;
-  the audio copied when the device decodes it, else stereo AAC; `+faststart` so AVPlayer opens it at once. Until it
+  the device decodes it within the quality, else encoded in software, to H.264, or to HEVC or AV1
+  for a device that plays no H.264; the audio copied when the device decodes it, else stereo AAC;
+  `+faststart` so AVPlayer opens it at once. A GPU encode would need admission that waits for a
+  free encoder slot and never takes a viewer's, which encoder admission does not offer. Until it
   is written, prepare answers `Preparing` with progress (the tail of ffmpeg's `-progress` output)
   and an upper bound on the size (the encode's rates, with copied audio counted at 1.6 Mb/s), and
   the app asks again. Unlike playback, the quality is a limit: a source this host cannot bring
@@ -254,7 +255,9 @@ Old movies' Convex project, its SDK client, and its command registry were delete
 - The MP4s are written one at a time at the lowest CPU priority (`ffmpegInBackground`) and take no
   transcode slot, so playback always wins. They live in
   `TRANSCODE_DIR/downloads/<fileId>/<name>.mp4`. One job per hash of the file's identity (ID,
-  size, modification time) and the plan, so devices asking for the same thing share one file;
+  size, modification time) and the request (quality, audio track, the device's capabilities), so
+  devices asking the same share one file and a poll answers from the job its request started,
+  whatever capability evidence arrived since;
   each run gets a random name, so a plan written again is served at a new URL and a resumed
   transfer never mixes bytes of two runs. The MP4 being written reserves its estimate in a ledger
   streams share (`TranscodeSpace`), so streams keep `MIN_FREE_TRANSCODE_MB` beyond it; queued MP4s
