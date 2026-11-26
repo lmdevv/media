@@ -335,6 +335,24 @@ describe("notReproduced", () => {
 
     assert.strictEqual(notReproduced(quarantined, TONE_MAP, FILM, 0, began), quarantined);
   });
+
+  it("never keeps a file off a CPU row, whatever a probe of it showed", () => {
+    const encodeCpu = capabilityKey(ImplId("encode.cpu"), "h264/8/crf");
+    const decodeCpu = capabilityKey(ImplId("decode.cpu"), "h264/yuv420p");
+    const shared = recorded(recorded(empty, encodeCpu), decodeCpu);
+    const epochOf = (key: typeof encodeCpu) => capabilityOf(shared, key).epoch;
+
+    const after = [
+      notReproduced(shared, encodeCpu, FILM, 0, epochOf(encodeCpu)),
+      reproduced(shared, encodeCpu, probe("rejected", 0, FILM), epochOf(encodeCpu)),
+      record(shared, decodeCpu, probe("crashed", 0, FILM), epochOf(decodeCpu)),
+    ];
+
+    for (const inventory of after) {
+      assert.isFalse(excludedIn(inventory, 0).has(ImplId("encode.cpu")));
+      assert.isFalse(excludedIn(inventory, 0).has(ImplId("decode.cpu")));
+    }
+  });
 });
 
 describe("forget", () => {

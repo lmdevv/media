@@ -7,8 +7,8 @@
  * belongs to that file version and stream alone and never changes a shared status or sets a shared
  * key aside; a quarantine sets a key aside for a while after a generated clip reproduced a
  * failure or a probe crashed ffmpeg, and a key with strikes needs more clean runs to verify again
- * (`runsToVerify`); an exclusion keeps one source from a row. Pure: the service owns probes and
- * the clock.
+ * (`runsToVerify`); an exclusion keeps one source from a GPU row, never from a CPU row. Pure: the
+ * service owns probes and the clock.
  */
 import type { MediaFileId } from "@media/contracts/ids";
 import { Brand, Data, Option } from "effect";
@@ -119,7 +119,7 @@ export interface Inventory {
   readonly capabilities: ReadonlyMap<CapabilityKey, Capability>;
   /** Real-source evidence, by the file version and stream it came from. */
   readonly sources: ReadonlyMap<SourceScope, ReadonlyMap<CapabilityKey, Capability>>;
-  /** Rows a source must not use, until a time. */
+  /** GPU rows a source must not use, until a time. */
   readonly exclusions: ReadonlyMap<SourceScope, ReadonlyMap<ImplId, number>>;
   /** The newest epoch handed out; a key's epoch only ever moves to a newer one. */
   readonly clock: number;
@@ -231,16 +231,23 @@ const updated = (capability: Capability, evidence: Evidence): Capability => {
 const current = (inventory: Inventory, key: CapabilityKey, epoch: number): boolean =>
   capabilityOf(inventory, key).epoch === epoch;
 
-/** Keeps `scope` from the rows `impls` until `until`. */
+/**
+ * Keeps `scope` from the GPU rows among `impls` until `until`. A CPU row is never kept from a
+ * file: it is the floor every file plays on, and a file kept off it can be left with no chain at
+ * all. Only a stream keeps off a CPU row, for itself, so its recovery can try a GPU for that stage.
+ */
 const exclude = (
   inventory: Inventory,
   scope: SourceScope,
   impls: Iterable<ImplId>,
   until: number,
 ): Inventory => {
+  const gpu = [...impls].filter((impl) => (rowOf(impl)?.on ?? "cpu") !== "cpu");
+
+  if (gpu.length === 0) return inventory;
   const known = new Map(inventory.exclusions.get(scope) ?? []);
 
-  for (const impl of impls) known.set(impl, Math.max(until, known.get(impl) ?? 0));
+  for (const impl of gpu) known.set(impl, Math.max(until, known.get(impl) ?? 0));
 
   return { ...inventory, exclusions: new Map(inventory.exclusions).set(scope, known) };
 };

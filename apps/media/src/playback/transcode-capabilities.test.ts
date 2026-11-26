@@ -24,6 +24,7 @@ import * as TranscodeCapabilities from "./transcode-capabilities.ts";
 import { Diagnosis } from "./transcode-recovery.ts";
 import { planVideo, samePipeline, type VideoIntent, type VideoPipeline } from "./video-pipeline.ts";
 import { capabilityKey, ImplId, type SourceVideo } from "./video-ops.ts";
+import { renderVideo } from "./video-render.ts";
 
 const hasFfmpeg = await ffmpegAvailable();
 
@@ -164,6 +165,11 @@ const pipelineOf = (
 
   return planned.success.pipeline;
 };
+
+/** Which step owns each name in a log of `pipeline`'s runs, as the renderer lays a run out. */
+const ownersOf = (pipeline: VideoPipeline) =>
+  renderVideo(pipeline, { input: 0, stream: 0, trimPicture: undefined, trimSubtitle: undefined })
+    .owners;
 
 /** A run of the full Quick Sync chain whose fused `vpp_qsv` failed, as ffmpeg reports it. */
 const vppFailed = (pipeline: VideoPipeline): TranscodeCapabilities.FailedRun => ({
@@ -965,6 +971,52 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
 
           assert.isTrue(next.excluded.has(ImplId("scale.qsv")));
           assert.isTrue(next.excluded.has(ImplId("tonemap.qsv")));
+        }),
+      60_000,
+    );
+  });
+
+  layer(
+    servicesOf(plain.ffmpeg, { HARDWARE_ACCELERATION: "none" }),
+    live,
+  )((it) => {
+    it.effect(
+      "keeps the failed stream alone off a CPU row its log named, never the file",
+      () =>
+        Effect.gen(function* () {
+          const capabilities = yield* TranscodeCapabilities.Service;
+          const sdr: SourceVideo = { ...JPEG_RANGE, pixelFormat: "yuv420p" };
+          const asked = request(sdr);
+          const pipeline = pipelineOf(sdr, yield* capabilities.resolve(asked));
+
+          assert.deepStrictEqual(
+            pipeline.steps.map((step) => step.impl),
+            [ImplId("decode.cpu"), ImplId("scale.cpu"), ImplId("encode.cpu")],
+          );
+
+          const diagnosis = yield* capabilities.diagnose({
+            request: asked,
+            pipeline,
+            owners: ownersOf(pipeline),
+            failure: {
+              exitCode: 1,
+              signal: null,
+              stderrTail: [
+                "[libx264 @ 0x5d1c2a0] Error encoding a video frame",
+                "[vost#0:0/libx264 @ 0x5d1c3b0] [enc:libx264 @ 0x5d1c2a0] Error submitting video frame to the encoder",
+              ].join("\n"),
+            },
+          });
+
+          assert.deepStrictEqual(diagnosis, Diagnosis.Source({ impls: [ImplId("encode.cpu")] }));
+          const next = yield* capabilities.resolve(asked);
+
+          assert.isFalse(next.excluded.has(ImplId("encode.cpu")));
+          assert.deepStrictEqual(
+            plannedImpls(sdr, next),
+            Result.succeed(["decode.cpu", "scale.cpu", "encode.cpu"]),
+            "the file's next stream still has a chain",
+          );
         }),
       60_000,
     );
