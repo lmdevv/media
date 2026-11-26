@@ -49,6 +49,19 @@ export const sizedArtworkUrl = (url: string, width: ArtworkWidth | undefined): s
     : `${url}${url.includes("?") ? "&" : "?"}${ARTWORK_WIDTH_PARAM}=${String(width)}`;
 
 /**
+ * An `<img srcset>` of every resized copy of the music cover at `url` and the cover itself, for a
+ * browser to pick from by the size the cover is drawn at. Each copy is described by the size the
+ * server bounds its shorter side to, the side that must cover the square a cover is drawn in. The
+ * original is described as one pixel past the largest copy, so a cover drawn larger than every
+ * copy loads the original rather than a copy smaller than it is drawn.
+ */
+export const coverSrcSet = (url: string): string =>
+  [
+    ...ARTWORK_WIDTHS.map((width) => `${sizedArtworkUrl(url, width)} ${String(width)}w`),
+    `${url} ${String(Math.max(...ARTWORK_WIDTHS) + 1)}w`,
+  ].join(", ");
+
+/**
  * The key an image cache keeps a media-server image under: its URL without the shareable ticket,
  * which changes every week while the image stays the same (ADR 0011). Every other part stays, the
  * width included, so a resized image and its original never share a key.

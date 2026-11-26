@@ -50,7 +50,6 @@ describe("showNowPlaying", () => {
       [185, 342, 500, 780, 1280].map((width) => ({
         src: `${COVER}&w=${String(width)}`,
         sizes: `${String(width)}x${String(width)}`,
-        type: "image/jpeg",
       })),
     );
   });

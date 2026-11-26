@@ -7,6 +7,7 @@ import {
   artworkCacheKey,
   artworkUrl,
   artworkWidthFor,
+  coverSrcSet,
   requestedArtworkWidth,
   sizedArtworkUrl,
 } from "./artwork";
@@ -38,6 +39,19 @@ describe("artworkWidthFor", () => {
     expect(artworkWidthFor(48 * 3)).toBe(185);
     expect(artworkWidthFor(240 * 3)).toBe(780);
     expect(artworkWidthFor(Number.NaN)).toBeUndefined();
+  });
+});
+
+describe("coverSrcSet", () => {
+  it("offers every copy by its shorter side, then the original past the largest", () => {
+    expect(coverSrcSet("https://m.example/music/art/a1?ticket=t").split(", ")).toEqual([
+      "https://m.example/music/art/a1?ticket=t&w=185 185w",
+      "https://m.example/music/art/a1?ticket=t&w=342 342w",
+      "https://m.example/music/art/a1?ticket=t&w=500 500w",
+      "https://m.example/music/art/a1?ticket=t&w=780 780w",
+      "https://m.example/music/art/a1?ticket=t&w=1280 1280w",
+      "https://m.example/music/art/a1?ticket=t 1281w",
+    ]);
   });
 });
 

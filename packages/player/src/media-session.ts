@@ -22,13 +22,13 @@ export interface MediaSessionHandlers {
 /**
  * A cover as the system media controls take it: each resized copy with its size, so the browser
  * downloads the one that fits its controls rather than the stored original. A copy's shorter side
- * is its width, and the controls draw it square.
+ * is the size, and the controls draw it square. No type is given: the server answers a JPEG, or a
+ * PNG for a cover with transparency.
  */
 const nowPlayingArtwork = (artUrl: string): MediaImage[] =>
   ARTWORK_WIDTHS.map((width) => ({
     src: sizedArtworkUrl(artUrl, width),
     sizes: `${String(width)}x${String(width)}`,
-    type: "image/jpeg",
   }));
 
 const session = (): MediaSession | null =>

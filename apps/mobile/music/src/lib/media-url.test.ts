@@ -49,6 +49,14 @@ describe("artSource", () => {
     expect(artSource(origin, cover, "original")).toEqual(artSource(origin, cover, 2000));
   });
 
+  it("loads the original for a frame larger than the largest copy, such as an iPad's", () => {
+    expect(artSource(origin, cover, 1279)?.uri).toBe(`${origin}${cover}&w=1280`);
+    expect(artSource(origin, cover, 1280)?.uri).toBe(`${origin}${cover}&w=1280`);
+    expect(artSource(origin, cover, 1281)?.uri).toBe(`${origin}${cover}`);
+    // Now Playing on a 13-inch iPad: about 900 points at 2x.
+    expect(artSource(origin, cover, 900 * 2)?.uri).toBe(`${origin}${cover}`);
+  });
+
   it("keeps a cover's key when its ticket changes", () => {
     const nextWeek = cover.replace("week-one", "week-two");
 
