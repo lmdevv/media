@@ -25,6 +25,8 @@ import {
   type GpuDomain,
   ImplId,
   implOf,
+  OUTPUT_CODECS,
+  type OutputCodec,
   sdrTarget,
   type SubtitleInput,
 } from "./video-ops.ts";
@@ -87,6 +89,8 @@ interface Chain {
   readonly without?: ReadonlyArray<string>;
   /** The stages the chain must plan, when they are part of what it proves. */
   readonly stages?: ReadonlyArray<string>;
+  /** What it encodes to; H.264 when absent. */
+  readonly output?: OutputCodec;
 }
 
 /** Chains that between them use every row the table has on each domain. */
@@ -111,15 +115,19 @@ const chainsOn = (domain: GpuDomain): ReadonlyArray<Chain> => [
   { name: `${domain}: MPEG-2`, clip: "mpeg2-8", domain },
   { name: `${domain}: AV1`, clip: "av1-8", domain },
   { name: `${domain}: VP9`, clip: "vp9-10", domain },
+  { name: `${domain}: H.264 encoded to HEVC`, clip: "h264-8", domain, output: "hevc" },
+  { name: `${domain}: HEVC Main 10 encoded to AV1`, clip: "hevc-10", domain, output: "av1" },
 ];
 
 const CPU_CHAINS: ReadonlyArray<Chain> = [
   { name: "cpu: HDR10 tone-mapped", clip: "hevc-pq", domain: "cpu" },
   { name: "cpu: an image subtitle burned in", clip: "h264-8", domain: "cpu", burn: true },
+  { name: "cpu: H.264 encoded to HEVC", clip: "h264-8", domain: "cpu", output: "hevc" },
+  { name: "cpu: H.264 encoded to AV1", clip: "h264-8", domain: "cpu", output: "av1" },
 ];
 
 const intentOf = (chain: Chain): VideoIntent => ({
-  targets: [sdrTarget("h264")],
+  targets: [sdrTarget(chain.output ?? "h264")],
   toneMap: PROBE_CLIPS[chain.clip].source.colour !== "sdr",
   bounds: { width: 320, height: 180 },
   cpuEncodeBounds: { width: 1920, height: 1080 },
@@ -217,6 +225,7 @@ describe.runIf(hasQsv || hasVaapi)("TranscodeCapabilities on this machine's GPU"
           }
 
           const ran = new Set<ImplId>();
+          const ranKeys = new Set<string>();
           const outcomes: Array<string> = [];
           const now = yield* Clock.currentTimeMillis;
 
@@ -292,7 +301,10 @@ describe.runIf(hasQsv || hasVaapi)("TranscodeCapabilities on this machine's GPU"
               );
               assert.isAbove(frames, 0, `${chain.name}: ${stages}: ${how}`);
 
-              for (const step of pipeline.steps) ran.add(step.impl);
+              for (const step of pipeline.steps) {
+                ran.add(step.impl);
+                ranKeys.add(step.capability);
+              }
             }
           }
 
@@ -314,6 +326,27 @@ describe.runIf(hasQsv || hasVaapi)("TranscodeCapabilities on this machine's GPU"
           );
 
           for (const impl of verifiedRows) assert.isTrue(ran.has(impl), `${impl} ran in no chain`);
+
+          // Each encoder is its own key: one this build or device lacks loses only that key, and
+          // every one verified ran in a real chain.
+          const encoders = ["cpu", ...domains].flatMap((domain) =>
+            OUTPUT_CODECS.map((codec) => {
+              const key = capabilityKey(
+                ImplId(`encode.${domain}`),
+                `${codec}/8/${domain === "cpu" ? "crf" : "cbr"}`,
+              );
+
+              return { key, status: Inventory.capabilityOf(inventory, key).status };
+            }),
+          );
+
+          yield* Console.log(
+            `encoders: ${encoders.map(({ key, status }) => `${key} ${status}`).join(", ")}`,
+          );
+
+          for (const { key, status } of encoders) {
+            if (status === "verified") assert.isTrue(ranKeys.has(key), `${key} ran in no chain`);
+          }
         }),
       300_000,
     );

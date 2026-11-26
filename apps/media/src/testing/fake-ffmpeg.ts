@@ -161,7 +161,8 @@ for (const [index, rule] of (behavior.rules ?? []).entries()) {
 }
 
 // The stand-in plays any Quick Sync or VA-API device in software, so the service's probes and
-// runs work without one: GPU options go, GPU filters become their software equivalents.
+// runs work without one: GPU options go, GPU filters become their software equivalents, and GPU
+// encoders of H.264 and HEVC become libx264 and libx265.
 const optionsOf = (text) =>
   Object.fromEntries(text.split(":").map((pair) => [pair.split("=")[0], pair.split("=")[1]]));
 const inSoftware = (options) => {
@@ -192,6 +193,8 @@ for (let index = 0; index < args.length; index += 1) {
     index += 1;
   } else if (arg === "h264_qsv" || arg === "h264_vaapi") {
     played.push("libx264");
+  } else if (arg === "hevc_qsv" || arg === "hevc_vaapi") {
+    played.push("libx265");
   } else {
     played.push(arg);
   }
@@ -220,7 +223,7 @@ const emulated = {
   ].join("\\n"),
   "-codecs": [
     " DEV.L. h264                 played (decoders: h264_qsv) (encoders: h264_qsv h264_vaapi)",
-    " DEV.L. hevc                 played (decoders: hevc_qsv)",
+    " DEV.L. hevc                 played (decoders: hevc_qsv) (encoders: hevc_qsv hevc_vaapi)",
     " DEV.L. av1                  played (decoders: av1_qsv)",
     " DEV.L. vp9                  played (decoders: vp9_qsv)",
     " DEV.L. mpeg2video           played (decoders: mpeg2_qsv)",
