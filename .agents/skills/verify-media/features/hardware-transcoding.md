@@ -80,6 +80,17 @@ Preconditions:
     where only HEVC plays).
   - `SKIPPED`: the fixture or the device is absent. Neither `NOT-BUILT` nor `SKIPPED` counts as a
     pass.
+- **Check Apple playback.** A `PASS` checks the served bytes with ffmpeg alone, and an init segment
+  AVFoundation refuses still probes and decodes in ffmpeg, so it is no proof that Apple's players
+  open the stream. `$S apple-check [--side S] [--paths cpu,qsv,vaapi] [--rows encode-hevc,...]`
+  sends each cell's `start.mp4` and `seek.mp4` to the Mac (`MAC_HOST`, as `ios up` uses), compiles
+  `scripts/apple-check.swift` there, and prints a line per file: `cpu-encode-hevc-start.mp4
+  video=true frames=96` when AVFoundation exposes a video track and decodes that many frames,
+  `video=false frames=0` when it refuses the track (AVPlayer then says "Cannot Open"). It fails
+  unless every file shows video and decodes a frame. When the Mac can't run it, every file reads
+  `not checked`, never passed. `$S apple-check FILE...` checks any MP4s, such as an init segment
+  with fragments appended. AV1 needs a Mac that decodes it (M3 or later, A17 Pro or later on
+  iPhone); the M4 here does. Put its lines beside the grid's in the PR.
 - **Read a cell.** `<side>/<path>/<row>/cell.json` holds the verdict, each check with its class
   (`stage`, `output`, `path`) and evidence, and what was observed: the negotiation, each fetch's
   segments and ffprobe facts, each ffmpeg run's arguments and engine time, and the service's log
@@ -99,6 +110,12 @@ Preconditions:
   films' frames, at a few MB each.
 
 ## Gotchas
+
+- ffmpeg 7.1, the image's, writes an empty sample dependency box (`sdtp`) into a fragmented
+  stream's init segment for an encoder that marks pictures disposable (libx265's non-reference
+  B-frames, libsvtav1's non-reference pictures), and AVFoundation then hides the video track. The
+  media service drops that box from `init.mp4` as it serves it; a grid run's cells hold the bytes
+  as served, so `apple-check` sees what a device gets. NixOS's ffmpeg 9 writes no such box.
 
 - Switching paths restarts the side's container, Convex inside it included: the browser host and
   CLI sessions carry on, but a page open in the browser reconnects.

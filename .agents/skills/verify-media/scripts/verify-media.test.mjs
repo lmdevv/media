@@ -252,6 +252,24 @@ describe("verify-media.sh", () => {
     assert.match(side.stderr, /--side must be after or before, not sideways/);
   });
 
+  test("asks for a grid before checking its cells on the Mac", () => {
+    const result = helperCommand("apple-check");
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /no hardware-matrix cells for the after side under .*; run hardware-matrix first/);
+  });
+
+  test("reports a file it could not have AVFoundation check as not checked, and fails", () => {
+    const file = join(scratch, "cell-start.mp4");
+    writeFileSync(file, "not checked here");
+    const result = spawnSync(helper, ["apple-check", file], {
+      encoding: "utf8",
+      env: { ...env, MAC_HOST: "unreachable.invalid" },
+    });
+    assert.equal(result.status, 1);
+    assert.equal(result.stdout, "cell-start.mp4 not checked\n");
+    assert.match(result.stderr, /AVFoundation could not run on unreachable\.invalid/);
+  });
+
   test("takes down a run that never started", () => {
     const result = helperCommand("down");
     assert.equal(result.status, 0, result.stderr);
