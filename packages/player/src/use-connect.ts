@@ -1,9 +1,9 @@
 import { usePlatformQuery } from "@media/sdk/react";
 import type { PlatformSdk } from "@media/sdk/promise";
 import { Brand } from "effect";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import { activeDevice, ownDevices, yieldsTo } from "./connect-devices";
+import { activeDevice, deviceReports, ownDevices, yieldsTo } from "./connect-devices";
 import type { ConnectTarget, Device, DevicePlayback } from "./connect-devices";
 import { ConnectPlayer, systemConnectClock } from "./connect-player";
 import type { ConnectCommands, ConnectOutput } from "./connect-player";
@@ -263,16 +263,11 @@ export const useConnect = (
   );
 
   const devices = useStable(online);
-  const latest = useRef(online);
+  const [reports] = useState(deviceReports);
 
   useLayoutEffect(() => {
-    latest.current = online;
-  }, [online]);
-
-  const playbackOf = useCallback(
-    (id: string) => latest.current.find((device) => device.id === id)?.playback ?? null,
-    [],
-  );
+    reports.offer(online);
+  }, [reports, online]);
 
   const [followed, setFollowed] = useState<string | null>(null);
   const remote = here ? null : activeDevice(devices, followed);
@@ -295,10 +290,10 @@ export const useConnect = (
       here,
       player,
       lead: async () => election.current?.take(),
-      playbackOf,
+      playbackOf: reports.playbackOf,
       serverNow: () => player.serverNow(),
     }),
-    [deviceId, devices, remote, here, player, playbackOf],
+    [deviceId, devices, remote, here, player, reports],
   );
 };
 

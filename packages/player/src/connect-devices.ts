@@ -63,6 +63,62 @@ const musicOf = (target: ConnectTarget): DevicePlayback | null => {
   };
 };
 
+const samePlayback = (left: DevicePlayback | null, right: DevicePlayback | null): boolean =>
+  left === right ||
+  (left !== null &&
+    right !== null &&
+    left.trackId === right.trackId &&
+    left.playing === right.playing &&
+    left.positionMs === right.positionMs &&
+    left.at === right.at &&
+    left.pending === right.pending);
+
+/**
+ * The listener's other devices as the core last listed them, read without a render: a report that
+ * moves only a device's position anchor changes nothing the player shows, but moves the position
+ * it shows for that device.
+ */
+export interface DeviceReports {
+  /** What `deviceId` plays as it last reported, its position anchor included; null for none. */
+  readonly playbackOf: (deviceId: string) => DevicePlayback | null;
+  /**
+   * Calls `listener` after each list that changes what a device plays or where it stands in it;
+   * returns the function that stops calling it.
+   */
+  readonly subscribe: (listener: () => void) => () => void;
+  /** Takes in the devices as the core last listed them. */
+  readonly offer: (devices: ReadonlyArray<Device>) => void;
+}
+
+/** A `DeviceReports` that lists no device yet. */
+export const deviceReports = (): DeviceReports => {
+  const listeners = new Set<() => void>();
+  let listed: ReadonlyArray<Device> = [];
+
+  const playbackOf = (deviceId: string): DevicePlayback | null =>
+    listed.find((device) => device.id === deviceId)?.playback ?? null;
+
+  return {
+    playbackOf,
+    subscribe: (listener) => {
+      listeners.add(listener);
+
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    offer: (devices) => {
+      const changed =
+        devices.length !== listed.length ||
+        devices.some((device) => !samePlayback(device.playback, playbackOf(device.id)));
+
+      listed = devices;
+
+      if (changed) for (const listener of listeners) listener();
+    },
+  };
+};
+
 /**
  * `devices` by name, then id, inserted in order: the phone app's JavaScript engine (Hermes) has no
  * `toSorted`, and lint forbids `sort`. The list is a person's few devices.

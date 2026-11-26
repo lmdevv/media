@@ -3,7 +3,6 @@ import { pagedStore } from "@media/mobile-core/pages";
 import { lastPerson } from "@media/mobile-core/sign-in";
 import { moveHere, moveTo, playOn, remoteActions } from "@media/player/connect-actions";
 import type { TransportActions } from "@media/player/connect-actions";
-import { devicePosition } from "@media/player/connect-devices";
 import type { Device } from "@media/player/connect-devices";
 import { PlaybackController } from "@media/player/playback-controller";
 import type {
@@ -106,7 +105,7 @@ import { handOver } from "./hand-over";
 import type { HandBackStep, LocalQueue } from "./local-queue";
 import { LocalStore, offlinePlaysKey } from "./local-store";
 import { NativeEngine } from "./native-engine";
-import { positionTicker } from "./position-ticker";
+import { showPosition } from "./position-ticker";
 import type { PositionTicker } from "./position-ticker";
 import type { TimelineMark } from "./native-engine";
 import { lockScreenControls } from "./native-host";
@@ -1586,9 +1585,25 @@ export function PlayerProvider({ children }: { readonly children: ReactNode }) {
   const shownPlaying = remotePlayback === null ? playing : remotePlayback.playing;
   const latest = useRef<Latest>({ queue: serverQueue, shownPlaying, connect, track });
 
+  const [shown] = useState(() =>
+    showPosition(
+      controller,
+      {
+        playbackOf: connected.playbackOf,
+        serverNow: () => connected.player.serverNow(),
+      },
+      POSITION_INTERVAL_MS,
+    ),
+  );
+
   useLayoutEffect(() => {
     latest.current = { queue: serverQueue, shownPlaying, connect, track };
-  }, [serverQueue, shownPlaying, connect, track]);
+    shown.follow(
+      connect.remote === null
+        ? null
+        : { deviceId: connect.remote.id, durationMs: track?.durationMs ?? 0 },
+    );
+  }, [serverQueue, shownPlaying, connect, track, shown]);
 
   const commands = useMemo(
     () => createCommands(platform, phone, copies),
@@ -1614,19 +1629,7 @@ export function PlayerProvider({ children }: { readonly children: ReactNode }) {
     [platform, phone, commands],
   );
 
-  const readPosition = useMemo(
-    () => () => {
-      const { connect: view, track: playingTrack } = latest.current;
-      const followed = view.remote === null ? null : view.playbackOf(view.remote.id);
-
-      if (followed === null) return controller.positionMs();
-
-      return devicePosition(followed, view.serverNow(), playingTrack?.durationMs ?? 0);
-    },
-    [controller],
-  );
-
-  const [ticker] = useState(() => positionTicker(readPosition, POSITION_INTERVAL_MS));
+  const { read: readPosition, ticker } = shown;
   const [foreground, setForeground] = useState(AppState.currentState === "active");
 
   useEffect(() => {
@@ -1642,11 +1645,6 @@ export function PlayerProvider({ children }: { readonly children: ReactNode }) {
   useEffect(() => {
     ticker.update({ playing: shownPlaying, foreground });
   }, [ticker, shownPlaying, foreground]);
-
-  // A seek, another song, or a followed device's report may move the position while it stands.
-  useEffect(() => {
-    ticker.refresh();
-  }, [ticker, snapshot, connect]);
 
   const devices = useDevicesView(platform, controller, connect, latest);
 

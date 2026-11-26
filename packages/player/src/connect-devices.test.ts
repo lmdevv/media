@@ -4,6 +4,7 @@ import {
   ONLINE_MS,
   activeDevice,
   deviceKind,
+  deviceReports,
   devicePosition,
   moveArrived,
   outputLabel,
@@ -162,6 +163,57 @@ describe("yieldsTo", () => {
     expect(yieldsTo({ playing: false }, [device("a", false)])).toBe(false);
     expect(yieldsTo({ playing: true }, [device("a", true)])).toBe(false);
     expect(yieldsTo(null, [device("a", true)])).toBe(false);
+  });
+});
+
+const pausedAt = (id: string, positionMs: number): Device => ({
+  ...device(id, false),
+  playback: { trackId: "a", playing: false, positionMs, at: NOW, pending: false },
+});
+
+describe("deviceReports", () => {
+  it("tells its listeners of a report that moves only a device's position, and reads it", () => {
+    const reports = deviceReports();
+    let heard = 0;
+
+    reports.subscribe(() => {
+      heard += 1;
+    });
+    reports.offer([pausedAt("laptop", 26_000)]);
+    reports.offer([pausedAt("laptop", 0)]);
+
+    expect(heard).toBe(2);
+    expect(reports.playbackOf("laptop")?.positionMs).toBe(0);
+  });
+
+  it("tells nothing for a list that changes no device's playback, as the online check's", () => {
+    const reports = deviceReports();
+    let heard = 0;
+
+    reports.offer([pausedAt("laptop", 26_000), device("desk", null)]);
+    reports.subscribe(() => {
+      heard += 1;
+    });
+    reports.offer([pausedAt("laptop", 26_000), device("desk", null)]);
+
+    expect(heard).toBe(0);
+  });
+
+  it("tells of a device that comes or goes, and stops telling a listener that left", () => {
+    const reports = deviceReports();
+    let heard = 0;
+
+    const stop = reports.subscribe(() => {
+      heard += 1;
+    });
+
+    reports.offer([pausedAt("laptop", 0)]);
+    reports.offer([]);
+    stop();
+    reports.offer([pausedAt("laptop", 0)]);
+
+    expect(heard).toBe(2);
+    expect(reports.playbackOf("desk")).toBeNull();
   });
 });
 
