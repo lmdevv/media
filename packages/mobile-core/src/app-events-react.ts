@@ -10,7 +10,15 @@ import type { ContentSource, OpenCache, TimedScreen } from "@media/contracts/dia
 import { createMediaServer } from "@media/sdk/promise";
 import { usePlatform, usePlatformQuery, usePlatformStatus } from "@media/sdk/react";
 import { Option } from "effect";
-import { Component, Fragment, createElement, useEffect, useLayoutEffect, useState } from "react";
+import {
+  Component,
+  Fragment,
+  createElement,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import type { ComponentType, ReactNode } from "react";
 
 import type { AppEvents, Landing, OpenClaim } from "./app-events";
@@ -119,10 +127,11 @@ export interface ScreenPlace {
 
 /**
  * Times the opening of the screen of record `id`: answers the frame mark to render as the
- * screen's last child, or null. Identity rule: the screen claims the press that opened it when it
- * mounts focused, as route instance `place.key`, and only that claim closes that press's timer, at
- * the first frame its content is in view. A later press, a blur, or an unmount ends the claim, so
- * an earlier screen's late content never closes a later press's timer.
+ * screen's last child, or null. The mark renders with the content, in the same commit, so it is
+ * drawn in the content's first frame. Identity rule: the screen claims the press that opened it
+ * when it mounts focused, as route instance `place.key`, and only that claim closes that press's
+ * timer, when the mark is drawn. A later press, a blur, or an unmount ends the claim, so an
+ * earlier screen's late content never closes a later press's timer.
  */
 export const useOpenMark = (
   events: AppEvents,
@@ -133,29 +142,30 @@ export const useOpenMark = (
   contentReady: boolean,
 ): ReactNode => {
   const [cache] = useState<OpenCache>(contentReady ? "kept" : "fetched");
-  const [claim, setClaim] = useState(Option.none<OpenClaim>());
+  const [drawn, setDrawn] = useState(false);
+  const claim = useRef(Option.none<OpenClaim>());
   const { key, focused } = place;
 
   useLayoutEffect(() => {
     if (!focused) return undefined;
     const held = events.claimOpen(screen, id, key, cache);
 
-    setClaim(held);
+    claim.current = held;
 
     return () => {
       Option.map(held, events.releaseOpen);
+      claim.current = Option.none();
     };
   }, [events, screen, id, key, focused, cache]);
 
-  if (!contentReady || Option.isNone(claim)) return null;
-  const held = claim.value;
+  if (!contentReady || drawn) return null;
 
   return createElement(mark, {
     style: OVER_SCREEN,
     pointerEvents: "none",
     onDrawn: (event) => {
-      events.openContentVisible(held, event.nativeEvent.at);
-      setClaim(Option.none());
+      Option.map(claim.current, (held) => events.openContentVisible(held, event.nativeEvent.at));
+      setDrawn(true);
     },
   });
 };
