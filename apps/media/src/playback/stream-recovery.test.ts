@@ -1,7 +1,7 @@
 import { join } from "node:path";
 
 import { assert, describe, layer } from "@effect/vitest";
-import { Clock, Effect, Fiber, FileSystem, Path, Schedule, Schema } from "effect";
+import { Clock, Effect, Fiber, FileSystem, Option, Path, Schedule, Schema } from "effect";
 import { HttpClient, HttpClientRequest } from "effect/http";
 
 import { LibraryId } from "@media/contracts/ids";
@@ -126,6 +126,18 @@ const slowDiagnosis = await writeFakeFfmpeg({
 const failsOnceSeeking = await writeFakeFfmpeg({
   hlsFromStartSeconds: 2,
   rules: [{ token: "-ss ", runs: "hls", stderr: "Conversion failed!", limit: 1 }],
+  logInvocations: true,
+});
+
+/**
+ * The first stream run that tone-maps on Quick Sync fails; from then on every probe takes eight
+ * seconds, longer than a diagnosis's whole budget.
+ */
+const outlastsDiagnosis = await writeFakeFfmpeg({
+  rules: [
+    { token: "tonemap=1", runs: "hls", stderr: VPP_FAILED, arm: "slow", limit: 1 },
+    { token: "-progress", runs: "probe", armedBy: "slow", delayMs: 8000 },
+  ],
   logInvocations: true,
 });
 
@@ -643,6 +655,68 @@ describe.skipIf(!hasFfmpeg)("stream recovery", () => {
           const moved = yield* decodeSeek(back.body).pipe(Effect.orDie);
 
           assert.strictEqual(yield* fetchStatus(segmentOf(moved.playlistUrl, index)), 200);
+        }),
+      120_000,
+    );
+  });
+
+  layer(
+    MediaTestServer.layer(
+      { FFMPEG_PATH: outlastsDiagnosis, HARDWARE_ACCELERATION: "qsv" },
+      { diagnosisBudget: TranscodeCapabilities.DiagnosisBudget.defaultValue() },
+    ),
+    options,
+  )((it) => {
+    it.effect(
+      "keeps this stream off the stages a diagnosis could not decide in the service's budget, and sets nothing aside for others",
+      () =>
+        Effect.gen(function* () {
+          const server = yield* MediaTestServer.Service;
+          const capabilities = yield* TranscodeCapabilities.Service;
+          const fileId = yield* addFilm("undecided");
+          const toneMap = capabilityKey(ImplId("tonemap.qsv"), "pq");
+
+          const film = yield* negotiated({
+            token: signTestToken({ fid: fileId, sid: "film" }),
+            ...CHOICES,
+          });
+
+          assert.strictEqual(film.mode, "transcode-qsv", "the encode stays on the GPU");
+          assert.strictEqual(film.generation, 2);
+          assert.strictEqual(yield* fetchStatus(segmentOf(film.url, 3)), 200);
+
+          const [first = [], replacement = []] = yield* runsOf(
+            outlastsDiagnosis,
+            film.streamId ?? "",
+          );
+
+          assert.isTrue(first.join(" ").includes("tonemap=1"));
+          assert.isTrue(replacement.join(" ").includes("zscale"), "tone-mapped on the CPU");
+          assert.notInclude(replacement.join(" "), "vpp_qsv", "both suspects kept off");
+          assert.include(replacement, "h264_qsv");
+
+          const replaced = server
+            .logged()
+            .filter(
+              (entry) =>
+                entry.annotations["streamId"] === film.streamId &&
+                entry.message === "StreamSessions.pipeline_replaced",
+            );
+
+          assert.deepStrictEqual(
+            replaced.map((entry) => [entry.annotations["cause"], entry.annotations["excluded"]]),
+            [["Undecided", "scale.qsv,tonemap.qsv"]],
+          );
+
+          // Nothing was decided: the tone map is neither quarantined nor kept from the file.
+          const known = yield* capabilities.inventory;
+
+          assert.strictEqual(capabilityOf(known, toneMap).status, "verified");
+          assert.isTrue(Option.isNone(capabilityOf(known, toneMap).quarantine));
+          assert.isTrue(
+            [...known.exclusions.values()].every((excluded) => excluded.size === 0),
+            "no file is kept from a row",
+          );
         }),
       120_000,
     );
