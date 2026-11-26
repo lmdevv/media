@@ -140,7 +140,7 @@ const decodeStarted = Schema.decodeUnknownEffect(StartedPlayback);
 
 /**
  * Where an HLS stream's video is made, for people: `stages: Decode · QSV, Encode · QSV`, then a
- * line per change of the chain with its generation, cause, what it kept off, and ffmpeg's line.
+ * line per change of the chain with its generation, cause, what it kept off, and its reason.
  */
 const transcodeLines = (transcode: TranscodeSummary): ReadonlyArray<string> => [
   ...(transcode.stages.length === 0
@@ -151,7 +151,7 @@ const transcodeLines = (transcode: TranscodeSummary): ReadonlyArray<string> => [
       `changed: generation ${String(change.generation)}`,
       TranscodeLabels.causeLabel(change.cause),
       ...(change.excluded.length === 0 ? [] : [`off ${change.excluded.join(", ")}`]),
-      ...(change.detail === "" ? [] : [change.detail]),
+      TranscodeLabels.reasonLabel(change.reason),
     ].join(" · "),
   ),
 ];

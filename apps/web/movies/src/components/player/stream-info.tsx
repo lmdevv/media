@@ -12,7 +12,7 @@ import { XIcon } from "lucide-react";
 
 const { channelLabel, codecLabel } = MediaLabels;
 
-const { causeLabel, stageLabel } = TranscodeLabels;
+const { reasonLabel, stageLabel } = TranscodeLabels;
 
 const RUNGS = [
   { id: "direct", label: "Direct" },
@@ -57,14 +57,14 @@ const megabits = (bitsPerSecond: number): string => (bitsPerSecond / 1_000_000).
 
 const pad = (part: number): string => String(part).padStart(2, "0");
 
-/** `21:04 · stage failed · tonemap.qsv`: when, why, and what the stream keeps off from then on. */
+/** `21:04 · probe failed too · tonemap.qsv`: when, why, and what the stream keeps off from then on. */
 const changeLine = (change: TranscodeChange): string => {
   const at = new Date(change.at);
   const [first, ...rest] = change.excluded;
 
   return [
     `${pad(at.getHours())}:${pad(at.getMinutes())}`,
-    causeLabel(change.cause),
+    reasonLabel(change.reason),
     ...(first === undefined
       ? []
       : [rest.length === 0 ? first : `${first} +${String(rest.length)}`]),

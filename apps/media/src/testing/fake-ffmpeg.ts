@@ -56,16 +56,18 @@ export interface FakeFfmpegBehavior {
 /**
  * A rule for runs whose arguments, as the service wrote them, contain `token`. `runs` picks HLS
  * runs, capability probes (`-progress` into the null output), or any run. A matching run waits
- * `delayMs`, then writes `stderr` if given; then with `signal` it is killed by that signal, with
- * `hang` it never exits until killed, with `exitCode` it exits with that status, with `stderr`
- * alone it exits with status 1, and otherwise it runs as usual. A rule with `armedBy` applies only
- * once a rule that `arm`s that name has matched, so a probe can pass at start and fail after a
- * stream's failure; `limit` caps how many runs a rule matches.
+ * `delayMs`, then writes `stderr` if given, or the text of the file `stderrFrom` names beside the
+ * stand-in as it is when the run starts; then with `signal` it is killed by that signal, with
+ * `hang` it never exits until killed, with `exitCode` it exits with that status, with `stderr` or
+ * `stderrFrom` alone it exits with status 1, and otherwise it runs as usual. A rule with `armedBy`
+ * applies only once a rule that `arm`s that name has matched, so a probe can pass at start and
+ * fail after a stream's failure; `limit` caps how many runs a rule matches.
  */
 export interface RunRule {
   readonly token: string;
   readonly runs: "hls" | "probe" | "any";
   readonly stderr?: string;
+  readonly stderrFrom?: string;
   readonly signal?: NodeJS.Signals;
   readonly exitCode?: number;
   readonly hang?: true;
@@ -145,14 +147,15 @@ for (const [index, rule] of (behavior.rules ?? []).entries()) {
     if (spare !== undefined) writeFileSync(spare, "");
     if (rule.arm !== undefined) writeFileSync(join(here, "armed-" + rule.arm), "");
     if (rule.delayMs !== undefined) await new Promise((resolve) => setTimeout(resolve, rule.delayMs));
-    if (rule.stderr !== undefined) process.stderr.write(rule.stderr + "\\n");
+    const stderr = rule.stderrFrom === undefined ? rule.stderr : readFileSync(join(here, rule.stderrFrom), "utf8");
+    if (stderr !== undefined) process.stderr.write(stderr + "\\n");
     // A core size limit of 1 makes Linux skip the core dump, which a dump collector such as
     // systemd-coredump would otherwise take seconds to write before the run ends.
     if (rule.signal !== undefined) spawnSync("prlimit", ["--pid", String(process.pid), "--core=1:1"]);
     if (rule.signal !== undefined) process.kill(process.pid, rule.signal);
     if (rule.hang === true || rule.signal !== undefined) await new Promise(() => setInterval(() => {}, 60_000));
     if (rule.exitCode !== undefined) process.exit(rule.exitCode);
-    if (rule.stderr !== undefined) process.exit(1);
+    if (stderr !== undefined) process.exit(1);
     break;
   }
 }

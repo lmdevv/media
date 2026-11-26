@@ -29,11 +29,7 @@ const textsOf = (report: TranscodingReport): ReadonlyArray<string | null> => [
     device.kernelDriver,
     device.userDriver,
   ]),
-  ...report.capabilities.flatMap((capability) => [
-    capability.key,
-    capability.domain,
-    capability.detail,
-  ]),
+  ...report.capabilities.flatMap((capability) => [capability.key, capability.domain]),
 ];
 
 /**

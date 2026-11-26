@@ -2167,7 +2167,7 @@ const core_server_status = query({
         build: Schema.Union([
           Schema.Null,
           Schema.Struct({
-            version: Schema.String,
+            version: Schema.Union([Schema.String, Schema.Null]),
             kernel: Schema.String,
             checkedAt: Schema.Finite,
           }),
@@ -2194,7 +2194,15 @@ const core_server_status = query({
             ]),
             source: Schema.Union([Schema.Literal("listing"), Schema.Literal("probe"), Schema.Null]),
             checkedAt: Schema.Union([Schema.Finite, Schema.Null]),
-            detail: Schema.String,
+            reason: Schema.Union([
+              Schema.Literal("listed"),
+              Schema.Literal("not-listed"),
+              Schema.Literal("passed"),
+              Schema.Literal("refused"),
+              Schema.Literal("crashed"),
+              Schema.Literal("inconclusive"),
+              Schema.Null,
+            ]),
             quarantineEndsAt: Schema.Union([Schema.Finite, Schema.Literal("restart"), Schema.Null]),
           }),
         ),

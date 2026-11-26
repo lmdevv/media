@@ -267,12 +267,16 @@ const linkState = v.union(
 /**
  * What the media server knows about transcoding on its machine: the ffmpeg build, each GPU device
  * as one GPU API sees it, and each capability with its status, where and when its latest evidence
- * came from, and the end of any quarantine in force.
+ * came from, what it showed as a code, and the end of any quarantine in force.
  */
 const transcodingReport = v.object({
   build: v.union(
     v.null(),
-    v.object({ version: v.string(), kernel: v.string(), checkedAt: v.number() }),
+    v.object({
+      version: v.union(v.string(), v.null()),
+      kernel: v.string(),
+      checkedAt: v.number(),
+    }),
   ),
   devices: v.array(
     v.object({
@@ -292,7 +296,15 @@ const transcodingReport = v.object({
       status: v.union(v.literal("unknown"), v.literal("verified"), v.literal("unsupported")),
       source: v.union(v.literal("listing"), v.literal("probe"), v.null()),
       checkedAt: v.union(v.number(), v.null()),
-      detail: v.string(),
+      reason: v.union(
+        v.literal("listed"),
+        v.literal("not-listed"),
+        v.literal("passed"),
+        v.literal("refused"),
+        v.literal("crashed"),
+        v.literal("inconclusive"),
+        v.null(),
+      ),
       quarantineEndsAt: v.union(v.number(), v.literal("restart"), v.null()),
     }),
   ),

@@ -121,9 +121,10 @@ const folders = await media.run("libraries.folders", {});
 - `Downloads.prepare` asks the media service where a download stands.
 - `PlayerDiagnostics` records a player's startup, stalls, and recoveries and reports them.
 - `Versions` orders a title's files (`preferredVersion`) and `MediaLabels` names their facts.
-- `TranscodeLabels` names a stream's stages (`stageLabel`) and changes (`causeLabel`), and sums
-  up `core.server.status`'s transcoding report: its GPUs (`devicesOf`) and how many capabilities
-  are verified, unsupported, and quarantined (`capabilityCounts`).
+- `TranscodeLabels` names a stream's stages (`stageLabel`), its changes' causes (`causeLabel`),
+  and why a chain changed or a stream ended (`reasonLabel`), and sums up `core.server.status`'s
+  transcoding report: its GPUs (`devicesOf`) and how many capabilities are verified, unsupported,
+  and quarantined (`capabilityCounts`).
 - `MediaOrigin`: playback and download requests go to the public URL the playback names unless
   this reference is provided, as the CLI does with its configured media URL. The URLs the service
   answers with, such as `stream.url`, stay public either way.

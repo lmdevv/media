@@ -345,7 +345,7 @@ describe.skipIf(core === undefined)("the media CLI against the core", () => {
           generation: 2,
           cause: "capability",
           excluded: ["tonemap.qsv"],
-          detail: "[Parsed_vpp_qsv_1 @ 0x1] Invalid color_matrix.",
+          reason: "reproduced",
         },
       ],
     };
@@ -387,7 +387,7 @@ describe.skipIf(core === undefined)("the media CLI against the core", () => {
     expect(human.stdout.trimEnd().split("\n")).toEqual([
       `Sintel ${id} (transcode-qsv, from 0:00)`,
       "stages: Decode · QSV, Move · QSV → CPU, Tone map · CPU, Move · CPU → QSV, Encode · QSV",
-      "changed: generation 2 · stage failed · off tonemap.qsv · [Parsed_vpp_qsv_1 @ 0x1] Invalid color_matrix.",
+      "changed: generation 2 · stage failed · off tonemap.qsv · probe failed too",
       answer.url,
     ]);
   });
@@ -421,7 +421,7 @@ describe.skipIf(core === undefined)("the media CLI against the core", () => {
             status: "unsupported",
             source: "probe",
             checkedAt: at,
-            detail: "rejected: Error querying IO surface",
+            reason: "refused",
             quarantineEndsAt: null,
           },
           {
@@ -430,7 +430,7 @@ describe.skipIf(core === undefined)("the media CLI against the core", () => {
             status: "unknown",
             source: "probe",
             checkedAt: at,
-            detail: "passed",
+            reason: "passed",
             quarantineEndsAt: "restart",
           },
         ],
@@ -457,10 +457,12 @@ describe.skipIf(core === undefined)("the media CLI against the core", () => {
     expect(human.code, human.stderr).toBe(ExitCode.ok);
     expect(lines).toContain("transcoding:");
     expect(
-      lines.some((line) => /^\s+KEY\s+DOMAIN\s+STATUS\s+SOURCE\s+CHECKED AT/u.test(line)),
+      lines.some((line) => /^\s+KEY\s+DOMAIN\s+STATUS\s+SOURCE\s+CHECKED AT\s+REASON/u.test(line)),
     ).toBe(true);
     expect(
-      lines.some((line) => /decode\.qsv:h264\/yuv420p10le\s+qsv\s+unsupported\s+probe/u.test(line)),
+      lines.some((line) =>
+        /decode\.qsv:h264\/yuv420p10le\s+qsv\s+unsupported\s+probe\s+\S+ \S+\s+refused/u.test(line),
+      ),
     ).toBe(true);
     expect(lines.some((line) => /encode\.qsv:h264\/8\/cbr .*restart$/u.test(line))).toBe(true);
   });

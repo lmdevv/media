@@ -1,7 +1,18 @@
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { assert, describe, layer } from "@effect/vitest";
-import { Duration, Effect, FileSystem, Layer, Option, Ref, Schedule, Schema, Stream } from "effect";
+import {
+  Duration,
+  Effect,
+  FileSystem,
+  Layer,
+  Option,
+  Predicate,
+  Ref,
+  Schedule,
+  Schema,
+  Stream,
+} from "effect";
 import { HttpClient, HttpClientRequest } from "effect/http";
 
 import { LibraryId } from "@media/contracts/ids";
@@ -9,8 +20,10 @@ import {
   type ClientCapabilities,
   NegotiateResponse,
   PlaybackApiError,
+  TranscodeReason,
 } from "@media/contracts/media-playback";
-import { StartedPlayback } from "@media/contracts/models/playback";
+import { PlaybackMode, StartedPlayback } from "@media/contracts/models/playback";
+import { EvidenceReason } from "@media/contracts/server-functions";
 import { Milliseconds } from "@media/contracts/units";
 import { Playback } from "@media/sdk/effect";
 
@@ -24,8 +37,10 @@ import { ffmpegAvailable } from "../testing/fixture-library.ts";
 import * as FixtureWorkspace from "../testing/fixture-workspace.ts";
 import * as MediaTestServer from "../testing/media-test-server.ts";
 import { signTestToken } from "../testing/test-tokens.ts";
+import { RELEASE } from "../release.ts";
 import { capabilityOf } from "./capability-inventory.ts";
 import * as TranscodeCapabilities from "./transcode-capabilities.ts";
+import { VIDEO_OPS } from "./video-pipeline.ts";
 import { capabilityKey, ImplId } from "./video-ops.ts";
 
 const hasFfmpeg = await ffmpegAvailable();
@@ -54,6 +69,171 @@ const leakingEncoder = await writeFakeFfmpeg({
   ],
   logInvocations: true,
 });
+
+/** What the stand-in's failing runs write to standard error, rewritten before each case. */
+const STDERR = "stderr.txt";
+
+/** A ticket a playback URL in ffmpeg's log could carry. */
+const SECRET = "Zq7SecretTicketValue";
+
+/** A file whose every HLS run fails, by a word its name holds. */
+const DOOMED = "Doomed";
+
+/**
+ * Ways ffmpeg's log could spell `path` under `root`: whole, quoted, relative, Windows-style,
+ * percent-encoded, inside a longer token, and in URLs whose ticket is spelled out or encoded.
+ */
+const spellingsOf = (path: string, root: string): ReadonlyArray<string> => {
+  const relative = path.slice(root.length + 1);
+
+  return [
+    path,
+    `'${path}'`,
+    `"${path}"`,
+    relative,
+    `C:${path.replaceAll("/", "\\")}`,
+    encodeURIComponent(path),
+    encodeURI(path),
+    `file:${path}`,
+    `subtitles=filename=${path}:si=0`,
+    `concat:${path}|${relative}`,
+    `../media/hls/a/1/0.m4s?%74icket=${SECRET}`,
+    `http://media.test/media/hls/a/1/0.m4s?ticket=${SECRET}&x=1`,
+  ];
+};
+
+/** The device check's log: libva's lines, then the driver line with a path after its version. */
+const DEVICE_LOG = [
+  "libva info: VA-API version 1.22.0",
+  `[AVHWDeviceContext @ 0x1] VAAPI driver: Intel iHD driver for Intel(R) Gen Graphics - 25.2.6 (${LEAKED}).`,
+].join("\n");
+
+/**
+ * The device check prints a driver line with a path in it, and Quick Sync's tone map probes fail
+ * printing every spelling of another; every HLS run of a file named `Doomed`, and every Quick Sync
+ * HLS run, fails writing the text of `STDERR`.
+ */
+const leakingRuns = await writeFakeFfmpeg({
+  rules: [
+    { token: "nullsrc=s=64x64", runs: "any", stderr: DEVICE_LOG, exitCode: 0 },
+    { token: "tonemap=1", runs: "probe", stderr: spellingsOf(LEAKED, "/zz-vault").join(" ") },
+    { token: DOOMED, runs: "hls", stderrFrom: STDERR },
+    { token: "h264_qsv", runs: "hls", stderrFrom: STDERR },
+  ],
+});
+
+/** Where an ffmpeg line can start, so a case's failure reaches each of the classifier's branches. */
+const LINE_STARTS = [
+  "",
+  "[h264_qsv @ 0x1] ",
+  "[Parsed_vpp_qsv_0 @ 0x2] ",
+  "[vist#0:0/h264 @ 0x3] ",
+  "Error opening input file ",
+  "[aost#0:1/aac @ 0x4] ",
+  "[out#0/hls @ 0x5] ",
+  "No space left on device ",
+  "Device creation failed: ",
+  "libva info: ",
+] as const;
+
+const OPS: ReadonlySet<string> = new Set([
+  "decode",
+  "scale",
+  "tonemap",
+  "burn-image",
+  "encode",
+  "move",
+]);
+
+const DOMAIN_NAMES: ReadonlySet<string> = new Set(["cpu", "qsv", "vaapi"]);
+
+const CAUSES: ReadonlySet<string> = new Set([
+  "capability",
+  "source",
+  "undecided",
+  "not-video",
+  "unexplained",
+  "capability-lost",
+]);
+
+const IMPLS: ReadonlySet<string> = new Set(VIDEO_OPS.map((row) => row.id));
+
+const among =
+  (known: ReadonlySet<string> | ReadonlyArray<string>) =>
+  (text: string): boolean =>
+    "has" in known ? known.has(text) : known.includes(text);
+
+/** The text a field of a summary, a failure, or a report may hold, by its path in the answer. */
+const FIELDS = new Map<string, (text: string) => boolean>([
+  ["transcode.stages.op", among(OPS)],
+  ["transcode.stages.domain", among(DOMAIN_NAMES)],
+  ["transcode.stages.impl", among(IMPLS)],
+  ["transcode.stages.move.from", among(DOMAIN_NAMES)],
+  ["transcode.stages.move.to", among(DOMAIN_NAMES)],
+  ["transcode.changes.cause", among(CAUSES)],
+  ["transcode.changes.excluded", among(IMPLS)],
+  ["transcode.changes.reason", among(TranscodeReason.literals)],
+  ["_tag", (text) => text === "TranscodeFailed"],
+  ["streamId", (text) => /^[\w-]+$/u.test(text)],
+  ["mode", among(PlaybackMode.literals)],
+  ["reason", among(TranscodeReason.literals)],
+  ["version", (text) => text === RELEASE],
+  ["transcoding.build.version", (text) => /^[\w.+~-]+$/u.test(text)],
+  ["transcoding.build.kernel", (text) => /^[\w.+~-]+$/u.test(text)],
+  ["transcoding.devices.domain", among(DOMAIN_NAMES)],
+  ["transcoding.devices.node", (text) => text === "renderD128"],
+  ["transcoding.devices.pci", (text) => /^[0-9a-f]{4}:[0-9a-f]{4}( rev [0-9a-f]{2})?$/u.test(text)],
+  ["transcoding.devices.kernelDriver", (text) => /^[\w-]+$/u.test(text)],
+  [
+    "transcoding.devices.userDriver",
+    (text) => text === "Intel iHD driver for Intel(R) Gen Graphics 25.2.6",
+  ],
+  ["transcoding.capabilities.key", (text) => IMPLS.has(text.slice(0, text.indexOf(":")))],
+  ["transcoding.capabilities.domain", among(DOMAIN_NAMES)],
+  ["transcoding.capabilities.status", among(["unknown", "verified", "unsupported"])],
+  ["transcoding.capabilities.source", among(["listing", "probe"])],
+  ["transcoding.capabilities.reason", among(EvidenceReason.literals)],
+  ["transcoding.capabilities.quarantineEndsAt", (text) => text === "restart"],
+]);
+
+const isJsonArray = (value: Schema.Json): value is Schema.JsonArray => Array.isArray(value);
+
+const isJsonObject = (value: Schema.Json): value is Schema.JsonObject =>
+  Predicate.isObject(value) && !isJsonArray(value);
+
+/** Every string in `value`, with the path of keys that leads to it, array positions left out. */
+const stringsOf = (value: Schema.Json, at = ""): ReadonlyArray<readonly [string, string]> => {
+  if (Predicate.isString(value)) return [[at, value]];
+
+  if (isJsonArray(value)) return value.flatMap((item) => stringsOf(item, at));
+
+  if (isJsonObject(value)) {
+    return Object.entries(value).flatMap(([key, item]) =>
+      stringsOf(item, at === "" ? key : `${at}.${key}`),
+    );
+  }
+
+  return [];
+};
+
+/** An answer's `transcode` summary alone, null when it has none. */
+const summaryIn = (body: Schema.Json): Schema.Json => ({
+  transcode: isJsonObject(body) ? (body["transcode"] ?? null) : null,
+});
+
+/** Fails unless every string field of `answer` holds what `FIELDS` allows there. */
+const assertCodesOnly = (answer: Schema.Json, label: string) => {
+  for (const [field, text] of stringsOf(answer)) {
+    const allowed = FIELDS.get(field);
+
+    assert.isTrue(
+      allowed !== undefined && allowed(text),
+      `${label}: ${field} holds ${JSON.stringify(text)}`,
+    );
+  }
+};
+
+const decodeJson = Schema.decodeUnknownEffect(Schema.Json);
 
 /** A browser on a 4K screen: H.264 only, so other codecs transcode at full size on the GPU. */
 const wideBrowser: ClientCapabilities = {
@@ -375,10 +555,7 @@ describe.skipIf(!hasFfmpeg)("stream diagnostics", () => {
 
           assert.strictEqual(change?.cause, "capability", "the encoder's probe failed again");
           assert.deepStrictEqual(change?.excluded, ["encode.qsv"]);
-          assert.strictEqual(
-            change?.detail,
-            "[h264_qsv @ 0x1] Error submitting frame from <path>: device lost in <path>",
-          );
+          assert.strictEqual(change?.reason, "reproduced");
 
           // Warmup proves the tone maps last; their probes' lines name the path too.
           const toneMap = capabilityKey(ImplId("tonemap.qsv"), "pq");
@@ -441,7 +618,7 @@ describe.skipIf(!hasFfmpeg)("stream diagnostics", () => {
               "status",
               "source",
               "checkedAt",
-              "detail",
+              "reason",
               "quarantineEndsAt",
             ]);
           }
@@ -453,7 +630,7 @@ describe.skipIf(!hasFfmpeg)("stream diagnostics", () => {
             domain: "qsv",
             status: "unsupported",
             source: "probe",
-            detail: "rejected: [Parsed_vpp_qsv_1 @ 0x1] Could not open <path> for <path>",
+            reason: "refused",
             quarantineEndsAt: null,
           });
           assert.isNumber(
@@ -462,6 +639,167 @@ describe.skipIf(!hasFfmpeg)("stream diagnostics", () => {
           );
         }),
       120_000,
+    );
+  });
+
+  layer(
+    MediaTestServer.layer({ FFMPEG_PATH: leakingRuns, HARDWARE_ACCELERATION: "qsv" }),
+    options,
+  )((it) => {
+    let cases = 0;
+
+    it.effect.prop(
+      "whatever ffmpeg prints, every text field of a negotiation, a seek, a failure, and the status report is a code, an implementation, a domain, or a device's identity",
+      {
+        start: Schema.Literals(LINE_STARTS),
+        noise: Schema.Array(Schema.String),
+        end: Schema.String,
+      },
+      ({ start, noise, end }) =>
+        Effect.gen(function* () {
+          const server = yield* MediaTestServer.Service;
+          const workspace = yield* FixtureWorkspace.Service;
+          const scanner = yield* LibraryScanner.Service;
+          const fs = yield* FileSystem.FileSystem;
+          const libraryId = LibraryId.make("cases");
+          const root = join(workspace.root, "cases");
+          const original = join(workspace.library.moviesRoot, workspace.library.directMovie);
+
+          cases += 1;
+          const playing = `Quokka's Cut ${String(cases)} (1999)`;
+          const doomed = `${DOOMED} Quokka's ${String(cases)} (1999)`;
+
+          for (const name of [playing, doomed]) {
+            yield* fs.makeDirectory(join(root, name), { recursive: true });
+            yield* fs.copyFile(original, join(root, name, `${name}.mp4`));
+          }
+
+          yield* scanner.scan({ libraryId, root, mode: "incremental" });
+
+          /** Makes failing runs print the case's text around every spelling of `name`'s path. */
+          const failWith = (name: string) =>
+            fs.writeFileString(
+              join(dirname(leakingRuns), STDERR),
+              [
+                ...noise,
+                ...spellingsOf(join(root, name, `${name}.mp4`), workspace.root).map(
+                  (spelling, index) => `${start}${noise[index] ?? ""}${spelling}${end}`,
+                ),
+              ].join("\n"),
+            );
+
+          /** The status and JSON body of what `route` answers `request`. */
+          const post = (
+            route: string,
+            request: (
+              request: HttpClientRequest.HttpClientRequest,
+            ) => HttpClientRequest.HttpClientRequest,
+          ) =>
+            HttpClient.execute(request(HttpClientRequest.post(`${server.baseUrl}${route}`))).pipe(
+              Effect.flatMap((response) =>
+                response.json.pipe(
+                  Effect.flatMap(decodeJson),
+                  Effect.map((json) => ({ status: response.status, json })),
+                ),
+              ),
+              Effect.orDie,
+            );
+
+          yield* failWith(playing);
+
+          const token = signTestToken({
+            fid: MemoryLibrary.fileIdOf(libraryId, `${playing}/${playing}.mp4`),
+            sid: `playing-${String(cases)}`,
+          });
+
+          const negotiated = yield* post(
+            "/api/playback/negotiate",
+            HttpClientRequest.bodyJsonUnsafe({ token, capabilities: smallBrowser }),
+          );
+
+          /** What each answer must hold codes only in, and the whole bodies, by what they answered. */
+          const coded: Array<readonly [string, Schema.Json]> = [];
+          const bodies: Array<Schema.Json> = [negotiated.json];
+
+          // The Quick Sync run failed. A replacement plays unless every chain left was blamed too,
+          // as when the log names the decoder on the GPU and then on the CPU.
+          if (negotiated.status === 200) {
+            const stream = yield* decodeNegotiation(negotiated.json).pipe(Effect.orDie);
+
+            assert.isAbove(stream.transcode?.changes.length ?? 0, 0, "the change is shown");
+
+            const moved = yield* post(
+              "/api/playback/seek",
+              HttpClientRequest.bodyJsonUnsafe({
+                token,
+                streamId: stream.streamId,
+                positionSeconds: 1,
+              }),
+            );
+
+            assert.strictEqual(moved.status, 200, JSON.stringify(moved.json));
+            // Stopped, so the cases after it find an encoder slot free.
+            yield* post(
+              "/api/playback/stop",
+              HttpClientRequest.bodyJsonUnsafe({ token, streamId: stream.streamId }),
+            );
+            coded.push(
+              ["negotiation", summaryIn(negotiated.json)],
+              ["seek", summaryIn(moved.json)],
+            );
+            bodies.push(moved.json);
+          } else {
+            assert.strictEqual(negotiated.status, 500, JSON.stringify(negotiated.json));
+            coded.push(["failure", negotiated.json]);
+          }
+
+          yield* failWith(doomed);
+
+          const failed = yield* post(
+            "/api/playback/negotiate",
+            HttpClientRequest.bodyJsonUnsafe({
+              token: signTestToken({
+                fid: MemoryLibrary.fileIdOf(libraryId, `${doomed}/${doomed}.mp4`),
+                sid: `doomed-${String(cases)}`,
+              }),
+              capabilities: smallBrowser,
+            }),
+          );
+
+          assert.strictEqual(failed.status, 500, JSON.stringify(failed.json));
+          const report = yield* firstReport.pipe(Effect.flatMap(decodeJson), Effect.orDie);
+
+          coded.push(["failure", failed.json], ["status report", report]);
+          bodies.push(failed.json, report);
+
+          for (const [label, answer] of coded) assertCodesOnly(answer, label);
+
+          // The driver line went out as its name and version, without what followed them.
+          assert.deepInclude(stringsOf(report), [
+            "transcoding.devices.userDriver",
+            "Intel iHD driver for Intel(R) Gen Graphics 25.2.6",
+          ]);
+
+          for (const body of bodies) {
+            for (const part of [SECRET, "Quokka", "zz-vault", workspace.root]) {
+              assert.notInclude(JSON.stringify(body), part);
+            }
+          }
+
+          // The readable line stays in the server's own log.
+          assert.isTrue(
+            server
+              .logged()
+              .some(
+                (record) =>
+                  JSON.stringify(record.message).includes("StreamSessions.encoder_failed") &&
+                  Predicate.isString(record.annotations["detail"]) &&
+                  record.annotations["detail"] !== "",
+              ),
+            "the service logged the failure",
+          );
+        }),
+      { timeout: 300_000, arbitrary: { runs: 8, maxShrinks: 3 } },
     );
   });
 });

@@ -4,7 +4,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   NegotiateResponse,
+  PlaybackApiError,
   SeekResponse,
+  TranscodeReason,
   type TranscodeStage,
   TranscodeSummary,
 } from "./media-playback";
@@ -37,7 +39,7 @@ const summary = fc.record({
       generation: fc.integer({ min: 1, max: 1000 }),
       cause: fc.string(),
       excluded: fc.array(fc.string(), { maxLength: 4 }),
-      detail: fc.string(),
+      reason: fc.constantFrom(...TranscodeReason.literals),
     }),
     { maxLength: 3 },
   ),
@@ -61,10 +63,52 @@ describe("TranscodeSummary", () => {
       Schema.decodeSync(TranscodeSummary)({
         stages: [{ op: "deinterlace", domain: "nvenc", impl: "deinterlace.nvenc" }],
         changes: [
-          { at: 1, generation: 2, cause: "driver-crash", excluded: ["encode.nvenc"], detail: "" },
+          {
+            at: 1,
+            generation: 2,
+            cause: "driver-crash",
+            excluded: ["encode.nvenc"],
+            reason: "other",
+          },
         ],
       }).stages[0]?.domain,
     ).toBe("nvenc");
+  });
+});
+
+describe("reasons", () => {
+  it("refuse a change or a failure whose reason is text outside the closed list", () => {
+    const line = "[h264_qsv @ 0x1] Error opening 'media/Private Film/movie.mkv'";
+
+    const change = {
+      at: 1,
+      generation: 2,
+      cause: "source",
+      excluded: ["encode.qsv"],
+      reason: line,
+    };
+
+    expect(
+      Exit.isFailure(Schema.decodeUnknownExit(TranscodeSummary)({ stages: [], changes: [change] })),
+    ).toBe(true);
+    expect(
+      Exit.isFailure(
+        Schema.decodeUnknownExit(PlaybackApiError)({
+          _tag: "TranscodeFailed",
+          streamId: STREAM_ID,
+          mode: "transcode-qsv",
+          reason: line,
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      Schema.decodeSync(PlaybackApiError)({
+        _tag: "TranscodeFailed",
+        streamId: STREAM_ID,
+        mode: "transcode-qsv",
+        reason: "disk-full",
+      }).message,
+    ).toBe("Transcode failed in transcode-qsv: disk-full");
   });
 });
 

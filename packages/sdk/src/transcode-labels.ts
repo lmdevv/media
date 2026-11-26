@@ -1,4 +1,4 @@
-import type { TranscodeStage } from "@media/contracts/media-playback";
+import type { TranscodeReason, TranscodeStage } from "@media/contracts/media-playback";
 
 const DOMAINS: ReadonlyMap<string, string> = new Map([
   ["cpu", "CPU"],
@@ -38,6 +38,26 @@ const CAUSES: ReadonlyMap<string, string> = new Map([
 
 /** A change's cause in a few words, such as `stage failed`, or the code itself when new. */
 export const causeLabel = (cause: string): string => CAUSES.get(cause) ?? cause;
+
+const REASONS: Readonly<Record<TranscodeReason, string>> = {
+  reproduced: "probe failed too",
+  "file-only": "this file only",
+  undecided: "probes timed out",
+  unexplained: "unexplained",
+  stopped: "stopped",
+  "not-started": "didn't start",
+  "disk-full": "disk full",
+  input: "input failed",
+  audio: "audio failed",
+  mux: "output failed",
+  "capability-lost": "stage lost",
+  "nothing-left": "nothing left to try",
+  "segment-not-cut": "segment not cut",
+  other: "failed",
+};
+
+/** Why a chain changed or a stream ended, in a few words, such as `disk full`. */
+export const reasonLabel = (reason: TranscodeReason): string => REASONS[reason];
 
 /** A GPU device as a server's transcoding report lists it. */
 interface ReportedDevice {

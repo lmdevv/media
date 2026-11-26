@@ -308,10 +308,12 @@ fails during a stream, first on the GPU without it and then in software.
   `HARDWARE_ACCELERATION=auto scripts/nixos-module-e2e.sh`).
 - See what it found: `media admin server status` prints the ffmpeg build, each GPU with its PCI id
   and drivers, and every capability it knows with its status (`unknown`, `verified`,
-  `unsupported`), where and when its evidence came from, and any quarantine after a failure the
-  probes reproduced. The admin Server page (and the iOS app's) shows the GPU and the counts. For
-  one stream, the player's Stream info and `media movies stream` list where each stage runs and
-  any change after a failure; none of it carries file paths or ffmpeg's arguments.
+  `unsupported`), where and when its evidence came from and what it showed (`refused`,
+  `inconclusive`), and any quarantine after a failure the probes reproduced. The admin Server page
+  (and the iOS app's) shows the GPU and the counts. For one stream, the player's Stream info and
+  `media movies stream` list where each stage runs and any change after a failure with its reason
+  (`disk full`, `probe failed too`). Reasons are codes: no line from ffmpeg's log, file path, or
+  argument leaves the server, and the readable line stays in the server's own log.
 
 ## Telemetry and logs
 

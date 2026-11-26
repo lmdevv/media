@@ -33,7 +33,7 @@ describe("afterDownloadFailure", () => {
       ),
     ).toStrictEqual(DownloadStep.Interrupt({ message: SERVER_UNAVAILABLE }));
     expect(
-      afterDownloadFailure(new TranscodeFailed({ streamId: "k", mode: "remux", detail: "x" })),
+      afterDownloadFailure(new TranscodeFailed({ streamId: "k", mode: "remux", reason: "other" })),
     ).toStrictEqual(
       DownloadStep.Interrupt({ message: "Your server couldn't prepare this download." }),
     );

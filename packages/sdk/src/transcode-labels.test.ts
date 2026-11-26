@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 
+import { TranscodeReason } from "@media/contracts/media-playback";
+
 import {
   capabilityCounts,
   causeLabel,
   devicesOf,
   domainLabel,
+  reasonLabel,
   stageLabel,
 } from "./transcode-labels";
 
@@ -38,6 +41,13 @@ describe("TranscodeLabels", () => {
     expect(domainLabel("vaapi")).toBe("VA-API");
     expect(causeLabel("capability")).toBe("stage failed");
     expect(causeLabel("driver-crash")).toBe("driver-crash");
+  });
+
+  it("names every reason a change or a failure can give apart", () => {
+    const labels = TranscodeReason.literals.map(reasonLabel);
+
+    expect(new Set(labels).size).toBe(TranscodeReason.literals.length);
+    expect(reasonLabel("disk-full")).toBe("disk full");
   });
 
   it("lists each GPU once with the APIs that opened it", () => {

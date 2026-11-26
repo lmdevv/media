@@ -957,7 +957,7 @@ Show what the media server last reported: its version, streams, transcoding devi
 - Kind: query
 - Scope: admin
 - Arguments: none
-- Result: `null | { version: string; activeStreams: number; runsAwaitingExit: number; startedAt: number; reportedAt: number; transcoding: { build: null | { version: string; kernel: string; checkedAt: number }; devices: Array<{ domain: string; node: string; opened: boolean; pci: string | null; kernelDriver: string | null; userDriver: string | null; checkedAt: number }>; capabilities: Array<{ key: string; domain: string; status: "unknown" | "verified" | "unsupported"; source: "listing" | "probe" | null; checkedAt: number | null; detail: string; quarantineEndsAt: number | "restart" | null }> } }`
+- Result: `null | { version: string; activeStreams: number; runsAwaitingExit: number; startedAt: number; reportedAt: number; transcoding: { build: null | { version: string | null; kernel: string; checkedAt: number }; devices: Array<{ domain: string; node: string; opened: boolean; pci: string | null; kernelDriver: string | null; userDriver: string | null; checkedAt: number }>; capabilities: Array<{ key: string; domain: string; status: "unknown" | "verified" | "unsupported"; source: "listing" | "probe" | null; checkedAt: number | null; reason: "listed" | "not-listed" | "passed" | "refused" | "crashed" | "inconclusive" | null; quarantineEndsAt: number | "restart" | null }> } }`
 
 ## `core.settings.get`
 

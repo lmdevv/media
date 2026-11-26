@@ -2,11 +2,16 @@
  * What the media service tells players and admins about its transcoder: a generation's stages and
  * the changes that led to them (`summaryOf`), the video a generation delivers (`deliveredVideo`),
  * and the ffmpeg build, devices, and evidence per capability (`transcodingReport`). Each is a
- * projection of what the service keeps; none carries ffmpeg arguments, file paths, or a render
- * node's folder, and every line from ffmpeg's log passes through `scrubLine` first.
+ * projection of what the service keeps into codes, implementation ids, and device identities: no
+ * text from ffmpeg's log reaches the wire, only the codes its classifiers chose (`reasonOf`) and a
+ * driver's name and version matched whole.
  */
-import type { DeliveredVideo, TranscodeSummary } from "@media/contracts/media-playback";
-import type { TranscodingReport } from "@media/contracts/server-functions";
+import type {
+  DeliveredVideo,
+  TranscodeReason,
+  TranscodeSummary,
+} from "@media/contracts/media-playback";
+import type { EvidenceReason, TranscodingReport } from "@media/contracts/server-functions";
 import { EpochMillis } from "@media/contracts/units";
 import { Option } from "effect";
 
@@ -16,45 +21,34 @@ import {
   Evidence,
   type Inventory,
   isQuarantined,
+  type ProbeOutcome,
 } from "./capability-inventory.ts";
 import { VideoPlan } from "./playback-decision.ts";
+import { Diagnosis } from "./transcode-recovery.ts";
 import { rowOf, type Step } from "./video-pipeline.ts";
 import { implOf, Op } from "./video-ops.ts";
 
-/** The longest line a summary or report carries from ffmpeg's log. */
-const LINE_MAX = 200;
+/** What a failure that was not the video's points at, as the recovery classifier names it. */
+type NotVideoPart = Extract<Diagnosis, { readonly _tag: "NotVideo" }>["reason"];
 
-/** Where a path stood in a scrubbed line. */
-const PATH = "<path>";
+const NOT_VIDEO_REASONS = {
+  stopped: "stopped",
+  spawn: "not-started",
+  disk: "disk-full",
+  input: "input",
+  audio: "audio",
+  mux: "mux",
+} as const satisfies Record<NotVideoPart, TranscodeReason>;
 
-/** A path in quotes: everything between the quotes goes. */
-const QUOTED_PATH = /(["'])\/[^"']*\1/gu;
-
-/**
- * A path outside whole quotes, from its first slash to the end of the line: a folder name may
- * hold spaces or `: `, and a line cut short may leave a quote open, so nothing after the slash is
- * safe to keep. A slash starts a path only at the start of the line or after a space, a quote, or
- * one of `=([,:`, so `h264/yuv420p` and `1/25` stay.
- */
-const BARE_PATH = /(^|[\s"'=([,:])\/.*$/u;
-
-const CREDENTIAL = /\b(token|ticket)=[^\s&"']+/giu;
-
-const CONTROL = /\p{Cc}+/gu;
-
-/**
- * One line of ffmpeg's log as the wire may carry it: its first line, without control characters,
- * any absolute path, or a token or ticket, folded and cut to 200 characters.
- */
-export const scrubLine = (text: string): string =>
-  (text.trim().split("\n")[0] ?? "")
-    .replaceAll(CONTROL, " ")
-    .replaceAll(QUOTED_PATH, PATH)
-    .replace(BARE_PATH, `$1${PATH}`)
-    .replaceAll(CREDENTIAL, "$1=<redacted>")
-    .replaceAll(/\s+/gu, " ")
-    .trim()
-    .slice(0, LINE_MAX);
+/** What a diagnosis of a failed run found, as the wire's code. */
+export const reasonOf = (diagnosis: Diagnosis): TranscodeReason =>
+  Diagnosis.$match(diagnosis, {
+    Capability: (): TranscodeReason => "reproduced",
+    Source: (): TranscodeReason => "file-only",
+    Undecided: (): TranscodeReason => "undecided",
+    NotVideo: ({ reason }): TranscodeReason => NOT_VIDEO_REASONS[reason],
+    Unexplained: (): TranscodeReason => "unexplained",
+  });
 
 /** What an operation is called on the wire, after its rows' names (`tonemap.qsv`). */
 const opName = (op: Op): string =>
@@ -89,7 +83,7 @@ interface ChangeRecord {
   /** A diagnosis's tag, such as `NotVideo`, or `capability-lost`. */
   readonly cause: string;
   readonly excluded: ReadonlyArray<string>;
-  readonly detail: string;
+  readonly reason: TranscodeReason;
 }
 
 /** `NotVideo` → `not-video`: a cause as the wire's code. */
@@ -118,7 +112,7 @@ export const summaryOf = (
             generation: change.generation,
             cause: causeCode(change.cause),
             excluded: [...change.excluded],
-            detail: scrubLine(change.detail),
+            reason: change.reason,
           },
         ],
   ),
@@ -141,36 +135,58 @@ export const deliveredVideo = (video: VideoPlan, source: VideoStream): Delivered
     }),
   });
 
-/** `ffmpeg version 9.0.2 Copyright …` → `9.0.2`. */
-const versionOf = (line: string): string =>
-  /^ffmpeg version (\S+)/u.exec(line)?.[1] ?? scrubLine(line);
+/** ffmpeg's version line, whose version is a token of letters, digits, and `.+~-`. */
+const VERSION = /^ffmpeg version ([\w.+~-]{1,64})(?:\s|$)/u;
+
+/** `ffmpeg version 9.0.2 Copyright …` → `9.0.2`; null for a line in any other form. */
+const versionOf = (line: string): string | null => VERSION.exec(line)?.[1] ?? null;
+
+/**
+ * A userspace driver as libva names it, `Intel iHD driver for Intel(R) Gen Graphics - 25.2.6`: a
+ * name of letters, digits, spaces, parentheses, and `.+-`, then ` - ` and a dotted version.
+ */
+const DRIVER = /^([A-Za-z][A-Za-z0-9 ().+-]{0,79}?) - (\d{1,4}(?:\.\d{1,4}){0,3})/u;
+
+/**
+ * The driver's name and version alone, such as `Intel iHD driver for Intel(R) Gen Graphics
+ * 25.2.6`: whatever follows the version stays off the wire, and a driver named in another form is
+ * null.
+ */
+const driverOf = (named: string): string | null => {
+  const [, name, version] = DRIVER.exec(named) ?? [];
+
+  return name === undefined || version === undefined ? null : `${name} ${version}`;
+};
 
 const basename = (node: string): string => node.slice(node.lastIndexOf("/") + 1);
 
 const byText = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0);
 
-const evidenceOf = (
-  capability: Capability,
-): Pick<TranscodingReport["capabilities"][number], "source" | "checkedAt" | "detail"> => {
+const PROBE_REASONS = {
+  passed: "passed",
+  rejected: "refused",
+  inconclusive: "inconclusive",
+} as const satisfies Record<ProbeOutcome, EvidenceReason>;
+
+/** What a capability's latest evidence puts in the report. */
+type Shown = Pick<TranscodingReport["capabilities"][number], "source" | "checkedAt" | "reason">;
+
+const evidenceOf = (capability: Capability): Shown => {
   const latest = capability.evidence[0];
 
-  if (latest === undefined) return { source: null, checkedAt: null, detail: "" };
+  if (latest === undefined) return { source: null, checkedAt: null, reason: null };
 
   return Evidence.$match(latest, {
-    Build: ({ at, feature, present }) => ({
-      source: "listing" as const,
+    Build: ({ at, present }): Shown => ({
+      source: "listing",
       checkedAt: EpochMillis.make(at),
-      detail: `${present ? "lists" : "lacks"} ${feature}`,
+      reason: present ? "listed" : "not-listed",
     }),
-    Probe: ({ at, outcome, detail }) => {
-      const line = scrubLine(detail);
-
-      return {
-        source: "probe" as const,
-        checkedAt: EpochMillis.make(at),
-        detail: line === "" ? outcome : `${outcome}: ${line}`,
-      };
-    },
+    Probe: ({ at, outcome }): Shown => ({
+      source: "probe",
+      checkedAt: EpochMillis.make(at),
+      reason: PROBE_REASONS[outcome],
+    }),
   });
 };
 
@@ -195,7 +211,7 @@ export const transcodingReport = (inventory: Inventory, now: number): Transcodin
     onNone: () => null,
     onSome: (build) => ({
       version: versionOf(build.version),
-      kernel: scrubLine(build.kernel),
+      kernel: build.kernel,
       checkedAt: EpochMillis.make(build.at),
     }),
   }),
@@ -207,7 +223,7 @@ export const transcodingReport = (inventory: Inventory, now: number): Transcodin
       opened: device.opened,
       pci: device.pci ?? null,
       kernelDriver: device.kernelDriver ?? null,
-      userDriver: device.userDriver === undefined ? null : scrubLine(device.userDriver),
+      userDriver: device.userDriver === undefined ? null : driverOf(device.userDriver),
       checkedAt: EpochMillis.make(device.at),
     })),
   capabilities: [...inventory.capabilities.values()]
@@ -221,7 +237,7 @@ export const transcodingReport = (inventory: Inventory, now: number): Transcodin
         status: capability.status,
         source: evidence.source,
         checkedAt: evidence.checkedAt,
-        detail: evidence.detail,
+        reason: evidence.reason,
         quarantineEndsAt: quarantineEndOf(capability, now),
       };
     }),

@@ -276,8 +276,8 @@ const CreditedPerson = Schema.Struct({
 
 /** The ffmpeg build the media service transcodes with. */
 const TranscodingBuild = Schema.Struct({
-  /** ffmpeg's version, such as `9.0.2` or `7.1.3-0+deb13u1`. */
-  version: Schema.String,
+  /** ffmpeg's version, such as `9.0.2` or `7.1.3-0+deb13u1`; null when its version line has none. */
+  version: Schema.NullOr(Schema.String),
   /** The kernel release the evidence was gathered on, such as `6.18.63`. */
   kernel: Schema.String,
   /** When the service read the build's listings. */
@@ -296,7 +296,10 @@ const TranscodingDevice = Schema.Struct({
   pci: Schema.NullOr(Schema.String),
   /** The kernel driver bound to it, such as `i915`. */
   kernelDriver: Schema.NullOr(Schema.String),
-  /** The userspace driver ffmpeg loaded, such as Intel's iHD driver and its version. */
+  /**
+   * The userspace driver ffmpeg loaded, by name and version alone, such as `Intel iHD driver for
+   * Intel(R) Gen Graphics 25.2.6`; null when ffmpeg named none in that form.
+   */
   userDriver: Schema.NullOr(Schema.String),
   /** When the service identified it. */
   checkedAt: EpochMillis,
@@ -304,6 +307,29 @@ const TranscodingDevice = Schema.Struct({
 
 /** What a transcoding capability is known to be: never planned until verified. */
 const CapabilityStatus = Schema.Literals(["unknown", "verified", "unsupported"]);
+
+/**
+ * What a capability's latest evidence showed, as a code, so no text from ffmpeg's log reaches a
+ * client; the readable line stays in the server's log.
+ *
+ * - `listed` and `not-listed`: the build's listings show the component it needs, or lack it.
+ * - `passed`: a probe's frames came out.
+ * - `refused`: ffmpeg refused the probe, exiting with an error it wrote.
+ * - `crashed`: a signal such as SIGSEGV killed ffmpeg as the probe ran.
+ * - `inconclusive`: the probe proved nothing, as when it timed out, was stopped, or its device
+ *   would not open.
+ */
+export const EvidenceReason = Schema.Literals([
+  "listed",
+  "not-listed",
+  "passed",
+  "refused",
+  "crashed",
+  "inconclusive",
+]);
+
+/** What a capability's latest evidence showed. */
+export type EvidenceReason = typeof EvidenceReason.Type;
 
 /**
  * One thing a transcoding stage may be asked to do on this server, and the evidence about it:
@@ -321,8 +347,8 @@ const TranscodingCapability = Schema.Struct({
   source: Schema.NullOr(Schema.Literals(["listing", "probe"])),
   /** When the latest evidence was gathered; null with none. */
   checkedAt: Schema.NullOr(EpochMillis),
-  /** What it showed, such as `rejected: Error querying IO surface`, with any path removed. */
-  detail: Schema.String,
+  /** What the latest evidence showed; null with none. */
+  reason: Schema.NullOr(EvidenceReason),
   /**
    * When its quarantine after a reproduced failure ends: a time, `restart` for not before the
    * server restarts, or null when it is not quarantined.
@@ -332,7 +358,8 @@ const TranscodingCapability = Schema.Struct({
 
 /**
  * What the media service knows about transcoding on its machine: the ffmpeg build, the GPU
- * devices, and the evidence for each capability, without paths beyond a render node's name.
+ * devices, and the evidence for each capability, as codes and identities without paths beyond a
+ * render node's name.
  */
 export const TranscodingReport = Schema.Struct({
   build: Schema.NullOr(TranscodingBuild),

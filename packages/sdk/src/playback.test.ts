@@ -107,7 +107,7 @@ const RELOADED = {
         generation: 2,
         cause: "source",
         excluded: ["decode.qsv", "encode.qsv"],
-        detail: "",
+        reason: "file-only",
       },
     ],
   },

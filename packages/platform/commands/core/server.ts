@@ -27,7 +27,11 @@ const statusResult = v.union(
     transcoding: v.object({
       build: v.union(
         v.null(),
-        v.object({ version: v.string(), kernel: v.string(), checkedAt: v.number() }),
+        v.object({
+          version: v.union(v.string(), v.null()),
+          kernel: v.string(),
+          checkedAt: v.number(),
+        }),
       ),
       devices: v.array(
         v.object({
@@ -47,7 +51,15 @@ const statusResult = v.union(
           status: v.union(v.literal("unknown"), v.literal("verified"), v.literal("unsupported")),
           source: v.union(v.literal("listing"), v.literal("probe"), v.null()),
           checkedAt: v.union(v.number(), v.null()),
-          detail: v.string(),
+          reason: v.union(
+            v.literal("listed"),
+            v.literal("not-listed"),
+            v.literal("passed"),
+            v.literal("refused"),
+            v.literal("crashed"),
+            v.literal("inconclusive"),
+            v.null(),
+          ),
           quarantineEndsAt: v.union(v.number(), v.literal("restart"), v.null()),
         }),
       ),

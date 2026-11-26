@@ -38,7 +38,7 @@ Preconditions:
   `Playback mode` (`Direct`, `Remux`, `Transcode`) and the terms `Video` (`H.264 · 818p · SDR`),
   `Audio` (`AAC 2.0 · converted`), `Container` (`MKV → HLS fMP4`), and `Bitrate`. A transcode
   adds `Stages`, one line per stage with where it ran (`Decode · QSV`, `Move · QSV → CPU`,
-  `Encode · CPU`), and after a failure `Changed` (`21:04 · stage failed · tonemap.qsv`). `Close
+  `Encode · CPU`), and after a failure `Changed` (`21:04 · probe failed too · tonemap.qsv`). `Close
   stream info` closes it.
 - **Sessions.** `$S cli -- diagnostics sessions` prints a JSON list, newest first; the first entry
   has a `sessionId`, Lucía's `userId`, `"platform": "web"`, and `"warnings": 0`. `--human` prints

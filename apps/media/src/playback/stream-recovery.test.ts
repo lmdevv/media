@@ -771,7 +771,7 @@ describe.skipIf(!hasFfmpeg)("stream recovery", () => {
           assert.strictEqual(answer.status, 500, JSON.stringify(answer.body));
           assert.deepInclude(answer.body, {
             _tag: "TranscodeFailed",
-            detail: "could not start ffmpeg",
+            reason: "not-started",
           });
 
           const streams = yield* fs

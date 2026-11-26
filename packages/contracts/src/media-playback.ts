@@ -211,6 +211,44 @@ export const TranscodeStage = Schema.Struct({
 /** One stage of a transcode's video chain. */
 export interface TranscodeStage extends Schema.Schema.Type<typeof TranscodeStage> {}
 
+/**
+ * Why a stream's video chain changed or the stream ended, as the media service's failure
+ * classifier found it. A closed list, so no text from ffmpeg's log reaches a client; the readable
+ * line stays in the server's log.
+ *
+ * - `reproduced`: a probe on a generated clip failed again at a stage the run used.
+ * - `file-only`: the stages ran on generated frames; only this file fails there.
+ * - `undecided`: the probes ran out of time before they showed anything.
+ * - `unexplained`: a run on the CPU failed and its log named no part.
+ * - `stopped`: a signal stopped ffmpeg.
+ * - `not-started`: ffmpeg did not start.
+ * - `disk-full`: the disk or its quota was full.
+ * - `input`, `audio`, `mux`: reading the file, the audio, or writing the output failed.
+ * - `capability-lost`: a stage the chain used stopped being verified before a new run (a change).
+ * - `nothing-left`: no chain left can encode the file (a failure).
+ * - `segment-not-cut`: ffmpeg did not cut where the segment plan starts a segment (a failure).
+ * - `other`: a failure the classifier does not read, such as a remux's or a download's.
+ */
+export const TranscodeReason = Schema.Literals([
+  "reproduced",
+  "file-only",
+  "undecided",
+  "unexplained",
+  "stopped",
+  "not-started",
+  "disk-full",
+  "input",
+  "audio",
+  "mux",
+  "capability-lost",
+  "nothing-left",
+  "segment-not-cut",
+  "other",
+]);
+
+/** Why a stream's video chain changed or the stream ended. */
+export type TranscodeReason = typeof TranscodeReason.Type;
+
 /** A change of a stream's video chain, after a failed run or a capability its chain lost. */
 export const TranscodeChange = Schema.Struct({
   at: EpochMillis,
@@ -225,8 +263,7 @@ export const TranscodeChange = Schema.Struct({
   cause: Schema.String,
   /** The implementations the stream keeps off from then on, such as `tonemap.qsv`. */
   excluded: Schema.Array(Schema.String),
-  /** A line from ffmpeg's log with any path removed; empty when the change has none. */
-  detail: Schema.String,
+  reason: TranscodeReason,
 });
 
 /** A change of a stream's video chain. */
@@ -235,7 +272,7 @@ export interface TranscodeChange extends Schema.Schema.Type<typeof TranscodeChan
 /**
  * Where an HLS generation's video is made: its stages, none when the video is copied, and every
  * change of the chain up to that generation, oldest first. It carries no ffmpeg arguments, paths,
- * or log text beyond each change's scrubbed line.
+ * or log text: only codes and the implementation ids of the service's operation table.
  */
 export const TranscodeSummary = Schema.Struct({
   stages: Schema.Array(TranscodeStage),
@@ -564,17 +601,17 @@ export class SegmentNotReady extends Schema.TaggedError<
   }
 }
 
-/** ffmpeg failed and no fallback applies. */
+/** ffmpeg failed and no fallback applies; `reason` says why, as the failure classifier found it. */
 export class TranscodeFailed extends Schema.TaggedError<
   TranscodeFailed,
   { readonly brand: unique symbol }
 >()(
   "TranscodeFailed",
-  { streamId: Schema.String, mode: Schema.String, detail: Schema.String },
+  { streamId: Schema.String, mode: Schema.String, reason: TranscodeReason },
   { httpApiStatus: 500 },
 ) {
   override get message(): string {
-    return `Transcode failed in ${this.mode}: ${this.detail}`;
+    return `Transcode failed in ${this.mode}: ${this.reason}`;
   }
 }
 

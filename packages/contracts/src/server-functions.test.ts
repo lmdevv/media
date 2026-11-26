@@ -2,7 +2,7 @@ import * as fc from "fast-check";
 import { Exit, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { ServerReport } from "./server-functions";
+import { EvidenceReason, ServerReport } from "./server-functions";
 import { EpochMillis } from "./units";
 
 /** `value` as the wire carries it and read back. */
@@ -26,9 +26,10 @@ const report = fc.record({
   runsAwaitingExit: fc.nat(),
   startedAt: instant,
   transcoding: fc.record({
-    build: fc.option(fc.record({ version: text, kernel: text, checkedAt: instant }), {
-      nil: null,
-    }),
+    build: fc.option(
+      fc.record({ version: fc.option(text, { nil: null }), kernel: text, checkedAt: instant }),
+      { nil: null },
+    ),
     devices: fc.array(
       fc.record({
         domain: text,
@@ -48,13 +49,39 @@ const report = fc.record({
         status: fc.constantFrom("unknown" as const, "verified" as const, "unsupported" as const),
         source: fc.constantFrom("listing" as const, "probe" as const, null),
         checkedAt: fc.option(instant, { nil: null }),
-        detail: text,
+        reason: fc.option(fc.constantFrom(...EvidenceReason.literals), { nil: null }),
         quarantineEndsAt: fc.oneof(instant, fc.constant("restart" as const), fc.constant(null)),
       }),
       { maxLength: 6 },
     ),
   }),
 });
+
+/** Whether a report listing one capability with `status` and `reason` decodes. */
+const decodesWith = (status: string, reason: string): boolean =>
+  Exit.isSuccess(
+    Schema.decodeUnknownExit(ServerReport)({
+      version: "0.9.0",
+      activeStreams: 0,
+      runsAwaitingExit: 0,
+      startedAt: 1,
+      transcoding: {
+        build: null,
+        devices: [],
+        capabilities: [
+          {
+            key: "encode.qsv:h264/8/cbr",
+            domain: "qsv",
+            status,
+            source: "probe",
+            checkedAt: 1,
+            reason,
+            quarantineEndsAt: null,
+          },
+        ],
+      },
+    }),
+  );
 
 describe("ServerReport", () => {
   it("comes back over the wire as it went, with its transcoding report", () => {
@@ -65,27 +92,9 @@ describe("ServerReport", () => {
     );
   });
 
-  it("refuses a capability status outside unknown, verified, and unsupported", () => {
-    const capability = {
-      key: "encode.qsv:h264/8/cbr",
-      domain: "qsv",
-      status: "maybe",
-      source: "probe",
-      checkedAt: 1,
-      detail: "passed",
-      quarantineEndsAt: null,
-    };
-
-    expect(
-      Exit.isFailure(
-        Schema.decodeUnknownExit(ServerReport)({
-          version: "0.9.0",
-          activeStreams: 0,
-          runsAwaitingExit: 0,
-          startedAt: 1,
-          transcoding: { build: null, devices: [], capabilities: [capability] },
-        }),
-      ),
-    ).toBe(true);
+  it("refuses a capability status or reason outside its closed list", () => {
+    expect(decodesWith("verified", "passed")).toBe(true);
+    expect(decodesWith("maybe", "passed")).toBe(false);
+    expect(decodesWith("verified", "rejected: Error opening /media/movie.mkv")).toBe(false);
   });
 });

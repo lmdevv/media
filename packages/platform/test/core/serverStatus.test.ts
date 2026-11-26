@@ -22,7 +22,7 @@ describe.skipIf(stack === undefined)("server status", { timeout: 60_000 }, () =>
       opened: true,
       pci: "8086:56a5 rev 05",
       kernelDriver: "i915",
-      userDriver: "Intel iHD driver for Intel(R) Gen Graphics - 26.3.5",
+      userDriver: "Intel iHD driver for Intel(R) Gen Graphics 26.3.5",
       checkedAt: startedAt,
     };
 
@@ -32,7 +32,7 @@ describe.skipIf(stack === undefined)("server status", { timeout: 60_000 }, () =>
       status: "unsupported" as const,
       source: "probe" as const,
       checkedAt: startedAt,
-      detail: "rejected: Error querying IO surface",
+      reason: "refused" as const,
       quarantineEndsAt: null,
     };
 
@@ -50,7 +50,7 @@ describe.skipIf(stack === undefined)("server status", { timeout: 60_000 }, () =>
           status: "verified" as const,
           source: "probe" as const,
           checkedAt: startedAt,
-          detail: "passed",
+          reason: "passed" as const,
           quarantineEndsAt: "restart" as const,
         },
         {
@@ -59,7 +59,7 @@ describe.skipIf(stack === undefined)("server status", { timeout: 60_000 }, () =>
           status: "verified" as const,
           source: "listing" as const,
           checkedAt: startedAt,
-          detail: "lists filter:zscale",
+          reason: "listed" as const,
           quarantineEndsAt: startedAt + 900_000,
         },
       ],

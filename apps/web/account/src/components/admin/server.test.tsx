@@ -28,7 +28,7 @@ const capability = (
   status,
   source: "probe" as const,
   checkedAt: NOW - 50 * MINUTE_MS,
-  detail: status === "verified" ? "passed" : "rejected: Error querying IO surface",
+  reason: status === "verified" ? ("passed" as const) : ("refused" as const),
   quarantineEndsAt,
 });
 

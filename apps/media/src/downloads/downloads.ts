@@ -252,20 +252,20 @@ const make = Effect.gen(function* () {
         const failure = Cause.squash(exit.cause);
 
         yield* Effect.logWarning("Downloads.mp4_failed").pipe(
-          Effect.annotateLogs({ fileId: job.fileId, mode: plan.mode }),
+          Effect.annotateLogs({
+            fileId: job.fileId,
+            mode: plan.mode,
+            detail:
+              failure instanceof MediaToolFailed
+                ? failure.stderr.trim().slice(-400)
+                : "the download could not be written",
+          }),
         );
 
         yield* Ref.set(
           job.state,
           JobState.Failed({
-            error: new TranscodeFailed({
-              streamId: job.name,
-              mode: plan.mode,
-              detail:
-                failure instanceof MediaToolFailed
-                  ? failure.stderr.trim().slice(-400)
-                  : "The download could not be written",
-            }),
+            error: new TranscodeFailed({ streamId: job.name, mode: plan.mode, reason: "other" }),
             at: yield* Clock.currentTimeMillis,
           }),
         );
