@@ -61,7 +61,7 @@ export const reachWatch = (
   const listeners = new Set<() => void>();
   let state: Reachability = ANSWERING;
   let evidence = 0;
-  /** The evidence of the newest check sent; its answer settles anything older. */
+  /** The evidence of the newest check sent; none is set again until its answer applies. */
   let sent = 0;
   let needed = false;
   let closed = false;
@@ -101,10 +101,11 @@ export const reachWatch = (
     return answered;
   };
 
-  /** Sets the check `nextCheck` calls for, unless one sent after the newest evidence is out. */
+  /** Sets the check `nextCheck` calls for, unless one sent after every standing doubt is out. */
   function follow(): void {
-    const inMs =
-      closed || sent > state.newest ? null : nextCheck(state, needed, socket?.connected === true);
+    const doubtedAt = Math.max(state.coreDoubt ?? 0, state.mediaDoubt ?? 0);
+    const out = sent > state.checked && sent > doubtedAt;
+    const inMs = closed || out ? null : nextCheck(state, needed, socket?.connected === true);
 
     if (pending !== null && pending.inMs === inMs) return;
     pending?.cancel();
@@ -132,7 +133,7 @@ export const reachWatch = (
       cancelStall = null;
 
       if (socket?.connected === true && socket.waitingSince === waitingSince) {
-        apply("doubted", stamp());
+        apply("coreDoubted", stamp());
       }
     });
   };
@@ -156,15 +157,15 @@ export const reachWatch = (
       socket = next;
 
       // The first word decides at once: a socket closed from the start is a doubt like a drop.
-      if (was === null) apply(next.connected ? "answered" : "doubted", stamp());
-      else if (next.connected && !was.connected) apply("answered", stamp());
-      else if (!next.connected && was.connected) apply("doubted", stamp());
+      if (was === null) apply(next.connected ? "coreAnswered" : "coreDoubted", stamp());
+      else if (next.connected && !was.connected) apply("coreAnswered", stamp());
+      else if (!next.connected && was.connected) apply("coreDoubted", stamp());
       else if (
         next.connected &&
         was.waitingSince !== null &&
         next.waitingSince !== was.waitingSince
       ) {
-        apply("answered", stamp());
+        apply("coreAnswered", stamp());
       }
 
       watchStall();

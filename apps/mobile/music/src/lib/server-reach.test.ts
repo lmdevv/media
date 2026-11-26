@@ -43,7 +43,13 @@ describe("reachOf", () => {
   });
 });
 
-const observation = fc.constantFrom<Observation>("answered", "failed", "doubted");
+const observation = fc.constantFrom<Observation>(
+  "answered",
+  "failed",
+  "doubted",
+  "coreAnswered",
+  "coreDoubted",
+);
 
 /** Observations in the order they land, each with the evidence its request or event took. */
 const landings = fc.array(fc.tuple(observation, fc.integer({ min: 1, max: 50 })), {
@@ -77,13 +83,20 @@ describe("observe", () => {
     expect(nextCheck(doubted, true, true)).toBe(SETTLE_MS);
   });
 
-  it("drops what lands with evidence older than the newest applied", () => {
+  it("lets the core's answers settle only doubts about the core, never the media server's", () => {
     fc.assert(
-      fc.property(landings, observation, fc.integer({ min: 0, max: 50 }), (list, late, at) => {
+      fc.property(landings, fc.integer({ min: 1, max: 20 }), (list, answers) => {
         const state = applied(list);
+        const top = Math.max(state.checked, state.core);
 
-        fc.pre(at <= state.newest);
-        expect(observe(state, late, at)).toBe(state);
+        const answered = Array.from({ length: answers }, (_, index) => index).reduce(
+          (current, index) => observe(current, "coreAnswered", top + 1 + index),
+          state,
+        );
+
+        expect(answered.failures).toBe(state.failures);
+        expect(answered.mediaDoubt).toBe(state.mediaDoubt);
+        expect(answered.coreDoubt).toBeNull();
       }),
     );
   });
@@ -94,22 +107,23 @@ describe("observe", () => {
       ["failed", 1],
     ]);
 
-    expect(state).toEqual({ failures: 0, doubted: false, newest: 2 });
+    expect(state).toEqual({ ...ANSWERING, checked: 2 });
   });
 
-  it("always applies the newest evidence", () => {
-    fc.assert(
-      fc.property(landings, observation, (list, last) => {
-        const state = applied(list);
-        const next = observe(state, last, state.newest + 1);
+  it("keeps a doubt raised after a check went out when that check answers", () => {
+    const state = applied([
+      ["doubted", 3],
+      ["coreDoubted", 4],
+      ["answered", 2],
+    ]);
 
-        expect(next.newest).toBe(state.newest + 1);
-        expect(next.doubted).toBe(last === "doubted");
-        const failures = { answered: 0, failed: state.failures + 1, doubted: state.failures };
-
-        expect(next.failures).toBe(failures[last]);
-      }),
-    );
+    expect(state.mediaDoubt).toBe(3);
+    expect(state.coreDoubt).toBe(4);
+    expect(observe(state, "failed", 5)).toMatchObject({
+      failures: 1,
+      mediaDoubt: null,
+      coreDoubt: null,
+    });
   });
 });
 

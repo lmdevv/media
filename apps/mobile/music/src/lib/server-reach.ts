@@ -38,48 +38,77 @@ export const reachOf = ({ offlinePhase, socketLost, stalled }: ReachInputs): Rea
 export const LOST_AFTER = 2;
 
 /**
- * What one connection has learned of its server: from the requests the app makes anyway (the
- * core's socket, the calls on it, the player's streams) and from the health checks it sends when
- * it must decide. Each observation carries its evidence, a number taken when its request left or
- * its event happened; evidence older than the newest applied changes nothing, so the answer to a
- * check a later check or event replaced is dropped.
+ * What one connection has learned of its server. The core's socket and the calls on it speak only
+ * for the core; whether the media server answers comes from its health checks and the player's
+ * streams. Each observation carries its evidence, a number taken when its request left or its
+ * event happened. A doubt stands until evidence newer than it settles it: a check sent after it,
+ * or for a doubt about the core, the core answering again.
  */
 export interface Reachability {
-  /** Health checks unanswered in a row since the server last answered. */
+  /** Health checks unanswered in a row since the media server last answered. */
   readonly failures: number;
-  /** The socket closed, a call stalled, or a stream failed since the server last answered. */
-  readonly doubted: boolean;
-  /** The newest evidence applied. */
-  readonly newest: number;
+  /** When the socket closed or a call stalled, unless the core answered since; null for none. */
+  readonly coreDoubt: number | null;
+  /** When a stream failed or the core said the media server went silent, unless settled since. */
+  readonly mediaDoubt: number | null;
+  /** The evidence of the newest check or stream answer applied; older ones change nothing. */
+  readonly checked: number;
+  /** The evidence of the newest observation of the core applied. */
+  readonly core: number;
 }
 
 /** What one request or event said of the server. */
 export type Observation =
-  /** It answered: a health check, the socket opening, a call's answer. */
+  /** The media server answered: a health check, or a stream that plays again. */
   | "answered"
   /** A health check went unanswered. */
   | "failed"
-  /** A hint that it went away, which a health check settles. */
-  | "doubted";
+  /** A hint the media server went away, which a check settles: a stream failed, or the core said so. */
+  | "doubted"
+  /** The core answered: its socket opened, or a call got its answer. */
+  | "coreAnswered"
+  /** A hint the core went away, which its answer or a check settles: the socket closed, a call stalled. */
+  | "coreDoubted";
 
 /** Where every connection starts: the server answers until something says otherwise. */
-export const ANSWERING: Reachability = { failures: 0, doubted: false, newest: 0 };
+export const ANSWERING: Reachability = {
+  failures: 0,
+  coreDoubt: null,
+  mediaDoubt: null,
+  checked: 0,
+  core: 0,
+};
 
-/** `state` after `observation`, made at `evidence`; unchanged for evidence older than its newest. */
+const settledBy = (doubt: number | null, evidence: number): number | null =>
+  doubt !== null && doubt <= evidence ? null : doubt;
+
+/** `state` after `observation`, made at `evidence`; unchanged for evidence it already outdated. */
 export const observe = (
   state: Reachability,
   observation: Observation,
   evidence: number,
 ): Reachability => {
-  if (evidence <= state.newest) return state;
+  if (observation === "coreAnswered" || observation === "coreDoubted") {
+    if (evidence <= state.core) return state;
 
-  if (observation === "answered") return { failures: 0, doubted: false, newest: evidence };
-
-  if (observation === "failed") {
-    return { failures: state.failures + 1, doubted: false, newest: evidence };
+    return {
+      ...state,
+      core: evidence,
+      coreDoubt: observation === "coreDoubted" ? evidence : null,
+    };
   }
 
-  return { ...state, doubted: true, newest: evidence };
+  if (evidence <= state.checked) return state;
+
+  if (observation === "doubted") return { ...state, mediaDoubt: evidence };
+
+  return {
+    ...state,
+    failures: observation === "answered" ? 0 : state.failures + 1,
+    checked: evidence,
+    coreDoubt: settledBy(state.coreDoubt, evidence),
+    mediaDoubt: settledBy(state.mediaDoubt, evidence),
+  };
 };
 
 /** Whether the server counts as gone: `LOST_AFTER` health checks in a row went unanswered. */
@@ -103,9 +132,10 @@ export const CLOSED_RECHECK_MS = 10_000;
 /**
  * In how many milliseconds the app checks the server's health on its own, or null for no check:
  * never while nothing waits on the server; `SETTLE_MS` after a doubt; `RECHECK_MS` after each
- * unanswered check, until it answers; and `CLOSED_RECHECK_MS` while the core's socket is not open.
- * With the socket open and the server answering it checks nothing: the socket closing, a call
- * stalling, a stream failing, or the core saying the media server went away each bring a doubt.
+ * unanswered check, until the media server answers one; and `CLOSED_RECHECK_MS` while the core's
+ * socket is not open. With the socket open and the server answering it checks nothing: the socket
+ * closing, a call stalling, a stream failing, or the core saying the media server went away each
+ * bring a doubt.
  * `needed` says whether anything waits on the server: the app is on screen, or it plays the
  * server's queue, which goes on with songs from the server.
  */
@@ -116,7 +146,7 @@ export const nextCheck = (
 ): number | null => {
   if (!needed) return null;
 
-  if (state.doubted) return SETTLE_MS;
+  if (state.coreDoubt !== null || state.mediaDoubt !== null) return SETTLE_MS;
 
   if (state.failures > 0) return RECHECK_MS;
 
