@@ -485,6 +485,8 @@ describe("hlsCommandArgs", () => {
         "6000000",
         "-bufsize",
         "12000000",
+        "-forced-idr",
+        "1",
         "-x265-params",
         "log-level=error:open-gop=0",
         "-tag:v",

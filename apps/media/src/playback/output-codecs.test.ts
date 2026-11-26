@@ -31,6 +31,18 @@ const SOURCE_FILE = "Mpeg Two (2012)/Mpeg Two (2012).mkv";
 
 const SOURCE_SECONDS = 14;
 
+/**
+ * Fourteen seconds at 24 fps that cut to another picture at 3.083 s and 7.083 s, under a second
+ * before the planned starts at 4 and 8 s: an encoder that sets a keyframe at a scene cut may then
+ * skip the forced one that follows it, as libx265 without `forced-idr` does.
+ */
+const PICTURE = [
+  "testsrc2=s=320x180:r=24,trim=end_frame=74[a]",
+  "mandelbrot=s=320x180:r=24,trim=end_frame=96,setpts=PTS-STARTPTS[b]",
+  "smptehdbars=s=320x180:r=24,trim=end_frame=166,setpts=PTS-STARTPTS[c]",
+  "[a][b][c]concat=n=3:v=1:a=0,format=yuv420p[out0]",
+].join(";");
+
 const FRAME = 1 / 24;
 
 const client = (videoCodecs: ClientCapabilities["videoCodecs"]): ClientCapabilities => ({
@@ -139,7 +151,7 @@ const addSource = Effect.gen(function* () {
       "-f",
       "lavfi",
       "-i",
-      `testsrc2=size=320x180:rate=24:duration=${String(SOURCE_SECONDS)}`,
+      PICTURE,
       "-f",
       "lavfi",
       "-i",
