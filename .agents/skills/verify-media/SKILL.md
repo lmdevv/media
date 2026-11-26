@@ -487,9 +487,11 @@ as the splash screen. All of them run on `CACurrentMediaTime`, the clock iOS sta
   artwork). They are separate marks, so they differ whenever Home drew before its content.
 - **Opens**: from the touch that ended the press to the first refresh in which the opened screen's
   content is in view, which is no earlier than the native push's first frame. Each launch opens
-  the same records twice: first as the launch left them, then again after Back. Each open reports
-  its cache state, `fetched` (the screen asked for its content after it mounted) or `kept` (the SDK
-  held it), and the table reports the two apart.
+  the same records, none asked for yet this launch, then after Back opens the first of them again.
+  Each open reports its cache state, `fetched` (the screen asked for its content after it mounted)
+  or `kept` (the SDK held it), and the table reports the two apart. Music's artist reopens only in
+  the first round: its album list is a paged query that is never ready at mount, so a second open
+  would report `fetched` for a case that runs faster than the first.
 
 A cold launch on the dev client includes fetching the bundle from Metro through the ssh forward,
 and the simulator runs on the Mac's CPU, so these are a relative baseline to compare two builds by,

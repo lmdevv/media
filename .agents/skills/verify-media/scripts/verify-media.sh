@@ -1321,9 +1321,10 @@ ios_back() {
 # Times $runs cold launches of this side's app, then reads the App.launched and App.screenOpened
 # records the media service received and prints each metric's median and spread
 # (app-timings.mjs). Each launch ends the app's process and opens it on Metro again, waits for
-# Home's content, then opens the screens timing_opens names twice: first as the launch left them,
-# then again after Back, when the SDK may keep their queries. Each open records its cache state, so
-# the two rounds report apart. The Home button ends each launch and sends its events.
+# Home's content, then opens the screens timing_opens names, none asked for yet this launch, and
+# after Back opens the first of them again, when the SDK may keep its query. Each open records its
+# cache state, so the two rounds report apart. The Home button ends each launch and sends its
+# events.
 #
 # --record also records the screen to truth.mp4 for app-timings-truth.mjs. Every press and launch
 # goes to actions.tsv with the wall clock in milliseconds, so the recording can be lined up.
@@ -1357,6 +1358,9 @@ ios_timings() {
     ios_wait_opened "$(timing_home "$app")" 180 || die "launch $launch: Home did not show its content"
     sleep 2
     for round in 1 2; do
+      # Round 2 reopens only the first screen: a later one, such as music's artist, can mount
+      # without its content after Back too, and would report a second case as the first.
+      ((round == 1)) || opens=("${opens[0]}")
       for open in "${opens[@]}"; do
         point="$(ios_find "${open%%|*}")" || die "launch $launch: can't press \"${open%%|*}\""
         stamp press "${open%%|*}|$point"
@@ -1372,6 +1376,7 @@ ios_timings() {
       ios_wait "$(timing_home "$app")" 30
       sleep 1
     done
+    mapfile -t opens < <(timing_opens "$app")
     stamp home "$launch"
     on_mac "$axe button home --udid $id"
     sleep 3
