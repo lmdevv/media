@@ -28,43 +28,6 @@ const flakySession = (failures: number) =>
     }),
   );
 
-describe("CoreStatus.beatLayer", () => {
-  it.effect("beats at once and every 15 seconds, past a call that fails", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const calls = yield* Ref.make<ReadonlyArray<string>>([]);
-
-        const session = CoreSession.Service.of({
-          status: Effect.succeed("signed-in"),
-          run: () => Effect.die(new Error("not used")),
-          watch: () => Stream.die(new Error("not used")),
-          call: (fn, ..._params) =>
-            Ref.updateAndGet(calls, (names) => [...names, fn.name]).pipe(
-              Effect.flatMap((names) =>
-                names.length === 1
-                  ? Effect.fail(
-                      new ProtocolError({ operation: "beat", message: "not yet", cause: null }),
-                    )
-                  : Schema.decodeEffect(fn.result)(null).pipe(Effect.orDie),
-              ),
-            ),
-        });
-
-        yield* Layer.build(
-          CoreStatus.beatLayer.pipe(Layer.provide(Layer.succeed(CoreSession.Service, session))),
-        );
-
-        yield* TestClock.adjust(Duration.millis(10));
-        assert.deepStrictEqual(yield* Ref.get(calls), ["core.serverStatus.beat"]);
-
-        yield* TestClock.adjust(Duration.seconds(15));
-        yield* TestClock.adjust(Duration.seconds(15));
-        assert.strictEqual((yield* Ref.get(calls)).length, 3);
-      }),
-    ),
-  );
-});
-
 describe("CoreStatus.healthLayer", () => {
   it.effect("asks again soon after an unanswered probe, not a whole interval later", () =>
     Effect.scoped(

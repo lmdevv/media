@@ -71,25 +71,6 @@ export const layer: Layer.Layer<
   }),
 );
 
-/** The core counts the server away after 40 seconds without a beat, so it misses two first. */
-const BEAT_EVERY = Duration.seconds(15);
-
-/**
- * Tells the core the server runs every `BEAT_EVERY`, so every client hears through the core's
- * `core.server.presence` soon after it stops.
- */
-export const beatLayer: Layer.Layer<never, never, CoreSession.Service> = Layer.effectDiscard(
-  Effect.gen(function* () {
-    const session = yield* CoreSession.Service;
-
-    const beat = session
-      .call(serverFunctions.beatStatus, {})
-      .pipe(Effect.catch((error) => Effect.logDebug("CoreStatus.beat_failed", error)));
-
-    yield* beat.pipe(Effect.repeat(Schedule.spaced(BEAT_EVERY)), Effect.forkScoped);
-  }),
-);
-
 const PROBE_EVERY = Duration.seconds(30);
 
 const PROBE_TIMEOUT = Duration.seconds(10);

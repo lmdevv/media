@@ -49,7 +49,7 @@ export interface Reachability {
   readonly failures: number;
   /** When the socket closed or a call stalled, unless the core answered since; null for none. */
   readonly coreDoubt: number | null;
-  /** When a stream failed or the core said the media server went silent, unless settled since. */
+  /** When a request to the media service went unanswered, unless a check settled it since. */
   readonly mediaDoubt: number | null;
   /** The evidence of the newest check or stream answer applied; older ones change nothing. */
   readonly checked: number;
@@ -63,7 +63,7 @@ export type Observation =
   | "answered"
   /** A health check went unanswered. */
   | "failed"
-  /** A hint the media server went away, which a check settles: a stream failed, or the core said so. */
+  /** A hint the media server went away, which a check settles: a request to it went unanswered. */
   | "doubted"
   /** The core answered: its socket opened, or a call got its answer. */
   | "coreAnswered"
@@ -124,8 +124,8 @@ export const SETTLE_MS = 1000;
 export const RECHECK_MS = 3000;
 
 /**
- * How often the app checks while the core's socket is closed: the core can't tell it then that the
- * media server went away.
+ * How often the app checks while the core's socket is closed: nothing reaches the app over it then,
+ * so a server that goes away meanwhile shows only in a check.
  */
 export const CLOSED_RECHECK_MS = 10_000;
 
@@ -134,8 +134,8 @@ export const CLOSED_RECHECK_MS = 10_000;
  * never while nothing waits on the server; `SETTLE_MS` after a doubt; `RECHECK_MS` after each
  * unanswered check, until the media server answers one; and `CLOSED_RECHECK_MS` while the core's
  * socket is not open. With the socket open and the server answering it checks nothing: the socket
- * closing, a call stalling, a stream failing, or the core saying the media server went away each
- * bring a doubt.
+ * closing, a call stalling, or a request to the media service going unanswered each brings a
+ * doubt.
  * `needed` says whether anything waits on the server: the app is on screen, or it plays the
  * server's queue, which goes on with songs from the server.
  */

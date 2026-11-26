@@ -1,10 +1,7 @@
-import { ConvexHttpClient } from "convex/browser";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { api, internal } from "../../convex/_generated/api";
-import { AWAY_MS } from "../../convex/core/serverStatus";
-import { runFunction } from "../admin";
+import { api } from "../../convex/_generated/api";
 import { member } from "../devices";
 import { runServer, runServerAs } from "../service";
 import { refusal, unique } from "../sign-in";
@@ -145,35 +142,6 @@ describe.skipIf(stack === undefined)("server status", { timeout: 60_000 }, () =>
         ),
       ),
     ).toBe("invalid_args");
-  });
-
-  it("tell anyone, signed in or not, once the media server goes silent and once it beats again", async () => {
-    if (stack === undefined) return;
-    const person = await member(stack, "presence-member");
-    const anonymous = new ConvexHttpClient(stack.url, { logger: false });
-    const presence = () => anonymous.query(api.core.server.presence, {});
-
-    const sweepAsOf = (asOf: number) =>
-      runFunction(stack, internal.core.serverStatus.sweep, { asOf }, Schema.Null);
-
-    await runServer(stack, api.core.serverStatus.beat, {}, Schema.Null);
-    expect(await presence()).toBe("present");
-    expect(await person.signedIn.client.query(api.core.server.presence, {})).toBe("present");
-
-    await sweepAsOf(Date.now() + AWAY_MS - 5000);
-    expect(await presence()).toBe("present");
-
-    await sweepAsOf(Date.now() + AWAY_MS + 5000);
-    expect(await presence()).toBe("away");
-
-    await runServer(stack, api.core.serverStatus.beat, {}, Schema.Null);
-    expect(await presence()).toBe("present");
-
-    expect(
-      await refusal(
-        runServerAs(stack, person.signedIn, api.core.serverStatus.beat, {}, Schema.Null),
-      ),
-    ).toBe("forbidden");
   });
 
   it("store the largest report the caps allow, and refuse a text one character past its cap", async () => {

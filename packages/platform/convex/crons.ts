@@ -22,13 +22,6 @@ crons.interval(
 );
 
 crons.interval(
-  "mark a silent media server away",
-  { seconds: 10 },
-  internal.core.serverStatus.sweep,
-  {},
-);
-
-crons.interval(
   "wake waiting job retries and end job pauses",
   { minutes: 1 },
   internal.core.jobs.leases.wakeDue,

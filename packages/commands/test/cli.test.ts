@@ -119,7 +119,6 @@ describe("CLI placement", () => {
       "core.server.backups.list": "admin backups list",
       "core.server.backups.run": "admin backups run",
       "core.server.info": "auth server info",
-      "core.server.presence": "auth server presence",
       "core.server.status": "admin server status",
       "core.settings.get": "auth settings get",
       "core.settings.set": "auth settings set",

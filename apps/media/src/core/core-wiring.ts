@@ -142,7 +142,6 @@ export const layer = (options: Options) =>
         CoreJobs.layer(jobs(options.serviceKey)),
         CoreTrickplay.sweepLayer,
         CoreStatus.layer,
-        CoreStatus.beatLayer,
         CoreRescans.layer,
         Backups.layerSyncOnStart,
       ).pipe(

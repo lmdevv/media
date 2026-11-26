@@ -357,7 +357,7 @@ type Learned = "answered" | "doubted" | "failed once" | "lost";
  * The watch's table: the check it has set next, in milliseconds, or null for none, for each row of
  * what the socket last said, what it last learned, and whether anything needs the server (the app
  * on screen, or the server's queue playing). With null, it still hears the socket close, a call
- * stall, the core say the media server went away, and a stream fail.
+ * stall, and a stream fail.
  */
 const scheduledNext = (socket: Socket, learned: Learned, needed: boolean): number | null => {
   if (!needed) return null;
@@ -394,7 +394,7 @@ interface Row {
   readonly failures: number;
   /** The socket closed or a call stalled, and the core hasn't answered since. */
   readonly coreDoubted: boolean;
-  /** A stream failed or the core said the media server went away, and no check settled it. */
+  /** A stream failed, and no check settled it. */
   readonly mediaDoubted: boolean;
   readonly needed: boolean;
 }
@@ -522,16 +522,16 @@ describe("reachWatch's table", () => {
     );
   });
 
-  it("finds a server gone within seconds while needed, once the socket closes or the core says so", async () => {
+  it("finds a server gone within seconds while needed, once the socket closes or a stream fails", async () => {
     await fc.assert(
-      fc.asyncProperty(history, fc.boolean(), async (events, coreSays) => {
+      fc.asyncProperty(history, fc.boolean(), async (events, streamFails) => {
         vi.clearAllTimers();
         const { watch, answering } = await watchAfter(events);
 
         watch.need(true);
         answering.up = false;
 
-        if (coreSays) watch.hear("doubted");
+        if (streamFails) watch.hear("doubted");
         else watch.connection(DOWN);
 
         await vi.advanceTimersByTimeAsync(CLOSED_RECHECK_MS + SETTLE_MS + 2 * RECHECK_MS);

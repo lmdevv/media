@@ -593,31 +593,6 @@ export default defineSchema({
     .index("by_service", ["serviceId"])
     .index("by_reported", ["reportedAt"]),
 
-  /**
-   * When each media server last beat. `core/serverStatus.ts` is its only writer, and no query reads
-   * it, so a beat re-runs no one's view.
-   */
-  serverBeats: defineTable({
-    serviceId: v.id("users"),
-    seenAt: v.number(),
-  })
-    .index("by_service", ["serviceId"])
-    .index("by_seen", ["seenAt"]),
-
-  /**
-   * Whether each media server beats, written only when that changes, for `core.server.presence`.
-   * `core/serverStatus.ts` is its only writer.
-   */
-  serverPresence: defineTable({
-    serviceId: v.id("users"),
-    /** When the sweep found it silent; null while it beats. */
-    awaySince: v.union(v.number(), v.null()),
-    /** When `awaySince` last changed. */
-    changedAt: v.number(),
-  })
-    .index("by_service", ["serviceId"])
-    .index("by_changed", ["changedAt"]),
-
   imports: defineTable({
     source: importSource,
     serverId: v.string(),

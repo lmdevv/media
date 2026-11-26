@@ -143,7 +143,7 @@ describe("nextCheck", () => {
     expect(nextCheck(ANSWERING, true, true)).toBeNull();
   });
 
-  it("keeps checking while the socket is closed, since the core can't say the server went away", () => {
+  it("keeps checking while the socket is closed, since nothing reaches the app over it", () => {
     expect(nextCheck(applied([["answered", 1]]), true, false)).toBe(CLOSED_RECHECK_MS);
     expect(nextCheck(applied([["doubted", 1]]), true, false)).toBe(SETTLE_MS);
     expect(nextCheck(applied([["failed", 1]]), true, false)).toBe(RECHECK_MS);

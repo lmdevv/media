@@ -193,7 +193,6 @@ export const commandRefs = {
   "core.restrictions.get": api.core.restrictions.get satisfies core_restrictions["get"],
   "core.restrictions.set": api.core.restrictions.set satisfies core_restrictions["set"],
   "core.server.info": api.core.server.info satisfies core_server["info"],
-  "core.server.presence": api.core.server.presence satisfies core_server["presence"],
   "core.server.status": api.core.server.status satisfies core_server["status"],
   "core.server.backups.active": api.core.server.backups
     .active satisfies core_server_backups["active"],

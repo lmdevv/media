@@ -312,13 +312,6 @@ export const core = [
     args: {},
     result: v.object({ name: v.string(), version: v.string(), hasOwner: v.boolean() }),
   }),
-  query("core.server.presence", {
-    summary:
-      "Show whether the media server keeps in touch with the core: away once it has been silent for 40 seconds",
-    scope: "public",
-    args: {},
-    result: v.union(v.literal("present"), v.literal("away"), v.null()),
-  }),
   query("core.server.status", {
     summary:
       "Show what the media server last reported: its version, streams, transcoding devices and capabilities, and when",
