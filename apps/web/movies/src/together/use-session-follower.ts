@@ -1,6 +1,7 @@
 import type { SessionClock } from "@media/contracts/clock";
 import { run } from "@media/contracts/follower";
 import type {
+  ClockMove,
   Follower,
   FollowerPlayer,
   FollowerState,
@@ -41,13 +42,20 @@ export interface FollowingInput {
   readonly hosting: boolean;
 }
 
+/** The clock move a viewer's `move` asks for: a seek against the clock at `revision`. */
+const clockMove = (move: ViewerMove, revision: number): ClockMove =>
+  move.kind === "seek" ? { kind: "seek", positionMs: move.positionMs, revision } : move;
+
 /** The player's follower, for the screen. */
 export interface Following {
   /** Where it stands, or null until it has started. */
   readonly state: FollowerState | null;
   /**
-   * Plays, pauses, or seeks for everyone at once. Resolves with why the session refused the move,
-   * whose player returns to the session's clock, or null once it moved.
+   * Plays, pauses, or seeks for everyone at once: through the follower while one runs, which moves
+   * the player at once, and straight to the session while none does, as while the follower takes
+   * its first clock samples or the player loads; the player then takes up the clock the move left
+   * once its follower runs. Resolves with why the session refused the move, whose player returns
+   * to the session's clock, or null once it moved.
    */
   readonly move: (move: ViewerMove) => Promise<SessionCallFailed | null>;
 }
@@ -71,7 +79,7 @@ export const useSessionFollower = ({
   const [state, setState] = useState<FollowerState | null>(null);
   const follower = useRef<Follower<SessionCallFailed> | null>(null);
   const hold = useRef<Hold | null>(null);
-  const latest = useLatest({ clock, controls, durationMs });
+  const latest = useLatest({ clock, controls, durationMs, sessionId });
   const known = durationMs !== null && durationMs > 0;
 
   const port = useMemo(
@@ -145,15 +153,24 @@ export const useSessionFollower = ({
     if (running !== null) Effect.runFork(running.allow(controls));
   }, [controls]);
 
-  const move = useCallback(async (next: ViewerMove): Promise<SessionCallFailed | null> => {
-    const running = follower.current;
+  const move = useCallback(
+    async (next: ViewerMove): Promise<SessionCallFailed | null> => {
+      const running = follower.current;
+      const { clock: seen, sessionId: joined } = latest.current;
 
-    if (running === null) return null;
+      if (running === null && joined === null) return null;
 
-    const exit = await Effect.runPromiseExit(running.move(next));
+      const moved =
+        running === null
+          ? Effect.asVoid(port.control(clockMove(next, seen.revision)))
+          : running.move(next);
 
-    return Exit.isSuccess(exit) ? null : Option.getOrNull(Exit.findErrorOption(exit));
-  }, []);
+      const exit = await Effect.runPromiseExit(moved);
+
+      return Exit.isSuccess(exit) ? null : Option.getOrNull(Exit.findErrorOption(exit));
+    },
+    [port, latest],
+  );
 
   return { state, move };
 };
