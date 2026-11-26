@@ -187,7 +187,7 @@ const sheets = (dir) => {
   console.log(lines.join("\n"));
 };
 
-const MARK = /^(home-screen|home-content|open) drawn at ([\d.]+) hitched (true|false)$/u;
+const MARK = /^(home-screen|home-content|open) drawn at ([\d.]+) hitched (true|false)(?: |$)/u;
 
 /**
  * The frame marks in the device's log (`log show --style ndjson`), grouped by process in the order

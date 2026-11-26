@@ -13,7 +13,7 @@ const logged = (processID, name, at, hitched = false) =>
   JSON.stringify({
     processID,
     subsystem: "dev.lmdevv.launch-clock",
-    eventMessage: `${name} drawn at ${at.toFixed(3)} hitched ${String(hitched)}`,
+    eventMessage: `${name} drawn at ${at.toFixed(3)} hitched ${String(hitched)} gap ${hitched ? "33.333" : "0.000"} past -0.712`,
   });
 
 const LOG = [

@@ -483,9 +483,10 @@ Each timing ends on a frame the app's `LaunchClock` module saw drawn: a frame ma
 first display refresh that shows it in the window, inside the screen, and under no opaque view
 such as the splash screen, as that refresh's target time. All of them run on `CACurrentMediaTime`,
 the clock iOS stamps touches with. iOS gives no time at which an ordinary frame was really shown,
-so each mark also says whether it was **hitched**: its refresh came after one the app missed, or
-its callback ran late, which happens after a heavy frame, and a heavy frame can show a refresh or
-more after its target. The table counts each metric's hitched samples; drop or widen them.
+so each mark also says whether it was **hitched**: its callbacks skipped a refresh before it, or
+its callback ran past the refresh's target, so the app was busy across a refresh and the frame can
+show a refresh or more after its target. `marks.ndjson` gives each mark's gap and how far past
+its target its callback ran. The table counts each metric's hitched samples; drop or widen them.
 
 - **Cold launch**: the probe ends the app's process (`simctl terminate`) and opens it on Metro.
   Both metrics run from the process start the kernel records, an instant no screen recording shows:

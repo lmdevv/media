@@ -17,9 +17,11 @@ import os
 ///   the window, inside the window's bounds as it moves on screen, and covered by no opaque view,
 ///   such as the splash screen over React Native's root view. It reports the refresh's target time,
 ///   when the frame committed before it is due on screen, and whether the refresh is hitched: the
-///   app missed the refresh before it, or ran this one late, so that frame was heavy and may show a
-///   refresh or more after its target. iOS gives no time at which an ordinary frame was really
-///   shown. Each mark also goes to the device's log under its `name`, as numbers only.
+///   mark's callbacks skipped a refresh before it, or this callback ran past its target, so the app
+///   was busy across a refresh and the frame may show a refresh or more after its target. iOS gives
+///   no time at which an ordinary frame was really shown. Each mark also goes to the device's log
+///   under its `name`, with the gap since its previous callback and how far past the target this
+///   one ran, as numbers only.
 public final class LaunchClockModule: Module {
   public func definition() -> ModuleDefinition {
     Name("LaunchClock")
@@ -74,10 +76,12 @@ private let shownOpacity: Float = 0.01
 /// A covering view's background must be this opaque to hide what is under it.
 private let coveringAlpha: CGFloat = 0.99
 
-/// A refresh whose callback runs this many refresh intervals after the refresh began ran late.
-private let lateCallback: CFTimeInterval = 0.5
+/// A callback that runs this many refresh intervals past its refresh's target ran late: the frame
+/// it would commit misses that refresh.
+private let lateCallback: CFTimeInterval = 0.25
 
-/// Refreshes this many intervals apart, or more, had at least one the app missed between them.
+/// Two callbacks this many intervals apart, or more, had at least one refresh between them that the
+/// app was too busy to take.
 private let missedRefresh: CFTimeInterval = 1.5
 
 /// Where each mark goes in the device's log, for a probe to read the app's own clock.
@@ -91,8 +95,8 @@ final class FrameMarkView: ExpoView {
 
   private var link: CADisplayLink?
   private var deadline: CFTimeInterval = 0
-  /// When the previous refresh began, or when the mark started looking before the first one.
-  private var previousRefresh: CFTimeInterval = 0
+  /// When the refresh of the mark's previous callback began; none before its first callback.
+  private var previousRefresh: CFTimeInterval?
   private var reported = false
 
   required init(appContext: AppContext? = nil) {
@@ -119,9 +123,8 @@ final class FrameMarkView: ExpoView {
   private func start() {
     guard link == nil else { return }
 
-    let now = CACurrentMediaTime()
-    deadline = now + markPatience
-    previousRefresh = now
+    deadline = CACurrentMediaTime() + markPatience
+    previousRefresh = nil
     let link = CADisplayLink(target: WeakTarget(self), selector: #selector(WeakTarget.tick(_:)))
     link.add(to: .main, forMode: .common)
     self.link = link
@@ -132,14 +135,14 @@ final class FrameMarkView: ExpoView {
     link = nil
   }
 
-  /// Runs at the start of each display refresh. Whatever the app committed before it is what the
-  /// render server draws for the refresh at `targetTimestamp`, unless that frame was too heavy to
-  /// draw in time: then the refresh is hitched.
+  /// Runs once per display refresh, ahead of its target. Whatever the app committed before it is
+  /// what the render server draws for the refresh at `targetTimestamp`, unless the app was busy
+  /// across a refresh: then the refresh is hitched.
   fileprivate func tick(_ link: CADisplayLink) {
     let interval = link.targetTimestamp - link.timestamp
-    let hitched =
-      link.timestamp - previousRefresh >= missedRefresh * interval
-      || CACurrentMediaTime() - link.timestamp >= lateCallback * interval
+    let gap = previousRefresh.map { link.timestamp - $0 } ?? 0
+    let pastTarget = CACurrentMediaTime() - link.targetTimestamp
+    let hitched = gap >= missedRefresh * interval || pastTarget >= lateCallback * interval
     previousRefresh = link.timestamp
 
     if link.timestamp > deadline {
@@ -153,7 +156,7 @@ final class FrameMarkView: ExpoView {
     stop()
     let at = link.targetTimestamp * 1000
     markLog.notice(
-      "\(self.name, privacy: .public) drawn at \(at, format: .fixed(precision: 3), privacy: .public) hitched \(hitched, privacy: .public)"
+      "\(self.name, privacy: .public) drawn at \(at, format: .fixed(precision: 3), privacy: .public) hitched \(hitched, privacy: .public) gap \(gap * 1000, format: .fixed(precision: 3), privacy: .public) past \(pastTarget * 1000, format: .fixed(precision: 3), privacy: .public)"
     )
     onDrawn(["at": at, "hitched": hitched])
   }
