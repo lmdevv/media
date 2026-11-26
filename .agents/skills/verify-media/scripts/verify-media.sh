@@ -1292,14 +1292,16 @@ ios_matrix() {
 
 # What a timing run opens in each app on the demo library, in order, one line per screen: the label
 # to press, then a label the opened screen shows only with its content. Each is a plain press on a
-# control Home shows without scrolling, so the app times it from the touch, and none is a page
-# Home asks for before the press.
+# control shown without scrolling, so the app times it from the touch, and none is a record Home
+# asks for before the press: movies' hero opens on its featured title, whose detail comes with
+# Home's rows, not from the title's own query. Movies' row posters aren't used: AXe's tap doesn't
+# reach a poster's native link trigger.
 timing_opens() {
   case "$1" in
-    movies) echo "Sintel|About This Movie" ;;
+    movies) echo "Caminandes|About This Show" ;;
     music)
-      printf '%s\n' "translations ep, raymundo mendoza|Artist, raymundo mendoza" \
-        "Artist, raymundo mendoza|Albums" ;;
+      printf '%s\n' "Vienna Blue, Doc & Lena Selyanina|Artist, Doc & Lena Selyanina" \
+        "Artist, Doc & Lena Selyanina|Songs" ;;
   esac
 }
 
@@ -1335,7 +1337,7 @@ ios_timings() {
       *) die "ios timings [--runs N] [--out DIR] [--record]" ;;
     esac
   done
-  local app id since run round opens open point
+  local app id since launch round opens open point
   app="$(ios_app)"
   id="$(udid)"
   mapfile -t opens < <(timing_opens "$app")
@@ -1347,16 +1349,16 @@ ios_timings() {
     stamp record-start ""
     ios_record_start "$out/truth.mp4"
   fi
-  for run in $(seq 1 "$runs"); do
+  for launch in $(seq 1 "$runs"); do
     on_mac "xcrun simctl terminate $id dev.lmdevv.$app || true"
     sleep 2
-    stamp launch "$run"
+    stamp launch "$launch"
     ios_open_on_metro
-    ios_wait_opened "$(timing_home "$app")" 180 || die "run $run: Home did not show its content"
+    ios_wait_opened "$(timing_home "$app")" 180 || die "launch $launch: Home did not show its content"
     sleep 2
     for round in 1 2; do
       for open in "${opens[@]}"; do
-        point="$(ios_find "${open%%|*}")" || die "run $run: can't press \"${open%%|*}\""
+        point="$(ios_find "${open%%|*}")" || die "launch $launch: can't press \"${open%%|*}\""
         stamp press "${open%%|*}|$point"
         ios_touch "${point% *}" "${point#* }"
         ios_wait "${open#*|}" 60
@@ -1370,10 +1372,10 @@ ios_timings() {
       ios_wait "$(timing_home "$app")" 30
       sleep 1
     done
-    stamp home "$run"
+    stamp home "$launch"
     on_mac "$axe button home --udid $id"
     sleep 3
-    say "timings: run $run of $runs done"
+    say "timings: launch $launch of $runs done"
   done
   ((record)) && ios_record_stop >/dev/null
   sleep 2

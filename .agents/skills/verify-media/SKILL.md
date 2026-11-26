@@ -499,7 +499,8 @@ to see how far the same build moves: `node scripts/app-timings.mjs compare <app>
 
 `--record` checks the numbers against the screen. `node scripts/app-timings-truth.mjs sheets <dir>`
 cuts a storyboard of each launch and press from `truth.mp4`, every frame that changed with its time
-in the recording. Read off each sample's zero frame (iOS's launch animation starting, or the
+in the recording; `frames <truth.mp4> <out.png> <seconds>...` cuts a closer look at chosen frames,
+such as the pressed control's feedback, which the storyboard can miss. Read off each sample's zero frame (iOS's launch animation starting, or the
 pressed control's feedback clearing) and end frame, write them to `truth.tsv`, and run
 `node scripts/app-timings-truth.mjs judge truth.tsv [frame-ms]`: each logged value must sit within
 two frames of the recorded span once the zero points' median difference is taken out.

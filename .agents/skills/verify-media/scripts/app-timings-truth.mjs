@@ -3,6 +3,7 @@
 //
 //   node app-timings-truth.mjs sheets <app-timings-dir>
 //   node app-timings-truth.mjs judge <truth.tsv> [frame-ms]
+//   node app-timings-truth.mjs frames <truth.mp4> <out.png> <seconds>...
 //
 // `sheets` cuts, from truth.mp4, a storyboard of each launch and each press in actions.tsv: every
 // frame that visibly changed, captioned with its time in the recording. Read the frames yourself
@@ -13,6 +14,7 @@
 // `zero_s` and `end_s` are the recording's times (the sheets' captions) of the sample's zero and
 // end frames: for a launch, iOS's launch animation starting and the frame the metric names; for an
 // open, the pressed control's feedback clearing and the opened screen's content first in view.
+// `frames` cuts a small sheet of the frames at the given times, to look closer at one sample.
 // `judge` prints each sample's recorded span, how far the logged value is from it, and whether all
 // agree within two frames once the zero points' median difference is taken out.
 
@@ -123,8 +125,8 @@ const changedCell = (left, right) => {
   return false;
 };
 
-/** Writes a captioned sheet of `video`'s frames at `times` to `path`. */
-const sheet = (video, times, path) => {
+/** Writes a captioned sheet of `video`'s frames at `times` to `path`, each `width` pixels wide. */
+const sheet = (video, times, path, width = 201) => {
   if (times.length === 0) return;
   const from = Math.max(0, times[0] - 0.05);
   const to = times.at(-1) + 0.05;
@@ -145,7 +147,7 @@ const sheet = (video, times, path) => {
     "-i",
     video,
     "-vf",
-    `select='${pick}',scale=201:437,drawtext=text='%{pts\\:flt}':x=4:y=4:fontsize=18:fontcolor=yellow:box=1:boxcolor=black,tile=${String(columns)}x${String(rows)}`,
+    `select='${pick}',scale=${String(width)}:-2,drawtext=text='%{pts\\:flt}':x=4:y=4:fontsize=${String(Math.round(width / 11))}:fontcolor=yellow:box=1:boxcolor=black,tile=${String(columns)}x${String(rows)}`,
     "-fps_mode",
     "passthrough",
     "-frames:v",
@@ -232,6 +234,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 
   if (command === "sheets" && target !== undefined) {
     sheets(target);
+  } else if (command === "frames" && target !== undefined && frame !== undefined) {
+    sheet(target, process.argv.slice(5).map(Number), frame, 134);
   } else if (command === "judge" && target !== undefined) {
     const frameMs = Number(frame ?? 1000 / 60);
     const metrics = judge(parseTruth(readFileSync(target, "utf8")), frameMs);
@@ -255,7 +259,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       );
     }
   } else {
-    console.error("usage: node app-timings-truth.mjs sheets <app-timings-dir> | judge <truth.tsv> [frame-ms]");
+    console.error(
+      "usage: node app-timings-truth.mjs sheets <app-timings-dir> | judge <truth.tsv> [frame-ms] | frames <truth.mp4> <out.png> <seconds>...",
+    );
     process.exit(2);
   }
 }
