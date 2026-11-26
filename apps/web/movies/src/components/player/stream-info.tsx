@@ -71,9 +71,17 @@ const changeLine = (change: TranscodeChange): string => {
   ].join(" · ");
 };
 
+/** One line of a row, keyed apart from lines that read the same, such as two like changes. */
+interface Line {
+  readonly key: string;
+  readonly text: string;
+}
+
+const lineOf = (text: string): Line => ({ key: text, text });
+
 interface Row {
   readonly label: string;
-  readonly lines: ReadonlyArray<string>;
+  readonly lines: ReadonlyArray<Line>;
   /** The first line is where the rest came from, such as the source of a transcoded video. */
   readonly fromFirst?: true;
 }
@@ -134,24 +142,50 @@ const streamInfoRows = (
   const changes = stream.transcode?.changes ?? [];
 
   const rows: ReadonlyArray<Row> = [
-    ...(file.versionName === null ? [] : [{ label: "Version", lines: [file.versionName] }]),
+    ...(file.versionName === null ? [] : [{ label: "Version", lines: [lineOf(file.versionName)] }]),
     copiedVideo || sourceVideo === null
-      ? { label: "Video", lines: [sourceVideo ?? outputVideo] }
-      : { label: "Video", lines: [sourceVideo, `→ ${outputVideo}`], fromFirst: true },
-    ...(stages.length === 0 ? [] : [{ label: "Stages", lines: stages.map(stageLabel) }]),
-    ...(changes.length === 0 ? [] : [{ label: "Changed", lines: changes.map(changeLine) }]),
-    { label: "Audio", lines: [audio] },
+      ? { label: "Video", lines: [lineOf(sourceVideo ?? outputVideo)] }
+      : {
+          label: "Video",
+          lines: [lineOf(sourceVideo), lineOf(`→ ${outputVideo}`)],
+          fromFirst: true,
+        },
+    ...(stages.length === 0
+      ? []
+      : [
+          {
+            label: "Stages",
+            lines: stages.map((stage, index) => ({
+              key: `${String(index)}:${stage.impl}`,
+              text: stageLabel(stage),
+            })),
+          },
+        ]),
+    ...(changes.length === 0
+      ? []
+      : [
+          {
+            label: "Changed",
+            lines: changes.map((change, index) => ({
+              key: `${String(change.generation)}:${String(index)}`,
+              text: changeLine(change),
+            })),
+          },
+        ]),
+    { label: "Audio", lines: [lineOf(audio)] },
     {
       label: "Container",
-      lines: [stream.mode === "direct" ? container : `${container} → HLS fMP4`],
+      lines: [lineOf(stream.mode === "direct" ? container : `${container} → HLS fMP4`)],
     },
     {
       label: "Bitrate",
       lines: [
-        [
-          ...(file.probe.bitRate === null ? [] : [`${megabits(file.probe.bitRate)} Mb/s`]),
-          `buffer ${String(Math.round(bufferedAheadSeconds))} s`,
-        ].join(" · "),
+        lineOf(
+          [
+            ...(file.probe.bitRate === null ? [] : [`${megabits(file.probe.bitRate)} Mb/s`]),
+            `buffer ${String(Math.round(bufferedAheadSeconds))} s`,
+          ].join(" · "),
+        ),
       ],
     },
   ];
@@ -222,13 +256,13 @@ export function StreamInfo({
             <dd className="flex grow basis-0 flex-col gap-0.5">
               {row.lines.map((line, index) => (
                 <span
-                  key={line}
+                  key={line.key}
                   className={cn(
                     "font-mono text-label/5",
                     row.fromFirst === true && index === 0 ? "text-text-muted" : "text-text",
                   )}
                 >
-                  {line}
+                  {line.text}
                 </span>
               ))}
             </dd>

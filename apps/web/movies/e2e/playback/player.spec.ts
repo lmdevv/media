@@ -7,7 +7,7 @@ import type { PlaybackMode } from "@media/contracts/models/playback";
 import { Milliseconds } from "@media/contracts/units";
 import { formatTimecode } from "@media/ui/lib/timecode";
 import { devices, expect, test } from "@playwright/test";
-import type { BrowserContext, Page, Request, Route } from "@playwright/test";
+import type { BrowserContext, ConsoleMessage, Page, Request, Route } from "@playwright/test";
 
 import { drawStill } from "../stack/fixture-library";
 import { createLibrary, removeLibrary, titlesByName } from "../stack/libraries";
@@ -46,7 +46,7 @@ import {
   videoState,
   writeText,
 } from "./playback-stack";
-import { recordStreams, refuseQualityCaps } from "./negotiated-streams";
+import { markSeekAnswers, recordStreams, refuseQualityCaps } from "./negotiated-streams";
 import type { NegotiatedStream } from "./negotiated-streams";
 
 const stack = await reachableStack();
@@ -73,6 +73,8 @@ const MOVIES = {
   remux: "Signal Box",
   audio: "Night Ferry",
   transcode: "Glass Harbor",
+  /** HEVC long enough that a seek near its end lands past what its stream produced. */
+  long: "Tide Clock",
   missing: "Lost Reel",
   pictures: "Paper Lantern",
 } as const;
@@ -166,6 +168,12 @@ test.beforeAll(async ({ browser }) => {
     encodeClip(join(folder(MOVIES.transcode), `${MOVIES.transcode} (2021).mkv`), {
       seconds: 120,
       video: "hevc",
+      audio: [{ codec: "aac", language: "eng" }],
+    }),
+    encodeClip(join(folder(MOVIES.long), `${MOVIES.long} (2021).mkv`), {
+      seconds: 300,
+      video: "hevc",
+      size: "320x180",
       audio: [{ codec: "aac", language: "eng" }],
     }),
     encodeClip(join(folder(MOVIES.pictures), `${MOVIES.pictures} (2021).mkv`), {
@@ -1286,6 +1294,86 @@ test("HEVC transcodes in software, and a seek past what is produced moves the st
   expect((await seek).ok()).toBe(true);
   await expectPlayingPast(page, 90, 45_000);
 });
+
+/** The generation of each HLS playlist the page loaded, in order. */
+const PLAYLIST_GENERATION = /\/media\/hls\/[^/]+\/(\d+)\/index\.m3u8/u;
+
+for (const first of ["reload", "seek"] as const) {
+  test(`stream info describes the generation the player loads when the ${first} answers first`, async () => {
+    await playFromStart(MOVIES.long, "transcode-software");
+
+    const loaded: Array<number> = [];
+    const errors: Array<string> = [];
+
+    const onRequest = (request: Request) => {
+      const generation = PLAYLIST_GENERATION.exec(request.url())?.[1];
+
+      if (generation !== undefined) loaded.push(Number(generation));
+    };
+
+    const onConsole = (message: ConsoleMessage) => {
+      if (message.type() === "error") errors.push(message.text());
+    };
+
+    page.on("request", onRequest);
+    page.on("console", onConsole);
+
+    // Each answer names its generation twice, in two lines alike, which need keys of their own.
+    const seeks = await markSeekAnswers(page);
+
+    try {
+      // The seek near the end starts a generation there, which ends the one playing: the player's
+      // next segment of it answers 410, and the player reloads where it is.
+      await revealControls(page);
+      await clickScrubber(page, 0.8);
+      await expect
+        .poll(() => seeks.held.length, { message: "the seek, then the reload, asked to move" })
+        .toBe(2);
+      seeks.letGo();
+
+      const [seek, reload] = seeks.held;
+      const [answersFirst, answersNext] = first === "seek" ? [seek, reload] : [reload, seek];
+
+      answersFirst?.release();
+      await page.waitForTimeout(500);
+      answersNext?.release();
+
+      // Once the player plays on, stream info names the generation it loaded last.
+      await expect
+        .poll(async () => {
+          const before = await videoState(page);
+
+          await page.waitForTimeout(500);
+
+          const after = await videoState(page);
+
+          return !after.paused && after.currentTime > before.currentTime;
+        })
+        .toBe(true);
+      await revealControls(page);
+      await page.getByRole("button", { name: "Stream info" }).click();
+
+      const info = page.getByRole("region", { name: "Stream info" });
+      const playing = loaded.at(-1) ?? 0;
+
+      const changed = info.getByText(/ · gen-\d+$/u);
+
+      expect(playing, "the seek moved the stream to a new generation").toBeGreaterThan(1);
+      await expect(changed).toHaveCount(2);
+      expect(
+        (await changed.allTextContents()).every((line) =>
+          line.endsWith(` · gen-${String(playing)}`),
+        ),
+      ).toBe(true);
+      expect(errors.filter((text) => text.includes("same key"))).toEqual([]);
+      await page.getByRole("button", { name: "Close stream info" }).click();
+    } finally {
+      page.off("request", onRequest);
+      page.off("console", onConsole);
+      await seeks.remove();
+    }
+  });
+}
 
 test("the next episode plays itself after the countdown; Watch credits cancels it", async () => {
   const [first, second] = episodes;
