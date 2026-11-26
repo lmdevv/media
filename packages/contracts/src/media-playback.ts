@@ -312,6 +312,11 @@ export type PrepareDownloadResponse = typeof PrepareDownloadResponse.Type;
 /** Service health. */
 export const HealthResponse = Schema.Struct({
   status: Schema.Literal("ok"),
+  /**
+   * The version of Lar this server runs, as its package names it. Apps read it as a `Release`
+   * (`./release`) and treat any other text as an unknown release.
+   */
+  release: Schema.String,
   /** Streams whose encoder runs; a paused stream whose encoder stopped is not counted. */
   activeStreams: Schema.Int,
   /**
@@ -332,10 +337,13 @@ export const HealthResponse = Schema.Struct({
 export interface HealthResponse extends Schema.Schema.Type<typeof HealthResponse> {}
 
 /**
- * What an app needs to connect when someone types only this service's address: the Convex URL
- * to sign in to, as clients reach it (`CONVEX_PUBLIC_URL`). Absent when none is configured.
+ * What an app needs to connect when someone types only this service's address: the release it
+ * runs, and the Convex URL to sign in to, as clients reach it (`CONVEX_PUBLIC_URL`), absent when
+ * none is configured.
  */
 export const ClientConfigResponse = Schema.Struct({
+  /** The version of Lar this server runs, as its package names it. */
+  release: Schema.String,
   /** The core's public Convex URL, which clients sign in to. */
   convexUrl: Schema.optional(Schema.String),
   /** The movies web client's address, `${MEDIA_BASE_URL}/movies`, for links apps build. */

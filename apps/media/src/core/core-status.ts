@@ -3,10 +3,10 @@ import type { ServerReport } from "@media/contracts/server-functions";
 import { EpochMillis } from "@media/contracts/units";
 import { Clock, Duration, Effect, Layer, Option, Ref, Schedule } from "effect";
 
-import packageJson from "../../package.json" with { type: "json" };
 import * as BackendHealth from "../backend-health.ts";
 import * as StreamSessions from "../playback/stream-sessions.ts";
 import * as TranscodeCapabilities from "../playback/transcode-capabilities.ts";
+import { RELEASE } from "../release.ts";
 import * as CoreSession from "./core-session.ts";
 
 const LOOK_EVERY = Duration.seconds(15);
@@ -42,7 +42,7 @@ export const layer: Layer.Layer<
 
     const look = Effect.gen(function* () {
       const report: ServerReport = {
-        version: packageJson.version,
+        version: RELEASE,
         hardwareAcceleration: (yield* capabilities.hardwareEncoder) ?? "none",
         activeStreams: yield* sessions.activeCount,
         runsAwaitingExit: yield* sessions.runsAwaitingExit,

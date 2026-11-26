@@ -13,6 +13,7 @@ import * as TranscodeCapabilities from "../playback/transcode-capabilities.ts";
 import * as PlaybackNegotiator from "../playback/playback-negotiator.ts";
 import * as PlaybackToken from "../playback/playback-grants.ts";
 import * as StreamSessions from "../playback/stream-sessions.ts";
+import { RELEASE } from "../release.ts";
 import { retryAfter } from "./rate-limit.ts";
 
 /**
@@ -106,6 +107,7 @@ const systemHandlers = HttpApiBuilder.group(
       health: Effect.fn("Api.health")(function* () {
         return {
           status: "ok" as const,
+          release: RELEASE,
           activeStreams: yield* sessions.activeCount,
           runsAwaitingExit: yield* sessions.runsAwaitingExit,
           hardwareAcceleration: (yield* capabilities.hardwareEncoder) ?? ("none" as const),
@@ -114,6 +116,7 @@ const systemHandlers = HttpApiBuilder.group(
       }),
       clientConfig: () =>
         Effect.succeed({
+          release: RELEASE,
           ...Option.match(config.convexPublicUrl, {
             onNone: () => ({}),
             onSome: (url) => ({ convexUrl: url }),

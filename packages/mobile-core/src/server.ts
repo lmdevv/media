@@ -3,7 +3,8 @@ import {
   HealthResponse,
   MEDIA_ROUTES,
 } from "@media/contracts/media-playback";
-import { Option, Schema } from "effect";
+import { Release } from "@media/contracts/release";
+import { Option, Schema, Struct } from "effect";
 
 /** Where this install connects. */
 export interface ServerConnection {
@@ -55,20 +56,19 @@ export const normalizeServerUrl = (text: string): string | null => {
 
 const TIMEOUT_MS = 5000;
 
-const getDecoded = async <A>(
-  url: string,
-  schema: Schema.Codec<A, unknown>,
-): Promise<Option.Option<A>> => {
+/** The JSON body of a success answer from `url`, or none when nothing answers that way in time. */
+const getJson = async (url: string): Promise<Option.Option<unknown>> => {
   try {
     const response = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT_MS) });
 
-    return response.ok
-      ? Schema.decodeUnknownOption(Schema.toCodecJson(schema))(await response.json())
-      : Option.none();
+    return response.ok ? Option.some(await response.json()) : Option.none();
   } catch {
     return Option.none();
   }
 };
+
+const decoderOf = <A>(schema: Schema.Codec<A, unknown>) =>
+  Schema.decodeUnknownOption(Schema.toCodecJson(schema));
 
 /** What connecting to an address found. */
 export type ConnectResult =
@@ -87,9 +87,36 @@ const convexAnswers = async (convexUrl: string): Promise<boolean> => {
   }
 };
 
-/** The health of the Lar server at `mediaUrl`, or none when it does not answer. */
-export const readHealth = (mediaUrl: string): Promise<Option.Option<HealthResponse>> =>
-  getDecoded(`${mediaUrl}${MEDIA_ROUTES.health}`, HealthResponse);
+/** What a Lar server's health check says, once it answered as one. */
+export interface Health {
+  /** The release the server runs; none when it names none this app can read. */
+  readonly release: Option.Option<Release>;
+  /**
+   * The whole report; none when this app can't read it, such as a newer server's that names a
+   * value this app doesn't know.
+   */
+  readonly report: Option.Option<HealthResponse>;
+}
+
+/** A health answer counts as a Lar server's when it has a success status and `"status": "ok"`. */
+const decodeAnswer = decoderOf(HealthResponse.mapFields(Struct.pick(["status"])));
+
+/** The health check names its release as text; this app reads it as a release it can compare. */
+const decodeRelease = decoderOf(Schema.Struct({ release: Release }));
+
+const decodeReport = decoderOf(HealthResponse);
+
+/**
+ * The health of the Lar server at `mediaUrl`, or none when it does not answer as one. A report
+ * this app can't read in full, such as a newer server's, still counts as an answer.
+ */
+export const readHealth = async (mediaUrl: string): Promise<Option.Option<Health>> =>
+  Option.flatMap(await getJson(`${mediaUrl}${MEDIA_ROUTES.health}`), (body) =>
+    Option.as(decodeAnswer(body), {
+      release: Option.map(decodeRelease(body), ({ release }) => release),
+      report: decodeReport(body),
+    }),
+  );
 
 const mediaAnswers = async (mediaUrl: string): Promise<boolean> =>
   Option.isSome(await readHealth(mediaUrl));
@@ -149,6 +176,14 @@ export const reachableUrl = (convexUrl: string, mediaUrl: string): string => {
 export const moviesUrlBeside = (mediaUrl: string): string => `${mediaUrl}/movies`;
 
 /**
+ * Only the fields of `/api/client-config` the app connects with, so a newer server's other fields
+ * never stop it.
+ */
+const decodeConnectionDetails = decoderOf(
+  ClientConfigResponse.mapFields(Struct.pick(["convexUrl", "moviesUrl"])),
+);
+
+/**
  * Checks that `text` is a Lar server, asks its `/api/client-config` where the core and the
  * movies web client live, and probes the core.
  */
@@ -157,8 +192,8 @@ export const discoverServer = async (text: string): Promise<ConnectResult> => {
 
   if (candidates === null) return { ok: false, failure: "invalid" };
 
-  const configs = candidates.map((url) =>
-    getDecoded(`${url}${MEDIA_ROUTES.clientConfig}`, ClientConfigResponse),
+  const configs = candidates.map(async (url) =>
+    Option.flatMap(await getJson(`${url}${MEDIA_ROUTES.clientConfig}`), decodeConnectionDetails),
   );
 
   const mediaUrl = await firstAnswering(candidates, mediaAnswers);
