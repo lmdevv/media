@@ -345,6 +345,21 @@ const relapsing = await standIn({
 
 const plain = await standIn({});
 
+/** The device check opens the device and names its driver as `line` does, then exits 0. */
+const namingDriver = (line: string) =>
+  standIn({
+    rules: [{ token: "nullsrc=s=64x64", runs: "any", stderr: line, exitCode: 0 }],
+  });
+
+/** Debian's iHD 25.2.3 prints an empty build note after its version. */
+const emptyBuildNote = await namingDriver(
+  "[AVHWDeviceContext @ 0x1] VAAPI driver: Intel iHD driver for Intel(R) Gen Graphics - 25.2.3 ().",
+);
+
+const buildNote = await namingDriver(
+  "[AVHWDeviceContext @ 0x1] VAAPI driver: Intel iHD driver for Intel(R) Gen Graphics - 25.2.3 (1.2).",
+);
+
 /** This build cannot make the generated VP9 clip, as one without that encoder setting couldn't. */
 const clipless = await standIn({
   rules: [
@@ -927,6 +942,35 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
       60_000,
     );
   });
+
+  for (const [named, standInOf, driver] of [
+    [
+      "drops an empty build note",
+      emptyBuildNote,
+      "Intel iHD driver for Intel(R) Gen Graphics - 25.2.3",
+    ],
+    ["keeps a build note", buildNote, "Intel iHD driver for Intel(R) Gen Graphics - 25.2.3 (1.2)"],
+  ] as const) {
+    layer(
+      standInOf.services,
+      live,
+    )((it) => {
+      it.effect(
+        `records the userspace driver the device check names, and ${named}`,
+        () =>
+          Effect.gen(function* () {
+            const capabilities = yield* TranscodeCapabilities.Service;
+
+            yield* capabilities.resolve(request(HDR));
+            const device = (yield* capabilities.inventory).devices.get("qsv");
+
+            assert.strictEqual(device?.opened, true);
+            assert.strictEqual(device?.userDriver, driver);
+          }),
+        60_000,
+      );
+    });
+  }
 
   layer(
     clipless.services,

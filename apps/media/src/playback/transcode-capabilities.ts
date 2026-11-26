@@ -167,6 +167,16 @@ const DEVICE_FAILED =
 /** What ffmpeg writes when a signal, not the stage, ended it. */
 const ENDED_BY_SIGNAL = /received signal \d+|system signals, hard exiting/u;
 
+/**
+ * The userspace driver a device check's log names, such as `Intel iHD driver for Intel(R) Gen
+ * Graphics - 26.3.5`, without the empty `()` some builds print after the version.
+ */
+const userDriverOf = (log: string): string | undefined =>
+  /driver: (.+?)\.?$/mu
+    .exec(log)?.[1]
+    ?.replace(/\s*\(\)$/u, "")
+    .trim();
+
 /** The first line ffmpeg itself wrote, past libva's informational lines. */
 const firstLine = (text: string): string =>
   (
@@ -422,9 +432,7 @@ const make = Effect.gen(function* () {
           ? `${vendor.value.replace(/^0x/u, "")}:${model.value.replace(/^0x/u, "")}${Option.match(revision, { onNone: () => "", onSome: (rev) => ` rev ${rev.replace(/^0x/u, "")}` })}`
           : undefined,
       kernelDriver: Option.getOrUndefined(kernelDriver),
-      userDriver: Result.isSuccess(log)
-        ? /driver: (.+?)\.?$/mu.exec(log.success)?.[1]?.trim()
-        : undefined,
+      userDriver: Result.isSuccess(log) ? userDriverOf(log.success) : undefined,
       at: yield* now,
     };
 
