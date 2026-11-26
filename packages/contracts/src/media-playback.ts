@@ -213,8 +213,8 @@ export interface TranscodeStage extends Schema.Schema.Type<typeof TranscodeStage
 
 /**
  * Why a stream's video chain changed or the stream ended, as the media service's failure
- * classifier found it. A closed list, so no text from ffmpeg's log reaches a client; the readable
- * line stays in the server's log.
+ * classifier found it. A closed list, so no answer carries text from ffmpeg's log; the readable
+ * line goes to the server's log, which admins can read.
  *
  * - `reproduced`: a probe on a generated clip failed again at a stage the run used.
  * - `file-only`: the stages ran on generated frames; only this file fails there.

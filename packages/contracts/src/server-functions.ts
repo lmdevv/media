@@ -309,8 +309,8 @@ const TranscodingDevice = Schema.Struct({
 const CapabilityStatus = Schema.Literals(["unknown", "verified", "unsupported"]);
 
 /**
- * What a capability's latest evidence showed, as a code, so no text from ffmpeg's log reaches a
- * client; the readable line stays in the server's log.
+ * What a capability's latest evidence showed, as a code, so no report carries text from ffmpeg's
+ * log; the readable line goes to the server's log, which admins can read.
  *
  * - `listed` and `not-listed`: the build's listings show the component it needs, or lack it.
  * - `passed`: a probe's frames came out.

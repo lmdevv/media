@@ -312,8 +312,9 @@ fails during a stream, first on the GPU without it and then in software.
   `inconclusive`), and any quarantine after a failure the probes reproduced. The admin Server page
   (and the iOS app's) shows the GPU and the counts. For one stream, the player's Stream info and
   `media movies stream` list where each stage runs and any change after a failure with its reason
-  (`disk full`, `probe failed too`). Reasons are codes: no line from ffmpeg's log, file path, or
-  argument leaves the server, and the readable line stays in the server's own log.
+  (`disk full`, `probe failed too`). Reasons are codes, so these answers carry no line from
+  ffmpeg's log, file path, or argument. The readable line goes to the server's log, which admins
+  read with `media logs`.
 
 ## Telemetry and logs
 

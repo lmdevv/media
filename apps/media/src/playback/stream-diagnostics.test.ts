@@ -787,7 +787,7 @@ describe.skipIf(!hasFfmpeg)("stream diagnostics", () => {
             }
           }
 
-          // The readable line stays in the server's own log.
+          // The readable line goes to the server's log.
           assert.isTrue(
             server
               .logged()
