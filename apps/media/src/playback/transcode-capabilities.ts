@@ -759,7 +759,12 @@ const make = Effect.gen(function* () {
         }
 
         const epoch = Inventory.capabilityOf(known, target.key).epoch;
-        const probed = yield* runProbe(plan, request, priority);
+
+        const probed = yield* runProbe(
+          { ...plan, runs: Inventory.runsToVerify(known, target.key, plan.runs) },
+          request,
+          priority,
+        );
 
         if (Option.isNone(probed)) return Option.none();
         const shown = probed.value;

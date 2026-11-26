@@ -6,8 +6,9 @@
  * moves every epoch of its domain, even of keys with no entry yet. Evidence from a real source
  * belongs to that file version and stream alone and never changes a shared status or sets a shared
  * key aside; a quarantine sets a key aside for a while after a generated clip reproduced a
- * failure or a probe crashed ffmpeg; an exclusion keeps one source from a row. Pure: the service
- * owns probes and the clock.
+ * failure or a probe crashed ffmpeg, and a key with strikes needs more clean runs to verify again
+ * (`runsToVerify`); an exclusion keeps one source from a row. Pure: the service owns probes and
+ * the clock.
  */
 import type { MediaFileId } from "@media/contracts/ids";
 import { Brand, Data, Option } from "effect";
@@ -177,6 +178,21 @@ export const isQuarantined = (capability: Capability, now: number): boolean =>
     onNone: () => false,
     onSome: ({ until }) => until === "restart" || until > now,
   });
+
+/**
+ * How many clean runs in a row a probe of `key` needs before it verifies the key: the probe's own
+ * `runs`, three times over for each strike the key has taken. Strikes stay after a quarantine
+ * ends, since a key that crashed in a share of runs can pass a few by luck: on an Arc A380,
+ * VA-API's MPEG-2 decoder probe crashed in 46 of 108 runs and passed three in a row a fifth of the
+ * time.
+ */
+export const runsToVerify = (inventory: Inventory, key: CapabilityKey, runs: number): number =>
+  runs *
+  3 **
+    Option.match(capabilityOf(inventory, key).quarantine, {
+      onNone: () => 0,
+      onSome: ({ strikes }) => strikes,
+    });
 
 /** What a probe makes a key's status; a crash sets the key aside instead (`setAside`). */
 const PROBE_STATUS: Readonly<Record<ProbeOutcome, Status | undefined>> = {

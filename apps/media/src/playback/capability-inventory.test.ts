@@ -15,6 +15,7 @@ import {
   quarantinedSince,
   record,
   reproduced,
+  runsToVerify,
   snapshot,
   type SourceScope,
   sourceScope,
@@ -192,6 +193,24 @@ describe("reproduced", () => {
 
     assert.isFalse(probeable(third, TONE_MAP, Number.MAX_SAFE_INTEGER));
     assert.deepStrictEqual(quarantinedSince(third, 3 * 3_600_000), [TONE_MAP]);
+  });
+
+  it("asks a key with strikes for three times the clean runs per strike, after its quarantine too", () => {
+    assert.strictEqual(runsToVerify(empty, TONE_MAP, 3), 3);
+
+    const once = struck(recorded(empty), TONE_MAP, 0);
+
+    assert.strictEqual(runsToVerify(once, TONE_MAP, 3), 9);
+    assert.strictEqual(
+      runsToVerify(recorded(once), TONE_MAP, 1),
+      3,
+      "a later pass keeps the strike",
+    );
+
+    const twice = struck(recorded(once), TONE_MAP, 15 * 60_000);
+
+    assert.strictEqual(runsToVerify(twice, TONE_MAP, 3), 27);
+    assert.strictEqual(runsToVerify(twice, DECODE, 3), 3, "strikes are the key's own");
   });
 
   it("keeps the probe that reproduced the failure as the quarantined key's newest evidence", () => {

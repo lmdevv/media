@@ -317,6 +317,18 @@ const crashingOnce = await standIn({
   rules: [{ token: TONE_MAP_PROBE, runs: "probe", signal: "SIGBUS", limit: 1 }],
 });
 
+/**
+ * The Quick Sync HDR10 tone map probe crashes ffmpeg, passes once, then crashes again: a key that
+ * crashes in a share of runs, which one lucky pass must not verify.
+ */
+const crashingAgain = await standIn({
+  rules: [
+    { token: TONE_MAP_PROBE, runs: "probe", signal: "SIGBUS", limit: 1 },
+    { token: TONE_MAP_PROBE, runs: "probe", limit: 1 },
+    { token: TONE_MAP_PROBE, runs: "probe", signal: "SIGBUS", limit: 1 },
+  ],
+});
+
 /** Making the generated MPEG-2 clip takes four seconds, longer than a negotiation waits. */
 const slowClip = await writeFakeFfmpeg({
   rules: [{ token: "mpeg2-8.mkv.part", runs: "any", delayMs: 4000 }],
@@ -700,7 +712,7 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
 
   layer(crashingOnce.services, { timeout: "60 seconds" })((it) => {
     it.effect(
-      "verifies a key whose probe crashed once when it is probed again after 15 minutes",
+      "verifies a key whose probe crashed once after three clean runs in a row 15 minutes later",
       () =>
         Effect.gen(function* () {
           const capabilities = yield* TranscodeCapabilities.Service;
@@ -708,14 +720,40 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
 
           assert.isFalse(first.verified.has(TONE_MAP_QSV));
           assert.strictEqual(yield* statusOf(TONE_MAP_QSV), "unknown");
+          const probes = yield* runsWith(crashingOnce.ffmpeg, "hevc-pq.mkv");
 
           yield* TestClock.adjust(Duration.minutes(15));
           const later = yield* capabilities.resolve(request(HDR));
 
+          // The tone map's probe runs once; with one strike, three times that.
+          assert.strictEqual(yield* runsWith(crashingOnce.ffmpeg, "hevc-pq.mkv"), probes + 3);
           assert.isTrue(later.verified.has(TONE_MAP_QSV));
           assert.deepStrictEqual(
             plannedImpls(HDR, later),
             Result.succeed(["decode.qsv", "scale.qsv", "tonemap.qsv", "encode.qsv"]),
+          );
+        }),
+      60_000,
+    );
+  });
+
+  layer(crashingAgain.services, { timeout: "60 seconds" })((it) => {
+    it.effect(
+      "keeps a key that crashed set aside when one of its clean runs after the quarantine crashes",
+      () =>
+        Effect.gen(function* () {
+          const capabilities = yield* TranscodeCapabilities.Service;
+
+          yield* capabilities.resolve(request(HDR));
+          yield* TestClock.adjust(Duration.minutes(15));
+          const later = yield* capabilities.resolve(request(HDR));
+          const known = Inventory.capabilityOf(yield* capabilities.inventory, TONE_MAP_QSV);
+
+          assert.isFalse(later.verified.has(TONE_MAP_QSV), "one lucky pass verifies nothing");
+          assert.strictEqual(known.status, "unknown");
+          assert.deepStrictEqual(
+            Option.map(known.quarantine, (quarantine) => quarantine.strikes),
+            Option.some(2),
           );
         }),
       60_000,
@@ -833,8 +871,9 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
           yield* TestClock.adjust(Duration.minutes(15));
           const recovered = yield* capabilities.resolve(request(HDR));
 
+          // The probe runs once; with the strike, three clean runs in a row verify it again.
           assert.isTrue(recovered.verified.has(TONE_MAP_QSV));
-          assert.strictEqual(yield* runsWith(relapsing.ffmpeg, "tonemap=1"), probesBefore + 1);
+          assert.strictEqual(yield* runsWith(relapsing.ffmpeg, "tonemap=1"), probesBefore + 3);
         }),
       60_000,
     );
