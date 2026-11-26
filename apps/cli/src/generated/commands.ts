@@ -2737,6 +2737,20 @@ export const generatedCommands = [
     method: (platform) => platform.core.server.info,
   }),
   coreCommand({
+    name: "core.server.presence",
+    path: ["auth", "server", "presence"],
+    kind: "query",
+    scope: "public",
+    refusesKeys: false,
+    summary:
+      "Show whether the media server keeps in touch with the core: away once it has been silent for 40 seconds",
+    secrets: [],
+    paginated: false,
+    args: Schema.Struct({}),
+    result: Schema.Union([Schema.Literal("present"), Schema.Literal("away"), Schema.Null]),
+    method: (platform) => platform.core.server.presence,
+  }),
+  coreCommand({
     name: "core.server.status",
     path: ["admin", "server", "status"],
     kind: "query",

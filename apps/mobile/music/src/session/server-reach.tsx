@@ -1,4 +1,4 @@
-import { usePlatform } from "@media/sdk/react";
+import { usePlatform, usePlatformQuery } from "@media/sdk/react";
 import { Option } from "effect";
 import {
   createContext,
@@ -33,16 +33,18 @@ const ServerReachContext = createContext<ReachState | null>(null);
 const noWatch = (): (() => void) => () => undefined;
 
 /**
- * The connection's `ReachWatch`, fed by the core's socket, by whether the app is on screen, and by
- * whether the server's queue plays here. It checks the server's health on coming back on screen,
- * with the read that also follows the server's release. The watch belongs to this connection, and
- * closes with it.
+ * The connection's `ReachWatch`, fed by the core's socket, by the core's word that the media
+ * server went away, by whether the app is on screen, and by whether the server's queue plays here.
+ * It checks the server's health on coming back on screen, with the read that also follows the
+ * server's release. The watch belongs to this connection, and closes with it.
  */
 const useWatch = (playing: boolean): ReachWatch | null => {
   const platform = usePlatform();
   const readHealth = useServerHealth();
   const [watch, setWatch] = useState<ReachWatch | null>(null);
   const [foreground, setForeground] = useState(AppState.currentState === "active");
+  const presence = usePlatformQuery(platform.core.server.presence);
+  const away = presence.status === "success" && presence.data === "away";
 
   useEffect(() => {
     const made = reachWatch(async () => Option.isSome(await readHealth()));
@@ -67,14 +69,19 @@ const useWatch = (playing: boolean): ReachWatch | null => {
     watch?.need(foreground || playing);
   }, [watch, foreground, playing]);
 
+  // Pushed over the socket the app holds anyway, only when it changes.
+  useEffect(() => {
+    if (away) watch?.hear("doubted");
+  }, [watch, away]);
+
   return watch;
 };
 
 /**
  * Works out, once for every screen below it, whether the server answers: `phase` is the phase on
  * show, offline when the app opened without the server. Tells the downloads, which fetch only
- * while it answers. On an install the media server and the core run in one place, so the core's
- * socket answering stands for both.
+ * while it answers. The core's socket stands for the core, and the core says when the media
+ * server stops beating; a health check of the media server decides each doubt.
  */
 export function ServerReachProvider({
   phase,

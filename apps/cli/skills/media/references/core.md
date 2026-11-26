@@ -949,6 +949,16 @@ Show this server's name and version, and whether its owner has set it up.
 - Arguments: none
 - Result: `{ name: string; version: string; hasOwner: boolean }`
 
+## `core.server.presence`
+
+Show whether the media server keeps in touch with the core: away once it has been silent for 40 seconds.
+
+- CLI: `media auth server presence`
+- Kind: query
+- Scope: public
+- Arguments: none
+- Result: `"present" | "away" | null`
+
 ## `core.server.status`
 
 Show what the media server last reported: its version, streams, transcoding devices and capabilities, and when.

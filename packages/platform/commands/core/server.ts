@@ -14,6 +14,10 @@ const infoArgs = v.object({});
 
 const infoResult = v.object({ name: v.string(), version: v.string(), hasOwner: v.boolean() });
 
+const presenceArgs = v.object({});
+
+const presenceResult = v.union(v.literal("present"), v.literal("away"), v.null());
+
 const statusArgs = v.object({});
 
 const statusResult = v.union(
@@ -67,6 +71,12 @@ export interface Handlers {
     args: Record<string, never>,
   ) => Infer<typeof infoResult> | Promise<Infer<typeof infoResult>>;
 
+  /** `core.server.presence` (query, public): Show whether the media server keeps in touch with the core: away once it has been silent for 40 seconds. */
+  readonly presence: (
+    ctx: Omit<QueryCtx, "auth">,
+    args: Record<string, never>,
+  ) => Infer<typeof presenceResult> | Promise<Infer<typeof presenceResult>>;
+
   /** `core.server.status` (query, admin): Show what the media server last reported: its version, streams, transcoding devices and capabilities, and when. */
   readonly status: (
     ctx: Omit<QueryCtx, "auth">,
@@ -83,6 +93,12 @@ export interface Refs {
     Record<string, never>,
     Infer<typeof infoResult>
   >;
+  readonly presence: FunctionReference<
+    "query",
+    "public",
+    Record<string, never>,
+    Infer<typeof presenceResult>
+  >;
   readonly status: FunctionReference<
     "query",
     "public",
@@ -97,6 +113,11 @@ export const register = (handlers: Handlers) => ({
     args: infoArgs,
     returns: infoResult,
     handler: async (ctx, args) => handlers.info(ctx, args),
+  }),
+  presence: query({
+    args: presenceArgs,
+    returns: presenceResult,
+    handler: async (ctx, args) => handlers.presence(ctx, args),
   }),
   status: query({
     args: statusArgs,

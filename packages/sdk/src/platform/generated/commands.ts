@@ -2151,6 +2151,13 @@ const core_server_info = query({
   result: Schema.Struct({ name: Schema.String, version: Schema.String, hasOwner: Schema.Boolean }),
 });
 
+const core_server_presence = query({
+  name: "core.server.presence",
+  path: "core/server:presence",
+  args: Schema.Struct({}),
+  result: Schema.Union([Schema.Literal("present"), Schema.Literal("away"), Schema.Null]),
+});
+
 const core_server_status = query({
   name: "core.server.status",
   path: "core/server:status",
@@ -6672,6 +6679,8 @@ export const effectMethods = (method: EffectBuilder) => ({
       },
       /** `core.server.info` (query, public): Show this server's name and version, and whether its owner has set it up. */
       info: method.query(core_server_info),
+      /** `core.server.presence` (query, public): Show whether the media server keeps in touch with the core: away once it has been silent for 40 seconds. */
+      presence: method.query(core_server_presence),
       /** `core.server.status` (query, admin): Show what the media server last reported: its version, streams, transcoding devices and capabilities, and when. */
       status: method.query(core_server_status),
     },
@@ -7186,6 +7195,8 @@ export const promiseMethods = (method: PromiseBuilder) => ({
       },
       /** `core.server.info` (query, public): Show this server's name and version, and whether its owner has set it up. */
       info: method.query(core_server_info),
+      /** `core.server.presence` (query, public): Show whether the media server keeps in touch with the core: away once it has been silent for 40 seconds. */
+      presence: method.query(core_server_presence),
       /** `core.server.status` (query, admin): Show what the media server last reported: its version, streams, transcoding devices and capabilities, and when. */
       status: method.query(core_server_status),
     },

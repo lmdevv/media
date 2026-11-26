@@ -1,7 +1,10 @@
 import { v } from "convex/values";
 
+import { internal } from "../_generated/api";
+import { internalMutation } from "../_generated/server";
 import type { DatabaseReader } from "../_generated/server";
 import { fail } from "./lib/errors";
+import { inOrder } from "./lib/inOrder";
 import { serverMutation } from "./lib/serverFacing";
 import { transcodingReport } from "./serverReport";
 import type { TranscodingReport } from "./serverReport";
@@ -104,6 +107,101 @@ export const report = serverMutation({
     return null;
   },
 });
+
+/**
+ * How long a media server may stay silent before every client hears it is away: it beats every 15
+ * seconds, so this misses two beats before it counts.
+ */
+export const AWAY_MS = 40_000;
+
+const SWEEP_MAX = 100;
+
+/**
+ * Records that the calling media server runs. Writes its beat, which no query reads, and its
+ * presence only when it comes back, so a beat re-runs no one's view.
+ */
+export const beat = serverMutation({
+  args: {},
+  returns: v.null(),
+  handler: async (ctx, _args, service) => {
+    const now = Date.now();
+    const { userId: serviceId } = service;
+
+    const seen = await ctx.db
+      .query("serverBeats")
+      .withIndex("by_service", (q) => q.eq("serviceId", serviceId))
+      .unique();
+
+    if (seen === null) await ctx.db.insert("serverBeats", { serviceId, seenAt: now });
+    else await ctx.db.patch(seen._id, { seenAt: now });
+
+    const presence = await ctx.db
+      .query("serverPresence")
+      .withIndex("by_service", (q) => q.eq("serviceId", serviceId))
+      .unique();
+
+    if (presence === null) {
+      await ctx.db.insert("serverPresence", { serviceId, awaySince: null, changedAt: now });
+    } else if (presence.awaySince !== null) {
+      await ctx.db.patch(presence._id, { awaySince: null, changedAt: now });
+    }
+
+    return null;
+  },
+});
+
+/**
+ * Marks away each media server silent for `AWAY_MS` as of `asOf` (now, or a later time a test
+ * passes instead of waiting), dropping its beat until it beats again. Writes use the real time. A
+ * full batch runs the next one at once.
+ */
+export const sweep = internalMutation({
+  args: { asOf: v.optional(v.number()) },
+  returns: v.null(),
+  handler: async (ctx, { asOf }) => {
+    const now = Date.now();
+
+    const silent = await ctx.db
+      .query("serverBeats")
+      .withIndex("by_seen", (q) => q.lt("seenAt", (asOf ?? now) - AWAY_MS))
+      .take(SWEEP_MAX);
+
+    await inOrder(silent, async (seen) => {
+      await ctx.db.delete(seen._id);
+
+      const presence = await ctx.db
+        .query("serverPresence")
+        .withIndex("by_service", (q) => q.eq("serviceId", seen.serviceId))
+        .unique();
+
+      if (presence?.awaySince === null) {
+        await ctx.db.patch(presence._id, { awaySince: now, changedAt: now });
+      }
+    });
+
+    if (silent.length === SWEEP_MAX) {
+      await ctx.scheduler.runAfter(
+        0,
+        internal.core.serverStatus.sweep,
+        asOf === undefined ? {} : { asOf },
+      );
+    }
+
+    return null;
+  },
+});
+
+/**
+ * Whether the media server whose presence changed last beats: `away` once the sweep found it
+ * silent, null before any server beat. An install runs one server.
+ */
+export const latestPresence = async (db: DatabaseReader): Promise<"present" | "away" | null> => {
+  const row = await db.query("serverPresence").withIndex("by_changed").order("desc").first();
+
+  if (row === null) return null;
+
+  return row.awaySince === null ? "present" : "away";
+};
 
 /** The row of the server that reported last: one index entry, since an install runs one server. */
 export const latestStatus = async (db: DatabaseReader) => {

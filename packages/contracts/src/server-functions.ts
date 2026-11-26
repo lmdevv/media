@@ -775,6 +775,12 @@ export const serverFunctions = {
     args: ServerReport,
     result: Schema.Null,
   }),
+  beatStatus: serverMutation({
+    name: "core.serverStatus.beat",
+    path: "core/serverStatus:beat",
+    args: Schema.Struct({}),
+    result: Schema.Null,
+  }),
   importAllowed: serverQuery({
     name: "movies.imports.mayImport",
     path: "movies/imports:mayImport",
