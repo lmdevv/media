@@ -8,7 +8,7 @@ import {
   itemFolder,
   nextOf,
   removalFolder,
-  removedIdOf,
+  removalNamed,
   subtitleFile,
   videoFile,
 } from "./files";
@@ -26,12 +26,12 @@ describe("download files", () => {
     expect(subtitleFile("x1a2b/../c")).toBe("subtitle-x1a2b_.._c.vtt");
   });
 
-  it("names a removal's folder so the download's ID comes back from it whole", () => {
+  it("names a removal's folder so the download's ID and the stamp come back from it whole", () => {
     fc.assert(
       fc.property(fc.string({ minLength: 1 }), fc.nat(), (id, stamp) => {
         const folder = removalFolder(id, stamp);
 
-        expect(removedIdOf(folder)).toBe(id);
+        expect(removalNamed(folder)).toStrictEqual({ id, stamp });
         expect(folder).not.toContain("/");
       }),
     );
@@ -40,12 +40,12 @@ describe("download files", () => {
   it("never takes a download's folder or the index for a removal", () => {
     fc.assert(
       fc.property(fc.string(), (id) => {
-        expect(removedIdOf(itemFolder(id))).toBeNull();
+        expect(removalNamed(itemFolder(id))).toBeNull();
       }),
     );
 
     for (const name of [STORE_FILE, nextOf(STORE_FILE), UNREADABLE_STORE_FILE, "removal+1+%E0"]) {
-      expect(removedIdOf(name)).toBeNull();
+      expect(removalNamed(name)).toBeNull();
     }
   });
 });

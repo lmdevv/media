@@ -10,6 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { Conflict } from "@media/contracts/errors";
 import type { PlatformSdk } from "@media/sdk/promise";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -19,6 +20,7 @@ import {
   STORE_FILE,
   UNREADABLE_STORE_FILE,
   itemPath,
+  removalFolder,
   videoFile,
 } from "@/lib/downloads/files";
 import type { DownloadDisk } from "@/lib/downloads/disk";
@@ -72,6 +74,8 @@ class FakeCore implements EnginePlatform {
   serves = false;
   /** Whether it can be reached; one out of reach refuses every remove. */
   online = true;
+  /** What it answers every remove with once it refuses them for good; null takes them. */
+  refusal: Error | null = null;
   #page: ListPage = { page: [], isDone: true, continueCursor: "" };
   readonly #listeners = new Set<() => void>();
 
@@ -125,6 +129,8 @@ class FakeCore implements EnginePlatform {
         this.calls.push(`remove:${item.id}`);
 
         if (!this.online) return Promise.reject(new Error("The core is out of reach."));
+
+        if (this.refusal !== null) return Promise.reject(this.refusal);
 
         if (this.#page.page.some((row) => row.item.id === item.id)) {
           this.states(this.#page.page.filter((row) => row.item.id !== item.id));
@@ -207,6 +213,13 @@ const withUnknownPhase = (): string => {
   });
 };
 
+/** The index main's app writes for `ids`, ready: its rows carry no `hasFolder` mark. */
+const mainIndex = (ids: ReadonlyArray<FileId>): string =>
+  JSON.stringify({
+    downloads: readyStore(ids).downloads.map(({ hasFolder: _mark, ...row }) => row),
+    pendingProgress: [],
+  });
+
 const listed = (engine: DownloadEngine): ReadonlyArray<string> =>
   engine.getSnapshot().store.downloads.map((download) => `${download.id}:${download.phase}`);
 
@@ -270,6 +283,28 @@ describe("DownloadEngine", () => {
     engine.start();
     core.lists(ids);
     await settle();
+  };
+
+  /**
+   * An engine started on fake timers over `dune` and `arrival`, ready, that removed `arrival` while
+   * the core was out of reach.
+   */
+  const removedOffline = async (): Promise<DownloadEngine> => {
+    vi.useFakeTimers();
+    keep([dune, arrival]);
+    const engine = launch();
+
+    engine.setNetwork({ connected: true, wifi: true });
+    engine.start();
+    core.lists([dune, arrival]);
+    await vi.advanceTimersByTimeAsync(0);
+    core.online = false;
+    await engine.remove(arrival);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(core.listing()).toStrictEqual([dune, arrival]);
+
+    return engine;
   };
 
   it("keeps every download when the app is killed partway through saving", () => {
@@ -992,6 +1027,280 @@ describe("DownloadEngine", () => {
     expect(listed(engine)).toStrictEqual([`${dune}:ready`, `${arrival}:ready`]);
     expect(filesUnder(arrival)).toContain(videoFile("mp4"));
     expect(core.calls).toStrictEqual([]);
+  });
+
+  it("never brings back a removed download from main's restored index once the core acknowledged it", async () => {
+    keep([dune, arrival]);
+    writeFileSync(join(root, STORE_FILE), mainIndex([dune, arrival]));
+    const upgraded = launch();
+
+    await follow(upgraded, [dune, arrival]);
+    await upgraded.remove(arrival);
+    await settle();
+    upgraded.dispose();
+
+    expect(core.listing()).toStrictEqual([dune]);
+    expect(names(root)).toStrictEqual([dune, STORE_FILE]);
+
+    writeFileSync(join(root, STORE_FILE), mainIndex([dune, arrival]));
+    const reopened = launch();
+
+    expect(listed(reopened)).toStrictEqual([`${dune}:ready`]);
+
+    await follow(reopened, [dune]);
+    reopened.dispose();
+
+    expect(names(root)).toStrictEqual([dune, STORE_FILE]);
+    expect(filesUnder(dune)).toContain(videoFile("mp4"));
+    expect(listed(launch())).toStrictEqual([`${dune}:ready`]);
+  });
+
+  it("never brings back a download removed on a full disk over main's index when the app dies before saving", async () => {
+    keep([dune, arrival]);
+    writeFileSync(join(root, STORE_FILE), mainIndex([dune, arrival]));
+    const disk = new NodeDisk(root);
+
+    disk.full = true;
+    const upgrading = launch(disk);
+
+    await follow(upgrading, [dune, arrival]);
+    await upgrading.remove(arrival);
+    await settle();
+
+    expect(upgrading.getSnapshot().save).toBe("failed");
+    expect(core.listing()).toStrictEqual([dune]);
+    expect(readFileSync(join(root, STORE_FILE), "utf8")).toBe(mainIndex([dune, arrival]));
+
+    // The app dies here: the next launch reads what is on disk, and no save is tried again.
+    const reopened = launch();
+
+    expect(listed(reopened)).toStrictEqual([`${dune}:ready`]);
+
+    await settle();
+
+    expect(names(root)).toStrictEqual([dune, STORE_FILE]);
+    expect(filesUnder(dune)).toContain(videoFile("mp4"));
+  });
+
+  it("drops a row ready to play whose folder is gone, makes it no folder, and frees it on the core", async () => {
+    keep([dune]);
+    writeFileSync(join(root, STORE_FILE), mainIndex([dune, arrival]));
+    const engine = launch();
+
+    expect(listed(engine)).toStrictEqual([`${dune}:ready`]);
+
+    await follow(engine, [dune, arrival]);
+
+    expect(core.calls).toStrictEqual([`remove:${arrival}`]);
+    expect(core.listing()).toStrictEqual([dune]);
+    expect(names(root)).toStrictEqual([dune, STORE_FILE]);
+  });
+
+  it("keeps a queued row from main that never had a folder", async () => {
+    keep([dune]);
+
+    const queued = reduce(
+      readyStore([dune]),
+      DownloadEvent.Added({ download: newDownload(arrival), at: 9 }),
+    );
+
+    writeFileSync(
+      join(root, STORE_FILE),
+      JSON.stringify({
+        downloads: queued.downloads.map(({ hasFolder: _mark, ...row }) => row),
+        pendingProgress: [],
+      }),
+    );
+    const engine = launch();
+
+    await settle();
+
+    expect(listed(engine)).toStrictEqual([`${dune}:ready`, `${arrival}:queued`]);
+    expect(listed(launch())).toStrictEqual([`${dune}:ready`, `${arrival}:queued`]);
+  });
+
+  it("never shows a download whose removal is recorded while the folder cannot be listed", async () => {
+    keep([dune, arrival]);
+    const first = launch();
+
+    await follow(first, [dune, arrival]);
+    first.dispose();
+    const disk = new NodeDisk(root);
+    const removing = launch(disk);
+
+    core.online = false;
+    // Killed at the save after the rename, so the index still holds the removed download.
+    disk.killAt(2);
+    await removing.remove(arrival);
+    const index = readFileSync(join(root, STORE_FILE), "utf8");
+
+    const unlistable = new NodeDisk(root);
+
+    unlistable.failLists();
+    const held = launch(unlistable);
+
+    expect(held.getSnapshot().save).toBe("unread");
+    expect(listed(held)).toStrictEqual([`${dune}:ready`]);
+    expect(names(root)).not.toContain(arrival);
+
+    held.dispose();
+
+    expect(readFileSync(join(root, STORE_FILE), "utf8")).toBe(index);
+  });
+
+  it("shows only what plays while the folder cannot be listed, and drops nothing until it can", async () => {
+    vi.useFakeTimers();
+    keep([dune]);
+    writeFileSync(join(root, STORE_FILE), mainIndex([dune, arrival]));
+    const disk = new NodeDisk(root);
+
+    disk.failLists(1);
+    const engine = launch(disk);
+
+    expect(engine.getSnapshot().save).toBe("unread");
+    expect(listed(engine)).toStrictEqual([`${dune}:ready`]);
+    expect(readFileSync(join(root, STORE_FILE), "utf8")).toBe(mainIndex([dune, arrival]));
+
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(engine.getSnapshot().save).toBe("saved");
+    expect(listed(engine)).toStrictEqual([`${dune}:ready`]);
+    expect(names(root)).toStrictEqual([dune, STORE_FILE]);
+  });
+
+  it("carries a recorded removal over a folder a late transfer made again, and never lists it", async () => {
+    keep([dune, arrival]);
+    const first = launch();
+
+    await follow(first, [dune, arrival]);
+    first.dispose();
+    renameSync(join(root, arrival), join(root, removalFolder(arrival, Date.now())));
+    mkdirSync(join(root, arrival));
+    writeFileSync(join(root, itemPath(arrival, videoFile("mp4"))), "a late transfer's video");
+    core.online = false;
+    const offline = launch();
+
+    expect(listed(offline)).toStrictEqual([`${dune}:ready`]);
+    expect(names(root)).not.toContain(arrival);
+
+    offline.dispose();
+    core.online = true;
+    const online = launch();
+
+    await follow(online, [dune, arrival]);
+
+    expect(core.calls).toStrictEqual([`remove:${arrival}`]);
+    expect(core.listing()).toStrictEqual([dune]);
+    expect(names(root)).toStrictEqual([dune, STORE_FILE]);
+  });
+
+  it("keeps a download added again after its removal over an older index's row for it", async () => {
+    keep([dune, arrival]);
+    const first = launch();
+
+    await follow(first, [dune, arrival]);
+    first.dispose();
+    const older = readFileSync(join(root, STORE_FILE), "utf8");
+
+    core.online = false;
+    const offline = launch();
+
+    await offline.remove(arrival);
+    offline.add(newDownload(arrival));
+    offline.dispose();
+    writeFileSync(join(root, STORE_FILE), older);
+
+    expect(listed(launch())).toStrictEqual([`${dune}:ready`, `${arrival}:queued`]);
+    expect(filesUnder(arrival)).toStrictEqual([RECORD_FILE]);
+  });
+
+  it("deletes a removed download's files on a full disk, though its index cannot save", async () => {
+    keep([dune, arrival]);
+    const disk = new NodeDisk(root);
+    const engine = launch(disk);
+
+    await follow(engine, [dune, arrival]);
+    disk.full = true;
+    core.online = false;
+    await engine.remove(arrival);
+
+    const removals = names(root).filter((name) => name.startsWith("removal+"));
+
+    expect(engine.getSnapshot().save).toBe("failed");
+    expect(names(root)).not.toContain(arrival);
+    expect(removals).toHaveLength(1);
+    expect(filesUnder(removals[0] ?? "")).toStrictEqual([]);
+  });
+
+  describe("telling the core about a removal it did not take", () => {
+    it("tells it again while the app is in front, with no new network, sync, or launch", async () => {
+      await removedOffline();
+      core.online = true;
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(core.listing()).toStrictEqual([dune]);
+      expect(names(root)).toStrictEqual([dune, STORE_FILE]);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("tells it again as soon as another call to it is answered", async () => {
+      const engine = await removedOffline();
+
+      core.online = true;
+      engine.played(dune, 60_000, 9_960_000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(core.listing()).toStrictEqual([dune]);
+    });
+
+    it("tells it nothing while the app is in the background, and again once it comes back", async () => {
+      const engine = await removedOffline();
+
+      engine.setForeground(false);
+      core.online = true;
+      await vi.advanceTimersByTimeAsync(600_000);
+
+      expect(core.calls).toStrictEqual([`remove:${arrival}`]);
+      expect(vi.getTimerCount()).toBe(0);
+
+      engine.setForeground(true);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(core.calls).toStrictEqual([`remove:${arrival}`, `remove:${arrival}`]);
+      expect(core.listing()).toStrictEqual([dune]);
+    });
+
+    it("stops asking a core that refused it for good, says so, and asks again at the next launch", async () => {
+      const engine = await removedOffline();
+
+      core.online = true;
+      core.refusal = new Conflict({ message: "This session is on no device." });
+      await vi.advanceTimersByTimeAsync(60_000);
+      engine.setNetwork({ connected: true, wifi: true });
+      core.lists([dune, arrival]);
+      await vi.advanceTimersByTimeAsync(600_000);
+
+      expect(core.calls).toStrictEqual([`remove:${arrival}`, `remove:${arrival}`]);
+      expect(engine.getSnapshot().removalRefused).toBe(true);
+      expect(names(root).filter((name) => name.startsWith("removal+"))).toHaveLength(1);
+      expect(vi.getTimerCount()).toBe(0);
+
+      engine.dispose();
+      core.refusal = null;
+      const relaunched = launch();
+
+      relaunched.start();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(core.calls).toStrictEqual([
+        `remove:${arrival}`,
+        `remove:${arrival}`,
+        `remove:${arrival}`,
+      ]);
+      expect(relaunched.getSnapshot().removalRefused).toBe(false);
+      expect(core.listing()).toStrictEqual([dune]);
+      expect(names(root)).toStrictEqual([dune, STORE_FILE]);
+    });
   });
 
   describe.each(["offline", "online"] as const)("killed while removing a download %s", (first) => {

@@ -11,6 +11,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import type { ReactNode } from "react";
+import { AppState } from "react-native";
 
 import { accountFolder } from "@/lib/downloads/files";
 import { appKeychains } from "@/lib/keychains";
@@ -95,6 +96,17 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
   useEffect(() => {
     engine?.setSettings(settings);
   }, [engine, settings]);
+
+  useEffect(() => {
+    if (engine === null) return undefined;
+    engine.setForeground(AppState.currentState !== "background");
+
+    const subscription = AppState.addEventListener("change", (state) =>
+      engine.setForeground(state !== "background"),
+    );
+
+    return () => subscription.remove();
+  }, [engine]);
 
   useEffect(() => {
     if (engine === null) return undefined;

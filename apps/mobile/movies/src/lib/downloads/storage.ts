@@ -10,7 +10,8 @@ import {
   itemPath,
   nextOf,
   removalFolder,
-  removedIdOf,
+  removalNamed,
+  videoFile,
 } from "./files";
 import {
   EMPTY_STORE,
@@ -59,21 +60,26 @@ const recorded = Symbol("recorded");
  * iPhone before anything of it is deleted. The record is the removal's folder: the download's own
  * folder renamed in one step, or a new empty folder when the download had none. It lasts until
  * both halves are done, the files gone and the core acknowledging it no longer counts the
- * download, and every launch, sync, and reconnection retries them until then. Only this module
- * makes one, from that folder.
+ * download, and the engine retries them until then. While it lasts it outranks everything of the
+ * download that is older than it: a row in any index, a copy of the row, and a folder made again
+ * under the download's name. Only this module makes one, from that folder.
  */
 export interface Removal {
   /** The file the core is told to forget. */
   readonly id: FileId;
+  /**
+   * When it was recorded, on the engine's clock. A download of the same file added after it is a
+   * new one, which the removal leaves alone.
+   */
+  readonly stamp: number;
   /** The removal's folder in the person's folder, which holds what is left of the files. */
   readonly folder: string;
   readonly recorded: typeof recorded;
 }
 
 const removalAt = (folder: string): Option.Option<Removal> =>
-  Option.map(
-    Option.flatMap(Option.fromNullishOr(removedIdOf(folder)), fileIdOf),
-    (id): Removal => ({ id, folder, recorded }),
+  Option.flatMap(Option.fromNullishOr(removalNamed(folder)), ({ id, stamp }) =>
+    Option.map(fileIdOf(id), (file): Removal => ({ id: file, stamp, folder, recorded })),
   );
 
 /** The removals recorded in the person's folder, whose names are `names`. */
@@ -99,7 +105,7 @@ export const recordRemoval = (
         names?.includes(itemFolder(id)) === true ? renamed : disk.createFolder(folder),
       );
 
-  return Result.map(made, (): Removal => ({ id, folder, recorded }));
+  return Result.map(made, (): Removal => ({ id, stamp, folder, recorded }));
 };
 
 /**
@@ -183,18 +189,21 @@ const recordIn = (disk: DownloadDisk, name: string): Option.Option<DownloadRecor
 export type Launch = Data.TaggedEnum<{
   /**
    * The index, or the folder that holds it, could not be read: nothing is decided, deleted, or
-   * saved until it can. `shown` holds what could be read, the index's rows or the downloads
-   * rebuilt from their own copies, to play meanwhile.
+   * saved until it can. `shown` holds what could be read and proven, the index's rows or the
+   * downloads rebuilt from their own copies, to play meanwhile.
    */
   Held: { readonly shown: DownloadStore; readonly cause: DiskFailed };
   /**
-   * The downloads, and the removals still to carry out. `misplaced` when the index at
-   * `index.json` did not read whole and must move aside before a save replaces it; `changed` when
-   * the store differs from the index, which a save then catches up.
+   * The downloads, and the removals still to carry out. `leftovers` are folders made again under a
+   * removed download's name after its removal, such as by a transfer that landed late, which go
+   * with the removal. `misplaced` when the index at `index.json` did not read whole and must move
+   * aside before a save replaces it; `changed` when the store differs from the index, which a save
+   * then catches up.
    */
   Loaded: {
     readonly store: DownloadStore;
     readonly removals: ReadonlyArray<Removal>;
+    readonly leftovers: ReadonlyArray<string>;
     readonly misplaced: boolean;
     readonly changed: boolean;
   };
@@ -203,83 +212,193 @@ export type Launch = Data.TaggedEnum<{
 /** Constructors and matchers for `Launch`. */
 export const Launch = Data.taggedEnum<Launch>();
 
-/**
- * The downloads of the folders in `names` that `store` lacks, from their own copies. A removal's
- * folder is never one: a removal moves the folder away from the download's name.
- */
-const copiesIn = (
-  disk: DownloadDisk,
-  store: DownloadStore,
-  names: ReadonlyArray<string>,
-): ReadonlyArray<DownloadRecord> =>
-  unowned(store, names).flatMap((name) =>
-    removedIdOf(name) === null
-      ? Option.toArray(
-          Option.map(recordIn(disk, name), (download) =>
-            Struct.assign(download, { hasFolder: true }),
-          ),
-        )
-      : [],
-  );
+/** What a launch knows of the download of one file. */
+interface Holding {
+  /** Its row in the index. */
+  readonly row: DownloadRecord | undefined;
+  /** The latest removal of it recorded. */
+  readonly removal: Removal | undefined;
+  /** Whether its folder is there, by the listing or, when the listing lacks it, a direct check. */
+  readonly housed: boolean;
+  /** The download its folder's own copy holds, read only when the row does not settle it. */
+  readonly copy: () => Option.Option<DownloadRecord>;
+}
 
-const withCopies = (
+/** What a launch makes of the download of one file. */
+type Verdict = Data.TaggedEnum<{
+  Kept: { readonly download: DownloadRecord };
+  /**
+   * No download. Its row, if any, goes. `leftover` when its folder was made again after a recorded
+   * removal, and goes with it.
+   */
+  None: { readonly leftover: boolean };
+}>;
+
+const Verdict = Data.taggedEnum<Verdict>();
+
+/**
+ * `download` by whether its folder is there. Without one, a download that had one, or that says
+ * it is ready to play, holds nothing. Only a removal moves a folder away, and there is nothing to
+ * play. One never given a folder, such as one still queued, stays.
+ */
+const housing = (download: DownloadRecord, housed: boolean): Verdict => {
+  if (housed) {
+    return Verdict.Kept({
+      download: download.hasFolder ? download : Struct.assign(download, { hasFolder: true }),
+    });
+  }
+
+  return download.hasFolder || download.phase === "ready"
+    ? Verdict.None({ leftover: false })
+    : Verdict.Kept({ download });
+};
+
+/**
+ * What a launch makes of the download of one file, always in this order. A recorded removal comes
+ * first. Only a download added after it, by its row or its folder's own copy, is kept, and a
+ * folder under the file's name holding none goes with the removal. Then the row, else the folder's
+ * copy, by whether the folder is there.
+ */
+const judge = ({ row, removal, housed, copy }: Holding): Verdict => {
+  const current = (download: DownloadRecord): boolean =>
+    removal === undefined || download.addedAt > removal.stamp;
+
+  const download =
+    row !== undefined && current(row)
+      ? Option.some(row)
+      : housed
+        ? Option.filter(copy(), current)
+        : Option.none();
+
+  return Option.match(download, {
+    onNone: () => Verdict.None({ leftover: removal !== undefined && housed }),
+    onSome: (kept) => housing(kept, housed),
+  });
+};
+
+/** The latest removal of each file among `removals`. */
+const latestOf = (removals: ReadonlyArray<Removal>): ReadonlyMap<FileId, Removal> =>
+  removals.reduce((latest, removal) => {
+    const known = latest.get(removal.id);
+
+    return known === undefined || known.stamp < removal.stamp
+      ? new Map(latest).set(removal.id, removal)
+      : latest;
+  }, new Map<FileId, Removal>());
+
+/** What a launch makes of the index's rows beside the person's folder. */
+interface Judged {
+  readonly downloads: ReadonlyArray<DownloadRecord>;
+  /** Folders made again under a removed download's name after its removal, which go with it. */
+  readonly leftovers: ReadonlyArray<string>;
+}
+
+/**
+ * Judges every file the launch knows of: each row of `indexed`, each file with a removal among
+ * `removals`, and each folder in `names` whose own copy reads, in that order. A folder whose copy
+ * does not read, and that no row or removal speaks for, is no download, and stays as it is.
+ */
+const judged = (
   disk: DownloadDisk,
-  store: DownloadStore,
+  indexed: DownloadStore,
   names: ReadonlyArray<string>,
-): DownloadStore => ({
-  downloads: [...store.downloads, ...copiesIn(disk, store, names)],
-  pendingProgress: store.pendingProgress,
-});
+  removals: ReadonlyArray<Removal>,
+): Judged => {
+  const present = new Set(names);
+  const latest = latestOf(removals);
+
+  const housed = (id: string): boolean =>
+    present.has(itemFolder(id)) || disk.exists(itemFolder(id));
+
+  const verdictOf = (id: FileId, row: DownloadRecord | undefined) => ({
+    id,
+    verdict: judge({
+      row,
+      removal: latest.get(id),
+      housed: housed(id),
+      copy: () => recordIn(disk, itemFolder(id)),
+    }),
+  });
+
+  const rowIds = new Set(indexed.downloads.map((download) => download.id));
+  const claimed = new Set([...rowIds, ...latest.keys()].map(itemFolder));
+
+  const copies = unowned(indexed, names)
+    .filter((name) => !claimed.has(name) && removalNamed(name) === null)
+    .flatMap((name) => Option.toArray(recordIn(disk, name)));
+
+  const verdicts = [
+    ...indexed.downloads.map((row) => verdictOf(row.id, row)),
+    ...[...latest.keys()].flatMap((id) => (rowIds.has(id) ? [] : [verdictOf(id, undefined)])),
+    ...copies.map((copy) => ({
+      id: copy.id,
+      verdict: judge({
+        row: undefined,
+        removal: latest.get(copy.id),
+        housed: true,
+        copy: () => Option.some(copy),
+      }),
+    })),
+  ];
+
+  return {
+    downloads: verdicts.flatMap(({ verdict }) =>
+      Verdict.$is("Kept")(verdict) ? [verdict.download] : [],
+    ),
+    leftovers: verdicts.flatMap(({ id, verdict }) =>
+      Verdict.$is("None")(verdict) && verdict.leftover ? [itemFolder(id)] : [],
+    ),
+  };
+};
+
+/**
+ * Whether a held launch, which cannot judge, shows `download`. It shows one ready to play only while
+ * its video is there, and one that had a folder only while that folder is there.
+ */
+const provable = (disk: DownloadDisk, download: DownloadRecord): boolean =>
+  download.phase === "ready"
+    ? download.delivery !== null &&
+      disk.exists(itemPath(download.id, videoFile(download.delivery.container)))
+    : !download.hasFolder || disk.exists(itemFolder(download.id));
 
 const held = (
   disk: DownloadDisk,
   store: DownloadStore,
   listing: Result.Result<ReadonlyArray<string> | null, DiskFailed>,
   cause: DiskFailed,
-): Launch =>
-  Launch.Held({
-    shown: Result.match(listing, {
-      onFailure: () => store,
-      onSuccess: (names) => withCopies(disk, store, names ?? []),
-    }),
-    cause,
+): Launch => {
+  const readable = Result.match(listing, {
+    onFailure: () => store.downloads,
+    onSuccess: (names) => judged(disk, store, names ?? [], removalsIn(names ?? [])).downloads,
   });
 
-/**
- * The launch of the downloads in `indexed` beside the folder's `names`. A folder whose own copy of
- * its row reads is a kept download, and the store takes it when the index lacks it. An index row
- * whose folder is missing is dropped when its folder was made or a removal of it is recorded,
- * since only a removal moves a download's folder away; one never given a folder, from main or
- * still queued, stays.
- */
+  return Launch.Held({
+    shown: {
+      downloads: readable.filter((download) => provable(disk, download)),
+      pendingProgress: store.pendingProgress,
+    },
+    cause,
+  });
+};
+
+/** The launch of the downloads in `indexed` beside the folder's `names`, judged one file at a time. */
 const loaded = (
   disk: DownloadDisk,
   indexed: DownloadStore,
   misplaced: boolean,
   names: ReadonlyArray<string>,
 ): Launch => {
-  const present = new Set(names);
   const removals = removalsIn(names);
-  const removed = new Set(removals.map((removal) => removal.id));
-  const housed = (download: DownloadRecord): boolean => present.has(itemFolder(download.id));
-
-  const rows = indexed.downloads.flatMap((download): ReadonlyArray<DownloadRecord> => {
-    if (housed(download)) return [Struct.assign(download, { hasFolder: true })];
-
-    return download.hasFolder || removed.has(download.id) ? [] : [download];
-  });
-
-  const kept: DownloadStore = { downloads: rows, pendingProgress: indexed.pendingProgress };
-  const copies = copiesIn(disk, kept, names);
+  const { downloads, leftovers } = judged(disk, indexed, names, removals);
 
   return Launch.Loaded({
-    store: { downloads: [...rows, ...copies], pendingProgress: kept.pendingProgress },
+    store: { downloads, pendingProgress: indexed.pendingProgress },
     removals,
+    leftovers,
     misplaced,
     changed:
-      rows.length < indexed.downloads.length ||
-      copies.length > 0 ||
-      indexed.downloads.some((download) => housed(download) && !download.hasFolder),
+      downloads.length !== indexed.downloads.length ||
+      downloads.some((download, index) => download !== indexed.downloads[index]),
   });
 };
 

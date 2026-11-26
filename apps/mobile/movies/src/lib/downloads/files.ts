@@ -34,24 +34,32 @@ export const itemFolder = (downloadId: string): string => segment(downloadId);
 export const itemPath = (downloadId: string, file: string): string =>
   `${itemFolder(downloadId)}/${file}`;
 
-const REMOVAL_NAME = /^removal\+\d+\+(?<id>[^+]+)$/u;
+const REMOVAL_NAME = /^removal\+(?<stamp>\d+)\+(?<id>[^+]+)$/u;
 
 /**
  * The name of the folder that records a removal of download `downloadId`, made at `stamp`, in
  * milliseconds since the epoch. A download's folder name never holds a `+`, so a removal's folder
- * is never taken for one, and the ID comes back from the name whole.
+ * is never taken for one, and the ID and the stamp come back from the name whole.
  */
 export const removalFolder = (downloadId: string, stamp: number): string =>
   `removal+${String(stamp)}+${encodeURIComponent(downloadId)}`;
 
-/** The download ID the removal's folder `name` was made for; null when `name` is not one. */
-export const removedIdOf = (name: string): string | null => {
-  const encoded = REMOVAL_NAME.exec(name)?.groups?.["id"];
+/** The download ID a removal's folder was made for, and when. */
+export interface RemovalName {
+  readonly id: string;
+  readonly stamp: number;
+}
 
-  if (encoded === undefined) return null;
+/** The download ID and stamp the removal's folder `name` was made with; null when `name` is not one. */
+export const removalNamed = (name: string): RemovalName | null => {
+  const groups = REMOVAL_NAME.exec(name)?.groups;
+  const encoded = groups?.["id"];
+  const stamp = Number(groups?.["stamp"]);
+
+  if (encoded === undefined || !Number.isSafeInteger(stamp)) return null;
 
   try {
-    return decodeURIComponent(encoded);
+    return { id: decodeURIComponent(encoded), stamp };
   } catch {
     return null;
   }

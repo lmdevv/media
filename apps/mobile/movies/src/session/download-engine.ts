@@ -84,6 +84,11 @@ export interface DownloadsSnapshot {
   readonly settings: DownloadSettings;
   readonly network: NetworkNow;
   readonly save: SaveState;
+  /**
+   * Whether the core refused for good, in this run, to stop counting a download removed here. It
+   * is asked again at the next launch, or when the same download is added again.
+   */
+  readonly removalRefused: boolean;
 }
 
 /** Where an engine keeps its files and which server it downloads from. */
@@ -133,6 +138,29 @@ const SAVE_EVERY_MS = 2_000;
 const SAVE_RETRY_MS = 30_000;
 
 const SHOW_EVERY_MS = 500;
+
+/**
+ * How long after the core could not be reached for a removal the engine tells it again, while the
+ * app is in front. The delay doubles after each try, from the first up to the last.
+ */
+const TELL_RETRY_MS = { first: 5_000, last: 60_000 } as const;
+
+/**
+ * The core's answers that refuse a removal for good. Asking again changes nothing until the app or
+ * the server changes. Any other failure, such as `TransportError` or `RateLimited`, may pass.
+ */
+const REFUSALS = [
+  "Forbidden",
+  "NotFound",
+  "InvalidArgs",
+  "Conflict",
+  "Expired",
+  "Internal",
+  "ProtocolError",
+] as const;
+
+const refusedForGood = (cause: unknown): boolean =>
+  REFUSALS.some((tag) => Predicate.isTagged(cause, tag));
 
 /**
  * Downloads whose own copy is checked per turn of the event loop after a launch, so the first
@@ -297,9 +325,16 @@ export class DownloadEngine {
   /** The removals recorded on disk that the core has not acknowledged yet, by their folder. */
   readonly #removals = new Map<string, Removal>();
   /** The removals being told to the core now, by their folder. */
-  readonly #telling = new Map<string, Promise<boolean>>();
-  /** The stamp of the last removal recorded, so each one's folder gets its own name. */
-  #lastStamp = 0;
+  readonly #telling = new Map<string, Promise<Result.Result<void, unknown>>>();
+  /** The removals the core refused for good in this run, by their folder, which it is not asked again. */
+  readonly #refused = new Set<string>();
+  /** Tells the core again about the removals it could not be reached for. */
+  #tellTimer: ReturnType<typeof setTimeout> | undefined;
+  #tellDelay: number = TELL_RETRY_MS.first;
+  /** Whether the app is in front; removals are told again on a timer only then. */
+  #foreground = true;
+  /** The last time `#now` gave, the latest download added or removal recorded. */
+  #clock = 0;
   /** Whether an index that did not read whole still sits where a save would overwrite it. */
   #unreadableInPlace = false;
   /**
@@ -329,6 +364,7 @@ export class DownloadEngine {
       settings: options.settings,
       network: { connected: false, wifi: false },
       save: "saved",
+      removalRefused: false,
     };
 
     this.#load(readIndex(options.disk));
@@ -338,6 +374,7 @@ export class DownloadEngine {
     Launch.$match(launch, {
       Held: ({ shown }) => {
         this.#held ??= [];
+        this.#seeClock(shown, []);
         this.#snapshot = {
           ...this.#snapshot,
           store: this.#held.reduce(reduce, requeued(shown)),
@@ -354,10 +391,11 @@ export class DownloadEngine {
 
         this.#notify();
       },
-      Loaded: ({ store, removals, misplaced, changed }) => {
+      Loaded: ({ store, removals, leftovers, misplaced, changed }) => {
         const changes = this.#held ?? [];
 
         this.#held = null;
+        this.#seeClock(store, removals);
         clearTimeout(this.#readTimer);
         this.#unreadableInPlace = misplaced;
         this.#settled.clear();
@@ -374,6 +412,8 @@ export class DownloadEngine {
           clearRemoval(this.#options.disk, removal);
           this.#removals.set(removal.folder, removal);
         }
+
+        for (const leftover of leftovers) this.#options.disk.remove(leftover);
 
         this.#copiesLeft = known.downloads.map((download) => download.id);
         clearTimeout(this.#copyTimer);
@@ -430,6 +470,7 @@ export class DownloadEngine {
     clearTimeout(this.#showTimer);
     clearTimeout(this.#readTimer);
     clearTimeout(this.#copyTimer);
+    clearTimeout(this.#tellTimer);
     this.#save();
     keepRecords(this.#options.disk, this.#rows(this.#copiesLeft));
     this.#copiesLeft = [];
@@ -444,7 +485,7 @@ export class DownloadEngine {
   add(download: NewDownload): void {
     const fresh = this.#find(download.id) === undefined;
 
-    this.#dispatch(DownloadEvent.Added({ download, at: Date.now() }));
+    this.#dispatch(DownloadEvent.Added({ download, at: this.#now() }));
 
     if (fresh && this.#snapshot.save === "saved") this.#keepRecord(download.id);
     this.#pump();
@@ -458,8 +499,10 @@ export class DownloadEngine {
 
   /**
    * Cancels a download or removes a kept one (Remove, Cancel Download): records the removal, then
-   * deletes its files and tells the core. A core that refuses or is out of reach is told again at
-   * the next launch, sync, or reconnection. A download whose removal cannot be recorded stays.
+   * deletes its files and tells the core. A core out of reach is told again at the next launch,
+   * sync, reconnection, or answer to another call, and on a timer while the app is in front; one
+   * that refuses for good is asked again at the next launch. A download whose removal cannot be
+   * recorded stays.
    */
   async remove(id: string): Promise<void> {
     const download = this.#find(id);
@@ -506,6 +549,21 @@ export class DownloadEngine {
     const listed = this.#list?.getSnapshot();
 
     if (listed?.status === "error") listed.retry();
+  }
+
+  /**
+   * Applies the app moving to the foreground or the background. The core is told again about the
+   * removals it could not be reached for on a timer only while the app is in front, and at once
+   * when it comes back.
+   */
+  setForeground(foreground: boolean): void {
+    this.#foreground = foreground;
+    clearTimeout(this.#tellTimer);
+    this.#tellTimer = undefined;
+
+    if (!foreground) return;
+    this.#tellDelay = TELL_RETRY_MS.first;
+    this.#tellAll();
   }
 
   /** The kept video of `download`, or null before it is ready. */
@@ -562,7 +620,7 @@ export class DownloadEngine {
 
     if (entry === undefined) return sent;
 
-    const result = await attempt(() =>
+    const result = await this.#call(() =>
       this.#platform.movies.play.reportOffline({
         fileId: entry.fileId,
         positionMs: entry.positionMs,
@@ -635,7 +693,7 @@ export class DownloadEngine {
 
     for (const entry of listed) this.#settled.add(entry.id);
     this.#follow(planSync(this.#snapshot.store, listed, settled, holdingsOf(this.#options.disk)));
-    this.#tellAll();
+    this.#answered();
   }
 
   /** `rows` and the rows of every page after `page`, read in order; null when a page fails. */
@@ -647,7 +705,7 @@ export class DownloadEngine {
 
     const cursor = page.continueCursor;
 
-    const read = await attempt(() =>
+    const read = await this.#call(() =>
       this.#platform.core.downloads.list({
         paginationOpts: { numItems: LIST_PAGE_SIZE, cursor },
       }),
@@ -687,7 +745,7 @@ export class DownloadEngine {
   #remove(id: FileId): void {
     if (this.#disposed) return;
 
-    const recorded = recordRemoval(this.#options.disk, id, this.#stamp());
+    const recorded = recordRemoval(this.#options.disk, id, this.#now());
 
     if (Result.isFailure(recorded)) return;
 
@@ -703,25 +761,81 @@ export class DownloadEngine {
     this.#pump();
   }
 
-  #stamp(): number {
-    this.#lastStamp = Math.max(Date.now(), this.#lastStamp + 1);
+  /**
+   * A time on the engine's clock, in milliseconds since the epoch, after every download added and
+   * every removal recorded that the engine knows of. A download added after a removal is newer
+   * than it even when the phone's clock went back, so the removal never takes it.
+   */
+  #now(): number {
+    this.#clock = Math.max(Date.now(), this.#clock + 1);
 
-    return this.#lastStamp;
+    return this.#clock;
   }
 
-  /** Tells the core about every removal it has not acknowledged, once the engine has started. */
+  /** Moves the clock past the downloads in `store` and the stamps of `removals`. */
+  #seeClock(store: DownloadStore, removals: ReadonlyArray<Removal>): void {
+    this.#clock = [
+      ...store.downloads.map((download) => download.addedAt),
+      ...removals.map((removal) => removal.stamp),
+    ].reduce((latest, time) => Math.max(latest, time), this.#clock);
+  }
+
+  /** Runs `run`. Once the core answers, even with a refusal, the removals waiting on it are told now. */
+  async #call<A>(run: () => Promise<A>): Promise<Result.Result<A, unknown>> {
+    const result = await attempt(run);
+
+    if (Result.isSuccess(result) || refusedForGood(result.failure)) this.#answered();
+
+    return result;
+  }
+
+  /** Tells the core now about the removals it has not taken, and starts the timer's delay over. */
+  #answered(): void {
+    if (this.#disposed) return;
+    clearTimeout(this.#tellTimer);
+    this.#tellTimer = undefined;
+    this.#tellDelay = TELL_RETRY_MS.first;
+    this.#tellAll();
+  }
+
+  /**
+   * Tells the core about every removal it has not acknowledged and has not refused for good, once
+   * the engine has started.
+   */
   #tellAll(): void {
     if (!this.#confirmed) return;
 
-    for (const removal of this.#removals.values()) void this.#tell(removal);
+    for (const removal of this.#removals.values()) {
+      if (!this.#refused.has(removal.folder)) void this.#tell(removal);
+    }
+  }
+
+  /**
+   * Tells the core again after the next delay, while the app is in front and a removal waits for a
+   * core that could not be reached. No timer runs otherwise.
+   */
+  #tellLater(): void {
+    const waiting = [...this.#removals.keys()].some((folder) => !this.#refused.has(folder));
+
+    if (!this.#confirmed || this.#disposed || !this.#foreground || this.#tellTimer !== undefined) {
+      return;
+    }
+
+    if (!waiting) return;
+
+    this.#tellTimer = setTimeout(() => {
+      this.#tellTimer = undefined;
+      this.#tellDelay = Math.min(this.#tellDelay * 2, TELL_RETRY_MS.last);
+      this.#tellAll();
+    }, this.#tellDelay);
   }
 
   /**
    * Tells the core it no longer keeps the download of `removal`, then deletes the removal's
-   * folder; answers whether both are done. A remove of what the core no longer keeps changes
+   * folder; fails with what stopped either. A remove of what the core no longer keeps changes
    * nothing there, so telling it again is safe.
    */
-  #tell(removal: Removal): Promise<boolean> {
+  #tell(removal: Removal): Promise<Result.Result<void, unknown>> {
     const telling = this.#telling.get(removal.folder);
 
     if (telling !== undefined) return telling;
@@ -733,37 +847,60 @@ export class DownloadEngine {
     return told;
   }
 
-  async #tellOnce(removal: Removal): Promise<boolean> {
-    const answer = await attempt(() =>
+  async #tellOnce(removal: Removal): Promise<Result.Result<void, unknown>> {
+    const answer = await this.#call(() =>
       this.#coreCalls.run(removal.id, () =>
         this.#platform.core.downloads.remove({ item: itemOf(removal.id) }),
       ),
     );
 
-    if (Result.isFailure(answer) || this.#disposed) return false;
+    if (Result.isFailure(answer)) {
+      if (refusedForGood(answer.failure)) this.#refuse(removal.folder, true);
+      else this.#tellLater();
 
-    if (Result.isFailure(endRemoval(this.#options.disk, removal))) return false;
+      return Result.fail(answer.failure);
+    }
+
+    // A disposed engine deletes nothing; the next launch tells the core again and ends it.
+    if (this.#disposed) return Result.void;
+    this.#refuse(removal.folder, false);
+    const ended = endRemoval(this.#options.disk, removal);
+
+    if (Result.isFailure(ended)) return ended;
     this.#removals.delete(removal.folder);
 
-    return true;
+    return Result.void;
+  }
+
+  /** Records whether the core refused the removal at `folder` for good, and shows whether any is. */
+  #refuse(folder: string, refused: boolean): void {
+    if (refused) this.#refused.add(folder);
+    else this.#refused.delete(folder);
+
+    const removalRefused = this.#refused.size > 0;
+
+    if (removalRefused === this.#snapshot.removalRefused) return;
+    this.#snapshot = { ...this.#snapshot, removalRefused };
+    this.#notify();
   }
 
   /**
    * Whether every removal of download `id` is done, telling the core about each one still pending
-   * first: a download added again reaches the core only after its removal did.
+   * first, even one it refused. A download added again reaches the core only after its removal
+   * did. Fails with what stopped one.
    */
-  async #toldAbout(id: string): Promise<boolean> {
+  async #toldAbout(id: string): Promise<Result.Result<void, unknown>> {
     const pending = [...this.#removals.values()].filter((removal) => removal.id === id);
     const told = await Promise.all(pending.map((removal) => this.#tell(removal)));
 
-    return told.every(Boolean);
+    return told.find(Result.isFailure) ?? Result.void;
   }
 
   /** Frees on the core a listed download this iPhone holds nothing of. */
   async #forget(id: FileId): Promise<void> {
     this.#settled.delete(id);
     // After any add of the same file still in flight, so a cancel right after Download sticks.
-    await attempt(() =>
+    await this.#call(() =>
       this.#coreCalls.run(id, () => this.#platform.core.downloads.remove({ item: itemOf(id) })),
     );
   }
@@ -994,15 +1131,22 @@ export class DownloadEngine {
   async #confirm(download: DownloadRecord, active: Active): Promise<boolean> {
     if (this.#find(download.id)?.added ?? download.added) return true;
 
-    if (!(await this.#toldAbout(download.id))) {
-      if (!this.#stopped(active)) this.#interrupt(active, SERVER_UNAVAILABLE);
+    const told = await this.#toldAbout(download.id);
+
+    if (Result.isFailure(told)) {
+      if (!this.#stopped(active)) {
+        this.#interrupt(
+          active,
+          refusedForGood(told.failure) ? failureLine(told.failure) : SERVER_UNAVAILABLE,
+        );
+      }
 
       return false;
     }
 
     if (this.#stopped(active)) return false;
 
-    const added = await attempt(() =>
+    const added = await this.#call(() =>
       this.#coreCalls.run(download.id, () =>
         this.#platform.core.downloads.add({ item: itemOf(download.id) }),
       ),
@@ -1027,7 +1171,7 @@ export class DownloadEngine {
 
     if (known !== null) return known;
 
-    const start = await attempt(() =>
+    const start = await this.#call(() =>
       this.#platform.movies.play.start({
         titleId: download.titleId,
         fileId: download.id,
@@ -1064,7 +1208,7 @@ export class DownloadEngine {
    * and one whose file is gone is removed; both answer null.
    */
   async #ticket(download: DownloadRecord, active: Active): Promise<Ticket | null> {
-    const fetched = await attempt(() =>
+    const fetched = await this.#call(() =>
       this.#platform.core.downloads.fetch({ item: itemOf(download.id) }),
     );
 

@@ -36,8 +36,11 @@ const SAVE_NOTICES: Readonly<Record<DownloadsSnapshot["save"], string | null>> =
   saved: null,
   failed: "This iPhone couldn't save your downloads list. Free up some space, and it saves again.",
   unread:
-    "This iPhone can't read your downloads list right now. Your downloads stay, and it tries again.",
+    "This iPhone can't read your downloads list right now, so some may be missing here. They stay, and it tries again.",
 };
+
+/** What the list says once the server refused to stop counting a download removed here. */
+const REFUSED_NOTICE = "Your server refused to free the space of a removed download.";
 
 function DownloadsBody({
   engine,
@@ -52,7 +55,13 @@ function DownloadsBody({
 }) {
   const downloads = snapshot === null ? [] : downloadsOf(snapshot.store);
   const summary = summaryOf(downloads);
-  const notice = snapshot === null ? null : SAVE_NOTICES[snapshot.save];
+
+  const notices =
+    snapshot === null
+      ? []
+      : [SAVE_NOTICES[snapshot.save], snapshot.removalRefused ? REFUSED_NOTICE : null].filter(
+          (notice) => notice !== null,
+        );
 
   if (engine === null || downloads.length === 0) {
     const action = <Button label={empty.label} onPress={empty.onPress} />;
@@ -65,17 +74,22 @@ function DownloadsBody({
         action={action}
       />
     ) : (
-      <EmptyState icon={Download} title="Nothing downloaded yet." action={action} />
+      <EmptyState
+        icon={Download}
+        title="Nothing downloaded yet."
+        {...(snapshot?.removalRefused === true ? { description: REFUSED_NOTICE } : {})}
+        action={action}
+      />
     );
   }
 
   return (
     <View className="gap-4 px-5 py-4 regular:w-full regular:max-w-readable regular:self-center regular:px-0">
-      {notice === null ? null : (
-        <Text variant="secondary" tone="danger">
+      {notices.map((notice) => (
+        <Text key={notice} variant="secondary" tone="danger">
           {notice}
         </Text>
-      )}
+      ))}
       <ListRow icon={Download} title={summary.items} detail={summary.size} onPress={openSettings} />
       {downloads.map((download) => (
         <DownloadRow key={download.id} engine={engine} download={download} />
