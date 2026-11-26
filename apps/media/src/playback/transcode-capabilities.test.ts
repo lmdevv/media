@@ -813,6 +813,14 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
             Diagnosis.Capability({ keys: [TONE_MAP_QSV], impls: [ImplId("tonemap.qsv")] }),
           );
 
+          // The probe that failed again is the key's newest evidence, beside its quarantine.
+          const [shown] = Inventory.capabilityOf(
+            yield* capabilities.inventory,
+            TONE_MAP_QSV,
+          ).evidence;
+
+          assert.deepInclude(shown, { _tag: "Probe", outcome: "rejected", detail: VPP_FAILED });
+
           const quarantined = yield* capabilities.resolve(request(HDR));
 
           assert.isFalse(quarantined.verified.has(TONE_MAP_QSV));

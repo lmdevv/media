@@ -318,22 +318,36 @@ export const record = (
 };
 
 /**
- * Records that re-probing `key` after a failed run failed again, if `epoch`, the key's when the
- * diagnosis began, is still its. On a generated clip that quarantines the key (`setAside`). On the
- * real source `source` it says nothing about other files: that source alone keeps off the row.
+ * Records that `probe`, re-probing `key` after a failed run, failed again, if `epoch`, the key's
+ * when the diagnosis began, is still its. On a generated clip that quarantines the key
+ * (`setAside`) and keeps the probe as its newest evidence, so what is known shows why. On the real
+ * source the probe read it says nothing about other files: that source alone keeps off the row.
  */
 export const reproduced = (
   inventory: Inventory,
   key: CapabilityKey,
-  source: SourceScope | undefined,
-  at: number,
+  probe: Extract<Evidence, { readonly _tag: "Probe" }>,
   epoch: number,
 ): Inventory => {
   if (!current(inventory, key, epoch)) return inventory;
 
-  return source === undefined
-    ? setAside(inventory, key, at)
-    : exclude(inventory, source, [implOf(key)], at + SOURCE_EXCLUSION_MS);
+  if (probe.source !== undefined) {
+    return exclude(inventory, probe.source, [implOf(key)], probe.at + SOURCE_EXCLUSION_MS);
+  }
+
+  const capability = capabilityOf(inventory, key);
+
+  if (isQuarantined(capability, probe.at)) return inventory;
+
+  const shown: Inventory = {
+    ...inventory,
+    capabilities: new Map(inventory.capabilities).set(key, {
+      ...capability,
+      evidence: [probe, ...capability.evidence].slice(0, EVIDENCE_KEPT),
+    }),
+  };
+
+  return setAside(shown, key, probe.at);
 };
 
 /**

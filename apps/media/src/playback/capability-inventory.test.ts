@@ -39,7 +39,7 @@ const recorded = (inventory: Inventory, key = TONE_MAP, outcome: ProbeOutcome = 
 
 /** A failure a generated clip reproduced at `at`, under the key's epoch now. */
 const struck = (inventory: Inventory, key: typeof TONE_MAP, at: number) =>
-  reproduced(inventory, key, undefined, at, capabilityOf(inventory, key).epoch);
+  reproduced(inventory, key, probe("rejected", at), capabilityOf(inventory, key).epoch);
 
 const verifiedIn = (inventory: Inventory, at: number, scope = FILM) =>
   snapshot(inventory, scope, at, [], new Set()).verified;
@@ -194,11 +194,42 @@ describe("reproduced", () => {
     assert.deepStrictEqual(quarantinedSince(third, 3 * 3_600_000), [TONE_MAP]);
   });
 
+  it("keeps the probe that reproduced the failure as the quarantined key's newest evidence", () => {
+    const verified = recorded(empty);
+
+    const failedAgain = Evidence.Probe({
+      at: 60_000,
+      outcome: "rejected",
+      source: undefined,
+      detail: "[Parsed_vpp_qsv_0 @ 0x1] Invalid color_matrix.",
+      millis: 140,
+    });
+
+    const after = reproduced(
+      verified,
+      TONE_MAP,
+      failedAgain,
+      capabilityOf(verified, TONE_MAP).epoch,
+    );
+
+    const known = capabilityOf(after, TONE_MAP);
+
+    assert.deepStrictEqual(known.evidence, [
+      failedAgain,
+      ...capabilityOf(verified, TONE_MAP).evidence,
+    ]);
+    assert.strictEqual(known.status, "unknown");
+    assert.deepStrictEqual(
+      Option.map(known.quarantine, (q) => q.until),
+      Option.some(60_000 + 15 * 60_000),
+    );
+  });
+
   it("takes one strike for diagnoses of one outage, overlapping or begun during the quarantine", () => {
     const verified = recorded(empty);
     const began = capabilityOf(verified, TONE_MAP).epoch;
-    const once = reproduced(verified, TONE_MAP, undefined, 0, began);
-    const overlapping = reproduced(once, TONE_MAP, undefined, 10, began);
+    const once = reproduced(verified, TONE_MAP, probe("rejected", 0), began);
+    const overlapping = reproduced(once, TONE_MAP, probe("rejected", 10), began);
     const during = struck(overlapping, TONE_MAP, 20);
 
     assert.strictEqual(overlapping, once);
@@ -222,7 +253,13 @@ describe("reproduced", () => {
 
   it("keeps a failure reproduced on a real source to that source", () => {
     const shared = recorded(empty, DECODE);
-    const after = reproduced(shared, DECODE, FILM, 0, capabilityOf(shared, DECODE).epoch);
+
+    const after = reproduced(
+      shared,
+      DECODE,
+      probe("rejected", 0, FILM),
+      capabilityOf(shared, DECODE).epoch,
+    );
 
     assert.deepStrictEqual(capabilityOf(after, DECODE), capabilityOf(shared, DECODE));
     assert.isTrue(excludedIn(after, DAY - 1).has(ImplId("decode.qsv")));
@@ -249,7 +286,7 @@ describe("reproduced", () => {
         const epoch = capabilityOf(inventory, chosen).epoch;
 
         return outcome === "reproduced"
-          ? reproduced(inventory, chosen, FILM, at, epoch)
+          ? reproduced(inventory, chosen, probe("rejected", at, FILM), epoch)
           : record(inventory, chosen, probe(outcome, at, FILM), epoch);
       }, before);
 

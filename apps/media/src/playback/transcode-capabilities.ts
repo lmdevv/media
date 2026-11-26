@@ -957,7 +957,18 @@ const make = Effect.gen(function* () {
           const reproducedAt = yield* now;
 
           yield* update((current) =>
-            Inventory.reproduced(current, step.capability, source, reproducedAt, epochOf(step)),
+            Inventory.reproduced(
+              current,
+              step.capability,
+              Inventory.Evidence.Probe({
+                at: reproducedAt,
+                outcome,
+                source,
+                detail: result.detail,
+                millis: result.millis,
+              }),
+              epochOf(step),
+            ),
           );
           yield* Effect.logWarning(
             source === undefined
