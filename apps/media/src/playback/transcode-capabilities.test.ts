@@ -304,9 +304,17 @@ const provingNothing = await Promise.all(
   PROVES_NOTHING.map(async ([name, behavior]) => [name, await standIn(behavior)] as const),
 );
 
-/** A tone map probe that crashes, which ffmpeg ran: a refusal. */
+/** What the Quick Sync HDR10 tone map probe reads, past the clip's path. */
+const TONE_MAP_PROBE = "hevc-pq.mkv -map";
+
+/** Every Quick Sync HDR10 tone map probe crashes ffmpeg, as a driver that always faults would. */
 const crashing = await standIn({
-  rules: [{ token: "tonemap=1", runs: "probe", signal: "SIGSEGV" }],
+  rules: [{ token: TONE_MAP_PROBE, runs: "probe", signal: "SIGBUS" }],
+});
+
+/** The first Quick Sync HDR10 tone map probe crashes ffmpeg, as an intermittent driver fault would. */
+const crashingOnce = await standIn({
+  rules: [{ token: TONE_MAP_PROBE, runs: "probe", signal: "SIGBUS", limit: 1 }],
 });
 
 /** Making the generated MPEG-2 clip takes four seconds, longer than a negotiation waits. */
@@ -615,18 +623,85 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
     });
   }
 
-  layer(
-    crashing.services,
-    live,
-  )((it) => {
+  layer(crashing.services, { timeout: "60 seconds" })((it) => {
     it.effect(
-      "refuses a key whose probe crashes ffmpeg",
+      "sets a key whose probe crashes ffmpeg aside for 15 minutes, then 2 hours, then until a restart, probing it again after each",
       () =>
         Effect.gen(function* () {
           const capabilities = yield* TranscodeCapabilities.Service;
 
+          const strikes = Effect.map(capabilities.inventory, (known) =>
+            Option.map(
+              Inventory.capabilityOf(known, TONE_MAP_QSV).quarantine,
+              ({ strikes: struck, until }) => [struck, until === "restart"] as const,
+            ),
+          );
+
+          const first = yield* capabilities.resolve(request(HDR));
+          const known = Inventory.capabilityOf(yield* capabilities.inventory, TONE_MAP_QSV);
+
+          assert.strictEqual(known.status, "unknown", "a crash refuses nothing");
+          assert.deepStrictEqual(
+            known.evidence.map((evidence) =>
+              Inventory.Evidence.$is("Probe")(evidence) ? evidence.outcome : "build",
+            ),
+            ["crashed"],
+          );
+          assert.deepStrictEqual(yield* strikes, Option.some([1, false] as const));
+          assert.isFalse(first.verified.has(TONE_MAP_QSV));
+          assert.include(
+            plannedImpls(HDR, first).pipe(Result.getOrElse((): ReadonlyArray<string> => [])),
+            "tonemap.cpu",
+          );
+          // Runs that read the clip: its making, once, and each probe of the tone map.
+          const toneMapRuns = runsWith(crashing.ffmpeg, "hevc-pq.mkv");
+          const probes = yield* toneMapRuns;
+
+          // Within the quarantine nothing probes it; once it ends, the next negotiation does.
+          yield* TestClock.adjust(Duration.minutes(14));
           yield* capabilities.resolve(request(HDR));
-          assert.strictEqual(yield* statusOf(TONE_MAP_QSV), "unsupported");
+          assert.strictEqual(yield* toneMapRuns, probes);
+
+          yield* TestClock.adjust(Duration.minutes(1));
+          yield* capabilities.resolve(request(HDR));
+          assert.strictEqual(yield* toneMapRuns, probes + 1);
+          assert.deepStrictEqual(yield* strikes, Option.some([2, false] as const));
+
+          yield* TestClock.adjust(Duration.hours(2));
+          yield* capabilities.resolve(request(HDR));
+          assert.strictEqual(yield* toneMapRuns, probes + 2);
+          assert.deepStrictEqual(yield* strikes, Option.some([3, true] as const));
+
+          // A path that always crashes stays out until the server restarts.
+          yield* TestClock.adjust(Duration.days(7));
+          const last = yield* capabilities.resolve(request(HDR));
+
+          assert.strictEqual(yield* toneMapRuns, probes + 2);
+          assert.isFalse(last.verified.has(TONE_MAP_QSV));
+        }),
+      60_000,
+    );
+  });
+
+  layer(crashingOnce.services, { timeout: "60 seconds" })((it) => {
+    it.effect(
+      "verifies a key whose probe crashed once when it is probed again after 15 minutes",
+      () =>
+        Effect.gen(function* () {
+          const capabilities = yield* TranscodeCapabilities.Service;
+          const first = yield* capabilities.resolve(request(HDR));
+
+          assert.isFalse(first.verified.has(TONE_MAP_QSV));
+          assert.strictEqual(yield* statusOf(TONE_MAP_QSV), "unknown");
+
+          yield* TestClock.adjust(Duration.minutes(15));
+          const later = yield* capabilities.resolve(request(HDR));
+
+          assert.isTrue(later.verified.has(TONE_MAP_QSV));
+          assert.deepStrictEqual(
+            plannedImpls(HDR, later),
+            Result.succeed(["decode.qsv", "scale.qsv", "tonemap.qsv", "encode.qsv"]),
+          );
         }),
       60_000,
     );

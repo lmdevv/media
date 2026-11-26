@@ -7,6 +7,8 @@
  * sources where no clip stands in, and then plans once from a snapshot. After a failed run it
  * re-probes the suspects: a reproduced failure quarantines that one key, a failure nothing
  * reproduces keeps that source from the rows involved, and running out of time decides nothing.
+ * A probe that crashes ffmpeg counts as a reproduced failure: its key is quarantined and probed
+ * again when the quarantine ends.
  * A listing proves the CPU's rows, which touch no device; it never proves a GPU row. A listing
  * that fails is read again at the next need, and the CPU's rows stay unknown meanwhile.
  */
@@ -177,10 +179,11 @@ const firstLine = (text: string): string =>
 /**
  * What one probe run proves, decided here alone. It passed when ffmpeg exited 0 and frames came
  * out. It was rejected when ffmpeg ran and refused by its own decision, exiting non-zero with an
- * error it wrote, or crashed (SIGSEGV, SIGBUS, SIGILL, SIGABRT, SIGFPE). Anything else proves
- * nothing: a clean exit without frames, a stop by any other signal or ffmpeg's exit on one, a
- * shell that could not run ffmpeg (126, 127), a spawn error, a timeout, or a device that would not
- * open.
+ * error it wrote. It crashed when SIGSEGV, SIGBUS, SIGILL, SIGABRT, or SIGFPE killed it: a driver
+ * can crash in a fraction of runs only (iHD's H.264 encoder on a small-BAR Arc A380), so a crash
+ * sets the key aside for a while rather than refusing it. Anything else proves nothing: a clean
+ * exit without frames, a stop by any other signal or ffmpeg's exit on one, a shell that could not
+ * run ffmpeg (126, 127), a spawn error, a timeout, or a device that would not open.
  */
 const probeOutcome = (
   result: Result.Result<string, MediaTools.MediaToolFailed>,
@@ -188,7 +191,7 @@ const probeOutcome = (
   if (Result.isSuccess(result)) return probedFrames(result.success) > 0 ? "passed" : "inconclusive";
   const { signal, exitCode, stderrHead } = result.failure;
 
-  if (signal !== null) return CRASHES.has(signal) ? "rejected" : "inconclusive";
+  if (signal !== null) return CRASHES.has(signal) ? "crashed" : "inconclusive";
 
   if (exitCode === null || NOT_RUN.has(exitCode)) return "inconclusive";
 
@@ -653,9 +656,13 @@ const make = Effect.gen(function* () {
           ? outcome === "passed"
             ? ""
             : "no frames came out"
-          : firstLine(
-              result.failure.stderrHead === "" ? result.failure.stderr : result.failure.stderrHead,
-            ),
+          : outcome === "crashed"
+            ? `ffmpeg died of ${result.failure.signal ?? "a signal"}`
+            : firstLine(
+                result.failure.stderrHead === ""
+                  ? result.failure.stderr
+                  : result.failure.stderrHead,
+              ),
         millis: (yield* now) - started,
       };
 
@@ -938,7 +945,7 @@ const make = Effect.gen(function* () {
         const { result, source } = shown.value;
         const outcome = result.outcome;
 
-        if (outcome === "rejected") {
+        if (outcome === "rejected" || outcome === "crashed") {
           const reproducedAt = yield* now;
 
           yield* update((current) =>

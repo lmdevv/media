@@ -62,6 +62,48 @@ describe("record", () => {
     assert.isTrue(probeable(timedOut, TONE_MAP, 30_000));
   });
 
+  it("sets a key aside on a probe that crashed, as on a reproduced failure, and keeps its evidence", () => {
+    const crashedAt = (inventory: Inventory, at: number) =>
+      record(inventory, TONE_MAP, probe("crashed", at), capabilityOf(inventory, TONE_MAP).epoch);
+
+    const first = crashedAt(empty, 0);
+    const known = capabilityOf(first, TONE_MAP);
+
+    assert.strictEqual(known.status, "unknown");
+    assert.deepStrictEqual(
+      known.evidence.map((evidence) => (Evidence.$is("Probe")(evidence) ? evidence.outcome : "")),
+      ["crashed"],
+    );
+    assert.isFalse(probeable(first, TONE_MAP, 15 * 60_000 - 1));
+    assert.isTrue(probeable(first, TONE_MAP, 15 * 60_000));
+
+    const second = crashedAt(first, 15 * 60_000);
+
+    assert.isFalse(probeable(second, TONE_MAP, 15 * 60_000 + 2 * 3_600_000 - 1));
+    assert.isTrue(probeable(second, TONE_MAP, 15 * 60_000 + 2 * 3_600_000));
+
+    const third = crashedAt(second, 3 * 3_600_000);
+
+    assert.isFalse(probeable(third, TONE_MAP, Number.MAX_SAFE_INTEGER));
+    assert.isFalse(verifiedIn(third, Number.MAX_SAFE_INTEGER).has(TONE_MAP));
+  });
+
+  it("keeps a crashed probe of a real source to that source, which stays off the row for a day", () => {
+    const shared = recorded(empty, DECODE);
+
+    const crashed = record(
+      shared,
+      DECODE,
+      probe("crashed", 0, FILM),
+      capabilityOf(shared, DECODE).epoch,
+    );
+
+    assert.deepStrictEqual(crashed.capabilities, shared.capabilities);
+    assert.isTrue(excludedIn(crashed, DAY - 1).has(ImplId("decode.qsv")));
+    assert.isFalse(excludedIn(crashed, DAY).has(ImplId("decode.qsv")));
+    assert.isFalse(excludedIn(crashed, 0, OTHER).has(ImplId("decode.qsv")));
+  });
+
   it("proves absence from a listing, and presence only for a key nothing contradicted", () => {
     const absent = record(
       empty,
@@ -194,7 +236,7 @@ describe("reproduced", () => {
     {
       steps: Schema.Array(
         Schema.Struct({
-          outcome: Schema.Literals(["passed", "rejected", "inconclusive", "reproduced"]),
+          outcome: Schema.Literals(["passed", "rejected", "crashed", "inconclusive", "reproduced"]),
           key: Schema.Literals(["decode", "tonemap"]),
         }),
       ),
