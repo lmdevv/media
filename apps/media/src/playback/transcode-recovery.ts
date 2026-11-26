@@ -239,11 +239,14 @@ export type Diagnosis = Data.TaggedEnum<{
     readonly impls: ReadonlyArray<ImplId>;
   };
   /**
-   * The source is the cause, and it is kept from these rows: every suspect ran on generated
-   * frames, or one failed again only on the source itself.
+   * The source is the cause, and it is kept from these rows: the failure named these parts and
+   * each ran on generated frames, or one failed again only on the source itself.
    */
   Source: { readonly impls: ReadonlyArray<ImplId> };
-  /** The probes ran out of time: no verdict, and this stream keeps off these rows. */
+  /**
+   * No verdict, and this stream keeps off these rows: the probes ran out of time, or the failure
+   * named no part (a crash signal names none) and the suspects ran on generated frames.
+   */
   Undecided: { readonly impls: ReadonlyArray<ImplId> };
   NotVideo: { readonly reason: NotVideo };
   /** Nothing to suspect: the run was on the CPU and named nothing it owns. */

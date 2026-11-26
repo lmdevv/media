@@ -5,8 +5,10 @@
  * variant of that device's rows, one at a time at the lowest CPU priority. A negotiation probes
  * the unknown keys its cheapest chain would use under one budget, ahead of that warmup, real
  * sources where no clip stands in, and then plans once from a snapshot. After a failed run it
- * re-probes the suspects: a reproduced failure quarantines that one key, a failure nothing
- * reproduces keeps that source from the rows involved, and running out of time decides nothing.
+ * re-probes the suspects: a reproduced failure quarantines that one key; a failure whose log
+ * named a part that its probe runs past keeps that source from the rows involved for a day; a
+ * failure that named nothing, such as a crash signal, that nothing reproduces, and running out of
+ * time, decide nothing, and only the failed stream keeps off those rows.
  * A probe that crashes ffmpeg counts as a reproduced failure: its key is quarantined and probed
  * again when the quarantine ends.
  * A listing proves the CPU's rows, which touch no device; it never proves a GPU row. A listing
@@ -989,8 +991,13 @@ const make = Effect.gen(function* () {
     }
 
     const at = yield* now;
+    // Only a line that named a part says the file is refused there. A failure that named nothing,
+    // as a crash signal's never does, and whose suspects ran on generated frames is no verdict:
+    // the stream keeps off them, the file keeps them.
+    const sourceExcluded = attribution.named ? passed : [];
+    const unsettled = attribution.named ? undecided : [...passed, ...undecided];
 
-    for (const step of passed) {
+    for (const step of sourceExcluded) {
       yield* update((current) =>
         Inventory.notReproduced(current, step.capability, failed.request.scope, at, epochOf(step)),
       );
@@ -999,14 +1006,16 @@ const make = Effect.gen(function* () {
     yield* Effect.logWarning("TranscodeCapabilities.diagnosed").pipe(
       Effect.annotateLogs({
         named: attribution.named,
-        sourceExcluded: passed.map((step) => step.impl).join(","),
-        undecided: undecided.map((step) => step.impl).join(","),
+        sourceExcluded: sourceExcluded.map((step) => step.impl).join(","),
+        undecided: unsettled.map((step) => step.impl).join(","),
       }),
     );
 
-    return undecided.length > 0
-      ? Diagnosis.Undecided({ impls: undecided.map((step) => step.impl) })
-      : Diagnosis.Source({ impls: passed.map((step) => step.impl) });
+    return unsettled.length > 0
+      ? Diagnosis.Undecided({
+          impls: suspects.flatMap((step) => (unsettled.includes(step) ? [step.impl] : [])),
+        })
+      : Diagnosis.Source({ impls: sourceExcluded.map((step) => step.impl) });
   });
 
   const hardwareEncoder = Effect.gen(function* () {

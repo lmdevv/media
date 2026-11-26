@@ -886,6 +886,56 @@ describe.skipIf(!hasFfmpeg)("TranscodeCapabilities", () => {
     live,
   )((it) => {
     it.effect(
+      "keeps a file off a row for a day only for a named failure its probe runs past; a crash nothing reproduces keeps the stream off alone",
+      () =>
+        Effect.gen(function* () {
+          const capabilities = yield* TranscodeCapabilities.Service;
+          const asked = request(HDR);
+          const warm = yield* capabilities.resolve(asked);
+          const pipeline = pipelineOf(HDR, warm);
+          const gpuRows = pipeline.steps.map((step) => step.impl);
+
+          assert.deepStrictEqual(gpuRows, [
+            ImplId("decode.qsv"),
+            ImplId("scale.qsv"),
+            ImplId("tonemap.qsv"),
+            ImplId("encode.qsv"),
+          ]);
+
+          // A SIGBUS no probe reproduces: no verdict, and nothing kept from the file.
+          const crashed = yield* capabilities.diagnose({
+            ...vppFailed(pipeline),
+            failure: { exitCode: null, signal: "SIGBUS", stderrTail: VPP_FAILED },
+          });
+
+          assert.deepStrictEqual(crashed, Diagnosis.Undecided({ impls: gpuRows }));
+          assert.isUndefined((yield* capabilities.inventory).exclusions.get(asked.scope));
+          assert.isTrue(
+            samePipeline(pipelineOf(HDR, yield* capabilities.resolve(asked)), pipeline),
+            "the file's next stream keeps its GPU chain",
+          );
+
+          // A failure that names vpp_qsv, which ran on the generated clip: the file is refused there.
+          const named = yield* capabilities.diagnose(vppFailed(pipeline));
+
+          assert.deepStrictEqual(
+            named,
+            Diagnosis.Source({ impls: [ImplId("scale.qsv"), ImplId("tonemap.qsv")] }),
+          );
+          const next = yield* capabilities.resolve(asked);
+
+          assert.isTrue(next.excluded.has(ImplId("scale.qsv")));
+          assert.isTrue(next.excluded.has(ImplId("tonemap.qsv")));
+        }),
+      60_000,
+    );
+  });
+
+  layer(
+    plain.services,
+    live,
+  )((it) => {
+    it.effect(
       "blames the disk, not the decoder, for a full disk after a decode error the run recovered from",
       () =>
         Effect.gen(function* () {
