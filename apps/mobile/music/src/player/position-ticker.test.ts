@@ -322,7 +322,7 @@ const phone = (resume: { readonly itemId: string; readonly positionMs: number } 
 
   const shown = showPosition(
     controller,
-    { playbackOf: reports.playbackOf, serverNow: () => clock.now },
+    { playbackOf: reports.playbackOf, onPlayback: reports.subscribe, serverNow: () => clock.now },
     EVERY_MS,
   );
 

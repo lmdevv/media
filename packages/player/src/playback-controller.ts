@@ -375,6 +375,7 @@ export class PlaybackController {
   #engine: PlayerEngine;
   readonly #env: ControllerEnvironment;
   readonly #listeners = new Set<() => void>();
+  readonly #positionListeners = new Set<() => void>();
   /** What runs as the listener acts here, before the action: {@link onListenerAction}. */
   readonly #listenerActions = new Set<() => void>();
   #snapshot: ControllerSnapshot;
@@ -498,6 +499,19 @@ export class PlaybackController {
 
     return () => {
       this.#listeners.delete(listener);
+    };
+  };
+
+  /**
+   * Calls `listener` whenever the place in the song is set rather than moved on by time: a seek, a
+   * load and where it starts, a play or a pause, a stall, an end, and each position the engine
+   * reports. {@link positionMs} reads the new place. Returns the function that stops calling it.
+   */
+  onPosition = (listener: () => void): (() => void) => {
+    this.#positionListeners.add(listener);
+
+    return () => {
+      this.#positionListeners.delete(listener);
     };
   };
 
@@ -1822,6 +1836,8 @@ export class PlaybackController {
 
   #stamp(positionMs: number, playing: boolean): void {
     this.#sample = { positionMs, updatedAt: this.#env.monotonicNow(), playing };
+
+    for (const listener of this.#positionListeners) listener();
   }
 
   #setPosition(positionMs: number): void {

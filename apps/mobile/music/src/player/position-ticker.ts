@@ -115,13 +115,15 @@ export const positionTicker = (
 export interface HerePosition {
   /** Where its song stands now, in milliseconds. */
   readonly positionMs: () => number;
-  /** Tells after each change of what it shows, such as another song or a seek. */
-  readonly subscribe: Changes;
+  /** Tells whenever where its song stands is set rather than moved on by time. */
+  readonly onPosition: Changes;
 }
 
 /** The person's other devices' last reports, as the shown position reads them. */
 export interface DevicePositions {
   readonly playbackOf: (deviceId: string) => DevicePlayback | null;
+  /** Tells after each report that changes what a device plays or where it stands in it. */
+  readonly onPlayback: Changes;
   /** The server's time now, which a report's position anchor is in. */
   readonly serverNow: () => number;
 }
@@ -147,8 +149,8 @@ export interface ShownPosition {
 
 /**
  * The position the screens show: the followed device's last report projected to now while it has
- * one, else this phone's player. Its ticker reads again whenever the player shows something new
- * and whenever what the screens show changes.
+ * one, else this phone's player. Its ticker reads again whenever either says its position changed
+ * and whenever the followed device changes.
  */
 export const showPosition = (
   here: HerePosition,
@@ -165,7 +167,7 @@ export const showPosition = (
     return devicePosition(playback, devices.serverNow(), followed.durationMs);
   };
 
-  const ticker = positionTicker(read, [here.subscribe], everyMs);
+  const ticker = positionTicker(read, [here.onPosition, devices.onPlayback], everyMs);
 
   return {
     read,

@@ -1590,6 +1590,7 @@ export function PlayerProvider({ children }: { readonly children: ReactNode }) {
       controller,
       {
         playbackOf: connected.playbackOf,
+        onPlayback: connected.onPlayback,
         serverNow: () => connected.player.serverNow(),
       },
       POSITION_INTERVAL_MS,

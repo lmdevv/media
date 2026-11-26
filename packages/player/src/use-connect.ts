@@ -141,6 +141,11 @@ export interface ConnectView {
    * as it was while nothing shown changes.
    */
   readonly playbackOf: (deviceId: string) => DevicePlayback | null;
+  /**
+   * Calls `listener` after each report that changes what a device plays or where it stands in it,
+   * one that moves only its position anchor included; returns the function that stops calling it.
+   */
+  readonly onPlayback: (listener: () => void) => () => void;
   /** The server's time now. */
   readonly serverNow: () => number;
 }
@@ -291,6 +296,7 @@ export const useConnect = (
       player,
       lead: async () => election.current?.take(),
       playbackOf: reports.playbackOf,
+      onPlayback: reports.subscribe,
       serverNow: () => player.serverNow(),
     }),
     [deviceId, devices, remote, here, player, reports],
@@ -300,7 +306,7 @@ export const useConnect = (
 /**
  * `devices` as last answered while it holds the same devices, playing the same songs the same way,
  * so a device's report, which moves only its position anchor, never re-renders the player. The
- * position is read through `playbackOf`.
+ * position is read through `playbackOf`, and `onPlayback` tells of the move.
  */
 const useStable = (devices: ReadonlyArray<Device>): ReadonlyArray<Device> => {
   const key = JSON.stringify(
