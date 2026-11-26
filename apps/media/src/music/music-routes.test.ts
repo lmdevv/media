@@ -172,37 +172,99 @@ const resolved = (trackId: string, path: string, codec: string): ResolvedTrack =
   codec,
 });
 
+const COVERS = join(import.meta.dirname, "..", "testing", "fixtures", "covers");
+
+/** What the art route answers at `?w=width` for the cover in `file`, saved to a file of its own. */
+const serveArt = async (file: string, width: string) => {
+  const original = await run(Files.readWholeFile(file));
+  const hash = await run(saveArt(join(work, "data"), original).pipe(Effect.map(Option.getOrThrow)));
+
+  const response = await fetch(
+    `${baseUrl}/music/art/${hash}?ticket=${await artTicket(hash)}&w=${width}`,
+  );
+
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  const copy = join(work, `copy-${hash}-${width}`);
+
+  await writeBytes(copy, bytes);
+
+  return {
+    status: response.status,
+    contentType: response.headers.get("content-type"),
+    original,
+    bytes,
+    copy,
+  };
+};
+
+/** `width,height` of the image in `file`. */
+const sizeOf = async (file: string) =>
+  (
+    await ffprobe(["-v", "error", "-show_entries", "stream=width,height", "-of", "csv=p=0", file])
+  ).trim();
+
+/** The image in `file` decoded to 8-bit RGBA, row by row. */
+const rgbaOf = async (file: string) => {
+  const raw = `${file}.rgba`;
+
+  await ffmpeg(["-v", "error", "-i", file, "-f", "rawvideo", "-pix_fmt", "rgba", raw]);
+  const [width = 0] = (await sizeOf(file)).split(",").map(Number);
+
+  return { width, data: await run(Files.readWholeFile(raw)) };
+};
+
+/** The ICC profile a JPEG carries, joined from its `ICC_PROFILE` segments. */
+const iccProfileOf = (jpeg: Uint8Array): Buffer => {
+  const parts: Array<Buffer> = [];
+  let offset = 2;
+
+  while (offset + 4 <= jpeg.length && jpeg[offset + 1] !== 0xda) {
+    const length = ((jpeg[offset + 2] ?? 0) << 8) + (jpeg[offset + 3] ?? 0);
+    const segment = Buffer.from(jpeg.subarray(offset + 4, offset + 2 + length));
+
+    if (
+      jpeg[offset + 1] === 0xe2 &&
+      segment.subarray(0, 12).toString("latin1") === "ICC_PROFILE\0"
+    ) {
+      parts.push(segment.subarray(14));
+    }
+
+    offset += 2 + length;
+  }
+
+  return Buffer.concat(parts);
+};
+
+/**
+ * Expects the art route to serve the 320x320 lime disc on transparent magenta in `file` resized to a
+ * PNG that keeps its transparency, without magenta at the disc's edge.
+ */
+const expectTransparentCopy = async (file: string) => {
+  const served = await serveArt(file, "185");
+
+  expect([file, served.status, served.contentType]).toEqual([file, 200, "image/png"]);
+  expect(await sizeOf(served.copy)).toBe("185,186");
+  const { data } = await rgbaOf(served.copy);
+
+  // The corner is transparent, as in the original.
+  expect([file, data[3]]).toEqual([file, 0]);
+
+  // The disc is lime (gray when the cover is) right to its edge: the magenta under the
+  // transparent pixels never bleeds into it.
+  const bled = Array.from({ length: data.length / 4 }, (_, pixel) => pixel * 4).filter(
+    (at) => (data[at + 3] ?? 0) > 32 && (data[at] ?? 0) - (data[at + 1] ?? 0) > 24,
+  );
+
+  expect([file, bled.length]).toEqual([file, 0]);
+};
+
 /** `width,height` of the copy the art route serves at `?w=width` of a cover `size` pixels big. */
 const servedArtSize = async (size: string, width: string) => {
   const original = join(work, `cover-${size}.jpg`);
 
   await ffmpeg(["-f", "lavfi", "-i", `testsrc=size=${size}`, "-frames:v", "1", original]);
 
-  const hash = await run(
-    saveArt(join(work, "data"), await run(Files.readWholeFile(original))).pipe(
-      Effect.map(Option.getOrThrow),
-    ),
-  );
-
-  const response = await fetch(
-    `${baseUrl}/music/art/${hash}?ticket=${await artTicket(hash)}&w=${width}`,
-  );
-
-  const copy = join(work, `copy-${size}-${width}.jpg`);
-
-  await writeBytes(copy, new Uint8Array(await response.arrayBuffer()));
-
-  const probed = await ffprobe([
-    "-v",
-    "error",
-    "-show_entries",
-    "stream=width,height",
-    "-of",
-    "csv=p=0",
-    copy,
-  ]);
-
-  return probed.trim();
+  return sizeOf((await serveArt(original, width)).copy);
 };
 
 beforeAll(async () => {
@@ -550,6 +612,98 @@ describe("music routes", { timeout: 60_000 }, () => {
     expect(await servedArtSize("300x150", "185")).toBe("300,150");
     // A square cover comes out as it did when the width was bounded.
     expect(await servedArtSize("600x600", "185")).toBe("185,186");
+  });
+
+  it("never make a cover's copy larger than the cover either way", async () => {
+    expect(await servedArtSize("1x1", "185")).toBe("1,1");
+    expect(await servedArtSize("3x1", "185")).toBe("3,1");
+    expect(await servedArtSize("1x3", "185")).toBe("1,3");
+    expect(await servedArtSize("5x3", "185")).toBe("5,3");
+    expect(await servedArtSize("101x101", "185")).toBe("101,101");
+    expect(await servedArtSize("3000x100", "185")).toBe("3000,100");
+  });
+
+  it("serve a transparent cover's copy as a PNG that keeps its transparency and edges", async () => {
+    const rgba64 = join(work, "transparent-16.png");
+    const grayAlpha = join(work, "transparent-gray.png");
+    const transparent = join(COVERS, "transparent.png");
+
+    await Promise.all([
+      ffmpeg(["-v", "error", "-i", transparent, "-pix_fmt", "rgba64be", rgba64]),
+      ffmpeg(["-v", "error", "-i", transparent, "-pix_fmt", "ya8", grayAlpha]),
+    ]);
+
+    await Promise.all(
+      [transparent, join(COVERS, "palette.png"), join(COVERS, "alpha.webp"), rgba64, grayAlpha].map(
+        expectTransparentCopy,
+      ),
+    );
+  });
+
+  it("serve a profiled, rotated, 16-bit, or gray cover's copy as a JPEG that looks the same", async () => {
+    const profiled = join(COVERS, "profiled.jpg");
+    const fromProfiled = await serveArt(profiled, "185");
+
+    expect([fromProfiled.status, fromProfiled.contentType]).toEqual([200, "image/jpeg"]);
+    expect(iccProfileOf(fromProfiled.original).length).toBeGreaterThan(0);
+    expect(iccProfileOf(fromProfiled.bytes)).toEqual(iccProfileOf(fromProfiled.original));
+
+    // Stored 240x320 and shown 320x240 by its EXIF orientation: the copy is turned upright, red
+    // corner at the top left, since the copy carries no EXIF.
+    const rotated = await serveArt(join(COVERS, "rotated.jpg"), "185");
+
+    expect(await sizeOf(rotated.copy)).toBe("246,185");
+    const { data } = await rgbaOf(rotated.copy);
+
+    expect((data[0] ?? 0) > 200 && (data[1] ?? 255) < 60).toBe(true);
+
+    const deep = join(work, "deep.png");
+    const gray = join(work, "gray.jpg");
+
+    await Promise.all(
+      [
+        [deep, "rgb48be"],
+        [gray, "gray"],
+      ].map(([file = "", format = ""]) =>
+        ffmpeg(
+          ["-v", "error", "-f", "lavfi", "-i", "testsrc2=size=320x320"].concat([
+            "-frames:v",
+            "1",
+            "-pix_fmt",
+            format,
+            file,
+          ]),
+        ),
+      ),
+    );
+
+    await Promise.all(
+      [deep, gray].map(async (file) => {
+        const served = await serveArt(file, "185");
+
+        expect([file, served.status, served.contentType]).toEqual([file, 200, "image/jpeg"]);
+        expect(await sizeOf(served.copy)).toBe("185,186");
+      }),
+    );
+  });
+
+  it("serve the original for a cover a copy would not show the same", async () => {
+    const originals = [
+      ["cmyk.jpg", "image/jpeg"],
+      ["gamma.png", "image/png"],
+      ["animated.png", "image/png"],
+      ["animated.gif", "image/gif"],
+      ["animated.webp", "image/webp"],
+    ] as const;
+
+    await Promise.all(
+      originals.map(async ([name, contentType]) => {
+        const served = await serveArt(join(COVERS, name), "185");
+
+        expect([name, served.status, served.contentType]).toEqual([name, 200, contentType]);
+        expect(Buffer.from(served.bytes).equals(Buffer.from(served.original))).toBe(true);
+      }),
+    );
   });
 
   it("serve a Cast receiver's credential the song its sender started, past the ticket's expiry", async () => {

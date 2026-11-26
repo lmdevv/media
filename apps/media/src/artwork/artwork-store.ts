@@ -60,13 +60,14 @@ export interface Interface {
   ) => Effect.Effect<ArtworkImage, ArtworkNotFound | ArtworkUnavailable>;
   /**
    * A music cover the server holds, resized so its shorter side is `size`, since every cover is
-   * drawn as a square crop. `fingerprint` names the file's content, and the copy is kept under it
-   * with the other resized artwork, within `CACHE_MAX_MB`.
+   * drawn as a square crop, and written as `format`. `fingerprint` names the file's content, and
+   * the copy is kept under it with the other resized artwork, within `CACHE_MAX_MB`.
    */
   readonly resizeCover: (
     file: string,
     fingerprint: string,
     size: ArtworkWidth,
+    format: CoverFormat,
   ) => Effect.Effect<ArtworkImage, ArtworkUnavailable>;
 }
 
@@ -108,22 +109,59 @@ class ArtworkDownloadTimedOut extends Schema.TaggedError<
 }
 
 /**
- * The side of an image a resize bounds by the requested size. `width` bounds the width, for movie
- * artwork, which is drawn at its own shape. `shorter` bounds the shorter side, for a music cover,
- * which is drawn as a square crop that then has the size each way. Neither enlarges an image,
- * beyond rounding the side it does not bound to an even number of pixels.
+ * The file format of a resized music cover. `jpeg` is for a cover without transparency. `png`
+ * keeps a cover's alpha channel, and is scaled with premultiplied alpha, as browsers and iOS scale
+ * it, so the colour under fully transparent pixels never bleeds into the edges.
  */
-type ResizeBound = "width" | "shorter";
+export type CoverFormat = "jpeg" | "png";
 
-const BOUNDS: Record<
-  ResizeBound,
-  { readonly folder: string; readonly filter: (size: string) => string }
-> = {
-  width: { folder: "w", filter: (size) => `scale='min(${size},iw)':-2` },
-  shorter: {
-    folder: "s",
-    filter: (size) => `scale='if(gt(iw,ih),-2,min(${size},iw))':'if(gt(iw,ih),min(${size},ih),-2)'`,
-  },
+/**
+ * How a resize bounds an image by the requested size, and the file it writes. `width` bounds the
+ * width, for movie artwork, which is drawn at its own shape; it rounds the height to an even
+ * number of pixels, which can enlarge an image with an odd height by one row. `shorter` bounds the
+ * shorter side, for a music cover, which is drawn as a square crop that then has the size each
+ * way. It rounds the longer side to an even number of pixels too, so a square cover's copy matches
+ * the width bound's, but never past the cover's own size.
+ */
+type Resize =
+  | { readonly bound: "width" }
+  | { readonly bound: "shorter"; readonly format: CoverFormat };
+
+/** The longer side's even rounding of the shorter side's `scaled` size, at most `longer`. */
+const evenLonger = (scaled: string, longer: string, shorter: string) =>
+  `min(${longer},2*floor((${scaled}*${longer}+${shorter})/(2*${shorter})))`;
+
+const shorterScale = (size: string) =>
+  `scale='if(gt(iw,ih),${evenLonger(`min(${size},ih)`, "iw", "ih")},min(${size},iw))'` +
+  `:'if(gt(iw,ih),min(${size},ih),${evenLonger(`min(${size},iw)`, "ih", "iw")})'`;
+
+/** The cache folder, file extension, content type, filter, and encoder options of `resize` at `size`. */
+const plan = (resize: Resize, size: string) => {
+  if (resize.bound === "width") {
+    return {
+      folder: `w${size}`,
+      extension: "jpg",
+      contentType: "image/jpeg",
+      filter: `scale='min(${size},iw)':-2`,
+      quality: ["-q:v", "3"],
+    };
+  }
+
+  return resize.format === "jpeg"
+    ? {
+        folder: `s${size}`,
+        extension: "jpg",
+        contentType: "image/jpeg",
+        filter: shorterScale(size),
+        quality: ["-q:v", "3"],
+      }
+    : {
+        folder: `s${size}`,
+        extension: "png",
+        contentType: "image/png",
+        filter: `premultiply=inplace=1,${shorterScale(size)},unpremultiply=inplace=1`,
+        quality: [],
+      };
 };
 
 const timeToLive = (exit: Exit.Exit<unknown, unknown>): Duration.Duration =>
@@ -239,18 +277,19 @@ const make = Effect.gen(function* () {
     file: string,
     fingerprint: string,
     size: ArtworkWidth,
-    bound: ResizeBound,
+    resize: Resize,
   ) {
     // Each bound keeps its copies in its own folder, so the same file never answers both.
-    const { folder, filter } = BOUNDS[bound];
-    const target = path.join(directory, `${folder}${String(size)}`, `${hash(fingerprint)}.jpg`);
+    const { folder, extension, contentType, filter, quality } = plan(resize, String(size));
+    const target = path.join(directory, folder, `${hash(fingerprint)}.${extension}`);
+    const image: ArtworkImage = { path: target, contentType };
 
-    if (yield* cached(target)) return target;
+    if (yield* cached(target)) return image;
 
     yield* fs
       .makeDirectory(path.dirname(target), { recursive: true })
       .pipe(Effect.mapError((cause) => new ArtworkUnavailable({ cause })));
-    const temporary = `${target}.${(yield* Clock.currentTimeNanos).toString(36)}.part.jpg`;
+    const temporary = `${target}.${(yield* Clock.currentTimeNanos).toString(36)}.part.${extension}`;
 
     yield* resizes.withPermits(1)(
       tools
@@ -263,11 +302,10 @@ const make = Effect.gen(function* () {
           "-i",
           file,
           "-vf",
-          filter(String(size)),
+          filter,
           "-frames:v",
           "1",
-          "-q:v",
-          "3",
+          ...quality,
           temporary,
         ])
         .pipe(Effect.mapError((cause) => new ArtworkUnavailable({ cause }))),
@@ -277,21 +315,19 @@ const make = Effect.gen(function* () {
       .rename(temporary, target)
       .pipe(Effect.mapError((cause) => new ArtworkUnavailable({ cause })));
 
-    return target;
+    return image;
   });
 
   // Concurrent requests for one copy share a single ffmpeg run. Nothing outlives that run, so each
   // later request finds the copy on disk again, or makes it again after the cache pruner removed it.
   const copies = yield* Cache.makeWith(
-    ([file, fingerprint, size, bound]: readonly [string, string, ArtworkWidth, ResizeBound]) =>
-      resizeFile(file, fingerprint, size, bound).pipe(
-        Effect.map((target): ArtworkImage => ({ path: target, contentType: "image/jpeg" })),
-      ),
+    ([file, fingerprint, size, resize]: readonly [string, string, ArtworkWidth, Resize]) =>
+      resizeFile(file, fingerprint, size, resize),
     { capacity: 2048, timeToLive: () => Duration.zero },
   );
 
-  const resize = (file: string, fingerprint: string, size: ArtworkWidth, bound: ResizeBound) =>
-    Cache.get(copies, [file, fingerprint, size, bound] as const);
+  const resizeImage = (file: string, fingerprint: string, size: ArtworkWidth, resize: Resize) =>
+    Cache.get(copies, [file, fingerprint, size, resize] as const);
 
   const images = yield* Cache.makeWith(
     ([key, width]: readonly [string, Option.Option<ArtworkWidth>]) =>
@@ -303,14 +339,15 @@ const make = Effect.gen(function* () {
 
         if (Option.isNone(width)) return { path: file, contentType: contentTypeOf(file) };
 
-        return yield* resize(file, fingerprint, width.value, "width");
+        return yield* resizeImage(file, fingerprint, width.value, { bound: "width" });
       }),
     { capacity: 2048, timeToLive },
   );
 
   return Service.of({
     image: (key, width) => Cache.get(images, [key, width] as const),
-    resizeCover: (file, fingerprint, size) => resize(file, fingerprint, size, "shorter"),
+    resizeCover: (file, fingerprint, size, format) =>
+      resizeImage(file, fingerprint, size, { bound: "shorter", format }),
   });
 });
 

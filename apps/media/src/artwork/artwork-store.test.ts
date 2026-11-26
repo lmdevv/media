@@ -181,7 +181,7 @@ describe("artwork store", () => {
 
           // A remote image's fingerprint is its URL, so both copies below share file and fingerprint.
           const poster = yield* store.image(key, Option.some(342));
-          const cover = yield* store.resizeCover(original.path, url, 342);
+          const cover = yield* store.resizeCover(original.path, url, 342, "jpeg");
           const posterAgain = yield* store.image(key, Option.some(342));
 
           assert.strictEqual(yield* sizeOf(poster.path), "342,172");

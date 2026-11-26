@@ -1,8 +1,9 @@
 /**
  * Music's byte routes (`@media/contracts/music-playback`) on the server's Effect HTTP router
  * (ADR 0010): a song's stream at a profile to its personal ticket, and album art to its shareable
- * ticket (ADR 0011), as stored or with its shorter side resized to one of `ARTWORK_WIDTHS`. Answers
- * are plain text with the statuses music's players read. No answer, log, or span carries a ticket.
+ * ticket (ADR 0011), as stored or with its shorter side resized to one of `ARTWORK_WIDTHS` when a
+ * copy looks the same (`coverCopy`). Answers are plain text with the statuses music's players
+ * read. No answer, log, or span carries a ticket.
  */
 import { requestedArtworkWidth } from "@media/contracts/artwork";
 import { isReceiverCredential } from "@media/contracts/cast";
@@ -32,6 +33,7 @@ import { realPathInsideApprovedRoots } from "../playback/file-resolver.ts";
 import * as PlaybackToken from "../playback/playback-grants.ts";
 import { artPath, imageContentType, isArtHash } from "./art-store.ts";
 import { contentTypeFor, isBrowserPlayable } from "./audio-format.ts";
+import { COVER_HEAD_BYTES, coverCopy } from "./cover-copy.ts";
 import { isFragmentedProfile } from "./ffmpeg-args.ts";
 import * as Files from "./music-files.ts";
 import {
@@ -310,12 +312,15 @@ export const layer: Layer.Layer<
       }
 
       const path = artPath(config.dataDir, hash);
-      const head = yield* Files.readHead(path, 16);
+      const size = width.success;
+      const head = yield* Files.readHead(path, Option.isNone(size) ? 16 : COVER_HEAD_BYTES);
+      const copy = Option.isNone(size) ? "original" : coverCopy(head);
 
       // The art store names a cover by its content hash, so the hash alone names each resized copy.
-      const image = Option.isNone(width.success)
-        ? { path, contentType: imageContentType(head) }
-        : yield* store.resizeCover(path, `music-art:${hash}`, width.success.value);
+      const image =
+        Option.isNone(size) || copy === "original"
+          ? { path, contentType: imageContentType(head) }
+          : yield* store.resizeCover(path, `music-art:${hash}`, size.value, copy);
 
       return yield* fileResponse(request, image.path, {
         contentType: image.contentType,
