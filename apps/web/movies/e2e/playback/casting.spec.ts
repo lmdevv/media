@@ -76,7 +76,7 @@ const HEVC = "Night Ferry";
  * VP9 in MP4: the browser plays it as it is, a Chromecast as an H.264 transcode. Five minutes, so
  * a seek near its end lands past what the receiver's stream produced.
  */
-const VP9 = "Glass Harbor";
+const VP9 = "Copper Quay";
 
 const SRT = `1
 00:00:00,500 --> 00:02:00,000
