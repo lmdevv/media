@@ -252,10 +252,11 @@ describe.runIf(hasQsv || hasVaapi)("TranscodeCapabilities on this machine's GPU"
               const run = tools.ffmpeg(args, { timeout: Duration.seconds(30) }).pipe(Effect.result);
               const first = yield* run;
 
-              // On the Arc A380, iHD 26.3.5's H.264 encoder under Quick Sync dies of SIGBUS
-              // while it fills a command or batch buffer in about one in twenty chains that hand
-              // it frames from CPU memory. A chain that dies of a signal runs once more, and the
-              // crash is reported with the outcome.
+              // On an Arc A380 with a 256 MiB BAR, iHD 26.3.5's H.264 encoder dies of SIGBUS in a
+              // small share of runs, Quick Sync's and VA-API's alike: the kernel refuses its page
+              // fault on a buffer outside the CPU-visible window while a GPU address space is
+              // torn down. A chain that dies of a signal runs once more, and the crash is
+              // reported with the outcome.
               const crashed = Result.isFailure(first) && first.failure.signal !== null;
               const result = crashed ? yield* run : first;
               const frames = Result.isSuccess(result) ? probedFrames(result.success) : 0;

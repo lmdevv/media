@@ -342,7 +342,7 @@ describe("verdicts", () => {
     software.negotiation.body.mode = "transcode-qsv";
     const result = judge(cell, software);
     assert.equal(result.verdict, "FAIL");
-    assert.match(result.evidence, /^work: decode not on qsv: the arguments lack -hwaccel qsv/);
+    assert.match(result.evidence, /^work: decode not on qsv: the arguments lack -hwaccel qsv -hwaccel_output_format qsv/);
 
     const moved = healthy(cell);
     moved.log = [{ message: "Stream.mode_changed", annotations: { to: "transcode-software", reason: "hardware-unavailable" } }];
@@ -460,6 +460,13 @@ describe("verdicts", () => {
     const run = { args: ["-hwaccel", "qsv", "-hwaccel_output_format", "qsv", "-c:v", "h264_qsv"], gpu: true, polls: 9, engines: { video: 0 } };
     assert.match(ranOn("decode", "qsv", run).why, /no GPU video engine time/);
     assert.equal(ranOn("decode", "qsv", { ...run, engines: { video: 1 } }).ok, true);
+    const mapped = {
+      ...run,
+      args: ["-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi", "-hwaccel_device", "va", "-i", "in.mkv", "-vf", "hwmap=derive_device=qsv,format=qsv,vpp_qsv=w=640:h=360", "-c:v", "h264_qsv"],
+      engines: { video: 1 },
+    };
+    assert.equal(ranOn("decode", "qsv", mapped).ok, true, "VA-API's decoder mapped into Quick Sync");
+    assert.equal(ranOn("decode", "qsv", { ...mapped, args: mapped.args.filter((arg) => !arg.startsWith("hwmap")) }).ok, false);
     assert.match(ranOn("encode-h264", "cpu", { args: ["-c:v", "libx264"], gpu: true, engines: {} }, "x264").why, /holds a GPU client/);
     assert.match(ranOn("encode-h264", "cpu", { args: ["-c:v", "libx264"], gpu: false, engines: {} }, undefined).why, /lacks x264's fingerprint/);
     assert.match(ranOn("encode-h264", "qsv", { ...run, engines: { video: 1 } }, "x264").why, /carries x264's fingerprint/);

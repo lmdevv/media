@@ -145,15 +145,43 @@ describe("hlsCommandArgs", () => {
     );
   });
 
-  it("opens Quick Sync on the configured render node", () => {
+  it("opens Quick Sync on the configured render node, derived from a VA-API device there", () => {
     // oneVPL builds ignore the path in `qsv=hw:<path>` and use the default GPU; the node must be
-    // the child device, so a wrong one fails (and is replaced) instead of encoding elsewhere.
+    // the VA-API device Quick Sync derives from, so a wrong one fails (and is replaced) instead of
+    // encoding elsewhere.
     const args = hlsCommandArgs({
       ...command(AudioPlan.Copy({ index: 1 }), "aac"),
       video: encode("qsv", { device: "/dev/dri/renderD130" }),
     });
 
-    expect(after(args, "-init_hw_device")).toBe("qsv=hw,child_device=/dev/dri/renderD130");
+    expect(args.slice(args.indexOf("-init_hw_device"), args.indexOf("-hwaccel"))).toEqual([
+      "-init_hw_device",
+      "vaapi=va:/dev/dri/renderD130",
+      "-init_hw_device",
+      "qsv=hw@va",
+      "-filter_hw_device",
+      "hw",
+    ]);
+  });
+
+  it("decodes for Quick Sync with VA-API and maps the surfaces into Quick Sync", () => {
+    const args = hlsCommandArgs({
+      ...command(AudioPlan.Copy({ index: 1 }), "aac"),
+      video: encode("qsv", {}),
+    });
+
+    expect(args.slice(args.indexOf("-hwaccel"), args.indexOf("-copyts"))).toEqual([
+      "-hwaccel",
+      "vaapi",
+      "-hwaccel_output_format",
+      "vaapi",
+      "-hwaccel_device",
+      "va",
+    ]);
+    expect(after(args, "-vf")).toBe(
+      "hwmap=derive_device=qsv,format=qsv,vpp_qsv=w=1920:h=1080:format=nv12",
+    );
+    expect(after(args, "-c:v")).toBe("h264_qsv");
   });
 
   it("encodes on VA-API, decoding, scaling in 10 bits, then tone-mapping on the GPU", () => {
@@ -265,7 +293,7 @@ describe("hlsCommandArgs", () => {
 
     expect(after(qsv, "-filter_complex")).toBe(
       [
-        "[0:0]vpp_qsv=w=1920:h=1080:format=nv12,hwdownload,format=nv12[picture]",
+        "[0:0]hwmap=derive_device=qsv,format=qsv,vpp_qsv=w=1920:h=1080:format=nv12,hwdownload,format=nv12[picture]",
         "[0:3]scale=1920:1080[subtitle]",
         "[picture][subtitle]overlay=eof_action=pass:repeatlast=0,format=nv12,hwupload=extra_hw_frames=64,format=qsv[video]",
       ].join(";"),
@@ -397,7 +425,9 @@ describe("hlsCommandArgs", () => {
     });
 
     expect(qsv.indexOf("-hwaccel")).toBeLessThan(qsv.indexOf("-i"));
-    expect(after(qsv, "-filter_complex")).toContain("[0:0]trim=start=61.400000,vpp_qsv=");
+    expect(after(qsv, "-filter_complex")).toContain(
+      "[0:0]trim=start=61.400000,hwmap=derive_device=qsv,format=qsv,vpp_qsv=",
+    );
   });
 
   it("never lets a seek read a burned-in subtitle apart from its picture", () => {

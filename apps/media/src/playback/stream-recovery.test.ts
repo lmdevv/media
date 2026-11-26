@@ -31,10 +31,10 @@ const FILM = "Recovered (2021)/Recovered (2021).mkv";
 
 /**
  * What ffmpeg prints when `vpp_qsv`, here scaling and tone mapping at once, fails at start. In a
- * run that burns a subtitle in after a seek, the picture's `trim` is the graph's first filter, so
- * `vpp_qsv` is its second.
+ * run that burns a subtitle in after a seek, the picture's `trim` is the graph's first filter and
+ * the decoder's map into Quick Sync (`hwmap`, `format`) the next two, so `vpp_qsv` is its fourth.
  */
-const VPP_FAILED = "[Parsed_vpp_qsv_1 @ 0x1] Invalid color_matrix.";
+const VPP_FAILED = "[Parsed_vpp_qsv_3 @ 0x1] Invalid color_matrix.";
 
 /** The first stream run that tone-maps on Quick Sync fails; its probe then fails too. */
 const TONE_MAP_FAILS: ReadonlyArray<RunRule> = [
