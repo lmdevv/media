@@ -856,14 +856,37 @@ test("a page back from the back-forward cache plays on from where it left, at it
       .toMatchObject({ mode: "transcode-software", height: 480 });
     expect(viewerStreams.slice(before).map((stream) => stream.streamId)).not.toContain(leaving);
     await expectPlayingPast(viewer, leftAt + 1);
+
+    const restored = viewerStreams.at(-1)?.streamId ?? "";
+
+    // Closing the browser hides no page, so the restored stream would keep a transcode slot into
+    // the tests after this one until its idle release.
+    await viewer.goto("about:blank");
+    await expect
+      .poll(() =>
+        loggedAbout(media, "Stream.ended", restored).map(
+          ({ annotations }) => annotations["reason"],
+        ),
+      )
+      .toEqual(["stopped"]);
   } finally {
     await cached.close();
   }
 });
 
 test("pausing while a stream moves to where it resumes keeps the position", async () => {
+  // The player stops its stream once the title page replaces it. A page load that starts before
+  // then can lose that stop, and the stream keeps one of the service's transcode slots until its
+  // idle release, so leaving waits for the stop before the next resume loads the player again.
   const leavePlayer = async () => {
+    const leaving = streams.at(-1)?.streamId ?? "";
+
     await leaveWithEscape(page);
+    await expect
+      .poll(() =>
+        loggedAbout(media, "Stream.ended", leaving).map(({ annotations }) => annotations["reason"]),
+      )
+      .toEqual(["stopped"]);
   };
 
   await playFromStart(MOVIES.pictures, "remux");
