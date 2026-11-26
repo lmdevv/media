@@ -1,22 +1,27 @@
-// Checks each timing an app logged against the screen recording `ios timings --record` made of the
-// same run.
+// Checks the app's frame marks against the screen recording `ios timings --record` made of the same
+// run, without the launch's zero: the process start, which no recording can show.
 //
 //   node app-timings-truth.mjs sheets <app-timings-dir>
-//   node app-timings-truth.mjs judge <truth.tsv> [frame-ms]
+//   node app-timings-truth.mjs judge <app-timings-dir> [frame-ms]
 //   node app-timings-truth.mjs frames <truth.mp4> <out.png> <seconds>...
+//
+// Within one launch, the app's own clock gives the time from Home's content mark to the first
+// open's content mark (marks.ndjson: each mark the app's `LaunchClock` wrote to the device's log,
+// by process), and the recording gives the time between the same two frames. The two differences
+// share no zero point, so they agree within two frames exactly when both marks land on the frames
+// the screen showed.
 //
 // `sheets` cuts, from truth.mp4, a storyboard of each launch and each press in actions.tsv: every
 // frame that visibly changed, captioned with its time in the recording. Read the frames yourself
-// and write truth.tsv, one tab-separated row per sample with a header:
+// and write truth.tsv in the same folder, one tab-separated row per launch with a header:
 //
-//   sample  logged_ms  zero_s  end_s
+//   launch  home_s  open_s
 //
-// `zero_s` and `end_s` are the recording's times (the sheets' captions) of the sample's zero and
-// end frames: for a launch, iOS's launch animation starting and the frame the metric names; for an
-// open, the pressed control's feedback clearing and the opened screen's content first in view.
-// `frames` cuts a small sheet of the frames at the given times, to look closer at one sample.
-// `judge` prints each sample's recorded span, how far the logged value is from it, and whether all
-// agree within two frames once the zero points' median difference is taken out.
+// `home_s` is the recording's time (the sheets' caption) of the first frame showing Home's content
+// (its rows and titles, not their artwork); `open_s` of the first frame showing the first opened
+// screen's content. `frames` cuts a small sheet of the frames at the given times, to look closer.
+// `judge` prints, per launch, both differences, how far apart they are, and whether every launch
+// agrees within two frames.
 
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -182,37 +187,61 @@ const sheets = (dir) => {
   console.log(lines.join("\n"));
 };
 
-/** The median of `values`. */
-const median = (values) => {
-  const sorted = [...values].sort((left, right) => left - right);
-  const middle = (sorted.length - 1) / 2;
+const MARK = /^(home-screen|home-content|open) drawn at ([\d.]+) hitched (true|false)$/u;
 
-  return (sorted[Math.floor(middle)] + sorted[Math.ceil(middle)]) / 2;
+/**
+ * The frame marks in the device's log (`log show --style ndjson`), grouped by process in the order
+ * the processes first wrote one: one group per launch, each mark its name, its refresh's time in
+ * milliseconds on the app's clock, and whether that refresh was hitched.
+ */
+export const parseMarks = (text) => {
+  const launches = new Map();
+
+  for (const line of text.split("\n")) {
+    if (!line.trim().startsWith("{")) continue;
+    const entry = JSON.parse(line);
+    const mark = MARK.exec(entry.eventMessage ?? "");
+
+    if (mark === null) continue;
+    const marks = launches.get(entry.processID) ?? [];
+
+    marks.push({ name: mark[1], at: Number(mark[2]), hitched: mark[3] === "true" });
+    launches.set(entry.processID, marks);
+  }
+
+  return [...launches.values()];
 };
 
 /**
- * Each sample's recorded span, the logged value's distance from it, and, once the median distance
- * (the zero points' difference) is taken out, whether every sample agrees within two frames.
+ * Per launch of `truth` (`launch`, `home_s`, `open_s`), the app's time from Home's content mark
+ * (its screen mark when Home drew no content mark) to the first open's mark, the recording's time
+ * between the same frames, the difference, and whether it is within two frames.
  */
-export const judge = (rows, frameMs) => {
-  const samples = rows.map((row) => {
-    const recordedMs = (row.end_s - row.zero_s) * 1000;
+export const judge = (launches, truth, frameMs) =>
+  truth.map((row) => {
+    const marks = launches[row.launch - 1] ?? [];
+    const home =
+      marks.find((mark) => mark.name === "home-content") ??
+      marks.find((mark) => mark.name === "home-screen");
+    const open = marks.find((mark) => mark.name === "open");
+    const recordedMs = (row.open_s - row.home_s) * 1000;
 
-    return { ...row, recordedMs, distance: row.logged_ms - recordedMs };
-  });
-  const groups = Map.groupBy(samples, (sample) => sample.sample.replace(/-\d+$/u, ""));
+    if (home === undefined || open === undefined) {
+      return { launch: row.launch, appMs: null, recordedMs, difference: null, agrees: false, hitched: [] };
+    }
 
-  return [...groups].map(([metric, group]) => {
-    const offset = median(group.map((sample) => sample.distance));
+    const appMs = open.at - home.at;
+    const difference = appMs - recordedMs;
 
     return {
-      metric,
-      offset,
-      samples: group.map((sample) => ({ ...sample, residual: sample.distance - offset })),
-      agrees: group.every((sample) => Math.abs(sample.distance - offset) <= 2 * frameMs),
+      launch: row.launch,
+      appMs,
+      recordedMs,
+      difference,
+      agrees: Math.abs(difference) <= 2 * frameMs,
+      hitched: [home, open].filter((mark) => mark.hitched).map((mark) => mark.name),
     };
   });
-};
 
 const parseTruth = (text) => {
   const [header, ...lines] = text.split("\n").filter((line) => line.trim().length > 0);
@@ -227,7 +256,7 @@ const parseTruth = (text) => {
   });
 };
 
-const round = (value) => String(Math.round(value));
+const round = (value) => (value === null ? "–" : String(Math.round(value)));
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const [command, target, frame] = process.argv.slice(2);
@@ -238,29 +267,26 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     sheet(target, process.argv.slice(5).map(Number), frame, 134);
   } else if (command === "judge" && target !== undefined) {
     const frameMs = Number(frame ?? 1000 / 60);
-    const metrics = judge(parseTruth(readFileSync(target, "utf8")), frameMs);
+    const launches = parseMarks(readFileSync(join(target, "marks.ndjson"), "utf8"));
+    const rows = judge(launches, parseTruth(readFileSync(join(target, "truth.tsv"), "utf8")), frameMs);
 
-    console.log("| sample | logged ms | recorded ms | logged − recorded | after the zero offset |");
-    console.log("| --- | --: | --: | --: | --: |");
+    console.log("| launch | app clock, Home → open ms | recording, Home → open ms | difference ms | hitched marks |");
+    console.log("| --: | --: | --: | --: | --- |");
 
-    for (const metric of metrics) {
-      for (const sample of metric.samples) {
-        console.log(
-          `| ${sample.sample} | ${round(sample.logged_ms)} | ${round(sample.recordedMs)} | ${round(sample.distance)} | ${round(sample.residual)} |`,
-        );
-      }
-    }
-
-    console.log("");
-
-    for (const metric of metrics) {
+    for (const row of rows) {
       console.log(
-        `${metric.metric}: zero offset ${round(metric.offset)} ms; ${metric.agrees ? "agrees" : "DISAGREES"} within two frames (${round(2 * frameMs)} ms)`,
+        `| ${String(row.launch)} | ${round(row.appMs)} | ${round(row.recordedMs)} | ${round(row.difference)} | ${row.hitched.join(", ") || "none"} |`,
       );
     }
+
+    const agree = rows.filter((row) => row.agrees).length;
+
+    console.log(
+      `\n${String(agree)} of ${String(rows.length)} launches agree within two frames (${round(2 * frameMs)} ms); ${rows.every((row) => row.agrees) ? "the marks land on the frames the screen showed" : "DISAGREES"}.`,
+    );
   } else {
     console.error(
-      "usage: node app-timings-truth.mjs sheets <app-timings-dir> | judge <truth.tsv> [frame-ms] | frames <truth.mp4> <out.png> <seconds>...",
+      "usage: node app-timings-truth.mjs sheets <app-timings-dir> | judge <app-timings-dir> [frame-ms] | frames <truth.mp4> <out.png> <seconds>...",
     );
     process.exit(2);
   }

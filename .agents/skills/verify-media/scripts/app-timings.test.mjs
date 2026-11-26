@@ -1,26 +1,48 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { compare, comparisonTable, parseRecords, spread, summarize, table } from "./app-timings.mjs";
+import {
+  compare,
+  comparisonTable,
+  loadLine,
+  notComparable,
+  parseLoads,
+  parseRecords,
+  passLoad,
+  spread,
+  summarize,
+  table,
+} from "./app-timings.mjs";
 
-const launch = (app, firstScreenVisibleMs, homeContentVisibleMs = null) => ({
+const launch = (app, firstScreenVisibleMs, homeContentVisibleMs = null, hitched = false) => ({
   timestamp: "2026-11-25T15:00:00.000Z",
   level: "INFO",
   message: "App.launched",
-  annotations: { app, launch: "cold", firstScreenVisibleMs, homeContentVisibleMs, development: false },
+  annotations: {
+    app,
+    launch: "cold",
+    firstScreenVisibleMs,
+    firstScreenHitched: hitched,
+    homeContentVisibleMs,
+    homeContentHitched: homeContentVisibleMs === null ? null : false,
+    development: false,
+  },
 });
 
-const open = (app, screen, cache, contentVisibleMs) => ({
+const open = (app, screen, cache, contentVisibleMs, hitched = false) => ({
   timestamp: "2026-11-25T15:00:00.000Z",
   level: "INFO",
   message: "App.screenOpened",
-  annotations: { app, screen, recordId: `${screen}_1`, cache, contentVisibleMs },
+  annotations: { app, screen, cache, contentVisibleMs, hitched },
 });
+
+/** A loads.tsv line: when, then each machine's one-minute load and CPUs. */
+const loadAt = (at, mac, host) => `1000\t${at}\t${String(mac)}\t10\t${String(host)}\t32`;
 
 describe("spread", () => {
   test("interpolates the median and quartiles between the nearest values", () => {
@@ -42,12 +64,12 @@ describe("spread", () => {
 
 describe("summarize", () => {
   const records = [
-    launch("music", 1200, 1900),
+    launch("music", 1200, 1900, true),
     launch("music", 1000, null),
     launch("music", 1400, 2100),
     launch("movies", 9000, 9900),
     open("music", "album", "fetched", 300),
-    open("music", "album", "fetched", 340),
+    open("music", "album", "fetched", 340, true),
     open("music", "album", "kept", 120),
     open("music", "artist", "fetched", 500),
     { timestamp: "", level: "WARN", message: "Client.error", annotations: { app: "music" } },
@@ -67,6 +89,12 @@ describe("summarize", () => {
     assert.equal(rows["album open, content visible (kept)"].median, 120);
   });
 
+  test("counts each metric's hitched samples", () => {
+    assert.equal(rows["cold launch, Home's screen visible"].hitched, 1);
+    assert.equal(rows["cold launch, Home's content visible"].hitched, 0);
+    assert.equal(rows["album open, content visible (fetched)"].hitched, 1);
+  });
+
   test("leaves a launch whose Home showed no content out of the content metric", () => {
     assert.equal(rows["cold launch, Home's content visible"].n, 2);
     assert.equal(rows["cold launch, Home's content visible"].median, 2000);
@@ -75,8 +103,8 @@ describe("summarize", () => {
   test("prints a table of the metrics it has records for", () => {
     const printed = table("music", summarize(records, "music"));
 
-    assert.match(printed, /^\| music \| n \| median ms/u);
-    assert.match(printed, /\| cold launch, Home's screen visible \| 3 \| 1200 \| 1100–1300 \| 1000–1400 \|/u);
+    assert.match(printed, /^\| music \| n \| hitched \| median ms/u);
+    assert.match(printed, /\| cold launch, Home's screen visible \| 3 \| 1 \| 1200 \| 1100–1300 \| 1000–1400 \|/u);
     assert.doesNotMatch(printed, /title open/u);
   });
 });
@@ -96,25 +124,71 @@ describe("compare", () => {
   });
 });
 
-test("the command prints the table for an app, and the comparison of two passes", () => {
-  const dir = mkdtempSync(join(tmpdir(), "app-timings-"));
-  const file = join(dir, "records.ndjson");
+describe("load", () => {
+  test("calls a pass quiet only when both machines stayed at or under their bound every time", () => {
+    const quiet = passLoad(parseLoads([loadAt("start", 1.3, 9), loadAt("launch 1", 2.6, 16), loadAt("end", 2, 10)].join("\n")));
 
-  writeFileSync(file, `${JSON.stringify(open("movies", "title", "kept", 812))}\n\n`);
+    assert.deepEqual(
+      { mac: [quiet.mac.min, quiet.mac.max, quiet.mac.quietUpTo], quiet: quiet.quiet },
+      { mac: [1.3, 2.6, 4], quiet: true },
+    );
+    assert.match(loadLine(quiet), /the Mac 1\.3–2\.6 of 10 CPUs, this host 9\.0–16\.0 of 32 CPUs\. Quiet\./u);
+
+    const loaded = passLoad(parseLoads([loadAt("start", 55.23, 9), loadAt("end", 4.08, 9)].join("\n")));
+
+    assert.equal(loaded.quiet, false);
+    assert.deepEqual(loaded.loaded, ["the Mac"]);
+    assert.match(loadLine(loaded), /LOADED \(the Mac past 0\.4 per CPU/u);
+    assert.equal(passLoad([]).quiet, false);
+  });
+
+  test("refuses to compare a loaded pass, or one that recorded no load", () => {
+    const quiet = passLoad(parseLoads(loadAt("start", 1, 4)));
+    const loaded = passLoad(parseLoads(loadAt("start", 1, 25)));
+
+    assert.deepEqual(notComparable(quiet, quiet), []);
+    assert.equal(notComparable(quiet, loaded).length, 1);
+    assert.match(notComparable(quiet, loaded)[0], /^pass 2: .*this host past/u);
+    assert.match(notComparable(passLoad([]), quiet)[0], /^pass 1: Load: not recorded/u);
+  });
+});
+
+test("the command prints a pass's table and load, and compares two quiet passes only", () => {
+  const pass = (name, mac) => {
+    const dir = join(mkdtempSync(join(tmpdir(), "app-timings-")), name);
+
+    mkdirSync(dir);
+    writeFileSync(join(dir, "records.ndjson"), `${JSON.stringify(open("movies", "title", "kept", 812, true))}\n\n`);
+    writeFileSync(join(dir, "loads.tsv"), `${loadAt("start", mac, 4)}\n${loadAt("end", mac, 4)}\n`);
+
+    return dir;
+  };
+  const quiet = pass("quiet", 1.5);
+  const loaded = pass("loaded", 55);
+
   assert.equal(parseRecords(`${JSON.stringify(open("movies", "title", "kept", 1))}\n`).length, 1);
 
   const script = fileURLToPath(new URL("./app-timings.mjs", import.meta.url));
-  const result = spawnSync(process.execPath, [script, "movies", file], { encoding: "utf8" });
+  const result = spawnSync(process.execPath, [script, "movies", quiet], { encoding: "utf8" });
 
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /\| title open, content visible \(kept\) \| 1 \| 812 \|/u);
+  assert.match(result.stdout, /\| title open, content visible \(kept\) \| 1 \| 1 \| 812 \|/u);
   assert.match(result.stdout, /Production JavaScript/u);
-  assert.equal(spawnSync(process.execPath, [script, "books", file]).status, 2);
+  assert.match(result.stdout, /Quiet\./u);
+  assert.equal(spawnSync(process.execPath, [script, "books", quiet]).status, 2);
 
-  const compared = spawnSync(process.execPath, [script, "compare", "movies", file, file], {
+  const compared = spawnSync(process.execPath, [script, "compare", "movies", quiet, quiet], {
     encoding: "utf8",
   });
 
   assert.equal(compared.status, 0, compared.stderr);
   assert.match(compared.stdout, /\| title open, content visible \(kept\) \| 812 \(812–812\) \| 812 \(812–812\) \| \+0 \| yes \|/u);
+
+  const refused = spawnSync(process.execPath, [script, "compare", "movies", quiet, loaded], {
+    encoding: "utf8",
+  });
+
+  assert.equal(refused.status, 3);
+  assert.match(refused.stdout, /^Not comparable, so no difference is reported:\n- pass 2: .*LOADED/u);
+  assert.doesNotMatch(refused.stdout, /moved/u);
 });

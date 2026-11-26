@@ -2,11 +2,16 @@
 // it (`verify-media.sh ios force-error`). It runs one line of JavaScript in the app's runtime through
 // Metro's inspector proxy, the way a debugger would:
 //
-//   node app-force-error.mjs <metro-port> <fatal|rejection>
+//   node app-force-error.mjs <metro-port> <fatal|rejection|synthetic|bundle>
 //
 // `fatal` throws from a timer, which React Native hands to its global handler as fatal; `rejection`
 // rejects a promise nobody handles. Each error's text names a made-up person, title, file, and
 // server, which the report must not carry: `PRIVATE` lists them, to search the log for.
+// `synthetic` rejects with an error renamed to a made-up person, whose stack names a title, a file,
+// and a host where functions and bundles would be: `SYNTHETIC` lists those words. `bundle` rejects
+// from inside the bundle's own module loader (Metro's `__r` asked for a module that doesn't exist),
+// so the report's top frames are positions in the bundle for its source map to turn back into
+// source.
 
 import { fileURLToPath } from "node:url";
 
@@ -16,10 +21,25 @@ export const EXPRESSIONS = {
     'setTimeout(() => { throw new Error("Lucía García could not open Sintel.mkv on http://192.168.1.20:8080"); }, 0); "thrown"',
   rejection:
     'void Promise.reject(new Error("Lucía García could not open Sintel.mkv on http://192.168.1.20:8080")); "rejected"',
+  synthetic: [
+    "(() => {",
+    '  const failure = new Error("Fictional Nerea Marlow opened Cloud Orchard from leaf.mkv on 192.0.2.44:8112");',
+    '  failure.name = "NereaMarlow";',
+    '  failure.stack = failure.name + ": " + failure.message',
+    '    + "\\n    at CloudOrchard (address at /synthetic/NereaMarlow/PrivateLeaf.js:14:9)"',
+    '    + "\\n    at travel (https://fictional-lar.js/synthetic/index.bundle:18:2)";',
+    "  void Promise.reject(failure);",
+    '  return "rejected with a made-up name and stack";',
+    "})()",
+  ].join("\n"),
+  bundle: 'void Promise.resolve().then(() => globalThis.__r(987654321)); "rejected in the bundle"',
 };
 
-/** The text in the forced errors that no report may carry. */
+/** The text in the `fatal` and `rejection` errors that no report may carry. */
 export const PRIVATE = ["Lucía", "García", "Sintel.mkv", "192.168.1.20"];
+
+/** The words the `synthetic` rejection puts where an error's class, functions, and files would be. */
+export const SYNTHETIC = ["NereaMarlow", "CloudOrchard", "PrivateLeaf.js", "fictional-lar.js"];
 
 /** The debugger address of the app's runtime among Metro's inspector targets: the newest one. */
 export const debuggerUrl = (targets) => {
@@ -67,7 +87,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const expression = EXPRESSIONS[kind];
 
   if (port === undefined || expression === undefined) {
-    console.error("usage: node app-force-error.mjs <metro-port> <fatal|rejection>");
+    console.error("usage: node app-force-error.mjs <metro-port> <fatal|rejection|synthetic|bundle>");
     process.exit(2);
   }
 

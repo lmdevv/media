@@ -6,7 +6,26 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { judge, parseActions } from "./app-timings-truth.mjs";
+import { judge, parseActions, parseMarks } from "./app-timings-truth.mjs";
+
+/** One frame mark as `log show --style ndjson` prints it. */
+const logged = (processID, name, at, hitched = false) =>
+  JSON.stringify({
+    processID,
+    subsystem: "dev.lmdevv.launch-clock",
+    eventMessage: `${name} drawn at ${at.toFixed(3)} hitched ${String(hitched)}`,
+  });
+
+const LOG = [
+  "Filtering the log data using \"subsystem == \\\"dev.lmdevv.launch-clock\\\"\"",
+  logged(501, "home-screen", 10_000),
+  logged(501, "home-content", 10_016.667, true),
+  logged(501, "open", 14_250),
+  logged(501, "open", 18_000),
+  logged(733, "home-screen", 50_000),
+  logged(733, "open", 53_100),
+  JSON.stringify({ processID: 733, eventMessage: "something else" }),
+].join("\n");
 
 test("reads each probe action's time, kind, and detail", () => {
   assert.deepEqual(parseActions("1000\trecord-start\t\n2600\tpress\tSintel|201 483\n"), [
@@ -15,33 +34,46 @@ test("reads each probe action's time, kind, and detail", () => {
   ]);
 });
 
-test("takes the zero points' median difference out, then needs every sample within two frames", () => {
-  const rows = [
-    { sample: "title-1", logged_ms: 300, zero_s: 10, end_s: 10.267 },
-    { sample: "title-2", logged_ms: 310, zero_s: 20, end_s: 20.25 },
-    { sample: "title-3", logged_ms: 290, zero_s: 30, end_s: 30.25 },
-    { sample: "launch-1", logged_ms: 7000, zero_s: 0, end_s: 7.2 },
-    { sample: "launch-2", logged_ms: 7000, zero_s: 0, end_s: 7.0 },
-  ];
+test("groups the app's frame marks by process, one group per launch", () => {
+  const launches = parseMarks(LOG);
 
-  const [title, launch] = judge(rows, 1000 / 30);
-
-  assert.equal(title.metric, "title");
-  assert.equal(Math.round(title.offset), 40);
-  assert.equal(title.agrees, true);
-  assert.equal(launch.agrees, false);
+  assert.equal(launches.length, 2);
+  assert.deepEqual(launches[0]?.[1], { name: "home-content", at: 10_016.667, hitched: true });
+  assert.deepEqual(launches[1]?.map((mark) => mark.name), ["home-screen", "open"]);
 });
 
-test("the command prints the acceptance table from truth.tsv", () => {
-  const dir = mkdtempSync(join(tmpdir(), "app-timings-truth-"));
-  const file = join(dir, "truth.tsv");
+test("compares the app's Home-to-open time with the recording's, with no zero point to fit", () => {
+  const rows = judge(
+    parseMarks(LOG),
+    [
+      { launch: 1, home_s: 3.2, open_s: 7.45 },
+      { launch: 2, home_s: 40, open_s: 43.0 },
+      { launch: 3, home_s: 80, open_s: 81 },
+    ],
+    1000 / 60,
+  );
 
-  writeFileSync(file, "sample\tlogged_ms\tzero_s\tend_s\nalbum-1\t250\t1\t1.2\n");
+  assert.deepEqual(
+    rows.map(({ launch, appMs, agrees, hitched }) => ({ launch, appMs: appMs === null ? null : Math.round(appMs), agrees, hitched })),
+    [
+      { launch: 1, appMs: 4233, agrees: true, hitched: ["home-content"] },
+      { launch: 2, appMs: 3100, agrees: false, hitched: [] },
+      { launch: 3, appMs: null, agrees: false, hitched: [] },
+    ],
+  );
+  assert.equal(Math.round(rows[0]?.difference ?? 0), -17);
+});
+
+test("the command prints the per-launch table from a run's marks and truth.tsv", () => {
+  const dir = mkdtempSync(join(tmpdir(), "app-timings-truth-"));
+
+  writeFileSync(join(dir, "marks.ndjson"), LOG);
+  writeFileSync(join(dir, "truth.tsv"), "launch\thome_s\topen_s\n1\t3.2\t7.45\n");
 
   const script = fileURLToPath(new URL("./app-timings-truth.mjs", import.meta.url));
-  const result = spawnSync(process.execPath, [script, "judge", file, "33.333"], { encoding: "utf8" });
+  const result = spawnSync(process.execPath, [script, "judge", dir, "16.667"], { encoding: "utf8" });
 
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /\| album-1 \| 250 \| 200 \| 50 \| 0 \|/u);
-  assert.match(result.stdout, /album: zero offset 50 ms; agrees within two frames \(67 ms\)/u);
+  assert.match(result.stdout, /\| 1 \| 4233 \| 4250 \| -17 \| home-content \|/u);
+  assert.match(result.stdout, /1 of 1 launches agree within two frames \(33 ms\); the marks land/u);
 });

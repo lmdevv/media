@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { debuggerUrl, EXPRESSIONS, PRIVATE } from "./app-force-error.mjs";
+import { debuggerUrl, EXPRESSIONS, PRIVATE, SYNTHETIC } from "./app-force-error.mjs";
 
 test("picks the newest app runtime among Metro's inspector targets", () => {
   assert.equal(
@@ -27,6 +27,17 @@ test("puts each piece of private text in both errors, to check no report carries
     assert.ok(EXPRESSIONS.fatal.includes(text), text);
     assert.ok(EXPRESSIONS.rejection.includes(text), text);
   }
+});
+
+test("names a made-up person, title, file, and host in the synthetic rejection's name and stack", () => {
+  assert.match(EXPRESSIONS.synthetic, /failure\.name = "NereaMarlow"/u);
+
+  for (const word of SYNTHETIC) assert.ok(EXPRESSIONS.synthetic.includes(word), word);
+  assert.doesNotThrow(() => new Function(`return ${EXPRESSIONS.synthetic}`));
+});
+
+test("rejects from the bundle's own module loader", () => {
+  assert.match(EXPRESSIONS.bundle, /globalThis\.__r\(/u);
 });
 
 test("refuses a kind of error it does not know", () => {

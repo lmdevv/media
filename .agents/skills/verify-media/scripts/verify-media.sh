@@ -1181,7 +1181,7 @@ cmd_ios() {
     matrix) ios_matrix "${args[@]:1}" ;;
     timings) ios_timings "${args[@]:1}" ;;
     force-error)
-      node "$scripts/app-force-error.mjs" "$(read_state metro_port)" "${args[1]:?ios force-error fatal|rejection}" ;;
+      node "$scripts/app-force-error.mjs" "$(read_state metro_port)" "${args[1]:?ios force-error fatal|rejection|synthetic|bundle}" ;;
     down) ios_down ;;
     *) die "ios: unknown command ${sub:-<none>}" ;;
   esac
@@ -1318,16 +1318,31 @@ ios_back() {
   ios_tap_any "Back" "Go back" || die "no Back button on screen; run \`ios describe\`"
 }
 
+# Appends one line to $1, loads.tsv: the wall clock in milliseconds, $2 (when), then the Mac's
+# one-minute load average and CPU count, and this host's.
+timing_load() {
+  local mac host
+  mac="$(on_mac 'sysctl -n vm.loadavg hw.ncpu' | tr -d '{}' | awk 'NR == 1 { load = $1 } NR == 2 { cpus = $1 } END { print load "\t" cpus }')"
+  if [[ -r /proc/loadavg ]]; then
+    host="$(cut -d' ' -f1 /proc/loadavg)"
+  else
+    host="$(sysctl -n vm.loadavg | tr -d '{}' | awk '{ print $1 }')"
+  fi
+  printf '%s\t%s\t%s\t%s\t%s\n' "$(date +%s%3N)" "$2" "$mac" "$host" "$(getconf _NPROCESSORS_ONLN)" >> "$1"
+}
+
 # Times $runs cold launches of this side's app, then reads the App.launched and App.screenOpened
-# records the media service received and prints each metric's median and spread
-# (app-timings.mjs). Each launch ends the app's process and opens it on Metro again, waits for
-# Home's content, then opens the screens timing_opens names, none asked for yet this launch, and
-# after Back opens the first of them again, when the SDK may keep its query. Each open records its
-# cache state, so the two rounds report apart. The Home button ends each launch and sends its
-# events.
+# records the media service received and prints each metric's median and spread, how many samples
+# were hitched, and how loaded the two machines were (app-timings.mjs). Each launch ends the app's
+# process and opens it on Metro again, waits for Home's content, then opens the screens
+# timing_opens names, none asked for yet this launch, and after Back opens the first of them again,
+# when the SDK may keep its query. Each open records its cache state, so the two rounds report
+# apart. The Home button ends each launch and sends its events.
 #
-# --record also records the screen to truth.mp4 for app-timings-truth.mjs. Every press and launch
-# goes to actions.tsv with the wall clock in milliseconds, so the recording can be lined up.
+# The pass folder keeps records.ndjson, loads.tsv (the load at the start, before each launch, and
+# at the end), marks.ndjson (each frame mark the app wrote to the device's log, on its own clock),
+# and actions.tsv (every launch and press with the wall clock in milliseconds). --record also
+# records the screen to truth.mp4, which app-timings-truth.mjs lines up with actions.tsv.
 ios_timings() {
   local runs=10 out="$evidence_root/$side/app-timings" record=0
   while (($#)); do
@@ -1338,20 +1353,24 @@ ios_timings() {
       *) die "ios timings [--runs N] [--out DIR] [--record]" ;;
     esac
   done
-  local app id since launch round opens open point
+  local app id since mac_since launch round opens open point
   app="$(ios_app)"
   id="$(udid)"
   mapfile -t opens < <(timing_opens "$app")
   since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  mac_since="$(on_mac "date '+%Y-%m-%d %H:%M:%S'")"
   mkdir -p "$out"
   : > "$out/actions.tsv"
+  : > "$out/loads.tsv"
   stamp() { printf '%s\t%s\t%s\n' "$(date +%s%3N)" "$1" "$2" >> "$out/actions.tsv"; }
+  timing_load "$out/loads.tsv" start
   if ((record)); then
     stamp record-start ""
     ios_record_start "$out/truth.mp4"
   fi
   for launch in $(seq 1 "$runs"); do
     on_mac "xcrun simctl terminate $id dev.lmdevv.$app || true"
+    timing_load "$out/loads.tsv" "launch $launch"
     sleep 2
     stamp launch "$launch"
     ios_open_on_metro
@@ -1383,9 +1402,11 @@ ios_timings() {
     say "timings: launch $launch of $runs done"
   done
   ((record)) && ios_record_stop >/dev/null
+  timing_load "$out/loads.tsv" end
   sleep 2
   (cmd_cli --side "$side" -- logs --since "$since" --grep App. --json --limit 5000) > "$out/records.ndjson"
-  node "$scripts/app-timings.mjs" "$app" "$out/records.ndjson" | tee "$out/timings.md"
+  on_mac "xcrun simctl spawn $id log show --style ndjson --start '$mac_since' --predicate 'subsystem == \"dev.lmdevv.launch-clock\"'" > "$out/marks.ndjson"
+  node "$scripts/app-timings.mjs" "$app" "$out" | tee "$out/timings.md"
 }
 
 # The screens a layout change can reach, as name|path. Titles are looked up by name, since their
