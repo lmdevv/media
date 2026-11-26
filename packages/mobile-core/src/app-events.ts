@@ -338,8 +338,12 @@ export const errorClassOf = (cause: unknown): ErrorClass => {
   return isError(cause) ? "Other" : "NotAnError";
 };
 
-/** `place` without its query or fragment, the part of a script's address that names its file. */
-const fileOf = (place: string): string => place.replace(/[?#].*$/su, "").replace(/^.*\//su, "");
+/**
+ * `place` without its query or fragment: the file a script's address names. React Native writes a
+ * script's query after `//&` in stack frames where its `scriptURL` has `?`.
+ */
+const fileOf = (place: string): string =>
+  place.replace(/(?:\?|\/\/&|#).*$/su, "").replace(/^.*\//su, "");
 
 /** Which code a frame at `place` runs in, the app's bundle being the file at `scriptUrl`. */
 const sourceOf = (place: string, scriptUrl: string | null): FrameSource => {

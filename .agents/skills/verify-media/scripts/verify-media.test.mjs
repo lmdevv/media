@@ -680,6 +680,14 @@ esac
     assert.match(result.stderr, /^movies titles search --query Sintel$/m);
   });
 
+  test("records each machine's one-minute load and CPUs for a timing pass, reaching the Mac by its host", () => {
+    const result = withSideOffline(
+      `on_mac() { [[ -n "$mac" ]] || { echo "no Mac host" >&2; return 1; }; printf '{ 1.50 1.20 1.10 }\\n10\\n'; }; timing_load "$state/loads.tsv" start; timing_load "$state/loads.tsv" "launch 1"; cat "$state/loads.tsv"`,
+    );
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /^\d+\tstart\t1\.50\t10\t[\d.]+\t\d+\n\d+\tlaunch 1\t1\.50\t10\t[\d.]+\t\d+\n$/u);
+  });
+
   test("opens a path with the scheme of the app the simulator runs, and keeps the matrix to movies", () => {
     const opened = withSideOffline(
       'write_state ios_app music; udid() { echo SIM; }; on_mac() { echo "$1"; }; ios_agent_once() { return 1; }; ios_open /jam/abc',

@@ -9,9 +9,8 @@
 // server, which the report must not carry: `PRIVATE` lists them, to search the log for.
 // `synthetic` rejects with an error renamed to a made-up person, whose stack names a title, a file,
 // and a host where functions and bundles would be: `SYNTHETIC` lists those words. `bundle` rejects
-// from inside the bundle's own module loader (Metro's `__r` asked for a module that doesn't exist),
-// so the report's top frames are positions in the bundle for its source map to turn back into
-// source.
+// from inside the bundle's own module loader (Metro's `__r` asked for no module), so the report's
+// top frame is a position in the bundle for its source map to turn back into source.
 
 import { fileURLToPath } from "node:url";
 
@@ -32,7 +31,7 @@ export const EXPRESSIONS = {
     '  return "rejected with a made-up name and stack";',
     "})()",
   ].join("\n"),
-  bundle: 'void Promise.resolve().then(() => globalThis.__r(987654321)); "rejected in the bundle"',
+  bundle: 'void Promise.resolve().then(() => globalThis.__r(null)); "rejected in the bundle"',
 };
 
 /** The text in the `fatal` and `rejection` errors that no report may carry. */

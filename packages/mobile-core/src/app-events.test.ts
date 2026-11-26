@@ -53,7 +53,11 @@ const WALL = 1_800_000_000_000;
 
 /** The address Metro served the app's JavaScript from, as React Native's `SourceCode` reports it. */
 const SCRIPT_URL =
-  "http://127.0.0.1:8081/node_modules/expo-router/entry.bundle?platform=ios&dev=false&minify=true";
+  "http://127.0.0.1:8081/apps/mobile/movies/node_modules/expo-router/entry.bundle?platform=ios&dev=false&transform.routerRoot=src/app";
+
+/** The same address as a Hermes stack frame names it, its query after `//&`. */
+const SCRIPT_IN_STACK =
+  "http://127.0.0.1:8081/apps/mobile/movies/node_modules/expo-router/entry.bundle//&platform=ios&dev=false&transform.routerRoot=src/app";
 
 /** A frame mark's refresh at monotonic time `at`, on time unless `hitched`. */
 const drawn = (at: number, hitched = false): FrameEnd => ({ at, hitched });
@@ -183,7 +187,7 @@ const thrown = (message: string, Type: ErrorConstructor = TypeError): Error => {
 
   error.stack = [
     `${error.name}: ${message}`,
-    `    at Album (${SCRIPT_URL}:4123:17)`,
+    `    at Album (${SCRIPT_IN_STACK}:4123:17)`,
     "    at render (address at /var/containers/Bundle/Application/X/Lar.app/main.jsbundle:1:52344)",
     "    at apply (native)",
   ].join("\n");
@@ -1178,6 +1182,7 @@ describe("what goes out", () => {
     fc.stringMatching(/^[A-Za-z_$][\w$]{0,15}$/u),
     fc.constantFrom(
       SCRIPT_URL,
+      SCRIPT_IN_STACK,
       "native",
       ...MOVIES_ROUTES,
       ...MUSIC_ROUTES,
@@ -1187,7 +1192,7 @@ describe("what goes out", () => {
 
   const stackLine = fc.oneof(
     fc
-      .tuple(text, fc.oneof(text, fc.constant(SCRIPT_URL)), fc.nat(), fc.nat())
+      .tuple(text, fc.oneof(text, fc.constant(SCRIPT_IN_STACK)), fc.nat(), fc.nat())
       .map(
         ([fn, file, line, column]) => `    at ${fn} (${file}:${String(line)}:${String(column)})`,
       ),

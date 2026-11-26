@@ -1321,14 +1321,14 @@ ios_back() {
 # Appends one line to $1, loads.tsv: the wall clock in milliseconds, $2 (when), then the Mac's
 # one-minute load average and CPU count, and this host's.
 timing_load() {
-  local mac host
-  mac="$(on_mac 'sysctl -n vm.loadavg hw.ncpu' | tr -d '{}' | awk 'NR == 1 { load = $1 } NR == 2 { cpus = $1 } END { print load "\t" cpus }')"
+  local mac_load host_load
+  mac_load="$(on_mac 'sysctl -n vm.loadavg hw.ncpu' | tr -d '{}' | awk 'NR == 1 { load = $1 } NR == 2 { cpus = $1 } END { print load "\t" cpus }')"
   if [[ -r /proc/loadavg ]]; then
-    host="$(cut -d' ' -f1 /proc/loadavg)"
+    host_load="$(cut -d' ' -f1 /proc/loadavg)"
   else
-    host="$(sysctl -n vm.loadavg | tr -d '{}' | awk '{ print $1 }')"
+    host_load="$(sysctl -n vm.loadavg | tr -d '{}' | awk '{ print $1 }')"
   fi
-  printf '%s\t%s\t%s\t%s\t%s\n' "$(date +%s%3N)" "$2" "$mac" "$host" "$(getconf _NPROCESSORS_ONLN)" >> "$1"
+  printf '%s\t%s\t%s\t%s\t%s\n' "$(date +%s%3N)" "$2" "$mac_load" "$host_load" "$(getconf _NPROCESSORS_ONLN)" >> "$1"
 }
 
 # Times $runs cold launches of this side's app, then reads the App.launched and App.screenOpened
