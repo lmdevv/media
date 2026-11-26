@@ -457,7 +457,7 @@ It prints `ready: ios <side> on simulator <udid>` when the app shows Home. Then:
 | `ios orientation portrait\|landscape`            | Turns the simulator and checks the app's window turned  |
 | `ios open <path>`                                | Opens an app path with the running app's scheme (`movies://` or `music://`), such as `/title/<id>` or `/jam/<link>`, and accepts iOS's `Open in` prompt |
 | `ios matrix --out DIR [--orientations portrait,landscape] [--screens a,b]` | Movies app only. Screenshots each screen a layout change reaches, in each orientation, as `<device>-<orientation>-<screen>.png` |
-| `ios timings [--runs N] [--out DIR]`             | Times N cold launches, each opening the records `timing_opens` names, and N warm launches, then prints each metric's median and spread from the `App.*` records the server received (see [App timings](#app-timings)) |
+| `ios timings [--runs N] [--out DIR] [--record]`  | Times N cold launches, each opening the records `timing_opens` names twice, then prints each metric's median and spread from the `App.*` records the server received; `--record` also records the screen to check them against (see [App timings](#app-timings)) |
 | `ios force-error fatal\|rejection`               | Throws from a timer in the running app, or leaves a promise rejection unhandled, through Metro's inspector, to check the app reports it |
 | `ios down`                                       | Removes this side's simulator, Metro, and forwards      |
 
@@ -470,28 +470,47 @@ tap misses the tab bar. Every `ios` command takes `--side S`.
 
 ### App timings
 
-Both iOS apps report each launch, each open of a movies title, a music album, or an artist, and
-each unexpected error to `POST /api/app-events`, which writes `App.launched`, `App.screenOpened`,
-and `Client.error` to the retained log (`@media/mobile-core/app-events`). `ios timings` reads those
-records back with `$S cli -- logs --grep App. --json`, so the numbers are the ones the server
-received, and writes them and the table to `captures/verify/<run>/<side>/app-timings/`.
+Both iOS apps report each cold launch, each open of a movies title, a music album, or an artist,
+and each unexpected error to `POST /api/app-events`, which writes `App.launched`,
+`App.screenOpened`, and `Client.error` to the retained log (`@media/mobile-core/app-events`).
+`ios timings` reads those records back with `$S cli -- logs --grep App. --json`, so the numbers are
+the ones the server received, and writes them, the table, and `actions.tsv` (each launch and press
+with the wall clock) to `captures/verify/<run>/<side>/app-timings/`.
+
+Each timing ends on a frame the app's `LaunchClock` module saw drawn: a frame mark view reports the
+first display refresh that shows it in the window, inside the screen, and under no opaque view such
+as the splash screen. All of them run on `CACurrentMediaTime`, the clock iOS stamps touches with.
 
 - **Cold launch**: the probe ends the app's process (`simctl terminate`) and opens it on Metro.
-  First frame (TTID) runs from the process start the kernel records to the first frame after the
-  splash screen; Home content (TTFD) to the first frame of Home with real content.
-- **Warm launch**: the Home button, then `simctl launch` brings the running app back. It runs from
-  the moment JavaScript learns the app is active to the next frame.
-- **Opens**: from the press to the first frame of the screen's real content, not its spinner.
-  Each cold launch opens the same records, so each open starts with nothing cached in the app.
+  Both metrics run from the process start the kernel records: Home's screen visible (the splash
+  gone and Home drawn, loading or not) and Home's content visible (its rows and titles, not their
+  artwork). They are separate marks, so they differ whenever Home drew before its content.
+- **Opens**: from the touch that ended the press to the first refresh in which the opened screen's
+  content is in view, which is no earlier than the native push's first frame. Each launch opens
+  the same records twice: first as the launch left them, then again after Back. Each open reports
+  its cache state, `fetched` (the screen asked for its content after it mounted) or `kept` (the SDK
+  held it), and the table reports the two apart.
 
 A cold launch on the dev client includes fetching the bundle from Metro through the ssh forward,
 and the simulator runs on the Mac's CPU, so these are a relative baseline to compare two builds by,
-never a phone's numbers. Compare runs made with the same `--js` mode, device, and run count.
+never a phone's numbers. Compare runs made with the same `--js` mode, device, and run count, back to
+back (`ios up --source <main checkout>`, then the branch), and compare two passes of one build first
+to see how far the same build moves: `node scripts/app-timings.mjs compare <app> <pass-1> <pass-2>`.
+
+`--record` checks the numbers against the screen. `node scripts/app-timings-truth.mjs sheets <dir>`
+cuts a storyboard of each launch and press from `truth.mp4`, every frame that changed with its time
+in the recording. Read off each sample's zero frame (iOS's launch animation starting, or the
+pressed control's feedback clearing) and end frame, write them to `truth.tsv`, and run
+`node scripts/app-timings-truth.mjs judge truth.tsv [frame-ms]`: each logged value must sit within
+two frames of the recorded span once the zero points' median difference is taken out.
 
 To see a forced error arrive: `ios force-error rejection`, then the Home button, which sends the
 batch; and `ios force-error fatal`, which ends the app or shows its error screen with the report
 saved, then `ios up`'s link again (or `ios timings --runs 1`) to launch it, which sends the saved
-report. `$S cli -- logs --grep Client.error --json` shows each with `"fatal"` and its route.
+report after Home's first frame. Each forced error's text names a made-up person, title, file, and
+server (`PRIVATE` in `app-force-error.mjs`); `$S cli -- logs --grep Client.error --json` shows each
+with its class, frames, route pattern, and `"fatal"`, and none of that text. A report goes out only
+under the account that was signed in when it happened; a sign-out or another account drops it.
 
 ### Hardware paths
 

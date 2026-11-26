@@ -5,15 +5,21 @@
 //   node app-force-error.mjs <metro-port> <fatal|rejection>
 //
 // `fatal` throws from a timer, which React Native hands to its global handler as fatal; `rejection`
-// rejects a promise nobody handles.
+// rejects a promise nobody handles. Each error's text names a made-up person, title, file, and
+// server, which the report must not carry: `PRIVATE` lists them, to search the log for.
 
 import { fileURLToPath } from "node:url";
 
 /** The line each kind of error runs in the app. */
 export const EXPRESSIONS = {
-  fatal: 'setTimeout(() => { throw new Error("verify-media forced a fatal error"); }, 0); "thrown"',
-  rejection: 'void Promise.reject(new Error("verify-media forced an unhandled rejection")); "rejected"',
+  fatal:
+    'setTimeout(() => { throw new Error("Lucía García could not open Sintel.mkv on http://192.168.1.20:8080"); }, 0); "thrown"',
+  rejection:
+    'void Promise.reject(new Error("Lucía García could not open Sintel.mkv on http://192.168.1.20:8080")); "rejected"',
 };
+
+/** The text in the forced errors that no report may carry. */
+export const PRIVATE = ["Lucía", "García", "Sintel.mkv", "192.168.1.20"];
 
 /** The debugger address of the app's runtime among Metro's inspector targets: the newest one. */
 export const debuggerUrl = (targets) => {

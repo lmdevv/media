@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { debuggerUrl, EXPRESSIONS } from "./app-force-error.mjs";
+import { debuggerUrl, EXPRESSIONS, PRIVATE } from "./app-force-error.mjs";
 
 test("picks the newest app runtime among Metro's inspector targets", () => {
   assert.equal(
@@ -20,6 +20,13 @@ test("picks the newest app runtime among Metro's inspector targets", () => {
 test("throws from a timer for a fatal error, and leaves a rejection unhandled", () => {
   assert.match(EXPRESSIONS.fatal, /^setTimeout\(\(\) => \{ throw new Error/u);
   assert.match(EXPRESSIONS.rejection, /^void Promise\.reject\(/u);
+});
+
+test("puts each piece of private text in both errors, to check no report carries it", () => {
+  for (const text of PRIVATE) {
+    assert.ok(EXPRESSIONS.fatal.includes(text), text);
+    assert.ok(EXPRESSIONS.rejection.includes(text), text);
+  }
 });
 
 test("refuses a kind of error it does not know", () => {

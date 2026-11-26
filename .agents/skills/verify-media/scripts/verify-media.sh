@@ -998,6 +998,25 @@ cmd_ios_up() {
   echo "ready: ios $side on simulator $id (Metro $metro, server $(url))"
 }
 
+# Records the simulator's screen to $1 until ios_record_stop. simctl writes a frame each time the
+# screen changes, stamped with when it showed.
+ios_record_start() {
+  on_mac "rm -f /tmp/media-verify-$run-$side.mp4; nohup xcrun simctl io $(udid) recordVideo --codec h264 --force /tmp/media-verify-$run-$side.mp4 > /tmp/media-verify-$run-$side.rec.log 2>&1 &"
+  write_state ios_record "$1"
+  sleep 2
+}
+
+ios_record_stop() {
+  local out
+  out="$(read_state ios_record)"
+  [[ -n "$out" ]] || die "no recording in progress on the $side side"
+  on_mac "pkill -INT -f 'recordVideo.*media-verify-$run-$side.mp4' || true; sleep 3"
+  mkdir -p "$(dirname "$out")"
+  scp -q "$mac:/tmp/media-verify-$run-$side.mp4" "$out"
+  rm -f "$state/ios_record"
+  echo "$out"
+}
+
 # Opens the app on this side's Metro: a new process when none runs, else the running one.
 ios_open_on_metro() {
   local metro_url
@@ -1152,19 +1171,8 @@ cmd_ios() {
       echo "$path" ;;
     record)
       case "${args[1]:-}" in
-        start)
-          on_mac "rm -f /tmp/media-verify-$run-$side.mp4; nohup xcrun simctl io $(udid) recordVideo --codec h264 --force /tmp/media-verify-$run-$side.mp4 > /tmp/media-verify-$run-$side.rec.log 2>&1 &"
-          write_state ios_record "${args[2]:?ios record start <path.mp4>}"
-          sleep 2 ;;
-        stop)
-          local out
-          out="$(read_state ios_record)"
-          [[ -n "$out" ]] || die "no recording in progress on the $side side"
-          on_mac "pkill -INT -f 'recordVideo.*media-verify-$run-$side.mp4' || true; sleep 3"
-          mkdir -p "$(dirname "$out")"
-          scp -q "$mac:/tmp/media-verify-$run-$side.mp4" "$out"
-          rm -f "$state/ios_record"
-          echo "$out" ;;
+        start) ios_record_start "${args[2]:?ios record start <path.mp4>}" ;;
+        stop) ios_record_stop ;;
         *) die "ios record start <path.mp4> | stop" ;;
       esac ;;
     appearance) on_mac "xcrun simctl ui $(udid) appearance ${args[1]:?ios appearance light|dark}" ;;
@@ -1282,11 +1290,13 @@ ios_matrix() {
   ios_orientation portrait
 }
 
-# What a timing run opens in each app on the demo library, one tap|wait line per screen: the label
-# to tap, then a label that shows only once the opened screen draws its content.
+# What a timing run opens in each app on the demo library, in order, one line per screen: the label
+# to press, then a label the opened screen shows only with its content. Each is a plain press on a
+# control Home shows without scrolling, so the app times it from the touch, and none is a page
+# Home asks for before the press.
 timing_opens() {
   case "$1" in
-    movies) echo "Elephants Dream|About This Movie" ;;
+    movies) echo "Sintel|About This Movie" ;;
     music)
       printf '%s\n' "translations ep, raymundo mendoza|Artist, raymundo mendoza" \
         "Artist, raymundo mendoza|Albums" ;;
@@ -1301,45 +1311,71 @@ timing_home() {
   esac
 }
 
-# Times $runs cold launches of this side's app, each opening the screens timing_opens names, and
-# $runs warm launches, then prints each metric's median and spread from the App.launched and
-# App.screenOpened records the media service received (app-timings.mjs). A cold launch ends the
-# app's process and opens it on Metro again; a warm one sends the app to the Home Screen and brings
-# it back. Each launch goes to the Home Screen when it is done, which sends its events.
+# Goes back one screen with the stack's Back button.
+ios_back() {
+  ios_tap_any "Back" "Go back" || die "no Back button on screen; run \`ios describe\`"
+}
+
+# Times $runs cold launches of this side's app, then reads the App.launched and App.screenOpened
+# records the media service received and prints each metric's median and spread
+# (app-timings.mjs). Each launch ends the app's process and opens it on Metro again, waits for
+# Home's content, then opens the screens timing_opens names twice: first as the launch left them,
+# then again after Back, when the SDK may keep their queries. Each open records its cache state, so
+# the two rounds report apart. The Home button ends each launch and sends its events.
+#
+# --record also records the screen to truth.mp4 for app-timings-truth.mjs. Every press and launch
+# goes to actions.tsv with the wall clock in milliseconds, so the recording can be lined up.
 ios_timings() {
-  local runs=10 out="$evidence_root/$side/app-timings"
+  local runs=10 out="$evidence_root/$side/app-timings" record=0
   while (($#)); do
     case "$1" in
       --runs) runs="$2"; shift 2 ;;
       --out) out="$2"; shift 2 ;;
-      *) die "ios timings [--runs N] [--out DIR]" ;;
+      --record) record=1; shift ;;
+      *) die "ios timings [--runs N] [--out DIR] [--record]" ;;
     esac
   done
-  local app id since run opens open
+  local app id since run round opens open point
   app="$(ios_app)"
   id="$(udid)"
   mapfile -t opens < <(timing_opens "$app")
   since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   mkdir -p "$out"
+  : > "$out/actions.tsv"
+  stamp() { printf '%s\t%s\t%s\n' "$(date +%s%3N)" "$1" "$2" >> "$out/actions.tsv"; }
+  if ((record)); then
+    stamp record-start ""
+    ios_record_start "$out/truth.mp4"
+  fi
   for run in $(seq 1 "$runs"); do
     on_mac "xcrun simctl terminate $id dev.lmdevv.$app || true"
     sleep 2
+    stamp launch "$run"
     ios_open_on_metro
     ios_wait_opened "$(timing_home "$app")" 180 || die "run $run: Home did not show its content"
     sleep 2
-    for open in "${opens[@]}"; do
-      ios_tap_label "${open%%|*}"
-      ios_wait "${open#*|}" 60
+    for round in 1 2; do
+      for open in "${opens[@]}"; do
+        point="$(ios_find "${open%%|*}")" || die "run $run: can't press \"${open%%|*}\""
+        stamp press "${open%%|*}|$point"
+        ios_touch "${point% *}" "${point#* }"
+        ios_wait "${open#*|}" 60
+        sleep 1
+      done
+      for open in "${opens[@]}"; do
+        stamp back ""
+        ios_back
+        sleep 1.5
+      done
+      ios_wait "$(timing_home "$app")" 30
       sleep 1
     done
-    on_mac "$axe button home --udid $id"
-    sleep 3
-    on_mac "xcrun simctl launch $id dev.lmdevv.$app >/dev/null"
-    sleep 3
+    stamp home "$run"
     on_mac "$axe button home --udid $id"
     sleep 3
     say "timings: run $run of $runs done"
   done
+  ((record)) && ios_record_stop >/dev/null
   sleep 2
   (cmd_cli --side "$side" -- logs --since "$since" --grep App. --json --limit 5000) > "$out/records.ndjson"
   node "$scripts/app-timings.mjs" "$app" "$out/records.ndjson" | tee "$out/timings.md"
