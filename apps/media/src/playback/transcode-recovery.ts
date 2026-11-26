@@ -1,12 +1,13 @@
 /**
  * What a failed ffmpeg run points at, and what the stream does next. `attribute` reads the end of
- * ffmpeg's standard error. A stop or a full disk settles it wherever it stands, as a run never
- * recovers from either; otherwise the line that ended the run decides: the last line that names a
- * part, past what ffmpeg writes about every part a failure stopped. It may say a part other than
- * the video failed (the muxer, the input, the audio), or name the failing video part: a filter by
- * its parsed instance name, the decoder, the encoder, or the device. Earlier lines are warnings
- * the run went on past. A named part is a hint, never evidence: the capability service re-probes
- * what it names before it sets anything aside. `advance` bounds the retries: a targeted
+ * ffmpeg's standard error. A run a crash signal killed names nothing, as no line ended it: every
+ * step outside the CPU is a suspect. A stop or a full disk settles it wherever it stands, as a run
+ * never recovers from either; otherwise the line that ended the run decides: the last line that
+ * names a part, past what ffmpeg writes about every part a failure stopped. It may say a part
+ * other than the video failed (the muxer, the input, the audio), or name the failing video part: a
+ * filter by its parsed instance name, the decoder, the encoder, or the device. Earlier lines are
+ * warnings the run went on past. A named part is a hint, never evidence: the capability service
+ * re-probes what it names before it sets anything aside. `advance` bounds the retries: a targeted
  * replacement, then the CPU, then a typed failure, so one position starts ffmpeg at most three
  * times. Pure.
  */
@@ -56,6 +57,18 @@ const DEMUXERS = /^(?:in#\d+(?:\/.+)?|matroska,webm|mpegts|mov,mp4,m4a,3gp,3g2,m
 const MUXERS = /^(?:out#\d+\/.+|hls|mp4|mov|null)$/u;
 
 const STOPPED: ReadonlySet<string> = new Set(["SIGKILL", "SIGTERM"]);
+
+/**
+ * Signals of a crash: ffmpeg ran, and something it ran broke it. The log says nothing of what,
+ * since the run died mid-line: its last lines are warnings the run had gone on past.
+ */
+export const CRASH_SIGNALS: ReadonlySet<string> = new Set([
+  "SIGSEGV",
+  "SIGBUS",
+  "SIGILL",
+  "SIGABRT",
+  "SIGFPE",
+]);
 
 /** The filters of the audio graph the service writes (`-af`). */
 const AUDIO_FILTERS = /^Parsed_(?:aresample|anull|asetpts)_\d+$/u;
@@ -174,10 +187,10 @@ const ofLine = (
 };
 
 /**
- * What a failed run of `pipeline` points at: a signal that stopped it; a stop or a full disk its
- * log reports anywhere; else the line that ended the run, the last that names a part other than
- * the video or a video step, past what ffmpeg writes after any failure; or, with nothing named,
- * every step outside the CPU.
+ * What a failed run of `pipeline` points at: a signal that stopped it; every step outside the CPU
+ * when a crash signal killed it; a stop or a full disk its log reports anywhere; else the line that
+ * ended the run, the last that names a part other than the video or a video step, past what ffmpeg
+ * writes after any failure; or, with nothing named, every step outside the CPU.
  */
 export const attribute = (
   pipeline: VideoPipeline,
@@ -190,6 +203,10 @@ export const attribute = (
 
   if (failure.exitCode === null && failure.signal === null) {
     return Attribution.NotVideo({ reason: "spawn" });
+  }
+
+  if (failure.signal !== null && CRASH_SIGNALS.has(failure.signal)) {
+    return Attribution.Video({ named: false, suspects: gpuSteps(pipeline) });
   }
 
   const lines = failure.stderrTail.split("\n");

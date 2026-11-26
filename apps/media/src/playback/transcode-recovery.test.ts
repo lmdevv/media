@@ -449,6 +449,47 @@ describe("attribute", () => {
       Attribution.Video({ named: false, suspects: [1, 2, 3] }),
     );
   });
+
+  it("names nothing for a run a crash signal killed, whatever part its log last named", () => {
+    // Native decoders log this after a seek; the run went on past it until the SIGBUS.
+    const decoderWarning = "[hevc @ 0x5d1c2a0] Could not find ref with POC 12";
+
+    for (const tail of [decoderWarning, RECOVERED[0], HEADS.fused.join("\n")]) {
+      assert.deepStrictEqual(
+        attribute(QSV_CHAIN, QSV_OWNERS, failed(tail, null, "SIGBUS")),
+        Attribution.Video({ named: false, suspects: [0, 1, 2, 3] }),
+        tail,
+      );
+    }
+  });
+
+  it.prop(
+    "suspects every step outside the CPU of a run a crash signal killed, whatever its log says",
+    {
+      lines: Schema.Array(
+        Schema.Literals([
+          "fused",
+          "encoder",
+          "qsvDecoder",
+          "device",
+          "audio",
+          "mux",
+          "input",
+          "disk",
+          "aftermath",
+        ]),
+      ),
+      signal: Schema.Literals(["SIGSEGV", "SIGBUS", "SIGILL", "SIGABRT", "SIGFPE"]),
+    },
+    ({ lines, signal }) => {
+      const tail = lines.flatMap((name) => HEADS[name]).join("\n");
+
+      assert.deepStrictEqual(
+        attribute(UPLOAD_CHAIN, UPLOAD_OWNERS, failed(tail, null, signal)),
+        Attribution.Video({ named: false, suspects: [1, 2, 3] }),
+      );
+    },
+  );
 });
 
 const AnyDiagnosis = Schema.Literals([

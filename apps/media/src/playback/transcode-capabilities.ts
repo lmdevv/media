@@ -36,6 +36,7 @@ import { PROBE_CLIPS } from "./probe-clips.ts";
 import {
   attribute,
   Attribution,
+  CRASH_SIGNALS,
   Diagnosis,
   type LogOwners,
   type RunFailure,
@@ -155,9 +156,6 @@ type Priority = "warmup" | "demand";
 /** The key a step exercises, the domain it runs in, and what it needs from the build. */
 type Target = Pick<Step, "on" | "needs"> & { readonly key: CapabilityKey };
 
-/** Signals of a crash: ffmpeg ran, and the stage it ran broke it. */
-const CRASHES: ReadonlySet<string> = new Set(["SIGSEGV", "SIGBUS", "SIGILL", "SIGABRT", "SIGFPE"]);
-
 /** What a shell that could not run ffmpeg exits with: not executable, or not found. */
 const NOT_RUN: ReadonlySet<number> = new Set([126, 127]);
 
@@ -201,7 +199,7 @@ const probeOutcome = (
   if (Result.isSuccess(result)) return probedFrames(result.success) > 0 ? "passed" : "inconclusive";
   const { signal, exitCode, stderrHead } = result.failure;
 
-  if (signal !== null) return CRASHES.has(signal) ? "crashed" : "inconclusive";
+  if (signal !== null) return CRASH_SIGNALS.has(signal) ? "crashed" : "inconclusive";
 
   if (exitCode === null || NOT_RUN.has(exitCode)) return "inconclusive";
 
