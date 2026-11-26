@@ -132,9 +132,9 @@ describe("reachWatch", () => {
     expect(server.sent()).toBe(8);
   });
 
-  it("clears as soon as the socket opens again, without waiting for a check", async () => {
-    const server = serverThat({ up: false });
-    const watch = reachWatch(server.answers);
+  it("clears at the first check the media server answers once the socket opens again", async () => {
+    const answering = { up: false };
+    const watch = reachWatch(serverThat(answering).answers);
 
     watch.need(true);
     watch.connection(UP);
@@ -142,9 +142,43 @@ describe("reachWatch", () => {
     await vi.advanceTimersByTimeAsync(SETTLE_MS + RECHECK_MS);
 
     expect(watch.lost()).toBe(true);
+    answering.up = true;
     watch.connection(UP);
 
+    expect(watch.lost()).toBe(true);
+    await vi.advanceTimersByTimeAsync(RECHECK_MS);
+
     expect(watch.lost()).toBe(false);
+  });
+
+  it("finds the media server gone while the core keeps answering the app's calls", async () => {
+    const checks = healthChecks();
+    const watch = reachWatch(checks.answers);
+
+    // A Connect report, say, goes out and the core answers it.
+    const coreAnswersACall = (): void => {
+      watch.connection({ connected: true, waitingSince: Date.now() });
+      watch.connection(UP);
+    };
+
+    watch.need(true);
+    watch.connection(UP);
+    watch.hear("doubted");
+    await vi.advanceTimersByTimeAsync(SETTLE_MS);
+    coreAnswersACall();
+    await checks.answer(false);
+    await vi.advanceTimersByTimeAsync(RECHECK_MS);
+    coreAnswersACall();
+    await checks.answer(false);
+
+    expect(checks.sent()).toBe(2);
+    expect(watch.lost()).toBe(true);
+
+    coreAnswersACall();
+    await vi.advanceTimersByTimeAsync(RECHECK_MS);
+
+    expect(watch.lost()).toBe(true);
+    expect(checks.sent()).toBe(3);
   });
 
   it("sends nothing while nothing needs the server, as a downloaded song plays in the background", async () => {
@@ -340,7 +374,9 @@ type Event =
   | { readonly kind: "socket"; readonly open: boolean }
   | { readonly kind: "need"; readonly needed: boolean }
   | { readonly kind: "hear"; readonly observation: Observation }
-  | { readonly kind: "check"; readonly up: boolean };
+  | { readonly kind: "check"; readonly up: boolean }
+  /** A call goes out on the open socket and the core answers it. */
+  | { readonly kind: "call" };
 
 const event: fc.Arbitrary<Event> = fc.oneof(
   fc.record({ kind: fc.constant("socket" as const), open: fc.boolean() }),
@@ -350,42 +386,47 @@ const event: fc.Arbitrary<Event> = fc.oneof(
     observation: fc.constantFrom<Observation>("answered", "doubted", "failed"),
   }),
   fc.record({ kind: fc.constant("check" as const), up: fc.boolean() }),
+  fc.record({ kind: fc.constant("call" as const) }),
 );
 
 interface Row {
   readonly socket: Socket;
   readonly failures: number;
-  readonly doubted: boolean;
+  /** The socket closed or a call stalled, and the core hasn't answered since. */
+  readonly coreDoubted: boolean;
+  /** A stream failed or the core said the media server went away, and no check settled it. */
+  readonly mediaDoubted: boolean;
   readonly needed: boolean;
 }
 
-const failuresAfter: Readonly<Record<Observation, (failures: number) => number>> = {
-  answered: () => 0,
-  failed: (failures) => failures + 1,
-  doubted: (failures) => failures,
-};
+/** What the media server's answer, or its silence, leaves: only a check or a stream says it. */
+const media = (row: Row, observation: Observation): Row => {
+  if (observation === "doubted") return { ...row, mediaDoubted: true };
 
-const learn = (row: Row, observation: Observation): Row => ({
-  ...row,
-  failures: failuresAfter[observation](row.failures),
-  doubted: observation === "doubted",
-});
+  return {
+    ...row,
+    failures: observation === "answered" ? 0 : row.failures + 1,
+    coreDoubted: false,
+    mediaDoubted: false,
+  };
+};
 
 const after = (row: Row, happened: Event): Row => {
   if (happened.kind === "need") return { ...row, needed: happened.needed };
 
-  if (happened.kind === "hear") return learn(row, happened.observation);
+  if (happened.kind === "hear") return media(row, happened.observation);
 
-  if (happened.kind === "check") return learn(row, happened.up ? "answered" : "failed");
+  if (happened.kind === "check") return media(row, happened.up ? "answered" : "failed");
+
+  if (happened.kind === "call") return row.socket === "open" ? { ...row, coreDoubted: false } : row;
 
   const socket: Socket = happened.open ? "open" : "closed";
-  const moved = socket === row.socket ? row : learn(row, happened.open ? "answered" : "doubted");
 
-  return { ...moved, socket };
+  return socket === row.socket ? row : { ...row, socket, coreDoubted: !happened.open };
 };
 
-const learnedOf = ({ failures, doubted }: Row): Learned => {
-  if (doubted) return "doubted";
+const learnedOf = ({ failures, coreDoubted, mediaDoubted }: Row): Learned => {
+  if (coreDoubted || mediaDoubted) return "doubted";
 
   if (failures >= LOST_AFTER) return "lost";
 
@@ -397,7 +438,8 @@ const rowAfter = (events: ReadonlyArray<Event>) => {
   const row = events.reduce(after, {
     socket: "unknown",
     failures: 0,
-    doubted: false,
+    coreDoubted: false,
+    mediaDoubted: false,
     needed: false,
   });
 
@@ -410,13 +452,22 @@ const watchAfter = async (events: ReadonlyArray<Event>) => {
   const server = serverThat(answering);
   const watch = reachWatch(server.answers);
 
+  let open = false;
+
   const run = async (rest: ReadonlyArray<Event>): Promise<void> => {
     const [happened, ...later] = rest;
 
     if (happened === undefined) return;
 
-    if (happened.kind === "socket") watch.connection(happened.open ? UP : DOWN);
-    else if (happened.kind === "need") watch.need(happened.needed);
+    if (happened.kind === "call") {
+      if (open) {
+        watch.connection({ connected: true, waitingSince: Date.now() });
+        watch.connection(UP);
+      }
+    } else if (happened.kind === "socket") {
+      open = happened.open;
+      watch.connection(happened.open ? UP : DOWN);
+    } else if (happened.kind === "need") watch.need(happened.needed);
     else if (happened.kind === "hear") watch.hear(happened.observation);
     else {
       answering.up = happened.up;
