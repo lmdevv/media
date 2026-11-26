@@ -1,3 +1,6 @@
+import { serverFunctions } from "@media/contracts/server-functions";
+import type { ServerReport } from "@media/contracts/server-functions";
+import { EpochMillis } from "@media/contracts/units";
 import { Platform, TokenStorage } from "@media/sdk/effect";
 import { ownClientFetch, startOwnClientProxy } from "@media/sdk/testing/own-client";
 import type { OwnClientProxy } from "@media/sdk/testing/own-client";
@@ -85,28 +88,84 @@ const Seeded = parse(
   }),
 );
 
-/** Seeds a library of `names` as movies, each with one file, that `managerId` manages and sees. */
-const seedMovies = async (managerId: string, names: ReadonlyArray<string>): Promise<void> => {
+/** Runs the internal function at `path` with the stack's admin key and answers its JSON reply. */
+const runInternal = async (path: string, args: Schema.JsonObject) => {
   const response = await fetch(`${url}/api/function`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Convex ${core?.adminKey ?? ""}`,
     },
-    body: JSON.stringify({
-      path: "movies/probe:seed",
-      args: {
-        managerId,
-        libraries: [
-          { name: `cli-${id}`, titles: names.map((name) => ({ name, age: null, episodes: 0 })) },
-        ],
-      },
-      format: "json",
-    }),
+    body: JSON.stringify({ path, args, format: "json" }),
   });
 
-  expect(Seeded(await response.text()).value[0]?.titles).toHaveLength(names.length);
+  return response.text();
 };
+
+/** Seeds a library of `names` as movies, each with one file, that `managerId` manages and sees. */
+const seedMovies = async (managerId: string, names: ReadonlyArray<string>): Promise<void> => {
+  const answer = await runInternal("movies/probe:seed", {
+    managerId,
+    libraries: [
+      { name: `cli-${id}`, titles: names.map((name) => ({ name, age: null, episodes: 0 })) },
+    ],
+  });
+
+  expect(Seeded(answer).value[0]?.titles).toHaveLength(names.length);
+};
+
+const Answered = <A>(value: Schema.Codec<A, unknown>) =>
+  parse(Schema.Struct({ status: Schema.Literal("success"), value }));
+
+/** Reports `report` to the core as a new media server, signed in with a key of its own. */
+const reportStatus = async (report: ServerReport): Promise<void> => {
+  const serviceId = Answered(Schema.String)(
+    await runInternal("core/accounts/host:createService", { name: `media server ${id}` }),
+  ).value;
+
+  const { key } = Answered(Schema.Struct({ key: Schema.String }))(
+    await runInternal("core/auth/apiKeys:issueServiceKey", { serviceId }),
+  ).value;
+
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const context = yield* Layer.build(
+          Platform.layerClient({
+            url,
+            connection: "http",
+            storage: TokenStorage.layerMemory,
+            signIn: Platform.SignInRoute.Boundary({
+              url: core?.signInUrl ?? "",
+              fetch: ownClientFetch(),
+            }),
+          }),
+        );
+
+        const client = Context.get(context, Platform.Client);
+
+        yield* client.session.signIn(Platform.Credentials.ApiKey({ key: Redacted.make(key) }));
+        yield* client.run(serverFunctions.reportStatus, [report]);
+      }),
+    ),
+  );
+};
+
+const Status = parse(
+  Schema.Struct({
+    version: Schema.String,
+    transcoding: Schema.Struct({
+      devices: Schema.Array(Schema.Struct({ domain: Schema.String, node: Schema.String })),
+      capabilities: Schema.Array(
+        Schema.Struct({
+          key: Schema.String,
+          status: Schema.String,
+          quarantineEndsAt: Schema.Union([Schema.Finite, Schema.String, Schema.Null]),
+        }),
+      ),
+    }),
+  }),
+);
 
 const Enrolled = parse(Schema.Struct({ deviceId: Schema.String, device: Schema.String }));
 
@@ -259,6 +318,151 @@ describe.skipIf(core === undefined)("the media CLI against the core", () => {
       "http://media.local/api/playback/direct/stream?token=t",
       "",
     ]);
+  });
+
+  it("prints where a transcoded stream's stages run and why its chain changed", async () => {
+    const home = await install();
+
+    expect((await login(home, ownerName)).code).toBe(ExitCode.ok);
+
+    const me = parse(Schema.Struct({ userId: Schema.String }))(
+      (await runCli(["auth", "sessions", "current"], home)).stdout,
+    );
+
+    await seedMovies(me.userId, [`Sintel ${id}`]);
+
+    const transcode = {
+      stages: [
+        { op: "decode", domain: "qsv", impl: "decode.qsv" },
+        { op: "move", domain: "qsv", impl: "move.qsv>cpu", move: { from: "qsv", to: "cpu" } },
+        { op: "tonemap", domain: "cpu", impl: "tonemap.cpu" },
+        { op: "move", domain: "qsv", impl: "move.cpu>qsv", move: { from: "cpu", to: "qsv" } },
+        { op: "encode", domain: "qsv", impl: "encode.qsv" },
+      ],
+      changes: [
+        {
+          at: Date.now(),
+          generation: 2,
+          cause: "capability",
+          excluded: ["tonemap.qsv"],
+          detail: "[Parsed_vpp_qsv_1 @ 0x1] Invalid color_matrix.",
+        },
+      ],
+    };
+
+    const answer = {
+      mode: "transcode-qsv",
+      url: "http://media.local/media/hls/s/2/index.m3u8?token=t",
+      streamId: "stream-0123456789abcde",
+      generation: 2,
+      startSeconds: 0,
+      durationSeconds: 888,
+      video: { codec: "h264", width: 1920, height: 1080, dynamicRange: "sdr" },
+      transcode,
+      subtitles: [],
+      expiresAt: Date.now() + 3_600_000,
+    };
+
+    const streamed = (format: ReadonlyArray<string>) =>
+      withMediaService(
+        (_request, response) => {
+          response.writeHead(200, { "content-type": "application/json" });
+          response.end(JSON.stringify(answer));
+        },
+        (mediaUrl) =>
+          runCli(["movies", "stream", `Sintel ${id}`, ...format], {
+            ...home,
+            MEDIA_SERVER_URL: mediaUrl,
+          }),
+      );
+
+    const json = await streamed([]);
+
+    expect(json.code, json.stderr).toBe(ExitCode.ok);
+    expect(JSON.parse(json.stdout)).toMatchObject({ mode: "transcode-qsv", transcode });
+
+    const human = await streamed(["--human"]);
+
+    expect(human.code, human.stderr).toBe(ExitCode.ok);
+    expect(human.stdout.trimEnd().split("\n")).toEqual([
+      `Sintel ${id} (transcode-qsv, from 0:00)`,
+      "stages: Decode · QSV, Move · QSV → CPU, Tone map · CPU, Move · CPU → QSV, Encode · QSV",
+      "changed: generation 2 · stage failed · off tonemap.qsv · [Parsed_vpp_qsv_1 @ 0x1] Invalid color_matrix.",
+      answer.url,
+    ]);
+  });
+
+  it("shows an admin the media server's transcoding report as JSON and as tables", async () => {
+    const at = EpochMillis.make(Date.now() - 60_000);
+    const version = `0.0.0-${id}`;
+
+    await reportStatus({
+      version,
+      activeStreams: 1,
+      runsAwaitingExit: 0,
+      startedAt: at,
+      transcoding: {
+        build: { version: "9.0.2", kernel: "6.18.63", checkedAt: at },
+        devices: [
+          {
+            domain: "qsv",
+            node: "renderD128",
+            opened: true,
+            pci: "8086:56a5 rev 05",
+            kernelDriver: "i915",
+            userDriver: "Intel iHD driver 26.3.5",
+            checkedAt: at,
+          },
+        ],
+        capabilities: [
+          {
+            key: "decode.qsv:h264/yuv420p10le",
+            domain: "qsv",
+            status: "unsupported",
+            source: "probe",
+            checkedAt: at,
+            detail: "rejected: Error querying IO surface",
+            quarantineEndsAt: null,
+          },
+          {
+            key: "encode.qsv:h264/8/cbr",
+            domain: "qsv",
+            status: "unknown",
+            source: "probe",
+            checkedAt: at,
+            detail: "passed",
+            quarantineEndsAt: "restart",
+          },
+        ],
+      },
+    });
+
+    const json = await runCli(["admin", "server", "status"], owner);
+
+    expect(json.code, json.stderr).toBe(ExitCode.ok);
+    expect(Status(json.stdout)).toMatchObject({
+      version,
+      transcoding: {
+        devices: [{ domain: "qsv", node: "renderD128" }],
+        capabilities: [
+          { key: "decode.qsv:h264/yuv420p10le", status: "unsupported", quarantineEndsAt: null },
+          { key: "encode.qsv:h264/8/cbr", status: "unknown", quarantineEndsAt: "restart" },
+        ],
+      },
+    });
+
+    const human = await runCli(["admin", "server", "status", "--human"], owner);
+    const lines = human.stdout.split("\n");
+
+    expect(human.code, human.stderr).toBe(ExitCode.ok);
+    expect(lines).toContain("transcoding:");
+    expect(
+      lines.some((line) => /^\s+KEY\s+DOMAIN\s+STATUS\s+SOURCE\s+CHECKED AT/u.test(line)),
+    ).toBe(true);
+    expect(
+      lines.some((line) => /decode\.qsv:h264\/yuv420p10le\s+qsv\s+unsupported\s+probe/u.test(line)),
+    ).toBe(true);
+    expect(lines.some((line) => /encode\.qsv:h264\/8\/cbr .*restart$/u.test(line))).toBe(true);
   });
 
   it("lists the core's users as its owner", async () => {

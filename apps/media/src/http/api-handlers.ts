@@ -54,6 +54,9 @@ const playbackHandlers = HttpApiBuilder.group(
             `${config.mediaBaseUrl}/media/hls/${view.streamId}/${view.generation}/index.m3u8`,
             payload.token,
           ),
+          mode: view.mode,
+          video: view.video,
+          transcode: view.transcode,
         };
       }),
       receiver: Effect.fn("Api.receiver")(function* ({ payload }) {

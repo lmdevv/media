@@ -1,12 +1,18 @@
-import type { DynamicRange, NegotiateResponse } from "@media/contracts/media-playback";
+import type {
+  DynamicRange,
+  NegotiateResponse,
+  TranscodeChange,
+} from "@media/contracts/media-playback";
 import type { HdrFormat, MediaFile } from "@media/contracts/models/catalog";
-import { MediaLabels } from "@media/sdk/effect";
+import { MediaLabels, TranscodeLabels } from "@media/sdk/effect";
 import { useLiveValue } from "@media/ui/lib/live-value";
 import type { LiveValue } from "@media/ui/lib/live-value";
 import { cn } from "@media/ui/lib/utils";
 import { XIcon } from "lucide-react";
 
 const { channelLabel, codecLabel } = MediaLabels;
+
+const { causeLabel, stageLabel } = TranscodeLabels;
 
 const RUNGS = [
   { id: "direct", label: "Direct" },
@@ -49,11 +55,28 @@ const sizeLabel = (width: number, height: number): string => {
 
 const megabits = (bitsPerSecond: number): string => (bitsPerSecond / 1_000_000).toFixed(1);
 
-const ENCODER_LABELS = {
-  "transcode-qsv": "Intel QSV",
-  "transcode-vaapi": "VA-API",
-  "transcode-software": "Software",
-} as const;
+const pad = (part: number): string => String(part).padStart(2, "0");
+
+/** `21:04 · stage failed · tonemap.qsv`: when, why, and what the stream keeps off from then on. */
+const changeLine = (change: TranscodeChange): string => {
+  const at = new Date(change.at);
+  const [first, ...rest] = change.excluded;
+
+  return [
+    `${pad(at.getHours())}:${pad(at.getMinutes())}`,
+    causeLabel(change.cause),
+    ...(first === undefined
+      ? []
+      : [rest.length === 0 ? first : `${first} +${String(rest.length)}`]),
+  ].join(" · ");
+};
+
+interface Row {
+  readonly label: string;
+  readonly lines: ReadonlyArray<string>;
+  /** The first line is where the rest came from, such as the source of a transcoded video. */
+  readonly fromFirst?: true;
+}
 
 const CONTAINER_LABELS = new Map([
   ["mkv", "MKV"],
@@ -68,7 +91,7 @@ const streamInfoRows = (
   file: MediaFile,
   stream: NegotiateResponse,
   bufferedAheadSeconds: number,
-): ReadonlyArray<{ readonly label: string; readonly lines: ReadonlyArray<string> }> => {
+): ReadonlyArray<Row> => {
   const source = file.probe.video[0];
 
   const copiedVideo =
@@ -107,34 +130,16 @@ const streamInfoRows = (
   const container =
     CONTAINER_LABELS.get(file.probe.container) ?? file.probe.container.toUpperCase();
 
-  const rows = [
+  const stages = stream.transcode?.stages ?? [];
+  const changes = stream.transcode?.changes ?? [];
+
+  const rows: ReadonlyArray<Row> = [
     ...(file.versionName === null ? [] : [{ label: "Version", lines: [file.versionName] }]),
-    {
-      label: "Video",
-      lines:
-        copiedVideo || sourceVideo === null
-          ? [sourceVideo ?? outputVideo]
-          : [sourceVideo, `→ ${outputVideo}`],
-    },
-    ...(stream.mode === "transcode-qsv" ||
-    stream.mode === "transcode-vaapi" ||
-    stream.mode === "transcode-software"
-      ? [
-          {
-            label: "Encoder",
-            lines: [
-              [
-                ENCODER_LABELS[stream.mode],
-                ...(source !== undefined &&
-                source.hdr !== "none" &&
-                stream.video.dynamicRange === "sdr"
-                  ? ["tone-map"]
-                  : []),
-              ].join(" · "),
-            ],
-          },
-        ]
-      : []),
+    copiedVideo || sourceVideo === null
+      ? { label: "Video", lines: [sourceVideo ?? outputVideo] }
+      : { label: "Video", lines: [sourceVideo, `→ ${outputVideo}`], fromFirst: true },
+    ...(stages.length === 0 ? [] : [{ label: "Stages", lines: stages.map(stageLabel) }]),
+    ...(changes.length === 0 ? [] : [{ label: "Changed", lines: changes.map(changeLine) }]),
     { label: "Audio", lines: [audio] },
     {
       label: "Container",
@@ -220,7 +225,7 @@ export function StreamInfo({
                   key={line}
                   className={cn(
                     "font-mono text-label/5",
-                    row.lines.length > 1 && index === 0 ? "text-text-muted" : "text-text",
+                    row.fromFirst === true && index === 0 ? "text-text-muted" : "text-text",
                   )}
                 >
                   {line}

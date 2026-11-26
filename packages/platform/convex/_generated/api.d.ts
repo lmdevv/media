@@ -85,6 +85,7 @@ import type * as core_restrictions from "../core/restrictions.js";
 import type * as core_scans from "../core/scans.js";
 import type * as core_server from "../core/server.js";
 import type * as core_server_backups from "../core/server/backups.js";
+import type * as core_serverReport from "../core/serverReport.js";
 import type * as core_serverStatus from "../core/serverStatus.js";
 import type * as core_serviceProbe from "../core/serviceProbe.js";
 import type * as core_sessions from "../core/sessions.js";
@@ -258,6 +259,7 @@ declare const fullApi: ApiFromModules<{
   "core/scans": typeof core_scans;
   "core/server": typeof core_server;
   "core/server/backups": typeof core_server_backups;
+  "core/serverReport": typeof core_serverReport;
   "core/serverStatus": typeof core_serverStatus;
   "core/serviceProbe": typeof core_serviceProbe;
   "core/sessions": typeof core_sessions;

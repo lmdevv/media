@@ -1,8 +1,8 @@
 import type { ClientDiagnosticsRequest, PlayerObservation } from "@media/contracts/diagnostics";
-import type { ClientCapabilities } from "@media/contracts/media-playback";
+import type { ClientCapabilities, SeekResponse } from "@media/contracts/media-playback";
 import { Milliseconds } from "@media/contracts/units";
 import { Playback, PlayerDiagnostics } from "@media/sdk/effect";
-import { Data, Effect, Exit, Option, Result, Scope, Struct } from "effect";
+import { Data, Effect, Exit, Option, Result, Scope } from "effect";
 import { createVideoPlayer } from "expo-video";
 import type { VideoMetadata, VideoPlayer } from "expo-video";
 
@@ -124,17 +124,6 @@ const runSdk = async <A, E>(effect: Effect.Effect<A, E>): Promise<Result.Result<
 
   return Exit.isSuccess(exit) ? exit.value : null;
 };
-
-const inGeneration = (
-  playback: Playback.Playback,
-  moved: { readonly generation: number; readonly playlistUrl: string },
-): Playback.Playback => ({
-  started: playback.started,
-  stream: Struct.evolve(playback.stream, {
-    url: () => moved.playlistUrl,
-    generation: () => moved.generation,
-  }),
-});
 
 /** What the controller calls besides the media server. */
 interface PlayerServices {
@@ -618,7 +607,7 @@ export class PlayerController {
 
   #moveTo(
     playback: Playback.Playback,
-    moved: Option.Option<{ readonly generation: number; readonly playlistUrl: string }>,
+    moved: Option.Option<SeekResponse>,
     positionMs: number,
   ): void {
     if (Option.isNone(moved) || moved.value.generation === playback.stream.generation) {
@@ -629,7 +618,7 @@ export class PlayerController {
       return;
     }
 
-    this.#load(inGeneration(playback, moved.value), positionMs);
+    this.#load(Playback.inGeneration(playback, moved.value), positionMs);
   }
 
   async #follow(step: PlaybackStep, positionMs: number, reason: string): Promise<void> {
@@ -708,7 +697,7 @@ export class PlayerController {
       // A reload after an error needs a fresh player even in the same generation.
       const next = Option.getOrNull(moved.success);
 
-      this.#load(next === null ? playback : inGeneration(playback, next), positionMs);
+      this.#load(next === null ? playback : Playback.inGeneration(playback, next), positionMs);
 
       return;
     }

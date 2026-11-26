@@ -1271,6 +1271,12 @@ test("HEVC transcodes in software, and a seek past what is produced moves the st
   await revealControls(page);
   await page.getByRole("button", { name: "Stream info" }).click();
   await expect(activeRung(page)).toHaveText("Transcode");
+
+  const info = page.getByRole("region", { name: "Stream info" });
+
+  await expect(info).toContainText("Decode · CPU");
+  await expect(info).toContainText("Encode · CPU");
+  await expect(info).not.toContainText("Changed");
   await capture(page, "07-03-stream-info");
   await page.getByRole("button", { name: "Close stream info" }).click();
 

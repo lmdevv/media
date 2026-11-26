@@ -274,13 +274,82 @@ const CreditedPerson = Schema.Struct({
   needsDetails: Schema.Boolean,
 });
 
+/** The ffmpeg build the media service transcodes with. */
+const TranscodingBuild = Schema.Struct({
+  /** ffmpeg's version, such as `9.0.2` or `7.1.3-0+deb13u1`. */
+  version: Schema.String,
+  /** The kernel release the evidence was gathered on, such as `6.18.63`. */
+  kernel: Schema.String,
+  /** When the service read the build's listings. */
+  checkedAt: EpochMillis,
+});
+
+/** A GPU device the media service found, as one GPU API sees it. */
+const TranscodingDevice = Schema.Struct({
+  /** The GPU API: `qsv` or `vaapi`. A string, so a later backend changes no contract. */
+  domain: Schema.String,
+  /** The render node's name, such as `renderD128`, without its folder. */
+  node: Schema.String,
+  /** Whether ffmpeg opened it. */
+  opened: Schema.Boolean,
+  /** PCI vendor, device, and revision, such as `8086:56a5 rev 05`. */
+  pci: Schema.NullOr(Schema.String),
+  /** The kernel driver bound to it, such as `i915`. */
+  kernelDriver: Schema.NullOr(Schema.String),
+  /** The userspace driver ffmpeg loaded, such as Intel's iHD driver and its version. */
+  userDriver: Schema.NullOr(Schema.String),
+  /** When the service identified it. */
+  checkedAt: EpochMillis,
+});
+
+/** What a transcoding capability is known to be: never planned until verified. */
+const CapabilityStatus = Schema.Literals(["unknown", "verified", "unsupported"]);
+
+/**
+ * One thing a transcoding stage may be asked to do on this server, and the evidence about it:
+ * `decode.qsv:hevc/yuv420p10le` or `scale.vaapi:10>8`.
+ */
+const TranscodingCapability = Schema.Struct({
+  key: Schema.String,
+  /** Where the stage runs: `cpu`, `qsv`, or `vaapi`. */
+  domain: Schema.String,
+  status: CapabilityStatus,
+  /**
+   * Where the latest evidence came from: the build's listings (`listing`) or a probe on a
+   * generated clip (`probe`); null with none.
+   */
+  source: Schema.NullOr(Schema.Literals(["listing", "probe"])),
+  /** When the latest evidence was gathered; null with none. */
+  checkedAt: Schema.NullOr(EpochMillis),
+  /** What it showed, such as `rejected: Error querying IO surface`, with any path removed. */
+  detail: Schema.String,
+  /**
+   * When its quarantine after a reproduced failure ends: a time, `restart` for not before the
+   * server restarts, or null when it is not quarantined.
+   */
+  quarantineEndsAt: Schema.Union([EpochMillis, Schema.Literal("restart"), Schema.Null]),
+});
+
+/**
+ * What the media service knows about transcoding on its machine: the ffmpeg build, the GPU
+ * devices, and the evidence for each capability, without paths beyond a render node's name.
+ */
+export const TranscodingReport = Schema.Struct({
+  build: Schema.NullOr(TranscodingBuild),
+  devices: Schema.Array(TranscodingDevice),
+  capabilities: Schema.Array(TranscodingCapability),
+});
+
+/** What the media service knows about transcoding on its machine. */
+export interface TranscodingReport extends Schema.Schema.Type<typeof TranscodingReport> {}
+
 /** What the server reports about itself for admins' server status. */
 export const ServerReport = Schema.Struct({
   version: Schema.String,
-  hardwareAcceleration: Schema.Literals(["qsv", "vaapi", "none"]),
   activeStreams: Schema.Int,
   runsAwaitingExit: Schema.Int,
   startedAt: EpochMillis,
+  transcoding: TranscodingReport,
 });
 
 /** What the server reports about itself. */

@@ -9,7 +9,7 @@ reported side by side.
 ## Sub-features
 
 - `stream-info` shows the playing stream's mode, video, audio, container, and bitrate in the
-  player.
+  player, and for a transcode where each stage runs and any change of its chain after a failure.
 - `diag-sessions` lists playback sessions, newest first: everyone's for an owner or admin, a
   member's own for a member.
 - `diag-playback` prints one session's timeline: the stream's start and why it ended, the player's
@@ -36,8 +36,10 @@ Preconditions:
 - **Stream info.** While Sintel plays, run `$S browser hover --testid player-video` and
   `$S browser click --role button --name "Stream info"`. The region `Stream info` holds the list
   `Playback mode` (`Direct`, `Remux`, `Transcode`) and the terms `Video` (`H.264 · 818p · SDR`),
-  `Audio` (`AAC 2.0 · converted`), `Container` (`MKV → HLS fMP4`), and `Bitrate`. `Close stream
-  info` closes it.
+  `Audio` (`AAC 2.0 · converted`), `Container` (`MKV → HLS fMP4`), and `Bitrate`. A transcode
+  adds `Stages`, one line per stage with where it ran (`Decode · QSV`, `Move · QSV → CPU`,
+  `Encode · CPU`), and after a failure `Changed` (`21:04 · stage failed · tonemap.qsv`). `Close
+  stream info` closes it.
 - **Sessions.** `$S cli -- diagnostics sessions` prints a JSON list, newest first; the first entry
   has a `sessionId`, Lucía's `userId`, `"platform": "web"`, and `"warnings": 0`. `--human` prints
   one line per session.

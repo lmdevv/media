@@ -1,5 +1,6 @@
 import {
   type ClientCapabilities,
+  type DeliveredVideo,
   type InsufficientTranscodeSpace,
   type PlaybackQuality,
   type KeyframeIndexFailed,
@@ -10,6 +11,7 @@ import {
   StreamNotFound,
   TranscodeCapacityReached,
   TranscodeFailed,
+  type TranscodeSummary,
   UnsupportedPlayback,
 } from "@media/contracts/media-playback";
 import type { PlaybackMode } from "@media/contracts/models/playback";
@@ -72,6 +74,7 @@ import * as TranscodeSpace from "./transcode-space.ts";
 import { sourceScope, type SourceScope } from "./capability-inventory.ts";
 import * as TranscodeCapabilities from "./transcode-capabilities.ts";
 import { hlsCommand } from "./transcode-command.ts";
+import { deliveredVideo, summaryOf } from "./transcode-diagnostics.ts";
 import {
   advance,
   Diagnosis,
@@ -107,6 +110,8 @@ interface StartedStream {
   readonly mode: Exclude<PlaybackMode, "direct">;
   /** What that generation does with the video, which may differ from the plan asked for. */
   readonly video: VideoPlan;
+  /** Where that generation's video is made, and the changes that led there. */
+  readonly transcode: TranscodeSummary;
   readonly segmentIndex: number;
 }
 
@@ -114,6 +119,13 @@ interface StreamView {
   readonly streamId: StreamId;
   readonly generation: number;
   readonly plan: SegmentPlan;
+}
+
+/** Where a seek continues, and how that generation delivers the video. */
+interface MovedStream extends StreamView {
+  readonly mode: Exclude<PlaybackMode, "direct">;
+  readonly video: DeliveredVideo;
+  readonly transcode: TranscodeSummary;
 }
 
 interface ServedPart {
@@ -185,12 +197,15 @@ export interface Interface {
     index: number,
     grant: PlaybackGrant,
   ) => Effect.Effect<ServedSegment, StreamRequestError, Scope.Scope>;
-  /** Moves playback to `seconds`, starting a new generation unless that point is already produced. */
+  /**
+   * Moves playback to `seconds`, starting a new generation unless that point is already produced,
+   * and answers how the generation that covers it delivers the video.
+   */
   readonly seek: (
     streamId: StreamId,
     seconds: number,
     grant: PlaybackGrant,
-  ) => Effect.Effect<StreamView, StreamRequestError>;
+  ) => Effect.Effect<MovedStream, StreamRequestError>;
   readonly stop: (
     streamId: StreamId,
     grant: PlaybackGrant,
@@ -2203,6 +2218,7 @@ const make = Effect.gen(function* () {
       generation: generation.number,
       mode,
       video,
+      transcode: summaryOf(video, yield* Ref.get(session.changes), generation.number),
       segmentIndex,
     } satisfies StartedStream;
   });
@@ -2368,7 +2384,19 @@ const make = Effect.gen(function* () {
           generation: covering.number,
         });
 
-        return { streamId, generation: covering.number, plan: session.plan } satisfies StreamView;
+        const source = session.file.probe.video;
+
+        if (source === undefined)
+          return yield* new UnsupportedPlayback({ reason: "no-video-stream" });
+
+        return {
+          streamId,
+          generation: covering.number,
+          plan: session.plan,
+          mode: modeOf(covering.video, session.audio),
+          video: deliveredVideo(covering.video, source),
+          transcode: summaryOf(covering.video, yield* Ref.get(session.changes), covering.number),
+        } satisfies MovedStream;
       }),
     );
   });

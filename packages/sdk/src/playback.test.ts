@@ -9,7 +9,15 @@ import { TestClock } from "effect/testing";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { MediaOrigin } from "./media-http";
-import { autoplayCountdown, lendToReceiver, negotiate, stop, stopNow } from "./playback";
+import {
+  autoplayCountdown,
+  inGeneration,
+  lendToReceiver,
+  negotiate,
+  seekStream,
+  stop,
+  stopNow,
+} from "./playback";
 
 const started = Schema.decodeSync(StartedPlayback)({
   sessionId: "session-1",
@@ -81,9 +89,35 @@ const NEGOTIATED = {
   expiresAt: 1_760_000_000_000,
 };
 
+/** A seek's answer after a failed Quick Sync run: a CPU replacement capped at 1080p. */
+const RELOADED = {
+  streamId: STREAM_ID,
+  generation: 2,
+  playlistUrl: `${PUBLIC_URL}/media/hls/${STREAM_ID}/2/index.m3u8?token=t`,
+  mode: "transcode-software",
+  video: { codec: "h264", width: 1920, height: 1080, dynamicRange: "sdr" },
+  transcode: {
+    stages: [
+      { op: "decode", domain: "cpu", impl: "decode.cpu" },
+      { op: "encode", domain: "cpu", impl: "encode.cpu" },
+    ],
+    changes: [
+      {
+        at: 1_760_000_000_000,
+        generation: 2,
+        cause: "source",
+        excluded: ["decode.qsv", "encode.qsv"],
+        detail: "",
+      },
+    ],
+  },
+};
+
 /** What the media server answers on the route `url`; null for any other. */
 const answerTo = (url: string | undefined) => {
   if (url === "/api/playback/receiver") return { credential: CREDENTIAL };
+
+  if (url === "/api/playback/seek") return RELOADED;
 
   return url === "/api/playback/negotiate" ? NEGOTIATED : null;
 };
@@ -164,6 +198,38 @@ describe("reaching the media service", () => {
 
     expect(received).toStrictEqual(["/api/playback/negotiate", "/api/playback/stop"]);
     expect(url).toBe(`${PUBLIC_URL}/media/hls/${STREAM_ID}/0/index.m3u8?token=t`);
+  });
+});
+
+describe("following a stream into its next generation", () => {
+  it("takes the playlist, mode, picture, and stages the seek names, the rest as it was", async () => {
+    const session = { ...started, mediaBaseUrl: mediaServiceUrl };
+
+    const moved = await Effect.runPromise(
+      Effect.gen(function* () {
+        const stream = yield* negotiate(session, DESKTOP, Milliseconds.make(0), Option.none());
+        const playback = { started: session, stream };
+        const next = yield* seekStream(playback, Milliseconds.make(4_000));
+
+        return { playback, next: Option.map(next, (seek) => inGeneration(playback, seek)) };
+      }),
+    );
+
+    expect(Option.isSome(moved.next)).toBe(true);
+
+    if (Option.isNone(moved.next)) return;
+    const { stream } = moved.next.value;
+
+    expect(moved.next.value.started).toBe(moved.playback.started);
+    expect(stream).toMatchObject({
+      url: RELOADED.playlistUrl,
+      generation: 2,
+      mode: "transcode-software",
+      video: { width: 1920, height: 1080 },
+      transcode: RELOADED.transcode,
+      streamId: STREAM_ID,
+      durationSeconds: 600,
+    });
   });
 });
 

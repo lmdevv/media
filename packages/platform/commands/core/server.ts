@@ -20,11 +20,38 @@ const statusResult = v.union(
   v.null(),
   v.object({
     version: v.string(),
-    hardwareAcceleration: v.union(v.literal("qsv"), v.literal("vaapi"), v.literal("none")),
     activeStreams: v.number(),
     runsAwaitingExit: v.number(),
     startedAt: v.number(),
     reportedAt: v.number(),
+    transcoding: v.object({
+      build: v.union(
+        v.null(),
+        v.object({ version: v.string(), kernel: v.string(), checkedAt: v.number() }),
+      ),
+      devices: v.array(
+        v.object({
+          domain: v.string(),
+          node: v.string(),
+          opened: v.boolean(),
+          pci: v.union(v.string(), v.null()),
+          kernelDriver: v.union(v.string(), v.null()),
+          userDriver: v.union(v.string(), v.null()),
+          checkedAt: v.number(),
+        }),
+      ),
+      capabilities: v.array(
+        v.object({
+          key: v.string(),
+          domain: v.string(),
+          status: v.union(v.literal("unknown"), v.literal("verified"), v.literal("unsupported")),
+          source: v.union(v.literal("listing"), v.literal("probe"), v.null()),
+          checkedAt: v.union(v.number(), v.null()),
+          detail: v.string(),
+          quarantineEndsAt: v.union(v.number(), v.literal("restart"), v.null()),
+        }),
+      ),
+    }),
   }),
 );
 
@@ -36,7 +63,7 @@ export interface Handlers {
     args: Record<string, never>,
   ) => Infer<typeof infoResult> | Promise<Infer<typeof infoResult>>;
 
-  /** `core.server.status` (query, admin): Show what the media server last reported: its version, hardware acceleration, streams, and when. */
+  /** `core.server.status` (query, admin): Show what the media server last reported: its version, streams, transcoding devices and capabilities, and when. */
   readonly status: (
     ctx: Omit<QueryCtx, "auth">,
     args: Record<string, never>,

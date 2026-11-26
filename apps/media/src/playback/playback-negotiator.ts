@@ -29,6 +29,7 @@ import * as PlaybackReporter from "./playback-reporter.ts";
 import * as PlaybackToken from "./playback-grants.ts";
 import * as StreamSessions from "./stream-sessions.ts";
 import * as TranscodeCapabilities from "./transcode-capabilities.ts";
+import { deliveredVideo } from "./transcode-diagnostics.ts";
 import { type CapabilitySnapshot, sourceOf } from "./video-pipeline.ts";
 
 type NegotiateError =
@@ -310,19 +311,10 @@ const make = Effect.gen(function* () {
       ),
     );
 
-    const outputVideo = VideoPlan.$match(started.video, {
-      Copy: () => common.video,
-      Encode: ({ output }) => ({
-        codec: output.codec,
-        width: output.width,
-        height: output.height,
-        dynamicRange: output.dynamicRange,
-      }),
-    });
-
     return {
       ...common,
-      video: outputVideo,
+      video: deliveredVideo(started.video, video),
+      transcode: started.transcode,
       mode: started.mode,
       burnedInSubtitle: burnSubtitle === undefined ? undefined : request.burnInSubtitle,
       streamId: started.streamId,

@@ -27,6 +27,23 @@ export const formatCount = (value: number): string =>
 export const countOf = (count: number, singular: string, plural: string): string =>
   `${formatCount(count)} ${count === 1 ? singular : plural}`;
 
+/**
+ * What a server's transcoding capabilities come to: `31 Verified · 4 Unsupported`, and how many
+ * are quarantined now when any are.
+ */
+export const capabilityDetail = (counts: {
+  readonly verified: number;
+  readonly unsupported: number;
+  readonly quarantined: ReadonlyArray<unknown>;
+}): string =>
+  [
+    `${formatCount(counts.verified)} Verified`,
+    `${formatCount(counts.unsupported)} Unsupported`,
+    ...(counts.quarantined.length === 0
+      ? []
+      : [`${formatCount(counts.quarantined.length)} Quarantined`]),
+  ].join(" · ");
+
 const clock = (date: Date): string => {
   const hours = date.getHours();
   const minutes = String(date.getMinutes()).padStart(2, "0");

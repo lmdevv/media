@@ -306,6 +306,12 @@ fails during a stream, first on the GPU without it and then in software.
   VA-API, with `vaapiDevice` for the render node.
 - Verified on an Arc A380 in both installs (`QSV=1 scripts/stack-e2e.sh`,
   `HARDWARE_ACCELERATION=auto scripts/nixos-module-e2e.sh`).
+- See what it found: `media admin server status` prints the ffmpeg build, each GPU with its PCI id
+  and drivers, and every capability it knows with its status (`unknown`, `verified`,
+  `unsupported`), where and when its evidence came from, and any quarantine after a failure the
+  probes reproduced. The admin Server page (and the iOS app's) shows the GPU and the counts. For
+  one stream, the player's Stream info and `media movies stream` list where each stage runs and
+  any change after a failure; none of it carries file paths or ffmpeg's arguments.
 
 ## Telemetry and logs
 

@@ -1,5 +1,9 @@
 import type { ClientDiagnosticsRequest } from "@media/contracts/diagnostics";
-import type { ClientCapabilities, NegotiateResponse } from "@media/contracts/media-playback";
+import type {
+  ClientCapabilities,
+  NegotiateResponse,
+  SeekResponse,
+} from "@media/contracts/media-playback";
 import type { StartedPlayback } from "@media/contracts/models/playback";
 import { Milliseconds } from "@media/contracts/units";
 import type { CallError } from "@media/sdk/effect";
@@ -30,7 +34,7 @@ import { startArgs, startPlay } from "./play-session";
 import type { CoreStart, PlayCommands, StartedPlay } from "./play-session";
 import { reportProgress } from "./progress-reporter";
 import type { StopReporting } from "./progress-reporter";
-import { inGeneration, runSdk } from "./sdk-calls";
+import { runSdk } from "./sdk-calls";
 import { SubtitleRetimer, clampSubtitleDelay } from "./subtitle-timing";
 import { SwitchablePlayer } from "./switchable-player";
 
@@ -608,7 +612,7 @@ export class PlaybackController {
 
   async #moveTo(
     playback: Playback.Playback,
-    moved: Option.Option<{ readonly generation: number; readonly playlistUrl: string }>,
+    moved: Option.Option<SeekResponse>,
     positionMs: number,
   ): Promise<void> {
     const seconds = positionMs / 1000;
@@ -619,7 +623,7 @@ export class PlaybackController {
       return;
     }
 
-    const next = inGeneration(playback, moved.value);
+    const next = Playback.inGeneration(playback, moved.value);
 
     const attached = this.#attached;
 

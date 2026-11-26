@@ -6,6 +6,7 @@ import { Clock, Duration, Effect, Layer, Option, Ref, Schedule } from "effect";
 import * as BackendHealth from "../backend-health.ts";
 import * as StreamSessions from "../playback/stream-sessions.ts";
 import * as TranscodeCapabilities from "../playback/transcode-capabilities.ts";
+import { transcodingReport } from "../playback/transcode-diagnostics.ts";
 import { RELEASE } from "../release.ts";
 import * as CoreSession from "./core-session.ts";
 
@@ -16,14 +17,15 @@ const HEARTBEAT = Duration.minutes(5);
 
 const same = (left: ServerReport, right: ServerReport): boolean =>
   left.version === right.version &&
-  left.hardwareAcceleration === right.hardwareAcceleration &&
   left.activeStreams === right.activeStreams &&
   left.runsAwaitingExit === right.runsAwaitingExit &&
-  left.startedAt === right.startedAt;
+  left.startedAt === right.startedAt &&
+  JSON.stringify(left.transcoding) === JSON.stringify(right.transcoding);
 
 /**
- * Reports the server's version, hardware transcoding, streams, and unexited runs to the core
- * for admins' `core.server.status`.
+ * Reports the server's version, streams, unexited runs, and what it knows about transcoding (the
+ * ffmpeg build, the GPU devices, and the evidence per capability) to the core for admins'
+ * `core.server.status`.
  */
 export const layer: Layer.Layer<
   never,
@@ -41,15 +43,16 @@ export const layer: Layer.Layer<
     );
 
     const look = Effect.gen(function* () {
+      const now = yield* Clock.currentTimeMillis;
+
       const report: ServerReport = {
         version: RELEASE,
-        hardwareAcceleration: (yield* capabilities.hardwareEncoder) ?? "none",
         activeStreams: yield* sessions.activeCount,
         runsAwaitingExit: yield* sessions.runsAwaitingExit,
         startedAt,
+        transcoding: transcodingReport(yield* capabilities.inventory, now),
       };
 
-      const now = yield* Clock.currentTimeMillis;
       const last = yield* Ref.get(sent);
 
       if (

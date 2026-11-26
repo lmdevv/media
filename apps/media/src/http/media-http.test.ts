@@ -852,11 +852,17 @@ describe.skipIf(!hasFfmpeg)("media service over HTTP", () => {
           positionSeconds: 1,
         });
 
-        assert.deepStrictEqual(yield* json(seek), {
-          streamId,
-          generation: 2,
-          playlistUrl: `http://media.test/media/hls/${streamId}/2/index.m3u8?token=${encodeURIComponent(token)}`,
-        });
+        const answered = yield* decodeSeek(yield* json(seek)).pipe(Effect.orDie);
+
+        assert.strictEqual(answered.streamId, streamId);
+        assert.strictEqual(answered.generation, 2);
+        assert.strictEqual(
+          answered.playlistUrl,
+          `http://media.test/media/hls/${streamId}/2/index.m3u8?token=${encodeURIComponent(token)}`,
+        );
+        assert.strictEqual(answered.mode, "transcode-software");
+        assert.deepStrictEqual(answered.video, result.video);
+        assert.deepStrictEqual(answered.transcode, result.transcode);
 
         const stop = yield* postText(`${server.baseUrl}/api/playback/stop`, {
           token,

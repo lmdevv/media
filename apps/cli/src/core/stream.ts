@@ -1,8 +1,12 @@
 import { NotFound } from "@media/contracts/errors";
-import { type ClientCapabilities, PlaybackApiError } from "@media/contracts/media-playback";
+import {
+  type ClientCapabilities,
+  PlaybackApiError,
+  type TranscodeSummary,
+} from "@media/contracts/media-playback";
 import { StartedPlayback } from "@media/contracts/models/playback";
 import type { Platform } from "@media/sdk/effect";
-import { Playback, ProtocolError } from "@media/sdk/effect";
+import { Playback, ProtocolError, TranscodeLabels } from "@media/sdk/effect";
 import { Brand, Effect, Option, Predicate, Result, Schema } from "effect";
 
 import { LaunchError, PlaybackRefused } from "../cli-errors";
@@ -133,6 +137,24 @@ const findTitle = Effect.fn("Stream.findTitle")(function* (connection: Connectio
 });
 
 const decodeStarted = Schema.decodeUnknownEffect(StartedPlayback);
+
+/**
+ * Where an HLS stream's video is made, for people: `stages: Decode · QSV, Encode · QSV`, then a
+ * line per change of the chain with its generation, cause, what it kept off, and ffmpeg's line.
+ */
+const transcodeLines = (transcode: TranscodeSummary): ReadonlyArray<string> => [
+  ...(transcode.stages.length === 0
+    ? []
+    : [`stages: ${transcode.stages.map(TranscodeLabels.stageLabel).join(", ")}`]),
+  ...transcode.changes.map((change) =>
+    [
+      `changed: generation ${String(change.generation)}`,
+      TranscodeLabels.causeLabel(change.cause),
+      ...(change.excluded.length === 0 ? [] : [`off ${change.excluded.join(", ")}`]),
+      ...(change.detail === "" ? [] : [change.detail]),
+    ].join(" · "),
+  ),
+];
 
 const isPlaybackApiError = Schema.is(PlaybackApiError);
 
@@ -291,6 +313,8 @@ const stream = coreShortcut("movies", "stream", {
         startSeconds: playback.startSeconds,
         durationSeconds: playback.durationSeconds,
         expiresAt: playback.expiresAt,
+        video: playback.video,
+        transcode: playback.transcode ?? null,
       };
 
       if (booleanFlag(invocation.tokens, "open")) {
@@ -315,6 +339,7 @@ const stream = coreShortcut("movies", "stream", {
         json,
         [
           `${title.name}${Option.match(episode, { onNone: () => "", onSome: (label) => ` ${label}` })}${started.file.versionName === null ? "" : ` · ${started.file.versionName}`} (${playback.mode}, from ${formatDuration(playback.startSeconds * 1000)})`,
+          ...(playback.transcode === undefined ? [] : transcodeLines(playback.transcode)),
           playback.url,
         ].join("\n"),
       );

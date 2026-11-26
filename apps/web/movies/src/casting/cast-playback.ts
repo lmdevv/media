@@ -30,7 +30,7 @@ import type { PlaybackCallError } from "@media/sdk/effect";
 import { Option, Predicate, Redacted, Result } from "effect";
 
 import type { PlaybackController } from "@/playback/playback-controller";
-import { inGeneration, runSdk } from "@/playback/sdk-calls";
+import { runSdk } from "@/playback/sdk-calls";
 import { heldPlayer } from "@/playback/switchable-player";
 
 import type { CastLoadRequest, CastSession } from "./cast-api";
@@ -559,7 +559,7 @@ export class CastPlayback {
         return;
       }
 
-      this.#receiver = { ...this.#receiver, playback: inGeneration(playback, next) };
+      this.#receiver = { ...this.#receiver, playback: Playback.inGeneration(playback, next) };
       await this.#loadAt(positionMs);
     });
   }

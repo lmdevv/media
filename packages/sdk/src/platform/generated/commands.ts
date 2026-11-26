@@ -2159,15 +2159,46 @@ const core_server_status = query({
     Schema.Null,
     Schema.Struct({
       version: Schema.String,
-      hardwareAcceleration: Schema.Union([
-        Schema.Literal("qsv"),
-        Schema.Literal("vaapi"),
-        Schema.Literal("none"),
-      ]),
       activeStreams: Schema.Finite,
       runsAwaitingExit: Schema.Finite,
       startedAt: Schema.Finite,
       reportedAt: Schema.Finite,
+      transcoding: Schema.Struct({
+        build: Schema.Union([
+          Schema.Null,
+          Schema.Struct({
+            version: Schema.String,
+            kernel: Schema.String,
+            checkedAt: Schema.Finite,
+          }),
+        ]),
+        devices: Schema.Array(
+          Schema.Struct({
+            domain: Schema.String,
+            node: Schema.String,
+            opened: Schema.Boolean,
+            pci: Schema.Union([Schema.String, Schema.Null]),
+            kernelDriver: Schema.Union([Schema.String, Schema.Null]),
+            userDriver: Schema.Union([Schema.String, Schema.Null]),
+            checkedAt: Schema.Finite,
+          }),
+        ),
+        capabilities: Schema.Array(
+          Schema.Struct({
+            key: Schema.String,
+            domain: Schema.String,
+            status: Schema.Union([
+              Schema.Literal("unknown"),
+              Schema.Literal("verified"),
+              Schema.Literal("unsupported"),
+            ]),
+            source: Schema.Union([Schema.Literal("listing"), Schema.Literal("probe"), Schema.Null]),
+            checkedAt: Schema.Union([Schema.Finite, Schema.Null]),
+            detail: Schema.String,
+            quarantineEndsAt: Schema.Union([Schema.Finite, Schema.Literal("restart"), Schema.Null]),
+          }),
+        ),
+      }),
     }),
   ]),
 });
@@ -6641,7 +6672,7 @@ export const effectMethods = (method: EffectBuilder) => ({
       },
       /** `core.server.info` (query, public): Show this server's name and version, and whether its owner has set it up. */
       info: method.query(core_server_info),
-      /** `core.server.status` (query, admin): Show what the media server last reported: its version, hardware acceleration, streams, and when. */
+      /** `core.server.status` (query, admin): Show what the media server last reported: its version, streams, transcoding devices and capabilities, and when. */
       status: method.query(core_server_status),
     },
     settings: {
@@ -7155,7 +7186,7 @@ export const promiseMethods = (method: PromiseBuilder) => ({
       },
       /** `core.server.info` (query, public): Show this server's name and version, and whether its owner has set it up. */
       info: method.query(core_server_info),
-      /** `core.server.status` (query, admin): Show what the media server last reported: its version, hardware acceleration, streams, and when. */
+      /** `core.server.status` (query, admin): Show what the media server last reported: its version, streams, transcoding devices and capabilities, and when. */
       status: method.query(core_server_status),
     },
     settings: {

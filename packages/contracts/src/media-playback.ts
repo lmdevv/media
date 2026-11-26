@@ -12,6 +12,7 @@ import { Schema } from "effect";
 
 import { PlaybackSessionId } from "./ids";
 import { PlaybackMode } from "./models/playback";
+import { EpochMillis } from "./units";
 
 /** Paths of the playback API, relative to the media service's base URL. */
 export const MEDIA_ROUTES = {
@@ -178,6 +179,72 @@ export const NegotiateRequest = Schema.Struct({
 /** A negotiation request. */
 export interface NegotiateRequest extends Schema.Schema.Type<typeof NegotiateRequest> {}
 
+/** The video as the device receives it, after any transcode. */
+export const DeliveredVideo = Schema.Struct({
+  codec: Schema.String,
+  width: Schema.Int,
+  height: Schema.Int,
+  dynamicRange: DynamicRange,
+});
+
+/** The video as the device receives it. */
+export interface DeliveredVideo extends Schema.Schema.Type<typeof DeliveredVideo> {}
+
+/**
+ * One stage of a transcode's video chain, in the order frames pass through it. `op` and `domain`
+ * are strings, so a later operation or GPU backend changes no contract.
+ */
+export const TranscodeStage = Schema.Struct({
+  /**
+   * What it does: `decode`, `scale`, `tonemap` (HDR to SDR), `burn-image` (a picture subtitle
+   * drawn in), `encode`, or `move`, a copy of the frames between CPU and GPU memory.
+   */
+  op: Schema.String,
+  /** Where it runs: `cpu`, or a GPU API such as `qsv` or `vaapi`. A move runs in its GPU's. */
+  domain: Schema.String,
+  /** The implementation, such as `decode.qsv`, `tonemap.cpu`, or `move.qsv>cpu`. */
+  impl: Schema.String,
+  /** A move's memories: where the frames were, and where they go. */
+  move: Schema.optionalKey(Schema.Struct({ from: Schema.String, to: Schema.String })),
+});
+
+/** One stage of a transcode's video chain. */
+export interface TranscodeStage extends Schema.Schema.Type<typeof TranscodeStage> {}
+
+/** A change of a stream's video chain, after a failed run or a capability its chain lost. */
+export const TranscodeChange = Schema.Struct({
+  at: EpochMillis,
+  /** The generation the changed chain first ran in. */
+  generation: Schema.Int,
+  /**
+   * Why, as a code: `capability` (a probe reproduced a stage's failure), `source` (only this file
+   * fails there), `undecided` (the probes ran out of time), `not-video` (the failure was not the
+   * video's), `unexplained` (a CPU run failed naming nothing), or `capability-lost` (a stage the
+   * chain used stopped being verified). A string, so a new cause changes no contract.
+   */
+  cause: Schema.String,
+  /** The implementations the stream keeps off from then on, such as `tonemap.qsv`. */
+  excluded: Schema.Array(Schema.String),
+  /** A line from ffmpeg's log with any path removed; empty when the change has none. */
+  detail: Schema.String,
+});
+
+/** A change of a stream's video chain. */
+export interface TranscodeChange extends Schema.Schema.Type<typeof TranscodeChange> {}
+
+/**
+ * Where an HLS generation's video is made: its stages, none when the video is copied, and every
+ * change of the chain up to that generation, oldest first. It carries no ffmpeg arguments, paths,
+ * or log text beyond each change's scrubbed line.
+ */
+export const TranscodeSummary = Schema.Struct({
+  stages: Schema.Array(TranscodeStage),
+  changes: Schema.Array(TranscodeChange),
+});
+
+/** Where an HLS generation's video is made. */
+export interface TranscodeSummary extends Schema.Schema.Type<typeof TranscodeSummary> {}
+
 /** The negotiated playback. */
 export const NegotiateResponse = Schema.Struct({
   mode: PlaybackMode,
@@ -189,13 +256,9 @@ export const NegotiateResponse = Schema.Struct({
   /** Where playback should start; HLS streams start producing here. */
   startSeconds: Schema.Finite,
   durationSeconds: Schema.Finite,
-  /** The video as the device receives it, after any transcode. */
-  video: Schema.Struct({
-    codec: Schema.String,
-    width: Schema.Int,
-    height: Schema.Int,
-    dynamicRange: DynamicRange,
-  }),
+  video: DeliveredVideo,
+  /** HLS only: where the generation's video is made. */
+  transcode: Schema.optional(TranscodeSummary),
   audio: Schema.optional(
     Schema.Struct({ streamIndex: Schema.Int, codec: Schema.String, channels: Schema.Int }),
   ),
@@ -216,11 +279,18 @@ export const SeekRequest = Schema.Struct({
   positionSeconds: Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)),
 });
 
-/** Where the stream continues: the generation to load and its playlist. */
+/**
+ * Where the stream continues: the generation to load and its playlist, with how that generation
+ * delivers the video, which a replacement after a failure may have changed. A player that reloads
+ * after `StreamGenerationGone` seeks to where it is and gets the same.
+ */
 export const SeekResponse = Schema.Struct({
   streamId: StreamId,
   generation: Schema.Int,
   playlistUrl: Schema.String,
+  mode: PlaybackMode,
+  video: DeliveredVideo,
+  transcode: TranscodeSummary,
 });
 
 /** Where an HLS stream continues after a seek. */
@@ -288,12 +358,7 @@ export const DownloadReady = Schema.TaggedStruct("Ready", {
   /** `mp4` or `mov`. */
   container: Container,
   durationSeconds: Schema.Finite,
-  video: Schema.Struct({
-    codec: Schema.String,
-    width: Schema.Int,
-    height: Schema.Int,
-    dynamicRange: DynamicRange,
-  }),
+  video: DeliveredVideo,
   audio: Schema.optional(
     Schema.Struct({ streamIndex: Schema.Int, codec: Schema.String, channels: Schema.Int }),
   ),

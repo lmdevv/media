@@ -26,6 +26,7 @@ import {
   movieNfo,
   offline,
   removePath,
+  revealControls,
   videoState,
   writeText,
 } from "./playback-stack";
@@ -341,4 +342,15 @@ test("a Quick Sync stream that cannot restart after a pause reloads into softwar
     ]),
     "the failed restart fell back to software",
   ).toEqual([["transcode-qsv", "transcode-software"]]);
+
+  // Stream info shows the chain that replaced it, and the change.
+  await revealControls(page);
+  await page.getByRole("button", { name: "Stream info" }).click();
+
+  const info = page.getByRole("region", { name: "Stream info" });
+
+  await expect(info).toContainText("Encode · CPU");
+  await expect(info).not.toContainText("QSV");
+  await expect(info).toContainText(/Changed\s*\d\d:\d\d · [a-z ]+ · [a-z]+\.qsv/u);
+  await page.getByRole("button", { name: "Close stream info" }).click();
 });

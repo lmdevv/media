@@ -15,14 +15,57 @@ describe.skipIf(stack === undefined)("server status", { timeout: 60_000 }, () =>
     const admin = await member(stack, "status-admin", "admin");
     const person = await member(stack, "status-member");
     const version = `0.0.0-${unique()}`;
+    const startedAt = Date.now() - 60_000;
 
-    const reported = {
-      version,
-      hardwareAcceleration: "qsv" as const,
-      activeStreams: 2,
-      runsAwaitingExit: 1,
-      startedAt: Date.now() - 60_000,
+    const gpu = {
+      node: "renderD128",
+      opened: true,
+      pci: "8086:56a5 rev 05",
+      kernelDriver: "i915",
+      userDriver: "Intel iHD driver for Intel(R) Gen Graphics - 26.3.5",
+      checkedAt: startedAt,
     };
+
+    const unsupported = {
+      key: "decode.qsv:h264/yuv420p10le",
+      domain: "qsv",
+      status: "unsupported" as const,
+      source: "probe" as const,
+      checkedAt: startedAt,
+      detail: "rejected: Error querying IO surface",
+      quarantineEndsAt: null,
+    };
+
+    const transcoding = {
+      build: { version: "9.0.2", kernel: "6.18.63", checkedAt: startedAt },
+      devices: [
+        { ...gpu, domain: "qsv" },
+        { ...gpu, domain: "vaapi" },
+      ],
+      capabilities: [
+        unsupported,
+        {
+          key: "encode.qsv:h264/8/cbr",
+          domain: "qsv",
+          status: "verified" as const,
+          source: "probe" as const,
+          checkedAt: startedAt,
+          detail: "passed",
+          quarantineEndsAt: "restart" as const,
+        },
+        {
+          key: "tonemap.cpu:pq",
+          domain: "cpu",
+          status: "verified" as const,
+          source: "listing" as const,
+          checkedAt: startedAt,
+          detail: "lists filter:zscale",
+          quarantineEndsAt: startedAt + 900_000,
+        },
+      ],
+    };
+
+    const reported = { version, activeStreams: 2, runsAwaitingExit: 1, startedAt, transcoding };
 
     const before = Date.now();
 
@@ -36,13 +79,17 @@ describe.skipIf(stack === undefined)("server status", { timeout: 60_000 }, () =>
     await runServer(
       stack,
       api.core.serverStatus.report,
-      { ...reported, activeStreams: 0, hardwareAcceleration: "vaapi" },
+      {
+        ...reported,
+        activeStreams: 0,
+        transcoding: { build: null, devices: [], capabilities: [] },
+      },
       Schema.Null,
     );
     expect(await admin.signedIn.client.query(api.core.server.status, {})).toMatchObject({
       version,
       activeStreams: 0,
-      hardwareAcceleration: "vaapi",
+      transcoding: { build: null, devices: [], capabilities: [] },
     });
 
     expect(await refusal(person.signedIn.client.query(api.core.server.status, {}))).toBe(
@@ -69,6 +116,25 @@ describe.skipIf(stack === undefined)("server status", { timeout: 60_000 }, () =>
           stack,
           api.core.serverStatus.report,
           { ...reported, version: "v".repeat(65) },
+          Schema.Null,
+        ),
+      ),
+    ).toBe("invalid_args");
+    expect(
+      await refusal(
+        runServer(
+          stack,
+          api.core.serverStatus.report,
+          {
+            ...reported,
+            transcoding: {
+              ...transcoding,
+              capabilities: Array.from({ length: 1001 }, (_, index) => ({
+                ...unsupported,
+                key: `decode.qsv:h264/${String(index)}`,
+              })),
+            },
+          },
           Schema.Null,
         ),
       ),
