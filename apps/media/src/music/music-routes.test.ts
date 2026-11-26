@@ -548,6 +548,8 @@ describe("music routes", { timeout: 60_000 }, () => {
     expect(await servedArtSize("1201x599", "342")).toBe("686,342");
     expect(await servedArtSize("640x480", "1280")).toBe("640,480");
     expect(await servedArtSize("300x150", "185")).toBe("300,150");
+    // A square cover comes out as it did when the width was bounded.
+    expect(await servedArtSize("600x600", "185")).toBe("185,186");
   });
 
   it("serve a Cast receiver's credential the song its sender started, past the ticket's expiry", async () => {

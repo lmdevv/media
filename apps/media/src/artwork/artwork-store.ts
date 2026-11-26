@@ -110,7 +110,8 @@ class ArtworkDownloadTimedOut extends Schema.TaggedError<
 /**
  * The side of an image a resize bounds by the requested size. `width` bounds the width, for movie
  * artwork, which is drawn at its own shape. `shorter` bounds the shorter side, for a music cover,
- * which is drawn as a square crop that then has the size each way. Neither enlarges an image.
+ * which is drawn as a square crop that then has the size each way. Neither enlarges an image,
+ * beyond rounding the side it does not bound to an even number of pixels.
  */
 type ResizeBound = "width" | "shorter";
 
@@ -121,7 +122,7 @@ const BOUNDS: Record<
   width: { folder: "w", filter: (size) => `scale='min(${size},iw)':-2` },
   shorter: {
     folder: "s",
-    filter: (size) => `scale='if(gt(iw,ih),-1,min(${size},iw))':'if(gt(iw,ih),min(${size},ih),-1)'`,
+    filter: (size) => `scale='if(gt(iw,ih),-2,min(${size},iw))':'if(gt(iw,ih),min(${size},ih),-2)'`,
   },
 };
 
