@@ -1,6 +1,6 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, layer } from "@effect/vitest";
-import { Deferred, Effect, Fiber, FileSystem, Layer, Path, Result, Schedule, Stream } from "effect";
+import { Effect, Fiber, FileSystem, Layer, Path, Ref, Result, Schedule, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import { probeFile } from "../media/media-probe.ts";
@@ -18,16 +18,18 @@ const ffmpegPath = process.env["FFMPEG_PATH"] ?? "ffmpeg";
 
 const SECONDS = 48;
 
-/**
- * The share of the source fed before its first fragment must be out. With the muxer's default
- * 10-second wait for a stream without packets, a software encode of this source published it after
- * 34 to 38 % (with Debian's ffmpeg 7.1 and with 9.0); a wait without a bound, after 86 %, once the
- * audio came back at 42 s.
- */
-const FED = 0.6;
+/** Bytes written to ffmpeg's standard input at a time; Node and the pipe buffer some 80 KB more. */
+const CHUNK = 4096;
 
-/** Tenths of a second the run may take to publish once fed: far more than it needs. */
-const PUBLISH_WITHIN = 200;
+/**
+ * How much more of the source a codec's run may have read than the H.264 run when its first
+ * fragment appears. With the muxer's default 10-second wait for a stream without packets, each
+ * software encoder's first fragment of this source came out with 44 to 61 % of it read, run to
+ * run, with NixOS's ffmpeg 9.0.2, and within 13 points of the H.264 run with Debian's 7.1; with a
+ * wait without a bound, only at the end, once the audio came back at 42 s. Nixpkgs' ffmpeg 9.0.1
+ * waits for the audio with every encoder.
+ */
+const MARGIN = 0.25;
 
 /**
  * Forty-eight seconds of 192x128 MPEG-2 whose AAC plays for the first two seconds and the last
@@ -113,24 +115,28 @@ const encodeArgs = Effect.fn("FragmentPublishing.encodeArgs")(function* (
 });
 
 /**
- * Runs ffmpeg with `args`, feeds it the first `share` of `source` on standard input, and answers
- * whether its first fragment `first` is out within `PUBLISH_WITHIN` tenths of a second, with what
- * it wrote to stderr. The rest of `source` follows only then, so the run ends as it would.
+ * Feeds `source` to ffmpeg running `args` on standard input as fast as ffmpeg takes it, and answers
+ * the share of `source` written when the first fragment `first` appeared. ffmpeg reads only as far
+ * ahead of its encoder and muxer as its queues hold, so the share is how far into the source the
+ * fragment came out, however fast the machine encodes; 1 when it came out only at the end.
  */
-const publishesOnceFed = Effect.fn("FragmentPublishing.publishesOnceFed")(function* (
+const publishedAt = Effect.fn("FragmentPublishing.publishedAt")(function* (
   args: ReadonlyArray<string>,
   source: Uint8Array,
-  share: number,
   first: string,
 ) {
   const fs = yield* FileSystem.FileSystem;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const checked = yield* Deferred.make<void>();
+  const written = yield* Ref.make(0);
   const stderr: Array<string> = [];
-  const fed = Math.floor(source.length * share);
 
-  const input = Stream.make(source.subarray(0, fed)).pipe(
-    Stream.concat(Stream.fromEffect(Deferred.await(checked).pipe(Effect.as(source.subarray(fed))))),
+  // One chunk a pull: the sink pulls the next once ffmpeg's pipe has taken the last.
+  const input = Stream.unfold(0, (offset) =>
+    offset >= source.length
+      ? Effect.undefined
+      : Ref.set(written, Math.min(source.length, offset + CHUNK)).pipe(
+          Effect.as([source.subarray(offset, offset + CHUNK), offset + CHUNK] as const),
+        ),
   );
 
   const handle = yield* spawner.spawn(
@@ -143,19 +149,25 @@ const publishesOnceFed = Effect.fn("FragmentPublishing.publishesOnceFed")(functi
     Effect.forkScoped,
   );
 
-  const published = yield* fs.exists(first).pipe(
-    Effect.repeat({
-      until: (present) => present,
-      schedule: Schedule.spaced("100 millis"),
-      times: PUBLISH_WITHIN,
-    }),
-  );
+  const appeared = yield* fs
+    .exists(first)
+    .pipe(
+      Effect.repeat({ until: (present) => present, schedule: Schedule.spaced("10 millis") }),
+      Effect.andThen(Ref.get(written)),
+      Effect.forkScoped,
+    );
 
-  yield* Deferred.succeed(checked, undefined);
-  yield* handle.exitCode;
+  const code = yield* handle.exitCode;
+
   yield* Fiber.join(output);
 
-  return { published, stderr: stderr.join("") };
+  if (code !== ChildProcessSpawner.ExitCode(0) || !(yield* fs.exists(first))) {
+    return yield* Effect.die(
+      `ffmpeg exited ${String(code)} without a fragment: ${stderr.join("")}`,
+    );
+  }
+
+  return (yield* Fiber.join(appeared)) / source.length;
 }, Effect.scoped);
 
 const tools = MediaTools.layer.pipe(
@@ -170,37 +182,42 @@ const tools = MediaTools.layer.pipe(
 
 describe.runIf(hasFfmpeg)("fragment publishing", () => {
   layer(tools, { excludeTestServices: true, timeout: "60 seconds" })((it) => {
-    for (const codec of OUTPUT_CODECS) {
-      it.effect(
-        `publishes a software ${codec} stream's first fragment while its copied audio is silent`,
-        () =>
-          Effect.gen(function* () {
-            const fs = yield* FileSystem.FileSystem;
-            const path = yield* Path.Path;
-            const directory = yield* fs.makeTempDirectoryScoped();
-            const source = path.join(directory, "sparse.mkv");
-            const output = path.join(directory, "hls");
+    it.effect(
+      "publishes each software encoder's first fragment while its copied audio is silent, no later than the H.264 row does",
+      () =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const directory = yield* fs.makeTempDirectoryScoped();
+          const source = path.join(directory, "sparse.mkv");
 
-            yield* writeSource(source);
-            yield* fs.makeDirectory(output);
+          yield* writeSource(source);
 
-            const args = yield* encodeArgs(source, codec, output);
-            const bytes = yield* fs.readFile(source);
+          const bytes = yield* fs.readFile(source);
 
-            const { published, stderr } = yield* publishesOnceFed(
-              args,
-              bytes,
-              FED,
-              path.join(output, "f0.m4s"),
+          const shares = yield* Effect.forEach(OUTPUT_CODECS, (codec) =>
+            Effect.gen(function* () {
+              const output = path.join(directory, codec);
+
+              yield* fs.makeDirectory(output);
+
+              const args = yield* encodeArgs(source, codec, output);
+
+              return [codec, yield* publishedAt(args, bytes, path.join(output, "f0.m4s"))] as const;
+            }),
+          );
+
+          const h264 = shares.find(([codec]) => codec === "h264")?.[1] ?? Number.NaN;
+
+          for (const [codec, share] of shares) {
+            assert.isAtMost(
+              share,
+              h264 + MARGIN,
+              `${codec}: first fragment after ${(share * 100).toFixed(0)} % of the source, H.264's after ${(h264 * 100).toFixed(0)} %`,
             );
-
-            assert.isTrue(
-              published,
-              `no fragment once ${String(FED * 100)} % of the source was fed: ${stderr}`,
-            );
-          }).pipe(Effect.scoped, Effect.orDie),
-        60_000,
-      );
-    }
+          }
+        }).pipe(Effect.scoped, Effect.orDie),
+      120_000,
+    );
   });
 });
