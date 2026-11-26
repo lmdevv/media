@@ -75,6 +75,30 @@ const refusedAfterSignIn = (refresh: Reply) =>
     }),
   );
 
+/** A server report whose one capability gives `reason`. */
+const reportGiving = (reason: string) => ({
+  version: "0.9.0",
+  activeStreams: 1,
+  runsAwaitingExit: 0,
+  startedAt: 1_760_000_000_000,
+  reportedAt: 1_760_000_060_000,
+  transcoding: {
+    build: { version: "9.0.2", kernel: "6.18.63", checkedAt: 1_760_000_000_000 },
+    devices: [],
+    capabilities: [
+      {
+        key: "encode.qsv:h264/8/cbr",
+        domain: "qsv",
+        status: "verified",
+        source: "probe",
+        checkedAt: 1_760_000_000_000,
+        reason,
+        quarantineEndsAt: null,
+      },
+    ],
+  },
+});
+
 describe("Platform", () => {
   it("runs a command as the method at its name's path", async () => {
     const answer = await withPlatform((platform, fake) =>
@@ -99,6 +123,18 @@ describe("Platform", () => {
     );
 
     expect(failure).toMatchObject({ _tag: "ProtocolError", operation: "core.server.info" });
+  });
+
+  it("reads a server report whose capability gives a reason a newer server added", async () => {
+    const read = await withPlatform((platform, fake) =>
+      Effect.forEach(["passed", "driver-reset"], (reason) =>
+        fake
+          .reply("core/server:status", Reply.Success({ value: reportGiving(reason) }))
+          .pipe(Effect.andThen(platform.core.server.status())),
+      ),
+    );
+
+    expect(read).toStrictEqual([reportGiving("passed"), reportGiving("driver-reset")]);
   });
 
   it("turns each refusal into its tagged error", async () => {

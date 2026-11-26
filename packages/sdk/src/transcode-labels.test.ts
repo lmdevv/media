@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { TranscodeReason } from "@media/contracts/media-playback";
+import { TranscodeReason, TranscodeReasonCode } from "@media/contracts/media-playback";
+import { Schema } from "effect";
 
 import {
   capabilityCounts,
@@ -48,6 +49,12 @@ describe("TranscodeLabels", () => {
 
     expect(new Set(labels).size).toBe(TranscodeReason.literals.length);
     expect(reasonLabel("disk-full")).toBe("disk full");
+  });
+
+  it("names a reason a newer server added as it names other", () => {
+    const newer = Schema.decodeSync(TranscodeReasonCode)("driver-reset");
+
+    expect(reasonLabel(newer)).toBe(reasonLabel("other"));
   });
 
   it("lists each GPU once with the APIs that opened it", () => {

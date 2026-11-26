@@ -249,6 +249,20 @@ export const TranscodeReason = Schema.Literals([
 /** Why a stream's video chain changed or the stream ended. */
 export type TranscodeReason = typeof TranscodeReason.Type;
 
+/** A reason a newer media service gives, which this client's list lacks, kept as it came. */
+const NewerTranscodeReason = Schema.String.pipe(Schema.brand("NewerTranscodeReason"));
+
+/**
+ * A reason as the wire carries it: one of `TranscodeReason`'s codes, or a code a newer media
+ * service added, kept as it came, so a client still reads the rest of the answer and labels the
+ * code as it labels `other`. Only `TranscodeReason`'s codes type-check where the service builds a
+ * change or a failure; a plain string does not.
+ */
+export const TranscodeReasonCode = Schema.Union([TranscodeReason, NewerTranscodeReason]);
+
+/** A reason as the wire carries it. */
+export type TranscodeReasonCode = typeof TranscodeReasonCode.Type;
+
 /** A change of a stream's video chain, after a failed run or a capability its chain lost. */
 export const TranscodeChange = Schema.Struct({
   at: EpochMillis,
@@ -263,7 +277,7 @@ export const TranscodeChange = Schema.Struct({
   cause: Schema.String,
   /** The implementations the stream keeps off from then on, such as `tonemap.qsv`. */
   excluded: Schema.Array(Schema.String),
-  reason: TranscodeReason,
+  reason: TranscodeReasonCode,
 });
 
 /** A change of a stream's video chain. */
@@ -607,7 +621,7 @@ export class TranscodeFailed extends Schema.TaggedError<
   { readonly brand: unique symbol }
 >()(
   "TranscodeFailed",
-  { streamId: Schema.String, mode: Schema.String, reason: TranscodeReason },
+  { streamId: Schema.String, mode: Schema.String, reason: TranscodeReasonCode },
   { httpApiStatus: 500 },
 ) {
   override get message(): string {

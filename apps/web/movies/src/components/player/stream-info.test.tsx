@@ -129,4 +129,27 @@ describe("StreamInfo", () => {
     expect(after).not.toContain("Encode · QSV");
     expect(after.some((line) => line.endsWith(" · this file only · decode.qsv +1"))).toBe(true);
   });
+
+  it("names a change whose reason a newer server added as a failure, and shows the rest", () => {
+    const newer = Schema.decodeSync(NegotiateResponse)({
+      ...Schema.encodeSync(NegotiateResponse)(onGpu),
+      transcode: {
+        stages: replaced.transcode.stages,
+        changes: [
+          {
+            at: 1_790_000_000_000,
+            generation: 2,
+            cause: "source",
+            excluded: ["decode.qsv", "encode.qsv"],
+            reason: "driver-reset",
+          },
+        ],
+      },
+    });
+
+    const lines = panelText(newer);
+
+    expect(lines).toEqual(expect.arrayContaining(["Decode · CPU", "Scale · CPU", "Encode · CPU"]));
+    expect(lines.some((line) => line.endsWith(" · failed · decode.qsv +1"))).toBe(true);
+  });
 });

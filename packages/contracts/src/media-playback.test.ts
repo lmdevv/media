@@ -1,11 +1,13 @@
 import * as fc from "fast-check";
 import { Exit, Schema } from "effect";
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 
 import {
   NegotiateResponse,
   PlaybackApiError,
   SeekResponse,
+  type TranscodeChange,
+  type TranscodeFailed,
   TranscodeReason,
   type TranscodeStage,
   TranscodeSummary,
@@ -76,39 +78,76 @@ describe("TranscodeSummary", () => {
   });
 });
 
-describe("reasons", () => {
-  it("refuse a change or a failure whose reason is text outside the closed list", () => {
-    const line = "[h264_qsv @ 0x1] Error opening 'media/Private Film/movie.mkv'";
+/** A reason code a newer server added, which this client's list lacks. */
+const NEWER = "driver-reset";
 
-    const change = {
-      at: 1,
+/** A transcode whose one change gives `reason`. */
+const transcodeGiving = (reason: string) => ({
+  stages: [{ op: "encode", domain: "cpu", impl: "encode.cpu" }],
+  changes: [{ at: 1, generation: 2, cause: "source", excluded: ["encode.qsv"], reason }],
+});
+
+/** `json` read the way a client reads the media service's answer. */
+const readAnswer = <A, I>(schema: Schema.Codec<A, I>, json: Schema.Json) =>
+  Schema.decodeExit(Schema.toCodecJson(schema))(json);
+
+describe("reasons", () => {
+  it("decode a code a newer server added in a negotiation, a seek, or a failure, and keep the rest", () => {
+    const negotiated = {
+      mode: "transcode-software",
+      url: `http://media.test/media/hls/${STREAM_ID}/2/index.m3u8`,
+      streamId: STREAM_ID,
       generation: 2,
-      cause: "source",
-      excluded: ["encode.qsv"],
-      reason: line,
+      startSeconds: 0,
+      durationSeconds: 60,
+      video,
+      transcode: transcodeGiving(NEWER),
+      subtitles: [],
+      expiresAt: 1,
     };
 
-    expect(
-      Exit.isFailure(Schema.decodeUnknownExit(TranscodeSummary)({ stages: [], changes: [change] })),
-    ).toBe(true);
-    expect(
-      Exit.isFailure(
-        Schema.decodeUnknownExit(PlaybackApiError)({
-          _tag: "TranscodeFailed",
-          streamId: STREAM_ID,
-          mode: "transcode-qsv",
-          reason: line,
-        }),
-      ),
-    ).toBe(true);
-    expect(
-      Schema.decodeSync(PlaybackApiError)({
-        _tag: "TranscodeFailed",
-        streamId: STREAM_ID,
-        mode: "transcode-qsv",
-        reason: "disk-full",
-      }).message,
-    ).toBe("Transcode failed in transcode-qsv: disk-full");
+    const seek = {
+      streamId: STREAM_ID,
+      generation: 2,
+      playlistUrl: `http://media.test/media/hls/${STREAM_ID}/2/index.m3u8`,
+      mode: "transcode-software",
+      video,
+      transcode: transcodeGiving(NEWER),
+    };
+
+    const failed = {
+      _tag: "TranscodeFailed",
+      streamId: STREAM_ID,
+      mode: "transcode-qsv",
+      reason: NEWER,
+    };
+
+    expect(readAnswer(NegotiateResponse, negotiated)).toStrictEqual(Exit.succeed(negotiated));
+    expect(readAnswer(SeekResponse, seek)).toStrictEqual(Exit.succeed(seek));
+
+    const failure = readAnswer(PlaybackApiError, failed);
+
+    expect(Exit.isSuccess(failure) ? failure.value : failure).toMatchObject(failed);
+    expect(Exit.isSuccess(failure) ? failure.value.message : null).toBe(
+      `Transcode failed in transcode-qsv: ${NEWER}`,
+    );
+  });
+
+  it("come back over the wire as they went, a known code as the code itself", () => {
+    for (const reason of [...TranscodeReason.literals, NEWER]) {
+      const decoded = Schema.decodeSync(TranscodeSummary)(transcodeGiving(reason));
+
+      expect(overTheWire(TranscodeSummary, decoded)).toEqual(decoded);
+      expect(decoded.changes[0]?.reason).toBe(reason);
+      expect(Schema.is(TranscodeReason)(decoded.changes[0]?.reason)).toBe(reason !== NEWER);
+    }
+  });
+
+  it("admit only the closed list where the service builds a change or a failure", () => {
+    expectTypeOf<TranscodeReason>().toExtend<TranscodeChange["reason"]>();
+    expectTypeOf<TranscodeReason>().toExtend<TranscodeFailed["reason"]>();
+    expectTypeOf<typeof NEWER>().not.toExtend<TranscodeChange["reason"]>();
+    expectTypeOf<string>().not.toExtend<TranscodeFailed["reason"]>();
   });
 });
 

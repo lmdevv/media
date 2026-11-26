@@ -122,7 +122,8 @@ const folders = await media.run("libraries.folders", {});
 - `PlayerDiagnostics` records a player's startup, stalls, and recoveries and reports them.
 - `Versions` orders a title's files (`preferredVersion`) and `MediaLabels` names their facts.
 - `TranscodeLabels` names a stream's stages (`stageLabel`), its changes' causes (`causeLabel`),
-  and why a chain changed or a stream ended (`reasonLabel`), and sums up `core.server.status`'s
+  and why a chain changed or a stream ended (`reasonLabel`; a code a newer server added reads as
+  `other` does, and the answer keeps the code), and sums up `core.server.status`'s
   transcoding report: its GPUs (`devicesOf`) and how many capabilities are verified, unsupported,
   and quarantined (`capabilityCounts`).
 - `MediaOrigin`: playback and download requests go to the public URL the playback names unless

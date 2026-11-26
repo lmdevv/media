@@ -1,4 +1,8 @@
-import type { TranscodeReason, TranscodeStage } from "@media/contracts/media-playback";
+import type {
+  TranscodeReason,
+  TranscodeReasonCode,
+  TranscodeStage,
+} from "@media/contracts/media-playback";
 
 const DOMAINS: ReadonlyMap<string, string> = new Map([
   ["cpu", "CPU"],
@@ -56,8 +60,14 @@ const REASONS: Readonly<Record<TranscodeReason, string>> = {
   other: "failed",
 };
 
-/** Why a chain changed or a stream ended, in a few words, such as `disk full`. */
-export const reasonLabel = (reason: TranscodeReason): string => REASONS[reason];
+const REASON_LABELS: ReadonlyMap<string, string> = new Map(Object.entries(REASONS));
+
+/**
+ * Why a chain changed or a stream ended, in a few words, such as `disk full`; a code a newer
+ * server added reads as `other` does.
+ */
+export const reasonLabel = (reason: TranscodeReasonCode): string =>
+  REASON_LABELS.get(reason) ?? REASONS.other;
 
 /** A GPU device as a server's transcoding report lists it. */
 interface ReportedDevice {

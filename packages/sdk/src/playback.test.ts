@@ -14,6 +14,7 @@ import {
   inGeneration,
   lendToReceiver,
   negotiate,
+  recoveryFor,
   seekStream,
   stop,
   stopNow,
@@ -113,6 +114,42 @@ const RELOADED = {
   },
 };
 
+/** A transcode whose one change gives `reason`, as a media service of any version may answer. */
+const transcodeGiving = (reason: string) => ({
+  stages: [{ op: "encode", domain: "cpu", impl: "encode.cpu" }],
+  changes: [
+    { at: 1_760_000_000_000, generation: 2, cause: "source", excluded: ["encode.qsv"], reason },
+  ],
+});
+
+const GIVING = /^\/(?<kind>reason|failing)\/(?<reason>[a-z-]+)(?<route>\/api\/playback\/\w+)$/u;
+
+/**
+ * What the media server answers below `/reason/<code>`: negotiations and seeks whose change gives
+ * `<code>`; below `/failing/<code>`, a `TranscodeFailed` giving it. Null for any other route.
+ */
+const answerGiving = (url: string | undefined) => {
+  const { kind, reason = "", route } = GIVING.exec(url ?? "")?.groups ?? {};
+
+  if (kind === "failing") {
+    return {
+      status: 500,
+      body: { _tag: "TranscodeFailed", streamId: STREAM_ID, mode: "transcode-qsv", reason },
+    };
+  }
+
+  if (route === "/api/playback/negotiate") {
+    return {
+      status: 200,
+      body: { ...NEGOTIATED, mode: "transcode-software", transcode: transcodeGiving(reason) },
+    };
+  }
+
+  return route === "/api/playback/seek"
+    ? { status: 200, body: { ...RELOADED, transcode: transcodeGiving(reason) } }
+    : null;
+};
+
 /** What the media server answers on the route `url`; null for any other. */
 const answerTo = (url: string | undefined) => {
   if (url === "/api/playback/receiver") return { credential: CREDENTIAL };
@@ -134,9 +171,12 @@ const mediaServer = createServer((request: IncomingMessage, response: ServerResp
     receivedBodies.push(text);
     receivedTypes.push(request.headers["content-type"] ?? "");
 
-    const body = answerTo(request.url);
+    const { status, body } = answerGiving(request.url) ?? {
+      status: 200,
+      body: answerTo(request.url),
+    };
 
-    response.writeHead(200, { "content-type": "application/json" });
+    response.writeHead(status, { "content-type": "application/json" });
     response.end(JSON.stringify(body));
   });
 });
@@ -230,6 +270,52 @@ describe("following a stream into its next generation", () => {
       streamId: STREAM_ID,
       durationSeconds: 600,
     });
+  });
+});
+
+/** What a player gets when every answer gives `reason`: the stream, its next generation, a failure. */
+const playedGiving = (reason: string) =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const session = { ...started, mediaBaseUrl: `${mediaServiceUrl}reason/${reason}/` };
+      const stream = yield* negotiate(session, DESKTOP, Milliseconds.make(0), Option.none());
+      const playback = { started: session, stream };
+      const moved = yield* seekStream(playback, Milliseconds.make(4_000));
+
+      const failure = yield* Effect.flip(
+        negotiate(
+          { ...started, mediaBaseUrl: `${mediaServiceUrl}failing/${reason}/` },
+          DESKTOP,
+          Milliseconds.make(0),
+          Option.none(),
+        ),
+      );
+
+      return {
+        playing: { mode: stream.mode, transcode: stream.transcode },
+        moved: Option.map(moved, (seek) => {
+          const next = inGeneration(playback, seek).stream;
+
+          return { generation: next.generation, transcode: next.transcode };
+        }),
+        failed: Predicate.isTagged(failure, "TranscodeFailed")
+          ? { reason: failure.reason, recovery: recoveryFor(failure) }
+          : failure,
+      };
+    }),
+  );
+
+/** What a player gets when every answer gives `reason`, the known codes and newer ones alike. */
+const playedAsKnown = (reason: string) => ({
+  playing: { mode: "transcode-software", transcode: transcodeGiving(reason) },
+  moved: Option.some({ generation: 2, transcode: transcodeGiving(reason) }),
+  failed: { reason, recovery: "fail" },
+});
+
+describe("reading a reason this client's list lacks", () => {
+  it("plays, moves, and fails on a code a newer server added as it does on a known one", async () => {
+    expect(await playedGiving("file-only")).toStrictEqual(playedAsKnown("file-only"));
+    expect(await playedGiving("driver-reset")).toStrictEqual(playedAsKnown("driver-reset"));
   });
 });
 

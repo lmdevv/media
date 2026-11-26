@@ -2790,15 +2790,7 @@ export const generatedCommands = [
                 Schema.Null,
               ]),
               checkedAt: Schema.Union([Schema.Finite, Schema.Null]),
-              reason: Schema.Union([
-                Schema.Literal("listed"),
-                Schema.Literal("not-listed"),
-                Schema.Literal("passed"),
-                Schema.Literal("refused"),
-                Schema.Literal("crashed"),
-                Schema.Literal("inconclusive"),
-                Schema.Null,
-              ]),
+              reason: Schema.Union([Schema.String, Schema.Null]),
               quarantineEndsAt: Schema.Union([
                 Schema.Finite,
                 Schema.Literal("restart"),

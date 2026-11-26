@@ -267,7 +267,9 @@ const linkState = v.union(
 /**
  * What the media server knows about transcoding on its machine: the ffmpeg build, each GPU device
  * as one GPU API sees it, and each capability with its status, where and when its latest evidence
- * came from, what it showed as a code, and the end of any quarantine in force.
+ * came from, what it showed as a code, and the end of any quarantine in force. The server stores
+ * only the codes of `EvidenceReason` (`@media/contracts/server-functions`); a client reads any
+ * string there, so a code a newer server adds leaves the rest of the report readable.
  */
 const transcodingReport = v.object({
   build: v.union(
@@ -296,15 +298,7 @@ const transcodingReport = v.object({
       status: v.union(v.literal("unknown"), v.literal("verified"), v.literal("unsupported")),
       source: v.union(v.literal("listing"), v.literal("probe"), v.null()),
       checkedAt: v.union(v.number(), v.null()),
-      reason: v.union(
-        v.literal("listed"),
-        v.literal("not-listed"),
-        v.literal("passed"),
-        v.literal("refused"),
-        v.literal("crashed"),
-        v.literal("inconclusive"),
-        v.null(),
-      ),
+      reason: v.union(v.string(), v.null()),
       quarantineEndsAt: v.union(v.number(), v.literal("restart"), v.null()),
     }),
   ),
