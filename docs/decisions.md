@@ -98,7 +98,11 @@ Old movies' Convex project, its SDK client, and its command registry were delete
   aside for a while (15 minutes, then 2 hours, then until a restart), and the stream replans without
   it, then in software, then answers `TranscodeFailed`. HDR is tone-mapped to SDR on the GPU
   (`vpp_qsv`, `tonemap_vaapi`) or in software with `zscale` and `tonemap` when the ffmpeg build has
-  them; without either, HDR that the client cannot display is refused.
+  them; without either, HDR that the client cannot display is refused. `vpp_qsv` leaves the
+  source's PQ and BT.2020 on its frames under Debian's ffmpeg 7.1, and its mastering display and
+  content light levels under 7.1 and 9, so Quick Sync's tone map tags its frames BT.709
+  (`setparams`) and drops that metadata (`sidedata`): every encoder would write it, and Apple's
+  players would read the SDR stream as HDR.
 - Output codec: direct play, remuxes, and audio-only conversions come first, as always; only
   video that must be encoded gets a codec. The decision lists what the client plays, most wanted
   first: HEVC; AV1 when the client reports decoding it power-efficiently (in hardware) or plays

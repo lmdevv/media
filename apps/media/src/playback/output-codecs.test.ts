@@ -129,6 +129,11 @@ const Probed = Schema.fromJsonString(
         level: Schema.optional(Schema.Finite),
         width: Schema.optional(Schema.Finite),
         height: Schema.optional(Schema.Finite),
+        color_transfer: Schema.optional(Schema.String),
+        color_primaries: Schema.optional(Schema.String),
+        side_data_list: Schema.optional(
+          Schema.Array(Schema.Struct({ side_data_type: Schema.String })),
+        ),
       }),
     ),
     packets: Schema.Array(
@@ -190,6 +195,66 @@ const addFile = Effect.fn("OutputCodecs.addFile")(function* (
 const addSource = addFile(SOURCE_FILE, PICTURE, SOURCE_SECONDS, 12);
 
 const addFastSource = addFile(FAST_FILE, "testsrc2=s=640x360:r=60:duration=6[out0]", 6, 30);
+
+/** Six seconds of HEVC Main 10 in HDR10, with mastering display and content light levels. */
+const HDR_FILE = "Pq Ten (2014)/Pq Ten (2014).mkv";
+
+const addHdrSource = Effect.gen(function* () {
+  const workspace = yield* FixtureWorkspace.Service;
+  const tools = yield* MediaTools.Service;
+  const scanner = yield* LibraryScanner.Service;
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const root = path.join(workspace.root, "output-codecs");
+  const file = path.join(root, HDR_FILE);
+
+  if (!(yield* fs.exists(file))) {
+    yield* fs.makeDirectory(path.dirname(file), { recursive: true });
+    yield* tools.ffmpeg([
+      "-hide_banner",
+      "-nostdin",
+      "-v",
+      "error",
+      "-y",
+      "-f",
+      "lavfi",
+      "-i",
+      "testsrc2=s=640x360:r=24:duration=6",
+      "-f",
+      "lavfi",
+      "-i",
+      "sine=frequency=440:sample_rate=48000:duration=6",
+      "-map",
+      "0:v",
+      "-map",
+      "1:a",
+      "-vf",
+      "format=yuv420p10le,setparams=color_primaries=bt2020:color_trc=smpte2084:colorspace=bt2020nc",
+      "-c:v",
+      "libx265",
+      "-preset",
+      "ultrafast",
+      "-x265-params",
+      [
+        "log-level=error",
+        "keyint=48",
+        "colorprim=bt2020",
+        "transfer=smpte2084",
+        "colormatrix=bt2020nc",
+        "master-display=G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,1)",
+        "max-cll=1000,400",
+        "hdr10=1",
+      ].join(":"),
+      "-c:a",
+      "aac",
+      file,
+    ]);
+  }
+
+  yield* scanner.scan({ libraryId: SOURCES, root, mode: "incremental" });
+
+  return MemoryLibrary.fileIdOf(SOURCES, HDR_FILE);
+}).pipe(Effect.orDie);
 
 const fetched = (url: string) =>
   HttpClient.get(url).pipe(
@@ -255,7 +320,7 @@ const probeSegment = Effect.fn("OutputCodecs.probeSegment")(function* (
       "-select_streams",
       "v:0",
       "-show_entries",
-      "stream=codec_name,profile,codec_tag_string,level,width,height:packet=pts_time,flags",
+      "stream=codec_name,profile,codec_tag_string,level,width,height,color_transfer,color_primaries:stream_side_data=side_data_type:packet=pts_time,flags",
       "-of",
       "json",
       file,
@@ -479,6 +544,66 @@ const holdsLevel = Effect.fn("OutputCodecs.holdsLevel")(function* (
   });
 });
 
+/**
+ * Negotiates `expected.client`, which plays SDR alone, for the HDR10 source on `path`, and reads
+ * the first segments: tone-mapped there, and tagged as BT.709 SDR with none of the source's
+ * mastering display or content light levels.
+ */
+const mapsToSdr = Effect.fn("OutputCodecs.mapsToSdr")(function* (
+  expected: Case,
+  path: "cpu" | "qsv" | "vaapi",
+) {
+  const server = yield* MediaTestServer.Service;
+  const fileId: MediaFileId = yield* addHdrSource;
+  const token = signTestToken({ fid: fileId, sid: `sdr-${path}-${expected.codec}` });
+  const local = (url: string) => url.replace(/^https?:\/\/[^/]+/u, server.baseUrl);
+
+  const negotiated = yield* decodeNegotiation(
+    yield* posted(`${server.baseUrl}/api/playback/negotiate`, {
+      token,
+      capabilities: expected.client,
+    }),
+  ).pipe(Effect.orDie);
+
+  assert.strictEqual(negotiated.video.codec, expected.codec, expected.name);
+  assert.strictEqual(negotiated.video.dynamicRange, "sdr", expected.name);
+  assert.deepInclude(
+    negotiated.transcode?.stages.find((stage) => stage.op === "tonemap"),
+    { domain: path },
+    expected.name,
+  );
+
+  const { init, segments } = yield* segmentsOf(local(negotiated.url));
+  const initBytes = yield* fetched(init);
+
+  for (const segment of segments.slice(0, 2)) {
+    const served = yield* fetched(segment.url);
+    const at = `${expected.name}, the segment at ${segment.start.toFixed(3)} s`;
+
+    assert.strictEqual(served.status, 200, at);
+
+    const [stream] = (yield* probeSegment([initBytes.body, served.body]).pipe(Effect.orDie))
+      .streams;
+
+    assert.isDefined(stream, at);
+    assert.deepStrictEqual(
+      [stream.codec_name, stream.color_transfer, stream.color_primaries],
+      [expected.codec, "bt709", "bt709"],
+      at,
+    );
+    assert.deepStrictEqual(
+      (stream.side_data_list ?? []).map((side) => side.side_data_type),
+      [],
+      at,
+    );
+  }
+
+  yield* posted(`${server.baseUrl}/api/playback/stop`, {
+    token,
+    streamId: negotiated.streamId ?? "",
+  });
+});
+
 describe.skipIf(!hasFfmpeg)("output codecs", () => {
   layer(MediaTestServer.layer(), { excludeTestServices: true, timeout: "180 seconds" })((it) => {
     for (const expected of CPU_CASES) {
@@ -541,6 +666,16 @@ describe.skipIf(!hasFfmpeg)("output codecs", () => {
             () => holdsLevel(expected, path),
             120_000,
           );
+        }
+
+        if (path === "qsv") {
+          for (const expected of [h264Only, hevcOnly, av1Only]) {
+            it.effect(
+              `tags ${expected.codec} tone-mapped on qsv as BT.709 SDR without HDR metadata`,
+              () => mapsToSdr(expected, path),
+              120_000,
+            );
+          }
         }
       });
     });

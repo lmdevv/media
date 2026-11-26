@@ -224,6 +224,28 @@ describe("hlsCommandArgs", () => {
     expect(after(args, "-force_key_frames")).toBe("1.400000,3.400000");
   });
 
+  it.each<OutputCodec>(["h264", "hevc", "av1"])(
+    "tags %s tone-mapped on Quick Sync as BT.709 SDR and drops the source's HDR metadata",
+    (output) => {
+      const args = hlsCommandArgs({
+        ...command(AudioPlan.Copy({ index: 1 }), "aac"),
+        videoCodec: "hevc",
+        video: encode("qsv", { codec: "hevc", bitDepth: 10, toneMap: true, output }),
+      });
+
+      expect(after(args, "-vf")).toBe(
+        [
+          "hwmap",
+          "format=qsv",
+          "vpp_qsv=w=1920:h=1080:format=nv12:tonemap=1:out_color_matrix=bt709:out_color_primaries=bt709:out_color_transfer=bt709",
+          "setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709",
+          "sidedata=mode=delete:type=MASTERING_DISPLAY_METADATA",
+          "sidedata=mode=delete:type=CONTENT_LIGHT_LEVEL",
+        ].join(","),
+      );
+    },
+  );
+
   it("uploads frames the GPU cannot decode, in the source's bit depth", () => {
     const args = hlsCommandArgs({
       ...command(AudioPlan.Copy({ index: 1 }), "aac"),

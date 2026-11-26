@@ -225,13 +225,18 @@ const scaleQsv: OpImpl<"Scale"> = {
   probes: scaleProbes,
 };
 
-/** `vpp_qsv`'s tone map from P010 HDR surfaces to BT.709 SDR in NV12. */
+/**
+ * `vpp_qsv`'s tone map from P010 HDR surfaces to BT.709 SDR in NV12. `vpp_qsv` leaves the source's
+ * colour on the frames under Debian's ffmpeg 7.1 and its mastering display and content light
+ * levels under 7.1 and 9, which every encoder then writes into the stream, so an SDR stream would
+ * say PQ and BT.2020: the row tags its frames BT.709 (`setparams`) and drops that metadata.
+ */
 const toneMapQsv: OpImpl<"ToneMap"> = {
   id: ImplId("tonemap.qsv"),
   op: "ToneMap",
   on: "qsv",
   takes: "qsv",
-  needs: () => ["filter:vpp_qsv"],
+  needs: () => ["filter:vpp_qsv", "filter:setparams", "filter:sidedata"],
   variant: (_, frame) =>
     HDR_COLOURS.has(frame.colour) && frame.pixelFormat === "p010le"
       ? transferOf(frame.colour)
@@ -248,6 +253,14 @@ const toneMapQsv: OpImpl<"ToneMap"> = {
         ["out_color_primaries", "bt709"],
         ["out_color_transfer", "bt709"],
       ),
+      filter(
+        "setparams",
+        ["color_primaries", "bt709"],
+        ["color_trc", "bt709"],
+        ["colorspace", "bt709"],
+      ),
+      filter("sidedata", ["mode", "delete"], ["type", "MASTERING_DISPLAY_METADATA"]),
+      filter("sidedata", ["mode", "delete"], ["type", "CONTENT_LIGHT_LEVEL"]),
     ],
   }),
   probes: toneMapProbes,
