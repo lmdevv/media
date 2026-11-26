@@ -363,6 +363,30 @@ const posted = (url: string, body: RequestBody) =>
     Effect.orDie,
   );
 
+const SAMPLE_TABLE_PATH = ["moov", "trak", "mdia", "minf", "stbl"];
+
+/**
+ * The sample dependency boxes (`sdtp`) in `init`'s sample tables that list no sample. With one,
+ * AVFoundation exposes no video track and Apple's players say "Cannot Open"; ffmpeg 7.1 writes one
+ * for an encoder that marks pictures disposable, as libx265 and libsvtav1 do.
+ */
+const emptySampleDependencies = (init: Uint8Array, start = 0, end = init.byteLength, depth = 0) => {
+  const view = new DataView(init.buffer, init.byteOffset, init.byteLength);
+  let found = 0;
+
+  for (let at = start; at + 8 <= end && view.getUint32(at) >= 8; at += view.getUint32(at)) {
+    const size = view.getUint32(at);
+    const type = String.fromCodePoint(...init.subarray(at + 4, at + 8));
+
+    if (depth === SAMPLE_TABLE_PATH.length) found += type === "sdtp" && size === 12 ? 1 : 0;
+    else if (type === SAMPLE_TABLE_PATH[depth]) {
+      found += emptySampleDependencies(init, at + 8, at + size, depth + 1);
+    }
+  }
+
+  return found;
+};
+
 /** The playlist's segments with the time each starts at, from its durations. */
 const segmentsOf = Effect.fn("OutputCodecs.segmentsOf")(function* (playlistUrl: string) {
   const playlist = new URL(playlistUrl);
@@ -452,8 +476,9 @@ const audioSpan = Effect.fn("OutputCodecs.audioSpan")(function* (parts: Readonly
 }, Effect.scoped);
 
 /**
- * Fetches the segments of `playlistUrl` from the one that holds `position` on and checks each,
- * fetched alone with the init segment: served, in the case's codec, profile, and sample entry,
+ * Fetches the init segment of `playlistUrl`, which must carry no empty sample dependency box, and
+ * its segments from the one that holds `position` on, and checks each, fetched alone with the
+ * init segment: served, in the case's codec, profile, and sample entry,
  * opening on a keyframe at its planned start that no picture of the segment is presented before,
  * and carrying the sound of its whole interval: its audio starts no later than one audio frame
  * after its video, and no earlier than one audio frame before its first video packet is decoded,
@@ -470,6 +495,7 @@ const checkSegments = Effect.fn("OutputCodecs.checkSegments")(function* (
   const initBytes = yield* fetched(init);
 
   assert.strictEqual(initBytes.status, 200, "init segment");
+  assert.strictEqual(emptySampleDependencies(initBytes.body), 0, `${expected.name}: init segment`);
 
   const holding = segments.findLastIndex((segment) => segment.start <= position + frame / 2);
   const checked = segments.slice(Math.max(0, holding));

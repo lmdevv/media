@@ -54,6 +54,7 @@ import {
   fragmentSpan,
   type VideoTiming,
   videoTiming,
+  withoutEmptySampleDependencies,
 } from "./fmp4-fragments.ts";
 import {
   groupFragments,
@@ -1828,7 +1829,7 @@ const make = Effect.gen(function* () {
     const copied =
       (yield* Ref.get(run.fragments)).length > 0 &&
       (yield* fs.readFile(path.join(run.directory, "init.mp4")).pipe(
-        Effect.andThen((bytes) => fs.writeFile(temporary, bytes)),
+        Effect.andThen((bytes) => fs.writeFile(temporary, withoutEmptySampleDependencies(bytes))),
         Effect.andThen(fs.rename(temporary, file)),
         Effect.as(true),
         Effect.catch(() => fs.remove(temporary).pipe(Effect.ignore, Effect.as(false))),
@@ -2287,7 +2288,14 @@ const make = Effect.gen(function* () {
           Run: ({ run }) =>
             awaitSegment(session, run, run.startSegment, SEGMENT_WAIT).pipe(
               Effect.andThen(
-                readerOf(run, Effect.option(fs.readFile(path.join(run.directory, "init.mp4")))),
+                readerOf(
+                  run,
+                  Effect.option(
+                    fs
+                      .readFile(path.join(run.directory, "init.mp4"))
+                      .pipe(Effect.map(withoutEmptySampleDependencies)),
+                  ),
+                ),
               ),
               Effect.map(Option.flatten),
             ),
