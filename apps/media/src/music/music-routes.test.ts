@@ -172,6 +172,39 @@ const resolved = (trackId: string, path: string, codec: string): ResolvedTrack =
   codec,
 });
 
+/** `width,height` of the copy the art route serves at `?w=width` of a cover `size` pixels big. */
+const servedArtSize = async (size: string, width: string) => {
+  const original = join(work, `cover-${size}.jpg`);
+
+  await ffmpeg(["-f", "lavfi", "-i", `testsrc=size=${size}`, "-frames:v", "1", original]);
+
+  const hash = await run(
+    saveArt(join(work, "data"), await run(Files.readWholeFile(original))).pipe(
+      Effect.map(Option.getOrThrow),
+    ),
+  );
+
+  const response = await fetch(
+    `${baseUrl}/music/art/${hash}?ticket=${await artTicket(hash)}&w=${width}`,
+  );
+
+  const copy = join(work, `copy-${size}-${width}.jpg`);
+
+  await writeBytes(copy, new Uint8Array(await response.arrayBuffer()));
+
+  const probed = await ffprobe([
+    "-v",
+    "error",
+    "-show_entries",
+    "stream=width,height",
+    "-of",
+    "csv=p=0",
+    copy,
+  ]);
+
+  return probed.trim();
+};
+
 beforeAll(async () => {
   work = await makeDirectory("routes");
   library = join(work, "library");
@@ -479,7 +512,7 @@ describe("music routes", { timeout: 60_000 }, () => {
     expect((await widthOf(small, "small.jpg")).trim()).toBe("185");
 
     // A copy the cache pruner removed is made again on the next request.
-    await removeDirectory(join(work, "data", "artwork", "w185"));
+    await removeDirectory(join(work, "data", "artwork", "s185"));
     expect((await widthOf(await fetch(sized("185")), "again.jpg")).trim()).toBe("185");
 
     // The server never enlarges a cover, so a width past it answers the cover's own size.
@@ -506,6 +539,15 @@ describe("music routes", { timeout: 60_000 }, () => {
       (await fetch(`${baseUrl}/music/art/${missing}?ticket=${await artTicket(missing)}&w=185`))
         .status,
     ).toBe(404);
+  });
+
+  it("resize a cover that is not square by its shorter side, and never enlarge one", async () => {
+    // A cover is drawn as a square crop, so the crop of each copy needs the asked size each way.
+    expect(await servedArtSize("1200x600", "185")).toBe("370,185");
+    expect(await servedArtSize("600x1200", "185")).toBe("185,370");
+    expect(await servedArtSize("1201x599", "342")).toBe("686,342");
+    expect(await servedArtSize("640x480", "1280")).toBe("640,480");
+    expect(await servedArtSize("300x150", "185")).toBe("300,150");
   });
 
   it("serve a Cast receiver's credential the song its sender started, past the ticket's expiry", async () => {

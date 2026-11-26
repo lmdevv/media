@@ -1,8 +1,8 @@
 /**
  * Music's byte routes (`@media/contracts/music-playback`) on the server's Effect HTTP router
  * (ADR 0010): a song's stream at a profile to its personal ticket, and album art to its shareable
- * ticket (ADR 0011), as stored or resized to one of `ARTWORK_WIDTHS`. Answers are plain text with
- * the statuses music's players read. No answer, log, or span carries a ticket.
+ * ticket (ADR 0011), as stored or with its shorter side resized to one of `ARTWORK_WIDTHS`. Answers
+ * are plain text with the statuses music's players read. No answer, log, or span carries a ticket.
  */
 import { requestedArtworkWidth } from "@media/contracts/artwork";
 import { isReceiverCredential } from "@media/contracts/cast";
@@ -315,7 +315,7 @@ export const layer: Layer.Layer<
       // The art store names a cover by its content hash, so the hash alone names each resized copy.
       const image = Option.isNone(width.success)
         ? { path, contentType: imageContentType(head) }
-        : yield* store.resize(path, `music-art:${hash}`, width.success.value);
+        : yield* store.resizeCover(path, `music-art:${hash}`, width.success.value);
 
       return yield* fileResponse(request, image.path, {
         contentType: image.contentType,

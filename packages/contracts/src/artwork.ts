@@ -3,7 +3,8 @@
  * `Season.poster`, `Episode.still`, and so on): opaque, URL-safe strings the media service minted
  * while scanning. Clients load an image from `${mediaBaseUrl}/artwork/${key}`, and a music cover
  * from the path the music commands answer (`/music/art/<hash>`). Either can be resized to one of
- * `ARTWORK_WIDTHS` with `?w=`. An image URL also carries a shareable `ticket` for the key's
+ * `ARTWORK_WIDTHS` with `?w=`: artwork by its width, and a music cover, which clients draw as a
+ * square crop, by its shorter side. Neither is enlarged. An image URL also carries a shareable `ticket` for the key's
  * `artworkTicketId` (`@media/contracts/ticket`), the same string for a whole week, so images still
  * cache (ADR 0011).
  */
@@ -31,8 +32,9 @@ const decodeWidth = Schema.decodeUnknownOption(
 );
 
 /**
- * The width to ask for an image drawn `pixels` wide: the smallest one that covers it, so the image
- * is never soft, or undefined when only the original does.
+ * The width to ask for a music cover drawn `pixels` wide: the smallest one that covers it, so the
+ * cover is never soft, or undefined when only the original does. The server bounds a cover's
+ * shorter side by the width, so the copy covers a frame of that size whatever the cover's shape.
  *
  * @param pixels - The drawn size in device pixels, the longer side of the image's frame in points
  *   times the screen's pixel density, since a cover fills its frame.
