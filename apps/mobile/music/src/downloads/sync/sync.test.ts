@@ -243,6 +243,43 @@ const withCover = (track: OfflineTrack, title: string): DownloadManifest => ({
   ],
 });
 
+describe("DownloadSync in Low Power Mode", () => {
+  it("starts no transfer on its own while it is on, and fetches the rest once it turns off", async () => {
+    const one = song("t1", "Safe from Harm");
+
+    media.serve("/song/t1", "first song");
+    await settled((snapshot) => snapshot.ready);
+    await sync.request(ALBUM, DETAILS);
+    sync.setLowPower(true);
+    // The album gained its song on the server while Low Power Mode is on.
+    sync.offerManifest(pinIdOf(ALBUM), manifestOf([one]));
+    await settled((snapshot) => snapshot.tracks.get(one.id) === "queued");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(core.calls.filter((call) => call.startsWith("ticket:"))).toEqual([]);
+    expect(sync.getSnapshot().copies.size).toBe(0);
+
+    sync.setLowPower(false);
+    const done = await settled((snapshot) => snapshot.copies.size === 1);
+
+    expect(done.tracks.get(one.id)).toBe("downloaded");
+  });
+
+  it("fetches a download the person starts while it is on", async () => {
+    const one = song("t1", "Safe from Harm");
+
+    media.serve("/song/t1", "first song");
+    await settled((snapshot) => snapshot.ready);
+    sync.setLowPower(true);
+    await sync.request(ALBUM, DETAILS);
+    sync.offerManifest(pinIdOf(ALBUM), manifestOf([one]));
+
+    const done = await settled((snapshot) => snapshot.copies.size === 1);
+
+    expect(done.tracks.get(one.id)).toBe("downloaded");
+  });
+});
+
 describe("DownloadSync over the core", () => {
   it("keeps each song of a download on the core, fetches it with a ticket, and stores its revision", async () => {
     const one = song("t1", "Safe from Harm");

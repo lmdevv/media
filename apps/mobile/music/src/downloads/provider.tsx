@@ -6,6 +6,7 @@ import { usePlatform, usePlatformStatus } from "@media/sdk/react";
 import { isFailure } from "@media/mobile-core/failure";
 import { lastPerson } from "@media/mobile-core/sign-in";
 import { Equal, Option, Schema } from "effect";
+import { useLowPowerMode } from "expo-battery";
 import { CryptoDigestAlgorithm, digestStringAsync } from "expo-crypto";
 import {
   createContext,
@@ -459,7 +460,7 @@ const useQuality = (): [DownloadQuality, (quality: DownloadQuality) => void] => 
 
 /**
  * Keeps the account's downloads on this phone while the app runs, and fetches new ones while the
- * server answers. Mount it inside the platform provider, above the session phase, which opens the
+ * server answers. In Low Power Mode it fetches only the downloads the person starts then. Mount it inside the platform provider, above the session phase, which opens the
  * app on the downloads when the server is out of reach, and above the player, which plays
  * downloaded songs from their files.
  */
@@ -472,10 +473,17 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
   const [quality, setQuality] = useQuality();
   const chosen = useRef(quality);
   const current = useRef<DownloadSync | null>(null);
+  const lowPower = useLowPowerMode();
+  const saving = useRef(lowPower);
 
   useLayoutEffect(() => {
     chosen.current = quality;
   }, [quality]);
+
+  useLayoutEffect(() => {
+    saving.current = lowPower;
+    current.current?.setLowPower(lowPower);
+  }, [lowPower]);
 
   useLayoutEffect(() => {
     if (userId === null) return undefined;
@@ -522,6 +530,7 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
       });
 
       created = opened;
+      opened.setLowPower(saving.current);
       opened.start();
       current.current = opened;
       setSync(opened);
