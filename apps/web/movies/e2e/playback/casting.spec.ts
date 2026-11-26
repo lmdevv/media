@@ -136,9 +136,115 @@ const titleId = (name: string): TitleId => {
 const activeRung = (target: Page) =>
   target.getByRole("list", { name: "Playback mode" }).locator('[aria-current="true"]');
 
-const negotiateAnswer = Schema.decodeUnknownSync(Schema.toCodecJson(NegotiateResponse));
+const negotiateJson = Schema.toCodecJson(NegotiateResponse);
+
+const negotiateAnswer = Schema.decodeUnknownSync(negotiateJson);
 
 const seekAnswer = Schema.toCodecJson(SeekResponse);
+
+/** Stream info's panel. */
+const streamInfo = (target: Page) => target.getByRole("region", { name: "Stream info" });
+
+const openInfo = async (target: Page): Promise<void> => {
+  await revealControls(target);
+  await target.getByRole("button", { name: "Stream info" }).click();
+  await expect(streamInfo(target)).toBeVisible();
+};
+
+const closeInfo = async (target: Page): Promise<void> => {
+  await target.getByRole("button", { name: "Close stream info" }).click();
+  await expect(streamInfo(target)).toBeHidden();
+};
+
+/**
+ * A change naming `generation`. On a CPU-only server every generation runs the same stages, so an
+ * answer that carries one tells its generation apart in stream info, as `MARKED`.
+ */
+const marker = (generation: number) => ({
+  at: EpochMillis.make(Date.now()),
+  generation,
+  cause: "capability",
+  excluded: ["encode.qsv"],
+  reason: "reproduced" as const,
+});
+
+/** What stream info shows of a `marker`. */
+const MARKED = /Changed\s*\d\d:\d\d · probe failed too · encode\.qsv/u;
+
+/** Marks each seek answer from now on with a `marker`; answers the generations moved to, in order. */
+const markSeeks = async (target: Page): Promise<ReadonlyArray<number>> => {
+  const moves: Array<number> = [];
+
+  await target.route(`**${MEDIA_ROUTES.seek}`, async (route) => {
+    const response = await route.fetch();
+    const moved = Schema.decodeUnknownSync(seekAnswer)(await response.json());
+
+    moves.push(moved.generation);
+    await route.fulfill({
+      response,
+      json: Schema.encodeSync(seekAnswer)({
+        ...moved,
+        transcode: {
+          ...moved.transcode,
+          changes: [...moved.transcode.changes, marker(moved.generation)],
+        },
+      }),
+    });
+  });
+
+  return moves;
+};
+
+/**
+ * Keeps each negotiation answer from now on, in order, and marks the `nth` and later ones with a
+ * `marker`, so stream info tells a later negotiation's stream from an earlier one's.
+ */
+const markNegotiations = async (
+  target: Page,
+  nth: number,
+): Promise<ReadonlyArray<NegotiateResponse>> => {
+  const answers: Array<NegotiateResponse> = [];
+
+  await target.route(`**${MEDIA_ROUTES.negotiate}`, async (route) => {
+    const response = await route.fetch();
+    const answer = negotiateAnswer(await response.json());
+    const { transcode } = answer;
+
+    answers.push(answer);
+
+    if (answers.length < nth || transcode === undefined) return route.fulfill({ response });
+
+    return route.fulfill({
+      response,
+      json: Schema.encodeSync(negotiateJson)({
+        ...answer,
+        transcode: {
+          ...transcode,
+          changes: [...transcode.changes, marker(answer.generation ?? 0)],
+        },
+      }),
+    });
+  });
+
+  return answers;
+};
+
+/**
+ * Has the page note on its body (`data-stream-info-showed`) whether stream info shows `text` from
+ * now on, even for a moment.
+ */
+const noteStreamInfoShowing = (target: Page, text: string): Promise<void> =>
+  target.evaluate((watched) => {
+    const observer = new MutationObserver(() => {
+      const panel = document.querySelector('section[aria-label="Stream info"]');
+
+      if (panel?.textContent.includes(watched) === true) {
+        document.body.dataset.streamInfoShowed = "true";
+      }
+    });
+
+    observer.observe(document.body, { subtree: true, childList: true, characterData: true });
+  }, text);
 
 /** The volume levels the TV was sent, in order. */
 const levels = (commands: FakeReceiver["commands"]) =>
@@ -496,23 +602,12 @@ test("stream info describes the stream the TV plays, follows the generation its 
   await page.goto(moviesPath(`/watch/${titleId(VP9)}?start=0`));
   await expectPlayingPast(page, 1);
 
-  const info = page.getByRole("region", { name: "Stream info" });
+  const info = streamInfo(page);
 
-  const openInfo = async () => {
-    await revealControls(page);
-    await page.getByRole("button", { name: "Stream info" }).click();
-    await expect(info).toBeVisible();
-  };
-
-  const closeInfo = async () => {
-    await page.getByRole("button", { name: "Close stream info" }).click();
-    await expect(info).toBeHidden();
-  };
-
-  await openInfo();
+  await openInfo(page);
   await expect(activeRung(page)).toHaveText("Direct");
   await expect(info).not.toContainText("Encode");
-  await closeInfo();
+  await closeInfo(page);
   await castFake(page, "devicesAppear");
 
   const negotiated = page.waitForResponse(
@@ -528,43 +623,17 @@ test("stream info describes the stream the TV plays, follows the generation its 
   expect(first).toBeGreaterThan(0);
 
   // The TV plays the transcode, so stream info shows its stages, not the page's direct file.
-  await openInfo();
+  await openInfo(page);
   await expect(activeRung(page)).toHaveText("Transcode");
   await expect(info).toContainText("Decode · CPU");
   await expect(info).toContainText("Encode · CPU");
   await expect(info).not.toContainText("Changed");
-  await closeInfo();
+  await closeInfo(page);
 
   // On a CPU-only server every generation runs the same stages, so each seek answer gets a change
   // that names its generation: stream info shows it only once it follows the generation the TV
   // moved to.
-  const moves: Array<number> = [];
-
-  await page.route(`**${MEDIA_ROUTES.seek}`, async (route) => {
-    const response = await route.fetch();
-    const moved = Schema.decodeUnknownSync(seekAnswer)(await response.json());
-
-    moves.push(moved.generation);
-    await route.fulfill({
-      response,
-      json: Schema.encodeSync(seekAnswer)({
-        ...moved,
-        transcode: {
-          ...moved.transcode,
-          changes: [
-            ...moved.transcode.changes,
-            {
-              at: EpochMillis.make(Date.now()),
-              generation: moved.generation,
-              cause: "capability",
-              excluded: ["encode.qsv"],
-              reason: "reproduced",
-            },
-          ],
-        },
-      }),
-    });
-  });
+  const moves = await markSeeks(page);
 
   const loads = (await receiver(page)).loads.length;
 
@@ -573,11 +642,11 @@ test("stream info describes the stream the TV plays, follows the generation its 
   await expect.poll(() => moves.at(-1) ?? 0).toBeGreaterThan(first);
   await expect.poll(async () => (await receiver(page)).loads.length).toBeGreaterThan(loads);
   await page.unroute(`**${MEDIA_ROUTES.seek}`);
-  await openInfo();
+  await openInfo(page);
   await expect(activeRung(page)).toHaveText("Transcode");
   await expect(info).toContainText("Encode · CPU");
-  await expect(info).toContainText(/Changed\s*\d\d:\d\d · probe failed too · encode\.qsv/u);
-  await closeInfo();
+  await expect(info).toContainText(MARKED);
+  await closeInfo(page);
 
   // The page takes the start back where the TV was, with the direct file, and stream info says so.
   await castFake(page, "disconnect");
@@ -589,11 +658,111 @@ test("stream info describes the stream the TV plays, follows the generation its 
       return readyState > 0 && currentTime > 200;
     })
     .toBe(true);
-  await openInfo();
+  await openInfo(page);
   await expect(activeRung(page)).toHaveText("Direct");
   await expect(info).not.toContainText("Encode");
   await expect(info).not.toContainText("Changed");
-  await closeInfo();
+  await closeInfo(page);
+});
+
+test("stream info keeps the TV's generation until the TV takes the next one's load", async () => {
+  await page.goto(moviesPath(`/watch/${titleId(VP9)}?start=0`));
+  await expectPlayingPast(page, 1);
+  await castFake(page, "devicesAppear");
+  await castToTv(page);
+
+  const info = streamInfo(page);
+  const moves = await markSeeks(page);
+  const loads = (await receiver(page)).loads.length;
+
+  // The seek moves the stream to a new generation, whose load the TV holds unanswered.
+  await castFake(page, "holdLoad");
+  await revealControls(page);
+  await clickScrubber(page, 0.9);
+  await expect.poll(() => moves.length).toBe(1);
+  await expect.poll(async () => (await receiver(page)).loads.length).toBe(loads + 1);
+  await openInfo(page);
+  await expect(activeRung(page)).toHaveText("Transcode");
+  await expect(info).not.toContainText("Changed");
+
+  await castFake(page, "releaseLoad");
+  await expect(info).toContainText(MARKED);
+  await closeInfo(page);
+  await page.unroute(`**${MEDIA_ROUTES.seek}`);
+  await castFake(page, "disconnect");
+});
+
+test("a generation the TV refuses never reaches stream info, and the page takes over", async () => {
+  await page.goto(moviesPath(`/watch/${titleId(VP9)}?start=0`));
+  await expectPlayingPast(page, 1);
+  await castFake(page, "devicesAppear");
+  await castToTv(page);
+
+  const info = streamInfo(page);
+  const moves = await markSeeks(page);
+  const loads = (await receiver(page)).loads.length;
+
+  await noteStreamInfoShowing(page, "Changed");
+  await castFake(page, "holdLoad");
+  await revealControls(page);
+  await clickScrubber(page, 0.9);
+  await expect.poll(() => moves.length).toBe(1);
+  await expect.poll(async () => (await receiver(page)).loads.length).toBe(loads + 1);
+  await openInfo(page);
+  await expect(info).not.toContainText("Changed");
+
+  await castFake(page, "refuseLoad");
+  await expect(page.getByText("The TV couldn't play this. Continuing here.")).toBeVisible();
+  await expect(page.getByTestId("casting-state")).toBeHidden();
+  await expect(activeRung(page)).toHaveText("Direct");
+  expect(await page.locator("body").getAttribute("data-stream-info-showed")).toBeNull();
+  await closeInfo(page);
+  await page.unroute(`**${MEDIA_ROUTES.seek}`);
+});
+
+test("a load of a cast session that ended, answered late, leaves the newer session's stream on the TV and in stream info", async () => {
+  await page.goto(moviesPath(`/watch/${titleId(VP9)}?start=0`));
+  await expectPlayingPast(page, 1);
+  await castFake(page, "devicesAppear");
+
+  const info = streamInfo(page);
+  const negotiated = await markNegotiations(page, 2);
+
+  // The first session's load goes unanswered until after the device disconnects and reconnects.
+  await castFake(page, "holdLoad");
+  await revealControls(page);
+  await page.getByRole("button", { name: "Cast" }).click();
+  await page
+    .getByRole("dialog", { name: "Play on" })
+    .getByRole("button", { name: /Chromecast/u })
+    .click();
+  await expect.poll(async () => (await receiver(page)).loads.length).toBe(1);
+  await castFake(page, "disconnect");
+  await castToTv(page);
+  expect(negotiated).toHaveLength(2);
+
+  const [first, second] = negotiated;
+  const newer = (await receiver(page)).loads[1]?.contentId ?? "";
+
+  await openInfo(page);
+  await expect(info).toContainText(MARKED);
+
+  // The first session ends its own stream once it hears its load was taken: by then it is done.
+  const stopped = page.waitForRequest(
+    (request) =>
+      request.url().endsWith(MEDIA_ROUTES.stop) &&
+      (request.postData() ?? "").includes(first?.streamId ?? "none"),
+  );
+
+  await castFake(page, "releaseLoad");
+  await stopped;
+  await expect(info).toContainText(MARKED);
+  expect((await receiver(page)).media).toBe(newer);
+  expect(newer).toContain(`/${second?.streamId ?? "none"}/`);
+  await expect(page.getByTestId("casting-state")).toHaveText("Playing on Living Room TV");
+  await closeInfo(page);
+  await page.unroute(`**${MEDIA_ROUTES.negotiate}`);
+  await castFake(page, "disconnect");
 });
 
 test("leaving the player while casting saves where the TV was", async () => {
