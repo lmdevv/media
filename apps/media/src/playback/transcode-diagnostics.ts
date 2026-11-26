@@ -135,11 +135,27 @@ export const deliveredVideo = (video: VideoPlan, source: VideoStream): Delivered
     }),
   });
 
-/** ffmpeg's version line, whose version is a token of letters, digits, and `.+~-`. */
-const VERSION = /^ffmpeg version ([\w.+~-]{1,64})(?:\s|$)/u;
+/**
+ * The most characters ffmpeg's version or a driver's name and version takes in the report. Both
+ * are what the tools say of themselves; the cap keeps a malformed line from filling the report.
+ */
+const IDENTITY_CHARS_MAX = 64;
 
-/** `ffmpeg version 9.0.2 Copyright …` → `9.0.2`; null for a line in any other form. */
-const versionOf = (line: string): string | null => VERSION.exec(line)?.[1] ?? null;
+/** `text`, or null when it is longer than the report takes. */
+const bounded = (text: string): string | null => (text.length <= IDENTITY_CHARS_MAX ? text : null);
+
+/** ffmpeg's version line, whose version is a token of letters, digits, and `.+~-`. */
+const VERSION = /^ffmpeg version ([\w.+~-]+)(?:\s|$)/u;
+
+/**
+ * `ffmpeg version 9.0.2 Copyright …` → `9.0.2`; null for a line in any other form or a version
+ * past the cap.
+ */
+const versionOf = (line: string): string | null => {
+  const version = VERSION.exec(line)?.[1];
+
+  return version === undefined ? null : bounded(version);
+};
 
 /**
  * A userspace driver as libva names it, `Intel iHD driver for Intel(R) Gen Graphics - 25.2.6`: a
@@ -149,13 +165,13 @@ const DRIVER = /^([A-Za-z][A-Za-z0-9 ().+-]{0,79}?) - (\d{1,4}(?:\.\d{1,4}){0,3}
 
 /**
  * The driver's name and version alone, such as `Intel iHD driver for Intel(R) Gen Graphics
- * 25.2.6`: whatever follows the version stays off the wire, and a driver named in another form is
- * null.
+ * 25.2.6`: whatever follows the version stays off the wire, and a driver named in another form,
+ * or longer than the cap, is null.
  */
 const driverOf = (named: string): string | null => {
   const [, name, version] = DRIVER.exec(named) ?? [];
 
-  return name === undefined || version === undefined ? null : `${name} ${version}`;
+  return name === undefined || version === undefined ? null : bounded(`${name} ${version}`);
 };
 
 const basename = (node: string): string => node.slice(node.lastIndexOf("/") + 1);

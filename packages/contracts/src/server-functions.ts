@@ -276,7 +276,10 @@ const CreditedPerson = Schema.Struct({
 
 /** The ffmpeg build the media service transcodes with. */
 const TranscodingBuild = Schema.Struct({
-  /** ffmpeg's version, such as `9.0.2` or `7.1.3-0+deb13u1`; null when its version line has none. */
+  /**
+   * ffmpeg's version as its version line gives it, such as `9.0.2` or `7.1.3-0+deb13u1`; null
+   * when that line has none, or one past 64 characters.
+   */
   version: Schema.NullOr(Schema.String),
   /** The kernel release the evidence was gathered on, such as `6.18.63`. */
   kernel: Schema.String,
@@ -297,8 +300,9 @@ const TranscodingDevice = Schema.Struct({
   /** The kernel driver bound to it, such as `i915`. */
   kernelDriver: Schema.NullOr(Schema.String),
   /**
-   * The userspace driver ffmpeg loaded, by name and version alone, such as `Intel iHD driver for
-   * Intel(R) Gen Graphics 25.2.6`; null when ffmpeg named none in that form.
+   * The userspace driver ffmpeg loaded, by name and version alone as the driver names itself, such
+   * as `Intel iHD driver for Intel(R) Gen Graphics 25.2.6`; null when ffmpeg named none in that
+   * form, or one past 64 characters.
    */
   userDriver: Schema.NullOr(Schema.String),
   /** When the service identified it. */
