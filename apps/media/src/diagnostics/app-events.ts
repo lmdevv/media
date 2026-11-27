@@ -77,28 +77,34 @@ const commonFields = (
 
 const logEvent = (event: AppEvent, fields: ReturnType<typeof commonFields>) =>
   AppEvent.match(event, {
-    Launched: ({ firstScreenVisibleMs, firstScreenHitched, homeContent }) =>
+    Launched: ({ firstScreen, homeContent }) =>
       Effect.logInfo("App.launched").pipe(
         Effect.annotateLogs({
           source: "app",
           ...fields,
           launch: "cold",
-          firstScreenVisibleMs,
-          firstScreenHitched,
-          homeContentVisibleMs: homeContent?.ms ?? null,
-          homeContentHitched: homeContent?.hitched ?? null,
+          firstScreenReadyMs: firstScreen.readyMs,
+          firstScreenReadyHitched: firstScreen.readyHitched,
+          firstScreenAtRestMs: firstScreen.atRestMs,
+          firstScreenAtRestHitched: firstScreen.atRestHitched,
+          homeContentReadyMs: homeContent?.readyMs ?? null,
+          homeContentReadyHitched: homeContent?.readyHitched ?? null,
+          homeContentAtRestMs: homeContent?.atRestMs ?? null,
+          homeContentAtRestHitched: homeContent?.atRestHitched ?? null,
           homeSource: homeContent?.source ?? null,
         }),
       ),
-    ScreenOpened: ({ screen, cache, contentVisibleMs, hitched }) =>
+    ScreenOpened: ({ screen, cache, content }) =>
       Effect.logInfo("App.screenOpened").pipe(
         Effect.annotateLogs({
           source: "app",
           ...fields,
           screen,
           cache,
-          contentVisibleMs,
-          hitched,
+          contentReadyMs: content.readyMs,
+          contentReadyHitched: content.readyHitched,
+          contentAtRestMs: content.atRestMs,
+          contentAtRestHitched: content.atRestHitched,
         }),
       ),
     ErrorCaught: ({ kind, fatal, route, errorClass, frames, requestId }) =>

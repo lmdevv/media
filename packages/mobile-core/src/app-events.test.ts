@@ -40,7 +40,7 @@ import {
 } from "./app-events";
 import type {
   AppEventsOptions,
-  FrameEnd,
+  FrameMarks,
   GlobalErrorUtils,
   Owner,
   SendAppEvents,
@@ -59,8 +59,22 @@ const SCRIPT_URL =
 const SCRIPT_IN_STACK =
   "http://127.0.0.1:8081/apps/mobile/movies/node_modules/expo-router/entry.bundle//&platform=ios&dev=false&transform.routerRoot=src/app";
 
-/** A frame mark's refresh at monotonic time `at`, on time unless `hitched`. */
-const drawn = (at: number, hitched = false): FrameEnd => ({ at, hitched });
+/**
+ * What a frame mark saw: its content at rest at monotonic time `at`, on time unless `hitched`, and
+ * ready at `readyAt`, on time, which is `at` unless given.
+ */
+const drawn = (at: number, hitched = false, readyAt = at): FrameMarks => ({
+  ready: { at: readyAt, hitched: false },
+  atRest: { at, hitched },
+});
+
+/** The timing `drawn` makes, `atRestMs` and `readyMs` from the timing's start. */
+const timing = (atRestMs: number, atRestHitched = false, readyMs = atRestMs) => ({
+  readyMs,
+  readyHitched: false,
+  atRestMs,
+  atRestHitched,
+});
 
 const LUCIA: Owner = { server: "http://media.local", account: "user_lucia" };
 
@@ -203,15 +217,15 @@ const THROWN_FRAMES = [
 ];
 
 describe("launch timing", () => {
-  it("records Home's screen and its content as two marks, each from the process start", async () => {
+  it("records Home's screen and its content, each ready and at rest, from the process start", async () => {
     const phone = device();
     const events = phone.open();
     const server = recordingSender();
 
     events.attach(LUCIA, server.send);
     events.landed("home");
-    events.firstScreenVisible(drawn(BOOTED + 7300, true));
-    events.homeContentVisible(drawn(BOOTED + 7566), "network");
+    events.firstScreenMarked(drawn(BOOTED + 7300, true, BOOTED + 7200));
+    events.homeContentMarked(drawn(BOOTED + 7566, false, BOOTED + 7400), "network");
     phone.advance(FLUSH_DELAY_MS);
     await settled();
 
@@ -224,9 +238,8 @@ describe("launch timing", () => {
     expect(server.events()).toEqual([
       {
         _tag: "Launched",
-        firstScreenVisibleMs: 8200,
-        firstScreenHitched: true,
-        homeContent: { ms: 8466, source: "network", hitched: false },
+        firstScreen: timing(8200, true, 8100),
+        homeContent: { ...timing(8466, false, 8300), source: "network" },
       },
     ]);
   });
@@ -238,17 +251,16 @@ describe("launch timing", () => {
 
     events.attach(LUCIA, server.send);
     events.landed("home");
-    events.homeContentVisible(drawn(BOOTED + 120), "downloads");
-    events.firstScreenVisible(drawn(BOOTED + 160));
+    events.homeContentMarked(drawn(BOOTED + 120), "downloads");
+    events.firstScreenMarked(drawn(BOOTED + 160));
     phone.advance(FLUSH_DELAY_MS);
     await settled();
 
     expect(server.events()).toEqual([
       {
         _tag: "Launched",
-        firstScreenVisibleMs: 1060,
-        firstScreenHitched: false,
-        homeContent: { ms: 1020, source: "downloads", hitched: false },
+        firstScreen: timing(1060, false),
+        homeContent: { ...timing(1020, false), source: "downloads" },
       },
     ]);
   });
@@ -260,13 +272,11 @@ describe("launch timing", () => {
 
     events.attach(LUCIA, server.send);
     events.landed("home");
-    events.firstScreenVisible(drawn(BOOTED + 100));
+    events.firstScreenMarked(drawn(BOOTED + 100));
     phone.advance(HOME_WAIT_MS + FLUSH_DELAY_MS);
     await settled();
 
-    expect(server.events()).toEqual([
-      { _tag: "Launched", firstScreenVisibleMs: 1000, firstScreenHitched: false },
-    ]);
+    expect(server.events()).toEqual([{ _tag: "Launched", firstScreen: timing(1000) }]);
   });
 
   it("drops a launch that went to the background before Home showed", async () => {
@@ -278,8 +288,8 @@ describe("launch timing", () => {
     events.landed("home");
     events.appStateChanged("background");
     events.appStateChanged("active");
-    events.firstScreenVisible(drawn(BOOTED + 100));
-    events.homeContentVisible(drawn(BOOTED + 100), "network");
+    events.firstScreenMarked(drawn(BOOTED + 100));
+    events.homeContentMarked(drawn(BOOTED + 100), "network");
     phone.advance(FLUSH_DELAY_MS);
     await settled();
 
@@ -295,7 +305,7 @@ describe("launch timing", () => {
     events.attach(LUCIA, server.send);
     events.landed("elsewhere");
     events.landed("home");
-    events.firstScreenVisible(drawn(BOOTED + 100));
+    events.firstScreenMarked(drawn(BOOTED + 100));
     phone.advance(FLUSH_DELAY_MS);
     await settled();
 
@@ -317,7 +327,7 @@ describe("launch timing", () => {
 });
 
 describe("screen-open timing", () => {
-  it("times the touch to the frame its content showed, with the cache state it mounted with", async () => {
+  it("times the touch to its content ready and at rest, with the cache state it mounted with", async () => {
     const phone = device();
     const events = phone.open({ processStartedAt: null });
     const server = recordingSender();
@@ -327,7 +337,7 @@ describe("screen-open timing", () => {
     events.pressed("album", "album_1", BOOTED + 10);
     const claim = Option.getOrThrow(events.claimOpen("album", "album_1", "album-key-1", "fetched"));
 
-    events.openContentVisible(claim, drawn(BOOTED + 277, true));
+    events.openContentMarked(claim, drawn(BOOTED + 677, true, BOOTED + 277));
     phone.advance(FLUSH_DELAY_MS);
     await settled();
 
@@ -336,10 +346,25 @@ describe("screen-open timing", () => {
         _tag: "ScreenOpened",
         screen: "album",
         cache: "fetched",
-        contentVisibleMs: 267,
-        hitched: true,
+        content: timing(667, true, 267),
       },
     ]);
+  });
+
+  it("sends no open whose content was ready after it came to rest", async () => {
+    const phone = device();
+    const events = phone.open({ processStartedAt: null });
+    const server = recordingSender();
+
+    events.attach(LUCIA, server.send);
+    events.pressed("title", "title_1", BOOTED);
+    const claim = Option.getOrThrow(events.claimOpen("title", "title_1", "t", "kept"));
+
+    events.openContentMarked(claim, drawn(BOOTED + 300, false, BOOTED + 301));
+    phone.advance(FLUSH_DELAY_MS);
+    await settled();
+
+    expect(server.events()).toEqual([]);
   });
 
   it("measures on the monotonic clock, so a wall clock step changes nothing", async () => {
@@ -352,7 +377,7 @@ describe("screen-open timing", () => {
     const claim = Option.getOrThrow(events.claimOpen("title", "title_1", "t", "kept"));
 
     phone.clock.wall -= 500;
-    events.openContentVisible(claim, drawn(BOOTED + 81));
+    events.openContentMarked(claim, drawn(BOOTED + 81));
     phone.advance(FLUSH_DELAY_MS);
     await settled();
 
@@ -361,8 +386,7 @@ describe("screen-open timing", () => {
         _tag: "ScreenOpened",
         screen: "title",
         cache: "kept",
-        contentVisibleMs: 81,
-        hitched: false,
+        content: timing(81, false),
       },
     ]);
   });
@@ -380,12 +404,12 @@ describe("screen-open timing", () => {
     events.pressed("album", "album_2", BOOTED + 100);
     const second = Option.getOrThrow(events.claimOpen("album", "album_2", "k2", "fetched"));
 
-    events.openContentVisible(first, drawn(BOOTED + 900));
-    events.openContentVisible(second, drawn(BOOTED + 400));
+    events.openContentMarked(first, drawn(BOOTED + 900));
+    events.openContentMarked(second, drawn(BOOTED + 400));
     phone.advance(FLUSH_DELAY_MS);
     await settled();
 
-    expect(server.events()).toEqual([expect.objectContaining({ contentVisibleMs: 300 })]);
+    expect(server.events()).toEqual([expect.objectContaining({ content: timing(300) })]);
   });
 
   it("closes a timer only for the route instance that claimed it", async () => {
@@ -398,12 +422,12 @@ describe("screen-open timing", () => {
     const claim = Option.getOrThrow(events.claimOpen("artist", "artist_1", "k1", "kept"));
 
     expect(events.claimOpen("artist", "artist_1", "k2", "kept")).toEqual(Option.none());
-    events.openContentVisible({ ...claim, route: "k2" }, drawn(BOOTED + 50));
-    events.openContentVisible(claim, drawn(BOOTED + 70));
+    events.openContentMarked({ ...claim, route: "k2" }, drawn(BOOTED + 50));
+    events.openContentMarked(claim, drawn(BOOTED + 70));
     phone.advance(FLUSH_DELAY_MS);
     await settled();
 
-    expect(server.events()).toEqual([expect.objectContaining({ contentVisibleMs: 70 })]);
+    expect(server.events()).toEqual([expect.objectContaining({ content: timing(70) })]);
   });
 
   it("reads the touch's time from a press, and none from a press with no touch", () => {
@@ -434,14 +458,14 @@ describe("screen-open timing", () => {
     const blurred = Option.getOrThrow(events.claimOpen("title", "title_1", "k1", "fetched"));
 
     events.releaseOpen(blurred);
-    events.openContentVisible(blurred, drawn(BOOTED + 200));
+    events.openContentMarked(blurred, drawn(BOOTED + 200));
     phone.advance(300);
     events.pressed("title", "title_2", BOOTED + 300);
     const left = Option.getOrThrow(events.claimOpen("title", "title_2", "k2", "fetched"));
 
     events.appStateChanged("background");
     events.appStateChanged("active");
-    events.openContentVisible(left, drawn(BOOTED + 500));
+    events.openContentMarked(left, drawn(BOOTED + 500));
     phone.advance(FLUSH_DELAY_MS);
     await settled();
 
@@ -457,7 +481,7 @@ describe("screen-open timing", () => {
     events.pressed("title", "title_1", BOOTED);
     const late = Option.getOrThrow(events.claimOpen("title", "title_1", "k1", "fetched"));
 
-    events.openContentVisible(late, drawn(BOOTED + OPEN_WAIT_MS + 1));
+    events.openContentMarked(late, drawn(BOOTED + OPEN_WAIT_MS + 1));
     events.pressed("title", "title_2", BOOTED);
     phone.advance(OPEN_WAIT_MS + 1);
 
@@ -973,7 +997,7 @@ describe("owners", () => {
     expect(file.reads).toBe(0);
     expect(server.requests).toEqual([]);
 
-    after.firstScreenVisible(drawn(BOOTED + 5));
+    after.firstScreenMarked(drawn(BOOTED + 5));
     relaunched.advance(0);
 
     expect(file.reads).toBe(1);
@@ -1079,7 +1103,7 @@ describe("sending", () => {
         events.claimOpen("title", `title_${String(index)}`, "k", "kept"),
       );
 
-      events.openContentVisible(claim, drawn(phone.clock.mono + 1));
+      events.openContentMarked(claim, drawn(phone.clock.mono + 1));
     }
 
     events.appStateChanged("background");
@@ -1131,7 +1155,7 @@ describe("sending", () => {
         events.claimOpen("title", `title_${String(index)}`, "k", "kept"),
       );
 
-      events.openContentVisible(claim, drawn(phone.clock.mono + 1 + index));
+      events.openContentMarked(claim, drawn(phone.clock.mono + 1 + index));
     }
 
     events.attach(LUCIA, server.send);
@@ -1142,7 +1166,7 @@ describe("sending", () => {
       MAX_APP_EVENTS,
       MAX_PENDING_EVENTS - MAX_APP_EVENTS,
     ]);
-    expect(server.events()[0]).toMatchObject({ contentVisibleMs: 21 });
+    expect(server.events()[0]).toMatchObject({ content: timing(21) });
   });
 
   it("reaches the media server's route through the SDK as the signed-in person", async () => {
@@ -1177,8 +1201,8 @@ describe("sending", () => {
 
     events.attach(LUCIA, media.reportAppEvents);
     events.landed("home");
-    events.firstScreenVisible(drawn(BOOTED + 100));
-    events.homeContentVisible(drawn(BOOTED + 100), "network");
+    events.firstScreenMarked(drawn(BOOTED + 100));
+    events.homeContentMarked(drawn(BOOTED + 100), "network");
     events.appStateChanged("background");
     await new Promise((resolve) => setTimeout(resolve, 200));
     http.close();
@@ -1194,9 +1218,8 @@ describe("sending", () => {
         ageMs: 0,
         event: {
           _tag: "Launched",
-          firstScreenVisibleMs: 1000,
-          firstScreenHitched: false,
-          homeContent: { ms: 1000, source: "network", hitched: false },
+          firstScreen: timing(1000, false),
+          homeContent: { ...timing(1000, false), source: "network" },
         },
       },
     ]);
@@ -1233,7 +1256,7 @@ const rejectionFrom = async (status: number, requestId: string): Promise<Error> 
     events: [
       {
         ageMs: 0,
-        event: { _tag: "Launched", firstScreenVisibleMs: 1000, firstScreenHitched: false },
+        event: { _tag: "Launched", firstScreen: timing(1000) },
       },
     ],
   };
@@ -1405,11 +1428,13 @@ describe("what goes out", () => {
         readonly key: string;
         readonly cache: OpenCache;
         readonly ms: number;
+        readonly lead: number;
         readonly hitched: boolean;
       }
     | {
         readonly type: "launch";
         readonly ms: number;
+        readonly lead: number;
         readonly hitched: boolean;
         readonly source: ContentSource;
       };
@@ -1429,11 +1454,13 @@ describe("what goes out", () => {
       key: text,
       cache: fc.constantFrom(...OpenCache.literals),
       ms: fc.nat(5000),
+      lead: fc.nat(5000),
       hitched: fc.boolean(),
     }),
     fc.record({
       type: fc.constant("launch" as const),
       ms: fc.nat(20_000),
+      lead: fc.nat(20_000),
       hitched: fc.boolean(),
       source: fc.constantFrom(...ContentSource.literals),
     }),
@@ -1458,12 +1485,17 @@ describe("what goes out", () => {
             if (each.type === "caught") events.caught(each.cause, each.kind, each.fatal);
             else if (each.type === "route") events.routeChanged(each.route);
             else if (each.type === "launch") {
-              events.firstScreenVisible(drawn(now + each.ms, each.hitched));
-              events.homeContentVisible(drawn(now + each.ms, each.hitched), each.source);
+              const marks = drawn(now + each.ms, each.hitched, now + each.ms - each.lead);
+
+              events.firstScreenMarked(marks);
+              events.homeContentMarked(marks, each.source);
             } else {
               events.pressed(each.screen, each.id, now);
               Option.map(events.claimOpen(each.screen, each.id, each.key, each.cache), (claim) =>
-                events.openContentVisible(claim, drawn(now + each.ms, each.hitched)),
+                events.openContentMarked(
+                  claim,
+                  drawn(now + each.ms, each.hitched, now + each.ms - each.lead),
+                ),
               );
             }
 

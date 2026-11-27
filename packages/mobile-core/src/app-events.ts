@@ -3,13 +3,13 @@
  * until the person saw the result, and the unexpected errors it caught, sent in batches through
  * `POST /api/app-events` as `AppEvent`s.
  *
- * Every timing is a span of the device's monotonic clock, the one iOS stamps touches and frames
- * with, and ends on a frame the app's `LaunchClock` module saw drawn: a `FrameMark` view over the
- * content reports the first display refresh that shows the content as it will rest, in place with
- * any slide-in transition over, faded in, and under no view such as the splash screen. A cold
- * launch runs from the process start the kernel records; a screen open from the touch that ended
- * the press. A span that crosses a trip to the background, or comes out negative or past its bound,
- * is dropped.
+ * Every timing is a pair of spans of the device's monotonic clock, the one iOS stamps touches and
+ * frames with, each ending on a refresh the app's `LaunchClock` module saw: a `FrameMark` view over
+ * the content reports the first refresh after the content was committed and laid out (ready), and
+ * the first that shows it as it will rest, in place with any slide-in over, faded in, and under no
+ * view such as the splash screen (at rest). A cold launch runs from the process start the kernel
+ * records; a screen open from the touch that ended the press. A timing that crosses a trip to the
+ * background, or comes out negative or past its bound, is dropped.
  *
  * Every event belongs to one account on one server, its owner. Events wait in memory for their
  * owner only: a new owner or a sign-out drops them and the saved crash reports of anyone else, and
@@ -103,13 +103,22 @@ export interface CrashFile {
 }
 
 /**
- * The display refresh at which a frame mark first saw its frame on screen, in milliseconds on the
- * monotonic clock, and whether it came after one or more refreshes the app missed, when the frame
- * may have shown a refresh or more later.
+ * A display refresh a frame mark saw, in milliseconds on the monotonic clock, and whether it came
+ * after one or more refreshes the app missed, when the frame may have shown a refresh or more
+ * later.
  */
-export interface FrameEnd {
+export interface FrameAt {
   readonly at: number;
   readonly hitched: boolean;
+}
+
+/**
+ * What a frame mark over some content saw: the first refresh after the content was committed and
+ * laid out (`ready`), and the first that showed it at rest (`atRest`), never earlier.
+ */
+export interface FrameMarks {
+  readonly ready: FrameAt;
+  readonly atRest: FrameAt;
 }
 
 /** Where the app stands, as React Native's `AppState` names it. */
@@ -172,10 +181,10 @@ export interface AppEvents {
   readonly landed: (landing: Landing) => void;
   /** Whether a cold launch still waits for Home's frame marks. */
   readonly launchPending: () => boolean;
-  /** Home's screen was first in view, with the splash screen gone, at frame `end`. */
-  readonly firstScreenVisible: (end: FrameEnd) => void;
-  /** Home's real content from `source` was first in view at frame `end`. */
-  readonly homeContentVisible: (end: FrameEnd, source: ContentSource) => void;
+  /** Home's screen was ready, and at rest with the splash screen gone, at `marks`. */
+  readonly firstScreenMarked: (marks: FrameMarks) => void;
+  /** Home's real content from `source` was ready, and at rest, at `marks`. */
+  readonly homeContentMarked: (marks: FrameMarks, source: ContentSource) => void;
   /**
    * A press is opening the screen of record `id`; `touchedAt` is the monotonic time of the touch
    * that ended it. A later press replaces it. The id only matches the press to its screen; no
@@ -193,10 +202,10 @@ export interface AppEvents {
     route: string,
     cache: OpenCache,
   ) => Option.Option<OpenClaim>;
-  /** The claiming screen lost focus or unmounted before its content was in view. */
+  /** The claiming screen lost focus or unmounted before its content came to rest. */
   readonly releaseOpen: (claim: OpenClaim) => void;
-  /** The claiming screen's content was first in view at frame `end`. */
-  readonly openContentVisible: (claim: OpenClaim, end: FrameEnd) => void;
+  /** The claiming screen's content was ready, and at rest, at `marks`. */
+  readonly openContentMarked: (claim: OpenClaim, marks: FrameMarks) => void;
   /**
    * The route pattern on screen now, such as `/(tabs)/(home)`, which error reports name; one not
    * in the app's route list goes out as `unknown`.
@@ -269,8 +278,8 @@ interface Pending {
 interface LaunchTrace {
   /** The process start, on the monotonic clock. */
   readonly zero: number;
-  readonly firstScreen: Option.Option<FrameEnd>;
-  readonly home: Option.Option<{ readonly end: FrameEnd; readonly source: ContentSource }>;
+  readonly firstScreen: Option.Option<FrameMarks>;
+  readonly home: Option.Option<{ readonly marks: FrameMarks; readonly source: ContentSource }>;
   readonly cancelWait: () => void;
 }
 
@@ -294,6 +303,25 @@ const span = (from: number, to: number, max: number): Option.Option<number> => {
 
   return ms >= 0 && ms <= max ? Option.some(ms) : Option.none();
 };
+
+/** A timing's two ends, as an event carries them. */
+interface Timings {
+  readonly readyMs: number;
+  readonly readyHitched: boolean;
+  readonly atRestMs: number;
+  readonly atRestHitched: boolean;
+}
+
+/** The two ends of `marks` as spans from `from`, each at most `max`; none when either is out. */
+const timingsOf = (from: number, marks: FrameMarks, max: number): Option.Option<Timings> =>
+  Option.all([span(from, marks.ready.at, max), span(from, marks.atRest.at, max)]).pipe(
+    Option.map(([readyMs, atRestMs]) => ({
+      readyMs,
+      readyHitched: marks.ready.hitched,
+      atRestMs,
+      atRestHitched: marks.atRest.hitched,
+    })),
+  );
 
 const POSITION = /:(\d{1,9}):(\d{1,9})$/u;
 
@@ -750,24 +778,22 @@ export const createAppEvents = (options: AppEventsOptions): AppEvents => {
   const sendLaunch = (trace: LaunchTrace): void => {
     dropLaunch();
 
-    const firstScreen = Option.flatMap(trace.firstScreen, ({ at }) =>
-      span(trace.zero, at, MAX_APP_TIMING_MS),
+    const firstScreen = Option.flatMap(trace.firstScreen, (marks) =>
+      timingsOf(trace.zero, marks, MAX_APP_TIMING_MS),
     );
 
-    if (Option.isNone(firstScreen) || Option.isNone(trace.firstScreen)) return;
+    if (Option.isNone(firstScreen)) return;
 
-    const home = Option.flatMap(trace.home, ({ end, source }) =>
-      Option.map(span(trace.zero, end.at, MAX_APP_TIMING_MS), (ms) => ({
-        ms,
+    const home = Option.flatMap(trace.home, ({ marks, source }) =>
+      Option.map(timingsOf(trace.zero, marks, MAX_APP_TIMING_MS), (timings) => ({
+        ...timings,
         source,
-        hitched: end.hitched,
       })),
     );
 
     Option.map(
       AppEvent.cases.Launched.makeOption({
-        firstScreenVisibleMs: firstScreen.value,
-        firstScreenHitched: trace.firstScreen.value.hitched,
+        firstScreen: firstScreen.value,
         ...Option.match(home, {
           onNone: () => ({}),
           onSome: (homeContent) => ({ homeContent }),
@@ -904,18 +930,18 @@ export const createAppEvents = (options: AppEventsOptions): AppEvents => {
       schedule(CRASH_READ_DELAY_MS, frameDrawn);
     },
     launchPending: () => Option.isSome(launch),
-    firstScreenVisible: (end) => {
+    firstScreenMarked: (marks) => {
       frameDrawn();
 
       if (Option.isNone(launch) || Option.isSome(launch.value.firstScreen)) return;
-      const trace = { ...launch.value, firstScreen: Option.some(end) };
+      const trace = { ...launch.value, firstScreen: Option.some(marks) };
 
       launch = Option.some(trace);
       settleLaunch(trace);
     },
-    homeContentVisible: (end, source) => {
+    homeContentMarked: (marks, source) => {
       if (Option.isNone(launch) || Option.isSome(launch.value.home)) return;
-      const trace = { ...launch.value, home: Option.some({ end, source }) };
+      const trace = { ...launch.value, home: Option.some({ marks, source }) };
 
       launch = Option.some(trace);
       settleLaunch(trace);
@@ -951,7 +977,7 @@ export const createAppEvents = (options: AppEventsOptions): AppEvents => {
     releaseOpen: (claim) => {
       if (Option.exists(open, (waiting) => waiting.token === claim.token)) open = Option.none();
     },
-    openContentVisible: (claim, end) => {
+    openContentMarked: (claim, marks) => {
       const waiting = Option.filter(
         open,
         (each) =>
@@ -964,13 +990,8 @@ export const createAppEvents = (options: AppEventsOptions): AppEvents => {
       const { screen, touchedAt } = waiting.value;
 
       Option.map(
-        Option.flatMap(span(touchedAt, end.at, OPEN_WAIT_MS), (contentVisibleMs) =>
-          AppEvent.cases.ScreenOpened.makeOption({
-            screen,
-            cache: claim.cache,
-            contentVisibleMs,
-            hitched: end.hitched,
-          }),
+        Option.flatMap(timingsOf(touchedAt, marks, OPEN_WAIT_MS), (content) =>
+          AppEvent.cases.ScreenOpened.makeOption({ screen, cache: claim.cache, content }),
         ),
         enqueue,
       );

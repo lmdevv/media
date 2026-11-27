@@ -153,8 +153,12 @@ describe.skipIf(core === undefined)("the server's own routes on the core's sign-
               _tag: "ScreenOpened",
               screen: "title",
               cache: "fetched",
-              contentVisibleMs: 7654,
-              hitched: false,
+              content: {
+                readyMs: 2345,
+                readyHitched: false,
+                atRestMs: 7654,
+                atRestHitched: false,
+              },
             },
           },
         ],
@@ -173,7 +177,7 @@ describe.skipIf(core === undefined)("the server's own routes on the core's sign-
         .some(
           (line) =>
             line.includes("App.screenOpened") &&
-            line.includes('"contentVisibleMs":7654') &&
+            line.includes('"contentAtRestMs":7654') &&
             line.includes(userId),
         ),
     ).toBe(true);

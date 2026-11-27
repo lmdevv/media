@@ -7,11 +7,14 @@
 //   node app-timings.mjs <movies|music> <pass-dir>
 //   node app-timings.mjs compare <movies|music> <pass-1-dir> <pass-2-dir>
 //
-// Each record is one line of `media logs --json`: `App.launched` with `firstScreenVisibleMs` and
-// `homeContentVisibleMs`, or `App.screenOpened` with `screen`, `cache`, and `contentVisibleMs`
-// (apps/media/src/diagnostics/app-events.ts). Every value ends on a frame the app saw drawn, and
-// says whether that frame's refresh was hitched: it came after a refresh the app missed, so the
-// frame may have shown a refresh or more late.
+// Each record is one line of `media logs --json`: `App.launched` with Home's screen and content
+// timings, or `App.screenOpened` with `screen`, `cache`, and the content's timings
+// (apps/media/src/diagnostics/app-events.ts). Each timing has two ends, each a refresh the app saw:
+// content ready, the first refresh after the content was committed and laid out, wherever it
+// stood; and content at rest, the first that showed it in place with any transition over. Each
+// says whether its refresh was hitched: it came after a refresh the app missed, so the frame may
+// have shown a refresh or more late. The table sets each screen's fetched and kept opens side by
+// side, per end, to show how far apart each end puts them against its own spread.
 //
 // Each line of loads.tsv is the wall clock in milliseconds, when (`start`, `launch N`, or `end`),
 // the Mac's one-minute load average and CPU count, and this host's. A pass whose load passed
@@ -21,41 +24,53 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const launched = (field, flag) => ({
-  read: (record) => (record.message === "App.launched" ? record.annotations[field] : undefined),
-  hitched: (record) => record.annotations[flag] === true,
+const launched = (prefix, end) => ({
+  read: (record) =>
+    record.message === "App.launched" ? record.annotations[`${prefix}${end}Ms`] : undefined,
+  hitched: (record) => record.annotations[`${prefix}${end}Hitched`] === true,
 });
 
-const opened = (screen, cache) => ({
+const opened = (screen, cache, end) => ({
   read: (record) =>
     record.message === "App.screenOpened" &&
     record.annotations.screen === screen &&
     record.annotations.cache === cache
-      ? record.annotations.contentVisibleMs
+      ? record.annotations[`content${end}Ms`]
       : undefined,
-  hitched: (record) => record.annotations.hitched === true,
+  hitched: (record) => record.annotations[`content${end}Hitched`] === true,
 });
+
+/** Each timing's two ends, as the records name them and as the table does. */
+const ENDS = [
+  ["Ready", "ready"],
+  ["AtRest", "at rest"],
+];
 
 /**
  * The metrics the probe reports, in its table's order, how each reads a record, and whether that
  * sample was hitched. A launch runs from the process start; an open from the touch that ended the
  * press, per cache state: `fetched`, the screen asked for its content after it mounted; `kept`,
- * the SDK already held it.
+ * the SDK already held it. Each comes as content ready and content at rest.
  */
 export const METRICS = [
-  {
-    name: "cold launch, Home's screen visible",
-    ...launched("firstScreenVisibleMs", "firstScreenHitched"),
-  },
-  {
-    name: "cold launch, Home's content visible",
-    ...launched("homeContentVisibleMs", "homeContentHitched"),
-  },
+  ...ENDS.map(([end, label]) => ({
+    name: `cold launch, Home's screen ${label}`,
+    ...launched("firstScreen", end),
+  })),
+  ...ENDS.map(([end, label]) => ({
+    name: `cold launch, Home's content ${label}`,
+    ...launched("homeContent", end),
+  })),
   ...["title", "album", "artist"].flatMap((screen) =>
-    ["fetched", "kept"].map((cache) => ({
-      name: `${screen} open, content visible (${cache})`,
-      ...opened(screen, cache),
-    })),
+    ENDS.flatMap(([end, label]) =>
+      ["fetched", "kept"].map((cache) => ({
+        name: `${screen} open, content ${label} (${cache})`,
+        screen,
+        end: label,
+        cache,
+        ...opened(screen, cache, end),
+      })),
+    ),
   ),
 ];
 
@@ -162,11 +177,14 @@ export const spread = (values) => {
 export const summarize = (records, app) => {
   const own = records.filter((record) => record.annotations?.app === app);
 
-  return METRICS.map(({ name, read, hitched }) => {
+  return METRICS.map(({ name, read, hitched, screen, end, cache }) => {
     const samples = own.filter((record) => typeof read(record) === "number");
 
     return {
       name,
+      screen,
+      end,
+      cache,
       hitched: samples.filter(hitched).length,
       ...spread(samples.map(read)),
     };
@@ -186,6 +204,40 @@ export const table = (app, rows) =>
         (row) =>
           `| ${row.name} | ${String(row.n)} | ${String(row.hitched)} | ${ms(row.median)} | ${ms(row.p25)}–${ms(row.p75)} | ${ms(row.min)}–${ms(row.max)} |`,
       ),
+  ].join("\n");
+
+/**
+ * Per screen and end, its fetched and kept opens from the `summarize` rows: each median and
+ * interquartile range, how much longer fetched ran, and whether the two ranges overlap, which
+ * says whether that end tells the two cache states apart in this pass.
+ */
+export const separation = (rows) =>
+  rows.flatMap((row, index) => {
+    const kept = rows[index + 1];
+
+    if (row.cache !== "fetched" || kept?.cache !== "kept" || row.n === 0 || kept.n === 0) return [];
+
+    return [
+      {
+        screen: row.screen,
+        end: row.end,
+        fetched: row,
+        kept,
+        apart: row.median - kept.median,
+        overlap: row.p25 <= kept.p75 && kept.p25 <= row.p75,
+      },
+    ];
+  });
+
+/** A separation as a Markdown table. */
+export const separationTable = (rows) =>
+  [
+    "| screen, end | fetched median (p25–p75) | kept median (p25–p75) | fetched longer by | IQRs overlap |",
+    "| --- | --: | --: | --: | :-: |",
+    ...rows.map(
+      ({ screen, end, fetched, kept, apart, overlap }) =>
+        `| ${screen}, ${end} | ${ms(fetched.median)} (${ms(fetched.p25)}–${ms(fetched.p75)}) | ${ms(kept.median)} (${ms(kept.p25)}–${ms(kept.p75)}) | ${ms(apart)} | ${overlap ? "yes" : "no"} |`,
+    ),
   ].join("\n");
 
 /**
@@ -276,9 +328,12 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const development = records.some((record) => record.annotations?.development === true);
     const devServer = records.some((record) => record.annotations?.bundle === "dev-server");
 
-    console.log(table(app, summarize(records, app)));
+    const rows = summarize(records, app);
+
+    console.log(table(app, rows));
+    console.log(`\n${separationTable(separation(rows))}`);
     console.log(
-      `\n${development ? "Development" : "Production"} JavaScript${devServer ? " from a dev server, whose download every launch includes" : ""}. Launches run from the process start the kernel records, which no recording shows, to the refresh that first showed Home; opens from the touch that ended the press to the refresh that first showed the screen's content. A hitched sample's frame came after a refresh the app missed and may have shown a refresh or more later.`,
+      `\n${development ? "Development" : "Production"} JavaScript${devServer ? " from a dev server, whose download every launch includes" : ""}. Launches run from the process start the kernel records, which no recording shows; opens from the touch that ended the press. Content ready ends on the first refresh after the content was committed and laid out, wherever it stood: under the splash screen, or partway through the push. Content at rest ends on the first refresh that showed it in place with the push over, which the push's length sets a floor under. A hitched sample's frame came after a refresh the app missed and may have shown a refresh or more later.`,
     );
     console.log(loadLine(load));
   }

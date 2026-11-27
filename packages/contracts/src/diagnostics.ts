@@ -408,12 +408,42 @@ export const OpenCache = Schema.Literals(["kept", "fetched"]);
 export type OpenCache = typeof OpenCache.Type;
 
 /**
- * A timing's end: the display refresh at which a frame mark first saw its frame on screen, and
- * whether `hitched`, the refresh came after one or more the app missed. A missed refresh means the
- * frame before it was heavy, and a heavy frame can show a refresh or more after the time given, so
- * a reader can drop or widen a hitched sample.
+ * One timing's two ends, each a display refresh a frame mark over the content saw, in milliseconds
+ * from the timing's start:
+ *
+ * - `readyMs`: the first refresh after the real content (not a placeholder) was committed and laid
+ *   out, wherever it stood then: under the splash screen, or partway through a slide-in. Work that
+ *   gets the content sooner, such as preloading, moves it.
+ * - `atRestMs`: the first refresh that shows the content as it rests: in its place with any
+ *   transition over, faded in, and uncovered. It is never earlier than `readyMs`, and a fixed-length
+ *   transition sets its floor; it is the most a person can see.
+ *
+ * Each `…Hitched` says the refresh came after one or more the app missed: the frame before it was
+ * heavy and can show a refresh or more after the time given, so a reader can drop or widen it.
  */
-const FrameEnd = { hitched: Schema.Boolean } as const;
+const frameTimingFields = {
+  readyMs: TimingMs,
+  readyHitched: Schema.Boolean,
+  atRestMs: TimingMs,
+  atRestHitched: Schema.Boolean,
+} as const;
+
+const readyFirst = Schema.makeFilter(
+  (timing: { readonly readyMs: number; readonly atRestMs: number }) =>
+    timing.readyMs <= timing.atRestMs,
+  { title: "content ready no later than at rest" },
+);
+
+/** One timing's two ends: content ready and content at rest. */
+export const FrameTimings = Schema.Struct(frameTimingFields).check(readyFirst);
+
+/** One timing's two ends. */
+export interface FrameTimings extends Schema.Schema.Type<typeof FrameTimings> {}
+
+/** Home's content timing at launch, and where the content came from. */
+const HomeContentTimings = Schema.Struct({ ...frameTimingFields, source: ContentSource }).check(
+  readyFirst,
+);
 
 /** A route pattern of the movies app, or `unknown` before its first screen or for any other. */
 export const MoviesRoute = Schema.Literals([...MOVIES_ROUTES, "unknown"]);
@@ -520,25 +550,22 @@ export interface ErrorFrame extends Schema.Schema.Type<typeof ErrorFrame> {}
  */
 export const AppEvent = Schema.TaggedUnion({
   /**
-   * A cold launch that landed on Home. Both times run from the process start the kernel records,
-   * an instant before the app's first frame that no screen shows. `firstScreenVisibleMs` ends on
-   * the first frame that shows Home's screen with the splash screen gone; `homeContent` on the
-   * first frame that shows Home's real content (its rows and titles, not their artwork), and is
+   * A cold launch that landed on Home. Every time runs from the process start the kernel records,
+   * an instant before the app's first frame that no screen shows. `firstScreen` times Home's
+   * screen, loading or not: ready once React committed it, at rest once the splash screen is gone.
+   * `homeContent` times Home's real content (its rows and titles, not their artwork), and is
    * missing when Home drew none within a minute.
    */
   Launched: {
-    firstScreenVisibleMs: TimingMs,
-    firstScreenHitched: FrameEnd.hitched,
-    homeContent: Schema.optionalKey(
-      Schema.Struct({ ms: TimingMs, source: ContentSource, ...FrameEnd }),
-    ),
+    firstScreen: FrameTimings,
+    homeContent: Schema.optionalKey(HomeContentTimings),
   },
   /**
-   * A press opened a timed screen. `contentVisibleMs` runs from the touch that ended the press to
-   * the first frame in which the screen's real content is in view, which is no earlier than the
-   * native transition's first frame.
+   * A press opened a timed screen. `content` runs from the touch that ended the press: ready once
+   * the screen's real content is committed and laid out, which a preload can bring forward to the
+   * push's first frame; at rest once the push has ended with it in place.
    */
-  ScreenOpened: { screen: TimedScreen, cache: OpenCache, contentVisibleMs: TimingMs, ...FrameEnd },
+  ScreenOpened: { screen: TimedScreen, cache: OpenCache, content: FrameTimings },
   /**
    * An unexpected error the app caught on the screen of route pattern `route`. A `fatal` error
    * ended the app; it was saved on the device and sent at the next launch.

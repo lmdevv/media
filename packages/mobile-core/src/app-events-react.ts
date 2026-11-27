@@ -3,11 +3,12 @@
  * marks that time a launch and a screen open, and the boundary that reports render errors.
  *
  * A frame mark is the app's `LaunchClock` view (`modules/launch-clock`): an empty view, laid over
- * the content a person waits for, that reports once, on the monotonic clock, the display refresh
- * that first shows that content as it will rest: in its place, so a screen sliding in has arrived,
- * with the part inside the window on screen, faded in, and under no view such as the splash
- * screen; and whether that refresh came after one the app missed. It also writes the mark, by its name, to
- * the device's log (subsystem `dev.lmdevv.launch-clock`), where a probe reads the app's own clock.
+ * the content a person waits for, that reports once, on the monotonic clock, two display
+ * refreshes: the first after the content was committed and laid out (ready), and the first that
+ * shows it as it will rest (at rest): in its place, so a screen sliding in has arrived, faded in,
+ * and under no view such as the splash screen. Each says whether it came after a refresh the app
+ * missed. It also writes the mark, by its name, to the device's log (subsystem
+ * `dev.lmdevv.launch-clock`), where a probe reads the app's own clock.
  */
 import type { ContentSource, OpenCache, TimedScreen } from "@media/contracts/diagnostics";
 import { createMediaServer } from "@media/sdk/promise";
@@ -24,7 +25,7 @@ import {
 } from "react";
 import type { ComponentType, ReactNode } from "react";
 
-import type { AppEvents, FrameEnd, Landing, OpenClaim } from "./app-events";
+import type { AppEvents, FrameMarks, Landing, OpenClaim } from "./app-events";
 
 /** What a frame mark marks, the name it writes to the device's log. */
 export type FrameMarkName = "home-screen" | "home-content" | "open";
@@ -33,10 +34,11 @@ export type FrameMarkName = "home-screen" | "home-content" | "open";
 export interface FrameMarkProps {
   readonly name: FrameMarkName;
   /**
-   * The refresh that first showed the mark, on the monotonic clock, in milliseconds, and whether it
-   * came after one or more the app missed.
+   * The first refresh after the mark's content was committed and laid out, and the first that
+   * showed it at rest, each on the monotonic clock in milliseconds and with whether it came after
+   * one or more refreshes the app missed. Sent once, when the content comes to rest.
    */
-  readonly onDrawn: (event: { readonly nativeEvent: FrameEnd }) => void;
+  readonly onMarked: (event: { readonly nativeEvent: FrameMarks }) => void;
   readonly style: typeof OVER_SCREEN;
   readonly pointerEvents: "none";
 }
@@ -95,8 +97,8 @@ export const useLanding = (events: AppEvents, landing: Landing): void => {
 
 /**
  * Home's launch marks, as the last child of Home's screen while a cold launch waits for them:
- * one for its screen, drawn from its first frame, and one for its real content from `content`,
- * drawn once it is not null.
+ * one for its screen, rendered from its first commit, and one for its real content from
+ * `content`, rendered once it is not null.
  */
 export function LaunchMarks({
   events,
@@ -119,7 +121,7 @@ export function LaunchMarks({
       name: "home-screen",
       style: OVER_SCREEN,
       pointerEvents: "none",
-      onDrawn: (event) => events.firstScreenVisible(event.nativeEvent),
+      onMarked: (event) => events.firstScreenMarked(event.nativeEvent),
     }),
     content === null
       ? null
@@ -128,7 +130,7 @@ export function LaunchMarks({
           name: "home-content",
           style: OVER_SCREEN,
           pointerEvents: "none",
-          onDrawn: (event) => events.homeContentVisible(event.nativeEvent, content),
+          onMarked: (event) => events.homeContentMarked(event.nativeEvent, content),
         }),
   );
 }
@@ -142,10 +144,10 @@ export interface ScreenPlace {
 
 /**
  * Times the opening of the screen of record `id`: answers the frame mark to render as the
- * screen's last child, or null. The mark renders with the content, in the same commit, so it is
- * drawn in the content's first frame. Identity rule: the screen claims the press that opened it
+ * screen's last child, or null. The mark renders with the content, in the same commit, so its
+ * ready refresh is the content's first. Identity rule: the screen claims the press that opened it
  * when it mounts focused, as route instance `place.key`, and only that claim closes that press's
- * timer, when the mark is drawn. A later press, a blur, or an unmount ends the claim, so an
+ * timer, when the mark reports the content at rest. A later press, a blur, or an unmount ends the claim, so an
  * earlier screen's late content never closes a later press's timer.
  */
 export const useOpenMark = (
@@ -179,8 +181,8 @@ export const useOpenMark = (
     name: "open",
     style: OVER_SCREEN,
     pointerEvents: "none",
-    onDrawn: (event) => {
-      Option.map(claim.current, (held) => events.openContentVisible(held, event.nativeEvent));
+    onMarked: (event) => {
+      Option.map(claim.current, (held) => events.openContentMarked(held, event.nativeEvent));
       setDrawn(true);
     },
   });

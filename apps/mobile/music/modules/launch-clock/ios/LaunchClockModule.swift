@@ -13,17 +13,18 @@ import os
 /// - `processStartedAt` answers when this process started, or null when the kernel does not say
 ///   or iOS prewarmed the process: a prewarmed process starts before anyone opens the app, so its
 ///   start says nothing about how long the launch took.
-/// - `FrameMark` is an empty view laid over the content a person waits for. It reports, once, the
-///   display refresh that first shows that content as it will rest: where its layout puts it, so a
-///   screen sliding in has arrived, with the part the window shows inside the window's bounds;
-///   faded in to its resting opacity; and covered by no view that shows over all of it, such as the
-///   splash screen over React Native's root view; no animation still brings it in. Each report
-///   gives the refresh's target time and says whether the refresh is hitched: the mark's callbacks
-///   skipped a refresh before it, or this callback ran past its target, so the app was busy across
-///   a refresh and the frame may show a refresh or more after its time. iOS gives no time at which
-///   an ordinary frame was really shown. Each mark also goes to the device's log
-///   under its `name`, with the gap since its previous callback and how far past the target this
-///   one ran, as numbers only.
+/// - `FrameMark` is an empty view laid over the content a person waits for. It reports, once, two
+///   display refreshes: the first after the commit that mounted it and its content is laid out
+///   (ready), wherever the content stands then, and the first that shows the content as it will
+///   rest (at rest): where its layout puts it, so a screen sliding in has arrived, with the part
+///   the window shows inside the window's bounds; faded in to its resting opacity; covered by no
+///   view that shows over all of it, such as the splash screen over React Native's root view; and
+///   with no animation still bringing it in. Each is the refresh's target time, with whether it is
+///   hitched: the mark's callbacks skipped a refresh before it, or this callback ran past its
+///   target, so the app was busy across a refresh and the frame may show a refresh or more after
+///   its time. iOS gives no time at which an ordinary frame was really shown. Each mark also goes
+///   to the device's log under its `name`, with when it entered the window, the gap since its
+///   previous callback, and how far past the target the last one ran, as numbers only.
 public final class LaunchClockModule: Module {
   public func definition() -> ModuleDefinition {
     Name("LaunchClock")
@@ -37,7 +38,7 @@ public final class LaunchClockModule: Module {
     }
 
     View(FrameMarkView.self) {
-      Events("onDrawn")
+      Events("onMarked")
 
       Prop("name") { (view: FrameMarkView, name: String) in
         view.name = name
@@ -88,7 +89,7 @@ private let missedRefresh: CFTimeInterval = 1.5
 private let markLog = Logger(subsystem: "dev.lmdevv.launch-clock", category: "frame-mark")
 
 final class FrameMarkView: ExpoView {
-  let onDrawn = EventDispatcher()
+  let onMarked = EventDispatcher()
 
   /// What the mark marks, such as `home-content`; it names the mark in the device's log.
   var name = ""
@@ -97,6 +98,12 @@ final class FrameMarkView: ExpoView {
   private var deadline: CFTimeInterval = 0
   /// When the refresh of the mark's previous callback began; none before its first callback.
   private var previousRefresh: CFTimeInterval?
+  /// When the mark last entered a window: the commit that mounted its content reached the screen's
+  /// layer tree.
+  private var mountedAt: CFTimeInterval = 0
+  /// The first refresh after the mark's content was committed and laid out, and whether it was
+  /// hitched; none before it.
+  private var ready: (at: CFTimeInterval, hitched: Bool)?
   private var reported = false
 
   required init(appContext: AppContext? = nil) {
@@ -124,7 +131,9 @@ final class FrameMarkView: ExpoView {
     guard link == nil else { return }
 
     deadline = CACurrentMediaTime() + markPatience
+    mountedAt = CACurrentMediaTime()
     previousRefresh = nil
+    ready = nil
     let link = CADisplayLink(target: WeakTarget(self), selector: #selector(WeakTarget.tick(_:)))
     link.add(to: .main, forMode: .common)
     self.link = link
@@ -138,7 +147,9 @@ final class FrameMarkView: ExpoView {
   /// Runs once per display refresh, ahead of its target. What the app's layer tree holds now,
   /// its commits and the animations it has finished and removed, is what the render server draws
   /// for the refresh at `targetTimestamp`, unless the app was busy across a refresh: then the
-  /// refresh is hitched.
+  /// refresh is hitched. The first refresh at which the mark is in a window with its layout done
+  /// is its content's ready refresh, wherever the content stands; the first at which it is at rest
+  /// ends the mark.
   fileprivate func tick(_ link: CADisplayLink) {
     let interval = link.targetTimestamp - link.timestamp
     let gap = previousRefresh.map { link.timestamp - $0 } ?? 0
@@ -151,15 +162,23 @@ final class FrameMarkView: ExpoView {
       return
     }
 
-    guard sight() == .atRest else { return }
+    if ready == nil, window != nil, !bounds.isEmpty {
+      ready = (link.targetTimestamp, hitched)
+    }
+
+    guard let ready, sight() == .atRest else { return }
 
     reported = true
     stop()
+    let readyAt = ready.at * 1000
     let at = link.targetTimestamp * 1000
     markLog.notice(
-      "\(self.name, privacy: .public) drawn at \(at, format: .fixed(precision: 3), privacy: .public) hitched \(hitched, privacy: .public) gap \(gap * 1000, format: .fixed(precision: 3), privacy: .public) past \(pastTarget * 1000, format: .fixed(precision: 3), privacy: .public)"
+      "\(self.name, privacy: .public) ready at \(readyAt, format: .fixed(precision: 3), privacy: .public) hitched \(ready.hitched, privacy: .public) rests at \(at, format: .fixed(precision: 3), privacy: .public) hitched \(hitched, privacy: .public) mounted \(self.mountedAt * 1000, format: .fixed(precision: 3), privacy: .public) gap \(gap * 1000, format: .fixed(precision: 3), privacy: .public) past \(pastTarget * 1000, format: .fixed(precision: 3), privacy: .public)"
     )
-    onDrawn(["at": at, "hitched": hitched])
+    onMarked([
+      "ready": ["at": readyAt, "hitched": ready.hitched],
+      "atRest": ["at": at, "hitched": hitched],
+    ])
   }
 
   /// What the render server shows of this view. Each layer has two states: its model, where

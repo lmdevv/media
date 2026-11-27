@@ -6,11 +6,14 @@
 //   node app-timings-truth.mjs judge <app-timings-dir> [frame-ms]
 //   node app-timings-truth.mjs frames <truth.mp4> <out.png> <seconds>...
 //
-// Within one launch, the app's own clock gives the time from Home's content mark to each open's
-// content mark (marks.ndjson: each mark the app's `LaunchClock` wrote to the device's log, by
-// process), and the recording gives the time between the same two frames. The two differences
-// share no zero point, so they agree within two frames exactly when both marks land on the frames
-// the screen showed. A mark stands for its content at rest: in place, with any slide-in over.
+// Each mark has two ends: content ready (committed and laid out, wherever it stands) and content
+// at rest (in place with any slide-in over). Within one launch, the app's own clock gives the time
+// from Home's content mark at rest to each open's mark at rest (marks.ndjson: each mark the app's
+// `LaunchClock` wrote to the device's log, by process), and the recording gives the time between
+// the same two frames. The two differences share no zero point; a mark that tracks the screen
+// keeps them within `AGREE_FRAMES` frames, and steady from open to open of one screen and cache
+// state. Content ready has no frame to compare with during a slide, so `judge` checks it against
+// the log instead: never after rest, and a frame or two after the commit that mounted it.
 //
 // `sheets` cuts, from truth.mp4, a storyboard of each launch and each press in actions.tsv: every
 // frame that visibly changed, captioned with its time in the recording. `settle` finds, for each
@@ -26,8 +29,9 @@
 // titles, not their artwork); `open_s` of the first frame showing that open's content at rest:
 // `rest_s` when the content was there before the screen came to rest, as a kept open's is,
 // otherwise the first frame showing the content. `frames` cuts a small sheet of the frames at the
-// given times, to look closer. `judge` prints, per open, both differences, how far apart they
-// are, and whether every open agrees within two frames.
+// given times, to look closer. `judge` prints, per open, both differences and how far apart they
+// are, whether every open with no hitched mark agrees, the spread per screen and cache state, and
+// the ready check (it reads records.ndjson for each open's screen, cache, and ready time).
 
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -391,12 +395,15 @@ const sheets = (dir) => {
   console.log(lines.join("\n"));
 };
 
-const MARK = /^(home-screen|home-content|open) drawn at ([\d.]+) hitched (true|false)(?: |$)/u;
+const MARK =
+  /^(home-screen|home-content|open) ready at ([\d.]+) hitched (true|false) rests at ([\d.]+) hitched (true|false) mounted ([\d.]+)(?: |$)/u;
 
 /**
  * The frame marks in the device's log (`log show --style ndjson`), grouped by process in the order
- * the processes first wrote one: one group per launch, each mark its name, its refresh's time in
- * milliseconds on the app's clock, and whether that refresh was hitched.
+ * the processes first wrote one: one group per launch. Each mark has its name; when its content was
+ * ready (`readyAt`) and at rest (`at`), in milliseconds on the app's clock, each with whether that
+ * refresh was hitched; and when the mark entered the window (`mountedAt`), the commit of its
+ * content.
  */
 export const parseMarks = (text) => {
   const launches = new Map();
@@ -409,7 +416,14 @@ export const parseMarks = (text) => {
     if (mark === null) continue;
     const marks = launches.get(entry.processID) ?? [];
 
-    marks.push({ name: mark[1], at: Number(mark[2]), hitched: mark[3] === "true" });
+    marks.push({
+      name: mark[1],
+      readyAt: Number(mark[2]),
+      readyHitched: mark[3] === "true",
+      at: Number(mark[4]),
+      hitched: mark[5] === "true",
+      mountedAt: Number(mark[6]),
+    });
     launches.set(entry.processID, marks);
   }
 
@@ -417,19 +431,52 @@ export const parseMarks = (text) => {
 };
 
 /**
- * Per open of `truth` (`launch`, `open`, `home_s`, `open_s`), the app's time from Home's content
- * mark (its screen mark when Home drew no content mark) to that launch's `open`th open mark, the
- * recording's time between the same frames, the difference, and whether it is within two frames.
+ * Each open mark of `launches`, by launch and its count in the launch from 1, with the
+ * `App.screenOpened` record of the same open from `records` (`media logs --json` lines, in any
+ * order): the n-th open mark is the n-th record by time. Without one record per mark, no open has
+ * its record.
  */
-export const judge = (launches, truth, frameMs) =>
+export const opensOf = (launches, records) => {
+  const opens = launches.flatMap((marks, index) =>
+    marks
+      .filter((mark) => mark.name === "open")
+      .map((mark, open) => ({ launch: index + 1, open: open + 1, mark })),
+  );
+  const opened = records
+    .filter((record) => record.message === "App.screenOpened")
+    .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
+
+  return opens.map((each, index) => ({
+    ...each,
+    record: opened.length === opens.length ? opened[index].annotations : null,
+  }));
+};
+
+/** How many 60 Hz frames a mark and the recording may part by. */
+export const AGREE_FRAMES = 3;
+
+/**
+ * Per open of `truth` (`launch`, `open`, `home_s`, `open_s`), the app's time from Home's content
+ * mark (its screen mark when Home drew no content mark) to that launch's `open`th open mark at
+ * rest, the recording's time between the same frames, the difference, whether it is within
+ * `AGREE_FRAMES` frames, which marks were hitched, and the open's screen and cache from `opens`.
+ */
+export const judge = (launches, truth, frameMs, opens = []) =>
   truth.map((row) => {
     const marks = launches[row.launch - 1] ?? [];
     const home =
       marks.find((mark) => mark.name === "home-content") ??
       marks.find((mark) => mark.name === "home-screen");
     const open = marks.filter((mark) => mark.name === "open")[row.open - 1];
+    const record = opens.find((each) => each.launch === row.launch && each.open === row.open)?.record;
     const recordedMs = (row.open_s - row.home_s) * 1000;
-    const sample = { launch: row.launch, open: row.open, recordedMs };
+    const sample = {
+      launch: row.launch,
+      open: row.open,
+      screen: record?.screen ?? null,
+      cache: record?.cache ?? null,
+      recordedMs,
+    };
 
     if (home === undefined || open === undefined) {
       return { ...sample, appMs: null, difference: null, agrees: false, hitched: [] };
@@ -442,8 +489,60 @@ export const judge = (launches, truth, frameMs) =>
       ...sample,
       appMs,
       difference,
-      agrees: Math.abs(difference) <= 2 * frameMs,
+      agrees: Math.abs(difference) <= AGREE_FRAMES * frameMs,
       hitched: [home, open].filter((mark) => mark.hitched).map((mark) => mark.name),
+    };
+  });
+
+/**
+ * Per screen and cache state, how many of the `rows` `judge` made, hitched ones aside, agreed,
+ * and the lowest and highest difference among them: how steadily the mark tracks the recording.
+ */
+export const spreadOf = (rows) => {
+  const groups = new Map();
+
+  for (const row of rows) {
+    if (row.difference === null || row.hitched.length > 0) continue;
+    const key = `${row.screen ?? "?"} ${row.cache ?? "?"}`;
+    const group = groups.get(key) ?? [];
+
+    group.push(row);
+    groups.set(key, group);
+  }
+
+  return [...groups].map(([key, group]) => {
+    const differences = group.map((row) => row.difference);
+
+    return {
+      key,
+      n: group.length,
+      agree: group.filter((row) => row.agrees).length,
+      min: Math.min(...differences),
+      max: Math.max(...differences),
+    };
+  });
+};
+
+/**
+ * Per open of `opens`, the ready check, which no recording can make during a slide: the touch's
+ * time (the ready refresh less the record's `contentReadyMs`), how long from the touch until the
+ * commit of the content reached the window (`touchToMountMs`), from that commit to the ready
+ * refresh (`mountToReadyMs`, a frame or two), and how long before rest the content was ready
+ * (`readyBeforeRestMs`, never negative).
+ */
+export const readyCheck = (opens) =>
+  opens.map(({ launch, open, mark, record }) => {
+    const touch = record === null ? null : mark.readyAt - record.contentReadyMs;
+
+    return {
+      launch,
+      open,
+      screen: record?.screen ?? null,
+      cache: record?.cache ?? null,
+      touchToMountMs: touch === null ? null : mark.mountedAt - touch,
+      mountToReadyMs: mark.readyAt - mark.mountedAt,
+      readyBeforeRestMs: mark.at - mark.readyAt,
+      readyHitched: mark.readyHitched,
     };
   });
 
@@ -474,23 +573,54 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   } else if (command === "judge" && target !== undefined) {
     const frameMs = Number(frame ?? 1000 / 60);
     const launches = parseMarks(readFileSync(join(target, "marks.ndjson"), "utf8"));
-    const rows = judge(launches, parseTruth(readFileSync(join(target, "truth.tsv"), "utf8")), frameMs);
+    const records = readFileSync(join(target, "records.ndjson"), "utf8")
+      .split("\n")
+      .filter((line) => line.trim().startsWith("{"))
+      .map((line) => JSON.parse(line));
+    const opens = opensOf(launches, records);
+    const rows = judge(launches, parseTruth(readFileSync(join(target, "truth.tsv"), "utf8")), frameMs, opens);
 
-    console.log(
-      "| launch | open | app clock, Home → open ms | recording, Home → open ms | difference ms | hitched marks |",
-    );
-    console.log("| --: | --: | --: | --: | --: | --- |");
+    console.log("At rest: app clock against the recording, Home's mark to each open's.\n");
+    console.log("| launch | open | screen, cache | app clock ms | recording ms | difference ms | hitched marks |");
+    console.log("| --: | --: | --- | --: | --: | --: | --- |");
 
     for (const row of rows) {
       console.log(
-        `| ${String(row.launch)} | ${String(row.open)} | ${round(row.appMs)} | ${round(row.recordedMs)} | ${round(row.difference)} | ${row.hitched.join(", ") || "none"} |`,
+        `| ${String(row.launch)} | ${String(row.open)} | ${row.screen ?? "?"}, ${row.cache ?? "?"} | ${round(row.appMs)} | ${round(row.recordedMs)} | ${round(row.difference)} | ${row.hitched.join(", ") || "none"} |`,
       );
     }
 
-    const agree = rows.filter((row) => row.agrees).length;
+    const steady = rows.filter((row) => row.hitched.length === 0);
+    const agree = steady.filter((row) => row.agrees).length;
 
     console.log(
-      `\n${String(agree)} of ${String(rows.length)} opens agree within two frames (${round(2 * frameMs)} ms); ${rows.every((row) => row.agrees) ? "the marks land on the frames the screen showed" : "DISAGREES"}.`,
+      `\n${String(agree)} of ${String(steady.length)} opens with no hitched mark agree within ${String(AGREE_FRAMES)} frames (${round(AGREE_FRAMES * frameMs)} ms); ${agree === steady.length ? "the at-rest marks track the screen" : "DISAGREES"}. ${String(rows.length - steady.length)} hitched aside.\n`,
+    );
+    console.log("| screen, cache | n | agree | difference min–max ms | spread ms |");
+    console.log("| --- | --: | --: | --: | --: |");
+
+    for (const group of spreadOf(rows)) {
+      console.log(
+        `| ${group.key.replace(" ", ", ")} | ${String(group.n)} | ${String(group.agree)} | ${round(group.min)} to ${round(group.max)} | ${round(group.max - group.min)} |`,
+      );
+    }
+
+    const checks = readyCheck(opens);
+
+    console.log("\nReady: from the device log and the records, per open.\n");
+    console.log("| launch | open | screen, cache | touch → commit ms | commit → ready ms | ready before rest ms |");
+    console.log("| --: | --: | --- | --: | --: | --: |");
+
+    for (const check of checks) {
+      console.log(
+        `| ${String(check.launch)} | ${String(check.open)} | ${check.screen ?? "?"}, ${check.cache ?? "?"} | ${round(check.touchToMountMs)} | ${round(check.mountToReadyMs)} | ${round(check.readyBeforeRestMs)} |`,
+      );
+    }
+
+    const late = checks.filter((check) => check.readyBeforeRestMs < 0).length;
+
+    console.log(
+      `\n${late === 0 ? "No" : String(late)} open${late === 1 ? " was" : "s were"} ready after rest.`,
     );
   } else {
     console.error(

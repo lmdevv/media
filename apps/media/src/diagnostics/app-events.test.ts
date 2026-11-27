@@ -146,13 +146,34 @@ const batch = (events: ReadonlyArray<Schema.Json>) => ({
   events,
 });
 
-const launched = (firstScreenVisibleMs: number) => ({
+const launched = (firstScreenAtRestMs: number) => ({
   ageMs: 0,
   event: {
     _tag: "Launched",
-    firstScreenVisibleMs,
-    firstScreenHitched: false,
-    homeContent: { ms: firstScreenVisibleMs + 400, source: "network", hitched: true },
+    firstScreen: {
+      readyMs: Math.max(0, firstScreenAtRestMs - 100),
+      readyHitched: false,
+      atRestMs: firstScreenAtRestMs,
+      atRestHitched: false,
+    },
+    homeContent: {
+      readyMs: firstScreenAtRestMs + 300,
+      readyHitched: false,
+      atRestMs: firstScreenAtRestMs + 400,
+      atRestHitched: true,
+      source: "network",
+    },
+  },
+});
+
+/** A movies title open whose content was ready after `readyMs` and at rest after `atRestMs`. */
+const opened = (readyMs: number, atRestMs: number) => ({
+  ageMs: 0,
+  event: {
+    _tag: "ScreenOpened",
+    screen: "title",
+    cache: "kept",
+    content: { readyMs, readyHitched: false, atRestMs, atRestHitched: false },
   },
 });
 
@@ -252,8 +273,7 @@ layer(serverLayer, { timeout: 30_000 })("app events", (it) => {
               _tag: "ScreenOpened",
               screen: "album",
               cache: "fetched",
-              contentVisibleMs: 345,
-              hitched: false,
+              content: { readyMs: 120, readyHitched: true, atRestMs: 345, atRestHitched: false },
             },
           },
           {
@@ -293,18 +313,24 @@ layer(serverLayer, { timeout: 30_000 })("app events", (it) => {
         bundle: "embedded",
         development: false,
         launch: "cold",
-        firstScreenVisibleMs: 812,
-        firstScreenHitched: false,
-        homeContentVisibleMs: 1212,
-        homeContentHitched: true,
+        firstScreenReadyMs: 712,
+        firstScreenReadyHitched: false,
+        firstScreenAtRestMs: 812,
+        firstScreenAtRestHitched: false,
+        homeContentReadyMs: 1112,
+        homeContentReadyHitched: false,
+        homeContentAtRestMs: 1212,
+        homeContentAtRestHitched: true,
         homeSource: "network",
       });
 
       assert.deepInclude(open?.annotations, {
         screen: "album",
         cache: "fetched",
-        contentVisibleMs: 345,
-        hitched: false,
+        contentReadyMs: 120,
+        contentReadyHitched: true,
+        contentAtRestMs: 345,
+        contentAtRestHitched: false,
       });
       assert.strictEqual(open?.annotations["occurredAt"], new Date(now - 2000).toISOString());
       assert.strictEqual(error?.level, "ERROR");
@@ -336,7 +362,15 @@ layer(serverLayer, { timeout: 30_000 })("app events", (it) => {
         batch([
           {
             ageMs: 0,
-            event: { _tag: "Launched", firstScreenVisibleMs: 940, firstScreenHitched: true },
+            event: {
+              _tag: "Launched",
+              firstScreen: {
+                readyMs: 900,
+                readyHitched: false,
+                atRestMs: 940,
+                atRestHitched: true,
+              },
+            },
           },
           errorEvent({ kind: "unhandled-rejection", route: "unknown" }),
         ]),
@@ -347,10 +381,10 @@ layer(serverLayer, { timeout: 30_000 })("app events", (it) => {
       const error = records.find((record) => record.message === "Client.error");
 
       assert.deepInclude(launch?.annotations, {
-        firstScreenVisibleMs: 940,
-        firstScreenHitched: true,
-        homeContentVisibleMs: null,
-        homeContentHitched: null,
+        firstScreenAtRestMs: 940,
+        firstScreenAtRestHitched: true,
+        homeContentReadyMs: null,
+        homeContentAtRestMs: null,
         homeSource: null,
       });
       assert.strictEqual(error?.level, "WARN");
@@ -394,8 +428,7 @@ layer(serverLayer, { timeout: 30_000 })("app events", (it) => {
                   screen: "album",
                   id: "CloudOrchard",
                   cache: "kept",
-                  contentVisibleMs: 9,
-                  hitched: false,
+                  content: { readyMs: 9, readyHitched: false, atRestMs: 9, atRestHitched: false },
                 },
               },
             ]),
@@ -408,6 +441,23 @@ layer(serverLayer, { timeout: 30_000 })("app events", (it) => {
         );
 
         for (const word of words) assert.deepStrictEqual(yield* grep(word), []);
+      }),
+  );
+
+  it.effect(
+    "take an open whose content was ready before it rested, and refuse one ready after",
+    () =>
+      Effect.gen(function* () {
+        const token = Option.some(`member-${unique()}`);
+        const send = (body: Schema.Json) => post("/api/app-events", token, body);
+
+        const statuses = [
+          (yield* send(batch([opened(120, 640)]))).status,
+          (yield* send(batch([opened(640, 640)]))).status,
+          (yield* send(batch([opened(641, 640)]))).status,
+        ];
+
+        assert.deepStrictEqual(statuses, [204, 204, 400]);
       }),
   );
 
