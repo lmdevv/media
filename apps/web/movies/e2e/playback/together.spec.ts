@@ -266,6 +266,11 @@ test.beforeAll(async () => {
 
 test.afterEach(async () => {
   await Promise.all(pages.splice(0).map((page) => page.context().close()));
+
+  // A session a test leaves open would hold the host as the next test starts; leaving ends it.
+  if ((await hostClockStatus()) !== null) {
+    await host.platform.core.together.leave({ domain: "movies" });
+  }
 });
 
 test.afterAll(async () => {
@@ -448,8 +453,4 @@ test("the host's pause pauses the session while its player still samples the ser
   // Once the samples are answered, the player takes up the clock the pause left.
   release();
   await expect.poll(async () => (await videoState(hostPage)).paused).toBe(true);
-
-  await revealControls(hostPage);
-  await hostPage.getByRole("button", { name: "End session" }).click();
-  await expect.poll(hostClockStatus).toBeNull();
 });
