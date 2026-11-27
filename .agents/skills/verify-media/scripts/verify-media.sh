@@ -1301,7 +1301,7 @@ timing_opens() {
   case "$1" in
     movies) echo "Caminandes;Pioneer One;Cosmos Laundromat: First Cycle|About This" ;;
     music)
-      printf '%s\n' "Vienna Blue, Doc & Lena Selyanina|Artist, Doc & Lena Selyanina" \
+      printf '%s\n' "Vienna Blue, Doc & Lena Selyanina;Cosmic Lullabies, Doc & Lena Selyanina|Artist, Doc & Lena Selyanina" \
         "Artist, Doc & Lena Selyanina|Songs" ;;
   esac
 }
