@@ -14,7 +14,9 @@ import type { LogOwners } from "./transcode-recovery.ts";
 import {
   DOMAINS,
   isAssembled,
+  leavesUntrustedDurations,
   ProbeInput,
+  RATE_FILTER,
   type Step,
   type VideoPipeline,
 } from "./video-pipeline.ts";
@@ -104,24 +106,22 @@ const callsOf = (steps: ReadonlyArray<Step>, offset: number): ReadonlyArray<Owne
 
 /**
  * Re-times frames at the rate of the frames reaching it, which is the rate the chain hands the
- * encoder at that point (doubled there by a deinterlacer before it that doubles it), and gives
- * each a duration of one frame. It reads timestamps and the end of the stream, never durations, so
- * it makes whole what a domain's filters leave untrusted (`DomainSpec.filterDurations`): Quick
- * Sync's under ffmpeg 7.0 and 7.1, which copy durations in the input's time base (FFmpeg
- * 578ac59887, fixed in 8.0 by bc991ca048): left alone, ffmpeg's constant-rate output holds a 24 fps
- * MP4's first picture for 21 s and runs a variable-rate file's last segment to 1127 s. On a build
- * with the fix it changes nothing (a 24 fps encode comes out byte for byte the same on ffmpeg
- * 9.0.2), so it runs on every build; once the image's ffmpeg is 8 or later it can go.
+ * encoder at that point (a deinterlacer before it that doubles the rate doubles it), and gives each
+ * a duration of one frame. It reads timestamps and the end of the stream, never durations, so it
+ * makes whole what a domain's filters leave untrusted (`DomainSpec.filterDurations`): Quick Sync's
+ * under ffmpeg 7.1.x, which copy durations in the input's time base (FFmpeg 578ac59887, in 7.1
+ * through 7.1.5; 7.0.x copies them first, as 8.0 does again after bc991ca048). Left alone, ffmpeg's
+ * constant-rate output holds a 24 fps MP4's first picture for 21 s and runs a variable-rate file's
+ * last segment to 1127 s. It runs on every build: on ffmpeg 9.0.2 a constant-rate source's encode
+ * comes out byte for byte the same, and a variable-rate file's ends at its last frame's end (960
+ * frames for 16 s at 60 fps, as the CPU path gives) instead of a frame short. Once the image's
+ * ffmpeg is 8 or later it can go.
  */
-const RESTATE_RATE: FilterCall = filter("fps", "source_fps");
+const RESTATE_RATE: FilterCall = filter(RATE_FILTER, "source_fps");
 
 /** Whether `step` is a processing filter of a domain whose filters leave durations untrusted. */
 const untrustedDurations = (step: Step | undefined): boolean =>
-  step !== undefined &&
-  step.on !== "cpu" &&
-  DOMAINS[step.on].filterDurations === "untrusted" &&
-  !Op.$is("Decode")(step.op) &&
-  !Op.$is("Move")(step.op);
+  step !== undefined && leavesUntrustedDurations(step.on, step.op, step.rendering);
 
 /** Where in `calls` the last call is that a step with untrusted durations owns; -1 for none. */
 const lastUntrusted = (calls: ReadonlyArray<Owned>, steps: ReadonlyArray<Step>): number =>

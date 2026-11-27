@@ -48,10 +48,10 @@ const SURFACE_DEPTHS: ReadonlySet<number> = new Set([8, 10]);
  * node, so a missing one fails, as it should, and Quick Sync's decoder reads through it.
  *
  * Its processing filters (`vpp_qsv`, `scale_qsv`, `deinterlace_qsv`, `overlay_qsv`, all built on
- * libavfilter's `qsvvpp`) time their output in 1/frame rate, but ffmpeg 7.0 and 7.1, Debian's in
- * the image, then copy each input frame's duration over in the input's time base (FFmpeg
- * 578ac59887; 8.0 has the fix, bc991ca048). A 24 fps MP4 counted in 1/12288 s gets frames 512
- * ticks long, which ffmpeg's constant-rate output shows its first picture for: 21 s.
+ * libavfilter's `qsvvpp`) time their output in 1/frame rate, but ffmpeg 7.1.x, Debian's in the
+ * image, then copies each input frame's duration over in the input's time base (FFmpeg 578ac59887,
+ * in 7.1 through 7.1.5; 8.0 has the fix, bc991ca048). A 24 fps MP4 counted in 1/12288 s then has
+ * frames 512 ticks long, so ffmpeg's constant-rate output shows its first picture for 21 s.
  */
 export const QSV: DomainSpec = {
   device: (config) => config.qsvDevice,

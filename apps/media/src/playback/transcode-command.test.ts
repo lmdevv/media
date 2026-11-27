@@ -124,6 +124,12 @@ const inputs = (args: ReadonlyArray<string>): ReadonlyArray<string> =>
     args.lastIndexOf("-i") + 2,
   );
 
+/** Each step of `plan`'s pipeline, and whether it needs the `fps` filter from the build. */
+const fps = (plan: VideoPlan): ReadonlyArray<readonly [string, boolean]> =>
+  VideoPlan.$is("Encode")(plan)
+    ? plan.pipeline.steps.map((step) => [step.impl, step.needs.includes("filter:fps")] as const)
+    : [];
+
 /** How many times the filter graphs of `args` restate the frame rate. */
 const restatements = (args: ReadonlyArray<string>): number =>
   [
@@ -284,6 +290,20 @@ describe("hlsCommandArgs", () => {
     expect(scaled.owners?.filters.get("Parsed_fps_3")).toStrictEqual([1]);
     expect(toneMapped.owners?.filters.get("Parsed_fps_6")).toStrictEqual([2]);
     expect(after(burned.args, "-filter_complex")?.split(";")[2]).not.toContain("fps=");
+
+    // Each step the restatement follows needs the filter from the build, so a build without it
+    // loses those rows; the decoder and the encoder do not.
+    expect(fps(encode("qsv", { codec: "hevc", bitDepth: 10, toneMap: true }))).toStrictEqual([
+      ["decode.qsv", false],
+      ["scale.qsv", true],
+      ["tonemap.qsv", true],
+      ["encode.qsv.h264", false],
+    ]);
+    expect(
+      fps(encode("vaapi", { codec: "hevc", bitDepth: 10, toneMap: true })).filter(
+        ([, needed]) => needed,
+      ),
+    ).toStrictEqual([]);
 
     for (const domain of ["vaapi", "software"] as const) {
       for (const options of [
