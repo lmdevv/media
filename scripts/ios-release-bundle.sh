@@ -10,9 +10,9 @@
 # hermesc's line table, and a stack frame of a release build names a line and column in this
 # main.jsbundle. A frame an app reports (`Client.error`'s `frames`, `source: "bundle"`, in a batch
 # with `bundle: "embedded"`) turns into a source file, line, and function with
-# `scripts/symbolicate-app-frames.mjs main.jsbundle.map`. Build at the release's tag (`git checkout
-# v0.9.0`, `pnpm install --frozen-lockfile`): the same commit and lockfile give the same bytes in any
-# folder, which is what lets a map built later match the app.
+# `.agents/skills/verify-media/scripts/symbolicate.mjs main.jsbundle.map`. Build at the release's
+# tag (`git checkout v0.9.0`, `pnpm install --frozen-lockfile`): the same commit and lockfile give
+# the same bytes in any folder, which is what lets a map built later match the app.
 #
 #   scripts/ios-release-bundle.sh <movies|music> <out-dir>
 set -euo pipefail

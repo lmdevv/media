@@ -42,6 +42,23 @@ test("turns a bundle frame's line and column, counted from 1, into its source an
   assert.equal(describeFrame(resolve, { source: "bundle", line: 9, column: 1 }), "bundle 9:1 → not in the map");
 });
 
+test("resolves through the section of a sectioned map, as Metro writes a bundle's map", () => {
+  // MAP's two lines as the second section, from bundle line 11, column 3, behind a first section.
+  const sectioned = {
+    version: 3,
+    sections: [
+      { offset: { line: 0, column: 0 }, map: { version: 3, sources: ["src/entry.ts"], names: [], mappings: "AAAA" } },
+      { offset: { line: 10, column: 3 }, map: MAP },
+    ],
+  };
+  const resolve = resolver(sectioned);
+
+  assert.deepEqual(resolve({ line: 1, column: 1 }), { file: "src/entry.ts", line: 1, column: 1, name: null });
+  assert.deepEqual(resolve({ line: 11, column: 4 }), { file: "src/album.ts", line: 1, column: 1, name: "openAlbum" });
+  assert.deepEqual(resolve({ line: 12, column: 5 }), { file: "src/album.ts", line: 3, column: 3, name: "boom" });
+  assert.equal(resolve({ line: 11, column: 2 }), null);
+});
+
 test("prints each error record with its frames resolved, and nothing for other records", () => {
   const text = [JSON.stringify(record), JSON.stringify({ message: "App.launched", annotations: {} })].join("\n");
 
