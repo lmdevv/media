@@ -200,6 +200,31 @@ export const withSegment = (jpeg: Uint8Array, marker: number, payload: Uint8Arra
   ]);
 };
 
+/** A JPEG segment of `marker` holding `payload`. */
+export const jpegSegment = (marker: number, payload: Uint8Array): Uint8Array => {
+  const length = Buffer.alloc(2);
+
+  length.writeUInt16BE(payload.length + 2);
+
+  return Buffer.concat([Buffer.from([0xff, marker]), length, payload]);
+};
+
+/** `jpeg` with `bytes` before its end of image, after its last scan. */
+export const beforeJpegEnd = (jpeg: Uint8Array, bytes: Uint8Array): Uint8Array =>
+  Buffer.concat([jpeg.subarray(0, jpeg.length - 2), bytes, jpeg.subarray(jpeg.length - 2)]);
+
+/** A progressive `jpeg` with `bytes` before its second scan. */
+export const beforeSecondScan = (jpeg: Uint8Array, bytes: Uint8Array): Uint8Array => {
+  const scan = Buffer.from([0xff, 0xda]);
+  const second = Buffer.from(jpeg).indexOf(scan, Buffer.from(jpeg).indexOf(scan) + 2);
+
+  return Buffer.concat([jpeg.subarray(0, second), bytes, jpeg.subarray(second)]);
+};
+
+/** An ICC_PROFILE APP2 payload holding all of `profile` in one segment. */
+export const iccSegment = (profile: Uint8Array): Uint8Array =>
+  Buffer.concat([Buffer.from("ICC_PROFILE\0", "latin1"), Buffer.from([1, 1]), profile]);
+
 /** An APP1 payload of EXIF whose first IFD holds just `orientation`. */
 export const exifOrientation = (orientation: number): Uint8Array => {
   const tiff = Buffer.alloc(26);
@@ -270,6 +295,10 @@ export const pngChunk = (type: string, data: Uint8Array): Uint8Array => {
 /** `png` with `chunks` right after its header chunk. */
 export const withChunks = (png: Uint8Array, chunks: ReadonlyArray<Uint8Array>): Uint8Array =>
   Buffer.concat([png.subarray(0, 33), ...chunks, png.subarray(33)]);
+
+/** `png` with `chunks` after its image data, before its `IEND`. */
+export const beforePngEnd = (png: Uint8Array, chunks: ReadonlyArray<Uint8Array>): Uint8Array =>
+  Buffer.concat([png.subarray(0, png.length - 12), ...chunks, png.subarray(png.length - 12)]);
 
 /** The types of a PNG's chunks, in order. */
 export const pngChunkTypes = (png: Uint8Array): ReadonlyArray<string> => {

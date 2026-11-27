@@ -47,6 +47,9 @@ CMS. `cover-art.test.ts` makes the other kinds from these at run time.
   `gray.icc` is `cmsCreateGrayProfile` with a D50 white point and `cmsBuildGamma(1.0)`, saved with
   `cmsSaveProfileToFile`.
 
+- `exif-after-data.png`: the fourth review's 800x400 RGB PNG with an `eXIf` orientation after its
+  image data, which browsers ignore and ffmpeg 9.0 applies, so the art route serves it as stored.
+
 - `transparent.png` (RGBA) and `palette.png` (palette with `tRNS`): a lime disc, opaque, on
   magenta that is fully transparent. `alpha.webp` is the same picture as lossless WebP with alpha.
 

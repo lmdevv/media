@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { deflateSync } from "node:zlib";
 
 import { NodeHttpServer, NodeServices } from "@effect/platform-node";
@@ -8,7 +8,18 @@ import type { SessionStatus } from "@media/contracts/server-functions";
 import { artworkTicketId, loadTicketKeyRing } from "@media/contracts/ticket";
 import { TICKET_TEST_KEYS } from "@media/contracts/ticket-vectors";
 import { EpochMillis } from "@media/contracts/units";
-import { Duration, Effect, Exit, Layer, Option, Redacted, Scope, SubscriptionRef } from "effect";
+import {
+  Duration,
+  Effect,
+  Exit,
+  FileSystem,
+  Layer,
+  Option,
+  Redacted,
+  Scope,
+  Stream,
+  SubscriptionRef,
+} from "effect";
 import { FetchHttpClient, HttpServer } from "effect/http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -27,6 +38,11 @@ import * as MusicRoutes from "./music-routes.ts";
 import {
   adobeSegment,
   areaScale,
+  beforeJpegEnd,
+  beforePngEnd,
+  beforeSecondScan,
+  iccSegment,
+  jpegSegment,
   decodeRgba,
   exifOrientation,
   fidelity,
@@ -40,7 +56,7 @@ import {
   withSegment,
 } from "./testing/cover-images.ts";
 import { makeDirectory, PNG, removeDirectory, writeBytes } from "./testing/music-fixtures.ts";
-import { ffmpeg, ffprobe } from "./testing/music-songs.ts";
+import { ffmpeg, ffprobe, writeScript } from "./testing/music-songs.ts";
 import * as TrackSources from "./track-sources.ts";
 import * as MusicTranscoder from "./transcoder.ts";
 
@@ -76,11 +92,18 @@ const artTicket = async (hash: string) => {
   ).ticket;
 };
 
-/**
- * A media server with the music routes, keeping its files in `data`, on this test's ffmpeg
- * (`FFMPEG_PATH`, so the suite runs on the image's as well as CI's) unless `ffmpegPath` says.
- */
-const startServer = async (data: string, ffmpegPath = process.env["FFMPEG_PATH"] ?? "ffmpeg") => {
+/** How a test server differs from the default one. */
+interface ServerOptions {
+  /** Its ffmpeg, when not this test's (`FFMPEG_PATH`, so the suite runs on the image's and CI's). */
+  readonly ffmpegPath?: string;
+  /** Its file system, built from the real one. */
+  readonly fileSystem?: (real: FileSystem.FileSystem) => FileSystem.FileSystem;
+}
+
+/** A media server with the music routes, keeping its files in `data`. */
+const startServer = async (data: string, options: ServerOptions = {}) => {
+  const ffmpegPath = options.ffmpegPath ?? process.env["FFMPEG_PATH"] ?? "ffmpeg";
+  const fileSystem = options.fileSystem;
   const scope = await run(Scope.make());
 
   scopes = [...scopes, scope];
@@ -104,7 +127,22 @@ const startServer = async (data: string, ffmpegPath = process.env["FFMPEG_PATH"]
     FFPROBE_PATH: process.env["FFPROBE_PATH"] ?? "ffprobe",
   });
 
-  const http = serve(MusicRoutes.layer).pipe(
+  // The routes' own file system, so a stand-in reaches the files they answer with.
+  const routes =
+    fileSystem === undefined
+      ? MusicRoutes.layer
+      : MusicRoutes.layer.pipe(
+          Layer.provide(
+            Layer.effect(
+              FileSystem.FileSystem,
+              Effect.gen(function* () {
+                return fileSystem(yield* FileSystem.FileSystem);
+              }),
+            ),
+          ),
+        );
+
+  const http = serve(routes).pipe(
     Layer.provideMerge(NodeHttpServer.layer(createServer, { port: 0, host: "127.0.0.1" })),
     Layer.provideMerge(
       CoreTickets.layer({
@@ -172,12 +210,57 @@ const serveArt = async (
   return {
     status: response.status,
     contentType: response.headers.get("content-type"),
+    cacheControl: response.headers.get("cache-control"),
     original,
     bytes,
     copy,
     isOriginal: Buffer.from(bytes).equals(Buffer.from(original)),
   };
 };
+
+/**
+ * A stand-in ffmpeg named `name` that logs each run, waits `seconds`, and then runs this test's
+ * ffmpeg, or fails with `fails`; `runs` counts its runs so far.
+ */
+const countingFfmpeg = async (
+  name: string,
+  options: { seconds?: number; fails?: boolean } = {},
+) => {
+  const log = join(work, `${name}.log`);
+  const script = join(work, `${name}.sh`);
+  const real = process.env["FFMPEG_PATH"] ?? "ffmpeg";
+
+  await writeBytes(log, "");
+  await writeScript(script, [
+    `echo run >> '${log}'`,
+    options.seconds === undefined ? "" : `sleep ${String(options.seconds)}`,
+    options.fails === true ? "exit 1" : `exec '${real}' "$@"`,
+  ]);
+
+  const runs = async () =>
+    Buffer.from(await run(Files.readWholeFile(log)))
+      .toString("latin1")
+      .split("\n")
+      .filter((line) => line === "run").length;
+
+  return { path: script, runs };
+};
+
+/** The sizes of the files in `folder`, none when it is missing. */
+const sizesIn = async (folder: string) =>
+  run(
+    Files.listFiles(folder).pipe(
+      Effect.flatMap((files) =>
+        Effect.forEach(files, (file) =>
+          Files.statPath(file.path).pipe(Effect.map(({ size }) => size)),
+        ),
+      ),
+      Effect.orElseSucceed(() => []),
+    ),
+  );
+
+/** True for the path of a resized music cover. */
+const isCopy = (path: string) => path.includes(`${sep}artwork${sep}s`);
 
 /** `width,height` of the image in `file`, as stored. */
 const sizeOf = async (file: string) =>
@@ -265,6 +348,34 @@ const splicedAs = (name: string, bytes: Uint8Array) => () => coverFile(name, byt
 
 /** The fixture cover named `name`. */
 const fixture = (name: string) => () => Promise.resolve(join(COVERS, name));
+
+/**
+ * Stand-ins for a prune landing after the art route chose a copy: one removes the copy before the
+ * route opens it, one right after.
+ */
+const removeBefore = (real: FileSystem.FileSystem): FileSystem.FileSystem => ({
+  ...real,
+  open: (path, options) =>
+    isCopy(path)
+      ? real.remove(path).pipe(Effect.ignore, Effect.andThen(real.open(path, options)))
+      : real.open(path, options),
+  stream: (path, options) =>
+    isCopy(path)
+      ? Stream.unwrap(real.remove(path).pipe(Effect.ignore, Effect.as(real.stream(path, options))))
+      : real.stream(path, options),
+});
+
+const removeAfter = (real: FileSystem.FileSystem): FileSystem.FileSystem => ({
+  ...real,
+  open: (path, options) =>
+    isCopy(path)
+      ? real.open(path, options).pipe(Effect.tap(() => real.remove(path).pipe(Effect.ignore)))
+      : real.open(path, options),
+  stream: (path, options) =>
+    isCopy(path)
+      ? Stream.unwrap(real.remove(path).pipe(Effect.ignore, Effect.as(real.stream(path, options))))
+      : real.stream(path, options),
+});
 
 beforeAll(async () => {
   work = await makeDirectory("cover-art");
@@ -586,7 +697,9 @@ describe("music cover art", { timeout: 120_000 }, () => {
   });
 
   it("serves a cover as stored, never 503, when a copy cannot be made", async () => {
-    const broken = await startServer(join(work, "broken-data"), join(work, "no-such-ffmpeg"));
+    const broken = await startServer(join(work, "broken-data"), {
+      ffmpegPath: join(work, "no-such-ffmpeg"),
+    });
 
     const served = await serveArt(
       join(COVERS, "photo.jpg"),
@@ -599,6 +712,150 @@ describe("music cover art", { timeout: 120_000 }, () => {
       200,
       "image/jpeg",
       true,
+    ]);
+  });
+
+  it("serves as stored a cover with a picture-changing tag after its image data, at any size", async () => {
+    // The third verifier's 800x400 RGB PNG: an EXIF orientation after the image data, which
+    // browsers ignore and ffmpeg 9 applies.
+    const probe = join(COVERS, "exif-after-data.png");
+    const photo = await run(Files.readWholeFile(join(COVERS, "photo.jpg")));
+    const photoPng = await run(Files.readWholeFile(join(COVERS, "photo.png")));
+    const soft = await run(Files.readWholeFile(join(COVERS, "soft-alpha.png")));
+    const profile = jpegProfile(await run(Files.readWholeFile(join(COVERS, "adobe-rgb.jpg"))));
+    const turned = jpegSegment(0xe1, exifOrientation(6));
+    const eXIf = pngChunk("eXIf", exifOrientation(6).subarray(6));
+
+    const trailing = await Promise.all([
+      coverFile("jpeg-exif-at-end.jpg", beforeJpegEnd(photo, turned)),
+      coverFile(
+        "jpeg-icc-at-end.jpg",
+        beforeJpegEnd(photo, jpegSegment(0xe2, iccSegment(profile))),
+      ),
+      coverFile(
+        "progressive-exif-between-scans.jpg",
+        beforeSecondScan(await run(Files.readWholeFile(join(COVERS, "progressive.jpg"))), turned),
+      ),
+      coverFile(
+        "oriented-exif-at-end.jpg",
+        beforeJpegEnd(await run(Files.readWholeFile(join(COVERS, "rotated.jpg"))), turned),
+      ),
+      coverFile("rgb-png-exif-at-end.png", beforePngEnd(photoPng, [eXIf])),
+      coverFile("rgba-png-exif-at-end.png", beforePngEnd(soft, [eXIf])),
+    ]);
+
+    await Promise.all(
+      [
+        ...["144", "576", "1280"].map((width) => [probe, width] as const),
+        ...trailing.map((file) => [file, "144"] as const),
+      ].map(([file, width]) => expectOriginal(file, width)),
+    );
+  });
+
+  it("decides once, per cover and size, to serve the stored cover, and keeps no copy then", async () => {
+    // A JPEG saved at low quality: its copy at 1280 would take more bytes than it.
+    const coarse = join(work, "coarse-once.jpg");
+
+    await ffmpeg(
+      ["-f", "lavfi", "-i", "testsrc2=size=1600x1600", "-frames:v", "1", "-q:v", "31"].concat(
+        coarse,
+      ),
+    );
+    const counting = await countingFfmpeg("decided-once");
+    const data = join(work, "decided-once-data");
+    const server = await startServer(data, { ffmpegPath: counting.path });
+    const first = await serveArt(coarse, "1280", server, data);
+
+    expect([first.status, first.isOriginal, await counting.runs()]).toEqual([200, true, 1]);
+    // The larger output is gone.
+    expect(
+      (await sizesIn(join(data, "artwork", "s1280"))).filter(
+        (size) => size >= first.original.length,
+      ),
+    ).toEqual([]);
+    const second = await serveArt(coarse, "1280", server, data);
+
+    expect([second.status, second.isOriginal, await counting.runs()]).toEqual([200, true, 1]);
+
+    // An ffmpeg that fails is run once too.
+    const failing = await countingFfmpeg("fails-once", { fails: true });
+    const failingData = join(work, "fails-once-data");
+    const failingServer = await startServer(failingData, { ffmpegPath: failing.path });
+
+    const once = await serveArt(join(COVERS, "photo.jpg"), "144", failingServer, failingData);
+    const again = await serveArt(join(COVERS, "photo.jpg"), "144", failingServer, failingData);
+
+    expect([once.status, once.isOriginal, again.status, again.isOriginal]).toEqual([
+      200,
+      true,
+      200,
+      true,
+    ]);
+    expect(await failing.runs()).toBe(1);
+  });
+
+  it("serves the stored cover, unkept, to first requests past 16 copies under way", async () => {
+    // The bound is MAX_COVER_COPIES: two copies encode and the rest wait for an encoder.
+    const bound = 16;
+    const counting = await countingFfmpeg("admission", { seconds: 1 });
+    const data = join(work, "admission-data");
+    const server = await startServer(data, { ffmpegPath: counting.path });
+
+    const covers = await Promise.all(
+      Array.from({ length: bound + 8 }, async (_, index) => {
+        const file = join(work, `distinct-${String(index)}.jpg`);
+        const size = `${String(300 + index)}x${String(300 + index)}`;
+
+        await ffmpeg(
+          ["-f", "lavfi", "-i", `testsrc=size=${size}`, "-frames:v", "1", "-q:v", "1"].concat(file),
+        );
+        const original = await run(Files.readWholeFile(file));
+        const hash = await run(saveArt(data, original).pipe(Effect.map(Option.getOrThrow)));
+
+        return {
+          original,
+          url: `${server}/music/art/${hash}?ticket=${await artTicket(hash)}&w=144`,
+        };
+      }),
+    );
+
+    const served = await Promise.all(
+      covers.map(async ({ original, url }) => {
+        const response = await fetch(url);
+        const bytes = new Uint8Array(await response.arrayBuffer());
+
+        return {
+          status: response.status,
+          cacheControl: response.headers.get("cache-control"),
+          isOriginal: Buffer.from(bytes).equals(Buffer.from(original)),
+        };
+      }),
+    );
+
+    const stored = served.filter(({ isOriginal }) => isOriginal);
+
+    expect(served.map(({ status }) => status)).toEqual(served.map(() => 200));
+    expect(await counting.runs()).toBe(bound);
+    expect(stored.length).toBe(served.length - bound);
+    // A client asks again for a cover served as stored because copies were busy.
+    expect(stored.map(({ cacheControl }) => cacheControl)).toEqual(stored.map(() => "no-store"));
+  });
+
+  it("serves a chosen copy whole, or the stored cover, when the copy is removed meanwhile", async () => {
+    const photo = join(COVERS, "photo.jpg");
+    const beforeData = join(work, "removed-before-data");
+    const afterData = join(work, "removed-after-data");
+    const before = await startServer(beforeData, { fileSystem: removeBefore });
+    const after = await startServer(afterData, { fileSystem: removeAfter });
+    const gone = await serveArt(photo, "144", before, beforeData);
+
+    expect([gone.status, gone.isOriginal]).toEqual([200, true]);
+    const kept = await serveArt(photo, "144", after, afterData);
+
+    expect([kept.status, kept.isOriginal, await sizeOf(kept.copy)]).toEqual([
+      200,
+      false,
+      "144,144",
     ]);
   });
 });
