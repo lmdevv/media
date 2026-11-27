@@ -19,6 +19,7 @@ import { Artwork } from "@/components/ui/artwork";
 import { IconButton } from "@/components/ui/icon-button";
 import { Text } from "@/components/ui/text";
 import { albumMeta } from "@/lib/album-meta";
+import { useScreenOpenMark } from "@/lib/app-events";
 import { creditText } from "@/lib/credits";
 import { useAlbumDetail } from "@/lib/details";
 import { detailStateOf } from "@/lib/detail-state";
@@ -50,7 +51,7 @@ function ArtistLink({
       item={detail.album}
       label={`Artist, ${artists}`}
       className={line.link}
-      onOpen={(id) => openArtist({ id })}
+      onOpen={(id, press) => openArtist({ id }, press)}
     >
       <Text variant={line.variant} tone="accent" className={line.text}>
         {artists}
@@ -61,6 +62,8 @@ function ArtistLink({
 
 function Album({ albumId }: { readonly albumId: AlbumId }) {
   const state = detailStateOf(useAlbumDetail(albumId), "Couldn’t load this album.");
+
+  const openMark = useScreenOpenMark("album", albumId, state.kind === "ready");
 
   const playingId = useNowPlaying().nowPlaying?.trackId ?? null;
   const { playFrom, playAll } = usePlayList();
@@ -82,85 +85,88 @@ function Album({ albumId }: { readonly albumId: AlbumId }) {
   const trackIds = tracks.map((track) => track.id);
 
   return (
-    <ListPage
-      bar={
-        detail === undefined
-          ? {}
-          : {
-              trailing: (
+    <>
+      <ListPage
+        bar={
+          detail === undefined
+            ? {}
+            : {
+                trailing: (
+                  <>
+                    <DownloadButton
+                      target={{ kind: "album", id: albumId }}
+                      title={detail.album.title}
+                    />
+                    <IconButton
+                      icon={Ellipsis}
+                      label="Album actions"
+                      onPress={() =>
+                        router.push({ pathname: "/album/[id]/actions", params: { id: albumId } })
+                      }
+                    />
+                  </>
+                ),
+              }
+        }
+        data={tracks}
+        extraData={playingId}
+        keyExtractor={(track) => track.id}
+        header={
+          detail === undefined ? null : (
+            <View className="px-page">
+              <OfflineNotice variant="bar" className="pb-4" />
+              {tablet ? (
+                <DetailHeader
+                  art={{ url: detail.album.artUrl, recyclingKey: detail.album.id }}
+                  facts={albumMeta(detail)}
+                  title={detail.album.title}
+                  actions={
+                    <PlayShuffle
+                      width="natural"
+                      onPlay={() => playAll(trackIds, false)}
+                      onShuffle={() => playAll(trackIds, true)}
+                    />
+                  }
+                >
+                  <ArtistLink detail={detail} layout="tablet" />
+                </DetailHeader>
+              ) : (
                 <>
-                  <DownloadButton
-                    target={{ kind: "album", id: albumId }}
-                    title={detail.album.title}
-                  />
-                  <IconButton
-                    icon={Ellipsis}
-                    label="Album actions"
-                    onPress={() =>
-                      router.push({ pathname: "/album/[id]/actions", params: { id: albumId } })
-                    }
-                  />
-                </>
-              ),
-            }
-      }
-      data={tracks}
-      extraData={playingId}
-      keyExtractor={(track) => track.id}
-      header={
-        detail === undefined ? null : (
-          <View className="px-page">
-            <OfflineNotice variant="bar" className="pb-4" />
-            {tablet ? (
-              <DetailHeader
-                art={{ url: detail.album.artUrl, recyclingKey: detail.album.id }}
-                facts={albumMeta(detail)}
-                title={detail.album.title}
-                actions={
+                  <View className="items-center gap-2 pb-4">
+                    <Artwork
+                      url={detail.album.artUrl}
+                      recyclingKey={detail.album.id}
+                      className="size-ios-192 rounded-lg"
+                    />
+                    <Text variant="title" className="text-center" accessibilityRole="header">
+                      {detail.album.title}
+                    </Text>
+                    <ArtistLink detail={detail} layout="phone" />
+                    <Text variant="mono" tone="muted" className="text-center">
+                      {albumMeta(detail)}
+                    </Text>
+                  </View>
                   <PlayShuffle
-                    width="natural"
+                    className="pb-3"
                     onPlay={() => playAll(trackIds, false)}
                     onShuffle={() => playAll(trackIds, true)}
                   />
-                }
-              >
-                <ArtistLink detail={detail} layout="tablet" />
-              </DetailHeader>
-            ) : (
-              <>
-                <View className="items-center gap-2 pb-4">
-                  <Artwork
-                    url={detail.album.artUrl}
-                    recyclingKey={detail.album.id}
-                    className="size-ios-192 rounded-lg"
-                  />
-                  <Text variant="title" className="text-center" accessibilityRole="header">
-                    {detail.album.title}
-                  </Text>
-                  <ArtistLink detail={detail} layout="phone" />
-                  <Text variant="mono" tone="muted" className="text-center">
-                    {albumMeta(detail)}
-                  </Text>
-                </View>
-                <PlayShuffle
-                  className="pb-3"
-                  onPlay={() => playAll(trackIds, false)}
-                  onShuffle={() => playAll(trackIds, true)}
-                />
-              </>
-            )}
-          </View>
-        )
-      }
-      renderItem={({ item, index }) => (
-        <TrackRow
-          song={item}
-          artUrl={item.artUrl}
-          active={item.id === playingId}
-          onPress={() => playFrom(trackIds, index)}
-        />
-      )}
-    />
+                </>
+              )}
+            </View>
+          )
+        }
+        renderItem={({ item, index }) => (
+          <TrackRow
+            song={item}
+            artUrl={item.artUrl}
+            active={item.id === playingId}
+            onPress={() => playFrom(trackIds, index)}
+          />
+        )}
+      />
+      {openMark}
+    </>
   );
 }
 

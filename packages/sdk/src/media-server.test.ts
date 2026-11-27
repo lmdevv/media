@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { createServer } from "node:http";
 
 import {
+  AppEventsRequest,
   ClientDiagnosticsRequest,
   ClientErrorReport,
   PlayerObservation,
@@ -24,8 +25,8 @@ interface Received {
 
 const received: Array<Received> = [];
 
-/** How the server answers client errors: accepted, or refused for its budget. */
-const answer = { clientErrors: 204 };
+/** How the server answers client errors and app events: accepted, or refused for its budget. */
+const answer = { clientErrors: 204, appEvents: 204 };
 
 const server = createServer((request: IncomingMessage, response: ServerResponse) => {
   let body = "";
@@ -39,7 +40,10 @@ const server = createServer((request: IncomingMessage, response: ServerResponse)
 
     received.push({ path, authorization: request.headers.authorization, body });
 
-    if (path === "/api/client-errors" && answer.clientErrors === 429) {
+    if (
+      (path === "/api/client-errors" && answer.clientErrors === 429) ||
+      (path === "/api/app-events" && answer.appEvents === 429)
+    ) {
       response
         .writeHead(429, { "content-type": "application/json", "retry-after": "60" })
         .end(JSON.stringify({ code: "rate_limited", message: "Too many reports" }));
@@ -69,6 +73,7 @@ afterAll(() => {
 beforeEach(() => {
   received.length = 0;
   answer.clientErrors = 204;
+  answer.appEvents = 204;
 });
 
 const signedIn = () =>
@@ -213,5 +218,53 @@ describe("createMediaServer", () => {
     await signedOut().reportCaught(new Error("Boom"), context);
 
     expect(received).toEqual([]);
+  });
+});
+
+const decodeAppEvents = Schema.decodeUnknownSync(
+  Schema.fromJsonString(Schema.toCodecJson(AppEventsRequest)),
+);
+
+const appEvents: AppEventsRequest = {
+  platform: "ios",
+  app: "music",
+  release: "0.9.0",
+  bundle: "embedded",
+  development: false,
+  events: [
+    {
+      ageMs: 12,
+      event: {
+        _tag: "ScreenOpened",
+        screen: "artist",
+        cache: "fetched",
+        content: { readyMs: 90, readyHitched: false, atRestMs: 210, atRestHitched: false },
+      },
+    },
+  ],
+};
+
+describe("app events", () => {
+  it("sends a batch as the signed-in person and says it went out", async () => {
+    expect(await signedIn().reportAppEvents(appEvents)).toBe("sent");
+
+    expect(received.map((each) => [each.path, each.authorization])).toEqual([
+      ["/api/app-events", "Bearer jwt-1"],
+    ]);
+    expect(decodeAppEvents(received[0]?.body)).toEqual(appEvents);
+  });
+
+  it("sends nothing while signed out, and says so", async () => {
+    expect(await signedOut().reportAppEvents(appEvents)).toBe("signed-out");
+    expect(received).toEqual([]);
+  });
+
+  it("rejects with RateLimited and its wait when the server refuses the batch", async () => {
+    answer.appEvents = 429;
+
+    await expect(signedIn().reportAppEvents(appEvents)).rejects.toMatchObject({
+      _tag: "RateLimited",
+      retryAfterSeconds: 60,
+    });
   });
 });

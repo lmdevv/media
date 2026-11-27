@@ -10,6 +10,7 @@ import { OfflineNotice } from "@/components/states/offline-notice";
 import { SectionHeader } from "@/components/ui/section-header";
 import { TabRoot } from "@/components/ui/tab-root";
 import { useDownloadsLibrary } from "@/downloads";
+import { HomeLaunchMarks } from "@/lib/app-events";
 import { LIBRARY_HOME, RECENT_PLAYS, useHistory } from "@/lib/details";
 import { homeStats } from "@/lib/format";
 import { distinctSongs } from "@/lib/history";
@@ -99,6 +100,7 @@ export default function Home() {
           <RecentlyPlayed />
         </>
       )}
+      <HomeLaunchMarks content={onPhone ? "downloads" : home === undefined ? null : "network"} />
     </TabRoot>
   );
 }

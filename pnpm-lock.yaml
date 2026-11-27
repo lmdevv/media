@@ -885,6 +885,9 @@ importers:
       expo-secure-store:
         specifier: ~58.0.2
         version: 58.0.2(expo@58.0.17)
+      fast-check:
+        specifier: 4.10.2
+        version: 4.10.2
       react:
         specifier: 'catalog:'
         version: 19.3.0

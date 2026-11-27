@@ -136,4 +136,50 @@ describe.skipIf(core === undefined)("the server's own routes on the core's sign-
         .some((line) => line.includes("a report from the routes suite") && line.includes(userId)),
     ).toBe(true);
   });
+
+  it("writes any signed-in person's app events to the log with their core user", async () => {
+    const reported = await post(
+      "/api/app-events",
+      {
+        platform: "ios",
+        app: "movies",
+        release: "0.0.0",
+        bundle: "embedded",
+        development: false,
+        events: [
+          {
+            ageMs: 0,
+            event: {
+              _tag: "ScreenOpened",
+              screen: "title",
+              cache: "fetched",
+              content: {
+                readyMs: 2345,
+                readyHitched: false,
+                atRestMs: 7654,
+                atRestHitched: false,
+              },
+            },
+          },
+        ],
+      },
+      await bearerOf(member),
+    );
+
+    expect(reported.status, await reported.clone().text()).toBe(204);
+    expect((await post("/api/app-events", {})).status).toBe(401);
+
+    const userId = (await run(member.platform.core.auth.sessions.current())).userId;
+
+    expect(
+      server
+        .logged()
+        .some(
+          (line) =>
+            line.includes("App.screenOpened") &&
+            line.includes('"contentAtRestMs":7654') &&
+            line.includes(userId),
+        ),
+    ).toBe(true);
+  });
 });

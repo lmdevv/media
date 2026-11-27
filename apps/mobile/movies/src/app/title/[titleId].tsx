@@ -30,6 +30,7 @@ import { Icon } from "@/components/ui/icon";
 import { NavHeader } from "@/components/ui/nav-header";
 import { Screen } from "@/components/ui/screen";
 import { Text } from "@/components/ui/text";
+import { useScreenOpenMark } from "@/lib/app-events";
 import type { SeasonEpisode, TitleDetail, TitleId } from "@/lib/catalog";
 import { episodeLayout, heroHeight, rowsOf, topBarFade } from "@/lib/title-layout";
 import { useWidthClass } from "@/lib/use-width-class";
@@ -201,6 +202,7 @@ function TitleLoader({ titleId }: { readonly titleId: TitleId }) {
   const title = usePlatformQuery(platform.movies.titles.get, { titleId });
 
   useOpeningEpisodes(titleId);
+  const openMark = useScreenOpenMark("title", titleId, title.status === "success");
 
   if (title.status === "loading") {
     return (
@@ -229,10 +231,15 @@ function TitleLoader({ titleId }: { readonly titleId: TitleId }) {
     );
   }
 
-  return title.data.available ? (
-    <TitleDetailView title={title.data} />
-  ) : (
-    <FileUnavailable title={title.data} />
+  return (
+    <>
+      {title.data.available ? (
+        <TitleDetailView title={title.data} />
+      ) : (
+        <FileUnavailable title={title.data} />
+      )}
+      {openMark}
+    </>
   );
 }
 

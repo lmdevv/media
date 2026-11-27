@@ -399,8 +399,13 @@ makes with `git worktree` under the side's state. The simulator reaches the side
 matches the side's public URLs.
 
 ```sh
-$S ios up [--side S] [--app movies|music] [--device "iPhone 17 Pro"] [--udid ID] [--light] [--source DIR] [--no-sign-in]
+$S ios up [--side S] [--app movies|music] [--device "iPhone 17 Pro"] [--udid ID] [--light] [--source DIR] [--no-sign-in] [--js dev|production]
 ```
+
+`--js production` has Metro serve production JavaScript (`expo start --no-dev --minify`): no
+React development checks, minified, as a release build runs it, though Hermes still compiles it
+from source at each launch. Measure timings with it; the default, `dev`, runs several times
+slower.
 
 `--udid ID` installs and runs the app on a simulator someone else keeps, such as one T3's device
 tools opened, instead of making one; `ios down` then leaves that simulator alone. `--no-sign-in`
@@ -452,6 +457,8 @@ It prints `ready: ios <side> on simulator <udid>` when the app shows Home. Then:
 | `ios orientation portrait\|landscape`            | Turns the simulator and checks the app's window turned  |
 | `ios open <path>`                                | Opens an app path with the running app's scheme (`movies://` or `music://`), such as `/title/<id>` or `/jam/<link>`, and accepts iOS's `Open in` prompt |
 | `ios matrix --out DIR [--orientations portrait,landscape] [--screens a,b]` | Movies app only. Screenshots each screen a layout change reaches, in each orientation, as `<device>-<orientation>-<screen>.png` |
+| `ios timings [--runs N] [--out DIR] [--record]`  | Times N cold launches, each opening the records `timing_opens` names twice, then prints each metric's median, spread, and hitched samples from the `App.*` records the server received, and both machines' load; `--record` also records the screen to check the marks against (see [App timings](#app-timings)) |
+| `ios force-error fatal\|rejection\|synthetic\|bundle\|forged` | Throws from a timer in the running app, leaves a promise rejection unhandled, rejects with a made-up name and stack, rejects from inside the bundle's module loader, or rejects with six look-alikes of an SDK error, through Metro's inspector, to check what the app reports |
 | `ios down`                                       | Removes this side's simulator, Metro, and forwards      |
 
 Read labels from `ios describe` before you tap; never guess coordinates. A label is the whole
@@ -460,6 +467,103 @@ button over plain text. It taps only an element whose centre is on screen: a row
 sideways lists cards past the edge too, so swipe the row first (`ios swipe 350 729 80 729` on an
 iPhone 17 Pro's Continue Watching). Every tap is a touch held for 0.15 s, since AXe's instant
 tap misses the tab bar. Every `ios` command takes `--side S`.
+
+### App timings
+
+Both iOS apps report each cold launch, each open of a movies title, a music album, or an artist,
+and each unexpected error to `POST /api/app-events`, which writes `App.launched`,
+`App.screenOpened`, and `Client.error` to the retained log (`@media/mobile-core/app-events`).
+`ios timings` reads those records back with `$S cli -- logs --grep App. --json`, so the numbers are
+the ones the server received, and writes a pass folder, `captures/verify/<run>/<side>/app-timings/`
+by default: `records.ndjson`, the table as `timings.md`, `actions.tsv` (each launch and press with
+the wall clock), `loads.tsv` (both machines' load), and `marks.ndjson` (each frame mark the app
+wrote to the simulator's log, on the app's own clock).
+
+Each timing has two ends, both refreshes the app's `LaunchClock` module saw through a frame mark
+view laid over the content:
+
+- **Content ready**: the first refresh after the content (not its placeholder) was committed and
+  laid out, wherever it stood: under the splash screen, or partway through the push. Preloading
+  on press or drawing a header from row data moves this one; later lanes watch it.
+- **Content at rest**: the first refresh that shows the content in its place with the push over,
+  faded in, and under no view such as the splash screen. A push's fixed length sets its floor, so
+  it barely tells a fetched open from a kept one; it is the most the person can see.
+
+All of them run on `CACurrentMediaTime`, the clock iOS stamps touches with. iOS gives no time at
+which an ordinary frame was really shown, so each end also says whether it was **hitched**: its
+callbacks skipped a refresh before it, or its callback ran past the refresh's target, so the app
+was busy across a refresh and the frame can show a refresh or more after its target.
+`marks.ndjson` gives each mark's two ends, when it entered the window (the commit of its content),
+its gap, and how far past its target its callback ran. The table counts each metric's hitched
+samples (drop or widen them), and a second table sets each screen's fetched and kept opens side
+by side per end.
+
+- **Cold launch**: the probe ends the app's process (`simctl terminate`) and opens it on Metro.
+  Both metrics run from the process start the kernel records, an instant no screen recording shows:
+  iOS's opening animation starts at the launch request, some tens to hundreds of milliseconds
+  earlier, by a gap that varies. They end on Home's screen (loading or not) and Home's content
+  (its rows and titles, not their artwork), each ready (committed, under the splash or not) and at
+  rest (the splash gone).
+- **Opens**: from the touch that ended the press to the opened screen's content ready, and to it
+  at rest, no earlier than the native push's last frame. Each launch opens the
+  same records, none asked for yet this launch; music then goes Back once and opens the artist
+  again from its album; and after Back to Home each app opens the first record again. Each open
+  reports its cache state, `fetched` (the screen asked for its content after it mounted) or `kept`
+  (the SDK held it), and the table reports the two apart. The log names no record, so a slow
+  sample is found by its screen and cache state, its time in `records.ndjson`, and the probe's
+  `actions.tsv`, which names what each press opened.
+
+A cold launch on the dev client includes fetching the bundle from Metro through the ssh forward
+(`bundle: "dev-server"` in each record), and the simulator runs on the Mac's CPU, so these are a
+relative baseline to compare two builds by, never a phone's numbers. The Mac and this host are
+shared, and load moves these numbers by more than most changes: each pass records both machines'
+one-minute load at the start, before each launch, and at the end, and a pass over 0.4 per CPU on
+the Mac or 0.5 on this host at any of them is **loaded**. `node scripts/app-timings.mjs compare
+<app> <pass-1-dir> <pass-2-dir>` refuses a loaded pass, or one without `loads.tsv`, and prints why
+instead of a difference (exit 3). Quiet is not enough for launches: two quiet passes of one build
+on two simulators and Metro sessions moved the launch median 231 ms, while three passes on one
+simulator spread 57 ms and opens moved under 10 ms either way. Compare runs made with the same
+`--js` mode, device, and run count; to compare two builds, interleave their passes on one stack,
+one simulator, and one Metro (`ios up --source <main checkout>`, then the branch, then main
+again), discard every loaded pass, and trust a change only when it beats how far two quiet passes
+of one build move.
+
+`--record` checks the marks against the screen without the launch's zero, which no recording can
+see. Within each launch, the app's own clock gives the time from Home's content mark to each open's
+mark (`marks.ndjson`), and the recording gives the time between the same two frames; the two
+differences share no zero point. `node scripts/app-timings-truth.mjs sheets <dir>` cuts a
+storyboard of each launch and press from `truth.mp4`, every frame that changed with its time in the
+recording; `frames <truth.mp4> <out.png> <seconds>...` cuts a closer look at chosen frames;
+`settle <dir>` finds, per press, the first frame from which the opened screen stands within a pixel
+of where it rests (`settled.tsv`, `rest_s`). Read off each launch's first frame showing Home's
+content and, per open, the first frame showing its content at rest (`rest_s` for a kept open, whose
+content slides in with its screen; for a fetched one, the later of `rest_s` and the frame its
+content appears), write them to `truth.tsv` in the pass folder (`launch`, `open`, `home_s`,
+`open_s`), and run `node scripts/app-timings-truth.mjs judge <dir> [frame-ms]`. A later lane
+compares main and branch with the same marks, so a steady offset cancels: every open with no
+hitched mark must agree within three frames (50 ms), and the table gives each screen and cache
+state's spread. A push holds the screen 2 px from rest for about 65 ms before it snaps into
+place, so a mark mounted mid-push can land in that hold, up to three frames early. Content ready
+has no frame to compare with during a slide; `judge` checks it against the log instead: never
+after rest, and a frame or two after the commit that mounted the content.
+
+To see a forced error arrive: `ios force-error rejection`, then the Home button, which sends the
+batch; and `ios force-error fatal`, which ends the app or shows its error screen with the report
+saved, then `ios up`'s link again (or `ios timings --runs 1`) to launch it, which sends the saved
+report after Home's first frame. A report carries only numbers and members of sets fixed in the
+code: its class from a fixed list, the route pattern from the app's route list, and each frame as
+`{ source, line, column }`. The `fatal` and `rejection` errors' text names a made-up person, title,
+file, and server (`PRIVATE` in `app-force-error.mjs`); `synthetic` renames its error to a made-up
+person and puts a title, a file, and a host in its stack (`SYNTHETIC`); `$S cli -- logs --grep
+<word> --json` finds none of them. `forged` rejects with six look-alikes of an SDK error, each with
+an SDK tag and its own request id (`FORGED`): its reports name them `NotAnError`, `Other`, or
+`TypeError`, never `TransportError`, and the log holds none of the ids. `bundle` rejects from inside
+Metro's module loader, so its top frames are positions in the bundle: `$S cli -- logs --grep
+Client.error --json | node scripts/symbolicate.mjs <map>` turns them into source lines, with Metro's
+map of the bundle it served (the bundle's address with `.map` in place of `.bundle`) or, for a
+release build, `main.jsbundle.map` from `scripts/ios-release-bundle.sh` at the release's tag. A
+report goes out only under the account that was signed in when it happened; a sign-out or another
+account drops it.
 
 ### Hardware paths
 
@@ -540,6 +644,9 @@ never kills by process name. The demo library image stays for the next run. Evid
 - `scripts/browser.mjs` is the browser host that `up` starts and `browser` talks to. Run it
   directly only to debug the host. Its log is `${TMPDIR:-/tmp}/media-verify/<run>/<side>/browser.log`.
 - `scripts/evidence.mjs` keeps the manifest and publishes it. `$S evidence` calls it.
+- `scripts/app-timings.mjs` and `scripts/app-timings-truth.mjs` are `ios timings`' arithmetic and
+  its check against a recording; `scripts/symbolicate.mjs <map>` turns the frames of the
+  `Client.error` records on its input into source lines (see [App timings](#app-timings)).
 - `scripts/contact-sheet.sh OUT.png COLUMNS WIDTH FILE...` tiles screenshots, such as an `ios
   matrix`, into one captioned image for a review or a PR.
 - `scripts/compare-shots.sh BEFORE_DIR AFTER_DIR [GLOB]` compares same-named screenshots below the

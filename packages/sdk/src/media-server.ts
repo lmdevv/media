@@ -4,6 +4,7 @@ import type {
   MediaCommandResult,
 } from "@media/contracts/media-commands";
 import {
+  AppEventsRequest,
   ClientDiagnosticsRequest,
   ClientErrorReport,
   DIAGNOSTICS_ROUTES,
@@ -65,6 +66,12 @@ export interface MediaServer {
    * ticket in the body naming the playback they belong to; sends nothing while signed out.
    */
   readonly reportClientEvents: (request: ClientDiagnosticsRequest) => Promise<void>;
+  /**
+   * Sends a batch of an app's own events (launches, screen opens, errors) as the signed-in
+   * person. Answers `signed-out`, sending nothing, while signed out. Rejects with `RateLimited`
+   * when the server refuses the batch for its budget, `TransportError`, or `ProtocolError`.
+   */
+  readonly reportAppEvents: (request: AppEventsRequest) => Promise<"sent" | "signed-out">;
 }
 
 const bearerOf = (token: string | null): Option.Option<Redacted.Redacted> =>
@@ -85,6 +92,7 @@ export const withBearer = <A, E>(
     : options.accessToken().then(attempt);
 };
 
+/** Posts `body` to `path` as the bearer; with none, sends nothing. Answers whether it sent. */
 const postSignedIn =
   (
     options: MediaServerOptions,
@@ -94,7 +102,7 @@ const postSignedIn =
   ) =>
   (bearer: Option.Option<Redacted.Redacted>) =>
     Effect.gen(function* () {
-      if (Option.isNone(bearer)) return;
+      if (Option.isNone(bearer)) return "signed-out" as const;
 
       yield* requestJson(
         {
@@ -106,6 +114,8 @@ const postSignedIn =
         },
         Schema.Null,
       );
+
+      return "sent" as const;
     });
 
 /** The media server's routes at `options.url`, called as the session the options name. */
@@ -127,7 +137,8 @@ export const createMediaServer = (options: MediaServerOptions): MediaServer => {
       import("./media-commands").then(({ runMediaCommand }) =>
         runMediaCommand(options, name, args),
       ),
-    reportError: (report) => withBearer(options, sendReport(report)),
+    reportError: (report) =>
+      withBearer(options, (bearer) => Effect.asVoid(sendReport(report)(bearer))),
     reportCaught: (cause, context) =>
       Effect.runPromise(
         Effect.gen(function* () {
@@ -151,13 +162,24 @@ export const createMediaServer = (options: MediaServerOptions): MediaServer => {
         ),
       ),
     reportClientEvents: (request) =>
+      withBearer(options, (bearer) =>
+        Effect.asVoid(
+          postSignedIn(
+            options,
+            "playback.diagnostics",
+            DIAGNOSTICS_ROUTES.clientEvents,
+            encodeJson(ClientDiagnosticsRequest, request),
+          )(bearer),
+        ),
+      ),
+    reportAppEvents: (request) =>
       withBearer(
         options,
         postSignedIn(
           options,
-          "playback.diagnostics",
-          DIAGNOSTICS_ROUTES.clientEvents,
-          encodeJson(ClientDiagnosticsRequest, request),
+          "appEvents",
+          DIAGNOSTICS_ROUTES.appEvents,
+          encodeJson(AppEventsRequest, request),
         ),
       ),
   };

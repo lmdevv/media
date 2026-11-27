@@ -4,6 +4,7 @@ import { View } from "react-native";
 
 import { useSongDownloadLine } from "@/components/downloads/song-download";
 import { Row, RowChevron, RowMore } from "@/components/ui/row";
+import { pressedOpen } from "@/lib/app-events";
 import { creditText } from "@/lib/credits";
 import { songSheetParams } from "@/lib/song-sheet";
 import type { SheetSong } from "@/lib/song-sheet";
@@ -13,13 +14,24 @@ export const openSongActions = (song: SheetSong): void => {
   router.push({ pathname: "/song/[id]/actions", params: songSheetParams(song) });
 };
 
-/** Opens an album in the current tab's stack. */
-export const openAlbum = (album: Pick<AlbumCard, "id">): void => {
+/** A press that opens a screen, whose touch times the open (`@/lib/app-events`). */
+type Press = { readonly nativeEvent: unknown };
+
+/**
+ * Opens an album in the current tab's stack. With the `press` that asked for it, times the open
+ * from its touch until the album's content is in view.
+ */
+export const openAlbum = (album: Pick<AlbumCard, "id">, press?: Press): void => {
+  if (press !== undefined) pressedOpen("album", album.id, press);
   router.push({ pathname: "/album/[id]", params: { id: album.id } });
 };
 
-/** Opens an artist in the current tab's stack. */
-export const openArtist = (artist: Pick<ArtistCard, "id">): void => {
+/**
+ * Opens an artist in the current tab's stack. With the `press` that asked for it, times the open
+ * from its touch until the artist's content is in view.
+ */
+export const openArtist = (artist: Pick<ArtistCard, "id">, press?: Press): void => {
+  if (press !== undefined) pressedOpen("artist", artist.id, press);
   router.push({ pathname: "/artist/[id]", params: { id: artist.id } });
 };
 
@@ -79,7 +91,7 @@ export function AlbumRow({
         }
         leading={{ kind: "art", url: album.artUrl, recyclingKey: album.id }}
         trailing={<RowChevron />}
-        onPress={onPress ?? (() => openAlbum(album))}
+        onPress={onPress ?? ((press) => openAlbum(album, press))}
       />
     </View>
   );
@@ -102,7 +114,7 @@ export function ArtistRow({
         subtitle={subtitle}
         leading={{ kind: "art", url: artist.artUrl, recyclingKey: artist.id }}
         trailing={<RowChevron />}
-        onPress={onPress ?? (() => openArtist(artist))}
+        onPress={onPress ?? ((press) => openArtist(artist, press))}
       />
     </View>
   );

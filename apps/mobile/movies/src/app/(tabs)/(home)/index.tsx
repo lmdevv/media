@@ -20,6 +20,7 @@ import { ContinueCard } from "@/components/continue-card";
 import { TitlePoster } from "@/components/title-poster";
 import { Button } from "@/components/ui/button";
 import { CalmState } from "@/components/ui/calm-state";
+import { HomeLaunchMarks } from "@/lib/app-events";
 import { homeScreen } from "@/lib/browse";
 import type { HomeScreen } from "@/lib/browse";
 import type { Home as HomeRows } from "@/lib/catalog";
@@ -110,6 +111,7 @@ export default function Home() {
           </>
         )}
       </View>
+      <HomeLaunchMarks content={loaded === null ? null : "network"} />
     </ScrollView>
   );
 }

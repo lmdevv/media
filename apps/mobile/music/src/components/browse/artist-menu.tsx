@@ -3,6 +3,7 @@ import { accessibilityLabel } from "@expo/ui/swift-ui/modifiers";
 import type { CreditedItem } from "@media/contracts/artist-credits";
 import type { ReactElement } from "react";
 import { Pressable, View } from "react-native";
+import type { GestureResponderEvent } from "react-native";
 
 import { creditArtists } from "@/lib/credits";
 import type { ArtistId } from "@/lib/models";
@@ -30,7 +31,8 @@ export function ArtistMenu({
   readonly role?: "link" | "button";
   /** Classes for the control of a single artist, such as `self-start` to fit its text. */
   readonly className?: string;
-  readonly onOpen: (artistId: ArtistId) => void;
+  /** Opens the artist; `press` is the touch on a single artist's control, absent for a menu. */
+  readonly onOpen: (artistId: ArtistId, press?: GestureResponderEvent) => void;
   readonly children: ReactElement;
 }) {
   const artists = creditArtists(item);
@@ -44,7 +46,7 @@ export function ArtistMenu({
         accessibilityRole={role}
         accessibilityLabel={label}
         accessibilityHint={role === "link" ? "Opens the artist" : undefined}
-        onPress={() => onOpen(artistId)}
+        onPress={(press) => onOpen(artistId, press)}
         className={`active:opacity-60 ${className}`}
       >
         {children}

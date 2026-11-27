@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createServer } from "node:http";
 
-import { Effect, Option, Predicate, Redacted, Schema, Stream } from "effect";
+import { Effect, Option, Predicate, Redacted, Result, Schema, Stream } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
@@ -11,9 +11,12 @@ import {
   TranscodeCapacityReached,
 } from "@media/contracts/media-playback";
 
+import { Forbidden } from "@media/contracts/errors";
+
 import type { MediaRequest } from "./media-http";
 import { requestJson, requestLines, requestPlayback } from "./media-http";
 import { recoveryFor } from "./playback";
+import { TransportError, answeredRequestOf } from "./sdk-errors";
 
 const received: Array<{
   readonly url: string;
@@ -173,6 +176,16 @@ const request = (path: string): MediaRequest => ({
 
 const outcome = (path: string) => Effect.runPromise(Effect.result(requestJson(request(path), Ok)));
 
+/** The error a failed result holds; none for a success. */
+const failureIn = <A, E>(result: Result.Result<A, E>): ReadonlyArray<E> =>
+  Result.isFailure(result) ? [result.failure] : [];
+
+const linesOutcome = (path: string) =>
+  Effect.runPromise(Effect.result(requestLines(request(path))));
+
+const playbackOutcome = (path: string) =>
+  Effect.runPromise(Effect.result(requestPlayback(request(path), Ok)));
+
 describe("media service requests", () => {
   it("sends the JSON body and bearer token and decodes the answer", async () => {
     const result = await outcome("/ok");
@@ -238,6 +251,43 @@ describe("media service requests", () => {
     });
   });
 
+  it("vouches for the request ID of each failure it built from an answer, and nothing else's", async () => {
+    const failures = [
+      ...failureIn(await outcome("/traced/failure")),
+      ...failureIn(await outcome("/traced/garbage")),
+      ...failureIn(await outcome("/traced/busy")),
+      ...failureIn(await linesOutcome("/traced/failure")),
+      ...failureIn(await playbackOutcome("/traced/failure")),
+      ...failureIn(await outcome("/traced/gateway")),
+    ];
+
+    // What the app writes on a failure later changes nothing the SDK read from the answer.
+    for (const failure of failures) Object.assign(failure, { requestId: APPENDED_ID });
+
+    expect(failures.map((failure) => Option.getOrNull(answeredRequestOf(failure)))).toEqual([
+      FAILED_ID,
+      GARBLED_ID,
+      BUSY_ID,
+      FAILED_ID,
+      FAILED_ID,
+      null,
+    ]);
+
+    const made = [
+      new Forbidden({ message: "Admins only", requestId: FAILED_ID }),
+      new TransportError({ operation: "x", message: "x", cause: null, requestId: FAILED_ID }),
+      { _tag: "TransportError", requestId: FAILED_ID },
+      FAILED_ID,
+    ];
+
+    expect(made.map((cause) => Option.isNone(answeredRequestOf(cause)))).toEqual([
+      true,
+      true,
+      true,
+      true,
+    ]);
+  });
+
   it("drops a request ID the media service would not have sent, such as a proxy's", async () => {
     const [gateway, foreign, unsafe] = await Promise.all(
       ["/traced/gateway", "/traced/foreign", "/traced/unsafe"].map(outcome),
@@ -252,9 +302,6 @@ describe("media service requests", () => {
     }
   });
 });
-
-const linesOutcome = (path: string) =>
-  Effect.runPromise(Effect.result(requestLines(request(path))));
 
 describe("line-by-line requests", () => {
   it("answers with the headers, then the lines as they arrive", async () => {
@@ -285,9 +332,6 @@ describe("line-by-line requests", () => {
     });
   });
 });
-
-const playbackOutcome = (path: string) =>
-  Effect.runPromise(Effect.result(requestPlayback(request(path), Ok)));
 
 describe("playback API requests", () => {
   it("decodes the playback API's tagged failures into their errors", async () => {

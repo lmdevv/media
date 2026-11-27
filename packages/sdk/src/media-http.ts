@@ -5,7 +5,7 @@ import { PlaybackApiError } from "@media/contracts/media-playback";
 import { Context, Effect, Option, Redacted, Schema, Stream } from "effect";
 
 import type { CallError } from "./sdk-errors";
-import { ProtocolError, TransportError } from "./sdk-errors";
+import { ProtocolError, TransportError, answeredBy } from "./sdk-errors";
 
 /**
  * Where this client sends playback API requests, when not to the public URL a started session
@@ -214,7 +214,7 @@ export const send = (
 ): Effect.Effect<MediaResponse, TransportError | ProtocolError> =>
   Effect.flatMap(fetchResponse(request, "application/json", fetchWith), (fetched) =>
     readResponse(request, fetched),
-  );
+  ).pipe(Effect.mapError(answeredBy));
 
 const failureOf = (request: MediaRequest, response: MediaResponse): CommandError => {
   const known = decodeCommandFailure(response.body);
@@ -239,13 +239,15 @@ const failureOf = (request: MediaRequest, response: MediaResponse): CommandError
 export const commandFailureOf = (request: MediaRequest, response: MediaResponse): CommandError => {
   const failure = failureOf(request, response);
 
-  return failure instanceof RateLimited && Option.isSome(response.retryAfterSeconds)
-    ? new RateLimited({
-        message: failure.message,
-        retryAfterSeconds: response.retryAfterSeconds.value,
-        ...response.identity,
-      })
-    : failure;
+  return answeredBy(
+    failure instanceof RateLimited && Option.isSome(response.retryAfterSeconds)
+      ? new RateLimited({
+          message: failure.message,
+          retryAfterSeconds: response.retryAfterSeconds.value,
+          ...response.identity,
+        })
+      : failure,
+  );
 };
 
 const decodeSuccess = <A>(
@@ -280,7 +282,10 @@ export const requestJson = <A>(
     if (!response.ok) return yield* commandFailureOf(request, response);
 
     return yield* decodeSuccess(request, result, response);
-  }).pipe(Effect.withSpan("MediaHttp.request", { attributes: { operation: request.operation } }));
+  }).pipe(
+    Effect.mapError(answeredBy),
+    Effect.withSpan("MediaHttp.request", { attributes: { operation: request.operation } }),
+  );
 
 /** An answer streamed line by line: its headers, then its lines as they arrive. */
 export interface LineResponse {
@@ -312,12 +317,15 @@ export const requestLines = (request: MediaRequest): Effect.Effect<LineResponse,
           cause,
           ...fetched.identity,
         }),
-    }).pipe(Stream.decodeText(), Stream.splitLines);
+    }).pipe(Stream.mapError(answeredBy), Stream.decodeText(), Stream.splitLines);
 
     const answer: LineResponse = { headers: response.headers, lines };
 
     return answer;
-  }).pipe(Effect.withSpan("MediaHttp.lines", { attributes: { operation: request.operation } }));
+  }).pipe(
+    Effect.mapError(answeredBy),
+    Effect.withSpan("MediaHttp.lines", { attributes: { operation: request.operation } }),
+  );
 
 /** Any failure of a playback API call. */
 export type PlaybackCallError = PlaybackApiError | TransportError | ProtocolError;
@@ -345,4 +353,7 @@ export const requestPlayback = <A>(
       cause: response.body,
       ...response.identity,
     });
-  }).pipe(Effect.withSpan("MediaHttp.playback", { attributes: { operation: request.operation } }));
+  }).pipe(
+    Effect.mapError(answeredBy),
+    Effect.withSpan("MediaHttp.playback", { attributes: { operation: request.operation } }),
+  );

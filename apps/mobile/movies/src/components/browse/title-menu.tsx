@@ -4,6 +4,7 @@ import type { ReactElement } from "react";
 
 import { useDownloadMenuItem } from "@/components/downloads/use-download-menu-item";
 import { resumeOf } from "@/components/title/title-model";
+import { openTitle } from "@/lib/open-title";
 
 import { useTitleStates } from "./title-states";
 
@@ -91,7 +92,7 @@ export const useTitleMenu = ({ title, episode }: MenuTarget, playHref: string): 
           {download.title}
         </Link.MenuAction>
       )}
-      <Link.MenuAction icon="info.circle" onPress={() => router.push(`/title/${title.id}`)}>
+      <Link.MenuAction icon="info.circle" onPress={() => openTitle(title.id)}>
         Go to Title
       </Link.MenuAction>
     </Link.Menu>
