@@ -12,7 +12,7 @@ import type { ReactNode } from "react";
 
 import { appKeychains } from "@/lib/keychains";
 import { DEVICE_FAMILY } from "@/lib/this-device";
-import { launchDoubt } from "@/session/media-requests";
+import { launchDoubt, releaseReread } from "@/session/media-requests";
 import type { LaunchDoubt } from "@/session/media-requests";
 
 const THIS_APP: ThisApp = {
@@ -30,14 +30,14 @@ const ServerHealthContext = createContext<ServerHealth | null>(null);
 /**
  * Follows the server's release while the connection lasts, reading it once now; when that read
  * goes unanswered while the follow lasts, `launch` keeps the doubt for the connection's first
- * watch. Returns the read of its health check, which `ServerReachProvider` sends whenever it checks
+ * watch. A read made again after an answer the app couldn't read tells the listening watch. Returns the read of its health check, which `ServerReachProvider` sends whenever it checks
  * the server, as on coming back on screen, so the release is read again with it.
  */
 const useServerRelease = (mediaUrl: string, launch: LaunchDoubt): ServerFollow["refresh"] => {
   const current = useRef<ServerFollow | null>(null);
 
   useEffect(() => {
-    const followed = followServer(mediaUrl, THIS_APP);
+    const followed = followServer(mediaUrl, THIS_APP, releaseReread);
 
     current.current = followed;
 

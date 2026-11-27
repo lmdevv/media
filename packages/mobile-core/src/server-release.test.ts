@@ -269,6 +269,35 @@ describe("followServer", () => {
     expect([asks, describeUnreadable()]).toEqual([0, GENERIC]);
   });
 
+  it("tells onReread of each read made again, from its start, and never of a refresh", async () => {
+    const asked: Array<string> = [];
+    const answering = { up: true };
+
+    const mediaUrl = await startServer({
+      "/api/health": async () => {
+        asked.push("read");
+
+        return answering.up ? healthOf("0.10.0") : "not a health report";
+      },
+    });
+
+    const followed = followServer(mediaUrl, iPhone("0.9.0"), () => {
+      asked.push("started");
+
+      return (health) => {
+        asked.push(Option.isSome(health) ? "answered" : "unanswered");
+      };
+    });
+
+    following.push(followed);
+    await followed.refresh();
+    answering.up = false;
+    rereadAfter(unreadableAnswer());
+    await vi.waitFor(() => {
+      expect(asked).toEqual(["read", "started", "read", "unanswered"]);
+    });
+  });
+
   it("drops an answer for a server the app has since left", async () => {
     const late = Promise.withResolvers<string>();
     const leftUrl = await startServer({ "/api/health": () => late.promise });

@@ -1,13 +1,17 @@
 import { createServer } from "node:http";
 import type { Server } from "node:http";
 
+import { describeFailure } from "@media/mobile-core/failure";
+import { followServer } from "@media/mobile-core/server-release";
+import { ProtocolError } from "@media/sdk/effect";
 import { Schema } from "effect";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FakeOutput } from "@/player/fake-output";
 import { NativeEngine, observedOpen } from "@/player/native-engine";
 
 import {
+  releaseReread,
   coverFailed,
   coverUnread,
   launchDoubt,
@@ -282,6 +286,88 @@ describe("the app's requests to the media service", () => {
     await clock.advance(1000);
 
     expect(health.sent).toBe(1);
+  });
+});
+
+describe("a cover and the release, read again", () => {
+  it("hears a cover's 502 though its earlier failure had no status and a check settled it", async () => {
+    const { watch, health } = watchMedia();
+    const cover = `${media.base}/music/art/abc`;
+
+    coverFailed(`${cover}?ticket=1`)({ error: "Image data could not be decoded" });
+    await clock.advance(1000);
+
+    expect(health.sent).toBe(1);
+
+    health.up = false;
+    coverFailed(`${cover}?ticket=2`)(status(502));
+    await clock.advance(1000);
+
+    expect(health.sent).toBe(2);
+
+    await clock.advance(3000);
+
+    expect(watch.lost()).toBe(true);
+  });
+
+  it("hears a failed read of the release made again after an answer the app couldn't read", async () => {
+    const { health } = watchMedia();
+    const follow = followServer(media.base, { version: "0.10.0", device: "iPhone" }, releaseReread);
+
+    health.up = false;
+    describeFailure(
+      new ProtocolError({
+        operation: "music.albums.list",
+        message: "Protocol error in music.albums.list: the result does not match the contract",
+        cause: null,
+      }),
+    );
+
+    await until(() => clock.scheduled() > 0);
+    await clock.advance(1000);
+
+    expect(health.sent).toBe(1);
+    follow.stop();
+  });
+});
+
+describe("the fetch observer", () => {
+  it("wraps fetch once however often the module is loaded again, and gives the first fetch back", async () => {
+    const original = globalThis.fetch;
+
+    const cycle = async (left: number): Promise<void> => {
+      if (left === 0) return;
+      vi.resetModules();
+      const fresh = await import("./media-requests");
+      const stop = fresh.listenForMediaRequests(media.base, { hear: () => undefined });
+
+      stop();
+      await cycle(left - 1);
+    };
+
+    await cycle(4);
+
+    expect(globalThis.fetch).toBe(original);
+  });
+
+  it("keeps one wrapper while module copies listen at once, and the newest hears", async () => {
+    const original = globalThis.fetch;
+    const heard: Array<string> = [];
+
+    vi.resetModules();
+    const older = await import("./media-requests");
+    const stopOlder = older.listenForMediaRequests(media.base, { hear: () => heard.push("older") });
+
+    vi.resetModules();
+    const newer = await import("./media-requests");
+    const stopNewer = newer.listenForMediaRequests(media.base, { hear: () => heard.push("newer") });
+
+    await fetch(`${media.base}/media/music/stream/a`);
+    stopOlder();
+    stopNewer();
+
+    expect(heard).toEqual(["newer"]);
+    expect(globalThis.fetch).toBe(original);
   });
 });
 

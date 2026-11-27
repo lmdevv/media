@@ -1,10 +1,14 @@
+import { Option } from "effect";
+
 /**
  * The app's requests to the media service, observed for the reach watch. A failed one is a doubt,
  * which the watch settles with a health check.
  *
- * Every JavaScript `fetch` is observed once a watch listens (`listenForMediaRequests`), whoever
- * sends it. Native code reports from the event it gives: the player's audio items, file downloads,
- * and cover images call `mediaRequest` when the request starts and its result when it ends.
+ * Every JavaScript `fetch` is observed while a watch listens (`listenForMediaRequests`), whoever
+ * sends it, but the health check, which the watch asks itself. The release read `followServer`
+ * makes again reports through `releaseReread`. Native code reports from the event it gives: the
+ * player's audio items, file downloads, and cover images call `mediaRequest` when the request
+ * starts and its result when it ends.
  *
  * Identity: a request belongs to the watch that listened when it started. Its failure reaches that
  * watch only while it still listens, and only for a path of the media service on that watch's
@@ -62,7 +66,9 @@ const ownerOf = (url: string): Listener | null => {
 
 /**
  * Starts observing one request to `url`; returns the function that tells how it ended, with its
- * status, or null for no answer. `once` names a request whose failure the watch hears only once.
+ * status, or null for no answer. `once` names a request whose failure with no status, which may be
+ * a broken file rather than the service, the watch hears only once; one with a status it counts is
+ * heard every time.
  */
 export const mediaRequest = (url: string, once?: string): ((status: number | null) => void) => {
   const owner = ownerOf(url);
@@ -70,7 +76,7 @@ export const mediaRequest = (url: string, once?: string): ((status: number | nul
   return (status) => {
     if (owner === null || owner !== listening || !doubtsMedia(status)) return;
 
-    if (once !== undefined) {
+    if (once !== undefined && status === null) {
       if (owner.covers.has(once)) return;
       owner.covers.add(once);
     }
@@ -82,15 +88,27 @@ export const mediaRequest = (url: string, once?: string): ((status: number | nul
 const urlOf = (input: RequestInfo | URL): string =>
   input instanceof Request ? input.url : String(input);
 
-let observing = false;
+/** Names the `fetch` each observer wraps, on the global itself, which every copy of this module shares. */
+const SENDS: unique symbol = Symbol.for("lar.music.mediaRequests.sends");
 
-/** Observes every later `fetch`: an error status or no answer tells `mediaRequest`. */
+type ObservingFetch = typeof fetch & { readonly [SENDS]: typeof fetch };
+
+const isObserving = (send: typeof fetch): send is ObservingFetch => SENDS in send;
+
+/** This copy's observing `fetch`, while it is on the global; null otherwise. */
+let observing: ObservingFetch | null = null;
+
+/**
+ * Puts this copy's observing `fetch` on the global, around the `fetch` that was there first, in
+ * place of any other copy's, as a fast refresh loads the module again: one wrapper at most.
+ */
 const observeFetch = (): void => {
-  if (observing) return;
-  observing = true;
-  const send = globalThis.fetch;
+  const current = globalThis.fetch;
 
-  globalThis.fetch = async (input, init) => {
+  if (current === observing) return;
+  const send = isObserving(current) ? current[SENDS] : current;
+
+  const observe = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const told = mediaRequest(urlOf(input));
     const signal = init?.signal ?? (input instanceof Request ? input.signal : null);
 
@@ -106,6 +124,15 @@ const observeFetch = (): void => {
       throw error;
     }
   };
+
+  observing = Object.assign(observe, { [SENDS]: send });
+  globalThis.fetch = observing;
+};
+
+/** Gives the global back the `fetch` this copy wrapped, unless another copy's wrapper replaced it. */
+const stopObservingFetch = (): void => {
+  if (observing !== null && globalThis.fetch === observing) globalThis.fetch = observing[SENDS];
+  observing = null;
 };
 
 /**
@@ -127,7 +154,9 @@ export const listenForMediaRequests = (
   listening = listener;
 
   return () => {
-    if (listening === listener) listening = null;
+    if (listening !== listener) return;
+    listening = null;
+    stopObservingFetch();
   };
 };
 
@@ -166,6 +195,20 @@ export const coverUnread = (url: string): (() => null) => {
     told(null);
 
     return null;
+  };
+};
+
+/**
+ * Starts observing a read of the release that `followServer` makes again after an answer the app
+ * couldn't read; returns how to tell what it read. Its failure reaches the watch that listened when
+ * it started, while it still listens. The watch's own checks never come this way, so none counts
+ * twice.
+ */
+export const releaseReread = (): ((health: Option.Option<unknown>) => void) => {
+  const owner = listening;
+
+  return (health) => {
+    if (owner !== null && owner === listening && Option.isNone(health)) owner.hear("doubted");
   };
 };
 
