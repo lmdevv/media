@@ -33,10 +33,10 @@ describe("resolveMediaUrl", () => {
 describe("artSource", () => {
   const cover = "/music/art/a1?ticket=t1.week-one";
 
-  it("asks for the smallest width that covers a 48-point row on a 3x phone", () => {
+  it("asks for a copy of exactly the size a 48-point row draws on a 3x phone", () => {
     expect(artSource(origin, cover, 48 * 3)).toEqual({
-      uri: `${origin}/music/art/a1?ticket=t1.week-one&w=185`,
-      cacheKey: `${origin}/music/art/a1?w=185`,
+      uri: `${origin}/music/art/a1?ticket=t1.week-one&w=144`,
+      cacheKey: `${origin}/music/art/a1?w=144`,
     });
   });
 
