@@ -30,6 +30,7 @@ interface VideoOptions {
   readonly height?: number;
   readonly dynamicRange?: VideoStream["dynamicRange"];
   readonly frameRate?: number;
+  readonly fieldOrder?: VideoStream["fieldOrder"];
 }
 
 const video = (codec: string, options: VideoOptions = {}): VideoStream => ({
@@ -42,6 +43,7 @@ const video = (codec: string, options: VideoOptions = {}): VideoStream => ({
   height: options.height ?? 1080,
   dynamicRange: options.dynamicRange ?? "sdr",
   frameRate: options.frameRate,
+  fieldOrder: options.fieldOrder,
 });
 
 const h264 = video("h264");
@@ -393,6 +395,61 @@ describe("decidePlayback", () => {
         audio: AudioPlan.Aac({ index: 2 }),
       }),
     );
+  });
+
+  it("copies an interlaced stream the client plays, as it is, before any encode", () => {
+    const interlaced = video("h264", { fieldOrder: "tff", width: 1440, height: 1080 });
+
+    expect(software(probe("mp4", interlaced, [aac]), chrome)).toStrictEqual(
+      PlaybackPlan.Direct({ audioIndex: 1 }),
+    );
+    expect(everywhere(probe("mkv", interlaced, [aac]), chrome)).toStrictEqual(
+      PlaybackPlan.Hls({
+        mode: "remux",
+        video: VideoPlan.Copy(),
+        audio: AudioPlan.Copy({ index: 1 }),
+      }),
+    );
+    expect(everywhere(probe("mkv", interlaced, [eac3]), chrome)).toStrictEqual(
+      PlaybackPlan.Hls({
+        mode: "audio-transcode",
+        video: VideoPlan.Copy(),
+        audio: AudioPlan.Aac({ index: 2 }),
+      }),
+    );
+  });
+
+  it("deinterlaces an interlaced stream it encodes right after decoding, and a progressive one never", () => {
+    const sd = { profile: "Main", width: 720, height: 576 } as const;
+    const interlaced = probe("ts", video("mpeg2video", { ...sd, fieldOrder: "tff" }), [aac]);
+
+    const progressive = probe("ts", video("mpeg2video", { ...sd, fieldOrder: "progressive" }), [
+      aac,
+    ]);
+
+    expect(impls(software(interlaced, chrome))).toStrictEqual([
+      "decode.cpu",
+      "deinterlace.cpu",
+      "scale.cpu",
+      "encode.cpu.h264",
+    ]);
+    expect(impls(everywhere(interlaced, chrome))).toStrictEqual([
+      "decode.qsv",
+      "deinterlace.qsv",
+      "scale.qsv",
+      "encode.qsv.h264",
+    ]);
+    expect(impls(vaapi(interlaced, chrome))).toStrictEqual([
+      "decode.vaapi",
+      "deinterlace.vaapi",
+      "scale.vaapi",
+      "encode.vaapi.h264",
+    ]);
+    expect(impls(software(progressive, chrome))).toStrictEqual([
+      "decode.cpu",
+      "scale.cpu",
+      "encode.cpu.h264",
+    ]);
   });
 
   it("transcodes HDR HEVC on QSV with tone mapping", () => {

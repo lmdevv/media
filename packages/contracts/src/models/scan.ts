@@ -93,6 +93,8 @@ export const ScannedFile = Schema.Struct({
   versionName: Schema.NullOr(Schema.String),
   /** A digest of the file's companions (NFO, artwork, subtitles), to notice their edits. */
   sidecarDigest: Schema.optionalKey(Schema.String),
+  /** The revision of the media service's reader that made `probe`, so a later one reads again. */
+  probeRevision: Schema.Int,
 });
 
 /** A scanned file. */
@@ -134,6 +136,8 @@ export const IndexedFile = Schema.Struct({
   missing: Schema.Boolean,
   /** The companions' digest the file was last scanned with; null before one was recorded. */
   sidecarDigest: Schema.NullOr(Schema.String),
+  /** The reader revision its stored probe comes from; null before one was recorded. */
+  probeRevision: Schema.NullOr(Schema.Int),
 });
 
 /** A file the scanner already knows, as it compares them. */

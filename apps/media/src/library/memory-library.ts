@@ -71,6 +71,7 @@ export const layer: Layer.Layer<Service | LibrarySink.Service | FileResolver.Ser
                     sizeBytes: file.record.sizeBytes,
                     modifiedAtMs: file.record.modifiedAtMs,
                     sidecarDigest: file.record.sidecarDigest,
+                    probeRevision: file.record.probeRevision,
                   },
                 ]
               : [],

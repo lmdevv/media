@@ -54,6 +54,7 @@ export const reasonOf = (diagnosis: Diagnosis): TranscodeReason =>
 const opName = (op: Op): string =>
   Op.$match(op, {
     Decode: () => "decode",
+    Deinterlace: () => "deinterlace",
     Scale: () => "scale",
     ToneMap: () => "tonemap",
     BurnImage: () => "burn-image",

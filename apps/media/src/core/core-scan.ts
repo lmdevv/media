@@ -142,6 +142,7 @@ const makeSink = Effect.fnUntraced(function* (
                   sizeBytes: file.sizeBytes,
                   modifiedAtMs: file.mtimeMs,
                   sidecarDigest: file.sidecarDigest ?? undefined,
+                  probeRevision: file.probeRevision ?? undefined,
                 },
               ],
             }),

@@ -202,8 +202,9 @@ export interface DeliveredVideo extends Schema.Schema.Type<typeof DeliveredVideo
  */
 export const TranscodeStage = Schema.Struct({
   /**
-   * What it does: `decode`, `scale`, `tonemap` (HDR to SDR), `burn-image` (a picture subtitle
-   * drawn in), `encode`, or `move`, a copy of the frames between CPU and GPU memory.
+   * What it does: `decode`, `deinterlace`, `scale`, `tonemap` (HDR to SDR), `burn-image` (a
+   * picture subtitle drawn in), `encode`, or `move`, a copy of the frames between CPU and GPU
+   * memory.
    */
   op: Schema.String,
   /** Where it runs: `cpu`, or a GPU API such as `qsv` or `vaapi`. A move runs in its GPU's. */

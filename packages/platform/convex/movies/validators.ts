@@ -70,6 +70,14 @@ const hdrFormat = v.union(
   v.literal("dolby_vision"),
 );
 
+/** How a video stream says its pictures are scanned. */
+const fieldOrder = v.union(
+  v.literal("progressive"),
+  v.literal("tff"),
+  v.literal("bff"),
+  v.literal("unknown"),
+);
+
 const videoStream = v.object({
   index: v.number(),
   codec: v.string(),
@@ -82,6 +90,8 @@ const videoStream = v.object({
   pixelFormat: nullable(v.string()),
   hdr: hdrFormat,
   bitRate: nullable(v.number()),
+  /** Absent for a file last scanned before field orders were read. */
+  fieldOrder: v.optional(fieldOrder),
 });
 
 const audioStream = v.object({
@@ -238,6 +248,8 @@ export const scannedFile = v.object({
   versionName: nullable(v.string()),
   /** A digest of the companions the scan read (NFO, artwork, subtitles), to notice their edits. */
   sidecarDigest: v.optional(v.string()),
+  /** The revision of the media service's reader that made `probe`, so a later one reads again. */
+  probeRevision: v.number(),
 });
 
 /** One file the scanner found, with the title and episode it belongs to. */
@@ -265,6 +277,7 @@ export const knownFile = v.object({
   mtimeMs: v.number(),
   missing: v.boolean(),
   sidecarDigest: nullable(v.string()),
+  probeRevision: nullable(v.number()),
 });
 
 export const scannedPerson = v.object({

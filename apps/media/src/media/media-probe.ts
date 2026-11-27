@@ -1,9 +1,17 @@
 import { extname } from "node:path";
 
 import { BITMAP_SUBTITLE_FORMATS, Container, DynamicRange } from "@media/contracts/media-playback";
+import { FieldOrder } from "@media/contracts/models/catalog";
 import { Effect, Schema } from "effect";
 
 import * as MediaTools from "./media-tools.ts";
+
+/**
+ * Which revision of this reader a probe comes from. A probe stored by an older one lacks what this
+ * one reads (field order; the peak frame rate, where it kept the average), so a scan reads its
+ * file again even when the file is unchanged.
+ */
+export const PROBE_REVISION = 2;
 
 /** The main video stream of a file. */
 export const VideoStream = Schema.Struct({
@@ -25,6 +33,12 @@ export const VideoStream = Schema.Struct({
    */
   frameRate: Schema.optional(Schema.Finite),
   dynamicRange: DynamicRange,
+  /**
+   * How the stream says its pictures are scanned: what the container says, else what the decoder
+   * reads from the first pictures. Absent in a probe stored before field orders were read, which
+   * the next scan replaces.
+   */
+  fieldOrder: Schema.optional(FieldOrder),
 });
 
 /** The main video stream of a file. */
@@ -130,6 +144,7 @@ const FfprobeStream = Schema.Struct({
   avg_frame_rate: Schema.optionalKey(Schema.String),
   r_frame_rate: Schema.optionalKey(Schema.String),
   color_transfer: Schema.optionalKey(Schema.String),
+  field_order: Schema.optionalKey(Schema.String),
   side_data_list: Schema.optionalKey(
     Schema.Array(Schema.Struct({ side_data_type: Schema.optionalKey(Schema.String) })),
   ),
@@ -227,6 +242,24 @@ const dynamicRangeOf = (stream: FfprobeStream): DynamicRange => {
   return stream.color_transfer === "arib-std-b67" ? "hlg" : "sdr";
 };
 
+/**
+ * ffprobe's field order as data, the field coded first (`tb`: top coded, bottom shown) taken as
+ * the field shown first. Whether a stream is interlaced is reliable; which field comes first is
+ * not: ffmpeg's encoders mark top-field-first pictures `tb`, which Matroska keeps, and H.264's
+ * parser reads a bottom-field-first stream in MP4 as `tt`. Deinterlacing reads each frame's own
+ * flag, which its decoder takes from the picture.
+ */
+const FIELD_ORDERS: ReadonlyMap<string, FieldOrder> = new Map([
+  ["progressive", "progressive"],
+  ["tt", "tff"],
+  ["tb", "tff"],
+  ["bb", "bff"],
+  ["bt", "bff"],
+]);
+
+const fieldOrderOf = (stream: FfprobeStream): FieldOrder =>
+  FIELD_ORDERS.get(stream.field_order ?? "") ?? "unknown";
+
 const containerOf = (formatName: string, path: string): Container => {
   const extension = extname(path).toLowerCase();
 
@@ -265,6 +298,7 @@ const toVideo = (stream: FfprobeStream): VideoStream | undefined => {
     height: stream.height,
     frameRate,
     dynamicRange: dynamicRangeOf(stream),
+    fieldOrder: fieldOrderOf(stream),
   };
 };
 

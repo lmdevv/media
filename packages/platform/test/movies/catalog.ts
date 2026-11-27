@@ -73,6 +73,7 @@ const Known = answer(
         mtimeMs: Schema.Finite,
         missing: Schema.Boolean,
         sidecarDigest: Schema.NullOr(Schema.String),
+        probeRevision: Schema.NullOr(Schema.Finite),
       }),
     ),
     continueCursor: Schema.String,

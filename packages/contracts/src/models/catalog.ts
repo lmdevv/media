@@ -187,6 +187,15 @@ export const HdrFormat = Schema.Literals(["none", "hdr10", "hdr10plus", "hlg", "
 /** High dynamic range format. */
 export type HdrFormat = typeof HdrFormat.Type;
 
+/**
+ * How a video stream says its pictures are scanned: whole pictures (`progressive`), two fields
+ * with the top (`tff`) or bottom (`bff`) one first, or `unknown` when nothing says.
+ */
+export const FieldOrder = Schema.Literals(["progressive", "tff", "bff", "unknown"]);
+
+/** How a video stream says its pictures are scanned. */
+export type FieldOrder = typeof FieldOrder.Type;
+
 /** A video stream from ffprobe. */
 export const VideoStream = Schema.Struct({
   index: Schema.Int,
@@ -201,6 +210,8 @@ export const VideoStream = Schema.Struct({
   pixelFormat: Schema.NullOr(Schema.String),
   hdr: HdrFormat,
   bitRate: Schema.NullOr(Schema.Int),
+  /** Absent for a file last scanned before field orders were read. */
+  fieldOrder: Schema.optionalKey(FieldOrder),
 });
 
 /** A video stream. */

@@ -33,6 +33,7 @@ import {
   type OutputTarget,
   type Rendering,
   type Row,
+  type Scan,
   type SourceVideo,
   type SubtitleInput,
   toneMapsTo,
@@ -192,13 +193,45 @@ export interface PlannedVideo {
   readonly output: VideoOutput;
 }
 
+/**
+ * Codecs whose pictures may each hold two fields, which their decoders flag frame by frame. HEVC
+ * codes a field as a picture of its own, and VP9 and AV1 code no fields, so none is listed.
+ */
+const FIELD_CODECS: ReadonlySet<string> = new Set([
+  "mpeg2video",
+  "h264",
+  "vc1",
+  "mpeg4",
+  "dvvideo",
+  "mjpeg",
+  "prores",
+  "dnxhd",
+  "ffv1",
+]);
+
+/**
+ * Whether `video` is planned as interlaced, from what its stream says. A field order says so; a
+ * stream that says progressive is, and gets no deinterlacer. One that says nothing is interlaced
+ * when its codec codes fields: MPEG-4 Part 2 in AVI and DV say nothing whatever their frames
+ * hold, and the deinterlacer passes frames flagged progressive through untouched, so it costs such
+ * a file a filter, never its picture. A probe stored before field orders were read has none, and
+ * is planned progressive until the next scan reads it again.
+ */
+const scanOf = (video: VideoStream): Scan => {
+  if (video.fieldOrder === "tff" || video.fieldOrder === "bff") return "interlaced";
+
+  return video.fieldOrder === "unknown" && FIELD_CODECS.has(video.codec)
+    ? "interlaced"
+    : "progressive";
+};
+
 /** The source of `video` as rows see it; the one mapping from ffprobe. */
 export const sourceOf = (video: VideoStream): SourceVideo => ({
   codec: video.codec,
   pixelFormat: video.pixelFormat ?? (video.bitDepth > 8 ? "yuv420p10le" : "yuv420p"),
   depth: video.bitDepth,
   colour: video.dynamicRange,
-  scan: "progressive",
+  scan: scanOf(video),
   width: video.width,
   height: video.height,
 });
@@ -403,7 +436,8 @@ interface Candidate {
  * Every chain that could encode `source` for `intent` within the snapshot's domains: each encode
  * row with each target it may produce (on the CPU only those that allow it) sizes the picture
  * (the CPU within its bounds) and the bitrate within the target's level at the source's frame
- * rate, skipping a target whose level holds that rate at no size; the scale leaves frames at the
+ * rate, skipping a target whose level holds that rate at no size; an interlaced source is
+ * deinterlaced right after it is decoded, at its own frame rate; the scale leaves frames at the
  * source's depth or at 8 bits, whichever the rows after it take, and a tone map runs where the
  * target asks for SDR from HDR.
  */
@@ -461,6 +495,7 @@ const candidates = (
       return depths.flatMap((depth) => {
         const ops: ReadonlyArray<Op> = [
           Op.Decode({ codec: source.codec }),
+          ...(source.scan === "interlaced" ? [Op.Deinterlace()] : []),
           Op.Scale({ ...size, depth }),
           ...(toneMapsTo(source.colour, target) ? [Op.ToneMap()] : []),
           ...(intent.burnImage === undefined ? [] : [Op.BurnImage({ subtitle: intent.burnImage })]),
@@ -773,6 +808,7 @@ const WARMUP_ORDER: ReadonlyArray<OpName> = [
   "Scale",
   "Decode",
   "ToneMap",
+  "Deinterlace",
   "BurnImage",
 ];
 
@@ -792,6 +828,7 @@ const common = (step: Step): boolean =>
   step.output.colour === "sdr" &&
   Op.$match(step.op, {
     Decode: ({ codec }) => COMMON_CODECS.has(codec),
+    Deinterlace: () => false,
     Scale: () => true,
     ToneMap: () => true,
     BurnImage: () => false,
@@ -803,7 +840,7 @@ const common = (step: Step): boolean =>
  * The steps generated clips prove for the rows of `domain`, one per key: first those of the chain
  * most files play through (8-bit moves, the H.264 encoder, scaling, H.264 and HEVC decoding), then
  * the rest, each group in the order most chains need them: moves, the encoders, scaling, decoders,
- * then tone maps.
+ * tone maps, deinterlacers, then overlays.
  */
 export const probedSteps = (domain: Domain, snapshot: CapabilitySnapshot): ReadonlyArray<Step> => {
   const steps = new Map<CapabilityKey, Step>();

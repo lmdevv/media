@@ -18,6 +18,8 @@ const IndexedFile = Schema.Struct({
   sizeBytes: Schema.Int,
   modifiedAtMs: Schema.Finite,
   sidecarDigest: Schema.optional(Schema.String),
+  /** The reader revision (`PROBE_REVISION`) its stored probe comes from; absent before one was. */
+  probeRevision: Schema.optional(Schema.Int),
 });
 
 interface IndexedFile extends Schema.Schema.Type<typeof IndexedFile> {}
@@ -31,6 +33,8 @@ export const ScannedFile = Schema.Struct({
   sidecarDigest: Schema.String,
   name: MediaName,
   probe: MediaProbe,
+  /** The revision of the reader that made `probe` (`PROBE_REVISION`). */
+  probeRevision: Schema.Int,
   subtitles: Schema.Array(SidecarSubtitle),
   /** Movie metadata, or the show's metadata for an episode. Absent for extras. */
   title: Schema.optional(TitleMetadata),
@@ -45,7 +49,10 @@ export const ScanProgress = Schema.Struct({
   phase: Schema.Literals(["walking", "processing", "reconciling", "done"]),
   /** Media files found so far. */
   discovered: Schema.Int,
-  /** Files skipped because their size and modification time did not change. */
+  /**
+   * Files skipped because their size, modification time, and companions did not change since a
+   * probe by this reader revision.
+   */
   unchanged: Schema.Int,
   /** New or changed files probed and stored. */
   processed: Schema.Int,

@@ -69,6 +69,7 @@ const scannedFile = (path: string, sizeBytes: number, mtimeMs: number, video: bo
   sizeBytes,
   mtimeMs,
   probe: video ? VIDEO_PROBE : EMPTY_PROBE,
+  probeRevision: 1,
   externalSubtitles: [],
   versionName: null,
 });

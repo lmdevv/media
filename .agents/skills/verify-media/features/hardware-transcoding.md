@@ -184,6 +184,9 @@ Preconditions:
   GPU did the work.
 - The hdr-to-sdr bounds compare the picture with a software Hable tone map of the same frames: a
   different tone curve passes, and a black, washed-out, blown-out, or tinted picture fails.
+- VA-API deinterlaces with `deinterlace_vaapi=mode=bob`. Its default, motion-adaptive, gives no
+  frame for a run's first on iHD (Arc A380, iHD 25.2 and 26.3) and stamps the rest a frame late,
+  so a seek's sound starts before its picture; Quick Sync's `vpp_qsv` deinterlacer has neither.
 - The burn-in compare counts pixels that differ from the source frame by more than 40 levels: 1 %
   of the bottom 30 % must change while the subtitle shows (108 s), and almost none above it or
   before it shows (105 s).

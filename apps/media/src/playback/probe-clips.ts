@@ -1,8 +1,8 @@
 /**
  * The generated clips capability probes read: ten frames at 320x240, one per codec and layout a
- * decoder row tries, plus HDR clips for tone maps. The service writes each once with software
- * encoders; a clip this build cannot make proves nothing, and the keys that need it wait for a
- * real source.
+ * decoder row tries, plus HDR clips for tone maps and interlaced clips for deinterlacers. The
+ * service writes each once with software encoders; a clip this build cannot make proves nothing,
+ * and the keys that need it wait for a real source.
  */
 import type { BuildFeature, ClipName, SourceVideo } from "./video-ops.ts";
 
@@ -18,6 +18,21 @@ export interface ProbeClip {
 const SIZE = { width: 320, height: 240 } as const;
 
 const PICTURE = ["-f", "lavfi", "-i", "testsrc2=size=320x240:rate=10:duration=1"];
+
+/**
+ * Ten interlaced frames: twenty pictures woven in pairs, the top field from the earlier one, and
+ * coded as fields (`ildct`), so each decoded frame is flagged interlaced and top field first.
+ */
+const WOVEN = [
+  "-f",
+  "lavfi",
+  "-i",
+  "testsrc2=size=320x240:rate=20:duration=1",
+  "-vf",
+  "tinterlace=interleave_top,setfield=tff",
+  "-flags",
+  "+ildct+ilme",
+];
 
 const PQ =
   "format=yuv420p10le,setparams=color_primaries=bt2020:color_trc=smpte2084:colorspace=bt2020nc";
@@ -150,6 +165,16 @@ export const PROBE_CLIPS: Readonly<Record<ClipName, ProbeClip>> = {
     source: sdr("mpeg2video", "yuv420p", 8),
     needs: "encoder:mpeg2video",
     args: [...PICTURE, "-c:v", "mpeg2video", "-pix_fmt", "yuv420p"],
+  },
+  "mpeg2-8-interlaced": {
+    source: { ...sdr("mpeg2video", "yuv420p", 8), scan: "interlaced" },
+    needs: "encoder:mpeg2video",
+    args: [...WOVEN, "-c:v", "mpeg2video", "-pix_fmt", "yuv420p"],
+  },
+  "h264-10-interlaced": {
+    source: { ...sdr("h264", "yuv420p10le", 10), scan: "interlaced" },
+    needs: "encoder:libx264",
+    args: [...WOVEN, "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p10le"],
   },
 };
 

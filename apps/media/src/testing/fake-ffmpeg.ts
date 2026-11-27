@@ -163,10 +163,12 @@ for (const [index, rule] of (behavior.rules ?? []).entries()) {
 // The stand-in plays any Quick Sync or VA-API device in software, so the service's probes and
 // runs work without one: GPU options go, GPU filters become their software equivalents, and GPU
 // encoders of H.264 and HEVC become libx264 and libx265.
+const SOFTWARE_DEINTERLACE = "bwdif=mode=send_frame:deint=interlaced";
 const optionsOf = (text) =>
   Object.fromEntries(text.split(":").map((pair) => [pair.split("=")[0], pair.split("=")[1]]));
 const inSoftware = (options) => {
   const parts = [];
+  if (options.deinterlace !== undefined) parts.push(SOFTWARE_DEINTERLACE);
   if (options.w !== undefined && options.h !== undefined) parts.push("scale=" + options.w + ":" + options.h);
   if (options.format !== undefined) parts.push("format=" + (options.format === "p010" ? "p010le" : options.format));
 
@@ -177,6 +179,7 @@ const graphInSoftware = (text) =>
     .replace(/vpp_qsv=([^,;\\[]*)/g, (_, options) => inSoftware(optionsOf(options)))
     .replace(/scale_vaapi=([^,;\\[]*)/g, (_, options) => inSoftware(optionsOf(options)))
     .replace(/tonemap_vaapi=[^,;\\[]*/g, "format=nv12")
+    .replace(/deinterlace_vaapi=[^,;\\[]*/g, SOFTWARE_DEINTERLACE)
     .replace(/hwupload(=[^,;\\[]*)?/g, "null")
     .replace(/hwmap(=[^,;\\[]*)?/g, "null")
     .replace(/hwdownload/g, "null")
@@ -216,6 +219,7 @@ const emulated = {
     " .. vpp_qsv           V->V       played in software",
     " .. scale_vaapi       V->V       played in software",
     " .. tonemap_vaapi     V->V       played in software",
+    " .. deinterlace_vaapi V->V       played in software",
     " .. hwupload          V->V       played in software",
     " .. hwdownload        V->V       played in software",
     " .. hwmap             V->V       played in software",

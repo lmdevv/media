@@ -90,6 +90,8 @@ interface Chain {
   readonly without?: ReadonlyArray<string>;
   /** The stages the chain must plan, when they are part of what it proves. */
   readonly stages?: ReadonlyArray<string>;
+  /** Stages the chain must plan among others, whatever decodes it. */
+  readonly includes?: ReadonlyArray<string>;
   /** What it encodes to; H.264 when absent. */
   readonly output?: OutputCodec;
 }
@@ -118,6 +120,32 @@ const chainsOn = (domain: GpuDomain): ReadonlyArray<Chain> => [
   { name: `${domain}: VP9`, clip: "vp9-10", domain },
   { name: `${domain}: H.264 encoded to HEVC`, clip: "h264-8", domain, output: "hevc" },
   { name: `${domain}: HEVC Main 10 encoded to AV1`, clip: "hevc-10", domain, output: "av1" },
+  {
+    // VA-API's MPEG-2 decoder crashes in a share of runs on an Arc A380, so it may be set aside.
+    name: `${domain}: interlaced MPEG-2 deinterlaced on the GPU`,
+    clip: "mpeg2-8-interlaced",
+    domain,
+    includes: [`deinterlace.${domain}`, `scale.${domain}`, `encode.${domain}.h264`],
+  },
+  {
+    name: `${domain}: interlaced 10-bit H.264 decoded on the CPU, deinterlaced on the GPU`,
+    clip: "h264-10-interlaced",
+    domain,
+    stages: [
+      "decode.cpu",
+      `move.cpu>${domain}`,
+      `deinterlace.${domain}`,
+      `scale.${domain}`,
+      `encode.${domain}.h264`,
+    ],
+  },
+  {
+    name: `${domain}: interlaced MPEG-2 deinterlaced on the CPU between GPU stages`,
+    clip: "mpeg2-8-interlaced",
+    domain,
+    without: [`deinterlace.${domain}`],
+    includes: ["deinterlace.cpu", `move.cpu>${domain}`, `scale.${domain}`, `encode.${domain}.h264`],
+  },
 ];
 
 const CPU_CHAINS: ReadonlyArray<Chain> = [
@@ -125,6 +153,14 @@ const CPU_CHAINS: ReadonlyArray<Chain> = [
   { name: "cpu: an image subtitle burned in", clip: "h264-8", domain: "cpu", burn: true },
   { name: "cpu: H.264 encoded to HEVC", clip: "h264-8", domain: "cpu", output: "hevc" },
   { name: "cpu: H.264 encoded to AV1", clip: "h264-8", domain: "cpu", output: "av1" },
+  { name: "cpu: interlaced MPEG-2 deinterlaced", clip: "mpeg2-8-interlaced", domain: "cpu" },
+  {
+    name: "cpu: interlaced 10-bit H.264 deinterlaced with yadif",
+    clip: "h264-10-interlaced",
+    domain: "cpu",
+    without: ["deinterlace.cpu"],
+    stages: ["decode.cpu", "deinterlace.cpu.yadif", "scale.cpu", "encode.cpu.h264"],
+  },
 ];
 
 const intentOf = (chain: Chain): VideoIntent => ({
@@ -250,12 +286,14 @@ describe.runIf(hasQsv || hasVaapi)("TranscodeCapabilities on this machine's GPU"
             } else {
               const { pipeline } = planned.success;
 
+              const impls = pipeline.steps.map((step): string => step.impl);
+
               if (chain.stages !== undefined) {
-                assert.deepStrictEqual(
-                  pipeline.steps.map((step): string => step.impl),
-                  chain.stages,
-                  chain.name,
-                );
+                assert.deepStrictEqual(impls, chain.stages, chain.name);
+              }
+
+              for (const stage of chain.includes ?? []) {
+                assert.include(impls, stage, chain.name);
               }
 
               const clip = path.join(
@@ -338,6 +376,17 @@ describe.runIf(hasQsv || hasVaapi)("TranscodeCapabilities on this machine's GPU"
           );
 
           yield* Console.log(`encoders: ${encoders.join(", ")}`);
+
+          // Each deinterlacer is a row of its own per depth, and every one verified ran above.
+          const deinterlacers = (["cpu", ...domains] as const).flatMap((domain) =>
+            ["8", "10"].map((depth) => {
+              const key = capabilityKey(ImplId(`deinterlace.${domain}`), depth);
+
+              return `${key} ${Inventory.capabilityOf(inventory, key).status}`;
+            }),
+          );
+
+          yield* Console.log(`deinterlacers: ${deinterlacers.join(", ")}`);
         }),
       300_000,
     );

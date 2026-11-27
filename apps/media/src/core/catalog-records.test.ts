@@ -11,6 +11,7 @@ import * as DiskCache from "../disk-cache.ts";
 import * as LibraryScanner from "../library/library-scanner.ts";
 import { parseMediaPath } from "../library/media-naming.ts";
 import * as MemoryLibrary from "../library/memory-library.ts";
+import { PROBE_REVISION } from "../media/media-probe.ts";
 import * as MediaTools from "../media/media-tools.ts";
 import * as MetadataResolver from "../metadata/title-metadata.ts";
 import * as Omdb from "../metadata/omdb.ts";
@@ -101,6 +102,7 @@ describe.skipIf(!hasFfmpeg)("catalog records", () => {
               const decoded = yield* decodeItem(item.value);
 
               assert.strictEqual(decoded.file.path, `${root}/${stored.record.relativePath}`);
+              assert.strictEqual(decoded.file.probeRevision, PROBE_REVISION);
 
               const resolved = toResolvedMediaFile(
                 {
@@ -118,6 +120,11 @@ describe.skipIf(!hasFfmpeg)("catalog records", () => {
               assert.deepStrictEqual(
                 toCatalogProbe(resolved.probe),
                 toCatalogProbe(stored.record.probe),
+                stored.record.relativePath,
+              );
+              assert.strictEqual(
+                resolved.probe.video?.fieldOrder,
+                stored.record.probe.video === undefined ? undefined : "progressive",
                 stored.record.relativePath,
               );
               assert.deepStrictEqual(

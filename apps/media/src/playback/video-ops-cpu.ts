@@ -1,13 +1,15 @@
 /**
- * The CPU's rows: libavcodec's software decoders, `scale`, the `zscale` tone map, the image
- * subtitle overlay, and libx264, libx265, and libsvtav1, a row each. A build listing proves these
- * present, as they touch no device.
+ * The CPU's rows: libavcodec's software decoders, the `bwdif` deinterlacer (`yadif` where a build
+ * lacks it), `scale`, the `zscale` tone map, the image subtitle overlay, and libx264, libx265, and
+ * libsvtav1, a row each. A build listing proves these present, as they touch no device.
  * They are the floor every source falls back to, so they take any layout and depth ffmpeg
  * decodes, as software transcoding always has; closed lists guard the GPU rows instead.
  */
 import { type Level, levelOf } from "./output-levels.ts";
 import { DECODE_CLIPS, PROBE_CLIPS } from "./probe-clips.ts";
 import {
+  DEINTERLACE_PROBES,
+  deinterlaceVariant,
   encodeProbes,
   encodeRowId,
   encodesTarget,
@@ -40,6 +42,26 @@ const decodeCpu: OpImpl<"Decode"> = {
     runs: 1,
   })),
 };
+
+/**
+ * A software deinterlacer: one frame for each frame (`send_frame`), only those the decoder flagged
+ * interlaced (`deint=interlaced`), so soft-telecined and PsF pictures pass untouched, each in the
+ * field order its own flag gives (`parity` left at `auto`). It keeps the frames' layout.
+ */
+const deinterlaceCpu = (id: string, name: "bwdif" | "yadif"): OpImpl<"Deinterlace"> => ({
+  id: ImplId(id),
+  op: "Deinterlace",
+  on: "cpu",
+  takes: "cpu",
+  needs: () => [`filter:${name}`],
+  variant: (_, input) => deinterlaceVariant(input),
+  output: (_, input) => ({ ...input, scan: "progressive" }),
+  render: () => ({
+    ...NOTHING,
+    filters: [filter(name, ["mode", "send_frame"], ["deint", "interlaced"])],
+  }),
+  probes: DEINTERLACE_PROBES,
+});
 
 /** Bicubic scaling that keeps the frames' layout, whatever it is. */
 const scaleCpu: OpImpl<"Scale"> = {
@@ -242,6 +264,9 @@ const encodeCpu = (codec: OutputCodec): OpImpl<"Encode"> => {
 /** Every CPU row. */
 export const CPU_ROWS: ReadonlyArray<Row> = [
   row(decodeCpu),
+  row(deinterlaceCpu("deinterlace.cpu", "bwdif")),
+  // After `bwdif`, so a chain that costs the same takes `bwdif` while it is verified.
+  row(deinterlaceCpu("deinterlace.cpu.yadif", "yadif")),
   row(scaleCpu),
   row(toneMapCpu),
   row(burnImageCpu),

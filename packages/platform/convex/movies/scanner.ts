@@ -58,12 +58,13 @@ export const known = serverMutation({
         value: {
           files: found.page
             .filter((file) => scan.keeps(file.path))
-            .map(({ path, sizeBytes, mtimeMs, missing, sidecarDigest }) => ({
+            .map(({ path, sizeBytes, mtimeMs, missing, sidecarDigest, probeRevision }) => ({
               path,
               sizeBytes,
               mtimeMs,
               missing,
               sidecarDigest,
+              probeRevision: probeRevision ?? null,
             })),
           continueCursor: found.continueCursor,
           isDone: found.isDone,

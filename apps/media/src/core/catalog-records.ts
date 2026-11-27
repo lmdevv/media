@@ -86,6 +86,10 @@ export const toCatalogProbe = (probe: MediaProbe): Probe => ({
             pixelFormat: probe.video.pixelFormat ?? null,
             hdr: HDR_FORMATS[probe.video.dynamicRange],
             bitRate: null,
+            ...Option.match(present(probe.video.fieldOrder), {
+              onNone: () => ({}),
+              onSome: (fieldOrder) => ({ fieldOrder }),
+            }),
           },
         ],
   audio: probe.audio.map((track) => ({
@@ -151,6 +155,7 @@ const toMediaProbe = (probe: Probe): MediaProbe => {
             height: video.height,
             frameRate: video.frameRate ?? undefined,
             dynamicRange: dynamicRangeOf(video.hdr),
+            fieldOrder: video.fieldOrder,
           },
     audio: probe.audio.map((track) => ({
       index: track.index,
@@ -447,6 +452,7 @@ export const toScannedItem = Effect.fnUntraced(function* (
       externalSubtitles: file.subtitles.map(toExternalSubtitle),
       versionName: versionNameOf(file.name),
       sidecarDigest: file.sidecarDigest,
+      probeRevision: file.probeRevision,
     },
     title: yield* toScannedTitle(folder, file.title, seal),
     episode:

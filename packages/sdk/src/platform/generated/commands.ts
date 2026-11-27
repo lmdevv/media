@@ -3713,6 +3713,14 @@ const movies_play_start = mutation({
               Schema.Literal("dolby_vision"),
             ]),
             bitRate: Schema.Union([Schema.Finite, Schema.Null]),
+            fieldOrder: Schema.optionalKey(
+              Schema.Union([
+                Schema.Literal("progressive"),
+                Schema.Literal("tff"),
+                Schema.Literal("bff"),
+                Schema.Literal("unknown"),
+              ]),
+            ),
           }),
         ),
         audio: Schema.Array(
@@ -4211,6 +4219,14 @@ const movies_titles_get = query({
                 Schema.Literal("dolby_vision"),
               ]),
               bitRate: Schema.Union([Schema.Finite, Schema.Null]),
+              fieldOrder: Schema.optionalKey(
+                Schema.Union([
+                  Schema.Literal("progressive"),
+                  Schema.Literal("tff"),
+                  Schema.Literal("bff"),
+                  Schema.Literal("unknown"),
+                ]),
+              ),
             }),
           ),
           audio: Schema.Array(

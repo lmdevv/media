@@ -15,6 +15,7 @@ interface StreamJson {
   readonly avg_frame_rate?: string;
   readonly r_frame_rate?: string;
   readonly color_transfer?: string;
+  readonly field_order?: string;
   readonly side_data_list?: ReadonlyArray<{ readonly side_data_type: string }>;
   readonly channels?: number;
   readonly channel_layout?: string;
@@ -55,7 +56,37 @@ const frameRateOf = (rates: Pick<StreamJson, "avg_frame_rate" | "r_frame_rate">)
     "/library/Clip (2024)/Clip (2024).mp4",
   ).pipe(Effect.map((probe) => probe.video?.frameRate));
 
+/** The field order read for a 720x576 MPEG-2 stream whose field order ffprobe reports as `order`. */
+const SD_MPEG2: StreamJson = {
+  index: 0,
+  codec_type: "video",
+  codec_name: "mpeg2video",
+  width: 720,
+  height: 576,
+};
+
+const fieldOrderOf = (order: string | undefined) =>
+  parseFfprobeJson(
+    ffprobe([order === undefined ? SD_MPEG2 : { ...SD_MPEG2, field_order: order }]),
+    "/library/Clip (2004)/Clip (2004).mkv",
+  ).pipe(Effect.map((probe) => probe.video?.fieldOrder));
+
 describe("parseFfprobeJson", () => {
+  it.effect(
+    "reads the field order a stream says, the field coded first as the one shown first",
+    () =>
+      Effect.gen(function* () {
+        assert.strictEqual(yield* fieldOrderOf("progressive"), "progressive");
+        assert.strictEqual(yield* fieldOrderOf("tt"), "tff");
+        // ffmpeg's encoders mark top-field-first pictures `tb`, and Matroska keeps it.
+        assert.strictEqual(yield* fieldOrderOf("tb"), "tff");
+        assert.strictEqual(yield* fieldOrderOf("bb"), "bff");
+        assert.strictEqual(yield* fieldOrderOf("bt"), "bff");
+        assert.strictEqual(yield* fieldOrderOf("unknown"), "unknown");
+        assert.strictEqual(yield* fieldOrderOf(undefined), "unknown");
+      }),
+  );
+
   it.effect("reads the most frames a second the stream reports", () =>
     Effect.gen(function* () {
       // 4 s at 60 fps then 12 s at 15 fps, as ffprobe reads it.

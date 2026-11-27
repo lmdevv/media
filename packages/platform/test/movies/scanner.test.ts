@@ -83,6 +83,64 @@ describe.skipIf(stack === undefined)("movies scanner callbacks", { timeout: 180_
     await finishJob(stack, lease);
   });
 
+  it("remember the reader revision each file's probe comes from, and the field order it read", async () => {
+    if (stack === undefined) return;
+    const admin = await member(stack, "scanner-revision", "admin");
+    const { scanJobId, roots } = await moviesLibrary(admin, "Revised");
+    const path = join(roots[0] ?? "", "Interlaced.mkv");
+    const lease = await claimJob(stack, "movies.scan", scanJobId);
+    const before = movieFile(path, 10, 1, undefined, true);
+
+    await upsert(stack, lease, [before]);
+
+    expect((await knownFiles(stack, lease)).map((file) => file.probeRevision)).toEqual([1]);
+
+    const [stream] = before.file.probe.video;
+
+    if (stream === undefined) throw new Error("the file has no video stream");
+
+    const landed = await upsert(stack, lease, [
+      {
+        ...before,
+        file: {
+          ...before.file,
+          probeRevision: 2,
+          probe: { ...before.file.probe, video: [{ ...stream, fieldOrder: "tff" }] },
+        },
+      },
+    ]);
+
+    if (landed.outcome !== "held") throw new Error(`upsert answered ${landed.outcome}`);
+    const [file] = landed.value.files;
+
+    if (file === undefined) throw new Error("no file landed");
+
+    expect((await knownFiles(stack, lease)).map((known) => known.probeRevision)).toEqual([2]);
+
+    const resolved = await runServer(
+      stack,
+      api.movies.files.resolveFile,
+      { fileId: file.fileId },
+      Schema.Struct({
+        probe: Schema.Struct({
+          video: Schema.Array(Schema.Struct({ fieldOrder: Schema.optionalKey(Schema.String) })),
+        }),
+      }),
+    );
+
+    expect(resolved.probe.video.map((video) => video.fieldOrder)).toEqual(["tff"]);
+
+    // A viewer's title answers its files with the field order too.
+    const title = await admin.signedIn.client.query(api.movies.titles.get, {
+      titleId: file.titleId,
+    });
+
+    expect(
+      title.files.flatMap((each) => each.probe.video.map((video) => video.fieldOrder)),
+    ).toEqual(["tff"]);
+    await finishJob(stack, lease);
+  });
+
   it("refuse a batch over 500 files or paths, and a path outside the folders", async () => {
     if (stack === undefined) return;
     const admin = await member(stack, "scanner-bounds", "admin");

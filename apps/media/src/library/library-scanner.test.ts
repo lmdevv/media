@@ -1,9 +1,10 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, layer } from "@effect/vitest";
-import { Effect, FileSystem, Layer, Option, Path } from "effect";
+import { Effect, FileSystem, Layer, Option, Path, Struct } from "effect";
 import { FetchHttpClient } from "effect/http";
 
 import { LibraryId } from "@media/contracts/ids";
+import { PROBE_REVISION } from "../media/media-probe.ts";
 import * as MediaTools from "../media/media-tools.ts";
 import * as DiskCache from "../disk-cache.ts";
 import * as MetadataResolver from "../metadata/title-metadata.ts";
@@ -14,6 +15,7 @@ import { copyBytes } from "../testing/byte-copies.ts";
 import * as FixtureWorkspace from "../testing/fixture-workspace.ts";
 import { testConfigLayer } from "../testing/test-config.ts";
 import * as LibraryScanner from "./library-scanner.ts";
+import * as LibrarySink from "./library-sink.ts";
 import * as MemoryLibrary from "./memory-library.ts";
 
 const hasFfmpeg = await ffmpegAvailable();
@@ -220,6 +222,52 @@ describe.skipIf(!hasFfmpeg)("LibraryScanner", () => {
 
         assert.deepStrictEqual([full.unchanged, full.processed], [0, 3]);
       }),
+    );
+
+    it.effect(
+      "reads an unchanged file again when an older reader stored its probe, and keeps this one's field order and frame rate",
+      () =>
+        Effect.gen(function* () {
+          const { library, copy } = yield* FixtureWorkspace.Service;
+          const target = yield* copy;
+          const scanner = yield* LibraryScanner.Service;
+          const sink = yield* LibrarySink.Service;
+          const libraryId = LibraryId.make("older-probes");
+          const request = { libraryId, root: target.movies, mode: "incremental" } as const;
+
+          yield* scanner.scan(request);
+          const fresh = (yield* scanned(libraryId)).get(library.directMovie)?.record;
+
+          assert.isDefined(fresh);
+
+          if (fresh.probe.video === undefined) return;
+
+          assert.strictEqual(fresh.probeRevision, PROBE_REVISION);
+          assert.strictEqual(fresh.probe.video.fieldOrder, "progressive");
+
+          // As an older reader stored it: no field order, another frame rate, an older revision.
+          yield* sink.upsertBatch({ libraryId, root: target.movies }, [
+            Struct.assign(fresh, {
+              probeRevision: PROBE_REVISION - 1,
+              probe: {
+                ...fresh.probe,
+                video: { ...fresh.probe.video, fieldOrder: undefined, frameRate: 1 },
+              },
+            }),
+          ]);
+
+          const again = yield* scanner.scan(request);
+          const read = (yield* scanned(libraryId)).get(library.directMovie)?.record;
+
+          assert.deepStrictEqual([again.processed, again.unchanged], [1, 3]);
+          assert.strictEqual(read?.probeRevision, PROBE_REVISION);
+          assert.strictEqual(read?.probe.video?.fieldOrder, "progressive");
+          assert.strictEqual(read?.probe.video?.frameRate, fresh.probe.video.frameRate);
+
+          const settled = yield* scanner.scan(request);
+
+          assert.deepStrictEqual([settled.processed, settled.unchanged], [0, 4]);
+        }),
     );
 
     it.effect("rescans a file whose NFO, artwork, or subtitles changed", () =>

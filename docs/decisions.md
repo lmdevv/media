@@ -90,8 +90,8 @@ Old movies' Convex project, its SDK client, and its command registry were delete
 - Playback modes are one vocabulary everywhere: `direct`, `remux`, `audio-transcode`,
   `transcode-qsv`, `transcode-vaapi`, `transcode-software`.
 - GPU stages: `HARDWARE_ACCELERATION=auto` considers Quick Sync, then VA-API, then the CPU;
-  `qsv` and `vaapi` consider that one GPU, and `none` the CPU alone. Every stage (decode, scale,
-  tone map, encode, and the moves between CPU and GPU memory) is a capability the media service
+  `qsv` and `vaapi` consider that one GPU, and `none` the CPU alone. Every stage (decode,
+  deinterlace, scale, tone map, encode, and the moves between CPU and GPU memory) is a capability the media service
   proves through ffmpeg on the device, per codec, pixel format, and depth, and a plan uses only
   proven ones: a 10-bit H.264 source the Arc A380 cannot decode decodes on the CPU and still scales
   and encodes on the GPU. A run that fails is diagnosed: a stage whose probe fails again is set
@@ -130,6 +130,26 @@ Old movies' Convex project, its SDK client, and its command registry were delete
   Sync with `forced_idr`). Clients report `powerEfficient` per codec: the movies web app from the
   Media Capabilities API, the iOS app and Cast profiles for H.264 and HEVC; none of the fixed
   lists offers AV1.
+- Deinterlacing: a copied stream (direct play, remux, audio-only conversion) is never
+  deinterlaced; being interlaced is no reason to encode a file the client plays. A stream that is
+  encoded is deinterlaced right after it is decoded when its probe says it holds fields: a field
+  order (`tff`, `bff`), or no order at all in a codec that codes fields (MPEG-2, H.264, VC-1,
+  MPEG-4 Part 2, DV, and a few others; ffprobe says nothing for MPEG-4 in AVI or DV whatever they
+  hold). A stream that says `progressive`, and HEVC, VP9, and AV1 saying nothing, get no filter.
+  The deinterlacer works frame by frame: only frames the decoder flags interlaced, in the field
+  order each flag gives, so soft-telecined and PsF pictures in a stream flagged interlaced pass
+  untouched. The container's order is not used: ffmpeg writes `tb` for top-field-first Matroska,
+  and an MP4 of bottom-field-first H.264 reads `tt`. Content whose frames carry no flag at all
+  (woven fields coded as progressive pictures) plays as it is: telling it apart takes decoding
+  frames at scan time, which no rule does yet. One frame comes out for each frame, at the
+  source's rate: a field rate would double an H.264 encode's samples a second with no level table
+  or client frame-rate limit to hold it. The CPU uses `bwdif` (`yadif` where a build lacks it),
+  Quick Sync `vpp_qsv=deinterlace=advanced` fused with its scale, and VA-API `deinterlace_vaapi`'s
+  bob: its motion-adaptive mode on iHD gives no frame for each run's first and stamps each other
+  frame a frame late, so every seek would start late. A stored probe whose reader revision
+  (`PROBE_REVISION`) is older than the service's is out of date like a changed file: the scan at
+  the next start reads the file again, field order and the peak frame rate HEVC and AV1 levels
+  are held to included, and until then the file plays as progressive.
 - A stream's ffmpeg pauses (`SIGSTOP`) once its output runs `STREAM_BUFFER_AHEAD_SECONDS` (120)
   past the furthest segment the player asked for, and continues (`SIGCONT`) when the player is
   within half of that. A remux copies at disk speed, and without the pause every play wrote most of

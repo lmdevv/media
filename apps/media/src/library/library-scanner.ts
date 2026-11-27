@@ -17,7 +17,7 @@ import { SCAN_FAILURE_PREFIXES } from "@media/contracts/scan-failure";
 import { createHash } from "node:crypto";
 
 import * as MediaConfig from "../media-config.ts";
-import { probeFile } from "../media/media-probe.ts";
+import { PROBE_REVISION, probeFile } from "../media/media-probe.ts";
 import * as MediaTools from "../media/media-tools.ts";
 import * as MetadataResolver from "../metadata/title-metadata.ts";
 import { modifiedAtMs } from "../platform/file-info.ts";
@@ -751,7 +751,8 @@ export const make = Effect.gen(function* () {
           known !== undefined &&
           known.sizeBytes === file.sizeBytes &&
           known.modifiedAtMs === file.modifiedAtMs &&
-          known.sidecarDigest === file.sidecarDigest
+          known.sidecarDigest === file.sidecarDigest &&
+          known.probeRevision === PROBE_REVISION
         );
       };
 
@@ -771,6 +772,7 @@ export const make = Effect.gen(function* () {
             sidecarDigest: file.sidecarDigest,
             name,
             probe,
+            probeRevision: PROBE_REVISION,
             subtitles: sidecarSubtitles(file.relativePath, listing(parentOf(file.relativePath))),
             title: described.title,
             episode: described.episode,

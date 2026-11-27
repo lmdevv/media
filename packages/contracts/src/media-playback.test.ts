@@ -63,7 +63,7 @@ describe("TranscodeSummary", () => {
   it("takes an operation, domain, or cause no client knows yet", () => {
     expect(
       Schema.decodeSync(TranscodeSummary)({
-        stages: [{ op: "deinterlace", domain: "nvenc", impl: "deinterlace.nvenc" }],
+        stages: [{ op: "denoise", domain: "nvenc", impl: "denoise.nvenc" }],
         changes: [
           {
             at: 1,

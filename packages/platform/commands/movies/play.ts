@@ -146,6 +146,14 @@ const startResult = v.object({
             v.literal("dolby_vision"),
           ),
           bitRate: v.union(v.number(), v.null()),
+          fieldOrder: v.optional(
+            v.union(
+              v.literal("progressive"),
+              v.literal("tff"),
+              v.literal("bff"),
+              v.literal("unknown"),
+            ),
+          ),
         }),
       ),
       audio: v.array(

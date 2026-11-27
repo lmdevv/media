@@ -9,15 +9,18 @@ import {
   planVideo,
   probedSteps,
   probeFor,
+  ProbeInput,
   Purpose,
   Rejection,
   rowOf,
   rowsOf,
+  sourceOf,
   sourceProbeFor,
   type VideoIntent,
   type VideoPipeline,
   VIDEO_OPS,
 } from "./video-pipeline.ts";
+import type { VideoStream } from "../media/media-probe.ts";
 import { renderVideo } from "./video-render.ts";
 import {
   type CapabilityKey,
@@ -112,6 +115,7 @@ const Source = Schema.Struct({
   codec: Schema.Literals(["h264", "hevc", "av1", "vp9", "mpeg2video", "mpeg4"]),
   layout: Schema.Literals(["yuv420p", "yuvj420p", "yuv420p10le", "yuv422p10le", "yuv420p12le"]),
   colour: Schema.Literals(["sdr", "hdr10", "hlg", "dolby-vision"]),
+  scan: Schema.Literals(["progressive", "interlaced"]),
   width: Schema.Int.check(Schema.isBetween({ minimum: 64, maximum: 7680 })),
   height: Schema.Int.check(Schema.isBetween({ minimum: 64, maximum: 4320 })),
 });
@@ -130,6 +134,7 @@ const sourceFrom = (generated: typeof Source.Type): SourceVideo =>
     pixelFormat: generated.layout,
     depth: DEPTH_OF[generated.layout],
     colour: generated.colour,
+    scan: generated.scan,
     width: generated.width,
     height: generated.height,
   });
@@ -241,6 +246,135 @@ describe("planVideo", () => {
       }
     },
   );
+
+  it.prop(
+    "deinterlaces exactly the interlaced sources, right after they decode, and encodes progressive frames",
+    { generated: Source, domains: Domains, burn: Schema.Boolean },
+    ({ generated, domains, burn }) => {
+      const video = sourceFrom(generated);
+      const intent = intentFor(video, { burnImage: burn ? subtitle : undefined });
+      const bindings = DOMAIN_CHOICES[domains];
+      const known = snapshot(bindings, everyKey(video, intent, bindings));
+      const result = planVideo(video, intent, known);
+
+      if (Result.isFailure(result)) return;
+      const work = result.success.pipeline.steps.filter((step) => !Op.$is("Move")(step.op));
+      // A row's id names its operation first: `deinterlace.cpu.yadif`.
+      const ops = work.map((step) => step.impl.split(".")[0]);
+      const interlaced = video.scan === "interlaced";
+
+      assert.deepStrictEqual(ops.slice(0, 2), ["decode", interlaced ? "deinterlace" : "scale"]);
+      assert.strictEqual(ops.filter((op) => op === "deinterlace").length, interlaced ? 1 : 0);
+      assert.isTrue(
+        work.slice(interlaced ? 2 : 1).every((step) => step.input.scan === "progressive"),
+      );
+    },
+  );
+
+  it("keeps an interlaced source's chain on the GPU, deinterlacing in Quick Sync's scaling filter", () => {
+    const video = source({ codec: "mpeg2video", scan: "interlaced", width: 720, height: 576 });
+    const intent = intentFor(video);
+
+    for (const binding of [QSV, VAAPI]) {
+      const pipeline = planned(
+        video,
+        intent,
+        snapshot([binding], everyKey(video, intent, [binding])),
+      );
+
+      assert.deepStrictEqual(impls(pipeline), [
+        `decode.${binding.domain}`,
+        `deinterlace.${binding.domain}`,
+        `scale.${binding.domain}`,
+        `encode.${binding.domain}.h264`,
+      ]);
+
+      const rendered = renderVideo(pipeline, {
+        input: 0,
+        stream: 0,
+        trimPicture: undefined,
+        trimSubtitle: undefined,
+      });
+
+      assert.strictEqual(
+        rendered.graph?.text,
+        binding.domain === "qsv"
+          ? "hwmap,format=qsv,vpp_qsv=deinterlace=advanced:rate=frame:w=720:h=576:format=nv12,fps=source_fps"
+          : "deinterlace_vaapi=mode=bob:rate=frame:auto=1,scale_vaapi=w=720:h=576:format=nv12",
+      );
+      // Quick Sync's filters are followed by the restated rate, so they need `fps` from the build.
+      assert.deepStrictEqual(
+        pipeline.steps.find((step) => step.impl === `deinterlace.${binding.domain}`)?.needs,
+        binding.domain === "qsv" ? ["filter:vpp_qsv", "filter:fps"] : ["filter:deinterlace_vaapi"],
+      );
+    }
+  });
+
+  it("deinterlaces on the CPU between a GPU decode and a GPU encode when the GPU's deinterlacer is out", () => {
+    const video = source({ codec: "mpeg2video", scan: "interlaced", width: 720, height: 576 });
+    const intent = intentFor(video);
+
+    for (const binding of [QSV, VAAPI]) {
+      const { domain } = binding;
+      const keys = everyKey(video, intent, [binding]);
+      const unproven = capabilityKey(ImplId(`deinterlace.${domain}`), "8");
+
+      const expected = [
+        `decode.${domain}`,
+        `move.${domain}>cpu`,
+        "deinterlace.cpu",
+        `move.cpu>${domain}`,
+        `scale.${domain}`,
+        `encode.${domain}.h264`,
+      ];
+
+      assert.include(keys, unproven);
+      assert.deepStrictEqual(
+        impls(
+          planned(
+            video,
+            intent,
+            snapshot(
+              [binding],
+              keys.filter((key) => key !== unproven),
+            ),
+          ),
+        ),
+        expected,
+      );
+      assert.deepStrictEqual(
+        impls(planned(video, intent, snapshot([binding], keys, [ImplId(`deinterlace.${domain}`)]))),
+        expected,
+      );
+    }
+  });
+
+  it("deinterlaces with yadif only where bwdif is not verified", () => {
+    const video = source({ codec: "mpeg2video", scan: "interlaced", width: 720, height: 576 });
+    const intent = intentFor(video);
+    const keys = everyKey(video, intent, []);
+    const bwdif = capabilityKey(ImplId("deinterlace.cpu"), "8");
+
+    assert.deepStrictEqual(impls(planned(video, intent, snapshot([], keys))), [
+      "decode.cpu",
+      "deinterlace.cpu",
+      "scale.cpu",
+      "encode.cpu.h264",
+    ]);
+    assert.deepStrictEqual(
+      impls(
+        planned(
+          video,
+          intent,
+          snapshot(
+            [],
+            keys.filter((key) => key !== bwdif),
+          ),
+        ),
+      ),
+      ["decode.cpu", "deinterlace.cpu.yadif", "scale.cpu", "encode.cpu.h264"],
+    );
+  });
 
   it("keeps the whole chain on Quick Sync when the device verified it, as today", () => {
     const video = source();
@@ -380,6 +514,45 @@ describe("planVideo", () => {
 
 const everything = (video: SourceVideo, domains: ReadonlyArray<DomainBinding>) =>
   snapshot(domains, everyKey(video, intentFor(video, { burnImage: subtitle }), domains));
+
+/** An SD 8-bit SDR stream of `codec` whose probe read `fieldOrder`. */
+const streamOf = (codec: string, fieldOrder: VideoStream["fieldOrder"]): VideoStream => ({
+  index: 0,
+  codec,
+  bitDepth: 8,
+  width: 720,
+  height: 576,
+  dynamicRange: "sdr",
+  fieldOrder,
+});
+
+describe("sourceOf", () => {
+  it("plans a stream interlaced when it says a field order, or says none in a codec that codes fields", () => {
+    const cases: ReadonlyArray<readonly [string, VideoStream["fieldOrder"], SourceVideo["scan"]]> =
+      [
+        ["mpeg2video", "tff", "interlaced"],
+        ["h264", "bff", "interlaced"],
+        ["hevc", "tff", "interlaced"],
+        ["mpeg2video", "progressive", "progressive"],
+        ["h264", "progressive", "progressive"],
+        ["mpeg4", "unknown", "interlaced"],
+        ["dvvideo", "unknown", "interlaced"],
+        ["hevc", "unknown", "progressive"],
+        ["av1", "unknown", "progressive"],
+        ["vp9", "unknown", "progressive"],
+        // A probe stored before field orders were read, until a scan reads the file again.
+        ["mpeg2video", undefined, "progressive"],
+      ];
+
+    for (const [codec, fieldOrder, scan] of cases) {
+      assert.strictEqual(
+        sourceOf(streamOf(codec, fieldOrder)).scan,
+        scan,
+        `${codec} ${String(fieldOrder)}`,
+      );
+    }
+  });
+});
 
 describe("assemble", () => {
   it("refuses a tone map on SDR frames", () => {
@@ -693,13 +866,40 @@ describe("probes", () => {
     assert.isTrue(Result.isSuccess(sourceProbeFor(decode, video, known) ?? Result.fail(undefined)));
   });
 
+  it("prove a GPU deinterlacer on an interlaced clip, uploaded after a CPU decode", () => {
+    const keys = [
+      source({ codec: "mpeg2video", scan: "interlaced" }),
+      source({ pixelFormat: "yuv420p10le", depth: 10, scan: "interlaced" }),
+    ].flatMap((video) => everyKey(video, intentFor(video), [VAAPI]));
+
+    for (const [depth, clip] of [
+      ["8", "mpeg2-8-interlaced"],
+      ["10", "h264-10-interlaced"],
+    ] as const) {
+      const key = capabilityKey(ImplId("deinterlace.vaapi"), depth);
+      const probe = probeFor(key, snapshot([VAAPI], keys));
+
+      if (probe === undefined || Result.isFailure(probe)) throw new Error(`no probe of ${key}`);
+
+      assert.deepStrictEqual(probe.success.input, ProbeInput.Clip({ clip }));
+      assert.deepStrictEqual(impls(probe.success.pipeline), [
+        "decode.cpu",
+        "move.cpu>vaapi",
+        "deinterlace.vaapi",
+      ]);
+    }
+  });
+
   it("exist for every variant a chain on this table can need, except decoder layouts", () => {
     const video = source({ codec: "hevc", pixelFormat: "yuv420p10le", depth: 10, colour: "hdr10" });
+    const interlaced = source({ codec: "mpeg2video", scan: "interlaced" });
     const domains = [QSV, VAAPI];
 
     const keys = [
       ...everyKey(video, intentFor(video, { burnImage: subtitle }), domains),
       ...everyKey(source(), intentFor(source(), { burnImage: subtitle }), domains),
+      ...everyKey(interlaced, intentFor(interlaced), domains),
+      ...everyKey({ ...video, scan: "interlaced" }, intentFor(video), domains),
     ];
 
     const all = snapshot(domains, keys);

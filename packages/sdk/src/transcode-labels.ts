@@ -15,6 +15,7 @@ export const domainLabel = (domain: string): string => DOMAINS.get(domain) ?? do
 
 const OPS: ReadonlyMap<string, string> = new Map([
   ["decode", "Decode"],
+  ["deinterlace", "Deinterlace"],
   ["scale", "Scale"],
   ["tonemap", "Tone map"],
   ["burn-image", "Subtitle"],
