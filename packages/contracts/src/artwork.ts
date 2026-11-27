@@ -50,10 +50,11 @@ export type CoverSize = typeof CoverSize.Type;
 
 /**
  * How much larger than a cell a cover's copy must be for the device's own downscale not to soften
- * it, when no copy has the cell's exact size. A copy only slightly larger is scaled down again by
- * a small factor, which blurs fine detail.
+ * it, when no copy has the cell's exact size. Measured on the iOS simulator with copies 2% to 200%
+ * larger than a 144-pixel row: up to 25% larger lost 3% to 10% of the row's sharpness to iOS's
+ * second scaling, and from 75% larger the row was as sharp as one drawing the full original.
  */
-const ENOUGH_LARGER = 2;
+const ENOUGH_LARGER = 1.75;
 
 /**
  * The copy to ask for of a music cover drawn `pixels` big: the one of exactly that size, drawn

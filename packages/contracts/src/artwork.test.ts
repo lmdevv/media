@@ -22,26 +22,26 @@ describe("coverSizeFor", () => {
     expect(coverSizeFor(143.6)).toBe(144);
   });
 
-  it("asks for a copy at least twice a cell with no copy of its size, so the second scaling is harmless", () => {
+  it("asks for a copy at least 1.75 times a cell with no copy of its size, so the second scaling is harmless", () => {
     fc.assert(
-      fc.property(fc.double({ min: 0, max: 640, noNaN: true }), (pixels) => {
+      fc.property(fc.double({ min: 0, max: 731, noNaN: true }), (pixels) => {
         fc.pre(COVER_SIZES.every((size) => size !== Math.round(pixels)));
         const size = coverSizeFor(pixels);
 
-        expect(size).toBeGreaterThanOrEqual(2 * Math.round(pixels));
+        expect(size).toBeGreaterThanOrEqual(1.75 * Math.round(pixels));
         // The smallest such copy.
         expect(
-          COVER_SIZES.filter((each) => each >= 2 * Math.round(pixels) && each < (size ?? 0)),
+          COVER_SIZES.filter((each) => each >= 1.75 * Math.round(pixels) && each < (size ?? 0)),
         ).toEqual([]);
       }),
     );
     // A 44-point row and a fluid grid card on a 402-point phone at 3x.
-    expect([44 * 3, 175 * 3].map(coverSizeFor)).toEqual([336, 1280]);
+    expect([44 * 3, 175 * 3].map(coverSizeFor)).toEqual([336, 960]);
   });
 
-  it("asks for the original when no copy is the cell's size or twice it", () => {
+  it("asks for the original when no copy is the cell's size or 1.75 times it", () => {
     fc.assert(
-      fc.property(fc.double({ min: 641, max: 1e6, noNaN: true }), (pixels) => {
+      fc.property(fc.double({ min: 732, max: 1e6, noNaN: true }), (pixels) => {
         fc.pre(COVER_SIZES.every((size) => size !== Math.round(pixels)));
         expect(coverSizeFor(pixels)).toBeUndefined();
       }),

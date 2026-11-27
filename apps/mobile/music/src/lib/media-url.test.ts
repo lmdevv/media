@@ -49,10 +49,10 @@ describe("artSource", () => {
     expect(artSource(origin, cover, "original")).toEqual(artSource(origin, cover, 2000));
   });
 
-  it("asks for a copy at least twice a cell with no copy of its size, or else the original", () => {
+  it("asks for a copy at least 1.75 times a cell with no copy of its size, or else the original", () => {
     // A 44-point row and a 175-point grid card at 3x.
     expect(artSource(origin, cover, 44 * 3)?.uri).toBe(`${origin}${cover}&w=336`);
-    expect(artSource(origin, cover, 175 * 3)?.uri).toBe(`${origin}${cover}&w=1280`);
+    expect(artSource(origin, cover, 175 * 3)?.uri).toBe(`${origin}${cover}&w=960`);
     expect(artSource(origin, cover, 1280)?.uri).toBe(`${origin}${cover}&w=1280`);
     expect(artSource(origin, cover, 1279)?.uri).toBe(`${origin}${cover}`);
     // Now Playing on a 13-inch iPad: about 900 points at 2x.
