@@ -497,7 +497,7 @@ export const COMMON_CHECKS = [
   { check: "duration", tolerance: 1 },
   { check: "timeline" },
   { check: "keyframes" },
-  { check: "picture-time", frames: 1, minMatch: 0.7 },
+  { check: "picture-time", frames: 1, minMatch: 0.7, tolerance: 0.01, quiet: 4 },
   { check: "audio-start" },
 ];
 
@@ -620,8 +620,9 @@ export const THUMBNAIL = { width: 96, height: 28, filter: "scale=96:40,crop=96:2
 
 /**
  * Raw gray thumbnails (`THUMBNAIL.filter`, `-f rawvideo`) with the times `showinfo` printed for
- * them, in order: `{ pts, pixels }`, the pixels less their mean and scaled to unit length, so that
- * two thumbnails' dot product is their correlation. A flat thumbnail has no pixels.
+ * them, in order: `{ pts, spread, pixels }`, `spread` the standard deviation of their gray levels
+ * and the pixels less their mean and scaled to unit length, so that two thumbnails' dot product is
+ * their correlation. A thumbnail of one gray level has no pixels.
  */
 export const parseThumbnails = (raw, log, { width, height } = THUMBNAIL) => {
   const size = width * height;
@@ -638,10 +639,10 @@ export const parseThumbnails = (raw, log, { width, height } = THUMBNAIL) => {
       pixels[at] = bytes[at] - mean;
       norm += pixels[at] * pixels[at];
     }
-    if (norm < size) return { pts: times[index], pixels: undefined };
+    if (norm === 0) return { pts: times[index], spread: 0, pixels: undefined };
     const scale = 1 / Math.sqrt(norm);
     for (let at = 0; at < size; at += 1) pixels[at] *= scale;
-    return { pts: times[index], pixels };
+    return { pts: times[index], spread: Math.sqrt(norm / size), pixels };
   });
 };
 
@@ -651,57 +652,112 @@ const correlation = (a, b) => {
   return sum;
 };
 
-/** The most output thumbnails one offset search compares. */
-const SAMPLED_THUMBNAILS = 240;
-
 /**
- * How far in time the output's picture sits from the source's: the shift that best matches each
- * output thumbnail with the source thumbnail shown at its time plus that shift, searched in steps
- * of `step` within `window` seconds, the smallest shift winning a tie, so a still picture reads as
- * in place. A negative shift is a picture that comes late. `score` is the mean correlation at the
- * shift and `inPlace` at none; both are undefined when no output thumbnail has a picture to
- * compare. `flat` counts the output thumbnails without one, and `pictured` those of them the
- * source shows a picture at.
+ * Judges every output thumbnail against the source's, one rule for each frame: it must show the
+ * source's picture for its time, within `allowance` seconds. A frame with a picture does when the
+ * best of the source frames shown within the allowance of its time correlates at least `minMatch`
+ * and within `tolerance` of the best match anywhere within `window` seconds of it. A quiet frame,
+ * whose gray levels spread less than `quiet` (black, a fade, a flat colour, where correlation is
+ * noise), does when a source frame shown within the allowance is quiet too, and a frame with a
+ * picture fails where every one of them is quiet. A frame no source frame is shown for
+ * within the allowance (the source's thumbnails stop short of it, or none came back) cannot be
+ * judged. Returns how many frames there were, how many could not be judged, and each frame that
+ * failed: its time, whether it is `flat` where the source shows a picture or shows `another` time's
+ * picture, and how far away the source's best match for it lies (negative: the picture comes late).
  */
-export const pictureOffset = (output, source, { window, step }) => {
-  const shown = (time) => {
+export const judgeFrames = (output, source, { window, allowance, minMatch, tolerance, quiet }) => {
+  const isQuiet = (frame) => frame.pixels === undefined || (frame.spread ?? Number.POSITIVE_INFINITY) < quiet;
+  const gaps = source.slice(1).map((frame, index) => frame.pts - source[index].pts).sort((a, b) => a - b);
+  const lastShown = gaps.length === 0 ? 0 : gaps[gaps.length >> 1];
+  const until = (index) => source[index + 1]?.pts ?? source[index].pts + lastShown;
+  const firstAfter = (time) => {
     let low = 0;
-    let high = source.length - 1;
-    let found;
-    while (low <= high) {
+    let high = source.length;
+    while (low < high) {
       const middle = (low + high) >> 1;
-      if (source[middle].pts <= time + 0.001) {
-        found = source[middle];
-        low = middle + 1;
-      } else high = middle - 1;
+      if (until(middle) <= time + 0.001) low = middle + 1;
+      else high = middle;
     }
+    return low;
+  };
+  const shownWithin = (from, to) => {
+    const found = [];
+    for (let index = firstAfter(from); index < source.length && source[index].pts < to + 0.001; index += 1) found.push(source[index]);
     return found;
   };
-  const withPicture = output.filter((frame) => frame.pixels !== undefined);
-  const every = Math.max(1, Math.ceil(withPicture.length / SAMPLED_THUMBNAILS));
-  const sample = withPicture.filter((_, index) => index % every === 0);
-  const scoreAt = (shift) => {
-    let sum = 0;
-    let count = 0;
-    for (const frame of sample) {
-      const match = shown(frame.pts + shift);
-      if (match?.pixels === undefined) continue;
-      sum += correlation(frame.pixels, match.pixels);
-      count += 1;
+  const failed = [];
+  let unjudged = 0;
+  for (const frame of output) {
+    const near = shownWithin(frame.pts - allowance, frame.pts + allowance);
+    if (near.length === 0) {
+      unjudged += 1;
+      continue;
     }
-    return count === 0 ? undefined : sum / count;
-  };
-  let best;
-  for (let index = 0; index * step <= window + 1e-9; index += 1) {
-    for (const shift of index === 0 ? [0] : [-index * step, index * step]) {
-      const score = scoreAt(shift);
-      if (score !== undefined && (best === undefined || score > best.score + 1e-4)) best = { shift, score };
+    if (isQuiet(frame)) {
+      if (!near.some(isQuiet)) failed.push({ pts: frame.pts, how: "flat" });
+      continue;
+    }
+    const score = (match) => (isQuiet(match) ? -1 : correlation(frame.pixels, match.pixels));
+    const nearest = Math.max(...near.map(score));
+    let best = { score: nearest, at: frame.pts };
+    for (const match of shownWithin(frame.pts - window, frame.pts + window)) {
+      const value = score(match);
+      if (value > best.score) best = { score: value, at: match.pts };
+    }
+    if (nearest < minMatch || nearest < best.score - tolerance) {
+      failed.push({ pts: frame.pts, how: "another", by: best.at - frame.pts, score: nearest, best: best.score });
     }
   }
-  const flat = output.filter((frame) => frame.pixels === undefined);
-  const pictured = flat.filter((frame) => shown(frame.pts)?.pixels !== undefined).length;
-  return { offset: best?.shift, score: best?.score, inPlace: scoreAt(0), frames: sample.length, step, flat: flat.length, pictured };
+  return { frames: output.length, unjudged, failed };
 };
+
+/**
+ * What the picture-time check reads of `judgeFrames`' result: how many frames, how many could not
+ * be judged, how many failed and how (`flat`, `another`), the first that failed, and how far the
+ * source's best match lies for the middle one of those showing another time's picture.
+ */
+export const frameTiming = (judged) => {
+  const another = judged.failed.filter((frame) => frame.how === "another");
+  const offsets = another.map((frame) => frame.by).sort((a, b) => a - b);
+  return {
+    frames: judged.frames,
+    unjudged: judged.unjudged,
+    failed: judged.failed.length,
+    flat: judged.failed.length - another.length,
+    another: another.length,
+    first: judged.failed[0]?.pts,
+    by: offsets[offsets.length >> 1],
+  };
+};
+
+/** Samples in one frame of each audio codec the grid's outputs and sources carry. */
+const AUDIO_FRAME_SAMPLES = { aac: 1024, ac3: 1536, eac3: 1536, mp3: 1152, mp2: 1152, opus: 960, vorbis: 2048, dts: 512 };
+
+/** How long one frame of `codec` at `sampleRate` lasts, in seconds; undefined when unknown. */
+export const audioFrameSeconds = (codec, sampleRate) => {
+  const samples = AUDIO_FRAME_SAMPLES[codec];
+  const rate = Number(sampleRate);
+  return samples === undefined || !(rate > 0) ? undefined : samples / rate;
+};
+
+/**
+ * The earliest time at or after `time` that the audio `packets` (`{ pts, duration }`) sound: `time`
+ * itself inside a packet, else the next packet's start; undefined after the last. A packet without
+ * a duration lasts `frame`.
+ */
+export const soundFrom = (packets, time, frame) => {
+  let next;
+  for (const packet of packets) {
+    if (!Number.isFinite(packet.pts)) continue;
+    const lasts = packet.duration > 0 ? packet.duration : frame;
+    if (packet.pts <= time + 0.001 && time < packet.pts + lasts) return time;
+    if (packet.pts > time && (next === undefined || packet.pts < next)) next = packet.pts;
+  }
+  return next;
+};
+
+/** The most frames before its first picture that an encoder here decodes the first one, at the source's rate. */
+const REORDER_FRAMES = 4;
 
 /**
  * A media playlist: its init segment's URI and each segment's index, start, duration, and URI, all
@@ -1013,54 +1069,79 @@ export const CHECKS = {
   },
   // Each fetch's picture against the source shown at the same time: left alone, Quick Sync's
   // filters on ffmpeg 7.1 hold a first picture for 41 to 512 frames, every timestamp in place.
+  // Every frame of each fetch against the source's picture for its time: left alone, Quick Sync's
+  // filters on ffmpeg 7.1 hold a first picture for 41 to 666 frames, every timestamp in place.
   "picture-time": {
     class: "output",
     run: (obs, params) => {
       const said = [];
       for (const fetch of fetchesOf(obs)) {
         const timing = obs.analysis?.timing?.[fetch.name];
-        if (timing === undefined) return no(`the ${fetch.name} output's picture was not compared with the source`);
-        if (timing.score === undefined) {
-          if (timing.pictured > 0) {
-            return no(`the ${fetch.name} picture is one flat colour where the source shows a picture, in ${timing.pictured} of ${timing.flat} frames`);
-          }
-          said.push(`${fetch.name} flat, as the source is there`);
-          continue;
+        const expected = (fetch.frames ?? []).length;
+        if (timing === undefined) return no(`could not measure: the ${fetch.name} picture was not compared with the source`);
+        if (timing.error !== undefined) return no(`could not measure the ${fetch.name} picture: ${timing.error}`);
+        if (expected === 0 || timing.frames !== expected) {
+          return no(`could not measure: thumbnails of ${timing.frames} of the ${fetch.name} output's ${expected} frames`);
         }
-        const frames = timing.offset / timing.step;
-        const late = `${fmt(Math.abs(frames), 1)} frames (${fmt(Math.abs(timing.offset), 3)} s) ${timing.offset < 0 ? "behind" : "ahead of"} the source`;
-        if (timing.score < params.minMatch) {
-          return no(`the ${fetch.name} picture matches the source nowhere within ${TIMING_WINDOW} s (r ${fmt(timing.score)} at best)`);
+        if (timing.unjudged > 0) {
+          return no(`could not measure: the source's thumbnails reach ${timing.frames - timing.unjudged} of the ${fetch.name} output's ${timing.frames} frames`);
         }
-        if (Math.abs(frames) > params.frames + 0.01) {
-          return no(`the ${fetch.name} picture is ${late} (r ${fmt(timing.score)} there, ${fmt(timing.inPlace)} in place)`);
+        if (timing.failed > params.frames) {
+          const how = [
+            timing.flat > 0 ? `${timing.flat} flat where the source shows a picture` : undefined,
+            timing.another > 0
+              ? `${timing.another} showing another time's picture (typically ${fmt(Math.abs(timing.by), 3)} s ${timing.by < 0 ? "earlier" : "later"})`
+              : undefined,
+          ].filter(Boolean);
+          return no(`${timing.failed} of the ${fetch.name} output's ${timing.frames} frames do not show the source's picture for their time, from ${fmt(timing.first, 3)} s: ${how.join(", ")}`);
         }
-        said.push(`${fetch.name} ${fmt(frames, 1)} frames (r ${fmt(timing.score)})`);
+        said.push(`${fetch.name} ${timing.frames - timing.failed} of ${timing.frames}`);
       }
-      return ok(`picture on the source's timeline: ${said.join(", ")}`);
+      return ok(`frames showing the source's picture for their time: ${said.join(", ")}`);
     },
   },
-  // Each fetch's sound starts with its picture: no later than an audio frame after the first picture,
-  // and no earlier than an audio frame before the first video packet is decoded, where the muxer
-  // cuts a fragment when the encoder reorders pictures.
+  // Each fetch's sound starts where the source's does at that position, within an audio frame of its
+  // codec and sample rate: by the time the source sounds at the first picture, and no earlier than the
+  // source sounds at the first decoded video packet, where the muxer cuts a fragment when the encoder
+  // reorders pictures (at most REORDER_FRAMES before the picture).
   "audio-start": {
     class: "output",
     run: (obs) => {
       const said = [];
+      const rate = obs.source?.baseFps ?? obs.source?.fps;
+      const negotiated = obs.negotiation?.body?.audio;
       for (const fetch of fetchesOf(obs)) {
         const audio = fetch.audio;
+        const source = fetch.sourceAudio;
         const first = fetch.frames?.[0]?.pts;
+        if (negotiated === undefined || negotiated === null) {
+          if (audio !== undefined) return no(`the ${fetch.name} output has audio no negotiation asked for`);
+          said.push(`${fetch.name} none, as negotiated`);
+          continue;
+        }
         if (audio === undefined) return no(`the ${fetch.name} output has no audio`);
+        const frame = audioFrameSeconds(audio.codec, audio.sampleRate);
+        if (frame === undefined) return no(`could not measure: the ${fetch.name} audio's frame length (${audio.codec} at ${audio.sampleRate} Hz)`);
+        if (source?.error !== undefined) return no(`could not measure the source's audio at the ${fetch.name}: ${source.error}`);
+        const sourceFrame = audioFrameSeconds(source?.codec, source?.sampleRate);
+        if (first === undefined || !Number.isFinite(fetch.firstDecoded) || !(rate > 0) || sourceFrame === undefined) {
+          return no(`could not measure: the ${fetch.name} output's first picture, its first decoded packet, or the source's audio`);
+        }
+        const cut = Math.max(fetch.firstDecoded, first - REORDER_FRAMES / rate);
+        const latest = soundFrom(source.packets, first, sourceFrame);
+        const earliest = soundFrom(source.packets, cut, sourceFrame);
+        if (latest === undefined || earliest === undefined) return no(`could not measure: the source has no sound at or after the ${fetch.name}'s ${fmt(first, 3)} s`);
         const lead = audio.start - first;
-        if (audio.start > first + audio.frame + 0.001) {
-          return no(`the ${fetch.name} audio starts ${fmt(lead * 1000, 0)} ms after its first picture, more than an audio frame`);
+        const offset = `${fetch.name} audio starts ${fmt(Math.abs(lead) * 1000, 0)} ms ${lead < 0 ? "before" : "after"} its first picture`;
+        if (audio.start > latest + frame + 0.001) {
+          return no(`the ${offset}, where the source sounds ${fmt((latest - first) * 1000, 0)} ms after it`);
         }
-        if (audio.start < fetch.firstDecoded - audio.frame - 0.001) {
-          return no(`the ${fetch.name} audio starts ${fmt(-lead * 1000, 0)} ms before its first picture, before its first video packet is decoded`);
+        if (audio.start < earliest - frame - 0.001) {
+          return no(`the ${offset}, before the source sounds there (${fmt((earliest - first) * 1000, 0)} ms)`);
         }
-        said.push(`${fetch.name} ${lead >= 0 ? "+" : ""}${fmt(lead * 1000, 0)} ms`);
+        said.push(`${fetch.name} ${lead >= 0 ? "+" : ""}${fmt(lead * 1000, 0)} ms (source ${latest - first >= 0 ? "+" : ""}${fmt((latest - first) * 1000, 0)})`);
       }
-      return ok(`audio starts with the picture: ${said.join(", ")}`);
+      return ok(`audio starts where the source's does: ${said.join(", ")}`);
     },
   },
   codec: {

@@ -77,9 +77,10 @@ Preconditions:
   - `PASS`: the output is right and the stage ran on that path.
   - `FAIL`: the stream broke, the output is wrong (size, rate, timeline, tags, picture), or the
     stage ran somewhere else, such as in software on a GPU path. The evidence names which. Every
-    transcode cell also checks that its picture is where the playlist says (`picture-time`: the
-    start's and the seek's frames against the source shown at the same times, within a frame) and
-    that its sound starts with its picture (`audio-start`).
+    transcode cell also checks that each frame of the start and the seek shows the source's picture
+    for its time (`picture-time`) and that the sound starts where the source's does there
+    (`audio-start`). A check that could not measure (thumbnails or ffprobe that came back empty or
+    failed, a frame length it can't know) fails with `could not measure` and the reason.
   - `NOT-BUILT`: the service answered correctly but did not do the stage: it refused with a reason
     the row lists (`no-transcode-target`), or the output lacks the stage (combing left in, H.264
     where only HEVC plays).
@@ -102,8 +103,8 @@ Preconditions:
   records for the session. Beside it are the bytes served (`start.mp4`, `seek.mp4`), ffprobe's
   JSON, `negotiate.json`, `ffmpeg-watch.txt`, `service-log.jsonl`, and the stage's own analysis:
   `idet.txt`; `picture.txt` with `output-240.png`; or `output-108.png`, `source-108.png`, and
-  `changed-108.png` (the pixels the subtitle changed). `timing.txt` has each fetch's picture
-  offset against the source, with its correlation there and in place.
+  `changed-108.png` (the pixels the subtitle changed). `timing.txt` has each fetch's frame counts
+  against the source and the first frames that failed, with how far their best match lies.
 - **Add a row.** A stage, a path, or a hybrid row (a CPU decode feeding a GPU encode, say) is an
   entry in `scripts/hardware-matrix.mjs`. A hybrid row's id starts with `hybrid-`, and its `work`
   pins the operation that runs elsewhere (`decode: "cpu"`); that operation is judged by the run's
@@ -117,12 +118,20 @@ Preconditions:
 
 ## Gotchas
 
-- `picture-time` compares 96x28 gray thumbnails of the top 70 % of the picture with the source's
-  around the same span, through the reference tone map for an HDR row, and takes the shift within
-  3 s that matches best, the smallest shift winning a tie. A picture still on both sides reads as
-  in place, and a flat one (a held black first frame) where the source shows a picture fails. Left alone, ffmpeg 7.1's Quick Sync filters hold a first picture for 41 frames
-  (Matroska, 1.7 s) to 512 (a 24 fps MP4, 21 s) with every timestamp right, which the other
-  checks pass.
+- `picture-time` judges every frame of a fetch alone: its 96x28 gray thumbnail of the top 70 % of
+  the picture must match, within a frame of the source's rate, the source frame shown at its time
+  (correlation 0.7 or more, and within 0.01 of the best match anywhere within 3 s), through the
+  reference tone map for an HDR row. A quiet frame (black, a fade, a flat colour: gray levels
+  spreading less than 4) matches only a quiet source frame there. One failing frame per fetch is
+  tolerated, wherever it falls. Left alone, ffmpeg 7.1's Quick Sync filters hold a first picture for
+  41 frames (Matroska, 1.7 s) to 666 (the Feature Test's MP4, 27.7 s) with every timestamp right,
+  which the other checks pass.
+- `audio-start` measures the served sound against the source's own track at the fetch's position
+  (the stream negotiation chose): it must start by the time the source sounds at the first picture,
+  and no earlier than the source sounds at the first decoded video packet (the muxer cuts there when
+  the encoder reorders, at most four frames before the picture), within one audio frame of its
+  codec and sample rate (1024 samples for AAC). A source whose track starts late passes when the
+  output keeps that delay.
 
 - ffmpeg 7.1, the image's, writes an empty sample dependency box (`sdtp`) into a fragmented
   stream's init segment for an encoder that marks pictures disposable (libx265's non-reference

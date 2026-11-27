@@ -23,12 +23,15 @@ import {
   parseThumbnails,
   parseWatch,
   PATHS,
-  pictureOffset,
   pictureSane,
   PRINT_STATS,
   PROFILES,
   ranOn,
   redact,
+  audioFrameSeconds,
+  frameTiming,
+  judgeFrames,
+  soundFrom,
   renderGrid,
   ROWS,
   segmentsCovering,
@@ -45,6 +48,9 @@ const repo = here("../../../../");
 const helper = here("verify-media.sh");
 const scratch = mkdtempSync(join(tmpdir(), "hardware-matrix-test-"));
 after(() => rmSync(scratch, { recursive: true, force: true }));
+
+/** The picture-time check's frame rule, as the runner applies it. */
+const TIMING = { window: TIMING_WINDOW, minMatch: 0.7, tolerance: 0.01, quiet: 4 };
 
 const ffmpeg = (...args) => spawnSync("ffmpeg", ["-hide_banner", "-nostdin", ...args], { encoding: "utf8", maxBuffer: 1 << 26 });
 const ffprobe = (...args) => spawnSync("ffprobe", ["-v", "error", ...args], { encoding: "utf8", maxBuffer: 1 << 26 });
@@ -183,17 +189,16 @@ describe("reading real ffmpeg output", () => {
     assert.deepEqual(source.slice(0, 3).map((frame) => frame.pts), [0, 0.04, 0.08]);
     assert.ok(source.every((frame) => frame.pixels !== undefined));
 
-    const same = pictureOffset(source, source, { window: TIMING_WINDOW, step: 0.04 });
-    assert.equal(same.offset, 0);
-    assert.ok(same.score > 0.99, `r ${same.score}`);
+    const judgeAt = (output) => frameTiming(judgeFrames(output, source, { ...TIMING, allowance: 0.04 }));
+    assert.deepEqual(judgeAt(source), { frames: 50, unjudged: 0, failed: 0, flat: 0, another: 0, first: undefined, by: undefined });
 
     // The first picture held for ten frames and everything after it late, as ffmpeg 7.1's Quick
-    // Sync filters make a constant-rate output, every timestamp in place.
-    const held = thumbs("tpad=start=10:start_mode=clone,trim=end_frame=50,");
-    const late = pictureOffset(held, source, { window: TIMING_WINDOW, step: 0.04 });
-    assert.ok(Math.abs(late.offset + 0.4) < 1e-9, `offset ${late.offset}`);
-    assert.deepEqual([late.flat, late.pictured], [0, 0]);
-    assert.ok(late.inPlace < late.score, `in place ${late.inPlace}, at the offset ${late.score}`);
+    // Sync filters make a constant-rate output, every timestamp in place: after the first two
+    // frames (within a frame of their time), nearly every frame shows the picture 0.4 s earlier.
+    const held = judgeAt(thumbs("tpad=start=10:start_mode=clone,trim=end_frame=50,"));
+    assert.deepEqual([held.frames, held.first], [50, 0.08]);
+    assert.ok(held.failed > 40 && held.another === held.failed, `${held.failed} failed`);
+    assert.ok(Math.abs(held.by + 0.4) < 1e-9, `typically ${held.by} s`);
   });
 
   test("x264's bytes name it, and other bytes name no encoder", () => {
@@ -276,6 +281,13 @@ describe("parsing", () => {
   });
 });
 
+/** AAC packets at 48 kHz sounding from `from` to `to`, as ffprobe lists a track, with or without durations. */
+const sounding = (from, to, durations = true) =>
+  Array.from({ length: Math.round(((to - from) * 48_000) / 1024) }, (_, index) => ({
+    pts: from + (index * 1024) / 48_000,
+    duration: durations ? 1024 / 48_000 : undefined,
+  }));
+
 // What the runner would see for a cell whose stage ran as asked: the pieces each check reads.
 const healthy = (cell) => {
   const { row, path } = cell;
@@ -293,12 +305,13 @@ const healthy = (cell) => {
     ],
     media: { codec: "h264", profile: "High", width: 1920, height: 818, bitDepth: 8, transfer: "bt709", primaries: "bt709", space: "bt709" },
     frames: frames(from, 96),
-    audio: { start: from, frame: 1024 / 48_000 },
+    audio: { start: from, codec: "aac", sampleRate: "48000" },
+    sourceAudio: { codec: "aac", sampleRate: "48000", packets: sounding(from - 3, from + 3) },
     firstDecoded: from - 2 / 24,
     decodeErrors: "",
     fingerprint: path === "cpu" ? "x264" : undefined,
   });
-  const inPlace = { offset: 0, score: 0.97, inPlace: 0.97, frames: 96, step: 1 / 24 };
+  const inPlace = { frames: 96, unjudged: 0, failed: 0, flat: 0, another: 0 };
   const args = [
     "ffmpeg",
     ...(path === "cpu" ? [] : ["-hwaccel", path, "-hwaccel_output_format", path]),
@@ -311,7 +324,11 @@ const healthy = (cell) => {
     "/transcode/s/1/ffmpeg.m3u8",
   ];
   return {
-    negotiation: { status: 200, ok: true, body: { mode: `transcode-${PATHS[path].encoder}`, video: { width: 1920, height: 818 } } },
+    negotiation: {
+      status: 200,
+      ok: true,
+      body: { mode: `transcode-${PATHS[path].encoder}`, video: { width: 1920, height: 818 }, audio: { streamIndex: 1, codec: "aac", channels: 2 } },
+    },
     fetches: { start: fetch("start", row.start), seek: fetch("seek", row.seek) },
     runs: [{ pid: 1, args, gpu: path !== "cpu", engines: path === "cpu" ? {} : { video: 5e8 } }],
     log: [],
@@ -346,52 +363,114 @@ describe("verdicts", () => {
     }
   });
 
-  test("a picture behind the source, or matching it nowhere, fails however right its timestamps", () => {
+  test("every frame of a fetch must show the source's picture for its time, within a frame", () => {
+    // The verifier's scene: 24 fps frames that each correlate with themselves alone.
+    const step = 1 / 24;
+    const scene = Array.from({ length: 180 }, (_, index) => ({
+      pts: (index - 36) * step,
+      pixels: Float32Array.from({ length: 180 }, (_, at) => (index === at ? 1 : 0)),
+    }));
+    const source = scene.slice(36, 132);
+    const flat = source.map(({ pts }) => ({ pts, pixels: undefined }));
+    const timingOf = (output, reference) => frameTiming(judgeFrames(output, reference, { ...TIMING, allowance: step }));
     const cell = cellOf("decode", "qsv");
-    const behind = healthy(cell);
-    behind.analysis.timing.seek = { offset: -40 / 24, score: 0.986, inPlace: 0.18, frames: 96, step: 1 / 24 };
-    const result = judge(cell, behind);
-    assert.equal(result.verdict, "FAIL");
-    assert.match(result.evidence, /^picture-time: the seek picture is 40 frames \(1\.667 s\) behind the source \(r 0\.99 there, 0\.18 in place\)$/);
+    const verdictOf = (start, seek) => {
+      const obs = healthy(cell);
+      obs.analysis.timing = { start, seek };
+      return judge(cell, obs);
+    };
+    const aligned = timingOf(source, scene);
 
-    const held = healthy(cell);
-    held.analysis.timing.start = { offset: 2.5, score: 0.55, inPlace: 0.2, frames: 96, step: 1 / 24 };
-    assert.match(judge(cell, held).evidence, /^picture-time: the start picture matches the source nowhere within 3 s/);
+    assert.equal(verdictOf(aligned, aligned).verdict, "PASS", "all aligned");
 
-    const near = healthy(cell);
-    near.analysis.timing.start = { offset: 1 / 24, score: 0.97, inPlace: 0.96, frames: 96, step: 1 / 24 };
-    assert.equal(judge(cell, near).verdict, "PASS");
+    // Thumbnails that could not be made are no picture to compare: the cell can't be judged.
+    const noSource = verdictOf(timingOf(source, []), aligned);
+    assert.equal(noSource.verdict, "FAIL");
+    assert.match(noSource.evidence, /^picture-time: could not measure: the source's thumbnails reach 0 of the start output's 96 frames$/);
+    const noOutput = verdictOf(aligned, timingOf([], scene));
+    assert.match(noOutput.evidence, /^picture-time: could not measure: thumbnails of 0 of the seek output's 96 frames$/);
+    const errored = verdictOf({ ...aligned, error: "ffmpeg exited 1: Invalid data" }, aligned);
+    assert.match(errored.evidence, /^picture-time: could not measure the start picture: ffmpeg exited 1/);
 
-    const unread = healthy(cell);
-    delete unread.analysis.timing.seek;
-    assert.match(judge(cell, unread).evidence, /^picture-time: the seek output's picture was not compared with the source$/);
+    // A hold at the head of a fetch, however short, is the defect: each frame counts.
+    const headHeld = verdictOf(aligned, timingOf([...flat.slice(0, 12), ...source.slice(12)], scene));
+    assert.match(headHeld.evidence, /^picture-time: 12 of the seek output's 96 frames do not show the source's picture for their time, from 0 s: 12 flat where the source shows a picture$/);
+    const allHeld = verdictOf(timingOf(flat, scene), aligned);
+    assert.match(allHeld.evidence, /^picture-time: 96 of the start output's 96 frames/);
 
-    // A first picture held black over a span where the source shows its picture.
-    const black = healthy(cell);
-    black.analysis.timing.start = { frames: 0, step: 1 / 24, flat: 96, pictured: 72 };
-    assert.match(judge(cell, black).evidence, /^picture-time: the start picture is one flat colour where the source shows a picture, in 72 of 96 frames$/);
-    black.analysis.timing.start.pictured = 0;
-    assert.equal(judge(cell, black).verdict, "PASS", "black where the source is black too");
+    // A program two frames late fails; one frame late is within the allowance.
+    const late = (frames) => source.map((frame) => ({ ...frame, pts: frame.pts + frames * step }));
+    const twoLate = verdictOf(aligned, timingOf(late(2), scene));
+    assert.match(twoLate.evidence, /^picture-time: 96 of the seek output's 96 frames .*: 96 showing another time's picture \(typically 0\.083 s earlier\)$/);
+    assert.equal(verdictOf(aligned, timingOf(late(1), scene)).verdict, "PASS");
+
+    // One stray frame is tolerated, wherever it falls; a second is not.
+    const stray = (count) => source.map((frame, index) => (index % 40 === 39 && index < 40 * count ? { pts: frame.pts, pixels: undefined } : frame));
+    assert.equal(verdictOf(aligned, timingOf(stray(1), scene)).verdict, "PASS");
+    assert.match(verdictOf(aligned, timingOf(stray(2), scene)).evidence, /^picture-time: 2 of the seek output's 96 frames/);
+
+    // Black on both sides is in place; a picture where the source is black is not.
+    const dark = flat.map((frame) => ({ ...frame }));
+    assert.equal(verdictOf(timingOf(dark, dark), aligned).verdict, "PASS");
+    assert.match(verdictOf(timingOf(source, dark), aligned).evidence, /^picture-time: 96 of the start output's 96 frames/);
   });
 
-  test("sound that starts after the first picture, before the first decoded packet, or not at all fails", () => {
+  test("sound must start where the source's does at that position, within an audio frame of its codec", () => {
     const cell = cellOf("encode-h264", "cpu");
-    const late = healthy(cell);
-    late.fetches.seek.audio = { start: late.fetches.seek.frames[0].pts + 0.2, frame: 1024 / 48_000 };
-    assert.match(judge(cell, late).evidence, /^audio-start: the seek audio starts 200 ms after its first picture/);
+    const step = 1 / 24;
+    const fetchAt = (obs, name, { pts, decoded, audio, sourceFrom = pts - 3, durations = true }) => {
+      const fetch = obs.fetches[name];
+      fetch.frames = fetch.frames.map((frame, index) => ({ ...frame, pts: pts + index * step }));
+      fetch.firstDecoded = decoded;
+      fetch.audio = { start: audio, codec: "aac", sampleRate: "48000" };
+      fetch.sourceAudio = { codec: "aac", sampleRate: "48000", packets: sounding(sourceFrom, pts + 3, durations) };
+    };
 
-    const early = healthy(cell);
-    early.fetches.start.audio = { start: -0.2, frame: 1024 / 48_000 };
-    assert.match(judge(cell, early).evidence, /^audio-start: the start audio starts 200 ms before its first picture/);
+    // A B-frame fragment aligned at its keyframe after a fractional seek: sound from the decode time.
+    const reordered = healthy(cell);
+    fetchAt(reordered, "start", { pts: 0, decoded: -2 * step, audio: 0 });
+    fetchAt(reordered, "seek", { pts: 120, decoded: 120 - 2 * step, audio: 120 - 2 * step });
+    assert.equal(judge(cell, reordered).verdict, "PASS", judge(cell, reordered).evidence);
 
+    // A source whose sound starts 500 ms after its first picture, served as it is (AAC at +479 ms).
+    const delayed = healthy(cell);
+    fetchAt(delayed, "start", { pts: 0, decoded: -2 * step, audio: 0.479, sourceFrom: 0.5 });
+    fetchAt(delayed, "seek", { pts: 120, decoded: 120 - 2 * step, audio: 120 });
+    assert.equal(judge(cell, delayed).verdict, "PASS", judge(cell, delayed).evidence);
+    // The same source served with its sound moved to the picture fails.
+    fetchAt(delayed, "start", { pts: 0, decoded: -2 * step, audio: 0, sourceFrom: 0.5 });
+    assert.match(judge(cell, delayed).evidence, /^audio-start: the start audio starts 0 ms after its first picture, before the source sounds there \(500 ms\)$/);
+
+    // 500 ms late at the seek, from packets that carry no duration: the frame comes from the codec.
+    const undated = healthy(cell);
+    fetchAt(undated, "seek", { pts: 120, decoded: 120, audio: 120.5, durations: false });
+    assert.match(judge(cell, undated).evidence, /^audio-start: the seek audio starts 500 ms after its first picture, where the source sounds 0 ms after it$/);
+
+    // Sound it can't time is no pass.
+    const unknown = healthy(cell);
+    unknown.fetches.seek.audio = { ...unknown.fetches.seek.audio, codec: "pcm_s16le", sampleRate: undefined };
+    assert.match(judge(cell, unknown).evidence, /^audio-start: could not measure: the seek audio's frame length/);
+    const unread = healthy(cell);
+    unread.fetches.start.sourceAudio = { error: "ffprobe exited 1: No such file" };
+    assert.match(judge(cell, unread).evidence, /^audio-start: could not measure the source's audio at the start: ffprobe exited 1/);
     const silent = healthy(cell);
     delete silent.fetches.start.audio;
     assert.match(judge(cell, silent).evidence, /^audio-start: the start output has no audio$/);
+    const none = healthy(cell);
+    none.negotiation.body.audio = null;
+    for (const fetch of Object.values(none.fetches)) delete fetch.audio;
+    assert.equal(judge(cell, none).verdict, "PASS");
+  });
 
-    // The muxer cuts a fragment at its keyframe's decode time, so sound may lead by the reordering.
-    const reordered = healthy(cell);
-    reordered.fetches.start.audio = { start: -2 / 24, frame: 1024 / 48_000 };
-    assert.equal(judge(cell, reordered).verdict, "PASS");
+  test("an audio frame lasts its codec's samples, and a track sounds from its packets", () => {
+    assert.equal(audioFrameSeconds("aac", "48000"), 1024 / 48_000);
+    assert.equal(audioFrameSeconds("ac3", 48_000), 0.032);
+    assert.equal(audioFrameSeconds("pcm_s16le", "48000"), undefined);
+    assert.equal(audioFrameSeconds("aac", undefined), undefined);
+    const packets = sounding(0.5, 2, false);
+    assert.equal(soundFrom(packets, 0, 1024 / 48_000), 0.5);
+    assert.equal(soundFrom(packets, 1, 1024 / 48_000), 1);
+    assert.equal(soundFrom(packets, 3, 1024 / 48_000), undefined);
   });
 
   test("a variable-rate source runs at its base rate", () => {
