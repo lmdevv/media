@@ -1,10 +1,12 @@
 import { Brand, Option } from "effect";
+import * as fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
 import type { EpisodeId, TitleId } from "../catalog";
 import {
   DownloadEvent,
   EMPTY_STORE,
+  IndexText,
   downloadFor,
   downloadOfItem,
   downloadsOf,
@@ -16,10 +18,11 @@ import {
   mayTransfer,
   nameOf,
   nextToRun,
-  parseStore,
+  parseIndex,
   pictureOf,
   planSync,
   reduce,
+  serializeRecord,
   serializeStore,
   spaceShortfall,
   statusOf,
@@ -322,20 +325,49 @@ describe("the download store", () => {
       DownloadEvent.Described({ id: episodeFile, playback }),
     );
 
-    expect(parseStore(serializeStore(store))).toStrictEqual(store);
-    expect(parseStore("{")).toStrictEqual(EMPTY_STORE);
-    expect(parseStore(null)).toStrictEqual(EMPTY_STORE);
+    expect(parseIndex(serializeStore(store))).toStrictEqual(IndexText.AllRows({ store }));
+    expect(parseIndex("{")).toStrictEqual(IndexText.NotAnIndex());
+    expect(parseIndex("")).toStrictEqual(IndexText.NotAnIndex());
 
     const older = { id: "profile-title-movie", profileId: "profile", phase: "ready" };
 
     const mixed = JSON.stringify({
       downloads: [older, ...store.downloads],
       pendingProgress: [{ profileId: "profile" }],
+      whole: true,
     });
 
-    expect(parseStore(mixed)).toStrictEqual(store);
+    expect(parseIndex(mixed)).toStrictEqual(IndexText.SomeRows({ store }));
+  });
+
+  it("reads main's rows, which mark no folder, as never given one", () => {
+    const store = run(
+      DownloadEvent.Added({ download: movie, at: 1 }),
+      ...kept(duneFile),
+      DownloadEvent.FoldersMade({ ids: [duneFile] }),
+    );
+
+    const row = store.downloads[0] ?? fail();
+    const { hasFolder: _marked, ...mainRow } = row;
+
+    expect(row.hasFolder).toBe(true);
+    expect(parseIndex(JSON.stringify({ downloads: [mainRow], pendingProgress: [] }))).toStrictEqual(
+      IndexText.AllRows({
+        store: { downloads: [{ ...row, hasFolder: false }], pendingProgress: [] },
+      }),
+    );
+  });
+
+  it("writes a download's own copy as one whose folder was made", () => {
+    const [row] = run(DownloadEvent.Added({ download: movie, at: 1 })).downloads;
+
+    expect(row?.hasFolder).toBe(false);
+    expect(JSON.parse(serializeRecord(row ?? fail()))).toMatchObject({ hasFolder: true });
   });
 });
+
+/** Holds nothing of any download but its row. */
+const holdsNothing = (): boolean => false;
 
 describe("following the core's list", () => {
   const store = run(
@@ -356,6 +388,7 @@ describe("following the core's list", () => {
           { id: episodeFile, state: "available", revision: "r1" },
         ],
         both,
+        holdsNothing,
       ),
     ).toStrictEqual({ expire: [], refresh: [], drop: [], purge: [], forget: [] });
   });
@@ -369,6 +402,7 @@ describe("following the core's list", () => {
           { id: episodeFile, state: "available", revision: "r2" },
         ],
         both,
+        holdsNothing,
       ),
     ).toStrictEqual({
       expire: [duneFile],
@@ -386,6 +420,7 @@ describe("following the core's list", () => {
           { id: episodeFile, state: "available", revision: "r1" },
         ],
         both,
+        holdsNothing,
       ).drop,
     ).toStrictEqual([duneFile]);
   });
@@ -393,9 +428,12 @@ describe("following the core's list", () => {
   it("brings an expired download back once access returns", () => {
     const expired = reduce(store, DownloadEvent.Expired({ id: duneFile }));
 
-    expect(planSync(expired, [{ id: duneFile, state: "expired" }], both).expire).toStrictEqual([]);
     expect(
-      planSync(expired, [{ id: duneFile, state: "available", revision: "r1" }], both).refresh,
+      planSync(expired, [{ id: duneFile, state: "expired" }], both, holdsNothing).expire,
+    ).toStrictEqual([]);
+    expect(
+      planSync(expired, [{ id: duneFile, state: "available", revision: "r1" }], both, holdsNothing)
+        .refresh,
     ).toStrictEqual([duneFile]);
   });
 
@@ -411,7 +449,7 @@ describe("following the core's list", () => {
     );
 
     expect(
-      planSync(withNew, [{ id: stranger, state: "available", revision: "r1" }], both),
+      planSync(withNew, [{ id: stranger, state: "available", revision: "r1" }], both, holdsNothing),
     ).toStrictEqual({
       expire: [],
       refresh: [],
@@ -419,6 +457,62 @@ describe("following the core's list", () => {
       purge: [duneFile, episodeFile],
       forget: [stranger],
     });
+  });
+});
+
+describe("forgetting what the core lists", () => {
+  const ids = [duneFile, episodeFile, asFileId("file-unknown"), asFileId("file-other")];
+
+  const listing = fc.array(
+    fc.oneof(
+      fc.record({
+        id: fc.constantFrom(...ids),
+        state: fc.constant("available" as const),
+        revision: fc.constantFrom("r1", "r2"),
+      }),
+      fc.record({
+        id: fc.constantFrom(...ids),
+        state: fc.constantFrom("expired" as const, "gone" as const),
+      }),
+    ),
+  );
+
+  const stores = fc
+    .subarray([
+      [DownloadEvent.Added({ download: movie, at: 1 }), ...kept(duneFile)],
+      [
+        DownloadEvent.Added({ download: show, at: 2 }),
+        DownloadEvent.Confirmed({ id: episodeFile }),
+      ],
+    ])
+    .map((parts) => run(...parts.flat()));
+
+  it("forgets only listed downloads this iPhone holds nothing of, and nothing unlisted", () => {
+    fc.assert(
+      fc.property(
+        stores,
+        listing,
+        fc.subarray(ids),
+        fc.subarray(ids),
+        (store, listed, before, heldIds) => {
+          const addedBefore = new Set<string>(before);
+          const held = new Set<string>(heldIds);
+          const inStore = new Set<string>(store.downloads.map((download) => download.id));
+          const plan = planSync(store, listed, addedBefore, (id) => held.has(id));
+
+          expect(plan.forget).toStrictEqual(
+            listed.flatMap((entry) =>
+              inStore.has(entry.id) || held.has(entry.id) ? [] : [entry.id],
+            ),
+          );
+          expect({ ...plan, forget: [] }).toStrictEqual({
+            ...planSync(store, listed, addedBefore, holdsNothing),
+            forget: [],
+          });
+          expect(planSync(store, listed, addedBefore, null).forget).toStrictEqual([]);
+        },
+      ),
+    );
   });
 });
 

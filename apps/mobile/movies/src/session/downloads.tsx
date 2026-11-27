@@ -1,6 +1,6 @@
 import { lastPerson } from "@media/mobile-core/sign-in";
 import { usePlatform, usePlatformQuery, usePlatformStatus } from "@media/sdk/react";
-import { Directory, Paths } from "expo-file-system";
+import { Paths } from "expo-file-system";
 import * as Network from "expo-network";
 import {
   createContext,
@@ -11,6 +11,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import type { ReactNode } from "react";
+import { AppState } from "react-native";
 
 import { accountFolder } from "@/lib/downloads/files";
 import { appKeychains } from "@/lib/keychains";
@@ -21,6 +22,7 @@ import { useServer } from "./connection";
 import { DownloadEngine } from "./download-engine";
 import type { DownloadsSnapshot } from "./download-engine";
 import { useDownloadSettings } from "./download-settings";
+import { expoDisk } from "./expo-disk";
 import type { Person } from "./me";
 
 const DownloadsContext = createContext<DownloadEngine | null>(null);
@@ -77,7 +79,7 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
     }
 
     const created = new DownloadEngine(platform, {
-      folder: new Directory(Paths.document, accountFolder(mediaUrl, userId)),
+      disk: expoDisk(Paths.document, accountFolder(mediaUrl, userId)),
       mediaUrl,
       settings: initialSettings,
     });
@@ -94,6 +96,17 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
   useEffect(() => {
     engine?.setSettings(settings);
   }, [engine, settings]);
+
+  useEffect(() => {
+    if (engine === null) return undefined;
+    engine.setForeground(AppState.currentState !== "background");
+
+    const subscription = AppState.addEventListener("change", (state) =>
+      engine.setForeground(state !== "background"),
+    );
+
+    return () => subscription.remove();
+  }, [engine]);
 
   useEffect(() => {
     if (engine === null) return undefined;

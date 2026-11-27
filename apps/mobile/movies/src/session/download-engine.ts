@@ -5,17 +5,12 @@ import { EpochMillis } from "@media/contracts/units";
 import { Downloads } from "@media/sdk/effect";
 import type { PlatformSdk } from "@media/sdk/promise";
 import { Effect, Option, Predicate, Result, Schema } from "effect";
-import { Directory, DownloadTask, File, Paths } from "expo-file-system";
 import type { DownloadPauseState } from "expo-file-system";
 
 import { artworkUrl } from "@/lib/artwork";
-import {
-  ARTWORK_FILE,
-  STORE_FILE,
-  itemFolder,
-  subtitleFile,
-  videoFile,
-} from "@/lib/downloads/files";
+import { byteCount } from "@/lib/downloads/disk";
+import type { DownloadDisk, Transfer, TransferProgress } from "@/lib/downloads/disk";
+import { ARTWORK_FILE, itemFolder, itemPath, subtitleFile, videoFile } from "@/lib/downloads/files";
 import {
   DOWNLOAD_STOPPED,
   DownloadStep,
@@ -25,14 +20,14 @@ import {
 } from "@/lib/downloads/failures";
 import {
   DownloadEvent,
+  EMPTY_STORE,
+  holdsNoCopy,
   keptPlaybackOf,
   mayTransfer,
   nextToRun,
-  parseStore,
   pictureOf,
   planSync,
   reduce,
-  serializeStore,
   spaceShortfall,
 } from "@/lib/downloads/model";
 import type {
@@ -48,6 +43,20 @@ import type {
   SyncPlan,
 } from "@/lib/downloads/model";
 import type { DownloadSettings } from "@/lib/downloads/settings";
+import {
+  Launch,
+  clearMedia,
+  clearRemoval,
+  endRemoval,
+  holdingsOf,
+  keepRecord,
+  keepRecords,
+  readIndex,
+  recordRemoval,
+  saveIndex,
+  setAsideIndex,
+} from "@/lib/downloads/storage";
+import type { Removal } from "@/lib/downloads/storage";
 import { coreQueue } from "@/lib/downloads/core-queue";
 import { IOS_CAPABILITIES } from "@/lib/player/capabilities";
 
@@ -62,29 +71,43 @@ type ListPage = Awaited<ReturnType<PlatformSdk["core"]["downloads"]["list"]>>;
 
 type ListRow = ListPage["page"][number];
 
+/**
+ * Whether the downloads index on this iPhone holds the latest changes: `saved`; `failed` after a
+ * save that did not reach the disk, such as on a full disk; or `unread` while the index cannot be
+ * read, when nothing is saved over it. A crash loses what changed since the last save.
+ */
+type SaveState = "saved" | "failed" | "unread";
+
 /** Everything the screens read. */
 export interface DownloadsSnapshot {
   readonly store: DownloadStore;
   readonly settings: DownloadSettings;
   readonly network: NetworkNow;
+  readonly save: SaveState;
+  /**
+   * Whether the core refused for good, in this run, to stop counting a download removed here. It
+   * is asked again at the next launch, or when the same download is added again.
+   */
+  readonly removalRefused: boolean;
 }
 
 /** Where an engine keeps its files and which server it downloads from. */
 export interface EngineOptions {
   /** The person's folder, `downloads/<server>/<person>` under the documents folder. */
-  readonly folder: Directory;
+  readonly disk: DownloadDisk;
   readonly mediaUrl: string;
   readonly settings: DownloadSettings;
 }
 
-/**
- * A byte count from expo-file-system as a number. Its iOS module answers an `Int64`, which Expo
- * hands over as a BigInt although it is typed as a number, and no sum with a number survives one.
- */
-const byteCount = (value: number | bigint): number => Number(value);
-
-/** The phone's free space in bytes. */
-export const freeSpace = (): number => byteCount(Paths.availableDiskSpace);
+/** The platform calls an engine makes: the core's list of downloads, and playback. */
+export interface EnginePlatform {
+  readonly core: {
+    readonly downloads: Pick<PlatformSdk["core"]["downloads"], "list" | "add" | "remove" | "fetch">;
+  };
+  readonly movies: {
+    readonly play: Pick<PlatformSdk["movies"]["play"], "start" | "reportOffline">;
+  };
+}
 
 /** Rows asked for per page of `core.downloads.list`, the most it answers. */
 const LIST_PAGE_SIZE = 200;
@@ -108,7 +131,42 @@ const MAX_RESTARTS = 3;
 
 const SAVE_EVERY_MS = 2_000;
 
+/**
+ * How long after a save that failed, such as on a full disk, or a read of the index that failed,
+ * the engine tries again.
+ */
+const SAVE_RETRY_MS = 30_000;
+
 const SHOW_EVERY_MS = 500;
+
+/**
+ * How long after the core could not be reached for a removal the engine tells it again, while the
+ * app is in front. The delay doubles after each try, from the first up to the last.
+ */
+const TELL_RETRY_MS = { first: 5_000, last: 60_000 } as const;
+
+/**
+ * The core's answers that refuse a removal for good. Asking again changes nothing until the app or
+ * the server changes. Any other failure may pass: `TransportError`, `RateLimited`, or `Internal`,
+ * which the core answers when it fails while running the call.
+ */
+const REFUSALS = [
+  "Forbidden",
+  "NotFound",
+  "InvalidArgs",
+  "Conflict",
+  "Expired",
+  "ProtocolError",
+] as const;
+
+const refusedForGood = (cause: unknown): boolean =>
+  REFUSALS.some((tag) => Predicate.isTagged(cause, tag));
+
+/**
+ * Downloads whose own copy is checked per turn of the event loop after a launch, so the first
+ * launch after updating, which writes one per download, shows the screen first.
+ */
+const COPIES_PER_TURN = 50;
 
 const DownloadPauseStateJson = Schema.fromJsonString(
   Schema.Struct({
@@ -187,7 +245,7 @@ const prepareDownload = async (
 
 interface Active {
   readonly id: string;
-  task: DownloadTask | null;
+  task: Transfer | null;
   cancelled: boolean;
   /** Paused for Wi-Fi Only: the task's own promise resolves with null. */
   pausing: boolean;
@@ -223,12 +281,25 @@ const deliveryOf = (ready: DownloadReady, kept: ReadonlySet<string>): Delivery =
   ),
 });
 
+/** `store` with each transfer a quit or a crash stopped waiting to run again. */
+const requeued = (store: DownloadStore): DownloadStore =>
+  store.downloads.reduce(
+    (settling, download) =>
+      download.phase === "preparing" || download.phase === "downloading"
+        ? reduce(
+            settling,
+            DownloadEvent.Waiting({ id: download.id, wifi: false, resume: download.resume }),
+          )
+        : settling,
+    store,
+  );
+
 /**
  * Keeps and downloads one person's downloads on one server, following the core's list of what
  * this device keeps (ADR 0019). Create it, then `dispose` it.
  */
 export class DownloadEngine {
-  readonly #platform: PlatformSdk;
+  readonly #platform: EnginePlatform;
   readonly #coreCalls = coreQueue();
   readonly #options: EngineOptions;
   readonly #listeners = new Set<() => void>();
@@ -247,35 +318,125 @@ export class DownloadEngine {
   #syncing = false;
   #syncNext: ListPage | null = null;
   #sending = false;
+  /** Whether `start` was called, which means the core confirmed the person signed in here. */
+  #confirmed = false;
   #started = false;
   #disposed = false;
+  /** The removals recorded on disk that the core has not acknowledged yet, by their folder. */
+  readonly #removals = new Map<string, Removal>();
+  /** The removals being told to the core now, by their folder. */
+  readonly #telling = new Map<string, Promise<Result.Result<void, unknown>>>();
+  /** The removals the core refused for good in this run, by their folder, which it is not asked again. */
+  readonly #refused = new Set<string>();
+  /** Tells the core again about the removals it could not be reached for. */
+  #tellTimer: ReturnType<typeof setTimeout> | undefined;
+  #tellDelay: number = TELL_RETRY_MS.first;
+  /** Whether the app is in front; removals are told again on a timer only then. */
+  #foreground = true;
+  /** The last time `#now` gave, the latest download added or removal recorded. */
+  #clock = 0;
+  /** Whether an index that did not read whole still sits where a save would overwrite it. */
+  #unreadableInPlace = false;
+  /**
+   * While the index cannot be read: the changes made since launch, applied again over the index
+   * once it reads. Null once it has read.
+   */
+  #held: Array<DownloadEvent> | null = null;
+  #readTimer: ReturnType<typeof setTimeout> | undefined;
+  #startWhenRead = false;
+  #copiesLeft: ReadonlyArray<FileId> = [];
+  #copyTimer: ReturnType<typeof setTimeout> | undefined;
 
-  constructor(platform: PlatformSdk, options: EngineOptions) {
+  /**
+   * Reads the person's downloads index and folder. The downloads the index lacks come back from
+   * their own copies, and a removal recorded before a crash goes on: its files are deleted now, and
+   * the core is told once the engine starts. Nothing else is ever deleted for being missing from
+   * the index. A read that fails decides nothing: what could be read shows and plays, nothing is
+   * saved, deleted, or sent, and the read is tried again.
+   */
+  constructor(platform: EnginePlatform, options: EngineOptions) {
     this.#platform = platform;
     this.#options = options;
-
-    const stored = parseStore(this.#readStore());
-
-    const settled = stored.downloads.reduce(
-      (store, download) =>
-        download.phase === "preparing" || download.phase === "downloading"
-          ? reduce(
-              store,
-              DownloadEvent.Waiting({ id: download.id, wifi: false, resume: download.resume }),
-            )
-          : store,
-      stored,
-    );
-
-    this.#settled = new Set(
-      stored.downloads.filter((download) => download.added).map((download) => download.id),
-    );
+    this.#settled = new Set();
 
     this.#snapshot = {
-      store: settled,
+      store: EMPTY_STORE,
       settings: options.settings,
       network: { connected: false, wifi: false },
+      save: "saved",
+      removalRefused: false,
     };
+
+    this.#load(readIndex(options.disk));
+  }
+
+  #load(launch: Launch): void {
+    Launch.$match(launch, {
+      Held: ({ shown }) => {
+        this.#held ??= [];
+        this.#seeClock(shown, []);
+        this.#snapshot = {
+          ...this.#snapshot,
+          store: this.#held.reduce(reduce, requeued(shown)),
+          save: "unread",
+        };
+
+        if (!this.#disposed) {
+          clearTimeout(this.#readTimer);
+          this.#readTimer = setTimeout(
+            () => this.#load(readIndex(this.#options.disk)),
+            SAVE_RETRY_MS,
+          );
+        }
+
+        this.#notify();
+      },
+      Loaded: ({ store, removals, leftovers, misplaced, changed }) => {
+        const changes = this.#held ?? [];
+
+        this.#held = null;
+        this.#seeClock(store, removals);
+        clearTimeout(this.#readTimer);
+        this.#unreadableInPlace = misplaced;
+        this.#settled.clear();
+
+        for (const download of store.downloads) {
+          if (download.added) this.#settled.add(download.id);
+        }
+
+        const known = changes.reduce(reduce, requeued(store));
+
+        this.#snapshot = { ...this.#snapshot, store: known, save: "saved" };
+
+        for (const removal of removals) {
+          clearRemoval(this.#options.disk, removal);
+
+          // A download of the same file that the core already counts, added after this removal,
+          // came from another build of the app, which told the core itself. Telling the core of
+          // the removal now would take that download's count away, and the next sync its files.
+          const outlived = known.downloads.some(
+            (download) =>
+              download.id === removal.id && download.added && download.addedAt > removal.stamp,
+          );
+
+          if (outlived) endRemoval(this.#options.disk, removal);
+          else this.#removals.set(removal.folder, removal);
+        }
+
+        for (const leftover of leftovers) this.#options.disk.remove(leftover);
+
+        this.#copiesLeft = known.downloads.map((download) => download.id);
+        clearTimeout(this.#copyTimer);
+
+        if (!this.#disposed) this.#copyTimer = setTimeout(() => this.#keepCopies(), 0);
+
+        if (misplaced || changed || changes.length > 0) this.#save();
+        this.#notify();
+
+        if (this.#startWhenRead) this.start();
+        else this.#tellAll();
+      },
+    });
   }
 
   /** The current state; a new object after every change. */
@@ -297,6 +458,15 @@ export class DownloadEngine {
    */
   start(): void {
     if (this.#started || this.#disposed) return;
+    this.#confirmed = true;
+    this.#tellAll();
+
+    if (this.#held !== null) {
+      this.#startWhenRead = true;
+
+      return;
+    }
+
     this.#started = true;
     this.#followList();
     this.#pump();
@@ -308,14 +478,26 @@ export class DownloadEngine {
     this.#disposed = true;
     this.#unfollowList?.();
     clearTimeout(this.#showTimer);
+    clearTimeout(this.#readTimer);
+    clearTimeout(this.#copyTimer);
+    clearTimeout(this.#tellTimer);
     this.#save();
+    keepRecords(this.#options.disk, this.#rows(this.#copiesLeft));
+    this.#copiesLeft = [];
 
     for (const active of this.#active.values()) active.task?.cancel();
   }
 
-  /** Queues a download; one already kept for the same file stays as it is. */
+  /**
+   * Queues a download; one already kept for the same file stays as it is. Its folder, with its own
+   * copy of its row, is made once the index holding it is saved.
+   */
   add(download: NewDownload): void {
-    this.#dispatch(DownloadEvent.Added({ download, at: Date.now() }));
+    const fresh = this.#find(download.id) === undefined;
+
+    this.#dispatch(DownloadEvent.Added({ download, at: this.#now() }));
+
+    if (fresh && this.#snapshot.save === "saved") this.#keepRecord(download.id);
     this.#pump();
   }
 
@@ -326,17 +508,16 @@ export class DownloadEngine {
   }
 
   /**
-   * Cancels a download or removes a kept one, deleting its files (Remove, Cancel Download), and
-   * tells the core. A refusal or a server out of reach leaves the core's row, which the next
-   * reading of the list removes again.
+   * Cancels a download or removes a kept one (Remove, Cancel Download): records the removal, then
+   * deletes its files and tells the core. A core out of reach is told again at the next launch,
+   * sync, reconnection, or answer to another call, and on a timer while the app is in front; one
+   * that refuses for good is asked again at the next launch. A download whose removal cannot be
+   * recorded stays.
    */
   async remove(id: string): Promise<void> {
     const download = this.#find(id);
 
-    this.#discard(id);
-    this.#pump();
-
-    if (download !== undefined) void this.#forget(download.id);
+    if (download !== undefined) this.#remove(download.id);
 
     await Promise.resolve();
   }
@@ -373,22 +554,38 @@ export class DownloadEngine {
     this.#reconsider();
 
     if (!network.connected) return;
+    this.#tellAll();
     void this.sendProgress();
     const listed = this.#list?.getSnapshot();
 
     if (listed?.status === "error") listed.retry();
   }
 
+  /**
+   * Applies the app moving to the foreground or the background. The core is told again about the
+   * removals it could not be reached for on a timer only while the app is in front, and at once
+   * when it comes back.
+   */
+  setForeground(foreground: boolean): void {
+    this.#foreground = foreground;
+    clearTimeout(this.#tellTimer);
+    this.#tellTimer = undefined;
+
+    if (!foreground) return;
+    this.#tellDelay = TELL_RETRY_MS.first;
+    this.#tellAll();
+  }
+
   /** The kept video of `download`, or null before it is ready. */
   videoUri(download: DownloadRecord): string | null {
     if (download.phase !== "ready" || download.delivery === null) return null;
 
-    return new File(this.#itemDirectory(download.id), videoFile(download.delivery.container)).uri;
+    return this.#options.disk.uri(itemPath(download.id, videoFile(download.delivery.container)));
   }
 
   /** The kept WebVTT file of a subtitle track. */
   subtitleUri(download: DownloadRecord, trackId: string): string {
-    return new File(this.#itemDirectory(download.id), subtitleFile(trackId)).uri;
+    return this.#options.disk.uri(itemPath(download.id, subtitleFile(trackId)));
   }
 
   /** The kept picture of `download`, or null when there is none yet. */
@@ -396,8 +593,8 @@ export class DownloadEngine {
     const known = this.#artwork.get(download.id);
 
     if (known !== undefined) return known;
-    const file = new File(this.#itemDirectory(download.id), ARTWORK_FILE);
-    const uri = file.exists ? file.uri : null;
+    const path = itemPath(download.id, ARTWORK_FILE);
+    const uri = this.#options.disk.exists(path) ? this.#options.disk.uri(path) : null;
 
     this.#artwork.set(download.id, uri);
 
@@ -433,7 +630,7 @@ export class DownloadEngine {
 
     if (entry === undefined) return sent;
 
-    const result = await attempt(() =>
+    const result = await this.#call(() =>
       this.#platform.movies.play.reportOffline({
         fileId: entry.fileId,
         positionMs: entry.positionMs,
@@ -505,7 +702,8 @@ export class DownloadEngine {
     const listed = rows.flatMap(listedOf);
 
     for (const entry of listed) this.#settled.add(entry.id);
-    this.#follow(planSync(this.#snapshot.store, listed, settled));
+    this.#follow(planSync(this.#snapshot.store, listed, settled, holdingsOf(this.#options.disk)));
+    this.#answered();
   }
 
   /** `rows` and the rows of every page after `page`, read in order; null when a page fails. */
@@ -517,7 +715,7 @@ export class DownloadEngine {
 
     const cursor = page.continueCursor;
 
-    const read = await attempt(() =>
+    const read = await this.#call(() =>
       this.#platform.core.downloads.list({
         paginationOpts: { numItems: LIST_PAGE_SIZE, cursor },
       }),
@@ -532,45 +730,202 @@ export class DownloadEngine {
     for (const id of plan.expire) this.#expire(id);
 
     for (const id of plan.refresh) {
-      this.#deleteFiles(id);
       this.#dispatch(DownloadEvent.Refreshed({ id }));
+      this.#empty(id);
     }
 
-    for (const id of plan.drop) this.#drop(id);
-
-    for (const id of plan.purge) this.#discard(id);
+    for (const id of [...plan.drop, ...plan.purge]) this.#remove(id);
 
     for (const id of plan.forget) void this.#forget(id);
 
     this.#pump();
   }
 
-  /** The person may no longer keep `id` here: its copy goes, and it shows as expired. */
+  /** The person may no longer keep `id` here: it shows as expired, and its files go. */
   #expire(id: string): void {
     this.#stop(id);
-    this.#deleteFiles(id);
     this.#dispatch(DownloadEvent.Expired({ id }));
+    this.#empty(id);
   }
 
-  /** The file or its library is gone: the copy and the core's row go. */
-  #drop(id: FileId): void {
-    this.#discard(id);
-    void this.#forget(id);
-  }
+  /**
+   * Removes download `id`: records the removal on disk first, then stops it, forgets its row,
+   * deletes its files, and tells the core. A removal that cannot be recorded leaves it as it is.
+   */
+  #remove(id: FileId): void {
+    if (this.#disposed) return;
 
-  /** Stops a download, deletes its files, and forgets it here. */
-  #discard(id: string): void {
+    const recorded = recordRemoval(this.#options.disk, id, this.#now());
+
+    if (Result.isFailure(recorded)) return;
+
+    const removal = recorded.success;
+
     this.#stop(id);
-    this.#deleteFiles(id);
+    this.#artwork.delete(id);
+    this.#settled.delete(id);
     this.#dispatch(DownloadEvent.Removed({ id }));
+    clearRemoval(this.#options.disk, removal);
+    this.#removals.set(removal.folder, removal);
+    void this.#tell(removal);
+    this.#pump();
   }
 
+  /**
+   * A time on the engine's clock, in milliseconds since the epoch, after every download added and
+   * every removal recorded that the engine knows of. A download added after a removal is newer
+   * than it even when the phone's clock went back, so the removal never takes it.
+   */
+  #now(): number {
+    this.#clock = Math.max(Date.now(), this.#clock + 1);
+
+    return this.#clock;
+  }
+
+  /** Moves the clock past the downloads in `store` and the stamps of `removals`. */
+  #seeClock(store: DownloadStore, removals: ReadonlyArray<Removal>): void {
+    this.#clock = [
+      ...store.downloads.map((download) => download.addedAt),
+      ...removals.map((removal) => removal.stamp),
+    ].reduce((latest, time) => Math.max(latest, time), this.#clock);
+  }
+
+  /** Runs `run`. Once the core answers, even with a refusal, the removals waiting on it are told now. */
+  async #call<A>(run: () => Promise<A>): Promise<Result.Result<A, unknown>> {
+    const result = await attempt(run);
+
+    if (Result.isSuccess(result) || refusedForGood(result.failure)) this.#answered();
+
+    return result;
+  }
+
+  /** Tells the core now about the removals it has not taken, and starts the timer's delay over. */
+  #answered(): void {
+    if (this.#disposed) return;
+    clearTimeout(this.#tellTimer);
+    this.#tellTimer = undefined;
+    this.#tellDelay = TELL_RETRY_MS.first;
+    this.#tellAll();
+  }
+
+  /**
+   * Tells the core about every removal it has not acknowledged and has not refused for good, once
+   * the engine has started.
+   */
+  #tellAll(): void {
+    if (!this.#confirmed) return;
+
+    for (const removal of this.#removals.values()) {
+      if (!this.#refused.has(removal.folder)) void this.#tell(removal);
+    }
+  }
+
+  /**
+   * Tells the core again after the next delay, while the app is in front and a removal waits for a
+   * core that could not be reached. No timer runs otherwise.
+   */
+  #tellLater(): void {
+    const waiting = [...this.#removals.keys()].some((folder) => !this.#refused.has(folder));
+
+    if (!this.#confirmed || this.#disposed || !this.#foreground || this.#tellTimer !== undefined) {
+      return;
+    }
+
+    if (!waiting) return;
+
+    this.#tellTimer = setTimeout(() => {
+      this.#tellTimer = undefined;
+      this.#tellDelay = Math.min(this.#tellDelay * 2, TELL_RETRY_MS.last);
+      this.#tellAll();
+    }, this.#tellDelay);
+  }
+
+  /**
+   * Tells the core it no longer keeps the download of `removal`, then deletes the removal's
+   * folder; fails with what stopped either. A remove of what the core no longer keeps changes
+   * nothing there, so telling it again is safe.
+   */
+  #tell(removal: Removal): Promise<Result.Result<void, unknown>> {
+    const telling = this.#telling.get(removal.folder);
+
+    if (telling !== undefined) return telling;
+
+    const told = this.#tellOnce(removal).finally(() => this.#telling.delete(removal.folder));
+
+    this.#telling.set(removal.folder, told);
+
+    return told;
+  }
+
+  async #tellOnce(removal: Removal): Promise<Result.Result<void, unknown>> {
+    const answer = await this.#call(() =>
+      this.#coreCalls.run(removal.id, () =>
+        this.#platform.core.downloads.remove({ item: itemOf(removal.id) }),
+      ),
+    );
+
+    if (Result.isFailure(answer)) {
+      if (refusedForGood(answer.failure)) this.#refuse(removal.folder, true);
+      else this.#tellLater();
+
+      return Result.fail(answer.failure);
+    }
+
+    // A disposed engine deletes nothing; the next launch tells the core again and ends it.
+    if (this.#disposed) return Result.void;
+    this.#refuse(removal.folder, false);
+    const ended = endRemoval(this.#options.disk, removal);
+
+    if (Result.isFailure(ended)) return ended;
+    this.#removals.delete(removal.folder);
+
+    return Result.void;
+  }
+
+  /** Records whether the core refused the removal at `folder` for good, and shows whether any is. */
+  #refuse(folder: string, refused: boolean): void {
+    if (refused) this.#refused.add(folder);
+    else this.#refused.delete(folder);
+
+    const removalRefused = this.#refused.size > 0;
+
+    if (removalRefused === this.#snapshot.removalRefused) return;
+    this.#snapshot = { ...this.#snapshot, removalRefused };
+    this.#notify();
+  }
+
+  /**
+   * Whether every removal of download `id` is done, telling the core about each one still pending
+   * first, even one it refused. A download added again reaches the core only after its removal
+   * did. Fails with what stopped one.
+   */
+  async #toldAbout(id: string): Promise<Result.Result<void, unknown>> {
+    const pending = [...this.#removals.values()].filter((removal) => removal.id === id);
+    const told = await Promise.all(pending.map((removal) => this.#tell(removal)));
+
+    return told.find(Result.isFailure) ?? Result.void;
+  }
+
+  /** Frees on the core a listed download this iPhone holds nothing of. */
   async #forget(id: FileId): Promise<void> {
     this.#settled.delete(id);
     // After any add of the same file still in flight, so a cancel right after Download sticks.
-    await attempt(() =>
+    await this.#call(() =>
       this.#coreCalls.run(id, () => this.#platform.core.downloads.remove({ item: itemOf(id) })),
     );
+  }
+
+  /**
+   * Deletes the files of download `id` once its row says it holds no copy, as after it expired or
+   * must be fetched again; its folder keeps its own copy of the row, saved first.
+   */
+  #empty(id: string): void {
+    const download = this.#find(id);
+
+    if (download === undefined || !holdsNoCopy(download)) return;
+    this.#artwork.delete(id);
+    this.#keepRecord(id);
+    clearMedia(this.#options.disk, download);
   }
 
   #stop(id: string): void {
@@ -591,6 +946,7 @@ export class DownloadEngine {
 
   #dispatch(event: DownloadEvent, save: "now" | "soon" = "now"): void {
     if (this.#disposed) return;
+    this.#held?.push(event);
     this.#snapshot = { ...this.#snapshot, store: reduce(this.#snapshot.store, event) };
 
     if (save === "now") {
@@ -605,38 +961,93 @@ export class DownloadEngine {
     }
   }
 
-  #readStore(): string | null {
-    try {
-      const file = new File(this.#options.folder, STORE_FILE);
-
-      return file.exists ? file.textSync() : null;
-    } catch {
-      return null;
-    }
-  }
-
+  /**
+   * Saves the store, and shows whether it reached the disk; one that failed is tried again later.
+   * While the index cannot be read, it is read again instead, and nothing is saved over it. An
+   * index that did not read whole is moved aside first; while it cannot be, nothing is saved over
+   * it.
+   */
   #save(): void {
     clearTimeout(this.#saveTimer);
     this.#saveTimer = undefined;
 
-    try {
-      this.#options.folder.create({ intermediates: true, idempotent: true });
-      new File(this.#options.folder, STORE_FILE).writeSync(serializeStore(this.#snapshot.store));
-    } catch {}
+    if (this.#held !== null) {
+      this.#load(readIndex(this.#options.disk));
+
+      return;
+    }
+
+    if (this.#unreadableInPlace) {
+      this.#unreadableInPlace = Result.isFailure(setAsideIndex(this.#options.disk));
+    }
+
+    const save =
+      !this.#unreadableInPlace &&
+      Result.isSuccess(saveIndex(this.#options.disk, this.#snapshot.store))
+        ? "saved"
+        : "failed";
+
+    if (save === "failed" && !this.#disposed) {
+      this.#saveTimer = setTimeout(() => this.#save(), SAVE_RETRY_MS);
+    }
+
+    if (save === this.#snapshot.save) return;
+    this.#snapshot = { ...this.#snapshot, save };
+    this.#notify();
   }
 
-  #itemDirectory(id: string): Directory {
-    return new Directory(this.#options.folder, itemFolder(id));
+  /**
+   * Whether the index on disk holds every download kept now, saving it first when the last save
+   * failed. A transfer starts only then, so a video never lands for a download whose row is on no
+   * disk.
+   */
+  #indexCurrent(): boolean {
+    if (this.#snapshot.save !== "saved") this.#save();
+
+    return this.#snapshot.save === "saved";
   }
 
-  #deleteFiles(id: string): void {
-    this.#artwork.delete(id);
+  /** The downloads of `ids` still kept. */
+  #rows(ids: ReadonlyArray<FileId>): ReadonlyArray<DownloadRecord> {
+    const kept = new Map(this.#snapshot.store.downloads.map((download) => [download.id, download]));
 
-    try {
-      const directory = this.#itemDirectory(id);
+    return ids.flatMap((id) => Option.toArray(Option.fromNullishOr(kept.get(id))));
+  }
 
-      if (directory.exists) directory.delete();
-    } catch {}
+  /**
+   * Saves the own copy of each download, from the launch, that lacks one or holds an older one,
+   * `COPIES_PER_TURN` per turn of the event loop, and marks the rows whose folders were made.
+   */
+  #keepCopies(): void {
+    const now = this.#copiesLeft.slice(0, COPIES_PER_TURN);
+
+    this.#copiesLeft = this.#copiesLeft.slice(COPIES_PER_TURN);
+
+    const made = keepRecords(this.#options.disk, this.#rows(now)).filter(
+      (download) => !download.hasFolder,
+    );
+
+    if (made.length > 0) {
+      this.#dispatch(DownloadEvent.FoldersMade({ ids: made.map((download) => download.id) }));
+    }
+
+    this.#copyTimer =
+      this.#copiesLeft.length > 0 ? setTimeout(() => this.#keepCopies(), 0) : undefined;
+  }
+
+  /**
+   * Saves a download's own copy of its row, making its folder when it has none: when it is added,
+   * when its transfer starts and lands, and before its files are emptied. A copy that fails to
+   * save is saved again at the next launch.
+   */
+  #keepRecord(id: string): void {
+    const download = this.#find(id);
+
+    if (download === undefined || Result.isFailure(keepRecord(this.#options.disk, download))) {
+      return;
+    }
+
+    if (!download.hasFolder) this.#dispatch(DownloadEvent.FoldersMade({ ids: [download.id] }));
   }
 
   #reconsider(): void {
@@ -730,7 +1141,22 @@ export class DownloadEngine {
   async #confirm(download: DownloadRecord, active: Active): Promise<boolean> {
     if (this.#find(download.id)?.added ?? download.added) return true;
 
-    const added = await attempt(() =>
+    const told = await this.#toldAbout(download.id);
+
+    if (Result.isFailure(told)) {
+      if (!this.#stopped(active)) {
+        this.#interrupt(
+          active,
+          refusedForGood(told.failure) ? failureLine(told.failure) : SERVER_UNAVAILABLE,
+        );
+      }
+
+      return false;
+    }
+
+    if (this.#stopped(active)) return false;
+
+    const added = await this.#call(() =>
       this.#coreCalls.run(download.id, () =>
         this.#platform.core.downloads.add({ item: itemOf(download.id) }),
       ),
@@ -755,7 +1181,7 @@ export class DownloadEngine {
 
     if (known !== null) return known;
 
-    const start = await attempt(() =>
+    const start = await this.#call(() =>
       this.#platform.movies.play.start({
         titleId: download.titleId,
         fileId: download.id,
@@ -792,7 +1218,7 @@ export class DownloadEngine {
    * and one whose file is gone is removed; both answer null.
    */
   async #ticket(download: DownloadRecord, active: Active): Promise<Ticket | null> {
-    const fetched = await attempt(() =>
+    const fetched = await this.#call(() =>
       this.#platform.core.downloads.fetch({ item: itemOf(download.id) }),
     );
 
@@ -809,7 +1235,7 @@ export class DownloadEngine {
     if (answer.state === "available") return answer;
 
     if (answer.state === "expired") this.#expire(download.id);
-    else this.#drop(download.id);
+    else this.#remove(download.id);
 
     return null;
   }
@@ -866,7 +1292,7 @@ export class DownloadEngine {
 
     const received = this.#find(download.id)?.receivedBytes ?? 0;
 
-    if (spaceShortfall(response.estimatedBytes - received, freeSpace()) > 0) {
+    if (spaceShortfall(response.estimatedBytes - received, this.#options.disk.freeBytes()) > 0) {
       this.#dispatch(
         DownloadEvent.NoSpace({ id: download.id, totalBytes: response.estimatedBytes }),
       );
@@ -889,32 +1315,22 @@ export class DownloadEngine {
   async #keepCompanions(
     download: DownloadRecord,
     ready: DownloadReady,
-    directory: Directory,
   ): Promise<ReadonlySet<string>> {
     const kept = await Promise.all(
-      ready.subtitles.map(async (subtitle) => {
-        try {
-          await File.downloadFileAsync(
-            subtitle.url,
-            new File(directory, subtitleFile(subtitle.id)),
-            {
-              idempotent: true,
-            },
-          );
-
-          return subtitle.id;
-        } catch {
-          return null;
-        }
-      }),
+      ready.subtitles.map(async (subtitle) =>
+        (await this.#options.disk.fetch(
+          subtitle.url,
+          itemPath(download.id, subtitleFile(subtitle.id)),
+        ))
+          ? subtitle.id
+          : null,
+      ),
     );
 
     const picture = artworkUrl(this.#options.mediaUrl, pictureOf(download), "card");
 
     if (picture !== undefined) {
-      await File.downloadFileAsync(picture, new File(directory, ARTWORK_FILE), {
-        idempotent: true,
-      }).catch(() => null);
+      await this.#options.disk.fetch(picture, itemPath(download.id, ARTWORK_FILE));
     }
 
     return new Set(kept.filter(Predicate.isNotNull));
@@ -957,23 +1373,22 @@ export class DownloadEngine {
 
     const { ticket, ready } = prepared;
 
-    if (spaceShortfall(ready.sizeBytes, freeSpace()) > 0) {
+    if (spaceShortfall(ready.sizeBytes, this.#options.disk.freeBytes()) > 0) {
       this.#dispatch(DownloadEvent.NoSpace({ id: queued.id, totalBytes: ready.sizeBytes }));
 
       return;
     }
 
-    const directory = this.#itemDirectory(queued.id);
-
-    try {
-      directory.create({ intermediates: true, idempotent: true });
-    } catch {
+    if (
+      !this.#indexCurrent() ||
+      Result.isFailure(this.#options.disk.createFolder(itemFolder(queued.id)))
+    ) {
       this.#interrupt(active, "This iPhone couldn't save the download.");
 
       return;
     }
 
-    const kept = await this.#keepCompanions(this.#find(queued.id) ?? queued, ready, directory);
+    const kept = await this.#keepCompanions(this.#find(queued.id) ?? queued, ready);
 
     this.#artwork.delete(queued.id);
 
@@ -987,15 +1402,14 @@ export class DownloadEngine {
         ticketExpiresAt: ticket.expiresAt,
       }),
     );
+    this.#keepRecord(queued.id);
 
-    const destination = new File(directory, videoFile(ready.container === "mov" ? "mov" : "mp4"));
+    const destination = itemPath(queued.id, videoFile(ready.container === "mov" ? "mov" : "mp4"));
 
     const outcome = await this.#transfer(
       queued.id,
       active,
-      File.createDownloadTask(ready.url, destination, {
-        onProgress: this.#progressOf(queued.id),
-      }),
+      this.#options.disk.transfer(ready.url, destination, this.#progressOf(queued.id)),
       "start",
     );
 
@@ -1004,19 +1418,13 @@ export class DownloadEngine {
     }
   }
 
-  #restore(id: string, resume: string): DownloadTask | null {
+  #restore(id: string, resume: string): Transfer | null {
     const state = resumeState(resume);
 
-    if (state === null) return null;
-
-    try {
-      return DownloadTask.fromSavable(state, { onProgress: this.#progressOf(id) });
-    } catch {
-      return null;
-    }
+    return state === null ? null : this.#options.disk.resume(state, this.#progressOf(id));
   }
 
-  #progressOf(id: string): (progress: { readonly bytesWritten: number | bigint }) => void {
+  #progressOf(id: string): TransferProgress {
     return ({ bytesWritten }) =>
       this.#dispatch(DownloadEvent.Received({ id, bytes: byteCount(bytesWritten) }), "soon");
   }
@@ -1024,7 +1432,7 @@ export class DownloadEngine {
   async #transfer(
     id: string,
     active: Active,
-    task: DownloadTask,
+    task: Transfer,
     how: "start" | "resume",
   ): Promise<"done" | "stopped" | "failed"> {
     active.task = task;
@@ -1038,6 +1446,7 @@ export class DownloadEngine {
       if (file === null) return "failed";
 
       this.#dispatch(DownloadEvent.Finished({ id }));
+      this.#keepRecord(id);
 
       return "done";
     } catch {
@@ -1056,7 +1465,7 @@ export class DownloadEngine {
    * it answers; when it does not, the transfer pauses (keeping its resume data) and the download
    * is interrupted (H19). Returns the function that stops watching.
    */
-  #watchStall(id: string, active: Active, task: DownloadTask): () => void {
+  #watchStall(id: string, active: Active, task: Transfer): () => void {
     let lastBytes = -1;
     let since = Date.now();
 
@@ -1098,7 +1507,7 @@ export class DownloadEngine {
     }
   }
 
-  async #pauseStalled(id: string, active: Active, task: DownloadTask): Promise<void> {
+  async #pauseStalled(id: string, active: Active, task: Transfer): Promise<void> {
     if (this.#stopped(active)) return;
     active.pausing = true;
 
@@ -1108,7 +1517,7 @@ export class DownloadEngine {
   }
 }
 
-const pauseKeeping = async (task: DownloadTask): Promise<string | null> => {
+const pauseKeeping = async (task: Transfer): Promise<string | null> => {
   try {
     await task.pauseAsync();
 

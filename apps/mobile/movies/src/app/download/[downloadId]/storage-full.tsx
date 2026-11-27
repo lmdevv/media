@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { nameOf, spaceShortfall } from "@/lib/downloads/model";
 import { formatBytes } from "@/lib/owner-format";
 import { DOWNLOADS_HREF } from "@/lib/routes";
-import { freeSpace } from "@/session/download-engine";
+import { freeSpace } from "@/session/expo-disk";
 import { useDownload } from "@/session/downloads";
 
 export default function StorageFull() {

@@ -279,9 +279,49 @@ Old movies' Convex project, its SDK client, and its command registry were delete
   ticket for that file. A failed job answers `TranscodeFailed` with the reason `other`; ffmpeg's
   output stays in the server's log, so the answer never names a path in `TRANSCODE_DIR`.
 - The iOS app keeps one store per server and person in `downloads/<server>/<person>/index.json`
-  under its documents folder, with one folder per download. A kept download plays from its local
-  file with no server call, and the progress it makes is sent with `movies.play.reportOffline`
-  when the server answers.
+  under its documents folder, with one folder per download that also holds the download's own copy
+  of its row (`download.json`). Each is saved as a `.new` file moved over the old one, so a crash
+  or a full disk leaves the old file or the new one. A save that fails shows on the Downloads
+  screen. A download's folder and copy are made once the index holding it is saved, and its row is
+  marked `hasFolder` from then on.
+- The app never decides a download was removed from what the index lacks, since an index can be
+  older than the files beside it after a crash, a restore, or a lost write. A folder whose copy of
+  its row reads is a kept download, and the store takes it when the index lacks it.
+- A removal is recorded before anything is deleted: the download's folder is renamed in one step
+  to `removal+<stamp>+<id>`, which needs no free space, or that folder is made when the download
+  has none. This applies to the person's removals and to the core's gone and unlisted answers. The
+  app then deletes the files inside and calls `core.downloads.remove`, and deletes the removal's
+  folder only once the core has answered. A download whose folder cannot be renamed is not
+  removed. The record sits beside the files it deletes, so a stale index cannot lose it.
+- While a removal is recorded it outranks everything of the download older than it: a row in any
+  index, a copy of the row, and a folder made again under the download's name, such as by a
+  transfer that landed late, which the launch deletes with it. A download of the same file added
+  after the removal is a new one and stays. Added times and removal stamps come from one clock that
+  never runs back past a download or removal the app knows of, so a later add is always newer. The
+  launch decides each file in one order: its removal, then its row, then its folder's copy.
+- The core is told about a removal again at every launch, completed sync, reconnection, return to
+  the foreground, and answer to any other call, and on a timer while a removal waits and the app is
+  in front, from 5 seconds doubling to a minute. No timer runs when nothing waits. A download
+  added again reaches the core only after its removal did. An answer that refuses the removal for
+  good, any failure but the core out of reach, rate limited, or signed out, stops the retries for
+  that run and shows on the Downloads screen; the next launch asks again.
+- A row whose folder is gone, by the listing and a direct check, is dropped when it had a folder
+  or says it is ready to play. It holds nothing, and nothing makes it a folder again. The core is
+  told to forget it once its list shows it. A row that never had a folder, such as a queued one
+  from main, stays.
+- Nothing else is deleted: a folder with no readable copy, such as one main left behind, stays.
+  An expired download keeps its folder with its copy and loses its media. The core is told to
+  forget a listed download only when the store lacks it and the phone holds no folder or removal
+  of it.
+- An index that is not one, or holds rows this version cannot decode, moves aside to
+  `index.unreadable.json` before a save replaces it. `index.json.new` is the index only when the
+  folder lists no `index.json`. A read of the index or a listing of the folder that fails holds
+  the launch: nothing is saved, moved, deleted, or sent but the person's own removals, and the
+  read is tried every 30 seconds. Meanwhile the screen says some downloads may be missing, and
+  shows only what it can check: a download ready to play while its video is there, and one that
+  had a folder while that folder is there, never one whose removal it can see.
+- A kept download plays from its local file with no server call, and the progress it makes is sent
+  with `movies.play.reportOffline` when the server answers.
 
 ## Subtitle delay
 

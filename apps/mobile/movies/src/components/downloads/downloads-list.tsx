@@ -9,6 +9,7 @@ import { CompactBar, LargeTitle, useCollapse } from "@/components/browse/tab-chr
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { ListRow } from "@/components/ui/list-row";
+import { Text } from "@/components/ui/text";
 import { downloadsOf, summaryOf } from "@/lib/downloads/model";
 import type { DownloadEngine } from "@/session/download-engine";
 import type { DownloadsSnapshot } from "@/session/download-engine";
@@ -30,6 +31,17 @@ const openSettings = () => router.push("/download-settings");
 
 const openMenu = () => router.push("/download-settings/menu");
 
+/** What the list says about the downloads index on this iPhone, by whether it holds the latest changes. */
+const SAVE_NOTICES: Readonly<Record<DownloadsSnapshot["save"], string | null>> = {
+  saved: null,
+  failed: "This iPhone couldn't save your downloads list. Free up some space, and it saves again.",
+  unread:
+    "This iPhone can't read your downloads list right now, so some may be missing here. They stay, and it tries again.",
+};
+
+/** What the list says once the server refused to stop counting a download removed here. */
+const REFUSED_NOTICE = "Your server refused to free the space of a removed download.";
+
 function DownloadsBody({
   engine,
   snapshot,
@@ -44,18 +56,40 @@ function DownloadsBody({
   const downloads = snapshot === null ? [] : downloadsOf(snapshot.store);
   const summary = summaryOf(downloads);
 
+  const notices =
+    snapshot === null
+      ? []
+      : [SAVE_NOTICES[snapshot.save], snapshot.removalRefused ? REFUSED_NOTICE : null].filter(
+          (notice) => notice !== null,
+        );
+
   if (engine === null || downloads.length === 0) {
-    return (
+    const action = <Button label={empty.label} onPress={empty.onPress} />;
+
+    return snapshot?.save === "unread" ? (
+      <EmptyState
+        icon={Download}
+        title="Can't read your downloads list."
+        description="Your downloads stay on this iPhone, and it tries again in 30 seconds."
+        action={action}
+      />
+    ) : (
       <EmptyState
         icon={Download}
         title="Nothing downloaded yet."
-        action={<Button label={empty.label} onPress={empty.onPress} />}
+        {...(snapshot?.removalRefused === true ? { description: REFUSED_NOTICE } : {})}
+        action={action}
       />
     );
   }
 
   return (
     <View className="gap-4 px-5 py-4 regular:w-full regular:max-w-readable regular:self-center regular:px-0">
+      {notices.map((notice) => (
+        <Text key={notice} variant="secondary" tone="danger">
+          {notice}
+        </Text>
+      ))}
       <ListRow icon={Download} title={summary.items} detail={summary.size} onPress={openSettings} />
       {downloads.map((download) => (
         <DownloadRow key={download.id} engine={engine} download={download} />
