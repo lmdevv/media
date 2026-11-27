@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import {
   CHECKS,
   cells,
+  COMMON_CHECKS,
   describeRun,
   FIXTURES,
   fingerprint,
@@ -50,7 +51,7 @@ const scratch = mkdtempSync(join(tmpdir(), "hardware-matrix-test-"));
 after(() => rmSync(scratch, { recursive: true, force: true }));
 
 /** The picture-time check's frame rule, as the runner applies it. */
-const TIMING = { window: TIMING_WINDOW, minMatch: 0.7, tolerance: 0.01, quiet: 4 };
+const TIMING = { window: TIMING_WINDOW, minMatch: 0.7, tolerance: 0.01, flat: 1, pictured: 10 };
 
 const ffmpeg = (...args) => spawnSync("ffmpeg", ["-hide_banner", "-nostdin", ...args], { encoding: "utf8", maxBuffer: 1 << 26 });
 const ffprobe = (...args) => spawnSync("ffprobe", ["-v", "error", ...args], { encoding: "utf8", maxBuffer: 1 << 26 });
@@ -190,7 +191,19 @@ describe("reading real ffmpeg output", () => {
     assert.ok(source.every((frame) => frame.pixels !== undefined));
 
     const judgeAt = (output) => frameTiming(judgeFrames(output, source, { ...TIMING, allowance: 0.04 }));
-    assert.deepEqual(judgeAt(source), { frames: 50, unjudged: 0, failed: 0, flat: 0, another: 0, first: undefined, by: undefined });
+    assert.ok(source.every((frame) => frame.spread >= 10), "testsrc2 is pictured throughout");
+    assert.deepEqual(judgeAt(source), {
+      frames: 50,
+      unjudged: 0,
+      faint: 0,
+      placed: 50,
+      failed: 0,
+      flat: 0,
+      pictured: 0,
+      another: 0,
+      first: undefined,
+      by: undefined,
+    });
 
     // The first picture held for ten frames and everything after it late, as ffmpeg 7.1's Quick
     // Sync filters make a constant-rate output, every timestamp in place: after the first two
@@ -364,7 +377,9 @@ describe("verdicts", () => {
   });
 
   test("every frame of a fetch must show the source's picture for its time, within a frame", () => {
-    // The verifier's scene: 24 fps frames that each correlate with themselves alone.
+    // The verifier's scene: 24 fps frames that each correlate with themselves alone. Its frames
+    // carry pixels and no gray-level spread, so they read as pictured, as the demo films' pictures
+    // (a median spread of 43 gray levels) sit far above the margin of 10.
     const step = 1 / 24;
     const scene = Array.from({ length: 180 }, (_, index) => ({
       pts: (index - 36) * step,
@@ -394,14 +409,17 @@ describe("verdicts", () => {
 
     // A hold at the head of a fetch, however short, is the defect: each frame counts.
     const headHeld = verdictOf(aligned, timingOf([...flat.slice(0, 12), ...source.slice(12)], scene));
-    assert.match(headHeld.evidence, /^picture-time: 12 of the seek output's 96 frames do not show the source's picture for their time, from 0 s: 12 flat where the source shows a picture$/);
+    assert.match(
+      headHeld.evidence,
+      /^picture-time: 12 of the seek output's 96 frames do not show the source's picture for their time, from 0 s: 12 flat where the source shows a picture \(placed 96 of 96, 0 too faint, 12 failed\)$/,
+    );
     const allHeld = verdictOf(timingOf(flat, scene), aligned);
     assert.match(allHeld.evidence, /^picture-time: 96 of the start output's 96 frames/);
 
     // A program two frames late fails; one frame late is within the allowance.
     const late = (frames) => source.map((frame) => ({ ...frame, pts: frame.pts + frames * step }));
     const twoLate = verdictOf(aligned, timingOf(late(2), scene));
-    assert.match(twoLate.evidence, /^picture-time: 96 of the seek output's 96 frames .*: 96 showing another time's picture \(typically 0\.083 s earlier\)$/);
+    assert.match(twoLate.evidence, /^picture-time: 96 of the seek output's 96 frames .*: 96 showing another time's picture \(typically 0\.083 s earlier\) \(placed 96 of 96, 0 too faint, 96 failed\)$/);
     assert.equal(verdictOf(aligned, timingOf(late(1), scene)).verdict, "PASS");
 
     // One stray frame is tolerated, wherever it falls; a second is not.
@@ -412,7 +430,57 @@ describe("verdicts", () => {
     // Black on both sides is in place; a picture where the source is black is not.
     const dark = flat.map((frame) => ({ ...frame }));
     assert.equal(verdictOf(timingOf(dark, dark), aligned).verdict, "PASS");
-    assert.match(verdictOf(timingOf(source, dark), aligned).evidence, /^picture-time: 96 of the start output's 96 frames/);
+    assert.match(verdictOf(timingOf(source, dark), aligned).evidence, /^picture-time: 96 of the start output's 96 frames .*: 96 showing a picture where the source is flat/);
+
+    // What a PASS covered is in its evidence.
+    assert.match(verdictOf(aligned, aligned).evidence, /; frames showing the source's picture for their time: start placed 96 of 96, 0 too faint, 0 failed; seek placed 96 of 96, 0 too faint, 0 failed; transcode-qsv/);
+  });
+
+  test("a source frame too faint to place is judged neither way, and a fetch of mostly such frames can't be measured", () => {
+    const step = 1 / 24;
+    // Pictured frames that correlate with themselves alone, with the gray-level spread given.
+    const frame = (index, spread) => ({
+      pts: index * step,
+      spread,
+      pixels: Float32Array.from({ length: 200 }, (_, at) => (index === at ? 1 : 0)),
+    });
+    const cell = cellOf("hdr-to-sdr", "vaapi");
+    const verdictOf = (start) => {
+      const obs = healthy(cell);
+      obs.fetches.start.frames = Array.from({ length: start.frames }, (_, index) => ({ pts: index * step, key: index === 0 }));
+      obs.analysis = { ...obs.analysis, timing: { ...obs.analysis.timing, start }, picture: undefined };
+      return CHECKS["picture-time"].run(obs, COMMON_CHECKS.find((spec) => spec.check === "picture-time"));
+    };
+    const timingOf = (output, source) => frameTiming(judgeFrames(output, source, { ...TIMING, allowance: step }));
+    const picture = Array.from({ length: 96 }, (_, index) => frame(index, 40));
+
+    // A fade-in rendered darker, its timing right: the source spreads 5 to 7, the output 0 to 3.5,
+    // as both GPU tone maps render the Feature Test's opening; with the picture after it, a pass.
+    const fadeSource = picture.map((item, index) => (index < 11 ? { ...item, spread: 5 + (2 * index) / 10 } : item));
+    const fadeOutput = picture.map((item, index) =>
+      index < 11 ? (index < 4 ? { pts: item.pts, spread: 0, pixels: undefined } : { ...item, spread: (3.5 * index) / 10 }) : item,
+    );
+    const fade = timingOf(fadeOutput, fadeSource);
+    assert.deepEqual([fade.faint, fade.failed, fade.placed], [11, 0, 85]);
+    const longer = timingOf(
+      [...fadeOutput, ...Array.from({ length: 96 }, (_, index) => frame(96 + index, 40))],
+      [...fadeSource, ...Array.from({ length: 96 }, (_, index) => frame(96 + index, 40))],
+    );
+    assert.equal(verdictOf(longer).ok, true, verdictOf(longer).evidence);
+    assert.match(verdictOf(longer).evidence, /start placed 181 of 192, 11 too faint, 0 failed/);
+
+    // A held black picture over a real picture still fails, frame by frame.
+    const held = timingOf(
+      picture.map((item, index) => (index < 12 ? { pts: item.pts, spread: 0, pixels: undefined } : item)),
+      picture,
+    );
+    assert.match(verdictOf(held).evidence, /^12 of the start output's 96 frames .*: 12 flat where the source shows a picture/);
+
+    // Too faint to place is no pass: a fetch under nine tenths placed can't be measured.
+    assert.match(verdictOf(fade).evidence, /^could not measure: the start output's frames placed 85 of 96, 11 too faint, 0 failed, under 90% placed$/);
+    const dim = timingOf(picture, picture.map((item) => ({ ...item, spread: 6 })));
+    assert.equal(verdictOf(dim).ok, false);
+    assert.match(verdictOf(dim).evidence, /^could not measure: .*placed 0 of 96, 96 too faint/);
   });
 
   test("sound must start where the source's does at that position, within an audio frame of its codec", () => {

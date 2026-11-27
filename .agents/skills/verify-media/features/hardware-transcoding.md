@@ -118,14 +118,20 @@ Preconditions:
 
 ## Gotchas
 
-- `picture-time` judges every frame of a fetch alone: its 96x28 gray thumbnail of the top 70 % of
-  the picture must match, within a frame of the source's rate, the source frame shown at its time
-  (correlation 0.7 or more, and within 0.01 of the best match anywhere within 3 s), through the
-  reference tone map for an HDR row. A quiet frame (black, a fade, a flat colour: gray levels
-  spreading less than 4) matches only a quiet source frame there. One failing frame per fetch is
-  tolerated, wherever it falls. Left alone, ffmpeg 7.1's Quick Sync filters hold a first picture for
-  41 frames (Matroska, 1.7 s) to 666 (the Feature Test's MP4, 27.7 s) with every timestamp right,
-  which the other checks pass.
+- `picture-time` judges every frame of a fetch alone, against the source frame shown at its time
+  (96x28 gray thumbnails of the top 70 % of the picture, through the reference tone map for an
+  HDR row). That source frame is flat (gray levels spreading under 1), pictured (10 or more), or
+  too faint to place (between: a fade, where the GPU tone maps render the Feature Test's opening
+  near black while the CPU does not). Over a pictured frame the output must correlate 0.7 or more
+  with it within a frame of the source's rate, and within 0.01 of its best match within 3 s; over a
+  flat frame it must not show a picture; a too-faint frame is not judged. One failing frame per
+  fetch is tolerated, wherever it falls, and a fetch with under 90 % of its frames placed (judged
+  either way) is `could not measure`. The evidence says how many were placed, too faint, and
+  failed. The margin of 10 is measured: on 8,160 served frames of every path, the highest source
+  spread at which an output showed no correlatable picture was 6.78 (both GPU tone maps in that
+  fade; the CPU 2.25, the plain scales 0.52 at most). Left alone, ffmpeg 7.1's Quick Sync filters
+  hold a first picture for 41 frames (Matroska, 1.7 s) to 666 (the Feature Test's MP4, 27.7 s) with
+  every timestamp right, which the other checks pass.
 - `audio-start` measures the served sound against the source's own track at the fetch's position
   (the stream negotiation chose): it must start by the time the source sounds at the first picture,
   and no earlier than the source sounds at the first decoded video packet (the muxer cuts there when

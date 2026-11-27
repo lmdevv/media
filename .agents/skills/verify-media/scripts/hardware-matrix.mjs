@@ -497,7 +497,7 @@ export const COMMON_CHECKS = [
   { check: "duration", tolerance: 1 },
   { check: "timeline" },
   { check: "keyframes" },
-  { check: "picture-time", frames: 1, minMatch: 0.7, tolerance: 0.01, quiet: 4 },
+  { check: "picture-time", frames: 1, minMatch: 0.7, tolerance: 0.01, flat: 1, pictured: 10, share: 0.9 },
   { check: "audio-start" },
 ];
 
@@ -654,19 +654,25 @@ const correlation = (a, b) => {
 
 /**
  * Judges every output thumbnail against the source's, one rule for each frame: it must show the
- * source's picture for its time, within `allowance` seconds. A frame with a picture does when the
- * best of the source frames shown within the allowance of its time correlates at least `minMatch`
- * and within `tolerance` of the best match anywhere within `window` seconds of it. A quiet frame,
- * whose gray levels spread less than `quiet` (black, a fade, a flat colour, where correlation is
- * noise), does when a source frame shown within the allowance is quiet too, and a frame with a
- * picture fails where every one of them is quiet. A frame no source frame is shown for
- * within the allowance (the source's thumbnails stop short of it, or none came back) cannot be
- * judged. Returns how many frames there were, how many could not be judged, and each frame that
- * failed: its time, whether it is `flat` where the source shows a picture or shows `another` time's
- * picture, and how far away the source's best match for it lies (negative: the picture comes late).
+ * source's picture for its time, within `allowance` seconds. The source frame shown at its time is
+ * one of three things by its own gray levels' spread: `flat` (under `flat`), pictured (`pictured`
+ * or more: enough contrast that a right output can't be flat), or too faint to place (between,
+ * such as a fade, where two near-black renderings of the same frame can fall either side of any
+ * threshold). Over a pictured source frame, an output frame passes when the best of the source's
+ * pictured frames shown within the allowance correlates at least `minMatch` and within `tolerance`
+ * of its best match anywhere within `window` seconds, or when it is flat where a source frame
+ * within the allowance is flat too (a cut); a flat one fails as `flat`, any other as `another`
+ * time's picture. Over a flat source frame it passes unless it is pictured without matching a
+ * pictured source frame within the allowance (`pictured`). A frame over a too-faint source frame is
+ * not judged either way, and one no source frame is shown for within the allowance (the source's
+ * thumbnails stop short, or none came back) cannot be. Returns the frame count, how many could not
+ * be judged and how many were too faint, and each frame that failed: its time, how, and how far
+ * away the source's best match lies (negative: the picture comes late).
  */
-export const judgeFrames = (output, source, { window, allowance, minMatch, tolerance, quiet }) => {
-  const isQuiet = (frame) => frame.pixels === undefined || (frame.spread ?? Number.POSITIVE_INFINITY) < quiet;
+export const judgeFrames = (output, source, { window, allowance, minMatch, tolerance, flat, pictured }) => {
+  const spreadOf = (frame) => (frame.pixels === undefined ? 0 : (frame.spread ?? Number.POSITIVE_INFINITY));
+  const isFlat = (frame) => spreadOf(frame) < flat;
+  const isPictured = (frame) => spreadOf(frame) >= pictured;
   const gaps = source.slice(1).map((frame, index) => frame.pts - source[index].pts).sort((a, b) => a - b);
   const lastShown = gaps.length === 0 ? 0 : gaps[gaps.length >> 1];
   const until = (index) => source[index + 1]?.pts ?? source[index].pts + lastShown;
@@ -687,44 +693,58 @@ export const judgeFrames = (output, source, { window, allowance, minMatch, toler
   };
   const failed = [];
   let unjudged = 0;
+  let faint = 0;
   for (const frame of output) {
     const near = shownWithin(frame.pts - allowance, frame.pts + allowance);
-    if (near.length === 0) {
+    const [shown] = shownWithin(frame.pts, frame.pts);
+    if (near.length === 0 || shown === undefined) {
       unjudged += 1;
       continue;
     }
-    if (isQuiet(frame)) {
-      if (!near.some(isQuiet)) failed.push({ pts: frame.pts, how: "flat" });
+    if (!isFlat(shown) && !isPictured(shown)) {
+      faint += 1;
       continue;
     }
-    const score = (match) => (isQuiet(match) ? -1 : correlation(frame.pixels, match.pixels));
+    const score = (match) => (frame.pixels === undefined || !isPictured(match) ? -1 : correlation(frame.pixels, match.pixels));
     const nearest = Math.max(...near.map(score));
     let best = { score: nearest, at: frame.pts };
     for (const match of shownWithin(frame.pts - window, frame.pts + window)) {
       const value = score(match);
       if (value > best.score) best = { score: value, at: match.pts };
     }
-    if (nearest < minMatch || nearest < best.score - tolerance) {
-      failed.push({ pts: frame.pts, how: "another", by: best.at - frame.pts, score: nearest, best: best.score });
+    const matches = nearest >= minMatch && nearest >= best.score - tolerance;
+    if (isPictured(shown)) {
+      if (matches || (isFlat(frame) && near.some(isFlat))) continue;
+      failed.push(
+        isFlat(frame)
+          ? { pts: frame.pts, how: "flat" }
+          : { pts: frame.pts, how: "another", by: best.at - frame.pts, score: nearest, best: best.score },
+      );
+    } else if (isPictured(frame) && !matches) {
+      failed.push({ pts: frame.pts, how: "pictured" });
     }
   }
-  return { frames: output.length, unjudged, failed };
+  return { frames: output.length, unjudged, faint, failed };
 };
 
 /**
  * What the picture-time check reads of `judgeFrames`' result: how many frames, how many could not
- * be judged, how many failed and how (`flat`, `another`), the first that failed, and how far the
+ * be judged, were too faint, and were placed (judged either way), how many of those failed and how
+ * (`flat`, `pictured` where the source is flat, `another`), the first that failed, and how far the
  * source's best match lies for the middle one of those showing another time's picture.
  */
 export const frameTiming = (judged) => {
-  const another = judged.failed.filter((frame) => frame.how === "another");
-  const offsets = another.map((frame) => frame.by).sort((a, b) => a - b);
+  const how = (kind) => judged.failed.filter((frame) => frame.how === kind);
+  const offsets = how("another").map((frame) => frame.by).sort((a, b) => a - b);
   return {
     frames: judged.frames,
     unjudged: judged.unjudged,
+    faint: judged.faint,
+    placed: judged.frames - judged.unjudged - judged.faint,
     failed: judged.failed.length,
-    flat: judged.failed.length - another.length,
-    another: another.length,
+    flat: how("flat").length,
+    pictured: how("pictured").length,
+    another: how("another").length,
     first: judged.failed[0]?.pts,
     by: offsets[offsets.length >> 1],
   };
@@ -1086,18 +1106,23 @@ export const CHECKS = {
         if (timing.unjudged > 0) {
           return no(`could not measure: the source's thumbnails reach ${timing.frames - timing.unjudged} of the ${fetch.name} output's ${timing.frames} frames`);
         }
+        const counts = `placed ${timing.placed} of ${timing.frames}, ${timing.faint} too faint, ${timing.failed} failed`;
+        if (timing.placed < params.share * timing.frames) {
+          return no(`could not measure: the ${fetch.name} output's frames ${counts}, under ${fmt(params.share * 100, 0)}% placed`);
+        }
         if (timing.failed > params.frames) {
           const how = [
             timing.flat > 0 ? `${timing.flat} flat where the source shows a picture` : undefined,
+            timing.pictured > 0 ? `${timing.pictured} showing a picture where the source is flat` : undefined,
             timing.another > 0
               ? `${timing.another} showing another time's picture (typically ${fmt(Math.abs(timing.by), 3)} s ${timing.by < 0 ? "earlier" : "later"})`
               : undefined,
           ].filter(Boolean);
-          return no(`${timing.failed} of the ${fetch.name} output's ${timing.frames} frames do not show the source's picture for their time, from ${fmt(timing.first, 3)} s: ${how.join(", ")}`);
+          return no(`${timing.failed} of the ${fetch.name} output's ${timing.frames} frames do not show the source's picture for their time, from ${fmt(timing.first, 3)} s: ${how.join(", ")} (${counts})`);
         }
-        said.push(`${fetch.name} ${timing.frames - timing.failed} of ${timing.frames}`);
+        said.push(`${fetch.name} ${counts}`);
       }
-      return ok(`frames showing the source's picture for their time: ${said.join(", ")}`);
+      return ok(`frames showing the source's picture for their time: ${said.join("; ")}`);
     },
   },
   // Each fetch's sound starts where the source's does at that position, within an audio frame of its
@@ -1413,10 +1438,12 @@ export const judge = (cell, obs) => {
   if (elsewhere) return { verdict: "FAIL", evidence: `${elsewhere.name}: ${elsewhere.evidence}`, checks };
   const media = outputMedia(obs);
   const shown = checks.filter((check) => check.class === "stage" && check.name !== "codec").map((check) => check.evidence);
+  // What the picture check placed, judged too faint, and failed, so a PASS says what it covered.
+  const timed = checks.filter((check) => check.name === "picture-time").map((check) => check.evidence);
   const work = checks.find((check) => check.name === "work");
   const fps = measuredFps(obs.fetches.seek.frames);
   const output = `${media.codec} ${media.profile ?? ""} ${media.width}x${media.height} ${media.bitDepth}-bit ${fmt(fps)} fps`;
-  return { verdict: "PASS", evidence: [output.replace(/\s+/g, " "), ...shown, work.evidence].join("; "), checks };
+  return { verdict: "PASS", evidence: [output.replace(/\s+/g, " "), ...shown, ...timed, work.evidence].join("; "), checks };
 };
 
 // ----------------------------------------------------------------------------------------- grid

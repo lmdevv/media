@@ -486,7 +486,8 @@ const analyseTiming = (obs, found, cell, dir) => {
       allowance: spec.frames / rate,
       minMatch: spec.minMatch,
       tolerance: spec.tolerance,
-      quiet: spec.quiet,
+      flat: spec.flat,
+      pictured: spec.pictured,
     });
     timing[fetch.name] = { ...Matrix.frameTiming(judged), ...(error === undefined ? {} : { error }) };
     lines.push(
