@@ -45,6 +45,8 @@ describe("coverKind", () => {
     expect(coverKind(withChunks(soft, SRGB_CHUNKS))).toBe("png-alpha");
     expect(coverKind(cover("transparent.png"))).toBe("png-alpha");
     expect(coverKind(PNG)).toBe("png-alpha");
+    expect(coverKind(cover("photo.png"))).toBe("png-opaque");
+    expect(coverKind(withChunks(cover("photo.png"), SRGB_CHUNKS))).toBe("png-opaque");
   });
 
   it("names every other cover unproven", () => {
@@ -64,6 +66,7 @@ describe("coverKind", () => {
       withSegment(withSegment(photo, 0xe1, exifOrientation(6)), 0xe1, exifOrientation(6)),
       withSegment(photo, 0xe1, exifOrientation(9)),
       withChunks(soft, SRGB_CHUNKS.slice(1)),
+      withChunks(cover("photo.png"), [pngChunk("tRNS", Uint8Array.of(0, 255, 0, 0, 0, 255))]),
       withChunks(soft, [pngChunk("iCCP", Buffer.from("x\0\0", "latin1"))]),
       withChunks(soft, [pngChunk("eXIf", exifOrientation(6).subarray(6))]),
       withChunks(soft, [pngChunk("sRGB", Uint8Array.of(0)), pngChunk("sRGB", Uint8Array.of(0))]),

@@ -26,6 +26,11 @@ export const COPIED_KINDS = {
    * premultiplied alpha, which keeps its `sRGB`, `gAMA`, and `cHRM` chunks.
    */
   "png-alpha": "png",
+  /**
+   * An 8-bit RGB PNG with no transparent colour, not interlaced, untagged or sRGB, copied as a
+   * JPEG, which a viewer draws as sRGB.
+   */
+  "png-opaque": "jpeg",
 } as const satisfies Record<string, CoverFormat>;
 
 /** A kind of cover the art route resizes. */
@@ -240,6 +245,12 @@ const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 /** Chunks that describe nothing a viewer draws: text, time, density, and background and bit hints. */
 const INERT_CHUNKS = new Set(["tEXt", "zTXt", "iTXt", "tIME", "pHYs", "bKGD", "sBIT"]);
 
+/** RGBA, and RGB, which carries no transparent colour since `tRNS` is not among the chunks read. */
+const PNG_COLOUR_KINDS = new Map<number, CoverKind>([
+  [6, "png-alpha"],
+  [2, "png-opaque"],
+]);
+
 /** The colour chunks read beside sRGB, each at most once, by the length of its data. */
 const COLOUR_CHUNKS = new Map([
   ["sRGB", 1],
@@ -261,17 +272,20 @@ const pngKind = (head: Uint8Array): CoverKind => {
     const type = ascii(head, offset + 4, 4);
 
     if (type === "IDAT") {
-      // 8-bit RGBA, deflate, adaptive filtering, not interlaced, at least a pixel each way.
-      const rgba =
+      // 8-bit, deflate, adaptive filtering, not interlaced, at least a pixel each way.
+      const plain =
         seen.has("IHDR") &&
         view.getUint32(16) > 0 &&
         view.getUint32(20) > 0 &&
-        [8, 6, 0, 0, 0].every((byte, index) => head[24 + index] === byte);
+        head[24] === 8 &&
+        [0, 0, 0].every((byte, index) => head[26 + index] === byte);
 
       // Gamma or primaries alone carry colour ffmpeg's copy would not be drawn with.
       const srgb = seen.has("sRGB") || (!seen.has("gAMA") && !seen.has("cHRM"));
 
-      return rgba && srgb ? "png-alpha" : "unproven";
+      if (!plain || !srgb) return "unproven";
+
+      return PNG_COLOUR_KINDS.get(head[25] ?? 0) ?? "unproven";
     }
 
     const end = offset + 12 + length;

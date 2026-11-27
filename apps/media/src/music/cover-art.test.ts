@@ -464,11 +464,27 @@ describe("music cover art", { timeout: 120_000 }, () => {
     expect(bled).toEqual([]);
   });
 
+  it("copies an 8-bit RGB PNG, untagged or sRGB, as a JPEG that looks the same", async () => {
+    const photo = join(COVERS, "photo.png");
+
+    const tagged = await coverFile(
+      "photo-srgb.png",
+      withChunks(await run(Files.readWholeFile(photo)), SRGB_CHUNKS),
+    );
+
+    await Promise.all([
+      expectFaithfulCopy(photo, "96", "image/jpeg"),
+      expectFaithfulCopy(photo, "144", "image/jpeg"),
+      expectFaithfulCopy(tagged, "144", "image/jpeg"),
+    ]);
+  });
+
   it("serves every other kind of cover as stored", async () => {
     const photo = join(COVERS, "photo.jpg");
     const photoBytes = await run(Files.readWholeFile(photo));
     const soft = join(COVERS, "soft-alpha.png");
     const softBytes = await run(Files.readWholeFile(soft));
+    const photoPng = await run(Files.readWholeFile(join(COVERS, "photo.png")));
 
     const profile = jpegProfile(await run(Files.readWholeFile(join(COVERS, "adobe-rgb.jpg"))));
 
@@ -488,7 +504,13 @@ describe("music cover art", { timeout: 120_000 }, () => {
         "JPEG with an unknown segment",
         splicedAs("app3.jpg", withSegment(photoBytes, 0xe3, Buffer.from("Meta", "latin1"))),
       ],
-      ["opaque RGB PNG", madeWith("rgb.png", ["-i", photo, "-pix_fmt", "rgb24"])],
+      [
+        "RGB PNG with a transparent colour",
+        splicedAs(
+          "rgb-key.png",
+          withChunks(photoPng, [pngChunk("tRNS", Uint8Array.of(0, 255, 0, 0, 0, 255))]),
+        ),
+      ],
       ["gray PNG", madeWith("gray.png", ["-i", photo, "-pix_fmt", "gray"])],
       ["gray PNG with alpha", madeWith("gray-alpha.png", ["-i", soft, "-pix_fmt", "ya8"])],
       ["16-bit RGBA PNG", madeWith("deep.png", ["-i", soft, "-pix_fmt", "rgba64be"])],
