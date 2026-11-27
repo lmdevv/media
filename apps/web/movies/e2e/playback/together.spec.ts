@@ -170,6 +170,43 @@ const delayFirstEpisodeLookup = async (page: Page): Promise<() => boolean> => {
   return () => delayed;
 };
 
+/**
+ * Holds each `core.together.heartbeat` the page sends, the clock samples its player's follower
+ * takes as it starts included, until the returned function sends them on; other frames pass.
+ */
+const holdHeartbeats = async (page: Page): Promise<() => void> => {
+  const held: Array<() => void> = [];
+  let holding = true;
+
+  await page.routeWebSocket("**/api/*/sync", (socket) => {
+    const server = socket.connectToServer();
+
+    socket.onMessage((message) => {
+      if (holding && message.includes('"udfPath":"core/together:heartbeat"')) {
+        held.push(() => {
+          server.send(message);
+        });
+      } else {
+        server.send(message);
+      }
+    });
+  });
+
+  return () => {
+    holding = false;
+    held.splice(0).forEach((send) => {
+      send();
+    });
+  };
+};
+
+/** The status of the host's movies session clock, or null while the host is in none. */
+const hostClockStatus = async (): Promise<string | null> => {
+  const current = await host.platform.core.together.get({ domain: "movies" });
+
+  return current?.state === "joined" ? current.clock.status : null;
+};
+
 test.beforeAll(async () => {
   if (stack === null) return;
 
@@ -229,6 +266,11 @@ test.beforeAll(async () => {
 
 test.afterEach(async () => {
   await Promise.all(pages.splice(0).map((page) => page.context().close()));
+
+  // A session a test leaves open would hold the host as the next test starts; leaving ends it.
+  if ((await hostClockStatus()) !== null) {
+    await host.platform.core.together.leave({ domain: "movies" });
+  }
 });
 
 test.afterAll(async () => {
@@ -386,4 +428,29 @@ test("the session counts down to the next episode and moves every member on toge
 
   await Promise.all([expectPlayingPast(hostPage, 1), expectPlayingPast(aiko, 1)]);
   await expectInStep([hostPage, aiko]);
+});
+
+test("the host's pause pauses the session while its player still samples the server's clock", async ({
+  browser,
+}) => {
+  const hostPage = await signedInPage(browser, host.person);
+
+  pages.push(hostPage);
+
+  const release = await holdHeartbeats(hostPage);
+
+  await hostPage.goto(moviesPath(`/watch/${titleId(MOVIE)}?start=0`));
+  await expectPlayingPast(hostPage, 1);
+  await startSession(hostPage);
+  await expect(hostPage.getByRole("region", { name: "Watching together" })).toBeVisible();
+  await expect.poll(hostClockStatus).toBe("playing");
+
+  // The player follows the session once its clock samples are answered; a pause before that still
+  // pauses the session.
+  await hostPage.getByTestId("player").press("k");
+  await expect.poll(hostClockStatus).toBe("paused");
+
+  // Once the samples are answered, the player takes up the clock the pause left.
+  release();
+  await expect.poll(async () => (await videoState(hostPage)).paused).toBe(true);
 });
