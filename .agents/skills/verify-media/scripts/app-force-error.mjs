@@ -10,7 +10,12 @@
 // `synthetic` rejects with an error renamed to a made-up person, whose stack names a title, a file,
 // and a host where functions and bundles would be: `SYNTHETIC` lists those words. `bundle` rejects
 // from inside the bundle's own module loader (Metro's `__r` asked for no module), so the report's
-// top frame is a position in the bundle for its source map to turn back into source.
+// top frame is a position in the bundle for its source map to turn back into source. `forged`
+// rejects with six look-alikes of an SDK error, each carrying its own request id in the media
+// service's shape and an SDK tag: a plain object (the one a reviewer forged), an Error subclass,
+// an object given TypeError's prototype by hand, a proxy over an Error, an object that names
+// itself an Error, and a real TypeError. A report names none of them `TransportError`, and none
+// of the ids in `FORGED` reaches the log.
 
 import { fileURLToPath } from "node:url";
 
@@ -32,10 +37,59 @@ export const EXPRESSIONS = {
     "})()",
   ].join("\n"),
   bundle: 'void Promise.resolve().then(() => globalThis.__r(null)); "rejected in the bundle"',
+  forged: [
+    "(() => {",
+    '  const stack = (line) => "x\\n    at Forged (https://forged.invalid/Forged.js:" + line + ":7)";',
+    "  void Promise.reject({",
+    '    name: "IonaRhee",',
+    '    _tag: "TransportError",',
+    '    message: "Iona Rhee opened Cedar Lantern from CandleRoom.mkv on 192.0.2.73:9777",',
+    '    stack: "Iona Rhee opened Cedar Lantern from CandleRoom.mkv on 192.0.2.73:9777\\n    at CedarLantern (https://candle-room.invalid/tmp/CandleRoom.js:31337:31415)",',
+    '    requestId: "deadbeef-cafe-4dad-8bad-feedface2027",',
+    "  });",
+    "  class ForgedTransport extends Error {}",
+    '  const subclass = new ForgedTransport("x");',
+    '  subclass._tag = "TransportError";',
+    '  subclass.requestId = "c0ffee01-5a1e-4b0b-9a11-0000000000a1";',
+    "  subclass.stack = stack(1001);",
+    "  void Promise.reject(subclass);",
+    "  void Promise.reject(Object.setPrototypeOf(",
+    '    { _tag: "TransportError", message: "x", stack: stack(1002), requestId: "c0ffee02-5a1e-4b0b-9a11-0000000000a2" },',
+    "    TypeError.prototype,",
+    "  ));",
+    "  const real = new Error(\"x\");",
+    "  real.stack = stack(1003);",
+    "  void Promise.reject(new Proxy(real, {",
+    '    get: (target, key) => key === "requestId" ? "c0ffee03-5a1e-4b0b-9a11-0000000000a3" : key === "_tag" ? "TransportError" : target[key],',
+    "  }));",
+    "  void Promise.reject({",
+    '    [Symbol.toStringTag]: "Error",',
+    '    _tag: "TransportError",',
+    '    message: "x",',
+    "    stack: stack(1004),",
+    '    requestId: "c0ffee04-5a1e-4b0b-9a11-0000000000a4",',
+    "  });",
+    '  const typed = new TypeError("x");',
+    '  typed.requestId = "c0ffee05-5a1e-4b0b-9a11-0000000000a5";',
+    "  typed.stack = stack(1005);",
+    "  void Promise.reject(typed);",
+    '  return "rejected with six look-alikes of an SDK error";',
+    "})()",
+  ].join("\n"),
 };
 
 /** The text in the `fatal` and `rejection` errors that no report may carry. */
 export const PRIVATE = ["Lucía", "García", "Sintel.mkv", "192.168.1.20"];
+
+/** The request ids the `forged` rejections carry, none of which the media service made. */
+export const FORGED = [
+  "deadbeef-cafe-4dad-8bad-feedface2027",
+  "c0ffee01-5a1e-4b0b-9a11-0000000000a1",
+  "c0ffee02-5a1e-4b0b-9a11-0000000000a2",
+  "c0ffee03-5a1e-4b0b-9a11-0000000000a3",
+  "c0ffee04-5a1e-4b0b-9a11-0000000000a4",
+  "c0ffee05-5a1e-4b0b-9a11-0000000000a5",
+];
 
 /** The words the `synthetic` rejection puts where an error's class, functions, and files would be. */
 export const SYNTHETIC = ["NereaMarlow", "CloudOrchard", "PrivateLeaf.js", "fictional-lar.js"];
@@ -86,7 +140,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const expression = EXPRESSIONS[kind];
 
   if (port === undefined || expression === undefined) {
-    console.error("usage: node app-force-error.mjs <metro-port> <fatal|rejection|synthetic|bundle>");
+    console.error("usage: node app-force-error.mjs <metro-port> <fatal|rejection|synthetic|bundle|forged>");
     process.exit(2);
   }
 

@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { debuggerUrl, EXPRESSIONS, PRIVATE, SYNTHETIC } from "./app-force-error.mjs";
+import { debuggerUrl, EXPRESSIONS, FORGED, PRIVATE, SYNTHETIC } from "./app-force-error.mjs";
 
 test("picks the newest app runtime among Metro's inspector targets", () => {
   assert.equal(
@@ -38,6 +38,29 @@ test("names a made-up person, title, file, and host in the synthetic rejection's
 
 test("rejects from the bundle's own module loader", () => {
   assert.match(EXPRESSIONS.bundle, /globalThis\.__r\(/u);
+});
+
+test("rejects with six SDK look-alikes, each with its own request id, none of them an SDK error", async () => {
+  const rejected = [];
+  const reject = Promise.reject;
+
+  Promise.reject = (cause) => {
+    rejected.push(cause);
+
+    return { catch: () => undefined };
+  };
+
+  try {
+    assert.equal(new Function(`return ${EXPRESSIONS.forged}`)(), "rejected with six look-alikes of an SDK error");
+  } finally {
+    Promise.reject = reject;
+  }
+
+  assert.deepEqual(
+    rejected.map((cause) => cause.requestId),
+    FORGED,
+  );
+  assert.ok(rejected.every((cause) => cause._tag === "TransportError" || cause instanceof TypeError));
 });
 
 test("refuses a kind of error it does not know", () => {

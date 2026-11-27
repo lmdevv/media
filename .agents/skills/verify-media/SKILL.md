@@ -458,7 +458,7 @@ It prints `ready: ios <side> on simulator <udid>` when the app shows Home. Then:
 | `ios open <path>`                                | Opens an app path with the running app's scheme (`movies://` or `music://`), such as `/title/<id>` or `/jam/<link>`, and accepts iOS's `Open in` prompt |
 | `ios matrix --out DIR [--orientations portrait,landscape] [--screens a,b]` | Movies app only. Screenshots each screen a layout change reaches, in each orientation, as `<device>-<orientation>-<screen>.png` |
 | `ios timings [--runs N] [--out DIR] [--record]`  | Times N cold launches, each opening the records `timing_opens` names twice, then prints each metric's median, spread, and hitched samples from the `App.*` records the server received, and both machines' load; `--record` also records the screen to check the marks against (see [App timings](#app-timings)) |
-| `ios force-error fatal\|rejection\|synthetic\|bundle` | Throws from a timer in the running app, leaves a promise rejection unhandled, rejects with a made-up name and stack, or rejects from inside the bundle's module loader, through Metro's inspector, to check what the app reports |
+| `ios force-error fatal\|rejection\|synthetic\|bundle\|forged` | Throws from a timer in the running app, leaves a promise rejection unhandled, rejects with a made-up name and stack, rejects from inside the bundle's module loader, or rejects with six look-alikes of an SDK error, through Metro's inspector, to check what the app reports |
 | `ios down`                                       | Removes this side's simulator, Metro, and forwards      |
 
 Read labels from `ios describe` before you tap; never guess coordinates. A label is the whole
@@ -540,12 +540,15 @@ code: its class from a fixed list, the route pattern from the app's route list, 
 `{ source, line, column }`. The `fatal` and `rejection` errors' text names a made-up person, title,
 file, and server (`PRIVATE` in `app-force-error.mjs`); `synthetic` renames its error to a made-up
 person and puts a title, a file, and a host in its stack (`SYNTHETIC`); `$S cli -- logs --grep
-<word> --json` finds none of them. `bundle` rejects from inside Metro's module loader, so its top
-frames are positions in the bundle: `$S cli -- logs --grep Client.error --json | node
-scripts/symbolicate.mjs <map>` turns them into source lines, with Metro's map of the bundle it
-served (the bundle's address with `.map` in place of `.bundle`) or, for a release build,
-`main.jsbundle.map` from `scripts/ios-release-bundle.sh` at the release's tag. A report goes out
-only under the account that was signed in when it happened; a sign-out or another account drops it.
+<word> --json` finds none of them. `forged` rejects with six look-alikes of an SDK error, each with
+an SDK tag and its own request id (`FORGED`): its reports name them `NotAnError`, `Other`, or
+`TypeError`, never `TransportError`, and the log holds none of the ids. `bundle` rejects from inside
+Metro's module loader, so its top frames are positions in the bundle: `$S cli -- logs --grep
+Client.error --json | node scripts/symbolicate.mjs <map>` turns them into source lines, with Metro's
+map of the bundle it served (the bundle's address with `.map` in place of `.bundle`) or, for a
+release build, `main.jsbundle.map` from `scripts/ios-release-bundle.sh` at the release's tag. A
+report goes out only under the account that was signed in when it happened; a sign-out or another
+account drops it.
 
 ### Hardware paths
 

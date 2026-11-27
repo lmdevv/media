@@ -1181,7 +1181,7 @@ cmd_ios() {
     matrix) ios_matrix "${args[@]:1}" ;;
     timings) ios_timings "${args[@]:1}" ;;
     force-error)
-      node "$scripts/app-force-error.mjs" "$(read_state metro_port)" "${args[1]:?ios force-error fatal|rejection|synthetic|bundle}" ;;
+      node "$scripts/app-force-error.mjs" "$(read_state metro_port)" "${args[1]:?ios force-error fatal|rejection|synthetic|bundle|forged}" ;;
     down) ios_down ;;
     *) die "ios: unknown command ${sub:-<none>}" ;;
   esac
