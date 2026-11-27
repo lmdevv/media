@@ -12,7 +12,9 @@ evidence of where it ran.
 - `hw-decode` decodes a source the device can't play: generated HEVC 8-bit SDR for an H.264-only
   browser.
 - `hw-deinterlace` makes the interlaced MPEG-2 version progressive.
-- `hw-scale` scales the 818-line H.264 version down to a 480-line quality cap.
+- `hw-scale` scales the 818-line H.264 version down to a 480-line quality cap, and
+  `scale-variable-rate` a generated phone-style MP4 (4 s at 60 fps, then 12 s at 15 fps) down to
+  240 lines, through to its last segment.
 - `hw-hdr-to-sdr` maps the HDR10 HEVC version to BT.709 SDR for an SDR browser.
 - `hw-burn-in` draws the DVD (image) subtitle track into the picture.
 - `hw-encode-h264`, `hw-encode-hevc`, and `hw-encode-av1` encode for a device that plays only that
@@ -74,7 +76,11 @@ Preconditions:
   per cell (`side stage row path verdict evidence measured cell`), and `grid.json` the same as JSON.
   - `PASS`: the output is right and the stage ran on that path.
   - `FAIL`: the stream broke, the output is wrong (size, rate, timeline, tags, picture), or the
-    stage ran somewhere else, such as in software on a GPU path. The evidence names which.
+    stage ran somewhere else, such as in software on a GPU path. The evidence names which. Every
+    transcode cell also checks that each frame of the start and the seek shows the source's picture
+    for its time (`picture-time`) and that the sound starts where the source's does there
+    (`audio-start`). A check that could not measure (thumbnails or ffprobe that came back empty or
+    failed, a frame length it can't know) fails with `could not measure` and the reason.
   - `NOT-BUILT`: the service answered correctly but did not do the stage: it refused with a reason
     the row lists (`no-transcode-target`), or the output lacks the stage (combing left in, H.264
     where only HEVC plays).
@@ -97,7 +103,8 @@ Preconditions:
   records for the session. Beside it are the bytes served (`start.mp4`, `seek.mp4`), ffprobe's
   JSON, `negotiate.json`, `ffmpeg-watch.txt`, `service-log.jsonl`, and the stage's own analysis:
   `idet.txt`; `picture.txt` with `output-240.png`; or `output-108.png`, `source-108.png`, and
-  `changed-108.png` (the pixels the subtitle changed).
+  `changed-108.png` (the pixels the subtitle changed). `timing.txt` has each fetch's frame counts
+  against the source and the first frames that failed, with how far their best match lies.
 - **Add a row.** A stage, a path, or a hybrid row (a CPU decode feeding a GPU encode, say) is an
   entry in `scripts/hardware-matrix.mjs`. A hybrid row's id starts with `hybrid-`, and its `work`
   pins the operation that runs elsewhere (`decode: "cpu"`); that operation is judged by the run's
@@ -110,6 +117,50 @@ Preconditions:
   films' frames, at a few MB each.
 
 ## Gotchas
+
+- `picture-time` judges every frame of a fetch alone, against the source frame shown at its time
+  (96x28 gray thumbnails of the top 70 % of the picture, through the reference tone map for an
+  HDR row). That source frame is flat (gray levels spreading under 1), pictured (10 or more), or
+  too faint to place (between: a fade, where the GPU tone maps render the Feature Test's opening
+  near black while the CPU does not). Over a pictured frame the output must correlate 0.7 or more
+  with it within a frame of the source's rate, and within 0.01 of its best match within 3 s; over a
+  flat frame it must not show a picture; a too-faint frame is not judged. One failing frame per
+  fetch is tolerated, wherever it falls. Only pictured frames carry timing, so a fetch whose source
+  is pictured in under 60 % of its frames is `could not measure`: black from end to end is no
+  evidence. The evidence says how many were pictured, flat, too faint, and failed.
+  - The margin of 10 is measured: on 8,160 served frames of every path, the highest source spread
+    at which an output showed no correlatable picture was 6.78 (both GPU tone maps in that fade;
+    the CPU 2.25, the plain scales 0.52 at most).
+  - The share of 60 % is measured too: every row's start and seek fetches are pictured in 90 % of
+    their frames or more (the least, the burn-in seek at 104 s, 90 to 93 %, with a dim stretch; the
+    rest 100 %).
+  - The Feature Test rows start at 36 s: its first 4 s are a black opening and a fade with no
+    pictured frame, while from 36 to 42 s every frame of every version is pictured, the dimmest at
+    a spread of 42.9 (the HDR10 version through the reference tone map; 59.9 in the others). It is
+    a plain start at that position, on the 4 s segment grid, and no row's seek. Position 0 stays
+    covered by the rows whose generated fixtures are pictured from their first frame (spreads 49 to
+    63): `decode`, `hybrid-cpu-decode`, `hybrid-cpu-tone-map`, and `scale-variable-rate`.
+  - Left alone, ffmpeg 7.1's Quick Sync filters hold a first picture for 41 frames (Matroska,
+    1.7 s) to 666 (the Feature Test's MP4, 27.7 s) with every timestamp right, which the other
+    checks pass.
+- `audio-start` measures the served sound against the source's own track at the fetch's position
+  (the stream negotiation chose): it must start by the time the source sounds at the first picture,
+  and no earlier than the source sounds at the first decoded video packet (the muxer cuts there when
+  the encoder reorders, at most four frames before the picture), within one audio frame of its
+  codec and sample rate (1024 samples for AAC). A source whose track starts late passes when the
+  output keeps that delay.
+- What the two checks do not judge, each shown by a made-up case fed to them:
+  - `picture-time` places a picture by how well it matches, so a picture that barely changes (a
+    still, or a small marker moving on a still background) matches at every offset and hides one.
+    The rows' stretches move enough: with the frame-rate restatement stripped from the Quick Sync
+    chain, all four affected cells fail on the 40-frame hold.
+  - It does not judge tone. An output crushed to nearly one gray level still matches its source
+    and passes, and a shape fainter than a spread of 10 over a black source passes.
+  - A variable-rate source whose last picture lasts past the end of the fetch reads `could not
+    measure` for the frames under it.
+  - `audio-start` reads a gap inside the source's audio from its packets' durations, which an MP4
+    can state across the gap, and takes an Opus frame for 20 ms. The rows negotiate AAC from
+    sources whose audio has no gap.
 
 - ffmpeg 7.1, the image's, writes an empty sample dependency box (`sdtp`) into a fragmented
   stream's init segment for an encoder that marks pictures disposable (libx265's non-reference

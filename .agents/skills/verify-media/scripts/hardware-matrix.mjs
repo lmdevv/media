@@ -41,6 +41,17 @@ export const VERDICTS = ["PASS", "FAIL", "NOT-BUILT", "SKIPPED"];
 
 const FEATURE_TEST = "/media/library/Movies/[movies] Feature Test (2010)/[movies] Feature Test (2010)";
 
+/**
+ * Where the rows that play the Feature Test start: past its black opening and fade-in (0 to 4 s),
+ * where no frame is pictured, so no check can place one in time. From 36 s to 42 s every frame of
+ * each of its versions is pictured, the dimmest at a gray-level spread of 42.9 (the HDR10 version
+ * through the reference tone map; 59.9 in the others), over four times the margin of 10. It is on
+ * the 4 s segment grid, and no row's seek. Position 0 stays covered by the rows whose generated
+ * fixtures are pictured from their first frame: decode, hybrid-cpu-decode, hybrid-cpu-tone-map, and
+ * scale-variable-rate.
+ */
+export const FEATURE_TEST_START = 36;
+
 /** Where the generated fixtures live in a side's container (`up` mounts the side's state there). */
 export const FIXTURE_ROOT = "/media/verify-fixtures";
 
@@ -50,7 +61,8 @@ export const FIXTURE_LIBRARY = "Verify fixtures";
 /**
  * What the cells play. A `library` fixture is a version of a demo library title; a `generate`
  * fixture is made at run time with the side's own ffmpeg into the side's state, mounted at
- * FIXTURE_ROOT, from `args` (the inputs and encode, without the output file).
+ * FIXTURE_ROOT, from `args` (the inputs and encode, without the output file), in Matroska unless
+ * `format` names another container.
  */
 export const FIXTURES = {
   "sdr-h264": {
@@ -117,6 +129,22 @@ export const FIXTURES = {
         ["-c:v", "libx265", "-preset", "ultrafast", "-pix_fmt", "yuv420p10le"],
         ["-x265-params", "keyint=48:min-keyint=48:scenecut=0:log-level=error"],
         ["-color_primaries", "bt2020", "-color_trc", "arib-std-b67", "-colorspace", "bt2020nc", "-c:a", "aac", "-b:a", "128k"],
+      ].flat(),
+    },
+  },
+  "vfr-h264": {
+    about: "H.264 640x360 in MP4 at a variable frame rate, as a phone records: 4 s at 60 fps then 12 s at 15 fps, with a tone, generated; ffprobe reads a base rate of 60 and an average of 26.25",
+    generate: {
+      title: "Verify Fixture Variable Rate",
+      year: 2026,
+      file: "Verify Fixture Variable Rate (2026).mp4",
+      format: "mp4",
+      args: [
+        ["-f", "lavfi", "-i", "testsrc2=size=640x360:rate=60:duration=4"],
+        ["-f", "lavfi", "-i", "testsrc2=size=640x360:rate=15:duration=12"],
+        ["-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=16"],
+        ["-filter_complex", "[0:v][1:v]concat=n=2:v=1:a=0[v]", "-map", "[v]", "-map", "2:a"],
+        ["-fps_mode", "vfr", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-b:a", "128k"],
       ].flat(),
     },
   },
@@ -241,8 +269,9 @@ export const REFERENCE_TONE_MAP =
   "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p";
 
 /**
- * The rows: one per stage, then hybrid rows, whose `work` fixes an operation to another path than
- * the cell's. `start` and `seek` are where the two fetches begin, in seconds, and `span` how much
+ * The rows: one per stage, a stage's row for a kind of source (`<stage>-<source>`, such as a
+ * variable frame rate), then hybrid rows, whose `work` fixes an operation to another path than the
+ * cell's. `start` and `seek` are where the two fetches begin, in seconds, and `span` how much
  * each covers. `request` adds negotiation options (`quality`, `burnInSubtitle`). `work` maps each
  * operation to where it must run: `path` (the cell's own) or a fixed path, for a hybrid row.
  * `notBuilt` lists the UnsupportedPlayback reasons that mean the service does not do the stage.
@@ -275,7 +304,7 @@ export const ROWS = [
     fixture: "interlaced-mpeg2",
     profile: "h264-sdr",
     request: {},
-    start: 0,
+    start: FEATURE_TEST_START,
     seek: 60,
     span: 4,
     work: { deinterlace: "path" },
@@ -294,7 +323,7 @@ export const ROWS = [
     fixture: "sdr-h264",
     profile: "h264-sdr",
     request: { quality: { maxHeight: 480 } },
-    start: 0,
+    start: FEATURE_TEST_START,
     seek: 120,
     span: 4,
     work: { scale: "path" },
@@ -308,13 +337,33 @@ export const ROWS = [
     ],
   },
   {
+    id: "scale-variable-rate",
+    stage: "scale",
+    paths: ALL_PATHS,
+    fixture: "vfr-h264",
+    profile: "h264-sdr",
+    request: { quality: { maxHeight: 240 } },
+    start: 0,
+    seek: 8,
+    span: 6,
+    work: { scale: "path" },
+    notBuilt: [],
+    checks: [
+      { check: "scaled", maxHeight: 240 },
+      { check: "dimensions", expect: "negotiated" },
+      { check: "aspect", tolerance: 0.01 },
+      { check: "codec", codec: "h264", stage: false },
+      { check: "frame-rate", expect: ["base"] },
+    ],
+  },
+  {
     id: "hdr-to-sdr",
     stage: "hdr-to-sdr",
     paths: ALL_PATHS,
     fixture: "hdr10-hevc",
     profile: "h264-sdr",
     request: {},
-    start: 0,
+    start: FEATURE_TEST_START,
     seek: 240,
     span: 4,
     work: { "tone-map": "path" },
@@ -336,7 +385,7 @@ export const ROWS = [
     fixture: "image-subtitles",
     profile: "h264-sdr",
     request: { burnInSubtitle: "e13" },
-    start: 0,
+    start: FEATURE_TEST_START,
     seek: 104,
     span: 6,
     work: { overlay: "path" },
@@ -355,7 +404,7 @@ export const ROWS = [
     fixture: "sdr-h264",
     profile: "h264-sdr",
     request: { quality: { maxBitrate: 4_000_000 } },
-    start: 0,
+    start: FEATURE_TEST_START,
     seek: 120,
     span: 4,
     work: { "encode-h264": "path" },
@@ -376,7 +425,7 @@ export const ROWS = [
     fixture: "sdr-h264",
     profile: "hevc-sdr",
     request: {},
-    start: 0,
+    start: FEATURE_TEST_START,
     seek: 120,
     span: 4,
     work: { "encode-hevc": "path" },
@@ -397,7 +446,7 @@ export const ROWS = [
     fixture: "sdr-h264",
     profile: "av1-sdr",
     request: {},
-    start: 0,
+    start: FEATURE_TEST_START,
     seek: 120,
     span: 4,
     work: { "encode-av1": "path" },
@@ -459,6 +508,8 @@ export const COMMON_CHECKS = [
   { check: "duration", tolerance: 1 },
   { check: "timeline" },
   { check: "keyframes" },
+  { check: "picture-time", frames: 1, minMatch: 0.7, tolerance: 0.01, flat: 1, pictured: 10, share: 0.6 },
+  { check: "audio-start" },
 ];
 
 /** Every cell of the table: one per row and path, in grid order. */
@@ -492,7 +543,8 @@ const known = (value) => (value === undefined || value === "unknown" || value ==
 
 /**
  * The first video stream of `ffprobe -show_streams -show_format -of json`, as the checks read it:
- * codec, profile, size, bit depth, colour tags, field order, frame rate, and the file's duration.
+ * codec, profile, size, bit depth, colour tags, field order, frame rate (the average, and the base
+ * rate ffmpeg gives an encode), and the file's duration.
  */
 export const parseProbe = (json) => {
   const parsed = typeof json === "string" ? JSON.parse(json) : json;
@@ -511,6 +563,7 @@ export const parseProbe = (json) => {
     space: known(video.color_space),
     fieldOrder: known(video.field_order),
     fps: rate(video.avg_frame_rate) ?? rate(video.r_frame_rate),
+    baseFps: rate(video.r_frame_rate),
     duration: number(parsed.format?.duration) ?? number(video.duration),
   };
 };
@@ -566,6 +619,181 @@ export const parseSignalstats = (text) => {
   const means = Object.fromEntries(Object.entries(sums).map(([name, sum]) => [name, sum / counts[name]]));
   return Object.keys(means).length === 0 ? undefined : { ...means, frames: counts.YAVG ?? 0 };
 };
+
+/** How far a picture's time may be searched from where the playlist puts it, in seconds. */
+export const TIMING_WINDOW = 3;
+
+/**
+ * The thumbnails the picture-time check compares: 96x28 gray, the top 70 % of the picture, where a
+ * burned-in subtitle never is. `showinfo` after them prints each one's time.
+ */
+export const THUMBNAIL = { width: 96, height: 28, filter: "scale=96:40,crop=96:28:0:0,format=gray,showinfo" };
+
+/**
+ * Raw gray thumbnails (`THUMBNAIL.filter`, `-f rawvideo`) with the times `showinfo` printed for
+ * them, in order: `{ pts, spread, pixels }`, `spread` the standard deviation of their gray levels
+ * and the pixels less their mean and scaled to unit length, so that two thumbnails' dot product is
+ * their correlation. A thumbnail of one gray level has no pixels.
+ */
+export const parseThumbnails = (raw, log, { width, height } = THUMBNAIL) => {
+  const size = width * height;
+  const times = [...String(log).matchAll(/Parsed_showinfo_\d+[^\n]*\bn:\s*\d+[^\n]*\bpts_time:\s*(-?[\d.]+)/g)].map((match) => Number(match[1]));
+  const count = Math.min(times.length, Math.floor(raw.length / size));
+  return Array.from({ length: count }, (_, index) => {
+    const bytes = raw.subarray(index * size, (index + 1) * size);
+    let mean = 0;
+    for (const value of bytes) mean += value;
+    mean /= size;
+    const pixels = new Float32Array(size);
+    let norm = 0;
+    for (let at = 0; at < size; at += 1) {
+      pixels[at] = bytes[at] - mean;
+      norm += pixels[at] * pixels[at];
+    }
+    if (norm === 0) return { pts: times[index], spread: 0, pixels: undefined };
+    const scale = 1 / Math.sqrt(norm);
+    for (let at = 0; at < size; at += 1) pixels[at] *= scale;
+    return { pts: times[index], spread: Math.sqrt(norm / size), pixels };
+  });
+};
+
+const correlation = (a, b) => {
+  let sum = 0;
+  for (let at = 0; at < a.length; at += 1) sum += a[at] * b[at];
+  return sum;
+};
+
+/**
+ * Judges every output thumbnail against the source's, one rule for each frame: it must show the
+ * source's picture for its time, within `allowance` seconds. The source frame shown at its time is
+ * one of three things by its own gray levels' spread: `flat` (under `flat`), pictured (`pictured`
+ * or more: enough contrast that a right output can't be flat), or too faint to place (between,
+ * such as a fade, where two near-black renderings of the same frame can fall either side of any
+ * threshold). Over a pictured source frame, an output frame passes when the best of the source's
+ * pictured frames shown within the allowance correlates at least `minMatch` and within `tolerance`
+ * of its best match anywhere within `window` seconds, or when it is flat where a source frame
+ * within the allowance is flat too (a cut); a flat one fails as `flat`, any other as `another`
+ * time's picture. Over a flat source frame it passes unless it is pictured without matching a
+ * pictured source frame within the allowance (`pictured`). A frame over a too-faint source frame is
+ * not judged either way, and one no source frame is shown for within the allowance (the source's
+ * thumbnails stop short, or none came back) cannot be. Returns the frame count, how many could not
+ * be judged, how many were over a pictured, a flat, and a too-faint source frame, and each frame
+ * that failed: its time, how, and how far away the source's best match lies (negative: the picture
+ * comes late).
+ */
+export const judgeFrames = (output, source, { window, allowance, minMatch, tolerance, flat, pictured }) => {
+  const spreadOf = (frame) => (frame.pixels === undefined ? 0 : (frame.spread ?? Number.POSITIVE_INFINITY));
+  const isFlat = (frame) => spreadOf(frame) < flat;
+  const isPictured = (frame) => spreadOf(frame) >= pictured;
+  const gaps = source.slice(1).map((frame, index) => frame.pts - source[index].pts).sort((a, b) => a - b);
+  const lastShown = gaps.length === 0 ? 0 : gaps[gaps.length >> 1];
+  const until = (index) => source[index + 1]?.pts ?? source[index].pts + lastShown;
+  const firstAfter = (time) => {
+    let low = 0;
+    let high = source.length;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if (until(middle) <= time + 0.001) low = middle + 1;
+      else high = middle;
+    }
+    return low;
+  };
+  const shownWithin = (from, to) => {
+    const found = [];
+    for (let index = firstAfter(from); index < source.length && source[index].pts < to + 0.001; index += 1) found.push(source[index]);
+    return found;
+  };
+  const failed = [];
+  let unjudged = 0;
+  let faint = 0;
+  let flatSource = 0;
+  let picturedSource = 0;
+  for (const frame of output) {
+    const near = shownWithin(frame.pts - allowance, frame.pts + allowance);
+    const [shown] = shownWithin(frame.pts, frame.pts);
+    if (near.length === 0 || shown === undefined) {
+      unjudged += 1;
+      continue;
+    }
+    if (!isFlat(shown) && !isPictured(shown)) {
+      faint += 1;
+      continue;
+    }
+    if (isPictured(shown)) picturedSource += 1;
+    else flatSource += 1;
+    const score = (match) => (frame.pixels === undefined || !isPictured(match) ? -1 : correlation(frame.pixels, match.pixels));
+    const nearest = Math.max(...near.map(score));
+    let best = { score: nearest, at: frame.pts };
+    for (const match of shownWithin(frame.pts - window, frame.pts + window)) {
+      const value = score(match);
+      if (value > best.score) best = { score: value, at: match.pts };
+    }
+    const matches = nearest >= minMatch && nearest >= best.score - tolerance;
+    if (isPictured(shown)) {
+      if (matches || (isFlat(frame) && near.some(isFlat))) continue;
+      failed.push(
+        isFlat(frame)
+          ? { pts: frame.pts, how: "flat" }
+          : { pts: frame.pts, how: "another", by: best.at - frame.pts, score: nearest, best: best.score },
+      );
+    } else if (isPictured(frame) && !matches) {
+      failed.push({ pts: frame.pts, how: "pictured" });
+    }
+  }
+  return { frames: output.length, unjudged, pictured: picturedSource, flat: flatSource, faint, failed };
+};
+
+/**
+ * What the picture-time check reads of `judgeFrames`' result: how many frames, how many could not
+ * be judged, how many were over a pictured, a flat, and a too-faint source frame (only pictured
+ * ones carry timing), how many failed and how (`flat` where the source is pictured, `pictured`
+ * where it is flat, `another` time's picture), the first that failed, and how far the source's best
+ * match lies for the middle one of those showing another time's picture.
+ */
+export const frameTiming = (judged) => {
+  const how = (kind) => judged.failed.filter((frame) => frame.how === kind);
+  const offsets = how("another").map((frame) => frame.by).sort((a, b) => a - b);
+  return {
+    frames: judged.frames,
+    unjudged: judged.unjudged,
+    pictured: judged.pictured,
+    flat: judged.flat,
+    faint: judged.faint,
+    failed: judged.failed.length,
+    failures: { flat: how("flat").length, pictured: how("pictured").length, another: how("another").length },
+    first: judged.failed[0]?.pts,
+    by: offsets[offsets.length >> 1],
+  };
+};
+
+/** Samples in one frame of each audio codec the grid's outputs and sources carry. */
+const AUDIO_FRAME_SAMPLES = { aac: 1024, ac3: 1536, eac3: 1536, mp3: 1152, mp2: 1152, opus: 960, vorbis: 2048, dts: 512 };
+
+/** How long one frame of `codec` at `sampleRate` lasts, in seconds; undefined when unknown. */
+export const audioFrameSeconds = (codec, sampleRate) => {
+  const samples = AUDIO_FRAME_SAMPLES[codec];
+  const rate = Number(sampleRate);
+  return samples === undefined || !(rate > 0) ? undefined : samples / rate;
+};
+
+/**
+ * The earliest time at or after `time` that the audio `packets` (`{ pts, duration }`) sound: `time`
+ * itself inside a packet, else the next packet's start; undefined after the last. A packet without
+ * a duration lasts `frame`.
+ */
+export const soundFrom = (packets, time, frame) => {
+  let next;
+  for (const packet of packets) {
+    if (!Number.isFinite(packet.pts)) continue;
+    const lasts = packet.duration > 0 ? packet.duration : frame;
+    if (packet.pts <= time + 0.001 && time < packet.pts + lasts) return time;
+    if (packet.pts > time && (next === undefined || packet.pts < next)) next = packet.pts;
+  }
+  return next;
+};
+
+/** The most frames before its first picture that an encoder here decodes the first one, at the source's rate. */
+const REORDER_FRAMES = 4;
 
 /**
  * A media playlist: its init segment's URI and each segment's index, start, duration, and URI, all
@@ -875,6 +1103,86 @@ export const CHECKS = {
       return ok("every segment starts on a keyframe");
     },
   },
+  // Every frame of each fetch against the source's picture for its time: left alone, Quick Sync's
+  // filters on ffmpeg 7.1 hold a first picture for 41 to 666 frames, every timestamp in place.
+  "picture-time": {
+    class: "output",
+    run: (obs, params) => {
+      const said = [];
+      for (const fetch of fetchesOf(obs)) {
+        const timing = obs.analysis?.timing?.[fetch.name];
+        const expected = (fetch.frames ?? []).length;
+        if (timing === undefined) return no(`could not measure: the ${fetch.name} picture was not compared with the source`);
+        if (timing.error !== undefined) return no(`could not measure the ${fetch.name} picture: ${timing.error}`);
+        if (expected === 0 || timing.frames !== expected) {
+          return no(`could not measure: thumbnails of ${timing.frames} of the ${fetch.name} output's ${expected} frames`);
+        }
+        if (timing.unjudged > 0) {
+          return no(`could not measure: the source's thumbnails reach ${timing.frames - timing.unjudged} of the ${fetch.name} output's ${timing.frames} frames`);
+        }
+        const counts = `${timing.pictured} pictured, ${timing.flat} flat, ${timing.faint} too faint of ${timing.frames}; ${timing.failed} failed`;
+        if (timing.pictured < params.share * timing.frames) {
+          return no(`could not measure: the source is pictured under ${fmt(params.share * 100, 0)}% of the ${fetch.name} output's frames (${counts})`);
+        }
+        if (timing.failed > params.frames) {
+          const how = [
+            timing.failures.flat > 0 ? `${timing.failures.flat} flat where the source shows a picture` : undefined,
+            timing.failures.pictured > 0 ? `${timing.failures.pictured} showing a picture where the source is flat` : undefined,
+            timing.failures.another > 0
+              ? `${timing.failures.another} showing another time's picture (typically ${fmt(Math.abs(timing.by), 3)} s ${timing.by < 0 ? "earlier" : "later"})`
+              : undefined,
+          ].filter(Boolean);
+          return no(`${timing.failed} of the ${fetch.name} output's ${timing.frames} frames do not show the source's picture for their time, from ${fmt(timing.first, 3)} s: ${how.join(", ")} (${counts})`);
+        }
+        said.push(`${fetch.name} ${counts}`);
+      }
+      return ok(`frames showing the source's picture for their time: ${said.join("; ")}`);
+    },
+  },
+  // Each fetch's sound starts where the source's does at that position, within an audio frame of its
+  // codec and sample rate: by the time the source sounds at the first picture, and no earlier than the
+  // source sounds at the first decoded video packet, where the muxer cuts a fragment when the encoder
+  // reorders pictures (at most REORDER_FRAMES before the picture).
+  "audio-start": {
+    class: "output",
+    run: (obs) => {
+      const said = [];
+      const rate = obs.source?.baseFps ?? obs.source?.fps;
+      const negotiated = obs.negotiation?.body?.audio;
+      for (const fetch of fetchesOf(obs)) {
+        const audio = fetch.audio;
+        const source = fetch.sourceAudio;
+        const first = fetch.frames?.[0]?.pts;
+        if (negotiated === undefined || negotiated === null) {
+          if (audio !== undefined) return no(`the ${fetch.name} output has audio no negotiation asked for`);
+          said.push(`${fetch.name} none, as negotiated`);
+          continue;
+        }
+        if (audio === undefined) return no(`the ${fetch.name} output has no audio`);
+        const frame = audioFrameSeconds(audio.codec, audio.sampleRate);
+        if (frame === undefined) return no(`could not measure: the ${fetch.name} audio's frame length (${audio.codec} at ${audio.sampleRate} Hz)`);
+        if (source?.error !== undefined) return no(`could not measure the source's audio at the ${fetch.name}: ${source.error}`);
+        const sourceFrame = audioFrameSeconds(source?.codec, source?.sampleRate);
+        if (first === undefined || !Number.isFinite(fetch.firstDecoded) || !(rate > 0) || sourceFrame === undefined) {
+          return no(`could not measure: the ${fetch.name} output's first picture, its first decoded packet, or the source's audio`);
+        }
+        const cut = Math.max(fetch.firstDecoded, first - REORDER_FRAMES / rate);
+        const latest = soundFrom(source.packets, first, sourceFrame);
+        const earliest = soundFrom(source.packets, cut, sourceFrame);
+        if (latest === undefined || earliest === undefined) return no(`could not measure: the source has no sound at or after the ${fetch.name}'s ${fmt(first, 3)} s`);
+        const lead = audio.start - first;
+        const offset = `${fetch.name} audio starts ${fmt(Math.abs(lead) * 1000, 0)} ms ${lead < 0 ? "before" : "after"} its first picture`;
+        if (audio.start > latest + frame + 0.001) {
+          return no(`the ${offset}, where the source sounds ${fmt((latest - first) * 1000, 0)} ms after it`);
+        }
+        if (audio.start < earliest - frame - 0.001) {
+          return no(`the ${offset}, before the source sounds there (${fmt((earliest - first) * 1000, 0)} ms)`);
+        }
+        said.push(`${fetch.name} ${lead >= 0 ? "+" : ""}${fmt(lead * 1000, 0)} ms (source ${latest - first >= 0 ? "+" : ""}${fmt((latest - first) * 1000, 0)})`);
+      }
+      return ok(`audio starts where the source's does: ${said.join(", ")}`);
+    },
+  },
   codec: {
     class: "output",
     run: (obs, params) =>
@@ -943,7 +1251,7 @@ export const CHECKS = {
     class: "output",
     run: (obs, params) => {
       const source = obs.source?.fps;
-      const allowed = params.expect.map((kind) => (kind === "double" ? source * 2 : source));
+      const allowed = params.expect.map((kind) => ({ double: source * 2, base: obs.source?.baseFps })[kind] ?? source);
       for (const fetch of fetchesOf(obs)) {
         const fps = measuredFps(fetch.frames ?? []);
         if (!allowed.some((want) => near(fps, want, want * 0.01))) {
@@ -1144,10 +1452,12 @@ export const judge = (cell, obs) => {
   if (elsewhere) return { verdict: "FAIL", evidence: `${elsewhere.name}: ${elsewhere.evidence}`, checks };
   const media = outputMedia(obs);
   const shown = checks.filter((check) => check.class === "stage" && check.name !== "codec").map((check) => check.evidence);
+  // What the picture check found pictured, flat, too faint, and failed, so a PASS says what it covered.
+  const timed = checks.filter((check) => check.name === "picture-time").map((check) => check.evidence);
   const work = checks.find((check) => check.name === "work");
   const fps = measuredFps(obs.fetches.seek.frames);
   const output = `${media.codec} ${media.profile ?? ""} ${media.width}x${media.height} ${media.bitDepth}-bit ${fmt(fps)} fps`;
-  return { verdict: "PASS", evidence: [output.replace(/\s+/g, " "), ...shown, work.evidence].join("; "), checks };
+  return { verdict: "PASS", evidence: [output.replace(/\s+/g, " "), ...shown, ...timed, work.evidence].join("; "), checks };
 };
 
 // ----------------------------------------------------------------------------------------- grid

@@ -44,6 +44,22 @@ export const VIDEO_OPS: ReadonlyArray<Row> = [...CPU_ROWS, ...INTEL_ROWS];
 /** What the transcoder knows about each GPU domain besides its rows. A backend adds its entry. */
 export const DOMAINS: Readonly<Record<GpuDomain, DomainSpec>> = { qsv: QSV, vaapi: VAAPI };
 
+/** The ffmpeg filter the renderer restates the frame rate with (`video-render.ts`). */
+export const RATE_FILTER = "fps";
+
+/**
+ * Whether a row doing `op` in `on` with `rendering` runs a processing filter of a domain whose
+ * filters leave durations untrusted (`DomainSpec.filterDurations`): filters, and neither a decoder
+ * nor a move. The renderer restates the frame rate after the last such step, so each needs
+ * `RATE_FILTER` from the build as well as its own filters.
+ */
+export const leavesUntrustedDurations = (on: Domain, op: Op, rendering: Rendering): boolean =>
+  on !== "cpu" &&
+  DOMAINS[on].filterDurations === "untrusted" &&
+  rendering.filters.length > 0 &&
+  !Op.$is("Decode")(op) &&
+  !Op.$is("Move")(op);
+
 /** GPU domains in the order `HARDWARE_ACCELERATION=auto` prefers them. */
 export const GPU_PREFERENCE: ReadonlyArray<GpuDomain> = ["qsv", "vaapi"];
 
@@ -234,6 +250,10 @@ const build = (
     if (use === undefined) return Rejection.Refused({ impl: entry.id, frame });
     const key = capabilityKey(entry.id, use.variant);
 
+    const needs: ReadonlyArray<BuildFeature> = leavesUntrustedDurations(entry.on, op, use.rendering)
+      ? [...use.needs, `filter:${RATE_FILTER}`]
+      : use.needs;
+
     if (Checks.$is("Evidence")(checks)) {
       if (snapshot.excluded.has(entry.id)) return Rejection.Excluded({ impl: entry.id });
 
@@ -243,7 +263,7 @@ const build = (
       });
 
       if (!exempt && !snapshot.verified.has(key)) {
-        return Rejection.NotVerified({ key, on: entry.on, needs: use.needs });
+        return Rejection.NotVerified({ key, on: entry.on, needs });
       }
     }
 
@@ -263,7 +283,7 @@ const build = (
       op,
       on: entry.on,
       capability: key,
-      needs: use.needs,
+      needs,
       input: frame,
       output,
       rendering: use.rendering,

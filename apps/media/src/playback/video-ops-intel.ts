@@ -46,6 +46,12 @@ const SURFACE_DEPTHS: ReadonlySet<number> = new Set([8, 10]);
  * Quick Sync on `QSV_DEVICE`, derived from a VA-API device (`va`) on that render node. With oneVPL
  * builds `qsv=hw:<path>` ignores the path and opens the default GPU; the VA-API device names the
  * node, so a missing one fails, as it should, and Quick Sync's decoder reads through it.
+ *
+ * Its processing filters (`vpp_qsv`, `scale_qsv`, `deinterlace_qsv`, `overlay_qsv`, all built on
+ * libavfilter's `qsvvpp`) time their output in 1/frame rate, but ffmpeg 7.1.x, Debian's in the
+ * image, then copies each input frame's duration over in the input's time base (FFmpeg 578ac59887,
+ * in 7.1 through 7.1.5; 8.0 has the fix, bc991ca048). A 24 fps MP4 counted in 1/12288 s then has
+ * frames 512 ticks long, so ffmpeg's constant-rate output shows its first picture for 21 s.
  */
 export const QSV: DomainSpec = {
   device: (config) => config.qsvDevice,
@@ -58,13 +64,15 @@ export const QSV: DomainSpec = {
     "hw",
   ],
   needs: ["hwaccel:qsv", "hwaccel:vaapi"],
+  filterDurations: "untrusted",
 };
 
-/** VA-API on `VAAPI_DEVICE`. */
+/** VA-API on `VAAPI_DEVICE`. Its filters keep frames' durations in their timestamps' time base. */
 export const VAAPI: DomainSpec = {
   device: (config) => config.vaapiDevice,
   deviceArgs: (device) => ["-init_hw_device", `vaapi=va:${device}`, "-filter_hw_device", "va"],
   needs: ["hwaccel:vaapi"],
+  filterDurations: "trusted",
 };
 
 const decodeProbes: ReadonlyArray<ProbeCase<"Decode">> = DECODE_CLIPS.map((clip) => ({
