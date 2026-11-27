@@ -5,6 +5,7 @@ import {
   Cache,
   Clock,
   Context,
+  Data,
   Duration,
   Effect,
   Exit,
@@ -12,6 +13,7 @@ import {
   Layer,
   Option,
   Path,
+  Ref,
   Schema,
   Semaphore,
   Stream,
@@ -59,17 +61,17 @@ export interface Interface {
     width: Option.Option<ArtworkWidth>,
   ) => Effect.Effect<ArtworkImage, ArtworkNotFound | ArtworkUnavailable>;
   /**
-   * A music cover the server holds, resized so its shorter side is `size`, since every cover is
-   * drawn as a square crop, and written as `format`. `fingerprint` names the file's content, and
-   * the copy is kept under it with the other resized artwork, within `CACHE_MAX_MB`. Fails when
-   * ffmpeg finds any error in the cover, so a damaged cover is never copied.
+   * What to serve for a music cover the server holds asked at `size`: its copy, with the shorter
+   * side resized to `size`, since every cover is drawn as a square crop, and written as `format`,
+   * or the stored cover. `fingerprint` names the file's content; the copy is kept under it with the
+   * other resized artwork, within `CACHE_MAX_MB`.
    */
-  readonly resizeCover: (
+  readonly coverCopy: (
     file: string,
     fingerprint: string,
     size: CoverSize,
     format: CoverFormat,
-  ) => Effect.Effect<ArtworkImage, ArtworkUnavailable>;
+  ) => Effect.Effect<CoverCopy>;
 }
 
 /** The artwork store. */
@@ -117,65 +119,56 @@ class ArtworkDownloadTimedOut extends Schema.TaggedError<
 export type CoverFormat = "jpeg" | "png";
 
 /**
- * How a resize bounds an image by the requested size, and the file it writes. `width` bounds the
- * width, for movie artwork, which is drawn at its own shape; it rounds the height to an even
- * number of pixels, which can enlarge an image with an odd height by one row. `shorter` bounds the
- * shorter side, for a music cover, which is drawn as a square crop that then has the size each
- * way. It rounds the longer side to an even number of pixels, never past the cover's own size, and
- * scales with Lanczos, the sharpest of ffmpeg's filters, since a copy at a cell's exact size is
- * drawn pixel for pixel.
+ * What the art route serves for a music cover at a size. `Stored` is decided once per cover and
+ * size and remembered: the copy would not be smaller than the cover, or ffmpeg found an error in
+ * the cover. `Busy` is for this request alone: `MAX_COVER_COPIES` copies are already under way.
  */
-type Resize =
-  | { readonly bound: "width" }
-  | { readonly bound: "shorter"; readonly format: CoverFormat };
+export type CoverCopy = Data.TaggedEnum<{
+  Copy: { readonly image: ArtworkImage };
+  Stored: {};
+  Busy: {};
+}>;
+
+/** Constructors and matchers for `CoverCopy`. */
+export const CoverCopy = Data.taggedEnum<CoverCopy>();
+
+/**
+ * How many distinct music cover copies may be under way at once, two encoding and the rest
+ * waiting for an encoder. A first request past it gets the stored cover and makes no copy.
+ */
+const MAX_COVER_COPIES = 16;
 
 /** The longer side's even rounding of the shorter side's `scaled` size, at most `longer`. */
 const evenLonger = (scaled: string, longer: string, shorter: string) =>
   `min(${longer},2*floor((${scaled}*${longer}+${shorter})/(2*${shorter})))`;
 
-const shorterScale = (size: string) =>
-  `scale='if(gt(iw,ih),${evenLonger(`min(${size},ih)`, "iw", "ih")},min(${size},iw))'` +
-  `:'if(gt(iw,ih),min(${size},ih),${evenLonger(`min(${size},iw)`, "ih", "iw")})':flags=lanczos`;
-
 /**
- * The cache folder, file extension, content type, decoder options, filter, and encoder options of
- * `resize` at `size`. A music cover's decoder stops at the first error in the file, and its JPEG
- * keeps colour at every pixel (4:4:4): a small copy of a 4:2:0 cover would otherwise hold colour
- * at half its size, blurring saturated edges the original keeps when drawn as small.
+ * How a music cover's copy is written at `size`: its shorter side bounded by `size`, since a cover
+ * is drawn as a square crop that then has the size each way, and the longer side rounded to an
+ * even number of pixels, never past the cover's own size. It scales with Lanczos, the sharpest of
+ * ffmpeg's filters, since a copy at a cell's exact size is drawn pixel for pixel, and the JPEG keeps
+ * colour at every pixel (4:4:4): a small copy of a 4:2:0 cover would otherwise hold colour at half
+ * its size, blurring saturated edges the original keeps when drawn as small.
  */
-const plan = (resize: Resize, size: string) => {
-  if (resize.bound === "width") {
-    return {
-      folder: `w${size}`,
-      extension: "jpg",
-      contentType: "image/jpeg",
-      decoding: [],
-      filter: `scale='min(${size},iw)':-2`,
-      quality: ["-q:v", "3"],
-    };
-  }
+const coverPlan = (format: CoverFormat, size: string) => {
+  const scale =
+    `scale='if(gt(iw,ih),${evenLonger(`min(${size},ih)`, "iw", "ih")},min(${size},iw))'` +
+    `:'if(gt(iw,ih),min(${size},ih),${evenLonger(`min(${size},iw)`, "ih", "iw")})':flags=lanczos`;
 
-  return resize.format === "jpeg"
+  return format === "jpeg"
     ? {
-        folder: `s${size}`,
         extension: "jpg",
         contentType: "image/jpeg",
-        decoding: ["-err_detect", "explode"],
-        filter: shorterScale(size),
+        filter: scale,
         quality: ["-pix_fmt", "yuvj444p", "-q:v", "3"],
       }
     : {
-        folder: `s${size}`,
         extension: "png",
         contentType: "image/png",
-        decoding: ["-err_detect", "explode"],
-        filter: `premultiply=inplace=1,${shorterScale(size)},unpremultiply=inplace=1`,
+        filter: `premultiply=inplace=1,${scale},unpremultiply=inplace=1`,
         quality: [],
       };
 };
-
-const timeToLive = (exit: Exit.Exit<unknown, unknown>): Duration.Duration =>
-  Exit.isSuccess(exit) ? Duration.minutes(5) : Duration.zero;
 
 const contentTypeOf = (path: string): string =>
   CONTENT_TYPES.get(path.split(".").at(-1)?.toLowerCase() ?? "") ?? "application/octet-stream";
@@ -283,27 +276,19 @@ const make = Effect.gen(function* () {
     });
   });
 
-  const resizeFile = Effect.fn("ArtworkStore.resize")(function* (
+  const resize = Effect.fn("ArtworkStore.resize")(function* (
     file: string,
     fingerprint: string,
-    size: ArtworkWidth | CoverSize,
-    resize: Resize,
+    width: ArtworkWidth,
   ) {
-    // Each bound keeps its copies in its own folder, so the same file never answers both.
-    const { folder, extension, contentType, decoding, filter, quality } = plan(
-      resize,
-      String(size),
-    );
+    const target = path.join(directory, `w${String(width)}`, `${hash(fingerprint)}.jpg`);
 
-    const target = path.join(directory, folder, `${hash(fingerprint)}.${extension}`);
-    const image: ArtworkImage = { path: target, contentType };
-
-    if (yield* cached(target)) return image;
+    if (yield* cached(target)) return target;
 
     yield* fs
       .makeDirectory(path.dirname(target), { recursive: true })
       .pipe(Effect.mapError((cause) => new ArtworkUnavailable({ cause })));
-    const temporary = `${target}.${(yield* Clock.currentTimeNanos).toString(36)}.part.${extension}`;
+    const temporary = `${target}.${(yield* Clock.currentTimeNanos).toString(36)}.part.jpg`;
 
     yield* resizes.withPermits(1)(
       tools
@@ -313,14 +298,14 @@ const make = Effect.gen(function* () {
           "-v",
           "error",
           "-y",
-          ...decoding,
           "-i",
           file,
           "-vf",
-          filter,
+          `scale='min(${String(width)},iw)':-2`,
           "-frames:v",
           "1",
-          ...quality,
+          "-q:v",
+          "3",
           temporary,
         ])
         .pipe(Effect.mapError((cause) => new ArtworkUnavailable({ cause }))),
@@ -330,27 +315,8 @@ const make = Effect.gen(function* () {
       .rename(temporary, target)
       .pipe(Effect.mapError((cause) => new ArtworkUnavailable({ cause })));
 
-    return image;
+    return target;
   });
-
-  // Concurrent requests for one copy share a single ffmpeg run. Nothing outlives that run, so each
-  // later request finds the copy on disk again, or makes it again after the cache pruner removed it.
-  const copies = yield* Cache.makeWith(
-    ([file, fingerprint, size, resize]: readonly [
-      string,
-      string,
-      ArtworkWidth | CoverSize,
-      Resize,
-    ]) => resizeFile(file, fingerprint, size, resize),
-    { capacity: 2048, timeToLive: () => Duration.zero },
-  );
-
-  const resizeImage = (
-    file: string,
-    fingerprint: string,
-    size: ArtworkWidth | CoverSize,
-    resize: Resize,
-  ) => Cache.get(copies, [file, fingerprint, size, resize] as const);
 
   const images = yield* Cache.makeWith(
     ([key, width]: readonly [string, Option.Option<ArtworkWidth>]) =>
@@ -362,15 +328,111 @@ const make = Effect.gen(function* () {
 
         if (Option.isNone(width)) return { path: file, contentType: contentTypeOf(file) };
 
-        return yield* resizeImage(file, fingerprint, width.value, { bound: "width" });
+        return { path: yield* resize(file, fingerprint, width.value), contentType: "image/jpeg" };
       }),
-    { capacity: 2048, timeToLive },
+    {
+      capacity: 2048,
+      timeToLive: (exit) => (Exit.isSuccess(exit) ? Duration.minutes(5) : Duration.zero),
+    },
+  );
+
+  /** How many cover copies are under way, encoding or waiting for an encoder. */
+  const underWay = yield* Ref.make(0);
+
+  /**
+   * Encodes `file`'s copy to `target`, which it keeps only when it is smaller than the cover.
+   * Otherwise, and when ffmpeg finds an error in the cover, it deletes the output and writes the
+   * `marker` that answers later requests with the stored cover.
+   */
+  const encodeCover = Effect.fnUntraced(function* (
+    file: string,
+    target: string,
+    marker: string,
+    plan: ReturnType<typeof coverPlan>,
+  ): Effect.fn.Return<CoverCopy> {
+    const temporary = `${target}.${(yield* Clock.currentTimeNanos).toString(36)}.part.${plan.extension}`;
+
+    const smaller = yield* Effect.gen(function* () {
+      yield* fs.makeDirectory(path.dirname(target), { recursive: true });
+      yield* resizes.withPermits(1)(
+        tools.ffmpeg([
+          "-hide_banner",
+          "-nostdin",
+          "-v",
+          "error",
+          "-y",
+          // Stop at the first error in the cover, so a damaged cover is never copied.
+          "-err_detect",
+          "explode",
+          "-i",
+          file,
+          "-vf",
+          plan.filter,
+          "-frames:v",
+          "1",
+          ...plan.quality,
+          temporary,
+        ]),
+      );
+      const [copy, cover] = yield* Effect.all([fs.stat(temporary), fs.stat(file)]);
+
+      if (copy.size >= cover.size) return false;
+      yield* fs.rename(temporary, target);
+
+      return true;
+    }).pipe(
+      Effect.catch((cause) =>
+        Effect.logWarning("ArtworkStore.cover_copy_failed", cause).pipe(Effect.as(false)),
+      ),
+    );
+
+    if (smaller) return CoverCopy.Copy({ image: { path: target, contentType: plan.contentType } });
+    yield* fs.remove(temporary, { force: true }).pipe(Effect.ignore);
+    yield* fs.writeFile(marker, new Uint8Array(0)).pipe(Effect.ignore);
+
+    return CoverCopy.Stored();
+  });
+
+  const cover = Effect.fn("ArtworkStore.cover")(function* (
+    file: string,
+    fingerprint: string,
+    size: CoverSize,
+    format: CoverFormat,
+  ): Effect.fn.Return<CoverCopy> {
+    const plan = coverPlan(format, String(size));
+    const name = path.join(directory, `s${String(size)}`, hash(fingerprint));
+    const target = `${name}.${plan.extension}`;
+
+    if (yield* cached(target)) {
+      return CoverCopy.Copy({ image: { path: target, contentType: plan.contentType } });
+    }
+
+    if (yield* cached(`${name}.stored`)) return CoverCopy.Stored();
+
+    const admitted = yield* Ref.modify(underWay, (copies) =>
+      copies < MAX_COVER_COPIES ? [true, copies + 1] : [false, copies],
+    );
+
+    if (!admitted) return CoverCopy.Busy();
+
+    return yield* encodeCover(file, target, `${name}.stored`, plan).pipe(
+      Effect.ensuring(Ref.update(underWay, (copies) => copies - 1)),
+    );
+  });
+
+  // Concurrent requests for one copy share a single ffmpeg run and one place under the bound.
+  // Nothing outlives that run, so each later request finds the copy or the marker on disk again,
+  // or makes it again after the cache pruner removed it.
+  const covers = yield* Cache.makeWith(
+    ([file, fingerprint, size, format]: readonly [string, string, CoverSize, CoverFormat]) =>
+      cover(file, fingerprint, size, format),
+    { capacity: 2048, timeToLive: () => Duration.zero },
   );
 
   return Service.of({
     image: (key, width) => Cache.get(images, [key, width] as const),
-    resizeCover: (file, fingerprint, size, format) =>
-      resizeImage(file, fingerprint, size, { bound: "shorter", format }),
+    coverCopy: (file, fingerprint, size, format) =>
+      Cache.get(covers, [file, fingerprint, size, format] as const),
   });
 });
 

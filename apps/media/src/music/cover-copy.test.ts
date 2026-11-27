@@ -1,12 +1,19 @@
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { Effect } from "effect";
+import { beforeAll, describe, expect, it } from "vitest";
 
 import { coverKind } from "./cover-copy.ts";
+import * as Files from "./music-files.ts";
 import {
   adobeSegment,
+  beforeJpegEnd,
+  beforePngEnd,
+  beforeSecondScan,
   exifOrientation,
+  iccSegment,
+  jpegProfile,
+  jpegSegment,
   pngChunk,
   SRGB_CHUNKS,
   withChunks,
@@ -16,37 +23,84 @@ import { PNG } from "./testing/music-fixtures.ts";
 
 const COVERS = join(import.meta.dirname, "..", "testing", "fixtures", "covers");
 
-const cover = (name: string) => new Uint8Array(readFileSync(join(COVERS, name)));
+const NAMES = [
+  "photo.jpg",
+  "progressive.jpg",
+  "adobe-rgb.jpg",
+  "profiled.jpg",
+  "rotated.jpg",
+  "soft-alpha.png",
+  "transparent.png",
+  "photo.png",
+  "gray.jpg",
+  "gray-profiled.jpg",
+  "cmyk.jpg",
+  "palette.png",
+  "gamma.png",
+  "animated.png",
+  "animated.gif",
+  "animated.webp",
+  "alpha.webp",
+  "exif-after-data.png",
+] as const;
 
-const photo = cover("photo.jpg");
+const fixtures = new Map<string, Uint8Array>();
 
-const soft = cover("soft-alpha.png");
+/** The fixture cover named `name`, read before the tests run. */
+const cover = (name: (typeof NAMES)[number]) => fixtures.get(name) ?? new Uint8Array();
 
-/** Where a JPEG's image data starts: its first start-of-scan segment ends here. */
-const scanEnd = (jpeg: Uint8Array) => {
-  const at = Buffer.from(jpeg).indexOf(Buffer.from([0xff, 0xda]));
+let photo: Uint8Array = new Uint8Array();
 
-  return at + 2 + ((jpeg[at + 2] ?? 0) << 8) + (jpeg[at + 3] ?? 0);
-};
+let soft: Uint8Array = new Uint8Array();
+
+let photoPng: Uint8Array = new Uint8Array();
+
+beforeAll(async () => {
+  const files = await Effect.runPromise(
+    Effect.forEach(NAMES, (name) => Files.readWholeFile(join(COVERS, name))),
+  );
+
+  NAMES.forEach((name, index) => fixtures.set(name, files[index] ?? new Uint8Array()));
+  photo = cover("photo.jpg");
+  soft = cover("soft-alpha.png");
+  photoPng = cover("photo.png");
+});
+
+/** The kind of the cover whose whole file is `bytes`. */
+const kindOf = (bytes: Uint8Array) =>
+  Effect.runSync(
+    coverKind(bytes.length, (offset, length) =>
+      Effect.succeed(bytes.subarray(offset, offset + length)),
+    ),
+  );
+
+const exif = (orientation: number) => exifOrientation(orientation);
 
 describe("coverKind", () => {
   it("names each kind a copy is proven for", () => {
-    expect(coverKind(photo)).toBe("jpeg");
-    expect(coverKind(cover("progressive.jpg"))).toBe("jpeg");
-    expect(coverKind(withSegment(photo, 0xee, adobeSegment(1)))).toBe("jpeg");
-    expect(coverKind(cover("adobe-rgb.jpg"))).toBe("jpeg-profiled");
-    expect(coverKind(cover("profiled.jpg"))).toBe("jpeg-profiled");
-    expect(coverKind(cover("rotated.jpg"))).toBe("jpeg-oriented");
-    expect(coverKind(withSegment(photo, 0xe1, exifOrientation(1)))).toBe("jpeg");
-    expect(coverKind(withSegment(cover("adobe-rgb.jpg"), 0xe1, exifOrientation(8)))).toBe(
-      "jpeg-oriented",
-    );
-    expect(coverKind(soft)).toBe("png-alpha");
-    expect(coverKind(withChunks(soft, SRGB_CHUNKS))).toBe("png-alpha");
-    expect(coverKind(cover("transparent.png"))).toBe("png-alpha");
-    expect(coverKind(PNG)).toBe("png-alpha");
-    expect(coverKind(cover("photo.png"))).toBe("png-opaque");
-    expect(coverKind(withChunks(cover("photo.png"), SRGB_CHUNKS))).toBe("png-opaque");
+    expect(kindOf(photo)).toBe("jpeg");
+    expect(kindOf(cover("progressive.jpg"))).toBe("jpeg");
+    expect(kindOf(withSegment(photo, 0xee, adobeSegment(1)))).toBe("jpeg");
+    expect(kindOf(cover("adobe-rgb.jpg"))).toBe("jpeg-profiled");
+    expect(kindOf(cover("profiled.jpg"))).toBe("jpeg-profiled");
+    expect(kindOf(cover("rotated.jpg"))).toBe("jpeg-oriented");
+    expect(kindOf(withSegment(photo, 0xe1, exif(1)))).toBe("jpeg");
+    expect(kindOf(withSegment(cover("adobe-rgb.jpg"), 0xe1, exif(8)))).toBe("jpeg-oriented");
+    expect(kindOf(soft)).toBe("png-alpha");
+    expect(kindOf(withChunks(soft, SRGB_CHUNKS))).toBe("png-alpha");
+    expect(kindOf(cover("transparent.png"))).toBe("png-alpha");
+    expect(kindOf(photoPng)).toBe("png-opaque");
+    expect(kindOf(withChunks(photoPng, SRGB_CHUNKS))).toBe("png-opaque");
+  });
+
+  it("keeps a kind past text, comments, and tables after the image data", () => {
+    const text = pngChunk("tEXt", Buffer.from("Comment\0after the data", "latin1"));
+    const comment = jpegSegment(0xfe, Buffer.from("after the scan", "latin1"));
+
+    expect(kindOf(beforePngEnd(photoPng, [text]))).toBe("png-opaque");
+    expect(kindOf(beforePngEnd(soft, [text]))).toBe("png-alpha");
+    expect(kindOf(beforeJpegEnd(photo, comment))).toBe("jpeg");
+    expect(kindOf(beforeSecondScan(cover("progressive.jpg"), comment))).toBe("jpeg");
   });
 
   it("names every other cover unproven", () => {
@@ -63,33 +117,58 @@ describe("coverKind", () => {
       withSegment(photo, 0xee, adobeSegment(0)),
       withSegment(photo, 0xe2, Buffer.from("MPF\0II*\0", "latin1")),
       withSegment(photo, 0xe3, Buffer.from("Meta", "latin1")),
-      withSegment(withSegment(photo, 0xe1, exifOrientation(6)), 0xe1, exifOrientation(6)),
-      withSegment(photo, 0xe1, exifOrientation(9)),
+      withSegment(withSegment(photo, 0xe1, exif(6)), 0xe1, exif(6)),
+      withSegment(photo, 0xe1, exif(9)),
       withChunks(soft, SRGB_CHUNKS.slice(1)),
-      withChunks(cover("photo.png"), [pngChunk("tRNS", Uint8Array.of(0, 255, 0, 0, 0, 255))]),
+      withChunks(photoPng, [pngChunk("tRNS", Uint8Array.of(0, 255, 0, 0, 0, 255))]),
       withChunks(soft, [pngChunk("iCCP", Buffer.from("x\0\0", "latin1"))]),
-      withChunks(soft, [pngChunk("eXIf", exifOrientation(6).subarray(6))]),
+      withChunks(soft, [pngChunk("eXIf", exif(6).subarray(6))]),
       withChunks(soft, [pngChunk("sRGB", Uint8Array.of(0)), pngChunk("sRGB", Uint8Array.of(0))]),
+      // A 1x1 PNG whose image data runs past the length its chunk states.
+      PNG,
       new Uint8Array([0x42, 0x4d, 0, 0]),
       new Uint8Array(),
     ];
 
-    expect(unproven.map(coverKind)).toEqual(unproven.map(() => "unproven"));
+    expect(unproven.map(kindOf)).toEqual(unproven.map(() => "unproven"));
   });
 
-  it("names a cover unproven when its head ends anywhere before its image data", () => {
-    const jpegs = [photo, cover("adobe-rgb.jpg"), cover("rotated.jpg")];
-    const idat = Buffer.from(soft).indexOf("IDAT") - 4;
+  it("names a cover unproven when anything after its image data can change the picture", () => {
+    const profile = jpegProfile(cover("adobe-rgb.jpg"));
+    const turned = jpegSegment(0xe1, exif(6));
+    const profiled = jpegSegment(0xe2, iccSegment(profile));
 
-    for (const jpeg of jpegs) {
-      const cuts = Array.from({ length: scanEnd(jpeg) }, (_, length) => jpeg.subarray(0, length));
+    const trailing = [
+      // The third verifier's 800x400 RGB PNG with an orientation after its image data.
+      cover("exif-after-data.png"),
+      beforePngEnd(photoPng, [pngChunk("eXIf", exif(6).subarray(6))]),
+      beforePngEnd(soft, [pngChunk("eXIf", exif(6).subarray(6))]),
+      beforePngEnd(photoPng, [pngChunk("iCCP", Buffer.from("x\0\0", "latin1"))]),
+      beforePngEnd(soft, [pngChunk("sRGB", Uint8Array.of(0))]),
+      Buffer.concat([photoPng, Buffer.from("after the end", "latin1")]),
+      beforeJpegEnd(photo, turned),
+      beforeJpegEnd(photo, profiled),
+      beforeJpegEnd(cover("adobe-rgb.jpg"), turned),
+      beforeJpegEnd(cover("rotated.jpg"), profiled),
+      beforeSecondScan(cover("progressive.jpg"), turned),
+      Buffer.concat([photo, Buffer.from("after the end", "latin1")]),
+      Buffer.concat([photo, withSegment(photo, 0xe1, exif(6))]),
+    ];
 
-      expect(cuts.map(coverKind).filter((kind) => kind !== "unproven")).toEqual([]);
+    expect(trailing.map(kindOf)).toEqual(trailing.map(() => "unproven"));
+  });
+
+  it("names a cover unproven when its file ends anywhere before its end", () => {
+    for (const file of [photo, cover("progressive.jpg"), cover("rotated.jpg"), soft, photoPng]) {
+      // Every length through the headers, then every 211th, and the last few bytes.
+      const lengths = Array.from({ length: file.length }, (_, length) => length).filter(
+        (length) => length < 1024 || length % 211 === 0 || length > file.length - 16,
+      );
+
+      expect(lengths.filter((length) => kindOf(file.subarray(0, length)) !== "unproven")).toEqual(
+        [],
+      );
     }
-
-    const cuts = Array.from({ length: idat + 8 }, (_, length) => soft.subarray(0, length));
-
-    expect(cuts.map(coverKind).filter((kind) => kind !== "unproven")).toEqual([]);
   });
 
   it("names a PNG unproven when any byte of a chunk before its image data is changed", () => {
@@ -104,6 +183,6 @@ describe("coverKind", () => {
       return bytes;
     });
 
-    expect(changed.map(coverKind).filter((kind) => kind === "png-alpha")).toEqual([]);
+    expect(changed.map(kindOf).filter((kind) => kind === "png-alpha")).toEqual([]);
   });
 });

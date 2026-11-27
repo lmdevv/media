@@ -14,7 +14,10 @@ import {
   MusicStreamProfile,
 } from "@media/contracts/music-playback";
 import {
+  Cache,
+  Duration,
   Effect,
+  Exit,
   FileSystem,
   Layer,
   Option,
@@ -33,13 +36,14 @@ import { realPathInsideApprovedRoots } from "../playback/file-resolver.ts";
 import * as PlaybackToken from "../playback/playback-grants.ts";
 import { artPath, imageContentType, isArtHash } from "./art-store.ts";
 import { contentTypeFor, isBrowserPlayable } from "./audio-format.ts";
-import { COPIED_KINDS, COVER_HEAD_BYTES, coverKind } from "./cover-copy.ts";
+import { COPIED_KINDS, coverKind } from "./cover-copy.ts";
 import { isFragmentedProfile } from "./ffmpeg-args.ts";
 import * as Files from "./music-files.ts";
 import {
   fileResponse,
   finishedResponse,
   offsetResponse,
+  openFileResponse,
   transcodedResponse,
 } from "./music-responses.ts";
 import * as TrackSources from "./track-sources.ts";
@@ -92,6 +96,24 @@ export const layer: Layer.Layer<
     const tokens = yield* PlaybackToken.Service;
     const gate = yield* ArtworkGate.Service;
     const store = yield* ArtworkStore.Service;
+
+    // A cover's kind, by its content hash, which names the same bytes for good.
+    const kinds = yield* Cache.makeWith(
+      (hash: string) =>
+        Effect.gen(function* () {
+          const path = artPath(config.dataDir, hash);
+          const info = yield* Files.statPath(path);
+
+          return yield* coverKind(info.size, (offset, length) =>
+            Files.readAt(path, offset, length),
+          );
+        }),
+      {
+        capacity: 4096,
+        timeToLive: (exit) => (Exit.isSuccess(exit) ? Duration.infinity : Duration.zero),
+      },
+    );
+
     const sources = yield* TrackSources.Service;
 
     const transcoder = yield* MusicTranscoder.Service;
@@ -313,39 +335,47 @@ export const layer: Layer.Layer<
 
       const path = artPath(config.dataDir, hash);
       const size = width.success;
-      const head = yield* Files.readHead(path, Option.isNone(size) ? 16 : COVER_HEAD_BYTES);
-      const original = { path, contentType: imageContentType(head) };
-      const kind = Option.isNone(size) ? "unproven" : coverKind(head);
+      const contentType = imageContentType(yield* Files.readHead(path, 16));
+      const kind = Option.isNone(size) ? "unproven" : yield* Cache.get(kinds, hash);
 
-      // A copy only when it takes fewer bytes than the cover; the cover itself when it cannot be made.
-      const image =
+      // The art store names a cover by its content hash, so the hash alone names each copy.
+      const answer =
         Option.isNone(size) || kind === "unproven"
-          ? original
-          : yield* Effect.gen(function* () {
-              // The art store names a cover by its content hash, so the hash alone names each copy.
-              const copy = yield* store.resizeCover(
-                path,
-                `music-art:${hash}`,
-                size.value,
-                COPIED_KINDS[kind],
-              );
+          ? undefined
+          : yield* store.coverCopy(path, `music-art:${hash}`, size.value, COPIED_KINDS[kind]);
 
-              const [copied, stored] = yield* Effect.all([
-                Files.statPath(copy.path),
-                Files.statPath(path),
-              ]);
+      // Open before answering: the copy's bytes then survive a prune before the body ends, and a
+      // copy pruned before this serves the stored cover.
+      const copy =
+        answer !== undefined && ArtworkStore.CoverCopy.$is("Copy")(answer)
+          ? answer.image
+          : undefined;
 
-              return copied.size < stored.size ? copy : original;
-            }).pipe(
-              Effect.catch((error) =>
-                Effect.logWarning("MusicRoutes.art_copy_failed", error).pipe(Effect.as(original)),
+      const copied =
+        copy === undefined
+          ? Option.none()
+          : yield* fs.open(copy.path).pipe(
+              Effect.flatMap((file) =>
+                openFileResponse(request, file, {
+                  contentType: copy.contentType,
+                  sessionEnded: undefined,
+                }),
               ),
+              Effect.option,
             );
 
-      return yield* fileResponse(request, image.path, {
-        contentType: image.contentType,
-        sessionEnded: undefined,
-      }).pipe(Effect.map(HttpServerResponse.setHeader("cache-control", ART_CACHE_CONTROL)));
+      const response = Option.isSome(copied)
+        ? copied.value
+        : yield* fileResponse(request, path, { contentType, sessionEnded: undefined });
+
+      // The stored cover served only because too many copies were under way is asked for again.
+      return HttpServerResponse.setHeader(
+        response,
+        "cache-control",
+        answer !== undefined && ArtworkStore.CoverCopy.$is("Busy")(answer)
+          ? "no-store"
+          : ART_CACHE_CONTROL,
+      );
     }).pipe(
       Effect.catchTag("FileError", (error) =>
         error.missing

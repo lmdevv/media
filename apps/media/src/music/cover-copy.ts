@@ -1,12 +1,9 @@
 import { crc32 } from "node:zlib";
 
-import type { CoverFormat } from "../artwork/artwork-store.ts";
+import { Effect } from "effect";
 
-/**
- * The bytes of a stored cover the art route reads to tell its kind: enough for the headers of any
- * common cover, ICC profiles included.
- */
-export const COVER_HEAD_BYTES = 1024 * 1024;
+import type { CoverFormat } from "../artwork/artwork-store.ts";
+import type { FileError } from "./music-files.ts";
 
 /**
  * The kinds of cover the art route resizes, each with the format of its copy. A kind is here only
@@ -131,22 +128,116 @@ const isCommonSampling = (luma: number, blue: number, red: number): boolean => {
 
 const R_G_B = [0x52, 0x47, 0x42];
 
+/** Reads up to `length` bytes of a cover from `offset`, fewer past its end. */
+export type ReadCover = (offset: number, length: number) => Effect.Effect<Uint8Array, FileError>;
+
+/** How much of a cover one read takes. */
+const BLOCK = 64 * 1024;
+
 /**
- * A JPEG's kind, from every segment before its image data. Only the segments named here are
- * read: any other marker, a second frame header or EXIF segment, or a segment cut off by the head
- * makes the cover `unproven`.
+ * `read` a block at a time: a range inside the block in hand comes from it, and any other starts a
+ * new block, so a walk reads each part of the file about once and holds one block.
  */
-const jpegKind = (head: Uint8Array): CoverKind => {
-  const view = viewOf(head);
+const blocks = (read: ReadCover): ReadCover => {
+  let start = 0;
+  let block: Uint8Array = new Uint8Array(0);
+
+  return (offset, length) =>
+    offset >= start && offset + length <= start + block.length
+      ? Effect.succeed(block.subarray(offset - start, offset - start + length))
+      : Effect.map(read(offset, Math.max(length, BLOCK)), (bytes) => {
+          start = offset;
+          block = bytes;
+
+          return bytes.subarray(0, length);
+        });
+};
+
+/** The kind a JPEG's frame and segments before its first scan describe. */
+interface JpegHeader {
+  readonly frame: Frame;
+  readonly orientation: number | undefined;
+  readonly profiled: boolean;
+  readonly transform: number | undefined;
+}
+
+const jpegHeaderKind = ({ frame, orientation, profiled, transform }: JpegHeader): CoverKind => {
+  if (frame.precision !== 8 || frame.components.length !== 3) return "unproven";
+
+  const ids = frame.components.map(({ id }) => id);
+
+  // YCbCr: Adobe's segment says so with transform 1; without it, ids R, G, B mean RGB.
+  const ycbcr =
+    transform === undefined ? ids.some((id, index) => id !== R_G_B[index]) : transform === 1;
+
+  const [luma = 0, blue = 0, red = 0] = frame.components.map(({ sampling }) => sampling);
+
+  if (!ycbcr || !isCommonSampling(luma, blue, red)) return "unproven";
+
+  if (orientation !== undefined && orientation !== 1) return "jpeg-oriented";
+
+  return profiled ? "jpeg-profiled" : "jpeg";
+};
+
+/** Tables, a restart interval, and a comment: segments that may sit between scans. */
+const BETWEEN_SCANS = new Set([0xc4, 0xdb, 0xdd, 0xfe]);
+
+/**
+ * Where the marker after `from` in a JPEG's coded data starts, past stuffed and restart bytes, or
+ * undefined at the end of the file without one.
+ */
+const nextMarker = Effect.fnUntraced(function* (
+  at: ReadCover,
+  from: number,
+): Effect.fn.Return<number | undefined, FileError> {
+  let position = from;
+
+  for (;;) {
+    const block = yield* at(position, BLOCK);
+    const found = block.indexOf(0xff);
+
+    if (block.length < 2) return undefined;
+
+    if (found === -1 || found === block.length - 1) {
+      position += Math.max(found, block.length - 1);
+      continue;
+    }
+
+    const next = block[found + 1] ?? 0;
+
+    // A stuffed 0xFF, a restart marker, or a fill byte belongs to the coded data.
+    if (next === 0x00 || (next >= 0xd0 && next <= 0xd7) || next === 0xff) {
+      position += found + 1;
+      continue;
+    }
+
+    return position + found;
+  }
+});
+
+/**
+ * A JPEG's kind, from every segment in the file. Before the first scan only the segments named here
+ * are read; between scans only tables, a restart interval, a comment, and further scans; and the
+ * end of image must end the file. ffmpeg reads an orientation or a profile anywhere before the end
+ * while viewers stop at the first scan, so any other marker, a second frame header or EXIF
+ * segment, or a segment cut off by the file's end makes the cover `unproven`.
+ */
+const jpegKind = Effect.fnUntraced(function* (
+  size: number,
+  at: ReadCover,
+): Effect.fn.Return<CoverKind, FileError> {
   let offset = 2;
   let frame: Frame | undefined;
   let orientation: number | undefined;
   let profiled = false;
   let transform: number | undefined;
+  let kind: CoverKind | undefined;
 
-  while (offset + 4 <= head.length) {
-    if (head[offset] !== 0xff) return "unproven";
-    const marker = head[offset + 1] ?? 0;
+  while (kind === undefined) {
+    const head = yield* at(offset, 4);
+
+    if (head[0] !== 0xff) return "unproven";
+    const marker = head[1] ?? 0;
 
     // A fill byte before a marker.
     if (marker === 0xff) {
@@ -154,32 +245,19 @@ const jpegKind = (head: Uint8Array): CoverKind => {
       continue;
     }
 
-    const end = offset + 2 + view.getUint16(offset + 2);
+    const end = offset + 2 + ((head[2] ?? 0) << 8) + (head[3] ?? 0);
 
-    if (end > head.length || end < offset + 4) return "unproven";
-    const payload = head.subarray(offset + 4, end);
+    if (head.length < 4 || end > size || end < offset + 4) return "unproven";
+    const payload = yield* at(offset + 4, end - offset - 4);
 
     switch (marker) {
-      // Start of scan: every segment that describes the picture came before it.
-      case 0xda: {
-        if (frame === undefined || frame.precision !== 8 || frame.components.length !== 3) {
-          return "unproven";
-        }
+      // Start of scan: every segment a viewer draws the picture from came before it.
+      case 0xda:
+        if (frame === undefined) return "unproven";
+        kind = jpegHeaderKind({ frame, orientation, profiled, transform });
 
-        const ids = frame.components.map(({ id }) => id);
-
-        // YCbCr: Adobe's segment says so with transform 1; without it, ids R, G, B mean RGB.
-        const ycbcr =
-          transform === undefined ? ids.some((id, index) => id !== R_G_B[index]) : transform === 1;
-
-        const [luma = 0, blue = 0, red = 0] = frame.components.map(({ sampling }) => sampling);
-
-        if (!ycbcr || !isCommonSampling(luma, blue, red)) return "unproven";
-
-        if (orientation !== undefined && orientation !== 1) return "jpeg-oriented";
-
-        return profiled ? "jpeg-profiled" : "jpeg";
-      }
+        if (kind === "unproven") return kind;
+        break;
 
       // Baseline, extended sequential, and progressive frames, Huffman coded.
       case 0xc0:
@@ -237,13 +315,31 @@ const jpegKind = (head: Uint8Array): CoverKind => {
     offset = end;
   }
 
-  return "unproven";
-};
+  // The coded data, and only tables, a comment, or another scan until the end of image.
+  for (;;) {
+    const marked = yield* nextMarker(at, offset);
+
+    if (marked === undefined) return "unproven";
+    const head = yield* at(marked, 4);
+    const marker = head[1] ?? 0;
+
+    if (marker === 0xd9) return marked + 2 === size ? kind : "unproven";
+
+    if (marker !== 0xda && !BETWEEN_SCANS.has(marker)) return "unproven";
+    const end = marked + 2 + ((head[2] ?? 0) << 8) + (head[3] ?? 0);
+
+    if (head.length < 4 || end > size || end < marked + 4) return "unproven";
+    offset = end;
+  }
+});
 
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
-/** Chunks that describe nothing a viewer draws: text, time, density, and background and bit hints. */
-const INERT_CHUNKS = new Set(["tEXt", "zTXt", "iTXt", "tIME", "pHYs", "bKGD", "sBIT"]);
+/** Chunks a viewer draws nothing from that may come only before the image data. */
+const BEFORE_DATA_CHUNKS = new Set(["pHYs", "bKGD", "sBIT"]);
+
+/** Text and time, which a viewer draws nothing from, before or after the image data. */
+const TEXT_CHUNKS = new Set(["tEXt", "zTXt", "iTXt", "tIME"]);
 
 /** RGBA, and RGB, which carries no transparent colour since `tRNS` is not among the chunks read. */
 const PNG_COLOUR_KINDS = new Map<number, CoverKind>([
@@ -258,69 +354,108 @@ const COLOUR_CHUNKS = new Map([
   ["cHRM", 32],
 ]);
 
+/** True when a chunk of `length` at `offset`, read whole, matches its CRC. */
+const crcMatches = Effect.fnUntraced(function* (
+  at: ReadCover,
+  offset: number,
+  length: number,
+): Effect.fn.Return<boolean, FileError> {
+  const chunk = yield* at(offset, 12 + length);
+
+  return (
+    chunk.length === 12 + length &&
+    crc32(chunk.subarray(4, 8 + length)) === viewOf(chunk).getUint32(8 + length)
+  );
+});
+
 /**
- * A PNG's kind, from its header and every chunk before its image data, each whole and with its
- * CRC. Only the chunks named here are read: any other makes the cover `unproven`.
+ * A PNG's kind, from every chunk in the file, walked by their lengths to `IEND`, which must end the
+ * file. Only the chunks named here are read, each in its place: the header first, colour chunks
+ * (with their CRC) and other inert chunks before the image data, which is one run of `IDAT`, and
+ * text after it. Any other chunk, wherever it sits, or a chunk cut off by the file's end makes the
+ * cover `unproven`: ffmpeg 9 turns a picture by an `eXIf` chunk even after the image data.
  */
-const pngKind = (head: Uint8Array): CoverKind => {
-  const view = viewOf(head);
+const pngKind = Effect.fnUntraced(function* (
+  size: number,
+  at: ReadCover,
+): Effect.fn.Return<CoverKind, FileError> {
   const seen = new Set<string>();
+  let header: Uint8Array | undefined;
+  let data: "before" | "in" | "after" = "before";
   let offset = PNG_SIGNATURE.length;
 
-  while (offset + 8 <= head.length) {
-    const length = view.getUint32(offset);
-    const type = ascii(head, offset + 4, 4);
+  for (;;) {
+    const head = yield* at(offset, 8);
 
-    if (type === "IDAT") {
+    if (head.length < 8) return "unproven";
+    const length = viewOf(head).getUint32(0);
+    const type = ascii(head, 4, 4);
+    const end = offset + 12 + length;
+
+    if (end > size) return "unproven";
+
+    if (header === undefined) {
+      if (type !== "IHDR" || length !== 13 || !(yield* crcMatches(at, offset, length))) {
+        return "unproven";
+      }
+
+      header = yield* at(offset + 8, 13);
+    } else if (type === "IDAT") {
+      if (data === "after") return "unproven";
+      data = "in";
+    } else if (type === "IEND") {
+      if (data === "before" || length !== 0 || end !== size) return "unproven";
+
       // 8-bit, deflate, adaptive filtering, not interlaced, at least a pixel each way.
+      const view = viewOf(header);
+
       const plain =
-        seen.has("IHDR") &&
-        view.getUint32(16) > 0 &&
-        view.getUint32(20) > 0 &&
-        head[24] === 8 &&
-        [0, 0, 0].every((byte, index) => head[26 + index] === byte);
+        view.getUint32(0) > 0 &&
+        view.getUint32(4) > 0 &&
+        header[8] === 8 &&
+        [0, 0, 0].every((byte, index) => header?.[10 + index] === byte);
 
       // Gamma or primaries alone carry colour ffmpeg's copy would not be drawn with.
       const srgb = seen.has("sRGB") || (!seen.has("gAMA") && !seen.has("cHRM"));
 
-      if (!plain || !srgb) return "unproven";
+      return plain && srgb ? (PNG_COLOUR_KINDS.get(header[9] ?? 0) ?? "unproven") : "unproven";
+    } else {
+      const colour = COLOUR_CHUNKS.get(type);
 
-      return PNG_COLOUR_KINDS.get(head[25] ?? 0) ?? "unproven";
+      const known =
+        TEXT_CHUNKS.has(type) ||
+        (data === "before" && BEFORE_DATA_CHUNKS.has(type)) ||
+        (data === "before" &&
+          colour === length &&
+          !seen.has(type) &&
+          (yield* crcMatches(at, offset, length)));
+
+      if (!known) return "unproven";
+
+      if (data === "in") data = "after";
     }
 
-    const end = offset + 12 + length;
-
-    if (
-      end > head.length ||
-      crc32(head.subarray(offset + 4, end - 4)) !== view.getUint32(end - 4)
-    ) {
-      return "unproven";
-    }
-
-    const first = offset === PNG_SIGNATURE.length;
-
-    const known =
-      type === "IHDR"
-        ? first && length === 13
-        : !first &&
-          (INERT_CHUNKS.has(type) || (COLOUR_CHUNKS.get(type) === length && !seen.has(type)));
-
-    if (!known) return "unproven";
     seen.add(type);
     offset = end;
   }
-
-  return "unproven";
-};
+});
 
 /**
- * The kind of the cover whose file starts with `head`: one of `COPIED_KINDS` when its header shows
- * it whole, or `unproven`, served as stored.
+ * The kind of the cover `read` gives, `size` bytes long: one of `COPIED_KINDS` when a walk of the
+ * whole file shows it as one, or `unproven`, served as stored.
  */
-export const coverKind = (head: Uint8Array): CoverKind => {
-  if (PNG_SIGNATURE.every((byte, index) => head[index] === byte)) return pngKind(head);
+export const coverKind = Effect.fnUntraced(function* (
+  size: number,
+  read: ReadCover,
+): Effect.fn.Return<CoverKind, FileError> {
+  const at = blocks(read);
+  const head = yield* at(0, 8);
 
-  if (head[0] === 0xff && head[1] === 0xd8) return jpegKind(head);
+  if (PNG_SIGNATURE.every((byte, index) => head[index] === byte)) {
+    return yield* pngKind(size, at);
+  }
+
+  if (head[0] === 0xff && head[1] === 0xd8) return yield* jpegKind(size, at);
 
   return "unproven";
-};
+});

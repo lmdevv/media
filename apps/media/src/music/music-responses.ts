@@ -79,25 +79,24 @@ const matchesEtag = (header: string, etag: string): boolean =>
   header.trim() === "*" ||
   header.split(",").some((candidate) => candidate.trim().replace(/^W\//u, "") === etag);
 
+/** A file to answer with: its size, its change time, and its bytes from an offset. */
+interface FileSource {
+  readonly size: number;
+  readonly mtimeMs: number;
+  readonly bytes: (offset: number, length: number) => Stream.Stream<Uint8Array, unknown>;
+}
+
 /**
- * Answers `request` with the file at `path`: `304` for a matching `If-None-Match`, `206` for a
- * byte range (honoured only when `If-Range` matches), `416` past the end, and the whole file
- * otherwise, with `ETag`, `Last-Modified`, and `Accept-Ranges`. Fails with `FileError` when the
- * file cannot be read; a missing one has `missing: true`.
+ * Answers `request` with `source`: `304` for a matching `If-None-Match`, `206` for a byte range
+ * (honoured only when `If-Range` matches), `416` past the end, and the whole file otherwise, with
+ * `ETag`, `Last-Modified`, and `Accept-Ranges`.
  */
-export const fileResponse = Effect.fn("MusicResponses.file")(function* (
+const sourceResponse = (
   request: HttpServerRequest.HttpServerRequest,
-  path: string,
+  source: FileSource,
   options: FileResponseOptions,
-) {
-  const fs = yield* FileSystem.FileSystem;
-  const info = yield* Files.statPath(path);
-
-  if (info.kind !== "file") {
-    return yield* new Files.FileError({ operation: "serve", path, missing: true, cause: null });
-  }
-
-  const { size, mtimeMs } = info;
+): HttpServerResponse.HttpServerResponse => {
+  const { size, mtimeMs } = source;
   const etag = etagOf(size, mtimeMs);
   const lastModified = new Date(Math.trunc(mtimeMs)).toUTCString();
 
@@ -123,9 +122,7 @@ export const fileResponse = Effect.fn("MusicResponses.file")(function* (
   const body = (status: number, offset: number, bytes: number, more: Record<string, string>) =>
     HttpServerResponse.stream(
       untilSessionEnds(
-        bytes === 0
-          ? Stream.empty
-          : fs.stream(path, { offset, bytesToRead: bytes, chunkSize: READ_CHUNK }),
+        bytes === 0 ? Stream.empty : source.bytes(offset, bytes),
         options.sessionEnded,
       ),
       {
@@ -146,6 +143,73 @@ export const fileResponse = Effect.fn("MusicResponses.file")(function* (
         headers: { ...headers, "content-range": `bytes */${size}` },
       }),
   });
+};
+
+/**
+ * Answers `request` with the file at `path` (`sourceResponse`). Fails with `FileError` when the
+ * file cannot be read; a missing one has `missing: true`.
+ */
+export const fileResponse = Effect.fn("MusicResponses.file")(function* (
+  request: HttpServerRequest.HttpServerRequest,
+  path: string,
+  options: FileResponseOptions,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const info = yield* Files.statPath(path);
+
+  if (info.kind !== "file") {
+    return yield* new Files.FileError({ operation: "serve", path, missing: true, cause: null });
+  }
+
+  return sourceResponse(
+    request,
+    {
+      size: info.size,
+      mtimeMs: info.mtimeMs,
+      bytes: (offset, length) =>
+        fs.stream(path, { offset, bytesToRead: length, chunkSize: READ_CHUNK }),
+    },
+    options,
+  );
+});
+
+/**
+ * Answers `request` with a file the caller opened (`sourceResponse`), read from the open handle, so
+ * the bytes are the file's even when its path is removed before the body ends.
+ */
+export const openFileResponse = Effect.fn("MusicResponses.open_file")(function* (
+  request: HttpServerRequest.HttpServerRequest,
+  file: FileSystem.File,
+  options: FileResponseOptions,
+) {
+  const info = yield* file.stat;
+
+  const bytes = (offset: number, length: number) =>
+    Stream.paginate({ offset, left: length }, ({ offset: at, left }) =>
+      file.readAlloc(Math.min(READ_CHUNK, left), { position: BigInt(at) }).pipe(
+        Effect.map((read) => {
+          const chunk = Option.getOrElse(read, () => new Uint8Array(0));
+          const rest = left - chunk.length;
+
+          return [
+            chunk.length === 0 ? [] : [chunk],
+            chunk.length === 0 || rest === 0
+              ? Option.none()
+              : Option.some({ offset: at + chunk.length, left: rest }),
+          ] as const;
+        }),
+      ),
+    );
+
+  return sourceResponse(
+    request,
+    {
+      size: Number(info.size),
+      mtimeMs: Option.match(info.mtime, { onNone: () => 0, onSome: (date) => date.getTime() }),
+      bytes,
+    },
+    options,
+  );
 });
 
 const OPENING_RANGE = /^bytes=0-1?$/u;

@@ -62,6 +62,8 @@ const makeLandscape = Effect.gen(function* () {
     "testsrc=size=1200x600",
     "-frames:v",
     "1",
+    "-q:v",
+    "1",
     file,
   ]);
 
@@ -181,12 +183,15 @@ describe("artwork store", () => {
 
           // A remote image's fingerprint is its URL, so both copies below share file and fingerprint.
           const poster = yield* store.image(key, Option.some(342));
-          const cover = yield* store.resizeCover(original.path, url, 336, "jpeg");
+          const cover = yield* store.coverCopy(original.path, url, 336, "jpeg");
           const posterAgain = yield* store.image(key, Option.some(342));
 
           assert.strictEqual(yield* sizeOf(poster.path), "342,172");
-          assert.strictEqual(yield* sizeOf(cover.path), "672,336");
-          assert.notStrictEqual(cover.path, poster.path);
+          assert.isTrue(ArtworkStore.CoverCopy.$is("Copy")(cover));
+
+          if (!ArtworkStore.CoverCopy.$is("Copy")(cover)) return;
+          assert.strictEqual(yield* sizeOf(cover.image.path), "672,336");
+          assert.notStrictEqual(cover.image.path, poster.path);
           assert.strictEqual(posterAgain.path, poster.path);
           assert.strictEqual(yield* sizeOf(posterAgain.path), "342,172");
         }),
