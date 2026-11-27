@@ -147,7 +147,8 @@ const TELL_RETRY_MS = { first: 5_000, last: 60_000 } as const;
 
 /**
  * The core's answers that refuse a removal for good. Asking again changes nothing until the app or
- * the server changes. Any other failure, such as `TransportError` or `RateLimited`, may pass.
+ * the server changes. Any other failure may pass: `TransportError`, `RateLimited`, or `Internal`,
+ * which the core answers when it fails while running the call.
  */
 const REFUSALS = [
   "Forbidden",
@@ -155,7 +156,6 @@ const REFUSALS = [
   "InvalidArgs",
   "Conflict",
   "Expired",
-  "Internal",
   "ProtocolError",
 ] as const;
 
@@ -410,7 +410,17 @@ export class DownloadEngine {
 
         for (const removal of removals) {
           clearRemoval(this.#options.disk, removal);
-          this.#removals.set(removal.folder, removal);
+
+          // A download of the same file that the core already counts, added after this removal,
+          // came from another build of the app, which told the core itself. Telling the core of
+          // the removal now would take that download's count away, and the next sync its files.
+          const outlived = known.downloads.some(
+            (download) =>
+              download.id === removal.id && download.added && download.addedAt > removal.stamp,
+          );
+
+          if (outlived) endRemoval(this.#options.disk, removal);
+          else this.#removals.set(removal.folder, removal);
         }
 
         for (const leftover of leftovers) this.#options.disk.remove(leftover);

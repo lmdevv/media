@@ -10,7 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { Conflict } from "@media/contracts/errors";
+import { Conflict, Internal } from "@media/contracts/errors";
 import type { PlatformSdk } from "@media/sdk/promise";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -780,6 +780,47 @@ describe("DownloadEngine", () => {
     expect(filesUnder(dune)).toContain(videoFile("mp4"));
   });
 
+  it("keeps a download another build added after an unanswered removal, and tells the core nothing of that removal", async () => {
+    keep([dune, arrival]);
+    core.lists([dune, arrival]);
+    const engine = launch();
+
+    engine.start();
+    await settle();
+    core.online = false;
+    await engine.remove(arrival);
+    await settle();
+    engine.dispose();
+
+    // Main's app runs over the same files: it frees Arrival on the core, downloads it again, and
+    // writes its row and its video. It knows nothing of the removal's folder and leaves it.
+    core.online = true;
+    core.lists([dune, arrival]);
+
+    const rows = readyStore([dune, arrival]).downloads.map((row) =>
+      Object.assign({}, row, {
+        hasFolder: undefined,
+        addedAt: row.id === arrival ? Date.now() + 1_000 : row.addedAt,
+      }),
+    );
+
+    writeFileSync(join(root, STORE_FILE), JSON.stringify({ downloads: rows, pendingProgress: [] }));
+    mkdirSync(join(root, arrival));
+    writeFileSync(join(root, itemPath(arrival, videoFile("mp4"))), "main's new copy");
+    const asked = core.calls.length;
+    const back = launch();
+
+    back.start();
+    await settle();
+    await settle();
+
+    expect(core.calls.slice(asked)).toStrictEqual([]);
+    expect(core.listing()).toStrictEqual([dune, arrival]);
+    expect(listed(back).toSorted()).toStrictEqual([`${arrival}:ready`, `${dune}:ready`]);
+    expect(filesUnder(arrival)).toContain(videoFile("mp4"));
+    expect(names(root).filter((name) => name.startsWith("removal+"))).toStrictEqual([]);
+  });
+
   it("tells the core about a removal made offline when the network comes back", async () => {
     keep([dune, arrival]);
     core.lists([dune, arrival]);
@@ -1268,6 +1309,24 @@ describe("DownloadEngine", () => {
 
       expect(core.calls).toStrictEqual([`remove:${arrival}`, `remove:${arrival}`]);
       expect(core.listing()).toStrictEqual([dune]);
+    });
+
+    it("keeps asking a core that failed while running the removal", async () => {
+      const engine = await removedOffline();
+
+      core.online = true;
+      core.refusal = new Internal({
+        message: "The server failed while running core/downloads:remove",
+      });
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(engine.getSnapshot().removalRefused).toBe(false);
+
+      core.refusal = null;
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(core.listing()).toStrictEqual([dune]);
+      expect(names(root)).toStrictEqual([dune, STORE_FILE]);
     });
 
     it("stops asking a core that refused it for good, says so, and asks again at the next launch", async () => {
