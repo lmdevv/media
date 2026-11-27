@@ -171,7 +171,8 @@ describe("withoutFailedPath", () => {
       }),
     );
 
-    // The media service encodes the first of HEVC, efficient AV1, and H.264 the client lists.
+    // The media service picks by its own order, not the list's: on a GPU HEVC, then AV1 where the
+    // client decodes it efficiently, then H.264; on the CPU H.264 while the client lists it.
     expect(
       everything.videoCodecs.map(({ codec, powerEfficient }) => [codec, powerEfficient]),
     ).toStrictEqual([

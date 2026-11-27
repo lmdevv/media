@@ -153,8 +153,9 @@ export const detectCapabilities = (support: MediaSupport): ClientCapabilities =>
 /**
  * The capabilities without the path that just failed, so renegotiating picks the next rung: a
  * failed direct file drops progressive playback, and a failed stream, copied or encoded, drops its
- * video codec, so a copy becomes an encode and an HEVC or AV1 encode becomes H.264. H.264 is never
- * dropped: it is the codec every encode falls back to. Null when nothing is left to drop.
+ * video codec, so a copy becomes an encode and an HEVC or AV1 encode becomes whichever codec the
+ * media service picks from the rest. H.264 is never dropped: it is the codec every encode falls
+ * back to. Null when nothing is left to drop.
  */
 export const withoutFailedPath = (
   capabilities: ClientCapabilities,

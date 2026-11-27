@@ -181,6 +181,9 @@ const frameRateOf = (rate: string | undefined): number | undefined => {
 /** A base rate this fast beside an average this slow counts a timestamp clock, not pictures. */
 const CLOCK_RATE = { base: 210, average: 70 } as const;
 
+/** No picture rate in use is faster; a base rate above it counts a timestamp clock at any average. */
+const FASTEST_PICTURE_RATE = 240;
+
 /**
  * The most frames a second ffprobe reports for `stream`: the larger of its average
  * (`avg_frame_rate`) and its base rate (`r_frame_rate`, the rate it finds the first pictures'
@@ -188,7 +191,8 @@ const CLOCK_RATE = { base: 210, average: 70 } as const;
  * its fast stretches: one with 4 s at 60 fps then 12 s at 15 fps averages 26.25, with a base rate
  * of 60. Neither reads a fast stretch that starts later (15 fps then 60 reads 15 and 26.25; in
  * Matroska the average repeats the base rate), so such a file is held to its slower rate. A
- * constant-rate stream reports the same rate twice.
+ * constant-rate stream reports the same rate twice. A base rate that counts a timestamp clock, as
+ * 1000 or 2000 for jittered timestamps, leaves the average.
  */
 const peakFrameRateOf = (stream: FfprobeStream): number | undefined => {
   const average = frameRateOf(stream.avg_frame_rate);
@@ -196,7 +200,10 @@ const peakFrameRateOf = (stream: FfprobeStream): number | undefined => {
 
   if (average === undefined || base === undefined) return average ?? base;
 
-  return base > CLOCK_RATE.base && average < CLOCK_RATE.average ? average : Math.max(average, base);
+  const clock =
+    base > FASTEST_PICTURE_RATE || (base > CLOCK_RATE.base && average < CLOCK_RATE.average);
+
+  return clock ? average : Math.max(average, base);
 };
 
 const bitDepthOf = (stream: FfprobeStream): number => {

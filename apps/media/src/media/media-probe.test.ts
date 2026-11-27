@@ -71,6 +71,17 @@ describe("parseFfprobeJson", () => {
         29.97,
         0.001,
       );
+      // Jittered timestamps on a fast stream: the base rate is their clock, far above any picture rate.
+      assert.approximately(
+        (yield* frameRateOf({ avg_frame_rate: "80000/687", r_frame_rate: "2000/1" })) ?? 0,
+        116.45,
+        0.01,
+      );
+      // A slow-motion recording keeps its picture rate.
+      assert.strictEqual(
+        yield* frameRateOf({ avg_frame_rate: "120/1", r_frame_rate: "240/1" }),
+        240,
+      );
       assert.strictEqual(yield* frameRateOf({ r_frame_rate: "25/1" }), 25);
       assert.strictEqual(yield* frameRateOf({}), undefined);
     }),

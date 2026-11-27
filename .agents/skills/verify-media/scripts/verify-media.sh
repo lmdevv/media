@@ -717,11 +717,13 @@ cmd_apple_check() (
   local report
   if ! report="$(tar -C "$stage" -chf - . | ssh -o BatchMode=yes -o ConnectTimeout=10 "$mac" \
     'set -e; d=$(mktemp -d /tmp/verify-media-apple.XXXXXX); trap "rm -rf \"$d\"" EXIT; tar -xf - -C "$d"; cd "$d"
-     swiftc -O -o apple-check apple-check.swift >/dev/null 2>&1; ./apple-check $(ls *.mp4 | sort)' 2>&1)"; then
+     swiftc -O -o apple-check apple-check.swift >/dev/null 2>&1; ./apple-check *.mp4' 2>&1)"; then
     sed 's/$/ not checked/' <<<"$names"
     die "apple-check: AVFoundation could not run on $mac: $(tail -1 <<<"$report")"
   fi
   echo "$report"
+  [[ "$(wc -l <<<"$report")" -eq "$(wc -l <<<"$names")" ]] ||
+    die "apple-check: AVFoundation answered for $(wc -l <<<"$report") of $(wc -l <<<"$names") files"
   ! grep -qvE ' video=true frames=[1-9]' <<<"$report"
 )
 
