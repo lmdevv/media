@@ -125,13 +125,24 @@ Preconditions:
   near black while the CPU does not). Over a pictured frame the output must correlate 0.7 or more
   with it within a frame of the source's rate, and within 0.01 of its best match within 3 s; over a
   flat frame it must not show a picture; a too-faint frame is not judged. One failing frame per
-  fetch is tolerated, wherever it falls, and a fetch with under 90 % of its frames placed (judged
-  either way) is `could not measure`. The evidence says how many were placed, too faint, and
-  failed. The margin of 10 is measured: on 8,160 served frames of every path, the highest source
-  spread at which an output showed no correlatable picture was 6.78 (both GPU tone maps in that
-  fade; the CPU 2.25, the plain scales 0.52 at most). Left alone, ffmpeg 7.1's Quick Sync filters
-  hold a first picture for 41 frames (Matroska, 1.7 s) to 666 (the Feature Test's MP4, 27.7 s) with
-  every timestamp right, which the other checks pass.
+  fetch is tolerated, wherever it falls. Only pictured frames carry timing, so a fetch whose source
+  is pictured in under 60 % of its frames is `could not measure`: black from end to end is no
+  evidence. The evidence says how many were pictured, flat, too faint, and failed.
+  - The margin of 10 is measured: on 8,160 served frames of every path, the highest source spread
+    at which an output showed no correlatable picture was 6.78 (both GPU tone maps in that fade;
+    the CPU 2.25, the plain scales 0.52 at most).
+  - The share of 60 % is measured too: every row's start and seek fetches are pictured in 90 % of
+    their frames or more (the least, the burn-in seek at 104 s, 90 to 93 %, with a dim stretch; the
+    rest 100 %).
+  - The Feature Test rows start at 36 s: its first 4 s are a black opening and a fade with no
+    pictured frame, while from 36 to 42 s every frame of every version is pictured, the dimmest at
+    a spread of 42.9 (the HDR10 version through the reference tone map; 59.9 in the others). It is
+    a plain start at that position, on the 4 s segment grid, and no row's seek. Position 0 stays
+    covered by the rows whose generated fixtures are pictured from their first frame (spreads 49 to
+    63): `decode`, `hybrid-cpu-decode`, `hybrid-cpu-tone-map`, and `scale-variable-rate`.
+  - Left alone, ffmpeg 7.1's Quick Sync filters hold a first picture for 41 frames (Matroska,
+    1.7 s) to 666 (the Feature Test's MP4, 27.7 s) with every timestamp right, which the other
+    checks pass.
 - `audio-start` measures the served sound against the source's own track at the fetch's position
   (the stream negotiation chose): it must start by the time the source sounds at the first picture,
   and no earlier than the source sounds at the first decoded video packet (the muxer cuts there when

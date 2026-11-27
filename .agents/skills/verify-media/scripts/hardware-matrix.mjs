@@ -41,6 +41,17 @@ export const VERDICTS = ["PASS", "FAIL", "NOT-BUILT", "SKIPPED"];
 
 const FEATURE_TEST = "/media/library/Movies/[movies] Feature Test (2010)/[movies] Feature Test (2010)";
 
+/**
+ * Where the rows that play the Feature Test start: past its black opening and fade-in (0 to 4 s),
+ * where no frame is pictured, so no check can place one in time. From 36 s to 42 s every frame of
+ * each of its versions is pictured, the dimmest at a gray-level spread of 42.9 (the HDR10 version
+ * through the reference tone map; 59.9 in the others), over four times the margin of 10. It is on
+ * the 4 s segment grid, and no row's seek. Position 0 stays covered by the rows whose generated
+ * fixtures are pictured from their first frame: decode, hybrid-cpu-decode, hybrid-cpu-tone-map, and
+ * scale-variable-rate.
+ */
+export const FEATURE_TEST_START = 36;
+
 /** Where the generated fixtures live in a side's container (`up` mounts the side's state there). */
 export const FIXTURE_ROOT = "/media/verify-fixtures";
 
@@ -293,7 +304,7 @@ export const ROWS = [
     fixture: "interlaced-mpeg2",
     profile: "h264-sdr",
     request: {},
-    start: 0,
+    start: FEATURE_TEST_START,
     seek: 60,
     span: 4,
     work: { deinterlace: "path" },
@@ -312,7 +323,7 @@ export const ROWS = [
     fixture: "sdr-h264",
     profile: "h264-sdr",
     request: { quality: { maxHeight: 480 } },
-    start: 0,
+    start: FEATURE_TEST_START,
     seek: 120,
     span: 4,
     work: { scale: "path" },
@@ -352,7 +363,7 @@ export const ROWS = [
     fixture: "hdr10-hevc",
     profile: "h264-sdr",
     request: {},
-    start: 0,
+    start: FEATURE_TEST_START,
     seek: 240,
     span: 4,
     work: { "tone-map": "path" },
@@ -374,7 +385,7 @@ export const ROWS = [
     fixture: "image-subtitles",
     profile: "h264-sdr",
     request: { burnInSubtitle: "e13" },
-    start: 0,
+    start: FEATURE_TEST_START,
     seek: 104,
     span: 6,
     work: { overlay: "path" },
@@ -393,7 +404,7 @@ export const ROWS = [
     fixture: "sdr-h264",
     profile: "h264-sdr",
     request: { quality: { maxBitrate: 4_000_000 } },
-    start: 0,
+    start: FEATURE_TEST_START,
     seek: 120,
     span: 4,
     work: { "encode-h264": "path" },
@@ -414,7 +425,7 @@ export const ROWS = [
     fixture: "sdr-h264",
     profile: "hevc-sdr",
     request: {},
-    start: 0,
+    start: FEATURE_TEST_START,
     seek: 120,
     span: 4,
     work: { "encode-hevc": "path" },
@@ -435,7 +446,7 @@ export const ROWS = [
     fixture: "sdr-h264",
     profile: "av1-sdr",
     request: {},
-    start: 0,
+    start: FEATURE_TEST_START,
     seek: 120,
     span: 4,
     work: { "encode-av1": "path" },
@@ -497,7 +508,7 @@ export const COMMON_CHECKS = [
   { check: "duration", tolerance: 1 },
   { check: "timeline" },
   { check: "keyframes" },
-  { check: "picture-time", frames: 1, minMatch: 0.7, tolerance: 0.01, flat: 1, pictured: 10, share: 0.9 },
+  { check: "picture-time", frames: 1, minMatch: 0.7, tolerance: 0.01, flat: 1, pictured: 10, share: 0.6 },
   { check: "audio-start" },
 ];
 
@@ -666,8 +677,9 @@ const correlation = (a, b) => {
  * pictured source frame within the allowance (`pictured`). A frame over a too-faint source frame is
  * not judged either way, and one no source frame is shown for within the allowance (the source's
  * thumbnails stop short, or none came back) cannot be. Returns the frame count, how many could not
- * be judged and how many were too faint, and each frame that failed: its time, how, and how far
- * away the source's best match lies (negative: the picture comes late).
+ * be judged, how many were over a pictured, a flat, and a too-faint source frame, and each frame
+ * that failed: its time, how, and how far away the source's best match lies (negative: the picture
+ * comes late).
  */
 export const judgeFrames = (output, source, { window, allowance, minMatch, tolerance, flat, pictured }) => {
   const spreadOf = (frame) => (frame.pixels === undefined ? 0 : (frame.spread ?? Number.POSITIVE_INFINITY));
@@ -694,6 +706,8 @@ export const judgeFrames = (output, source, { window, allowance, minMatch, toler
   const failed = [];
   let unjudged = 0;
   let faint = 0;
+  let flatSource = 0;
+  let picturedSource = 0;
   for (const frame of output) {
     const near = shownWithin(frame.pts - allowance, frame.pts + allowance);
     const [shown] = shownWithin(frame.pts, frame.pts);
@@ -705,6 +719,8 @@ export const judgeFrames = (output, source, { window, allowance, minMatch, toler
       faint += 1;
       continue;
     }
+    if (isPictured(shown)) picturedSource += 1;
+    else flatSource += 1;
     const score = (match) => (frame.pixels === undefined || !isPictured(match) ? -1 : correlation(frame.pixels, match.pixels));
     const nearest = Math.max(...near.map(score));
     let best = { score: nearest, at: frame.pts };
@@ -724,14 +740,15 @@ export const judgeFrames = (output, source, { window, allowance, minMatch, toler
       failed.push({ pts: frame.pts, how: "pictured" });
     }
   }
-  return { frames: output.length, unjudged, faint, failed };
+  return { frames: output.length, unjudged, pictured: picturedSource, flat: flatSource, faint, failed };
 };
 
 /**
  * What the picture-time check reads of `judgeFrames`' result: how many frames, how many could not
- * be judged, were too faint, and were placed (judged either way), how many of those failed and how
- * (`flat`, `pictured` where the source is flat, `another`), the first that failed, and how far the
- * source's best match lies for the middle one of those showing another time's picture.
+ * be judged, how many were over a pictured, a flat, and a too-faint source frame (only pictured
+ * ones carry timing), how many failed and how (`flat` where the source is pictured, `pictured`
+ * where it is flat, `another` time's picture), the first that failed, and how far the source's best
+ * match lies for the middle one of those showing another time's picture.
  */
 export const frameTiming = (judged) => {
   const how = (kind) => judged.failed.filter((frame) => frame.how === kind);
@@ -739,12 +756,11 @@ export const frameTiming = (judged) => {
   return {
     frames: judged.frames,
     unjudged: judged.unjudged,
+    pictured: judged.pictured,
+    flat: judged.flat,
     faint: judged.faint,
-    placed: judged.frames - judged.unjudged - judged.faint,
     failed: judged.failed.length,
-    flat: how("flat").length,
-    pictured: how("pictured").length,
-    another: how("another").length,
+    failures: { flat: how("flat").length, pictured: how("pictured").length, another: how("another").length },
     first: judged.failed[0]?.pts,
     by: offsets[offsets.length >> 1],
   };
@@ -1106,16 +1122,16 @@ export const CHECKS = {
         if (timing.unjudged > 0) {
           return no(`could not measure: the source's thumbnails reach ${timing.frames - timing.unjudged} of the ${fetch.name} output's ${timing.frames} frames`);
         }
-        const counts = `placed ${timing.placed} of ${timing.frames}, ${timing.faint} too faint, ${timing.failed} failed`;
-        if (timing.placed < params.share * timing.frames) {
-          return no(`could not measure: the ${fetch.name} output's frames ${counts}, under ${fmt(params.share * 100, 0)}% placed`);
+        const counts = `${timing.pictured} pictured, ${timing.flat} flat, ${timing.faint} too faint of ${timing.frames}; ${timing.failed} failed`;
+        if (timing.pictured < params.share * timing.frames) {
+          return no(`could not measure: the source is pictured under ${fmt(params.share * 100, 0)}% of the ${fetch.name} output's frames (${counts})`);
         }
         if (timing.failed > params.frames) {
           const how = [
-            timing.flat > 0 ? `${timing.flat} flat where the source shows a picture` : undefined,
-            timing.pictured > 0 ? `${timing.pictured} showing a picture where the source is flat` : undefined,
-            timing.another > 0
-              ? `${timing.another} showing another time's picture (typically ${fmt(Math.abs(timing.by), 3)} s ${timing.by < 0 ? "earlier" : "later"})`
+            timing.failures.flat > 0 ? `${timing.failures.flat} flat where the source shows a picture` : undefined,
+            timing.failures.pictured > 0 ? `${timing.failures.pictured} showing a picture where the source is flat` : undefined,
+            timing.failures.another > 0
+              ? `${timing.failures.another} showing another time's picture (typically ${fmt(Math.abs(timing.by), 3)} s ${timing.by < 0 ? "earlier" : "later"})`
               : undefined,
           ].filter(Boolean);
           return no(`${timing.failed} of the ${fetch.name} output's ${timing.frames} frames do not show the source's picture for their time, from ${fmt(timing.first, 3)} s: ${how.join(", ")} (${counts})`);
@@ -1438,7 +1454,7 @@ export const judge = (cell, obs) => {
   if (elsewhere) return { verdict: "FAIL", evidence: `${elsewhere.name}: ${elsewhere.evidence}`, checks };
   const media = outputMedia(obs);
   const shown = checks.filter((check) => check.class === "stage" && check.name !== "codec").map((check) => check.evidence);
-  // What the picture check placed, judged too faint, and failed, so a PASS says what it covered.
+  // What the picture check found pictured, flat, too faint, and failed, so a PASS says what it covered.
   const timed = checks.filter((check) => check.name === "picture-time").map((check) => check.evidence);
   const work = checks.find((check) => check.name === "work");
   const fps = measuredFps(obs.fetches.seek.frames);
