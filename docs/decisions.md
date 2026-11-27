@@ -172,6 +172,12 @@ Old movies' Convex project, its SDK client, and its command registry were delete
   files and URLs reveal no folder names. Local images are re-checked against `LIBRARY_ROOTS`;
   remote images are fetched only from `image.tmdb.org` and cached under `DATA_DIR/artwork`; resized
   copies are JPEGs made with ffmpeg and cached by source, size, and modification time.
+- Music covers carry `/music/art/<hash>?ticket=<ticket>`. A client adds `&w=` one of
+  `COVER_SIZES` in `@media/contracts/artwork`, the sizes the music apps draw covers at, and
+  `coverSizeFor` picks the size of the cell or at least twice it. The server bounds the cover's
+  shorter side by it, but copies only the kinds of cover `COPIED_KINDS` lists
+  (`apps/media/src/music/cover-copy.ts`), each proven by a route test, and only when the copy takes
+  fewer bytes; every other cover, and any it cannot copy, is served as stored.
 
 ## Rich metadata
 
