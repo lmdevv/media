@@ -1291,14 +1291,15 @@ ios_matrix() {
 }
 
 # What a timing run opens in each app on the demo library, in order, one line per screen: the label
-# to press, then a label the opened screen shows only with its content. Each is a plain press on a
+# to press (or several, split by `;`, pressing the first on screen), then a label the opened screen
+# shows only with its content. Each is a plain press on a
 # control shown without scrolling, so the app times it from the touch, and none is a record Home
-# asks for before the press: movies' hero opens on its featured title, whose detail comes with
-# Home's rows, not from the title's own query. Movies' row posters aren't used: AXe's tap doesn't
+# asks for before the press: movies' hero opens on the featured title it shows first, whose detail
+# comes with Home's rows, not from the title's own query, and which title that is varies by run. Movies' row posters aren't used: AXe's tap doesn't
 # reach a poster's native link trigger.
 timing_opens() {
   case "$1" in
-    movies) echo "Caminandes|About This Show" ;;
+    movies) echo "Caminandes;Pioneer One;Cosmos Laundromat: First Cycle|About This" ;;
     music)
       printf '%s\n' "Vienna Blue, Doc & Lena Selyanina|Artist, Doc & Lena Selyanina" \
         "Artist, Doc & Lena Selyanina|Songs" ;;
@@ -1353,7 +1354,7 @@ ios_timings() {
       *) die "ios timings [--runs N] [--out DIR] [--record]" ;;
     esac
   done
-  local app id since mac_since launch round opens open point
+  local app id since mac_since launch round opens open point label first_pressed=""
   app="$(ios_app)"
   id="$(udid)"
   mapfile -t opens < <(timing_opens "$app")
@@ -1363,10 +1364,18 @@ ios_timings() {
   : > "$out/actions.tsv"
   : > "$out/loads.tsv"
   stamp() { printf '%s\t%s\t%s\n' "$(date +%s%3N)" "$1" "$2" >> "$out/actions.tsv"; }
-  # Presses the control labelled $1 by its touch, then waits for the opened screen's label $2.
+  # Presses the first control on screen labelled one of $1 (split by `;`) by its touch, then
+  # waits for the opened screen's label $2.
   timing_press() {
-    point="$(ios_find "$1")" || die "launch $launch: can't press \"$1\""
-    stamp press "$1|$point"
+    local labels
+    IFS=';' read -ra labels <<<"$1"
+    point=""
+    for label in "${labels[@]}"; do
+      point="$(ios_find "$label" 2>/dev/null)" && break
+      point=""
+    done
+    [[ -n "$point" ]] || die "launch $launch: can't press any of \"$1\""
+    stamp press "$label|$point"
     ios_touch "${point% *}" "${point#* }"
     ios_wait "$2" 60
     sleep 1
@@ -1387,10 +1396,11 @@ ios_timings() {
     for round in 1 2; do
       # Round 2 reopens only the first screen, from Home. A later screen, such as music's artist,
       # reopens in round 1 from the screen under it, right after Back, while the SDK keeps its
-      # queries.
-      ((round == 1)) || opens=("${opens[0]}")
+      # queries. Round 2 presses the label round 1 pressed.
+      ((round == 1)) || opens=("$first_pressed|${opens[0]#*|}")
       for open in "${opens[@]}"; do
         timing_press "${open%%|*}" "${open#*|}"
+        [[ -n "$first_pressed" ]] || first_pressed="$label"
       done
       if ((round == 1 && ${#opens[@]} > 1)); then
         stamp back ""
@@ -1407,6 +1417,7 @@ ios_timings() {
       sleep 1
     done
     mapfile -t opens < <(timing_opens "$app")
+    first_pressed=""
     stamp home "$launch"
     on_mac "$axe button home --udid $id"
     sleep 3

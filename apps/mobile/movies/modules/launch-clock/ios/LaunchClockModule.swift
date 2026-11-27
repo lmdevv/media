@@ -17,14 +17,13 @@ import os
 ///   display refresh that first shows that content as it will rest: where its layout puts it, so a
 ///   screen sliding in has arrived, with the part the window shows inside the window's bounds;
 ///   faded in to its resting opacity; and covered by no view that shows over all of it, such as the
-///   splash screen over React Native's root view. That refresh is the one a commit is due on screen
-///   at, or, when only an animation was still bringing the content in, the one in which the
-///   animation brought it to rest. Each report also says whether the refresh is hitched: the
-///   mark's callbacks skipped a refresh before it, or this callback ran past its target, so the app
-///   was busy across a refresh and the frame may show a refresh or more after its time. iOS gives
-///   no time at which an ordinary frame was really shown. Each mark also goes to the device's log
-///   under its `name`, with the gap since its previous callback, how far past the target this one
-///   ran, and whether an animation brought the content to rest, as numbers and flags only.
+///   splash screen over React Native's root view; no animation still brings it in. Each report
+///   gives the refresh's target time and says whether the refresh is hitched: the mark's callbacks
+///   skipped a refresh before it, or this callback ran past its target, so the app was busy across
+///   a refresh and the frame may show a refresh or more after its time. iOS gives no time at which
+///   an ordinary frame was really shown. Each mark also goes to the device's log
+///   under its `name`, with the gap since its previous callback and how far past the target this
+///   one ran, as numbers only.
 public final class LaunchClockModule: Module {
   public func definition() -> ModuleDefinition {
     Name("LaunchClock")
@@ -98,8 +97,6 @@ final class FrameMarkView: ExpoView {
   private var deadline: CFTimeInterval = 0
   /// When the refresh of the mark's previous callback began; none before its first callback.
   private var previousRefresh: CFTimeInterval?
-  /// What the mark's previous callback saw of it.
-  private var previousSight = Sight.hidden
   private var reported = false
 
   required init(appContext: AppContext? = nil) {
@@ -128,7 +125,6 @@ final class FrameMarkView: ExpoView {
 
     deadline = CACurrentMediaTime() + markPatience
     previousRefresh = nil
-    previousSight = .hidden
     let link = CADisplayLink(target: WeakTarget(self), selector: #selector(WeakTarget.tick(_:)))
     link.add(to: .main, forMode: .common)
     self.link = link
@@ -139,19 +135,15 @@ final class FrameMarkView: ExpoView {
     link = nil
   }
 
-  /// Runs once per display refresh, at the start of the refresh at `timestamp` and ahead of the
-  /// one at `targetTimestamp`. Whatever the app committed before it is what the render server
-  /// draws for the refresh at `targetTimestamp`, unless the app was busy across a refresh: then the
-  /// refresh is hitched. Animations are different: the render server draws each refresh's at that
-  /// refresh's time, and a presentation layer read now is where the refresh at `timestamp` drew
-  /// it. So a mark the last callback saw arriving, and this one sees at rest, came to rest in the
-  /// refresh at `timestamp`; any other mark shows from the refresh at `targetTimestamp`.
+  /// Runs once per display refresh, ahead of its target. What the app's layer tree holds now,
+  /// its commits and the animations it has finished and removed, is what the render server draws
+  /// for the refresh at `targetTimestamp`, unless the app was busy across a refresh: then the
+  /// refresh is hitched.
   fileprivate func tick(_ link: CADisplayLink) {
     let interval = link.targetTimestamp - link.timestamp
     let gap = previousRefresh.map { link.timestamp - $0 } ?? 0
     let pastTarget = CACurrentMediaTime() - link.targetTimestamp
     let hitched = gap >= missedRefresh * interval || pastTarget >= lateCallback * interval
-    let arrived = previousSight == .arriving
     previousRefresh = link.timestamp
 
     if link.timestamp > deadline {
@@ -159,16 +151,13 @@ final class FrameMarkView: ExpoView {
       return
     }
 
-    let sight = self.sight()
-    previousSight = sight
-
-    guard sight == .atRest else { return }
+    guard sight() == .atRest else { return }
 
     reported = true
     stop()
-    let at = (arrived ? link.timestamp : link.targetTimestamp) * 1000
+    let at = link.targetTimestamp * 1000
     markLog.notice(
-      "\(self.name, privacy: .public) drawn at \(at, format: .fixed(precision: 3), privacy: .public) hitched \(hitched, privacy: .public) gap \(gap * 1000, format: .fixed(precision: 3), privacy: .public) past \(pastTarget * 1000, format: .fixed(precision: 3), privacy: .public) arrived \(arrived, privacy: .public)"
+      "\(self.name, privacy: .public) drawn at \(at, format: .fixed(precision: 3), privacy: .public) hitched \(hitched, privacy: .public) gap \(gap * 1000, format: .fixed(precision: 3), privacy: .public) past \(pastTarget * 1000, format: .fixed(precision: 3), privacy: .public)"
     )
     onDrawn(["at": at, "hitched": hitched])
   }
@@ -177,10 +166,12 @@ final class FrameMarkView: ExpoView {
   /// layout puts it, and its presentation, where the running animations have it on screen now. The
   /// view is in sight when every layer up to the window is rendered and visible, part of its
   /// rectangle is inside the window's bounds, and no later sibling of it or of a view above it
-  /// shows over all of that part. It is at rest once it is also as opaque now as at rest and its
-  /// rectangle now is its resting rectangle, within a pixel, so a transition that slides, scales,
-  /// or fades it in has ended; until then it is arriving. Content taller than the screen comes to
-  /// rest once the part inside the window is in place.
+  /// shows over all of that part. It is at rest once no animation runs on it or any layer it hangs
+  /// from, it stands where its layout puts it, within a pixel, and as opaque as at rest, and its
+  /// rectangle lies wholly inside the window, within half a pixel, or across the whole window on an
+  /// axis where it is longer, as content taller than the screen is: so a transition that slides,
+  /// scales, or fades it in has ended, even one that moves the layout itself. Until then it is
+  /// arriving.
   private func sight() -> Sight {
     guard let window, !window.isHidden,
       let presented = layer.presentation(),
@@ -191,6 +182,7 @@ final class FrameMarkView: ExpoView {
 
     var opacityNow: Float = 1
     var opacityAtRest: Float = 1
+    var animated = false
     var view: UIView? = self
     while let current = view {
       if current.isHidden {
@@ -198,6 +190,7 @@ final class FrameMarkView: ExpoView {
       }
       opacityNow *= current.layer.presentation()?.opacity ?? 0
       opacityAtRest *= current.layer.opacity
+      animated = animated || !(current.layer.animationKeys() ?? []).isEmpty
       view = current.superview
     }
 
@@ -215,8 +208,23 @@ final class FrameMarkView: ExpoView {
     let inPlace =
       abs(now.minX - atRest.minX) <= pixel && abs(now.minY - atRest.minY) <= pixel
       && abs(now.width - atRest.width) <= pixel && abs(now.height - atRest.height) <= pixel
+    let inside =
+      fits(now.minX, now.maxX, in: windowPresented.bounds.minX, windowPresented.bounds.maxX, pixel / 2)
+      && fits(now.minY, now.maxY, in: windowPresented.bounds.minY, windowPresented.bounds.maxY, pixel / 2)
 
-    return inPlace && opacityNow >= opacityAtRest - shownOpacity ? .atRest : .arriving
+    return !animated && inPlace && inside && opacityNow >= opacityAtRest - shownOpacity
+      ? .atRest : .arriving
+  }
+
+  /// Whether a span from `low` to `high` lies inside the window's span, within `slack`: wholly,
+  /// or, for a span longer than the window's, across all of it, as content taller than the
+  /// screen does.
+  private func fits(
+    _ low: CGFloat, _ high: CGFloat, in windowLow: CGFloat, _ windowHigh: CGFloat, _ slack: CGFloat
+  ) -> Bool {
+    high - low <= windowHigh - windowLow + slack
+      ? low >= windowLow - slack && high <= windowHigh + slack
+      : low <= windowLow + slack && high >= windowHigh - slack
   }
 
   private func isCovered(_ area: CGRect, in windowPresented: CALayer) -> Bool {
