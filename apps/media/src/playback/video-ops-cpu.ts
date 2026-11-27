@@ -1,17 +1,24 @@
 /**
  * The CPU's rows: libavcodec's software decoders, `scale`, the `zscale` tone map, the image
- * subtitle overlay, and libx264. A build listing proves these present, as they touch no device.
+ * subtitle overlay, and libx264, libx265, and libsvtav1, a row each. A build listing proves these
+ * present, as they touch no device.
  * They are the floor every source falls back to, so they take any layout and depth ffmpeg
  * decodes, as software transcoding always has; closed lists guard the GPU rows instead.
  */
+import { type Level, levelOf } from "./output-levels.ts";
 import { DECODE_CLIPS, PROBE_CLIPS } from "./probe-clips.ts";
 import {
+  encodeProbes,
+  encodeRowId,
+  encodesTarget,
   filter,
   HDR_COLOURS,
   ImplId,
   NOTHING,
   Op,
   type OpImpl,
+  OUTPUT_CODECS,
+  type OutputCodec,
   row,
   type Row,
   transferOf,
@@ -129,35 +136,107 @@ const burnImageCpu: OpImpl<"BurnImage"> = {
   ],
 };
 
-/** libx264 at CRF 23 under a VBV cap, from any SDR layout and depth, converted to 8-bit 4:2:0. */
-const encodeCpu: OpImpl<"Encode"> = {
-  id: ImplId("encode.cpu"),
-  op: "Encode",
-  on: "cpu",
-  takes: "cpu",
-  needs: () => ["encoder:libx264"],
-  variant: (op, input) =>
-    input.colour === "sdr" && input.scan === "progressive" ? `${op.codec}/8/crf` : undefined,
-  output: (_, input) => ({ ...input, depth: 8, pixelFormat: "yuv420p" }),
-  render: (op) => ({
-    input: [],
-    filters: [filter("format", "yuv420p")],
-    output: [
-      "-c:v",
-      "libx264",
-      "-preset",
-      "veryfast",
-      "-profile:v",
-      "high",
-      "-crf",
-      "23",
-      "-maxrate",
-      String(op.bitrate),
-      "-bufsize",
-      String(op.bitrate * 2),
+/**
+ * One codec's software encoder: its name, the options that set its speed, profile, and quality
+ * target before the bitrate cap, and those after it, which state the plan's level when it has one.
+ */
+interface SoftwareEncoder {
+  readonly name: string;
+  readonly quality: ReadonlyArray<string>;
+  readonly after: (level: Level | undefined) => ReadonlyArray<string>;
+}
+
+/**
+ * How many pictures SVT-AV1 holds before it gives them back, as a live stream needs it. By default
+ * it holds as many as its pipeline sizes itself for from the machine's cores: on a 32-thread host,
+ * up to 351 pictures with Debian's SVT-AV1 2.3 and 221 with 4.1, 14.6 and 9.2 seconds at 24 fps.
+ * The muxer waits at most 10 seconds for a stream's next packet (`max_interleave_delta`), then
+ * writes the copied audio ahead into earlier fragments, so a fragment fetched alone opened with
+ * seconds of silence. Three levels of parallelism (`lp`, which both versions read; neither reads
+ * the longer name), an 8-picture mini-GOP (`hierarchical-levels=3`), and no look-ahead past it
+ * hold 18 pictures before the first packet and at most 23 at once, whatever the host, with both
+ * versions. On a 1688x720 film this kept SSIM within 0.0002 and the bitrate within 7 %, and
+ * halved the frames encoded a second on a Ryzen 9 5950X (212 to 114 with 2.3).
+ */
+const SVT_AV1_LIVE: ReadonlyArray<string> = ["lp=3", "hierarchical-levels=3", "lookahead=0"];
+
+/**
+ * The 8-bit SDR encoder of each codec, each at a quality target near libx264's CRF 23 and a speed
+ * that keeps up with a 1080p stream on a desktop CPU. libx265 closes its GOPs, or a forced
+ * keyframe is a CRA picture whose leading pictures need the segment before, and makes each forced
+ * keyframe an IDR frame (`forced-idr`): without it, a forced keyframe less than a second after a
+ * scene cut's keyframe is dropped. On 30 s of a 1080p SDR film with Debian's ffmpeg 7.1 on a Ryzen
+ * 9 5950X, libx265 `superfast` at CRF 23 scores an SSIM of 0.9878 against libx264's 0.9892 (CRF
+ * 24: 0.9865; 28: 0.9801) with 81 % of its bytes, near 39 frames a second against libx264's 195.
+ * SVT-AV1's presets above 9 warn of artifacts outside its real-time mode.
+ */
+const SOFTWARE_ENCODERS: Readonly<Record<OutputCodec, SoftwareEncoder>> = {
+  h264: {
+    name: "libx264",
+    quality: ["-preset", "veryfast", "-profile:v", "high", "-crf", "23"],
+    after: () => [],
+  },
+  hevc: {
+    name: "libx265",
+    quality: ["-preset", "superfast", "-profile:v", "main", "-crf", "23"],
+    after: (level) => [
+      "-forced-idr",
+      "1",
+      "-x265-params",
+      [
+        "log-level=error",
+        "open-gop=0",
+        ...(level === undefined ? [] : [`level-idc=${String(level.tenths)}`]),
+      ].join(":"),
     ],
-  }),
-  probes: [{ op: Op.Encode({ codec: "h264", bitrate: 1_000_000 }), clip: "h264-8", runs: 1 }],
+  },
+  av1: {
+    name: "libsvtav1",
+    quality: ["-preset", "9", "-crf", "30"],
+    after: (level) => [
+      "-svtav1-params",
+      [...SVT_AV1_LIVE, ...(level === undefined ? [] : [`level=${String(level.tenths)}`])].join(
+        ":",
+      ),
+    ],
+  },
+};
+
+/**
+ * The software encoder of `codec`, a row of its own: a quality target under a VBV cap, from any
+ * SDR layout and depth, converted to 8-bit 4:2:0. Every forced keyframe is an IDR frame (H.264,
+ * HEVC) or a key frame (AV1).
+ */
+const encodeCpu = (codec: OutputCodec): OpImpl<"Encode"> => {
+  const encoder = SOFTWARE_ENCODERS[codec];
+
+  return {
+    id: encodeRowId("cpu", codec),
+    op: "Encode",
+    on: "cpu",
+    takes: "cpu",
+    needs: () => [`encoder:${encoder.name}`],
+    variant: (op, input) =>
+      encodesTarget(codec, op.target) && input.colour === "sdr" && input.scan === "progressive"
+        ? `${String(op.target.depth)}/crf`
+        : undefined,
+    output: (_, input) => ({ ...input, depth: 8, pixelFormat: "yuv420p" }),
+    render: (op) => ({
+      input: [],
+      filters: [filter("format", "yuv420p")],
+      output: [
+        "-c:v",
+        encoder.name,
+        ...encoder.quality,
+        "-maxrate",
+        String(op.bitrate),
+        "-bufsize",
+        String(op.bitrate * 2),
+        ...encoder.after(op.level === undefined ? undefined : levelOf(codec, op.level)),
+      ],
+    }),
+    probes: encodeProbes(codec),
+  };
 };
 
 /** Every CPU row. */
@@ -166,5 +245,5 @@ export const CPU_ROWS: ReadonlyArray<Row> = [
   row(scaleCpu),
   row(toneMapCpu),
   row(burnImageCpu),
-  row(encodeCpu),
+  ...OUTPUT_CODECS.map((codec) => row(encodeCpu(codec))),
 ];

@@ -1,4 +1,6 @@
-import { describe, expect, it } from "@effect/vitest";
+import { NodeServices } from "@effect/platform-node";
+import { describe, expect, it, layer } from "@effect/vitest";
+import { Effect, FileSystem, Path } from "effect";
 
 import {
   FRAGMENT_HEAD_BYTES,
@@ -6,6 +8,7 @@ import {
   fragmentSpan,
   type VideoTiming,
   videoTiming,
+  withoutEmptySampleDependencies,
 } from "./fmp4-fragments.ts";
 
 const uint32 = (value: number): Array<number> => [
@@ -393,4 +396,88 @@ describe("fragmentHeadLength", () => {
     );
     expect(fragmentHeadLength(new Uint8Array(box("styp", ascii("msdh"))))).toBe(undefined);
   });
+});
+
+const CONTAINERS: ReadonlySet<string> = new Set([
+  "moov",
+  "trak",
+  "mdia",
+  "minf",
+  "stbl",
+  "mvex",
+  "dinf",
+  "edts",
+  "udta",
+]);
+
+/** Every box of `bytes` down through the containers, as its path and size. */
+const boxTree = (
+  bytes: Uint8Array,
+  start = 0,
+  end = bytes.byteLength,
+  parent = "",
+): ReadonlyArray<readonly [string, number]> => {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const listed: Array<readonly [string, number]> = [];
+  const seen = new Map<string, number>();
+
+  for (let at = start; at + 8 <= end; at += view.getUint32(at)) {
+    const size = view.getUint32(at);
+    const type = String.fromCodePoint(...bytes.subarray(at + 4, at + 8));
+    const nth = seen.get(type) ?? 0;
+    const path = `${parent}/${type}${String(nth)}`;
+
+    seen.set(type, nth + 1);
+    listed.push([path, size]);
+
+    if (CONTAINERS.has(type)) listed.push(...boxTree(bytes, at + 8, at + size, path));
+  }
+
+  return listed;
+};
+
+/** A fixture the image's ffmpeg 7.1 wrote: the init segment of an HLS run of the service's. */
+const fixture = Effect.fn("Fmp4FragmentsTest.fixture")(function* (name: string) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+
+  return yield* fs.readFile(path.join(import.meta.dirname, "..", "testing", "fixtures", name));
+}, Effect.orDie);
+
+layer(NodeServices.layer)("withoutEmptySampleDependencies", (onDisk) => {
+  for (const name of ["libx265-ffmpeg-7.1-init.mp4", "libsvtav1-ffmpeg-7.1-init.mp4"]) {
+    onDisk.effect(`drops the empty sdtp ffmpeg 7.1 wrote into ${name}, and nothing else`, () =>
+      Effect.gen(function* () {
+        const written = yield* fixture(name);
+        const sdtp = "/moov0/trak0/mdia0/minf0/stbl0/sdtp0";
+
+        expect(boxTree(written)).toContainEqual([sdtp, 12]);
+
+        const kept = withoutEmptySampleDependencies(written);
+
+        expect(boxTree(kept)).toStrictEqual(
+          boxTree(written).flatMap(([path, size]) =>
+            path === sdtp ? [] : [[path, sdtp.startsWith(`${path}/`) ? size - 12 : size] as const],
+          ),
+        );
+        expect(kept.byteLength).toBe(written.byteLength - 12);
+        expect(videoTiming(kept)).toStrictEqual(videoTiming(written));
+        expect(withoutEmptySampleDependencies(kept)).toBe(kept);
+      }),
+    );
+  }
+
+  onDisk(
+    "leaves an init segment without one as it is, and a sample table that lists its samples",
+    () => {
+      const plain = init([trak({ trackId: 1, handler: "vide", timescale: 12_288 })]);
+
+      const listed = init([
+        box("trak", box("mdia", box("minf", box("stbl", fullBox("sdtp", 0, 0, [0x18, 0x10]))))),
+      ]);
+
+      expect(withoutEmptySampleDependencies(plain)).toBe(plain);
+      expect(withoutEmptySampleDependencies(listed)).toBe(listed);
+    },
+  );
 });

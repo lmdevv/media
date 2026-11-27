@@ -252,6 +252,61 @@ describe("verify-media.sh", () => {
     assert.match(side.stderr, /--side must be after or before, not sideways/);
   });
 
+  test("asks for a grid before checking its cells on the Mac", () => {
+    const result = helperCommand("apple-check");
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /no hardware-matrix cells for the after side under .*; run hardware-matrix first/);
+  });
+
+  test("reports a file it could not have AVFoundation check as not checked, and fails", () => {
+    const file = join(scratch, "cell-start.mp4");
+    writeFileSync(file, "not checked here");
+    const result = spawnSync(helper, ["apple-check", file], {
+      encoding: "utf8",
+      env: { ...env, MAC_HOST: "unreachable.invalid" },
+    });
+    assert.equal(result.status, 1);
+    assert.equal(result.stdout, "cell-start.mp4 not checked\n");
+    assert.match(result.stderr, /AVFoundation could not run on unreachable\.invalid/);
+  });
+
+  test("has AVFoundation check each named file once, a name with a space included", () => {
+    // Stand-ins on PATH for the Mac: `ssh` runs the remote command here, and `swiftc` builds a
+    // checker that shows video for a file holding "video" and none for any other.
+    const bin = join(scratch, "apple-bin");
+    const files = join(scratch, "apple-files");
+    mkdirSync(bin);
+    mkdirSync(files);
+    writeFileSync(join(bin, "ssh"), '#!/usr/bin/env bash\nexec bash -c "${@: -1}"\n', { mode: 0o755 });
+    writeFileSync(
+      join(bin, "swiftc"),
+      [
+        "#!/usr/bin/env bash",
+        "cat > apple-check <<'CHECK'",
+        "#!/usr/bin/env bash",
+        'for f in "$@"; do',
+        '  if [[ "$(cat "$f")" == video ]]; then echo "$f video=true frames=3"; else echo "$f video=false frames=0"; fi',
+        "done",
+        "CHECK",
+        "chmod +x apple-check",
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    writeFileSync(join(files, "cell.mp4"), "video");
+    writeFileSync(join(files, "cell.mp4 cell.mp4"), "none");
+    const onMac = { ...env, PATH: `${bin}:${env.PATH}`, MAC_HOST: "unreachable.invalid" };
+    const both = spawnSync(helper, ["apple-check", join(files, "cell.mp4"), join(files, "cell.mp4 cell.mp4")], {
+      encoding: "utf8",
+      env: onMac,
+    });
+    assert.equal(both.stdout, "cell.mp4 video=true frames=3\ncell.mp4 cell.mp4 video=false frames=0\n");
+    assert.equal(both.status, 1);
+    const one = spawnSync(helper, ["apple-check", join(files, "cell.mp4")], { encoding: "utf8", env: onMac });
+    assert.equal(one.stdout, "cell.mp4 video=true frames=3\n");
+    assert.equal(one.status, 0, one.stderr);
+  });
+
   test("takes down a run that never started", () => {
     const result = helperCommand("down");
     assert.equal(result.status, 0, result.stderr);

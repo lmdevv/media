@@ -20,6 +20,7 @@ import * as KeyframeIndex from "./keyframe-index.ts";
 import { verifiedFor } from "../testing/capability-snapshots.ts";
 import { AudioPlan, replan, VideoPlan } from "./playback-decision.ts";
 import { hlsCommand } from "./transcode-command.ts";
+import { sdrTarget } from "./video-ops.ts";
 
 const hasFfmpeg = await ffmpegAvailable();
 
@@ -38,8 +39,8 @@ const encodedOn = (probe: MediaProbe, domain: "software" | "qsv" | "vaapi"): Vid
   const planned = replan(
     video,
     {
-      codec: "h264",
-      toneMap: false,
+      targets: [sdrTarget("h264")],
+      frameRate: undefined,
       bounds: { width: 320, height: 180 },
       cpuEncodeBounds: { width: 1920, height: 1080 },
       maxBitrate: 1_000_000,

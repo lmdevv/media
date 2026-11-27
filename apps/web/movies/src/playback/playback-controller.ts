@@ -808,6 +808,9 @@ export class PlaybackController {
 
         this.#capabilities = narrower;
         this.#detach();
+        // The player reports where the next stream starts, and a seek meanwhile moves it there.
+        this.player.setSeeker(this.#waitingSeeker());
+        this.player.seek(positionMs);
         this.#update({ phase: PlaybackPhase.Recovering({ positionMs }) });
 
         return this.#renegotiate(playback, positionMs, this.#snapshot.audioStreamIndex);
@@ -818,6 +821,26 @@ export class PlaybackController {
         return this.#renegotiate(playback, positionMs, this.#snapshot.audioStreamIndex);
       },
     });
+  }
+
+  /**
+   * Seeks while no stream is attached, as while another way to play is negotiated: a seek moves
+   * the position the player reports, and shows, which the next negotiation asks for, and waits for
+   * that stream, whose attaching ends it.
+   */
+  #waitingSeeker(): StreamSeeker {
+    return {
+      reaches: () => false,
+      move: (positionMs, signal) => {
+        if (PlaybackPhase.$is("Recovering")(this.#snapshot.phase)) {
+          this.#update({ phase: PlaybackPhase.Recovering({ positionMs }) });
+        }
+
+        return new Promise((resolve) => {
+          signal.addEventListener("abort", () => resolve(), { once: true });
+        });
+      },
+    };
   }
 
   async #reloadPlaylist(playback: Playback.Playback, positionMs: number): Promise<void> {
@@ -1010,6 +1033,7 @@ export class PlaybackController {
     const wasPlaying = this.playing();
     const ticket = ++this.#negotiation;
     const version = this.#choicesVersion;
+    const seeks = this.player.seekCount();
     const chosen = this.#chosen();
 
     const negotiated = await runSdk(
@@ -1022,13 +1046,32 @@ export class PlaybackController {
       ),
     );
 
+    const answered =
+      negotiated !== null && Result.isSuccess(negotiated)
+        ? { started: playback.started, stream: negotiated.success }
+        : null;
+
+    // An answer applies only to the start and the position the person is at when it arrives: a
+    // later start (another title or version), negotiation, or hand-off drops it, and a seek since
+    // the asking asks again from where the seek went.
+    if (this.#disposed) {
+      if (answered !== null) Playback.stopNow(answered);
+
+      return;
+    }
+
     if (
-      this.#disposed ||
       this.isHandedOff() ||
       ticket !== this.#negotiation ||
       this.#playback?.started !== playback.started
     ) {
       return;
+    }
+
+    if (seeks !== this.player.seekCount()) {
+      if (answered !== null) Playback.stopNow(answered);
+
+      return this.#renegotiate(playback, this.positionMs(), audioStreamIndex, options);
     }
 
     if (negotiated === null) return this.#stop(STOPPED);

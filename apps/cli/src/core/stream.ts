@@ -6,7 +6,7 @@ import {
 } from "@media/contracts/media-playback";
 import { StartedPlayback } from "@media/contracts/models/playback";
 import type { Platform } from "@media/sdk/effect";
-import { Playback, ProtocolError, TranscodeLabels } from "@media/sdk/effect";
+import { MediaLabels, Playback, ProtocolError, TranscodeLabels } from "@media/sdk/effect";
 import { Brand, Effect, Option, Predicate, Result, Schema } from "effect";
 
 import { LaunchError, PlaybackRefused } from "../cli-errors";
@@ -338,7 +338,7 @@ const stream = coreShortcut("movies", "stream", {
       return textOutcome(
         json,
         [
-          `${title.name}${Option.match(episode, { onNone: () => "", onSome: (label) => ` ${label}` })}${started.file.versionName === null ? "" : ` · ${started.file.versionName}`} (${playback.mode}, from ${formatDuration(playback.startSeconds * 1000)})`,
+          `${title.name}${Option.match(episode, { onNone: () => "", onSome: (label) => ` ${label}` })}${started.file.versionName === null ? "" : ` · ${started.file.versionName}`} (${playback.mode}, ${MediaLabels.codecLabel(playback.video.codec)}, from ${formatDuration(playback.startSeconds * 1000)})`,
           ...(playback.transcode === undefined ? [] : transcodeLines(playback.transcode)),
           playback.url,
         ].join("\n"),

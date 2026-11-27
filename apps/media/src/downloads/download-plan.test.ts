@@ -60,12 +60,58 @@ const iphone: ClientCapabilities = {
   mse: false,
 };
 
-/** A server whose CPU does everything, software tone mapping included. */
-const optionsFor = (media: MediaProbe, refused: (key: CapabilityKey) => boolean = () => false) => ({
+/** A browser that plays H.264 alone. */
+const h264Browser: ClientCapabilities = {
+  containers: ["mp4"],
+  videoCodecs: [{ codec: "h264" }],
+  audioCodecs: [{ codec: "aac" }],
+  maxWidth: 3840,
+  maxHeight: 2160,
+  hls: false,
+  mse: true,
+};
+
+/** A device that plays HEVC Main alone. */
+const hevcOnly: ClientCapabilities = {
+  containers: ["mp4"],
+  videoCodecs: [{ codec: "hevc", profiles: ["Main"] }],
+  audioCodecs: [{ codec: "aac" }],
+  maxWidth: 3840,
+  maxHeight: 2160,
+  hls: true,
+  mse: false,
+};
+
+/** A device that plays AV1 alone. */
+const av1Only: ClientCapabilities = {
+  containers: ["mp4"],
+  videoCodecs: [{ codec: "av1" }],
+  audioCodecs: [{ codec: "aac" }],
+  maxWidth: 3840,
+  maxHeight: 2160,
+  hls: true,
+  mse: false,
+};
+
+/**
+ * A server whose Quick Sync device and CPU do everything, software tone mapping included, except
+ * the keys `refused` picks; `domains` drops the device.
+ */
+const optionsFor = (
+  media: MediaProbe,
+  refused: (key: CapabilityKey) => boolean = () => false,
+  domains: ReadonlyArray<"qsv"> = ["qsv"],
+) => ({
   audioIndex: undefined,
-  capabilities: verifiedFor(media, ["qsv"], refused),
+  capabilities: verifiedFor(media, domains, refused),
   sizeBytes: 900_000_000,
 });
+
+/** The capability key of each stage an encode plan runs. */
+const stagesOf = (plan: DownloadPlan): ReadonlyArray<string> =>
+  DownloadPlan.$is("Mp4")(plan) && VideoPlan.$is("Encode")(plan.video)
+    ? plan.video.pipeline.steps.map((step) => step.capability)
+    : [];
 
 const aac = audio(1, "aac", true);
 
@@ -101,20 +147,79 @@ describe("decideDownload", () => {
     ).toMatchObject({ _tag: "Mp4", mode: "audio-transcode", audio: AudioPlan.Aac({ index: 2 }) });
   });
 
-  it("encodes a source above the quality down to it, bounding the size by the bitrate", () => {
+  it("encodes a source above the quality down to it on the CPU, as H.264 for a device that plays it, even where a GPU does everything", () => {
     const film = probe("mkv", video("h264", 1080), [aac], 12_000_000);
-    const standard = decideDownload(film, iphone, "standard", optionsFor(film));
 
-    expect(standard).toMatchObject({
-      _tag: "Mp4",
+    for (const client of [iphone, h264Browser]) {
+      const standard = decideDownload(film, client, "standard", optionsFor(film));
+
+      expect(standard).toMatchObject({
+        _tag: "Mp4",
+        mode: "transcode-software",
+        video: {
+          _tag: "Encode",
+          output: { codec: "h264", width: 1280, height: 720, bitrate: 4_000_000 },
+        },
+        estimatedBytes: Math.ceil((5_600_000 * 3000) / 8),
+      });
+      expect(stagesOf(standard)).toStrictEqual([
+        "decode.cpu:h264/yuv420p",
+        "scale.cpu:8>8",
+        "encode.cpu.h264:8/crf",
+      ]);
+      expect(decideDownload(film, client, "high", optionsFor(film))).toMatchObject({
+        _tag: "Mp4",
+        mode: "transcode-software",
+        video: { _tag: "Encode", output: { codec: "h264", height: 1080, bitrate: 8_000_000 } },
+      });
+      expect(
+        decideDownload(
+          film,
+          client,
+          "standard",
+          optionsFor(film, () => false, []),
+        ),
+      ).toEqual(standard);
+    }
+  });
+
+  it("encodes HEVC or AV1 on the CPU for a device that plays no H.264", () => {
+    const film = probe("mkv", video("h264", 1080), [aac], 12_000_000);
+    const hevc = decideDownload(film, hevcOnly, "standard", optionsFor(film));
+
+    expect(hevc).toMatchObject({
       mode: "transcode-software",
-      video: { _tag: "Encode", output: { height: 720, bitrate: 4_000_000 } },
+      video: { _tag: "Encode", output: { codec: "hevc", height: 720, bitrate: 3_000_000 } },
     });
-    expect(standard).toMatchObject({ estimatedBytes: Math.ceil((5_600_000 * 3000) / 8) });
-    expect(decideDownload(film, iphone, "high", optionsFor(film))).toMatchObject({
-      _tag: "Mp4",
-      video: { _tag: "Encode", output: { height: 1080, bitrate: 8_000_000 } },
+    expect(stagesOf(hevc).at(-1)).toBe("encode.cpu.hevc:8/crf");
+    expect(decideDownload(film, av1Only, "standard", optionsFor(film))).toMatchObject({
+      mode: "transcode-software",
+      video: { _tag: "Encode", output: { codec: "av1", height: 720, bitrate: 2_600_000 } },
     });
+  });
+
+  it("never plans an encode above the quality's height or bitrate", () => {
+    const caps = { standard: [720, 4_000_000], high: [1080, 10_000_000] } as const;
+
+    for (const source of [video("h264", 2160), video("mpeg2video", 1080), video("hevc", 2160)]) {
+      const film = probe("mkv", source, [aac], 60_000_000);
+
+      for (const client of [iphone, h264Browser, hevcOnly, av1Only]) {
+        for (const options of [optionsFor(film), optionsFor(film, () => false, [])]) {
+          for (const quality of ["standard", "high"] as const) {
+            const plan = decideDownload(film, client, quality, options);
+            const [height, bitrate] = caps[quality];
+
+            if (DownloadPlan.$is("Mp4")(plan) && VideoPlan.$is("Encode")(plan.video)) {
+              expect(plan.video.output.height).toBeLessThanOrEqual(height);
+              expect(plan.video.output.bitrate).toBeLessThanOrEqual(bitrate);
+            } else {
+              expect(plan).toStrictEqual(DownloadPlan.Original());
+            }
+          }
+        }
+      }
+    }
   });
 
   it("refuses a source it cannot bring within the quality, rather than the whole original", () => {

@@ -9,11 +9,14 @@ const browser = (options: {
   readonly maybe?: ReadonlyArray<string>;
   readonly mse: boolean;
   readonly hdr?: boolean;
+  /** Types the Media Capabilities API answered for, and its answer; the rest are unknown. */
+  readonly efficient?: ReadonlyMap<string, boolean>;
 }): MediaSupport => ({
   canPlayType: (type) =>
     options.types.includes(type) ? "probably" : (options.maybe ?? []).includes(type) ? "maybe" : "",
   isTypeSupported: options.mse ? (type) => options.types.includes(type) : null,
   hdrDisplay: options.hdr ?? false,
+  powerEfficient: (type) => options.efficient?.get(type),
 });
 
 const chrome = browser({
@@ -82,11 +85,33 @@ describe("detectCapabilities", () => {
     ]);
   });
 
+  it("says which codecs decode power-efficiently, once the browser has answered", () => {
+    const answered = browser({
+      types: [
+        'video/mp4; codecs="avc1.640033"',
+        'video/mp4; codecs="hvc1.1.6.L153.B0"',
+        'video/mp4; codecs="av01.0.08M.08"',
+      ],
+      mse: true,
+      efficient: new Map([
+        ['video/mp4; codecs="avc1.640033"', true],
+        ['video/mp4; codecs="av01.0.08M.08"', false],
+      ]),
+    });
+
+    expect(detectCapabilities(answered).videoCodecs).toStrictEqual([
+      { codec: "h264", maxLevel: 51, maxBitDepth: 8, powerEfficient: true },
+      { codec: "hevc", maxBitDepth: 8 },
+      { codec: "av1", maxBitDepth: 8, powerEfficient: false },
+    ]);
+  });
+
   it("offers HDR only on HDR displays", () => {
     const sdr = detectCapabilities({
       canPlayType: iphone.canPlayType,
       isTypeSupported: iphone.isTypeSupported,
       hdrDisplay: false,
+      powerEfficient: () => undefined,
     });
 
     expect(
@@ -128,7 +153,48 @@ describe("withoutFailedPath", () => {
     expect(next?.videoCodecs.map((support) => support.codec)).toStrictEqual(["h264", "vp9"]);
   });
 
-  it("has nothing left to drop after H.264 or a transcode failed", () => {
+  it("drops an encoded codec other than H.264 after a failed transcode, so the server sends H.264", () => {
+    const next = withoutFailedPath(capabilities, stream("transcode-software", "av1"));
+
+    expect(next?.videoCodecs.map((support) => support.codec)).toStrictEqual(["h264", "vp9"]);
+  });
+
+  it("tries HEVC, then AV1 where it decodes efficiently, then H.264 in a browser that plays all three", () => {
+    const hevc = 'video/mp4; codecs="hvc1.1.6.L153.B0"';
+    const av1 = 'video/mp4; codecs="av01.0.08M.08"';
+
+    const everything = detectCapabilities(
+      browser({
+        types: ['video/mp4; codecs="avc1.640033"', hevc, av1],
+        mse: true,
+        efficient: new Map([[av1, true]]),
+      }),
+    );
+
+    // The media service picks by its own order, not the list's: on a GPU HEVC, then AV1 where the
+    // client decodes it efficiently, then H.264; on the CPU H.264 while the client lists it.
+    expect(
+      everything.videoCodecs.map(({ codec, powerEfficient }) => [codec, powerEfficient]),
+    ).toStrictEqual([
+      ["h264", undefined],
+      ["hevc", undefined],
+      ["av1", true],
+    ]);
+
+    const withoutHevc = withoutFailedPath(everything, stream("transcode-software", "hevc"));
+
+    expect(withoutHevc?.videoCodecs.map(({ codec }) => codec)).toStrictEqual(["h264", "av1"]);
+
+    const withoutAv1 =
+      withoutHevc && withoutFailedPath(withoutHevc, stream("transcode-software", "av1"));
+
+    expect(withoutAv1?.videoCodecs.map(({ codec }) => codec)).toStrictEqual(["h264"]);
+    expect(
+      withoutAv1 && withoutFailedPath(withoutAv1, stream("transcode-software", "h264")),
+    ).toBeNull();
+  });
+
+  it("has nothing left to drop after H.264 failed", () => {
     expect(withoutFailedPath(capabilities, stream("remux", "h264"))).toBeNull();
     expect(withoutFailedPath(capabilities, stream("transcode-software", "h264"))).toBeNull();
     expect(

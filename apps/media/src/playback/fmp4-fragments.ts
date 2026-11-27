@@ -1,7 +1,7 @@
 /**
- * Reads where an fMP4 fragment file starts and ends. ffmpeg's HLS muxer writes one file per
- * keyframe interval here: `styp`, a `sidx` per track unless the run skips them, then a `moof`
- * with one `traf` per track.
+ * Reads where an fMP4 fragment file starts and ends, and drops what an init segment must not
+ * carry. ffmpeg's HLS muxer writes one file per keyframe interval here: `styp`, a `sidx` per track
+ * unless the run skips them, then a `moof` with one `traf` per track.
  *
  * The times come from the video `traf` (its `tfdt` and `trun`) and the init segment's edit list,
  * never from a `sidx`: ffmpeg 8.0 writes a `sidx` earliest presentation time one frame late for
@@ -214,6 +214,77 @@ export const videoTiming = (init: Uint8Array): VideoTiming | undefined => {
   }
 
   return undefined;
+};
+
+/** The boxes from an init segment's top level down to a track's sample table. */
+const SAMPLE_TABLE_PATH = ["moov", "trak", "mdia", "minf", "stbl"] as const;
+
+/**
+ * `init` without the sample dependency boxes (`sdtp`) that list no sample, or `init` itself when it
+ * has none. ffmpeg 7.1's MP4 muxer writes one into a fragmented stream's init segment, whose
+ * sample tables are empty, for each track whose encoder marked a picture disposable, as libx265 and
+ * libsvtav1 mark their non-reference pictures; AVFoundation then exposes no video track, and
+ * Apple's players say "Cannot Open". ffmpeg 8 writes none for an empty sample table. Boxes with a
+ * 64-bit size are left as they are.
+ */
+export const withoutEmptySampleDependencies = (init: Uint8Array): Uint8Array => {
+  const view = viewOf(init);
+  // A box whose 32-bit size field, just before its type, spans it.
+  const plain = (box: Box): boolean => view.getUint32(box.body - 8) === box.end - box.body + 8;
+  const dropped: Array<Box> = [];
+  const shrunk = new Map<number, number>();
+
+  const visit = (start: number, end: number, ancestors: ReadonlyArray<Box>): void => {
+    for (const box of boxesIn(init, start, end)) {
+      if (ancestors.length < SAMPLE_TABLE_PATH.length) {
+        if (box.type === SAMPLE_TABLE_PATH[ancestors.length]) {
+          visit(box.body, box.end, [...ancestors, box]);
+        }
+      } else if (box.type === "sdtp" && box.end - box.body === 4 && plain(box)) {
+        if (!ancestors.every(plain)) continue;
+        dropped.push(box);
+
+        for (const ancestor of ancestors) {
+          shrunk.set(
+            ancestor.body - 8,
+            (shrunk.get(ancestor.body - 8) ?? 0) + box.end - box.body + 8,
+          );
+        }
+      }
+    }
+  };
+
+  visit(0, init.byteLength, []);
+
+  if (dropped.length === 0) return init;
+
+  // A copy: `slice` of a Node Buffer, as files read back, would share the caller's bytes.
+  const resized = new Uint8Array(init);
+  const resizedView = viewOf(resized);
+
+  for (const [header, bytes] of shrunk) {
+    resizedView.setUint32(header, resizedView.getUint32(header) - bytes);
+  }
+
+  const kept: Array<Uint8Array> = [];
+  let from = 0;
+
+  for (const box of dropped) {
+    kept.push(resized.subarray(from, box.body - 8));
+    from = box.end;
+  }
+
+  kept.push(resized.subarray(from));
+
+  const out = new Uint8Array(kept.reduce((total, part) => total + part.byteLength, 0));
+  let at = 0;
+
+  for (const part of kept) {
+    out.set(part, at);
+    at += part.byteLength;
+  }
+
+  return out;
 };
 
 /**

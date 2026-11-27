@@ -144,6 +144,30 @@ const outlastsDiagnosis = await writeFakeFfmpeg({
 /** Runs as usual, logging every run. */
 const plain = await writeFakeFfmpeg({ logInvocations: true });
 
+/** The tone map fails once, as `once` does, for a stream that encodes HEVC. */
+const toneMapFailsUnderHevc = await writeFakeFfmpeg({
+  rules: TONE_MAP_FAILS,
+  logInvocations: true,
+});
+
+/** What ffmpeg prints when Quick Sync's HEVC encoder fails at start. */
+const HEVC_QSV_FAILED = "[hevc_qsv @ 0x1] Error initializing the encoder: device failed (-17)";
+
+/** The first stream run that encodes HEVC on Quick Sync fails; its probe then fails too. */
+const hevcEncoderFails = await writeFakeFfmpeg({
+  rules: [
+    { token: "hevc_qsv", runs: "hls", stderr: HEVC_QSV_FAILED, arm: "hevc", limit: 1 },
+    { token: "hevc_qsv", runs: "probe", stderr: HEVC_QSV_FAILED, armedBy: "hevc" },
+  ],
+  logInvocations: true,
+});
+
+/** The first stream run that encodes HEVC on Quick Sync fails, naming the encoder; probes pass. */
+const hevcEncoderFailsOnce = await writeFakeFfmpeg({
+  rules: [{ token: "hevc_qsv", runs: "hls", stderr: HEVC_QSV_FAILED, limit: 1 }],
+  logInvocations: true,
+});
+
 /** Runs stall after their first fragment until killed, so a seek replaces a live run. */
 const stalling = await writeFakeFfmpeg({ hlsStallsAfterFragments: 1, logInvocations: true });
 
@@ -155,6 +179,17 @@ const browser: ClientCapabilities = {
   maxHeight: 1080,
   hls: false,
   mse: true,
+};
+
+/** A device that plays H.264 and HEVC SDR, as Safari or an iPhone does. */
+const hevcDevice: ClientCapabilities = {
+  containers: [],
+  videoCodecs: [{ codec: "h264" }, { codec: "hevc", profiles: ["Main"] }],
+  audioCodecs: [{ codec: "aac" }],
+  maxWidth: 1920,
+  maxHeight: 1080,
+  hls: true,
+  mse: false,
 };
 
 /** The browser on a small screen, where a 1080p source is scaled down. */
@@ -936,6 +971,130 @@ describe.skipIf(!hasFfmpeg)("stream recovery", () => {
             [],
             "no generation is left to attach to",
           );
+        }),
+      120_000,
+    );
+  });
+
+  layer(
+    recovering(toneMapFailsUnderHevc),
+    options,
+  )((it) => {
+    it.effect(
+      "keeps an HEVC stream on Quick Sync's HEVC encoder when its tone map is replaced",
+      () =>
+        Effect.gen(function* () {
+          const fileId = yield* addFilm("hevc-kept");
+
+          const film = yield* negotiated({
+            token: signTestToken({ fid: fileId, sid: "film" }),
+            capabilities: hevcDevice,
+            ...CHOICES,
+          });
+
+          assert.strictEqual(film.mode, "transcode-qsv");
+          assert.strictEqual(film.generation, 2);
+          assert.strictEqual(film.video.codec, "hevc", "still HEVC after the replacement");
+          assert.strictEqual(yield* fetchStatus(segmentOf(film.url, 3)), 200);
+
+          const runs = yield* runsOf(toneMapFailsUnderHevc, film.streamId ?? "");
+          const [first = [], replacement = []] = runs;
+
+          assert.lengthOf(runs, 2);
+          assert.include(first, "hevc_qsv");
+          assert.isTrue(replacement.join(" ").includes("zscale"), "tone-mapped on the CPU");
+          assert.include(replacement, "hevc_qsv");
+          assert.deepStrictEqual(valuesAfter(replacement, "-tag:v"), ["hvc1"]);
+          assert.deepStrictEqual(kept(replacement), kept(first));
+        }),
+      120_000,
+    );
+  });
+
+  layer(
+    recovering(hevcEncoderFails),
+    options,
+  )((it) => {
+    it.effect(
+      "falls from HEVC to H.264 on Quick Sync when the HEVC encoder fails, and says why",
+      () =>
+        Effect.gen(function* () {
+          const fileId = yield* addFilm("hevc-lost");
+
+          const film = yield* negotiated({
+            token: signTestToken({ fid: fileId, sid: "film" }),
+            capabilities: hevcDevice,
+            ...CHOICES,
+          });
+
+          assert.strictEqual(film.generation, 2);
+          assert.strictEqual(film.mode, "transcode-qsv", "still on Quick Sync");
+          assert.strictEqual(film.video.codec, "h264", "the next target");
+          assert.strictEqual(yield* fetchStatus(segmentOf(film.url, 3)), 200);
+          assert.deepInclude(film.transcode?.changes[0], {
+            generation: 2,
+            reason: "reproduced",
+            excluded: ["encode.qsv.hevc"],
+          });
+
+          const runs = yield* runsOf(hevcEncoderFails, film.streamId ?? "");
+          const [first = [], replacement = []] = runs;
+
+          assert.lengthOf(runs, 2);
+          assert.include(first, "hevc_qsv");
+          assert.include(replacement, "h264_qsv");
+          assert.deepStrictEqual(valuesAfter(replacement, "-tag:v"), []);
+          assert.deepStrictEqual(kept(replacement), kept(first));
+        }),
+      120_000,
+    );
+  });
+
+  layer(
+    recovering(hevcEncoderFailsOnce),
+    options,
+  )((it) => {
+    it.effect(
+      "continues as H.264 on Quick Sync when only this file fails in the HEVC encoder, and plays the file there again",
+      () =>
+        Effect.gen(function* () {
+          const fileId = yield* addFilm("hevc-file-only");
+
+          const film = yield* negotiated({
+            token: signTestToken({ fid: fileId, sid: "film" }),
+            capabilities: hevcDevice,
+            ...CHOICES,
+          });
+
+          assert.strictEqual(film.generation, 2);
+          assert.strictEqual(film.mode, "transcode-qsv", "still on Quick Sync");
+          assert.strictEqual(film.video.codec, "h264");
+          assert.strictEqual(yield* fetchStatus(segmentOf(film.url, 3)), 200);
+          assert.deepInclude(film.transcode?.changes[0], {
+            generation: 2,
+            reason: "file-only",
+            excluded: ["encode.qsv.hevc"],
+          });
+
+          const runs = yield* runsOf(hevcEncoderFailsOnce, film.streamId ?? "");
+          const [first = [], replacement = []] = runs;
+
+          assert.lengthOf(runs, 2);
+          assert.include(first, "hevc_qsv");
+          assert.include(replacement, "h264_qsv");
+          assert.notInclude(replacement, "libx264");
+          assert.deepStrictEqual(kept(replacement), kept(first));
+          assert.isTrue(kept(first).subtitle);
+          assert.deepStrictEqual(kept(first).maxrate, ["1500000"]);
+
+          const later = yield* negotiated({
+            token: signTestToken({ fid: fileId, sid: "later" }),
+            capabilities: hevcDevice,
+          });
+
+          assert.strictEqual(later.mode, "transcode-qsv", "the file keeps Quick Sync's H.264");
+          assert.strictEqual(later.video.codec, "h264");
+          assert.deepInclude(later.transcode?.stages.at(-1), { op: "encode", domain: "qsv" });
         }),
       120_000,
     );

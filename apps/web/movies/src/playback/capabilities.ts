@@ -3,7 +3,8 @@
  * after a path failed. Browser answers are hints: `canPlayType` says "maybe" for containers it
  * often cannot play, so only a "probably" counts for progressive containers, while codecs count
  * when Media Source Extensions accept them. A path that fails anyway is dropped with
- * `withoutFailedPath` and playback renegotiates.
+ * `withoutFailedPath` and playback renegotiates. Each codec found carries whether the Media
+ * Capabilities API calls its decoding power-efficient (in hardware), once the browser has answered.
  */
 import type { ClientCapabilities, NegotiateResponse } from "@media/contracts/media-playback";
 import { Struct } from "effect";
@@ -16,6 +17,11 @@ export interface MediaSupport {
   readonly isTypeSupported: ((type: string) => boolean) | null;
   /** The display shows high dynamic range (`(dynamic-range: high)`). */
   readonly hdrDisplay: boolean;
+  /**
+   * Whether the browser decodes 1080p of a content type power-efficiently, as the Media
+   * Capabilities API answers; undefined until it has answered, or without the API.
+   */
+  readonly powerEfficient: (type: string) => boolean | undefined;
 }
 
 type VideoCodecSupport = ClientCapabilities["videoCodecs"][number];
@@ -67,23 +73,43 @@ const videoType = (codecs: string): string => `video/mp4; codecs="${codecs}"`;
 const decodes = (support: MediaSupport, type: string): boolean =>
   (support.isTypeSupported?.(type) ?? false) || support.canPlayType(type) === "probably";
 
+/** `powerEfficient` for `type`, when the browser has answered for it. */
+const efficiency = (
+  support: MediaSupport,
+  type: string,
+): Pick<VideoCodecSupport, "powerEfficient"> => {
+  const efficient = support.powerEfficient(type);
+
+  return efficient === undefined ? {} : { powerEfficient: efficient };
+};
+
 const h264Support = (support: MediaSupport): VideoCodecSupport | null => {
   const level = H264_LEVELS.find(([codecs]) => decodes(support, videoType(codecs)));
 
-  return level === undefined ? null : { codec: "h264", maxLevel: level[1], maxBitDepth: 8 };
+  return level === undefined
+    ? null
+    : {
+        codec: "h264",
+        maxLevel: level[1],
+        maxBitDepth: 8,
+        ...efficiency(support, videoType(level[0])),
+      };
 };
 
 const videoSupport = (support: MediaSupport, probe: CodecProbe): VideoCodecSupport | null => {
-  if (!decodes(support, videoType(probe.eightBit))) return null;
+  const eightBit = videoType(probe.eightBit);
+
+  if (!decodes(support, eightBit)) return null;
 
   const tenBit = probe.tenBit !== null && decodes(support, videoType(probe.tenBit));
 
-  if (!tenBit) return { codec: probe.codec, maxBitDepth: 8 };
+  if (!tenBit) return { codec: probe.codec, maxBitDepth: 8, ...efficiency(support, eightBit) };
 
   return {
     codec: probe.codec,
     maxBitDepth: 10,
     dynamicRanges: support.hdrDisplay ? ["hdr10", "hlg"] : [],
+    ...efficiency(support, eightBit),
   };
 };
 
@@ -126,8 +152,10 @@ export const detectCapabilities = (support: MediaSupport): ClientCapabilities =>
 
 /**
  * The capabilities without the path that just failed, so renegotiating picks the next rung: a
- * failed direct file drops progressive playback, and a failed copied stream drops its video codec
- * (except H.264, which every transcode produces). Null when nothing is left to drop.
+ * failed direct file drops progressive playback, and a failed stream, copied or encoded, drops its
+ * video codec, so a copy becomes an encode and an HEVC or AV1 encode becomes whichever codec the
+ * media service picks from the rest. H.264 is never dropped: it is the codec every encode falls
+ * back to. Null when nothing is left to drop.
  */
 export const withoutFailedPath = (
   capabilities: ClientCapabilities,
@@ -139,17 +167,13 @@ export const withoutFailedPath = (
       : Struct.evolve(capabilities, { containers: () => [] });
   }
 
-  if (stream.mode === "remux" || stream.mode === "audio-transcode") {
-    if (stream.video.codec === "h264") return null;
+  if (stream.video.codec === "h264") return null;
 
-    const videoCodecs = capabilities.videoCodecs.filter(
-      (support) => support.codec !== stream.video.codec,
-    );
+  const videoCodecs = capabilities.videoCodecs.filter(
+    (support) => support.codec !== stream.video.codec,
+  );
 
-    return videoCodecs.length === capabilities.videoCodecs.length
-      ? null
-      : Struct.evolve(capabilities, { videoCodecs: () => videoCodecs });
-  }
-
-  return null;
+  return videoCodecs.length === capabilities.videoCodecs.length
+    ? null
+    : Struct.evolve(capabilities, { videoCodecs: () => videoCodecs });
 };

@@ -58,10 +58,11 @@ export interface DownloadOptions {
 }
 
 /**
- * Chooses what `client` downloads of `probe` at `quality`. A file another audio track was asked
- * for, or in a container the device cannot open, is written as an MP4 even when its streams play
- * as they are. Encodes run in software: a download waits for no player, and the GPU stays free for
- * streams.
+ * Chooses what `client` downloads of `probe` at `quality`, by the decision streams use, strictly
+ * within the quality's size and bitrate. A file another audio track was asked for, or in a
+ * container the device cannot open, is written as an MP4 even when its streams play as they are.
+ * Encodes run in software: a download waits for no player, and the GPU stays free for streams.
+ * The CPU encodes H.264 for a client that plays it, else HEVC or AV1, as it does for streams.
  */
 export const decideDownload = (
   probe: MediaProbe,

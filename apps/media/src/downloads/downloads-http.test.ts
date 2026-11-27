@@ -1,5 +1,5 @@
 import { assert, describe, layer } from "@effect/vitest";
-import { Effect, FileSystem, Path, Predicate, Schedule, Schema } from "effect";
+import { Clock, Duration, Effect, FileSystem, Path, Predicate, Schedule, Schema } from "effect";
 import { HttpClient, HttpClientRequest, type HttpClientResponse } from "effect/http";
 
 import {
@@ -10,7 +10,10 @@ import {
 
 import * as MediaTools from "../media/media-tools.ts";
 import { parseFfprobeJson } from "../media/media-probe.ts";
-import { writeFakeFfmpeg } from "../testing/fake-ffmpeg.ts";
+import { capabilityOf } from "../playback/capability-inventory.ts";
+import * as TranscodeCapabilities from "../playback/transcode-capabilities.ts";
+import { capabilityKey, ImplId } from "../playback/video-ops.ts";
+import { invocationsOf, writeFakeFfmpeg } from "../testing/fake-ffmpeg.ts";
 import { ffmpegAvailable } from "../testing/fixture-library.ts";
 import * as FixtureWorkspace from "../testing/fixture-workspace.ts";
 import * as MediaTestServer from "../testing/media-test-server.ts";
@@ -25,6 +28,26 @@ const TOOL_TEXT = "Error opening input media/Private Film/movie.mkv: Invalid dat
 const failingMp4 = await writeFakeFfmpeg({
   rules: [{ token: "+faststart", runs: "any", stderr: TOOL_TEXT }],
 });
+
+/** Every capability probe hangs until stopped, as a device that never answers would. */
+const probesHang = await writeFakeFfmpeg({
+  rules: [{ token: "-progress", runs: "probe", hang: true }],
+});
+
+/**
+ * Quick Sync's HEVC probe answers after four seconds, later than a negotiation waits, and every MP4
+ * waits fifteen seconds before it starts, so a download is still running once that probe passed.
+ */
+const lateHevcProbe = await writeFakeFfmpeg({
+  rules: [
+    { token: "hevc_qsv", runs: "probe", delayMs: 4000 },
+    { token: "+faststart", runs: "any", delayMs: 15_000 },
+  ],
+  logInvocations: true,
+});
+
+/** The capability key of Quick Sync's 8-bit HEVC encode. */
+const HEVC_QSV = capabilityKey(ImplId("encode.qsv.hevc"), "8/cbr");
 
 const iphone: ClientCapabilities = {
   containers: ["mp4", "mov"],
@@ -487,6 +510,110 @@ describe.skipIf(!hasFfmpeg)("a download whose ffmpeg fails", () => {
           assert.notInclude(JSON.stringify(warnings), "Private Film");
         }),
       120_000,
+    );
+  });
+});
+
+describe.skipIf(!hasFfmpeg)("downloads on a Quick Sync server whose probes never answer", () => {
+  layer(
+    MediaTestServer.layer(
+      { FFMPEG_PATH: probesHang, HARDWARE_ACCELERATION: "qsv" },
+      { negotiationBudget: Duration.seconds(10) },
+    ),
+    { excludeTestServices: true, timeout: "120 seconds" },
+  )((it) => {
+    it.effect(
+      "answers a download of the original, and starts a CPU encode, waiting for no probe",
+      () =>
+        Effect.gen(function* () {
+          const server = yield* MediaTestServer.Service;
+          const { library } = yield* FixtureWorkspace.Service;
+          const fileId = server.fileId("movies", library.directMovie);
+          const started = yield* Clock.currentTimeMillis;
+
+          const original = yield* readyOf(
+            yield* prepared({
+              token: signTestToken({ fid: fileId, sid: "cold-original", pur: "download" }),
+              capabilities: iphone,
+              quality: "standard",
+            }),
+          );
+
+          const answered = yield* Clock.currentTimeMillis;
+
+          assert.strictEqual(original.mode, "direct");
+          assert.isBelow(answered - started, 3000, "within a fraction of the 10-second budget");
+
+          const encode = yield* prepared({
+            token: signTestToken({ fid: fileId, sid: "cold-encode", pur: "download" }),
+            capabilities: tinyScreen,
+            quality: "standard",
+          });
+
+          assert.isTrue(Predicate.isTagged(encode, "Preparing"));
+          assert.isBelow((yield* Clock.currentTimeMillis) - answered, 3000);
+        }),
+      60_000,
+    );
+  });
+});
+
+describe.skipIf(!hasFfmpeg)("a download polled while Quick Sync's evidence changes", () => {
+  layer(
+    MediaTestServer.layer(
+      { FFMPEG_PATH: lateHevcProbe, HARDWARE_ACCELERATION: "qsv" },
+      { negotiationBudget: Duration.seconds(1) },
+    ),
+    { excludeTestServices: true, timeout: "180 seconds" },
+  )((it) => {
+    it.effect(
+      "keeps the job the first poll started, encoded as main encodes it for a device that plays H.264",
+      () =>
+        Effect.gen(function* () {
+          const server = yield* MediaTestServer.Service;
+          const { library } = yield* FixtureWorkspace.Service;
+          const capabilities = yield* TranscodeCapabilities.Service;
+          const fs = yield* FileSystem.FileSystem;
+          const fileId = server.fileId("movies", library.directMovie);
+          const token = signTestToken({ fid: fileId, sid: "download-evidence", pur: "download" });
+          const poll = { token, capabilities: tinyScreen, quality: "standard" } as const;
+          const first = yield* prepared(poll);
+
+          assert.isTrue(Predicate.isTagged(first, "Preparing"));
+
+          // Warmup proves Quick Sync's HEVC encoder while the job waits to start.
+          yield* capabilities.inventory.pipe(
+            Effect.filterOrFail(
+              (known) => capabilityOf(known, HEVC_QSV).status === "verified",
+              () => "HEVC on Quick Sync is not verified yet",
+            ),
+            Effect.retry({ schedule: Schedule.spaced("200 millis"), times: 300 }),
+            Effect.orDie,
+          );
+
+          const second = yield* prepared(poll);
+
+          assert.isTrue(
+            Predicate.isTagged(second, "Preparing"),
+            "the same job, still waiting to start",
+          );
+
+          const { ready } = yield* untilReady(poll);
+
+          assert.strictEqual(ready.mode, "transcode-software");
+          assert.deepStrictEqual([ready.video.codec, ready.video.height], ["h264", 120]);
+
+          const runs = (yield* fs.readFileString(invocationsOf(lateHevcProbe)).pipe(Effect.orDie))
+            .split("\n")
+            .filter((line) => line.includes("+faststart"));
+
+          assert.lengthOf(runs, 1, "one MP4 run");
+          assert.include(runs[0], "libx264");
+          assert.isEmpty(
+            server.logged().filter((record) => record.message === "Downloads.mp4_abandoned"),
+          );
+        }),
+      150_000,
     );
   });
 });

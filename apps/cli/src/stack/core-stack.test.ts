@@ -320,7 +320,7 @@ describe.skipIf(core === undefined)("the media CLI against the core", () => {
     ]);
   });
 
-  it("prints where a transcoded stream's stages run and why its chain changed", async () => {
+  it("prints the codec a transcoded stream sends, where its stages run, and why its chain changed", async () => {
     const home = await install();
 
     expect((await login(home, ownerName)).code).toBe(ExitCode.ok);
@@ -357,7 +357,7 @@ describe.skipIf(core === undefined)("the media CLI against the core", () => {
       generation: 2,
       startSeconds: 0,
       durationSeconds: 888,
-      video: { codec: "h264", width: 1920, height: 1080, dynamicRange: "sdr" },
+      video: { codec: "hevc", width: 1920, height: 1080, dynamicRange: "sdr" },
       transcode,
       subtitles: [],
       expiresAt: Date.now() + 3_600_000,
@@ -385,7 +385,7 @@ describe.skipIf(core === undefined)("the media CLI against the core", () => {
 
     expect(human.code, human.stderr).toBe(ExitCode.ok);
     expect(human.stdout.trimEnd().split("\n")).toEqual([
-      `Sintel ${id} (transcode-qsv, from 0:00)`,
+      `Sintel ${id} (transcode-qsv, HEVC, from 0:00)`,
       "stages: Decode · QSV, Move · QSV → CPU, Tone map · CPU, Move · CPU → QSV, Encode · QSV",
       "changed: generation 2 · stage failed · off tonemap.qsv · probe failed too",
       answer.url,

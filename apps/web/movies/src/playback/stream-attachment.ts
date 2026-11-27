@@ -213,7 +213,13 @@ const attachHlsJs = async (
 
     if (failure === null) return;
 
-    if (failure.kind === "media" && mediaRecoveries === 0) {
+    // Recovering the media element cannot buffer a codec the browser refuses, and hls.js reports
+    // nothing fatal after it, so a codec it cannot buffer fails the stream at once.
+    const unbufferable =
+      data.details === Hls.ErrorDetails.BUFFER_ADD_CODEC_ERROR ||
+      data.details === Hls.ErrorDetails.BUFFER_INCOMPATIBLE_CODECS_ERROR;
+
+    if (failure.kind === "media" && mediaRecoveries === 0 && !unbufferable) {
       mediaRecoveries += 1;
       observe(
         PlayerObservation.cases.Recovery.make({

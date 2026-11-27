@@ -102,12 +102,15 @@ type JobState = Data.TaggedEnum<{
 
 const JobState = Data.taggedEnum<JobState>();
 
+type Mp4Plan = Extract<DownloadPlan, { _tag: "Mp4" }>;
+
 interface Job {
   readonly key: string;
   readonly name: string;
   readonly fileId: MediaFileId;
   readonly output: string;
-  readonly estimatedBytes: number;
+  /** What the job writes, as planned when it was queued. */
+  readonly plan: Mp4Plan;
   readonly progress: Ref.Ref<number>;
   readonly state: Ref.Ref<JobState>;
   readonly lastUsed: Ref.Ref<number>;
@@ -122,9 +125,22 @@ export const progressSeconds = (text: string): number | undefined => {
   return last === undefined ? undefined : Number(last) / 1_000_000;
 };
 
-const keyOf = (file: CheckedMediaFile, plan: DownloadPlan): string =>
+/**
+ * A download's identity: the file as it is on disk and what was asked of it. Never the plan, which
+ * moves with capability evidence, so an identical poll finds the job the first one queued.
+ */
+const keyOf = (file: CheckedMediaFile, request: PrepareDownloadRequest): string =>
   createHash("sha256")
-    .update(JSON.stringify([file.fileId, file.sizeBytes, file.modifiedAtMs, plan]))
+    .update(
+      JSON.stringify([
+        file.fileId,
+        file.sizeBytes,
+        file.modifiedAtMs,
+        request.quality,
+        request.audioStreamIndex ?? null,
+        request.capabilities,
+      ]),
+    )
     .digest("hex")
     .slice(0, 24);
 
@@ -156,11 +172,8 @@ const make = Effect.gen(function* () {
   const touch = (job: Job) =>
     Clock.currentTimeMillis.pipe(Effect.flatMap((now) => Ref.set(job.lastUsed, now)));
 
-  const write = (
-    job: Job,
-    file: CheckedMediaFile,
-    plan: Extract<DownloadPlan, { _tag: "Mp4" }>,
-  ) => {
+  const write = (job: Job, file: CheckedMediaFile) => {
+    const plan = job.plan;
     const part = `${job.output}.part`;
     const progress = `${job.output}.progress`;
     const video = file.probe.video;
@@ -184,7 +197,7 @@ const make = Effect.gen(function* () {
 
     const run = Effect.gen(function* () {
       yield* Ref.set(job.state, JobState.Running());
-      yield* space.reserve(job.name, job.estimatedBytes);
+      yield* space.reserve(job.name, plan.estimatedBytes);
       yield* fs.makeDirectory(path.dirname(job.output), { recursive: true });
 
       const written = yield* Ref.make(0);
@@ -314,11 +327,7 @@ const make = Effect.gen(function* () {
     if (yield* unsettled(previous)) yield* abandon(previous, "replaced");
   });
 
-  const jobFor = Effect.fnUntraced(function* (
-    file: CheckedMediaFile,
-    plan: Extract<DownloadPlan, { _tag: "Mp4" }>,
-  ) {
-    const key = keyOf(file, plan);
+  const jobFor = Effect.fnUntraced(function* (key: string, file: CheckedMediaFile, plan: Mp4Plan) {
     const known = yield* Ref.get(jobs);
     const existing = known.get(key);
 
@@ -329,7 +338,7 @@ const make = Effect.gen(function* () {
     );
 
     yield* space.check(
-      queued.reduce((total, job) => total + job.estimatedBytes, plan.estimatedBytes),
+      queued.reduce((total, job) => total + job.plan.estimatedBytes, plan.estimatedBytes),
     );
 
     const name = randomBytes(12).toString("hex");
@@ -339,7 +348,7 @@ const make = Effect.gen(function* () {
       name,
       fileId: file.fileId,
       output: path.join(root, file.fileId, `${name}.mp4`),
-      estimatedBytes: plan.estimatedBytes,
+      plan,
       progress: yield* Ref.make(0),
       state: yield* Ref.make<JobState>(JobState.Queued()),
       lastUsed: yield* Ref.make(yield* Clock.currentTimeMillis),
@@ -360,10 +369,7 @@ const make = Effect.gen(function* () {
         );
 
         if (started) {
-          const fiber = yield* write(job, file, plan).pipe(
-            Effect.interruptible,
-            Effect.forkIn(scope),
-          );
+          const fiber = yield* write(job, file).pipe(Effect.interruptible, Effect.forkIn(scope));
 
           yield* Ref.set(job.writer, Option.some(fiber));
         }
@@ -373,18 +379,11 @@ const make = Effect.gen(function* () {
     );
   });
 
-  const prepare = Effect.fn("Downloads.prepare")(function* (request: PrepareDownloadRequest) {
-    const grant = yield* verifier.verify(request.token, PlaybackToken.DOWNLOAD);
-
-    const file = yield* resolveInsideRoots(grant.fileId, { sidecars: true }).pipe(
-      Effect.provideService(FileResolver.Service, resolver),
-      Effect.provideService(MediaConfig.Service, config),
-      Effect.provideService(FileSystem.FileSystem, fs),
-      Effect.provideService(Path.Path, path),
-    );
-
-    yield* Effect.annotateCurrentSpan({ fileId: grant.fileId, sessionId: grant.sessionId });
-
+  /** What `request` downloads of `file`, by what the CPU may use for it now. */
+  const planFor = Effect.fnUntraced(function* (
+    file: CheckedMediaFile,
+    request: PrepareDownloadRequest,
+  ) {
     const source = file.probe.video;
 
     const intent =
@@ -405,12 +404,49 @@ const make = Effect.gen(function* () {
             excluded: new Set(),
           });
 
-    const plan = decideDownload(file.probe, request.capabilities, request.quality, {
+    return decideDownload(file.probe, request.capabilities, request.quality, {
       audioIndex: request.audioStreamIndex,
       capabilities: known,
       sizeBytes: file.sizeBytes,
     });
+  });
 
+  /**
+   * The job queued under `key`, unless it failed and its cooldown has passed: that one is forgotten,
+   * so the download is planned and written again.
+   */
+  const queuedUnder = Effect.fnUntraced(function* (key: string) {
+    const found = (yield* Ref.get(jobs)).get(key);
+
+    if (found === undefined) return undefined;
+    const state = yield* Ref.get(found.state);
+    const now = yield* Clock.currentTimeMillis;
+
+    if (!JobState.$is("Failed")(state) || now - state.at < Duration.toMillis(FAILED_COOLDOWN)) {
+      return found;
+    }
+
+    yield* forget(found);
+
+    return undefined;
+  });
+
+  const prepare = Effect.fn("Downloads.prepare")(function* (request: PrepareDownloadRequest) {
+    const grant = yield* verifier.verify(request.token, PlaybackToken.DOWNLOAD);
+
+    const file = yield* resolveInsideRoots(grant.fileId, { sidecars: true }).pipe(
+      Effect.provideService(FileResolver.Service, resolver),
+      Effect.provideService(MediaConfig.Service, config),
+      Effect.provideService(FileSystem.FileSystem, fs),
+      Effect.provideService(Path.Path, path),
+    );
+
+    yield* Effect.annotateCurrentSpan({ fileId: grant.fileId, sessionId: grant.sessionId });
+
+    // A poll the job's own request repeats answers from that job, whatever evidence arrived since.
+    const key = keyOf(file, request);
+    const queued = yield* queuedUnder(key);
+    const plan = queued?.plan ?? (yield* planFor(file, request));
     const video = file.probe.video;
 
     if (DownloadPlan.$is("Unsupported")(plan) || video === undefined) {
@@ -462,15 +498,7 @@ const make = Effect.gen(function* () {
       });
     }
 
-    const found = yield* jobFor(file, plan);
-    const now = yield* Clock.currentTimeMillis;
-    const before = yield* Ref.get(found.state);
-
-    const retry =
-      JobState.$is("Failed")(before) && now - before.at >= Duration.toMillis(FAILED_COOLDOWN);
-
-    if (retry) yield* forget(found);
-    const job = retry ? yield* jobFor(file, plan) : found;
+    const job = queued ?? (yield* jobFor(key, file, plan));
 
     yield* hold(grant.sessionId, job);
     yield* touch(job);
@@ -481,7 +509,7 @@ const make = Effect.gen(function* () {
     if (!JobState.$is("Finished")(state)) {
       return DownloadPreparing.make({
         progress: yield* Ref.get(job.progress),
-        estimatedBytes: job.estimatedBytes,
+        estimatedBytes: job.plan.estimatedBytes,
       });
     }
 
@@ -489,14 +517,14 @@ const make = Effect.gen(function* () {
       durationSeconds: file.probe.durationSeconds,
       subtitles: subtitles(),
       expiresAt: grant.expiresAt,
-      mode: plan.mode,
+      mode: job.plan.mode,
       url: verifier.withToken(
         `${base}/media/downloads/${grant.fileId}/${job.name}.mp4`,
         request.token,
       ),
       sizeBytes: state.sizeBytes,
       container: "mp4",
-      video: VideoPlan.$match(plan.video, {
+      video: VideoPlan.$match(job.plan.video, {
         Copy: () => sourceVideo,
         Encode: ({ output }) => ({
           codec: output.codec,
@@ -505,7 +533,7 @@ const make = Effect.gen(function* () {
           dynamicRange: output.dynamicRange,
         }),
       }),
-      audio: AudioPlan.$match(plan.audio, {
+      audio: AudioPlan.$match(job.plan.audio, {
         None: () => undefined,
         Copy: ({ index }) => audioOf(index, false),
         Aac: ({ index }) => audioOf(index, true),

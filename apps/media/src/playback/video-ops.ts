@@ -18,7 +18,56 @@ export type Domain = "cpu" | "qsv" | "vaapi";
 export type GpuDomain = Exclude<Domain, "cpu">;
 
 /** What the transcoder encodes to. */
-export type OutputCodec = "h264";
+export type OutputCodec = "h264" | "hevc" | "av1";
+
+/** Every codec the transcoder encodes to. */
+export const OUTPUT_CODECS: ReadonlyArray<OutputCodec> = ["h264", "hevc", "av1"];
+
+/**
+ * The share of H.264's bitrate an encode in each codec gets for the same picture. HEVC and AV1
+ * need fewer bits for the same quality; these shares are conservative, keeping more bits than the
+ * savings usually quoted (about a half for HEVC, more for AV1), until measured quality says more.
+ */
+export const BITRATE_SHARE: Readonly<Record<OutputCodec, number>> = {
+  h264: 1,
+  hevc: 0.75,
+  av1: 0.65,
+};
+
+/**
+ * One stream an encode may produce, as the decision asks for it and encode rows read it. Rows take
+ * the codec, depth, and colour as data and accept only the entries they register: 8-bit SDR.
+ */
+export interface OutputTarget {
+  readonly codec: OutputCodec;
+  /** Bits per component of the encoded picture. */
+  readonly depth: number;
+  readonly colour: DynamicRange;
+  /** Whether an encoder on the CPU may produce it, or only one on a GPU. */
+  readonly cpuEncode: "allowed" | "refused";
+  /**
+   * The highest level the client declared for the codec, in ffprobe's units, which the encode's
+   * picture, frame rate, and bitrate must fit (`output-levels.ts`); none limits nothing.
+   */
+  readonly level: number | undefined;
+}
+
+/**
+ * Whether a chain from a source of `colour` to `target` maps HDR to SDR: the target is SDR and the
+ * source is not. Each target says it for itself, so one intent may offer an HDR source as HDR to
+ * one target and tone-mapped to the next.
+ */
+export const toneMapsTo = (colour: DynamicRange, target: OutputTarget): boolean =>
+  colour !== "sdr" && target.colour === "sdr";
+
+/** `codec` at 8-bit SDR, from any encoder and at any size: what probes encode. */
+export const sdrTarget = (codec: OutputCodec): OutputTarget => ({
+  codec,
+  depth: 8,
+  colour: "sdr",
+  cpuEncode: "allowed",
+  level: undefined,
+});
 
 /** Whether a frame holds a whole picture or two fields. */
 type Scan = "progressive" | "interlaced";
@@ -65,7 +114,15 @@ export type Op = Data.TaggedEnum<{
   /** HDR to SDR. */
   ToneMap: {};
   BurnImage: { readonly subtitle: SubtitleInput };
-  Encode: { readonly codec: OutputCodec; readonly bitrate: number };
+  /**
+   * `bitrate` is the target's: a cap on the CPU, the rate on a GPU. `level` is the level the
+   * stream states, in ffprobe's units; none leaves it to the encoder.
+   */
+  Encode: {
+    readonly target: OutputTarget;
+    readonly bitrate: number;
+    readonly level: number | undefined;
+  };
   /** Only `assemble` creates moves. */
   Move: { readonly to: Domain };
 }>;
@@ -266,3 +323,23 @@ export const surfaceDepth = (format: "nv12" | "p010le"): number => (format === "
 
 /** A rendering with nothing in it, as a CPU decoder's. */
 export const NOTHING: Rendering = { input: [], filters: [], output: [] };
+
+/** The id of the row that encodes `codec` in `domain`, such as `encode.qsv.hevc`. */
+export const encodeRowId = (domain: Domain, codec: OutputCodec): ImplId =>
+  ImplId(`encode.${domain}.${codec}`);
+
+/**
+ * Whether the encode row of `codec` takes `target`: that codec at 8-bit SDR, the one entry encode
+ * rows register.
+ */
+export const encodesTarget = (codec: OutputCodec, target: OutputTarget): boolean =>
+  target.codec === codec && target.depth === 8 && target.colour === "sdr";
+
+/** What proves the encode row of `codec`: one 8-bit SDR encode of the 8-bit H.264 clip. */
+export const encodeProbes = (codec: OutputCodec): ReadonlyArray<ProbeCase<"Encode">> => [
+  {
+    op: Op.Encode({ target: sdrTarget(codec), bitrate: 1_000_000, level: undefined }),
+    clip: "h264-8",
+    runs: 1,
+  },
+];

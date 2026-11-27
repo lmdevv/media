@@ -98,7 +98,30 @@ Old movies' Convex project, its SDK client, and its command registry were delete
   aside for a while (15 minutes, then 2 hours, then until a restart), and the stream replans without
   it, then in software, then answers `TranscodeFailed`. HDR is tone-mapped to SDR on the GPU
   (`vpp_qsv`, `tonemap_vaapi`) or in software with `zscale` and `tonemap` when the ffmpeg build has
-  them; without either, HDR that the client cannot display is refused.
+  them; without either, HDR that the client cannot display is refused. `vpp_qsv` leaves the
+  source's PQ and BT.2020 on its frames under Debian's ffmpeg 7.1, and its mastering display and
+  content light levels under 7.1 and 9, so Quick Sync's tone map tags its frames BT.709
+  (`setparams`) and drops that metadata (`sidedata`): every encoder would write it, and Apple's
+  players would read the SDR stream as HDR.
+- Output codec: direct play, remuxes, and audio-only conversions come first, as always; only
+  video that must be encoded gets a codec. The decision lists what the client plays, most wanted
+  first: HEVC; AV1 when the client reports decoding it power-efficiently (in hardware) or plays
+  neither HEVC nor H.264; H.264 last. The CPU encodes HEVC or AV1 only for a client without H.264,
+  since libx265 and libsvtav1 cost several times libx264's CPU for a live stream, so a server
+  without a proven GPU encoder for HEVC sends H.264. The planner tries the list in order, a GPU
+  encode of a later codec before a CPU encode of an earlier one. Encodes are 8-bit SDR (H.264
+  High, HEVC Main, AV1 Main), at H.264's bitrates times 0.75 for HEVC and 0.65 for AV1. Each
+  encoder is a row of its own, so a failed `hevc_qsv` leaves the stream and the file `h264_qsv`. An HEVC or AV1 encode fits the level the client declares (`output-levels.ts`): the
+  coded picture (HEVC codes whole 8x8 blocks), its samples a second at the source's frame rate,
+  the bitrate, and HEVC's buffer, twice the bitrate, which Quick Sync counts. The picture shrinks
+  until it fits; a target whose level holds the frame rate at no size is skipped. The encode then
+  tells its encoder the lowest level it holds, as the encoders' own choices disagree (VA-API's
+  AV1 writes 2.1 where 2.0 holds; Quick Sync's AV1 writes 4.0 for a 4.1 stream). H.264 keeps no
+  level table. HEVC is written with the `hvc1` sample entry Apple requires, and every encoder
+  puts an IDR or key frame exactly at each planned segment start (libx265 with closed GOPs, Quick
+  Sync with `forced_idr`). Clients report `powerEfficient` per codec: the movies web app from the
+  Media Capabilities API, the iOS app and Cast profiles for H.264 and HEVC; none of the fixed
+  lists offers AV1.
 - A stream's ffmpeg pauses (`SIGSTOP`) once its output runs `STREAM_BUFFER_AHEAD_SECONDS` (120)
   past the furthest segment the player asked for, and continues (`SIGCONT`) when the player is
   within half of that. A remux copies at disk speed, and without the pause every play wrote most of
@@ -230,8 +253,10 @@ Old movies' Convex project, its SDK client, and its command registry were delete
   audio track. It answers `Ready` at once when the device opens the original file within the
   quality (MP4 or QuickTime, decodable streams, the default audio), with the existing
   `/media/direct` URL. Anything else becomes an MP4 by the playback ladder: the video copied when
-  the device decodes it within the quality, else encoded to H.264 in software; the audio copied
-  when the device decodes it, else stereo AAC; `+faststart` so AVPlayer opens it at once. Until it
+  the device decodes it within the quality, else encoded in software, to H.264, or to HEVC or AV1
+  for a device that plays no H.264; the audio copied when the device decodes it, else stereo AAC;
+  `+faststart` so AVPlayer opens it at once. A GPU encode would need admission that waits for a
+  free encoder slot and never takes a viewer's, which encoder admission does not offer. Until it
   is written, prepare answers `Preparing` with progress (the tail of ffmpeg's `-progress` output)
   and an upper bound on the size (the encode's rates, with copied audio counted at 1.6 Mb/s), and
   the app asks again. Unlike playback, the quality is a limit: a source this host cannot bring
@@ -240,7 +265,9 @@ Old movies' Convex project, its SDK client, and its command registry were delete
 - The MP4s are written one at a time at the lowest CPU priority (`ffmpegInBackground`) and take no
   transcode slot, so playback always wins. They live in
   `TRANSCODE_DIR/downloads/<fileId>/<name>.mp4`. One job per hash of the file's identity (ID,
-  size, modification time) and the plan, so devices asking for the same thing share one file;
+  size, modification time) and the request (quality, audio track, the device's capabilities), so
+  devices asking the same share one file and a poll answers from the job its request started,
+  whatever capability evidence arrived since;
   each run gets a random name, so a plan written again is served at a new URL and a resumed
   transfer never mixes bytes of two runs. The MP4 being written reserves its estimate in a ledger
   streams share (`TranscodeSpace`), so streams keep `MIN_FREE_TRANSCODE_MB` beyond it; queued MP4s

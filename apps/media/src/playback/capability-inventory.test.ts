@@ -143,7 +143,7 @@ describe("record", () => {
     assert.strictEqual(capabilityOf(late, DECODE).status, "unknown");
 
     // Another domain's keys keep their epochs.
-    const cpu = capabilityKey(ImplId("encode.cpu"), "h264/8/crf");
+    const cpu = capabilityKey(ImplId("encode.cpu.h264"), "8/crf");
 
     assert.strictEqual(capabilityOf(changed, cpu).epoch, capabilityOf(empty, cpu).epoch);
   });
@@ -337,7 +337,7 @@ describe("notReproduced", () => {
   });
 
   it("never keeps a file off a CPU row, whatever a probe of it showed", () => {
-    const encodeCpu = capabilityKey(ImplId("encode.cpu"), "h264/8/crf");
+    const encodeCpu = capabilityKey(ImplId("encode.cpu.h264"), "8/crf");
     const decodeCpu = capabilityKey(ImplId("decode.cpu"), "h264/yuv420p");
     const shared = recorded(recorded(empty, encodeCpu), decodeCpu);
     const epochOf = (key: typeof encodeCpu) => capabilityOf(shared, key).epoch;
@@ -349,7 +349,7 @@ describe("notReproduced", () => {
     ];
 
     for (const inventory of after) {
-      assert.isFalse(excludedIn(inventory, 0).has(ImplId("encode.cpu")));
+      assert.isFalse(excludedIn(inventory, 0).has(ImplId("encode.cpu.h264")));
       assert.isFalse(excludedIn(inventory, 0).has(ImplId("decode.cpu")));
     }
   });
@@ -357,14 +357,14 @@ describe("notReproduced", () => {
 
 describe("forget", () => {
   it("forgets what a changed device knew, and moves its epochs on", () => {
-    const known = recorded(recorded(empty), capabilityKey(ImplId("encode.cpu"), "h264/8/crf"));
+    const known = recorded(recorded(empty), capabilityKey(ImplId("encode.cpu.h264"), "8/crf"));
     const before = capabilityOf(known, TONE_MAP).epoch;
     const changed = forget(known, "qsv");
 
     assert.strictEqual(capabilityOf(changed, TONE_MAP).status, "unknown");
     assert.isAbove(capabilityOf(changed, TONE_MAP).epoch, before);
     assert.strictEqual(
-      capabilityOf(changed, capabilityKey(ImplId("encode.cpu"), "h264/8/crf")).status,
+      capabilityOf(changed, capabilityKey(ImplId("encode.cpu.h264"), "8/crf")).status,
       "verified",
     );
   });

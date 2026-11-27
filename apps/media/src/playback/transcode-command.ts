@@ -9,7 +9,9 @@
  * keyframe is where its leading pictures start: frames before its own time, the time plans use.
  * Transcodes place keyframes on the planned segment starts. An encode renders its pipeline
  * (`video-render.ts`): the device its GPU stages open, the decoder's flags, one filter graph, and
- * the encoder, each stage on the CPU or a GPU as the plan placed it.
+ * the encoder, each stage on the CPU or a GPU as the plan placed it. HEVC, copied or encoded, is
+ * written with the `hvc1` sample entry Apple's players require (parameter sets in the sample entry
+ * only); ffmpeg's default for it is `hev1`. H.264 (`avc1`) and AV1 (`av01`) have one entry each.
  */
 import { AudioPlan, VideoPlan } from "./playback-decision.ts";
 import type { LogOwners } from "./transcode-recovery.ts";
@@ -25,7 +27,7 @@ export interface HlsCommand {
   /** First planned segment start this run produces, on the source timeline. */
   readonly from: number;
   readonly videoIndex: number;
-  /** ffprobe's name for the source video's codec, which a copy tags (`hvc1` for HEVC). */
+  /** ffprobe's name for the source video's codec, which a copy keeps. */
   readonly videoCodec: string;
   readonly video: VideoPlan;
   readonly audio: AudioPlan;
@@ -97,21 +99,26 @@ const rendered = (command: EncodeSource, video: Encode): RenderedVideo => {
   });
 };
 
+/** The sample entry the output's video track is written with, for the codec it delivers. */
+const sampleEntry = (codec: string): ReadonlyArray<string> =>
+  codec === "hevc" ? ["-tag:v", "hvc1"] : [];
+
 const videoArgs = (
   command: EncodeSource,
   encoded: RenderedVideo | undefined,
 ): ReadonlyArray<string> =>
-  encoded === undefined
+  encoded === undefined || !VideoPlan.$is("Encode")(command.video)
     ? [
         "-map",
         `0:${String(command.videoIndex)}`,
         "-c:v",
         "copy",
-        ...(command.videoCodec === "hevc" ? ["-tag:v", "hvc1"] : []),
+        ...sampleEntry(command.videoCodec),
       ]
     : [
         ...graphArgs(encoded, { input: 0, stream: command.videoIndex }),
         ...encoded.output,
+        ...sampleEntry(command.video.output.codec),
         ...(command.segmentStarts.length === 0
           ? []
           : ["-force_key_frames", command.segmentStarts.map(seconds).join(",")]),

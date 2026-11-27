@@ -10,7 +10,7 @@ import {
   planVideo,
   type VideoIntent,
 } from "./video-pipeline.ts";
-import type { SourceVideo } from "./video-ops.ts";
+import { type OutputCodec, sdrTarget, type SourceVideo } from "./video-ops.ts";
 
 const hlsCommandArgs = (command: HlsCommand): ReadonlyArray<string> => hlsCommand(command).args;
 
@@ -34,6 +34,10 @@ const audioPart = (args: ReadonlyArray<string>): ReadonlyArray<string> =>
 
 interface EncodeOptions {
   readonly codec?: string;
+  /** What the encode produces; H.264 when absent. */
+  readonly output?: OutputCodec;
+  /** The level the client declared for `output`, in ffprobe's units. */
+  readonly level?: number;
   readonly bitDepth?: number;
   readonly toneMap?: boolean;
   readonly burnSubtitle?: number;
@@ -45,7 +49,8 @@ const DEVICES = { qsv: "/dev/dri/renderD128", vaapi: "/dev/dri/renderD129" } as 
 
 /**
  * The plan a 1920x1080 source gets on `domain` (and the CPU) when the device verified everything:
- * an 8 Mbit/s H.264 encode at its size, tone-mapped from HDR10 when asked.
+ * an 8 Mbit/s H.264 encode at its size, or `output` at its share of that, tone-mapped from HDR10
+ * when asked.
  */
 const encode = (domain: "qsv" | "vaapi" | "software", options: EncodeOptions) => {
   const depth = options.bitDepth ?? 8;
@@ -62,8 +67,8 @@ const encode = (domain: "qsv" | "vaapi" | "software", options: EncodeOptions) =>
   };
 
   const intent: VideoIntent = {
-    codec: "h264",
-    toneMap,
+    targets: [{ ...sdrTarget(options.output ?? "h264"), level: options.level }],
+    frameRate: undefined,
     bounds: { width: 1920, height: 1080 },
     cpuEncodeBounds: { width: 1920, height: 1080 },
     maxBitrate: undefined,
@@ -218,6 +223,28 @@ describe("hlsCommandArgs", () => {
     ]);
     expect(after(args, "-force_key_frames")).toBe("1.400000,3.400000");
   });
+
+  it.each<OutputCodec>(["h264", "hevc", "av1"])(
+    "tags %s tone-mapped on Quick Sync as BT.709 SDR and drops the source's HDR metadata",
+    (output) => {
+      const args = hlsCommandArgs({
+        ...command(AudioPlan.Copy({ index: 1 }), "aac"),
+        videoCodec: "hevc",
+        video: encode("qsv", { codec: "hevc", bitDepth: 10, toneMap: true, output }),
+      });
+
+      expect(after(args, "-vf")).toBe(
+        [
+          "hwmap",
+          "format=qsv",
+          "vpp_qsv=w=1920:h=1080:format=nv12:tonemap=1:out_color_matrix=bt709:out_color_primaries=bt709:out_color_transfer=bt709",
+          "setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709",
+          "sidedata=mode=delete:type=MASTERING_DISPLAY_METADATA",
+          "sidedata=mode=delete:type=CONTENT_LIGHT_LEVEL",
+        ].join(","),
+      );
+    },
+  );
 
   it("uploads frames the GPU cannot decode, in the source's bit depth", () => {
     const args = hlsCommandArgs({
@@ -449,6 +476,205 @@ describe("hlsCommandArgs", () => {
     }
   });
 
+  it.each<readonly [OutputCodec, "software" | "qsv" | "vaapi", ReadonlyArray<string>]>([
+    [
+      "h264",
+      "software",
+      [
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-profile:v",
+        "high",
+        "-crf",
+        "23",
+        "-maxrate",
+        "8000000",
+        "-bufsize",
+        "16000000",
+      ],
+    ],
+    [
+      "hevc",
+      "software",
+      [
+        "libx265",
+        "-preset",
+        "superfast",
+        "-profile:v",
+        "main",
+        "-crf",
+        "23",
+        "-maxrate",
+        "6000000",
+        "-bufsize",
+        "12000000",
+        "-forced-idr",
+        "1",
+        "-x265-params",
+        "log-level=error:open-gop=0",
+        "-tag:v",
+        "hvc1",
+      ],
+    ],
+    [
+      "av1",
+      "software",
+      [
+        "libsvtav1",
+        "-preset",
+        "9",
+        "-crf",
+        "30",
+        "-maxrate",
+        "5200000",
+        "-bufsize",
+        "10400000",
+        "-svtav1-params",
+        "lp=3:hierarchical-levels=3:lookahead=0",
+      ],
+    ],
+    [
+      "h264",
+      "qsv",
+      [
+        "h264_qsv",
+        "-preset",
+        "veryfast",
+        "-b:v",
+        "8000000",
+        "-maxrate",
+        "8000000",
+        "-bufsize",
+        "16000000",
+        "-forced_idr",
+        "1",
+      ],
+    ],
+    [
+      "hevc",
+      "qsv",
+      [
+        "hevc_qsv",
+        "-preset",
+        "veryfast",
+        "-profile:v",
+        "main",
+        "-b:v",
+        "6000000",
+        "-maxrate",
+        "6000000",
+        "-bufsize",
+        "12000000",
+        "-forced_idr",
+        "1",
+        "-tag:v",
+        "hvc1",
+      ],
+    ],
+    [
+      "av1",
+      "qsv",
+      [
+        "av1_qsv",
+        "-preset",
+        "veryfast",
+        "-profile:v",
+        "main",
+        "-b:v",
+        "5200000",
+        "-maxrate",
+        "5200000",
+        "-bufsize",
+        "10400000",
+        "-forced_idr",
+        "1",
+      ],
+    ],
+    [
+      "h264",
+      "vaapi",
+      [
+        "h264_vaapi",
+        "-profile:v",
+        "high",
+        "-b:v",
+        "8000000",
+        "-maxrate",
+        "8000000",
+        "-bufsize",
+        "16000000",
+      ],
+    ],
+    [
+      "hevc",
+      "vaapi",
+      [
+        "hevc_vaapi",
+        "-profile:v",
+        "main",
+        "-b:v",
+        "6000000",
+        "-maxrate",
+        "6000000",
+        "-bufsize",
+        "12000000",
+        "-tag:v",
+        "hvc1",
+      ],
+    ],
+    [
+      "av1",
+      "vaapi",
+      [
+        "av1_vaapi",
+        "-profile:v",
+        "main",
+        "-b:v",
+        "5200000",
+        "-maxrate",
+        "5200000",
+        "-bufsize",
+        "10400000",
+      ],
+    ],
+  ])(
+    "encodes %s on %s with its rate control and sample entry, keyframes at the planned starts",
+    (output, domain, encoder) => {
+      const args = hlsCommandArgs({
+        ...command(AudioPlan.Copy({ index: 1 }), "aac"),
+        video: encode(domain, { output }),
+      });
+
+      expect(
+        args.slice(args.indexOf("-c:v"), args.indexOf("-map", args.indexOf("-c:v"))),
+      ).toStrictEqual(["-c:v", ...encoder, "-force_key_frames", "1.400000,3.400000"]);
+    },
+  );
+
+  it.each<readonly [OutputCodec, "software" | "qsv" | "vaapi", number, ReadonlyArray<string>]>([
+    ["hevc", "software", 153, ["-x265-params", "log-level=error:open-gop=0:level-idc=41"]],
+    ["av1", "software", 19, ["-svtav1-params", "lp=3:hierarchical-levels=3:lookahead=0:level=41"]],
+    ["hevc", "qsv", 153, ["-level", "41"]],
+    ["av1", "qsv", 19, ["-level", "41"]],
+    ["hevc", "vaapi", 153, ["-level", "123"]],
+    ["av1", "vaapi", 19, ["-level", "9"]],
+  ])(
+    "states the level a %s encode on %s holds as its encoder takes it, under the client's %i",
+    (output, domain, declared, stated) => {
+      // 1080p at 60 frames a second, as an unknown frame rate counts, needs level 4.1 of both.
+      const args = hlsCommandArgs({
+        ...command(AudioPlan.Copy({ index: 1 }), "aac"),
+        video: encode(domain, { output, level: declared }),
+      });
+
+      const encoder = args.slice(args.indexOf("-c:v"), args.indexOf("-force_key_frames"));
+      const at = encoder.indexOf(stated[0] ?? "");
+
+      expect(encoder.slice(at, at + stated.length)).toStrictEqual(stated);
+    },
+  );
+
   it("changes no other run", () => {
     const expected = [
       "-hide_banner",
@@ -555,6 +781,12 @@ describe("mp4CommandArgs", () => {
     expect(after(args, "-movflags")).toBe("+faststart");
     expect(after(args, "-progress")).toBe("/tmp/downloads/f/key.mp4.progress");
     expect(args.slice(-4)).toStrictEqual(["-f", "mp4", "-y", "/tmp/downloads/f/key.mp4.part"]);
+  });
+
+  it("writes an HEVC encode with the hvc1 sample entry, and H.264 and AV1 with their own", () => {
+    expect(after(mp4(encode("qsv", { output: "hevc" })), "-tag:v")).toBe("hvc1");
+    expect(mp4(encode("qsv", { output: "av1" }))).not.toContain("-tag:v");
+    expect(mp4(encode("software", {}))).not.toContain("-tag:v");
   });
 
   it("encodes in software without a segment plan", () => {

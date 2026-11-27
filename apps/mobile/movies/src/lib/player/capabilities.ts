@@ -3,7 +3,8 @@
  * runtime codec query like a browser's `canPlayType`, so this is a fixed list of what iOS 17
  * decodes: MP4 and QuickTime files over byte ranges, H.264 up to level 5.2, HEVC Main and Main 10
  * with HDR10, HLG, and Dolby Vision, the audio codecs Core Audio decodes, and fMP4 HLS for
- * everything else. A file in another container (MKV, WebM, AVI) arrives remuxed into HLS.
+ * everything else. A file in another container (MKV, WebM, AVI) arrives remuxed into HLS. Every
+ * iPhone decodes H.264 and HEVC in hardware; the list has no AV1, which only the newest decode.
  */
 import type { ClientCapabilities } from "@media/contracts/media-playback";
 
@@ -14,12 +15,13 @@ const H264_MAX_LEVEL = 52;
 export const IOS_CAPABILITIES = {
   containers: ["mp4", "mov"],
   videoCodecs: [
-    { codec: "h264", maxLevel: H264_MAX_LEVEL, maxBitDepth: 8 },
+    { codec: "h264", maxLevel: H264_MAX_LEVEL, maxBitDepth: 8, powerEfficient: true },
     {
       codec: "hevc",
       profiles: ["Main", "Main 10"],
       maxBitDepth: 10,
       dynamicRanges: ["hdr10", "hlg", "dolby-vision"],
+      powerEfficient: true,
     },
   ],
   audioCodecs: [

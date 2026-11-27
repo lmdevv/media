@@ -5,6 +5,7 @@
 #   verify-media.sh doctor [--side S]
 #   verify-media.sh hardware [--side S] none|qsv|vaapi
 #   verify-media.sh hardware-matrix [--side S] [--paths cpu,qsv,vaapi] [--rows ROW,...] [--grid-only]
+#   verify-media.sh apple-check [--side S] [--paths cpu,qsv,vaapi] [--rows ROW,...] | apple-check FILE...
 #   verify-media.sh browser [--side S] [--app movies|music|account] <command> [flags]
 #   verify-media.sh cli [--side S] [--as PERSON] -- <media args>
 #   verify-media.sh logs [--side S] [lines]
@@ -672,6 +673,59 @@ cmd_hardware_matrix() {
     --container "$(container media)" --url "$(url)" --cli "$cli_js" --image "$(read_state image)" \
     --out "$evidence_root/hardware-matrix" --run "$run" --uid "$(id -u)" --gid "$(id -g)" "${args[@]}"
 }
+
+# Asks AVFoundation on the Mac ($MAC_HOST) what it makes of the bytes the grid's cells were
+# served (each cell's start.mp4 and seek.mp4: the init segment, then its fragments), or of the FILEs
+# named: whether it exposes a video track, and how many frames it decodes. ffmpeg reading the bytes
+# well is no proof that Apple's players open them: an init segment AVFoundation refuses still
+# probes and decodes in ffmpeg. Prints one line per file, `not checked` for every file when the Mac
+# could not run the check, and fails unless every file showed video and decoded a frame. It runs in a
+# subshell, whose exit removes its staging folder.
+cmd_apple_check() (
+  take_side "$@"
+  local paths="cpu,qsv,vaapi" rows="" files=() i=0 f path row
+  while ((i < ${#args[@]})); do
+    case "${args[i]}" in
+      --paths) paths="${args[i + 1]:?--paths needs a list}"; i=$((i + 2)) ;;
+      --rows) rows="${args[i + 1]:?--rows needs a list}"; i=$((i + 2)) ;;
+      *) files+=("${args[i]}"); i=$((i + 1)) ;;
+    esac
+  done
+  stage="$(mktemp -d "${TMPDIR:-/tmp}/apple-check.XXXXXX")"
+  trap 'rm -rf -- "$stage"' EXIT
+  if ((${#files[@]} == 0)); then
+    local cells="$evidence_root/hardware-matrix/$side"
+    [[ -d "$cells" ]] || die "no hardware-matrix cells for the $side side under $cells; run hardware-matrix first"
+    for path in ${paths//,/ }; do
+      for f in "$cells/$path"/*/start.mp4 "$cells/$path"/*/seek.mp4; do
+        [[ -f "$f" ]] || continue
+        row="$(basename "$(dirname "$f")")"
+        [[ -z "$rows" || ",$rows," == *",$row,"* ]] || continue
+        ln -s "$f" "$stage/$path-$row-$(basename "$f")"
+      done
+    done
+  else
+    for f in "${files[@]}"; do
+      [[ -f "$f" ]] || die "apple-check: no file $f"
+      ln -s "$(cd "$(dirname "$f")" && pwd)/$(basename "$f")" "$stage/$(basename "$f")"
+    done
+  fi
+  ln -s "$scripts/apple-check.swift" "$stage/apple-check.swift"
+  local names
+  names="$(cd "$stage" && find . -name '*.mp4' -printf '%f\n' | sort)"
+  [[ -n "$names" ]] || die "apple-check: no MP4s to check"
+  local report
+  if ! report="$(tar -C "$stage" -chf - . | ssh -o BatchMode=yes -o ConnectTimeout=10 "$mac" \
+    'set -e; d=$(mktemp -d /tmp/verify-media-apple.XXXXXX); trap "rm -rf \"$d\"" EXIT; tar -xf - -C "$d"; cd "$d"
+     swiftc -O -o apple-check apple-check.swift >/dev/null 2>&1; ./apple-check *.mp4' 2>&1)"; then
+    sed 's/$/ not checked/' <<<"$names"
+    die "apple-check: AVFoundation could not run on $mac: $(tail -1 <<<"$report")"
+  fi
+  echo "$report"
+  [[ "$(wc -l <<<"$report")" -eq "$(wc -l <<<"$names")" ]] ||
+    die "apple-check: AVFoundation answered for $(wc -l <<<"$report") of $(wc -l <<<"$names") files"
+  ! grep -qvE ' video=true frames=[1-9]' <<<"$report"
+)
 
 side_phase() {
   if [[ -n "$(read_state ready)" ]]; then echo ready
@@ -1385,6 +1439,7 @@ main() {
     lyrics-probe) cmd_lyrics_probe "$@" ;;
     hardware) cmd_hardware "$@" ;;
     hardware-matrix) cmd_hardware_matrix "$@" ;;
+    apple-check) cmd_apple_check "$@" ;;
     ios) cmd_ios "$@" ;;
     evidence) cmd_evidence "$@" ;;
     status) cmd_status ;;

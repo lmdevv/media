@@ -1,5 +1,6 @@
 import {
   MEDIA_ROUTES,
+  NegotiateRequest,
   NegotiateResponse,
   SeekRequest,
   SeekResponse,
@@ -44,6 +45,77 @@ export const recordStreams = (page: Page): ReadonlyArray<NegotiatedStream> => {
   });
 
   return streams;
+};
+
+const negotiateRequest = Schema.toCodecJson(NegotiateRequest);
+
+/**
+ * A negotiation the page sent: the video codecs it listed, where it asked the stream to start,
+ * and the mode and video codec of the stream it was answered, once answered.
+ */
+export interface AskedStream {
+  readonly codecs: ReadonlyArray<string>;
+  readonly startSeconds: number | undefined;
+  readonly answered:
+    | { readonly mode: PlaybackMode; readonly codec: string; readonly streamId: string | undefined }
+    | undefined;
+}
+
+/**
+ * Sends the page's first negotiation on as a device that plays HEVC alone would ask, so a media
+ * service on the CPU encodes HEVC for it, and every later one as the page sent it, until the route
+ * is removed; records each with the codecs the page itself listed. The answer to the second, which
+ * a failed HEVC stream sends without HEVC, reaches the page only once `late` settles.
+ */
+export const askForHevcFirst = async (
+  page: Page,
+  late: Promise<void> = Promise.resolve(),
+): Promise<ReadonlyArray<AskedStream>> => {
+  const asked: Array<AskedStream> = [];
+
+  await page.route(`**${MEDIA_ROUTES.negotiate}`, async (route) => {
+    const request = Schema.decodeUnknownSync(negotiateRequest)(route.request().postDataJSON());
+    const listed = request.capabilities.videoCodecs;
+
+    const sent =
+      asked.length === 0
+        ? {
+            ...request,
+            capabilities: {
+              ...request.capabilities,
+              videoCodecs: listed.filter((support) => support.codec === "hevc"),
+            },
+          }
+        : request;
+
+    const index = asked.length;
+
+    const codecs = listed.map((support) => support.codec);
+    const { startSeconds } = request;
+
+    asked.push({ codecs, startSeconds, answered: undefined });
+
+    const response = await route.fetch({
+      postData: JSON.stringify(Schema.encodeSync(negotiateRequest)(sent)),
+    });
+
+    if (index === 1) await late;
+
+    asked[index] = {
+      codecs,
+      startSeconds,
+      answered: Option.getOrUndefined(
+        Option.map(decodeStream(await response.text()), ({ mode, video, streamId }) => ({
+          mode,
+          codec: video.codec,
+          streamId,
+        })),
+      ),
+    };
+    await route.fulfill({ response }).catch(() => undefined);
+  });
+
+  return asked;
 };
 
 const capacityReached = Schema.encodeSync(

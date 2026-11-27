@@ -46,7 +46,12 @@ import {
   videoState,
   writeText,
 } from "./playback-stack";
-import { markSeekAnswers, recordStreams, refuseQualityCaps } from "./negotiated-streams";
+import {
+  askForHevcFirst,
+  markSeekAnswers,
+  recordStreams,
+  refuseQualityCaps,
+} from "./negotiated-streams";
 import type { NegotiatedStream } from "./negotiated-streams";
 
 const stack = await reachableStack();
@@ -1865,6 +1870,137 @@ test("touch: a tap opens the volume slider before muting, and the picker plays a
   await phonePicker.getByRole("button", { name: new RegExp(EPISODES[0], "u") }).tap();
   await expect(handset).toHaveURL(new RegExp(`episodeId=${first}`, "u"));
   await phone.close();
+});
+
+/** Lists HEVC in Media Source Extensions, as a browser does that names a decoder it cannot use. */
+const listHevc = (): void => {
+  const source = window.MediaSource;
+  const supported = source.isTypeSupported.bind(source);
+
+  source.isTypeSupported = (type) => type.includes("hvc1") || supported(type);
+};
+
+test("a stream that fails in HEVC gives way once to one without it, which plays, and HEVC stays off", async ({
+  browser,
+}) => {
+  if (stack === null) return;
+
+  const viewer = await signedInPage(browser, owner.person);
+  const asked = await askForHevcFirst(viewer);
+  const answered = () => asked.map((each) => each.answered?.codec);
+  const panel = viewer.getByRole("dialog", { name: TRACKS });
+
+  await viewer.context().addInitScript(listHevc);
+  await viewer.goto(moviesPath(`/watch/${titleId(MOVIES.remux)}?start=0`));
+  await expectPlayingPast(viewer, 1, 60_000);
+
+  // This Chromium has no HEVC decoder, so hls.js cannot buffer the HEVC transcode, and the player
+  // asks again without HEVC. It decodes AV1, but not power-efficiently, so H.264 comes next, here
+  // copied from the file; a browser that decodes AV1 efficiently would get AV1 before H.264.
+  expect(answered()).toStrictEqual(["hevc", "h264"]);
+  expect(asked[0]?.codecs).toContain("hevc");
+  expect(asked[1]?.codecs).not.toContain("hevc");
+  expect(asked.map((each) => each.answered?.mode)).toStrictEqual(["transcode-software", "remux"]);
+
+  // Playing on asks for nothing more: the fallback runs once.
+  await expectPlayingPast(viewer, 3);
+  expect(asked).toHaveLength(2);
+
+  // Another quality later in the playback asks without HEVC too.
+  await revealControls(viewer);
+  await viewer.getByRole("button", { name: TRACKS }).click();
+  await panel.getByRole("radio", { name: "480p" }).click();
+  await expect.poll(() => answered()[2]).toBe("h264");
+
+  expect(asked[2]?.codecs).not.toContain("hevc");
+  expect(asked).toHaveLength(3);
+  await viewer.context().close();
+});
+
+test("a seek while the player tries another way plays from where the seek went", async ({
+  browser,
+}) => {
+  if (stack === null) return;
+
+  const viewer = await signedInPage(browser, owner.person);
+  const late = Promise.withResolvers<void>();
+  const asked = await askForHevcFirst(viewer, late.promise);
+
+  await viewer.context().addInitScript(listHevc);
+  await viewer.goto(moviesPath(`/watch/${titleId(MOVIES.remux)}?start=0`));
+
+  // HEVC fails to buffer, and the player asks again without it; that answer waits.
+  await expect.poll(() => asked.length, { timeout: 60_000 }).toBe(2);
+  await expect(viewer.getByText("Trying another way to play")).toBeVisible();
+
+  const from = asked[1]?.startSeconds ?? 0;
+
+  await viewer.keyboard.press("l");
+  await expect(viewer.getByText(`Resuming at ${formatTimecode(from + 10)}`)).toBeVisible();
+  late.resolve();
+
+  // The answer for where the player was goes unused: it asks from 10 s on and plays there.
+  await expect.poll(() => asked.length).toBe(3);
+  expect(asked[2]?.startSeconds ?? Number.NaN).toBeCloseTo(from + 10, 0);
+  expect(asked[2]?.codecs).not.toContain("hevc");
+  await expectPlayingPast(viewer, from + 10);
+  expect((await videoState(viewer)).currentTime).toBeLessThan(from + 20);
+  await viewer.context().close();
+});
+
+test("another title started while the player tries another way plays, and the late answer is stopped unused", async ({
+  browser,
+}) => {
+  if (stack === null) return;
+
+  const viewer = await signedInPage(browser, owner.person);
+  const late = Promise.withResolvers<void>();
+  const asked = await askForHevcFirst(viewer, late.promise);
+  const requested: Array<{ readonly url: string; readonly body: string | null }> = [];
+
+  viewer.on("request", (request) =>
+    requested.push({ url: request.url(), body: request.postData() }),
+  );
+  await viewer.context().addInitScript(listHevc);
+  await viewer.goto(moviesPath(`/watch/${titleId(MOVIES.remux)}?start=0`));
+  await expect.poll(() => asked.length, { timeout: 60_000 }).toBe(2);
+  await expect(viewer.getByText("Trying another way to play")).toBeVisible();
+
+  // Leave and start another title in the same page while that answer waits.
+  await viewer.getByText("Back to details", { exact: true }).click();
+  await expect(viewer).toHaveURL(new RegExp(`/title/${titleId(MOVIES.remux)}$`, "u"));
+  await viewer
+    .getByRole("navigation", { name: "Sections" })
+    .getByRole("link", { name: "Movies" })
+    .click();
+  await viewer.getByRole("link", { name: MOVIES.direct }).first().click();
+  await expect(viewer).toHaveURL(new RegExp(`/title/${titleId(MOVIES.direct)}`, "u"));
+  await viewer.getByRole("link", { name: "Play", exact: true }).click();
+  await expect(viewer).toHaveURL(new RegExp(`/watch/${titleId(MOVIES.direct)}`, "u"));
+  await expect.poll(() => asked[2]?.answered?.mode).toBe("direct");
+  await expectPlayingPast(viewer, 0.5);
+
+  late.resolve();
+  await expect.poll(() => asked[1]?.answered?.streamId).toBeDefined();
+
+  const stale = asked[1]?.answered?.streamId ?? "";
+
+  // The new title plays on; the old player stops the stream it was answered and never loads it.
+  await expect
+    .poll(() =>
+      requested.some(
+        ({ url, body }) => url.endsWith(MEDIA_ROUTES.stop) && (body ?? "").includes(stale),
+      ),
+    )
+    .toBe(true);
+
+  const before = await videoState(viewer);
+
+  await expectPlayingPast(viewer, before.currentTime + 1);
+  await expect(viewer).toHaveURL(new RegExp(`/watch/${titleId(MOVIES.direct)}`, "u"));
+  expect(requested.some(({ url }) => url.includes(`/media/hls/${stale}/`))).toBe(false);
+  expect(asked).toHaveLength(3);
+  await viewer.context().close();
 });
 
 test("a file gone from disk says so instead of playing", async () => {

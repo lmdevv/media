@@ -469,8 +469,11 @@ port, and the command waits for health as `up` does. `$S hardware-matrix [--side
 cpu,qsv,vaapi] [--rows ROW,...]` plays a fixture per video stage on each path through the
 service's playback negotiation, judges the bytes it serves and where each stage ran, and writes
 `captures/verify/<run>/hardware-matrix/grid.md`, `grid.tsv`, and `grid.json`, with each cell's
-evidence beside them. [features/hardware-transcoding.md](features/hardware-transcoding.md) says
-how to run it for a PR and how to read it.
+evidence beside them. `$S apple-check [--side S] [--paths P] [--rows R]` has AVFoundation on the
+Mac read the bytes each cell was served, or the MP4 files named, and says whether it exposes a
+video track and how many frames it decodes: a grid `PASS` checks the bytes with ffmpeg only.
+[features/hardware-transcoding.md](features/hardware-transcoding.md) says how to run both for a PR
+and how to read them.
 
 ## Evidence
 
@@ -551,7 +554,8 @@ never kills by process name. The demo library image stays for the next run. Evid
   music's. `up` calls both.
 - `scripts/hardware-matrix.mjs` is the hardware matrix's table (fixtures, client profiles, rows,
   and where each operation must run) and the logic that judges a cell;
-  `scripts/hardware-matrix-run.mjs` drives a side for `hardware-matrix`.
+  `scripts/hardware-matrix-run.mjs` drives a side for `hardware-matrix`. `scripts/apple-check.swift`
+  is what `apple-check` compiles and runs on the Mac.
 - `node --test .agents/skills/verify-media/scripts/*.test.mjs` runs the skill's own tests, which need no
   stack: the browser host serves pages of both apps from local servers, in its namespace and on
   the host network, `evidence` builds one block from both apps' captures, and the hardware matrix's

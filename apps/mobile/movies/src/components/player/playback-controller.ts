@@ -3,8 +3,7 @@ import type { ClientCapabilities, SeekResponse } from "@media/contracts/media-pl
 import { Milliseconds } from "@media/contracts/units";
 import { Playback, PlayerDiagnostics } from "@media/sdk/effect";
 import { Data, Effect, Exit, Option, Result, Scope } from "effect";
-import { createVideoPlayer } from "expo-video";
-import type { VideoMetadata, VideoPlayer } from "expo-video";
+import type { VideoMetadata, VideoPlayer, VideoPlayerEvents, VideoSource } from "expo-video";
 
 import { StreamLifecycle } from "@/lib/player/app-state";
 import type { AppStatus, HeldStream, LifecycleStep } from "@/lib/player/app-state";
@@ -33,7 +32,7 @@ import { StallVerdict, checked, watching } from "@/lib/player/stall-watchdog";
 import type { StallWatch } from "@/lib/player/stall-watchdog";
 import { clampSubtitleDelay } from "@/lib/player/subtitle-delay";
 import { NATIVE_SEEKER, VideoPort, withinBuffer } from "@/lib/player/video-port";
-import type { StreamSeeker } from "@/lib/player/video-port";
+import type { NativeVideo, StreamSeeker } from "@/lib/player/video-port";
 
 /** Where the player's first stream comes from. */
 export type PlaySource = Data.TaggedEnum<{
@@ -75,12 +74,32 @@ export type PlayerPhase = Data.TaggedEnum<{
 /** Constructors and matchers for `PlayerPhase`. */
 export const PlayerPhase = Data.taggedEnum<PlayerPhase>();
 
+/** The events of expo-video's player the controller and its port follow. */
+type StreamVideoEvents = Pick<
+  VideoPlayerEvents,
+  "playingChange" | "statusChange" | "playToEnd" | "timeUpdate" | "sourceLoad"
+>;
+
+/** The parts of expo-video's `VideoPlayer` the controller drives and its port reads. */
+export interface StreamVideo extends NativeVideo {
+  timeUpdateEventInterval: number;
+  volume: number;
+  staysActiveInBackground: boolean;
+  showNowPlayingNotification: boolean;
+  allowsExternalPlayback: boolean;
+  release(): void;
+  addListener<Name extends keyof StreamVideoEvents>(
+    event: Name,
+    listener: StreamVideoEvents[Name],
+  ): { remove(): void };
+}
+
 /** Everything the player screen reads besides the port's own state. */
-export interface PlayerSnapshot {
+export interface PlayerSnapshot<Video extends StreamVideo = VideoPlayer> {
   readonly phase: PlayerPhase;
   readonly playback: Playback.Playback | null;
   /** The native player of the stream playing, for the video view. */
-  readonly video: VideoPlayer | null;
+  readonly video: Video | null;
   /** The audio track playing, as an ffmpeg stream index. */
   readonly audioStreamIndex: number | null;
   /** The subtitle track shown, or null for none. */
@@ -134,8 +153,10 @@ interface PlayerServices {
 }
 
 /** What the controller needs from the screen. */
-export interface PlayerControllerOptions {
+export interface PlayerControllerOptions<Video extends StreamVideo = VideoPlayer> {
   readonly services: PlayerServices;
+  /** Makes the native player of a stream: expo-video's `createVideoPlayer`. */
+  readonly createVideo: (source: VideoSource) => Video;
   /**
    * Start again at `positionMs` with a new `movies.play.start`, which takes a new ticket: the
    * session ended, the server refused the ticket as expired, or the app came back from the
@@ -175,10 +196,10 @@ interface Parked {
  * and when nobody watches or hears it while the app is away (`StreamLifecycle`): in the background
  * with no Picture in Picture and nothing playing.
  */
-export class PlayerController {
+export class PlayerController<Video extends StreamVideo = VideoPlayer> {
   /** The player as the progress reporter and the diagnostics see it. */
   readonly port = new VideoPort();
-  readonly #options: PlayerControllerOptions;
+  readonly #options: PlayerControllerOptions<Video>;
   #capabilities: ClientCapabilities = IOS_CAPABILITIES;
   #begun = false;
   /** The streamed start's playback as the media server reads it; null for a kept download. */
@@ -195,12 +216,12 @@ export class PlayerController {
   #negotiating: number | null = null;
   #parked: Parked | null = null;
   readonly #lifecycle: StreamLifecycle;
-  #video: VideoPlayer | null = null;
+  #video: Video | null = null;
   #diagnostics: {
     readonly recorder: PlayerDiagnostics.Recorder;
     readonly scope: Scope.Closeable;
   } | null = null;
-  readonly #videoSubscriptions = new Map<VideoPlayer, { remove(): void }>();
+  readonly #videoSubscriptions = new Map<Video, { remove(): void }>();
   #generation = 0;
   #negotiation = 0;
   #recoveries = 0;
@@ -215,7 +236,7 @@ export class PlayerController {
   #frameShown = false;
   #metadata: VideoMetadata = {};
   #disposed = false;
-  #snapshot: PlayerSnapshot = {
+  #snapshot: PlayerSnapshot<Video> = {
     phase: PlayerPhase.Preparing(),
     playback: null,
     video: null,
@@ -229,7 +250,7 @@ export class PlayerController {
   readonly #listeners = new Set<() => void>();
   readonly #unsubscribePort: () => void;
 
-  constructor(options: PlayerControllerOptions) {
+  constructor(options: PlayerControllerOptions<Video>) {
     this.#options = options;
     this.#lifecycle = new StreamLifecycle(options.background, options.play);
     this.#snapshot = { ...this.#snapshot, quality: options.quality };
@@ -249,7 +270,7 @@ export class PlayerController {
   }
 
   /** The current state; a new object after every change. */
-  readonly getSnapshot = (): PlayerSnapshot => this.#snapshot;
+  readonly getSnapshot = (): PlayerSnapshot<Video> => this.#snapshot;
 
   /** Calls `listener` after every change; returns the function that stops it. */
   readonly subscribe = (listener: () => void): (() => void) => {
@@ -260,7 +281,7 @@ export class PlayerController {
     };
   };
 
-  #update(change: Partial<PlayerSnapshot>): void {
+  #update(change: Partial<PlayerSnapshot<Video>>): void {
     if (this.#disposed) return;
 
     const next = { ...this.#snapshot, ...change };
@@ -465,7 +486,7 @@ export class PlayerController {
     const generation = ++this.#generation;
     const { stream } = playback;
 
-    const video = createVideoPlayer({
+    const video = this.#options.createVideo({
       uri: stream.url,
       contentType: stream.mode === "direct" ? "auto" : "hls",
       metadata: this.#metadata,
@@ -513,7 +534,7 @@ export class PlayerController {
     this.#observe(PlayerDiagnostics.attached(playback, "avplayer"));
   }
 
-  #retire(video: VideoPlayer | null): void {
+  #retire(video: Video | null): void {
     if (video === null) return;
 
     this.#videoSubscriptions.get(video)?.remove();

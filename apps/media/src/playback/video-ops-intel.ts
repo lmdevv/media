@@ -1,14 +1,19 @@
 /**
  * The rows of Intel's two GPU APIs, written for any Intel GPU and for AMD's VA-API: Quick Sync
  * (`qsv`, oneVPL derived from a VA-API device) and VA-API (`vaapi`). Each decodes, scales,
- * tone-maps, and encodes H.264 on the device, and moves frames to and from CPU memory in NV12 or
- * P010. Which of these a device does is evidence, never assumed: a row only says what it may try.
+ * tone-maps, and encodes H.264, HEVC, and AV1 (a row per codec) on the device, and moves frames
+ * to and from CPU memory in NV12 or P010. Which of these a device does is evidence, never
+ * assumed: a row only says what it may try.
  */
+import { type Level, levelOf } from "./output-levels.ts";
 import { DECODE_CLIPS, PROBE_CLIPS } from "./probe-clips.ts";
 import {
   type BuildFeature,
   type Domain,
   type DomainSpec,
+  encodeProbes,
+  encodeRowId,
+  encodesTarget,
   filter,
   fusing,
   type GpuDomain,
@@ -17,6 +22,8 @@ import {
   NOTHING,
   Op,
   type OpImpl,
+  OUTPUT_CODECS,
+  type OutputCodec,
   type ProbeCase,
   type Rendering,
   row,
@@ -75,10 +82,6 @@ const scaleProbes: ReadonlyArray<ProbeCase<"Scale">> = [
 const toneMapProbes: ReadonlyArray<ProbeCase<"ToneMap">> = [
   { op: Op.ToneMap(), clip: "hevc-pq", runs: 1 },
   { op: Op.ToneMap(), clip: "hevc-hlg", runs: 1 },
-];
-
-const encodeProbes: ReadonlyArray<ProbeCase<"Encode">> = [
-  { op: Op.Encode({ codec: "h264", bitrate: 1_000_000 }), clip: "h264-8", runs: 1 },
 ];
 
 const moveProbes = (to: Domain): ReadonlyArray<ProbeCase<"Move">> => [
@@ -222,13 +225,18 @@ const scaleQsv: OpImpl<"Scale"> = {
   probes: scaleProbes,
 };
 
-/** `vpp_qsv`'s tone map from P010 HDR surfaces to BT.709 SDR in NV12. */
+/**
+ * `vpp_qsv`'s tone map from P010 HDR surfaces to BT.709 SDR in NV12. `vpp_qsv` leaves the source's
+ * colour on the frames under Debian's ffmpeg 7.1 and its mastering display and content light
+ * levels under 7.1 and 9, which every encoder then writes into the stream, so an SDR stream would
+ * say PQ and BT.2020: the row tags its frames BT.709 (`setparams`) and drops that metadata.
+ */
 const toneMapQsv: OpImpl<"ToneMap"> = {
   id: ImplId("tonemap.qsv"),
   op: "ToneMap",
   on: "qsv",
   takes: "qsv",
-  needs: () => ["filter:vpp_qsv"],
+  needs: () => ["filter:vpp_qsv", "filter:setparams", "filter:sidedata"],
   variant: (_, frame) =>
     HDR_COLOURS.has(frame.colour) && frame.pixelFormat === "p010le"
       ? transferOf(frame.colour)
@@ -245,42 +253,113 @@ const toneMapQsv: OpImpl<"ToneMap"> = {
         ["out_color_primaries", "bt709"],
         ["out_color_transfer", "bt709"],
       ),
+      filter(
+        "setparams",
+        ["color_primaries", "bt709"],
+        ["color_trc", "bt709"],
+        ["colorspace", "bt709"],
+      ),
+      filter("sidedata", ["mode", "delete"], ["type", "MASTERING_DISPLAY_METADATA"]),
+      filter("sidedata", ["mode", "delete"], ["type", "CONTENT_LIGHT_LEVEL"]),
     ],
   }),
   probes: toneMapProbes,
 };
 
-/** `h264_qsv` at a fixed bitrate, an IDR frame at every forced keyframe. */
-const encodeQsv: OpImpl<"Encode"> = {
-  id: ImplId("encode.qsv"),
+/**
+ * One codec's GPU encoder: its name, the options before and after the bitrate, and how it states a
+ * level the plan has.
+ */
+interface GpuEncoder {
+  readonly name: string;
+  readonly before: ReadonlyArray<string>;
+  readonly after: ReadonlyArray<string>;
+  readonly level: (level: Level) => ReadonlyArray<string>;
+}
+
+/**
+ * The row of `domain`'s encoder of `codec`: a fixed bitrate from 8-bit SDR NV12 surfaces. On the
+ * Arc A380 every one of them, with ffmpeg 9 and Debian's 7.1, put an IDR frame (H.264, HEVC) or a
+ * key frame (AV1) exactly at each forced keyframe.
+ */
+const encodeOn = (
+  domain: GpuDomain,
+  codec: OutputCodec,
+  encoder: GpuEncoder,
+): OpImpl<"Encode"> => ({
+  id: encodeRowId(domain, codec),
   op: "Encode",
-  on: "qsv",
-  takes: "qsv",
-  needs: () => ["encoder:h264_qsv"],
+  on: domain,
+  takes: domain,
+  needs: () => [`encoder:${encoder.name}`],
   variant: (op, frame) =>
-    frame.colour === "sdr" && frame.scan === "progressive" && frame.pixelFormat === "nv12"
-      ? `${op.codec}/8/cbr`
+    encodesTarget(codec, op.target) &&
+    frame.colour === "sdr" &&
+    frame.scan === "progressive" &&
+    frame.pixelFormat === "nv12"
+      ? `${String(op.target.depth)}/cbr`
       : undefined,
   output: (_, frame) => frame,
   render: (op) => ({
     ...NOTHING,
     output: [
       "-c:v",
-      "h264_qsv",
-      "-preset",
-      "veryfast",
+      encoder.name,
+      ...encoder.before,
+      ...(op.level === undefined ? [] : levelArgs(codec, op.level, encoder)),
       "-b:v",
       String(op.bitrate),
       "-maxrate",
       String(op.bitrate),
       "-bufsize",
       String(op.bitrate * 2),
-      "-forced_idr",
-      "1",
+      ...encoder.after,
     ],
   }),
-  probes: encodeProbes,
+  probes: encodeProbes(codec),
+});
+
+/** How `encoder` states the level in ffprobe's units `idc`; nothing for a level no table lists. */
+const levelArgs = (codec: OutputCodec, idc: number, encoder: GpuEncoder): ReadonlyArray<string> => {
+  const level = levelOf(codec, idc);
+
+  return level === undefined ? [] : encoder.level(level);
 };
+
+/** Each of `domain`'s encoders as a row of its own. */
+const encodesOn = (
+  domain: GpuDomain,
+  encoders: Readonly<Record<OutputCodec, GpuEncoder>>,
+): ReadonlyArray<Row> =>
+  OUTPUT_CODECS.map((codec) => row(encodeOn(domain, codec, encoders[codec])));
+
+/** States no level: H.264 encodes have no level table. */
+const NO_LEVEL = (): ReadonlyArray<string> => [];
+
+/**
+ * Quick Sync's encoders; `forced_idr` makes each forced keyframe an IDR frame. oneVPL takes HEVC's
+ * and AV1's level as its tenths (21 for 2.1).
+ */
+const encodeQsv = encodesOn("qsv", {
+  h264: {
+    name: "h264_qsv",
+    before: ["-preset", "veryfast"],
+    after: ["-forced_idr", "1"],
+    level: NO_LEVEL,
+  },
+  hevc: {
+    name: "hevc_qsv",
+    before: ["-preset", "veryfast", "-profile:v", "main"],
+    after: ["-forced_idr", "1"],
+    level: (level) => ["-level", String(level.tenths)],
+  },
+  av1: {
+    name: "av1_qsv",
+    before: ["-preset", "veryfast", "-profile:v", "main"],
+    after: ["-forced_idr", "1"],
+    level: (level) => ["-level", String(level.tenths)],
+  },
+});
 
 const decodeVaapi = decodeOn("vaapi", { input: VAAPI_DECODING, filters: [] }, (codec) => [
   "hwaccel:vaapi",
@@ -340,48 +419,38 @@ const toneMapVaapi: OpImpl<"ToneMap"> = {
   probes: toneMapProbes,
 };
 
-/** `h264_vaapi`, High profile, at a fixed bitrate. */
-const encodeVaapi: OpImpl<"Encode"> = {
-  id: ImplId("encode.vaapi"),
-  op: "Encode",
-  on: "vaapi",
-  takes: "vaapi",
-  needs: () => ["encoder:h264_vaapi"],
-  variant: (op, frame) =>
-    frame.colour === "sdr" && frame.scan === "progressive" && frame.pixelFormat === "nv12"
-      ? `${op.codec}/8/cbr`
-      : undefined,
-  output: (_, frame) => frame,
-  render: (op) => ({
-    ...NOTHING,
-    output: [
-      "-c:v",
-      "h264_vaapi",
-      "-profile:v",
-      "high",
-      "-b:v",
-      String(op.bitrate),
-      "-maxrate",
-      String(op.bitrate),
-      "-bufsize",
-      String(op.bitrate * 2),
-    ],
-  }),
-  probes: encodeProbes,
-};
+/**
+ * VA-API's encoders: H.264 High, HEVC Main, AV1 Main. They take a level in ffprobe's units
+ * (`general_level_idc`, `seq_level_idx`).
+ */
+const encodeVaapi = encodesOn("vaapi", {
+  h264: { name: "h264_vaapi", before: ["-profile:v", "high"], after: [], level: NO_LEVEL },
+  hevc: {
+    name: "hevc_vaapi",
+    before: ["-profile:v", "main"],
+    after: [],
+    level: (level) => ["-level", String(level.idc)],
+  },
+  av1: {
+    name: "av1_vaapi",
+    before: ["-profile:v", "main"],
+    after: [],
+    level: (level) => ["-level", String(level.idc)],
+  },
+});
 
 /** Every Quick Sync and VA-API row. */
 export const INTEL_ROWS: ReadonlyArray<Row> = [
   row(decodeQsv),
   row(scaleQsv),
   row(toneMapQsv),
-  row(encodeQsv),
+  ...encodeQsv,
   row(uploadTo("qsv", [["extra_hw_frames", "64"]], "qsv")),
   row(downloadFrom("qsv")),
   row(decodeVaapi),
   row(scaleVaapi),
   row(toneMapVaapi),
-  row(encodeVaapi),
+  ...encodeVaapi,
   row(uploadTo("vaapi", [], undefined)),
   row(downloadFrom("vaapi")),
 ];

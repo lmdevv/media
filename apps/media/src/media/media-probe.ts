@@ -19,6 +19,10 @@ export const VideoStream = Schema.Struct({
   bitDepth: Schema.Int,
   width: Schema.Int,
   height: Schema.Int,
+  /**
+   * The most frames a second ffprobe reports for the stream (`peakFrameRateOf`), which a level an
+   * encode states must hold.
+   */
   frameRate: Schema.optional(Schema.Finite),
   dynamicRange: DynamicRange,
 });
@@ -174,6 +178,34 @@ const frameRateOf = (rate: string | undefined): number | undefined => {
   return Number.isFinite(value) && value > 0 ? value : undefined;
 };
 
+/** A base rate this fast beside an average this slow counts a timestamp clock, not pictures. */
+const CLOCK_RATE = { base: 210, average: 70 } as const;
+
+/** No picture rate in use is faster; a base rate above it counts a timestamp clock at any average. */
+const FASTEST_PICTURE_RATE = 240;
+
+/**
+ * The most frames a second ffprobe reports for `stream`: the larger of its average
+ * (`avg_frame_rate`) and its base rate (`r_frame_rate`, the rate it finds the first pictures'
+ * timestamps spaced at, which ffmpeg also gives the encoder). A variable-rate file averages under
+ * its fast stretches: one with 4 s at 60 fps then 12 s at 15 fps averages 26.25, with a base rate
+ * of 60. Neither reads a fast stretch that starts later (15 fps then 60 reads 15 and 26.25; in
+ * Matroska the average repeats the base rate), so such a file is held to its slower rate. A
+ * constant-rate stream reports the same rate twice. A base rate that counts a timestamp clock, as
+ * 1000 or 2000 for jittered timestamps, leaves the average.
+ */
+const peakFrameRateOf = (stream: FfprobeStream): number | undefined => {
+  const average = frameRateOf(stream.avg_frame_rate);
+  const base = frameRateOf(stream.r_frame_rate);
+
+  if (average === undefined || base === undefined) return average ?? base;
+
+  const clock =
+    base > FASTEST_PICTURE_RATE || (base > CLOCK_RATE.base && average < CLOCK_RATE.average);
+
+  return clock ? average : Math.max(average, base);
+};
+
 const bitDepthOf = (stream: FfprobeStream): number => {
   const raw = finiteOr(stream.bits_per_raw_sample, 0);
 
@@ -218,7 +250,7 @@ const nonBlank = (value: string | undefined): string | undefined => {
 };
 
 const toVideo = (stream: FfprobeStream): VideoStream | undefined => {
-  const frameRate = frameRateOf(stream.avg_frame_rate) ?? frameRateOf(stream.r_frame_rate);
+  const frameRate = peakFrameRateOf(stream);
 
   if (stream.width === undefined || stream.height === undefined) return undefined;
 

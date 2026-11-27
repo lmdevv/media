@@ -22,9 +22,13 @@ import { probeCommandArgs, probedFrames } from "./video-render.ts";
 import {
   capabilityKey,
   type ClipName,
+  encodeRowId,
   type GpuDomain,
   ImplId,
   implOf,
+  OUTPUT_CODECS,
+  type OutputCodec,
+  sdrTarget,
   type SubtitleInput,
 } from "./video-ops.ts";
 
@@ -86,6 +90,8 @@ interface Chain {
   readonly without?: ReadonlyArray<string>;
   /** The stages the chain must plan, when they are part of what it proves. */
   readonly stages?: ReadonlyArray<string>;
+  /** What it encodes to; H.264 when absent. */
+  readonly output?: OutputCodec;
 }
 
 /** Chains that between them use every row the table has on each domain. */
@@ -98,7 +104,7 @@ const chainsOn = (domain: GpuDomain): ReadonlyArray<Chain> => [
     clip: "h264-10",
     domain,
     // Intel's media engines decode no 10-bit H.264, and Quick Sync's map takes no software frames.
-    stages: ["decode.cpu", `move.cpu>${domain}`, `scale.${domain}`, `encode.${domain}`],
+    stages: ["decode.cpu", `move.cpu>${domain}`, `scale.${domain}`, `encode.${domain}.h264`],
   },
   {
     name: `${domain}: HDR10 tone-mapped on the CPU between GPU stages`,
@@ -110,16 +116,20 @@ const chainsOn = (domain: GpuDomain): ReadonlyArray<Chain> => [
   { name: `${domain}: MPEG-2`, clip: "mpeg2-8", domain },
   { name: `${domain}: AV1`, clip: "av1-8", domain },
   { name: `${domain}: VP9`, clip: "vp9-10", domain },
+  { name: `${domain}: H.264 encoded to HEVC`, clip: "h264-8", domain, output: "hevc" },
+  { name: `${domain}: HEVC Main 10 encoded to AV1`, clip: "hevc-10", domain, output: "av1" },
 ];
 
 const CPU_CHAINS: ReadonlyArray<Chain> = [
   { name: "cpu: HDR10 tone-mapped", clip: "hevc-pq", domain: "cpu" },
   { name: "cpu: an image subtitle burned in", clip: "h264-8", domain: "cpu", burn: true },
+  { name: "cpu: H.264 encoded to HEVC", clip: "h264-8", domain: "cpu", output: "hevc" },
+  { name: "cpu: H.264 encoded to AV1", clip: "h264-8", domain: "cpu", output: "av1" },
 ];
 
 const intentOf = (chain: Chain): VideoIntent => ({
-  codec: "h264",
-  toneMap: PROBE_CLIPS[chain.clip].source.colour !== "sdr",
+  targets: [sdrTarget(chain.output ?? "h264")],
+  frameRate: undefined,
   bounds: { width: 320, height: 180 },
   cpuEncodeBounds: { width: 1920, height: 1080 },
   maxBitrate: 1_000_000,
@@ -313,6 +323,21 @@ describe.runIf(hasQsv || hasVaapi)("TranscodeCapabilities on this machine's GPU"
           );
 
           for (const impl of verifiedRows) assert.isTrue(ran.has(impl), `${impl} ran in no chain`);
+
+          // Each encoder is a row of its own, so one this build or device lacks loses only that
+          // row, and every one verified ran in a real chain above.
+          const encoders = (["cpu", ...domains] as const).flatMap((domain) =>
+            OUTPUT_CODECS.map((codec) => {
+              const key = capabilityKey(
+                encodeRowId(domain, codec),
+                `8/${domain === "cpu" ? "crf" : "cbr"}`,
+              );
+
+              return `${key} ${Inventory.capabilityOf(inventory, key).status}`;
+            }),
+          );
+
+          yield* Console.log(`encoders: ${encoders.join(", ")}`);
         }),
       300_000,
     );
