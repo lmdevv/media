@@ -497,7 +497,7 @@ export const COMMON_CHECKS = [
   { check: "duration", tolerance: 1 },
   { check: "timeline" },
   { check: "keyframes" },
-  { check: "picture-time", frames: 1, minMatch: 0.5 },
+  { check: "picture-time", frames: 1, minMatch: 0.7 },
   { check: "audio-start" },
 ];
 
@@ -659,7 +659,9 @@ const SAMPLED_THUMBNAILS = 240;
  * output thumbnail with the source thumbnail shown at its time plus that shift, searched in steps
  * of `step` within `window` seconds, the smallest shift winning a tie, so a still picture reads as
  * in place. A negative shift is a picture that comes late. `score` is the mean correlation at the
- * shift and `inPlace` at none; both are undefined when no thumbnail has a picture to compare.
+ * shift and `inPlace` at none; both are undefined when no output thumbnail has a picture to
+ * compare. `flat` counts the output thumbnails without one, and `pictured` those of them the
+ * source shows a picture at.
  */
 export const pictureOffset = (output, source, { window, step }) => {
   const shown = (time) => {
@@ -675,9 +677,9 @@ export const pictureOffset = (output, source, { window, step }) => {
     }
     return found;
   };
-  const pictured = output.filter((frame) => frame.pixels !== undefined);
-  const every = Math.max(1, Math.ceil(pictured.length / SAMPLED_THUMBNAILS));
-  const sample = pictured.filter((_, index) => index % every === 0);
+  const withPicture = output.filter((frame) => frame.pixels !== undefined);
+  const every = Math.max(1, Math.ceil(withPicture.length / SAMPLED_THUMBNAILS));
+  const sample = withPicture.filter((_, index) => index % every === 0);
   const scoreAt = (shift) => {
     let sum = 0;
     let count = 0;
@@ -696,7 +698,9 @@ export const pictureOffset = (output, source, { window, step }) => {
       if (score !== undefined && (best === undefined || score > best.score + 1e-4)) best = { shift, score };
     }
   }
-  return { offset: best?.shift, score: best?.score, inPlace: scoreAt(0), frames: sample.length, step };
+  const flat = output.filter((frame) => frame.pixels === undefined);
+  const pictured = flat.filter((frame) => shown(frame.pts)?.pixels !== undefined).length;
+  return { offset: best?.shift, score: best?.score, inPlace: scoreAt(0), frames: sample.length, step, flat: flat.length, pictured };
 };
 
 /**
@@ -1015,7 +1019,14 @@ export const CHECKS = {
       const said = [];
       for (const fetch of fetchesOf(obs)) {
         const timing = obs.analysis?.timing?.[fetch.name];
-        if (timing?.score === undefined) return no(`no picture of the ${fetch.name} output could be compared with the source`);
+        if (timing === undefined) return no(`the ${fetch.name} output's picture was not compared with the source`);
+        if (timing.score === undefined) {
+          if (timing.pictured > 0) {
+            return no(`the ${fetch.name} picture is one flat colour where the source shows a picture, in ${timing.pictured} of ${timing.flat} frames`);
+          }
+          said.push(`${fetch.name} flat, as the source is there`);
+          continue;
+        }
         const frames = timing.offset / timing.step;
         const late = `${fmt(Math.abs(frames), 1)} frames (${fmt(Math.abs(timing.offset), 3)} s) ${timing.offset < 0 ? "behind" : "ahead of"} the source`;
         if (timing.score < params.minMatch) {

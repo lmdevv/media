@@ -192,6 +192,7 @@ describe("reading real ffmpeg output", () => {
     const held = thumbs("tpad=start=10:start_mode=clone,trim=end_frame=50,");
     const late = pictureOffset(held, source, { window: TIMING_WINDOW, step: 0.04 });
     assert.ok(Math.abs(late.offset + 0.4) < 1e-9, `offset ${late.offset}`);
+    assert.deepEqual([late.flat, late.pictured], [0, 0]);
     assert.ok(late.inPlace < late.score, `in place ${late.inPlace}, at the offset ${late.score}`);
   });
 
@@ -354,7 +355,7 @@ describe("verdicts", () => {
     assert.match(result.evidence, /^picture-time: the seek picture is 40 frames \(1\.667 s\) behind the source \(r 0\.99 there, 0\.18 in place\)$/);
 
     const held = healthy(cell);
-    held.analysis.timing.start = { offset: 2.5, score: 0.21, inPlace: 0.2, frames: 96, step: 1 / 24 };
+    held.analysis.timing.start = { offset: 2.5, score: 0.55, inPlace: 0.2, frames: 96, step: 1 / 24 };
     assert.match(judge(cell, held).evidence, /^picture-time: the start picture matches the source nowhere within 3 s/);
 
     const near = healthy(cell);
@@ -363,7 +364,14 @@ describe("verdicts", () => {
 
     const unread = healthy(cell);
     delete unread.analysis.timing.seek;
-    assert.match(judge(cell, unread).evidence, /^picture-time: no picture of the seek output could be compared/);
+    assert.match(judge(cell, unread).evidence, /^picture-time: the seek output's picture was not compared with the source$/);
+
+    // A first picture held black over a span where the source shows its picture.
+    const black = healthy(cell);
+    black.analysis.timing.start = { frames: 0, step: 1 / 24, flat: 96, pictured: 72 };
+    assert.match(judge(cell, black).evidence, /^picture-time: the start picture is one flat colour where the source shows a picture, in 72 of 96 frames$/);
+    black.analysis.timing.start.pictured = 0;
+    assert.equal(judge(cell, black).verdict, "PASS", "black where the source is black too");
   });
 
   test("sound that starts after the first picture, before the first decoded packet, or not at all fails", () => {

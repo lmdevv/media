@@ -120,7 +120,7 @@ Preconditions:
 - `picture-time` compares 96x28 gray thumbnails of the top 70 % of the picture with the source's
   around the same span, through the reference tone map for an HDR row, and takes the shift within
   3 s that matches best, the smallest shift winning a tie. A picture still on both sides reads as
-  in place. Left alone, ffmpeg 7.1's Quick Sync filters hold a first picture for 41 frames
+  in place, and a flat one (a held black first frame) where the source shows a picture fails. Left alone, ffmpeg 7.1's Quick Sync filters hold a first picture for 41 frames
   (Matroska, 1.7 s) to 512 (a 24 fps MP4, 21 s) with every timestamp right, which the other
   checks pass.
 
