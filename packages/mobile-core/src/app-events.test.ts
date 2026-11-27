@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createServer } from "node:http";
+import vm from "node:vm";
 
 import { MOVIES_ROUTES, MUSIC_ROUTES } from "@media/contracts/app-routes";
 import {
@@ -19,13 +20,12 @@ import {
   OpenCache,
   TimedScreen,
 } from "@media/contracts/diagnostics";
-import { RequestId } from "@media/contracts/request-id";
 import { RateLimited, commandError } from "@media/contracts/errors";
 import { TransportError } from "@media/sdk/effect";
 import { createMediaServer } from "@media/sdk/promise";
 import { Option, Predicate, Result, Schema } from "effect";
 import * as fc from "fast-check";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
 import {
   CRASH_READ_DELAY_MS,
@@ -628,8 +628,81 @@ describe("error reports", () => {
       "NotAnError",
       "NotAnError",
     ]);
-    expect(server.events()[2]).toMatchObject({ requestId });
+    expect(server.events()[2]).not.toHaveProperty("requestId");
     expect(JSON.stringify(server.requests)).not.toContain("Lucía");
+  });
+
+  it("takes the class and request id only from an error the SDK or Effect built", async () => {
+    const answered = "0b9d6f2a-7c1e-4a3b-8d5f-2e6c9a1b7d40";
+    const forged = "deadbeef-cafe-4dad-8bad-feedface2027";
+    const fromService = await rejectionFrom(404, answered);
+
+    class Retrying extends TransportError {}
+
+    const realm: unknown = vm.runInNewContext(`
+      class TransportError extends Error {}
+      const error = new TransportError("Iona Rhee");
+      error._tag = "TransportError";
+      error.requestId = "${forged}";
+      error;
+    `);
+
+    const handMade = { _tag: "TransportError", message: "x", requestId: forged };
+
+    Object.setPrototypeOf(handMade, TransportError.prototype);
+
+    const causes: ReadonlyArray<unknown> = [
+      // What a verifier rejected with in both apps: a plain object with an SDK tag and an id.
+      {
+        name: "IonaRhee",
+        _tag: "TransportError",
+        message: "Iona Rhee opened Cedar Lantern from CandleRoom.mkv on 192.0.2.73:9777",
+        stack:
+          "Iona Rhee opened Cedar Lantern from CandleRoom.mkv on 192.0.2.73:9777\n    at CedarLantern (https://candle-room.invalid/tmp/CandleRoom.js:31337:31415)",
+        requestId: forged,
+      },
+      new Retrying({ operation: "titles.get", message: "x", cause: null, requestId: forged }),
+      realm,
+      handMade,
+      new Proxy(new TransportError({ operation: "x", message: "x", cause: null }), {
+        get: () => forged,
+      }),
+      new TransportError({ operation: "titles.get", message: "x", cause: null, requestId: forged }),
+      fromService,
+    ];
+
+    // An error the SDK built keeps the id it read from the response, whatever the app writes later.
+    Object.assign(Predicate.isObject(fromService) ? fromService : {}, { requestId: forged });
+
+    const phone = device();
+    const events = phone.open({ processStartedAt: null });
+    const server = recordingSender();
+
+    events.attach(LUCIA, server.send);
+
+    for (const [index, cause] of causes.entries()) {
+      events.routeChanged(MUSIC_ROUTES[index] ?? "unknown");
+      events.caught(cause, "unhandled-rejection", false);
+    }
+
+    phone.advance(FLUSH_DELAY_MS);
+    await settled();
+
+    expect(
+      server
+        .events()
+        .filter(AppEvent.guards.ErrorCaught)
+        .map((event) => [event.errorClass, event.requestId]),
+    ).toEqual([
+      ["NotAnError", undefined],
+      ["TransportError", undefined],
+      ["Other", undefined],
+      ["NotAnError", undefined],
+      ["NotAnError", undefined],
+      ["TransportError", undefined],
+      ["NotFound", answered],
+    ]);
+    expect(JSON.stringify(server.requests)).not.toContain(forged);
   });
 
   it("counts a frame as the bundle's only in the file the app's JavaScript came from", async () => {
@@ -1130,6 +1203,52 @@ describe("sending", () => {
   });
 });
 
+/**
+ * What `reportAppEvents` rejects with when the media service answers `status` with a command
+ * failure under request id `requestId`: an error the SDK built from a real response.
+ */
+const rejectionFrom = async (status: number, requestId: string): Promise<Error> => {
+  const http = createServer((_request: IncomingMessage, response: ServerResponse) => {
+    response
+      .writeHead(status, { "content-type": "application/json", "x-request-id": requestId })
+      .end(JSON.stringify({ code: "not_found", message: "Lucía García's album" }));
+  });
+
+  await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve));
+  const address = http.address();
+
+  if (address === null || Predicate.isString(address)) throw new Error("The server is not on TCP");
+
+  const media = createMediaServer({
+    url: `http://127.0.0.1:${String(address.port)}`,
+    accessToken: () => Promise.resolve("jwt-1"),
+  });
+
+  const batch: AppEventsRequest = {
+    platform: "ios",
+    app: "music",
+    release: "0.9.0",
+    bundle: "embedded",
+    development: false,
+    events: [
+      {
+        ageMs: 0,
+        event: { _tag: "Launched", firstScreenVisibleMs: 1000, firstScreenHitched: false },
+      },
+    ],
+  };
+
+  const rejection = await media.reportAppEvents(batch).then(
+    () => new Error("The server took the batch"),
+    (cause: unknown) =>
+      cause instanceof Error ? cause : new Error("The SDK rejected a non-error"),
+  );
+
+  http.close();
+
+  return rejection;
+};
+
 /** Each string the batches carry on the wire, with the name of the field that holds it. */
 const wireStrings = (
   requests: ReadonlyArray<AppEventsRequest>,
@@ -1146,6 +1265,18 @@ const wireStrings = (
 };
 
 describe("what goes out", () => {
+  /** The ids the media service answered under, and the errors the SDK built from those answers. */
+  const ANSWERED = [
+    "3c5e7a91-2b4d-4f6a-8c1e-9d0b2a4c6e81",
+    "7e1a3c5b-9d2f-4b8a-a6c4-1e3f5a7b9c02",
+  ] as const;
+
+  const fromService: Array<Error> = [];
+
+  beforeAll(async () => {
+    fromService.push(await rejectionFrom(404, ANSWERED[0]), await rejectionFrom(502, ANSWERED[1]));
+  });
+
   /** Every string a batch may carry outside `release` and `requestId`: the contract's fixed sets. */
   const FIXED = new Set<string>([
     ...Object.keys(AppEvent.cases),
@@ -1163,12 +1294,12 @@ describe("what goes out", () => {
   ]);
 
   const isRelease = Schema.is(AppRelease);
-  const isRequestId = Schema.is(RequestId);
 
+  /** Whether `value` is in its field's set: a request id only as the media service answered it. */
   const inItsSet = ([field, value]: readonly [string, string]): boolean => {
     if (field === "release") return isRelease(value);
 
-    return field === "requestId" ? isRequestId(value) : FIXED.has(value);
+    return field === "requestId" ? ANSWERED.some((id) => id === value) : FIXED.has(value);
   };
 
   const decodeStrictly = Schema.decodeUnknownResult(AppEventsRequest, {
@@ -1246,6 +1377,17 @@ describe("what goes out", () => {
 
       return error;
     }),
+    fc.nat().map((index) => fromService[index % fromService.length]),
+    fc
+      .tuple(
+        fc.record({ _tag: text, message: text, stack, requestId: fc.uuid({ version: 4 }) }),
+        fc.constantFrom(TransportError.prototype, TypeError.prototype, Error.prototype),
+      )
+      .map(([fields, prototype]) => {
+        Object.setPrototypeOf(fields, prototype);
+
+        return fields;
+      }),
   );
 
   type Action =

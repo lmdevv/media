@@ -1,6 +1,7 @@
 import { RequestIdentity } from "@media/contracts/errors";
+import { RequestId } from "@media/contracts/request-id";
 import type { CommandError } from "@media/contracts/errors";
-import { Predicate, Schema } from "effect";
+import { Option, Predicate, Schema } from "effect";
 
 /**
  * The server could not be reached or the connection dropped before an answer arrived. A mutation
@@ -41,3 +42,27 @@ export type CallError = CommandError | TransportError | ProtocolError;
  */
 export const isTransient = (error: CallError): boolean =>
   Predicate.isTagged(error, "TransportError") || Predicate.isTagged(error, "RateLimited");
+
+/** The media service request each error the SDK built from that request's response failed. */
+const answeredRequests = new WeakMap<object, string>();
+
+const isRequestId = Schema.is(RequestId);
+
+/**
+ * `error`, kept as failing the media service request its `requestId` names. The SDK passes each
+ * error it builds from a media service response through here before a caller can see it.
+ */
+export const answeredBy = <E>(error: E): E => {
+  if (Predicate.hasProperty(error, "requestId") && isRequestId(error.requestId)) {
+    answeredRequests.set(error, error.requestId);
+  }
+
+  return error;
+};
+
+/**
+ * The media service request `cause` failed, as the SDK read it from that request's response;
+ * none for any value the SDK did not build so, whatever fields it has or gains later.
+ */
+export const answeredRequestOf = (cause: unknown): Option.Option<string> =>
+  Predicate.isObject(cause) ? Option.fromNullishOr(answeredRequests.get(cause)) : Option.none();

@@ -30,7 +30,9 @@ export type { PlaybackCallError } from "./media-http";
 
 export type { CallError } from "./sdk-errors";
 
-export { ProtocolError, TransportError } from "./sdk-errors";
+export { ProtocolError, TransportError, answeredRequestOf } from "./sdk-errors";
+
+export { DeviceSignInRefused } from "./platform/client";
 
 export * as TokenStorage from "./token-storage";
 

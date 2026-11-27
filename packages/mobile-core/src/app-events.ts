@@ -35,7 +35,8 @@ import {
   type BundleOrigin,
   type ClientErrorKind,
   type ContentSource,
-  ErrorClass,
+  DiagnosticsRateLimited,
+  type ErrorClass,
   type ErrorFrame,
   type FrameSource,
   MAX_APP_EVENT_AGE_MS,
@@ -47,8 +48,37 @@ import {
   type QueuedAppEvent,
   type TimedScreen,
 } from "@media/contracts/diagnostics";
-import { RequestId } from "@media/contracts/request-id";
-import { Option, Predicate, Schema } from "effect";
+import {
+  Conflict,
+  Expired,
+  Forbidden,
+  Internal,
+  InvalidArgs,
+  NotFound,
+  RateLimited,
+  Unauthenticated,
+} from "@media/contracts/errors";
+import {
+  InsufficientTranscodeSpace,
+  MediaFileNotFound,
+  PlaybackSessionEnded,
+  PlaybackTokenInvalid,
+  StreamAccessDenied,
+  StreamGenerationGone,
+  StreamNotFound,
+  TranscodeCapacityReached,
+  TranscodeFailed,
+  UnsupportedPlayback,
+} from "@media/contracts/media-playback";
+import {
+  Auth,
+  DeviceSignInRefused,
+  ProtocolError,
+  TokenStorage,
+  TransportError,
+  answeredRequestOf,
+} from "@media/sdk/effect";
+import { Cause, Option, Predicate, Schema } from "effect";
 
 /** Sends one batch as the owner's session, as `MediaServer.reportAppEvents` does. */
 export type SendAppEvents = (request: AppEventsRequest) => Promise<"sent" | "signed-out">;
@@ -223,11 +253,7 @@ const decodeCrashes = Schema.decodeOption(crashCodec);
 
 const encodeCrashes = Schema.encodeOption(crashCodec);
 
-const isRequestId = Schema.is(RequestId);
-
 const isRelease = Schema.is(AppRelease);
-
-const isErrorClass = Schema.is(ErrorClass);
 
 type SavedCrash = (typeof SavedCrashes.Type)[number];
 
@@ -279,23 +305,73 @@ const stringAt = (cause: unknown, key: string): Option.Option<string> =>
     Predicate.hasProperty(cause, key) && Predicate.isString(cause[key]) ? cause[key] : null,
   )().pipe(Option.flatMap(Option.fromNullishOr));
 
-/** JavaScript's own error types, each by the name `ErrorClass` gives it. */
-const BUILT_IN_ERRORS = [
-  "Error",
-  "TypeError",
-  "RangeError",
-  "ReferenceError",
-  "SyntaxError",
-  "EvalError",
-  "URIError",
-  "AggregateError",
-] as const satisfies ReadonlyArray<ErrorClass>;
+/**
+ * Whether `cause` was made by an `Error` constructor, its own class's or a subclass's:
+ * `Object.prototype.toString` names `Error` only for an object with an error's internal slot, once
+ * nothing along its chain sets `Symbol.toStringTag`. A plain object or a proxy has no such slot,
+ * whatever its prototype.
+ */
+const madeAsError = (cause: unknown): boolean =>
+  Option.getOrElse(
+    Option.liftThrowable(
+      () =>
+        Predicate.isObject(cause) &&
+        !(Symbol.toStringTag in cause) &&
+        Object.prototype.toString.call(cause) === "[object Error]",
+    )(),
+    () => false,
+  );
+
+/** A class an error may be made by. */
+type ErrorType = abstract new (...args: never) => Error;
+
+/** Whether `Type`'s prototype is on `cause`'s prototype chain. */
+const inheritsFrom = (cause: unknown, Type: ErrorType): boolean =>
+  Option.getOrElse(Option.liftThrowable(() => cause instanceof Type)(), () => false);
+
+/**
+ * The tagged error types the SDK, the contracts, and Effect build, each with the name `ErrorClass`
+ * gives it. An error is one of these only when it was made by that type's constructor or a
+ * subclass's.
+ */
+const TAGGED_ERRORS: ReadonlyArray<readonly [ErrorClass, ErrorType]> = [
+  ["Unauthenticated", Unauthenticated],
+  ["Forbidden", Forbidden],
+  ["NotFound", NotFound],
+  ["InvalidArgs", InvalidArgs],
+  ["Conflict", Conflict],
+  ["Expired", Expired],
+  ["RateLimited", RateLimited],
+  ["Internal", Internal],
+  ["TransportError", TransportError],
+  ["ProtocolError", ProtocolError],
+  ["TokenStorageError", TokenStorage.TokenStorageError],
+  ["SignInWaiting", Auth.SignInWaiting],
+  ["DeviceSignInRefused", DeviceSignInRefused],
+  ["PlaybackTokenInvalid", PlaybackTokenInvalid],
+  ["PlaybackSessionEnded", PlaybackSessionEnded],
+  ["UnsupportedPlayback", UnsupportedPlayback],
+  ["MediaFileNotFound", MediaFileNotFound],
+  ["StreamNotFound", StreamNotFound],
+  ["StreamGenerationGone", StreamGenerationGone],
+  ["StreamAccessDenied", StreamAccessDenied],
+  ["TranscodeCapacityReached", TranscodeCapacityReached],
+  ["InsufficientTranscodeSpace", InsufficientTranscodeSpace],
+  ["TranscodeFailed", TranscodeFailed],
+  ["DiagnosticsRateLimited", DiagnosticsRateLimited],
+  ["SchemaError", Schema.SchemaError],
+  ["NoSuchElementError", Cause.NoSuchElementError],
+  ["TimeoutError", Cause.TimeoutError],
+  ["UnknownError", Cause.UnknownError],
+  ["IllegalArgumentError", Cause.IllegalArgumentError],
+  ["ExceededCapacityError", Cause.ExceededCapacityError],
+];
 
 /**
  * The prototype of each of JavaScript's own error types, with its name; `AggregateError` only where
  * the runtime has it.
  */
-const builtInPrototypes: ReadonlyArray<readonly [object, (typeof BUILT_IN_ERRORS)[number]]> = [
+const BUILT_IN_ERRORS: ReadonlyArray<readonly [object, ErrorClass]> = [
   [Error.prototype, "Error"],
   [TypeError.prototype, "TypeError"],
   [RangeError.prototype, "RangeError"],
@@ -308,34 +384,27 @@ const builtInPrototypes: ReadonlyArray<readonly [object, (typeof BUILT_IN_ERRORS
     : [[AggregateError.prototype, "AggregateError"] as const]),
 ];
 
-const prototypeOf = (cause: unknown): Option.Option<object | null> =>
-  Option.liftThrowable(() => (Predicate.isObject(cause) ? Reflect.getPrototypeOf(cause) : null))();
-
-const isError = (cause: unknown): boolean =>
-  Option.getOrElse(Option.liftThrowable(() => cause instanceof Error)(), () => false);
-
 /**
- * What kind of error `cause` is, from `ErrorClass`'s fixed list: the SDK's, the contracts', or
- * Effect's tag when it has one of theirs; one of JavaScript's own types when it is exactly one;
- * `NotAnError` for a thrown value that is no error; `Other` for anything else. A name the error
- * gives itself only picks a member of the list.
+ * What kind of error `cause` is, from `ErrorClass`'s fixed list, decided by which constructor made
+ * it: one of the SDK's, the contracts', or Effect's tagged types, or a subclass of one; exactly one
+ * of JavaScript's own types; `Other` for any other error; `NotAnError` for a value no `Error`
+ * constructor made, such as a plain object, whatever its fields or prototype. Nothing the error
+ * says about itself, its tag or its name, picks the class.
  */
 export const errorClassOf = (cause: unknown): ErrorClass => {
-  const tagged = Option.filter(stringAt(cause, "_tag"), isErrorClass);
+  if (!Predicate.isObject(cause) || !madeAsError(cause)) return "NotAnError";
 
-  if (Option.isSome(tagged) && !BUILT_IN_ERRORS.some((name) => name === tagged.value)) {
-    return tagged.value;
-  }
+  const tagged = TAGGED_ERRORS.find(([, Type]) => inheritsFrom(cause, Type));
 
-  const prototype = prototypeOf(cause);
+  if (tagged !== undefined) return tagged[0];
 
-  const builtIn = builtInPrototypes.find(([candidate]) =>
+  const prototype = Option.liftThrowable(() => Reflect.getPrototypeOf(cause))();
+
+  const builtIn = BUILT_IN_ERRORS.find(([candidate]) =>
     Option.exists(prototype, (own) => own === candidate),
   );
 
-  if (builtIn !== undefined) return builtIn[1];
-
-  return isError(cause) ? "Other" : "NotAnError";
+  return builtIn === undefined ? "Other" : builtIn[1];
 };
 
 /**
@@ -421,10 +490,6 @@ const decodeTouch = Schema.decodeUnknownOption(TouchEvent);
  */
 export const touchTime = (press: { readonly nativeEvent: unknown }): Option.Option<number> =>
   Option.map(decodeTouch(press.nativeEvent), (touch) => touch.timestamp);
-
-/** The request id an SDK error names, when it names one in the media service's shape. */
-const requestIdOf = (cause: unknown): Option.Option<string> =>
-  Option.filter(stringAt(cause, "requestId"), isRequestId);
 
 /** A gate that admits one report per key per `REPEAT_WINDOW_MS`, remembering at most 100 keys. */
 const repeatGate = () => {
@@ -779,7 +844,7 @@ export const createAppEvents = (options: AppEventsOptions): AppEvents => {
       route,
       errorClass,
       frames,
-      ...Option.match(requestIdOf(cause), {
+      ...Option.match(answeredRequestOf(cause), {
         onNone: () => ({}),
         onSome: (requestId) => ({ requestId }),
       }),

@@ -460,7 +460,6 @@ export const ErrorClass = Schema.Literals([
   "TokenStorageError",
   "SignInWaiting",
   "DeviceSignInRefused",
-  "UseRejected",
   "PlaybackTokenInvalid",
   "PlaybackSessionEnded",
   "UnsupportedPlayback",
