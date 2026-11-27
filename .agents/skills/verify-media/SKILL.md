@@ -479,9 +479,10 @@ by default: `records.ndjson`, the table as `timings.md`, `actions.tsv` (each lau
 the wall clock), `loads.tsv` (both machines' load), and `marks.ndjson` (each frame mark the app
 wrote to the simulator's log, on the app's own clock).
 
-Each timing ends on a frame the app's `LaunchClock` module saw drawn: a frame mark view reports the
-first display refresh that shows it in the window, inside the screen, and under no opaque view
-such as the splash screen, as that refresh's target time. All of them run on `CACurrentMediaTime`,
+Each timing ends on a frame the app's `LaunchClock` module saw drawn: a frame mark view laid over
+the content reports the first display refresh that shows the content as it will rest, in its
+place within a pixel (so a screen sliding in has arrived), faded in, and under no view such as the
+splash screen, as that refresh's time. All of them run on `CACurrentMediaTime`,
 the clock iOS stamps touches with. iOS gives no time at which an ordinary frame was really shown,
 so each mark also says whether it was **hitched**: its callbacks skipped a refresh before it, or
 its callback ran past the refresh's target, so the app was busy across a refresh and the frame can
@@ -494,12 +495,13 @@ its target its callback ran. The table counts each metric's hitched samples; dro
   earlier, by a gap that varies. They end on Home's screen visible (the splash gone and Home drawn,
   loading or not) and Home's content visible (its rows and titles, not their artwork).
 - **Opens**: from the touch that ended the press to the first refresh in which the opened screen's
-  content is in view, which is no earlier than the native push's first frame. Each launch opens
-  the same records, none asked for yet this launch, then after Back opens the first of them again.
-  Each open reports its cache state, `fetched` (the screen asked for its content after it mounted)
-  or `kept` (the SDK held it), and the table reports the two apart. Music's artist reopens only in
-  the first round: its album list is a paged query that is never ready at mount, so a second open
-  would report `fetched` for a case that runs faster than the first.
+  content is at rest, which is no earlier than the native push's last frame. Each launch opens the
+  same records, none asked for yet this launch; music then goes Back once and opens the artist
+  again from its album; and after Back to Home each app opens the first record again. Each open
+  reports its cache state, `fetched` (the screen asked for its content after it mounted) or `kept`
+  (the SDK held it), and the table reports the two apart. The log names no record, so a slow
+  sample is found by its screen and cache state, its time in `records.ndjson`, and the probe's
+  `actions.tsv`, which names what each press opened.
 
 A cold launch on the dev client includes fetching the bundle from Metro through the ssh forward
 (`bundle: "dev-server"` in each record), and the simulator runs on the Mac's CPU, so these are a
@@ -517,15 +519,18 @@ again), discard every loaded pass, and trust a change only when it beats how far
 of one build move.
 
 `--record` checks the marks against the screen without the launch's zero, which no recording can
-see. Within each launch, the app's own clock gives the time from Home's content mark to the first
-open's mark (`marks.ndjson`), and the recording gives the time between the same two frames; the two
+see. Within each launch, the app's own clock gives the time from Home's content mark to each open's
+mark (`marks.ndjson`), and the recording gives the time between the same two frames; the two
 differences share no zero point. `node scripts/app-timings-truth.mjs sheets <dir>` cuts a
 storyboard of each launch and press from `truth.mp4`, every frame that changed with its time in the
-recording; `frames <truth.mp4> <out.png> <seconds>...` cuts a closer look at chosen frames. Read
-off each launch's first frame showing Home's content and first frame showing the opened screen's
-content, write them to `truth.tsv` in the pass folder (`launch`, `home_s`, `open_s`), and run
-`node scripts/app-timings-truth.mjs judge <dir> [frame-ms]`: each launch's two differences must
-agree within two frames.
+recording; `frames <truth.mp4> <out.png> <seconds>...` cuts a closer look at chosen frames;
+`settle <dir>` finds, per press, the first frame from which the opened screen stands within a pixel
+of where it rests (`settled.tsv`, `rest_s`). Read off each launch's first frame showing Home's
+content and, per open, the first frame showing its content at rest (`rest_s` for a kept open, whose
+content slides in with its screen; for a fetched one, the later of `rest_s` and the frame its
+content appears), write them to `truth.tsv` in the pass folder (`launch`, `open`, `home_s`,
+`open_s`), and run `node scripts/app-timings-truth.mjs judge <dir> [frame-ms]`: every open's two
+differences must agree within two frames.
 
 To see a forced error arrive: `ios force-error rejection`, then the Home button, which sends the
 batch; and `ios force-error fatal`, which ends the app or shows its error screen with the report

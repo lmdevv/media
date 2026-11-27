@@ -4,11 +4,12 @@
  * `POST /api/app-events` as `AppEvent`s.
  *
  * Every timing is a span of the device's monotonic clock, the one iOS stamps touches and frames
- * with, and ends on a frame the app's `LaunchClock` module saw drawn: a `FrameMark` view reports
- * the first display refresh in which it is in the window, inside the screen's bounds, and covered
- * by no opaque view such as the splash screen. A cold launch runs from the process start the
- * kernel records; a screen open from the touch that ended the press. A span that crosses a trip to
- * the background, or comes out negative or past its bound, is dropped.
+ * with, and ends on a frame the app's `LaunchClock` module saw drawn: a `FrameMark` view over the
+ * content reports the first display refresh that shows the content as it will rest, in place with
+ * any slide-in transition over, faded in, and under no view such as the splash screen. A cold
+ * launch runs from the process start the kernel records; a screen open from the touch that ended
+ * the press. A span that crosses a trip to the background, or comes out negative or past its bound,
+ * is dropped.
  *
  * Every event belongs to one account on one server, its owner. Events wait in memory for their
  * owner only: a new owner or a sign-out drops them and the saved crash reports of anyone else, and

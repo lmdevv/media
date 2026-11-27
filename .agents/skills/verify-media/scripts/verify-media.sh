@@ -1335,8 +1335,8 @@ timing_load() {
 # records the media service received and prints each metric's median and spread, how many samples
 # were hitched, and how loaded the two machines were (app-timings.mjs). Each launch ends the app's
 # process and opens it on Metro again, waits for Home's content, then opens the screens
-# timing_opens names, none asked for yet this launch, and after Back opens the first of them again,
-# when the SDK may keep its query. Each open records its cache state, so the two rounds report
+# timing_opens names, none asked for yet this launch, then after one Back opens the last of them
+# again, and after Back to Home the first of them again, when the SDK may keep their queries. Each open records its cache state, so the two rounds report
 # apart. The Home button ends each launch and sends its events.
 #
 # The pass folder keeps records.ndjson, loads.tsv (the load at the start, before each launch, and
@@ -1363,6 +1363,14 @@ ios_timings() {
   : > "$out/actions.tsv"
   : > "$out/loads.tsv"
   stamp() { printf '%s\t%s\t%s\n' "$(date +%s%3N)" "$1" "$2" >> "$out/actions.tsv"; }
+  # Presses the control labelled $1 by its touch, then waits for the opened screen's label $2.
+  timing_press() {
+    point="$(ios_find "$1")" || die "launch $launch: can't press \"$1\""
+    stamp press "$1|$point"
+    ios_touch "${point% *}" "${point#* }"
+    ios_wait "$2" 60
+    sleep 1
+  }
   timing_load "$out/loads.tsv" start
   if ((record)); then
     stamp record-start ""
@@ -1377,16 +1385,19 @@ ios_timings() {
     ios_wait_opened "$(timing_home "$app")" 180 || die "launch $launch: Home did not show its content"
     sleep 2
     for round in 1 2; do
-      # Round 2 reopens only the first screen: a later one, such as music's artist, can mount
-      # without its content after Back too, and would report a second case as the first.
+      # Round 2 reopens only the first screen, from Home. A later screen, such as music's artist,
+      # reopens in round 1 from the screen under it, right after Back, while the SDK keeps its
+      # queries.
       ((round == 1)) || opens=("${opens[0]}")
       for open in "${opens[@]}"; do
-        point="$(ios_find "${open%%|*}")" || die "launch $launch: can't press \"${open%%|*}\""
-        stamp press "${open%%|*}|$point"
-        ios_touch "${point% *}" "${point#* }"
-        ios_wait "${open#*|}" 60
-        sleep 1
+        timing_press "${open%%|*}" "${open#*|}"
       done
+      if ((round == 1 && ${#opens[@]} > 1)); then
+        stamp back ""
+        ios_back
+        sleep 1.5
+        timing_press "${opens[-1]%%|*}" "${opens[-1]#*|}"
+      fi
       for open in "${opens[@]}"; do
         stamp back ""
         ios_back

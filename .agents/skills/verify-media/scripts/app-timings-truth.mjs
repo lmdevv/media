@@ -2,26 +2,32 @@
 // run, without the launch's zero: the process start, which no recording can show.
 //
 //   node app-timings-truth.mjs sheets <app-timings-dir>
+//   node app-timings-truth.mjs settle <app-timings-dir>
 //   node app-timings-truth.mjs judge <app-timings-dir> [frame-ms]
 //   node app-timings-truth.mjs frames <truth.mp4> <out.png> <seconds>...
 //
-// Within one launch, the app's own clock gives the time from Home's content mark to the first
-// open's content mark (marks.ndjson: each mark the app's `LaunchClock` wrote to the device's log,
-// by process), and the recording gives the time between the same two frames. The two differences
+// Within one launch, the app's own clock gives the time from Home's content mark to each open's
+// content mark (marks.ndjson: each mark the app's `LaunchClock` wrote to the device's log, by
+// process), and the recording gives the time between the same two frames. The two differences
 // share no zero point, so they agree within two frames exactly when both marks land on the frames
-// the screen showed.
+// the screen showed. A mark stands for its content at rest: in place, with any slide-in over.
 //
 // `sheets` cuts, from truth.mp4, a storyboard of each launch and each press in actions.tsv: every
-// frame that visibly changed, captioned with its time in the recording. Read the frames yourself
-// and write truth.tsv in the same folder, one tab-separated row per launch with a header:
+// frame that visibly changed, captioned with its time in the recording. `settle` finds, for each
+// press, the first frame from which the opened screen stands where it rests: it lines each frame
+// up with the screen's last frame before the next action by the columns of its edges, and
+// prints the frame from which the two line up within a pixel (`rest_s`). Write truth.tsv in the
+// same folder, one tab-separated row per open with a header:
 //
-//   launch  home_s  open_s
+//   launch  open  home_s  open_s
 //
-// `home_s` is the recording's time (the sheets' caption) of the first frame showing Home's content
-// (its rows and titles, not their artwork); `open_s` of the first frame showing the first opened
-// screen's content. `frames` cuts a small sheet of the frames at the given times, to look closer.
-// `judge` prints, per launch, both differences, how far apart they are, and whether every launch
-// agrees within two frames.
+// `open` counts the launch's opens from 1, in the order of its presses. `home_s` is the
+// recording's time (the sheets' caption) of the first frame showing Home's content (its rows and
+// titles, not their artwork); `open_s` of the first frame showing that open's content at rest:
+// `rest_s` when the content was there before the screen came to rest, as a kept open's is,
+// otherwise the first frame showing the content. `frames` cuts a small sheet of the frames at the
+// given times, to look closer. `judge` prints, per open, both differences, how far apart they
+// are, and whether every open agrees within two frames.
 
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -76,6 +82,37 @@ const framesBetween = (video, from, to) => {
     Number(match[1]),
   );
   const size = WIDTH * HEIGHT;
+
+  return times.map((t, index) => ({ t, pixels: decoded.stdout.subarray(index * size, (index + 1) * size) }));
+};
+
+/** The frames of `video` from `from` to `to` seconds, each its time and its grey pixels, at a size. */
+const framesSized = (video, from, to, width, height) => {
+  const decoded = spawnSync(
+    "ffmpeg",
+    [
+      "-hide_banner",
+      "-copyts",
+      "-ss",
+      String(Math.max(0, from)),
+      "-to",
+      String(to),
+      "-i",
+      video,
+      "-vf",
+      `scale=${String(width)}:${String(height)},format=gray,showinfo`,
+      "-fps_mode",
+      "passthrough",
+      "-f",
+      "rawvideo",
+      "-",
+    ],
+    { maxBuffer: 2 ** 31 },
+  );
+  const times = [...decoded.stderr.toString().matchAll(/pts_time:([\d.]+)/gu)].map((match) =>
+    Number(match[1]),
+  );
+  const size = width * height;
 
   return times.map((t, index) => ({ t, pixels: decoded.stdout.subarray(index * size, (index + 1) * size) }));
 };
@@ -161,6 +198,173 @@ const sheet = (video, times, path, width = 201) => {
   ]);
 };
 
+/** The recording's size in pixels. */
+const sizeOf = (video) => {
+  const [width, height] = execFileSync(
+    "ffprobe",
+    ["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0", video],
+    { encoding: "utf8" },
+  )
+    .trim()
+    .split(",")
+    .map(Number);
+
+  return { width, height };
+};
+
+/** The rows of the screen `settle` lines up: below the status bar, above a tab bar and player. */
+const BAND = { from: 0.08, to: 0.75 };
+
+/**
+ * How strongly each column of a grey frame `width` pixels wide changes from the column to its
+ * right, summed over `BAND`'s rows: where the screen's edges stand across it.
+ */
+export const edgeColumns = (pixels, width, height) => {
+  const columns = new Float64Array(width);
+
+  for (let y = Math.floor(height * BAND.from); y < Math.floor(height * BAND.to); y += 1) {
+    const row = y * width;
+
+    for (let x = 0; x < width - 1; x += 1) columns[x] += Math.abs(pixels[row + x + 1] - pixels[row + x]);
+  }
+
+  return columns;
+};
+
+/**
+ * How far right, in pixels, `columns` shows what `resting` shows, from `-slack` to `maxShift`, and
+ * how well the two line up there (their correlation, 1 for a perfect match), over at least
+ * `overlap` shared columns.
+ */
+export const shiftOf = (columns, resting, { maxShift, slack = 8, overlap = 160 }) => {
+  let best = { shift: 0, match: -Infinity };
+
+  for (let shift = -slack; shift <= maxShift; shift += 1) {
+    const from = Math.max(0, shift);
+    const to = Math.min(columns.length, resting.length + shift);
+
+    if (to - from < overlap) break;
+    let product = 0;
+    let own = 0;
+    let theirs = 0;
+
+    for (let x = from; x < to; x += 1) {
+      product += columns[x] * resting[x - shift];
+      own += columns[x] * columns[x];
+      theirs += resting[x - shift] * resting[x - shift];
+    }
+
+    const match = own === 0 || theirs === 0 ? 0 : product / Math.sqrt(own * theirs);
+
+    if (match > best.match) best = { shift, match };
+  }
+
+  return best;
+};
+
+/**
+ * The first of `frames` (each its time, shift, and match) from which every later one stands
+ * within a pixel of where the screen rests and lines up with it at `match` or better; null when
+ * the last frame doesn't.
+ */
+export const restingFrom = (frames, match = 0.9) => {
+  let first = null;
+
+  for (const frame of frames) {
+    const resting = Math.abs(frame.shift) <= 1 && frame.match >= match;
+
+    if (!resting) first = null;
+    else first ??= frame;
+  }
+
+  return first;
+};
+
+/** Mean grey-level change between two frames that counts as the whole screen moving. */
+const MOVING = 5;
+
+/**
+ * How many seconds the recording runs behind actions.tsv's clock: the probe stamps `record-start`
+ * before the simulator starts recording, so each press shows that much earlier than its stamp
+ * says, plus the time the simulator takes the touch. It is the median, over `presses` (their times
+ * by the stamps), of how long before each press's stamp the first frame came that moved the whole
+ * screen, within `reach` seconds either side.
+ */
+export const recordingLag = (presses, framesAround, reach = 1.5) => {
+  const lags = presses.flatMap((at) => {
+    const frames = framesAround(at - reach, at + reach);
+    const moved = frames.findIndex(
+      (frame, index) => index > 0 && difference(frame.pixels, frames[index - 1].pixels) >= MOVING,
+    );
+
+    return moved < 0 ? [] : [at - frames[moved].t];
+  });
+  const sorted = [...lags].sort((a, b) => a - b);
+
+  return sorted.length === 0 ? 0 : sorted[Math.floor(sorted.length / 2)];
+};
+
+/**
+ * Per launch and press of one `ios timings --record` run, the press's time in the recording and
+ * the first frame from which the opened screen stands where it rests (`restingFrom`), lined up
+ * with the last frame before the next action.
+ */
+const settle = (dir) => {
+  const video = join(dir, "truth.mp4");
+  const actions = parseActions(readFileSync(join(dir, "actions.tsv"), "utf8"));
+  const recordStart = actions.find((action) => action.kind === "record-start")?.ms ?? actions[0].ms;
+  const { width, height } = sizeOf(video);
+  const rows = Math.round(height / 6);
+  const at = (action) => (action.ms - recordStart) / 1000;
+  const lag = recordingLag(
+    actions.filter((action) => action.kind === "press").map(at),
+    (from, to) => framesBetween(video, from, to),
+  );
+  const lines = [
+    `# the recording runs ${lag.toFixed(3)} s behind the stamps`,
+    "launch\topen\tpress_s\trest_s\tshift_px\tmatch",
+  ];
+  let launch = 0;
+  let open = 0;
+
+  actions.forEach((action, index) => {
+    if (action.kind === "launch") {
+      launch = Number(action.detail);
+      open = 0;
+    }
+
+    if (action.kind !== "press") return;
+    open += 1;
+    const pressed = at(action) - lag;
+    const next = actions[index + 1];
+    // From just before the press shows to before the next action could: a press's screen moves a
+    // moment after its touch, once JavaScript pushes it, while Back moves with the touch. So the
+    // last frame is the opened screen at rest.
+    const until = next === undefined ? pressed + 2 : at(next) - lag - 0.4;
+    const frames = framesSized(video, pressed - 0.3, until, width, rows);
+    const resting = edgeColumns(frames.at(-1).pixels, width, rows);
+    const lined = frames.map((frame) => ({
+      t: frame.t,
+      ...shiftOf(edgeColumns(frame.pixels, width, rows), resting, { maxShift: width }),
+    }));
+    const rest = restingFrom(lined);
+
+    lines.push(
+      [
+        launch,
+        open,
+        pressed.toFixed(3),
+        rest === null ? "–" : rest.t.toFixed(6),
+        rest === null ? "–" : String(rest.shift),
+        rest === null ? "–" : rest.match.toFixed(3),
+      ].join("\t"),
+    );
+  });
+
+  writeFileSync(join(dir, "settled.tsv"), `${lines.join("\n")}\n`);
+  console.log(lines.join("\n"));
+};
+
 /** A storyboard sheet of each launch and press of one `ios timings --record` run. */
 const sheets = (dir) => {
   const video = join(dir, "truth.mp4");
@@ -213,9 +417,9 @@ export const parseMarks = (text) => {
 };
 
 /**
- * Per launch of `truth` (`launch`, `home_s`, `open_s`), the app's time from Home's content mark
- * (its screen mark when Home drew no content mark) to the first open's mark, the recording's time
- * between the same frames, the difference, and whether it is within two frames.
+ * Per open of `truth` (`launch`, `open`, `home_s`, `open_s`), the app's time from Home's content
+ * mark (its screen mark when Home drew no content mark) to that launch's `open`th open mark, the
+ * recording's time between the same frames, the difference, and whether it is within two frames.
  */
 export const judge = (launches, truth, frameMs) =>
   truth.map((row) => {
@@ -223,20 +427,20 @@ export const judge = (launches, truth, frameMs) =>
     const home =
       marks.find((mark) => mark.name === "home-content") ??
       marks.find((mark) => mark.name === "home-screen");
-    const open = marks.find((mark) => mark.name === "open");
+    const open = marks.filter((mark) => mark.name === "open")[row.open - 1];
     const recordedMs = (row.open_s - row.home_s) * 1000;
+    const sample = { launch: row.launch, open: row.open, recordedMs };
 
     if (home === undefined || open === undefined) {
-      return { launch: row.launch, appMs: null, recordedMs, difference: null, agrees: false, hitched: [] };
+      return { ...sample, appMs: null, difference: null, agrees: false, hitched: [] };
     }
 
     const appMs = open.at - home.at;
     const difference = appMs - recordedMs;
 
     return {
-      launch: row.launch,
+      ...sample,
       appMs,
-      recordedMs,
       difference,
       agrees: Math.abs(difference) <= 2 * frameMs,
       hitched: [home, open].filter((mark) => mark.hitched).map((mark) => mark.name),
@@ -263,6 +467,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 
   if (command === "sheets" && target !== undefined) {
     sheets(target);
+  } else if (command === "settle" && target !== undefined) {
+    settle(target);
   } else if (command === "frames" && target !== undefined && frame !== undefined) {
     sheet(target, process.argv.slice(5).map(Number), frame, 134);
   } else if (command === "judge" && target !== undefined) {
@@ -270,23 +476,25 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const launches = parseMarks(readFileSync(join(target, "marks.ndjson"), "utf8"));
     const rows = judge(launches, parseTruth(readFileSync(join(target, "truth.tsv"), "utf8")), frameMs);
 
-    console.log("| launch | app clock, Home → open ms | recording, Home → open ms | difference ms | hitched marks |");
-    console.log("| --: | --: | --: | --: | --- |");
+    console.log(
+      "| launch | open | app clock, Home → open ms | recording, Home → open ms | difference ms | hitched marks |",
+    );
+    console.log("| --: | --: | --: | --: | --: | --- |");
 
     for (const row of rows) {
       console.log(
-        `| ${String(row.launch)} | ${round(row.appMs)} | ${round(row.recordedMs)} | ${round(row.difference)} | ${row.hitched.join(", ") || "none"} |`,
+        `| ${String(row.launch)} | ${String(row.open)} | ${round(row.appMs)} | ${round(row.recordedMs)} | ${round(row.difference)} | ${row.hitched.join(", ") || "none"} |`,
       );
     }
 
     const agree = rows.filter((row) => row.agrees).length;
 
     console.log(
-      `\n${String(agree)} of ${String(rows.length)} launches agree within two frames (${round(2 * frameMs)} ms); ${rows.every((row) => row.agrees) ? "the marks land on the frames the screen showed" : "DISAGREES"}.`,
+      `\n${String(agree)} of ${String(rows.length)} opens agree within two frames (${round(2 * frameMs)} ms); ${rows.every((row) => row.agrees) ? "the marks land on the frames the screen showed" : "DISAGREES"}.`,
     );
   } else {
     console.error(
-      "usage: node app-timings-truth.mjs sheets <app-timings-dir> | judge <app-timings-dir> [frame-ms] | frames <truth.mp4> <out.png> <seconds>...",
+      "usage: node app-timings-truth.mjs sheets <app-timings-dir> | settle <app-timings-dir> | judge <app-timings-dir> [frame-ms] | frames <truth.mp4> <out.png> <seconds>...",
     );
     process.exit(2);
   }

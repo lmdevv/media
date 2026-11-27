@@ -3,9 +3,10 @@
  * marks that time a launch and a screen open, and the boundary that reports render errors.
  *
  * A frame mark is the app's `LaunchClock` view (`modules/launch-clock`): an empty view, laid over
- * its screen, that reports once, on the monotonic clock, the display refresh that first shows it
- * in the window, inside the screen's bounds, and under no opaque view such as the splash screen,
- * and whether that refresh came after one the app missed. It also writes the mark, by its name, to
+ * the content a person waits for, that reports once, on the monotonic clock, the display refresh
+ * that first shows that content as it will rest: in its place, so a screen sliding in has arrived,
+ * with the part inside the window on screen, faded in, and under no view such as the splash
+ * screen; and whether that refresh came after one the app missed. It also writes the mark, by its name, to
  * the device's log (subsystem `dev.lmdevv.launch-clock`), where a probe reads the app's own clock.
  */
 import type { ContentSource, OpenCache, TimedScreen } from "@media/contracts/diagnostics";
@@ -43,7 +44,10 @@ export interface FrameMarkProps {
 /** The app's frame mark view. */
 export type FrameMark = ComponentType<FrameMarkProps>;
 
-/** A mark covers the view it is the last child of, so it is in view when any of that view is. */
+/**
+ * A mark covers the view it is the last child of, so it stands where that view stands: it is shown
+ * once the view has come to rest on screen.
+ */
 const OVER_SCREEN = { position: "absolute", top: 0, right: 0, bottom: 0, left: 0 } as const;
 
 /**
