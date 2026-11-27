@@ -124,6 +124,15 @@ const inputs = (args: ReadonlyArray<string>): ReadonlyArray<string> =>
     args.lastIndexOf("-i") + 2,
   );
 
+/** How many times the filter graphs of `args` restate the frame rate. */
+const restatements = (args: ReadonlyArray<string>): number =>
+  [
+    ...args
+      .filter((_, index) => /^-(vf|filter_complex)$/u.test(args[index - 1] ?? ""))
+      .join(";")
+      .matchAll(/fps=/gu),
+  ].length;
+
 describe("hlsCommandArgs", () => {
   it("rewrites ADTS headers of copied AAC, which MPEG-TS files carry and MP4 refuses", () => {
     expect(audioPart(hlsCommandArgs(command(AudioPlan.Copy({ index: 1 }), "aac")))).toStrictEqual([
@@ -183,7 +192,9 @@ describe("hlsCommandArgs", () => {
       "-hwaccel_device",
       "va",
     ]);
-    expect(after(args, "-vf")).toBe("hwmap,format=qsv,vpp_qsv=w=1920:h=1080:format=nv12");
+    expect(after(args, "-vf")).toBe(
+      "hwmap,format=qsv,vpp_qsv=w=1920:h=1080:format=nv12,fps=source_fps",
+    );
     expect(after(args, "-c:v")).toBe("h264_qsv");
   });
 
@@ -241,10 +252,56 @@ describe("hlsCommandArgs", () => {
           "setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709",
           "sidedata=mode=delete:type=MASTERING_DISPLAY_METADATA",
           "sidedata=mode=delete:type=CONTENT_LIGHT_LEVEL",
+          "fps=source_fps",
         ].join(","),
       );
     },
   );
+
+  it("restates the frame rate once after Quick Sync's filters, and on no other path", () => {
+    // ffmpeg 7.1's Quick Sync filters leave each frame's duration in the input's time base, which
+    // ffmpeg's constant-rate output reads as frames to repeat.
+    const scaled = hlsCommand({
+      ...command(AudioPlan.Copy({ index: 1 }), "aac"),
+      video: encode("qsv", {}),
+    });
+
+    const toneMapped = hlsCommand({
+      ...command(AudioPlan.Copy({ index: 1 }), "aac"),
+      videoCodec: "hevc",
+      video: encode("qsv", { codec: "hevc", bitDepth: 10, toneMap: true }),
+    });
+
+    const burned = hlsCommand({
+      ...command(AudioPlan.Copy({ index: 1 }), "aac"),
+      video: encode("qsv", { burnSubtitle: 3 }),
+    });
+
+    expect([scaled, toneMapped, burned].map((run) => restatements(run.args))).toStrictEqual([
+      1, 1, 1,
+    ]);
+    // It is the scale's, then the tone map's, so a failure in it reads back to that step.
+    expect(scaled.owners?.filters.get("Parsed_fps_3")).toStrictEqual([1]);
+    expect(toneMapped.owners?.filters.get("Parsed_fps_6")).toStrictEqual([2]);
+    expect(after(burned.args, "-filter_complex")?.split(";")[2]).not.toContain("fps=");
+
+    for (const domain of ["vaapi", "software"] as const) {
+      for (const options of [
+        {},
+        { codec: "hevc", bitDepth: 10, toneMap: true },
+        { burnSubtitle: 3 },
+      ]) {
+        expect(
+          restatements(
+            hlsCommandArgs({
+              ...command(AudioPlan.Copy({ index: 1 }), "aac"),
+              video: encode(domain, options),
+            }),
+          ),
+        ).toBe(0);
+      }
+    }
+  });
 
   it("uploads frames the GPU cannot decode, in the source's bit depth", () => {
     const args = hlsCommandArgs({
@@ -263,7 +320,7 @@ describe("hlsCommandArgs", () => {
     });
 
     expect(after(qsv, "-vf")).toBe(
-      "format=p010le,hwupload=extra_hw_frames=64,format=qsv,vpp_qsv=w=1920:h=1080:format=nv12",
+      "format=p010le,hwupload=extra_hw_frames=64,format=qsv,vpp_qsv=w=1920:h=1080:format=nv12,fps=source_fps",
     );
   });
 
@@ -318,7 +375,7 @@ describe("hlsCommandArgs", () => {
 
     expect(after(qsv, "-filter_complex")).toBe(
       [
-        "[0:0]hwmap,format=qsv,vpp_qsv=w=1920:h=1080:format=nv12,hwdownload,format=nv12[picture]",
+        "[0:0]hwmap,format=qsv,vpp_qsv=w=1920:h=1080:format=nv12,fps=source_fps,hwdownload,format=nv12[picture]",
         "[0:3]scale=1920:1080[subtitle]",
         "[picture][subtitle]overlay=eof_action=pass:repeatlast=0,format=nv12,hwupload=extra_hw_frames=64,format=qsv[video]",
       ].join(";"),

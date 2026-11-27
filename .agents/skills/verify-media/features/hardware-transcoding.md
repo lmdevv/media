@@ -12,7 +12,9 @@ evidence of where it ran.
 - `hw-decode` decodes a source the device can't play: generated HEVC 8-bit SDR for an H.264-only
   browser.
 - `hw-deinterlace` makes the interlaced MPEG-2 version progressive.
-- `hw-scale` scales the 818-line H.264 version down to a 480-line quality cap.
+- `hw-scale` scales the 818-line H.264 version down to a 480-line quality cap, and
+  `scale-variable-rate` a generated phone-style MP4 (4 s at 60 fps, then 12 s at 15 fps) down to
+  240 lines, through to its last segment.
 - `hw-hdr-to-sdr` maps the HDR10 HEVC version to BT.709 SDR for an SDR browser.
 - `hw-burn-in` draws the DVD (image) subtitle track into the picture.
 - `hw-encode-h264`, `hw-encode-hevc`, and `hw-encode-av1` encode for a device that plays only that
@@ -74,7 +76,10 @@ Preconditions:
   per cell (`side stage row path verdict evidence measured cell`), and `grid.json` the same as JSON.
   - `PASS`: the output is right and the stage ran on that path.
   - `FAIL`: the stream broke, the output is wrong (size, rate, timeline, tags, picture), or the
-    stage ran somewhere else, such as in software on a GPU path. The evidence names which.
+    stage ran somewhere else, such as in software on a GPU path. The evidence names which. Every
+    transcode cell also checks that its picture is where the playlist says (`picture-time`: the
+    start's and the seek's frames against the source shown at the same times, within a frame) and
+    that its sound starts with its picture (`audio-start`).
   - `NOT-BUILT`: the service answered correctly but did not do the stage: it refused with a reason
     the row lists (`no-transcode-target`), or the output lacks the stage (combing left in, H.264
     where only HEVC plays).
@@ -97,7 +102,8 @@ Preconditions:
   records for the session. Beside it are the bytes served (`start.mp4`, `seek.mp4`), ffprobe's
   JSON, `negotiate.json`, `ffmpeg-watch.txt`, `service-log.jsonl`, and the stage's own analysis:
   `idet.txt`; `picture.txt` with `output-240.png`; or `output-108.png`, `source-108.png`, and
-  `changed-108.png` (the pixels the subtitle changed).
+  `changed-108.png` (the pixels the subtitle changed). `timing.txt` has each fetch's picture
+  offset against the source, with its correlation there and in place.
 - **Add a row.** A stage, a path, or a hybrid row (a CPU decode feeding a GPU encode, say) is an
   entry in `scripts/hardware-matrix.mjs`. A hybrid row's id starts with `hybrid-`, and its `work`
   pins the operation that runs elsewhere (`decode: "cpu"`); that operation is judged by the run's
@@ -110,6 +116,13 @@ Preconditions:
   films' frames, at a few MB each.
 
 ## Gotchas
+
+- `picture-time` compares 96x28 gray thumbnails of the top 70 % of the picture with the source's
+  around the same span, through the reference tone map for an HDR row, and takes the shift within
+  3 s that matches best, the smallest shift winning a tie. A picture still on both sides reads as
+  in place. Left alone, ffmpeg 7.1's Quick Sync filters hold a first picture for 41 frames
+  (Matroska, 1.7 s) to 512 (a 24 fps MP4, 21 s) with every timestamp right, which the other
+  checks pass.
 
 - ffmpeg 7.1, the image's, writes an empty sample dependency box (`sdtp`) into a fragmented
   stream's init segment for an encoder that marks pictures disposable (libx265's non-reference

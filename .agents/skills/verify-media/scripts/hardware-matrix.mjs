@@ -50,7 +50,8 @@ export const FIXTURE_LIBRARY = "Verify fixtures";
 /**
  * What the cells play. A `library` fixture is a version of a demo library title; a `generate`
  * fixture is made at run time with the side's own ffmpeg into the side's state, mounted at
- * FIXTURE_ROOT, from `args` (the inputs and encode, without the output file).
+ * FIXTURE_ROOT, from `args` (the inputs and encode, without the output file), in Matroska unless
+ * `format` names another container.
  */
 export const FIXTURES = {
   "sdr-h264": {
@@ -117,6 +118,22 @@ export const FIXTURES = {
         ["-c:v", "libx265", "-preset", "ultrafast", "-pix_fmt", "yuv420p10le"],
         ["-x265-params", "keyint=48:min-keyint=48:scenecut=0:log-level=error"],
         ["-color_primaries", "bt2020", "-color_trc", "arib-std-b67", "-colorspace", "bt2020nc", "-c:a", "aac", "-b:a", "128k"],
+      ].flat(),
+    },
+  },
+  "vfr-h264": {
+    about: "H.264 640x360 in MP4 at a variable frame rate, as a phone records: 4 s at 60 fps then 12 s at 15 fps, with a tone, generated; ffprobe reads a base rate of 60 and an average of 26.25",
+    generate: {
+      title: "Verify Fixture Variable Rate",
+      year: 2026,
+      file: "Verify Fixture Variable Rate (2026).mp4",
+      format: "mp4",
+      args: [
+        ["-f", "lavfi", "-i", "testsrc2=size=640x360:rate=60:duration=4"],
+        ["-f", "lavfi", "-i", "testsrc2=size=640x360:rate=15:duration=12"],
+        ["-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=16"],
+        ["-filter_complex", "[0:v][1:v]concat=n=2:v=1:a=0[v]", "-map", "[v]", "-map", "2:a"],
+        ["-fps_mode", "vfr", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-b:a", "128k"],
       ].flat(),
     },
   },
@@ -241,8 +258,9 @@ export const REFERENCE_TONE_MAP =
   "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p";
 
 /**
- * The rows: one per stage, then hybrid rows, whose `work` fixes an operation to another path than
- * the cell's. `start` and `seek` are where the two fetches begin, in seconds, and `span` how much
+ * The rows: one per stage, a stage's row for a kind of source (`<stage>-<source>`, such as a
+ * variable frame rate), then hybrid rows, whose `work` fixes an operation to another path than the
+ * cell's. `start` and `seek` are where the two fetches begin, in seconds, and `span` how much
  * each covers. `request` adds negotiation options (`quality`, `burnInSubtitle`). `work` maps each
  * operation to where it must run: `path` (the cell's own) or a fixed path, for a hybrid row.
  * `notBuilt` lists the UnsupportedPlayback reasons that mean the service does not do the stage.
@@ -305,6 +323,26 @@ export const ROWS = [
       { check: "aspect", tolerance: 0.01 },
       { check: "codec", codec: "h264", stage: false },
       { check: "frame-rate", expect: ["source"] },
+    ],
+  },
+  {
+    id: "scale-variable-rate",
+    stage: "scale",
+    paths: ALL_PATHS,
+    fixture: "vfr-h264",
+    profile: "h264-sdr",
+    request: { quality: { maxHeight: 240 } },
+    start: 0,
+    seek: 8,
+    span: 6,
+    work: { scale: "path" },
+    notBuilt: [],
+    checks: [
+      { check: "scaled", maxHeight: 240 },
+      { check: "dimensions", expect: "negotiated" },
+      { check: "aspect", tolerance: 0.01 },
+      { check: "codec", codec: "h264", stage: false },
+      { check: "frame-rate", expect: ["base"] },
     ],
   },
   {
@@ -459,6 +497,8 @@ export const COMMON_CHECKS = [
   { check: "duration", tolerance: 1 },
   { check: "timeline" },
   { check: "keyframes" },
+  { check: "picture-time", frames: 1, minMatch: 0.5 },
+  { check: "audio-start" },
 ];
 
 /** Every cell of the table: one per row and path, in grid order. */
@@ -492,7 +532,8 @@ const known = (value) => (value === undefined || value === "unknown" || value ==
 
 /**
  * The first video stream of `ffprobe -show_streams -show_format -of json`, as the checks read it:
- * codec, profile, size, bit depth, colour tags, field order, frame rate, and the file's duration.
+ * codec, profile, size, bit depth, colour tags, field order, frame rate (the average, and the base
+ * rate ffmpeg gives an encode), and the file's duration.
  */
 export const parseProbe = (json) => {
   const parsed = typeof json === "string" ? JSON.parse(json) : json;
@@ -511,6 +552,7 @@ export const parseProbe = (json) => {
     space: known(video.color_space),
     fieldOrder: known(video.field_order),
     fps: rate(video.avg_frame_rate) ?? rate(video.r_frame_rate),
+    baseFps: rate(video.r_frame_rate),
     duration: number(parsed.format?.duration) ?? number(video.duration),
   };
 };
@@ -565,6 +607,96 @@ export const parseSignalstats = (text) => {
   }
   const means = Object.fromEntries(Object.entries(sums).map(([name, sum]) => [name, sum / counts[name]]));
   return Object.keys(means).length === 0 ? undefined : { ...means, frames: counts.YAVG ?? 0 };
+};
+
+/** How far a picture's time may be searched from where the playlist puts it, in seconds. */
+export const TIMING_WINDOW = 3;
+
+/**
+ * The thumbnails the picture-time check compares: 96x28 gray, the top 70 % of the picture, where a
+ * burned-in subtitle never is. `showinfo` after them prints each one's time.
+ */
+export const THUMBNAIL = { width: 96, height: 28, filter: "scale=96:40,crop=96:28:0:0,format=gray,showinfo" };
+
+/**
+ * Raw gray thumbnails (`THUMBNAIL.filter`, `-f rawvideo`) with the times `showinfo` printed for
+ * them, in order: `{ pts, pixels }`, the pixels less their mean and scaled to unit length, so that
+ * two thumbnails' dot product is their correlation. A flat thumbnail has no pixels.
+ */
+export const parseThumbnails = (raw, log, { width, height } = THUMBNAIL) => {
+  const size = width * height;
+  const times = [...String(log).matchAll(/Parsed_showinfo_\d+[^\n]*\bn:\s*\d+[^\n]*\bpts_time:\s*(-?[\d.]+)/g)].map((match) => Number(match[1]));
+  const count = Math.min(times.length, Math.floor(raw.length / size));
+  return Array.from({ length: count }, (_, index) => {
+    const bytes = raw.subarray(index * size, (index + 1) * size);
+    let mean = 0;
+    for (const value of bytes) mean += value;
+    mean /= size;
+    const pixels = new Float32Array(size);
+    let norm = 0;
+    for (let at = 0; at < size; at += 1) {
+      pixels[at] = bytes[at] - mean;
+      norm += pixels[at] * pixels[at];
+    }
+    if (norm < size) return { pts: times[index], pixels: undefined };
+    const scale = 1 / Math.sqrt(norm);
+    for (let at = 0; at < size; at += 1) pixels[at] *= scale;
+    return { pts: times[index], pixels };
+  });
+};
+
+const correlation = (a, b) => {
+  let sum = 0;
+  for (let at = 0; at < a.length; at += 1) sum += a[at] * b[at];
+  return sum;
+};
+
+/** The most output thumbnails one offset search compares. */
+const SAMPLED_THUMBNAILS = 240;
+
+/**
+ * How far in time the output's picture sits from the source's: the shift that best matches each
+ * output thumbnail with the source thumbnail shown at its time plus that shift, searched in steps
+ * of `step` within `window` seconds, the smallest shift winning a tie, so a still picture reads as
+ * in place. A negative shift is a picture that comes late. `score` is the mean correlation at the
+ * shift and `inPlace` at none; both are undefined when no thumbnail has a picture to compare.
+ */
+export const pictureOffset = (output, source, { window, step }) => {
+  const shown = (time) => {
+    let low = 0;
+    let high = source.length - 1;
+    let found;
+    while (low <= high) {
+      const middle = (low + high) >> 1;
+      if (source[middle].pts <= time + 0.001) {
+        found = source[middle];
+        low = middle + 1;
+      } else high = middle - 1;
+    }
+    return found;
+  };
+  const pictured = output.filter((frame) => frame.pixels !== undefined);
+  const every = Math.max(1, Math.ceil(pictured.length / SAMPLED_THUMBNAILS));
+  const sample = pictured.filter((_, index) => index % every === 0);
+  const scoreAt = (shift) => {
+    let sum = 0;
+    let count = 0;
+    for (const frame of sample) {
+      const match = shown(frame.pts + shift);
+      if (match?.pixels === undefined) continue;
+      sum += correlation(frame.pixels, match.pixels);
+      count += 1;
+    }
+    return count === 0 ? undefined : sum / count;
+  };
+  let best;
+  for (let index = 0; index * step <= window + 1e-9; index += 1) {
+    for (const shift of index === 0 ? [0] : [-index * step, index * step]) {
+      const score = scoreAt(shift);
+      if (score !== undefined && (best === undefined || score > best.score + 1e-4)) best = { shift, score };
+    }
+  }
+  return { offset: best?.shift, score: best?.score, inPlace: scoreAt(0), frames: sample.length, step };
 };
 
 /**
@@ -875,6 +1007,51 @@ export const CHECKS = {
       return ok("every segment starts on a keyframe");
     },
   },
+  // Each fetch's picture against the source shown at the same time: left alone, Quick Sync's
+  // filters on ffmpeg 7.1 hold a first picture for 41 to 512 frames, every timestamp in place.
+  "picture-time": {
+    class: "output",
+    run: (obs, params) => {
+      const said = [];
+      for (const fetch of fetchesOf(obs)) {
+        const timing = obs.analysis?.timing?.[fetch.name];
+        if (timing?.score === undefined) return no(`no picture of the ${fetch.name} output could be compared with the source`);
+        const frames = timing.offset / timing.step;
+        const late = `${fmt(Math.abs(frames), 1)} frames (${fmt(Math.abs(timing.offset), 3)} s) ${timing.offset < 0 ? "behind" : "ahead of"} the source`;
+        if (timing.score < params.minMatch) {
+          return no(`the ${fetch.name} picture matches the source nowhere within ${TIMING_WINDOW} s (r ${fmt(timing.score)} at best)`);
+        }
+        if (Math.abs(frames) > params.frames + 0.01) {
+          return no(`the ${fetch.name} picture is ${late} (r ${fmt(timing.score)} there, ${fmt(timing.inPlace)} in place)`);
+        }
+        said.push(`${fetch.name} ${fmt(frames, 1)} frames (r ${fmt(timing.score)})`);
+      }
+      return ok(`picture on the source's timeline: ${said.join(", ")}`);
+    },
+  },
+  // Each fetch's sound starts with its picture: no later than an audio frame after the first picture,
+  // and no earlier than an audio frame before the first video packet is decoded, where the muxer
+  // cuts a fragment when the encoder reorders pictures.
+  "audio-start": {
+    class: "output",
+    run: (obs) => {
+      const said = [];
+      for (const fetch of fetchesOf(obs)) {
+        const audio = fetch.audio;
+        const first = fetch.frames?.[0]?.pts;
+        if (audio === undefined) return no(`the ${fetch.name} output has no audio`);
+        const lead = audio.start - first;
+        if (audio.start > first + audio.frame + 0.001) {
+          return no(`the ${fetch.name} audio starts ${fmt(lead * 1000, 0)} ms after its first picture, more than an audio frame`);
+        }
+        if (audio.start < fetch.firstDecoded - audio.frame - 0.001) {
+          return no(`the ${fetch.name} audio starts ${fmt(-lead * 1000, 0)} ms before its first picture, before its first video packet is decoded`);
+        }
+        said.push(`${fetch.name} ${lead >= 0 ? "+" : ""}${fmt(lead * 1000, 0)} ms`);
+      }
+      return ok(`audio starts with the picture: ${said.join(", ")}`);
+    },
+  },
   codec: {
     class: "output",
     run: (obs, params) =>
@@ -943,7 +1120,7 @@ export const CHECKS = {
     class: "output",
     run: (obs, params) => {
       const source = obs.source?.fps;
-      const allowed = params.expect.map((kind) => (kind === "double" ? source * 2 : source));
+      const allowed = params.expect.map((kind) => ({ double: source * 2, base: obs.source?.baseFps })[kind] ?? source);
       for (const fetch of fetchesOf(obs)) {
         const fps = measuredFps(fetch.frames ?? []);
         if (!allowed.some((want) => near(fps, want, want * 0.01))) {

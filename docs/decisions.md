@@ -102,7 +102,13 @@ Old movies' Convex project, its SDK client, and its command registry were delete
   source's PQ and BT.2020 on its frames under Debian's ffmpeg 7.1, and its mastering display and
   content light levels under 7.1 and 9, so Quick Sync's tone map tags its frames BT.709
   (`setparams`) and drops that metadata (`sidedata`): every encoder would write it, and Apple's
-  players would read the SDR stream as HDR.
+  players would read the SDR stream as HDR. Quick Sync's filters (`vpp_qsv`, and `deinterlace_qsv`
+  and `overlay_qsv` on the same `qsvvpp` code) hand on each frame's duration in the input's time
+  base under ffmpeg 7.0 and 7.1, and ffmpeg's constant-rate output repeats a frame for every tick
+  of it: a 24 fps MP4 holds its first picture 21 s, a variable-rate file's last segment runs to
+  1127 s. A domain says whether its filters' durations can be trusted, and after the last Quick
+  Sync filter the graph restates the frame rate (`fps=source_fps`, the rate reaching it). It runs
+  on every build, since it changes nothing on ffmpeg 8 and later (FFmpeg bc991ca048).
 - Output codec: direct play, remuxes, and audio-only conversions come first, as always; only
   video that must be encoded gets a codec. The decision lists what the client plays, most wanted
   first: HEVC; AV1 when the client reports decoding it power-efficiently (in hardware) or plays

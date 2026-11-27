@@ -20,8 +20,10 @@ import {
   parsePlaylist,
   parseProbe,
   parseSignalstats,
+  parseThumbnails,
   parseWatch,
   PATHS,
+  pictureOffset,
   pictureSane,
   PRINT_STATS,
   PROFILES,
@@ -33,6 +35,8 @@ import {
   sessionRecords,
   STAGES,
   streamRuns,
+  THUMBNAIL,
+  TIMING_WINDOW,
   WORK,
 } from "./hardware-matrix.mjs";
 
@@ -46,7 +50,7 @@ const ffmpeg = (...args) => spawnSync("ffmpeg", ["-hide_banner", "-nostdin", ...
 const ffprobe = (...args) => spawnSync("ffprobe", ["-v", "error", ...args], { encoding: "utf8", maxBuffer: 1 << 26 });
 
 describe("the table", () => {
-  test("has a row for every stage on every path, once, in the stages' order, then hybrid rows", () => {
+  test("has a row for every stage on every path, once, in the stages' order, then source and hybrid rows", () => {
     const keys = cells().map((cell) => cell.key);
     assert.equal(new Set(keys).size, keys.length);
     assert.deepEqual(
@@ -55,6 +59,7 @@ describe("the table", () => {
     );
 
     for (const row of ROWS.filter((row) => !STAGES.includes(row.id))) {
+      if (row.id.startsWith(`${row.stage}-`)) continue;
       assert.ok(row.id.startsWith("hybrid-"), row.id);
       assert.ok(
         Object.values(row.work).some((location) => location !== "path"),
@@ -163,6 +168,33 @@ describe("reading real ffmpeg output", () => {
     assert.equal(stats.SATAVG, 0);
   });
 
+  test("thumbnails find a picture held at the start, and a picture in place, in frames", () => {
+    const thumbs = (filters) => {
+      const run = spawnSync(
+        "ffmpeg",
+        ["-hide_banner", "-nostdin", "-copyts", "-i", clip, "-vf", `${filters}${THUMBNAIL.filter}`, "-fps_mode", "passthrough", "-f", "rawvideo", "-"],
+        { maxBuffer: 1 << 26 },
+      );
+      assert.equal(run.status, 0, run.stderr.toString());
+      return parseThumbnails(run.stdout, run.stderr.toString());
+    };
+    const source = thumbs("");
+    assert.equal(source.length, 50);
+    assert.deepEqual(source.slice(0, 3).map((frame) => frame.pts), [0, 0.04, 0.08]);
+    assert.ok(source.every((frame) => frame.pixels !== undefined));
+
+    const same = pictureOffset(source, source, { window: TIMING_WINDOW, step: 0.04 });
+    assert.equal(same.offset, 0);
+    assert.ok(same.score > 0.99, `r ${same.score}`);
+
+    // The first picture held for ten frames and everything after it late, as ffmpeg 7.1's Quick
+    // Sync filters make a constant-rate output, every timestamp in place.
+    const held = thumbs("tpad=start=10:start_mode=clone,trim=end_frame=50,");
+    const late = pictureOffset(held, source, { window: TIMING_WINDOW, step: 0.04 });
+    assert.ok(Math.abs(late.offset + 0.4) < 1e-9, `offset ${late.offset}`);
+    assert.ok(late.inPlace < late.score, `in place ${late.inPlace}, at the offset ${late.score}`);
+  });
+
   test("x264's bytes name it, and other bytes name no encoder", () => {
     assert.equal(fingerprint(readFileSync(clip)), "x264");
     assert.equal(fingerprint(Buffer.from("nothing here")), undefined);
@@ -260,9 +292,12 @@ const healthy = (cell) => {
     ],
     media: { codec: "h264", profile: "High", width: 1920, height: 818, bitDepth: 8, transfer: "bt709", primaries: "bt709", space: "bt709" },
     frames: frames(from, 96),
+    audio: { start: from, frame: 1024 / 48_000 },
+    firstDecoded: from - 2 / 24,
     decodeErrors: "",
     fingerprint: path === "cpu" ? "x264" : undefined,
   });
+  const inPlace = { offset: 0, score: 0.97, inPlace: 0.97, frames: 96, step: 1 / 24 };
   const args = [
     "ffmpeg",
     ...(path === "cpu" ? [] : ["-hwaccel", path, "-hwaccel_output_format", path]),
@@ -279,8 +314,8 @@ const healthy = (cell) => {
     fetches: { start: fetch("start", row.start), seek: fetch("seek", row.seek) },
     runs: [{ pid: 1, args, gpu: path !== "cpu", engines: path === "cpu" ? {} : { video: 5e8 } }],
     log: [],
-    source: { codec: "hevc", width: 1920, height: 818, fps: 24, duration: 300.2 },
-    analysis: {},
+    source: { codec: "hevc", width: 1920, height: 818, fps: 24, baseFps: 24, duration: 300.2 },
+    analysis: { timing: { start: inPlace, seek: inPlace } },
   };
 };
 
@@ -308,6 +343,59 @@ describe("verdicts", () => {
       assert.equal(judge(cell, onGpu).verdict, "FAIL", path);
       assert.match(judge(cell, onGpu).evidence, /decode not on cpu: the arguments use -hwaccel/);
     }
+  });
+
+  test("a picture behind the source, or matching it nowhere, fails however right its timestamps", () => {
+    const cell = cellOf("decode", "qsv");
+    const behind = healthy(cell);
+    behind.analysis.timing.seek = { offset: -40 / 24, score: 0.986, inPlace: 0.18, frames: 96, step: 1 / 24 };
+    const result = judge(cell, behind);
+    assert.equal(result.verdict, "FAIL");
+    assert.match(result.evidence, /^picture-time: the seek picture is 40 frames \(1\.667 s\) behind the source \(r 0\.99 there, 0\.18 in place\)$/);
+
+    const held = healthy(cell);
+    held.analysis.timing.start = { offset: 2.5, score: 0.21, inPlace: 0.2, frames: 96, step: 1 / 24 };
+    assert.match(judge(cell, held).evidence, /^picture-time: the start picture matches the source nowhere within 3 s/);
+
+    const near = healthy(cell);
+    near.analysis.timing.start = { offset: 1 / 24, score: 0.97, inPlace: 0.96, frames: 96, step: 1 / 24 };
+    assert.equal(judge(cell, near).verdict, "PASS");
+
+    const unread = healthy(cell);
+    delete unread.analysis.timing.seek;
+    assert.match(judge(cell, unread).evidence, /^picture-time: no picture of the seek output could be compared/);
+  });
+
+  test("sound that starts after the first picture, before the first decoded packet, or not at all fails", () => {
+    const cell = cellOf("encode-h264", "cpu");
+    const late = healthy(cell);
+    late.fetches.seek.audio = { start: late.fetches.seek.frames[0].pts + 0.2, frame: 1024 / 48_000 };
+    assert.match(judge(cell, late).evidence, /^audio-start: the seek audio starts 200 ms after its first picture/);
+
+    const early = healthy(cell);
+    early.fetches.start.audio = { start: -0.2, frame: 1024 / 48_000 };
+    assert.match(judge(cell, early).evidence, /^audio-start: the start audio starts 200 ms before its first picture/);
+
+    const silent = healthy(cell);
+    delete silent.fetches.start.audio;
+    assert.match(judge(cell, silent).evidence, /^audio-start: the start output has no audio$/);
+
+    // The muxer cuts a fragment at its keyframe's decode time, so sound may lead by the reordering.
+    const reordered = healthy(cell);
+    reordered.fetches.start.audio = { start: -2 / 24, frame: 1024 / 48_000 };
+    assert.equal(judge(cell, reordered).verdict, "PASS");
+  });
+
+  test("a variable-rate source runs at its base rate", () => {
+    const cell = cellOf("scale-variable-rate", "qsv");
+    const obs = healthy(cell);
+    obs.source = { ...obs.source, width: 640, height: 360, fps: 26.25, baseFps: 24 };
+    obs.negotiation.body.video = { width: 426, height: 240 };
+    for (const fetch of Object.values(obs.fetches)) fetch.media = { ...fetch.media, width: 426, height: 240 };
+    obs.runs[0].args = obs.runs[0].args.map((arg) => arg.replace("w=1920:h=818", "w=426:h=240"));
+    assert.equal(judge(cell, obs).verdict, "PASS", judge(cell, obs).evidence);
+    obs.source.baseFps = 60;
+    assert.match(judge(cell, obs).evidence, /^frame-rate: the start output runs at 24 fps/);
   });
 
   test("an absent fixture or device is skipped", () => {

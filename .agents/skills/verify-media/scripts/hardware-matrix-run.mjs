@@ -199,7 +199,7 @@ const prepareGenerated = async (name, fixture) => {
       "-y",
       ...generate.args,
       "-f",
-      "matroska",
+      generate.format ?? "matroska",
       `/out/${generate.file}.part`,
     ]);
     if (result.status !== 0) throw new Error(`generating ${name} failed: ${result.stderr.trim()}`);
@@ -310,8 +310,14 @@ const fetchSpan = async (name, playlistUrl, from, span, dir, token) => {
   return { name, ok: false, error: "the generation kept changing", notes };
 };
 
-// ffprobe's and ffmpeg's view of a fetched span: the video stream, its frames, decode errors, and
-// whose fingerprint the bytes carry.
+// The earliest of a fetch's packets in one stream, and the first one's duration.
+const packetsOf = (file, stream, entries) => {
+  const probed = tool("ffprobe", ["-v", "error", "-select_streams", stream, "-show_entries", `packet=${entries}`, "-of", "json", file]);
+  return probed.status === 0 ? (JSON.parse(probed.stdout).packets ?? []) : [];
+};
+
+// ffprobe's and ffmpeg's view of a fetched span: the video stream, its frames, decode errors, when
+// its sound starts, and whose fingerprint the bytes carry.
 const readFetch = (fetch, dir) => {
   if (!fetch.ok) return fetch;
   const streams = tool("ffprobe", ["-v", "error", "-show_streams", "-show_format", "-of", "json", fetch.file]);
@@ -329,8 +335,15 @@ const readFetch = (fetch, dir) => {
   ]);
   writeFileSync(join(dir, `${fetch.name}.frames.json`), frames.stdout);
   const decoded = tool("ffmpeg", ["-v", "error", "-nostdin", "-i", fetch.file, "-map", "0:v:0", "-f", "null", "-"]);
+  const audio = packetsOf(fetch.file, "a:0", "pts_time,duration_time");
+  const video = packetsOf(fetch.file, "v:0", "dts_time");
   return {
     ...fetch,
+    audio:
+      audio.length === 0
+        ? undefined
+        : { start: Math.min(...audio.map((packet) => Number(packet.pts_time))), frame: Number(audio[0].duration_time) },
+    firstDecoded: Math.min(...video.map((packet) => Number(packet.dts_time))),
     media: streams.status === 0 ? Matrix.parseProbe(streams.stdout) : undefined,
     frames: frames.status === 0 ? Matrix.parseFrames(frames.stdout) : [],
     decodeErrors: decoded.status === 0 ? decoded.stderr : `${decoded.stderr}\nffmpeg exited ${decoded.status}`,
@@ -396,6 +409,55 @@ const analysePicture = (obs, found, params, dir) => {
   writeFileSync(join(dir, "picture.txt"), `output:\n${output.stdout}${output.stderr}\nreference:\n${reference.stdout}${reference.stderr}`);
   frameAt(fetch.file, params.at, join(dir, `output-${params.at}.png`));
   return { output: Matrix.parseSignalstats(output.stdout), reference: Matrix.parseSignalstats(reference.stdout) };
+};
+
+// Gray thumbnails of `args`' picture with their times, from a run here or (`where`) in the side.
+const thumbnails = (where, args) => {
+  const run = where([...args, "-map", "0:v:0", "-fps_mode", "passthrough", "-f", "rawvideo", "-"], { encoding: "buffer" });
+  return { frames: Matrix.parseThumbnails(run.stdout, run.stderr.toString()), log: run.stderr.toString() };
+};
+
+// Where each fetch's picture sits in time against the source's: thumbnails of the output, and of
+// the source around the same span on its own timeline, through the reference tone map where the
+// row maps HDR to SDR.
+const analyseTiming = (obs, found, cell, dir) => {
+  const timing = {};
+  const lines = [];
+  const toneMap = cell.row.work["tone-map"] === undefined ? "" : `scale=384:-2,${Matrix.REFERENCE_TONE_MAP},`;
+  for (const fetch of [obs.fetches.start, obs.fetches.seek]) {
+    if (!fetch?.ok || (fetch.frames ?? []).length < 2) continue;
+    const { from, seconds } = spanOf(fetch);
+    const begin = Math.max(0, from - Matrix.TIMING_WINDOW - 1);
+    const output = thumbnails((args, options) => tool("ffmpeg", args, options), [
+      "-hide_banner",
+      "-nostdin",
+      "-copyts",
+      "-i",
+      fetch.file,
+      "-vf",
+      Matrix.THUMBNAIL.filter,
+    ]);
+    const source = thumbnails((args, options) => inContainer(["ffmpeg", ...args], options), [
+      "-hide_banner",
+      "-nostdin",
+      "-ss",
+      String(begin),
+      "-copyts",
+      "-t",
+      String(from + seconds + Matrix.TIMING_WINDOW + 1 - begin),
+      "-i",
+      found.path,
+      "-vf",
+      `${toneMap}${Matrix.THUMBNAIL.filter}`,
+    ]);
+    const step = 1 / Matrix.measuredFps(fetch.frames);
+    timing[fetch.name] = Matrix.pictureOffset(output.frames, source.frames, { window: Matrix.TIMING_WINDOW, step });
+    lines.push(
+      `${fetch.name}: ${output.frames.length} output thumbnails, ${source.frames.length} source thumbnails from ${begin} s: ${JSON.stringify(timing[fetch.name])}`,
+    );
+  }
+  writeFileSync(join(dir, "timing.txt"), `${lines.join("\n")}\n`);
+  return timing;
 };
 
 // The output keeps the source's timeline, which ffmpeg moves to zero unless told to copy it.
@@ -472,7 +534,7 @@ const measure = async (cell, found, health, dir) => {
   obs.fetches.start = obs.fetches.start && readFetch(obs.fetches.start, dir);
   obs.fetches.seek = obs.fetches.seek && readFetch(obs.fetches.seek, dir);
   obs.source = found.source;
-  obs.analysis = {};
+  obs.analysis = { timing: analyseTiming(obs, found, cell, dir) };
   for (const spec of row.checks) {
     if (spec.check === "progressive") obs.analysis.idet = analyseProgressive(obs, found, dir);
     if (spec.check === "picture") obs.analysis.picture = analysePicture(obs, found, spec, dir);
@@ -504,6 +566,8 @@ const summary = (obs) => ({
         frames: fetch.frames?.length,
         fps: fetch.frames && Matrix.measuredFps(fetch.frames),
         fingerprint: fetch.fingerprint,
+        audio: fetch.audio,
+        firstDecoded: fetch.firstDecoded,
         decodeErrors: fetch.decodeErrors?.trim() || undefined,
       },
     ]),

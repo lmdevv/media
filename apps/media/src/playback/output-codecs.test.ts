@@ -61,12 +61,21 @@ const FAST_FILE = "Mpeg Sixty (2013)/Mpeg Sixty (2013).mkv";
  */
 const SLOW_FILE = "Mpeg Six (2015)/Mpeg Six (2015).mkv";
 
-const client = (videoCodecs: ClientCapabilities["videoCodecs"]): ClientCapabilities => ({
+/** The largest picture the clients below show. */
+const FULL_HD = { width: 1920, height: 1080 } as const;
+
+/** A smaller picture than every source, so its encode is scaled. */
+const SCALED = { width: 480, height: 270 } as const;
+
+const client = (
+  videoCodecs: ClientCapabilities["videoCodecs"],
+  screen: { readonly width: number; readonly height: number } = FULL_HD,
+): ClientCapabilities => ({
   containers: [],
   videoCodecs,
   audioCodecs: [{ codec: "aac" }],
-  maxWidth: 1920,
-  maxHeight: 1080,
+  maxWidth: screen.width,
+  maxHeight: screen.height,
   hls: false,
   mse: true,
 });
@@ -276,6 +285,46 @@ const addVfrSource = Effect.gen(function* () {
   yield* scanner.scan({ libraryId: SOURCES, root, mode: "incremental" });
 
   return MemoryLibrary.fileIdOf(SOURCES, VFR_FILE);
+}).pipe(Effect.orDie);
+
+/**
+ * Six seconds of 640x360 H.264 at 24 fps in MP4, whose track counts time in 1/12288 s: each frame
+ * lasts 512 ticks, which ffmpeg 7.1's Quick Sync filters hand on as 512 frames.
+ */
+const MP4_FILE = "Mp4 Clip (2017)/Mp4 Clip (2017).mp4";
+
+const addMp4Source = Effect.gen(function* () {
+  const workspace = yield* FixtureWorkspace.Service;
+  const tools = yield* MediaTools.Service;
+  const scanner = yield* LibraryScanner.Service;
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const root = path.join(workspace.root, "output-codecs");
+  const file = path.join(root, MP4_FILE);
+
+  if (!(yield* fs.exists(file))) {
+    yield* fs.makeDirectory(path.dirname(file), { recursive: true });
+    yield* tools.ffmpeg([
+      "-hide_banner",
+      "-nostdin",
+      "-v",
+      "error",
+      "-y",
+      "-f",
+      "lavfi",
+      "-i",
+      "testsrc2=s=640x360:r=24:duration=6",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "ultrafast",
+      file,
+    ]);
+  }
+
+  yield* scanner.scan({ libraryId: SOURCES, root, mode: "incremental" });
+
+  return MemoryLibrary.fileIdOf(SOURCES, MP4_FILE);
 }).pipe(Effect.orDie);
 
 /** Six seconds of HEVC Main 10 in HDR10, with mastering display and content light levels. */
@@ -653,6 +702,98 @@ const downloads = Effect.fn("OutputCodecs.downloads")(function* (
   );
 });
 
+/** A source whose frames' durations a GPU filter can misread, and the rate its encode runs at. */
+interface TimedSource {
+  readonly name: string;
+  readonly key: string;
+  readonly file: typeof addVfrSource;
+  /** One frame of the encode: ffmpeg's base rate for the file. */
+  readonly frame: number;
+  readonly seconds: number;
+}
+
+const TIMED_SOURCES: ReadonlyArray<TimedSource> = [
+  { name: "a variable frame rate", key: "vfr", file: addVfrSource, frame: 1 / 60, seconds: 16 },
+  { name: "a 24 fps MP4", key: "mp4", file: addMp4Source, frame: FRAME, seconds: 6 },
+];
+
+/**
+ * Negotiates `expected.client`'s codecs on a 480x270 screen, so the picture is scaled, for
+ * `source` on `path`, and reads every segment: each holds a frame for every frame of its interval
+ * and ends where the playlist says, within half a frame, so the last ends with the file. ffmpeg
+ * 7.1's Quick Sync filters hand on durations ffmpeg's constant-rate output reads as frames to
+ * repeat: left alone, the variable one's last segment runs to 1127 s and the MP4 to 27 s.
+ */
+const endsWhereListed = Effect.fn("OutputCodecs.endsWhereListed")(function* (
+  expected: Case,
+  path: "cpu" | "qsv" | "vaapi",
+  source: TimedSource,
+) {
+  const server = yield* MediaTestServer.Service;
+  const fileId: MediaFileId = yield* source.file;
+  const name = `${expected.name}, from ${source.name}`;
+
+  const token = signTestToken({
+    fid: fileId,
+    sid: `timed-${path}-${expected.codec}-${source.key}`,
+  });
+
+  const local = (url: string) => url.replace(/^https?:\/\/[^/]+/u, server.baseUrl);
+
+  const negotiated = yield* decodeNegotiation(
+    yield* posted(`${server.baseUrl}/api/playback/negotiate`, {
+      token,
+      capabilities: client(expected.client.videoCodecs, SCALED),
+    }),
+  ).pipe(Effect.orDie);
+
+  // A stream left running holds its encoder slot, so a failed check must not starve the next case.
+  yield* Effect.addFinalizer(() =>
+    Effect.asVoid(
+      posted(`${server.baseUrl}/api/playback/stop`, { token, streamId: negotiated.streamId ?? "" }),
+    ),
+  );
+
+  assert.strictEqual(negotiated.video.codec, expected.codec, name);
+  assert.deepInclude(
+    negotiated.transcode?.stages.find((stage) => stage.op === "scale"),
+    {
+      domain: path,
+    },
+    name,
+  );
+
+  const { init, segments } = yield* segmentsOf(local(negotiated.url));
+  const initBytes = yield* fetched(init);
+  const ends = [...segments.slice(1).map((segment) => segment.start), source.seconds];
+
+  for (const [index, segment] of segments.entries()) {
+    const served = yield* fetched(segment.url);
+    const end = ends[index] ?? Number.NaN;
+    const at = `${name}, the segment at ${segment.start.toFixed(3)} s`;
+
+    assert.strictEqual(served.status, 200, at);
+
+    const times = (yield* probeSegment([initBytes.body, served.body]).pipe(Effect.orDie)).packets
+      .map((packet) => packet.pts_time)
+      .toSorted((left, right) => left - right);
+
+    assert.approximately(times[0] ?? Number.NaN, segment.start, source.frame / 2, `${at}: starts`);
+    assert.approximately(
+      (times.at(-1) ?? Number.NaN) + source.frame,
+      end,
+      source.frame / 2,
+      `${at}: ends where the playlist says`,
+    );
+    assert.approximately(
+      times.length,
+      (end - segment.start) / source.frame,
+      1,
+      `${at}: a frame for every frame of its interval`,
+    );
+  }
+}, Effect.scoped);
+
 /** The sources a level is checked against. */
 const LEVEL_SOURCES = {
   "24 fps": addSource,
@@ -849,6 +990,16 @@ describe.skipIf(!hasFfmpeg)("output codecs", () => {
         120_000,
       );
     }
+
+    for (const source of TIMED_SOURCES) {
+      for (const expected of [h264Only, hevcOnly, av1Only]) {
+        it.effect(
+          `ends every scaled ${expected.codec} segment where the playlist says on the CPU, from ${source.name}`,
+          () => endsWhereListed(expected, "cpu", source),
+          120_000,
+        );
+      }
+    }
   });
 
   for (const path of ["qsv", "vaapi"] as const) {
@@ -888,6 +1039,16 @@ describe.skipIf(!hasFfmpeg)("output codecs", () => {
             () => holdsLevel(expected, path),
             120_000,
           );
+        }
+
+        for (const source of TIMED_SOURCES) {
+          for (const expected of [h264Only, hevcOnly, av1Only]) {
+            it.effect(
+              `ends every scaled ${expected.codec} segment where the playlist says on ${path}, from ${source.name}`,
+              () => endsWhereListed(expected, path, source),
+              120_000,
+            );
+          }
         }
 
         if (path === "qsv") {

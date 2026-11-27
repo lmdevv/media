@@ -304,6 +304,13 @@ export interface DomainSpec {
   readonly deviceArgs: (device: string) => ReadonlyArray<string>;
   /** Components every use of the domain needs. */
   readonly needs: ReadonlyArray<BuildFeature>;
+  /**
+   * Whether the frames its processing filters (its rows other than decoders and moves) hand on
+   * carry durations in their timestamps' time base. ffmpeg's constant-rate output repeats each
+   * frame for its duration, so where they may not, the renderer restates the frame rate once
+   * after the last such filter (`video-render.ts`), whichever row the filter belongs to.
+   */
+  readonly filterDurations: "trusted" | "untrusted";
 }
 
 /** Colours a tone map takes. */
