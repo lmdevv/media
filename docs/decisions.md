@@ -174,7 +174,8 @@ Old movies' Convex project, its SDK client, and its command registry were delete
   copies are JPEGs made with ffmpeg and cached by source, size, and modification time.
 - Music covers carry `/music/art/<hash>?ticket=<ticket>`. A client adds `&w=` one of
   `COVER_SIZES` in `@media/contracts/artwork`, the sizes the music apps draw covers at, and
-  `coverSizeFor` picks the size of the cell or at least 1.75 times it. The server bounds the cover's
+  `coverSizeFor` picks the size of the cell or at least 1.75 times it, and the web app's
+  `webCoverSize` the size of the cell or one the browser shrinks sharply. The server bounds the cover's
   shorter side by it, but copies only the kinds of cover `COPIED_KINDS` lists
   (`apps/media/src/music/cover-copy.ts`), each proven by a route test, and only when the copy takes
   fewer bytes; every other cover, and any it cannot copy, is served as stored.
