@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import type { ArtworkWidth } from "@media/contracts/artwork";
+import type { ArtworkWidth, CoverSize } from "@media/contracts/artwork";
 import {
   Cache,
   Clock,
@@ -61,12 +61,13 @@ export interface Interface {
   /**
    * A music cover the server holds, resized so its shorter side is `size`, since every cover is
    * drawn as a square crop, and written as `format`. `fingerprint` names the file's content, and
-   * the copy is kept under it with the other resized artwork, within `CACHE_MAX_MB`.
+   * the copy is kept under it with the other resized artwork, within `CACHE_MAX_MB`. Fails when
+   * ffmpeg finds any error in the cover, so a damaged cover is never copied.
    */
   readonly resizeCover: (
     file: string,
     fingerprint: string,
-    size: ArtworkWidth,
+    size: CoverSize,
     format: CoverFormat,
   ) => Effect.Effect<ArtworkImage, ArtworkUnavailable>;
 }
@@ -120,8 +121,9 @@ export type CoverFormat = "jpeg" | "png";
  * width, for movie artwork, which is drawn at its own shape; it rounds the height to an even
  * number of pixels, which can enlarge an image with an odd height by one row. `shorter` bounds the
  * shorter side, for a music cover, which is drawn as a square crop that then has the size each
- * way. It rounds the longer side to an even number of pixels too, so a square cover's copy matches
- * the width bound's, but never past the cover's own size.
+ * way. It rounds the longer side to an even number of pixels, never past the cover's own size, and
+ * scales with Lanczos, the sharpest of ffmpeg's filters, since a copy at a cell's exact size is
+ * drawn pixel for pixel.
  */
 type Resize =
   | { readonly bound: "width" }
@@ -133,15 +135,19 @@ const evenLonger = (scaled: string, longer: string, shorter: string) =>
 
 const shorterScale = (size: string) =>
   `scale='if(gt(iw,ih),${evenLonger(`min(${size},ih)`, "iw", "ih")},min(${size},iw))'` +
-  `:'if(gt(iw,ih),min(${size},ih),${evenLonger(`min(${size},iw)`, "ih", "iw")})'`;
+  `:'if(gt(iw,ih),min(${size},ih),${evenLonger(`min(${size},iw)`, "ih", "iw")})':flags=lanczos`;
 
-/** The cache folder, file extension, content type, filter, and encoder options of `resize` at `size`. */
+/**
+ * The cache folder, file extension, content type, decoder options, filter, and encoder options of
+ * `resize` at `size`. A music cover's decoder stops at the first error in the file.
+ */
 const plan = (resize: Resize, size: string) => {
   if (resize.bound === "width") {
     return {
       folder: `w${size}`,
       extension: "jpg",
       contentType: "image/jpeg",
+      decoding: [],
       filter: `scale='min(${size},iw)':-2`,
       quality: ["-q:v", "3"],
     };
@@ -152,6 +158,7 @@ const plan = (resize: Resize, size: string) => {
         folder: `s${size}`,
         extension: "jpg",
         contentType: "image/jpeg",
+        decoding: ["-err_detect", "explode"],
         filter: shorterScale(size),
         quality: ["-q:v", "3"],
       }
@@ -159,6 +166,7 @@ const plan = (resize: Resize, size: string) => {
         folder: `s${size}`,
         extension: "png",
         contentType: "image/png",
+        decoding: ["-err_detect", "explode"],
         filter: `premultiply=inplace=1,${shorterScale(size)},unpremultiply=inplace=1`,
         quality: [],
       };
@@ -276,11 +284,15 @@ const make = Effect.gen(function* () {
   const resizeFile = Effect.fn("ArtworkStore.resize")(function* (
     file: string,
     fingerprint: string,
-    size: ArtworkWidth,
+    size: ArtworkWidth | CoverSize,
     resize: Resize,
   ) {
     // Each bound keeps its copies in its own folder, so the same file never answers both.
-    const { folder, extension, contentType, filter, quality } = plan(resize, String(size));
+    const { folder, extension, contentType, decoding, filter, quality } = plan(
+      resize,
+      String(size),
+    );
+
     const target = path.join(directory, folder, `${hash(fingerprint)}.${extension}`);
     const image: ArtworkImage = { path: target, contentType };
 
@@ -299,6 +311,7 @@ const make = Effect.gen(function* () {
           "-v",
           "error",
           "-y",
+          ...decoding,
           "-i",
           file,
           "-vf",
@@ -321,13 +334,21 @@ const make = Effect.gen(function* () {
   // Concurrent requests for one copy share a single ffmpeg run. Nothing outlives that run, so each
   // later request finds the copy on disk again, or makes it again after the cache pruner removed it.
   const copies = yield* Cache.makeWith(
-    ([file, fingerprint, size, resize]: readonly [string, string, ArtworkWidth, Resize]) =>
-      resizeFile(file, fingerprint, size, resize),
+    ([file, fingerprint, size, resize]: readonly [
+      string,
+      string,
+      ArtworkWidth | CoverSize,
+      Resize,
+    ]) => resizeFile(file, fingerprint, size, resize),
     { capacity: 2048, timeToLive: () => Duration.zero },
   );
 
-  const resizeImage = (file: string, fingerprint: string, size: ArtworkWidth, resize: Resize) =>
-    Cache.get(copies, [file, fingerprint, size, resize] as const);
+  const resizeImage = (
+    file: string,
+    fingerprint: string,
+    size: ArtworkWidth | CoverSize,
+    resize: Resize,
+  ) => Cache.get(copies, [file, fingerprint, size, resize] as const);
 
   const images = yield* Cache.makeWith(
     ([key, width]: readonly [string, Option.Option<ArtworkWidth>]) =>

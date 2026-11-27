@@ -1,4 +1,4 @@
-import { artworkCacheKey, artworkWidthFor, sizedArtworkUrl } from "@media/contracts/artwork";
+import { artworkCacheKey, coverSizeFor, sizedArtworkUrl } from "@media/contracts/artwork";
 
 const absolute = /^https?:\/\//iu;
 
@@ -29,10 +29,10 @@ export interface ArtSource {
 }
 
 /**
- * The cover to load for `url` (as `resolveMediaUrl` reads it) drawn `size` device pixels wide:
- * resized by the server to the smallest width that covers that, or the stored original. The cache
- * keeps it under its URL without the weekly image ticket, so a new ticket loads nothing again, and
- * each width under its own key. A cover saved on this phone loads as it is.
+ * The cover to load for `url` (as `resolveMediaUrl` reads it) drawn `size` device pixels wide: the
+ * server's copy for that size (`coverSizeFor`), or the stored original. The cache keeps it under
+ * its URL without the weekly image ticket, so a new ticket loads nothing again, and each size under
+ * its own key. A cover saved on this phone loads as it is.
  */
 export const artSource = (
   origin: string,
@@ -46,7 +46,7 @@ export const artSource = (
   const uri =
     size === "original" || local.test(resolved)
       ? resolved
-      : sizedArtworkUrl(resolved, artworkWidthFor(size));
+      : sizedArtworkUrl(resolved, coverSizeFor(size));
 
   return { uri, cacheKey: artworkCacheKey(uri) };
 };

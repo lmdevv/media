@@ -40,8 +40,8 @@ describe("artSource", () => {
     });
   });
 
-  it("keeps each width under its own key, and the original under the cover's path", () => {
-    expect(artSource(origin, cover, 240 * 3)?.cacheKey).toBe(`${origin}/music/art/a1?w=780`);
+  it("keeps each size under its own key, and the original under the cover's path", () => {
+    expect(artSource(origin, cover, 192 * 3)?.cacheKey).toBe(`${origin}/music/art/a1?w=576`);
     expect(artSource(origin, cover, 2000)).toEqual({
       uri: `${origin}${cover}`,
       cacheKey: `${origin}/music/art/a1`,
@@ -49,10 +49,12 @@ describe("artSource", () => {
     expect(artSource(origin, cover, "original")).toEqual(artSource(origin, cover, 2000));
   });
 
-  it("loads the original for a frame larger than the largest copy, such as an iPad's", () => {
-    expect(artSource(origin, cover, 1279)?.uri).toBe(`${origin}${cover}&w=1280`);
+  it("asks for a copy at least twice a cell with no copy of its size, or else the original", () => {
+    // A 44-point row and a 175-point grid card at 3x.
+    expect(artSource(origin, cover, 44 * 3)?.uri).toBe(`${origin}${cover}&w=336`);
+    expect(artSource(origin, cover, 175 * 3)?.uri).toBe(`${origin}${cover}&w=1280`);
     expect(artSource(origin, cover, 1280)?.uri).toBe(`${origin}${cover}&w=1280`);
-    expect(artSource(origin, cover, 1281)?.uri).toBe(`${origin}${cover}`);
+    expect(artSource(origin, cover, 1279)?.uri).toBe(`${origin}${cover}`);
     // Now Playing on a 13-inch iPad: about 900 points at 2x.
     expect(artSource(origin, cover, 900 * 2)?.uri).toBe(`${origin}${cover}`);
   });

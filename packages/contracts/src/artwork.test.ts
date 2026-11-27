@@ -3,61 +3,56 @@ import { Option, Result } from "effect";
 import { describe, expect, it } from "vitest";
 
 import {
-  ARTWORK_WIDTHS,
   artworkCacheKey,
   artworkUrl,
-  artworkWidthFor,
-  coverSrcSet,
+  COVER_SIZES,
+  coverSizeFor,
   requestedArtworkWidth,
+  requestedCoverSize,
   sizedArtworkUrl,
 } from "./artwork";
 
 const COVER = "http://lar.local/music/art/ab12?ticket=t1.week-one";
 
-describe("artworkWidthFor", () => {
-  it("asks for the smallest width that covers the drawn pixels", () => {
-    fc.assert(
-      fc.property(fc.double({ min: 0, max: 1280, noNaN: true }), (pixels) => {
-        const width = artworkWidthFor(pixels);
+describe("coverSizeFor", () => {
+  it("asks for the copy of exactly the size a cell is drawn at", () => {
+    for (const size of COVER_SIZES) expect(coverSizeFor(size)).toBe(size);
+    // A 48-point row at 3x and 2x, a 168-point card and a 192-point album header at 3x.
+    expect([48 * 3, 48 * 2, 168 * 3, 192 * 3].map(coverSizeFor)).toEqual([144, 96, 504, 576]);
+    expect(coverSizeFor(143.6)).toBe(144);
+  });
 
-        expect(width).toBeDefined();
-        expect(width).toBeGreaterThanOrEqual(pixels);
-        expect(ARTWORK_WIDTHS.filter((each) => each >= pixels && each < (width ?? 0))).toEqual([]);
+  it("asks for a copy at least twice a cell with no copy of its size, so the second scaling is harmless", () => {
+    fc.assert(
+      fc.property(fc.double({ min: 0, max: 640, noNaN: true }), (pixels) => {
+        fc.pre(COVER_SIZES.every((size) => size !== Math.round(pixels)));
+        const size = coverSizeFor(pixels);
+
+        expect(size).toBeGreaterThanOrEqual(2 * Math.round(pixels));
+        // The smallest such copy.
+        expect(
+          COVER_SIZES.filter((each) => each >= 2 * Math.round(pixels) && each < (size ?? 0)),
+        ).toEqual([]);
       }),
     );
+    // A 44-point row and a fluid grid card on a 402-point phone at 3x.
+    expect([44 * 3, 175 * 3].map(coverSizeFor)).toEqual([336, 1280]);
   });
 
-  it("asks for the original past the largest width", () => {
+  it("asks for the original when no copy is the cell's size or twice it", () => {
     fc.assert(
-      fc.property(fc.double({ min: 1280, max: 1e6, noNaN: true, minExcluded: true }), (pixels) => {
-        expect(artworkWidthFor(pixels)).toBeUndefined();
+      fc.property(fc.double({ min: 641, max: 1e6, noNaN: true }), (pixels) => {
+        fc.pre(COVER_SIZES.every((size) => size !== Math.round(pixels)));
+        expect(coverSizeFor(pixels)).toBeUndefined();
       }),
     );
-  });
-
-  it("sizes a 48-point row and a 240-point header on a 3x phone", () => {
-    expect(artworkWidthFor(48 * 3)).toBe(185);
-    expect(artworkWidthFor(240 * 3)).toBe(780);
-    expect(artworkWidthFor(Number.NaN)).toBeUndefined();
-  });
-});
-
-describe("coverSrcSet", () => {
-  it("offers every copy by its shorter side, then the original past the largest", () => {
-    expect(coverSrcSet("https://m.example/music/art/a1?ticket=t").split(", ")).toEqual([
-      "https://m.example/music/art/a1?ticket=t&w=185 185w",
-      "https://m.example/music/art/a1?ticket=t&w=342 342w",
-      "https://m.example/music/art/a1?ticket=t&w=500 500w",
-      "https://m.example/music/art/a1?ticket=t&w=780 780w",
-      "https://m.example/music/art/a1?ticket=t&w=1280 1280w",
-      "https://m.example/music/art/a1?ticket=t 1281w",
-    ]);
+    expect(coverSizeFor(Number.NaN)).toBeUndefined();
   });
 });
 
 describe("sizedArtworkUrl", () => {
   it("adds the width after a query, or starts one", () => {
-    expect(sizedArtworkUrl(COVER, 185)).toBe(`${COVER}&w=185`);
+    expect(sizedArtworkUrl(COVER, 144)).toBe(`${COVER}&w=144`);
     expect(sizedArtworkUrl("http://lar.local/artwork/a1.key", 342)).toBe(
       "http://lar.local/artwork/a1.key?w=342",
     );
@@ -98,15 +93,23 @@ describe("artworkCacheKey", () => {
 
 const read = (query: string) => requestedArtworkWidth(new URLSearchParams(query));
 
-describe("requestedArtworkWidth", () => {
-  it("reads an allowed width, or the original without one", () => {
+const readCover = (query: string) => requestedCoverSize(new URLSearchParams(query));
+
+describe("requestedArtworkWidth and requestedCoverSize", () => {
+  it("read an allowed size, or the original without one", () => {
     expect(read("ticket=t1.x&w=185")).toEqual(Result.succeed(Option.some(185)));
     expect(read("ticket=t1.x")).toEqual(Result.succeed(Option.none()));
+    expect(readCover("ticket=t1.x&w=144")).toEqual(Result.succeed(Option.some(144)));
+    expect(readCover("ticket=t1.x")).toEqual(Result.succeed(Option.none()));
   });
 
-  it("refuses any other width", () => {
-    for (const raw of ["100", "186", "abc", "", "185.5", "-185", "1e9"]) {
+  it("refuse any other size, each its own list", () => {
+    for (const raw of ["100", "186", "144", "abc", "", "185.5", "-185", "1e9"]) {
       expect(read(`w=${raw}`)).toEqual(Result.fail(raw));
+    }
+
+    for (const raw of ["100", "185", "145", "abc", "", "144.5", "-144", "1e9"]) {
+      expect(readCover(`w=${raw}`)).toEqual(Result.fail(raw));
     }
   });
 });

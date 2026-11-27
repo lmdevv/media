@@ -47,9 +47,9 @@ describe("showNowPlaying", () => {
     showNowPlaying(song, true, 0);
 
     expect(media.metadata?.artwork).toEqual(
-      [185, 342, 500, 780, 1280].map((width) => ({
-        src: `${COVER}&w=${String(width)}`,
-        sizes: `${String(width)}x${String(width)}`,
+      [96, 120, 144, 336, 384, 480, 504, 576, 720, 960, 1280].map((size) => ({
+        src: `${COVER}&w=${String(size)}`,
+        sizes: `${String(size)}x${String(size)}`,
       })),
     );
   });

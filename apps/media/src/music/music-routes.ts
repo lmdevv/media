@@ -1,11 +1,11 @@
 /**
  * Music's byte routes (`@media/contracts/music-playback`) on the server's Effect HTTP router
  * (ADR 0010): a song's stream at a profile to its personal ticket, and album art to its shareable
- * ticket (ADR 0011), as stored or with its shorter side resized to one of `ARTWORK_WIDTHS` when a
- * copy looks the same (`coverCopy`). Answers are plain text with the statuses music's players
- * read. No answer, log, or span carries a ticket.
+ * ticket (ADR 0011), as stored or with its shorter side resized to one of `COVER_SIZES` when it is
+ * of a kind a copy is proven to show the same (`coverKind`). Answers are plain text with the
+ * statuses music's players read. No answer, log, or span carries a ticket.
  */
-import { requestedArtworkWidth } from "@media/contracts/artwork";
+import { requestedCoverSize } from "@media/contracts/artwork";
 import { isReceiverCredential } from "@media/contracts/cast";
 import { TrackId } from "@media/contracts/ids";
 import {
@@ -33,7 +33,7 @@ import { realPathInsideApprovedRoots } from "../playback/file-resolver.ts";
 import * as PlaybackToken from "../playback/playback-grants.ts";
 import { artPath, imageContentType, isArtHash } from "./art-store.ts";
 import { contentTypeFor, isBrowserPlayable } from "./audio-format.ts";
-import { COVER_HEAD_BYTES, coverCopy } from "./cover-copy.ts";
+import { COPIED_KINDS, COVER_HEAD_BYTES, coverKind } from "./cover-copy.ts";
 import { isFragmentedProfile } from "./ffmpeg-args.ts";
 import * as Files from "./music-files.ts";
 import {
@@ -301,7 +301,7 @@ export const layer: Layer.Layer<
       if (!isArtHash(hash)) return text(404, "Artwork not found");
 
       const search = searchOf(request);
-      const width = requestedArtworkWidth(search);
+      const width = requestedCoverSize(search);
 
       if (Result.isFailure(width)) return text(400, "Invalid width");
 
@@ -314,31 +314,46 @@ export const layer: Layer.Layer<
       const path = artPath(config.dataDir, hash);
       const size = width.success;
       const head = yield* Files.readHead(path, Option.isNone(size) ? 16 : COVER_HEAD_BYTES);
-      const copy = Option.isNone(size) ? "original" : coverCopy(head);
+      const original = { path, contentType: imageContentType(head) };
+      const kind = Option.isNone(size) ? "unproven" : coverKind(head);
 
-      // The art store names a cover by its content hash, so the hash alone names each resized copy.
+      // A copy only when it takes fewer bytes than the cover; the cover itself when it cannot be made.
       const image =
-        Option.isNone(size) || copy === "original"
-          ? { path, contentType: imageContentType(head) }
-          : yield* store.resizeCover(path, `music-art:${hash}`, size.value, copy);
+        Option.isNone(size) || kind === "unproven"
+          ? original
+          : yield* Effect.gen(function* () {
+              // The art store names a cover by its content hash, so the hash alone names each copy.
+              const copy = yield* store.resizeCover(
+                path,
+                `music-art:${hash}`,
+                size.value,
+                COPIED_KINDS[kind],
+              );
+
+              const [copied, stored] = yield* Effect.all([
+                Files.statPath(copy.path),
+                Files.statPath(path),
+              ]);
+
+              return copied.size < stored.size ? copy : original;
+            }).pipe(
+              Effect.catch((error) =>
+                Effect.logWarning("MusicRoutes.art_copy_failed", error).pipe(Effect.as(original)),
+              ),
+            );
 
       return yield* fileResponse(request, image.path, {
         contentType: image.contentType,
         sessionEnded: undefined,
       }).pipe(Effect.map(HttpServerResponse.setHeader("cache-control", ART_CACHE_CONTROL)));
     }).pipe(
-      Effect.catchTags({
-        FileError: (error) =>
-          error.missing
-            ? Effect.succeed(text(404, "Artwork not found"))
-            : Effect.logError("MusicRoutes.art_unreadable", error).pipe(
-                Effect.as(text(500, "Artwork unreadable")),
-              ),
-        ArtworkUnavailable: (error) =>
-          Effect.logWarning("MusicRoutes.art_unavailable", error).pipe(
-            Effect.as(text(503, "Artwork unavailable")),
-          ),
-      }),
+      Effect.catchTag("FileError", (error) =>
+        error.missing
+          ? Effect.succeed(text(404, "Artwork not found"))
+          : Effect.logError("MusicRoutes.art_unreadable", error).pipe(
+              Effect.as(text(500, "Artwork unreadable")),
+            ),
+      ),
       services,
       Effect.withSpan("MusicRoutes.art"),
     );

@@ -48,8 +48,9 @@ const COVERS = join(import.meta.dirname, "..", "testing", "fixtures", "covers");
 
 /**
  * The least PSNR, in dB, of a copy against the original shrunk by area averaging, over white and
- * over black, and of its alpha. Resampling and JPEG alone keep every copy here above it; a copy
- * turned the wrong way, mirrored, recoloured, or that lost its transparency scores under 20.
+ * over black, and of its alpha. Every copy here scores 34 or more on ffmpeg 7.1 and 9.0; a copy of
+ * `photo.jpg` turned or mirrored the wrong way scores 14 to 16, with red and green swapped 17, and
+ * `soft-alpha.png` turned the wrong way 25 to 27, or without its transparency 2.
  */
 const FAITHFUL_DB = 30;
 
@@ -184,11 +185,16 @@ const sizeOf = async (file: string) =>
     await ffprobe(["-v", "error", "-show_entries", "stream=width,height", "-of", "csv=p=0", file])
   ).trim();
 
-/** `width,height` of the copy the art route serves at `?w=width` of a test pattern `size` big. */
+/**
+ * `width,height` of the copy the art route serves at `?w=width` of a test pattern `size` big, saved
+ * at the highest quality so a smaller copy takes fewer bytes.
+ */
 const servedArtSize = async (size: string, width: string) => {
   const original = join(work, `pattern-${size}.jpg`);
 
-  await ffmpeg(["-f", "lavfi", "-i", `testsrc=size=${size}`, "-frames:v", "1", original]);
+  await ffmpeg(
+    ["-f", "lavfi", "-i", `testsrc=size=${size}`, "-frames:v", "1", "-q:v", "1"].concat(original),
+  );
 
   return sizeOf((await serveArt(original, width)).copy);
 };
@@ -274,7 +280,9 @@ describe("music cover art", { timeout: 120_000 }, () => {
   it("serves a cover resized to a size music draws covers at, with ranges, and refuses other sizes", async () => {
     const original = join(work, "cover.jpg");
 
-    await ffmpeg(["-f", "lavfi", "-i", "testsrc=size=600x600", "-frames:v", "1", original]);
+    await ffmpeg(
+      ["-f", "lavfi", "-i", "testsrc=size=600x600", "-frames:v", "1", "-q:v", "1"].concat(original),
+    );
     const bytes = await run(Files.readWholeFile(original));
     const hash = await run(saveArt(join(work, "data"), bytes).pipe(Effect.map(Option.getOrThrow)));
     const ticket = await artTicket(hash);
@@ -465,7 +473,7 @@ describe("music cover art", { timeout: 120_000 }, () => {
     const profile = jpegProfile(await run(Files.readWholeFile(join(COVERS, "adobe-rgb.jpg"))));
 
     const others: ReadonlyArray<readonly [string, () => Promise<string>]> = [
-      ["gray JPEG", madeWith("gray.jpg", ["-i", photo, "-pix_fmt", "gray"])],
+      ["gray JPEG", fixture("gray.jpg")],
       ["gray JPEG with a gray profile", fixture("gray-profiled.jpg")],
       ["CMYK JPEG", fixture("cmyk.jpg")],
       [
@@ -534,6 +542,7 @@ describe("music cover art", { timeout: 120_000 }, () => {
     const damaged = [
       ["cut-in-frame.jpg", photo.subarray(0, frame + 9)],
       ["cut-after-scan-header.jpg", photo.subarray(0, scan + 14)],
+      ["cut-mid-image.jpg", photo.subarray(0, Math.floor(photo.length / 2))],
       ["bad-header-crc.png", badCrc],
       ["cut-in-header.png", soft.subarray(0, 20)],
     ] as const;

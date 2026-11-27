@@ -3,7 +3,10 @@
  * orientation applied by hand, PSNR, and covers of a kind made by splicing JPEG segments or PNG
  * chunks into a real file.
  */
-import { readFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { crc32 } from "node:zlib";
 
 import { ffmpeg } from "./music-songs.ts";
@@ -20,7 +23,7 @@ export interface Rgba {
  * `stored`.
  */
 export const decodeRgba = async (file: string, stored = false): Promise<Rgba> => {
-  const pam = `${file}.${stored ? "stored" : "shown"}.pam`;
+  const pam = join(tmpdir(), `media-cover-${randomUUID()}.pam`);
 
   await ffmpeg([
     ...(stored ? ["-noautorotate"] : []),
@@ -41,6 +44,8 @@ export const decodeRgba = async (file: string, stored = false): Promise<Rgba> =>
     pam,
   ]);
   const bytes = new Uint8Array(await readFile(pam));
+
+  await rm(pam);
   const end = Buffer.from(bytes).indexOf("ENDHDR\n") + "ENDHDR\n".length;
   const header = Buffer.from(bytes.subarray(0, end)).toString("latin1");
   const field = (name: string) => Number(new RegExp(`${name} (\\d+)`, "u").exec(header)?.[1]);

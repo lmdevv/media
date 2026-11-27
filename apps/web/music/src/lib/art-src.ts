@@ -1,4 +1,4 @@
-import { ARTWORK_WIDTHS, coverSrcSet, sizedArtworkUrl } from "@media/contracts/artwork";
+import { COVER_SIZES, coverSizeFor, sizedArtworkUrl } from "@media/contracts/artwork";
 
 import { MEDIA_BASE_URL } from "@/env";
 
@@ -8,9 +8,12 @@ import { MEDIA_BASE_URL } from "@/env";
  */
 export const artSrc = (url: string): string => `${MEDIA_BASE_URL}${url}`;
 
-/** Every resized copy of a cover and the original, for `<img srcset>` (`coverSrcSet`). */
-export const artSrcSet = (url: string): string => coverSrcSet(artSrc(url));
+/**
+ * The cover at `url` for a cell drawn `pixels` device pixels big: the server's copy for that size
+ * (`coverSizeFor`), or the original.
+ */
+export const coverSrc = (url: string, pixels: number): string =>
+  sizedArtworkUrl(artSrc(url), coverSizeFor(pixels));
 
 /** The smallest copy of a cover, for reading its colors. */
-export const smallestArtSrc = (url: string): string =>
-  sizedArtworkUrl(artSrc(url), ARTWORK_WIDTHS[0]);
+export const smallestArtSrc = (url: string): string => sizedArtworkUrl(artSrc(url), COVER_SIZES[0]);

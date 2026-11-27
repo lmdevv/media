@@ -27,7 +27,8 @@ stored, made with ImageMagick 7.1, exiftool 13, ffmpeg, colord's ICC profiles (`
 CMS. `cover-art.test.ts` makes the other kinds from these at run time.
 
 - `photo.jpg` (baseline, 4:2:0), `progressive.jpg` (progressive, 4:4:4), `adobe-rgb.jpg`
-  (`AdobeRGB1998.icc`), `gray-profiled.jpg` (one channel, with a gray profile of gamma 1.0), and
+  (`AdobeRGB1998.icc`), `gray.jpg` (one channel), `gray-profiled.jpg` (one channel, with a gray
+  profile of gamma 1.0), and
   `soft-alpha.png` (RGBA, alpha fading from the centre): one blurred plasma picture.
 
   ```sh
@@ -35,6 +36,7 @@ CMS. `cover-art.test.ts` makes the other kinds from these at run time.
   magick source.png -strip -sampling-factor 2x2 -quality 90 photo.jpg
   magick source.png -strip -interlace JPEG -sampling-factor 1x1 -quality 92 progressive.jpg
   magick source.png -strip -sampling-factor 2x2 -quality 90 -profile $ICC/AdobeRGB1998.icc adobe-rgb.jpg
+  magick source.png -strip -colorspace Gray -quality 90 gray.jpg
   magick source.png -strip -colorspace Gray -quality 90 -profile gray.icc gray-profiled.jpg
   magick source.png \( -size 320x320 radial-gradient:white-black \) -alpha off -compose CopyOpacity \
     -composite -strip -define png:exclude-chunks=date,time PNG32:soft-alpha.png

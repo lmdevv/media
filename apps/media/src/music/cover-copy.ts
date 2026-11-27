@@ -1,132 +1,312 @@
+import { crc32 } from "node:zlib";
+
 import type { CoverFormat } from "../artwork/artwork-store.ts";
 
 /**
- * The bytes of a stored cover the art route reads to choose its copy: enough for the headers of
- * any common cover, ICC profiles included.
+ * The bytes of a stored cover the art route reads to tell its kind: enough for the headers of any
+ * common cover, ICC profiles included.
  */
 export const COVER_HEAD_BYTES = 1024 * 1024;
 
 /**
- * How the art route serves a resized cover: as a copy in `CoverFormat`, or as the stored
- * original, for a cover a copy could not show the same.
+ * The kinds of cover the art route resizes, each with the format of its copy. A kind is here only
+ * with a route test that takes a real file of the kind through ffmpeg and compares the copy with
+ * the original shrunk by area averaging (`cover-art.test.ts`). Every other cover is served as
+ * stored, which always looks right.
  */
-export type CoverCopy = CoverFormat | "original";
+export const COPIED_KINDS = {
+  /** An 8-bit YCbCr JPEG, baseline or progressive, without an ICC profile or EXIF orientation. */
+  jpeg: "jpeg",
+  /** The same with one RGB ICC profile, which ffmpeg writes into the copy byte for byte. */
+  "jpeg-profiled": "jpeg",
+  /** Either of those with an EXIF orientation, which ffmpeg applies to the copy's pixels. */
+  "jpeg-oriented": "jpeg",
+  /**
+   * An 8-bit RGBA PNG, not interlaced, untagged or sRGB, copied as a PNG scaled with
+   * premultiplied alpha, which keeps its `sRGB`, `gAMA`, and `cHRM` chunks.
+   */
+  "png-alpha": "png",
+} as const satisfies Record<string, CoverFormat>;
+
+/** A kind of cover the art route resizes. */
+type CopiedKind = keyof typeof COPIED_KINDS;
+
+/** What a cover's header shows: a kind the art route resizes, or `unproven`, served as stored. */
+export type CoverKind = CopiedKind | "unproven";
 
 const ascii = (bytes: Uint8Array, start: number, length: number): string =>
   String.fromCharCode(...bytes.subarray(start, start + length));
 
-const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+const startsWith = (bytes: Uint8Array, text: string): boolean =>
+  bytes.length >= text.length && ascii(bytes, 0, text.length) === text;
+
+const viewOf = (bytes: Uint8Array) =>
+  new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 
 /**
- * A PNG's copy. ffmpeg keeps an ICC profile but drops the other colour chunks, EXIF, and all but
- * the first frame, so a PNG with any of those is served as it is. A PNG with an alpha channel or
- * a transparent colour gets a PNG copy, and any other a JPEG one.
+ * The orientation an EXIF payload's first IFD gives (TIFF 6.0 tag 274), 1 when it gives none, or
+ * undefined when the payload is not one this reads whole.
  */
-const pngCopy = (head: Uint8Array): CoverCopy => {
-  const view = new DataView(head.buffer, head.byteOffset, head.byteLength);
-  const chunks = new Set<string>();
-  let colorType = -1;
-  let offset = PNG_SIGNATURE.length;
+const exifOrientation = (tiff: Uint8Array): number | undefined => {
+  const little = startsWith(tiff, "II");
 
-  // Every chunk this reads comes before the image data.
-  while (offset + 8 <= head.length) {
-    const type = ascii(head, offset + 4, 4);
+  if (tiff.length < 8 || (!little && !startsWith(tiff, "MM"))) return undefined;
+  const view = viewOf(tiff);
 
-    if (type === "IDAT") break;
+  if (view.getUint16(2, little) !== 42) return undefined;
+  const ifd = view.getUint32(4, little);
 
-    if (type === "IHDR" && offset + 18 <= head.length) colorType = view.getUint8(offset + 17);
-    chunks.add(type);
-    offset += 12 + view.getUint32(offset);
+  if (ifd + 2 > tiff.length) return undefined;
+  const count = view.getUint16(ifd, little);
+
+  if (ifd + 2 + count * 12 > tiff.length) return undefined;
+
+  const entry = Array.from({ length: count }, (_, index) => ifd + 2 + index * 12).find(
+    (at) => view.getUint16(at, little) === 0x0112,
+  );
+
+  if (entry === undefined) return 1;
+
+  // One SHORT, held in the entry itself.
+  if (view.getUint16(entry + 2, little) !== 3 || view.getUint32(entry + 4, little) !== 1) {
+    return undefined;
   }
 
-  if (offset + 8 > head.length || colorType === -1) return "original";
+  const orientation = view.getUint16(entry + 8, little);
 
-  const unkept = ["acTL", "eXIf", "cICP"].some((type) => chunks.has(type));
-  const tagged = chunks.has("sRGB") || chunks.has("iCCP");
+  return orientation >= 1 && orientation <= 8 ? orientation : undefined;
+};
 
-  if (unkept || (!tagged && (chunks.has("gAMA") || chunks.has("cHRM")))) return "original";
+/** True for an APP2 ICC payload holding a whole RGB profile in one segment. */
+const isWholeRgbProfile = (payload: Uint8Array): boolean => {
+  const profile = payload.subarray(14);
 
-  return colorType === 4 || colorType === 6 || chunks.has("tRNS") ? "png" : "jpeg";
+  return (
+    startsWith(payload, "ICC_PROFILE\0") &&
+    payload[12] === 1 &&
+    payload[13] === 1 &&
+    profile.length >= 128 &&
+    viewOf(profile).getUint32(0) === profile.length &&
+    ascii(profile, 16, 4) === "RGB "
+  );
+};
+
+/** A JPEG frame header (ITU T.81 B.2.2): its sample precision and each component's id and sampling. */
+interface Frame {
+  readonly precision: number;
+  readonly components: ReadonlyArray<{ readonly id: number; readonly sampling: number }>;
+}
+
+const frameOf = (payload: Uint8Array): Frame | undefined => {
+  const count = payload[5] ?? 0;
+  const view = viewOf(payload);
+
+  if (payload.length < 6 || payload.length !== 6 + 3 * count) return undefined;
+
+  if (view.getUint16(1) === 0 || view.getUint16(3) === 0) return undefined;
+
+  return {
+    precision: payload[0] ?? 0,
+    components: Array.from({ length: count }, (_, index) => ({
+      id: payload[6 + 3 * index] ?? 0,
+      sampling: payload[7 + 3 * index] ?? 0,
+    })),
+  };
 };
 
 /**
- * A JPEG's copy. ffmpeg applies EXIF orientation and keeps an ICC profile, but a CMYK JPEG's
- * profile cannot describe the copy, so one is served as it is.
+ * True for 4:4:4, 4:2:2, 4:4:0, or 4:2:0: both chroma components sampled alike, and luma once or
+ * twice as often each way. Each byte holds a component's horizontal and vertical factors.
  */
-const jpegCopy = (head: Uint8Array): CoverCopy => {
+const isCommonSampling = (luma: number, blue: number, red: number): boolean => {
+  const ratio = (shift: number) => ((luma >> shift) & 0xf) / ((blue >> shift) & 0xf);
+
+  return blue === red && [ratio(4), ratio(0)].every((each) => each === 1 || each === 2);
+};
+
+const R_G_B = [0x52, 0x47, 0x42];
+
+/**
+ * A JPEG's kind, from every segment before its image data. Only the segments named here are
+ * read: any other marker, a second frame header or EXIF segment, or a segment cut off by the head
+ * makes the cover `unproven`.
+ */
+const jpegKind = (head: Uint8Array): CoverKind => {
+  const view = viewOf(head);
   let offset = 2;
+  let frame: Frame | undefined;
+  let orientation: number | undefined;
+  let profiled = false;
+  let transform: number | undefined;
 
   while (offset + 4 <= head.length) {
-    if (head[offset] !== 0xff) return "original";
+    if (head[offset] !== 0xff) return "unproven";
     const marker = head[offset + 1] ?? 0;
 
-    // Fill bytes, then markers without a length.
+    // A fill byte before a marker.
     if (marker === 0xff) {
       offset += 1;
       continue;
     }
 
-    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
-      offset += 2;
-      continue;
+    const end = offset + 2 + view.getUint16(offset + 2);
+
+    if (end > head.length || end < offset + 4) return "unproven";
+    const payload = head.subarray(offset + 4, end);
+
+    switch (marker) {
+      // Start of scan: every segment that describes the picture came before it.
+      case 0xda: {
+        if (frame === undefined || frame.precision !== 8 || frame.components.length !== 3) {
+          return "unproven";
+        }
+
+        const ids = frame.components.map(({ id }) => id);
+
+        // YCbCr: Adobe's segment says so with transform 1; without it, ids R, G, B mean RGB.
+        const ycbcr =
+          transform === undefined ? ids.some((id, index) => id !== R_G_B[index]) : transform === 1;
+
+        const [luma = 0, blue = 0, red = 0] = frame.components.map(({ sampling }) => sampling);
+
+        if (!ycbcr || !isCommonSampling(luma, blue, red)) return "unproven";
+
+        if (orientation !== undefined && orientation !== 1) return "jpeg-oriented";
+
+        return profiled ? "jpeg-profiled" : "jpeg";
+      }
+
+      // Baseline, extended sequential, and progressive frames, Huffman coded.
+      case 0xc0:
+      case 0xc1:
+      case 0xc2:
+        if (frame !== undefined) return "unproven";
+
+        frame = frameOf(payload);
+
+        if (frame === undefined) return "unproven";
+        break;
+      // Huffman and quantization tables, restart interval, comment.
+      case 0xc4:
+      case 0xdb:
+      case 0xdd:
+      case 0xfe:
+        break;
+      case 0xe0:
+        if (!startsWith(payload, "JFIF\0") && !startsWith(payload, "JFXX\0")) return "unproven";
+        break;
+      case 0xe1:
+        if (startsWith(payload, "Exif\0\0")) {
+          if (orientation !== undefined) return "unproven";
+          orientation = exifOrientation(payload.subarray(6));
+
+          if (orientation === undefined) return "unproven";
+        } else if (!startsWith(payload, "http://ns.adobe.com/xap/1.0/\0")) {
+          return "unproven";
+        }
+
+        break;
+      case 0xe2:
+        if (profiled || !isWholeRgbProfile(payload)) return "unproven";
+        profiled = true;
+        break;
+      // Photoshop's export settings and resources, which no viewer draws from.
+      case 0xec:
+      case 0xed:
+        if (!startsWith(payload, "Ducky") && !startsWith(payload, "Photoshop 3.0\0")) {
+          return "unproven";
+        }
+
+        break;
+      case 0xee:
+        if (transform !== undefined || payload.length < 12 || !startsWith(payload, "Adobe")) {
+          return "unproven";
+        }
+
+        transform = payload[11];
+        break;
+      default:
+        return "unproven";
     }
 
-    // The image data starts before any frame header: not a JPEG ffmpeg reads.
-    if (marker === 0xda) return "original";
-    const frame = marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker);
-
-    if (frame) {
-      const components = head[offset + 9];
-
-      if (components === undefined) return "original";
-
-      return components === 1 || components === 3 ? "jpeg" : "original";
-    }
-
-    offset += 2 + ((head[offset + 2] ?? 0) << 8) + (head[offset + 3] ?? 0);
+    offset = end;
   }
 
-  return "original";
+  return "unproven";
+};
+
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+
+/** Chunks that describe nothing a viewer draws: text, time, density, and background and bit hints. */
+const INERT_CHUNKS = new Set(["tEXt", "zTXt", "iTXt", "tIME", "pHYs", "bKGD", "sBIT"]);
+
+/** The colour chunks read beside sRGB, each at most once, by the length of its data. */
+const COLOUR_CHUNKS = new Map([
+  ["sRGB", 1],
+  ["gAMA", 4],
+  ["cHRM", 32],
+]);
+
+/**
+ * A PNG's kind, from its header and every chunk before its image data, each whole and with its
+ * CRC. Only the chunks named here are read: any other makes the cover `unproven`.
+ */
+const pngKind = (head: Uint8Array): CoverKind => {
+  const view = viewOf(head);
+  const seen = new Set<string>();
+  let offset = PNG_SIGNATURE.length;
+
+  while (offset + 8 <= head.length) {
+    const length = view.getUint32(offset);
+    const type = ascii(head, offset + 4, 4);
+
+    if (type === "IDAT") {
+      // 8-bit RGBA, deflate, adaptive filtering, not interlaced, at least a pixel each way.
+      const rgba =
+        seen.has("IHDR") &&
+        view.getUint32(16) > 0 &&
+        view.getUint32(20) > 0 &&
+        [8, 6, 0, 0, 0].every((byte, index) => head[24 + index] === byte);
+
+      // Gamma or primaries alone carry colour ffmpeg's copy would not be drawn with.
+      const srgb = seen.has("sRGB") || (!seen.has("gAMA") && !seen.has("cHRM"));
+
+      return rgba && srgb ? "png-alpha" : "unproven";
+    }
+
+    const end = offset + 12 + length;
+
+    if (
+      end > head.length ||
+      crc32(head.subarray(offset + 4, end - 4)) !== view.getUint32(end - 4)
+    ) {
+      return "unproven";
+    }
+
+    const first = offset === PNG_SIGNATURE.length;
+
+    const known =
+      type === "IHDR"
+        ? first && length === 13
+        : !first &&
+          (INERT_CHUNKS.has(type) || (COLOUR_CHUNKS.get(type) === length && !seen.has(type)));
+
+    if (!known) return "unproven";
+    seen.add(type);
+    offset = end;
+  }
+
+  return "unproven";
 };
 
 /**
- * A WebP's copy. An animated WebP, or one with EXIF, is served as it is. One with alpha gets a
- * PNG copy, and any other a JPEG one.
+ * The kind of the cover whose file starts with `head`: one of `COPIED_KINDS` when its header shows
+ * it whole, or `unproven`, served as stored.
  */
-const webpCopy = (head: Uint8Array): CoverCopy => {
-  const chunk = ascii(head, 12, 4);
+export const coverKind = (head: Uint8Array): CoverKind => {
+  if (PNG_SIGNATURE.every((byte, index) => head[index] === byte)) return pngKind(head);
 
-  if (chunk === "VP8 ") return "jpeg";
+  if (head[0] === 0xff && head[1] === 0xd8) return jpegKind(head);
 
-  if (chunk === "VP8L" && head.length >= 25) {
-    // The alpha bit follows the 14-bit width and height, after the one-byte signature.
-    return ((head[24] ?? 0) & 0x10) === 0 ? "jpeg" : "png";
-  }
-
-  if (chunk === "VP8X" && head.length >= 21) {
-    const flags = head[20] ?? 0;
-    const animated = (flags & 0x02) !== 0;
-    const exif = (flags & 0x08) !== 0;
-
-    if (animated || exif) return "original";
-
-    return (flags & 0x10) === 0 ? "jpeg" : "png";
-  }
-
-  return "original";
-};
-
-/**
- * The copy of a cover whose file starts with `head`, so a resized cover looks the same as its
- * original over any background. A GIF, which may be animated, and anything unrecognised are
- * served as they are.
- */
-export const coverCopy = (head: Uint8Array): CoverCopy => {
-  if (PNG_SIGNATURE.every((byte, index) => head[index] === byte)) return pngCopy(head);
-
-  if (head[0] === 0xff && head[1] === 0xd8) return jpegCopy(head);
-
-  if (ascii(head, 0, 4) === "RIFF" && ascii(head, 8, 4) === "WEBP") return webpCopy(head);
-
-  return "original";
+  return "unproven";
 };
