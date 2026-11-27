@@ -370,7 +370,18 @@ describe("music cover art", { timeout: 120_000 }, () => {
       withSegment(await run(Files.readWholeFile(photo)), 0xee, adobeSegment(1)),
     );
 
-    const files = [photo, join(COVERS, "progressive.jpg"), adobe];
+    // Saturated colour bars and text, coded 4:2:0: a 4:2:0 copy of it scores under 29 dB.
+    const colourful = join(work, "colourful.jpg");
+
+    await ffmpeg(
+      ["-f", "lavfi", "-i", "testsrc2=size=1600x1600", "-frames:v", "1", "-q:v", "2"].concat(
+        "-pix_fmt",
+        "yuvj420p",
+        colourful,
+      ),
+    );
+
+    const files = [photo, join(COVERS, "progressive.jpg"), adobe, colourful];
 
     const served = await Promise.all(
       files.flatMap((file) =>

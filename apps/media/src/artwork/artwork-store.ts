@@ -139,7 +139,9 @@ const shorterScale = (size: string) =>
 
 /**
  * The cache folder, file extension, content type, decoder options, filter, and encoder options of
- * `resize` at `size`. A music cover's decoder stops at the first error in the file.
+ * `resize` at `size`. A music cover's decoder stops at the first error in the file, and its JPEG
+ * keeps colour at every pixel (4:4:4): a small copy of a 4:2:0 cover would otherwise hold colour
+ * at half its size, blurring saturated edges the original keeps when drawn as small.
  */
 const plan = (resize: Resize, size: string) => {
   if (resize.bound === "width") {
@@ -160,7 +162,7 @@ const plan = (resize: Resize, size: string) => {
         contentType: "image/jpeg",
         decoding: ["-err_detect", "explode"],
         filter: shorterScale(size),
-        quality: ["-q:v", "3"],
+        quality: ["-pix_fmt", "yuvj444p", "-q:v", "3"],
       }
     : {
         folder: `s${size}`,
