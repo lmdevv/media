@@ -34,7 +34,9 @@ import {
   insertTitle,
   insertTitleGenre,
   patchPerson,
+  patchMediaFile,
   patchTitle,
+  replaceMediaFile,
 } from "./write";
 import { findProgress, watchGeneration } from "./viewing";
 import { FEATURED_READS, featuredDetailOf } from "./playState";
@@ -544,6 +546,40 @@ export const files = internalQuery({
       .take(500);
 
     return found.map((file) => ({ fileId: file._id, path: file.path }));
+  },
+});
+
+/**
+ * Leaves a scanned file as an older media service and a provider's match left it, so a stack test
+ * can check what an update's scan does to it: its title keyed and named as a match through TMDB
+ * keys it, and its probe without a field order, stored at `probeRevision` or with none.
+ */
+export const ageFile = internalMutation({
+  args: {
+    fileId: v.id("mediaFiles"),
+    matchKey: v.string(),
+    name: v.string(),
+    probeRevision: v.optional(v.number()),
+  },
+  returns: v.null(),
+  handler: async (ctx, { fileId, matchKey, name, probeRevision }) => {
+    const file = (await ctx.db.get(fileId)) ?? fail("not_found", "No such file");
+    const title = (await ctx.db.get(file.titleId)) ?? fail("not_found", "No such title");
+    const { _id, _creationTime, probeRevision: _newer, ...fields } = file;
+
+    await patchTitle(ctx.db, title, { matchKey, name, matchStatus: "matched" });
+
+    const aged = await replaceMediaFile(ctx.db, file, {
+      ...fields,
+      probe: {
+        ...file.probe,
+        video: file.probe.video.map(({ fieldOrder: _read, ...video }) => video),
+      },
+    });
+
+    if (probeRevision !== undefined) await patchMediaFile(ctx.db, aged, { probeRevision });
+
+    return null;
   },
 });
 

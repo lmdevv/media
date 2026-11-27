@@ -6,6 +6,7 @@ import type { ExternalSubtitle, HdrFormat, Probe } from "@media/contracts/models
 import { type Ratings, type Trailer, YOUTUBE_KEY_PATTERN } from "@media/contracts/models/catalog";
 import {
   CREDIT_BATCH_LIMIT,
+  type ReprobedFile as CatalogReprobedFile,
   type ResolvedFile,
   type ScannedCollection,
   type ScannedCredit,
@@ -20,7 +21,7 @@ import { Bytes, EpochMillis, Milliseconds } from "@media/contracts/units";
 import { Effect, Option, Schema } from "effect";
 
 import { ArtworkSource } from "../artwork/artwork-keys.ts";
-import type { LibraryFolder, ScannedFile } from "../library/library-sink.ts";
+import type { LibraryFolder, ReprobedFile, ScannedFile } from "../library/library-sink.ts";
 import { SidecarFormat } from "../library/sidecar-subtitles.ts";
 import { MediaName } from "../library/media-naming.ts";
 import type { MediaProbe } from "../media/media-probe.ts";
@@ -416,6 +417,15 @@ const toExternalSubtitle = (subtitle: ScannedFile["subtitles"][number]): Externa
   forced: subtitle.forced,
   hearingImpaired: subtitle.hearingImpaired,
   default: subtitle.default,
+});
+
+/** The catalog's record of a file probed again: where it is, as found, and its new probe. */
+export const toReprobedFile = (folder: LibraryFolder, file: ReprobedFile): CatalogReprobedFile => ({
+  path: absolutePath(folder, file.relativePath),
+  sizeBytes: Bytes.make(file.sizeBytes),
+  mtimeMs: EpochMillis.make(Math.trunc(file.modifiedAtMs)),
+  probe: toCatalogProbe(file.probe),
+  probeRevision: file.probeRevision,
 });
 
 /**

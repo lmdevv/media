@@ -83,6 +83,9 @@ const Known = answer(
 
 const Marked = answer(Schema.Struct({ marked: Schema.Finite, done: Schema.Finite }));
 
+/** What `movies.scanner.reprobed` answers. */
+export const Reprobed = answer(Schema.Struct({ written: Schema.Finite, done: Schema.Finite }));
+
 export const Totals = Schema.Struct({
   titles: Schema.Finite,
   episodes: Schema.Finite,

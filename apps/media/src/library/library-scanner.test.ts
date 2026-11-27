@@ -32,12 +32,12 @@ const scannerLayer = Layer.unwrap(
 
     return LibraryScanner.layer.pipe(
       Layer.provideMerge(MemoryLibrary.layer),
-      Layer.provide(MetadataResolver.layer),
+      Layer.provideMerge(MetadataResolver.layer),
       Layer.provide(Tmdb.layerWithOptions(Tmdb.defaultOptions(Option.none()))),
       Layer.provide(Omdb.layerWithOptions(Omdb.defaultOptions(Option.none()))),
       Layer.provide(DiskCache.layer),
-      Layer.provide(MediaTools.layer),
-      Layer.provide(config),
+      Layer.provideMerge(MediaTools.layer),
+      Layer.provideMerge(config),
     );
   }),
 ).pipe(
@@ -51,6 +51,62 @@ const scanned = Effect.fn(function* (libraryId: LibraryId) {
 
   return new Map(files.map((file) => [file.record.relativePath, file]));
 });
+
+/** The stored record of `relativePath` in library `libraryId`, which must exist. */
+const storedOf = Effect.fn(function* (libraryId: LibraryId, relativePath: string) {
+  const stored = (yield* scanned(libraryId)).get(relativePath)?.record;
+
+  if (stored === undefined) return yield* Effect.die(new Error(`${relativePath} is not stored`));
+
+  return stored;
+});
+
+/** The title an earlier match through a metadata provider gave a file, which its own files do not. */
+const ELSEWHERE = "Matched Elsewhere";
+
+/**
+ * Stores `relativePath`'s record as an older reader and an earlier match left it: an older probe
+ * revision, a probe without a field order and with another frame rate, and the title a provider
+ * gave it. Answers the record as this scanner stored it.
+ */
+const aged = Effect.fn(function* (libraryId: LibraryId, root: string, relativePath: string) {
+  const sink = yield* LibrarySink.Service;
+  const fresh = yield* storedOf(libraryId, relativePath);
+  const video = fresh.probe.video;
+
+  yield* sink.upsertBatch({ libraryId, root }, [
+    Struct.assign(fresh, {
+      probeRevision: PROBE_REVISION - 1,
+      probe: Struct.assign(fresh.probe, {
+        video:
+          video === undefined
+            ? undefined
+            : Struct.assign(video, { fieldOrder: undefined, frameRate: 1 }),
+      }),
+      title:
+        fresh.title === undefined ? undefined : Struct.assign(fresh.title, { title: ELSEWHERE }),
+    }),
+  ]);
+
+  return fresh;
+});
+
+/** `sink`, where a write of probes read again stores the first and then fails, as a stop would. */
+const storesOneThenStops = (sink: LibrarySink.Interface): LibrarySink.Interface =>
+  LibrarySink.Service.of({
+    ...sink,
+    reprobed: (folder, files) =>
+      sink.reprobed(folder, files.slice(0, 1)).pipe(
+        Effect.andThen(
+          Effect.fail(
+            new LibrarySink.LibrarySinkFailed({
+              operation: "reprobed",
+              cause: "the service stopped",
+            }),
+          ),
+        ),
+      ),
+  });
 
 describe.skipIf(!hasFfmpeg)("LibraryScanner", () => {
   layer(scannerLayer, { excludeTestServices: true, timeout: "60 seconds" })((it) => {
@@ -225,49 +281,140 @@ describe.skipIf(!hasFfmpeg)("LibraryScanner", () => {
     );
 
     it.effect(
-      "reads an unchanged file again when an older reader stored its probe, and keeps this one's field order and frame rate",
+      "probes an unchanged file again when an older reader stored its probe, and stores only the probe",
       () =>
         Effect.gen(function* () {
           const { library, copy } = yield* FixtureWorkspace.Service;
+          const fs = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
           const target = yield* copy;
           const scanner = yield* LibraryScanner.Service;
-          const sink = yield* LibrarySink.Service;
           const libraryId = LibraryId.make("older-probes");
           const request = { libraryId, root: target.movies, mode: "incremental" } as const;
 
           yield* scanner.scan(request);
-          const fresh = (yield* scanned(libraryId)).get(library.directMovie)?.record;
-
-          assert.isDefined(fresh);
-
-          if (fresh.probe.video === undefined) return;
-
-          assert.strictEqual(fresh.probeRevision, PROBE_REVISION);
-          assert.strictEqual(fresh.probe.video.fieldOrder, "progressive");
-
-          // As an older reader stored it: no field order, another frame rate, an older revision.
-          yield* sink.upsertBatch({ libraryId, root: target.movies }, [
-            Struct.assign(fresh, {
-              probeRevision: PROBE_REVISION - 1,
-              probe: {
-                ...fresh.probe,
-                video: { ...fresh.probe.video, fieldOrder: undefined, frameRate: 1 },
-              },
-            }),
-          ]);
-
+          const fresh = yield* aged(libraryId, target.movies, library.directMovie);
+          const old = yield* storedOf(libraryId, library.directMovie);
           const again = yield* scanner.scan(request);
-          const read = (yield* scanned(libraryId)).get(library.directMovie)?.record;
+          const read = yield* storedOf(libraryId, library.directMovie);
 
-          assert.deepStrictEqual([again.processed, again.unchanged], [1, 3]);
-          assert.strictEqual(read?.probeRevision, PROBE_REVISION);
-          assert.strictEqual(read?.probe.video?.fieldOrder, "progressive");
-          assert.strictEqual(read?.probe.video?.frameRate, fresh.probe.video.frameRate);
+          // The title an earlier match found stays, with everything else stored of the file.
+          // Metadata providers are unavailable here: matching again would have replaced it.
+          assert.strictEqual(read.title?.title, ELSEWHERE);
+          assert.deepStrictEqual(
+            Struct.omit(read, ["probe", "probeRevision"]),
+            Struct.omit(old, ["probe", "probeRevision"]),
+          );
+          assert.strictEqual(read.probeRevision, PROBE_REVISION);
+          assert.deepStrictEqual(read.probe, fresh.probe);
+          assert.deepStrictEqual(
+            [again.reprobed, again.processed, again.unchanged, again.failed],
+            [1, 0, 3, 0],
+          );
 
           const settled = yield* scanner.scan(request);
 
-          assert.deepStrictEqual([settled.processed, settled.unchanged], [0, 4]);
+          assert.deepStrictEqual([settled.reprobed, settled.unchanged], [0, 4]);
+
+          // A file whose bytes change is read whole and matched again, as any changed file is.
+          yield* aged(libraryId, target.movies, library.directMovie);
+          yield* fs.utimes(
+            path.join(target.movies, library.directMovie),
+            new Date(),
+            new Date(2001, 1, 1),
+          );
+          const changed = yield* scanner.scan(request);
+          const matched = yield* storedOf(libraryId, library.directMovie);
+
+          assert.deepStrictEqual([changed.reprobed, changed.processed], [0, 1]);
+          assert.strictEqual(matched.title?.title, fresh.title?.title);
+          assert.strictEqual(matched.probeRevision, PROBE_REVISION);
         }),
+    );
+
+    it.effect(
+      "keeps the stored row of a file that fails to probe again, goes on with the others, and tries it at each scan",
+      () =>
+        Effect.gen(function* () {
+          const { library, copy } = yield* FixtureWorkspace.Service;
+          const fs = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const target = yield* copy;
+          const scanner = yield* LibraryScanner.Service;
+          const libraryId = LibraryId.make("unreadable-probes");
+          const request = { libraryId, root: target.movies, mode: "incremental" } as const;
+          const unreadable = path.join(target.movies, library.directMovie);
+
+          yield* scanner.scan(request);
+          yield* aged(libraryId, target.movies, library.directMovie);
+          yield* aged(libraryId, target.movies, library.messyMovie);
+          const old = yield* storedOf(libraryId, library.directMovie);
+
+          // Its size and modification time stay as stored, but ffprobe cannot read it.
+          yield* fs.chmod(unreadable, 0o000);
+
+          const first = yield* scanner.scan(request);
+          const second = yield* scanner.scan(request);
+
+          assert.deepStrictEqual(
+            [first, second].map((scan) => [scan.reprobed, scan.failed, scan.failures.length]),
+            [
+              [1, 1, 1],
+              [0, 1, 1],
+            ],
+          );
+          assert.deepStrictEqual(yield* storedOf(libraryId, library.directMovie), old);
+          assert.strictEqual(
+            (yield* storedOf(libraryId, library.messyMovie)).probeRevision,
+            PROBE_REVISION,
+          );
+
+          yield* fs.chmod(unreadable, 0o644);
+          const readable = yield* scanner.scan(request);
+
+          assert.deepStrictEqual([readable.reprobed, readable.failed], [1, 0]);
+        }),
+    );
+
+    it.effect("continues probing files again where a stopped scan left off", () =>
+      Effect.gen(function* () {
+        const { library, copy } = yield* FixtureWorkspace.Service;
+        const target = yield* copy;
+        const scanner = yield* LibraryScanner.Service;
+        const sink = yield* LibrarySink.Service;
+        const libraryId = LibraryId.make("stopped-probes");
+        const request = { libraryId, root: target.movies, mode: "incremental" } as const;
+        const files = [library.directMovie, library.messyMovie, library.hdrMovie];
+
+        yield* scanner.scan(request);
+
+        for (const relativePath of files) yield* aged(libraryId, target.movies, relativePath);
+
+        // The service stops while the core takes the probes: it stored one, then nothing more.
+        const stopping = yield* LibraryScanner.make.pipe(
+          Effect.provideService(LibrarySink.Service, storesOneThenStops(sink)),
+        );
+
+        const stopped = yield* Effect.flip(stopping.scan(request));
+
+        const revisions = yield* Effect.forEach(files, (relativePath) =>
+          Effect.map(storedOf(libraryId, relativePath), (stored) => stored.probeRevision),
+        );
+
+        assert.instanceOf(stopped, LibrarySink.LibrarySinkFailed);
+        assert.strictEqual(revisions.filter((revision) => revision === PROBE_REVISION).length, 1);
+
+        const rest = yield* scanner.scan(request);
+
+        assert.deepStrictEqual([rest.reprobed, rest.unchanged], [2, 2]);
+
+        for (const relativePath of files) {
+          assert.strictEqual(
+            (yield* storedOf(libraryId, relativePath)).probeRevision,
+            PROBE_REVISION,
+          );
+        }
+      }),
     );
 
     it.effect("rescans a file whose NFO, artwork, or subtitles changed", () =>

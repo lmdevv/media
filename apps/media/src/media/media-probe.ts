@@ -402,7 +402,7 @@ export const parseFfprobeJson = Effect.fn("MediaProbe.parse")(function* (
   const durationSeconds = finiteOr(output.format.duration, 0);
   const startSeconds = finiteOr(output.format.start_time, 0);
 
-  return {
+  const probe: MediaProbe = {
     container: containerOf(output.format.format_name, path),
     formatName: output.format.format_name,
     durationSeconds,
@@ -412,7 +412,9 @@ export const parseFfprobeJson = Effect.fn("MediaProbe.parse")(function* (
     audio: ofType("audio").map(toAudio),
     subtitles: ofType("subtitle").map(toSubtitle),
     chapters: toChapters(output.chapters ?? [], startSeconds, durationSeconds),
-  } satisfies MediaProbe;
+  };
+
+  return probe;
 });
 
 /** Probes the file at `path` with ffprobe. */

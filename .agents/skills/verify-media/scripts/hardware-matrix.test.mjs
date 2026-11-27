@@ -14,6 +14,7 @@ import {
   describeRun,
   FIXTURES,
   fingerprint,
+  IDET,
   interlacedShare,
   judge,
   parseFrames,
@@ -161,7 +162,7 @@ describe("reading real ffmpeg output", () => {
 
   test("idet tells combed frames from deinterlaced ones", () => {
     const share = (filters) =>
-      interlacedShare(parseIdet(ffmpeg("-nostats", "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=50:duration=2", "-vf", `${filters},idet`, "-f", "null", "-").stderr));
+      interlacedShare(parseIdet(ffmpeg("-nostats", "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=50:duration=2", "-vf", `${filters},${IDET}`, "-f", "null", "-").stderr));
     assert.ok(share("tinterlace=mode=interleave_top") > 0.9);
     assert.ok(share("tinterlace=mode=interleave_top,setfield=tff,yadif") < 0.15);
   });

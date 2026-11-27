@@ -100,6 +100,21 @@ export const ScannedFile = Schema.Struct({
 /** A scanned file. */
 export interface ScannedFile extends Schema.Schema.Type<typeof ScannedFile> {}
 
+/**
+ * A file a scan found unchanged but probed again, as a newer reader revision reads more: the size
+ * and modification time it was found with, and its new probe. Only the probe is written.
+ */
+export const ReprobedFile = Schema.Struct({
+  path: Schema.String,
+  sizeBytes: Bytes,
+  mtimeMs: EpochMillis,
+  probe: Probe,
+  probeRevision: Schema.Int,
+});
+
+/** A file probed again. */
+export interface ReprobedFile extends Schema.Schema.Type<typeof ReprobedFile> {}
+
 /** One scanned file with the title (and episode, for shows) it belongs to. */
 export const ScannedItem = Schema.Struct({
   file: ScannedFile,

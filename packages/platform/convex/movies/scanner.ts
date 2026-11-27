@@ -8,9 +8,16 @@ import { withScanLease } from "../core/scans";
 import { boundedItem, pathFits } from "./bounds";
 import { DOCUMENT_BYTES } from "./fit";
 import { NO_WORK, budgetFor, whileBudget, work } from "./budget";
-import { MISSING_COST, markFileMissing, upsertCost, upsertScannedItem } from "./catalog";
+import {
+  MISSING_COST,
+  markFileMissing,
+  REFRESH_COST,
+  refreshProbe,
+  upsertCost,
+  upsertScannedItem,
+} from "./catalog";
 import { moveTotals, sumMoved } from "./totals";
-import { knownFile, scannedItem, upsertedFile } from "./validators";
+import { knownFile, reprobedFile, scannedItem, upsertedFile } from "./validators";
 
 /**
  * The most files or paths one call takes as arguments. How many of them it writes is the call's
@@ -132,6 +139,36 @@ export const missing = serverMutation({
 
       return {
         value: { marked: marked.filter(Boolean).length, done: marked.length },
+        added: 0,
+        removed: 0,
+      };
+    }),
+});
+
+/**
+ * Writes the probes of up to 500 files a scan found unchanged but probed again, as a newer reader
+ * revision reads more: each file's probe and revision, and nothing else of it, as many as the
+ * call's budget admits. It never matches a title, so a probe read again cannot move a file. A
+ * file changed since the scan found it is skipped and counted done; the scan that reads it as
+ * changed writes it. Answers how many it got through (`done`) and how many it wrote.
+ */
+export const reprobed = serverMutation({
+  args: { lease, files: v.array(reprobedFile) },
+  returns: leaseAnswer(v.object({ written: v.number(), done: v.number() })),
+  handler: (ctx, { lease: held, files }) =>
+    withScanLease(ctx, "movies", held, async (scan) => {
+      checkBatch(files.length);
+      scan.admit(files.map((file) => file.path));
+
+      const written = await whileBudget(
+        budgetFor(CALL_COST),
+        files,
+        (file) => (pathFits(file.path) ? REFRESH_COST : NO_WORK),
+        async (file) => pathFits(file.path) && refreshProbe(ctx.db, scan.library._id, file),
+      );
+
+      return {
+        value: { written: written.filter(Boolean).length, done: written.length },
         added: 0,
         removed: 0,
       };

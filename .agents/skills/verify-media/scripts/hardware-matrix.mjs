@@ -581,6 +581,15 @@ export const parseFrames = (json) => {
     .sort((a, b) => a.pts - b.pts);
 };
 
+/**
+ * ffmpeg's `idet` as the `progressive` check runs it. By default `idet` calls a frame interlaced
+ * when one of its two field-timing guesses fits 4 % better than the other; Quick Sync's
+ * motion-adaptive output, free of combing, leans that far on half its frames (49-62 % read
+ * interlaced on the demo's Feature Test). Woven fields lean far more: at 1.5 the source still
+ * reads 52 %, and Quick Sync's and the CPU's outputs read 0 %.
+ */
+export const IDET = "idet=intl_thres=1.5";
+
 /** The last `Multi frame detection` line of ffmpeg's `idet` filter: frame counts by kind. */
 export const parseIdet = (text) => {
   const lines = String(text).match(/Multi frame detection:[^\n]*/g) ?? [];

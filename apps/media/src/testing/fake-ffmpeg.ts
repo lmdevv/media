@@ -59,9 +59,11 @@ export interface FakeFfmpegBehavior {
  * `delayMs`, then writes `stderr` if given, or the text of the file `stderrFrom` names beside the
  * stand-in as it is when the run starts; then with `signal` it is killed by that signal, with
  * `hang` it never exits until killed, with `exitCode` it exits with that status, with `stderr` or
- * `stderrFrom` alone it exits with status 1, and otherwise it runs as usual. A rule with `armedBy`
- * applies only once a rule that `arm`s that name has matched, so a probe can pass at start and
- * fail after a stream's failure; `limit` caps how many runs a rule matches.
+ * `stderrFrom` alone it exits with status 1, and otherwise it runs as usual. With
+ * `afterFragments`, a matching HLS run first writes its init segment and that many fragments, then
+ * writes `stderr` and exits with status 1, as a stage that fails partway through would. A rule
+ * with `armedBy` applies only once a rule that `arm`s that name has matched, so a probe can pass at
+ * start and fail after a stream's failure; `limit` caps how many runs a rule matches.
  */
 export interface RunRule {
   readonly token: string;
@@ -75,6 +77,7 @@ export interface RunRule {
   readonly arm?: string;
   readonly armedBy?: string;
   readonly limit?: number;
+  readonly afterFragments?: number;
 }
 
 /** Options that open or use a GPU, dropped with their values when the stand-in plays the GPU. */
@@ -137,6 +140,8 @@ if (behavior.logInvocations === true) {
   appendFileSync(join(here, "invocations.jsonl"), JSON.stringify(asked) + "\\n");
 }
 
+let failsPartway;
+
 for (const [index, rule] of (behavior.rules ?? []).entries()) {
   const runs = rule.runs === "any" || (rule.runs === "hls" ? hls : probe);
   const armed = rule.armedBy === undefined || existsSync(join(here, "armed-" + rule.armedBy));
@@ -146,6 +151,10 @@ for (const [index, rule] of (behavior.rules ?? []).entries()) {
   if (runs && armed && asked.join(" ").includes(rule.token) && (rule.limit === undefined || spare !== undefined)) {
     if (spare !== undefined) writeFileSync(spare, "");
     if (rule.arm !== undefined) writeFileSync(join(here, "armed-" + rule.arm), "");
+    if (hls && rule.afterFragments !== undefined) {
+      failsPartway = rule;
+      break;
+    }
     if (rule.delayMs !== undefined) await new Promise((resolve) => setTimeout(resolve, rule.delayMs));
     const stderr = rule.stderrFrom === undefined ? rule.stderr : readFileSync(join(here, rule.stderrFrom), "utf8");
     if (stderr !== undefined) process.stderr.write(stderr + "\\n");
@@ -289,7 +298,7 @@ const failsAfterFirst =
     behavior.qsvFailsAfterFirstFragmentBefore !== undefined &&
     runStart < behavior.qsvFailsAfterFirstFragmentBefore);
 
-if (stalls || failsAfterFirst) {
+if (stalls || failsAfterFirst || failsPartway !== undefined) {
   const output = dirname(args.at(-1) ?? "");
   const aside = mkdtempSync(join(tmpdir(), "media-fake-hls-"));
   const redirected = args.map((arg) => (arg.startsWith(output) ? aside + arg.slice(output.length) : arg));
@@ -299,7 +308,9 @@ if (stalls || failsAfterFirst) {
   try {
     status = run(redirected, { stdio: "inherit" }).status ?? 1;
 
-    const kept = stalls ? behavior.hlsStallsAfterFragments : 1;
+    const kept = stalls
+      ? behavior.hlsStallsAfterFragments
+      : (failsPartway?.afterFragments ?? 1);
     const names = ["init.mp4", ...Array.from({ length: kept }, (_, index) => \`f\${index}.m4s\`)];
 
     for (const name of status === 0 ? names : []) {
@@ -312,6 +323,10 @@ if (stalls || failsAfterFirst) {
   }
 
   if (status !== 0) process.exit(status);
+  if (failsPartway !== undefined) {
+    process.stderr.write((failsPartway.stderr ?? "Conversion failed!") + "\\n");
+    process.exit(1);
+  }
   if (failsAfterFirst) process.exit(1);
   const cue = join(dirname(process.argv[1] ?? ""), "cue");
 

@@ -40,6 +40,7 @@ import {
 } from "./models/migration-service";
 import {
   IndexedFile,
+  ReprobedFile,
   ResolvedFile,
   ScannedCollection,
   ScannedCredit,
@@ -556,6 +557,12 @@ export const serverFunctions = {
     path: "movies/scanner:missing",
     args: Schema.Struct({ lease: Lease, paths: Schema.Array(Schema.String) }),
     result: LeaseAnswer(Schema.Struct({ marked: Schema.Int, done: Schema.Int })),
+  }),
+  moviesReprobed: serverMutation({
+    name: "movies.scanner.reprobed",
+    path: "movies/scanner:reprobed",
+    args: Schema.Struct({ lease: Lease, files: Schema.Array(ReprobedFile) }),
+    result: LeaseAnswer(Schema.Struct({ written: Schema.Int, done: Schema.Int })),
   }),
   musicKnown: serverMutation({
     name: "music.scanner.known",

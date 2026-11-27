@@ -552,6 +552,27 @@ describe("sourceOf", () => {
       );
     }
   });
+
+  it("deinterlaces H.264 that says no field order where its frames already are, adding no move", () => {
+    // H.264 says no field order where no parser reads its stream, as in NUT, whether its frames
+    // are fields or progressive; progressive frames pass each deinterlacer untouched.
+    const silent = sourceOf(streamOf("h264", "unknown"));
+    const progressive = sourceOf(streamOf("h264", "progressive"));
+    const intent = intentFor(silent);
+
+    for (const bindings of [[], [QSV], [VAAPI]]) {
+      const domain = bindings[0]?.domain ?? "cpu";
+
+      const chain = (video: SourceVideo) =>
+        impls(planned(video, intent, snapshot(bindings, everyKey(video, intent, bindings))));
+
+      assert.deepStrictEqual(
+        chain(silent),
+        chain(progressive).toSpliced(1, 0, `deinterlace.${domain}`),
+        domain,
+      );
+    }
+  });
 });
 
 describe("assemble", () => {

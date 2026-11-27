@@ -94,19 +94,95 @@ const hevcDevice: ClientCapabilities = {
   mse: false,
 };
 
+/** Soft telecine of the MPEG-2 elementary stream in file `from`, written to file `to`. */
+class Pulldown {
+  readonly from: string;
+  readonly to: string;
+
+  constructor(from: string, to: string) {
+    this.from = from;
+    this.to = to;
+  }
+}
+
+/** One step that writes a fixture: the arguments of an ffmpeg run, or a soft telecine. */
+type Step = ReadonlyArray<string> | Pulldown;
+
+/** The 3:2 order of soft telecine, picture by picture: top field first, first field repeated. */
+const CADENCE = [
+  { topFirst: true, repeat: true },
+  { topFirst: false, repeat: false },
+  { topFirst: false, repeat: true },
+  { topFirst: true, repeat: false },
+] as const;
+
+/**
+ * `stream`, a progressive MPEG-2 elementary stream at 23.976 frames a second, soft telecined as a
+ * film's DVD is: its sequence says 29.97 frames a second and interlaced, and each picture, still
+ * progressive, carries the top-first and repeat-first-field flags of the 3:2 order. Only header
+ * bits change, as a DVD authoring tool's pulldown does.
+ */
+const softTelecined = (stream: Uint8Array): Uint8Array => {
+  const out = Uint8Array.from(stream);
+
+  const set = (bit: number, on: boolean) => {
+    const index = Math.floor(bit / 8);
+    const mask = 0x80 >> (bit % 8);
+    const byte = out[index] ?? 0;
+
+    out[index] = on ? byte | mask : byte & ~mask;
+  };
+
+  let picture = 0;
+
+  for (let at = 0; at + 8 < out.length; at += 1) {
+    if (out[at] === 0 && out[at + 1] === 0 && out[at + 2] === 1) {
+      const code = out[at + 3];
+      const extension = (out[at + 4] ?? 0) >> 4;
+
+      if (code === 0xb3) {
+        // The sequence header's frame rate code, 4: 30000/1001.
+        out[at + 7] = ((out[at + 7] ?? 0) & 0xf0) | 4;
+      } else if (code === 0xb5 && extension === 1) {
+        // The sequence extension's progressive_sequence, after the profile and level.
+        set((at + 5) * 8 + 4, false);
+      } else if (code === 0xb5 && extension === 8) {
+        // The picture coding extension: top_field_first after the f-codes, DC precision, and
+        // picture structure, repeat_first_field six bits on.
+        const flags = (at + 4) * 8 + 4 + 16 + 2 + 2;
+        const { topFirst, repeat } = CADENCE[picture % CADENCE.length] ?? CADENCE[0];
+
+        set(flags, topFirst);
+        set(flags + 6, repeat);
+        picture += 1;
+      }
+    }
+  }
+
+  return out;
+};
+
 interface Fixture {
   readonly key: string;
   readonly name: string;
   readonly file: string;
-  /** The ffmpeg runs that write it, each given its output path. */
-  readonly runs: (output: string) => ReadonlyArray<ReadonlyArray<string>>;
+  /** The steps that write it, each given its output path. */
+  readonly runs: (output: string) => ReadonlyArray<Step>;
   readonly client: ClientCapabilities;
   readonly codec: string;
+  /** The frames a second its stream says it shows, which the output keeps. */
+  readonly rate: number;
   /** Whether its frames are fields of a moving box to measure, or progressive pictures. */
   readonly frames: "woven" | "progressive";
   /** The field each frame shows first. */
   readonly first: "top" | "bottom";
   readonly audio: boolean;
+  /**
+   * Whether pictures repeat a field. Quick Sync's deinterlacer refuses such a picture ("Error
+   * querying VPP params: unsupported" at the first, "undefined behavior" later), so the stream's
+   * recovery deinterlaces the file on the CPU between Quick Sync's decode and encode.
+   */
+  readonly repeatsFields?: true;
 }
 
 /** MPEG-2 coded as fields, top first; ffmpeg's Matroska says `tb`, top coded, bottom shown. */
@@ -141,6 +217,7 @@ const topFirst: Fixture = {
   ],
   client: h264Browser,
   codec: "h264",
+  rate: 25,
   frames: "woven",
   first: "top",
   audio: true,
@@ -178,6 +255,7 @@ const bottomFirst: Fixture = {
   ],
   client: hevcDevice,
   codec: "hevc",
+  rate: 25,
   frames: "woven",
   first: "bottom",
   audio: true,
@@ -207,9 +285,63 @@ const flaggedProgressive: Fixture = {
   ],
   client: hevcDevice,
   codec: "hevc",
+  rate: 25,
   frames: "progressive",
   first: "top",
   audio: false,
+};
+
+/**
+ * A film soft telecined on a DVD, in Matroska flagged top field first as the rip's stream says:
+ * every picture is progressive, a 23.976 frames a second picture shown in 3:2 order by its flags.
+ */
+const softTelecine: Fixture = {
+  key: "telecine",
+  name: "soft-telecined MPEG-2 flagged interlaced",
+  file: "Soft Telecine (2005)/Soft Telecine (2005).mkv",
+  runs: (output) => [
+    [
+      ...QUIET,
+      "-f",
+      "lavfi",
+      "-i",
+      `testsrc2=s=720x480:r=24000/1001:d=${String(SECONDS)}`,
+      "-c:v",
+      "mpeg2video",
+      "-q:v",
+      "2",
+      "-g",
+      "12",
+      "-bf",
+      "0",
+      "-f",
+      "mpeg2video",
+      `${output}.m2v`,
+    ],
+    new Pulldown(`${output}.m2v`, `${output}.pulled.m2v`),
+    // The program stream gives each picture the time its fields show it at.
+    [
+      ...QUIET,
+      "-fflags",
+      "+genpts",
+      "-i",
+      `${output}.pulled.m2v`,
+      "-c",
+      "copy",
+      "-f",
+      "vob",
+      `${output}.mpg`,
+    ],
+    [...QUIET, "-i", `${output}.mpg`, "-c", "copy", "-field_order", "tt", output],
+  ],
+  client: h264Browser,
+  codec: "h264",
+  // The sequence's 29.97: the output shows a picture again where its flags repeat a field.
+  rate: 30_000 / 1001,
+  frames: "progressive",
+  first: "top",
+  audio: false,
+  repeatsFields: true,
 };
 
 /** MPEG-4 Part 2 coded as fields in AVI, which says nothing of fields: only its frames do. */
@@ -235,12 +367,19 @@ const unflagged: Fixture = {
   ],
   client: h264Browser,
   codec: "h264",
+  rate: 25,
   frames: "woven",
   first: "top",
   audio: false,
 };
 
-const FIXTURES: ReadonlyArray<Fixture> = [topFirst, bottomFirst, flaggedProgressive, unflagged];
+const FIXTURES: ReadonlyArray<Fixture> = [
+  topFirst,
+  bottomFirst,
+  flaggedProgressive,
+  softTelecine,
+  unflagged,
+];
 
 /** Writes `fixture` in the sources library, once, scans it, and answers its file and path. */
 const added = Effect.fn("Deinterlace.added")(function* (fixture: Fixture) {
@@ -255,7 +394,13 @@ const added = Effect.fn("Deinterlace.added")(function* (fixture: Fixture) {
   if (!(yield* fs.exists(file))) {
     yield* fs.makeDirectory(path.dirname(file), { recursive: true });
 
-    for (const run of fixture.runs(file)) yield* tools.ffmpeg(run);
+    for (const step of fixture.runs(file)) {
+      if (step instanceof Pulldown) {
+        yield* fs.writeFile(step.to, softTelecined(yield* fs.readFile(step.from)));
+      } else {
+        yield* tools.ffmpeg(step);
+      }
+    }
   }
 
   yield* scanner.scan({ libraryId: SOURCES, root, mode: "incremental" });
@@ -353,7 +498,9 @@ const packetsOf = Effect.fn("Deinterlace.packetsOf")(function* (file: string, ki
 
 /**
  * The share of `file`'s frames ffmpeg's `idet` finds interlaced, of those it decides either way,
- * by its decision over several frames.
+ * by its decision over several frames. A frame counts interlaced when one field timing fits it
+ * half again better than the other, as the hardware grid reads it: at `idet`'s default 4 %, Quick
+ * Sync's motion-adaptive output, with no combing left, reads interlaced on half its frames.
  */
 const interlacedShare = Effect.fn("Deinterlace.interlacedShare")(
   function* (file: string) {
@@ -368,7 +515,7 @@ const interlacedShare = Effect.fn("Deinterlace.interlacedShare")(
       "-map",
       "0:v:0",
       "-vf",
-      `idet,metadata=mode=print:key=lavfi.idet.multiple.current_frame:file=${log}`,
+      `idet=intl_thres=1.5,metadata=mode=print:key=lavfi.idet.multiple.current_frame:file=${log}`,
       "-f",
       "null",
       "-",
@@ -436,12 +583,12 @@ const boxPositions = Effect.fn("Deinterlace.boxPositions")(function* (file: stri
 }, Effect.scoped);
 
 /**
- * The PSNR of `file`'s first `frames` frames against `source`'s, put through `reference` first
- * when given, in decibels, from the mean of the squared errors ffmpeg's `psnr` reports frame by
- * frame.
+ * The PSNR of `file`'s first `frames` frames against `source`'s, put through `reference` first,
+ * in decibels: the median frame's, of those ffmpeg's `psnr` reports, so the few frames a repeated
+ * picture lands a tick off, as rounding its time to the output's rate can, don't decide it.
  */
 const psnrAgainst = Effect.fn("Deinterlace.psnrAgainst")(
-  function* (file: string, source: string, frames: number, reference = "null") {
+  function* (file: string, source: string, frames: number, reference: string) {
     const tools = yield* MediaTools.Service;
     const fs = yield* FileSystem.FileSystem;
     const log = yield* fs.makeTempFileScoped({ suffix: ".txt" });
@@ -463,9 +610,9 @@ const psnrAgainst = Effect.fn("Deinterlace.psnrAgainst")(
 
     const stats = yield* fs.readFileString(log);
     const errors = [...stats.matchAll(/mse_avg:([\d.]+)/gu)].map((match) => Number(match[1]));
-    const mean = errors.reduce((total, error) => total + error, 0) / errors.length;
+    const median = errors.toSorted((a, b) => a - b)[Math.floor(errors.length / 2)] ?? Number.NaN;
 
-    return mean === 0 ? Number.POSITIVE_INFINITY : 10 * Math.log10((255 * 255) / mean);
+    return median === 0 ? Number.POSITIVE_INFINITY : 10 * Math.log10((255 * 255) / median);
   },
   Effect.scoped,
   Effect.orDie,
@@ -473,9 +620,9 @@ const psnrAgainst = Effect.fn("Deinterlace.psnrAgainst")(
 
 /**
  * Plays `fixture` on `path` and checks what it serves: the summary names the deinterlace stage on
- * that path; every segment opens on a keyframe at its planned start; the frames run at the
- * source's 25 a second for its whole length; and, for woven fields, `idet` finds no combing left
- * where it finds it in the source, and each frame shows the box where the source's first field
+ * that path, or on the CPU where Quick Sync refuses the pictures; every segment opens on a keyframe
+ * at its planned start; the frames run at the stream's rate for its whole length; and, for woven
+ * fields, `idet` finds no combing left where it finds it in the source, and each frame shows the box where the source's first field
  * puts it (the other field's place, 8 pixels on, is a wrong field order); for whole pictures, the
  * frames pass through untouched. After a seek, sound and picture start within a frame.
  */
@@ -496,10 +643,12 @@ const plays = Effect.fn("Deinterlace.plays")(function* (
     }),
   ).pipe(Effect.orDie);
 
+  const deinterlacer = path === "qsv" && fixture.repeatsFields === true ? "cpu" : path;
+
   assert.strictEqual(negotiated.video.codec, fixture.codec, at);
   assert.deepInclude(
     negotiated.transcode?.stages.find((stage) => stage.op === "deinterlace"),
-    { domain: path, impl: `deinterlace.${path}` },
+    { domain: deinterlacer, impl: `deinterlace.${deinterlacer}` },
     at,
   );
 
@@ -529,9 +678,13 @@ const plays = Effect.fn("Deinterlace.plays")(function* (
     .map((packet) => packet.pts_time)
     .toSorted((a, b) => a - b);
 
-  assert.lengthOf(times, SECONDS * 25, `${at}: one frame for each of the source's`);
+  assert.lengthOf(
+    times,
+    Math.round(SECONDS * fixture.rate),
+    `${at}: one frame for each the stream shows`,
+  );
   assert.approximately(
-    (times.at(-1) ?? 0) + FRAME,
+    (times.at(-1) ?? 0) + 1 / fixture.rate,
     SECONDS,
     FRAME / 2,
     `${at}: where the frames end`,
@@ -540,9 +693,9 @@ const plays = Effect.fn("Deinterlace.plays")(function* (
   for (const [index, time] of times.entries()) {
     assert.approximately(
       time,
-      index * FRAME,
+      index / fixture.rate,
       FRAME / 4,
-      `${at}: frame ${String(index)} at the source's rate`,
+      `${at}: frame ${String(index)} at the stream's rate`,
     );
   }
 
@@ -575,9 +728,17 @@ const plays = Effect.fn("Deinterlace.plays")(function* (
     }
   } else {
     // Deinterlacing a whole picture costs it detail wherever it moves; the encode costs every
-    // picture some. Passed through, the frames are nearer the source than its deinterlaced copy.
-    const untouched = yield* psnrAgainst(whole, source, 50);
-    const deinterlaced = yield* psnrAgainst(whole, source, 50, "bwdif=mode=send_frame:deint=all");
+    // picture some. Passed through, the frames are nearer the source, shown at the stream's rate
+    // as the output shows it, than its deinterlaced copy.
+    const shown = `fps=${String(fixture.rate)}`;
+    const untouched = yield* psnrAgainst(whole, source, 50, shown);
+
+    const deinterlaced = yield* psnrAgainst(
+      whole,
+      source,
+      50,
+      `${shown},bwdif=mode=send_frame:deint=all`,
+    );
 
     assert.isAbove(
       untouched,

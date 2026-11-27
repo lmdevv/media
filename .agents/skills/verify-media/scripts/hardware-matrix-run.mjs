@@ -385,9 +385,9 @@ const analyseProgressive = (obs, found, dir) => {
   const fetch = obs.fetches.seek;
   if (!fetch?.ok) return undefined;
   const { from, seconds } = spanOf(fetch);
-  const output = tool("ffmpeg", ["-hide_banner", "-nostats", "-nostdin", "-i", fetch.file, "-map", "0:v:0", "-vf", "idet", "-f", "null", "-"]);
+  const output = tool("ffmpeg", ["-hide_banner", "-nostats", "-nostdin", "-i", fetch.file, "-map", "0:v:0", "-vf", Matrix.IDET, "-f", "null", "-"]);
   const span = ["-ss", String(from), "-t", String(seconds), "-i", found.path];
-  const source = inContainer(["ffmpeg", "-hide_banner", "-nostats", "-nostdin", ...span, "-map", "0:v:0", "-vf", "idet", "-f", "null", "-"]);
+  const source = inContainer(["ffmpeg", "-hide_banner", "-nostats", "-nostdin", ...span, "-map", "0:v:0", "-vf", Matrix.IDET, "-f", "null", "-"]);
   writeFileSync(join(dir, "idet.txt"), `output:\n${output.stderr}\nsource ${from}-${from + seconds} s:\n${source.stderr}\n`);
   return { output: idetOf(output), source: idetOf(source) };
 };

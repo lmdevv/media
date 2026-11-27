@@ -24,7 +24,13 @@ import type { Work } from "./budget";
 import { nothingMoved } from "./totals";
 import type { Moved } from "./totals";
 import { forgetTrickplay, queueTrickplay } from "./trickplayState";
-import type { scannedEpisode, scannedItem, scannedTitle, upsertedFile } from "./validators";
+import type {
+  reprobedFile,
+  scannedEpisode,
+  scannedItem,
+  scannedTitle,
+  upsertedFile,
+} from "./validators";
 
 type Db = MutationCtx["db"];
 
@@ -653,6 +659,41 @@ export const upsertScannedItem = async (
   if (existingFile.missing || moved) await adjustPresent(db, title.row._id, episodeId, 1);
 
   return { row: { ...landed, fileId: existingFile._id }, moved: { ...found, files: 0 } };
+};
+
+/** The worst case of `refreshProbe`: the file looked up and written. */
+export const REFRESH_COST = work(4, 2);
+
+/**
+ * Writes the probe a scan read again of a file it found unchanged, the reader revision that read
+ * it, and the HDR flag that probe decides, and nothing else: the file keeps its title, episode,
+ * version name, added date, subtitles, scrub thumbnails, and the history pointing at its title.
+ * A file missing, gone, or changed since the scan found it (another size or modification time) is
+ * left for the scan that reads it as changed. Answers whether it wrote.
+ */
+export const refreshProbe = async (
+  db: Db,
+  libraryId: Id<"libraries">,
+  file: Infer<typeof reprobedFile>,
+): Promise<boolean> => {
+  const stored = await fileAt(db, libraryId, file.path);
+
+  if (
+    stored === null ||
+    stored.missing ||
+    stored.sizeBytes !== file.sizeBytes ||
+    stored.mtimeMs !== file.mtimeMs
+  ) {
+    return false;
+  }
+
+  await patchMediaFile(db, stored, {
+    probe: file.probe,
+    probeRevision: file.probeRevision,
+    hdr: (file.probe.video[0]?.hdr ?? "none") !== "none",
+  });
+
+  return true;
 };
 
 /**

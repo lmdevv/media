@@ -252,6 +252,18 @@ export const scannedFile = v.object({
   probeRevision: v.number(),
 });
 
+/**
+ * A file the scanner found unchanged but probed again for a newer reader revision: the size and
+ * modification time it was found with, and its new probe.
+ */
+export const reprobedFile = v.object({
+  path: v.string(),
+  sizeBytes: v.number(),
+  mtimeMs: v.number(),
+  probe,
+  probeRevision: v.number(),
+});
+
 /** One file the scanner found, with the title and episode it belongs to. */
 export const scannedItem = v.object({
   file: scannedFile,

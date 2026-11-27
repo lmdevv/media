@@ -138,18 +138,26 @@ Old movies' Convex project, its SDK client, and its command registry were delete
   hold). A stream that says `progressive`, and HEVC, VP9, and AV1 saying nothing, get no filter.
   The deinterlacer works frame by frame: only frames the decoder flags interlaced, in the field
   order each flag gives, so soft-telecined and PsF pictures in a stream flagged interlaced pass
-  untouched. The container's order is not used: ffmpeg writes `tb` for top-field-first Matroska,
-  and an MP4 of bottom-field-first H.264 reads `tt`. Content whose frames carry no flag at all
-  (woven fields coded as progressive pictures) plays as it is: telling it apart takes decoding
-  frames at scan time, which no rule does yet. One frame comes out for each frame, at the
-  source's rate: a field rate would double an H.264 encode's samples a second with no level table
-  or client frame-rate limit to hold it. The CPU uses `bwdif` (`yadif` where a build lacks it),
-  Quick Sync `vpp_qsv=deinterlace=advanced` fused with its scale, and VA-API `deinterlace_vaapi`'s
-  bob: its motion-adaptive mode on iHD gives no frame for each run's first and stamps each other
-  frame a frame late, so every seek would start late. A stored probe whose reader revision
-  (`PROBE_REVISION`) is older than the service's is out of date like a changed file: the scan at
-  the next start reads the file again, field order and the peak frame rate HEVC and AV1 levels
-  are held to included, and until then the file plays as progressive.
+  untouched. Quick Sync's deinterlacer refuses a picture that repeats a field, as soft telecine's
+  do, so such a file's stream fails there once and its recovery deinterlaces that file on the CPU
+  between Quick Sync's decode and encode. The container's order is not used: ffmpeg writes `tb`
+  for top-field-first Matroska, and an MP4 of bottom-field-first H.264 reads `tt`. Content whose
+  frames carry no flag at all (woven fields coded as progressive pictures) plays as it is:
+  telling it apart takes decoding frames at scan time, which no rule does yet. One frame comes out
+  for each frame, at the source's rate: a field rate would double an H.264 encode's samples a
+  second with no level table or client frame-rate limit to hold it. H.264 coded as separate field
+  pictures reports its field rate as its frame rate, so its output shows each frame twice at that
+  rate, and levels are fitted to it. The CPU uses `bwdif` (`yadif` where a build lacks it), Quick
+  Sync `vpp_qsv=deinterlace=advanced` fused with its scale, and VA-API `deinterlace_vaapi`'s bob:
+  its motion-adaptive mode on iHD gives no frame for each run's first and stamps each other frame a
+  frame late, so every seek would start late.
+- Reading files again: a stored probe whose reader revision (`PROBE_REVISION`) is older than the
+  service's is read again by the next scan (the one at start, then each reconcile), which writes
+  that file's probe and revision and nothing else: no matching, and no change to its title, its
+  identity, the date it was added, artwork, versions, or progress. A file whose size, modification
+  time, or companions changed is a changed file, read and matched as any scan does. Until its new
+  probe is written a file plays as before, progressive; one ffprobe fails on keeps its stored probe
+  and revision, and each scan tries it again.
 - A stream's ffmpeg pauses (`SIGSTOP`) once its output runs `STREAM_BUFFER_AHEAD_SECONDS` (120)
   past the furthest segment the player asked for, and continues (`SIGCONT`) when the player is
   within half of that. A remux copies at disk speed, and without the pause every play wrote most of

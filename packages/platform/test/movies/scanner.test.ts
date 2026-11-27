@@ -11,6 +11,7 @@ import { runServer } from "../service";
 import { coreStackFromEnvFile } from "../stack-env";
 import {
   Landed,
+  Reprobed,
   claimJob,
   finishJob,
   knownFiles,
@@ -83,61 +84,72 @@ describe.skipIf(stack === undefined)("movies scanner callbacks", { timeout: 180_
     await finishJob(stack, lease);
   });
 
-  it("remember the reader revision each file's probe comes from, and the field order it read", async () => {
+  it("write a probe read again and its revision, and nothing else of the file, its title, or its history", async () => {
     if (stack === undefined) return;
-    const admin = await member(stack, "scanner-revision", "admin");
-    const { scanJobId, roots } = await moviesLibrary(admin, "Revised");
-    const path = join(roots[0] ?? "", "Interlaced.mkv");
+    const admin = await member(stack, "scanner-reprobed", "admin");
+    const { scanJobId, roots } = await moviesLibrary(admin, "Reprobed");
+    const path = join(roots[0] ?? "", "Matched Elsewhere (2004).mkv");
     const lease = await claimJob(stack, "movies.scan", scanJobId);
-    const before = movieFile(path, 10, 1, undefined, true);
-
-    await upsert(stack, lease, [before]);
-
-    expect((await knownFiles(stack, lease)).map((file) => file.probeRevision)).toEqual([1]);
-
-    const [stream] = before.file.probe.video;
-
-    if (stream === undefined) throw new Error("the file has no video stream");
-
-    const landed = await upsert(stack, lease, [
-      {
-        ...before,
-        file: {
-          ...before.file,
-          probeRevision: 2,
-          probe: { ...before.file.probe, video: [{ ...stream, fieldOrder: "tff" }] },
-        },
-      },
-    ]);
+    const matched = scannedTitle("movie", "tmdb:4242", "Matched Elsewhere");
+    const film = movieFile(path, 10, 1, matched, true);
+    const landed = await upsert(stack, lease, [film]);
 
     if (landed.outcome !== "held") throw new Error(`upsert answered ${landed.outcome}`);
     const [file] = landed.value.files;
+    const [stream] = film.file.probe.video;
 
-    if (file === undefined) throw new Error("no file landed");
+    if (file === undefined || stream === undefined) throw new Error("no file with video landed");
 
-    expect((await knownFiles(stack, lease)).map((known) => known.probeRevision)).toEqual([2]);
+    // Older readers stored no revision; the helper's files carry revision 1.
+    expect((await knownFiles(stack, lease)).map((known) => known.probeRevision)).toEqual([1]);
 
-    const resolved = await runServer(
-      stack,
-      api.movies.files.resolveFile,
-      { fileId: file.fileId },
-      Schema.Struct({
-        probe: Schema.Struct({
-          video: Schema.Array(Schema.Struct({ fieldOrder: Schema.optionalKey(Schema.String) })),
-        }),
-      }),
-    );
-
-    expect(resolved.probe.video.map((video) => video.fieldOrder)).toEqual(["tff"]);
-
-    // A viewer's title answers its files with the field order too.
-    const title = await admin.signedIn.client.query(api.movies.titles.get, {
+    const started = await admin.signedIn.client.mutation(api.movies.play.start, {
       titleId: file.titleId,
     });
 
-    expect(
-      title.files.flatMap((each) => each.probe.video.map((video) => video.fieldOrder)),
-    ).toEqual(["tff"]);
+    await admin.signedIn.client.mutation(api.movies.play.report, {
+      fileId: started.file.id,
+      positionMs: 60_000,
+      event: "tick",
+      playbackId: started.playbackId,
+      startedAt: started.startedAt,
+    });
+
+    const before = await admin.signedIn.client.query(api.movies.titles.get, {
+      titleId: file.titleId,
+    });
+
+    const probe = {
+      ...film.file.probe,
+      video: [{ ...stream, frameRate: 25, fieldOrder: "tff" as const }],
+    };
+
+    // The second is the same file found with another size: changed since, so left alone.
+    const reprobed = await runServer(
+      stack,
+      api.movies.scanner.reprobed,
+      {
+        lease,
+        files: [
+          { path, sizeBytes: 10, mtimeMs: 1, probe, probeRevision: 2 },
+          { path, sizeBytes: 11, mtimeMs: 1, probe, probeRevision: 3 },
+        ],
+      },
+      Reprobed,
+    );
+
+    expect(reprobed).toEqual({ outcome: "held", value: { written: 1, done: 2 } });
+    expect((await knownFiles(stack, lease)).map((known) => known.probeRevision)).toEqual([2]);
+
+    const after = await admin.signedIn.client.query(api.movies.titles.get, {
+      titleId: file.titleId,
+    });
+
+    const [beforeFile] = before.files;
+
+    expect(after.files).toEqual(beforeFile === undefined ? [] : [{ ...beforeFile, probe }]);
+    expect({ ...after, files: [] }).toEqual({ ...before, files: [] });
+    expect(after.progress?.positionMs).toBe(60_000);
     await finishJob(stack, lease);
   });
 
