@@ -77,6 +77,7 @@ import {
 } from "../lib/transfer";
 import type { MoveEnd, MoveTarget, Transfer } from "../lib/transfer";
 import { useServer } from "../session/connection";
+import { mediaRequest } from "../session/media-requests";
 import {
   useCheckReach,
   useHearReach,
@@ -104,7 +105,7 @@ import { withDeadline } from "./deadline";
 import { handOver } from "./hand-over";
 import type { HandBackStep, LocalQueue } from "./local-queue";
 import { LocalStore, offlinePlaysKey } from "./local-store";
-import { NativeEngine } from "./native-engine";
+import { NativeEngine, observedOpen } from "./native-engine";
 import { showPosition } from "./position-ticker";
 import type { PositionTicker } from "./position-ticker";
 import type { TimelineMark } from "./native-engine";
@@ -463,10 +464,13 @@ const createPhone = ({
     EventEmitter<RemoteCommandEvents> & Pick<RemoteCommands, "stamp"> & LockScreenPlayers
   >("RemoteCommands");
 
-  const engine = new NativeEngine((url) => openExpoOutput(url, remoteCommands), {
-    mark: logTimeline,
-    now: () => performance.now(),
-  });
+  const engine = new NativeEngine(
+    observedOpen((url) => openExpoOutput(url, remoteCommands), mediaRequest),
+    {
+      mark: logTimeline,
+      now: () => performance.now(),
+    },
+  );
 
   const local = new LocalStore(appKeychains().own, playsKey);
   const mode: Phone["mode"] = { current: "server" };

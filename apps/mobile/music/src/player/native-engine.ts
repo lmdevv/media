@@ -75,6 +75,26 @@ export interface AudioOutput {
 export type OpenOutput = (url: string) => AudioOutput;
 
 /**
+ * `open`, observing each stream with `request`, which starts observing one URL and returns how to
+ * tell its outcome. The native player fetches the stream itself, so its first failure, the current
+ * song's or a preloaded one's, is the only word of that request.
+ */
+export const observedOpen =
+  (open: OpenOutput, request: (url: string) => (status: number | null) => void): OpenOutput =>
+  (url) => {
+    const told = request(url);
+    const output = open(url);
+
+    const stop = output.subscribe((status) => {
+      if (status.error === null) return;
+      stop();
+      told(null);
+    });
+
+    return output;
+  };
+
+/**
  * One moment of a song change, for the gapless timeline: the song before reached its end, the
  * preloaded player was told to play, and its first report of playing. `at` is on a clock that
  * never jumps, in milliseconds.

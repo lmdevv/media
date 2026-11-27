@@ -28,7 +28,7 @@ import type { UserId } from "@/lib/models";
 import { useReadSettled } from "@/lib/platform";
 import { playsOnIos } from "@/player/player-state";
 import { useServer } from "@/session/connection";
-import { mediaFailed } from "@/session/media-failures";
+import { mediaRequest } from "@/session/media-requests";
 
 import { expoTransfer } from "./expo-transfer";
 import { openVault, wipeVaults } from "./expo-vault";
@@ -545,7 +545,7 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
       const opened = new DownloadSync({
         core: coreFor(platform, mediaUrl),
         vault,
-        transfer: observedTransfer(expoTransfer, mediaFailed),
+        transfer: observedTransfer(expoTransfer, mediaRequest),
         policy: () => policyFor(chosen.current),
         now: Date.now,
       });

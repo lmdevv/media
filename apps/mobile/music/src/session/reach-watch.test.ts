@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CLOSED_RECHECK_MS, LOST_AFTER, RECHECK_MS, SETTLE_MS } from "@/lib/server-reach";
 import type { Observation } from "@/lib/server-reach";
 
-import { doubtsMedia, hearMediaFailures, mediaFailed, onMediaDoubt } from "./media-failures";
+import { doubtsMedia, listenForMediaRequests, mediaRequest } from "./media-requests";
 import { reachWatch, STALL_MS } from "./reach-watch";
 
 /** A health check the test answers by hand, recording each one sent. */
@@ -47,6 +47,11 @@ const serverThat = (answering: { up: boolean }) => {
 };
 
 const UP = { connected: true, waitingSince: null };
+
+/** The media server the watches in the table listen at, and a song's stream on it. */
+const MEDIA = "http://media.test";
+
+const STREAM = `${MEDIA}/media/music/stream/t1`;
 
 const DOWN = { connected: false, waitingSince: null };
 
@@ -321,6 +326,61 @@ describe("reachWatch", () => {
     expect(server.sent()).toBe(1);
   });
 
+  it("remembers a doubt heard in the background with nothing playing, and settles it with the one check on coming back", async () => {
+    const answering = { up: false };
+    const server = serverThat(answering);
+    const watch = reachWatch(server.answers);
+
+    watch.connection(UP);
+    watch.need(true);
+    watch.need(false);
+    watch.hear("doubted");
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+
+    expect(server.sent()).toBe(0);
+
+    // Coming back on screen: the app checks once, then says it needs the server.
+    void watch.check();
+    watch.need(true);
+    await vi.advanceTimersByTimeAsync(SETTLE_MS);
+
+    expect(server.sent()).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(RECHECK_MS);
+
+    expect(server.sent()).toBe(2);
+    expect(watch.lost()).toBe(true);
+  });
+
+  it("settles a background doubt with that one check when the server answers it", async () => {
+    const server = serverThat({ up: true });
+    const watch = reachWatch(server.answers);
+
+    watch.connection(UP);
+    watch.hear("doubted");
+    void watch.check();
+    watch.need(true);
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(server.sent()).toBe(1);
+    expect(watch.lost()).toBe(false);
+  });
+
+  it("checks a socket that is already closed when the watch first hears of it", async () => {
+    const server = serverThat({ up: true });
+    const watch = reachWatch(server.answers);
+
+    watch.connection(DOWN);
+    watch.need(true);
+    await vi.advanceTimersByTimeAsync(SETTLE_MS);
+
+    expect(server.sent()).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(CLOSED_RECHECK_MS);
+
+    expect(server.sent()).toBe(2);
+  });
+
   it("checks a settle after a stream fails, and settles on its answer", async () => {
     const server = serverThat({ up: true });
     const watch = reachWatch(server.answers);
@@ -462,7 +522,7 @@ const watchAfter = async (events: ReadonlyArray<Event>) => {
   const answering = { up: true };
   const server = serverThat(answering);
   const watch = reachWatch(server.answers);
-  const stopHearing = hearMediaFailures(watch);
+  const stopHearing = listenForMediaRequests(MEDIA, watch);
 
   let open = false;
 
@@ -479,7 +539,7 @@ const watchAfter = async (events: ReadonlyArray<Event>) => {
     } else if (happened.kind === "socket") {
       open = happened.open;
       watch.connection(happened.open ? UP : DOWN);
-    } else if (happened.kind === "fails") mediaFailed(happened.status);
+    } else if (happened.kind === "fails") mediaRequest(STREAM)(happened.status);
     else if (happened.kind === "need") watch.need(happened.needed);
     else if (happened.kind === "hear") watch.hear(happened.observation);
     else {
@@ -523,8 +583,6 @@ const history = fc.array(event, { maxLength: 12 });
 describe("reachWatch's table", () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    // Takes any doubt an earlier test left unheard.
-    onMediaDoubt(() => undefined)();
   });
 
   afterEach(() => {
@@ -572,7 +630,7 @@ describe("reachWatch's table", () => {
         watch.need(true);
         answering.up = false;
 
-        if (requestFails) mediaFailed(null);
+        if (requestFails) mediaRequest(STREAM)(null);
         else watch.connection(DOWN);
 
         await vi.advanceTimersByTimeAsync(CLOSED_RECHECK_MS + SETTLE_MS + 2 * RECHECK_MS);

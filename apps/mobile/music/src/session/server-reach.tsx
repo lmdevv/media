@@ -1,4 +1,4 @@
-import { usePlatform } from "@media/sdk/react";
+import { usePlatform, usePlatformStatus } from "@media/sdk/react";
 import { Option } from "effect";
 import {
   createContext,
@@ -17,7 +17,8 @@ import { useDownloadsReach, useTrackHeld } from "@/downloads";
 import { reachOf } from "@/lib/server-reach";
 import type { Observation, Reach, ServerReach } from "@/lib/server-reach";
 import type { SettledPhase } from "@/lib/session-phase";
-import { hearMediaFailures } from "@/session/media-failures";
+import { useServer } from "@/session/connection";
+import { listenForMediaRequests } from "@/session/media-requests";
 import { reachWatch } from "@/session/reach-watch";
 import type { ReachWatch } from "@/session/reach-watch";
 import { useServerHealth } from "@/session/sdk-provider";
@@ -34,22 +35,25 @@ const ServerReachContext = createContext<ReachState | null>(null);
 const noWatch = (): (() => void) => () => undefined;
 
 /**
- * The connection's `ReachWatch`, fed by the core's socket, by the app's failed requests to the
- * media service, by whether the app is on screen, and by whether the server's queue plays here.
- * It checks the server's health on coming back on screen, with the read that also follows the
- * server's release. The watch belongs to this connection, and closes with it.
+ * The `ReachWatch` of this connection and sign-in, fed by the core's socket, by the app's failed
+ * requests to the media service, by whether the app is on screen, and by whether the server's queue
+ * plays here. It checks the server's health on coming back on screen, with the read that also
+ * follows the server's release. Signing in or out starts a new watch, which hears only the requests
+ * sent from then on; the connection's first watch also hears its release read at launch.
  */
 const useWatch = (playing: boolean): ReachWatch | null => {
   const platform = usePlatform();
-  const readHealth = useServerHealth();
+  const { mediaUrl } = useServer();
+  const signedOut = usePlatformStatus() === "signedOut";
+  const { read: readHealth, launch } = useServerHealth();
   const [watch, setWatch] = useState<ReachWatch | null>(null);
   const [foreground, setForeground] = useState(AppState.currentState === "active");
 
   useEffect(() => {
     const made = reachWatch(async () => Option.isSome(await readHealth()));
     const stopConnection = platform.onConnection(made.connection);
-
-    const stopFailures = hearMediaFailures(made);
+    const stopRequests = listenForMediaRequests(mediaUrl, made);
+    const stopLaunch = launch.take(made);
 
     const foregrounding = AppState.addEventListener("change", (state) => {
       setForeground(state === "active");
@@ -61,11 +65,12 @@ const useWatch = (playing: boolean): ReachWatch | null => {
 
     return () => {
       foregrounding.remove();
-      stopFailures();
+      stopLaunch();
+      stopRequests();
       void stopConnection();
       made.close();
     };
-  }, [platform, readHealth]);
+  }, [platform, readHealth, mediaUrl, launch, signedOut]);
 
   useEffect(() => {
     watch?.need(foreground || playing);

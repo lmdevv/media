@@ -39,40 +39,28 @@ export interface Transfer {
 }
 
 /**
- * `transfer`, telling `failed` of each request that got an error status, with that status, or no
- * answer, with null. A request stopped by its signal tells nothing.
+ * `transfer`, observing each download with `request`, which starts observing one URL and returns
+ * how to tell its outcome: an error status, or null for no answer. A download stopped by its signal
+ * tells nothing. `head` goes through `fetch`, which the app observes on its own.
  */
 export const observedTransfer = (
   transfer: Transfer,
-  failed: (status: number | null) => void,
+  request: (url: string) => (status: number | null) => void,
 ): Transfer => ({
-  head: async (url, signal) => {
-    let response: Response;
+  head: transfer.head,
+  download: async (download) => {
+    const told = request(download.url);
+    const result = await transfer.download(download);
 
-    try {
-      response = await transfer.head(url, signal);
-    } catch (error) {
-      if (!signal.aborted) failed(null);
-
-      throw error;
-    }
-
-    if (!response.ok) failed(response.status);
-
-    return response;
-  },
-  download: async (request) => {
-    const result = await transfer.download(request);
-
-    if (request.signal.aborted) return result;
+    if (download.signal.aborted) return result;
 
     DownloadResult.$match(result, {
       Written: () => undefined,
       Refused: ({ status }) => {
-        failed(status);
+        told(status);
       },
       Broken: () => {
-        failed(null);
+        told(null);
       },
     });
 

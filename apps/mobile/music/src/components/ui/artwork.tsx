@@ -4,7 +4,7 @@ import { withUniwind } from "uniwind";
 
 import { resolveMediaUrl } from "@/lib/media-url";
 import { useServer } from "@/session/connection";
-import { coverFailed } from "@/session/media-failures";
+import { coverFailed } from "@/session/media-requests";
 
 const Image = withUniwind(ExpoImage);
 
@@ -42,7 +42,7 @@ export function Artwork({ url, className, recyclingKey }: ArtworkProps) {
           cachePolicy="memory-disk"
           transition={150}
           recyclingKey={recyclingKey ?? source}
-          onError={coverFailed}
+          onError={coverFailed(source)}
         />
       )}
     </View>
