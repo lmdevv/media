@@ -149,6 +149,18 @@ Preconditions:
   the encoder reorders, at most four frames before the picture), within one audio frame of its
   codec and sample rate (1024 samples for AAC). A source whose track starts late passes when the
   output keeps that delay.
+- What the two checks do not judge, each shown by a made-up case fed to them:
+  - `picture-time` places a picture by how well it matches, so a picture that barely changes (a
+    still, or a small marker moving on a still background) matches at every offset and hides one.
+    The rows' stretches move enough: with the frame-rate restatement stripped from the Quick Sync
+    chain, all four affected cells fail on the 40-frame hold.
+  - It does not judge tone. An output crushed to nearly one gray level still matches its source
+    and passes, and a shape fainter than a spread of 10 over a black source passes.
+  - A variable-rate source whose last picture lasts past the end of the fetch reads `could not
+    measure` for the frames under it.
+  - `audio-start` reads a gap inside the source's audio from its packets' durations, which an MP4
+    can state across the gap, and takes an Opus frame for 20 ms. The rows negotiate AAC from
+    sources whose audio has no gap.
 
 - ffmpeg 7.1, the image's, writes an empty sample dependency box (`sdtp`) into a fragmented
   stream's init segment for an encoder that marks pictures disposable (libx265's non-reference

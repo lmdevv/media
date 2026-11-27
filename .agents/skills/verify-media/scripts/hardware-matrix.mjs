@@ -1103,8 +1103,6 @@ export const CHECKS = {
       return ok("every segment starts on a keyframe");
     },
   },
-  // Each fetch's picture against the source shown at the same time: left alone, Quick Sync's
-  // filters on ffmpeg 7.1 hold a first picture for 41 to 512 frames, every timestamp in place.
   // Every frame of each fetch against the source's picture for its time: left alone, Quick Sync's
   // filters on ffmpeg 7.1 hold a first picture for 41 to 666 frames, every timestamp in place.
   "picture-time": {
