@@ -68,9 +68,9 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
   );
 
   // The core keeps downloads per device and refuses a session on none, so the engine starts only
-  // once the sign-in has put the session on this phone's device.
+  // once the core itself says the session is on this phone's device: a saved answer is not enough.
   const confirmed =
-    status === "signedIn" && me.status === "success" && me.data.device !== null
+    status === "signedIn" && me.status === "success" && me.saved !== true && me.data.device !== null
       ? me.data.userId
       : null;
 
@@ -153,6 +153,17 @@ export const useDownloads = (): Downloads => {
   );
 
   return { engine, snapshot };
+};
+
+/** Whether this phone holds a download ready to play for the person signed in here. */
+export const useHasDownloads = (): boolean => {
+  const engine = useContext(DownloadsContext);
+
+  return useSyncExternalStore(
+    engine?.subscribe ?? subscribeNothing,
+    () =>
+      engine?.getSnapshot().store.downloads.some((download) => download.phase === "ready") === true,
+  );
 };
 
 /** One download by its ID, with the engine that keeps it; null when there is no such download. */

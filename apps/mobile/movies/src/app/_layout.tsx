@@ -35,10 +35,17 @@ import { displayHost } from "@/lib/local-network";
 import { useSheetOptions } from "@/lib/sheet";
 import { useThemeColor } from "@/lib/theme-color";
 import { ConnectionProvider, useConnection, useServer } from "@/session/connection";
-import { DownloadsProvider, useOfflinePerson } from "@/session/downloads";
+import { DownloadsProvider, useHasDownloads, useOfflinePerson } from "@/session/downloads";
 import { OfflineContext } from "@/session/offline";
 import { FirstRunProvider, useFirstRun, useHomeAfterSetup } from "@/session/first-run";
 import { InviteLinks } from "@/session/invite-links";
+import {
+  isServersAnswer,
+  returnsHome,
+  waitsForServer,
+  waitsToOpenDownloads,
+} from "@/session/launch-offline";
+import type { Offline } from "@/session/launch-offline";
 import {
   PendingInviteProvider,
   useDropInviteWhenSignedIn,
@@ -212,6 +219,9 @@ function ErrorRoute() {
 
 const SLOW_LOAD_MS = 8000;
 
+/** How long a launch waits for the server before it opens on the downloads, as music does (D11). */
+const OFFLINE_AFTER_MS = 2500;
+
 const useSlowLoad = (loading: boolean): boolean => {
   const [slow, setSlow] = useState(false);
 
@@ -272,7 +282,7 @@ function ConnectionTrouble({
 /**
  * Opens Home's queries and the person's list and history as soon as the session is signed in, in
  * the same batch as `core.auth.sessions.current`, and keeps them open, so Home and the title
- * states find their answers when the stack mounts them after the session answers. Off while
+ * states find their answers, or the ones this phone saved, when the stack mounts them. Off while
  * signed out, while the owner sets up the server (the owner screens show then, not Home), and in
  * offline mode.
  */
@@ -290,19 +300,51 @@ function HeldLaunch({ offline }: { readonly offline: boolean }) {
   );
 }
 
+/** Whether the server has answered who is signed in, or that no one is, since the app opened. */
+const useHeardFromServer = (answered: boolean): boolean => {
+  const [heard, setHeard] = useState(answered);
+
+  if (answered && !heard) setHeard(true);
+
+  return heard || answered;
+};
+
 function ConnectedScreens({
   offline,
   onOffline,
 }: {
-  readonly offline: boolean;
-  readonly onOffline: (offline: boolean) => void;
+  readonly offline: Offline;
+  readonly onOffline: (offline: Offline) => void;
 }) {
   const phase = useLiveSessionPhase();
   const settled = useSettledPhase(phase);
   const offlinePerson = useOfflinePerson();
+  const waiting = waitsForServer(phase);
+
+  const launch = {
+    heard: useHeardFromServer(isServersAnswer(phase)),
+    waiting,
+    hasDownloads: useHasDownloads(),
+    onDownloadsList: useSegments()[0] === "offline",
+    offline,
+  };
+
+  const opensDownloads = waitsToOpenDownloads(launch);
+  const leavesDownloads = returnsHome(launch);
+
+  useEffect(() => {
+    if (!opensDownloads) return undefined;
+    const timer = setTimeout(() => onOffline("silent"), OFFLINE_AFTER_MS);
+
+    return () => clearTimeout(timer);
+  }, [opensDownloads, onOffline]);
+
+  useEffect(() => {
+    if (leavesDownloads) onOffline("no");
+  }, [leavesDownloads, onOffline]);
 
   useDropInviteWhenSignedIn(settled !== null && settled.kind !== "signedOut");
-  const slow = useSlowLoad(phase.kind === "loading");
+  const slow = useSlowLoad(waiting);
   const signedIn = settled?.kind === "ready" || settled?.kind === "setup" ? settled.me : null;
 
   const person = useMemo(
@@ -313,7 +355,7 @@ function ConnectedScreens({
   const offlineMode = useMemo(
     () => ({
       leave: () => {
-        onOffline(false);
+        onOffline("no");
 
         if (phase.kind === "unavailable") phase.retry();
       },
@@ -321,7 +363,7 @@ function ConnectedScreens({
     [onOffline, phase],
   );
 
-  if (offline && offlinePerson !== null) {
+  if (offline !== "no" && offlinePerson !== null) {
     return (
       <OfflineContext.Provider value={offlineMode}>
         <PersonContext.Provider value={offlinePerson}>
@@ -334,7 +376,7 @@ function ConnectedScreens({
     );
   }
 
-  const toDownloads = offlinePerson === null ? undefined : () => onOffline(true);
+  const toDownloads = offlinePerson === null ? undefined : () => onOffline("chosen");
   let trouble: ReactNode = null;
 
   if (phase.kind === "unavailable") {
@@ -345,7 +387,7 @@ function ConnectedScreens({
         onDownloads={toDownloads}
       />
     );
-  } else if (phase.kind === "loading" && slow) {
+  } else if (waiting && slow) {
     trouble = <ConnectionTrouble onDownloads={toDownloads} />;
   }
 
@@ -377,11 +419,11 @@ function ConnectedScreens({
 
 function ConnectedApp() {
   const offlinePerson = useOfflinePerson();
-  const [offline, setOffline] = useState(false);
+  const [offline, setOffline] = useState<Offline>("no");
 
   return (
     <>
-      <HeldLaunch offline={offline && offlinePerson !== null} />
+      <HeldLaunch offline={offline !== "no" && offlinePerson !== null} />
       <ConnectedScreens offline={offline} onOffline={setOffline} />
     </>
   );

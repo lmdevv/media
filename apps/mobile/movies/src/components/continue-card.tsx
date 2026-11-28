@@ -9,6 +9,7 @@ import { openTitle } from "@/lib/open-title";
 import { watchHref } from "@/lib/routes";
 import { useServer } from "@/session/connection";
 
+import { useSavedHome } from "./browse/held-home";
 import { useTitleMenu } from "./browse/title-menu";
 import { Icon } from "./ui/icon";
 import { IconButton } from "./ui/icon-button";
@@ -35,7 +36,13 @@ export function ContinueCard({ item }: { readonly item: ContinueWatchingItem }) 
   const label =
     item.episode === null ? item.title.name : `${item.title.name} · ${episodeCode(item.episode)}`;
 
-  const target = watchHref({ titleId: item.title.id, episodeId: item.episode?.id });
+  const saved = useSavedHome();
+
+  const target = watchHref({
+    titleId: item.title.id,
+    episodeId: saved ? undefined : item.episode?.id,
+  });
+
   const menu = useTitleMenu(item, target);
 
   // The card stays a plain button for VoiceOver: content inside a `Link.Trigger` loses its own

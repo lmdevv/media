@@ -25,7 +25,11 @@ export type SessionPhase =
   | { readonly kind: "createOwner" }
   /** The owner just created here sets up a first library before Home. */
   | { readonly kind: "setup"; readonly me: Me }
-  | { readonly kind: "ready"; readonly me: Me }
+  /**
+   * Signed in. `saved` while `me` is the answer this phone saved at an earlier launch, so the server
+   * has not yet said who is signed in.
+   */
+  | { readonly kind: "ready"; readonly me: Me; readonly saved: boolean }
   /** The server could not say who is signed in; `retry` asks again. */
   | { readonly kind: "unavailable"; readonly cause: unknown; readonly retry: () => void };
 
@@ -131,7 +135,9 @@ export const useLiveSessionPhase = (): SessionPhase => {
         : { kind: "unavailable", cause: me.error, retry: me.retry };
     }
 
-    return settingUp ? { kind: "setup", me: me.data } : { kind: "ready", me: me.data };
+    return settingUp
+      ? { kind: "setup", me: me.data }
+      : { kind: "ready", me: me.data, saved: me.saved === true };
   }, [status, launch, retryLaunch, info, settingUp, mediaUrl, signingIn, me]);
 };
 
