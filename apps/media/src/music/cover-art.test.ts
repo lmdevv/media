@@ -220,11 +220,11 @@ const serveArt = async (
 
 /**
  * A stand-in ffmpeg named `name` that logs each run, waits `seconds`, and then runs this test's
- * ffmpeg, or fails with `fails`; `runs` counts its runs so far.
+ * ffmpeg, or exits with `exit`, or is killed; `runs` counts its runs so far.
  */
 const countingFfmpeg = async (
   name: string,
-  options: { seconds?: number; fails?: boolean } = {},
+  options: { seconds?: number; exit?: number | "killed" } = {},
 ) => {
   const log = join(work, `${name}.log`);
   const script = join(work, `${name}.sh`);
@@ -234,7 +234,11 @@ const countingFfmpeg = async (
   await writeScript(script, [
     `echo run >> '${log}'`,
     options.seconds === undefined ? "" : `sleep ${String(options.seconds)}`,
-    options.fails === true ? "exit 1" : `exec '${real}' "$@"`,
+    options.exit === undefined
+      ? `exec '${real}' "$@"`
+      : options.exit === "killed"
+        ? "kill -9 $$"
+        : `exit ${String(options.exit)}`,
   ]);
 
   const runs = async () =>
@@ -376,6 +380,48 @@ const removeAfter = (real: FileSystem.FileSystem): FileSystem.FileSystem => ({
       ? Stream.unwrap(real.remove(path).pipe(Effect.ignore, Effect.as(real.stream(path, options))))
       : real.stream(path, options),
 });
+
+/**
+ * A stand-in that counts the stored covers the art route opens, which it does only to tell a
+ * cover's kind, and the most it holds open at once.
+ */
+const countingOpens = () => {
+  const counts = { opened: 0, open: 0, most: 0 };
+
+  const opening = Effect.acquireRelease(
+    Effect.sync(() => {
+      counts.opened += 1;
+      counts.open += 1;
+      counts.most = Math.max(counts.most, counts.open);
+    }),
+    () =>
+      Effect.sync(() => {
+        counts.open -= 1;
+      }),
+  );
+
+  const fileSystem = (real: FileSystem.FileSystem): FileSystem.FileSystem => ({
+    ...real,
+    open: (path, options) =>
+      isCopy(path) ? real.open(path, options) : Effect.andThen(opening, real.open(path, options)),
+  });
+
+  return { fileSystem, counts };
+};
+
+/** What the art route answers for `url`, and when its headers came, from `started`. */
+const fetchArt = async (url: string, original: Uint8Array, started: number) => {
+  const response = await fetch(url);
+  const answeredMs = performance.now() - started;
+  const bytes = new Uint8Array(await response.arrayBuffer());
+
+  return {
+    status: response.status,
+    cacheControl: response.headers.get("cache-control"),
+    isOriginal: Buffer.from(bytes).equals(Buffer.from(original)),
+    answeredMs,
+  };
+};
 
 beforeAll(async () => {
   work = await makeDirectory("cover-art");
@@ -778,20 +824,59 @@ describe("music cover art", { timeout: 120_000 }, () => {
     expect([second.status, second.isOriginal, await counting.runs()]).toEqual([200, true, 1]);
 
     // An ffmpeg that fails is run once too.
-    const failing = await countingFfmpeg("fails-once", { fails: true });
+    const failing = await countingFfmpeg("fails-once", { exit: 1 });
     const failingData = join(work, "fails-once-data");
     const failingServer = await startServer(failingData, { ffmpegPath: failing.path });
 
     const once = await serveArt(join(COVERS, "photo.jpg"), "144", failingServer, failingData);
     const again = await serveArt(join(COVERS, "photo.jpg"), "144", failingServer, failingData);
 
-    expect([once.status, once.isOriginal, again.status, again.isOriginal]).toEqual([
+    expect([once.status, once.isOriginal, once.cacheControl, again.isOriginal]).toEqual([
       200,
       true,
-      200,
+      "public, max-age=31536000, immutable",
       true,
     ]);
     expect(await failing.runs()).toBe(1);
+  });
+
+  it("decides nothing when a copy's run is killed, and runs it again on a later request", async () => {
+    const photo = join(COVERS, "photo.jpg");
+
+    // Killed, as by the kernel, and stopped by a signal ffmpeg catches, which it exits 255 for.
+    const stops = await Promise.all(
+      (["killed", 255] as const).map(async (exit) => {
+        const name = `stopped-${String(exit)}`;
+        const stopped = await countingFfmpeg(name, { exit });
+        const data = join(work, `${name}-data`);
+        const server = await startServer(data, { ffmpegPath: stopped.path });
+        const first = await serveArt(photo, "144", server, data);
+        const second = await serveArt(photo, "144", server, data);
+
+        return {
+          answers: [first, second].map(({ status, isOriginal, cacheControl }) => [
+            status,
+            isOriginal,
+            cacheControl,
+          ]),
+          runs: await stopped.runs(),
+          kept: await sizesIn(join(data, "artwork", "s144")),
+        };
+      }),
+    );
+
+    // Each request was served the stored cover, unkept, and ran the copy, and no decision or
+    // output was kept.
+    expect(stops).toEqual(
+      stops.map(() => ({
+        answers: [
+          [200, true, "no-store"],
+          [200, true, "no-store"],
+        ],
+        runs: 2,
+        kept: [],
+      })),
+    );
   });
 
   it("serves the stored cover, unkept, to first requests past 16 copies under way", async () => {
@@ -839,6 +924,99 @@ describe("music cover art", { timeout: 120_000 }, () => {
     expect(stored.length).toBe(served.length - bound);
     // A client asks again for a cover served as stored because copies were busy.
     expect(stored.map(({ cacheControl }) => cacheControl)).toEqual(stored.map(() => "no-store"));
+  });
+
+  it("tells a cover's kind under the bound on copies, and serves first requests past it at once", async () => {
+    // The bound is MAX_COVER_COPIES. Thirty covers whose kinds the server has not told: the fifth
+    // review's JPEG, each with its own comment, which took 15,478 reads to tell at 496adedc.
+    const bound = 16;
+    const counting = await countingFfmpeg("unknown-kinds", { seconds: 1 });
+    const opens = countingOpens();
+    const data = join(work, "unknown-kinds-data");
+
+    const server = await startServer(data, {
+      ffmpegPath: counting.path,
+      fileSystem: opens.fileSystem,
+    });
+
+    const fine = await run(Files.readWholeFile(join(COVERS, "fine-text.jpg")));
+
+    const covers = await Promise.all(
+      Array.from({ length: 30 }, async (_, index) => {
+        const original = withSegment(fine, 0xfe, Buffer.from(`cover ${String(index)}`, "latin1"));
+        const hash = await run(saveArt(data, original).pipe(Effect.map(Option.getOrThrow)));
+
+        return {
+          original,
+          url: `${server}/music/art/${hash}?ticket=${await artTicket(hash)}&w=144`,
+        };
+      }),
+    );
+
+    const first = performance.now();
+
+    const served = await Promise.all(
+      covers.map(({ original, url }) => fetchArt(url, original, first)),
+    );
+
+    const stored = served.filter(({ isOriginal }) => isOriginal);
+    const slowest = Math.max(...stored.map(({ answeredMs }) => answeredMs));
+
+    // Sixteen covers had their kinds told and copies made, never more at once. The rest read
+    // nothing but their first bytes and were served at once, unkept, while the copies, each
+    // taking over a second, were still being made.
+    expect(
+      {
+        statuses: served.map(({ status }) => status),
+        runs: await counting.runs(),
+        told: opens.counts.opened,
+        mostAtOnce: opens.counts.most <= bound,
+        stored: stored.map(({ cacheControl }) => cacheControl),
+        storedAtOnce: slowest < 1_000,
+      },
+      `the slowest stored cover was answered after ${String(Math.round(slowest))} ms`,
+    ).toEqual({
+      statuses: served.map(() => 200),
+      runs: bound,
+      told: bound,
+      mostAtOnce: true,
+      stored: Array.from({ length: 30 - bound }, () => "no-store"),
+      storedAtOnce: true,
+    });
+
+    // The same thirty again: the sixteen copies from disk, the other fourteen told and made now.
+    const again = performance.now();
+
+    const servedAgain = await Promise.all(
+      covers.map(({ original, url }) => fetchArt(url, original, again)),
+    );
+
+    expect(servedAgain.map(({ status, isOriginal }) => [status, isOriginal])).toEqual(
+      servedAgain.map(() => [200, false]),
+    );
+    expect([await counting.runs(), opens.counts.opened, opens.counts.most <= bound]).toEqual([
+      30,
+      30,
+      true,
+    ]);
+  });
+
+  it("tells a cover's kind once, for every size", async () => {
+    const opens = countingOpens();
+    const data = join(work, "kind-once-data");
+    const server = await startServer(data, { fileSystem: opens.fileSystem });
+
+    // A cover copied and a cover served as stored, each asked at three sizes at once.
+    const sized = await Promise.all(
+      ["photo.jpg", "cmyk.jpg"].flatMap((name) =>
+        ["144", "120", "96"].map((width) => serveArt(join(COVERS, name), width, server, data)),
+      ),
+    );
+
+    expect([sized.map(({ status }) => status), opens.counts.opened]).toEqual([
+      sized.map(() => 200),
+      2,
+    ]);
   });
 
   it("serves a chosen copy whole, or the stored cover, when the copy is removed meanwhile", async () => {

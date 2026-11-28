@@ -1,9 +1,9 @@
 import { join } from "node:path";
 
-import { Effect } from "effect";
+import { Duration, Effect } from "effect";
 import { beforeAll, describe, expect, it } from "vitest";
 
-import { coverKind } from "./cover-copy.ts";
+import { coverKind, MAX_COVER_BYTES, READ_BLOCK } from "./cover-copy.ts";
 import * as Files from "./music-files.ts";
 import {
   adobeSegment,
@@ -42,6 +42,7 @@ const NAMES = [
   "animated.webp",
   "alpha.webp",
   "exif-after-data.png",
+  "fine-text.jpg",
 ] as const;
 
 const fixtures = new Map<string, Uint8Array>();
@@ -185,4 +186,99 @@ describe("coverKind", () => {
 
     expect(changed.map(kindOf).filter((kind) => kind === "png-alpha")).toEqual([]);
   });
+});
+
+/** The kind of `bytes`, told as a file `size` bytes long, and each read made telling it. */
+const readsOf = async (bytes: Uint8Array, size = bytes.length) => {
+  const reads: Array<{ readonly offset: number; readonly asked: number; readonly got: number }> =
+    [];
+
+  const kind = await Effect.runPromise(
+    coverKind(size, (offset, length) =>
+      Effect.sync(() => {
+        const got = bytes.subarray(offset, offset + length);
+
+        reads.push({ offset, asked: length, got: got.length });
+
+        return got;
+      }),
+    ),
+  );
+
+  return { kind, reads };
+};
+
+const total = (values: ReadonlyArray<number>) => values.reduce((sum, value) => sum + value, 0);
+
+describe("telling a cover's kind", () => {
+  it("reads the fifth review's 667,016-byte JPEG once, in order, a block at a time", async () => {
+    const fine = cover("fine-text.jpg");
+    const { kind, reads } = await readsOf(fine);
+
+    expect([fine.length, kind]).toEqual([667_016, "jpeg"]);
+    expect({
+      reads: reads.length,
+      asked: total(reads.map(({ asked }) => asked)) <= fine.length + READ_BLOCK,
+      got: total(reads.map(({ got }) => got)),
+    }).toEqual({ reads: Math.ceil(fine.length / READ_BLOCK), asked: true, got: fine.length });
+  });
+
+  it("reads every cover forward, each byte at most once", async () => {
+    const told = await Promise.all(
+      NAMES.map(async (name) => ({ name, reads: (await readsOf(cover(name))).reads })),
+    );
+
+    const backward = told.flatMap(({ name, reads }) =>
+      reads
+        .filter((read, index) => {
+          const last = reads[index - 1];
+
+          return last !== undefined && read.offset < last.offset + last.got;
+        })
+        .map(() => name),
+    );
+
+    expect(backward).toEqual([]);
+    expect(
+      told
+        .filter(({ name, reads }) => total(reads.map(({ got }) => got)) > cover(name).length)
+        .map(({ name }) => name),
+    ).toEqual([]);
+  });
+
+  it("names a cover over 16 MiB unproven without reading it", async () => {
+    const { kind, reads } = await readsOf(photo, MAX_COVER_BYTES + 1);
+
+    expect([MAX_COVER_BYTES, kind, reads.length]).toEqual([16 * 1024 * 1024, "unproven", 0]);
+  });
+
+  it(
+    "names a cover undecided when telling its kind outlasts two seconds",
+    { timeout: 15_000 },
+    async () => {
+      const fine = cover("fine-text.jpg");
+      const started = performance.now();
+
+      const kinds = await Effect.runPromise(
+        Effect.all(
+          [
+            // A read that never answers, and reads that answer slowly.
+            coverKind(photo.length, () => Effect.never),
+            coverKind(fine.length, (offset, length) =>
+              Effect.sleep(Duration.millis(500)).pipe(
+                Effect.as(fine.subarray(offset, offset + length)),
+              ),
+            ),
+          ],
+          { concurrency: 2 },
+        ),
+      );
+
+      const elapsed = performance.now() - started;
+
+      expect(kinds).toEqual(["undecided", "undecided"]);
+      expect(elapsed).toBeGreaterThanOrEqual(1_900);
+      expect(elapsed).toBeLessThan(4_000);
+    },
+  );
 });

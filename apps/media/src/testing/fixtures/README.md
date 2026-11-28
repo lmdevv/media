@@ -47,6 +47,10 @@ CMS. `cover-art.test.ts` makes the other kinds from these at run time.
   `gray.icc` is `cmsCreateGrayProfile` with a D50 white point and `cmsBuildGamma(1.0)`, saved with
   `cmsSaveProfileToFile`.
 
+- `fine-text.jpg`: the fifth review's 667,016-byte 1600x1600 baseline 4:4:4 JPEG of fine text,
+  whose entropy-coded data holds thousands of stuffed `0xFF` bytes, so a cover's kind is told
+  reading it once.
+
 - `exif-after-data.png`: the fourth review's 800x400 RGB PNG with an `eXIf` orientation after its
   image data, which browsers ignore and ffmpeg 9.0 applies, so the art route serves it as stored.
 
