@@ -419,7 +419,7 @@ libass_says() {
     in_media sh -c 'cat >/tmp/fallback.ass && chmod a+r /tmp/fallback.ass && rm -f /tmp/frames.gray'
   draw() {
     in_media setpriv "${identity[@]}" --inh-caps=-all env -i "${environment[@]}" "$exe" \
-      -hide_banner -nostdin -v "$1" -f lavfi -i color=c=black:s=640x360:r=1:d=6 \
+      -hide_banner -nostdin -v "$1" -f lavfi -i color=c=black:s=640x360:r=1:d=8 \
       -vf subtitles=filename=/tmp/fallback.ass,format=gray -f rawvideo -y "$2" 2>&1
   }
   draw error /dev/null

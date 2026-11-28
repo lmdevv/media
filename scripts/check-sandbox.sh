@@ -145,7 +145,7 @@ cat >"$canary/libass.sh" <<'EOF'
 script="$1/fallback.ass"
 draw() {
   env -i PATH="$PATH" FONTCONFIG_FILE="$FONTCONFIG_FILE" ffmpeg -hide_banner -nostdin -v "$1" \
-    -f lavfi -i color=c=black:s=640x360:r=1:d=6 -vf "subtitles=filename=$script,format=gray" \
+    -f lavfi -i color=c=black:s=640x360:r=1:d=8 -vf "subtitles=filename=$script,format=gray" \
     -f rawvideo -y "$2" 2>&1
 }
 said="$(draw error /dev/null)" || { echo "$said"; exit 1; }

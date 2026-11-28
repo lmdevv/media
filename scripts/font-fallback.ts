@@ -5,8 +5,8 @@
 //
 //   node scripts/font-fallback.ts script               prints the script to draw
 //   node scripts/font-fallback.ts judge FRAMES LOG     judges the drawing: FRAMES is gray, 640x360,
-//                                                     a frame a second over black; LOG is ffmpeg's
-//                                                     output at `-v info`
+//                                                     a frame a second for 8 seconds over black;
+//                                                     LOG is ffmpeg's output at `-v info`
 import { readFileSync } from "node:fs";
 
 const WIDTH = 640;
@@ -23,7 +23,8 @@ interface Line {
 
 /**
  * A second each: DejaVu Sans, which both installs have, then Arial, which neither has, upright,
- * bold, and italic. Each Arial line must draw in DejaVu Sans's face at its size.
+ * bold, italic, and bold italic. Each line must draw in DejaVu Sans's own face for its weight and
+ * slant, not one libass slants or emboldens itself, and each Arial line at DejaVu Sans's size.
  */
 const LINES: ReadonlyArray<Line> = [
   { family: "DejaVu Sans", bold: false, italic: false, face: "DejaVuSans" },
@@ -32,6 +33,8 @@ const LINES: ReadonlyArray<Line> = [
   { family: "Arial", bold: true, italic: false, face: "DejaVuSans-Bold" },
   { family: "DejaVu Sans", bold: false, italic: true, face: "DejaVuSans-Oblique" },
   { family: "Arial", bold: false, italic: true, face: "DejaVuSans-Oblique" },
+  { family: "DejaVu Sans", bold: true, italic: true, face: "DejaVuSans-BoldOblique" },
+  { family: "Arial", bold: true, italic: true, face: "DejaVuSans-BoldOblique" },
 ];
 
 const nameOf = (line: Line): string =>
