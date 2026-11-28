@@ -147,11 +147,12 @@ export const missing = serverMutation({
 
 /**
  * Writes the probes of up to 500 files a scan found unchanged but probed again, as a newer reader
- * revision reads more: each file's probe and revision, and nothing else of it, as many as the
- * call's budget admits. It never matches a title, so a probe read again cannot move a file. A
- * file changed since the scan found it is skipped and counted done; the scan that reads it as
- * changed writes it. Answers how many it got through (`done`), how many it wrote, and the paths
- * whose probe could not fit beside the rest of their file (`unfit`), which keep their old probe.
+ * revision reads more: each file's probe, its revision, and the HDR flag the probe decides, and
+ * nothing else of it, as many as the call's budget admits. It never matches a title, so a probe
+ * read again cannot move a file. A file changed since the scan found it is skipped and counted
+ * done; the scan that reads it as changed writes it. Answers how many it got through (`done`), how
+ * many it wrote, and the paths whose probe could not fit beside the rest of their file (`unfit`),
+ * which keep their old probe.
  */
 export const reprobed = serverMutation({
   args: { lease, files: v.array(reprobedFile) },
