@@ -28,7 +28,6 @@ import {
   Op,
   type OutputCodec,
   type OutputTarget,
-  subtitleCanvas,
   type TextSubtitle,
   toneMapsTo,
 } from "./video-ops.ts";
@@ -356,7 +355,8 @@ const burnOf = (probe: MediaProbe, video: VideoStream, request: BurnRequest): Bu
                 depth: 8,
                 pixelFormat: "pal8",
                 scan: "progressive",
-                ...subtitleCanvas(subtitle.codec, video),
+                width: video.width,
+                height: video.height,
               },
             },
           });

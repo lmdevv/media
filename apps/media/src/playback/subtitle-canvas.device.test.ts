@@ -2,20 +2,12 @@ import { join } from "node:path";
 
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, layer } from "@effect/vitest";
-import { Duration, Effect, FileSystem, Layer, Result } from "effect";
+import { Effect, FileSystem, Layer } from "effect";
 
 import * as MediaTools from "../media/media-tools.ts";
+import { brightBox, burnedFrame, burnPlan } from "../testing/burn-in-runs.ts";
 import { qsvUsable, vaapiUsable } from "../testing/fixture-library.ts";
 import { testConfigLayer } from "../testing/test-config.ts";
-import { AudioPlan, VideoPlan } from "./playback-decision.ts";
-import { hlsCommand } from "./transcode-command.ts";
-import {
-  candidateKeys,
-  type DomainBinding,
-  planVideo,
-  type VideoIntent,
-} from "./video-pipeline.ts";
-import { type GpuDomain, Op, sdrTarget, type SourceVideo } from "./video-ops.ts";
 
 const hasQsv = await qsvUsable();
 
@@ -23,209 +15,228 @@ const hasVaapi = await vaapiUsable();
 
 const FIXTURES = join(import.meta.dirname, "..", "testing", "fixtures");
 
-/** A 3840x2160 H.264 picture, as each file carries it. */
-const SOURCE: SourceVideo = {
-  codec: "h264",
-  pixelFormat: "yuv420p",
-  depth: 8,
-  colour: "sdr",
-  scan: "progressive",
-  width: 3840,
-  height: 2160,
+const VOBSUB = join(FIXTURES, "vobsub.mkv");
+
+const UHD = { width: 3840, height: 2160 } as const;
+
+const HD = { width: 1280, height: 720 } as const;
+
+/** The GPU paths this machine has. */
+const domains = [...(hasQsv ? ["qsv" as const] : []), ...(hasVaapi ? ["vaapi" as const] : [])];
+
+/** Writes a film in `folder` from a lavfi `picture` and the subtitle `input` brings, as `name`. */
+const film = Effect.fn(function* (
+  folder: string,
+  name: string,
+  picture: string,
+  input: ReadonlyArray<string>,
+  codecs: ReadonlyArray<string>,
+) {
+  const tools = yield* MediaTools.Service;
+  const output = join(folder, name);
+
+  yield* tools.ffmpeg([
+    "-hide_banner",
+    "-nostdin",
+    "-v",
+    "error",
+    "-y",
+    "-f",
+    "lavfi",
+    "-i",
+    picture,
+    ...input,
+    "-map",
+    "0:v",
+    "-map",
+    "1:s",
+    "-c:v",
+    "libx264",
+    "-preset",
+    "ultrafast",
+    "-pix_fmt",
+    "yuv420p",
+    ...codecs,
+    output,
+  ]);
+
+  return output;
+});
+
+/** Asserts `box` is within `slack` samples of `expected` on every side. */
+const near = (
+  box: readonly [number, number, number, number] | undefined,
+  expected: readonly [number, number, number, number] | undefined,
+  name: string,
+  slack = 2,
+) => {
+  assert.isDefined(box, `${name}: nothing drawn`);
+  assert.isDefined(expected, `${name}: nothing to compare with`);
+
+  for (const [index, side] of ["left", "top", "right", "bottom"].entries()) {
+    assert.closeTo(box[index] ?? 0, expected[index] ?? 0, slack, `${name}: ${side}`);
+  }
 };
 
-/** The PGS tracks the files carry: a white bar on a 1920x1080 canvas, and the same on 1280x720. */
-const TRACKS = [
-  { canvas: "1080", sup: join(FIXTURES, "pgs-1080.sup") },
-  { canvas: "720", sup: join(FIXTURES, "pgs-720.sup") },
-] as const;
+/** How many samples of row `y` the bar's left edge, near `x`, spends between its gray and white. */
+const edgeWidth = (gray: Uint8Array, width: number, x: number, y: number): number => {
+  let soft = 0;
 
-const DEVICE = process.env["QSV_DEVICE"] ?? "/dev/dri/renderD128";
+  for (let column = x - 8; column <= x + 8; column += 1) {
+    const sample = gray[y * width + column] ?? 0;
 
-/** The plan for burning the file's PGS track (stream 1) into the 4K picture on `domain`. */
-const planOn = (domain: GpuDomain | "cpu") => {
-  const intent: VideoIntent = {
-    targets: [sdrTarget("h264")],
-    frameRate: undefined,
-    bounds: { width: 3840, height: 2160 },
-    cpuEncodeBounds: { width: 3840, height: 2160 },
-    maxBitrate: undefined,
-    burn: Op.BurnImage({
-      subtitle: {
-        input: 0,
-        stream: 1,
-        codec: "hdmv_pgs_subtitle",
-        frame: {
-          memory: "cpu",
-          device: undefined,
-          colour: "sdr",
-          depth: 8,
-          pixelFormat: "pal8",
-          scan: "progressive",
-          width: 1920,
-          height: 1080,
-        },
-      },
-    }),
-  };
-
-  const domains: ReadonlyArray<DomainBinding> =
-    domain === "cpu" ? [] : [{ domain, device: DEVICE }];
-
-  const keys = candidateKeys(SOURCE, intent, { domains, verified: new Set(), excluded: new Set() });
-
-  const planned = planVideo(SOURCE, intent, {
-    domains,
-    verified: new Set(keys.keys()),
-    excluded: new Set(),
-  });
-
-  if (Result.isFailure(planned)) throw new Error(JSON.stringify(planned.failure));
-
-  return VideoPlan.Encode({ intent, ...planned.success });
-};
-
-/** The box of bright samples in a 3840x2160 gray picture, or nothing when there are none. */
-const brightBox = (gray: Uint8Array) => {
-  let box: [number, number, number, number] | undefined;
-
-  for (let at = 0; at < gray.length; at += 1) {
-    if ((gray[at] ?? 0) > 200) {
-      const x = at % 3840;
-      const y = Math.floor(at / 3840);
-
-      box =
-        box === undefined
-          ? [x, y, x, y]
-          : [Math.min(box[0], x), Math.min(box[1], y), Math.max(box[2], x), Math.max(box[3], y)];
-    }
+    if (sample > 80 && sample < 240) soft += 1;
   }
 
-  return box;
+  return soft;
 };
 
-describe.runIf(hasQsv || hasVaapi)("PGS burned into a 4K picture on this machine's GPU", () => {
+describe.runIf(domains.length > 0)("image subtitles burned in on this machine's GPU", () => {
   layer(
     MediaTools.layer.pipe(
       Layer.provide(testConfigLayer({ FFMPEG_PATH: process.env["FFMPEG_PATH"] ?? "ffmpeg" })),
       Layer.provideMerge(NodeServices.layer),
     ),
-    { excludeTestServices: true, timeout: "300 seconds" },
+    { excludeTestServices: true, timeout: "600 seconds" },
   )((it) => {
     it.effect(
-      "draws a canvas ffmpeg learns only from its first packet where it belongs, on every path",
+      "draws a 4K PGS canvas ffmpeg learns only from its first packet where it belongs",
       () =>
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem;
-          const tools = yield* MediaTools.Service;
           const root = yield* fs.makeTempDirectoryScoped({ prefix: "media-pgs-4k-" });
 
-          const domains = [
-            ...(hasQsv ? ["qsv" as const] : []),
-            ...(hasVaapi ? ["vaapi" as const] : []),
-            "cpu" as const,
-          ];
-
-          for (const track of TRACKS) {
-            const film = join(root, `film-${track.canvas}.mkv`);
-
-            // Noise keeps the picture at 40 Mbit/s, so ffmpeg's probe reads about a second and the
-            // bar, from 6 s to 8 s, is past it: the canvas is unknown when the file opens. The
-            // noise never reaches the bar's white.
-            yield* tools.ffmpeg([
-              "-hide_banner",
-              "-nostdin",
-              "-v",
-              "error",
-              "-y",
-              "-f",
-              "lavfi",
-              "-i",
+          for (const sup of ["pgs-1080.sup", "pgs-720.sup"]) {
+            // Noise keeps the picture at 40 Mbit/s, so ffmpeg's probe reads about a second and
+            // the bar, from 6 s to 8 s, is past it. The noise never reaches the bar's white.
+            const late = yield* film(
+              root,
+              `${sup}.mkv`,
               "color=c=gray:s=3840x2160:r=24:d=9,noise=alls=30:allf=t",
-              "-itsoffset",
-              "6",
-              "-i",
-              track.sup,
-              "-map",
-              "0:v",
-              "-map",
-              "1:s",
-              "-c:v",
-              "libx264",
-              "-preset",
-              "ultrafast",
-              "-b:v",
-              "40M",
-              "-g",
-              "24",
-              "-pix_fmt",
-              "yuv420p",
-              "-c:s",
-              "copy",
-              film,
-            ]);
+              ["-itsoffset", "6", "-i", join(FIXTURES, sup)],
+              ["-b:v", "40M", "-g", "24", "-c:s", "copy"],
+            );
 
             for (const domain of domains) {
-              const name = `${domain}, ${track.canvas} canvas`;
-              const output = join(root, `${domain}-${track.canvas}`);
-
-              yield* fs.makeDirectory(output);
-
-              const run = hlsCommand({
-                input: film,
-                sourceStart: 0,
-                from: 0,
-                videoIndex: 0,
-                videoCodec: "h264",
-                video: planOn(domain),
-                audio: AudioPlan.None(),
-                audioCodec: "",
-                copiedAudioEnd: undefined,
-                segmentStarts: [0, 3, 6],
-                files: {},
-                previousStart: undefined,
-                outputDirectory: output,
-              });
-
-              const ran = yield* tools
-                .ffmpeg(run.args, { timeout: Duration.seconds(120) })
-                .pipe(Effect.result);
-
-              assert.isTrue(
-                Result.isSuccess(ran),
-                `${name}: ${Result.isFailure(ran) ? ran.failure.message : ""}`,
+              const gray = yield* burnedFrame(
+                late,
+                burnPlan(UHD, "hdmv_pgs_subtitle", 1, domain),
+                join(root, `${domain}-${sup}`),
+                7,
               );
 
-              const frame = join(output, "frame.gray");
+              // The canvas at the picture's height (2x), its bar's white at 984-2855, 1824-2015.
+              near(brightBox(gray, UHD.width), [984, 1824, 2855, 2015], `${domain}, ${sup}`, 6);
+            }
+          }
+        }).pipe(Effect.scoped),
+      600_000,
+    );
 
-              yield* tools.ffmpeg([
-                "-hide_banner",
-                "-nostdin",
-                "-v",
-                "error",
-                "-y",
-                "-i",
-                join(output, "ffmpeg.m3u8"),
-                "-vf",
-                "select=gte(t\\,7),format=gray",
-                "-frames:v",
-                "1",
-                "-f",
-                "rawvideo",
-                frame,
-              ]);
+    it.effect(
+      "draws a 3840x2160 PGS canvas over a 4K picture at its full detail",
+      () =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem;
+          const root = yield* fs.makeTempDirectoryScoped({ prefix: "media-pgs-uhd-" });
 
-              // The canvas scaled to the picture's height (2x), its bar's white at 984-2855 and
-              // 1824-2015, whichever size the canvas turned out to be.
-              const box = brightBox(yield* fs.readFile(frame));
+          const uhd = yield* film(
+            root,
+            "uhd.mkv",
+            "color=c=gray:s=3840x2160:r=24:d=4",
+            ["-itsoffset", "1", "-i", join(FIXTURES, "pgs-2160.sup")],
+            ["-c:s", "copy"],
+          );
 
-              assert.isDefined(box, `${name}: no bar`);
-              const [left, top, right, bottom] = box;
+          const cpu = yield* burnedFrame(
+            uhd,
+            burnPlan(UHD, "hdmv_pgs_subtitle", 1, "cpu"),
+            join(root, "cpu"),
+            2,
+          );
 
-              assert.closeTo(left, 984, 6, `${name}: left`);
-              assert.closeTo(top, 1824, 6, `${name}: top`);
-              assert.closeTo(right, 2855, 6, `${name}: right`);
-              assert.closeTo(bottom, 2015, 6, `${name}: bottom`);
+          for (const domain of domains) {
+            const gray = yield* burnedFrame(
+              uhd,
+              burnPlan(UHD, "hdmv_pgs_subtitle", 1, domain),
+              join(root, domain),
+              2,
+            );
+
+            near(brightBox(gray, UHD.width), brightBox(cpu, UHD.width), domain);
+            // Uploaded at its own size, not halved and scaled back up: its edge as sharp as the
+            // CPU's, which steps from the frame to the white in one sample where a canvas held at
+            // 1920x1080 and scaled up on the device ramps over four.
+            assert.isAtMost(
+              edgeWidth(gray, UHD.width, 984, 1920),
+              edgeWidth(cpu, UHD.width, 984, 1920) + 1,
+              `${domain}: the bar's edge`,
+            );
+          }
+        }).pipe(Effect.scoped),
+      300_000,
+    );
+
+    it.effect(
+      "draws DVB, XSUB, and DVD tracks where the CPU chain does, a DVB canvas changing mid-stream",
+      () =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem;
+          const root = yield* fs.makeTempDirectoryScoped({ prefix: "media-image-codecs-" });
+          const picture = "color=c=gray:s=1280x720:r=25:d=5";
+
+          // ffmpeg starts the DVB canvas at the picture's 1280x720 until the display definition
+          // says 1920x1080; XSUB's is stored, and DVD's stated.
+          const tracks = [
+            {
+              codec: "dvb_subtitle",
+              file: yield* film(
+                root,
+                "dvb.ts",
+                picture,
+                ["-itsoffset", "1", "-i", join(FIXTURES, "pgs-1080.sup")],
+                ["-c:s", "dvbsub"],
+              ),
+              at: 3.5,
+            },
+            {
+              codec: "xsub",
+              file: yield* film(
+                root,
+                "xsub.avi",
+                picture,
+                ["-canvas_size", "720x576", "-i", VOBSUB],
+                ["-c:s", "xsub"],
+              ),
+              at: 1,
+            },
+            {
+              codec: "dvd_subtitle",
+              file: yield* film(root, "dvd.mkv", picture, ["-i", VOBSUB], ["-c:s", "copy"]),
+              at: 1,
+            },
+          ];
+
+          for (const track of tracks) {
+            const cpu = brightBox(
+              yield* burnedFrame(
+                track.file,
+                burnPlan(HD, track.codec, 1, "cpu"),
+                join(root, `${track.codec}-cpu`),
+                track.at,
+              ),
+              HD.width,
+            );
+
+            for (const domain of domains) {
+              const gray = yield* burnedFrame(
+                track.file,
+                burnPlan(HD, track.codec, 1, domain),
+                join(root, `${track.codec}-${domain}`),
+                track.at,
+              );
+
+              near(brightBox(gray, HD.width), cpu, `${track.codec} on ${domain}`);
             }
           }
         }).pipe(Effect.scoped),

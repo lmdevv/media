@@ -36,6 +36,9 @@ import {
   surfaceFormat,
   transferOf,
   visibleCanvas,
+  type Size,
+  statedCanvas,
+  drawnCanvas,
 } from "./video-ops.ts";
 
 /** Codecs Intel media engines may decode; each codec and layout is still proven per device. */
@@ -302,20 +305,25 @@ const toneMapQsv: OpImpl<"ToneMap"> = {
 };
 
 /**
- * Where an overlay on a GPU puts the subtitle's canvas, uploaded at its own size, as expressions of
- * the picture's size (`main_w`) and the canvas's (`overlay_iw`): stretched over the picture, or,
- * cropped first to the columns the picture shows (`visibleCanvas`), scaled to the picture's height
- * and centred (`canvasFit`). On an Arc A380, under ffmpeg 7.1 and 9, Quick Sync's and VA-API's
- * scaling put each band edge of a 320x240 canvas over a 640x360 picture on the same column as the
- * CPU's `scale` and `overlay`.
+ * The size a GPU row uploads an image subtitle at: where it is drawn on the picture
+ * (`drawnCanvas`), so a 4K canvas over a 4K picture keeps its detail, except a DVD subtitle's stated
+ * 720x576 canvas (`statedCanvas`), which the overlay stretches itself: scaling it on the CPU would
+ * cost every frame and gain nothing.
+ */
+const uploadSize = (codec: string, picture: Size): Size =>
+  canvasFit(codec) === "stretch" ? (statedCanvas(codec) ?? picture) : drawnCanvas(codec, picture);
+
+/**
+ * Where an overlay on a GPU puts the uploaded subtitle (`uploadSize`): stretched over the picture
+ * (`main_w`), or at its own size, centred. On an Arc A380, under ffmpeg 7.1 and 9, Quick Sync's and
+ * VA-API's scaling put each band edge of a 320x240 canvas over a 640x360 picture on the same column
+ * as the CPU's `scale` and `overlay`.
  */
 const overlayPlace = (codec: string): ReadonlyArray<readonly [string, string]> =>
   canvasFit(codec) === "height"
     ? [
         ["x", "(main_w-overlay_w)/2"],
         ["y", "(main_h-overlay_h)/2"],
-        ["w", "overlay_iw*main_h/overlay_ih"],
-        ["h", "main_h"],
       ]
     : [
         ["w", "main_w"],
@@ -324,9 +332,9 @@ const overlayPlace = (codec: string): ReadonlyArray<readonly [string, string]> =
 
 /**
  * An image subtitle drawn on `domain`'s SDR NV12 surfaces by `overlay`, so the picture never leaves
- * the device: the subtitle's own frames, small and sparse, are decoded on the CPU into BGRA at the
- * canvas's size (`subtitleCanvas`, held there by a `scale` that passes them on untouched unless a
- * packet changed it), uploaded, and scaled and blended on the device. Both
+ * the device: the subtitle's own frames, small and sparse, are decoded on the CPU into BGRA,
+ * scaled to the size they are uploaded at (`uploadSize`), which a frame whose canvas changed
+ * mid-stream keeps, uploaded, and blended on the device. Both
  * overlays take BGRA with straight alpha per pixel, as ffmpeg hands image subtitles to filters:
  * under ffmpeg 7.1 and 9 on an Arc A380, a band of white at half opacity over gray came out halfway
  * between the two (193 for 191.5), and a premultiplied one gray. Between captions and before the
@@ -359,14 +367,15 @@ const burnImageOn = (
       : undefined,
   output: (_, frame) => frame,
   render: (op, frame) => {
+    const picture = { width: frame.width, height: frame.height };
+    const uploaded = uploadSize(op.subtitle.codec, picture);
+
     const side = {
       input: op.subtitle.input,
       stream: op.subtitle.stream,
       calls: [
-        filter("scale", String(op.subtitle.frame.width), String(op.subtitle.frame.height)),
-        ...(canvasFit(op.subtitle.codec) === "height"
-          ? visibleCanvas(op.subtitle.frame, frame.width, frame.height)
-          : []),
+        filter("scale", String(uploaded.width), String(uploaded.height)),
+        ...visibleCanvas(uploaded, picture),
         filter("format", "bgra"),
         filter("hwupload"),
       ],

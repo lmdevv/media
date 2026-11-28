@@ -17,7 +17,7 @@ import { AudioPlan, VideoPlan } from "./playback-decision.ts";
 import type { LogOwners } from "./transcode-recovery.ts";
 import { type VideoPipeline } from "./video-pipeline.ts";
 import { graphArgs, type RenderedVideo, renderVideo, type RunFiles } from "./video-render.ts";
-import { Op } from "./video-ops.ts";
+import { Op, type Size, statedCanvas } from "./video-ops.ts";
 
 /** Everything one ffmpeg run needs; built only from server-side state. */
 export interface HlsCommand {
@@ -283,6 +283,10 @@ const SUBTITLE_LEAD = 30;
  */
 const SUBTITLE_MARGIN = 1;
 
+/** `-canvas_size` for a canvas the service states (`statedCanvas`); other inputs stay as filed. */
+const canvasArgs = (canvas: Size | undefined): ReadonlyArray<string> =>
+  canvas === undefined ? [] : ["-canvas_size", `${String(canvas.width)}x${String(canvas.height)}`];
+
 const seekArgs = (seek: number | undefined): ReadonlyArray<string> =>
   seek === undefined ? [] : ["-ss", seconds(seek)];
 
@@ -293,12 +297,7 @@ const subtitleReading = (command: EncodeSource) => {
   const offset = command.from - command.sourceStart;
 
   return {
-    // The canvas the plan drew the subtitle on (`subtitleCanvas`), so ffmpeg does not size it to the
-    // picture until a packet says otherwise: DVD subtitles carry none at all.
-    canvas:
-      subtitle === undefined
-        ? []
-        : ["-canvas_size", `${String(subtitle.frame.width)}x${String(subtitle.frame.height)}`],
+    canvas: canvasArgs(subtitle === undefined ? undefined : statedCanvas(subtitle.codec)),
     seeked: burning && offset > 0.001,
     lead: offset - SUBTITLE_LEAD > 0.001 ? offset - SUBTITLE_LEAD : undefined,
   };

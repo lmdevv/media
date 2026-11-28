@@ -10,14 +10,7 @@ import {
   planVideo,
   type VideoIntent,
 } from "./video-pipeline.ts";
-import {
-  ImplId,
-  Op,
-  type OutputCodec,
-  sdrTarget,
-  type SourceVideo,
-  subtitleCanvas,
-} from "./video-ops.ts";
+import { ImplId, Op, type OutputCodec, sdrTarget, type SourceVideo } from "./video-ops.ts";
 
 const hlsCommandArgs = (command: HlsCommand): ReadonlyArray<string> => hlsCommand(command).args;
 
@@ -112,7 +105,8 @@ const encode = (domain: "qsv" | "vaapi" | "software", options: EncodeOptions) =>
                   depth: 8,
                   pixelFormat: "pal8",
                   scan: "progressive",
-                  ...subtitleCanvas(options.subtitleCodec ?? "hdmv_pgs_subtitle", source),
+                  width: source.width,
+                  height: source.height,
                 },
               },
             }),
@@ -141,19 +135,12 @@ const dvd = (from: number) =>
     video: encode("software", { burnSubtitle: 3, subtitleCodec: "dvd_subtitle" }),
   });
 
-/** Where a GPU overlay puts the visible part of a PGS canvas: at the picture's height, centred. */
-const BY_HEIGHT =
-  "x=(main_w-overlay_w)/2:y=(main_h-overlay_h)/2:w=overlay_iw*main_h/overlay_ih:h=main_h";
+/** Where a GPU overlay puts a PGS canvas uploaded at the size it is drawn at: centred. */
+const BY_HEIGHT = "x=(main_w-overlay_w)/2:y=(main_h-overlay_h)/2";
 
-/**
- * What a GPU row does on the CPU to a PGS canvas (1920x1080) over a `width` by `height` picture
- * before it uploads it: holds it at that size, and keeps the columns the picture shows.
- */
-const pgsOnGpu = (width: number, height: number) => {
-  const shown = Math.round((1080 * width) / height);
-
-  return `scale=1920:1080${shown < 1920 ? `,crop=${String(shown)}:1080` : ""},format=bgra,hwupload`;
-};
+/** What a GPU row does on the CPU to a PGS canvas before it uploads it: as the CPU row does. */
+const pgsOnGpu = (width: number, height: number) =>
+  `${pgsOnCpu(width, height)},format=bgra,hwupload`;
 
 /** What the CPU row does to a PGS canvas: scales it to the picture's height, then keeps its middle. */
 const pgsOnCpu = (width: number, height: number) => {
@@ -504,6 +491,26 @@ describe("hlsCommandArgs", () => {
       expect(graph("qsv")).toContain(`overlay_qsv=${BY_HEIGHT}:`);
       expect(graph("vaapi")).toContain(`[0:3]${pgsOnGpu(size.width, size.height)}[subtitle]`);
       expect(graph("vaapi")).toContain(`overlay_vaapi=${BY_HEIGHT}:`);
+    }
+  });
+
+  it("states no canvas for DVB or XSUB, and scales either to the picture before anything else", () => {
+    for (const subtitleCodec of ["dvb_subtitle", "xsub"]) {
+      const graph = (domain: "qsv" | "vaapi" | "software") => {
+        const args = hlsCommandArgs({
+          ...command(AudioPlan.Copy({ index: 1 }), "aac"),
+          video: encode(domain, { burnSubtitle: 3, subtitleCodec }),
+        });
+
+        expect(args, subtitleCodec).not.toContain("-canvas_size");
+
+        return after(args, "-filter_complex");
+      };
+
+      expect(graph("software")).toContain("[0:3]scale=1920:1080[subtitle]");
+      expect(graph("qsv")).toContain("[0:3]scale=1920:1080,format=bgra,hwupload[subtitle]");
+      expect(graph("qsv")).toContain("overlay_qsv=w=main_w:h=main_h:");
+      expect(graph("vaapi")).toContain("[0:3]scale=1920:1080,format=bgra,hwupload[subtitle]");
     }
   });
 

@@ -186,14 +186,17 @@ Old movies' Convex project, its SDK client, and its command registry were delete
   its sides cut where the picture is narrower (a 4:3 one). On a GPU the subtitle's frames are
   decoded on the CPU, uploaded at the canvas's size, and scaled and blended by the GPU's overlay,
   so the picture stays on the device; a device or build without the overlay draws it on the CPU
-  between a download and an upload. The service tells ffmpeg the canvas (720x576 for DVD and DVB,
-  1920x1080 for PGS, the picture's size otherwise), as ffmpeg sizes one it learns only from the
-  first subtitle packet to the picture until then, and every path scales the subtitle to it first,
-  since only `scale` takes a canvas that changes mid-run: Quick Sync's upload failed, and ffmpeg 9
-  aborted, where a 4K file's first PGS packet came after the probe. VA-API's overlay blends the
-  subtitle's black as full range over frames that name BT.709 primaries, so it blends over a
-  picture whose primaries are cleared, and a stream it draws on names none. After a seek the subtitle comes from a second reading of the file from 30 seconds
-  earlier, so a line already on screen is drawn. Choosing a text subtitle or none negotiates again
+  between a download and an upload. The service states a canvas to ffmpeg only where leaving it
+  unstated is the defect: 720x576 for DVD, which carries none, and 1920x1080 for PGS, whose canvas
+  ffmpeg learns only from the first packet and sizes to the picture until then; a DVB stream's
+  display definition and an XSUB stream's stored size stand, as a stated canvas drops every caption
+  outside it. Every path then scales the subtitle's frames, at whatever canvas ffmpeg makes them,
+  to a size the service chooses from the picture before anything else, since only `scale` takes a
+  canvas that changes mid-run: Quick Sync's upload failed, and ffmpeg 9 aborted, where a 4K file's
+  first PGS packet came after the probe. VA-API's overlay blends the subtitle's black as full range
+  over frames that name BT.709 primaries, so it blends over a picture whose primaries are cleared,
+  and a stream it draws on names none. After a seek the subtitle comes from a second reading of
+  the file from 30 seconds earlier, so a line already on screen is drawn. Choosing a text subtitle or none negotiates again
   without it, back to the cheaper mode.
 - A text track can be burned in the same way, by naming it in `burnInSubtitle` (embedded `e<n>` or
   sidecar `x<hash>`): libass draws it on the SDR frame at the output size, ASS and SSA with their

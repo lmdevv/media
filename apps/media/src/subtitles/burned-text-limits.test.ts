@@ -2,7 +2,7 @@ import { join } from "node:path";
 
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it, layer } from "@effect/vitest";
-import { Effect, FileSystem, Layer, Path } from "effect";
+import { Effect, Fiber, FileSystem, Layer, Path } from "effect";
 
 import * as DiskCache from "../disk-cache.ts";
 import * as MediaTools from "../media/media-tools.ts";
@@ -16,6 +16,7 @@ import {
   isAssScript,
   isFont,
   MAX_SCRIPT_BYTES,
+  readWithin,
   TextSource,
 } from "./burned-text.ts";
 
@@ -114,13 +115,59 @@ const film = Effect.fn(function* (folder: string, script: string) {
   return output;
 });
 
-/** How many of the logging stand-in's runs converted a track to ASS. */
-const conversions = Effect.gen(function* () {
-  const fs = yield* FileSystem.FileSystem;
-  const log = yield* fs.readFileString(invocationsOf(logging)).pipe(Effect.orElseSucceed(() => ""));
+/** How many of a logging stand-in's runs converted a track to ASS. */
+const conversionsOf = (ffmpeg: string) =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
 
-  return log.split("\n").filter((line) => line.includes('"pipe:1"') && line.includes('"ass"'))
-    .length;
+    const log = yield* fs
+      .readFileString(invocationsOf(ffmpeg))
+      .pipe(Effect.orElseSucceed(() => ""));
+
+    return log.split("\n").filter((line) => line.includes('"pipe:3"') && line.includes('"ass"'))
+      .length;
+  });
+
+const conversions = conversionsOf(logging);
+
+/** A stand-in whose first conversion of an embedded stream 1 fails half a second in. */
+const failsOnce = await writeFakeFfmpeg({
+  rules: [{ token: "-map 0:1 -c:s", runs: "any", delayMs: 500, exitCode: 1, limit: 1 }],
+  logInvocations: true,
+});
+
+/** A stand-in whose first conversion of an embedded stream 1 starts a second and a half late. */
+const startsLate = await writeFakeFfmpeg({
+  rules: [{ token: "-map 0:1 -c:s", runs: "any", delayMs: 1500, limit: 1 }],
+  logInvocations: true,
+});
+
+/** Pieces of `size` bytes, `count` of them, counting in `pulled` how many bytes were taken. */
+const pieces = (size: number, count: number, pulled: { bytes: number }) => ({
+  async *[Symbol.asyncIterator]() {
+    for (let index = 0; index < count; index += 1) {
+      pulled.bytes += size;
+
+      yield new Uint8Array(size).fill(0x21);
+    }
+  },
+});
+
+describe("reading a converted track", () => {
+  it("stops once the bytes read reach the bound, holding no more than it and one piece", async () => {
+    const pulled = { bytes: 0 };
+    const piece = 64 * 1024;
+
+    // A header four times the bound, as a script's [Fonts] section can be.
+    assert.isUndefined(
+      await readWithin(pieces(piece, (4 * MAX_SCRIPT_BYTES) / piece, pulled), MAX_SCRIPT_BYTES),
+    );
+    assert.isAtMost(pulled.bytes, MAX_SCRIPT_BYTES + piece);
+
+    const small = { bytes: 0 };
+
+    assert.lengthOf((await readWithin(pieces(10, 3, small), MAX_SCRIPT_BYTES)) ?? "", 30);
+  });
 });
 
 describe("an ASS script's start", () => {
@@ -248,6 +295,68 @@ describe.skipIf(!hasFfmpeg)("a burned-in text track's limits", () => {
         assert.isFalse(yield* isFont(folder, size), "a folder");
         assert.isFalse(yield* isFont(path.join(root, "4.font"), size), "missing");
       }).pipe(Effect.scoped),
+    );
+  });
+
+  layer(preparerLayer({ FFMPEG_PATH: failsOnce }), { excludeTestServices: true })((scoped) => {
+    scoped.effect(
+      "hands a conversion's failure to everyone waiting on it, and keeps none of it for the next",
+      () =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const root = yield* fs.makeTempDirectoryScoped({ prefix: "media-burn-" });
+          const output = yield* film(root, SCRIPT);
+          const preparer = yield* BurnedText.Service;
+          const source = sourceOf(output, TextSource.Embedded({ stream: 1 }));
+
+          const both = yield* Effect.all(
+            [
+              Effect.flip(preparer.prepare(source, path.join(root, "a"))),
+              Effect.flip(preparer.prepare(source, path.join(root, "b"))),
+            ],
+            { concurrency: "unbounded" },
+          );
+
+          assert.deepStrictEqual(
+            both.map((failure) => failure.reason),
+            ["unreadable", "unreadable"],
+          );
+          assert.strictEqual(yield* conversionsOf(failsOnce), 1, "one conversion, shared");
+
+          const next = yield* preparer.prepare(source, path.join(root, "c"));
+
+          assert.include(yield* fs.readFileString(next.subtitle ?? ""), "LAR");
+          assert.strictEqual(yield* conversionsOf(failsOnce), 2, "converted again");
+        }).pipe(Effect.scoped),
+      60_000,
+    );
+  });
+
+  layer(preparerLayer({ FFMPEG_PATH: startsLate }), { excludeTestServices: true })((scoped) => {
+    scoped.effect(
+      "keeps converting for a caller still waiting when another stops waiting",
+      () =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const root = yield* fs.makeTempDirectoryScoped({ prefix: "media-burn-" });
+          const output = yield* film(root, SCRIPT);
+          const preparer = yield* BurnedText.Service;
+          const source = sourceOf(output, TextSource.Embedded({ stream: 1 }));
+
+          const leaving = yield* Effect.forkChild(preparer.prepare(source, path.join(root, "a")));
+          const staying = yield* Effect.forkChild(preparer.prepare(source, path.join(root, "b")));
+
+          yield* Effect.sleep("300 millis");
+          yield* Fiber.interrupt(leaving);
+
+          const files = yield* Fiber.join(staying);
+
+          assert.include(yield* fs.readFileString(files.subtitle ?? ""), "LAR");
+          assert.strictEqual(yield* conversionsOf(startsLate), 1, "the one conversion finished");
+        }).pipe(Effect.scoped),
+      60_000,
     );
   });
 

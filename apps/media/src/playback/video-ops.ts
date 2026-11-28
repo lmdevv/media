@@ -409,39 +409,46 @@ export const DEINTERLACE_PROBES: ReadonlyArray<ProbeCase<"Deinterlace">> = [
 export const canvasFit = (codec: string): "stretch" | "height" =>
   codec === "hdmv_pgs_subtitle" ? "height" : "stretch";
 
-/**
- * The canvas an image subtitle of `codec` is drawn on over a `video`-sized source: 720x576 for DVD
- * and DVB, 1920x1080 for PGS (Blu-ray's, UHD discs too), and the picture's own size for the rest.
- * ffmpeg is told it (`-canvas_size`), as a canvas it learns only from the first subtitle packet
- * starts at the picture's size; and each row scales the subtitle's frames to it before anything
- * else, as a packet can still change it. ffmpeg passes such a frame on without rebuilding the
- * graph, and of the filters here only `scale` takes it: Quick Sync's upload fails on it ("Error
- * synchronizing the operation"), and under ffmpeg 9 VA-API's upload, `crop`, and `overlay` abort
- * or crash, where a 4K picture's canvas changed from 3840x2160 to 1920x1080 or 1280x720.
- */
-export const subtitleCanvas = (
-  codec: string,
-  video: { readonly width: number; readonly height: number },
-): { readonly width: number; readonly height: number } =>
-  codec === "dvd_subtitle" || codec === "dvb_subtitle"
-    ? { width: 720, height: 576 }
-    : codec === "hdmv_pgs_subtitle"
-      ? { width: 1920, height: 1080 }
-      : { width: video.width, height: video.height };
+/** A picture's or a canvas's size in pixels. */
+export interface Size {
+  readonly width: number;
+  readonly height: number;
+}
 
 /**
- * The columns of a `canvas` that a `width` by `height` picture shows once the canvas is scaled to
- * the picture's height: a `crop` of the middle ones where the canvas is the wider, else nothing.
+ * The canvas the service states to ffmpeg for an image subtitle of `codec` (`-canvas_size`), only
+ * where leaving it unstated is the defect: DVD subtitles carry none (720x576), and ffmpeg learns a
+ * PGS stream's only from its first packet, which a 4K file can hold past ffmpeg's probe, sizing it
+ * to the picture until then (1920x1080 is Blu-ray's, UHD discs too). Every other codec's input is
+ * left as the file has it: a DVB stream's display definition gives its canvas, which a stated one
+ * overrides, dropping every caption outside it, and an XSUB stream's is stored with it.
  */
-export const visibleCanvas = (
-  canvas: { readonly width: number; readonly height: number },
-  width: number,
-  height: number,
-): ReadonlyArray<FilterCall> => {
-  const shown = Math.round((canvas.height * width) / height);
+export const statedCanvas = (codec: string): Size | undefined => STATED_CANVASES.get(codec);
 
-  return shown < canvas.width ? [filter("crop", String(shown), String(canvas.height))] : [];
-};
+const STATED_CANVASES: ReadonlyMap<string, Size> = new Map([
+  ["dvd_subtitle", { width: 720, height: 576 }],
+  ["hdmv_pgs_subtitle", { width: 1920, height: 1080 }],
+]);
+
+/**
+ * Where on a `picture` an image subtitle of `codec` is drawn: over all of it when stretched, or for
+ * a canvas scaled to the picture's `height` (PGS, 16:9 as Blu-ray's are), the canvas at that height,
+ * centred, its middle cut to the picture's width where it is wider (`visibleCanvas`). Each row
+ * scales the subtitle's frames to a size it names before anything else, as ffmpeg passes a frame
+ * whose canvas changed mid-stream on without rebuilding the graph, and of the filters here only
+ * `scale` takes it: Quick Sync's upload fails on it ("Error synchronizing the operation"), and
+ * under ffmpeg 9 VA-API's upload, `crop`, and `overlay` abort or crash.
+ */
+export const drawnCanvas = (codec: string, picture: Size): Size =>
+  canvasFit(codec) === "height"
+    ? { width: Math.round((picture.height * 16) / 9), height: picture.height }
+    : picture;
+
+/** The middle columns of a `canvas` a `picture` of its height shows: a `crop` where it is wider. */
+export const visibleCanvas = (canvas: Size, picture: Size): ReadonlyArray<FilterCall> =>
+  canvas.width > picture.width
+    ? [filter("crop", String(picture.width), String(canvas.height))]
+    : [];
 
 /**
  * The image subtitle a probe of an overlay reads: a 320x240 canvas in BGRA, the layout an image

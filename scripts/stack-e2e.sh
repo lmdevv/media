@@ -357,6 +357,16 @@ outer="$(through_outer_proxy)"
 check "a trusted outer proxy's clients each get their own limit" \
   'grep -qx 429 <<<"$outer" && [[ "$(tail -n 1 <<<"$outer")" == 200 ]]'
 
+# libass draws as the service user in the environment the service gives its tools, and fontconfig,
+# whose cache the image built, has nothing to write or say.
+libass_says() {
+  in_media sh -c "printf '[Script Info]\nScriptType: v4.00+\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,LAR\n' >/tmp/line.ass && chmod a+r /tmp/line.ass"
+  in_media setpriv --reuid=media --regid=media --init-groups env -i PATH=/usr/local/bin:/usr/bin:/bin \
+    ffmpeg -hide_banner -nostdin -v error -f lavfi -i color=c=gray:s=320x240:d=1 \
+    -vf subtitles=filename=/tmp/line.ass -frames:v 1 -f null - 2>&1
+}
+check "the media user draws text with libass, and fontconfig says nothing" '[[ -z "$(libass_says)" ]]'
+
 if [[ "${QSV:-0}" == 1 ]]; then
   check "the media user encodes with Quick Sync in the container" \
     'in_media setpriv --reuid=media --regid=media --init-groups ffmpeg -hide_banner -nostdin \

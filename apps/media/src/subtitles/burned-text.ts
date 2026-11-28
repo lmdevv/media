@@ -265,23 +265,41 @@ const NAMESPACE = "burned-subtitles";
 
 const CACHE_MAX_AGE = Duration.days(3650);
 
-/** Why converting the track failed: it ran out of time, or ffmpeg could not read it. */
-const failed = (error: MediaTools.MediaToolFailed) =>
-  new BurnTextFailed({
-    reason: error.exitCode === null && error.signal === null ? "timed-out" : "unreadable",
+/**
+ * Why converting the track failed: it ran out of time, ffmpeg needed more than `MAX_ALLOCATION` in
+ * one block for it (a header past the bound), or ffmpeg could not read it.
+ */
+const failed = (error: MediaTools.MediaToolFailed) => {
+  if (error.exitCode === null && error.signal === null) {
+    return new BurnTextFailed({ reason: "timed-out" });
+  }
+
+  return new BurnTextFailed({
+    reason: error.stderr.includes("Cannot allocate memory") ? "too-large" : "unreadable",
   });
+};
 
 /**
- * ffmpeg's arguments that write `source`'s track as ASS to standard output, stopping once it
- * reaches `MAX_SCRIPT_BYTES`: copied from ASS and SSA, converted from plain text; an embedded
- * track keeps the file's timestamps (`-copyts`), and a sidecar's, counted from the file's first
- * frame, move there (`-itsoffset`).
+ * The most ffmpeg allocates in one block while it converts a track: twice `MAX_SCRIPT_BYTES`, as
+ * it doubles a buffer while it reads a script's header. A header past it fails to open, or reads
+ * as nothing, where a 100 MiB `[Fonts]` section held ffmpeg at 769 MiB (sidecar) and 872 MiB
+ * (Matroska) under ffmpeg 9.0.1, and 132 and 76 MiB with it.
+ */
+const MAX_ALLOCATION = 2 * MAX_SCRIPT_BYTES;
+
+/**
+ * ffmpeg's arguments that write `source`'s track as ASS to file descriptor 3 (`pipe:3`), which the
+ * service reads within `MAX_SCRIPT_BYTES` (`readWithin`): copied from ASS and SSA, converted from
+ * plain text; an embedded track keeps the file's timestamps (`-copyts`), and a sidecar's, counted
+ * from the file's first frame, move there (`-itsoffset`).
  */
 const assArgs = (source: BurnSource): ReadonlyArray<string> => [
   "-hide_banner",
   "-nostdin",
   "-v",
   "error",
+  "-max_alloc",
+  String(MAX_ALLOCATION),
   ...TextSource.$match(source.text, {
     Embedded: ({ stream }) => ["-copyts", "-i", source.file.path, "-map", `0:${String(stream)}`],
     Sidecar: ({ path: sidecar }) => [
@@ -296,12 +314,32 @@ const assArgs = (source: BurnSource): ReadonlyArray<string> => [
   }),
   "-c:s",
   source.style === "styled" ? "copy" : "ass",
-  "-fs",
-  String(MAX_SCRIPT_BYTES),
   "-f",
   "ass",
-  "pipe:1",
+  "pipe:3",
 ];
+
+/**
+ * The text `output` carries, read only while it stays under `limit` bytes: undefined once the
+ * bytes read reach it, when the reading stops and the pipe closes, so no more than `limit` and one
+ * piece of it are ever held.
+ */
+export const readWithin = async (
+  output: AsyncIterable<Uint8Array>,
+  limit: number,
+): Promise<string | undefined> => {
+  const pieces: Array<Uint8Array> = [];
+  let read = 0;
+
+  for await (const piece of output) {
+    read += piece.length;
+
+    if (read >= limit) return undefined;
+    pieces.push(piece);
+  }
+
+  return Buffer.concat(pieces).toString("utf8");
+};
 
 /**
  * An embedded track to convert, equal to any other with the same cache key (the file's version,
@@ -334,12 +372,35 @@ const make = Effect.gen(function* () {
 
   const conversions = yield* Semaphore.make(MAX_CONVERSIONS);
 
-  /** `source`'s track converted to ASS, one of `MAX_CONVERSIONS` at a time. */
+  /**
+   * `source`'s track converted to ASS, one of `MAX_CONVERSIONS` at a time, read within the bound
+   * as ffmpeg writes it; a track that reaches it stops ffmpeg, which leaving the scope kills.
+   */
   const convert = (source: BurnSource) =>
     conversions.withPermits(1)(
-      tools
-        .ffmpeg(assArgs(source), { timeout: config.fileScanTimeout })
-        .pipe(Effect.mapError(failed), Effect.flatMap(script)),
+      Effect.scoped(
+        Effect.gen(function* () {
+          const running = yield* tools
+            .startFfmpegPiped(assArgs(source))
+            .pipe(Effect.mapError(failed));
+
+          const text = yield* Effect.tryPromise({
+            try: () => readWithin(running.output, MAX_SCRIPT_BYTES),
+            catch: () => new BurnTextFailed({ reason: "unreadable" }),
+          });
+
+          if (text === undefined) return yield* new BurnTextFailed({ reason: "too-large" });
+
+          yield* running.exit.pipe(Effect.mapError(failed));
+
+          return yield* script(text);
+        }),
+      ).pipe(
+        Effect.timeoutOrElse({
+          duration: config.fileScanTimeout,
+          orElse: () => Effect.fail(new BurnTextFailed({ reason: "timed-out" })),
+        }),
+      ),
     );
 
   /**

@@ -122,6 +122,7 @@ import { spawnSync } from "node:child_process";
 import {
   appendFileSync,
   existsSync,
+  fstatSync,
   mkdtempSync,
   readFileSync,
   renameSync,
@@ -343,7 +344,17 @@ if (stalls || failsAfterFirst || failsPartway !== undefined) {
     if (behavior.hlsStallsUntilCue === true && existsSync(cue)) process.exit(1);
   }, behavior.hlsStallsUntilCue === true ? 50 : 60_000);
 } else {
-  const result = run(args, { stdio: "inherit" });
+  // A run the service reads from file descriptor 3 (\`pipe:3\`) hands it on to the real tool.
+  const piped = (() => {
+    try {
+      fstatSync(3);
+
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+  const result = run(args, { stdio: piped ? ["inherit", "inherit", "inherit", 3] : "inherit" });
   const readback = args.at(-1) ?? "";
 
   if (
