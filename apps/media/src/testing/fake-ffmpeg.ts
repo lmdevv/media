@@ -154,10 +154,14 @@ let args = asked;
 const hls = args.includes("hls");
 const probe = args.includes("-progress") && (args.includes("null") || args.includes("rawvideo"));
 
-// A run that opens a Vulkan device names the one it picked, as ffmpeg does at the verbose level.
+// A run that opens a Vulkan device names the one it picked, as ffmpeg does at the verbose level,
+// after the 4 KiB or so ffmpeg 7.1 logs opening VA-API, Quick Sync, and Vulkan's layers first.
 if (asked.some((arg, index) => asked[index - 1] === "-init_hw_device" && arg.startsWith("vulkan="))) {
   process.stderr.write(
-    "[Vulkan @ 0x1] Device 0 selected: " + (behavior.vulkanDevice ?? "Stand-in GPU (discrete)") + " (0x1)\\n",
+    "[AVHWDeviceContext @ 0x1] Using instance extension VK_KHR_portability_enumeration\\n".repeat(64) +
+      "[AVHWDeviceContext @ 0x1] Device 0 selected: " +
+      (behavior.vulkanDevice ?? "Stand-in GPU (discrete)") +
+      " (0x1)\\n",
   );
 }
 
