@@ -152,7 +152,7 @@ function ConnectedApp() {
         <View className="flex-1 bg-canvas" />
       ) : (
         <SessionPhaseContext value={phase}>
-          <ServerReachProvider phase={phase.kind}>
+          <ServerReachProvider phase={phase.kind} saved={phase.kind === "ready" && phase.saved}>
             <HideSplash
               landing={phase.kind === "ready" || phase.kind === "offline" ? "home" : "elsewhere"}
             />

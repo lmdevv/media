@@ -27,8 +27,11 @@ export type SessionPhase =
   | { readonly kind: "needsLibrary"; readonly me: Me }
   /** The first scan of the library added here is on screen (E06). */
   | { readonly kind: "scanning"; readonly me: Me }
-  /** Signed in with music to browse. */
-  | { readonly kind: "ready"; readonly me: Me };
+  /**
+   * Signed in with music to browse. `saved` while what the server said rests on the answers this
+   * phone saved at an earlier launch, so the server has not answered yet.
+   */
+  | { readonly kind: "ready"; readonly me: Me; readonly saved: boolean };
 
 /**
  * This install's own steps through a new server's setup, which the server can't tell apart from
@@ -65,6 +68,8 @@ export interface PhaseInputs {
   readonly signingIn: boolean;
   readonly hasOwner: boolean | undefined;
   readonly me: Me | Error | undefined;
+  /** Whether `hasOwner` or `me` is an answer this phone saved at an earlier launch. */
+  readonly saved: boolean;
   /** Whether `me`'s failure is the core refusing the session, which the SDK settles itself. */
   readonly refused: boolean;
   /** Who this app last signed in as on this server. */
@@ -84,6 +89,9 @@ const waiting = (inputs: PhaseInputs): SessionPhase => {
  */
 export const sessionPhase = (inputs: PhaseInputs): SessionPhase => {
   if (!inputs.connected) return { kind: "disconnected" };
+
+  // Saved answers stand in only while the server may still answer.
+  if (inputs.saved && inputs.silent) return waiting(inputs);
 
   if (inputs.hasOwner === undefined || inputs.auth === "loading") return waiting(inputs);
 
@@ -109,7 +117,9 @@ export const sessionPhase = (inputs: PhaseInputs): SessionPhase => {
 
   const { progress } = inputs;
 
-  if (progress === "none" || progress === "creatingOwner") return { kind: "ready", me };
+  if (progress === "none" || progress === "creatingOwner") {
+    return { kind: "ready", me, saved: inputs.saved };
+  }
 
   return progress === "addingLibrary" ? { kind: "needsLibrary", me } : { kind: "scanning", me };
 };
@@ -120,16 +130,21 @@ export type SettledPhase = Exclude<SessionPhase, { readonly kind: "connecting" }
 const isSilent = (phase: SessionPhase): boolean =>
   phase.kind === "unreachable" || phase.kind === "offline";
 
+/** Whether `phase` shows what the server said, not what this phone saved. */
+const heardFromServer = (phase: SettledPhase): boolean =>
+  phase.kind !== "disconnected" && !isSilent(phase) && !(phase.kind === "ready" && phase.saved);
+
 /**
  * `next` when it has screens, else the phase already on screen. A reconnect or a token refresh
  * then keeps the screens, and their navigation, in place instead of falling back to the splash,
  * and losing the server after it answered stays on screen too (G04 reconnects in place); only a
- * server that never answered this launch shows as unreachable, or as offline with downloads.
+ * server that never answered this launch shows as unreachable, or as offline with downloads, even
+ * over a saved Home.
  */
 export const settle = (next: SessionPhase, shown: SettledPhase | null): SettledPhase | null => {
   if (next.kind === "connecting") return shown;
 
-  const answered = shown !== null && shown.kind !== "disconnected" && !isSilent(shown);
+  const answered = shown !== null && heardFromServer(shown);
 
   const offline = shown?.kind === "offline" && next.kind === "unreachable";
 
@@ -141,5 +156,8 @@ export const sameScreens = (next: SettledPhase, shown: SettledPhase | null): boo
 
   if (!("me" in next) || !("me" in shown)) return true;
 
-  return next.me.userId === shown.me.userId;
+  return (
+    next.me.userId === shown.me.userId &&
+    (next.kind !== "ready" || shown.kind !== "ready" || next.saved === shown.saved)
+  );
 };

@@ -63,19 +63,41 @@ export const useRead = <Args, Result>(
 };
 
 /**
+ * Like `useRead`, with whether the result is an answer this phone saved at an earlier launch,
+ * which shows until the server answers.
+ */
+export const useReadAnswer = <Args, Result>(
+  query: Query<Args, Result>,
+  args: Args | "skip",
+): { readonly data: Result | undefined; readonly saved: boolean } => {
+  const state = useQueryState(query, args);
+
+  if (state.status === "error") throw asError(state.error);
+
+  return state.status === "success"
+    ? { data: state.data, saved: state.saved === true }
+    : { data: undefined, saved: false };
+};
+
+/** A query's result, its failure as an `Error`, or `undefined` while it loads. */
+export const settledOf = <Result>(state: QueryState<Result>): Result | Error | undefined => {
+  if (state.status === "error") return asError(state.error);
+
+  return state.status === "success" ? state.data : undefined;
+};
+
+/** Whether `state` is an answer this phone saved at an earlier launch, not the server's. */
+export const isSaved = <Result>(state: QueryState<Result>): boolean =>
+  state.status === "success" && state.saved === true;
+
+/**
  * Like `useRead`, but a failure comes back as an `Error` instead of being thrown. For hooks above
  * every error boundary, such as the session phase, and for screens that show a failure in place.
  */
 export const useReadSettled = <Args, Result>(
   query: Query<Args, Result>,
   args: Args | "skip",
-): Result | Error | undefined => {
-  const state = useQueryState(query, args);
-
-  if (state.status === "error") return asError(state.error);
-
-  return state.status === "success" ? state.data : undefined;
-};
+): Result | Error | undefined => settledOf(useQueryState(query, args));
 
 export const useMusic = (): PlatformSdk["music"] => usePlatform().music;
 

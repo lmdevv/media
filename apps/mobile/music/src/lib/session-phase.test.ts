@@ -30,6 +30,7 @@ const signedIn: PhaseInputs = {
   signingIn: false,
   hasOwner: true,
   me: aiko,
+  saved: false,
   refused: false,
   person: { userId: aiko.userId, username: "aiko" },
   progress: "none",
@@ -104,9 +105,25 @@ describe("sessionPhase", () => {
       sessionPhase({ ...signedIn, progress: { kind: "followingScan", libraryId: "music" } }).kind,
     ).toBe("scanning");
   });
+
+  it("shows Home from saved answers until the server's silence runs out", () => {
+    const saved = { ...signedIn, saved: true };
+
+    expect(sessionPhase(saved)).toEqual({ kind: "ready", me: aiko, saved: true });
+    expect(sessionPhase({ ...saved, silent: true }).kind).toBe("unreachable");
+    expect(sessionPhase({ ...saved, silent: true, hasDownloads: true }).kind).toBe("offline");
+  });
+
+  it("lets a sign-out win over saved answers", () => {
+    expect(sessionPhase({ ...signedIn, saved: true, auth: "signedOut", me: undefined }).kind).toBe(
+      "signedOut",
+    );
+  });
 });
 
-const ready: SettledPhase = { kind: "ready", me: aiko };
+const ready: SettledPhase = { kind: "ready", me: aiko, saved: false };
+
+const savedReady: SettledPhase = { kind: "ready", me: aiko, saved: true };
 
 describe("settle", () => {
   it("keeps the screens on show while the server is heard from again", () => {
@@ -135,6 +152,12 @@ describe("settle", () => {
     expect(settle({ kind: "unreachable" }, offline)).toBe(offline);
   });
 
+  it("leaves a saved Home for the downloads or G05 when the server never answers", () => {
+    expect(settle({ kind: "offline" }, savedReady)).toEqual({ kind: "offline" });
+    expect(settle({ kind: "unreachable" }, savedReady)).toEqual({ kind: "unreachable" });
+    expect(settle({ kind: "connecting" }, savedReady)).toBe(savedReady);
+  });
+
   it("keeps the downloads on show while the server is heard from, then leaves for its phase", () => {
     const offline: SettledPhase = { kind: "offline" };
 
@@ -145,11 +168,21 @@ describe("settle", () => {
 
 describe("sameScreens", () => {
   it("is the same kind for the same person", () => {
-    expect(sameScreens({ kind: "ready", me: { ...aiko, displayName: "Aiko" } }, ready)).toBe(true);
-    expect(sameScreens({ kind: "ready", me: { ...aiko, userId: asUserId("mateo") } }, ready)).toBe(
-      false,
-    );
+    expect(
+      sameScreens({ kind: "ready", me: { ...aiko, displayName: "Aiko" }, saved: false }, ready),
+    ).toBe(true);
+    expect(
+      sameScreens(
+        { kind: "ready", me: { ...aiko, userId: asUserId("mateo") }, saved: false },
+        ready,
+      ),
+    ).toBe(false);
     expect(sameScreens({ kind: "offline" }, ready)).toBe(false);
     expect(sameScreens({ kind: "offline" }, null)).toBe(false);
+  });
+
+  it("takes the server's answer in place of a saved one, so its silence later keeps Home", () => {
+    expect(sameScreens(ready, savedReady)).toBe(false);
+    expect(settle({ kind: "unreachable" }, ready)).toBe(ready);
   });
 });

@@ -1,4 +1,5 @@
 import { sessionKeyFor } from "@media/mobile-core/records";
+import { savedAnswers } from "@media/mobile-core/saved-answers";
 import { readHealth } from "@media/mobile-core/server";
 import type { Health, ServerConnection } from "@media/mobile-core/server";
 import { followServer } from "@media/mobile-core/server-release";
@@ -7,10 +8,12 @@ import { signInUrlFor } from "@media/sdk/promise";
 import { PlatformProvider } from "@media/sdk/react";
 import { Option } from "effect";
 import Constants from "expo-constants";
+import { File, Paths } from "expo-file-system";
 import { createContext, use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { appKeychains } from "@/lib/keychains";
+import { SAVED_QUERIES } from "@/lib/saved-queries";
 import { DEVICE_FAMILY } from "@/lib/this-device";
 import { launchDoubt, releaseReread } from "@/session/media-requests";
 import type { LaunchDoubt } from "@/session/media-requests";
@@ -76,7 +79,8 @@ export const useServerHealth = (): ServerHealth => {
 /**
  * The platform client for `connection`, provided to everything below. Its session lives in this
  * app's own keychain group (D48), and every sign-in goes through the media server's sign-in boundary.
- * It also follows the server's release, so an answer this app can't read asks to update it.
+ * It saves Home's answers for the next launch to show at once. It also follows the server's
+ * release, so an answer this app can't read asks to update it.
  */
 export function SdkProvider({
   connection,
@@ -89,12 +93,26 @@ export function SdkProvider({
   const read = useServerRelease(connection.mediaUrl, launch);
   const health = useMemo(() => ({ read, launch }), [read, launch]);
 
+  // Held for the provider's life, which its `key` ties to the server and attempt: a new object
+  // opens a new client. None when another person took the phone in the movies app since this app
+  // last signed in (`savedAnswers`).
+  const [saved] = useState(() =>
+    savedAnswers({
+      cacheFile: (name) => new File(Paths.cache, name),
+      convexUrl: connection.convexUrl,
+      release: THIS_APP.version ?? "unknown",
+      queries: SAVED_QUERIES,
+      here: { ...appKeychains(), server: connection.mediaUrl },
+    }),
+  );
+
   return (
     <PlatformProvider
       url={connection.convexUrl}
       signInUrl={signInUrlFor(connection.mediaUrl)}
       storage={appKeychains().sessions}
       storageKey={sessionKeyFor(connection.mediaUrl)}
+      saved={saved}
     >
       <ServerHealthContext value={health}>{children}</ServerHealthContext>
     </PlatformProvider>
