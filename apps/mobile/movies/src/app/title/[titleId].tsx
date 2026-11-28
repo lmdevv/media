@@ -269,9 +269,20 @@ function TitleLoader({ titleId }: { readonly titleId: TitleId }) {
   const title = usePlatformQuery(platform.movies.titles.get, { titleId });
 
   useOpeningEpisodes(titleId);
+  // The answer joins a frame after the page first draws, so the commit that starts the push holds
+  // only what the card draws.
+  const [pastFirstFrame, setPastFirstFrame] = useState(false);
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setPastFirstFrame(true));
+
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
+  const answered = title.status === "success" && pastFirstFrame;
   // The open's content is the title's answer, not the card drawn before it: the mark renders with
   // the answer, so "content ready" is the first refresh after the answer was committed.
-  const openMark = useScreenOpenMark("title", titleId, title.status === "success");
+  const openMark = useScreenOpenMark("title", titleId, answered);
 
   if (title.status === "error") {
     const missing = isFailure(title.error, "NotFound");
@@ -292,7 +303,7 @@ function TitleLoader({ titleId }: { readonly titleId: TitleId }) {
     );
   }
 
-  if (title.status === "success" && !title.data.available) {
+  if (answered && !title.data.available) {
     return (
       <>
         <FileUnavailable title={title.data} />
@@ -307,7 +318,7 @@ function TitleLoader({ titleId }: { readonly titleId: TitleId }) {
         titleId={titleId}
         // A title whose files are missing gets another page, which a card can't draw.
         card={handed?.available === true ? handed : null}
-        detail={title.status === "success" ? title.data : null}
+        detail={answered ? title.data : null}
       />
       {openMark}
     </>
