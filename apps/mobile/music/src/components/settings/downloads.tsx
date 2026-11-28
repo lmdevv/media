@@ -8,6 +8,7 @@ import { Notice } from "@/components/ui/notice";
 import { Page } from "@/components/ui/page";
 import { Row, RowCheck } from "@/components/ui/row";
 import { SectionHeader } from "@/components/ui/section-header";
+import { Switch } from "@/components/ui/switch";
 import { Text } from "@/components/ui/text";
 import { useDownloadSettings } from "@/downloads";
 import type { DownloadQuality } from "@/downloads";
@@ -24,9 +25,9 @@ const QUALITIES = [
   readonly detail: string;
 }>;
 
-/** Quality, storage, and removing everything. A choice applies as it is made. */
+/** Wi-Fi only, quality, storage, and removing everything. A choice applies as it is made. */
 export function DownloadSettings() {
-  const { quality, setQuality, usage, downloads } = useDownloadSettings();
+  const { quality, setQuality, wifiOnly, setWifiOnly, usage, downloads } = useDownloadSettings();
   const empty = downloads === 0 && usage.tracks === 0;
 
   return (
@@ -35,6 +36,15 @@ export function DownloadSettings() {
       bottom="plain"
       trailing={<IconButton icon={Check} label="Done" onPress={() => router.back()} />}
     >
+      <View className="min-h-ios-72 flex-row items-center gap-4 border-b border-border py-3">
+        <View className="flex-1 gap-1">
+          <Text variant="bodyMedium">Wi-Fi only</Text>
+          <Text variant="secondary" tone="muted">
+            Downloads wait on mobile data and hotspots.
+          </Text>
+        </View>
+        <Switch label="Wi-Fi only" value={wifiOnly} onValueChange={setWifiOnly} />
+      </View>
       <SectionHeader title="Download quality" />
       <View accessibilityRole="radiogroup" accessibilityLabel="Download quality">
         {QUALITIES.map((option) => (

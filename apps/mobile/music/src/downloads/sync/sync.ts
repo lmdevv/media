@@ -34,6 +34,8 @@ import type {
   StoredMember,
   SyncPolicy,
 } from "./plan";
+import { transferGate } from "./transfer-gate";
+import type { StartedBy, TransferConditions } from "./transfer-gate";
 import { applyChange, artFile, audioFile, emptyVault, VaultChange } from "./vault";
 import type { VaultRows, VaultStore } from "./vault";
 
@@ -95,6 +97,8 @@ export interface DownloadsSnapshot {
   readonly online: boolean;
   /** Free space ran low, so fetching waits. */
   readonly lowSpace: boolean;
+  /** Wi-Fi only holds every transfer: the phone is on mobile data, a hotspot, or Low Data Mode. */
+  readonly waitingForWifi: boolean;
   /** Downloads in the server's order (the vault's before it answers), less those being removed. */
   readonly pins: ReadonlyArray<PinView>;
   /** Every song this device holds or is getting. */
@@ -176,6 +180,7 @@ export const EMPTY_DOWNLOADS: DownloadsSnapshot = {
   ready: false,
   online: false,
   lowSpace: false,
+  waitingForWifi: false,
   pins: [],
   tracks: new Map(),
   copies: new Map(),
@@ -232,7 +237,11 @@ export class DownloadSync {
   #stopped = false;
   #online = false;
   #lowSpace = false;
-  #lowPower = false;
+  /**
+   * What starting a transfer depends on besides the server (`transferGate`). A sync no one told
+   * otherwise transfers on any network; the app sets them before `start`.
+   */
+  #conditions: TransferConditions = { metered: false, wifiOnly: false, lowPower: false };
   /** The downloads the person started while Low Power Mode is on, which fetch all the same. */
   readonly #asked = new Set<DownloadPinId>();
   /** The songs the person tried again while Low Power Mode is on, which fetch all the same. */
@@ -331,11 +340,23 @@ export class DownloadSync {
    * running go on. Turning it off starts the rest.
    */
   setLowPower(on: boolean): void {
-    if (on === this.#lowPower) return;
-    this.#lowPower = on;
+    if (on === this.#conditions.lowPower) return;
     this.#asked.clear();
     this.#askedSongs.clear();
-    this.#plan();
+    this.#setConditions({ ...this.#conditions, lowPower: on });
+  }
+
+  /**
+   * Whether the phone's network is metered (`meteredOf`). With Wi-Fi only on, a metered network
+   * stops the transfers running, which start over once it is not.
+   */
+  setMetered(metered: boolean): void {
+    this.#setConditions({ ...this.#conditions, metered });
+  }
+
+  /** The Wi-Fi only setting: while it is on, no transfer runs on a metered network. */
+  setWifiOnly(on: boolean): void {
+    this.#setConditions({ ...this.#conditions, wifiOnly: on });
   }
 
   /**
@@ -368,7 +389,7 @@ export class DownloadSync {
       }),
     );
 
-    if (this.#lowPower) this.#asked.add(id);
+    if (this.#conditions.lowPower) this.#asked.add(id);
     this.#plan();
   }
 
@@ -402,7 +423,7 @@ export class DownloadSync {
     for (const trackId of members) {
       this.#trackFailures.delete(trackId);
 
-      if (this.#lowPower) this.#askedSongs.add(trackId);
+      if (this.#conditions.lowPower) this.#askedSongs.add(trackId);
     }
 
     this.#plan();
@@ -719,12 +740,42 @@ export class DownloadSync {
     }
   }
 
+  #setConditions(next: TransferConditions): void {
+    const before = this.#conditions;
+
+    if (
+      next.metered === before.metered &&
+      next.wifiOnly === before.wifiOnly &&
+      next.lowPower === before.lowPower
+    ) {
+      return;
+    }
+
+    this.#conditions = next;
+
+    // Wi-Fi only stops what runs as well as what would start: mobile data spent on a transfer
+    // already running is spent all the same. Low Power Mode lets running transfers finish.
+    if (transferGate(next, "person") === "wifi") {
+      for (const { stop } of this.#fetching.values()) stop.abort();
+
+      for (const stop of this.#fetchingArt.values()) stop.abort();
+    }
+
+    this.#publish();
+    this.#plan();
+  }
+
   /**
-   * Which songs and covers may start a transfer now: any, or in Low Power Mode only those of the
-   * downloads and songs the person asked for while it is on.
+   * Which songs and covers may start a transfer now, by `transferGate`: those the person asked for
+   * while Low Power Mode is on count as theirs, every other one as the sync's.
    */
   #mayStart(): Startable {
-    if (!this.#lowPower) return { song: () => true, art: () => true };
+    const gate = (startedBy: StartedBy): boolean =>
+      transferGate(this.#conditions, startedBy) === "run";
+
+    if (gate("sync")) return { song: () => true, art: () => true };
+
+    if (!gate("person")) return { song: () => false, art: () => false };
 
     const songs = new Set(this.#askedSongs);
     const art = new Set<string>();
@@ -868,7 +919,11 @@ export class DownloadSync {
     this.#fetchingArt.set(hash, stop);
 
     const fail = async (message: string): Promise<void> => {
-      this.#artFailures.set(hash, nextFailure(this.#artFailures.get(hash), message, true, now()));
+      // A cover stopped on purpose, by Wi-Fi only or because nothing shows it, didn't fail.
+      if (!stop.signal.aborted) {
+        this.#artFailures.set(hash, nextFailure(this.#artFailures.get(hash), message, true, now()));
+      }
+
       await this.#removeQuietly(file);
     };
 
@@ -1041,6 +1096,7 @@ export class DownloadSync {
       ready: this.#ready,
       online: this.#online,
       lowSpace: this.#lowSpace,
+      waitingForWifi: transferGate(this.#conditions, "person") === "wifi",
       pins: this.#pinViews(),
       tracks: this.#trackStates(copies),
       copies,

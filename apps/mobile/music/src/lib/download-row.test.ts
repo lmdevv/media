@@ -106,6 +106,12 @@ describe("downloadRows", () => {
     ]);
   });
 
+  it("waits for Wi-Fi", () => {
+    expect(downloadRows({ kind: "waiting", reason: "wifi" }, true, 0, "iPhone")).toEqual([
+      cancel("Waiting for Wi-Fi"),
+    ]);
+  });
+
   it("names an iPad where it says what removing a download frees", () => {
     expect(removeSubtitle(412_000_000, 358_000_000)).toBe("Frees 358 MB on this iPad");
     expect(removeSubtitle(412_000_000, 0)).toBe("Stays on this iPad with your other downloads");

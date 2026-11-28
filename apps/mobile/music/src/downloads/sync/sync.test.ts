@@ -279,6 +279,104 @@ describe("DownloadSync in Low Power Mode", () => {
   });
 });
 
+describe("DownloadSync with Wi-Fi only", () => {
+  const SONG = "first song, long enough to send in two halves";
+
+  it("transfers nothing on a metered network, and everything once the phone is off it", async () => {
+    const one = song("t1", "Safe from Harm", COVER);
+
+    media.serve("/song/t1", SONG);
+    media.serve(COVER, "cover bytes", { contentType: "image/jpeg" });
+    sync.setWifiOnly(true);
+    sync.setMetered(true);
+    await settled((snapshot) => snapshot.ready);
+    await sync.request(ALBUM, DETAILS);
+    sync.offerManifest(pinIdOf(ALBUM), withCover(one, "Blue Lines"));
+    const waiting = await settled((snapshot) => snapshot.tracks.get(one.id) === "queued");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(downloadStatus(waiting, ALBUM)).toEqual({ kind: "waiting", reason: "wifi" });
+    expect(media.bytesSent).toBe(0);
+    expect(core.calls).toEqual([]);
+
+    sync.setMetered(false);
+    const done = await settled((snapshot) => snapshot.copies.size === 1);
+    await settled(() => vault.view.art.size === 1);
+
+    expect(downloadStatus(done, ALBUM)).toMatchObject({ kind: "downloaded" });
+    expect(media.bytesSent).toBe(SONG.length + "cover bytes".length);
+  });
+
+  it("holds a song the person retries in Low Power Mode as well", async () => {
+    const one = song("t1", "Safe from Harm");
+
+    media.serve("/song/t1", SONG);
+    sync.setWifiOnly(true);
+    sync.setMetered(true);
+    sync.setLowPower(true);
+    await settled((snapshot) => snapshot.ready);
+    await sync.request(ALBUM, DETAILS);
+    sync.offerManifest(pinIdOf(ALBUM), manifestOf([one]));
+    sync.retry(ALBUM);
+    await settled((snapshot) => snapshot.tracks.get(one.id) === "queued");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(media.bytesSent).toBe(0);
+
+    sync.setMetered(false);
+    await settled((snapshot) => snapshot.copies.size === 1);
+
+    expect(media.bytesSent).toBe(SONG.length);
+  });
+
+  it("transfers on a metered network once the setting is off", async () => {
+    const one = song("t1", "Safe from Harm");
+
+    media.serve("/song/t1", SONG);
+    sync.setWifiOnly(true);
+    sync.setMetered(true);
+    await settled((snapshot) => snapshot.ready);
+    await sync.request(ALBUM, DETAILS);
+    sync.offerManifest(pinIdOf(ALBUM), manifestOf([one]));
+    await settled((snapshot) => snapshot.tracks.get(one.id) === "queued");
+    sync.setWifiOnly(false);
+    const done = await settled((snapshot) => snapshot.copies.size === 1);
+
+    expect(done.waitingForWifi).toBe(false);
+    expect(media.bytesSent).toBe(SONG.length);
+  });
+
+  it("stops a transfer when the phone moves to a metered network, and starts it over on Wi-Fi", async () => {
+    const one = song("t1", "Safe from Harm");
+    const { promise: rest, resolve: sendRest } = Promise.withResolvers<void>();
+
+    media.serve("/song/t1", SONG, { held: rest });
+    sync.setWifiOnly(true);
+    await settled((snapshot) => snapshot.ready);
+    await sync.request(ALBUM, DETAILS);
+    sync.offerManifest(pinIdOf(ALBUM), manifestOf([one]));
+    await settled((snapshot) => snapshot.tracks.get(one.id) === "downloading");
+    await vi.waitFor(() => {
+      expect(media.bytesSent).toBe(Math.floor(SONG.length / 2));
+    });
+
+    sync.setMetered(true);
+    const stopped = await settled((snapshot) => snapshot.tracks.get(one.id) === "queued");
+    sendRest();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(downloadStatus(stopped, ALBUM)).toEqual({ kind: "waiting", reason: "wifi" });
+    expect(sync.getSnapshot().copies.size).toBe(0);
+    expect(await vault.files()).toEqual([]);
+
+    sync.setMetered(false);
+    const done = await settled((snapshot) => snapshot.copies.size === 1);
+
+    expect(done.tracks.get(one.id)).toBe("downloaded");
+    expect(media.seen.filter((seen) => seen.method === "GET")).toHaveLength(2);
+  });
+});
+
 describe("DownloadSync over the core", () => {
   it("keeps each song of a download on the core, fetches it with a ticket, and stores its revision", async () => {
     const one = song("t1", "Safe from Harm");

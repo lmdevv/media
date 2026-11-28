@@ -3,6 +3,7 @@ import { streamUrl } from "@media/player/source-resolver";
 import { chooseStreamProfile } from "@media/player/stream-quality";
 import type { PlatformSdk } from "@media/sdk/promise";
 import { usePlatform, usePlatformStatus } from "@media/sdk/react";
+import { useDownloadSettingsOf } from "@media/mobile-core/download-settings";
 import { isFailure } from "@media/mobile-core/failure";
 import { lastPerson } from "@media/mobile-core/sign-in";
 import { Equal, Option, Schema } from "effect";
@@ -34,6 +35,7 @@ import { expoTransfer } from "./expo-transfer";
 import { openVault, wipeVaults } from "./expo-vault";
 import type { ExpoVault } from "./expo-vault";
 import { manifestOf } from "./manifest";
+import { downloadSettings, readNetwork, subscribeNetwork } from "./network";
 import type { CoreKept, PinRead } from "./manifest";
 import { freedBytesOf, offlineLibrary } from "./sync/library";
 import type { OfflineLibrary } from "./sync/library";
@@ -49,6 +51,7 @@ import type { HeldLyrics, SyncPolicy } from "./sync/plan";
 import { canToggleDownload, downloadStatus, trackDownloadState } from "./sync/status";
 import type { DownloadStatus } from "./sync/status";
 import { observedTransfer } from "./sync/finished-file";
+import { meteredOf } from "./sync/transfer-gate";
 import { DownloadSync, EMPTY_DOWNLOADS } from "./sync/sync";
 import type {
   DownloadsCore,
@@ -100,6 +103,9 @@ interface DownloadSettings {
   readonly quality: DownloadQuality;
   /** Saves the quality; songs already here keep theirs, and the next fetch uses the new one. */
   readonly setQuality: (quality: DownloadQuality) => void;
+  /** Downloads transfer only off mobile data, hotspots, and Low Data Mode. */
+  readonly wifiOnly: boolean;
+  readonly setWifiOnly: (wifiOnly: boolean) => void;
   readonly usage: DownloadUsage;
   /** How many downloads this phone keeps, finished or not, songs or none. */
   readonly downloads: number;
@@ -130,6 +136,10 @@ export const wipeDownloads = async (origin: string): Promise<void> => {
 };
 
 const subscribeToNothing = (): (() => void) => () => undefined;
+
+const subscribeToNetwork = (changed: () => void): (() => void) => subscribeNetwork(changed);
+
+const isMetered = (): boolean => meteredOf(readNetwork());
 
 const emptySnapshot = (): DownloadsSnapshot => EMPTY_DOWNLOADS;
 
@@ -481,9 +491,10 @@ const useQuality = (): [DownloadQuality, (quality: DownloadQuality) => void] => 
 
 /**
  * Keeps the account's downloads on this phone while the app runs, and fetches new ones while the
- * server answers. In Low Power Mode it fetches only the downloads the person starts then. Mount it inside the platform provider, above the session phase, which opens the
- * app on the downloads when the server is out of reach, and above the player, which plays
- * downloaded songs from their files.
+ * server answers. With Wi-Fi only on, nothing transfers on a metered network; in Low Power Mode it
+ * fetches only the downloads the person starts then (`transferGate`). Mount it inside the platform
+ * provider, above the session phase, which opens the app on the downloads when the server is out
+ * of reach, and above the player, which plays downloaded songs from their files.
  */
 export function DownloadsProvider({ children }: { readonly children: ReactNode }) {
   const platform = usePlatform();
@@ -496,6 +507,10 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
   const current = useRef<DownloadSync | null>(null);
   const lowPower = useLowPowerMode();
   const saving = useRef(lowPower);
+  const { wifiOnly } = useDownloadSettingsOf(downloadSettings());
+  const wifi = useRef(wifiOnly);
+  const metered = useSyncExternalStore(subscribeToNetwork, isMetered);
+  const costly = useRef(metered);
 
   useLayoutEffect(() => {
     chosen.current = quality;
@@ -505,6 +520,16 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
     saving.current = lowPower;
     current.current?.setLowPower(lowPower);
   }, [lowPower]);
+
+  useLayoutEffect(() => {
+    wifi.current = wifiOnly;
+    current.current?.setWifiOnly(wifiOnly);
+  }, [wifiOnly]);
+
+  useLayoutEffect(() => {
+    costly.current = metered;
+    current.current?.setMetered(metered);
+  }, [metered]);
 
   useLayoutEffect(() => {
     if (userId === null) return undefined;
@@ -552,6 +577,8 @@ export function DownloadsProvider({ children }: { readonly children: ReactNode }
 
       created = opened;
       opened.setLowPower(saving.current);
+      opened.setWifiOnly(wifi.current);
+      opened.setMetered(costly.current);
       opened.start();
       current.current = opened;
       setSync(opened);
@@ -681,14 +708,19 @@ export const useDownloadsLibrary = (): OfflineLibrary => {
   return useMemo(() => offlineLibrary(snapshot), [snapshot]);
 };
 
-/** Download quality, the space downloads take, and removing them all. */
+/** Download quality, Wi-Fi only, the space downloads take, and removing them all. */
 export const useDownloadSettings = (): DownloadSettings => {
   const { sync, quality, setQuality } = useDownloads("useDownloadSettings");
   const { usage, pins } = useSnapshot(sync);
+  const { wifiOnly } = useDownloadSettingsOf(downloadSettings());
 
   return {
     quality,
     setQuality,
+    wifiOnly,
+    setWifiOnly: (next) => {
+      downloadSettings().update({ wifiOnly: next });
+    },
     usage,
     downloads: pins.length,
     removeAll: async () => {

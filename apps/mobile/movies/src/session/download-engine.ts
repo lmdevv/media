@@ -3,6 +3,7 @@ import type { PrepareDownloadResponse } from "@media/contracts/media-playback";
 import type { StartedPlayback } from "@media/contracts/models/playback";
 import { EpochMillis } from "@media/contracts/units";
 import { Downloads } from "@media/sdk/effect";
+import type { DownloadSettings } from "@media/mobile-core/download-settings";
 import type { PlatformSdk } from "@media/sdk/promise";
 import { Effect, Option, Predicate, Result, Schema } from "effect";
 import type { DownloadPauseState } from "expo-file-system";
@@ -42,7 +43,6 @@ import type {
   PendingProgress,
   SyncPlan,
 } from "@/lib/downloads/model";
-import type { DownloadSettings } from "@/lib/downloads/settings";
 import {
   Launch,
   clearMedia,

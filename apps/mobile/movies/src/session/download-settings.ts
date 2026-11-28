@@ -1,37 +1,17 @@
+import { downloadSettingsStore, useDownloadSettingsOf } from "@media/mobile-core/download-settings";
+import type { DownloadSettings } from "@media/mobile-core/download-settings";
 import { usePlatform, usePlatformQuery } from "@media/sdk/react";
-import { useSyncExternalStore } from "react";
 
-import { parseDownloadSettings, serializeDownloadSettings } from "@/lib/downloads/settings";
-import type { DownloadQuality, DownloadSettings } from "@/lib/downloads/settings";
-import { readValue, writeValue } from "@/lib/secure-storage";
+import type { DownloadQuality } from "@/lib/downloads/settings";
+import { appKeychains } from "@/lib/keychains";
 
-const KEY = "movies.downloads.settings";
-
-let current: DownloadSettings = parseDownloadSettings(readValue(KEY));
-
-const listeners = new Set<() => void>();
-
-const subscribe = (listener: () => void): (() => void) => {
-  listeners.add(listener);
-
-  return () => {
-    listeners.delete(listener);
-  };
-};
-
-const read = (): DownloadSettings => current;
+const store = downloadSettingsStore(appKeychains().own, "movies.downloads.settings");
 
 /** Changes some settings and keeps them in the keychain. */
-export const updateDownloadSettings = (change: Partial<DownloadSettings>): void => {
-  current = { wifiOnly: change.wifiOnly ?? current.wifiOnly };
-  writeValue(KEY, serializeDownloadSettings(current));
-
-  for (const listener of listeners) listener();
-};
+export const updateDownloadSettings = store.update;
 
 /** Download Settings this iPhone keeps, re-rendering when they change. */
-export const useDownloadSettings = (): DownloadSettings =>
-  useSyncExternalStore(subscribe, read, read);
+export const useDownloadSettings = (): DownloadSettings => useDownloadSettingsOf(store);
 
 /** The person's download quality on this device, which the core keeps and downloads use. */
 export interface DownloadQualitySetting {
