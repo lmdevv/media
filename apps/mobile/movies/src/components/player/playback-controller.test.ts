@@ -154,6 +154,7 @@ const NegotiateBody = Schema.Struct({
         dynamicRanges: Schema.optional(Schema.Array(Schema.String)),
       }),
     ),
+    hdrScreen: Schema.optional(Schema.Array(Schema.String)),
   }),
   startSeconds: Schema.Finite,
   audioStreamIndex: Schema.optional(Schema.Int),
@@ -312,8 +313,8 @@ const eventually = (check: () => boolean): Promise<void> =>
     { timeout: 2000, interval: 10 },
   );
 
-/** A controller of the start against `base`, with every native player it made. */
-const playing = (base: string) => {
+/** A controller of the start against `base` on an SDR screen, or an HDR one, with every player it made. */
+const playing = (base: string, hdrScreen = false) => {
   const videos: Array<TestVideo> = [];
 
   const controller = new PlayerController({
@@ -333,6 +334,7 @@ const playing = (base: string) => {
     intentAt: null,
     play: true,
     background: false,
+    hdrScreen,
   });
 
   const play = Result.getOrThrow(startedPlay(coreStart, base));
@@ -414,6 +416,29 @@ describe("PlayerController after a Dolby Vision stream fails", () => {
       ["hdr10", "hlg"],
     ]);
     controller.dispose();
+  });
+});
+
+describe("PlayerController's screen", () => {
+  it("declares HDR10 and HLG on a screen AVFoundation says shows HDR, and none on an SDR one", async () => {
+    const service = await mediaService((base) => [
+      { stream: transcode(base, "hdr-1", "hevc") },
+      { stream: transcode(base, "sdr-1", "hevc") },
+    ]);
+
+    const onHdr = playing(service.base, true);
+
+    await eventually(() => service.negotiations.length === 1);
+    onHdr.controller.dispose();
+
+    const onSdr = playing(service.base, false);
+
+    await eventually(() => service.negotiations.length === 2);
+    onSdr.controller.dispose();
+
+    expect(
+      service.negotiations.map((negotiation) => negotiation.capabilities.hdrScreen),
+    ).toStrictEqual([["hdr10", "hlg"], undefined]);
   });
 });
 

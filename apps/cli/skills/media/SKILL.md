@@ -90,10 +90,14 @@ printf '%s' "$NEW" | media admin reset-password ana
 
 - **Play in mpv or VLC.** `media movies stream <title> [--episode-id <id>] [--version
   <name|number>] [--from <seconds|h:mm:ss>] [--max-height <lines>] [--burn-subtitle <track>]
-  [--open]` starts a title by its ID or the best name match (a show plays its next episode) and
-  prints `.url`; `--open` launches mpv. `--version` takes a name or a number from `media movies
-  titles versions`. `--burn-subtitle` draws a track from `.subtitles` (such as `e3`) into the
-  video, a styled ASS track with its fonts or a picture subtitle, so the stream transcodes.
+  [--client <desktop|hdr|sdr|hevc-hdr|h264>] [--open]` starts a title by its ID or the best name
+  match (a show plays its next episode) and prints `.url`; `--open` launches mpv. `--version`
+  takes a name or a number from `media movies titles versions`. `--burn-subtitle` draws a track
+  from `.subtitles` (such as `e3`) into the video, a styled ASS track with its fonts or a picture
+  subtitle, so the stream transcodes. `--client` streams as another device: `hdr` (a phone on an
+  HDR screen), `sdr` (the same on an SDR screen), `hevc-hdr` (plays only HEVC, on an HDR screen),
+  or `h264` (a browser); a stream that must encode keeps the source's HDR10 or HLG only for `hdr`
+  and `hevc-hdr`, and `.transcode.sdrReason` says why one that could did not.
 - **Why playback stalled.** `media diagnostics sessions [--since 2d]` lists recent playback
   sessions; `media diagnostics playback <session-id>` prints one's timeline. `media logs [--since
   15m] [--level warn] [--grep <text>] [--follow]` reads the media server's retained log (admins

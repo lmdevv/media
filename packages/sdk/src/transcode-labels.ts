@@ -77,6 +77,17 @@ const SOURCES: ReadonlyMap<string, string> = new Map([
  */
 export const sourceLabel = (source: string): string => SOURCES.get(source) ?? source;
 
+const SDR_REASONS: ReadonlyMap<string, string> = new Map([
+  ["subtitle", "SDR for the subtitle drawn in"],
+  ["no-hdr-encode", "SDR: no HDR encode here"],
+]);
+
+/**
+ * Why a source whose HDR the screen shows plays as SDR, in a few words, from the summary's
+ * `sdrReason`; a code a newer server added reads as plain `SDR`.
+ */
+export const sdrReasonLabel = (reason: string): string => SDR_REASONS.get(reason) ?? "SDR";
+
 const CAUSES: ReadonlyMap<string, string> = new Map([
   ["capability", "stage failed"],
   ["source", "file failed"],

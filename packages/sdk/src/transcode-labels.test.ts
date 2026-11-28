@@ -9,6 +9,7 @@ import {
   devicesOf,
   domainLabel,
   reasonLabel,
+  sdrReasonLabel,
   stageLabel,
 } from "./transcode-labels";
 
@@ -21,6 +22,12 @@ const gpu = {
 };
 
 describe("TranscodeLabels", () => {
+  it("says why an HDR source plays as SDR, and reads a later code as plain SDR", () => {
+    expect(sdrReasonLabel("subtitle")).toBe("SDR for the subtitle drawn in");
+    expect(sdrReasonLabel("no-hdr-encode")).toBe("SDR: no HDR encode here");
+    expect(sdrReasonLabel("some-later-reason")).toBe("SDR");
+  });
+
   it("names stages, moves, domains, and causes, and passes a later backend's names through", () => {
     expect(stageLabel({ op: "tonemap", domain: "cpu", impl: "tonemap.cpu" })).toBe(
       "Tone map · CPU",

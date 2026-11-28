@@ -11,12 +11,15 @@ const browser = (options: {
   readonly hdr?: boolean;
   /** Types the Media Capabilities API answered for, and its answer; the rest are unknown. */
   readonly efficient?: ReadonlyMap<string, boolean>;
+  /** Transfers the Media Capabilities API answered HEVC Main 10 HDR for; the rest are unknown. */
+  readonly hdrDecodes?: ReadonlyMap<"pq" | "hlg", boolean>;
 }): MediaSupport => ({
   canPlayType: (type) =>
     options.types.includes(type) ? "probably" : (options.maybe ?? []).includes(type) ? "maybe" : "",
   isTypeSupported: options.mse ? (type) => options.types.includes(type) : null,
   hdrDisplay: options.hdr ?? false,
   powerEfficient: (type) => options.efficient?.get(type),
+  hdrDecodes: (transfer) => options.hdrDecodes?.get(transfer),
 });
 
 const chrome = browser({
@@ -34,7 +37,8 @@ const chrome = browser({
   mse: true,
 });
 
-const iphone = browser({
+/** What Safari on an iPhone answers. */
+const IPHONE_TYPES = {
   types: [
     'video/mp4; codecs="avc1.640029"',
     'video/mp4; codecs="hvc1.1.6.L153.B0"',
@@ -45,8 +49,9 @@ const iphone = browser({
   ],
   maybe: ["video/mp4", "video/quicktime", "application/vnd.apple.mpegurl"],
   mse: false,
-  hdr: true,
-});
+};
+
+const iphone = browser({ ...IPHONE_TYPES, hdr: true });
 
 describe("detectCapabilities", () => {
   it("reads Chrome's codecs, plays MP4 and WebM directly, and leaves Matroska to HLS", () => {
@@ -112,6 +117,7 @@ describe("detectCapabilities", () => {
       isTypeSupported: iphone.isTypeSupported,
       hdrDisplay: false,
       powerEfficient: () => undefined,
+      hdrDecodes: () => undefined,
     });
 
     expect(
@@ -138,6 +144,50 @@ describe("detectCapabilities", () => {
 const stream = (mode: "direct" | "remux" | "transcode-software", codec: string) => ({
   mode,
   video: { codec, width: 1920, height: 1080, dynamicRange: "sdr" as const },
+});
+
+describe("the screen's HDR", () => {
+  const both = new Map([
+    ["pq", true],
+    ["hlg", true],
+  ] as const);
+
+  it("lists HDR10 and HLG on an HDR display where HEVC Main 10 plays in each", () => {
+    expect(
+      detectCapabilities(browser({ ...IPHONE_TYPES, hdr: true, hdrDecodes: both })).hdrScreen,
+    ).toStrictEqual(["hdr10", "hlg"]);
+    expect(
+      detectCapabilities(
+        browser({
+          ...IPHONE_TYPES,
+          hdr: true,
+          hdrDecodes: new Map([
+            ["pq", true],
+            ["hlg", false],
+          ]),
+        }),
+      ).hdrScreen,
+    ).toStrictEqual(["hdr10"]);
+  });
+
+  it("lists none on an SDR display, before the API answers, or without HEVC Main 10", () => {
+    expect(
+      detectCapabilities(browser({ ...IPHONE_TYPES, hdr: false, hdrDecodes: both })),
+    ).not.toHaveProperty("hdrScreen");
+    expect(detectCapabilities(browser({ ...IPHONE_TYPES, hdr: true }))).not.toHaveProperty(
+      "hdrScreen",
+    );
+    expect(
+      detectCapabilities(
+        browser({
+          types: IPHONE_TYPES.types.filter((type) => !type.includes("hvc1.2.4")),
+          mse: false,
+          hdr: true,
+          hdrDecodes: both,
+        }),
+      ),
+    ).not.toHaveProperty("hdrScreen");
+  });
 });
 
 describe("withoutFailedPath", () => {

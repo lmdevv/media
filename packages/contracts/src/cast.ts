@@ -9,7 +9,9 @@
  * list, so the model name is the only evidence, and an unknown model gets the safe profile; no
  * profile offers AV1, which only some models decode. The web sender SDK reports no model
  * at all, so the web app always asks for the safe profile; native senders, whose SDKs report the
- * model, can ask for more. A song plays as its original file when every Chromecast decodes it
+ * model, can ask for more. No profile names the screen's HDR (`hdrScreen`): Google's default
+ * receiver reports nothing of the television it plays on, so a stream that must encode is SDR,
+ * while an HDR original a model plays is still copied. A song plays as its original file when every Chromecast decodes it
  * (MP3, AAC), and as the AAC 320 kbps transcode otherwise.
  *
  * A receiver fetches media by URL and holds no session, so the sender trades its start's ticket

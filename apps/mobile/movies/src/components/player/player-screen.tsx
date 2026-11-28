@@ -21,6 +21,7 @@ import { artworkUrl } from "@/lib/artwork";
 import { asEpisodeId, asMediaFileId, asTitleId } from "@/lib/catalog";
 import type { EpisodeId, SeasonEpisode } from "@/lib/catalog";
 import { IOS_CAPABILITIES } from "@/lib/player/capabilities";
+import { screenShowsHdr } from "@/lib/player/hdr-screen";
 import { NEXT_COUNTDOWN, episodeLine, inCredits } from "@/lib/player/next-episode";
 import { DATA_SAVER_QUALITY, mobileDataStep } from "@/lib/player/mobile-data";
 import type { Connection, MobileDataStep } from "@/lib/player/mobile-data";
@@ -262,6 +263,7 @@ function PlayerSession({
       play: attemptPlay.current,
       // The app may already be away when the player opens; a start then opens no stream.
       background: AppState.currentState === "background",
+      hdrScreen: screenShowsHdr(),
     });
 
     setController(created);

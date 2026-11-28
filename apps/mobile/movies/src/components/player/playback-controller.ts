@@ -7,7 +7,7 @@ import type { VideoMetadata, VideoPlayer, VideoPlayerEvents, VideoSource } from 
 
 import { StreamLifecycle } from "@/lib/player/app-state";
 import type { AppStatus, HeldStream, LifecycleStep } from "@/lib/player/app-state";
-import { IOS_CAPABILITIES } from "@/lib/player/capabilities";
+import { capabilitiesOn } from "@/lib/player/capabilities";
 import {
   bufferedAheadSeconds,
   playerErrorObservation,
@@ -175,6 +175,11 @@ export interface PlayerControllerOptions<Video extends StreamVideo = VideoPlayer
   readonly play: boolean;
   /** Whether the app is in the background as the player opens, from `AppState.currentState`. */
   readonly background: boolean;
+  /**
+   * Whether the screen shows HDR as the player opens (`screenShowsHdr`), which its negotiations
+   * declare (`capabilitiesOn`).
+   */
+  readonly hdrScreen: boolean;
 }
 
 /** Where playback was when the app went away and its stream stopped, or its start was deferred. */
@@ -200,7 +205,7 @@ export class PlayerController<Video extends StreamVideo = VideoPlayer> {
   /** The player as the progress reporter and the diagnostics see it. */
   readonly port = new VideoPort();
   readonly #options: PlayerControllerOptions<Video>;
-  #capabilities: ClientCapabilities = IOS_CAPABILITIES;
+  #capabilities: ClientCapabilities;
   #begun = false;
   /** The streamed start's playback as the media server reads it; null for a kept download. */
   #started: Playback.Playback["started"] | null = null;
@@ -252,6 +257,7 @@ export class PlayerController<Video extends StreamVideo = VideoPlayer> {
 
   constructor(options: PlayerControllerOptions<Video>) {
     this.#options = options;
+    this.#capabilities = capabilitiesOn(options.hdrScreen);
     this.#lifecycle = new StreamLifecycle(options.background, options.play);
     this.#snapshot = { ...this.#snapshot, quality: options.quality };
     this.#unsubscribePort = this.port.subscribe((event) => {

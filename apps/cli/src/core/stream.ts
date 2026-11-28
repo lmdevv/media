@@ -110,6 +110,75 @@ const DESKTOP_PLAYER: StartCapabilities & ClientCapabilities = {
   mse: false,
 };
 
+/** HEVC Main and Main 10 in HDR10 and HLG, as a phone or an HDR television decodes it. */
+const HDR_HEVC = {
+  codec: "hevc",
+  profiles: ["Main", "Main 10"],
+  maxBitDepth: 10,
+  dynamicRanges: ["hdr10", "hlg"],
+} as const;
+
+/** A device on HLS with AAC and AC-3 that plays `videoCodecs`. */
+const hlsDevice = (videoCodecs: StartCapabilities["videoCodecs"]): StartCapabilities => ({
+  containers: ["mp4"],
+  videoCodecs,
+  audioCodecs: [
+    { codec: "aac", maxChannels: 8 },
+    { codec: "ac3", maxChannels: 6 },
+  ],
+  maxWidth: 3840,
+  maxHeight: 2160,
+  hls: true,
+  mse: false,
+});
+
+/**
+ * A device `--client` streams as: what it plays, which `movies.play.start` picks a version by, and
+ * the HDR formats its screen shows, which only the media server reads.
+ */
+interface Device {
+  readonly plays: StartCapabilities;
+  readonly screen: ClientCapabilities["hdrScreen"];
+}
+
+/**
+ * The devices `--client` streams as, so every case negotiation decides can be driven from a
+ * terminal: `desktop`, mpv or VLC (the default); `hdr`, a phone on its HDR screen (H.264 and HEVC
+ * Main 10 in HDR10 and HLG, the screen showing both); `sdr`, the same phone on an SDR screen;
+ * `hevc-hdr`, a device that plays only HEVC, on an HDR screen; `h264`, a browser that plays H.264
+ * alone. A stream that must encode keeps a source's HDR only for `hdr` and `hevc-hdr`.
+ */
+const CLIENTS = {
+  desktop: { plays: DESKTOP_PLAYER, screen: undefined },
+  hdr: { plays: hlsDevice([{ codec: "h264", maxLevel: 52 }, HDR_HEVC]), screen: ["hdr10", "hlg"] },
+  sdr: { plays: hlsDevice([{ codec: "h264", maxLevel: 52 }, HDR_HEVC]), screen: undefined },
+  "hevc-hdr": { plays: hlsDevice([HDR_HEVC]), screen: ["hdr10", "hlg"] },
+  h264: { plays: hlsDevice([{ codec: "h264", maxLevel: 51 }]), screen: undefined },
+} as const satisfies Record<string, Device>;
+
+type ClientName = keyof typeof CLIENTS;
+
+const isClientName = (name: string): name is ClientName => Object.hasOwn(CLIENTS, name);
+
+/** What `device` negotiates with: what it plays, and its screen. */
+const capabilitiesOf = (device: Device): ClientCapabilities => ({
+  containers: device.plays.containers,
+  videoCodecs: device.plays.videoCodecs,
+  audioCodecs: device.plays.audioCodecs,
+  maxWidth: device.plays.maxWidth,
+  maxHeight: device.plays.maxHeight,
+  hls: device.plays.hls,
+  mse: device.plays.mse,
+  hdrScreen: device.screen,
+});
+
+/** A delivered video's dynamic range after its codec, as `HDR10`; nothing for SDR. */
+const RANGE_LABELS: ReadonlyMap<string, string> = new Map([
+  ["hdr10", " HDR10"],
+  ["hlg", " HLG"],
+  ["dolby-vision", " Dolby Vision"],
+]);
+
 /** The title an ID names, or none when the text is no title ID the person may see. */
 const titleById = (connection: Connection, query: string) =>
   CONVEX_ID.test(query)
@@ -150,6 +219,9 @@ const transcodeLines = (transcode: TranscodeSummary): ReadonlyArray<string> => [
   ...(transcode.stages.length === 0
     ? []
     : [`stages: ${transcode.stages.map(TranscodeLabels.stageLabel).join(", ")}`]),
+  ...(transcode.sdrReason === undefined
+    ? []
+    : [`range: ${TranscodeLabels.sdrReasonLabel(transcode.sdrReason)}`]),
   ...transcode.changes.map((change) =>
     [
       `changed: generation ${String(change.generation)}`,
@@ -191,11 +263,12 @@ const isPlaybackApiError = Schema.is(PlaybackApiError);
 
 const stream = coreShortcut("movies", "stream", {
   usage:
-    "<title> [--episode-id <id>] [--version <name|number>] [--from <seconds>] [--max-height <lines>] [--burn-subtitle <track>] [--open]",
+    "<title> [--episode-id <id>] [--version <name|number>] [--from <seconds>] [--max-height <lines>] [--burn-subtitle <track>] [--client <desktop|hdr|sdr|hevc-hdr|h264>] [--open]",
   summary:
-    "Start a title by its ID or the best name match (a show resumes its next episode) and print the stream URL for mpv or VLC; --version picks a file by its name or its number in `media movies titles versions` (default: the one you last played, else the best quality); --max-height caps the picture, such as 720 on a slow link (a taller source is transcoded down); --burn-subtitle draws a subtitle track into the video by the ID the output's `subtitles:` line lists, such as e3, styled ASS and picture subtitles included (the stream then transcodes); --open launches mpv",
+    "Start a title by its ID or the best name match (a show resumes its next episode) and print the stream URL for mpv or VLC; --version picks a file by its name or its number in `media movies titles versions` (default: the one you last played, else the best quality); --max-height caps the picture, such as 720 on a slow link (a taller source is transcoded down); --burn-subtitle draws a subtitle track into the video by the ID the output's `subtitles:` line lists, such as e3, styled ASS and picture subtitles included (the stream then transcodes); --client streams as another device: hdr (a phone on an HDR screen), sdr (the same on an SDR screen), hevc-hdr (plays only HEVC, on an HDR screen), or h264 (a browser), where a stream that must encode keeps the source's HDR only for hdr and hevc-hdr; --open launches mpv",
   options: {
     "burn-subtitle": { type: "string" },
+    client: { type: "string" },
     "episode-id": { type: "string" },
     from: { type: "string" },
     "max-height": { type: "string" },
@@ -234,6 +307,14 @@ const stream = coreShortcut("movies", "stream", {
           "--burn-subtitle expects a subtitle track's ID from the `subtitles:` line, such as e3",
         );
       }
+
+      const clientName = Option.getOrElse(stringFlag(invocation.tokens, "client"), () => "desktop");
+
+      if (!isClientName(clientName)) {
+        return yield* usage(invocation, "--client expects desktop, hdr, sdr, hevc-hdr, or h264");
+      }
+
+      const device: Device = CLIENTS[clientName];
 
       if (
         Option.isSome(maxHeight) &&
@@ -296,7 +377,7 @@ const stream = coreShortcut("movies", "stream", {
           titleId: title.id,
           ...Option.match(episodeId, { onNone: () => ({}), onSome: (id) => ({ episodeId: id }) }),
           ...Option.match(fileId, { onNone: () => ({}), onSome: (id) => ({ fileId: id }) }),
-          capabilities: DESKTOP_PLAYER,
+          capabilities: device.plays,
         }),
       );
 
@@ -324,7 +405,7 @@ const stream = coreShortcut("movies", "stream", {
 
       const negotiated = yield* Playback.negotiate(
         started,
-        DESKTOP_PLAYER,
+        capabilitiesOf(device),
         Option.getOrElse(from, () => started.resumePositionMs),
         Option.none(),
         {
@@ -391,7 +472,7 @@ const stream = coreShortcut("movies", "stream", {
       return textOutcome(
         json,
         [
-          `${title.name}${Option.match(episode, { onNone: () => "", onSome: (label) => ` ${label}` })}${started.file.versionName === null ? "" : ` · ${started.file.versionName}`} (${playback.mode}, ${MediaLabels.codecLabel(playback.video.codec)}, from ${formatDuration(playback.startSeconds * 1000)})`,
+          `${title.name}${Option.match(episode, { onNone: () => "", onSome: (label) => ` ${label}` })}${started.file.versionName === null ? "" : ` · ${started.file.versionName}`} (${playback.mode}, ${MediaLabels.codecLabel(playback.video.codec)}${RANGE_LABELS.get(playback.video.dynamicRange) ?? ""}, from ${formatDuration(playback.startSeconds * 1000)})`,
           ...(playback.transcode === undefined ? [] : transcodeLines(playback.transcode)),
           ...subtitleLine(playback.subtitles, playback.burnedInSubtitle),
           playback.url,

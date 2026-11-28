@@ -21,6 +21,38 @@ const askEfficiency = (type: string, kind: MediaDecodingType): void => {
     );
 };
 
+/**
+ * The Media Capabilities API's answers to whether this browser plays 4K HEVC Main 10 in BT.2020 by
+ * transfer, asked the first time detection reads one, as `efficient` is.
+ */
+const hdr = new Map<"pq" | "hlg", boolean | undefined>();
+
+const askHdr = (transfer: "pq" | "hlg", kind: MediaDecodingType): void => {
+  hdr.set(transfer, undefined);
+  navigator.mediaCapabilities
+    .decodingInfo({
+      type: kind,
+      video: {
+        contentType: 'video/mp4; codecs="hvc1.2.4.L153.B0"',
+        width: 3840,
+        height: 2160,
+        bitrate: 20_000_000,
+        framerate: 24,
+        colorGamut: "rec2020",
+        transferFunction: transfer,
+        ...hdrMetadataOf(transfer),
+      },
+    })
+    .then(
+      (info) => hdr.set(transfer, info.supported),
+      () => hdr.delete(transfer),
+    );
+};
+
+/** HDR10's static metadata, which a PQ stream carries; HLG carries none. */
+const hdrMetadataOf = (transfer: "pq" | "hlg"): Pick<VideoConfiguration, "hdrMetadataType"> =>
+  transfer === "pq" ? { hdrMetadataType: "smpteSt2086" } : {};
+
 /** This browser's media checks. */
 export const browserMediaSupport = (): MediaSupport => {
   const probe = document.createElement("video");
@@ -38,6 +70,11 @@ export const browserMediaSupport = (): MediaSupport => {
       if (!efficient.has(type) && "mediaCapabilities" in navigator) askEfficiency(type, kind);
 
       return efficient.get(type);
+    },
+    hdrDecodes: (transfer) => {
+      if (!hdr.has(transfer) && "mediaCapabilities" in navigator) askHdr(transfer, kind);
+
+      return hdr.get(transfer);
     },
   };
 };

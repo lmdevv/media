@@ -4,7 +4,7 @@ import { ClientCapabilities } from "@media/contracts/media-playback";
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { IOS_CAPABILITIES } from "./capabilities";
+import { capabilitiesOn, IOS_CAPABILITIES } from "./capabilities";
 
 const video = {
   codec: "h264",
@@ -43,6 +43,18 @@ const uhd = (
     colour: { transfer: dynamicRange === "hlg" ? "arib-std-b67" : "smpte2084" },
   },
   audio: { codec: "eac3", channels: 6 },
+});
+
+describe("capabilitiesOn", () => {
+  it("lists HDR10 and HLG on a screen that shows HDR, and no screen format on an SDR one", () => {
+    const onHdr = capabilitiesOn(true);
+
+    expect(Schema.decodeSync(ClientCapabilities)(onHdr)).toStrictEqual(onHdr);
+    expect(onHdr.hdrScreen).toStrictEqual(["hdr10", "hlg"]);
+    expect(onHdr.videoCodecs).toStrictEqual(IOS_CAPABILITIES.videoCodecs);
+    expect(capabilitiesOn(false)).toStrictEqual(IOS_CAPABILITIES);
+    expect(capabilitiesOn(false)).not.toHaveProperty("hdrScreen");
+  });
 });
 
 describe("IOS_CAPABILITIES", () => {

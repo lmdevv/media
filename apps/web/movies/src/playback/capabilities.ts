@@ -5,6 +5,9 @@
  * when Media Source Extensions accept them. A path that fails anyway is dropped with
  * `withoutFailedPath` and playback renegotiates. Each codec found carries whether the Media
  * Capabilities API calls its decoding power-efficient (in hardware), once the browser has answered.
+ * The screen's HDR formats (`hdrScreen`) are those the display shows as HDR (`(dynamic-range:
+ * high)`) and the Media Capabilities API, asked with its HDR fields, says HEVC Main 10 plays in: a
+ * browser that decodes HDR on an SDR screen asks for none, and the media service maps HDR to SDR.
  */
 import type { ClientCapabilities, NegotiateResponse } from "@media/contracts/media-playback";
 import { Struct } from "effect";
@@ -22,6 +25,12 @@ export interface MediaSupport {
    * Capabilities API answers; undefined until it has answered, or without the API.
    */
   readonly powerEfficient: (type: string) => boolean | undefined;
+  /**
+   * Whether the browser plays 4K HEVC Main 10 in BT.2020 with `transfer`, PQ with HDR10's static
+   * metadata or HLG, as the Media Capabilities API answers asked with its HDR fields; undefined
+   * until it has answered, or without the API.
+   */
+  readonly hdrDecodes: (transfer: "pq" | "hlg") => boolean | undefined;
 }
 
 type VideoCodecSupport = ClientCapabilities["videoCodecs"][number];
@@ -113,6 +122,29 @@ const videoSupport = (support: MediaSupport, probe: CodecProbe): VideoCodecSuppo
   };
 };
 
+/** The HDR formats a screen shows, with the transfer the Media Capabilities API is asked about. */
+const SCREEN_RANGES = [
+  ["hdr10", "pq"],
+  ["hlg", "hlg"],
+] as const;
+
+/**
+ * The HDR formats this browser shows on its screen, when the display shows HDR and the browser
+ * plays HEVC Main 10 (`hevc`): each the Media Capabilities API says it plays; none otherwise.
+ */
+const hdrScreenOf = (
+  support: MediaSupport,
+  hevc: VideoCodecSupport | undefined,
+): Pick<ClientCapabilities, "hdrScreen"> => {
+  if (!support.hdrDisplay || hevc?.maxBitDepth !== 10) return {};
+
+  const shown = SCREEN_RANGES.flatMap(([range, transfer]) =>
+    support.hdrDecodes(transfer) === true ? [range] : [],
+  );
+
+  return shown.length === 0 ? {} : { hdrScreen: shown };
+};
+
 const audioSupport = (support: MediaSupport): ReadonlyArray<AudioCodecSupport> =>
   AUDIO_PROBES.flatMap(([codec, types]) =>
     types.some((type) => decodes(support, type)) ? [{ codec, maxChannels: 8 }] : [],
@@ -147,6 +179,10 @@ export const detectCapabilities = (support: MediaSupport): ClientCapabilities =>
     maxHeight: MAX_SIZE.height,
     hls: support.canPlayType("application/vnd.apple.mpegurl") !== "",
     mse,
+    ...hdrScreenOf(
+      support,
+      others.find((found) => found.codec === "hevc"),
+    ),
   };
 };
 

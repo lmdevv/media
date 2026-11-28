@@ -159,7 +159,8 @@ Old movies' Convex project, its SDK client, and its command registry were delete
   since libx265 and libsvtav1 cost several times libx264's CPU for a live stream, so a server
   without a proven GPU encoder for HEVC sends H.264. The planner tries the list in order, a GPU
   encode of a later codec before a CPU encode of an earlier one. Encodes are 8-bit SDR (H.264
-  High, HEVC Main, AV1 Main), at H.264's bitrates times 0.75 for HEVC and 0.65 for AV1. Each
+  High, HEVC Main, AV1 Main), or HEVC Main 10 where a source's HDR is kept (below), at H.264's
+  bitrates times 0.75 for HEVC and 0.65 for AV1. Each
   encoder is a row of its own, so a failed `hevc_qsv` leaves the stream and the file `h264_qsv`. An HEVC or AV1 encode fits the level the client declares (`output-levels.ts`): the
   coded picture (HEVC codes whole 8x8 blocks), its samples a second at the source's frame rate,
   the bitrate, and HEVC's buffer, twice the bitrate, which Quick Sync counts. The picture shrinks
@@ -171,6 +172,28 @@ Old movies' Convex project, its SDK client, and its command registry were delete
   Sync with `forced_idr`). Clients report `powerEfficient` per codec: the movies web app from the
   Media Capabilities API, the iOS app and Cast profiles for H.264 and HEVC; none of the fixed
   lists offers AV1.
+- HDR on a re-encode (ADS-390, ADS-391): a client says which HDR formats its screen shows now
+  (`hdrScreen`: `hdr10`, `hlg`), apart from the formats it decodes (`dynamicRanges`), since
+  AVPlayer and browsers decode HDR on an SDR screen and map it to SDR themselves. A video that must
+  be encoded keeps the source's HDR10 or HLG, as HEVC Main 10, when the table of source colours
+  keeps it (HDR10, HDR10+'s static base, HLG, and the base layers of Dolby Vision 7, 8.1, and 8.4,
+  sent with no Dolby Vision or HDR10+ metadata; never profile 5) and the client lists that format
+  for both its screen and HEVC Main 10; that target comes first and the SDR targets follow, so a
+  chain that cannot keep HDR maps to SDR in the same request and its summary says why
+  (`sdrReason`: `subtitle`, as subtitles are drawn on SDR pictures only, or `no-hdr-encode`).
+  `hevc_qsv`, `hevc_vaapi`, and libx265 carry the frames' tags and HDR10's mastering display and
+  content light levels into the stream and the sample entry with Main 10 alone, under ffmpeg 7.1
+  and 9; Quick Sync's scale states the frames' colour, which ffmpeg 7.1 otherwise converts to
+  BT.709's matrix under BT.2020 tags. The CPU keeps its rule: it encodes HDR HEVC only for a client
+  without H.264, and H.264 SDR for one with it. Apple's players present HDR only from a variant that
+  states its range, so such a stream's `index.m3u8` is a multivariant playlist of one variant
+  (`VIDEO-RANGE`, `CODECS` with the level the encode states, `RESOLUTION`, `FRAME-RATE`, and
+  bandwidths) whose media playlist is `video.m3u8`; every SDR stream's playlist is the media
+  playlist it was. The movies web app lists a screen format when the display shows HDR (`(dynamic-
+  range: high)`) and the Media Capabilities API, asked with its HDR fields, plays HEVC Main 10 in
+  it; the iOS app lists HDR10 and HLG when AVFoundation's `eligibleForHDRPlayback` is true as the
+  player opens; Cast lists none, as Google's default receiver reports nothing of its television;
+  `media movies stream --client` drives each case. Downloads stay SDR.
 - Deinterlacing: a copied stream (direct play, remux, audio-only conversion) is never
   deinterlaced; being interlaced is no reason to encode a file the client plays. A stream that is
   encoded is deinterlaced right after it is decoded when its probe says it holds fields: a field
