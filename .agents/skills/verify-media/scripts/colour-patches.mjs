@@ -61,8 +61,10 @@ export const HDR_PATCHES = [
  * SDR's reference white, of the generated fixtures as the image's ffmpeg 7.1 makes them, read at
  * 2 s and 20 s alike, as 8-bit BT.709 R'G'B'. BT.2390 is the ITU's own mapping of HDR to a lower
  * peak, and libplacebo the one renderer either ffmpeg build has that maps PQ, HLG, and Dolby
- * Vision, so every kind is judged against one reference that runs on no path under test (it ran
- * on Mesa's lavapipe, a CPU Vulkan). Made again with libplacebo by `reference` below.
+ * Vision, so every kind is judged against one reference that runs on no path under test: it ran
+ * with nixpkgs' ffmpeg-full 9.0.2 and libplacebo 7.387 on Mesa's lavapipe, a CPU Vulkan. The
+ * image's libplacebo (7.349, under ffmpeg 7.1.5) on lavapipe lies up to 4.6 (HDR10) and 5.0 (HLG)
+ * from it in CIEDE2000, so the reference names its build. The feature doc says how to make it again.
  */
 export const REFERENCES = {
   hdr10: [[0,0,0],[6.4,6.6,6.6],[15.4,15.7,15.6],[22.1,22.1,21.9],[34.3,34.6,34.3],[47.6,48,47.5],[65.3,65.5,65.2],[89.9,90.3,89.9],[122.4,122.7,122.3],[154.6,154.9,154.6],[174.1,174.6,174.1],[197.5,197.8,197.5],[212.9,213.2,212.8],[240.1,240.4,240.1],[252.6,253.1,252.6],[255,255,254.9],[131.7,16.4,9.7],[48.1,135.3,20.9],[1.1,3.3,130.4],[43,133.5,136.4],[127.6,19.3,133.6],[134.3,135.3,26.4],[130,108.8,94.2],[0.1,140.6,0.1],[38.8,1.1,0.4],[5.3,37.9,2.4],[0.2,1.1,38.5],[39.5,30,26.4],[238,35.8,27],[99.8,233.1,55.1],[0,27.5,228.3],[230,203.6,175.1]],

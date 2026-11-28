@@ -206,21 +206,28 @@ Preconditions:
 - `colour` reads a fetch's picture a second after the seek, converted to BT.709 R'G'B' by its own
   tags, and compares 32 patches (`colour-patches.mjs`, `patches.tsv` beside the cell) with what they
   should be. For HDR the reference is libplacebo's BT.2390 (constant, no contrast recovery,
-  perceptual gamut mapping) of the generated fixture, read once on Mesa's lavapipe and kept in
-  `REFERENCES`, so it runs on no path under test; for SDR it is the source's own picture. A dark
+  perceptual gamut mapping) of the generated fixture, read once on Mesa's lavapipe with nixpkgs'
+  ffmpeg-full 9.0.2 (libplacebo 7.387) and kept in `REFERENCES`, so it runs on no path under test; for SDR it is the source's own picture. A dark
   gray's luma must lie within 8 codes (3 for SDR) and every other patch within 10 in CIEDE2000 (3
   for SDR); grays stay neutral (a* and b* within 3), and neighbouring grays the reference tells
   apart by 4 codes stay 2 apart, so crushed shadows and clipped highlights fail. CIEDE2000 hardly
   tells a crushed black from a right one, hence luma for dark grays; for dark colours it is the
   measure, as a few codes of a minor channel move luma far more than the colour (dark red at luma
   10 against 19 is 0.9 in CIEDE2000).
+  - The reference depends on libplacebo's version: the image's (7.349, ffmpeg 7.1.5) rendering
+    the same frames on lavapipe lies within 4.6 (HDR10, bright green) and 5.0 (HLG, bright blue)
+    of `REFERENCES`, dark grays within 5.4 luma. A tone map near the bound passes against one and
+    fails against the other: the CPU's Hable oversaturates bright saturated HLG, 9.5 from
+    `REFERENCES` and 14.8 from the 7.1 rendering.
   - Measured on ffmpeg 7.1 and 9 alike: the CPU's Hable lies within 6.5 (HDR10) and 9.6 (HLG) of the
     reference; Intel's own tone map, Quick Sync's and VA-API's identical, maps 0.5 cd/m² to luma 3
     where 16 is right and 100 cd/m² to 130 where 174 is (up to 18 in the mid-tones), and passes on
     HLG (9.6); libplacebo on the GPU is the reference itself.
   - Remake `REFERENCES` after changing the patches or the fixtures' encode: run each fixture through
     `libplacebo=format=yuv420p:colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv:tonemapping=bt.2390:peak_detect=0:contrast_recovery=0`
-    on lavapipe (`VK_ICD_FILENAMES` naming Mesa's `lvp_icd`) and read the patches back with
+    with ffmpeg-full 9.0.2 on lavapipe (`VK_ICD_FILENAMES` naming Mesa's `lvp_icd`, and
+    `-init_hw_device vulkan=vk:0 -filter_hw_device vk`, since libplacebo picks no CPU device itself)
+    and read the patches back with
     `node colour-patches.mjs read`.
 - `hdr-metadata` fails a stream or first picture that carries any side data but the encoder's own
   unregistered SEI (`SDR_SIDE_DATA`): mastering display, content light level, HDR10+, Dolby Vision,
