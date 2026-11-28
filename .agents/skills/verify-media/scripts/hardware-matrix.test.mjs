@@ -256,7 +256,7 @@ describe("parsing", () => {
       "seen 52",
       "seen 52",
       "seen 52",
-      "args 41 ffmpeg\x1f-hwaccel\x1fqsv\x1f-i\x1f/media/a.mkv\x1f-c:v\x1fh264_qsv\x1f/transcode/stream-one/1/ffmpeg.m3u8",
+      "args 41 ffmpeg\x1f-hwaccel\x1fqsv\x1f-i\x1f/media/a.mkv\x1f-c:v\x1fh264_qsv\x1f-f\x1fhls\x1f/transcode/stream-one/1/ffmpeg.m3u8",
       "gpu 41 12 drm-client-id:\t7",
       "gpu 41 12 drm-engine-video:\t100 ns",
       "gpu 41 12 drm-engine-capacity-video:\t2",
@@ -264,7 +264,8 @@ describe("parsing", () => {
       "gpu 41 13 drm-engine-video:\t100 ns",
       "gpu 41 12 drm-engine-video:\t250 ns",
       "gpu 41 12 drm-engine-video-enhance:\t40 ns",
-      "args 52 ffmpeg\x1f-i\x1f/media/b.mkv\x1f-vf\x1fscale=320:240\x1f-c:v\x1flibx264\x1f/transcode/stream-two/1/ffmpeg.m3u8",
+      "args 52 ffmpeg\x1f-i\x1f/media/b.mkv\x1f-vf\x1fscale=320:240\x1f-c:v\x1flibx264\x1f-f\x1fhls\x1f/transcode/stream-two/1/ffmpeg.m3u8",
+      "args 70 ffmpeg\x1f-copyts\x1f-i\x1f/media/a.mkv\x1f-map\x1f0:2\x1f-c:s\x1fcopy\x1f-f\x1fass\x1f/transcode/stream-one/subtitle/subtitle.ass",
       "gpu 60 3 drm-cycles-vcs:\t900",
       "gpu 60 3 drm-client-id:\t9",
     ].join("\n");
@@ -273,7 +274,7 @@ describe("parsing", () => {
     assert.deepEqual(one.engines, { video: 250, "video-enhance": 40 });
     assert.equal(one.gpu, true);
     assert.equal(runs.find((run) => run.pid === 52).gpu, false);
-    assert.deepEqual(runs.map((run) => run.polls), [1, 3, 0]);
+    assert.deepEqual(runs.map((run) => run.polls), [1, 3, 0, 0]);
     assert.deepEqual(runs.find((run) => run.pid === 60).engines, { video: 900 });
     assert.deepEqual(streamRuns(runs, "stream-one").map((run) => run.pid), [41]);
     assert.equal(describeRun(one), "decode qsv; filters none; encode h264_qsv; GPU video 0.0 s, video-enhance 0.0 s");

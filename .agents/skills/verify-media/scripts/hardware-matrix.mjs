@@ -191,7 +191,8 @@ export const FIXTURES = {
       args: [
         ["-f", "lavfi", "-i", "testsrc2=size=1920x800:rate=24:duration=30"],
         ["-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=30"],
-        ["-i", "/out/pgs.sup"],
+        // ffmpeg starts each input at its own first packet; the offset keeps the bar at 2 s.
+        ["-itsoffset", "2", "-i", "/out/pgs.sup"],
         ["-map", "0:v", "-map", "1:a", "-map", "2:s", "-c:v", "libx264", "-preset", "ultrafast"],
         ["-g", "48", "-keyint_min", "48", "-sc_threshold", "0", "-pix_fmt", "yuv420p"],
         ["-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-c:a", "aac", "-b:a", "128k", "-c:s", "copy"],
@@ -1008,9 +1009,13 @@ export const parseWatch = (text) => {
   });
 };
 
-/** The runs that wrote this stream's segments: their output sits under `/transcode/<streamId>/`. */
+/**
+ * The runs that wrote this stream's segments: HLS runs whose output sits under
+ * `/transcode/<streamId>/`. A burned-in text subtitle's preparation writes there too, as ASS and
+ * fonts, and is no encode.
+ */
 export const streamRuns = (runs, streamId) =>
-  runs.filter((run) => run.args.some((arg) => arg.includes(`/${streamId}/`)));
+  runs.filter((run) => run.args.includes("hls") && run.args.some((arg) => arg.includes(`/${streamId}/`)));
 
 /**
  * The media service's JSON log records for one playback session, and the hardware records that
@@ -1056,8 +1061,9 @@ const graphOf = (args) => {
   return graphs.join(";");
 };
 
+// A comma or semicolon escaped with a backslash is part of an option's value, not a separator.
 const filterNames = (graph) =>
-  [...new Set(graph.split(/[,;]/).map((part) => part.replace(/\[[^\]]*\]/g, "").split("=")[0].trim()))].filter(
+  [...new Set(graph.split(/(?<!\\)[,;]/).map((part) => part.replace(/\[[^\]]*\]/g, "").split("=")[0].trim()))].filter(
     (name) => name !== "",
   );
 
